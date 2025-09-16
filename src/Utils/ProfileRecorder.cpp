@@ -22,52 +22,58 @@ inline bool operator&(ProfileRecorder::Type a, ProfileRecorder::Type b)
 } // namespace
 
 ProfileRecorder::ProfileRecorder(
-    const std::string& title, const std::string& subtitle, const std::string& desc, const Type& type)
-    : title_(title), subtitle_(subtitle), desc_(desc), type_(type)
+    const std::string& title, const std::string& subtitle, const std::string& desc)
+    : title_(title), subtitle_(subtitle), desc_(desc)
 {
-    Start(title, subtitle, desc, type);
+    Start(title, subtitle, desc);
 }
 
 ProfileRecorder::~ProfileRecorder()
 {
+#ifndef CANGJIE_ENABLE_GCOV
     try {
-        Stop(title_, subtitle_, desc_, type_);
+#endif
+        Stop(title_, subtitle_, desc_);
+#ifndef CANGJIE_ENABLE_GCOV
     } catch (...) {
         // The try-catch block is placed here as the used functions above do not declare with noexcept.
         // We shall avoid any exception occurring in the destruction function.
     }
+#endif
 }
 
-void ProfileRecorder::SetPackageName(const std::string& name, const Type& type)
+void ProfileRecorder::SetPackageName(const std::string& name)
 {
-    if (type & ProfileRecorder::Type::TIMER) {
-        UserTimer::Instance().SetPackageName(name);
-        UserCodeInfo::Instance().SetPackageName(name);
-    }
-    if (type & ProfileRecorder::Type::MEMORY) {
-        UserMemoryUsage::Instance().SetPackageName(name);
-        UserCodeInfo::Instance().SetPackageName(name);
-    }
+    UserTimer::Instance().SetPackageName(name);
+    UserMemoryUsage::Instance().SetPackageName(name);
+    UserCodeInfo::Instance().SetPackageName(name);
+}
+
+void ProfileRecorder::SetOutputDir(const std::string& path)
+{
+    UserTimer::Instance().SetOutputDir(path);
+    UserMemoryUsage::Instance().SetOutputDir(path);
+    UserCodeInfo::Instance().SetOutputDir(path);
 }
 
 void ProfileRecorder::Start(
-    const std::string& title, const std::string& subtitle, const std::string& desc, const Type& type)
+    const std::string& title, const std::string& subtitle, const std::string& desc)
 {
-    if ((type & ProfileRecorder::Type::TIMER) && UserTimer::Instance().IsEnable()) {
+    if (UserTimer::Instance().IsEnable()) {
         UserTimer::Instance().Start(title, subtitle, desc);
     }
-    if ((type & ProfileRecorder::Type::MEMORY) && UserMemoryUsage::Instance().IsEnable()) {
+    if (UserMemoryUsage::Instance().IsEnable()) {
         UserMemoryUsage::Instance().Start(title, subtitle, desc);
     }
 }
 
 void ProfileRecorder::Stop(
-    const std::string& title, const std::string& subtitle, const std::string& desc, const Type& type)
+    const std::string& title, const std::string& subtitle, const std::string& desc)
 {
-    if ((type & ProfileRecorder::Type::TIMER) && UserTimer::Instance().IsEnable()) {
+    if (UserTimer::Instance().IsEnable()) {
         UserTimer::Instance().Stop(title, subtitle, desc);
     }
-    if ((type & ProfileRecorder::Type::MEMORY) && UserMemoryUsage::Instance().IsEnable()) {
+    if (UserMemoryUsage::Instance().IsEnable()) {
         UserMemoryUsage::Instance().Stop(title, subtitle, desc);
     }
 }
@@ -99,19 +105,18 @@ void ProfileRecorder::Enable(bool en, const Type& type)
     }
 }
 
-std::string ProfileRecorder::GetResult(bool isJson, const Type& type)
+std::string ProfileRecorder::GetResult(const Type& type)
 {
     std::string result;
 
-    auto outType = isJson ? UserBase::OutType::JSON : UserBase::OutType::STRING;
     if ((type & ProfileRecorder::Type::TIMER) || (type & ProfileRecorder::Type::MEMORY)) {
-        result += UserCodeInfo::Instance().GetResult(outType);
+        result += UserCodeInfo::Instance().GetResult();
     }
     if (type & ProfileRecorder::Type::TIMER) {
-        result += UserTimer::Instance().GetResult(outType);
+        result += UserTimer::Instance().GetResult();
     }
     if (type & ProfileRecorder::Type::MEMORY) {
-        result += UserMemoryUsage::Instance().GetResult(outType);
+        result += UserMemoryUsage::Instance().GetResult();
     }
     return result;
 }

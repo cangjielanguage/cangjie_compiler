@@ -7,7 +7,7 @@
 #ifndef CANGJIE_CHIR_TRANSFORMATION_NO_SIDE_EFFECT_MARKER_H
 #define CANGJIE_CHIR_TRANSFORMATION_NO_SIDE_EFFECT_MARKER_H
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Expression.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Value.h"
 

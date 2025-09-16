@@ -36,9 +36,11 @@ Ptr<Value> Translator::Visit(const AST::PointerExpr& expr)
                 }
             }
             auto ty1 = TranslateType(*expr.arg->ty);
-            argVal = CreateAndAppendExpression<Intrinsic>(
-                loc, ty1, CHIR::IntrinsicKind::INOUT_PARAM, std::vector<Value*>{argVal}, currentBlock)
-                         ->GetResult();
+            auto callContext = IntrisicCallContext {
+                .kind = IntrinsicKind::INOUT_PARAM,
+                .args = std::vector<Value*>{argVal}
+            };
+            argVal = CreateAndAppendExpression<Intrinsic>(loc, ty1, callContext, currentBlock)->GetResult();
         } else {
             argVal = TranslateASTNode(*expr.arg, *this);
         }
@@ -49,5 +51,9 @@ Ptr<Value> Translator::Visit(const AST::PointerExpr& expr)
         intrinsicKind = IntrinsicKind::CPOINTER_INIT0;
     }
     const auto& loc = TranslateLocation(expr);
-    return CreateAndAppendExpression<Intrinsic>(loc, ty, intrinsicKind, args, currentBlock)->GetResult();
+    auto callContext = IntrisicCallContext {
+        .kind = intrinsicKind,
+        .args = args
+    };
+    return CreateAndAppendExpression<Intrinsic>(loc, ty, callContext, currentBlock)->GetResult();
 }

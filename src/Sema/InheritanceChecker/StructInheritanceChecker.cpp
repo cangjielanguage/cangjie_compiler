@@ -25,8 +25,8 @@
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Modules/ModulesUtils.h"
-#include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Sema/TestManager.h"
+#include "cangjie/Sema/TypeManager.h"
 
 #include "Diags.h"
 #include "TypeCheckUtil.h"
@@ -213,6 +213,14 @@ void DiagWeakVisibility(DiagnosticEngine& diag, const Decl& parent, const Decl& 
     }
     builder.AddNote(parentNote);
 }
+
+bool CompMemberSignatureByPosAndTy(Ptr<const MemberSignature> m1, Ptr<const MemberSignature> m2)
+{
+    if (m1->decl != m2->decl) {
+        return CompNodeByPos(m1->decl, m2->decl);
+    }
+    return CompTyByNames(m1->ty, m2->ty);
+}
 } // namespace
 
 void TypeChecker::TypeCheckerImpl::CheckInheritance(Package& pkg)
@@ -245,28 +253,6 @@ void StructInheritanceChecker::Check()
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     auto sortedExtends = GetAllNeedCheckExtended();
     extendDecls.insert(extendDecls.end(), sortedExtends.cbegin(), sortedExtends.cend());
-#else
-    // Collect all imported extend decls. Used for checking confliction between imported extends.
-    auto extendedDecls = typeManager.GetAllExtendedDecls();
-    // Use ordered set to diagnose in consistent order.
-    std::set<Ptr<const InheritableDecl>, CmpNodeByPos> sorted(extendedDecls.cbegin(), extendedDecls.cend());
-    for (auto extendedDecl : sorted) {
-        if (extendedDecl->TestAttr(Attribute::IMPORTED, Attribute::PUBLIC)) {
-            auto extends = typeManager.GetDeclExtends(*extendedDecl);
-            // If the extend decls are all imported from same package, do not check their inheritance again.
-            std::unordered_set<std::string> pkgNames;
-            if (std::all_of(extends.cbegin(), extends.cend(), [&pkgNames](auto it) {
-                    pkgNames.emplace(it->fullPackageName);
-                    return it->TestAttr(Attribute::IMPORTED) && pkgNames.size() == 1;
-                })) {
-                continue;
-            }
-            std::set<Ptr<ExtendDecl>, CmpNodeByPos> sortedExtends;
-            std::copy_if(extends.begin(), extends.end(), std::inserter(sortedExtends, sortedExtends.end()),
-                [](auto it) { return it->TestAttr(Attribute::PUBLIC); });
-            extendDecls.insert(extendDecls.end(), sortedExtends.cbegin(), sortedExtends.cend());
-        }
-    }
 #endif
 
     for (auto decl : structDecls) {
@@ -554,7 +540,7 @@ void StructInheritanceChecker::CheckExtendExportDependence(
     const InheritableDecl& curDecl, const MemberSignature& interface, const MemberMap& implDecls)
 {
     auto curExtend = DynamicCast<ExtendDecl>(&curDecl);
-    if (!curExtend) {
+    if (!curExtend || !curDecl.IsExportedDecl()) {
         return;
     }
     auto identifier = interface.decl->identifier;
@@ -834,7 +820,9 @@ void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMa
     }
     std::string prefix = structDecl.astKind == ASTKind::EXTEND_DECL ? "extend " : "";
     std::string structName = prefix + (structDecl.ty->IsNominal() ? structDecl.ty->name : structDecl.ty->String());
-    for (auto [identifier, member] : members) {
+    std::multimap<Ptr<Decl>, const MemberSignature*> unImplementedDecl;
+    std::vector<Ptr<const MemberSignature>> unImplementedMembers;
+    for (auto& [identifier, member] : members) {
         bool notInheritable = member.decl->astKind != ASTKind::PROP_DECL && !member.decl->IsFunc();
         bool ignored = notInheritable || member.extendDecl || opts.compileCjd;
         if (ignored) {
@@ -860,16 +848,8 @@ void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMa
         bool isAbstractDecl = isAbstractClass || structDecl.astKind == ASTKind::INTERFACE_DECL;
         bool isStaticAbsMember = member.decl->TestAttr(Attribute::STATIC, Attribute::ABSTRACT);
         if (member.decl->TestAttr(Attribute::ABSTRACT) && !isAbstractDecl) {
-            if (structDecl.IsClassLikeDecl()) {
-                auto abstractType = member.decl->outerDecl->astKind == ASTKind::CLASS_DECL ? "abstract" : "interface";
-                auto builder = diag.Diagnose(structDecl, DiagKind::sema_class_need_abstract_modifier_or_func_need_impl,
-                    structName, type, identifier);
-                builder.AddNote(*member.decl, DiagKind::sema_unimplemented_func_or_property, abstractType, type);
-            } else {
-                auto builder =
-                    diag.Diagnose(structDecl, DiagKind::sema_need_member_implementation, type, identifier, structName);
-                builder.AddNote(*member.decl, DiagKind::sema_unimplemented_func_or_property, "interface", type);
-            }
+            unImplementedDecl.emplace(member.decl, &member);
+            unImplementedMembers.emplace_back(&member);
         } else if (member.shouldBeImplemented) {
             diag.Diagnose(
                 structDecl, DiagKind::sema_interface_member_must_be_implemented, type, identifier, structName);
@@ -882,6 +862,29 @@ void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMa
                 // When inherit functions from interfaces which has inconsistent types, we need report error here.
                 DiagnoseInheritedInsconsistType(member, structDecl);
             }
+        }
+    }
+    if (!unImplementedMembers.empty()) {
+        DiagKindRefactor kind;
+        if (structDecl.IsClassLikeDecl()) {
+            kind = DiagKindRefactor::sema_class_need_abstract_modifier_or_func_need_impl;
+        } else {
+            kind = DiagKindRefactor::sema_need_member_implementation;
+        }
+        DiagnosticBuilder builder = diag.DiagnoseRefactor(kind, structDecl.begin, structName);
+        std::stable_sort(unImplementedMembers.begin(), unImplementedMembers.end(), CompMemberSignatureByPosAndTy);
+        for (auto member : unImplementedMembers) {
+            std::string identifierName;
+            if (unImplementedDecl.count(member->decl) > 1) {
+                identifierName = member->decl->identifier.Val() + ", of type: " + member->ty->String();
+            } else {
+                identifierName = member->decl->identifier.Val();
+            }
+            std::string abstractType =
+                member->decl->outerDecl->astKind == ASTKind::CLASS_DECL ? "abstract" : "interface";
+            std::string note =
+                "unimplemented " + abstractType + " " + DeclKindToString(*member->decl) + " " + identifierName;
+            builder.AddNote(member->decl->GetBegin(), note);
         }
     }
 }
@@ -991,16 +994,6 @@ void StructInheritanceChecker::CheckInheritanceAttributes(const MemberSignature&
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         if ((!parentDecl->TestAttr(Attribute::OPEN) && notInInterface) || TestManager::IsDeclOpenToMock(*parentDecl)) {
             DiagCannotOverride(diag, child, *parentDecl);
-#else
-        if (parentDecl->TestAttr(Attribute::GENERIC) && !HasJavaAttr(*parentDecl)) {
-            auto builder =
-                diag.Diagnose(child, DiagKind::sema_overload_conflicts, "generic function", child.identifier.Val());
-            builder.AddNote(
-                *parentDecl, DiagKind::sema_diag_report_note_message, "conflict with function in supertype");
-        } else if ((!parentDecl->TestAttr(Attribute::OPEN) && notInInterface) ||
-                    TestManager::IsDeclOpenToMock(*parentDecl)
-        ) {
-            DiagCannotOverride(diag, child, *parentDecl);
 #endif
         } else if (child.TestAttr(Attribute::ABSTRACT) && notInInterface) {
             diag.Diagnose(child, DiagKind::sema_invalid_override_member_in_class, type, child.identifier.Val(), type);
@@ -1044,8 +1037,6 @@ void StructInheritanceChecker::DiagnoseForOverriddenMember(const MemberSignature
     std::string type = DeclKindToString(*childDecl);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     if (childDecl->TestAttr(Attribute::OVERRIDE)) {
-#else
-    if (childDecl->TestAttr(Attribute::OVERRIDE) && !childDecl->TestAttr(Attribute::GENERIC)) {
 #endif
         diag.Diagnose(*childDecl, DiagKind::sema_missing_overridden_func, type, childDecl->identifier.Val(), type);
     } else if (childDecl->TestAttr(Attribute::REDEF) && childDecl->TestAttr(Attribute::STATIC)) {

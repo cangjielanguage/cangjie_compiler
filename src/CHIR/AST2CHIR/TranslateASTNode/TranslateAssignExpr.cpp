@@ -61,8 +61,11 @@ Value* Translator::TranslateVArrayAssign(const AssignExpr& assign)
         CJC_ASSERT(lhsBase->GetType()->IsRef());
 
         auto index = TranslateExprArg(*se->indexExprs[0]);
-        CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), CHIR::IntrinsicKind::VARRAY_SET,
-            std::vector<Value*>({lhsBase, TypeCastOrBoxIfNeeded(*rhs, *lhsType, loc), index}), currentBlock);
+        auto callContext = IntrisicCallContext {
+            .kind = IntrinsicKind::VARRAY_SET,
+            .args = std::vector<Value*>({lhsBase, TypeCastOrBoxIfNeeded(*rhs, *lhsType, loc), index})
+        };
+        CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), callContext, currentBlock);
         return nullptr;
     }
 
@@ -78,17 +81,25 @@ Value* Translator::TranslateVArrayAssign(const AssignExpr& assign)
         loc, StaticCast<RefType*>(lhsBase->GetType())->GetBaseType(), lhsBase, currentBlock);
     auto index = TranslateExprArg(*se->indexExprs[0]);
     auto baseLoc = TranslateLocation(*se->baseExpr);
-    auto lhs = CreateAndAppendExpression<Intrinsic>(lhsType, CHIR::IntrinsicKind::VARRAY_GET,
-        std::vector<Value*>({loadLHSValue->GetResult(), index}), currentBlock)
-                   ->GetResult();
+    auto arrGetContext = IntrisicCallContext {
+        .kind = IntrinsicKind::VARRAY_GET,
+        .args = std::vector<Value*>({loadLHSValue->GetResult(), index})
+    };
+    auto lhs = CreateAndAppendExpression<Intrinsic>(lhsType, arrGetContext, currentBlock)->GetResult();
     if (assign.op == TokenKind::AND_ASSIGN) {
         auto res = TransShortCircuitAnd(lhs, *assign.rightExpr, loc);
-        CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), CHIR::IntrinsicKind::VARRAY_SET,
-            std::vector<Value*>({lhsBase, TypeCastOrBoxIfNeeded(*res, *lhsType, loc), index}), currentBlock);
+        auto arrSetContext = IntrisicCallContext {
+            .kind = IntrinsicKind::VARRAY_SET,
+            .args = std::vector<Value*>({lhsBase, TypeCastOrBoxIfNeeded(*res, *lhsType, loc), index})
+        };
+        CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), arrSetContext, currentBlock);
     } else if (assign.op == TokenKind::OR_ASSIGN) {
         auto res = TransShortCircuitOr(lhs, *assign.rightExpr, loc);
-        CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), CHIR::IntrinsicKind::VARRAY_SET,
-            std::vector<Value*>({lhsBase, TypeCastOrBoxIfNeeded(*res, *lhsType, loc), index}), currentBlock);
+        auto arrSetContext = IntrisicCallContext {
+            .kind = IntrinsicKind::VARRAY_SET,
+            .args = std::vector<Value*>({lhsBase, TypeCastOrBoxIfNeeded(*res, *lhsType, loc), index})
+        };
+        CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), arrSetContext, currentBlock);
     } else {
         // normal compound assign, e.g a[0] += b
         auto rhsValue = TranslateExprArg(*assign.rightExpr);
@@ -97,8 +108,11 @@ Value* Translator::TranslateVArrayAssign(const AssignExpr& assign)
             loc, lhs->GetType(), op2ExprKind.at(COMPOUND_ASSIGN_EXPR_MAP.at(assign.op)), lhs, rhsValue)
                                   ->GetResult();
 
-        CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), CHIR::IntrinsicKind::VARRAY_SET,
-            std::vector<Value*>({lhsBase, TypeCastOrBoxIfNeeded(*binaryOpResult, *lhsType, loc), index}), currentBlock);
+        auto arrSetContext = IntrisicCallContext {
+            .kind = IntrinsicKind::VARRAY_SET,
+            .args = std::vector<Value*>({lhsBase, TypeCastOrBoxIfNeeded(*binaryOpResult, *lhsType, loc), index})
+        };
+        CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), arrSetContext, currentBlock);
     }
     return nullptr;
 }

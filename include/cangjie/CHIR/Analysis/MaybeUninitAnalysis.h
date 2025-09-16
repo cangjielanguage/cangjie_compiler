@@ -117,10 +117,9 @@ public:
     /**
      * @brief maybe not init analysis constructor.
      * @param func function to analyse.
-     * @param isDebug flag whether print debug log.
      * @param ctorInitInfo extra info for init function check.
      */
-    MaybeUninitAnalysis(const Func* func, bool isDebug, const ConstructorInitInfo* ctorInitInfo);
+    MaybeUninitAnalysis(const Func* func, const ConstructorInitInfo* ctorInitInfo);
 
     /// maybe not init analysis destructor.
     ~MaybeUninitAnalysis() final

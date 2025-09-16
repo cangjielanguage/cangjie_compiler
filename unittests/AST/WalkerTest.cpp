@@ -4,8 +4,8 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-#include "gtest/gtest.h"
 #include <vector>
+#include "gtest/gtest.h"
 
 #define private public
 #include "cangjie/AST/Match.h"

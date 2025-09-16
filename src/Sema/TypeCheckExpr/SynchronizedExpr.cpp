@@ -44,7 +44,7 @@ bool TypeChecker::TypeCheckerImpl::ChkSyncExpr(ASTContext& ctx, Ptr<Ty> tgtTy, S
                 isWellTyped = false;
             }
         }
-        // The child at 2 is a try expression. (A foolish comment for the code check of CI.)
+        // The child at 2 is a try expression.
         auto te = RawStaticCast<TryExpr*>(b.at(2).get());
         isWellTyped = (tgtTy ? ChkTryExpr(ctx, *tgtTy, *te) : Ty::IsTyCorrect(SynTryExpr(ctx, *te))) && isWellTyped;
         se.desugarExpr->ty = isWellTyped ? te->ty : TypeManager::GetInvalidTy();

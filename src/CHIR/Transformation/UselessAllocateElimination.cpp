@@ -8,7 +8,7 @@
 
 #include "cangjie/CHIR/Analysis/Utils.h"
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 
 using namespace Cangjie::CHIR;
 

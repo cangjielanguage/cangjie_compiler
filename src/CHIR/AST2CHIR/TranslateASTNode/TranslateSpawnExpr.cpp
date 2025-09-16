@@ -20,19 +20,10 @@ Ptr<Value> Translator::Visit(const AST::SpawnExpr& spawnExpr)
         spawnArg = TranslateExprArg(*spawnExpr.arg->desugarExpr.get());
     }
 
-    auto futureDef = GetNominalSymbolTable(*AST::Ty::GetDeclOfTy(spawnExpr.futureObj->ty));
-    FuncBase* executeClosureDecl = nullptr;
-    for (auto method : futureDef->GetMethods()) {
-        if (method->GetSrcCodeIdentifier() == "executeClosure") {
-            executeClosureDecl = method;
-        }
-    }
-    CJC_ASSERT(executeClosureDecl);
     if (spawnArg) {
-        TryCreate<Spawn>(currentBlock, loc, chirTy.TranslateType(*spawnExpr.ty), futureObj, spawnArg,
-            executeClosureDecl, false);
+        TryCreate<Spawn>(currentBlock, loc, chirTy.TranslateType(*spawnExpr.ty), futureObj, spawnArg);
     } else {
-        TryCreate<Spawn>(currentBlock, loc, chirTy.TranslateType(*spawnExpr.ty), futureObj, executeClosureDecl, false);
+        TryCreate<Spawn>(currentBlock, loc, chirTy.TranslateType(*spawnExpr.ty), futureObj);
     }
     return futureObj;
 }

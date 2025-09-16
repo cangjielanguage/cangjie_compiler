@@ -411,10 +411,11 @@ public:
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 private:
-    void InitIncrementalGen()
+    bool InitIncrementalGen()
     {
+        bool ret = true;
         if (!cgPkgCtx.IsIncrementEnabled()) {
-            return;
+            return ret;
         }
 
         Utils::ProfileRecorder::Start("EmitIR", "InitIncrementalGen");
@@ -422,16 +423,22 @@ private:
         size_t threadNum = cgPkgCtx.GetGlobalOptions().codegenDebugMode ? 1 : cgMods.size();
         if (threadNum == 1) {
             for (auto& cgMod : cgMods) {
-                cgMod->InitIncrementalGen();
+                ret = ret && cgMod->InitIncrementalGen();
             }
         } else {
             Utils::TaskQueue taskQueueInitIncrementalGen(threadNum);
+            std::vector<Cangjie::Utils::TaskResult<bool>> results;
             for (auto& cgMod : cgMods) {
-                taskQueueInitIncrementalGen.AddTask<void>([&cgMod]() { cgMod->InitIncrementalGen(); });
+                results.emplace_back(
+                    taskQueueInitIncrementalGen.AddTask<bool>([&cgMod]() { return cgMod->InitIncrementalGen(); }));
             }
             taskQueueInitIncrementalGen.RunAndWaitForAllTasksCompleted();
+            for (auto& result : results) {
+                ret = ret && result.get();
+            }
         }
         Utils::ProfileRecorder::Start("EmitIR", "InitIncrementalGen");
+        return ret;
     }
 
     void GenSubCHIRPackages()
@@ -536,7 +543,9 @@ void PackageGeneratorImpl::EmitIR()
     }
 
     // Reads the buffered bitcode.
-    InitIncrementalGen();
+    if (!InitIncrementalGen()) {
+        return;
+    }
 
     // Translate CHIR to LLVM IR
     GenSubCHIRPackages();

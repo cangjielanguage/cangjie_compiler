@@ -27,10 +27,6 @@ Type* CHIRType::TranslateTupleType(AST::TupleTy& tupleTy)
     for (auto argTy : tupleTy.typeArgs) {
         argTys.emplace_back(TranslateType(*argTy));
     }
-    if (tupleTy.isClosureTy) {
-        CJC_ASSERT(argTys.size() == 2); // 2 denote that closure tuple type has 2 args.
-        return builder.GetType<ClosureType>(argTys[1], argTys[0]);
-    }
     return builder.GetType<TupleType>(argTys);
 }
 
@@ -47,25 +43,6 @@ Type* CHIRType::TranslateFuncType(const AST::FuncTy& fnTy)
     }
     auto funcTy = builder.GetType<FuncType>(paramTys, retTy, fnTy.hasVariableLenArg, fnTy.IsCFunc());
     return funcTy;
-}
-
-/**
- * Translate open (virtual) method type without this type.
- *
- * AST type: (Base, Float64)->Float64
- * Result type: (Float64)->Unit()
- */
-FuncType* CHIRType::TranslateMethodType(const AST::FuncTy& methodType)
-{
-    std::vector<Type*> args;
-    auto& paramTys = methodType.paramTys;
-    // Skip this type
-    for (size_t i = 1; i < paramTys.size(); i++) {
-        args.emplace_back(TranslateType(*paramTys[i]));
-    }
-    // For virtual function, the return type is not important. Simply, we erase it to a UnitType.
-    auto retTy = builder.GetUnitTy();
-    return builder.GetType<FuncType>(args, retTy);
 }
 
 Type* CHIRType::TranslateStructType(AST::StructTy& structTy)
@@ -147,9 +124,7 @@ void CHIRType::FillGenericArgType(AST::GenericsTy& ty)
 
     std::vector<Type*> chirTy;
     for (auto argTy : ty.upperBounds) {
-        if (argTy->IsGeneric()) {
-            continue; // Ignore other generic upper bounds.
-        }
+        CJC_ASSERT(!argTy->IsGeneric());
         chirTy.emplace_back(TranslateType(*argTy));
     }
     StaticCast<GenericType*>(it->second)->SetUpperBounds(chirTy);

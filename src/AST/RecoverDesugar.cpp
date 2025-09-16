@@ -146,6 +146,7 @@ void RecoverToAssignExpr(AssignExpr& ae)
         auto ma = StaticCast<MemberAccess*>(callExpr.baseFunc.get());
         auto se = StaticCast<SubscriptExpr*>(ae.leftValue.get());
         se->baseExpr = std::move(ma->baseExpr);
+        CJC_ASSERT(!callExpr.args.empty());
         for (size_t i = 0; i < callExpr.args.size() - 1; ++i) { // The last arg is right expr.
             se->indexExprs[i] = std::move(callExpr.args[i]->expr);
             se->indexExprs[i]->mapExpr = nullptr;
@@ -236,7 +237,7 @@ void RecoverFromVariadicCallExpr(CallExpr& ce)
     size_t arrayLitIdx = 0;
     size_t arraySize = 0;
     for (; idx < callExpr->args.size(); ++idx) {
-        if (idx < callExpr->args.size() - 1 && callExpr->args[idx + 1]->name.Empty()) {
+        if (idx + 1 < callExpr->args.size() && callExpr->args[idx + 1]->name.Empty()) {
             // Fixed positional arguments.
             ce.args[idx] = std::move(callExpr->args[idx]);
             continue;

@@ -4,20 +4,23 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "gtest/gtest.h"
 #include "cangjie/Driver/TempFileManager.h"
 #include "cangjie/Driver/TempFileInfo.h"
 #include "cangjie/Option/Option.h"
 #include "cangjie/Utils/FileUtil.h"
-#include "gtest/gtest.h"
 
 using namespace Cangjie;
 
 class TempFileManagerTest : public ::testing::Test {
 protected:
-    void SetUp() override {}
+    void SetUp() override
+    {
+    }
 };
 
-TEST_F(TempFileManagerTest, WindowsOutputSuffixTest) {
+TEST_F(TempFileManagerTest, WindowsOutputSuffixTest)
+{
     GlobalOptions options;
     options.target.os = Triple::OSType::WINDOWS;
     TempFileManager::Instance().Init(options, false);
@@ -31,7 +34,8 @@ TEST_F(TempFileManagerTest, WindowsOutputSuffixTest) {
     ASSERT_EQ(FileUtil::GetFileName(newInfo.filePath), "libtest.a");
 }
 
-TEST_F(TempFileManagerTest, LinuxOutputSuffixTest) {
+TEST_F(TempFileManagerTest, LinuxOutputSuffixTest)
+{
     GlobalOptions options;
     options.target.os = Triple::OSType::LINUX;
     TempFileManager::Instance().Init(options, false);

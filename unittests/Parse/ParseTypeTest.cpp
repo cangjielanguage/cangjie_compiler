@@ -9,8 +9,8 @@
  *
  * Test cases for type parser.
  */
-#include "gtest/gtest.h"
 #include <utility>
+#include "gtest/gtest.h"
 
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
@@ -100,7 +100,7 @@ TEST(ParseType, ParseFuncTypeTest)
     }
     {
         std::string code = R"(
-        ((Int32,Int32))->Int32
+        ((Int32, Int32))->Int32
         )";
         SourceManager sm;
         DiagnosticEngine diag;
@@ -112,7 +112,7 @@ TEST(ParseType, ParseFuncTypeTest)
     }
     {
         std::string code = R"(
-        ((Int32,Int32), ((Int8,Int16),Int64))->Int32
+        ((Int32, Int32), ((Int8, Int16), Int64))->Int32
         )";
         SourceManager sm;
         DiagnosticEngine diag;
@@ -175,13 +175,13 @@ TEST(ParseType, OthreType)
         diag.SetSourceManager(&sm);
         Parser p(code, diag, sm);
         OwnedPtr<Node> node = p.ParseType();
-        
+
         EXPECT_TRUE(diag.GetErrorCount() == 0);
         EXPECT_TRUE(Is<RefType>(node.get()));
     }
     {
         std::string code = R"(
-        (inta,intb,intc)
+        (inta, intb, intc)
         )";
 
         SourceManager sm;
@@ -194,7 +194,7 @@ TEST(ParseType, OthreType)
     }
     {
         std::string code = R"(
-        ((inta.intb),intc)
+        ((inta.intb), intc)
         )";
 
         SourceManager sm;
@@ -215,7 +215,7 @@ TEST(ParseType, OthreType)
         diag.SetSourceManager(&sm);
         Parser p(code, diag, sm);
         OwnedPtr<Node> node = p.ParseType();
-        
+
         EXPECT_TRUE(diag.GetErrorCount() == 0);
         EXPECT_TRUE(Is<QualifiedType>(node.get()));
     }
@@ -225,7 +225,7 @@ TEST(ParseType, ParseParenTypeTest)
 {
     {
         std::string code = R"(
-        ((Int32,Int32),Int32)
+        ((Int32, Int32), Int32)
         )";
         SourceManager sm;
         DiagnosticEngine diag;

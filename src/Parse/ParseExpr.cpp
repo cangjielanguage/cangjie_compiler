@@ -923,15 +923,13 @@ OwnedPtr<Expr> ParserImpl::ParseCallExpr(OwnedPtr<Expr> baseExpr)
     ret->leftParenPos = lastToken.Begin();
     baseExpr->isBaseFunc = true;
     ret->baseFunc = std::move(baseExpr);
-    do {
-        if (lastToken.kind == TokenKind::COMMA && !ret->args.empty()) {
-            ret->args.back()->commaPos = lastToken.Begin();
-        }
-        if (Seeing(TokenKind::RPAREN)) {
-            break;
-        }
-        ret->args.emplace_back(ParseFuncArg());
-    } while (Skip(TokenKind::COMMA));
+    ParseZeroOrMoreSepTrailing(
+        [&ret](const Position& pos) {
+            ret->args.back()->commaPos = pos;
+        },
+        [this, &ret]() {
+            ret->args.emplace_back(ParseFuncArg());
+        }, TokenKind::RPAREN);
     if (!Skip(TokenKind::RPAREN) && !ret->TestAttr(Attribute::HAS_BROKEN)) {
         ret->EnableAttr(Attribute::HAS_BROKEN);
         DiagExpectedRightDelimiter("(", ret->leftParenPos);

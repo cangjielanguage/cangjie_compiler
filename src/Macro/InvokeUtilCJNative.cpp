@@ -8,6 +8,7 @@
 #include "cangjie/Basic/Print.h"
 #include "cangjie/Macro/InvokeConfig.h"
 #include "cangjie/Utils/Utils.h"
+#include "cangjie/Utils/StdUtils.h"
 
 namespace Cangjie {
 using namespace Utils;
@@ -56,14 +57,14 @@ size_t GetSizeFromEnv(std::string& str)
     }
     int32_t iRes = 0;
     auto num = str.substr(0, len - UNIT_LEN);
-    try {
+    if (auto r = Stoi(num)) {
         // str must be a number
-        iRes = std::stoi(num);
+        iRes = *r;
         // number must > 0
         if (iRes <= 0) {
             return 0;
         }
-    } catch (...) {
+    } else {
         return SIZE_MAX;
     }
 

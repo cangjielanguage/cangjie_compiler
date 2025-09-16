@@ -87,15 +87,6 @@ void CHIR2BCHIR::TranslateOthersExpression(Context& ctx, const Expression& expr)
             PushOpCodeWithAnnotations(ctx, OpCode::VARRAY, expr, vArraySize);
             break;
         }
-        case ExprKind::VARRAY_BUILDER: {
-            auto vArrayBuilder = StaticCast<const VArrayBuilder*>(&expr);
-            TranslateVArrayBuilder(ctx, *vArrayBuilder);
-            break;
-        }
-        case ExprKind::SPAWN: {
-            PushOpCodeWithAnnotations<true, true>(ctx, OpCode::SPAWN, expr);
-            break;
-        }
         case ExprKind::BOX: {
             CJC_ASSERT(expr.GetNumOfOperands() == 1);
             auto boxExpr = StaticCast<const Box*>(&expr);
@@ -112,6 +103,8 @@ void CHIR2BCHIR::TranslateOthersExpression(Context& ctx, const Expression& expr)
             PushOpCodeWithAnnotations(ctx, OpCode::UNBOX_REF, expr);
             break;
         }
+        case ExprKind::VARRAY_BUILDER:
+        case ExprKind::SPAWN:
         case ExprKind::INVOKESTATIC:
         case ExprKind::GET_RTTI:
         case ExprKind::GET_RTTI_STATIC:
@@ -133,7 +126,7 @@ void CHIR2BCHIR::TranslateOthersExpression(Context& ctx, const Expression& expr)
 void CHIR2BCHIR::TranslateField(Context& ctx, const Expression& expr)
 {
     auto fieldExpr = StaticCast<const Field*>(&expr);
-    auto indexes = fieldExpr->GetIndexes();
+    auto indexes = fieldExpr->GetPath();
     CJC_ASSERT(indexes.size() > 0);
     if (indexes.size() == 1) {
         PushOpCodeWithAnnotations(ctx, OpCode::FIELD, expr, static_cast<unsigned>(indexes[0]));
@@ -204,7 +197,7 @@ void CHIR2BCHIR::TranslateBox(Context& ctx, const Box& expr)
     auto opIdx = ctx.def.Size();
     CJC_ASSERT(opIdx <= static_cast<size_t>(Bchir::BYTECODE_CONTENT_MAX));
     PushOpCodeWithAnnotations<false>(ctx, OpCode::BOX, expr, 0);
-    auto ty = expr.GetObject()->GetType();
+    auto ty = expr.GetSourceTy();
     if (ty->IsStruct()) {
         auto structTy = StaticCast<const StructType*>(ty);
         auto structDef = structTy->GetStructDef();
@@ -276,99 +269,3 @@ void CHIR2BCHIR::TranslateApplyExpression(Context& ctx, const Apply& apply)
     PushOpCodeWithAnnotations<false, true>(ctx, OpCode::APPLY, apply, static_cast<unsigned>(apply.GetNumOfOperands()));
 }
 
-void CHIR2BCHIR::TranslateVArrayBuilder(Context& ctx, const VArrayBuilder& vArrayBuilder)
-{
-    // introduces bytecode to initialize the VArray
-    // :: LVAR :: ID1 :: FIELD :: 1 :: LVAR :: ID1 :: FIELD :: 0 :: INT64 :: 0 :: APPLY ::
-    // ... :: LVAR :: ID1 :: FIELD :: 1 :: LVAR :: ID1 :: FIELD :: 1 :: INT64 :: n
-    // where ID1 is the local variable ID asociated to vArrayBuilder.GetOperands()[2] and
-    // n is the size of the array - 1
-    const size_t CLOSURE_IDX = 2;
-    CJC_ASSERT(vArrayBuilder.GetOperands()[0]->IsLocalVar());
-    CJC_ASSERT(vArrayBuilder.GetOperands()[1]->IsLocalVar());
-    CJC_ASSERT(vArrayBuilder.GetOperands()[CLOSURE_IDX]->IsLocalVar());
-    auto vArraySizeVar = StaticCast<const LocalVar*>(vArrayBuilder.GetOperands()[0]);
-    CJC_ASSERT(vArraySizeVar->GetExpr()->IsConstant());
-    auto vArrayConstant = StaticCast<const Constant*>(vArraySizeVar->GetExpr());
-    auto vArraySizeLit = StaticCast<const IntLiteral*>(vArrayConstant->GetValue());
-    auto vArraySize = vArraySizeLit->GetSignedVal();
-    auto initVar = StaticCast<const LocalVar*>(vArrayBuilder.GetOperands()[1]);
-    auto closureVar = vArrayBuilder.GetOperands()[CLOSURE_IDX];
-    CJC_ASSERT(vArraySize >= 0);
-    if (initVar->GetExpr()->IsConstantNull()) {
-        GenerateVArrayInitializer(ctx, vArrayBuilder, static_cast<uint64_t>(vArraySize), *closureVar);
-    } else {
-        PushOpCodeWithAnnotations(ctx, OpCode::VARRAY_BY_VALUE, vArrayBuilder);
-    }
-}
-
-void CHIR2BCHIR::GenerateVArrayInitializer(
-    Context& ctx, const VArrayBuilder& vArrayBuilder, uint64_t vArraySize, const CHIR::Value& closure)
-{
-    const Bchir::ByteCodeContent NUMBER_ARGS = 3;
-    PushOpCodeWithAnnotations(ctx, OpCode::DROP, vArrayBuilder); // pop closure from stack
-    PushOpCodeWithAnnotations(ctx, OpCode::DROP, vArrayBuilder); // pop nullptr from argStack
-    PushOpCodeWithAnnotations(ctx, OpCode::DROP, vArrayBuilder); // pop size from argStack
-
-    // ALLOCATE :: LVAR_SET :: indexVarId
-    PushOpCodeWithAnnotations(ctx, OpCode::ALLOCATE, vArrayBuilder);
-    auto indexVarId = ctx.localVarId++;
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR_SET, vArrayBuilder, indexVarId);
-
-    // INT64 :: 0 :: LVAR :: indexVarId :: STORE
-    PushOpCodeWithAnnotations(ctx, OpCode::INT64, vArrayBuilder);
-    ctx.def.Push8bytes(static_cast<uint64_t>(0));
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, indexVarId);
-    PushOpCodeWithAnnotations(ctx, OpCode::STORE, vArrayBuilder);
-
-    // LVAR :: indexVarId :: DEREF :: INT64 :: vArraySize :: BIN_LT :: BRANCH :: i1 :: i2
-    auto loopBegin = static_cast<Bchir::ByteCodeIndex>(ctx.def.Size());
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, indexVarId);
-    PushOpCodeWithAnnotations(ctx, OpCode::DEREF, vArrayBuilder);
-    PushOpCodeWithAnnotations(ctx, OpCode::INT64, vArrayBuilder);
-    ctx.def.Push8bytes(vArraySize);
-    auto typeKind = static_cast<Bchir::ByteCodeContent>(CHIR::Type::TypeKind::TYPE_INT64);
-    auto overflowStrat = static_cast<Bchir::ByteCodeContent>(Cangjie::OverflowStrategy::NA);
-    PushOpCodeWithAnnotations(ctx, OpCode::BIN_LT, vArrayBuilder, typeKind, overflowStrat);
-    auto branchIdx = static_cast<Bchir::ByteCodeIndex>(ctx.def.Size());
-    PushOpCodeWithAnnotations(
-        ctx, OpCode::BRANCH, vArrayBuilder, branchIdx + 1, static_cast<Bchir::ByteCodeContent>(0));
-
-    // LVAR :: LVarId(closure) :: FIELD :: 1 :: LVAR :: LVarId(closure) :: FIELD :: 0 ::
-    // LVAR :: indexVarId :: DEREF :: APPLY :: 3
-#if CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, LVarId(ctx, closure));
-    PushOpCodeWithAnnotations(ctx, OpCode::FIELD, vArrayBuilder, 0);
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, LVarId(ctx, closure));
-    PushOpCodeWithAnnotations(ctx, OpCode::FIELD, vArrayBuilder, 1);
-#else
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, LVarId(ctx, closure));
-    PushOpCodeWithAnnotations(ctx, OpCode::FIELD, vArrayBuilder, 1);
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, LVarId(ctx, closure));
-    PushOpCodeWithAnnotations(ctx, OpCode::FIELD, vArrayBuilder, 0);
-#endif
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, indexVarId);
-    PushOpCodeWithAnnotations(ctx, OpCode::DEREF, vArrayBuilder);
-    PushOpCodeWithAnnotations(ctx, OpCode::APPLY, vArrayBuilder, NUMBER_ARGS);
-
-    // VAR :: indexVarId :: DEREF :: INT64 :: 1 :: BIN_ADD ::
-    // LVAR :: STORE :: JUMP :: loopBegin
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, indexVarId);
-    PushOpCodeWithAnnotations(ctx, OpCode::DEREF, vArrayBuilder);
-    PushOpCodeWithAnnotations(ctx, OpCode::INT64, vArrayBuilder);
-    ctx.def.Push8bytes(static_cast<uint64_t>(1));
-    PushOpCodeWithAnnotations(ctx, OpCode::BIN_ADD, vArrayBuilder, typeKind, overflowStrat);
-    PushOpCodeWithAnnotations(ctx, OpCode::LVAR, vArrayBuilder, indexVarId);
-    PushOpCodeWithAnnotations(ctx, OpCode::STORE, vArrayBuilder);
-    PushOpCodeWithAnnotations(ctx, OpCode::JUMP, vArrayBuilder, loopBegin);
-
-    // set indexes
-    const Bchir::ByteCodeContent OFFSET_TWO = 2;
-    const Bchir::ByteCodeContent OFFSET_THREE = 3;
-    auto afterLoop = static_cast<Bchir::ByteCodeIndex>(ctx.def.Size());
-    ctx.def.Set(branchIdx + 1, branchIdx + OFFSET_THREE);
-    ctx.def.Set(branchIdx + OFFSET_TWO, afterLoop);
-
-    // VARRAY :: vArraySize
-    PushOpCodeWithAnnotations(ctx, OpCode::VARRAY, vArrayBuilder, static_cast<unsigned>(vArraySize));
-}

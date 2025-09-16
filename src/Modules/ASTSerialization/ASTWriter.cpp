@@ -282,7 +282,7 @@ inline Ptr<Decl> GetCallee(const CallExpr& ce)
     return ce.resolvedFunction ? ce.resolvedFunction : ce.baseFunc->GetTarget();
 }
 
-bool ShouldExportSource(const VarDecl& varDecl, bool exportComplicatedSrc)
+bool ShouldExportSource(const VarDecl& varDecl)
 {
     if (!Ty::IsTyCorrect(varDecl.ty) || !varDecl.initializer || varDecl.TestAttr(Attribute::IMPORTED)) {
         return false;
@@ -291,7 +291,7 @@ bool ShouldExportSource(const VarDecl& varDecl, bool exportComplicatedSrc)
     // it does not have outerDecl or it is an instance member variable in generic decl, always export initializer.
     if (!varDecl.TestAttr(Attribute::GLOBAL) && (!varDecl.outerDecl || IsInstMemberVarInGenericDecl(varDecl))) {
         // Only export complicated content when flag is enabled.
-        return exportComplicatedSrc;
+        return true;
     }
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     // For other case, we will export source code for:
@@ -429,7 +429,7 @@ void ASTWriter::ASTWriterImpl::PreSaveFullExportDecls(Package& package)
             auto addToQueue = [&searchingQueue](auto& it) { searchingQueue.push(it.get()); };
             std::for_each(pd->getters.begin(), pd->getters.end(), addToQueue);
             std::for_each(pd->setters.begin(), pd->setters.end(), addToQueue);
-        } else if (auto vd = DynamicCast<VarDecl>(decl); vd && ShouldExportSource(*vd, config.exportContent)) {
+        } else if (auto vd = DynamicCast<VarDecl>(decl); vd && ShouldExportSource(*vd)) {
             CollectBodyToQueue(*decl, searchingQueue);
             fullExportDecls.emplace_back(decl);
         }
@@ -484,7 +484,7 @@ void ASTWriter::ASTWriterImpl::ExportAST(const PackageDecl& package)
             if (config.exportContent) {
                 usedTys.merge(CollectInstantiations(*decl));
             }
-            AddCurFile(*decl, file.get()); // For decls added in AD stage which may not have 'curFile'.
+            AddCurFile(*decl, file.get());
         }
     }
     if (config.exportContent) {
@@ -601,7 +601,7 @@ flatbuffers::Offset<PackageFormat::Imports> ASTWriter::ASTWriterImpl::SaveFileIm
         importSpecs.push_back(PackageFormat::CreateImportSpec(builder, &posBegin, &posEnd,
             builder.CreateVectorOfStrings(importSpec->content.prefixPaths),
             builder.CreateString(importSpec->content.identifier.Val()),
-            builder.CreateString(importSpec->content.aliasName.Val()), reExport));
+            builder.CreateString(importSpec->content.aliasName.Val()), reExport, importSpec->content.isDecl));
         if (importSpec->IsReExport()) {
             // If the import package is reExported, it should be stored as used.
             SavePackageName(cjoManager.GetPackageNameByImport(*importSpec));
@@ -944,7 +944,7 @@ TDeclOffset ASTWriter::ASTWriterImpl::SavePropDecl(const PropDecl& propDecl, con
 
 TDeclOffset ASTWriter::ASTWriterImpl::SaveVarDecl(const VarDecl& varDecl, const DeclInfo& declInfo)
 {
-    bool exportSourceCode = ShouldExportSource(varDecl, config.exportContent);
+    bool exportSourceCode = config.exportContent && ShouldExportSource(varDecl);
     FormattedIndex initializer = exportSourceCode ? SaveExpr(*varDecl.initializer) : INVALID_FORMAT_INDEX;
     auto info =
         PackageFormat::CreateVarInfo(builder, varDecl.isVar, varDecl.isConst, varDecl.isMemberParam, initializer);
@@ -1107,7 +1107,7 @@ static void WriteAnnoTargets(PackageFormat::ClassInfoBuilder& builder, Annotatio
     }
     constexpr AnnotationTargetT anno2Mask{0x180};
     constexpr AnnotationTargetT anno1Mask{0x7f};
-    if (auto anno2 = anno2Mask & targets; anno2 != 0) {
+    if (auto anno2 = static_cast<unsigned>(anno2Mask & targets); anno2 != 0) {
         builder.add_annoTargets2(static_cast<unsigned char>(anno2 >> (CHAR_BIT - 1)));
         builder.add_annoTargets(static_cast<unsigned char>(anno1Mask & targets));
     } else {

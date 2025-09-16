@@ -4,16 +4,16 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "gtest/gtest.h"
 #include "cangjie/Basic/StringConvertor.h"
 #include "cangjie/Basic/Version.h"
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Utils/FileUtil.h"
 #include "cangjie/Utils/ICEUtil.h"
 #include "cangjie/Utils/Signal.h"
-#include "gtest/gtest.h"
 
 #ifdef __unix__
-#include <stdlib.h>
+#include <cstdlib>
 #include <unistd.h>
 #elif _WIN32
 #include <windows.h>
@@ -27,19 +27,19 @@ using namespace Cangjie;
 
 #ifdef PROJECT_SOURCE_DIR
 // Gets the absolute path of the project from the compile parameter.
-const std::string projectPath = PROJECT_SOURCE_DIR;
+const std::string PRPJECT_PATH = PROJECT_SOURCE_DIR;
 #else
 // Just in case, give it a default value.
 // Assume the initial is in the build directory.
-const std::string projectPath = "..";
+const std::string PRPJECT_PATH = "..";
 #endif
 
 #ifdef __unix__
-const int stackOverflowReturnCode = SIGSEGV + 128;
+const int STACK_OVERFLOW_RETURN_CODE = SIGSEGV + 128;
 const std::unordered_map<std::string, int> signalStringValueMap = {{"SIGABRT", SIGABRT}, {"SIGFPE", SIGFPE},
     {"SIGSEGV", SIGSEGV}, {"SIGILL", SIGILL}, {"SIGTRAP", SIGTRAP}, {"SIGBUS", SIGBUS}};
 #elif _WIN32
-const DWORD stackOverflowReturnCode = EXCEPTION_STACK_OVERFLOW;
+const DWORD STACK_OVERFLOW_RETURN_CODE = EXCEPTION_STACK_OVERFLOW;
 const std::unordered_map<std::string, int> signalStringValueMap = {
     {"SIGABRT", SIGABRT}, {"SIGFPE", SIGFPE}, {"SIGSEGV", SIGSEGV}, {"SIGILL", SIGILL}};
 #endif
@@ -52,8 +52,8 @@ const std::unordered_map<std::string, int64_t> moduleValueMap = {
     {"codegen", static_cast<int64_t>(CompileStage::CODEGEN)},
     {"driver", static_cast<int64_t>(CompileStage::COMPILE_STAGE_NUMBER)}};
 
-const std::string tempCJFileName = projectPath + "/unittests/Utils/SignalTest.cj";
-const std::string tempErrorOutputName = "./tempError.txt";
+const std::string TEMP_CJ_FILE_NAME = PRPJECT_PATH + "/unittests/Utils/SignalTest.cj";
+const std::string TEMP_ERROR_OUTPUT_NAME = "./tempError.txt";
 
 class SignalTests : public testing::Test {
 protected:
@@ -77,13 +77,13 @@ protected:
         setenv("TMPDIR", path, 1);
 #endif
         std::fstream tempFile;
-        tempFile.open(tempErrorOutputName, std::fstream::out);
+        tempFile.open(TEMP_ERROR_OUTPUT_NAME, std::fstream::out);
         tempFile.close();
     }
 
     void TearDown() override
     {
-        FileUtil::Remove(tempErrorOutputName);
+        FileUtil::Remove(TEMP_ERROR_OUTPUT_NAME);
     }
 };
 
@@ -94,12 +94,13 @@ std::string GetSignalString(std::string& signalValue, std::string& module)
         return "";
     }
     std::string result1 = Cangjie::ICE::MSG_PART_ONE + Cangjie::SIGNAL_MSG_PART_ONE;
-    std::string result2 = Cangjie::SIGNAL_MSG_PART_TWO + Cangjie::ICE::MSG_PART_TWO + std::to_string(moduleStr->second) + "\n";
+    std::string result2 =
+        Cangjie::SIGNAL_MSG_PART_TWO + Cangjie::ICE::MSG_PART_TWO + std::to_string(moduleStr->second) + "\n";
     if (signalValue == "StackOverflow") {
 #ifdef __unix__
         return CANGJIE_COMPILER_VERSION + "\n" + result1 + std::to_string(SIGSEGV) + result2;
 #elif _WIN32
-        return CANGJIE_COMPILER_VERSION + "\n" + result1 + std::to_string(stackOverflowReturnCode) + result2;
+        return CANGJIE_COMPILER_VERSION + "\n" + result1 + std::to_string(STACK_OVERFLOW_RETURN_CODE) + result2;
 #endif
     }
     auto found = signalStringValueMap.find(signalValue);
@@ -122,7 +123,7 @@ void VerifyDeleteTempFile()
         if (c <= 0) {
             break;
         }
-        data.push_back((char)c);
+        data.push_back(static_cast<char>(c));
     }
     pclose(fp);
     std::string tempFileName = "cangjie-tmp-";
@@ -135,7 +136,7 @@ void VerifyErrorOutput(std::string signalValue, std::string module)
     char c;
     std::string errorStr;
     std::fstream tempFile;
-    tempFile.open(tempErrorOutputName);
+    tempFile.open(TEMP_ERROR_OUTPUT_NAME);
     while (tempFile.get(c)) {
         errorStr.push_back(c);
     }
@@ -152,18 +153,19 @@ void VerifyErrorOutput(std::string signalValue, std::string module)
 int ExecuteProcess(std::string signalValue, std::string triggerPoint)
 {
     std::stringstream ss;
-    ss << signalValue << "_" << triggerPoint << "_" << tempErrorOutputName;
+    ss << signalValue << "_" << triggerPoint << "_" << TEMP_ERROR_OUTPUT_NAME;
     std::string commandLine = ss.str();
     char buffer[MAX_PATH] = {0};
     if (readlink("/proc/self/exe", buffer, MAX_PATH) == -1) {
         return -1;
     }
     std::string exePath = FileUtil::GetDirPath(std::string(buffer)) + "/SignalTestCJC";
-    pid_t pid, wpid;
+    pid_t pid;
+    pid_t wpid;
     int status;
     pid = fork();
     if (pid == 0) {
-        if (execl(exePath.c_str(), exePath.c_str(), tempCJFileName.c_str(), commandLine.c_str(), nullptr) == -1) {
+        if (execl(exePath.c_str(), exePath.c_str(), TEMP_CJ_FILE_NAME.c_str(), commandLine.c_str(), nullptr) == -1) {
             _exit(1);
         }
     } else if (pid > 0) {
@@ -190,7 +192,7 @@ DWORD ExecuteProcess(std::string signalValue, std::string triggerPoint)
     std::string exePath = FileUtil::GetDirPath(std::string(buffer)) + "\\SignalTestCJC.exe";
 
     std::stringstream ss;
-    ss << exePath << " " << tempCJFileName << " " << signalValue << "_" << triggerPoint << "_" << tempErrorOutputName;
+    ss << exePath << " " << TEMP_CJ_FILE_NAME << " " << signalValue << "_" << triggerPoint << "_" << TEMP_ERROR_OUTPUT_NAME;
     std::string commandLine = ss.str();
 
     STARTUPINFOA si;
@@ -222,7 +224,7 @@ DWORD ExecuteProcess(std::string signalValue, std::string triggerPoint)
 #define CTSO(module)                                                                                                   \
     TEST_F(SignalTests, module##StackOverflow)                                                                         \
     {                                                                                                                  \
-        EXPECT_EQ(ExecuteProcess("StackOverflow", #module), stackOverflowReturnCode);                                  \
+        EXPECT_EQ(ExecuteProcess("StackOverflow", #module), STACK_OVERFLOW_RETURN_CODE);                                  \
         VerifyErrorOutput("StackOverflow", #module);                                                                   \
     }
 CT(SIGABRT, main)
@@ -244,3 +246,43 @@ CT(SIGTRAP, parser)
 CT(SIGBUS, parser)
 #endif
 CTSO(parser)
+
+// CT(SIGABRT, sema)
+// CT(SIGFPE, sema)
+// CT(SIGSEGV, sema)
+// CT(SIGILL, sema)
+// #if __unix__
+// CT(SIGTRAP, sema)
+// CT(SIGBUS, sema)
+// #endif
+// CTSO(sema)
+
+// CT(SIGABRT, chir)
+// CT(SIGFPE, chir)
+// CT(SIGSEGV, chir)
+// CT(SIGILL, chir)
+// #if __unix__
+// CT(SIGTRAP, chir)
+// CT(SIGBUS, chir)
+// #endif
+// CTSO(chir)
+
+// CT(SIGABRT, codegen)
+// CT(SIGFPE, codegen)
+// CT(SIGSEGV, codegen)
+// CT(SIGILL, codegen)
+// #if __unix__
+// CT(SIGTRAP, codegen)
+// CT(SIGBUS, codegen)
+// #endif
+// CTSO(codegen)
+
+// CT(SIGABRT, driver)
+// CT(SIGFPE, driver)
+// CT(SIGSEGV, driver)
+// CT(SIGILL, driver)
+// #if __unix__
+// CT(SIGTRAP, driver)
+// CT(SIGBUS, driver)
+// #endif
+// CTSO(driver)

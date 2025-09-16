@@ -26,11 +26,9 @@ SkipKind& operator&=(SkipKind& l, SkipKind r)
     return l;
 }
 
+// callee should have checked that there is only a single way GoTo between this block and its predecessor
 void MergeIntoPredecessor(Block& block)
 {
-    if (auto preds = block.GetPredecessors(); preds.size() != 1 || preds[0]->GetSuccessors().size() != 1) {
-        return;
-    }
     // 1) remove the terminator of predecessor
     auto pred = block.GetPredecessors()[0];
     CJC_NULLPTR_CHECK(pred->GetTerminator());
@@ -57,9 +55,7 @@ void MergeGotoOnlyBlock(Block& block)
 
     for (auto pred : preds) {
         auto terminator = pred->GetTerminator();
-        if (terminator == nullptr) {
-            continue;
-        }
+        CJC_NULLPTR_CHECK(terminator);
         target->SetDebugLocation(block.GetDebugLocation());
         terminator->ReplaceSuccessor(block, *target);
         // skip check of block.terminator is not considered, because it is a simple GoTo and is unconditionally removed
@@ -106,6 +102,7 @@ void MergeForInCondBlock(CHIRBuilder& builder, Block& block)
 {
     auto oldPreds = block.GetPredecessors();
     auto oldSuccs = block.GetSuccessors();
+    CJC_ASSERT(!oldPreds.empty());
     for (size_t i{0}; i < oldPreds.size() - 1; ++i) {
         auto cpBlock = CopyBlock(builder, block);
         auto pred = oldPreds[i];
@@ -122,10 +119,22 @@ void MergeBlocks::RunOnPackage(const Package& package, CHIRBuilder& builder, con
     }
 }
 
+static bool SkipMergeBlock(const Block& bl, const GlobalOptions& opts)
+{
+    if (bl.TestAttr(Attribute::UNREACHABLE)) {
+        return true;
+    }
+    if (!opts.enableCompileDebug) {
+        return false;
+    }
+    auto term = bl.GetTerminator();
+    return term && !term->GetDebugLocation().IsInvalidPos();
+}
+
 void MergeBlocks::RunOnFunc(const BlockGroup& body, CHIRBuilder& builder, const GlobalOptions& opts)
 {
     auto checkSingleEntrySingleExit = [](const Block& block, const GlobalOptions& opts) {
-        if (block.TestAttr(Attribute::UNREACHABLE)) {
+        if (SkipMergeBlock(block, opts)) {
             return false;
         }
         auto preds = block.GetPredecessors();
@@ -148,7 +157,7 @@ void MergeBlocks::RunOnFunc(const BlockGroup& body, CHIRBuilder& builder, const 
         return true;
     };
     auto checkGotoOnly = [](const Block& block, const GlobalOptions& opts) {
-        if (block.GetExpressions().size() != 1 || block.TestAttr(Attribute::UNREACHABLE) || block.IsEntry()) {
+        if (block.GetExpressions().size() != 1 || block.IsEntry() || SkipMergeBlock(block, opts)) {
             return false;
         }
         auto term = block.GetTerminator();

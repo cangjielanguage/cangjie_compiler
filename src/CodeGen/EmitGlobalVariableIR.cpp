@@ -51,8 +51,14 @@ void GlobalVariableGeneratorImpl::EmitIR()
         }
         const auto align = cgMod.GetLLVMModule()->getDataLayout().getPrefTypeAlignment(rawGV->getType());
         rawGV->setAlignment(llvm::MaybeAlign(align));
-        if (auto literalValue = chirGV->GetInitializer()) {
-            rawGV->setInitializer(llvm::cast<llvm::Constant>(HandleLiteralValue(irBuilder, *literalValue)));
+        if (auto literal = chirGV->GetInitializer()) {
+            auto literalValue = HandleLiteralValue(irBuilder, *literal);
+            if (literal->GetType()->IsString()) {
+                cgMod.GetCGContext().AddCJString(
+                    rawGV->getName().str(), StaticCast<CHIR::StringLiteral*>(literal)->GetVal());
+            } else {
+                rawGV->setInitializer(llvm::cast<llvm::Constant>(literalValue));
+            }
             if (chirGV->TestAttr(CHIR::Attribute::READONLY)) {
                 rawGV->addAttribute(llvm::Attribute::ReadOnly);
                 rawGV->setConstant(true);
@@ -65,14 +71,6 @@ void GlobalVariableGeneratorImpl::EmitIR()
             auto fieldMeta = llvm::MDTuple::get(
                 cgMod.GetLLVMContext(), {llvm::MDString::get(cgMod.GetLLVMContext(), MangleType(*chirGV->GetType()))});
             rawGV->setMetadata(GC_GLOBAL_VAR_TYPE, fieldMeta);
-        }
-        // When HotReload is enabled, we should put those user-defined GVs with `internal`
-        // linkage into llvm.used to prevent them from being eliminated by llvm-opt.
-        // Check whether the GV is user-defined based on whether it has AST info.
-        if (cgMod.GetCGContext().GetCompileOptions().enableHotReload &&
-            !chirGV->TestAttr(CHIR::Attribute::COMPILER_ADD) &&
-            chirGV->Get<CHIR::LinkTypeInfo>() == Linkage::INTERNAL) {
-            cgMod.GetCGContext().AddLLVMUsedVars(rawGV->getName().str());
         }
     }
 }

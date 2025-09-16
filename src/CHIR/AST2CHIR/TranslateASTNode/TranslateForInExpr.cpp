@@ -209,7 +209,7 @@ Ptr<Value> Translator::GetOuterMostExpr()
         Ptr<BlockGroup> bg = *reverseBegin;
         Expression* ownedExpr = bg->GetOwnerExpression();
         if ((ownedExpr && ownedExpr->GetExprKind() == ExprKind::LAMBDA) ||
-            (currentBlock->GetParentFunc() && bg == currentBlock->GetParentFunc()->GetBody())) {
+            (currentBlock->GetTopLevelFunc() && bg == currentBlock->GetTopLevelFunc()->GetBody())) {
             return finalValidExpr != nullptr ? finalValidExpr : nullptr;
         }
         if (ownedExpr && (Is<ForIn>(ownedExpr) || ownedExpr->GetExprKind() == ExprKind::IF)) {
@@ -225,11 +225,11 @@ void Translator::InitializeDelayExitSignal(const DebugLocation& loc)
     if (finalValidExpr == nullptr) {
         auto allocSignal = CreateAndAppendExpression<Allocate>(loc,
             builder.GetType<RefType>(builder.GetInt64Ty()), builder.GetInt64Ty(), currentBlock);
-        allocSignal->Set<GeneratedFromForIn>();
+        allocSignal->Set<GeneratedFromForIn>(true);
         delayExitSignal = allocSignal->GetResult();
         auto constZero =
             CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 0UL)->GetResult();
-        CreateWrappedStore(loc, constZero, delayExitSignal, currentBlock);
+        CreateWrappedStore(constZero, delayExitSignal, currentBlock);
     }
 }
 
@@ -237,13 +237,12 @@ Ptr<Value> Translator::InitializeCondVar(const DebugLocation& loc)
 {
     auto condVar = CreateAndAppendExpression<Allocate>(loc,
         builder.GetType<RefType>(builder.GetBoolTy()), builder.GetBoolTy(), currentBlock);
-    condVar->Set<GeneratedFromForIn>();
+    condVar->Set<GeneratedFromForIn>(true);
     auto constantTrue =
         CreateAndAppendConstantExpression<BoolLiteral>(builder.GetBoolTy(), *currentBlock, static_cast<bool>(1));
-    constantTrue->Set<GeneratedFromForIn>();
+    constantTrue->Set<GeneratedFromForIn>(true);
     CreateWrappedStore(loc, constantTrue->GetResult(), condVar->GetResult(), currentBlock);
     auto res = condVar->GetResult();
-    res->SetDebugLocation(loc);
     return res;
 }
 
@@ -265,7 +264,7 @@ Ptr<Value> Translator::GenerateForInRetValLocation(const DebugLocation& loc)
         if (!forInType->IsNothing() && !forInType->IsUnit()) {
             auto forInRetValLocation =
                 CreateAndAppendExpression<Allocate>(loc, builder.GetType<RefType>(forInType), forInType, currentBlock);
-            forInRetValLocation->Set<GeneratedFromForIn>();
+            forInRetValLocation->Set<GeneratedFromForIn>(true);
             Ptr<Value> forInBodyVal =
                 CreateAndAppendConstantExpression<NullLiteral>(loc, forInType, *currentBlock)->GetResult();
             CreateWrappedStore(loc, forInBodyVal, forInRetValLocation->GetResult(), currentBlock);
@@ -279,7 +278,7 @@ ForIn* Translator::InitForInExprSkeleton(const AST::ForInExpr& forInExpr, Ptr<Va
 {
     auto forInloc = TranslateLocation(forInExpr);
     auto forInType = TranslateType(*forInExpr.ty);
-    Func* parentFunc = currentBlock->GetParentFunc();
+    Func* parentFunc = currentBlock->GetTopLevelFunc();
     CJC_NULLPTR_CHECK(parentFunc);
     BlockGroup* bodyBlockGrp = builder.CreateBlockGroup(*parentFunc);
     BlockGroup* latchBlockGrp = builder.CreateBlockGroup(*parentFunc);
@@ -287,15 +286,16 @@ ForIn* Translator::InitForInExprSkeleton(const AST::ForInExpr& forInExpr, Ptr<Va
     ForIn* forIn;
     if (forInExpr.forInKind == ForInKind::FORIN_ITER) {
         forIn = CreateAndAppendExpression<ForInIter>(
-            forInloc, forInType, inductiveVar, condVar, bodyBlockGrp, latchBlockGrp, condBlockGrp, currentBlock);
+            forInloc, forInType, inductiveVar, condVar, currentBlock);
     } else {
         forIn = CreateAndAppendExpression<ForInRange>(
-            forInloc, forInType, inductiveVar, condVar, bodyBlockGrp, latchBlockGrp, condBlockGrp, currentBlock);
+            forInloc, forInType, inductiveVar, condVar, currentBlock);
     }
     CJC_ASSERT(forIn);
-    bodyBlockGrp->SetOwnerExpression(forIn);
-    latchBlockGrp->SetOwnerExpression(forIn);
-    condBlockGrp->SetOwnerExpression(forIn);
+    CJC_NULLPTR_CHECK(bodyBlockGrp);
+    CJC_NULLPTR_CHECK(latchBlockGrp);
+    CJC_NULLPTR_CHECK(condBlockGrp);
+    forIn->InitBlockGroups(*bodyBlockGrp, *latchBlockGrp, *condBlockGrp);
 
     // 1. Initialize body blockGroup
     Ptr<Block> bodyEntry = builder.CreateBlock(bodyBlockGrp);
@@ -354,16 +354,16 @@ void Translator::TranslateForInRangeLatchBlockGroup(const AST::Node& node)
     //   Branch(%52, #16, #17)
     auto loc = TranslateLocation(node);
     auto delayExitSignalVal =
-        CreateAndAppendExpression<Load>(loc, builder.GetInt64Ty(), delayExitSignal, currentBlock);
-    delayExitSignalVal->Set<GeneratedFromForIn>();
+        CreateAndAppendExpression<Load>(builder.GetInt64Ty(), delayExitSignal, currentBlock);
+    delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto constZero = CreateAndAppendConstantExpression<IntLiteral>(
         builder.GetInt64Ty(), *currentBlock, 0UL)->GetResult();
     auto isNeedExit = CreateAndAppendExpression<BinaryExpression>(
-        loc, builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero, currentBlock);
+        builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero, currentBlock);
     isNeedExit->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
-    isNeedExit->Set<GeneratedFromForIn>();
+    isNeedExit->Set<GeneratedFromForIn>(true);
     CreateAndAppendTerminator<Branch>(loc, isNeedExit->GetResult(),
-        delayExitTrueBlock, delayExitFalseBlock, currentBlock)->sourceExpr = SourceExpr::FOR_IN_EXPR;
+        delayExitTrueBlock, delayExitFalseBlock, currentBlock)->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
 
     // before go out for-in loop, we only exit() from latch blockGroup,
     // as we still need to enter the next CFG: cond blockGroup.
@@ -391,16 +391,16 @@ void Translator::TranslateForInStringLatchBlockGroup(Ptr<Value>& inductiveVar)
     auto loc = inductiveVar->GetDebugLocation();
 
     auto delayExitSignalVal =
-        CreateAndAppendExpression<Load>(loc, builder.GetInt64Ty(), delayExitSignal, currentBlock);
-    delayExitSignalVal->Set<GeneratedFromForIn>();
+        CreateAndAppendExpression<Load>(builder.GetInt64Ty(), delayExitSignal, currentBlock);
+    delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto constZero = CreateAndAppendConstantExpression<IntLiteral>(
         builder.GetInt64Ty(), *currentBlock, 0UL)->GetResult();
     auto isNeedExit = CreateAndAppendExpression<BinaryExpression>(
-        loc, builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero, currentBlock);
+        builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero, currentBlock);
     isNeedExit->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
-    isNeedExit->Set<GeneratedFromForIn>();
+    isNeedExit->Set<GeneratedFromForIn>(true);
     CreateAndAppendTerminator<Branch>(loc, isNeedExit->GetResult(), delayExitTrueBlock,
-        delayExitFalseBlock, currentBlock)->sourceExpr = SourceExpr::FOR_IN_EXPR;
+        delayExitFalseBlock, currentBlock)->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
 
     currentBlock = delayExitTrueBlock;
     CreateAndAppendTerminator<Exit>(loc, currentBlock);
@@ -409,10 +409,10 @@ void Translator::TranslateForInStringLatchBlockGroup(Ptr<Value>& inductiveVar)
     Ptr<Value> inductiveVal = GetDerefedValue(inductiveVar);
     auto constOne =
         CreateAndAppendConstantExpression<IntLiteral>(inductiveVal->GetType(), *currentBlock, 1UL);
-    constOne->Set<GeneratedFromForIn>();
+    constOne->Set<GeneratedFromForIn>(true);
     auto plusOne = CreateAndAppendExpression<BinaryExpression>(
         loc, inductiveVal->GetType(), ExprKind::ADD, inductiveVal, constOne->GetResult(), currentBlock);
-    plusOne->Set<GeneratedFromForIn>();
+    plusOne->Set<GeneratedFromForIn>(true);
     CreateWrappedStore(loc, plusOne->GetResult(), inductiveVar, currentBlock);
     CreateAndAppendTerminator<Exit>(loc, currentBlock);
 }
@@ -431,16 +431,16 @@ void Translator::TranslateForInCondControlFlow(Ptr<Value>& condVar)
     //   Branch(%21, #7, #8)
     auto& loc = condVar->GetDebugLocation();
     auto delayExitSignalVal =
-        CreateAndAppendExpression<Load>(loc, builder.GetInt64Ty(), delayExitSignal, currentBlock);
-    delayExitSignalVal->Set<GeneratedFromForIn>();
+        CreateAndAppendExpression<Load>(builder.GetInt64Ty(), delayExitSignal, currentBlock);
+    delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto constZero = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 0UL);
-    constZero->Set<GeneratedFromForIn>();
+    constZero->Set<GeneratedFromForIn>(true);
     auto isNeedExit = CreateAndAppendExpression<BinaryExpression>(
-        loc, builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero->GetResult(), currentBlock);
+        builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero->GetResult(), currentBlock);
     isNeedExit->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
-    isNeedExit->Set<GeneratedFromForIn>();
+    isNeedExit->Set<GeneratedFromForIn>(true);
     CreateAndAppendTerminator<Branch>(loc, isNeedExit->GetResult(), delayExitTrueBlock,
-        delayExitFalseBlock, currentBlock)->sourceExpr = SourceExpr::FOR_IN_EXPR;
+        delayExitFalseBlock, currentBlock)->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
 
     // before go out for-in loop, let --delayExitSignalVal, and clear cond var to false
     // Block #7: // preds: #6
@@ -453,18 +453,18 @@ void Translator::TranslateForInCondControlFlow(Ptr<Value>& condVar)
     //   Exit()
     currentBlock = delayExitTrueBlock;
     delayExitSignalVal =
-        CreateAndAppendExpression<Load>(loc, builder.GetInt64Ty(), delayExitSignal, currentBlock);
-    delayExitSignalVal->Set<GeneratedFromForIn>();
+        CreateAndAppendExpression<Load>(builder.GetInt64Ty(), delayExitSignal, currentBlock);
+    delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto constOne = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 1UL);
-    constOne->Set<GeneratedFromForIn>();
+    constOne->Set<GeneratedFromForIn>(true);
     auto decreaseOne = CreateAndAppendExpression<BinaryExpression>(
-        loc, builder.GetInt64Ty(), ExprKind::SUB, delayExitSignalVal->GetResult(), constOne->GetResult(), currentBlock);
-    decreaseOne->Set<GeneratedFromForIn>();
-    CreateWrappedStore(loc, decreaseOne->GetResult(), delayExitSignal, currentBlock);
+        builder.GetInt64Ty(), ExprKind::SUB, delayExitSignalVal->GetResult(), constOne->GetResult(), currentBlock);
+    decreaseOne->Set<GeneratedFromForIn>(true);
+    CreateWrappedStore(decreaseOne->GetResult(), delayExitSignal, currentBlock);
     auto constantFalse =
         CreateAndAppendConstantExpression<BoolLiteral>(builder.GetBoolTy(), *currentBlock, false);
-    constantFalse->Set<GeneratedFromForIn>();
-    CreateWrappedStore(loc, constantFalse->GetResult(), condVar, currentBlock);
+    constantFalse->Set<GeneratedFromForIn>(true);
+    CreateWrappedStore(constantFalse->GetResult(), condVar, currentBlock);
     CreateAndAppendTerminator<Exit>(loc, currentBlock);
 
     // if delayExitSignal value is equal to 0, we translate condition as normal,
@@ -486,16 +486,16 @@ void Translator::UpdateDelayExitSignalInForInEnd(const ForIn& forIn)
     //     %71: Bool = GT(%70, %69)
     //     Branch(%71, #26, #27)
     auto constZero = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 0UL);
-    constZero->Set<GeneratedFromForIn>();
+    constZero->Set<GeneratedFromForIn>(true);
     auto delayExitSignalVal =
-        CreateAndAppendExpression<Load>(loc, builder.GetInt64Ty(), delayExitSignal, currentBlock);
-    delayExitSignalVal->Set<GeneratedFromForIn>();
+        CreateAndAppendExpression<Load>(builder.GetInt64Ty(), delayExitSignal, currentBlock);
+    delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto isNeedExit = CreateAndAppendExpression<BinaryExpression>(
-        loc, builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero->GetResult(), currentBlock);
+        builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero->GetResult(), currentBlock);
     isNeedExit->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
-    isNeedExit->Set<GeneratedFromForIn>();
+    isNeedExit->Set<GeneratedFromForIn>(true);
     CreateAndAppendTerminator<Branch>(loc, isNeedExit->GetResult(),
-        delayExitTrueBlock, delayExitFalseBlock, currentBlock)->sourceExpr = SourceExpr::FOR_IN_EXPR;
+        delayExitTrueBlock, delayExitFalseBlock, currentBlock)->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
 
     // before we exit() the func, let --delayExitSignalVal, and if the current forIn expr has forInRetValLocation,
     // we shold load forInRetVal from it, and restore forInRetVal to outer expr or func RetValLocation.
@@ -509,13 +509,13 @@ void Translator::UpdateDelayExitSignalInForInEnd(const ForIn& forIn)
     //     Exit()
     currentBlock = delayExitTrueBlock;
     delayExitSignalVal =
-        CreateAndAppendExpression<Load>(loc, builder.GetInt64Ty(), delayExitSignal, currentBlock);
-    delayExitSignalVal->Set<GeneratedFromForIn>();
+        CreateAndAppendExpression<Load>(builder.GetInt64Ty(), delayExitSignal, currentBlock);
+    delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto constOne = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 1UL);
-    constOne->Set<GeneratedFromForIn>();
+    constOne->Set<GeneratedFromForIn>(true);
     auto decreaseOne = CreateAndAppendExpression<BinaryExpression>(
-        loc, builder.GetInt64Ty(), ExprKind::SUB, delayExitSignalVal->GetResult(), constOne->GetResult(), currentBlock);
-    CreateWrappedStore(loc, decreaseOne->GetResult(), delayExitSignal, currentBlock);
+        builder.GetInt64Ty(), ExprKind::SUB, delayExitSignalVal->GetResult(), constOne->GetResult(), currentBlock);
+    CreateWrappedStore(decreaseOne->GetResult(), delayExitSignal, currentBlock);
     Ptr<Value> funcRetValLocation = GetOuterBlockGroupReturnValLocation();
     if (funcRetValLocation != nullptr && forInExprReturnMap.count(forIn.GetResult()) != 0) {
         Ptr<Value> forInRetValLocation = forInExprReturnMap[forIn.GetResult()];
@@ -542,8 +542,8 @@ Ptr<Value> Translator::TranslateForInIterCondition(Ptr<Value>& iterNextLocation,
     // Field(%xx, 0)
     auto enumIdx = GetEnumIDValue(astTy, GetDerefedValue(iterNextLocation, iterNextLocation->GetDebugLocation()));
     // bool == 0 euqals !bool
-    return CreateAndAppendExpression<UnaryExpression>(
-        iterNextLocation->GetDebugLocation(), builder.GetBoolTy(), ExprKind::NOT, enumIdx, currentBlock)->GetResult();
+    return CreateAndAppendExpression<UnaryExpression>(iterNextLocation->GetDebugLocation(),
+        builder.GetBoolTy(), ExprKind::NOT, enumIdx, Cangjie::OverflowStrategy::NA, currentBlock)->GetResult();
 }
 
 void Translator::TranslateForInIterPattern(const AST::ForInExpr& forInExpr, Ptr<Value>& iterNextLocation)
@@ -582,15 +582,15 @@ void Translator::TranslateForInIterLatchBlockGroup(
     //   Branch(%80, #14, #15)
     auto& loc = iterNextLocation->GetDebugLocation();
     auto delayExitSignalVal =
-        CreateAndAppendExpression<Load>(loc, builder.GetInt64Ty(), delayExitSignal, currentBlock);
-    delayExitSignalVal->Set<GeneratedFromForIn>();
+        CreateAndAppendExpression<Load>(builder.GetInt64Ty(), delayExitSignal, currentBlock);
+    delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto constZero = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 0UL);
     auto isNeedExit = CreateAndAppendExpression<BinaryExpression>(
-        loc, builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero->GetResult(), currentBlock);
+        builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero->GetResult(), currentBlock);
     isNeedExit->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
-    isNeedExit->Set<GeneratedFromForIn>();
+    isNeedExit->Set<GeneratedFromForIn>(true);
     CreateAndAppendTerminator<Branch>(loc, isNeedExit->GetResult(), delayExitTrueBlock,
-        delayExitFalseBlock, currentBlock)->sourceExpr = SourceExpr::FOR_IN_EXPR;
+        delayExitFalseBlock, currentBlock)->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
 
     // before go out for-in loop, we only exit() from latch blockGroup,
     // as we still need to enter the next CFG: cond blockGroup.
@@ -625,11 +625,16 @@ Ptr<Value> Translator::TranslateForInRange(const AST::ForInExpr& forInExpr)
     // nodes[3] is condition var,
     // 1. Translate inductive var of for-in node
     Ptr<Value> inductiveVar = TranslateExprArg(*inExpression->body[0]);
+    StaticCast<LocalVar>(inductiveVar)->GetExpr()->Set<GeneratedFromForIn>(true);
     // 2. Translate stopExpr var
     Ptr<Value> stopExprVar = TranslateExprArg(*inExpression->body[1]);
+    if (auto stopExpr = DynamicCast<LocalVar>(stopExprVar)) {
+        stopExpr->GetExpr()->Set<GeneratedFromForIn>(true);
+    }
     // 3. Translate condition
     auto condLoc = TranslateLocation(*inExpression->body[3]);
     Ptr<Value> condition = TranslateExprArg(*inExpression->body[3u]);
+    StaticCast<LocalVar>(condition)->GetExpr()->Set<GeneratedFromForIn>(true);
     auto recordBlock = currentBlock;
     // Create forInBody block.
     Ptr<Block> forInBodyBlock = CreateBlock();
@@ -693,7 +698,7 @@ Ptr<Value> Translator::TranslateForInRange(const AST::ForInExpr& forInExpr)
     currentBlock = endBlock;
     UpdateDelayExitSignalInForInEnd(*forIn);
     auto br = CreateAndAppendTerminator<Branch>(forInExprLoc, condition, forInBodyBlock, currentBlock, recordBlock);
-    br->sourceExpr = SourceExpr::FOR_IN_EXPR;
+    br->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
     // when the range is made of constants (i.e. value can be computed by CA), this branch generates an unreachable
     // warning on the false branch.
     currentBlock->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
@@ -717,6 +722,7 @@ Ptr<Value> Translator::TranslateForInString(const AST::ForInExpr& forInExpr)
     // 2. Translate inductive var of inExpression
     // there are three nodes in forInExpr.inExpression, nodes[0] is inductive var
     Ptr<Value> inductiveVar = GetSymbolTable(*inExpression->body[0]);
+    StaticCast<LocalVar>(inductiveVar)->GetExpr()->Set<GeneratedFromForIn>(true);
 
     // 3. Translate loop condition var of for-in node
     // there are three nodes in forInExpr.inExpression, nodes[2] is sizeget func
@@ -724,6 +730,8 @@ Ptr<Value> Translator::TranslateForInString(const AST::ForInExpr& forInExpr)
     auto stringSize = GetDerefedValue(GetSymbolTable(*inExpression->body[2U]), condLoc);
     auto condition = CreateAndAppendExpression<BinaryExpression>(condLoc, builder.GetBoolTy(),
         ExprKind::LT, GetDerefedValue(inductiveVar, condLoc), stringSize, currentBlock)->GetResult();
+    condition->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
+    condition->GetExpr()->Set<GeneratedFromForIn>(true);
     auto recordBlock = currentBlock;
     // Create forInBody block.
     Ptr<Block> forInBodyBlock = CreateBlock();
@@ -784,17 +792,17 @@ Ptr<Value> Translator::TranslateForInString(const AST::ForInExpr& forInExpr)
     UpdateDelayExitSignalInForInEnd(*forIn);
     auto br = CreateAndAppendTerminator<Branch>(forInExprLoc, condition, forInBodyBlock, currentBlock, recordBlock);
     br->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
-    br->sourceExpr = SourceExpr::FOR_IN_EXPR;
+    br->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
     return nullptr;
 }
 
 Ptr<Value> Translator::MakeNone(Type& optionType, const DebugLocation& loc)
 {
     auto one = CreateAndAppendConstantExpression<BoolLiteral>(builder.GetBoolTy(), *currentBlock, true);
-    one->Set<GeneratedFromForIn>();
+    one->Set<GeneratedFromForIn>(true);
     auto enumTuple = CreateAndAppendExpression<Tuple>(
         loc, &optionType, std::vector<Value*>{one->GetResult()}, currentBlock);
-    enumTuple->Set<GeneratedFromForIn>();
+    enumTuple->Set<GeneratedFromForIn>(true);
     return enumTuple->GetResult();
 }
 
@@ -962,9 +970,10 @@ protected:
         auto loc = tr.TranslateLocation(*forin->pattern);
         auto intType = iterBegin.GetType();
         auto iterType = tr.builder.GetType<RefType>(intType);
-        auto res1 = tr.CreateAndAppendExpression<Allocate>(loc, iterType, intType, tr.GetCurrentBlock())->GetResult();
-        tr.CreateWrappedStore(loc, &iterBegin, res1, tr.GetCurrentBlock());
-        return res1;
+        auto res1 = tr.CreateAndAppendExpression<Allocate>(loc, iterType, intType, tr.GetCurrentBlock());
+        res1->Set<GeneratedFromForIn>(true);
+        tr.CreateWrappedStore(loc, &iterBegin, res1->GetResult(), tr.GetCurrentBlock());
+        return res1->GetResult();
     }
 
     Value* TranslateBegin()
@@ -998,7 +1007,7 @@ protected:
 
     ForinBGs CreateRetAndBGs()
     {
-        Func* parentFunc = tr.currentBlock->GetParentFunc();
+        Func* parentFunc = tr.currentBlock->GetTopLevelFunc();
         CJC_NULLPTR_CHECK(parentFunc);
         BlockGroup* bodyBlockGrp = tr.builder.CreateBlockGroup(*parentFunc);
         BlockGroup* condBlockGrp = tr.builder.CreateBlockGroup(*parentFunc);
@@ -1006,9 +1015,6 @@ protected:
         ForinBGs ret{bodyBlockGrp, condBlockGrp, latchBlockGrp};
         
         res = CreateRes(ret);
-        bodyBlockGrp->SetOwnerExpression(res);
-        latchBlockGrp->SetOwnerExpression(res);
-        condBlockGrp->SetOwnerExpression(res);
 
         Ptr<Block> bodyEntry = tr.builder.CreateBlock(bodyBlockGrp);
         bodyBlockGrp->SetEntryBlock(bodyEntry);
@@ -1025,8 +1031,14 @@ protected:
     ForIn* CreateRes(const ForinBGs& bgs)
     {
         auto loc = tr.TranslateLocation(*forin);
-        return res = tr.CreateAndAppendExpression<ForInClosedRange>(loc, tr.TranslateType(*forin->ty), iterVar, condVar,
-            bgs.body, bgs.latch, bgs.cond, tr.GetCurrentBlock());
+        auto forInClosedRange = tr.CreateAndAppendExpression<ForInClosedRange>(
+            loc, tr.TranslateType(*forin->ty), iterVar, condVar, tr.GetCurrentBlock());
+        CJC_NULLPTR_CHECK(forInClosedRange);
+        CJC_NULLPTR_CHECK(bgs.body);
+        CJC_NULLPTR_CHECK(bgs.latch);
+        CJC_NULLPTR_CHECK(bgs.cond);
+        forInClosedRange->InitBlockGroups(*bgs.body, *bgs.latch, *bgs.cond);
+        return forInClosedRange;
     }
 
     void TranslateBodyBG(BlockGroup& body)
@@ -1165,7 +1177,7 @@ protected:
     Branch* CreateBranch(Args... args)
     {
         auto br = tr.CreateAndAppendTerminator<Branch>(args...);
-        br->sourceExpr = SourceExpr::FOR_IN_EXPR;
+        br->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
         return br;
     }
 };

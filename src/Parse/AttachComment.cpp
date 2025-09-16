@@ -40,7 +40,13 @@ std::vector<Ptr<Node>> CollectPtrsOfASTNodes(Ptr<File> node)
         if (curNode->astKind == ASTKind::ANNOTATION || curNode->astKind == ASTKind::MODIFIER) {
             return VisitAction::SKIP_CHILDREN;
         }
+        bool ignoreFlag = false;
         if (curNode->astKind == ASTKind::FILE) {
+            ignoreFlag = true;
+        } else if (auto inv = curNode->GetConstInvocation(); inv && inv->decl) {
+            ignoreFlag = true;
+        }
+        if (ignoreFlag) {
             return VisitAction::WALK_CHILDREN;
         }
         ptrs.push_back(curNode);
@@ -87,7 +93,7 @@ void UpdateFollowInfoAndAppendCommentGroup(const std::optional<size_t>& preTkIdx
     AppendCommentGroup(comment, commentGroups);
 }
 
-inline CommentKind GetCommentKind(const Token& token)
+CommentKind GetCommentKind(const Token& token)
 {
     CJC_ASSERT(token.kind == TokenKind::COMMENT);
     if (token.Value().rfind("/*", 0) == std::string::npos) {

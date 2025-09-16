@@ -9,7 +9,6 @@
 
 #include "Base/CGTypes/CGFunctionType.h"
 #include "CGModule.h"
-#include "CJNative/IROptimizer.h"
 #include "IRBuilder.h"
 #include "Utils/BlockScopeImpl.h"
 #include "Utils/CGCommonDef.h"
@@ -86,7 +85,7 @@ llvm::Function* CreateFunctionWrapper(
     llvm::Function* function, const CGFunctionType* cgType, const CHIR::Value* chirFunc, CGModule& cgMod)
 {
     if (function->hasFnAttribute("wrapper")) {
-        return nullptr;
+        return function;
     }
     auto& cgCtx = cgMod.GetCGContext();
     if (chirFunc->TestAttr(CHIR::Attribute::STATIC) || chirFunc->Get<CHIR::WrappedRawMethod>()) {
@@ -194,7 +193,6 @@ void CGFunction::Opt() const
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     EraseReplaceableAlloca(cgMod, *function);
     AddZeroInitForStructWithRefField(cgMod, *function);
-    LICMForVtableLookup(cgMod.GetCGContext(), *function).Run();
 #endif
 }
 

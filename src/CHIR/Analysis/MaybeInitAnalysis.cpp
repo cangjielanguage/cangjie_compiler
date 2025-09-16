@@ -51,8 +51,8 @@ template <> const std::string Analysis<MaybeInitDomain>::name = "maybe-init";
 template <> const std::optional<unsigned> Analysis<MaybeInitDomain>::blockLimit = std::nullopt;
 template <> const AnalysisKind GenKillDomain<MaybeInitDomain>::mustOrMaybe = AnalysisKind::MAYBE;
 
-MaybeInitAnalysis::MaybeInitAnalysis(const Func* func, bool isDebug, const ConstructorInitInfo* ctorInitInfo)
-    : GenKillAnalysis(func, isDebug), ctorInitInfo(ctorInitInfo)
+MaybeInitAnalysis::MaybeInitAnalysis(const Func* func, const ConstructorInitInfo* ctorInitInfo)
+    : GenKillAnalysis(func), ctorInitInfo(ctorInitInfo)
 {
     size_t allocateIdx = ctorInitInfo->localMemberNums;
     SaveAllocateMap(*func->GetBody(), allocateIdx, allocateIdxMap);
@@ -100,11 +100,6 @@ void MaybeInitAnalysis::HandleAllocateExpr(MaybeInitDomain& state, const Allocat
     if (auto it = allocateIdxMap.find(res); it != allocateIdxMap.end()) {
         auto allcoateIdx = it->second;
         state.Kill(allcoateIdx);
-        if (isDebug) {
-            std::cout << "[MaybeInitAnalysis] " << allocate->ToString()
-                      << " (indexInStates: " << std::to_string(allcoateIdx) << ") has refreshed"
-                      << ToPosInfo(allocate->GetDebugLocation()) << std::endl;
-        }
     }
 }
 
@@ -114,17 +109,14 @@ void MaybeInitAnalysis::HandleStoreExpr(MaybeInitDomain& state, const Store* sto
     if (auto it = allocateIdxMap.find(location); it != allocateIdxMap.end()) {
         auto allocateIdx = it->second;
         state.Gen(allocateIdx);
-        if (isDebug) {
-            std::cout << "[MaybeInitAnalysis] " << store->GetLocation()->GetIdentifier()
-                      << " (indexInStates: " << std::to_string(allocateIdx) << ") has been rewritten"
-                      << ToPosInfo(store->GetDebugLocation()) << std::endl;
-        }
     }
 }
 
 void MaybeInitAnalysis::HandleStoreElemRefExpr(MaybeInitDomain& state, const StoreElementRef* store) const
 {
-    auto memberIdxOpt = IsInitialisingMemberVar(*func, *store);
+    auto parentFunc = store->GetTopLevelFunc();
+    CJC_NULLPTR_CHECK(parentFunc);
+    auto memberIdxOpt = IsInitialisingMemberVar(*parentFunc, *store);
     if (!memberIdxOpt.has_value()) {
         return;
     }
@@ -134,12 +126,6 @@ void MaybeInitAnalysis::HandleStoreElemRefExpr(MaybeInitDomain& state, const Sto
         return;
     }
     state.Gen(memberIdx - ctorInitInfo->superMemberNums);
-    if (isDebug) {
-        std::cout << "[MaybeInitAnalysis: " << func->GetIdentifierWithoutPrefix() << "] member at memberVarIndex "
-                  << std::to_string(memberIdx)
-                  << " (indexInStates: " << std::to_string(memberIdx - ctorInitInfo->superMemberNums)
-                  << ") has been rewritten" << ToPosInfo(store->GetDebugLocation()) << std::endl;
-    }
 }
 
 void MaybeInitAnalysis::HandleApplyExpr(MaybeInitDomain& state, const Apply* apply) const
@@ -150,10 +136,6 @@ void MaybeInitAnalysis::HandleApplyExpr(MaybeInitDomain& state, const Apply* app
     // Check if it is a call to super init function of this class
     if (apply->IsSuperCall()) {
         state.Gen(domainSize - 1);
-        if (isDebug) {
-            std::cout << "[MaybeInitAnalysis: " << func->GetIdentifierWithoutPrefix() << "] super() was called"
-                      << std::endl;
-        }
         return;
     }
     // Check if it is a call to another init function of this class/struct
@@ -161,17 +143,11 @@ void MaybeInitAnalysis::HandleApplyExpr(MaybeInitDomain& state, const Apply* app
     if (callee->IsFuncWithBody()) {
         auto calleeFunc = VirtualCast<Func*>(callee);
         if (calleeFunc->IsConstructor() &&
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
             calleeFunc->GetOuterDeclaredOrExtendedDef() == ctorInitInfo->thisCustomDef &&
-#endif
             apply->GetArgs()[0] == func->GetParam(0)) {
             state.SetAllLocalMemberInited();
             if (ctorInitInfo->superClassDef) {
                 state.Gen(domainSize - 1);
-            }
-            if (isDebug) {
-                std::cout << "[MaybeInitAnalysis: " << func->GetIdentifierWithoutPrefix() << "] this() was called"
-                          << std::endl;
             }
         }
     }

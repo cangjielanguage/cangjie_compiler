@@ -15,12 +15,13 @@
 
 #include <iostream>
 
+#include "cangjie/CHIR/CHIR.h"
 #include "cangjie/CHIR/CHIRBuilder.h"
 #include "cangjie/Option/Option.h"
 
 namespace Cangjie::CHIR {
-bool IRCheck(const class Package& root,
-    const Cangjie::GlobalOptions& opts, CHIRBuilder& builder, std::ostream& out = std::cerr);
+bool IRCheck(const class Package& root, const Cangjie::GlobalOptions& opts, CHIRBuilder& builder,
+    const ToCHIR::Phase& phase, std::ostream& out = std::cerr);
 } // namespace Cangjie::CHIR
 
 #endif

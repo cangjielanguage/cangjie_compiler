@@ -226,7 +226,7 @@ bool TempFileManager::Init(const GlobalOptions& options, bool isFrontend)
         {TempFileKind::O_OPT_BC, []() { return ".bc"; }},
         {TempFileKind::T_ASM, []() { return ".s"; }},
 #endif
-        {TempFileKind::O_CHIR, []() { return ".chir.fb"; }},
+        {TempFileKind::O_CHIR, []() { return CHIR_SERIALIZATION_FILE_EXTENSION; }},
         {TempFileKind::T_OBJ, []() { return ".o"; }},
         {TempFileKind::T_EXE_MAC, []() { return  "_temp"; }},
         {TempFileKind::T_DYLIB_MAC, []() { return "_temp.dylib"; }},

@@ -37,14 +37,6 @@ const unsigned TWO_INDENT = 2u;
 const unsigned THREE_INDENT = 3u;
 #define UNKNOWN_TY (ANSI_COLOR_RED + "unknown" + ANSI_COLOR_RESET)
 
-void PrintAnnotations(const Decl& decl, unsigned indent)
-{
-    for (auto& anno : decl.annotations) {
-        auto str = "Annotation: " + anno->identifier;
-        PrintIndent(indent + ONE_INDENT, str);
-    }
-}
-
 void PrintModifiers(const Decl& decl, unsigned indent)
 {
     std::string str = "Modifiers:";
@@ -56,55 +48,119 @@ void PrintModifiers(const Decl& decl, unsigned indent)
     }
 }
 
-void PrintTy(unsigned indent, const std::string& str)
+void PrintTarget(unsigned indent, const Decl& target, std::string addition = "target")
 {
-    PrintIndent(indent, "*Ty:", str);
+    if (target.mangledName.empty()) {
+        PrintIndent(indent, addition + ": ptr:", &target);
+    } else {
+        PrintIndent(indent, addition + ": mangledName:", "\"" + target.exportId + "\"");
+    }
+}
+
+void PrintBasic(unsigned indent, const Node& node)
+{
+    // Basic info:
+    std::string filePath = node.curFile ? node.curFile->filePath : "not in file";
+    PrintIndent(indent, "curFile:", filePath);
+    PrintIndent(indent, "position:", node.begin.ToString(), node.end.ToString());
+    PrintIndent(indent, "scopeName:", "\"" + node.scopeName + "\"");
+    PrintIndent(indent, "ty:", node.ty->String());
+    auto fullPkgName = node.GetFullPackageName();
+    if (!fullPkgName.empty()) {
+        PrintIndent(indent, "fullPackageName:", fullPkgName);
+    } else {
+        PrintIndent(indent, "fullPackageName is empty");
+    }
+    PrintIndent(indent, "attributes:", node.GetAttrs().ToString());
+    if (!node.exportId.empty()) {
+        PrintIndent(indent, "exportId:", "\"" + node.exportId + "\"");
+    }
+    if (auto d = DynamicCast<Decl>(&node)) {
+        PrintIndent(indent, "linkage:", static_cast<int>(d->linkage), ", isConst:", static_cast<int>(d->IsConst()));
+        if (!d->mangledName.empty()) {
+            PrintIndent(indent, "mangledName:", "\"" + d->mangledName + "\"");
+        }
+        if (d->annotationsArray) {
+            PrintNode(d->annotationsArray.get(), indent, "annotationsArray");
+        }
+        if (d->outerDecl) {
+            PrintTarget(indent, *d->outerDecl, "outerDecl");
+        }
+    }
+    if (!node.comments.IsEmpty()) {
+        PrintIndent(indent, "comments: " + node.comments.ToString());
+    }
 }
 
 void PrintIndentTokens(unsigned indent, const std::vector<Token>& args)
 {
-    PrintIndentOnly(indent);
+    std::stringstream ss;
+    PrintIndent(indent, "pos: ", args.front().Begin().ToString(), args.back().End().ToString());
     for (auto& it : args) {
         if (it.kind == TokenKind::NL) {
-            Println();
-            PrintIndentOnly(indent);
+            ss << ";";
         } else {
-            Print(it.Value());
+            ss << it.Value();
         }
     }
-    Println();
+    PrintIndent(indent, "\"" + ss.str() + "\"");
 }
 
 void PrintMacroInvocation(unsigned indent, const MacroInvocation& invocation)
 {
     if (invocation.attrs.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no attributes");
+        PrintIndent(indent + ONE_INDENT, "// no attributes");
     } else {
-        PrintIndent(indent + ONE_INDENT, "# attributes", "{");
+        PrintIndent(indent + ONE_INDENT, "attrs {");
         PrintIndentTokens(indent + TWO_INDENT, invocation.attrs);
         PrintIndent(indent + ONE_INDENT, "}");
     }
     if (invocation.args.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no arguments");
+        PrintIndent(indent + ONE_INDENT, "// no arguments");
     } else {
-        PrintIndent(indent + ONE_INDENT, "# arguments", "{");
+        PrintIndent(indent + ONE_INDENT, "args {");
         PrintIndentTokens(indent + TWO_INDENT, invocation.args);
         PrintIndent(indent + ONE_INDENT, "}");
+    }
+    if (invocation.decl) {
+        PrintNode(invocation.decl, indent + ONE_INDENT, "decl");
     }
 }
 
 void PrintPackage(unsigned indent, const Package& package)
 {
-    PrintIndent(indent, "Package", package.fullPackageName, "{");
+    PrintIndent(indent, "Package:", package.fullPackageName, "{");
+
+    PrintIndent(indent + ONE_INDENT, "noSubPkg:", package.noSubPkg);
+
     for (auto& it : package.files) {
         PrintNode(it.get(), indent + ONE_INDENT);
     }
+
+    PrintIndent(indent + ONE_INDENT, "genericInstantiatedDecls {");
+    for (auto& it : package.genericInstantiatedDecls) {
+        PrintNode(it.get(), indent + TWO_INDENT);
+    }
+    PrintIndent(indent + ONE_INDENT, "}");
+
+    PrintIndent(indent + ONE_INDENT, "srcImportedNonGenericDecls {");
+    for (auto& it : package.srcImportedNonGenericDecls) {
+        PrintNode(it.get(), indent + TWO_INDENT);
+    }
+    PrintIndent(indent + ONE_INDENT, "}");
+
+    PrintIndent(indent + ONE_INDENT, "inlineFuncDecls {");
+    for (auto& it : package.inlineFuncDecls) {
+        PrintNode(it.get(), indent + TWO_INDENT);
+    }
+    PrintIndent(indent + ONE_INDENT, "}");
+
     PrintIndent(indent, "}");
 }
 
 void PrintFile(unsigned indent, const File& file)
 {
-    PrintIndent(indent, "File", file.fileName, "{");
+    PrintIndent(indent, "File:", file.fileName, "{");
     PrintNode(file.package.get(), indent + ONE_INDENT, "package");
     for (auto& it : file.imports) {
         PrintNode(it.get(), indent + ONE_INDENT);
@@ -115,31 +171,74 @@ void PrintFile(unsigned indent, const File& file)
         }
         PrintNode(it.get(), indent + ONE_INDENT);
     }
+    for (auto& it : file.exportedInternalDecls) {
+        PrintNode(it.get(), indent + ONE_INDENT, "exportedInternalDecls");
+    }
+    PrintIndent(indent + ONE_INDENT, "originalMacroCallNodes [");
+    for (auto& macroNode : file.originalMacroCallNodes) {
+        PrintNode(macroNode.get(), indent + TWO_INDENT);
+    }
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent, "}");
 }
 
 void PrintMacroExpandParam(unsigned indent, const AST::MacroExpandParam& macroExpand)
 {
-    PrintIndent(indent, "MacroExpand:", macroExpand.invocation.fullName, "{");
+    PrintIndent(indent, "MacroExpandParam:", macroExpand.invocation.fullName, "{");
     PrintMacroInvocation(indent, macroExpand.invocation);
     PrintIndent(indent, "}");
 }
 
-void PrintFuncParam(unsigned indent, const FuncParam& param, std::string& tyStr)
+void PrintGenericParamDecl(unsigned indent, const AST::GenericParamDecl& gpd)
 {
-    PrintIndent(indent, "FuncParam", param.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintAnnotations(param, indent);
+    PrintIndent(indent, "GenericParamDecl:", gpd.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, gpd);
+    PrintIndent(indent, "}");
+}
+
+void PrintAnnotation(unsigned indent, const Annotation& anno)
+{
+    PrintIndent(indent, "Annotation:", anno.identifier, "{");
+    PrintBasic(indent + ONE_INDENT, anno);
+    PrintIndent(indent + ONE_INDENT, "args [");
+    for (auto& arg : anno.args) {
+        PrintNode(arg.get(), indent + TWO_INDENT);
+    }
+    PrintIndent(indent + ONE_INDENT, "]");
+    PrintIndent(indent + ONE_INDENT, "adAnnotation:", anno.adAnnotation);
+    PrintNode(anno.condExpr.get(), indent + ONE_INDENT, "condExpr");
+    PrintIndent(indent + ONE_INDENT, "target:", anno.target);
+    PrintNode(anno.baseExpr.get(), indent + ONE_INDENT, "baseExpr");
+    PrintIndent(indent, "}");
+}
+
+void PrintAnnotations(const Decl& decl, unsigned indent)
+{
+    PrintIndent(indent, "annotations [");
+    for (auto& anno : decl.annotations) {
+        PrintAnnotation(indent + ONE_INDENT, *anno.get());
+    }
+    PrintIndent(indent, "]");
+}
+
+void PrintFuncParam(unsigned indent, const FuncParam& param)
+{
+    PrintIndent(indent, "FuncParam:", param.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, param);
+    PrintAnnotations(param, indent + ONE_INDENT);
     PrintNode(param.type.get(), indent + ONE_INDENT, "type");
     PrintNode(param.assignment.get(), indent + ONE_INDENT, "assignment");
+    if (param.desugarDecl) {
+        PrintNode(param.desugarDecl.get(), indent + ONE_INDENT, "desugarDecl");
+    }
     PrintIndent(indent, "}");
 }
 
 void PrintFuncParamList(unsigned indent, const FuncParamList& paramList)
 {
-    PrintIndent(indent, "ParamList", "{");
+    PrintIndent(indent, "FuncParamList {");
     if (paramList.params.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no Params");
+        PrintIndent(indent + ONE_INDENT, "// no Params");
     } else {
         for (auto& it : paramList.params) {
             PrintNode(it.get(), indent + ONE_INDENT);
@@ -148,25 +247,26 @@ void PrintFuncParamList(unsigned indent, const FuncParamList& paramList)
     PrintIndent(indent, "}");
 }
 
-void PrintMacroDecl(unsigned indent, const MacroDecl& macroDecl, std::string& tyStr)
+void PrintMacroDecl(unsigned indent, const MacroDecl& macroDecl)
 {
-    PrintIndent(indent, "MacroDecl", macroDecl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "MacroDecl:", macroDecl.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, macroDecl);
     PrintModifiers(macroDecl, indent);
     if (macroDecl.desugarDecl) {
-        PrintIndent(indent + ONE_INDENT, "# desugar decl");
+        PrintIndent(indent + ONE_INDENT, "// desugar decl");
         PrintNode(macroDecl.desugarDecl.get(), indent + ONE_INDENT);
     } else {
-        PrintIndent(indent + ONE_INDENT, "# macro body");
+        PrintIndent(indent + ONE_INDENT, "// macro body");
         PrintNode(macroDecl.funcBody.get(), indent + ONE_INDENT);
     }
     PrintIndent(indent, "}");
 }
 
-void PrintFuncDecl(unsigned indent, const FuncDecl& funcDecl, std::string& tyStr)
+void PrintFuncDecl(unsigned indent, const FuncDecl& funcDecl)
 {
-    PrintIndent(indent, "FuncDecl", funcDecl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "FuncDecl:", funcDecl.identifier.Val(), funcDecl.identifier.Begin(),
+        funcDecl.identifier.End(), "{");
+    PrintBasic(indent + ONE_INDENT, funcDecl);
     if (funcDecl.TestAttr(Attribute::CONSTRUCTOR) && funcDecl.constructorCall == ConstructorCall::SUPER) {
         if (auto ce = DynamicCast<CallExpr*>(funcDecl.funcBody->body->body.begin()->get()); ce) {
             if (ce->TestAttr(Attribute::COMPILER_ADD)) {
@@ -176,54 +276,72 @@ void PrintFuncDecl(unsigned indent, const FuncDecl& funcDecl, std::string& tyStr
             }
         }
     }
-    PrintAnnotations(funcDecl, indent);
+    PrintAnnotations(funcDecl, indent + ONE_INDENT);
     PrintModifiers(funcDecl, indent);
     PrintNode(funcDecl.funcBody.get(), indent + ONE_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintMainDecl(unsigned indent, const MainDecl& mainDecl, std::string& tyStr)
+void PrintPrimaryCtorDecl(unsigned indent, const PrimaryCtorDecl& primaryCtor)
 {
-    PrintIndent(indent, "MainDecl", mainDecl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "PrimaryCtorDecl:", primaryCtor.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, primaryCtor);
+    PrintAnnotations(primaryCtor, indent + ONE_INDENT);
+    PrintModifiers(primaryCtor, indent);
+    PrintNode(primaryCtor.funcBody.get(), indent + ONE_INDENT);
+    PrintIndent(indent, "}");
+}
+
+void PrintMainDecl(unsigned indent, const MainDecl& mainDecl)
+{
+    PrintIndent(indent, "MainDecl:", mainDecl.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, mainDecl);
     if (mainDecl.desugarDecl) {
-        PrintIndent(indent + ONE_INDENT, "DesugarDecl: ");
-        PrintNode(mainDecl.desugarDecl.get(), indent + ONE_INDENT);
+        PrintNode(mainDecl.desugarDecl.get(), indent + ONE_INDENT, "desugarDecl");
     } else {
-        PrintNode(mainDecl.funcBody.get(), indent + ONE_INDENT);
+        PrintNode(mainDecl.funcBody.get(), indent + ONE_INDENT, "funcBody");
     }
     PrintIndent(indent, "}");
 }
 
-void PrintFuncBody(unsigned indent, const FuncBody& body, std::string& tyStr)
+void PrintGeneric(unsigned indent, const Generic& generic)
 {
-    PrintTy(indent + ONE_INDENT, tyStr);
-    if (body.generic) {
-        PrintIndent(indent, "typeParameters", ":");
-        for (auto& it : body.generic->typeParameters) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
-        PrintIndent(indent, "genericConstraints", ":");
-        for (auto& it : body.generic->genericConstraints) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
+    PrintIndent(indent, "typeParameters {");
+    for (auto& it : generic.typeParameters) {
+        PrintNode(it.get(), indent + ONE_INDENT);
     }
-    for (auto& it : body.paramLists) {
-        PrintNode(it.get(), indent);
+    PrintIndent(indent, "}");
+    PrintIndent(indent, "genericConstraints {");
+    for (auto& it : generic.genericConstraints) {
+        PrintNode(it.get(), indent + ONE_INDENT);
     }
-    if (!body.retType) {
-        PrintIndent(indent, "# no return type");
-    } else {
-        PrintIndent(indent, "# return type");
-        PrintNode(body.retType.get(), indent + ONE_INDENT);
-    }
-    PrintNode(body.body.get(), indent, "FuncBody");
+    PrintIndent(indent, "}");
 }
 
-void PrintPropDecl(unsigned indent, const PropDecl& propDecl, std::string& tyStr)
+void PrintFuncBody(unsigned indent, const FuncBody& body)
 {
-    PrintIndent(indent, "PropDecl", propDecl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "FuncBody {");
+    PrintBasic(indent + ONE_INDENT, body);
+    if (body.generic) {
+        PrintGeneric(indent + ONE_INDENT, *body.generic);
+    }
+    for (auto& it : body.paramLists) {
+        PrintNode(it.get(), indent + ONE_INDENT);
+    }
+    if (!body.retType) {
+        PrintIndent(indent + ONE_INDENT, "// no return type");
+    } else {
+        PrintIndent(indent + ONE_INDENT, "// return type");
+        PrintNode(body.retType.get(), indent + ONE_INDENT);
+    }
+    PrintNode(body.body.get(), indent + ONE_INDENT, "body");
+    PrintIndent(indent, "}");
+}
+
+void PrintPropDecl(unsigned indent, const PropDecl& propDecl)
+{
+    PrintIndent(indent, "PropDecl:", propDecl.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, propDecl);
     PrintModifiers(propDecl, indent);
     PrintNode(propDecl.type.get(), indent + ONE_INDENT, "type");
     for (auto& propMemberDecl : propDecl.setters) {
@@ -238,14 +356,15 @@ void PrintPropDecl(unsigned indent, const PropDecl& propDecl, std::string& tyStr
 void PrintMacroExpandDecl(unsigned indent, const AST::MacroExpandDecl& macroExpand)
 {
     PrintIndent(indent, "MacroExpand:", macroExpand.invocation.fullName, "{");
+    PrintBasic(indent + ONE_INDENT, macroExpand);
     PrintMacroInvocation(indent, macroExpand.invocation);
     PrintIndent(indent, "}");
 }
 
-void PrintVarWithPatternDecl(unsigned indent, const VarWithPatternDecl& varWithPatternDecl, std::string& tyStr)
+void PrintVarWithPatternDecl(unsigned indent, const VarWithPatternDecl& varWithPatternDecl)
 {
-    PrintIndent(indent, "VarWithPatternDecl:", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "VarWithPatternDecl {");
+    PrintBasic(indent + ONE_INDENT, varWithPatternDecl);
     if (varWithPatternDecl.isConst) {
         PrintIndent(indent + ONE_INDENT, "Const");
     } else {
@@ -257,163 +376,116 @@ void PrintVarWithPatternDecl(unsigned indent, const VarWithPatternDecl& varWithP
     PrintIndent(indent, "}");
 }
 
-void PrintVarDecl(unsigned indent, const VarDecl& varDecl, std::string& tyStr)
+void PrintVarDecl(unsigned indent, const VarDecl& varDecl)
 {
-    PrintIndent(indent, "VarDecl", varDecl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintAnnotations(varDecl, indent);
-    if (varDecl.isConst) {
-        PrintIndent(indent + ONE_INDENT, "Const");
-    } else {
-        PrintModifiers(varDecl, indent);
-        PrintIndent(indent + ONE_INDENT, varDecl.isVar ? "Var" : "Let");
-    }
+    std::string key = varDecl.isConst ? "const " : varDecl.isVar ? "var " : "let ";
+    PrintIndent(indent, "VarDecl:", key + varDecl.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, varDecl);
+    PrintAnnotations(varDecl, indent + ONE_INDENT);
+    PrintModifiers(varDecl, indent);
     PrintNode(varDecl.type.get(), indent + ONE_INDENT, "type");
     PrintNode(varDecl.initializer.get(), indent + ONE_INDENT, "initializer");
     PrintIndent(indent, "}");
 }
 
-void PrintTypeAliasDecl(unsigned indent, const TypeAliasDecl& alias, std::string& tyStr)
+void PrintBasicpeAliasDecl(unsigned indent, const TypeAliasDecl& alias)
 {
     PrintIndent(indent, "TypeAliasDecl", alias.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, alias);
     if (alias.generic) {
-        PrintIndent(indent, "typeParameters", ":");
-        for (auto& it : alias.generic->typeParameters) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
-        PrintIndent(indent, "genericConstraints", ":");
-        for (auto& it : alias.generic->genericConstraints) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
+        PrintGeneric(indent + ONE_INDENT, *alias.generic);
     }
-    PrintNode(alias.type.get(), indent + ONE_INDENT, "target type");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    std::string aliasStr = (!alias.ty) ? (ANSI_COLOR_RED + "unknown" + ANSI_COLOR_RESET) : alias.ty->String();
-    PrintTy(indent + ONE_INDENT, "aliasedTy:" + aliasStr);
+    PrintNode(alias.type.get(), indent + ONE_INDENT, "type");
     PrintIndent(indent, "}");
 }
 
-void PrintClassDecl(unsigned indent, const ClassDecl& classDecl, std::string& tyStr)
+void PrintClassDecl(unsigned indent, const ClassDecl& classDecl)
 {
     if (auto attr = HasJavaAttr(classDecl); attr) {
         std::string argStr = attr.value() == Attribute::JAVA_APP ? "app" : "ext";
         PrintIndent(indent, "@Java[\"" + argStr + "\"]");
     }
-    PrintIndent(indent, "ClassDecl", classDecl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintAnnotations(classDecl, indent);
+    PrintIndent(indent, "ClassDecl:", classDecl.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, classDecl);
+    PrintAnnotations(classDecl, indent + ONE_INDENT);
     PrintModifiers(classDecl, indent);
     if (classDecl.generic) {
-        PrintIndent(indent, "typeParameters", ":");
-        for (auto& it : classDecl.generic->typeParameters) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
-        PrintIndent(indent, "genericConstraints", ":");
-        for (auto& it : classDecl.generic->genericConstraints) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
+        PrintGeneric(indent + ONE_INDENT, *classDecl.generic);
     }
     if (!classDecl.inheritedTypes.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# ClassOrInterfaceTypes", "{");
+        PrintIndent(indent + ONE_INDENT, "inheritedTypes [");
         for (auto& it : classDecl.inheritedTypes) {
             PrintNode(it.get(), indent + TWO_INDENT);
         }
-        PrintIndent(indent + ONE_INDENT, "}");
+        PrintIndent(indent + ONE_INDENT, "]");
     }
-    PrintIndent(indent + ONE_INDENT, "# ClassBody:", "{");
-    PrintNode(classDecl.body.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "}");
+    PrintNode(classDecl.body.get(), indent + ONE_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintInterfaceDecl(unsigned indent, const InterfaceDecl& interfaceDecl, std::string& tyStr)
+void PrintInterfaceDecl(unsigned indent, const InterfaceDecl& interfaceDecl)
 {
     if (auto attr = HasJavaAttr(interfaceDecl); attr) {
         PrintIndent(indent, "@Java[\"", attr.value() == Attribute::JAVA_APP ? "app" : "ext", "\"]");
     }
     PrintIndent(indent, "InterfaceDecl:", interfaceDecl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, interfaceDecl);
     PrintModifiers(interfaceDecl, indent);
     if (interfaceDecl.generic) {
-        PrintIndent(indent, "typeParameters", ":");
-        for (auto& it : interfaceDecl.generic->typeParameters) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
-        PrintIndent(indent, "genericConstraints", ":");
-        for (auto& it : interfaceDecl.generic->genericConstraints) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
+        PrintGeneric(indent + ONE_INDENT, *interfaceDecl.generic);
     }
     if (!interfaceDecl.inheritedTypes.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# inheritedTypes:", "{");
+        PrintIndent(indent + ONE_INDENT, "inheritedTypes: [");
         for (auto& it : interfaceDecl.inheritedTypes) {
             PrintNode(it.get(), indent + TWO_INDENT);
         }
-        PrintIndent(indent + ONE_INDENT, "}");
+        PrintIndent(indent + ONE_INDENT, "]");
     }
-    PrintIndent(indent + ONE_INDENT, "# InterfaceBody:", "{");
-    PrintNode(interfaceDecl.body.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "}");
+    PrintNode(interfaceDecl.body.get(), indent + ONE_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintEnumDecl(unsigned indent, const EnumDecl& enumDecl, std::string& tyStr)
+void PrintEnumDecl(unsigned indent, const EnumDecl& enumDecl)
 {
-    PrintIndent(indent, "EnumDecl", enumDecl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "EnumDecl:", enumDecl.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, enumDecl);
     PrintModifiers(enumDecl, indent);
     if (enumDecl.generic) {
-        PrintIndent(indent, "typeParameters", ":");
-        for (auto& it : enumDecl.generic->typeParameters) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
-        PrintIndent(indent, "genericConstraints", ":");
-        for (auto& it : enumDecl.generic->genericConstraints) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
+        PrintGeneric(indent + ONE_INDENT, *enumDecl.generic);
     }
     if (!enumDecl.inheritedTypes.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# inheritedTypes", "{");
+        PrintIndent(indent + ONE_INDENT, "inheritedTypes [");
         for (auto& it : enumDecl.inheritedTypes) {
             PrintNode(it.get(), indent + TWO_INDENT);
         }
-        PrintIndent(indent + ONE_INDENT, "}");
+        PrintIndent(indent + ONE_INDENT, "]");
     }
-    PrintIndent(indent + ONE_INDENT, "constructors", "{");
+    PrintIndent(indent + ONE_INDENT, "constructors [");
     for (auto& it : enumDecl.constructors) {
-        PrintIndent(indent + TWO_INDENT, ">caseBody", "{");
-        PrintNode(it.get(), indent + THREE_INDENT);
-        PrintIndent(indent + TWO_INDENT, "}");
+        PrintNode(it.get(), indent + TWO_INDENT);
     }
-    PrintIndent(indent + ONE_INDENT, "}");
-    PrintIndent(indent + ONE_INDENT, "functions", "{");
+    PrintIndent(indent + ONE_INDENT, "]");
+    PrintIndent(indent + ONE_INDENT, "members [");
     for (auto& it : enumDecl.members) {
         PrintNode(it.get(), indent + TWO_INDENT);
     }
-    PrintIndent(indent + ONE_INDENT, "}");
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent, "}");
 }
 
-void PrintStructDecl(unsigned indent, const StructDecl& decl, std::string& tyStr)
+void PrintStructDecl(unsigned indent, const StructDecl& decl)
 {
     if (decl.TestAttr(Attribute::C)) {
         PrintIndent(indent, "@C");
     }
-    PrintIndent(indent, "StructDecl", decl.identifier.Val(), "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintAnnotations(decl, indent);
+    PrintIndent(indent, "StructDecl:", decl.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, decl);
+    PrintAnnotations(decl, indent + ONE_INDENT);
     PrintModifiers(decl, indent);
     if (decl.generic) {
-        PrintIndent(indent, "typeParameters", ":");
-        for (auto& it : decl.generic->typeParameters) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
-        PrintIndent(indent, "genericConstraints", ":");
-        for (auto& it : decl.generic->genericConstraints) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
+        PrintGeneric(indent + ONE_INDENT, *decl.generic);
     }
-    PrintIndent(indent + ONE_INDENT, "# StructBody:", "{");
+    PrintIndent(indent + ONE_INDENT, "StructBody {");
     PrintNode(decl.body.get(), indent + TWO_INDENT);
     PrintIndent(indent + ONE_INDENT, "}");
     PrintIndent(indent, "}");
@@ -421,99 +493,90 @@ void PrintStructDecl(unsigned indent, const StructDecl& decl, std::string& tyStr
 
 void PrintExtendDecl(unsigned indent, const ExtendDecl& ed)
 {
-    PrintIndent(indent, "ExtendDecl", "{");
-    PrintIndent(indent + ONE_INDENT, "extendedType", ":");
-    PrintNode(ed.extendedType.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "interfaces", "{");
+    PrintIndent(indent, "ExtendDecl {");
+    PrintBasic(indent + ONE_INDENT, ed);
+    PrintNode(ed.extendedType.get(), indent + ONE_INDENT, "extendedType");
+    PrintIndent(indent + ONE_INDENT, "inheritedTypes [");
     for (auto& interface : ed.inheritedTypes) {
         PrintNode(interface.get(), indent + TWO_INDENT);
     }
-    PrintIndent(indent + ONE_INDENT, "}");
+    PrintIndent(indent + ONE_INDENT, "]");
     if (ed.generic) {
-        PrintIndent(indent, "typeParameters", ":");
-        for (auto& it : ed.generic->typeParameters) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
-        PrintIndent(indent, "genericConstraints", ":");
-        for (auto& it : ed.generic->genericConstraints) {
-            PrintNode(it.get(), indent + ONE_INDENT);
-        }
+        PrintGeneric(indent + ONE_INDENT, *ed.generic);
     }
-    PrintIndent(indent + ONE_INDENT, "extendMembers", "{");
+    PrintIndent(indent + ONE_INDENT, "extendMembers [");
     for (auto& it : ed.members) {
         PrintNode(it.get(), indent + TWO_INDENT);
     }
-    PrintIndent(indent + ONE_INDENT, "}");
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent, "}");
 }
 
-void PrintIfExpr(unsigned indent, const IfExpr& expr, const std::string& tyStr, const std::string& str)
+void PrintIfExpr(unsigned indent, const IfExpr& expr)
 {
-    if (expr.desugarExpr) {
-        PrintNode(expr.desugarExpr.get(), indent, "MatchExpr desugared from IfExpr");
-        return;
-    }
-    std::string str1 = (str != "ElseExpr") ? "# IfExpr" : "# ElseIfExpr";
-    PrintIndent(indent, str1, expr.begin.ToString() + " {");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "condExpr", "{");
-    PrintNode(expr.condExpr.get(), indent + TWO_INDENT, "condition expr");
-    PrintIndent(indent + ONE_INDENT, "}");
-    PrintNode(expr.thenBody.get(), indent + ONE_INDENT, "Control-Body begin=" + expr.thenBody->begin.ToString());
+    PrintIndent(indent, "IfExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.condExpr.get(), indent + ONE_INDENT, "condExpr");
+    PrintNode(expr.thenBody.get(), indent + ONE_INDENT, "thenBody");
     if (expr.hasElse) {
-        PrintNode(expr.elseBody.get(), indent + ONE_INDENT, "ElseExpr begin=" + expr.elseBody->ToString());
+        PrintNode(expr.elseBody.get(), indent + ONE_INDENT, "elseBody");
     }
     PrintIndent(indent, "}");
 }
 
 void PrintMatchCase(unsigned indent, const MatchCase& mc)
 {
-    PrintIndent(indent, "MatchCase:", "{");
-    std::string tyStr = mc.ty ? mc.ty->String() : UNKNOWN_TY;
-    PrintTy(indent + ONE_INDENT, tyStr);
-
+    PrintIndent(indent, "MatchCase: {");
+    PrintBasic(indent + ONE_INDENT, mc);
+    PrintIndent(indent + ONE_INDENT, "patterns {");
     for (auto& it : mc.patterns) {
-        PrintNode(it.get(), indent + ONE_INDENT);
+        PrintNode(it.get(), indent + TWO_INDENT);
     }
-    PrintIndent(indent + ONE_INDENT, "PatternGuard:");
-    PrintNode(mc.patternGuard.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "CaseBody(ExprOrDecls):");
+    PrintIndent(indent + ONE_INDENT, "}");
+    PrintNode(mc.patternGuard.get(), indent + ONE_INDENT, "patternGuard");
+    PrintIndent(indent + ONE_INDENT, "exprOrDecls [");
     for (auto& it : mc.exprOrDecls->body) {
-        PrintNode(it.get(), indent + THREE_INDENT);
+        PrintNode(it.get(), indent + TWO_INDENT);
     }
+    PrintIndent(indent + ONE_INDENT, "]");
 
     PrintIndent(indent, "}");
 }
 
-void PrintMatchExpr(unsigned indent, const MatchExpr& expr, std::string& tyStr)
+void PrintMatchExpr(unsigned indent, const MatchExpr& expr)
 {
     PrintIndent(indent, "MatchExpr:", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
     if (expr.matchMode) {
-        PrintIndent(indent + ONE_INDENT, "Selector:");
+        PrintIndent(indent + ONE_INDENT, "selector: {");
         PrintNode(expr.selector.get(), indent + TWO_INDENT);
-        PrintIndent(indent + ONE_INDENT, "MatchCases:");
+        PrintIndent(indent + ONE_INDENT, "}");
+
+        PrintIndent(indent + ONE_INDENT, "matchCases: [");
         for (auto& matchCase : expr.matchCases) {
             PrintMatchCase(indent + TWO_INDENT, *StaticCast<MatchCase*>(matchCase.get()));
         }
+        PrintIndent(indent + ONE_INDENT, "]");
     } else {
         for (auto& matchCaseOther : expr.matchCaseOthers) {
-            PrintIndent(indent + ONE_INDENT, ">MatchCase:", "{");
+            PrintIndent(indent + ONE_INDENT, "matchCases: {");
             PrintNode(matchCaseOther->matchExpr.get(), indent + TWO_INDENT);
-            PrintIndent(indent + TWO_INDENT, "PatternExprOrDecls:");
-            for (auto& it : matchCaseOther->exprOrDecls->body) {
-                PrintNode(it.get(), indent + THREE_INDENT);
-            }
             PrintIndent(indent + ONE_INDENT, "}");
+
+            PrintIndent(indent + ONE_INDENT, "exprOrDecls: [");
+            for (auto& it : matchCaseOther->exprOrDecls->body) {
+                PrintNode(it.get(), indent + ONE_INDENT);
+            }
+            PrintIndent(indent + ONE_INDENT, "]");
         }
     }
     PrintIndent(indent, "}");
 }
 
-void PrintTryExpr(unsigned indent, const TryExpr& expr, std::string& tyStr)
+void PrintTryExpr(unsigned indent, const TryExpr& expr)
 {
     PrintIndent(indent, "TryExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
     if (!expr.resourceSpec.empty()) {
         PrintIndent(indent + ONE_INDENT, "ResourceSpec", "{");
         for (auto& i : expr.resourceSpec) {
@@ -534,61 +597,92 @@ void PrintTryExpr(unsigned indent, const TryExpr& expr, std::string& tyStr)
         PrintIndent(indent + TWO_INDENT, "}");
         PrintIndent(indent + ONE_INDENT, "}");
     }
+    for (const auto& handler : expr.handlers) {
+        PrintIndent(indent + ONE_INDENT, "Handle", "{");
+        PrintIndent(indent + TWO_INDENT, "HandlePattern", "{");
+        PrintIndent(indent + THREE_INDENT, "CommandTypePattern:");
+        PrintNode(handler.commandPattern.get(), indent + THREE_INDENT);
+        PrintIndent(indent + TWO_INDENT, "}");
+        PrintIndent(indent + TWO_INDENT, "HandleBlock", "{");
+        PrintNode(handler.block.get(), indent + THREE_INDENT);
+        PrintIndent(indent + TWO_INDENT, "}");
+        PrintIndent(indent + TWO_INDENT, "DesugaredLambda", "{");
+        PrintNode(handler.desugaredLambda.get(), indent + THREE_INDENT);
+        PrintIndent(indent + TWO_INDENT, "}");
+        PrintIndent(indent + ONE_INDENT, "}");
+    }
     PrintIndent(indent + ONE_INDENT, "FinallyBlock", "{");
     PrintNode(expr.finallyBlock.get(), indent + TWO_INDENT);
     PrintIndent(indent + ONE_INDENT, "}");
+    if (!expr.handlers.empty()) {
+        PrintIndent(indent + ONE_INDENT, "TryLambda", "{");
+        PrintNode(expr.tryLambda.get(), indent + TWO_INDENT);
+        PrintIndent(indent + ONE_INDENT, "}");
+        PrintIndent(indent + ONE_INDENT, "FinallyLambda", "{");
+        PrintNode(expr.finallyLambda.get(), indent + TWO_INDENT);
+        PrintIndent(indent + ONE_INDENT, "}");
+    }
     PrintIndent(indent, "}");
 }
 
-void PrintThrowExpr(unsigned indent, const ThrowExpr& expr, std::string& tyStr)
+void PrintThrowExpr(unsigned indent, const ThrowExpr& expr)
 {
     PrintIndent(indent, "ThrowExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintNode(expr.expr.get(), indent + ONE_INDENT, "ThrowExpr");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.expr.get(), indent + ONE_INDENT, "expr");
     PrintIndent(indent, "}");
 }
 
-void PrintReturnExpr(unsigned indent, const ReturnExpr& expr, std::string& tyStr)
+void PrintPerformExpr(unsigned indent, const PerformExpr& expr)
 {
-    if (expr.desugarExpr) {
-        PrintNode(expr.desugarExpr.get());
-    } else {
-        PrintIndent(indent, "ReturnExpr", "{");
-        PrintTy(indent + ONE_INDENT, tyStr);
-        PrintNode(expr.expr.get(), indent + ONE_INDENT, "ReturnExpr");
-        PrintIndent(indent, "}");
-    }
+    PrintIndent(indent, "PerformExpr", "{");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.expr.get(), indent + ONE_INDENT, "PerformExpr");
+    PrintIndent(indent, "}");
 }
 
-void PrintJumpExpr(unsigned indent, const JumpExpr& expr, std::string& tyStr)
+void PrintResumeExpr(unsigned indent, const ResumeExpr& expr)
 {
-    if (expr.desugarExpr) {
-        PrintNode(expr.desugarExpr.get());
-    } else {
-        std::string str1 = expr.isBreak ? "Break" : "Continue";
-        PrintIndent(indent, "JumpExpr:", str1);
-        PrintTy(indent + ONE_INDENT, tyStr);
-    }
+    PrintIndent(indent, "ResumeExpr", "{");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.withExpr.get(), indent + ONE_INDENT, "WithExpr");
+    PrintNode(expr.throwingExpr.get(), indent + ONE_INDENT, "ThrowingExpr");
+    PrintIndent(indent, "}");
 }
 
-void PrintForInExpr(unsigned indent, const ForInExpr& expr, std::string& tyStr)
+void PrintReturnExpr(unsigned indent, const ReturnExpr& expr)
 {
-    PrintIndent(indent, "# ForInExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "ReturnExpr", "{");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.expr.get(), indent + ONE_INDENT, "expr");
+    PrintIndent(indent, "}");
+}
+
+void PrintJumpExpr(unsigned indent, const JumpExpr& expr)
+{
+    std::string str1 = expr.isBreak ? "Break" : "Continue";
+    PrintIndent(indent, "JumpExpr:", str1);
+    PrintBasic(indent + ONE_INDENT, expr);
+}
+
+void PrintForInExpr(unsigned indent, const ForInExpr& expr)
+{
+    PrintIndent(indent, "ForInExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
     PrintIndent(indent + ONE_INDENT, "pattern", ":");
     PrintNode(expr.pattern.get(), indent + TWO_INDENT);
     PrintIndent(indent + ONE_INDENT, "inExpression", ":");
     PrintNode(expr.inExpression.get(), indent + TWO_INDENT);
     PrintIndent(indent + ONE_INDENT, "patternGuard", ":");
     PrintNode(expr.patternGuard.get(), indent + TWO_INDENT);
-    PrintNode(expr.body.get(), indent + ONE_INDENT, "controlBody");
+    PrintNode(expr.body.get(), indent + ONE_INDENT, "body");
     PrintIndent(indent, "}");
 }
 
-void PrintWhileExpr(unsigned indent, const WhileExpr& expr, std::string& tyStr)
+void PrintWhileExpr(unsigned indent, const WhileExpr& expr)
 {
-    PrintIndent(indent, "# WhileExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "WhileExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
     PrintIndent(indent + ONE_INDENT, "condExpr", "{");
     PrintNode(expr.condExpr.get(), indent + TWO_INDENT, "condition expr");
     PrintIndent(indent + ONE_INDENT, "}");
@@ -596,10 +690,10 @@ void PrintWhileExpr(unsigned indent, const WhileExpr& expr, std::string& tyStr)
     PrintIndent(indent, "}");
 }
 
-void PrintDoWhileExpr(unsigned indent, const DoWhileExpr& expr, std::string& tyStr)
+void PrintDoWhileExpr(unsigned indent, const DoWhileExpr& expr)
 {
-    PrintIndent(indent, "# DoWhileExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "DoWhileExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
     PrintNode(expr.body.get(), indent + ONE_INDENT, "DoWhile-Body");
     PrintIndent(indent + ONE_INDENT, "condExpr", "{");
     PrintNode(expr.condExpr.get(), indent + TWO_INDENT);
@@ -607,7 +701,7 @@ void PrintDoWhileExpr(unsigned indent, const DoWhileExpr& expr, std::string& tyS
     PrintIndent(indent, "}");
 }
 
-void PrintAssignExpr(unsigned indent, const AssignExpr& expr, std::string& tyStr)
+void PrintAssignExpr(unsigned indent, const AssignExpr& expr)
 {
     const std::unordered_map<TokenKind, std::string> op2str = {
         {TokenKind::ASSIGN, "'='"},
@@ -626,7 +720,7 @@ void PrintAssignExpr(unsigned indent, const AssignExpr& expr, std::string& tyStr
         {TokenKind::RSHIFT_ASSIGN, "'>>='"},
     };
     PrintIndent(indent, "AssignExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
     std::string str1;
     auto result = op2str.find(expr.op);
     if (result != op2str.end()) {
@@ -639,17 +733,12 @@ void PrintAssignExpr(unsigned indent, const AssignExpr& expr, std::string& tyStr
         PrintIndent(indent + ONE_INDENT, "overflowStrategy:", OverflowStrategyName(expr.overflowStrategy));
     }
     PrintIndent(indent, "}");
-    if (expr.desugarExpr) {
-        PrintIndent(indent, "# desugar expr of AssignExpr", "{");
-        PrintNode(expr.desugarExpr.get(), indent + ONE_INDENT);
-        PrintIndent(indent, "}");
-    }
 }
 
-void PrintIncOrDecExpr(unsigned indent, const IncOrDecExpr& expr, std::string& tyStr)
+void PrintIncOrDecExpr(unsigned indent, const IncOrDecExpr& expr)
 {
     PrintIndent(indent, "IncOrDecExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
     std::string str1 = (expr.op == TokenKind::INCR) ? "++" : "--";
     PrintIndent(indent + ONE_INDENT, str1);
     PrintNode(expr.expr.get(), indent + ONE_INDENT);
@@ -659,10 +748,10 @@ void PrintIncOrDecExpr(unsigned indent, const IncOrDecExpr& expr, std::string& t
     PrintIndent(indent, "}");
 }
 
-void PrintUnaryExpr(unsigned indent, const UnaryExpr& unaryExpr, std::string& tyStr)
+void PrintUnaryExpr(unsigned indent, const UnaryExpr& unaryExpr)
 {
     PrintIndent(indent, "UnaryExpr", "{", TOKENS[static_cast<int>(unaryExpr.op)]);
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, unaryExpr);
     PrintNode(unaryExpr.expr.get(), indent + ONE_INDENT);
     if (unaryExpr.overflowStrategy != OverflowStrategy::NA) {
         PrintIndent(indent + ONE_INDENT, "overflowStrategy:", OverflowStrategyName(unaryExpr.overflowStrategy));
@@ -670,31 +759,22 @@ void PrintUnaryExpr(unsigned indent, const UnaryExpr& unaryExpr, std::string& ty
     PrintIndent(indent, "}");
 }
 
-void PrintBinaryExpr(unsigned indent, const BinaryExpr& binaryExpr, std::string& tyStr)
+void PrintBinaryExpr(unsigned indent, const BinaryExpr& binaryExpr)
 {
-    if (binaryExpr.desugarExpr) {
-        return PrintNode(binaryExpr.desugarExpr.get(), indent, "desugared to");
-    }
-    PrintIndent(indent, "BinaryExpr " + binaryExpr.begin.ToString(), TOKENS[static_cast<int>(binaryExpr.op)], "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "left: " + binaryExpr.leftExpr->begin.ToString());
-    PrintNode(binaryExpr.leftExpr.get(), indent + ONE_INDENT, binaryExpr.leftExpr->begin.ToString());
-    PrintIndent(indent + ONE_INDENT, "right: " + binaryExpr.rightExpr->begin.ToString());
-    PrintNode(binaryExpr.rightExpr.get(), indent + ONE_INDENT, binaryExpr.rightExpr->begin.ToString());
-    if (binaryExpr.desugarExpr) {
-        PrintIndent(indent + ONE_INDENT, "DesugarExpr: ");
-        PrintNode(binaryExpr.desugarExpr.get(), indent + ONE_INDENT);
-    }
+    PrintIndent(indent, "BinaryExpr ", TOKENS[static_cast<int>(binaryExpr.op)], "{");
+    PrintBasic(indent + ONE_INDENT, binaryExpr);
+    PrintNode(binaryExpr.leftExpr.get(), indent + ONE_INDENT, "leftExpr:");
+    PrintNode(binaryExpr.rightExpr.get(), indent + ONE_INDENT, "rightExpr:");
     if (binaryExpr.overflowStrategy != OverflowStrategy::NA) {
         PrintIndent(indent + ONE_INDENT, "overflowStrategy:", OverflowStrategyName(binaryExpr.overflowStrategy));
     }
     PrintIndent(indent, "}");
 }
 
-void PrintRangeExpr(unsigned indent, const RangeExpr& rangeExpr, std::string& tyStr)
+void PrintRangeExpr(unsigned indent, const RangeExpr& rangeExpr)
 {
-    PrintIndent(indent, "RangeExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "RangeExpr {");
+    PrintBasic(indent + ONE_INDENT, rangeExpr);
     PrintIndent(indent + ONE_INDENT, "Start:");
     PrintNode(rangeExpr.startExpr.get(), indent + TWO_INDENT);
     PrintIndent(indent + ONE_INDENT, "Stop:");
@@ -704,80 +784,84 @@ void PrintRangeExpr(unsigned indent, const RangeExpr& rangeExpr, std::string& ty
     PrintIndent(indent, "}");
 }
 
-void PrintSubscriptExpr(unsigned indent, const SubscriptExpr& expr, std::string& tyStr)
+void PrintSubscriptExpr(unsigned indent, const SubscriptExpr& expr)
 {
-    PrintIndent(indent, "SubscriptExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "BaseExpr:");
-    PrintNode(expr.baseExpr.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "IndexExpr:");
+    PrintIndent(indent, "SubscriptExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.baseExpr.get(), indent + ONE_INDENT, "baseExpr");
+    PrintIndent(indent + ONE_INDENT, "indexExprs [");
     for (auto& it : expr.indexExprs) {
         PrintNode(it.get(), indent + TWO_INDENT);
     }
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent, "}");
 }
 
-void PrintMemberAccess(unsigned indent, const MemberAccess& expr, std::string& tyStr)
+void PrintMemberAccess(unsigned indent, const MemberAccess& expr)
 {
     PrintIndent(indent, "MemberAccess", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "BaseExpr:");
-    PrintNode(expr.baseExpr.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "FieldIdentifier:");
-    PrintIndent(indent + TWO_INDENT, expr.field.Val());
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.baseExpr.get(), indent + ONE_INDENT, "baseExpr");
+    PrintIndent(indent + ONE_INDENT, "field:", expr.field.Val());
     if (expr.typeArguments.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no type arguments");
+        PrintIndent(indent + ONE_INDENT, "// no type arguments");
     } else {
-        PrintIndent(indent + ONE_INDENT, "# type arguments");
+        PrintIndent(indent + ONE_INDENT, "typeArguments [");
         for (auto& it : expr.typeArguments) {
             PrintNode(it.get(), indent + TWO_INDENT);
         }
+        PrintIndent(indent + ONE_INDENT, "]");
     }
+    if (expr.target) {
+        PrintTarget(indent + ONE_INDENT, *expr.target);
+    }
+    PrintIndent(indent + ONE_INDENT, "targets [");
+    for (auto t : expr.targets) {
+        PrintTarget(indent + TWO_INDENT, *t);
+    }
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent, "}");
 }
 
-void PrintOptionalExpr(unsigned indent, const OptionalExpr& optionalExpr, std::string& tyStr)
+void PrintOptionalExpr(unsigned indent, const OptionalExpr& optionalExpr)
 {
     PrintIndent(indent, "OptionalExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, optionalExpr);
     PrintIndent(indent + ONE_INDENT, "BaseExpr:");
     PrintNode(optionalExpr.baseExpr.get(), indent + ONE_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintOptionalChainExpr(unsigned indent, const OptionalChainExpr& optionalChainExpr, std::string& tyStr)
+void PrintOptionalChainExpr(unsigned indent, const OptionalChainExpr& optionalChainExpr)
 {
     PrintIndent(indent, "OptionalChainExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, optionalChainExpr);
     PrintIndent(indent + ONE_INDENT, "Expr:");
     PrintNode(optionalChainExpr.expr.get(), indent + ONE_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintLetPatternDestructor(unsigned indent, const LetPatternDestructor& expr, const std::string& tyStr)
+void PrintLetPatternDestructor(unsigned indent, const LetPatternDestructor& expr)
 {
-    if (expr.desugarExpr) {
-        return PrintNode(expr.desugarExpr.get(), indent, "desugared to");
-    }
     PrintIndent(indent, "LetPattern", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, ">LetPatterns:", "{");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintIndent(indent + ONE_INDENT, "patterns [");
     for (auto& p : expr.patterns) {
         PrintIndent(indent + TWO_INDENT, "|", "{");
         PrintNode(p.get(), indent + THREE_INDENT);
         PrintIndent(indent + TWO_INDENT, "}");
     }
-    PrintIndent(indent + ONE_INDENT, "}");
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent + ONE_INDENT, "Initializer:", "{");
     PrintNode(expr.initializer.get(), indent + TWO_INDENT);
     PrintIndent(indent + ONE_INDENT, "}");
     PrintIndent(indent, "}");
 }
 
-void PrintFuncArg(unsigned indent, const FuncArg& expr, std::string& tyStr)
+void PrintFuncArg(unsigned indent, const FuncArg& expr)
 {
     PrintIndent(indent, "FuncArg", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
     if (!expr.name.Empty()) {
         PrintIndent(indent + ONE_INDENT, "ArgName:", expr.name.Val());
     }
@@ -788,132 +872,153 @@ void PrintFuncArg(unsigned indent, const FuncArg& expr, std::string& tyStr)
     PrintIndent(indent, "}");
 }
 
-void PrintCallExpr(unsigned indent, const CallExpr& expr, std::string& tyStr)
+void PrintCallExpr(unsigned indent, const CallExpr& expr)
 {
-    PrintIndent(indent, "CallExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "BaseFunc:");
+    PrintIndent(indent, "CallExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintIndent(indent + ONE_INDENT, "BaseFunc {");
     PrintNode(expr.baseFunc.get(), indent + TWO_INDENT);
+    PrintIndent(indent + ONE_INDENT, "}");
     if (expr.args.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no arguments");
+        PrintIndent(indent + ONE_INDENT, "// no arguments");
     } else {
-        PrintIndent(indent + ONE_INDENT, "# arguments");
+        PrintIndent(indent + ONE_INDENT, "arguments [");
         for (auto& it : expr.args) {
             PrintNode(it.get(), indent + TWO_INDENT);
         }
+        PrintIndent(indent + ONE_INDENT, "]");
+    }
+    if (expr.resolvedFunction) {
+        PrintTarget(indent + ONE_INDENT, *expr.resolvedFunction, "resolvedFunction");
     }
     PrintIndent(indent, "}");
-    if (expr.desugarExpr != nullptr) {
-        PrintIndent(indent, "# desugar expr ", "{");
-        PrintNode(expr.desugarExpr.get(), indent + ONE_INDENT);
-        PrintIndent(indent, "}");
-    }
 }
 
-void PrintParenExpr(unsigned indent, const ParenExpr& parenExpr, std::string& tyStr)
+void PrintParenExpr(unsigned indent, const ParenExpr& parenExpr)
 {
-    PrintIndent(indent, "ParenExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "ParenExpr {");
+    PrintBasic(indent + ONE_INDENT, parenExpr);
     PrintNode(parenExpr.expr.get(), indent + ONE_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintLambdaExpr(unsigned indent, const LambdaExpr& expr, std::string& tyStr)
+void PrintLambdaExpr(unsigned indent, const LambdaExpr& expr)
 {
-    PrintIndent(indent, "LambdaExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "LambdaExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintIndent(indent + ONE_INDENT, "mangledName:", expr.mangledName);
     PrintNode(expr.funcBody.get(), indent + ONE_INDENT, "LambdaExpr-Body");
     PrintIndent(indent, "}");
 }
 
-void PrintLitConstExpr(unsigned indent, const LitConstExpr& expr, std::string& tyStr)
+void PrintLitConstExpr(unsigned indent, const LitConstExpr& expr)
 {
-    PrintIndent(indent, "LitConstExpr:", expr.LitKindToString(), StringConvertor::Recover(expr.stringValue));
-    PrintTy(indent + ONE_INDENT, tyStr);
-    if (expr.desugarExpr != nullptr) {
-        PrintIndent(indent + ONE_INDENT, "# desugar expr");
-        PrintNode(expr.desugarExpr.get(), indent + TWO_INDENT);
+    PrintIndent(
+        indent, "LitConstExpr:", expr.LitKindToString(), "\"" + StringConvertor::Recover(expr.stringValue) + "\"", "{");
+    PrintBasic(indent + ONE_INDENT, expr);
+    if (expr.siExpr) {
+        PrintNode(expr.siExpr.get(), indent + ONE_INDENT, "siExpr");
     }
+    PrintIndent(indent, "}");
 }
 
-void PrintStrInterpolationExpr(unsigned indent, const StrInterpolationExpr& expr, std::string& tyStr)
+void PrintInterpolationExpr(unsigned indent, const InterpolationExpr& ie)
 {
-    PrintIndent(indent, "StrInterpolationExpr:", expr.rawString);
-    PrintTy(indent + ONE_INDENT, tyStr);
-    if (expr.desugarExpr != nullptr) {
-        PrintIndent(indent + ONE_INDENT, "# desugar expr");
-        PrintNode(expr.desugarExpr.get(), indent + TWO_INDENT);
-    }
+    PrintIndent(indent, "InterpolationExpr:", "\"" + ie.rawString + "\"", "{");
+    PrintBasic(indent + ONE_INDENT, ie);
+    PrintNode(ie.block.get(), indent + ONE_INDENT, "block");
+    PrintIndent(indent, "}");
 }
 
-void PrintArrayLit(unsigned indent, const ArrayLit& expr, std::string& tyStr)
+void PrintStrInterpolationExpr(unsigned indent, const StrInterpolationExpr& expr)
+{
+    PrintIndent(indent, "StrInterpolationExpr:", "\"" + expr.rawString + "\"", "{");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintIndent(indent + ONE_INDENT, "strPartExprs [");
+    for (auto& sp : expr.strPartExprs) {
+        PrintNode(sp.get(), indent + TWO_INDENT);
+    }
+    PrintIndent(indent + ONE_INDENT, "]");
+    PrintIndent(indent, "}");
+}
+
+void PrintArrayLit(unsigned indent, const ArrayLit& expr)
 {
     PrintIndent(indent, "ArrayLiteral", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
     if (expr.children.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no members");
+        PrintIndent(indent + ONE_INDENT, "// no members");
     }
+    PrintIndent(indent + ONE_INDENT, "children [");
     for (auto& it : expr.children) {
-        PrintNode(it.get(), indent + ONE_INDENT);
+        PrintNode(it.get(), indent + TWO_INDENT);
     }
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent, "}");
 }
 
-void PrintArrayExpr(unsigned indent, const ArrayExpr& expr, std::string& tyStr)
+void PrintArrayExpr(unsigned indent, const ArrayExpr& expr)
 {
-    auto typeName = expr.isValueArray ? "ValueArrayExpr" : "ArrayExpr";
+    auto typeName = expr.isValueArray ? "VArrayExpr" : "ArrayExpr";
     PrintIndent(indent, typeName, "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintIndent(indent + ONE_INDENT, "args [");
     for (size_t i = 0; i < expr.args.size(); ++i) {
-        PrintIndent(indent + ONE_INDENT, "Arg", std::to_string(i), ":");
         PrintNode(expr.args[i].get(), indent + TWO_INDENT);
     }
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent, "}");
 }
 
-void PrintTupleLit(unsigned indent, const TupleLit& expr, std::string& tyStr)
+void PrintTupleLit(unsigned indent, const TupleLit& expr)
 {
     PrintIndent(indent, "TupleLiteral", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
     for (auto& it : expr.children) {
         PrintNode(it.get(), indent + ONE_INDENT);
     }
     PrintIndent(indent, "}");
 }
 
-void PrintTypeConvExpr(unsigned indent, const TypeConvExpr& expr, std::string& tyStr)
+void PrintBasicpeConvExpr(unsigned indent, const TypeConvExpr& expr)
 {
     PrintIndent(indent, "TypeConvExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "# Convert Type:");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintIndent(indent + ONE_INDENT, "// Convert Type:");
     PrintNode(expr.type.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "# Expr:");
+    PrintIndent(indent + ONE_INDENT, "// Expr:");
     PrintNode(expr.expr.get(), indent + TWO_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintRefExpr(unsigned indent, const RefExpr& refExpr, std::string& tyStr)
+void PrintRefExpr(unsigned indent, const RefExpr& refExpr)
 {
-    PrintIndent(indent, "RefExpr :", refExpr.ref.identifier.Val());
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "RefExpr:", refExpr.ref.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, refExpr);
     if (refExpr.typeArguments.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no type arguments");
+        PrintIndent(indent + ONE_INDENT, "// no type arguments");
     } else {
-        PrintIndent(indent + ONE_INDENT, "# type arguments");
+        PrintIndent(indent + ONE_INDENT, "typeArguments [");
         for (auto& it : refExpr.typeArguments) {
             PrintNode(it.get(), indent + TWO_INDENT);
         }
+        PrintIndent(indent + ONE_INDENT, "]");
     }
-    if (refExpr.desugarExpr != nullptr) {
-        PrintIndent(indent + ONE_INDENT, "# desugar expr");
-        PrintNode(refExpr.desugarExpr.get(), indent + TWO_INDENT);
+    if (refExpr.ref.target) {
+        PrintTarget(indent + ONE_INDENT, *refExpr.ref.target);
     }
+    PrintIndent(indent + ONE_INDENT, "targets [");
+    for (auto t : refExpr.ref.targets) {
+        PrintTarget(indent + TWO_INDENT, *t);
+    }
+    PrintIndent(indent + ONE_INDENT, "]");
+    PrintIndent(indent, "}");
 }
 
-void PrintSpawnExpr(unsigned indent, const SpawnExpr& expr, std::string& tyStr)
+void PrintSpawnExpr(unsigned indent, const SpawnExpr& expr)
 {
-    PrintIndent(indent, "# SpawnExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "SpawnExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
     if (expr.futureObj) {
         PrintNode(expr.futureObj.get(), indent + ONE_INDENT);
     }
@@ -926,23 +1031,31 @@ void PrintSpawnExpr(unsigned indent, const SpawnExpr& expr, std::string& tyStr)
     PrintIndent(indent, "}");
 }
 
-void PrintSynchronizedExpr(unsigned indent, const SynchronizedExpr& expr, std::string& tyStr)
+void PrintSynchronizedExpr(unsigned indent, const SynchronizedExpr& expr)
 {
-    PrintIndent(indent, "# SynchronizedExpr", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "# Mutex:");
-    PrintNode(expr.mutex.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "# Synchronized body:");
-    PrintNode(expr.body.get(), indent + TWO_INDENT);
+    PrintIndent(indent, "SynchronizedExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.mutex.get(), indent + TWO_INDENT, "mutex");
+    PrintNode(expr.body.get(), indent + TWO_INDENT, "body");
     PrintIndent(indent, "}");
 }
 
-void PrintBlock(unsigned indent, const Block& block, const std::string& tyStr, const std::string& str)
+void PrintIfAvailableExpr(unsigned indent, const IfAvailableExpr& expr)
 {
-    PrintIndent(indent, "#", str, "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "IfAvailableExpr {");
+    PrintBasic(indent + ONE_INDENT, expr);
+    PrintNode(expr.GetArg(), indent + TWO_INDENT, "arg");
+    PrintNode(expr.GetLambda1(), indent + TWO_INDENT, "lambda1");
+    PrintNode(expr.GetLambda2(), indent + TWO_INDENT, "lamdba2");
+    PrintIndent(indent, "}");
+}
+
+void PrintBlock(unsigned indent, const Block& block)
+{
+    PrintIndent(indent, "Block: {");
+    PrintBasic(indent + ONE_INDENT, block);
     if (block.body.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no block");
+        PrintIndent(indent + ONE_INDENT, "// no block");
     } else {
         for (auto& it : block.body) {
             PrintNode(it.get(), indent + ONE_INDENT);
@@ -953,16 +1066,20 @@ void PrintBlock(unsigned indent, const Block& block, const std::string& tyStr, c
 
 void PrintInterfaceBody(unsigned indent, const InterfaceBody& body)
 {
+    PrintIndent(indent, "InterfaceBody {");
     for (auto& it : body.decls) {
-        PrintNode(it.get(), indent);
+        PrintNode(it.get(), indent + ONE_INDENT);
     }
+    PrintIndent(indent, "}");
 }
 
 void PrintClassBody(unsigned indent, const ClassBody& body)
 {
+    PrintIndent(indent, "ClassBody {");
     for (auto& it : body.decls) {
-        PrintNode(it.get(), indent);
+        PrintNode(it.get(), indent + ONE_INDENT);
     }
+    PrintIndent(indent, "}");
 }
 
 void PrintStructBody(unsigned indent, const StructBody& body)
@@ -972,34 +1089,22 @@ void PrintStructBody(unsigned indent, const StructBody& body)
     }
 }
 
-void PrintIsExpr(unsigned indent, const IsExpr& isExpr, std::string& tyStr)
+void PrintIsExpr(unsigned indent, const IsExpr& isExpr)
 {
     PrintIndent(indent, "IsExpr : ", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent, "LeftExpr :");
-    if (isExpr.desugarExpr && isExpr.desugarExpr->astKind == ASTKind::MATCH_EXPR) {
-        auto me = StaticCast<MatchExpr*>(isExpr.desugarExpr.get());
-        PrintNode(me->selector.get(), indent + ONE_INDENT);
-    } else {
-        PrintNode(isExpr.leftExpr.get(), indent + ONE_INDENT);
-    }
-    PrintIndent(indent, "IsType :");
-    PrintNode(isExpr.isType.get(), indent + ONE_INDENT);
+    PrintBasic(indent + ONE_INDENT, isExpr);
+    PrintNode(isExpr.leftExpr.get(), indent + ONE_INDENT, "leftExpr");
+    PrintNode(isExpr.isType.get(), indent + ONE_INDENT, "isType");
+    PrintIndent(indent, "}");
 }
 
-void PrintAsExpr(unsigned indent, const AsExpr& asExpr, std::string& tyStr)
+void PrintAsExpr(unsigned indent, const AsExpr& asExpr)
 {
-    PrintIndent(indent, "AsExpr : ", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent, "LeftExpr :");
-    if (asExpr.desugarExpr && asExpr.desugarExpr->astKind == ASTKind::MATCH_EXPR) {
-        auto me = StaticCast<MatchExpr*>(asExpr.desugarExpr.get());
-        PrintNode(me->selector.get(), indent + ONE_INDENT);
-    } else {
-        PrintNode(asExpr.leftExpr.get(), indent + ONE_INDENT);
-    }
-    PrintIndent(indent, "AsType :");
-    PrintNode(asExpr.asType.get(), indent + ONE_INDENT);
+    PrintIndent(indent, "AsExpr: {");
+    PrintBasic(indent + ONE_INDENT, asExpr);
+    PrintNode(asExpr.leftExpr.get(), indent + ONE_INDENT, "leftExpr");
+    PrintNode(asExpr.asType.get(), indent + ONE_INDENT, "asType");
+    PrintIndent(indent, "}");
 }
 
 void PrintTokenPart(unsigned indent, const AST::TokenPart& tokenPart)
@@ -1009,8 +1114,7 @@ void PrintTokenPart(unsigned indent, const AST::TokenPart& tokenPart)
 
 void PrintQuoteExpr(unsigned indent, const AST::QuoteExpr& qe)
 {
-    PrintIndent(indent, "QuoteExpr", "{");
-    PrintIndent(indent + ONE_INDENT, "content:", qe.content);
+    PrintIndent(indent, "QuoteExpr {");
     for (auto& expr : qe.exprs) {
         if (expr->astKind == ASTKind::TOKEN_PART) {
             PrintIndent(indent + ONE_INDENT, "TokenPart", "(");
@@ -1020,108 +1124,117 @@ void PrintQuoteExpr(unsigned indent, const AST::QuoteExpr& qe)
         PrintNode(expr.get(), indent + TWO_INDENT);
         PrintIndent(indent + ONE_INDENT, ")");
     }
-    if (qe.desugarExpr) {
-        PrintIndent(indent + ONE_INDENT, "# desugar expr");
-        PrintNode(qe.desugarExpr.get(), indent + ONE_INDENT);
-    }
     PrintIndent(indent, "}");
 }
 
-void PrintMacroExpandExpr(unsigned indent, const AST::MacroExpandExpr& expr, std::string& tyStr)
+void PrintMacroExpandExpr(unsigned indent, const AST::MacroExpandExpr& expr)
 {
     PrintIndent(indent, "MacroExpand:", expr.invocation.fullName, "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintBasic(indent + ONE_INDENT, expr);
     PrintMacroInvocation(indent, expr.invocation);
     PrintIndent(indent, "}");
 }
 
-void PrintRefType(unsigned indent, const RefType& refType, std::string& tyStr)
+void PrintRefType(unsigned indent, const RefType& refType)
 {
-    PrintIndent(indent, "RefType:", refType.ref.identifier.Val());
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "RefType:", refType.ref.identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, refType);
     if (refType.typeArguments.empty()) {
-        PrintIndent(indent + ONE_INDENT, "# no type arguments");
+        PrintIndent(indent + ONE_INDENT, "// no type arguments");
     } else {
-        PrintIndent(indent + ONE_INDENT, "# type arguments");
+        PrintIndent(indent + ONE_INDENT, "typeArguments [");
         for (auto& it : refType.typeArguments) {
             PrintNode(it.get(), indent + TWO_INDENT);
         }
+        PrintIndent(indent + ONE_INDENT, "]");
     }
+    if (refType.ref.target) {
+        PrintTarget(indent + ONE_INDENT, *refType.ref.target);
+    }
+    PrintIndent(indent + ONE_INDENT, "targets [");
+    for (auto t : refType.ref.targets) {
+        PrintTarget(indent + TWO_INDENT, *t);
+    }
+    PrintIndent(indent + ONE_INDENT, "]");
+    PrintIndent(indent, "}");
 }
 
-void PrintParenType(unsigned indent, const ParenType& type, std::string& tyStr)
+void PrintParenType(unsigned indent, const ParenType& type)
 {
-    PrintIndent(indent, "ParenType", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "ParenType {");
+    PrintBasic(indent + ONE_INDENT, type);
     PrintNode(type.type.get(), indent + ONE_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintFuncType(unsigned indent, const FuncType& type, std::string& tyStr)
+void PrintFuncType(unsigned indent, const FuncType& type)
 {
-    PrintIndent(indent, "FuncType", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "FuncParamType:");
+    PrintIndent(indent, "FuncType {");
+    PrintBasic(indent + ONE_INDENT, type);
+    PrintIndent(indent + ONE_INDENT, "paramTypes [");
     for (auto& paramType : type.paramTypes) {
         PrintNode(paramType.get(), indent + TWO_INDENT);
     }
-    PrintIndent(indent + ONE_INDENT, "FuncRetType:");
-    PrintNode(type.retType.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "IsCFuncType:");
-    PrintIndent(indent + TWO_INDENT, type.isC);
+    PrintIndent(indent + ONE_INDENT, "]");
+    PrintNode(type.retType.get(), indent + ONE_INDENT, "retType");
+    PrintIndent(indent + ONE_INDENT, "IsCFuncType:", type.isC);
     PrintIndent(indent, "}");
 }
 
-void PrintTupleType(unsigned indent, const TupleType& type, std::string& tyStr)
+void PrintTupleType(unsigned indent, const TupleType& type)
 {
-    PrintIndent(indent, "TupleType", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "TupleTypeList:");
+    PrintIndent(indent, "TupleType {");
+    PrintBasic(indent + ONE_INDENT, type);
+    PrintIndent(indent + ONE_INDENT, "fieldTypes [");
     for (auto& it : type.fieldTypes) {
         PrintNode(it.get(), indent + TWO_INDENT);
     }
+    PrintIndent(indent + ONE_INDENT, "]");
     PrintIndent(indent, "}");
 }
 
-void PrintThisType(unsigned indent, std::string& tyStr)
+void PrintThisType(unsigned indent, const ThisType& type)
 {
-    PrintIndent(indent, "ThisType");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "ThisType {");
+    PrintBasic(indent + ONE_INDENT, type);
+    PrintIndent(indent, "}");
 }
 
-void PrintPrimitiveType(unsigned indent, const PrimitiveType& type, std::string& tyStr)
+void PrintPrimitiveType(unsigned indent, const PrimitiveType& type)
 {
-    PrintIndent(indent, "PrimitiveType:", type.str);
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "PrimitiveType:", type.str, "{");
+    PrintBasic(indent + ONE_INDENT, type);
+    PrintIndent(indent, "}");
 }
 
-void PrintOptionType(unsigned indent, const OptionType& type, std::string& tyStr)
+void PrintOptionType(unsigned indent, const OptionType& type)
 {
-    PrintIndent(indent, "OptionType", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "OptionType {");
+    PrintBasic(indent + ONE_INDENT, type);
     PrintIndent(indent + ONE_INDENT, "BaseType:");
     PrintNode(type.componentType.get(), indent + TWO_INDENT);
     PrintIndent(indent + ONE_INDENT, "QuestNums:", type.questNum);
     PrintIndent(indent, "}");
 }
 
-void PrintVArrayType(unsigned indent, const VArrayType& type, std::string& tyStr)
+void PrintVArrayType(unsigned indent, const VArrayType& type)
 {
-    PrintIndent(indent, "VArrayType", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
+    PrintIndent(indent, "VArrayType {");
+    PrintBasic(indent + ONE_INDENT, type);
     PrintIndent(indent + ONE_INDENT, "typeArguments:");
     PrintNode(type.typeArgument.get(), indent + TWO_INDENT);
     PrintIndent(indent, "}");
 }
 
-void PrintQualifiedType(unsigned indent, const QualifiedType& type, std::string& tyStr)
+void PrintQualifiedType(unsigned indent, const QualifiedType& type)
 {
-    PrintIndent(indent, "QualifiedType", "{");
-    PrintTy(indent + ONE_INDENT, tyStr);
-    PrintIndent(indent + ONE_INDENT, "BaseType:");
-    PrintNode(type.baseType.get(), indent + TWO_INDENT);
-    PrintIndent(indent + ONE_INDENT, "FieldIdentifier:");
-    PrintIndent(indent + TWO_INDENT, type.field.Val());
+    PrintIndent(indent, "QualifiedType {");
+    PrintBasic(indent + ONE_INDENT, type);
+    PrintNode(type.baseType.get(), indent + ONE_INDENT, "baseType");
+    PrintIndent(indent + ONE_INDENT, "field:", type.field.Val());
+    if (type.target) {
+        PrintTarget(indent + ONE_INDENT, *type.target);
+    }
     PrintIndent(indent, "}");
 }
 
@@ -1129,68 +1242,70 @@ void PrintGenericConstraint(unsigned indent, const GenericConstraint& generic)
 {
     PrintIndent(indent, "GenericConstraint {");
     PrintNode(generic.type.get(), indent + ONE_INDENT);
+    PrintIndent(indent + ONE_INDENT, "upperBounds {");
     for (auto& upperBound : generic.upperBounds) {
-        PrintNode(upperBound.get(), indent + ONE_INDENT);
+        PrintNode(upperBound.get(), indent + TWO_INDENT);
     }
+    PrintIndent(indent + ONE_INDENT, "}");
     PrintIndent(indent, "}");
 }
 
 void PrintConstPattern(unsigned indent, const ConstPattern& constPattern)
 {
-    PrintIndent(indent, "ConstPattern:");
+    PrintIndent(indent, "ConstPattern {");
     PrintNode(constPattern.literal.get(), indent + ONE_INDENT);
+    PrintIndent(indent, "}");
 }
 
 void PrintTuplePattern(unsigned indent, const TuplePattern& tuplePattern)
 {
-    PrintIndent(indent, "TuplePattern:");
+    PrintIndent(indent, "TuplePattern {");
+    PrintIndent(indent + ONE_INDENT, "patterns [");
     for (auto& pattern : tuplePattern.patterns) {
         PrintNode(pattern.get(), indent + ONE_INDENT);
     }
+    PrintIndent(indent + ONE_INDENT, "]");
+    PrintIndent(indent, "}");
 }
 
-void PrintTypePattern(unsigned indent, const TypePattern& typePattern)
+void PrintBasicpePattern(unsigned indent, const TypePattern& typePattern)
 {
-    PrintIndent(indent, "TypePattern:");
-    PrintNode(typePattern.pattern.get(), indent + ONE_INDENT);
-    PrintNode(typePattern.type.get(), indent + ONE_INDENT);
-    if (typePattern.desugarExpr.get()) {
-        PrintIndent(indent, "# autobox typePattern");
-        PrintNode(typePattern.desugarExpr.get(), indent + ONE_INDENT);
-    }
+    PrintIndent(indent, "TypePattern {");
+    PrintBasic(indent + ONE_INDENT, typePattern);
+    PrintNode(typePattern.pattern.get(), indent + ONE_INDENT, "pattern");
+    PrintNode(typePattern.type.get(), indent + ONE_INDENT, "type");
     if (typePattern.desugarVarPattern.get()) {
-        PrintIndent(indent, "# unboxing typePattern");
-        PrintNode(typePattern.desugarVarPattern.get(), indent + ONE_INDENT);
+        PrintNode(typePattern.desugarVarPattern.get(), indent + ONE_INDENT, "// desugarVarPattern");
     }
+    PrintIndent(indent, "}");
 }
 
 void PrintVarPattern(unsigned indent, const VarPattern& varPattern)
 {
-    PrintIndent(indent, "VariablePattern:", varPattern.varDecl->identifier.Val());
-    std::string tyStr = varPattern.ty ? varPattern.ty->String() : UNKNOWN_TY;
-    PrintTy(indent + ONE_INDENT, tyStr);
-    if (varPattern.desugarExpr.get()) {
-        PrintIndent(indent, "# DesugarExpr");
-        PrintNode(varPattern.desugarExpr.get(), indent + ONE_INDENT);
-    }
+    PrintIndent(indent, "VarPattern:", varPattern.varDecl->identifier.Val(), "{");
+    PrintBasic(indent + ONE_INDENT, varPattern);
+    PrintNode(varPattern.varDecl, indent + ONE_INDENT, "varDecl");
+    PrintIndent(indent, "}");
 }
 
 void PrintEnumPattern(unsigned indent, const EnumPattern& enumPattern)
 {
-    PrintIndent(indent, "EnumPattern:");
+    PrintIndent(indent, "EnumPattern {");
     PrintNode(enumPattern.constructor.get(), indent + ONE_INDENT);
     for (auto& pattern : enumPattern.patterns) {
         PrintNode(pattern.get(), indent + ONE_INDENT);
     }
+    PrintIndent(indent, "}");
 }
 
 void PrintExceptTypePattern(unsigned indent, const ExceptTypePattern& exceptTypePattern)
 {
-    PrintIndent(indent, "ExceptTypePattern:");
+    PrintIndent(indent, "ExceptTypePattern {");
     PrintNode(exceptTypePattern.pattern.get(), indent + ONE_INDENT);
     for (auto& type : exceptTypePattern.types) {
         PrintNode(type.get(), indent + ONE_INDENT);
     }
+    PrintIndent(indent, "}");
 }
 
 void PrintVarOrEnumPattern(unsigned indent, const VarOrEnumPattern& ve)
@@ -1205,37 +1320,48 @@ void PrintVarOrEnumPattern(unsigned indent, const VarOrEnumPattern& ve)
     PrintIndent(indent, "}");
 }
 
+void PrintCommandTypePattern(unsigned indent, const CommandTypePattern& commandTypePattern)
+{
+    PrintNode(commandTypePattern.pattern.get(), indent + ONE_INDENT);
+    for (auto& type : commandTypePattern.types) {
+        PrintNode(type.get(), indent + ONE_INDENT);
+    }
+}
+
 void PrintPackageSpec(unsigned indent, const PackageSpec& package)
 {
-    PrintIndent(indent, "PackageHeader:", package.packageName.Val());
+    PrintIndent(indent, "PackageSpec:", package.packageName.Val(), "{");
     if (!package.prefixPaths.empty()) {
         auto prefixPath = JoinStrings(package.prefixPaths, ".");
-        PrintIndent(indent + ONE_INDENT, ">PrefixPath:", std::move(prefixPath));
+        PrintIndent(indent + ONE_INDENT, "prefixPath:", std::move(prefixPath));
     }
     if (package.modifier) {
-        PrintIndent(indent + ONE_INDENT, ">Modifier:", TOKENS[static_cast<int>(package.modifier->modifier)]);
+        PrintIndent(indent + ONE_INDENT, "modifier:", TOKENS[static_cast<int>(package.modifier->modifier)]);
     }
+    PrintIndent(indent, "}");
 }
 
 void PrintImportSpec(unsigned indent, const ImportSpec& import)
 {
     if (import.content.kind != ImportKind::IMPORT_MULTI) {
-        PrintIndent(indent, "ImportPackage:", import.content.identifier.Val());
+        PrintIndent(indent, "ImportSpec:", import.content.identifier.Val(), "{");
         if (import.content.kind == ImportKind::IMPORT_ALIAS) {
-            PrintIndent(indent + ONE_INDENT, ">AliasName:", import.content.aliasName.Val());
+            PrintIndent(indent + ONE_INDENT, "aliasName:", import.content.aliasName.Val());
         }
         if (!import.content.prefixPaths.empty()) {
-            PrintIndent(indent + ONE_INDENT, ">PrefixPath:", JoinStrings(import.content.prefixPaths, "."));
+            PrintIndent(indent + ONE_INDENT, "prefixPaths:", JoinStrings(import.content.prefixPaths, "."));
         }
         if (import.modifier) {
-            PrintIndent(indent + ONE_INDENT, ">Modifier:", TOKENS[static_cast<int>(import.modifier->modifier)]);
+            PrintIndent(indent + ONE_INDENT, "modifier:", TOKENS[static_cast<int>(import.modifier->modifier)]);
         }
+        PrintIndent(indent + ONE_INDENT, "isDecl:", import.content.isDecl);
+        PrintIndent(indent, "}");
     } else {
         std::string commonPrefix = JoinStrings(import.content.prefixPaths, ".");
         for (const auto& item : import.content.items) {
-            PrintIndent(indent, "ImportPackage:", item.identifier.Val());
+            PrintIndent(indent, "ImportSpec:", item.identifier.Val(), "{");
             if (item.kind == ImportKind::IMPORT_ALIAS) {
-                PrintIndent(indent + ONE_INDENT, ">AliasName:", item.aliasName.Val());
+                PrintIndent(indent + ONE_INDENT, "aliasName:", item.aliasName.Val());
             }
             std::stringstream ss;
             ss << commonPrefix;
@@ -1245,123 +1371,126 @@ void PrintImportSpec(unsigned indent, const ImportSpec& import)
                 ss << JoinStrings(item.prefixPaths, ".");
             }
             if (ss.rdbuf()->in_avail() != 0) {
-                PrintIndent(indent + ONE_INDENT, ">PrefixPath:", ss.str());
+                PrintIndent(indent + ONE_INDENT, "prefixPaths:", ss.str());
             }
             if (import.modifier) {
-                PrintIndent(indent + ONE_INDENT, ">Modifier:", TOKENS[static_cast<int>(import.modifier->modifier)]);
+                PrintIndent(indent + ONE_INDENT, "modifier:", TOKENS[static_cast<int>(import.modifier->modifier)]);
             }
+            PrintIndent(indent, "}");
         }
     }
 }
 } // namespace
 #endif
 
-void PrintNode(
-    [[maybe_unused]] Ptr<const Node> node, [[maybe_unused]] unsigned indent, [[maybe_unused]] const std::string& str)
+void PrintNode([[maybe_unused]] Ptr<const Node> node, [[maybe_unused]] unsigned indent,
+    [[maybe_unused]] const std::string addition)
 {
 #if !defined(NDEBUG) || defined(CMAKE_ENABLE_ASSERT) // Enable printNode for debug and CI version.
-    if (!node) {
-        return PrintIndent(indent, "# no " + str);
+    if (!addition.empty()) {
+        PrintIndent(indent, "//", node ? addition : addition + " nullptr");
     }
-
+    if (!node) {
+        return;
+    }
     if (node->IsExpr()) {
         auto expr = RawStaticCast<const Expr*>(node);
         if (expr->desugarExpr) {
-            return PrintNode(expr->desugarExpr.get(), indent, str);
+            return PrintNode(expr->desugarExpr.get(), indent, addition);
         }
     }
-
-    std::string tyStr = (!node->ty) ? (ANSI_COLOR_RED + "unknown" + ANSI_COLOR_RESET) : node->ty->String();
     match (*node)([&indent](const Package& package) { PrintPackage(indent, package); },
         [&indent](const File& file) { PrintFile(indent, file); },
         // ----------- Decls --------------------
-        [&indent](
-            const GenericParamDecl& typeDecl) { PrintIndent(indent, "GenericParamDecl", typeDecl.identifier.Val()); },
-        [&indent, &tyStr](const FuncParam& param) { PrintFuncParam(indent, param, tyStr); },
+        [&indent](const GenericParamDecl& gpd) { PrintGenericParamDecl(indent, gpd); },
+        [&indent](const FuncParam& param) { PrintFuncParam(indent, param); },
         [&indent](const MacroExpandParam& macroExpand) { PrintMacroExpandParam(indent, macroExpand); },
         [&indent](const FuncParamList& paramList) { PrintFuncParamList(indent, paramList); },
-        [&indent, &tyStr](const MainDecl& mainDecl) { PrintMainDecl(indent, mainDecl, tyStr); },
-        [&indent, &tyStr](const FuncDecl& funcDecl) { PrintFuncDecl(indent, funcDecl, tyStr); },
-        [&indent, &tyStr](const MacroDecl& macroDecl) { PrintMacroDecl(indent, macroDecl, tyStr); },
-        [&indent, &tyStr](const FuncBody& body) { PrintFuncBody(indent, body, tyStr); },
-        [&indent, &tyStr](const PropDecl& propDecl) { PrintPropDecl(indent, propDecl, tyStr); },
+        [&indent](const MainDecl& mainDecl) { PrintMainDecl(indent, mainDecl); },
+        [&indent](const FuncDecl& funcDecl) { PrintFuncDecl(indent, funcDecl); },
+        [&indent](const MacroDecl& macroDecl) { PrintMacroDecl(indent, macroDecl); },
+        [&indent](const FuncBody& body) { PrintFuncBody(indent, body); },
+        [&indent](const PropDecl& propDecl) { PrintPropDecl(indent, propDecl); },
         [&indent](const MacroExpandDecl& macroExpand) { PrintMacroExpandDecl(indent, macroExpand); },
-        [&indent, &tyStr](const VarWithPatternDecl& varWithPatternDecl) {
-            PrintVarWithPatternDecl(indent, varWithPatternDecl, tyStr);
-        },
-        [&indent, &tyStr](const VarDecl& varDecl) { PrintVarDecl(indent, varDecl, tyStr); },
-        [&indent, &tyStr](const TypeAliasDecl& alias) { PrintTypeAliasDecl(indent, alias, tyStr); },
-        [&indent, &tyStr](const ClassDecl& classDecl) { PrintClassDecl(indent, classDecl, tyStr); },
-        [&indent, &tyStr](const InterfaceDecl& interfaceDecl) { PrintInterfaceDecl(indent, interfaceDecl, tyStr); },
-        [&indent, &tyStr](const EnumDecl& enumDecl) { PrintEnumDecl(indent, enumDecl, tyStr); },
-        [&indent, &tyStr](const StructDecl& decl) { PrintStructDecl(indent, decl, tyStr); },
-        [&indent](const ExtendDecl& ed) { PrintExtendDecl(indent, ed); }, [](const PrimaryCtorDecl&) {},
+        [&indent](const VarWithPatternDecl& vwpd) { PrintVarWithPatternDecl(indent, vwpd); },
+        [&indent](const VarDecl& varDecl) { PrintVarDecl(indent, varDecl); },
+        [&indent](const TypeAliasDecl& alias) { PrintBasicpeAliasDecl(indent, alias); },
+        [&indent](const ClassDecl& classDecl) { PrintClassDecl(indent, classDecl); },
+        [&indent](const InterfaceDecl& interfaceDecl) { PrintInterfaceDecl(indent, interfaceDecl); },
+        [&indent](const EnumDecl& enumDecl) { PrintEnumDecl(indent, enumDecl); },
+        [&indent](const StructDecl& decl) { PrintStructDecl(indent, decl); },
+        [&indent](const ExtendDecl& ed) { PrintExtendDecl(indent, ed); },
+        [&indent](const PrimaryCtorDecl& pc) { PrintPrimaryCtorDecl(indent, pc); },
         // -----------Exprs----------------------
-        [&indent, &tyStr, &str](const IfExpr& expr) { PrintIfExpr(indent, expr, tyStr, str); },
-        [&indent, &tyStr](const MatchExpr& expr) { PrintMatchExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const TryExpr& expr) { PrintTryExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const ThrowExpr& expr) { PrintThrowExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const ReturnExpr& expr) { PrintReturnExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const JumpExpr& expr) { PrintJumpExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const ForInExpr& expr) { PrintForInExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const WhileExpr& expr) { PrintWhileExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const DoWhileExpr& expr) { PrintDoWhileExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const AssignExpr& expr) { PrintAssignExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const IncOrDecExpr& expr) { PrintIncOrDecExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const UnaryExpr& unaryExpr) { PrintUnaryExpr(indent, unaryExpr, tyStr); },
-        [&indent, &tyStr](const BinaryExpr& binaryExpr) { PrintBinaryExpr(indent, binaryExpr, tyStr); },
-        [&indent, &tyStr](const RangeExpr& rangeExpr) { PrintRangeExpr(indent, rangeExpr, tyStr); },
-        [&indent, &tyStr](const SubscriptExpr& expr) { PrintSubscriptExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const MemberAccess& expr) { PrintMemberAccess(indent, expr, tyStr); },
-        [&indent, &tyStr](const FuncArg& expr) { PrintFuncArg(indent, expr, tyStr); },
-        [&indent, &tyStr](const CallExpr& expr) { PrintCallExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const ParenExpr& parenExpr) { PrintParenExpr(indent, parenExpr, tyStr); },
-        [&indent, &tyStr](const LambdaExpr& expr) { PrintLambdaExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const LitConstExpr& expr) { PrintLitConstExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const StrInterpolationExpr& expr) { PrintStrInterpolationExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const ArrayLit& expr) { PrintArrayLit(indent, expr, tyStr); },
-        [&indent, &tyStr](const ArrayExpr& expr) { PrintArrayExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const TupleLit& expr) { PrintTupleLit(indent, expr, tyStr); },
-        [&indent, &tyStr](const TypeConvExpr& expr) { PrintTypeConvExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const RefExpr& refExpr) { PrintRefExpr(indent, refExpr, tyStr); },
-        [&indent, &tyStr](const OptionalExpr& expr) { PrintOptionalExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const OptionalChainExpr& expr) { PrintOptionalChainExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const LetPatternDestructor& expr) { PrintLetPatternDestructor(indent, expr, tyStr); },
-        [&indent, &tyStr](
-            const PrimitiveTypeExpr& /* primitiveTypeExpr */) { PrintIndent(indent, "PrimitiveTypeExpr: " + tyStr); },
-        [&indent, &tyStr](const SpawnExpr& expr) { PrintSpawnExpr(indent, expr, tyStr); },
-        [&indent, &tyStr](const SynchronizedExpr& expr) { PrintSynchronizedExpr(indent, expr, tyStr); },
-        [](const InvalidExpr& /* expr */) { PrintIndent(0, "InvalidExpr: Need to be fixed!"); },
-        [&indent, &str, &tyStr](const Block& block) { PrintBlock(indent, block, tyStr, str); },
+        [&indent](const IfExpr& expr) { PrintIfExpr(indent, expr); },
+        [&indent](const MatchExpr& expr) { PrintMatchExpr(indent, expr); },
+        [&indent](const TryExpr& expr) { PrintTryExpr(indent, expr); },
+        [&indent](const ThrowExpr& expr) { PrintThrowExpr(indent, expr); },
+        [&indent](const PerformExpr& expr) { PrintPerformExpr(indent, expr); },
+        [&indent](const ResumeExpr& expr) { PrintResumeExpr(indent, expr); },
+        [&indent](const ReturnExpr& expr) { PrintReturnExpr(indent, expr); },
+        [&indent](const JumpExpr& expr) { PrintJumpExpr(indent, expr); },
+        [&indent](const ForInExpr& expr) { PrintForInExpr(indent, expr); },
+        [&indent](const WhileExpr& expr) { PrintWhileExpr(indent, expr); },
+        [&indent](const DoWhileExpr& expr) { PrintDoWhileExpr(indent, expr); },
+        [&indent](const AssignExpr& expr) { PrintAssignExpr(indent, expr); },
+        [&indent](const IncOrDecExpr& expr) { PrintIncOrDecExpr(indent, expr); },
+        [&indent](const UnaryExpr& unaryExpr) { PrintUnaryExpr(indent, unaryExpr); },
+        [&indent](const BinaryExpr& binaryExpr) { PrintBinaryExpr(indent, binaryExpr); },
+        [&indent](const RangeExpr& rangeExpr) { PrintRangeExpr(indent, rangeExpr); },
+        [&indent](const SubscriptExpr& expr) { PrintSubscriptExpr(indent, expr); },
+        [&indent](const MemberAccess& expr) { PrintMemberAccess(indent, expr); },
+        [&indent](const FuncArg& expr) { PrintFuncArg(indent, expr); },
+        [&indent](const CallExpr& expr) { PrintCallExpr(indent, expr); },
+        [&indent](const ParenExpr& parenExpr) { PrintParenExpr(indent, parenExpr); },
+        [&indent](const LambdaExpr& expr) { PrintLambdaExpr(indent, expr); },
+        [&indent](const LitConstExpr& expr) { PrintLitConstExpr(indent, expr); },
+        [&indent](const InterpolationExpr& expr) { PrintInterpolationExpr(indent, expr); },
+        [&indent](const StrInterpolationExpr& expr) { PrintStrInterpolationExpr(indent, expr); },
+        [&indent](const ArrayLit& expr) { PrintArrayLit(indent, expr); },
+        [&indent](const ArrayExpr& expr) { PrintArrayExpr(indent, expr); },
+        [&indent](const TupleLit& expr) { PrintTupleLit(indent, expr); },
+        [&indent](const TypeConvExpr& expr) { PrintBasicpeConvExpr(indent, expr); },
+        [&indent](const RefExpr& refExpr) { PrintRefExpr(indent, refExpr); },
+        [&indent](const OptionalExpr& expr) { PrintOptionalExpr(indent, expr); },
+        [&indent](const OptionalChainExpr& expr) { PrintOptionalChainExpr(indent, expr); },
+        [&indent](const LetPatternDestructor& expr) { PrintLetPatternDestructor(indent, expr); },
+        [&indent](const PrimitiveTypeExpr& pte) { PrintIndent(indent, "PrimitiveTypeExpr: " + pte.ty->String()); },
+        [&indent](const SpawnExpr& expr) { PrintSpawnExpr(indent, expr); },
+        [&indent](const SynchronizedExpr& expr) { PrintSynchronizedExpr(indent, expr); },
+        [&indent](const InvalidExpr& /* expr */) { PrintIndent(indent, "InvalidExpr: Need to be fixed!"); },
+        [&indent](const Block& block) { PrintBlock(indent, block); },
         [&indent](const InterfaceBody& body) { PrintInterfaceBody(indent, body); },
         [&indent](const ClassBody& body) { PrintClassBody(indent, body); },
         [&indent](const StructBody& body) { PrintStructBody(indent, body); },
-        [&indent, &tyStr](const IsExpr& isExpr) { PrintIsExpr(indent, isExpr, tyStr); },
-        [&indent, &tyStr](const AsExpr& asExpr) { PrintAsExpr(indent, asExpr, tyStr); },
+        [&indent](const IsExpr& isExpr) { PrintIsExpr(indent, isExpr); },
+        [&indent](const AsExpr& asExpr) { PrintAsExpr(indent, asExpr); },
         [&indent](const TokenPart& tokenPart) { PrintTokenPart(indent, tokenPart); },
         [&indent](const QuoteExpr& quoteExpr) { PrintQuoteExpr(indent, quoteExpr); },
-        [&indent, &tyStr](const MacroExpandExpr& macroExpr) { PrintMacroExpandExpr(indent, macroExpr, tyStr); },
+        [&indent](const MacroExpandExpr& macroExpr) { PrintMacroExpandExpr(indent, macroExpr); },
         [&indent](const WildcardExpr& /* WildcardExpr */) { PrintIndent(indent, "WildcardExpr:", "_"); },
+        [&indent](const IfAvailableExpr& expr) { PrintIfAvailableExpr(indent, expr); },
         // ----------- Type --------------------
-        [&indent, &tyStr](const RefType& refType) { PrintRefType(indent, refType, tyStr); },
-        [&indent, &tyStr](const ParenType& type) { PrintParenType(indent, type, tyStr); },
-        [&indent, &tyStr](const FuncType& type) { PrintFuncType(indent, type, tyStr); },
-        [&indent, &tyStr](const TupleType& type) { PrintTupleType(indent, type, tyStr); },
-        [&indent, &tyStr](const ThisType& /* type */) { PrintThisType(indent, tyStr); },
-        [&indent, &tyStr](const PrimitiveType& type) { PrintPrimitiveType(indent, type, tyStr); },
-        [&indent, &tyStr](const OptionType& type) { PrintOptionType(indent, type, tyStr); },
-        [&indent, &tyStr](const VArrayType& type) { PrintVArrayType(indent, type, tyStr); },
-        [&indent, &tyStr](const QualifiedType& type) { PrintQualifiedType(indent, type, tyStr); },
+        [&indent](const RefType& refType) { PrintRefType(indent, refType); },
+        [&indent](const ParenType& type) { PrintParenType(indent, type); },
+        [&indent](const FuncType& type) { PrintFuncType(indent, type); },
+        [&indent](const TupleType& type) { PrintTupleType(indent, type); },
+        [&indent](const ThisType& type) { PrintThisType(indent, type); },
+        [&indent](const PrimitiveType& type) { PrintPrimitiveType(indent, type); },
+        [&indent](const OptionType& type) { PrintOptionType(indent, type); },
+        [&indent](const VArrayType& type) { PrintVArrayType(indent, type); },
+        [&indent](const QualifiedType& type) { PrintQualifiedType(indent, type); },
         [&indent](const GenericConstraint& generic) { PrintGenericConstraint(indent, generic); },
-        [](const InvalidType&) { PrintIndent(0, "InvalidType: Need to be fixed!"); },
+        [&indent](const InvalidType&) { PrintIndent(indent, "InvalidType: Need to be fixed!"); },
         // -----------pattern----------------------
         [&indent](const ConstPattern& constPattern) { PrintConstPattern(indent, constPattern); },
         [&indent](const WildcardPattern& /* WildcardPattern */) { PrintIndent(indent, "WildcardPattern:", "_"); },
         [&indent](const VarPattern& varPattern) { PrintVarPattern(indent, varPattern); },
         [&indent](const TuplePattern& tuplePattern) { PrintTuplePattern(indent, tuplePattern); },
-        [&indent](const TypePattern& typePattern) { PrintTypePattern(indent, typePattern); },
+        [&indent](const TypePattern& typePattern) { PrintBasicpePattern(indent, typePattern); },
         [&indent](const EnumPattern& enumPattern) { PrintEnumPattern(indent, enumPattern); },
         [&indent](const ExceptTypePattern& exceptTypePattern) { PrintExceptTypePattern(indent, exceptTypePattern); },
+        [&indent](const CommandTypePattern& cmdTypePattern) { PrintCommandTypePattern(indent, cmdTypePattern); },
         [indent](const VarOrEnumPattern& ve) { PrintVarOrEnumPattern(indent, ve); },
         // ----------- package----------------------
         [&indent](const PackageSpec& package) { PrintPackageSpec(indent, package); },
@@ -1372,10 +1501,16 @@ void PrintNode(
             PrintImportSpec(indent, import);
         },
         // -----------no match----------------------
-        [&node]() {
-            const auto n = *node.get();
-            std::cout << typeid(n).name() << " " << std::endl;
+        [&indent, &node]() {
+            PrintIndent(indent, "UnknowNode:", ASTKIND_TO_STR.at(node->astKind), "{");
+            PrintBasic(indent + ONE_INDENT, *node);
+            PrintIndent(indent, "}");
         });
 #endif
+}
+
+void PrintNode(Ptr<const AST::Node> node)
+{
+    PrintNode(node, 0, "");
 }
 } // namespace Cangjie

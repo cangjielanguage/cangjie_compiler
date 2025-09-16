@@ -19,9 +19,6 @@ CGContext::CGContext(const SubCHIRPackage& subCHIRPackage, CGPkgContext& cgPkgCo
     llvmContext = new llvm::LLVMContext(); // This `llvmContext` will be released in the de-constructor of `CGModule`.
     llvmContext->setOpaquePointers(cgPkgContext.GetGlobalOptions().enableOpaque);
     impl = std::make_unique<CGContextImpl>();
-    auto p1i8Type = llvm::Type::getInt8PtrTy(*llvmContext, 1u);
-    auto int32Type = llvm::Type::getInt32Ty(*llvmContext);
-    impl->cjStringType = llvm::StructType::create(*llvmContext, {p1i8Type, int32Type, int32Type}, "cjStringType");
 }
 #endif
 
@@ -29,7 +26,14 @@ CGContext::~CGContext() = default;
 
 llvm::StructType* CGContext::GetCjStringType() const
 {
-    return impl->cjStringType;
+    auto p1i8Type = llvm::Type::getInt8PtrTy(*llvmContext, 1u);
+    auto int32Type = llvm::Type::getInt32Ty(*llvmContext);
+    const std::string stringTypeStr = "record.std.core:String";
+    if (auto stringType = llvm::StructType::getTypeByName(*llvmContext, stringTypeStr)) {
+        return stringType;
+    } else {
+        return llvm::StructType::create(*llvmContext, {p1i8Type, int32Type, int32Type}, stringTypeStr);
+    }
 }
 
 void CGContext::Add2CGTypePool(CGType* cgType)
@@ -90,9 +94,7 @@ void CGContext::PopUnwindBlockStack()
 
 void CGContext::AddGeneratedStructType(const std::string& structTypeName)
 {
-    if (structTypeName.empty()) {
-        return;
-    }
+    CJC_ASSERT(!structTypeName.empty());
     generatedStructType.emplace(structTypeName);
 }
 const std::set<std::string>& CGContext::GetGeneratedStructType() const
@@ -118,11 +120,6 @@ bool CGContext::IsGlobalsOfCompileUnit(const std::string& globalsName)
 void CGContext::AddNullableReference(llvm::Value* value)
 {
     (void)impl->nullableReference.emplace(value);
-}
-
-bool CGContext::IsNullableReference(llvm::Value* value) const
-{
-    return impl->nullableReference.find(value) != impl->nullableReference.end();
 }
 #endif
 } // namespace CodeGen

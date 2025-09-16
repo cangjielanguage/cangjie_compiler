@@ -29,11 +29,11 @@ const std::string INTERNAL_CFUNC_ATTR = "internal";
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 const std::string FAST_NATIVE_ATTR = "gc-leaf-function";
 #endif
-const std::string MACRO_INVOKE_CFUNC_ATTR = "macro-invoke-cfunc";
 const std::string VTABLE_LOOKUP = "VTABLE_LOOKUP"; // Indicates that it is the instruction of VTable lookup.
 const std::string GC_TYPE_META_NAME = "RelatedType";
 const std::string GC_GLOBAL_VAR_TYPE = "GlobalVarType";
 const std::string GC_KLASS_ATTR = "CFileKlass";
+const std::string GC_CAN_MALLOC_WITH_FIXED_SIZE = "can_malloc_with_fixed_size";
 const std::string GC_MTABLE_ATTR = "CFileMTable";
 const std::string GC_FINALIZER_ATTR = "HasFinalizer";
 const std::string STRUCT_MUT_FUNC_ATTR = "record_mut";

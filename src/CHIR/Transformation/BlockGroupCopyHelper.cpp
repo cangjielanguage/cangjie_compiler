@@ -65,7 +65,7 @@ void BlockGroupCopyHelper::CollectValueMap(const Lambda& oldLambda, const Lambda
     for (size_t i = 0; i < oldParams.size(); ++i) {
         valueMap.emplace(oldParams[i], newParams[i]);
     }
-    CollectValueMap(*oldLambda.GetLambdaBody(), *newLambda.GetLambdaBody(), valueMap, newDebugs);
+    CollectValueMap(*oldLambda.GetBody(), *newLambda.GetBody(), valueMap, newDebugs);
 }
 
 void BlockGroupCopyHelper::CollectValueMap(const Block& oldBlk, const Block& newBlk,
@@ -120,16 +120,7 @@ void BlockGroupCopyHelper::ReplaceExprOperands(const Block& block, const std::un
         }
         if (expr->GetExprKind() == ExprKind::LAMBDA) {
             auto lambda = StaticCast<Lambda*>(expr);
-            ReplaceExprOperands(*lambda->GetLambdaBody(), valueMap);
-            std::vector<Value*> newCapturedVars;
-            for (auto var : lambda->GetCapturedVars()) {
-                auto it = valueMap.find(var);
-                if (it != valueMap.end()) {
-                    var = valueMap.at(var);
-                }
-                newCapturedVars.emplace_back(var);
-            }
-            lambda->SetCapturedVars(newCapturedVars);
+            ReplaceExprOperands(*lambda->GetBody(), valueMap);
         }
     }
 }
@@ -150,7 +141,7 @@ void BlockGroupCopyHelper::GetInstMapFromApply(const Apply& apply)
         // get inst map from function
         size_t index = 0;
         for (auto& genericType : lambda->GetGenericTypeParams()) {
-            instMap.emplace(genericType, apply.GetInstantiateArgs()[index]);
+            instMap.emplace(genericType, apply.GetInstantiatedTypeArgs()[index]);
             ++index;
         }
         thisType = builder.GetType<ThisType>();
@@ -158,7 +149,7 @@ void BlockGroupCopyHelper::GetInstMapFromApply(const Apply& apply)
         auto func = VirtualCast<FuncBase*>(apply.GetCallee());
         if (auto customDef = func->GetParentCustomTypeDef(); customDef && customDef->IsGenericDef()) {
             // 1. get customType where function in.
-            auto instParentCustomType = apply.GetInstParentCustomTyOfCallee();
+            auto instParentCustomType = apply.GetInstParentCustomTyOfCallee(builder);
             if (instParentCustomType == nullptr) {
                 instParentCustomType =
                     customDef->IsExtend() ? StaticCast<ExtendDef*>(customDef)->GetExtendedType() : customDef->GetType();
@@ -176,7 +167,7 @@ void BlockGroupCopyHelper::GetInstMapFromApply(const Apply& apply)
         // 3. get inst map from function
         size_t index = 0;
         for (auto& genericType : func->GetGenericTypeParams()) {
-            instMap.emplace(genericType, apply.GetInstantiateArgs()[index]);
+            instMap.emplace(genericType, apply.GetInstantiatedTypeArgs()[index]);
             ++index;
         }
         thisType = apply.GetThisType();
@@ -219,24 +210,24 @@ void FixCastProblemAfterInst(Ptr<BlockGroup> group, CHIRBuilder& builder)
                 return VisitResult::CONTINUE;
             }
             if (objType->IsEqualOrSubTypeOf(*instance->GetType(), builder)) {
-                auto trueExpr = builder.CreateConstantExpression<BoolLiteral>(builder.GetBoolTy(), e.GetParent(), true);
+                auto trueExpr =
+                    builder.CreateConstantExpression<BoolLiteral>(builder.GetBoolTy(), e.GetParentBlock(), true);
                 e.ReplaceWith(*trueExpr);
             } else {
                 auto falseExpr =
-                    builder.CreateConstantExpression<BoolLiteral>(builder.GetBoolTy(), e.GetParent(), false);
+                    builder.CreateConstantExpression<BoolLiteral>(builder.GetBoolTy(), e.GetParentBlock(), false);
                 e.ReplaceWith(*falseExpr);
             }
         }
         if (e.GetExprKind() == ExprKind::TRANSFORM_TO_CONCRETE) {
             // change transformToConcrete to box/unbox/typecast
-            auto cast = StaticCast<TransformToConcrete*>(&e);
-            if (!cast->GetObject()->GetType()->IsGenericRelated()) {
-                auto newCast =
-                    TypeCastOrBoxIfNeeded(*cast->GetObject(), *e.GetResult()->GetType(), builder, *e.GetParent(),
-                        e.GetDebugLocation());
-                if (newCast == cast->GetObject()) {
+            auto& cast = StaticCast<TransformToConcrete&>(e);
+            if (!cast.GetSourceTy()->IsGenericRelated()) {
+                auto newCast = TypeCastOrBoxIfNeeded(
+                    *cast.GetSourceValue(), *cast.GetTargetTy(), builder, *e.GetParentBlock(), e.GetDebugLocation());
+                if (newCast == cast.GetSourceValue()) {
                     for (auto user : e.GetResult()->GetUsers()) {
-                        user->ReplaceOperand(e.GetResult(), cast->GetObject());
+                        user->ReplaceOperand(e.GetResult(), cast.GetSourceValue());
                     }
                     e.RemoveSelfFromBlock();
                     return VisitResult::CONTINUE;
@@ -251,13 +242,13 @@ void FixCastProblemAfterInst(Ptr<BlockGroup> group, CHIRBuilder& builder)
         if (e.GetExprKind() == ExprKind::TRANSFORM_TO_GENERIC) {
             // change TransformToGeneric to box/unbox/typecast
             auto cast = StaticCast<TransformToGeneric*>(&e);
-            if (!cast->GetResult()->GetType()->IsGenericRelated()) {
+            if (!cast->GetTargetTy()->IsGenericRelated()) {
                 auto newCast =
-                    TypeCastOrBoxIfNeeded(*cast->GetObject(), *e.GetResult()->GetType(), builder, *e.GetParent(),
+                    TypeCastOrBoxIfNeeded(*cast->GetSourceValue(), *cast->GetTargetTy(), builder, *e.GetParentBlock(),
                         e.GetDebugLocation());
-                if (newCast == cast->GetObject()) {
+                if (newCast == cast->GetSourceValue()) {
                     for (auto user : e.GetResult()->GetUsers()) {
-                        user->ReplaceOperand(e.GetResult(), cast->GetObject());
+                        user->ReplaceOperand(e.GetResult(), cast->GetSourceValue());
                     }
                     e.RemoveSelfFromBlock();
                     return VisitResult::CONTINUE;
@@ -283,7 +274,7 @@ void FixCastProblemAfterInst(Ptr<BlockGroup> group, CHIRBuilder& builder)
                 return VisitResult::CONTINUE;
             }
             auto newCastRes =
-                TypeCastOrBoxIfNeeded(*cast->GetSourceValue(), *e.GetResult()->GetType(), builder, *e.GetParent(),
+                TypeCastOrBoxIfNeeded(*cast->GetSourceValue(), *e.GetResult()->GetType(), builder, *e.GetParentBlock(),
                     e.GetDebugLocation());
             if (newCastRes == cast->GetSourceValue()) {
                 return VisitResult::CONTINUE;

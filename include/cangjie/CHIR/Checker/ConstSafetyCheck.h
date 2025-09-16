@@ -10,7 +10,7 @@
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/CHIR/Analysis/AnalysisWrapper.h"
 #include "cangjie/CHIR/Analysis/ConstAnalysis.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 
 namespace Cangjie::CHIR {
@@ -20,7 +20,7 @@ public:
 
     explicit ConstSafetyCheck(ConstAnalysisWrapper* constAnalysisWrapper);
 
-    void RunOnPackage(const Package& package, bool isCJLint, size_t threadNum) const;
+    void RunOnPackage(const Package& package, size_t threadNum) const;
 
     void RunOnFunc(const Func* func) const;
 

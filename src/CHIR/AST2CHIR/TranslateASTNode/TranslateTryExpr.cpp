@@ -47,8 +47,8 @@ Ptr<Value> Translator::Visit(const AST::TryExpr& tryExpr)
             auto pkgInit = builder.GetCurPackage()->GetPackageInitFunc();
             CJC_NULLPTR_CHECK(pkgInit);
             // ApplyWithException will create and update current block.
-            GenerateFuncCall(*pkgInit, StaticCast<FuncType*>(pkgInit->GetType()), std::vector<Type*>{}, nullptr,
-                nullptr, std::vector<Value*>{}, INVALID_LOCATION);
+            GenerateFuncCall(*pkgInit, StaticCast<FuncType*>(pkgInit->GetType()),
+                std::vector<Type*>{}, nullptr, std::vector<Value*>{}, INVALID_LOCATION);
         }
         auto baseBlock = currentBlock;
         auto tryVal = TranslateExprArg(*tryExpr.tryBlock);
@@ -143,9 +143,11 @@ void Translator::TranslateFinallyRethrowFlows(const AST::Block& finally)
     currentBlock->SetExceptions({});
     auto baseETy = builder.GetType<RefType>(builder.GetObjectTy());
     auto exception = CreateAndAppendExpression<GetException>(baseETy, currentBlock)->GetResult();
-    auto eVal = CreateAndAppendExpression<Intrinsic>(
-        baseETy, CHIR::IntrinsicKind::BEGIN_CATCH, std::vector<Value*>{exception}, currentBlock)
-                    ->GetResult();
+    auto callContext = IntrisicCallContext {
+        .kind = IntrinsicKind::BEGIN_CATCH,
+        .args = std::vector<Value*>{exception}
+    };
+    auto eVal = CreateAndAppendExpression<Intrinsic>(baseETy, callContext, currentBlock)->GetResult();
     // Generate rethrow finally block.
     TranslateASTNode(finally, exceptionTrans);
     auto finallyBlock = exceptionTrans.GetBlockByAST(finally);
@@ -263,9 +265,11 @@ Ptr<Block> Translator::TranslateCatchBlocks(const AST::TryExpr& tryExpr, Ptr<Val
     auto baseETy = builder.GetType<RefType>(builder.GetObjectTy());
     auto catchLoc = TranslateLocation(*tryExpr.catchBlocks[0]);
     auto exception = CreateAndAppendExpression<GetException>(catchLoc, baseETy, currentBlock)->GetResult();
-    auto eVal = CreateAndAppendExpression<Intrinsic>(catchLoc,
-        baseETy, CHIR::IntrinsicKind::BEGIN_CATCH, std::vector<Value*>{exception}, currentBlock)
-                    ->GetResult();
+    auto callContext = IntrisicCallContext {
+        .kind = IntrinsicKind::BEGIN_CATCH,
+        .args = std::vector<Value*>{exception}
+    };
+    auto eVal = CreateAndAppendExpression<Intrinsic>(catchLoc, baseETy, callContext, currentBlock)->GetResult();
     auto catchSize = tryExpr.catchPatterns.size();
     CJC_ASSERT(tryExpr.catchBlocks.size() == catchSize);
     for (size_t i = 0; i < catchSize; ++i) {

@@ -333,12 +333,12 @@ struct Cmp1 {
     {
         return a < std::get<0>(b);
     }
-} const cmp1{};
+} const CMP1{};
 
 std::optional<UTF32> CompositionTableAstral(UTF32 c1, UTF32 c2)
 {
     auto [begin, end] = std::equal_range(std::begin(COMPOSITION_TABLE_ASTRAL_VALUES),
-        std::end(COMPOSITION_TABLE_ASTRAL_VALUES), c1, cmp1);
+        std::end(COMPOSITION_TABLE_ASTRAL_VALUES), c1, CMP1);
     if (begin == std::end(COMPOSITION_TABLE_ASTRAL_VALUES)) { // not found
         return std::nullopt;
     }

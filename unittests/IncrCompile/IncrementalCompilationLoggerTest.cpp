@@ -15,10 +15,12 @@ using namespace Cangjie;
 
 class IncrementalCompilationLoggerTest : public ::testing::Test {
 protected:
-    void SetUp() override {}
+    void SetUp() override
+    {
+    }
 };
 
-TEST_F(IncrementalCompilationLoggerTest, DISABLED_InvidPath)
+TEST_F(IncrementalCompilationLoggerTest, InvidPath)
 {
     auto& logger = IncrementalCompilationLogger::GetInstance();
     logger.InitLogFile("");
@@ -39,9 +41,14 @@ TEST_F(IncrementalCompilationLoggerTest, DISABLED_InvidPath)
     logger.InitLogFile("log/");
     EXPECT_EQ(logger.IsEnable(), false);
     std::string nomalIncrLogPath = ".cached/2343242355.log";
-    logger.InitLogFile(nomalIncrLogPath);
-    EXPECT_EQ(logger.IsEnable(), false);
-    Cangjie::FileUtil::CreateDirs(".cached/");
-    logger.InitLogFile(nomalIncrLogPath);
-    EXPECT_EQ(logger.IsEnable(), true);
+    if (Cangjie::FileUtil::FileExist(nomalIncrLogPath)) {
+        logger.InitLogFile(nomalIncrLogPath);
+        EXPECT_EQ(logger.IsEnable(), true);
+    } else {
+        logger.InitLogFile(nomalIncrLogPath);
+        EXPECT_EQ(logger.IsEnable(), false);
+        Cangjie::FileUtil::CreateDirs(".cached/");
+        logger.InitLogFile(nomalIncrLogPath);
+        EXPECT_EQ(logger.IsEnable(), true);
+    }
 }

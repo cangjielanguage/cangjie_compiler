@@ -4,10 +4,10 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-#include "cangjie/Basic/Utils.h"
 #include <string>
 #include <utility>
 #include <vector>
+#include "cangjie/Basic/Utils.h"
 
 #include "gtest/gtest.h"
 using namespace Cangjie;

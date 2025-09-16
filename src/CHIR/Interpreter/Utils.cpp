@@ -11,7 +11,9 @@
  */
 
 #include "cangjie/CHIR/Interpreter/Utils.h"
+
 #include <securec.h>
+#include "cangjie/CHIR/Interpreter/InterpreterValueUtils.h"
 
 using namespace Cangjie::CHIR;
 using namespace Cangjie::CHIR::Interpreter;
@@ -136,12 +138,6 @@ OpCode Interpreter::BinExprKindWitException2OpCode(Cangjie::CHIR::ExprKind exprK
             return OpCode::BIN_RSHIFT_EXC;
         case ExprKind::NEG:
             return OpCode::UN_NEG_EXC;
-        case ExprKind::BITAND:
-            return OpCode::BIN_BITAND_EXC;
-        case ExprKind::BITOR:
-            return OpCode::BIN_BITOR_EXC;
-        case ExprKind::BITXOR:
-            return OpCode::BIN_BITXOR_EXC;
         default: {
             CJC_ASSERT(false);
             return OpCode::INVALID;
@@ -149,7 +145,7 @@ OpCode Interpreter::BinExprKindWitException2OpCode(Cangjie::CHIR::ExprKind exprK
     }
 }
 
-IVal Interpreter::ByteCodeToIval(const Bchir::Definition& def)
+IVal Interpreter::ByteCodeToIval(const Bchir::Definition& def, const Bchir& bchir, Bchir& topBchir)
 {
     switch (static_cast<OpCode>(def.Get(0))) {
         case OpCode::UINT8:
@@ -198,10 +194,26 @@ IVal Interpreter::ByteCodeToIval(const Bchir::Definition& def)
             return {IValUtils::PrimitiveValue<IRune>(def.Get(1))};
         case OpCode::BOOL:
             return {IValUtils::PrimitiveValue<IBool>(def.Get(1))};
-        case OpCode::UNIT:
-            return {IUnit()};
         case OpCode::NULLPTR:
             return {INullptr()};
+        case OpCode::STRING: {
+            // string values in the interpreter need to match the definition in core
+            /* OPTIMIZE:
+            Instead of having a section of std::strings literals and converting them to match
+            core library RawArray<UInt8> during interpretation, we can have a section of
+            IArray strings, and during interpretation we just create an IPtr pointing to the
+            corresponding IArray string. This is correct because strings are immutable in CJ.
+            Also, the Unicode size of the string should be calculated on translation */
+            auto strIdx = def.Get(1);
+            auto& str = bchir.GetString(strIdx);
+            auto array = topBchir.StoreStringArray(IValUtils::StringToArray(str));
+            auto ptr = IPointer();
+            ptr.content = array;
+
+            auto tuple = ITuple{{ptr, IValUtils::PrimitiveValue<IUInt32>(uint32_t(0)),
+                IValUtils::PrimitiveValue<IUInt32>(static_cast<uint32_t>(str.size()))}};
+            return {tuple};
+        }
         default:
             CJC_ASSERT(false);
             return {INullptr()};

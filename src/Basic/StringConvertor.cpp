@@ -72,7 +72,7 @@ std::optional<std::string> UTF16ToCodePage(unsigned codepage, std::wstring& utf1
  * 1111_10XX 10XX_XXXX 10XX_XXXX 10XX_XXXX 10XX_XXXX
  * 1111_110X 10XX_XXXX 10XX_XXXX 10XX_XXXX 10XX_XXXX 10XX_XXXX
  */
-inline size_t PreNum(unsigned char byte)
+size_t PreNum(unsigned char byte)
 {
     unsigned char mask = 0x80;
     size_t num = 0;
@@ -373,7 +373,9 @@ std::optional<std::string> StringConvertor::UTF8ToGBK(const std::string& utf8Str
     if (!utf16.has_value()) {
         return {};
     }
-    std::optional<std::string> gbk = UTF16ToCodePage(CP_ACP, utf16.value());
+    // Code Page 936 is the identifier for the GBK encoding in the Windows operating system.
+    const static unsigned gbkCode = 936;
+    std::optional<std::string> gbk = UTF16ToCodePage(gbkCode, utf16.value());
     return gbk;
 }
 

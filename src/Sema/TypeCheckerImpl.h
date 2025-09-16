@@ -20,6 +20,7 @@
 #include "TypeCheckUtil.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Symbol.h"
+#include "cangjie/AST/Types.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Modules/ImportManager.h"
@@ -542,6 +543,25 @@ private:
     void ReArrangeForInIterExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
     void ReArrangeForInStringExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
     void DesugarTryWithResourcesExpr(ASTContext& ctx, AST::TryExpr& te);
+
+    OwnedPtr<AST::Expr> ConstructOptionMatch(OwnedPtr<AST::Expr> selector, OwnedPtr<AST::Block> someExpr,
+        OwnedPtr<AST::Block> otherExpr, AST::RefExpr& someVar, Ptr<AST::Ty> someTy) const;
+
+    void DesugarTryToFrame(ASTContext& ctx, AST::TryExpr& te);
+    void DesugarPerform(ASTContext& ctx, AST::PerformExpr& pe);
+    void DesugarResume(ASTContext& ctx, AST::ResumeExpr& re);
+    void DesugarImmediateResume(ASTContext& ctx, AST::ResumeExpr& re);
+    OwnedPtr<AST::Expr> GetHelperFrameMethod(
+        AST::Node& base, const std::string& methodName, std::vector<Ptr<AST::Ty>> typeArgs);
+    void CreateResult(
+        ASTContext& ctx, const AST::TryExpr& te, AST::VarDecl& frame, std::vector<OwnedPtr<AST::Node>>& block);
+    void CreateSetHandler(
+        ASTContext& ctx, AST::TryExpr& te, AST::VarDecl& frame, std::vector<OwnedPtr<AST::Node>>& block);
+    void CreateSetFinally(
+        ASTContext& ctx, AST::TryExpr& te, AST::VarDecl& frame, std::vector<OwnedPtr<AST::Node>>& block);
+    AST::VarDecl& CreateFrame(ASTContext& ctx, AST::TryExpr& te, std::vector<OwnedPtr<AST::Node>>& block);
+    void EncloseTryLambda(ASTContext& ctx, OwnedPtr<AST::LambdaExpr>& tryLambda);
+
     /* Synthesize specialized for desugar after sema. Will not recover previous desugar results */
     Ptr<AST::Ty> SynthesizeWithoutRecover(ASTContext& ctx, Ptr<AST::Node> node);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
@@ -678,13 +698,21 @@ private:
 
     bool SynLetPatternDestructor(
         ASTContext& ctx, AST::LetPatternDestructor& lpd, bool suppressIntroducingVariableError);
+    std::optional<Ptr<AST::ClassTy>> PromoteToCommandTy(const AST::Node& cause, AST::Ty& cmdTy);
     Ptr<AST::Ty> SynThrowExpr(ASTContext& ctx, AST::ThrowExpr& te);
+    Ptr<AST::Ty> SynPerformExpr(ASTContext& ctx, AST::PerformExpr& pe);
+    Ptr<AST::Ty> SynResumeExpr(ASTContext& ctx, AST::ResumeExpr& re);
     Ptr<AST::Ty> SynTryExpr(ASTContext& ctx, AST::TryExpr& te);
     Ptr<AST::Ty> SynTryWithResourcesExpr(ASTContext& ctx, AST::TryExpr& te);
-    std::optional<Ptr<AST::Ty>> SynTryExprCatches(ASTContext& ctx, AST::TryExpr& te);
+    std::optional<Ptr<AST::Ty>> SynTryExprCatchesAndHandles(ASTContext& ctx, AST::TryExpr& te);
+    bool SynHandler(ASTContext& ctx, AST::Handler& handler, Ptr<AST::Ty> tgtTy, AST::TryExpr& te);
     bool ChkTryExpr(ASTContext& ctx, AST::Ty& tgtTy, AST::TryExpr& te);
-    bool ChkTryExprCatches(ASTContext& ctx, AST::Ty& tgtTy, AST::TryExpr& te);
+    bool ChkTryExprCatchesAndHandles(ASTContext& ctx, AST::Ty& tgtTy, AST::TryExpr& te);
     bool ChkTryExprCatchPatterns(ASTContext& ctx, AST::TryExpr& te);
+    bool ChkTryExprHandlePatterns(ASTContext& ctx, AST::TryExpr& te);
+    bool ChkHandler(ASTContext& ctx, AST::Handler& handler, AST::Ty& tgtTy);
+    bool ValidateBlockInTryHandle(AST::Block& block);
+    bool ValidateHandler(AST::Handler& h);
     bool ChkTryExprFinallyBlock(ASTContext& ctx, const AST::TryExpr& te);
     bool ChkQuoteExpr(ASTContext& ctx, AST::Ty& target, AST::QuoteExpr& qe);
     Ptr<AST::Ty> SynQuoteExpr(ASTContext& ctx, AST::QuoteExpr& qe);
@@ -1028,6 +1056,10 @@ private:
     bool ChkEnumPattern(ASTContext& ctx, AST::Ty& target, AST::EnumPattern& p);
     bool ChkVarOrEnumPattern(ASTContext& ctx, AST::Ty& target, AST::VarOrEnumPattern& p);
     bool ChkExceptTypePattern(ASTContext& ctx, AST::ExceptTypePattern& etp, std::vector<Ptr<AST::Ty>>& included);
+    bool ChkHandlePatterns(ASTContext& ctx, AST::Handler& h,
+        std::vector<Ptr<AST::Ty>>& included);
+    std::optional<Ptr<AST::Ty>> ChkCommandTypePattern(
+        ASTContext& ctx, AST::CommandTypePattern& ctp, std::vector<Ptr<AST::Ty>>& included);
     bool ChkTryWildcardPattern(Ptr<AST::Ty> target, AST::WildcardPattern& p, std::vector<Ptr<AST::Ty>>& included);
     void FindEnumPatternTarget(ASTContext& ctx, Ptr<AST::EnumDecl> ed, AST::EnumPattern& ep);
     std::vector<Ptr<AST::Decl>> FindEnumPatternTargets(ASTContext& ctx, Ptr<AST::EnumDecl> ed, AST::EnumPattern& ep);
@@ -1173,7 +1205,7 @@ private:
     void CheckQualifiedType(const ASTContext& ctx, AST::QualifiedType& qt);
     bool IsGenericTypeWithTypeArgs(AST::Type& type) const;
     // Returns true if further checks can be omitted.
-    bool CheckRefExprCheckTyArgs(const AST::RefType& rt, const AST::Decl& target) const;
+    bool CheckRefExprCheckTyArgs(const AST::RefType& rt, const AST::Decl& target);
     bool CheckRefTypeCheckAccessLegality(const ASTContext& ctx, AST::RefType& rt, const AST::Decl& target);
     void CheckRefTypeWithRealTarget(AST::RefType& rt);
     void HandleAliasForRefType(AST::RefType& rt, Ptr<AST::Decl>& target);
@@ -1375,6 +1407,7 @@ private:
      * will trigger the check.
      * */
     void CheckInstDupSuperInterfacesEntry(AST::Node& n);
+    void CheckUnusedImportSpec(AST::Package& pkg);
     AST::VisitAction CheckInstDupSuperInterfaces(const AST::Type& type);
     AST::VisitAction CheckInstDupSuperInterfaces(const AST::Expr& expr);
     /**
@@ -1516,6 +1549,7 @@ private:
      */
     void CheckAccessLegalityOfRefExpr(const ASTContext& ctx, AST::RefExpr& re);
     void CheckAccessLegalityOfMemberAccess(const ASTContext& ctx, AST::MemberAccess& ma);
+    void CheckTypeArgLegalityOfJArrayCtor(const AST::NameReferenceExpr& re);
     void CheckStaticMemberAccessLegality(const AST::MemberAccess& ma, const AST::Decl& target);
     void CheckInstanceMemberAccessLegality(const ASTContext& ctx, const AST::MemberAccess& ma, const AST::Decl& target);
     void CheckLegalityOfReference(ASTContext& ctx, AST::Node& node);
@@ -1639,7 +1673,7 @@ private:
     friend class EnumSugarChecker;
     friend class InstCtxScope;
     bool ChkIfAvailableExpr(ASTContext& ctx, AST::Ty& ty, AST::IfAvailableExpr& ie);
-    Ptr<AST::Ty> SynIfAvailableExpr(ASTContext& ctx, AST::IfAvailableExpr& ie);
+    Ptr<AST::Ty> SynIfAvailableExpr(ASTContext& ctx, AST::IfAvailableExpr& iae);
 
     /** Members */
     Promotion promotion;

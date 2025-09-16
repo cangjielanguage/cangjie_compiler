@@ -6,7 +6,7 @@
 
 #include "cangjie/CHIR/Value.h"
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/ToStringUtils.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Type/CustomTypeDef.h"
@@ -173,10 +173,10 @@ void Value::ReplaceWith(Value& newValue, const BlockGroup* scope)
 {
     std::vector<Expression*> oldUsers{users};
     for (auto user : oldUsers) {
-        if (user->GetParent() == nullptr) {
+        if (user->GetParentBlock() == nullptr) {
             continue;
         }
-        if (scope == nullptr || IsNestedBlockOf(user->GetParent()->GetParentBlockGroup(), scope)) {
+        if (scope == nullptr || IsNestedBlockOf(user->GetParentBlock()->GetParentBlockGroup(), scope)) {
             user->ReplaceOperand(this, &newValue);
         }
     }
@@ -217,16 +217,6 @@ void Value::SetAnnoInfo(AnnoInfo&& info)
     annoInfo = std::move(info);
 }
 
-void Value::SetJavaAnnoInfo(JavaAnnoInfo&& info)
-{
-    jAnnoInfo = std::move(info);
-}
-
-const JavaAnnoInfo& Value::GetJavaAnnoInfo() const
-{
-    return jAnnoInfo;
-}
-
 void Value::ClearUsersOnly()
 {
     users.clear();
@@ -261,13 +251,13 @@ Func* Parameter::GetOwnerFunc() const
     return ownerFunc;
 }
 
-Func* Parameter::GetParentFunc() const
+Func* Parameter::GetTopLevelFunc() const
 {
     if (ownerFunc != nullptr) {
         return ownerFunc;
     }
     CJC_NULLPTR_CHECK(ownerLambda);
-    return ownerLambda->GetParentFunc();
+    return ownerLambda->GetTopLevelFunc();
 }
 
 Lambda* Parameter::GetOwnerLambda() const
@@ -340,10 +330,10 @@ bool LocalVar::IsRetValue() const
     return isRetValue;
 }
 
-Func* LocalVar::GetParentFunc() const
+Func* LocalVar::GetTopLevelFunc() const
 {
     CJC_NULLPTR_CHECK(expr);
-    return expr->GetParentFunc();
+    return expr->GetTopLevelFunc();
 }
 
 const DebugLocation& LocalVar::GetDebugLocation() const
@@ -542,7 +532,7 @@ void Block::AppendExprOnly(Expression& expr)
 void Block::AppendNonTerminatorExpression(Expression* expression)
 {
     CJC_ASSERT(!expression->IsTerminator());
-    expression->GetParent()->RemoveExprOnly(*expression);
+    expression->GetParentBlock()->RemoveExprOnly(*expression);
     expression->SetParent(this);
     AppendExprOnly(*expression);
 }
@@ -603,11 +593,11 @@ void Block::AppendTerminator(Terminator* term)
     }
 }
 
-Func* Block::GetParentFunc() const
+Func* Block::GetTopLevelFunc() const
 {
     auto blockGroup = GetParentBlockGroup();
     CJC_NULLPTR_CHECK(blockGroup);
-    return blockGroup->GetParentFunc();
+    return blockGroup->GetTopLevelFunc();
 }
 
 Terminator* Block::GetTerminator() const
@@ -672,7 +662,7 @@ void Block::InsertExprIntoHead(Expression& expr)
     CJC_ASSERT(!expr.IsTerminator());
     // 1. remove expr from expr's parent block
     if (expr.parent != nullptr) {
-        expr.GetParent()->RemoveExprOnly(expr);
+        expr.GetParentBlock()->RemoveExprOnly(expr);
     }
 
     // 2. insert expr to head of current block
@@ -744,7 +734,7 @@ size_t Block::GetExpressionsNum() const
     size_t res = 0;
     for (auto expr : exprs) {
         if (expr->GetExprKind() == ExprKind::LAMBDA) {
-            res += StaticCast<Lambda*>(expr)->GetLambdaBody()->GetExpressionsNum();
+            res += StaticCast<Lambda*>(expr)->GetBody()->GetExpressionsNum();
         }
     }
     res += exprs.size();
@@ -760,25 +750,13 @@ void BlockGroup::RemoveBlock(Block& block)
     blocks.erase(std::remove(blocks.begin(), blocks.end(), &block), blocks.end());
 }
 
-Func* BlockGroup::GetParentFunc() const
+Func* BlockGroup::GetTopLevelFunc() const
 {
     if (ownerFunc != nullptr) {
         return ownerFunc;
     }
     CJC_ASSERT(users.size() == 1);
-    return users[0]->GetParentFunc();
-}
-
-void BlockGroup::SetOwnedLambda(Lambda& lambda)
-{
-    if (ownerFunc) {
-        ownerFunc->RemoveBody();
-    } else if (auto lambdaExpr = DynamicCast<Lambda*>(ownerExpression)) {
-        lambdaExpr->RemoveBody();
-    }
-    RemoveUserOnly(ownerExpression);
-    AddUserOnly(&lambda);
-    lambda.AppendBlockGroup(*this);
+    return users[0]->GetTopLevelFunc();
 }
 
 void BlockGroup::SetOwnerFunc(Func* func)
@@ -818,12 +796,29 @@ void BlockGroup::SetEntryBlock(Block* block)
     entryBlock = block;
 }
 
-void BlockGroup::SetOwnerExpression(Expression* expr)
+void BlockGroup::SetOwnerExpression(Expression& expr)
 {
-    if (auto lambda = DynamicCast<Lambda*>(expr)) {
-        SetOwnedLambda(*lambda);
+#ifndef NDEBUG
+    // we can't move func or lambdas' body to other expression, vice versa
+    if (expr.IsLambda()) {
+        CJC_ASSERT(ownerExpression == nullptr || ownerExpression->IsLambda());
+    } else {
+        CJC_ASSERT(ownerFunc == nullptr && (ownerExpression == nullptr || !ownerExpression->IsLambda()));
     }
-    ownerExpression = expr;
+#endif
+    if (auto lambda = DynamicCast<Lambda*>(&expr)) {
+        if (ownerFunc) {
+            ownerFunc->RemoveBody();
+            ownerFunc = nullptr;
+        } else if (auto lambdaExpr = DynamicCast<Lambda*>(ownerExpression)) {
+            lambdaExpr->RemoveBody();
+        }
+    }
+    if (ownerExpression) {
+        RemoveUserOnly(ownerExpression);
+    }
+    ownerExpression = &expr;
+    AddUserOnly(&expr);
 }
 
 Func* BlockGroup::GetOwnerFunc() const
@@ -913,7 +908,7 @@ BlockGroup* BlockGroup::Clone(CHIRBuilder& builder, Func& newFunc) const
 
 BlockGroup* BlockGroup::Clone(CHIRBuilder& builder, Lambda& newLambda) const
 {
-    auto parentFunc = newLambda.GetParentFunc();
+    auto parentFunc = newLambda.GetTopLevelFunc();
     CJC_NULLPTR_CHECK(parentFunc);
     auto newGroup = builder.CreateBlockGroup(*parentFunc);
     if (newLambda.GetBody() == nullptr) {
@@ -969,6 +964,11 @@ LocalVar* FuncBody::GetReturnValue() const
 void FuncBody::RemoveBody()
 {
     body = nullptr;
+}
+
+void FuncBody::RemoveParams()
+{
+    parameters.clear();
 }
 
 void FuncBody::AddParam(Parameter& param)
@@ -1075,6 +1075,33 @@ const std::string& FuncBase::GetRawMangledName() const
 void FuncBase::SetRawMangledName(const std::string& name)
 {
     rawMangledName = name;
+}
+
+bool FuncBase::IsConstructor() const
+{
+    return (funcKind == FuncKind::CLASS_CONSTRUCTOR || funcKind == FuncKind::STRUCT_CONSTRUCTOR ||
+        funcKind == FuncKind::PRIMAL_CLASS_CONSTRUCTOR || funcKind == FuncKind::PRIMAL_STRUCT_CONSTRUCTOR) &&
+        !TestAttr(Attribute::STATIC);
+}
+
+bool FuncBase::IsFinalizer() const
+{
+    return funcKind == FuncKind::FINALIZER;
+}
+
+bool FuncBase::IsLambda() const
+{
+    return funcKind == FuncKind::LAMBDA;
+}
+
+bool FuncBase::IsGVInit() const
+{
+    return funcKind == FuncKind::GLOBALVAR_INIT;
+}
+
+bool FuncBase::IsPrimalConstructor() const
+{
+    return funcKind == FuncKind::PRIMAL_CLASS_CONSTRUCTOR || funcKind == FuncKind::PRIMAL_STRUCT_CONSTRUCTOR;
 }
 
 bool FuncBase::IsCFunc() const
@@ -1189,33 +1216,6 @@ std::vector<GenericType*> FuncBase::GetOriginalGenericTypeParams() const
     return funcKind == LAMBDA ? originalLambdaInfo.genericTypeParams : GetGenericTypeParams();
 }
 
-bool FuncBase::IsConstructor() const
-{
-    return (funcKind == FuncKind::CLASS_CONSTRUCTOR || funcKind == FuncKind::STRUCT_CONSTRUCTOR ||
-        funcKind == FuncKind::PRIMAL_CLASS_CONSTRUCTOR || funcKind == FuncKind::PRIMAL_STRUCT_CONSTRUCTOR) &&
-        !TestAttr(Attribute::STATIC);
-}
-
-bool FuncBase::IsFinalizer() const
-{
-    return funcKind == FuncKind::FINALIZER;
-}
-
-bool FuncBase::IsLambda() const
-{
-    return funcKind == FuncKind::LAMBDA;
-}
-
-bool FuncBase::IsGVInit() const
-{
-    return funcKind == FuncKind::GLOBALVAR_INIT;
-}
-
-bool FuncBase::IsPrimalConstructor() const
-{
-    return funcKind == FuncKind::PRIMAL_CLASS_CONSTRUCTOR || funcKind == FuncKind::PRIMAL_STRUCT_CONSTRUCTOR;
-}
-
 Func::Func(Type* ty, const std::string& identifier, const std::string& srcCodeIdentifier,
     const std::string& rawMangledName, const std::string& packageName,
     const std::vector<GenericType*>& genericTypeParams)
@@ -1247,6 +1247,11 @@ BlockGroup* Func::GetBody() const
 void Func::RemoveBody()
 {
     body.RemoveBody();
+}
+
+void Func::RemoveParams()
+{
+    body.RemoveParams();
 }
 
 void Func::InitBody(BlockGroup& newBody)

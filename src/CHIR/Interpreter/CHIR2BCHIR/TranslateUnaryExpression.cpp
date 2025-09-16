@@ -22,5 +22,5 @@ void CHIR2BCHIR::TranslateUnaryExpression(Context& ctx, const Expression& expr)
     auto unaryExpression = StaticCast<const UnaryExpression*>(&expr);
     auto typeKind = expr.GetResult()->GetType()->GetTypeKind();
     auto overflow = static_cast<Bchir::ByteCodeContent>(unaryExpression->GetOverflowStrategy());
-    PushOpCodeWithAnnotations(ctx, opCode, expr, typeKind, overflow);
+    PushOpCodeWithAnnotations<false, true>(ctx, opCode, expr, typeKind, overflow);
 }

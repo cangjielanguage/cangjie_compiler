@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "cangjie/CHIR/Interpreter/OpCodes.h"
+#include "cangjie/CHIR/Interpreter/InterpreterValue.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
 
@@ -69,8 +70,6 @@ public:
         void Push(Bchir::ByteCodeContent value);
         /** @brief push a 8 bytes value */
         void Push8bytes(uint64_t value);
-        /** @brief append anotherDef bytecode to this bytecode */
-        void Append(const Definition& anotherDef);
         /** @brief sets value at index in the bytecode. */
         void Set(ByteCodeIndex index, Bchir::ByteCodeContent value);
         /** @brief sets opcode at index in the bytecode. */
@@ -89,8 +88,6 @@ public:
             return bytecode[static_cast<size_t>(index)] +
                 (static_cast<uint64_t>(bytecode[static_cast<size_t>(index) + 1]) << byteCodeContentWidth);
         }
-        /** @brief reserve space for bytecode array. */
-        void Reserve(size_t size);
         /** @brief get size of bytecode */
         size_t Size() const;
         /** @brief next available index (same as Size, but returns ByteCodeIndex). */
@@ -105,8 +102,6 @@ public:
         ByteCodeContent GetNumLVars() const;
         /** @brief set number of arguments */
         void SetNumArgs(ByteCodeContent num);
-        /** @brief get number of arguments */
-        ByteCodeContent GetNumArgs() const;
 
         // Annotations
 
@@ -222,8 +217,6 @@ public:
 
     /** @brief get linkedByteCode */
     const Definition& GetLinkedByteCode() const;
-    /** @brief gst linkedByteCode */
-    void SetLinkedByteCode(Definition&& def);
 
     /** @brief get value at index from linkedByteCode */
     inline ByteCodeContent Get(ByteCodeIndex index) const
@@ -248,14 +241,11 @@ public:
     const std::string& GetString(size_t index) const;
     /** @brief get all strings */
     const std::vector<std::string>& GetStrings() const;
-    /** @brief set string section */
-    void SetStrings(std::vector<std::string>&& strs);
+    IVal* StoreStringArray(IArray&& array);
 
     /** @brief get types section */
     const std::vector<Cangjie::CHIR::Type*>& GetTypes() const;
 
-    /** @brief set type section */
-    void SetTypes(std::vector<Cangjie::CHIR::Type*>&& tys);
     /** @brief Adds a new type to the types section and returns its index. */
     size_t AddType(Cangjie::CHIR::Type& ty);
     /** @brief Retrieves a type from the types section
@@ -340,6 +330,8 @@ private:
     std::vector<Type*> types;
     /** @brief section for string literals */
     std::vector<std::string> strings;
+    /** @brief IArrays for const strings. Only for linked BCHIR. */
+    std::vector<std::unique_ptr<IVal>> stringArrays;
     /** @brief all the file names */
     std::vector<std::string> fileNames;
     /** @brief main function mangled name */

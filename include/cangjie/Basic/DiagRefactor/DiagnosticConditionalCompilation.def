@@ -6,13 +6,16 @@
 
 ERROR(conditional_compilation_diag_begin, "")
 ERROR(conditional_compilation_not_support_op, "conditional compilation '%s' not support this op '%s'")
-ERROR(conditional_compilation_not_support_this_condition, "conditional compilation have not supported this condition: '%s'")
-ERROR(conditional_compilation_not_support_builtin_value, "builtin condition '%s' do not support '%s', supported listed: '%s'")
+ERROR(conditional_compilation_not_support_this_condition,
+    "conditional compilation have not supported this condition: '%s'")
+ERROR(conditional_compilation_not_support_builtin_value,
+    "builtin condition '%s' do not support '%s', supported listed: '%s'")
 ERROR(conditional_compilation_not_support_cjc_version_format, "cjc version's format should be 'xx.xx.xx'")
 ERROR(conditional_compilation_invalid_condition_expr, "conditional compilation not support this expression")
 ERROR(conditional_compilation_not_have_condition_expr, "conditional compilation should have condition expression")
 ERROR(conditional_compilation_invalid_condition_value,
     "conditional compilation's condition value should be string literal without interpolation")
-ERROR(conditional_compilation_just_support_block, "conditional compilation macro '@If' and '@Else' only support used in block")
+ERROR(conditional_compilation_just_support_block,
+    "conditional compilation macro '@If' and '@Else' only support used in block")
 ERROR(conditional_compilation_unexpected_after_macro, "unexpected conditional compilation directive")
 ERROR(conditional_compilation_diag_end, "")

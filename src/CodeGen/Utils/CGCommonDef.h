@@ -138,14 +138,14 @@ const std::unordered_map<CHIR::BooleanType::TypeKind, std::pair<int64_t, int64_t
     {CHIR::BooleanType::TypeKind::TYPE_INT64,
         {std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()}},
     {CHIR::BooleanType::TypeKind::TYPE_INT_NATIVE,
-        {std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()}}};
+        {std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()}}};
 
 const std::unordered_map<CHIR::Type::TypeKind, uint64_t> G_UNSIGNED_INT_MAP = {
     {CHIR::Type::TypeKind::TYPE_UINT8, std::numeric_limits<uint8_t>::max()},
     {CHIR::Type::TypeKind::TYPE_UINT16, std::numeric_limits<uint16_t>::max()},
     {CHIR::Type::TypeKind::TYPE_UINT32, std::numeric_limits<uint32_t>::max()},
     {CHIR::Type::TypeKind::TYPE_UINT64, std::numeric_limits<uint64_t>::max()},
-    {CHIR::Type::TypeKind::TYPE_UINT_NATIVE, std::numeric_limits<uint32_t>::max()}};
+    {CHIR::Type::TypeKind::TYPE_UINT_NATIVE, std::numeric_limits<uint64_t>::max()}};
 
 const std::set<std::string> REFLECT_INTRINSIC_FUNC = {"CJ_MCC_ApplyCJInstanceMethod", "CJ_MCC_ApplyCJStaticMethod",
     "CJ_MCC_ApplyCJGenericInstanceMethod", "CJ_MCC_ApplyCJGenericStaticMethod", "CJ_MCC_CheckMethodActualArgs",
@@ -205,6 +205,10 @@ const std::unordered_map<CHIR::IntrinsicKind, llvm::Intrinsic::ID> INTRINSIC_KIN
     {CHIR::IntrinsicKind::STOP_CJ_CPU_PROFILING, llvm::Intrinsic::cj_stop_cpu_profiling},
     {CHIR::IntrinsicKind::INVOKE_GC, llvm::Intrinsic::cj_invoke_gc},
     {CHIR::IntrinsicKind::SET_GC_THRESHOLD, llvm::Intrinsic::cj_set_gc_threshold},
+    {CHIR::IntrinsicKind::CROSS_ACCESS_BARRIER, llvm::Intrinsic::cj_cross_access_barrier},
+    {CHIR::IntrinsicKind::CREATE_EXPORT_HANDLE, llvm::Intrinsic::cj_create_export_handle},
+    {CHIR::IntrinsicKind::GET_EXPORTED_REF, llvm::Intrinsic::cj_get_exported_ref},
+    {CHIR::IntrinsicKind::REMOVE_EXPORTED_REF, llvm::Intrinsic::cj_remove_exported_ref},
     // math
     {CHIR::IntrinsicKind::ABS, llvm::Intrinsic::abs}, {CHIR::IntrinsicKind::POW, llvm::Intrinsic::pow},
     {CHIR::IntrinsicKind::POWI, llvm::Intrinsic::powi}, {CHIR::IntrinsicKind::FABS, llvm::Intrinsic::fabs},

@@ -7,6 +7,7 @@
 #ifndef CANGJIE_CHIR_SERIALIZER_DESERIALIZER_H
 #define CANGJIE_CHIR_SERIALIZER_DESERIALIZER_H
 
+#include "cangjie/CHIR/CHIR.h"
 #include "cangjie/CHIR/CHIRBuilder.h"
 
 #include <string>
@@ -16,7 +17,8 @@ class CHIRDeserializer {
     class CHIRDeserializerImpl;
 
 public:
-    static void Deserialize(const std::string& fileName, Cangjie::CHIR::CHIRBuilder& chirBuilder);
+    static bool Deserialize(const std::string& fileName, Cangjie::CHIR::CHIRBuilder& chirBuilder, ToCHIR::Phase& phase,
+        bool compilePlatform = false);
 
 private:
     explicit CHIRDeserializer()

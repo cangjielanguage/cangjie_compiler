@@ -18,7 +18,7 @@
 namespace Cangjie::CHIR {
 class GlobalDeclAnalysis {
 public:
-    GlobalDeclAnalysis(DiagAdapter& ciDiag, const GenericInstantiationManager& gim, IncreKind kind,
+    GlobalDeclAnalysis(DiagAdapter& ciDiag, const GenericInstantiationManager* gim, IncreKind kind,
         const ElementList<Ptr<const AST::Decl>>& funcsAndVars, const ElementList<Ptr<const AST::Decl>>& localConstVars,
         const StaticInitInfoMap& staticInitFuncInfoMap)
         : diag(&ciDiag),
@@ -84,7 +84,7 @@ private:
     InitOrder SortLocalConstVarDep(const InitOrder& initOrder);
 
     DiagAdapter* diag;
-    const GenericInstantiationManager& gim;
+    const GenericInstantiationManager* gim;
     IncreKind kind;
 
     // All funcs and variables which will form the dependency graph by their dependencies

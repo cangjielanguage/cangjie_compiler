@@ -303,20 +303,6 @@ inline void SetSkipPrintWarning(Ptr<Value> value)
     value->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
 }
 
-inline bool ShouldInGlobalTable(const AST::Node& node)
-{
-    // 'NominalDecl' is stored to indicate 'this' and should be found from local table.
-    if (node.TestAttr(AST::Attribute::GLOBAL) && !node.IsNominalDecl()) {
-        return true;
-    }
-
-    const auto decl = DynamicCast<const AST::Decl*>(&node);
-    if (decl != nullptr && decl->outerDecl != nullptr && decl->outerDecl->astKind != AST::ASTKind::FUNC_DECL) {
-        return true;
-    }
-    return false;
-}
-
 inline void MergeEffectMap(const OptEffectCHIRMap& from, OptEffectCHIRMap& to)
 {
     for (auto fromIt : from) {
@@ -327,11 +313,6 @@ inline void MergeEffectMap(const OptEffectCHIRMap& from, OptEffectCHIRMap& to)
             toIt->second.merge(fromIt.second);
         }
     }
-}
-
-inline bool IsInstantiatedJArray([[maybe_unused]] const AST::ClassLikeDecl& cld)
-{
-    return false;
 }
 
 /**
@@ -428,7 +409,7 @@ Ptr<Value> TypeCastOrBoxIfNeeded(
 template <typename TExpr, typename... Args> TExpr* CreateAndAppendExpression(CHIRBuilder& builder, Args&&... args)
 {
     auto expr = builder.CreateExpression<TExpr>(args...);
-    expr->GetParent()->AppendExpression(expr);
+    expr->GetParentBlock()->AppendExpression(expr);
     return expr;
 }
 
@@ -444,7 +425,7 @@ template <typename TExpr, typename... Args> TExpr* CreateAndAppendExpression(CHI
 template <typename TExpr, typename... Args> TExpr* CreateAndAppendTerminator(CHIRBuilder& builder, Args&&... args)
 {
     auto expr = builder.CreateTerminator<TExpr>(args...);
-    expr->GetParent()->AppendExpression(expr);
+    expr->GetParentBlock()->AppendExpression(expr);
     return expr;
 }
 
@@ -513,8 +494,8 @@ Type* CreateBoxTypeRef(Type& baseTy, CHIRBuilder& builder);
 
 class GenericTypeConvertor {
 public:
-    GenericTypeConvertor(const std::unordered_map<const GenericType*, Type*>& instMap, CHIRBuilder& builder) :
-        instMap(instMap), builder(builder) {}
+    GenericTypeConvertor(const std::unordered_map<const GenericType*, Type*>& instMap, CHIRBuilder& builder)
+        : instMap(instMap), builder(builder) {}
     Type* ConvertToInstantiatedType(Type& type);
 
 private:
@@ -650,6 +631,14 @@ bool IsCoreObject(const CustomTypeDef& def);
 bool IsCoreOption(const CustomTypeDef& def);
 
 /**
+ * @brief Checks if a custom type definition is the core 'Future' type.
+ *
+ * @param def The custom type definition to check.
+ * @return True if the custom type definition is the core 'Future' type, false otherwise.
+ */
+bool IsCoreFuture(const CustomTypeDef& def);
+
+/**
  * @brief Checks if a class definition is a closure conversion environment class.
  *
  * @param def The class definition to check.
@@ -671,7 +660,7 @@ bool IsCapturedClass(const ClassDef& def);
  * @param value The value to retrieve the parent function from.
  * @return The parent function of the given value.
  */
-Func* GetParentFunc(const Value& value);
+Func* GetTopLevelFunc(const Value& value);
 
 /**
  * @brief Retrieves the visible generic types for a given value.
@@ -729,5 +718,16 @@ bool IsStructOrExtendMethod(const Value& value);
  * @return True if the value is a constructor, false otherwise.
  */
 bool IsConstructor(const Value& value);
+bool IsInstanceVarInit(const Value& value);
+
+std::vector<ClassType*> GetSuperTypesRecusively(Type& subType, CHIRBuilder& builder);
+
+Type* GetInstParentCustomTypeForApplyCallee(const Apply& expr, CHIRBuilder& builder);
+Type* GetInstParentCustomTypeForAweCallee(const ApplyWithException& expr, CHIRBuilder& builder);
+
+std::vector<VTableSearchRes> GetFuncIndexInVTable(
+    Type& root, const FuncCallType& funcCallType, bool isStatic, CHIRBuilder& builder);
+
+bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType);
 } // namespace Cangjie::CHIR
 #endif

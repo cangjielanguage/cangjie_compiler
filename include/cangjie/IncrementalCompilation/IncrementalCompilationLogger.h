@@ -92,15 +92,19 @@ private:
     IncrementalCompilationLogger() {}
     ~IncrementalCompilationLogger() noexcept
     {
+#ifndef CANGJIE_ENABLE_GCOV
         try {
+#endif
             if (fileStream.is_open()) {
                 fileStream.close();
             }
+#ifndef CANGJIE_ENABLE_GCOV
         } catch (const std::exception& e) {
             // do nothing for noexcept
         } catch (...) {
             // do nothing for noexcept
         }
+#endif
     }
     bool debugPrint{false};
     bool saveLogFile{false};

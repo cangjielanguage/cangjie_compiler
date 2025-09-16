@@ -88,16 +88,6 @@ void GIM::GenericInstantiationManagerImpl::RestoreInstantiatedDeclTy() const
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     WalkImportedInstantiations([this](Decl& decl) { RestoreInstantiatedDeclTy(decl); },
         [this](auto& pkg) { return importManager.IsMacroRelatedPackageName(pkg.fullPackageName); });
-#else
-    if (declInstantiationByTypeMap.empty()) {
-        WalkImportedInstantiations([this](Decl& decl) { RestoreInstantiatedDeclTy(decl); },
-            [this](auto& pkg) { return importManager.IsMacroRelatedPackageName(pkg.fullPackageName); });
-    } else {
-        // If 'declInstantiationByTypeMap' is not empty, restore type decl reference using the map.
-        for (auto it : declInstantiationByTypeMap) {
-            RestoreInstantiatedDeclTy(*it.second);
-        }
-    }
 #endif
 }
 
@@ -163,28 +153,6 @@ bool GIM::GenericInstantiationManagerImpl::IsDeclCanRestoredForTy(const Decl& de
     for (auto it = decls.first; it != decls.second; ++it) {
         auto instantiatedDecl = it->second;
         if (instantiatedDecl->fullPackageName == curPkg->fullPackageName) {
-            return false;
-        }
-    }
-    return true;
-#else
-    if (auto current = Ty::GetDeclOfTy(decl.ty); current && current->TestAttr(Attribute::GENERIC_INSTANTIATED) &&
-        decl.TestAttr(Attribute::IMPORTED)) {
-        // Only restore once if the decl is imported.
-        return false;
-    }
-    // If decl is in current or in a dependent package of current package, decl can be set as ty's decl.
-    auto& dependencies = importManager.GetAllDependentPackageNames(curPkg->fullPackageName);
-    if (decl.fullPackageName == curPkg->fullPackageName || dependencies.count(decl.fullPackageName)) {
-        return true;
-    }
-    // If decl is not in related package of current, decl can be set for ty if all decls are irrelevant.
-    GenericInfo genericInfo(decl.genericDecl, BuildTypeMapping(decl));
-    auto decls = declInstantiationByTypeMap.equal_range(genericInfo);
-    for (auto it = decls.first; it != decls.second; ++it) {
-        auto instantiatedDecl = it->second;
-        if (instantiatedDecl->fullPackageName == curPkg->fullPackageName ||
-            dependencies.count(instantiatedDecl->fullPackageName)) {
             return false;
         }
     }

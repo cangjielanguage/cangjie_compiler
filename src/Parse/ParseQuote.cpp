@@ -25,7 +25,9 @@ void ParserImpl::ParseQuoteDollarInterpolationWithParen(AST::QuoteExpr& qe)
         ASTKind::JUMP_EXPR};
     auto dol = lookahead;
     Skip(TokenKind::DOLLAR);
+    auto dollarPos = lastToken.Begin();
     Skip(TokenKind::LPAREN);
+    auto lpPos = lastToken.Begin();
     skipNL = true;
     OwnedPtr<Expr> expr = ParseExpr();
     CheckMacroExprRules(dol, Token{TokenKind::DOT}, *expr);
@@ -33,7 +35,15 @@ void ParserImpl::ParseQuoteDollarInterpolationWithParen(AST::QuoteExpr& qe)
     if (Utils::In(expr->astKind, INVALID_AST_KIND)) {
         ParseDiagnoseRefactor(DiagKindRefactor::parse_invalid_quote_dollar_expr, dol);
     }
-    qe.exprs.emplace_back(std::move(expr));
+    // add a level of ParenExpr to store the location of '$()', to be used by std.syntax
+    // cjc/fmt/lsp does not need it
+    auto quoteExprWrapper = MakeOwned<ParenExpr>();
+    quoteExprWrapper->expr = std::move(expr);
+    quoteExprWrapper->begin = dollarPos;
+    quoteExprWrapper->leftParenPos = lpPos;
+    quoteExprWrapper->rightParenPos = lookahead.Begin();
+    quoteExprWrapper->end = lookahead.End();
+    qe.exprs.emplace_back(std::move(quoteExprWrapper));
     if (!Seeing(TokenKind::RPAREN)) {
         DiagExpectedRightDelimiter("(", dol.Begin());
     }

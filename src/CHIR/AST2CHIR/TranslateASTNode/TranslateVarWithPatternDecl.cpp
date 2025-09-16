@@ -19,8 +19,8 @@ void Translator::HandleVarWithVarPattern(
     if (initNode != nullptr) {
         StoreRValueToLValue(*varDecl, *initNode, leftValue);
         if (leftValue->IsGlobalVarInCurPackage()) {
-            CJC_ASSERT(GetParentFunc(*initNode));
-            VirtualCast<GlobalVar*>(leftValue)->SetInitFunc(*GetParentFunc(*initNode));
+            CJC_ASSERT(GetTopLevelFunc(*initNode));
+            VirtualCast<GlobalVar*>(leftValue)->SetInitFunc(*GetTopLevelFunc(*initNode));
         }
     }
     SetSymbolTable(*varDecl, *leftValue);

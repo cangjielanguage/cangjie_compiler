@@ -25,16 +25,39 @@ public:
     explicit MockSupportManager(TypeManager& typeManager, const Ptr<MockUtils> mockUtils);
     static bool IsDeclOpenToMock(const AST::Decl& decl);
     static bool DoesClassLikeSupportMocking(AST::ClassLikeDecl& classLikeToCheck);
-    static void MarkNodeMockSupportedIfNeeded(AST::Node& node);
     static bool NeedToSearchCallsToReplaceWithAccessors(AST::Node& node);
     void GenerateSpyCallMarker(AST::Package& package);
     void GenerateAccessors(AST::Decl& decl);
-    void WriteGeneratedMockDecls();
     Ptr<AST::Expr> ReplaceExprWithAccessor(
         AST::Expr& originalExpr, bool isInConstructor, bool isSubMemberAccess = false);
-    void PrepareStaticDecls(std::vector<Ptr<AST::Decl>> decls);
-    void CollectStaticDeclsToPrepare(AST::Decl& decl, std::vector<Ptr<AST::Decl>>& decls);
+    void ReplaceInterfaceDefaultFunc(
+        AST::Expr& originalExpr, Ptr<AST::Decl> outerClassLike, bool isInMockAnnotatedLambda);
+    void ReplaceInterfaceDefaultFuncInCall(
+        AST::Node& node, Ptr<AST::Decl> outerClassLike, bool isInMockAnnotatedLambda);
+    static void MarkNodeMockSupportedIfNeeded(AST::Node& node);
+    void WriteGeneratedMockDecls();
     void PrepareToSpy(AST::Decl& decl);
+
+    struct DeclsToPrepare {
+        // - Toplevel, static functions
+        // - Instance functions from extends
+        std::vector<Ptr<AST::FuncDecl>> functions;
+
+        // Static properties
+        std::vector<Ptr<AST::PropDecl>> properties;
+
+        // Interfaces contains any methods with default implementation
+        std::vector<Ptr<AST::InterfaceDecl>> interfacesWithDefaults;
+
+        // Classes along with the interfaces that it implements (directly or through extend)
+        // with methods with default implementation
+        std::vector<std::tuple<Ptr<AST::ClassDecl>, Ptr<AST::InterfaceDecl>>> classWithInterfaceDefaults;
+    };
+
+    void PrepareDecls(DeclsToPrepare&& decls);
+    void CollectDeclsToPrepare(AST::Decl& decl, DeclsToPrepare& decls);
+
+    void PrepareClassWithDefaults(AST::ClassDecl& classDecl, AST::InterfaceDecl& interfaceDecl);
 
 private:
     TypeManager& typeManager;
@@ -42,11 +65,16 @@ private:
     std::set<OwnedPtr<AST::Decl>> generatedMockDecls;
     std::unordered_map<Ptr<AST::Decl>, Ptr<AST::VarDecl>> genericMockVarsDecls;
 
+    std::unordered_map<Ptr<AST::Ty>, std::unordered_set<Ptr<AST::Ty>>> defaultInterfaceAccessorExtends;
+
+    bool HasDefaultInterfaceAccessor(Ptr<AST::Ty> declTy, Ptr<AST::Ty> accessorInterfaceDeclTy);
+
     static void MakeOpenToMockIfNeeded(AST::Decl& decl);
-    static void MarkMockAccessorWithAttributes(AST::Decl& decl);
+    static void MarkMockAccessorWithAttributes(AST::Decl& decl, AST::AccessLevel accessLevel);
     bool IsMemberAccessOnThis(const AST::MemberAccess& memberAccess) const;
-    OwnedPtr<AST::FuncDecl> GenerateFuncAccessor(AST::FuncDecl& methodDecl) const;
-    OwnedPtr<AST::PropDecl> GeneratePropAccessor(AST::PropDecl& propDecl) const;
+    OwnedPtr<AST::FuncDecl> GenerateErasedFuncAccessor(AST::FuncDecl& methodDecl) const;
+    OwnedPtr<AST::FuncDecl> GenerateFuncAccessor(AST::FuncDecl& methodDecl);
+    OwnedPtr<AST::PropDecl> GeneratePropAccessor(AST::PropDecl& propDecl);
     std::vector<OwnedPtr<AST::Node>> GenerateFieldGetterAccessorBody(
         AST::VarDecl& fieldDecl, AST::FuncBody& funcBody, AccessorKind kind) const;
     std::vector<OwnedPtr<AST::Node>> GenerateFieldSetterAccessorBody(
@@ -59,6 +87,10 @@ private:
     Ptr<AST::Expr> ReplaceFieldGetWithAccessor(AST::MemberAccess& memberAccess, bool isInConstructor);
     Ptr<AST::Expr> ReplaceFieldSetWithAccessor(AST::AssignExpr& assignExpr, bool isInConstructor);
     Ptr<AST::Expr> ReplaceMemberAccessWithAccessor(AST::MemberAccess& memberAccess, bool isInConstructor);
+    template <typename T>
+    Ptr<T> FindGeneratedGlobalDecl(Ptr<AST::File> file, const std::string& identifier);
+    std::tuple<Ptr<AST::InterfaceDecl>, Ptr<AST::FuncDecl>> FindDefaultAccessorInterfaceAndFunction(
+        Ptr<AST::FuncDecl> original);
     void TransformAccessorCallForMutOperation(
         AST::MemberAccess& originalMa, AST::Expr& replacedMa, AST::Expr& topLevelExpr);
     void ReplaceSubMemberAccessWithAccessor(
@@ -70,9 +102,14 @@ private:
     void PrepareStaticDecl(AST::Decl& decl);
     std::vector<OwnedPtr<AST::MatchCase>> GenerateHandlerMatchCases(
         const AST::FuncDecl& funcDecl,
-        OwnedPtr<AST::EnumPattern> optionFuncTyPattern, OwnedPtr<AST::RefExpr> handlerCallExpr);
+        OwnedPtr<AST::EnumPattern> optionFuncTyPattern, OwnedPtr<AST::CallExpr> handlerCallExpr);
     Ptr<AST::Decl> GenerateSpiedObjectVar(const AST::Decl& decl);
+
+    std::vector<Ptr<AST::Ty>> CloneFuncDecl(Ptr<AST::FuncDecl> fromDecl, Ptr<AST::FuncDecl> toDecl);
     void GenerateSpyCallHandler(AST::FuncDecl& funcDecl, AST::Decl& spiedObjectDecl);
+    void PrepareInterfaceDecl(AST::InterfaceDecl& interfaceDecl);
+
+    bool NeedEraseAccessorTypes(AST::Decl& decl) const;
 };
 } // namespace Cangjie
 

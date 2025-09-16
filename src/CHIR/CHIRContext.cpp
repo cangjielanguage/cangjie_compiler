@@ -229,6 +229,9 @@ StructType* CHIRContext::GetStructType(
         if (it->GetPackageName() != package || it->GetSrcCodeIdentifier() != name) {
             continue;
         }
+        if (it->TestAttr(Attribute::GENERIC_INSTANTIATED)) {
+            continue;
+        }
         auto structType = StaticCast<StructType*>(it->GetType());
         auto argTypes = structType->GetGenericArgs();
         if (std::equal(genericType.begin(), genericType.end(), argTypes.begin(),

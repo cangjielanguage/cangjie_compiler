@@ -153,8 +153,8 @@ void CustomTypeDef::PrintComment(std::stringstream& ss) const
     AddCommaOrNot(comment);
     if (genericDecl != nullptr) {
         comment << "genericDecl: " << genericDecl->GetIdentifierWithoutPrefix();
+        AddCommaOrNot(comment);
     }
-    AddCommaOrNot(comment);
     comment << "packageName: " << packageName;
     if (comment.str() != "") {
         ss << " // " << comment.str();
@@ -192,11 +192,11 @@ void CustomTypeDef::PrintMethod(std::stringstream& ss) const
 void CustomTypeDef::PrintVTable(std::stringstream& ss) const
 {
     unsigned indent = 1;
-    if (vtable2.size() > 0) {
+    if (vtable.size() > 0) {
         PrintIndent(ss, indent);
         ss << "vtable {\n";
         ++indent;
-        for (auto& vtableIt : vtable2) {
+        for (auto& vtableIt : vtable) {
             PrintIndent(ss, indent);
             ss << vtableIt.first->ToString() << " {\n";
             ++indent;
@@ -204,8 +204,7 @@ void CustomTypeDef::PrintVTable(std::stringstream& ss) const
                 PrintIndent(ss, indent);
                 ss << "@" << funcInfo.srcCodeIdentifier;
                 if (funcInfo.srcCodeIdentifier != "$Placeholder") {
-                    ss << ": " << funcInfo.typeInfo.sigType->ToString();
-                    ss << "(" << funcInfo.typeInfo.returnType->ToString() << ")";
+                    ss << ": " << funcInfo.typeInfo.originalType->ToString();
                     ss << " => " <<
                         (funcInfo.instance ? funcInfo.instance->GetIdentifier() : "[abstract]");
                 }
@@ -329,17 +328,18 @@ std::pair<FuncBase*, bool> CustomTypeDef::GetExpectedFunc(
     return failed;
 }
 
-VTableSearchRes CustomTypeDef::GetFuncIndexInVTable(
-    const std::string& funcName, FuncType& funcType, bool isStatic,
-    std::unordered_map<const GenericType*, Type*>& replaceTable,
-    const std::vector<Type*>& funcInstTypeArgs, CHIRBuilder& builder) const
+std::vector<VTableSearchRes> CustomTypeDef::GetFuncIndexInVTable(const FuncCallType& funcCallType,
+    bool isStatic, std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder) const
 {
-    auto instArgTys = funcType.GetParamTypes();
+    auto& funcName = funcCallType.funcName;
+    auto& funcInstTypeArgs = funcCallType.genericTypeArgs;
+    auto instArgTys = funcCallType.funcType->GetParamTypes();
     if (!isStatic) {
         CJC_ASSERT(!instArgTys.empty());
         instArgTys.erase(instArgTys.begin());
     }
-    for (auto& mapIt : vtable2) {
+    std::vector<VTableSearchRes> res;
+    for (auto& mapIt : vtable) {
         for (size_t i = 0; i < mapIt.second.size(); ++i) {
             if (mapIt.second[i].srcCodeIdentifier != funcName) {
                 continue;
@@ -358,25 +358,26 @@ VTableSearchRes CustomTypeDef::GetFuncIndexInVTable(
             bool matched = true;
             for (size_t j = 0; j < genericParamTys.size(); ++j) {
                 auto declaredInstType = ReplaceRawGenericArgType(*genericParamTys[j], replaceTable, builder);
-                if (instArgTys[j] == declaredInstType) {
-                    continue;
+                if (!ParamTypeIsEquivalent(*declaredInstType, *instArgTys[j])) {
+                    matched = false;
+                    break;
                 }
-                if (auto g = DynamicCast<GenericType>(declaredInstType); g &&
-                    g->SatisfyGenericConstraints(*instArgTys[j], builder)) {
-                    continue;
-                }
-                matched = false;
-                break;
             }
             if (matched) {
                 auto instSrcParentTy =
                     ReplaceRawGenericArgType(*const_cast<ClassType*>(mapIt.first), replaceTable, builder);
                 auto& funcInfo = mapIt.second[i];
-                return {StaticCast<ClassType*>(instSrcParentTy), funcInfo.typeInfo.originalType, funcInfo.instance, i};
+                res.emplace_back(VTableSearchRes{
+                    .instSrcParentType = StaticCast<ClassType*>(instSrcParentTy),
+                    .originalFuncType = funcInfo.typeInfo.originalType,
+                    .instance = funcInfo.instance,
+                    .offset = i
+                });
+                break;
             }
         }
     }
-    return {nullptr, nullptr, nullptr, 0};
+    return res;
 }
 
 std::string CustomTypeDef::ToString() const
@@ -483,18 +484,18 @@ void CustomTypeDef::AddExtend(ExtendDef& extend)
 
 const VTableType& CustomTypeDef::GetVTable() const
 {
-    return vtable2;
+    return vtable;
 }
 
 void CustomTypeDef::SetVTable(const VTableType& table)
 {
-    vtable2 = table;
+    vtable = table;
 }
 
 void CustomTypeDef::UpdateVtableItem(ClassType& srcClassTy,
     size_t index, FuncBase* newFunc, Type* newParentTy, const std::string newName)
 {
-    auto& funcInfo = vtable2[&srcClassTy][index];
+    auto& funcInfo = vtable[&srcClassTy][index];
     funcInfo.instance = newFunc;
     if (newFunc != nullptr) {
         funcInfo.typeInfo.originalType = newFunc->GetFuncType();
@@ -509,7 +510,7 @@ void CustomTypeDef::UpdateVtableItem(ClassType& srcClassTy,
 
 void CustomTypeDef::AddVtableItem(ClassType& srcClassTy, VirtualFuncInfo&& info)
 {
-    vtable2[&srcClassTy].push_back(std::move(info));
+    vtable[&srcClassTy].push_back(std::move(info));
 }
 
 CustomDefKind CustomTypeDef::GetCustomKind() const
@@ -552,10 +553,8 @@ void CustomTypeDef::AppendAttributeInfo(const AttributeInfo& info)
  */
 std::string CustomTypeDef::GetIdentifierWithoutPrefix() const
 {
-    if (identifier != "") {
-        return identifier.substr(1);
-    }
-    return identifier;
+    CJC_ASSERT(!identifier.empty());
+    return identifier.substr(1);
 }
 
 void CustomTypeDef::EnableAttr(Attribute attr)
@@ -661,15 +660,6 @@ void CustomTypeDef::SetAnnoInfo(const AnnoInfo& info)
 AnnoInfo CustomTypeDef::GetAnnoInfo() const
 {
     return annoInfo;
-}
-void CustomTypeDef::SetJavaAnnoInfo(const JavaAnnoInfo& info)
-{
-    jAnnoInfo = info;
-}
-
-JavaAnnoInfo CustomTypeDef::GetJavaAnnoInfo() const
-{
-    return jAnnoInfo;
 }
 
 std::vector<ClassType*> CustomTypeDef::GetImplementedInterfaceTys() const

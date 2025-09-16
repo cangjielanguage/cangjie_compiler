@@ -5,7 +5,7 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 
 using namespace Cangjie::CHIR;
 using namespace Cangjie;
@@ -48,7 +48,11 @@ Ptr<Value> Translator::TranslateStructArray(const AST::ArrayLit& array)
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     if (IsArrayEleTypePrimitive(*eleTy)) {
         for (auto& child : array.children) {
-            elements.push_back(TranslateExprArg(*child, *eleTy));
+            auto element = TranslateExprArg(*child, *eleTy);
+            if (child->TestAttr(AST::Attribute::NO_REFLECT_INFO)) {
+                element->EnableAttr(Attribute::NO_REFLECT_INFO);
+            }
+            elements.push_back(element);
         }
         CreateAndAppendExpression<RawArrayLiteralInit>(builder.GetUnitTy(), rawArrayRef, elements, currentBlock);
     } else {
@@ -60,6 +64,9 @@ Ptr<Value> Translator::TranslateStructArray(const AST::ArrayLit& array)
         for (size_t i = 0; i < array.children.size(); ++i) {
             auto& child = array.children[i];
             auto ele = TranslateExprArg(*child, *eleTy, false);
+            if (child->TestAttr(AST::Attribute::NO_REFLECT_INFO)) {
+                ele->EnableAttr(Attribute::NO_REFLECT_INFO);
+            }
             CreateAndAppendExpression<StoreElementRef>(
                 builder.GetUnitTy(), ele, rawArrayRef, std::vector<uint64_t>({static_cast<uint64_t>(i)}), currentBlock);
         }
@@ -77,7 +84,7 @@ Ptr<Value> Translator::TranslateStructArray(const AST::ArrayLit& array)
         instParamTys.emplace_back(arg->GetType());
     }
     auto instantiedFuncTy = builder.GetType<FuncType>(instParamTys, builder.GetVoidTy());
-    GenerateFuncCall(*initFn, instantiedFuncTy, {}, result->GetType(), result->GetType(), args, loc);
+    GenerateFuncCall(*initFn, instantiedFuncTy, {}, result->GetType(), args, loc);
     result = CreateAndAppendExpression<Load>(arrayTy, result, currentBlock)->GetResult();
     return result;
 }

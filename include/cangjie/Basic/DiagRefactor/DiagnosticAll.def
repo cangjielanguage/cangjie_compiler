@@ -5,10 +5,13 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/Basic/DiagRefactor/DiagnosticChir.def"
+#include "cangjie/Basic/DiagRefactor/DiagnosticConditionalCompilation.def"
 #include "cangjie/Basic/DiagRefactor/DiagnosticDriver.def"
+#include "cangjie/Basic/DiagRefactor/DiagnosticFrontend.def"
 #include "cangjie/Basic/DiagRefactor/DiagnosticIncrementalCompilation.def"
 #include "cangjie/Basic/DiagRefactor/DiagnosticLexer.def"
 #include "cangjie/Basic/DiagRefactor/DiagnosticModule.def"
 #include "cangjie/Basic/DiagRefactor/DiagnosticPackage.def"
 #include "cangjie/Basic/DiagRefactor/DiagnosticParser.def"
+#include "cangjie/Basic/DiagRefactor/DiagnosticParserQuery.def"
 #include "cangjie/Basic/DiagRefactor/DiagnosticSema.def"

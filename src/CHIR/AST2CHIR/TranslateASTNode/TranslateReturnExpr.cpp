@@ -17,9 +17,9 @@ int64_t Translator::CalculateDelayExitLevelForReturn()
     Ptr<BlockGroup> bg = blockGroupStack.back();
     for (auto rBegin = blockGroupStack.crbegin(), rEnd = blockGroupStack.crend(); rBegin != rEnd; ++rBegin) {
         bg = *rBegin;
-        CJC_NULLPTR_CHECK(currentBlock->GetParentFunc());
+        CJC_NULLPTR_CHECK(currentBlock->GetTopLevelFunc());
         auto parentLambda = DynamicCast<Lambda*>(bg->GetOwnerExpression());
-        if (bg == currentBlock->GetParentFunc()->GetBody() || parentLambda != nullptr) {
+        if (bg == currentBlock->GetTopLevelFunc()->GetBody() || parentLambda != nullptr) {
             break;
         }
         Expression* expr = bg->GetOwnerExpression();

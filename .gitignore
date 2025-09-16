@@ -62,7 +62,7 @@ third_party/flatbuffers
 third_party/boundscheck*
 third_party/llvm-project
 third_party/runtime
-third_party/libxml*
+third_party/pcre2-10.44-h1
 # flatc generated file
 libs/std/ast/NodeFormat_generated.cj
 libs/std/ast/nodeformat_generated.cj
@@ -72,6 +72,3 @@ libs/std/ast/decode.cj
 
 # vscode
 .VSCodeCounter/
-
-# macOS build cache
-.DS_Store

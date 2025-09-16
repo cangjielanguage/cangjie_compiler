@@ -10,8 +10,8 @@
 #include "cangjie/AST/Node.h"
 #include "cangjie/CHIR/AttributeInfo.h"
 #include <functional>
-#include <vector>
 #include <map>
+#include <vector>
 
 namespace Cangjie::CHIR {
 
@@ -31,7 +31,7 @@ public:
 
 struct VirtualFuncTypeInfo {
     FuncType* sigType{nullptr}; // instantiated type, (param types)->Unit, param types exclude `this` type
-    FuncType* originalType{nullptr}; // virtual func's original func type, (param types)->retType,
+    FuncType* originalType{nullptr}; // virtual func's original func type from parent def, (param types)->retType,
                                      // param types include `this` type
     Type* parentType{nullptr}; // CustomType or extended type(may be primitive type)
     Type* returnType{nullptr}; // instantiated type
@@ -56,6 +56,12 @@ struct FuncSigInfo {
     FuncType* funcType{nullptr};  // declared type, including `this` type and return type
                                   // there may be generic type in it
     std::vector<GenericType*> genericTypeParams;
+};
+
+struct FuncCallType {
+    std::string funcName;         // src code name
+    FuncType* funcType{nullptr};  // inst type, including `this` type and return type
+    std::vector<Type*> genericTypeArgs;
 };
 
 struct VTableSearchRes {

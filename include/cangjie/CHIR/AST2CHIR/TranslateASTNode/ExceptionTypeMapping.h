@@ -13,7 +13,7 @@
 #ifndef CANGJIE_CHIR_EXCEPTION_TYPEMAPPING_H
 #define CANGJIE_CHIR_EXCEPTION_TYPEMAPPING_H
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 
 namespace Cangjie::CHIR {
 template <typename T> struct CHIRNodeMap {

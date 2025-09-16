@@ -26,12 +26,6 @@ inline std::map<Cangjie::AST::Attribute, Attribute> g_attrMap = {
     {Cangjie::AST::Attribute::GENERIC, Attribute::GENERIC}, {Cangjie::AST::Attribute::IMPORTED, Attribute::IMPORTED},
     {Cangjie::AST::Attribute::NO_REFLECT_INFO, Attribute::NO_REFLECT_INFO}};
 
-inline std::unordered_map<AST::AccessLevel, Package::AccessLevel> g_accessLevelMap = {
-    {AST::AccessLevel::INTERNAL, Package::AccessLevel::INTERNAL},
-    {AST::AccessLevel::PROTECTED, Package::AccessLevel::PROTECTED},
-    {AST::AccessLevel::PUBLIC, Package::AccessLevel::PUBLIC},
-};
-
 void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& func)
 {
     CJC_NULLPTR_CHECK(func.funcBody);
@@ -205,13 +199,6 @@ bool IsSymbolImportedDecl(const AST::Decl& decl, const GlobalOptions& opts)
     return decl.TestAttr(AST::Attribute::IMPORTED) && !IsSrcImportedDecl(decl, opts);
 }
 
-Package::AccessLevel BuildPackageAccessLevel(const AST::AccessLevel& level)
-{
-    auto it = g_accessLevelMap.find(level);
-    CJC_ASSERT(it != g_accessLevelMap.end());
-    return it->second;
-}
-
 AST::Decl* GetOuterDecl(const AST::Decl& decl)
 {
     auto outerDecl = decl.outerDecl;
@@ -224,7 +211,8 @@ AST::Decl* GetOuterDecl(const AST::Decl& decl)
 bool IsLocalFunc(const AST::FuncDecl& func)
 {
     auto outerDecl = GetOuterDecl(func);
-    return outerDecl != nullptr && outerDecl->astKind == AST::ASTKind::FUNC_DECL;
+    return outerDecl != nullptr &&
+        (outerDecl->astKind == AST::ASTKind::FUNC_DECL || outerDecl->astKind == AST::ASTKind::VAR_DECL);
 }
 
 const std::unordered_set<std::string> OVERFLOW_OPERATOR_NAMES{"+", "-", "*", "/"};
@@ -272,6 +260,22 @@ std::string OverflowStrategyPrefix(OverflowStrategy ovf)
         default:
             return "%";
     }
+}
+
+void SetCompileTimeValueFlagRecursivly(Func& initFunc)
+{
+    auto setConstFlagForLambda = [](BlockGroup& body) {
+        std::function<VisitResult(Expression&)> preVisit = [&preVisit](Expression& expr) {
+            if (expr.GetExprKind() == CHIR::ExprKind::LAMBDA) {
+                auto& lambda = StaticCast<Lambda&>(expr);
+                lambda.SetCompileTimeValue();
+                Visitor::Visit(*lambda.GetBody(), preVisit);
+            }
+            return VisitResult::CONTINUE;
+        };
+        Visitor::Visit(body, preVisit);
+    };
+    setConstFlagForLambda(*initFunc.GetBody());
 }
 } // namespace CHIR
 } // namespace Cangjie

@@ -108,7 +108,7 @@ set(CANGJIE_SANITIZER_SUPPORT_ENABLED OFF)
 
 if(CANGJIE_SANITIZER_SUPPORT_ENABLED)
     if(NOT CANGJIE_CODEGEN_CJNATIVE_BACKEND)
-        message(FATAL_ERROR "Cangjie with sanitizer support is supposed to be built in llvmgc backend")
+        message(FATAL_ERROR "Cangjie with sanitizer support is supposed to be built in cjnative backend")
     endif()
     if(CANGJIE_ENABLE_ASAN OR CANGJIE_ENABLE_ASAN_COV)
         message(FATAL_ERROR "Cangjie with sanitizer support is not compatible with asan build version")
@@ -119,6 +119,10 @@ if(CANGJIE_SANITIZER_SUPPORT_ENABLED)
     if(NOT CANGJIE_BUILD_STD_SUPPORT)
         message(FATAL_ERROR "Please build sanitizer support version with CANGJIE_BUILD_STD_SUPPORT")
     endif()
+endif()
+
+if(CANGJIE_ENABLE_HWASAN)
+    add_compile_options(-mllvm -hwasan-globals=0)
 endif()
 
 if(CANGJIE_ASAN_SUPPORT)
@@ -312,23 +316,20 @@ endif()
 
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     add_subdirectory(third_party/boundscheck-v1.1.16)
-
-    if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
-        install(
-            TARGETS boundscheck
-            RUNTIME
-                DESTINATION
-                    runtime/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}${SANITIZER_SUBPATH} # RUNTIME includes DLLs. This takes effect on Windows.
-            LIBRARY
-                DESTINATION
-                    runtime/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}${SANITIZER_SUBPATH} # LIBRARY includes shared libraries except DLLs.
-        )
-        install(TARGETS boundscheck-static DESTINATION lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}${SANITIZER_SUBPATH})
-        if(WIN32 AND CANGJIE_BUILD_CJDB)
-            install(TARGETS boundscheck RUNTIME DESTINATION third_party/llvm/bin)
-        endif()
-        install(FILES include/cangjie/MetaTransformation/MetaTransform.h DESTINATION include/)
+    install(
+        TARGETS boundscheck
+        RUNTIME
+            DESTINATION
+                runtime/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}${SANITIZER_SUBPATH} # RUNTIME includes DLLs. This takes effect on Windows.
+        LIBRARY
+            DESTINATION
+                runtime/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}${SANITIZER_SUBPATH} # LIBRARY includes shared libraries except DLLs.
+    )
+    install(TARGETS boundscheck-static DESTINATION lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}${SANITIZER_SUBPATH})
+    if(WIN32 AND CANGJIE_BUILD_CJDB)
+        install(TARGETS boundscheck RUNTIME DESTINATION third_party/llvm/bin)
     endif()
+    install(FILES include/cangjie/MetaTransformation/MetaTransform.h DESTINATION include/)
 endif()
 
 add_subdirectory(third_party)

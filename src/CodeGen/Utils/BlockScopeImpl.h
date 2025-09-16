@@ -36,7 +36,7 @@ public:
             : irBuilder(irBuilder), oldBb(irBuilder.GetInsertBlock())
     {
         irBuilder.SetInsertPoint(irBuilder.GetCGModule().GetMappedBB(&chirBlock));
-        irBuilder.SetInsertCGFunction(*irBuilder.GetCGModule().GetOrInsertCGFunction(chirBlock.GetParentFunc()));
+        irBuilder.SetInsertCGFunction(*irBuilder.GetCGModule().GetOrInsertCGFunction(chirBlock.GetTopLevelFunc()));
     }
 
     ~CodeGenBlockScope()
@@ -52,22 +52,14 @@ private:
 class CodeGenFunctionScope {
 public:
     CodeGenFunctionScope(IRBuilder2& irBuilder, llvm::Function* function)
-        : refFunc(nullptr), block(irBuilder, &function->getEntryBlock())
+        : block(irBuilder, &function->getEntryBlock())
     {
-        oldFunc = nullptr;
     }
 
-    ~CodeGenFunctionScope()
-    {
-        if (refFunc) {
-            *refFunc = oldFunc;
-        }
-    }
+    ~CodeGenFunctionScope() = default;
 
 private:
-    const CHIR::Func** refFunc;
     CodeGenBlockScope block;
-    const CHIR::Func* oldFunc;
 };
 
 class CodeGenUnwindBlockScope {

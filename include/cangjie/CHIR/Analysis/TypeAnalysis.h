@@ -140,6 +140,10 @@ private:
 
     void HandleBoxExpr(TypeDomain& state, const Box* boxExpr) const;
 
+    void HandleDefaultExpr(TypeDomain& state, const Expression* expr) const;
+
+    void PreHandleGetElementRefExpr(TypeDomain& state, const GetElementRef* getElemRef) override;
+
     std::optional<Block*> HandleTerminatorEffect(TypeDomain& state, const Terminator* terminator) override;
 
     const std::unordered_map<Func*, Type*>& realRetTyMap;

@@ -15,7 +15,7 @@
 #include <list>
 
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/PrivateTypeConverter.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Utils.h"
@@ -201,7 +201,7 @@ static size_t GetExprSize(const Expression& expr)
         exprSize += GetExprSize(e);
         return VisitResult::CONTINUE;
     };
-    Visitor::Visit(*Cangjie::StaticCast<const Lambda&>(expr).GetLambdaBody(), postVisit);
+    Visitor::Visit(*Cangjie::StaticCast<const Lambda&>(expr).GetBody(), postVisit);
     return exprSize;
 }
 
@@ -230,13 +230,13 @@ bool FunctionInline::CheckCanRewrite(const Apply& apply)
     CJC_NULLPTR_CHECK(callee);
 
     // when the terminator of this block is RaiseException, do not inline this apply because it rarely happens
-    if (auto block = apply.GetParent(); Is<RaiseException>(block->GetTerminator())) {
+    if (auto block = apply.GetParentBlock(); Is<RaiseException>(block->GetTerminator())) {
         return false;
     }
 
     // Omit the function inline in block that exceed the Blocksize
     // threshold to avoid the huge time consume.
-    auto block = apply.GetParent();
+    auto block = apply.GetParentBlock();
     if (block->GetExpressions().size() >= INLINED_BLOCKSIZE_THRESHOLD) {
         return false;
     }
@@ -307,11 +307,12 @@ void FunctionInline::ReplaceFuncResult(LocalVar* resNew, LocalVar* resOld)
     // Insert a load from the new local variable of result at the end of Exit Block of Inlined function.
     // Replace the use of the old local variable of result with the result of load.
     for (auto user : users) {
-        auto newLoad = builder.CreateExpression<Load>(user->GetDebugLocation(), valType, resNew, user->GetParent());
+        auto newLoad =
+            builder.CreateExpression<Load>(user->GetDebugLocation(), valType, resNew, user->GetParentBlock());
         newLoad->MoveBefore(user);
         user->ReplaceOperand(resOld, newLoad->GetResult());
         auto cast = TypeCastOrBoxIfNeeded(
-            *newLoad->GetResult(), *resOld->GetType(), builder, *newLoad->GetParent(), INVALID_LOCATION);
+            *newLoad->GetResult(), *resOld->GetType(), builder, *newLoad->GetParentBlock(), INVALID_LOCATION);
         if (cast != newLoad->GetResult()) {
             CJC_ASSERT(cast->IsLocalVar());
             StaticCast<LocalVar*>(cast)->GetExpr()->MoveBefore(user);
@@ -370,7 +371,7 @@ void FunctionInline::DoFunctionInline(const Apply& apply, const std::string& nam
         oldFuncGroup = lambda->GetBody();
         funcArgs = lambda->GetParams();
     }
-    CJC_NULLPTR_CHECK(oldFuncGroup->GetParentFunc());
+    CJC_NULLPTR_CHECK(oldFuncGroup->GetTopLevelFunc());
     // after cloned, we get a new block group, but func arg is value node, can't be cloned:
     // { // Block Group: 7
     // Block #27:
@@ -380,14 +381,14 @@ void FunctionInline::DoFunctionInline(const Apply& apply, const std::string& nam
     //   Exit()
     // }
     // `newFuncGroup` is `Block Group: 7`
-    CJC_NULLPTR_CHECK(apply.GetParentFunc());
-    auto [newFuncGroup, returnVal] = CloneBlockGroupForInline(*oldFuncGroup, *apply.GetParentFunc(), apply);
+    CJC_NULLPTR_CHECK(apply.GetTopLevelFunc());
+    auto [newFuncGroup, returnVal] = CloneBlockGroupForInline(*oldFuncGroup, *apply.GetTopLevelFunc(), apply);
     SetGroupDebugLocation(*newFuncGroup, apply.GetDebugLocation());
     // `funcEntry` is `Block #27`
     auto funcEntry = newFuncGroup->GetEntryBlock();
     // `exitBlock` is `Block #27`, `returnVal` is `%20`
     auto exitBlocks = GetExitBlocks(*newFuncGroup);
-    CJC_NULLPTR_CHECK(newFuncGroup->GetParentFunc());
+    CJC_NULLPTR_CHECK(newFuncGroup->GetTopLevelFunc());
 
     // step 2: change connection of func args
     // Func foo2 { // Block Group: 4
@@ -423,8 +424,8 @@ void FunctionInline::DoFunctionInline(const Apply& apply, const std::string& nam
     //   Exit()
     // }
     // `applyGroup` is `Block Group: 2`
-    auto applyGroup = apply.GetParent()->GetParentBlockGroup();
-    CJC_NULLPTR_CHECK(applyGroup->GetParentFunc());
+    auto applyGroup = apply.GetParentBlock()->GetParentBlockGroup();
+    CJC_NULLPTR_CHECK(applyGroup->GetTopLevelFunc());
     for (auto block : newFuncGroup->GetBlocks()) {
         block->MoveTo(*applyGroup);
     }
@@ -500,7 +501,7 @@ void FunctionInline::RecordEffectMap(const Apply& apply)
     if (callee == nullptr) {
         return;
     }
-    auto parentFunc = apply.GetParentFunc();
+    auto parentFunc = apply.GetTopLevelFunc();
     CJC_NULLPTR_CHECK(parentFunc);
     if (!callee->IsLambda() && !parentFunc->IsLambda()) {
         effectMap[callee].emplace(parentFunc);

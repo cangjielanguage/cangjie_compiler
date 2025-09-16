@@ -39,13 +39,11 @@ static void ModifyApplyCalleeInfo(const LocalVar& loadResult, Value& storeValue)
     for (auto user : oldUsers) {
         if (user->GetExprKind() == ExprKind::APPLY) {
             auto apply = StaticCast<Apply*>(user);
-            apply->SetThisType(*thisType);
-            apply->SetInstParentCustomTyOfCallee(*thisType);
+            apply->SetThisType(thisType);
         }
         if (user->GetExprKind() == ExprKind::APPLY_WITH_EXCEPTION) {
             auto apply = StaticCast<ApplyWithException*>(user);
-            apply->SetThisType(*thisType);
-            apply->SetInstParentCustomTyOfCallee(*thisType);
+            apply->SetThisType(thisType);
         }
     }
 }
@@ -79,7 +77,7 @@ void RedundantLoadElimination::RunOnFunc(const Ptr<const Func>& func, bool isDeb
 
             // replace load with its exact value
             load->GetResult()->ReplaceWith(*def->GetValue(), func->GetBody());
-            toBeRemoved[load->GetParent()].emplace_back(index);
+            toBeRemoved[load->GetParentBlock()].emplace_back(index);
             if (isDebug) {
                 std::string message = "[RLE] The usages of the result of Load" +
                     ToPosInfo(load->GetDebugLocation()) + " have been replaced by the value" +
@@ -94,7 +92,7 @@ void RedundantLoadElimination::RunOnFunc(const Ptr<const Func>& func, bool isDeb
                 return;
             }
             load->GetResult()->ReplaceWith(*validLoad->GetResult(), func->GetBody());
-            toBeRemoved[load->GetParent()].emplace_back(index);
+            toBeRemoved[load->GetParentBlock()].emplace_back(index);
             if (isDebug) {
                 std::string message = "[RLE] The usages of the result of Load" +
                     ToPosInfo(load->GetDebugLocation()) + " have been replaced by the value" +

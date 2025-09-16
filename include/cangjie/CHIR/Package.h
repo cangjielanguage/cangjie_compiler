@@ -23,7 +23,7 @@ class Package {
     friend class CHIRBuilder;
 
 public:
-    enum class AccessLevel {
+    enum class AccessLevel : uint8_t {
         INTERNAL,
         PROTECTED,
         PUBLIC
@@ -121,7 +121,7 @@ public:
 
 private:
     std::string name;                                  // full package name, like "std.core"
-    AccessLevel pkgAccessLevel;                        // public/internal/protected, get from AST
+    AccessLevel pkgAccessLevel{};                      // public/internal/protected, get from AST
 
     // imported decls
     std::vector<ImportedValue*> importedVarAndFuncs;

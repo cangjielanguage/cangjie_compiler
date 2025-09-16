@@ -13,7 +13,7 @@
 #ifndef CANGJIE_CHIR_INTERRETER_UTILS_H
 #define CANGJIE_CHIR_INTERRETER_UTILS_H
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/CHIR/Interpreter/InterpreterValue.h"
 #include "cangjie/CHIR/Interpreter/OpCodes.h"
@@ -26,7 +26,7 @@ OpCode PrimitiveTypeKind2OpCode(Type::TypeKind kind);
 OpCode UnExprKind2OpCode(Cangjie::CHIR::ExprKind exprKind);
 OpCode BinExprKind2OpCode(Cangjie::CHIR::ExprKind exprKind);
 OpCode BinExprKindWitException2OpCode(Cangjie::CHIR::ExprKind exprKind);
-IVal ByteCodeToIval(const Bchir::Definition& def);
+IVal ByteCodeToIval(const Bchir::Definition& def, const Bchir& bchir, Bchir& topBchir);
 
 template <bool OmitFirstArg = false>
 std::string MangleMethodName(const std::string& methodName, const FuncType& funcTy)

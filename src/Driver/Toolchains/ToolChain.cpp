@@ -27,14 +27,16 @@ const std::map<std::string, std::string> LLVM_LTO_CSTD_FFI_OPTION_MAP = {
 std::optional<std::tuple<std::string, uint64_t>> GetElementFromOrderVector(
     std::vector<std::tuple<std::string, uint64_t>>& orderVector, const std::string& name)
 {
+    std::optional<std::tuple<std::string, uint64_t>> result = {};
     for (auto it = orderVector.begin(); it < orderVector.end(); ++it) {
         std::tuple<std::string, uint64_t> tuple = *it;
         if (std::get<0>(tuple) == name) {
             (void)orderVector.erase(it);
-            return tuple;
+            result = tuple;
+            break;
         }
     }
-    return {};
+    return result;
 }
 }; // namespace
 
@@ -46,8 +48,7 @@ void ToolChain::GenerateLinkOptionsOfBuiltinLibs(Tool& tool) const
     // When user compiling to a shared library, standard library must be dynamic linked or there might be multiple
     // versions of standard library exists in different dynamic libraries. A user could still specify --static-std
     // to reproduct the problem. Here we only ensure the default behavior of cjc is correct.
-    bool isStaticLink = driverOptions.linkStaticStd.value_or(notOutputDylib) &&
-        driverOptions.linkStaticLibs.value_or(notOutputDylib);
+    bool isStaticLink = driverOptions.linkStaticStd.value_or(notOutputDylib);
     if (isStaticLink) {
         return GenerateLinkOptionsOfBuiltinLibsForStaticLink(tool);
     } else {
@@ -212,9 +213,19 @@ void ToolChain::AppendLibrariesFromInput(std::vector<std::tuple<std::string, uin
     }
 }
 
-void ToolChain::AppendLinkOptionsFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples)
+void ToolChain::AppendLinkOptionFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples)
 {
     for (const std::tuple<std::string, uint64_t>& optionTuple : driverOptions.inputLinkOptionOrder) {
+        std::string option = std::get<0>(optionTuple);
+        if (!option.empty()) {
+            inputOrderTuples.emplace_back(std::make_tuple(option, std::get<1>(optionTuple)));
+        }
+    }
+}
+
+void ToolChain::AppendLinkOptionsFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples)
+{
+    for (const std::tuple<std::string, uint64_t>& optionTuple : driverOptions.inputLinkOptionsOrder) {
         std::string option = std::get<0>(optionTuple);
         auto splitArgs = Utils::SplitString(option, " ");
         for (const auto& arg : splitArgs) {
@@ -234,6 +245,7 @@ void ToolChain::SortInputlibraryFileAndAppend(Tool& tool, const std::vector<Temp
 
     AppendObjectsFromInput(inputOrderTuples);
     AppendLibrariesFromInput(inputOrderTuples);
+    AppendLinkOptionFromInput(inputOrderTuples);
     AppendLinkOptionsFromInput(inputOrderTuples);
     // need to maintain front-to-back relative position
     std::stable_sort(inputOrderTuples.begin(), inputOrderTuples.end(),

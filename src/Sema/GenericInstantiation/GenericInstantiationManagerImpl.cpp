@@ -586,7 +586,6 @@ Ptr<Decl> GIM::GenericInstantiationManagerImpl::GetInstantiatedDeclWithGenericIn
     }
     // Collect extend decls by usage.
     RecordExtend(*instantiatedDecl);
-    // WalkNonGenericExtendedType();  // Do not need box anymore.
     Walker(instantiatedDecl, instantiationWalkerID, instantiator, contextReset).Walk();
     return instantiatedDecl;
 }
@@ -1119,7 +1118,7 @@ VisitAction GIM::GenericInstantiationManagerImpl::CheckVisitedNode(Ptr<Node> nod
     }
 
     // Ignore compiler added placeholder argument for function's default parameter.
-    // NOTE: This should not be translated by CHIR or JS, and never been used.
+    // NOTE: This should not be translated by CHIR, and never been used.
     if (node->astKind == ASTKind::FUNC_ARG && node->TestAttr(Attribute::HAS_INITIAL)) {
         return VisitAction::SKIP_CHILDREN;
     }

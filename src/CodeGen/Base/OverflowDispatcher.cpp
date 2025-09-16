@@ -16,7 +16,7 @@
 #include "Base/ExprDispatcher/ExprDispatcher.h"
 #include "Base/IntrinsicsDispatcher.h"
 #include "Base/LogicalOpImpl.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Value.h"
 
 namespace Cangjie {
@@ -82,8 +82,8 @@ bool IsIncOrDec(const CHIR::IntrinsicKind intrinsicKind)
 }
 } // namespace
 
-llvm::Value* GenerateOverflowWrappingArithmeticOp(IRBuilder2& irBuilder, const CHIR::ExprKind& kind,
-    const CHIR::Type* ty, const std::vector<CGValue*>& argGenValues)
+llvm::Value* GenerateOverflowWrappingArithmeticOp(
+    IRBuilder2& irBuilder, const CHIR::ExprKind& kind, const CHIR::Type* ty, const std::vector<CGValue*>& argGenValues)
 {
     // Overflow func implicit calling reproduce `Neg`, `Inc`, `Dec` Operations.
     if (kind == CHIR::ExprKind::NEG) {
@@ -106,7 +106,9 @@ llvm::Value* GenerateOverflowApply(IRBuilder2& irBuilder, const CHIRIntrinsicWra
     const CHIR::Type* paramType = args[0]->GetType();
     // There is a possibility of integer overflow when the result of an arithmetic expression is an integer type.
     if (!paramType->IsInteger()) {
+#ifndef NDEBUG
         Errorln("The parameter type of the overflow intrinsic function is error.");
+#endif
         return nullptr;
     }
     const CHIR::IntType* intTy = StaticCast<const CHIR::IntType*>(paramType);

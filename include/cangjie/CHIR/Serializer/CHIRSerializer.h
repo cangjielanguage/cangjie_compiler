@@ -7,6 +7,7 @@
 #ifndef CANGJIE_CHIR_SERIALIZER_CHIRSERIALIZER_H
 #define CANGJIE_CHIR_SERIALIZER_CHIRSERIALIZER_H
 
+#include "cangjie/CHIR/CHIR.h"
 #include "cangjie/CHIR/Package.h"
 
 #include <string>
@@ -15,9 +16,8 @@ namespace Cangjie::CHIR {
 
 class CHIRSerializer {
     class CHIRSerializerImpl;
-
 public:
-    static void Serialize(const Package& package, const std::string filename);
+    static void Serialize(const Package& package, const std::string filename, ToCHIR::Phase phase);
 };
 
 } // namespace Cangjie::CHIR

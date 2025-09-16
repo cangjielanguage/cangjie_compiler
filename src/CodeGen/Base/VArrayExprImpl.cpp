@@ -17,7 +17,7 @@
 #include "CGModule.h"
 #include "IRBuilder.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
 

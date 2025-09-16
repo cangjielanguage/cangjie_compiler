@@ -44,17 +44,16 @@ public:
      * @tparam Args the args type of analysis.
      * @param package package to do optimization.
      * @param isDebug flag whether print debug log.
-     * @param isCJLint flag whether is cangjie lint
      * @param threadNum thread num to do analysis
      * @param args args of analysis
      */
     template <typename... Args>
-    void RunOnPackage(const Package* package, bool isDebug, bool isCJLint, size_t threadNum, Args&&... args)
+    void RunOnPackage(const Package* package, bool isDebug, size_t threadNum, Args&&... args)
     {
         if (threadNum == 1) {
-            RunOnPackageInSerial(package, isDebug, isCJLint, std::forward<Args>(args)...);
+            RunOnPackageInSerial(package, isDebug, std::forward<Args>(args)...);
         } else {
-            RunOnPackageInParallel(package, isDebug, isCJLint, threadNum, std::forward<Args>(args)...);
+            RunOnPackageInParallel(package, isDebug, threadNum, std::forward<Args>(args)...);
         }
     }
 
@@ -113,13 +112,13 @@ public:
 
 private:
     template <typename... Args>
-    void RunOnPackageInSerial(const Package* package, bool isDebug, bool isCJLint, Args&&... args)
+    void RunOnPackageInSerial(const Package* package, bool isDebug, Args&&... args)
     {
         if constexpr (IsValueAnalysis<TAnalysis>::value) {
             SetUpGlobalVarState(*package, isDebug, std::forward<Args>(args)...);
         }
         for (auto func : package->GetGlobalFuncs()) {
-            if (ShouldBeAnalysed(*func, isCJLint)) {
+            if (ShouldBeAnalysed(*func)) {
                 if (auto res = RunOnFunc(func, isDebug, std::forward<Args>(args)...)) {
                     resultsMap.emplace(func, std::move(res));
                 }
@@ -128,7 +127,7 @@ private:
     }
 
     template <typename... Args>
-    void RunOnPackageInParallel(const Package* package, bool isDebug, bool isCJLint, size_t threadNum, Args&&... args)
+    void RunOnPackageInParallel(const Package* package, bool isDebug, size_t threadNum, Args&&... args)
     {
         if constexpr (IsValueAnalysis<TAnalysis>::value) {
             SetUpGlobalVarState(*package, isDebug, std::forward<Args>(args)...);
@@ -137,7 +136,7 @@ private:
         using ResTy = std::unique_ptr<Results<TDomain>>;
         std::vector<Cangjie::Utils::TaskResult<ResTy>> results;
         for (auto func : package->GetGlobalFuncs()) {
-            if (ShouldBeAnalysed(*func, isCJLint)) {
+            if (ShouldBeAnalysed(*func)) {
                 results.emplace_back(taskQueue.AddTask<ResTy>(
                     [func, isDebug, &args..., this]() { return RunOnFunc(func, isDebug, std::forward<Args>(args)...); },
                     // Roughly use the number of Blocks as the cost of task weight
@@ -154,11 +153,8 @@ private:
         }
     }
 
-    bool ShouldBeAnalysed(const Func& func, bool isCJLint)
+    bool ShouldBeAnalysed(const Func& func)
     {
-        if (!isCJLint && func.Get<SkipCheck>() == SkipKind::SKIP_CODEGEN) {
-            return false;
-        }
         if constexpr (IsValueAnalysis<TAnalysis>::value) {
             if (resultsMap.find(&func) != resultsMap.end()) {
                 return false;

@@ -40,7 +40,6 @@ public:
     void AddCtor(EnumCtorInfo ctor);
     EnumCtorInfo GetCtor(size_t index) const;
     std::vector<EnumCtorInfo> GetCtors() const;
-    size_t GetCtorSize() const;
     void SetCtors(const std::vector<EnumCtorInfo>& items);
 
     /**

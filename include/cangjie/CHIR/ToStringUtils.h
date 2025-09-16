@@ -9,6 +9,7 @@
 
 #include "cangjie/CHIR/IntrinsicKind.h"
 #include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/StringWrapper.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
 #include "cangjie/Utils/SafePointer.h"
@@ -32,6 +33,7 @@ const std::unordered_map<CHIR::IntrinsicKind, std::string> INTRINSIC_KIND_TO_STR
     // CORE
     {CHIR::SIZE_OF, CHIR::SIZE_OF_NAME}, {CHIR::ALIGN_OF, CHIR::ALIGN_OF_NAME},
     {CHIR::GET_TYPE_FOR_TYPE_PARAMETER, CHIR::GET_TYPE_FOR_TYPE_PARAMETER_NAME},
+    {CHIR::IS_SUBTYPE_TYPES, CHIR::IS_SUBTYPE_TYPES_NAME},
     {CHIR::ARRAY_ACQUIRE_RAW_DATA, CHIR::ARRAY_ACQUIRE_RAW_DATA_NAME},
     {CHIR::ARRAY_RELEASE_RAW_DATA, CHIR::ARRAY_RELEASE_RAW_DATA_NAME},
     {CHIR::ARRAY_BUILT_IN_COPY_TO, CHIR::ARRAY_BUILT_IN_COPY_TO_NAME}, {CHIR::ARRAY_GET, CHIR::ARRAY_GET_NAME},
@@ -168,6 +170,10 @@ const std::unordered_map<CHIR::IntrinsicKind, std::string> INTRINSIC_KIND_TO_STR
     {CHIR::VECTOR_COMPARE_32, CHIR::VECTOR_COMPARE_32_NAME},
     {CHIR::VECTOR_INDEX_BYTE_32, CHIR::VECTOR_INDEX_BYTE_32_NAME},
     {CHIR::CJ_CORE_CAN_USE_SIMD, CHIR::CJ_CORE_CAN_USE_SIMD_NAME},
+    {CHIR::CROSS_ACCESS_BARRIER, CHIR::CROSS_ACCESS_BARRIER_NAME},
+    {CHIR::CREATE_EXPORT_HANDLE, CHIR::CREATE_EXPORT_HANDLE_NAME},
+    {CHIR::GET_EXPORTED_REF, CHIR::GET_EXPORTED_REF_NAME},
+    {CHIR::REMOVE_EXPORTED_REF, CHIR::REMOVE_EXPORTED_REF_NAME},
 #endif
     {CHIR::CJ_TLS_DYN_SET_SESSION_CALLBACK, CHIR::CJ_TLS_DYN_SET_SESSION_CALLBACK_NAME},
     {CHIR::CJ_TLS_DYN_SSL_INIT, CHIR::CJ_TLS_DYN_SSL_INIT_NAME},
@@ -208,7 +214,7 @@ class ClassType;
  * @param stream The output stream to print to.
  * @param indent The number of indentation levels.
  */
-void PrintIndent(std::ostream& stream, unsigned indent = 1);
+void PrintIndent(std::ostream& stream, size_t indent = 1);
 
 /**
  * @brief Generates a string representation of generic constraints.
@@ -225,7 +231,7 @@ std::string GetGenericConstaintsStr(const std::vector<GenericType*>& genericType
  * @param indent The number of indentation levels.
  * @return A string representing the block group.
  */
-std::string GetBlockGroupStr(const BlockGroup& blockGroup, unsigned indent = 0);
+std::string GetBlockGroupStr(const BlockGroup& blockGroup, size_t indent = 0);
 
 /**
  * @brief Generates a string representation of a block.
@@ -234,7 +240,7 @@ std::string GetBlockGroupStr(const BlockGroup& blockGroup, unsigned indent = 0);
  * @param indent The number of indentation levels.
  * @return A string representing the block.
  */
-std::string GetBlockStr(const Block& block, unsigned indent = 0);
+std::string GetBlockStr(const Block& block, size_t indent = 0);
 
 /**
  * @brief Generates a string representation of a function.
@@ -243,7 +249,7 @@ std::string GetBlockStr(const Block& block, unsigned indent = 0);
  * @param indent The number of indentation levels.
  * @return A string representing the function.
  */
-std::string GetFuncStr(const Func& func, unsigned indent = 0);
+std::string GetFuncStr(const Func& func, size_t indent = 0);
 
 /**
  * @brief Generates a string representation of a lambda expression.
@@ -252,7 +258,7 @@ std::string GetFuncStr(const Func& func, unsigned indent = 0);
  * @param indent The number of indentation levels.
  * @return A string representing the lambda expression.
  */
-std::string GetLambdaStr(const Lambda& lambda, unsigned indent = 0);
+std::string GetLambdaStr(const Lambda& lambda, size_t indent = 0);
 
 /**
  * @brief Generates a string representation of an imported value.
@@ -324,6 +330,13 @@ std::string CustomTypeKindToString(const CustomTypeDef& def);
  * @return A string representing the boolean value.
  */
 std::string BoolToString(bool flag);
+
+StringWrapper ThisTypeToString(const Type* thisType);
+std::string InstTypeArgsToString(const std::vector<Type*>& instTypeArgs);
+std::string ExprOperandsToString(const std::vector<Value*>& args);
+std::string ExprWithExceptionOperandsToString(const std::vector<Value*>& args, const std::vector<Block*>& successors);
+std::string ParamTypesToString(const FuncType& funcType);
+std::string OverflowToString(Cangjie::OverflowStrategy ofStrategy);
 } // namespace Cangjie::CHIR
 
 #endif // CANGJIE_CHIR_TOSTRING_UTILS_H

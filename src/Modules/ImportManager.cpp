@@ -176,8 +176,7 @@ std::string Jsonfy(const std::set<Ptr<ImportSpec>, CmpNodeByPos>& imports, bool 
 std::string Jsonfy(const DependencyInfoItem& info, bool exportCJO)
 {
     std::ostringstream out;
-    out << "{"
-        << "\"package\":\"" << Jsonfy(info.package) << "\",";
+    out << "{" << "\"package\":\"" << Jsonfy(info.package) << "\",";
     if (!info.orPackage.empty()) {
         out << "\"orPackage\":\"" << Jsonfy(info.orPackage) << "\",";
     }
@@ -240,7 +239,8 @@ void ImportManager::ExportAST(bool saveFileWithAbsPath, std::vector<uint8_t>& as
 
 std::vector<uint8_t> ImportManager::ExportASTSignature(const Package& pkg)
 {
-    ASTWriter writer(diag, {}, {.exportForIncr = true, .compileCjd = opts.compileCjd}, *cjoManager);
+    ASTWriter writer(
+        diag, {}, {.exportContent = true, .exportForIncr = true, .compileCjd = opts.compileCjd}, *cjoManager);
     auto packageDecl = cjoManager->GetPackageDecl(pkg.fullPackageName);
     CJC_NULLPTR_CHECK(packageDecl);
     writer.PreSaveFullExportDecls(*packageDecl->srcPackage);
@@ -808,6 +808,20 @@ Ptr<Package> ImportManager::GetPackage(const std::string& fullPackageName) const
     return cjoManager->GetPackage(fullPackageName);
 }
 
+void ImportManager::AddUsedMacroDecls(const Ptr<const AST::File> file, Ptr<const AST::Decl> decl)
+{
+    auto& usedDeclMap = fileUsedMacroDeclsMap[file->indexOfPackage];
+
+    auto& declSet = usedDeclMap[decl->fullPackageName];
+    declSet.emplace(decl);
+}
+
+std::map<std::string, std::set<Ptr<const AST::Decl>, AST::CmpNodeByPos>>& ImportManager::GetUsedMacroDecls(
+    const AST::File& file)
+{
+    return fileUsedMacroDeclsMap[file.indexOfPackage];
+}
+
 void ImportManager::AddImportedDeclsForSourcePackage(const AST::Package& pkg)
 {
     for (auto& file : pkg.files) {
@@ -866,6 +880,7 @@ void ImportManager::AddImportedDeclsForSourcePackage(const AST::Package& pkg)
                     declsImportedByNodeMap[pkg.fullPackageName][it].emplace_back(import.get());
                 });
                 targetMap.merge(visibleDecls);
+                import->content.isDecl = true;
             }
         }
     }

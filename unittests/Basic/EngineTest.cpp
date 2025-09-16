@@ -5,21 +5,13 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/AST/PrintNode.h"
-#include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Basic/DiagnosticEmitter.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Basic/Match.h"
 #include "cangjie/Basic/Print.h"
 #include "cangjie/Parse/Parser.h"
 #include "cangjie/Utils/CheckUtils.h"
 
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4244) // warning C4244: '=' : warning C4244: 'initializing':
-                                // conversion from '_Ty' to '_Ty1'
-#endif                          //_MSC_VER
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif //_MSC_VER
 #include "gtest/gtest.h"
 
 #include <cstdlib>
@@ -92,10 +84,10 @@ TEST(EngineTest, Handle1)
     auto hander = std::make_unique<LSPDiagnosticHandlerTest>(diag);
     std::string code = R"(
     packag demo
-    main(argc:int,argv!:string="123") {
+    main(argc:int, argv!:string="123") {
     let a:int=40
     let b = 2 ** -a
-    print( (a+3*b, (a+3) *b) )
+    print((a+3*b, (a+3) *b))
     }
 )";
     diag.RegisterHandler(std::move(hander));
@@ -121,7 +113,7 @@ TEST(EngineTest, apiTest)
 {
     DiagnosticEngine diag;
     std::string code = R"(
-    main(argc:int,argv!:string="123") {
+    main(argc:int, argv!:string="123") {
         var a = 1
         var b = """
         cangjie
@@ -133,7 +125,7 @@ TEST(EngineTest, apiTest)
     std::string expectedOut = R"(error: expected test name test1, found test2
  ==> test.cj:7:13:
   | 
-2 |       main(argc:int,argv!:string="123") {
+2 |       main(argc:int, argv!:string="123") {
   |  _____________~
 3 | |         var a = 1
   | |        ~    ~~~~~ test
@@ -244,7 +236,6 @@ TEST(EngineTest, apiTest4)
     DiagnosticEngine diag;
     auto code = R"(
 main(){
-
 })";
     auto file = std::string{"test.cj"};
     SourceManager sm;
@@ -339,20 +330,14 @@ TEST(EngineTest, OldDiagKindDefGuard)
     };
     constexpr const size_t diagEnds[]{
         static_cast<size_t>(DiagKind::chir_diag_end),
-        static_cast<size_t>(DiagKind::conditional_compilation_diag_end),
-        static_cast<size_t>(DiagKind::frontend_diag_end),
         static_cast<size_t>(DiagKind::macro_expand_diag_end),
-        static_cast<size_t>(DiagKind::parse_query_diag_end),
         static_cast<size_t>(DiagKind::sema_diag_end),
     };
     // current number of each ending kind, need be modified when modify the def in cangjie/Basic/DiagnosticsAll.def
     const std::vector<size_t> endNumber = {
-        15, // 0
-        26, // 1
-        31, // 2
-        73, // 3
-        90, // 4
-        337 // 5
+        15,  // 0
+        57,  // 1
+        295, // 2
     };
     bool oldDiagKindBeModified = false;
     for (size_t i = 0; i < endNumber.size(); ++i) {

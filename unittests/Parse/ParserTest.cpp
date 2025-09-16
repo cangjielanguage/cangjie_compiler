@@ -4,6 +4,11 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+#include "gtest/gtest.h"
 #include "cangjie/Parse/Parser.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
@@ -12,11 +17,6 @@
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Basic/Match.h"
 #include "cangjie/Utils/ConstantsUtils.h"
-#include "gtest/gtest.h"
-#include <string>
-#include <unordered_set>
-#include <utility>
-#include <vector>
 
 using namespace Cangjie;
 using namespace AST;
@@ -31,10 +31,10 @@ protected:
         file = parser->ParseTopLevel();
     }
     std::string code = R"(
-    main(argc:int,argv:string="123") {
+    main(argc:int, argv:string="123") {
     let a:int=40
     let b = 2 ** -a
-    print( (a+3*b, (a+3) *b) )
+    print((a+3*b, (a+3) *b))
     }
 )";
     std::unique_ptr<Parser> parser;
@@ -46,10 +46,10 @@ protected:
 TEST(ParserTest1, PositionTest)
 {
     std::string code = R"(
-    main(argc:Int,argv:String") {
+    main(argc:Int, argv:String") {
     let a:Int= [1..3];
     let b = 2 ** -a
-    print( (a+3*b, (a+3) *b) )
+    print((a+3*b, (a+3) *b))
     var scoreResult: string = match (score) {
         case 10  => "fail"
         case _ =>
@@ -70,7 +70,7 @@ TEST(ParserTest1, PositionTest)
     std::vector<std::pair<int, int>> expectPosition;
     expectPosition.push_back(std::make_pair(2, 5));
     expectPosition.push_back(std::make_pair(2, 10));
-    expectPosition.push_back(std::make_pair(2, 19));
+    expectPosition.push_back(std::make_pair(2, 20));
     expectPosition.push_back(std::make_pair(6, 31));
     expectPosition.push_back(std::make_pair(7, 14));
     expectPosition.push_back(std::make_pair(8, 14));
@@ -131,7 +131,7 @@ TEST_F(ParserTest, Decl)
     EXPECT_TRUE(std::equal(identifiers.begin(), identifiers.end(), expectIdentifiers.begin()));
     // private test
     std::string classCode = R"(
-    class A <: B & C & D{
+    class A <: B & C & D {
         func E() {}
         let H = 40
         init() {}
@@ -142,7 +142,8 @@ TEST_F(ParserTest, Decl)
 
     std::vector<std::string> expectMembers{"A", "E", "H", "init"};
     std::vector<std::string> expectRefs{"B", "C", "D"};
-    std::vector<std::string> classMembers, classRefs;
+    std::vector<std::string> classMembers;
+    std::vector<std::string> classRefs;
     Walker walkerClass(file.get(), [&classMembers, &classRefs](Ptr<Node> node) -> VisitAction {
         return match(*node)(
             [&classMembers](const Decl& decl) {
@@ -174,7 +175,8 @@ TEST_F(ParserTest, InterfaceDecl)
 )";
     std::vector<std::string> expectMembers{"I", "E", "H", "A", "F"};
     std::vector<std::string> expectRefs{"C", "D", "E", "F"};
-    std::vector<std::string> members, refs;
+    std::vector<std::string> members;
+    std::vector<std::string> refs;
     Parser parser = Parser(classCode, diag, sm);
     OwnedPtr<File> file = parser.ParseTopLevel();
 
@@ -423,7 +425,7 @@ TEST(ParserTest1, VarDecl)
         let b = 2 ** -a
         let mArray1 : Array<float> = [10.1, 20.2]
         let mArray2: Array<Array<Bool>>
-        let mList1 : List<int> = [1, 2 , 3]
+        let mList1 : List<int> = [1, 2, 3]
         var mList2 : List<float>
         let tuplePIE = (3.14, 1, 'A',  "PIE")
         var (x,     y) = Point
@@ -514,9 +516,9 @@ TEST(ParserTest1, ClassInterfaceDecl)
 {
     std::string code = R"(
     class A <: B & C & D {
-        func foo(){}
+        func foo(){ }
         let tmp : Int32 = 40
-        class AA{}
+        class AA{ }
         interface I1 {}
         interface I2 <: E1.E2 & F{}
     }
@@ -539,7 +541,6 @@ TEST(ParserTest1, ClassInterfaceDecl)
     Parser parser(code, diag, sm);
     OwnedPtr<File> file = parser.ParseTopLevel();
 
-    // return;
     Walker walkerClass(file.get(), [&classNames, &members](Ptr<Node> node) -> VisitAction {
         return match(*node)(
             [&members](const ClassBody& body) {
@@ -586,8 +587,8 @@ TEST(ParserTest1, ClassInterfaceDecl)
 TEST(ParserTest1, ClassDecl)
 {
     std::string code = R"(
-    class A{
-        func B(a: Int32, b: Int32){
+    class A {
+        func B(a: Int32, b: Int32) {
             return a +
         }
         func C() {
@@ -702,20 +703,20 @@ TEST(ParserTest1, OperatorFunc)
     }
     class Test {
         operator func -(): Test {
-            Point(-x,-y)
+            Point(-x, -y)
         }
         operator func [](): Test {
-            Point(-x,-y)
+            Point(-x, -y)
         }
     }
     struct Test {
         operator func -(): Test {
-            Point(-x,-y)
+            Point(-x, -y)
         }
     }
     interface Test {
         operator func -(): Test {
-            Point(-x,-y)
+            Point(-x, -y)
         }
     }
 )";
@@ -768,7 +769,7 @@ TEST(ParserTest1, OperatorFunc)
 TEST(ParserTest1, PrimitiveType)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             let a : Int8
             let a : Int16
             let a : Int32
@@ -812,11 +813,11 @@ TEST(ParserTest1, PrimitiveType)
 TEST(ParserTest1, IfExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             if (i<10) {
                 b +=2
             }
-            if(i<10) {
+            if (i<10) {
                 b +=2
             }
             else if (i > 10) {
@@ -863,7 +864,7 @@ TEST(ParserTest1, IfExpr)
 TEST(ParserTest1, QuoteExpr1)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             quote(1 + 2 + 3 \( \))
             quote($(ast) + $ast + ast + \$a)
         }
@@ -1056,7 +1057,7 @@ TEST(ParserTest1, ThrowExpr)
 TEST(ParserTest1, StrInterpolationExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             var a = "1"
             var b = "${a}"
             var c = "${a.}" // For lsp
@@ -1346,12 +1347,12 @@ TEST(ParserTest1, ForInExpr)
 TEST(ParserTest1, WhileExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             while ((i<10))
             {
                 a=b
             }
-            while (()){
+            while (()) {
                 b +=2
             }
             while (i<10) {
@@ -1391,7 +1392,7 @@ TEST(ParserTest1, WhileExpr)
 TEST(ParserTest1, DoWhileExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             do {
                 b +=2
             } while ((x < 100))
@@ -1432,7 +1433,7 @@ TEST(ParserTest1, DoWhileExpr)
 TEST(ParserTest1, AssignExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             A = expr
             A.B.C = expr
             A[0][1][2] = expr
@@ -1491,7 +1492,7 @@ TEST(ParserTest1, AssignExpr)
 TEST(ParserTest1, IncOrDecExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             a
 
             ++
@@ -1527,11 +1528,11 @@ TEST(ParserTest1, IncOrDecExpr)
 TEST(ParserTest1, CallExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             a = test1();
-            b = test2(a, 1, a+b )
+            b = test2(a, 1, a+b)
             c = test3(a:1, a:a+2)
-            d = test4(if(()){}, while(1){})
+            d = test4(if (()){}, while (1){})
             aa = test11()();
             bb = test22(aa)(bb:1)(cc:2);
             let a = Some(12)
@@ -1690,7 +1691,7 @@ TEST(ParserTest1, MacroExpandInterStr)
 TEST(ParserTest1, PostfixUnaryExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             b = b.c.d.e
             c = c[1][2][3][4]
             d = test(bb:1)(cc=2);
@@ -1880,18 +1881,18 @@ TEST(ParserTest1, CurriedFunction)
 TEST(ParserTest1, LambdaExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             {=>}
             {=>}
             ()
             {a=>1}
             {a=>}
-            {a:Int32,b => }
-            {a,b,c,d:Int32,e => }
-            {a,b,c,d,e => }
-            {a,b,c,d,e => }
-            (a,b,c,
-            d,e)
+            {a:Int32, b => }
+            {a, b, c, d:Int32, e => }
+            {a, b, c, d, e => }
+            {a, b, c, d, e => }
+            (a, b, c,
+            d, e)
             var sum = {a:int, b => a+b}
         }
 )";
@@ -1929,7 +1930,7 @@ TEST(ParserTest1, LambdaExpr)
 TEST(ParserTest1, TypeConvExpr)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             Int8(Int32(a))
             Float64(Int8(Float32(a)))  // Int8 is acutally a CallExpr
         }
@@ -1967,7 +1968,7 @@ TEST(ParserTest1, TypeConvExpr)
 TEST(ParserTest1, Comparisons)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             a >= b ==c<d !=e > f // '!=e > f' is invalid and ignored
             a != b +c== d  // '==d' is invalid and ignored
             a > b ==c+d<=e
@@ -2042,13 +2043,13 @@ TEST(ParserTest1, IsAsExpr)
 TEST(ParserTest1, OpExprs)
 {
     std::string code = R"(
-        func test(){
+        func test() {
             a = -+-2 + -(2+a)
             b = -1 + a- -+- a
             c = a + (if (b) {1} else {3}) * (c * (d + 2))
-            d = b + ( if (c*a) {d*3} else {e} ) + f**4
+            d = b + (if (c*a) {d*3} else {e}) + f**4
             e = -1 + a << 2 >>3 <=aaa
-            f = if (a) {if(b) {c} else {d}} else {e}
+            f = if (a) {if (b) {c} else {d}} else {e}
         }
 )";
     SourceManager sm;
@@ -2395,7 +2396,7 @@ TEST(ParserTestError, ErrorPrint)
         default override class a {
         }
         default static interface a {}
-        if(){}     // line = 8
+        if (){}     // line = 8
         var a : int = 1
         class {
         }
@@ -2417,7 +2418,7 @@ TEST(ParserTestError, ErrorPrint)
 }
         var a = 1
         var scoreResult: String = match scoreList {
-            case List 50,...,} =>  "the lowest score is 50" // line = 30
+            case List 50, ..., } =>  "the lowest score is 50" // line = 30
         }
         var scoreResult: String = match scoreMap {
             case Map{"A" : score} => "the highest score is "+score.tostring()
@@ -2500,7 +2501,8 @@ TEST(ParserTestSpawn, Spawn)
     EXPECT_EQ(0, diag.GetErrorCount());
 }
 
-TEST(ParserTestMatchCase, MatchCase){
+TEST(ParserTestMatchCase, MatchCase)
+{
     std::string code = R"(match(1){
         case 1 => a + aa
     })";
@@ -2517,7 +2519,8 @@ TEST(ParserTestMatchCase, MatchCase){
     EXPECT_EQ(Position(0, 2, 25), matchExpr->matchCases[0]->end);
 }
 
-TEST(ParserTestWildcardExpr, WildcardExpr){
+TEST(ParserTestWildcardExpr, WildcardExpr)
+{
     std::string code = R"(
         _ = 1
     )";
@@ -2532,10 +2535,11 @@ TEST(ParserTestWildcardExpr, WildcardExpr){
     EXPECT_EQ(assignExpr->leftValue->astKind, ASTKind::WILDCARD_EXPR);
 }
 
-TEST(ParserTestWildcardParam, LetOrVar){
+TEST(ParserTestWildcardParam, LetOrVar)
+{
     std::string code = R"(
-        class A{
-            A(let _:Int64){}
+        class A {
+            A(let _:Int64){ }
         }
     )";
     SourceManager sm;
@@ -2558,10 +2562,11 @@ TEST(ParserTestWildcardParam, LetOrVar){
     ASSERT_EQ(funcParams.size(), 1);
 }
 
-TEST(ParserTestWildcardParam, NamedParameter){
+TEST(ParserTestWildcardParam, NamedParameter)
+{
     std::string code = R"(
-        class A{
-            func a(_!:Int64){}
+        class A {
+            func a(_!:Int64){ }
         }
     )";
     SourceManager sm;
@@ -2587,7 +2592,7 @@ TEST(ParserTestWildcardParam, NamedParameter){
 TEST(ParserTestWildcardParam, LambdaParameter)
 {
     std::string code = R"(
-        main(){
+        main() {
             let a = {_:Int64 => return false}
         }
     )";
@@ -2611,9 +2616,10 @@ TEST(ParserTestWildcardParam, LambdaParameter)
     ASSERT_EQ(funcParams.size(), 1);
 }
 
-TEST(ParserTestWildcardExpr, OnlyAppearOnTheLeftOfAssignment){
+TEST(ParserTestWildcardExpr, OnlyAppearOnTheLeftOfAssignment)
+{
     std::string code = R"(
-    func fn(){
+    func fn() {
         a = _
         b = _ + _
         _ += 1
@@ -2637,7 +2643,8 @@ TEST(ParserTestWildcardExpr, OnlyAppearOnTheLeftOfAssignment){
     ASSERT_EQ(wildcardExprs.size(), 4);
 }
 
-TEST(ParserTestWarningAboutNewline, ExprNlExpr){
+TEST(ParserTestWarningAboutNewline, ExprNlExpr)
+{
     auto verify = [](std::string code) -> void {
         SourceManager sm;
         DiagnosticEngine diag;
@@ -2705,7 +2712,8 @@ TEST(ParserTestWarningAboutNewline, ReturnNlExpr)
     EXPECT_EQ(diag.GetWarningCount(), 1);
 }
 
-TEST(ParserTestTupleLeftValue, tupleLeftValue){
+TEST(ParserTestTupleLeftValue, tupleLeftValue)
+{
     std::string code = "(_, _) = (1, 2)";
     SourceManager sm;
     DiagnosticEngine diag;
@@ -2724,7 +2732,8 @@ TEST(ParserTestTupleLeftValue, tupleLeftValue){
     EXPECT_EQ(diag.GetErrorCount(), 0);
 }
 
-TEST(ParserTestTupleLeftValue, wildcardExprOnTheRight){
+TEST(ParserTestTupleLeftValue, wildcardExprOnTheRight)
+{
     std::string code = "(a, b) = (1, _)";
     SourceManager sm;
     DiagnosticEngine diag;
@@ -2743,7 +2752,8 @@ TEST(ParserTestTupleLeftValue, wildcardExprOnTheRight){
     EXPECT_EQ(diag.GetErrorCount(), 1);
 }
 
-TEST(ParserTestTupleLeftValue, TupleAddAssign){
+TEST(ParserTestTupleLeftValue, TupleAddAssign)
+{
     std::string code = "(a, b) += (1, 2)";
     SourceManager sm;
     DiagnosticEngine diag;
@@ -2759,11 +2769,24 @@ TEST(ParserTestTupleLeftValue, TupleAddAssign){
     EXPECT_EQ(diag.GetErrorCount(), 1);
 }
 
+TEST(ParserTest2, NamedInoutArg)
+{
+    std::string code = R"(let a = foo(a: inout a))";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto expr = parser.ParseDecl(ScopeKind::TOPLEVEL);
+    auto diags = diag.GetCategoryDiagnostic(Cangjie::DiagCategory::PARSE);
+    ASSERT_EQ(diags.size(), 1);
+    EXPECT_EQ(diags[0].rKind, DiagKindRefactor::parse_expected_expression);
+}
+
 TEST(PositionTest, doWhileExpr)
 {
     std::string code = R"(
     do { i++ }
-    while(true)
+    while (true)
     )";
     SourceManager sm;
     DiagnosticEngine diag;
@@ -2775,7 +2798,7 @@ TEST(PositionTest, doWhileExpr)
     EXPECT_EQ(expr->begin.line, 2);
     EXPECT_EQ(expr->begin.column, 5);
     EXPECT_EQ(expr->end.line, 3);
-    EXPECT_EQ(expr->end.column, 16);
+    EXPECT_EQ(expr->end.column, 17);
 }
 
 TEST(PositionTest, macroPackageHeader)
@@ -2953,7 +2976,7 @@ TEST(PositionTest, memberParamWithModifier)
 {
     std::string code = R"(
     class A {
-        A (public let a: Int64){}
+        A (public let a: Int64){ }
     }
     )";
     SourceManager sm;
@@ -2975,6 +2998,203 @@ TEST(PositionTest, memberParamWithModifier)
     });
     walker.Walk();
     EXPECT_EQ(funcParams.size(), 1);
+}
+
+TEST_F(ParserTest, FmtWhen)
+{
+    std::string code{R"(@When[abcd == "apple"]
+public open class Rectangle {
+})"};
+    Parser p(code, diag, sm);
+    auto file = p.ParseTopLevel();
+    auto& cl = StaticCast<ClassDecl>(*file->decls[0]);
+    ASSERT_EQ(cl.annotations.size(), 1);
+    ASSERT_EQ(cl.annotations[0]->kind, AnnotationKind::WHEN);
+    ASSERT_EQ(cl.annotations[0]->end.column, 23);
+}
+
+TEST_F(ParserTest, OuterDeclUnderMacroExpandDecl)
+{
+    std::string code{
+        R"(
+@Derive[ToString]
+@Derive[Equatable]
+@!APILevel[
+    19,
+    atomicservice: true,
+    stagemodelonly: true,
+    syscap: "SystemCapability.Advertising.Ads"
+]
+public class Parameter {
+    @M1
+    @!APILevel[
+        19,
+        atomicservice: true,
+        stagemodelonly: true,
+        syscap: "SystemCapability.Advertising.Ads"
+    ]
+    public Parameter(
+        let key: String
+    ) {}
+    @M1
+    @Frozen
+    public func foo() {}
+}
+@Derive[Equatable]
+public struct S {
+    @M1
+    public func hoo() {}
+    @M1
+    @Frozen
+    public prop b: Int64 {
+        get() {
+            0
+        }
+    }
+}
+@Derive[Equatable]
+enum RGBColor {
+    | Red | Green | Blue
+    @M1
+    public static func printType() {
+        print("RGBColor")
+    }
+}
+ 
+extend String {
+    @M1
+    public func printSize() {
+        println("the size is ${this.size}")
+    }
+}
+ 
+)"};
+    Parser p(code, diag, sm);
+    auto file = p.ParseTopLevel();
+    bool hitKey = false;
+    bool hitPrimaryCtor = false;
+    bool hitFoo = false;
+    bool hitHoo = false;
+    bool hitB = false;
+    bool hitPrintType = false;
+    bool hitPrintSize = false;
+    Walker walker(file.get(),
+        [&hitPrimaryCtor, &hitKey, &hitFoo, &hitHoo, &hitB, &hitPrintType, &hitPrintSize](
+            Ptr<Node> node) -> VisitAction {
+            Meta::match (*node)(
+                [&hitPrimaryCtor](const PrimaryCtorDecl& decl) {
+                    if (decl.identifier == "Parameter" && decl.outerDecl) {
+                        hitPrimaryCtor = true;
+                    }
+                },
+                [&hitB](const PropDecl& decl) {
+                    if (decl.outerDecl && decl.identifier == "b") {
+                        hitB = true;
+                    }
+                },
+                [&hitKey](const VarDecl& decl) {
+                    if (decl.identifier == "key" && decl.outerDecl) {
+                        hitKey = true;
+                    }
+                },
+                [&hitFoo, &hitHoo, &hitPrintType, &hitPrintSize](const FuncDecl& decl) {
+                    if (decl.outerDecl) {
+                        if (decl.identifier == "foo") {
+                            hitFoo = true;
+                        } else if (decl.identifier == "hoo") {
+                            hitHoo = true;
+                        } else if (decl.identifier == "printType") {
+                            hitPrintType = true;
+                        } else if (decl.identifier == "printSize") {
+                            hitPrintSize = true;
+                        }
+                    }
+                });
+            return VisitAction::WALK_CHILDREN;
+        });
+    walker.Walk();
+    ASSERT_TRUE(hitPrimaryCtor);
+    ASSERT_TRUE(hitKey);
+    ASSERT_TRUE(hitFoo);
+    ASSERT_TRUE(hitHoo);
+    ASSERT_TRUE(hitB);
+    ASSERT_TRUE(hitPrintType);
+    ASSERT_TRUE(hitPrintSize);
+}
+
+TEST(PositionTest, FuncWithoutBodyCommentsPos)
+{
+    std::string code = R"(/**
+* Provides class to generate logs.
+*/
+@!APILevel[
+    21,
+    stagemodelonly: true,
+    syscap: "SystemCapability.HiviewDFX.HiLog"
+]
+public class HilogChannel {
+    
+    /**
+    * Outputs debug-level logs.
+    */
+    @!APILevel[
+        21,
+        stagemodelonly: true,
+        syscap: "SystemCapability.HiviewDFX.HiLog"
+    ]
+    public func debug<T>(message: T): Unit where T <: ToString
+    
+    /**
+    * Outputs info-level logs.
+    */
+    @!APILevel[
+        21,
+        stagemodelonly: true,
+        syscap: "SystemCapability.HiviewDFX.HiLog"
+    ]
+    public func info<T>(message: T): Unit where T <: ToString
+})";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    auto file = parser.ParseTopLevel();
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    auto& d = StaticCast<MacroExpandDecl>(*file->decls[0]);
+    EXPECT_EQ(d.comments.innerComments.size(), 0);
+    auto& hilog = StaticCast<ClassDecl>(*d.invocation.decl);
+    EXPECT_EQ(hilog.comments.innerComments.size(), 0);
+    auto members = hilog.GetMemberDeclPtrs();
+    auto debug = StaticCast<FuncDecl>(StaticCast<MacroExpandDecl>(members[0])->invocation.decl.get());
+    EXPECT_EQ(debug->begin, Position(19, 5));
+    EXPECT_EQ(debug->end, Position(19, 63));
+    EXPECT_EQ(debug->comments.leadingComments.size(), 1);
+    EXPECT_EQ(debug->comments.trailingComments.size(), 0);
+    auto info = StaticCast<FuncDecl>(StaticCast<MacroExpandDecl>(members[1])->invocation.decl.get());
+    EXPECT_EQ(info->begin, Position(29, 5));
+    EXPECT_EQ(info->end, Position(29, 62));
+    EXPECT_EQ(info->comments.leadingComments.size(), 1);
+    EXPECT_EQ(info->comments.trailingComments.size(), 0);
+}
+
+TEST(PositionTest, Finalizer)
+{
+    std::string code = R"(
+class C {
+    ~  init() {
+        println(3)
+    }
+}
+    )";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto decl = parser.ParseDecl(ScopeKind::TOPLEVEL);
+    auto& finalizer = StaticCast<FuncDecl>(*StaticCast<ClassDecl>(*decl).GetMemberDecls()[0]);
+    EXPECT_EQ(finalizer.identifier.Begin().column, 5);
+    EXPECT_EQ(finalizer.identifier.End().column, 12);
+    EXPECT_EQ(finalizer.keywordPos.column, 8);
 }
 
 TEST_F(ParserTest, LSP)

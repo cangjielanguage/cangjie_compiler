@@ -14,7 +14,7 @@
 #define CANGJIE_CHIR_INTERRETER_INTERPRETERENV_H
 
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
-#include "cangjie/CHIR/Interpreter/InterpreterValue.h"
+#include "cangjie/CHIR/Interpreter/InterpreterValueUtils.h"
 
 namespace Cangjie::CHIR::Interpreter {
 
@@ -70,14 +70,6 @@ struct Env {
         bp = local.size();
     }
 
-    /** @brief set base pointer to newBP and clean environment stack after nextStackFrameStart */
-    void RestoreStackFrameTo(size_t newBP, size_t nextStackFrameStart)
-    {
-        local.erase(local.begin() + static_cast<std::vector<Interpreter::IVal>::difference_type>(nextStackFrameStart),
-            local.end());
-        bp = newBP;
-    }
-
     /** @brief set base pointer to newBP and clean environment stack after bp. */
     void RestoreStackFrameTo(size_t newBP)
     {
@@ -89,24 +81,6 @@ struct Env {
     size_t GetBP() const
     {
         return bp;
-    }
-
-    void Print()
-    {
-        std::cout << "global [ ";
-        for (Bchir::VarIdx var = 0; var < global.size(); ++var) {
-            std::cout << var << " -> ";
-            IValUtils::Printer(global[var]);
-            std::cout << "; ";
-        }
-        std::cout << "]" << std::endl;
-        std::cout << "local [ ";
-        for (Bchir::VarIdx var = 0; var < local.size(); ++var) {
-            std::cout << var << " -> ";
-            IValUtils::Printer(local[var]);
-            std::cout << "; ";
-        }
-        std::cout << "]" << std::endl;
     }
 
 private:

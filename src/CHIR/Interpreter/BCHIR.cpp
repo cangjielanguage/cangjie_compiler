@@ -34,10 +34,6 @@ void Bchir::Definition::Push8bytes(uint64_t value)
     (void)bytecode.emplace_back(static_cast<ByteCodeContent>(value >> byteCodeContentWidth));
 }
 
-void Bchir::Definition::Append(const Definition& anotherDef)
-{
-    std::copy(anotherDef.bytecode.begin(), anotherDef.bytecode.end(), std::back_inserter(bytecode));
-}
 
 void Bchir::Definition::Set(ByteCodeIndex index, Bchir::ByteCodeContent value)
 {
@@ -60,11 +56,6 @@ void Bchir::Definition::Resize(size_t newSize)
 {
     CJC_ASSERT(newSize > bytecode.size());
     bytecode.resize(newSize);
-}
-
-void Bchir::Definition::Reserve(size_t size)
-{
-    bytecode.reserve(size);
 }
 
 Bchir::ByteCodeIndex Bchir::Definition::NextIndex() const
@@ -91,11 +82,6 @@ Bchir::ByteCodeContent Bchir::Definition::GetNumLVars() const
 void Bchir::Definition::SetNumArgs(ByteCodeContent num)
 {
     this->numArgs = num;
-}
-
-Bchir::ByteCodeContent Bchir::Definition::GetNumArgs() const
-{
-    return this->numArgs;
 }
 
 const Bchir::Definition& Bchir::GetLinkedByteCode() const
@@ -147,11 +133,6 @@ Bchir::Definition::GetCodePositionsAnnotations() const
     return codePositionsAnnotations;
 }
 
-void Bchir::SetLinkedByteCode(Definition&& def)
-{
-    this->linkedByteCode = def;
-}
-
 const std::string& Bchir::GetString(size_t index) const
 {
     return strings[index];
@@ -168,9 +149,9 @@ const std::vector<std::string>& Bchir::GetStrings() const
     return strings;
 }
 
-void Bchir::SetStrings(std::vector<std::string>&& strs)
+IVal* Bchir::StoreStringArray(IArray&& array)
 {
-    strings = strs;
+    return stringArrays.emplace_back(std::make_unique<IVal>(std::move(array))).get();
 }
 
 size_t Bchir::AddType(Cangjie::CHIR::Type& ty)
@@ -183,11 +164,6 @@ size_t Bchir::AddType(Cangjie::CHIR::Type& ty)
 const std::vector<Cangjie::CHIR::Type*>& Bchir::GetTypes() const
 {
     return types;
-}
-
-void Bchir::SetTypes(std::vector<Cangjie::CHIR::Type*>&& tys)
-{
-    types = tys;
 }
 
 const Cangjie::CHIR::Type* Bchir::GetTypeAt(size_t idx) const
@@ -276,11 +252,6 @@ const std::vector<std::string>& Bchir::GetFileNames() const
     return fileNames;
 }
 
-void Bchir::SetFileNames(std::vector<std::string>&& names)
-{
-    fileNames = names;
-}
-
 size_t Bchir::AddFileName(const std::string& name)
 {
     auto idx = fileNames.size();
@@ -311,16 +282,6 @@ void Bchir::SetGlobalInitFunc(const std::string& name)
 const std::string& Bchir::GetGlobalInitFunc() const
 {
     return globalInitFunc;
-}
-
-void Bchir::SetGlobalInitLiteralFunc(const std::string& name)
-{
-    globalInitLiteralFunc = name;
-}
-
-const std::string& Bchir::GetGlobalInitLiteralFunc() const
-{
-    return globalInitLiteralFunc;
 }
 
 void Bchir::AddSClass(const std::string& mangledName, SClassInfo&& classInfo)
@@ -370,20 +331,6 @@ bool Bchir::ClassExists(ByteCodeContent id) const
     return classTable.find(id) != classTable.end();
 }
 
-void Bchir::SetVtableEntry(ByteCodeContent classId, ByteCodeContent mId, ByteCodeIndex idx)
-{
-    CJC_ASSERT(classTable.find(classId) != classTable.end());
-    CJC_ASSERT(classTable[classId].vtable.find(mId) != classTable[classId].vtable.end());
-    classTable[classId].vtable[mId] = idx;
-}
-
-void Bchir::SetClassFinalizer(ByteCodeContent classId, ByteCodeIndex idx)
-{
-    auto classIt = classTable.find(classId);
-    CJC_ASSERT(classIt != classTable.end());
-    classIt->second.finalizerIdx = idx;
-}
-
 Bchir::ByteCodeIndex Bchir::GetClassFinalizer(ByteCodeContent classId)
 {
     auto classIt = classTable.find(classId);
@@ -409,44 +356,6 @@ void Bchir::RemoveGlobalVar(const std::string& name)
 void Bchir::RemoveClass(const std::string& name)
 {
     sClassTable.erase(name);
-}
-
-void Bchir::RemoveDefinition(const std::string& name)
-{
-    RemoveFunction(name);
-    RemoveGlobalVar(name);
-    RemoveClass(name);
-}
-
-Bchir Bchir::Clone() const
-{
-    Bchir bchir{};
-    CJC_ASSERT(false);
-    return bchir;
-}
-
-void Bchir::InstantiateDefaultCoreClassesAndFunctions()
-{
-    // Any class
-    auto anyMangledName = "_CNat3AnyE";
-    SClassInfo anyClassInfo;
-    AddSClass(anyMangledName, std::move(anyClassInfo));
-    // Object class
-    auto objMangledName = "_CNat6ObjectE";
-    SClassInfo objClassInfo;
-    objClassInfo.superClasses.emplace_back(anyMangledName);
-    AddSClass(objMangledName, std::move(objClassInfo));
-    // Exception clas
-    auto excMangledName = "_CNat9ExceptionE";
-    SClassInfo excClassInfo;
-    excClassInfo.superClasses.emplace_back(anyMangledName);
-    AddSClass(excMangledName, std::move(excClassInfo));
-
-    // Global var initializer for core
-    auto stdCoreGlobalInit = "_CGPatiiHv";
-    Definition stdCodeGlobalInitDef;
-    stdCodeGlobalInitDef.Push(OpCode::RETURN);
-    AddFunction(stdCoreGlobalInit, std::move(stdCodeGlobalInitDef));
 }
 
 void Bchir::Set(ByteCodeIndex index, Bchir::ByteCodeContent value)

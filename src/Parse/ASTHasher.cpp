@@ -61,7 +61,7 @@ struct [[maybe_unused]] DebugWhen {
             g_print = true;
         }
     }
-    DebugWhen(bool v) noexcept
+    explicit DebugWhen(bool v) noexcept
     {
         if (v) {
             g_print = true;
@@ -108,18 +108,14 @@ std::string GetTrimmedPath(AST::File* file)
     // remove begining package name and the following '/'
     auto path = file->filePath;
     if (file->curPackage) {
-#ifdef _WIN32
         auto pkgName = file->curPackage->fullPackageName;
-        for (size_t i{0}; i < pkgName.size(); ++i) {
-            if (pkgName[i] == '/') {
-                pkgName[i] = '\\';
-            }
-        }
+#ifdef _WIN32
+        pkgName += "\\";
 #else
-        auto& pkgName = file->curPackage->fullPackageName;
+        pkgName += "/";
 #endif
         if (path.find(pkgName) == 0) {
-            path = path.substr(pkgName.size() + 1);
+            path = path.substr(pkgName.size());
         }
     }
     return TrimPackagePath(path);
@@ -519,7 +515,7 @@ struct ASTHasherImpl {
     template <int whatTypeToHash> void HashQuoteExpr(const QuoteExpr& qe)
     {
         HashExpr<whatTypeToHash>(qe);
-        SUPERHash<whatTypeToHash>(qe.quotePos, qe.content);
+        SUPERHash<whatTypeToHash>(qe.quotePos);
     }
     template <int whatTypeToHash> void HashRangeExpr(const RangeExpr& re)
     {
@@ -556,6 +552,16 @@ struct ASTHasherImpl {
     {
         HashExpr<whatTypeToHash>(te);
         SUPERHash<whatTypeToHash>(te.throwPos, te.expr);
+    }
+    template <int whatTypeToHash> void HashPerformExpr(const PerformExpr& pe)
+    {
+        HashExpr<whatTypeToHash>(pe);
+        SUPERHash<whatTypeToHash>(pe.performPos, pe.expr);
+    }
+    template <int whatTypeToHash> void HashResumeExpr(const ResumeExpr& re)
+    {
+        HashExpr<whatTypeToHash>(re);
+        SUPERHash<whatTypeToHash>(re.resumePos);
     }
     template <int whatTypeToHash> void HashTrailingClosureExpr(const TrailingClosureExpr& tce)
     {
@@ -982,7 +988,7 @@ struct ASTHasherImpl {
             return;
         }
         if (auto outer = dynamic_cast<InheritableDecl*>(decl.outerDecl.get());
-            !outer || !outer->TestAttr(Attribute::OPEN) || !outer->TestAttr(Attribute::ABSTRACT)) {
+            !outer || !outer->IsOpen()) {
             return;
         }
         HashSpecificModifiers(decl, {TokenKind::OPEN, TokenKind::ABSTRACT});

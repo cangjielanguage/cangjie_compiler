@@ -18,7 +18,7 @@
 #include <string_view>
 
 namespace Cangjie {
-enum class OverflowStrategy : int8_t { NA, CHECKED, WRAPPING, THROWING, SATURATING, OVERFLOW_STRATEGY_END };
+enum class OverflowStrategy : uint8_t { NA, CHECKED, WRAPPING, THROWING, SATURATING, OVERFLOW_STRATEGY_END };
 
 inline const std::string MAIN_INVOKE = "$mainInvoke";
 inline const std::string ENV_NAME = "$env";
@@ -51,10 +51,20 @@ inline const std::string CACHED_CHIR_OPT_EXTENSION = ".cachedchiropt";
 inline const std::string CACHED_GLOBAL_DECL_DEP_EXTENSION = ".cachedgdecldep";
 inline const std::string CACHED_MODIFIED_AST_EXTENSION = ".cachedModified";
 inline const std::string CACHED_LOG_EXTENSION = ".log";
+inline const std::string CHIR_SERIALIZATION_FILE_EXTENSION = ".chir";
+inline const std::string CHIR_READABLE_FILE_EXTENSION = ".chirtxt";
 
 // Built-in type name.
 inline const std::string CLASS_EXCEPTION = "Exception";
 inline const std::string CLASS_ERROR = "Error";
+inline const std::string CLASS_COMMAND = "Command";
+inline const std::string CLASS_HANDLER_FRAME = "HandlerFrame";
+inline const std::string CLASS_IMMEDIATE_FRAME = "ImmediateFrame";
+inline const std::string CLASS_DOUBLE_RESUME_EXCEPTION = "DoubleResumeException";
+inline const std::string CLASS_FRAME_EXCEPTION_WRAPPER = "ImmediateFrameExceptionWrapper";
+inline const std::string CLASS_FRAME_ERROR_WRAPPER = "ImmediateFrameErrorWrapper";
+inline const std::string CLASS_EARLY_RETURN = "ImmediateEarlyReturn";
+inline const std::string OPTION_NAME = "Option";
 inline const std::string OPTION_VALUE_CTOR = "Some";
 inline const std::string OPTION_NONE_CTOR = "None";
 inline const std::string ANY_NAME = "Any";
@@ -94,6 +104,8 @@ inline constexpr const char AST_PACKAGE_NAME[] = "std.ast";
 inline constexpr const char NET_PACKAGE_NAME[] = "std.net";
 inline constexpr const char REFLECT_PACKAGE_NAME[] = "std.reflect";
 inline constexpr const char REF_PACKAGE_NAME[] = "std.ref";
+inline constexpr const char EFFECT_INTERNALS_PACKAGE_NAME[] = "stdx.effect";
+inline constexpr const char EFFECT_PACKAGE_NAME[] = "stdx.effect";
 
 // Standard library class name
 inline const std::string STD_LIB_ARRAY = "Array";
@@ -104,6 +116,8 @@ inline const std::string STD_LIB_OPTION = "Option";
 inline const std::string STD_LIB_STRING = "String";
 inline const std::string STD_LIB_WAIT_QUEUE = "WaitQueue";
 inline const std::string STD_LIB_WEAK_REF = "WeakRef";
+inline const std::string INTEROP_LIB_EXPORTED_REF = "ExportedRef";
+inline const std::string INTEROP_LIB_FOREIGN_PROXY = "ForeignProxy";
 
 // Global init function name for CHIR, CodeGen.
 inline const std::string ANNOTATION_VAR_POSTFIX{"@Annotation@"};
@@ -118,5 +132,6 @@ inline const std::string CFFI_FUNC_SUFFIX = "$real";
 
 // Headless instrinsics
 inline const std::string GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME = "getTypeForTypeParameter";
+inline const std::string IS_SUBTYPE_TYPES_FUNC_NAME = "isSubtypeTypes";
 } // namespace Cangjie
 #endif // CANGJIE_CONSTANTSUTILS_H

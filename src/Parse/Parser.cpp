@@ -133,7 +133,6 @@ OwnedPtr<File> ParserImpl::ParseTopLevel()
     if (!scanDepPkg) {
         ParseTopLevelDecls(*ret, annos);
     }
-    ret->hasJavaFFI = hasJavaFFI;
     ret->end = lookahead.End();
     if (ret->end.IsZero()) {
         ret->end = ret->begin;
@@ -444,7 +443,7 @@ void ParserImpl::ParseExtendBody(ExtendDecl& ed)
             break;
         }
         auto decl = ParseDecl(ScopeKind::EXTEND_BODY);
-        decl->outerDecl = &ed;
+        SetMemberParentInheritableDecl(ed, decl);
         ed.members.emplace_back(std::move(decl));
     }
 }

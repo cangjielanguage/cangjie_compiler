@@ -31,9 +31,27 @@ void DiagInvalidBinaryExpr(DiagnosticEngine& diag, const BinaryExpr& be)
     auto range = be.operatorPos.IsZero() ? MakeRange(be.begin, be.end) : MakeRange(be.operatorPos, opStr);
     auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_invalid_binary_expr, be, range, opStr,
         be.leftExpr->ty->String(), be.rightExpr->ty->String());
+    if (be.leftExpr->ty->IsFunc() || be.leftExpr->ty->IsCFunc() || be.leftExpr->ty->IsTuple()) {
+        // func and tuple type cannot be extended
+        return;
+    }
     if (TypeCheckUtil::IsOverloadableOperator(be.op)) {
-        builder.AddNote("you may want to implement 'operator func " + opStr + "(right: " + be.rightExpr->ty->String() +
+        std::string note("you may want to implement 'operator func " + opStr + "(right: " + be.rightExpr->ty->String() +
             ")' for type '" + be.leftExpr->ty->String() + "'");
+        if (be.op == TokenKind::EXP) {
+            if (be.leftExpr->ty->kind == TypeKind::TYPE_INT64) {
+                note += ", or to provide a right operand of type 'UInt64'";
+            } else if (be.leftExpr->ty->kind == TypeKind::TYPE_FLOAT64) {
+                note += ", or to provide a right operand of type 'Int64' or 'Float64'";
+            } else if (be.rightExpr->ty->kind == TypeKind::TYPE_INT64) {
+                note += ", or to provide a left operand of type 'Float64'";
+            } else if (be.rightExpr->ty->kind == TypeKind::TYPE_FLOAT64) {
+                note += ", or to provide a left operand of type 'Float64'";
+            } else if (be.rightExpr->ty->kind == TypeKind::TYPE_UINT64) {
+                note += ", or to provide a left operand of type 'Int64'";
+            }
+        }
+        builder.AddNote(note);
     }
 }
 

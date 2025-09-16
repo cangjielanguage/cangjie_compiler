@@ -13,14 +13,12 @@
 #ifndef CANGJIE_CHIR_CHIRCONTEXT_H
 #define CANGJIE_CHIR_CHIRCONTEXT_H
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
-#include "cangjie/Utils/BumpPtrAllocator.h"
 
 #include <atomic>
 #include <vector>
-#include <memory>
 #include <mutex>
 #include <unordered_set>
 
@@ -278,10 +276,6 @@ public:
     void DeleteAllocatedTys();
 
 private:
-    BumpPtrAllocator& GetAllocator() const
-    {
-        return *allocator;
-    }
     /*
      * @brief Cached Pointer of allocated instance in CHIR.
      */
@@ -289,7 +283,6 @@ private:
 
     /* The file name string pool for debug location: fileID map to source path */
     std::unordered_map<unsigned int, std::string>* fileNameMap;
-    std::unique_ptr<BumpPtrAllocator> allocator;
     /*
      * @brief Cached Pointer of allocated instance in CHIR.
      */

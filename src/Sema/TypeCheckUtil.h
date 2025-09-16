@@ -269,5 +269,70 @@ std::set<Ptr<AST::Ty>> GetGenericParamsForDecl(const AST::Decl& decl);
 std::set<Ptr<AST::Ty>> GetGenericParamsForTy(const AST::Ty& ty);
 // get generic params for all decls used in the call
 std::set<Ptr<AST::Ty>> GetGenericParamsForCall(const AST::CallExpr& ce, const AST::FuncDecl& fd);
+
+OwnedPtr<AST::ThrowExpr> CreateThrowException(
+    AST::ClassDecl& exceptionDecl, std::vector<OwnedPtr<AST::Expr>> args,
+    AST::File& curFile, TypeManager& typeManager);
+std::optional<std::pair<Ptr<AST::FuncDecl>, Ptr<AST::Ty>>> FindInitDecl(
+    AST::InheritableDecl& decl, TypeManager& typeManager,
+    std::vector<OwnedPtr<AST::Expr>>& valueArgs, const std::vector<Ptr<AST::Ty>> instTys = {});
+std::optional<std::pair<Ptr<AST::FuncDecl>, Ptr<AST::Ty>>> FindInitDecl(
+    AST::InheritableDecl& decl, TypeManager& typeManager,
+    const std::vector<Ptr<AST::Ty>> valueParamTys, const std::vector<Ptr<AST::Ty>> instTys = {});
+OwnedPtr<AST::CallExpr> CreateInitCall(
+    const std::pair<Ptr<AST::FuncDecl>, Ptr<AST::Ty>> initDeclInfo,
+    std::vector<OwnedPtr<AST::Expr>>& valueArgs,
+    AST::File& curFile, const std::vector<Ptr<AST::Ty>> instTys = {});
+
+Ptr<AST::FuncDecl> GenerateGetTypeForTypeParamIntrinsic(
+    AST::Package& pkg, TypeManager& typeManager, Ptr<AST::Ty> strTy);
+
+// Generates declaration of intrinsic that is roughly eqivalent to expression `TypeLeft is TypeRight`,
+// where `TypeLeft` and `TypeRight` are types and the result is true iff TypeLeft is subtype of TypeRight:
+// func isSubtypeTypes<T, E>() {
+//   return T is E
+// }
+Ptr<AST::FuncDecl> GenerateIsSubtypeTypesIntrinsic(AST::Package& pkg, TypeManager& typeManager);
+
+OwnedPtr<AST::GenericParamDecl> CreateGenericParamDecl(
+    AST::Decl& decl, const std::string& name, TypeManager& typeManager);
+OwnedPtr<AST::GenericParamDecl> CreateGenericParamDecl(AST::Decl& decl, TypeManager& typeManager);
+
+static bool const IS_GENERIC_INSTANTIATION_ENABLED =
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    false;
+#endif
+
+template <typename T> T* GetMemberDecl(
+    AST::Decl& decl, const std::string& identifier, std::vector<Ptr<AST::Ty>> paramTys, TypeManager& typeManager)
+{
+    for (auto& member : decl.GetMemberDecls()) {
+        if (member->identifier != identifier) {
+            continue;
+        }
+        bool isSuitableDecl = true;
+        if (auto funcMember = DynamicCast<AST::FuncDecl>(member.get()); funcMember) {
+            auto originalParamTys = RawStaticCast<const AST::FuncTy*>(funcMember->ty)->paramTys;
+            if (originalParamTys.size() != paramTys.size()) {
+                continue;
+            }
+            for (std::vector<Ptr<AST::Ty>>::size_type i = 0; i < paramTys.size(); i++) {
+                // Object super type is added later, at "desugar after type instantiation" stage,
+                // so we check it here explicitly
+                if (originalParamTys[i]->IsObject() && paramTys[i]->IsClass()) {
+                    continue;
+                }
+                if (!typeManager.IsSubtype(paramTys[i], originalParamTys[i])) {
+                    isSuitableDecl = false;
+                }
+            }
+        }
+        if (isSuitableDecl) {
+            return DynamicCast<T*>(member.get());
+        }
+    }
+
+    return nullptr;
+}
 } // namespace Cangjie::TypeCheckUtil
 #endif

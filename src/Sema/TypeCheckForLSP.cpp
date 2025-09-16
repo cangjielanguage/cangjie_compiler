@@ -656,17 +656,21 @@ protected:
         {
             synthesizer->ctxExprs.push(current);
         }
-        ~SynCtx()
+        ~SynCtx() noexcept
         {
+#ifndef CANGJIE_ENABLE_GCOV
             try {
+#endif
                 if (synthesizer->wasPureReference) {
                     synthesizer->wasPureReference = synthesizer->ctxExprs.top()->IsReferenceExpr();
                 }
                 synthesizer->ctxExprs.pop();
                 synthesizer = nullptr;
+#ifndef CANGJIE_ENABLE_GCOV
             } catch (...) {
                 // Avoid using exceptions in destructors.
             }
+#endif
         }
 
     private:

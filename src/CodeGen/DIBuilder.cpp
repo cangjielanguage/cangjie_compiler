@@ -138,26 +138,8 @@ void DIBuilder::Finalize()
     if (!enabled && !enableLineInfo) {
         return;
     }
-    ChangeMarkedNodeValName();
     finalize();
     lexicalBlocks.clear();
-}
-
-void DIBuilder::ChangeMarkedNodeValName()
-{
-    for (auto enumTy : markedNode) {
-        CJC_ASSERT(typeCache.find(enumTy) != typeCache.end());
-        auto enumDef = enumTy->GetEnumDef();
-        auto fwdDecl = llvm::cast<llvm::DICompositeType>(typeCache.find(enumTy)->second);
-        auto& position = enumDef->GetDebugLocation();
-        auto diFile = GetOrCreateFile(position);
-        auto argTy = enumTy->GetGenericArgs()[0];
-        CJC_ASSERT(argTy);
-        auto argType = GetOrCreateType(*argTy);
-        auto valueType = createMemberType(
-            fwdDecl, "Recursive-val", diFile, 0u, GetSizeInBits(argType), 0u, 0u, llvm::DINode::FlagZero, argType);
-        replaceArrays(fwdDecl, getOrCreateArray({valueType}));
-    }
 }
 
 void DIBuilder::CreateGlobalVar(const CHIR::GlobalVar& variable)
@@ -166,9 +148,7 @@ void DIBuilder::CreateGlobalVar(const CHIR::GlobalVar& variable)
         variable.TestAttr(CHIR::Attribute::NO_DEBUG_INFO)) {
         return;
     }
-    if (variable.TestAttr(CHIR::Attribute::IMPORTED) && !variable.TestAttr(CHIR::Attribute::PUBLIC)) {
-        return;
-    }
+    CJC_ASSERT(!variable.TestAttr(CHIR::Attribute::IMPORTED));
     auto& position = variable.GetDebugLocation();
     auto ty = DeRef(*variable.GetType());
     llvm::DIFile* file = GetOrCreateFile(position);
@@ -302,9 +282,7 @@ void DIBuilder::FinalizeSubProgram(llvm::Function& function)
 
 void DIBuilder::EmitDeclare(const CHIR::Debug& debugNode, llvm::BasicBlock& curBB, bool pointerWrapper)
 {
-    if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
-        return;
-    }
+    CJC_ASSERT(cgMod.GetCGContext().GetCompileOptions().enableCompileDebug);
 
     if (curBB.getParent()->getSubprogram() == nullptr) {
         return;
@@ -457,10 +435,8 @@ llvm::DILocation* DIBuilder::HandleDefaultParamLocation(const CHIRExprWrapper& c
 
 llvm::DILocation* DIBuilder::CreateDILoc(const CHIRExprWrapper& chirNode)
 {
-    if (!enabled && !enableLineInfo) {
-        return nullptr;
-    }
-    llvm::BasicBlock* currentBB = cgMod.GetMappedBB(chirNode.GetParent());
+    CJC_ASSERT(enabled || enableLineInfo);
+    llvm::BasicBlock* currentBB = cgMod.GetMappedBB(chirNode.GetParentBlock());
     auto& position = chirNode.GetDebugLocation();
     // Should not try to generate DebugLocation in the function without subprogram.
     CJC_NULLPTR_CHECK(currentBB);
@@ -469,7 +445,7 @@ llvm::DILocation* DIBuilder::CreateDILoc(const CHIRExprWrapper& chirNode)
     }
     needSubprogram = true;
     llvm::DIScope* scope = GetOrCreateScope(position, *currentBB);
-    auto parentFunc = chirNode.GetParentFunc();
+    auto parentFunc = chirNode.GetTopLevelFunc();
     if (parentFunc && parentFunc->GetFuncKind() == CHIR::DEFAULT_PARAMETER_FUNC) {
         return HandleDefaultParamLocation(chirNode, scope);
     }
@@ -684,8 +660,6 @@ llvm::DIType* DIBuilder::CreateDIType(const CHIR::Type& ty)
             encoding = llvm::dwarf::DW_ATE_boolean;
             break;
         }
-        case CHIR::Type::TYPE_CLOSURE:
-            return CreateClosureType(ty);
         case CHIR::Type::TypeKind::TYPE_FUNC:
             return CreateVarFuncType(StaticCast<const CHIR::FuncType&>(ty));
         case CHIR::Type::TypeKind::TYPE_TUPLE:
@@ -814,7 +788,7 @@ llvm::DIType* DIBuilder::CreateArrayType(const CHIR::RawArrayType& arrTy)
     auto diFile = defaultFile;
     auto scope = diCompileUnit;
 
-    CodeGenDIVector3 elements;
+    CodeGenDIVector3 elements; // Array.Type has 3 elements.
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     auto elemTy = arrTy.GetElementType();
     auto elemType = GetOrCreateType(*elemTy);

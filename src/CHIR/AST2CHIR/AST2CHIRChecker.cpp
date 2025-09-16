@@ -191,7 +191,7 @@ bool CheckType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
 {
     if (chirTy.IsPrimitive()) {
         return CheckPrimitiveType(astTy, chirTy);
-    } else if (chirTy.IsTuple() || chirTy.IsClosure()) {
+    } else if (chirTy.IsTuple()) {
         return CheckTupleType(astTy, chirTy);
     } else if (chirTy.IsFunc()) {
         return CheckFuncType(astTy, chirTy);
@@ -375,11 +375,9 @@ bool CheckInheritDeclMembers(
     const Cangjie::AST::InheritableDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
 {
     auto ret = true;
-    bool isJArray =
-        decl.astKind == AST::ASTKind::CLASS_DECL && IsInstantiatedJArray(StaticCast<const AST::ClassDecl&>(decl));
     for (auto& it : decl.GetMemberDecls()) {
         // All of call to JArray constructors will be desugared, so we can skip the useless constructor member directly.
-        if (it->TestAttr(Cangjie::AST::Attribute::GENERIC) || (isJArray && it->TestAttr(AST::Attribute::CONSTRUCTOR))) {
+        if (it->TestAttr(Cangjie::AST::Attribute::GENERIC)) {
             continue;
         }
         // decl in Interface is abstract method.

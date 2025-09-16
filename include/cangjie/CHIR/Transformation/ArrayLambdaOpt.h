@@ -7,7 +7,7 @@
 #ifndef CANGJIE_CHIR_TRANSFORMATION_ARRAY_LAMBDA_OPT_H
 #define CANGJIE_CHIR_TRANSFORMATION_ARRAY_LAMBDA_OPT_H
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Value.h"
 

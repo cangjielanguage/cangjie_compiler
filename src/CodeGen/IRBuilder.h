@@ -42,7 +42,7 @@ public:
     {
         if (cgMod.GetCGContext().GetCompileOptions().disableInstantiation) {
             this->chirExpr = chirExprWrapper;
-            this->cgFunction = cgMod.GetOrInsertCGFunction(chirExprWrapper->GetParentFunc());
+            this->cgFunction = cgMod.GetOrInsertCGFunction(chirExprWrapper->GetTopLevelFunc());
         }
     }
 
@@ -254,7 +254,6 @@ public:
     }
 
     llvm::Value* CallIntrinsicRef2Null(llvm::Value* value);
-    llvm::Value* CallIntrinsicNull2Ref(llvm::Value* value, bool isJava);
     llvm::Value* CreateStringLiteral(const std::string& str);
 
     void CallArrayInit(
@@ -343,6 +342,8 @@ public:
     void CreateRefStore(CGValue* cgValue, llvm::Value* basePtr, llvm::Value* place, bool isBaseObjStruct);
     ///*----------------- unit test related --------------------//
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    ///*----------------- FFI OHOS related --------------------//
+    llvm::Value* CallInteropIntrinsics(const CHIRIntrinsicWrapper& intrinsic, const std::vector<CGValue*>& parameters);
     ///*----------------- VArray related --------------------//
     void CallVArrayIntrinsicIndexCheck(const CGValue* arrayPtr, std::vector<llvm::Value*>& index);
     void CreateVArrayStore(CGValue* cgValue, llvm::Value* place);

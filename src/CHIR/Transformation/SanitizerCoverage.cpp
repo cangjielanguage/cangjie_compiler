@@ -24,23 +24,15 @@ namespace {
 Ptr<Apply> CreateNonMemberApply(Ptr<Type> resultTy, Ptr<Value> callee, const std::vector<Value*>& args,
     Ptr<Block> parent, CHIRBuilder& builder, DebugLocation loc = INVALID_LOCATION)
 {
-    auto apply = builder.CreateExpression<Apply>(loc, resultTy, callee, args, parent);
-    std::vector<Type*> paramType;
-    for_each(args.begin(), args.end(), [&paramType](const auto& t) { paramType.push_back(t->GetType()); });
-    apply->SetInstantiatedFuncType(nullptr, nullptr, std::move(paramType), *resultTy);
-    return apply;
+    return builder.CreateExpression<Apply>(loc, resultTy, callee, FuncCallContext{.args = args}, parent);
 }
 
-Ptr<Apply> CreateMemberApply(Ptr<Type> resultTy, Ptr<Value> callee, Ptr<Type> thisType, Ptr<Type> parentType,
+Ptr<Apply> CreateMemberApply(Ptr<Type> resultTy, Ptr<Value> callee, Ptr<Type> thisType,
     const std::vector<Value*>& args, Ptr<Block> parent, CHIRBuilder& builder, DebugLocation loc = INVALID_LOCATION)
 {
-    auto argsCopy = args;
-    auto apply = builder.CreateExpression<Apply>(loc, resultTy, callee, argsCopy, parent);
-
-    std::vector<Type*> paramType;
-    for_each(argsCopy.begin(), argsCopy.end(), [&paramType](const auto& t) { paramType.push_back(t->GetType()); });
-    apply->SetInstantiatedFuncType(thisType, parentType, std::move(paramType), *resultTy);
-    return apply;
+    return builder.CreateExpression<Apply>(loc, resultTy, callee, FuncCallContext{
+        .args = args,
+        .thisType = thisType}, parent);
 }
 } // namespace
 
@@ -121,7 +113,7 @@ static const std::unordered_set<std::string> HAS_N_PARAMETER_MEM_CMP_SET = {
 
 enum class MemCmpType { STRING_TYPE, CSTRING_TYPE, ARRAY_TYPE, ARRAYLIST_TYPE };
 
-inline std::optional<std::string> GetStringSanConvFunc(MemCmpType cmpType, const std::string& funcName)
+std::optional<std::string> GetStringSanConvFunc(MemCmpType cmpType, const std::string& funcName)
 {
     if (cmpType == MemCmpType::STRING_TYPE && STRING_FUNC_NAME2_SAN_COV_FUNC.count(funcName) != 0) {
         return STRING_FUNC_NAME2_SAN_COV_FUNC.at(funcName);
@@ -238,7 +230,7 @@ void SanitizerCoverage::RunOnFunc(const Ptr<Func>& func, bool isDebug)
                 auto mb = StaticCast<MultiBranch*>(&expr);
                 InjectTraceForSwitch(*mb, isDebug);
             }
-            if (expr.GetExprMajorKind() == ExprMajorKind::BINARY_EXPR) {
+            if (expr.IsBinaryExpr()) {
                 auto binary = StaticCast<BinaryExpression*>(&expr);
                 InjectTraceForCmp(*binary, isDebug);
             }
@@ -325,7 +317,7 @@ void SanitizerCoverage::InjectTraceForCmp(BinaryExpression& binary, bool isDebug
         %n = __sanitizer_cov_trace_const_cmpsize(arg1, arg2) // add function here
         %2 = Equal(%0, %1)
     */
-    auto parent = binary.GetParent();
+    auto parent = binary.GetParentBlock();
     if (auto intTy = StaticCast<IntType*>(lhs->GetType()); intTy && intTy->IsSigned()) {
         // Note: If the operand type is int8, convert it to uint8. int16, int32, int64 is similar.
         auto unsignedType = builder.GetType<IntType>(GetTraceCompareType(lhs->GetType()->GetTypeKind()));
@@ -382,7 +374,7 @@ void SanitizerCoverage::InjectTraceForSwitch(MultiBranch& mb, bool isDebug)
     // 1. create trace function type for switch
     auto funcTy = builder.GetType<FuncType>(std::vector<Type*>{u64Ty, cPointTy}, builder.GetUnitTy(), false, true);
     auto callee = GenerateForeignFunc(callName, mb.GetDebugLocation(), *funcTy, packageName);
-    auto parent = mb.GetParent();
+    auto parent = mb.GetParentBlock();
     // 2. generate lit value list from switch case list
     auto caseValList = CreateArrayForSwitchCaseList(mb);
     caseValList->MoveBefore(&mb);
@@ -422,24 +414,36 @@ std::vector<Value*> SanitizerCoverage::GenerateCStringMemCmp(
         %5: Unit = Apply(@__cj_sanitizer_weak_hook_strcmp, %3, %4, %2)
         %c: Bool = Apply(@_CNatX7CString6equalsHk, %a, %b)
     */
-    auto parent = apply.GetParent();
+    auto parent = apply.GetParentBlock();
     auto loc = apply.GetDebugLocation();
     std::vector<Value*> res;
     auto cPointerType = builder.GetType<CPointerType>(builder.GetUInt8Ty());
-    auto cPointer = builder.CreateExpression<Intrinsic>(
-        loc, cPointerType, CHIR::CSTRING_CONVERT_CSTR_TO_PTR, std::vector<Value*>{&oper1}, parent);
+    auto callContext1 = IntrisicCallContext {
+        .kind = IntrinsicKind::CSTRING_CONVERT_CSTR_TO_PTR,
+        .args = std::vector<Value*>{&oper1}
+    };
+    auto cPointer = builder.CreateExpression<Intrinsic>(loc, cPointerType, callContext1, parent);
     cPointer->MoveBefore(&apply);
-    auto cPointer2 = builder.CreateExpression<Intrinsic>(
-        loc, cPointerType, CHIR::CSTRING_CONVERT_CSTR_TO_PTR, std::vector<Value*>{&oper2}, parent);
+    auto callContext2 = IntrisicCallContext {
+        .kind = IntrinsicKind::CSTRING_CONVERT_CSTR_TO_PTR,
+        .args = std::vector<Value*>{&oper2}
+    };
+    auto cPointer2 = builder.CreateExpression<Intrinsic>(loc, cPointerType, callContext2, parent);
     cPointer2->MoveBefore(&apply);
     if (fuzzName == SAN_COV_TRACE_MEM_CMP) {
         // __cj_sanitizer_weak_hook_memcmp function need void* input
         auto typeTarget = builder.GetType<CPointerType>(builder.GetVoidTy());
-        cPointer = builder.CreateExpression<Intrinsic>(
-            loc, typeTarget, CHIR::CPOINTER_INIT1, std::vector<Value*>{cPointer->GetResult()}, parent);
+        auto callContext3 = IntrisicCallContext {
+            .kind = IntrinsicKind::CPOINTER_INIT1,
+            .args = std::vector<Value*>{cPointer->GetResult()}
+        };
+        cPointer = builder.CreateExpression<Intrinsic>(loc, typeTarget, callContext3, parent);
         cPointer->MoveBefore(&apply);
-        cPointer2 = builder.CreateExpression<Intrinsic>(
-            loc, typeTarget, CHIR::CPOINTER_INIT1, std::vector<Value*>{cPointer2->GetResult()}, parent);
+        auto callContext4 = IntrisicCallContext {
+            .kind = IntrinsicKind::CPOINTER_INIT1,
+            .args = std::vector<Value*>{cPointer2->GetResult()}
+        };
+        cPointer2 = builder.CreateExpression<Intrinsic>(loc, typeTarget, callContext4, parent);
         cPointer2->MoveBefore(&apply);
     }
     res.push_back(cPointer->GetResult());
@@ -447,7 +451,7 @@ std::vector<Value*> SanitizerCoverage::GenerateCStringMemCmp(
     if (HAS_N_PARAMETER_MEM_CMP_SET.count(fuzzName) != 0) {
         auto getSize = GetImportedFunc(FUNC_MANGLE_NAME_CSTRING_SIZE);
         auto sizeN = CreateMemberApply(
-            builder.GetInt64Ty(), getSize, oper1.GetType(), oper1.GetType(), {&oper1}, parent, builder, loc);
+            builder.GetInt64Ty(), getSize, oper1.GetType(), {&oper1}, parent, builder, loc);
         sizeN->MoveBefore(&apply);
         auto sizeNCasted = builder.CreateExpression<TypeCast>(loc, builder.GetUInt32Ty(), sizeN->GetResult(), parent);
         sizeNCasted->MoveBefore(&apply);
@@ -464,7 +468,7 @@ Expression* SanitizerCoverage::CreateOneCPointFromList(Value& array, Apply& appl
         auto cPointeroffset = array.start
         cPointer = cPointerBase + cPointeroffset
     */
-    auto parent = apply.GetParent();
+    auto parent = apply.GetParentBlock();
     auto& loc = apply.GetDebugLocation();
 
     auto rawArrayType = builder.GetType<RefType>(builder.GetType<RawArrayType>(&elementType, 1U));
@@ -479,13 +483,20 @@ Expression* SanitizerCoverage::CreateOneCPointFromList(Value& array, Apply& appl
         startRes = castToInt64->GetResult();
     }
     auto origPointerType = builder.GetType<CPointerType>(&elementType);
-    auto cPointerAcquire = builder.CreateExpression<Intrinsic>(
-        loc, origPointerType, CHIR::ARRAY_ACQUIRE_RAW_DATA, std::vector<Value*>{rawArray->GetResult()}, parent);
-    cPointerAcquire->SetGenericTypeInfo({&elementType});
+    auto callContext1 = IntrisicCallContext {
+        .kind = IntrinsicKind::ARRAY_ACQUIRE_RAW_DATA,
+        .args = std::vector<Value*>{rawArray->GetResult()},
+        .instTypeArgs = std::vector<Type*>{&elementType}
+    };
+    auto cPointerAcquire = builder.CreateExpression<Intrinsic>(loc, origPointerType, callContext1, parent);
     cPointerAcquire->MoveBefore(&apply);
-    auto pointAdd = builder.CreateExpression<Intrinsic>(loc, origPointerType, CHIR::CPOINTER_ADD,
-        std::vector<Value*>{cPointerAcquire->GetResult(), startRes}, parent);
-    pointAdd->SetGenericTypeInfo({&elementType});
+
+    auto callContext2 = IntrisicCallContext {
+        .kind = IntrinsicKind::CPOINTER_ADD,
+        .args = std::vector<Value*>{cPointerAcquire->GetResult(), startRes},
+        .instTypeArgs = std::vector<Type*>{&elementType}
+    };
+    auto pointAdd = builder.CreateExpression<Intrinsic>(loc, origPointerType, callContext2, parent);
     pointAdd->MoveBefore(&apply);
     return pointAdd;
 }
@@ -514,18 +525,24 @@ std::vector<Value*> SanitizerCoverage::GenerateStringMemCmp(
         %c: Bool = Apply(@_CNat6String2==ERNat6StringE, %a, %b)
     */
     std::vector<Value*> res;
-    auto parent = apply.GetParent();
+    auto parent = apply.GetParentBlock();
     auto& loc = apply.GetDebugLocation();
     auto cPoint1 = CreateOneCPointFromList(oper1, apply, *builder.GetUInt8Ty(), *builder.GetUInt32Ty());
     auto cPoint2 = CreateOneCPointFromList(oper2, apply, *builder.GetUInt8Ty(), *builder.GetUInt32Ty());
     if (fuzzName == SAN_COV_TRACE_MEM_CMP) {
         // __cj_sanitizer_weak_hook_memcmp function need void* input
         auto typeTarget = builder.GetType<CPointerType>(builder.GetVoidTy());
-        cPoint1 = builder.CreateExpression<Intrinsic>(
-            loc, typeTarget, CHIR::CPOINTER_INIT1, std::vector<Value*>{cPoint1->GetResult()}, parent);
+        auto callContext1 = IntrisicCallContext {
+            .kind = IntrinsicKind::CPOINTER_INIT1,
+            .args = std::vector<Value*>{cPoint1->GetResult()}
+        };
+        cPoint1 = builder.CreateExpression<Intrinsic>(loc, typeTarget, callContext1, parent);
         cPoint1->MoveBefore(&apply);
-        cPoint2 = builder.CreateExpression<Intrinsic>(
-            loc, typeTarget, CHIR::CPOINTER_INIT1, std::vector<Value*>{cPoint2->GetResult()}, parent);
+        auto callContext2 = IntrisicCallContext {
+            .kind = IntrinsicKind::CPOINTER_INIT1,
+            .args = std::vector<Value*>{cPoint2->GetResult()}
+        };
+        cPoint2 = builder.CreateExpression<Intrinsic>(loc, typeTarget, callContext2, parent);
         cPoint2->MoveBefore(&apply);
     }
     res.push_back(cPoint1->GetResult());
@@ -570,7 +587,7 @@ std::vector<Value*> SanitizerCoverage::GenerateArrayCmp(
         %c: Bool = Apply(@_CNat6Extendat5ArrayIl2==ERNat5ArrayIlE, %a, %b)
     */
     std::vector<Value*> res;
-    auto parent = apply.GetParent();
+    auto parent = apply.GetParentBlock();
     auto& loc = apply.GetDebugLocation();
     CJC_ASSERT(oper1.GetType()->GetTypeKind() == Type::TypeKind::TYPE_STRUCT);
     auto arrayType = StaticCast<StructType*>(oper1.GetType());
@@ -583,11 +600,17 @@ std::vector<Value*> SanitizerCoverage::GenerateArrayCmp(
         typeTarget = builder.GetType<CPointerType>(builder.GetVoidTy());
     }
     // __cj_sanitizer_weak_hook_memcmp function need void* input
-    auto typeCast1 = builder.CreateExpression<Intrinsic>(
-        loc, typeTarget, CHIR::CPOINTER_INIT1, std::vector<Value*>{cPointer1->GetResult()}, parent);
+    auto callContext1 = IntrisicCallContext {
+        .kind = IntrinsicKind::CPOINTER_INIT1,
+        .args = std::vector<Value*>{cPointer1->GetResult()}
+    };
+    auto typeCast1 = builder.CreateExpression<Intrinsic>(loc, typeTarget, callContext1, parent);
     typeCast1->MoveBefore(&apply);
-    auto typeCast2 = builder.CreateExpression<Intrinsic>(
-        loc, typeTarget, CHIR::CPOINTER_INIT1, std::vector<Value*>{cPointer2->GetResult()}, parent);
+    auto callContext2 = IntrisicCallContext {
+        .kind = IntrinsicKind::CPOINTER_INIT1,
+        .args = std::vector<Value*>{cPointer2->GetResult()}
+    };
+    auto typeCast2 = builder.CreateExpression<Intrinsic>(loc, typeTarget, callContext2, parent);
     typeCast2->MoveBefore(&apply);
     res.push_back(typeCast1->GetResult());
     res.push_back(typeCast2->GetResult());
@@ -634,7 +657,7 @@ std::pair<Value*, Value*> SanitizerCoverage::CastArrayListToArray(Value& oper1, 
 
     auto arrayRefType = builder.GetType<RefType>(arrayType);
 
-    auto parent = apply.GetParent();
+    auto parent = apply.GetParentBlock();
     auto arrayRef1 =
         builder.CreateExpression<GetElementRef>(loc, arrayRefType, &oper1, std::vector<uint64_t>{0}, parent);
     arrayRef1->MoveBefore(&apply);
@@ -728,7 +751,7 @@ void SanitizerCoverage::InjectTraceMemCmp(Expression& expr, bool isDebug)
         return;
     }
     Expression* syscall;
-    auto parent = expr.GetParent();
+    auto parent = expr.GetParentBlock();
     if (intrinsicName == SAN_COV_TRACE_MEM_CMP) {
         auto voidPointerType = builder.GetType<CPointerType>(builder.GetVoidTy());
         syscall = CreateMemCmpFunc(intrinsicName, *voidPointerType, params, expr.GetDebugLocation(), parent);
@@ -746,15 +769,15 @@ void SanitizerCoverage::InjectTraceMemCmp(Expression& expr, bool isDebug)
 void SanitizerCoverage::InsertCoverageAheadBlock(Block& block, bool isDebug)
 {
     if (sanCovOption.pcTable) {
-        CJC_ASSERT(block.GetParentFunc());
-        auto blockLocation = block.GetParentFunc()->GetDebugLocation();
+        CJC_ASSERT(block.GetTopLevelFunc());
+        auto blockLocation = block.GetTopLevelFunc()->GetDebugLocation();
         for (auto it : block.GetExpressions()) {
             if (!it->GetDebugLocation().IsInvalidPos()) {
                 blockLocation = it->GetDebugLocation();
                 break;
             }
         }
-        pcArray.emplace_back(std::make_pair(block.GetParentFunc()->GetSrcCodeIdentifier(), blockLocation));
+        pcArray.emplace_back(std::make_pair(block.GetTopLevelFunc()->GetSrcCodeIdentifier(), blockLocation));
     }
     CJC_ASSERT(block.GetExpressions().size() > 0);
     auto callList = GenerateCoverageCallByOption(INVALID_LOCATION, isDebug, &block);
@@ -780,44 +803,47 @@ RawArrayAllocate* SanitizerCoverage::CreateArrayForSwitchCaseList(MultiBranch& m
     std::vector<Value*> caseVals;
     // switch case size
     auto& loc = multiBranch.GetDebugLocation();
-    auto caseSize =
-        builder.CreateConstantExpression<IntLiteral>(loc, builder.GetUInt64Ty(), multiBranch.GetParent(), cases.size());
+    auto caseSize = builder.CreateConstantExpression<IntLiteral>(
+        loc, builder.GetUInt64Ty(), multiBranch.GetParentBlock(), cases.size());
     caseVals.emplace_back(caseSize->GetResult());
     caseSize->MoveBefore(&multiBranch);
 
     // bit size of switch condition type
     // only support uint64 as bit size of switch condition type
     auto elemBitSize = builder.CreateConstantExpression<IntLiteral>(
-        loc, builder.GetUInt64Ty(), multiBranch.GetParent(), sizeof(uint64_t) * CHAR_BIT);
+        loc, builder.GetUInt64Ty(), multiBranch.GetParentBlock(), sizeof(uint64_t) * CHAR_BIT);
     caseVals.emplace_back(elemBitSize->GetResult());
     elemBitSize->MoveBefore(&multiBranch);
 
     // switch value list
     std::for_each(cases.begin(), cases.end(), [this, &caseVals, &loc, &multiBranch](uint64_t caseVal) {
-        auto valExpr =
-            builder.CreateConstantExpression<IntLiteral>(loc, builder.GetUInt64Ty(), multiBranch.GetParent(), caseVal);
+        auto valExpr = builder.CreateConstantExpression<IntLiteral>(
+            loc, builder.GetUInt64Ty(), multiBranch.GetParentBlock(), caseVal);
         caseVals.emplace_back(valExpr->GetResult());
         valExpr->MoveBefore(&multiBranch);
     });
 
     // list size should be case size plus two
     auto listSize = builder.CreateConstantExpression<IntLiteral>(
-        loc, builder.GetInt64Ty(), multiBranch.GetParent(), cases.size() + 2U);
+        loc, builder.GetInt64Ty(), multiBranch.GetParentBlock(), cases.size() + 2U);
     listSize->MoveBefore(&multiBranch);
     // create raw literal array
     auto arrayTy = builder.GetType<RefType>(builder.GetType<RawArrayType>(builder.GetUInt64Ty(), 1U));
     auto rawArrayExpr = builder.CreateExpression<RawArrayAllocate>(
-        arrayTy, builder.GetUInt64Ty(), listSize->GetResult(), multiBranch.GetParent());
+        arrayTy, builder.GetUInt64Ty(), listSize->GetResult(), multiBranch.GetParentBlock());
     return rawArrayExpr;
 }
 
 Intrinsic* SanitizerCoverage::CreateRawDataAcquire(const Expression& dataList, Type& elementType) const
 {
     auto cPointerTy = builder.GetType<CPointerType>(&elementType);
-    auto rawDataAcquire = builder.CreateExpression<Intrinsic>(dataList.GetDebugLocation(), cPointerTy,
-        CHIR::ARRAY_ACQUIRE_RAW_DATA, std::vector<Value*>{dataList.GetResult()}, dataList.GetParent());
-    rawDataAcquire->SetGenericTypeInfo({&elementType});
-    return rawDataAcquire;
+    auto callContext = IntrisicCallContext {
+        .kind = IntrinsicKind::ARRAY_ACQUIRE_RAW_DATA,
+        .args = std::vector<Value*>{dataList.GetResult()},
+        .instTypeArgs = std::vector<Type*>{&elementType}
+    };
+    return builder.CreateExpression<Intrinsic>(
+        dataList.GetDebugLocation(), cPointerTy, callContext, dataList.GetParentBlock());
 }
 
 std::vector<Expression*> SanitizerCoverage::GenerateCoverageCallByOption(
@@ -863,10 +889,12 @@ std::vector<Expression*> SanitizerCoverage::GeneratePCGuardExpr(const DebugLocat
     auto offset = builder.CreateConstantExpression<IntLiteral>(
         loc, builder.GetInt64Ty(), parent, static_cast<uint64_t>(bbCounter));
     Expression* arrayTestLoad = builder.CreateExpression<Load>(loc, globalVarType, charArrayTest, parent);
-    auto addPoint = builder.CreateExpression<Intrinsic>(loc, cPointTy, CHIR::CPOINTER_ADD,
-        std::vector<Value*>{arrayTestLoad->GetResult(), offset->GetResult()}, parent);
-    addPoint->SetGenericTypeInfo({builder.GetUInt32Ty()});
-
+    auto callContext = IntrisicCallContext {
+        .kind = IntrinsicKind::CPOINTER_ADD,
+        .args = std::vector<Value*>{arrayTestLoad->GetResult(), offset->GetResult()},
+        .instTypeArgs = std::vector<Type*>{builder.GetUInt32Ty()}
+    };
+    auto addPoint = builder.CreateExpression<Intrinsic>(loc, cPointTy, callContext, parent);
     auto syscall = CreateNonMemberApply(
         builder.GetUnitTy(), pcGuardFunc, std::vector<Value*>{addPoint->GetResult()}, parent, builder, loc);
     if (isDebug) {
@@ -896,15 +924,21 @@ std::vector<Expression*> SanitizerCoverage::GenerateInline8bitExpr(
     auto loadGlobal = builder.CreateExpression<Load>(loc, globalVarType, charArrayTest, parent);
     auto offset = builder.CreateConstantExpression<IntLiteral>(
         loc, builder.GetInt64Ty(), parent, static_cast<uint64_t>(bbCounter));
-    auto readPoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUInt8Ty(), CHIR::CPOINTER_READ,
-        std::vector<Value*>{loadGlobal->GetResult(), offset->GetResult()}, parent);
-    readPoint->SetGenericTypeInfo({builder.GetUInt8Ty()});
+    auto callContext1 = IntrisicCallContext {
+        .kind = IntrinsicKind::CPOINTER_READ,
+        .args = std::vector<Value*>{loadGlobal->GetResult(), offset->GetResult()},
+        .instTypeArgs = std::vector<Type*>{builder.GetUInt8Ty()}
+    };
+    auto readPoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUInt8Ty(), callContext1, parent);
     auto one = builder.CreateConstantExpression<IntLiteral>(loc, builder.GetUInt8Ty(), parent, 1UL);
     auto addRes = builder.CreateExpression<BinaryExpression>(
         loc, builder.GetUInt8Ty(), ExprKind::ADD, readPoint->GetResult(), one->GetResult(), parent);
-    auto writePoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUnitTy(), CHIR::CPOINTER_WRITE,
-        std::vector<Value*>{loadGlobal->GetResult(), offset->GetResult(), addRes->GetResult()}, parent);
-    writePoint->SetGenericTypeInfo({builder.GetUInt8Ty()});
+    auto callContext2 = IntrisicCallContext {
+        .kind = IntrinsicKind::CPOINTER_WRITE,
+        .args = std::vector<Value*>{loadGlobal->GetResult(), offset->GetResult(), addRes->GetResult()},
+        .instTypeArgs = std::vector<Type*>{builder.GetUInt8Ty()}
+    };
+    auto writePoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUnitTy(), callContext2, parent);
     if (isDebug) {
         std::cout << "[SanitizerCoverage] Add trace inline 8 bit" << ToPosInfo(loc) << ".\n";
     }
@@ -931,9 +965,12 @@ std::vector<Expression*> SanitizerCoverage::GenerateInlineBoolExpr(
     auto offset = builder.CreateConstantExpression<IntLiteral>(
         loc, builder.GetInt64Ty(), parent, static_cast<uint64_t>(bbCounter));
     auto boolTrue = builder.CreateConstantExpression<BoolLiteral>(loc, builder.GetBoolTy(), parent, true);
-    auto writePoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUnitTy(), CHIR::CPOINTER_WRITE,
-        std::vector<Value*>{loadGlobal->GetResult(), offset->GetResult(), boolTrue->GetResult()}, parent);
-    writePoint->SetGenericTypeInfo({builder.GetBoolTy()});
+    auto callContext = IntrisicCallContext {
+        .kind = IntrinsicKind::CPOINTER_WRITE,
+        .args = std::vector<Value*>{loadGlobal->GetResult(), offset->GetResult(), boolTrue->GetResult()},
+        .instTypeArgs = std::vector<Type*>{builder.GetBoolTy()}
+    };
+    auto writePoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUnitTy(), callContext, parent);
     if (isDebug) {
         std::cout << "[SanitizerCoverage] Add trace inline bool" << ToPosInfo(loc) << ".\n";
     }
@@ -1056,11 +1093,11 @@ Func* SanitizerCoverage::CreatePCTableInitFunc()
     block0->AppendExpression(funcSize);
     // create package
     auto packExpr = builder.CreateConstantExpression<StringLiteral>(
-        INVALID_LOCATION, builder.GetStringTy(), block0, packageName, false);
+        INVALID_LOCATION, builder.GetStringTy(), block0, packageName);
     block0->AppendExpression(packExpr);
     auto libc = builder.GetStructType("std.core", "LibC");
     auto libcRef = builder.GetType<RefType>(libc);
-    auto packCString = CreateMemberApply(builder.GetCStringTy(), mallocStringFunc, libcRef, libc,
+    auto packCString = CreateMemberApply(builder.GetCStringTy(), mallocStringFunc, libcRef,
         {packExpr->GetResult()}, block0, builder, INVALID_LOCATION);
     block0->AppendExpression(packCString);
     // create arrays of function name, file name and line number
@@ -1069,16 +1106,16 @@ Func* SanitizerCoverage::CreatePCTableInitFunc()
     std::vector<Value*> lineNumberArray;
     for (auto pcIter : pcArray) {
         auto funcName = builder.CreateConstantExpression<StringLiteral>(
-            INVALID_LOCATION, builder.GetStringTy(), block0, pcIter.first, false);
+            INVALID_LOCATION, builder.GetStringTy(), block0, pcIter.first);
         block0->AppendExpression(funcName);
-        auto cString = CreateMemberApply(builder.GetCStringTy(), mallocStringFunc, libcRef, libc,
+        auto cString = CreateMemberApply(builder.GetCStringTy(), mallocStringFunc, libcRef,
             {funcName->GetResult()}, block0, builder, INVALID_LOCATION);
         block0->AppendExpression(cString);
         funcNameArray.push_back(cString->GetResult());
         auto fileName = builder.CreateConstantExpression<StringLiteral>(INVALID_LOCATION, builder.GetStringTy(), block0,
-            builder.GetChirContext().GetSourceFileName(pcIter.second.GetFileID()), false);
+            builder.GetChirContext().GetSourceFileName(pcIter.second.GetFileID()));
         block0->AppendExpression(fileName);
-        auto fileNameCString = CreateMemberApply(builder.GetCStringTy(), mallocStringFunc, libcRef, libc,
+        auto fileNameCString = CreateMemberApply(builder.GetCStringTy(), mallocStringFunc, libcRef,
             {fileName->GetResult()}, block0, builder, INVALID_LOCATION);
         block0->AppendExpression(fileNameCString);
         fileNameArray.push_back(fileNameCString->GetResult());
@@ -1118,10 +1155,13 @@ Intrinsic* SanitizerCoverage::CreateRawDataAcquire(
     auto arrayVar = expr->GetResult();
     block.AppendExpression(builder.CreateExpression<RawArrayLiteralInit>(builder.GetUnitTy(), arrayVar, list, &block));
     auto cPointerTy = builder.GetType<CPointerType>(&type);
-    auto rawDataAcquire = builder.CreateExpression<Intrinsic>(
-        INVALID_LOCATION, cPointerTy, CHIR::ARRAY_ACQUIRE_RAW_DATA, std::vector<Value*>{arrayVar}, &block);
+    auto callContext = IntrisicCallContext {
+        .kind = IntrinsicKind::ARRAY_ACQUIRE_RAW_DATA,
+        .args = std::vector<Value*>{arrayVar},
+        .instTypeArgs = std::vector<Type*>{&type}
+    };
+    auto rawDataAcquire = builder.CreateExpression<Intrinsic>(INVALID_LOCATION, cPointerTy, callContext, &block);
     block.AppendExpression(rawDataAcquire);
-    rawDataAcquire->SetGenericTypeInfo({&type});
     return rawDataAcquire;
 }
 

@@ -87,8 +87,8 @@ private:
     void CollectCandidates(
         CHIRBuilder& builder, ClassType* specific, std::pair<FuncBase*, Type*>& res, const FuncSig& method) const;
     
-    bool GetSpecificCandidates(
-        CHIRBuilder& builder, ClassType& specific, std::pair<FuncBase*, Type*>& res, const FuncSig& method) const;
+    FuncBase* GetCandidateFromSpecificType(
+        CHIRBuilder& builder, ClassType& specific, const FuncSig& method) const;
     
     static void RewriteToApply(CHIRBuilder& builder, std::vector<RewriteInfo>& rewriteInfos, bool isDebug);
     

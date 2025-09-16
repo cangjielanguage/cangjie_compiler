@@ -90,10 +90,6 @@ llvm::Type* CGFunctionType::GenLLVMType()
         auto llvmType = cgType->GetLLVMType();
 
         (void)realParamIndices.emplace_back(realArgIdx);
-        if (paramType->IsClosure()) {
-            llvm::Metadata* meta = llvm::MDString::get(llvmCtx, std::to_string(realArgIdx));
-            closureParamIndices.emplace_back(meta);
-        }
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         /// Effect Overview
         // The parameter that requires additional basePtr must meet and the function should not be 'mut'

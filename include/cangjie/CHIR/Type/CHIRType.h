@@ -47,14 +47,6 @@ public:
     Type* TranslateType(AST::Ty& ty);
     
     /**
-     * @brief Translates an AST method type to a CHIR function type.
-     *
-     * @param methodType The AST method type to be translated.
-     * @return The translated CHIR function type.
-     */
-    FuncType* TranslateMethodType(const AST::FuncTy& methodType);
-    
-    /**
      * @brief Fills the generic argument types.
      *
      * @param ty The AST generics type to be processed.

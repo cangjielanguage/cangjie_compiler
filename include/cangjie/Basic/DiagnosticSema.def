@@ -151,11 +151,6 @@ ERROR(sema_symbol_not_collected, "reference node named '%s' is not collected in 
 ERROR(sema_cannot_convert_literal, "cannot convert %s literal to type '%s'")
 ERROR(sema_cannot_have_parameter, "%s cannot have parameter")
 
-// FFI Sema Prepare Check.
-ERROR(sema_invalid_argument_count_for_annotation, "invalid argument count for annotation %s: expected %d, actual %d")
-ERROR(sema_invalid_argument_type_for_annotation, "invalid argument type for annotation %s: expected %s")
-ERROR(sema_can_not_use_annotations_together, "can not use annotations %s and %s together")
-
 // C FFI Sema Prepare Check.
 ERROR(sema_only_cfunc_can_use_annotation, "only CFunc can use '%s'")
 ERROR(sema_annotation_error_arg_num, "'%s' should have %s arg")
@@ -195,9 +190,6 @@ ERROR(sema_this_or_super_not_allowed_to_initialize_non_static_member,
 ERROR(sema_this_or_super_not_allowed_to_initialize_static_member, "'%s' is not allowed to initialize static member")
 ERROR(sema_illegal_usage_of_super_member, "super member '%s' is not allowed to be used before calling super()")
 ERROR(sema_illegal_usage_of_member, "'%s' is not allowed to be accessed before all member variables are initialized")
-ERROR(sema_class_need_abstract_modifier_or_func_need_impl,
-    "class '%s' missing abstract modifier or abstract %s '%s' should be implemented")
-NOTE(sema_unimplemented_func_or_property, "unimplemented %s %s")
 ERROR(sema_invalid_assignment_to_this_expr, "cannot assign a value to 'this'")
 ERROR(sema_invalid_override_member_in_class,
     "cannot override non-abstract %s '%s' with abstract %s")
@@ -229,7 +221,6 @@ ERROR(sema_this_super_use_error_outside_class, "'%s' cannot be used outside clas
 ERROR(sema_missing_func_body, "%s '%s' can not be abstract")
 ERROR(sema_interface_member_must_be_implemented, "interface %s '%s' must be implemented in '%s'")
 ERROR(sema_interface_member_must_be_implemented_in_struct, "interface %s '%s' must be implemented in '%s'")
-ERROR(sema_need_member_implementation, "implementation of %s '%s' is needed in '%s'")
 ERROR(sema_member_variable_can_not_shadow, "the variable '%s' must not shadow a member variable of the supertype")
 ERROR(sema_missing_overridden_func, "'override' %s '%s' does not have an overridden %s in its supertype")
 ERROR(sema_missing_redefined_func, "'redef' %s '%s' does not have a redefined 'static' %s in its supertype")
@@ -252,12 +243,6 @@ ERROR(sema_static_members_cannot_call_members, "non-static variable '%s' cannot 
 ERROR(sema_class_inherit_non_class_nor_interface, "class '%s' can only inherit a class or implement interfaces")
 ERROR(sema_type_implement_non_interface, "%s '%s' can only implement interface")
 ERROR(sema_interface_inherit_non_interface, "interface '%s' can only inherit interface")
-// deleted by native, only used by VM
-ERROR(
-    sema_abstract_generic_function_inside_abstract_class, "abstract generic function is not allowed in abstract class")
-ERROR(sema_generic_function_in_interface, "non-static generic function is not allowed in interface")
-ERROR(sema_invalid_generic_function_in_class, "generic function cannot have '%s' modifier")
-// deleted by native, only used by VM end
 ERROR(sema_generic_in_operator_overload, "generic is not allowed in operator overload function")
 ERROR(sema_illegal_this_outside_struct_constructor,
     "'this' is only allowed to be used inside constructor or function for struct")

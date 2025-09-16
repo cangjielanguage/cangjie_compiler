@@ -22,7 +22,7 @@
 #include "cangjie/CHIR/Analysis/CallGraphAnalysis.h"
 
 #include "cangjie/CHIR/Transformation/Devirtualization.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Visitor/Visitor.h"
 
 namespace Cangjie::CHIR {

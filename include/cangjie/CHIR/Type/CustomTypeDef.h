@@ -28,7 +28,6 @@ struct MemberVarInfo {
     AttributeInfo attributeInfo;
     DebugLocation loc;
     AnnoInfo annoInfo;
-    JavaAnnoInfo jAnnoInfo;
     bool TestAttr(Attribute attr) const
     {
         return attributeInfo.TestAttr(attr);
@@ -47,6 +46,7 @@ class CustomTypeDef : public Base {
     friend class FuncBase;
     friend class CustomType;
     friend class CustomDefTypeConverter;
+    friend class CHIRDeserializer;
 
 public:
     // ===--------------------------------------------------------------------===//
@@ -196,8 +196,6 @@ public:
     AnnoInfo GetAnnoInfo() const;
     void SetAnnoInfo(const AnnoInfo& info);
 
-    JavaAnnoInfo GetJavaAnnoInfo() const;
-    void SetJavaAnnoInfo(const JavaAnnoInfo& info);
     // ===--------------------------------------------------------------------===//
     // Vtable
     // ===--------------------------------------------------------------------===//
@@ -226,17 +224,14 @@ public:
     /**
     * @brief get virtual function's index in vtable
     *
-    * @param funcName src code name
-    * @param funcType function type
+    * @param funcCallType function name and type
     * @param isStatic function is static or not
     * @param replaceTable an auxiliary map
-    * @param funcInstTypeArgs generic type args
     * @param builder CHIR builder
     */
-    VTableSearchRes GetFuncIndexInVTable(
-        const std::string& funcName, FuncType& funcType, bool isStatic,
-        std::unordered_map<const GenericType*, Type*>& replaceTable,
-        const std::vector<Type*>& funcInstTypeArgs, CHIRBuilder& builder) const;
+    std::vector<VTableSearchRes> GetFuncIndexInVTable(
+        const FuncCallType& funcCallType, bool isStatic,
+        std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder) const;
 
     // ===--------------------------------------------------------------------===//
     // Extra Information
@@ -287,8 +282,7 @@ protected:
     std::vector<GlobalVarBase*> staticVars;       /**< static member variables */
     AttributeInfo attributeInfo;                  /**< attribute */
     AnnoInfo annoInfo;                            /**< struct/class/enum annoInfo */
-    JavaAnnoInfo jAnnoInfo;                       /**< class jAnnoInfo */
-    VTableType vtable2;
+    VTableType vtable;
     std::vector<ExtendDef*> extends;
 };
 } // namespace Cangjie::CHIR

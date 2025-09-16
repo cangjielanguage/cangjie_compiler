@@ -84,6 +84,13 @@ void UpdateInstanceAttr(VTableType& vtable)
         }
     }
 }
+
+void UpdateFuncInfo(VirtualFuncInfo& oldItem, const VirtualFuncInfo& newItem)
+{
+    auto originalFuncType = oldItem.typeInfo.originalType;
+    oldItem = newItem;
+    oldItem.typeInfo.originalType = originalFuncType;
+}
 }
 
 VTableGenerator::VTableGenerator(CHIRBuilder& builder)
@@ -246,7 +253,7 @@ bool VTableGenerator::UpdateVtable(VirtualFuncInfo& curFuncInfo, VTableType& vta
     for (auto& vtableIt : vtable) {
         for (auto& funcInfo : vtableIt.second) {
             if (IsSigTypeMatched(curFuncInfo, funcInfo)) {
-                funcInfo = curFuncInfo;
+                UpdateFuncInfo(funcInfo, curFuncInfo);
                 // if a function declared in sub type updates its parent type's vtable, then don't need to
                 // add new item to vtable
                 // but if a function updates its brother type's vtable(rules 2 and 3), then maybe this function

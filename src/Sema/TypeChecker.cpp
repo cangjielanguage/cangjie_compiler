@@ -16,6 +16,7 @@
 #include <memory>
 #include <unordered_set>
 
+#include "CheckAPILevel.h"
 #include "Collector.h"
 #include "Desugar/DesugarInTypeCheck.h"
 #include "DiagSuppressor.h"
@@ -32,7 +33,6 @@
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Basic/Print.h"
 #include "cangjie/Frontend/CompilerInstance.h"
-#include "cangjie/Sema/CheckAPILevel.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/Utils.h"
 
@@ -734,7 +734,16 @@ Ptr<AST::Ty> TypeChecker::TypeCheckerImpl::SubstituteTypeAliasInTy(
             return typeManager.GetFunctionTy(typeArgs, returnTy, {funcTy.isC, false, funcTy.hasVariableLenArg});
         }
         case TypeKind::TYPE: {
-            return GetUnaliasedTypeFromTypeAlias(static_cast<TypeAliasTy&>(ty), typeArgs);
+            auto inner = GetUnaliasedTypeFromTypeAlias(static_cast<TypeAliasTy&>(ty), typeArgs);
+            if (auto nestedAlias = DynamicCast<TypeAliasTy>(inner)) {
+                auto type = Ty::GetDeclPtrOfTy(nestedAlias);
+                // the aliased type is in cycle, stop recursive substitution to avoid endless loop
+                if (type && type->TestAttr(Attribute::IN_REFERENCE_CYCLE)) {
+                    return nestedAlias;
+                }
+                return SubstituteTypeAliasInTy(*nestedAlias, needSubstituteGeneric, typeMapping);
+            }
+            return inner;
         }
         case TypeKind::TYPE_TUPLE: {
             return typeManager.GetTupleTy(typeArgs);
@@ -1062,6 +1071,17 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::Synthesize(ASTContext& ctx, Ptr<Node> node
             node->ty = SynThrowExpr(*curCtx, *StaticAs<ASTKind::THROW_EXPR>(node));
             break;
         }
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+        // Effect handlers are only enabled in the CJNative backend, for now
+        case ASTKind::PERFORM_EXPR: {
+            node->ty = SynPerformExpr(*curCtx, *StaticAs<ASTKind::PERFORM_EXPR>(node));
+            break;
+        }
+        case ASTKind::RESUME_EXPR: {
+            node->ty = SynResumeExpr(*curCtx, *StaticAs<ASTKind::RESUME_EXPR>(node));
+            break;
+        }
+#endif // CANGJIE_CODEGEN_CJNATIVE_BACKEND
         case ASTKind::TYPE_ALIAS_DECL: {
             CheckTypeAlias(*curCtx, *StaticAs<ASTKind::TYPE_ALIAS_DECL>(node));
             break;
@@ -1280,6 +1300,7 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
             }
                 // These patterns are supported, so do type infer framework.
             case ASTKind::EXCEPT_TYPE_PATTERN:
+            case ASTKind::COMMAND_TYPE_PATTERN:
             case ASTKind::WILDCARD_PATTERN:
             case ASTKind::CONST_PATTERN:
             case ASTKind::TYPE_PATTERN:
@@ -2097,6 +2118,7 @@ void TypeChecker::TypeCheckerImpl::PostTypeCheck(std::vector<Ptr<ASTContext>>& c
     // Post checking for legality of semantic.
     for (auto& ctx : contexts) {
         CheckOverflow(*ctx->curPackage);
+        CheckUnusedImportSpec(*ctx->curPackage);
         // Check duplicated super interfaces in class, interface when type arguments applied.
         CheckInstDupSuperInterfacesEntry(*ctx->curPackage);
         // Check legality of usage after sema type completed.
@@ -2112,7 +2134,7 @@ void TypeChecker::TypeCheckerImpl::PostTypeCheck(std::vector<Ptr<ASTContext>>& c
                 (void)mainFunctionMap[md->curFile].emplace(md->desugarDecl.get());
             }
         });
-        APILevelCheck::APILevelAnnoChecker(*ci, diag, typeManager, importManager).Check(*ctx->curPackage);
+        APILevelCheck::APILevelAnnoChecker(*ci, diag, importManager).Check(*ctx->curPackage);
     }
     CheckWhetherHasProgramEntry();
 }

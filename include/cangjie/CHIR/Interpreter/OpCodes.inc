@@ -57,7 +57,6 @@ OPCODE(VARRAY, "VARRAY", 1, false)         // size
 OPCODE(VARRAY_BY_VALUE, "VARRAY_BY_VALUE", 0, false)
 OPCODE(VARRAY_GET, "VARRAY_GET", 1, false) // path size
 OPCODE(FUNC, "FUNC", 1, false)
-OPCODE(OBJECT, "OBJECT", 2, false) // number of args, classId
 // Terminators
 OPCODE(RETURN, "RETURN", 0, false) // return to call site
 OPCODE(JUMP, "JUMP", 1, false)   // Jump to subsequent index
@@ -89,9 +88,6 @@ OPCODE(BIN_MUL_EXC, "BIN_MUL_EXC", 3, true)
 OPCODE(BIN_DIV_EXC, "BIN_DIV_EXC", 3, true)
 OPCODE(BIN_MOD_EXC, "BIN_MOD_EXC", 3, true)
 OPCODE(BIN_EXP_EXC, "BIN_EXP_EXC", 3, true)
-OPCODE(BIN_BITAND_EXC, "BIN_BITAND_EXC", 3, true)
-OPCODE(BIN_BITOR_EXC, "BIN_BITOR_EXC", 3, true)
-OPCODE(BIN_BITXOR_EXC, "BIN_BITXOR_EXC", 3, true)
 OPCODE(BIN_LT, "BIN_LT", 2, false)
 OPCODE(BIN_GT, "BIN_GT", 2, false)
 OPCODE(BIN_LE, "BIN_LE", 2, false)

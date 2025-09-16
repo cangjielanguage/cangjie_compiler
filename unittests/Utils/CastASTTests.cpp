@@ -5,7 +5,6 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include <cstdio>
-
 #include <fstream>
 #include <string>
 
@@ -102,7 +101,7 @@ TEST_F(CastASTTests, VerifyCastingCount)
     size_t totalCount = static_cast<uint8_t>(AST::ASTKind::NODE) + 1;
     EXPECT_TRUE(totalCount > ignoredKind.size());
     size_t size = totalCount - ignoredKind.size();
-    EXPECT_EQ(size, 101);
+    EXPECT_EQ(size, 104);
     EXPECT_EQ(astPool.size(), size);
 
     // Added node's kind should same with key.

@@ -37,18 +37,20 @@ endif()
 add_test(NAME UtilsTests COMMAND UtilsTests)
 
 set(CAST_TEST_SRC CastASTTests.cpp CastTyTests.cpp)
+set(CAST_TEST_LIB cangjie-lsp ${CMAKE_DL_LIBS})
+
 
 add_executable(
-    CastTests
+    CastTest
     ${CAST_TEST_SRC})
 target_link_libraries(
-    CastTests
+    CastTest
     cangjie-lsp
     ${CAST_TEST_LIB}
     GTest::gtest
     GTest::gtest_main)
-set_target_properties(CastTests PROPERTIES COMPILE_FLAGS "-DUT=1")
-add_test(NAME CastTests COMMAND CastTests)
+set_target_properties(CastTest PROPERTIES COMPILE_FLAGS "-DUT=1")
+add_test(NAME CastTest COMMAND CastTest)
 
 if(CMAKE_BUILD_TYPE MATCHES Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fomit-frame-pointer")
@@ -67,4 +69,4 @@ if(CMAKE_BUILD_TYPE MATCHES Release)
     target_link_libraries(SignalTestCJC ${LINK_LIBS})
 endif()
 
-add_subdirectory(UnicodeTests)
+add_subdirectory(UnicodeTest)

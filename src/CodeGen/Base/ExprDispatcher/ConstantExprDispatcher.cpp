@@ -26,11 +26,16 @@ llvm::Value* HandleLiteralValue(IRBuilder2& irBuilder, const CHIR::LiteralValue&
         ? cgMod.diBuilder->CreateDILoc(irBuilder.GetInsertFunction()->getSubprogram(), {0, 0})
         : llvm::DebugLoc().get();
     irBuilder.SetCurrentDebugLocation(curLoc);
-    if (chirLiteral.IsBoolLiteral()) {
+    if (chirLiteral.IsUnitLiteral()) {
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+        literalValue = cgMod.GenerateUnitTypeValue();
+#endif
+    } else if (chirLiteral.IsNullLiteral()) {
+        literalValue = irBuilder.CreateNullValue(*chirLiteral.GetType());
+    } else if (chirLiteral.IsBoolLiteral()) {
         literalValue = irBuilder.getInt1(StaticCast<CHIR::BoolLiteral&>(chirLiteral).GetVal());
-    } else if (chirLiteral.IsFloatLiteral()) {
-        literalValue = llvm::ConstantFP::get(CGType::GetOrCreate(
-            cgMod, chirLiteral.GetType())->GetLLVMType(), StaticCast<CHIR::FloatLiteral&>(chirLiteral).GetVal());
+    } else if (chirLiteral.IsRuneLiteral()) {
+        literalValue = irBuilder.getInt32(StaticCast<CHIR::RuneLiteral&>(chirLiteral).GetVal());
     } else if (chirLiteral.IsIntLiteral()) {
         auto type = CGType::GetOrCreate(cgMod, chirLiteral.GetType())->GetLLVMType();
         auto intConst = StaticCast<CHIR::IntLiteral*>(&chirLiteral);
@@ -39,20 +44,16 @@ llvm::Value* HandleLiteralValue(IRBuilder2& irBuilder, const CHIR::LiteralValue&
         } else {
             literalValue = llvm::ConstantInt::get(type, intConst->GetUnsignedVal());
         }
-    } else if (chirLiteral.IsNullLiteral()) {
-        literalValue = irBuilder.CreateNullValue(*chirLiteral.GetType());
-    } else if (chirLiteral.IsRuneLiteral()) {
-        literalValue = irBuilder.getInt32(StaticCast<CHIR::RuneLiteral&>(chirLiteral).GetVal());
+    } else if (chirLiteral.IsFloatLiteral()) {
+        literalValue = llvm::ConstantFP::get(CGType::GetOrCreate(cgMod, chirLiteral.GetType())->GetLLVMType(),
+            StaticCast<CHIR::FloatLiteral&>(chirLiteral).GetVal());
     } else if (chirLiteral.IsStringLiteral()) {
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         literalValue = irBuilder.CreateStringLiteral(StaticCast<CHIR::StringLiteral&>(chirLiteral).GetVal());
 #endif
-    } else if (chirLiteral.IsUnitLiteral()) {
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-        literalValue = cgMod.GenerateUnitTypeValue();
-#endif
     } else {
-        CJC_ABORT();
+        CJC_ASSERT(false);
+        return nullptr;
     }
     return literalValue;
 }

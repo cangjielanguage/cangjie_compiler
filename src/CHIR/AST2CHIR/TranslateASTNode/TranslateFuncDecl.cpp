@@ -22,9 +22,7 @@ void Translator::BindingFuncParam(
     const auto& params = GetFuncParams(funcBody);
     size_t offset = paramList.params.size() < params.size() ? 1 : 0;
     CJC_ASSERT(paramList.params.size() + offset == params.size());
-    // If current func is a @Java class's constructor, the super call instruction must be the first one,
-    // so we always try to use current block to place the Debug nodes instead of entry block.
-    auto block = cfg.isJCtor ? currentBlock.get() : funcBody.GetEntryBlock();
+    auto block = funcBody.GetEntryBlock();
     for (size_t i = 0; i < paramList.params.size(); ++i) {
         auto arg = params[i + offset];
         auto& param = paramList.params[i];
@@ -154,7 +152,6 @@ void Translator::SetRawMangledNameForIncrementalCompile(const AST::FuncDecl& ast
 
 bool NeedCreateDebugForFirstParam(const Func& func)
 {
-    // In Java classes' ctor, `this` can only be used (include Debug node) after initialized.
     if (func.TestAttr(Attribute::STATIC)) {
         return false;
     }
@@ -211,16 +208,12 @@ Ptr<Value> Translator::Visit(const AST::FuncDecl& func)
     blockGroupStack.emplace_back(body);
     auto entry = builder.CreateBlock(body);
     body->SetEntryBlock(entry);
-    // In Java classes' ctor, `this` can only be used (include Debug node) after initialized.
     if (NeedCreateDebugForFirstParam(*curFunc)) {
         auto thisVar = curFunc->GetParam(0);
         CreateAndAppendExpression<Debug>(builder.GetUnitTy(), thisVar, "this", curFunc->GetEntryBlock());
     }
-    // If current func is a @Java class's constructor, the super call instruction must be the first one,
-    // so we cannot create any Debug node for function parameters here.
-    const bool isJCtor = AST::HasJavaAttr(func) && IsInstanceConstructor(func);
     BindingFuncParam(*func.funcBody->paramLists[0], *curFunc->GetBody(),
-        {.hasInitial = func.TestAttr(AST::Attribute::HAS_INITIAL), .createDebug = !isJCtor, .isJCtor = isJCtor});
+        {.hasInitial = func.TestAttr(AST::Attribute::HAS_INITIAL), .createDebug = true});
     // Set return value if the return type is not Void
     auto retType = curFunc->GetReturnType();
     if (!retType->IsVoid()) {
@@ -305,10 +298,9 @@ uint64_t GetSuperInstanceVarSize(const Type& thisType)
 // returns true when the function body contains a delegated this constructor call
 bool HasDelegatedThisCall(const AST::FuncBody& func)
 {
+    CJC_ASSERT(func.body);
     auto& body = func.body->body;
-    if (body.empty()) {
-        return false;
-    }
+    CJC_ASSERT(!body.empty());
     // first expression is callexpr to constructor
     if (auto call = DynamicCast<AST::CallExpr>(body[0].get())) {
         // the `resolvedFunction` of callExpr with call_function_ptr is null.
@@ -389,11 +381,11 @@ Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
     if (func.TestAttr(AST::Attribute::GENERIC)) {
         TranslateFunctionGenericUpperBounds(chirTy, func);
     }
-    auto [capturedMutVars, lambdaTrans] = SetupContextForLambda(*func.funcBody->body);
+    auto lambdaTrans = SetupContextForLambda(*func.funcBody->body);
     auto funcTy = RawStaticCast<FuncType*>(TranslateType(*func.ty));
     // Create nested functions' body and parameters.
-    CJC_NULLPTR_CHECK(currentBlock->GetParentFunc());
-    BlockGroup* body = builder.CreateBlockGroup(*currentBlock->GetParentFunc());
+    CJC_NULLPTR_CHECK(currentBlock->GetTopLevelFunc());
+    BlockGroup* body = builder.CreateBlockGroup(*currentBlock->GetTopLevelFunc());
     const auto& loc = TranslateLocation(func);
     std::vector<GenericType*> genericTys;
     // Only collect for generic function which has not been instantiated.
@@ -407,7 +399,6 @@ Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
         loc, funcTy, funcTy, currentBlock, true, lambdaMangleName, func.identifier, genericTys);
     CJC_ASSERT(lambda);
     lambda->InitBody(*body);
-    lambda->SetCapturedVars(capturedMutVars);
     if (func.isConst) {
         lambda->SetCompileTimeValue();
     }

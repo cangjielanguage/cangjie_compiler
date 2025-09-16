@@ -78,11 +78,7 @@ public:
 
         ~CommitScope()
         {
-            try {
-                ResetSoft(data);
-            } catch (...) {
-                // shouldn't reach here
-            }
+            ResetSoft(data);
         }
 
         CommitScope() = delete;

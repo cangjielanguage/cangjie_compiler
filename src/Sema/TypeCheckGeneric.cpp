@@ -155,11 +155,8 @@ bool TypeChecker::TypeCheckerImpl::CheckInstTyWithUpperbound(
             CollectStaticMember(*iTy->decl, staticMembers);
             isInstByInterface = HasIncompleteStaticFuncOrProp(ctx, *iTy->decl, staticMembers);
         }
-        // Must be abstract class. Non-abstract class are not checked here.
-        auto cTy = DynamicCast<ClassTy*>(it.second);
-        auto isInstByIncompleteClass = cTy && HasIncompleteStaticFuncOrProp(ctx, *cTy->decl, staticMemberFuncsOrProps);
         auto isInstByNothing = it.second->IsNothing(); // The Nothing type does not have any members.
-        if (isInstByInterface || isInstByIncompleteClass || isInstByNothing) {
+        if (isInstByInterface || isInstByNothing) {
             std::string typeString =
                 isInstByNothing ? "'Nothing'" : "interface or abstract class '" + it.second->String() + "'";
             auto builder = diag.Diagnose(typeArgs.empty() ? StaticCast<Node>(expr) : *typeArgs[indexMap[it.second]],

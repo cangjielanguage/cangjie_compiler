@@ -65,53 +65,31 @@ void ExprTypeConverter::VisitSubExpression(RawArrayAllocateWithException& o)
 void ExprTypeConverter::VisitSubExpression(Apply& o)
 {
     VisitExprDefaultImpl(o);
-    for (auto& ty : o.instantiateArgs) {
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
-    if (o.instFuncType.instParentCustomTy != nullptr) {
-        o.instFuncType.instParentCustomTy = ConvertType(*o.instFuncType.instParentCustomTy);
-    }
-    if (o.instFuncType.thisType != nullptr) {
-        o.instFuncType.thisType = ConvertType(*o.instFuncType.thisType);
-    }
-    o.instFuncType.instRetTy = ConvertType(*o.instFuncType.instRetTy);
-    for (auto& ty : o.instFuncType.instParamTys) {
-        ty = ConvertType(*ty);
-    }
-    auto wrapperedParentTy = o.Get<WrappedParentType>();
-    if (wrapperedParentTy != nullptr) {
-        o.Set<WrappedParentType>(ConvertType(*wrapperedParentTy));
+    if (o.thisType != nullptr) {
+        o.thisType = ConvertType(*o.thisType);
     }
 }
 
 void ExprTypeConverter::VisitSubExpression(ApplyWithException& o)
 {
     VisitExprDefaultImpl(o);
-    for (auto& ty : o.instantiateArgs) {
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
-    if (o.instFuncType.instParentCustomTy != nullptr) {
-        o.instFuncType.instParentCustomTy = ConvertType(*o.instFuncType.instParentCustomTy);
-    }
-    if (o.instFuncType.thisType != nullptr) {
-        o.instFuncType.thisType = ConvertType(*o.instFuncType.thisType);
-    }
-    o.instFuncType.instRetTy = ConvertType(*o.instFuncType.instRetTy);
-    for (auto& ty : o.instFuncType.instParamTys) {
-        ty = ConvertType(*ty);
+    if (o.thisType != nullptr) {
+        o.thisType = ConvertType(*o.thisType);
     }
 }
 
 void ExprTypeConverter::VisitSubExpression(Invoke& o)
 {
     VisitExprDefaultImpl(o);
-    auto& funcInfo = o.funcInfo;
-    funcInfo.instFuncType = ConvertFuncParamsAndRetType(*funcInfo.instFuncType);
-    funcInfo.originalFuncType = ConvertFuncParamsAndRetType(*funcInfo.originalFuncType);
-    funcInfo.instParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.instParentCustomTy));
-    funcInfo.originalParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.originalParentCustomTy));
-    funcInfo.thisType = ConvertType(*funcInfo.thisType);
-    for (auto& ty : funcInfo.instantiatedTypeArgs) {
+    o.virMethodCtx.originalFuncType = ConvertFuncParamsAndRetType(*o.virMethodCtx.originalFuncType);
+    o.thisType = ConvertType(*o.thisType);
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -119,13 +97,9 @@ void ExprTypeConverter::VisitSubExpression(Invoke& o)
 void ExprTypeConverter::VisitSubExpression(InvokeWithException& o)
 {
     VisitExprDefaultImpl(o);
-    auto& funcInfo = o.funcInfo;
-    funcInfo.instFuncType = ConvertFuncParamsAndRetType(*funcInfo.instFuncType);
-    funcInfo.originalFuncType = ConvertFuncParamsAndRetType(*funcInfo.originalFuncType);
-    funcInfo.instParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.instParentCustomTy));
-    funcInfo.originalParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.originalParentCustomTy));
-    funcInfo.thisType = ConvertType(*funcInfo.thisType);
-    for (auto& ty : funcInfo.instantiatedTypeArgs) {
+    o.virMethodCtx.originalFuncType = ConvertFuncParamsAndRetType(*o.virMethodCtx.originalFuncType);
+    o.thisType = ConvertType(*o.thisType);
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -133,13 +107,9 @@ void ExprTypeConverter::VisitSubExpression(InvokeWithException& o)
 void ExprTypeConverter::VisitSubExpression(InvokeStatic& o)
 {
     VisitExprDefaultImpl(o);
-    auto& funcInfo = o.funcInfo;
-    funcInfo.instFuncType = ConvertFuncParamsAndRetType(*funcInfo.instFuncType);
-    funcInfo.originalFuncType = ConvertFuncParamsAndRetType(*funcInfo.originalFuncType);
-    funcInfo.instParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.instParentCustomTy));
-    funcInfo.originalParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.originalParentCustomTy));
-    funcInfo.thisType = ConvertType(*funcInfo.thisType);
-    for (auto& ty : funcInfo.instantiatedTypeArgs) {
+    o.virMethodCtx.originalFuncType = ConvertFuncParamsAndRetType(*o.virMethodCtx.originalFuncType);
+    o.thisType = ConvertType(*o.thisType);
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -147,13 +117,9 @@ void ExprTypeConverter::VisitSubExpression(InvokeStatic& o)
 void ExprTypeConverter::VisitSubExpression(InvokeStaticWithException& o)
 {
     VisitExprDefaultImpl(o);
-    auto& funcInfo = o.funcInfo;
-    funcInfo.instFuncType = ConvertFuncParamsAndRetType(*funcInfo.instFuncType);
-    funcInfo.originalFuncType = ConvertFuncParamsAndRetType(*funcInfo.originalFuncType);
-    funcInfo.instParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.instParentCustomTy));
-    funcInfo.originalParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.originalParentCustomTy));
-    funcInfo.thisType = ConvertType(*funcInfo.thisType);
-    for (auto& ty : funcInfo.instantiatedTypeArgs) {
+    o.virMethodCtx.originalFuncType = ConvertFuncParamsAndRetType(*o.virMethodCtx.originalFuncType);
+    o.thisType = ConvertType(*o.thisType);
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -167,7 +133,7 @@ void ExprTypeConverter::VisitSubExpression(Constant& o)
 void ExprTypeConverter::VisitSubExpression(Intrinsic& o)
 {
     VisitExprDefaultImpl(o);
-    for (auto& ty : o.genericTypeInfo) {
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -175,7 +141,7 @@ void ExprTypeConverter::VisitSubExpression(Intrinsic& o)
 void ExprTypeConverter::VisitSubExpression(IntrinsicWithException& o)
 {
     VisitExprDefaultImpl(o);
-    for (auto& ty : o.genericTypeInfo) {
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -206,7 +172,7 @@ void ExprTypeConverter::VisitSubExpression(Lambda& o)
 void ExprTypeConverter::VisitSubExpression(GetRTTIStatic& o)
 {
     VisitExprDefaultImpl(o);
-    o.ReplaceRTTIType(ConvertType(*o.GetRTTIType()));
+    o.ty = ConvertType(*o.GetRTTIType());
 }
 
 void ValueTypeConverter::VisitValueDefaultImpl(Value& o)
@@ -256,7 +222,7 @@ void CustomDefTypeConverter::VisitDefDefaultImpl(CustomTypeDef& o)
         var.type = ConvertType(*var.type);
     }
     VTableType newVtable;
-    for (auto& it : o.vtable2) {
+    for (auto& it : o.vtable) {
         auto newKey = ConvertType(*it.first);
         for (auto& funcInfo : it.second) {
             funcInfo.typeInfo.sigType = ConvertFuncParamsAndRetType(*funcInfo.typeInfo.sigType);
@@ -271,7 +237,7 @@ void CustomDefTypeConverter::VisitDefDefaultImpl(CustomTypeDef& o)
         }
         newVtable.emplace(StaticCast<ClassType*>(newKey), it.second);
     }
-    o.vtable2 = newVtable;
+    o.vtable = newVtable;
 }
 
 void CustomDefTypeConverter::VisitSubDef(StructDef& o)
@@ -313,11 +279,8 @@ void CustomDefTypeConverter::VisitSubDef(ExtendDef& o)
 void PrivateTypeConverterNoInvokeOriginal::VisitSubExpression(Invoke& o)
 {
     VisitExprDefaultImpl(o);
-    auto& funcInfo = o.funcInfo;
-    funcInfo.instFuncType = ConvertFuncParamsAndRetType(*funcInfo.instFuncType);
-    funcInfo.instParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.instParentCustomTy));
-    funcInfo.thisType = ConvertType(*funcInfo.thisType);
-    for (auto& ty : funcInfo.instantiatedTypeArgs) {
+    o.thisType = ConvertType(*o.thisType);
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -325,11 +288,8 @@ void PrivateTypeConverterNoInvokeOriginal::VisitSubExpression(Invoke& o)
 void PrivateTypeConverterNoInvokeOriginal::VisitSubExpression(InvokeWithException& o)
 {
     VisitExprDefaultImpl(o);
-    auto& funcInfo = o.funcInfo;
-    funcInfo.instFuncType = ConvertFuncParamsAndRetType(*funcInfo.instFuncType);
-    funcInfo.instParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.instParentCustomTy));
-    funcInfo.thisType = ConvertType(*funcInfo.thisType);
-    for (auto& ty : funcInfo.instantiatedTypeArgs) {
+    o.thisType = ConvertType(*o.thisType);
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -337,11 +297,8 @@ void PrivateTypeConverterNoInvokeOriginal::VisitSubExpression(InvokeWithExceptio
 void PrivateTypeConverterNoInvokeOriginal::VisitSubExpression(InvokeStatic& o)
 {
     VisitExprDefaultImpl(o);
-    auto& funcInfo = o.funcInfo;
-    funcInfo.instFuncType = ConvertFuncParamsAndRetType(*funcInfo.instFuncType);
-    funcInfo.instParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.instParentCustomTy));
-    funcInfo.thisType = ConvertType(*funcInfo.thisType);
-    for (auto& ty : funcInfo.instantiatedTypeArgs) {
+    o.thisType = ConvertType(*o.thisType);
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }
@@ -349,11 +306,8 @@ void PrivateTypeConverterNoInvokeOriginal::VisitSubExpression(InvokeStatic& o)
 void PrivateTypeConverterNoInvokeOriginal::VisitSubExpression(InvokeStaticWithException& o)
 {
     VisitExprDefaultImpl(o);
-    auto& funcInfo = o.funcInfo;
-    funcInfo.instFuncType = ConvertFuncParamsAndRetType(*funcInfo.instFuncType);
-    funcInfo.instParentCustomTy = StaticCast<ClassType*>(ConvertType(*funcInfo.instParentCustomTy));
-    funcInfo.thisType = ConvertType(*funcInfo.thisType);
-    for (auto& ty : funcInfo.instantiatedTypeArgs) {
+    o.thisType = ConvertType(*o.thisType);
+    for (auto& ty : o.instantiatedTypeArgs) {
         ty = ConvertType(*ty);
     }
 }

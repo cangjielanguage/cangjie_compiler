@@ -84,6 +84,7 @@ static const std::string BIT_CAST_NAME = "bitCast";
  * it's intended to be generated dynamically in the compiler front-end
  */
 static const std::string GET_TYPE_FOR_TYPE_PARAMETER_NAME = GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME;
+static const std::string IS_SUBTYPE_TYPES_NAME = IS_SUBTYPE_TYPES_FUNC_NAME;
 
 // Package runtime
 static const std::string INVOKE_GC_NAME = "invokeGC";
@@ -233,6 +234,10 @@ static const std::string MEMCMP_NAME = "memcmp";
 static const std::string STRNCMP_NAME = "strncmp";
 static const std::string STRCASECMP_NAME = "strcasecmp";
 
+static const std::string UNSAFE_BEGIN = "_unsafe_begin";
+static const std::string UNSAFE_END = "_unsafe_end";
+static const std::string POINTER_INIT = "_Pointer_Init_";
+static const std::string CSTR_INIT = "_CString_Init_";
 static const std::string CJ_AST_LEX = "CJ_AST_Lex";
 static const std::string CJ_ASTPARSEEXPR = "CJ_AST_ParseExpr";
 static const std::string CJ_ASTPARSEDECL = "CJ_AST_ParseDecl";
@@ -247,13 +252,20 @@ static const std::string CJ_GET_CHILD_MESSAGES = "CJ_GetChildMessages";
 static const std::string CJ_CHECK_ADD_SPACE = "CJ_CheckAddSpace";
 static const std::string CJ_AST_DIAGREPORT = "CJ_AST_DiagReport";
 
+// ============================ cjnative only start ==============================
+static const std::string CROSS_ACCESS_BARRIER_NAME = "CrossAccessBarrier";
+static const std::string CREATE_EXPORT_HANDLE_NAME = "CreateExportHandle";
+static const std::string GET_EXPORTED_REF_NAME = "GetExportedRef";
+static const std::string REMOVE_EXPORTED_REF_NAME = "RemoveExportedRef";
+// ============================ cjnative only end ==============================
+
 /**
  * @brief In the future we should generate intrinsic/xxx node in CHIR
  *        to represent intrinsic functions. That way we don't need intrinsic
  *        to have function body as well. We can keep using this enum tho.
  *
  */
-enum IntrinsicKind {
+enum IntrinsicKind : uint16_t {
     NOT_INTRINSIC,
     NOT_IMPLEMENTED,
 
@@ -428,6 +440,10 @@ enum IntrinsicKind {
     MULTICONDITION_WAIT,
     MULTICONDITION_NOTIFY,
     MULTICONDITION_NOTIFY_ALL,
+    CROSS_ACCESS_BARRIER,
+    CREATE_EXPORT_HANDLE,
+    GET_EXPORTED_REF,
+    REMOVE_EXPORTED_REF,
     // ============================ cjnative only end =================
 
     // Syscall
@@ -588,6 +604,7 @@ enum IntrinsicKind {
     IS_NULL,
 
     GET_TYPE_FOR_TYPE_PARAMETER,
+    IS_SUBTYPE_TYPES,
 };
 
 static const std::unordered_map<std::string, IntrinsicKind> coreIntrinsicMap = {
@@ -670,6 +687,7 @@ static const std::unordered_map<std::string, IntrinsicKind> coreIntrinsicMap = {
     {SLEEP_NAME, SLEEP},
 
     {GET_TYPE_FOR_TYPE_PARAMETER_NAME, GET_TYPE_FOR_TYPE_PARAMETER},
+    {IS_SUBTYPE_TYPES_NAME, IS_SUBTYPE_TYPES},
 };
 
 static const std::unordered_map<std::string, IntrinsicKind> overflowIntrinsicMap = {
@@ -719,6 +737,13 @@ static const std::unordered_map<std::string, IntrinsicKind> reflectIntrinsicMap 
 #endif
 };
 
+static const std::unordered_map<std::string, IntrinsicKind> interOpIntrinsicMap = {
+    {CROSS_ACCESS_BARRIER_NAME, CROSS_ACCESS_BARRIER},
+    {CREATE_EXPORT_HANDLE_NAME, CREATE_EXPORT_HANDLE},
+    {GET_EXPORTED_REF_NAME, GET_EXPORTED_REF},
+    {REMOVE_EXPORTED_REF_NAME, REMOVE_EXPORTED_REF}
+};
+
 static const std::unordered_map<std::string, IntrinsicKind> cjnativeSyncIntrinsicMap = {
     {ATOMIC_LOAD_NAME, ATOMIC_LOAD},
     {ATOMIC_STORE_NAME, ATOMIC_STORE},
@@ -759,6 +784,10 @@ static const std::unordered_map<std::string, IntrinsicKind> runtimeIntrinsicMap 
     {GET_THREAD_NUMBER_NAME, GET_THREAD_NUMBER},
     {GET_BLOCKING_THREAD_NUMBER_NAME, GET_BLOCKING_THREAD_NUMBER},
     {GET_NATIVE_THREAD_NUMBER_NAME, GET_NATIVE_THREAD_NUMBER},
+    {CROSS_ACCESS_BARRIER_NAME, CROSS_ACCESS_BARRIER},
+    {CREATE_EXPORT_HANDLE_NAME, CREATE_EXPORT_HANDLE},
+    {GET_EXPORTED_REF_NAME, GET_EXPORTED_REF},
+    {REMOVE_EXPORTED_REF_NAME, REMOVE_EXPORTED_REF},
 };
 static const std::unordered_map<std::string, IntrinsicKind> mathIntrinsicMap = {
     {ABS_NAME, ABS},

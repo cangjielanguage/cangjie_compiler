@@ -13,22 +13,15 @@ ConstSafetyCheck::ConstSafetyCheck(ConstAnalysisWrapper* constAnalysisWrapper) :
 {
 }
 
-void ConstSafetyCheck::RunOnPackage(const Package& package, bool isCJLint, size_t threadNum) const
+void ConstSafetyCheck::RunOnPackage(const Package& package, size_t threadNum) const
 {
-    (void)isCJLint;
     if (threadNum == 1) {
         for (auto func : package.GetGlobalFuncs()) {
-            if (func->Get<SkipCheck>() == SkipKind::SKIP_CODEGEN) {
-                continue;
-            }
             RunOnFunc(func);
         }
     } else {
         Utils::TaskQueue taskQueue(threadNum);
         for (auto func : package.GetGlobalFuncs()) {
-            if (func->Get<SkipCheck>() == SkipKind::SKIP_CODEGEN) {
-                continue;
-            }
             taskQueue.AddTask<void>([this, func]() { return RunOnFunc(func); });
         }
         taskQueue.RunAndWaitForAllTasksCompleted();

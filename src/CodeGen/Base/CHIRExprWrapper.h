@@ -14,7 +14,7 @@
 
 #include "cangjie/Basic/Print.h"
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Utils.h"
 
 namespace Cangjie {
@@ -67,14 +67,14 @@ public:
         return chirExpr.GetExprKindName();
     }
 
-    CHIR::Block* GetParent() const
+    CHIR::Block* GetParentBlock() const
     {
-        return chirExpr.GetParent();
+        return chirExpr.GetParentBlock();
     }
 
-    CHIR::Func* GetParentFunc() const
+    CHIR::Func* GetTopLevelFunc() const
     {
-        return chirExpr.GetParentFunc();
+        return chirExpr.GetTopLevelFunc();
     }
 
     unsigned GetNumOfOperands() const
@@ -134,11 +134,10 @@ public:
     }
     virtual CHIR::Type* GetThisType() const = 0;
     virtual std::vector<CHIR::Type*> GetInstantiatedTypeArgs() const = 0;
-    virtual CHIR::Type* GetInstantiatedRetType() const = 0;
     virtual bool IsCalleeMethod() const = 0;
     virtual bool IsCalleeStructInstanceMethod() const = 0;
     virtual bool IsCalleeStatic() const = 0;
-    virtual const CHIR::Type* GetOuterType() const = 0;
+    virtual const CHIR::Type* GetOuterType([[maybe_unused]] CHIR::CHIRBuilder& builder) const = 0;
     virtual const CHIR::Value* GetThisParam() const = 0;
 };
 
@@ -147,7 +146,9 @@ public:
     explicit CHIRApplyWrapper(const CHIR::Apply& apply) : CHIRCallExpr(apply)
     {
         if (GetInstantiatedTypeArgs().size() != GetCalleeTypeArgsNum()) {
+#ifndef NDEBUG
             Errorln(chirExpr.ToString() + "\n");
+#endif
             CJC_ASSERT(false && "Incorrect ApplyExpr from CHIR, type arguments are missing.");
         }
     }
@@ -155,7 +156,9 @@ public:
     explicit CHIRApplyWrapper(const CHIR::ApplyWithException& applyWithException) : CHIRCallExpr(applyWithException)
     {
         if (GetInstantiatedTypeArgs().size() != GetCalleeTypeArgsNum()) {
+#ifndef NDEBUG
             Errorln(chirExpr.ToString() + "\n");
+#endif
             CJC_ASSERT(false && "Incorrect ApplyExpr from CHIR, type arguments are missing.");
         }
     }
@@ -187,9 +190,9 @@ public:
     std::vector<CHIR::Type*> GetInstantiatedTypeArgs() const override
     {
         if (GetExprKind() == CHIR::ExprKind::APPLY) {
-            return StaticCast<const CHIR::Apply&>(chirExpr).GetInstantiateArgs();
+            return StaticCast<const CHIR::Apply&>(chirExpr).GetInstantiatedTypeArgs();
         } else {
-            return StaticCast<const CHIR::ApplyWithException&>(chirExpr).GetInstantiateArgs();
+            return StaticCast<const CHIR::ApplyWithException&>(chirExpr).GetInstantiatedTypeArgs();
         }
     }
 
@@ -202,30 +205,13 @@ public:
         }
     }
 
-    CHIR::Type* GetInstParentCustomTyOfCallee() const
-    {
-        if (GetExprKind() == CHIR::ExprKind::APPLY) {
-            return StaticCast<const CHIR::Apply&>(chirExpr).GetInstParentCustomTyOfCallee();
-        } else {
-            return StaticCast<const CHIR::ApplyWithException&>(chirExpr).GetInstParentCustomTyOfCallee();
-        }
-    }
-
-    CHIR::Type* GetInstantiatedRetType() const override
-    {
-        if (GetExprKind() == CHIR::ExprKind::APPLY) {
-            return StaticCast<const CHIR::Apply&>(chirExpr).GetInstantiatedRetType();
-        } else {
-            return StaticCast<const CHIR::ApplyWithException&>(chirExpr).GetInstantiatedRetType();
-        }
-    }
-
     bool IsCalleeMethod() const override
     {
+        bool isCallee = false;
         if (auto func = DynamicCast<CHIR::FuncBase*>(GetCallee())) {
-            return func->IsMemberFunc();
+            isCallee = func->IsMemberFunc();
         }
-        return false;
+        return isCallee;
     }
 
     bool IsCalleeStatic() const override
@@ -249,16 +235,18 @@ public:
             (GetCallee()->TestAttr(CHIR::Attribute::MUT) || CHIR::IsConstructor(*GetCallee()));
     }
 
-    const CHIR::Type* GetOuterType() const override
+    const CHIR::Type* GetOuterType(CHIR::CHIRBuilder& builder) const override
     {
         CHIR::Type* res = nullptr;
         if (GetExprKind() == CHIR::ExprKind::APPLY) {
-            res = StaticCast<const CHIR::Apply&>(chirExpr).GetInstParentCustomTyOfCallee();
+            res = StaticCast<const CHIR::Apply&>(chirExpr).GetInstParentCustomTyOfCallee(builder);
         } else {
-            res = StaticCast<const CHIR::ApplyWithException&>(chirExpr).GetInstParentCustomTyOfCallee();
+            res = StaticCast<const CHIR::ApplyWithException&>(chirExpr).GetInstParentCustomTyOfCallee(builder);
         }
         if (!res) {
+#ifndef NDEBUG
             Errorln("Should not get a nullptr:\n", chirExpr.ToString());
+#endif
             CJC_ASSERT(false);
         }
         return res;
@@ -285,8 +273,7 @@ public:
     {
     }
 
-    explicit CHIRInvokeWrapper(const CHIR::InvokeWithException& invokeWithException)
-        : CHIRCallExpr(invokeWithException)
+    explicit CHIRInvokeWrapper(const CHIR::InvokeWithException& invokeWithException) : CHIRCallExpr(invokeWithException)
     {
     }
 
@@ -346,15 +333,6 @@ public:
         }
     }
 
-    CHIR::Type* GetInstantiatedRetType() const override
-    {
-        if (GetExprKind() == CHIR::ExprKind::INVOKE) {
-            return StaticCast<const CHIR::Invoke&>(chirExpr).GetInstantiatedRetType();
-        } else {
-            return StaticCast<const CHIR::InvokeWithException&>(chirExpr).GetInstantiatedRetType();
-        }
-    }
-
     bool IsCalleeMethod() const override
     {
         return true;
@@ -370,17 +348,19 @@ public:
         return false;
     }
 
-    const CHIR::Type* GetOuterType() const override
+    const CHIR::Type* GetOuterType(CHIR::CHIRBuilder& builder) const override
     {
         CJC_ASSERT(!IsCalleeStatic());
         CHIR::Type* res = nullptr;
         if (GetExprKind() == CHIR::ExprKind::INVOKE) {
-            res = StaticCast<const CHIR::Invoke&>(chirExpr).GetInstParentCustomTyOfCallee();
+            res = StaticCast<const CHIR::Invoke&>(chirExpr).GetInstSrcParentCustomTypeOfMethod(builder);
         } else {
-            res = StaticCast<const CHIR::InvokeWithException&>(chirExpr).GetInstParentCustomTyOfCallee();
+            res = StaticCast<const CHIR::InvokeWithException&>(chirExpr).GetInstSrcParentCustomTypeOfMethod(builder);
         }
         if (!res) {
+#ifndef NDEBUG
             Errorln("Should not get a nullptr:\n", chirExpr.ToString());
+#endif
             CJC_ASSERT(false);
         }
         return res;
@@ -392,12 +372,12 @@ public:
         return GetObject();
     }
 
-    CHIR::InvokeCalleeInfo GetFuncInfo() const
+    size_t GetVirtualMethodOffset() const
     {
         if (GetExprKind() == CHIR::ExprKind::INVOKE) {
-            return StaticCast<const CHIR::Invoke&>(chirExpr).GetFuncInfo();
+            return StaticCast<const CHIR::Invoke&>(chirExpr).GetVirtualMethodOffset();
         } else {
-            return StaticCast<const CHIR::InvokeWithException&>(chirExpr).GetFuncInfo();
+            return StaticCast<const CHIR::InvokeWithException&>(chirExpr).GetVirtualMethodOffset();
         }
     }
 };
@@ -461,39 +441,12 @@ public:
         }
     }
 
-    CHIR::Type* GetInstParentCustomTyOfCallee() const
-    {
-        if (GetExprKind() == CHIR::ExprKind::INVOKESTATIC) {
-            return StaticCast<const CHIR::InvokeStatic&>(chirExpr).GetInstParentCustomTyOfCallee();
-        } else {
-            return StaticCast<const CHIR::InvokeStaticWithException&>(chirExpr).GetInstParentCustomTyOfCallee();
-        }
-    }
-
-    std::vector<CHIR::Type*> GetInstantiatedParamTypes() const
-    {
-        if (GetExprKind() == CHIR::ExprKind::INVOKESTATIC) {
-            return StaticCast<const CHIR::InvokeStatic&>(chirExpr).GetInstantiatedParamTypes();
-        } else {
-            return StaticCast<const CHIR::InvokeStaticWithException&>(chirExpr).GetInstantiatedParamTypes();
-        }
-    }
-
     std::vector<CHIR::Type*> GetInstantiatedTypeArgs() const override
     {
         if (GetExprKind() == CHIR::ExprKind::INVOKESTATIC) {
             return StaticCast<const CHIR::InvokeStatic&>(chirExpr).GetInstantiatedTypeArgs();
         } else {
             return StaticCast<const CHIR::InvokeStaticWithException&>(chirExpr).GetInstantiatedTypeArgs();
-        }
-    }
-
-    CHIR::Type* GetInstantiatedRetType() const override
-    {
-        if (GetExprKind() == CHIR::ExprKind::INVOKESTATIC) {
-            return StaticCast<const CHIR::InvokeStatic&>(chirExpr).GetInstantiatedRetType();
-        } else {
-            return StaticCast<const CHIR::InvokeStaticWithException&>(chirExpr).GetInstantiatedRetType();
         }
     }
 
@@ -512,11 +465,20 @@ public:
         return false;
     }
 
-    const CHIR::Type* GetOuterType() const override
+    const CHIR::Type* GetOuterType(CHIR::CHIRBuilder& builder) const override
     {
-        auto res = GetInstParentCustomTyOfCallee();
+        CJC_ASSERT(IsCalleeStatic());
+        CHIR::Type* res = nullptr;
+        if (GetExprKind() == CHIR::ExprKind::INVOKESTATIC) {
+            res = StaticCast<const CHIR::InvokeStatic&>(chirExpr).GetInstSrcParentCustomTypeOfMethod(builder);
+        } else {
+            res = StaticCast<const CHIR::InvokeStaticWithException&>(chirExpr).GetInstSrcParentCustomTypeOfMethod(
+                builder);
+        }
         if (!res) {
+#ifndef NDEBUG
             Errorln("Should not get a nullptr:\n", chirExpr.ToString());
+#endif
             CJC_ASSERT(false);
         }
         return res;
@@ -528,12 +490,12 @@ public:
         return nullptr;
     }
 
-    CHIR::InvokeCalleeInfo GetFuncInfo() const
+    size_t GetVirtualMethodOffset() const
     {
         if (GetExprKind() == CHIR::ExprKind::INVOKESTATIC) {
-            return StaticCast<const CHIR::InvokeStatic&>(chirExpr).GetFuncInfo();
+            return StaticCast<const CHIR::InvokeStatic&>(chirExpr).GetVirtualMethodOffset();
         } else {
-            return StaticCast<const CHIR::InvokeStaticWithException&>(chirExpr).GetFuncInfo();
+            return StaticCast<const CHIR::InvokeStaticWithException&>(chirExpr).GetVirtualMethodOffset();
         }
     }
 };
@@ -657,7 +619,7 @@ public:
         }
     }
 
-    std::optional<CHIR::Value*> GetSpawnArg() const
+    CHIR::Value* GetSpawnArg() const
     {
         if (GetExprKind() == CHIR::ExprKind::SPAWN) {
             return StaticCast<const CHIR::Spawn&>(chirExpr).GetSpawnArg();
@@ -766,12 +728,12 @@ public:
         }
     }
 
-    std::vector<Ptr<CHIR::Type>> GetGenericTypeInfo() const
+    std::vector<CHIR::Type*> GetInstantiatedTypeArgs() const
     {
         if (GetExprKind() == CHIR::ExprKind::INTRINSIC) {
-            return StaticCast<const CHIR::Intrinsic&>(chirExpr).GetGenericTypeInfo();
+            return StaticCast<const CHIR::Intrinsic&>(chirExpr).GetInstantiatedTypeArgs();
         } else {
-            return StaticCast<const CHIR::IntrinsicWithException&>(chirExpr).GetGenericTypeInfo();
+            return StaticCast<const CHIR::IntrinsicWithException&>(chirExpr).GetInstantiatedTypeArgs();
         }
     }
 };

@@ -11,21 +11,21 @@ ASTKIND(DECL, "*decl", Decl, 696) // begin of subtypes of Decl.
 ASTKIND(MAIN_DECL, "main_decl", MainDecl, 720)
 ASTKIND(FUNC_DECL, "func_decl", FuncDecl, 792)
 ASTKIND(MACRO_DECL, "macro_decl", MacroDecl, 752)
-ASTKIND(CLASS_LIKE_DECL, "class_like_decl", ClassLikeDecl, 792) // begin: subtypes of ClassLikeDecl and InheritableDecl.
-ASTKIND(CLASS_DECL, "class_decl", ClassDecl, 808)
-ASTKIND(INTERFACE_DECL, "interface_decl", InterfaceDecl, 800) // end: subtypes of ClassLikeDecl.
-ASTKIND(EXTEND_DECL, "extend_decl", ExtendDecl, 856)
-ASTKIND(ENUM_DECL, "enum_decl", EnumDecl, 896)
-ASTKIND(STRUCT_DECL, "struct_decl", StructDecl, 760) // end of subtypes of InheritableDecl.
-ASTKIND(TYPE_ALIAS_DECL, "type_alias_decl", TypeAliasDecl, 728)
+ASTKIND(CLASS_LIKE_DECL, "class_like_decl", ClassLikeDecl, 784) // begin: subtypes of ClassLikeDecl and InheritableDecl.
+ASTKIND(CLASS_DECL, "class_decl", ClassDecl, 800)
+ASTKIND(INTERFACE_DECL, "interface_decl", InterfaceDecl, 792) // end: subtypes of ClassLikeDecl.
+ASTKIND(EXTEND_DECL, "extend_decl", ExtendDecl, 848)
+ASTKIND(ENUM_DECL, "enum_decl", EnumDecl, 888)
+ASTKIND(STRUCT_DECL, "struct_decl", StructDecl, 752) // end of subtypes of InheritableDecl.
+ASTKIND(TYPE_ALIAS_DECL, "type_alias_decl", TypeAliasDecl, 720)
 ASTKIND(PRIMARY_CTOR_DECL, "primary_ctor_decl", PrimaryCtorDecl, 712)
-ASTKIND(BUILTIN_DECL, "builtin_decl", BuiltInDecl, 704)
+ASTKIND(BUILTIN_DECL, "builtin_decl", BuiltInDecl, 696)
 ASTKIND(VAR_DECL, "var_decl", VarDecl, 776) // begin of subtypes of VarDecl and VarDeclAbstract.
 ASTKIND(PROP_DECL, "prop_decl", PropDecl, 864)
 ASTKIND(MACRO_EXPAND_PARAM, "macro_expand_param", MacroExpandParam, 1576)
 ASTKIND(FUNC_PARAM, "func_param", FuncParam, 840)                                // end of subtypes of VarDecl.
 ASTKIND(VAR_WITH_PATTERN_DECL, "var_with_pattern_decl", VarWithPatternDecl, 768) // end of subtypes of VarDeclAbstract.
-ASTKIND(GENERIC_PARAM_DECL, "generic_param_decl", GenericParamDecl, 720)
+ASTKIND(GENERIC_PARAM_DECL, "generic_param_decl", GenericParamDecl, 712)
 ASTKIND(PACKAGE_DECL, "package_decl", PackageDecl, 704)
 ASTKIND(MACRO_EXPAND_DECL, "macro_expand_decl", MacroExpandDecl, 1432)
 ASTKIND(INVALID_DECL, "invalid_decl", InvalidDecl, 696) // end of subtypes of Decl.
@@ -37,6 +37,7 @@ ASTKIND(ENUM_PATTERN, "enum_pattern", EnumPattern, 368)
 ASTKIND(VAR_OR_ENUM_PATTERN, "var_or_enum_pattern", VarOrEnumPattern, 352)
 ASTKIND(TYPE_PATTERN, "type_pattern", TypePattern, 328)
 ASTKIND(EXCEPT_TYPE_PATTERN, "except_type_pattern", ExceptTypePattern, 360)
+ASTKIND(COMMAND_TYPE_PATTERN, "effect_type_pattern", CommandTypePattern, 360)
 ASTKIND(WILDCARD_PATTERN, "wildcard_pattern", WildcardPattern, 264)
 ASTKIND(INVALID_PATTERN, "invalid_pattern", InvalidPattern, 264) // end of subtypes of Pattern.
 ASTKIND(TYPE, "*type", Type, 376)                                // begin of subtypes of Type.
@@ -81,8 +82,8 @@ ASTKIND(BLOCK, "block", Block, 512)
 ASTKIND(IF_EXPR, "if_expr", IfExpr, 544)
 ASTKIND(LET_PATTERN_DESTRUCTOR, "let_pattern_destructor", LetPatternDestructor, 512)
 ASTKIND(TOKEN_PART, "token_part", TokenPart, 448)
-ASTKIND(QUOTE_EXPR, "quote_expr", QuoteExpr, 544)
-ASTKIND(TRY_EXPR, "try_expr", TryExpr, 704)
+ASTKIND(QUOTE_EXPR, "quote_expr", QuoteExpr, 512)
+ASTKIND(TRY_EXPR, "try_expr", TryExpr, 752)
 ASTKIND(WHILE_EXPR, "while_expr", WhileExpr, 512)
 ASTKIND(JUMP_EXPR, "jump_expr", JumpExpr, 448)
 ASTKIND(LAMBDA_EXPR, "lambda_expr", LambdaExpr, 464)
@@ -91,6 +92,8 @@ ASTKIND(FOR_IN_EXPR, "for_in_expr", ForInExpr, 560)
 ASTKIND(DO_WHILE_EXPR, "do_while_expr", DoWhileExpr, 528)
 ASTKIND(TYPE_CONV_EXPR, "type_conv_expr", TypeConvExpr, 496)
 ASTKIND(THROW_EXPR, "throw_expr", ThrowExpr, 464)
+ASTKIND(PERFORM_EXPR, "perform_expr", PerformExpr, 464)
+ASTKIND(RESUME_EXPR, "resume_expr", ResumeExpr, 528)
 ASTKIND(SPAWN_EXPR, "spawn_expr", SpawnExpr, 512)
 ASTKIND(SYNCHRONIZED_EXPR, "synchronized_expr", SynchronizedExpr, 512)
 ASTKIND(MACRO_EXPAND_EXPR, "macro_expand_expr", MacroExpandExpr, 1312)
@@ -100,7 +103,7 @@ ASTKIND(GENERIC, "generic", Generic, 400)
 ASTKIND(GENERIC_CONSTRAINT, "generic_constraint", GenericConstraint, 384)
 ASTKIND(MATCH_CASE, "match_case", MatchCase, 360)
 ASTKIND(MATCH_CASE_OTHER, "match_case_other", MatchCaseOther, 296)
-ASTKIND(FUNC_ARG, "func_arg", FuncArg, 392)
+ASTKIND(FUNC_ARG, "func_arg", FuncArg, 416)
 ASTKIND(FUNC_PARAM_LIST, "func_param_list", FuncParamList, 344)
 ASTKIND(FUNC_BODY, " func_body", FuncBody, 448)
 ASTKIND(STRUCT_BODY, "struct_body", StructBody, 328)

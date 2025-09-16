@@ -7,7 +7,7 @@
 #ifndef CANGJIE_CHIR_TRANSFORMATION_REDUNDANT_FUTURE_REMOVAL_H
 #define CANGJIE_CHIR_TRANSFORMATION_REDUNDANT_FUTURE_REMOVAL_H
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Value.h"
 
@@ -17,19 +17,26 @@ namespace Cangjie::CHIR {
  */
 class RedundantFutureRemoval {
 public:
+    RedundantFutureRemoval(const Package& pkg, bool isDebug);
+
     /**
      * @brief Main process to do future remove in spawn expression.
-     * @param package package to do optimization.
-     * @param isDebug flag whether print debug log.
      */
-    static void RunOnPackage(const Ptr<const Package>& package, bool isDebug);
+    void RunOnPackage();
 
 private:
-    static void RunOnFunc(const Ptr<Func>& func, bool isDebug);
+    void RunOnFunc(const Func& func);
 
-    static std::pair<LocalVar*, Apply*> CheckSpawnWithFuture(Expression& expr);
+    FuncBase* GetExecureClosureFunc() const;
 
-    static void RewriteSpawnWithOutFuture(Spawn& spawnExpr, LocalVar& futureValue, Apply& apply);
+    std::pair<LocalVar*, Apply*> CheckSpawnWithFuture(Expression& expr) const;
+
+    void RewriteSpawnWithOutFuture(Spawn& spawnExpr, LocalVar& futureValue, Apply& apply);
+
+    const Package& package;
+    bool isDebug{false};
+
+    FuncBase* executeClosure{nullptr};
 };
 
 }

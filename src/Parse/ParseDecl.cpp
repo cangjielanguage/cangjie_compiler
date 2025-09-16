@@ -510,11 +510,11 @@ OwnedPtr<FuncDecl> ParserImpl::ParseFinalizer(
     ScopeKind scopeKind, const std::set<Modifier> modifiers, PtrVector<Annotation> annos)
 {
     Next(); // skip ~
-    auto& tildeBegin{lastToken.Begin()};
+    auto tildeBegin{lastToken.Begin()};
     OwnedPtr<FuncDecl> funcDecl = MakeOwned<FuncDecl>();
     [[maybe_unused]]ChainScope cs(*this, funcDecl.get());
     funcDecl->begin = tildeBegin;
-    Next(); // skip init
+    Skip(TokenKind::INIT); // skip init
     funcDecl->identifier = SrcIdentifier{"~init", tildeBegin, lastToken.End(), false};
     funcDecl->keywordPos = lastToken.Begin();
     funcDecl->EnableAttr(Attribute::FINALIZER);
@@ -579,9 +579,7 @@ OwnedPtr<FuncDecl> ParserImpl::ParseConstructor(
     ParseFuncDeclAnnos(annos, *funcDecl);
     if (!funcDecl->funcBody || !funcDecl->funcBody->body) {
         DiagMissingBody("constructor", "", funcDecl->end);
-        if (!parseDeclFile) {
-            funcDecl->EnableAttr(Attribute::HAS_BROKEN);
-        }
+        funcDecl->EnableAttr(Attribute::HAS_BROKEN);
     }
     return funcDecl;
 }
@@ -680,6 +678,7 @@ OwnedPtr<ClassBody> ParserImpl::ParseClassBody(const ClassDecl& cd)
         if (decl->IsInvalid()) {
             continue;
         }
+        SetMemberParentInheritableDecl(cd, decl);
         if (decl->astKind == ASTKind::PRIMARY_CTOR_DECL && decl->identifier != cd.identifier) {
             ret->decls.emplace_back(MakeOwned<InvalidDecl>(decl->begin));
             continue;
@@ -690,7 +689,7 @@ OwnedPtr<ClassBody> ParserImpl::ParseClassBody(const ClassDecl& cd)
     return ret;
 }
 
-OwnedPtr<InterfaceBody> ParserImpl::ParseInterfaceBody()
+OwnedPtr<InterfaceBody> ParserImpl::ParseInterfaceBody(const AST::InterfaceDecl& id)
 {
     if (!Skip(TokenKind::LCURL)) {
         ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_left_brace, lookahead, ConvertToken(lookahead));
@@ -709,6 +708,7 @@ OwnedPtr<InterfaceBody> ParserImpl::ParseInterfaceBody()
         if (decl->IsInvalid()) {
             continue;
         }
+        SetMemberParentInheritableDecl(id, decl);
         ret->decls.emplace_back(std::move(decl));
     }
     ret->end = ret->rightCurlPos;
@@ -853,22 +853,27 @@ void ParserImpl::ParseInterfaceDeclOrClassDeclGeneric(InheritableDecl& ret)
     }
 }
 
-void ParserImpl::SetBodyParentClassLike(ClassLikeDecl& ret, std::vector<OwnedPtr<Decl>>& decls)
+void ParserImpl::SetMemberParentInheritableDecl(const InheritableDecl& outer, const OwnedPtr<AST::Decl>& decl) const
 {
-    for (auto& decl : decls) {
-        decl->outerDecl = &ret;
-        if (auto func = DynamicCast<FuncDecl*>(decl.get()); func && func->funcBody) {
-            func->funcBody->parentClassLike = &ret;
-        } else if (auto pd = DynamicCast<AST::PrimaryCtorDecl*>(decl.get()); pd && pd->funcBody &&
-            !pd->funcBody->paramLists.empty()) {
-            for (auto& param : pd->funcBody->paramLists[0]->params) {
-                if (param->isMemberParam) {
-                    param->outerDecl = &ret;
-                }
+    auto outerPtr = const_cast<InheritableDecl*>(&outer);
+    decl->outerDecl = outerPtr;
+    if (auto macroExpandDecl = DynamicCast<MacroExpandDecl*>(decl.get());
+        macroExpandDecl && macroExpandDecl->invocation.decl) {
+        SetMemberParentInheritableDecl(outer, macroExpandDecl->invocation.decl);
+    } else if (auto pd = DynamicCast<AST::PrimaryCtorDecl*>(decl.get());
+               pd && pd->funcBody && !pd->funcBody->paramLists.empty()) {
+        for (auto& param : pd->funcBody->paramLists[0]->params) {
+            if (param->isMemberParam) {
+                param->outerDecl = outerPtr;
             }
         }
+    } else if (auto func = DynamicCast<FuncDecl*>(decl.get()); func && func->funcBody) {
+        if (outer.IsClassLikeDecl()) {
+            func->funcBody->parentClassLike = StaticCast<ClassLikeDecl*>(outerPtr);
+        } else if (outer.astKind == ASTKind::ENUM_DECL) {
+            func->funcBody->parentEnum = StaticCast<EnumDecl*>(outerPtr);
+        }
     }
-    ret.end = lastToken.End();
 }
 
 void ParserImpl::SetDefaultFunc(ScopeKind scopeKind, AST::Decl& decl) const
@@ -930,7 +935,7 @@ OwnedPtr<ClassDecl> ParserImpl::ParseClassDecl(
     SetPrimaryDecl(ret->identifier, ret->identifier.IsRaw());
     ret->body = ParseClassBody(*ret);
     RevertPrimaryDecl();
-    SetBodyParentClassLike(*ret, ret->body->decls);
+    ret->end = lastToken.End();
     ret->annotations = std::move(annos);
     return ret;
 }
@@ -951,8 +956,8 @@ OwnedPtr<InterfaceDecl> ParserImpl::ParseInterfaceDecl(
         ret->EnableAttr(it);
     }
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
-    ret->body = ParseInterfaceBody();
-    SetBodyParentClassLike(*ret, ret->body->decls);
+    ret->body = ParseInterfaceBody(*ret);
+    ret->end = lastToken.End();
     ret->annotations = std::move(annos);
     return ret;
 }
@@ -966,7 +971,7 @@ void ParserImpl::ParseCaseBody(EnumDecl& enumDecl)
     if (!caseBody->TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
         ParseDiagnoseRefactor(DiagKindRefactor::parse_unknown_enum_constructor, *caseBody);
     }
-    caseBody->outerDecl = &enumDecl;
+    SetMemberParentInheritableDecl(enumDecl, caseBody);
     enumDecl.constructors.emplace_back(std::move(caseBody));
 }
 
@@ -1023,10 +1028,7 @@ void ParserImpl::ParseEnumBody(EnumDecl& enumDecl)
         if (decl->TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
             ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_decl, MakeRange(decl->identifier), decl->identifier);
         }
-        decl->outerDecl = &enumDecl;
-        if (auto func = DynamicCast<FuncDecl*>(decl.get()); func && func->funcBody) {
-            func->funcBody->parentEnum = &enumDecl;
-        }
+        SetMemberParentInheritableDecl(enumDecl, decl);
         enumDecl.members.emplace_back(std::move(decl));
     }
 }
@@ -1093,21 +1095,10 @@ OwnedPtr<StructBody> ParserImpl::ParseStructBody(StructDecl& sd)
         if (decl->IsInvalid()) {
             continue;
         }
-        decl->outerDecl = &sd;
-        if (auto func = DynamicCast<FuncDecl*>(decl.get()); func && func->funcBody) {
-            func->funcBody->parentStruct = &sd;
-        }
+        SetMemberParentInheritableDecl(sd, decl);
         if (decl->astKind == ASTKind::PRIMARY_CTOR_DECL && decl->identifier != sd.identifier) {
             ret->decls.emplace_back(MakeOwned<InvalidDecl>(decl->begin));
             continue;
-        }
-        if (auto pd = DynamicCast<AST::PrimaryCtorDecl*>(decl.get()); pd && pd->funcBody &&
-            !pd->funcBody->paramLists.empty()) {
-            for (auto& param : pd->funcBody->paramLists[0]->params) {
-                if (param->isMemberParam) {
-                    param->outerDecl = &sd;
-                }
-            }
         }
         ret->decls.emplace_back(std::move(decl));
     }
@@ -1287,14 +1278,13 @@ OwnedPtr<Generic> ParserImpl::ParseGeneric()
     ret->leftAnglePos = lastToken.Begin();
     ret->begin = lastToken.Begin();
     ChainScope cs(*this, ret.get());
-    ParseOneOrMoreWithSeparator(
-        TokenKind::COMMA,
-        [&](const Position commaPos) {
+    ParseOneOrMoreSepTrailing(
+        [&ret](const Position commaPos) {
             if (!ret->typeParameters.empty()) {
                 ret->typeParameters.back()->commaPos = commaPos;
             }
         },
-        [&, this]() {
+        [&ret, this]() {
             OwnedPtr<GenericParamDecl> gpd;
             if (Seeing(TokenKind::IDENTIFIER) || SeeingContextualKeyword()) {
                 gpd = ParseGenericParamDecl();
@@ -1308,7 +1298,7 @@ OwnedPtr<Generic> ParserImpl::ParseGeneric()
             if (lookahead.kind != TokenKind::GT && gpd) {
                 ret->typeParameters.emplace_back(std::move(gpd));
             }
-        });
+        }, TokenKind::GT);
     if (!Skip(TokenKind::GT)) {
         if (!ret->TestAttr(Attribute::IS_BROKEN)) {
             ret->end = lastToken.End();
@@ -1372,7 +1362,7 @@ std::vector<OwnedPtr<GenericConstraint>> ParserImpl::ParseGenericConstraints()
         auto illegalConstraint = ParseGenericUpperBound(genericConstraint);
         if (!illegalConstraint) {
             genericConstraint->begin = genericConstraint->type->begin;
-            genericConstraint->end = lookahead.Begin();
+            genericConstraint->end = lastToken.End();
             ret.push_back(std::move(genericConstraint));
         }
     } while (Skip(TokenKind::COMMA));
@@ -1545,9 +1535,9 @@ void ParserImpl::CheckFuncBody(ScopeKind scopeKind, FuncDecl& decl)
             ParseDiagnoseRefactor(DiagKindRefactor::parse_intrinsic_function_cannot_have_body, *fb->body);
         }
     }
-    const bool isMember = fb && !fb->body && !decl.TestAttr(Attribute::FOREIGN) &&
+    bool isMember = fb && !fb->body && !decl.TestAttr(Attribute::FOREIGN) &&
         !decl.TestAttr(Attribute::INTRINSIC) && scopeKind != ScopeKind::UNKNOWN_SCOPE;
-    if (isMember && !parseDeclFile) {
+    if (isMember) {
         if (scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::INTERFACE_BODY) {
             decl.EnableAttr(Attribute::ABSTRACT);
             if (!decl.funcBody->retType && !fb->TestAttr(Attribute::HAS_BROKEN)) {
@@ -1839,27 +1829,16 @@ OwnedPtr<FuncParamList> ParserImpl::ParseParameterList(ScopeKind scopeKind)
     Ptr<FuncParam> memberParam{nullptr};
     ret->begin = lookahead.Begin();
     ret->leftParenPos = lookahead.Begin();
-    while (true) {
-        if (DetectPrematureEnd()) {
-            DiagExpectedRightDelimiter("(", ret->leftParenPos);
-            break;
-        }
-        if (Skip(TokenKind::RPAREN)) {
-            break;
-        }
-        (void)ret->params.emplace_back(ParseParamInParamList(scopeKind, namedParameter, memberParam));
-        if (!Skip(TokenKind::COMMA)) {
-            if (!Seeing(TokenKind::RPAREN)) {
-                DiagExpectedRightDelimiter("(", ret->leftParenPos);
-                ret->end = lookahead.End();
-                ret->EnableAttr(Attribute::IS_BROKEN);
-                return ret;
-            }
-        } else {
-            if (Seeing(TokenKind::RPAREN)) {
-                DiagExpectedName("a parameter", "after ','");
-            }
-        }
+    ParseZeroOrMoreSepTrailing([&ret](const Position& pos) { ret->params.back()->commaPos = pos; },
+        [&ret, this, scopeKind, &namedParameter, &memberParam]() {
+            ret->params.push_back(ParseParamInParamList(scopeKind, namedParameter, memberParam));
+        },
+        TokenKind::RPAREN);
+    if (!Skip(TokenKind::RPAREN)) {
+        DiagExpectedRightDelimiter("(", ret->leftParenPos);
+        ret->end = lookahead.End();
+        ret->EnableAttr(Attribute::IS_BROKEN);
+        return ret;
     }
     if (scopeKind == ScopeKind::PROP_MEMBER_SETTER_BODY) {
         if (ret->params.empty()) {

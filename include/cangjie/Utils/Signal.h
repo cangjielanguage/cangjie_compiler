@@ -54,8 +54,8 @@ enum TriggerPointer {
     MAIN_POINTER,   // Execute the test callback function inserted in the main func.
     DRIVER_POINTER, // Execute the test callback function inserted in the Driver module.
     PARSER_POINTER, // Execute the test callback function inserted in the Parser module.
-    SEMA_POINTER,   // Execute the test callback callback function inserted in the Sema module.
-    CHIR_POINTER,   // Execute the test function inserted in the CHIR module.
+    SEMA_POINTER,   // Execute the test callback function inserted in the Sema module.
+    CHIR_POINTER,   // Execute the test callback function inserted in the CHIR module.
     CODEGEN_POINTER // Execute the test callback function inserted in the CodeGen module.
 };
 void SetSignalTestCallbackFunc(SignalTestCallbackFuncType fp, TriggerPointer pointerType, int errorCodeOffset);

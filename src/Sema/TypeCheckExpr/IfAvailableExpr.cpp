@@ -4,6 +4,7 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "Desugar/DesugarInTypeCheck.h"
 #include "Diags.h"
 #include "TypeCheckerImpl.h"
 
@@ -11,52 +12,104 @@ using namespace Cangjie;
 using namespace AST;
 
 namespace {
-bool IsLiteral(const Expr& expr)
+const std::string LEVEL_IDENTGIFIER = "level";
+const std::string SYSCAP_IDENTGIFIER = "syscap";
+const std::string DEVICE_INFO = "DeviceInfo";
+// For level check:
+const std::string PKG_NAME_DEVICE_INFO_AT = "ohos.device_info";
+// For syscap check:
+const std::string PKG_NAME_CANIUSE_AT = "ohos.base";
+
+bool ChkIfImportDeviceInfo(DiagnosticEngine& diag, const ImportManager& im, const IfAvailableExpr& iae)
 {
-    auto lit = DynamicCast<LitConstExpr>(&expr);
-    if (!lit) {
-        return false;
+    if (iae.GetFullPackageName() == PKG_NAME_DEVICE_INFO_AT) {
+        return true;
     }
-    return !lit->siExpr;
+    auto importedPkgs = im.GetAllImportedPackages();
+    for (auto& importedPkg : importedPkgs) {
+        if (importedPkg->srcPackage && importedPkg->srcPackage->fullPackageName == PKG_NAME_DEVICE_INFO_AT) {
+            return true;
+        }
+    }
+    auto builder = diag.DiagnoseRefactor(
+        DiagKindRefactor::sema_use_expr_without_import, iae, PKG_NAME_DEVICE_INFO_AT, "IfAvailable");
+    builder.AddNote("depend on declaration 'DeviceInfo'");
+    return false;
+}
+
+bool ChkIfImportBase(DiagnosticEngine& diag, const ImportManager& im, const IfAvailableExpr& iae)
+{
+    if (iae.GetFullPackageName() == PKG_NAME_CANIUSE_AT) {
+        return true;
+    }
+    auto importedPkgs = im.GetAllImportedPackages();
+    for (auto& importedPkg : importedPkgs) {
+        if (importedPkg->srcPackage && importedPkg->srcPackage->fullPackageName == PKG_NAME_CANIUSE_AT) {
+            return true;
+        }
+    }
+    auto builder =
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_use_expr_without_import, iae, PKG_NAME_CANIUSE_AT, "IfAvailable");
+    builder.AddNote("depend on declaration 'canIUse'");
+    return false;
 }
 } // namespace
 
 bool TypeChecker::TypeCheckerImpl::ChkIfAvailableExpr(ASTContext& ctx, Ty& ty, IfAvailableExpr& ie)
 {
     auto exprTy = SynIfAvailableExpr(ctx, ie);
-    if (exprTy->IsInvalid()) {
+    if (!Ty::IsTyCorrect(exprTy)) {
         return false;
     }
-    if (&ty != exprTy) {
+    if (!typeManager.IsSubtype(exprTy, &ty)) {
         Sema::DiagMismatchedTypes(diag, ie, ty);
         return false;
     }
     return true;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIfAvailableExpr(ASTContext& ctx, IfAvailableExpr& ie)
+Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIfAvailableExpr(ASTContext& ctx, IfAvailableExpr& iae)
 {
-    auto arg = ie.GetArg();
-    if (!arg) {
-        return ie.ty = typeManager.GetInvalidTy();
+    // Desugar before type checker.
+    auto ie = DynamicCast<IfExpr>(iae.desugarExpr.get());
+    if (!ie) {
+        return typeManager.GetInvalidTy();
     }
     bool res{true};
-    if (arg->name.Empty()) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_ifavailable_arg_no_name, *ie.GetArg());
+    auto argName = iae.GetArg()->name;
+    if (argName.Empty()) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_ifavailable_arg_no_name, *iae.GetArg());
         res = false;
     }
-    Synthesize(ctx, arg);
-    ReplaceIdealTy(*arg->expr);
-    ReplaceIdealTy(*arg);
-    if (Ty::IsTyCorrect(arg->expr->ty) && !IsLiteral(*arg->expr)) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_ifavailable_arg_not_literal, *ie.GetArg());
+    if (argName == LEVEL_IDENTGIFIER && ie->condExpr) {
+        res = ChkIfImportDeviceInfo(diag, importManager, iae) && res;
+        CJC_ASSERT(ie->condExpr->astKind == ASTKind::BINARY_EXPR);
+        auto argExpr = StaticCast<BinaryExpr>(ie->condExpr.get())->rightExpr.get();
+        if (argExpr->astKind != ASTKind::LIT_CONST_EXPR) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_ifavailable_arg_not_literal, *iae.GetArg());
+            res = false;
+        }
+    } else if (argName == SYSCAP_IDENTGIFIER && ie->condExpr) {
+        res = ChkIfImportBase(diag, importManager, iae) && res;
+        CJC_ASSERT(ie->condExpr->astKind == ASTKind::CALL_EXPR);
+        auto argExpr = StaticCast<CallExpr>(ie->condExpr.get());
+        CJC_ASSERT(argExpr->args.size() == 1);
+        if (argExpr->args[0]->expr->astKind != ASTKind::LIT_CONST_EXPR) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_ifavailable_arg_not_literal, *iae.GetArg());
+            res = false;
+        }
+    } else {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_ifavailable_unknow_arg_name, MakeRange(iae.GetArg()->name),
+            iae.GetArg()->name.Val());
         res = false;
     }
-    auto lambdaType = typeManager.GetFunctionTy({}, typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
-    res = Check(ctx, lambdaType, ie.GetLambda1()) && res;
-    res = Check(ctx, lambdaType, ie.GetLambda2()) && res;
-    if (res) {
-        return ie.ty = typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT);
+    auto targetTy = typeManager.GetFunctionTy({}, typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    res = Check(ctx, targetTy, iae.GetLambda1()) && res;
+    res = Check(ctx, targetTy, iae.GetLambda2()) && res;
+    if (!res) {
+        iae.ty = typeManager.GetInvalidTy();
+        return iae.ty;
     }
-    return ie.ty = typeManager.GetInvalidTy();
+    iae.ty = Synthesize(ctx, iae.desugarExpr);
+    return iae.ty;
 }

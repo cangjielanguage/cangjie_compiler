@@ -4,10 +4,12 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-// EXPRKIND(expression kind, exression kind value for human reading, Expression)
+// Tips:
+// 1. EXPRKIND(expression kind, exression name for human reading, Expression class)
+// 2. Remember to modify CHIRCasting.h and PackageFormat.fbs after adding a new expression
+
 #if defined(MAJORKIND) && defined(EXPRKIND)
 
-// NOTE: First and last kind will affect implementation of 'CHIRCasting'
 MAJORKIND(TERMINATOR,
 EXPRKIND(GOTO, "GoTo", GoTo)
 EXPRKIND(BRANCH, "Branch", Branch)
@@ -92,7 +94,7 @@ EXPRKIND(SPAWN, "Spawn", Spawn)
 EXPRKIND(GET_INSTANTIATE_VALUE, "GetInstantiateValue", GetInstantiateValue)
 
 EXPRKIND(BOX, "Box", Box)
-EXPRKIND(UNBOX, "Unbox", Unbox)
+EXPRKIND(UNBOX, "UnBox", Unbox)
 EXPRKIND(TRANSFORM_TO_GENERIC, "TransformToGeneric", TransformToGeneric)
 EXPRKIND(TRANSFORM_TO_CONCRETE, "TransformToConcrete", TransformToConcrete)
 EXPRKIND(UNBOX_TO_REF, "UnBoxToRef", UnBoxToRef)

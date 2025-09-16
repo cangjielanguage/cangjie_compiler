@@ -6,10 +6,11 @@
 
 #include "cangjie/CHIR/Analysis/Utils.h"
 #include "cangjie/CHIR/CHIR.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Visitor/Visitor.h"
 #include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 
 namespace Cangjie::CHIR {
@@ -17,16 +18,11 @@ namespace {
 struct UnusedImportAnalysis {
 public:
     UnusedImportAnalysis(
-        const std::unordered_set<const ImportedValue*>& srcCodeImportedValue,
         const std::unordered_map<std::string, FuncBase*>& implicitFuncs, bool incr, bool skipVirtualFunc = true)
-        : srcCodeImportedValue(srcCodeImportedValue),
-        implicitFuncs(implicitFuncs), incr(incr), skipVirtualFunc(skipVirtualFunc) {}
+        : implicitFuncs(implicitFuncs), incr(incr), skipVirtualFunc(skipVirtualFunc) {}
     bool Judge(const ImportedValue& val)
     {
         if (incr || val.TestAttr(Attribute::NON_RECOMPILE)) {
-            return false;
-        }
-        if (srcCodeImportedValue.find(&val) != srcCodeImportedValue.end()) {
             return false;
         }
         if (auto func = DynamicCast<const ImportedFunc*>(&val)) {
@@ -59,7 +55,6 @@ public:
         skipVirtualFunc = skip;
     }
 private:
-    const std::unordered_set<const ImportedValue*>& srcCodeImportedValue;
     const std::unordered_map<std::string, FuncBase*>& implicitFuncs;
     bool incr;
     bool skipVirtualFunc;
@@ -192,6 +187,13 @@ private:
                 VisitType(*ctor.funcType);
             }
         }
+        for (auto vTable : def.GetVTable()) {
+            for (auto funcInfo : vTable.second) {
+                if (funcInfo.instance) {
+                    VisitValue(*funcInfo.instance);
+                }
+            }
+        }
     }
     
     /// Begin visit expression methods
@@ -211,83 +213,53 @@ private:
         }
         // we are planning to give the following six classes a common interface.
         if (auto apply = DynamicCast<Apply>(&e)) {
-            for (auto type : apply->GetInstantiateArgs()) {
+            for (auto type : apply->GetInstantiatedTypeArgs()) {
                 VisitType(*type);
             }
-            Visit(apply->GetCalleeTypeInfo());
+            if (apply->GetThisType()) {
+                VisitType(*apply->GetThisType());
+            }
         }
         if (auto apply = DynamicCast<ApplyWithException>(&e)) {
-            for (auto type : apply->GetInstantiateArgs()) {
+            for (auto type : apply->GetInstantiatedTypeArgs()) {
                 VisitType(*type);
             }
-            Visit(apply->GetCalleeTypeInfo());
+            if (apply->GetThisType()) {
+                VisitType(*apply->GetThisType());
+            }
         }
         if (auto invoke = DynamicCast<Invoke>(&e)) {
             for (auto type : invoke->GetInstantiatedTypeArgs()) {
                 VisitType(*type);
             }
-            Visit(invoke->GetFuncInfo());
+            VisitType(*invoke->GetThisType());
+            VisitType(*invoke->GetMethodType());
         }
         if (auto invoke = DynamicCast<InvokeStatic>(&e)) {
             for (auto type : invoke->GetInstantiatedTypeArgs()) {
                 VisitType(*type);
             }
-            Visit(invoke->GetFuncInfo());
+            VisitType(*invoke->GetThisType());
+            VisitType(*invoke->GetMethodType());
         }
         if (auto invoke = DynamicCast<InvokeWithException>(&e)) {
             for (auto type : invoke->GetInstantiatedTypeArgs()) {
                 VisitType(*type);
             }
-            Visit(invoke->GetFuncInfo());
+            VisitType(*invoke->GetThisType());
+            VisitType(*invoke->GetMethodType());
         }
         if (auto invoke = DynamicCast<InvokeStaticWithException>(&e)) {
             for (auto type : invoke->GetInstantiatedTypeArgs()) {
                 VisitType(*type);
             }
-            Visit(invoke->GetFuncInfo());
+            VisitType(*invoke->GetThisType());
+            VisitType(*invoke->GetMethodType());
         }
         if (auto inst = DynamicCast<GetInstantiateValue>(&e)) {
             for (auto type : inst->GetInstantiateTypes()) {
                 VisitType(*type);
             }
-        }
-    }
-
-    void Visit(const CalleeInfo& info)
-    {
-        if (info.thisType) {
-            VisitType(*info.thisType);
-        }
-        for (auto type : info.instParamTys) {
-            VisitType(*type);
-        }
-        if (info.instParentCustomTy) {
-            VisitType(*info.instParentCustomTy);
-        }
-        if (info.instRetTy) {
-            VisitType(*info.instRetTy);
-        }
-    }
-
-    void Visit(const InvokeCalleeInfo& info)
-    {
-        if (info.thisType) {
-            VisitType(*info.thisType);
-        }
-        for (auto type : info.instantiatedTypeArgs) {
-            VisitType(*type);
-        }
-        if (info.instFuncType) {
-            VisitType(*info.instFuncType);
-        }
-        if (info.originalFuncType) {
-            VisitType(*info.originalFuncType);
-        }
-        if (info.instParentCustomTy) {
-            VisitType(*info.instParentCustomTy);
-        }
-        if (info.originalParentCustomTy) {
-            VisitType(*info.originalParentCustomTy);
         }
     }
 
@@ -365,11 +337,11 @@ private:
 
 class UnusedImportRemover {
 public:
-    UnusedImportRemover(bool incr, const std::unordered_set<const ImportedValue*>& srcCodeImportValue,
-        const GlobalOptions& opts, const std::unordered_map<std::string, FuncBase*>& implicitFuncs)
-        : isIncremental(incr), opts(opts),
-          unusedImportAnalysis(srcCodeImportValue, implicitFuncs, incr),
-          implicitFuncs(implicitFuncs) {}
+    UnusedImportRemover(
+        bool incr, const GlobalOptions& opts, const std::unordered_map<std::string, FuncBase*>& implicitFuncs)
+        : isIncremental(incr), opts(opts), unusedImportAnalysis(implicitFuncs, incr), implicitFuncs(implicitFuncs)
+    {
+    }
 
     void Remove(Package& p)
     {
@@ -616,6 +588,7 @@ void ReplaceMethodAndStaticVar(
             }
         }
         it.first->SetStaticMemberVars(staticVars);
+
         for (auto& it2 : it.second) {
             if (auto func = DynamicCast<Func*>(it2.first)) {
                 func->DestroySelf();
@@ -655,12 +628,74 @@ static std::unordered_map<ClassDef*, std::unordered_set<CustomTypeDef*>> Collect
     }
     return subClasses;
 }
+namespace {
+void CreateSrcImportedFuncSymbol(
+    CHIRBuilder& builder, Func& fn, std::unordered_map<Func*, ImportedFunc*>& srcCodeImportedFuncMap)
+{
+    auto genericParamTy = fn.GetGenericTypeParams();
+    auto pkgName = fn.GetPackageName();
+    auto funcTy = fn.GetType();
+    auto mangledName = fn.GetIdentifierWithoutPrefix();
+    auto srcCodeName = fn.GetSrcCodeIdentifier();
+    auto rawMangledName = fn.GetRawMangledName();
+    auto importedFunc = builder.CreateImportedVarOrFunc<ImportedFunc>(
+        funcTy, mangledName, srcCodeName, rawMangledName, pkgName, genericParamTy);
+    importedFunc->AppendAttributeInfo(fn.GetAttributeInfo());
+    importedFunc->SetFuncKind(fn.GetFuncKind());
+    if (auto hostFunc = fn.GetParamDftValHostFunc()) {
+        auto it = srcCodeImportedFuncMap.find(StaticCast<Func*>(hostFunc));
+        CJC_ASSERT(it != srcCodeImportedFuncMap.end());
+        importedFunc->SetParamDftValHostFunc(*it->second);
+    }
+    importedFunc->SetFastNative(fn.IsFastNative());
+    importedFunc->Set<LinkTypeInfo>(Linkage::EXTERNAL);
+    srcCodeImportedFuncMap.emplace(&fn, importedFunc);
+}
+
+void CreateSrcImportedVarSymbol(
+    CHIRBuilder& builder, Value& gv, std::unordered_map<GlobalVar*, ImportedVar*>& srcCodeImportedVarMap)
+{
+    auto globalVar = VirtualCast<GlobalVar*>(&gv);
+    auto mangledName = globalVar->GetIdentifierWithoutPrefix();
+    auto srcCodeName = globalVar->GetSrcCodeIdentifier();
+    auto rawMangledName = globalVar->GetRawMangledName();
+    auto packageName = globalVar->GetPackageName();
+    auto ty = globalVar->GetType();
+    auto importedVar =
+        builder.CreateImportedVarOrFunc<ImportedVar>(ty, mangledName, srcCodeName, rawMangledName, packageName);
+    importedVar->AppendAttributeInfo(globalVar->GetAttributeInfo());
+    importedVar->Set<LinkTypeInfo>(gv.Get<LinkTypeInfo>());
+    srcCodeImportedVarMap.emplace(globalVar, importedVar);
+}
+
+void CreateSrcImpotedValueSymbol(const std::unordered_set<Func*>& srcCodeImportedFuncs,
+    const std::unordered_set<GlobalVar*>& srcCodeImportedVars, CHIRBuilder& builder,
+    std::unordered_map<Func*, ImportedFunc*>& srcCodeImportedFuncMap,
+    std::unordered_map<GlobalVar*, ImportedVar*>& srcCodeImportedVarMap)
+{
+    for (auto func : builder.GetCurPackage()->GetGlobalFuncs()) {
+        CJC_NULLPTR_CHECK(func);
+        if (srcCodeImportedFuncs.find(func) != srcCodeImportedFuncs.end()) {
+            CreateSrcImportedFuncSymbol(builder, *func, srcCodeImportedFuncMap);
+        }
+    }
+    for (auto gv : builder.GetCurPackage()->GetGlobalVars()) {
+        CJC_NULLPTR_CHECK(gv);
+        if (srcCodeImportedVars.find(gv) != srcCodeImportedVars.end()) {
+            CreateSrcImportedVarSymbol(builder, *gv, srcCodeImportedVarMap);
+        }
+    }
+}
+}
 
 void ToCHIR::ReplaceSrcCodeImportedValueWithSymbol()
 {
     std::unordered_set<Func*> toBeRemovedFuncs;
     std::unordered_set<GlobalVar*> toBeRemovedVars;
-
+    std::unordered_map<Func*, ImportedFunc*> srcCodeImportedFuncMap;
+    std::unordered_map<GlobalVar*, ImportedVar*> srcCodeImportedVarMap;
+    CreateSrcImpotedValueSymbol(
+        srcCodeImportedFuncs, srcCodeImportedVars, builder, srcCodeImportedFuncMap, srcCodeImportedVarMap);
     for (auto lambda : uselessLambda) {
         for (auto user : lambda->GetUsers()) {
             user->RemoveSelfFromBlock();
@@ -692,6 +727,9 @@ void ToCHIR::ReplaceSrcCodeImportedValueWithSymbol()
     for (auto& it : srcCodeImportedFuncMap) {
         auto funcWithBody = it.first;
         auto importedSymbol = it.second;
+        // Attributes may be added in the chir phase. For example, 'final' is added when a virtual table is created. In
+        // this case, you need to append the attributes again.
+        importedSymbol->AppendAttributeInfo(funcWithBody->GetAttributeInfo());
         for (auto user : funcWithBody->GetUsers()) {
             user->ReplaceOperand(funcWithBody, importedSymbol);
         }
@@ -707,6 +745,9 @@ void ToCHIR::ReplaceSrcCodeImportedValueWithSymbol()
     for (auto& it : srcCodeImportedVarMap) {
         auto varWithInit = it.first;
         auto importedSymbol = it.second;
+        // Attributes may be added in the chir phase. For example, 'final' is added when a virtual table is created. In
+        // this case, you need to append the attributes again.
+        importedSymbol->AppendAttributeInfo(varWithInit->GetAttributeInfo());
         if (auto initFunc = varWithInit->GetInitFunc()) {
             for (auto user : initFunc->GetUsers()) {
                 user->RemoveSelfFromBlock();
@@ -752,19 +793,12 @@ void ToCHIR::ReplaceSrcCodeImportedValueWithSymbol()
 void ToCHIR::RemoveUnusedImports(bool removeSrcCodeImported)
 {
     Utils::ProfileRecorder r{"CHIR", "RemoveUnusedImports"};
-    std::unordered_set<const ImportedValue*> srcCodeImportedValue;
+
     if (removeSrcCodeImported) {
         ReplaceSrcCodeImportedValueWithSymbol();
-    } else {
-        for (auto& it : srcCodeImportedFuncMap) {
-            srcCodeImportedValue.emplace(it.second);
-        }
-        for (auto& it : srcCodeImportedVarMap) {
-            srcCodeImportedValue.emplace(it.second);
-        }
     }
-    UnusedImportRemover
-        unusedImportRemover{kind == IncreKind::INCR, srcCodeImportedValue, opts, implicitFuncs};
+    UnusedImportRemover unusedImportRemover{
+        kind == IncreKind::INCR, opts, implicitFuncs};
     unusedImportRemover.Remove(*GetPackage());
     CreateExtendDefForImportedCustomTypeDef(*GetPackage(), builder, kind == IncreKind::INCR);
     DumpCHIRDebug("RemoveUnusedImports");

@@ -17,14 +17,12 @@ Ptr<Value> Translator::Visit(const AST::LambdaExpr& lambdaExpr)
 {
     CJC_ASSERT(lambdaExpr.funcBody && lambdaExpr.funcBody->body);
     CJC_ASSERT(!lambdaExpr.mangledName.empty());
-    auto [capturedMutVars, lambdaTrans] = SetupContextForLambda(*lambdaExpr.funcBody->body);
+    auto lambdaTrans = SetupContextForLambda(*lambdaExpr.funcBody->body);
     auto funcTy = RawStaticCast<FuncType*>(TranslateType(*lambdaExpr.ty));
     // Create lambda body and parameters.
-    CJC_ASSERT(currentBlock->GetParentFunc());
-    BlockGroup* body = builder.CreateBlockGroup(*currentBlock->GetParentFunc());
+    CJC_ASSERT(currentBlock->GetTopLevelFunc());
+    BlockGroup* body = builder.CreateBlockGroup(*currentBlock->GetTopLevelFunc());
     const auto& loc = TranslateLocation(lambdaExpr);
-    auto oldCompileTimeValueMark = builder.GetCompileTimeValueMark();
-    builder.SetCompileTimeValueMark(IsCompileTimeValue());
     auto mangledName = lambdaExpr.mangledName;
     if (funcTy->IsCFunc()) {
         mangledName += CFFI_FUNC_SUFFIX;
@@ -32,8 +30,6 @@ Ptr<Value> Translator::Visit(const AST::LambdaExpr& lambdaExpr)
     // cjdb need src code name to show the stack, or core dump will occurred in some case
     auto lambda = CreateAndAppendExpression<Lambda>(loc, funcTy, funcTy, currentBlock, true, mangledName, "$lambda");
     lambda->InitBody(*body);
-    lambda->SetCapturedVars(capturedMutVars);
-    builder.SetCompileTimeValueMark(oldCompileTimeValueMark);
 
     std::vector<DebugLocation> paramLoc;
     for (auto& astParam : lambdaExpr.funcBody->paramLists[0]->params) {
@@ -56,10 +52,10 @@ Ptr<Value> Translator::Visit(const AST::LambdaExpr& lambdaExpr)
 Translator Translator::Copy() const
 {
     return {builder, chirTy, opts, gim, globalSymbolTable, localConstVars, localConstFuncs, increKind,
-        annoFactoryFuncs, maybeUnreachable};
+        annoFactoryFuncs, maybeUnreachable, isComputingAnnos, initFuncsForAnnoFactory};
 }
 
-std::pair<std::vector<Value*>, Translator> Translator::SetupContextForLambda(const AST::Block& body)
+Translator Translator::SetupContextForLambda(const AST::Block& body)
 {
     // Copy local symbols, and update symbol for let decl which needs deref before used in lambda.
     Translator trans = Copy();
@@ -73,29 +69,18 @@ std::pair<std::vector<Value*>, Translator> Translator::SetupContextForLambda(con
         return AST::VisitAction::WALK_CHILDREN;
     }).Walk();
     std::vector<std::pair<const Cangjie::AST::Node*, Value*>> capturedSymbol;
-    std::unordered_set<Value*> usedCapturedMutVars;
     for (auto [node, symbol] : localValSymbolTable.GetALL()) {
-        // 1. Non-variable decl just captured as it self.
-        // 2. Mutable variable should be captured as reference.
         if (node->astKind != AST::ASTKind::VAR_DECL) {
             trans.SetSymbolTable(*node, *symbol);
-            if (auto var = DynamicCast<LocalVar*>(symbol);
-                var && Is<Lambda>(var->GetExpr()) && usedCapturedDecls.count(node) != 0) {
-                auto& transitivelyCaptured = StaticCast<Lambda>(var->GetExpr())->GetCapturedVars();
-                usedCapturedMutVars.insert(transitivelyCaptured.cbegin(), transitivelyCaptured.cend());
-            }
             continue;
         }
         auto vd = DynamicCast<AST::VarDecl>(node);
         if (!vd->TestAttr(AST::Attribute::IS_CAPTURE) || vd->isVar) {
             trans.SetSymbolTable(*node, *symbol);
-            if (usedCapturedDecls.find(vd) != usedCapturedDecls.end() && vd->isVar) {
-                usedCapturedMutVars.emplace(symbol);
-            }
             continue;
         }
         // Ignore local variables which is not used in current funcBody.
-        if (usedCapturedDecls.count(vd) == 0) {
+        if (usedCapturedDecls.count(node) == 0) {
             continue;
         }
         capturedSymbol.emplace_back(node, symbol);
@@ -110,7 +95,7 @@ std::pair<std::vector<Value*>, Translator> Translator::SetupContextForLambda(con
     trans.currentBlock = currentBlock;
     // Copy 'exprValueTable' for desugared mapping expressions' value.
     trans.exprValueTable = exprValueTable;
-    return {Utils::SetToVec<Value*>(usedCapturedMutVars), trans};
+    return trans;
 }
 
 Ptr<Value> Translator::TranslateLambdaBody(

@@ -14,7 +14,7 @@
 #define CANGJIE_CHIR_CHIRBUILDER_H
 
 #include "cangjie/CHIR/CHIRContext.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
@@ -185,14 +185,10 @@ public:
     {
         TExpr* expr = new TExpr(std::forward<Args>(args)...);
         this->allocatedExprs.push_back(expr);
-        CJC_NULLPTR_CHECK(expr->GetParentFunc());
-        std::string idStr = "%" + std::to_string(expr->GetParentFunc()->GenerateLocalId());
+        CJC_NULLPTR_CHECK(expr->GetTopLevelFunc());
+        std::string idStr = "%" + std::to_string(expr->GetTopLevelFunc()->GenerateLocalId());
         LocalVar* res = new LocalVar(resultTy, idStr, expr);
         this->allocatedValues.push_back(res);
-        if (markAsCompileTimeValue) {
-            expr->SetCompileTimeValue();
-            res->EnableAttr(Attribute::CONST);
-        }
         return expr;
     }
 
@@ -220,9 +216,6 @@ public:
         static_assert(std::is_base_of_v<Terminator, TExpr>);
         TExpr* expr = new TExpr(std::forward<Args>(args)...);
         this->allocatedExprs.push_back(expr);
-        if (markAsCompileTimeValue) {
-            expr->SetCompileTimeValue();
-        }
         return expr;
     }
 
@@ -249,14 +242,10 @@ public:
         TLitVal* litVal = CreateLiteralValue<TLitVal>(resultTy, std::forward<Args>(args)...);
         Constant* expr = new Constant(litVal, parentBlock);
         this->allocatedExprs.push_back(expr);
-        CJC_NULLPTR_CHECK(parentBlock->GetParentFunc());
-        std::string idStr = "%" + std::to_string(parentBlock->GetParentFunc()->GenerateLocalId());
+        CJC_NULLPTR_CHECK(parentBlock->GetTopLevelFunc());
+        std::string idStr = "%" + std::to_string(parentBlock->GetTopLevelFunc()->GenerateLocalId());
         LocalVar* res = new LocalVar(resultTy, idStr, expr);
         this->allocatedValues.push_back(res);
-        if (markAsCompileTimeValue) {
-            expr->SetCompileTimeValue();
-            res->EnableAttr(Attribute::CONST);
-        }
         return expr;
     }
 
@@ -376,11 +365,16 @@ public:
     std::unordered_set<CustomType*> GetAllCustomTypes() const;
     std::unordered_set<GenericType*> GetAllGenericTypes() const;
 
+    void EnableIRCheckerAfterPlugin();
+    void DisableIRCheckerAfterPlugin();
+    bool IsEnableIRCheckerAfterPlugin() const;
+
 private:
     CHIRContext& context;
 
     // A flag indicate if the created CHIR value/expression should be marked as compile time value for const evaluation
     bool markAsCompileTimeValue = false;
+    bool enableIRCheckerAfterPlugin = true;
     size_t threadIdx;
     std::vector<Expression*> allocatedExprs;
     std::vector<Value*> allocatedValues;

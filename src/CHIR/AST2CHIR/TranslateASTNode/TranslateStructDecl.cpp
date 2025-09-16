@@ -19,7 +19,7 @@ Ptr<Value> Translator::Visit(const AST::StructDecl& decl)
     auto structDef = StaticCast<StructDef*>(def.get());
 
     // step 1: set annotation info
-    CreateAnnotationInfo<StructDef>(decl, *structDef, *structDef);
+    CreateAnnotationInfo<StructDef>(decl, *structDef, structDef);
 
     // step 2: set type
     auto chirType = StaticCast<StructType*>(chirTy.TranslateType(*decl.ty));

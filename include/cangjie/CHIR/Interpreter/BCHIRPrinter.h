@@ -39,47 +39,6 @@ public:
     static std::fstream GetBCHIROutputFile(
         const GlobalOptions& options, const std::string& fullPackageName, const std::string& stageName);
 
-    /**
-     * @brief DemangleName string in a more human readable format
-     * i.e. _CN11std.FS$core9Exception6<init>ERN11std.FS$core6StringE
-     *      std.core.Exception.init.std.core.String()
-     **/
-    static std::pair<std::string, std::string> DemangleName(const std::string& mangled)
-    {
-        const std::regex start("^_CN(\\d+)");
-        const std::regex erCn("(ER)+_CN(\\d+)");
-        const std::regex ecCn("(EC)+_CN(\\d+)");
-        const std::regex end("H(v)*$");
-        const std::regex rt("rt\\$");
-        const std::regex std("std\\$");
-        const std::regex fs("\\$");
-        const std::regex cn("_CN(\\d+)");
-        const std::regex inER(".initER");
-        const std::regex initName("<init>");
-        const std::regex mainName("<main>");
-        auto ret = std::string(std::regex_replace(mangled, start, ""));
-        ret = std::string(std::regex_replace(ret, initName, "init"));
-        ret = std::string(std::regex_replace(ret, mainName, "main"));
-        ret = std::string(std::regex_replace(ret, erCn, "."));
-        ret = std::string(std::regex_replace(ret, ecCn, "."));
-        ret = std::string(std::regex_replace(ret, end, ""));
-        const std::regex num("(\\w)\\d+(?=\\w)");
-        ret = std::string(std::regex_replace(ret, fs, "."));
-        ret = std::string(std::regex_replace(ret, rt, "rt."));
-        ret = std::string(std::regex_replace(ret, std, "std."));
-        ret = std::string(std::regex_replace(ret, cn, ""));
-        ret = std::string(std::regex_replace(ret, inER, ".init."));
-        ret = std::string(std::regex_replace(ret, num, "$1."));
-        std::size_t found = ret.find_first_of(".");
-        std::string className = "default";
-        std::string methodName = ret;
-        if (found != std::string::npos) {
-            className = ret.substr(0, found);
-            methodName = ret.substr(found + 1, ret.size() - 1) + "()";
-        }
-        return std::make_pair(className, methodName);
-    }
-
 private:
     std::ostream& os;
     const Bchir& bchir;
@@ -105,9 +64,7 @@ private:
         void PrintOPBinRshift(OpCode opCode);
         void PrintOPTypeCast();
         void PrintPath();
-        void PrintOPSyscall();
         void PrintOPIntrinsic(OpCode opCode);
-        void PrintOPCApply();
         // PrintOpCode advances index
         void PrintOpCode();
         void PrintAtIndex();

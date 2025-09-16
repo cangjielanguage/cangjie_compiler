@@ -80,10 +80,9 @@ public:
     /**
      * @brief may be init analysis constructor.
      * @param func function to analyse.
-     * @param isDebug flag whether print debug log.
      * @param ctorInitInfo extra info for init function check.
      */
-    MaybeInitAnalysis(const Func* func, bool isDebug, const ConstructorInitInfo* ctorInitInfo);
+    MaybeInitAnalysis(const Func* func, const ConstructorInitInfo* ctorInitInfo);
 
     /// may be init analysis destructor.
     ~MaybeInitAnalysis() final

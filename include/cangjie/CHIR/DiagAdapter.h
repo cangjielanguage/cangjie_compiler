@@ -37,14 +37,9 @@ public:
     {
         auto key = static_cast<uint64_t>(pos.Hash64());
         auto it = posRange2MacroCallMap.lower_bound(key);
-        if (it == posRange2MacroCallMap.end() || !it->second) {
-            // means the range's begin is not from macro expanded node
-            return diag.DiagnoseRefactor(kind, pos, std::forward<Args>(args)...);
-        }
-        AST::Node node;
-        node.EnableAttr(AST::Attribute::MACRO_EXPANDED_NODE);
-        node.curMacroCall = it->second;
-        return diag.DiagnoseRefactor(kind, node, pos, std::forward<Args>(args)...);
+        CJC_ASSERT(it == posRange2MacroCallMap.end() || !it->second);
+        // means the range's begin is not from macro expanded node
+        return diag.DiagnoseRefactor(kind, pos, std::forward<Args>(args)...);
     }
 
     template <typename... Args> DiagnosticBuilder Diagnose(DiagKind kind, Args&&... args)

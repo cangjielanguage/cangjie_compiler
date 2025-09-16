@@ -132,32 +132,6 @@ std::string ToBase62(uint64_t value)
 } // namespace
 
 namespace Cangjie::MangleUtils {
-/**
- * @brief From content with target to get constraint type string.
- * Such as : target is "T", content is "<T,E> where T <: xxx, E <: bbb", result is "xxx".
- */
-std::string GetGenericTyConstraintStr(const std::string& target, const std::string& content)
-{
-    if (target.empty() || content.empty()) {
-        return "";
-    }
-    if (content.find(target) == std::string::npos) {
-        return "";
-    }
-    // The "<:" is the agreement format string for constraints content.
-    std::string flagStr = " <:";
-    auto startIndex = content.find(target + flagStr);
-    if (startIndex == std::string::npos) {
-        return "";
-    }
-    std::string restContent = content.substr(startIndex + target.size() + flagStr.size(), content.size());
-    auto endIndex = restContent.find_first_of(',');
-    endIndex = endIndex != std::string::npos ? endIndex : restContent.size();
-    std::string ret = restContent.substr(0, endIndex);
-    ret.erase(std::remove(ret.begin(), ret.end(), ' '), ret.end());
-    return ret;
-}
-
 std::string MangleFilePrivate(const AST::Decl& decl)
 {
     const size_t cjExtLen = 3;
@@ -248,13 +222,19 @@ std::string BaseMangler::MangleUserDefinedType(const AST::Ty& ty, std::vector<st
     auto mangledName = GetPrefixOfType(ty) + MANGLE_NESTED_PREFIX;
     std::string genericPkgName = ManglePackageNameForGeneric(*decl);
     mangledName += genericPkgName.empty() ? MangleFullPackageName(*decl) : genericPkgName;
+    if (decl->TestAttr(Attribute::PRIVATE) && decl->linkage == Linkage::INTERNAL) {
+        std::string fileName = decl->curFile->fileName;
+        mangledName += MANGLE_FILE_ID_PREFIX +
+            (IsHashable(fileName) ? HashToBase62(fileName)
+                                  : (FileNameWithoutExtension(fileName) + MANGLE_DOLLAR_PREFIX));
+    }
     mangledName += MangleUtils::MangleName(decl->identifier);
-        if (decl->GetGeneric()) {
-            mangledName += MANGLE_GENERIC_PREFIX;
-        }
-        for (auto arg : ty.typeArgs) {
-            mangledName += MangleType(*arg, genericsTypeStack, declare, isCollectGTy);
-        }
+    if (decl->GetGeneric()) {
+        mangledName += MANGLE_GENERIC_PREFIX;
+    }
+    for (auto arg : ty.typeArgs) {
+        mangledName += MangleType(*arg, genericsTypeStack, declare, isCollectGTy);
+    }
     mangledName += MANGLE_SUFFIX;
     return mangledName;
 }
@@ -466,30 +446,6 @@ std::string BaseMangler::MangleVarWithPatternDecl(
     mangleStr += MangleUtils::DecimalToManglingNumber(std::to_string(index.value()));
     mangleStr += MANGLE_SUFFIX;
     return mangleStr;
-}
-
-std::string BaseMangler::GetConcreteNameForPattern(const AST::VarWithPatternDecl& vwpDecl) const
-{
-    std::vector<Ptr<AST::Pattern>> subPatterns = FlattenVarWithPatternDecl(vwpDecl);
-    bool onlyWildcardPattern = true;
-    std::string subName;
-    for (auto subPattern : subPatterns) {
-        if (subPattern->astKind == AST::ASTKind::VAR_PATTERN) {
-            subName += ":" + StaticCast<const AST::VarPattern*>(subPattern)->varDecl->identifier;
-            onlyWildcardPattern = false;
-        } else if (subPattern->astKind == AST::ASTKind::WILDCARD_PATTERN) {
-            subName += ":_";
-        } else {
-            CJC_ABORT();
-        }
-    }
-    if (onlyWildcardPattern) {
-        subName = MANGLE_WILDCARD_PREFIX + MangleUtils::MangleName(vwpDecl.curFile->fileName) +
-            std::to_string(NextWildcard(vwpDecl.curFile->fileName));
-    }
-
-    auto pos = vwpDecl.GetBegin();
-    return std::to_string(pos.line) + MANGLE_WILDCARD_PREFIX + std::to_string(pos.column) + subName;
 }
 
 std::optional<std::string> BaseMangler::MangleEntryFunction(const FuncDecl& funcDecl) const
@@ -743,7 +699,6 @@ std::string BaseMangler::ManglePrefix(const Node& node, const std::vector<Ptr<No
                 auto mangleCtx = manglerCtxTable.at(pkgName);
                 CJC_NULLPTR_CHECK(mangleCtx.get());
                 std::optional<size_t> index = mangleCtx->GetIndexOfLambda(outerNode, &lambda);
-                CJC_ASSERT(index.has_value() && "index of lambda has no value.");
                 mangled += MANGLE_LAMBDA_PREFIX + MangleUtils::DecimalToManglingNumber(std::to_string(index.value()));
                 break;
             }
@@ -924,7 +879,6 @@ std::string BaseMangler::MangleLambda(const LambdaExpr& lambda, const::std::vect
     auto mangleCtx = manglerCtxTable.at(pkgName);
     CJC_NULLPTR_CHECK(mangleCtx.get());
     std::optional<size_t> index = mangleCtx->GetIndexOfLambda(outerNode, &lambda);
-    CJC_ASSERT(index.has_value() && "index of lambda has no value.");
     std::string mangleStr = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX;
     std::vector<std::string> genericsTypeStack;
     mangleStr += ManglePrefix(lambda, prefix, genericsTypeStack, true);
@@ -1480,6 +1434,12 @@ std::optional<size_t> ManglerContext::GetIndexOfLambda(
         }
         return {};
     };
-    std::optional<size_t> lambdaIdx = getIndex(foundFunc);
-    return lambdaIdx.has_value() ? lambdaIdx : (getIndex(foundArrayLit).value() + foundFunc->second.size());
+    std::optional<size_t> funcIdx = getIndex(foundFunc);
+    if (funcIdx.has_value()) {
+        return funcIdx;
+    }
+    std::optional<size_t> arrayIdx = getIndex(foundArrayLit);
+    CJC_ASSERT(arrayIdx.has_value() && "index of lambda has no value.");
+    size_t offset = foundFunc != node2Lambda.end() ? foundFunc->second.size() : 0;
+    return arrayIdx.value() + offset;
 }

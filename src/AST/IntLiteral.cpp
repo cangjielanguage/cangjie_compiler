@@ -18,6 +18,7 @@
 #include <stdexcept>
 
 #include "cangjie/AST/ASTCasting.h"
+#include "cangjie/Utils/StdUtils.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -123,14 +124,8 @@ static int ParseByteIntLitString(const std::string& val)
             return -1;
         }
         std::string digits = val.substr(lCurlPos + 1, (rCurlPos - lCurlPos) - 1);
-        try {
-            const int hexBase = 16;
-            return std::stoi(digits, nullptr, hexBase);
-        } catch (const std::invalid_argument& e) {
-            return -1;
-        } catch (const std::out_of_range& e) {
-            return -1;
-        }
+        const int hexBase = 16;
+        return Stoi(digits, hexBase).value_or(-1);
     }
     return -1;
 }
@@ -199,16 +194,16 @@ void IntLiteral::InitIntLiteral(const std::string& stringVal, const TypeKind kin
         }
         uint64Val = static_cast<uint64_t>(int64Val);
     } else {
-        try {
-            uint64Val = std::stoull(stringValue, nullptr, base);
-        } catch (...) {
+        if (auto ul = Stoull(stringValue, base)) {
+            uint64Val = *ul;
+        } else {
             uint64Val = 0;
             outOfUintRange = true;
         }
 
-        try {
-            int64Val = std::stoll(stringValue, nullptr, base);
-        } catch (...) {
+        if (auto il = Stoll(stringValue, base)) {
+            int64Val = *il;
+        } else {
             int64Val = 0;
             outOfIntRange = true;
         }

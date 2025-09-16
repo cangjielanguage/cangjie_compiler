@@ -64,13 +64,24 @@ std::string BoolToSerializedString(bool val)
 }
 
 const std::unordered_map<ArchType, std::string> ARCH_STRING_MAP = {
-    {ArchType::X86_64, "x86_64"}, {ArchType::AARCH64, "aarch64"}, {ArchType::UNKNOWN, "unknown"}};
+    {ArchType::X86_64, "x86_64"},
+    {ArchType::AARCH64, "aarch64"},
+    {ArchType::UNKNOWN, "unknown"},
+};
 
-const std::unordered_map<OSType, std::string> OS_STRING_MAP = {{OSType::WINDOWS, "windows"}, {OSType::WINDOWS, "w64"},
-    {OSType::LINUX, "linux"}, {OSType::DARWIN, "darwin"}, {OSType::UNKNOWN, "unknown"}};
+const std::unordered_map<OSType, std::string> OS_STRING_MAP = {
+    {OSType::WINDOWS, "windows"},
+    {OSType::WINDOWS, "w64"},
+    {OSType::LINUX, "linux"},
+    {OSType::DARWIN, "darwin"},
+    {OSType::UNKNOWN, "unknown"},
+};
 
 const std::unordered_map<Vendor, std::string> VENDOR_STRING_MAP = {
-    {Vendor::PC, "pc"}, {Vendor::APPLE, "apple"}, {Vendor::UNKNOWN, "unknown"}};
+    {Vendor::PC, "pc"},
+    {Vendor::APPLE, "apple"},
+    {Vendor::UNKNOWN, "unknown"},
+};
 
 template <typename... Args>
 inline void RaiseArgumentUnusedMessage(DiagnosticEngine& diag, DiagKindRefactor diagKind, const Args... args)
@@ -222,7 +233,6 @@ bool GlobalOptions::PerformPostActions()
     success = success && CheckCompileMacro();
     success = success && ReprocessCoverageOptions();
     success = success && CheckScanDependencyOptions();
-    success = success && ReprocessLinkOptions();
     success = success && CheckSanitizerOptions();
     success = success && CheckLtoOptions();
     success = success && CheckPgoOptions();
@@ -428,36 +438,6 @@ bool GlobalOptions::CheckScanDependencyOptions() const
     return true;
 }
 
-bool GlobalOptions::ReprocessLinkOptions()
-{
-    bool notOutputDylib = outputMode != GlobalOptions::OutputMode::SHARED_LIB;
-    if (linkStaticStd.value_or(notOutputDylib) == linkStaticLibs.value_or(notOutputDylib)) {
-        return true;
-    }
-    if (linkStaticStd == false && linkStaticLibs == std::nullopt) {
-        linkStaticLibs = false;
-        Warningln("Link option '--dy-libs' is enabled by default.");
-        return true;
-    }
-    if (linkStaticStd == std::nullopt && linkStaticLibs == false) {
-        linkStaticStd = false;
-        Warningln("Link option '--dy-std' is enabled by default.");
-        return true;
-    }
-    if (linkStaticStd == true && linkStaticLibs == std::nullopt) {
-        linkStaticStd = true;
-        Warningln("Link option '--static-libs' is enabled by default.");
-        return true;
-    }
-    if (linkStaticStd == std::nullopt && linkStaticLibs == true) {
-        linkStaticStd = true;
-        Warningln("Link option '--static-std' is enabled by default.");
-        return true;
-    }
-    Errorln("Options '--static-std' and '--dy-libs' or '--dy-std' and '--static-libs' cannot be enabled together.");
-    return false;
-}
-
 bool GlobalOptions::CheckSanitizerOptions() const
 {
     if (!EnableSanitizer()) {
@@ -607,7 +587,7 @@ void GlobalOptions::DisableStaticStdForOhos()
     if (target.env == Triple::Environment::OHOS) {
         if (linkStaticStd.has_value() && linkStaticStd.value()) {
             DiagnosticEngine diag;
-            diag.DiagnoseRefactor(DiagKindRefactor::driver_static_std_for_ohos, DEFAULT_POSITION);
+            (void) diag.DiagnoseRefactor(DiagKindRefactor::driver_static_std_for_ohos, DEFAULT_POSITION);
         }
         linkStaticStd = false;
     }
@@ -778,8 +758,10 @@ void GlobalOptions::CollectOrderedInputFiles(ArgInstance& arg, uint64_t idx)
             OptionArgInstance& optArg = *static_cast<OptionArgInstance*>(&arg);
             if (optArg.info.GetID() == Options::ID::LIBRARY) {
                 inputLibraryOrder.push_back(std::make_tuple(optArg.value, idx));
-            } else if (optArg.info.GetID() == Options::ID::LINK_OPTIONS) {
+            } else if (optArg.info.GetID() == Options::ID::LINK_OPTION) {
                 inputLinkOptionOrder.push_back(std::make_tuple(optArg.value, idx));
+            } else if (optArg.info.GetID() == Options::ID::LINK_OPTIONS) {
+                inputLinkOptionsOrder.push_back(std::make_tuple(optArg.value, idx));
             }
             break;
         }
@@ -879,7 +861,7 @@ void GlobalOptions::DeprecatedOptionCheck(const OptionArgInstance& arg) const
 {
     // Check if the option is deprecated which will be removed in the future release
     Options::ID id = arg.info.GetID();
-    const std::unordered_set<Options::ID> deprecatedOptions{};
+    const std::unordered_set<Options::ID> deprecatedOptions{Options::ID::STATIC_LIBS, Options::ID::DY_LIBS};
     DiagnosticEngine diag;
     if (deprecatedOptions.find(id) != deprecatedOptions.end()) {
         std::string substitutableOption = "";

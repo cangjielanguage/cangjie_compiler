@@ -144,6 +144,11 @@ private:
     std::unordered_set<std::string> GetMacroDefDynamicFiles();
 
     /**
+     * Save used macros for unused import.
+     */
+    void SaveUsedMacros(MacroCall& macCall);
+
+    /**
      * Save used macro packages for init global variable.
      */
     void SaveUsedMacroPkgs(const std::string packageName);

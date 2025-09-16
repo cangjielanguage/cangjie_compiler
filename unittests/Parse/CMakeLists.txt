@@ -4,23 +4,23 @@
 #
 # See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-add_executable(ParserTests ParserTest.cpp)
+add_executable(ParserTest ParserTest.cpp)
 target_link_libraries(
-    ParserTests
+    ParserTest
     cangjie-lsp
     ${CMAKE_DL_LIBS}
     GTest::gtest
     GTest::gtest_main)
-add_test(NAME ParserTests COMMAND ParserTests)
+add_test(NAME ParserTest COMMAND ParserTest)
 
-add_executable(ParseTypeTests ParseTypeTest.cpp)
+add_executable(ParseTypeTest ParseTypeTest.cpp)
 target_link_libraries(
-    ParseTypeTests
+    ParseTypeTest
     cangjie-lsp
     ${CMAKE_DL_LIBS}
     GTest::gtest
     GTest::gtest_main)
-add_test(NAME ParseTypeTests COMMAND ParseTypeTests)
+add_test(NAME ParseTypeTest COMMAND ParseTypeTest)
 
 add_executable(ParseTypeAliasTest ParseTypeAliasTest.cpp)
 target_link_libraries(

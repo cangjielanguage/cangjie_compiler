@@ -597,9 +597,6 @@ Ptr<Value> Translator::HandleTypePattern(const AST::TypePattern& typePattern, Pt
         // When pattern is always matched, do not return condition value.
         return nullptr;
     }
-    if (typePattern.desugarVarPattern) {
-        return HandleUnboxTypePattern(typePattern, value, queue);
-    }
     auto targetTy = TranslateType(*typePattern.type->ty);
     queue.push(std::make_pair(typePattern.pattern.get(), value));
     if (typePattern.needRuntimeTypeCheck) {
@@ -609,126 +606,6 @@ Ptr<Value> Translator::HandleTypePattern(const AST::TypePattern& typePattern, Pt
         auto expr = CreateAndAppendConstantExpression<BoolLiteral>(builder.GetBoolTy(), *currentBlock, false);
         return expr->GetResult();
     }
-}
-
-namespace {
-Ptr<AST::ClassTy> GetBaseBoxedTypeBeforeObject(Ptr<AST::ClassTy> classTy)
-{
-    auto baseTy = classTy;
-    auto superTy = baseTy->GetSuperClassTy();
-    while (superTy != nullptr && !superTy->IsObject()) {
-        baseTy = superTy;
-        superTy = baseTy->GetSuperClassTy();
-    }
-    CJC_NULLPTR_CHECK(superTy);
-    return baseTy;
-}
-} // namespace
-
-/**
- * Generate unboxing branch for class as:
- *   val: A // if subpattern is varPattern
- *     condition: Bool
- * ========= For LLVM ==========
- *     val = intrinsic::object_as(ins, A)
- *     condition = val != nullptr
- *     goto end
- * ====== For other types ======
- *     cond = ins is Box_A
- *     br cond, t1, f1
- *  t1:
- *     condition = true
- *     val = TypeCast(ins.$value, A)
- *  goto end
- *  f2:
- *     condition = false
- *     goto end
- * =============================
- *  end:
- *     SET current Block here
- * NOTE: if the sub-pattern of typePattern is not var pattern, the 'val: A' will not be stored and used.
- */
-Ptr<Value> Translator::HandleUnboxTypePattern(const AST::TypePattern& typePattern, Ptr<Value> value,
-    std::queue<std::pair<Ptr<const AST::Pattern>, Ptr<Value>>>& queue)
-{
-    auto targetTy = TranslateType(*typePattern.type->ty);
-    // 1. Declare 'val: Type'.
-    bool hasSubVar = typePattern.pattern->astKind == AST::ASTKind::VAR_PATTERN;
-    auto endBlock = CreateBlock();
-    bool castToClass = typePattern.type->ty->IsClass();
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    if (castToClass) {
-        // 2. cast for class type.
-        auto asVal = CreateAndAppendExpression<Intrinsic>(
-            targetTy, CHIR::IntrinsicKind::OBJECT_AS, std::vector<Value*>{value}, currentBlock);
-        auto boxChirTy = TranslateType(*typePattern.desugarVarPattern->ty);
-        asVal->SetGenericTypeInfo({targetTy->GetTypeArgs()[0], boxChirTy->GetTypeArgs()[0]});
-        auto matchRes = CreateAndAppendExpression<Intrinsic>(
-            builder.GetBoolTy(), CHIR::IntrinsicKind::IS_NULL, std::vector<Value*>{asVal->GetResult()}, currentBlock);
-        if (hasSubVar) {
-            queue.push(std::make_pair(typePattern.pattern.get(), asVal->GetResult()));
-        }
-        CreateAndAppendTerminator<GoTo>(endBlock, currentBlock);
-        currentBlock = endBlock;
-        return matchRes->GetResult();
-    }
-#endif
-    Value* var = nullptr;
-    if (hasSubVar) {
-        var = CreateAndAppendExpression<Allocate>(builder.GetType<RefType>(targetTy), targetTy, currentBlock)
-                  ->GetResult();
-        // Class type alloca must have initial value.
-        auto null = CreateAndAppendConstantExpression<NullLiteral>(targetTy, *currentBlock)->GetResult();
-        CreateAndAppendExpression<Store>(builder.GetUnitTy(), null, var, currentBlock);
-    }
-    auto cond = CreateAndAppendExpression<Allocate>(
-        builder.GetType<RefType>(builder.GetBoolTy()), builder.GetBoolTy(), currentBlock)
-                    ->GetResult();
-    // Type of desugared type pattern must be classTy.
-    auto baseBoxTy = GetBaseBoxedTypeBeforeObject(StaticCast<AST::ClassTy*>(typePattern.desugarVarPattern->ty));
-    auto baseBoxChirTy = TranslateType(*baseBoxTy);
-
-    // Create branches for box matching case.
-    // 1. Create branch for 'ins is Box_A'.
-    auto boxTypeBlock = CreateBlock();
-    auto elseBlock = CreateBlock();
-    auto boxCond =
-        CreateAndAppendExpression<InstanceOf>(builder.GetBoolTy(), value, baseBoxChirTy, currentBlock)->GetResult();
-    CreateAndAppendTerminator<Branch>(boxCond, boxTypeBlock, elseBlock, currentBlock);
-    // 2. Get element value from boxed value.
-    // boxedIns.value is always the first element with index '0'.
-    currentBlock = boxTypeBlock;
-    auto fieldTy = GetFieldOfType(*baseBoxChirTy, 0, builder);
-    auto unboxedValRef = CreateAndAppendExpression<GetElementRef>(builder.GetType<RefType>(fieldTy),
-        TypeCastOrBoxIfNeeded(*value, *baseBoxChirTy, value->GetDebugLocation(), false),
-        std::vector<uint64_t>{0}, currentBlock)->GetResult();
-    auto unboxedVal = CreateAndAppendExpression<Load>(fieldTy, unboxedValRef, currentBlock)->GetResult();
-    // 3. store result to 'var' and 'cond'.
-    if (hasSubVar) {
-        CreateAndAppendExpression<Store>(
-            builder.GetUnitTy(), TypeCastOrBoxIfNeeded(*unboxedVal, *targetTy, unboxedVal->GetDebugLocation(), false),
-            var, currentBlock);
-    }
-    auto trueLit =
-        CreateAndAppendConstantExpression<BoolLiteral>(builder.GetBoolTy(), *currentBlock, true)->GetResult();
-    CreateAndAppendExpression<Store>(builder.GetUnitTy(), trueLit, cond, currentBlock);
-    CreateAndAppendTerminator<GoTo>(endBlock, currentBlock);
-
-    // Update current to 'elseBlock' for case of mismatching boxed type.
-    currentBlock = elseBlock;
-    // Create final mismatched block.
-    auto falseLit =
-        CreateAndAppendConstantExpression<BoolLiteral>(builder.GetBoolTy(), *currentBlock, false)->GetResult();
-    CreateAndAppendExpression<Store>(builder.GetUnitTy(), falseLit, cond, currentBlock);
-    CreateAndAppendTerminator<GoTo>(endBlock, currentBlock);
-    if (hasSubVar) {
-        // Store alloca 'var' result with original varPattern for next generation.
-        // NOTE: the desugared memberAccess 'var.$value' is stored on original varPttern.
-        // 'var' will only have valid content in 'trueBlock', so it must be loaded lazily
-        queue.push(std::make_pair(typePattern.pattern.get(), var));
-    }
-    currentBlock = endBlock;
-    return CreateAndAppendExpression<Load>(builder.GetBoolTy(), cond, endBlock)->GetResult();
 }
 
 void Translator::TranslateConditionMatches(const AST::MatchExpr& matchExpr, Ptr<Value> retVal)

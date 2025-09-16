@@ -21,11 +21,7 @@ public:
     UserTimer() = default;
     ~UserTimer() override
     {
-#ifdef CANGJIE_WRITE_PROFILE
-        OutputResult(OutType::JSON);
-#else
-        OutputResult(OutType::STRING);
-#endif
+        OutputResult();
     }
     static UserTimer& Instance()
     {
@@ -58,14 +54,11 @@ private:
         }
     };
     std::pair<ResultDataType, std::vector<std::string>> GetDataAndOrder() const;
-    std::string GetFlat() const override;
-#ifdef CANGJIE_WRITE_PROFILE
     std::string GetJson() const override;
     std::string GetSuffix() const final
     {
-        return ".cj.prof";
+        return ".time.prof";
     }
-#endif
     std::list<Info> infoList;
 };
 } // namespace Cangjie

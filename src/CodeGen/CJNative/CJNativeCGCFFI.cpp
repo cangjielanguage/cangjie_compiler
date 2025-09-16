@@ -95,6 +95,7 @@ CGType* GetCGType(CGModule& cgMod, const llvm::Type& llvmTy)
     return CGType::GetInt8CGType(cgMod);
 }
 
+#ifdef __APPLE__
 inline void AddAttrForIntTypeArgOnMacMx(llvm::Function& llvmFunc, const llvm::Argument& arg)
 {
     auto intType = llvm::dyn_cast<llvm::IntegerType>(arg.getType());
@@ -108,6 +109,7 @@ inline void AddAttrForIntTypeArgOnMacMx(llvm::Function& llvmFunc, const llvm::Ar
         AddParamAttr(&llvmFunc, arg.getArgNo(), llvm::Attribute::SExt);
     }
 }
+#endif
 } // namespace
 
 bool LinuxCJNativeCGCFFI::ProcessInvocation(
@@ -974,7 +976,7 @@ bool LinuxAarch64CJNativeCGCFFI::IsHomogeneousAggregate(llvm::Type& type, llvm::
     }
     return members > 0 && members <= 4; // 4 is maximum number of homogeneous aggregate's members.
 }
-
+#ifdef __APPLE__
 void MacAArch64CJNativeCGCFFI::AddFunctionAttr(const CHIR::FuncType& chirFuncTy, llvm::Function& llvmFunc)
 {
     LinuxAarch64CJNativeCGCFFI::AddFunctionAttr(chirFuncTy, llvmFunc);
@@ -1008,7 +1010,7 @@ llvm::Type* MacAArch64CJNativeCGCFFI::GetStructReturnType(CHIR::StructType& chir
     }
     return LinuxAarch64CJNativeCGCFFI::GetStructReturnType(chirTy, params);
 }
-
+#endif
 llvm::FunctionType* WindowsAmd64CJNativeCGCFFI::GetCFuncType(const CHIR::FuncType& chirFuncTy)
 {
     if (auto found = cfuncMap.find(&chirFuncTy); found != cfuncMap.end()) {

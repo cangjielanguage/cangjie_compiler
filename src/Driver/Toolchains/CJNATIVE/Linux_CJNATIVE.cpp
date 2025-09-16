@@ -72,9 +72,6 @@ void Linux_CJNATIVE::GenerateLinkingTool(const std::vector<TempFileInfo>& objFil
     if (driverOptions.IsLTOEnabled()) {
         tool->SetLdLibraryPath(FileUtil::JoinPath(FileUtil::GetDirPath(ldPath), "../lib"));
         GenerateLinkOptionsForLTO(*tool.get());
-        // The -z notext option is the default for ld, while the -z noexecstack option is the default for lld.
-        // Therefore, ld needs to explicitly pass -z noexecstack, and lld needs to explicitly pass -z notext.
-        tool->AppendArg("-z", "notext");
     } else if (driverOptions.EnableHwAsan()) {
         // same args as lto except GenerateLinkOptionsForLTO
         tool->SetLdLibraryPath(FileUtil::JoinPath(FileUtil::GetDirPath(ldPath), "../lib"));

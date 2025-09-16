@@ -8,7 +8,7 @@
 #define CANGJIE_CHIR_PRIVATE_TYPE_CONVERTER_H
 
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Type/CustomTypeDef.h"
 #include "cangjie/CHIR/Type/EnumDef.h"
@@ -66,21 +66,17 @@ public:
     virtual R VisitDef(CustomTypeDef& o, Args... args)
     {
         static Dispatcher dispatcher = InitCustomTypeDefTable();
-        if (auto func = dispatcher.find(o.GetCustomKind()); func != dispatcher.end()) {
-            return func->second(this, o, std::forward<args>...);
-        }
-        return VisitDefDefaultImpl(o, std::forward<args>...);
+        auto func = dispatcher.find(o.GetCustomKind());
+        CJC_ASSERT(func != dispatcher.end());
+        return func->second(this, o, std::forward<args>...);
     }
 
 protected:
-    virtual R VisitDefDefaultImpl([[maybe_unused]] CustomTypeDef& o, [[maybe_unused]] Args... args)
-    {
-        CJC_ABORT();
-    }
-    virtual R VisitSubDef(StructDef& o, Args... args) VISIT_IMPL_DEFAULT(Def);
-    virtual R VisitSubDef(EnumDef& o, Args... args) VISIT_IMPL_DEFAULT(Def);
-    virtual R VisitSubDef(ClassDef& o, Args... args) VISIT_IMPL_DEFAULT(Def);
-    virtual R VisitSubDef(ExtendDef& o, Args... args) VISIT_IMPL_DEFAULT(Def);
+    virtual R VisitDefDefaultImpl([[maybe_unused]] CustomTypeDef& o, [[maybe_unused]] Args... args) = 0;
+    virtual R VisitSubDef(StructDef& o, Args... args) = 0;
+    virtual R VisitSubDef(EnumDef& o, Args... args) = 0;
+    virtual R VisitSubDef(ClassDef& o, Args... args) = 0;
+    virtual R VisitSubDef(ExtendDef& o, Args... args) = 0;
 
 private:
     static Dispatcher InitCustomTypeDefTable()
@@ -107,34 +103,32 @@ public:
     virtual R VisitExpr(Expression& o, Args... args)
     {
         static Dispatcher dispatcher = InitExprVTable();
-        if (auto func = dispatcher.find(o.GetExprKind()); func != dispatcher.end()) {
-            return dispatcher.at(o.GetExprKind())(this, o, std::forward<args>...);
+        auto func = dispatcher.find(o.GetExprKind());
+        if (func != dispatcher.end()) {
+            return func->second(this, o, std::forward<args>...);
         }
         return VisitExprDefaultImpl(o, std::forward<args>...);
     }
 
 protected:
-    virtual R VisitExprDefaultImpl([[maybe_unused]] Expression& o, [[maybe_unused]] Args... args)
-    {
-        CJC_ABORT();
-    }
-    virtual R VisitSubExpression(Allocate& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(AllocateWithException& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(InstanceOf& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(RawArrayAllocate& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(RawArrayAllocateWithException& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(Apply& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(ApplyWithException& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(Invoke& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(InvokeWithException& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(InvokeStatic& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(InvokeStaticWithException& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(Constant& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(Intrinsic& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(IntrinsicWithException& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(GetInstantiateValue& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(Lambda& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
-    virtual R VisitSubExpression(GetRTTIStatic& o, Args... args) VISIT_IMPL_DEFAULT(Expr);
+    virtual R VisitExprDefaultImpl([[maybe_unused]] Expression& o, [[maybe_unused]] Args... args) = 0;
+    virtual R VisitSubExpression(Allocate& o, Args... args) = 0;
+    virtual R VisitSubExpression(AllocateWithException& o, Args... args) = 0;
+    virtual R VisitSubExpression(InstanceOf& o, Args... args) = 0;
+    virtual R VisitSubExpression(RawArrayAllocate& o, Args... args) = 0;
+    virtual R VisitSubExpression(RawArrayAllocateWithException& o, Args... args) = 0;
+    virtual R VisitSubExpression(Apply& o, Args... args) = 0;
+    virtual R VisitSubExpression(ApplyWithException& o, Args... args) = 0;
+    virtual R VisitSubExpression(Invoke& o, Args... args) = 0;
+    virtual R VisitSubExpression(InvokeWithException& o, Args... args) = 0;
+    virtual R VisitSubExpression(InvokeStatic& o, Args... args) = 0;
+    virtual R VisitSubExpression(InvokeStaticWithException& o, Args... args) = 0;
+    virtual R VisitSubExpression(Constant& o, Args... args) = 0;
+    virtual R VisitSubExpression(Intrinsic& o, Args... args) = 0;
+    virtual R VisitSubExpression(IntrinsicWithException& o, Args... args) = 0;
+    virtual R VisitSubExpression(GetInstantiateValue& o, Args... args) = 0;
+    virtual R VisitSubExpression(Lambda& o, Args... args) = 0;
+    virtual R VisitSubExpression(GetRTTIStatic& o, Args... args) = 0;
 
 private:
     static Dispatcher InitExprVTable()
@@ -270,11 +264,11 @@ public:
     }
 
 protected:
-    void VisitDefDefaultImpl(CustomTypeDef& o) override;
-    void VisitSubDef(StructDef& o) override;
-    void VisitSubDef(EnumDef& o) override;
-    void VisitSubDef(ClassDef& o) override;
-    void VisitSubDef(ExtendDef& o) override;
+    void VisitDefDefaultImpl(CustomTypeDef& o) final;
+    void VisitSubDef(StructDef& o) final;
+    void VisitSubDef(EnumDef& o) final;
+    void VisitSubDef(ClassDef& o) final;
+    void VisitSubDef(ExtendDef& o) final;
 };
 
 class PrivateTypeConverter : public ExprTypeConverter, public ValueTypeConverter {

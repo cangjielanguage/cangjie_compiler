@@ -99,7 +99,7 @@ public:
     OwnedPtr<AST::Type> ParseType();
     OwnedPtr<AST::Pattern> ParsePattern();
     /// Parse annotation arguments from unprocessed tokens, and put them into \ref anno
-    /// Used by lsp.
+    /// Used by fmt.
     void ParseAnnotationArguments(AST::Annotation& anno) const;
     OwnedPtr<AST::Annotation> ParseCustomAnnotation() const;
     // Macro.
@@ -109,6 +109,9 @@ public:
     Parser& EnableCustomAnno();
     std::size_t GetProcessedTokens() const;
     std::string GetPrimaryDeclIdentRawValue() const;
+
+    Parser& SetEHEnabled(bool enabled);
+    bool IsEHEnabled() const;
 
     Parser& SetModuleName(const std::string& name);
     Parser& SetPrimaryDecl(const std::string& decl);

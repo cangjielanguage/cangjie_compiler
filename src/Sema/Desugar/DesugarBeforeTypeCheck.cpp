@@ -410,6 +410,7 @@ void DesugarMainDecl(MainDecl& mainDecl)
     funcDecl->funcBody = std::move(mainDecl.funcBody);
     funcDecl->end = funcDecl->funcBody->end;
     funcDecl->toBeCompiled = mainDecl.toBeCompiled;
+    funcDecl->comments = std::move(mainDecl.comments);
     funcDecl->rawMangleName = std::move(mainDecl.rawMangleName);
     funcDecl->hash = mainDecl.hash;
     funcDecl->EnableAttr(Attribute::MAIN_ENTRY);
@@ -460,17 +461,63 @@ void DesugarTrailingClosureExpr(TrailingClosureExpr& trailingClosure)
     }
 }
 
-/// @IfAvailable(namedArg, lambda1, lambda2) is parsed as a MacroExpandExpr and desguared into an IfAvailableExpr here
-[[maybe_unused]] void DesugarIfAvailableExpr(MacroExpandExpr& expr)
+const std::string LEVEL_IDENTGIFIER = "level";
+const std::string SYSCAP_IDENTGIFIER = "syscap";
+// For level check:
+const std::string DEVICE_INFO = "DeviceInfo";
+const std::string SDK_API_VERSION = "sdkApiVersion";
+// For syscap check:
+const std::string CANIUSE_IDENTIFIER = "canIUse";
+
+// Before desugar: `@IfAvaliable(level: 11, {=>...}, {=>...})`
+// Desugar as: `if (DeviceInfo.sdkApiVersion >= 11) {...} else {...}`
+OwnedPtr<Expr> DesugarIfAvailableLevelCondition(IfAvailableExpr& iae)
 {
-    if (!expr.invocation.IsIfAvailable()) {
+    auto me = CreateMemberAccess(CreateRefExpr(SrcIdentifier(DEVICE_INFO)), SDK_API_VERSION);
+    auto condition = CreateBinaryExpr(std::move(me), std::move(iae.GetArg()->expr), TokenKind::GE);
+    AddCurFile(*condition, iae.curFile);
+    CopyBasicInfo(&iae, condition.get());
+    return std::move(condition);
+}
+
+// Before desugar: `@IfAvaliable(syscap: "xxx", {=>...}, {=>...})`
+// Desugar as: `if (canIUse("xxx")) {...} else {...}`
+OwnedPtr<Expr> DesugarIfAvailableSyscapCondition(IfAvailableExpr& iae)
+{
+    auto canIUseRef = CreateRefExpr(SrcIdentifier(CANIUSE_IDENTIFIER));
+    std::vector<OwnedPtr<FuncArg>> argList;
+    argList.emplace_back(CreateFuncArg(std::move(iae.GetArg()->expr)));
+    auto condition = CreateCallExpr(CreateRefExpr(SrcIdentifier(CANIUSE_IDENTIFIER)), std::move(argList));
+    AddCurFile(*condition, iae.curFile);
+    CopyBasicInfo(&iae, condition.get());
+    return std::move(condition);
+}
+
+OwnedPtr<Expr> DesugarIfAvailableCondition(IfAvailableExpr& iae)
+{
+    if (iae.GetArg()->name == LEVEL_IDENTGIFIER) {
+        return DesugarIfAvailableLevelCondition(iae);
+    } else if (iae.GetArg()->name == SYSCAP_IDENTGIFIER) {
+        return DesugarIfAvailableSyscapCondition(iae);
+    } else {
+        return MakeOwned<InvalidExpr>();
+    }
+}
+
+/// @IfAvailable(namedArg, lambda1, lambda2) is parsed as a MacroExpandExpr and desguared into an IfAvailableExpr here
+void DesugarIfAvailableExpr(IfAvailableExpr& iae)
+{
+    if (iae.desugarExpr) {
         return;
     }
-    auto [arg, lam1, lam2] = expr.Decompose();
-    auto de = new IfAvailableExpr{std::move(arg), std::move(lam1), std::move(lam2)};
-    de->begin = expr.begin;
-    de->end = expr.end;
-    expr.desugarExpr = OwnedPtr<Expr>(de);
+    // Create condition.
+    OwnedPtr<Expr> condition = DesugarIfAvailableCondition(iae);
+    auto ifBlock = ASTCloner::Clone(iae.GetLambda1()->funcBody->body.get());
+    auto elseBlock = ASTCloner::Clone(iae.GetLambda2()->funcBody->body.get());
+    auto ifExpr = CreateIfExpr(std::move(condition), std::move(ifBlock), std::move(elseBlock), iae.ty);
+    ifExpr->sourceExpr = &iae;
+    CopyBasicInfo(&iae, ifExpr);
+    iae.desugarExpr = std::move(ifExpr);
 }
 
 struct VisitContext {
@@ -561,9 +608,21 @@ struct DiscardedHelper {
         };
 
         auto unitifyTry = [&unitifyBlock](TryExpr& te) {
-            unitifyBlock(*(te.tryBlock));
+            if (te.tryLambda) {
+                unitifyBlock(*(te.tryLambda->funcBody->body));
+            } else {
+                unitifyBlock(*(te.tryBlock));
+            }
             for (auto& cb : te.catchBlocks) {
                 unitifyBlock(*cb);
+            }
+
+            for (auto& h : te.handlers) {
+                if (h.desugaredLambda) {
+                    unitifyBlock(*h.desugaredLambda->funcBody->body);
+                }
+                CJC_NULLPTR_CHECK(h.block);
+                unitifyBlock(*h.block);
             }
         };
 
@@ -694,6 +753,8 @@ void PerformDesugarBeforeTypeCheck(Node& root, bool desugarMacrocall)
             DesugarIncOrDecExpr(StaticCast<IncOrDecExpr&>(*node));
         } else if (node->astKind == ASTKind::ASSIGN_EXPR) {
             DesugarAssignExpr(*StaticAs<ASTKind::ASSIGN_EXPR>(node));
+        } else if (node->astKind == ASTKind::IF_AVAILABLE_EXPR) {
+            DesugarIfAvailableExpr(*StaticAs<ASTKind::IF_AVAILABLE_EXPR>(node));
         }
         if (dHelper.IsNodeDiscarded(*node)) {
             dHelper.PushCtxt(true, node);

@@ -4,12 +4,12 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "gtest/gtest.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/Basic/SourceManager.h"
 #include "cangjie/FrontendTool/DefaultCompilerInstance.h"
 #include "cangjie/Utils/FileUtil.h"
-#include "gtest/gtest.h"
 
 #include <memory>
 #include <string>

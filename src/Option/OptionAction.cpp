@@ -92,6 +92,10 @@ const std::unordered_map<std::string, uint8_t> DUMP_CHIR_MODE_MAP = {
     {"all", uint8_t(GlobalOptions::CHIRMode::ALL)},
 };
 
+const std::unordered_map<std::string, GlobalOptions::CandidateEmitCHIRPhase> EMIT_CHIR_PHASE_MAP = {
+    {"raw", GlobalOptions::CandidateEmitCHIRPhase::RAW},
+    {"opt", GlobalOptions::CandidateEmitCHIRPhase::OPT}};
+
 const std::unordered_map<std::string, uint8_t> PRINT_BCHIR_MODE_MAP = {
     {"deserialized", uint8_t(GlobalOptions::PrintBCHIROption::DESERIALIED)},
     {"linked", uint8_t(GlobalOptions::PrintBCHIROption::LINKED)},
@@ -116,6 +120,8 @@ bool SeeingTomlComment(const std::string inputLine)
         }
         if (c != '#') {
             return false;
+        } else {
+            return true;
         }
     }
     return true;
@@ -526,8 +532,8 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
     }},
     { Options::ID::STATIC_STD, OPTION_TRUE_ACTION(opts.linkStaticStd = true) },
     { Options::ID::DY_STD, OPTION_TRUE_ACTION(opts.linkStaticStd = false) },
-    { Options::ID::STATIC_LIBS, OPTION_TRUE_ACTION(opts.linkStaticLibs = true) },
-    { Options::ID::DY_LIBS, OPTION_TRUE_ACTION(opts.linkStaticLibs = false) },
+    { Options::ID::STATIC_LIBS, OPTION_TRUE_ACTION((void)opts) },
+    { Options::ID::DY_LIBS, OPTION_TRUE_ACTION((void)opts) },
     { Options::ID::LTO,  [](GlobalOptions& opts, const OptionArgInstance& arg) {
         if (LTO_MODE_MAP.count(arg.value) == 0) {
             return false;
@@ -551,14 +557,17 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     { Options::ID::PLUGIN_PATH, [](GlobalOptions& opts, const OptionArgInstance& arg) {
          auto maybePath = opts.CheckInputFilePath(arg.value);
+         auto suffix = GlobalOptions::GetSharedLibraryExtension(opts.host.os);
          if (maybePath.has_value()) {
              auto path = maybePath.value();
-             if ('.' + FileUtil::GetFileExtension(path) == GlobalOptions::GetSharedLibraryExtension(opts.target.os)) {
+             if ('.' + FileUtil::GetFileExtension(path) == suffix) {
                  opts.pluginPaths.emplace_back(maybePath.value());
                  return true;
              }
+             Errorf("'%s' requires a dynamic library path with '%s' suffix.\n", arg.name.c_str(), suffix.c_str());
+             return false;
          }
-         Errorf("'%s' requires a valid dynamic library path.\n", arg.name.c_str());
+         Errorf("'%s' only accepts an existing dynamic library path.\n", arg.name.c_str());
          return false;
      }},
 #endif
@@ -726,7 +735,6 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
         if (arg.value == "hotreload") {
             opts.outputMode = GlobalOptions::OutputMode::SHARED_LIB;
             opts.enableHotReload = true;
-            opts.linkStaticLibs = false;
             opts.linkStaticStd = false; // waiting for hotreload's bugfix
         } else {
             CJC_ASSERT(OUTPUT_MODE_MAP.count(arg.value) != 0);
@@ -805,10 +813,25 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
     }},
     { Options::ID::DEBUG_CODEGEN, OPTION_TRUE_ACTION(opts.codegenDebugMode = true) },
     { Options::ID::CHIR_OPT_DEBUG, OPTION_TRUE_ACTION(opts.chirDebugOptimizer = true) },
-    { Options::ID::DUMP_CHIL_DEBUG, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
+    { Options::ID::DUMP_CHIR_DEBUG, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
         opts.chirDumpDebugMode = true;
         return true;
     }},
+    { Options::ID::EMIT_CHIR, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
+        if (arg.value.empty()) {
+            opts.emitCHIRPhase = GlobalOptions::CandidateEmitCHIRPhase::OPT;
+            return true;
+        }
+        if (EMIT_CHIR_PHASE_MAP.count(arg.value) == 0) { return false; }
+        opts.emitCHIRPhase = EMIT_CHIR_PHASE_MAP.at(arg.value);
+        return true;
+    }},
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    { Options::ID::DUMP_ANNOTATIONS_DEBUG, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
+        opts.computeAnnotationsDebug = true;
+        return true;
+    }},
+#endif
     { Options::ID::RENDER_CHIR, [](GlobalOptions& opts, const OptionArgInstance& arg) {
         CJC_ASSERT(DUMP_CHIR_MODE_MAP.count(arg.value) != 0);
         if (DUMP_CHIR_MODE_MAP.count(arg.value) == 0) { return false; }
@@ -910,6 +933,9 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
     { Options::ID::DISCARD_EH_FRAME, OPTION_TRUE_ACTION(opts.discardEhFrame = true) },
     {Options::ID::JOBS, ParseJobs},
     {Options::ID::AGGRESSIVE_PARALLEL_COMPILE, ParseAPCJobs},
+#ifndef DISABLE_EFFECT_HANDLERS
+    {Options::ID::ENABLE_EFFECTS, OPTION_TRUE_ACTION(opts.enableEH = true) },
+#endif
 #endif // CANGJIE_CODEGEN_CJNATIVE_BACKEND
 };
 } // namespace

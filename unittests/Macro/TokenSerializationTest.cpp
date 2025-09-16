@@ -4,10 +4,10 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include <string>
+#include "gtest/gtest.h"
 #include "cangjie/Macro/TokenSerialization.h"
 #include "cangjie/Lex/Lexer.h"
-#include "gtest/gtest.h"
-#include <string>
 using namespace Cangjie;
 
 class TokenSerializationTest : public testing::Test {
@@ -19,7 +19,7 @@ protected:
     std::string code = R"(
 ?:
     true false
-    main(argc:Int64=1,argv:String) {
+    main(argc:Int64=1, argv:String) {
     let a:Int64=-40
     let pi:float64=3.14
     let alpha=0x1.1p1
@@ -28,7 +28,7 @@ protected:
     /*/**/*/
     let d:String = "asdqwe"
     let b = 2 ** -a
-    print( (a+3*b, (a+3) *b) )
+    print((a+3*b, (a+3) *b))
     @abc
     };
 )";

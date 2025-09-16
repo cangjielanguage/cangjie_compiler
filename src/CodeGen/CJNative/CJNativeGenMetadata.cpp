@@ -205,11 +205,7 @@ std::string MetadataInfo::GetTiName(const CHIR::Type& ty) const
             return GetTiName(static_cast<const CHIR::Type&>(*superClassTy));
         }
     }
-    auto baseType = &ty;
-    if (ty.IsClosure()) {
-        baseType = static_cast<const CHIR::ClosureType&>(ty).GetFuncType();
-    }
-    auto tiName = CGType::GetNameOfTypeInfoGV(*baseType);
+    auto tiName = CGType::GetNameOfTypeInfoGV(ty);
     if (!module.GetLLVMModule()->getNamedGlobal(tiName)) {
         auto ti = cgType->GetOrCreateTypeInfo();
         if (cgType->IsStaticGI()) {
@@ -737,7 +733,8 @@ void GFMetadataInfo::GenerateAllFunctionsMetadata()
                     .Concat(gf->GetIdentifierWithoutPrefix())
                     .Concat(GenerateParametersMetadata(gf->GetParams()))
                     .Concat(GenerateParametersMetadata(gf->GetGenericTypeParams()))
-                    .Concat(GenerateAttrsMetadata(gf->GetAttributeInfo(), ExtraAttribute::METHOD, "none", hasSRetMode))
+                    .Concat(GenerateAttrsMetadata(gf->GetAttributeInfo(), ExtraAttribute::METHOD,
+                        gf->GetAnnoInfo().mangledName, hasSRetMode))
                     .CreateMDTuple();
             functionsMdNode->addOperand(funcMD);
             func->addMetadata("ReflectionFunc", *funcMD);
@@ -778,7 +775,8 @@ llvm::MDNode* GVMetadataInfo::GenerateVariableMetadata(const CHIR::GlobalVar& va
     /// If a CHIR::Variable node is not generated as a global variable in the current module, or the node is imported
     /// to the current module, we don't need to generate metadata for it. Just return directly.
     const auto globalVariable = llvmMod->getGlobalVariable(variableMangleName, true);
-    if (!globalVariable || !globalVariable->hasInitializer()) {
+    bool isStringGV = variable.GetInitializer() != nullptr && variable.GetInitializer()->GetType()->IsString();
+    if (!globalVariable || (!globalVariable->hasInitializer() && !isStringGV)) {
         return nullptr;
     }
     llvm::LLVMContext& llvmCtx = module.GetLLVMContext();
@@ -789,6 +787,6 @@ llvm::MDNode* GVMetadataInfo::GenerateVariableMetadata(const CHIR::GlobalVar& va
         .Concat(GenerateAttrsMetadata(variable.GetAttributeInfo(),
             variable.TestAttr(CHIR::Attribute::READONLY) ? ExtraAttribute::IMMUTABLE_FIELD
                                                           : ExtraAttribute::MUTABLE_FIELD,
-            "none"))
+            variable.GetAnnoInfo().mangledName))
         .CreateMDTuple();
 }

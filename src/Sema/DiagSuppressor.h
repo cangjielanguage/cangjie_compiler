@@ -24,11 +24,7 @@ public:
     }
     ~DiagSuppressor()
     {
-        try {
-            diag.EnableDiagnose(originDiagVec);
-        } catch (...) {
-            Errorln("out of memory");
-        }
+        diag.EnableDiagnose(originDiagVec);
     }
     std::vector<Diagnostic> GetSuppressedDiag();
     void ReportDiag();

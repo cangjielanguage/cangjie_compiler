@@ -70,7 +70,7 @@ Block* MoveExpressionAfterForIn(CHIRBuilder& builder, ExprIt it, ExprIt end)
 {
     ++it;
     auto& expr = **it;
-    auto parentBlock = expr.GetParent();
+    auto parentBlock = expr.GetParentBlock();
     // create a new block to collect expressions after this ForInExpr before the terminator
     auto newSuc = builder.CreateBlock(parentBlock->GetParentBlockGroup());
     for (auto mv = it; mv != end; ++mv) {
@@ -87,7 +87,7 @@ void FlatForInExpr::FlatternForInExpr(ExprIt it, ExprIt end)
     if (Is<ForInClosedRange>(&expr)) {
         return FlatternForInClosedRange(it, end);
     }
-    auto parentBlock = expr.GetParent();
+    auto parentBlock = expr.GetParentBlock();
     auto forInSuc = MoveExpressionAfterForIn(builder, it, end);
 
     auto bg = expr.GetParentBlockGroup();
@@ -95,7 +95,7 @@ void FlatForInExpr::FlatternForInExpr(ExprIt it, ExprIt end)
     auto loadCondVar = builder.CreateExpression<Load>(builder.GetBoolTy(), expr.GetLoopCondVar(), jumpBlock);
     auto jumpBr = builder.CreateTerminator<Branch>(
         expr.GetDebugLocation(), loadCondVar->GetResult(), expr.GetBody()->GetEntryBlock(), forInSuc, jumpBlock);
-    jumpBr->sourceExpr = SourceExpr::FOR_IN_EXPR;
+    jumpBr->SetSourceExpr(SourceExpr::FOR_IN_EXPR);
     jumpBlock->AppendExpression(loadCondVar);
     jumpBlock->AppendExpression(jumpBr);
 
@@ -150,7 +150,7 @@ void FlatForInExpr::FlatternForInExpr(ExprIt it, ExprIt end)
 void FlatForInExpr::FlatternForInClosedRange(ExprIt it, ExprIt end)
 {
     auto& expr = StaticCast<ForInClosedRange>(**it);
-    auto parentBlock = expr.GetParent();
+    auto parentBlock = expr.GetParentBlock();
     auto forInSuc = MoveExpressionAfterForIn(builder, it, end);
 
     auto gotoForin = builder.CreateTerminator<GoTo>(GetEntryBlock(expr), parentBlock);
@@ -198,5 +198,8 @@ void FlatForInExpr::RunOnBlockGroup(BlockGroup& blockGroup)
 
 void FlatForInExpr::RunOnFunc(Func& func)
 {
+    if (func.TestAttr(Attribute::SKIP_ANALYSIS)) {
+        return;
+    }
     return RunOnBlockGroup(*func.GetBody());
 }

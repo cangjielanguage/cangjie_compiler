@@ -13,30 +13,6 @@
 
 namespace Cangjie {
 
-std::string UserTimer::GetFlat() const
-{
-    auto [result, order] = GetDataAndOrder();
-    std::string output;
-    if (packageName.empty()) {
-        output += "================ Compile Time ================\n";
-    } else {
-        output += "================ Compile Time of [ " + packageName + " ] ================\n";
-    }
-    for (const auto& key : order) {
-        output += ("================ " + key + " ================\n");
-        for (auto& sec : result.at(key)) {
-            // 31, red; 32, green. This doesn't work on windows.
-#ifdef _WIN32
-            output += ("[ " + sec.first + " ] cost " + std::to_string(sec.second) + " ms\n");
-#else
-            output += ("[ \033[32;1m" + sec.first + "\033[0m ] cost " + std::to_string(sec.second) + " ms\n");
-#endif
-        }
-    }
-    return output;
-}
-
-#ifdef CANGJIE_WRITE_PROFILE
 std::string UserTimer::GetJson() const
 {
     auto [result, _] = GetDataAndOrder();
@@ -58,7 +34,6 @@ std::string UserTimer::GetJson() const
     output += "\n}\n";
     return output;
 }
-#endif
 
 void UserTimer::Start(const std::string& title, const std::string& subtitle, const std::string& desc)
 {

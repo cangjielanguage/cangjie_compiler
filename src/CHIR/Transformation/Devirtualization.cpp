@@ -27,9 +27,6 @@ void Devirtualization::RunOnFuncs(const std::vector<Func*>& funcs, CHIRBuilder& 
 {
     rewriteInfos.clear();
     for (auto func : funcs) {
-        if (func->Get<SkipCheck>() == SkipKind::SKIP_CODEGEN) {
-            continue;
-        }
         RunOnFunc(func, builder);
     }
     RewriteToApply(builder, rewriteInfos, isDebug);
@@ -56,7 +53,10 @@ void Devirtualization::RunOnFunc(const Func* func, CHIRBuilder& builder)
         if (!resVal) {
             return;
         }
-        std::vector<Type*> paramTys = invoke->GetInstantiatedParamTypes();
+        std::vector<Type*> paramTys;
+        for (auto param : invoke->GetOperands()) {
+            paramTys.emplace_back(param->GetType());
+        }
         // Grab the function from the classMap.
         auto [realCallee, thisType] = FindRealCallee(builder, resVal,
             {invoke->GetMethodName(), std::move(paramTys), invoke->GetInstantiatedTypeArgs()});
@@ -94,24 +94,21 @@ static const std::vector<BuiltinOpInfo> COMPARABLE_FUNC_LISTS = {
 Ptr<Apply> BuiltinOpCreateNewApply(CHIRBuilder& builder, const Invoke& oriInvoke, Ptr<FuncBase> func,
     const Ptr<Value>& thisValue, const std::vector<Value*>& args)
 {
-    auto instParamTys = oriInvoke.GetInstantiatedParamTypes();
-    auto instRetTy = oriInvoke.GetInstantiatedRetType();
+    auto instRetTy = oriInvoke.GetResultType();
     std::vector<Value*> applyArgs{thisValue};
     applyArgs.insert(applyArgs.end(), args.begin(), args.end());
-    auto apply = builder.CreateExpression<Apply>(instRetTy, func, applyArgs, oriInvoke.GetParent());
-    instParamTys[0] = thisValue->GetType();
     auto thisType = builder.GetType<RefType>(thisValue->GetType());
-    auto instParentCustomTy = thisValue->GetType();
-    apply->SetInstantiatedFuncType(thisType, instParentCustomTy, std::move(instParamTys), *instRetTy);
-    return apply;
+    return builder.CreateExpression<Apply>(instRetTy, func, FuncCallContext{
+        .args = applyArgs,
+        .thisType = thisType}, oriInvoke.GetParentBlock());
 }
 
 Ptr<BinaryExpression> BuiltinOpCreateNewBinary(CHIRBuilder& builder, const Invoke& oriInvoke, ExprKind kind,
     const Ptr<Value>& thisValue, const std::vector<Value*>& args)
 {
     CJC_ASSERT(args.size() == 1U);
-    auto instRetTy = oriInvoke.GetInstantiatedRetType();
-    auto parent = oriInvoke.GetParent();
+    auto instRetTy = oriInvoke.GetResultType();
+    auto parent = oriInvoke.GetParentBlock();
     return builder.CreateExpression<BinaryExpression>(
         oriInvoke.GetDebugLocation(), instRetTy, kind, thisValue, args[0], parent);
 }
@@ -131,6 +128,7 @@ bool Devirtualization::RewriteToBuiltinOp(CHIRBuilder& builder, const RewriteInf
         }
     }
     auto args = invoke->GetArgs();
+    args.erase(args.begin());  // remove `this`
     if (targetExprKind == ExprKind::INVALID || args.size() != operandsNum - 1U) {
         return false;
     }
@@ -178,27 +176,39 @@ void Devirtualization::RewriteToApply(CHIRBuilder& builder, std::vector<RewriteI
             continue;
         }
         auto invoke = rewriteInfo->invoke;
-        auto parent = invoke->GetParent();
-        auto thisType = builder.GetType<RefType>(rewriteInfo->thisType);
-        auto instParentCustomTy = rewriteInfo->thisType;
-        auto instParamTys = invoke->GetInstantiatedParamTypes();
-        if (rewriteInfo->thisType->IsBuiltinType()) {
-            instParamTys[0] = builder.GetType<RefType>(builder.GetAnyTy());
-        } else if (thisType->IsEqualOrSubTypeOf(*instParamTys[0], builder)) {
-            instParamTys[0] = thisType;
+        auto parent = invoke->GetParentBlock();
+
+        // get this type from rewrite info
+        Type* thisType = builder.GetType<RefType>(rewriteInfo->thisType);
+        auto& realFunc = rewriteInfo->realCallee;
+
+        bool isMutFunc =
+            realFunc->TestAttr(Attribute::MUT) || IsConstructor(*realFunc);
+        bool isNonMutFuncWithValueType =
+            !isMutFunc && (rewriteInfo->thisType->IsStruct() || rewriteInfo->thisType->IsEnum());
+        if (isNonMutFuncWithValueType) {
+            thisType = rewriteInfo->thisType;
+            realFunc = rewriteInfo->realCallee->Get<WrappedRawMethod>();
         }
-        auto instRetTy = invoke->GetInstantiatedRetType();
         auto args = invoke->GetOperands();
-        auto typecastRes = TypeCastOrBoxIfNeeded(*args[0], *instParamTys[0], builder, *parent, INVALID_LOCATION);
+        auto instThisType = args[0]->GetType();
+        if (rewriteInfo->thisType->IsBuiltinType()) {
+            instThisType = builder.GetType<RefType>(builder.GetAnyTy());
+        } else if (thisType->IsEqualOrSubTypeOf(*instThisType, builder)) {
+            instThisType = thisType;
+        }
+        auto instRetTy = invoke->GetResultType();
+        auto typecastRes = TypeCastOrBoxIfNeeded(*args[0], *instThisType, builder, *parent, INVALID_LOCATION);
         if (typecastRes != args[0]) {
             StaticCast<LocalVar*>(typecastRes)->GetExpr()->MoveBefore(invoke);
             args[0] = typecastRes;
         }
-        auto apply = builder.CreateExpression<Apply>(instRetTy, rewriteInfo->realCallee, args, invoke->GetParent());
+        auto loc = invoke->GetDebugLocation();
+        auto apply = builder.CreateExpression<Apply>(loc, instRetTy, realFunc, FuncCallContext{
+            .args = args,
+            .instTypeArgs = rewriteInfo->typeArgs,
+            .thisType = thisType}, invoke->GetParentBlock());
         rewriteInfo->newApply = apply;
-        apply->SetDebugLocation(invoke->GetDebugLocation());
-        apply->SetInstantiatedArgTypes(rewriteInfo->typeArgs);
-        apply->SetInstantiatedFuncType(thisType, instParentCustomTy, std::move(instParamTys), *instRetTy);
         invoke->ReplaceWith(*apply);
         invoke->GetResult()->ReplaceWith(*apply->GetResult(), parent->GetParentBlockGroup());
         if (isDebug) {
@@ -219,19 +229,19 @@ void Devirtualization::AppendFrozenFuncState(const Func* func, std::unique_ptr<R
     frozenStates.emplace(func, std::move(analysisRes));
 }
 
-static std::string CreateInstFuncMangleName(const std::string& oriIdentifer, const Apply& apply)
+static std::string CreateInstFuncMangleName(const std::string& oriIdentifer, const Apply& apply, CHIRBuilder& builder)
 {
     // 1. get type args
     std::vector<Type*> genericTypes;
     auto func = VirtualCast<FuncBase*>(apply.GetCallee());
     if (auto customDef = func->GetParentCustomTypeDef(); customDef != nullptr && customDef->IsGenericDef()) {
-        auto funcInCustomType = apply.GetInstParentCustomTyOfCallee();
+        auto funcInCustomType = apply.GetInstParentCustomTyOfCallee(builder);
         while (funcInCustomType->IsRef()) {
             funcInCustomType = StaticCast<RefType*>(funcInCustomType)->GetBaseType();
         }
         genericTypes = funcInCustomType->GetTypeArgs();
     }
-    auto funcArgs = apply.GetInstantiateArgs();
+    auto funcArgs = apply.GetInstantiatedTypeArgs();
     if (!funcArgs.empty()) {
         genericTypes.insert(genericTypes.end(), funcArgs.begin(), funcArgs.end());
     }
@@ -247,15 +257,18 @@ void Devirtualization::InstantiateFuncIfPossible(CHIRBuilder& builder, std::vect
             continue;
         }
         auto apply = rewriteInfo->newApply;
-        auto parameterType = apply->GetInstantiatedParamTypes();
-        auto retType = apply->GetInstantiatedRetType();
+        std::vector<Type*> parameterType;
+        for (auto param : apply->GetArgs()) {
+            parameterType.emplace_back(param->GetType());
+        }
+        auto retType = apply->GetResultType();
         auto instFuncType = builder.GetType<FuncType>(parameterType, retType);
 
         if (instFuncType->IsGenericRelated()) {
             continue;
         }
         // 2. create new inst func if needed
-        auto newId = CreateInstFuncMangleName(callee->GetIdentifierWithoutPrefix(), *apply);
+        auto newId = CreateInstFuncMangleName(callee->GetIdentifierWithoutPrefix(), *apply, builder);
         Func* newFunc;
         if (frozenInstFuncMap.count(newId) != 0) {
             newFunc = frozenInstFuncMap.at(newId);
@@ -265,7 +278,7 @@ void Devirtualization::InstantiateFuncIfPossible(CHIRBuilder& builder, std::vect
             
             newFunc->AppendAttributeInfo(callee->GetAttributeInfo());
             newFunc->DisableAttr(Attribute::GENERIC);
-            if (!apply->GetInstantiateArgs().empty()) {
+            if (!apply->GetInstantiatedTypeArgs().empty()) {
                 newFunc->EnableAttr(Attribute::GENERIC_INSTANTIATED);
             }
             newFunc->Set<LinkTypeInfo>(Linkage::INTERNAL);
@@ -292,10 +305,10 @@ void Devirtualization::InstantiateFuncIfPossible(CHIRBuilder& builder, std::vect
             frozenInstFuncMap[newId] = newFunc;
         }
         // replace apply callee with new inst func
-        auto applyParent = apply->GetParent();
-        auto instApply = builder.CreateExpression<Apply>(retType, newFunc, apply->GetArgs(), applyParent);
-        instApply->SetInstantiatedFuncType(nullptr, nullptr, parameterType, *retType);
-        instApply->SetDebugLocation(apply->GetDebugLocation());
+        auto applyParent = apply->GetParentBlock();
+        auto loc = apply->GetDebugLocation();
+        auto instApply = builder.CreateExpression<Apply>(
+            loc, retType, newFunc, FuncCallContext{.args = apply->GetArgs()}, applyParent);
         apply->ReplaceWith(*instApply);
     }
 }
@@ -446,9 +459,10 @@ std::pair<FuncBase*, Type*> Devirtualization::FindRealCallee(
                 continue;
             }
             auto funcType = builder.GetType<FuncType>(method.types, builder.GetUnitTy());
-            auto res = def->GetFuncIndexInVTable(method.name, *funcType, false, replaceTable, method.typeArgs, builder);
-            if (res.instance != nullptr) {
-                target = res.instance;
+            FuncCallType funcCallType{method.name, funcType, method.typeArgs};
+            auto res = def->GetFuncIndexInVTable(funcCallType, false, replaceTable, builder);
+            if (!res.empty() && res[0].instance != nullptr) {
+                target = res[0].instance;
                 break;
             }
         }
@@ -463,17 +477,6 @@ std::pair<FuncBase*, Type*> Devirtualization::FindRealCallee(
     }
 }
 
-bool IsFromCoreIterator(const ClassDef& def)
-{
-    if (def.GetSuperTypesInCurDef().size() != 1U) {
-        return false;
-    }
-    auto parentDef = def.GetSuperTypesInCurDef()[0]->GetClassDef();
-    // need more accurate range which cannot be inherit.
-    return def.GetPackageName().substr(0, 4U) == "std." && parentDef->GetPackageName() == CORE_PACKAGE_NAME &&
-           parentDef->GetIdentifier() == "@_CNat8IteratorIG_E";
-}
-
 static bool IsOpenClass(const ClassDef& def)
 {
     if (def.IsInterface() || def.IsAbstract()) {
@@ -482,42 +485,44 @@ static bool IsOpenClass(const ClassDef& def)
     return def.TestAttr(Attribute::VIRTUAL);
 }
 
-bool Devirtualization::GetSpecificCandidates(
-    CHIRBuilder& builder, ClassType& specific, std::pair<FuncBase*, Type*>& res, const FuncSig& method) const
+FuncBase* Devirtualization::GetCandidateFromSpecificType(
+    CHIRBuilder& builder, ClassType& specific, const FuncSig& method) const
 {
     auto specificDef = specific.GetClassDef();
-    if (IsOpenClass(*specificDef) && !specificDef->TestAttr(Attribute::PRIVATE) &&
-        !IsFromCoreIterator(*specificDef)) {
-        return false;
-    }
     if (specificDef->IsAbstract() || specificDef->IsInterface()) {
-        return true;
+        return nullptr;
     }
     auto extendsOrImplements = devirtFuncInfo.defsMap[&specific];
     for (auto oriDef : extendsOrImplements) {
         auto genericDef = oriDef->GetGenericDecl() != nullptr ? oriDef->GetGenericDecl() : oriDef;
         for (auto [parentTy, infos] : genericDef->GetVTable()) {
             if (auto target = FindFunctionInVtable(parentTy, infos, method, builder)) {
-                res = {target, &specific};
-                return true;
+                return target;
             }
         }
     }
-    return true;
+    return nullptr;
 }
 
 void Devirtualization::CollectCandidates(
     CHIRBuilder& builder, ClassType* specific, std::pair<FuncBase*, Type*>& res, const FuncSig& method) const
 {
-    // 1. Get candidate from this type
-    if (!GetSpecificCandidates(builder, *specific, res, method)) {
+    auto specificDef = specific->GetClassDef();
+    if (IsOpenClass(*specificDef) && !devirtFuncInfo.CheckCustomTypeInternal(*specificDef)) {
+        // skip open classes with external linkage
         return;
     }
-    if (!IsOpenClass(*specific->GetClassDef())) {
+    // 1. Get candidate from this type
+    auto targetFromSpecificType = GetCandidateFromSpecificType(builder, *specific, method);
+    if (targetFromSpecificType != nullptr) {
+        res = {targetFromSpecificType, specific};
+    }
+    if (!IsOpenClass(*specificDef)) {
+        // non-open class do not need try its subtype
         return;
     }
     auto& subtypeMap = devirtFuncInfo.GetSubtypeMap();
-    auto it = subtypeMap.find(specific->GetClassDef());
+    auto it = subtypeMap.find(specificDef);
     if (it == subtypeMap.end()) {
         // return if has no subtype
         return;
@@ -565,7 +570,7 @@ bool Devirtualization::CheckFuncHasInvoke(const BlockGroup& bg)
         auto exprs = bb->GetNonTerminatorExpressions();
         for (size_t i = 0; i < exprs.size(); ++i) {
             if (exprs[i]->GetExprKind() == ExprKind::LAMBDA) {
-                if (CheckFuncHasInvoke(*StaticCast<Lambda*>(exprs[i])->GetLambdaBody())) {
+                if (CheckFuncHasInvoke(*StaticCast<Lambda*>(exprs[i])->GetBody())) {
                     return true;
                 }
             }

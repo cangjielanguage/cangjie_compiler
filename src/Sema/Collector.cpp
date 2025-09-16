@@ -306,8 +306,9 @@ void Collector::CollectFuncDecl(ASTContext& ctx, FuncDecl& fd, bool buildTrie)
     auto pkg = ctx.curPackage;
     static const std::unordered_set<std::string> intrinsicPkgs{CORE_PACKAGE_NAME, SYNC_PACKAGE_NAME, MATH_PACKAGE_NAME,
         OVERFLOW_PACKAGE_NAME, RUNTIME_PACKAGE_NAME, NET_PACKAGE_NAME, REFLECT_PACKAGE_NAME,
-        UNITTEST_MOCK_INTERNAL_PACKAGE_NAME};
-    static const std::unordered_set<std::string> headlessIntrinsics{GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME};
+        UNITTEST_MOCK_INTERNAL_PACKAGE_NAME, EFFECT_PACKAGE_NAME};
+    static const std::unordered_set<std::string> headlessIntrinsics{GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME,
+        IS_SUBTYPE_TYPES_FUNC_NAME};
 
     if (Utils::In(fd.identifier.Val(), headlessIntrinsics)) {
         return;
@@ -574,6 +575,10 @@ void Collector::CollectTryExpr(ASTContext& ctx, TryExpr& te, bool buildTrie)
         }
     }
     scopeManager.FinalizeScope(ctx); // end of try
+    if (!te.handlers.empty()) {
+        BuildSymbolTable(ctx, te.tryLambda.get(), buildTrie);
+        BuildSymbolTable(ctx, te.finallyLambda.get(), buildTrie);
+    }
     for (size_t cnt = 0; cnt < te.catchPatterns.size(); cnt++) {
         CJC_ASSERT(cnt < te.catchBlocks.size());
         auto catchBlockNodeInfo =
@@ -587,6 +592,23 @@ void Collector::CollectTryExpr(ASTContext& ctx, TryExpr& te, bool buildTrie)
         }
         scopeManager.FinalizeScope(ctx);
     }
+    for (const auto& handler : te.handlers) {
+        auto handleBlockNodeInfo =
+            NodeInfo(*handler.block, "", ctx.currentScopeLevel, scopeManager.CalcScopeGateName(ctx));
+        AddSymbol(ctx, handleBlockNodeInfo, buildTrie);
+        scopeManager.InitializeScope(ctx);
+        BuildSymbolTable(ctx, handler.commandPattern.get(), buildTrie);
+        // handle block has the same scope as effect and resumption patterns.
+        for (auto& n : handler.block->body) {
+            BuildSymbolTable(ctx, n.get(), buildTrie);
+        }
+        scopeManager.FinalizeScope(ctx);
+
+        if (handler.desugaredLambda) {
+            BuildSymbolTable(ctx, handler.desugaredLambda, buildTrie);
+        }
+    }
+
     if (te.finallyBlock) {
         BuildSymbolTable(ctx, te.finallyBlock.get(), buildTrie);
     }
@@ -1085,6 +1107,21 @@ void Collector::BuildSymbolTable(ASTContext& ctx, Ptr<Node> node, bool buildTrie
             BuildSymbolTable(ctx, te->expr.get(), buildTrie);
             break;
         }
+        case ASTKind::PERFORM_EXPR: {
+            auto pe = StaticAs<ASTKind::PERFORM_EXPR>(node);
+            auto nodeInfo = NodeInfo(*pe, "", ctx.currentScopeLevel, ctx.currentScopeName);
+            AddSymbol(ctx, nodeInfo, buildTrie);
+            BuildSymbolTable(ctx, pe->expr.get(), buildTrie);
+            break;
+        }
+        case ASTKind::RESUME_EXPR: {
+            auto re = StaticAs<ASTKind::RESUME_EXPR>(node);
+            auto nodeInfo = NodeInfo(*re, "", ctx.currentScopeLevel, ctx.currentScopeName);
+            AddSymbol(ctx, nodeInfo, buildTrie);
+            BuildSymbolTable(ctx, re->withExpr.get(), buildTrie);
+            BuildSymbolTable(ctx, re->throwingExpr.get(), buildTrie);
+            break;
+        }
         case ASTKind::TRY_EXPR: {
             auto te = StaticAs<ASTKind::TRY_EXPR>(node);
             CollectTryExpr(ctx, *te, buildTrie);
@@ -1177,6 +1214,14 @@ void Collector::BuildSymbolTable(ASTContext& ctx, Ptr<Node> node, bool buildTrie
         }
         case ASTKind::EXCEPT_TYPE_PATTERN: {
             auto etp = StaticAs<ASTKind::EXCEPT_TYPE_PATTERN>(node);
+            BuildSymbolTable(ctx, etp->pattern.get(), buildTrie);
+            for (auto& type : etp->types) {
+                BuildSymbolTable(ctx, type.get(), buildTrie);
+            }
+            break;
+        }
+        case ASTKind::COMMAND_TYPE_PATTERN: {
+            auto etp = StaticAs<ASTKind::COMMAND_TYPE_PATTERN>(node);
             BuildSymbolTable(ctx, etp->pattern.get(), buildTrie);
             for (auto& type : etp->types) {
                 BuildSymbolTable(ctx, type.get(), buildTrie);

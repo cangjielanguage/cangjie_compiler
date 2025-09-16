@@ -13,10 +13,11 @@
 #ifndef CANGJIE_CHIR_TRANSLATOR_H
 #define CANGJIE_CHIR_TRANSLATOR_H
 
+#include "cangjie/AST/NodeX.h"
 #include "cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/ExceptionTypeMapping.h"
 #include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/CHIRType.h"
 #include "cangjie/CHIR/Utils.h"
 #include "cangjie/CHIR/Value.h"
@@ -29,11 +30,13 @@ namespace Cangjie::CHIR {
 class Translator {
 public:
     Translator(CHIRBuilder& builder, CHIRType& chirTy, const Cangjie::GlobalOptions& opts,
-        const GenericInstantiationManager& gim, AST2CHIRNodeMap<Value>& globalSymbolTable,
+        const GenericInstantiationManager* gim, AST2CHIRNodeMap<Value>& globalSymbolTable,
         const ElementList<Ptr<const AST::Decl>>& localConstVars,
         const ElementList<Ptr<const AST::FuncDecl>>& localConstFuncs, const IncreKind& kind,
         std::vector<std::pair<const AST::Decl*, Func*>>& annoFactories,
-        std::unordered_map<Block*, Terminator*>& maybeUnreachable)
+        std::unordered_map<Block*, Terminator*>& maybeUnreachable,
+        bool computeAnnotations,
+        std::vector<CHIR::Func*>& initFuncForAnnoFactory)
         : builder(builder),
           chirTy(chirTy),
           globalSymbolTable(globalSymbolTable),
@@ -43,7 +46,9 @@ public:
           gim(gim),
           increKind(kind),
           annoFactoryFuncs(annoFactories),
-          maybeUnreachable(maybeUnreachable)
+          maybeUnreachable(maybeUnreachable),
+          isComputingAnnos{computeAnnotations},
+          initFuncsForAnnoFactory{initFuncForAnnoFactory}
     {
     }
 
@@ -96,6 +101,23 @@ public:
         return res;
     }
 
+    struct InstCalleeInfo {
+        Type* instParentCustomTy{nullptr};
+        Type* thisType{nullptr};
+        std::vector<Type*> instParamTys;
+        Type* instRetTy{nullptr};
+    };
+
+    struct InstInvokeCalleeInfo {
+        std::string srcCodeIdentifier;
+        FuncType* instFuncType{nullptr};
+        FuncType* originalFuncType{nullptr}; // not ()->Unit, include this type
+        ClassType* instParentCustomTy{nullptr};
+        ClassType* originalParentCustomTy{nullptr};
+        std::vector<Type*> instantiatedTypeArgs;
+        Type* thisType{nullptr};
+        size_t offset{0};
+    };
     // === static helper functions ==
     /**
      * @brief Retrieves the constructor ID of an enum.
@@ -318,11 +340,12 @@ public:
      * @param pkgName The package name.
      * @param linkage The linkage type of the function.
      * @param loc The debug location for the function.
+     * @param isConst The global var is const or not.
      * @return A pointer to the created function.
      */
     Ptr<Func> CreateEmptyGVInitFunc(const std::string& mangledName, const std::string& identifier,
         const std::string& rawMangledName, const std::string& pkgName, const Linkage& linkage,
-        const DebugLocation& loc);
+        const DebugLocation& loc, bool isConst);
     
     /**
      * @brief Returns a dereferenced value if necessary.
@@ -368,7 +391,7 @@ public:
      * @param parent The custom type definition.
      * @return The annotation information.
      */
-    AnnoInfo CreateAnnoFactoryFuncs(const AST::Decl& decl, CustomTypeDef* parent);
+    AnnoInfo CreateAnnoFactoryFuncSig(const AST::Decl& decl, CustomTypeDef* parent);
     
     /**
      * @brief Translates the body of an annotation factory function.
@@ -377,11 +400,13 @@ public:
      * @param func The function to translate the body for.
      */
     void TranslateAnnoFactoryFuncBody(const AST::Decl& decl, Func& func);
+    void TranslateAnnotationsArrayBody(const AST::Decl& decl, Func& func);
+    std::vector<GlobalVar*> TranslateAnnotationsArraySig(const AST::ArrayLit& annos, const Func& func);
+    GlobalVar* TranslateCustomAnnoInstanceSig(const AST::Expr& expr, const Func& func, size_t i);
 
     /**
      * @brief Creates annotation information for a function parameter.
      *
-     * @param funcDecl The function declaration.
      * @param astParam The AST function parameter.
      * @param chirParam The CHIR parameter.
      * @param parent The custom type definition.
@@ -394,19 +419,19 @@ public:
      * @tparam TValue The type of the value to create annotation info for.
      * @param decl The declaration.
      * @param value The value to create annotation info for.
-     * @param parent The custom type definition.
+     * @param parent The custom type definition. Can be null.
      */
     template <typename TValue>
-    void CreateAnnotationInfo(const AST::Decl& decl, TValue& value, CustomTypeDef& parent)
+    void CreateAnnotationInfo(const AST::Decl& decl, TValue& value, CustomTypeDef* parent)
     {
-        value.SetAnnoInfo(CreateAnnoFactoryFuncs(decl, &parent));
+        value.SetAnnoInfo(CreateAnnoFactoryFuncSig(decl, parent));
     }
 
     /**
      * @brief Creates annotation factory functions for a function declaration.
      *
      * @param funcDecl The function declaration.
-     * @param parent The custom type definition.
+     * @param parent The custom type definition. Can be null.
      */
     void CreateAnnoFactoryFuncsForFuncDecl(const AST::FuncDecl& funcDecl, CustomTypeDef* parent);
     
@@ -449,11 +474,6 @@ public:
      */
     Value* GetWrapperFuncFromMemberAccess(Type& thisType, const std::string funcName,
         FuncType& instFuncType, bool isStatic, std::vector<Type*>& funcInstTypeArgs);
-    
-    bool IsCompileTimeValue() const
-    {
-        return isCompileTimeValue;
-    }
     
     void SetCompileTimeValue(bool val)
     {
@@ -567,7 +587,7 @@ private:
     size_t lambdaWrapperIndex{0};
 
     const Cangjie::GlobalOptions& opts;
-    const GenericInstantiationManager& gim;
+    const GenericInstantiationManager* gim;
     // Map for blocks inside looping control flow, it has conditionBlock, falseBlock.
     AST2CHIRNodeMap<std::pair<Ptr<Block>, Ptr<Block>>> terminatorSymbolTable;
     //                 generic func,         instantiated func
@@ -628,8 +648,8 @@ private:
     const IncreKind& increKind;
     std::vector<std::pair<const AST::Decl*, Func*>>& annoFactoryFuncs;
     std::unordered_map<Block*, Terminator*>& maybeUnreachable;
-
-    static std::unordered_map<AST::Ty*, ClassDef*> boxedRefEnumTypeClass;
+    bool isComputingAnnos{};
+    std::vector<CHIR::Func*>& initFuncsForAnnoFactory;
 
     class ScopeContext {
     public:
@@ -706,33 +726,19 @@ private:
     std::vector<Type*> GetFuncInstArgs(const AST::CallExpr& expr);
 
     Expression* GenerateFuncCall(Value& callee, const FuncType* instantiedFuncTy,
-        const std::vector<Type*> calleeInstTypeArgs, Type* thisTy, Type* instParentCustomDefTy,
+        const std::vector<Type*> calleeInstTypeArgs, Type* thisTy,
         const std::vector<Value*>& args, DebugLocation loc);
 
-    Expression* GenerateDynmaicDispatchFuncCall(const InvokeCalleeInfo& funcInfo, const std::vector<Value*>& args,
+    Expression* GenerateDynmaicDispatchFuncCall(const InstInvokeCalleeInfo& funcInfo, const std::vector<Value*>& args,
         Value* thisObj = nullptr, Value* thisRTTI = nullptr, DebugLocation loc = INVALID_LOCATION);
 
-    InvokeCalleeInfo CreateVirFuncInvokeInfo(CalleeInfo& strInstFuncType,
+    InstInvokeCalleeInfo CreateVirFuncInvokeInfo(InstCalleeInfo& strInstFuncType,
         const std::vector<Ptr<Type>>& funcInstArgs, const AST::FuncDecl& resolvedFunction);
 
     CHIR::Type* GetExactParentType(Type& fuzzyParentType, const AST::FuncDecl& resolvedFunction, FuncType& funcType,
         std::vector<Type*>& funcInstTypeArgs, bool checkAbstractMethod, [[maybe_unused]] bool report = true);
-    VTableSearchRes GetFuncIndexInVTable(Type& root, const std::string& funcName, FuncType& funcType,
-        bool isStatic, const std::vector<Type*>& funcInstTypeArgs, [[maybe_unused]] bool report = true);
-
-    template <typename... Args>
-    Expression* TryCreateTypeCast(Block* parent, Args&&... args)
-    {
-        if (tryCatchContext.empty()) {
-            return CreateWrappedTypeCast(std::forward<Args>(args)..., parent);
-        }
-        auto errBB = tryCatchContext.top();
-        auto sucBB = CreateBlock();
-        auto ret =
-            CreateAndAppendExpression<TypeCastWithException>(std::forward<Args>(args)..., sucBB, errBB, parent);
-        currentBlock = sucBB;
-        return ret;
-    }
+    std::vector<VTableSearchRes> GetFuncIndexInVTable(
+        Type& root, const FuncCallType& funcCallType, bool isStatic, [[maybe_unused]] bool report = true);
 
     // translate var decl
     Ptr<Value> TranslateLeftValueOfVarDecl(const AST::VarDecl& decl, bool rValueIsEmpty, bool isLocalVar);
@@ -781,7 +787,6 @@ private:
     Ptr<Value> Visit(const AST::SpawnExpr& spawnExpr);
     Ptr<Value> Visit(const AST::StructDecl& decl);
     Ptr<Value> Visit(const AST::SubscriptExpr& subscriptExpr);
-    Ptr<Value> Visit(const AST::SynchronizedExpr& expr);
     Ptr<Value> Visit(const AST::ThrowExpr& throwExpr);
     Ptr<Value> Visit(const AST::TryExpr& tryExpr);
     Ptr<Value> Visit(const AST::TupleLit& tuple);
@@ -790,9 +795,12 @@ private:
     Ptr<Value> Visit(const AST::VarDecl& decl);
     Ptr<Value> Visit(const AST::VarWithPatternDecl& patternDecl);
     Ptr<Value> Visit(const AST::WhileExpr& whileExpr);
-    Ptr<Value> Visit(const AST::Node&) const
+    Ptr<Value> Visit(const AST::Node& node) const
     {
-        printf("shouldn't be here!!!");
+        if (isComputingAnnos && Is<AST::IfAvailableExpr>(node)) {
+            return nullptr;
+        }
+        CJC_ASSERT(false && "Should not reach here!");
         return nullptr;
     }
 
@@ -843,16 +851,15 @@ private:
         bool hasInitial{false};
         bool createDebug{true};
         bool setSymbol{true};
-        bool isJCtor{false};
     };
     // Translate function.
     void BindingFuncParam(const AST::FuncParamList& paramList, const BlockGroup& funcBody,
-        const BindingConfig& cfg = {false, true, true, false});
+        const BindingConfig& cfg = {false, true, true});
     Ptr<Block> TranslateFuncBody(const AST::FuncBody& funcBody);
     Ptr<Value> TranslateInstanceMemberFunc(const AST::Decl& parent, const AST::FuncBody& funcBody);
     Ptr<Value> TranslateConstructorFunc(const AST::Decl& parent, const AST::FuncBody& funcBody);
     Ptr<Value> TranslateNestedFunc(const AST::FuncDecl& func);
-    std::pair<std::vector<Value*>, Translator> SetupContextForLambda(const AST::Block& body);
+    Translator SetupContextForLambda(const AST::Block& body);
     /** NOTE: This method must be called with new translator. */
     Ptr<Value> TranslateLambdaBody(Ptr<Lambda> lambda, const AST::FuncBody& funcBody, const BindingConfig& config);
     friend class TranslateCondCtrlExpr;
@@ -933,13 +940,12 @@ private:
     std::pair<Value*, Type*> TranslateStructOrClassCtorCallCommon(const AST::CallExpr& expr);
     Value* TranslateStructOrClassCtorCall(const AST::CallExpr& expr);
     // ==================== func args===============
-    std::optional<std::string> GetCalleePkgName(const AST::FuncDecl& callee) const;
     static bool IsOptimizableTy(Ptr<AST::Ty> ty);
     static bool IsOptimizableEnumTy(Ptr<AST::Ty> ty);
     static uint64_t GetJumpablePatternVal(const AST::Pattern& pattern);
     bool CanOptimizeMatchToSwitch(const AST::MatchExpr& matchExpr);
 
-    std::vector<Ptr<Type>> TranslateASTTypes(const std::vector<Ptr<AST::Ty>>& genericInfos);
+    std::vector<Type*> TranslateASTTypes(const std::vector<Ptr<AST::Ty>>& genericInfos);
     bool HasNothingTypeArg(std::vector<Value*>& args) const;
     // ============= memberaccess expr ====================
     Ptr<Value> TranslateStaticTargetOrPackageMemberAccess(const AST::MemberAccess& member);
@@ -947,10 +953,11 @@ private:
     Ptr<Value> TranslateEnumMemberAccess(const AST::MemberAccess& member);
     Ptr<Value> TranslateVarMemberAccess(const AST::MemberAccess& member);
     Ptr<Value> TranslateFuncMemberAccess(const AST::MemberAccess& member);
-    Ptr<Value> WrapFuncMemberByLambda(const AST::FuncDecl& funcDecl, const Position& pos, Ptr<Value> thisVal,
-        CalleeInfo& strInstFuncType, std::vector<Ptr<Type>>& funcInstArgs, bool isSuper = false);
-    CalleeInfo GetStructFuncType(const AST::RefExpr& expr, const AST::FuncDecl& funcDecl);
-    CalleeInfo GetStructFuncType(const AST::MemberAccess& expr);
+    Ptr<Value> WrapFuncMemberByLambda(
+        const AST::FuncDecl& funcDecl, const Position& pos, Ptr<Value> thisVal, Type* thisType,
+        InstCalleeInfo& strInstFuncType, std::vector<Ptr<Type>>& funcInstArgs, bool isSuper = false);
+    InstCalleeInfo GetCustomTypeFuncRef(const AST::RefExpr& expr, const AST::FuncDecl& funcDecl);
+    InstCalleeInfo GetCustomTypeMemberAccessFuncRef(const AST::MemberAccess& expr);
     Ptr<Value> GetBaseFromMemberAccess(const AST::Expr& base);
 
     uint64_t GetFieldOffset(const AST::Decl& target) const;
@@ -998,8 +1005,6 @@ private:
         const DebugLocation& originLoc);
     Type* GetSelectorType(const AST::EnumTy& ty) const;
     Ptr<Value> HandleTypePattern(const AST::TypePattern& typePattern, Ptr<Value> value,
-        std::queue<std::pair<Ptr<const AST::Pattern>, Ptr<Value>>>& queue);
-    Ptr<Value> HandleUnboxTypePattern(const AST::TypePattern& typePattern, Ptr<Value> value,
         std::queue<std::pair<Ptr<const AST::Pattern>, Ptr<Value>>>& queue);
     Ptr<Value> HandleConstPattern(
         const AST::ConstPattern& constPattern, Ptr<Value> value, const DebugLocation& originLoc);
@@ -1072,7 +1077,7 @@ private:
     template <typename... Args> void CreateWrappedBranch(const SourceExpr& sourceExpr, Args&&... args)
     {
         auto expr = CreateAndAppendTerminator<Branch>(std::forward<Args>(args)...);
-        expr->sourceExpr = sourceExpr;
+        expr->SetSourceExpr(sourceExpr);
     }
 
     Ptr<LocalVar> CreateGetElementRefWithPath(const DebugLocation& loc, Ptr<Value> lhsBase,
@@ -1108,8 +1113,6 @@ private:
     {
         return CreateWrappedStoreElementRef(type, DebugLocation(), val, location, path);
     }
-
-    ClassDef* GetOrCreateBoxedRefEnumType(AST::Ty* declTy);
 
     /// Create a typecast or some equivalent expressions that represent a typecast.
     TypeCast* CreateWrappedTypeCast(Type* ty, Value* operand, Block* parent)
@@ -1213,7 +1216,8 @@ const static std::unordered_map<std::string, const std::unordered_map<std::strin
 
 // Below are instrinsics without a source-level declaration, their delcaration should be dinamically generated
 const static std::unordered_map<std::string, IntrinsicKind> headlessIntrinsics = {
-    {GET_TYPE_FOR_TYPE_PARAMETER_NAME, IntrinsicKind::GET_TYPE_FOR_TYPE_PARAMETER}
+    {GET_TYPE_FOR_TYPE_PARAMETER_NAME, IntrinsicKind::GET_TYPE_FOR_TYPE_PARAMETER},
+    {IS_SUBTYPE_TYPES_NAME, IntrinsicKind::IS_SUBTYPE_TYPES},
 };
 } // namespace Cangjie::CHIR
 

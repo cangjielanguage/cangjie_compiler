@@ -297,15 +297,39 @@ bool CompileStrategy::ImportPackages() const
     return ret;
 }
 
+namespace {
+// All instance objects share, do not clean. The cjd content of the same process should not be inconsistent.
+std::unordered_map<std::string, OwnedPtr<Package>> gCjdAstCache;
+} // namespace
+
 void CompileStrategy::ParseAndMacroExpandCjd() const
 {
+    Utils::ProfileRecorder::Start("ImportPackages", "ParseAndMacroExpandCjd");
     auto cjdPaths = ci->importManager.GetDepPkgCjdPaths();
+    auto searchPath = ci->importManager.GetSearchPath();
     // cjdInfo is [fullPackageName, cjdPath].
     for (auto cjdInfo : cjdPaths) {
+        if (auto pkgAst = gCjdAstCache.find(cjdInfo.first); pkgAst != gCjdAstCache.end()) {
+            auto originPkg = ci->importManager.GetPackage(cjdInfo.first);
+            if (!originPkg) {
+                InternalError(cjdInfo.first + " cannot find origin ast");
+            }
+            MergeCusAnno(originPkg, pkgAst->second.get());
+            continue;
+        }
         std::string failedReason;
         auto sourceCode = FileUtil::ReadFileContent(cjdInfo.second, failedReason);
         if (!failedReason.empty() || !sourceCode.has_value()) {
-            continue;
+            // In the LSP scenario, the cjd file path cannot be obtained based on the dependency package information
+            // configured in the cache. The cjd file path is searched in searchPath.
+            auto cjdPath = FileUtil::FindSerializationFile(cjdInfo.first, CJ_D_FILE_EXTENSION, searchPath);
+            if (cjdPath.empty()) {
+                continue;
+            }
+            sourceCode = FileUtil::ReadFileContent(cjdPath, failedReason);
+            if (!failedReason.empty() || !sourceCode.has_value()) {
+                continue;
+            }
         }
         // Reuse current CompilerInstance, but the Parser in the macro expansion phase uses the DParser.
         ci->invocation.globalOptions.compileCjd = true;
@@ -314,7 +338,6 @@ void CompileStrategy::ParseAndMacroExpandCjd() const
         auto fileId = sm.AddSource(cjdInfo.second, sourceCode.value(), cjdInfo.first);
         auto fileAst =
             Parser(fileId, sourceCode.value(), ci->diag, ci->diag.GetSourceManager(), false, true).ParseTopLevel();
-        Debugln("[apilevel] DParser done ", cjdInfo.second);
         auto pkg = MakeOwned<Package>(cjdInfo.first);
         fileAst->curPackage = pkg.get();
         pkg->files.emplace_back(std::move(fileAst));
@@ -322,13 +345,13 @@ void CompileStrategy::ParseAndMacroExpandCjd() const
         MacroExpansion me(ci);
         me.Execute(*pkg.get());
         ci->invocation.globalOptions.compileCjd = false;
-        Debugln("[apilevel] MacroExpansion done ", cjdInfo.first);
         auto originPkg = ci->importManager.GetPackage(cjdInfo.first);
         if (!originPkg) {
             InternalError(cjdInfo.first + " cannot find origin ast");
         }
-        MergeCusAnno(ci->diag, originPkg, pkg.get());
+        MergeCusAnno(originPkg, pkg.get());
     }
+    Utils::ProfileRecorder::Stop("ImportPackages", "ParseAndMacroExpandCjd");
 }
 
 bool CompileStrategy::MacroExpand() const

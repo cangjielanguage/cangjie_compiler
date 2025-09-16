@@ -47,9 +47,8 @@ std::string ConvertToken(const Token& t)
 
 static Ptr<Node> TraceBackNode(std::vector<Ptr<Node>>& chainAST, std::vector<ASTKind> kinds)
 {
-    auto iter = std::find_if(chainAST.rbegin(), chainAST.rend(), [&kinds](auto node) {
-        return std::find(kinds.begin(), kinds.end(), node->astKind) != kinds.end();
-    });
+    auto iter = std::find_if(chainAST.rbegin(), chainAST.rend(),
+        [&kinds](auto node) { return std::find(kinds.begin(), kinds.end(), node->astKind) != kinds.end(); });
     if (iter != chainAST.rend()) {
         return *iter;
     }
@@ -730,16 +729,14 @@ const std::unordered_map<TokenKind, std::string_view> NONE_ASSO_OP = {
 
 bool ParserImpl::IsNoneAssociative(const Token& tok) const
 {
-    return std::any_of(NONE_ASSO_OP.begin(), NONE_ASSO_OP.end(), [&tok, this](auto& kind) {
-        return Precedence(kind.first) == Precedence(tok.kind);
-    });
+    return std::any_of(NONE_ASSO_OP.begin(), NONE_ASSO_OP.end(),
+        [&tok, this](auto& kind) { return Precedence(kind.first) == Precedence(tok.kind); });
 }
 
 void ParserImpl::DiagNoneAssociativeOp(const Token& preT, const Token& tok)
 {
-    auto iter = std::find_if(NONE_ASSO_OP.begin(), NONE_ASSO_OP.end(), [&tok, this](auto& asso) {
-        return Precedence(tok.kind) == Precedence(asso.first);
-    });
+    auto iter = std::find_if(NONE_ASSO_OP.begin(), NONE_ASSO_OP.end(),
+        [&tok, this](auto& asso) { return Precedence(tok.kind) == Precedence(asso.first); });
     CJC_ASSERT(iter != NONE_ASSO_OP.end());
 
     auto builder =
@@ -986,10 +983,11 @@ void ParserImpl::DiagMatchCase(DiagnosticBuilder& builder)
     }
 }
 
-void ParserImpl::DiagExpectedCatchOrFinallyAfterTry(const TryExpr& te)
+void ParserImpl::DiagExpectedCatchOrHandleOrFinallyAfterTry(const TryExpr& te)
 {
-    auto builder = ParseDiagnoseRefactor(
-        DiagKindRefactor::parse_expected_catch_or_finally_in_try, lookahead, ConvertToken(lookahead));
+    auto diagKind = this->enableEH ? DiagKindRefactor::parse_expected_catch_or_handle_or_finally_in_try
+                                        : DiagKindRefactor::parse_expected_catch_or_finally_in_try;
+    auto builder = ParseDiagnoseRefactor(diagKind, lookahead, ConvertToken(lookahead));
     builder.AddHint(MakeRange(te.begin, te.tryBlock->end));
 }
 
@@ -1201,8 +1199,8 @@ void ParserImpl::DiagUnexpectedWhere(const Token& token)
     });
     CJC_ASSERT(iter != chainedAST.rend() && "cannot find declaration");
     auto decl = StaticAs<ASTKind::DECL>(*iter);
-    auto hintRange = decl->astKind == ASTKind::EXTEND_DECL ? MakeRange(decl->keywordPos, "extend")
-                                                           : MakeRange(decl->identifier);
+    auto hintRange =
+        decl->astKind == ASTKind::EXTEND_DECL ? MakeRange(decl->keywordPos, "extend") : MakeRange(decl->identifier);
     builder.AddHint(hintRange);
 }
 
@@ -1328,9 +1326,7 @@ void ParserImpl::DiagUnrecognizedExprInWhen(const Expr& expr, const Annotation& 
 
 void ParserImpl::DiagDeprecatedArgumentNotLitConst(const Node& node)
 {
-    ParseDiagnoseRefactor(
-        DiagKindRefactor::parse_deprecated_arguments_must_be_lit_const_expr,
-        node);
+    ParseDiagnoseRefactor(DiagKindRefactor::parse_deprecated_arguments_must_be_lit_const_expr, node);
 }
 
 void ParserImpl::DiagDeprecatedArgumentDuplicated(
@@ -1338,10 +1334,7 @@ void ParserImpl::DiagDeprecatedArgumentDuplicated(
     const std::string& parameterName
 )
 {
-    ParseDiagnoseRefactor(
-        DiagKindRefactor::parse_deprecated_argument_duplication,
-        node,
-        parameterName);
+    ParseDiagnoseRefactor(DiagKindRefactor::parse_deprecated_argument_duplication, node, parameterName);
 }
 
 void ParserImpl::DiagDeprecatedWrongArgumentType(
@@ -1350,11 +1343,7 @@ void ParserImpl::DiagDeprecatedWrongArgumentType(
     const std::string& expectedType
 )
 {
-    ParseDiagnoseRefactor(
-        DiagKindRefactor::parse_deprecated_wrong_argument,
-        node,
-        paramName,
-        expectedType);
+    ParseDiagnoseRefactor(DiagKindRefactor::parse_deprecated_wrong_argument, node, paramName, expectedType);
 }
 
 void ParserImpl::DiagDeprecatedUnknownArgument(
@@ -1362,10 +1351,7 @@ void ParserImpl::DiagDeprecatedUnknownArgument(
     const std::string& name
 )
 {
-    ParseDiagnoseRefactor(
-        DiagKindRefactor::parse_deprecated_unknown_argument,
-        arg,
-        name);
+    ParseDiagnoseRefactor(DiagKindRefactor::parse_deprecated_unknown_argument, arg, name);
 }
 
 void ParserImpl::DiagDeprecatedEmptyStringArgument(
@@ -1373,10 +1359,7 @@ void ParserImpl::DiagDeprecatedEmptyStringArgument(
     const std::string& paramName
 )
 {
-    ParseDiagnoseRefactor(
-        DiagKindRefactor::parse_deprecated_empty_string_argument,
-        node,
-        paramName);
+    ParseDiagnoseRefactor(DiagKindRefactor::parse_deprecated_empty_string_argument, node, paramName);
 }
 
 void ParserImpl::DiagDeprecatedInvalidTarget(
@@ -1384,10 +1367,7 @@ void ParserImpl::DiagDeprecatedInvalidTarget(
     const std::string& invalidTarget
 )
 {
-    ParseDiagnoseRefactor(
-        DiagKindRefactor::parse_deprecated_invalid_target,
-        node,
-        invalidTarget);
+    ParseDiagnoseRefactor(DiagKindRefactor::parse_deprecated_invalid_target, node, invalidTarget);
 }
 
 void ParserImpl::DiagUnexpectedTypeIn(

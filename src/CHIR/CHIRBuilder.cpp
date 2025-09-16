@@ -50,7 +50,7 @@ BlockGroup* CHIRBuilder::CreateBlockGroup(Func& func)
 Block* CHIRBuilder::CreateBlock(BlockGroup* parentGroup)
 {
     CJC_NULLPTR_CHECK(parentGroup);
-    auto func = parentGroup->GetParentFunc();
+    auto func = parentGroup->GetTopLevelFunc();
     CJC_NULLPTR_CHECK(func);
     std::string idstr = "#" + std::to_string(func->GenerateBlockId());
 
@@ -65,7 +65,7 @@ Block* CHIRBuilder::CreateBlock(BlockGroup* parentGroup)
 // split one block to two blocks, and remove separator
 std::pair<Block*, Block*> CHIRBuilder::SplitBlock(const Expression& separator)
 {
-    auto block1 = separator.GetParent();
+    auto block1 = separator.GetParentBlock();
     auto block2 = CreateBlock(block1->GetParentBlockGroup());
     bool needMove = false;
     for (auto expr : block1->GetExpressions()) {
@@ -99,8 +99,8 @@ Parameter* CHIRBuilder::CreateParameter(Type* ty, const DebugLocation& loc, Func
 
 Parameter* CHIRBuilder::CreateParameter(Type* ty, const DebugLocation& loc, Lambda& parentLambda)
 {
-    CJC_NULLPTR_CHECK(parentLambda.GetParentFunc());
-    auto id = parentLambda.GetParentFunc()->GenerateLocalId();
+    CJC_NULLPTR_CHECK(parentLambda.GetTopLevelFunc());
+    auto id = parentLambda.GetTopLevelFunc()->GenerateLocalId();
     auto param = new Parameter(ty, "%" + std::to_string(id), parentLambda);
     param->EnableAttr(Attribute::READONLY);
     param->SetDebugLocation(loc);
@@ -259,4 +259,19 @@ std::unordered_set<GenericType*> CHIRBuilder::GetAllGenericTypes() const
         }
     }
     return result;
+}
+
+void CHIRBuilder::EnableIRCheckerAfterPlugin()
+{
+    enableIRCheckerAfterPlugin = true;
+}
+
+void CHIRBuilder::DisableIRCheckerAfterPlugin()
+{
+    enableIRCheckerAfterPlugin = false;
+}
+
+bool CHIRBuilder::IsEnableIRCheckerAfterPlugin() const
+{
+    return enableIRCheckerAfterPlugin;
 }

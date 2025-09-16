@@ -17,7 +17,7 @@ set(OTHER_FLAGS "-fno-omit-frame-pointer -pipe -fno-common -fno-strict-aliasing 
 set(GCOV_FLAGS "-fno-inline -O0 -fprofile-arcs -ftest-coverage")
 set(ASAN_FLAGS "-fsanitize=address -fno-omit-frame-pointer")
 set(TSAN_FLAGS "-fsanitize=thread")
-set(HWASAN_FLAGS "-fsanitize=hwaddress -fno-omit-frame-pointer")
+set(HWASAN_FLAGS "-shared-libsan -fsanitize=hwaddress -fno-omit-frame-pointer -fno-emulated-tls -fno-lto -fno-whole-program-vtables")
 
 set(LINK_FLAGS "-Wl,-z,relro,-z,now,-z,noexecstack")
 set(STRIP_FLAG "-s")

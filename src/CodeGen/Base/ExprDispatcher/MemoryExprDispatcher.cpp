@@ -30,7 +30,8 @@ llvm::Value* HandleLoadExpr(IRBuilder2& irBuilder, const CHIR::Load& load)
         if (IsGetElementRefOfClass(*localVar->GetExpr(), irBuilder.GetCGContext().GetCHIRBuilder())) {
             auto getEleRefExpr = StaticCast<const CHIR::GetElementRef*>(localVar->GetExpr());
             auto locationCHIRType = DeRef(*getEleRefExpr->GetLocation()->GetType());
-            if (locationCHIRType->IsClass() && IsWeakRefClass(*StaticCast<CHIR::ClassType*>(locationCHIRType)->GetClassDef())) {
+            if (locationCHIRType->IsClass() &&
+                IsWeakRefClass(*StaticCast<CHIR::ClassType*>(locationCHIRType)->GetClassDef())) {
                 auto addr = value.GetRawValue();
                 auto base = irBuilder.GetCGContext().GetBasePtrOf(addr);
                 CJC_NULLPTR_CHECK(base);
@@ -192,7 +193,7 @@ llvm::Value* HandleMemoryExpression(IRBuilder2& irBuilder, const CHIR::Expressio
             auto& alloca = StaticCast<const CHIR::Allocate&>(chirExpr);
             // Opt: For the function that returns value by an `sret` argument,
             // we don't need to allocate another place to store the return value.
-            if (auto parentFunc = alloca.GetParentFunc();
+            if (auto parentFunc = alloca.GetTopLevelFunc();
                 parentFunc && parentFunc->GetReturnValue() == alloca.GetResult()) {
                 auto llvmFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(parentFunc)->GetRawFunction();
                 if (llvmFunc->hasStructRetAttr()) {

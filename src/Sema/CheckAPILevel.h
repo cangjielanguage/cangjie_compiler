@@ -79,9 +79,8 @@ using SysCapSet = std::vector<std::string>;
 
 class APILevelAnnoChecker {
 public:
-    APILevelAnnoChecker(
-        const CompilerInstance& ci, DiagnosticEngine& diag, TypeManager& typeManager, ImportManager& importManager)
-        : ci(ci), diag(diag), typeManager(typeManager), importManager(importManager)
+    APILevelAnnoChecker(CompilerInstance& ci, DiagnosticEngine& diag, ImportManager& importManager)
+        : ci(ci), diag(diag), importManager(importManager)
     {
         ParseOption();
     }
@@ -99,15 +98,9 @@ private:
     void CheckIfAvailableExpr(AST::IfAvailableExpr& iae, APILevelAnnoInfo& scopeAPILevel);
     bool IsAnnoAPILevel(Ptr<AST::Annotation> anno, const AST::Decl& decl);
 
-    void DesugarIfAvailableExprInTypeCheck(AST::IfAvailableExpr& iae);
-    OwnedPtr<AST::Expr> DesugarIfAvailableLevelCondition(AST::IfAvailableExpr& iae);
-    OwnedPtr<AST::Expr> DesugarIfAvailableSyscapCondition(AST::IfAvailableExpr& iae);
-    OwnedPtr<AST::Expr> DesugarIfAvailableCondition(AST::IfAvailableExpr& iae);
-
 private:
-    const CompilerInstance& ci;
+    CompilerInstance& ci;
     DiagnosticEngine& diag;
-    TypeManager& typeManager;
     ImportManager& importManager;
 
     LevelType globalLevel{0};

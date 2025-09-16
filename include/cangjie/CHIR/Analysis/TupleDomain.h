@@ -7,7 +7,7 @@
 #ifndef CANGJIE_CHIR_ANALYSIS_TUPLE_DOMAIN_H
 #define CANGJIE_CHIR_ANALYSIS_TUPLE_DOMAIN_H
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 
 namespace Cangjie::CHIR {
 /// Represents a tuple, a struct or a value-type enum.

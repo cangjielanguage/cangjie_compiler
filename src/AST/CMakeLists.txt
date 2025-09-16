@@ -13,7 +13,8 @@ set(LIBAST_FFI_AST
     Clone.cpp
     Create.cpp
     Utils.cpp
-    Identifier.cpp)
+    Identifier.cpp
+    Comment.cpp)
 set(AST_EXTRA_SRC
     Cache.cpp
     PrintNode.cpp

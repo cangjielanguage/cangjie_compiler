@@ -19,6 +19,8 @@
 #include "cangjie/CHIR/Type/ExtendDef.h"
 #include "cangjie/CHIR/Utils.h"
 #include "cangjie/Mangle/CHIRManglingUtils.h"
+#include "cangjie/Utils/CastingTemplate.h"
+#include "cangjie/Utils/CheckUtils.h"
 
 namespace Cangjie::CHIR {
 namespace {
@@ -56,7 +58,7 @@ Linkage GetFuncLinkage(const GlobalOptions& opts, const AST::FuncDecl& func)
     return func.linkage;
 }
 
-bool IsLocalConstFuncInStaticMemberMethod(const AST::FuncDecl& astFunc)
+bool IsLocalConstFuncInStaticMember(const AST::FuncDecl& astFunc)
 {
     if (!astFunc.isConst) {
         return false;
@@ -166,23 +168,12 @@ void AST2CHIR::CollectDeclsFromExtendDecl(AST::ExtendDecl& extendDecl)
 
 void AST2CHIR::CollectDeclsFromClassLikeDecl(AST::ClassLikeDecl& classLikeDecl)
 {
-    bool isJArray = IsInstantiatedJArray(classLikeDecl);
     auto& bodyDecls = classLikeDecl.GetMemberDecls();
     for (auto& member : bodyDecls) {
         // Skip the non-static member variable declaration
         if (member->astKind == AST::ASTKind::VAR_DECL && !member.get()->TestAttr(AST::Attribute::STATIC)) {
             continue;
         }
-        // All of call to JArray constructors will be desugared,
-        // so we can skip the useless constructor member directly.
-        // cangjie code:
-        // var jarr = JArray<Int64>(Array<Int64>())
-        // will be desugared to
-        // var jarr = Array<Int64>().toJArray().
-        if (isJArray && member->TestAttr(AST::Attribute::CONSTRUCTOR)) {
-            continue;
-        }
-
         CollectMemberDecl(*member);
     }
 }
@@ -191,21 +182,22 @@ void AST2CHIR::CollectInstantiatedDecls(const AST::Decl& decl)
 {
     /**
      * This function should only collect instantiated decls whose generic decl is in current package.
-     * if the generic decl is in upstream package, but responding instantiated decls is in current
-     * package, which should be collected by `CollectImportedGenericInstantiatedDecl`
+     * if the generic decl is in upstream package, but instantiated decls is in current package,
+     * which should be collected by `CollectImportedGenericInstantiatedDecl`
      */
     CJC_ASSERT(decl.TestAttr(AST::Attribute::GENERIC));
     if (decl.curFile->curPackage->fullPackageName != GetPackage()->GetName()) {
         return;
     }
-    auto instantiatedDecls = gim.GetInstantiatedDecls(decl);
+    if (!gim) {
+        return;
+    }
+    auto instantiatedDecls = gim->GetInstantiatedDecls(decl);
     // For bep, decl should be sorted by mangledName and position to make sequence stable.
     auto compare = [](const AST::Decl* d1, const AST::Decl* d2) {
         CJC_NULLPTR_CHECK(d1);
         CJC_NULLPTR_CHECK(d2);
-        if (d1->mangledName == d2->mangledName) {
-            return d1->fullPackageName < d2->fullPackageName;
-        }
+        CJC_ASSERT(d1->mangledName != d2->mangledName);
         return d1->mangledName < d2->mangledName;
     };
     std::set<AST::Decl*, decltype(compare)> sortedInstantiatedDecls(compare);
@@ -603,7 +595,7 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
     // in SEMA, if a local const func is declared in static member method, it will be set STATIC
     // STATIC can be set for local func in SEMA, but not in CHIR, especially for const local func,
     // it can be lifted to global func, we need to disable STATIC, otherwise, a wrong Func will be generated in CHIR
-    if (IsLocalConstFuncInStaticMemberMethod(astFunc)) {
+    if (IsLocalConstFuncInStaticMember(astFunc)) {
         chirFunc.DisableAttr(Attribute::STATIC);
     }
     // in CHIR, we treat `static.init()` as global function, not member function,
@@ -686,20 +678,8 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
     CJC_ASSERT(fn);
     SetFuncAttributeAndLinkageType(funcDecl, *fn);
     if (IsSrcCodeImportedGlobalDecl(funcDecl, opts)) {
-        auto importedFunc = builder.CreateImportedVarOrFunc<ImportedFunc>(
-            funcTy, mangledName, srcCodeName, rawMangledName, pkgName, genericParamTy);
-        importedFunc->AppendAttributeInfo(fn->GetAttributeInfo());
-        importedFunc->SetFuncKind(fn->GetFuncKind());
-        if (auto hostFunc = fn->GetParamDftValHostFunc()) {
-            auto it = srcCodeImportedFuncMap.find(StaticCast<Func*>(hostFunc));
-            CJC_ASSERT(it != srcCodeImportedFuncMap.end());
-            importedFunc->SetParamDftValHostFunc(*it->second);
-        }
-        importedFunc->SetFastNative(fn->IsFastNative());
-        importedFunc->Set<LinkTypeInfo>(Linkage::EXTERNAL);
-        srcCodeImportedFuncMap.emplace(fn, importedFunc);
+        srcCodeImportedFuncs.emplace(fn);
     }
-
     std::vector<DebugLocation> paramLoc;
     if (IsInstanceMember(funcDecl)) {
         paramLoc.emplace_back(INVALID_LOCATION);
@@ -846,14 +826,8 @@ void AST2CHIR::CreateAndCacheGlobalVar(const AST::VarDecl& decl, bool isLocalCon
         gv->EnableAttr(Attribute::CONST);
     }
     if (IsSrcCodeImportedGlobalDecl(decl, opts)) {
-        auto globalVar = VirtualCast<GlobalVar*>(gv);
-        auto importedVar = builder.CreateImportedVarOrFunc<ImportedVar>(
-            ty, mangledName, srcCodeName, rawMangledName, packageName);
-        importedVar->AppendAttributeInfo(globalVar->GetAttributeInfo());
-        importedVar->Set<LinkTypeInfo>(gv->Get<LinkTypeInfo>());
-        srcCodeImportedVarMap.emplace(globalVar, importedVar);
+        srcCodeImportedVars.emplace(VirtualCast<GlobalVar*>(gv));
     }
-
     globalCache.Set(decl, *gv);
 }
 
@@ -886,14 +860,90 @@ void AST2CHIR::CacheTopLevelDeclToGlobalSymbolTable()
     auto tr = CreateTranslator();
     for (auto var : globalAndStaticVars) {
         if (!var->TestAttr(AST::Attribute::STATIC)) {
-            tr.CreateAnnoFactoryFuncs(*var, nullptr);
+            auto fn = tr.CreateAnnoFactoryFuncSig(*var, nullptr);
+            if (fn.mangledName != "none" && Is<AST::VarDecl>(var)) {
+                globalCache.Get(*var)->SetAnnoInfo(std::move(fn));
+            }
             tr.CollectValueAnnotation(*var);
         }
     }
+
     CreateGlobalVarSignature(localConstVars.stableOrderValue, true);
     creatingLocalConstVarSignature = false;
     for (auto decl : std::as_const(localConstFuncs.stableOrderValue)) {
         CreateFuncSignatureAndSetGlobalCache(*decl);
+    }
+}
+
+void AST2CHIR::CreatePseudoDefForAnnoOnlyDecl(const AST::Decl& decl)
+{
+    if (chirType.Has(decl) || globalCache.TryGet(decl)) {
+        return;
+    }
+    auto tr = CreateTranslator();
+    CustomTypeDef* sym{};
+    if (auto cl = DynamicCast<AST::ClassLikeDecl>(&decl)) {
+        sym = builder.CreateClass(tr.TranslateLocation(decl), decl.identifier.Val(), decl.mangledName,
+            decl.fullPackageName, Is<AST::ClassDecl>(cl), false);
+    }
+    if (auto cl = DynamicCast<AST::StructDecl>(&decl)) {
+        sym = builder.CreateStruct(
+            tr.TranslateLocation(decl), decl.identifier.Val(), decl.mangledName, decl.fullPackageName, false);
+    }
+    if (auto cl = DynamicCast<AST::EnumDecl>(&decl)) {
+        sym = builder.CreateEnum(tr.TranslateLocation(decl), decl.identifier.Val(), decl.mangledName,
+            decl.fullPackageName, false, cl->hasEllipsis);
+    }
+    if (auto cl = DynamicCast<AST::ExtendDecl>(&decl)) {
+        sym = builder.CreateExtend(tr.TranslateLocation(decl), decl.mangledName, decl.fullPackageName, false);
+    }
+    if (sym) {
+        sym->EnableAttr(Attribute::SKIP_ANALYSIS);
+        chirType.SetGlobalNominalCache(decl, *sym);
+        return;
+    }
+    Value* val;
+    if (auto func = DynamicCast<AST::FuncDecl>(&decl)) {
+        auto fn = builder.CreateFunc(INVALID_LOCATION,
+            builder.GetType<FuncType>(
+                std::vector<Type*>{func->funcBody->paramLists[0]->params.size(), builder.GetInt64Ty()},
+                builder.GetUnitTy()),
+            decl.mangledName, decl.mangledName, decl.rawMangleName, decl.fullPackageName);
+        for (auto& pr : func->funcBody->paramLists[0]->params) {
+            builder.CreateParameter(builder.GetInt64Ty(), tr.TranslateLocation(*pr), *fn);
+        }
+        val = fn;
+    }
+    if (auto var = DynamicCast<AST::VarDecl>(&decl)) {
+        val = builder.CreateGlobalVar(tr.TranslateLocation(decl), builder.GetType<RefType>(builder.GetInt64Ty()),
+            decl.mangledName, decl.identifier, decl.rawMangleName, decl.fullPackageName);
+    }
+    // such function does not have body (because it is a pseudo func, just a hook for annoFactoryFunc).
+    // skip all CHIR pass on it.
+    val->EnableAttr(Attribute::SKIP_ANALYSIS);
+    globalCache.Set(decl, *val);
+}
+
+void AST2CHIR::CreateAnnoOnlyDeclSig(const AST::Decl& decl)
+{
+    // pseudo def of inheritable decls are create earlier in CacheCustomTypeDefToGlobalSymbolTable; do not create twice
+    if (auto type = DynamicCast<AST::InheritableDecl>(&decl)) {
+        for (auto& member : type->GetMemberDecls()) {
+            CreateAnnoOnlyDeclSig(*member);
+        }
+    } else {
+        CreatePseudoDefForAnnoOnlyDecl(decl);
+    }
+    auto tr = CreateTranslator();
+    if (auto funcDecl = DynamicCast<AST::FuncDecl>(&decl)) {
+        tr.CreateAnnoFactoryFuncsForFuncDecl(*funcDecl, nullptr);
+    } else {
+        auto fn = tr.CreateAnnoFactoryFuncSig(decl, nullptr);
+        if (fn.mangledName != "none") {
+            if (auto var = DynamicCast<AST::VarDecl>(&decl)) {
+                globalCache.Get(*var)->SetAnnoInfo(std::move(fn));
+            }
+        }
     }
 }
 
@@ -918,7 +968,7 @@ void AST2CHIR::CreateCustomTypeDef(const AST::Decl& decl, bool isImported)
     auto loc = TranslateLocationWithoutScope(builder.GetChirContext(), decl.begin, decl.end);
     auto& identifier = decl.identifier.Val();
     auto& mangledName = decl.mangledName;
-    auto& pkgName = decl.fullPackageName;
+    auto& pkgName = decl.genericDecl ? decl.genericDecl->fullPackageName : decl.fullPackageName;
     AST::Decl* uniqueDecl = nullptr;
     switch (decl.astKind) {
         case AST::ASTKind::CLASS_DECL:
@@ -975,6 +1025,12 @@ void AST2CHIR::CacheCustomTypeDefToGlobalSymbolTable()
     }
     for (auto decl : importedGenericInstantiatedNominalDecls) {
         CreateCustomTypeDef(*decl, false);
+    }
+
+    for (auto decl : annoOnlyDecls) {
+        if (Is<AST::InheritableDecl>(decl)) {
+            CreatePseudoDefForAnnoOnlyDecl(*decl);
+        }
     }
 }
 
@@ -1144,6 +1200,9 @@ void AST2CHIR::SetVTable()
     auto allCustomTypeDef = package->GetAllCustomTypeDef();
     auto vtableGenerator = VTableGenerator(builder);
     for (auto customDef : allCustomTypeDef) {
+        if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
+            continue;
+        }
         vtableGenerator.GenerateVTable(*customDef);
     }
     Utils::ProfileRecorder::Stop("TranslateNominalDecls", "SetVTable");
@@ -1155,11 +1214,17 @@ void AST2CHIR::SetVTable()
     IncreKind tempKind = opts.enIncrementalCompilation ? kind : IncreKind::INVALID;
     auto wrapper = WrapVirtualFunc(builder, cachedInfo, tempKind, targetIsWin);
     for (auto customDef : allCustomTypeDef) {
+        if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
+            continue;
+        }
         wrapper.CheckAndWrap(*customDef);
     }
     curVirtFuncWrapDep = wrapper.GetCurVirtFuncWrapDep();
     delVirtFuncWrapForIncr = wrapper.GetDelVirtFuncWrapForIncr();
     for (auto customDef : allCustomTypeDef) {
+        if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
+            continue;
+        }
         Translator::WrapMutFunc(builder, *customDef);
     }
     Utils::ProfileRecorder::Stop("TranslateNominalDecls", "SetWrapperFunc");

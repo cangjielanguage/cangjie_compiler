@@ -311,7 +311,7 @@ void ExternalLinkageAnalyzer::PerformPublicType(const OwnedPtr<Decl>& decl)
     if (!id) {
         return;
     }
-    for (auto& super : id->inheritedTypes) {
+    for (auto& super : id->GetAllSuperDecls()) {
         AddExportedTy(super->ty);
     }
 
@@ -581,6 +581,21 @@ void TypeChecker::TypeCheckerImpl::AnalyzeFunctionLinkage(Package& pkg) const
                     vd->linkage = Linkage::INTERNAL;
                 }
             });
+        }
+    });
+    // If has same name private decls are non-internal in one package diag error.
+    // NOTE: It should be remove when bug of PrivateDecl.ti is fixed.
+    //       The identifier for PrivateDecl.ti does not use the file name for differentiation.
+    //       The above modifications are incompatible, and the action is postponed.
+    std::unordered_map<std::string, Ptr<Decl>> privateDeclMap;
+    IterateToplevelDecls(pkg, [this, &privateDeclMap](OwnedPtr<Decl>& decl) {
+        if (decl->IsNominalDecl() && decl->TestAttr(Attribute::PRIVATE) && decl->linkage != Linkage::INTERNAL) {
+            auto ret = privateDeclMap.emplace(decl->identifier.Val(), decl.get());
+            if (!ret.second) {
+                auto builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor::sema_export_same_private_decl, MakeRange(ret.first->second->identifier));
+                builder.AddNote(MakeRange(decl->identifier), "same with private declaration");
+            }
         }
     });
 }

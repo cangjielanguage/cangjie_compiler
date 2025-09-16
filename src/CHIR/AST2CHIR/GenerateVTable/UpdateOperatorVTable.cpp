@@ -251,6 +251,9 @@ void UpdateOperatorVTable::RewriteVtable()
 void UpdateOperatorVTable::CollectVTableUsers()
 {
     for (auto def : package.GetAllCustomTypeDef()) {
+        if (def->TestAttr(Attribute::SKIP_ANALYSIS)) {
+            continue;
+        }
         for (const auto& it : def->GetVTable()) {
             auto parentDef = it.first->GetClassDef();
             auto resIt = vtableUsers.find(parentDef);

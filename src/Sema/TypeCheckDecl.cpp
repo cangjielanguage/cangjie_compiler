@@ -238,8 +238,8 @@ void TypeChecker::TypeCheckerImpl::HandIndexOperatorOverload(const FuncDecl& fd,
 void TypeChecker::TypeCheckerImpl::CheckVarDecl(ASTContext& ctx, VarDecl& vd)
 {
     if (vd.TestAttr(Attribute::IS_CHECK_VISITED)) {
-        // Unable to infer mutually recursive top level variables.
-        if (vd.TestAttr(Attribute::GLOBAL) && Ty::IsInitialTy(vd.ty)) {
+        // Unable to infer mutually recursive variables.
+        if (IsGlobalOrMember(vd) && Ty::IsInitialTy(vd.ty)) {
             DiagUnableToInferDecl(diag, vd);
             vd.ty = TypeManager::GetInvalidTy();
         }

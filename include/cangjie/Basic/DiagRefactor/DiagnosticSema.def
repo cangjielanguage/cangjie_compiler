@@ -124,6 +124,7 @@ ERROR(sema_return_type_incompatible,
 
 // Spawn
 ERROR(sema_spawn_arg_invalid, "invalid argument of spawn expr, user-defined `ThreadContext` types are prohibited now")
+WARNING(sema_spawn_arg_no_effect, UNGROUPED, "argument of spawn expr does not take effect at current backend")
 
 // Interface
 ERROR(sema_interface_call_with_unimplemented_call, "static invocation contains unimplemented static %s '%s'")
@@ -136,6 +137,11 @@ ERROR(sema_no_non_param_constructor_in_super_class,
 ERROR(sema_non_abstract_class_cannot_be_sealed, "non-abstract class cannot be modified by 'sealed'")
 ERROR(sema_static_variable_use_generic_parameter, "static member cannot depend on generic parameter '%s'")
 ERROR(sema_cstruct_cannot_impl_interfaces, "struct with @C cannot implement interfaces")
+ERROR(sema_class_need_abstract_modifier_or_func_need_impl,
+    "class '%s' missing abstract modifier, otherwise abstract function or property should be implemented")
+ERROR(sema_need_member_implementation, "implementation of function or property is needed in '%s'")
+ERROR(sema_export_same_private_decl,
+    "currently, it is not possible to export two private declarations with the same name")
 
 // Extend
 ERROR(sema_extend_function_cannot_overridden, "cannot override %s '%s' in extend of supertype")
@@ -183,32 +189,10 @@ ERROR(sema_inout_modify_heap_variable,
 ERROR(sema_inout_can_only_used_in_cfunc_calling, "'inout' can only be used in a 'CFunc' calling")
 ERROR(sema_inout_mismatch, "mismatch 'inout' of function argument with type '%s'")
 
-// Java interoperation
+// interoperation
 ERROR(sema_annotation_error_arg_num, "'%s' should have %s arg")
 ERROR(sema_annotation_error_arg_range, "'%s' only supports %s as arg")
 ERROR(sema_annotation_error_object, "'%s' can only modify %s")
-ERROR(sema_java_incorrect_use_between_types,
-    "type annotated with '@Java[\"ext\"]' can only be used within the declaration which has '@Java[\"ext\"]' "
-    "annotation")
-ERROR(sema_java_non_jtype, "%s type in %s '%s' with '@Java' must meet JType constraint")
-ERROR(sema_java_invalid_unit, "%s type in %s '%s' with '@Java' can not be 'Unit'")
-ERROR(sema_java_app_inherit_ext,
-    "only types annotated with '@Java[\"ext\"] can %s from a type annotated with '@Java[\"ext\"]'")
-ERROR(sema_java_unsupported_decl, "%s is not supported in %s '%s' annotated with '@Java'")
-ERROR(sema_missing_java_interop_annotation, "%s '%s' should have '@Java' annotation")
-ERROR(sema_generic_static_access, "cannot access static member with generic parameter in '@Java' types")
-ERROR(sema_primitive_type_as_generics_arg, "only reference types are available for '@Java' generics")
-ERROR(sema_meet_constraint_indirectly, "types that meet constraints by 'extend' cannot be used in '@Java' generics")
-ERROR(
-    sema_static_member_in_interface_must_has_body, "static functions in '@Java'-annotated interfaces must have a body")
-ERROR(sema_extend_a_java_type, "types annotated with '@Java' cannot be extended")
-ERROR(sema_generic_upper_bounds_must_be_java_in_java,
-    "generic type's upper bound in types annotated with '@Java' should be annotated with '@Java' too")
-ERROR(sema_define_java_annotation, "types annotated with '@Java' cannot be annotated with '@Annotation' together")
-ERROR(
-    sema_invalid_use_of_java_annotation, "imported Java annotations can only be used with types annotated with '@Java'")
-ERROR(sema_shadow_cannot_in_type_args,
-    "'%s' is not allowd to be used here as type argument, because it shadows field '%s' with its super type '%s'")
 
 // VArray
 ERROR(sema_varray_size_match, "mismatch 'VArray' type's size", "expected size is %s, found %s")
@@ -235,6 +219,17 @@ ERROR(sema_mock_doesnt_support_mocking,
 ERROR(sema_mock_frozen_required,
     "generic wrapper function '%s' for createMock/createSpy calls should be marked with @Frozen annotation")
 
+// effects
+ERROR(sema_command_handle_type_error, "the command handle type must implement 'effect.Command<T>'")
+ERROR(sema_command_resumption_mismatch, "the parameter type of the resumption ('%s') does not match the result type of the command ('%s')")
+ERROR(sema_implicit_resume_outside_handler, "'resume' outside of an immediate handler must have a resumption argument")
+ERROR(sema_resume_no_with, "a resumption of non-Unit type '%s' must have a 'with' or 'throwing' clause")
+ERROR(sema_mismatching_handle_block, "The type of this handle block is '%s', which mismatches the smallest common supertype '%s' of previous branches.")
+ERROR(sema_return_in_try_handle_block, "Return statements are not allowed within try/handle blocks")
+ERROR(sema_command_incompatible_type, "type '%s' does not implement compatible instantiations of 'Command<T>'")
+ERROR(sema_resume_throwing_mismatch_type, "the type of the `resume throwing` must be a subtype of core.Exception or core.Error")
+WARNING(sema_useless_command_type, UNUSED, "useless command type")
+
 // @Deprecated - call-site errors:
 ERROR(sema_deprecated_error, "%s '%s' is deprecated%s%s", "deprecated")
 WARNING(sema_deprecated_warning, DEPRECATED, "%s '%s' is deprecated%s%s", "deprecated")
@@ -258,5 +253,10 @@ ERROR(sema_apilevel_ref_higher,
 WARNING(sema_apilevel_syscap_warning, APILEVEL_CHECK, "inappropriate syscap '%s'")
 ERROR(sema_apilevel_syscap_error, "inappropriate syscap '%s'")
 ERROR(sema_apilevel_multi_diff_syscap, "declaration mark with different syscap")
+ERROR(sema_ifavailable_level_limit,
+    "`@IfAvaliable` feature is not avaliable in device where the APILevel is less than 19 due to missing capatability "
+    "in ROM")
+
+WARNING(sema_unused_import, UNUSED, "unused import '%s'", "unused import")
 
 ERROR(sema_diag_end, "")

@@ -44,7 +44,6 @@ uint64_t Translator::GetVarMemberIndex(const AST::VarDecl& varDecl)
                 index++;
             }
         }
-        InternalError("illegal index.");
     } else if (outerDecl->astKind == ASTKind::CLASS_DECL) {
         auto classDecl = StaticCast<ClassDecl*>(outerDecl);
         auto classTy = StaticCast<ClassType*>(GetNominalSymbolTable(*classDecl)->GetType());
@@ -59,11 +58,8 @@ uint64_t Translator::GetVarMemberIndex(const AST::VarDecl& varDecl)
                 index++;
             }
         }
-        InternalError("illegal index.");
-    } else {
-        CJC_ASSERT(false && "unknown astkind in GetVarMemberIndex");
     }
-    InternalError("Certainly won't come here");
+    CJC_ABORT();
     return 0;
 }
 
@@ -122,28 +118,14 @@ Translator::LeftValueInfo Translator::TranslateEnumMemberVarRef(const AST::RefEx
     }
 }
 
-// Does AST provide an better way to check imported global var here?
-static bool IsImportedGlobal(const AST::Decl& var)
-{
-    return var.TestAttr(AST::Attribute::GLOBAL) ||
-        (var.TestAttr(AST::Attribute::IMPORTED) && var.outerDecl == nullptr) ||
-        var.TestAttr(AST::Attribute::STATIC);
-}
-
 Translator::LeftValueInfo Translator::TranslateVarRefAsLeftValue(const AST::RefExpr& refExpr)
 {
     auto target = refExpr.ref.target;
     CJC_ASSERT(target);
     CJC_ASSERT(target->astKind == AST::ASTKind::VAR_DECL || target->astKind == AST::ASTKind::FUNC_PARAM);
 
-    // Case 1: global or static variable
-    if (IsImportedGlobal(*target)) {
-        auto val = GetSymbolTable(*target);
-        return LeftValueInfo(val, {});
-    }
-
-    // Case 2: non static member variable
-    if (target->outerDecl != nullptr) {
+    // Case 1: non static member variable
+    if (target->outerDecl != nullptr && !target->TestAttr(AST::Attribute::STATIC)) {
         // Case 2.1: non static member variable in struct
         if (target->outerDecl->astKind == AST::ASTKind::STRUCT_DECL) {
             return TranslateStructMemberVarRefAsLeftValue(refExpr);
@@ -156,21 +138,11 @@ Translator::LeftValueInfo Translator::TranslateVarRefAsLeftValue(const AST::RefE
         if (target->outerDecl->astKind == AST::ASTKind::ENUM_DECL) {
             return TranslateEnumMemberVarRef(refExpr);
         }
-        // Case 2.4: func param
-        if (target->outerDecl->astKind == AST::ASTKind::FUNC_DECL) {
-            auto val = GetSymbolTable(*target);
-            return LeftValueInfo(val, {});
-        }
     }
 
-    // Case 3: local variable
-    if (target->outerDecl == nullptr) {
-        auto val = GetSymbolTable(*target);
-        return LeftValueInfo(val, {});
-    }
-
-    CJC_ABORT();
-    return LeftValueInfo(nullptr, {});
+    // Case 2: global var, static member var, local var, func param
+    auto val = GetSymbolTable(*target);
+    return LeftValueInfo(val, {});
 }
 
 Translator::LeftValueInfo Translator::TranslateRefExprAsLeftValue(const AST::RefExpr& refExpr)
@@ -217,31 +189,11 @@ Value* Translator::TranslateVarRef(const AST::RefExpr& refExpr)
     auto varLeftValueBase = varLeftValueInfo.base;
     auto varLeftValueBaseTy = varLeftValueInfo.base->GetType();
 
-    // Case 2.1: global or static variables, which are always translated into reference like `var` due to
-    // initialization, thus we need to do a load
-    if (IsImportedGlobal(*target)) {
-        CJC_ASSERT(varLeftValueInfo.path.empty());
-        /**
-         * This is only a temporary solution.
-         * When target is a local variable and its parent func is a source imported or generic instantiated func decl,
-         * `target` is set imported attribute, we need to determine if we should remove the attribute
-         * and regard `target` and its parent func as declarations in current package.
-         */
-        if (varLeftValueBaseTy->IsReferenceTypeWithRefDims(CLASS_REF_DIM) ||
-            varLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(1)) {
-            auto loadVarRightValue = CreateAndAppendExpression<Load>(
-                loc, StaticCast<RefType*>(varLeftValueBaseTy)->GetBaseType(), varLeftValueBase, currentBlock);
-            return loadVarRightValue->GetResult();
-        }
-        CJC_ASSERT(varLeftValueBaseTy->IsReferenceTypeWithRefDims(1) ||
-            varLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(0));
-        return varLeftValueBase;
-    }
-    // Case 2.1 non static member variables
-    if (target->outerDecl != nullptr) {
+    // Case 1 non static member variables
+    if (target->outerDecl != nullptr && !target->TestAttr(AST::Attribute::STATIC)) {
         auto path = varLeftValueInfo.path;
 
-        // Case 2.1.1: non static member variables in struct or class
+        // Case 1.1: non static member variables in struct or class
         if (target->outerDecl->astKind == AST::ASTKind::STRUCT_DECL ||
             target->outerDecl->astKind == AST::ASTKind::CLASS_DECL) {
             auto thisCustomType = StaticCast<CustomType*>(varLeftValueBaseTy->StripAllRefs());
@@ -261,58 +213,42 @@ Value* Translator::TranslateVarRef(const AST::RefExpr& refExpr)
                 return getField->GetResult();
             }
         }
-        // Case 2.1.2: variable case in enum
+        // Case 1.2: variable case in enum
         if (target->outerDecl->astKind == AST::ASTKind::ENUM_DECL) {
             CJC_ASSERT(path.empty());
             return varLeftValueBase;
         }
-        // Case 2.1.3: variable as func param
-        if (target->outerDecl->astKind == AST::ASTKind::FUNC_DECL) {
-            CJC_ASSERT(path.empty());
-            if (target->outerDecl->ty->IsCFunc()) {
-                if (varLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(1)) {
-                    auto loadVarRightValue = CreateAndAppendExpression<Load>(
-                        loc, StaticCast<RefType*>(varLeftValueBaseTy)->GetBaseType(), varLeftValueBase, currentBlock);
-                    return loadVarRightValue->GetResult();
-                }
-            }
-            CJC_ASSERT(varLeftValueBaseTy->IsReferenceTypeWithRefDims(1) ||
-                varLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(0));
-            return varLeftValueBase;
-        }
     }
-    // Case 2.2 local variable
-    if (target->outerDecl == nullptr) {
-        CJC_ASSERT(varLeftValueInfo.path.empty());
-        if (varLeftValueBaseTy->IsReferenceTypeWithRefDims(CLASS_REF_DIM) ||
-            varLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(1)) {
-            auto loadVarRightValue = CreateAndAppendExpression<Load>(
-                loc, StaticCast<RefType*>(varLeftValueBaseTy)->GetBaseType(), varLeftValueBase, currentBlock);
-            return loadVarRightValue->GetResult();
-        }
-        CJC_ASSERT(varLeftValueBaseTy->IsReferenceTypeWithRefDims(1) ||
-            varLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(0));
-        return varLeftValueBase;
+    // Case 2: global var, static member var, local var, func param
+    CJC_ASSERT(varLeftValueInfo.path.empty());
+    if (varLeftValueBaseTy->IsReferenceTypeWithRefDims(CLASS_REF_DIM) ||
+        varLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(1)) {
+        auto loadVarRightValue = CreateAndAppendExpression<Load>(
+            loc, StaticCast<RefType*>(varLeftValueBaseTy)->GetBaseType(), varLeftValueBase, currentBlock);
+        return loadVarRightValue->GetResult();
     }
-
-    CJC_ABORT();
-    return nullptr;
+    CJC_ASSERT(varLeftValueBaseTy->IsReferenceTypeWithRefDims(1) ||
+        varLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(0));
+    return varLeftValueBase;
 }
 
-CalleeInfo Translator::GetStructFuncType(const AST::RefExpr& expr, const AST::FuncDecl& funcDecl)
+Translator::InstCalleeInfo Translator::GetCustomTypeFuncRef(const AST::RefExpr& expr, const AST::FuncDecl& funcDecl)
 {
     auto funcType = StaticCast<FuncType*>(TranslateType(*expr.ty));
     auto paramTys = funcType->GetParamTypes();
     CJC_ASSERT(funcDecl.outerDecl != nullptr);
-    auto thisTy = TranslateType(*funcDecl.outerDecl->ty);
-    if (IsStructMutFunction(funcDecl)) {
+    auto currentFunc = GetCurrentFunc();
+    CJC_NULLPTR_CHECK(currentFunc);
+    auto outerDef = currentFunc->GetParentCustomTypeDef();
+    CJC_NULLPTR_CHECK(outerDef);
+    Type* thisTy = outerDef->GetType();
+    if (thisTy->IsClass() || IsStructMutFunction(funcDecl)) {
         thisTy = builder.GetType<RefType>(thisTy);
     }
     if (!funcDecl.TestAttr(AST::Attribute::STATIC)) {
         paramTys.insert(paramTys.begin(), thisTy);
     }
-    // need to calculate thisTy and instParentCustomDefTy
-    return CalleeInfo{thisTy, nullptr, paramTys, funcType->GetReturnType()};
+    return InstCalleeInfo{thisTy, thisTy, paramTys, funcType->GetReturnType()};
 }
 
 Value* Translator::TranslateMemberFuncRef(const AST::RefExpr& refExpr)
@@ -323,14 +259,13 @@ Value* Translator::TranslateMemberFuncRef(const AST::RefExpr& refExpr)
     Position pos = {unsigned(refExpr.begin.line), unsigned(refExpr.begin.column)};
 
     auto thisObj = GetImplicitThisParam();
-    // here might have bug, cause func might be defined in a super generic decl,
-    // thus give you a un-inst this type here
-    auto instFuncType = GetStructFuncType(refExpr, *StaticCast<FuncDecl*>(target));
+    auto instFuncType = GetCustomTypeFuncRef(refExpr, *StaticCast<FuncDecl*>(target));
     std::vector<Ptr<Type>> funcInstArgs;
     for (auto ty : refExpr.instTys) {
         funcInstArgs.emplace_back(TranslateType(*ty));
     }
-    return WrapFuncMemberByLambda(*StaticCast<FuncDecl*>(target), pos, thisObj, instFuncType, funcInstArgs, false);
+    return WrapFuncMemberByLambda(
+        *StaticCast<FuncDecl*>(target), pos, thisObj, nullptr, instFuncType, funcInstArgs, false);
 }
 
 /// Returns true if \ref expr is to be translated to a InvokeStatic call after wrapping function into lambda.
@@ -352,7 +287,7 @@ static bool IsInvokeStaticAccess(const AST::RefExpr& ref)
     if (parent->ty->HasGeneric()) {
         return true;
     }
-    return parent->TestAttr(AST::Attribute::OPEN) || Is<AST::InterfaceDecl>(parent);
+    return parent->IsOpen();
 }
 
 Value* Translator::TranslateFuncRefInstArgs(const AST::RefExpr& refExpr, Value& originalFunc)
@@ -408,6 +343,7 @@ Value* Translator::TranslateFuncRefInstArgs(const AST::RefExpr& refExpr, Value& 
      * }
     */
     // emplace back `T1` and `T2`
+    CJC_ASSERT(outerDeclaredTypes.size() >= refExpr.instTys.size());
     for (size_t i = 0; i < outerDeclaredTypes.size() - refExpr.instTys.size(); ++i) {
         instArgs.emplace_back(outerDeclaredTypes[i]);
     }
@@ -439,13 +375,12 @@ Value* Translator::TranslateStaticAccessAsLambda(const AST::RefExpr& ref)
 {
     auto target = StaticCast<AST::FuncDecl>(ref.ref.target);
     Position pos = {unsigned(target->begin.line), unsigned(target->begin.column)};
-    auto instFuncType = GetStructFuncType(ref, *target);
+    auto instFuncType = GetCustomTypeFuncRef(ref, *target);
     std::vector<Ptr<Type>> funcInstArgs;
     for (auto ty : ref.instTys) {
         funcInstArgs.emplace_back(TranslateType(*ty));
     }
-    auto lambda = WrapFuncMemberByLambda(*target, pos, nullptr, instFuncType, funcInstArgs, false);
-    return lambda;
+    return WrapFuncMemberByLambda(*target, pos, nullptr, nullptr, instFuncType, funcInstArgs, false);
 }
 
 Value* Translator::TranslateFuncRef(const AST::RefExpr& refExpr)
@@ -455,53 +390,30 @@ Value* Translator::TranslateFuncRef(const AST::RefExpr& refExpr)
     CJC_ASSERT(target->astKind == AST::ASTKind::FUNC_DECL);
     auto loc = TranslateLocation(refExpr);
 
-    // Case 1: global or static func
-    if (target->outerDecl == nullptr || target->TestAttr(AST::Attribute::STATIC)) {
-        // this might not hold any more in new generic solution
-        // If the target is static and abstract, will translate to Constant(null).
-        // Interface's static function calling abstract static function does not need to be generated during
-        // codegen.
-        if (target->TestAttr(AST::Attribute::ABSTRACT)) {
-            auto curFunc = GetCurrentFunc();
-            CJC_NULLPTR_CHECK(curFunc);
-
-            auto targ = refExpr.ref.target;
-            CJC_ASSERT(targ->astKind == ASTKind::FUNC_DECL);
-            // should use loc instead of pos
-            Position pos = {unsigned(refExpr.begin.line), unsigned(refExpr.begin.column)};
-
-            // here might have bug, cause func might be defined in a super generic decl,
-            // thus give you a un-inst this type here
-            auto instFuncType = GetStructFuncType(refExpr, *StaticCast<FuncDecl*>(targ));
-            std::vector<Ptr<Type>> funcInstArgs;
-            for (auto ty : refExpr.instTys) {
-                funcInstArgs.emplace_back(TranslateType(*ty));
-            }
-            return WrapFuncMemberByLambda(
-                *StaticCast<FuncDecl*>(targ), pos, nullptr, instFuncType, funcInstArgs, false);
-        } else {
-            auto targetFunc = GetSymbolTable(*target);
-            // if the ref expr contains type instantiation args, we need to create `GetInstantiateValue`
-            // expression to carry the info
-            return TranslateFuncRefInstArgs(refExpr, *targetFunc);
-        }
-    }
-
-    // Case 2: non static member func
-    if (target->outerDecl != nullptr && target->outerDecl->IsNominalDecl()) {
+    // Case 1: non static member func
+    if (!target->TestAttr(AST::Attribute::STATIC) &&
+        target->outerDecl != nullptr && target->outerDecl->IsNominalDecl()) {
         return TranslateMemberFuncRef(refExpr);
     }
+    // Case 2: static abstract function
+    if (target->TestAttr(AST::Attribute::STATIC, AST::Attribute::ABSTRACT)) {
+        auto curFunc = GetCurrentFunc();
+        CJC_NULLPTR_CHECK(curFunc);
+        CJC_ASSERT(target->astKind == ASTKind::FUNC_DECL);
+        // should use loc instead of pos
+        Position pos = {unsigned(refExpr.begin.line), unsigned(refExpr.begin.column)};
 
-    // Case 3: local func
-    if (target->outerDecl != nullptr && target->outerDecl->astKind == AST::ASTKind::FUNC_DECL) {
-        auto targetFunc = GetSymbolTable(*target);
-        // if the ref expr contains type instantiation args, we need to create `GetInstantiateValue`
-        // expression to carry the info
-        return TranslateFuncRefInstArgs(refExpr, *targetFunc);
+        auto instFuncType = GetCustomTypeFuncRef(refExpr, *StaticCast<FuncDecl*>(target));
+        std::vector<Ptr<Type>> funcInstArgs;
+        for (auto ty : refExpr.instTys) {
+            funcInstArgs.emplace_back(TranslateType(*ty));
+        }
+        return WrapFuncMemberByLambda(
+            *StaticCast<FuncDecl*>(target), pos, nullptr, nullptr, instFuncType, funcInstArgs, false);
     }
-
-    CJC_ABORT();
-    return nullptr;
+    // Case 3: global func or local func
+    auto targetFunc = GetSymbolTable(*target);
+    return TranslateFuncRefInstArgs(refExpr, *targetFunc);
 }
 
 Ptr<Value> Translator::Visit(const AST::RefExpr& refExpr)

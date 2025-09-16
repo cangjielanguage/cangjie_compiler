@@ -123,7 +123,7 @@ void CheckWhenAfterMacroExpand(Ptr<const Node> curNode, DiagnosticEngine& diag)
             auto annotation = std::find_if(decl->annotations.begin(), decl->annotations.end(),
                 [](auto& anno) { return anno->kind == AST::AnnotationKind::WHEN; });
             if (annotation != decl->annotations.end()) {
-                diag.Diagnose(**annotation, DiagKind::conditional_compilation_unexpected_after_macro);
+                diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_unexpected_after_macro, **annotation);
             }
         }
         return VisitAction::WALK_CHILDREN;
@@ -169,8 +169,9 @@ void MacroExpansion::CollectMacros(Package& package)
         CollectMacroEachFile(*file.get(), macroCollector);
 
         // it is certain that at least one of macCalls and macroDefFuncs will increase, because file->hasMacro is true.
-        CJC_ASSERT(ci->diag.GetErrorCount() != 0 || ((macroCollector.macCalls.size() > oldMacCallNum ||
-              macroCollector.macroDefFuncs.size() > oldMacDefNum) && "Collect Macro Failed."));
+        CJC_ASSERT(ci->diag.GetErrorCount() != 0 ||
+            ((macroCollector.macCalls.size() > oldMacCallNum || macroCollector.macroDefFuncs.size() > oldMacDefNum) &&
+                "Collect Macro Failed."));
     }
     // The macroCall is not collected by order strictly, need sort.
     std::sort(macroCollector.macCalls.begin(), macroCollector.macCalls.end(), [](auto& m1, auto& m2) -> bool {
@@ -295,19 +296,7 @@ void MacroExpansion::ReplaceEachMacroHelper(MacroCall& macroNode, PtrVector<Node
     if (!file) {
         return;
     }
-    if (auto node = std::get_if<OwnedPtr<Node>*>(&macroNode.replaceLoc); node) { // For all node.
-        if (newNodes.empty()) {
-            (void)ci->diag.Diagnose(macroNode.GetBeginPos(), DiagKind::macro_unexpect_no_expr);
-            return;
-        }
-        // match no selector, expected one expr or pattern.
-        if (newNodes.size() == 1 && DynamicCast<Node*>(newNodes[0].get())) {
-            (void)file->originalMacroCallNodes.emplace_back((*node)->release());
-            (*node)->reset(RawStaticCast<Node*>(newNodes[0].release()));
-            return;
-        }
-        (void)ci->diag.Diagnose(*newNodes.back(), DiagKind::macro_expect_one_expr_or_pattern);
-    } else if (auto expr = std::get_if<OwnedPtr<Expr>*>(&macroNode.replaceLoc); expr) { // For all expr.
+    if (auto expr = std::get_if<OwnedPtr<Expr>*>(&macroNode.replaceLoc); expr) { // For all expr.
         if (newNodes.empty()) {
             (void)ci->diag.Diagnose(macroNode.GetBeginPos(), DiagKind::macro_unexpect_no_expr);
             return;
@@ -411,8 +400,14 @@ void MacroExpansion::EvaluateMacros()
     return;
 }
 
+// In the LSP scenario, there may be concurrent calls to macro expansion when process cjd file. If Execute is executed
+// concurrently with the same macro declaration, it will cause a problem. The global lock is used to protect macro
+// expansion calls in different CompilerInstances.
+std::mutex globalMacroExpandLock;
+
 void MacroExpansion::Execute(Package& package)
 {
+    std::lock_guard<std::mutex> guard(globalMacroExpandLock);
     curPackage = &package;
     // Step 1: Collect macro-defs, macro-calls.
     CollectMacros(package);
@@ -441,8 +436,7 @@ void MacroExpansion::Execute(std::vector<OwnedPtr<AST::Package>>& packages)
         }
     }
     if (ci->invocation.globalOptions.enableCompileTest) {
-        TestEntryConstructor::ConstructTestSuite(
-            ci->invocation.globalOptions.moduleName, packages,
+        TestEntryConstructor::ConstructTestSuite(ci->invocation.globalOptions.moduleName, packages,
             ci->importManager.GetAllImportedPackages(), ci->invocation.globalOptions.compileTestsOnly);
     }
     for (auto& package : packages) {

@@ -409,7 +409,7 @@ TEST_F(PackageTest, DISABLED_LSPCompileWithConstraint)
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
     instance->code = R"(
-        main(){
+        main() {
             match (0) {
                 case x: ToString => 0
                 case x: ?Any => 1  // unreachable
@@ -528,6 +528,44 @@ TEST_F(PackageTest, DISABLED_ExportVisibleMembersForLSP)
     EXPECT_TRUE(std::equal(res.cbegin(), res.cend(), expected.cbegin(), expected.cend()));
 }
 
+TEST_F(PackageTest, DISABLED_ConstNotExportInitializerForLSP)
+{
+    diag.ClearError();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->invocation.globalOptions.implicitPrelude = true;
+    instance->invocation.globalOptions.compilePackage = true;
+    instance->code = R"(
+        package initializer
+
+        public class A{
+            static const INSTANCE = A()
+            private const init() {}
+        }
+    )";
+    instance->importManager.SetSourceCodeImportStatus(false);
+    instance->Compile(CompileStage::SEMA);
+    std::vector<uint8_t> astData;
+    instance->importManager.ExportAST(false, astData, *instance->GetSourcePackages()[0]);
+
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager.SetPackageCjoCache("initializer", astData);
+    instance->invocation.globalOptions.implicitPrelude = true;
+    instance->code = R"(
+        import initializer.*
+        main() {}
+    )";
+    instance->importManager.SetSourceCodeImportStatus(false);
+    instance->Compile(CompileStage::IMPORT_PACKAGE);
+    auto pd = instance->importManager.GetPackageDecl("initializer");
+    ASSERT_TRUE(pd != nullptr && !pd->srcPackage->files.empty() && !pd->srcPackage->files[0]->decls.empty());
+
+    for (auto it : pd->srcPackage->files[0]->decls[0]->GetMemberDeclPtrs()) {
+        EXPECT_TRUE(it->astKind == ASTKind::VAR_DECL);
+        EXPECT_TRUE(it->identifier == "INSTANCE");
+        EXPECT_TRUE(StaticCast<VarDecl*>(it)->initializer == nullptr);
+    }
+}
+
 TEST_F(PackageTest, DISABLED_ForbiddenRunInstantiation)
 {
     Cangjie::ICE::TriggerPointSetter iceSetter(static_cast<int64_t>(Cangjie::ICE::UNITTEST_TP));
@@ -644,7 +682,7 @@ TEST_F(PackageTest, DISABLED_LSPExportInterfaceFuncFromMacro)
             return
         }
     }
-    main(){}
+    main() { }
     )";
     instance->Compile(CompileStage::SEMA);
     std::vector<OwnedPtr<MacroExpandDecl>> meds;
@@ -671,7 +709,7 @@ TEST_F(PackageTest, DISABLED_ImportManager_API)
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
     instance->code = R"(
-    main(){}
+    main() { }
     )";
     instance->Compile(CompileStage::IMPORT_PACKAGE);
     auto members = instance->importManager.GetPackageMembers("default", "std.core");
@@ -1039,8 +1077,8 @@ TEST_F(PackageTest, DISABLED_UsageOfOnTheLeftOfPipeline)
             public func a(input:Int64){input}
         }
 
-        class B <: A{
-            public func test(){
+        class B <: A {
+            public func test() {
                 super.b |> super.a
             }
         }

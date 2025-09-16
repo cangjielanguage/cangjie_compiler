@@ -39,81 +39,51 @@ struct Position {
  */
 class DebugLocation {
 public:
-    DebugLocation(const std::string& absPath, unsigned fileID, const Position& beginPos, const Position& endPos,
-        const std::vector<int>& scopeInfo = {0})
+    DebugLocation(const std::string& absPath, unsigned fileID,
+        const Position& beginPos, const Position& endPos, const std::vector<int>& scopeInfo = {0})
         : absPath(&absPath), fileID(fileID), beginPos(beginPos), endPos(endPos), scopeInfo(scopeInfo)
     {
     }
+
     DebugLocation() : absPath(&INVALID_NAME), fileID(0), beginPos({0, 0}), endPos({0, 0})
     {
     }
     ~DebugLocation() = default;
 
-    Position GetBeginPos() const
-    {
-        return beginPos;
-    }
+    // ===--------------------------------------------------------------------===//
+    // Position
+    // ===--------------------------------------------------------------------===//
+    Position GetBeginPos() const;
+    void SetBeginPos(const Position& pos);
 
-    Position GetEndPos() const
-    {
-        return endPos;
-    }
+    Position GetEndPos() const;
+    void SetEndPos(const Position& pos);
 
-    void SetBeginPos(const Position& pos)
-    {
-        beginPos = pos;
-    }
+    bool IsInvalidPos() const;
 
-    void SetEndPos(const Position& pos)
-    {
-        endPos = pos;
-    }
+    bool IsInvalidMacroPos() const;
 
-    void SetScopeInfo(const std::vector<int>& scope)
-    {
-        scopeInfo = scope;
-    }
+    // ===--------------------------------------------------------------------===//
+    // Scope Info
+    // ===--------------------------------------------------------------------===//
+    std::vector<int> GetScopeInfo() const;
+    void SetScopeInfo(const std::vector<int>& scope);
 
-    /**
-     * @brief get the ID of the file.
-     */
-    unsigned GetFileID() const
-    {
-        return fileID;
-    }
+    // ===--------------------------------------------------------------------===//
+    // File Info
+    // ===--------------------------------------------------------------------===//
+    unsigned GetFileID() const;
 
-    const std::string& GetAbsPath() const
-    {
-        return *absPath;
-    }
+    const std::string& GetAbsPath() const;
 
-    std::vector<int> GetScopeInfo() const
-    {
-        return scopeInfo;
-    }
+    std::string GetFileName() const;
 
-    bool IsInvalidPos() const
-    {
-        return beginPos.line == 0 || beginPos.column == 0 || endPos.line == 0 || endPos.column == 0;
-    }
-
-    bool IsInvalidMacroPos() const
-    {
-        return beginPos.line == 0 || beginPos.column == 0;
-    }
-
-    std::string GetFileName() const
-    {
-#ifdef _WIN32
-        const std::string dirSeparator = "\\/";
-#else
-        const std::string dirSeparator = "/";
-#endif
-        auto fileName = absPath->substr(absPath->find_last_of(dirSeparator) + 1);
-        return fileName;
-    }
-
+    // ===--------------------------------------------------------------------===//
+    // Others
+    // ===--------------------------------------------------------------------===//
+    bool operator==(const DebugLocation& other) const;
     std::string ToString() const;
+    void Dump() const;
 
 private:
     const std::string* absPath; /* the absolute path of file */

@@ -108,7 +108,10 @@ Ptr<Value> Translator::TranslateVArrayAccess(const AST::SubscriptExpr& subscript
     }
     auto base = TranslateExprArg(*baseExpr);
     indexs.insert(indexs.begin(), base);
-    return CreateAndAppendExpression<Intrinsic>(loc, chirTy.TranslateType(*subscriptExpr.ty),
-        CHIR::IntrinsicKind::VARRAY_GET, std::vector<Value*>(indexs.begin(), indexs.end()), currentBlock)
-        ->GetResult();
+    auto callContext = IntrisicCallContext {
+        .kind = IntrinsicKind::VARRAY_GET,
+        .args = indexs
+    };
+    return CreateAndAppendExpression<Intrinsic>(
+        loc, chirTy.TranslateType(*subscriptExpr.ty), callContext, currentBlock)->GetResult();
 }

@@ -4,15 +4,15 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include <string>
+#include <vector>
+#include "gtest/gtest.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/PrintNode.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Parse/Parser.h"
-#include "gtest/gtest.h"
-#include <string>
-#include <vector>
 
 using namespace Cangjie;
 using namespace AST;

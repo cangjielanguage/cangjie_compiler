@@ -68,10 +68,7 @@ llvm::Constant* GenFieldsFnsOfTypeTemplate(
 {
     auto fieldNum = fieldsFn.size();
     auto i8PtrTy = llvm::Type::getInt8PtrTy(cgMod.GetLLVMContext());
-    if (fieldNum == 0) {
-        return llvm::ConstantPointerNull::get(i8PtrTy);
-    }
-
+    CJC_ASSERT(fieldNum > 0 && "field num should be at least 1");
     llvm::ArrayType* arrayType = llvm::ArrayType::get(fieldsFn[0]->getType(), fieldNum);
     llvm::GlobalVariable* globalArray = llvm::cast<llvm::GlobalVariable>(
         cgMod.GetLLVMModule()->getOrInsertGlobal(funcPrefixName + ".fieldTiFns", arrayType));

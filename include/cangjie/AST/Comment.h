@@ -32,6 +32,7 @@ struct Comment {
     CommentStyle style;
     CommentKind kind;
     Token info;
+    std::string ToString() const;
 };
 
 /// e.g.
@@ -45,11 +46,16 @@ struct Comment {
 // group 1: line 1, line 2, group 2: block 1, line 3, group 3: line 4, line6
 struct CommentGroup {
     std::vector<Comment> cms;
+    bool IsEmpty() const
+    {
+        return cms.empty();
+    }
+    std::string ToString() const;
 };
 
 ///
-/// Comments are classified into leadingComments, innerComments and trailingComments based on the location relationship between
-/// nodes and comments, For details, see the description in AttachComment.cpp.
+/// Comments are classified into leadingComments, innerComments and trailingComments based on the location relationship
+/// among nodes and comments, For details, see the description in AttachComment.cpp.
 /// e.g.
 /// /** c0 lead classDecl of class A */
 /// class A { // c1 lead var decl of a
@@ -71,6 +77,11 @@ struct CommentGroups {
     std::vector<CommentGroup> leadingComments;
     std::vector<CommentGroup> innerComments;
     std::vector<CommentGroup> trailingComments;
+    bool IsEmpty() const
+    {
+        return leadingComments.empty() && innerComments.empty() && trailingComments.empty();
+    }
+    std::string ToString() const;
 };
 
 /**

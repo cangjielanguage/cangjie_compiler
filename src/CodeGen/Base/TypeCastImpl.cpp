@@ -70,29 +70,17 @@ const std::unordered_map<std::string, std::pair<uint64_t, uint64_t>> G_FLOAT2INT
     {"Float64UInt64", {0xBFF0000000000000, 0x43F0000000000000}},
 };
 
-CHIR::Type::TypeKind GetTypeKindFromType(const CHIR::NumericType& ty)
-{
-    auto typeKind = ty.GetTypeKind();
-    constexpr uint64_t INT64_BITNESS = 64;
-    if (typeKind == CHIR::Type::TypeKind::TYPE_UINT_NATIVE) {
-        typeKind =
-            ty.GetBitness() == INT64_BITNESS ? CHIR::Type::TypeKind::TYPE_UINT64 : CHIR::Type::TypeKind::TYPE_UINT32;
-    } else if (typeKind == CHIR::Type::TypeKind::TYPE_INT_NATIVE) {
-        typeKind =
-            ty.GetBitness() == INT64_BITNESS ? CHIR::Type::TypeKind::TYPE_INT64 : CHIR::Type::TypeKind::TYPE_INT32;
-    }
-    return typeKind;
-}
-
 bool NeedsIntToUIntConversion(const CHIR::IntType& srcTy, const CHIR::Type::TypeKind typeKind)
 {
-    auto srcTypeKind = GetTypeKindFromType(srcTy);
+    auto srcTypeKind = srcTy.GetTypeKind();
     switch (srcTypeKind) {
         case CHIR::Type::TypeKind::TYPE_INT16:
             return typeKind >= CHIR::Type::TypeKind::TYPE_UINT16;
         case CHIR::Type::TypeKind::TYPE_INT32:
             return typeKind >= CHIR::Type::TypeKind::TYPE_UINT32;
         case CHIR::Type::TypeKind::TYPE_INT64:
+            return typeKind >= CHIR::Type::TypeKind::TYPE_UINT64;
+        case CHIR::Type::TypeKind::TYPE_INT_NATIVE:
             return typeKind >= CHIR::Type::TypeKind::TYPE_UINT64;
         default:
             return true;
@@ -229,9 +217,8 @@ llvm::Value* GenerateCondCheckLowerBound(
             if (targetTy.GetTypeKind() > srcTy.GetTypeKind()) {
                 return irBuilder.getTrue();
             }
-            auto typeKind = GetTypeKindFromType(targetTy);
-            auto minVal =
-                llvm::ConstantInt::get(srcValue.getType(), static_cast<uint64_t>(G_SIGNED_INT_MAP.at(typeKind).first));
+            auto minVal = llvm::ConstantInt::getSigned(
+                srcValue.getType(), GetIntMaxOrMin(targetTy.GetTypeKind(), false));
             return irBuilder.CreateICmpSLE(minVal, &srcValue, "i2i.lower");
         } else {
             CJC_ASSERT(IsUInt2UInt(srcTy, targetTy));
@@ -259,17 +246,17 @@ llvm::Value* GenerateCondCheckUpperBound(
 {
     auto& targetTy = StaticCast<const CHIR::IntType&>(targetType.GetOriginal());
     if constexpr (std::is_same_v<SrcT, CHIR::IntType>) {
-        auto typeKind = GetTypeKindFromType(targetTy);
+        auto typeKind = targetTy.GetTypeKind();
         if (IsUInt2Int(srcTy, targetTy)) {
             auto maxType = NeedsUIntToIntConversion(srcTy, typeKind) ? targetType.GetLLVMType() : srcValue.getType();
-            auto maxVal = llvm::ConstantInt::getSigned(maxType, G_SIGNED_INT_MAP.at(typeKind).second);
+            auto maxVal = llvm::ConstantInt::getSigned(maxType, GetIntMaxOrMin(typeKind, true));
             auto tempSrcValue = NeedsUIntToIntConversion(srcTy, typeKind)
                 ? irBuilder.CreateZExtOrTrunc(&srcValue, targetType.GetLLVMType())
                 : &srcValue;
             return irBuilder.CreateICmpULE(tempSrcValue, maxVal, "ui2i.upper");
         } else if (IsInt2UInt(srcTy, targetTy)) {
             auto maxType = NeedsIntToUIntConversion(srcTy, typeKind) ? targetType.GetLLVMType() : srcValue.getType();
-            auto maxVal = llvm::ConstantInt::get(maxType, G_UNSIGNED_INT_MAP.at(typeKind));
+            auto maxVal = llvm::ConstantInt::get(maxType, GetUIntMax(typeKind));
             auto tempSrcValue = NeedsIntToUIntConversion(srcTy, typeKind)
                 ? irBuilder.CreateZExtOrTrunc(&srcValue, targetType.GetLLVMType())
                 : &srcValue;
@@ -278,7 +265,7 @@ llvm::Value* GenerateCondCheckUpperBound(
             if (targetTy.GetTypeKind() > srcTy.GetTypeKind()) {
                 return irBuilder.getTrue();
             }
-            auto maxVal = llvm::ConstantInt::getSigned(srcValue.getType(), G_SIGNED_INT_MAP.at(typeKind).second);
+            auto maxVal = llvm::ConstantInt::getSigned(srcValue.getType(), GetIntMaxOrMin(typeKind, true));
             return irBuilder.CreateICmpSLE(&srcValue, maxVal, "i2i.upper");
         } else {
             CJC_ASSERT(IsUInt2UInt(srcTy, targetTy));
@@ -347,7 +334,7 @@ llvm::Value* GenerateOverflowSaturatingBasicBlock(IRBuilder2& irBuilder, const C
     // Emit lower.bound.overflow body.
     irBuilder.SetInsertPoint(lowerBoundOverflow);
     llvm::Value* retMin = targetTy.IsSigned()
-        ? llvm::ConstantInt::getSigned(targetType.GetLLVMType(), G_SIGNED_INT_MAP.at(targetTy.GetTypeKind()).first)
+        ? llvm::ConstantInt::getSigned(targetType.GetLLVMType(), GetIntMaxOrMin(targetTy.GetTypeKind(), false))
         : llvm::ConstantInt::get(targetType.GetLLVMType(), 0);
     irBuilder.CreateBr(satEndBB);
     // Emit lower.bound.ok body.
@@ -356,8 +343,8 @@ llvm::Value* GenerateOverflowSaturatingBasicBlock(IRBuilder2& irBuilder, const C
     /// Emit upper.bound.overflow body.
     irBuilder.SetInsertPoint(upperBoundOverflowBB);
     llvm::Value* retMax = targetTy.IsSigned()
-        ? llvm::ConstantInt::getSigned(targetType.GetLLVMType(), G_SIGNED_INT_MAP.at(targetTy.GetTypeKind()).second)
-        : llvm::ConstantInt::get(targetType.GetLLVMType(), G_UNSIGNED_INT_MAP.at(targetTy.GetTypeKind()));
+        ? llvm::ConstantInt::getSigned(targetType.GetLLVMType(), GetIntMaxOrMin(targetTy.GetTypeKind(), true))
+        : llvm::ConstantInt::get(targetType.GetLLVMType(), GetUIntMax(targetTy.GetTypeKind()));
     irBuilder.CreateBr(satEndBB);
     /// Emit upper.bound.ok body.
     irBuilder.SetInsertPoint(upperBoundOKBB);
@@ -623,9 +610,6 @@ llvm::Value* GenerateTypeCast(IRBuilder2& irBuilder, const CHIRTypeCastWrapper& 
     }
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    if (srcTy->IsClosure() && targetTy->IsClosure()) {
-        return srcValue;
-    }
     if (srcType->IsPointerType(1) && targetType->IsPointerType(1)) {
         return srcValue;
     }

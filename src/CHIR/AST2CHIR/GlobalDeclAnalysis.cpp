@@ -158,8 +158,8 @@ void GlobalDeclAnalysis::WalkAndCollectDep(const AST::Node& curNode, std::vector
                 return AST::VisitAction::WALK_CHILDREN;
             },
             [this, &visitor](const AST::FuncDecl& func) {
-                if (func.TestAttr(AST::Attribute::GENERIC)) {
-                    auto instantiatedDecls = gim.GetInstantiatedDecls(func);
+                if (gim && func.TestAttr(AST::Attribute::GENERIC)) {
+                    auto instantiatedDecls = gim->GetInstantiatedDecls(func);
                     for (auto& instance : instantiatedDecls) {
                         AST::Walker walker(instance, visitor);
                         walker.Walk();

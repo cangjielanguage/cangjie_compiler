@@ -315,7 +315,7 @@ void Gnu::HandleLLVMLinkOptions(
     // 3.2 pass to the linker in the order of input files (.o, .a, -l)
     SortInputlibraryFileAndAppend(tool, objFiles);
     // note that the pgo options must be inserted after those from SortInputlibraryFileAndAppend
-    tool.AppendArgIf(driverOptions.enablePgoInstrGen, "-u__llvm_profile_runtime");
+    tool.AppendArgIf(driverOptions.enablePgoInstrGen, "-u", "__llvm_profile_runtime");
     tool.AppendArgIf(driverOptions.enablePgoInstrGen || driverOptions.enableCoverage,
         FileUtil::JoinPath(cangjieLibPath, GetClangRTProfileLibraryName()));
     HandleSanitizer(tool, cangjieLibPath, gccLibPath);

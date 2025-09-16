@@ -196,7 +196,7 @@ bool Driver::ExecuteCompilation() const
     if (driverOptions->enableVerbose) {
         FrontendCmdPrint(*driverOptions.get(), cangjieHome, args);
     }
-    if (driverOptions->frontendOutputFiles.empty()) {
+    if (driverOptions->frontendOutputFiles.empty() || driverOptions->IsEmitCHIREnable()) {
         DeleteInstance(instance);
         return true;
     }

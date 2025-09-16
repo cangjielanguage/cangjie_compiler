@@ -695,6 +695,16 @@ OwnedPtr<ThrowExpr> CreateThrowExpr(Decl& var)
     return ret;
 }
 
+OwnedPtr<PerformExpr> CreatePerformExpr(Decl& var)
+{
+    auto refExpr = MakeOwned<RefExpr>();
+    refExpr->ref.identifier = var.identifier;
+    refExpr->ref.target = &var;
+    auto ret = MakeOwned<PerformExpr>();
+    ret->expr = std::move(refExpr);
+    return ret;
+}
+
 OwnedPtr<TypePattern> CreateTypePattern(
     OwnedPtr<Pattern> && pattern, OwnedPtr<Type> && type, Expr& selector
 )

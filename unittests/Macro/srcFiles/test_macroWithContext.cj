@@ -4,12 +4,15 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-#include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
+import child.*
 
-using namespace Cangjie::CHIR;
-using namespace Cangjie;
+@Outer
+class Demo {
+    @Inner var state = 1
+}
 
-Ptr<Value> Translator::Visit(const AST::SynchronizedExpr& expr)
-{
-    return TranslateASTNode(*expr.desugarExpr, *this);
+main(): Int64 {
+    let d = Demo()
+
+    return 0
 }

@@ -17,6 +17,7 @@
 #endif
 #include <fstream>
 #include <iostream>
+#include <utility>
 
 #include "cangjie/CHIR/CHIRBuilder.h"
 #include "cangjie/CHIR/CHIRContext.h"
@@ -30,16 +31,10 @@ namespace Cangjie::CHIR {
 
 class CHIRDeserializer::CHIRDeserializerImpl {
 public:
-    static void Deserialize(const std::string& fileName, Cangjie::CHIR::CHIRBuilder& chirBuilder)
-    {
-        CHIRDeserializerImpl deserializer(chirBuilder);
-        auto buffer = deserializer.Read(fileName);
-        deserializer.Run(PackageFormat::GetCHIRPackage(buffer));
-    }
-
-    void ConfigBase(const PackageFormat::Base* expr, Base& obj);
-    void ConfigValue(const PackageFormat::Value* expr, Value& obj);
-    void ConfigCustomTypeDef(const PackageFormat::CustomTypeDef* def, CustomTypeDef& obj);
+    void ConfigBase(const PackageFormat::Base* buffer, Base& obj);
+    void ConfigValue(const PackageFormat::Value* buffer, Value& obj);
+    void ConfigCustomTypeDef(const PackageFormat::CustomTypeDef* buffer, CustomTypeDef& obj);
+    void ConfigExpression(const PackageFormat::Expression* buffer, Expression& obj);
     template <typename T, typename FBT> T Create(const FBT* obj);
     template <typename T, typename FBT> std::vector<T> Create(const flatbuffers::Vector<FBT>* vec);
     template <typename T, typename FBT> T* Deserialize(const FBT* obj);
@@ -58,12 +53,13 @@ public:
 
     template <typename T, typename FBT> void Config(const FBT* buffer, T& obj);
 
-    void* Read(const std::string& fileName) const;
     void Run(const PackageFormat::CHIRPackage* package);
-    explicit CHIRDeserializerImpl(CHIRBuilder& chirBuilder) : builder(chirBuilder){};
+    explicit CHIRDeserializerImpl(CHIRBuilder& chirBuilder, bool compilePlatform = false)
+        : builder(chirBuilder), compilePlatform(compilePlatform){};
 
 private:
     Cangjie::CHIR::CHIRBuilder& builder;
+    bool compilePlatform = false;
     const PackageFormat::CHIRPackage* pool{};
 
     // Package object maps
@@ -74,7 +70,9 @@ private:
 
     // lazy GenericType config
     std::vector<std::pair<GenericType*, const PackageFormat::GenericType*>> genericTypeConfig;
-};
 
-#endif
+    void ResetImportedValuesUnderPackage();
+    void ResetImportedDefsUnderPackage();
+};
 }
+#endif

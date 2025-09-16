@@ -4,10 +4,10 @@
 #
 # See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-add_executable(CompilerInstanceTests CompilerInstanceTest.cpp ${CANGJIE_SRC_OBJECTS})
+add_executable(CompilerInstanceTest CompilerInstanceTest.cpp ${CANGJIE_SRC_OBJECTS})
 target_link_libraries(
-    CompilerInstanceTests
+    CompilerInstanceTest
     ${LINK_LIBS}
     GTest::gtest
     GTest::gtest_main)
-add_test(NAME CompilerInstanceTests COMMAND CompilerInstanceTests)
+add_test(NAME CompilerInstanceTest COMMAND CompilerInstanceTest)

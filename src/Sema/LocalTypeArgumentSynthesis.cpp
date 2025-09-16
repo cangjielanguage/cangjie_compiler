@@ -1154,17 +1154,26 @@ SolvingErrInfo LocalTypeArgumentSynthesis::MakeMsgConflictingConstraints(
 
 SolvingErrInfo LocalTypeArgumentSynthesis::MakeMsgNoConstraint(TyVar& v) const
 {
-    return { .style = SolvingErrStyle::NO_CONSTRAINT, .tyVar = &v };
+    return {
+        .style = SolvingErrStyle::NO_CONSTRAINT,
+        .tyVar = &v
+    };
 }
 
 SolvingErrInfo LocalTypeArgumentSynthesis::MakeMsgMismatchedArg(const Blame& blame) const
 {
-    return { .style = SolvingErrStyle::ARG_MISMATCH, .blames = {{blame}} };
+    return {
+        .style = SolvingErrStyle::ARG_MISMATCH,
+        .blames = {{blame}}
+    };
 }
 
 SolvingErrInfo LocalTypeArgumentSynthesis::MakeMsgMismatchedRet(const Blame& blame) const
 {
-    return { .style = SolvingErrStyle::RET_MISMATCH, .blames = {{blame}} };
+    return {
+        .style = SolvingErrStyle::RET_MISMATCH,
+        .blames = {{blame}}
+    };
 }
 
 void LocalTypeArgumentSynthesis::MaybeSetErrMsg(const SolvingErrInfo& s)

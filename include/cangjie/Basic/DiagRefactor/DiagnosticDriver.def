@@ -36,7 +36,6 @@ WARNING(driver_warning_path_close_to_length_limit, DRIVER_ARG, "the path length 
 // warning of --static-std is not supported for ohos
 WARNING(driver_static_std_for_ohos, DRIVER_ARG, "Statically link packages of the std module is not supported for OHOS")
 
-
 // driver & option errors
 ERROR(driver_require_package_directory, "expected one package path to build")
 ERROR(driver_require_package_directory_scan_dependency, "expected one package path to scan dependency")

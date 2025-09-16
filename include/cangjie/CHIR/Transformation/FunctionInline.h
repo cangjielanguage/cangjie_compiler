@@ -14,7 +14,7 @@
 #define CANGJIE_CHIR_TRANSFORMATION_FUNCTION_INLINE_H
 
 #include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Utils.h"
 #include "cangjie/Option/Option.h"

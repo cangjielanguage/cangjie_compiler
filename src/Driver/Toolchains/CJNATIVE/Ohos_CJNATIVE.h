@@ -38,16 +38,6 @@ protected:
 
     void HandleSanitizerDependencies(Tool& tool) override;
 
-    std::string GetSslDependency() const override
-    {
-        return "-lssl_openssl.z";
-    }
-
-    std::string GetCryptoDependency() const override
-    {
-        return "-lcrypto_openssl.z";
-    }
-
     std::string GetClangRTProfileLibraryName() const override
     {
         return "libclang_rt.profile.a";

@@ -518,54 +518,6 @@ bool TypeChecker::TypeCheckerImpl::ChkPointerExpr(ASTContext& ctx, Ty& target, P
     }
     return ret;
 }
-#else
-bool TypeChecker::TypeCheckerImpl::ChkPointerExpr(ASTContext& ctx, Ty& target, PointerExpr& cpe)
-{
-    CJC_ASSERT(cpe.type && cpe.type->ty);
-    bool ret = true;
-    // 'var a: CPointer<T> = CPointer()': Generic types should need to be derived.
-    if (!target.typeArgs.empty() && Ty::IsTyCorrect(target.typeArgs[0]) &&
-        (!Ty::IsTyCorrect(cpe.type->ty->typeArgs[0]) || cpe.type->ty->HasGeneric())) {
-        cpe.type->ty = &target;
-    }
-    if (Ty::IsTyCorrect(&target)) {
-        ret = Check(ctx, &target, cpe.type.get());
-    } else {
-        // 'var a = CPointer<T>()': Type derivation does not depend on target information.
-        cpe.type->ty = Synthesize(ctx, cpe.type.get());
-    }
-    cpe.ty = cpe.type->ty;
-    // 'var a = CPointer()': Generic type cannot be derived.
-    if (!Ty::IsTyCorrect(cpe.ty)) {
-        diag.Diagnose(cpe, DiagKind::sema_pointer_unknow_generic_type);
-        return false;
-    } else if (!ret) {
-        DiagMismatchedTypesWithFoundTy(diag, *cpe.sourceExpr, target, *cpe.ty);
-    }
-
-    // One arg.
-    if (cpe.arg) {
-        auto argTy = Synthesize(ctx, cpe.arg.get());
-        if (!Ty::IsTyCorrect(argTy) || !(argTy->IsPointer() || argTy->IsCFunc())) {
-            if (!TypeCheckUtil::CanSkipDiag(*cpe.arg)) {
-                diag.Diagnose(cpe, DiagKind::sema_pointer_single_element_type_error);
-            }
-            return false;
-        }
-        if (!cpe.arg->name.Empty()) {
-            diag.Diagnose(cpe.arg->name.Begin(), cpe.arg->name.End(),
-                DiagKind::sema_unknown_named_argument, cpe.arg->name.Val());
-            return false;
-        }
-    }
-
-    if (Ty::IsTyCorrect(&target) && !typeManager.IsSubtype(cpe.ty, &target)) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_mismatched_types, cpe)
-            .AddMainHintArguments(target.String(), Ty::ToString(cpe.ty));
-        return false;
-    }
-    return ret;
-}
 #endif
 
 Ptr<Ty> TypeChecker::TypeCheckerImpl::SynPointerExpr(ASTContext& ctx, PointerExpr& cptrExpr)
@@ -668,12 +620,6 @@ bool TypeChecker::TypeCheckerImpl::ChkCStringCall(ASTContext& ctx, Ty& target, C
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         Ptr<Ty> targetTy = TypeCheckUtil::UnboxOptionType(&target);
         if (Ty::IsTyCorrect(targetTy) && !targetTy->IsCString() && !targetTy->IsCType()) {
-            DiagMismatchedTypesWithFoundTy(diag, ce, target.String(), std::string{CSTRING_NAME});
-            ce.ty = TypeManager::GetInvalidTy();
-            return false;
-        }
-#else
-        if (Ty::IsTyCorrect(&target) && !target.IsCString() && !target.IsCType()) {
             DiagMismatchedTypesWithFoundTy(diag, ce, target.String(), std::string{CSTRING_NAME});
             ce.ty = TypeManager::GetInvalidTy();
             return false;

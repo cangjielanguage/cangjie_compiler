@@ -19,7 +19,7 @@
 #include "CGModule.h"
 #include "cangjie/Basic/Linkage.h"
 #include "cangjie/Basic/StringConvertor.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/StructDef.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
@@ -75,147 +75,15 @@ void GetGenericArgsFromCHIRTypeHelper(const Cangjie::CHIR::Type& type, std::vect
 
 namespace Cangjie {
 namespace CodeGen {
-std::string GenerateTypeName(const CHIR::Type& type)
+int64_t GetIntMaxOrMin(const CHIR::IntType::TypeKind& typeKind, bool isMax)
 {
-    if (type.IsPrimitive()) {
-        return type.ToString();
-    }
-    switch (type.GetTypeKind()) {
-        case CHIR::Type::TypeKind::TYPE_RAWARRAY:
-            return GenerateRawArrayName(StaticCast<const CHIR::RawArrayType&>(type));
-        case CHIR::Type::TypeKind::TYPE_TUPLE:
-            return GenerateTupleName(StaticCast<const CHIR::TupleType&>(type));
-        case CHIR::Type::TypeKind::TYPE_CLOSURE:
-            return GenerateClosureName(StaticCast<const CHIR::ClosureType&>(type));
-        case CHIR::Type::TypeKind::TYPE_FUNC:
-            return GenerateFuncName(StaticCast<const CHIR::FuncType&>(type));
-        case CHIR::Type::TypeKind::TYPE_VARRAY:
-            return GenerateVArrayName(StaticCast<const CHIR::VArrayType&>(type));
-        case CHIR::Type::TypeKind::TYPE_CPOINTER:
-            return GenerateCPointerName(StaticCast<const CHIR::CPointerType&>(type));
-        case CHIR::Type::TypeKind::TYPE_CSTRING:
-            return type.ToString();
-        case CHIR::Type::TypeKind::TYPE_CLASS:
-        case CHIR::Type::TypeKind::TYPE_STRUCT:
-        case CHIR::Type::TypeKind::TYPE_ENUM:
-            return GenerateCustomTypeName(StaticCast<const CHIR::CustomType&>(type));
-        case CHIR::Type::TypeKind::TYPE_REFTYPE:
-            return GenerateTypeName(*StaticCast<const CHIR::RefType&>(type).GetBaseType());
-        default:
-            CJC_ABORT();
-            return "";
-    }
+    auto minMax = G_SIGNED_INT_MAP.at(typeKind);
+    return isMax ? minMax.second : minMax.first;
 }
 
-std::string GenerateRawArrayName(const CHIR::RawArrayType& type)
+uint64_t GetUIntMax(const CHIR::IntType::TypeKind& typeKind)
 {
-    std::stringstream typeName;
-    for (auto i = 0u; i < type.GetDims(); i++) {
-        typeName << "Array<";
-    }
-    typeName << GenerateTypeName(*type.GetElementType());
-    std::string suffix(type.GetDims(), '>');
-    typeName << suffix;
-    return typeName.str();
-}
-
-std::string GenerateTupleName(const CHIR::TupleType& type)
-{
-    std::string typeName = "(";
-    for (auto arg : type.GetTypeArgs()) {
-        typeName += GenerateTypeName(*arg);
-        typeName += ",";
-    }
-    typeName.pop_back();
-    typeName += ")";
-    return typeName;
-}
-
-std::string GenerateClosureName(const CHIR::ClosureType& type)
-{
-    return "Closure<" + GenerateTypeName(*type.GetFuncType()) + ">";
-}
-
-std::string GenerateFuncName(const CHIR::FuncType& type)
-{
-    std::string typeName = "(";
-    if (!type.GetParamTypes().empty()) {
-        for (auto param : type.GetParamTypes()) {
-            typeName += GenerateTypeName(*param);
-            typeName += ",";
-        }
-        typeName.pop_back();
-    }
-    typeName += ")->";
-    typeName += GenerateTypeName(*type.GetReturnType());
-    return typeName;
-}
-
-std::string GenerateVArrayName(const CHIR::VArrayType& type)
-{
-    std::stringstream typeName;
-    typeName << "VArray<";
-    typeName << GenerateTypeName(*StaticCast<const CHIR::VArrayType&>(type).GetElementType());
-    typeName << ", $" << type.GetSize() << ">";
-    return typeName.str();
-}
-
-std::string GenerateCPointerName(const CHIR::CPointerType& type)
-{
-    std::string typeName = "CPointer<";
-    for (auto arg : type.GetTypeArgs()) {
-        typeName += GenerateTypeName(*arg);
-        typeName += ", ";
-    }
-    typeName.pop_back();
-    typeName.pop_back();
-    typeName += ">";
-    return typeName;
-}
-
-std::string GenerateCustomTypeName(const CHIR::CustomType& type)
-{
-    auto pkgName = type.GetCustomTypeDef()->GetPackageName();
-    std::string typeName = pkgName + '$' + CHIR::GetCustomTypeIdentifier(type);
-    if (!type.GetGenericArgs().empty()) {
-        typeName += '<';
-        for (auto arg : type.GetGenericArgs()) {
-            typeName += GenerateTypeName(*arg);
-            typeName += ',';
-        }
-        typeName.pop_back();
-        typeName += '>';
-    }
-    return typeName;
-}
-
-int64_t GetIntMaxOrMin(const CHIR::IntType& ty, bool isMax)
-{
-    if (!ty.IsIntNative()) {
-        auto minMax = G_SIGNED_INT_MAP.at(ty.GetTypeKind());
-        return isMax ? minMax.second : minMax.first;
-    }
-    uint64_t bitness = ty.GetBitness();
-    if (bitness == I64_WIDTH) {
-        auto minMax = G_SIGNED_INT_MAP.at(CHIR::Type::TypeKind::TYPE_INT64);
-        return isMax ? minMax.second : minMax.first;
-    } else {
-        auto minMax = G_SIGNED_INT_MAP.at(CHIR::Type::TypeKind::TYPE_INT32);
-        return isMax ? minMax.second : minMax.first;
-    }
-}
-
-uint64_t GetUIntMax(const CHIR::IntType& ty)
-{
-    if (!ty.IsUIntNative()) {
-        return G_UNSIGNED_INT_MAP.at(ty.GetTypeKind());
-    }
-    uint64_t bitness = StaticCast<const CHIR::NumericType&>(ty).GetBitness();
-    if (bitness == UI64_WIDTH) {
-        return G_UNSIGNED_INT_MAP.at(CHIR::Type::TypeKind::TYPE_UINT64);
-    } else {
-        return G_UNSIGNED_INT_MAP.at(CHIR::Type::TypeKind::TYPE_UINT32);
-    }
+    return G_UNSIGNED_INT_MAP.at(typeKind);
 }
 
 std::string GetTypeName(const CGType* type)
@@ -253,6 +121,25 @@ std::string GetTypeName(const CGType* type)
 }
 
 namespace {
+std::string ConstantValueToString(const CHIR::Constant& expr)
+{
+    std::string res;
+    if (expr.IsBoolLit()) {
+        res = std::to_string(expr.GetBoolLitVal());
+    } else if (expr.IsFloatLit()) {
+        res = std::to_string(expr.GetFloatLitVal());
+    } else if (expr.IsSignedIntLit()) {
+        res = std::to_string(expr.GetSignedIntLitVal());
+    } else if (expr.IsUnSignedIntLit()) {
+        res = std::to_string(expr.GetUnsignedIntLitVal());
+    } else if (expr.IsRuneLit()) {
+        res = std::to_string(expr.GetRuneLitVal());
+    } else {
+        CJC_ABORT();
+    }
+    return res;
+}
+
 std::tuple<bool, std::string> IsAllConstantNode(const std::vector<CHIR::Value*>& args)
 {
     if (args.empty()) {
@@ -270,7 +157,7 @@ std::tuple<bool, std::string> IsAllConstantNode(const std::vector<CHIR::Value*>&
         auto expr = localVar->GetExpr();
         if (auto constant = DynamicCast<const Constant*>(expr); constant &&
             (constant->IsBoolLit() || constant->IsIntLit() || constant->IsFloatLit() || constant->IsRuneLit())) {
-            serialized += "{" + constant->ToString() + localVar->GetType()->ToString() + "}";
+            serialized += "{" + ConstantValueToString(*constant) + localVar->GetType()->ToString() + "}";
             continue;
         }
         CJC_NULLPTR_CHECK(expr);
@@ -328,7 +215,7 @@ bool IsReferenceType(const CHIR::Type& ty, CGModule& cgMod)
         auto enumCGType = StaticCast<CGEnumType*>(CGType::GetOrCreate(cgMod, &ty));
         return enumCGType->IsCommonEnum() || enumCGType->IsOptionLikeRef() || enumCGType->IsOptionLikeT();
     }
-    return ty.IsClosure() || ty.IsClass() || ty.IsBox() || ty.IsRawArray();
+    return ty.IsClass() || ty.IsBox() || ty.IsRawArray();
 }
 
 bool IsAllConstantValue(const std::vector<CGValue*>& args)
@@ -472,6 +359,7 @@ bool IsGetElementRefOfClass(const CHIR::Expression& expr, CHIR::CHIRBuilder& bui
     auto& getEleRef = dynamic_cast<const CHIR::GetElementRef&>(expr);
     auto baseType = getEleRef.GetLocation()->GetType()->GetTypeArgs()[0];
     auto& path = getEleRef.GetPath();
+    CJC_ASSERT(!path.empty());
     for (size_t idx = 0; idx < path.size() - 1; ++idx) {
         baseType = GetFieldOfType(*baseType, path[idx], builder);
     }
@@ -653,7 +541,7 @@ bool IsThisArgOfStructMethod(const CHIR::Value& chirValue)
     }
 
     auto& chirParam = StaticCast<const CHIR::Parameter&>(chirValue);
-    auto chirFunc = chirParam.GetParentFunc();
+    auto chirFunc = chirParam.GetTopLevelFunc();
     if (!chirFunc || !chirFunc->GetNumOfParams() || chirFunc->GetParam(0) != &chirParam) {
         return false;
     }

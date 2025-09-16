@@ -100,15 +100,19 @@ std::string RuneLiteral::ToString() const
     return ss.str();
 }
 
-StringLiteral::StringLiteral(Type* ty, std::string val, bool isJString)
-    : LiteralValue(ty, ConstantValueKind::KIND_STRING), val(val), isJString(isJString)
+StringLiteral::StringLiteral(Type* ty, std::string val)
+    : LiteralValue(ty, ConstantValueKind::KIND_STRING), val(val)
 {
     CJC_ASSERT(ty->IsString());
 }
 
-std::string StringLiteral::GetVal() const
+std::string StringLiteral::GetVal() const&
 {
     return val;
+}
+std::string StringLiteral::GetVal() &&
+{
+    return std::move(val);
 }
 
 std::string StringLiteral::ToString() const

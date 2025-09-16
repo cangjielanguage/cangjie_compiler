@@ -165,6 +165,8 @@ void TypeChecker::TypeCheckerImpl::DesugarStrInterpolationExpr(ASTContext& ctx, 
     // Get '$tmpN' var declaration, and synthesize it's ty by initializer expression.
     auto sbItem = StaticCast<VarDecl*>(blk->body.front().get());
     CopyNodeScopeInfo(siexpr, sbItem);
+    // Local variable names do not require mangling.
+    sbItem->EnableAttr(Attribute::NO_MANGLE);
     sbItem->ty = SynthesizeWithoutRecover(ctx, sbItem->initializer.get());
     // Get all StringBuilder append candidate functions.
     LookupInfo info{.file = litConstExpr.curFile, .lookupExtend = false};

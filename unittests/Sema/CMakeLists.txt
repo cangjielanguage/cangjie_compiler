@@ -25,3 +25,14 @@ target_link_libraries(
     GTest::gtest_main
     TestCompilerInstanceObject)
 add_test(NAME GenericTest COMMAND GenericTest)
+
+add_executable(CommentsTest CommentsTest.cpp)
+target_link_libraries(
+    CommentsTest
+    cangjie-lsp
+    ${LINK_LIBS}
+    boundscheck-static
+    GTest::gtest
+    GTest::gtest_main
+    TestCompilerInstanceObject)
+add_test(NAME CommentsTest COMMAND CommentsTest)

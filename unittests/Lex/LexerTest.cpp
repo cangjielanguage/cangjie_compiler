@@ -727,11 +727,14 @@ TEST_F(LexerTest, TokenValues)
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::CASE)]) == "case");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::TRY)]) == "try");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::CATCH)]) == "catch");
+    ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::HANDLE)]) == "handle");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::FINALLY)]) == "finally");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::FOR)]) == "for");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::DO)]) == "do");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::WHILE)]) == "while");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::THROW)]) == "throw");
+    ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::PERFORM)]) == "perform");
+    ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::RESUME)]) == "resume");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::RETURN)]) == "return");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::CONTINUE)]) == "continue");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::BREAK)]) == "break");
@@ -741,6 +744,7 @@ TEST_F(LexerTest, TokenValues)
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::MATCH)]) == "match");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::WHERE)]) == "where");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::WITH)]) == "with");
+    ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::THROWING)]) == "throwing");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::STATIC)]) == "static");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::PUBLIC)]) == "public");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::PRIVATE)]) == "private");
@@ -843,6 +847,7 @@ TEST_F(LexerTest, TokenKindValues)
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::CASE)]) == "case");
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::TRY)]) == "try");
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::CATCH)]) == "catch");
+    ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::HANDLE)]) == "handle");
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::FINALLY)]) == "finally");
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::FOR)]) == "for");
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::DO)]) == "do");

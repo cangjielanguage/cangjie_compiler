@@ -13,13 +13,6 @@ Ptr<LiteralValue> Translator::TranslateLitConstant(const AST::LitConstExpr& expr
 {
     auto chirTyToTrans = TranslateType(realTy);
     switch (realTy.kind) {
-        case AST::TypeKind::TYPE_UNIT: {
-            auto unitLiteral = builder.CreateLiteralValue<UnitLiteral>(chirTyToTrans);
-            if (expr.TestAttr(AST::Attribute::COMPILER_ADD)) {
-                unitLiteral->EnableAttr(Attribute::COMPILER_ADD);
-            }
-            return unitLiteral;
-        }
         case AST::TypeKind::TYPE_FLOAT16:
         case AST::TypeKind::TYPE_FLOAT64:
         case AST::TypeKind::TYPE_IDEAL_FLOAT: {
@@ -56,12 +49,10 @@ Ptr<LiteralValue> Translator::TranslateLitConstant(const AST::LitConstExpr& expr
         }
         case AST::TypeKind::TYPE_STRUCT: {
             CJC_ASSERT(expr.kind == AST::LitConstKind::STRING);
-            return builder.CreateLiteralValue<StringLiteral>(chirTyToTrans, expr.stringValue, false);
+            return builder.CreateLiteralValue<StringLiteral>(chirTyToTrans, expr.stringValue);
         }
-        case AST::TypeKind::TYPE_CLASS: {
-            CJC_ASSERT(expr.kind == AST::LitConstKind::JSTRING);
-            return builder.CreateLiteralValue<StringLiteral>(chirTyToTrans, expr.stringValue, true);
-        }
+        // Unit literal is handled in TranslateExprArg etc. functions
+        case AST::TypeKind::TYPE_UNIT:
         default: {
             CJC_ABORT();
             return nullptr;
@@ -118,12 +109,7 @@ Ptr<Constant> Translator::TranslateLitConstant(const AST::LitConstExpr& expr, AS
         case AST::TypeKind::TYPE_STRUCT: {
             CJC_ASSERT(expr.kind == AST::LitConstKind::STRING);
             auto value = expr.stringValue;
-            return CreateAndAppendConstantExpression<StringLiteral>(loc, chirTyToTrans, *block, value, false);
-        }
-        case AST::TypeKind::TYPE_CLASS: {
-            CJC_ASSERT(expr.kind == AST::LitConstKind::JSTRING);
-            auto value = expr.stringValue;
-            return CreateAndAppendConstantExpression<StringLiteral>(loc, chirTyToTrans, *block, value, true);
+            return CreateAndAppendConstantExpression<StringLiteral>(loc, chirTyToTrans, *block, value);
         }
         default: {
             CJC_ABORT();
@@ -134,14 +120,7 @@ Ptr<Constant> Translator::TranslateLitConstant(const AST::LitConstExpr& expr, AS
 
 Ptr<Value> Translator::Visit(const AST::LitConstExpr& expr)
 {
-    Constant* c;
-    if (expr.ty->kind == AST::TypeKind::TYPE_GENERICS) {
-        auto genericTy = RawStaticCast<AST::GenericsTy*>(expr.ty);
-        CJC_ASSERT(genericTy->lowerBound != nullptr);
-        c = TranslateLitConstant(expr, *genericTy->lowerBound, currentBlock);
-    } else {
-        c = TranslateLitConstant(expr, *expr.ty, currentBlock);
-    }
+    Constant* c = TranslateLitConstant(expr, *expr.ty, currentBlock);
     if (!c) {
         return nullptr;
     }

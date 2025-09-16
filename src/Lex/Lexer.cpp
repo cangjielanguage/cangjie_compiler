@@ -1460,10 +1460,10 @@ void LexerImpl::ScanSymbolExclamation()
 {
     /// Lexer read a stream of token and classify them into some syntactic
     /// category.
-    constexpr int NEXT_INDEX = 2;
+    constexpr int nextIndex = 2;
     if (GetNextChar(0) == 'i' && GetNextChar(1) == 'n' &&
-        (GetNextChar(NEXT_INDEX) == ' ' || GetNextChar(NEXT_INDEX) == '\r' ||
-            GetNextChar(NEXT_INDEX) == '\n')) { // process '!in' token
+        (GetNextChar(nextIndex) == ' ' || GetNextChar(nextIndex) == '\r' ||
+            GetNextChar(nextIndex) == '\n')) { // process '!in' token
         ReadUTF8Char();
         ReadUTF8Char();
         return;

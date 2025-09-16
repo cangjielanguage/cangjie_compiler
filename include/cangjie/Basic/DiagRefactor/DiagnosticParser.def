@@ -45,9 +45,14 @@ ERROR(parse_expected_expr_or_decl_in, "expected expression or declaration, found
     "expected expression or declaration here")
 ERROR(parse_expected_catch_or_finally_in_try, "expected 'catch' or 'finally' after try block, found %s",
     "expected 'catch' or 'finally' here", {"after try block"})
+ERROR(parse_expected_catch_or_handle_or_finally_in_try, "expected 'catch', 'handle' or 'finally' after try block, found %s",
+    "expected 'catch', 'handle' or 'finally' here", {"after try block"})
 ERROR(parse_expected_colon_in_catch_pattern, "expected ':' in exception type pattern, found %s", "expected ':' here")
+ERROR(parse_expected_colon_in_effect_pattern, "expected ':' in effect type pattern, found %s", "expected ':' here")    
 ERROR(parse_expected_wildcard_or_exception_pattern, "expected wildcard or exception type pattern, found %s",
     "expected wildcard or exception type pattern here")
+ERROR(parse_expected_wildcard_or_effect_pattern, "expected wildcard or effect type pattern, found %s",
+    "expected wildcard or effect type pattern here")
 ERROR(parse_expected_double_arrow_in_case, "expected '=>' in case, found %s",
     "expected '=>' here")
 ERROR(parse_selector_or_match_expression_body, "expected '(' or '{' after 'match', found %s",

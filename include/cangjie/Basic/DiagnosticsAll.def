@@ -5,8 +5,5 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/Basic/DiagnosticCHIR.def"
-#include "cangjie/Basic/DiagnosticConditionalCompilation.def"
-#include "cangjie/Basic/DiagnosticFrontend.def"
 #include "cangjie/Basic/DiagnosticMacroExpand.def"
-#include "cangjie/Basic/DiagnosticParserQuery.def"
 #include "cangjie/Basic/DiagnosticSema.def"

@@ -164,8 +164,9 @@ void Translator::CreateMutFuncWrapper(
     auto anyRefTy = builder.GetType<RefType>(builder.GetAnyTy());
     args[0] = Cangjie::CHIR::TypeCastOrBoxIfNeeded(*args[0], *anyRefTy, builder, *entry, INVALID_LOCATION);
 
-    auto apply = Cangjie::CHIR::CreateAndAppendExpression<Apply>(builder, retTy, rawFunc, args, entry);
-    apply->SetInstantiatedFuncType(curDef.GetType(), instFuncTy->GetParamType(0), instFuncTy->GetParamTypes(), *retTy);
+    auto apply = Cangjie::CHIR::CreateAndAppendExpression<Apply>(builder, retTy, rawFunc, FuncCallContext{
+        .args = args,
+        .thisType = curDef.GetType()}, entry);
     Cangjie::CHIR::CreateAndAppendExpression<Store>(
         builder, builder.GetUnitTy(), apply->GetResult(), func->GetReturnValue(), entry);
 
@@ -247,9 +248,6 @@ void Translator::WrapMutFunc(CHIRBuilder& builder, CustomTypeDef& customTypeDef)
     }
     for (auto& [srcTy, infos] : customTypeDef.GetVTable()) {
         for (size_t i = 0; i < infos.size(); ++i) {
-            if (!infos[i].instance) {
-                continue;
-            }
             CJC_NULLPTR_CHECK(infos[i].instance);
             auto rawFunc = infos[i].instance;
             while (auto base = rawFunc->Get<WrappedRawMethod>()) {

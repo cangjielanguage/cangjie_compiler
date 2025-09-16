@@ -35,8 +35,9 @@ static bool IsUnnecessarySuperCall(const AST::Node& node)
     return false;
 }
 
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 static std::vector<Ptr<AST::Node>> CollectBlockBodyNodes(
-    const AST::Block& block, const GenericInstantiationManager& gim)
+    const AST::Block& block, const GenericInstantiationManager* gim)
 {
     std::vector<Ptr<AST::Node>> nodes;
     for (const auto& body : block.body) {
@@ -44,8 +45,10 @@ static std::vector<Ptr<AST::Node>> CollectBlockBodyNodes(
         // retrieve all the instantiated functions for the translation.
         auto funcDecl = DynamicCast<AST::FuncDecl*>(body.get());
         if (funcDecl != nullptr && funcDecl->TestAttr(AST::Attribute::GENERIC)) {
-                nodes.emplace_back(funcDecl);
-                CollectInstantiatedFuncNodes(nodes, *funcDecl, gim);
+            nodes.emplace_back(funcDecl);
+            if (gim) {
+                CollectInstantiatedFuncNodes(nodes, *funcDecl, *gim);
+            }
         } else {
             if (IsUnnecessarySuperCall(*body)) {
                 continue;
@@ -55,6 +58,7 @@ static std::vector<Ptr<AST::Node>> CollectBlockBodyNodes(
     }
     return nodes;
 }
+#endif
 
 Ptr<Value> Translator::Visit(const AST::Block& b)
 {
@@ -66,7 +70,9 @@ Ptr<Value> Translator::Visit(const AST::Block& b)
 
     currentBlock = block;
     // Since cangjie's block has value, return the value of last block node.
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     std::vector<Ptr<AST::Node>> nodes = CollectBlockBodyNodes(b, gim);
+#endif
     for (size_t i = 0; i < nodes.size(); ++i) {
         if (i == nodes.size() - 1) {
             return TranslateSubExprAsValue(*nodes[i]);

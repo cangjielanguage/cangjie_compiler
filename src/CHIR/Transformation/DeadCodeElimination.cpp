@@ -157,7 +157,7 @@ void DeadCodeElimination::UselessFuncElimination(Package& package, const GlobalO
                 ++it;
                 continue;
             }
-            if ((*it)->Get<SkipCheck>() == SkipKind::SKIP_CODEGEN || CheckUselessFunc(**it, opts)) {
+            if (CheckUselessFunc(**it, opts)) {
                 funcsToBeRemoved.emplace_back(*it);
                 DumpForDebug(nullptr, *it, opts.chirDebugOptimizer);
                 it = allFuncs.erase(it);
@@ -392,11 +392,7 @@ void DeadCodeElimination::ReportUnusedLocalVariable(const Expression& expr, bool
     if (operand->IsParameter()) {
         DiagUnusedVariableForParam(debugExpr);
     } else if (operand->IsLocalVar()) {
-        if (operand->GetType()->IsClosure()) {
-            DiagUnusedLambdaVariable(debugExpr);
-        } else {
-            DiagUnusedVariableForLocalVar(debugExpr, isDebug);
-        }
+        DiagUnusedVariableForLocalVar(debugExpr, isDebug);
     }
 }
 
@@ -457,9 +453,7 @@ void DeadCodeElimination::ReportUnusedExpression(Expression& expr)
             if (expr.GetExprKind() == ExprKind::LAMBDA) {
                 DiagUnusedCode(res, DiagKindRefactor::chir_dce_unused_function,
                     StaticCast<const Lambda&>(expr).GetSrcCodeIdentifier());
-            } else if (expr.GetExprMajorKind() == ExprMajorKind::UNARY_EXPR ||
-                expr.GetExprMajorKind() == ExprMajorKind::BINARY_EXPR ||
-                expr.GetExprKind() == ExprKind::INT_OP_WITH_EXCEPTION) {
+            } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsIntOpWithException()) {
                 auto kind = expr.GetExprKind() == ExprKind::INT_OP_WITH_EXCEPTION
                     ? GetLiteralFromExprKind(StaticCast<IntOpWithException*>(&expr)->GetOpKind())
                     : GetLiteralFromExprKind(expr.GetExprKind());
@@ -568,7 +562,7 @@ bool HandleFuncWithNothingParamter(CHIRBuilder& builder, const BlockGroup& funcB
         }
         CreateNullReturnValue(builder, entry, funcBody);
         entry->AppendExpression(builder.CreateTerminator<Exit>(entry));
-        if (auto func = param->GetParentFunc()) {
+        if (auto func = param->GetTopLevelFunc()) {
             func->Set<SkipCheck>(SkipKind::SKIP_VIC);
         }
         return true;
@@ -616,8 +610,11 @@ void DeadCodeElimination::NothingTypeExprEliminationForFunc(BlockGroup& funcBody
                             HandleNothingTerminator(builder, StaticCast<InvokeStaticWithException*>(expr), funcBody);
                             break;
                         default:
+#ifndef NDEBUG
                             CJC_ABORT();
+#else
                             return;
+#endif
                     }
                 }
             }
@@ -908,8 +905,7 @@ Ptr<Expression> DeadCodeElimination::GetUnreachableExpression(const CHIR::Block&
             // when report deadcode in BinaryExpr, it has 4 situations in tests/LLT/CHIR/DCE/testUnusedOp03.cj
             // if operand in binaryExpr is nothing, use warninglocation as report position
             // if all operand in binaryExpr is normal, use binaryExpr location as report position
-            if (expression->GetExprMajorKind() == ExprMajorKind::BINARY_EXPR ||
-                (expression->GetExprKind() == ExprKind::INT_OP_WITH_EXCEPTION)) {
+            if (expression->IsBinaryExpr() || expression->IsIntOpWithException()) {
                 auto args = expression->GetOperands();
                 auto it =
                     std::find_if(args.begin(), args.end(), [](auto item) { return item->GetType()->IsNothing(); });
@@ -976,9 +972,7 @@ void DeadCodeElimination::PrintUnreachableBlockWarning(
                     return;
                 }
             }
-            if (!isNormal &&
-                (unreableExpr->GetExprMajorKind() == ExprMajorKind::BINARY_EXPR ||
-                    unreableExpr->GetExprMajorKind() == ExprMajorKind::UNARY_EXPR)) {
+            if (!isNormal && (unreableExpr->IsBinaryExpr() || unreableExpr->IsUnaryExpr())) {
                 auto diagBuilder = diag.DiagnoseRefactor(DiagKindRefactor::chir_dce_unreachable, range, "operator");
                 diagBuilder.AddMainHintArguments("operator");
                 diagBuilder.AddHint(terminalNodeRange);
@@ -992,26 +986,6 @@ void DeadCodeElimination::PrintUnreachableBlockWarning(
                 diagBuilder.AddHint(terminalNodeRange);
             }
             isPrinted = true;
-        }
-    }
-}
-
-void DeadCodeElimination::RemoveUnreachableBlock(std::queue<Block*>& workList) const
-{
-    // Remove action.
-    while (!workList.empty()) {
-        auto block = workList.front();
-        workList.pop();
-        // Skip removed block
-        if (block->GetParentBlockGroup() == nullptr) {
-            continue;
-        }
-        auto successors = block->GetSuccessors();
-        block->RemoveSelfFromBlockGroup();
-        for (auto suc : successors) {
-            if (CheckUselessBlock(*suc)) {
-                workList.push(suc);
-            }
         }
     }
 }
@@ -1062,6 +1036,7 @@ bool DeadCodeElimination::CheckUselessExpr(const Expression& expr, bool isReport
                 kind == ExprKind::VARRAY;
         }
         default: {
+            CJC_ABORT();
             return false;
         }
     }

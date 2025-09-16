@@ -129,7 +129,7 @@ llvm::Value* IRBuilder2::CreateCallOrInvoke(const CGFunctionType& calleeType, ll
         if (!returnCGType->GetSize()) {
             CHIR::Type* retValType = nullptr;
             if (auto applyWrapper = dynamic_cast<const CHIRCallExpr*>(this->chirExpr); applyWrapper) {
-                retValType = applyWrapper->GetInstantiatedRetType();
+                retValType = applyWrapper->GetResult()->GetType();
             } else if (this->chirExpr->GetExprKind() == CHIR::ExprKind::VARRAY_BUILDER) {
                 auto& varrayBuilder = StaticCast<const CHIR::VArrayBuilder&>(this->chirExpr->GetChirExpr());
                 retValType = StaticCast<CHIR::VArrayType*>(varrayBuilder.GetResult()->GetType())->GetElementType();
@@ -184,7 +184,8 @@ llvm::Value* IRBuilder2::CreateCallOrInvoke(const CGFunctionType& calleeType, ll
             if (applyWrapper->IsCalleeStatic()) {
                 if (this->chirExpr->GetExprKind() == CHIR::ExprKind::APPLY ||
                     this->chirExpr->GetExprKind() == CHIR::ExprKind::APPLY_WITH_EXCEPTION) {
-                    typeInfo = CreateBitCast(CreateTypeInfo(applyWrapper->GetOuterType()),
+                    typeInfo = CreateBitCast(CreateTypeInfo(
+                        applyWrapper->GetOuterType(GetCGContext().GetCHIRBuilder())),
                         CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext()));
                 } else {
                     if (DeRef(*applyWrapper->GetThisType())->IsThis()) {
@@ -197,13 +198,9 @@ llvm::Value* IRBuilder2::CreateCallOrInvoke(const CGFunctionType& calleeType, ll
             } else {
                 if (this->chirExpr->GetExprKind() == CHIR::ExprKind::APPLY ||
                     this->chirExpr->GetExprKind() == CHIR::ExprKind::APPLY_WITH_EXCEPTION) {
-                    if (auto wrapperFrom = this->chirExpr->Get<CHIR::WrappedParentType>()) {
-                        typeInfo = CreateBitCast(
-                            CreateTypeInfo(wrapperFrom), CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext()));
-                    } else {
-                        typeInfo = CreateBitCast(CreateTypeInfo(applyWrapper->GetOuterType()),
-                            CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext()));
-                    }
+                    typeInfo = CreateBitCast(CreateTypeInfo(
+                        applyWrapper->GetOuterType(GetCGContext().GetCHIRBuilder())),
+                        CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext()));
                 } else {
                     auto thisVal = **(cgMod | applyWrapper->GetThisParam());
                     typeInfo = GetTypeInfoFromObject(thisVal);
@@ -620,8 +617,6 @@ llvm::Instruction* IRBuilder2::CreateStore(const CGValue& cgVal, const CGValue& 
 }
 
 namespace {
-// Checks whether the given CHIR expression is a load expression for a local variable of a generic reference type that
-// has been allocated.
 bool IsLoadExprForAllocatedGenericRef(const CHIR::Expression& chirExpr)
 {
     if (chirExpr.GetExprKind() != CHIR::ExprKind::LOAD) {
@@ -899,11 +894,11 @@ CGValue IRBuilder2::CreateGEP(
                 params.emplace_back(getInt32(8U));
             }
             llvm::Value* offset = CallIntrinsicGetFieldOffset(params);
-            CJC_NULLPTR_CHECK(chirExpr->GetParentFunc());
+            CJC_NULLPTR_CHECK(chirExpr->GetTopLevelFunc());
             CJC_NULLPTR_CHECK(GetInsertFunction());
             if ((GetInsertFunction()->hasFnAttribute(HAS_WITH_TI_WRAPPER_ATTR) ||
                     GetInsertFunction()->hasFnAttribute(THIS_PARAM_HAS_BP)) &&
-                **(cgMod | chirExpr->GetParentFunc()->GetParam(0)) == ret) {
+                **(cgMod | chirExpr->GetTopLevelFunc()->GetParam(0)) == ret) {
                 // It means this param doesn't have typeinfo, no need to add the offset.
             } else if (!hasSkippedTypeInfo) {
                 offset = CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), sizeof(void*)));
@@ -1387,8 +1382,8 @@ void IRBuilder2::CallArrayInit(
 
 llvm::Value* IRBuilder2::CreateEnumGEP(const CHIR::Field& field)
 {
-    CJC_ASSERT(field.GetIndexes().size() == 1);
-    auto index = field.GetIndexes()[0];
+    CJC_ASSERT(field.GetPath().size() == 1);
+    auto index = field.GetPath()[0];
     if (index == 0) {
         return GetEnumTag(field);
     } else {
@@ -1508,7 +1503,7 @@ llvm::Value* GetCommonEnumAssociatedValue(IRBuilder2& irBuilder, const CHIR::Fie
     }
 
     auto enumVal = cgEnum.GetRawValue();
-    auto associatedValIdx = static_cast<unsigned int>(field.GetIndexes()[0]);
+    auto associatedValIdx = static_cast<unsigned int>(field.GetPath()[0]);
     if (isSized) {
         auto payload = irBuilder.GetPayloadFromObject(enumVal);
         auto layoutType = llvm::StructType::get(cgCtx.GetLLVMContext(), elemTypes);
@@ -1564,7 +1559,7 @@ llvm::Value* GetAssociatedNonRefEnumAssociatedValue(
     auto& cgMod = irBuilder.GetCGModule();
     auto i8Ty = irBuilder.getInt8Ty();
 
-    auto associatedValIdx = static_cast<unsigned int>(field.GetIndexes()[0]);
+    auto associatedValIdx = static_cast<unsigned int>(field.GetPath()[0]);
     // 1. get the memory layout of the Enum's constructor.
     auto offset = 0U;
     auto args = field.GetBase()->GetType()->GetTypeArgs();
@@ -1589,8 +1584,8 @@ llvm::Value* IRBuilder2::GetEnumAssociatedValue(const CHIR::Field& field)
 
     auto cgEnum = GetCGModule().GetMappedValue(field.GetBase());
     CJC_NULLPTR_CHECK(cgEnum);
-    CJC_ASSERT(field.GetIndexes().size() == 1);
-    auto index = static_cast<unsigned int>(field.GetIndexes()[0]);
+    CJC_ASSERT(field.GetPath().size() == 1);
+    auto index = static_cast<unsigned int>(field.GetPath()[0]);
 
     switch (cgEnumType->GetCGEnumTypeKind()) {
         case CGEnumType::CGEnumTypeKind::NON_EXHAUSTIVE_ASSOCIATED:
@@ -1871,7 +1866,7 @@ void IRBuilder2::SetInsertPointForPreparingTypeInfo()
             insertBB = preTi;
         }
     } else if (insertBB->getName() != "prepTi") {
-        auto preTi = llvm::BasicBlock::Create(getContext(), "prepTi", curFunc, insertBB);
+        auto preTi = CreateEntryBasicBlock(curFunc, "prepTi");
         SetInsertPoint(preTi);
         CreateBr(insertBB);
         insertBB = preTi;

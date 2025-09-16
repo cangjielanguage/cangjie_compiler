@@ -36,7 +36,7 @@ public:
     explicit CHIRSerializerImpl(const Package& package) : package(package){};
 
     // Utility
-    void Save(const std::string& filename);
+    void Save(const std::string& filename, ToCHIR::Phase phase);
     void Initialize();
     void Dispatch();
 
@@ -75,7 +75,9 @@ private:
     // Serializers
     template <typename FBT, typename T> flatbuffers::Offset<FBT> Serialize(const T& obj);
     template <typename FBT, typename T> std::vector<flatbuffers::Offset<FBT>> SerializeVec(const std::vector<T>& vec);
-
+    template <typename FBT, typename T>
+    std::vector<flatbuffers::Offset<FBT>> SerializeSetToVec(const std::unordered_set<T>& set) const;
+    std::vector<flatbuffers::Offset<PackageFormat::VTableElement>> SerializeVTable(const VTableType& obj);
     // Dispatchers
     template <typename T> flatbuffers::Offset<void> Dispatch(const T& obj);
 
@@ -83,9 +85,14 @@ private:
     template <typename T> uint32_t GetId(const T* obj);
     template <typename T, typename E> std::vector<uint32_t> GetId(std::vector<E*> vec);
     template <typename T, typename E> std::vector<uint32_t> GetId(std::vector<Ptr<E>> vec);
-
+    template <typename T, typename E> std::vector<uint32_t> GetId(const std::unordered_set<E*>& set) const;
     // other to save
-    unsigned globalInitFunc{};
+    unsigned packageInitFunc{};
+    uint32_t maxImportedValueId = 0;
+    uint32_t maxImportedStructId = 0;
+    uint32_t maxImportedClassId = 0;
+    uint32_t maxImportedEnumId = 0;
+    uint32_t maxImportedExtendId = 0;
 };
 } // namespace Cangjie::CHIR
 

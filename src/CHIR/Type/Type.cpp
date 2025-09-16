@@ -46,19 +46,6 @@ static const std::string PrintArgTys(const std::vector<Type*>& argTys)
     return ss.str();
 }
 
-static bool IsArgTysEqual(const std::vector<Type*>& argTys0, const std::vector<Type*>& argTys1)
-{
-    if (argTys0.size() != argTys1.size()) {
-        return false;
-    }
-    for (size_t loop = 0; loop < argTys0.size(); loop++) {
-        if (argTys0[loop] != argTys1[loop]) {
-            return false;
-        }
-    }
-    return true;
-}
-
 Type::Type(TypeKind kind) : kind(kind)
 {
     for (auto ty : argTys) {
@@ -202,17 +189,13 @@ bool Type::IsCType() const
     return CheckCustomTypeDefIsExpected(*def, CORE_PACKAGE_NAME, CTYPE_NAME);
 }
 
-std::vector<FuncBase*> Type::GetDeclareAndExtendMethods(CHIRBuilder& builder) const
+std::vector<FuncBase*> Type::GetDeclareAndExtendMethods([[maybe_unused]] CHIRBuilder& builder) const
 {
-    std::vector<FuncBase*> methods;
-    if (auto customType = DynamicCast<const CustomType*>(this)) {
-        methods = customType->GetDeclareAndExtendMethods(builder);
-    } else if (auto builtinType = DynamicCast<const BuiltinType*>(this)) {
-        methods = builtinType->GetExtendMethods();
-    } else {
-        CJC_ABORT();
-    }
-    return methods;
+#ifdef NDEBUG
+    return {};
+#else
+    CJC_ABORT();
+#endif
 }
 
 void Type::Dump() const
@@ -229,14 +212,18 @@ size_t Type::Hash() const
 
 bool Type::operator==(const Type& other) const
 {
-    return kind == other.kind && IsArgTysEqual(argTys, other.argTys);
+    return kind == other.kind && argTys == other.argTys;
 }
 
 const std::vector<ExtendDef*>& Type::GetExtends(CHIRBuilder* builder) const
 {
+#ifndef NDEBUG
+    (void)builder;
     CJC_ABORT();
+#else
     // just for release cjc, it's not expected to go here
     return StaticCast<const BuiltinType*>(this)->GetExtends(builder);
+#endif
 }
 
 IntType::IntType(TypeKind kind) : NumericType(kind)
@@ -280,7 +267,7 @@ size_t FuncType::Hash() const
 bool FuncType::operator==(const Type& other) const
 {
     auto it = DynamicCast<const FuncType*>(&other);
-    return it && IsArgTysEqual(argTys, it->argTys) && (isCFunc == it->isCFunc) && (hasVarArg == it->hasVarArg);
+    return it && argTys == it->argTys && (isCFunc == it->isCFunc) && (hasVarArg == it->hasVarArg);
 }
 
 CustomType::CustomType(TypeKind kind, CustomTypeDef* def, const std::vector<Type*>& typeArgs = {})
@@ -375,7 +362,11 @@ std::pair<Type*, bool> CustomType::GetInstMemberTypeByPathCheckingReadOnly(
     const std::vector<uint64_t>& path, CHIRBuilder& builder) const
 {
     if (path.empty()) {
+#ifdef NDEBUG
         return {const_cast<CustomType*>(this), false};
+#else
+        CJC_ABORT();
+#endif
     }
     auto customTypeDef = GetCustomTypeDef();
     std::unordered_map<const GenericType*, Type*> instMap;
@@ -487,10 +478,10 @@ size_t CustomType::Hash() const
 bool CustomType::operator==(const Type& other) const
 {
     auto it = DynamicCast<const CustomType*>(&other);
-    return it && IsArgTysEqual(argTys, it->argTys) && (def == it->def);
+    return it && argTys == it->argTys && (def == it->def);
 }
 
-ClassType::ClassType(ClassDef* classDef, const std::vector<Type*>& genericArgs, [[maybe_unused]] bool isJava)
+ClassType::ClassType(ClassDef* classDef, const std::vector<Type*>& genericArgs)
     : CustomType(TypeKind::TYPE_CLASS, classDef, genericArgs)
 {
 }
@@ -604,7 +595,11 @@ static bool CollectReplaceTableForExtendedType(Type& extendedType, Type& instCus
             auto res = replaceTable.emplace(genericTy, instTypeArgs[i]);
             // if generic type has been stored, but instantiated types are different, this extend def isn't expected
             if (!res.second && res.first->second != instTypeArgs[i]) {
+#ifdef NDEBUG
                 return false;
+#else
+                CJC_ABORT();
+#endif
             }
         } else {
             auto genericArgTy = Cangjie::DynamicCast<CustomType*>(genericTypeArgs[i]);
@@ -778,8 +773,8 @@ Type* CustomType::GetExactParentType(
     return nullptr;
 }
 
-VTableSearchRes CustomType::GetFuncIndexInVTable(const std::string& funcName, FuncType& funcType,
-    bool isStatic, const std::vector<Type*>& funcInstTypeArgs, CHIRBuilder& builder) const
+std::vector<VTableSearchRes> CustomType::GetFuncIndexInVTable(
+    const FuncCallType& funcCallType, bool isStatic, CHIRBuilder& builder) const
 {
     std::unordered_map<const GenericType*, Type*> replaceTable;
     auto classInstArgs = this->GetTypeArgs();
@@ -791,9 +786,8 @@ VTableSearchRes CustomType::GetFuncIndexInVTable(const std::string& funcName, Fu
         replaceTable.emplace(classGenericArgs[i], classInstArgs[i]);
     }
 
-    auto result = GetCustomTypeDef()->GetFuncIndexInVTable(
-        funcName, funcType, isStatic, replaceTable, funcInstTypeArgs, builder);
-    if (result.instSrcParentType != nullptr) {
+    auto result = GetCustomTypeDef()->GetFuncIndexInVTable(funcCallType, isStatic, replaceTable, builder);
+    if (!result.empty()) {
         return result;
     }
 
@@ -804,12 +798,12 @@ VTableSearchRes CustomType::GetFuncIndexInVTable(const std::string& funcName, Fu
         for (size_t i = 0; i < classInstArgs.size(); ++i) {
             CollectGenericReplaceTable(*extendedTyGenericArgs[i], *classInstArgs[i], replaceTable);
         }
-        result = ex->GetFuncIndexInVTable(funcName, funcType, isStatic, replaceTable, funcInstTypeArgs, builder);
-        if (result.instSrcParentType != nullptr) {
+        result = ex->GetFuncIndexInVTable(funcCallType, isStatic, replaceTable, builder);
+        if (!result.empty()) {
             return result;
         }
     }
-    return {nullptr};
+    return result;
 }
 
 std::vector<ClassType*> CustomType::CalculateExtendImplementedInterfaceTys(CHIRBuilder& builder) const
@@ -993,14 +987,6 @@ std::string TupleType::ToString() const
     return ss.str();
 }
 
-std::string ClosureType::ToString() const
-{
-    std::stringstream ss;
-    ss << "Closure";
-    ss << PrintArgTys(argTys);
-    return ss.str();
-}
-
 std::string RawArrayType::ToString() const
 {
     CJC_ASSERT(!argTys.empty());
@@ -1030,7 +1016,7 @@ size_t RawArrayType::Hash() const
 bool RawArrayType::operator==(const Type& other) const
 {
     auto it = DynamicCast<const RawArrayType*>(&other);
-    return it && IsArgTysEqual(argTys, it->argTys) && (dims == it->dims);
+    return it && argTys == it->argTys && (dims == it->dims);
 }
 
 std::string VArrayType::ToString() const
@@ -1051,7 +1037,7 @@ size_t VArrayType::Hash() const
 bool VArrayType::operator==(const Type& other) const
 {
     auto it = DynamicCast<const VArrayType*>(&other);
-    return it && IsArgTysEqual(argTys, it->argTys) && (size == it->size);
+    return it && argTys == it->argTys && (size == it->size);
 }
 
 const std::vector<ExtendDef*>& CPointerType::GetExtends(CHIRBuilder* builder) const
@@ -1159,7 +1145,6 @@ std::string GenericType::ToString() const
 }
 
 namespace Cangjie::CHIR {
-
 Type* GetFieldOfType(Type& baseTy, uint64_t index, CHIRBuilder& builder)
 {
     Type* type = nullptr;
@@ -1181,13 +1166,6 @@ Type* GetFieldOfType(Type& baseTy, uint64_t index, CHIRBuilder& builder)
         auto memberTys = classTy.GetInstantiatedMemberTys(builder);
         if (index < memberTys.size()) {
             type = memberTys[index];
-        }
-    } else if (baseTy.IsClosure()) {
-        auto& closureTy = StaticCast<ClosureType&>(baseTy);
-        if (index == 0) {
-            type = closureTy.GetFuncType();
-        } else if (index == 1) {
-            type = closureTy.GetEnvType();
         }
     } else if (baseTy.IsRawArray()) {
         type = StaticCast<RawArrayType&>(baseTy).GetElementType();
@@ -1253,7 +1231,7 @@ void Type::VisitTypeRecursively(const std::function<bool(const Type&)>& visitor)
 std::vector<ClassType*> BuiltinType::GetSuperTypesRecusively(CHIRBuilder& builder) const
 {
     std::vector<ClassType*> inheritanceList;
-    for (auto extendDef : extends) {
+    for (auto extendDef : GetExtends(&builder)) {
         if (!IsEqualOrInstantiatedTypeOf(*extendDef->GetExtendedType(), builder)) {
             continue;
         }
@@ -1282,6 +1260,11 @@ std::vector<FuncBase*> BuiltinType::GetExtendMethods() const
         methods.insert(methods.end(), funcs.begin(), funcs.end());
     }
     return methods;
+}
+
+std::vector<FuncBase*> BuiltinType::GetDeclareAndExtendMethods([[maybe_unused]] CHIRBuilder& builder) const
+{
+    return GetExtendMethods();
 }
 
 bool GenericType::SatisfyGenericConstraints(Type& type, CHIRBuilder& builder) const
@@ -1331,6 +1314,16 @@ static bool FuncTypeIsEqualOrSub(const FuncType& subType, const FuncType& parent
     return subType.GetReturnType()->IsEqualOrSubTypeOf(*parentType.GetReturnType(), builder);
 }
 
+bool Type::SatisfyCType() const
+{
+    // same logical with `AST::Ty::IsMetCType`
+    auto builtinCType = (kind >= TYPE_INT8 && kind <= TYPE_UNIT) || kind == TYPE_CPOINTER || kind == TYPE_CSTRING;
+    auto isCStruct = (kind == TYPE_STRUCT) && StaticCast<const StructType*>(this)->GetStructDef()->IsCStruct();
+    auto varrayMeetCondition =
+        (kind == TYPE_VARRAY) && StaticCast<const VArrayType*>(this)->GetElementType()->SatisfyCType();
+    return builtinCType || isCStruct || IsCFunc() || varrayMeetCondition;
+}
+
 bool Type::IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder) const
 {
     auto thisDeref = this->StripAllRefs();
@@ -1343,6 +1336,9 @@ bool Type::IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder) cons
     // if parent type is generic type, that means it can be any type
     if (thisDeref->IsInvalid() || parentDeref->IsInvalid() || parentDeref->IsGeneric()) {
         return false;
+    }
+    if (parentDeref->IsCType()) {
+        return this->SatisfyCType();
     }
     if (thisDeref->IsGeneric()) {
         for (auto upperBound : StaticCast<GenericType*>(thisDeref)->GetUpperBounds()) {

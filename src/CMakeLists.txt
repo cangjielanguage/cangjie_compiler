@@ -86,7 +86,7 @@ if (CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     list(APPEND CANGJIE_SRC_COMMON_OBJECTS_LIST $<TARGET_OBJECTS:CangjieCHIRBase>)
     list(APPEND CANGJIE_SRC_COMMON_OBJECTS_LIST $<TARGET_OBJECTS:CangjieCHIRExtra>)
     list(APPEND CANGJIE_SRC_COMMON_OBJECTS_LIST $<TARGET_OBJECTS:CangjieCodeGen>)
-    list(APPEND CANGJIE_SRC_COMMON_OBJECTS_LIST $<TARGET_OBJECTS:CangjieCodeGenIncrementalGen2>)
+    list(APPEND CANGJIE_SRC_COMMON_OBJECTS_LIST $<TARGET_OBJECTS:CangjieCodeGenIncrementalGen>)
 else()
     list(APPEND CANGJIE_SRC_COMMON_OBJECTS_LIST $<TARGET_OBJECTS:CangjieCHIRBase>)
     list(APPEND CANGJIE_SRC_COMMON_OBJECTS_LIST $<TARGET_OBJECTS:CangjieCHIRExtra>)
@@ -281,21 +281,21 @@ if(NOT WIN_DEBUG_USE_STATIC_LIB)
     endif()
 endif()
 
-    #  we should remove this once the LSPCompilerInstance is out of compiler
-    if(NOT WIN_DEBUG_USE_STATIC_LIB)
-        install(TARGETS cangjie-lsp-share LIBRARY DESTINATION tools/lib)
-    else()
-        install(TARGETS cangjie-lsp DESTINATION "tools/lib")
-    endif()
-    if(CANGJIE_CODEGEN_CJNATIVE_BACKEND AND NOT WIN_DEBUG_USE_STATIC_LIB)
-        install(
-            TARGETS cangjie-lsp-share
-            RUNTIME DESTINATION tools/bin
-            ARCHIVE DESTINATION tools/lib
-            LIBRARY DESTINATION tools/lib)
-    endif()
+#  we should remove this once the LSPCompilerInstance is out of compiler
+if(NOT WIN_DEBUG_USE_STATIC_LIB)
+    install(TARGETS cangjie-lsp-share LIBRARY DESTINATION tools/lib)
+else()
+    install(TARGETS cangjie-lsp DESTINATION "tools/lib")
+endif()
+if(CANGJIE_CODEGEN_CJNATIVE_BACKEND AND NOT WIN_DEBUG_USE_STATIC_LIB)
+    install(
+        TARGETS cangjie-lsp-share
+        RUNTIME DESTINATION tools/bin
+        ARCHIVE DESTINATION tools/lib
+        LIBRARY DESTINATION tools/lib)
+endif()
 
-#LSPMacroServer for lsp(Win)
+#LSPMacroServer for lsp
 add_executable(LSPMacroServer main-macrosrv.cpp)
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     add_dependencies(LSPMacroServer cjnative)
@@ -326,12 +326,44 @@ else()
 endif()
 install(TARGETS LSPMacroServer DESTINATION "tools/bin")
 
+#chir-dis
+add_executable(chir-dis main-chir-dis.cpp)
+if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
+    add_dependencies(chir-dis cjnative)
+endif()
+set_target_properties(chir-dis PROPERTIES LINK_FLAGS
+                                    "${CMAKE_EXE_LINKER_FLAGS} ${SAFE_EXE_LINK_FLAG} ${CJ_RUNTIME_LINK_FLAGS}")
+
+target_link_libraries(
+    chir-dis ${LLVM_LIBS}
+    # Required by CangjieBasic
+    ${CMAKE_DL_LIBS})
+
+target_link_libraries(chir-dis boundscheck-static) # depended by LLVMCore in ${LINK_LIBS} and interrupt signal handler
+target_include_directories(chir-dis PRIVATE ${BOUNDSCHECK}/include)
+
+add_dependencies(chir-dis CangjieFlatbuffersHeaders)
+target_include_directories(chir-dis PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
+if(WIN_DEBUG_USE_STATIC_LIB)
+    target_link_libraries(chir-dis ${ffi} cangjie-lsp)
+else()
+    target_link_libraries(chir-dis ${ffi} cangjie-lsp-share)
+endif()
+# Add the rpath for chir-dis
+if(DARWIN)
+    set_property(TARGET chir-dis APPEND PROPERTY INSTALL_RPATH "@loader_path/../lib")
+else()
+    set_property(TARGET chir-dis APPEND PROPERTY INSTALL_RPATH "\$ORIGIN/../lib")
+endif()
+install(TARGETS chir-dis DESTINATION "tools/bin")
+
+
 set(CANGJIE_LIB_FRONTEND
     $<TARGET_OBJECTS:CangjieDriver>
     $<TARGET_OBJECTS:CangjieFrontendTool>)
 if (CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     list(APPEND CANGJIE_LIB_FRONTEND $<TARGET_OBJECTS:CangjieCodeGen>)
-    list(APPEND CANGJIE_LIB_FRONTEND $<TARGET_OBJECTS:CangjieCodeGenIncrementalGen2>)
+    list(APPEND CANGJIE_LIB_FRONTEND $<TARGET_OBJECTS:CangjieCodeGenIncrementalGen>)
 endif()
 if(NOT WIN_DEBUG_USE_STATIC_LIB)
     add_library(cangjie-frontend SHARED ${CANGJIE_LIB_FRONTEND})
@@ -386,9 +418,6 @@ endif()
 if (CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     add_subdirectory(CHIR)
     add_subdirectory(CodeGen)
-else()
-    add_subdirectory(CHIRVM)
-    add_subdirectory(CodeGenVM)
 endif()
 
 set(AST_FFI_OBJECTS

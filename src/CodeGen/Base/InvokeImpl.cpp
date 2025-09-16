@@ -15,7 +15,7 @@
 #include "Base/CHIRExprWrapper.h"
 #include "CGModule.h"
 #include "IRBuilder.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Type/Type.h"
 
@@ -29,7 +29,7 @@ llvm::Value* CodeGen::GenerateInvoke(IRBuilder2& irBuilder, const CHIRInvokeWrap
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     auto& cgMod = irBuilder.GetCGModule();
     auto objVal = cgMod | invoke.GetObject();
-    std::vector<CGValue*> argsVal{objVal};
+    std::vector<CGValue*> argsVal;
     for (auto arg : invoke.GetArgs()) {
         (void)argsVal.emplace_back(cgMod | arg);
     }
@@ -41,15 +41,16 @@ llvm::Value* CodeGen::GenerateInvoke(IRBuilder2& irBuilder, const CHIRInvokeWrap
     llvm::Value* funcPtr = nullptr;
     if (!objType->IsAutoEnv()) {
         auto ti = irBuilder.GetTypeInfoFromObject(objVal->GetRawValue());
-        auto funcInfo = invoke.GetFuncInfo();
-        if (auto introType = funcInfo.instParentCustomTy; introType->GetClassDef()->IsInterface()) {
+        auto vtableOffset = invoke.GetVirtualMethodOffset();
+        if (auto introType = StaticCast<const CHIR::ClassType*>(invoke.GetOuterType(cgCtx.GetCHIRBuilder()));
+            introType->GetClassDef()->IsInterface()) {
             auto introTi = irBuilder.CreateTypeInfo(introType);
-            funcPtr = irBuilder.CallIntrinsicMTable({ti, introTi, irBuilder.getInt64(funcInfo.offset)});
+            funcPtr = irBuilder.CallIntrinsicMTable({ti, introTi, irBuilder.getInt64(vtableOffset)});
         } else {
             auto vtableSizeOfIntroType = cgCtx.GetVTableSizeOf(introType);
             CJC_ASSERT(vtableSizeOfIntroType > 0);
             auto idxOfIntroType = irBuilder.getInt64(vtableSizeOfIntroType - 1U);
-            auto idxOfVFunc = irBuilder.getInt64(funcInfo.offset);
+            auto idxOfVFunc = irBuilder.getInt64(vtableOffset);
             funcPtr = irBuilder.CallIntrinsicGetVTableFunc(ti, idxOfIntroType, idxOfVFunc);
             auto& llvmCtx = cgCtx.GetLLVMContext();
             auto meta = llvm::MDTuple::get(llvmCtx, llvm::MDString::get(llvmCtx, GetTypeQualifiedName(*introType)));
@@ -87,16 +88,17 @@ llvm::Value* CodeGen::GenerateInvokeStatic(IRBuilder2& irBuilder, const CHIRInvo
 
     llvm::Value* ti = **(cgMod | invokeStatic.GetRTTIValue());
     llvm::Value* funcPtr = nullptr;
-    auto funcInfo = invokeStatic.GetFuncInfo();
-    if (auto introType = funcInfo.instParentCustomTy; introType->GetClassDef()->IsInterface()) {
-        auto introTi = irBuilder.CreateTypeInfo(funcInfo.instParentCustomTy);
-        funcPtr = irBuilder.CallIntrinsicMTable({ti, introTi, irBuilder.getInt64(funcInfo.offset)});
+    auto vtableOffset = invokeStatic.GetVirtualMethodOffset();
+    auto& cgCtx = cgMod.GetCGContext();
+    if (auto introType = StaticCast<const CHIR::ClassType*>(invokeStatic.GetOuterType(cgCtx.GetCHIRBuilder()));
+        introType->GetClassDef()->IsInterface()) {
+        auto introTi = irBuilder.CreateTypeInfo(introType);
+        funcPtr = irBuilder.CallIntrinsicMTable({ti, introTi, irBuilder.getInt64(vtableOffset)});
     } else {
-        auto& cgCtx = cgMod.GetCGContext();
         auto vtableSizeOfIntroType = cgCtx.GetVTableSizeOf(introType);
         CJC_ASSERT(vtableSizeOfIntroType > 0);
         auto idxOfIntroType = irBuilder.getInt64(vtableSizeOfIntroType - 1U);
-        auto idxOfVFunc = irBuilder.getInt64(funcInfo.offset);
+        auto idxOfVFunc = irBuilder.getInt64(vtableOffset);
         funcPtr = irBuilder.CallIntrinsicGetVTableFunc(ti, idxOfIntroType, idxOfVFunc);
         auto& llvmCtx = cgCtx.GetLLVMContext();
         auto meta = llvm::MDTuple::get(llvmCtx, llvm::MDString::get(llvmCtx, GetTypeQualifiedName(*introType)));

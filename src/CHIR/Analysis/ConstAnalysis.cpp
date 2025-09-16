@@ -187,8 +187,8 @@ template <> ConstDomain::AllocatedObjMap ValueAnalysis<ConstValueDomain>::global
 template <> std::vector<std::unique_ptr<Ref>> ValueAnalysis<ConstValueDomain>::globalRefPool{};
 template <> std::vector<std::unique_ptr<AbstractObject>> ValueAnalysis<ConstValueDomain>::globalAbsObjPool{};
 template <>
-ConstDomain ValueAnalysis<ConstValueDomain>::globalState{
-    &globalChildrenMap, &globalAllocatedRefMap, &globalAllocatedObjMap, &globalRefPool, &globalAbsObjPool};
+ConstDomain ValueAnalysis<ConstValueDomain>::globalState{&globalChildrenMap, &globalAllocatedRefMap,
+    nullptr, &globalAllocatedObjMap, &globalRefPool, &globalAbsObjPool};
 
 ConstAnalysis::ConstAnalysis(const Func* func, CHIRBuilder& builder, bool isDebug, DiagAdapter* diag)
     : ValueAnalysis(func, builder, isDebug), diag(diag)
@@ -201,8 +201,7 @@ ConstAnalysis::~ConstAnalysis()
 
 void ConstAnalysis::PrintDebugMessage(const Expression* expr, const ConstValue* absVal) const
 {
-    std::string message = "[ConstAnalysis] The const value of " +
-        ExprKindMgr::Instance()->GetKindName(static_cast<size_t>(expr->GetExprKind())) +
+    std::string message = "[ConstAnalysis] The const value of " + expr->GetExprKindName() +
         ToPosInfo(expr->GetDebugLocation()) + " has been set to " + absVal->ToString() + "\n";
     std::cout << message;
 }

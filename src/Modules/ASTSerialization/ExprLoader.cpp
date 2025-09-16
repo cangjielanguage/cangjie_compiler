@@ -223,6 +223,20 @@ OwnedPtr<Expr> ASTLoader::ASTLoaderImpl::LoadThrowExpr(const PackageFormat::Expr
     return te;
 }
 
+OwnedPtr<Expr> ASTLoader::ASTLoaderImpl::LoadPerformExpr(const PackageFormat::Expr& expr, int64_t exprIndex)
+{
+    auto pe = CreateAndLoadBasicInfo<PerformExpr>(expr, exprIndex);
+    CJC_ASSERT(expr.operands()->size() == 1);
+    pe->expr = LoadExpr(expr.operands()->Get(0));
+    return pe;
+}
+
+OwnedPtr<Expr> ASTLoader::ASTLoaderImpl::LoadResumeExpr(const PackageFormat::Expr& expr, int64_t exprIndex)
+{
+    auto re = CreateAndLoadBasicInfo<ResumeExpr>(expr, exprIndex);
+    return re;
+}
+
 OwnedPtr<Expr> ASTLoader::ASTLoaderImpl::LoadSpawnExpr(const PackageFormat::Expr& expr, int64_t exprIndex)
 {
     auto se = CreateAndLoadBasicInfo<SpawnExpr>(expr, exprIndex);
@@ -282,6 +296,7 @@ OwnedPtr<Expr> ASTLoader::ASTLoaderImpl::LoadTryExpr(const PackageFormat::Expr& 
     CJC_ASSERT(expr.operands()->size() >= 1); // Has at least 1 sub node.
     uoffset_t idx = 0;
     te->tryBlock = LoadExpr<Block>(expr.operands()->Get(idx++));
+    CJC_ASSERT(expr.operands()->size() > 0);
     for (; idx < expr.operands()->size() - 1; idx++) {
         auto index = expr.operands()->Get(idx);
         te->catchBlocks.emplace_back(LoadExpr<Block>(index));
@@ -523,6 +538,8 @@ OwnedPtr<Pattern> ASTLoader::ASTLoaderImpl::LoadPattern(const PackageFormat::Pat
             return LoadEnumPattern(pattern);
         case PackageFormat::PatternKind_ExceptTypePattern:
             return LoadExceptTypePattern(pattern);
+        case PackageFormat::PatternKind_CommandTypePattern:
+            return LoadCommandTypePattern(pattern);
         default:
             CJC_ABORT(); // Should be unreachable.
             return CreateAndLoadBasicInfo<InvalidPattern>(pattern, INVALID_FORMAT_INDEX);
@@ -596,4 +613,12 @@ OwnedPtr<Pattern> ASTLoader::ASTLoaderImpl::LoadExceptTypePattern(const PackageF
     CJC_ASSERT(pattern.patterns()->size() == 1);
     etp->pattern = LoadPattern(*pattern.patterns()->Get(0));
     return etp;
+}
+
+OwnedPtr<Pattern> ASTLoader::ASTLoaderImpl::LoadCommandTypePattern(const PackageFormat::Pattern& pattern)
+{
+    auto ctp = CreateAndLoadBasicInfo<CommandTypePattern>(pattern, INVALID_FORMAT_INDEX);
+    CJC_ASSERT(pattern.patterns()->size() == 1);
+    ctp->pattern = LoadPattern(*pattern.patterns()->Get(0));
+    return ctp;
 }

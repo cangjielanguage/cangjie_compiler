@@ -205,7 +205,15 @@ bool IsStructEnum(const Ptr<Type>& type);
 bool IsRefEnum(const Ptr<Type>& type);
 
 /// check if expression is arithmetic of unsigned value.
-bool IsUnsignedArithmetic(const Ptr<const Expression>& expr);
+bool IsUnsignedArithmetic(const BinaryExpression& expr);
+
+/**
+ * @brief Get mutable variables that captured by lambda recursively.
+ * if there is lambda define or lambda calling, we will step in and collect child lambda's captured mutable variables
+ * @param lambda the root lambda.
+ * @return captured mutable variables.
+ */
+std::unordered_set<Value*> GetLambdaCapturedVarsRecursively(const Lambda& lambda);
 } // namespace Cangjie::CHIR
 
 #endif

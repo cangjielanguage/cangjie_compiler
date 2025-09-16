@@ -16,11 +16,11 @@
 #include <iostream>
 
 #include <cangjie/CHIR/CHIRBuilder.h>
-#include <cangjie/CHIR/Expression.h>
+#include <cangjie/CHIR/Expression/Terminator.h>
 #include <cangjie/CHIR/Interpreter/BCHIR.h>
 #include <cangjie/CHIR/Interpreter/BCHIRInterpreter.h>
 #include <cangjie/CHIR/Interpreter/BCHIRLinker.h>
-#include <cangjie/CHIR/Interpreter/InterpreterValue.h>
+#include <cangjie/CHIR/Interpreter/InterpreterValueUtils.h>
 #include <cangjie/CHIR/Package.h>
 #include <cangjie/Frontend/CompilerInstance.h>
 #include <cangjie/Mangle/BaseMangler.h>
@@ -56,8 +56,6 @@ private:
     Value* ConvertFuncToChir(const FuncType& ty, const IFunc& val);
     Value* ConvertArrayToChir(
         VArrayType& ty, const IArray& val, std::function<void(Expression*)>& insertExpr, Block& parent);
-    Value* ConvertClosureToChir(
-        ClosureType& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent);
 
     ClassType* FindClassType(const std::string& mangledName);
 
@@ -79,10 +77,10 @@ public:
     // Evaluates constants (variables declared with `const`) and simplifies
     // their intializers.
     void RunOnPackage(Package& package,
-        const std::vector<CHIR::FuncBase*>& initFuncsForConstVar, std::vector<Bchir> bchirPackages);
+        const std::vector<CHIR::FuncBase*>& initFuncsForConstVar, std::vector<Bchir>& bchirPackages);
 
 private:
-    void RunInterpreter(Package& package, std::vector<Bchir> bchirPackages,
+    void RunInterpreter(Package& package, std::vector<Bchir>& bchirPackages,
         const std::vector<CHIR::FuncBase*>& initFuncsForConstVar,
         std::function<void(Package&, BCHIRInterpreter&, BCHIRLinker&)> onSuccess);
     void ReplaceGlobalConstantInitializers(Package& package, BCHIRInterpreter& interpreter, BCHIRLinker& linker);

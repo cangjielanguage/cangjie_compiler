@@ -48,8 +48,8 @@ if(CANGJIE_CMAKE_SYSROOT)
 endif()
 
 if(CANGJIE_ENABLE_HWASAN)
-    add_compile_options(-fsanitize=hwaddress -fno-emulated-tls)
-    add_link_options(-fsanitize=hwaddress -fno-emulated-tls)
+    add_compile_options(-shared-libsan -fsanitize=hwaddress -fno-emulated-tls -mllvm -hwasan-globals=0 -fno-lto -fno-whole-program-vtables)
+    add_link_options(-shared-libsan -fsanitize=hwaddress -fno-emulated-tls -mllvm -hwasan-globals=0 -fno-lto -fno-whole-program-vtables)
 endif()
 
 if (MINGW)

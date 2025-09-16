@@ -104,7 +104,7 @@ struct FloatTypeInfo {
 };
 FloatTypeInfo GetFloatTypeInfoByKind(AST::TypeKind kind);
 
-void SetOuterFunctionDecl(AST::FuncDecl& fd);
+void SetOuterFunctionDecl(AST::Decl& decl);
 bool IsInDeclWithAttribute(const AST::Decl& decl, AST::Attribute attr);
 
 /**

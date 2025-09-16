@@ -117,7 +117,7 @@ void HandleFuncParams(CGModule& cgMod, const CHIR::Func& chirFunc, const CGFunct
     }
 }
 
-inline bool BuildCFunc(CGModule& cgMod, const CHIR::Value& chirFunc, const CGFunction& cgFunc, IRBuilder2& builder)
+inline void BuildCFunc(CGModule& cgMod, const CHIR::Value& chirFunc, const CGFunction& cgFunc, IRBuilder2& builder)
 {
     CJC_ASSERT(chirFunc.GetType()->IsFunc() && StaticCast<CHIR::FuncType*>(chirFunc.GetType())->IsCFunc());
     llvm::Function* llvmFunc = cgFunc.GetRawFunction();
@@ -128,7 +128,7 @@ inline bool BuildCFunc(CGModule& cgMod, const CHIR::Value& chirFunc, const CGFun
 #endif
 
     if (chirFunc.TestAttr(CHIR::Attribute::FOREIGN)) {
-        return false;
+        return;
     }
 
     if (chirFunc.IsFuncWithBody()) {
@@ -147,9 +147,7 @@ inline bool BuildCFunc(CGModule& cgMod, const CHIR::Value& chirFunc, const CGFun
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     HandleCFuncParams(cgMod, chirFunc, *llvmFunc);
 #endif
-    AddLinkageTypeMetadata(*llvmFunc, CHIRLinkage2LLVMLinkage(chirFunc.Get<CHIR::LinkTypeInfo>()),
-        cgMod.GetCGContext().IsCGParallelEnabled());
-    return true;
+    return;
 }
 } // namespace
 
@@ -194,9 +192,8 @@ void FunctionGeneratorImpl::EmitIR()
     auto chirFuncTy = chirFunc.GetFuncType();
     CJC_NULLPTR_CHECK(chirFuncTy);
     if (chirFuncTy->IsCFunc()) {
-        if (!BuildCFunc(cgMod, chirFunc, *cgFunc, builder)) {
-            return;
-        }
+        CJC_ASSERT(!chirFunc.TestAttr(CHIR::Attribute::FOREIGN));
+        BuildCFunc(cgMod, chirFunc, *cgFunc, builder);
     } else {
         BuildCJFunc(cgMod, chirFunc, *cgFunc);
     }
@@ -213,13 +210,6 @@ void FunctionGeneratorImpl::EmitIR()
     }
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    // When HotReload is enabled, we should put those non-param constructors with `internal`
-    // linkage into llvm.used to prevent them from being eliminated by llvm-opt.
-    // The non-param constructor of struct
-    if (cgMod.GetCGContext().GetCompileOptions().enableHotReload && chirFunc.IsConstructor() &&
-        chirFunc.Get<CHIR::LinkTypeInfo>() == Linkage::INTERNAL && chirFunc.GetNumOfParams() == 1) {
-        cgMod.GetCGContext().AddLLVMUsedVars(rawFunction->getName().str());
-    }
     const auto& options = cgMod.GetCGContext().GetCompileOptions();
     if ((options.enableTimer || options.enableMemoryCollect) && (chirFunc.GetGenericDecl() != nullptr)) {
         if (chirFunc.GetGenericDecl()->TestAttr(CHIR::Attribute::IMPORTED)) {
@@ -277,9 +267,6 @@ void EmitImportedCFuncIR(CGModule& cgMod, const std::vector<CHIR::ImportedFunc*>
             IsNonPublicCFunc(*chirFuncTy, *importedCFunc) && importedCFunc->TestAttr(CHIR::Attribute::NON_RECOMPILE)) {
             cgFunc->GetRawFunction()->addFnAttr(CodeGen::INCREMENTAL_CFUNC_ATTR);
             cgFunc->GetRawFunction()->addFnAttr(CodeGen::INTERNAL_CFUNC_ATTR);
-            if (importedCFunc->GetFuncKind() == CHIR::FuncKind::MACRO_INVOKE_FUNC) {
-                cgFunc->GetRawFunction()->addFnAttr(CodeGen::MACRO_INVOKE_CFUNC_ATTR);
-            }
         }
 
         SetSRetAttrForStructReturnType(*chirFuncTy, *cgFunc->GetRawFunction());

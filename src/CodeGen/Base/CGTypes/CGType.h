@@ -243,8 +243,6 @@ public:
         return cgGenericKind == CGGenericKind::DYNAMIC_GI;
     }
 
-    bool HasBasePtr() const;
-
     void GenTypeInfo();
 
     void SetCGExtensionDef(CGExtensionDef* ed)
@@ -264,8 +262,8 @@ public:
     static llvm::Type* GetLandingPadType(llvm::LLVMContext& llvmCtx);
     static llvm::Type* GetArrayBaseType(CGContext& cgCtx);
     static llvm::Type* GetBitMapType(llvm::LLVMContext& llvmCtx);
-    static llvm::FunctionType* GetCodeGenFunctionType(llvm::LLVMContext& llvmCtx, llvm::Type* retType,
-        std::vector<llvm::Type*>& params, bool shouldReturnVoid = false);
+    static llvm::FunctionType* GetCodeGenFunctionType(
+        llvm::LLVMContext& llvmCtx, llvm::Type* retType, std::vector<llvm::Type*>& params);
     static llvm::StructType* GetOrCreateTypeInfoType(llvm::LLVMContext& llvmCtx);
     static llvm::PointerType* GetOrCreateTypeInfoPtrType(llvm::LLVMContext& llvmCtx);
     static llvm::StructType* GetOrCreateTypeTemplateType(llvm::LLVMContext& llvmCtx);
@@ -277,9 +275,6 @@ public:
     /// To get a RefType of chir
     static CHIR::RefType* GetRefTypeOf(CHIR::CHIRBuilder& chirBuilder, const CHIR::Type& typeOfCHIR);
     static CHIR::RefType* GetRefTypeOfCHIRInt8(CHIR::CHIRBuilder& chirBuilder);
-    /// To get a VTable method type of chir
-    static CHIR::FuncType* GetCorrespondingVTableMethodType(
-        CHIR::CHIRBuilder& chirBuilder, const CHIR::FuncType& funcType);
 
     static CGType* GetCGTI(CGModule& cgModule);
 

@@ -7,7 +7,7 @@
 #ifndef CANGJIE_CHIR_ANALYSIS_ANALYSIS_H
 #define CANGJIE_CHIR_ANALYSIS_ANALYSIS_H
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 
 #include <optional>
 

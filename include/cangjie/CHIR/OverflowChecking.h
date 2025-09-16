@@ -10,7 +10,7 @@
 // DO NOT remove this include. Required for builds for Windows and newer clang
 #include <limits>
 
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/Type.h"
 
 namespace Cangjie::CHIR {
@@ -69,26 +69,6 @@ public:
      * @return True if an overflow occurs, false otherwise.
      */
     static bool IsExpOverflow(int64_t x, uint64_t y, OverflowStrategy strategy, int64_t* res);
-
-    /**
-     * @brief Checks for overflow when typecasting a floating-point number to another type.
-     *
-     * @tparam T The source data type.
-     * @tparam K The target data type.
-     * @param x The value to be typecast.
-     * @param res The result of the typecast.
-     * @return True if an overflow occurs, false otherwise.
-     */
-    template <typename T, typename K> static bool IsTypecastOverflowForFloat(T x, K* res)
-    {
-        CJC_NULLPTR_CHECK(res);
-        CJC_ASSERT((std::is_same<T, double>::value) || (std::is_same<T, float>::value));
-        bool bMax = x > static_cast<double>(std::numeric_limits<K>::max());
-        bool bMin = x < static_cast<double>(std::numeric_limits<K>::min());
-        bool isOverflow = bMax || bMin;
-        *res = (K)x;
-        return isOverflow;
-    }
 
     /**
      * @brief Checks for overflow when typecasting an integer to another type.
@@ -233,6 +213,7 @@ public:
                 return isOverflow;
             }
         }
+        CJC_ASSERT(y != 0);
         *res = x / y;
         return isOverflow;
     }
@@ -256,41 +237,9 @@ public:
                 return true;
             }
         }
+        CJC_ASSERT(y != 0);
         *res = x % y;
         return false;
-    }
-
-    /**
-     * @brief Checks for overflow after an exponentiation operation.
-     *
-     * @tparam T The data type of the operands.
-     * @param x The base of the exponentiation.
-     * @param y The exponent.
-     * @param strategy The overflow strategy to be used.
-     * @param res The result of the exponentiation.
-     * @return True if an overflow occurs, false otherwise.
-     */
-    template <typename T> static bool IsOverflowAfterExp(T x, T y, OverflowStrategy strategy, T* res)
-    {
-        CJC_NULLPTR_CHECK(res);
-        *res = 1;
-        bool isOverflow = false;
-        for (T j = 1; j <= y; j++) {
-            if (__builtin_mul_overflow(x, *res, res) && !isOverflow) {
-                isOverflow = true;
-            }
-        }
-        if (isOverflow && strategy == OverflowStrategy::SATURATING) {
-            T magicNumber = 2;
-            if (x < 0 && (y % magicNumber == 0)) {
-                *res = std::numeric_limits<T>::max();
-            } else if (x < 0 && (y % magicNumber == 1)) {
-                *res = std::numeric_limits<T>::min();
-            } else {
-                *res = std::numeric_limits<T>::max();
-            }
-        }
-        return isOverflow;
     }
 };
 } // namespace Cangjie::CHIR

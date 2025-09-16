@@ -17,7 +17,7 @@
 #include "cangjie/Basic/DiagnosticEngine.h"
 
 namespace Cangjie {
-void MergeCusAnno(DiagnosticEngine& diag, Ptr<AST::Package> target, Ptr<AST::Package> source);
+void MergeCusAnno(Ptr<AST::Package> target, Ptr<AST::Package> source);
 }
 
 #endif

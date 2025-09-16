@@ -12,16 +12,21 @@
 
 namespace Cangjie::CHIR {
 
-void RedundantFutureRemoval::RunOnPackage(const Ptr<const Package>& package, bool isDebug)
+RedundantFutureRemoval::RedundantFutureRemoval(const Package& pkg, bool isDebug)
+    : package(pkg), isDebug(isDebug)
 {
-    for (auto func : package->GetGlobalFuncs()) {
-        RunOnFunc(func, isDebug);
+}
+
+void RedundantFutureRemoval::RunOnPackage()
+{
+    for (auto func : package.GetGlobalFuncs()) {
+        RunOnFunc(*func);
     }
 }
 
-void RedundantFutureRemoval::RunOnFunc(const Ptr<Func>& func, bool isDebug)
+void RedundantFutureRemoval::RunOnFunc(const Func& func)
 {
-    auto visitExitAction = [isDebug](Expression& expr) {
+    auto visitExitAction = [this](Expression& expr) {
         auto [future, apply] = CheckSpawnWithFuture(expr);
         if (future != nullptr) {
             auto spawnExpr = StaticCast<Spawn*>(&expr);
@@ -35,7 +40,23 @@ void RedundantFutureRemoval::RunOnFunc(const Ptr<Func>& func, bool isDebug)
         }
         return VisitResult::CONTINUE;
     };
-    Visitor::Visit(*func, visitExitAction);
+    Visitor::Visit(func, visitExitAction);
+}
+
+FuncBase* RedundantFutureRemoval::GetExecureClosureFunc() const
+{
+    for (auto def : package.GetAllCustomTypeDef()) {
+        if (!IsCoreFuture(*def)) {
+            continue;
+        }
+        for (auto method : def->GetMethods()) {
+            if (method->GetSrcCodeIdentifier() == "executeClosure") {
+                return method;
+            }
+        }
+        return nullptr;
+    }
+    return nullptr;
 }
 
 void RedundantFutureRemoval::RewriteSpawnWithOutFuture(Spawn& spawnExpr, LocalVar& futureValue, Apply& apply)
@@ -56,12 +77,16 @@ void RedundantFutureRemoval::RewriteSpawnWithOutFuture(Spawn& spawnExpr, LocalVa
     // 2. Replace spawn and remove useless node
     auto futureExpression = futureValue.GetExpr();
     apply.RemoveSelfFromBlock();
-    futureValue.ReplaceWith(*lambda, spawnExpr.GetParent()->GetParentBlockGroup());
+    futureValue.ReplaceWith(*lambda, spawnExpr.GetParentBlock()->GetParentBlockGroup());
     futureExpression->RemoveSelfFromBlock();
-    spawnExpr.SetExecuteClosure(true);
+    if (executeClosure == nullptr) {
+        executeClosure = GetExecureClosureFunc();
+        CJC_NULLPTR_CHECK(executeClosure);
+    }
+    spawnExpr.SetExecuteClosure(*executeClosure);
 }
 
-std::pair<LocalVar*, Apply*> RedundantFutureRemoval::CheckSpawnWithFuture(Expression& expr)
+std::pair<LocalVar*, Apply*> RedundantFutureRemoval::CheckSpawnWithFuture(Expression& expr) const
 {
     if (expr.GetExprKind() != ExprKind::SPAWN) {
         return {nullptr, nullptr};

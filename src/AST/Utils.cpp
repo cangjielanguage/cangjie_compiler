@@ -20,6 +20,8 @@
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/Utils.h"
 #include "cangjie/Utils/FloatFormat.h"
+#include "cangjie/Utils/StdUtils.h"
+#include "cangjie/Utils/Utils.h"
 
 namespace Cangjie::AST {
 void AddCurFile(Node& root, Ptr<File> file)
@@ -210,13 +212,9 @@ void InitializeLitConstValue(LitConstExpr& lce)
     } else if (primitiveTy->IsFloating()) {
         std::string stringValue = lce.stringValue;
         stringValue.erase(std::remove(stringValue.begin(), stringValue.end(), '_'), stringValue.end());
-        try {
-            lce.constNumValue.asFloat.value = std::stold(stringValue);
-#ifdef __APPLE__
-        } catch (...) {
-#else
-        } catch (std::out_of_range&) {
-#endif
+        if (auto val = Stold(stringValue)) {
+            lce.constNumValue.asFloat.value = *val;
+        } else {
             if (Cangjie::FloatFormat::IsUnderFlowFloat(stringValue)) {
                 lce.constNumValue.asFloat.flowStatus = Expr::FlowStatus::UNDER;
                 lce.constNumValue.asFloat.value = 0;
@@ -231,22 +229,32 @@ void InitializeLitConstValue(LitConstExpr& lce)
     }
 }
 
-void SetOuterFunctionDecl(FuncDecl& fd)
+void SetOuterFunctionDecl(AST::Decl& decl)
 {
-    if (fd.funcBody == nullptr) {
+    Ptr<AST::Node> root = nullptr;
+    if (auto fd = DynamicCast<AST::FuncDecl*>(&decl)) {
+        root = fd->funcBody.get();
+    } else if (auto vd = DynamicCast<AST::VarDecl*>(&decl);
+        vd && (vd->TestAttr(Attribute::GLOBAL) || (vd->outerDecl && vd->outerDecl->IsNominalDecl()))) {
+        // As for decls in lambda expr, their outerDecl is lambda's left decl, may be a VarDecl(only global var or
+        // member var). Because lambda is expr in AST, not a decl, so we can't set lambda as outerDecl.
+        root = vd->initializer.get();
+    }
+    if (root == nullptr) {
         return;
     }
-    auto visitor = [&fd](Ptr<Node> node) -> VisitAction {
+    auto visitor = [&decl](Ptr<Node> node) -> VisitAction {
+        // `var d = { i => let temp = 1 }`, outerDecls of lambda param `i` and local var decl `temp` are both `d`
         if (auto fp = DynamicCast<FuncParam*>(node); fp) {
-            fp->outerDecl = &fd;
+            fp->outerDecl = &decl;
             return VisitAction::SKIP_CHILDREN;
         } else if (auto funcDecl = DynamicCast<FuncDecl*>(node); funcDecl) {
-            funcDecl->outerDecl = &fd;
+            funcDecl->outerDecl = &decl;
             return VisitAction::SKIP_CHILDREN;
         }
         return VisitAction::WALK_CHILDREN;
     };
-    Walker walker(fd.funcBody.get(), visitor);
+    Walker walker(root, visitor);
     walker.Walk();
 }
 

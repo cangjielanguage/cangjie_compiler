@@ -18,7 +18,7 @@
 
 #include "cangjie/Basic/SourceManager.h"
 #include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/CHIR/Interpreter/BCHIRPrinter.h"
 #include "cangjie/CHIR/Package.h"
@@ -72,17 +72,10 @@ private:
     /** @brief memoization table for the index in bchir.types */
     std::unordered_map<CHIR::Type*, Bchir::ByteCodeContent> typesMemoization;
 
-    /** @brief Returns the id of a constant local variable. */
-    Bchir::ByteCodeContent CLVarId(const LocalVar& var);
-
     /** @brief translate a CHIR package into BCHIR */
     template <bool ForConstEval> void TranslatePackage(
         const Package& chirPkg, const std::vector<CHIR::FuncBase*>& initFuncsForConstVar);
-    template <bool ForConstEval> void TranslateClassesLike(const Package& chirPkg);
     template <bool ForConstEval> void TranslateClasses(const Package& chirPkg);
-    template <bool ForConstEval> void TranslateStucts(const Package& chirPkg);
-    template <bool ForConstEval> void TranslateEnums(const Package& chirPkg);
-    template <bool ForConstEval> void TranslateExtends(const Package& chirPkg);
     template <bool ForConstEval> void TranslateGlobalVars(const Package& chirPkg);
     template <bool ForConstEval> void TranslateFunctions(const Package& chirPkg);
 
@@ -133,28 +126,12 @@ private:
     void TranslateInvoke(Context& ctx, const Expression& expr);
     void TranslateTypecast(Context& ctx, const Expression& expr);
     template <typename T> void TranslateIntrinsicExpression(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicStore(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicLoad(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicCAS(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicFetchAdd(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicSwap(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicFetchSub(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicFetchAnd(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicFetchOr(Context& ctx, const T& intrinsic);
-    template <typename T> void TranslateAtomicFetchXor(Context& ctx, const T& intrinsic);
-    template <typename T, OpCode O, OverflowStrategy S>
-    void TranslateOpsWithOverflowStrat(Context& ctx, const T& intrinsic);
     void TranslateCApplyExpression(Context& ctx, const Apply& apply, const Cangjie::CHIR::FuncType& funcTy);
     void TranslateApplyExpression(Context& ctx, const Apply& apply);
     void TranslateApplyWithExceptionExpression(Context& ctx, const ApplyWithException& apply);
-    void TranslateVArrayBuilder(Context& ctx, const VArrayBuilder& vArrayBuilder);
-    void GenerateVArrayInitializer(
-        Context& ctx, const VArrayBuilder& vArrayBuilder, uint64_t vArraySize, const CHIR::Value& closure);
     void TranslateMultiBranch(Context& ctx, const MultiBranch& branch);
     void TranslateAllocate(Context& ctx, const Expression& expr);
     void TranslateIntOpWithException(Context& ctx, const IntOpWithException& expr);
-    /** @brief returns true if typecast was generated */
-    bool TranslateTypecastWithException(Context& ctx, const TypeCastWithException& expr);
     void TranslateBox(Context& ctx, const Box& expr);
     void TranslateInstanceOf(Context& ctx, const InstanceOf& expr);
 

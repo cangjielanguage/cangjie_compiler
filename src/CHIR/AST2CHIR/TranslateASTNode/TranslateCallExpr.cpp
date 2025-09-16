@@ -24,10 +24,8 @@ bool ShouldInvokeStatic(const AST::FuncDecl& func, const AST::Ty& baseTy)
         return false;
     }
     // exclude partial instantiation
-    if (func.outerDecl->TestAttr(AST::Attribute::GENERIC_INSTANTIATED)) {
-        return false;
-    }
-    if (func.outerDecl->TestAttr(AST::Attribute::OPEN) &&
+    CJC_ASSERT(!func.outerDecl->TestAttr(AST::Attribute::GENERIC_INSTANTIATED));
+    if (func.outerDecl->IsOpen() &&
         // either function generic, or the type that calls is generic
         (baseTy.HasGeneric() || func.outerDecl->ty->HasGeneric())) {
         return true;
@@ -62,8 +60,7 @@ bool IsInvokeStatic(const AST::CallExpr& callExpr)
         if (auto extend = DynamicCast<AST::ExtendDecl>(parent)) {
             return false;
         }
-        if (parent->astKind == AST::ASTKind::INTERFACE_DECL ||
-            parent->TestAnyAttr(AST::Attribute::OPEN, AST::Attribute::ABSTRACT)) {
+        if (parent->IsOpen()) {
             // If the `This` is implicit and callee is defined in interface, then we are definitly
             // in the scope of the interface. In this case, we should do dynamic dispatch
             return true;
@@ -74,9 +71,9 @@ bool IsInvokeStatic(const AST::CallExpr& callExpr)
 }
 } // namespace
 
-std::vector<Ptr<Type>> Translator::TranslateASTTypes(const std::vector<Ptr<AST::Ty>>& genericInfos)
+std::vector<Type*> Translator::TranslateASTTypes(const std::vector<Ptr<AST::Ty>>& genericInfos)
 {
-    std::vector<Ptr<Type>> ts;
+    std::vector<Type*> ts;
     for (auto& genericInfo : genericInfos) {
         ts.emplace_back(TranslateType(*genericInfo));
     }
@@ -133,7 +130,7 @@ static bool IsPropertySetterCall(const AST::CallExpr& expr)
     return res;
 }
 
-Expression* Translator::GenerateDynmaicDispatchFuncCall(const InvokeCalleeInfo& funcInfo,
+Expression* Translator::GenerateDynmaicDispatchFuncCall(const InstInvokeCalleeInfo& funcInfo,
     const std::vector<Value*>& args, Value* thisObj, Value* thisRTTI, DebugLocation loc)
 {
     auto instantiatedParamTys = funcInfo.instFuncType->GetParamTypes();
@@ -159,12 +156,23 @@ Expression* Translator::GenerateDynmaicDispatchFuncCall(const InvokeCalleeInfo& 
 
     // Step 2: create the func call (might be a `Invoke` or `InvokeWithException`) and set
     // its instantiated type info
+    auto invokeInfo = InvokeCallContext {
+        .caller = (thisObj == nullptr) ? thisRTTI : castedThisObj,
+        .funcCallCtx = FuncCallContext {
+            .args = castedArgs,
+            .instTypeArgs = funcInfo.instantiatedTypeArgs,
+            .thisType = funcInfo.thisType
+        },
+        .virMethodCtx = VirMethodContext {
+            .srcCodeIdentifier = funcInfo.srcCodeIdentifier,
+            .originalFuncType = funcInfo.originalFuncType,
+            .offset = funcInfo.offset
+        }
+    };
     if (thisObj != nullptr) {
-        return TryCreate<Invoke>(currentBlock, loc, funcInfo.instFuncType->GetReturnType(), castedThisObj, castedArgs,
-            funcInfo);
+        return TryCreate<Invoke>(currentBlock, loc, funcInfo.instFuncType->GetReturnType(), invokeInfo);
     } else {
-        return TryCreate<InvokeStatic>(
-            currentBlock, loc, funcInfo.instFuncType->GetReturnType(), thisRTTI, castedArgs, funcInfo);
+        return TryCreate<InvokeStatic>(currentBlock, loc, funcInfo.instFuncType->GetReturnType(), invokeInfo);
     }
 }
 
@@ -446,7 +454,7 @@ void Translator::TranslateTrivialArgsWithSugar(
 
             // check the this type and instParentCustomType value here
             auto defaultValueCall = GenerateFuncCall(*defaultValueFunc, instDefaultValueFuncTy, std::move(instArgs),
-                thisInstType, thisInstType, defaultValueFuncArgs, loc);
+                thisInstType, defaultValueFuncArgs, loc);
             auto ret = defaultValueCall->GetResult();
 
             Value* castedRet = ret;
@@ -480,9 +488,11 @@ Value* Translator::TranslateTrivialArgWithNoSugar(
         auto argLeftValInfo = TranslateExprAsLeftValue(*arg.expr);
         argVal = GenerateLeftValue(argLeftValInfo, loc);
         auto ty = TranslateType(*arg.ty);
-        argVal = CreateAndAppendExpression<Intrinsic>(
-            loc, ty, CHIR::IntrinsicKind::INOUT_PARAM, std::vector<Value*>{argVal}, currentBlock)
-                     ->GetResult();
+        auto callContext = IntrisicCallContext {
+            .kind = IntrinsicKind::INOUT_PARAM,
+            .args = std::vector<Value*>{argVal}
+        };
+        argVal = CreateAndAppendExpression<Intrinsic>(loc, ty, callContext, currentBlock)->GetResult();
     } else {
         argVal = TranslateExprArg(*arg.expr);
         // This load should be able to remove since we are always generate right value from
@@ -527,16 +537,6 @@ void Translator::TranslateTrivialArgs(
     }
 }
 
-std::optional<std::string> Translator::GetCalleePkgName(const AST::FuncDecl& callee) const
-{
-    if (callee.TestAttr(Cangjie::AST::Attribute::COMPILER_ADD) &&
-        !callee.TestAttr(Cangjie::AST::Attribute::INTRINSIC)) {
-        return std::nullopt;
-    }
-    CJC_ASSERT(callee.curFile && callee.curFile->curPackage);
-    return {callee.curFile->curPackage->fullPackageName};
-}
-
 Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
 {
     // Conditions to check if this is a call to intrinsic
@@ -573,20 +573,14 @@ Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
     // Translate arguments
     std::vector<Value*> args;
     TranslateTrivialArgs(expr, args, std::vector<Type*>{});
-
-    // wrap this into the `GenerateFuncCall` API
-    auto intriVar = TryCreate<Intrinsic>(currentBlock, loc, ty, intrinsicKind, args)->GetResult();
-
-    // what is this for
-    auto intri = intriVar->GetExpr();
     auto ne = StaticCast<AST::NameReferenceExpr*>(expr.baseFunc.get());
-    auto genericInfos = ne->instTys;
-    std::vector<Ptr<Type>> ts = TranslateASTTypes(genericInfos);
-    if (intri->GetExprKind() == ExprKind::INTRINSIC) {
-        StaticCast<Intrinsic*>(intri)->SetGenericTypeInfo(ts);
-    } else {
-        StaticCast<IntrinsicWithException*>(intri)->SetGenericTypeInfo(ts);
-    }
+    // wrap this into the `GenerateFuncCall` API
+    auto callContext = IntrisicCallContext {
+        .kind = intrinsicKind,
+        .args = args,
+        .instTypeArgs = TranslateASTTypes(ne->instTys)
+    };
+    auto intriVar = TryCreate<Intrinsic>(currentBlock, loc, ty, callContext)->GetResult();
 
     // what is this for
     if (expr.ty->IsUnit()) {
@@ -625,7 +619,7 @@ Ptr<Value> Translator::TranslateForeignFuncCall(const AST::CallExpr& expr)
 
     auto callee = GetSymbolTable(*resolvedFunction);
     CJC_ASSERT(callee != nullptr && "TranslateApply: not supported callee now!");
-    auto funcCall = GenerateFuncCall(*callee, instTargetFuncTy, {}, nullptr, nullptr, args, loc);
+    auto funcCall = GenerateFuncCall(*callee, instTargetFuncTy, {}, nullptr, args, loc);
     if (HasNothingTypeArg(args)) {
         funcCall->Set<DebugLocationInfoForWarning>(warningLoc);
     }
@@ -641,11 +635,13 @@ Ptr<Value> Translator::TranslateCStringCtorCall(const AST::CallExpr& expr)
         target && target->type == AST::BuiltInType::CSTRING) {
         auto ty = TranslateType(*expr.ty);
         const auto& loc = TranslateLocation(expr);
-        CHIR::IntrinsicKind intrinsicKind = CHIR::IntrinsicKind::CSTRING_INIT;
         CJC_ASSERT(expr.args.size() == 1);
         auto argVal = TranslateExprArg(*expr.args[0]);
-        std::vector<Value*> args = {argVal};
-        return CreateAndAppendExpression<Intrinsic>(loc, ty, intrinsicKind, args, currentBlock)->GetResult();
+        auto callContext = IntrisicCallContext {
+            .kind = IntrinsicKind::CSTRING_INIT,
+            .args = std::vector<Value*>{argVal}
+        };
+        return CreateAndAppendExpression<Intrinsic>(loc, ty, callContext, currentBlock)->GetResult();
     }
     return nullptr;
 }
@@ -751,9 +747,9 @@ Translator::LeftValueInfo Translator::TranslateStructOrClassCtorCallAsLeftValue(
     auto callee = GetSymbolTable(*expr.resolvedFunction);
     CJC_ASSERT(callee != nullptr && "TranslateApply: not supported callee now!");
     auto funcCall = GenerateFuncCall(
-        *callee, instTargetFuncTy, {}, builder.GetType<RefType>(thisTy), builder.GetType<RefType>(thisTy), args, loc);
+        *callee, instTargetFuncTy, {}, builder.GetType<RefType>(thisTy), args, loc);
     if (expr.callKind == AST::CallKind::CALL_SUPER_FUNCTION) {
-        StaticCast<Apply*>(funcCall)->SetSuperCall(true);
+        StaticCast<Apply*>(funcCall)->SetSuperCall();
     }
     if (HasNothingTypeArg(args)) {
         funcCall->Set<DebugLocationInfoForWarning>(warningLoc);
@@ -810,9 +806,9 @@ Value* Translator::TranslateStructOrClassCtorCall(const AST::CallExpr& expr)
     auto callee = GetSymbolTable(*expr.resolvedFunction);
     CJC_ASSERT(callee != nullptr && "TranslateApply: not supported callee now!");
     auto funcCall = GenerateFuncCall(
-        *callee, instTargetFuncTy, {}, builder.GetType<RefType>(thisTy), builder.GetType<RefType>(thisTy), args, loc);
+        *callee, instTargetFuncTy, {}, builder.GetType<RefType>(thisTy), args, loc);
     if (expr.callKind == AST::CallKind::CALL_SUPER_FUNCTION) {
-        StaticCast<Apply*>(funcCall)->SetSuperCall(true);
+        StaticCast<Apply*>(funcCall)->SetSuperCall();
     }
     if (HasNothingTypeArg(args)) {
         funcCall->Set<DebugLocationInfoForWarning>(warningLoc);
@@ -825,7 +821,6 @@ Value* Translator::TranslateStructOrClassCtorCall(const AST::CallExpr& expr)
         }
         auto load = CreateAndAppendExpression<Load>(loc, thisTy, thisArg, currentBlock);
         // this load should be removed if it is a super/this call, but it will trigger IRChecker error in:
-        // expr.GetInstantiatedParamTypes().size() != funcType->GetParamTypes().size()
         if (IsSuperOrThisCall(expr)) {
             load->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
             // should be: return nullptr;
@@ -866,7 +861,7 @@ Ptr<Value> Translator::TranslateFuncTypeValueCall(const AST::CallExpr& expr)
     CJC_ASSERT(callee != nullptr && "TranslateApply: not supported callee now!");
     callee = GenerateLoadIfNeccessary(*callee, false, false, false, loc);
     auto funcCall =
-        GenerateFuncCall(*callee, StaticCast<FuncType*>(callee->GetType()), {}, nullptr, nullptr, args, loc);
+        GenerateFuncCall(*callee, StaticCast<FuncType*>(callee->GetType()), {}, nullptr, args, loc);
     if (HasNothingTypeArg(args)) {
         funcCall->Set<DebugLocationInfoForWarning>(loc);
     }
@@ -914,7 +909,7 @@ Value* Translator::TranslateNonStaticMemberFuncCall(const AST::CallExpr& expr)
         thisType = basePartTy;
     } else {
         // If there is no `this` object, then we must be inside of another non-static memeber func
-        auto currentFunc = currentBlock->GetParentFunc();
+        auto currentFunc = currentBlock->GetTopLevelFunc();
         CJC_NULLPTR_CHECK(currentFunc);
         auto outerDef = currentFunc->GetParentCustomTypeDef();
         CJC_NULLPTR_CHECK(outerDef);
@@ -969,8 +964,9 @@ Value* Translator::TranslateNonStaticMemberFuncCall(const AST::CallExpr& expr)
         }
         paramInstTys.insert(paramInstTys.begin(), instParentTy);
         auto instTargetFuncTy = builder.GetType<FuncType>(paramInstTys, retInstTy);
-        auto vtableRes = GetFuncIndexInVTable(*thisType, funcName, *instTargetFuncTy, false, funcInstTypeArgs);
-        InvokeCalleeInfo dynamicDispatchFuncInfo{funcName, instTargetFuncTy, vtableRes.originalFuncType,
+        FuncCallType funcCallType{funcName, instTargetFuncTy, funcInstTypeArgs};
+        auto vtableRes = GetFuncIndexInVTable(*thisType, funcCallType, false)[0];
+        InstInvokeCalleeInfo dynamicDispatchFuncInfo{funcName, instTargetFuncTy, vtableRes.originalFuncType,
             vtableRes.instSrcParentType,
             StaticCast<ClassType*>(vtableRes.instSrcParentType->GetCustomTypeDef()->GetType()), funcInstTypeArgs,
             thisRefType, vtableRes.offset};
@@ -1005,7 +1001,7 @@ Value* Translator::TranslateNonStaticMemberFuncCall(const AST::CallExpr& expr)
         }
         auto instTargetFuncTy = builder.GetType<FuncType>(paramInstTys, retInstTy);
         funcCall = GenerateFuncCall(
-            *wrapperFuncMaybe, instTargetFuncTy, funcInstTypeArgs, thisRefType, instParentTy, args, loc);
+            *wrapperFuncMaybe, instTargetFuncTy, funcInstTypeArgs, thisRefType, args, loc);
         PrintDevirtualizationMessage(expr, "apply");
     }
     // polish this
@@ -1063,7 +1059,7 @@ Value* Translator::TranslateStaticMemberFuncCall(const AST::CallExpr& expr)
         }
     } else {
         // If there is no `This` type, then we must be inside of another static memeber func
-        auto currentFunc = currentBlock->GetParentFunc();
+        auto currentFunc = currentBlock->GetTopLevelFunc();
         auto outerDef = currentFunc->GetParentCustomTypeDef();
         if (outerDef == nullptr) {
             // a hack solution for the GVInit func used for the member var default init value
@@ -1112,7 +1108,8 @@ Value* Translator::TranslateStaticMemberFuncCall(const AST::CallExpr& expr)
     Expression* funcCall = nullptr;
     if (IsInvokeStatic(expr) && !IsInsideCFunc(*currentBlock) && !isInGVInit) {
         auto funcName = expr.resolvedFunction->identifier;
-        auto vtableRes = GetFuncIndexInVTable(*thisType, funcName, *instTargetFuncTy, true, funcInstTypeArgs);
+        FuncCallType funcCallType{funcName, instTargetFuncTy, funcInstTypeArgs};
+        auto vtableRes = GetFuncIndexInVTable(*thisType, funcCallType, true)[0];
         auto useThisType = [thisType, &expr]() {
             if (auto thisCustomType = DynamicCast<CustomType*>(thisType)) {
                 if (auto outerInterface = DynamicCast<ClassDef*>(thisCustomType->GetCustomTypeDef())) {
@@ -1128,20 +1125,20 @@ Value* Translator::TranslateStaticMemberFuncCall(const AST::CallExpr& expr)
         if (useThisType()) {
             thisRefType = builder.GetType<RefType>(builder.GetType<ThisType>());
         }
-        InvokeCalleeInfo dynamicDispatchFuncInfo{funcName, instTargetFuncTy, vtableRes.originalFuncType,
+        InstInvokeCalleeInfo dynamicDispatchFuncInfo{funcName, instTargetFuncTy, vtableRes.originalFuncType,
             vtableRes.instSrcParentType,
             StaticCast<ClassType*>(vtableRes.instSrcParentType->GetCustomTypeDef()->GetType()), funcInstTypeArgs,
             thisRefType, vtableRes.offset};
 
         Value* rtti{};
         if (!Is<AST::MemberAccess>(expr.baseFunc)) {
-            if (currentBlock->GetParentFunc()->TestAttr(Attribute::STATIC)) {
+            if (currentBlock->GetTopLevelFunc()->TestAttr(Attribute::STATIC)) {
                 rtti = CreateAndAppendExpression<GetRTTIStatic>(TranslateLocation(expr),
                     builder.GetUnitTy(), thisRefType, currentBlock)->GetResult();
             } else {
                 // calling InvokeStatic in instance member function, use GetRTTI(%this)
                 rtti = CreateGetRTTIWrapper(
-                    currentBlock->GetParentFunc()->GetParam(0), currentBlock, TranslateLocation(expr));
+                    currentBlock->GetTopLevelFunc()->GetParam(0), currentBlock, TranslateLocation(expr));
             }
         } else {
             // otherwise use rtti of thisRefType
@@ -1151,12 +1148,10 @@ Value* Translator::TranslateStaticMemberFuncCall(const AST::CallExpr& expr)
         funcCall = GenerateDynmaicDispatchFuncCall(dynamicDispatchFuncInfo, args, nullptr, rtti, loc);
         PrintDevirtualizationMessage(expr, "invoke");
     } else {
-        auto instParentCustomDefTy =
-            GetExactParentType(*thisType, *resolvedFunction, *instTargetFuncTy, funcInstTypeArgs, false);
         auto callee = GetSymbolTable(*resolvedFunction);
         CJC_ASSERT(callee != nullptr && "TranslateApply: not supported callee now!");
         funcCall = GenerateFuncCall(
-            *callee, instTargetFuncTy, funcInstTypeArgs, thisRefType, instParentCustomDefTy, args, loc);
+            *callee, instTargetFuncTy, funcInstTypeArgs, thisRefType, args, loc);
         PrintDevirtualizationMessage(expr, "apply");
     }
     // polish this
@@ -1172,7 +1167,7 @@ Value* Translator::TranslateStaticMemberFuncCall(const AST::CallExpr& expr)
 // remove this after 'This' proposals
 bool Translator::IsInsideCFunc(const Block& bl)
 {
-    if (bl.GetParentFunc()->IsCFunc()) {
+    if (bl.GetTopLevelFunc()->IsCFunc()) {
         return true;
     }
     auto expr = bl.GetParentBlockGroup()->GetOwnerExpression();
@@ -1225,7 +1220,7 @@ Value* Translator::TranslateTrivialFuncCall(const AST::CallExpr& expr)
 
     auto callee = GetSymbolTable(*resolvedFunction);
     CJC_ASSERT(callee != nullptr && "TranslateApply: not supported callee now!");
-    auto funcCall = GenerateFuncCall(*callee, instTargetFuncTy, funcInstTypeArgs, nullptr, nullptr, args, loc);
+    auto funcCall = GenerateFuncCall(*callee, instTargetFuncTy, funcInstTypeArgs, nullptr, args, loc);
     // polish this
     if (HasNothingTypeArg(args)) {
         funcCall->Set<DebugLocationInfoForWarning>(warningLoc);
@@ -1264,7 +1259,7 @@ Ptr<Type> Translator::GetMemberFuncCallerInstType(const AST::CallExpr& expr, boo
     } else if (expr.resolvedFunction != nullptr && expr.resolvedFunction->outerDecl != nullptr &&
         expr.resolvedFunction->outerDecl->IsNominalDecl()) {
         // call own member function in nominal decl, there are 3 cases:
-        auto outerDef = currentBlock->GetParentFunc()->GetParentCustomTypeDef();
+        auto outerDef = currentBlock->GetTopLevelFunc()->GetParentCustomTypeDef();
         if (outerDef != nullptr) {
             if (auto exDef = DynamicCast<ExtendDef*>(outerDef)) {
                 // 1. struct A { func foo() {} }; extend A { func goo() { foo() } }

@@ -50,11 +50,8 @@ std::vector<std::string> PrependToPaths(const std::string& prefix, const std::ve
 {
     std::vector<std::string> searchPaths;
     for (const auto& path : paths) {
-        if (quoted) {
-            searchPaths.emplace_back(FileUtil::GetQuoted(prefix + path));
-        } else {
-            searchPaths.emplace_back(prefix + path);
-        }
+        std::string tmp = quoted ? FileUtil::GetQuoted(prefix + path) : (prefix + path);
+        searchPaths.emplace_back(tmp);
     }
     return searchPaths;
 }

@@ -16,6 +16,7 @@
 #include <optional>
 
 #include "QueryParser.h"
+#include "cangjie/Utils/StdUtils.h"
 
 using namespace Cangjie;
 
@@ -48,7 +49,8 @@ std::unique_ptr<Query> QueryParser::ParseBooleanClause()
     } else if (Seeing(TokenKind::IDENTIFIER) || Seeing(TokenKind::WILDCARD)) {
         left = ParseTerm();
     } else {
-        GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_expected_query_symbol);
+        GetDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor::parse_query_expected_query_symbol, LookAhead().Begin());
         return nullptr;
     }
     if (!left) {
@@ -58,8 +60,8 @@ std::unique_ptr<Query> QueryParser::ParseBooleanClause()
         !(Seeing(TokenKind::RPAREN) && parsingParenClause);
     if (unexpectedEnd) {
         Next();
-        GetDiagnosticEngine().Diagnose(
-            LookAhead().Begin(), DiagKind::parse_query_expected_logic_symbol, LookAhead().Value());
+        GetDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor::parse_query_expected_logic_symbol, LookAhead().Begin(), LookAhead().Value());
         return nullptr;
     }
     while (SeeingAny({TokenKind::AND, TokenKind::OR, TokenKind::NOT})) {
@@ -80,7 +82,8 @@ std::unique_ptr<Query> QueryParser::ParseBooleanClause()
         } else if (Seeing(TokenKind::IDENTIFIER) || Seeing(TokenKind::WILDCARD)) {
             right = ParseTerm();
         } else {
-            GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_expected_query_symbol);
+            GetDiagnosticEngine().DiagnoseRefactor(
+                DiagKindRefactor::parse_query_expected_query_symbol, LookAhead().Begin());
             return nullptr;
         }
 
@@ -129,18 +132,15 @@ std::optional<std::string> QueryParser::ParseComparator()
 std::unique_ptr<Query> QueryParser::ParsePositionTerm()
 {
     auto getNumber = [](const std::string& str) -> int {
-        try {
-            return std::stoi(str.c_str());
-        } catch (...) { // If parse failed, just return 0 for any exception.
-            return 0;
-        }
+        return Stoi(str).value_or(0);
     };
     auto pos = std::make_unique<Query>();
     pos->key = TOKEN_KIND_VALUES[static_cast<int>(TokenKind::WILDCARD)];
     pos->type = QueryType::POS;
     auto sign = ParseComparator();
     if (!sign.has_value()) {
-        GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_expected_position_compare_operator);
+        GetDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor::parse_query_expected_position_compare_operator, LookAhead().Begin());
         return nullptr;
     }
     pos->sign = *sign;
@@ -150,25 +150,30 @@ std::unique_ptr<Query> QueryParser::ParsePositionTerm()
         return nullptr;
     }
     if (!Skip(TokenKind::INTEGER_LITERAL)) {
-        GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_position_illegal_file_id);
+        GetDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor::parse_query_position_illegal_file_id, LookAhead().Begin());
         return nullptr;
     }
     pos->pos.fileID = static_cast<unsigned int>(getNumber(LookAhead().Value()));
     if (!Skip(TokenKind::COMMA)) {
-        GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_position_comma_required);
+        GetDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor::parse_query_position_comma_required, LookAhead().Begin());
         return nullptr;
     }
     if (!Skip(TokenKind::INTEGER_LITERAL)) {
-        GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_position_illegal_line_num);
+        GetDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor::parse_query_position_illegal_line_num, LookAhead().Begin());
         return nullptr;
     }
     pos->pos.line = getNumber(LookAhead().Value());
     if (!Skip(TokenKind::COMMA)) {
-        GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_position_comma_required);
+        GetDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor::parse_query_position_comma_required, LookAhead().Begin());
         return nullptr;
     }
     if (!Skip(TokenKind::INTEGER_LITERAL)) {
-        GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_position_illegal_column_num);
+        GetDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor::parse_query_position_illegal_column_num, LookAhead().Begin());
         return nullptr;
     }
     pos->pos.column = getNumber(LookAhead().Value());
@@ -204,7 +209,8 @@ std::unique_ptr<Query> QueryParser::ParseNormalTerm()
             term->matchKind = MatchKind::SUFFIX;
             Next();
         } else {
-            GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_invalid_query_value);
+            GetDiagnosticEngine().DiagnoseRefactor(
+                DiagKindRefactor::parse_query_invalid_query_value, LookAhead().Begin());
             return nullptr;
         }
     } else if (Seeing(TokenKind::INT8, TokenKind::RUNE_LITERAL) && !Seeing(TokenKind::DOLLAR)) {
@@ -219,7 +225,7 @@ std::unique_ptr<Query> QueryParser::ParseNormalTerm()
         if (Seeing(TokenKind::DOLLAR_IDENTIFIER) || Seeing(TokenKind::DOLLAR)) {
             GetDiagnosticEngine().DiagnoseRefactor(DiagKindRefactor::lex_unrecognized_symbol, LookAhead(), "$");
         }
-        GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_invalid_query_value);
+        GetDiagnosticEngine().DiagnoseRefactor(DiagKindRefactor::parse_query_invalid_query_value, LookAhead().Begin());
         return nullptr;
     }
     return term;
@@ -233,7 +239,7 @@ std::unique_ptr<Query> QueryParser::ParseTerm()
     if (Skip(TokenKind::WILDCARD)) {
         return ParsePositionTerm();
     }
-    GetDiagnosticEngine().Diagnose(LookAhead().Begin(), DiagKind::parse_query_expected_query_symbol);
+    GetDiagnosticEngine().DiagnoseRefactor(DiagKindRefactor::parse_query_expected_query_symbol, LookAhead().Begin());
     return nullptr;
 }
 

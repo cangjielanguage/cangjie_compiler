@@ -116,14 +116,6 @@ bool IsSrcCodeImportedGlobalDecl(const AST::Decl& decl, const GlobalOptions& opt
 bool IsSymbolImportedDecl(const AST::Decl& decl, const GlobalOptions& opts);
 
 /**
- * @brief Builds the package access level.
- *
- * @param level The access level from the AST.
- * @return Package access level.
- */
-Package::AccessLevel BuildPackageAccessLevel(const AST::AccessLevel& level);
-
-/**
  * @brief Checks if a function is local.
  *
  * @param func The function declaration.
@@ -171,6 +163,8 @@ bool IsOverflowOperator(const std::string& name);
  * @return True if the type can be an integer type, false otherwise.
  */
 bool CanBeIntegerType(const Type& type);
+
+void SetCompileTimeValueFlagRecursivly(Func& initFunc);
 } // namespace CHIR
 } // namespace Cangjie
 

@@ -23,6 +23,7 @@
 #include "cangjie/AST/ScopeManagerApi.h"
 #include "cangjie/Basic/Print.h"
 #include "cangjie/Utils/FileUtil.h"
+#include "cangjie/Utils/StdUtils.h"
 #include "cangjie/Utils/Utils.h"
 
 using namespace Cangjie;
@@ -575,7 +576,7 @@ std::set<Symbol*> Searcher::GetIDsByScopeName(const ASTContext& ctx, const Query
             ids = Union(ids, GetIDsByScopeName(ctx, n));
         }
     } else {
-        ctx.diag.Diagnose(DiagKind::searcher_invalid_scope_name, query.value);
+        ctx.diag.DiagnoseRefactor(DiagKindRefactor::searcher_invalid_scope_name, DEFAULT_POSITION, query.value);
     }
     return ids;
 }
@@ -622,24 +623,24 @@ std::set<Symbol*> Searcher::GetIDs(const ASTContext& ctx, const Query& query) co
 unsigned long Searcher::StrToUint(const ASTContext& ctx, const std::string& queryVal) const
 {
     if (queryVal.empty()) {
-        ctx.diag.Diagnose(DiagKind::searcher_empty_number);
+        ctx.diag.DiagnoseRefactor(DiagKindRefactor::searcher_empty_number, DEFAULT_POSITION);
         return UINT32_MAX;
     }
     unsigned long uintValue = UINT32_MAX;
     bool validDigits = std::all_of(queryVal.cbegin(), queryVal.cend(), [](auto c) { return std::isdigit(c); });
     if (validDigits) {
-        try {
-            uintValue = std::stoul(queryVal);
-        } catch (...) {
+        if (auto v = Stoul(queryVal)) {
+            uintValue = *v;
+        } else {
             validDigits = false;
         }
     }
     if (!validDigits) {
-        ctx.diag.Diagnose(DiagKind::searcher_invalid_number, queryVal);
+        ctx.diag.DiagnoseRefactor(DiagKindRefactor::searcher_invalid_number, DEFAULT_POSITION, queryVal);
         return UINT32_MAX;
     }
     if (uintValue >= ctx.symbolTable.size() && !ctx.symbolTable.empty()) {
-        ctx.diag.Diagnose(DiagKind::searcher_past_the_end_of_array, queryVal);
+        ctx.diag.DiagnoseRefactor(DiagKindRefactor::searcher_past_the_end_of_array, DEFAULT_POSITION, queryVal);
         return UINT32_MAX;
     }
     return uintValue;

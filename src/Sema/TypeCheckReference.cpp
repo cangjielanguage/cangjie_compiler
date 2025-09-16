@@ -355,8 +355,10 @@ bool TypeChecker::TypeCheckerImpl::FilterAndCheckTargetsOfRef(
         std::distance(sourceEndIt, targets.end()) > 1 &&
         std::any_of(sourceEndIt, targets.end(), [](auto decl) { return decl->astKind != ASTKind::FUNC_DECL; })) {
         std::vector<Ptr<Decl>> imports(sourceEndIt, targets.end());
-        DiagAmbiguousUse(diag, re, re.ref.identifier.Val(), imports, importManager);
-        return false;
+        if (!std::all_of(imports.begin(), imports.end(), [](auto decl) { return decl->IsMemberDecl(); })) {
+            DiagAmbiguousUse(diag, re, re.ref.identifier.Val(), imports, importManager);
+            return false;
+        }
     }
 
     if (!IsRefTypeArgSizeValid(re, targets) || !FilterInvalidEnumTargets(re, targets)) {

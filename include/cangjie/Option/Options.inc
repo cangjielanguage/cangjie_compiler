@@ -134,6 +134,10 @@ PREDEFVALUE(diagnostic_value, {
     VALUE("json", "", { BACKEND(ALL) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
     VALUE("noColor", "", { BACKEND(ALL) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
     VALUE("default", "", { BACKEND(ALL) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) });
+PREDEFVALUE(emit_chir_phase, {
+    VALUE("raw", "emit CHIR before compiler optimization", {BACKEND(ALL)}, {GROUP(STABLE) COMMA GROUP(VISIBLE)}) COMMA
+    VALUE("opt", "emit CHIR after compiler optimization (default)", {BACKEND(ALL)},
+        {GROUP(STABLE) COMMA GROUP(VISIBLE)})});
 PREDEFVALUE(chir_mode, {
     VALUE("standard", "", { BACKEND(ALL) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
     VALUE("withID", "", { BACKEND(ALL) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
@@ -319,28 +323,31 @@ OPTION("--dy-libs", DY_LIBS, FLAG, { BACKEND(CJNATIVE) },
 OPTION("--lto", LTO, SEPARATED, {BACKEND(CJNATIVE)},
     {GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE)}, nullptr, lto_mode, SINGLE_OCCURRENCE,
     "Enable LTO to either 'full' or 'thin' (Not available for Windows target)")
-#ifdef CANGJIE_WRITE_PROFILE
 OPTION("--profile-compile-time", PROFILE_COMPILE_TIME, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(VISIBLE) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Print time spent of all phases in the compilation")
 OPTION("--profile-compile-memory", PROFILE_COMPILE_MEMORY, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(VISIBLE) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Print memory usage of all phases in the compilation")
-#else
-OPTION("--profile-compile-time", PROFILE_COMPILE_TIME, FLAG, { BACKEND(ALL) },
-    { GROUP(GLOBAL) COMMA GROUP(VISIBLE) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Print time spent of all phases in the compilation")
-OPTION("--profile-compile-memory", PROFILE_COMPILE_MEMORY, FLAG, { BACKEND(ALL) },
-    { GROUP(GLOBAL) COMMA GROUP(VISIBLE) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Print memory usage of all phases in the compilation")
+#ifndef DISABLE_EFFECT_HANDLERS
+OPTION("--enable-eh", ENABLE_EFFECTS, FLAG, { BACKEND(CJNATIVE) },
+    { GROUP(GLOBAL) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Enables experimental support for effect handlers")
 #endif
-OPTION("--dump-chil-debug", DUMP_CHIL_DEBUG, FLAG, { BACKEND(ALL) },
+OPTION("--dump-chir-debug", DUMP_CHIR_DEBUG, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Dump CHIL to file")
+    "Dump CHIR readable txt file when compiling for debug")
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+OPTION("--debug-annotations", DUMP_ANNOTATIONS_DEBUG, FLAG, { BACKEND(ALL) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Debug computing annotations stage")
+#endif
 OPTION("--deserialize-chir-and-dump", DESERIALIZE_CHIR_AND_DUMP, SEPARATED, { BACKEND(ALL) },
     { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, SINGLE_OCCURRENCE,
     "Deserialize CHIR and dump CHIL to file")
-
+OPTION("--emit-chir", EMIT_CHIR, FLAG_WITH_ARG, {BACKEND(ALL)},
+    {GROUP(GLOBAL) COMMA GROUP(VISIBLE) COMMA GROUP(STABLE)}, nullptr, emit_chir_phase, SINGLE_OCCURRENCE,
+    "emit CHIR serialization file of the specified phase. Candidate phases:")
 OPTION("--chir-wfc", CHIR_WFC, SEPARATED, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) }, nullptr, simple_on_off_mode, SINGLE_OCCURRENCE,
     "Well-formedness check for CHIR. Candidate modes: ")
@@ -481,6 +488,13 @@ OPTION("--opt-options", OPT_OPTIONS, SEPARATED, { BACKEND(CJNATIVE) },
 OPTION("--llc-options", LLC_OPTIONS, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) }, nullptr, {}, SINGLE_OCCURRENCE,
     "Options directly passed to llc, put the value into \"\" when there is space in it")
+OPTION("--link-option", LINK_OPTION, SEPARATED, { BACKEND(ALL) },
+    { GROUP(DRIVER) COMMA GROUP(STABLE)
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+        COMMA GROUP(VISIBLE)
+#endif
+    }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "An option directly passed to linker")
 OPTION("--link-options", LINK_OPTIONS, SEPARATED, { BACKEND(ALL) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE)
     }, nullptr, {}, MULTIPLE_OCCURRENCE,
@@ -554,10 +568,10 @@ OPTION("--plugin", PLUGIN_PATH, SEPARATED, { BACKEND(CJNATIVE) },
     "Specify the dynamic library path of compiler plugin")
 
 OPTION("--incremental-compile", INCRE_COMPILE, FLAG, {BACKEND(CJNATIVE)},
-    {GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE)}, nullptr, {}, MULTIPLE_OCCURRENCE,
+    {GROUP(GLOBAL) COMMA GROUP(VISIBLE)}, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Enable incremental compilation.")
 OPTION("--incremental-debug", INCRE_DEBUG, FLAG, {BACKEND(CJNATIVE)},
-    {GROUP(GLOBAL) COMMA GROUP(STABLE)}, nullptr, {}, MULTIPLE_OCCURRENCE,
+    {GROUP(GLOBAL)}, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Print debug message during incremental compilation.")
 OPTION("--save-temps", SAVE_TEMPS, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,

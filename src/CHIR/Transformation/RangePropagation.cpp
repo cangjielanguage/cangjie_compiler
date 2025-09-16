@@ -48,9 +48,6 @@ const OptEffectCHIRMap& RangePropagation::GetEffectMap() const
 void RangePropagation::RunOnPackage(const Ptr<const Package>& package, bool isDebug)
 {
     for (auto func : package->GetGlobalFuncs()) {
-        if (func->Get<SkipCheck>() == SkipKind::SKIP_CODEGEN) {
-            continue;
-        }
         RunOnFunc(func, isDebug);
     }
 }
@@ -65,18 +62,17 @@ void RangePropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug)
     const auto actionBeforeVisitExpr = [](const RangeDomain&, Expression*, size_t) {};
     const auto actionAfterVisitExpr = [this, &toBeRewrited, func](
                                           const RangeDomain& state, Expression* expr, size_t index) {
-        auto [majorKind, exprKind] = expr->GetMajorAndMinorExprKind();
         auto exprType = expr->GetResult()->GetType();
-        if (majorKind == ExprMajorKind::BINARY_EXPR) {
+        if (expr->IsBinaryExpr()) {
             if (auto absVal = state.CheckAbstractValue(expr->GetResult()); absVal) {
                 return (void)toBeRewrited.emplace_back(expr, index, GenerateConstExpr(exprType, absVal));
             }
-        } else if (majorKind == ExprMajorKind::UNARY_EXPR) {
+        } else if (expr->IsUnaryExpr()) {
             if (auto absVal = state.CheckAbstractValue(expr->GetResult()); absVal) {
                 return (void)toBeRewrited.emplace_back(expr, index, GenerateConstExpr(exprType, absVal));
             }
         } else if ((exprType->IsInteger() || exprType->IsBoolean()) &&
-            (exprKind == ExprKind::LOAD || exprKind == ExprKind::TYPECAST || exprKind == ExprKind::FIELD)) {
+            (expr->IsLoad() || expr->IsTypeCast() || expr->IsField())) {
             if (auto absVal = state.CheckAbstractValue(expr->GetResult()); absVal && !exprType->IsString()) {
                 toBeRewrited.emplace_back(expr, index, GenerateConstExpr(exprType, absVal));
                 RecordEffectMap(expr, func);
@@ -121,8 +117,6 @@ Ptr<LiteralValue> RangePropagation::GenerateConstExpr(const Ptr<Type>& type, con
                 return builder.CreateLiteralValue<IntLiteral>(type, intValue.value().UVal());
             }
             break;
-        default:
-            return nullptr;
     }
     return nullptr;
 }
@@ -134,7 +128,7 @@ void RangePropagation::RewriteToConstExpr(const RewriteInfo& rewriteInfo, bool i
     }
     auto oldExpr = rewriteInfo.oldExpr;
     auto oldExprResult = oldExpr->GetResult();
-    auto oldExprParent = oldExpr->GetParent();
+    auto oldExprParent = oldExpr->GetParentBlock();
     auto newExpr = builder.CreateExpression<Constant>(oldExprResult->GetType(), rewriteInfo.literalVal, oldExprParent);
     newExpr->SetDebugLocation(oldExpr->GetDebugLocation());
 
@@ -148,24 +142,10 @@ void RangePropagation::RewriteToConstExpr(const RewriteInfo& rewriteInfo, bool i
     }
 }
 
-void RangePropagation::ReplaceUsageOfExprResult(
-    const Ptr<const Expression>& expr, const Ptr<Value>& newVal, bool isDebug) const
-{
-    // note: The scope of rewriting should be revised when nested block groups occur.
-    expr->GetResult()->ReplaceWith(*newVal, expr->GetParentBlockGroup());
-
-    if (isDebug) {
-        std::string message = "[RangePropagation] The result of the trivial " +
-            ExprKindMgr::Instance()->GetKindName(static_cast<size_t>(expr->GetExprKind())) +
-            ToPosInfo(expr->GetDebugLocation()) + " has been optimised\n";
-        std::cout << message;
-    }
-}
-
 void RangePropagation::RewriteBranchTerminator(
     const Ptr<Terminator>& branch, const Ptr<Block>& targetSucc, bool isDebug)
 {
-    auto parentBlock = branch->GetParent();
+    auto parentBlock = branch->GetParentBlock();
     branch->RemoveSelfFromBlock();
     auto newTerminator = builder.CreateTerminator<GoTo>(targetSucc, parentBlock);
     parentBlock->AppendExpression(newTerminator);

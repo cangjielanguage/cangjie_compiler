@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/ToStringUtils.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
@@ -35,18 +35,18 @@ using namespace Cangjie::CHIR;
 
 namespace {
 
-bool IsExpectedType(const Type& type1, const Type& type2)
+bool IsExpectedType(const Type& expectedTy, const Type& curTy)
 {
-    if (&type1 == &type2) {
+    if (&expectedTy == &curTy) {
         return true;
     }
-    if (type1.IsNothing()) {
+    if (curTy.IsNothing()) {
         return true;
     }
     auto isRefAny = [](const Type& t1) {
         return t1.IsRef() && Cangjie::StaticCast<const RefType*>(&t1)->GetBaseType()->IsAny();
     };
-    if (isRefAny(type1) || isRefAny(type2)) {
+    if (isRefAny(expectedTy) || isRefAny(curTy)) {
         // Any type should be checked
         return true;
     }
@@ -72,7 +72,7 @@ bool CheckFuncArgType(const Type& t, bool isCFunc, bool isMutThisType = false)
         }
         return false;
     }
-    if (t.IsValueType() || t.IsFunc() || t.IsClosure() || t.IsGeneric()) {
+    if (t.IsValueType() || t.IsFunc() || t.IsGeneric()) {
         // value_type/func/closure/generic pass by value
         return true;
     }
@@ -129,11 +129,11 @@ bool CheckIfGenericTypeInSet(const Type& type, const std::set<const Type*>& gene
 class IRChecker {
 public:
     /** @brief Entry function of the Well-formedness Checker */
-    static bool Check(const Package& root,
-        std::ostream& outStream, const Cangjie::GlobalOptions& options, CHIRBuilder& builder)
+    static bool Check(const Package& root, std::ostream& outStream, const Cangjie::GlobalOptions& options,
+        CHIRBuilder& builder, const ToCHIR::Phase& phase)
     {
         bool ret = true;
-
+        curCheckPhase = phase;
         auto irChecker = IRChecker(outStream, options, builder);
 
         ret = ParallelCheck(irChecker, &IRChecker::CheckFunc, root.GetGlobalFuncs()) && ret;
@@ -151,14 +151,30 @@ public:
             irChecker.Errorln("package " + root.GetName() + " need a global init func.");
             ret = false;
         }
+        if (!ret) {
+            switch (phase) {
+                case ToCHIR::Phase::RAW:
+                    irChecker.Errorln("after translation.");
+                    break;
+                case ToCHIR::Phase::PLUGIN:
+                    irChecker.Errorln("after plugin.");
+                    break;
+                case ToCHIR::Phase::ANALYSIS_FOR_CJLINT:
+                    irChecker.Errorln("after analysis for cjlint.");
+                    break;
+                case ToCHIR::Phase::OPT:
+                    irChecker.Errorln("after opt.");
+                    break;
+            }
+        }
         return ret;
     }
-
+    static ToCHIR::Phase curCheckPhase;
 private:
     std::ostream& out;
     const Cangjie::GlobalOptions& opts;
-    CHIRBuilder& builder;
 
+    CHIRBuilder& builder;
     explicit IRChecker(std::ostream& outStream, const Cangjie::GlobalOptions& opts, CHIRBuilder& builder)
         : out(outStream), opts(opts), builder(builder) {};
 
@@ -214,7 +230,7 @@ private:
     {
         auto err = "value " + value.GetIdentifier() + " has type " + value.GetType()->ToString() + " but type " +
             expectedTy + " is expected.";
-        ErrorInFunc(GetParentFunc(value), err);
+        ErrorInFunc(GetTopLevelFunc(value), err);
     }
 
     void TypeCheckError(const Expression& expr, const Value& input, const std::string& expectedTy) const
@@ -227,7 +243,7 @@ private:
         }
         auto err = "value " + input.GetIdentifier() + " used in " + location + " has type " +
             input.GetType()->ToString() + " but type " + expectedTy + " is expected.";
-        ErrorInFunc(expr.GetParentFunc(), err);
+        ErrorInFunc(expr.GetTopLevelFunc(), err);
     }
 
     void TypeCheckError(const Expression& expr, size_t index, const Value& child, const std::string& expectedTy) const
@@ -240,7 +256,7 @@ private:
         }
         auto err = "in " + location + ": the " + std::to_string(index) + "-th element (" + child.GetIdentifier() +
             ") has type " + child.GetType()->ToString() + " but type " + expectedTy + " is expected.";
-        ErrorInFunc(expr.GetParentFunc(), err);
+        ErrorInFunc(expr.GetTopLevelFunc(), err);
     }
 
     bool MemberFuncCheckError(
@@ -321,9 +337,21 @@ private:
         return true;
     }
 
+    bool CheckCustomTypeDefPackageName(const CustomTypeDef& def) const
+    {
+        if (def.GetGenericDecl() && def.GetGenericDecl()->GetPackageName() != def.GetPackageName()) {
+            std::string msg = "customDef package name error, current def " + def.GetIdentifier() +
+                ", current package name is " + def.GetPackageName() + ", expected package name is " +
+                def.GetGenericDecl()->GetPackageName();
+            Errorln(msg);
+            return false;
+        }
+        return true;
+    }
     bool CheckCustomTypeDefCommonRules(const CustomTypeDef& def) const
     {
         bool ret = true;
+        ret = CheckCustomTypeDefPackageName(def);
         for (auto func : def.GetMethods()) {
             ret = CheckDeclaredParent(*func, def) && ret;
         }
@@ -354,11 +382,45 @@ private:
         Errorln(err);
     }
 
+    bool CheckImportedCustomDef(const CustomTypeDef& customDef) const
+    {
+        if (!customDef.TestAttr(Attribute::IMPORTED)) {
+            CJC_ABORT();
+            return false;
+        }
+        for (auto& thisVtableIter : customDef.GetVTable()) {
+            auto vtableKey = thisVtableIter.first;
+            for (size_t funcId = 0; funcId < thisVtableIter.second.size(); ++funcId) {
+                if (thisVtableIter.second[funcId].instance) {
+                    bool imported = thisVtableIter.second[funcId].instance->TestAttr(Attribute::IMPORTED);
+                    bool vImported = thisVtableIter.second[funcId].attr.TestAttr(Attribute::IMPORTED);
+                    if (vImported != imported) {
+                        DumpVTableError(customDef, *vtableKey->GetCustomTypeDef(), "vtable import error");
+                        return false;
+                    }
+                    if (!thisVtableIter.second[funcId].instance->GetParentCustomTypeDef()) {
+                        std::string msg = "vtable instance parent error " +
+                            thisVtableIter.second[funcId].instance->GetIdentifier();
+                        DumpVTableError(customDef, *vtableKey->GetCustomTypeDef(), msg);
+                        return false;
+                    }
+                    if (auto f = Cangjie::DynamicCast<Func*>(thisVtableIter.second[funcId].instance);
+                        f && !f->GetBody()) {
+                        std::string msg = "vtable instance func body error " +
+                            thisVtableIter.second[funcId].instance->GetIdentifier();
+                        DumpVTableError(customDef, *vtableKey->GetCustomTypeDef(), msg);
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     bool CheckVTable(const CustomTypeDef& customDef)
     {
         if (customDef.TestAttr(Attribute::IMPORTED)) {
-            // imported need check
-            return true;
+            return CheckImportedCustomDef(customDef);
         }
         for (auto& thisVtableIter : customDef.GetVTable()) {
             auto vtableKey = thisVtableIter.first;
@@ -375,6 +437,14 @@ private:
                 return false;
             }
             for (size_t funcId = 0; funcId < thisVtableIter.second.size(); ++funcId) {
+                if (auto f = Cangjie::DynamicCast<Func*>(thisVtableIter.second[funcId].instance); f) {
+                    if (!f->GetBody()) {
+                        std::string msg = "vtable instance func body error " +
+                            thisVtableIter.second[funcId].instance->GetIdentifier();
+                        DumpVTableError(customDef, *vtableKey->GetCustomTypeDef(), msg);
+                        return false;
+                    }
+                }
                 auto thisFuncInfo = thisVtableIter.second[funcId].typeInfo.originalType;
                 auto parentFuncInfo = parentVTableIter->second[funcId].typeInfo.originalType;
                 auto& funcName = thisVtableIter.second[funcId].srcCodeIdentifier;
@@ -751,14 +821,14 @@ private:
                 }
                 const std::string& id = expr->GetResult()->GetIdentifier();
                 if (id.empty()) {
-                    CJC_NULLPTR_CHECK(block->GetParentFunc());
+                    CJC_NULLPTR_CHECK(block->GetTopLevelFunc());
                     Errorln("The result of expression " + expr->ToString() + " in the func " +
-                        block->GetParentFunc()->GetIdentifier() + " does not have identifier.");
+                        block->GetTopLevelFunc()->GetIdentifier() + " does not have identifier.");
                     return false;
                 }
                 if (!idSet.insert(id).second) {
-                    CJC_NULLPTR_CHECK(block->GetParentFunc());
-                    Errorln(block->GetParentFunc()->GetIdentifier() + " has duplicate id:" + id);
+                    CJC_NULLPTR_CHECK(block->GetTopLevelFunc());
+                    Errorln(block->GetTopLevelFunc()->GetIdentifier() + " has duplicate id:" + id);
                     return false;
                 }
             }
@@ -766,12 +836,12 @@ private:
         return true;
     }
 
-    bool CheckApplyExtraTypes(const std::vector<Type*>& instantiateArgs, const CalleeInfo& instFuncType,
-        const std::set<const Type*>& visibleGenericTypes, const Expression& expr)
+    bool CheckApplyExtraTypes(const std::vector<Type*>& instantiateArgs, const Type* thisType,
+        const std::set<const Type*>& visibleGenericTypes, const Expression& expr) const
     {
         bool ret = true;
         auto errInfoSuffix = "generic type is unknown in expression " +
-            expr.GetResult()->ToString() + ", of function " + expr.GetParentFunc()->GetIdentifier();
+            expr.GetResult()->ToString() + ", of function " + expr.GetTopLevelFunc()->GetIdentifier();
         for (size_t i = 0; i < instantiateArgs.size(); ++i) {
             if (!CheckIfGenericTypeInSet(*instantiateArgs[i], visibleGenericTypes)) {
                 auto errInfo = "In instantiated type args, " + std::to_string(i) + "-th arg's " + errInfoSuffix;
@@ -779,40 +849,21 @@ private:
                 ret = false;
             }
         }
-        if (instFuncType.instParentCustomTy != nullptr) {
-            if (!CheckIfGenericTypeInSet(*instFuncType.instParentCustomTy, visibleGenericTypes)) {
-                auto errInfo = "Instantiated parent customType's " + errInfoSuffix;
-                Errorln(errInfo);
-                ret = false;
-            }
-        }
-        if (instFuncType.thisType != nullptr) {
-            if (!CheckIfGenericTypeInSet(*instFuncType.thisType, visibleGenericTypes)) {
+        if (thisType != nullptr) {
+            if (!CheckIfGenericTypeInSet(*thisType, visibleGenericTypes)) {
                 auto errInfo = "Instantiated This type's " + errInfoSuffix;
                 Errorln(errInfo);
                 ret = false;
             }
         }
-        for (size_t i = 0; i < instFuncType.instParamTys.size(); ++i) {
-            if (!CheckIfGenericTypeInSet(*instFuncType.instParamTys[i], visibleGenericTypes)) {
-                auto errInfo = "In instantiated param types, " + std::to_string(i) + "-th param's " + errInfoSuffix;
-                Errorln(errInfo);
-                ret = false;
-            }
-        }
-        if (!CheckIfGenericTypeInSet(*instFuncType.instRetTy, visibleGenericTypes)) {
-            auto errInfo = "Instantiated return type's " + errInfoSuffix;
-            Errorln(errInfo);
-            ret = false;
-        }
         return ret;
     }
 
-    bool CheckGenericTypeValidInFunc(BlockGroup& body, const std::vector<GenericType*>& genericArgs)
+    bool CheckGenericTypeValidInFunc(BlockGroup& body, const std::set<const GenericType*>& genericArgs) const
     {
         bool ret = true;
         auto genericTypes = std::set<const Type*>(genericArgs.begin(), genericArgs.end());
-        auto func = body.GetParentFunc();
+        auto func = body.GetTopLevelFunc();
         CJC_NULLPTR_CHECK(func);
         if (func->GetFuncKind() == FuncKind::DEFAULT_PARAMETER_FUNC) {
             //  need check default parameter func
@@ -829,23 +880,34 @@ private:
             if (expr.GetResult() == nullptr) {
                 return VisitResult::CONTINUE;
             }
+            if (expr.GetExprKind() == ExprKind::LAMBDA) {
+                auto& lambda = Cangjie::StaticCast<Lambda&>(expr);
+                auto genericTypesWithLamdba = std::set<const Type*>(lambda.GetGenericTypeParams().begin(),
+                    lambda.GetGenericTypeParams().end());
+                genericTypesWithLamdba.insert(genericTypes.begin(), genericTypes.end());
+                if (!CheckIfGenericTypeInSet(*lambda.GetResult()->GetType(), genericTypesWithLamdba)) {
+                    ret = false;
+                    Errorln("Generic Type of labmda " + lambda.GetIdentifier() + " is not found in function " +
+                        lambda.GetTopLevelFunc()->GetIdentifier());
+                }
+                // exprs in Lambda body will be check in 'CheckLambda'
+                return VisitResult::SKIP;
+            }
             if (!CheckIfGenericTypeInSet(*expr.GetResult()->GetType(), genericTypes)) {
                 ret = false;
                 Errorln("Generic Type of variable " + expr.GetResult()->ToString() + " is not found in function " +
-                    expr.GetParentFunc()->GetIdentifier());
+                    expr.GetTopLevelFunc()->GetIdentifier());
             }
             if (expr.GetExprKind() == Cangjie::CHIR::ExprKind::APPLY) {
                 auto& apply = Cangjie::StaticCast<Apply&>(expr);
-                auto instantiatedTypeArgs = apply.GetInstantiateArgs();
-                auto calleeInfo = apply.GetCalleeTypeInfo();
-                if (!CheckApplyExtraTypes(instantiatedTypeArgs, calleeInfo, genericTypes, expr)) {
+                auto instantiatedTypeArgs = apply.GetInstantiatedTypeArgs();
+                if (!CheckApplyExtraTypes(instantiatedTypeArgs, apply.GetThisType(), genericTypes, expr)) {
                     ret = false;
                 }
             } else if (expr.GetExprKind() == Cangjie::CHIR::ExprKind::APPLY_WITH_EXCEPTION) {
                 auto& apply = Cangjie::StaticCast<ApplyWithException&>(expr);
-                auto instantiatedTypeArgs = apply.GetInstantiateArgs();
-                auto calleeInfo = apply.GetCalleeTypeInfo();
-                if (!CheckApplyExtraTypes(instantiatedTypeArgs, calleeInfo, genericTypes, expr)) {
+                auto instantiatedTypeArgs = apply.GetInstantiatedTypeArgs();
+                if (!CheckApplyExtraTypes(instantiatedTypeArgs, apply.GetThisType(), genericTypes, expr)) {
                     ret = false;
                 }
             }
@@ -870,14 +932,26 @@ private:
     // func mangledName can not be same with other node.
     bool CheckFunc(const Func& func)
     {
-        CJC_NULLPTR_CHECK(func.GetBody());
-        CJC_NULLPTR_CHECK(func.GetFuncType());
         auto ret = CheckIdentifier(func.GetIdentifier());
+        if (!func.GetBody()) {
+            auto err = "func " + func.GetIdentifier() + " doesn't have body";
+            Errorln(err);
+            ret = false;
+        }
+        if (!func.GetFuncType()) {
+            auto err = "func " + func.GetIdentifier() + " doesn't have type";
+            Errorln(err);
+            ret = false;
+        }
         ret = CheckFuncParams(func.GetParams(), *func.GetFuncType(), func) && ret;
-        ret = CheckFuncBody(*func.GetBody()) && ret;
+        std::set<const GenericType*> genericTys = {
+            func.GetGenericTypeParams().begin(), func.GetGenericTypeParams().end()};
+        if (func.GetBody()) {
+            ret = CheckFuncBody(*func.GetBody(), genericTys) && ret;
+        }
         ret = CheckFuncRetValue(func, *func.GetFuncType()->GetReturnType(), func.GetReturnValue()) && ret;
         ret = CheckReferenceTypeInFunc(func) && ret;
-        ret = CheckGenericTypeValidInFunc(*func.GetBody(), func.GetGenericTypeParams()) && ret;
+        ret = CheckGenericTypeValidInFunc(*func.GetBody(), genericTys) && ret;
         if (func.IsGVInit() && !func.GetFuncType()->GetReturnType()->IsVoid()) {
             auto err =
                 "func " + func.GetIdentifier() + " has type " + func.GetType()->ToString() + ", but Void is expected";
@@ -931,7 +1005,7 @@ private:
     // funcBody parameters and func input must have same size and same type.
     // funcBody blocks must have more than one exit or raise
     // funcBody return type must be same with funcBody block exit type.
-    bool CheckFuncBody(BlockGroup& body, bool isGlobalBody = true)
+    bool CheckFuncBody(BlockGroup& body, std::set<const GenericType*>& genericTypes, bool isGlobalBody = true)
     {
         bool ret = true;
         std::unordered_set<std::string> idSet;
@@ -955,8 +1029,8 @@ private:
             }
             ret = ExprOperandCheck(body, values) && ret;
         }
-        Visitor::Visit(body, [this, &ret](Expression& expr) {
-            ret = CheckExpression(expr) && ret;
+        Visitor::Visit(body, [this, &ret, &genericTypes](Expression& expr) {
+            ret = CheckExpression(expr, genericTypes) && ret;
             return VisitResult::CONTINUE;
         });
         return ret;
@@ -986,7 +1060,7 @@ private:
     // block group must have block and entry block.
     bool CheckBlockGroup(const BlockGroup& blockGroup) const
     {
-        auto curFunc = blockGroup.GetParentFunc();
+        auto curFunc = blockGroup.GetTopLevelFunc();
         CJC_NULLPTR_CHECK(curFunc);
         std::string location = curFunc->GetIdentifier();
         if (!blockGroup.GetUsers().empty()) {
@@ -996,10 +1070,10 @@ private:
         }
         auto blocks = blockGroup.GetBlocks();
         if (blocks.size() == 0) {
-            ErrorInFunc(blockGroup.GetParentFunc(), "block group in " + location + " has no block.");
+            ErrorInFunc(blockGroup.GetTopLevelFunc(), "block group in " + location + " has no block.");
             return false;
         } else if (blockGroup.GetEntryBlock() == nullptr) {
-            ErrorInFunc(blockGroup.GetParentFunc(), "block group in " + location + " has no entry block.");
+            ErrorInFunc(blockGroup.GetTopLevelFunc(), "block group in " + location + " has no entry block.");
             return false;
         }
         bool hasReturn = false;
@@ -1015,7 +1089,7 @@ private:
         }
         if (!hasReturn) {
             // Report warning now, to distinguish more specific scenarios in future.
-            WarningInFunc(blockGroup.GetParentFunc(), "block group has no exit or raise terminator.");
+            WarningInFunc(blockGroup.GetTopLevelFunc(), "block group has no exit or raise terminator.");
             return true;
         }
         return true;
@@ -1047,7 +1121,7 @@ private:
                 }
             }
             if (!findFlag) {
-                ErrorInFunc(block.GetParentFunc(),
+                ErrorInFunc(block.GetTopLevelFunc(),
                     successor->GetIdentifier() + " is " + block.GetIdentifier() + "'s successor, but " +
                         block.GetIdentifier() + " is not " + successor->GetIdentifier() + "'s predecessor.");
                 return false;
@@ -1064,20 +1138,20 @@ private:
     {
         CJC_NULLPTR_CHECK(block.GetParentBlockGroup());
         auto exprs = block.GetExpressions();
-        if (exprs.size() == 0) {
-            ErrorInFunc(block.GetParentFunc(), "block " + block.GetIdentifier() + " has no expression.");
+        if (IsEndPhase() && exprs.size() == 0) {
+            ErrorInFunc(block.GetTopLevelFunc(), "block " + block.GetIdentifier() + " has no expression.");
             return false;
         }
-        for (size_t loop = 0; loop < exprs.size() - 1; loop++) {
+        for (size_t loop = 0; loop + 1 < exprs.size(); loop++) {
             auto expr = exprs[loop];
             if (expr->IsTerminator()) {
                 ErrorInFunc(
-                    block.GetParentFunc(), "terminator found in the middle of block " + block.GetIdentifier() + ".");
+                    block.GetTopLevelFunc(), "terminator found in the middle of block " + block.GetIdentifier() + ".");
                 return false;
             }
         }
         if (!CheckTerminator(block)) {
-            ErrorInFunc(block.GetParentFunc(), "block " + block.GetIdentifier() + " does not have terminator.");
+            ErrorInFunc(block.GetTopLevelFunc(), "block " + block.GetIdentifier() + " does not have terminator.");
             return false;
         }
         return CheckSuccessors(block);
@@ -1096,13 +1170,13 @@ private:
             if (operand->TestAttr(Attribute::IMPORTED)) {
                 continue;
             }
-            if (std::find(values.begin(), values.end(), operand) == values.end()) {
+            if (IsEndPhase() && std::find(values.begin(), values.end(), operand) == values.end()) {
                 if (expr.IsTerminator()) {
-                    ErrorInFunc(expr.GetParentFunc(),
-                        operand->GetIdentifier() + " in terminator of block " + expr.GetParent()->GetIdentifier() +
+                    ErrorInFunc(expr.GetTopLevelFunc(),
+                        operand->GetIdentifier() + " in terminator of block " + expr.GetParentBlock()->GetIdentifier() +
                             " is unreachable.");
                 } else {
-                    ErrorInFunc(expr.GetParentFunc(),
+                    ErrorInFunc(expr.GetTopLevelFunc(),
                         operand->GetIdentifier() + " in " + expr.GetResult()->GetIdentifier() + " is unreachable.");
                 }
                 return false;
@@ -1193,9 +1267,9 @@ private:
         return ret;
     }
 
-    bool CheckExpression(const Expression& expr)
+    bool CheckExpression(const Expression& expr, std::set<const GenericType*>& genericTypes)
     {
-        CJC_NULLPTR_CHECK(expr.GetParent());
+        CJC_NULLPTR_CHECK(expr.GetParentBlock());
         auto ret = true;
         const std::unordered_map<ExprMajorKind, std::function<void()>> actionMap = {
             {ExprMajorKind::TERMINATOR,
@@ -1205,12 +1279,12 @@ private:
         if (auto iter = actionMap.find(expr.GetExprMajorKind()); iter != actionMap.end()) {
             iter->second();
         } else {
-            ret = CheckNormalExpr(expr);
+            ret = CheckNormalExpr(expr, genericTypes);
         }
         return ret;
     }
 
-    bool CheckNormalExpr(const Expression& expr)
+    bool CheckNormalExpr(const Expression& expr, std::set<const GenericType*>& genericTypes)
     {
         bool ret = true;
         const std::unordered_map<ExprKind, std::function<void()>> actionMap = {
@@ -1264,7 +1338,10 @@ private:
                 [&ret, &expr, this]() { ret = CheckVArrayBuilder(Cangjie::StaticCast<const VArrayBuilder&>(expr)); }},
             {ExprKind::INTRINSIC,
                 [&ret, &expr, this]() { ret = CheckIntrinsic(Cangjie::StaticCast<const Intrinsic&>(expr)); }},
-            {ExprKind::LAMBDA, [&ret, &expr, this]() { ret = CheckLambda(Cangjie::StaticCast<const Lambda&>(expr)); }},
+            {ExprKind::LAMBDA,
+                [&ret, &expr, this, &genericTypes]() {
+                    ret = CheckLambda(Cangjie::StaticCast<const Lambda&>(expr), genericTypes);
+                }},
             {ExprKind::BOX, [&ret, &expr, this]() { ret = CheckBox(Cangjie::StaticCast<const Box&>(expr)); }},
             {ExprKind::UNBOX, [&ret, &expr, this]() { ret = CheckUnBox(Cangjie::StaticCast<const UnBox&>(expr)); }},
             {ExprKind::TRANSFORM_TO_GENERIC,
@@ -1291,7 +1368,7 @@ private:
         if (auto iter = actionMap.find(expr.GetExprKind()); iter != actionMap.end()) {
             iter->second();
         } else {
-            WarningInFunc(expr.GetParentFunc(), "find unrecongnized ExprKind " + expr.GetExprKindName() + ".");
+            WarningInFunc(expr.GetTopLevelFunc(), "find unrecongnized ExprKind " + expr.GetExprKindName() + ".");
         }
         return ret;
     }
@@ -1306,7 +1383,7 @@ private:
         auto operandType = expr.GetOperand()->GetType();
         if (!Cangjie::Is<RefType>(operandType) ||
             (!operandType->StripAllRefs()->IsClass() && !operandType->StripAllRefs()->IsThis())) {
-            ErrorInFunc(expr.GetParentFunc(), "GetRTTI must be used on Class& or This&");
+            ErrorInFunc(expr.GetTopLevelFunc(), "GetRTTI must be used on Class& or This&");
             return false;
         }
         return true;
@@ -1319,8 +1396,13 @@ private:
             TypeCheckError(*result, "Unit");
             return false;
         }
-        auto func = expr.GetParentFunc();
-        if (expr.GetRTTIType()->StripAllRefs()->IsThis() && !func->TestAttr(Attribute::STATIC)) {
+        auto func = expr.GetTopLevelFunc();
+
+        bool skipCheckUse = false;
+        if (!IsEndPhase()) {
+            skipCheckUse = true;
+        }
+        if (!skipCheckUse && expr.GetRTTIType()->StripAllRefs()->IsThis() && !func->TestAttr(Attribute::STATIC)) {
             ErrorInFunc(func, "Cannot use GetRTTIStatic on This type in non-static function");
             return false;
         }
@@ -1345,6 +1427,9 @@ private:
     {
         auto ty = expr.GetResult()->GetType();
         auto expTy = expr.GetOperand(0)->GetType();
+        if (expTy->IsNothing()) {
+            return true;
+        }
         if (expr.GetExprKind() == ExprKind::NOT && !expTy->IsBoolean()) {
             TypeCheckError(expr, *expr.GetOperand(0), "Boolean");
             return false;
@@ -1379,7 +1464,7 @@ private:
         } else if (exprKind >= ExprKind::AND && exprKind <= ExprKind::OR) {
             return CheckLogicExpression(expr);
         }
-        WarningInFunc(expr.GetParentFunc(), "find unrecongnized ExprKind " + expr.GetExprKindName() + ".");
+        WarningInFunc(expr.GetTopLevelFunc(), "find unrecongnized ExprKind " + expr.GetExprKindName() + ".");
         return true;
     }
 
@@ -1389,17 +1474,40 @@ private:
     {
         auto expTy0 = expr.GetOperand(0)->GetType();
         auto expTy1 = expr.GetOperand(1)->GetType();
-        if (expr.GetExprKind() == ExprKind::MOD && !expTy0->IsInteger()) {
-            TypeCheckError(expr, *expr.GetOperand(0), "Integer");
-            return false;
+        if (expTy0->IsNothing() && expTy1->IsNothing()) {
+            // both operand types are 'Nothing', no need check
+            return true;
         }
-        if (!IsExpectedType(*expTy0, *expTy1)) {
-            TypeCheckError(expr, *expr.GetOperand(1), expTy0->ToString());
-            return false;
+        if (expr.GetExprKind() == ExprKind::MOD) {
+            if (!expTy0->IsNothing() && !expTy0->IsInteger()) {
+                TypeCheckError(expr, *expr.GetOperand(0), "Integer");
+                return false;
+            }
+            if (!expTy1->IsNothing() && !expTy1->IsInteger()) {
+                TypeCheckError(expr, *expr.GetOperand(0), "Integer");
+                return false;
+            }
         }
-        if (!IsExpectedType(*expTy0, *expr.GetResult()->GetType())) {
-            TypeCheckError(expr, *expr.GetResult(), expTy0->ToString());
-            return false;
+        if (!expTy0->IsNothing() && !expTy1->IsNothing()) {
+            // no 'Nothing' type in operands check operand and result
+            if (!IsExpectedType(*expTy0, *expTy1)) {
+                TypeCheckError(expr, *expr.GetOperand(1), expTy0->ToString());
+                return false;
+            }
+            if (!expTy0->IsNothing() && !IsExpectedType(*expTy0, *expr.GetResult()->GetType())) {
+                TypeCheckError(expr, *expr.GetResult(), expTy0->ToString());
+                return false;
+            }
+        } else {
+            // 'Nothing' type in operands just check result
+            if (!IsExpectedType(*expr.GetResult()->GetType(), *expTy0)) {
+                TypeCheckError(expr, *expr.GetOperand(0), expr.GetResult()->GetType()->ToString());
+                return false;
+            }
+            if (!IsExpectedType(*expr.GetResult()->GetType(), *expTy1)) {
+                TypeCheckError(expr, *expr.GetOperand(1), expr.GetResult()->GetType()->ToString());
+                return false;
+            }
         }
         return true;
     }
@@ -1439,12 +1547,12 @@ private:
     bool CheckBitExpression(const Expression& expr) const
     {
         auto expTy0 = expr.GetOperand(0)->GetType();
-        if (!expTy0->IsInteger()) {
+        if (!expTy0->IsInteger() && !expTy0->IsNothing()) {
             TypeCheckError(expr, *expr.GetOperand(0), "Integer");
             return false;
         }
         auto expTy1 = expr.GetOperand(1)->GetType();
-        if (!expTy1->IsInteger()) {
+        if (!expTy1->IsInteger() && !expTy1->IsNothing()) {
             TypeCheckError(expr, *expr.GetOperand(1), "Integer");
             return false;
         }
@@ -1458,7 +1566,7 @@ private:
         auto expTy0 = expr.GetOperand(0)->GetType();
         auto expTy1 = expr.GetOperand(1)->GetType();
         auto result = expr.GetResult();
-        if (!IsExpectedType(*expTy0, *expTy1)) {
+        if (!IsExpectedType(*expTy0, *expTy1) && !expTy0->IsNothing()) {
             TypeCheckError(expr, *expr.GetOperand(1), expTy0->ToString());
             return false;
         }
@@ -1475,14 +1583,16 @@ private:
     {
         auto result = expr.GetResult();
         auto expTy0 = expr.GetOperand(0)->GetType();
-        if (!expTy0->IsBoolean()) {
-            TypeCheckError(expr, *expr.GetOperand(0), "Boolean");
-            return false;
-        }
         auto expTy1 = expr.GetOperand(1)->GetType();
-        if (!expTy1->IsBoolean()) {
-            TypeCheckError(expr, *expr.GetOperand(1), "Boolean");
-            return false;
+        if (!expTy0->IsNothing() || !expTy1->IsNothing()) {
+            if (!expTy0->IsBoolean()) {
+                TypeCheckError(expr, *expr.GetOperand(0), "Boolean");
+                return false;
+            }
+            if (!expTy1->IsBoolean()) {
+                TypeCheckError(expr, *expr.GetOperand(1), "Boolean");
+                return false;
+            }
         }
         auto resultTy = result->GetType();
         if (!resultTy->IsBoolean()) {
@@ -1571,7 +1681,7 @@ private:
         if (auto res = Cangjie::DynamicCast<LocalVar*>(location)) {
             if (res->GetExpr()->GetExprKind() == Cangjie::CHIR::ExprKind::GET_ELEMENT_REF) {
                 auto err = "Location of Store:" + result->GetIdentifier() + " should not be GetElementRef.";
-                ErrorInFunc(expr.GetParentFunc(), err);
+                ErrorInFunc(expr.GetTopLevelFunc(), err);
                 return false;
             }
         }
@@ -1590,7 +1700,7 @@ private:
             indexStr += std::to_string(index);
             baseType = GetFieldOfType(*baseType, index, builder);
             if (baseType == nullptr) {
-                ErrorInFunc(expr.GetParentFunc(),
+                ErrorInFunc(expr.GetTopLevelFunc(),
                     "value " + expr.GetResult()->GetIdentifier() + " can not find path " + indexStr + ") from type " +
                     locationType.ToString());
                 return nullptr;
@@ -1618,7 +1728,7 @@ private:
 
         baseType = Cangjie::StaticCast<RefType*>(baseType)->GetBaseType();
         if (baseType->IsGeneric()) {
-            ErrorInFunc(expr.GetParentFunc(),
+            ErrorInFunc(expr.GetTopLevelFunc(),
                 "Location of StoreElementRef: " + result->GetIdentifier() + "should not be generic");
             return false;
         }
@@ -1631,7 +1741,7 @@ private:
             auto errInfo = "Stored value type " + expr.GetValue()->GetType()->ToString() + " of value " +
                 expr.GetValue()->GetIdentifier() + " does not match pointer operand " + fieldType->ToString() +
                 " in StoreElementRef " + expr.GetResult()->GetIdentifier();
-            ErrorInFunc(expr.GetParentFunc(), errInfo);
+            ErrorInFunc(expr.GetTopLevelFunc(), errInfo);
         }
 
         if (!result->GetType()->IsUnit()) {
@@ -1647,7 +1757,7 @@ private:
     bool CheckIf(const If& expr) const
     {
         auto cond = expr.GetCondition();
-        if (!cond->GetType()->IsBoolean()) {
+        if (!cond->GetType()->IsBoolean() && !cond->GetType()->IsNothing()) {
             TypeCheckError(expr, *cond, "Boolean");
             return false;
         }
@@ -1711,7 +1821,7 @@ private:
         if (resultTy->IsEnum()) {
             if (operands.size() == 0) {
                 auto err = result->GetIdentifier() + " first operand type is expected to be UInt32 or Bool.";
-                ErrorInFunc(expr.GetParentFunc(), err);
+                ErrorInFunc(expr.GetTopLevelFunc(), err);
                 return false;
             }
             if (!IsEnumSelectorType(*operands[0]->GetType())) {
@@ -1724,15 +1834,12 @@ private:
                 return false;
             }
             return true;
-        } else if (!resultTy->IsTuple() && !resultTy->IsClosure() && !resultTy->IsStruct()) {
-            TypeCheckError(*result, "Enum, Tuple, Struct or Closure");
+        } else if (!resultTy->IsTuple() && !resultTy->IsStruct()) {
+            TypeCheckError(*result, "Enum, Tuple or Struct");
             return false;
         }
         size_t resultTySize = 0;
-        constexpr size_t closureSize = 2;
-        if (resultTy->IsClosure()) {
-            resultTySize = closureSize;
-        } else if (resultTy->IsTuple()) {
+        if (resultTy->IsTuple()) {
             resultTySize = Cangjie::StaticCast<TupleType*>(resultTy)->GetElementTypes().size();
         } else {
             resultTySize = Cangjie::StaticCast<StructType*>(resultTy)->GetStructDef()->GetAllInstanceVarNum();
@@ -1743,7 +1850,7 @@ private:
         }
         for (size_t i = 0; i < resultTySize; i++) {
             auto fieldTy = GetFieldOfType(*resultTy, i, builder);
-            if (!IsExpectedType(*operands[i]->GetType(), *fieldTy)) {
+            if (!IsExpectedType(*fieldTy, *operands[i]->GetType())) {
                 TypeCheckError(expr, i, *operands[i], fieldTy->ToString());
                 return false;
             }
@@ -1755,12 +1862,12 @@ private:
     bool CheckField(const Field& expr) const
     {
         auto base = expr.GetBase();
-        auto index = expr.GetIndexes();
+        auto index = expr.GetPath();
         auto result = expr.GetResult();
         auto type = base->GetType();
         if (type->IsGeneric()) {
             ErrorInFunc(
-                expr.GetParentFunc(), "Location of Field: " + result->GetIdentifier() + "should not be generic");
+                expr.GetTopLevelFunc(), "Location of Field: " + result->GetIdentifier() + "should not be generic");
             return false;
         }
         std::string indexStr = "(";
@@ -1768,7 +1875,7 @@ private:
         if (type->IsEnum() && index.back() == 0) {
             auto kind = result->GetType()->GetTypeKind();
             if (kind != Type::TypeKind::TYPE_UINT32 && kind != Type::TypeKind::TYPE_BOOLEAN) {
-                ErrorInFunc(expr.GetParentFunc(), "value " + expr.GetResult()->GetIdentifier() + " has type " +
+                ErrorInFunc(expr.GetTopLevelFunc(), "value " + expr.GetResult()->GetIdentifier() + " has type " +
                     expr.GetResultType()->ToString() + " but type UInt32 or Boolean is expected.");
                 return false;
             }
@@ -1780,7 +1887,7 @@ private:
             }
             indexStr = indexStr + std::to_string(index[i]);
             if (type->IsClass() || type->IsRef()) {
-                ErrorInFunc(expr.GetParentFunc(),
+                ErrorInFunc(expr.GetTopLevelFunc(),
                     "value " + result->GetIdentifier() + " can not find indexs " + indexStr + ") from input type " +
                         base->GetType()->ToString());
                 return false;
@@ -1790,7 +1897,7 @@ private:
             }
             type = GetFieldOfType(*type, index[i], builder);
             if (type == nullptr) {
-                ErrorInFunc(expr.GetParentFunc(),
+                ErrorInFunc(expr.GetTopLevelFunc(),
                     "value " + result->GetIdentifier() + " can not find indexs " + indexStr + ") from input type " +
                         base->GetType()->ToString());
                 return false;
@@ -1851,66 +1958,14 @@ private:
 
     template <typename T>
     bool CheckInstantiatedType(
-        const T& expr, const Ptr<FuncType> funcType, bool isMemberfunc, bool isConstructor, bool isStatic) const
+        const T& expr, Ptr<FuncType> funcType, bool isConstructor) const
     {
-        if (isMemberfunc && !isConstructor && expr.GetInstParentCustomTyOfCallee() == nullptr) {
-            std::string info = "Member func should have instantiated this type.";
-            ErrorInFunc(expr.GetParentFunc(), info);
-            return false;
-        }
-        // UG need fix non static
-        (void)isStatic;
-        if (expr.GetInstantiatedParamTypes().size() != funcType->GetParamTypes().size()) {
-            std::string info = expr.GetResult()->ToString() +
-                " Size of instantiated param:" + std::to_string(expr.GetInstantiatedParamTypes().size()) +
-                " should be equal to size of func declared params:" + std::to_string(funcType->GetParamTypes().size());
-            ErrorInFunc(expr.GetParentFunc(), info);
-            return false;
-        }
-
-        if (expr.GetInstantiatedParamTypes().size() != (expr.GetArgs().size())) {
-            std::string info = expr.GetResult()->ToString() +
-                " Size of instantiated param:" + std::to_string(expr.GetInstantiatedParamTypes().size()) +
-                " should be equal to size of args:" + std::to_string(expr.GetArgs().size());
-            ErrorInFunc(expr.GetParentFunc(), info);
-            return false;
-        }
-
-        for (size_t index = 0; index < expr.GetInstantiatedParamTypes().size(); ++index) {
-            if (!CheckType(*expr.GetInstantiatedParamTypes()[index], *funcType->GetParamTypes()[index])) {
-                auto exprInfo = std::to_string(index) + "-th param in expr: " + expr.GetResult()->ToString();
-                std::string info = ", Instantiated param type " + expr.GetInstantiatedParamTypes()[index]->ToString() +
-                    " is not sub type of " + funcType->GetParamTypes()[index]->ToString();
-                ErrorInFunc(expr.GetParentFunc(), exprInfo + info);
-                return false;
-            }
-        }
-
-        for (size_t index = 0; index < expr.GetInstantiatedParamTypes().size(); ++index) {
-            if (!IsExpectedType(*expr.GetInstantiatedParamTypes()[index], *expr.GetArgs()[index]->GetType())) {
-                std::string info = "Value: '" + expr.GetResult()->ToString() +
-                    "' type mismatch between instantiated param type '" +
-                    expr.GetInstantiatedParamTypes()[index]->ToString() + "' and arg type '" +
-                    expr.GetArgs()[index]->GetType()->ToString() + "'.";
-                ErrorInFunc(expr.GetParentFunc(), info);
-                return false;
-            }
-        }
-
         if (!isConstructor) {
-            if (!CheckReturnType(*funcType, *expr.GetInstantiatedRetType())) {
-                std::string info = "Value:" + expr.GetResult()->ToString() + " Instantiated return type " +
-                    expr.GetInstantiatedRetType()->ToString() + " is not super type of " +
-                    funcType->GetReturnType()->ToString();
-                ErrorInFunc(expr.GetParentFunc(), info);
-                return false;
-            }
-
             if (!CheckReturnType(*funcType, *expr.GetResult()->GetType())) {
                 std::string info = "Value:" + expr.GetResult()->ToString() +
-                    " type mismatch between instantiated return type '" + expr.GetInstantiatedRetType()->ToString() +
-                    "' and arg type '" + expr.GetResult()->GetType()->ToString() + "'.";
-                ErrorInFunc(expr.GetParentFunc(), info);
+                    " type mismatch between instantiated return type '" + expr.GetResultType()->ToString() +
+                    "' and arg type '" + funcType->GetReturnType()->ToString() + "'.";
+                ErrorInFunc(expr.GetTopLevelFunc(), info);
                 return false;
             }
         }
@@ -1932,6 +1987,9 @@ private:
 
     bool CheckType(const Type& subType, const Type& parentType) const
     {
+        if (subType.IsNothing()) {
+            return true;
+        }
         if (parentType.IsGeneric() || subType.IsGeneric()) {
             return true;
         }
@@ -1974,8 +2032,15 @@ private:
             return true;
         }
 
-        if (!CheckInstantiatedType(expr, Cangjie::StaticCast<FuncType*>(func->GetType()), IsMemberFunc(func),
-            IsConstructor(*func), func->TestAttr(Attribute::STATIC))) {
+        if (auto callee = Cangjie::DynamicCast<FuncBase*>(func); callee && callee->IsMemberFunc()) {
+            if (expr.GetThisType() == nullptr) {
+                std::string info = expr.GetResult()->ToString() + ", callee is method func, but don't have ThisType.";
+                ErrorInFunc(expr.GetTopLevelFunc(), info);
+                return false;
+            }
+        }
+        if (!CheckInstantiatedType(expr,
+            Cangjie::StaticCast<FuncType*>(func->GetType()), IsConstructor(*func))) {
             return false;
         }
 
@@ -1985,7 +2050,7 @@ private:
         if (args.size() != funcParamsTy.size()) {
             std::string info = "value " + result->GetIdentifier() + " has " + std::to_string(args.size()) +
                 " arguments but the function type has " + std::to_string(funcParamsTy.size()) + " parameters.";
-            ErrorInFunc(expr.GetParentFunc(), info);
+            ErrorInFunc(expr.GetTopLevelFunc(), info);
             return false;
         }
 
@@ -2037,12 +2102,12 @@ private:
         if (!type->IsFunc()) {
             auto err = "method " + expr.GetMethodName() + " used in " + result->GetIdentifier() + " has type " +
                 type->ToString() + " but type FuncType is expected.";
-            ErrorInFunc(expr.GetParentFunc(), err);
+            ErrorInFunc(expr.GetTopLevelFunc(), err);
             return false;
         }
         auto funcType = Cangjie::StaticCast<FuncType*>(type);
         const auto& args = expr.GetOperands();
-        if (!CheckInstantiatedType(expr, Cangjie::StaticCast<FuncType*>(type), true, false, true)) {
+        if (!CheckInstantiatedType(expr, Cangjie::StaticCast<FuncType*>(type), false)) {
             return false;
         }
         // check ref info of args
@@ -2059,8 +2124,8 @@ private:
         auto rttiValue = expr.GetRTTIValue();
         auto rttiExpr = Cangjie::StaticCast<LocalVar>(rttiValue)->GetExpr();
         if (!Cangjie::Is<GetRTTI>(rttiExpr) && !Cangjie::Is<GetRTTIStatic>(rttiExpr)) {
-            ErrorInFunc(rttiExpr->GetParentFunc(), "RTTI value of InvokeStatic must be either GetRTTI or GetRTTIStatic,"
-                " got " + rttiValue->ToString());
+            ErrorInFunc(rttiExpr->GetTopLevelFunc(),
+                "RTTI value of InvokeStatic must be either GetRTTI or GetRTTIStatic, got " + rttiValue->ToString());
             return false;
         }
         return true;
@@ -2199,8 +2264,8 @@ private:
     // terminal check
     bool JumpFieldCheck(const Ptr<Block> srcBlock, const Ptr<Block> dstBlock) const
     {
-        if (dstBlock->GetParentBlockGroup() != srcBlock->GetParentBlockGroup()) {
-            ErrorInFunc(srcBlock->GetParentFunc(),
+        if (IsEndPhase() && dstBlock->GetParentBlockGroup() != srcBlock->GetParentBlockGroup()) {
+            ErrorInFunc(srcBlock->GetTopLevelFunc(),
                 "terminator in block " + srcBlock->GetIdentifier() + " jump to a unreachable block " +
                     dstBlock->GetIdentifier() + ".");
             return false;
@@ -2211,7 +2276,7 @@ private:
     // terminator must jump to reachable blocks
     bool CheckTerminator(const Terminator& expr) const
     {
-        auto srcBlock = expr.GetParent();
+        auto srcBlock = expr.GetParentBlock();
         bool ret = true;
         auto size = expr.GetNumOfSuccessor();
         for (size_t i = 0; i < size; i++) {
@@ -2263,7 +2328,7 @@ private:
         if (auto iter = actionMap.find(expr.GetExprKind()); iter != actionMap.end()) {
             iter->second();
         } else {
-            WarningInFunc(expr.GetParentFunc(), "find unrecongnized ExprKind " + expr.GetExprKindName() + ".");
+            WarningInFunc(expr.GetTopLevelFunc(), "find unrecongnized ExprKind " + expr.GetExprKindName() + ".");
         }
         return ret;
     }
@@ -2271,7 +2336,7 @@ private:
     bool CheckBranch(const Branch& expr) const
     {
         auto cond = expr.GetOperand(0);
-        if (!cond->GetType()->IsBoolean()) {
+        if (!cond->GetType()->IsBoolean() && !cond->GetType()->IsNothing()) {
             TypeCheckError(expr, *cond, "Boolean");
             return false;
         }
@@ -2303,11 +2368,18 @@ private:
         if (args.size() != funcParamsTy.size()) {
             std::string info = "value " + result->GetIdentifier() + " has " + std::to_string(args.size()) +
                 " arguments but the function type has " + std::to_string(funcParamsTy.size()) + " parameters.";
-            ErrorInFunc(expr.GetParentFunc(), info);
+            ErrorInFunc(expr.GetTopLevelFunc(), info);
             return false;
         }
-        if (!CheckInstantiatedType(expr, Cangjie::StaticCast<FuncType*>(func->GetType()), IsMemberFunc(func),
-            IsConstructor(*func), func->TestAttr(Attribute::STATIC))) {
+        if (auto callee = Cangjie::DynamicCast<FuncBase*>(func); callee && callee->IsMemberFunc()) {
+            if (expr.GetThisType() == nullptr) {
+                std::string info = expr.GetResult()->ToString() + ", callee is method func, but don't have ThisType.";
+                ErrorInFunc(expr.GetTopLevelFunc(), info);
+                return false;
+            }
+        }
+        if (!CheckInstantiatedType(expr,
+            Cangjie::StaticCast<FuncType*>(func->GetType()), IsConstructor(*func))) {
             return false;
         }
         // check ref info of args
@@ -2454,7 +2526,7 @@ private:
     {
         if (expr.GetOperands().size() != 0) {
             auto ty = expr.GetOperand(0)->GetType();
-            if (!ty->IsClosure() && !(ty->IsRef() && ty->GetTypeArgs()[0]->IsClass())) {
+            if (!(ty->IsRef() && ty->GetTypeArgs()[0]->IsClass())) {
                 TypeCheckError(expr, *expr.GetOperand(0), "closure or ref to class");
                 return false;
             }
@@ -2562,7 +2634,7 @@ private:
         // elements type check
         for (size_t i = 0; i < args.size(); i++) {
             auto argtype = args[i]->GetType();
-            if (!IsExpectedType(*argtype, *elemType)) {
+            if (!IsExpectedType(*elemType, *argtype)) {
                 TypeCheckError(expr, *args[i], elemType->ToString());
                 return false;
             }
@@ -2592,7 +2664,7 @@ private:
         return true;
     }
 
-    bool CheckLambda(const Lambda& expr)
+    bool CheckLambda(const Lambda& expr, std::set<const GenericType*>& genericTypes)
     {
         auto result = expr.GetResult();
         if (!result->GetType()->IsFunc()) {
@@ -2601,22 +2673,29 @@ private:
         }
         auto funcTy = expr.GetFuncType();
         CJC_NULLPTR_CHECK(funcTy);
-        CJC_NULLPTR_CHECK(expr.GetParentFunc());
-        auto ret = expr.GetIdentifier().empty() || CheckIdentifier(expr.GetIdentifier());
-        ret = CheckFuncParams(expr.GetParams(), *funcTy, *expr.GetParentFunc()) && ret;
-        ret = CheckFuncBody(*expr.GetBody(), false) && ret;
-        ret = CheckFuncRetValue(*expr.GetParentFunc(), *funcTy->GetReturnType(), expr.GetReturnValue()) && ret;
-        ret = CheckGenericTypeValidInFunc(*expr.GetBody(), expr.GetGenericTypeParams()) && ret;
+        CJC_NULLPTR_CHECK(expr.GetTopLevelFunc());
+        auto ret = !expr.GetIdentifier().empty();
+        ret = CheckFuncParams(expr.GetParams(), *funcTy, *expr.GetTopLevelFunc()) && ret;
+        genericTypes.insert(expr.GetGenericTypeParams().begin(), expr.GetGenericTypeParams().end());
+        ret = CheckFuncBody(*expr.GetBody(), genericTypes, false) && ret;
+        ret = CheckFuncRetValue(*expr.GetTopLevelFunc(), *funcTy->GetReturnType(), expr.GetReturnValue()) && ret;
+        ret = CheckGenericTypeValidInFunc(*expr.GetBody(), genericTypes) && ret;
         if (!ret) {
             expr.Dump();
+        }
+        for (auto ty : expr.GetGenericTypeParams()) {
+            genericTypes.erase(ty);
         }
         return ret;
     }
 
     bool CheckGetInstantiateValue(const GetInstantiateValue& expr)
     {
+        if (!IsEndPhase()) {
+            return true;
+        }
         std::string err = "expr: " + expr.ToString() + ", should be removed, can't be seen in CodeGen Stage.";
-        ErrorInFunc(expr.GetParentFunc(), err);
+        ErrorInFunc(expr.GetTopLevelFunc(), err);
         return false;
     }
 
@@ -2631,20 +2710,20 @@ private:
         auto result = expr.GetResult();
         // Box(%1: Int32, BoxType<Int32>&), is ok
         if (IsBoxRefType(*result->GetType()) &&
-            GetBaseTypeFromBoxRefType(*result->GetType()) == expr.GetObject()->GetType()) {
+            GetBaseTypeFromBoxRefType(*result->GetType()) == expr.GetSourceTy()) {
             return true;
         }
         if (!IsClassRefType(*result->GetType()) && !IsBoxRefType(*result->GetType())) {
             TypeCheckError(*result, "class or box reference type");
             return false;
         }
-        if (expr.GetObject()->GetType()->IsRef() &&
-            Cangjie::StaticCast<RefType*>(expr.GetObject()->GetType())->GetBaseType()->IsReferenceType()) {
+        if (expr.GetSourceTy()->IsRef() &&
+            Cangjie::StaticCast<RefType*>(expr.GetSourceTy())->GetBaseType()->IsReferenceType()) {
             std::stringstream ms{};
             ms << "In value " << expr.ToString()
                << ":\n"
                   "Operand must be value type, got "
-               << expr.GetObject()->GetType()->ToString();
+               << expr.GetSourceTy()->ToString();
             Errorln(ms.str());
             return false;
         }
@@ -2670,7 +2749,7 @@ private:
 
     bool CheckTransformToConcrete(const TransformToConcrete& expr)
     {
-        if (!expr.GetObject()->GetType()->IsGenericRelated()) {
+        if (!expr.GetSourceTy()->IsGenericRelated()) {
             TypeCheckError(*expr.GetResult(), "value type");
             return false;
         }
@@ -2687,21 +2766,30 @@ private:
             return false;
         }
 
-        auto srcTy = expr.GetObject()->GetType();
+        auto srcTy = expr.GetSourceTy();
         auto srcIsReferenceTy = srcTy->IsRef() &&
             Cangjie::StaticCast<RefType*>(srcTy)->GetBaseType()->IsReferenceType();
         if (!srcIsReferenceTy) {
-            TypeCheckError(*expr.GetObject(), "reference type");
+            TypeCheckError(*expr.GetSourceValue(), "reference type");
             return false;
         }
         return true;
     }
+
+    bool IsEndPhase() const
+    {
+        return curCheckPhase == ToCHIR::Phase::OPT || curCheckPhase == ToCHIR::Phase::ANALYSIS_FOR_CJLINT;
+    }
 };
+
+ToCHIR::Phase IRChecker::curCheckPhase = ToCHIR::Phase::OPT;
+
 } // unnamed namespace
 
 namespace Cangjie::CHIR {
-bool IRCheck(const Package& root, const Cangjie::GlobalOptions& opts, CHIRBuilder& builder, std::ostream& out)
+bool IRCheck(const Package& root, const Cangjie::GlobalOptions& opts, CHIRBuilder& builder, const ToCHIR::Phase& phase,
+    std::ostream& out)
 {
-    return IRChecker::Check(root, out, opts, builder);
+    return IRChecker::Check(root, out, opts, builder, phase);
 }
 } // namespace Cangjie::CHIR

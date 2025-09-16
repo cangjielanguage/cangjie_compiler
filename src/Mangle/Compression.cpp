@@ -958,14 +958,6 @@ bool SpanningFuncDeclTree(std::vector<std::unique_ptr<Entity>>& entities, std::s
             RecursionHelper(funcName, treeIdMap, mid, compressed, false);
         }
     }
-    if (idx < n && mangled[idx] == MANGLE_LOCAL_VAR_PREFIX[0]) {
-        size_t nextIdx = ForwardNumber(mangled, idx + MANGLE_CHAR_LEN);
-        if (nextIdx != idx + MANGLE_CHAR_LEN) {
-            std::string localName = mangled.substr(idx, nextIdx - idx);
-            RecursionHelper(localName, treeIdMap, mid, compressed, false);
-            idx = nextIdx;
-        }
-    }
     bool isFunc = false;
     std::tie(isFunc, idx, compressed) = SpanningFuncSubTree(treeIdMap, mangled, compressed, idx, mid, isCompressed);
     if (idx < n) {
@@ -1056,10 +1048,6 @@ std::string RecursionFuncEntity(const std::unique_ptr<Entity>& entity,
     bool isReplaced = std::get<1>(exInfo);
     size_t idx = ForwardName(entity->mangledName, isCompressed);
     std::string funcName = entity->mangledName.substr(0, idx);
-    if (idx < entity->mangledName.size() && entity->mangledName[idx] == MANGLE_LOCAL_VAR_PREFIX[0]) {
-        idx = ForwardNumber(entity->mangledName, idx + MANGLE_CHAR_LEN);
-        funcName = entity->mangledName.substr(0, idx);
-    }
     RecursionHelper(funcName, treeIdMap, mid, compressed, isReplaced);
     FunctionEntity* fe = static_cast<FunctionEntity*>(entity.get());
     if (isGeneric) {

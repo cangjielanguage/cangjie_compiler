@@ -4,14 +4,18 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-#include "cangjie/Driver/Backend/Backend.h"
 #include "gtest/gtest.h"
+#include "cangjie/Driver/Backend/Backend.h"
 
 using namespace Cangjie;
 
 class ToolchainTest : public ::testing::Test {
 protected:
-    void SetUp() override {}
+    void SetUp() override
+    {
+    }
 };
 
-TEST_F(ToolchainTest, Init) {}
+TEST_F(ToolchainTest, Init)
+{
+}

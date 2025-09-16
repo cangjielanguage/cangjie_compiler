@@ -34,10 +34,9 @@ int64_t Translator::CalculateDelayExitLevelForContinue()
 
 void Translator::UpdateDelayExitSignal(int64_t level)
 {
-    const auto& loc = delayExitSignal->GetDebugLocation();
-    auto constDepth = CreateAndAppendConstantExpression<IntLiteral>(loc, builder.GetInt64Ty(),
+    auto constDepth = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(),
         *currentBlock, static_cast<uint64_t>(level))->GetResult();
-    CreateWrappedStore(loc, constDepth, delayExitSignal, currentBlock);
+    CreateWrappedStore(constDepth, delayExitSignal, currentBlock);
 }
 
 Ptr<Value> Translator::Visit(const AST::JumpExpr& jumpExpr)

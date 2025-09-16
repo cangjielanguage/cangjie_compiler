@@ -511,7 +511,7 @@ void ReplaceFunction(CGModule& cgMod)
     auto& callBasesToReplace = cgMod.GetCGContext().GetCallBasesToReplace();
     for (auto& item : callBasesToReplace) {
         auto& applyW = item.applyExprW;
-        irBuilder.SetInsertCGFunction(*cgMod.GetOrInsertCGFunction(applyW.GetParentFunc()));
+        irBuilder.SetInsertCGFunction(*cgMod.GetOrInsertCGFunction(applyW.GetTopLevelFunc()));
         auto oldCall = item.callWithoutTI;
         irBuilder.SetInsertPoint(oldCall);
         /// step1: prepare new arguments
@@ -533,6 +533,8 @@ void ReplaceFunction(CGModule& cgMod)
         /// step2: alloca memory for `this` with TypeInfo
         CJC_NULLPTR_CHECK(applyW.GetThisParam());
         auto thisCHIRType = DeRef(*applyW.GetThisParam()->GetType());
+        cgMod.GetCGContext().genericParamsCacheMap[irBuilder.GetInsertFunction()].clear();
+        cgMod.GetCGContext().genericParamsSizeBlockLevelCacheMap[irBuilder.GetInsertBlock()].clear();
         auto thisParamTypeInfo = irBuilder.CreateTypeInfo(thisCHIRType);
         auto size32 = irBuilder.GetLayoutSize_32(*thisCHIRType);
         auto size64 = irBuilder.CreateSExt(size32, irBuilder.getInt64Ty());

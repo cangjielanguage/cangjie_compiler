@@ -195,18 +195,14 @@ std::vector<llvm::BasicBlock*> IRBuilder2::CreateAndInsertBasicBlocks(
 
 void IRBuilder2::EmitDeclare(const CHIR::Debug& debugNode, bool pointerWrapper)
 {
-    if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
-        return;
-    }
+    CJC_ASSERT(cgMod.GetCGContext().GetCompileOptions().enableCompileDebug);
     cgMod.diBuilder->EmitDeclare(debugNode, *GetInsertBlock(), pointerWrapper);
     EmitLocation(CHIRExprWrapper(debugNode));
 }
 
 void IRBuilder2::CreateLocalVarPointer(const CHIR::Debug& debugNode, const CGValue& cgValue)
 {
-    if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
-        return;
-    }
+    CJC_ASSERT(cgMod.GetCGContext().GetCompileOptions().enableCompileDebug);
     auto cgType = cgValue.GetCGType();
     auto arg = cgValue.GetRawValue();
     auto tmpArg = CreateEntryAlloca(
@@ -310,12 +306,11 @@ llvm::Type* IRBuilder2::HandleArgPointerType(const CGType& argType) const
 {
     // If the pointer type is Ref type, it should be stored in addrSpace(1)**.
     // If the pointer type is Derive type, it should be stored in addrSpace(0)*.
-    if (!argType.IsRefType()) {
+    if (argType.IsRefType()) {
+        return argType.GetPointerElementType()->GetLLVMType()->getPointerTo(1);
+    } else {
         return GetPointerToWithSpecificAddrSpace(&argType, 0);
     }
-    return (argType.GetLLVMType()->getPointerAddressSpace() == 0
-            ? argType.GetLLVMType()
-            : argType.GetPointerElementType()->GetLLVMType()->getPointerTo(1));
 }
 
 void IRBuilder2::CreateValuePointer(const CHIR::Debug& debugNode, const CGValue& cgValue)
@@ -508,10 +503,6 @@ llvm::Value* IRBuilder2::CallIntrinsicIsNonNull(llvm::Value* value)
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 llvm::Value* IRBuilder2::CallIntrinsicRef2Null(llvm::Value* value)
-{
-    return value;
-}
-llvm::Value* IRBuilder2::CallIntrinsicNull2Ref(llvm::Value* value, [[maybe_unused]] bool isJava)
 {
     return value;
 }

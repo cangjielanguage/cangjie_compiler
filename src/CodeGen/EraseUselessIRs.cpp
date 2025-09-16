@@ -46,24 +46,6 @@ void TryPropagateLocalConstantVars(llvm::Module& module)
     }
 }
 
-void EraseReplaceableInsts(llvm::Function* function, const std::vector<llvm::Instruction*>& insts)
-{
-    if (insts.size() <= 1) {
-        return;
-    }
-    llvm::Instruction* specificInst = insts.front();
-    auto& entryBB = function->getEntryBlock();
-    specificInst->moveBefore(&entryBB.front());
-
-    // Separate replace & erase steps to avoid iterator smashing.
-    std::for_each(
-        insts.begin() + 1, insts.end(), [&specificInst](auto inst) { inst->replaceAllUsesWith(specificInst); });
-    std::for_each(insts.begin() + 1, insts.end(), [](auto inst) { inst->eraseFromParent(); });
-    if (HasNoUse(*specificInst)) {
-        specificInst->eraseFromParent();
-    }
-}
-
 std::vector<llvm::Instruction*> CollectInstructions(
     llvm::BasicBlock* block, const std::function<bool(const llvm::Instruction&)>& condition = nullptr)
 {
@@ -85,21 +67,6 @@ std::vector<llvm::Instruction*> CollectInstructions(
         collectedInsts.insert(collectedInsts.end(), bbRes.begin(), bbRes.end());
     }
     return collectedInsts;
-}
-
-void EraseUselessNullCall(llvm::Function* function)
-{
-    // Erase redundant jet.null calls from function.
-    // Erase unused jet.null calls from function.
-    auto isCallNull = [](const llvm::Instruction& inst) {
-        if (auto callInst = llvm::dyn_cast<llvm::CallInst>(&inst);
-            callInst && callInst->getCalledFunction() && callInst->getCalledFunction()->getName() == "jet.null") {
-            return true;
-        }
-        return false;
-    };
-    std::vector<llvm::Instruction*> nullCallInsts = CollectInstructions(function, isCallNull);
-    EraseReplaceableInsts(function, nullCallInsts);
 }
 
 void EraseUselessLoad(llvm::Function* function)
@@ -235,9 +202,6 @@ void CGModule::EraseUnusedFuncs(const std::function<bool(const llvm::GlobalObjec
 
 void CGModule::EraseUselessInstsAndDeclarations()
 {
-    if (!GetCGContext().GetCompileOptions().chirLLVM) {
-        return;
-    }
     ClearLinkNameUsedInMeta();
     auto& funcList = module->getFunctionList();
     std::vector<llvm::Function*> funcs;
@@ -248,7 +212,6 @@ void CGModule::EraseUselessInstsAndDeclarations()
             EraseUnreachableBBs(func);
             MergeUselessBBIntoPreds(func);
             EraseUselessLoad(func);
-            EraseUselessNullCall(func);
             EraseUselessAlloca(func);
             EraseTmpMetadata(func);
         }
@@ -266,9 +229,6 @@ void CGModule::EraseUselessInstsAndDeclarations()
 
 void CGModule::EraseUselessGVAndFunctions()
 {
-    if (!GetCGContext().GetCompileOptions().chirLLVM) {
-        return;
-    }
     if (GetCGContext().GetCompileOptions().enableCompileDebug || GetCGContext().GetCompileOptions().enableCoverage) {
         return;
     }

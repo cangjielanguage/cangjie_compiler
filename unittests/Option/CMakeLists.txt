@@ -4,15 +4,15 @@
 #
 # See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-add_executable(OptionTests OptionTest.cpp OptionTableTest.cpp ${CANGJIE_SRC_OBJECTS})
+add_executable(OptionTest OptionTest.cpp OptionTableTest.cpp ${CANGJIE_SRC_OBJECTS})
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     set(CJNATIVE_BACKEND "cjnative")
     string(TOLOWER ${CMAKE_SYSTEM_NAME}_${CMAKE_SYSTEM_PROCESSOR}_${CJNATIVE_BACKEND} output_lib_dir)
     set(RUNTIME_LIB_DIR ${CMAKE_BINARY_DIR}/lib/${output_lib_dir})
 endif()
 target_link_libraries(
-    OptionTests
+    OptionTest
     ${LINK_LIBS}
     GTest::gtest
     GTest::gtest_main)
-add_test(NAME OptionTests COMMAND OptionTests)
+add_test(NAME OptionTest COMMAND OptionTest)

@@ -368,37 +368,6 @@ void DeclAttributeChecker::CheckGenericFuncDeclAttributes(const FuncDecl& fd) co
         diag.Diagnose(fd, DiagKind::sema_generic_in_operator_overload);
     }
 }
-#else
-void DeclAttributeChecker::CheckGenericFuncDeclAttributes(const FuncDecl& fd) const
-{
-    if (fd.funcBody == nullptr || fd.funcBody->generic == nullptr) {
-        return;
-    }
-    bool openFd = fd.TestAttr(Attribute::OPEN);
-    bool abstractFd = fd.TestAttr(Attribute::ABSTRACT);
-    bool jTypeGeneric = HasJavaAttr(fd) ||
-        (fd.funcBody->parentClassLike && HasJavaAttr(*fd.funcBody->parentClassLike));
-    if (auto cd = DynamicCast<ClassDecl*>(fd.outerDecl); cd) {
-        bool abstractCd = cd->TestAttr(Attribute::ABSTRACT);
-        if (openFd && !jTypeGeneric) {
-            diag.Diagnose(fd, DiagKind::sema_invalid_generic_function_in_class, "open");
-        }
-        if (abstractCd && abstractFd) {
-            diag.Diagnose(fd, DiagKind::sema_abstract_generic_function_inside_abstract_class);
-        }
-    }
-    // Generics are not allowed for non-static abstract functions in interface, unless decorated for Java interfaces.
-    if (auto id = DynamicCast<InterfaceDecl*>(fd.outerDecl);
-        id && !HasJavaAttr(*fd.outerDecl) && !fd.TestAttr(Attribute::STATIC)) {
-        diag.Diagnose(fd, DiagKind::sema_generic_function_in_interface);
-    }
-    if (fd.TestAttr(Attribute::OPERATOR)) {
-        diag.Diagnose(fd, DiagKind::sema_generic_in_operator_overload);
-    }
-    if (fd.TestAttr(Attribute::OVERRIDE)) {
-        diag.Diagnose(fd, DiagKind::sema_invalid_generic_function_in_class, "override");
-    }
-}
 #endif
 
 void DeclAttributeChecker::Check() const

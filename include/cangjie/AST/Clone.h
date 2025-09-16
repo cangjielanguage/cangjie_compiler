@@ -79,6 +79,8 @@ private:
     static OwnedPtr<IfExpr> CloneIfExpr(const IfExpr& ie, const VisitFunc& visitor);
     static OwnedPtr<TryExpr> CloneTryExpr(const TryExpr& te, const VisitFunc& visitor);
     static OwnedPtr<ThrowExpr> CloneThrowExpr(const ThrowExpr& te, const VisitFunc& visitor);
+    static OwnedPtr<PerformExpr> ClonePerformExpr(const PerformExpr& pe, const VisitFunc& visitor);
+    static OwnedPtr<ResumeExpr> CloneResumeExpr(const ResumeExpr& re, const VisitFunc& visitor);
     static OwnedPtr<ReturnExpr> CloneReturnExpr(const ReturnExpr& re, const VisitFunc& visitor);
     static OwnedPtr<WhileExpr> CloneWhileExpr(const WhileExpr& we, const VisitFunc& visitor);
     static OwnedPtr<DoWhileExpr> CloneDoWhileExpr(const DoWhileExpr& dwe, const VisitFunc& visitor);
@@ -123,6 +125,8 @@ private:
     static OwnedPtr<TypePattern> CloneTypePattern(const TypePattern& tp, const VisitFunc& visitor);
     static OwnedPtr<EnumPattern> CloneEnumPattern(const EnumPattern& ep, const VisitFunc& visitor);
     static OwnedPtr<ExceptTypePattern> CloneExceptTypePattern(const ExceptTypePattern& etp, const VisitFunc& visitor);
+    static OwnedPtr<CommandTypePattern> CloneCommandTypePattern(
+        const CommandTypePattern& ctp, const VisitFunc& visitor);
     static OwnedPtr<VarOrEnumPattern> CloneVarOrEnumPattern(const VarOrEnumPattern& vep, const VisitFunc& visitor);
     static OwnedPtr<Block> CloneBlock(const Block& block, const VisitFunc& visitor = DefaultVisitFunc);
     static OwnedPtr<ClassBody> CloneClassBody(const ClassBody& cb, const VisitFunc& visitor);

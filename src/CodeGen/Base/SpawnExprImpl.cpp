@@ -16,7 +16,7 @@
 #include "CGModule.h"
 #include "IRBuilder.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
@@ -50,8 +50,8 @@ llvm::Value* GenerateSpawnWithExecuteFuture(IRBuilder2& irBuilder, const CHIRSpa
     auto futureObj = cgMod | spawn.GetFuture();
 
     std::optional<CGValue*> threadCtx = std::nullopt;
-    if (spawn.GetSpawnArg().has_value()) {
-        threadCtx = cgMod | spawn.GetSpawnArg().value();
+    if (spawn.GetSpawnArg()) {
+        threadCtx = cgMod | spawn.GetSpawnArg();
     }
 
     auto methods =
@@ -86,8 +86,8 @@ llvm::Value* GenerateSpawnWithExecuteClosure(IRBuilder2& irBuilder, const CHIRSp
     auto closure = cgMod | closureNode;
 
     std::optional<CGValue*> threadCtx = std::nullopt;
-    if (spawn.GetSpawnArg().has_value()) {
-        threadCtx = cgMod | spawn.GetSpawnArg().value();
+    if (spawn.GetSpawnArg()) {
+        threadCtx = cgMod | spawn.GetSpawnArg();
     }
 
     CJC_NULLPTR_CHECK(spawn.GetExecuteClosure());

@@ -7,7 +7,7 @@
 #include "cangjie/CHIR/Transformation/GetRefToArrayElem.h"
 
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 
 using namespace Cangjie::CHIR;
 
@@ -33,18 +33,21 @@ void GetRefToArrayElem::RunOnFunc(const Func& func, CHIRBuilder& builder)
             if (!std::all_of(users.begin(), users.end(), [](auto e) { return e->GetExprKind() == ExprKind::FIELD; })) {
                 continue;
             }
-            auto arrayGetRef =
-                builder.CreateExpression<Intrinsic>(builder.GetType<RefType>(intrinsic->GetResult()->GetType()),
-                    CHIR::IntrinsicKind::ARRAY_GET_REF_UNCHECKED, intrinsic->GetOperands(), intrinsic->GetParent());
+            auto callContext = IntrisicCallContext {
+                .kind = IntrinsicKind::ARRAY_GET_REF_UNCHECKED,
+                .args = intrinsic->GetOperands()
+            };
+            auto arrayGetRef = builder.CreateExpression<Intrinsic>(
+                builder.GetType<RefType>(intrinsic->GetResult()->GetType()), callContext, intrinsic->GetParentBlock());
             arrayGetRef->CopyAnnotationMapFrom(*intrinsic);
             for (auto user : users) {
                 auto field = StaticCast<Field*>(user);
                 auto fieldTy = field->GetResult()->GetType();
                 auto getElemRef = builder.CreateExpression<GetElementRef>(builder.GetType<RefType>(fieldTy),
-                    arrayGetRef->GetResult(), field->GetIndexes(), field->GetParent());
+                    arrayGetRef->GetResult(), field->GetPath(), field->GetParentBlock());
                 getElemRef->CopyAnnotationMapFrom(*field);
                 getElemRef->GetResult()->EnableAttr(Attribute::READONLY);
-                auto load = builder.CreateExpression<Load>(fieldTy, getElemRef->GetResult(), field->GetParent());
+                auto load = builder.CreateExpression<Load>(fieldTy, getElemRef->GetResult(), field->GetParentBlock());
                 load->CopyAnnotationMapFrom(*field);
                 getElemRef->MoveBefore(user);
                 field->ReplaceWith(*load);

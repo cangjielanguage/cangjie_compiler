@@ -9,7 +9,7 @@
 
 #include "cangjie/CHIR/CHIRBuilder.h"
 #include "cangjie/CHIR/DiagAdapter.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/Utils/TaskQueue.h"
 
@@ -90,17 +90,17 @@ private:
     bool CheckOneUsers(const std::vector<Expression*>& users) const;
     bool CheckTwoUsers(const std::vector<Expression*>& users) const;
     void UselessExprEliminationForFunc(const Func& func, bool isDebug) const;
-    static bool CheckAllUsersIsNotUse(const Value& value, const std::vector<Expression*>& users);
-
+    
     // =============== Functions for Nothing type Check =============== //
     void NothingTypeExprEliminationForFunc(BlockGroup& funcBody, bool isDebug);
     
+    static bool CheckAllUsersIsNotUse(const Value& value, const std::vector<Expression*>& users);
+
     // =============== Functions for Useless Func Elimination =============== //
     bool CheckUselessFunc(const Func& func, const GlobalOptions& opts);
 
     // =============== Functions for Unreachable Block Elimination =============== //
     bool CheckUselessBlock(const Block& block) const;
-    void RemoveUnreachableBlock(std::queue<Block*>& workList) const;
     void BreakBranchConnection(const Block& block) const;
     void UnreachableBlockEliminationForFunc(const BlockGroup& body, bool isDebug) const;
     void ClearUnreachableMarkBlockForFunc(const BlockGroup& body) const;

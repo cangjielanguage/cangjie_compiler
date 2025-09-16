@@ -14,13 +14,7 @@ using namespace Cangjie;
 Ptr<Value> Translator::Visit(const AST::FuncArg& arg)
 {
     auto val = TranslateExprArg(*arg.expr);
-    if (arg.withInout) {
-        auto ty = TranslateType(*arg.ty);
-        std::vector<Value*> args{val};
-        return CreateAndAppendExpression<Intrinsic>(
-            val->GetDebugLocation(), ty, CHIR::IntrinsicKind::INOUT_PARAM, args, currentBlock)
-            ->GetResult();
-    } else {
-        return val;
-    }
+    // not handled here; see Translator::TranslateTrivialArgWithNoSugar
+    CJC_ASSERT(!arg.withInout);
+    return val;
 }

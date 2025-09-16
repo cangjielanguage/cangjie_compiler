@@ -480,6 +480,7 @@ static void ParseInterplationString2OriginPosMap(
         Lexer lexerStr(strP.begin.fileID, strP.value, diag, diag.GetSourceManager(), strP.begin);
         std::vector<Token> tks = lexerStr.GetTokens();
         // first token must be `$` and second token must be `{`
+        CJC_ASSERT(!tks.empty());
         for (size_t i = 2; i < tks.size() - 1; i++) {
             auto& t = tks[i];
             if (t.kind == TokenKind::COMMENT) {

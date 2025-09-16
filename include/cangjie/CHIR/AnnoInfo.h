@@ -68,11 +68,6 @@ struct AnnoInfo {
         return mangledName != "none";
     }
 };
-
-class Tuple;
-struct JavaAnnoInfo {
-    Ptr<Tuple> annos;
-};
 } // namespace Cangjie::CHIR
 
 #endif

@@ -163,8 +163,6 @@ void MacroEvaluation::RunMacroSrv()
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     RuntimeInit::GetInstance().InitRuntime(
         ci->invocation.GetRuntimeLibPath(), ci->invocation.globalOptions.environment.allVariables);
-#else
-    RuntimeInit::GetInstance().InitRuntime(ci->invocation.GetRuntimeLibPath(), GetMacroDependPath());
 #endif
     // close unused pipe
     close(MacroProcMsger::GetInstance().pipefdP2C[1]);
@@ -232,7 +230,7 @@ bool MacroEvaluation::EvalMacroCallsAndWaitResult()
             }
             continue;
         }
-        SaveUsedMacroPkgs(mc->packageName);
+        SaveUsedMacros(*mc);
     }
     const auto foundEvalMacroCall =
         std::find_if(macCalls.cbegin(), macCalls.cend(), [](auto& mc) { return mc->status != MacroEvalStatus::FAIL; });

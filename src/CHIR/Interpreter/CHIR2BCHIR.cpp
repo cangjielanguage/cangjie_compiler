@@ -10,8 +10,7 @@
  * This file implements a translation from CHIR to BCHIR.
  */
 #include "cangjie/CHIR/Interpreter/CHIR2BCHIR.h"
-// test the serialiser
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Interpreter/Utils.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Type/StructDef.h"
@@ -44,7 +43,7 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslatePackage(
         // the object class isn't defined anywhere, so we force it's generation when compiling core
         bchir.AddSClass("_CN8std$core6ObjectE", Bchir::SClassInfo());
     }
-    TranslateClassesLike<ForConstEval>(chirPkg);
+    TranslateClasses<ForConstEval>(chirPkg);
     TranslateGlobalVars<ForConstEval>(chirPkg);
     TranslateFunctions<ForConstEval>(chirPkg);
     bchir.SetGlobalInitFunc(chirPkg.GetPackageInitFunc()->GetIdentifierWithoutPrefix());
@@ -107,14 +106,6 @@ bool CHIR2BCHIR::IsConstClass(const CustomTypeDef& def) const
     }
 };
 
-template <bool ForConstEval> void CHIR2BCHIR::TranslateClassesLike(const Package& chirPkg)
-{
-    TranslateClasses<ForConstEval>(chirPkg);
-    TranslateStucts<ForConstEval>(chirPkg);
-    TranslateEnums<ForConstEval>(chirPkg);
-    TranslateExtends<ForConstEval>(chirPkg);
-}
-
 template <bool ForConstEval> void CHIR2BCHIR::TranslateClasses(const Package& chirPkg)
 {
     for (const auto chirClass : chirPkg.GetAllClassDef()) {
@@ -133,10 +124,6 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslateClasses(const Package& ch
         CollectMethods(*chirClass, classInfo);
         AddClassInfo(chirClass->GetIdentifierWithoutPrefix(), std::move(classInfo), bchir, isIncremental);
     }
-}
-
-template <bool ForConstEval> void CHIR2BCHIR::TranslateStucts(const Package& chirPkg)
-{
     for (const auto chirClass : chirPkg.GetAllStructDef()) {
         if constexpr (ForConstEval) {
             if (!IsConstClass(*chirClass)) {
@@ -147,19 +134,11 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslateStucts(const Package& chi
         CollectMethods(*chirClass, classInfo);
         AddClassInfo(chirClass->GetIdentifierWithoutPrefix(), std::move(classInfo), bchir, isIncremental);
     }
-}
-
-template <bool ForConstEval> void CHIR2BCHIR::TranslateEnums(const Package& chirPkg)
-{
     for (const auto chirClass : chirPkg.GetAllEnumDef()) {
         Bchir::SClassInfo classInfo;
         CollectMethods(*chirClass, classInfo);
         AddClassInfo(chirClass->GetIdentifierWithoutPrefix(), std::move(classInfo), bchir, isIncremental);
     }
-}
-
-template <bool ForConstEval> void CHIR2BCHIR::TranslateExtends(const Package& chirPkg)
-{
     for (const auto chirClass : chirPkg.GetAllExtendDef()) {
         auto extendedDef = chirClass->GetExtendedCustomTypeDef();
         if constexpr (ForConstEval) {
@@ -228,9 +207,12 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslateFunctions(const Package& 
         if (isIncremental && bchir.GetFunctions().find(fIdent) != bchir.GetFunctions().end()) {
             bchir.RemoveFunction(fIdent);
         }
-        CJC_ASSERT(f->GetBody());
 
         if constexpr (ForConstEval) {
+            bool missingBody = f->TestAttr(Attribute::SKIP_ANALYSIS) && !f->GetBody();
+            if (missingBody) {
+                continue;
+            }
             // If ForConstEval we only need to translate the IsCompileTimeValue expressions.
             if (
                 // it is a const function
@@ -250,6 +232,7 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslateFunctions(const Package& 
                 continue;
             }
         }
+        CJC_ASSERT(f->GetBody());
 
         Context ctx;
         TranslateFuncDef(ctx, *f);
@@ -310,14 +293,6 @@ Bchir::ByteCodeContent CHIR2BCHIR::GetTypeIdx(Cangjie::CHIR::Type& chirType)
             for (auto& it : tType.GetElementTypes()) {
                 (void)GetTypeIdx(*it);
             }
-            break;
-        }
-        case CHIR::Type::TYPE_CLOSURE: {
-            auto& cType = StaticCast<const ClosureType&>(chirType);
-            auto envType = cType.GetEnvType();
-            (void)GetTypeIdx(*envType);
-            auto funcType = cType.GetFuncType();
-            (void)GetTypeIdx(*funcType);
             break;
         }
         case CHIR::Type::TYPE_FUNC: {
@@ -512,16 +487,6 @@ Bchir::ByteCodeContent CHIR2BCHIR::LVarId(Context& ctx, const Value& value)
     return ctx.localVarId++; // increment ctx.localVarId
 }
 
-Bchir::ByteCodeContent CHIR2BCHIR::CLVarId(const LocalVar& var)
-{
-    auto it = const2CLVarId.find(&var);
-    if (it != const2CLVarId.end()) {
-        return it->second;
-    }
-
-    const2CLVarId.emplace_hint(it, &var, constLocalVarId);
-    return constLocalVarId++; // increment constLocalVarId
-}
 
 void CHIR2BCHIR::TranslateAllocate(Context& ctx, const Expression& expr)
 {

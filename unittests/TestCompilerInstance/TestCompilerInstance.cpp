@@ -12,8 +12,8 @@
 
 #include "TestCompilerInstance.h"
 
-#include "cangjie/Parse/Parser.h"
 #include "cangjie/IncrementalCompilation/ASTCacheCalculator.h"
+#include "cangjie/Parse/Parser.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -58,7 +58,8 @@ bool TestCompilerInstance::ParseCode()
 {
     auto package = MakeOwned<Package>();
     auto fileID = GetSourceManager().AddSource("", code);
-    Parser parser(fileID, code, diag, GetSourceManager());
+    Parser parser(fileID, code, diag, GetSourceManager(), invocation.globalOptions.enableAddCommentToAst,
+        invocation.globalOptions.compileCjd);
     parser.SetCompileOptions(invocation.globalOptions);
     auto file = parser.ParseTopLevel();
     GetSourceManager().AddComments(parser.GetCommentsMap());

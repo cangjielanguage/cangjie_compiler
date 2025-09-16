@@ -32,6 +32,24 @@ bool Translator::IsTopLevel(const AST::Decl& decl) const
     return topLevelDecl == &decl;
 }
 
+static bool ShouldInGlobalTable(const AST::Node& node)
+{
+    // 1. global decl, 'NominalDecl' is stored to indicate 'this' and should be found from local table.
+    if (node.TestAttr(AST::Attribute::GLOBAL) && !node.IsNominalDecl()) {
+        return true;
+    }
+
+    // 2. member method or static member var
+    if ((node.TestAttr(AST::Attribute::STATIC) && node.astKind == AST::ASTKind::VAR_DECL) ||
+        node.astKind == AST::ASTKind::FUNC_DECL) {
+        const auto& decl = StaticCast<const AST::Decl&>(node);
+        if (decl.outerDecl != nullptr && decl.outerDecl->IsNominalDecl()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 Ptr<Value> Translator::GetSymbolTable(const AST::Node& node) const
 {
     CJC_ASSERT(node.IsDecl() ||
@@ -147,7 +165,8 @@ Ptr<Block> Translator::GetCurrentBlock() const
 }
 
 Ptr<Func> Translator::CreateEmptyGVInitFunc(const std::string& mangledName, const std::string& identifier,
-    const std::string& rawMangledName, const std::string& pkgName, const Linkage& linkage, const DebugLocation& loc)
+    const std::string& rawMangledName, const std::string& pkgName, const Linkage& linkage, const DebugLocation& loc,
+    bool isConst)
 {
     auto funcTy = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetVoidTy());
     auto func = builder.CreateFunc(INVALID_LOCATION, funcTy, mangledName, identifier, rawMangledName, pkgName);
@@ -157,6 +176,9 @@ Ptr<Func> Translator::CreateEmptyGVInitFunc(const std::string& mangledName, cons
     func->EnableAttr(Attribute::NO_REFLECT_INFO);
     func->EnableAttr(Attribute::NO_INLINE);
     func->EnableAttr(Attribute::COMPILER_ADD);
+    if (isConst) {
+        func->EnableAttr(Attribute::CONST);
+    }
     func->template Set<LinkTypeInfo>(Linkage(linkage));
     func->SetDebugLocation(loc);
 

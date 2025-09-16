@@ -130,6 +130,8 @@ bool ParserImpl::SeeingExpr()
         TokenKind::QUOTE,
         TokenKind::TRY,
         TokenKind::THROW,
+        TokenKind::PERFORM,
+        TokenKind::RESUME,
         TokenKind::RETURN,
         TokenKind::CONTINUE,
         TokenKind::BREAK,
@@ -278,6 +280,32 @@ void ParserImpl::ParseOneOrMoreWithSeparator(
     while (Skip(separator)) {
         storeSeparator(lastToken.Begin());
         parseElement();
+    }
+}
+
+void ParserImpl::ParseOneOrMoreSepTrailing(std::function<void(const Position&)>&& storeSeparator,
+    std::function<void()>&& parseElement, TokenKind end, TokenKind separator)
+{
+    do {
+        parseElement();
+        if (Skip(separator)) {
+            storeSeparator(lastToken.Begin());
+        } else {
+            break;
+        }
+    } while (!Seeing(end));
+}
+
+void ParserImpl::ParseZeroOrMoreSepTrailing(std::function<void(const Position&)>&& storeSeparator,
+    std::function<void()>&& parseElement, TokenKind end, TokenKind separator)
+{
+    while (!Seeing(end)) {
+        parseElement();
+        if (Skip(separator)) {
+            storeSeparator(lastToken.Begin());
+        } else {
+            break;
+        }
     }
 }
 
@@ -487,7 +515,9 @@ unsigned LevenshteinDistance(const std::string& source, const std::string& targe
     unsigned result;
     // although using std::min on unsigned is effectively noexcept, string::operator[] may throws an exception when
     // index out of range, so a try block is required
+#ifndef CANGJIE_ENABLE_GCOV
     try {
+#endif
         for (unsigned j = 0; j < n + 1; j++) {
             dp[j] = j;
         }
@@ -503,10 +533,12 @@ unsigned LevenshteinDistance(const std::string& source, const std::string& targe
         }
 
         result = dp[n];
+#ifndef CANGJIE_ENABLE_GCOV
     } catch (...) {
         delete[] dp;
         throw;
     }
+#endif
     delete[] dp;
     return result;
 }

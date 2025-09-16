@@ -9,7 +9,7 @@
 
 #include "cangjie/CHIR/Analysis/AnalysisWrapper.h"
 #include "cangjie/CHIR/Analysis/ConstAnalysis.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Utils.h"
 #include "cangjie/CHIR/Value.h"

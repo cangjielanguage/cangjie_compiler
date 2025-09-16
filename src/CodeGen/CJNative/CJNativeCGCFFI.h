@@ -216,7 +216,7 @@ private:
     ProcessKind GetParamType(CHIR::Type& chirTy, std::vector<llvm::Type*>& params);
     ABIArgInfo GetMappingArgInfo(CHIR::StructType& chirTy, bool isArg);
 };
-
+#ifdef __APPLE__
 class MacAArch64CJNativeCGCFFI : public LinuxAarch64CJNativeCGCFFI {
 public:
     explicit MacAArch64CJNativeCGCFFI(CGModule& cgMod) : LinuxAarch64CJNativeCGCFFI(cgMod)
@@ -227,7 +227,7 @@ public:
 protected:
     llvm::Type* GetStructReturnType(CHIR::StructType& chirTy, std::vector<llvm::Type*>& params) override;
 };
-
+#endif
 class WindowsAmd64CJNativeCGCFFI : public LinuxCJNativeCGCFFI {
 public:
     explicit WindowsAmd64CJNativeCGCFFI(CGModule& cgMod) : LinuxCJNativeCGCFFI(cgMod)

@@ -20,14 +20,14 @@ namespace Cangjie::Unicode {
 namespace {
 /// Index into the table below with the first byte of a UTF-8 sequence to get the number of trailing bytes that are
 /// supposed to follow it. Note that LEGAL UTF-8 values cannot have 4-5 bytes.
-const char TRAILING_BYTES_FOR_UTF8[256] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+const char TRAILING_BYTES_FOR_UTF8[256] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5};
-} // namespace
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5};
+}
 
 bool IsASCII(UTF32 v)
 {
@@ -49,7 +49,7 @@ bool IsASCIIIdContinue(UTF32 c)
 ConversionResult ConvertUTF8toUTF32(
     const UTF8** sourceStart, const UTF8* sourceEnd, UTF32** targetStart, UTF32* targetEnd)
 {
-    auto cr = llvm::ConvertUTF8toUTF32(sourceStart,sourceEnd,targetStart,targetEnd,llvm::strictConversion);
+    auto cr = llvm::ConvertUTF8toUTF32(sourceStart, sourceEnd, targetStart, targetEnd, llvm::strictConversion);
     switch (cr) {
         case llvm::conversionOK:
         case llvm::targetExhausted:
@@ -59,8 +59,8 @@ ConversionResult ConvertUTF8toUTF32(
         case llvm::sourceExhausted:
             return ConversionResult::SOURCE_EXHAUSTED;
     }
-#if defined(__hm__) && not defined(NDEBUG)
-    return llvm::ConversionResult::Ok;
+#if defined(__hm__) && defined(NDEBUG)
+    return ConversionResult::OK;
 #endif
 }
 
@@ -73,11 +73,10 @@ UTF32 ReadOneUnicodeChar(const UTF8** sourceStart, const UTF8* sourceEnd)
     CJC_ASSERT(status == ConversionResult::OK);
     return c;
 }
-
 ConversionResult ConvertUTF32toUTF8(
     const UTF32** sourceStart, const UTF32* sourceEnd, UTF8** targetStart, UTF8* targetEnd)
 {
-    auto cr = llvm::ConvertUTF32toUTF8(sourceStart,sourceEnd,targetStart,targetEnd,llvm::strictConversion);
+    auto cr = llvm::ConvertUTF32toUTF8(sourceStart, sourceEnd, targetStart, targetEnd, llvm::strictConversion);
     switch (cr) {
         case llvm::conversionOK:
             return ConversionResult::OK;
@@ -88,8 +87,8 @@ ConversionResult ConvertUTF32toUTF8(
         case llvm::sourceExhausted:
             return ConversionResult::SOURCE_EXHAUSTED;
     }
-#if defined(__hm__) && not defined(NDEBUG)
-    return llvm::ConversionResult::Ok;
+#if defined(__hm__) && defined(NDEBUG)
+    return ConversionResult::OK;
 #endif
 }
 

@@ -78,6 +78,7 @@ OwnedPtr<AST::Type> ParserImpl::ParseVarrayType()
         DiagVArrayTypeArgMismatch(MakeRange(ret->leftAnglePos, lookahead.End()), "a type argument and size literal");
         return MakeOwned<InvalidType>(lookahead.Begin());
     }
+    ret->typeArgument->commaPos = lastToken.Begin();
     // <T, $N>
     //     ^ Parse the constant type prefix.
     skipNL = false;
@@ -187,8 +188,7 @@ OwnedPtr<AST::Type> ParserImpl::ParseTypeWithParen()
     Position lParenPos = lastToken.Begin();
     std::vector<OwnedPtr<Type>> types;
     std::unordered_map<std::string, Position> typeNameMap;
-    ParseZeroOrMoreWithSeparator(
-        TokenKind::COMMA, [&types](const Position commaPos) { types.back()->commaPos = commaPos; },
+    ParseZeroOrMoreSepTrailing([&types](const Position commaPos) { types.back()->commaPos = commaPos; },
         [this, &types, &typeNameMap]() {
             if (Seeing(TokenKind::RPAREN) && types.size() > 1) {
                 return;
@@ -336,8 +336,7 @@ std::pair<bool, std::vector<OwnedPtr<AST::Type>>> ParserImpl::ParseTypeArguments
         ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_type_argument, lastToken.Begin());
         return {true, std::move(ret)};
     }
-    ParseOneOrMoreWithSeparator(
-        TokenKind::COMMA,
+    ParseOneOrMoreSepTrailing(
         [&ret](const Position commaPos) {
             if (!ret.empty()) {
                 ret.back()->commaPos = commaPos;
@@ -350,7 +349,7 @@ std::pair<bool, std::vector<OwnedPtr<AST::Type>>> ParserImpl::ParseTypeArguments
             if (type && !type->TestAttr(Attribute::IS_BROKEN)) {
                 ret.emplace_back(std::move(type));
             }
-        });
+        }, TokenKind::GT);
     if (!Skip(TokenKind::GT) && !ret.empty()) {
         DiagExpectedRightDelimiter("<", leftAnglePos);
         ret.clear();

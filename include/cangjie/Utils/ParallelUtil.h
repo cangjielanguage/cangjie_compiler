@@ -30,12 +30,12 @@ public:
     }
 
     void RunAST2CHIRInParallel(const std::vector<Ptr<const AST::Decl>>& decls, const CHIRType& chirType,
-        const Cangjie::GlobalOptions& opts, const GenericInstantiationManager& gim, AST2CHIRNodeMap<Value>& globalCache,
+        const Cangjie::GlobalOptions& opts, const GenericInstantiationManager* gim, AST2CHIRNodeMap<Value>& globalCache,
         const ElementList<Ptr<const AST::Decl>>& localConstVars,
         const ElementList<Ptr<const AST::FuncDecl>>& localConstFuncs, IncreKind& kind,
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         const TranslateASTNodeFunc& funcForTranlateASTNode, std::unordered_map<Block*, Terminator*>& maybeUnreachable,
-#endif
+        bool computeAnnotations,
+        std::vector<CHIR::Func*>& initFuncsForAnnoFactory,
         std::vector<std::pair<const AST::Decl*, Func*>>& annoFactoryFuncs)
     {
         size_t funcNum = decls.size();
@@ -49,16 +49,15 @@ public:
         for (size_t idx = 0; idx < funcNum; ++idx) {
             auto decl = decls.at(idx);
             auto subChirType = std::make_unique<CHIRType>(*builderList[idx], chirTypeCache);
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
             auto tran = std::make_unique<Translator>(
                 *builderList[idx], *subChirType, opts, gim, globalCache, localConstVars,
-                localConstFuncs, kind, annoFactoryFuncs, maybeUnreachableBlocks[idx]);
+                localConstFuncs, kind, annoFactoryFuncs, maybeUnreachableBlocks[idx],
+                computeAnnotations, initFuncsForAnnoFactory);
             tran->SetTopLevel(*decl);
-            tran->SetCompileTimeValue(decl->IsConst());
-            taskQueue.AddTask<void>([translator = tran.get(), decl, &funcForTranlateASTNode]() {
-                return funcForTranlateASTNode(*decl, *translator);
-            });
-#endif
+            taskQueue.AddTask<void>(
+                [translator = tran.get(), decl, &funcForTranlateASTNode]() {
+                    return funcForTranlateASTNode(*decl, *translator);
+                });
             if (decl->TestAttr(AST::Attribute::GLOBAL) && !Is<AST::InheritableDecl>(decl)) {
                 tran->CollectValueAnnotation(*decl);
             }
@@ -70,11 +69,9 @@ public:
             (*subBd).MergeAllocatedInstance();
         }
         builder.GetChirContext().MergeTypes();
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         for (auto& it : maybeUnreachableBlocks) {
             maybeUnreachable.merge(it);
         }
-#endif
         // If the function RunAST2CHIRInParallel is invoked again, we need revert chirTypePool to the inital state.
     }
 

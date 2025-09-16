@@ -45,7 +45,7 @@ llvm::Value* HandleExitExpression(IRBuilder2& irBuilder, const CHIR::Exit& exitE
         auto debugLocOfRetExpr = exitExpr.GetDebugLocation();
         cgCtx.AddDebugLocOfRetExpr(func, debugLocOfRetExpr);
     }
-    auto parentFunc = exitExpr.GetParentFunc();
+    auto parentFunc = exitExpr.GetTopLevelFunc();
     CJC_NULLPTR_CHECK(parentFunc);
     auto retTy = parentFunc->GetReturnType();
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
@@ -79,12 +79,20 @@ llvm::Value* HandleExitExpression(IRBuilder2& irBuilder, const CHIR::Exit& exitE
 
 llvm::Value* HandleTerminatorExpression(IRBuilder2& irBuilder, const CHIR::Expression& chirExpr)
 {
-    CJC_ASSERT(chirExpr.GetExprMajorKind() == CHIR::ExprMajorKind::TERMINATOR);
+    CJC_ASSERT(chirExpr.IsTerminator());
     auto& cgMod = irBuilder.GetCGModule();
     switch (chirExpr.GetExprKind()) {
         case CHIR::ExprKind::GOTO: {
             auto& goTo = StaticCast<const CHIR::GoTo&>(chirExpr);
             auto succ = goTo.GetSuccessors()[0];
+            if (irBuilder.GetCGContext().GetCompileOptions().enableCompileDebug &&
+                !goTo.GetDebugLocation().IsInvalidPos() && chirExpr.GetParentBlock()->GetExpressionsNum() > 1) {
+                auto func = irBuilder.GetInsertFunction();
+                auto gotoBB = llvm::BasicBlock::Create(
+                    irBuilder.GetLLVMContext(), "goto", func, cgMod.GetMappedBB(succ));
+                irBuilder.CreateBr(gotoBB);
+                irBuilder.SetInsertPoint(gotoBB);
+            }
             return irBuilder.CreateBr(cgMod.GetMappedBB(succ));
         }
         case CHIR::ExprKind::EXIT: {

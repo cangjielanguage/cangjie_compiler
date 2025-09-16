@@ -77,6 +77,7 @@ std::string ManglePrimitive(const Cangjie::CHIR::Type::TypeKind& kind);
  * @return std::string The mangled chir type args qualified name.
  */
 std::string GetTypeArgsQualifiedName(const std::vector<Type*>& typeArgs, bool forNameFieldOfTi = false);
+
 /**
  * @brief Generate mangled name for type qualified.
  *

@@ -145,8 +145,6 @@ public:
     // ===--------------------------------------------------------------------===//
     const AnnoInfo& GetAnnoInfo() const;
     void SetAnnoInfo(AnnoInfo&& info);
-    const JavaAnnoInfo& GetJavaAnnoInfo() const;
-    void SetJavaAnnoInfo(JavaAnnoInfo&& info);
     
 protected:
     explicit Value(Type* ty, std::string identifier, ValueKind kind);
@@ -169,7 +167,6 @@ protected:
     std::vector<Expression*> users; // variable users
     std::mutex userMutex;           // mutex for AddUserOnly and RemoveUserOnly
     AnnoInfo annoInfo;              // annoInfo, used in struct/class/enum member func
-    JavaAnnoInfo jAnnoInfo;         // jAnnoInfo, used in struct/class/enum member func
 
 private:
     ValueKind GetValueKind() const;
@@ -200,7 +197,7 @@ public:
     Lambda* GetOwnerLambda() const;
     void SetOwnerLambda(Lambda* newParent);
 
-    Func* GetParentFunc() const;
+    Func* GetTopLevelFunc() const;
 
     // ===--------------------------------------------------------------------===//
     // Debug Expression
@@ -223,6 +220,7 @@ class LocalVar : public Value {
     friend class Expression;
     friend class Func;
     friend class Lambda;
+    friend class CHIRSerializer;
     friend class CHIRDeserializer;
 
 public:
@@ -244,7 +242,7 @@ public:
     // ===--------------------------------------------------------------------===//
     BlockGroup* GetOwnerBlockGroup() const;
 
-    Func* GetParentFunc() const;
+    Func* GetTopLevelFunc() const;
 
     // ===--------------------------------------------------------------------===//
     // Debug Expression
@@ -343,7 +341,6 @@ enum FuncKind : uint8_t {
     MAIN_ENTRY,
     ANNOFACTORY_FUNC,
     MACRO_FUNC,
-    MACRO_INVOKE_FUNC, // macro invoke func need call package init func
     DEFAULT_PARAMETER_FUNC,
     FUNCKIND_END
 };
@@ -355,13 +352,12 @@ const std::unordered_map<FuncKind, std::string> FUNCKIND_TO_STRING{{FuncKind::DE
     {FuncKind::PRIMAL_STRUCT_CONSTRUCTOR, "structPrimalConstructor"}, {FuncKind::GLOBALVAR_INIT, "globalVarInit"},
     {FuncKind::FINALIZER, "finalizer"}, {FuncKind::MAIN_ENTRY, "mainEntry"},
     {FuncKind::ANNOFACTORY_FUNC, "annoFactory"}, {FuncKind::MACRO_FUNC, "macro"},
-    {FuncKind::MACRO_INVOKE_FUNC, "macroInvoke"}, {FuncKind::DEFAULT_PARAMETER_FUNC, "defaultParameter"}};
+    {FuncKind::DEFAULT_PARAMETER_FUNC, "defaultParameter"}};
 
 struct AbstractMethodParam {
     std::string paramName;
     Type* type = nullptr;
     AnnoInfo annoInfo;
-    JavaAnnoInfo jAnnoInfo;
 
     std::string ToString();
 };
@@ -475,7 +471,7 @@ public:
     BlockGroup* GetParentBlockGroup() const;
     void SetParentBlockGroup(BlockGroup* parent);
     
-    Func* GetParentFunc() const;
+    Func* GetTopLevelFunc() const;
 
     // ===--------------------------------------------------------------------===//
     // Modify Self
@@ -529,6 +525,7 @@ class BlockGroup : public Value {
     friend class CHIRBuilder;
     friend class Block;
     friend class Lambda;
+    friend class ForIn;
 
 public:
     // ===--------------------------------------------------------------------===//
@@ -557,13 +554,12 @@ public:
      * if this blockGroup belongs to If/Loop/ForIn/Lambda,
      * the method will also continue looking up until ownerFunc is not empty.
      */
-    Func* GetParentFunc() const;
+    Func* GetTopLevelFunc() const;
 
     Func* GetOwnerFunc() const;
     void SetOwnerFunc(Func* func);
 
     Expression* GetOwnerExpression() const;
-    void SetOwnerExpression(Expression* expr);
 
     BlockGroup* Clone(CHIRBuilder& builder, Func& newFunc) const;
     BlockGroup* Clone(CHIRBuilder& builder, Lambda& newLambda) const;
@@ -578,9 +574,9 @@ private:
 
     void SetOwnedFuncOnly(Func* newFunc);
 
-    void RemoveBlock(Block& block);
+    void SetOwnerExpression(Expression& expr);
 
-    void SetOwnedLambda(Lambda& lambda);
+    void RemoveBlock(Block& block);
 
     void CloneBlocks(CHIRBuilder& builder, BlockGroup& parent) const;
 
@@ -604,6 +600,7 @@ class FuncBody {
 private:
     BlockGroup* GetBody() const;
     void RemoveBody();
+    void RemoveParams();
 
     void AddParam(Parameter& param);
     Parameter* GetParam(size_t index) const;
@@ -765,6 +762,8 @@ class Func : public FuncBase {
     friend class BlockGroup;
     friend class CHIRBuilder;
     friend class ValueTypeConverter;
+    friend class CHIRSerializer;
+    friend class CHIRDeserializer;
 
 public:
     // ===--------------------------------------------------------------------===//
@@ -823,6 +822,7 @@ public:
 private:
     void DestroyFuncBody();
     void RemoveBody();
+    void RemoveParams();
 
 private:
     explicit Func(Type* ty, const std::string& identifier, const std::string& srcCodeIdentifier,

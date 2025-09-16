@@ -20,9 +20,6 @@ ConstPropagation::ConstPropagation(CHIRBuilder& builder, ConstAnalysisWrapper* c
 void ConstPropagation::RunOnPackage(const Ptr<const Package>& package, bool isDebug, bool isCJLint)
 {
     for (auto func : package->GetGlobalFuncs()) {
-        if (!isCJLint && func->Get<SkipCheck>() == SkipKind::SKIP_CODEGEN) {
-            continue;
-        }
         RunOnFunc(func, isDebug, isCJLint);
     }
 }
@@ -36,9 +33,8 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
     const auto actionBeforeVisitExpr = [](const ConstDomain&, Expression*, size_t) {};
     const auto actionAfterVisitExpr = [this, &toBeRewrited, func, isDebug, isCJLint](
                                           const ConstDomain& state, Expression* expr, size_t index) {
-        auto [majorKind, exprKind] = expr->GetMajorAndMinorExprKind();
         auto exprType = expr->GetResult()->GetType();
-        if (majorKind == ExprMajorKind::BINARY_EXPR) {
+        if (expr->IsBinaryExpr()) {
             if (auto absVal = state.CheckAbstractValue(expr->GetResult()); absVal) {
                 return (void)toBeRewrited.emplace_back(expr, index, GenerateConstExpr(exprType, absVal, isCJLint));
             } else if (expr->GetResult()->GetType()->IsInteger()) {
@@ -50,7 +46,7 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
                 }
             }
         }
-        if (majorKind == ExprMajorKind::UNARY_EXPR) {
+        if (expr->IsUnaryExpr()) {
             if (auto absVal = state.CheckAbstractValue(expr->GetResult()); absVal) {
                 return (void)toBeRewrited.emplace_back(expr, index, GenerateConstExpr(exprType, absVal, isCJLint));
             } else {
@@ -59,7 +55,7 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
         }
         if ((exprType->IsInteger() || exprType->IsFloat() || exprType->IsRune() ||
             exprType->IsBoolean() || exprType->IsString()) &&
-            (exprKind == ExprKind::LOAD || exprKind == ExprKind::TYPECAST || exprKind == ExprKind::FIELD)) {
+            (expr->IsLoad() || expr->IsTypeCast() || expr->IsField())) {
             auto absVal = state.CheckAbstractValue(expr->GetResult());
             if (absVal) {
                 toBeRewrited.emplace_back(expr, index, GenerateConstExpr(exprType, absVal, isCJLint));
@@ -125,15 +121,18 @@ Ptr<LiteralValue> ConstPropagation::GenerateConstExpr(
         case ConstValue::ConstKind::STRING: {
             if (isCJLint) {
                 return builder.CreateLiteralValue<StringLiteral>(
-                    type, StaticCast<const ConstStrVal*>(constVal)->GetVal(), false);
+                    type, StaticCast<const ConstStrVal*>(constVal)->GetVal());
             } else {
                 return nullptr;
             }
         }
 
         default:
+#ifndef NDEBUG
             CJC_ABORT();
+#else
             return nullptr;
+#endif
     }
 }
 
@@ -145,15 +144,12 @@ static bool SkipCP(const Expression& expr, const GlobalOptions& opts)
         if (expr.Get<GeneratedFromForIn>()) {
             return false;
         }
-        if (auto bin = DynamicCast<BinaryExpression>(&expr)) {
-            if (auto lhs = bin->GetLHSOperand(), rhs = bin->GetRHSOperand(); (lhs && lhs->Get<GeneratedFromForIn>()) ||
-                (rhs && rhs->Get<GeneratedFromForIn>())) {
-                return false;
-            }
+        if (auto br = DynamicCast<Branch>(&expr)) {
+            return br->GetSourceExpr() != SourceExpr::FOR_IN_EXPR;
         }
-        if (auto un = DynamicCast<UnaryExpression>(&expr)) {
-            if (auto opr = un->GetOperand(); opr && opr->Get<GeneratedFromForIn>()) {
-                return false;
+        if (auto st = DynamicCast<Load>(&expr)) {
+            if (auto alloc = DynamicCast<LocalVar>(st->GetLocation())) {
+                return !alloc->GetExpr()->Get<GeneratedFromForIn>();
             }
         }
         return true;
@@ -230,11 +226,10 @@ void ConstPropagation::RewriteToConstExpr(const RewriteInfo& rewriteInfo, bool i
         return;
     }
     auto oldExprResult = oldExpr->GetResult();
-    auto oldExprParent = oldExpr->GetParent();
+    auto oldExprParent = oldExpr->GetParentBlock();
     auto newExpr = builder.CreateExpression<Constant>(oldExprResult->GetType(), rewriteInfo.literalVal, oldExprParent);
     newExpr->SetDebugLocation(oldExpr->GetDebugLocation());
     oldExprParent->GetExpressionByIdx(rewriteInfo.index)->ReplaceWith(*newExpr);
-
     if (isDebug) {
         std::string message = "[ConstPropagation] The " +
             ExprKindMgr::Instance()->GetKindName(static_cast<size_t>(oldExpr->GetExprKind())) +
@@ -290,7 +285,7 @@ void ConstPropagation::RewriteTerminator(
     if (SkipCP(*oldTerminator, opts)) {
         return;
     }
-    auto parentBlock = oldTerminator->GetParent();
+    auto parentBlock = oldTerminator->GetParentBlock();
     oldTerminator->RemoveSelfFromBlock();
     const auto& loc = oldTerminator->GetDebugLocation();
     if (newValue) {

@@ -729,6 +729,7 @@ void DesugarMacroDecl(File& file)
             funcDecl->funcBody = std::move(macroDecl->funcBody);
             funcDecl->end = funcDecl->funcBody->end;
             funcDecl->toBeCompiled = macroDecl->toBeCompiled; // For incremental compilation.
+            funcDecl->comments = std::move(macroDecl->comments);
             auto isAttr = funcDecl->funcBody->paramLists.front()->params.size() == 2;
             for (auto& anno : macroDecl->annotations) {
                 if (anno->kind == AnnotationKind::DEPRECATED) {

@@ -14,10 +14,10 @@ set(INCREMENTAL_COMPILATION_SRC ${CodeGenIncrementalGen})
 # `-fno-rtti` flag to compile this part.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
-add_library(CangjieCodeGenIncrementalGen2 OBJECT ${INCREMENTAL_COMPILATION_SRC})
+add_library(CangjieCodeGenIncrementalGen OBJECT ${INCREMENTAL_COMPILATION_SRC})
 
 # use llvm
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
-    add_dependencies(CangjieCodeGenIncrementalGen2 cjnative)
+    add_dependencies(CangjieCodeGenIncrementalGen cjnative)
 endif()
-target_include_directories(CangjieCodeGenIncrementalGen2 PRIVATE ${LLVM_INCLUDE_DIRS})
+target_include_directories(CangjieCodeGenIncrementalGen PRIVATE ${LLVM_INCLUDE_DIRS})

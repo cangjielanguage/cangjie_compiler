@@ -4,10 +4,10 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "gtest/gtest.h"
 #include "cangjie/Option/Option.h"
 #include "cangjie/Driver/Driver.h"
 #include "cangjie/Utils/FileUtil.h"
-#include "gtest/gtest.h"
 
 #include <memory>
 
@@ -212,8 +212,7 @@ TEST(ToFullTripleStringTest, OSNameTest)
 {
     std::vector<std::pair<Triple::Info, std::string>> pairs = {
         {{Triple::ArchType::X86_64, Triple::Vendor::UNKNOWN, Triple::OSType::LINUX, Triple::Environment::GNU},
-            "x86_64-unknown-linux-gnu"}
-    };
+            "x86_64-unknown-linux-gnu"}};
     for (size_t i = 0; i < pairs.size(); i++) {
         auto actualName = pairs[i].first.ToFullTripleString();
         EXPECT_EQ(actualName, pairs[i].second);

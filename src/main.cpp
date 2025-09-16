@@ -17,6 +17,7 @@
 #include "cangjie/Utils/FileUtil.h"
 
 #include <memory>
+#include <exception>
 #include <string>
 #ifdef _WIN32
 #include <algorithm>
@@ -97,8 +98,12 @@ int main(int argc, const char** argv, const char** envp)
             return EXIT_CODE_ERROR;
         }
         RuntimeInit::GetInstance().CloseRuntime();
+#ifndef CANGJIE_ENABLE_GCOV
     } catch (const NullPointerException& nullPointerException) {
         Cangjie::ICE::TriggerPointSetter iceSetter(nullPointerException.GetTriggerPoint());
+#else
+    } catch (const std::exception& nullPointerException) {
+#endif
         InternalError("null pointer");
     }
     return EXIT_CODE_SUCCESS;

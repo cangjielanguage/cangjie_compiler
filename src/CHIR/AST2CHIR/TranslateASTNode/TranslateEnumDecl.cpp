@@ -19,7 +19,7 @@ Ptr<Value> Translator::Visit(const AST::EnumDecl& decl)
     auto enumDef = StaticCast<EnumDef*>(def.get());
 
     // step 1: set annotation info
-    CreateAnnotationInfo<EnumDef>(decl, *enumDef, *enumDef);
+    CreateAnnotationInfo<EnumDef>(decl, *enumDef, enumDef);
 
     // step 2: set type
     auto chirType = StaticCast<EnumType*>(TranslateType(*decl.ty));
@@ -37,6 +37,7 @@ Ptr<Value> Translator::Visit(const AST::EnumDecl& decl)
                 {ctor->identifier, ctor->mangledName, builder.GetType<FuncType>(std::vector<Type*>{}, chirType)});
         } else if (ctor->astKind == AST::ASTKind::FUNC_DECL) {
             std::vector<Type*> paramTypes;
+            CJC_ASSERT(!ctor->ty->typeArgs.empty());
             for (size_t i = 0; i < ctor->ty->typeArgs.size() - 1; i++) {
                 if (ctor->ty->typeArgs[i] == decl.ty) {
                     paramTypes.emplace_back(chirType);

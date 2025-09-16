@@ -21,6 +21,7 @@
 #include "cangjie/AST/Symbol.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
+#include "cangjie/AST/Create.h"
 
 namespace Cangjie::TypeCheckUtil {
 using namespace AST;
@@ -760,7 +761,6 @@ std::vector<Ptr<Ty>> GetParamTysInArgsOrder(
                 // For C FFI variable-length arguments.
                 tyInArgOrder.emplace_back(tyMgr.GetCTypeTy());
             } else if (HasJavaAttr(fd)) {
-                // For JavaScript or Java FFI variable-length arguments.
                 tyInArgOrder.emplace_back(tyMgr.GetAnyTy());
             } else {
                 // Cangjie's variable-length arguments are handled by `ChkVariadicCallExpr`.
@@ -1005,4 +1005,151 @@ std::set<Ptr<AST::Ty>> GetGenericParamsForCall(const AST::CallExpr& ce, const AS
     }
     return ret;
 }
+
+std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(
+    InheritableDecl& decl,
+    TypeManager& typeManager,
+    std::vector<OwnedPtr<Expr>>& valueArgs,
+    const std::vector<Ptr<Ty>> instTys)
+{
+    std::vector<Ptr<Ty>> valueParamTys;
+    std::transform(
+        valueArgs.begin(), valueArgs.end(), std::back_inserter(valueParamTys),
+        [] (auto & arg) { return arg->ty; }
+    );
+
+    return FindInitDecl(decl, typeManager, valueParamTys, instTys);
+}
+
+std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(
+    InheritableDecl& decl,
+    TypeManager& typeManager,
+    const std::vector<Ptr<Ty>> valueParamTys,
+    const std::vector<Ptr<Ty>> instTys)
+{
+    auto initFuncDecl = GetMemberDecl<FuncDecl>(decl, "init", valueParamTys, typeManager);
+
+    if (!initFuncDecl) {
+        return std::nullopt;
+    }
+
+    return std::make_pair(
+        initFuncDecl,
+        typeManager.GetInstantiatedTy(initFuncDecl->ty, GenerateTypeMapping(decl, instTys)));
+}
+
+OwnedPtr<CallExpr> CreateInitCall(
+    const std::pair<Ptr<FuncDecl>, Ptr<Ty>> initDeclInfo,
+    std::vector<OwnedPtr<Expr>>& valueArgs,
+    File& curFile,
+    const std::vector<Ptr<Ty>> instTys)
+{
+    std::vector<OwnedPtr<FuncArg>> valueFuncArgs;
+    std::transform(
+        valueArgs.begin(), valueArgs.end(), std::back_inserter(valueFuncArgs),
+        [] (auto & arg) { return CreateFuncArg(std::move(arg)); }
+    );
+
+    auto call = MakeOwned<CallExpr>();
+    auto initDecl = initDeclInfo.first;
+    auto ty = initDeclInfo.second;
+    auto refExpr = CreateRefExpr(*initDecl);
+    refExpr->ty = ty;
+    refExpr->curFile = &curFile;
+    refExpr->instTys = instTys;
+    call->baseFunc = std::move(refExpr);
+    call->curFile = &curFile;
+    call->resolvedFunction = initDecl;
+    CJC_ASSERT(ty && ty->IsFunc());
+    call->ty = StaticCast<FuncTy>(ty)->retTy;
+    call->args = std::move(valueFuncArgs);
+    return call;
+}
+
+OwnedPtr<ThrowExpr> CreateThrowException(
+    ClassDecl& exceptionDecl, std::vector<OwnedPtr<Expr>> args, File& curFile, TypeManager& typeManager)
+{
+    auto throwExpr = MakeOwned<ThrowExpr>();
+    throwExpr->expr = CreateInitCall(FindInitDecl(exceptionDecl, typeManager, args).value(), args, curFile);
+    throwExpr->ty = TypeManager::GetNothingTy();
+    throwExpr->curFile = &curFile;
+    return throwExpr;
+}
+
+OwnedPtr<GenericParamDecl> CreateGenericParamDecl(Decl& decl, const std::string& name, TypeManager& typeManager)
+{
+    auto typeParam = MakeOwned<GenericParamDecl>();
+    typeParam->identifier = name;
+    typeParam->ty = typeManager.GetGenericsTy(*typeParam);
+    typeParam->outerDecl = &decl;
+    return typeParam;
+}
+
+OwnedPtr<GenericParamDecl> CreateGenericParamDecl(Decl& decl, TypeManager& typeManager)
+{
+    return CreateGenericParamDecl(decl, "T", typeManager);
+}
+
+Ptr<FuncDecl> GenerateGetTypeForTypeParamIntrinsic(Package& pkg, TypeManager& typeManager, Ptr<Ty> strTy)
+{
+    auto file = pkg.files[0].get();
+    auto retTy = IS_GENERIC_INSTANTIATION_ENABLED ? strTy : typeManager.GetCStringTy();
+    auto funcTy = typeManager.GetFunctionTy({}, retTy);
+    auto decl = MakeOwned<FuncDecl>();
+    auto funcBody = MakeOwned<FuncBody>();
+    funcBody->paramLists.emplace_back(CreateFuncParamList(std::vector<OwnedPtr<FuncParam>>{}));
+    funcBody->retType = MakeOwned<RefType>();
+    funcBody->retType->ty = retTy;
+    funcBody->generic = MakeOwned<Generic>();
+    funcBody->generic->typeParameters.emplace_back(CreateGenericParamDecl(*decl, typeManager));
+    funcBody->ty = funcTy;
+
+    decl->curFile = file;
+    decl->identifier = GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME;
+    decl->fullPackageName = pkg.fullPackageName;
+    decl->ty = funcTy;
+    decl->funcBody = std::move(funcBody);
+    decl->EnableAttr(Attribute::INTRINSIC);
+    decl->EnableAttr(Attribute::GENERIC);
+
+    auto declPtr = decl.get();
+
+    file->decls.push_back(std::move(decl));
+    std::rotate(file->decls.rbegin(), file->decls.rbegin() + 1, file->decls.rend());
+
+    return declPtr;
+}
+
+Ptr<FuncDecl> GenerateIsSubtypeTypesIntrinsic(Package& pkg, TypeManager& typeManager)
+{
+    auto file = pkg.files[0].get();
+    auto retTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
+    auto funcTy = typeManager.GetFunctionTy({}, retTy);
+    auto decl = MakeOwned<FuncDecl>();
+    auto funcBody = MakeOwned<FuncBody>();
+    funcBody->paramLists.emplace_back(CreateFuncParamList(std::vector<OwnedPtr<FuncParam>>{}));
+    funcBody->retType = MakeOwned<RefType>();
+    funcBody->retType->ty = retTy;
+    funcBody->generic = MakeOwned<Generic>();
+    funcBody->generic->typeParameters.emplace_back(CreateGenericParamDecl(*decl, typeManager));
+    funcBody->generic->typeParameters.emplace_back(CreateGenericParamDecl(*decl, typeManager));
+    funcBody->ty = funcTy;
+
+    AddCurFile(*decl, file);
+    decl->identifier = IS_SUBTYPE_TYPES_FUNC_NAME;
+    decl->fullPackageName = pkg.fullPackageName;
+    decl->ty = funcTy;
+    decl->funcBody = std::move(funcBody);
+    decl->EnableAttr(Attribute::INTRINSIC);
+    decl->EnableAttr(Attribute::GENERIC);
+    decl->EnableAttr(Attribute::COMPILER_ADD);
+
+    auto declPtr = decl.get();
+
+    file->decls.push_back(std::move(decl));
+    std::rotate(file->decls.rbegin(), file->decls.rbegin() + 1, file->decls.rend());
+
+    return declPtr;
+}
+
 } // namespace Cangjie::TypeCheckUtil

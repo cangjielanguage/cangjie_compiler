@@ -71,7 +71,7 @@ bool ArrayListConstStartOpt::IsStartAddIndexExpression(const Field& field, bool 
     }
 
     // 2.the first index must be 1 cause the index of start in struct Array is 1
-    if (field.GetIndexes().at(0) != 1) {
+    if (field.GetPath().at(0) != 1) {
         return false;
     }
 
@@ -97,8 +97,8 @@ bool ArrayListConstStartOpt::IsStartAddIndexExpression(const Field& field, bool 
     if (!isIteratorFunc && location->IsParameter()) {
         auto param = StaticCast<Parameter*>(location);
         // the index 0 or 1 parameter of ArrayList Func is class ArrayList
-        if (param == field.GetParentFunc()->GetParam(0) ||
-            param == field.GetParentFunc()->GetParam(1)) {
+        if (param == field.GetTopLevelFunc()->GetParam(0) ||
+            param == field.GetTopLevelFunc()->GetParam(1)) {
             return true;
             }
     }
@@ -134,8 +134,8 @@ bool ArrayListConstStartOpt::IsStartAddIndexExpression(const Field& field, bool 
             return false;
         }
         // the index 0 or 1 parameter of ArrayListIterator Func is class ArrayListIterator
-        return StaticCast<Parameter*>(location) == field.GetParentFunc()->GetParam(0) ||
-            StaticCast<Parameter*>(location) == field.GetParentFunc()->GetParam(1);
+        return StaticCast<Parameter*>(location) == field.GetTopLevelFunc()->GetParam(0) ||
+            StaticCast<Parameter*>(location) == field.GetTopLevelFunc()->GetParam(1);
     }
     return false;
 }
@@ -143,7 +143,7 @@ bool ArrayListConstStartOpt::IsStartAddIndexExpression(const Field& field, bool 
 void ArrayListConstStartOpt::RewriteStartWithConstZero(Expression& oldExpr) const
 {
     auto oldExprResult = oldExpr.GetResult();
-    auto oldExprParent = oldExpr.GetParent();
+    auto oldExprParent = oldExpr.GetParentBlock();
     Ptr<LiteralValue> literalValueZero = builder.CreateLiteralValue<IntLiteral>(builder.GetInt64Ty(), 0UL);
     auto newExpr = builder.CreateExpression<Constant>(oldExprResult->GetType(), literalValueZero, oldExprParent);
     newExpr->SetDebugLocation(oldExpr.GetDebugLocation());

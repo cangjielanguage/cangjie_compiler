@@ -18,7 +18,7 @@ Ptr<Value> Translator::Visit(const AST::ExtendDecl& decl)
     auto extendDef = StaticCast<ExtendDef*>(GetNominalSymbolTable(decl));
 
     // step 1: set annotation info
-    CreateAnnotationInfo<ExtendDef>(decl, *extendDef, *extendDef);
+    CreateAnnotationInfo<ExtendDef>(decl, *extendDef, extendDef);
 
     // step 2: set extended type
     auto extendedTy = chirTy.TranslateType(*decl.extendedType->ty);

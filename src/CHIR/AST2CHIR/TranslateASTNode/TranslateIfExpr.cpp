@@ -14,6 +14,7 @@ bool Translator::CanOptimizeToSwitch(const LetPatternDestructor& let) const
     if (!opts.IsOptimizationExisted(FrontendOptions::OptimizationFlag::SWITCH_OPT)) {
         return false;
     }
+    // A wildcard pattern renders cases following it unreachable.
     if (let.patterns[0]->astKind == ASTKind::WILDCARD_PATTERN) {
         return false;
     }
@@ -25,10 +26,9 @@ bool Translator::CanOptimizeToSwitch(const LetPatternDestructor& let) const
     }
 
     for (auto& curPattern : let.patterns) {
-        // Any wildcard pattern will render cases following it unreachable.
-        if (curPattern->astKind == ASTKind::WILDCARD_PATTERN) {
-            return true;
-        } else if (curPattern->astKind == ASTKind::CONST_PATTERN) {
+        // patterns connected by '|' should be of the same kind, so when the first is not WILDCARD, others neither.
+        CJC_ASSERT(curPattern->astKind != ASTKind::WILDCARD_PATTERN);
+        if (curPattern->astKind == ASTKind::CONST_PATTERN) {
             continue;
         }
         auto vep = DynamicCast<VarOrEnumPattern>(curPattern.get());
@@ -342,7 +342,7 @@ protected:
     virtual Branch* CreateBranch(Value& val, CHIR::Block& cur, CHIR::Block& tb, CHIR::Block& fb)
     {
         auto res = tr.CreateAndAppendTerminator<Branch>(&val, &tb, &fb, &cur);
-        res->sourceExpr = GetSourceExpr();
+        res->SetSourceExpr(GetSourceExpr());
         return res;
     }
     GoTo* CreateGoto(CHIR::Block& dest, CHIR::Block& from)
@@ -405,8 +405,8 @@ class TranslateIfExpr final : private TranslateCondCtrlExpr {
             if (auto block = DynamicCast<AST::Block>(&*expr.elseBody)) {
                 return IsEmptyBlock(*block);
             }
-            if (auto lit = DynamicCast<LitConstExpr>(&*expr.elseBody)) {
-                return lit->ty->IsUnit();
+            if (auto elseIf = DynamicCast<AST::IfExpr>(&*expr.elseBody)) {
+                return IsEmptyIf(*elseIf);
             }
             return false;
         }
@@ -433,6 +433,7 @@ public:
     {
         e = &e1;
         auto ifType = tr.TranslateType(*e1.ty);
+        // generate an Allocate(Unit&) for debugging, so that the if expr can be stepped in
         bool forceGenerateUnit = opts.enableCompileDebug && IsEmptyIf(e1);
         if ((!HasTypeOfNothing(e1) && !ifType->IsUnit()) || forceGenerateUnit) {
             retVal = tr.CreateAndAppendExpression<Allocate>(tr.TranslateLocation(e1),
@@ -471,9 +472,7 @@ protected:
     }
     CHIR::Block* TranslateTrueBlock() override
     {
-        if (trueBlock) {
-            return trueBlock;
-        }
+        CJC_ASSERT(!trueBlock);
         CJC_ASSERT(!endBlock);
         endBlock = CreateBlock();
         tr.TranslateSubExprToLoc(*e->thenBody, retVal);
@@ -493,9 +492,7 @@ protected:
 
     CHIR::Block* TranslateFalseBlock() override
     {
-        if (falseBlock) {
-            return falseBlock;
-        }
+        CJC_ASSERT(!falseBlock);
         CJC_ASSERT(endBlock);
         if (e->elseBody) {
             auto loc = tr.TranslateLocation(*e);
@@ -520,7 +517,7 @@ protected:
     Branch* CreateBranch(Value& val, CHIR::Block& cur, CHIR::Block& tb, CHIR::Block& fb) override
     {
         auto res = tr.CreateAndAppendTerminator<Branch>(&val, &tb, &fb, &cur);
-        res->sourceExpr = GetSourceExpr();
+        res->SetSourceExpr(GetSourceExpr());
         return res;
     }
     ///@}
@@ -579,9 +576,7 @@ protected:
 
     CHIR::Block* TranslateTrueBlock() override
     {
-        if (bodyBlock) {
-            return bodyBlock;
-        }
+        CJC_ASSERT(!bodyBlock);
         std::pair bls{conditionBlock, endBlock};
         tr.terminatorSymbolTable.Set(*e, bls);
         {

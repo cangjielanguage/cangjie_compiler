@@ -59,9 +59,11 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIfExpr(ASTContext& ctx, IfExpr& ie)
     if (Ty::IsTyCorrect(thenTy) && Ty::IsTyCorrect(elseTy)) {
         auto joinRes = JoinAndMeet(typeManager, {thenTy, elseTy}, {}, &importManager, ie.curFile).JoinAsVisibleTy();
         if (auto optErrs = JoinAndMeet::SetJoinedType(ie.ty, joinRes)) {
-            diag.Diagnose(ie, DiagKind::sema_diag_report_error_message,
-                          "types " + Ty::ToString(thenTy) + " and " + Ty::ToString(elseTy) +
-                          " of the two branches of this 'if' expression mismatch").AddNote(*optErrs);
+            std::string errMsg = "types " + Ty::ToString(thenTy) + " and " + Ty::ToString(elseTy);
+            errMsg = ie.sourceExpr && ie.sourceExpr->astKind == ASTKind::IF_AVAILABLE_EXPR
+                ? errMsg + " of the two lambda of this '@IfAvailable' expression mismatch"
+                : errMsg + " of the two branches of this 'if' expression mismatch";
+            diag.Diagnose(ie, DiagKind::sema_diag_report_error_message, errMsg).AddNote(*optErrs);
         }
     }
     return ie.ty;

@@ -145,9 +145,6 @@ std::pair<bool, std::vector<size_t>> TupleNeedBox(const Tuple& tuple)
         return retVal;
     }
     auto operands = tuple.GetOperands();
-    if (!operands[0]->IsLocalVar()) {
-        return retVal;
-    }
     auto indexExpr = StaticCast<Constant*>(StaticCast<LocalVar*>(operands[0])->GetExpr());
     size_t index = 0;
     if (indexExpr->IsBoolLit()) {
@@ -187,7 +184,7 @@ std::pair<std::pair<TypeCast*, std::vector<size_t>>, Field*> FieldAndTypeCastNee
      *  %2: Box<Struct-S>& = Field(%1, 1)
      *  %3: Struct-S = UnBox(%2)
      */
-    auto index = field.GetIndexes();
+    auto index = field.GetPath();
     if (index.size() != 1) {
         return {{nullptr, {}}, nullptr};
     }
@@ -264,7 +261,7 @@ bool FieldNeedUnBox(Field& field, CHIRBuilder& builder)
     if (baseType->IsEnum()) {
         return false;
     }
-    auto targetType = GetTargetType(*baseType, field.GetIndexes(), builder);
+    auto targetType = GetTargetType(*baseType, field.GetPath(), builder);
     auto srcType = field.GetResult()->GetType();
     if (LeftIsBoxTypeOfRight(*targetType, *srcType)) {
         return true;
@@ -275,7 +272,7 @@ bool FieldNeedUnBox(Field& field, CHIRBuilder& builder)
 
 void InsertBoxBeforeStoreElementRef(StoreElementRef& ser, CHIRBuilder& builder)
 {
-    auto parent = ser.GetParent();
+    auto parent = ser.GetParentBlock();
     auto srcValue = ser.GetValue();
     auto boxType = builder.GetType<RefType>(builder.GetType<BoxType>(srcValue->GetType()));
     auto boxExpr = builder.CreateExpression<Box>(boxType, srcValue, parent);
@@ -285,7 +282,7 @@ void InsertBoxBeforeStoreElementRef(StoreElementRef& ser, CHIRBuilder& builder)
 
 void InsertUnBoxAfterGetElementRef(GetElementRef& ger, CHIRBuilder& builder)
 {
-    auto parent = ger.GetParent();
+    auto parent = ger.GetParentBlock();
     auto location = ger.GetLocation();
     auto gerLoc = ger.GetDebugLocation();
     auto& path = ger.GetPath();
@@ -307,7 +304,7 @@ void InsertUnBoxAfterGetElementRef(GetElementRef& ger, CHIRBuilder& builder)
 
 void InsertBoxBeforeTuple(Tuple& tuple, const std::vector<size_t>& path, CHIRBuilder& builder)
 {
-    auto parent = tuple.GetParent();
+    auto parent = tuple.GetParentBlock();
     for (auto i : path) {
         auto srcValue = tuple.GetOperand(i);
         auto boxType = builder.GetType<RefType>(builder.GetType<BoxType>(srcValue->GetType()));
@@ -327,7 +324,7 @@ void TypeCastToBoxType(TypeCast& typecast, const std::vector<size_t>& path, CHIR
         eleTypes[i] = boxType;
     }
     auto newTargetType = builder.GetType<TupleType>(eleTypes);
-    auto parent = typecast.GetParent();
+    auto parent = typecast.GetParentBlock();
     auto loc = typecast.GetDebugLocation();
     auto newTypeCast = builder.CreateExpression<TypeCast>(loc, newTargetType, typecast.GetSourceValue(), parent);
     newTypeCast->MoveBefore(&typecast);
@@ -340,9 +337,9 @@ void InsertUnBoxAfterField(Field& field, CHIRBuilder& builder)
 {
     auto resType = field.GetResult()->GetType();
     auto boxType = builder.GetType<RefType>(builder.GetType<BoxType>(resType));
-    auto parent = field.GetParent();
+    auto parent = field.GetParentBlock();
     auto loc = field.GetDebugLocation();
-    auto newField = builder.CreateExpression<Field>(loc, boxType, field.GetBase(), field.GetIndexes(), parent);
+    auto newField = builder.CreateExpression<Field>(loc, boxType, field.GetBase(), field.GetPath(), parent);
     newField->MoveBefore(&field);
     auto unbox = builder.CreateExpression<UnBox>(resType, newField->GetResult(), parent);
     field.ReplaceWith(*unbox);

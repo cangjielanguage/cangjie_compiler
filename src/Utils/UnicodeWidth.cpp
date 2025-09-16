@@ -120,7 +120,7 @@ int DisplayWidth(StringRef s, bool isCJK)
     for (auto it = str.crbegin(); it != str.crend(); ++it) {
         UTF32 c = *it;
         if (c == TAB) { // this may be incorrect if there is a remaining sequence awaiting in the cache
-            res += 4;
+            res += 4;  // Table is 4 spaces
             st = NextCharInfo::DEFAULT;
             continue;
         }

@@ -99,6 +99,8 @@ private:
     flatbuffers::Offset<NodeFormat::Pattern> SerializeWildcardPattern(AstPattern pattern);
     flatbuffers::Offset<NodeFormat::Pattern> SerializeVarPattern(AstPattern pattern);
     flatbuffers::Offset<NodeFormat::Pattern> SerializeExceptTypePattern(AstPattern pattern);
+    flatbuffers::Offset<NodeFormat::Pattern> SerializeCommandTypePattern(AstPattern pattern);
+    flatbuffers::Offset<NodeFormat::Pattern> SerializeResumptionTypePattern(AstPattern pattern);
     flatbuffers::Offset<NodeFormat::Pattern> SerializeTypePattern(AstPattern pattern);
     flatbuffers::Offset<NodeFormat::Pattern> SerializeEnumPattern(const AST::Pattern* pattern);
     flatbuffers::Offset<NodeFormat::Pattern> SerializeMultiEnumPattern(AstPattern pattern);
@@ -129,6 +131,8 @@ private:
     flatbuffers::Offset<NodeFormat::Expr> SerializeTokenPart(AstExpr expr);
     flatbuffers::Offset<NodeFormat::Expr> SerializeQuoteExpr(AstExpr expr);
     flatbuffers::Offset<NodeFormat::Expr> SerializeThrowExpr(AstExpr expr);
+    flatbuffers::Offset<NodeFormat::Expr> SerializePerformExpr(AstExpr expr);
+    flatbuffers::Offset<NodeFormat::Expr> SerializeResumeExpr(AstExpr expr);
     flatbuffers::Offset<NodeFormat::Expr> SerializeForInExpr(AstExpr expr);
     flatbuffers::Offset<NodeFormat::Expr> SerializeIfExpr(AstExpr expr);
     flatbuffers::Offset<NodeFormat::Expr> SerializeLetPatternDestructor(AstExpr expr);

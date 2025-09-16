@@ -156,6 +156,7 @@ llvm::Value* CGExtensionDef::CheckGenericParams(IRBuilder2& irBuilder, llvm::Val
     }
     llvm::Value* newRet = retVal;
     for (auto [_, values] : generatedGenerics) {
+        CJC_ASSERT(!values.empty());
         for (size_t i = 0; i < values.size() - 1; ++i) {
             HandleShortcutBranch(irBuilder, newRet, "type_cs");
             newRet = irBuilder.CallIntrinsicIsTypeEqualTo({values[i], values[i + 1]});

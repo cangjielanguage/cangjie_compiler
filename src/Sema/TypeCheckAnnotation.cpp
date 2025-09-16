@@ -32,19 +32,14 @@ OwnedPtr<CallExpr> DesugarCustomAnnotation(Annotation& ann)
     if (!ann.baseExpr) {
         return nullptr;
     }
-    // The args information needs to be saved into cjo. The original node cannot be moved here.
-    std::vector<OwnedPtr<FuncArg>> args = {};
-    for (auto& arg : ann.args) {
-        args.emplace_back(ASTCloner::Clone(arg.get()));
-    }
-    auto callExpr = CreateCallExpr(ASTCloner::Clone(ann.baseExpr.get()), std::move(args));
+    auto callExpr = CreateCallExpr(std::move(ann.baseExpr), std::move(ann.args));
     callExpr->callKind = CallKind::CALL_ANNOTATION;
     CopyBasicInfo(&ann, callExpr.get());
     AddCurFile(*callExpr, ann.curFile);
     return callExpr;
 }
 
-void RecoverToCustomAnnotation(CallExpr& callExpr)
+void RecoverToCustomAnnotation(Annotation& ann, CallExpr& callExpr)
 {
     RecoverToCallExpr(callExpr);
     if (callExpr.baseFunc->astKind == ASTKind::REF_EXPR) {
@@ -53,6 +48,8 @@ void RecoverToCustomAnnotation(CallExpr& callExpr)
             re->callOrPattern = nullptr;
         }
     }
+    ann.baseExpr = std::move(callExpr.baseFunc);
+    ann.args = std::move(callExpr.args);
 }
 
 void DesugarAnnotationsArray(ImportManager& importManager, TypeManager& typeManager, Decl& decl,
@@ -69,7 +66,7 @@ void DesugarAnnotationsArray(ImportManager& importManager, TypeManager& typeMana
         } else {
             CJC_ASSERT(annotations.size() == annotationsArray.size());
             for (size_t i = 0; i < annotations.size(); ++i) {
-                RecoverToCustomAnnotation(StaticCast<CallExpr&>(*annotationsArray[i]));
+                RecoverToCustomAnnotation(annotations[i], StaticCast<CallExpr&>(*annotationsArray[i]));
             }
         }
     }
@@ -139,11 +136,16 @@ OwnedPtr<CallExpr> TypeChecker::TypeCheckerImpl::CheckCustomAnnotation(
     }
     if (Ty::IsTyCorrect(Synthesize(ctx, callExpr.get())) && CheckCustomAnnotationPlace(diag, decl, ann)) {
         CJC_ASSERT(callExpr->ty->IsClass());
-        ann.baseExpr->ty = callExpr->baseFunc->ty;
-        ann.baseExpr->SetTarget(callExpr->baseFunc->GetTarget());
+        // The args information needs to be save into cjo. The original node need to be recover.
+        std::vector<OwnedPtr<FuncArg>> args = {};
+        for (auto& arg : callExpr->args) {
+            args.emplace_back(ASTCloner::Clone(arg.get()));
+        }
+        ann.baseExpr = ASTCloner::Clone(callExpr->baseFunc.get());
+        ann.args = std::move(args);
         return callExpr;
     }
-    RecoverToCustomAnnotation(*callExpr);
+    RecoverToCustomAnnotation(ann, *callExpr);
     return nullptr;
 }
 
@@ -164,6 +166,15 @@ void TypeChecker::TypeCheckerImpl::CheckAnnotations(ASTContext& ctx, Decl& decl)
                     break;
                 }
                 CJC_ASSERT(callExpr && Ty::IsTyCorrect(callExpr->ty));
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+                if (!anno->isCompileTimeVisible) {
+                    // this special attribute is to tell CHIR that this attr isCompileTimeVisible when computing
+                    // annotations not visible during compile time
+                    // it should have name NO_COMPILE_TIME_INFO, but there is no such attribute. Virtually any
+                    // attribute that cannot be used on const eval expr works here.
+                    callExpr->EnableAttr(Attribute::NO_REFLECT_INFO);
+                }
+#endif
                 annotationsArray.emplace_back(std::move(callExpr));
                 annotations.emplace_back(*anno);
                 break;

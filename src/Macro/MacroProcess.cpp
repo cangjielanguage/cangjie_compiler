@@ -121,6 +121,7 @@ static void HandleInterplationStringPosMap(Token& strToken, Position newStartPos
         }
         std::vector<Token> tks = GetTokensFromString(strP.value, ci.diag, strP.begin);
         // first token must be `$` and second token must be `{`
+        CJC_ASSERT(!tks.empty());
         for (size_t i = 2; i < tks.size() - 1; i++) {
             auto &t = tks[i];
             if (t.kind == TokenKind::COMMENT) {

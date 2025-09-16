@@ -6,6 +6,7 @@
 
 #include "cangjie/CHIR/Type/ExtendDef.h"
 
+#include <sstream>
 #include "cangjie/CHIR/CHIRCasting.h"
 #include "cangjie/CHIR/ToStringUtils.h"
 #include "cangjie/Utils/CastingTemplate.h"

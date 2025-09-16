@@ -18,7 +18,7 @@
 #include "Base/TypeCastImpl.h"
 #include "IRBuilder.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Value.h"
 
 namespace {
@@ -271,7 +271,7 @@ llvm::Value* OverflowHandler::GenerateOverflowDivOrMod()
     CGType* optionType = CGType::GetOrCreate(irBuilder.GetCGModule(), optionTy);
 
     // Overflow condition: x <= MinInt8 && y == -1.
-    auto minVal = llvm::ConstantInt::getSigned(elemType->GetLLVMType(), GetIntMaxOrMin(*ty, false));
+    auto minVal = llvm::ConstantInt::getSigned(elemType->GetLLVMType(), GetIntMaxOrMin(ty->GetTypeKind(), false));
     auto leftCond = [this, &minVal]() { return irBuilder.CreateICmpSLE(argGenValues[0]->GetRawValue(), minVal); };
     auto negativeOne = llvm::ConstantInt::getSigned(elemType->GetLLVMType(), -1);
     auto rightCond = [this, &negativeOne]() {
@@ -593,14 +593,14 @@ void OverflowHandler::GenerateOverflowSaturatingOp(llvm::AllocaInst* retValue)
     // emit then body.
     irBuilder.SetInsertPoint(thenBB);
     // Saturating: MaxInt8.
-    auto maxVal = llvm::ConstantInt::getSigned(type, GetIntMaxOrMin(*ty, true));
+    auto maxVal = llvm::ConstantInt::getSigned(type, GetIntMaxOrMin(ty->GetTypeKind(), true));
     (void)irBuilder.CreateStore(maxVal, retValue);
     (void)irBuilder.CreateBr(endBB);
 
     // emit else body.
     irBuilder.SetInsertPoint(elseBB);
     // Saturating: MinInt8.
-    auto minVal = llvm::ConstantInt::getSigned(type, GetIntMaxOrMin(*ty, false));
+    auto minVal = llvm::ConstantInt::getSigned(type, GetIntMaxOrMin(ty->GetTypeKind(), false));
     (void)irBuilder.CreateStore(minVal, retValue);
     (void)irBuilder.CreateBr(endBB);
 
@@ -614,7 +614,7 @@ void OverflowHandler::GenerateOverflowSaturating(llvm::AllocaInst* retValue)
         // Unsigned Integer: MaxUInt8/0.
         if (kind == CHIR::ExprKind::ADD || kind == CHIR::ExprKind::MUL || kind == CHIR::ExprKind::EXP) {
             // add/mul/pow: MaxUInt8
-            auto maxVal = llvm::ConstantInt::get(type, GetUIntMax(*ty));
+            auto maxVal = llvm::ConstantInt::get(type, GetUIntMax(ty->GetTypeKind()));
             (void)irBuilder.CreateStore(maxVal, retValue);
         } else {
             // sub/dec/neg: 0
@@ -634,7 +634,7 @@ void OverflowHandler::GenerateOverflowSaturating(llvm::AllocaInst* retValue)
         val = llvm::ConstantInt::getSigned(type, 0);
     } else {
         // inc/neg: MaxInt8
-        val = llvm::ConstantInt::getSigned(type, GetIntMaxOrMin(*ty, true));
+        val = llvm::ConstantInt::getSigned(type, GetIntMaxOrMin(ty->GetTypeKind(), true));
     }
     (void)irBuilder.CreateStore(val, retValue);
 }

@@ -86,8 +86,7 @@ TEST_F(SearchPlusTest, IllegalParametersTest)
     instance->PerformParse();
 
     Searcher searcher;
-    std::vector<Symbol*> res;
-    res = searcher.Search(ctx, "");
+    std::vector<Symbol*> res = searcher.Search(ctx, "");
     EXPECT_EQ(res.size(), 0);
     res = searcher.Search(ctx, " ");
     EXPECT_EQ(res.size(), 0);
@@ -199,8 +198,7 @@ TEST_F(SearchPlusTest, ScopeTest)
     diag.ClearError();
 
     Searcher searcher;
-    std::vector<Symbol*> res;
-    res = searcher.Search(ctx, "name:Friday && scope_level:10 && ast_kind:class_decl");
+    std::vector<Symbol*> res = searcher.Search(ctx, "name:Friday && scope_level:10 && ast_kind:class_decl");
     EXPECT_EQ(res.size(), 1);
 
     std::string curScopeName;
@@ -272,8 +270,7 @@ TEST_F(SearchPlusTest, DISABLED_MultiFileTest)
     Searcher searcher;
     ASTContext* ctx = instance->GetASTContextByPackage(instance->GetSourcePackages()[0]);
     ASSERT_TRUE(ctx != nullptr);
-    std::vector<Symbol*> res;
-    res = searcher.Search(*ctx, "name:Time && ast_kind:class_decl");
+    std::vector<Symbol*> res = searcher.Search(*ctx, "name:Time && ast_kind:class_decl");
     EXPECT_EQ(res.size(), 2);
     EXPECT_EQ(res[0]->hashID.fieldID, 55);
     EXPECT_EQ(res[1]->hashID.fieldID, 55);

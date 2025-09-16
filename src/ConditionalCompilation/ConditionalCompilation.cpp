@@ -116,7 +116,7 @@ const std::map<std::string, std::vector<std::string>> CONDITION_VALUES = {
 
 class ConditionalCompilationImpl {
 public:
-    ConditionalCompilationImpl(CompilerInstance* c);
+    explicit ConditionalCompilationImpl(CompilerInstance* c);
     void HandleConditionalCompilation(const Package& root);
     void HandleFileConditionalCompilation(File& file);
 
@@ -319,7 +319,8 @@ bool ConditionalCompilationImpl::ConditionCheck(
     auto isBuiltin = TARGET_CONDITION.count(conditionStr) > 0;
     auto isUserDefined = !isBuiltin && passedCondition.count(conditionStr) == 1;
     if (!isBuiltin && !isUserDefined) {
-        (void)ci->diag.Diagnose(begin, DiagKind::conditional_compilation_not_support_this_condition, conditionStr);
+        (void)ci->diag.DiagnoseRefactor(
+            DiagKindRefactor::conditional_compilation_not_support_this_condition, begin, conditionStr);
         return false;
     }
     // Check `backend` and `os` condition value.
@@ -331,15 +332,16 @@ bool ConditionalCompilationImpl::ConditionCheck(
         if (!supportedValues.empty()) {
             supportedValues.pop_back();
         }
-        (void)ci->diag.Diagnose(
-            begin, DiagKind::conditional_compilation_not_support_builtin_value, conditionStr, right, supportedValues);
+        (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_not_support_builtin_value, begin,
+            conditionStr, right, supportedValues);
         return false;
     }
     // Check `cjc_version`.
     if (conditionStr == CJC_VERSION_STR) {
         std::regex cjcVersionRegex("[0-9]{1,2}[.][0-9]{1,2}[.][0-9]{1,2}");
         if (!std::regex_match(right, cjcVersionRegex)) {
-            (void)ci->diag.Diagnose(begin, DiagKind::conditional_compilation_not_support_cjc_version_format);
+            (void)ci->diag.DiagnoseRefactor(
+                DiagKindRefactor::conditional_compilation_not_support_cjc_version_format, begin);
             return false;
         }
     }
@@ -371,20 +373,22 @@ bool ConditionalCompilationImpl::Eval(const BinaryExpr& expr, const std::string&
 bool ConditionalCompilationImpl::EvalJudgeBinaryExpr(const BinaryExpr& be)
 {
     if (be.leftExpr == nullptr || be.rightExpr == nullptr) {
-        (void)ci->diag.Diagnose(be.begin, DiagKind::conditional_compilation_invalid_condition_expr);
+        (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_invalid_condition_expr, be.begin);
         return false;
     }
     if (be.leftExpr->astKind != ASTKind::REF_EXPR) {
-        (void)ci->diag.Diagnose(be.begin, DiagKind::conditional_compilation_invalid_condition_expr);
+        (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_invalid_condition_expr, be.begin);
         return false;
     }
     if (be.rightExpr->astKind != ASTKind::LIT_CONST_EXPR) {
-        (void)ci->diag.Diagnose(*be.rightExpr, DiagKind::conditional_compilation_invalid_condition_value);
+        (void)ci->diag.DiagnoseRefactor(
+            DiagKindRefactor::conditional_compilation_invalid_condition_value, be.rightExpr->begin);
         return false;
     }
     auto right = RawStaticCast<LitConstExpr*>(be.rightExpr.get());
     if (right->kind != LitConstKind::STRING || right->siExpr) {
-        (void)ci->diag.Diagnose(*right, DiagKind::conditional_compilation_invalid_condition_value);
+        (void)ci->diag.DiagnoseRefactor(
+            DiagKindRefactor::conditional_compilation_invalid_condition_value, be.rightExpr->begin);
         return false;
     }
     auto left = RawStaticCast<RefExpr*>(be.leftExpr.get());
@@ -398,8 +402,8 @@ bool ConditionalCompilationImpl::EvalJudgeBinaryExpr(const BinaryExpr& be)
     }
     // Filter not support op.
     if (CONDITION_OP.count(conditionStr) > 0 && Utils::NotIn(be.op, CONDITION_OP.at(conditionStr))) {
-        (void)ci->diag.Diagnose(be.begin, DiagKind::conditional_compilation_not_support_op, conditionStr.Val(),
-            TOKENS[static_cast<int>(be.op)]);
+        (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_not_support_op, be.begin,
+            conditionStr.Val(), TOKENS[static_cast<int>(be.op)]);
         return false;
     }
     // Decode cjc version to judge.
@@ -419,7 +423,7 @@ bool ConditionalCompilationImpl::EvalBinaryExpr(const BinaryExpr& be)
     if (IsJudgeBinaryExpr(be) || IsRangeBinaryExpr(be)) {
         return EvalJudgeBinaryExpr(be);
     }
-    (void)ci->diag.Diagnose(be.begin, DiagKind::conditional_compilation_invalid_condition_expr);
+    (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_invalid_condition_expr, be.begin);
     return false;
 }
 
@@ -434,16 +438,13 @@ bool ConditionalCompilationImpl::EvalParenExpr(const ParenExpr& pe)
 bool ConditionalCompilationImpl::EvalUnaryExpr(const UnaryExpr& ue) const
 {
     if (ue.expr == nullptr || ue.expr->astKind != ASTKind::REF_EXPR) {
-        (void)ci->diag.Diagnose(ue.begin, DiagKind::conditional_compilation_invalid_condition_expr);
+        (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_invalid_condition_expr, ue.begin);
         return false;
     }
     auto conditionExpr = RawStaticCast<RefExpr*>(ue.expr.get());
     if (conditionExpr == nullptr || (conditionExpr->ref.identifier != DEBUG_STR &&
         conditionExpr->ref.identifier != TEST_STR)) {
-        (void)ci->diag.Diagnose(ue.begin, DiagKind::conditional_compilation_invalid_condition_expr);
-        return false;
-    }
-    if (TARGET_CONDITION.count(conditionExpr->ref.identifier) == 0) {
+        (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_invalid_condition_expr, ue.begin);
         return false;
     }
     auto relatedInfo = GetRelatedInfo(conditionExpr->ref.identifier);
@@ -456,10 +457,7 @@ bool ConditionalCompilationImpl::EvalUnaryExpr(const UnaryExpr& ue) const
 bool ConditionalCompilationImpl::EvalRefExpr(const RefExpr& re) const
 {
     if (re.ref.identifier != DEBUG_STR && re.ref.identifier != TEST_STR) {
-        (void)ci->diag.Diagnose(re.begin, DiagKind::conditional_compilation_invalid_condition_expr);
-        return false;
-    }
-    if (TARGET_CONDITION.count(re.ref.identifier) == 0) {
+        (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_invalid_condition_expr, re.begin);
         return false;
     }
     auto relatedInfo = GetRelatedInfo(re.ref.identifier);
@@ -481,7 +479,8 @@ bool ConditionalCompilationImpl::EvalConditionExpr(const Expr& condition)
         case ASTKind::PAREN_EXPR:
             return EvalParenExpr(static_cast<const ParenExpr&>(condition));
         default: {
-            (void)ci->diag.Diagnose(condition.begin, DiagKind::conditional_compilation_invalid_condition_expr);
+            (void)ci->diag.DiagnoseRefactor(
+                DiagKindRefactor::conditional_compilation_invalid_condition_expr, condition.begin);
             return false;
         }
     }
@@ -517,7 +516,8 @@ template <typename T> bool ConditionalCompilationImpl::EvalNodeCondition(Ptr<T> 
             return false;
         }
         if (anno->condExpr == nullptr) {
-            (void)ci->diag.Diagnose(anno->begin, DiagKind::conditional_compilation_not_have_condition_expr);
+            (void)ci->diag.DiagnoseRefactor(
+                DiagKindRefactor::conditional_compilation_not_have_condition_expr, anno->begin);
             return true;
         }
         evalResult = EvalConditionExpr(anno->condExpr.operator*());

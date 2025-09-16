@@ -44,6 +44,14 @@ llvm::Value* CodeGen::GenerateRawArrayAllocate(IRBuilder2& irBuilder, const CHIR
     auto arrTy = StaticCast<CHIR::RawArrayType*>(rawArray.GetResult()->GetType()->GetTypeArgs()[0]);
     auto length = **(cgMod | rawArray.GetOperand(0));
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    // If we already know the length of rawArray is greater than or equal to 0, we can remove the throw branch.
+    if (rawArray.GetOperand(0)->IsLocalVar() &&
+        StaticCast<CHIR::LocalVar*>(rawArray.GetOperand(0))->GetExpr()->IsConstant()) {
+        auto constExpr = StaticCast<CHIR::Constant*>(StaticCast<CHIR::LocalVar*>(rawArray.GetOperand(0))->GetExpr());
+        if (constExpr->GetSignedIntLitVal() >= 0) {
+            return irBuilder.AllocateArray(*arrTy, length);
+        }
+    }
     auto [throwBB, bodyBB] = Vec2Tuple<2>(
         irBuilder.CreateAndInsertBasicBlocks({GenNameForBB("arr.alloc.throw"), GenNameForBB("arr.alloc.body")}));
 

@@ -7,7 +7,7 @@
 #include "cangjie/CHIR/Transformation/MarkClassHasInited.h"
 
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 
 using namespace Cangjie::CHIR;
@@ -47,7 +47,7 @@ void ReAssignHasInitedToTrue(Ptr<Func> initFunc, CHIRBuilder& builder, std::vect
         if (!terminator || terminator->GetExprKind() != ExprKind::EXIT) {
             continue;
         }
-        auto parent = terminator->GetParent();
+        auto parent = terminator->GetParentBlock();
         auto terminatorAnnos = terminator->MoveAnnotation();
         terminator->RemoveSelfFromBlock();
         auto trueVal = builder.CreateConstantExpression<BoolLiteral>(boolTy, parent, true);

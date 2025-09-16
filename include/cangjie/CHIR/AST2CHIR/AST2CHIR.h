@@ -54,6 +54,7 @@ public:
 
         CHIRType* chirType;
         std::string outputPath;
+        bool isComputingAnnos{}; // is in computing annotations mode
 
         // Note: this variable is used only in sancov.
         /**
@@ -62,7 +63,6 @@ public:
         AST2CHIR Build()
         {
             CJC_NULLPTR_CHECK(opts);
-            CJC_NULLPTR_CHECK(gim);
             CJC_NULLPTR_CHECK(import);
             CJC_NULLPTR_CHECK(types);
             CJC_NULLPTR_CHECK(diag);
@@ -98,9 +98,9 @@ public:
          *
          * @param genericInstantiateManager generic instantiate manager to set.
          */
-        AST2CHIRBuilder* SetGenericInstantiationManager(const GenericInstantiationManager& genericInstantiateManager)
+        AST2CHIRBuilder* SetGenericInstantiationManager(const GenericInstantiationManager* genericInstantiateManager)
         {
-            gim = &genericInstantiateManager;
+            gim = genericInstantiateManager;
             return this;
         }
         /**
@@ -172,6 +172,11 @@ public:
             outputPath = path;
             return this;
         }
+        AST2CHIRBuilder* SetComputeAnnotations(bool value)
+        {
+            isComputingAnnos = value;
+            return this;
+        }
     };
     ~AST2CHIR()
     {
@@ -190,45 +195,58 @@ public:
         return package;
     }
 
-    VirtualWrapperDepMap GetCurVirtualFuncWrapperDepForIncr()
+    VirtualWrapperDepMap&& GetCurVirtualFuncWrapperDepForIncr()
     {
-        return curVirtFuncWrapDep;
+        return std::move(curVirtFuncWrapDep);
     }
 
-    VirtualWrapperDepMap GetDeleteVirtualFuncWrapperForIncr()
+    VirtualWrapperDepMap&& GetDeleteVirtualFuncWrapperForIncr()
     {
-        return delVirtFuncWrapForIncr;
+        return std::move(delVirtFuncWrapForIncr);
     }
 
-    std::unordered_map<Func*, ImportedFunc*> GetSrcCodeImportedFuncs() const
+    std::unordered_set<Func*>&& GetSrcCodeImportedFuncs()
     {
-        return srcCodeImportedFuncMap;
+        return std::move(srcCodeImportedFuncs);
     }
 
-    std::unordered_map<GlobalVar*, ImportedVar*> GetSrcCodeImportedVars() const
+    std::unordered_set<GlobalVar*>&& GetSrcCodeImportedVars()
     {
-        return srcCodeImportedVarMap;
+        return std::move(srcCodeImportedVars);
     }
 
-    std::unordered_map<std::string, FuncBase*> GetImplicitFuncs() const
+    std::unordered_map<std::string, FuncBase*>&& GetImplicitFuncs()
     {
-        return implicitFuncs;
+        return std::move(implicitFuncs);
     }
 
-    std::vector<FuncBase*> GetInitFuncsForConstVar() const
+    std::vector<FuncBase*>&& GetInitFuncsForConstVar()
     {
-        return initFuncsForConstVar;
+        for (auto f : initFuncsForAnnoFactory) {
+            initFuncsForConstVar.push_back(f);
+        }
+        return std::move(initFuncsForConstVar);
     }
-    
-    std::unordered_map<Block*, Terminator*> GetMaybeUnreachableBlocks() const
+
+    std::unordered_map<Block*, Terminator*>&& GetMaybeUnreachableBlocks()
     {
-        return maybeUnreachable;
+        return std::move(maybeUnreachable);
+    }
+
+    std::vector<std::pair<const AST::Decl*, Func*>>&& GetAnnoFactoryFuncs()
+    {
+        return std::move(annoFactoryFuncs);
+    }
+
+    void SetAnnoOnlyDecls(std::vector<const AST::Decl*>&& annoOnly)
+    {
+        annoOnlyDecls = std::move(annoOnly);
     }
 
 private:
     explicit AST2CHIR(AST2CHIRBuilder& builderToCHIR)
         : opts(*builderToCHIR.opts),
-          gim(*builderToCHIR.gim),
+          gim(builderToCHIR.gim),
           importManager(*builderToCHIR.import),
           sourceManager(*builderToCHIR.sourceManager),
           types(*builderToCHIR.types),
@@ -237,7 +255,10 @@ private:
           kind(builderToCHIR.kind),
           builder(*builderToCHIR.builder),
           chirType(*builderToCHIR.chirType),
-          outputPath(builderToCHIR.outputPath){};
+          outputPath(builderToCHIR.outputPath),
+          isComputingAnnos{builderToCHIR.isComputingAnnos}
+    {
+    }
 
     void AST2CHIRCheck();
     void CollectImplicitFuncs();
@@ -271,11 +292,12 @@ private:
      * @brief create all top-level func decl's shell and var decls, cache them to global symbol table.
      */
     void CacheTopLevelDeclToGlobalSymbolTable();
+    void CreateAnnoOnlyDeclSig(const AST::Decl& decl);
+    void CreatePseudoDefForAnnoOnlyDecl(const AST::Decl& decl);
     void CacheCustomTypeDefToGlobalSymbolTable();
     void CreateCustomTypeDef(const AST::Decl& decl, bool isImported);
     void TranslateAllCustomTypeTy();
     void TranslateNominalDecls(const AST::Package& pkg);
-    void SetAdditionalInfo();
     void SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, FuncBase& chirFunc);
 
     void FlatternPattern(const AST::Pattern& pattern, bool isLocalConst);
@@ -289,6 +311,7 @@ private:
 
     void TranslateAllDecls(const AST::Package& pkg, const InitOrder& initOrder);
     void TranslateTopLevelDeclsInParallel();
+    void TranslateInParallel(const std::vector<Ptr<const AST::Decl>>& decls);
 
     /** @brief Returns true if the AST2Chir process is unsuccessfull **/
     bool HasFailed() const;
@@ -314,7 +337,7 @@ private:
     Translator CreateTranslator();
 
     const GlobalOptions& opts;
-    const GenericInstantiationManager& gim;
+    const GenericInstantiationManager* gim;
     ImportManager& importManager;
     SourceManager& sourceManager;
     TypeManager& types;
@@ -334,9 +357,11 @@ private:
     std::vector<AST::File*> pkgFiles;
     std::unordered_map<std::string, FuncBase*> implicitFuncs;
     std::vector<FuncBase*> initFuncsForConstVar;
+    std::vector<Func*> initFuncsForAnnoFactory;
     std::unordered_map<Block*, Terminator*> maybeUnreachable;
 
     std::string outputPath;
+    bool isComputingAnnos{};
     CHIR::Package* package{nullptr};
     bool failure{false};
     std::set<std::string> dependencyPkg;
@@ -358,6 +383,10 @@ private:
     // ======================== Current Pkg Top-Level Decl Part ======================== //
     // including global VarDecl、global VarWithPatternDecl、static member VarDecl.
     std::vector<Ptr<const AST::Decl>> globalAndStaticVars{};
+    /// during computeAnnotations, translate only the annoFactoryFuncs of these decls.
+    /// These are decls that are not preserved when selecting const subpkg but have @!CustomAnnotations's.
+    /// \See ComputeAnnotations.cpp
+    std::vector<const AST::Decl*> annoOnlyDecls{};
     // including global FuncDecl、instantiated global FuncDecl、 MemberDecl(instance/static/open/abstract/instantiated).
     std::vector<Ptr<const AST::Decl>> globalAndMemberFuncs{};
     // including ClassDecl、InterfaceDecl、StructDecl、ExtendDecl、EnumDecl.
@@ -393,8 +422,8 @@ private:
     std::unordered_map<Ptr<const AST::File>, std::vector<Ptr<const AST::Decl>>> fileAndVarMap;
 
     std::unordered_set<Ptr<const AST::Decl>> usedSrcImportedNonGenericDecls;
-    std::unordered_map<Func*, ImportedFunc*> srcCodeImportedFuncMap;
-    std::unordered_map<GlobalVar*, ImportedVar*> srcCodeImportedVarMap;
+    std::unordered_set<Func*> srcCodeImportedFuncs;
+    std::unordered_set<GlobalVar*> srcCodeImportedVars;
 
     bool creatingLocalConstVarSignature{false};
 };

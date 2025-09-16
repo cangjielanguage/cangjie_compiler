@@ -41,8 +41,6 @@ std::unordered_map<Bchir::ByteCodeIndex, IVal> BCHIRLinker::Run(
         const auto& bchir = packages[i];
         if constexpr (ForConstEval) {
             LinkAndInitGlobalVars(bchir, gvarId2InitIVal, i == packages.size() - 1);
-        } else {
-            LinkGlobalVars(bchir);
         }
         if (bchir.GetMainMangledName() != "") {
             // always get the main from the most recent package
@@ -67,10 +65,6 @@ std::unordered_map<Bchir::ByteCodeIndex, IVal> BCHIRLinker::Run(
         // When running const-evaluation we initialize some variables manually instead of relying on linked BCHIR
         // to do that.
         GenerateCallsToConstInitFunctions(packages.back().initFuncsForConsts);
-    } else {
-        // The global init function from the entry package will trigger the init function
-        // from the other packages.
-        AppendGlobalInitFuncCall(packages.back().GetGlobalInitFunc());
     }
 
     // End of top-level initialization
@@ -244,49 +238,10 @@ void BCHIRLinker::LinkAndInitGlobalVars(
         auto& def = p.second;
         auto id = FreshGVarId();
         mName2GvarId.emplace(name, id);
-        auto initIVal = Interpreter::ByteCodeToIval(def);
-        if (IValUtils::GetIf<INullptr>(&initIVal) != nullptr && !isLast) {
-            // This is not a trivial value, therefore we need to initially call the initializer function
-            // In CHIR2BCHIR, when a variable doesn't have an init value, we store the initializer mangled name.
-            auto initFunc = def.GetMangledNameAnnotation(0);
-            CJC_ASSERT(initFunc != "");
-            Bchir::ByteCodeContent initFuncIdx;
-            auto it = mName2FuncBodyIdx.find(initFunc);
-            topDef.Push(OpCode::FUNC);
-            if (it != mName2FuncBodyIdx.end()) {
-                initFuncIdx = it->second;
-            } else {
-                AddToMName2FuncBodyIdxPlaceHolder(initFunc, topDef.NextIndex());
-                // Most of the time `dummyAbortFuncIdx` will be modified when function is visited, otherwise
-                // something went wrong and the interpretation will abort.
-                initFuncIdx = dummyAbortFuncIdx;
-            }
-            topDef.Push(initFuncIdx);
-            topDef.Push(OpCode::APPLY);
-            topDef.Push(1);            // only has the func arg
-            topDef.Push(OpCode::DROP); // drop initializer function result (unit)
-        } else {
-            // `initIVal == nullptr` and if `isLast == true` the initializer function will be called in
-            // `GenerateCallsToConstInitFunctions`.
-            gvarId2InitIVal.emplace(id, initIVal);
-        }
-    }
-}
+        auto initIVal = Interpreter::ByteCodeToIval(def, bchir, topBchir);
 
-void BCHIRLinker::LinkGlobalVars(const Bchir& bchir)
-{
-    for (auto& p : bchir.GetGlobalVars()) {
-        auto& name = p.first;
-        CJC_ASSERT(name.size() > 0);
-        if (mName2GvarId.find(name) != mName2GvarId.end()) {
-            continue;
-        }
-        auto& def = p.second;
-        topDef.Append(def);
-        auto id = FreshGVarId();
-        topDef.Push(OpCode::GVAR_SET);
-        topDef.Push(id);
-        mName2GvarId.emplace(name, id);
+        CJC_ASSERT(isLast);
+        gvarId2InitIVal.emplace(id, initIVal);
     }
 }
 
@@ -354,7 +309,7 @@ void BCHIRLinker::LinkFunctions(const std::vector<Bchir>& packages)
             topDef.Push(defPtr.GetNumLVars());
 
             // encode the body
-            TraverseAndLink(defPtr, fileMap, typeMap, stringMap);
+            TraverseAndLink(bchir, defPtr, fileMap, typeMap, stringMap);
         }
     }
 }
@@ -379,7 +334,7 @@ void BCHIRLinker::AddMangledName(
     }
 }
 
-void BCHIRLinker::TraverseAndLink(const Bchir::Definition& currentDef,
+void BCHIRLinker::TraverseAndLink(const Bchir& bchir, const Bchir::Definition& currentDef,
     const std::vector<Bchir::ByteCodeContent>& fileMap, const std::vector<Bchir::ByteCodeContent>& typeMap,
     const std::vector<Bchir::ByteCodeContent>& stringMap)
 {
@@ -460,7 +415,13 @@ void BCHIRLinker::TraverseAndLink(const Bchir::Definition& currentDef,
             case OpCode::INSTANCEOF: {
                 auto& mgl = currentDef.GetMangledNameAnnotation(curr);
                 auto thisClassId = GetClassId(mgl);
-                LinkClass(topBchir, mgl);
+                // Create class info if the type doesn't have a class table
+                // (e.g. enums). We don't do this for classes with a class
+                // table because we need to finish converting their methods
+                // to BCHIR before creating their vtables.
+                if (bchir.GetSClass(mgl) == nullptr) {
+                    LinkClass(bchir, mgl);
+                }
                 topDef.Push(thisClassId);
                 break;
             }
@@ -489,11 +450,6 @@ void BCHIRLinker::TraverseAndLink(const Bchir::Definition& currentDef,
                 topDef.Push(falseIdx);
                 break;
             }
-            case OpCode::INTRINSIC0_EXC: {
-                topDef.Push(currentDef.Get(curr + 1));
-                topDef.Push(currentDef.Get(curr + Bchir::FLAG_TWO) + offset); // jump target for when exception
-                break;
-            }
             case OpCode::INTRINSIC1: {
                 topDef.Push(currentDef.Get(curr + 1));                  // intrinsic kind
                 auto oldTyIdx = currentDef.Get(curr + Bchir::FLAG_TWO); // type
@@ -502,42 +458,6 @@ void BCHIRLinker::TraverseAndLink(const Bchir::Definition& currentDef,
                     newTyIdx = typeMap[oldTyIdx];
                 }
                 topDef.Push(newTyIdx);
-                break;
-            }
-            case OpCode::INTRINSIC1_EXC: {
-                topDef.Push(currentDef.Get(curr + 1));                          // intrinsic kind
-                auto oldTyIdx = currentDef.Get(curr + Bchir::FLAG_TWO);         // type
-                auto exceptionIndex = currentDef.Get(curr + Bchir::FLAG_THREE); // jump target for when exception
-                Bchir::ByteCodeContent newTyIdx = Bchir::BYTECODE_CONTENT_MAX;
-                if (oldTyIdx != Bchir::BYTECODE_CONTENT_MAX) {
-                    newTyIdx = typeMap[oldTyIdx];
-                }
-                topDef.Push(newTyIdx);
-                topDef.Push(exceptionIndex + offset);
-                break;
-            }
-            case OpCode::INTRINSIC2: {
-                topDef.Push(currentDef.Get(curr + 1));                  // intrinsic kind
-                auto oldTyIdx = currentDef.Get(curr + Bchir::FLAG_TWO); // type
-                Bchir::ByteCodeContent newTyIdx = Bchir::BYTECODE_CONTENT_MAX;
-                if (oldTyIdx != Bchir::BYTECODE_CONTENT_MAX) {
-                    newTyIdx = typeMap[oldTyIdx];
-                }
-                topDef.Push(newTyIdx);
-                topDef.Push(currentDef.Get(curr + Bchir::FLAG_THREE)); // overflow strategy
-                break;
-            }
-            case OpCode::INTRINSIC2_EXC: {
-                topDef.Push(currentDef.Get(curr + 1));                  // intrinsic kind
-                auto oldTyIdx = currentDef.Get(curr + Bchir::FLAG_TWO); // type
-                Bchir::ByteCodeContent newTyIdx = Bchir::BYTECODE_CONTENT_MAX;
-                if (oldTyIdx != Bchir::BYTECODE_CONTENT_MAX) {
-                    newTyIdx = typeMap[oldTyIdx];
-                }
-                topDef.Push(newTyIdx);
-                topDef.Push(currentDef.Get(curr + Bchir::FLAG_THREE));         // overflow strategy
-                auto exceptionIndex = currentDef.Get(curr + Bchir::FLAG_FOUR); // jump target for when exception
-                topDef.Push(exceptionIndex + offset);
                 break;
             }
             case OpCode::SYSCALL: {
@@ -584,10 +504,7 @@ void BCHIRLinker::TraverseAndLink(const Bchir::Definition& currentDef,
             case OpCode::BIN_MUL_EXC:
             case OpCode::BIN_DIV_EXC:
             case OpCode::BIN_MOD_EXC:
-            case OpCode::BIN_EXP_EXC:
-            case OpCode::BIN_BITAND_EXC:
-            case OpCode::BIN_BITOR_EXC:
-            case OpCode::BIN_BITXOR_EXC: {
+            case OpCode::BIN_EXP_EXC: {
                 topDef.Push(currentDef.Get(curr + 1));                          // type kind
                 topDef.Push(currentDef.Get(curr + Bchir::FLAG_TWO));            // overflow strategy
                 topDef.Push(currentDef.Get(curr + Bchir::FLAG_THREE) + offset); // jump target for when exception
@@ -599,26 +516,6 @@ void BCHIRLinker::TraverseAndLink(const Bchir::Definition& currentDef,
                 topDef.Push(currentDef.Get(curr + Bchir::FLAG_TWO));           // overflow strategy
                 topDef.Push(currentDef.Get(curr + Bchir::FLAG_THREE));         // type kind for rhs
                 topDef.Push(currentDef.Get(curr + Bchir::FLAG_FOUR) + offset); // jump target for when exception
-                break;
-            }
-            case OpCode::TYPECAST_EXC: {
-                topDef.Push(currentDef.Get(curr + 1));                         // source type kind
-                topDef.Push(currentDef.Get(curr + Bchir::FLAG_TWO));           // target type kind
-                topDef.Push(currentDef.Get(curr + Bchir::FLAG_THREE));         // overflow strategy
-                topDef.Push(currentDef.Get(curr + Bchir::FLAG_FOUR) + offset); // jump target for when exception
-                break;
-            }
-            case OpCode::ALLOCATE_RAW_ARRAY_EXC: {
-                topDef.Push(currentDef.Get(curr + 1) + offset); // jump target for when exception
-                break;
-            }
-            case OpCode::ALLOCATE_RAW_ARRAY_LITERAL_EXC: {
-                topDef.Push(currentDef.Get(curr + 1));                        // array size
-                topDef.Push(currentDef.Get(curr + Bchir::FLAG_TWO) + offset); // jump target for when exception
-                break;
-            }
-            case OpCode::RAISE_EXC: {
-                topDef.Push(currentDef.Get(curr + 1) + offset); // target block
                 break;
             }
             case OpCode::CAPPLY: {
@@ -660,17 +557,6 @@ void BCHIRLinker::TraverseAndLink(const Bchir::Definition& currentDef,
     }
 }
 
-void BCHIRLinker::AppendGlobalInitFuncCall(const std::string& initFunc)
-{
-    auto funcIdxIt = mName2FuncBodyIdx.find(initFunc);
-    CJC_ASSERT(funcIdxIt != mName2FuncBodyIdx.end());
-    topDef.Push(OpCode::FUNC);
-    topDef.Push(funcIdxIt->second);
-    topDef.Push(OpCode::APPLY);
-    topDef.Push(1);            // only has the func arg
-    topDef.Push(OpCode::DROP); // always returns a UNIT
-}
-
 Bchir::ByteCodeContent BCHIRLinker::FreshGVarId()
 {
     return gvarId++;
@@ -706,24 +592,4 @@ int BCHIRLinker::GetGVARId(const std::string& name) const
         return static_cast<int>(it->second);
     }
     return -1;
-}
-
-Bchir::ByteCodeIndex BCHIRLinker::GetFuncIndex(const std::string& name)
-{
-    auto it = mName2FuncBodyIdx.find(name);
-    if (it != mName2FuncBodyIdx.end()) {
-        return it->second;
-    }
-    return 0;
-}
-
-Bchir::ByteCodeContent BCHIRLinker::CLVar2GVarId(Bchir::ByteCodeContent cLVarID)
-{
-    auto it = cLVar2GVarID.find(cLVarID);
-    if (it != cLVar2GVarID.end()) {
-        return it->second;
-    }
-
-    cLVar2GVarID.emplace_hint(it, cLVarID, gvarId);
-    return gvarId++; // increse gVarId
 }

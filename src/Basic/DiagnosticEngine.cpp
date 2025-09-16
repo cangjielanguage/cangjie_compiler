@@ -61,38 +61,45 @@ DiagCategory Diagnostic::GetDiagnoseCategory(DiagKind diagKind)
             dc = DiagCategory::KIND;                                                                                   \
         }                                                                                                              \
     } while (0)
-    GET_CATE(parse_query, PARSE_QUERY);
-    GET_CATE(conditional_compilation, CONDITIONAL_COMPILATION);
     GET_CATE(macro_expand, MACRO_EXPAND);
     GET_CATE(sema, SEMA);
 #undef GET_CATE
     return dc;
 }
 
+struct DiagRange {
+    DiagKindRefactor start;
+    DiagKindRefactor end;
+    DiagCategory category;
+};
+
 DiagCategory Diagnostic::GetDiagnoseCategory(DiagKindRefactor diagKind)
 {
-    if (diagKind > DiagKindRefactor::lex_diag_begin && diagKind < DiagKindRefactor::lex_diag_end) {
-        return DiagCategory::LEX;
-    } else if (diagKind > DiagKindRefactor::parse_diag_begin && diagKind < DiagKindRefactor::parse_diag_end) {
-        return DiagCategory::PARSE;
-    } else if (diagKind > DiagKindRefactor::sema_diag_begin && diagKind < DiagKindRefactor::sema_diag_end) {
-        return DiagCategory::SEMA;
-    } else if (diagKind > DiagKindRefactor::chir_diag_begin && diagKind < DiagKindRefactor::chir_diag_end) {
-        return DiagCategory::CHIR;
-    } else if (diagKind > DiagKindRefactor::import_package_diag_begin &&
-        diagKind < DiagKindRefactor::import_package_diag_end) {
-        return DiagCategory::IMPORT_PACKAGE;
-    } else if (diagKind > DiagKindRefactor::module_diag_begin && diagKind < DiagKindRefactor::module_diag_end) {
-        return DiagCategory::MODULE;
-    } else if (diagKind > DiagKindRefactor::driver_diag_begin && diagKind < DiagKindRefactor::driver_diag_end) {
-        return DiagCategory::OTHER;
-    } else if (diagKind > DiagKindRefactor::incremental_compilation_diag_begin &&
-        diagKind < DiagKindRefactor::incremental_compilation_diag_end) {
-        return DiagCategory::OTHER;
-    } else {
-        CJC_ABORT();
-        return DiagCategory::OTHER;
+    static const std::array<DiagRange, 11> RANGES = {{
+        {DiagKindRefactor::lex_diag_begin, DiagKindRefactor::lex_diag_end, DiagCategory::LEX},
+        {DiagKindRefactor::parse_diag_begin, DiagKindRefactor::parse_diag_end, DiagCategory::PARSE},
+        {DiagKindRefactor::sema_diag_begin, DiagKindRefactor::sema_diag_end, DiagCategory::SEMA},
+        {DiagKindRefactor::chir_diag_begin, DiagKindRefactor::chir_diag_end, DiagCategory::CHIR},
+        {DiagKindRefactor::import_package_diag_begin, DiagKindRefactor::import_package_diag_end,
+            DiagCategory::IMPORT_PACKAGE},
+        {DiagKindRefactor::module_diag_begin, DiagKindRefactor::module_diag_end, DiagCategory::MODULE},
+        {DiagKindRefactor::driver_diag_begin, DiagKindRefactor::driver_diag_end, DiagCategory::OTHER},
+        {DiagKindRefactor::incremental_compilation_diag_begin, DiagKindRefactor::incremental_compilation_diag_end,
+            DiagCategory::OTHER},
+        {DiagKindRefactor::parse_query_diag_begin, DiagKindRefactor::parse_query_diag_end, DiagCategory::PARSE_QUERY},
+        {DiagKindRefactor::frontend_diag_begin, DiagKindRefactor::frontend_diag_end, DiagCategory::OTHER},
+        {DiagKindRefactor::conditional_compilation_diag_begin, DiagKindRefactor::conditional_compilation_diag_end,
+            DiagCategory::CONDITIONAL_COMPILATION},
+    }};
+
+    for (const auto& range : RANGES) {
+        if (diagKind > range.start && diagKind < range.end) {
+            return range.category;
+        }
     }
+
+    CJC_ABORT();
+    return DiagCategory::OTHER;
 }
 
 bool Diagnostic::IsValid() const
@@ -181,7 +188,9 @@ DiagnosticBuilder::DiagnosticBuilder(DiagnosticEngine& diag, Diagnostic diagnost
 
 DiagnosticBuilder::~DiagnosticBuilder()
 {
+#ifndef CANGJIE_ENABLE_GCOV
     try {
+#endif
         if (!diag.GetEnableDiagnose()) {
             auto storedDiags = diag.ConsumeStoredDiags();
             storedDiags.emplace_back(diagnostic);
@@ -202,9 +211,11 @@ DiagnosticBuilder::~DiagnosticBuilder()
             return;
         }
         diag.HandleDiagnostic(diagnostic);
+#ifndef CANGJIE_ENABLE_GCOV
     } catch (...) {
         CJC_ABORT();
     }
+#endif
 }
 
 void DiagnosticBuilder::AddHint(const Range& range, std::vector<std::string>& arguments)
@@ -244,6 +255,12 @@ void DiagnosticBuilder::AddNote(const Range& range, const std::string& note)
     diag.CheckRange(diagnostic.GetDiagCategory(), range);
     SubDiagnostic subDiag(range, note);
     AddNote(subDiag);
+}
+
+void DiagnosticBuilder::AddNote(const Position& pos, const std::string& note)
+{
+    auto end = pos == DEFAULT_POSITION ? pos : pos + 1;
+    AddNote(MakeRange(pos, end), note);
 }
 
 void DiagnosticBuilder::AddNote(const AST::Node& node, const std::string& note)

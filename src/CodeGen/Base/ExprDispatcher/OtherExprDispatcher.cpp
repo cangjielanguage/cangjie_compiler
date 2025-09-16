@@ -23,12 +23,9 @@
 #include "IRAttribute.h"
 #include "IRBuilder.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Value.h"
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-#include "CJNative/CJNativeClosure.h"
-#endif
 
 namespace {
 using namespace Cangjie;
@@ -99,25 +96,15 @@ llvm::Value* HandleFieldExpr(IRBuilder2& irBuilder, const CHIR::Expression& chir
     if (field.GetBase()->GetType()->IsEnum()) {
         return irBuilder.CreateEnumGEP(field);
     }
-    if (field.GetBase()->GetType()->IsClosure()) {
-        auto baseVal = base->GetRawValue();
-        if (field.GetIndexes()[0] == 1U) {
-            return baseVal;
-        }
-        auto fieldTy = irBuilder.getInt8PtrTy();
-        auto tmp =
-            irBuilder.CreateConstGEP1_32(fieldTy, irBuilder.CreateBitCast(baseVal, fieldTy->getPointerTo(1U)), 1U);
-        return irBuilder.CreateLoad(fieldTy, tmp);
-    }
     if (base->GetCGType()->IsPointerType()) {
-        auto val = irBuilder.CreateGEP(*base, field.GetIndexes());
+        auto val = irBuilder.CreateGEP(*base, field.GetPath());
         if (base->GetRawValue()->getType()->getPointerAddressSpace() == 1U) {
             cgMod.GetCGContext().SetBasePtr(val.GetRawValue(), base->GetRawValue());
         }
         return irBuilder.CreateLoad(val);
     } else {
         std::vector<unsigned> idxes;
-        for (auto idx : field.GetIndexes()) {
+        for (auto idx : field.GetPath()) {
             idxes.emplace_back(idx);
         }
         return irBuilder.CreateExtractValue(base->GetRawValue(), idxes);
@@ -133,9 +120,7 @@ llvm::Value* HandleTypecastExpr(IRBuilder2& irBuilder, const CHIR::Expression& c
 llvm::Value* HandleTupleExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirExpr)
 {
     auto& tuple = StaticCast<const CHIR::Tuple&>(chirExpr);
-    if (tuple.GetResult()->GetType()->IsClosure()) {
-        return GenerateClosure(irBuilder, tuple);
-    } else if (tuple.GetResult()->GetType()->IsEnum()) {
+    if (tuple.GetResult()->GetType()->IsEnum()) {
         return GenerateEnum(irBuilder, tuple);
     } else if (tuple.GetResult()->GetType()->IsStruct()) {
         return GenerateStruct(irBuilder, tuple);
@@ -200,7 +185,7 @@ llvm::Value* HandleTransformToGenericExpr(IRBuilder2& irBuilder, const CHIR::Exp
 {
     auto& castToGenericExpr = StaticCast<const CHIR::TransformToGeneric&>(chirExpr);
     auto& cgMod = irBuilder.GetCGModule();
-    auto cgVal = *(cgMod | castToGenericExpr.GetObject());
+    auto cgVal = *(cgMod | castToGenericExpr.GetSourceValue());
     auto srcCGType = CGType::GetOrCreate(cgMod, castToGenericExpr.GetSourceTy());
     auto targetCGType = CGType::GetOrCreate(cgMod, castToGenericExpr.GetTargetTy());
     CJC_ASSERT(srcCGType->GetSize() && "Source type must have size.");
@@ -232,7 +217,7 @@ llvm::Value* HandleBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
 {
     auto& boxExpr = StaticCast<const CHIR::Box&>(chirExpr);
     auto& cgMod = irBuilder.GetCGModule();
-    auto srcObject = boxExpr.GetObject();
+    auto srcObject = boxExpr.GetSourceValue();
     auto cgVal = *(cgMod | srcObject);
     auto srcCHIRType = boxExpr.GetSourceTy();
     auto srcCGType = CGType::GetOrCreate(cgMod, srcCHIRType);
@@ -286,7 +271,7 @@ llvm::Value* HandleUnBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chir
 {
     auto& cgMod = irBuilder.GetCGModule();
     auto& unboxExpr = StaticCast<const CHIR::UnBox&>(chirExpr);
-    auto cgVal = (cgMod | unboxExpr.GetObject());
+    auto cgVal = (cgMod | unboxExpr.GetSourceValue());
     auto targetCHIRType = unboxExpr.GetTargetTy();
     auto targetCGType = CGType::GetOrCreate(cgMod, targetCHIRType);
     if (targetCGType->IsReference()) {
@@ -310,7 +295,7 @@ llvm::Value* HandleTransformToConcreteExpr(IRBuilder2& irBuilder, const CHIR::Ex
     auto& cgMod = irBuilder.GetCGModule();
     auto& castToConcreteExpr = StaticCast<const CHIR::TransformToConcrete&>(chirExpr);
 
-    auto cgVal = *(cgMod | castToConcreteExpr.GetObject());
+    auto cgVal = *(cgMod | castToConcreteExpr.GetSourceValue());
     auto targetCHIRType = castToConcreteExpr.GetTargetTy();
     auto targetCGType = CGType::GetOrCreate(cgMod, targetCHIRType);
     CJC_ASSERT(targetCGType->GetSize() && "target type must have size");
@@ -341,7 +326,7 @@ llvm::Value* HandleUnBoxToRefExpr(IRBuilder2& irBuilder, const CHIR::Expression&
 {
     auto& cgMod = irBuilder.GetCGModule();
     auto& unboxToRefExpr = StaticCast<const CHIR::UnBoxToRef&>(chirExpr);
-    auto cgVal = (cgMod | unboxToRefExpr.GetObject());
+    auto cgVal = (cgMod | unboxToRefExpr.GetSourceValue());
     auto targetCHIRType = DeRef(*unboxToRefExpr.GetTargetTy());
     auto targetCGType = CGType::GetOrCreate(cgMod, targetCHIRType);
     if (targetCGType->GetSize()) {

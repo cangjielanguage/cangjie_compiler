@@ -11,7 +11,7 @@ if(CANGJIE_BUILD_CJC)
             ${SRC_FILES}
                 Backend/CJNATIVEBackend.cpp
             Toolchains/ToolChain.cpp
-                Toolchains/CJNATIVE/Linux_CJNATIVE.cpp
+            Toolchains/CJNATIVE/Linux_CJNATIVE.cpp
             Toolchains/CJNATIVE/MinGW_CJNATIVE.cpp
             Toolchains/CJNATIVE/Darwin_CJNATIVE.cpp
             Toolchains/CJNATIVE/Ohos_CJNATIVE.cpp)

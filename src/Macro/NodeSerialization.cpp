@@ -186,6 +186,8 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializePattern(AstPattern
                 [](NodeWriter& nw, AstPattern pattern) { return nw.SerializeVarOrEnumPattern(pattern); }},
             {ASTKind::EXCEPT_TYPE_PATTERN,
                 [](NodeWriter& nw, AstPattern pattern) { return nw.SerializeExceptTypePattern(pattern); }},
+            {ASTKind::COMMAND_TYPE_PATTERN,
+                [](NodeWriter& nw, AstPattern pattern) { return nw.SerializeCommandTypePattern(pattern); }},
             {ASTKind::WILDCARD_PATTERN,
                 [](NodeWriter& nw, AstPattern pattern) { return nw.SerializeWildcardPattern(pattern); }},
         };
@@ -200,11 +202,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializePattern(AstPattern
 flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeConstPattern(AstPattern pattern)
 {
     auto constPattern = RawStaticCast<const ConstPattern*>(pattern);
-    if (constPattern == nullptr) {
-        auto fbConstPattern = flatbuffers::Offset<NodeFormat::ConstPattern>();
-        return NodeFormat::CreatePattern(
-            builder, emptyNodeBase, NodeFormat::AnyPattern_CONST_PATTERN, fbConstPattern.Union());
-    }
     auto fbNodeBase = SerializeNodeBase(constPattern);
     auto fbLiteral = SerializeExpr(constPattern->literal.get());
     auto fbCallExpr = SerializeCallExpr(constPattern->operatorCallExpr.get());
@@ -215,11 +212,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeConstPattern(AstPa
 flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeWildcardPattern(AstPattern pattern)
 {
     auto wildcardPattern = RawStaticCast<const WildcardPattern*>(pattern);
-    if (wildcardPattern == nullptr) {
-        auto fbConstPattern = flatbuffers::Offset<NodeFormat::WildcardPattern>();
-        return NodeFormat::CreatePattern(
-            builder, emptyNodeBase, NodeFormat::AnyPattern_WILDCARD_PATTERN, fbConstPattern.Union());
-    }
     auto fbNodeBase = SerializeNodeBase(wildcardPattern);
     auto fbConstPattern = NodeFormat::CreateWildcardPattern(builder, fbNodeBase);
     return NodeFormat::CreatePattern(
@@ -229,11 +221,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeWildcardPattern(As
 flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeVarPattern(AstPattern pattern)
 {
     auto varPattern = RawStaticCast<const VarPattern*>(pattern);
-    if (varPattern == nullptr) {
-        auto fbVarPattern = flatbuffers::Offset<NodeFormat::VarPattern>();
-        return NodeFormat::CreatePattern(
-            builder, emptyNodeBase, NodeFormat::AnyPattern_VAR_PATTERN, fbVarPattern.Union());
-    }
     auto fbNodeBase = SerializeNodeBase(varPattern);
     auto fbVarDecl = SerializeVarDecl(varPattern->varDecl.get());
     auto fbVarPattern = NodeFormat::CreateVarPattern(builder, fbNodeBase, fbVarDecl);
@@ -243,11 +230,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeVarPattern(AstPatt
 flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeTypePattern(AstPattern pattern)
 {
     auto typePattern = RawStaticCast<const TypePattern*>(pattern);
-    if (typePattern == nullptr) {
-        auto fbTypePattern = flatbuffers::Offset<NodeFormat::TypePattern>();
-        return NodeFormat::CreatePattern(
-            builder, emptyNodeBase, NodeFormat::AnyPattern_TYPE_PATTERN, fbTypePattern.Union());
-    }
     auto fbNodeBase = SerializeNodeBase(typePattern);
     auto fbPattern = SerializePattern(typePattern->pattern.get());
     auto colonPos = FlatPosCreateHelper(typePattern->colonPos);
@@ -283,11 +265,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeEnumPattern(const 
 flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeVarOrEnumPattern(AstPattern pattern)
 {
     auto varOrEnumPattern = RawStaticCast<const VarOrEnumPattern*>(pattern);
-    if (varOrEnumPattern == nullptr) {
-        auto fbVarOrEnumPattern = flatbuffers::Offset<NodeFormat::VarOrEnumPattern>();
-        return NodeFormat::CreatePattern(
-            builder, emptyNodeBase, NodeFormat::AnyPattern_VAR_OR_ENUM_PATTERN, fbVarOrEnumPattern.Union());
-    }
     auto fbNodeBase = SerializeNodeBase(varOrEnumPattern);
     auto fbIdentifier = builder.CreateString(varOrEnumPattern->identifier.GetRawText());
     auto fbPattern = SerializePattern(varOrEnumPattern->pattern.get());
@@ -299,11 +276,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeVarOrEnumPattern(A
 flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeTuplePattern(AstPattern pattern)
 {
     auto tuplePattern = RawStaticCast<const TuplePattern*>(pattern);
-    if (tuplePattern == nullptr) {
-        auto fbTuplePattern = flatbuffers::Offset<NodeFormat::TuplePattern>();
-        return NodeFormat::CreatePattern(
-            builder, emptyNodeBase, NodeFormat::AnyPattern_TUPLE_PATTERN, fbTuplePattern.Union());
-    }
     auto fbNodeBase = SerializeNodeBase(tuplePattern);
     auto leftParenPos = FlatPosCreateHelper(tuplePattern->leftBracePos);
     auto fbPatterns = FlatVectorCreateHelper<NodeFormat::Pattern, Pattern, AstPattern>(
@@ -318,11 +290,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeTuplePattern(AstPa
 flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeExceptTypePattern(AstPattern pattern)
 {
     auto exceptTypePattern = RawStaticCast<const ExceptTypePattern*>(pattern);
-    if (exceptTypePattern == nullptr) {
-        auto fbExceptTypePattern = flatbuffers::Offset<NodeFormat::ExceptTypePattern>();
-        return NodeFormat::CreatePattern(
-            builder, emptyNodeBase, NodeFormat::AnyPattern_EXCEPT_TYPE_PATTERN, fbExceptTypePattern.Union());
-    }
     auto fbNodeBase = SerializeNodeBase(exceptTypePattern);
     auto fbPattern = SerializePattern(exceptTypePattern->pattern.get());
     auto patternPos = FlatPosCreateHelper(exceptTypePattern->patternPos);
@@ -334,6 +301,22 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeExceptTypePattern(
         builder, fbNodeBase, fbPattern, &patternPos, &colonPos, fbTypes, bitOrPosVector);
     return NodeFormat::CreatePattern(
         builder, fbNodeBase, NodeFormat::AnyPattern_EXCEPT_TYPE_PATTERN, fbExceptTypePattern.Union());
+}
+
+flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeCommandTypePattern(AstPattern pattern)
+{
+    auto effectTypePattern = RawStaticCast<const CommandTypePattern*>(pattern);
+    auto fbNodeBase = SerializeNodeBase(effectTypePattern);
+    auto fbPattern = SerializePattern(effectTypePattern->pattern.get());
+    auto patternPos = FlatPosCreateHelper(effectTypePattern->patternPos);
+    auto colonPos = FlatPosCreateHelper(effectTypePattern->colonPos);
+    auto fbTypes =
+        FlatVectorCreateHelper<NodeFormat::Type, Type, AstType>(effectTypePattern->types, &NodeWriter::SerializeType);
+    auto bitOrPosVector = CreatePositionVector(effectTypePattern->bitOrPosVector);
+    auto fbCommandTypePattern = NodeFormat::CreateCommandTypePattern(
+        builder, fbNodeBase, fbPattern, &patternPos, &colonPos, fbTypes, bitOrPosVector);
+    return NodeFormat::CreatePattern(
+        builder, fbNodeBase, NodeFormat::AnyPattern_COMMAND_TYPE_PATTERN, fbCommandTypePattern.Union());
 }
 
 flatbuffers::Offset<NodeFormat::FuncParam> NodeWriter::SerializeFuncParam(AstFuncParam funcParam)
@@ -505,10 +488,6 @@ flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializePrimitiveType(const T
 flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeThisType(AstType type)
 {
     auto thisType = RawStaticCast<const ThisType*>(type);
-    if (thisType == nullptr) {
-        auto fbThisType = flatbuffers::Offset<NodeFormat::ThisType>();
-        return NodeFormat::CreateType(builder, emptyTypeBase, NodeFormat::AnyType_THIS_TYPE, fbThisType.Union());
-    }
     auto fbTypeBase = SerializeTypeBase(thisType);
     auto fbThisType = NodeFormat::CreateThisType(builder, fbTypeBase);
     return NodeFormat::CreateType(builder, fbTypeBase, NodeFormat::AnyType_THIS_TYPE, fbThisType.Union());
@@ -517,10 +496,6 @@ flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeThisType(AstType type
 flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeParenType(AstType type)
 {
     auto parenType = RawStaticCast<const ParenType*>(type);
-    if (parenType == nullptr) {
-        auto fbParenType = flatbuffers::Offset<NodeFormat::ParenType>();
-        return NodeFormat::CreateType(builder, emptyTypeBase, NodeFormat::AnyType_PAREN_TYPE, fbParenType.Union());
-    }
     auto fbTypeBase = SerializeTypeBase(parenType);
     auto leftParenPos = FlatPosCreateHelper(parenType->leftParenPos);
     auto ptype = SerializeType(parenType->type.get());
@@ -532,11 +507,6 @@ flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeParenType(AstType typ
 flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeQualifiedType(AstType type)
 {
     auto qualifiedType = RawStaticCast<const QualifiedType*>(type);
-    if (qualifiedType == nullptr) {
-        auto fbQualifiedType = flatbuffers::Offset<NodeFormat::QualifiedType>();
-        return NodeFormat::CreateType(
-            builder, emptyTypeBase, NodeFormat::AnyType_QUALIFIED_TYPE, fbQualifiedType.Union());
-    }
     auto fbTypeBase = SerializeTypeBase(qualifiedType);
     auto baseType = SerializeType(qualifiedType->baseType.get());
     auto dotPos = FlatPosCreateHelper(qualifiedType->dotPos);
@@ -554,10 +524,6 @@ flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeQualifiedType(AstType
 flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeOptionType(AstType type)
 {
     auto optionType = RawStaticCast<const OptionType*>(type);
-    if (optionType == nullptr) {
-        auto fbOptionType = flatbuffers::Offset<NodeFormat::OptionType>();
-        return NodeFormat::CreateType(builder, emptyTypeBase, NodeFormat::AnyType_OPTION_TYPE, fbOptionType.Union());
-    }
     auto fbTypeBase = SerializeTypeBase(optionType);
     auto componentType = SerializeType(optionType->componentType.get());
     auto questVector = CreatePositionVector(optionType->questVector);
@@ -569,10 +535,6 @@ flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeOptionType(AstType ty
 flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeTupleType(AstType type)
 {
     auto tupleType = RawStaticCast<const TupleType*>(type);
-    if (tupleType == nullptr) {
-        auto fbTupleType = flatbuffers::Offset<NodeFormat::TupleType>();
-        return NodeFormat::CreateType(builder, emptyTypeBase, NodeFormat::AnyType_TUPLE_TYPE, fbTupleType.Union());
-    }
     auto fbTypeBase = SerializeTypeBase(tupleType);
     auto fieldTypes =
         FlatVectorCreateHelper<NodeFormat::Type, Type, AstType>(tupleType->fieldTypes, &NodeWriter::SerializeType);
@@ -590,10 +552,6 @@ flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeTupleType(AstType typ
 flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeFuncType(AstType type)
 {
     auto funcType = RawStaticCast<const FuncType*>(type);
-    if (funcType == nullptr) {
-        auto fbFuncType = flatbuffers::Offset<NodeFormat::FuncType>();
-        return NodeFormat::CreateType(builder, emptyTypeBase, NodeFormat::AnyType_FUNC_TYPE, fbFuncType.Union());
-    }
     auto fbTypeBase = SerializeTypeBase(funcType);
     auto leftParenPos = FlatPosCreateHelper(funcType->leftParenPos);
     auto fbTypeVec =
@@ -609,10 +567,6 @@ flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeFuncType(AstType type
 flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeVArrayType(AstType type)
 {
     auto vArrayType = RawStaticCast<const VArrayType*>(type);
-    if (vArrayType == nullptr) {
-        auto fbVArrayType = flatbuffers::Offset<NodeFormat::VArrayType>();
-        return NodeFormat::CreateType(builder, emptyTypeBase, NodeFormat::AnyType_VARRAY_TYPE, fbVArrayType.Union());
-    }
     auto fbTypeBase = SerializeTypeBase(vArrayType);
     auto varrayPos = FlatPosCreateHelper(vArrayType->varrayPos);
     auto leftAnglePos = FlatPosCreateHelper(vArrayType->leftAnglePos);
@@ -627,11 +581,6 @@ flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeVArrayType(AstType ty
 flatbuffers::Offset<NodeFormat::Type> NodeWriter::SerializeConstantType(AstType type)
 {
     auto constantType = RawStaticCast<const ConstantType*>(type);
-    if (constantType == nullptr) {
-        auto fbConstantType = flatbuffers::Offset<NodeFormat::ConstantType>();
-        return NodeFormat::CreateType(
-            builder, emptyTypeBase, NodeFormat::AnyType_CONSTANT_TYPE, fbConstantType.Union());
-    }
     auto fbTypeBase = SerializeTypeBase(constantType);
     auto constantExpr = SerializeExpr(constantType->constantExpr.get());
     auto dollarPos = FlatPosCreateHelper(constantType->dollarPos);
@@ -822,10 +771,6 @@ flatbuffers::Offset<NodeFormat::ClassBody> NodeWriter::SerializeClassBody(AstCla
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeClassDecl(AstDecl decl)
 {
     auto classDecl = RawStaticCast<const ClassDecl*>(decl);
-    if (classDecl == nullptr) {
-        auto fbClassDecl = flatbuffers::Offset<NodeFormat::ClassDecl>();
-        return NodeFormat::CreateDecl(builder, emptyDeclBase, NodeFormat::AnyDecl_CLASS_DECL, fbClassDecl.Union());
-    }
     auto fbBase = SerializeDeclBase(classDecl);
     auto upperBoundPos = FlatPosCreateHelper(classDecl->upperBoundPos);
     auto fbSuperTypes =
@@ -852,11 +797,6 @@ flatbuffers::Offset<NodeFormat::InterfaceBody> NodeWriter::SerializeInterfaceBod
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeInterfaceDecl(AstDecl decl)
 {
     auto interfaceDecl = RawStaticCast<const InterfaceDecl*>(decl);
-    if (interfaceDecl == nullptr) {
-        auto fbInterfaceDecl = flatbuffers::Offset<NodeFormat::InterfaceDecl>();
-        return NodeFormat::CreateDecl(
-            builder, emptyDeclBase, NodeFormat::AnyDecl_INTERFACE_DECL, fbInterfaceDecl.Union());
-    }
     auto fbBase = SerializeDeclBase(interfaceDecl);
     auto upperBoundPos = FlatPosCreateHelper(interfaceDecl->upperBoundPos);
     auto fbSuperTypes = FlatVectorCreateHelper<NodeFormat::Type, Type, AstType>(
@@ -869,11 +809,6 @@ flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeInterfaceDecl(AstDecl
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializePrimaryCtorDecl(AstDecl decl)
 {
     auto primaryCtorDecl = RawStaticCast<const PrimaryCtorDecl*>(decl);
-    if (primaryCtorDecl == nullptr) {
-        auto fbPrimaryCtorDecl = flatbuffers::Offset<NodeFormat::PrimaryCtorDecl>();
-        return NodeFormat::CreateDecl(
-            builder, emptyDeclBase, NodeFormat::AnyDecl_PRIMARY_CTOR_DECL, fbPrimaryCtorDecl.Union());
-    }
     auto fbBase = SerializeDeclBase(primaryCtorDecl);
     auto fbFuncBody = SerializeFuncBody(primaryCtorDecl->funcBody.get());
     auto fbPrimaryCtorDecl = NodeFormat::CreatePrimaryCtorDecl(builder, fbBase, fbFuncBody);
@@ -931,10 +866,6 @@ flatbuffers::Offset<NodeFormat::StructBody> NodeWriter::SerializeStructBody(AstS
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeStructDecl(AstDecl decl)
 {
     auto structDecl = RawStaticCast<const StructDecl*>(decl);
-    if (structDecl == nullptr) {
-        auto fbStructDecl = flatbuffers::Offset<NodeFormat::StructDecl>();
-        return NodeFormat::CreateDecl(builder, emptyDeclBase, NodeFormat::AnyDecl_STRUCT_DECL, fbStructDecl.Union());
-    }
     auto fbDeclBase = SerializeDeclBase(structDecl);
     auto structBodyPtr = structDecl->body.get();
     auto fbStructBody = SerializeStructBody(structBodyPtr);
@@ -948,11 +879,6 @@ flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeStructDecl(AstDecl de
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeVarWithPatternDecl(AstDecl decl)
 {
     auto varWithPatternDecl = RawStaticCast<const VarWithPatternDecl*>(decl);
-    if (varWithPatternDecl == nullptr) {
-        auto fbVarWithPatternDecl = flatbuffers::Offset<NodeFormat::VarWithPatternDecl>();
-        return NodeFormat::CreateDecl(
-            builder, emptyDeclBase, NodeFormat::AnyDecl_VAR_WITH_PATTERN_DECL, fbVarWithPatternDecl.Union());
-    }
     auto fbDeclBase = SerializeDeclBase(varWithPatternDecl);
     auto type = SerializeType(varWithPatternDecl->type.get());
     auto colonPos = FlatPosCreateHelper(varWithPatternDecl->colonPos);
@@ -969,10 +895,6 @@ flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeVarWithPatternDecl(As
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeEnumDecl(AstDecl decl)
 {
     auto enumDecl = RawStaticCast<const EnumDecl*>(decl);
-    if (enumDecl == nullptr) {
-        auto fbEnumDecl = flatbuffers::Offset<NodeFormat::EnumDecl>();
-        return NodeFormat::CreateDecl(builder, emptyDeclBase, NodeFormat::AnyDecl_ENUM_DECL, fbEnumDecl.Union());
-    }
     auto fbDeclBase = SerializeDeclBase(enumDecl);
     auto leftCurlPos = FlatPosCreateHelper(enumDecl->leftCurlPos);
     auto constructors =
@@ -994,10 +916,6 @@ flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeEnumDecl(AstDecl decl
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializePropDecl(AstDecl decl)
 {
     auto propDecl = RawStaticCast<const PropDecl*>(decl);
-    if (propDecl == nullptr) {
-        auto fbPropDecl = flatbuffers::Offset<NodeFormat::PropDecl>();
-        return NodeFormat::CreateDecl(builder, emptyDeclBase, NodeFormat::AnyDecl_PROP_DECL, fbPropDecl.Union());
-    }
     auto fbVarDecl = SerializeVarDecl(propDecl);
     auto fbDeclBase = SerializeDeclBase(propDecl);
     auto colonPos = FlatPosCreateHelper(propDecl->colonPos);
@@ -1015,11 +933,6 @@ flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializePropDecl(AstDecl decl
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeTypeAliasDecl(AstDecl decl)
 {
     auto typeAliasDecl = RawStaticCast<const TypeAliasDecl*>(decl);
-    if (typeAliasDecl == nullptr) {
-        auto fbTypeAliasDecl = flatbuffers::Offset<NodeFormat::TypeAliasDecl>();
-        return NodeFormat::CreateDecl(
-            builder, emptyDeclBase, NodeFormat::AnyDecl_TYPE_ALIAS_DECL, fbTypeAliasDecl.Union());
-    }
     auto fbDeclBase = SerializeDeclBase(typeAliasDecl);
     auto assignPos = FlatPosCreateHelper(typeAliasDecl->assignPos);
     auto type = SerializeType(typeAliasDecl->type.get());
@@ -1030,10 +943,6 @@ flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeTypeAliasDecl(AstDecl
 flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeExtendDecl(AstDecl decl)
 {
     auto extendDecl = RawStaticCast<const ExtendDecl*>(decl);
-    if (extendDecl == nullptr) {
-        auto fbExtendDecl = flatbuffers::Offset<NodeFormat::ExtendDecl>();
-        return NodeFormat::CreateDecl(builder, emptyDeclBase, NodeFormat::AnyDecl_EXTEND_DECL, fbExtendDecl.Union());
-    }
     auto fbDeclBase = SerializeDeclBase(extendDecl);
     auto extendedType = SerializeType(extendDecl->extendedType.get());
     auto upperBoundPos = FlatPosCreateHelper(extendDecl->upperBoundPos);
@@ -1071,9 +980,6 @@ flatbuffers::Offset<NodeFormat::MacroExpandDecl> NodeWriter::SerializeMacroExpan
 flatbuffers::Offset<NodeFormat::FuncParam> NodeWriter::SerializeMacroExpandParam(AstMacroExpandParam mep)
 {
     auto macroExpandParam = RawStaticCast<const MacroExpandParam*>(mep);
-    if (macroExpandParam == nullptr) {
-        return flatbuffers::Offset<NodeFormat::FuncParam>();
-    }
     auto base = SerializeFuncParam(macroExpandParam);
     auto fbNodeBase = SerializeNodeBase(mep);
     auto fbVarDeclBase = SerializeVarDecl(mep.get());

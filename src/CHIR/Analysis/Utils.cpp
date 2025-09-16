@@ -48,18 +48,13 @@ std::vector<ClassType*> GetAllFathers(ClassType* clsTy, CHIRBuilder* builder)
     g_superClassMap.emplace(clsTy, fathers);
     return fathers;
 }
-bool IsUnsignedArithmeticImpl(const Ptr<const BinaryExpression>& expr)
-{
-    auto ty = expr->GetLHSOperand()->GetType();
-    return ty->IsUnsignedInteger() || IsStructEnum(ty);
-}
-
-bool IsUnsignedArithmeticImpl(const Ptr<const UnaryExpression>& expr)
-{
-    return expr->GetOperand()->GetType()->IsUnsignedInteger();
-}
 } // namespace
 
+bool IsUnsignedArithmetic(const BinaryExpression& expr)
+{
+    auto ty = expr.GetLHSOperand()->GetType();
+    return ty->IsUnsignedInteger() || IsStructEnum(ty);
+}
 
 std::string GetRefName(size_t index)
 {
@@ -168,17 +163,46 @@ bool IsRefEnum(const Ptr<Type>& type)
     return false;
 }
 
-bool IsUnsignedArithmetic(const Ptr<const Expression>& expr)
+std::unordered_set<Value*> GetLambdaCapturedVarsRecursively(const Lambda& lambda)
 {
-    if (expr->GetExprMajorKind() == ExprMajorKind::BINARY_EXPR) {
-        return IsUnsignedArithmeticImpl(StaticCast<const BinaryExpression*>(expr));
-    } else if (expr->GetExprMajorKind() == ExprMajorKind::UNARY_EXPR) {
-        return IsUnsignedArithmeticImpl(StaticCast<const UnaryExpression*>(expr));
-    } else {
-        if (expr->GetResult() == nullptr) {
-            return false;
+    std::unordered_set<Value*> allCapturedVars;
+    std::unordered_set<const Lambda*> visited;
+
+    std::function<void(const Lambda&, std::unordered_set<const Lambda*>&)> collectRecursively =
+        [&allCapturedVars, &collectRecursively](const Lambda& lambda, std::unordered_set<const Lambda*>& visited) {
+        visited.emplace(&lambda);
+        auto visitAction = [&visited, &collectRecursively](Expression& expr) {
+            if (expr.IsApply()) {
+                auto callee = DynamicCast<LocalVar*>(StaticCast<Apply&>(expr).GetCallee());
+                if (callee != nullptr && callee->GetExpr()->IsLambda()) {
+                    auto child = StaticCast<const Lambda*>(callee->GetExpr());
+                    if (visited.find(child) == visited.end()) {
+                        collectRecursively(*child, visited);
+                    }
+                }
+            } else if (expr.IsApplyWithException()) {
+                auto callee = DynamicCast<LocalVar*>(StaticCast<ApplyWithException&>(expr).GetCallee());
+                if (callee != nullptr && callee->GetExpr()->IsLambda()) {
+                    auto child = StaticCast<const Lambda*>(callee->GetExpr());
+                    if (visited.find(child) == visited.end()) {
+                        collectRecursively(*child, visited);
+                    }
+                }
+            } else if (expr.IsLambda()) {
+                collectRecursively(StaticCast<const Lambda&>(expr), visited);
+            }
+            return VisitResult::CONTINUE;
+        };
+        Visitor::Visit(*lambda.GetBody(), visitAction);
+
+        for (auto var : lambda.GetCapturedVariables()) {
+            if (var->GetType()->IsRef()) {
+                allCapturedVars.emplace(var);
+            }
         }
-        return expr->GetResult()->GetType()->IsUnsignedInteger() || IsStructEnum(expr->GetResult()->GetType());
-    }
+    };
+    collectRecursively(lambda, visited);
+    
+    return allCapturedVars;
 }
 }  // namespace Cangjie::CHIR

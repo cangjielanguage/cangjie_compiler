@@ -5,13 +5,15 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/ToStringUtils.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Type/EnumDef.h"
 #include "cangjie/CHIR/Type/ExtendDef.h"
 #include "cangjie/CHIR/Type/StructDef.h"
 #include "cangjie/CHIR/Value.h"
+
+#include <sstream>
 
 using namespace Cangjie::CHIR;
 
@@ -209,6 +211,7 @@ std::string Package::ToString() const
     std::stringstream ss;
     ss << "package: " << name << "\n";
     ss << "packageAccessLevel: " << PackageAccessLevelToString(pkgAccessLevel) << "\n";
+    ss << "packageInitFunc: " << GetPackageInitFunc()->GetIdentifier() << "\n";
     ss << "\n==========================imports===============================\n";
     for (auto& it : importedVarAndFuncs) {
         ss << GetImportedValueStr(*it) << "\n";

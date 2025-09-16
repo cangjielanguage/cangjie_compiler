@@ -446,6 +446,8 @@ public:
     // Mark the input library(-l) files and their input order.
     std::vector<std::tuple<std::string, uint64_t>> inputLibraryOrder;
     // Mark the input link options and their input order.
+    std::vector<std::tuple<std::string, uint64_t>> inputLinkOptionsOrder;
+    // Mark the input link option and their input order.
     std::vector<std::tuple<std::string, uint64_t>> inputLinkOptionOrder;
 
     /**
@@ -493,6 +495,8 @@ public:
     bool compileTestsOnly = false; /** Compile *_test.cj files only */
 
     bool exportForTest = false; /** Export some additional kinds of declaration specifically for using them in tests */
+
+    bool enableEH = false; /** Whether support for effect handlers is enabled */
 
     MockSupportKind mock = MockSupportKind::DEFAULT; /**< Whether enable mocking. */
 
@@ -548,12 +552,6 @@ public:
     // The 'linkStaticStd' is 'false' when cjc uses '--dy-std' link option.
     // The 'linkStaticStd' is 'std::nullopt' when cjc neither uses '--static-std' nor '--dy-std' link option.
     std::optional<bool> linkStaticStd = std::nullopt;
-
-    // Control link mode of other modules except std.
-    // The 'linkStaticLibs' is 'true' when cjc uses '--static-libs' link option.
-    // The 'linkStaticLibs' is 'false' when cjc uses '--dy-libs' link option.
-    // The 'linkStaticLibs' is 'std::nullopt' when cjc neither uses '--static-libs' nor '--dy-libs' link option.
-    std::optional<bool> linkStaticLibs = std::nullopt;
 
     // LTO optimization options
     enum class LTOMode : uint8_t { FULL_LTO, THIN_LTO, NO_LTO };
@@ -686,6 +684,9 @@ public:
     bool interpMainNoLinkage = false;
     bool interpCHIR = false;
     bool constEvalDebug = false;
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    bool computeAnnotationsDebug{false}; // --debug-annotations
+#endif
     bool disableCodeGen = false;
     bool disableDeserializer = false;
 
@@ -769,7 +770,7 @@ public:
      * @brief Get Cangjie library path name of host.
      *
      * @return std::string Cangjie library path name is a name consists of os, arch and
-     * backend, such as hm_aarch64_cjnative.
+     * backend, such as linux_aarch64_cjnative.
      */
     std::string GetCangjieLibHostPathName() const;
 
@@ -1011,6 +1012,18 @@ public:
         return jobs.value_or(std::thread::hardware_concurrency());
     }
 
+    enum class CandidateEmitCHIRPhase : uint8_t {
+        NA,
+        RAW,
+        OPT
+    }; /**< Candidate phases of chir serialization file that can be emitted. */
+    CandidateEmitCHIRPhase emitCHIRPhase{
+        CandidateEmitCHIRPhase::NA}; /**< Emit chir serialization file of the specified phase. */
+    bool IsEmitCHIREnable() const
+    {
+        return emitCHIRPhase != CandidateEmitCHIRPhase::NA;
+    }
+
 protected:
     virtual std::optional<bool> ParseOption(OptionArgInstance& arg);
     virtual bool PerformPostActions();
@@ -1027,7 +1040,6 @@ private:
     bool CheckOutputPathLength() const;
     bool ReprocessInputs();
     bool ReprocessCoverageOptions();
-    bool ReprocessLinkOptions();
     bool ReprocessReflectionOption();
     bool CheckScanDependencyOptions() const;
     bool CheckSanitizerOptions() const;

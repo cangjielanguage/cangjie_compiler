@@ -59,7 +59,7 @@ STDLIB(DERIVING.BUILTINS, "std", "deriving.builtins")
 STDLIB(DERIVING, "std", "deriving")
 STDLIB(UNITTEST.TESTMACRO, "std", "unittest.testmacro")
 STDLIB(UNITTEST.MOCK.MOCKMACRO, "std", "unittest.mock.mockmacro")
-#endif
+#endif // CANGJIE_CODEGEN_CJNATIVE_BACKEND
 
 STDLIB_TOPPKG(STD, "std")
 

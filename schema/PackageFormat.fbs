@@ -9,164 +9,213 @@ namespace PackageFormat;
 file_identifier "CHIR";
 
 // Using 'uint32' as type of 'Type/Value/Expression/CustomTypeDef' 's table index.
-// 0 is invalid index, valid index start from 1, which is the offset of table plus 1.
-enum CHIRTypeKind: int16 {
-	INVALID,
-	// integer
-	INT8,
-	INT16,
-	INT32,
-	INT64,
-	INT_NATIVE,
-	// unsigned integer
-	UINT8,
-	UINT16,
-	UINT32,
-	UINT64,
-	UINT_NATIVE,
-	// float
-	FLOAT16,
-	FLOAT32,
-	FLOAT64,
-	// other primitive type
-	RUNE,
-	BOOLEAN,
-	UNIT,
-	NOTHING,
-	// Void type
-	VOID,
-	// composite type
-	TUPLE,
-	CLOSURE,
-	STRUCT,
-	ENUM,
-	FUNC,
-	CLASS,
-	// Built-in array related type
-	RAWARRAY,
-	VARRAY,
-	// Built-in CFFI related type
-	C_POINTER,
-	C_STRING,
-	// Generic type
-	GENERIC,
-	// Referece to an value with abritray type
-	REFTYPE,
+// 0 is invalid index or means void, valid index start from 1, which is the offset of table plus 1.
+
+// Using 'uint64' as a bitset for attributes:
+// 0   STATIC,               Mark whether a member is a static one.
+// 1   PUBLIC,               Mark whether a member is a public one.
+// 2   PRIVATE,              Mark whether a member is a private one.
+// 3   PROTECTED,            Mark whether a member is a protected one.
+// 4   ABSTRACT,             Mark whether a function is an abstract one.
+// 5   VIRTUAL,              Mark whether a declaration is in fact open (even if the user does not use `open` keyword).
+// 6   OVERRIDE,             Mark whether a declaration in fact overrides the inherited one (even if the user does not use `override` keyword).
+// 7   REDEF,                Mark whether a declaration in fact overrides the inherited one (even if the user does not use `redef` keyword).
+// 8   SEALED,               Mark whether a declaration is a sealed one.
+// 9   FOREIGN,              Mark whether a declaration is a foreign one.
+// 10  MUT,                  Mark whether a declaration is a mutable one.
+// 11  FINAL,                Mark a Func override a parent class's func, and this func self does not have VIRTUAL Attribute.
+// 12  OPERATOR,             Mark whether a declaration is a operator one.
+// 13  JAVA,                 Mark whether a node is foreign call.
+// 14  READONLY,             'let x = xxx', 'x' enable READONLY attribute
+// 15  CONST,                correspond `const` keyword in Cangjie source code.
+// 16  IMPORTED,             Mark whether variable、func、enum、struct、class is imported from other package.
+// 17  GENERIC_INSTANTIATED, Mark whether a `GlobalVar/Func/Type` is instantiated.
+// 18  NO_DEBUG_INFO,        Mark a `Value` doesn't contain debug info, like line/column number.
+// 19  GENERIC,              Mark a declaration is generic
+// 20  INTERNAL,             GlobalVar/Func/Enum/Class/Struct/Interface is visible in current and sub package.
+// 21  COMPILER_ADD,         Mark a `Value` is added by compiler, like "copied default func from interface".
+// compiler attribute
+// 22  NO_REFLECT_INFO,      Mark a `Value` is't used by `reflect` feature.
+// 23  NO_INLINE,            Mark a Func can't be inlined.
+// 24  NON_RECOMPILE,        only used in `ImportedValue` in incremental compilation, indicate this ImportedValue is converted from a decl in current package that is not recompiled.
+// 25  UNREACHABLE,          Mark a Block is unreachable.
+// 26  NO_SIDE_EFFECT,       Mark a Func does't have side effect.
+
+enum CHIRTypeKind: uint8 {
+  INVALID,
+  // integer
+  INT8,
+  INT16,
+  INT32,
+  INT64,
+  INT_NATIVE,
+  // unsigned integer
+  UINT8,
+  UINT16,
+  UINT32,
+  UINT64,
+  UINT_NATIVE,
+  // float
+  FLOAT16,
+  FLOAT32,
+  FLOAT64,
+  // other primitive type
+  RUNE,
+  BOOLEAN,
+  UNIT,
+  NOTHING,
+  // Void type
+  VOID,
+  // composite type
+  TUPLE,
+  STRUCT,
+  ENUM,
+  FUNC,
+  CLASS,
+  // Built-in array related type
+  RAWARRAY,
+  VARRAY,
+  // Built-in CFFI related type
+  C_POINTER,
+  C_STRING,
+  // Generic type
+  GENERIC,
+  // Referece to an value with abritray type
+  REFTYPE,
+  // Built-in box type
+  BOXTYPE,
+  THIS,
 }
 
-enum SourceExpr: int8 {
-    IF_EXPR,
-    WHILE_EXPR,
-    DO_WHILE_EXPR,
-    MATCH_EXPR,
-    IF_LET_OR_WHILE_LET,
-    QUEST,
-    BINARY,
-    FOR_IN_EXPR,
-    OTHER
+enum SourceExpr: uint8 {
+  IF_EXPR,
+  WHILE_EXPR,
+  DO_WHILE_EXPR,
+  MATCH_EXPR,
+  IF_LET_OR_WHILE_LET,
+  QUEST,
+  BINARY,
+  FOR_IN_EXPR,
+  OTHER,
 }
 
 table Type {
-kind: CHIRTypeKind;
-typeID: uint32;
-argTys: [uint32]; // use typeID
-refDims: uint64 = 0;
+  kind: CHIRTypeKind;
+  typeID: uint32; // current id in types
+  argTys: [uint32]; // use types id
+  refDims: uint8 = 0;
 }
 
 table RuneType {
-base: Type;
+  base: Type;
+  extends: [uint32]; // use defs id
 }
 
 table BooleanType {
-base: Type;
+  base: Type;
+  extends: [uint32]; // use defs id
 }
 
 table UnitType {
-base: Type;
+  base: Type;
+  extends: [uint32]; // use defs id
 }
 
 table NothingType {
-base: Type;
+  base: Type;
+  extends: [uint32]; // use defs id
 }
 
 table NumericType {
-base: Type;
+  base: Type;
+  extends: [uint32]; // use defs id
 }
 
 table IntType {
-base: NumericType;
+  base: NumericType;
 }
 
 table FloatType {
-base: NumericType;
+  base: NumericType;
 }
 
 table TupleType {
-base: Type;
-}
-
-table ClosureType {
-base: Type;
+  base: Type;
 }
 
 table RawArrayType {
-base: Type;
-dims: uint64;
+  base: Type;
+  dims: uint32;
 }
 
 table VArrayType {
-base: Type;
-size: int64;
+  base: Type;
+  size: int64;
 }
 
 table FuncType {
-base: Type;
-isCFuncType: bool;
-hasVarArg: bool;
+  base: Type;
+  isCFuncType: bool = false;
+  hasVarArg: bool = false;
 }
 
 table CustomType {
-base: Type;
-customTypeDef: uint32; // use customTypeDefID
+  base: Type;
+  implementedInterfaceTys: [uint32]; // use types id
+  instantiatedMemberTys: [uint32]; // use types id
+  customTypeDef: uint32; // use defs id
+  hasSetSuperInterface: bool = false;
+  hasSetInstMemberTy: bool = false;
 }
 
 table EnumType {
-base: CustomType;
-isBoxed: bool;
+  base: CustomType;
+  isBoxed: bool = false;
 }
 
 table StructType {
-base: CustomType;
+  base: CustomType;
 }
 
 table ClassType {
-base: CustomType;
+  base: CustomType;
+  superClassTy: uint32; // use type id
+  hasSetSuperClass: bool = false;
 }
 
 table CStringType {
-base: Type;
+  base: Type;
+  extends: [uint32]; // use defs id
 }
 
 table CPointerType {
-base: Type;
+  base: Type;
+  extends: [uint32]; // use defs id
 }
 
 table GenericType {
-base: Type;
-identifier: string;
-upperBounds: [uint32]; // use typeID
+  base: Type;
+  orphanFlag: bool = false;
+  skipCheck: bool = false;
+  identifier: string(shared);
+  srcCodeIdentifier: string(shared);
+  upperBounds: [uint32]; // use types id
 }
 
 table RefType {
-base: Type;
+  base: Type;
 }
 
 table BoxType {
-base: Type;
+  base: Type;
 }
 
 table VoidType {
-base: Type;
+  base: Type;
+}
+
+table ThisType {
+  base: Type;
 }
 
 enum Linkage: int16 {
@@ -178,1200 +227,1354 @@ enum Linkage: int16 {
 }
 
 table Pos {
-line: uint64;
-column: uint64;
+  line: uint32;
+  column: uint32;
 }
 
 table DebugLocation {
-filePath: string;
-fileId: uint32;
-beginPos: Pos;
-endPos: Pos;
-scope: [int32];
+  filePath: string(shared);
+  fileId: uint32;
+  beginPos: Pos;
+  endPos: Pos;
+  scope: [int32];
 }
 
 table LinkTypeInfo {
-    linkage: Linkage;
+  linkage: Linkage;
 }
 
 enum SkipKind : uint8 {
-    NO_SKIP,
-    SKIP_DCE_WARNING,
-    SKIP_CODEGEN,
+  NO_SKIP,
+  SKIP_DCE_WARNING,
+  SKIP_FORIN_EXIT,
+  SKIP_VIC,
 }
 
 table SkipCheck {
-    skipKind: SkipKind;
+  skipKind: SkipKind;
 }
 
 table NeedCheckArrayBound {
-    need: bool;
+  need: bool = true;
 }
 
 table NeedCheckCast {
-    need: bool;
+  need: bool = true;
 }
 
-enum OverflowStrategy: int16 {
-	NA,
-	CHECKED,
-	WRAPPING,
-	THROWING,
-	SATURATING
-}
-
-enum Inline: int8 {
-    ALWAYS, NEVER, DEFAULT
-}
-
-table InlineInfo {
-    kind: Inline;
+enum OverflowStrategy: uint8 {
+  NA,
+  CHECKED,
+  WRAPPING,
+  THROWING,
+  SATURATING,
 }
 
 table NeverOverflowInfo {
-    neverOverflow: bool;
+  neverOverflow: bool = false;
+}
+
+table GeneratedFromForIn {
+  value: bool = false;
+}
+
+table IsAutoEnvClass {
+  value: bool = false;
+}
+
+table IsCapturedClassInCC {
+  value: bool = false;
+}
+
+table EnumCaseIndex {
+  index: int64 = -1;
+}
+ 
+table WrappedRawMethod {
+  rawMethod: uint32; // use values id
+}
+
+table VariantTypeCastWrapper {
+  lambdaCache: [uint32]; // use exprs id
 }
 
 union Annotation {
-needCheckArrayBound: NeedCheckArrayBound,
-needCheckCast: NeedCheckCast,
-debugLocationInfo: DebugLocation,
-debugLocationInfoForWarning: DebugLocation,
-linkTypeInfo: LinkTypeInfo,
-skipCheck: SkipCheck,
-inlineInfo: InlineInfo,
-neverOverflowInfo: NeverOverflowInfo,
+  needCheckArrayBound: NeedCheckArrayBound,
+  needCheckCast: NeedCheckCast,
+  debugLocationInfo: DebugLocation,
+  debugLocationInfoForWarning: DebugLocation,
+  generatedFromForIn: GeneratedFromForIn,
+  isAutoEnvClass: IsAutoEnvClass,
+  isCapturedClassInCC: IsCapturedClassInCC,
+  linkTypeInfo: LinkTypeInfo,
+  skipCheck: SkipCheck,
+  neverOverflowInfo: NeverOverflowInfo,
+  enumCaseIndex: EnumCaseIndex,
+  wrappedRawMethod: WrappedRawMethod,
+  variantTypeCastWrapper : VariantTypeCastWrapper
 }
 
 table Base {
-    annos: [Annotation];
+  annos: [Annotation];
 }
 
-enum ValueKind: int16 {
-	LITERAL,
-	GLOBALVAR,
-	PARAMETER,
-	IMPORTED_FUNC,
-	IMPORTED_VAR,
-	LOCALVAR,
-	FUNC,
-	BLOCK,
-	BLOCK_GROUP
+enum ValueKind: uint8 {
+  LITERAL,
+  GLOBALVAR,
+  PARAMETER,
+  IMPORTED_FUNC,
+  IMPORTED_VAR,
+  LOCALVAR,
+  FUNC,
+  BLOCK,
+  BLOCK_GROUP,
 }
 
 table Value {
 base: Base;
-type: uint32; // use typeID
-identifier: string;
+type: uint32; // use types id
+identifier: string(shared);
 kind: ValueKind;
-valueID: uint32;
-users: [uint32]; // use expressionID
+valueID: uint32; // current id in values
 attributes: uint64;
+annoInfo: AnnoInfo;
 }
 
-enum ConstantValueKind: int16 {
-	BOOL,
-	RUNE,
-	INT,
-	FLOAT,
-	STRING,
-	UNIT,
-	NULL,
-	FUNC
+enum ConstantValueKind: uint8 {
+  BOOL,
+  RUNE,
+  INT,
+  FLOAT,
+  STRING,
+  UNIT,
+  NULL,
+  FUNC,
 }
 
 table LiteralValue {
-base: Value;
-literalKind: ConstantValueKind;
+  base: Value;
+  literalKind: ConstantValueKind;
 }
 
 table BoolLiteral {
-base: LiteralValue;
-val: bool;
+  base: LiteralValue;
+  val: bool;
 }
 
 table StringLiteral {
-base: LiteralValue;
-val: string;
-isJString: bool;
+  base: LiteralValue;
+  val: string(shared);
 }
 
 table RuneLiteral {
-base: LiteralValue;
-val: uint64; // coding of `rune`
+  base: LiteralValue;
+  val: uint32; // coding of `rune`
 }
 
 table IntLiteral {
-base: LiteralValue;
-val: uint64;
+  base: LiteralValue;
+  val: uint64;
 }
 
 table FloatLiteral {
-base: LiteralValue;
-val: double;
+  base: LiteralValue;
+  val: double = 1.0; // use a non-0.0 as the default value to avoid sign problem
 }
 
 table UnitLiteral {
-base: LiteralValue;
+  base: LiteralValue;
 }
 
 table NullLiteral {
-base: LiteralValue;
+  base: LiteralValue;
 }
 
 table Parameter {
-base: Value;
-ownedFunc: uint32;  // use valueID
-ownedLambda: uint32;  // use expressionID
-associatedDebug: uint32;  // use expressionID
-annoInfo: AnnoInfo;
+  base: Value;
+  ownedFunc: uint32;  // use values id
+  ownedLambda: uint32;  // use exprs id
 }
 
 table LocalVar {
-base: Value;
-associatedExpr: uint32; // use expressionID
-isRetVal: bool = false;
-debug: uint32; // use expressionID(Debug)
-accurateEnvObjTy: uint32; // use typeID
+  base: Value;
+  associatedExpr: uint32; // use exprs id
+  isRetVal: bool = false;
 }
 
 table GlobalVar {
-base: Value;
-rawMangledName: string;
-srcCodeIdentifier: string;
-packageName: string;
-defaultInitVal: uint32; // use valueID
-associatedInitFunc: uint32; // use valueID
-declaredParent: uint32; // use customTypeDefID
-annoInfo: AnnoInfo;
+  base: Value;
+  rawMangledName: string(shared);
+  srcCodeIdentifier: string(shared);
+  packageName: string(shared);
+  defaultInitVal: uint32; // use values id
+  associatedInitFunc: uint32; // use values id
+  declaredParent: uint32; // use defs id
 }
 
-enum ImportedValueKind: int16 {
-	VARIABLE,
-	FUNC
-}
-
-enum FuncKind: int16 {
-	DEFAULT,
-	GETTER,
-	SETTER,
-    LAMBDA,
-	CLASS_CONSTRUCTOR,
-	PRIMAL_CLASS_CONSTRUCTOR,
-	STRUCT_CONSTRUCTOR,
-	PRIMAL_STRUCT_CONSTRUCTOR,
-	GLOBALVAR_INIT,
-	FINALIZER,
-	MAIN_ENTRY,
-	ANNOFACTORY_FUNC,
-	MACRO_FUNC,
-    MACRO_INVOKE_FUNC,
-    DEFAULT_PARAMETER_FUNC
+enum FuncKind: uint8 {
+  DEFAULT,
+  GETTER,
+  SETTER,
+  LAMBDA,
+  CLASS_CONSTRUCTOR,
+  PRIMAL_CLASS_CONSTRUCTOR,
+  STRUCT_CONSTRUCTOR,
+  PRIMAL_STRUCT_CONSTRUCTOR,
+  GLOBALVAR_INIT,
+  FINALIZER,
+  MAIN_ENTRY,
+  ANNOFACTORY_FUNC,
+  MACRO_FUNC,
+  DEFAULT_PARAMETER_FUNC,
 }
 
 table ImportedValue {
-base: Value;
-packageName: string;
+  base: Value;
 }
 
 table ImportedFunc {
-base: ImportedValue;
-srcCodeIdentifier: string;
-funcKind: FuncKind;
-genericTypeParams: [uint32];  // use typeID
-implicitedImported: bool;
-ownerFunc: uint32;  // use valueID
-rawMangledName: string;
-packageName: string;
-paramInfo: [AbstractMethodParam];
-declaredParent: uint32; // use customTypeDefID
-extendedParent: uint32; // use customTypeDefID
-genericDecl: uint32; // use valueID
-annoInfo: AnnoInfo;
-isFastNative: bool;
-isCFFIWrapper: bool;
+  base: ImportedValue;
+
+  // func base
+  srcCodeIdentifier: string(shared);
+  rawMangledName: string(shared);
+  packageName: string(shared);
+  declaredParent: uint32; // use defs id
+  genericDecl: uint32; // use values id
+  funcKind: FuncKind;
+  isFastNative: bool;
+  isCFFIWrapper: bool;
+  // originalLambdaInfo : FuncSigInfo
+  // 1. when lambda is lifted to global func, its generic type params and func type may be changed,
+  //  but cjdb need original type to show
+  //  e.g. func foo<T1>() {
+  //      func goo<T2>() {} // this lambda will be lifted to global func
+  //  }
+  //  after being lifted, global func `goo` is as follow:
+  //  func goo<T1, T2>(env: class&) {}
+  originalLambdaFuncType: uint32; // use types id. declared type, including `this` type and return type, there may be generic type in it.
+  originalLambdaGenericTypeParams: [uint32]; // use types id
+  genericTypeParams: [uint32]; // use types id
+  paramDftValHostFunc: uint32; // use values id 
+
+  paramInfo: [AbstractMethodParam];
 }
 
 table ImportedVar {
-base: ImportedValue;
-srcCodeIdentifier: string;
-annoInfo: AnnoInfo;
+  base: ImportedValue;
+  packageName: string(shared);
+  srcCodeIdentifier: string(shared);
+  rawMangledName: string(shared);
 }
 
 table Block {
-base: Value;
-parentGroup: uint32; // use valueID
-exprs: [uint32];  // use expressionID
-predecessors: [uint32];  // use valueID
-isLandingPadBlock: bool;
-exceptionCatchList: [uint32];  // use typeID
-predecessorTerminal: uint32; // use expressionID (Terminator)
+  base: Value;
+  parentGroup: uint32; // use values id
+  exprs: [uint32];  // use  exprs
+  predecessors: [uint32];  // use values id
+  isLandingPadBlock: bool;
+  exceptionCatchList: [uint32];  // use types id
 }
 
 table BlockGroup {
-base: Value;
-entryBlock: uint32;  // use valueID
-blocks: [uint32];  // use valueID
-ownedFunc: uint32;  // use valueID
-ownedLambda: uint32;  // use expressionID
+  base: Value;
+  entryBlock: uint32;  // use values id
+  blocks: [uint32];  // use values id
+  ownedFunc: uint32;  // use values id
+  ownedExpression: uint32;  // use exprs id
 }
 
 table Func {
-base: Value;
-srcCodeIdentifier: string;
-packageName: string;
-body: uint32; // use valueID
-params: [uint32]; // use valueID
-funcKind: FuncKind;
-genericTypeParams: [uint32]; // use typeID
-retVal: uint32; // use valueID
-rawMangledName: string;
-declaredParent: uint32; // use customTypeDefID
-extendedParent: uint32; // use customTypeDefID
-genericDecl: uint32; // use valueID
-annoInfo: AnnoInfo;
-parentName: string;
-propLoc: DebugLocation;
-isFastNative: bool;
-isCFFIWrapper: bool;
-ownerFunc: uint32; // use valueID
+  base: Value;
+
+  // func base
+  srcCodeIdentifier: string(shared);
+  rawMangledName: string(shared);
+  packageName: string(shared);
+  declaredParent: uint32; // use defs id
+  genericDecl : uint32; // use values id
+  funcKind: FuncKind;
+  isFastNative: bool;
+  isCFFIWrapper: bool;
+  // originalLambdaInfo : FuncSigInfo
+  // 1. when lambda is lifted to global func, its generic type params and func type may be changed,
+  //  but cjdb need original type to show
+  //  e.g. func foo<T1>() {
+  //      func goo<T2>() {} // this lambda will be lifted to global func
+  //  }
+  //  after being lifted, global func `goo` is as follow:
+  //  func goo<T1, T2>(env: class&) {}
+  originalLambdaFuncType: uint32; // use types id. declared type, including `this` type and return type, there may be generic type in it.
+  originalLambdaGenericTypeParams: [uint32]; // use types id
+  genericTypeParams: [uint32]; // use types id
+  paramDftValHostFunc: uint32; // use values id 
+
+  // FuncBody
+  body: uint32; // use values id
+  params: [uint32]; // use values id
+  retVal: uint32; // use values id
+
+  parentName: string(shared);
+  propLoc: DebugLocation;
+
+  localId: uint64;
+  blockId: uint64;
+  blockGroupId: uint64;
 }
 
-enum CustomTypeKind: int16 {
-	STRUCT,
-	ENUM,
-	CLASS
+enum CustomDefKind: uint8 {
+  STRUCT,
+  ENUM,
+  CLASS,
+  EXTEND,
 }
 
 table AnnoInfo {
-mangledName: string;
+  mangledName: string(shared);
 }
 
 table MemberVarInfo {
-name: string;
-rawMangledName: string;
-type: uint32; // use typeID
-attributes: uint64;
-loc: DebugLocation;
-annoInfo : AnnoInfo;
+  name: string(shared);
+  rawMangledName: string(shared);
+  type: uint32; // use types id
+  attributes: uint64;
+  loc: DebugLocation;
+  annoInfo : AnnoInfo;
 }
 
-table CustomTypeDef {
-base: Base;
-kind: CustomTypeKind;
-identifier: string;
-srcCodeIdentifier: string;
-packageName: string;
-customTypeDefID: uint32;
-type: uint32; // use typeID
-genericTypeParams: [uint32]; // use typeID
-methods: [uint32]; // use valueID
-instanceMemberVars: [MemberVarInfo];
-staticMemberVars: [uint32]; // use valueID
-attributes: uint64;
-implementedInterfaces: [uint32]; // use customTypeDefID
-extendedInterfaces: [uint32]; // use customTypeDefID
-extendedMethods: [uint32]; // use valueID
-genericDecl: uint32;  // use customTypeDefID
-annoInfo: AnnoInfo;
+
+table VirtualFuncTypeInfo {
+  sigType : uint32; // use types id
+  originalType : uint32; // use types id
+  parentType : uint32; // use types id
+  returnType : uint32; // use types id
+  methodGenericTypeParams : [uint32]; // use types id
 }
 
-table EnumCtorInfo {
-identifier: string;
-mangledName: string;
-funcType: uint32; // use typeID
-}
-
-table EnumDef {
-base: CustomTypeDef;
-ctors: [EnumCtorInfo];
-nonExhaustive: bool;
-}
-
-table StructDef {
-base: CustomTypeDef;
-isCStruct: bool;
-}
-
-enum ClassDefKind: int16 {
-	CLASS,
-	INTERFACE
-}
-
-table AbstractMethodParam {
-paramName: string;
-paramType: uint32; // use typeID
-annoInfo : AnnoInfo;
+table VirtualFuncInfo {
+  srcCodeIdentifier : string(shared);
+  instance : uint32; // used value Id
+  attributes: uint64;
+  typeInfo : VirtualFuncTypeInfo;
 }
 
 table VTableElement {
-virtualMethodName: string;
-virtualMethodType: uint32; // use typeID
-dispatchedFunc: uint32; // use valueID
+  ty : uint32; // use types id
+  info : [VirtualFuncInfo];
 }
 
+table CustomTypeDef {
+  base: Base;
+  kind: CustomDefKind;
+  customTypeDefID: uint32; // current id in defs
+  srcCodeIdentifier: string(shared);
+  identifier: string(shared);
+  packageName: string(shared);
+  type: uint32; // use types id
+  genericDecl: uint32;  // use defs id
+  methods: [uint32]; // use values id
+  implementedInterfaces: [uint32]; // use types id
+  instanceMemberVars: [MemberVarInfo];
+  staticMemberVars: [uint32]; // use values id
+  attributes: uint64;
+  annoInfo: AnnoInfo;
+  vtable: [VTableElement];
+  extends: [uint32]; // use defs id
+}
+
+table EnumCtorInfo {
+  identifier: string(shared);
+  mangledName: string(shared);
+  funcType: uint32; // use types id
+}
+
+table EnumDef {
+  base: CustomTypeDef;
+  ctors: [EnumCtorInfo];
+  nonExhaustive: bool;
+}
+
+table StructDef {
+  base: CustomTypeDef;
+  isCStruct: bool = false;
+}
+
+table ExtendDef {
+  base: CustomTypeDef;
+  extendedType: uint32; // use types id
+  genericParams: [uint32]; // use types id
+}
+
+enum ClassDefKind: int16 {
+  CLASS,
+  INTERFACE
+}
+
+table AbstractMethodParam {
+  paramName: string(shared);
+  paramType: uint32; // use types id
+  annoInfo : AnnoInfo;
+}
+
+
 table AbstractMethodInfo {
-methodName: string;
-mangledName: string;
-methodType: uint32; // use typeID
-paramsInfo: [AbstractMethodParam];
-attributes: uint64;
-annoInfo : AnnoInfo;
+  methodName: string(shared);
+  mangledName: string(shared);
+  methodType: uint32; // use types id
+  paramsInfo: [AbstractMethodParam];
+  attributes: uint64;
+  annoInfo : AnnoInfo;
+  methodGenericTypeParams : [uint32]; // use types id
+  hasBody : bool;
+  parent: uint32; // class def, use def id
 }
 
 table ClassDef {
-base: CustomTypeDef;
-kind: ClassDefKind;
-isAnnotation: bool = false;
-isJavaClass: bool = false;
-superClass: uint32; // use customTypeDefID
-finalizer: uint32; // use valueID
-vtable: [VTableElement];
-abstractMethods: [AbstractMethodInfo];
-isVtableMerged: bool;
-isBoxedByCC: bool;
+  base: CustomTypeDef;
+  kind: ClassDefKind;
+  isAnnotation: bool = false;
+  superClass: uint32; // use types id
+  abstractMethods: [AbstractMethodInfo];
 }
 
-enum CHIRExprKind: int16 {
-	INVALID,
-	// Terminator
-	GOTO,
-	BRANCH,
-	MULTIBRANCH,
-	EXIT,
-	APPLY_WITH_EXCEPTION,
-	INVOKE_WITH_EXCEPTION,
-	RAISE_EXCEPTION,
-	INT_OP_WITH_EXCEPTION,
-	SPAWN_WITH_EXCEPTION,
-	TYPECAST_WITH_EXCEPTION,
-	INTRINSIC_WITH_EXCEPTION,
-	ALLOCATE_WITH_EXCEPTION,
-	RAW_ARRAY_ALLOCATE_WITH_EXCEPTION,
-	RAW_ARRAY_LITERAL_ALLOCATE_WITH_EXCEPTION,
-	// Unary
-	NEG,
-	NOT,
-	BITNOT,
-	// Binary
-	ADD,
-	SUB,
-	MUL,
-	DIV,
-	MOD,
-	EXP,
-	LSHIFT,
-	RSHIFT,
-	BITAND,
-	BITOR,
-	BITXOR,
-	LT,
-	GT,
-	LE,
-	GE,
-	EQUAL,
-	NOTEQUAL,
-	AND,
-	OR,
-	// Memory
-	ALLOCATE,
-	LOAD,
-	STORE,
-	GET_ELEMENT_REF,
-	// Complext
-	IF,
-	LOOP,
-	FORIN_RANGE,
-    FORIN_ITER,
-    FORIN_CLOSED_RANGE,
-	LAMBDA,
-	// Others
-	CONSTANT,
-	DEBUG,
-	TUPLE,
-	FIELD,
-	APPLY,
-	INVOKE,
-	INVOKE_STATIC,
-	INSTANCEOF,
-	BOX,
-	UNBOX,
-	TYPECAST,
-	GET_EXCEPTION,
-	RAW_ARRAY_ALLOCATE,
-	RAW_ARRAY_LITERAL_ALLOCATE,
-	RAW_ARRAY_INIT_BY_VALUE,
-	VARRAY,
-	VARRAY_BUILDER,
-	INTRINSIC,
-	SPAWN
+enum CHIRExprKind: uint8 {
+  INVALID,
+  // Terminator
+  GOTO,
+  BRANCH,
+  MULTIBRANCH,
+  EXIT,
+  APPLY_WITH_EXCEPTION,
+  INVOKE_WITH_EXCEPTION,
+  INVOKESTATIC_WITH_EXCEPTION,
+  RAISE_EXCEPTION,
+  INT_OP_WITH_EXCEPTION,
+  SPAWN_WITH_EXCEPTION,
+  TYPECAST_WITH_EXCEPTION,
+  INTRINSIC_WITH_EXCEPTION,
+  ALLOCATE_WITH_EXCEPTION,
+  RAW_ARRAY_ALLOCATE_WITH_EXCEPTION,
+  // Unary
+  NEG,
+  NOT,
+  BITNOT,
+  // Binary
+  ADD,
+  SUB,
+  MUL,
+  DIV,
+  MOD,
+  EXP,
+  LSHIFT,
+  RSHIFT,
+  BITAND,
+  BITOR,
+  BITXOR,
+  LT,
+  GT,
+  LE,
+  GE,
+  EQUAL,
+  NOTEQUAL,
+  AND,
+  OR,
+  // Memory
+  ALLOCATE,
+  LOAD,
+  STORE,
+  GET_ELEMENT_REF,
+  STORE_ELEMENT_REF,
+  // Complext
+  IF,
+  LOOP,
+  FORIN_RANGE,
+  FORIN_ITER,
+  FORIN_CLOSED_RANGE,
+  LAMBDA,
+  // Others
+  CONSTANT,
+  DEBUGEXPR,
+  TUPLE,
+  FIELD,
+  APPLY,
+  INVOKE,
+  INVOKE_STATIC,
+  INSTANCEOF,
+  TYPECAST,
+  GET_EXCEPTION,
+  RAW_ARRAY_ALLOCATE,
+  RAW_ARRAY_LITERAL_INIT,
+  RAW_ARRAY_INIT_BY_VALUE,
+  VARRAY,
+  VARRAY_BUILDER,
+  INTRINSIC,
+  SPAWN,
+  GET_INSTANTIATE_VALUE,
+  BOX,
+  UNBOX,
+  TRANSFORM_TO_GENERIC,
+  TRANSFORM_TO_CONCRETE,
+  UNBOX_TO_REF,
+  GET_RTTI,
+  GET_RTTI_STATIC,
 }
 
-enum IntrinsicKind: int16 {
-    NOT_INTRINSIC,
-    NOT_IMPLEMENTED,
+enum IntrinsicKind: uint16 {
+  NOT_INTRINSIC,
+  NOT_IMPLEMENTED,
 
-    // For hoisting, but we should later split arraybuilder
-    // into allocation and initialisation
-    ARRAY_INIT,
+  // For hoisting, but we should later split arraybuilder
+  // into allocation and initialisation
+  ARRAY_INIT,
 
-    // CORE
-    SIZE_OF,
-    ALIGN_OF,
-    ARRAY_ACQUIRE_RAW_DATA,
-    ARRAY_RELEASE_RAW_DATA,
-    ARRAY_BUILT_IN_COPY_TO,
-    ARRAY_GET,
-    ARRAY_SET,
-    ARRAY_GET_UNCHECKED,
-    ARRAY_GET_REF_UNCHECKED,
-    ARRAY_SET_UNCHECKED,
-    ARRAY_SIZE,
-    ARRAY_CLONE,
-    ARRAY_SLICE_INIT,
-    ARRAY_SLICE,
-    ARRAY_SLICE_RAWARRAY,
-    ARRAY_SLICE_START,
-    ARRAY_SLICE_SIZE,
-    ARRAY_SLICE_GET_ELEMENT,
-    ARRAY_SLICE_SET_ELEMENT,
-    FILL_IN_STACK_TRACE,
-    DECODE_STACK_TRACE,
+  // CORE
+  SIZE_OF,
+  ALIGN_OF,
+  ARRAY_ACQUIRE_RAW_DATA,
+  ARRAY_RELEASE_RAW_DATA,
+  ARRAY_BUILT_IN_COPY_TO,
+  ARRAY_GET,
+  ARRAY_SET,
+  ARRAY_GET_UNCHECKED,
+  ARRAY_GET_REF_UNCHECKED,
+  ARRAY_SET_UNCHECKED,
+  ARRAY_SIZE,
+  ARRAY_CLONE,
+  ARRAY_SLICE_INIT,
+  ARRAY_SLICE,
+  ARRAY_SLICE_RAWARRAY,
+  ARRAY_SLICE_START,
+  ARRAY_SLICE_SIZE,
+  ARRAY_SLICE_GET_ELEMENT,
+  ARRAY_SLICE_GET_ELEMENT_UNCHECKED,
+  ARRAY_SLICE_SET_ELEMENT,
+  ARRAY_SLICE_SET_ELEMENT_UNCHECKED,
+  FILL_IN_STACK_TRACE,
+  DECODE_STACK_TRACE,
 
-    CHR,
-    ORD,
+  CHR,
+  ORD,
 
-    CPOINTER_GET_POINTER_ADDRESS,
-    CPOINTER_INIT0, // CPointer constructor with no arguments
-    CPOINTER_INIT1, // CPointer constructor with one argument
-    CPOINTER_READ,
-    CPOINTER_WRITE,
-    CPOINTER_ADD,
+  CPOINTER_GET_POINTER_ADDRESS,
+  CPOINTER_INIT0, // CPointer constructor with no arguments
+  CPOINTER_INIT1, // CPointer constructor with one argument
+  CPOINTER_READ,
+  CPOINTER_WRITE,
+  CPOINTER_ADD,
 
-    CSTRING_INIT,
-    CSTRING_CONVERT_CSTR_TO_PTR,
+  CSTRING_INIT,
+  CSTRING_CONVERT_CSTR_TO_PTR,
 
-    INOUT_PARAM,
+  INOUT_PARAM,
 
-    REGISTER_WATCHED_OBJECT,
+  REGISTER_WATCHED_OBJECT,
 
-    OBJECT_REFEQ,
+  OBJECT_REFEQ,
 
-    RAW_ARRAY_REFEQ,  // cjnative only
+  RAW_ARRAY_REFEQ,  // cjnative only
 
-    OBJECT_ZERO_VALUE,
+  OBJECT_ZERO_VALUE,
 
-    INVOKE_GC,
-    SET_GC_THRESHOLD,
-    GET_MAX_HEAP_SIZE,
-    GET_ALLOCATE_HEAP_SIZE,
-    DUMP_CJ_HEAP_DATA,
-    GET_GC_COUNT,
-    GET_GC_TIME_US,
-    GET_GC_FREED_SIZE,
-    START_CJ_CPU_PROFILING,
-    STOP_CJ_CPU_PROFILING,
-    GET_REAL_HEAP_SIZE,
-    GET_THREAD_NUMBER,
-    GET_BLOCKING_THREAD_NUMBER,
-    GET_NATIVE_THREAD_NUMBER,
+  INVOKE_GC,
+  SET_GC_THRESHOLD,
+  DUMP_CJ_HEAP_DATA,
+  GET_GC_COUNT,
+  GET_GC_TIME_US,
+  GET_GC_FREED_SIZE,
+  START_CJ_CPU_PROFILING,
+  STOP_CJ_CPU_PROFILING,
+  GET_MAX_HEAP_SIZE,
+  GET_ALLOCATE_HEAP_SIZE,
+  GET_REAL_HEAP_SIZE,
+  GET_THREAD_NUMBER,
+  GET_BLOCKING_THREAD_NUMBER,
+  GET_NATIVE_THREAD_NUMBER,
 
-    VARRAY_SET,
-    VARRAY_GET,
+  VARRAY_SET,
+  VARRAY_GET,
 
-    // About Future
-    FUTURE_INIT,
+  // About Future
+  FUTURE_INIT,
 
-    FUTURE_IS_COMPLETE,  // cjnative only
-    FUTURE_WAIT,  // cjnative only
-    FUTURE_NOTIFYALL,  // cjnative only
+  FUTURE_IS_COMPLETE,  // cjnative only
+  FUTURE_WAIT,  // cjnative only
+  FUTURE_NOTIFYALL,  // cjnative only
 
-    GET_THREAD_OBJECT,
-    SET_THREAD_OBJECT,
+  IS_THREAD_OBJECT_INITED,
+  GET_THREAD_OBJECT,
+  SET_THREAD_OBJECT,
 
-    OVERFLOW_CHECKED_ADD,
-    OVERFLOW_CHECKED_SUB,
-    OVERFLOW_CHECKED_MUL,
-    OVERFLOW_CHECKED_DIV,
-    OVERFLOW_CHECKED_MOD,
-    OVERFLOW_CHECKED_POW,
-    OVERFLOW_CHECKED_INC,
-    OVERFLOW_CHECKED_DEC,
-    OVERFLOW_CHECKED_NEG,
-    OVERFLOW_THROWING_ADD,
-    OVERFLOW_THROWING_SUB,
-    OVERFLOW_THROWING_MUL,
-    OVERFLOW_THROWING_DIV,
-    OVERFLOW_THROWING_MOD,
-    OVERFLOW_THROWING_POW,
-    OVERFLOW_THROWING_INC,
-    OVERFLOW_THROWING_DEC,
-    OVERFLOW_THROWING_NEG,
-    OVERFLOW_SATURATING_ADD,
-    OVERFLOW_SATURATING_SUB,
-    OVERFLOW_SATURATING_MUL,
-    OVERFLOW_SATURATING_DIV,
-    OVERFLOW_SATURATING_MOD,
-    OVERFLOW_SATURATING_POW,
-    OVERFLOW_SATURATING_INC,
-    OVERFLOW_SATURATING_DEC,
-    OVERFLOW_SATURATING_NEG,
-    OVERFLOW_WRAPPING_ADD,
-    OVERFLOW_WRAPPING_SUB,
-    OVERFLOW_WRAPPING_MUL,
-    OVERFLOW_WRAPPING_DIV,
-    OVERFLOW_WRAPPING_MOD,
-    OVERFLOW_WRAPPING_POW,
-    OVERFLOW_WRAPPING_INC,
-    OVERFLOW_WRAPPING_DEC,
-    OVERFLOW_WRAPPING_NEG,
+  OVERFLOW_CHECKED_ADD,
+  OVERFLOW_CHECKED_SUB,
+  OVERFLOW_CHECKED_MUL,
+  OVERFLOW_CHECKED_DIV,
+  OVERFLOW_CHECKED_MOD,
+  OVERFLOW_CHECKED_POW,
+  OVERFLOW_CHECKED_INC,
+  OVERFLOW_CHECKED_DEC,
+  OVERFLOW_CHECKED_NEG,
+  OVERFLOW_THROWING_ADD,
+  OVERFLOW_THROWING_SUB,
+  OVERFLOW_THROWING_MUL,
+  OVERFLOW_THROWING_DIV,
+  OVERFLOW_THROWING_MOD,
+  OVERFLOW_THROWING_POW,
+  OVERFLOW_THROWING_INC,
+  OVERFLOW_THROWING_DEC,
+  OVERFLOW_THROWING_NEG,
+  OVERFLOW_SATURATING_ADD,
+  OVERFLOW_SATURATING_SUB,
+  OVERFLOW_SATURATING_MUL,
+  OVERFLOW_SATURATING_DIV,
+  OVERFLOW_SATURATING_MOD,
+  OVERFLOW_SATURATING_POW,
+  OVERFLOW_SATURATING_INC,
+  OVERFLOW_SATURATING_DEC,
+  OVERFLOW_SATURATING_NEG,
+  OVERFLOW_WRAPPING_ADD,
+  OVERFLOW_WRAPPING_SUB,
+  OVERFLOW_WRAPPING_MUL,
+  OVERFLOW_WRAPPING_DIV,
+  OVERFLOW_WRAPPING_MOD,
+  OVERFLOW_WRAPPING_POW,
+  OVERFLOW_WRAPPING_INC,
+  OVERFLOW_WRAPPING_DEC,
+  OVERFLOW_WRAPPING_NEG,
 
-    // llvm vector instructions for string optimization
+  // llvm vector instructions for string optimization
 
-    VECTOR_COMPARE_32,  // cjnative only
-    VECTOR_INDEX_BYTE_32,  // cjnative only
+  VECTOR_COMPARE_32,  // cjnative only
+  VECTOR_INDEX_BYTE_32,  // cjnative only
 
-    // Foreign functions translated to intrinsic functions in the interpreter,
-    // These functions are not not marked as intrinsic in Cangjie but they are translated to intrinsics in BCHIR
+  // Foreign functions translated to intrinsic functions in the interpreter,
+  // These functions are not not marked as intrinsic in Cangjie but they are translated to intrinsics in BCHIR
 
-    CJ_CORE_CAN_USE_SIMD,  // cjnative only
+  CJ_CORE_CAN_USE_SIMD,  // cjnative only
 
-    CJ_TLS_DYN_SET_SESSION_CALLBACK,
-    CJ_TLS_DYN_SSL_INIT,
+  CJ_TLS_DYN_SET_SESSION_CALLBACK,
+  CJ_TLS_DYN_SSL_INIT,
 
-    // ============================ cjnative only start =================
-    REFLECTION_INTRINSIC_START_FLAG,
+  // ============================ cjnative only start =================
+  REFLECTION_INTRINSIC_START_FLAG,
 
-    IS_INTERFACE,
-    IS_CLASS,
-    IS_PRIMITIVE,
-    IS_STRUCT,
-    IS_GENERIC,
-    GET_OR_CREATE_TYPEINFO_FOR_REFLECT,
-    GET_TYPETEMPLATE,
-    CHECK_METHOD_ACTUAL_ARGS,
-    METHOD_ENTRYPOINT_IS_NULL,
-    IS_RELECT_UNSUPPORTED_TYPE,
-    GET_TYPE_FOR_ANY,
-    GET_TYPE_BY_MANGLED_NAME,
-    GET_TYPE_NAME,
-    GET_TYPE_BY_QUALIFIED_NAME,
-    GET_TYPE_QUALIFIED_NAME_LENGTH,
-    GET_TYPE_QUALIFIED_NAME,
-    GET_NUM_OF_INTERFACE,
-    GET_INTERFACE,
-    IS_SUBTYPE,
-    GET_TYPE_INFO_MODIFIER,
-    GET_TYPE_INFO_ANNOTATIONS,
-    GET_OBJ_CLASS,
-    GET_SUPER_TYPE_INFO,
+  IS_INTERFACE,
+  IS_CLASS,
+  IS_PRIMITIVE,
+  IS_STRUCT,
+  IS_GENERIC,
+  GET_OR_CREATE_TYPEINFO_FOR_REFLECT,
+  GET_TYPETEMPLATE,
+  CHECK_METHOD_ACTUAL_ARGS,
+  METHOD_ENTRYPOINT_IS_NULL,
+  IS_RELECT_UNSUPPORTED_TYPE,
+  GET_TYPE_FOR_ANY,
+  GET_TYPE_BY_MANGLED_NAME,
+  GET_TYPE_NAME,
+  GET_TYPE_BY_QUALIFIED_NAME,
+  GET_TYPE_QUALIFIED_NAME_LENGTH,
+  GET_TYPE_QUALIFIED_NAME,
+  GET_NUM_OF_INTERFACE,
+  GET_INTERFACE,
+  IS_SUBTYPE,
+  GET_TYPE_INFO_MODIFIER,
+  GET_TYPE_INFO_ANNOTATIONS,
+  GET_OBJ_CLASS,
+  GET_SUPER_TYPE_INFO,
 
-    GET_NUM_OF_INSTANCE_METHOD_INFOS,
-    GET_INSTANCE_METHOD_INFO,
-    GET_NUM_OF_STATIC_METHOD_INFOS,
-    GET_STATIC_METHOD_INFO,
-    GET_METHOD_NAME,
-    GET_METHOD_RETURN_TYPE,
-    GET_METHOD_MODIFIER,
-    GET_METHOD_ANNOTATIONS,
-    APPLY_CJ_METHOD,
-    APPLY_CJ_STATIC_METHOD,
-    APPLY_CJ_GENERIC_METHOD,
-    APPLY_CJ_GENERIC_STATIC_METHOD,
-    GET_NUM_OF_ACTUAL_PARAMETERS,
-    GET_NUM_OF_GENERIC_PARAMETERS,
-    GET_ACTUAL_PARAMETER_INFO,
-    GET_GENERIC_PARAMETER_INFO,
+  GET_NUM_OF_INSTANCE_METHOD_INFOS,
+  GET_INSTANCE_METHOD_INFO,
+  GET_NUM_OF_STATIC_METHOD_INFOS,
+  GET_STATIC_METHOD_INFO,
+  GET_METHOD_NAME,
+  GET_METHOD_RETURN_TYPE,
+  GET_METHOD_MODIFIER,
+  GET_METHOD_ANNOTATIONS,
+  APPLY_CJ_METHOD,
+  APPLY_CJ_STATIC_METHOD,
+  APPLY_CJ_GENERIC_METHOD,
+  APPLY_CJ_GENERIC_STATIC_METHOD,
+  GET_NUM_OF_ACTUAL_PARAMETERS,
+  GET_NUM_OF_GENERIC_PARAMETERS,
+  GET_ACTUAL_PARAMETER_INFO,
+  GET_GENERIC_PARAMETER_INFO,
 
-    GET_NUM_OF_INSTANCE_FIELD_INFOS,
-    GET_INSTANCE_FIELD_INFO,
-    GET_NUM_OF_STATIC_FIELD_INFOS,
-    GET_STATIC_FIELD_INFO,
-    GET_STATIC_FIELD_NAME,
-    GET_STATIC_FIELD_TYPE,
-    GET_STATIC_FIELD_ANNOTATIONS,
-    GET_FIELD_NAME,
-    GET_FIELD_TYPE,
-    GET_FIELD_ANNOTATIONS,
-    GET_FIELD_MODIFIER,
-    GET_STATIC_FIELD_MODIFIER,
-    GET_FIELD_VALUE,
-    SET_FIELD_VALUE,
-    GET_STATIC_FIELD_VALUE,
-    SET_STATIC_FIELD_VALUE,
-    GET_FIELD_DECLARING_TYPE,
+  GET_NUM_OF_INSTANCE_FIELD_INFOS,
+  GET_INSTANCE_FIELD_INFO,
+  GET_NUM_OF_STATIC_FIELD_INFOS,
+  GET_STATIC_FIELD_INFO,
+  GET_STATIC_FIELD_NAME,
+  GET_STATIC_FIELD_TYPE,
+  GET_STATIC_FIELD_ANNOTATIONS,
+  GET_FIELD_NAME,
+  GET_FIELD_TYPE,
+  GET_FIELD_ANNOTATIONS,
+  GET_FIELD_MODIFIER,
+  GET_STATIC_FIELD_MODIFIER,
+  GET_FIELD_VALUE,
+  SET_FIELD_VALUE,
+  GET_STATIC_FIELD_VALUE,
+  SET_STATIC_FIELD_VALUE,
+  GET_FIELD_DECLARING_TYPE,
 
-    GET_PARAMETER_INDEX,
-    GET_PARAMETER_NAME,
-    GET_PARAMETER_TYPE,
-    GET_PARAMETER_ANNOTATIONS,
+  GET_PARAMETER_INDEX,
+  GET_PARAMETER_NAME,
+  GET_PARAMETER_TYPE,
+  GET_PARAMETER_ANNOTATIONS,
 
-    GET_RELATED_PACKAGE_INF,
-    GET_PACKAGE_NAME,
-    GET_PACKAGE_NUM_OF_TYPE_INFOS,
-    GET_PACKAGE_TYPE_INFO,
-    GET_PACKAGE_NUM_OF_GLOBAL_METHODS,
-    GET_PACKAGE_GLOBAL_METHOD_INFO,
-    GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS,
-    GET_PACKAGE_GLOBAL_FIELD_INFO,
-    LOAD_PACKAGE,
-    GET_PACKAGE_BY_QUALIFIEDNAME,
-    GET_PACKAGE_VERSION,
-    GET_SUB_PACKAGES,
+  GET_RELATED_PACKAGE_INF,
+  GET_PACKAGE_NAME,
+  GET_PACKAGE_NUM_OF_TYPE_INFOS,
+  GET_PACKAGE_TYPE_INFO,
+  GET_PACKAGE_NUM_OF_GLOBAL_METHODS,
+  GET_PACKAGE_GLOBAL_METHOD_INFO,
+  GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS,
+  GET_PACKAGE_GLOBAL_FIELD_INFO,
+  LOAD_PACKAGE,
+  GET_PACKAGE_BY_QUALIFIEDNAME,
+  GET_PACKAGE_VERSION,
+  GET_SUB_PACKAGES,
+  REFLECTION_INTRINSIC_END_FLAG,
+  // ============================ cjnative only end =================
 
-    REFLECTION_INTRINSIC_END_FLAG,
-    // ============================ cjnative only end =================
+  SLEEP,
 
-    SLEEP,
+  SOURCE_FILE,
+  SOURCE_LINE,
 
-    SOURCE_FILE,
-    SOURCE_LINE,
+  IDENTITY_HASHCODE,
+  IDENTITY_HASHCODE_FOR_ARRAY,
 
-    IDENTITY_HASHCODE,
-    IDENTITY_HASHCODE_FOR_ARRAY,
+  // ============================ cjnative only start =================
+  // SYNC
+  ATOMIC_LOAD,
+  ATOMIC_STORE,
+  ATOMIC_SWAP,
+  ATOMIC_COMPARE_AND_SWAP,
+  ATOMIC_FETCH_ADD,
+  ATOMIC_FETCH_SUB,
+  ATOMIC_FETCH_AND,
+  ATOMIC_FETCH_OR,
+  ATOMIC_FETCH_XOR,
+  MUTEX_INIT,
+  CJ_MUTEX_LOCK,
+  MUTEX_TRY_LOCK,
+  MUTEX_CHECK_STATUS,
+  MUTEX_UNLOCK,
+  WAITQUEUE_INIT,
+  MONITOR_INIT,
+  MOITIOR_WAIT,
+  MOITIOR_NOTIFY,
+  MOITIOR_NOTIFY_ALL,
+  MULTICONDITION_WAIT,
+  MULTICONDITION_NOTIFY,
+  MULTICONDITION_NOTIFY_ALL,
+  CROSS_ACCESS_BARRIER,
+  CREATE_EXPORT_HANDLE,
+  GET_EXPORTED_REF,
+  REMOVE_EXPORTED_REF,
+  // ============================ cjnative only end =================
 
-    // ============================ cjnative only start =================
-    // SYNC
-    ATOMIC_LOAD,
-    ATOMIC_STORE,
-    ATOMIC_SWAP,
-    ATOMIC_COMPARE_AND_SWAP,
-    ATOMIC_FETCH_ADD,
-    ATOMIC_FETCH_SUB,
-    ATOMIC_FETCH_AND,
-    ATOMIC_FETCH_OR,
-    ATOMIC_FETCH_XOR,
-    MUTEX_INIT,
-    CJ_MUTEX_LOCK,
-    MUTEX_TRY_LOCK,
-    MUTEX_CHECK_STATUS,
-    MUTEX_UNLOCK,
-    WAITQUEUE_INIT,
-    MONITOR_INIT,
-    MOITIOR_WAIT,
-    MOITIOR_NOTIFY,
-    MOITIOR_NOTIFY_ALL,
-    MULTICONDITION_WAIT,
-    MULTICONDITION_NOTIFY,
-    MULTICONDITION_NOTIFY_ALL,
-    // ============================ cjnative only end =================
+  // Syscall
 
-    // Syscall
+  // AST lib FFI
+  FFI_CJ_AST_LEX,
+  FFI_CJ_AST_PARSEEXPR,
+  FFI_CJ_AST_PARSEDECL,
+  FFI_CJ_AST_PARSE_PROPMEMBERDECL,
+  FFI_CJ_AST_PARSE_PRICONSTRUCTOR,
+  FFI_CJ_AST_PARSE_PATTERN,
+  FFI_CJ_AST_PARSE_TYPE,
+  FFI_CJ_AST_PARSETOPLEVEL,
+  FFI_CJ_AST_DIAGREPORT,
 
-    // AST lib FFI
-    FFI_CJ_AST_LEX,
-    FFI_CJ_AST_PARSEEXPR,
-    FFI_CJ_AST_PARSEDECL,
-    FFI_CJ_AST_PARSE_PROPMEMBERDECL,
-    FFI_CJ_AST_PARSE_PRICONSTRUCTOR,
-    FFI_CJ_AST_PARSE_PATTERN,
-    FFI_CJ_AST_PARSE_TYPE,
-    FFI_CJ_AST_PARSETOPLEVEL,
-    FFI_CJ_AST_DIAGREPORT,
+  // Macro With Context FFI
+  FFI_CJ_PARENT_CONTEXT,
+  FFI_CJ_MACRO_ITEM_INFO,
+  FFI_CJ_GET_CHILD_MESSAGES,
+  FFI_CJ_CHECK_ADD_SPACE,
+  // CodeGen
+  CG_UNSAFE_BEGIN,
+  CG_UNSAFE_END,
 
-    // Macro With Context FFI
-    FFI_CJ_PARENT_CONTEXT,
-    FFI_CJ_MACRO_ITEM_INFO,
-    FFI_CJ_GET_CHILD_MESSAGES,
-    FFI_CJ_CHECK_ADD_SPACE,
-    // CodeGen
-    CG_UNSAFE_BEGIN,
-    CG_UNSAFE_END,
+  // C FFI funcs
+  STRLEN,
+  MEMCPY_S,
+  MEMSET_S,
+  FREE,
+  MALLOC,
+  STRCMP,
+  MEMCMP,
+  STRNCMP,
+  STRCASECMP,
 
-    // C FFI funcs
-    STRLEN,
-    MEMCPY_S,
-    MEMSET_S,
-    FREE,
-    MALLOC,
-    STRCMP,
-    MEMCMP,
-    STRNCMP,
-    STRCASECMP,
+  // The interpreter is using these for cjnative backend as well
+  ATOMIC_INT8_LOAD,
+  ATOMIC_INT8_STORE,
+  ATOMIC_INT8_SWAP,
+  ATOMIC_INT8_CAS,
+  ATOMIC_INT8_FETCH_ADD,
+  ATOMIC_INT8_FETCH_SUB,
+  ATOMIC_INT8_FETCH_AND,
+  ATOMIC_INT8_FETCH_OR,
+  ATOMIC_INT8_FETCH_XOR,
 
-    // The interpreter is using these for cjnative backend as well
-    ATOMIC_INT8_LOAD,
-    ATOMIC_INT8_STORE,
-    ATOMIC_INT8_SWAP,
-    ATOMIC_INT8_CAS,
-    ATOMIC_INT8_FETCH_ADD,
-    ATOMIC_INT8_FETCH_SUB,
-    ATOMIC_INT8_FETCH_AND,
-    ATOMIC_INT8_FETCH_OR,
-    ATOMIC_INT8_FETCH_XOR,
+  ATOMIC_INT16_LOAD,
+  ATOMIC_INT16_STORE,
+  ATOMIC_INT16_SWAP,
+  ATOMIC_INT16_CAS,
+  ATOMIC_INT16_FETCH_ADD,
+  ATOMIC_INT16_FETCH_SUB,
+  ATOMIC_INT16_FETCH_AND,
+  ATOMIC_INT16_FETCH_OR,
+  ATOMIC_INT16_FETCH_XOR,
 
-    ATOMIC_INT16_LOAD,
-    ATOMIC_INT16_STORE,
-    ATOMIC_INT16_SWAP,
-    ATOMIC_INT16_CAS,
-    ATOMIC_INT16_FETCH_ADD,
-    ATOMIC_INT16_FETCH_SUB,
-    ATOMIC_INT16_FETCH_AND,
-    ATOMIC_INT16_FETCH_OR,
-    ATOMIC_INT16_FETCH_XOR,
+  ATOMIC_INT32_LOAD,
+  ATOMIC_INT32_STORE,
+  ATOMIC_INT32_SWAP,
+  ATOMIC_INT32_CAS,
+  ATOMIC_INT32_FETCH_ADD,
+  ATOMIC_INT32_FETCH_SUB,
+  ATOMIC_INT32_FETCH_AND,
+  ATOMIC_INT32_FETCH_OR,
+  ATOMIC_INT32_FETCH_XOR,
 
-    ATOMIC_INT32_LOAD,
-    ATOMIC_INT32_STORE,
-    ATOMIC_INT32_SWAP,
-    ATOMIC_INT32_CAS,
-    ATOMIC_INT32_FETCH_ADD,
-    ATOMIC_INT32_FETCH_SUB,
-    ATOMIC_INT32_FETCH_AND,
-    ATOMIC_INT32_FETCH_OR,
-    ATOMIC_INT32_FETCH_XOR,
+  ATOMIC_INT64_LOAD,
+  ATOMIC_INT64_STORE,
+  ATOMIC_INT64_SWAP,
+  ATOMIC_INT64_CAS,
+  ATOMIC_INT64_FETCH_ADD,
+  ATOMIC_INT64_FETCH_SUB,
+  ATOMIC_INT64_FETCH_AND,
+  ATOMIC_INT64_FETCH_OR,
+  ATOMIC_INT64_FETCH_XOR,
 
-    ATOMIC_INT64_LOAD,
-    ATOMIC_INT64_STORE,
-    ATOMIC_INT64_SWAP,
-    ATOMIC_INT64_CAS,
-    ATOMIC_INT64_FETCH_ADD,
-    ATOMIC_INT64_FETCH_SUB,
-    ATOMIC_INT64_FETCH_AND,
-    ATOMIC_INT64_FETCH_OR,
-    ATOMIC_INT64_FETCH_XOR,
+  ATOMIC_UINT8_LOAD,
+  ATOMIC_UINT8_STORE,
+  ATOMIC_UINT8_SWAP,
+  ATOMIC_UINT8_CAS,
+  ATOMIC_UINT8_FETCH_ADD,
+  ATOMIC_UINT8_FETCH_SUB,
+  ATOMIC_UINT8_FETCH_AND,
+  ATOMIC_UINT8_FETCH_OR,
+  ATOMIC_UINT8_FETCH_XOR,
 
-    ATOMIC_UINT8_LOAD,
-    ATOMIC_UINT8_STORE,
-    ATOMIC_UINT8_SWAP,
-    ATOMIC_UINT8_CAS,
-    ATOMIC_UINT8_FETCH_ADD,
-    ATOMIC_UINT8_FETCH_SUB,
-    ATOMIC_UINT8_FETCH_AND,
-    ATOMIC_UINT8_FETCH_OR,
-    ATOMIC_UINT8_FETCH_XOR,
+  ATOMIC_UINT16_LOAD,
+  ATOMIC_UINT16_STORE,
+  ATOMIC_UINT16_SWAP,
+  ATOMIC_UINT16_CAS,
+  ATOMIC_UINT16_FETCH_ADD,
+  ATOMIC_UINT16_FETCH_SUB,
+  ATOMIC_UINT16_FETCH_AND,
+  ATOMIC_UINT16_FETCH_OR,
+  ATOMIC_UINT16_FETCH_XOR,
 
-    ATOMIC_UINT16_LOAD,
-    ATOMIC_UINT16_STORE,
-    ATOMIC_UINT16_SWAP,
-    ATOMIC_UINT16_CAS,
-    ATOMIC_UINT16_FETCH_ADD,
-    ATOMIC_UINT16_FETCH_SUB,
-    ATOMIC_UINT16_FETCH_AND,
-    ATOMIC_UINT16_FETCH_OR,
-    ATOMIC_UINT16_FETCH_XOR,
+  ATOMIC_UINT32_LOAD,
+  ATOMIC_UINT32_STORE,
+  ATOMIC_UINT32_SWAP,
+  ATOMIC_UINT32_CAS,
+  ATOMIC_UINT32_FETCH_ADD,
+  ATOMIC_UINT32_FETCH_SUB,
+  ATOMIC_UINT32_FETCH_AND,
+  ATOMIC_UINT32_FETCH_OR,
+  ATOMIC_UINT32_FETCH_XOR,
 
-    ATOMIC_UINT32_LOAD,
-    ATOMIC_UINT32_STORE,
-    ATOMIC_UINT32_SWAP,
-    ATOMIC_UINT32_CAS,
-    ATOMIC_UINT32_FETCH_ADD,
-    ATOMIC_UINT32_FETCH_SUB,
-    ATOMIC_UINT32_FETCH_AND,
-    ATOMIC_UINT32_FETCH_OR,
-    ATOMIC_UINT32_FETCH_XOR,
+  ATOMIC_UINT64_LOAD,
+  ATOMIC_UINT64_STORE,
+  ATOMIC_UINT64_SWAP,
+  ATOMIC_UINT64_CAS,
+  ATOMIC_UINT64_FETCH_ADD,
+  ATOMIC_UINT64_FETCH_SUB,
+  ATOMIC_UINT64_FETCH_AND,
+  ATOMIC_UINT64_FETCH_OR,
+  ATOMIC_UINT64_FETCH_XOR,
 
-    ATOMIC_UINT64_LOAD,
-    ATOMIC_UINT64_STORE,
-    ATOMIC_UINT64_SWAP,
-    ATOMIC_UINT64_CAS,
-    ATOMIC_UINT64_FETCH_ADD,
-    ATOMIC_UINT64_FETCH_SUB,
-    ATOMIC_UINT64_FETCH_AND,
-    ATOMIC_UINT64_FETCH_OR,
-    ATOMIC_UINT64_FETCH_XOR,
+  ATOMIC_BOOL_LOAD,
+  ATOMIC_BOOL_STORE,
+  ATOMIC_BOOL_SWAP,
+  ATOMIC_BOOL_CAS,
 
-    ATOMIC_BOOL_LOAD,
-    ATOMIC_BOOL_STORE,
-    ATOMIC_BOOL_SWAP,
-    ATOMIC_BOOL_CAS,
+  ATOMIC_REFERENCEBASE_LOAD,
+  ATOMIC_REFERENCEBASE_STORE,
+  ATOMIC_REFERENCEBASE_SWAP,
+  ATOMIC_REFERENCEBASE_CAS,
 
-    ATOMIC_REFERENCEBASE_LOAD,
-    ATOMIC_REFERENCEBASE_STORE,
-    ATOMIC_REFERENCEBASE_SWAP,
-    ATOMIC_REFERENCEBASE_CAS,
+  ATOMIC_OPTIONREFERENCE_LOAD,
+  ATOMIC_OPTIONREFERENCE_STORE,
+  ATOMIC_OPTIONREFERENCE_SWAP,
+  ATOMIC_OPTIONREFERENCE_CAS,
 
-    ATOMIC_OPTIONREFERENCE_LOAD,
-    ATOMIC_OPTIONREFERENCE_STORE,
-    ATOMIC_OPTIONREFERENCE_SWAP,
-    ATOMIC_OPTIONREFERENCE_CAS,
+  // Exception intrinsic
+  BEGIN_CATCH,
 
-    // CHIR 2: Exception intrinsic
-    BEGIN_CATCH,
+  // Math intrinsic
+  ABS,
+  FABS,
+  FLOOR,
+  CEIL,
+  TRUNC,
+  SIN,
+  COS,
+  EXP,
+  EXP2,
+  LOG,
+  LOG2,
+  LOG10,
+  SQRT,
+  ROUND,
+  POW,
+  POWI,
+  BIT_CAST,
 
-    // CHIR 2: Math intrinsic
-    ABS,
-    FABS,
-    FLOOR,
-    CEIL,
-    TRUNC,
-    SIN,
-    COS,
-    EXP,
-    EXP2,
-    LOG,
-    LOG2,
-    LOG10,
-    SQRT,
-    ROUND,
-    POW,
-    POWI,
-    BIT_CAST,
+  // preinitialize intrinsic
+  PREINITIALIZE,
+  // Box cast intrinsic
+  OBJECT_AS,
+  IS_NULL,
+
+  GET_TYPE_FOR_TYPE_PARAMETER,
+  IS_SUBTYPE_TYPES,
 }
 
 table Expression {
-base: Base;
-kind: CHIRExprKind;
-expressionID: uint32;
-operands: [uint32]; // use valueID
-blockGroups: [uint32]; // use valueID
-parentBlock: uint32; // use valueID
-resultLocalVar: uint32; // use valueID
-resultTy: uint32; // use typeID
+  base: Base;
+  kind: CHIRExprKind;
+  expressionID: uint32; // current id in exprs
+  operands: [uint32]; // use values id
+  blockGroups: [uint32]; // use values id
+  parentBlock: uint32; // use values id
+  resultLocalVar: uint32; // use values id
+  resultTy: uint32; // use types id
 }
 
 table UnaryExpression {
-base: Expression;
-overflowStrategy: OverflowStrategy;
+  base: Expression;
+  overflowStrategy: OverflowStrategy;
 }
 
 table BinaryExpression {
-base: Expression;
-overflowStrategy: OverflowStrategy;
+  base: Expression;
+  overflowStrategy: OverflowStrategy;
 }
 
 table Constant {
-base: Expression;
-genericArgs: [uint32]; // use typeID
+  base: Expression;
 }
 
 table Allocate {
-base: Expression;
-targetType: uint32; // use typeID
+  base: Expression;
+  targetType: uint32; // use types id
 }
 
 table Load {
-base: Expression;
+  base: Expression;
 }
 
 table Store {
-base: Expression;
+  base: Expression;
 }
 
 table GetElementRef {
-base: Expression;
-path: [uint64];
+  base: Expression;
+  path: [uint64];
 }
 
 table StoreElementRef {
-base: Expression;
-path: [uint64];
+  base: Expression;
+  path: [uint64];
+}
+
+table VirMethodContext {
+  srcCodeIdentifier: string(shared);
+  originalFuncType: uint32; // use types id
+  offset: uint64; // size_t
 }
 
 table Apply {
-base: Expression;
-genericArgs: [uint32]; // use typeID
-isSuperCall: bool;
+  base: Expression;
+  isSuperCall: bool = false;
+
+  // FuncCall
+  instantiatedTypeArgs: [uint32]; // use types id
+  thisType: uint32; // use types id
 }
 
 table Invoke {
-base: Expression;
-methodName: string;
-methodType: uint32; // use typeID
+  base: Expression;
+
+  // FuncCall
+  instantiatedTypeArgs: [uint32]; // use types id
+  thisType: uint32; // use types id
+
+  // DynamicDispatch
+  virMethodCtx: VirMethodContext;
 }
 
 table TypeCast {
-base: Expression;
-targetType: uint32; // use typeID
-overflowStrategy: OverflowStrategy;
+  base: Expression;
+  overflowStrategy: OverflowStrategy;
 }
 
 table InstanceOf {
-base: Expression;
-targetType: uint32; // use typeID
+  base: Expression;
+  targetType: uint32; // use types id, the class type of this Instanceof operation
 }
 
 table Box {
-base: Expression;
-targetType: uint64; // use typeID
+  base: Expression;
 }
 
 table UnBox {
-base: Expression;
-targetType: uint64; // use typeID
+  base: Expression;
 }
 
 table Terminator {
-base: Expression;
-successors: [uint32]; // use valueID
+  base: Expression;
+  successors: [uint32]; // use values id
 }
 
 table GoTo {
-base: Terminator;
+  base: Terminator;
 }
 
 table Branch {
-base: Terminator;
-sourceExpr: SourceExpr;
+  base: Terminator;
+  sourceExpr: SourceExpr;
 }
 
 table MultiBranch {
-base: Terminator;
-caseVals: [uint64];
+  base: Terminator;
+  caseVals: [uint64];
 }
 
 table Exit {
-base: Terminator;
+  base: Terminator;
 }
 
 table RaiseException {
-base: Terminator;
+  base: Terminator;
 }
 
 table ApplyWithException {
-base: Terminator;
-genericArgs: [uint32]; // use typeID
+  base: Terminator;
+  thisType: uint32; // use types id
+  instantiatedTypeArgs: [uint32]; // use types id
 }
 
 table InvokeWithException {
-base: Terminator;
-methodName: string;
-methodType: uint32; // use typeID
+  base: Terminator;
+
+  // FuncCallWithException
+  instantiatedTypeArgs: [uint32]; // use types id
+  thisType: uint32; // use types id
+
+  // DynamicDispatchWithException
+  virMethodCtx: VirMethodContext;
 }
 
 table IntOpWithException {
-base: Terminator;
-opKind: CHIRExprKind;
+  base: Terminator;
+  opKind: CHIRExprKind;
+  overflowStrategy: OverflowStrategy;
 }
 
 table TypeCastWithException {
-base: Terminator;
-targetType: uint32; // use typeID
+  base: Terminator;
 }
 
 table IntrinsicWithException {
-base: Terminator;
-intrinsicKind: IntrinsicKind;
-genericArgs: [uint32]; // use typeID
+  base: Terminator;
+  intrinsicKind: IntrinsicKind;
+  instantiatedTypeArgs: [uint32]; // use types id
 }
 
 table AllocateWithException {
-base: Terminator;
-targetType: uint32; // use typeID
+  base: Terminator;
+  targetType: uint32; // use types id
 }
 
 table RawArrayAllocateWithException {
-base: Terminator;
-elementType: uint32; // use typeID
+  base: Terminator;
+  elementType: uint32; // use types id
 }
 
 table RawArrayLiteralAllocateWithException {
-base: Terminator;
-elementType: uint32; // use typeID
+  base: Terminator;
+  elementType: uint32; // use types id
 }
 
 table SpawnWithException {
-base: Terminator;
-isExecuteClosure: bool;
-executeClosure: uint32;  // use valueID
+  base: Terminator;
+  executeClosure: uint32;  // use values id
 }
 
 table Tuple {
-base: Expression;
+  base: Expression;
 }
 
 table Field {
-base: Expression;
-path: [uint64];
+  base: Expression;
+  path: [uint64];
 }
 
 table RawArrayAllocate {
-base: Expression;
-elementType: uint32; // use typeID
+  base: Expression;
+  elementType: uint32; // use types id
 }
 
 table RawArrayLiteralAllocate {
-base: Expression;
-elementType: uint32; // use typeID
+  base: Expression;
+  elementType: uint32; // use types id
 }
 
 table RawArrayLiteralInit {
-base: Expression;
+  base: Expression;
 }
 
 table RawArrayInitByValue {
-base: Expression;
+  base: Expression;
 }
 
 table VArray {
-base: Expression;
+  base: Expression;
 }
 
 table VArrayBd {
-base: Expression;
+  base: Expression;
 }
 
 table GetException {
-base: Expression;
+  base: Expression;
 }
 
 table Intrinsic {
-base: Expression;
-intrinsicKind: IntrinsicKind;
-genericArgs: [uint32]; // use typeID
+  base: Expression;
+  intrinsicKind: IntrinsicKind;
+  instantiatedTypeArgs: [uint32]; // use types id
 }
 
 table If {
-base: Expression;
+  base: Expression;
 }
 
 table Loop {
-base: Expression;
+  base: Expression;
 }
 
 table ForInRange {
-base: Expression;
+  base: Expression;
 }
 
 table ForInIter {
-base: Expression;
+  base: Expression;
 }
 
 table ForInClosedRange {
-base: Expression;
+  base: Expression;
 }
 
 table Debug {
-base: Expression;
-srcCodeIdentifier: string;
-accurateEnvObjTy: uint32; // use typeID
+  base: Expression;
+  srcCodeIdentifier: string(shared);
 }
 
 table Spawn {
-base: Expression;
-isExecuteClosure: bool;
-executeClosure: uint32;  // use valueID
+  base: Expression;
+  executeClosure: uint32;  // use values id
 }
 
 table Lambda {
-base: Expression;
-funcTy: uint32; // use typeID
-isLocalFunc: bool;
-identifier: string;
-srcCodeIdentifier: string;
-params: [uint32];  // use valueID
-genericTypeParams: [uint32]; // use typeID
-capturedVars: [uint32];  // use valueID
+  base: Expression;
+  funcTy: uint32; // use types id
+  isLocalFunc: bool = false;
+  identifier: string(shared);
+  srcCodeIdentifier: string(shared);
+  params: [uint32];  // use values id
+  genericTypeParams: [uint32]; // use types id
+  body: uint32; // use values id
+  retVal: uint32; // use values id
+  isCompileTimeValue: bool = false;
 }
 
 table InvokeStatic {
-base: Expression;
-methodName: string;
-methodType: uint32; // use typeID
-classType: uint32; // use typeID
+  base: Expression;
+  
+  // FuncCall
+  instantiatedTypeArgs: [uint32]; // use types id
+  thisType: uint32; // use types id
+
+  // DynamicDispatch
+  virMethodCtx: VirMethodContext;
+}
+
+table GetInstantiateValue {
+  base: Expression;
+  instantiateTys: [uint32]; // use types id
 }
 
 table InvokeStaticWithException {
-base: Terminator;
-methodName: string;
-methodType: uint32; // use typeID
-classType: uint32; // use typeID
+  base: Terminator;
+
+  // FuncCallWithException
+  instantiatedTypeArgs: [uint32]; // use types id
+  thisType: uint32; // use types id
+
+  // DynamicDispatchWithException
+  virMethodCtx: VirMethodContext;
+}
+
+table TransformToGeneric {
+  base: Expression;
+}
+
+table TransformToConcrete {
+  base: Expression;
+}
+
+table UnBoxToRef {
+  base: Expression;
+}
+
+table GetRTTI {
+  base: Expression;
+}
+
+table GetRTTIStatic {
+  base: Expression;
+  rttiType: uint32; // use type id
 }
 
 union TypeElem {
-	RuneType,
-	BooleanType,
-	UnitType,
-	NothingType,
-	IntType,
-	FloatType,
-	TupleType,
-	ClosureType,
-	RawArrayType,
-	VArrayType,
-	FuncType,
-	EnumType,
-	StructType,
-	ClassType,
-	CStringType,
-	CPointerType,
-	GenericType,
-	RefType,
-    BoxType,
-	VoidType,
+  RuneType,
+  BooleanType,
+  UnitType,
+  NothingType,
+  IntType,
+  FloatType,
+  TupleType,
+  RawArrayType,
+  VArrayType,
+  FuncType,
+  CustomType,
+  EnumType,
+  StructType,
+  ClassType,
+  CStringType,
+  CPointerType,
+  GenericType,
+  RefType,
+  BoxType,
+  VoidType,
+  ThisType,
 }
 
 union CustomTypeDefElem {
-	EnumDef,
-	StructDef,
-	ClassDef,
+  EnumDef,
+  StructDef,
+  ClassDef,
+  ExtendDef,
 }
 
 union ExpressionElem {
-	UnaryExpression,
-	BinaryExpression,
-	Constant,
-	Allocate,
-	Load,
-	Store,
-	GetElementRef,
-	StoreElementRef,
-	Apply,
-	Invoke,
-	TypeCast,
-	InstanceOf,
-	Box,
-	UnBox,
-	GoTo,
-	Branch,
-	MultiBranch,
-	Exit,
-	RaiseException,
-	ApplyWithException,
-	InvokeWithException,
-	IntOpWithException,
-	TypeCastWithException,
-	IntrinsicWithException,
-	AllocateWithException,
-	RawArrayAllocateWithException,
-	SpawnWithException,
-	Tuple,
-	Field,
-	RawArrayAllocate,
-	RawArrayLiteralInit,
-	RawArrayInitByValue,
-	VArray,
-	VArrayBd,
-	GetException,
-	Intrinsic,
-	If,
-	Loop,
-	ForInRange,
-    ForInIter,
-    ForInClosedRange,
-	Debug,
-	Spawn,
-	Lambda,
-	InvokeStatic,
-	InvokeStaticWithException,
+  UnaryExpression,
+  BinaryExpression,
+  Constant,
+  Allocate,
+  Load,
+  Store,
+  GetElementRef,
+  StoreElementRef,
+  Apply,
+  Invoke,
+  TypeCast,
+  InstanceOf,
+  Box,
+  UnBox,
+  GoTo,
+  Branch,
+  MultiBranch,
+  Exit,
+  RaiseException,
+  ApplyWithException,
+  InvokeWithException,
+  IntOpWithException,
+  TypeCastWithException,
+  IntrinsicWithException,
+  AllocateWithException,
+  RawArrayAllocateWithException,
+  SpawnWithException,
+  Tuple,
+  Field,
+  RawArrayAllocate,
+  RawArrayLiteralInit,
+  RawArrayInitByValue,
+  VArray,
+  VArrayBd,
+  GetException,
+  Intrinsic,
+  If,
+  Loop,
+  ForInRange,
+  ForInIter,
+  ForInClosedRange,
+  Debug,
+  Spawn,
+  Lambda,
+  InvokeStatic,
+  InvokeStaticWithException,
+  GetInstantiateValue,
+  TransformToConcrete,
+  TransformToGeneric,
+  UnBoxToRef,
+  GetRTTI,
+  GetRTTIStatic,
 }
 
 union ValueElem {
-	BoolLiteral,
-	RuneLiteral,
-	StringLiteral,
-	IntLiteral,
-	FloatLiteral,
-	UnitLiteral,
-	NullLiteral,
-	Parameter,
-	LocalVar,
-	GlobalVar,
-	Func,
-	ImportedVar,
-	ImportedFunc,
-	Block,
-	BlockGroup,
+  BoolLiteral,
+  RuneLiteral,
+  StringLiteral,
+  IntLiteral,
+  FloatLiteral,
+  UnitLiteral,
+  NullLiteral,
+  Parameter,
+  LocalVar,
+  GlobalVar,
+  Func,
+  ImportedVar,
+  ImportedFunc,
+  Block,
+  BlockGroup,
+}
+
+enum PackageAccessLevel: uint8 {
+  INTERNAL,
+  PROTECTED,
+  PUBLIC,
+}
+
+enum Phase: uint8 {
+  RAW, // before compiler optimization, after translation from ast
+  OPT, // after compiler optimization
+  PLUGIN, // after perform pulgin
+  ANALYSIS_FOR_CJLINT, // after analysis for cjlint
 }
 
 table CHIRPackage {
-name: string;
-path: string;
-pkgAccessLevel: string;
-types: [TypeElem];
-values: [ValueElem];
-exprs: [ExpressionElem];
-defs: [CustomTypeDefElem];
-globalInitFunc: uint32;  // use valueID (Func)
+  name: string(shared);
+  path: string(shared);
+  pkgAccessLevel: PackageAccessLevel;
+  types: [TypeElem];
+  values: [ValueElem];
+  exprs: [ExpressionElem];
+  defs: [CustomTypeDefElem];
+  packageInitFunc: uint32;  // use values id
+  phase: Phase;
+  maxImportedValueId: uint32;
+  maxImportedStructId: uint32;
+  maxImportedClassId: uint32;
+  maxImportedEnumId: uint32;
+  maxImportedExtendId: uint32;
 }
 
 root_type CHIRPackage;

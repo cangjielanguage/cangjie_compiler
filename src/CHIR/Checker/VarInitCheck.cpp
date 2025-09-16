@@ -17,7 +17,7 @@ VarInitCheck::VarInitCheck(DiagAdapter* diag) : diag(diag)
 {
 }
 
-void VarInitCheck::RunOnPackage(const Package* package, bool isDebug, size_t threadNum)
+void VarInitCheck::RunOnPackage(const Package* package, size_t threadNum)
 {
     std::vector<Func*> funcs;
     for (auto func : package->GetGlobalFuncs()) {
@@ -33,23 +33,22 @@ void VarInitCheck::RunOnPackage(const Package* package, bool isDebug, size_t thr
     }
     if (threadNum == 1) {
         for (auto func : funcs) {
-            RunOnFunc(func, isDebug);
+            RunOnFunc(func);
         }
     } else {
         Utils::TaskQueue taskQueue(threadNum);
         for (auto func : funcs) {
-            taskQueue.AddTask<void>([this, func, isDebug]() { return RunOnFunc(func, isDebug); });
+            taskQueue.AddTask<void>([this, func]() { return RunOnFunc(func); });
         }
         taskQueue.RunAndWaitForAllTasksCompleted();
     }
 }
 
-void VarInitCheck::RunOnFunc(const Func* func, bool isDebug)
+void VarInitCheck::RunOnFunc(const Func* func)
 {
     std::vector<MemberVarInfo> members;
     auto ctorInitInfo = std::make_unique<ConstructorInitInfo>();
     if (func->IsConstructor()) {
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         auto customTypeDef = func->GetOuterDeclaredOrExtendedDef();
         CJC_NULLPTR_CHECK(customTypeDef);
         members = customTypeDef->GetAllInstanceVars();
@@ -59,7 +58,6 @@ void VarInitCheck::RunOnFunc(const Func* func, bool isDebug)
             ctorInitInfo->localMemberNums = classDef->GetDirectInstanceVarNum();
             // We do a check here as class-Object does not have a super class.
             if (auto superClassDef = classDef->GetSuperClassDef(); superClassDef) {
-#endif
                 ctorInitInfo->superClassDef = superClassDef;
                 ctorInitInfo->superMemberNums = members.size() - ctorInitInfo->localMemberNums;
             }
@@ -68,8 +66,8 @@ void VarInitCheck::RunOnFunc(const Func* func, bool isDebug)
         }
     }
 
-    UseBeforeInitCheck(func, ctorInitInfo.get(), members, isDebug);
-    ReassignInitedLetVarCheck(func, ctorInitInfo.get(), members, isDebug);
+    UseBeforeInitCheck(func, ctorInitInfo.get(), members);
+    ReassignInitedLetVarCheck(func, ctorInitInfo.get(), members);
 }
 
 template <typename TApply>
@@ -85,11 +83,9 @@ void VarInitCheck::CheckMemberFuncCall(const MaybeUninitDomain& state, const Fun
     auto thisArg = initFunc.GetParam(0);
     // check the callee is a member function and if all the member has been initialised
     // note: calling other initialiser of this class/struct is ok
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     if (calleeFunc->GetOuterDeclaredOrExtendedDef() == initFunc.GetOuterDeclaredOrExtendedDef() &&
         !calleeFunc->IsConstructor() && !calleeFunc->TestAttr(Attribute::STATIC) &&
         !state.GetMaybeUninitedLocalMembers().empty()) {
-#endif
         if (auto arg = apply.GetArgs()[0]; arg == thisArg) {
             // class member function
             // func init(%0 : CA&)
@@ -113,9 +109,9 @@ void VarInitCheck::CheckMemberFuncCall(const MaybeUninitDomain& state, const Fun
 }
 
 void VarInitCheck::UseBeforeInitCheck(
-    const Func* func, const ConstructorInitInfo* ctorInitInfo, const std::vector<MemberVarInfo>& members, bool isDebug)
+    const Func* func, const ConstructorInitInfo* ctorInitInfo, const std::vector<MemberVarInfo>& members)
 {
-    auto analysis = std::make_unique<MaybeUninitAnalysis>(func, isDebug, ctorInitInfo);
+    auto analysis = std::make_unique<MaybeUninitAnalysis>(func, ctorInitInfo);
     auto engine = Engine<MaybeUninitDomain>(func, std::move(analysis));
     auto result = engine.IterateToFixpoint();
     CJC_NULLPTR_CHECK(result);
@@ -174,7 +170,7 @@ void VarInitCheck::UseBeforeInitCheck(
         //    type (does not include Constant(Null)). And the callee must exit the function by throwing an exception.
         //    Thus, we don't need to check Exit due to Nothing expressions.
         if (terminator->GetExprKind() == ExprKind::EXIT) {
-            auto parent = terminator->GetParent();
+            auto parent = terminator->GetParentBlock();
             bool isForInGeneratedExit = terminator->Get<SkipCheck>() == SkipKind::SKIP_FORIN_EXIT;
             bool isExitForLocalFunc = parent->GetParentBlockGroup() != func->GetBody();
             auto parentBlockSize = parent->GetExpressions().size();
@@ -211,9 +207,7 @@ bool VarInitCheck::CheckGetElementRefToUninitedAllocation(
     const MaybeUninitDomain& state, const GetElementRef& getElementRef) const
 {
     auto targetVal = getElementRef.GetLocation();
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     auto oriType = targetVal->GetType()->StripAllRefs();
-#endif
     if (!oriType->IsStruct() && !oriType->IsEnum()) {
         // class need load before use, do not check it, only check struct and enum
         return false;
@@ -377,9 +371,9 @@ void VarInitCheck::RaiseIllegalMemberFunCallError(const Expression* apply, const
 }
 
 void VarInitCheck::ReassignInitedLetVarCheck(const Func* func, const ConstructorInitInfo* ctorInitInfo,
-    const std::vector<MemberVarInfo>& members, bool isDebug) const
+    const std::vector<MemberVarInfo>& members) const
 {
-    auto analysis = std::make_unique<MaybeInitAnalysis>(func, isDebug, ctorInitInfo);
+    auto analysis = std::make_unique<MaybeInitAnalysis>(func, ctorInitInfo);
     auto engine = Engine<MaybeInitDomain>(func, std::move(analysis));
     auto result = engine.IterateToFixpoint();
     CJC_NULLPTR_CHECK(result);

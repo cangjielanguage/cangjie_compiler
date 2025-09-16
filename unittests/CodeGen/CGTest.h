@@ -23,9 +23,9 @@ using namespace Cangjie::CHIR;
 
 class CGTestTemplate : public ::testing::Test {
 protected:
-    CGTestTemplate() : Test() {};
-    void SetUp() override {};
-    void TearDown() override {};
+    CGTestTemplate() : Test(){};
+    void SetUp() override{};
+    void TearDown() override{};
 };
 
 // To construct CHIR types

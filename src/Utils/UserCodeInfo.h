@@ -18,11 +18,7 @@ public:
     UserCodeInfo() = default;
     ~UserCodeInfo() override
     {
-#ifdef CANGJIE_WRITE_PROFILE
-        OutputResult(OutType::JSON);
-#else
-        OutputResult(OutType::STRING);
-#endif
+        OutputResult();
     }
 
     static UserCodeInfo& Instance()
@@ -33,14 +29,11 @@ public:
     void RecordInfo(const std::string& item, int64_t value);
 
 private:
-    std::string GetFlat() const override;
-#ifdef CANGJIE_WRITE_PROFILE
     std::string GetJson() const override;
     std::string GetSuffix() const final
     {
-        return ".cj.info.prof";
+        return ".info.prof";
     }
-#endif
     std::list<std::pair<std::string, int64_t>> codeInfo;
 };
 } // namespace Cangjie

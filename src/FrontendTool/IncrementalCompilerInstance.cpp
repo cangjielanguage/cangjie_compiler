@@ -259,7 +259,7 @@ static bool HasSimpleInitialiser(const AST::VarDecl& decl)
     }
     if (init->astKind == ASTKind::LIT_CONST_EXPR) {
         auto kind = StaticCast<LitConstExpr>(init.get())->kind;
-        return kind != LitConstKind::STRING && kind != LitConstKind::JSTRING && kind != LitConstKind::UNIT;
+        return kind != LitConstKind::JSTRING && kind != LitConstKind::UNIT;
     }
     return false;
 }

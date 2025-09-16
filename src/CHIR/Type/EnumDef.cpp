@@ -6,8 +6,9 @@
 
 #include "cangjie/CHIR/Type/EnumDef.h"
 
+#include <sstream>
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/ToStringUtils.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
@@ -85,11 +86,6 @@ std::string EnumDef::ToString() const
 void EnumDef::AddCtor(EnumCtorInfo ctor)
 {
     ctors.emplace_back(ctor);
-}
-
-size_t EnumDef::GetCtorSize() const
-{
-    return ctors.size();
 }
 
 std::vector<EnumCtorInfo> EnumDef::GetCtors() const

@@ -16,6 +16,7 @@
 #include "cangjie/CHIR/Type/ExtendDef.h"
 #include "cangjie/CHIR/Utils.h"
 #include "cangjie/Utils/Casting.h"
+#include "cangjie/Modules/ModulesUtils.h"
 
 namespace Cangjie::CHIR {
 
@@ -29,6 +30,9 @@ void DevirtualizationInfo::CollectInfo()
 
     // Collecting inheritance relationships between type definitions.
     for (const auto customTypeDef : package->GetAllCustomTypeDef()) {
+        if (customTypeDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
+            continue;
+        }
         if (customTypeDef->IsClassLike() && IsClosureConversionEnvClass(*StaticCast<const ClassDef*>(customTypeDef))) {
             continue;
         }
@@ -48,9 +52,8 @@ void DevirtualizationInfo::CollectInfo()
                 continue;
             }
             // need more accurate range which cannot be inherit.
-            if (parentDef->TestAttr(Attribute::PRIVATE)) {
+            if (CheckCustomTypeInternal(*parentDef)) {
                 subtypeMap[parentDef].emplace_back(InheritanceInfo{parentTy, thisType});
-                continue;
             }
         }
     }
@@ -63,7 +66,7 @@ const DevirtualizationInfo::SubTypeMap& DevirtualizationInfo::GetSubtypeMap() co
 
 const std::unordered_map<Func*, Type*>& DevirtualizationInfo::GetReturnTypeMap() const
 {
-    return realRetTyMap;
+    return realRuntimeRetTyMap;
 }
 
 void DevirtualizationInfo::FreshRetMap()
@@ -75,7 +78,7 @@ void DevirtualizationInfo::FreshRetMap()
         }
         auto rtTy = retVal->GetType();
         while (rtTy->IsRef()) {
-            rtTy = StaticCast<RefType *>(rtTy)->GetBaseType();
+            rtTy = StaticCast<RefType*>(rtTy)->GetBaseType();
         }
         // Do not process the return type that is not class type.
         if (!rtTy->IsClass()) {
@@ -83,21 +86,21 @@ void DevirtualizationInfo::FreshRetMap()
         }
         std::vector<Expression*> users = retVal->GetUsers();
         if (users.size() == 1 && users[0]->GetExprKind() == ExprKind::STORE) {
-            auto val = StaticCast<Store*>(users[0])->GetValue();
+            auto val = StaticCast<Store *>(users[0])->GetValue();
             if (!val->IsLocalVar()) {
                 continue;
             }
-            auto expr = StaticCast<LocalVar *>(val)->GetExpr();
+            auto expr = StaticCast<LocalVar*>(val)->GetExpr();
             auto srcTy = val->GetType();
             if (expr->GetExprKind() == ExprKind::TYPECAST) {
-                auto cast = StaticCast<TypeCast *>(expr);
+                auto cast = StaticCast<TypeCast*>(expr);
                 srcTy = cast->GetSourceTy();
             }
             // Ensure that the actual return value type is not a reference.
             while (srcTy->IsRef()) {
-                srcTy = StaticCast<RefType *>(srcTy)->GetBaseType();
+                srcTy = StaticCast<RefType*>(srcTy)->GetBaseType();
             }
-            realRetTyMap[func] = srcTy;
+            realRuntimeRetTyMap[func] = srcTy;
         }
     }
 }
@@ -134,7 +137,25 @@ void DevirtualizationInfo::CollectReturnTypeMap(Func& func)
         while (srcTy->IsRef()) {
             srcTy = StaticCast<RefType*>(srcTy)->GetBaseType();
         }
-        realRetTyMap.emplace(&func, srcTy);
+        realRuntimeRetTyMap.emplace(&func, srcTy);
     }
+}
+
+bool DevirtualizationInfo::CheckCustomTypeInternal(const CustomTypeDef& def) const
+{
+    auto relation = Modules::GetPackageRelation(def.GetPackageName(), package->GetName());
+    if (def.TestAttr(Attribute::PUBLIC)) {
+        return false;
+    }
+    if (def.TestAttr(Attribute::PRIVATE)) {
+        return true;
+    }
+    if (def.TestAttr(Attribute::INTERNAL)) {
+        return !(relation == Modules::PackageRelation::CHILD || relation == Modules::PackageRelation::SAME_PACKAGE);
+    }
+    if (def.TestAttr(Attribute::PROTECTED)) {
+        return relation == Modules::PackageRelation::NONE;
+    }
+    return false;
 }
 } // namespace Cangjie::CHIR

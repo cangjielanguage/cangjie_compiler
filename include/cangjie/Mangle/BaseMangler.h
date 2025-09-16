@@ -421,15 +421,6 @@ protected:
     mutable std::unordered_map<std::string, int> wildcardMap{};
     mutable std::mutex manglerUpdateMutex;
 
-    int NextWildcard(const std::string& filename) const
-    {
-        std::lock_guard<std::mutex> guard(manglerUpdateMutex);
-        auto result = wildcardMap[filename]++;
-        return result;
-    }
-
-    std::string GetConcreteNameForPattern(const AST::VarWithPatternDecl& vwpDecl) const;
-
 private:
     // Get the direct parent decl rather than the intermediate decl like `extendDecl`.
     Ptr<const AST::Decl> GetOuterDecl(const AST::Decl& decl) const;
@@ -604,15 +595,6 @@ inline std::string GetOptPkgName(const std::string& pkgName)
     }
     return MangleUtils::MangleName(pkgName);
 }
-
-/**
- * @brief From content with target to get constraint type string.
- *
- * @param target The target is "T".
- * @param content The content is "<T,E> where T <: xxx, E <: bbb".
- * @return std::string The generated generic type constraint string.
- */
-std::string GetGenericTyConstraintStr(const std::string& target, const std::string& content);
 
 /**
  * @brief Mangle file name part for global private declaration.

@@ -272,6 +272,8 @@ friend ASTLoader;
     OwnedPtr<AST::Expr> LoadPointerExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
     OwnedPtr<AST::Expr> LoadTypeConvExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
     OwnedPtr<AST::Expr> LoadThrowExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
+    OwnedPtr<AST::Expr> LoadPerformExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
+    OwnedPtr<AST::Expr> LoadResumeExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
     OwnedPtr<AST::Expr> LoadSpawnExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
     OwnedPtr<AST::Expr> LoadArrayLit(const PackageFormat::Expr& expr, int64_t exprIndex);
     OwnedPtr<AST::Expr> LoadTupleLit(const PackageFormat::Expr& expr, int64_t exprIndex);
@@ -308,6 +310,8 @@ friend ASTLoader;
         {PackageFormat::ExprKind_PointerExpr, &ASTLoaderImpl::LoadPointerExpr},
         {PackageFormat::ExprKind_TypeConvExpr, &ASTLoaderImpl::LoadTypeConvExpr},
         {PackageFormat::ExprKind_ThrowExpr, &ASTLoaderImpl::LoadThrowExpr},
+        {PackageFormat::ExprKind_PerformExpr, &ASTLoaderImpl::LoadPerformExpr},
+        {PackageFormat::ExprKind_ResumeExpr, &ASTLoaderImpl::LoadResumeExpr},
         {PackageFormat::ExprKind_SpawnExpr, &ASTLoaderImpl::LoadSpawnExpr},
         {PackageFormat::ExprKind_ArrayLit, &ASTLoaderImpl::LoadArrayLit},
         {PackageFormat::ExprKind_TupleLit, &ASTLoaderImpl::LoadTupleLit},
@@ -338,6 +342,7 @@ friend ASTLoader;
     OwnedPtr<AST::Pattern> LoadTypePattern(const PackageFormat::Pattern& pattern);
     OwnedPtr<AST::Pattern> LoadEnumPattern(const PackageFormat::Pattern& pattern);
     OwnedPtr<AST::Pattern> LoadExceptTypePattern(const PackageFormat::Pattern& pattern);
+    OwnedPtr<AST::Pattern> LoadCommandTypePattern(const PackageFormat::Pattern& pattern);
 
     void LoadExprRefs(const PackageFormat::Expr& exprObj, AST::Expr& expr);
     void LoadSubNodeRefs(const PackageFormat::Expr& exprObj, AST::Expr& expr);

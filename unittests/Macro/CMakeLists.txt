@@ -6,26 +6,26 @@
 
 include_directories(${CMAKE_SOURCE_DIR}/src/Sema)
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
-    add_executable(TokenSerializationTests TokenSerializationTest.cpp)
-    add_executable(NodeSerializationTests NodeSerializationTest.cpp)
-    add_executable(MacroTests MacroTest.cpp)
+    add_executable(TokenSerializationTest TokenSerializationTest.cpp)
+    add_executable(NodeSerializationTest NodeSerializationTest.cpp)
+    add_executable(MacroTest MacroTest.cpp)
 
     target_link_libraries(
-        TokenSerializationTests
+        TokenSerializationTest
         cangjie-lsp
         ${LINK_LIBS}
         boundscheck-static
         GTest::gtest
         GTest::gtest_main)
     target_link_libraries(
-        NodeSerializationTests
+        NodeSerializationTest
         cangjie-lsp
         ${LINK_LIBS}
         boundscheck-static
         GTest::gtest
         GTest::gtest_main)
     target_link_libraries(
-        MacroTests
+        MacroTest
         cangjie-lsp
         ${LINK_LIBS}
         boundscheck-static
@@ -33,11 +33,11 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
         GTest::gtest_main
         TestCompilerInstanceObject)
 
-    add_dependencies(NodeSerializationTests CangjieFlatbuffersHeaders)
-    target_include_directories(NodeSerializationTests PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
+    add_dependencies(NodeSerializationTest CangjieFlatbuffersHeaders)
+    target_include_directories(NodeSerializationTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
 
-    add_test(NAME TokenSerializationTests COMMAND TokenSerializationTests)
-    add_test(NAME NodeSerializationTests COMMAND NodeSerializationTests)
-    add_test(NAME MacroTests COMMAND MacroTests)
+    add_test(NAME TokenSerializationTest COMMAND TokenSerializationTest)
+    add_test(NAME NodeSerializationTest COMMAND NodeSerializationTest)
+    add_test(NAME MacroTest COMMAND MacroTest)
 
 endif()

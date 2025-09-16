@@ -13,6 +13,7 @@
 
 #include "ParserImpl.h"
 
+#include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/StringConvertor.h"
@@ -220,6 +221,9 @@ OwnedPtr<Expr> ParserImpl::ParseInterpolationExpr(const std::string& value, cons
     auto hasSkipNewline = newlineSkipped;
     std::unique_ptr<Lexer> curlexer = std::move(lexer);
     lexer = std::make_unique<Lexer>(wrapInBracket, diag, diag.GetSourceManager(), basePos);
+    if (enableEH) {
+        lexer->SetEHEnabled(true);
+    }
     ret->block = ParseBlock(ScopeKind::FUNC_BODY);
     if (!ret->block || ret->block->body.empty() || Peek().kind != TokenKind::END) {
         lexer = std::move(curlexer);
@@ -288,8 +292,7 @@ OwnedPtr<Expr> ParserImpl::ParseArrayLitExpr()
     OwnedPtr<ArrayLit> ret = MakeOwned<ArrayLit>();
     ret->begin = lastToken.Begin();
     ret->leftSquarePos = lastToken.Begin();
-    ParseZeroOrMoreWithSeparator(
-        TokenKind::COMMA, ret->commaPosVector,
+    ParseZeroOrMoreSepTrailing([&ret](const Position& pos) { ret->commaPosVector.push_back(pos); },
         [this, &ret]() { ret->children.emplace_back(ParseExpr(ExprKind::EXPR_IN_ARRAY)); }, TokenKind::RSQUARE);
     if (!Skip(TokenKind::RSQUARE)) {
         DiagExpectedRightDelimiter("[", ret->leftSquarePos);
@@ -320,8 +323,8 @@ bool ParserImpl::CheckCondition(Expr* e)
         hasSubCondition = CheckCondition(bin->rightExpr.get()) || hasSubCondition;
         if (hasSubCondition) {
             if (bin->op != TokenKind::AND && bin->op != TokenKind::OR) {
-                diag.Diagnose(
-                    bin->operatorPos, DiagKind::parse_query_expected_logic_symbol, TOKENS[static_cast<int>(bin->op)]);
+                diag.DiagnoseRefactor(DiagKindRefactor::parse_query_expected_logic_symbol, bin->operatorPos,
+                    TOKENS[static_cast<int>(bin->op)]);
                 bin->EnableAttr(Attribute::HAS_BROKEN);
             }
         }
@@ -424,6 +427,124 @@ OwnedPtr<Block> ParserImpl::ParseExprOrDeclsInMatchCase()
     return exprOrDecls;
 }
 
+static OwnedPtr<LambdaExpr> CreateLambdaFromBlock(
+    OwnedPtr<Block> block, const Expr& expr, OwnedPtr<FuncParamList> paramList)
+{
+    std::vector<OwnedPtr<FuncParamList>> paramLists;
+    paramList->begin = expr.begin;
+    paramList->end = expr.end;
+    paramLists.emplace_back(std::move(paramList));
+    auto fb = CreateFuncBody(std::move(paramLists), nullptr, std::move(block));
+
+    // create the lambda expression
+    auto le = CreateLambdaExpr(std::move(fb));
+    le->begin = expr.begin;
+    le->end = expr.end;
+
+    return le;
+}
+
+static void DesugarTry(const OwnedPtr<TryExpr>& expr)
+{
+    if (expr->handlers.empty()) {
+        return;
+    }
+
+    // To: {=> try{...} catch{...}}
+    // create block for function body
+    OwnedPtr<Block> lambdaBlock;
+    if (expr->catchBlocks.empty()) {
+        // Careful: CHIR2 cannot compile a Try block without catch or finally.
+        // Even if the catch block has a finally clause, we will remove it and turn
+        // it into a lambda
+        lambdaBlock = ASTCloner::Clone(expr->tryBlock.get(), SetIsClonedSourceCode);
+    } else {
+        auto teWithoutHandle = ASTCloner::Clone(expr.get(), SetIsClonedSourceCode);
+        teWithoutHandle->handlers.clear();
+        teWithoutHandle->finallyBlock = nullptr;
+        teWithoutHandle->ty = expr->ty;
+        std::vector<OwnedPtr<Node>> lambdaBodyExprs;
+        lambdaBodyExprs.emplace_back(std::move(teWithoutHandle));
+        lambdaBlock = CreateBlock(std::move(lambdaBodyExprs));
+    }
+    expr->tryLambda = CreateLambdaFromBlock(std::move(lambdaBlock), *expr->tryBlock, MakeOwned<FuncParamList>());
+
+    // handler lambdas
+    for (auto& handler : expr->handlers) {
+        auto cmdPat = RawStaticCast<CommandTypePattern*>(handler.commandPattern.get());
+        // no multiple command type patterns, it will be forbidden in typechecking
+        if (expr->TestAttr(Attribute::HAS_BROKEN) || cmdPat->TestAttr(Attribute::IS_BROKEN) ||
+            cmdPat->types[0]->TestAttr(Attribute::IS_BROKEN)) {
+            expr->EnableAttr(Attribute::HAS_BROKEN);
+            return;
+        }
+        auto paramList = MakeOwned<FuncParamList>();
+
+        auto originalCommandPatternType = cmdPat->types[0].get();
+        auto commandTy = originalCommandPatternType->ty;
+        auto commandPattern = ASTCloner::Clone(originalCommandPatternType);
+        OwnedPtr<FuncParam> command;
+        if (auto varPattern = DynamicCast<VarPattern*>(cmdPat->pattern.get()); varPattern) {
+            command = CreateFuncParam(varPattern->varDecl->identifier, std::move(commandPattern), nullptr, commandTy);
+        } else {
+            command = CreateFuncParam("_", std::move(commandPattern), nullptr, commandTy);
+        }
+        CopyBasicInfo(cmdPat->pattern, command);
+        paramList->params.emplace_back(std::move(command));
+
+        handler.desugaredLambda = CreateLambdaFromBlock(
+            ASTCloner::Clone(handler.block.get(), SetIsClonedSourceCode), *handler.block, std::move(paramList));
+    }
+
+    if (expr->finallyBlock) {
+        expr->finallyLambda = CreateLambdaFromBlock(ASTCloner::Clone(expr->finallyBlock.get(), SetIsClonedSourceCode),
+            *expr->finallyBlock, MakeOwned<FuncParamList>());
+    }
+}
+
+void ParserImpl::ParseHandleBlock(TryExpr& tryExpr)
+{
+    auto handler = Handler();
+    handler.pos = lastToken.Begin();
+    Position leftParenPos{0, 0, 0};
+    if (Skip(TokenKind::LPAREN)) {
+        leftParenPos = lastToken.Begin();
+    } else if (!tryExpr.TestAttr(Attribute::HAS_BROKEN)) {
+        DiagExpectedLeftParenAfter(handler.pos, "handle");
+        tryExpr.EnableAttr(Attribute::HAS_BROKEN);
+    }
+    // handle clause will have one or two arguments
+    handler.commandPattern = ParseCommandTypePattern();
+    if (!Skip(TokenKind::RPAREN) && leftParenPos.line != 0 && !tryExpr.TestAttr(Attribute::HAS_BROKEN)) {
+        DiagExpectedRightDelimiter("(", leftParenPos);
+        tryExpr.EnableAttr(Attribute::HAS_BROKEN);
+    }
+    handler.block = ParseBlock(ScopeKind::FUNC_BODY);
+    tryExpr.handlers.emplace_back(std::move(handler));
+}
+
+void ParserImpl::ParseCatchBlock(TryExpr& tryExpr)
+{
+    tryExpr.catchPosVector.push_back(lastToken.Begin());
+    Position leftParenPos{0, 0, 0};
+    if (Skip(TokenKind::LPAREN)) {
+        leftParenPos = lastToken.Begin();
+        tryExpr.catchLParenPosVector.push_back(leftParenPos);
+    } else if (!tryExpr.TestAttr(Attribute::HAS_BROKEN)) {
+        DiagExpectedLeftParenAfter(tryExpr.catchPosVector.back(), "catch");
+        tryExpr.EnableAttr(Attribute::HAS_BROKEN);
+    }
+    tryExpr.catchPatterns.emplace_back(ParseExceptTypePattern());
+    if (!Skip(TokenKind::RPAREN) && leftParenPos.line != 0 && !tryExpr.TestAttr(Attribute::HAS_BROKEN)) {
+        DiagExpectedRightDelimiter("(", leftParenPos);
+        tryExpr.EnableAttr(Attribute::HAS_BROKEN);
+    }
+    if (lastToken.kind == TokenKind::RPAREN) {
+        tryExpr.catchRParenPosVector.push_back(lastToken.Begin());
+    }
+    tryExpr.catchBlocks.emplace_back(ParseBlock(ScopeKind::FUNC_BODY));
+}
+
 OwnedPtr<TryExpr> ParserImpl::ParseTryExpr()
 {
     OwnedPtr<TryExpr> tryExpr = MakeOwned<TryExpr>();
@@ -438,37 +559,27 @@ OwnedPtr<TryExpr> ParserImpl::ParseTryExpr()
         tryExpr->EnableAttr(Attribute::HAS_BROKEN);
         tryExpr->EnableAttr(Attribute::IS_BROKEN);
     }
-    while (Skip(TokenKind::CATCH)) {
-        tryExpr->catchPosVector.push_back(lastToken.Begin());
-        Position leftParenPos{0, 0, 0};
-        if (Skip(TokenKind::LPAREN)) {
-            leftParenPos = lastToken.Begin();
-            tryExpr->catchLParenPosVector.push_back(leftParenPos);
-        } else if (!tryExpr->TestAttr(Attribute::HAS_BROKEN)) {
-            DiagExpectedLeftParenAfter(tryExpr->catchPosVector.back(), "catch");
-            tryExpr->EnableAttr(Attribute::HAS_BROKEN);
+    while (Seeing(TokenKind::HANDLE) || Seeing(TokenKind::CATCH)) {
+        if (Skip(TokenKind::HANDLE)) {
+            ParseHandleBlock(*tryExpr);
+        } else if (Skip(TokenKind::CATCH)) {
+            ParseCatchBlock(*tryExpr);
         }
-        tryExpr->catchPatterns.emplace_back(ParseExceptTypePattern());
-        if (!Skip(TokenKind::RPAREN) && leftParenPos.line != 0 && !tryExpr->TestAttr(Attribute::HAS_BROKEN)) {
-            DiagExpectedRightDelimiter("(", leftParenPos);
-            tryExpr->EnableAttr(Attribute::HAS_BROKEN);
-        }
-        if (lastToken.kind == TokenKind::RPAREN) {
-            tryExpr->catchRParenPosVector.push_back(lastToken.Begin());
-        }
-        tryExpr->catchBlocks.emplace_back(ParseBlock(ScopeKind::FUNC_BODY));
     }
     if (Skip(TokenKind::FINALLY)) {
         tryExpr->finallyPos = lastToken.Begin();
         tryExpr->finallyBlock = ParseBlock(ScopeKind::FUNC_BODY);
     } else {
-        if (tryExpr->catchBlocks.empty() && tryExpr->resourceSpec.empty() &&
+        if (tryExpr->catchBlocks.empty() && tryExpr->handlers.empty() && tryExpr->resourceSpec.empty() &&
             !tryExpr->TestAttr(Attribute::HAS_BROKEN)) {
-            DiagExpectedCatchOrFinallyAfterTry(*tryExpr);
+            DiagExpectedCatchOrHandleOrFinallyAfterTry(*tryExpr);
             tryExpr->EnableAttr(Attribute::HAS_BROKEN);
         }
     }
     tryExpr->end = lastToken.End();
+    if (!tryExpr->TestAttr(Attribute::HAS_BROKEN)) {
+        DesugarTry(tryExpr);
+    }
     return tryExpr;
 }
 
@@ -519,6 +630,59 @@ OwnedPtr<Pattern> ParserImpl::ParseExceptTypePattern()
     } else {
         ParseDiagnoseRefactor(
             DiagKindRefactor::parse_expected_wildcard_or_exception_pattern, lookahead, ConvertToken(lookahead));
+        return MakeInvalid<InvalidPattern>(lookahead.Begin());
+    }
+}
+
+OwnedPtr<Pattern> ParserImpl::ParseCommandTypePattern()
+{
+    auto parsePatterns = [this](CommandTypePattern& commandPattern) {
+        do {
+            if (lastToken.kind == TokenKind::BITOR) {
+                commandPattern.bitOrPosVector.emplace_back(lastToken.Begin());
+            }
+            commandPattern.types.emplace_back(ParseType());
+        } while (Skip(TokenKind::BITOR));
+    };
+    if (Skip(TokenKind::WILDCARD)) {
+        auto wildCardPos = lastToken.Begin();
+        auto wildCardPattern = MakeOwned<WildcardPattern>(wildCardPos);
+        if (Skip(TokenKind::COLON)) {
+            OwnedPtr<CommandTypePattern> commandPattern = MakeOwned<CommandTypePattern>();
+            commandPattern->colonPos = lastToken.Begin();
+            commandPattern->begin = wildCardPos;
+            commandPattern->pattern = std::move(wildCardPattern);
+            parsePatterns(*commandPattern);
+            if (!commandPattern->types.empty()) {
+                commandPattern->end = commandPattern->types.back()->end;
+            }
+            return commandPattern;
+        } else {
+            ParseDiagnoseRefactor(
+                DiagKindRefactor::parse_expected_colon_in_effect_pattern, lookahead, ConvertToken(lookahead));
+            return MakeInvalid<InvalidPattern>(lookahead.Begin());
+        }
+    } else if (Seeing(TokenKind::IDENTIFIER) || SeeingContextualKeyword()) {
+        OwnedPtr<CommandTypePattern> commandPattern = MakeOwned<CommandTypePattern>();
+        auto ident = ParseIdentifierFromToken(lookahead);
+        Position begin = lookahead.Begin();
+        commandPattern->begin = begin;
+        commandPattern->pattern = MakeOwned<VarPattern>(std::move(ident), begin);
+        commandPattern->patternPos = lookahead.Begin();
+        Next();
+        if (!Skip(TokenKind::COLON)) {
+            ParseDiagnoseRefactor(
+                DiagKindRefactor::parse_expected_colon_in_effect_pattern, lookahead, ConvertToken(lookahead));
+        }
+        commandPattern->colonPos = lastToken.Begin();
+        parsePatterns(*commandPattern);
+        if (!commandPattern->types.empty()) {
+            commandPattern->end = commandPattern->types.back()->end;
+        }
+        return commandPattern;
+    } else {
+        ParseDiagnoseRefactor(
+            DiagKindRefactor::parse_expected_wildcard_or_effect_pattern, lookahead, ConvertToken(lookahead));
         return MakeInvalid<InvalidPattern>(lookahead.Begin());
     }
 }
@@ -700,7 +864,6 @@ OwnedPtr<QuoteExpr> ParserImpl::ParseQuoteExpr()
     }
     skipNL = true;
     ret->end = lastToken.End();
-    ret->content = sourceManager.GetContentBetween(ret->begin.fileID, ret->begin, ret->end);
     return ret;
 }
 
@@ -752,6 +915,41 @@ OwnedPtr<ThrowExpr> ParserImpl::ParseThrowExpr()
     if (ret->expr) {
         ret->end = ret->expr->end;
     }
+    return ret;
+}
+
+OwnedPtr<PerformExpr> ParserImpl::ParsePerformExpr()
+{
+    OwnedPtr<PerformExpr> ret = MakeOwned<PerformExpr>();
+    ret->performPos = lastToken.Begin();
+    ret->begin = lookahead.Begin();
+    ret->expr = ParseExpr();
+    if (ret->expr) {
+        ret->end = ret->expr->end;
+    }
+    return ret;
+}
+
+OwnedPtr<ResumeExpr> ParserImpl::ParseResumeExpr()
+{
+    OwnedPtr<ResumeExpr> ret = MakeOwned<ResumeExpr>();
+    ret->resumePos = lastToken.Begin();
+    ret->begin = lookahead.Begin();
+    ret->end = lookahead.End();
+    if (Skip(TokenKind::WITH)) {
+        ret->withPos = lastToken.Begin();
+        ret->withExpr = ParseExpr();
+        if (ret->withExpr) {
+            ret->end = ret->withExpr->end;
+        }
+    } else if (Skip(TokenKind::THROWING)) {
+        ret->throwingPos = lastToken.Begin();
+        ret->throwingExpr = ParseExpr();
+        if (ret->throwingExpr) {
+            ret->end = ret->throwingExpr->end;
+        }
+    }
+
     return ret;
 }
 
@@ -904,10 +1102,9 @@ OwnedPtr<FuncArg> ParserImpl::ParseFuncArg()
         ret->name = ExpectIdentifierWithPos(*ret);
         Next();
         ret->colonPos = lookahead.Begin();
-    }
-    if (Seeing(TokenKind::INOUT)) {
+    } else if (Skip(TokenKind::INOUT)) {
         ret->withInout = true;
-        Next();
+        ret->inoutPos = lastToken.Begin();
     }
     auto tmpExpr = ParseExpr(ExprKind::EXPR_IN_CALLSUFFIX);
     ret->expr = std::move(tmpExpr);
@@ -1210,6 +1407,39 @@ OwnedPtr<Expr> ParserImpl::ParseMacroExprOrLambdaExpr()
     return ParseMacroCall<MacroExpandExpr>();
 }
 
+OwnedPtr<FuncParam> ParserImpl::ParseFuncParam()
+{
+    auto consumeTarget = [this]() {
+        return SeeingAny({TokenKind::DOUBLE_ARROW, TokenKind::COLON, TokenKind::COMMA, TokenKind::NL, TokenKind::SEMI,
+            TokenKind::RCURL}) || SeeingCombinator(combinedDoubleArrow);
+    };
+    auto param = MakeOwned<FuncParam>();
+    ChainScope c(*this, param.get());
+    // add process of '_'
+    if (Skip(TokenKind::WILDCARD)) {
+        param->identifier = "_";
+        param->identifier.SetPos(lookahead.Begin(), lookahead.End());
+    } else {
+        param->identifier = ExpectIdentifierWithPos(*param);
+    }
+    if (param->identifier == INVALID_IDENTIFIER) {
+        chainedAST.back()->EnableAttr(Attribute::IS_BROKEN);
+        ConsumeUntilAny(consumeTarget, false);
+    }
+    param->isVar = false;
+    param->begin = lookahead.Begin();
+    if (Skip(TokenKind::COLON)) {
+        param->colonPos = lastToken.Begin();
+        param->type = ParseType();
+        if (param->type) {
+            param->end = param->type->end;
+        }
+    } else {
+        param->end = param->identifier.GetRawEndPos();
+    }
+    return param;
+}
+
 OwnedPtr<FuncParamList> ParserImpl::ParseFuncParamListInLambdaExpr()
 {
     auto paramList = MakeOwned<FuncParamList>();
@@ -1220,44 +1450,17 @@ OwnedPtr<FuncParamList> ParserImpl::ParseFuncParamListInLambdaExpr()
         return paramList;
     }
     // Parse paramList.
-    auto consumeTarget = [this]() {
-        return SeeingAny({TokenKind::DOUBLE_ARROW, TokenKind::COLON, TokenKind::COMMA, TokenKind::NL, TokenKind::SEMI,
-                   TokenKind::RCURL}) ||
-            SeeingCombinator(combinedDoubleArrow);
-    };
-    do {
-        auto param = MakeOwned<FuncParam>();
-        ChainScope c(*this, param.get());
-        // add process of '_'
-        if (Skip(TokenKind::WILDCARD)) {
-            param->identifier = "_";
-            param->identifier.SetPos(lookahead.Begin(), lookahead.End());
-        } else {
-            param->identifier = ExpectIdentifierWithPos(*param);
-        }
-        if (param->identifier == INVALID_IDENTIFIER) {
-            chainedAST.back()->EnableAttr(Attribute::IS_BROKEN);
-            ConsumeUntilAny(consumeTarget, false);
-        }
-        param->isVar = false;
-        param->begin = lookahead.Begin();
-        if (Skip(TokenKind::COLON)) {
-            param->colonPos = lastToken.Begin();
-            param->type = ParseType();
-            if (param->type) {
-                param->end = param->type->end;
+    ParseZeroOrMoreSepTrailing(
+        [&paramList](const Position& pos) {
+            paramList->params.back()->commaPos = pos;
+        },
+        [this, &paramList]() {
+            auto param = ParseFuncParam();
+            if (param->TestAttr(Attribute::IS_BROKEN)) {
+                paramList->EnableAttr(Attribute::IS_BROKEN);
             }
-        } else {
-            param->end = param->identifier.GetRawEndPos();
-        }
-        if (lookahead.kind == TokenKind::COMMA) {
-            param->commaPos = lookahead.Begin();
-        }
-        if (param->TestAttr(Attribute::IS_BROKEN)) {
-            paramList->EnableAttr(Attribute::IS_BROKEN);
-        }
-        paramList->params.emplace_back(std::move(param));
-    } while (Skip(TokenKind::COMMA));
+            paramList->params.emplace_back(std::move(param));
+        }, TokenKind::DOUBLE_ARROW);
     if (!paramList->params.empty()) {
         paramList->begin = paramList->params.front()->begin;
         paramList->end = paramList->params.back()->end;
@@ -1342,15 +1545,13 @@ OwnedPtr<AST::Expr> ParserImpl::ParseVArrayExpr()
         return ret;
     }
     ret->leftParenPos = lookahead.Begin();
-    do {
-        if (lastToken.kind == TokenKind::COMMA && !ret->args.empty()) {
-            ret->args.back()->commaPos = lastToken.Begin();
-        }
-        if (Seeing(TokenKind::RPAREN)) {
-            break;
-        }
-        ret->args.emplace_back(ParseFuncArg());
-    } while (Skip(TokenKind::COMMA));
+    ParseZeroOrMoreSepTrailing(
+        [&ret](const Position& pos) {
+            ret->args.back()->commaPos = pos;
+        },
+        [this, &ret]() {
+            ret->args.emplace_back(ParseFuncArg());
+        }, TokenKind::RPAREN);
     if (!Skip(TokenKind::RPAREN)) {
         ret->EnableAttr(Attribute::HAS_BROKEN);
         DiagExpectedRightDelimiter("(", ret->leftParenPos);

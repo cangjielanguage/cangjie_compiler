@@ -15,8 +15,8 @@
 #include "Job.h"
 #include "cangjie/Driver/TempFileManager.h"
 #include "cangjie/Driver/ToolOptions.h"
+#include "Toolchains/CJNATIVE/Linux_CJNATIVE.h"
 #include "Toolchains/CJNATIVE/Darwin_CJNATIVE.h"
-
 #include "Toolchains/CJNATIVE/Linux_CJNATIVE.h"
 #include "Toolchains/CJNATIVE/MinGW_CJNATIVE.h"
 #include "Toolchains/CJNATIVE/Ohos_CJNATIVE.h"

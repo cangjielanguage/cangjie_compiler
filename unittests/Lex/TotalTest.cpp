@@ -15,7 +15,10 @@ using namespace Cangjie;
 
 class TotalTest : public ::testing::Test {
 protected:
-    void SetUp() override { lexer = std::make_unique<Lexer>(code, diag, sm); }
+    void SetUp() override
+    {
+        lexer = std::make_unique<Lexer>(code, diag, sm);
+    }
 
     std::string code =
         R"(

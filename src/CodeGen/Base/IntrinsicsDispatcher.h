@@ -50,6 +50,7 @@ enum class CGIntrinsicKind {
     FUTURE,
     NET,
     FFI_JAVA,
+    INTEROP,
     VARRAY,
     RUNTIME,
     EXCEPTION_CATCH,
@@ -108,6 +109,7 @@ const std::unordered_set<CHIR::IntrinsicKind> BUILTIN_FUNC_SET = {
     CHIR::IntrinsicKind::OBJECT_AS,
     CHIR::IntrinsicKind::IS_NULL,
     CHIR::IntrinsicKind::GET_TYPE_FOR_TYPE_PARAMETER,
+    CHIR::IntrinsicKind::IS_SUBTYPE_TYPES,
 };
 
 inline bool IsBuiltinIntrinsic(const CHIR::IntrinsicKind intrinsicKind)

@@ -92,6 +92,9 @@ inline size_t GetTokenLength(size_t originalSize, TokenKind kind, unsigned delim
     constexpr auto doubleQuotesSize = 2;
     constexpr auto multiQuotesSize = 6;
     switch (kind) {
+        // both windows and linux trait NL as 1 size
+        case TokenKind::NL:
+            return 1;
         case TokenKind::STRING_LITERAL:
             return originalSize + doubleQuotesSize;
         case TokenKind::RUNE_LITERAL:

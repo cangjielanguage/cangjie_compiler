@@ -105,7 +105,6 @@ public:
         TYPE_VOID,
         // composite type
         TYPE_TUPLE,
-        TYPE_CLOSURE,
         TYPE_STRUCT,
         TYPE_ENUM,
         TYPE_FUNC,
@@ -140,6 +139,13 @@ public:
     inline TypeKind GetTypeKind() const
     {
         return kind;
+    }
+
+    bool SatisfyCType() const;
+
+    bool IsSameTypeKind(const Type& type) const
+    {
+        return this->kind == type.kind;
     }
 
     /** @brief Check whether the type is Interger. */
@@ -192,11 +198,6 @@ public:
     bool IsTuple() const
     {
         return kind == TYPE_TUPLE;
-    }
-
-    bool IsClosure() const
-    {
-        return kind == TYPE_CLOSURE;
     }
 
     /**
@@ -301,12 +302,15 @@ public:
     bool IsCType() const;
 
     bool IsStructArray() const;
-
+    bool IsCustomType() const
+    {
+        return kind == TYPE_CLASS || kind == TYPE_STRUCT || kind == TYPE_ENUM;
+    }
     bool IsBuiltinType() const;
     bool IsValueType() const
     {
         return IsPrimitive() || IsEnum() || IsTuple() || IsStruct() || IsVArray() || IsCPointer() || IsCString() ||
-            IsFunc() || IsClosure();
+            IsFunc();
     }
 
     bool IsValueOrGenericType() const
@@ -426,6 +430,7 @@ public:
     void AddExtend(ExtendDef& extend);
 
     std::vector<FuncBase*> GetExtendMethods() const;
+    std::vector<FuncBase*> GetDeclareAndExtendMethods(CHIRBuilder& builder) const override;
 
 protected:
     std::vector<ExtendDef*> extends;
@@ -519,7 +524,7 @@ public:
 
     Type* GetParamType(size_t index) const
     {
-        CJC_ASSERT(index < argTys.size() - 1);
+        CJC_ASSERT(index + 1 < argTys.size());
         return argTys[index];
     }
 
@@ -564,6 +569,7 @@ private:
 };
 
 class CustomType : public Type {
+    friend class CHIRSerializer;
 public:
     CustomTypeDef* GetCustomTypeDef() const;
 
@@ -683,15 +689,13 @@ public:
     /**
      * @brief Retrieves the index of a function in the virtual table.
      *
-     * @param funcName The name of the function.
-     * @param funcType The type of the function.
+     * @param funcCallType Function name and type.
      * @param isStatic Indicates whether the function is static.
-     * @param funcInstTypeArgs A vector of function instance type arguments.
      * @param builder The CHIR builder used for building the function.
      * @return The virtual table search result.
      */
-    VTableSearchRes GetFuncIndexInVTable(const std::string& funcName, FuncType& funcType, bool isStatic,
-        const std::vector<Type*>& funcInstTypeArgs, CHIR::CHIRBuilder& builder) const;
+    std::vector<VTableSearchRes> GetFuncIndexInVTable(
+        const FuncCallType& funcCallType, bool isStatic, CHIR::CHIRBuilder& builder) const;
     
     /**
      * @brief Retrieves the declared and extended methods.
@@ -754,7 +758,7 @@ public:
 
     std::vector<AbstractMethodInfo> GetInstAbstractMethodTypes(CHIRBuilder& builder) const;
 private:
-    explicit ClassType(ClassDef* classDef, const std::vector<Type*>& genericArgs = {}, bool isJava = false);
+    explicit ClassType(ClassDef* classDef, const std::vector<Type*>& genericArgs = {});
     ~ClassType() override = default;
     friend class CHIRContext;
 
@@ -897,37 +901,6 @@ private:
     {
     }
     ~ThisType() override = default;
-    friend class CHIRContext;
-};
-
-class ClosureType : public Type {
-public:
-    enum class Element { FUNC_INDEX = 0, ENV_INDEX = 1, CLOSURE_ELE_NUM };
-
-    RefType* GetEnvType() const
-    {
-        auto envTy = this->argTys[static_cast<size_t>(Element::ENV_INDEX)];
-        CJC_ASSERT(envTy->IsRef());
-        return static_cast<RefType*>(envTy);
-    }
-
-    FuncType* GetFuncType() const
-    {
-        auto funcType = this->argTys[static_cast<size_t>(Element::FUNC_INDEX)];
-        CJC_ASSERT(funcType->IsFunc());
-        return static_cast<FuncType*>(funcType);
-    }
-
-    std::string ToString() const override;
-
-private:
-    explicit ClosureType(Type* funcTy, Type* envTy) : Type(TypeKind::TYPE_CLOSURE)
-    {
-        argTys.resize(static_cast<size_t>(Element::CLOSURE_ELE_NUM));
-        argTys[static_cast<size_t>(Element::FUNC_INDEX)] = funcTy;
-        argTys[static_cast<size_t>(Element::ENV_INDEX)] = envTy;
-    }
-    ~ClosureType() override = default;
     friend class CHIRContext;
 };
 
@@ -1152,12 +1125,12 @@ const static std::unordered_map<Type::TypeKind, std::string> TYPEKIND_TO_STRING{
     {Type::TypeKind::TYPE_FLOAT64, "Float64"}, {Type::TypeKind::TYPE_RUNE, "Rune"},
     {Type::TypeKind::TYPE_BOOLEAN, "Bool"}, {Type::TypeKind::TYPE_UNIT, "Unit"},
     {Type::TypeKind::TYPE_NOTHING, "Nothing"}, {Type::TypeKind::TYPE_TUPLE, "Tuple"},
-    {Type::TypeKind::TYPE_CLOSURE, "Closure"}, {Type::TypeKind::TYPE_STRUCT, "Struct"},
+    {Type::TypeKind::TYPE_BOXTYPE, "BoxType"}, {Type::TypeKind::TYPE_STRUCT, "Struct"},
     {Type::TypeKind::TYPE_ENUM, "Enum"}, {Type::TypeKind::TYPE_CLASS, "Class"}, {Type::TypeKind::TYPE_FUNC, "Func"},
     {Type::TypeKind::TYPE_RAWARRAY, "RawArray"}, {Type::TypeKind::TYPE_VARRAY, "VArray"},
     {Type::TypeKind::TYPE_CPOINTER, "CPointer"}, {Type::TypeKind::TYPE_CSTRING, "CString"},
     {Type::TypeKind::TYPE_GENERIC, "GenericType"}, {Type::TypeKind::TYPE_VOID, "Void"},
-    {Type::TypeKind::TYPE_REFTYPE, "RefType"}, {Type::TypeKind::TYPE_BOXTYPE, "BoxType"}};
+    {Type::TypeKind::TYPE_REFTYPE, "RefType"}};
 
 Type* GetFieldOfType(Type& baseTy, uint64_t index, CHIRBuilder& builder);
 } // namespace Cangjie::CHIR

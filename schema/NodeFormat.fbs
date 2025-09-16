@@ -51,7 +51,9 @@ union AnyExpr {
   OPTIONAL_CHAIN_EXPR: OptionalChainExpr,
   MACRO_EXPAND_EXPR: MacroExpandExpr,
   WILDCARD_EXPR: WildcardExpr,
-  ARRAY_EXPR: ArrayExpr
+  ARRAY_EXPR: ArrayExpr,
+  PERFORM_EXPR: PerformExpr,
+  RESUME_EXPR: ResumeExpr,
 }
 
 table MatchCase {
@@ -79,7 +81,8 @@ union AnyPattern {
   TYPE_PATTERN: TypePattern,
   ENUM_PATTERN: EnumPattern,
   VAR_OR_ENUM_PATTERN: VarOrEnumPattern,
-  TUPLE_PATTERN: TuplePattern
+  TUPLE_PATTERN: TuplePattern,
+  COMMAND_TYPE_PATTERN: CommandTypePattern,
 }
 
 table Pattern {
@@ -103,6 +106,15 @@ table VarPattern {
 }
 
 table ExceptTypePattern {
+  base: NodeBase;
+  pattern: Pattern;
+  pattern_pos: Position;
+  colon_pos: Position;
+  types: [Type];
+  bit_or_pos_vec: [Position];
+}
+
+table CommandTypePattern {
   base: NodeBase;
   pattern: Pattern;
   pattern_pos: Position;
@@ -392,6 +404,25 @@ table ThrowExpr {
   expr: Expr;
 }
 
+table PerformExpr {
+  base: NodeBase;
+  expr: Expr;
+}
+
+table ResumeExpr {
+  base: NodeBase;
+  with_pos: Position;
+  with_expr: Expr;
+  throwing_pos: Position;
+  throwing_expr: Expr;
+}
+
+table Handler {
+  handler_pos: Position;
+  command_pattern: Pattern;
+  handle_block: Block;
+}
+
 table TryExpr {
   base: NodeBase;
   resource_spec: [VarDecl];
@@ -407,6 +438,7 @@ table TryExpr {
   catch_pos_vec: [Position];
   catch_left_paren_pos_vec: [Position];
   catch_right_paren_pos_vec: [Position];
+  handlers: [Handler];
 }
 
 table DoWhileExpr {

@@ -53,6 +53,13 @@ public:
     void FreshRetMap();
 
     /**
+     * @brief check custom type is internal.
+     * @param def custom type to check.
+     * @return flag whether is internal custom type.
+     */
+    bool CheckCustomTypeInternal(const CustomTypeDef& def) const;
+
+    /**
      * @brief subType map inheritance info
      */
     struct InheritanceInfo {
@@ -77,7 +84,7 @@ public:
 private:
     SubTypeMap subtypeMap;
 
-    std::unordered_map<Func*, Type*> realRetTyMap;
+    std::unordered_map<Func*, Type*> realRuntimeRetTyMap;
 
     void CollectReturnTypeMap(Func& func);
 

@@ -19,7 +19,7 @@
 #include "CJNative/CGTypes/EnumCtorTIOrTTGenerator.h"
 #include "IRBuilder.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/Type.h"
 
 using namespace Cangjie;
@@ -222,7 +222,7 @@ llvm::Value* GenerateCommonEnum(IRBuilder2& irBuilder, const CHIR::Tuple& tuple)
             (void)typeArgs.emplace_back(arg);
         }
         auto typeArgsArr = irBuilder.CreateTypeInfoArray(
-            typeArgs, cgMod.GetOrInsertCGFunction(tuple.GetParentFunc())->genericParamsMap);
+            typeArgs, cgMod.GetOrInsertCGFunction(tuple.GetTopLevelFunc())->genericParamsMap);
         enumCaseTi = irBuilder.CallIntrinsicGetTypeInfo({enumCaseTi, irBuilder.getInt32(typeArgs.size()), typeArgsArr});
     }
     // 2. allocate memory for the Enum's constructor.

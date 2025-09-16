@@ -330,15 +330,13 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterSema(const std::vector<Ptr
     for (auto& pkg : pkgs) {
         PerformDesugarAfterTypeCheck(*ci->pkgCtxMap[pkg], *pkg);
         TryDesugarForCoalescing(*pkg);
-        AutoBoxing autoBox(typeManager, importManager, *ci->pkgCtxMap[pkg]);
+        AutoBoxing autoBox(typeManager);
         autoBox.AddOptionBox(*pkg);
     }
     if (ci->invocation.globalOptions.enIncrementalCompilation) {
         ci->CacheSemaUsage(GetSemanticUsage(typeManager, pkgs));
     }
     for (auto& pkg : pkgs) {
-        // Must desugar before handling default implementation.
-        HandleDefaultImplement(*pkg);
         if (ci->invocation.globalOptions.enableCoverage) {
             ClearLineInfoAfterSema(*pkg);
         }
@@ -452,8 +450,6 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterTypeCheck(ASTContext& ctx,
                 if (fie->inExpression) {
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
                     ReArrangeForInExpr(ctx, *fie);
-#else
-                    DesugarForInExpr(ctx, *fie);
 #endif
                 }
                 break;
@@ -495,6 +491,13 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterTypeCheck(ASTContext& ctx,
                 break;
             case ASTKind::TRY_EXPR:
                 DesugarTryWithResourcesExpr(ctx, *StaticCast<TryExpr*>(node));
+                DesugarTryToFrame(ctx, *StaticCast<TryExpr*>(node));
+                break;
+            case ASTKind::PERFORM_EXPR:
+                DesugarPerform(ctx, *StaticCast<PerformExpr*>(node));
+                break;
+            case ASTKind::RESUME_EXPR:
+                DesugarResume(ctx, *StaticCast<ResumeExpr*>(node));
                 break;
             default:
                 break;

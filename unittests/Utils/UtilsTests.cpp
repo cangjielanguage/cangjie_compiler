@@ -14,9 +14,9 @@
 #include "cangjie/Driver/Toolchains/GCCPathScanner.h"
 #include "cangjie/Utils/FileUtil.h"
 #include "cangjie/Utils/FloatFormat.h"
+#include "cangjie/Utils/ProfileRecorder.h"
 #include "cangjie/Utils/SipHash.h"
 #include "cangjie/Utils/Utils.h"
-#include "cangjie/Utils/ProfileRecorder.h"
 
 using namespace Cangjie;
 using namespace Cangjie::Utils;
@@ -26,11 +26,17 @@ using namespace AST;
 
 #ifdef PROJECT_SOURCE_DIR
 // Gets the absolute path of the project from the compile parameter.
-std::string projectPath = PROJECT_SOURCE_DIR;
+static std::string GetProjectPath()
+{
+    return PROJECT_SOURCE_DIR;
+}
 #else
 // Just in case, give it a default value.
 // Assume the initial is in the build directory.
-std::string projectPath = "..";
+static std::string GetProjectPath()
+{
+    return "..";
+}
 #endif
 
 TEST(UtilsTest, Access)
@@ -233,7 +239,7 @@ TEST(UtilsTest, GetFileNameTest)
 
 TEST(UtilsTest, IsDirTest)
 {
-    std::string utilsDir = projectPath + "/unittests/Utils/";
+    std::string utilsDir = GetProjectPath() + "/unittests/Utils/";
     std::string noExistDir = "no/exist/dir";
     EXPECT_TRUE(IsDir(utilsDir));
     EXPECT_FALSE(IsDir(noExistDir));
@@ -359,7 +365,7 @@ TEST(UtilsTest, SplitStrTest)
 
 TEST(UtilsTest, ReadUtf8WithSignature)
 {
-    std::string filePath = projectPath + "/unittests/Utils/CangjieFiles/testpkg01.cj";
+    std::string filePath = GetProjectPath() + "/unittests/Utils/CangjieFiles/testpkg01.cj";
     std::string failedReason;
     auto content = ReadFileContent(filePath, failedReason);
     EXPECT_TRUE(content.has_value() && failedReason.empty());
@@ -368,7 +374,7 @@ TEST(UtilsTest, ReadUtf8WithSignature)
 
 TEST(UtilsTest, ReadUtf8)
 {
-    std::string filePath = projectPath + "/unittests/Utils/CangjieFiles/pkg01.cj";
+    std::string filePath = GetProjectPath() + "/unittests/Utils/CangjieFiles/pkg01.cj";
     std::string failedReason;
     auto content = ReadFileContent(filePath, failedReason);
     EXPECT_TRUE(content.has_value() && failedReason.empty());
@@ -377,7 +383,7 @@ TEST(UtilsTest, ReadUtf8)
 
 TEST(UtilsTest, ReadEmptyFile)
 {
-    std::string filePath = projectPath + "/unittests/Utils/CangjieFiles/emptyfile.cj";
+    std::string filePath = GetProjectPath() + "/unittests/Utils/CangjieFiles/emptyfile.cj";
     std::string failedReason;
     auto content = ReadFileContent(filePath, failedReason);
     EXPECT_TRUE(content.has_value());
@@ -528,102 +534,6 @@ TEST(UtilsTest, Float32ToFloat16)
     EXPECT_EQ(0b0000000000000000, Float32ToFloat16(5.9604e-8f));
 }
 
-TEST(UtilsTest, TimerRecorderByCtor)
-{
-    ProfileRecorder::Enable(false);
-    ProfileRecorder::Enable(true, ProfileRecorder::Type::TIMER);
-    {
-        ProfileRecorder record("myTimer", "a test timer");
-        sleep(1);
-    }
-    {
-        ProfileRecorder record("myTimer", "a test timer");
-        sleep(1);
-    }
-    ProfileRecorder::RecordCodeInfo("code size", 123);
-    auto ret = ProfileRecorder::GetResult();
-    printf("%s\n", ret.c_str());
-#ifndef _WIN32
-    auto timerFlag = "================ myTimer ================\n[ \x1B[32;1ma test timer\x1B[0m ] cost ";
-    auto codeFlag = "================ Code Info ================\n[ \x1B[32;1mcode size\x1B[0m ] 123";
-#else
-    auto timerFlag = "================ myTimer ================\n[ a test timer ] cost ";
-    auto codeFlag = "================ Code Info ================\n[ code size ] 123";
-#endif
-    ASSERT_TRUE(ret.find(timerFlag) != std::string::npos);
-    ASSERT_TRUE(ret.find(codeFlag) != std::string::npos);
-}
-
-TEST(UtilsTest, TimerRecorderByStart)
-{
-    ProfileRecorder::Enable(false);
-    ProfileRecorder::Enable(true, ProfileRecorder::Type::TIMER);
-    ProfileRecorder::Start("myTimer", "a test timer", "", ProfileRecorder::Type::TIMER);
-    sleep(1);
-    ProfileRecorder::Stop("myTimer", "a test timer", "", ProfileRecorder::Type::TIMER);
-    ProfileRecorder::Start("myTimer", "a test timer", "", ProfileRecorder::Type::TIMER);
-    sleep(1);
-    ProfileRecorder::Stop("myTimer", "a test timer", "", ProfileRecorder::Type::TIMER);
-    auto ret = ProfileRecorder::GetResult();
-    ProfileRecorder::RecordCodeInfo("code size", 123);
-    printf("%s\n", ret.c_str());
-#ifndef _WIN32
-    auto timerFlag = "================ myTimer ================\n[ \x1B[32;1ma test timer\x1B[0m ] cost ";
-    auto codeFlag = "================ Code Info ================\n[ \x1B[32;1mcode size\x1B[0m ] 123";
-#else
-    auto timerFlag = "================ myTimer ================\n[ a test timer ] cost ";
-    auto codeFlag = "================ Code Info ================\n[ code size ] 123";
-#endif
-    ASSERT_TRUE(ret.find(timerFlag) != std::string::npos);
-    ASSERT_TRUE(ret.find(codeFlag) != std::string::npos);
-}
-
-TEST(UtilsTest, MemoryRecorderByCtor)
-{
-    ProfileRecorder::Enable(false);
-    ProfileRecorder::Enable(true, ProfileRecorder::Type::MEMORY);
-    {
-        ProfileRecorder record("myCollector", "a memory usage collector");
-    }
-    auto ret = ProfileRecorder::GetResult();
-    printf("%s\n", ret.c_str());
-    auto result = "================ myCollector ================\n[ " + ANSI_COLOR_BRIGHT + ANSI_COLOR_GREEN +
-        "a memory usage collector" + ANSI_COLOR_RESET + " ]";
-
-    // check overlap of `title and subTitle`
-    ASSERT_TRUE(ret.find(result) != std::string::npos);
-    {
-        ProfileRecorder record("myCollector", "a memory usage collector");
-    }
-
-    ProfileRecorder::SetPackageName("name");
-    ret = ProfileRecorder::GetResult();
-    std::string memFlag = "a memory usage collector";
-    std::string codeFlag = "==== Code Info of [ name ] ====";
-
-    auto pos = ret.find(memFlag);
-    ASSERT_TRUE(pos != std::string::npos);
-    pos = ret.find(memFlag, pos + 1);
-    ASSERT_TRUE(pos == std::string::npos);
-    ASSERT_TRUE(ret.find(codeFlag) != std::string::npos);
-}
-
-TEST(UtilsTest, TimerAndMemoryRecordr)
-{
-    ProfileRecorder::Enable(true);
-    {
-        ProfileRecorder record("myCollector", "a memory usage collector");
-    }
-    ProfileRecorder::SetPackageName("test");
-    auto ret = ProfileRecorder::GetResult();
-    printf("%s\n", ret.c_str());
-    std::string codeFlag = "==== Code Info of [ test ] ====";
-    auto pos = ret.find(codeFlag);
-    ASSERT_TRUE(pos != std::string::npos);
-    pos = ret.find(codeFlag, pos + 1);
-    ASSERT_TRUE(pos == std::string::npos);
-}
-
 TEST(UtilsTest, GetSizeDecl)
 {
     InvalidTy ty = InvalidTy();
@@ -723,7 +633,6 @@ TEST(UtilsTest, GetPkgNameFromRelativePath)
 
 TEST(UtilsTest, IsAbsolutePathAboveLengthLimit)
 {
-
 #ifdef _WIN32
     // 27 characters in the path
     EXPECT_FALSE(IsAbsolutePathAboveLengthLimit("C:/Windows/System32/cmd.exe"));
@@ -847,34 +756,34 @@ TEST(UtilsTest, SipHash2)
 
 TEST(UtilsTest, IsUnderFlowFloat)
 {
-    auto UnderUse = [](const std::string& value) {
+    auto underUse = [](const std::string& value) {
         auto stringValue = value;
         stringValue.erase(std::remove(stringValue.begin(), stringValue.end(), '_'), stringValue.end());
         return IsUnderFlowFloat(stringValue);
     };
 
-    EXPECT_EQ(UnderUse("1_e10000000000000000000000000000000"), false);
-    EXPECT_EQ(UnderUse("1e10000000000000000000000000000000"), false);
-    EXPECT_EQ(UnderUse("-1_e10000000000000000000000000000000"), false);
-    EXPECT_EQ(UnderUse("-1E10000"), false);
-    EXPECT_EQ(UnderUse("1E10000"), false);
-    EXPECT_EQ(UnderUse("-1E-10000"), true);
-    EXPECT_EQ(UnderUse("1E-10000"), true);
-    EXPECT_EQ(UnderUse("0_."
+    EXPECT_EQ(underUse("1_e10000000000000000000000000000000"), false);
+    EXPECT_EQ(underUse("1e10000000000000000000000000000000"), false);
+    EXPECT_EQ(underUse("-1_e10000000000000000000000000000000"), false);
+    EXPECT_EQ(underUse("-1E10000"), false);
+    EXPECT_EQ(underUse("1E10000"), false);
+    EXPECT_EQ(underUse("-1E-10000"), true);
+    EXPECT_EQ(underUse("1E-10000"), true);
+    EXPECT_EQ(underUse("0_."
                        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
                        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
                        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
                        "0000000000000000000000000000000000000000000001"),
         true);
-    EXPECT_EQ(UnderUse("."
+    EXPECT_EQ(underUse("."
                        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
                        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
                        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
                        "0000000000000000000000000000000000000000000001"),
         true);
-    EXPECT_EQ(UnderUse(".123e-10000"), true);
-    EXPECT_EQ(UnderUse("0x1p-100000000000000000000000000000000000000000"), true);
+    EXPECT_EQ(underUse(".123e-10000"), true);
+    EXPECT_EQ(underUse("0x1p-100000000000000000000000000000000000000000"), true);
     // By default, this function is invoked only when it is beyond the C++ representation range.
     // This should not occur in actual calls.
-    EXPECT_EQ(UnderUse("1.0"), false);
+    EXPECT_EQ(underUse("1.0"), false);
 }

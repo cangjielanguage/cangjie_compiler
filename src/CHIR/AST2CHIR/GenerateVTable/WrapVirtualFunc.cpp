@@ -244,13 +244,21 @@ WrapVirtualFunc::WrapperFuncGenericTable WrapVirtualFunc::GetReplaceTableForVirt
             resultTable.inverseReplaceTable.emplace(funcGenericParam, instArgTy);
         }
     }
-    auto parentMethodGenericTys = parentFuncInfo.typeInfo.methodGenericTypeParams;
+    auto& parentMethodGenericTys = parentFuncInfo.typeInfo.methodGenericTypeParams;
     for (auto& parentMethodGenericTy : parentMethodGenericTys) {
         auto srcIdentifier = "fT" + std::to_string(newGenericIdx++);
         auto tyIdentifier = funcIdentifier + '_' + srcIdentifier;
         auto funcGenericParam = builder.GetType<GenericType>(tyIdentifier, srcIdentifier);
         resultTable.funcGenericTypeParams.emplace_back(funcGenericParam);
         resultTable.replaceTable.emplace(parentMethodGenericTy, funcGenericParam);
+    }
+    CJC_ASSERT(resultTable.funcGenericTypeParams.size() == parentMethodGenericTys.size());
+    for (size_t i = 0; i < resultTable.funcGenericTypeParams.size(); ++i) {
+        std::vector<Type*> newUpperBounds;
+        for (auto ty : parentMethodGenericTys[i]->GetUpperBounds()) {
+            newUpperBounds.emplace_back(ReplaceRawGenericArgType(*ty, resultTable.replaceTable, builder));
+        }
+        resultTable.funcGenericTypeParams[i]->SetUpperBounds(newUpperBounds);
     }
     return resultTable;
 }
@@ -294,19 +302,20 @@ void WrapVirtualFunc::CreateVirtualWrapperFunc(Func& func, FuncType& wrapperTy,
     for (size_t i = 0; i < paramInstTy.size(); ++i) {
         args[i] = TypeCastOrBoxIfNeeded(*args[i], *paramInstTy[i], builder, *entry, INVALID_LOCATION);
     }
-    auto apply = CreateAndAppendExpression<Apply>(builder, applyRetTy, rawFunc, args, entry);
-    auto thisInstTy = &selfTy;
-    if (thisInstTy->IsClassOrArray()) {
-        thisInstTy = builder.GetType<RefType>(thisInstTy);
-    }
-    apply->SetInstantiatedFuncType(thisInstTy, instParentType, paramInstTy, *applyRetTy);
-
     std::vector<Type*> instArgTypes;
     instArgTypes.reserve(genericTable.funcGenericTypeParams.size());
     for (auto& funcGenericParam : genericTable.funcGenericTypeParams) {
         instArgTypes.emplace_back(funcGenericParam);
     }
-    apply->SetInstantiatedArgTypes(instArgTypes);
+    auto thisInstTy = &selfTy;
+    if (thisInstTy->IsClassOrArray()) {
+        thisInstTy = builder.GetType<RefType>(thisInstTy);
+    }
+    auto apply = CreateAndAppendExpression<Apply>(builder, applyRetTy, rawFunc, FuncCallContext{
+        .args = args,
+        .instTypeArgs = instArgTypes,
+        .thisType = thisInstTy}, entry);
+
     auto res = TypeCastOrBoxIfNeeded(*apply->GetResult(), *wrapperRetTy, builder, *entry, INVALID_LOCATION);
     CreateAndAppendExpression<Store>(builder, builder.GetUnitTy(), res, func.GetReturnValue(), entry);
     entry->AppendExpression(builder.CreateTerminator<Exit>(entry));

@@ -69,17 +69,6 @@ std::string MangleType(const CHIR::TupleType& t, const std::vector<std::string>&
     return ss.str();
 }
 
-// Type mangling for CHIR::ClosureType
-std::string MangleType(const CHIR::ClosureType& t, const std::vector<std::string>& genericsTypeStack,
-    bool useGenericName)
-{
-    std::stringstream ss;
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    ss << MangleType(*t.GetFuncType(), genericsTypeStack, useGenericName);
-#endif
-    return ss.str();
-}
-
 // Type mangling for CHIR::StructType
 std::string MangleType(const CHIR::StructType& t, const std::vector<std::string>& genericsTypeStack,
     bool useGenericName)
@@ -241,8 +230,6 @@ std::string MangleType(const CHIR::Type& t, const std::vector<std::string>& gene
     switch (k) {
         case ChirTypeKind::TYPE_TUPLE:
             return MangleType(StaticCast<const TupleType&>(t), genericsTypeStack, useGenericName);
-        case ChirTypeKind::TYPE_CLOSURE:
-            return MangleType(StaticCast<const ClosureType&>(t), genericsTypeStack, useGenericName);
         case ChirTypeKind::TYPE_STRUCT:
             return MangleType(StaticCast<const StructType&>(t), genericsTypeStack, useGenericName);
         case ChirTypeKind::TYPE_ENUM:
@@ -349,10 +336,6 @@ std::string GetTypeQualifiedName(const CHIR::Type& t, bool forNameFieldOfTi)
                 GetTypeQualifiedName(*ft.GetReturnType(), forNameFieldOfTi);
             return name;
         }
-        case ChirTypeKind::TYPE_CLOSURE: {
-            auto& type = static_cast<const ClosureType&>(t);
-            return GetTypeQualifiedName(*type.GetFuncType(), forNameFieldOfTi);
-        }
         case ChirTypeKind::TYPE_GENERIC:
             return static_cast<const GenericType&>(t).GetSrcCodeIdentifier();
         case ChirTypeKind::TYPE_VOID:
@@ -378,7 +361,8 @@ std::string GetCustomTypeDefIdentifier(const CHIR::CustomTypeDef& def)
 {
     CJC_ASSERT(!def.GetType()->IsAutoEnvBase());
     auto name = def.GetSrcCodeIdentifier();
-    if (name.empty()) {
+    if (name.empty() ||
+        (def.TestAttr(CHIR::Attribute::PRIVATE) && def.Get<CHIR::LinkTypeInfo>() == Linkage::INTERNAL)) {
         return def.GetIdentifierWithoutPrefix();
     } else {
         return name;

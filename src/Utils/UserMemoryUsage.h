@@ -19,11 +19,7 @@ public:
     UserMemoryUsage() = default;
     ~UserMemoryUsage() override
     {
-#ifdef CANGJIE_WRITE_PROFILE
-        OutputResult(OutType::JSON);
-#else
-        OutputResult(OutType::STRING);
-#endif
+        OutputResult();
     }
     static UserMemoryUsage& Instance()
     {
@@ -35,14 +31,11 @@ public:
     void Stop(const std::string& title, const std::string& subtitle, const std::string& desc);
 
 private:
-    std::string GetFlat() const override;
-#ifdef CANGJIE_WRITE_PROFILE
     std::string GetJson() const override;
     std::string GetSuffix() const final
     {
-        return ".cj.mem.prof";
+        return ".mem.prof";
     }
-#endif
     /**
      * @brief get current process(cjc)'s memory usage at callsite
      *

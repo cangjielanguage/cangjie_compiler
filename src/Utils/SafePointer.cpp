@@ -8,6 +8,8 @@
 
 #include "cangjie/Utils/ICEUtil.h"
 
+#ifndef CANGJIE_ENABLE_GCOV
 NullPointerException::NullPointerException() : triggerPoint(Cangjie::ICE::GetTriggerPoint())
 {
 }
+#endif

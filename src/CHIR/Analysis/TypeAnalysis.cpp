@@ -80,8 +80,8 @@ template <> TypeDomain::AllocatedObjMap ValueAnalysis<TypeValueDomain>::globalAl
 template <> std::vector<std::unique_ptr<Ref>> ValueAnalysis<TypeValueDomain>::globalRefPool{};
 template <> std::vector<std::unique_ptr<AbstractObject>> ValueAnalysis<TypeValueDomain>::globalAbsObjPool{};
 template <>
-TypeDomain ValueAnalysis<TypeValueDomain>::globalState{
-    &globalChildrenMap, &globalAllocatedRefMap, &globalAllocatedObjMap, &globalRefPool, &globalAbsObjPool};
+TypeDomain ValueAnalysis<TypeValueDomain>::globalState{&globalChildrenMap, &globalAllocatedRefMap,
+    nullptr, &globalAllocatedObjMap, &globalRefPool, &globalAbsObjPool};
 
 template <> bool IsTrackedGV<ValueDomain<TypeValue>>(const GlobalVar& gv)
 {
@@ -106,7 +106,7 @@ bool TypeAnalysis::CheckFuncHasInvoke(const BlockGroup& body)
         auto exprs = bb->GetNonTerminatorExpressions();
         for (size_t i = 0; i < exprs.size(); ++i) {
             if (exprs[i]->GetExprKind() == ExprKind::LAMBDA) {
-                if (CheckFuncHasInvoke(*StaticCast<Lambda*>(exprs[i])->GetLambdaBody())) {
+                if (CheckFuncHasInvoke(*StaticCast<Lambda*>(exprs[i])->GetBody())) {
                     return true;
                 }
             }
@@ -235,7 +235,7 @@ void TypeAnalysis::HandleBoxExpr(TypeDomain& state, const Box* boxExpr) const
 {
     auto result = boxExpr->GetResult();
     auto obj = state.GetReferencedObjAndSetToTop(result, boxExpr);
-    state.Propagate(boxExpr->GetObject(), obj);
+    state.Propagate(boxExpr->GetSourceValue(), obj);
 }
 
 template <typename TTypeCast> void TypeAnalysis::HandleTypeCastExpr(TypeDomain& state, const TTypeCast* typecast) const
@@ -297,6 +297,59 @@ template <typename TTypeCast> void TypeAnalysis::HandleTypeCastExpr(TypeDomain& 
             }
             return state.Update(resVal, std::make_unique<TypeValue>(DevirtualTyKind::SUBTYPE_OF, tgtClsTy));
         }
+    }
+}
+
+void TypeAnalysis::PreHandleGetElementRefExpr(TypeDomain& state, const GetElementRef* getElemRef)
+{
+    HandleDefaultExpr(state, getElemRef);
+}
+
+void TypeAnalysis::HandleDefaultExpr(TypeDomain& state, const Expression* expr) const
+{
+    // only using result type to analyse state
+    // must meet following conditions:
+    // 1. expr do not have branch
+    // 2. expr do not have more accurate state info
+    // 3. keep state if expr is re-analyse
+    auto result = expr->GetResult();
+    auto resType = result->GetType();
+    if (resType->IsPrimitive() || resType->IsStruct() || resType->IsEnum()) {
+        state.SetToTopOrTopRef(result, false);
+        state.Update(result, std::make_unique<TypeValue>(DevirtualTyKind::EXACTLY, resType));
+        return;
+    }
+    if (!resType->IsRef()) {
+        state.SetToTopOrTopRef(result, false);
+        return;
+    }
+    auto firstRefBaseType = StaticCast<RefType*>(resType)->GetBaseType();
+    if (firstRefBaseType->IsPrimitive() || firstRefBaseType->IsStruct() || firstRefBaseType->IsEnum()) {
+        auto resVal = state.GetReferencedObjAndSetToTop(result, expr);
+        state.Update(resVal, std::make_unique<TypeValue>(DevirtualTyKind::EXACTLY, firstRefBaseType));
+        return;
+    }
+    if (firstRefBaseType->IsClass()) {
+        auto classDef = StaticCast<ClassType*>(firstRefBaseType)->GetClassDef();
+        auto kind =
+            !classDef->IsInterface() && !classDef->TestAttr(Attribute::VIRTUAL) && !classDef->IsAbstract() ?
+            DevirtualTyKind::EXACTLY : DevirtualTyKind::SUBTYPE_OF;
+        auto resVal = state.GetReferencedObjAndSetToTop(result, expr);
+        state.Update(resVal, std::make_unique<TypeValue>(kind, firstRefBaseType));
+        return;
+    }
+    if (!firstRefBaseType->IsRef()) {
+        state.GetReferencedObjAndSetToTop(result, expr);
+        return;
+    }
+    auto secondRefBaseType = StaticCast<RefType*>(firstRefBaseType)->GetBaseType();
+    auto resVal = state.GetTwoLevelRefAndSetToTop(result, expr);
+    if (secondRefBaseType->IsClass()) {
+        auto classDef = StaticCast<ClassType*>(secondRefBaseType)->GetClassDef();
+        auto kind =
+            !classDef->IsInterface() && !classDef->TestAttr(Attribute::VIRTUAL) && !classDef->IsAbstract() ?
+            DevirtualTyKind::EXACTLY : DevirtualTyKind::SUBTYPE_OF;
+        state.Update(resVal, std::make_unique<TypeValue>(kind, secondRefBaseType));
     }
 }
 

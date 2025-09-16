@@ -44,10 +44,11 @@
 #include "cangjie/Utils/TaskQueue.h"
 #include "cangjie/Utils/Utils.h"
 
-#if defined CANGJIE_CODEGEN_CJNATIVE_BACKEND
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 #include "cangjie/Mangle/CHIRMangler.h"
+#include "cangjie/CHIR/Checker/ComputeAnnotations.h"
 #endif
-#if (defined RELEASE)
+#ifdef RELEASE
 #include "cangjie/Utils/Signal.h"
 #endif
 
@@ -200,11 +201,19 @@ MetaTransformPlugin MetaTransformPlugin::Get(const std::string& path)
     handle = InvokeRuntime::OpenSymbolTable(path, RTLD_NOW | RTLD_LOCAL);
 #endif
     if (!handle) {
+#ifndef CANGJIE_ENABLE_GCOV
         throw NullPointerException();
+#else
+        CJC_ABORT();
+#endif
     }
     void* fPtr = InvokeRuntime::GetMethod(handle, "getMetaTransformPluginInfo");
     if (!fPtr) {
+#ifndef CANGJIE_ENABLE_GCOV
         throw NullPointerException();
+#else
+        CJC_ABORT();
+#endif
     }
     auto pluginInfo = reinterpret_cast<MetaTransformPluginInfo (*)()>(fPtr)();
     return MetaTransformPlugin(path, pluginInfo, handle);
@@ -242,6 +251,7 @@ bool CompilerInstance::PerformParse()
         const auto& globalOpts = invocation.globalOptions;
         srcPkgs.front()->noSubPkg = globalOpts.noSubPkg;
         Utils::ProfileRecorder::SetPackageName(srcPkgs[0]->fullPackageName);
+        Utils::ProfileRecorder::SetOutputDir(globalOpts.output);
         if (IsNeedSaveIncrCompilationLogFile(globalOpts, invocation.frontendOptions)) {
             std::string incrLogPath =
                 invocation.globalOptions.GenerateCachedPathName(srcPkgs[0]->fullPackageName, CACHED_LOG_EXTENSION);
@@ -325,6 +335,9 @@ bool CompilerInstance::ShouldWriteCacheFile() const
     // if compiled with "cjc-frontend --dump-xxx ...", we don't write cache file
     // that's OK, in this case, we can not run incremental compiling
     if (invocation.frontendOptions.dumpAction != FrontendOptions::DumpAction::NO_ACTION) {
+        return false;
+    }
+    if (invocation.globalOptions.IsEmitCHIREnable()) {
         return false;
     }
     if (invocation.globalOptions.compileCjd) {
@@ -525,8 +538,8 @@ using DeclAndPackageName = std::pair<AST::Decl*, std::string>;
 using LambdaAndPackageName = std::pair<AST::LambdaExpr*, std::string>;
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-inline void DoNewMangling(const BaseMangler& baseMangler, const std::vector<DeclAndPackageName>& decls, size_t start,
-    size_t end)
+void DoNewMangling(
+    const BaseMangler& baseMangler, const std::vector<DeclAndPackageName>& decls, size_t start, size_t end)
 {
     std::vector<Ptr<Node>> prefix;
     auto handleMangle = [&baseMangler, &prefix](Ptr<Node> node) -> VisitAction {
@@ -562,8 +575,9 @@ inline void DoNewMangling(const BaseMangler& baseMangler, const std::vector<Decl
                     filteredPrefix);
                 return VisitAction::WALK_CHILDREN;
             },
-            []([[maybe_unused]] const Node& node) {
-                return VisitAction::WALK_CHILDREN;
+            []([[maybe_unused]] const Annotation& anno) {
+                // The annotation node should be desugared during the Sema, this node is only used in ExportAST.
+                return VisitAction::SKIP_CHILDREN;
             },
             []([[maybe_unused]] const Node& node) { return VisitAction::WALK_CHILDREN; },
             []() { return VisitAction::WALK_CHILDREN; });
@@ -705,12 +719,13 @@ void CompilerInstance::ManglingHelpFunction(const BaseMangler& baseMangler)
 
 bool CompilerInstance::PerformMangling()
 {
-#if defined CANGJIE_CODEGEN_CJNATIVE_BACKEND
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     using namespace CHIR;
     mangler = CreateUniquePtr<CHIR::CHIRMangler>(invocation.globalOptions.enableCompileTest);
 
     // Load the manglerCtxTable
     std::vector<std::unique_ptr<ManglerContext>> manglerCtxVec;
+
     // Get all imported packages and source packages.
     for (auto& package : importManager.GetAllImportedPackages()) {
         std::string pkgName = ManglerContext::ReduceUnitTestPackageName(package->fullPackageName);
@@ -721,10 +736,6 @@ bool CompilerInstance::PerformMangling()
         }
         mangler->CollectVarOrLambda(*mangler->manglerCtxTable.at(pkgName), *package->srcPackage);
     }
-#else
-    using namespace CHIR;
-    using namespace CodeGen;
-    mangler = CreateUniquePtr<HLIR::HLIRMangler>(invocation.globalOptions.enableCompileTest);
 #endif
     mangler->lambdaCounter = cachedInfo.lambdaCounter;
     ManglingHelpFunction(*mangler);
@@ -746,6 +757,8 @@ bool CompilerInstance::GenerateCHIRForPkg(AST::Package& pkg)
     }
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    // use this result when APILevel check supports arbitrary const expressions
+    (void)CHIR::ComputeAnnotations(pkg, *this);
     auto& constAnalysisWrapper = chirData.GetConstAnalysisResultRef();
 #endif
     CHIR::CHIRBuilder builder1(GetCHIRContext(), invocation.globalOptions.GetJobs());
@@ -1026,7 +1039,8 @@ bool CompilerInstance::DetectCangjieHome()
     }
     // Detect from exepath.
     if (invocation.globalOptions.executablePath.empty()) {
-        diag.Diagnose(DiagKind::frontend_failed_to_detect_cangjie_home, "can not resolve executable path");
+        diag.DiagnoseRefactor(DiagKindRefactor::frontend_failed_to_detect_cangjie_home,
+            DEFAULT_POSITION, "can not resolve executable path");
         return false;
     } else {
         cangjieHome =
@@ -1034,7 +1048,8 @@ bool CompilerInstance::DetectCangjieHome()
                                    FileUtil::IdenticalFunc),
                 "..");
         if (!FileUtil::FileExist(cangjieHome) || !FileUtil::FileExist(FileUtil::JoinPath(cangjieHome, "modules"))) {
-            diag.Diagnose(DiagKind::frontend_failed_to_detect_cangjie_home, "invalid cjc home");
+            diag.DiagnoseRefactor(
+                DiagKindRefactor::frontend_failed_to_detect_cangjie_home, DEFAULT_POSITION, "invalid cjc home");
             return false;
         }
     }
@@ -1044,18 +1059,20 @@ bool CompilerInstance::DetectCangjieHome()
 bool CompilerInstance::DetectCangjieModules()
 {
     if (cangjieHome.empty()) {
-        diag.Diagnose(DiagKind::frontend_failed_to_detect_cangjie_modules, "cangjie home is empty");
+        diag.DiagnoseRefactor(DiagKindRefactor::frontend_failed_to_detect_cangjie_modules,
+            MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), "cangjie home is empty");
         return false;
     }
     auto libPathName = invocation.globalOptions.GetCangjieLibTargetPathName();
     if (libPathName.empty()) {
-        diag.Diagnose(DiagKind::frontend_failed_to_detect_cangjie_modules, "target library path name is empty");
+        diag.DiagnoseRefactor(DiagKindRefactor::frontend_failed_to_detect_cangjie_modules,
+            MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), "target library path name is empty");
         return false;
     }
     cangjieModules = FileUtil::JoinPath(FileUtil::JoinPath(cangjieHome, "modules"), libPathName);
     if (!FileUtil::FileExist(cangjieModules)) {
-        diag.Diagnose(DiagKind::frontend_failed_to_detect_cangjie_modules,
-            "target library path is not exist : " + cangjieModules);
+        diag.DiagnoseRefactor(DiagKindRefactor::frontend_failed_to_detect_cangjie_modules,
+            MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), "target library path is not exist : " + cangjieModules);
         return false;
     }
     return true;
@@ -1089,7 +1106,10 @@ void CompilerInstance::AddDeclToPackage(OwnedPtr<Decl> decl)
 bool CompilerInstance::DeserializeCHIR()
 {
     CHIR::CHIRBuilder chirBuilder(GetCHIRContext());
-    CHIR::CHIRDeserializer::Deserialize(invocation.frontendOptions.chirDeserializePath, chirBuilder);
+    CHIR::ToCHIR::Phase phase;
+    CHIR::CHIRDeserializer::Deserialize(invocation.frontendOptions.chirDeserializePath, chirBuilder, phase);
+    // print serialize extension info which just for serialization not necessary for chir nodes
+    CHIR::CHIRPrinter::PrintCHIRSerializeInfo(phase, "deserialized.chir");
     CHIR::CHIRPrinter::PrintPackage(*GetCHIRContext().GetCurPackage(), "deserialized.chir");
     return true;
 }

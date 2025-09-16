@@ -23,7 +23,6 @@ endif()
 
 add_library(CangjieCodeGen OBJECT ${CODEGEN_SRC})
 
-# use llvm
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     add_dependencies(CangjieCodeGen cjnative)
 endif()

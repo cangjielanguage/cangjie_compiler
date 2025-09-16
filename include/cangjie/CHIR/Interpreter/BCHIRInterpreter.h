@@ -21,14 +21,14 @@
 #undef AARCH64
 #endif
 #include "cangjie/Basic/DiagnosticEngine.h"
-#include "cangjie/CHIR/OverflowChecking.h"
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/CHIR/Interpreter/BCHIRPrinter.h"
 #include "cangjie/CHIR/Interpreter/BCHIRResult.h"
 #include "cangjie/CHIR/Interpreter/InterpreterArena.h"
 #include "cangjie/CHIR/Interpreter/InterpreterEnv.h"
 #include "cangjie/CHIR/Interpreter/InterpreterStack.h"
-#include "cangjie/CHIR/Interpreter/InterpreterValue.h"
+#include "cangjie/CHIR/Interpreter/InterpreterValueUtils.h"
+#include "cangjie/CHIR/OverflowChecking.h"
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -73,11 +73,6 @@ public:
     {
     }
 
-    ~BCHIRInterpreter()
-    {
-        ExecuteFinalizers();
-    }
-
     /** @brief runt the interpreter */
     IResult Run(size_t baseIdx, bool expectsReturn = true);
 
@@ -87,22 +82,14 @@ public:
     /** @brief Moves a value to the arena, and returns the pointer */
     IPointer ToArena(IVal&& value);
 
-    /** @brief push value into the interpreter argument stack */
-    void PushIntoArgStack(IVal ival);
-
     /** @brief get the value of a global variable */
     const IVal& PeekValueOfGlobal(Bchir::VarIdx id) const;
 
     /** @brief set the global vars in the environment according to `gVarInitVals` */
     void SetGlobalVars(std::unordered_map<Bchir::ByteCodeIndex, IVal>&& gVarInitIVals);
 
-    /** @brief execute all finalizers */
-    void ExecuteFinalizers() noexcept;
-
     /** @brief returns the result of the previous run, or INotRun if interpreter never ran */
     const IResult& GetLastResult() const;
-
-    std::pair<std::string, Cangjie::Position> GetBacktraceForConstEval(const IException& exnPtr);
 
     /** @brief the max size of the internal playground, the part of the bytecode
      * where this interpreter instance can generate code. */
@@ -112,12 +99,12 @@ public:
      * where users of this instance can generate code. */
     static const size_t EXTERNAL_PLAYGROUND_SIZE = 20;
 
+#ifndef NDEBUG
     /** @brief Debug utility. Return a string with the code position for a bytecode operation index. */
     std::string DebugGetPosition(Bchir::ByteCodeIndex index);
     /** @brief Debug utility. Return a string with the mangled for a bytecode operation index. */
     std::string DebugGetMangledName(Bchir::ByteCodeIndex index) const;
 
-#ifndef NDEBUG
     /** @brief Check if writing debug data to a file is enabled. If so, create output file for PrintDebugInfo. */
     void PrepareRuntimeDebug(const GlobalOptions& options);
     /** @brief Debug utility. Write information about current pc to file (if enabled). */
@@ -198,30 +185,17 @@ private:
     bool InterpretIntrinsic0();
     /** @brief Returns true if exception is raised. */
     bool InterpretIntrinsic1();
-    /** @brief Returns true if exception is raised. */
-    bool InterpretIntrinsic2();
     void InterpretArrayBuilder();
     void InterpretRawArrayInitByValue();
-    void InterpretVArrayByValue();
     template <bool isLiteral, bool isExc> void InterpretAllocateRawArray();
-    template <OpCode op = OpCode::RAISE> void InterpretRaise();
     void InterpretSwitch();
     void InterpretStoreInRef();
     void InterpretGetRef();
     void InterpretFieldTpl();
     void InterpretReturn();
-    void PopsOneReturnsUnitDummy();
-    void PopsOneReturnsTrueDummy();
-    void PopsOneReturnsFalseDummy();
-    void PopsOneReturnsUInt64ZeroDummy();
-    void PopsTwoReturnsUnitDummy();
-    void PopsTwoReturnsTrueDummy();
-    void PopsThreeReturnsUnitDummy();
-    void PopsThreeReturnsTrueDummy();
 
     IVal* AllocateValue(IVal&& value);
 
-    bool FindCatchInCtrlStack();
 
     // Invoke support
     Bchir::ByteCodeIndex FindMethod(Bchir::ByteCodeContent classId, Bchir::ByteCodeContent nameId);
@@ -241,18 +215,7 @@ private:
     void RaiseNegativeArraySizeException(Bchir::ByteCodeIndex sourcePc);
     void RaiseArithmeticExceptionMsg(Bchir::ByteCodeIndex sourcePc, const std::string& str);
     void RaiseOutOfMemoryError(Bchir::ByteCodeIndex sourcePc);
-    void RaiseError(Bchir::ByteCodeIndex sourcePc, const std::string& str);
-    void CallPrintStackTrace(IVal&& exnPtr);
-    void CallPrintStackTraceError(IVal&& exnPtr);
-    void InterpretCJTLSDYNSetSessionCallback();
-    void InterpretCjTlsSslInit();
-
-    void CallToString(IVal&& exnPtr);
-    ITuple StringToITuple(const std::string& str);
-    std::tuple<std::string, std::string, int> PcFuncToString(const IUInt64 paramPc, const IUInt64 funcStart) const;
-    void CheckIsError(IVal&& exnPtr);
-    // args does not include func-op
-    void CallFunction(size_t callIdx, std::vector<IVal> args);
+    void RaiseError(Bchir::ByteCodeIndex, const std::string&);
 
     /* Binary operations */
     /** @brief Perform binary operation */
@@ -265,7 +228,7 @@ private:
     /** @brief Perform binary operation auxiliar for integral types. Returns true if excetion is raised. */
     template <OpCode op, typename T, typename S> bool BinOpInt(Cangjie::OverflowStrategy strat);
     /** @brief Binary exponential. Returns true if excetion is raised. */
-    template <typename T, typename S> bool BinExpOpInt(Cangjie::OverflowStrategy strat);
+    bool BinExpOpInt(Cangjie::OverflowStrategy strat);
     /** @brief Perform regular arithmetic operations: ADD, SUB, MUL, DIV, MOD, BITAND, BITOR, BITXOR, LT, LE, GT, GE,
      * EQ, NEQ. Returns true if excetion is raised. */
     template <OpCode op, typename T, typename S> bool BinRegOpInt(Cangjie::OverflowStrategy strat);
@@ -301,103 +264,15 @@ private:
         const std::string& name, Bchir::ByteCodeIndex opIdx, void (*func)(void), size_t args, const CHIR::Type& resTy);
 
     /* Intrinsic functions */
-    template <OpCode op> void InterpretIntrinsic();
-    template <Cangjie::CHIR::IntrinsicKind, bool IsSyscall = false> void InterpretASTIntrinsicWithFFI();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForParseExpr();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForParseDecl();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForParseType();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForParsePattern();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForParentContext();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForMacroSetItem();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForGetChildMessage();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForCheckAddSpace();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForDiagReport();
-    template <bool IsSyscall = false> void InterpretIntrinsicWithFFIForCangjieLex();
-    void InterpretCRTSTRLEN();
-    void InterpretSizeOf(Bchir::ByteCodeIndex idx);
-    void InterpretAlignOf(Bchir::ByteCodeIndex idx);
-    void InterpretGetTypeForTypeParameter(Bchir::ByteCodeIndex idx);
-    void InterpretCRTMEMCPYS();
-    void InterpretCRTMEMSETS();
-    void InterpretCRTFREE();
-    void InterpretCRTMALLOC();
-    void InterpretCRTSTRCMP();
-    void InterpretCRTMEMCMP();
-    void InterpretCRTSTRNCMP();
-    void InterpretCRTSTRCASECMP();
-    int64_t GetArraySize(const IVal& value) const;
-    void InterpretArraySizeIntrinsic();
-    void InterpretArrayCloneIntrinsic(Bchir::ByteCodeIndex idx);
-    void InterpretObjectZeroValue();
-    CHIR::Type* GetIntepretArrayElemTy(Bchir::ByteCodeIndex idx) const;
-    void IntepretArrayCopyToIntrinsic(Bchir::ByteCodeIndex idx);
-    void IntepretArrayNormalCopyToIntrinsic(int64_t srcStart, const IArray& srcArray, int64_t dstStart, IPointer& dst,
-        Bchir::ByteCodeIndex idx, int64_t copyLen);
-    void IntepretArrayCStyleCopyToIntrinsic(int64_t srcStart, const IPointer& src, int64_t dstStart, IPointer& dst,
-        Bchir::ByteCodeIndex idx, int64_t copyLen);
-    void InterpretAcquireRawDataIntrinsic(Bchir::ByteCodeIndex idx);
-    void InterpretReleaseRawDataIntrinsic();
-    void InterpretCPointerPlusIntrinsic(Bchir::ByteCodeIndex idx);
-    void InterpretCPointerReadIntrinsic(Bchir::ByteCodeIndex idx);
-    void InterpretCPointerGetPointerAddressIntrinsic();
-    void InterpretCPointerInitIntrinsic(bool hasArg = false);
-    void InterpretCPointerWriteIntrinsic(Bchir::ByteCodeIndex idx);
-    void InterpretFillInStackTrace();
-    void CopyControlStack(std::vector<Cangjie::CHIR::Interpreter::IVal>& array);
-    void InterpretFillInStackTraceException();
-    void InterpretArrayInitIntrinsic();
-    void InterpretArraySliceInitIntrinsic();
-    void InterpretArraySliceIntrinsic();
-    void InterpretArraySliceRawArrayIntrinsic();
-    void InterpretArraySliceStartIntrinsic();
-    void InterpretArraySliceSizeIntrinsic();
-    bool InterpretArrayOverflowCheck(Bchir::ByteCodeIndex opIdx, ITuple& structArray, const IInt64& argIndex,
-        OverflowStrategy strategy, int64_t& res);
-    /** @brief Returns true if exception is raised. */
-    bool InterpretArrayGetIntrinsic(Bchir::ByteCodeIndex idx, bool indexCheck);
-    /** @brief Returns true if exception is raised. */
-    bool InterpretArraySliceGetIntrinsic(Bchir::ByteCodeIndex idx, bool indexCheck);
-    /** @brief Returns true if exception is raised. */
-    bool InterpretArrayGet(Bchir::ByteCodeIndex idx, bool indexCheck, IPointer& arrayPtr, int64_t argIndex);
+    template <OpCode op> void InterpretIntrinsic();    /** @brief Returns true if exception is raised. */
     void InterpretVArrayGet();
     /** @brief Returns true if exception is raised. */
-    bool InterpretArraySetIntrinsic(Bchir::ByteCodeIndex idx, bool indexCheck);
-    /** @brief Returns true if exception is raised. */
-    bool InterpretVArraySetIntrinsic(Bchir::ByteCodeIndex idx, bool indexCheck);
-    /** @brief Returns true if exception is raised. */
-    bool InterpretArraySliceSetIntrinsic(Bchir::ByteCodeIndex idx, bool indexCheck);
-    /** @brief Returns true if exception is raised. */
-    bool InterpretArraySet(
-        Bchir::ByteCodeIndex idx, bool indexCheck, IPointer& arrayPtr, int64_t argIndex, const IVal& value);
-    /** @brief Returns true if exception is raised. */
-    bool InterpretVArraySet(
-        Bchir::ByteCodeIndex idx, bool indexCheck, const IPointer& arrayPtr, int64_t argIndex, const IVal& value);
+    bool InterpretArrayGetIntrinsic(Bchir::ByteCodeIndex idx, bool indexCheck);
+    bool InterpretArrayGet(Bchir::ByteCodeIndex idx, bool indexCheck, IPointer& arrayPtr, int64_t argIndex);
     void InterpretRawArrayLiteralInit();
-    void InterpretORD();
-    void InterpretCHR();
-    void InterpretSleep();
     void InterpretRefEq();
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    void InterpretDecodeStackTrace();
     void InterpretCJCodeCanUseSIMD();
-    void InterpretVectorIndexByte32();
     void ReportConstEvalException(Bchir::ByteCodeIndex opIdx, std::string exceptionName);
-#endif
-
-    void InterpretCStringInit();
-    void InterpretconvertCStr2Ptr() const;
-    void InterpretIdentityHashCode();
-    void InterpretIdentityHashCodeForArray();
-    void InterpretInvokeGC();
-    void InterpretAtomicLoad();
-    void InterpretAtomicStore();
-    void InterpretAtomicSwap();
-    template <typename IValType> void InterpretAtomicCAS();
-    template <typename IValType, typename NumType> void InterpretAtomicFetchAdd();
-    template <typename IValType, typename NumType> void InterpretAtomicFetchSub();
-    template <typename IValType, typename NumType> void InterpretAtomicFetchAnd();
-    template <typename IValType, typename NumType> void InterpretAtomicFetchOr();
-    template <typename IValType, typename NumType> void InterpretAtomicFetchXor();
 
     /* TypeCast */
     template <typename SourceTyRaw, typename TargetTy, typename TargetTyRaw>

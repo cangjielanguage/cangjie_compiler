@@ -435,6 +435,9 @@ void TypeChecker::TypeCheckerImpl::InferRefExpr(ASTContext& ctx, RefExpr& re)
         auto enumSugarChecker = std::make_unique<EnumSugarChecker>(*this, ctx, re);
         auto res = enumSugarChecker->Resolve();
         if (res.first) {
+            if (res.second.empty()) {
+                re.ty = TypeManager::GetInvalidTy();
+            }
             return;
         }
         targets = res.second;
@@ -689,11 +692,6 @@ void TypeChecker::TypeCheckerImpl::InferStaticAccess(const ASTContext& ctx, Memb
             return;
         }
         ReplaceTarget(&ma, target);
-        auto curFuncBody = GetCurFuncBody(ctx, ma.scopeName);
-        if (curFuncBody && curFuncBody->funcDecl && HasJavaAttr(*curFuncBody->funcDecl)) {
-            (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_generic_static_access, ma);
-            return;
-        }
         if (target && target->astKind == ASTKind::FUNC_DECL) {
             targets = std::vector<Ptr<Decl>>(ma.targets.begin(), ma.targets.end());
         }

@@ -15,11 +15,6 @@
 
 using namespace Cangjie::CHIR::Interpreter;
 
-void BCHIRInterpreter::PushIntoArgStack(IVal ival)
-{
-    interpStack.ArgsPushIVal(std::move(ival));
-}
-
 const IVal& BCHIRInterpreter::PeekValueOfGlobal(Bchir::VarIdx id) const
 {
     return env.PeekGlobal(id);
@@ -58,24 +53,8 @@ void BCHIRInterpreter::Interpret()
         // pcExcOffset is going to 0 if entry point was X or 1 is entry point was X_EXC
         Bchir::ByteCodeIndex pcExcOffset{0};
         switch (current) {
-            case OpCode::ALLOCATE_RAW_ARRAY_LITERAL_EXC: {
-                InterpretAllocateRawArray<true, true>();
-                continue;
-            }
-            case OpCode::ALLOCATE_RAW_ARRAY_LITERAL: {
-                InterpretAllocateRawArray<true, false>();
-                continue;
-            }
-            case OpCode::ALLOCATE_RAW_ARRAY_EXC: {
-                InterpretAllocateRawArray<false, true>();
-                continue;
-            }
             case OpCode::ALLOCATE_RAW_ARRAY: {
                 InterpretAllocateRawArray<false, false>();
-                continue;
-            }
-            case OpCode::RAW_ARRAY_INIT_BY_VALUE: {
-                InterpretRawArrayInitByValue();
                 continue;
             }
             case OpCode::ALLOCATE_EXC:
@@ -316,15 +295,6 @@ void BCHIRInterpreter::Interpret()
                 interpStack.ArgsPush(std::move(tuple));
                 continue;
             }
-            case OpCode::ARRAY: {
-                auto sizeIdx = pc + 1;
-                auto size = bchir.Get(sizeIdx);
-                auto array = IArray();
-                interpStack.ArgsPop(size, array.content);
-                interpStack.ArgsPush(std::move(array));
-                pc = sizeIdx + 1;
-                continue;
-            }
             case OpCode::VARRAY: {
                 auto sizeIdx = pc + 1;
                 auto size = bchir.Get(sizeIdx);
@@ -332,10 +302,6 @@ void BCHIRInterpreter::Interpret()
                 interpStack.ArgsPop(size, array.content);
                 interpStack.ArgsPush(std::move(array));
                 pc = sizeIdx + 1;
-                continue;
-            }
-            case OpCode::VARRAY_BY_VALUE: {
-                InterpretVArrayByValue();
                 continue;
             }
             case OpCode::VARRAY_GET: {
@@ -352,17 +318,6 @@ void BCHIRInterpreter::Interpret()
                 auto func = IFunc{bchir.Get(thunkIdx)};
                 interpStack.ArgsPush(func);
                 pc = thunkIdx + 1;
-                continue;
-            }
-            case OpCode::OBJECT: {
-                auto sizeIdx = pc + 1;
-                auto size = static_cast<size_t>(bchir.Get(sizeIdx));
-                auto classId = bchir.Get(sizeIdx + 1);
-                auto object = IObject();
-                object.classId = classId;
-                interpStack.ArgsPop(size, object.content);
-                interpStack.ArgsPush(std::move(object));
-                pc = sizeIdx + Bchir::FLAG_TWO;
                 continue;
             }
             case OpCode::RETURN: {
@@ -543,13 +498,6 @@ void BCHIRInterpreter::Interpret()
                 InterpretInvoke<OpCode::INVOKE>();
                 continue;
             }
-            case OpCode::TYPECAST_EXC: {
-                InterpretTypeCast<OpCode::TYPECAST_EXC>();
-                if (raiseExnToTopLevel) {
-                    return;
-                }
-                continue;
-            }
             case OpCode::TYPECAST: {
                 InterpretTypeCast();
                 if (raiseExnToTopLevel) {
@@ -635,55 +583,6 @@ void BCHIRInterpreter::Interpret()
                 if (raiseExnToTopLevel) {
                     return;
                 }
-                continue;
-            }
-            case OpCode::INTRINSIC2: {
-                InterpretIntrinsic<OpCode::INTRINSIC2>();
-                if (raiseExnToTopLevel) {
-                    return;
-                }
-                continue;
-            }
-            case OpCode::INTRINSIC0_EXC: {
-                InterpretIntrinsic<OpCode::INTRINSIC0_EXC>();
-                if (raiseExnToTopLevel) {
-                    return;
-                }
-                continue;
-            }
-            case OpCode::INTRINSIC1_EXC: {
-                InterpretIntrinsic<OpCode::INTRINSIC1_EXC>();
-                if (raiseExnToTopLevel) {
-                    return;
-                }
-                continue;
-            }
-            case OpCode::INTRINSIC2_EXC: {
-                InterpretIntrinsic<OpCode::INTRINSIC2_EXC>();
-                if (raiseExnToTopLevel) {
-                    return;
-                }
-                continue;
-            }
-            case OpCode::RAISE_EXC: {
-                InterpretRaise<OpCode::RAISE_EXC>();
-                if (raiseExnToTopLevel) {
-                    return;
-                }
-                continue;
-            }
-            case OpCode::RAISE: {
-                InterpretRaise();
-                if (raiseExnToTopLevel) {
-                    return;
-                }
-                continue;
-            }
-            case OpCode::GET_EXCEPTION: {
-                CJC_ASSERT(exception.has_value());
-                interpStack.ArgsPush(std::move(exception.value()));
-                exception = {};
-                pc += 1;
                 continue;
             }
             case OpCode::SWITCH: {
@@ -836,156 +735,40 @@ void BCHIRInterpreter::InterpretReturn()
     return;
 }
 
-void BCHIRInterpreter::RaiseError(Bchir::ByteCodeIndex sourcePc, const std::string& str)
+void BCHIRInterpreter::RaiseError(Bchir::ByteCodeIndex, const std::string&)
 {
-    // HACK: Work around exceptions not being const.
-    if (isConstEval) {
-        interpreterError = true;
-        return;
-    }
-    // ASSUMPTION: for some reason this function is CCed
-    // ASSUMPTION: we assume that str.size() == array.content.size()
-    auto stringPtr = IPointer();
-    auto array = IValUtils::StringToArray(str);
-    stringPtr.content = AllocateValue(array);
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    auto arrayTuple = ITuple{{std::move(stringPtr), IValUtils::PrimitiveValue<IInt64>(int64_t(0)),
-        IValUtils::PrimitiveValue<IInt64>(static_cast<int64_t>(str.size()))}};
-    // We assume the Unicode size is the same as the string size
-    auto tuple = ITuple{{std::move(arrayTuple), IValUtils::PrimitiveValue<IInt64>(static_cast<int64_t>(str.size()))}};
-#endif
-    // Dummy value to represent the function value.
-    // All function thunks expect the argStack to have at the top ... :: FUNC :: ARG_N :: ... :: ARG_1
-    interpStack.ArgsPush(IUnit());
-    interpStack.ArgsPush(std::move(tuple));
-
-    // start new stack frame to interpret function
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::THROW_ERROR);
-    CJC_ASSERT(functionIdx != 0);
-    interpStack.CtrlPush({OpCode::APPLY, functionIdx, sourcePc, env.GetBP()});
-    env.StartStackFrame();
-
-    pc = functionIdx;
+    interpreterError = true;
 }
 
 void BCHIRInterpreter::RaiseArithmeticExceptionMsg(Bchir::ByteCodeIndex sourcePc, const std::string& str)
 {
-    if (isConstEval) {
-        ReportConstEvalException(sourcePc, "ArithmeticException: " + str);
-        return;
-    }
-    // ASSUMPTION: for some reason this function is CCed
-    // ASSUMPTION: we assume that str.size() == array.content.size()
-    auto array = IValUtils::StringToArray(str);
-    auto ptr = IPointer();
-    ptr.content = AllocateValue(std::move(array));
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    // We assume the Unicode size is the same as the string size
-    auto arrayTuple = ITuple{{std::move(ptr), IValUtils::PrimitiveValue<IInt64>(int64_t(0)),
-        IValUtils::PrimitiveValue<IInt64>(static_cast<int64_t>(str.size()))}};
-    auto tuple = ITuple{{std::move(arrayTuple), IValUtils::PrimitiveValue<IInt64>(static_cast<int64_t>(str.size()))}};
-#endif
-    // Dummy value to represent the function value.
-    // All function thunks expect the argStack to have at the top ... :: FUNC :: ARG_N :: ... :: ARG_1
-    interpStack.ArgsPush(IUnit());
-    interpStack.ArgsPush(std::move(tuple));
-    // start new stack frame to interpret function
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::THROW_ARITHMETIC_EXCEPTION_MSG);
-    CJC_ASSERT(functionIdx != 0);
-    interpStack.CtrlPush({OpCode::APPLY, functionIdx, sourcePc, env.GetBP()});
-    env.StartStackFrame();
-
-    pc = functionIdx;
+    ReportConstEvalException(sourcePc, "ArithmeticException: " + str);
+    interpreterError = true;
 }
 
 void BCHIRInterpreter::RaiseArithmeticException(Bchir::ByteCodeIndex sourcePc)
 {
-    if (isConstEval) {
-        ReportConstEvalException(sourcePc, "ArithmeticException");
-        return;
-    }
-    // start new stack frame to interpret function
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::THROW_ARITHMETIC_EXCEPTION);
-    CJC_ASSERT(functionIdx != 0);
-    interpStack.CtrlPush({OpCode::APPLY, functionIdx, sourcePc, env.GetBP()});
-    env.StartStackFrame();
-    // Dummy value to represent the function value.
-    // All function thunks expect the argStack to have at the top ... :: FUNC :: ARG_N :: ... :: ARG_1
-    interpStack.ArgsPush(IUnit());
-
-    pc = functionIdx;
+    ReportConstEvalException(sourcePc, "ArithmeticException");
 }
 
 void BCHIRInterpreter::RaiseOverflowException(Bchir::ByteCodeIndex sourcePc)
 {
-    if (isConstEval) {
-        ReportConstEvalException(sourcePc, "OverflowException");
-        return;
-    }
-    // start new stack frame to interpret function
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::THROW_OVERFLOW_EXCEPTION);
-    CJC_ASSERT(functionIdx != 0);
-    interpStack.CtrlPush({OpCode::APPLY, functionIdx, sourcePc, env.GetBP()});
-    env.StartStackFrame();
-    // Dummy value to represent the function value.
-    // All function thunks expect the argStack to have at the top ... :: FUNC :: ARG_N :: ... :: ARG_1
-    interpStack.ArgsPush(IUnit());
-
-    pc = functionIdx;
+    ReportConstEvalException(sourcePc, "OverflowException");
 }
 
 void BCHIRInterpreter::RaiseIndexOutOfBoundsException(Bchir::ByteCodeIndex sourcePc)
 {
-    if (isConstEval) {
-        ReportConstEvalException(sourcePc, "IndexOutOfBoundsException");
-        return;
-    }
-    // start new stack frame to interpret function
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::THROW_INDEX_OUT_OF_BOUNDS_EXCEPTION);
-    CJC_ASSERT(functionIdx != 0);
-    interpStack.CtrlPush({OpCode::APPLY, functionIdx, sourcePc, env.GetBP()});
-    env.StartStackFrame();
-    // Dummy value to represent the function value.
-    // All function thunks expect the argStack to have at the top ... :: FUNC :: ARG_N :: ... :: ARG_1
-    interpStack.ArgsPush(IUnit());
-
-    pc = functionIdx;
+    ReportConstEvalException(sourcePc, "IndexOutOfBoundsException");
 }
 
 void BCHIRInterpreter::RaiseNegativeArraySizeException(Bchir::ByteCodeIndex sourcePc)
 {
-    if (isConstEval) {
-        ReportConstEvalException(sourcePc, "NegativeArraySizeException");
-        return;
-    }
-    // start new stack frame to interpret function
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::THROW_NEGATIVA_ARRAY_SIZE_EXCEPTION);
-    CJC_ASSERT(functionIdx != 0);
-    interpStack.CtrlPush({OpCode::APPLY, functionIdx, sourcePc, env.GetBP()});
-    env.StartStackFrame();
-    // Dummy value to represent the function value.
-    // All function thunks expect the argStack to have at the top ... :: FUNC :: ARG_N :: ... :: ARG_1
-    interpStack.ArgsPush(IUnit());
-
-    pc = functionIdx;
+    ReportConstEvalException(sourcePc, "NegativeArraySizeException");
 }
 
 void BCHIRInterpreter::RaiseOutOfMemoryError(Bchir::ByteCodeIndex sourcePc)
 {
-    if (isConstEval) {
-        ReportConstEvalException(sourcePc, "OutOfMemoryError");
-        return;
-    }
-    // start new stack frame to interpret function
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::THROW_OUT_OF_MEMORY_ERROR);
-    CJC_ASSERT(functionIdx != 0);
-    interpStack.CtrlPush({OpCode::APPLY, functionIdx, sourcePc, env.GetBP()});
-    env.StartStackFrame();
-    // Dummy value to represent the function value.
-    // All function thunks expect the argStack to have at the top ... :: FUNC :: ARG_N :: ... :: ARG_1
-    interpStack.ArgsPush(IUnit());
-
-    pc = functionIdx;
+    ReportConstEvalException(sourcePc, "OutOfMemoryError");
 }
 
 // HACK: Work around exceptions not being const
@@ -1044,12 +827,23 @@ bool BCHIRInterpreter::CastOrRaiseExceptionForInt(SourceTyRaw v, OverflowStrateg
     }
 }
 
+template <typename T, typename K> static bool IsTypecastOverflowForFloat(T x, K* res)
+{
+    CJC_NULLPTR_CHECK(res);
+    CJC_ASSERT((std::is_same<T, double>::value) || (std::is_same<T, float>::value));
+    bool bMax = x > static_cast<double>(std::numeric_limits<K>::max());
+    bool bMin = x < static_cast<double>(std::numeric_limits<K>::min());
+    bool isOverflow = bMax || bMin;
+    *res = static_cast<K>(x);
+    return isOverflow;
+}
+
 template <typename SourceTyRaw, typename TargetTy, typename TargetTyRaw>
 bool BCHIRInterpreter::CastOrRaiseExceptionForFloat(SourceTyRaw floatVal, Bchir::ByteCodeIndex opIdx)
 {
     CJC_ASSERT((std::is_same<SourceTyRaw, double>::value) || (std::is_same<SourceTyRaw, float>::value));
     TargetTyRaw res = 0;
-    bool isOverflow = CHIR::OverflowChecker::IsTypecastOverflowForFloat<SourceTyRaw, TargetTyRaw>(floatVal, &res);
+    bool isOverflow = IsTypecastOverflowForFloat<SourceTyRaw, TargetTyRaw>(floatVal, &res);
     // overflow semantics for floats is always THROWING
     if (isOverflow) {
         RaiseOverflowException(opIdx);
@@ -1162,9 +956,6 @@ template <OpCode op> void BCHIRInterpreter::InterpretTypeCast()
     auto srcKind = static_cast<CHIR::Type::TypeKind>(bchir.Get(pc++));
     auto targetKind = static_cast<CHIR::Type::TypeKind>(bchir.Get(pc++));
     auto strat = static_cast<Cangjie::OverflowStrategy>(bchir.Get(pc++));
-    if constexpr (op == OpCode::TYPECAST_EXC) {
-        interpStack.CtrlPush({op, 0, opIdx, env.GetBP()});
-    }
 
     bool raisedExc = false;
     switch (srcKind) {
@@ -1216,21 +1007,15 @@ template <OpCode op> void BCHIRInterpreter::InterpretTypeCast()
         case CHIR::Type::TypeKind::TYPE_FLOAT64:
             raisedExc = InterpretTypeCastForFloat(interpStack.ArgsPop<IFloat64>().content, targetKind, opIdx);
             break;
+        case CHIR::Type::TypeKind::TYPE_BOOLEAN:
+            raisedExc = InterpretTypeCastForInt(interpStack.ArgsPop<IBool>().content, targetKind, strat, opIdx);
+            break;
         case CHIR::Type::TypeKind::TYPE_INVALID:
         default: {
             CJC_ABORT();
         }
     };
-    if constexpr (op == OpCode::TYPECAST_EXC) {
-        if (!raisedExc) {
-            CJC_ASSERT(interpStack.CtrlTop().opCode == op);
-            CJC_ASSERT(interpStack.CtrlTop().byteCodePtr == opIdx);
-            interpStack.CtrlDrop();
-            pc++;
-        }
-    } else {
-        (void)raisedExc;
-    }
+    (void)raisedExc;
 }
 
 template <OpCode op> void BCHIRInterpreter::InterpretApply()
@@ -1306,63 +1091,6 @@ void BCHIRInterpreter::InterpretDeref()
     interpStack.ArgsPushIValRef(*ptr.content);
 }
 
-bool BCHIRInterpreter::FindCatchInCtrlStack()
-{
-    auto prevPrevBp = env.GetBP();
-    auto prevBP = env.GetBP();
-    while (!interpStack.CtrlIsEmpty()) {
-        auto& ctrl = interpStack.CtrlTop();
-        if (OpHasExceptionHandler(ctrl.opCode)) {
-            if (env.GetBP() != ctrl.envBP) {
-                env.RestoreStackFrameTo(ctrl.envBP, prevPrevBp);
-            }
-            return true;
-        }
-        auto dropedCtrl = interpStack.CtrlPop();
-        if (dropedCtrl.opCode == OpCode::APPLY || dropedCtrl.opCode == OpCode::INVOKE ||
-            dropedCtrl.opCode == OpCode::CAPPLY) {
-            prevPrevBp = prevBP;
-            prevBP = dropedCtrl.envBP;
-        } else {
-            CJC_ASSERT(false);
-        }
-    }
-    return false;
-}
-
-template <OpCode op> void BCHIRInterpreter::InterpretRaise()
-{
-    auto initPc = pc;
-    auto exn1 = interpStack.ArgsTopIVal(); // copy on purpose
-    CheckIsError(std::move(exn1));
-    auto isError = interpStack.ArgsPop<IBool>().content;
-    if (isError) {
-        raiseExnToTopLevel = true;
-        return;
-    }
-    // not an error
-    if constexpr (op == OpCode::RAISE_EXC) {
-        exception = interpStack.ArgsPop<IPointer>();
-        auto jumpTargetOffset = GetOpCodeArgSize(OpCode::RAISE_EXC);
-        pc = bchir.Get(initPc + jumpTargetOffset);
-        return;
-    } else {
-        (void)initPc;
-    }
-
-    if (!FindCatchInCtrlStack()) {
-        raiseExnToTopLevel = true;
-        return;
-    }
-    // FindCatchInCtrlStack should set env.bp
-    CJC_ASSERT(env.GetBP() == interpStack.CtrlTop().envBP);
-    exception = interpStack.ArgsPop<IPointer>();
-    auto ctrl = interpStack.CtrlPop();
-    CJC_ASSERT(OpHasExceptionHandler(ctrl.opCode));
-    auto jumpTargetOffset = GetOpCodeArgSize(ctrl.opCode);
-    pc = bchir.Get(ctrl.byteCodePtr + jumpTargetOffset);
-}
-
 static constexpr int INSTRUCTION_DIFF{3};
 template <typename T, typename S>
 bool BCHIRInterpreter::PushIfNotOverflow(bool overflow, S res, Cangjie::OverflowStrategy strat)
@@ -1391,8 +1119,10 @@ bool BCHIRInterpreter::PushIfNotOverflow(bool overflow, S res, Cangjie::Overflow
 template <OpCode op, typename T, typename S> bool BCHIRInterpreter::BinOpInt(Cangjie::OverflowStrategy strat)
 {
     if constexpr (op == OpCode::BIN_EXP || op == OpCode::BIN_EXP_EXC) {
-        // this is a special case because the type of the values are different
-        return BinExpOpInt<T, S>(strat);
+        // this is a special case: only Int64 ** UInt64 is allowed by the spec.
+        CJC_ASSERT((std::is_same_v<T, IInt64>));
+        CJC_ASSERT((std::is_same_v<S, int64_t>));
+        return BinExpOpInt(strat);
     } else if constexpr (op == OpCode::UN_NEG || op == OpCode::UN_NEG_EXC) {
         // this is another special case because SUB is a unary operator
         auto a = interpStack.ArgsPop<T>();
@@ -1424,23 +1154,36 @@ template <OpCode op, typename T, typename S> bool BCHIRInterpreter::BinOpInt(Can
     }
 }
 
-template <typename T, typename S> bool BCHIRInterpreter::BinExpOpInt(Cangjie::OverflowStrategy strat)
+template <typename T> static bool IsOverflowAfterExp(T x, T y, Cangjie::OverflowStrategy strategy, T* res)
 {
-    auto rhs = interpStack.ArgsPopIVal();
-    auto a1 = interpStack.ArgsPop<T>();
-
-    if constexpr (std::is_same_v<T, IInt64>) {
-        CJC_ASSERT(typeid(S) == typeid(int64_t));
-        if (auto a2 = IValUtils::GetIf<IUInt64>(&rhs)) {
-            int64_t res;
-            bool overflow = CHIR::OverflowChecker::IsExpOverflow(a1.content, a2->content, strat, &res);
-            return PushIfNotOverflow<T, S>(overflow, res, strat);
+    CJC_NULLPTR_CHECK(res);
+    *res = 1;
+    bool isOverflow = false;
+    for (T j = 1; j <= y; j++) {
+        if (__builtin_mul_overflow(x, *res, res) && !isOverflow) {
+            isOverflow = true;
         }
     }
-    auto a2 = IValUtils::Get<T>(std::move(rhs));
-    S res;
-    bool overflow = CHIR::OverflowChecker::IsOverflowAfterExp(a1.content, a2.content, strat, &res);
-    return PushIfNotOverflow<T, S>(overflow, res, strat);
+    if (isOverflow && strategy == Cangjie::OverflowStrategy::SATURATING) {
+        T magicNumber = 2;
+        if (x < 0 && (y % magicNumber == 0)) {
+            *res = std::numeric_limits<T>::max();
+        } else if (x < 0 && (y % magicNumber == 1)) {
+            *res = std::numeric_limits<T>::min();
+        } else {
+            *res = std::numeric_limits<T>::max();
+        }
+    }
+    return isOverflow;
+}
+
+bool BCHIRInterpreter::BinExpOpInt(Cangjie::OverflowStrategy strat)
+{
+    auto a2 = interpStack.ArgsPop<IUInt64>();
+    auto a1 = interpStack.ArgsPop<IInt64>();
+    int64_t res;
+    bool overflow = CHIR::OverflowChecker::IsExpOverflow(a1.content, a2.content, strat, &res);
+    return PushIfNotOverflow<IInt64, int64_t>(overflow, res, strat);
 }
 
 template <OpCode op, typename T, typename S> bool BCHIRInterpreter::BinRegOpInt(Cangjie::OverflowStrategy strat)
@@ -1475,17 +1218,17 @@ template <OpCode op, typename T, typename S> bool BCHIRInterpreter::BinRegOpInt(
         }
         auto isOverflow = CHIR::OverflowChecker::IsOverflowAfterMod(a1.content, a2.content, &gRes);
         return PushIfNotOverflow<T, S>(isOverflow, gRes, strat);
-    } else if constexpr (op == OpCode::BIN_BITAND || op == OpCode::BIN_BITAND_EXC) {
+    } else if constexpr (op == OpCode::BIN_BITAND) {
         // BIN_BITOR, BIN_BITAND and BIN_BITXOR Bitwise operations can not raise exceptions
         // but these operations are handled like the rest to keep code homogeneity
         S res = a1.content & a2.content;
         interpStack.ArgsPush(IValUtils::PrimitiveValue<T, S>(res));
         return false;
-    } else if constexpr (op == OpCode::BIN_BITOR || op == OpCode::BIN_BITOR_EXC) {
+    } else if constexpr (op == OpCode::BIN_BITOR) {
         S res = a1.content | a2.content;
         interpStack.ArgsPush(IValUtils::PrimitiveValue<T, S>(res));
         return false;
-    } else if constexpr (op == OpCode::BIN_BITXOR || op == OpCode::BIN_BITXOR_EXC) {
+    } else if constexpr (op == OpCode::BIN_BITXOR) {
         S res = a1.content ^ a2.content;
         interpStack.ArgsPush(IValUtils::PrimitiveValue<T, S>(res));
         return false;
@@ -1608,8 +1351,6 @@ template <OpCode op, typename T, typename S> bool BCHIRInterpreter::BinOpFloat()
         interpStack.ArgsPush(IValUtils::PrimitiveValue<T, S>(a1.content * a2.content));
     } else if constexpr (op == OpCode::BIN_DIV) {
         interpStack.ArgsPush(IValUtils::PrimitiveValue<T, S>(a1.content / a2.content));
-    } else if constexpr (op == OpCode::BIN_MOD) {
-        interpStack.ArgsPush(IValUtils::PrimitiveValue<T, S>(std::fmod(a1.content, a2.content)));
     } else if constexpr (op == OpCode::BIN_EQUAL || op == OpCode::BIN_NOTEQ || op == OpCode::BIN_LT ||
         op == OpCode::BIN_GT || op == OpCode::BIN_LE || op == OpCode::BIN_GE) {
         return BinOpCompare<op, decltype(a1.content)>(a1.content, a2.content);
@@ -1803,59 +1544,6 @@ template <OpCode op> bool BCHIRInterpreter::BinOpUnit()
     return false;
 }
 
-void BCHIRInterpreter::CallFunction(size_t callIdx, std::vector<IVal> args)
-{
-    auto numArgs = args.size() + 1;
-    interpStack.ArgsPush(IFunc{callIdx});
-    for (auto arg : args) {
-        interpStack.ArgsPushIVal(std::move(arg));
-    }
-    auto tempBaseIndex = baseIndex;
-    auto currIndex = pc;
-    baseIndex = playgroundIdx;
-    pc = baseIndex;
-    auto idx = playgroundIdx;
-    bchir.SetOp(idx++, OpCode::APPLY);
-    CJC_ASSERT(numArgs <= static_cast<size_t>(Bchir::BYTECODE_CONTENT_MAX));
-    bchir.Set(idx++, static_cast<Bchir::ByteCodeContent>(numArgs));
-    bchir.SetOp(idx++, OpCode::EXIT);
-    CJC_ASSERT(idx < playgroundIdxBase + INTERNAL_PLAYGROUND_SIZE);
-    // REMINDER: revisit this
-    Interpret();
-    baseIndex = tempBaseIndex;
-    pc = currIndex;
-}
-
-void BCHIRInterpreter::CallToString(IVal&& exnPtr)
-{
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::CALL_TO_STRING);
-    CJC_ASSERT(functionIdx != 0);
-    CallFunction(static_cast<size_t>(functionIdx), {std::move(exnPtr)});
-}
-
-void BCHIRInterpreter::CallPrintStackTrace(IVal&& exnPtr)
-{
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::CALL_PRINT_STACK_TRACE);
-    CJC_ASSERT(functionIdx != 0);
-    CallFunction(static_cast<Bchir::ByteCodeContent>(functionIdx), {std::move(exnPtr)});
-}
-
-void BCHIRInterpreter::CallPrintStackTraceError(IVal&& exnPtr)
-{
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::CALL_PRINT_STACK_TRACE_ERROR);
-    CJC_ASSERT(functionIdx != 0);
-    CallFunction(static_cast<Bchir::ByteCodeContent>(functionIdx), {std::move(exnPtr)});
-}
-
-void BCHIRInterpreter::CheckIsError(IVal&& exnPtr)
-{
-    auto functionIdx = bchir.GetDefaultFunctionPointer(Bchir::DefaultFunctionKind::CHECK_IS_ERROR);
-    CJC_ASSERT(functionIdx != 0);
-    // REMINDER: we should create a new opcode ABORT which will
-    // bypass everything including finally
-    CallFunction(static_cast<size_t>(functionIdx), {std::move(exnPtr)});
-}
-
 IResult BCHIRInterpreter::Run(size_t baseIdx, bool expectsReturn)
 {
     baseIndex = static_cast<unsigned>(baseIdx);
@@ -1863,26 +1551,8 @@ IResult BCHIRInterpreter::Run(size_t baseIdx, bool expectsReturn)
     playgroundIdx = playgroundIdxBase;
     raiseExnToTopLevel = false;
     Interpret();
-    if (interpreterError) {
+    if (interpreterError || raiseExnToTopLevel) {
         return IException{IInvalid{}};
-    } else if (raiseExnToTopLevel) {
-        raiseExnToTopLevel = false;
-        auto ptr = interpStack.ArgsPopIVal();
-        auto ptrCopy = ptr;
-        auto exn1 = ptr;
-        CheckIsError(std::move(exn1));
-        auto isError = interpStack.ArgsPop<IBool>().content;
-        if (isError && !isConstEval) {
-            CallPrintStackTraceError(std::move(ptr));
-        } else if (!isConstEval) {
-            CallPrintStackTrace(std::move(ptr));
-        }
-
-        raiseExnToTopLevel = true;
-        result = IException{std::move(ptrCopy)};
-        interpStack.CtrlClean();
-        interpStack.ArgsClean();
-        return result;
     } else if (!expectsReturn) {
         // this happens when we run the top-level
         CJC_ASSERT(interpStack.ArgsSize() == 0);
@@ -1980,24 +1650,6 @@ template <typename Ty> void BCHIRInterpreter::InterpretSwitchWithType()
     }
 }
 
-void BCHIRInterpreter::ExecuteFinalizers() noexcept
-{
-    auto tempRaiseToTopLevel = raiseExnToTopLevel;
-    for (auto& ptr : arena.finalizingObjects) {
-        CJC_ASSERT(interpStack.ArgsSize() == 0);
-        CJC_ASSERT(interpStack.CtrlIsEmpty());
-        auto& object = IValUtils::Get<IObject>(*ptr);
-        auto finalizerIdx = bchir.GetClassFinalizer(object.classId);
-
-        raiseExnToTopLevel = false;
-        // ASSUMPTION: for some reason this function is CCed
-        CallFunction(finalizerIdx, {IPointer{ptr}});
-        interpStack.ArgsClean();
-        interpStack.CtrlClean();
-    }
-    raiseExnToTopLevel = tempRaiseToTopLevel;
-}
-
 IVal* BCHIRInterpreter::AllocateValue(IVal&& value)
 {
     IVal* ptr = arena.Allocate(std::move(value));
@@ -2012,6 +1664,7 @@ IVal* BCHIRInterpreter::AllocateValue(IVal&& value)
     return ptr;
 }
 
+#ifndef NDEBUG
 std::string BCHIRInterpreter::DebugGetPosition(Bchir::ByteCodeIndex index)
 {
     auto pos = bchir.GetLinkedByteCode().GetCodePositionAnnotation(index);
@@ -2025,7 +1678,6 @@ std::string BCHIRInterpreter::DebugGetMangledName(Bchir::ByteCodeIndex index) co
     return bchir.GetLinkedByteCode().GetMangledNameAnnotation(index);
 }
 
-#ifndef NDEBUG
 void BCHIRInterpreter::PrintDebugInfo(Bchir::ByteCodeIndex currentPc)
 {
     if (printRuntimeDebugInfo) {
@@ -2101,57 +1753,7 @@ template <OpCode op> void BCHIRInterpreter::InterpretIntrinsic()
         InterpretIntrinsic0();
     } else if constexpr (op == OpCode::INTRINSIC1) {
         InterpretIntrinsic1();
-    } else if constexpr (op == OpCode::INTRINSIC2) {
-        InterpretIntrinsic2();
-    } else {
-        auto initPc = pc;
-        interpStack.CtrlPush({op, 0, initPc, env.GetBP()});
-        bool raisedExc = false;
-        if constexpr (op == OpCode::INTRINSIC0_EXC) {
-            raisedExc = InterpretIntrinsic0();
-        } else if constexpr (op == OpCode::INTRINSIC1_EXC) {
-            raisedExc = InterpretIntrinsic1();
-        } else if constexpr (op == OpCode::INTRINSIC2_EXC) {
-            raisedExc = InterpretIntrinsic2();
-        }
-        if (!raisedExc) {
-            CJC_ASSERT(interpStack.CtrlTop().opCode == op);
-            CJC_ASSERT(interpStack.CtrlTop().byteCodePtr == initPc);
-            interpStack.CtrlDrop();
-            // skip the exception target index
-            pc++;
-        }
     }
-}
-
-void BCHIRInterpreter::InterpretRawArrayInitByValue()
-{
-    auto item = interpStack.ArgsPopIVal();
-    auto size = interpStack.ArgsPop<IInt64>();
-    auto arrayPtr = interpStack.ArgsPop<IPointer>();
-    auto& array = IValUtils::Get<IArray>(*arrayPtr.content);
-    CJC_ASSERT(size.content == IValUtils::Get<IInt64>(array.content[0]).content);
-    for (int64_t i = 0; i < size.content; ++i) {
-        array.content[static_cast<size_t>(i) + 1] = item;
-    }
-    interpStack.ArgsPush(IUnit());
-    pc++;
-}
-
-void BCHIRInterpreter::InterpretVArrayByValue()
-{
-    // this should not raise an exception because it should come from a CJ literal
-    (void)interpStack.ArgsPop<INullptr>();
-    auto item = interpStack.ArgsPopIVal();
-    auto sizeIVal = interpStack.ArgsPop<IInt64>();
-    auto size = sizeIVal.content;
-    auto array = IArray();
-    array.content.reserve(static_cast<size_t>(size));
-    for (int64_t i = 0; i < size; ++i) {
-        array.content.emplace_back(item);
-    }
-    interpStack.ArgsPush(std::move(array));
-    pc++;
 }
 
 void BCHIRInterpreter::InterpretVArrayGet()
@@ -2190,46 +1792,3 @@ void BCHIRInterpreter::InterpretRawArrayLiteralInit()
     interpStack.ArgsPush(IUnit());
 }
 
-std::pair<std::string, Cangjie::Position> BCHIRInterpreter::GetBacktraceForConstEval(const IException& exnPtr)
-{
-    auto ptr = IValUtils::Get<IPointer>(exnPtr.ptr);
-    auto data = IValUtils::Get<IObject>(*ptr.content);
-    auto pcArrayPtr = IValUtils::Get<IPointer>(data.content[1]);
-    auto pcArray = IValUtils::Get<IArray>(*pcArrayPtr.content);
-
-    Cangjie::Position errorPosition = DEFAULT_POSITION;
-    std::stringstream backtrace;
-    auto exceptionTypeName = BCHIRPrinter::DemangleName(bchir.GetClassTable().find(data.classId)->second.mangledName);
-    const auto parensSize = 2;
-    if (exceptionTypeName.second.size() > parensSize) {
-        exceptionTypeName.second = exceptionTypeName.second.substr(0, exceptionTypeName.second.size() - parensSize);
-    }
-
-    backtrace << exceptionTypeName.first << "." << exceptionTypeName.second << '\n';
-    auto pcIt = pcArray.content.cbegin() + 1;
-    while (pcIt != pcArray.content.cend() && pcIt + 1 != pcArray.content.cend()) {
-        auto framePc = IValUtils::Get<IUInt64>(*pcIt++);
-        auto funcStart = IValUtils::Get<IUInt64>(*pcIt++);
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-        // in llvm there is an additional field with funcDesc
-        (void)pcIt++;
-#endif
-        auto [mangledName, file, position] = PcFuncToString(framePc, funcStart);
-        auto demangled = BCHIRPrinter::DemangleName(mangledName);
-        std::string classStr = demangled.first;
-        std::string methodStr = demangled.second;
-        backtrace << "\tat " << classStr << "." << methodStr << "(" << file << ":" << position << ")\n";
-
-        if (errorPosition == DEFAULT_POSITION) {
-            auto applyPosition =
-                bchir.GetLinkedByteCode().GetCodePositionAnnotation(static_cast<Bchir::ByteCodeIndex>(framePc.content));
-            auto fileName = bchir.GetFileName(applyPosition.fileID);
-            auto fileId = diag.GetSourceManager().GetFileID(fileName);
-            if (fileId != -1 && !diag.GetSourceManager().GetSource(static_cast<unsigned int>(fileId)).buffer.empty()) {
-                errorPosition = Cangjie::Position(static_cast<unsigned>(fileId),
-                    static_cast<int>(applyPosition.line), static_cast<int>(applyPosition.column));
-            }
-        }
-    }
-    return {backtrace.str(), errorPosition};
-}

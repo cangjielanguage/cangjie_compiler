@@ -215,10 +215,11 @@ llvm::Value* IRBuilder2::CallArrayIntrinsicGet(
     const CHIR::RawArrayType& arrTy, llvm::Value* array, llvm::Value* index, bool isChecked)
 {
     llvm::Value* elePtr = nullptr;
-    auto elemType = CGType::GetOrCreate(cgMod, arrTy.GetElementType())->GetLLVMType();
+    auto elemCHIRTy = arrTy.GetElementType();
+    auto elemType = CGType::GetOrCreate(cgMod, elemCHIRTy)->GetLLVMType();
     auto rawArrayCGType = CGType::GetOrCreate(cgMod, &arrTy);
     if (!rawArrayCGType->GetSize()) {
-        llvm::Value* offset = CreateMul(GetSize_64(*arrTy.GetElementType()), index);
+        llvm::Value* offset = CreateMul(GetSize_64(*elemCHIRTy), index);
         offset = CreateAdd(offset, getInt64(sizeof(void*) + 8U)); // 8U: size of rawArray's len field
         elePtr = CreateInBoundsGEP(getInt8Ty(), array, offset);
         elePtr = CreateBitCast(elePtr, elemType->getPointerTo(array->getType()->getPointerAddressSpace()));
@@ -226,7 +227,11 @@ llvm::Value* IRBuilder2::CallArrayIntrinsicGet(
     } else {
         elePtr = GetArrayElementAddr(arrTy, array, index, isChecked);
     }
-    return CreateLoad(elemType, elePtr);
+    auto loadInst = CreateLoad(elemType, elePtr);
+    if (elemCHIRTy->IsEnum()) {
+        llvm::cast<llvm::Instruction>(loadInst)->setMetadata("untrusted_ref", llvm::MDNode::get(GetLLVMContext(), {}));
+    }
+    return loadInst;
 }
 
 llvm::Value* IRBuilder2::AcquireRawData(const CHIRIntrinsicWrapper& intrinsic)
@@ -434,46 +439,63 @@ void IRBuilder2::CreateVArrayStore(CGValue* cgValue, llvm::Value* place)
     CreateRefStore(cgValue, basePtr, place, isBaseObjStruct);
 }
 
+namespace {
+inline llvm::Function* GenerateIntrinsicFunctionDecl(
+    IRBuilder2& irBuilder, llvm::Type* retType, const std::string& name, const std::vector<CGValue*>& parameters,
+    const std::vector<std::string>& attributes)
+{
+    auto& llvmCtx = irBuilder.GetLLVMContext();
+    std::vector<llvm::Type*> parameterTypes;
+    for (auto value : parameters) {
+        CJC_ASSERT(value);
+        CJC_ASSERT(value->GetRawValue());
+        auto paramType = value->GetRawValue()->getType();
+        if (IsStructPtrType(paramType) && !value->GetCGType()->IsCGTI()) {
+            if (REFLECT_INTRINSIC_FUNC.find(name) == REFLECT_INTRINSIC_FUNC.end()) {
+                (void)parameterTypes.emplace_back(irBuilder.getInt8PtrTy(1));
+            }
+            if (paramType->getPointerAddressSpace() != 1) {
+                paramType = value->GetCGType()->GetPointerElementType()->GetLLVMType()->getPointerTo(1);
+            }
+        }
+        (void)parameterTypes.emplace_back(paramType);
+    }
+    // The return value is treated as void type when it is Unit type.
+    // Otherwise, if it is struct type, sret needs to be added.
+    llvm::FunctionType* functionType = retType == CGType::GetUnitType(llvmCtx)
+        ? llvm::FunctionType::get(retType, parameterTypes, false)
+        : CGType::GetCodeGenFunctionType(llvmCtx, retType, parameterTypes);
+    llvm::Function* func = irBuilder.GetCGModule().GetOrInsertFunction(name, functionType);
+    if (retType != CGType::GetUnitType(llvmCtx) && retType->isStructTy()) {
+        func->arg_begin()->addAttr(llvm::Attribute::NoAlias);
+        func->arg_begin()->addAttr(llvm::Attribute::getWithStructRetType(llvmCtx, retType));
+    }
+    AddLinkageTypeMetadata(*func, llvm::GlobalValue::ExternalLinkage, irBuilder.GetCGContext().IsCGParallelEnabled());
+    for (auto& attribute : attributes) {
+        AddFnAttr(func, llvm::Attribute::get(llvmCtx, attribute));
+    }
+    return func;
+}
+} // namespace
+
 // Cangjie function calls the intrinsic function. LLVMCustomizedCreationAPI.cpp:99
 // For CJNATIVE: If Cangjie call C functions and C functions call Cangjie functions back, need to add "cj2c" attribute.
 llvm::Value* IRBuilder2::CallIntrinsicFunction(llvm::Type* retType, const std::string& name,
     const std::vector<CGValue*>& parameters, const std::vector<std::string>& attributes)
 {
+    CJC_ASSERT(retType && "The return type of intrinsic function is a nullptr.");
     auto module = cgMod.GetLLVMModule();
     llvm::Function* func = module->getFunction(name);
     std::vector<llvm::Value*> parametersValues;
     if (!func) {
-        std::vector<llvm::Type*> parameterTypes;
-        for (size_t i = 0; i < parameters.size(); ++i) {
-            auto paramType = parameters[i]->GetRawValue()->getType();
-            if (IsStructPtrType(paramType) && !parameters[i]->GetCGType()->IsCGTI()) {
-                if (REFLECT_INTRINSIC_FUNC.find(name) == REFLECT_INTRINSIC_FUNC.end()) {
-                    (void)parameterTypes.emplace_back(getInt8PtrTy(1));
-                }
-                if (paramType->getPointerAddressSpace() != 1) {
-                    paramType = parameters[i]->GetCGType()->GetPointerElementType()->GetLLVMType()->getPointerTo(1);
-                }
-            }
-            (void)parameterTypes.emplace_back(paramType);
-        }
-        // The return value is treated as void type when it is Unit type.
-        // Otherwise, if it is struct type, sret needs to be added.
-        auto& llvmCtx = GetLLVMContext();
-        llvm::FunctionType* functionType = retType == CGType::GetUnitType(llvmCtx)
-            ? llvm::FunctionType::get(retType, parameterTypes, false)
-            : CGType::GetCodeGenFunctionType(llvmCtx, retType, parameterTypes);
-        func = cgMod.GetOrInsertFunction(name, functionType);
-        if (retType != CGType::GetUnitType(llvmCtx) && retType->isStructTy()) {
-            parametersValues.emplace_back(CreateEntryAlloca(retType));
-            func->arg_begin()->addAttr(llvm::Attribute::NoAlias);
-            func->arg_begin()->addAttr(llvm::Attribute::getWithStructRetType(llvmCtx, retType));
-        }
-        AddLinkageTypeMetadata(*func, llvm::GlobalValue::ExternalLinkage, GetCGContext().IsCGParallelEnabled());
-        for (auto& attribute : attributes) {
-            AddFnAttr(func, llvm::Attribute::get(llvmCtx, attribute));
-        }
+        func = GenerateIntrinsicFunctionDecl(*this, retType, name, parameters, attributes);
+    }
+    if (retType != CGType::GetUnitType(GetLLVMContext()) && retType->isStructTy()) {
+        parametersValues.emplace_back(CreateEntryAlloca(retType));
     }
     for (auto value : parameters) {
+        CJC_ASSERT(value);
+        CJC_ASSERT(value->GetRawValue());
         auto llvmVal = value->GetRawValue();
         if (IsStructPtrType(llvmVal->getType()) && !value->GetCGType()->IsCGTI()) {
             // Insert the basePtr for the structure argument.
@@ -661,7 +683,7 @@ llvm::Value* IRBuilder2::GenerateOverflowWrappingFunc(
     CHIR::ExprKind opKind, const CHIR::Type& ty, [[maybe_unused]] std::vector<llvm::Value*>& argGenValues)
 {
     llvm::Type* type = CGType::GetOrCreate(cgMod, &ty)->GetLLVMType();
-    auto minVal = CodeGen::GetIntMaxOrMin(StaticCast<const CHIR::IntType&>(ty), false);
+    auto minVal = CodeGen::GetIntMaxOrMin(StaticCast<const CHIR::IntType&>(ty).GetTypeKind(), false);
     return llvm::ConstantInt::getSigned(type, opKind == CHIR::ExprKind::MOD ? 0 : minVal);
 }
 
@@ -810,7 +832,7 @@ llvm::Value* IRBuilder2::CallSyncIntrinsics(
 llvm::Value* IRBuilder2::CallAtomicIntrinsics(const CHIRIntrinsicWrapper& intrinsic, const std::vector<CGValue*>& args)
 {
     llvm::Value* fieldPtr = CreateGEP(*args[0], {0U}).GetRawValue();
-    auto atomicIntrinsicGenericTypeInfo = intrinsic.GetGenericTypeInfo();
+    auto atomicIntrinsicGenericTypeInfo = intrinsic.GetInstantiatedTypeArgs();
     CJC_ASSERT(atomicIntrinsicGenericTypeInfo.size() == 2U);
     if (atomicIntrinsicGenericTypeInfo[1]->IsPrimitive()) {
         return CallAtomicPrimitiveIntrinsics(intrinsic, args, fieldPtr);
@@ -1241,7 +1263,6 @@ llvm::Value* IRBuilder2::CreateTypeInfo(const CHIR::Type& gt,
     const std::unordered_map<const CHIR::Type*, std::function<llvm::Value*(IRBuilder2&)>>& map, bool canChangeBB)
 {
     auto baseType = DeRef(const_cast<CHIR::Type&>(gt));
-    CJC_ASSERT(!baseType->IsClosure() && "No closure type will be generated by CHIR now");
     if (baseType->IsThis()) {
         CJC_ASSERT(cgFunction && "Should not reach here.");
         auto cgFuncType = cgFunction->GetCGFunctionType();
@@ -1287,12 +1308,6 @@ llvm::Value* IRBuilder2::CreateTypeInfo(const CHIR::Type& gt,
         }
     } else if (cgType->IsConcrete()) {
         res = cgType->GetOrCreateTypeInfo();
-    } else if (baseType->IsClosure()) {
-        auto& closureType = StaticCast<CHIR::ClosureType&>(*baseType);
-        tt = CGType::GetOrCreate(cgMod, baseType)->GetOrCreateTypeTemplate();
-        genericArgs = closureType.GetFuncType()->GetParamTypes();
-        auto funcRetType = closureType.GetFuncType()->GetReturnType();
-        genericArgs.insert(genericArgs.begin(), funcRetType);
     } else if (cgType->IsStaticGI()) {
         res = cgType->GetOrCreateTypeInfo();
     } else if (baseType->IsTuple()) {
@@ -1374,5 +1389,11 @@ llvm::Value* IRBuilder2::CreateTypeInfo(const CHIR::Type* type, bool canChangeBB
         CJC_ASSERT(type && "Meets a nullptr from CHIR.");
     }
     return CreateTypeInfo(*type, canChangeBB);
+}
+
+llvm::Value* IRBuilder2::CallInteropIntrinsics(
+    const CHIRIntrinsicWrapper& intrinsic, const std::vector<CGValue*>& parameters)
+{
+    return CallIntrinsic(intrinsic, parameters);
 }
 } // namespace Cangjie::CodeGen

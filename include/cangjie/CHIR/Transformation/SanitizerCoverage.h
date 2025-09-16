@@ -9,7 +9,7 @@
 
 #include "cangjie/CHIR/CHIRBuilder.h"
 #include "cangjie/CHIR/DiagAdapter.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Value.h"
 #include "cangjie/Option/Option.h"

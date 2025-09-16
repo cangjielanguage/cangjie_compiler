@@ -14,7 +14,7 @@
 
 #include "Base/OverflowDispatcher.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/ToStringUtils.h"
 #include "cangjie/CHIR/Value.h"
 
@@ -35,6 +35,11 @@ CGIntrinsicKind GetCGIntrinsicKind(CHIR::IntrinsicKind intrinsicKind)
             return CGIntrinsicKind::CSTRING_INIT;
         case CHIR::IntrinsicKind::INOUT_PARAM:
             return CGIntrinsicKind::INOUT_PARAM;
+        case CHIR::IntrinsicKind::CROSS_ACCESS_BARRIER:
+        case CHIR::IntrinsicKind::CREATE_EXPORT_HANDLE:
+        case CHIR::IntrinsicKind::GET_EXPORTED_REF:
+        case CHIR::IntrinsicKind::REMOVE_EXPORTED_REF:
+            return CGIntrinsicKind::INTEROP;
         default:
             break;
     }
@@ -304,8 +309,8 @@ void GenerateArrayCopyTo(IRBuilder2& irBuilder, const std::vector<CHIR::Value*>&
     CallArrayIntrinsicCopyTo(irBuilder, dstArrayPos, srcArrayPos, copyLen->GetRawValue(), *arrTy);
 }
 
-llvm::Value* CallArrayIntrinsicCopy(IRBuilder2& irBuilder,
-    const CGValue& srcArr, const CGType& elemType, const CHIR::RawArrayType& arrTy)
+llvm::Value* CallArrayIntrinsicCopy(
+    IRBuilder2& irBuilder, const CGValue& srcArr, const CGType& elemType, const CHIR::RawArrayType& arrTy)
 {
     auto& cgMod = irBuilder.GetCGModule();
     auto srcLenVal = irBuilder.CallArrayIntrinsicGetSize(*srcArr);
@@ -322,8 +327,7 @@ llvm::Value* CallArrayIntrinsicCopy(IRBuilder2& irBuilder,
     auto dataSize = irBuilder.CreateMul(srcLenVal, typeSizeVal, "arr.data.len");
     auto zeroVal = irBuilder.getInt64(0);
     ArrayCopyToInfo arrayCopyToInfo(
-        srcArr.GetRawValue(), dst, srcArrPtr, dstArrPtr, dataSize, zeroVal, zeroVal, &elemType, srcLenVal
-    );
+        srcArr.GetRawValue(), dst, srcArrPtr, dstArrPtr, dataSize, zeroVal, zeroVal, &elemType, srcLenVal);
     ArrayMemCpyOrCopyTo(irBuilder, arrayCopyToInfo);
     return dst;
 }
@@ -352,7 +356,7 @@ inline void InsertAsanInstrument([[maybe_unused]] const CGModule& cgMod, [[maybe
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     if (cgMod.GetCGContext().GetCompileOptions().EnableAsan() ||
         cgMod.GetCGContext().GetCompileOptions().EnableHwAsan()) {
-        auto genericInfo = intrinsic.GetGenericTypeInfo();
+        auto genericInfo = intrinsic.GetInstantiatedTypeArgs();
         CJC_ASSERT(genericInfo.size() == 1);
         // CJ_MCC_AsanRead(uptr addr, uptr size)
         // CJ_MCC_AsanWrite(uptr addr, uptr size)
@@ -391,6 +395,12 @@ llvm::Value* GenerateMathIntrinsics(IRBuilder2& irBuilder, const CHIRIntrinsicWr
     transform(parameters.begin(), parameters.end(), back_inserter(args),
         [](const CGValue* value) { return value->GetRawValue(); });
     return irBuilder.CallMathIntrinsics(intrinsic, args);
+}
+
+llvm::Value* GenerateInteropIntrinsics(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper& intrinsic)
+{
+    auto parameters = HandleSyscallIntrinsicArguments(irBuilder, intrinsic.GetOperands());
+    return irBuilder.CallInteropIntrinsics(intrinsic, parameters);
 }
 #endif
 
@@ -556,17 +566,23 @@ llvm::Value* GenerateBuiltinCall(IRBuilder2& irBuilder, const CHIRIntrinsicWrapp
         case CHIR::IntrinsicKind::OBJECT_ZERO_VALUE:
             return irBuilder.CallIntrinsicForUninitialized(*intrinsic.GetResult()->GetType());
         case CHIR::IntrinsicKind::SIZE_OF: {
-            auto typeArgs = intrinsic.GetGenericTypeInfo();
+            auto typeArgs = intrinsic.GetInstantiatedTypeArgs();
             return irBuilder.GetSize_64(*typeArgs[0]);
         }
         case CHIR::IntrinsicKind::ALIGN_OF: {
             auto cgRetTy = CGType::GetOrCreate(irBuilder.GetCGModule(), intrinsic.GetResult()->GetType());
-            return irBuilder.GetAlign(*intrinsic.GetGenericTypeInfo()[0], cgRetTy->GetLLVMType());
+            return irBuilder.GetAlign(*intrinsic.GetInstantiatedTypeArgs()[0], cgRetTy->GetLLVMType());
         }
         case CHIR::IntrinsicKind::GET_TYPE_FOR_TYPE_PARAMETER: {
-            auto typeArgs = intrinsic.GetGenericTypeInfo();
+            auto typeArgs = intrinsic.GetInstantiatedTypeArgs();
             auto ti = irBuilder.CreateTypeInfo(typeArgs[0]);
             return irBuilder.GetTypeForTypeParameter(ti);
+        }
+        case CHIR::IntrinsicKind::IS_SUBTYPE_TYPES: {
+            auto typeArgs = intrinsic.GetInstantiatedTypeArgs();
+            auto leftTi = irBuilder.CreateTypeInfo(typeArgs[0]);
+            auto rightTi = irBuilder.CreateTypeInfo(typeArgs[1]);
+            return irBuilder.CallIntrinsicIsSubtype({leftTi, rightTi});
         }
         case CHIR::IntrinsicKind::CPOINTER_GET_POINTER_ADDRESS:
             return CPointerGetAddress(irBuilder, intrinsic);
@@ -591,7 +607,9 @@ llvm::Value* GenerateBuiltinCall(IRBuilder2& irBuilder, const CHIRIntrinsicWrapp
         }
 #endif
         default:
+#ifndef NDEBUG
             Errorln("unsupported intrinsic kind: ", CHIR::INTRINSIC_KIND_TO_STRING_MAP.at(kind));
+#endif
             break;
     }
 
@@ -653,8 +671,8 @@ llvm::Value* GeneratePreInitializeIntrinsics(IRBuilder2& irBuilder, const CHIRIn
     auto runtimePreInitializePackageFunc =
         llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_pre_initialize_package);
     auto i8Ptr = llvm::Type::getInt8PtrTy(cgMod.GetLLVMContext());
-    return irBuilder.LLVMIRBuilder2::CreateCall(runtimePreInitializePackageFunc,
-        {llvm::ConstantPointerNull::get(i8Ptr)});
+    return irBuilder.LLVMIRBuilder2::CreateCall(
+        runtimePreInitializePackageFunc, {llvm::ConstantPointerNull::get(i8Ptr)});
 }
 
 llvm::Value* GenerateRuntimeIntrinsics(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper& intrinsic)
@@ -686,12 +704,12 @@ llvm::Value* GenerateReflectIntrinsic(IRBuilder2& irBuilder, const CHIRIntrinsic
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     std::vector<CGValue*> parameters;
     if (intrinsic.GetIntrinsicKind() == CHIR::IntrinsicKind::GET_TYPE_BY_MANGLED_NAME) {
-        auto instTypes = intrinsic.GetGenericTypeInfo();
+        auto instTypes = intrinsic.GetInstantiatedTypeArgs();
         llvm::Value* arg = nullptr;
         if (instTypes[0]->IsGeneric()) {
-            CJC_NULLPTR_CHECK(intrinsic.GetParentFunc());
+            CJC_NULLPTR_CHECK(intrinsic.GetTopLevelFunc());
             arg = llvm::cast<llvm::Value>(irBuilder.GetLLVMModule()
-                                              ->getFunction(intrinsic.GetParentFunc()->GetIdentifierWithoutPrefix())
+                                              ->getFunction(intrinsic.GetTopLevelFunc()->GetIdentifierWithoutPrefix())
                                               ->getArg(0));
         } else {
             arg = llvm::cast<llvm::Value>(
@@ -728,8 +746,7 @@ llvm::Value* GenerateInout(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper& in
 {
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     auto& cgCtx = irBuilder.GetCGContext();
-    if (cgCtx.GetCompileOptions().EnableAsan() ||
-        cgCtx.GetCompileOptions().EnableHwAsan()) {
+    if (cgCtx.GetCompileOptions().EnableAsan() || cgCtx.GetCompileOptions().EnableHwAsan()) {
         auto function = irBuilder.GetInsertFunction();
         CJC_NULLPTR_CHECK(function);
         function->addFnAttr("address_sanitize_stack");
@@ -769,6 +786,7 @@ llvm::Value* GenerateIntrinsic(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper
         {CGIntrinsicKind::VECTOR, &GenerateVectorIntrinsics},
         {CGIntrinsicKind::MATH, &GenerateMathIntrinsics},
         {CGIntrinsicKind::PREINITIALIZE, &GeneratePreInitializeIntrinsics},
+        {CGIntrinsicKind::INTEROP, &GenerateInteropIntrinsics},
 #endif
         {CGIntrinsicKind::RUNTIME, &GenerateRuntimeIntrinsics},
     };

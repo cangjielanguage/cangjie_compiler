@@ -17,10 +17,14 @@ std::string AnnotationMap::ToString() const
     std::stringstream ss;
     ss << loc.ToString();
     for (auto& pair : annotations) {
+        auto str = pair.second->ToString();
+        if (str.empty()) {
+            continue;
+        }
         if (ss.str() != "") {
             ss << ", ";
         }
-        ss << pair.second->ToString();
+        ss << str;
     }
     return ss.str();
 }
@@ -30,10 +34,8 @@ std::string SkipCheck::ToString()
     switch (kind) {
         case SkipKind::SKIP_DCE_WARNING:
             return "skip: dce warning";
-        case SkipKind::SKIP_CODEGEN:
-            return "skip: codegen";
         case SkipKind::SKIP_FORIN_EXIT:
-            return "skip: vic (forin)";
+            return "skip: for-in exit";
         case SkipKind::SKIP_VIC:
             return "skip: vic";
         default:
@@ -41,13 +43,14 @@ std::string SkipCheck::ToString()
     }
 }
 
-std::string WrappedParentType::ToString()
-{
-    return "wrapped from: " + parentType->ToString();
-}
-
 std::string WrappedRawMethod::ToString()
 {
+    // WrappedRawMethod may be removed body when removeUnusedImported，do not form it.
+    auto wrapMethod = dynamic_cast<Func*>(rawMethod);
+    if (wrapMethod != nullptr && !wrapMethod->GetBody()) {
+        return "";
+    }
+
     return "wrapped raw method: " + rawMethod->GetIdentifier();
 }
 } // namespace Cangjie::CHIR

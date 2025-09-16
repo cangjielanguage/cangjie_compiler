@@ -13,7 +13,7 @@
 #include "cangjie/CHIR/Utils.h"
 
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Type/CustomTypeDef.h"
 #include "cangjie/CHIR/Type/Type.h"
@@ -303,7 +303,7 @@ void AddExpressionsToGlobalInitFunc(const Func& initFunc, const std::vector<Expr
         if (storeNode->GetLocation()->GetSrcCodeIdentifier() != GV_PKG_INIT_ONCE_FLAG) {
             return VisitResult::CONTINUE;
         }
-        auto parent = expr.GetParent();
+        auto parent = expr.GetParentBlock();
         const auto& exprs = parent->GetExpressions();
         for (auto it : insertExpr) {
             it->MoveBefore(exprs.back());
@@ -418,11 +418,6 @@ Type* CreateNewTypeWithArgs(Type& oldType, const std::vector<Type*>& newArgs, CH
         case Type::TypeKind::TYPE_VARRAY:
             CJC_ASSERT(newArgs.size() == 1);
             newType = builder.GetType<VArrayType>(newArgs[0], StaticCast<const VArrayType&>(oldType).GetSize());
-            break;
-        case Type::TypeKind::TYPE_CLOSURE:
-            CJC_ASSERT(newArgs.size() == static_cast<size_t>(ClosureType::Element::CLOSURE_ELE_NUM));
-            newType = builder.GetType<ClosureType>(newArgs[static_cast<size_t>(ClosureType::Element::FUNC_INDEX)],
-                newArgs[static_cast<size_t>(ClosureType::Element::ENV_INDEX)]);
             break;
         case Type::TypeKind::TYPE_BOXTYPE:
             CJC_ASSERT(newArgs.size() == 1);
@@ -874,7 +869,7 @@ std::vector<Type*> GetOutDefDeclaredTypes(const Value& innerDef)
     std::vector<Type*> instArgs(visiableGenericTypes.begin(), visiableGenericTypes.end());
     auto parentFunc = DynamicCast<const FuncBase*>(&innerDef);
     if (parentFunc == nullptr) {
-        parentFunc = GetParentFunc(innerDef);
+        parentFunc = GetTopLevelFunc(innerDef);
     }
     CJC_NULLPTR_CHECK(parentFunc);
     if (auto exDef = DynamicCast<ExtendDef*>(parentFunc->GetParentCustomTypeDef())) {
@@ -1033,6 +1028,11 @@ bool IsCoreOption(const CustomTypeDef& def)
     return CheckCustomTypeDefIsExpected(def, CORE_PACKAGE_NAME, STD_LIB_OPTION);
 }
 
+bool IsCoreFuture(const CustomTypeDef& def)
+{
+    return CheckCustomTypeDefIsExpected(def, CORE_PACKAGE_NAME, STD_LIB_FUTURE);
+}
+
 bool IsClosureConversionEnvClass(const ClassDef& def)
 {
     return def.Get<IsAutoEnvClass>();
@@ -1043,16 +1043,16 @@ bool IsCapturedClass(const ClassDef& def)
     return def.Get<IsCapturedClassInCC>();
 }
 
-Func* GetParentFunc(const Value& value)
+Func* GetTopLevelFunc(const Value& value)
 {
     if (value.IsParameter()) {
-        return StaticCast<const Parameter&>(value).GetParentFunc();
+        return StaticCast<const Parameter&>(value).GetTopLevelFunc();
     } else if (value.IsLocalVar()) {
-        return StaticCast<const LocalVar&>(value).GetParentFunc();
+        return StaticCast<const LocalVar&>(value).GetTopLevelFunc();
     } else if (value.IsBlock()) {
-        return StaticCast<const Block&>(value).GetParentFunc();
+        return StaticCast<const Block&>(value).GetTopLevelFunc();
     } else if (value.IsBlockGroup()) {
-        return StaticCast<const BlockGroup&>(value).GetParentFunc();
+        return StaticCast<const BlockGroup&>(value).GetTopLevelFunc();
     }
     CJC_ABORT();
     return nullptr;
@@ -1097,8 +1097,8 @@ void GetVisiableGenericTypes(const LocalVar& value, std::vector<GenericType*>& r
 
 void GetVisiableGenericTypes(const Parameter& value, std::vector<GenericType*>& result)
 {
-    if (value.GetParentFunc() != nullptr) {
-        GetVisiableGenericTypes(*value.GetParentFunc(), result);
+    if (value.GetTopLevelFunc() != nullptr) {
+        GetVisiableGenericTypes(*value.GetTopLevelFunc(), result);
     } else {
         CJC_NULLPTR_CHECK(value.GetOwnerLambda());
         GetVisiableGenericTypes(*value.GetOwnerLambda()->GetResult(), result);
@@ -1193,5 +1193,222 @@ bool IsConstructor(const Value& value)
         return func->IsConstructor();
     }
     return false;
+}
+
+bool MeetAutoEnvBase(const Type& subType, const Type& superType)
+{
+    return subType.IsAutoEnvInstBase() && superType.IsAutoEnvGenericBase() &&
+        Cangjie::StaticCast<const ClassType&>(subType).GetClassDef()->GetSuperClassTy() == &superType;
+}
+ 
+bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType)
+{
+    if (&paramType == &argType) {
+        return true;
+    }
+    if (auto g = DynamicCast<const GenericType*>(&paramType); g && g->orphanFlag) {
+        auto upperBounds = g->GetUpperBounds();
+        CJC_ASSERT(upperBounds.size() == 1);
+        return upperBounds[0] == &argType;
+    }
+    return MeetAutoEnvBase(*argType.StripAllRefs(), *paramType.StripAllRefs());
+}
+
+std::vector<ClassType*> GetSuperTypesRecusively(Type& subType, CHIRBuilder& builder)
+{
+    std::vector<ClassType*> result;
+    if (auto customType = DynamicCast<CustomType*>(&subType)) {
+        result = customType->GetSuperTypesRecusively(builder);
+    } else if (auto builtinType = DynamicCast<BuiltinType*>(&subType)) {
+        result = builtinType->GetSuperTypesRecusively(builder);
+    } else if (auto genericType = DynamicCast<GenericType*>(&subType)) {
+        for (auto upperBound : genericType->GetUpperBounds()) {
+            auto classType = StaticCast<ClassType*>(upperBound->StripAllRefs());
+            result.emplace_back(classType);
+            auto tempParents = GetSuperTypesRecusively(*classType, builder);
+            for (auto p : tempParents) {
+                if (std::find(result.begin(), result.end(), p) == result.end()) {
+                    result.emplace_back(p);
+                }
+            }
+        }
+    } else {
+        CJC_ABORT();
+    }
+    return result;
+}
+
+ClassType* GetInstParentType(const std::vector<ClassType*>& candidate,
+    const FuncBase& callee, const std::vector<Value*>& args, CHIRBuilder& builder)
+{
+    CJC_ASSERT(!candidate.empty());
+    if (candidate.size() == 1) {
+        return candidate[0];
+    }
+    std::unordered_set<ClassDef*> tempDef;
+    for (auto p : candidate) {
+        tempDef.emplace(p->GetClassDef());
+    }
+    CJC_ASSERT(tempDef.size() == 1);
+
+    size_t offset = callee.TestAttr(Attribute::STATIC) ? 0 : 1;
+    std::vector<Type*> argTypes;
+    for (size_t i = offset; i < args.size(); ++i) {
+        argTypes.emplace_back(args[i]->GetType());
+    }
+    auto paramTypes = callee.GetFuncType()->GetParamTypes();
+    if (!callee.TestAttr(Attribute::STATIC)) {
+        paramTypes.erase(paramTypes.begin());
+    }
+    CJC_ASSERT(argTypes.size() == paramTypes.size());
+    for (auto p : candidate) {
+        auto [ret, instMap] = p->GetClassDef()->GetType()->CalculateGenericTyMapping(*p);
+        CJC_ASSERT(ret);
+        bool argTypeMatched = true;
+        for (size_t i = 0; i < paramTypes.size(); ++i) {
+            auto instType = ReplaceRawGenericArgType(*paramTypes[i], instMap, builder);
+            if (!ParamTypeIsEquivalent(*instType, *argTypes[i])) {
+                argTypeMatched = false;
+                break;
+            }
+        }
+        if (argTypeMatched) {
+            return p;
+        }
+    }
+    CJC_ABORT();
+    return nullptr;
+}
+
+Type* GetInstParentCustomTyOfCallee(
+    const Value& value, const std::vector<Value*>& args, const Type* thisType, CHIRBuilder& builder)
+{
+    auto callee = DynamicCast<FuncBase*>(&value);
+    if (callee == nullptr) {
+        return nullptr;  // call a value
+    }
+    if (!callee->IsMemberFunc()) {
+        return nullptr; // global function
+    }
+
+    auto calleeParentDef = callee->GetParentCustomTypeDef();
+    CJC_NULLPTR_CHECK(calleeParentDef);
+    if (thisType == nullptr) {
+        return calleeParentDef->GetType(); // call a member method with implicit `this`
+    }
+    
+    if (!calleeParentDef->GetType()->IsBuiltinType() && calleeParentDef->IsExtend()) {
+        calleeParentDef = StaticCast<CustomType*>(calleeParentDef->GetType())->GetCustomTypeDef();
+    }
+    auto derefThisType = thisType->StripAllRefs();
+    // `thisType` is sub class, `calleeParentDef` is parent class, a CustomType can't inherit BuiltinType
+    CJC_ASSERT(!(derefThisType->IsCustomType() && calleeParentDef->GetType()->IsBuiltinType()));
+    auto typeAndDefIsEquivalent = [](const CustomType& type, const CustomTypeDef& def) {
+        /**
+         * 1. def equals def, maybe `def` is generic, `type` is instantiated
+         * 2. type equals type, maybe `def` is instantiated
+         */
+        return type.GetCustomTypeDef() == &def || &type == def.GetType();
+    };
+    if (auto customType = DynamicCast<CustomType*>(derefThisType); customType &&
+        typeAndDefIsEquivalent(*customType, *calleeParentDef)) {
+        /**
+         * 1. a function declared in generic custom type def, is called by instantiated custom type
+         *  class A<T> {
+         *      func foo() {}
+         *  }
+         *  A<Bool>.foo()  // `thisType` is A<Bool>, `foo`'s parent def is A<T>
+         *
+         * 2. a function declared in instantiated custom type def, is called by instantiated custom type
+         *  class A<T> {
+         *      func foo() {}
+         *  }
+         *  class A_Bool {  // A<T> is instantiated by Bool
+         *      func foo_Bool() {}
+         *  }
+         *  A<Bool>.foo_Bool()  // `thisType` is A<Bool>, `foo`'s parent def is A_Bool
+         */
+        return derefThisType;
+    } else if (auto builtinType = DynamicCast<BuiltinType*>(derefThisType);
+        builtinType && builtinType->IsSameTypeKind(*calleeParentDef->GetType())) {
+        // we should compare type pointer, but CPointer<T> is generic type, so we have to compare type kind
+        return derefThisType;
+    } else {
+        /**
+         * a function declared in parent def, but called by sub type, then we need to compute instantiated parent type
+         * 1. a function declared in generic custom type def, is called by instantiated sub custom type
+         *  interface A<T> {
+         *      func foo() {}
+         *  }
+         *  class B<T> <: A<T> {}
+         *  B<Bool>.foo()  // `thisType` is B<Bool>, `foo`'s parent def is A<T>, then parent type is A<Bool>
+         *
+         * 2. a function declared in instantiated custom type def, is called by instantiated sub custom type
+         *  interface A<T> {
+         *      func foo() {}
+         *  }
+         *  class B<T> <: A<T> {}
+         *  interface A_Bool {
+         *      func foo_Bool() {}
+         *  }
+         *  class B_Bool <: A_Bool {}
+         *  B<Bool>.foo_Bool()  // `thisType` is B<Bool>, `foo`'s parent def is A_Bool, then parent type is A<Bool>
+         *
+         * 3. sub class inherit the same parent class more than once with different instantiated type
+         *  interface A<T> {
+         *      func foo(a: T) {}
+         *  }
+         *  class B <: A<Bool> & A<Int64> {}
+         *  B().foo(1)  // `thisType` is B<Bool>, `foo`'s parent def is A<T>, then parent type is A<Int64>
+         */
+        auto parentTypes = GetSuperTypesRecusively(*derefThisType, builder);
+        std::vector<ClassType*> matchedTypes;
+        for (auto pType : parentTypes) {
+            if (typeAndDefIsEquivalent(*pType, *calleeParentDef)) {
+                matchedTypes.emplace_back(pType);
+            }
+        }
+        return GetInstParentType(matchedTypes, *callee, args, builder);
+    }
+}
+
+Type* GetInstParentCustomTypeForApplyCallee(const Apply& expr, CHIRBuilder& builder)
+{
+    return GetInstParentCustomTyOfCallee(*expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder);
+}
+
+Type* GetInstParentCustomTypeForAweCallee(const ApplyWithException& expr, CHIRBuilder& builder)
+{
+    return GetInstParentCustomTyOfCallee(*expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder);
+}
+
+std::vector<VTableSearchRes> GetFuncIndexInVTable(
+    Type& root, const FuncCallType& funcCallType, bool isStatic, CHIRBuilder& builder)
+{
+    std::vector<VTableSearchRes> result;
+    if (auto genericTy = DynamicCast<GenericType*>(&root)) {
+        auto& upperBounds = genericTy->GetUpperBounds();
+        CJC_ASSERT(!upperBounds.empty());
+        for (auto upperBound : upperBounds) {
+            ClassType* upperClassType = StaticCast<ClassType*>(StaticCast<RefType*>(upperBound)->GetBaseType());
+            result = GetFuncIndexInVTable(*upperClassType, funcCallType, isStatic, builder);
+            if (!result.empty()) {
+                break;
+            }
+        }
+    } else if (auto classTy = DynamicCast<CustomType*>(&root)) {
+        result = classTy->GetFuncIndexInVTable(funcCallType, isStatic, builder);
+    } else {
+        std::unordered_map<const GenericType*, Type*> empty;
+        auto extendDefs = root.GetExtends(&builder);
+        CJC_ASSERT(!extendDefs.empty());
+        for (auto ex : extendDefs) {
+            result = ex->GetFuncIndexInVTable(funcCallType, isStatic, empty, builder);
+            if (!result.empty()) {
+                break;
+            }
+        }
+    }
+    return result;
 }
 } // namespace Cangjie::CHIR

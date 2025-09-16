@@ -49,8 +49,8 @@ void CHIR2BCHIR::TranslateTerminatorExpression(Context& ctx, const Expression& e
         }
         case ExprKind::EXIT: {
             CJC_ASSERT(expr.GetNumOfOperands() == 0);
-            CJC_ASSERT(expr.GetParentFunc() != nullptr);
-            auto ret = expr.GetParentFunc()->GetReturnValue();
+            CJC_ASSERT(expr.GetTopLevelFunc() != nullptr);
+            auto ret = expr.GetTopLevelFunc()->GetReturnValue();
             if (ret == nullptr) {
                 // this function does not have a return var
                 PushOpCodeWithAnnotations(ctx, OpCode::UNIT, expr);
@@ -97,45 +97,20 @@ void CHIR2BCHIR::TranslateTerminatorExpression(Context& ctx, const Expression& e
             TranslateTryTerminatorJumps(ctx, *invoke);
             break;
         }
+        case ExprKind::INVOKESTATIC_WITH_EXCEPTION: {
+            PushOpCodeWithAnnotations(ctx, OpCode::ABORT, expr);
+            break;
+        }
         case ExprKind::INT_OP_WITH_EXCEPTION: {
             auto intOpWithException = StaticCast<const IntOpWithException*>(&expr);
             TranslateIntOpWithException(ctx, *intOpWithException);
             TranslateTryTerminatorJumps(ctx, *intOpWithException);
             break;
         }
-        case ExprKind::TYPECAST_WITH_EXCEPTION: {
-            CJC_ASSERT(expr.GetNumOfOperands() == 1);
-            auto typeCastWithExc = StaticCast<const TypeCastWithException*>(&expr);
-            if (TranslateTypecastWithException(ctx, *typeCastWithExc)) {
-                // only generate terminator jump if typecast is generated
-                TranslateTryTerminatorJumps(ctx, *typeCastWithExc);
-            }
-            break;
-        }
-        case ExprKind::INTRINSIC_WITH_EXCEPTION: {
-            auto intrinsic = StaticCast<const IntrinsicWithException*>(&expr);
-            TranslateIntrinsicExpression(ctx, *intrinsic);
-            TranslateTryTerminatorJumps(ctx, *intrinsic);
-            break;
-        }
         case ExprKind::ALLOCATE_WITH_EXCEPTION: {
             CJC_ASSERT(expr.GetNumOfOperands() == 0);
             TranslateAllocate(ctx, expr);
             TranslateTryTerminatorJumps(ctx, *StaticCast<const Terminator*>(&expr));
-            break;
-        }
-        case ExprKind::RAW_ARRAY_ALLOCATE_WITH_EXCEPTION: {
-            PushOpCodeWithAnnotations(ctx, OpCode::ALLOCATE_RAW_ARRAY_EXC, expr);
-            TranslateTryTerminatorJumps(ctx, *StaticCast<const Terminator*>(&expr));
-            break;
-        }
-        case ExprKind::SPAWN_WITH_EXCEPTION: {
-            PushOpCodeWithAnnotations(ctx, OpCode::SPAWN_EXC, expr);
-            TranslateTryTerminatorJumps(ctx, *StaticCast<const Terminator*>(&expr));
-            break;
-        }
-        case ExprKind::INVOKESTATIC_WITH_EXCEPTION: {
-            PushOpCodeWithAnnotations(ctx, OpCode::ABORT, expr);
             break;
         }
         default: {
@@ -149,39 +124,8 @@ void CHIR2BCHIR::TranslateTerminatorExpression(Context& ctx, const Expression& e
 
 void CHIR2BCHIR::TranslateApplyWithExceptionExpression(Context& ctx, const ApplyWithException& apply)
 {
-    auto funcExpr = apply.GetCallee();
-    if (funcExpr->IsImportedFunc() &&
-        funcExpr->GetAttributeInfo().TestAttr(Attribute::FOREIGN)) {
-        // This is an hack. These functions should be intrinsic in CHIR 2.0. For the time being
-        // we simply translate them as INTRINSIC1_EXC.
-        auto it = syscall2IntrinsicKind.find(funcExpr->GetSrcCodeIdentifier());
-        if (it != syscall2IntrinsicKind.end()) {
-            // We use INTRINSIC1_EXC instead of INTRINSIC0_EXC so that we know that the dummy function node
-            // needs to be popped from the argument stack. Revert changes once these functions are marked
-            // as intrinsic in CHIR 2.0.
-            PushOpCodeWithAnnotations<false, true>(
-                ctx, OpCode::INTRINSIC1_EXC, apply, static_cast<unsigned>(it->second), 0u);
-        } else {
-            // For some reason CHIR generates calls to foreign functions with ApplyWithException
-            auto operands = apply.GetOperands();
-            auto strIdx = GetStringIdx(funcExpr->GetSrcCodeIdentifier());
-            auto numberArgs = apply.GetNumOfOperands() - 1;
-            CJC_ASSERT(numberArgs <= static_cast<size_t>(Bchir::BYTECODE_CONTENT_MAX));
-            PushOpCodeWithAnnotations<false, true>(
-                ctx, OpCode::SYSCALL, apply, strIdx, static_cast<Bchir::ByteCodeContent>(numberArgs));
-            auto addTyAnnotation = [this, &ctx](CHIR::Type& type) { ctx.def.Push(GetTypeIdx(type)); };
-            addTyAnnotation(*apply.GetResult()->GetType());
-            // skip the first operand which is the function
-            for (size_t i = 1; i < operands.size(); ++i) {
-                addTyAnnotation(*operands[i]->GetType());
-            }
-            PushOpCodeWithAnnotations(ctx, OpCode::LVAR_SET, apply, LVarId(ctx, *apply.GetResult()));
-            return;
-        }
-    } else {
-        PushOpCodeWithAnnotations<false, true>(
-            ctx, OpCode::APPLY_EXC, apply, static_cast<unsigned>(apply.GetNumOfOperands()));
-    }
+    PushOpCodeWithAnnotations<false, true>(
+        ctx, OpCode::APPLY_EXC, apply, static_cast<unsigned>(apply.GetNumOfOperands()));
     TranslateTryTerminatorJumps(ctx, apply);
 }
 
@@ -252,30 +196,10 @@ void CHIR2BCHIR::TranslateIntOpWithException(Context& ctx, const IntOpWithExcept
         CJC_ASSERT(expr.GetNumOfOperands() == Bchir::FLAG_TWO);
         CJC_ASSERT(opCode == OpCode::BIN_ADD_EXC || opCode == OpCode::BIN_SUB_EXC || opCode == OpCode::BIN_MUL_EXC ||
             opCode == OpCode::BIN_DIV_EXC || opCode == OpCode::BIN_MOD_EXC || opCode == OpCode::BIN_EXP_EXC ||
-            opCode == OpCode::BIN_LSHIFT_EXC || opCode == OpCode::BIN_RSHIFT_EXC || opCode == OpCode::BIN_BITAND_EXC ||
-            opCode == OpCode::BIN_BITOR_EXC || opCode == OpCode::BIN_BITXOR_EXC);
+            opCode == OpCode::BIN_LSHIFT_EXC || opCode == OpCode::BIN_RSHIFT_EXC);
     }
     PushOpCodeWithAnnotations<false, true>(ctx, opCode, expr, typeKind, overflowStrat);
     if (opCode == OpCode::BIN_LSHIFT_EXC || opCode == OpCode::BIN_RSHIFT_EXC) {
         ctx.def.Push(static_cast<Bchir::ByteCodeContent>(expr.GetOperand(1)->GetType()->GetTypeKind()));
-    }
-}
-
-bool CHIR2BCHIR::TranslateTypecastWithException(Context& ctx, const TypeCastWithException& expr)
-{
-    auto srcTy = expr.GetSourceTy();
-    auto dstTy = expr.GetTargetTy();
-    if (srcTy->IsPrimitive() && dstTy->IsPrimitive()) {
-        auto srcTyIdx = srcTy->GetTypeKind();
-        auto dstTyIdx = dstTy->GetTypeKind();
-        auto overflowStrat = static_cast<Bchir::ByteCodeContent>(Cangjie::OverflowStrategy::THROWING);
-        PushOpCodeWithAnnotations<false, true>(ctx, OpCode::TYPECAST_EXC, expr, srcTyIdx, dstTyIdx, overflowStrat);
-        return true;
-    } else {
-        CJC_ASSERT((!srcTy->IsPrimitive() && !dstTy->IsPrimitive()) ||
-            (srcTy->IsEnum() && dstTy->GetTypeKind() == CHIR::Type::TypeKind::TYPE_UINT64) ||
-            (srcTy->GetTypeKind() == CHIR::Type::TypeKind::TYPE_UINT64 && dstTy->IsEnum()));
-        // no cast needed, the operation argument is the result of the operation
-        return false;
     }
 }

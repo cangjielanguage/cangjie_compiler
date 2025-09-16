@@ -23,12 +23,13 @@
 #include <vector>
 
 #include "cangjie/AST/Match.h"
-#include "cangjie/AST/Walker.h"
-#include "cangjie/AST/Symbol.h"
 #include "cangjie/AST/RecoverDesugar.h"
+#include "cangjie/AST/Symbol.h"
+#include "cangjie/AST/Utils.h"
+#include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/Position.h"
 #include "cangjie/Utils/CheckUtils.h"
-#include "cangjie/AST/Utils.h"
+#include "cangjie/Utils/StdUtils.h"
 
 namespace Cangjie {
 using namespace AST;
@@ -291,6 +292,66 @@ std::string LitConstExpr::ToString() const
     } else {
         return stringValue;
     }
+}
+
+TypeKind LitConstExpr::GetNumLitTypeKind()
+{
+    int suffixWidth = 0;
+    if (kind == LitConstKind::RUNE_BYTE) {
+        return TypeKind::TYPE_UINT8;
+    }
+    if (kind == LitConstKind::INTEGER) {
+        auto suffixStart =
+            std::find_if(stringValue.begin(), stringValue.end(), [](char c) { return c == 'i' || c == 'u'; });
+        std::string suffix = std::string(suffixStart, stringValue.end());
+        if (suffix.empty()) {
+            return TypeKind::TYPE_IDEAL_INT;
+        } else {
+            if (auto suffixWid = Stoi(std::string(suffix.begin() + 1, suffix.end()))) {
+                suffixWidth = *suffixWid;
+            } else {
+                return TypeKind::TYPE_INVALID;
+            }
+            // The following will calculate logarithm 8, 16, 32, 64 base 2 and will get
+            // 3,4,5,6, take 3(int) or 4(float) as base and plus powerBase2 - 3 + INT8 or UINT8 or FLOAT16
+            int powerBase2 = __builtin_ctz(static_cast<unsigned>(suffixWidth));
+            char signedness = suffix[0];
+            // The following code violates P.08-CPP(V5.0), however, I think it is OK since the number of width must
+            // be the several possibilities. If not the case, lexer would report an error in the early stage. Can
+            // only be i, u, f three cases
+            if (signedness == 'i' || signedness == 'u') {
+                int leastPowerBase2 = 3; // int starts from 8=2^3 bits width
+                TypeKind tk = signedness == 'i' ? TypeKind::TYPE_INT8 : TypeKind::TYPE_UINT8;
+                return static_cast<TypeKind>(powerBase2 - leastPowerBase2 + static_cast<int>(tk));
+            } else {
+                return TypeKind::TYPE_INVALID;
+            }
+        }
+    } else if (kind == LitConstKind::FLOAT) {
+        // Check whether it is a hexadecimal floating pointing number. If it is then
+        // 'f' is allowed as digits and there will not be any suffix.
+        // We should skip the negative sign if it exists.
+        bool isNegative = !stringValue.empty() && stringValue.front() == '-';
+        std::string prefix = stringValue.substr(isNegative ? 1 : 0, std::min<size_t>(stringValue.size(), 2UL));
+        if (prefix == "0x" || prefix == "0X") {
+            return TypeKind::TYPE_IDEAL_FLOAT;
+        }
+        auto suffixStart = std::find_if(stringValue.begin(), stringValue.end(), [](char c) { return c == 'f'; });
+        std::string suffix = std::string(suffixStart, stringValue.end());
+        if (suffix.empty()) {
+            return TypeKind::TYPE_IDEAL_FLOAT;
+        } else {
+            if (auto suffixWid = Stoi(std::string(suffix.begin() + 1, suffix.end()))) {
+                suffixWidth = *suffixWid;
+            } else {
+                return TypeKind::TYPE_INVALID;
+            }
+            int powerBase2 = __builtin_ctz(static_cast<unsigned>(suffixWidth));
+            int leastPowerBase2 = 4;
+            return static_cast<TypeKind>(powerBase2 - leastPowerBase2 + static_cast<int>(TypeKind::TYPE_FLOAT16));
+        }
+    }
+    return TypeKind::TYPE_INVALID;
 }
 
 std::string RefType::ToString() const
@@ -629,6 +690,25 @@ Ptr<Decl> Node::GetTarget() const
     }
 }
 
+std::vector<Ptr<Decl>> Node::GetTargets() const
+{
+    switch (astKind) {
+        case ASTKind::REF_TYPE: {
+            return RawStaticCast<const RefType*>(this)->ref.targets;
+        }
+        case ASTKind::REF_EXPR: {
+            return RawStaticCast<const RefExpr*>(this)->ref.targets;
+        }
+        case ASTKind::MEMBER_ACCESS: {
+            auto targetDecls = RawStaticCast<const MemberAccess*>(this)->targets;
+            std::vector<Ptr<Decl>> decls(targetDecls.begin(), targetDecls.end());
+            return decls;
+        }
+        default:
+            return {};
+    }
+}
+
 /**
  * Get a MacroInvocation ptr.
  * @return MacroInvocation ptr if a node is MacroExpandExpr or MacroExpandDecl,
@@ -892,6 +972,18 @@ bool Decl::IsConst() const
     return false;
 }
 
+Ptr<FuncDecl> Decl::GetDesugarDecl() const
+{
+    if (auto macroDecl = DynamicCast<const MacroDecl*>(this); macroDecl) {
+        return macroDecl->desugarDecl.get();
+    } else if (auto mainDecl = DynamicCast<const MainDecl*>(this); mainDecl) {
+        return mainDecl->desugarDecl.get();
+    } else if (auto funcParam = DynamicCast<const FuncParam*>(this); funcParam) {
+        return funcParam->desugarDecl.get();
+    }
+    return nullptr;
+}
+
 /**
  * For debug, get the original Position of the node if it is from MacroCall in curfile, curPos otherwise.
  */
@@ -1062,6 +1154,28 @@ bool FuncDecl::IsExportedDecl() const
         return false;
     }
     return Decl::IsExportedDecl() && TestAttr(Attribute::INTERFACE_IMPL);
+}
+
+bool FuncDecl::IsOpen() const noexcept
+{
+    if (!outerDecl || !outerDecl->IsOpen() || TestAttr(Attribute::STATIC)) {
+        return false;
+    }
+    if (TestAnyAttr(Attribute::OPEN, Attribute::ABSTRACT)) {
+        return true;
+    }
+    return !TestAttr(AST::Attribute::IMPORTED) && !funcBody->body;
+}
+
+bool PropDecl::IsOpen() const noexcept
+{
+    if (!outerDecl || !outerDecl->IsOpen() || TestAttr(Attribute::STATIC)) {
+        return false;
+    }
+    if (TestAnyAttr(Attribute::OPEN, Attribute::ABSTRACT)) {
+        return true;
+    }
+    return !TestAttr(AST::Attribute::IMPORTED) && getters.empty() && setters.empty();
 }
 
 } // namespace Cangjie

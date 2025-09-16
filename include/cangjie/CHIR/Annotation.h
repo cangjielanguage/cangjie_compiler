@@ -28,10 +28,7 @@ struct Annotation {
     virtual ~Annotation() = default;
     virtual std::unique_ptr<Annotation> Clone() = 0;
 
-    virtual std::string ToString()
-    {
-        return "";
-    }
+    virtual std::string ToString() = 0;
 };
 
 /**
@@ -96,35 +93,6 @@ private:
     bool need = true;
 };
 
-/**
- * record debug info, like absPath, fileID
- */
-struct DebugLocationInfo : public Annotation {
-public:
-    explicit DebugLocationInfo() = default;
-    explicit DebugLocationInfo(const DebugLocation& locationInfo) : location(locationInfo)
-    {
-    }
-
-    static const DebugLocation Extract(const DebugLocationInfo* input)
-    {
-        return input->location;
-    }
-
-    std::unique_ptr<Annotation> Clone() override
-    {
-        return std::make_unique<DebugLocationInfo>(location);
-    }
-
-    std::string ToString() override
-    {
-        return location.ToString();
-    }
-
-private:
-    DebugLocation location;
-};
-
 struct DebugLocationInfoForWarning : public Annotation {
 public:
     explicit DebugLocationInfoForWarning() = default;
@@ -178,33 +146,6 @@ private:
     Cangjie::Linkage linkType;
 };
 
-class Type;
-/**
- * record real parent type where it come from for wrapper function.
- */
-struct WrappedParentType : public Annotation {
-public:
-    explicit WrappedParentType() = default;
-    explicit WrappedParentType(Type* type) : parentType(type)
-    {
-    }
-
-    static Type* Extract(const WrappedParentType* input)
-    {
-        return input->parentType;
-    }
-
-    std::unique_ptr<Annotation> Clone() override
-    {
-        return std::make_unique<WrappedParentType>(parentType);
-    }
-
-    std::string ToString() override;
-
-private:
-    Type* parentType{nullptr};
-};
-
 struct WrappedRawMethod : public Annotation {
 public:
     explicit WrappedRawMethod() = default;
@@ -237,7 +178,6 @@ private:
 enum class SkipKind : uint8_t {
     NO_SKIP,
     SKIP_DCE_WARNING,
-    SKIP_CODEGEN,
     SKIP_FORIN_EXIT,
     SKIP_VIC,
 };
@@ -340,31 +280,6 @@ private:
     bool flag{false};
 };
 
-struct IsBoxedClass : public Annotation {
-public:
-    explicit IsBoxedClass() = default;
-    explicit IsBoxedClass(bool b) : isBoxed(b){};
-
-    static bool Extract(const IsBoxedClass* info)
-    {
-        return info->isBoxed;
-    }
-
-    std::unique_ptr<Annotation> Clone() override
-    {
-        return std::make_unique<IsBoxedClass>(isBoxed);
-    }
-
-    std::string ToString() override
-    {
-        std::string str = isBoxed ? "true" : "false";
-        return "IsBoxedClass: " + str;
-    }
-
-private:
-    bool isBoxed{false};
-};
-
 struct EnumCaseIndex : public Annotation {
 public:
     explicit EnumCaseIndex() = default;
@@ -382,8 +297,10 @@ public:
 
     std::string ToString() override
     {
-        std::string str = index.has_value() ? std::to_string(index.value()) : "non-value";
-        return "EnumCaseIndex: " + str;
+        if (index.has_value()) {
+            return "EnumCaseIndex: " + std::to_string(index.value());
+        }
+        return "";
     }
 
 private:
@@ -488,17 +405,5 @@ private:
     // DebugLocation is a specialised field for better performance, since most expression/value/decl/type has one.
     DebugLocation loc{};
 };
-
-// these three specialisations are deprecated and not defined
-// explicit use of them will cause a deprecation warning and a link error
-template <>
-[[deprecated("Use `const DebugLocation& GetDebugLocation() const` instead\n")]]
-const DebugLocation AnnotationMap::Get<DebugLocationInfo>() const;
-template <>
-[[deprecated("Use `void SetDebugLocation(DebugLocation&&)` instead\n")]]
-void AnnotationMap::Set<DebugLocationInfo>(const DebugLocation& newLoc);
-template <>
-[[deprecated("Use `void SetDebugLocation(DebugLocation&&)` instead\n")]]
-void AnnotationMap::Set<DebugLocationInfo>(DebugLocation&& newLoc);
 } // namespace Cangjie::CHIR
 #endif

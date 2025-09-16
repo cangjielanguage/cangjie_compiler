@@ -513,8 +513,6 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetTyFromASTType(ASTContext& ctx, VArrayTy
     auto le = StaticAs<ASTKind::LIT_CONST_EXPR>(expr);
 #if CANGJIE_CODEGEN_CJNATIVE_BACKEND
     auto lengthLimitKind = TypeKind::TYPE_INT64;
-#else
-    auto lengthLimitKind = TypeKind::TYPE_INT32;
 #endif
     le->constNumValue.asInt.InitIntLiteral(le->stringValue, lengthLimitKind);
     le->constNumValue.asInt.SetOutOfRange(Cangjie::TypeManager::GetPrimitiveTy(lengthLimitKind));
@@ -522,8 +520,6 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetTyFromASTType(ASTContext& ctx, VArrayTy
         (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_exceed_num_value_range, *le, le->stringValue,
 #if CANGJIE_CODEGEN_CJNATIVE_BACKEND
             "Int64");
-#else
-            "Int32");
 #endif
         return TypeManager::GetInvalidTy();
     }
@@ -775,8 +771,8 @@ void TypeChecker::TypeCheckerImpl::ResolveDecls(ASTContext& ctx)
 {
     std::vector<Symbol*> syms = GetAllDecls(ctx);
     for (auto& sym : syms) {
-        if (auto fd = AST::As<ASTKind::FUNC_DECL>(sym->node); fd) {
-            SetOuterFunctionDecl(*fd);
+        if (sym->node->astKind == ASTKind::VAR_DECL || sym->node->astKind == ASTKind::FUNC_DECL) {
+            SetOuterFunctionDecl(*StaticCast<Decl*>(sym->node));
         }
     }
     for (auto& sym : syms) {

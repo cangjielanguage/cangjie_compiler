@@ -13,6 +13,8 @@
 #ifndef CANGJIE_CHIR_CHIRPRINTER_H
 #define CANGJIE_CHIR_CHIRPRINTER_H
 
+#include "cangjie/CHIR/CHIR.h"
+
 #include <iostream>
 
 namespace Cangjie::CHIR {
@@ -31,6 +33,7 @@ class CHIRPrinter {
 public:
     static void PrintCFG(const Func& func, const std::string& path);
     static void PrintPackage(const Package& package, const std::string& fullPath);
+    static void PrintCHIRSerializeInfo(ToCHIR::Phase phase, const std::string& path);
 
 public:
     CHIRPrinter(std::ostream& os) : os(os)

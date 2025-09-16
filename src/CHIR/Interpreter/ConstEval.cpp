@@ -101,13 +101,6 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertToChir(
         case Type::TYPE_REFTYPE: {
             return ConvertRefToChir(StaticCast<RefType&>(ty), val, insertExpr, parent);
         }
-        case Type::TYPE_FUNC: {
-            auto func = IValUtils::Get<IFunc>(val);
-            return ConvertFuncToChir(StaticCast<FuncType&>(ty), func);
-        }
-        case Type::TYPE_CLOSURE: {
-            return ConvertClosureToChir(StaticCast<ClosureType&>(ty), val, insertExpr, parent);
-        }
         case Type::TYPE_UNIT: {
             // Unit is not supported as a global variable initializer
             auto expr = chirBuilder.CreateConstantExpression<UnitLiteral>(&ty, &parent);
@@ -120,6 +113,7 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertToChir(
         // Should always be behind RefType.
         case Type::TYPE_CLASS:
         // Not supported as constants.
+        case Type::TYPE_FUNC:
         case Type::TYPE_GENERIC:
         case Type::TYPE_NOTHING:
         case Type::TYPE_RAWARRAY:
@@ -155,7 +149,7 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertStringToChir(
     }
 #endif
 
-    auto expr = chirBuilder.CreateConstantExpression<StringLiteral>(&ty, &parent, stringVal, false);
+    auto expr = chirBuilder.CreateConstantExpression<StringLiteral>(&ty, &parent, stringVal);
     insertExpr(expr);
     return expr->GetResult();
 }
@@ -315,30 +309,6 @@ Cangjie::CHIR::ClassType* IVal2CHIR::FindClassType(const std::string& mangledNam
     return chirBuilder.GetType<ClassType>(resultClassDef);
 }
 
-Cangjie::CHIR::Value* IVal2CHIR::ConvertFuncToChir(const FuncType& ty, const IFunc& val)
-{
-    auto& mangledName = bchir.GetLinkedByteCode().GetMangledNameAnnotation(static_cast<unsigned>(val.content));
-
-    auto funcs = package.GetGlobalFuncs();
-    auto func = std::find_if(funcs.cbegin(), funcs.cend(),
-        [&mangledName](const Func* func) { return func->GetIdentifierWithoutPrefix() == mangledName; });
-    if (func != funcs.cend()) {
-        return *func;
-    }
-
-    auto imports = package.GetImportedVarAndFuncs();
-    auto import = std::find_if(imports.cbegin(), imports.cend(),
-        [&mangledName](const ImportedValue* import) { return import->GetIdentifierWithoutPrefix() == mangledName; });
-    if (import != imports.cend()) {
-        return *import;
-    }
-
-    // If the function is from another package and isn't imported then
-    // we leave the constant unevaluated.
-    (void)ty;
-    return nullptr;
-}
-
 Cangjie::CHIR::Value* IVal2CHIR::ConvertArrayToChir(
     VArrayType& ty, const IArray& val, std::function<void(Expression*)>& insertExpr, Block& parent)
 {
@@ -358,26 +328,8 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertArrayToChir(
     return expr->GetResult();
 }
 
-Cangjie::CHIR::Value* IVal2CHIR::ConvertClosureToChir(
-    ClosureType& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent)
-{
-    auto& tupleVal = IValUtils::Get<ITuple>(val);
-    auto& envVal = tupleVal.content[1];
-    auto& funcVal = IValUtils::Get<IFunc>(tupleVal.content[0]);
-    auto tyEnv = ty.GetEnvType();
-    auto tyFunc = ty.GetFuncType();
-    auto envChir = ConvertToChir(*tyEnv, envVal, insertExpr, parent);
-    auto funcChir = ConvertToChir(*tyFunc, funcVal, insertExpr, parent);
-    if (!envChir || !funcChir) {
-        return nullptr;
-    }
-    auto expr = chirBuilder.CreateExpression<Tuple>(&ty, std::vector<Value*>{funcChir, envChir}, &parent);
-    insertExpr(expr);
-    return expr->GetResult();
-}
-
 void ConstEvalPass::RunOnPackage(Package& package,
-    const std::vector<CHIR::FuncBase*>& initFuncsForConstVar, std::vector<Bchir> bchirPackages)
+    const std::vector<CHIR::FuncBase*>& initFuncsForConstVar, std::vector<Bchir>& bchirPackages)
 {
     RunInterpreter(package, bchirPackages, initFuncsForConstVar,
         [this](auto& package, auto& interpreter, auto& linker) {
@@ -385,7 +337,7 @@ void ConstEvalPass::RunOnPackage(Package& package,
     });
 }
 
-void ConstEvalPass::RunInterpreter(Package& package, std::vector<Bchir> bchirPackages,
+void ConstEvalPass::RunInterpreter(Package& package, std::vector<Bchir>& bchirPackages,
     const std::vector<CHIR::FuncBase*>& initFuncsForConstVar,
     std::function<void(Package&, BCHIRInterpreter&, BCHIRLinker&)> onSuccess)
 {
@@ -427,7 +379,7 @@ void ConstEvalPass::RunInterpreter(Package& package, std::vector<Bchir> bchirPac
     if (std::holds_alternative<INotRun>(res)) {
         onSuccess(package, interpreter, linker);
     } else if (std::holds_alternative<IException>(res)) {
-        // Suppress error, no way to know whehter exception is legitimate
+        // Suppress error, no way to know whether exception is legitimate
     }
 }
 
@@ -532,25 +484,6 @@ std::optional<Cangjie::CHIR::BlockGroup*> ConstEvalPass::CreateNewInitializer(
     return newBody;
 }
 
-void ConstEvalPass::RemoveConstructorCalls(const Value& value)
-{
-    if (value.GetType()->IsPrimitive()) {
-        // Primitives don't have constructors
-        return;
-    }
-    for (auto use : value.GetUsers()) {
-        if (auto kind = use->GetExprKind(); kind != ExprKind::APPLY && kind != ExprKind::APPLY_WITH_EXCEPTION) {
-            continue;
-        }
-        auto callee = use->GetOperand(0);
-        FuncKind funcKind = VirtualCast<FuncBase>(callee)->GetFuncKind();
-        if (funcKind == FuncKind::CLASS_CONSTRUCTOR || funcKind == FuncKind::STRUCT_CONSTRUCTOR ||
-            funcKind == FuncKind::PRIMAL_CLASS_CONSTRUCTOR || funcKind == FuncKind::PRIMAL_STRUCT_CONSTRUCTOR) {
-            use->RemoveSelfFromBlock();
-        }
-    }
-}
-
 void ConstEvalPass::PrintDebugMessage(
     const DebugLocation& loc, const Func& oldInit, const std::optional<BlockGroup*>& newInit) const
 {
@@ -572,10 +505,10 @@ void ConstEvalPass::PrintDebugMessage(
         std::cout << "debug: consteval at " << begin << " - " << end << " evaluated initializer function `"
                   << oldInit.GetSrcCodeIdentifier() << "` of "
                   << std::accumulate(oldBody.cbegin(), oldBody.cend(), static_cast<size_t>(0),
-                                     [](auto acc, auto& block) { return acc + block->GetExpressions().size(); })
+                         [](auto acc, auto& block) { return acc + block->GetExpressions().size(); })
                   << " expressions to one of "
                   << std::accumulate(newBody.cbegin(), newBody.cend(), static_cast<size_t>(0),
-                                     [](auto acc, auto& block) { return acc + block->GetExpressions().size(); })
+                         [](auto acc, auto& block) { return acc + block->GetExpressions().size(); })
                   << " expressions." << std::endl;
     }
 }

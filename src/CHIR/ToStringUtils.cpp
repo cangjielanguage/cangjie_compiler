@@ -13,14 +13,14 @@
 #include "cangjie/CHIR/ToStringUtils.h"
 
 #include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Utils.h"
 #include "cangjie/Utils/Utils.h"
 
 namespace Cangjie::CHIR {
-void PrintIndent(std::ostream& stream, unsigned indent)
+void PrintIndent(std::ostream& stream, size_t indent)
 {
     for (unsigned i = 0; i < indent * 2; i++) { // 2 denote width of indent.
         stream << " ";
@@ -63,7 +63,7 @@ std::string GetGenericConstaintsStr(const std::vector<GenericType*>& genericType
     return ss.str();
 }
 
-std::string GetBlockStr(const Block& block, unsigned indent)
+std::string GetBlockStr(const Block& block, size_t indent)
 {
     std::stringstream ss;
     PrintIndent(ss, indent);
@@ -96,15 +96,12 @@ std::string GetBlockStr(const Block& block, unsigned indent)
             ss << res->GetIdentifier() << ": " << res->GetType()->ToString() << " = ";
         }
         ss << expr->ToString(indent + 1);
-        if (auto annostr = expr->ToStringAnnotationMap(); !annostr.empty()) {
-            ss << " // " << annostr;
-        }
         ss << "\n";
     }
     return ss.str();
 }
 
-std::string GetBlockGroupStr(const BlockGroup& blockGroup, unsigned indent)
+std::string GetBlockGroupStr(const BlockGroup& blockGroup, size_t indent)
 {
     std::stringstream ss;
     PrintIndent(ss, indent);
@@ -165,7 +162,7 @@ std::string GetGenericTypeParamsConstraintsStr(const std::vector<GenericType*>& 
     return res;
 }
 
-std::string GetLambdaStr(const Lambda& lambda, unsigned indent)
+std::string GetLambdaStr(const Lambda& lambda, size_t indent)
 {
     std::stringstream ss;
     if (lambda.IsCompileTimeValue()) {
@@ -194,23 +191,13 @@ std::string GetLambdaStr(const Lambda& lambda, unsigned indent)
     ss << "=> {";
     ss << " // ";
     ss << " srcCodeIdentifier: " << lambda.GetSrcCodeIdentifier();
-    // captured vars
-    if (auto capturedVars = lambda.GetCapturedVars(); !capturedVars.empty()) {
-        ss << " capturedVars: ";
-        for (size_t i = 0; i < capturedVars.size(); ++i) {
-            ss << capturedVars[i]->GetIdentifier();
-            if (i != capturedVars.size() - 1) {
-                ss << ", ";
-            }
-        }
-    }
     ss << GetGenericTypeParamsConstraintsStr(lambda.GetGenericTypeParams());
     ss << "\n" << GetBlockGroupStr(*lambda.GetBody(), indent + 1);
     ss << "}";
     return ss.str();
 }
 
-std::string GetFuncStr(const Func& func, unsigned indent)
+std::string GetFuncStr(const Func& func, size_t indent)
 {
     std::stringstream ss;
     ss << func.GetAttributeInfo().ToString();
@@ -248,13 +235,28 @@ std::string GetFuncStr(const Func& func, unsigned indent)
     }
     attrss << annostr;
     if (func.GetGenericDecl() != nullptr) {
-        attrss << ", genericDecl: " << func.GetGenericDecl()->GetIdentifierWithoutPrefix();
+        bool skipFlag = false;
+        if (auto genericFunc = DynamicCast<Func*>(func.GetGenericDecl()); genericFunc && !genericFunc->GetBody()) {
+            skipFlag = true;
+        }
+        if (!skipFlag) {
+            attrss << ", genericDecl: " << func.GetGenericDecl()->GetIdentifierWithoutPrefix();
+        }
     }
     if (func.GetParentCustomTypeDef() != nullptr) {
         attrss << ", declared parent: " << func.GetParentCustomTypeDef()->GetIdentifierWithoutPrefix();
     }
     if (attrss.str() != "") {
         ss << " // " << attrss.str();
+    }
+    if (func.GetParamDftValHostFunc()) {
+        ss << " paramDftValHostFunc: " << func.GetParamDftValHostFunc()->GetIdentifier();
+    }
+    if (func.GetFuncKind() == FuncKind::LAMBDA) {
+        if (func.GetOriginalLambdaType()) {
+            ss << " originalLambdaInfo: " << GetGenericTypeParamsStr(func.GetOriginalGenericTypeParams())
+               << func.GetOriginalLambdaType()->ToString();
+        }
     }
     if (!func.GetParentRawMangledName().empty()) {
         ss << " extendParentName: " << func.GetParentRawMangledName();
@@ -280,7 +282,10 @@ std::string GetFuncStr(const Func& func, unsigned indent)
             ss << paramWithAnnos[i]->GetSrcCodeIdentifier() + " : " + paramAnno.mangledName;
         }
     }
-    ss << "\n" << GetBlockGroupStr(*func.GetBody(), indent);
+    ss << "\n";
+    if (func.GetBody()) {
+        ss << GetBlockGroupStr(*func.GetBody(), indent);
+    }
     return ss.str();
 }
 
@@ -347,10 +352,19 @@ std::string GetImportedFuncStr(const ImportedFunc& value)
     }
     attrss << annostr;
     if (value.GetGenericDecl() != nullptr) {
-        attrss << ", genericDecl: " << value.GetGenericDecl()->GetIdentifierWithoutPrefix();
+        bool skipFlag = false;
+        if (auto genericFunc = DynamicCast<Func*>(value.GetGenericDecl()); genericFunc && !genericFunc->GetBody()) {
+            skipFlag = true;
+        }
+        if (!skipFlag) {
+            attrss << ", genericDecl: " << value.GetGenericDecl()->GetIdentifierWithoutPrefix();
+        }
     }
     if (attrss.str() != "") {
         ss << " // " << attrss.str();
+    }
+    if (value.GetParamDftValHostFunc()) {
+        ss << " paramDftValHostFunc: " << value.GetParamDftValHostFunc()->GetIdentifier();
     }
     if (auto anno = value.GetAnnoInfo(); anno.IsAvailable()) {
         ss << " funcAnnoInfo: " << anno.mangledName;
@@ -420,5 +434,109 @@ std::string BoolToString(bool flag)
     } else {
         return "false";
     }
+}
+
+StringWrapper ThisTypeToString(const Type* thisType)
+{
+    StringWrapper res;
+    if (thisType) {
+        res.Append("ThisType: ");
+        res.Append(thisType->ToString());
+    }
+    return res;
+}
+
+std::string InstTypeArgsToString(const std::vector<Type*>& instTypeArgs)
+{
+    std::string res;
+    if (!instTypeArgs.empty()) {
+        res += "<";
+        for (auto type : instTypeArgs) {
+            res += type->ToString();
+            res += ", ";
+        }
+        // remove the last ", "
+        res.pop_back();
+        res.pop_back();
+        res += ">";
+    }
+    return res;
+}
+
+std::string SuccessorsToString(const std::vector<Block*>& successors)
+{
+    std::string res;
+    if (successors.size() > 0) {
+        // normal case
+        res += "normal: " + successors[0]->GetIdentifier();
+    }
+    if (successors.size() > 1) {
+        // exception case, exception list
+        res += ", exception ";
+        if (successors[1]->IsLandingPadBlock()) {
+            res += GetExceptionsStr(successors[1]->GetExceptions()) + ": ";
+        }
+        res += successors[1]->GetIdentifier();
+    }
+    constexpr size_t rethrowIndex = 2;
+    if (successors.size() > rethrowIndex) {
+        // rethrow case
+        res += ", rethrow: " + successors[rethrowIndex]->GetIdentifier();
+    }
+    return res;
+}
+
+std::string ExprOperandsToString(const std::vector<Value*>& args)
+{
+    std::string res;
+    if (!args.empty()) {
+        for (auto arg : args) {
+            res += arg->GetIdentifier();
+            res += ", ";
+        }
+        res.pop_back();
+        res.pop_back();
+    }
+    return res;
+}
+
+std::string ExprWithExceptionOperandsToString(const std::vector<Value*>& args, const std::vector<Block*>& successors)
+{
+    std::string res;
+    for (auto arg : args) {
+        res += arg->GetIdentifier();
+        res += ", ";
+    }
+    res += SuccessorsToString(successors);
+    return res;
+}
+
+std::string ParamTypesToString(const FuncType& funcType)
+{
+    std::string res = "(";
+    auto paramTypes = funcType.GetParamTypes();
+    if (!paramTypes.empty()) {
+        for (auto pType : paramTypes) {
+            res += pType->ToString();
+            res += ", ";
+        }
+        // remove the last ", "
+        res.pop_back();
+        res.pop_back();
+    }
+    res += ")";
+    return res;
+}
+
+std::string OverflowToString(Cangjie::OverflowStrategy ofStrategy)
+{
+    static const std::unordered_map<Cangjie::OverflowStrategy, std::string> OVERFLOW_STR_MAP {
+        {Cangjie::OverflowStrategy::NA, "NA"},
+        {Cangjie::OverflowStrategy::CHECKED, "CHECKED"},
+        {Cangjie::OverflowStrategy::WRAPPING, "WRAPPING"},
+        {Cangjie::OverflowStrategy::THROWING, "THROWING"},
+        {Cangjie::OverflowStrategy::SATURATING, "SATURATING"},
+    };
+    return "Overflow: " + OVERFLOW_STR_MAP.at(ofStrategy);
 }
 } // namespace Cangjie::CHIR

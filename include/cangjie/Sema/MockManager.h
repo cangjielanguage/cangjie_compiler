@@ -26,14 +26,19 @@ enum class MockKind : uint8_t;
 class MockManager {
 public:
     explicit MockManager(ImportManager& importManager, TypeManager& typeManager, const Ptr<MockUtils> mockUtils);
-    Ptr<AST::ClassDecl> GenerateMockClassIfNeededAndGet(
+
+    struct GeneratedClassResult {
+        Ptr<AST::ClassDecl> classDecl;
+        bool generated;
+    };
+    GeneratedClassResult GenerateMockClassIfNeededAndGet(
         AST::ClassLikeDecl& originalDecl, AST::Package& curPkg, MockKind mockKind);
     void WriteGeneratedClasses();
     void HandleMockAnnotatedLambdaValue(AST::Expr& expr);
     void WrapWithRequireMockObject(AST::Expr& receiverExpr);
 
     static OwnedPtr<AST::ThrowExpr> CreateIllegalMockCallException(
-        AST::File& curFile, TypeManager& typeManager, ImportManager& importManager);
+        AST::File& curFile, TypeManager& typeMgr, ImportManager& importMgr);
     static OwnedPtr<AST::CallExpr> CreateInitCallOfMockClass(
         AST::ClassDecl& mockClass, std::vector<OwnedPtr<AST::FuncArg>>& mockCallArgs,
         TypeManager& typeManager, const std::vector<Ptr<AST::Ty>> instTys,
@@ -62,13 +67,13 @@ private:
         AST::File& curFile, TypeManager& typeManager);
 
     TypeManager& typeManager;
+    ImportManager& importManager;
     Ptr<MockUtils> mockUtils;
 
     std::map<std::string, OwnedPtr<AST::ClassDecl>> mockedClassDecls;
     std::map<Ptr<AST::ClassLikeDecl>, int> instantiationCounters;
     std::map<Ptr<const AST::FuncDecl>, bool> defaultForTypePresence;
 
-    Ptr<AST::ClassDecl> exceptionClassDecl;
     Ptr<AST::ClassDecl> objectDecl;
 
     Ptr<AST::InterfaceDecl> callHandlerDecl;
@@ -131,29 +136,40 @@ private:
     OwnedPtr<AST::CallExpr> CreateDeclKind(const AST::FuncDecl& decl) const;
     OwnedPtr<AST::CallExpr> CreateCallInfo(
         AST::FuncDecl& originalFunction, OwnedPtr<AST::Expr> mockedArgsArray, OwnedPtr<AST::Expr> typeArgsArray,
-        const Ptr<AST::File> curFile, const Ptr<AST::ClassDecl> outerDecl
+        const Ptr<AST::File> curFile, OwnedPtr<AST::RefExpr> objRef
     );
     OwnedPtr<AST::CallExpr> CreateOnCallInvocation(
         OwnedPtr<AST::Expr> mockedArgsArray, OwnedPtr<AST::Expr> typeArgsArray, AST::FuncDecl& originalFunc,
-        const Ptr<AST::ClassDecl> mockedDecl, OwnedPtr<AST::Expr> handler
+        OwnedPtr<AST::RefExpr> objRef, OwnedPtr<AST::Expr> handler
     );
 
+    OwnedPtr<AST::FuncDecl> CreateStaticMethodStub(
+        AST::FuncDecl& originalMethod, AST::ClassDecl& mockedDecl, std::vector<TypeSubst>& classGenericSubsts);
     OwnedPtr<AST::FuncDecl> CreateMockedMethod(
-        AST::FuncDecl& originalFunc, AST::ClassDecl& mockedDecl, std::vector<TypeSubst>& classGenericSubsts
-    );
+        AST::FuncDecl& originalMethod, AST::ClassDecl& mockedDecl, std::vector<TypeSubst>& classGenericSubsts);
+    OwnedPtr<AST::FuncDecl> CreateMockedMethodWithoutBody(
+        AST::FuncDecl& originalMethod, AST::ClassDecl& mockedDecl, std::vector<TypeSubst>& classGenericSubsts);
     OwnedPtr<AST::PropDecl> CreateMockedProp(
         AST::PropDecl& originalProp, AST::ClassDecl& mockedDecl, std::vector<TypeSubst>& classGenericSubsts);
     void AddMockedMemberIfNeeded(
         AST::ClassDecl& mockedDecl, AST::Decl& member, std::vector<TypeSubst>& classGenericSubsts);
     OwnedPtr<AST::RefExpr> GetHandlerRefFromClass(const Ptr<AST::ClassDecl> decl);
-    void GenerateCallHandlerForStaticDecl(AST::FuncDecl& staticDecl, AST::Expr& injectTo);
+    void GenerateCallHandlerForStaticDecl(
+        AST::FuncDecl& decl, AST::Expr& injectTo, Ptr<AST::FuncDecl> declForInfo = nullptr);
+    void GenerateCallHandlerForMethodWithDefault(AST::CallExpr& callExpr);
     void HandleMockAnnotatedLambdaWithCall(AST::CallExpr& callExpr);
     void HandleMockAnnotatedLambdaWithMemberAccess(AST::MemberAccess& ma, AST::Expr& injectTo);
     void HandleMockAnnotatedLambdaWithRefExpr(const AST::RefExpr& refExpr, AST::Expr& injectTo);
     void HandleMockAnnotatedLambdaWithAssignExpr(AST::AssignExpr& assignExpr);
-    OwnedPtr<AST::LambdaExpr> GenerateCallHandlerLambda(AST::FuncDecl& staticDecl, const AST::Expr& injectTo);
+
+    OwnedPtr<AST::Expr> GetCurrentStaticHandler(const Ptr<AST::File> curFile);
+    OwnedPtr<AST::Expr> GetMockedObjectHandler(OwnedPtr<AST::RefExpr> objRef, const Ptr<AST::File> curFile);
+    OwnedPtr<AST::LambdaExpr> GenerateCallHandlerLambda(
+        AST::FuncDecl& decl, const AST::Expr& injectTo, Ptr<AST::FuncDecl> declForInfo = nullptr);
     std::vector<OwnedPtr<AST::MatchCase>> GenerateCallHandlerCases(
         AST::FuncDecl& staticDecl, const AST::Expr& injectTo);
+    std::tuple<Ptr<AST::InterfaceDecl>, Ptr<AST::FuncDecl>> FindDefaultAccessorInterfaceAndFunction(
+        Ptr<AST::FuncDecl> original, Ptr<AST::MemberAccess> baseFunc);
 };
 } // namespace Cangjie
 

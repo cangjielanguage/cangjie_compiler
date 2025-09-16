@@ -63,7 +63,7 @@ protected:
 #endif
 #ifdef _WIN32
         invocation.globalOptions.target.os = Cangjie::Triple::OSType::WINDOWS;
-#elif  __unix__
+#elif __unix__
         invocation.globalOptions.target.os = Cangjie::Triple::OSType::LINUX;
 #endif
     }

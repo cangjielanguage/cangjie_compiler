@@ -14,7 +14,7 @@
 #define CANGJIE_CHIR_INTERRETER_BCHIRLINKER_H
 
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
-#include "cangjie/CHIR/Interpreter/InterpreterValue.h"
+#include "cangjie/CHIR/Interpreter/InterpreterValueUtils.h"
 #include "cangjie/Option/Option.h"
 
 namespace Cangjie::CHIR::Interpreter {
@@ -33,12 +33,6 @@ public:
     std::unordered_map<Bchir::ByteCodeIndex, IVal> Run(std::vector<Bchir>& packages, const GlobalOptions& options);
 
     int GetGVARId(const std::string& name) const;
-
-    /** @brief returns the index of a function or 0 if the function is not found
-     *
-     * ASSUMPTION: no function starts at index 0
-     */
-    Bchir::ByteCodeIndex GetFuncIndex(const std::string& name);
 
 private:
     Bchir& topBchir;
@@ -60,11 +54,6 @@ private:
     Bchir::ByteCodeContent classId{0};
     std::unordered_map<std::string, Bchir::ByteCodeContent> mName2ClassId;
 
-    /** @brief Constant local var ID to Global var ID */
-    std::unordered_map<Bchir::ByteCodeContent, Bchir::ByteCodeContent> cLVar2GVarID;
-    /** @brief Get a GVar ID for the const local var. May update `gvarId`. */
-    Bchir::ByteCodeContent CLVar2GVarId(Bchir::ByteCodeContent cLVarID);
-
     Bchir::ByteCodeContent methodId{0};
     std::unordered_map<std::string, Bchir::ByteCodeContent> mName2MethodId;
 
@@ -73,17 +62,16 @@ private:
 
     void LinkClasses(const Bchir& bchir);
     void LinkClass(const Bchir& bchir, const std::string& mangledName);
-    void LinkGlobalVars(const Bchir& bchir);
     void LinkAndInitGlobalVars(
         const Bchir& bchir, std::unordered_map<Bchir::ByteCodeIndex, IVal>& gvarId2InitIVal, bool isLast);
     /** @brief Generates a dummy function that simply aborts interpretation. */
     void GenerateDummyAbortFunction();
     void LinkFunctions(const std::vector<Bchir>& packages);
-    void AppendGlobalInitFuncCall(const std::string& initFunc);
     void GenerateCallsToConstInitFunctions(const std::vector<std::string>& constInitFuncs);
     /** @brief Traverse currentDef and append it to topBCHIR */
-    void TraverseAndLink(const Bchir::Definition& currentDef, const std::vector<Bchir::ByteCodeContent>& fileMap,
-        const std::vector<Bchir::ByteCodeContent>& typeMap, const std::vector<Bchir::ByteCodeContent>& stringMap);
+    void TraverseAndLink(const Bchir& bchir, const Bchir::Definition& currentDef,
+        const std::vector<Bchir::ByteCodeContent>& fileMap, const std::vector<Bchir::ByteCodeContent>& typeMap,
+        const std::vector<Bchir::ByteCodeContent>& stringMap);
 
     void AddPosition(const std::unordered_map<Bchir::ByteCodeIndex, Bchir::CodePosition>& positions,
         const std::vector<Bchir::ByteCodeContent>& fileMap, Bchir::ByteCodeIndex curr);

@@ -73,11 +73,15 @@ std::string Char32ToUTF8(const std::basic_string<char32_t>& str)
 {
     std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
     std::string res;
+#ifndef CANGJIE_ENABLE_GCOV
     try {
+#endif
         res = conv.to_bytes(str);
+#ifndef CANGJIE_ENABLE_GCOV
     } catch (const std::range_error& e) {
         res = "";
     }
+#endif
     return res;
 }
 
@@ -122,11 +126,15 @@ size_t DisplayWidth(const std::basic_string<char32_t>& pwcs)
 size_t DisplayWidth(const std::string& str) noexcept
 {
     size_t len;
+#ifndef CANGJIE_ENABLE_GCOV
     try {
+#endif
         len = DisplayWidth(UTF8ToChar32(str));
+#ifndef CANGJIE_ENABLE_GCOV
     } catch (const std::range_error&) {
         len = str.size();
     }
+#endif
     return len;
 }
 

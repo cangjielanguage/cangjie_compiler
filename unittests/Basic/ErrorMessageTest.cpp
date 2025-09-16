@@ -4,10 +4,10 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "gtest/gtest.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/Basic/Display.h"
 #include "cangjie/Parse/Parser.h"
-#include "gtest/gtest.h"
 
 using namespace Cangjie;
 

@@ -84,8 +84,10 @@ CGModule::CGModule(SubCHIRPackage& subCHIRPackage, CGPkgContext& cgPkgCtx)
     } else if (options.target.arch == Triple::ArchType::AARCH64 &&
         Utils::In(options.target.os, {Triple::OSType::LINUX})) {
         cffi = std::make_unique<LinuxAarch64CJNativeCGCFFI>(*this);
+#ifdef __APPLE__
     } else if (options.target.arch == Triple::ArchType::AARCH64 && options.target.os == Triple::OSType::DARWIN) {
         cffi = std::make_unique<MacAArch64CJNativeCGCFFI>(*this);
+#endif
     } else {
         // Rollback to linux x86_64 abi.
         cffi = std::make_unique<LinuxAmd64CJNativeCGCFFI>(*this);
@@ -125,15 +127,13 @@ void CGModule::GenTypeTemplate()
     }
 }
 
-void CGModule::InitIncrementalGen()
+bool CGModule::InitIncrementalGen()
 {
-    if (!cgCtx->GetCGPkgContext().IsIncrementEnabled()) {
-        return;
-    }
+    CJC_ASSERT(cgCtx->GetCGPkgContext().IsIncrementEnabled());
     incrementalGen = std::make_unique<IncrementalGen>(cgCtx->IsCGParallelEnabled());
     auto cachePath =
         cgCtx->GetCompileOptions().GenerateCachedPathNameForCodeGen(module->getSourceFileName(), "_cache.bc");
-    incrementalGen->Init(cachePath, cgCtx->GetLLVMContext());
+    return incrementalGen->Init(cachePath, cgCtx->GetLLVMContext());
 }
 
 void CGModule::GenIncremental()
@@ -287,20 +287,17 @@ CGFunction* CGModule::GetOrInsertCGFunction(const CHIR::Value* func, bool forWra
         AddFnAttr(function, llvm::Attribute::get(module->getContext(), STRUCT_MUT_FUNC_ATTR)); // Deprecated
         AddFnAttr(function, llvm::Attribute::get(module->getContext(), THIS_PARAM_HAS_BP));
     }
-    if (cgCtx->GetCompileOptions().enIncrementalCompilation) {
-        if (func->IsFuncWithBody() &&
-            VirtualCast<const CHIR::Func*>(func)->GetFuncKind() == CHIR::FuncKind::MACRO_INVOKE_FUNC) {
-            function->addFnAttr(CodeGen::MACRO_INVOKE_CFUNC_ATTR);
-        } else if (func->IsImportedFunc() &&
-            VirtualCast<const CHIR::ImportedFunc*>(func)->GetFuncKind() == CHIR::FuncKind::MACRO_INVOKE_FUNC) {
-            function->addFnAttr(CodeGen::MACRO_INVOKE_CFUNC_ATTR);
-        }
-    }
+
+    auto chirFunc = VirtualCast<const CHIR::FuncBase*>(func);
+    auto chirLinkage = chirFunc->Get<CHIR::LinkTypeInfo>();
     if (func->IsFuncWithBody()) {
         auto chirFunc = VirtualCast<const CHIR::Func*>(func);
         auto chirLinkage = chirFunc->Get<CHIR::LinkTypeInfo>();
         bool markByMD = cgCtx->IsCGParallelEnabled() && !IsCHIRWrapper(func->GetIdentifierWithoutPrefix());
         AddLinkageTypeMetadata(*function, CHIRLinkage2LLVMLinkage(chirLinkage), markByMD);
+    } else if (chirLinkage == Linkage::EXTERNAL_WEAK) {
+        // Import function in if branch of @IfAvailable need to mark as EXTERNAL_WEAK.
+        function->setLinkage(llvm::GlobalValue::ExternalWeakLinkage);
     }
 
     auto cgFunc = std::make_unique<CGFunction>(function, cgFuncType, func, *this);

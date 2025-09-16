@@ -7,6 +7,7 @@
 #include "TypeCheckerImpl.h"
 
 #include "Desugar/AfterTypeCheck.h"
+#include "JoinAndMeet.h"
 #include "TypeCheckUtil.h"
 
 #include "cangjie/AST/Create.h"
@@ -114,8 +115,7 @@ OwnedPtr<TryExpr> CreateTryInFinally(ClassDecl& exceptionDecl, FuncTy& someTy, V
     std::vector<OwnedPtr<Node>> thenBlockNodes;
     (void)thenBlockNodes.emplace_back(CreateCallExpr(x, "close"));
     auto ifExpr = CreateIfExpr(
-        CreateUnaryExpr(CreateCallExpr(x, "isClosed"), TokenKind::NOT),
-        CreateBlock(std::move(thenBlockNodes)));
+        CreateUnaryExpr(CreateCallExpr(x, "isClosed"), TokenKind::NOT), CreateBlock(std::move(thenBlockNodes)));
     // `match`
     auto matchExp = CreateMatchExpr(someTy, freshExc, CreateThrowExpr(*vp));
     // `v: Exception`
@@ -202,6 +202,7 @@ OwnedPtr<Block> CreateOuterTryBlock(ClassDecl& exceptionDecl, FuncTy& someTy, En
     resourceSpec.clear();
     return tryBlock;
 }
+
 } // namespace
 
 /**

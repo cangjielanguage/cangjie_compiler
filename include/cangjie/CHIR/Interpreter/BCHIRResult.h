@@ -13,7 +13,7 @@
 #ifndef CANGJIE_CHIR_INTERRETER_BCHIRRESULT_H
 #define CANGJIE_CHIR_INTERRETER_BCHIRRESULT_H
 
-#include "cangjie/CHIR/Interpreter/InterpreterValue.h"
+#include "cangjie/CHIR/Interpreter/InterpreterValueUtils.h"
 #include <variant>
 
 namespace Cangjie::CHIR::Interpreter {

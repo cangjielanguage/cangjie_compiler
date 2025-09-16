@@ -14,7 +14,7 @@
 #define CANGJIE_CHIR_TRANSFORMATION_BLOCK_GROUP_COPY_HELPER_H
 
 #include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 
 namespace Cangjie::CHIR {
 /**

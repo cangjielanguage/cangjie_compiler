@@ -23,6 +23,7 @@
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/Parse/Parser.h"
+#include "cangjie/Utils/StdUtils.h"
 
 #ifdef __WIN32
 #include <libloaderapi.h> // should be at the end to avoid same macro define
@@ -98,9 +99,9 @@ std::optional<int> TryParseInt(const std::string& str)
     int res = 0;
     bool isValid = std::all_of(str.begin(), str.end(), [](auto c) { return std::isdigit(c); });
     if (isValid) {
-        try {
-            res = std::stoi(str);
-        } catch (...) {
+        if (auto r = Stoi(str)) {
+            res = *r;
+        } else {
             isValid = false;
         }
     }

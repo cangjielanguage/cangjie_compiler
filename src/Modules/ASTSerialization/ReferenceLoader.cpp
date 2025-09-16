@@ -653,6 +653,16 @@ void ASTLoader::ASTLoaderImpl::LoadPatternRefs(const PackageFormat::Pattern& pOb
             }
             break;
         }
+        case PackageFormat::PatternKind_CommandTypePattern: {
+            auto& ctp = StaticCast<CommandTypePattern&>(pattern);
+            LoadPatternRefs(*pObj.patterns()->Get(0), *ctp.pattern);
+            CJC_ASSERT(pObj.types()->size() >= 1);
+            ctp.types.resize(pObj.types()->size() - 1);
+            for (uoffset_t i = 1; i < pObj.types()->size(); i++) {
+                ctp.types[i - 1] = WrapTypeInNode(LoadType(pObj.types()->Get(i)));
+            }
+            break;
+        }
         default:
             break;
     }

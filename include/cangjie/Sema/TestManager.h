@@ -72,13 +72,14 @@ private:
     static bool ArePackagesMockSupportConsistent(
         const AST::Package& currentPackage, const AST::Package& importedPackage);
     AST::VisitAction HandleCreateMockCall(AST::CallExpr& callExpr, AST::Package& pkg);
+    void WrapWithRequireMockObjectIfNeeded(Ptr<AST::Expr> expr, Ptr<AST::Decl> target);
     AST::VisitAction HandleMockAnnotatedLambda(const AST::LambdaExpr& lambda);
     void ReportDoesntSupportMocking(const AST::Expr& reportOn, const std::string& name, const std::string& package);
     void ReportUnsupportedType(const AST::Expr& reportOn);
     void ReportNotInTestMode(const AST::Expr& reportOn);
     void ReportMockDisabled(const AST::Expr& reportOn);
     void ReportWrongStaticDecl(const AST::Expr& reportOn);
-    void PrepareStaticDecls(AST::Package& pkg);
+    void PrepareDecls(AST::Package& pkg);
     void PrepareToSpy(AST::Package& pkg);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     void ReportFrozenRequired(const AST::FuncDecl& reportOn);

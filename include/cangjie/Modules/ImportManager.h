@@ -249,6 +249,11 @@ public:
     /** @brief Returns a pointer for the cached BCHIR data for fullPackageName if it exists or nullptr otherwise. */
     const std::vector<uint8_t>* GetBchirCache(const std::string& fullPackageName);
 
+    Ptr<CjoManager> GetCjoManager() const
+    {
+        return cjoManager.get();
+    }
+
     /** @brief Clear the cache for BCHIR packages. */
     void ClearPackageBCHIRCache()
     {
@@ -307,6 +312,8 @@ public:
         const Ptr<DiagnosticBuilder> builder) const;
     bool IsExtendMemberAccessible(const AST::File& file, const AST::Decl& member, AST::Ty& baseTy,
         const Ptr<DiagnosticBuilder> builder = nullptr) const;
+    void AddUsedMacroDecls(const Ptr<const AST::File> file, Ptr<const AST::Decl> decl);
+    std::map<std::string, std::set<Ptr<const AST::Decl>, AST::CmpNodeByPos>>& GetUsedMacroDecls(const AST::File& file);
 
 public:
     /**
@@ -341,6 +348,13 @@ private:
      * fileHash -> {declName, declSet}
      */
     std::map<uint64_t, std::map<std::string, AST::OrderedDeclSet>> fileImportedDeclsMap;
+
+    /*
+     * Store all used macro decls for each file in source package.
+     * indexOfPackage -> {packageName, declSet}
+     */
+    std::map<size_t, std::map<std::string, std::set<Ptr<const AST::Decl>, AST::CmpNodeByPos>>> fileUsedMacroDeclsMap;
+
     /*
      * Store all accessible decls for in source package. {declName, declSet}.
      */

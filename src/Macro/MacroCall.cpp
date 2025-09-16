@@ -118,20 +118,8 @@ void MacroCall::DiagReport(const int level, const Range range, const char *messa
         return;
     }
 
-    if (this->ci) {
-        auto builder = this->ci->diag.DiagnoseRefactor(diagKind, range, message);
-        builder.AddMainHintArguments(hint);
-    } else {
-        DiagnosticEngine diag;
-        SourceManager sm;
-        diag.SetSourceManager(&sm);
-        diag.SetDiagnoseStatus(true);
-
-        auto builder = diag.DiagnoseRefactor(diagKind, range, message);
-        builder.AddMainHintArguments(hint);
-        auto emitter = DiagnosticEmitter(builder.diagnostic, false, false, std::cerr, sm);
-        emitter.Emit();
-    }
+    auto builder = this->ci->diag.DiagnoseRefactor(diagKind, range, message);
+    builder.AddMainHintArguments(hint);
 }
 
 /*

@@ -43,6 +43,10 @@ public:
     // Controlled by --strip-all/-s.
     bool stripSymbolTable = false;
 
+    // User-provided a custom argument to linker.
+    // Values is passed by --link-option.
+    std::vector<std::string> linkOption;
+
     // User-provided custom arguments to linker.
     // Values is passed by --link-options.
     std::vector<std::string> linkOptions;

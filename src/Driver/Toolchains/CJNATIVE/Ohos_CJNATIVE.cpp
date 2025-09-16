@@ -52,9 +52,6 @@ void Ohos_CJNATIVE::GenerateLinkingTool(const std::vector<TempFileInfo>& objFile
     tool->AppendArg("-o", outputFile);
     if (driverOptions.IsLTOEnabled()) {
         GenerateLinkOptionsForLTO(*tool.get());
-        // The -z notext option is the default for ld, while the -z noexecstack option is the default for lld.
-        // Therefore, ld needs to explicitly pass -z noexecstack, and lld needs to explicitly pass -z notext.
-        tool->AppendArg("-z", "notext");
     } else if (driverOptions.EnableHwAsan()) {
         // same args as lto except GenerateLinkOptionsForLTO
         tool->AppendArg("-z", "notext");

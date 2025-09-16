@@ -26,17 +26,18 @@ public:
         MEMORY       = 0x02,
         ALL          = 0x03  // TIMER | MEMORY
     };
-    ProfileRecorder(const std::string& title, const std::string& subtitle,
-        const std::string& desc = "", const Type& type = Type::ALL);
+    ProfileRecorder(
+        const std::string& title, const std::string& subtitle, const std::string& desc = "");
     ~ProfileRecorder();
 
-    static void SetPackageName(const std::string& name, const Type& type = Type::ALL);
+    static void SetPackageName(const std::string& name);
+    static void SetOutputDir(const std::string& path);
     static void Enable(bool en, const Type& type = Type::ALL);
 
-    static void Start(const std::string& title, const std::string& subtitle,
-        const std::string& desc = "", const Type& type = Type::ALL);
-    static void Stop(const std::string& title, const std::string& subtitle,
-        const std::string& desc = "", const Type& type = Type::ALL);
+    static void Start(
+        const std::string& title, const std::string& subtitle, const std::string& desc = "");
+    static void Stop(
+        const std::string& title, const std::string& subtitle, const std::string& desc = "");
     /**
      * @brief Record some code info. Avoid introducing other module-specific content by custom function.
      * @param item Indicates the name of a single information item.
@@ -45,13 +46,12 @@ public:
     static void RecordCodeInfo(const std::string& item, const std::function<int64_t(void)>& getData);
     static void RecordCodeInfo(const std::string& item, int64_t value);
 
-    static std::string GetResult(bool isJson = false, const Type& type = Type::ALL);
+    static std::string GetResult(const Type& type = Type::ALL);
 
 private:
     std::string title_;
     std::string subtitle_;
     std::string desc_;
-    Type type_{Type::INVALID_TYPE};
 };
 } // namespace Cangjie::Utils
 

@@ -15,23 +15,23 @@ set(LEX_UT_SRC
     $<TARGET_OBJECTS:CangjieUnicodeUtils>
 )
 
-add_executable(LexerTests LexerTest.cpp)
+add_executable(LexerTest LexerTest.cpp)
 target_link_libraries(
-    LexerTests
+    LexerTest
     ${CMAKE_DL_LIBS}
     ${LEX_UT_SRC}
     GTest::gtest
     GTest::gtest_main)
-add_test(NAME LexerTests COMMAND LexerTests)
+add_test(NAME LexerTest COMMAND LexerTest)
 
-add_executable(TotalTests TotalTest.cpp)
+add_executable(TotalTest TotalTest.cpp)
 target_link_libraries(
-    TotalTests
+    TotalTest
     ${CMAKE_DL_LIBS}
     ${LEX_UT_SRC}
     GTest::gtest
     GTest::gtest_main)
-add_test(NAME TotalTests COMMAND TotalTests)
+add_test(NAME TotalTest COMMAND TotalTest)
 
 add_executable(LexerTerminatorTest LexerTerminatorTest.cpp)
 target_link_libraries(

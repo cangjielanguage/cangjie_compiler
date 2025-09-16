@@ -9,9 +9,9 @@
 
 #include "ScopeManager.h"
 
+#include "gtest/gtest.h"
 #include "cangjie/Lex/Lexer.h"
 #include "cangjie/Utils/FileUtil.h"
-#include "gtest/gtest.h"
 
 using namespace Cangjie;
 

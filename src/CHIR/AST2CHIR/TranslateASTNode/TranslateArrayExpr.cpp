@@ -5,7 +5,7 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
-#include "cangjie/CHIR/Expression.h"
+#include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Type/Type.h"
 
 using namespace Cangjie::CHIR;
@@ -61,7 +61,7 @@ Ptr<Value> Translator::Visit(const AST::ArrayExpr& array)
 }
 
 Expression* Translator::GenerateFuncCall(Value& callee, const FuncType* instantiedFuncTy,
-    const std::vector<Type*> calleeInstTypeArgs, Type* thisTy, Type* instParentCustomDefTy,
+    const std::vector<Type*> calleeInstTypeArgs, Type* thisTy,
     const std::vector<Value*>& args, DebugLocation loc)
 {
     auto instantiatedParamTys = instantiedFuncTy->GetParamTypes();
@@ -83,16 +83,10 @@ Expression* Translator::GenerateFuncCall(Value& callee, const FuncType* instanti
     // Step 2: create the func call (might be a `Apply` or `ApplyWithException`) and set
     // its instantiated type info
     // we should make the instantiated type info as a forced input of the constructor of `Apply`
-    auto expr = TryCreate<Apply>(currentBlock, loc, instantiatedRetTy, &callee, castedArgs);
-    if (auto apply = DynamicCast<Apply*>(expr)) {
-        apply->SetInstantiatedFuncType(thisTy, instParentCustomDefTy, instantiatedParamTys, *instantiatedRetTy);
-        apply->SetInstantiatedArgTypes(calleeInstTypeArgs);
-    } else {
-        auto awe = StaticCast<ApplyWithException*>(expr);
-        awe->SetInstantiatedFuncType(thisTy, instParentCustomDefTy, instantiatedParamTys, *instantiatedRetTy);
-        awe->SetInstantiatedArgTypes(calleeInstTypeArgs);
-    }
-    return expr;
+    return TryCreate<Apply>(currentBlock, loc, instantiatedRetTy, &callee, FuncCallContext{
+        .args = castedArgs,
+        .instTypeArgs = calleeInstTypeArgs,
+        .thisType = thisTy});
 }
 
 Ptr<Value> Translator::InitArrayByLambda(const AST::ArrayExpr& array)
@@ -123,7 +117,7 @@ Ptr<Value> Translator::InitArrayByLambda(const AST::ArrayExpr& array)
     instParamTys.emplace_back(rawArrayRef->GetType());
     instParamTys.emplace_back(userInitFn->GetType());
     auto instantiedFuncTy = builder.GetType<FuncType>(instParamTys, arrayTy);
-    GenerateFuncCall(*initFn, instantiedFuncTy, instantiatedTypeArgs, rawArrayRef->GetType(), rawArrayRef->GetType(),
+    GenerateFuncCall(*initFn, instantiedFuncTy, instantiatedTypeArgs, rawArrayRef->GetType(),
         std::vector<Value*>{rawArrayRef, userInitFn}, loc);
 
     return rawArrayRef;
@@ -218,7 +212,7 @@ CHIR::Type* Translator::GetExactParentType(
 
 #ifndef NDEBUG
     if (report && result == nullptr) {
-        const std::string msg = "can't find '" + funcName + ": " + funcType.ToString() + ", in " +
+        const std::string msg = "can't find '" + funcName + "': " + funcType.ToString() + ", in " +
             fuzzyParentType.ToString() + " related CustomTypeDef";
         Errorln(msg);
         for (auto tmp : builder.GetCurPackage()->GetClasses()) {
@@ -251,38 +245,14 @@ CHIR::Type* Translator::GetExactParentType(
     return result;
 }
 
-VTableSearchRes Translator::GetFuncIndexInVTable(Type& root, const std::string& funcName,
-    FuncType& funcType, bool isStatic, const std::vector<Type*>& funcInstTypeArgs, [[maybe_unused]] bool report)
+std::vector<VTableSearchRes> Translator::GetFuncIndexInVTable(
+    Type& root, const FuncCallType& funcCallType, bool isStatic, [[maybe_unused]] bool report)
 {
-    VTableSearchRes result;
-    if (auto genericTy = DynamicCast<GenericType*>(&root)) {
-        auto& upperBounds = genericTy->GetUpperBounds();
-        CJC_ASSERT(!upperBounds.empty());
-        for (auto upperBound : upperBounds) {
-            ClassType* upperClassType = StaticCast<ClassType*>(StaticCast<RefType*>(upperBound)->GetBaseType());
-            result = GetFuncIndexInVTable(*upperClassType, funcName, funcType, isStatic, funcInstTypeArgs, false);
-            if (result.instSrcParentType != nullptr) {
-                break;
-            }
-        }
-    } else if (auto classTy = DynamicCast<CustomType*>(&root)) {
-        result = classTy->GetFuncIndexInVTable(funcName, funcType, isStatic, funcInstTypeArgs, builder);
-    } else {
-        std::unordered_map<const GenericType*, Type*> empty;
-        auto extendDefs = root.GetExtends(&builder);
-        CJC_ASSERT(!extendDefs.empty());
-        for (auto ex : extendDefs) {
-            result = ex->GetFuncIndexInVTable(funcName, funcType, isStatic, empty, funcInstTypeArgs, builder);
-            if (result.instSrcParentType != nullptr) {
-                break;
-            }
-        }
-    }
-
+    auto result = CHIR::GetFuncIndexInVTable(root, funcCallType, isStatic, builder);
 #ifndef NDEBUG
-    if (report && result.instSrcParentType == nullptr) {
-        const std::string msg =
-            "can't find '" + funcName + ": " + funcType.ToString() + ", in " + root.ToString() + " vtable.";
+    if (report && result.empty()) {
+        const std::string msg = "can't find '" + funcCallType.funcName + "': " +
+            funcCallType.funcType->ToString() + ", in " + root.ToString() + " vtable.";
         Errorln(msg);
         for (auto tmp : builder.GetCurPackage()->GetClasses()) {
             std::cout << tmp->ToString() << std::endl;
@@ -315,10 +285,10 @@ Ptr<Value> Translator::InitArrayByCollection(const AST::ArrayExpr& array)
     auto sizeGetInstFuncTy = builder.GetType<FuncType>(std::vector<Type*>({collection->GetType()}), sizeTy);
     auto collectionDerefType = StaticCast<RefType*>(collection->GetType())->GetBaseType();
     auto funcName = "$sizeget";
-    std::vector<Type*> funcInstTypeArgs;
+    FuncCallType funcCallType{funcName, sizeGetInstFuncTy};
     auto vtableRes =
-        GetFuncIndexInVTable(*collectionDerefType, funcName, *sizeGetInstFuncTy, false, funcInstTypeArgs);
-    InvokeCalleeInfo funcInfo{funcName, sizeGetInstFuncTy, vtableRes.originalFuncType, vtableRes.instSrcParentType,
+        GetFuncIndexInVTable(*collectionDerefType, funcCallType, false)[0];
+    InstInvokeCalleeInfo funcInfo{funcName, sizeGetInstFuncTy, vtableRes.originalFuncType, vtableRes.instSrcParentType,
         StaticCast<ClassType*>(vtableRes.instSrcParentType->GetCustomTypeDef()->GetType()), std::vector<Type*>{},
         collectionDerefType, vtableRes.offset};
     Value* sizeVal = GenerateDynmaicDispatchFuncCall(funcInfo, std::vector<Value*>{}, collection)->GetResult();
@@ -339,7 +309,7 @@ Ptr<Value> Translator::InitArrayByCollection(const AST::ArrayExpr& array)
     // if array init func is generic decl, then we will create `Apply` expr like: `Apply(init<xxx>, args)`
     // if array init func is instantiated decl, then we will create `Apply` expr like: `Apply(init, args)`
     auto instTys = array.initFunc->TestAttr(AST::Attribute::GENERIC) ? std::vector<Type*>{eleTy} : std::vector<Type*>{};
-    GenerateFuncCall(*initFn, instantiedFuncTy, instTys, rawArrayRef->GetType(), rawArrayRef->GetType(),
+    GenerateFuncCall(*initFn, instantiedFuncTy, instTys, rawArrayRef->GetType(),
         std::vector<Value*>{rawArrayRef, collection}, loc);
 
     return rawArrayRef;

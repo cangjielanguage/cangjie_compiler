@@ -90,9 +90,6 @@ public:
             PushTypeAnno(type, std::move(res));
         }
 
-        if (SkipCollectCustomAnnoInfo(decl)) {
-            return;
-        }
         // collect custom annotations for members
         for (auto member : decl.GetMemberDeclPtrs()) {
             if (auto prop = DynamicCast<PropDecl>(member)) {
@@ -241,9 +238,6 @@ private:
         var->EnableAttr(Attribute::CONST);
         var->EnableAttr(Attribute::NO_REFLECT_INFO);
         var->Set<LinkTypeInfo>(Linkage::INTERNAL);
-        if (decl.TestAttr(AST::Attribute::GENERIC_INSTANTIATED)) {
-            var->EnableAttr(Attribute::GENERIC_INSTANTIATED);
-        }
         return var;
     }
     
@@ -269,13 +263,10 @@ private:
         auto& expr = *StaticCast<AST::ArrayLit>(*anno.args[0]->expr).children[i];
         auto loc = tr.TranslateLocation(expr);
 
-        auto func = tr.CreateEmptyGVInitFunc(funcname, "", funcname, var.GetPackageName(), Linkage::INTERNAL, loc);
-        func->EnableAttr(Attribute::CONST);
+        auto func =
+            tr.CreateEmptyGVInitFunc(funcname, "", funcname, var.GetPackageName(), Linkage::INTERNAL, loc, true);
         func->EnableAttr(Attribute::COMPILER_ADD);
         func->EnableAttr(Attribute::NO_DEBUG_INFO);
-        if (var.TestAttr(Attribute::GENERIC_INSTANTIATED)) {
-            func->EnableAttr(Attribute::GENERIC_INSTANTIATED);
-        }
 
         auto value = Translator::TranslateASTNode(expr, tr);
         tr.GetCurrentBlock()->AppendExpression(
@@ -314,10 +305,21 @@ std::mutex AnnotationTranslator::annoLock{};
 // interfaces between AnnotationTranslator and other modules are implemented here
 void Translator::CollectTypeAnnotation(const InheritableDecl& decl, const CustomTypeDef& cl)
 {
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    // neither collect nor check annotations in compute annotations stage
+    if (isComputingAnnos) {
+        return;
+    }
+#endif
     AnnotationTranslator{*this, builder, opts}.CollectAnnoInfo(decl, cl);
 }
 void Translator::CollectValueAnnotation(const Decl& decl)
 {
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    if (isComputingAnnos) {
+        return;
+    }
+#endif
     if (decl.TestAttr(AST::Attribute::IMPORTED) || decl.TestAttr(AST::Attribute::GENERIC_INSTANTIATED)) {
         return;
     }
@@ -331,10 +333,6 @@ void GlobalVarInitializer::InsertAnnotationVarInit(std::vector<Ptr<Value>>& init
             initFuncsForConstVar.emplace_back(func);
 #endif
             (void)initFuncs.emplace_back(func);
-#ifndef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-            // Add the function also to the constant initializers so that its evaluated by const-eval
-            builder.GetCurPackage()->AddConstInit(func);
-#endif
         }
     }
 }
@@ -496,10 +494,6 @@ private:
             if (!targets.Matches(target)) {
                 (void)diag.diag.DiagnoseRefactor(DiagKindRefactor::chir_annotation_not_applicable, *annotation.src,
                     annotation.src->identifier, std::string{ANNOTATION_TARGET_2_STRING[targetid]});
-                res = false;
-            } else if (info.decl->mangledName.find("6<main>") != std::string::npos) {
-                diag.diag.DiagnoseRefactor(DiagKindRefactor::chir_annotation_not_applicable, *annotation.src,
-                    annotation.src->identifier, "main");
                 res = false;
             }
         }

@@ -13,11 +13,12 @@
 #ifndef CANGJIE_BASIC_LINKAGE_H
 #define CANGJIE_BASIC_LINKAGE_H
 
+#include <cstdint>
 namespace Cangjie {
 /**
  * Represent the linkage of the Decl.
  */
-enum class Linkage {
+enum class Linkage : uint8_t {
     WEAK_ODR,      /**< weak_odr linkage. */
     EXTERNAL,      /**< External linkage. */
     INTERNAL,      /**< Internal linkage. */

@@ -96,14 +96,14 @@ void SaveAllocateMap(
                 allocateIdxMap.emplace(expr->GetResult(), allocateIdx++);
             }
             if (kind == ExprKind::LAMBDA) {
-                SaveAllocateMap(*StaticCast<Lambda*>(expr)->GetLambdaBody(), allocateIdx, allocateIdxMap);
+                SaveAllocateMap(*StaticCast<Lambda*>(expr)->GetBody(), allocateIdx, allocateIdxMap);
             }
         }
     }
 }
 
-MaybeUninitAnalysis::MaybeUninitAnalysis(const Func* func, bool isDebug, const ConstructorInitInfo* ctorInitInfo)
-    : GenKillAnalysis(func, isDebug), ctorInitInfo(ctorInitInfo)
+MaybeUninitAnalysis::MaybeUninitAnalysis(const Func* func, const ConstructorInitInfo* ctorInitInfo)
+    : GenKillAnalysis(func), ctorInitInfo(ctorInitInfo)
 {
     size_t allocateIdx = ctorInitInfo->localMemberNums;
     SaveAllocateMap(*func->GetBody(), allocateIdx, allocateIdxMap);
@@ -153,11 +153,6 @@ void MaybeUninitAnalysis::HandleAllocateExpr(MaybeUninitDomain& state, const All
     if (auto it = allocateIdxMap.find(res); it != allocateIdxMap.end()) {
         auto allcoateIdx = it->second;
         state.Gen(allcoateIdx);
-        if (isDebug) {
-            std::cout << "[MaybeUninitAnalysis] " << allocate->ToString()
-                      << " (indexInStates: " << std::to_string(allcoateIdx) << ") has refreshed"
-                      << ToPosInfo(allocate->GetDebugLocation()) << std::endl;
-        }
     }
 }
 
@@ -169,17 +164,14 @@ void MaybeUninitAnalysis::HandleStoreExpr(MaybeUninitDomain& state, const Store*
         state.Kill(allcoateIdx);
         auto debugLoc = store->GetDebugLocation();
         state.maybeInitedPos[allcoateIdx].emplace(debugLoc.GetBeginPos().line);
-        if (isDebug) {
-            std::cout << "[MaybeUninitAnalysis] " << store->GetLocation()->GetIdentifier()
-                      << " (indexInStates: " << std::to_string(allcoateIdx) << ") has been rewritten"
-                      << ToPosInfo(debugLoc) << std::endl;
-        }
     }
 }
 
 void MaybeUninitAnalysis::HandleStoreElemRefExpr(MaybeUninitDomain& state, const StoreElementRef* store) const
 {
-    auto memberIdxOpt = IsInitialisingMemberVar(*func, *store);
+    auto parentFunc = store->GetTopLevelFunc();
+    CJC_NULLPTR_CHECK(parentFunc);
+    auto memberIdxOpt = IsInitialisingMemberVar(*parentFunc, *store);
     if (!memberIdxOpt.has_value()) {
         return;
     }
@@ -192,12 +184,6 @@ void MaybeUninitAnalysis::HandleStoreElemRefExpr(MaybeUninitDomain& state, const
     state.Kill(memberStateIdx);
     auto& debugLoc = store->GetDebugLocation();
     state.maybeInitedPos[memberStateIdx].emplace(debugLoc.GetBeginPos().line);
-    if (isDebug) {
-        std::cout << "[MaybeUninitAnalysis: " << func->GetIdentifierWithoutPrefix() << "] member at memberVarIndex "
-                  << std::to_string(memberIdx)
-                  << " (indexInStates: " << std::to_string(memberIdx - ctorInitInfo->superMemberNums)
-                  << ") has been rewritten" << ToPosInfo(debugLoc) << std::endl;
-    }
 }
 
 void MaybeUninitAnalysis::HandleApplyExpr(MaybeUninitDomain& state, const Apply* apply) const
@@ -208,10 +194,6 @@ void MaybeUninitAnalysis::HandleApplyExpr(MaybeUninitDomain& state, const Apply*
     // Check if it is a call to super init function of this class
     if (apply->IsSuperCall()) {
         state.Kill(domainSize - 1);
-        if (isDebug) {
-            std::cout << "[MaybeUninitAnalysis: " << func->GetIdentifierWithoutPrefix() << "] super() was called"
-                      << std::endl;
-        }
         return;
     }
     // Check if it is a call to another init function of this class/struct
@@ -219,17 +201,11 @@ void MaybeUninitAnalysis::HandleApplyExpr(MaybeUninitDomain& state, const Apply*
     if (callee->IsFuncWithBody()) {
         auto calleeFunc = VirtualCast<Func*>(callee);
         if (calleeFunc->IsConstructor() &&
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
             calleeFunc->GetOuterDeclaredOrExtendedDef() == ctorInitInfo->thisCustomDef &&
-#endif
             apply->GetArgs()[0] == func->GetParam(0)) {
             state.SetAllLocalMemberInited();
             if (ctorInitInfo->superClassDef) {
                 state.Kill(domainSize - 1);
-            }
-            if (isDebug) {
-                std::cout << "[MaybeUninitAnalysis: " << func->GetIdentifierWithoutPrefix() << "] this() was called"
-                          << std::endl;
             }
         }
     }
