@@ -17,11 +17,11 @@ if(EXISTS ${FLATBUFFERS_SRC}/CMakeLists.txt)
     set(FLATBUFFERS_DOWNLOAD_ARGS
         URL ${FLATBUFFERS_SRC})
 else()
-    set(REPOSITORY_PATH https://gitee.com/mirrors_trending/flatbuffers.git)
+    set(REPOSITORY_PATH https://gitcode.com/openharmony/third_party_flatbuffers.git)
     message(STATUS "Set flatbuffers REPOSITORY_PATH: ${REPOSITORY_PATH}")
     set(FLATBUFFERS_DOWNLOAD_ARGS
         GIT_REPOSITORY ${REPOSITORY_PATH}
-        GIT_TAG v24.3.25
+        GIT_TAG OpenHarmony-v6.0-Release
         GIT_PROGRESS ON
         GIT_CONFIG ${GIT_ARGS}
         GIT_SHALLOW ON)

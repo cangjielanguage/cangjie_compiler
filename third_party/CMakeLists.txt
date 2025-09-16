@@ -140,7 +140,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
     include(CompileRTLib)
 
     if(CANGJIE_USE_OH_LLVM_REPO)
-        set(REPOSITORY_PATH "https://gitee.com/openharmony/third_party_llvm-project.git")
+        set(REPOSITORY_PATH "https://gitcode.com/openharmony/third_party_llvm-project.git")
         set(LLVM_TAG master)
     else()
         set(REPOSITORY_PATH "https://gitcode.com/Cangjie/llvm-project.git")

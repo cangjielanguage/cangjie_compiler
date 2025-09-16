@@ -9,7 +9,7 @@ if(EXISTS ${CANGJIE_CJNATIVE_SOURCE_DIR})
 else()
     execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/utils_dep/
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-    execute_process(COMMAND git clone https://gitee.com/openharmony/third_party_llvm-project.git --depth 1
+    execute_process(COMMAND git clone https://gitcode.com/openharmony/third_party_llvm-project.git --depth 1
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/utils_dep/
         RESULT_VARIABLE GIT_CLONE_RESULT)
     execute_process(COMMAND git fetch --depth 1 origin 5c68a1cb123161b54b72ce90e7975d95a8eaf2a4
