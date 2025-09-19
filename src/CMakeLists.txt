@@ -282,9 +282,7 @@ if(NOT WIN_DEBUG_USE_STATIC_LIB)
 endif()
 
 #  we should remove this once the LSPCompilerInstance is out of compiler
-if(NOT WIN_DEBUG_USE_STATIC_LIB)
-    install(TARGETS cangjie-lsp-share LIBRARY DESTINATION tools/lib)
-else()
+if(WIN_DEBUG_USE_STATIC_LIB)
     install(TARGETS cangjie-lsp DESTINATION "tools/lib")
 endif()
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND AND NOT WIN_DEBUG_USE_STATIC_LIB)
