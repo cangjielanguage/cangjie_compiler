@@ -2,100 +2,102 @@
 
 ## Introduction
 
-Cangjie is a general-purpose programming language designed for all-scenario application development. It balances development efficiency and runtime performance, providing an excellent programming experience. Cangjie features concise and efficient syntax, multi-paradigm programming, and type safety. For more information, please refer to the [Cangjie Language Developer Guide](https://cangjie-lang.cn/docs?url=%2F1.0.0%2Fuser_manual%2Fsource_zh_cn%2Ffirst_understanding%2Fbasic.html) and the [Cangjie Programming Language White Paper](https://cangjie-lang.cn/docs?url=%2F0.53.18%2Fwhite_paper%2Fsource_zh_cn%2Fcj-wp-abstract.html).
+Cangjie is a general-purpose programming language designed for all-scenario application development, balancing development efficiency and runtime performance while providing a great programming experience. Cangjie features concise and efficient syntax, multi-paradigm programming, and type safety. For more information, please refer to the [Cangjie Language Development Guide](https://cangjie-lang.cn/docs?url=%2F1.0.0%2Fuser_manual%2Fsource_zh_cn%2Ffirst_understanding%2Fbasic.html) and the [Cangjie Programming Language White Paper](https://cangjie-lang.cn/docs?url=%2F0.53.18%2Fwhite_paper%2Fsource_zh_cn%2Fcj-wp-abstract.html).
 
-This repository provides the source code of the Cangjie compiler, comprises two parts: the compiler frontend and the modified open-source LLVM components. The latter includes the LLVM compiler backend, the opt optimizer, llc, the ld linker, and debuggers etc. For dependencies related to open-source LLVM components, please refer to the [Third-Party Library Patch Documentation](./third_party/README.md). The overall architecture is shown in the following diagram:
+This repository provides the source code for the Cangjie compiler, which consists of two main parts: the compiler frontend and modified open-source LLVM components. The latter includes the LLVM backend, opt optimizer, llc, ld linker, and debugger. For details on third-party dependencies, see the [Third-Party Library Patch Documentatio](./third_party/README.md). The overall architecture is shown below:
 
 ![Architecture Diagram](figures/Compiler_Architecture_Diagram.png)
 
-**Architecture Diagram Description**
+**Architecture Description**
 
-- **Compiler Frontend**: Responsible for converting Cangjie source code from text to intermediate representation, covering lexical, syntax, macro, and semantic analysis to ensure the correctness of code structure and semantics, and preparing for backend code generation. This module relies on mingw-w64 to support Windows platform's Cangjie capability, enabling it to generate final executable binaries for users that can call Windows APIs. It also depends on libboundscheck to provide secure function library access.
+- **Compiler Frontend**: Responsible for converting Cangjie source code from text to intermediate representation, including lexical, syntax, macro, and semantic analysis, ensuring code structure and semantics are correct, and preparing for backend code generation. This module depends on mingw-w64 to support Windows platform capabilities, enabling users to generate executable binaries that can call Windows APIs. It also relies on libboundscheck for safe function library access.
 
-    - **Lex/Parse**: Breaks down Cangjie source code into meaningful tokens, constructs an abstract syntax tree (AST) from the token sequence according to Cangjie grammar rules, reflecting the program structure.
+    - **Lexer** breaks down Cangjie source code into meaningful tokens.
 
-    - **Sema/Type Infer**: Performs type checking, scope analysis, etc. on the AST to ensure the correctness of program semantics.
+    - **Parser** builds an Abstract Syntax Tree (AST) according to Cangjie grammar rules to reflect program structure.
 
-    - **Mangle**: Responsible for performing name mangling on Cangjie symbols, and also includes a demangler tool for reverse parsing.
+    - **Semantic** performs type checking, type inference, and scope analysis on the AST to ensure semantic correctness.
 
-    - **Package Manage**: Manages and loads code modules, handles dependencies and namespace isolation, and supports collaborative development across multiple modules.
+    - **Mangler** handles symbol name mangling for Cangjie, and includes a demangler tool for reverse parsing.
 
-    - **Macro Expand**: Processes macro definitions and macro calls in the code to achieve code generation and reuse.
+    - **Package Management** manages and loads code modules, handles dependencies and namespace isolation, and supports multi-module collaborative development. This module uses the flatbuffer library for serialization and deserialization.
 
-    - **Condition/Incr Compile**: Condition compilation allows for building code based on predefined or user-defined conditions, while incremental compilation can accelerate the current build speed by leveraging cached files from previous compilations.
+    - **Macro** handles macro expansion, processing macro definitions and calls for code generation and reuse.
 
-    - **CHIR**: Converts the AST into the compiler's intermediate representation for optimization and backend processing.
+    - **Condition Compile**: Conditional compilation allows compiling based on predefined or custom conditions; incremental compilation speeds up builds using previous compilation cache files.
 
-    - **LLVM IR Codegen**: Translates the intermediate representation (CHIR) into LLVM IR, preparing to generate target machine code (LLVM BitCode).
+    - **CHIR**: CHIR (Cangjie High Level IR) converts the AST to an intermediate representation and performs optimizations.
 
-- **LLVM**: receives the intermediate representation generated by the frontend, performs optimization, generates target platform machine code, and integrates it into executable files through the linker.
+    - **Codegen**: Translates the intermediate representation (CHIR) to LLVM IR, preparing for target machine code (LLVM BitCode) generation.
 
-    - **Opt**: Performs various optimizations on LLVM IR, such as constant folding and loop optimization, to improve the execution efficiency and quality of the generated code.
+- **LLVM**: Includes the compiler backend and related LLVM toolchain. The backend receives the intermediate representation from the frontend, optimizes it, generates target platform machine code, and links it into executable files.
 
-    - **llc**: Converts the optimized LLVM IR into target platform machine code, adapting to different hardware architectures.
+    - **opt**: Performs various optimizations on LLVM IR, such as constant folding and loop optimization, to improve code efficiency and quality.
 
-    - **ld**: Links multiple object files and dependent libraries into the final executable, resolves symbol references, and generates deployable program.
+    - **llc**: Converts optimized LLVM IR to target platform machine code, supporting different hardware architectures.
 
-    - **debugger**: Provides debugging capabilities related to the Cangjie language.
+    - **ld**: Links multiple object files and libraries into the final executable, resolving symbol references and generating deployable program artifacts.
 
-For other toolchains of LLVM and more detailed descriptions of backend tools, please refer to the [LLVM Command Guide](https://llvm.org/docs/CommandGuide/).
+    - **debugger**: Provides debugging capabilities for the Cangjie language.
 
-- **OS**: The Cangjie Compiler and related toolchains currently support running on the following platforms: Windows x86-64, Linux x86-64/AArch64, and macOS x86_64/arm64. Support for the OpenHarmonyOS platform is under development. In addition to natively compiling outputs for the aforementioned platforms, the Cangjie Compiler also supports cross-compiling to generate binary outputs for the ohos-aarch64 platform. For details, please refer to the [Cangjie SDK Integration and Build Guide](https://gitcode.com/Cangjie/cangjie_build).
+For more details on the LLVM toolchain and backend tools, refer to the [LLVM Command Guide](https://llvm.org/docs/CommandGuide/).
+
+- **OS**: The Cangjie compiler and LLVM toolchain currently support Windows x86-64, Linux x86-64/AArch64, and Mac x86/arm64. HarmonyOS support is under development. In addition to native compilation, the Cangjie compiler supports cross-compiling binaries for the ohos-aarch64 platform. For details, see the Cangjie SDK Integration and Build Guide](https://gitcode.com/Cangjie/cangjie_build).
 
 ## Directory Structure
 
 ```text
 cangjie_compiler/
-├── cmake                       # CMake folder for build helper scripts
+├── cmake                       # CMake scripts for build assistance
 ├── demangler                   # Symbol demangling
-├── doc                         # documentations
-├── figures                     # figures for documentations
+├── doc                         # Documentation
+├── figures                     # Documentation images
 ├── include                     # Header files
-├── integration_build           # Cangjie SDK Integration Build Script
-├── schema                      # FlatBuffers Schema serialization data structure files
+├── integration_build           # Cangjie SDK integration build scripts
+├── schema                      # FlatBuffers schema files for serialization
 ├── src                         # Compiler source code
-│   ├── AST                     # Abstract Syntax Tree components
-│   ├── Basic                   # Basic compiler components
-│   ├── CHIR                    # Compiler intermediate representation, optimization and analysis
-│   ├── CodeGen                 # Code generation, translates CHIR to LLVMIR
+│   ├── AST                     # Abstract Syntax Tree
+│   ├── Basic                   # Compiler basic components
+│   ├── CHIR                    # Intermediate representation and optimization
+│   ├── CodeGen                 # Code generation (CHIR to LLVM IR)
 │   ├── ConditionalCompilation  # Conditional compilation
-│   ├── Driver                  # Compiler driver, launches frontend and invokes backend commands
-│   ├── Frontend                # Compiler instance class, organizes compilation process
-│   ├── FrontendTool            # Compiler instance class for external tools
+│   ├── Driver                  # Compiler driver (frontend/backend orchestration)
+│   ├── Frontend                # Compiler instance and workflow
+│   ├── FrontendTool            # Compiler instance for external tools
 │   ├── IncrementalCompilation  # Incremental compilation
 │   ├── Lex                     # Lexical analysis
 │   ├── Macro                   # Macro expansion
 │   ├── main.cpp                # Compiler entry point
 │   ├── Mangle                  # Symbol mangling
-│   ├── MetaTransformation      # Metaprogramming compiler plugins
-│   ├── Modules                 # Package management module
-│   ├── Option                  # Compiler options control
+│   ├── MetaTransformation      # Metaprogramming plugins
+│   ├── Modules                 # Module management
+│   ├── Option                  # Compiler options
 │   ├── Parse                   # Syntax analysis
 │   ├── Sema                    # Semantic analysis
-│   └── Utils                   # Common utilities
+│   └── Utils                   # Utilities
 ├── third_party                 # Third-party build scripts and patch files
-│   ├── cmake                   # Third-party CMake helper scripts
-│   ├── llvmPatch.diff          # LLVM backend patch file, includes LLVM and cjdb source
-│   └── flatbufferPatch.diff    # FlatBuffers source patch file
-├── unittests                   # Unit Test Cases
-└── utils                       # Compiler-related utilities
+│   ├── cmake                   # Third-party CMake scripts
+│   ├── llvmPatch.diff          # LLVM backend patch (includes llvm and cjdb sources)
+│   └── flatbufferPatch.diff    # Flatbuffer source patch
+├── unittests                   # Unit tests
+└── utils                       # Auxiliary tools
 ```
 
 ## Constraints
 
-Building the Cangjie compiler is supported on Ubuntu/MacOS (x86_64, aarch64) environments. For more details on environment and tool dependencies, please refer to the [Build Dependency Tools](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md).
+Supports building the Cangjie compiler on Ubuntu/MacOS (x86_64, aarch64). For detailed environment and tool dependencies, see [Build Dependency Tools](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md).
 
 ## Building from Source
 
 > **Note:**
 >
-> This section describes how to build the Cangjie compiler from source. If you want to use the Cangjie compiler to compile Cangjie source code or projects, please skip this section and go to the [Cangjie Official Download Page](https://cangjie-lang.cn/download) to get the release package, or refer to the [Integration Build Guide](#integration-build-guide) for integrated builds.
+> This section describes how to build the Cangjie compiler from source. If you only want to use the compiler to build Cangjie code or projects, skip this section and download the release package from the [official website](https://cangjie-lang.cn/download) or refer to the [Integration Build Guide](#integration-build-guide).
 
 ### Preparation
 
-For environment requirements and software dependencies on each platform, please refer to the [Standalone Build Guide](doc/Standalone_Build_Guide.md).
+For environment requirements and software dependencies on each platform, see the [Standalone Build Guide](doc/Standalone_Build_Guide.md).
 
-Download the source code:
+Clone the source code:
 
 ```shell
 git clone https://gitcode.com/Cangjie/cangjie_compiler.git -b main;
@@ -110,43 +112,43 @@ python3 build.py build -t release
 python3 build.py install
 ```
 
-1. The `clean` command clears temporary files in the workspace.
-2. The `build` command starts compilation. The `-t` or `--build-type` option specifies the build type, which can be `release`, `debug` or `relwithdebinfo`.
+1. The `clean` command removes temporary files from the workspace.
+2. The `build` command starts compilation. The `-t` or `--build-type` option specifies the build type: `release`, `debug`, or `relwithdebinfo`.
 3. The `install` command installs the build artifacts to the `output` directory.
 
-The `output` directory structure is as follows:
+The `output` directory structure:
 
 ```text
 ./output
 ├── bin
-│   ├── cjc                 # Cangjie compiler executable
-│   └── cjc-frontend -> cjc # Cangjie compiler frontend executable
-├── envsetup.sh             # One-click environment variable setup script
-├── include                 # Public header files for the frontend
-├── lib                     # Libraries required by the Cangjie build, subfolders by target platform
-├── modules                 # Reserved folder for Cangjie standard library cjo files, subfolders by target platform
-├── runtime                 # Runtime libraries required by the Cangjie build
-├── third_party             # Third-party binaries and libraries such as LLVM
-└── tools                   # Cangjie tools folder
+│   ├── cjc                 # Cangjie compiler executable
+│   └── cjc-frontend -> cjc # Cangjie compiler frontend executable (symlink)
+├── envsetup.sh             # Environment setup script
+├── include                 # Public headers for the frontend
+├── lib                     # Compiler libraries (by target platform)
+├── modules                 # Standard library cjo files (by target platform)
+├── runtime                 # Runtime libraries
+├── third_party             # Third-party binaries and libraries (e.g., LLVM)
+└── tools                   # Cangjie tools
 ```
 
-On Linux, you can apply the cjc environment with `source ./output/envsetup.sh`, and check the current compiler version and platform info with `cjc -v`:
+On Linux, run `source ./output/envsetup.sh` to set up the environment, then use `cjc -v` to check the compiler version and platform info:
 
 ```shell
 source ./output/envsetup.sh
 cjc -v
 ```
 
-Output as follows:
+Example output:
 
 ```text
 Cangjie Compiler: x.xx.xx (cjnative)
 Target: xxxx-xxxx-xxxx
 ```
 
-### Running unittest test cases
+### Run Unittest
 
-Unit test cases are built by default during the build process. After a successful build, you can verify them with the following command:
+Unit tests are built by default. After a successful build, run:
 
 ```shell
 python3 build.py test
@@ -166,6 +168,10 @@ For more platform-specific build information, see the [Standalone Build Guide](d
 
 For integration builds, please refer to the [Cangjie SDK Integration Build Guide](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md).
 
+## License
+
+This project is licensed under [Apache-2.0 with Runtime Library Exception](./LICENSE). Feel free to use and contribute!
+
 ## Related Repositories
 
 - [cangjie_docs](https://gitcode.com/Cangjie/cangjie_docs/tree/main/docs/dev-guide)
@@ -177,14 +183,15 @@ For integration builds, please refer to the [Cangjie SDK Integration Build Guide
 
 ## Open Source Software Statement
 
-| Software Name       | License                              | Usage Description                                                                                                                                                                | Main Component                | Usage Method                                                         |
-|---------------------|--------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------|----------------------------------------------------------------------|
-| mingw-w64           | Zope Public License V2.1             | The Cangjie Windows SDK includes some static libraries from Mingw, which are linked with Cangjie-generated object files to produce final executables that can call Windows APIs. | Compiler                      | Integrated into the Cangjie binary release                           |
-| LLVM                | Apache 2.0 with LLVM Exception       | The Cangjie compiler backend is developed based on LLVM.                                                                                                                         | Compiler                      | Integrated into the Cangjie binary release                           |
-| flatbuffers         | Apache License V2.0                  | Cangjie's cjo files and macro implementations rely on this software for serialization and deserialization.                                                                       | Compiler & StdLib (std.ast)   | Integrated into the Cangjie binary release                           |
-| libboundscheck      | Mulan Permissive Software License V2 | Related code in the compiler, standard library, and extension library is implemented based on this software.                                                                     | Compiler, StdLib, Extension   | Integrated into the Cangjie binary release                           |
+| Software Name       | License                              | Usage Description                                                                                                                       | Main Component              | Usage Methods                               |
+|---------------------|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|-----------------------------|---------------------------------------------|
+| mingw-w64           | Zope Public License V2.1             | The Cangjie Windows SDK includes some static libraries from Mingw, linked with Cangjie-generated objects to produce Windows executables | Compiler                    | Integrated into the Cangjie binary release  |
+| LLVM                | Apache 2.0 with LLVM Exception       | Cangjie compiler backend is based on LLVM.                                                                                              | Compiler                    | Integrated into the Cangjie binary release  |
+| flatbuffers         | Apache License V2.0                  | Used for serialization/deserialization of cjo files and macros                                                                          | Compiler & StdLib(std.ast)  | Integrated into the Cangjie binary release  |
+| libboundscheck      | Mulan Permissive Software License V2 | Used for safe function implementations in the compiler and related code                                                                 | Compiler, StdLib, Extension | Integrated into the Cangjie binary release  |
 
-For information on the usage of mingw-w64 and other build dependencies, please refer to [Build Dependency Tools](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md) and [Cangjie SDK Integration and Build Guide](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md).
+For details on mingw-w64 and other build dependencies, see [Build Dependencies](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md) and the [Cangjie SDK Integration Build Guide](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md).
+
 ## Contribution
 
 We welcome contributions from developers in any form, including but not limited to code, documentation, issues, and more.

@@ -10,7 +10,7 @@
 
 ### 构建说明
 
-该仓由 CMake 作为子目标项目依赖，编译时自动编译该项目并依赖，详细的构建参数见 [CMakeLists.txt](./cmake/CMakeLists.txt) 文件。
+本仓库通过 CMake 作为子目标项目引入，编译过程中会自动完成构建并建立依赖关系，具体构建参数请参见 [CMakeLists.txt](./cmake/CMakeLists.txt) 文件。
 
 ## flatbuffers
 
@@ -28,7 +28,7 @@ FlatBuffers 是一个高效的跨平台、跨语言序列化库，仓颉语言�
 
 ### 构建说明
 
-该仓由 CMake 作为子目标项目依赖，编译时自动编译该项目并依赖。前端编译器构建时自动拉取开源代码并，并应用 patch 文件。详细的构建参数见 [Flatbuffer.cmake](./cmake/Flatbuffer.cmake) 文件。
+本仓库通过 CMake 作为子目标项目引入，编译过程中会自动完成构建并建立依赖关系，具体构建参数请参见 [Flatbuffer.cmake](./cmake/Flatbuffer.cmake) 文件。
 
 开发者也可以手动下载 [flatbuffers](https://gitcode.com/openharmony/third_party_flatbuffers.git) 源码，并应用 patch 文件，命令如下：
 
@@ -45,7 +45,7 @@ git apply ../flatbufferPatch.diff
 
 ### 代码来源说明
 
-LLVM 作为仓颉编译器后端，当前基于官方代码仓 tag llvmorg-15.0.4(对应commit 5c68a1cb123161b54b72ce90e7975d95a8eaf2a4)开源版本修改实现。为了便于代码管理以及支持鸿蒙版本构建，LLVM 在构建时来源有两种：
+LLVM 作为仓颉编译器后端，当前基于官方代码仓 [llvmorg-15.0.4](https://gitcode.com/openharmony/third_party_llvm-project)（对应commit 5c68a1cb123161b54b72ce90e7975d95a8eaf2a4）开源版本修改实现。为了便于代码管理以及支持鸿蒙版本构建，LLVM 在构建时来源有两种：
 - 来源于仓库 https://gitcode.com/Cangjie/llvm-project/ ，使用此代码仓为默认方式，便于日常代码开发、检视和管理。
 - 来源于仓库 https://gitcode.com/openharmony/third_party_llvm-project （llvmorg-15.0.4 对应 commit hash），并外加 llvmPatch.diff 进行构建，此方式主要为 OpenHarmony 构建版本时采用。
 
@@ -53,9 +53,10 @@ llvmPatch.diff 基于 https://gitcode.com/Cangjie/llvm-project/ 仓库改动经�
 
 ### 构建说明
 
-该仓由 CMake 作为子目标项目依赖，编译时自动编译该项目并依赖。前端编译器构建时自动拉取开源代码并应用 patch 文件。
+本仓库通过 CMake 作为子目标项目引入，编译过程中会自动完成代码构建并建立依赖关系。
 
 当使用选项 "--use-oh-llvm-repo" 时，默认通过 [third_party_llvm-project](https://gitcode.com/openharmony/third_party_llvm-project) 仓代码外加 llvmPatch.diff 进行构建。
+
 开发者也可以手动下载 [third_party_llvm-project](https://gitcode.com/openharmony/third_party_llvm-project) 源码，并应用 patch 文件，命令如下：
 
 ```shell
