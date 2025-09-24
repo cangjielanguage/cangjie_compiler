@@ -4,7 +4,7 @@
 
 Cangjie is a general-purpose programming language designed for all-scenario application development, balancing development efficiency and runtime performance while providing a great programming experience. Cangjie features concise and efficient syntax, multi-paradigm programming, and type safety. For more information, please refer to the [Cangjie Language Development Guide](https://cangjie-lang.cn/docs?url=%2F1.0.0%2Fuser_manual%2Fsource_zh_cn%2Ffirst_understanding%2Fbasic.html) and the [Cangjie Programming Language White Paper](https://cangjie-lang.cn/docs?url=%2F0.53.18%2Fwhite_paper%2Fsource_zh_cn%2Fcj-wp-abstract.html).
 
-This repository provides the source code for the Cangjie compiler, which consists of two main parts: the compiler frontend and modified open-source LLVM components. The latter includes the LLVM backend, opt optimizer, llc, ld linker, and debugger. For details on third-party dependencies, see the [Third-Party Library Patch Documentatio](./third_party/README.md). The overall architecture is shown below:
+This repository provides the source code for the Cangjie compiler, which consists of two main parts: the compiler frontend and modified open-source LLVM components. The latter includes the LLVM backend, opt optimizer, llc, ld linker, and debugger. For details on third-party dependencies, see the [Third-Party Library Documentation](./third_party/README.md). The overall architecture is shown below:
 
 ![Architecture Diagram](figures/Compiler_Architecture_Diagram.png)
 
@@ -42,7 +42,7 @@ This repository provides the source code for the Cangjie compiler, which consist
 
 For more details on the LLVM toolchain and backend tools, refer to the [LLVM Command Guide](https://llvm.org/docs/CommandGuide/).
 
-- **OS**: The Cangjie compiler and LLVM toolchain currently support Windows x86-64, Linux x86-64/AArch64, and Mac x86/arm64. HarmonyOS support is under development. In addition to native compilation, the Cangjie compiler supports cross-compiling binaries for the ohos-aarch64 platform. For details, see the Cangjie SDK Integration and Build Guide](https://gitcode.com/Cangjie/cangjie_build).
+- **OS**: The Cangjie compiler and LLVM toolchain currently support Windows x86-64, Linux x86-64/AArch64, and Mac x86/arm64. HarmonyOS support is under development. In addition to native compilation, the Cangjie compiler supports cross-compiling binaries for the ohos-aarch64 platform. For details, see the [Cangjie SDK Integration and Build Guide](https://gitcode.com/Cangjie/cangjie_build) and [Platform Support Roadmap](#platform-support-roadmap).
 
 ## Directory Structure
 
@@ -85,7 +85,14 @@ cangjie_compiler/
 
 ## Constraints
 
-Supports building the Cangjie compiler on Ubuntu/MacOS (x86_64, aarch64). For detailed environment and tool dependencies, see [Build Dependency Tools](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md).
+Currently, building Cangjie compiler artifacts directly in the Windows environment is not supported. Instead, you need to generate compiler artifacts that can run on Windows through cross-compilation in a Linux environment. For details, see the [Cangjie SDK Integration Build Guide](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md). For future support plans, refer to the [Platform Support Roadmap](#platform-support-roadmap).
+
+## Platform Support Roadmap
+- Build Platform Evolution: Planned support for Windows Native builds of compiler artifacts by the end of 2025.
+
+- Compiler Runtime Platform Evolution: Planned support for running the compiler on the ohos (HarmonyOS PC) platform in 2026.
+
+- Cangjie Application Runtime Platform Evolution: Planned support for ohos-arm32 core features on 2025-09-30, but reflection and certain optimization features will not be included for the time being.
 
 ## Building from Source
 
@@ -190,7 +197,7 @@ This project is licensed under [Apache-2.0 with Runtime Library Exception](./LIC
 | flatbuffers         | Apache License V2.0                  | Used for serialization/deserialization of cjo files and macros                                                                          | Compiler & StdLib(std.ast)  | Integrated into the Cangjie binary release  |
 | libboundscheck      | Mulan Permissive Software License V2 | Used for safe function implementations in the compiler and related code                                                                 | Compiler, StdLib, Extension | Integrated into the Cangjie binary release  |
 
-For details on mingw-w64 and other build dependencies, see [Build Dependencies](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md) and the [Cangjie SDK Integration Build Guide](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md).
+For details on other build dependencies, see [Build Dependencies](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md) and the [Cangjie SDK Integration Build Guide](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md).
 
 ## Contribution
 

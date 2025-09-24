@@ -14,7 +14,7 @@
             <filefilter name="defaultFilter" desc="Files not to check">
                 <filteritem type="filename" name="COPYRIGHT|COPYRIGHT_EN" desc="doc file"/>
                 <filteritem type="filename" name="*.diff" desc="diff file"/>
-                <filteritem type="filename" name="*.cj|*.dylib|*.obfmap|*.expect|*.tsv|*.csv|*.der|*.text|*.key|*.zoneinfo.tar.g|errorTimeZone|*.expect|*.csr|*.der|Shanghai|*.info|*.dll|*.so|*.out|*.gz|TyKind.inc|*.base|*.test|*.list" desc="desc files"/>
+                <filteritem type="filename" name="*.dylib|*.obfmap|*.expect|*.tsv|*.csv|*.der|*.text|*.key|*.zoneinfo.tar.g|errorTimeZone|*.expect|*.csr|*.der|Shanghai|*.info|*.dll|*.so|*.out|*.gz|TyKind.inc|*.base|*.test|*.list" desc="desc files"/>
             </filefilter>
             <filefilter name="licenseFileNamePolicyFilter" desc="Filters for LICENSE file policies">
                 <filteritem type="filepath" name="doc/.*" desc="doc目录过滤"/>

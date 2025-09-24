@@ -46,7 +46,9 @@ git apply ../flatbufferPatch.diff
 ### 代码来源说明
 
 LLVM 作为仓颉编译器后端，当前基于官方代码仓 [llvmorg-15.0.4](https://gitcode.com/openharmony/third_party_llvm-project)（对应commit 5c68a1cb123161b54b72ce90e7975d95a8eaf2a4）开源版本修改实现。为了便于代码管理以及支持鸿蒙版本构建，LLVM 在构建时来源有两种：
+
 - 来源于仓库 https://gitcode.com/Cangjie/llvm-project/ ，使用此代码仓为默认方式，便于日常代码开发、检视和管理。
+
 - 来源于仓库 https://gitcode.com/openharmony/third_party_llvm-project （llvmorg-15.0.4 对应 commit hash），并外加 llvmPatch.diff 进行构建，此方式主要为 OpenHarmony 构建版本时采用。
 
 llvmPatch.diff 基于 https://gitcode.com/Cangjie/llvm-project/ 仓库改动经过验证后生成，每个版本都会保证 patch 可用。需要注意的是，LLVM 版本升级需结合 OpenHarmony 社区开源软件升级要求共同评估可行性，确保 OpenHarmony 版本可用。
@@ -77,3 +79,19 @@ git clone -b dev --depth 1 https://gitcode.com/Cangjie/llvm-project.git ./
 ```
 
 构建项目时，则直接使用 third_party/llvm-project 目录源码进行构建。
+
+## MinGW-w64
+
+### 代码来源说明
+
+仓颉 Windows 版本 SDK 携带 MinGW 中的部分静态库文件，与仓颉代码生成的目标文件链接在一起，为用户生成最终的可以调用 Windows API 的可执行二进制文件。
+
+该仓部分产物将被打包至仓颉发布包中，基于开源仓库 [third_party_mingw-w64 12.0.0](https://gitcode.com/openharmony/third_party_mingw-w64/commit/feea9a87fa42591b298b18fe0e07198f0b8c2f63?ref=master) 进行编译。
+
+该开源软件被编译器及周边组件以包含头文件的方式使用，并通过链接库（动态库或静态库）的方式依赖。
+
+### 构建说明
+
+当编译目标平台为 Windows 时，需要依赖该开源软件。
+
+该开源软件需在构建编译器之前完成，并且构建编译器时，需指定其编译产物路径。MinGW-w64 的详细构建流程请参阅 [构建指导书](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/linux_cross_windows_zh.md#23-%E7%BC%96%E8%AF%91mingw-w64%E5%8F%8A%E9%85%8D%E5%A5%97%E5%B7%A5%E5%85%B7%E9%93%BE-%E5%85%B3%E9%94%AE%E6%AD%A5%E9%AA%A4)。

@@ -4,7 +4,7 @@
 
 仓颉编程语言是一种面向全场景应用开发的通用编程语言，可以兼顾开发效率和运行性能，并提供良好的编程体验。仓颉语言具有语法简明高效、多范式编程、类型安全等特点，了解更多仓颉语言的介绍，请参阅 [仓颉语言开发指南](https://cangjie-lang.cn/docs?url=%2F1.0.0%2Fuser_manual%2Fsource_zh_cn%2Ffirst_understanding%2Fbasic.html) 以及 [仓颉编程语言白皮书](https://cangjie-lang.cn/docs?url=%2F0.53.18%2Fwhite_paper%2Fsource_zh_cn%2Fcj-wp-abstract.html)。
 
-本仓提供了仓颉编译器相关源码，整体包含两部分：编译器前端和 LLVM 开源修改部分，后者包括 LLVM 编译器后端 opt 优化器、llc、ld 链接器以及调试器等。LLVM 开源组件依赖部分可参考[第三方库 patch 说明](./third_party/README.md)。 整体架构如下图展示：
+本仓提供了仓颉编译器相关源码，整体包含两部分：编译器前端和 LLVM 开源修改部分，后者包括 LLVM 编译器后端 opt 优化器、llc、ld 链接器以及调试器等。开源组件依赖可参考[第三方库说明](./third_party/README.md)。 整体架构如下图展示：
 
 ![架构图](figures/Compiler_Architecture_Diagram_zh.png)
 
@@ -42,7 +42,7 @@
 
 llvm 其他工具链以及更详细的后端工具说明，可以参考[llvm 命令指南](https://llvm.org/docs/CommandGuide/)。
 
-- **OS**：仓颉编译器及 LLVM 相关工具链当前支持在如下平台运行 Windows x86-64、Linux x86-64/AArch64、Mac x86/arm64，鸿蒙平台正在开发中。同时，除可 native 编译出上述平台产物外，仓颉编译器还支持交叉编译出 ohos-aarch64 平台二进制产物，详细请参考[仓颉SDK集成构建指导书](https://gitcode.com/Cangjie/cangjie_build#%E4%BB%93%E9%A2%89sdk%E9%9B%86%E6%88%90%E6%9E%84%E5%BB%BA%E6%8C%87%E5%AF%BC%E4%B9%A6)。
+- **OS**：仓颉编译器及 LLVM 相关工具链当前支持在如下平台运行 Windows x86-64、Linux x86-64/AArch64、Mac x86/arm64，鸿蒙平台正在开发中。同时，除可 native 编译出上述平台产物外，仓颉编译器还支持交叉编译出 ohos-aarch64 平台二进制产物，详细请参考[仓颉SDK集成构建指导书](https://gitcode.com/Cangjie/cangjie_build#%E4%BB%93%E9%A2%89sdk%E9%9B%86%E6%88%90%E6%9E%84%E5%BB%BA%E6%8C%87%E5%AF%BC%E4%B9%A6)和[平台支持计划](#平台支持计划)。
 
 ## 目录结构
 
@@ -85,7 +85,13 @@ llvm 其他工具链以及更详细的后端工具说明，可以参考[llvm 命
 
 ## 约束
 
-支持在 Ubuntu/MacOS(x86_64, aarch64) 环境中对仓颉编译器进行构建。更详细的环境及工具依赖请参阅 [构建依赖工具](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md)。
+当前暂不支持 Windows 环境内构建仓颉编译器产物，需要在 Linux 环境内通过交叉编译方式生成可在 Windows 平台运行的编译器产物，详见[仓颉 SDK 集成构建指导书](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md)。未来支持计划具体见[平台支持计划](#平台支持计划)。
+
+## 平台支持计划
+- 构建平台演进：计划于2025年底支持 Windows Native 构建出编译器产物。
+- 编译器运行平台演进：计划于2026年支持 ohos（鸿蒙PC） 平台运行编译器。
+- 仓颉应用运行平台演进：计划于2025.9.30支持 ohos-arm32 核心功能，但暂时不包括反射、部分优化功能。
+
 
 ## 编译构建
 
@@ -190,7 +196,7 @@ python3 build.py --help
 | flatbuffers         | Apache License V2.0                         | 仓颉的 cjo 文件和宏实现依赖该软件进行序列化和反序列化                                                             | 编译器和标准库(std.ast)      | 集成到仓颉二进制发布包中         |
 | libboundscheck      | Mulan Permissive Software License Version 2 | 编译器等相关代码基于该软件实现                                                                           | 编译器、标准库、扩展库           | 集成到仓颉二进制发布包中         |
 
-mingw-w64 以及其他构建依赖使用情况可参考[构建依赖工具](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md)及[仓颉 SDK 集成构建指导书](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md)。
+其他构建依赖使用情况可参考[构建依赖工具](https://gitcode.com/Cangjie/cangjie_build/blob/dev/docs/env_zh.md)及[仓颉 SDK 集成构建指导书](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md)。
 
 ## 参与贡献
 
