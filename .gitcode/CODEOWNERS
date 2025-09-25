@@ -1,6 +1,14 @@
 /.gitcode/ @xuanjz
-/cmake/ @neilliuistaken
-/demangler/ @neilliuistaken
+/cmake/ @neilliuistaken @Yessy 
+/demangler/ @neilliuistaken @Yessy 
 *.md @amy_yun @liujianing
-build.py @neilliuistaken
+build.py @neilliuistaken @Yessy 
 /integration_build/ @zichexuelan
+/include/cangjie/CodeGen/ @Yessy @neilliuistaken
+/include/cangjie/Driver/ @Yessy @neilliuistaken
+/include/cangjie/Mangle/ @Yessy @neilliuistaken
+/include/cangjie/Option/ @Yessy @neilliuistaken
+/src/CodeGen/ @Yessy @neilliuistaken
+/src/Driver/ @Yessy @neilliuistaken
+/src/Mangle/ @Yessy @neilliuistaken
+/src/Option/ @Yessy @neilliuistaken
