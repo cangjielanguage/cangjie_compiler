@@ -1,7 +1,7 @@
 /.gitcode/ @xuanjz
 /cmake/ @neilliuistaken @Yessy 
 /demangler/ @neilliuistaken @Yessy 
-*.md @amy_yun @liujianing
+*.md @amy_mayun @luojianing
 build.py @neilliuistaken @Yessy 
 /integration_build/ @zichexuelan
 /include/cangjie/CodeGen/ @Yessy @neilliuistaken
