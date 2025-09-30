@@ -764,7 +764,6 @@ void IRBuilder2::CreateOutOfBoundException()
 
 void IRBuilder2::CreateRunTimeInvalidGenericParamException()
 {
-    // TODO:: need add  RunTimeInvalidGenericParamException in core package
     const std::string invalidGenericParamExceptionClassName = "_CNat9ExceptionE";
     const std::string invalidGenericParamExceptionInitFuncName = "_CNat9Exception6<init>Hv";
     CreateExceptionAndThrow(*this, invalidGenericParamExceptionClassName, invalidGenericParamExceptionInitFuncName);

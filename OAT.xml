@@ -17,7 +17,8 @@
                 <filteritem type="filename" name="*.dylib|*.obfmap|*.expect|*.tsv|*.csv|*.der|*.text|*.key|*.zoneinfo.tar.g|errorTimeZone|*.expect|*.csr|*.der|Shanghai|*.info|*.dll|*.so|*.out|*.gz|TyKind.inc|*.base|*.test|*.list" desc="desc files"/>
             </filefilter>
             <filefilter name="licenseFileNamePolicyFilter" desc="Filters for LICENSE file policies">
-                <filteritem type="filepath" name="doc/.*" desc="doc目录过滤"/>
+                <filteritem type="filepath" name="doc/*" desc="doc目录过滤"/>
+                <filteritem type="filepath" name="unittests/Utils/CangjieFiles/emptyfile.cj" desc="空文件过滤"/>
             </filefilter>
             <filefilter name="defaultPolicyFilter" desc="Files that do not need to be applied specified policy, will be merged with the filter items which has the same filefilter name">
 
