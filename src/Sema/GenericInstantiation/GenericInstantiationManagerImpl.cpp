@@ -971,7 +971,7 @@ void GIM::GenericInstantiationManagerImpl::GenericRefExprInstantiate(RefExpr& re
         return;
     }
     auto target = GetRealTarget(re.ref.target);
-    if (target->IsBuiltIn() || !RequireInstantiation(*target, IsInOpenContext(structContext))) {
+    if (target->IsBuiltIn() || !RequireInstantiation(*target)) {
         return;
     }
     auto instTys = re.instTys;
@@ -1307,7 +1307,7 @@ void GIM::GenericInstantiationManagerImpl::RearrangeRefExprReference(RefExpr& re
 {
     // Generic type decleration do not need to be instantiated.
     if (!Ty::IsTyCorrect(re.ty) || !re.ref.target || re.ref.target->IsBuiltIn() ||
-        re.ref.target->astKind == ASTKind::GENERIC_PARAM_DECL || IsInOpenContext(structContext)) {
+        re.ref.target->astKind == ASTKind::GENERIC_PARAM_DECL || !RequireInstantiation(*re.ref.target)) {
         return;
     }
     auto baseTy = re.ty;

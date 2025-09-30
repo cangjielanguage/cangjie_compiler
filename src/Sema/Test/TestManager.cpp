@@ -691,16 +691,12 @@ bool TestManager::ShouldBeMarkedAsContainingMockCreationCall(
 
 void TestManager::MarkDeclsForTestIfNeeded(std::vector<Ptr<Package>> pkgs) const
 {
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     HandleDeclsToExportForTest(pkgs);
-#endif
     for (auto& pkg : pkgs) {
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         MarkMockCreationContainingGenericFuncs(*pkg);
         if (mockMode != MockMode::ON && (!mockCompatibleIfNeeded || !IsThereMockUsage(*pkg))) {
             continue;
         }
-#endif
 
         Walker(pkg, Walker::GetNextWalkerID(), [](auto node) {
             MockSupportManager::MarkNodeMockSupportedIfNeeded(*node);

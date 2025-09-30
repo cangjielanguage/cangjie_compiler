@@ -379,7 +379,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         CopyBasicInfo(innerBlock, re23.get());
         re23->isAlone = false;
         re23->ref.target = excInitDecl;
-        re23->ty = exceptionType;
+        re23->ty = excInitDecl->ty;
 
         auto earlyCreation =
             AST::CreateCallExpr(std::move(re23), {}, excInitDecl, exceptionType, CallKind::CALL_OBJECT_CREATION);
@@ -829,7 +829,7 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
                 OwnedPtr<RefExpr> re2 = CreateRefExpr(CLASS_EARLY_RETURN);
                 re2->isAlone = false;
                 re2->ref.target = initDecl;
-                re2->ty = earlyReturnTy;
+                re2->ty = initDecl->ty;
                 CopyBasicInfo(tryResult, re2.get());
 
                 // ImmediateEarlyReturn(HandlerFrame.getActiveFrame(), result)

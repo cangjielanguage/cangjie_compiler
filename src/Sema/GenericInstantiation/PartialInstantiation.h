@@ -27,8 +27,7 @@ GlobalOptions::OptimizationLevel GetOptLevel();
  * Check whether the location where the instantiation is triggered is in the context with Open semantics.
  * Return true if expr is in a member of an open class or interface.
  */
-bool IsInOpenContext(const std::vector<Ptr<AST::Decl>>& contextDecl);
-bool RequireInstantiation(const AST::Decl& decl, bool isInOpenContext = false);
+bool RequireInstantiation(const AST::Decl& decl);
 
 using VisitFunc = std::function<void(AST::Node&, AST::Node&)>;
 void DefaultVisitFunc(const AST::Node& source, const AST::Node& target);
