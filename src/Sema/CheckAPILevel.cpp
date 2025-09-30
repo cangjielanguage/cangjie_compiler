@@ -30,15 +30,13 @@ using namespace AST;
 using namespace APILevelCheck;
 
 namespace {
-const std::string PKG_NAME_WHERE_APILEVEL_AT = "ohos.labels";
-const std::string APILEVEL_ANNO_NAME = "APILevel";
-const std::string LEVEL_IDENTGIFIER = "level";
-const std::string SYSCAP_IDENTGIFIER = "syscap";
-const std::string CFG_PARAM_LEVEL_NAME = "APILevel_level";
-const std::string CFG_PARAM_SYSCAP_NAME = "APILevel_syscap";
-// Based on the definition of 'APILevel' in the 'ohos.labels'.
-const std::string PARAMLIST_STR = "(UInt8, atomicservice!: Bool, crossplatform!: Bool, deprecated!: UInt8, form!: "
-                                  "Bool, permission!: ?PermissionValue, stagemodelonly!: Bool, syscap!: String)";
+constexpr std::string_view PKG_NAME_WHERE_APILEVEL_AT = "ohos.labels";
+constexpr std::string_view APILEVEL_ANNO_NAME = "APILevel";
+constexpr std::string_view SINCE_IDENTGIFIER = "since";
+constexpr std::string_view LEVEL_IDENTGIFIER = "level";
+constexpr std::string_view SYSCAP_IDENTGIFIER = "syscap";
+constexpr std::string_view CFG_PARAM_LEVEL_NAME = "APILevel_level";
+constexpr std::string_view CFG_PARAM_SYSCAP_NAME = "APILevel_syscap";
 // For level check:
 const LevelType IFAVAIALBEL_LOWER_LIMITLEVEL = 19;
 
@@ -58,11 +56,29 @@ void ParseLevel(const Expr& e, APILevelAnnoInfo& apilevel, DiagnosticEngine& dia
         lce = StaticCast<LitConstExpr>(&e);
     }
     if (!lce || lce->kind != LitConstKind::INTEGER) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_only_literal_support, e);
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_only_literal_support, e, "integer");
         return;
     }
     auto newLevel = Str2LevelType(lce->stringValue);
-    apilevel.level = apilevel.level == 0 ? newLevel : std::min(newLevel, apilevel.level);
+    apilevel.since = apilevel.since == 0 ? newLevel : std::min(newLevel, apilevel.since);
+}
+
+void ParseSince(const Expr& e, APILevelAnnoInfo& apilevel, DiagnosticEngine& diag)
+{
+    Ptr<const LitConstExpr> lce = nullptr;
+    if (e.astKind == ASTKind::BINARY_EXPR) {
+        auto be = StaticCast<BinaryExpr>(&e);
+        CJC_NULLPTR_CHECK(be->rightExpr);
+        lce = DynamicCast<LitConstExpr>(be->rightExpr.get());
+    } else if (e.astKind == ASTKind::LIT_CONST_EXPR) {
+        lce = StaticCast<LitConstExpr>(&e);
+    }
+    if (!lce || lce->kind != LitConstKind::STRING) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_only_literal_support, e, "string");
+        return;
+    }
+    auto newLevel = Str2LevelType(lce->stringValue);
+    apilevel.since = apilevel.since == 0 ? newLevel : std::min(newLevel, apilevel.since);
 }
 
 void ParseSysCap(const Expr& e, APILevelAnnoInfo& apilevel, DiagnosticEngine& diag)
@@ -76,26 +92,16 @@ void ParseSysCap(const Expr& e, APILevelAnnoInfo& apilevel, DiagnosticEngine& di
         lce = StaticCast<LitConstExpr>(&e);
     }
     if (!lce || lce->kind != LitConstKind::STRING) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_only_literal_support, e);
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_only_literal_support, e, "string");
         return;
     }
     apilevel.syscap = lce->stringValue;
 }
 
-void Placeholder([[maybe_unused]] const Expr& e, [[maybe_unused]] const APILevelAnnoInfo& apilevel,
-    [[maybe_unused]] const DiagnosticEngine& diag)
-{
-}
-
 using ParseNameParamFunc = std::function<void(const Expr&, APILevelAnnoInfo&, DiagnosticEngine&)>;
-std::unordered_map<std::string, ParseNameParamFunc> parseNameParam = {
+std::unordered_map<std::string_view, ParseNameParamFunc> parseNameParam = {
+    {SINCE_IDENTGIFIER, ParseSince},
     {LEVEL_IDENTGIFIER, ParseLevel},
-    {"atomicservice", Placeholder},
-    {"crossplatform", Placeholder},
-    {"deprecated", Placeholder},
-    {"form", Placeholder},
-    {"permission", Placeholder},
-    {"stagemodelonly", Placeholder},
     {SYSCAP_IDENTGIFIER, ParseSysCap},
 };
 
@@ -375,12 +381,12 @@ void APILevelAnnoChecker::ParseJsonFile(const std::vector<uint8_t>& in) noexcept
 void APILevelAnnoChecker::ParseOption() noexcept
 {
     auto& option = ci.invocation.globalOptions;
-    auto found = option.passedWhenKeyValue.find(CFG_PARAM_LEVEL_NAME);
+    auto found = option.passedWhenKeyValue.find(std::string(CFG_PARAM_LEVEL_NAME));
     if (found != option.passedWhenKeyValue.end()) {
         globalLevel = Str2LevelType(found->second);
         optionWithLevel = true;
     }
-    found = option.passedWhenKeyValue.find(CFG_PARAM_SYSCAP_NAME);
+    found = option.passedWhenKeyValue.find(std::string(CFG_PARAM_SYSCAP_NAME));
     if (found != option.passedWhenKeyValue.end()) {
         auto syscapsCfgPath = found->second;
         std::vector<uint8_t> jsonContent;
@@ -425,24 +431,21 @@ APILevelAnnoInfo APILevelAnnoChecker::Parse(const Decl& decl)
         if (!anno || !IsAnnoAPILevel(anno.get(), decl)) {
             continue;
         }
-        if (anno->args.size() < 1) {
-            auto builder = diag.DiagnoseRefactor(
-                DiagKindRefactor::sema_wrong_number_of_arguments, *anno, "missing argument", PARAMLIST_STR);
-            builder.AddMainHintArguments(std::to_string(parseNameParam.size()), std::to_string(anno->args.size()));
-            continue;
-        }
-        // level
-        CJC_NULLPTR_CHECK(anno->args[0]);
-        parseNameParam[LEVEL_IDENTGIFIER](*anno->args[0]->expr.get(), ret, diag);
-        // syscap
-        for (size_t i = 1; i < anno->args.size(); ++i) {
+        for (size_t i = 0; i < anno->args.size(); ++i) {
             std::string argName = anno->args[i]->name.Val();
-            CJC_ASSERT(parseNameParam.count(argName) > 0);
+            if (parseNameParam.count(argName) <= 0) {
+                continue;
+            }
             std::string preSyscap = ret.syscap;
             parseNameParam[argName](*anno->args[i]->expr.get(), ret, diag);
             if (!preSyscap.empty() && preSyscap != ret.syscap) {
                 diag.DiagnoseRefactor(DiagKindRefactor::sema_apilevel_multi_diff_syscap, decl);
             }
+        }
+        // In the APILevel definition, only "since" does not provide a default value. Here, the alert indicates that
+        // there is an issue with the APILevel annotation, which may originnate from the cj.d file.
+        if (ret.since == 0) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_apilevel_missing_arg, anno->begin, "since!: String");
         }
     }
     levelCache[&decl] = ret;
@@ -455,12 +458,12 @@ bool APILevelAnnoChecker::CheckLevel(
     if (!optionWithLevel) {
         return true;
     }
-    LevelType scopeLevel = scopeAPILevel.level != 0 ? scopeAPILevel.level : globalLevel;
+    LevelType scopeLevel = scopeAPILevel.since != 0 ? scopeAPILevel.since : globalLevel;
     auto targetAPILevel = Parse(target);
-    if (targetAPILevel.level > scopeLevel && !node.begin.IsZero()) {
+    if (targetAPILevel.since > scopeLevel && !node.begin.IsZero()) {
         if (reportDiag) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_apilevel_ref_higher, node, target.identifier.Val(),
-                std::to_string(targetAPILevel.level), std::to_string(scopeLevel));
+                std::to_string(targetAPILevel.since), std::to_string(scopeLevel));
         }
         return false;
     }
@@ -550,12 +553,12 @@ void APILevelAnnoChecker::CheckIfAvailableExpr(IfAvailableExpr& iae, APILevelAnn
     }
     auto ifExpr = StaticCast<IfExpr>(iae.desugarExpr.get());
     Ptr<FuncArg> arg = iae.GetArg();
-    if (parseNameParam.count(arg->name) <= 0) {
+    if (parseNameParam.count(arg->name.Val()) <= 0) {
         return;
     }
     auto ifScopeAPILevel = APILevelAnnoInfo();
-    parseNameParam[arg->name](*ifExpr->condExpr, ifScopeAPILevel, diag);
-    if (ifScopeAPILevel.level != 0 && ifScopeAPILevel.level < IFAVAIALBEL_LOWER_LIMITLEVEL) {
+    parseNameParam[arg->name.Val()](*ifExpr->condExpr, ifScopeAPILevel, diag);
+    if (ifScopeAPILevel.since != 0 && ifScopeAPILevel.since < IFAVAIALBEL_LOWER_LIMITLEVEL) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_ifavailable_level_limit, *arg);
         return;
     }
@@ -603,12 +606,12 @@ void APILevelAnnoChecker::Check(Package& pkg)
         auto scopeAPILevel = APILevelAnnoInfo();
         for (auto it = scopeDecl.rbegin(); it != scopeDecl.rend(); ++it) {
             scopeAPILevel = Parse(**it);
-            if (scopeAPILevel.level != 0) {
+            if (scopeAPILevel.since != 0) {
                 break;
             }
         }
         if (auto iae = DynamicCast<IfAvailableExpr>(node)) {
-            scopeAPILevel.level = scopeAPILevel.level == 0 ? globalLevel : scopeAPILevel.level;
+            scopeAPILevel.since = scopeAPILevel.since == 0 ? globalLevel : scopeAPILevel.since;
             CheckIfAvailableExpr(*iae, scopeAPILevel);
             return VisitAction::SKIP_CHILDREN;
         }

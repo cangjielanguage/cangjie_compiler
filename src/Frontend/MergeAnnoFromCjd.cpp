@@ -26,21 +26,16 @@ using namespace Cangjie::AST;
 namespace {
 void ExpandToAPILevel(MacroInvocation& invocation)
 {
-    auto apiLevelAnno = std::find_if(invocation.decl->annotations.begin(), invocation.decl->annotations.end(),
+    auto cache = std::find_if(invocation.decl->annotations.begin(), invocation.decl->annotations.end(),
         [](auto& anno) { return anno && anno->identifier.Val() == "APILevel"; });
-    if (apiLevelAnno != invocation.decl->annotations.end()) {
+    if (cache != invocation.decl->annotations.end()) {
         return;
     }
     auto expandedDecl = invocation.decl.get();
     auto apilevelAnno = MakeOwned<Annotation>();
     apilevelAnno->identifier = SrcIdentifier("APILevel");
-    // level:
-    CJC_ASSERT(invocation.attrs.size() > 0 && invocation.attrs[0].kind == TokenKind::INTEGER_LITERAL);
-    apilevelAnno->args.emplace_back(
-        CreateFuncArg(CreateLitConstExpr(LitConstKind::INTEGER, invocation.attrs[0].Value(), Ty::GetInitialTy()), ""));
-    // syscap:
     std::string lastIdentifier;
-    for (size_t i = 1; i < invocation.attrs.size(); ++i) {
+    for (size_t i = 0; i < invocation.attrs.size(); ++i) {
         if (invocation.attrs[i].kind == TokenKind::IDENTIFIER) {
             lastIdentifier = invocation.attrs[i].Value();
         }
@@ -48,6 +43,16 @@ void ExpandToAPILevel(MacroInvocation& invocation)
         if (invocation.attrs[i].kind == TokenKind::STRING_LITERAL) {
             apilevelAnno->args.emplace_back(
                 CreateFuncArg(CreateLitConstExpr(LitConstKind::STRING, invocation.attrs[i].Value(), Ty::GetInitialTy()),
+                    lastIdentifier));
+        }
+        if (invocation.attrs[i].kind == TokenKind::INTEGER_LITERAL) {
+            apilevelAnno->args.emplace_back(CreateFuncArg(
+                CreateLitConstExpr(LitConstKind::INTEGER, invocation.attrs[i].Value(), Ty::GetInitialTy()),
+                lastIdentifier));
+        }
+        if (invocation.attrs[i].kind == TokenKind::BOOL_LITERAL) {
+            apilevelAnno->args.emplace_back(
+                CreateFuncArg(CreateLitConstExpr(LitConstKind::BOOL, invocation.attrs[i].Value(), Ty::GetInitialTy()),
                     lastIdentifier));
         }
     }
@@ -279,6 +284,7 @@ bool IsSameFuncByIdentifier(Ptr<FuncBody> lb, Ptr<FuncBody> rb)
         if (auto mep = DynamicCast<MacroExpandParam>(lb->paramLists[0]->params[i].get());
             mep && mep->invocation.identifier == "APILevel") {
             ExpandToAPILevel(mep->invocation);
+            CopyBasicInfo(mep, mep->invocation.decl->annotations.back().get());
             expandedParam = StaticCast<FuncParam>(mep->invocation.decl.get());
         }
         if (expandedParam->identifier.Val() != rb->paramLists[0]->params[i]->identifier.Val()) {
@@ -420,6 +426,7 @@ void MergeTopLevelDecl(
         if (auto med = DynamicCast<MacroExpandDecl>(toplevelDecl.get());
             med && med->invocation.identifier == "APILevel") {
             ExpandToAPILevel(med->invocation);
+            CopyBasicInfo(med, med->invocation.decl->annotations.back().get());
             expandedDecl = med->invocation.decl.get();
         }
         if (expandedDecl->astKind == ASTKind::MAIN_DECL) {
@@ -472,6 +479,7 @@ void MergeMemberDecl(std::pair<const Ptr<Decl>, Ptr<Decl>>& declPair)
         Ptr<Decl> extendedDecl = member;
         if (auto med = DynamicCast<MacroExpandDecl>(member); med && med->invocation.identifier == "APILevel") {
             ExpandToAPILevel(med->invocation);
+            CopyBasicInfo(med, med->invocation.decl->annotations.back().get());
             extendedDecl = med->invocation.decl.get();
         }
         memberMapping.emplace(extendedDecl, nullptr);
@@ -506,6 +514,7 @@ void MergeMemberDecl(std::pair<const Ptr<Decl>, Ptr<Decl>>& declPair)
             if (auto mep = DynamicCast<MacroExpandParam>(s->funcBody->paramLists[0]->params[i].get());
                 mep && mep->invocation.identifier == "APILevel") {
                 ExpandToAPILevel(mep->invocation);
+                CopyBasicInfo(mep, mep->invocation.decl->annotations.back().get());
                 expandedParam = StaticCast<FuncParam>(mep->invocation.decl.get());
             }
             for (auto& anno : expandedParam->annotations) {
