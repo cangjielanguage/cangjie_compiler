@@ -13,15 +13,12 @@ else()
 endif()
 
 # for CloudDragon, download in Prebuild
-if(EXISTS ${FLATBUFFERS_SRC}/CMakeLists.txt)
-    set(FLATBUFFERS_DOWNLOAD_ARGS
-        URL ${FLATBUFFERS_SRC})
-else()
+if(NOT EXISTS ${FLATBUFFERS_SRC}/CMakeLists.txt)
     set(REPOSITORY_PATH https://gitcode.com/openharmony/third_party_flatbuffers.git)
     message(STATUS "Set flatbuffers REPOSITORY_PATH: ${REPOSITORY_PATH}")
     set(FLATBUFFERS_DOWNLOAD_ARGS
         GIT_REPOSITORY ${REPOSITORY_PATH}
-        GIT_TAG OpenHarmony-v6.0-Release
+        GIT_TAG master
         GIT_PROGRESS ON
         GIT_CONFIG ${GIT_ARGS}
         GIT_SHALLOW ON)
