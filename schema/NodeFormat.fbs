@@ -868,7 +868,8 @@ union AnyNode {
   FILE: File,
   PACKAGE_SPEC: PackageSpec,
   IMPORT_SPEC: ImportSpec,
-  ANNOTATION: Annotation
+  ANNOTATION: Annotation,
+  FEATURES_DIRECTIVE: FeaturesDirective
 }
 
 table Block {
@@ -922,6 +923,20 @@ table File {
   package: PackageSpec;
   imports: [ImportSpec];
   decls: [Decl];
+  feature: FeaturesDirective;
+}
+
+table FeatureId {
+  base: NodeBase;
+  identifiers: [string];
+  identPoses: [Position];
+  dotPoses: [Position];
+}
+
+table FeaturesDirective {
+  base: NodeBase;
+  content: [FeatureId];
+  commaPoses: [Position];
 }
 
 enum AccessibleKind:uint8 {

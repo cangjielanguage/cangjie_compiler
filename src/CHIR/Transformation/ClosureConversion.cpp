@@ -7,7 +7,7 @@
 #include "cangjie/CHIR/Transformation/ClosureConversion.h"
 
 #include "cangjie/CHIR/Annotation.h"
-#include "cangjie/CHIR/AST2CHIR/GenerateVTable/VTableGenerator.h"
+#include "cangjie/CHIR/GenerateVTable/VTableGenerator.h"
 #include "cangjie/CHIR/CHIRCasting.h"
 #include "cangjie/CHIR/Transformation/FunctionInline.h"
 #include "cangjie/CHIR/Transformation/LambdaInline.h"
@@ -382,7 +382,8 @@ std::pair<std::vector<Type*>, Type*> CreateFuncTypeWithOrphanT(
     CJC_ASSERT(!instFuncTypeArgs.empty());
     for (size_t i = 0; i < instFuncTypeArgs.size() - 1; ++i) {
         auto ty = instFuncTypeArgs[i];
-        if (ty->StripAllRefs()->IsGeneric()) {
+        auto tyDeref = ty->StripAllRefs();
+        if (tyDeref->IsGeneric() || tyDeref->IsClass() || tyDeref->IsFunc()) {
             paramTypes.emplace_back(ReplaceRawGenericArgType(*ty, replaceTable, builder));
             continue;
         }
@@ -800,11 +801,6 @@ bool GetElementRefRetValNeedWrapper(const Expression& e, CHIRBuilder& builder)
     if (!getEleRefRetType->IsAutoEnvInstBase()) {
         return false;
     }
-    // if it's Tuple<xxx>&, we don't care for now, only care class type, struct type and enum type
-    auto locationType = DynamicCast<CustomType*>(getEleRef.GetLocation()->GetType()->StripAllRefs());
-    if (locationType == nullptr) {
-        return false;
-    }
     /** class A<T> {
      *      var a: ()->T
      *  }
@@ -815,14 +811,12 @@ bool GetElementRefRetValNeedWrapper(const Expression& e, CHIRBuilder& builder)
      *  Class-$AutoEnvGenericBase is parent type of Class-$AutoEnvInstBase
      *  we can't cast type from parent type to sub type, a wrapper class is needed
      */
-    auto locationDef = locationType->GetCustomTypeDef();
-    Type* declaredType = locationDef->GetType();
+    auto locationType = getEleRef.GetLocation()->GetType();
     for (auto& idx : getEleRef.GetPath()) {
-        declaredType = GetFieldOfType(*declaredType, idx, builder);
-        CJC_NULLPTR_CHECK(declaredType);
+        locationType = GetFieldOfType(*locationType, idx, builder);
+        CJC_NULLPTR_CHECK(locationType);
     }
-    declaredType = declaredType->StripAllRefs();
-    return !declaredType->IsAutoEnvInstBase();
+    return !locationType->StripAllRefs()->IsAutoEnvInstBase();
 }
 
 Type* GetFieldBaseType(const Value& base)
@@ -1729,8 +1723,80 @@ void ClosureConversion::CreateGenericOverrideMethodInAutoEnvImplDef(ClassDef& au
     size_t offset = srcFunc.GetFuncKind() == FuncKind::LAMBDA ? 0 : 1;
     CJC_ASSERT(expectedParamTypes.size() == params.size() - offset);
     for (size_t i = offset; i < params.size(); ++i) {
-        applyArgs.emplace_back(
-            TypeCastOrBoxIfNeeded(*params[i], *expectedParamTypes[i - offset], builder, *entry, INVALID_LOCATION));
+        /**
+         *  we only need to add TypeCast in `$GenericVirtualFunc`, not in `$InstVirtualFunc`,
+         *  because we need a $AutoEnvWrapperClass here, we can view an example:
+         *  func foo<P>(x:P) { return () }
+         *  func segFault<P>(lam: ((P) -> Unit) -> Unit): Unit {
+         *      lam(foo<P>)
+         *  }
+         *  func zoo(t:((Int64) -> Unit)) {
+         *      t(0)
+         *  }
+         *  main() {
+         *      segFault<Int64>(zoo)
+         *  }
+         *  ---------------- after closure conversion, it should be:
+         *  abstract class autoEnv_generic<T1, T2> {
+         *      open public func $GenericVirtualFunc(a: T1): T2
+         *  }
+         *  abstract class autoEnv_inst_Int64_Unit <: autoEnv_generic<Int64, Unit> {
+         *      open public func $InstVirtualFunc(a: Int64): Unit
+         *  }
+         *  abstract class autoEnv_inst_Int64_Unit_Unit <: autoEnv_generic<autoEnv_generic<Int64, Unit>, Unit> {
+         *      open public func $InstVirtualFunc(a: autoEnv_inst_Int64_Unit): Unit
+         *  }
+         *  class autoEnvWrapper <: autoEnv_inst_Int64_Unit_Unit {
+         *      let v: autoEnv_generic<autoEnv_generic<Int64, Unit>, Unit>
+         *      public func $GenericVirtualFunc(a: T1): T2 {
+         *          return v.$GenericVirtualFunc(a)
+         *      }
+         *      public func $InstVirtualFunc(a: autoEnv_generic<Int64, Unit>): Unit {
+         *          return unbox($GenericVirtualFunc(box(a)))
+         *      }
+         *  }
+         *  class autoEnv_inst_Int64_Unit_Unit_Unit <: autoEnv_generic<autoEnv_generic<autoEnv_generic<Int64, Unit>, Unit>, Unit> {
+         *      public func $InstVirtualFunc(a: autoEnv_inst_Int64_Unit_Unit): Unit
+         *  }
+         *  class autoEnv_zoo <: autoEnv_inst_Int64_Unit_Unit_Unit {
+         *      public func $GenericVirtualFunc(a: autoEnv_generic<autoEnv_generic<Int64, Unit>, Unit>): T2 {
+         *          let w = autoEnvWrapper()  // we need a wrapper class here
+         *          w.v = a
+         *          let p: autoEnv_inst_Int64_Unit_Unit = TypeCast(w)
+         *          return box(zoo(p))
+         *      }
+         *      public func $InstVirtualFunc(a: autoEnv_inst_Int64_Unit_Unit): Unit {
+         *          return zoo(a)
+         *      }
+         *  }
+         *  class autoEnv_foo<P> <: autoEnv_generic<P, Unit> {
+         *      public func $GenericVirtualFunc(a: P): T2 {
+         *          let r: Unit = foo<P>(a)
+         *          return box(r)
+         *      }
+         *  }
+         *  func segFault<P>(lam: autoEnv_generic<autoEnv_generic<Int64, Unit>, Unit>): Unit {
+         *      let a = autoEnv_foo()
+         *      lam.$GenericVirtualFunc(a)
+         *  }
+         *  func zoo(t:autoEnv_inst_Int64_Unit) {
+         *      t.$InstVirtualFunc(0)
+         *  }
+         *  main() {
+         *      let a = autoEnv_zoo()
+         *      segFault<Int64>(a)
+         *  }
+         */
+        auto pType = params[i]->GetType();
+        if (pType->IsCJFunc()) {
+            CJC_ASSERT(expectedParamTypes[i - offset] == pType);
+            auto typecast = builder.CreateExpression<TypeCast>(pType, params[i], entry);
+            entry->AppendExpression(typecast);
+            applyArgs.emplace_back(typecast->GetResult());
+        } else {
+            applyArgs.emplace_back(
+                TypeCastOrBoxIfNeeded(*params[i], *expectedParamTypes[i - offset], builder, *entry, INVALID_LOCATION));
+        }
     }
     auto applyRetType =
         ReplaceRawGenericArgType(*srcFunc.GetFuncType()->GetReturnType(), originalTypeToNewType, builder);
@@ -2075,7 +2141,7 @@ Func* ClosureConversion::LiftLambdaToGlobalFunc(
         }
         return gConvertor.ConvertToInstantiatedType(type);
     };
-    PrivateTypeConverter converter(convertFunc, builder);
+    PrivateTypeConverterNoInvokeOriginal converter(convertFunc, builder);
     auto postVisit = [&converter](Expression& e) {
         converter.VisitExpr(e);
         return VisitResult::CONTINUE;
@@ -2327,12 +2393,12 @@ void ClosureConversion::ConvertApplyToInvoke(const std::vector<Apply*>& applyExp
             },
             .virMethodCtx = VirMethodContext {
                 .srcCodeIdentifier = methodName,
-                .originalFuncType = originalFuncType,
-                .offset = 0
+                .originalFuncType = originalFuncType
             }
         };
         auto invoke = builder.CreateExpression<Invoke>(
             e->GetDebugLocation(), e->GetResult()->GetType(), invokeInfo, e->GetParentBlock());
+        invoke->Set<VirMethodOffset>(0);
         e->ReplaceWith(*invoke);
     }
 }
@@ -2363,12 +2429,12 @@ void ClosureConversion::ConvertApplyWithExceptionToInvokeWithException(
             },
             .virMethodCtx = VirMethodContext {
                 .srcCodeIdentifier = methodName,
-                .originalFuncType = originalFuncType,
-                .offset = 0
+                .originalFuncType = originalFuncType
             }
         };
         auto invoke = builder.CreateExpression<InvokeWithException>(e->GetDebugLocation(),
             e->GetResult()->GetType(), invokeInfo, e->GetSuccessBlock(), e->GetErrorBlock(), e->GetParentBlock());
+        invoke->Set<VirMethodOffset>(0);
         e->ReplaceWith(*invoke);
     }
 }
@@ -2518,11 +2584,11 @@ Func* ClosureConversion::CreateGenericMethodInAutoEnvWrapper(ClassDef& autoEnvWr
         },
         .virMethodCtx = VirMethodContext {
             .srcCodeIdentifier = methodName,
-            .originalFuncType = originalFuncType,
-            .offset = 0
+            .originalFuncType = originalFuncType
         }
     };
     auto invokeRes = CreateAndAppendExpression<Invoke>(builder, retType, invokeInfo, entry)->GetResult();
+    invokeRes->GetExpr()->Set<VirMethodOffset>(0);
 
     // 8. store return value and exit
     CreateAndAppendExpression<Store>(builder, builder.GetType<UnitType>(), invokeRes, retVal->GetResult(), entry);

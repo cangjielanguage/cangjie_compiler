@@ -182,6 +182,7 @@ struct StringPart {
     }
 };
 using TokenVecMap = std::unordered_map<size_t, std::vector<Token>>;
+const std::vector<TokenKind>& GetEscapeTokenKinds();
 } // namespace Cangjie
 
 #endif // CANGJIE_LEX_TOKEN_H

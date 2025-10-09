@@ -16,9 +16,11 @@
 #include <deque>
 #include <sstream>
 
+#include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/Utils.h"
+#include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/Utils/FloatFormat.h"
 #include "cangjie/Utils/StdUtils.h"
 #include "cangjie/Utils/Utils.h"
@@ -396,9 +398,7 @@ std::string GetImportedItemFullName(const ImportContent& content, const std::str
     if (!commonPrefix.empty()) {
         ss << commonPrefix << ".";
     }
-    if (!content.prefixPaths.empty()) {
-        ss << Utils::JoinStrings(content.prefixPaths, ".");
-    }
+    ss << content.GetPrefixPath();
     if (content.kind == ImportKind::IMPORT_ALIAS || content.kind == ImportKind::IMPORT_SINGLE) {
         ss << "." << content.identifier.Val();
     }
@@ -593,4 +593,289 @@ bool IsVirtualMember(const Decl& decl)
     return decl.TestAnyAttr(AST::Attribute::OPEN, AST::Attribute::ABSTRACT) ||
         decl.outerDecl->astKind == AST::ASTKind::INTERFACE_DECL;
 }
+std::vector<VarDeclWithPosition> GetVarsInitializationOrderWithPositions(const Decl& parentDecl)
+{
+    std::vector<VarDeclWithPosition> commonDecls;
+    std::vector<VarDeclWithPosition> platformDecls;
+
+    std::size_t idx = 0;
+    for (auto& decl : parentDecl.GetMemberDecls()) {
+        if (decl->astKind != ASTKind::VAR_DECL || decl->IsStaticOrGlobal()) {
+            continue;
+        }
+        Ptr<VarDecl> varDecl = StaticCast<VarDecl>(decl.get());
+
+        if (varDecl->TestAttr(AST::Attribute::FROM_COMMON_PART)) {
+            commonDecls.push_back({varDecl, idx});
+        } else {
+            platformDecls.push_back({varDecl, idx});
+        }
+        idx++;
+    }
+
+    std::sort(platformDecls.begin(), platformDecls.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.decl->begin < rhs.decl->begin;
+    });
+
+    std::vector<VarDeclWithPosition> resultDecls;
+    auto platformDeclsIt = platformDecls.begin();
+    std::unordered_set<Ptr<const Decl>> wasPlatformVars;
+    for (auto& [commonDecl, commonDeclOffset] : commonDecls) {
+        std::unordered_set<Ptr<const Decl>> platformVarsDeps;
+        for (auto& dep : commonDecl->dependencies) {
+            if (!dep->TestAttr(Attribute::PLATFORM)) {
+                continue;
+            }
+
+            auto [_, inserted] = wasPlatformVars.emplace(dep);
+            if (inserted) {
+                platformVarsDeps.emplace(dep);
+            }
+        }
+
+        while (!platformVarsDeps.empty()) {
+            CJC_ASSERT(platformDeclsIt != platformDecls.end());
+            auto it = platformVarsDeps.find(platformDeclsIt->decl);
+            if (it != platformVarsDeps.end()) {
+                platformVarsDeps.erase(it);
+            }
+            resultDecls.emplace_back(*platformDeclsIt);
+            platformDeclsIt++;
+        }
+
+        resultDecls.push_back({commonDecl, commonDeclOffset});
+    }
+
+    for (; platformDeclsIt != platformDecls.end(); platformDeclsIt++) {
+        resultDecls.emplace_back(*platformDeclsIt);
+    }
+
+    return resultDecls;
+}
+
+void InsertPropGetterSignature(PropDecl& prop, Attribute attrToBeSet)
+{
+    auto getter = MakeOwned<FuncDecl>();
+    getter->identifier = "get";
+    getter->outerDecl = prop.outerDecl;
+    getter->propDecl = &prop;
+    getter->isGetter = true;
+    getter->CloneAttrs(prop);
+    getter->DisableAttr(Attribute::MUT);
+    getter->EnableAttr(Attribute::COMPILER_ADD, attrToBeSet);
+
+    if (prop.outerDecl->astKind == ASTKind::INTERFACE_DECL) {
+        getter->EnableAttr(Attribute::PUBLIC);
+    }
+
+    OwnedPtr<FuncBody> getterBody = MakeOwned<FuncBody>();
+    getterBody->EnableAttr(Attribute::COMPILER_ADD);
+    getterBody->paramLists.push_back(MakeOwned<FuncParamList>());
+    getterBody->paramLists.begin()->get()->EnableAttr(Attribute::COMPILER_ADD);
+    getter->funcBody = std::move(getterBody);
+    getter->funcBody->funcDecl = getter.get();
+    prop.getters.emplace_back(std::move(getter));
+}
+
+void InsertPropSetterSignature(PropDecl& prop, Attribute attrToBeSet)
+{
+    auto setter = MakeOwned<FuncDecl>();
+    setter->identifier = "set";
+    setter->outerDecl = prop.outerDecl;
+    setter->propDecl = &prop;
+    setter->isSetter = true;
+    setter->CloneAttrs(prop);
+    setter->DisableAttr(Attribute::MUT);
+    setter->EnableAttr(Attribute::COMPILER_ADD, attrToBeSet);
+
+    if (prop.outerDecl->astKind == ASTKind::INTERFACE_DECL) {
+        setter->EnableAttr(Attribute::PUBLIC);
+    }
+
+    OwnedPtr<FuncBody> setterBody = MakeOwned<FuncBody>();
+    setterBody->EnableAttr(Attribute::COMPILER_ADD);
+    setterBody->paramLists.push_back(MakeOwned<FuncParamList>());
+    auto setterParam = MakeOwned<FuncParam>();
+    setterParam->EnableAttr(Attribute::COMPILER_ADD);
+    setterParam->identifier = "set";
+    setterBody->paramLists.begin()->get()->params.push_back(std::move(setterParam));
+    setterBody->paramLists.begin()->get()->EnableAttr(Attribute::COMPILER_ADD);
+    setter->funcBody = std::move(setterBody);
+    setter->funcBody->funcDecl = setter.get();
+    prop.setters.emplace_back(std::move(setter));
+}
+
+void InsertPropConvertedByField(ClassDecl& decl, VarDecl& varDecl, Attribute attrToBeSet)
+{
+    auto propDecl = MakeOwned<PropDecl>();
+    propDecl->begin = varDecl.begin;
+    propDecl->end = varDecl.end;
+    propDecl->keywordPos = varDecl.keywordPos;
+    propDecl->identifier = varDecl.identifier;
+    propDecl->colonPos = varDecl.colonPos;
+    propDecl->type = std::move(varDecl.type);
+    propDecl->ty = varDecl.ty;
+    propDecl->CloneAttrs(varDecl);
+    propDecl->EnableAttr(Attribute::DESUGARED_MIRROR_FIELD);
+    propDecl->modifiers.insert(varDecl.modifiers.begin(), varDecl.modifiers.end());
+    propDecl->isVar = varDecl.isVar;
+    for (auto& anno : varDecl.annotations) {
+        propDecl->annotations.emplace_back(ASTCloner::Clone(anno.get()));
+    }
+    if (varDecl.isVar) {
+        propDecl->EnableAttr(Attribute::MUT);
+        Modifier mut = Modifier(TokenKind::MUT, varDecl.begin);
+        mut.curFile = varDecl.curFile;
+        propDecl->modifiers.insert(std::move(mut));
+    }
+    propDecl->outerDecl = varDecl.outerDecl;
+    InsertPropGetterSignature(*propDecl.get(), attrToBeSet);
+    if (varDecl.isVar) {
+        InsertPropSetterSignature(*propDecl.get(), attrToBeSet);
+    }
+    decl.body->decls.emplace_back(std::move(propDecl));
+}
+
+void InsertMirrorVarProp(ClassDecl& decl, Attribute attrToBeSet)
+{
+    auto& members = decl.GetMemberDecls();
+    // Collect the original field
+    std::vector<VarDecl*> oldVars;
+    for (auto& member : members) {
+        if (member->astKind == ASTKind::VAR_DECL) {
+            oldVars.emplace_back(StaticAs<ASTKind::VAR_DECL>(member.get()));
+        }
+    }
+    // Generate and insert the new prop
+    for (auto var : oldVars) {
+        InsertPropConvertedByField(decl, *var, attrToBeSet);
+    }
+    // Delete the original field
+    members.erase(std::remove_if(members.begin(), members.end(), [](auto& node) {
+        return node.get()->astKind == ASTKind::VAR_DECL;
+        }), members.end());
+}
+
 } // namespace Cangjie::AST
+
+namespace {
+using namespace Cangjie::AST;
+
+void SetPositionAndCurFileByProvidedNode(Node& consumer, Node& provider)
+{
+    consumer.curFile = provider.curFile;
+    consumer.begin = provider.begin;
+    consumer.end = provider.end;
+}
+}
+
+namespace Cangjie::Interop::Java {
+bool IsImpl(const Decl& decl)
+{
+    return !decl.TestAttr(Attribute::JAVA_MIRROR) && decl.TestAttr(Attribute::JAVA_MIRROR_SUBTYPE);
+}
+
+bool IsJObject(const Decl& decl)
+{
+    return IsJObject(decl, decl.fullPackageName);
+}
+
+bool IsJObject(const Decl& decl, const std::string& packageName)
+{
+    return IsMirror(decl) &&
+        decl.identifier.Val() == INTEROP_JOBJECT_NAME &&
+        packageName == INTEROP_JAVA_LANG_PACKAGE;
+}
+
+bool IsMirror(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::JAVA_MIRROR);
+}
+
+bool IsCJMapping(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::JAVA_CJ_MAPPING);
+}
+
+/**
+ * public func $getJavaRef(): Java_CFFI_JavaEntity {
+ *     return Java_CFFI_JavaEntity()
+ * }
+ */
+void InsertJavaRefGetterStubWithBody(ClassDecl& decl)
+{
+    std::vector<OwnedPtr<FuncParam>> callParams;
+    std::vector<OwnedPtr<FuncParamList>> paramLists;
+    auto pl = CreateFuncParamList(std::move(callParams));
+    pl->begin = decl.begin;
+    pl->end = decl.end;
+    paramLists.push_back(std::move(pl));
+
+    auto constructor = CreateCallExpr(CreateRefExpr(INTEROPLIB_CFFI_JAVA_ENTITY), {});
+    auto ret = CreateReturnExpr(std::move(constructor));
+    std::vector<OwnedPtr<Node>> nodes;
+    nodes.emplace_back(std::move(ret));
+
+    auto funcBody = CreateFuncBody(
+        std::move(paramLists),
+        CreateRefType(INTEROPLIB_CFFI_JAVA_ENTITY),
+        CreateBlock(std::move(nodes)));
+
+    auto fd = CreateFuncDecl(JAVA_REF_GETTER_FUNC_NAME, std::move(funcBody), nullptr);
+    fd->EnableAttr(Attribute::PUBLIC, Attribute::IN_CLASSLIKE);
+    fd->fullPackageName = decl.fullPackageName;
+    fd->funcBody->funcDecl = fd.get();
+    fd->funcBody->parentClassLike = &decl;
+    fd->outerDecl = &decl;
+
+    decl.body->decls.emplace_back(std::move(fd));
+}
+
+bool IsDeclAppropriateForSyntheticClassGeneration(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::JAVA_MIRROR) &&
+        (decl.astKind == ASTKind::INTERFACE_DECL ||
+            (decl.astKind == ASTKind::CLASS_DECL && decl.TestAttr(Attribute::ABSTRACT)));
+}
+
+std::string GetSyntheticNameFromClassLike(const ClassLikeDecl& cld)
+{
+    return cld.identifier.Val() + "$impl";
+}
+
+// abstract on parser stage, on sema stage abstractness will be removed
+void InsertSyntheticClassDecl(ClassLikeDecl& decl, File& file)
+{
+    auto synthetic = MakeOwned<ClassDecl>();
+    if (decl.TestAttr(Attribute::PUBLIC)) {
+        synthetic->EnableAttr(Attribute::PUBLIC);
+    } else if (decl.TestAttr(Attribute::INTERNAL)) {
+        synthetic->EnableAttr(Attribute::INTERNAL);
+    } else if (decl.TestAttr(Attribute::PROTECTED)) {
+        synthetic->EnableAttr(Attribute::PROTECTED);
+    } else if (decl.TestAttr(Attribute::PRIVATE)) {
+        synthetic->EnableAttr(Attribute::PRIVATE);
+    }
+    synthetic->EnableAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE,
+        Attribute::COMPILER_ADD, Attribute::ABSTRACT);
+    synthetic->identifier = GetSyntheticNameFromClassLike(decl);
+    synthetic->identifier.SetPos(decl.identifier.Begin(), decl.identifier.End());
+
+    if (decl.astKind == ASTKind::INTERFACE_DECL) { // add JObject as supertype
+        auto jobject = CreateRefType(INTEROP_JOBJECT_NAME);
+        SetPositionAndCurFileByProvidedNode(*jobject, decl);
+        synthetic->inheritedTypes.emplace_back(std::move(jobject));
+    }
+    synthetic->inheritedTypes.emplace_back(CreateRefType(decl));
+    
+    synthetic->fullPackageName = decl.fullPackageName;
+    SetPositionAndCurFileByProvidedNode(*synthetic, decl);
+    
+    synthetic->body = MakeOwned<ClassBody>();
+    SetPositionAndCurFileByProvidedNode(*synthetic->body, *synthetic);
+
+    synthetic->moduleName = ::Cangjie::Utils::GetRootPackageName(decl.fullPackageName);
+
+    file.decls.emplace_back(std::move(synthetic));
+}
+} // namespace Cangjie::Interop::Java

@@ -17,6 +17,7 @@
 #include <set>
 #include <utility>
 #include <vector>
+#include <fstream>
 
 #include "AutoBoxing.h"
 #include "ExtendBoxMarker.h"
@@ -79,6 +80,24 @@ void UpdateDeclAttributes(Package& pkg, bool exportForTest)
         return VisitAction::WALK_CHILDREN;
     }).Walk();
 }
+
+/**
+ * For compiled with the `--coverage` option,
+ * Clear line info for:
+ *   - Compiler add by generic instantiation.
+ */
+void ClearLineInfoAfterSema(Package& pkg)
+{
+    std::function<VisitAction(Ptr<Node>)> clearGenericInst = [](Ptr<Node> node) -> VisitAction {
+        node->begin.line = 0;
+        node->begin.column = 0;
+        node->begin.Mark(PositionStatus::IGNORE);
+        return VisitAction::WALK_CHILDREN;
+    };
+    for (auto& decl : pkg.genericInstantiatedDecls) {
+        Walker(decl, clearGenericInst).Walk();
+    }
+}
 } // namespace
 
 void TypeChecker::TypeCheckerImpl::PerformDesugarAfterInstantiation([[maybe_unused]] ASTContext& ctx, Package& pkg)
@@ -93,6 +112,9 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterInstantiation([[maybe_unus
 #endif
     PerformRecursiveTypesElimination();
     UpdateDeclAttributes(pkg, ci->invocation.globalOptions.exportForTest);
+    if (ci->invocation.globalOptions.enableCoverage) {
+        ClearLineInfoAfterSema(pkg);
+    }
 }
 
 bool AutoBoxing::NeedBoxOption(Ty& child, Ty& target)
@@ -137,8 +159,7 @@ void AutoBoxing::TryOptionBox(EnumTy& target, Expr& expr)
     auto baseFunc = CreateRefExpr(OPTION_VALUE_CTOR);
     baseFunc->EnableAttr(Attribute::IMPLICIT_ADD);
     baseFunc->ref.target = optionDecl;
-    baseFunc->ty =
-        typeManager.GetInstantiatedTy(optionDecl->ty, GenerateTypeMapping(*ed, target.typeArgs));
+    baseFunc->ty = typeManager.GetInstantiatedTy(optionDecl->ty, GenerateTypeMapping(*ed, target.typeArgs));
 
     std::vector<OwnedPtr<FuncArg>> arg;
     if (expr.desugarExpr) {

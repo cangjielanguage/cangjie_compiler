@@ -920,7 +920,7 @@ void GIM::GenericInstantiationManagerImpl::GenericMemberAccessInstantiate(Member
     Walker walkBase(ma.baseExpr.get(), instantiationWalkerID, instantiator, contextReset);
     walkBase.Walk();
     auto invalid = !ma.target || !ma.baseExpr || !Ty::IsTyCorrect(ma.ty);
-    if (invalid || ma.target->astKind == ASTKind::PACKAGE_DECL || MockUtils::IsMockAccessor(*ma.target)) {
+    if (invalid || ma.target->astKind == ASTKind::PACKAGE_DECL || TestManager::IsMockAccessor(*ma.target)) {
         return;
     }
     auto target = GetRealTarget(ma.target);

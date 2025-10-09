@@ -18,6 +18,7 @@
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/ConstantUtils.h"
 
 namespace Cangjie::CHIR {
 class CHIRBuilder {
@@ -295,10 +296,11 @@ public:
     {
         T* importDecl = nullptr;
         if constexpr (std::is_same_v<T, ImportedFunc>) {
-            importDecl = new ImportedFunc(
-                ty, "@" + mangledName, srcCodeIdentifier, rawMangledName, srcPackageName, genericTypeParams);
+            importDecl = new ImportedFunc(ty, GLOBAL_VALUE_PREFIX + mangledName,
+                srcCodeIdentifier, rawMangledName, srcPackageName, genericTypeParams);
         } else {
-            importDecl = new ImportedVar(ty, "@" + mangledName, srcCodeIdentifier, rawMangledName, srcPackageName);
+            importDecl = new ImportedVar(ty, GLOBAL_VALUE_PREFIX + mangledName,
+                srcCodeIdentifier, rawMangledName, srcPackageName);
         }
         CJC_NULLPTR_CHECK(importDecl);
         importDecl->EnableAttr(Attribute::IMPORTED);

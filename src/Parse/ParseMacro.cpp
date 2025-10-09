@@ -100,6 +100,10 @@ std::vector<OwnedPtr<Node>> ParserImpl::ParseNodes(std::variant<ScopeKind, ExprK
             } else {
                 node = ParseExpr();
             }
+
+            if (auto ctor = As<ASTKind::FUNC_DECL>(node.get()); ctor && ctor->TestAttr(Attribute::CONSTRUCTOR)) {
+                CheckConstructorBody(*ctor, *scopeKind, true);
+            }
         } else if (auto scp = std::get_if<ExprKind>(&scope)) {
             if (auto fa = DynamicCast<FuncArg*>(pInvocation->parent); fa && Seeing(TokenKind::INOUT)) {
                 fa->withInout = true;
@@ -573,6 +577,7 @@ template <typename T> OwnedPtr<T> ParserImpl::ParseMacroCall(
     ScopeKind scopeKind, const std::set<Modifier>& modifiers, std::vector<OwnedPtr<Annotation>> annos)
 {
     CheckOverflowAnno(annos, scopeKind);
+    ffiParser->CheckAnnotations(annos);
     // @! can be used before decl (param included), but not expr
     if constexpr (std::is_same_v<T, MacroExpandDecl> || std::is_same_v<T, MacroExpandParam>) {
         CJC_ASSERT(SeeingMacroCallDecl());

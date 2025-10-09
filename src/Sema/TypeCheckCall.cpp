@@ -2245,6 +2245,9 @@ bool TypeChecker::TypeCheckerImpl::GetCallBaseCandidates(
     const ASTContext& ctx, const CallExpr& ce, Expr& expr, Ptr<Decl>& target, std::vector<Ptr<FuncDecl>>& candidates)
 {
     target = GetRealTarget(&expr, expr.GetTarget());
+    if (target->TestAttr(Attribute::COMMON) && target->platformImplementation) {
+        target = target->platformImplementation;
+    }
     CJC_NULLPTR_CHECK(target);
     if (IsBuiltinTypeAlias(*target) || target->IsBuiltIn()) {
         return false;
@@ -2276,6 +2279,8 @@ bool TypeChecker::TypeCheckerImpl::GetCallBaseCandidates(
     if (expr.astKind == ASTKind::REF_EXPR && candidates.empty() && target->astKind == ASTKind::PACKAGE_DECL) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_cannot_ref_to_pkg_name, expr);
     }
+    // Add for cjmp
+    mpImpl->RemoveCommonCandidatesIfHasPlatform(candidates);
     if (ds.HasError()) {
         ds.ReportDiag();
         return false;
@@ -2315,7 +2320,7 @@ bool TypeChecker::TypeCheckerImpl::ChkCallBaseRefExpr(
     ctx.targetTypeMap[re] = ctx.targetTypeMap[&ce]; // For enum sugar type infer.
     Synthesize(ctx, re);
     if (auto builtin = DynamicCast<BuiltInDecl>(re->ref.target); builtin && builtin->type == BuiltInType::CFUNC) {
-        return ChkCFuncConstructorExpr(ctx, ce);
+        return SynCFuncCall(ctx, ce);
     }
     if (!re->ref.target && re->ref.targets.empty()) {
         return false;

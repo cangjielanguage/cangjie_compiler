@@ -75,6 +75,7 @@ void DesugarAsExpr(TypeManager& typeManager, AsExpr& ae)
     std::vector<OwnedPtr<MatchCase>> matchCases;
     auto varPattern = CreateVarPattern(V_COMPILER, theAsTy);
     varPattern->begin = ae.asPos;
+    varPattern->end = ae.asPos;
     auto varDecl = varPattern->varDecl.get();
     varDecl->fullPackageName = ae.GetFullPackageName();
     matchCases.emplace_back(

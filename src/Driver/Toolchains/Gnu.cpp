@@ -116,9 +116,9 @@ bool Gnu::PrepareDependencyPath()
 void Gnu::GenerateArchiveTool(const std::vector<TempFileInfo>& objFiles)
 {
     auto tool = std::make_unique<Tool>(arPath, ToolType::BACKEND, driverOptions.environment.allVariables);
-    // c for no warn if the library had to be created
-    // r for replacing existing or insert new file(s) into the archive
-    // D for deterministic mode
+    // The c for no warn if the library had to be created
+    // The r for replacing existing or insert new file(s) into the archive
+    // The D for deterministic mode
     tool->AppendArg("crD");
 
     // When we reach here, we must be at the final phase of the compilation,
@@ -141,7 +141,7 @@ void Gnu::GenerateArchiveTool(const std::vector<TempFileInfo>& objFiles)
 
 std::optional<std::string> Gnu::SearchClangLibrary(const std::string libName, const std::string libSuffix)
 {
-    // clang lib format:
+    // Clang lib format:
     // libclang_rt.<module name>[-<arch>].<suffix>
     std::vector<std::string> searchPaths = {};
     auto libraryPaths = GetLibraryPaths();
@@ -157,19 +157,16 @@ std::optional<std::string> Gnu::SearchClangLibrary(const std::string libName, co
         return clangLib;
     }
 
-    // clang asan lib with arch
+    // Clang asan lib with arch
     return FileUtil::FindFileByName(
         prefix + libName + "-" + driverOptions.target.ArchToString() + libSuffix, searchPaths);
 }
 
 void Gnu::HandleSanitizerDependencies(Tool& tool)
 {
-    tool.AppendArg("-lpthread");
-    tool.AppendArg("-lrt");
-    tool.AppendArg("-lm");
-    tool.AppendArg("-ldl");
-    tool.AppendArg("-lresolv");
-    tool.AppendArg("-lgcc_s");
+    for (const auto& arg : {"-lpthread", "-lrt", "-lm", "-ldl", "-lresolv", "-lgcc_s"}) {
+        tool.AppendArg(arg);
+    }
 }
 
 void Gnu::HandleAsanDependencies(Tool& tool, const std::string& cangjieLibPath, const std::string& gccLibPath)
@@ -178,11 +175,11 @@ void Gnu::HandleAsanDependencies(Tool& tool, const std::string& cangjieLibPath, 
         return;
     }
 
-    // general args
+    // General args
     HandleSanitizerDependencies(tool);
     tool.AppendArg("--export-dynamic");
 
-    // static library
+    // Static library
     auto asanLib = FileUtil::FindFileByName("libclang_rt-asan.a", {cangjieLibPath});
     if (!asanLib.has_value()) {
         asanLib = SearchClangLibrary("asan", ".a");
@@ -193,8 +190,8 @@ void Gnu::HandleAsanDependencies(Tool& tool, const std::string& cangjieLibPath, 
         return;
     }
 
-    // dynamic library
-    // clang
+    // Dynamic library
+    // Clang
     asanLib = SearchClangLibrary("asan-preinit", ".a");
     if (asanLib.has_value()) {
         // preinit static library
@@ -203,7 +200,7 @@ void Gnu::HandleAsanDependencies(Tool& tool, const std::string& cangjieLibPath, 
         return;
     }
 
-    // gnu lib
+    // The gnu lib
     tool.AppendArg(FileUtil::JoinPath(gccLibPath, "libasan_preinit.o"));
     tool.AppendArg("-lasan");
 }
@@ -214,11 +211,11 @@ void Gnu::HandleHwasanDependencies(Tool& tool, const std::string& cangjieLibPath
         return;
     }
 
-    // general args
+    // General args
     HandleSanitizerDependencies(tool);
     tool.AppendArg("--export-dynamic");
 
-    // static library
+    // Static library
     auto asanLib = FileUtil::FindFileByName("libclang_rt-hwasan.a", {cangjieLibPath});
     if (!asanLib.has_value()) {
         asanLib = SearchClangLibrary("hwasan", ".a");
@@ -229,7 +226,7 @@ void Gnu::HandleHwasanDependencies(Tool& tool, const std::string& cangjieLibPath
         return;
     }
 
-    // dynamic library
+    // Dynamic library
     asanLib = SearchClangLibrary("hwasan-preinit", ".a");
     LinkStaticLibrary(tool, asanLib.value_or("libclang_rt.hwasan-preinit.a"));
     tool.AppendArg("-lclang_rt.hwasan");
@@ -254,7 +251,7 @@ void Gnu::HandleSanitizer(Tool& tool, const std::string& cangjieLibPath, const s
         HandleHwasanDependencies(tool, sanitizerPath);
     }
 
-    // eh frame header is needed for all sanitizer
+    // The eh frame header is needed for all sanitizer
     tool.AppendArg("--eh-frame-hdr");
 }
 
@@ -290,9 +287,9 @@ void Gnu::HandleLLVMLinkOptions(
 
     auto cangjieLibPath =
         FileUtil::JoinPath(FileUtil::JoinPath(driver.cangjieHome, "lib"), driverOptions.GetCangjieLibTargetPathName());
-    // 1. -L library path
+    // 1. The -L library path
     HandleLibrarySearchPaths(tool, cangjieLibPath);
-    // where to search for gcc & backend libraries
+    // Where to search for gcc & backend libraries
     if (!gccLibPath.empty()) {
         tool.AppendArg("-L" + gccLibPath);
     }
@@ -301,7 +298,7 @@ void Gnu::HandleLLVMLinkOptions(
         tool.AppendArg("-T");
         tool.AppendArg(FileUtil::JoinPath(cangjieLibPath, "discard_eh_frame.lds"));
     }
-    // 2. cjld.lds, cjstart.o
+    // 2. The cjld.lds and cjstart.o
     if (driverOptions.target.os == Triple::OSType::WINDOWS) {
         tool.AppendArg(FileUtil::JoinPath(cangjieLibPath, "section.o"));
     } else {
@@ -310,11 +307,11 @@ void Gnu::HandleLLVMLinkOptions(
     }
     tool.AppendArg(FileUtil::JoinPath(cangjieLibPath, "cjstart.o"));
 
-    // 3. frontend output or input files
-    // 3.1 frontend output files (.o)
-    // 3.2 pass to the linker in the order of input files (.o, .a, -l)
+    // 3. Frontend output or Input files
+    // 3.1 Frontend output files (.o)
+    // 3.2 Pass to the linker in the order of input files (.o, .a, -l)
     SortInputlibraryFileAndAppend(tool, objFiles);
-    // note that the pgo options must be inserted after those from SortInputlibraryFileAndAppend
+    // Note that the pgo options must be inserted after those from SortInputlibraryFileAndAppend
     tool.AppendArgIf(driverOptions.enablePgoInstrGen, "-u", "__llvm_profile_runtime");
     tool.AppendArgIf(driverOptions.enablePgoInstrGen || driverOptions.enableCoverage,
         FileUtil::JoinPath(cangjieLibPath, GetClangRTProfileLibraryName()));
@@ -329,7 +326,7 @@ void Gnu::HandleLibrarySearchPaths(Tool& tool, const std::string& cangjieLibPath
 {
     // Append -L (those specified in command) as search paths
     tool.AppendArg(PrependToPaths("-L", driverOptions.librarySearchPaths));
-    // path to built-in libraries is placed between -L search paths and LIBRARY_PATH so that
+    // Path to built-in libraries is placed between -L search paths and LIBRARY_PATH so that
     // 1) user can explicitly specify a library path which contains libcangjie-<sth> to force Linker
     //    link against such libraries.
     // 2) Linker will not be confused if user's LIBRARY_PATH is polluted, for example, LIBRARY_PATH
@@ -426,7 +423,7 @@ bool Gnu::ProcessGeneration(std::vector<TempFileInfo>& objFiles)
         codegenOutputBCNum += objName.isForeignInput ? 0 : 1;
     }
     if (codegenOutputBCNum == 1) {
-        // '--output-type=staticlib', one more step to go, create an archive
+        // The '--output-type=staticlib', one more step to go, create an archive
         // file consisting of all generated object files
         if (driverOptions.outputMode == GlobalOptions::OutputMode::STATIC_LIB) {
             GenerateArchiveTool(objFiles);
@@ -436,7 +433,7 @@ bool Gnu::ProcessGeneration(std::vector<TempFileInfo>& objFiles)
         }
     }
     auto tool = std::make_unique<Tool>(ldPath, ToolType::BACKEND, driverOptions.environment.allVariables);
-    // recover the 'outputFile' from 'path/0-xx.o' to 'path/xx.o'
+    // Recover the 'outputFile' from 'path/0-xx.o' to 'path/xx.o'
     std::string outputFile = objFiles[0].filePath;
     std::string dirPath = FileUtil::GetDirPath(outputFile);
     std::string fileName = FileUtil::GetFileName(outputFile).substr(2); // 2 is the length of the prefix "0-"
@@ -476,7 +473,7 @@ bool Gnu::ProcessGeneration(std::vector<TempFileInfo>& objFiles)
     processedObjFiles.insert(processedObjFiles.begin(), fileInfo);
     objFiles = std::move(processedObjFiles);
 
-    // if aggressiveParallelCompile is enabled, we combined 0-xx.o, 1-xx.o, etc. to xx.o (aka 'outputFile') by using
+    // If aggressiveParallelCompile is enabled, we combined 0-xx.o, 1-xx.o, etc. to xx.o (aka 'outputFile') by using
     // 'ld', we need to copy xx.o to cache.
     if (driverOptions.aggressiveParallelCompile.value_or(1) > 1) {
         std::string destFile =
@@ -488,7 +485,7 @@ bool Gnu::ProcessGeneration(std::vector<TempFileInfo>& objFiles)
         backendCmds.emplace_back(MakeSingleToolBatch({std::move(toolOfCacheCopy)}));
     }
 
-    // '--output-type=staticlib', one more step to go, create an archive file consisting of all generated object files
+    // The '--output-type=staticlib', one more step to go, create an archive file consisting of all generated object files
     if (driverOptions.outputMode == GlobalOptions::OutputMode::STATIC_LIB) {
         GenerateArchiveTool(objFiles);
         return true;

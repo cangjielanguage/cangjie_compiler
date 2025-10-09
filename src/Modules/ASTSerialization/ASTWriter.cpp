@@ -18,6 +18,7 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/Version.h"
+#include "cangjie/AST/Match.h"
 #include "cangjie/Mangle/ASTMangler.h"
 #include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Mangle/CHIRMangler.h"
@@ -90,7 +91,7 @@ const std::unordered_map<AST::ForInKind, PackageFormat::ForInKind> FOR_IN_KIND_M
 } // namespace Cangjie
 
 namespace {
-void AppendDecl(std::vector<Ptr<const Decl>>& decls, Ptr<Decl> decl)
+void AppendDecl(std::vector<Ptr<const Decl>>& decls, Ptr<const Decl> decl)
 {
     CJC_NULLPTR_CHECK(decl);
     if (auto md = DynamicCast<MainDecl*>(decl); md && md->desugarDecl) {
@@ -155,13 +156,15 @@ inline bool IsExternalNorminalDecl(const Decl& decl)
     return decl.IsNominalDecl() && decl.linkage != Linkage::INTERNAL;
 }
 
-inline bool ShouldAlwaysExport(const Decl& decl)
+inline bool ShouldAlwaysExport(const Decl& decl, bool serializingCommon)
 {
     // When 'exportAddition' is enabled, we have following rules:
     // 1. For BCHIR(include const evaluation) type usage, type decl must be exported.
     // Otherwise, only export external decls.
+    // 2. For an extend in serializingCommon, always export it.
     return decl.IsExportedDecl() || decl.TestAttr(Attribute::IMPLICIT_USED) ||
-        (decl.TestAttr(Attribute::GLOBAL) && decl.linkage != Linkage::INTERNAL);
+        (decl.TestAttr(Attribute::GLOBAL) && decl.linkage != Linkage::INTERNAL) ||
+        (serializingCommon && decl.astKind == ASTKind::EXTEND_DECL);
 }
 
 void MangleExportId(Package& pkg)
@@ -334,6 +337,20 @@ void SaveDeclBasicInfo(const DeclInfo& declInfo, PackageFormat::DeclBuilder& dbu
     dbuilder.add_mangledBeforeSema(declInfo.mangledBeforeSema);
     dbuilder.add_hash(&declInfo.hash);
     dbuilder.add_annotations(declInfo.annotations);
+    // Only add for common part of CJMP
+    if (!declInfo.dependencies.IsNull()) {
+        dbuilder.add_dependencies(declInfo.dependencies);
+    }
+}
+
+// Check whether the decl is exported for common part of CJMP when it is not exported for general package.
+inline bool CanSkip4CJMP(const Decl& decl, bool serializingCommon)
+{
+    // Export global func or var, maybe used by global var initializer.
+    if (serializingCommon && !decl.IsNominalDecl() && decl.TestAttr(Attribute::GLOBAL)) {
+        return false;
+    }
+    return true;
 }
 } // namespace
 
@@ -380,8 +397,13 @@ template <typename T> TVectorOffset<FormattedIndex> ASTWriter::ASTWriterImpl::Ge
             (onlyVisibleSig && !it->IsExportedDecl())) {
             continue;
         }
+        if (decl.astKind == AST::ASTKind::EXTEND_DECL && serializingCommon) {
+            body.push_back(GetDeclIndex(it));
+            continue;
+        }
         // Incr compilation need load ty by cached cjo, so still cache internal or inst member var decls
-        if (!config.exportForIncr && !isInstMemberVar && it->linkage == Linkage::INTERNAL) {
+        if (!config.exportForIncr && !decl.TestAttr(Attribute::COMMON) && !isInstMemberVar &&
+            it->linkage == Linkage::INTERNAL) {
             continue;
         }
         body.push_back(GetDeclIndex(it));
@@ -390,11 +412,137 @@ template <typename T> TVectorOffset<FormattedIndex> ASTWriter::ASTWriterImpl::Ge
 }
 
 /**
+ * Update AST attributes related to common/platform, e.g. set FROM_COMMON_PART.
+ */
+void ASTWriter::ASTWriterImpl::SetAttributesIfSerializingCommonPartOfPackage(Package &package)
+{
+    for (auto &file : package.files) {
+        if (file->package && file->package->hasCommon) {
+            serializingCommon = true;
+            break;
+        }
+    }
+    if (!serializingCommon) {
+        return;
+    }
+    std::function<VisitAction(Ptr<Node>)> visitor = [&visitor](const Ptr<Node> &node) {
+        switch (node->astKind) {
+            case ASTKind::PACKAGE: {
+                return VisitAction::WALK_CHILDREN;
+            }
+            case ASTKind::FILE: {
+                auto file = StaticAs<ASTKind::FILE>(node);
+                for (auto &decl : file->decls) {
+                    decl->EnableAttr(Attribute::FROM_COMMON_PART);
+                    Walker(decl->generic.get(), visitor).Walk();
+                }
+                return VisitAction::WALK_CHILDREN;
+            }
+            case ASTKind::INTERFACE_DECL: {
+                auto id = StaticAs<ASTKind::INTERFACE_DECL>(node);
+                for (auto &member : id->body->decls) {
+                    member->EnableAttr(Attribute::FROM_COMMON_PART);
+                    Walker(member.get(), visitor).Walk();
+                }
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::CLASS_DECL: {
+                auto cd = StaticAs<ASTKind::CLASS_DECL>(node);
+                for (auto &member : cd->body->decls) {
+                    member->EnableAttr(Attribute::FROM_COMMON_PART);
+                    Walker(member.get(), visitor).Walk();
+                }
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::STRUCT_DECL: {
+                auto sd = StaticAs<ASTKind::STRUCT_DECL>(node);
+                for (auto& member : sd->body->decls) {
+                    member->EnableAttr(Attribute::FROM_COMMON_PART);
+                    Walker(member.get(), visitor).Walk();
+                }
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::ENUM_DECL: {
+                auto ed = StaticAs<ASTKind::ENUM_DECL>(node);
+                for (auto& member: ed->members) {
+                    member->EnableAttr(Attribute::FROM_COMMON_PART);
+                    Walker(member.get(), visitor).Walk();
+                }
+                for (auto& constructor: ed->constructors) {
+                    constructor->EnableAttr(Attribute::FROM_COMMON_PART);
+                }
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::EXTEND_DECL: {
+                auto ed = StaticAs<ASTKind::EXTEND_DECL>(node);
+                for (auto& member: ed->members) {
+                    member->EnableAttr(Attribute::FROM_COMMON_PART);
+                    Walker(member.get(), visitor).Walk();
+                }
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::FUNC_DECL: {
+                auto fd = StaticAs<ASTKind::FUNC_DECL>(node);
+                for (auto &param : fd->funcBody->paramLists[0]->params) {
+                    if (param->desugarDecl) {
+                        param->desugarDecl->EnableAttr(Attribute::FROM_COMMON_PART);
+                    }
+                }
+                Walker(fd->funcBody->generic.get(), visitor).Walk();
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::PROP_DECL: {
+                auto pd = StaticAs<ASTKind::PROP_DECL>(node);
+                for (auto &getter : pd->getters) {
+                    getter->EnableAttr(Attribute::FROM_COMMON_PART);
+                }
+                for (auto &setter : pd->setters) {
+                    setter->EnableAttr(Attribute::FROM_COMMON_PART);
+                }
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::GENERIC: {
+                auto generic = StaticAs<ASTKind::GENERIC>(node);
+                for (auto &it : generic->typeParameters) {
+                    it->EnableAttr(Attribute::FROM_COMMON_PART);
+                }
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::VAR_WITH_PATTERN_DECL: {
+                auto varDecl = StaticAs<ASTKind::VAR_WITH_PATTERN_DECL>(node);
+                varDecl->irrefutablePattern->EnableAttr(Attribute::FROM_COMMON_PART);
+                Walker(varDecl->irrefutablePattern, visitor).Walk();
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::TUPLE_PATTERN: {
+                auto tuplePattern = StaticAs<ASTKind::TUPLE_PATTERN>(node);
+                for (auto& pattern : tuplePattern->patterns) {
+                    Walker(pattern, visitor).Walk();
+                }
+                return VisitAction::SKIP_CHILDREN;
+            }
+            case ASTKind::VAR_PATTERN: {
+                auto varPattern = StaticAs<ASTKind::VAR_PATTERN>(node);
+                varPattern->varDecl->EnableAttr(Attribute::FROM_COMMON_PART);
+                return VisitAction::SKIP_CHILDREN;
+            }
+            default:
+                return VisitAction::SKIP_CHILDREN;
+        }
+    };
+
+    Walker walker(&package, visitor);
+    walker.Walk();
+}
+
+/**
  * Pre-save full exporting decls after sema's desugar before generic instantiation.
  * NOTE: avoid export boxed decl creation.
  */
 void ASTWriter::ASTWriterImpl::PreSaveFullExportDecls(Package& package)
 {
+    SetAttributesIfSerializingCommonPartOfPackage(package);
+
     for (auto& file : package.files) {
         CJC_NULLPTR_CHECK(file.get());
         SaveFileInfo(*file);
@@ -409,9 +557,9 @@ void ASTWriter::ASTWriterImpl::PreSaveFullExportDecls(Package& package)
     std::vector<Ptr<Decl>> fullExportDecls;
     std::queue<Ptr<Decl>> searchingQueue;
     std::unordered_set<Ptr<Decl>> searched;
-    IterateToplevelDecls(package, [&searchingQueue](auto& decl) {
+    IterateToplevelDecls(package, [&searchingQueue, this](auto& decl) {
         // External decls, type decls should always be considered as exported (For bchir's expression type usage).
-        if (ShouldAlwaysExport(*decl)) {
+        if (ShouldAlwaysExport(*decl, serializingCommon)) {
             searchingQueue.push(decl.get());
         }
     });
@@ -457,35 +605,83 @@ void ASTWriter::ASTWriterImpl::PreSaveFullExportDecls(Package& package)
     }
 }
 
+inline bool ASTWriter::ASTWriterImpl::NeedToExportDecl(Ptr<const Decl> decl)
+{
+    if (decl->doNotExport) {
+        return false;
+    }
+    // For incremental data or common part, export all toplevel decls.
+    // For normal cases, decl which does not always need to be export or does not be collected during preExport.
+    bool canSkip = !config.exportForIncr && !ShouldAlwaysExport(*decl, serializingCommon) &&
+        (topLevelDecls.count(decl.get()) == 0 || decl->linkage == Linkage::INTERNAL) &&
+        CanSkip4CJMP(*decl, serializingCommon);
+    if (canSkip) {
+        return false;
+    }
+
+    return true;
+}
+
+// Collect declarations file by file, so,
+// all dependent file declarations goes before declaration of file that depend.
+// NOTE: File dependency defined in specification.
+void ASTWriter::ASTWriterImpl::DFSCollectFilesDeclarations(Ptr<File> file,
+    std::unordered_set<File*>& alreadyVisitedFiles,
+    std::vector<Ptr<const Decl>>& topLevelDeclsOrdered,
+    std::unordered_set<Ty*>& usedTys)
+{
+    if (alreadyVisitedFiles.find(file) != alreadyVisitedFiles.end()) {
+        // File was visited as dependency of another file
+        return;
+    }
+    alreadyVisitedFiles.emplace(file);
+
+    std::vector<Ptr<const Decl>> topLevelDeclsOfFile;
+    for (auto& decl : file->decls) {
+        if (!NeedToExportDecl(decl)) {
+            continue;
+        }
+        AppendDecl(topLevelDeclsOfFile, decl);
+
+        // Collecting decls in all dependent files
+        std::unordered_set<File*> dependentFiles;
+        for (auto dependency : decl->dependencies) {
+            dependentFiles.emplace(dependency->curFile);
+        }
+        for (auto dependentFile : dependentFiles) {
+            if (alreadyVisitedFiles.find(dependentFile) != alreadyVisitedFiles.end()) {
+                continue;
+            }
+            if (dependentFile->curPackage != file->curPackage) {
+                continue;
+            }
+            DFSCollectFilesDeclarations(dependentFile, alreadyVisitedFiles, topLevelDeclsOrdered, usedTys);
+        }
+
+        if (config.exportContent) {
+            usedTys.merge(CollectInstantiations(*decl));
+        }
+        AddCurFile(*decl, file); // For decls added in AD stage which may not have 'curFile'.
+    }
+
+    std::move(topLevelDeclsOfFile.begin(), topLevelDeclsOfFile.end(), std::back_inserter(topLevelDeclsOrdered));
+}
+
 // Export external decls of a Package AST to a buffer.
 void ASTWriter::ASTWriterImpl::ExportAST(const PackageDecl& package)
 {
     exportFuncBody = false; // Content can only be saved during 'PreSaveFullExportDecls' step.
-    // 1. Mangle exportId.
     CJC_NULLPTR_CHECK(package.srcPackage);
+
+    // 1. Mangle exportId.
     MangleExportId(*package.srcPackage);
     // 2. Obtain all topLevelDecl
     std::vector<Ptr<const Decl>> topLevelDeclsOrdered;
+    std::unordered_set<File*> alreadyVisitedFiles;
     std::unordered_set<Ty*> usedTys;
     for (auto& file : package.srcPackage->files) {
         CJC_NULLPTR_CHECK(file.get());
-        for (auto& decl : file->decls) {
-            if (decl->doNotExport) {
-                continue;
-            }
-            // For incremental data, export all toplevel decls, becasue we need load cached info of them.
-            // For normal cases, decl which does not always need to be export or dose not be collected during preExport.
-            bool canSkip = !config.exportForIncr && !ShouldAlwaysExport(*decl) &&
-                (topLevelDecls.count(decl.get()) == 0 || decl->linkage == Linkage::INTERNAL);
-            if (canSkip) {
-                continue;
-            }
-            AppendDecl(topLevelDeclsOrdered, decl.get());
-            if (config.exportContent) {
-                usedTys.merge(CollectInstantiations(*decl));
-            }
-            AddCurFile(*decl, file.get());
-        }
+        DFSCollectFilesDeclarations(file.get(), alreadyVisitedFiles, topLevelDeclsOrdered, usedTys);
     }
     if (config.exportContent) {
         // Instantiated tys are only need to be collected when 'config.exportContent' is enabled.
@@ -505,6 +701,16 @@ void ASTWriter::ASTWriterImpl::ExportAST(const PackageDecl& package)
     }
 }
 
+void ASTWriter::SetSerializingCommon()
+{
+    pImpl->SetSerializingCommon();
+}
+ 
+void ASTWriter::ASTWriterImpl::SetSerializingCommon()
+{
+    serializingCommon = true;
+}
+
 void ASTWriter::AST2FB(std::vector<uint8_t>& data, const PackageDecl& package) const
 {
     CJC_NULLPTR_CHECK(pImpl);
@@ -519,6 +725,11 @@ void ASTWriter::ASTWriterImpl::AST2FB(std::vector<uint8_t>& data, const PackageD
     auto vimports = builder.CreateVector<TStringOffset>(allPackages);
     auto vfiles = builder.CreateVector<TStringOffset>(allFiles);
     auto vfileImports = builder.CreateVector<TImportsOffset>(allFileImports);
+    // Only for common part of CJMP
+    flatbuffers::Offset<flatbuffers::Vector<TFileInfoOffset>> vfileInfo;
+    if (serializingCommon) {
+        vfileInfo = builder.CreateVector<TFileInfoOffset>(allFileInfo);
+    }
     auto vdecls = builder.CreateVector<TDeclOffset>(allDecls);
     auto vexprs = builder.CreateVector<TExprOffset>(allExprs);
     auto vtypes = builder.CreateVector<TTypeOffset>(allTypes);
@@ -537,7 +748,7 @@ void ASTWriter::ASTWriterImpl::AST2FB(std::vector<uint8_t>& data, const PackageD
         builder.CreateString(hasModuleName ? package.srcPackage->files.front()->decls.front()->moduleName : "");
     PackageFormat::CjoVersion cjoVersion(CJO_MAJOR_VERSION, CJO_MINOR_VERSION, CJO_PATCH_VERSION);
     auto root = PackageFormat::CreatePackage(builder, cjcVersion, &cjoVersion, packageName, dependencyInfo, vimports,
-        vfiles, vfileImports, vtypes, vdecls, vexprs, INVALID_FORMAT_INDEX, kind, access, moduleName);
+        vfiles, vfileImports, vtypes, vdecls, vexprs, INVALID_FORMAT_INDEX, kind, access, moduleName, vfileInfo);
     FinishPackageBuffer(builder, root);
     auto size = static_cast<size_t>(builder.GetSize());
     data.resize(size);
@@ -567,7 +778,7 @@ FormattedIndex ASTWriter::ASTWriterImpl::GetDeclIndex(Ptr<const Decl> decl)
 // 1. if decl is packageDecl, get the index from imported map.
 // 2. if decl is imported, get the index form imported map.
 // 3. if decl is not imported, get the index from savedDeclMap.
-TFullIdOffset ASTWriter::ASTWriterImpl::GetFullDeclIndex(Ptr<Decl> decl)
+TFullIdOffset ASTWriter::ASTWriterImpl::GetFullDeclIndex(Ptr<const Decl> decl)
 {
     if (!decl || decl->doNotExport) {
         return PackageFormat::CreateFullId(builder, INVALID_PACKAGE_INDEX, builder.CreateString(""));
@@ -601,7 +812,8 @@ flatbuffers::Offset<PackageFormat::Imports> ASTWriter::ASTWriterImpl::SaveFileIm
         importSpecs.push_back(PackageFormat::CreateImportSpec(builder, &posBegin, &posEnd,
             builder.CreateVectorOfStrings(importSpec->content.prefixPaths),
             builder.CreateString(importSpec->content.identifier.Val()),
-            builder.CreateString(importSpec->content.aliasName.Val()), reExport, importSpec->content.isDecl));
+            builder.CreateString(importSpec->content.aliasName.Val()), reExport, importSpec->content.isDecl,
+            importSpec->content.hasDoubleColon));
         if (importSpec->IsReExport()) {
             // If the import package is reExported, it should be stored as used.
             SavePackageName(cjoManager.GetPackageNameByImport(*importSpec));
@@ -621,7 +833,7 @@ void ASTWriter::ASTWriterImpl::SaveFileInfo(const File& file)
     if (found == savedFileMap.end()) {
         // NOTE: current package's fileIndex is vector offset plus 1.
         FormattedIndex fileIndex = static_cast<FormattedIndex>(allFiles.size()) + 1;
-        if (config.needAbsPath) {
+        if (config.needAbsPath || serializingCommon) {
             allFiles.push_back(builder.CreateString(file.filePath));
         } else {
             allFiles.push_back(builder.CreateString(
@@ -629,6 +841,11 @@ void ASTWriter::ASTWriterImpl::SaveFileInfo(const File& file)
         }
         savedFileMap.emplace(file.begin.fileID, std::make_pair(0, fileIndex));
         allFileImports.push_back(SaveFileImports(file));
+        // Add additional file info for CJMP
+        auto fileID = file.begin.fileID;
+        auto begin = TPosition(fileIndex, 0, file.begin.line, file.begin.column, false);
+        auto end = TPosition(fileIndex, 0, file.end.line, file.end.column, false);
+        allFileInfo.push_back(PackageFormat::CreateFileInfo(builder, fileID, &begin, &end));
     }
 }
 
@@ -660,6 +877,35 @@ FormattedIndex ASTWriter::SaveType(Ptr<const Ty> pType) const
     return pImpl->SaveType(pType);
 }
 
+namespace {
+
+template <typename T>
+std::optional<Ptr<const Ty>> TryGetPlatformImplementationTy(const Ptr<const Ty>& pType)
+{
+    auto ty = StaticCast<T*>(pType);
+    if (ty->decl && ty->decl->platformImplementation) {
+        return ty->decl->platformImplementation->ty;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<Ptr<const Ty>> TryGetPlatformImplementationTy(const Ptr<const Ty>& pType)
+{
+    switch (pType->kind) {
+        case TypeKind::TYPE_CLASS:
+            return TryGetPlatformImplementationTy<ClassTy>(pType);
+        case TypeKind::TYPE_STRUCT:
+            return TryGetPlatformImplementationTy<StructTy>(pType);
+        case TypeKind::TYPE_ENUM:
+            return TryGetPlatformImplementationTy<EnumTy>(pType);
+        default:
+            return std::nullopt;
+    }
+}
+
+} // namespace
+
 // Save ty. If already saved, return its index; if not saved, save its
 // member according to different ty kind, add to savedTypeMap and return
 // its index.
@@ -674,12 +920,29 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveType(Ptr<const Ty> pType)
     if (found != savedTypeMap.end()) {
         return found->second;
     }
+
+    // Checking if has already saved platform decl
+    auto platformImplTy = TryGetPlatformImplementationTy(pType);
+    if (platformImplTy) {
+        found = savedTypeMap.find(*platformImplTy);
+        if (found != savedTypeMap.end()) {
+            savedTypeMap.emplace(pType, found->second);
+            return found->second;
+        }
+    }
+
     // Create a type index BEFORE actually creating the type object
     // this is needed to handle recursion in type details, like a class using  its own pointer for a member.
     // NOTE: valid index start from 1.
     FormattedIndex typeIndex = static_cast<FormattedIndex>(allTypes.size()) + 1;
     allTypes.emplace_back(TTypeOffset());
     savedTypeMap.emplace(pType, typeIndex);
+
+    // Also saving type for platform decl if any
+    if (platformImplTy) {
+        savedTypeMap.emplace(*platformImplTy, typeIndex);
+    }
+
     TTypeOffset typeObject;
     switch (pType->kind) {
         case TypeKind::TYPE:
@@ -1218,6 +1481,51 @@ TDeclOffset ASTWriter::ASTWriterImpl::SaveUnsupportDecl(const DeclInfo& declInfo
     return dbuilder.Finish();
 }
 
+flatbuffers::Offset<flatbuffers::Vector<AttrSizeType>> ASTWriter::ASTWriterImpl::SaveAttributes(
+    const AttributePack& attrs
+)
+{
+    std::vector<AttrSizeType> attrVec;
+    for (auto it : attrs.GetRawAttrs()) {
+        (void)attrVec.emplace_back(static_cast<AttrSizeType>(it.to_ullong()));
+    }
+
+    return builder.CreateVector<AttrSizeType>(attrVec);
+}
+
+bool ASTWriter::ASTWriterImpl::PlannedToBeSerialized(Ptr<const Decl> decl)
+{
+    return savedDeclMap.find(decl) != savedDeclMap.end();
+}
+
+/// Collect dependencies on which the current `decl` depends.
+/// In case if declaration is not exported, its transitive dependencies will be saved.
+std::vector<TFullIdOffset> ASTWriter::ASTWriterImpl::CollectInitializationDependencies(
+    const Decl& decl, std::set<const Decl*> visited)
+{
+    bool wasVisited = visited.find(&decl) != visited.end();
+    if (wasVisited) {
+        return {};
+    }
+    visited.insert(&decl);
+
+    std::vector<TFullIdOffset> dependencies;
+
+    std::vector<TFullIdOffset> dependenciesVector;
+    for (auto dependency : decl.dependencies) {
+        if (PlannedToBeSerialized(dependency)) {
+            TFullIdOffset depFullId = GetFullDeclIndex(dependency);
+            dependencies.push_back(depFullId);
+        } else {
+            for (auto transitiveFullId : CollectInitializationDependencies(*dependency, visited)) {
+                dependencies.push_back(transitiveFullId);
+            }
+        }
+    }
+    
+    return dependencies;
+}
+
 // Save decl, add to savedDeclMap and return its index.
 // It should be noted that: first saved all decls, then save types, to avoid
 // searching unsaved decls in SaveType.
@@ -1252,6 +1560,25 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveDecl(const Decl& decl, bool isTopLe
     if (decl.TestAttr(Attribute::GENERIC_INSTANTIATED, Attribute::GENERIC)) {
         attrs.SetAttr(Attribute::UNREACHABLE, true); // Set 'UNREACHABLE' for export.
     }
+
+    if (auto varDecl = DynamicCast<VarDecl>(&decl)) {
+        if (varDecl->TestAttr(Attribute::FROM_COMMON_PART) && varDecl->outerDecl &&
+            varDecl->outerDecl->TestAttr(Attribute::PLATFORM)) {
+            attrs.SetAttr(Attribute::COMMON, false);
+            attrs.SetAttr(Attribute::FROM_COMMON_PART, false);
+        }
+        if (varDecl->outerDecl && varDecl->outerDecl->TestAttr(Attribute::COMMON)) {
+            bool hasInitializer = varDecl->initializer;
+            attrs.SetAttr(Attribute::INITIALIZED, hasInitializer);
+            if (varDecl->TestAttr(Attribute::STATIC) && varDecl->TestAttr(Attribute::INITIALIZED)) {
+                attrs.SetAttr(Attribute::INITIALIZED, true);
+            }
+        }
+
+        if (varDecl->TestAttr(Attribute::PLATFORM)) {
+            attrs.SetAttr(Attribute::PLATFORM, false);
+        }
+    }
     auto type = attrs.TestAttr(Attribute::UNREACHABLE) ? INVALID_FORMAT_INDEX : SaveType(decl.ty);
     auto begin = decl.GetBegin();
     auto end = decl.GetEnd();
@@ -1271,16 +1598,17 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveDecl(const Decl& decl, bool isTopLe
     TPosition posBegin(fileIndex, pkgIndex, begin.line, begin.column, begin.GetStatus() == PositionStatus::IGNORE);
     TPosition posEnd(fileIndex, pkgIndex, end.line, end.column, end.GetStatus() == PositionStatus::IGNORE);
     TPosition identifierPos(fileIndex, pkgIndex, decl.GetIdentifierPos().line, decl.GetIdentifierPos().column, false);
-    std::vector<AttrSizeType> attrVec;
-    for (auto it : attrs.GetRawAttrs()) {
-        (void)attrVec.emplace_back(static_cast<AttrSizeType>(it.to_ullong()));
-    }
     TDeclHash declHash(decl.hash.instVar, decl.hash.virt, decl.hash.sig, decl.hash.srcUse, decl.hash.bodyHash);
-    auto attributes = builder.CreateVector<AttrSizeType>(attrVec);
+    auto attributes = SaveAttributes(attrs);
     auto isConst = decl.IsConst();
     auto annotations = builder.CreateVector<TAnnoOffset>(SaveAnnotations(decl));
+    // The dependencies default is null for compatibility, only may have value for common part of CJMP.
+    flatbuffers::Offset<flatbuffers::Vector<TFullIdOffset>> dependencies;
+    if (serializingCommon) {
+        dependencies = builder.CreateVector<TFullIdOffset>(CollectInitializationDependencies(decl, {}));
+    }
     DeclInfo declInfo{name, exportId, mangledName, rawMangleName, declHash, fullPackageName, posBegin, posEnd,
-        identifierPos, attributes, isConst, type, isTopLevel, annotations};
+        identifierPos, attributes, isConst, type, isTopLevel, annotations, dependencies};
     TDeclOffset offset;
     auto foundWriter = declWriterMap.find(decl.astKind);
     if (foundWriter != declWriterMap.end()) {
@@ -1327,6 +1655,31 @@ std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& d
             auto frozen = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_Frozen,
                 builder.CreateString(annotation->identifier.Val()), builder.CreateVector<TAnnoArgOffset>({}));
             annotations.emplace_back(frozen);
+        } else if (annotation->kind == AST::AnnotationKind::JAVA_MIRROR) {
+            auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
+            auto mirror = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_JavaMirror,
+                builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(mirror);
+        } else if (annotation->kind == AST::AnnotationKind::JAVA_IMPL) {
+            auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
+            auto impl = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_JavaImpl,
+                builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(impl);
+        } else if (annotation->kind == AST::AnnotationKind::OBJ_C_MIRROR) {
+            auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
+            auto mirror = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_ObjCMirror,
+                builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(mirror);
+        } else if (annotation->kind == AST::AnnotationKind::OBJ_C_IMPL) {
+            auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
+            auto impl = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_ObjCImpl,
+                builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(impl);
+        } else if (annotation->kind == AST::AnnotationKind::FOREIGN_NAME) {
+            auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
+            auto impl = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_ForeignName,
+                builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(impl);
         } else if (annotation->kind == AST::AnnotationKind::CUSTOM && annotation->isCompileTimeVisible) {
             auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
             auto custom = PackageFormat::CreateAnno(

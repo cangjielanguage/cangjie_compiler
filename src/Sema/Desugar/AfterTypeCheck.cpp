@@ -18,10 +18,13 @@
 #include "Desugar/AfterTypeCheck.h"
 
 #include "AutoBoxing.h"
+#include "NativeFFI/Java/AfterTypeCheck/JavaInteropManager.h"
+#include "NativeFFI/ObjC/AfterTypeCheck/Desugar.h"
+#include "ExtraScopes.h"
 #include "TypeCheckUtil.h"
 #include "TypeCheckerImpl.h"
-#include "ExtraScopes.h"
 
+#include "cangjie/AST/ASTCasting.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
@@ -32,7 +35,6 @@
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Sema/TypeManager.h"
-#include "cangjie/AST/ASTCasting.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/Utils.h"
 
@@ -55,8 +57,7 @@ OwnedPtr<TypeConvExpr> CreateConvInt64(VarDecl& vd, Ty& ty)
     return numConv;
 }
 
-OwnedPtr<FuncDecl> CreateMainInvokeDecl(
-    OwnedPtr<FuncBody>&& funcBody, const FuncDecl& mainFunc, Ty& funcTy)
+OwnedPtr<FuncDecl> CreateMainInvokeDecl(OwnedPtr<FuncBody>&& funcBody, const FuncDecl& mainFunc, Ty& funcTy)
 {
     auto mainInvokeFunc = MakeOwnedNode<FuncDecl>();
     funcBody->funcDecl = mainInvokeFunc.get();
@@ -278,46 +279,6 @@ void DesugarSetForPropDecl(TypeManager& tyMgr, Expr& expr)
 }
 } // namespace
 
-namespace {
-/**
- * When compiled with the `--coverage` option,
- * we should clear its line info of some nodes created by the compiler.
- * CodeGen then will not generate debug info for these nodes.
- * Reason:
- * Desugaring will create extra expressions and these expression will contribute
- * to an incorrect coverage (i.e., #execution-of-a-line).
- * For example, the `line 1: for (i in 0..1)` will be desugared as
- * `line 1: var iter = 0; ... ; while (...) { ... }`.
- * All these code has the line info, *line 1*,
- * and will accumulate their #execution to the coverage of line 1;
- * then, line 1 has an incorrect coverage (more than 1).
- * Currently, we clear line info of nodes in the function MainInvode
- * because they will contain invalid line info.
- */
-void ClearLineInfoAfterSema(Node& root)
-{
-    std::function<VisitAction(Ptr<Node>)> clearVisitor = [](Ptr<Node> node) -> VisitAction {
-        if (node->TestAttr(Attribute::COMPILER_ADD)) {
-            node->begin.Mark(PositionStatus::IGNORE);
-            node->end.Mark(PositionStatus::IGNORE);
-        }
-        return Cangjie::AST::VisitAction::WALK_CHILDREN;
-    };
-
-    std::function<VisitAction(Ptr<Node>)> visitor = [&clearVisitor](Ptr<Node> node) -> VisitAction {
-        // Clear line info of the MainInvode function.
-        if (auto fd = DynamicCast<FuncDecl*>(node); fd && fd->identifier == MAIN_INVOKE) {
-            Walker clearWalker(fd, clearVisitor);
-            clearWalker.Walk();
-            return Cangjie::AST::VisitAction::SKIP_CHILDREN;
-        }
-        return Cangjie::AST::VisitAction::WALK_CHILDREN;
-    };
-    Walker walker(&root, visitor);
-    walker.Walk();
-}
-} // namespace
-
 void TypeChecker::PerformDesugarAfterSema(const std::vector<Ptr<Package>>& pkgs) const
 {
     impl->PerformDesugarAfterSema(pkgs);
@@ -336,11 +297,6 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterSema(const std::vector<Ptr
     if (ci->invocation.globalOptions.enIncrementalCompilation) {
         ci->CacheSemaUsage(GetSemanticUsage(typeManager, pkgs));
     }
-    for (auto& pkg : pkgs) {
-        if (ci->invocation.globalOptions.enableCoverage) {
-            ClearLineInfoAfterSema(*pkg);
-        }
-    }
     GenerateMainInvoke();
     // Inline checking needs to process source package and imported packages which has source imported decls.
     CheckInlineFunctions(ci->GetPackages());
@@ -354,8 +310,9 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterSema(const std::vector<Ptr
     bool saveFileWithAbsPath =
         ci->invocation.globalOptions.enableCompileDebug || ci->invocation.globalOptions.enableCoverage;
     for (auto& pkg : pkgs) {
-        bool saveAbsPath = STANDARD_LIBS.find(pkg->fullPackageName) != STANDARD_LIBS.end() ?
-            ci->invocation.globalOptions.enableCoverage : saveFileWithAbsPath;
+        bool saveAbsPath = STANDARD_LIBS.find(pkg->fullPackageName) != STANDARD_LIBS.end()
+            ? ci->invocation.globalOptions.enableCoverage
+            : saveFileWithAbsPath;
         importManager.ExportDeclsWithContent(saveAbsPath, *pkg);
     }
 }
@@ -376,7 +333,10 @@ void TypeChecker::TypeCheckerImpl::GenerateMainInvoke()
     // 2. main function is in imported package. (can be remove when strategy of main importation is updated).
     // 3. current process is in incremental compiling strategy
     // 4. main function is invalid.
-    if (!ci->invocation.globalOptions.CompileExecutable() || packageHasMain->TestAttr(Attribute::IMPORTED) ||
+    // 5. when compiling chir we only depend on whether we have main func or not
+    bool outputCHIR = ci->invocation.globalOptions.outputMode == GlobalOptions::OutputMode::CHIR;
+    if ((!ci->invocation.globalOptions.CompileExecutable() && !outputCHIR) ||
+        packageHasMain->TestAttr(Attribute::IMPORTED) ||
         ci->compileStrategy->type == StrategyType::INCREMENTAL_COMPILE || !funcTy || !Ty::IsTyCorrect(funcTy->retTy) ||
         !mainFunc->funcBody || mainFunc->funcBody->paramLists.empty()) {
         return;
@@ -442,6 +402,19 @@ void TypeChecker::TypeCheckerImpl::DesugarForPropDecl(Node& pkg)
 // Perform desugar after typecheck before generic instantiation.
 void TypeChecker::TypeCheckerImpl::PerformDesugarAfterTypeCheck(ASTContext& ctx, Package& pkg)
 {
+    Interop::Java::JavaInteropManager jim(importManager, typeManager, diag, *ci->mangler,
+        ci->invocation.globalOptions.outputJavaGenDir, ci->invocation.globalOptions.output,
+        ci->invocation.globalOptions.enableInteropCJMapping);
+
+    jim.CheckImplRedefinition(pkg);
+    for (auto& file : pkg.files) {
+        jim.CheckTypes(*file);
+    }
+
+    jim.DesugarPackage(pkg);
+    Interop::ObjC::Desugar(Interop::ObjC::InteropContext(pkg, typeManager, importManager, diag, *ci->mangler,
+        ci->invocation.globalOptions.output));
+
     DesugarDeclsForPackage(pkg, ci->invocation.globalOptions.enableCoverage);
     std::function<VisitAction(Ptr<Node>)> preVisit = [this, &ctx](Ptr<Node> node) -> VisitAction {
         switch (node->astKind) {
@@ -510,7 +483,7 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterTypeCheck(ASTContext& ctx,
 Ptr<AST::Ty> TypeChecker::TypeCheckerImpl::SynthesizeWithoutRecover(ASTContext& ctx, Ptr<AST::Node> node)
 {
     CJC_NULLPTR_CHECK(node);
-    ctx.ClearTypeCheckCache(*node); // ensure newly created nodes have no related cache
+    ctx.ClearTypeCheckCache(*node);    // ensure newly created nodes have no related cache
     ctx.SkipSynForCorrectTyRec(*node); // avoid possible recovery during synthesize for already checked node
     auto ret = Synthesize(ctx, node);
     DesugarForPropDecl(*node); // seems that the above still aren't enough...

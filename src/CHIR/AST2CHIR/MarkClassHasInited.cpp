@@ -13,6 +13,8 @@
 using namespace Cangjie::CHIR;
 
 namespace {
+const std::string HAS_INITED_VAR_NAME = "$hasInited";
+
 void AddHasInitedFlagToImportedClass(const Package& package, CHIRBuilder& builder)
 {
     for (auto classDef : package.GetImportedClasses()) {
@@ -21,7 +23,9 @@ void AddHasInitedFlagToImportedClass(const Package& package, CHIRBuilder& builde
         }
         auto attributeInfo = AttributeInfo();
         attributeInfo.SetAttr(Attribute::NO_REFLECT_INFO, true);
-        classDef->AddInstanceVar(MemberVarInfo{"hasInited", "", builder.GetBoolTy(), attributeInfo});
+        attributeInfo.SetAttr(Attribute::COMPILER_ADD, true);
+        attributeInfo.SetAttr(Attribute::PRIVATE, true);
+        classDef->AddInstanceVar(MemberVarInfo{HAS_INITED_VAR_NAME, "", builder.GetBoolTy(), attributeInfo});
     }
 }
 
@@ -115,7 +119,9 @@ void MarkClassHasInited::RunOnPackage(const Package& package, CHIRBuilder& build
         }
         auto attributeInfo = AttributeInfo();
         attributeInfo.SetAttr(Attribute::NO_REFLECT_INFO, true);
-        classDef->AddInstanceVar(MemberVarInfo{"hasInited", "", builder.GetBoolTy(), attributeInfo});
+        attributeInfo.SetAttr(Attribute::COMPILER_ADD, true);
+        attributeInfo.SetAttr(Attribute::PRIVATE, true);
+        classDef->AddInstanceVar(MemberVarInfo{HAS_INITED_VAR_NAME, "", builder.GetBoolTy(), attributeInfo});
         auto index = std::vector<uint64_t>{classDef->GetAllInstanceVarNum() - 1};
 
         for (auto& funcBase : classDef->GetMethods()) {

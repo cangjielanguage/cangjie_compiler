@@ -59,22 +59,26 @@ const std::unordered_map<std::string, uint8_t> OUTPUT_MODE_MAP = {
     {"exe", uint8_t(GlobalOptions::OutputMode::EXECUTABLE)},
     {"staticlib", uint8_t(GlobalOptions::OutputMode::STATIC_LIB)},
     {"dylib", uint8_t(GlobalOptions::OutputMode::SHARED_LIB)},
+    {"chir", uint8_t(GlobalOptions::OutputMode::CHIR)},
 };
 #endif
 
 const std::unordered_map<std::string, ArchType> STRING_ARCH_MAP = {
-    {"x86_64", ArchType::X86_64}, {"aarch64", ArchType::AARCH64}, {"unknown", ArchType::UNKNOWN}
+    {"x86_64", ArchType::X86_64}, {"aarch64", ArchType::AARCH64}, {"arm64", ArchType::ARM64},
+    {"unknown", ArchType::UNKNOWN}
 };
 
 const std::unordered_map<std::string, OSType> STRING_OS_MAP = {
     {"windows", OSType::WINDOWS}, {"w64", OSType::WINDOWS}, {"linux", OSType::LINUX},
-    {"darwin", OSType::DARWIN}, {"unknown", OSType::UNKNOWN}
+    {"darwin", OSType::DARWIN}, {"ios", OSType::IOS}, {"unknown", OSType::UNKNOWN}
 };
 
 const std::unordered_map<std::string, Environment> STRING_ENVIRONMENT_MAP = {
     {"ohos", Environment::OHOS},
     {"gnu", Environment::GNU},
     {"mingw32", Environment::GNU},
+    {"android", Environment::ANDROID},
+    {"simulator", Environment::SIMULATOR},
     {"", Environment::NOT_AVAILABLE},
 };
 
@@ -82,6 +86,8 @@ const std::unordered_map<Environment, std::string> ENVIRONMENT_STRING_MAP = {
     {Environment::OHOS, "ohos"},
     {Environment::GNU, "gnu"},
     {Environment::GNU, "mingw32"},
+    {Environment::ANDROID, "android"},
+    {Environment::SIMULATOR, "simulator"}, 
     {Environment::NOT_AVAILABLE, ""},
 };
 
@@ -106,7 +112,7 @@ const std::unordered_map<std::string, uint8_t> PRINT_BCHIR_MODE_MAP = {
     {"all", uint8_t(GlobalOptions::PrintBCHIROption::ALL)},
 };
 
-bool SeeingTomlComment(const std::string inputLine)
+bool SeeingTomlComment(const std::string& inputLine)
 {
     if (inputLine.empty()) {
         return false;
@@ -150,6 +156,42 @@ std::optional<GlobalOptions::OptimizationLevel> ParseOptimizationValue(const std
     }
 }
 
+bool ParseAppleTargetTriple(GlobalOptions& opts, const std::vector<std::string>& parts)
+{
+    // Parts must contain at least 3 elements.
+    if (parts.size() < 3) {
+        return false;
+    }
+    // Index 1 corresponds to vendor name.
+    if (parts[1] != "apple") {
+        return false;
+    }
+    opts.target.vendor = Vendor::APPLE;
+    // Index 2 corresponds to os name.
+    if (parts[2] == "darwin") {
+        opts.target.os = OSType::DARWIN;
+        opts.target.env = Environment::NOT_AVAILABLE;
+        return true;
+    }
+    // 2 represents os name with version.
+    if (parts[2].rfind("ios", 0) == 0) {
+        opts.target.os = OSType::IOS;
+        opts.target.apiLevel = parts[2].substr(3); // 2 is the index of os, 3 is the length of "ios".
+        if (opts.target.apiLevel.empty()) {
+            opts.target.apiLevel = "11";
+        }
+        // In case of parts contain 4 elements, 3 represents environment type (supports simulator only).
+        if (parts.size() == 4 && parts[3] == "simulator") {
+            opts.target.env = Environment::SIMULATOR;
+            return true;
+        } else if (parts.size() == 3) { // When parts has 3 elements only. The target represents the real device.
+            opts.target.env = Environment::NOT_AVAILABLE;
+            return true;
+        }
+    }
+    return false;
+};
+
 bool ParseTargetTriple(GlobalOptions& opts, const std::string& triple)
 {
     auto parts = Utils::SplitString(triple, "-");
@@ -159,17 +201,17 @@ bool ParseTargetTriple(GlobalOptions& opts, const std::string& triple)
     }
     auto archStr = parts[0];
     if (auto arch = STRING_ARCH_MAP.find(archStr); arch != STRING_ARCH_MAP.end()) {
-        opts.target.arch = arch->second;
+        opts.target.vendor = Triple::Vendor::UNKNOWN;
+        if (arch->second == ArchType::ARM64) {
+            opts.target.arch = ArchType::AARCH64;
+        } else {
+            opts.target.arch = arch->second;
+        }
     } else {
         Errorln("The architecture \"" + archStr + "\" is not found or supported!");
         return false;
     }
-    // Hack for <arch>-apple-darwin, which has no environment field. The current function cannot handle such cases.
-    // Index 1 responds to vendor name and 2 responds to os name.
-    if (parts[1] == "apple" && parts[2] == "darwin") {
-        opts.target.vendor = Vendor::APPLE;
-        opts.target.os = OSType::DARWIN;
-        opts.target.env = Environment::NOT_AVAILABLE;
+    if (ParseAppleTargetTriple(opts, parts)) {
         return true;
     }
     auto osStr = parts[parts.size() - 2];
@@ -182,6 +224,15 @@ bool ParseTargetTriple(GlobalOptions& opts, const std::string& triple)
     auto envStr = parts[parts.size() - 1];
     if (auto env = STRING_ENVIRONMENT_MAP.find(envStr); env != STRING_ENVIRONMENT_MAP.end()) {
         opts.target.env = env->second;
+        if (opts.target.env == Environment::ANDROID) {
+            opts.target.apiLevel = "31";
+            Infoln("ANDROID API level is not suggested in the target. Use API level " +
+                opts.target.apiLevel + " by default.");
+        }
+    // If targeting Android, the env field may contains the API level like "android31"
+    } else if (envStr.rfind(ENVIRONMENT_STRING_MAP.at(Environment::ANDROID), 0) == 0) {
+        opts.target.env = Environment::ANDROID;
+        opts.target.apiLevel = envStr.substr(7); // 7 is the length of "android"
     } else {
         Errorln("The environment \"" + envStr + "\" is not found or supported!");
         return false;
@@ -524,6 +575,7 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
     }},
     { Options::ID::PACKAGE_COMPILE, OPTION_TRUE_ACTION(opts.compilePackage = true) },
     { Options::ID::NO_PRELUDE, OPTION_TRUE_ACTION(opts.implicitPrelude = false) },
+    { Options::ID::ENABLE_INTEROP_CJMAPPING, OPTION_TRUE_ACTION(opts.enableInteropCJMapping = true) },
     { Options::ID::INT_OVERFLOW_MODE, [](GlobalOptions& opts, const OptionArgInstance& arg) {
         CJC_ASSERT(ValidOverflowStrategy(arg.value));
         if (!ValidOverflowStrategy(arg.value)) { return false; }
@@ -571,6 +623,10 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
          return false;
      }},
 #endif
+    { Options::ID::COMMON_PART_PATH, [](GlobalOptions& opts, const OptionArgInstance& arg) {
+        opts.commonPartCjo = opts.ValidateInputFilePath(arg.value, DiagKindRefactor::driver_invalid_binary_file);
+        return true;
+    }},
     { Options::ID::INCRE_COMPILE, OPTION_TRUE_ACTION(opts.enIncrementalCompilation = true) },
     { Options::ID::INCRE_DEBUG, OPTION_TRUE_ACTION(opts.printIncrementalInfo = true) },
     { Options::ID::DUMP_DEPENDENT_PACKAGE, OPTION_TRUE_ACTION(opts.scanDepPkg = true) },
@@ -661,11 +717,11 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
     // ---------- MOCKING OPTIONS ----------
     { Options::ID::MOCK, [](GlobalOptions& opts, const OptionArgInstance& arg) {
         if (arg.value == "on") {
-            opts.mock = MockSupportKind::ON;
+            opts.mock = MockMode::ON;
         } else if (arg.value == "runtime-error") {
-            opts.mock = MockSupportKind::RUNTIME_ERROR;
+            opts.mock = MockMode::RUNTIME_ERROR;
         } else if (arg.value == "off") {
-            opts.mock = MockSupportKind::OFF;
+            opts.mock = MockMode::OFF;
         }
         return true;
     }},
@@ -769,6 +825,10 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
             return false;
         }
         opts.outputDir = {arg.value};
+        return true;
+    }},
+    { Options::ID::OUTPUT_JAVA_GEN_DIR, [](GlobalOptions& opts, const OptionArgInstance& arg) {
+        opts.outputJavaGenDir = {arg.value};
         return true;
     }},
     { Options::ID::SAVE_TEMPS, [](GlobalOptions& opts, const OptionArgInstance& arg) {
@@ -944,6 +1004,9 @@ namespace Cangjie {
 std::string Triple::Info::EnvironmentToString() const
 {
     if (auto search = ENVIRONMENT_STRING_MAP.find(env); search != ENVIRONMENT_STRING_MAP.end()) {
+        if (env == Environment::ANDROID) {
+            return search->second + apiLevel;
+        }
         return search->second;
     } else {
         return "";

@@ -154,6 +154,11 @@ public:
         return kind >= TYPE_INT8 && kind <= TYPE_UINT_NATIVE;
     }
 
+    bool IsNumeric() const
+    {
+        return kind >= TYPE_INT8 && kind <= TYPE_FLOAT64;
+    }
+
     bool IsUnsignedInteger() const
     {
         return kind >= TYPE_UINT8 && kind <= TYPE_UINT_NATIVE;
@@ -306,6 +311,10 @@ public:
     {
         return kind == TYPE_CLASS || kind == TYPE_STRUCT || kind == TYPE_ENUM;
     }
+    bool IsClassOrStruct() const
+    {
+        return kind == TYPE_CLASS || kind == TYPE_STRUCT;
+    }
     bool IsBuiltinType() const;
     bool IsValueType() const
     {
@@ -375,13 +384,30 @@ public:
      */
     void VisitTypeRecursively(const std::function<bool(const Type&)>& visitor) const;
 
-    bool IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder) const;
+    bool IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
-    bool IsEqualOrInstantiatedTypeOf(const Type& genericRelatedType, CHIRBuilder& builder) const;
+    bool IsEqualOrInstantiatedTypeOf(const Type& genericRelatedType, CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
     virtual std::vector<FuncBase*> GetDeclareAndExtendMethods(CHIRBuilder& builder) const;
 
     virtual const std::vector<ExtendDef*>& GetExtends(CHIRBuilder* builder = nullptr) const;
+
+    virtual std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr);
+
+    /**
+     * @brief Checks if current type satisfies generic constraints.
+     *
+     * @param type The genric type with constraints.
+     * @param builder The CHIR builder used for building the type.
+     * @param instMap Replace generic type to concrete type
+     * @return True if the generic constraints are satisfied, false otherwise.
+     */
+    bool SatisfyGenericConstraints(const GenericType& type, CHIRBuilder& builder,
+        const std::unordered_map<const GenericType*, Type*>& instMap,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
 protected:
     /**
@@ -424,7 +450,8 @@ public:
      *
      *  so the result of `CPointer<Bool>.GetSuperTypesRecusively()` is {I1, I2, I6}
      */
-    std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder) const;
+    std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) override;
 
     const std::vector<ExtendDef*>& GetExtends(CHIRBuilder* builder = nullptr) const override;
     void AddExtend(ExtendDef& extend);
@@ -594,7 +621,8 @@ public:
      *
      *  so the result of `C2.GetSuperTypesRecusively()` is {I1 ~ I6, C1}
      */
-    std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder);
+    std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) override;
 
     /**
      * @brief Retrieves the instance map for generic types.
@@ -648,7 +676,8 @@ public:
      * @param builder The CHIR builder used for building the types.
      * @return A vector of implemented interface types.
      */
-    std::vector<ClassType*> GetImplementedInterfaceTys(CHIRBuilder* builder);
+    std::vector<ClassType*> GetImplementedInterfaceTys(CHIRBuilder* builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr);
     
     /**
      * @brief Retrieves the implemented interface types without extension.
@@ -730,14 +759,16 @@ protected:
     std::vector<Type*> instantiatedMemberTys;
 
 private:
-    std::vector<ClassType*> CalculateImplementedInterfaceTys(CHIRBuilder& builder);
+    std::vector<ClassType*> CalculateImplementedInterfaceTys(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr);
     std::vector<Type*> CalculateCurDefInstantiatedMemberTys(CHIRBuilder& builder);
-    std::vector<ClassType*> CalculateExtendImplementedInterfaceTys(CHIRBuilder& builder) const;
+    std::vector<ClassType*> CalculateExtendImplementedInterfaceTys(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
 private:
     bool hasSetSuperInterface{false};
     bool hasSetInstMemberTy{false};
-    std::mutex setSuperInterfaceMtx;
+    std::recursive_mutex setSuperInterfaceMtx;
     std::mutex setInstMemberTyMtx;
 };
 
@@ -1069,15 +1100,6 @@ public:
      * @param builder The CHIR builder used for building the types.
      */
     void GetInstMap(std::unordered_map<const GenericType*, Type*>& instMap, CHIRBuilder& builder) const;
-    
-    /**
-     * @brief Checks if the generic constraints are satisfied for a given type.
-     *
-     * @param type The type to check.
-     * @param builder The CHIR builder used for building the type.
-     * @return True if the generic constraints are satisfied, false otherwise.
-     */
-    bool SatisfyGenericConstraints(Type& type, CHIRBuilder& builder) const;
 
     size_t Hash() const override;
     bool operator==(const Type& other) const override;

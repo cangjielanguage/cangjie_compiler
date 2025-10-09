@@ -696,22 +696,6 @@ bool IsSuperOrThisCall(const AST::CallExpr& expr)
     return false;
 }
 
-std::unordered_map<const GenericType*, Type*> GetInstMapFromExtendDefToCurType(
-    const ExtendDef& exDef, const Type& curType)
-{
-    auto genericTypeArgs = exDef.GetExtendedType()->GetTypeArgs();
-    auto instTypeArgs = curType.GetTypeArgs();
-    CJC_ASSERT(genericTypeArgs.size() == instTypeArgs.size());
-    std::unordered_map<const GenericType*, Type*> replaceTable;
-    for (size_t i = 0; i < genericTypeArgs.size(); ++i) {
-        if (auto genericTy = Cangjie::DynamicCast<GenericType*>(genericTypeArgs[i])) {
-            replaceTable.emplace(genericTy, instTypeArgs[i]);
-        }
-    }
-
-    return replaceTable;
-}
-
 std::unordered_map<const GenericType*, Type*> GetInstMapFromCurDefToCurType(const CustomType& curType)
 {
     auto genericTypeArgs = curType.GetCustomTypeDef()->GetGenericTypeParams();
@@ -727,20 +711,35 @@ std::unordered_map<const GenericType*, Type*> GetInstMapFromCurDefToCurType(cons
     return replaceTable;
 }
 
-void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vector<ClassType*>& parents)
+std::unordered_map<const GenericType*, Type*> GetInstMapFromCurDefAndExDefToCurType(const CustomType& curType)
+{
+    auto replaceTable = GetInstMapFromCurDefToCurType(curType);
+    for (auto extendDef : curType.GetCustomTypeDef()->GetExtends()) {
+        // maybe we can meet `extend<T> A<B<T>> {}`, and `curType` is A<Int32>, then ignore this def,
+        // so not need to check `res`
+        auto [res, tempTable] = extendDef->GetExtendedType()->CalculateGenericTyMapping(curType);
+        replaceTable.merge(tempTable);
+    }
+    return replaceTable;
+}
+
+void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vector<ClassType*>& parents,
+    std::set<std::pair<const Type*, const Type*>>* visited)
 {
     if (std::find(parents.begin(), parents.end(), &cur) != parents.end()) {
         return;
     }
 
     for (auto ex : cur.GetCustomTypeDef()->GetExtends()) {
-        if (!cur.IsEqualOrInstantiatedTypeOf(*ex->GetExtendedType(), builder)) {
+        if (!cur.IsEqualOrInstantiatedTypeOf(*ex->GetExtendedType(), builder, visited)) {
             continue;
         }
-        auto replaceTable = GetInstMapFromExtendDefToCurType(*ex, cur);
+        // maybe we can meet `extend<T> A<B<T>> {}`, and `curType` is A<Int32>, then ignore this def,
+        // so not need to check `res`
+        auto [res, replaceTable] = ex->GetExtendedType()->CalculateGenericTyMapping(cur);
         for (auto interface : ex->GetImplementedInterfaceTys()) {
             std::vector<ClassType*> extendParents;
-            GetAllInstantiatedParentType(*interface, builder, extendParents);
+            GetAllInstantiatedParentType(*interface, builder, extendParents, visited);
             for (size_t i = 0; i < extendParents.size(); ++i) {
                 extendParents[i] =
                     Cangjie::StaticCast<ClassType*>(ReplaceRawGenericArgType(*extendParents[i], replaceTable, builder));
@@ -750,11 +749,11 @@ void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vec
             }
         }
     }
-    for (auto interface : cur.GetImplementedInterfaceTys(&builder)) {
-        GetAllInstantiatedParentType(*interface, builder, parents);
+    for (auto interface : cur.GetImplementedInterfaceTys(&builder, visited)) {
+        GetAllInstantiatedParentType(*interface, builder, parents, visited);
     }
     if (auto superClassTy = cur.GetSuperClassTy(&builder)) {
-        GetAllInstantiatedParentType(*superClassTy, builder, parents);
+        GetAllInstantiatedParentType(*superClassTy, builder, parents, visited);
     }
     parents.emplace_back(&cur);
 }
@@ -1195,23 +1194,33 @@ bool IsConstructor(const Value& value)
     return false;
 }
 
-bool MeetAutoEnvBase(const Type& subType, const Type& superType)
+Value* GetCastOriginalTarget(const Expression& expr)
 {
-    return subType.IsAutoEnvInstBase() && superType.IsAutoEnvGenericBase() &&
-        Cangjie::StaticCast<const ClassType&>(subType).GetClassDef()->GetSuperClassTy() == &superType;
+    if (expr.GetExprKind() == ExprKind::TYPECAST) {
+        return StaticCast<TypeCast*>(&expr)->GetSourceValue();
+    }
+    if (expr.GetExprKind() == ExprKind::UNBOX_TO_REF) {
+        // from struct& -> class&
+        return StaticCast<UnBoxToRef*>(&expr)->GetSourceValue();
+    }
+    if (expr.GetExprKind() == ExprKind::TRANSFORM_TO_GENERIC) {
+        return StaticCast<TransformToGeneric*>(&expr)->GetSourceValue();
+    }
+    if (expr.GetExprKind() == ExprKind::TRANSFORM_TO_CONCRETE) {
+        return StaticCast<TransformToConcrete*>(&expr)->GetSourceValue();
+    }
+    if (expr.GetExprKind() == ExprKind::BOX) {
+        return StaticCast<Box*>(&expr)->GetSourceValue();
+    }
+    return nullptr;
 }
- 
-bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType)
+
+bool IsInstanceVarInit(const Value& value)
 {
-    if (&paramType == &argType) {
-        return true;
+    if (auto func = DynamicCast<FuncBase>(&value)) {
+        return func->IsInstanceVarInit();
     }
-    if (auto g = DynamicCast<const GenericType*>(&paramType); g && g->orphanFlag) {
-        auto upperBounds = g->GetUpperBounds();
-        CJC_ASSERT(upperBounds.size() == 1);
-        return upperBounds[0] == &argType;
-    }
-    return MeetAutoEnvBase(*argType.StripAllRefs(), *paramType.StripAllRefs());
+    return false;
 }
 
 std::vector<ClassType*> GetSuperTypesRecusively(Type& subType, CHIRBuilder& builder)
@@ -1236,6 +1245,30 @@ std::vector<ClassType*> GetSuperTypesRecusively(Type& subType, CHIRBuilder& buil
         CJC_ABORT();
     }
     return result;
+}
+
+static bool MeetAutoEnvBase(const Type& subType, const Type& superType)
+{
+    return subType.IsAutoEnvInstBase() && superType.IsAutoEnvGenericBase() &&
+        Cangjie::StaticCast<const ClassType&>(subType).GetClassDef()->GetSuperClassTy() == &superType;
+}
+
+bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType)
+{
+    if (&paramType == &argType) {
+        return true;
+    }
+    if (auto g = DynamicCast<const GenericType*>(&paramType); g && g->orphanFlag) {
+        auto upperBounds = g->GetUpperBounds();
+        CJC_ASSERT(upperBounds.size() == 1);
+        return upperBounds[0] == &argType;
+    }
+    if (auto g = DynamicCast<const GenericType*>(&argType); g && g->orphanFlag) {
+        auto upperBounds = g->GetUpperBounds();
+        CJC_ASSERT(upperBounds.size() == 1);
+        return upperBounds[0] == &paramType;
+    }
+    return MeetAutoEnvBase(*argType.StripAllRefs(), *paramType.StripAllRefs());
 }
 
 ClassType* GetInstParentType(const std::vector<ClassType*>& candidate,
@@ -1410,5 +1443,13 @@ std::vector<VTableSearchRes> GetFuncIndexInVTable(
         }
     }
     return result;
+}
+
+BuiltinType* GetBuiltinTypeWithVTable(BuiltinType& type, CHIRBuilder& builder)
+{
+    if (type.IsCPointer()) {
+        return builder.GetType<CPointerType>(builder.GetUnitTy());
+    }
+    return &type;
 }
 } // namespace Cangjie::CHIR

@@ -43,6 +43,11 @@ public:
     }
     OwnedPtr<AST::Package> LoadPackageDependencies();
     void LoadPackageDecls();
+    // Add for CJMP
+    void PreloadCommonPartOfPackage(AST::Package& pkg);
+    std::vector<OwnedPtr<AST::ImportSpec>> LoadImportSpecs(const PackageFormat::Imports* imports);
+    std::string PreReadAndSetPackageName();
+    std::vector<std::string> ReadFileNames() const;
     std::unordered_set<std::string> LoadCachedTypeForPackage(
         const AST::Package& sourcePackage, const std::map<std::string, Ptr<AST::Decl>>& mangledName2DeclMap);
     std::string LoadPackageDepInfo();
@@ -80,6 +85,7 @@ friend ASTLoader;
     std::vector<Ptr<AST::Decl>> importNonGenericSrcFuncDecls; // Only collect global and member decls.
     Ptr<AST::Package> curPackage{nullptr};
     bool importSrcCode{false};
+    bool deserializingCommon{false};
 
     // Define the context status for loading type cache of incremental compilation.
     bool isLoadCache{false};
@@ -112,6 +118,7 @@ friend ASTLoader;
     void LoadGenericConstraintsRef(const PackageFormat::Generic* genericRef, Ptr<AST::Generic> generic);
     template <typename DeclT> void LoadNominalDeclRef(const PackageFormat::Decl& decl, DeclT& astDecl);
     void LoadTypeAliasDeclRef(const PackageFormat::Decl& decl, AST::TypeAliasDecl& tad);
+    void LoadDeclDependencies(const PackageFormat::Decl& decl, AST::Decl& astDecl);
     void LoadDeclRefs(const PackageFormat::Decl& declObj, AST::Decl& decl);
     OwnedPtr<AST::Decl> LoadFuncParam(const PackageFormat::Decl& decl, int64_t declIndex);
     OwnedPtr<AST::Decl> LoadPropDecl(const PackageFormat::Decl& decl, int64_t declIndex);
@@ -157,13 +164,18 @@ friend ASTLoader;
         node.end = LoadPos(nodeObj.end());
     }
 
-    static inline AST::AttributePack GetAttributes(const PackageFormat::Decl& decl)
+    static inline AST::AttributePack GetAttributes(const flatbuffers::Vector<uint64_t>* rawAttrs)
     {
-        std::vector<std::bitset<AST::ATTR_SIZE>> bitSets(decl.attributes()->size());
-        for (uoffset_t i = 0; i < decl.attributes()->size(); ++i) {
-            bitSets[i] = decl.attributes()->Get(i);
+        std::vector<std::bitset<AST::ATTR_SIZE>> bitSets(rawAttrs->size());
+        for (uoffset_t i = 0; i < rawAttrs->size(); ++i) {
+            bitSets[i] = rawAttrs->Get(i);
         }
         return AST::AttributePack(bitSets);
+    }
+
+    static inline AST::AttributePack GetAttributes(const PackageFormat::Decl& decl)
+    {
+        return GetAttributes(decl.attributes());
     }
 
     inline const PackageFormat::Decl* GetFormatDeclByIndex(FormattedIndex declIndex) const

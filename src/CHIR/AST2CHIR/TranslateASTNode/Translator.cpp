@@ -10,8 +10,6 @@
 using namespace Cangjie::CHIR;
 using namespace Cangjie;
 
-Translator::WrapperFuncContainer Translator::mutWrapperMap;
-
 void Translator::SetSymbolTable(const AST::Node& node, Value& val, bool isLocal)
 {
     CJC_ASSERT(node.IsDecl() ||
@@ -168,16 +166,25 @@ Ptr<Func> Translator::CreateEmptyGVInitFunc(const std::string& mangledName, cons
     const std::string& rawMangledName, const std::string& pkgName, const Linkage& linkage, const DebugLocation& loc,
     bool isConst)
 {
-    auto funcTy = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetVoidTy());
-    auto func = builder.CreateFunc(INVALID_LOCATION, funcTy, mangledName, identifier, rawMangledName, pkgName);
-    auto blockGroup = builder.CreateBlockGroup(*func);
-    func->InitBody(*blockGroup);
-    func->SetFuncKind(FuncKind::GLOBALVAR_INIT);
-    func->EnableAttr(Attribute::NO_REFLECT_INFO);
-    func->EnableAttr(Attribute::NO_INLINE);
-    func->EnableAttr(Attribute::COMPILER_ADD);
-    if (isConst) {
-        func->EnableAttr(Attribute::CONST);
+    Func* func = TryGetFromCache<Value, Func>(GLOBAL_VALUE_PREFIX + mangledName, deserializedVals);
+    BlockGroup* blockGroup = nullptr;
+    if (func) {
+        // found deserialized one
+        blockGroup = builder.CreateBlockGroup(*func);
+        func->ReplaceBody(*blockGroup);
+    } else {
+        auto funcTy = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetVoidTy());
+        func = builder.CreateFunc(INVALID_LOCATION, funcTy, mangledName, identifier, rawMangledName, pkgName);
+        blockGroup = builder.CreateBlockGroup(*func);
+        func->SetFuncKind(FuncKind::GLOBALVAR_INIT);
+        func->EnableAttr(Attribute::NO_REFLECT_INFO);
+        func->EnableAttr(Attribute::NO_INLINE);
+        func->EnableAttr(Attribute::COMPILER_ADD);
+        func->EnableAttr(Attribute::INITIALIZER);
+        if (isConst) {
+            func->EnableAttr(Attribute::CONST);
+        }
+        func->InitBody(*blockGroup);
     }
     func->template Set<LinkTypeInfo>(Linkage(linkage));
     func->SetDebugLocation(loc);
@@ -191,12 +198,12 @@ Ptr<Func> Translator::CreateEmptyGVInitFunc(const std::string& mangledName, cons
 }
 
 Ptr<LocalVar> Translator::CreateGetElementRefWithPath(const DebugLocation& loc, Ptr<Value> lhsBase,
-    const std::vector<uint64_t>& path, Ptr<Block> block, const CustomType& customType)
+    const std::vector<std::string>& path, Ptr<Block> block, const CustomType& customType)
 {
-    auto [memberType, isReadOnly] = customType.GetInstMemberTypeByPathCheckingReadOnly(path, builder);
+    auto [memberType, isReadOnly] = GetInstMemberTypeByNameCheckingReadOnly(customType, path, builder);
     auto memberRefType = builder.GetType<RefType>(memberType);
     auto getMemberRef =
-        CreateAndAppendExpression<GetElementRef>(loc, memberRefType, lhsBase, path, block)->GetResult();
+        CreateAndAppendExpression<GetElementByName>(loc, memberRefType, lhsBase, path, block)->GetResult();
     if (lhsBase->TestAttr(Attribute::READONLY) || isReadOnly) {
         getMemberRef->EnableAttr(Attribute::READONLY);
     }

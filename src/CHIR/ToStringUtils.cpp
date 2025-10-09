@@ -197,7 +197,7 @@ std::string GetLambdaStr(const Lambda& lambda, size_t indent)
     return ss.str();
 }
 
-std::string GetFuncStr(const Func& func, size_t indent)
+std::string FuncSymbolStr(const Func& func)
 {
     std::stringstream ss;
     ss << func.GetAttributeInfo().ToString();
@@ -283,6 +283,13 @@ std::string GetFuncStr(const Func& func, size_t indent)
         }
     }
     ss << "\n";
+    return ss.str();
+}
+
+std::string GetFuncStr(const Func& func, size_t indent)
+{
+    std::stringstream ss;
+    ss << FuncSymbolStr(func);
     if (func.GetBody()) {
         ss << GetBlockGroupStr(*func.GetBody(), indent);
     }
@@ -472,9 +479,11 @@ std::string SuccessorsToString(const std::vector<Block*>& successors)
     }
     if (successors.size() > 1) {
         // exception case, exception list
-        res += ", exception ";
+        res += ", exception";
         if (successors[1]->IsLandingPadBlock()) {
-            res += GetExceptionsStr(successors[1]->GetExceptions()) + ": ";
+            res += " " + GetExceptionsStr(successors[1]->GetExceptions()) + ": ";
+        } else {
+            res += ": ";
         }
         res += successors[1]->GetIdentifier();
     }
@@ -508,23 +517,6 @@ std::string ExprWithExceptionOperandsToString(const std::vector<Value*>& args, c
         res += ", ";
     }
     res += SuccessorsToString(successors);
-    return res;
-}
-
-std::string ParamTypesToString(const FuncType& funcType)
-{
-    std::string res = "(";
-    auto paramTypes = funcType.GetParamTypes();
-    if (!paramTypes.empty()) {
-        for (auto pType : paramTypes) {
-            res += pType->ToString();
-            res += ", ";
-        }
-        // remove the last ", "
-        res.pop_back();
-        res.pop_back();
-    }
-    res += ")";
     return res;
 }
 

@@ -20,7 +20,7 @@ class UnreachableBranchCheck {
 public:
     using ConstAnalysisWrapper = AnalysisWrapper<ConstAnalysis, ConstDomain>;
     explicit UnreachableBranchCheck(
-        ConstAnalysisWrapper* constAnalysisWrapper, DiagAdapter& diag, std::string& packageName);
+        ConstAnalysisWrapper* constAnalysisWrapper, DiagAdapter& diag, const std::string& packageName);
 
     void RunOnPackage(const Package& package, size_t threadNum);
 
@@ -32,7 +32,7 @@ private:
     DiagAdapter& diag;
     ConstAnalysisWrapper* analysisWrapper;
 
-    std::string& currentPackageName;
+    const std::string& currentPackageName;
 };
 
 } // namespace Cangjie::CHIR

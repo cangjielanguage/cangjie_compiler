@@ -219,6 +219,28 @@ void DiagRecursiveConstructorCall(DiagnosticEngine& diag, const std::vector<Ptr<
 }
 } // namespace
 
+// desugar primary ctor before cjmp customDef merging
+void TypeChecker::TypeCheckerImpl::CheckPrimaryCtorBeforeMerge(Node &root)
+{
+    // Create by cjogen is not need to add default construct.
+    if (root.TestAttr(Attribute::TOOL_ADD)) {
+        return;
+    }
+    Walker walkerPackage(&root, [this](Ptr<Node> node) -> VisitAction {
+        if (node->astKind == ASTKind::FILE) {
+            auto file = StaticAs<ASTKind::FILE>(node);
+            for (auto &decl : file->decls) {
+                if (decl->astKind == ASTKind::CLASS_DECL || decl->astKind == ASTKind::STRUCT_DECL) {
+                    CheckPrimaryCtorForClassOrStruct(StaticCast<InheritableDecl>(*decl));
+                }
+            }
+            return VisitAction::SKIP_CHILDREN;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walkerPackage.Walk();
+}
+
 void TypeChecker::TypeCheckerImpl::AddDefaultFunction(Node& root)
 {
     // Create by cjogen is not need to add default construct.
@@ -347,12 +369,27 @@ void TypeChecker::TypeCheckerImpl::AddDefaultCtor(InheritableDecl& decl) const
     if (decl.astKind != ASTKind::STRUCT_DECL && decl.astKind != ASTKind::CLASS_DECL) {
         return;
     }
+
+    // Do not add default constructor to Objective-C mirrors declarations
+    // because it requires explicitly added one
+    if (decl.TestAnyAttr(Attribute::OBJ_C_MIRROR)) {
+        return;
+    }
+
+    // Do not add default constructor to common class(struct) because
+    // it requires explicitly added one
+    // Do not add default constructor to platform class(struct) because it
+    // always has one in common class(struct) due to above requirement
     if (decl.astKind == ASTKind::STRUCT_DECL) {
         auto structDecl = StaticAs<ASTKind::STRUCT_DECL>(&decl);
-        structDecl->body->decls.push_back(CreateDefaultCtor(decl));
+        if (!structDecl->TestAnyAttr(Attribute::COMMON)) {
+            structDecl->body->decls.push_back(CreateDefaultCtor(decl));
+        }
     } else if (decl.astKind == ASTKind::CLASS_DECL) {
         auto classDecl = StaticAs<ASTKind::CLASS_DECL>(&decl);
-        classDecl->body->decls.push_back(CreateDefaultCtor(decl));
+        if (!classDecl->TestAnyAttr(Attribute::COMMON, Attribute::JAVA_MIRROR)) {
+            classDecl->body->decls.push_back(CreateDefaultCtor(decl));
+        }
     }
 }
 

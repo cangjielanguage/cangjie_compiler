@@ -25,7 +25,7 @@ public:
      * @param diag cangjie error or warning reporter.
      * @param packageName this package name.
      */
-    explicit DeadCodeElimination(CHIRBuilder& builder, DiagAdapter& diag, std::string& packageName);
+    explicit DeadCodeElimination(CHIRBuilder& builder, DiagAdapter& diag, const std::string& packageName);
 
     /**
      * @brief process to do useless function elimination.
@@ -56,6 +56,12 @@ public:
     void UnreachableBlockElimination(const Package& package, bool isDebug) const;
 
     /**
+     * @brief process to do unreachable block elimination.
+     * @param funcs functions to do dead code elimination.
+     * @param isDebug flag whether print debug log.
+     */
+    void UnreachableBlockElimination(const std::vector<const Func*>& funcs, bool isDebug) const;
+    /**
      * @brief process to report unreachable block warning.
      * @param package package to report warning.
      * @param threadsNum threads num join to do this pass.
@@ -80,7 +86,7 @@ public:
 private:
     CHIRBuilder& builder;
     DiagAdapter& diag;
-    std::string& currentPackageName;
+    const std::string& currentPackageName;
     const std::string GLOBAL_INIT_MANGLED_NAME = "_global_init";
     const std::string STD_CORE_FUTURE_MANGLED_NAME = "_CNat6Future";
     const std::string STD_CORE_EXECUTE_CLOSURE_MANGLED_NAME = "executeClosure";
@@ -102,9 +108,9 @@ private:
     // =============== Functions for Unreachable Block Elimination =============== //
     bool CheckUselessBlock(const Block& block) const;
     void BreakBranchConnection(const Block& block) const;
-    void UnreachableBlockEliminationForFunc(const BlockGroup& body, bool isDebug) const;
     void ClearUnreachableMarkBlockForFunc(const BlockGroup& body) const;
-
+    void UnreachableBlockEliminationForFunc(const BlockGroup& body, bool isDebug) const;
+    
     // =============== Functions for Useless IR Elimination =============== //
     bool CheckUselessExpr(const Expression& expr, bool isReportWarning = false) const;
 

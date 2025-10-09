@@ -53,7 +53,7 @@ public:
     void ResetGenericInstantiationStage() const;
     std::unordered_map<Ptr<const AST::Decl>, std::unordered_set<Ptr<AST::Decl>>> GetAllGenericToInsDecls() const;
 
-    friend class TestManager;
+    friend class MockUtils;
 
 private:
     class InstantiatedExtendRecorder;

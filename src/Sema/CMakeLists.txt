@@ -10,11 +10,13 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectory(Desugar)
 add_subdirectory(FFI)
+add_subdirectory(NativeFFI)
 add_subdirectory(GenericInstantiation)
 add_subdirectory(InheritanceChecker)
 add_subdirectory(LegalityOfUsage)
 add_subdirectory(Test)
 add_subdirectory(TypeCheckExpr)
+add_subdirectory(CJMP)
 
 add_library(CangjieSema OBJECT ${SEMA_SRC})
 target_compile_options(CangjieSema PRIVATE ${CJC_EXTRA_WARNINGS})

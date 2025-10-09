@@ -162,8 +162,8 @@ private:
                     continue;
                 }
                 auto& im = import->content;
-                std::string prefix = Utils::JoinStrings(im.prefixPaths, ".");
-                auto mayBeName = prefix + "." + im.identifier;
+                std::string prefix = im.GetPrefixPath();
+                auto mayBeName = im.GetImportedPackageName();
                 auto& name = import->IsImportAlias() ? im.aliasName : im.identifier;
                 if (auto pd = importMgr.GetPackageDecl(mayBeName)) {
                     resp.packageAliasMap[mayBeName].emplace(name.Val());

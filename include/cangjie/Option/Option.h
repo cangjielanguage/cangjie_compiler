@@ -68,7 +68,8 @@ enum class DiagFormat : uint8_t { JSON, NO_COLOR, DEFAULT };
  *               but throw an exception at runtime when trying to create mock.
  * default: compile with no passed explicit mock option
  * */
-enum class MockSupportKind : uint8_t { ON, OFF, RUNTIME_ERROR, DEFAULT };
+enum class MockMode : uint8_t { ON, OFF, RUNTIME_ERROR, DEFAULT };
+
 
 class Option {
 public:
@@ -103,6 +104,7 @@ enum class BackendType : uint8_t {
 enum class ArchType : uint8_t {
     X86_64 = 0,
     AARCH64,
+    ARM64,
     UNKNOWN,
 };
 
@@ -110,6 +112,7 @@ enum class OSType : uint8_t {
     WINDOWS,
     LINUX,
     DARWIN, // MacOS
+    IOS, // iOS
     UNKNOWN,
 };
 
@@ -122,6 +125,8 @@ enum class Vendor : uint8_t {
 enum class Environment : uint8_t {
     OHOS,
     GNU,
+    ANDROID,
+    SIMULATOR,
     NOT_AVAILABLE,
 };
 
@@ -194,7 +199,7 @@ struct Info {
      */
     inline bool IsMacOS() const
     {
-        return vendor == Vendor::APPLE && os == OSType::DARWIN;
+        return vendor == Vendor::APPLE && (os == OSType::DARWIN || os == OSType::IOS);
     }
 
     /**
@@ -386,10 +391,13 @@ public:
 
     std::optional<std::string> outputDir = std::nullopt;
 
+    std::optional<std::string> outputJavaGenDir = std::nullopt;
+
     std::vector<std::string> importPaths; /**< .cjo search paths */
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     std::vector<std::string> pluginPaths; /**< meta-transform plugins */
 #endif
+    std::optional<std::string> commonPartCjo = std::nullopt; /**< .cjo path for common part of package */
 
     // enable incremental compilation
     bool enIncrementalCompilation = false;
@@ -423,6 +431,8 @@ public:
     std::vector<std::string> inputObjs; /**< .o files to link. */
 
     std::string inputCjoFile; /**< .cjo files to scan */
+
+    std::vector<std::string> inputChirFiles; /**< .chir files to complete compilation */
 
     std::vector<std::string> inputPdbaFiles; /**< cbc import libraries, which used to import cbclib */
 
@@ -498,13 +508,15 @@ public:
 
     bool enableEH = false; /** Whether support for effect handlers is enabled */
 
-    MockSupportKind mock = MockSupportKind::DEFAULT; /**< Whether enable mocking. */
+    MockMode mock = MockMode::DEFAULT; /**< Whether enable mocking. */
 
     DiagFormat diagFormat = DiagFormat::DEFAULT; /** Whether output diagnostic with color*/
 
     bool parseTest = false; /**< If we set flag '-test', this will be true. */
 
     bool implicitPrelude = true; /**< Whether import prelude libraries by default. */
+
+    bool enableInteropCJMapping = false; /**< Whether enable cj data structure mapping for interop */
 
     bool enableTimer = false; /**< Whether enable timer report. */
 
@@ -529,7 +541,7 @@ public:
     std::string optPassOptions = ""; /**< customized opt pass options from user.*/
 
     enum class OutputMode : uint8_t {
-        EXECUTABLE, STATIC_LIB, SHARED_LIB
+        EXECUTABLE, STATIC_LIB, SHARED_LIB, CHIR
     };
     OutputMode outputMode = OutputMode::EXECUTABLE;
 
@@ -707,6 +719,8 @@ public:
     bool disableChirUselessImportElimination = false;
     bool enableOpaque = false;
     CHIRMode chirRenderMode = CHIRMode::NA;
+
+    bool chirHLIR = false;
 
     bool chirLLVM = false;
 
@@ -1019,6 +1033,12 @@ public:
     }; /**< Candidate phases of chir serialization file that can be emitted. */
     CandidateEmitCHIRPhase emitCHIRPhase{
         CandidateEmitCHIRPhase::NA}; /**< Emit chir serialization file of the specified phase. */
+
+    /**
+     * @brief Checks if CHIR emission is enabled.
+     *
+     * @return True if CHIR emission is enabled, false otherwise.
+     */
     bool IsEmitCHIREnable() const
     {
         return emitCHIRPhase != CandidateEmitCHIRPhase::NA;
@@ -1054,6 +1074,7 @@ private:
     bool HandleArchiveExtension(DiagnosticEngine& diag, const std::string& value);
     bool HandleCJOExtension(DiagnosticEngine& diag, const std::string& value);
     bool HandleCJExtension(DiagnosticEngine& diag, const std::string& value);
+    bool HandleCHIRExtension(DiagnosticEngine& diag, const std::string& value);
     bool HandleCJDExtension(DiagnosticEngine& diag, const std::string& value);
     bool HandleBCExtension(DiagnosticEngine& diag, const std::string& value);
     bool HandleNoExtension(DiagnosticEngine& diag, const std::string& value);

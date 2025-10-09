@@ -20,7 +20,8 @@ using namespace Cangjie;
 bool ParserImpl::SeeingModifier()
 {
     return (Peek().kind >= TokenKind::STATIC && Peek().kind <= TokenKind::OPERATOR) ||
-        (Peek().kind == TokenKind::CONST);
+        (Peek().kind == TokenKind::CONST) || (Peek().kind == TokenKind::COMMON) ||
+        (Peek().kind == TokenKind::PLATFORM);
 }
 
 void ParserImpl::SetDeclBeginPos(AST::Decl& decl) const
@@ -76,14 +77,15 @@ std::set<AST::Attribute> ParserImpl::CheckDeclModifiers(const std::set<AST::Modi
         DiagIllegalModifierInScope(**modifiersVec.begin());
         return {};
     }
-
     auto scopeRules = defRules.at(scopeKind);
     std::unordered_map<TokenKind, std::vector<TokenKind>> scopeWarningRules;
     const auto& rules = GetModifierWarningRulesByDefKind(defKind);
     if (auto foundRules = rules.find(scopeKind); foundRules != rules.end()) {
         scopeWarningRules = foundRules->second;
     }
-
+    if (!mpImpl->CheckCJMPModifiers(modifiers)) {
+        return {};
+    }
     return GetModifierAttrs(scopeKind, scopeRules, scopeWarningRules, modifiersVec);
 }
 

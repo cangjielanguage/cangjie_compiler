@@ -114,6 +114,7 @@ void MaybeInitAnalysis::HandleStoreExpr(MaybeInitDomain& state, const Store* sto
 
 void MaybeInitAnalysis::HandleStoreElemRefExpr(MaybeInitDomain& state, const StoreElementRef* store) const
 {
+    // modify by cjmp, adapt for var init func create
     auto parentFunc = store->GetTopLevelFunc();
     CJC_NULLPTR_CHECK(parentFunc);
     auto memberIdxOpt = IsInitialisingMemberVar(*parentFunc, *store);

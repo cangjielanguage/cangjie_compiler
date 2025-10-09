@@ -34,6 +34,7 @@ OwnedPtr<Decl> ParserImpl::ParseDecl(ScopeKind scopeKind, std::set<Modifier> mod
     ParseAnnotations(annos);
     ParseModifiers(modifiers);
     CheckOverflowAnno(annos, scopeKind);
+    ffiParser->CheckAnnotations(annos);
     CheckAnnotationAnno(annos, modifiers);
 
     // Enum construtor.
@@ -54,6 +55,8 @@ OwnedPtr<Decl> ParserImpl::ParseDecl(ScopeKind scopeKind, std::set<Modifier> mod
             StaticCast<FuncDecl&>(*ret).isConst = true;
         }
         SetDeclBeginPos(*ret);
+
+        mpImpl->CheckCJMPDecl(*ret);
         return ret;
     }
 
@@ -197,6 +200,31 @@ OwnedPtr<Decl> ParserImpl::ParseConstVariable(
     return ParseVarOrLetOrConst(scopeKind, modifiers, std::move(annos), keyToken);
 }
 
+void ParserImpl::CheckVarDeclModifiers(
+    std::set<Modifier> modifiers, Ptr<VarDecl> varDecl, ScopeKind scopeKind, const Token& keyToken)
+{
+    if (HasModifier(modifiers, TokenKind::UNSAFE) || HasModifier(modifiers, TokenKind::FOREIGN)) {
+        SetUnsafe(varDecl, modifiers);
+    }
+    if (!varDecl->isConst && HasModifier(modifiers, TokenKind::CONST)) {
+        // Unexpected modifier: var or let variable has const.
+        DiagUnExpectedModifierOnDeclaration(*varDecl);
+    } else if (varDecl->isConst && (scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::STRUCT_BODY) &&
+        !HasModifier(modifiers, TokenKind::STATIC)) {
+        DiagConstVariableExpectedStatic(keyToken);
+    } else if (varDecl->initializer == nullptr && !varDecl->TestAttr(Attribute::HAS_BROKEN)) {
+        if (varDecl->isConst) {
+            DiagConstVariableExpectedInitializer(*varDecl);
+        } else if (scopeKind != ScopeKind::TOPLEVEL && varDecl->type == nullptr &&
+            !HasModifier(modifiers, TokenKind::COMMON)) {
+            DiagExpectedOneOfTypeOrInitializer(*varDecl, varDecl->identifier);
+        } else if (scopeKind == ScopeKind::TOPLEVEL && !HasModifier(modifiers, TokenKind::FOREIGN) &&
+            (varDecl->type == nullptr || !diag.ignoreScopeCheck) && !HasModifier(modifiers, TokenKind::COMMON)) {
+            DiagExpectedInitializerForToplevelVar(*varDecl);
+        }
+    }
+}
+
 OwnedPtr<Decl> ParserImpl::ParseVarDecl(
     const ScopeKind& scopeKind, const std::set<Modifier>& modifiers, const Token& keyToken)
 {
@@ -215,24 +243,13 @@ OwnedPtr<Decl> ParserImpl::ParseVarDecl(
         ret->EnableAttr(it);
     }
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
-    if (HasModifier(modifiers, TokenKind::UNSAFE) || HasModifier(modifiers, TokenKind::FOREIGN)) {
-        SetUnsafe(ret.get(), modifiers);
-    }
-    if (!ret->isConst && HasModifier(modifiers, TokenKind::CONST)) {
-        // Unexpected modifier: var or let variable has const.
-        DiagUnExpectedModifierOnDeclaration(*ret);
-    } else if (ret->isConst && (scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::STRUCT_BODY) &&
-        !HasModifier(modifiers, TokenKind::STATIC)) {
-        DiagConstVariableExpectedStatic(keyToken);
-    } else if (ret->initializer == nullptr && !ret->TestAttr(Attribute::HAS_BROKEN)) {
-        if (ret->isConst) {
-            DiagConstVariableExpectedInitializer(*ret);
-        } else if (scopeKind != ScopeKind::TOPLEVEL && ret->type == nullptr) {
-            DiagExpectedOneOfTypeOrInitializer(*ret, ret->identifier);
-        } else if (scopeKind == ScopeKind::TOPLEVEL && !HasModifier(modifiers, TokenKind::FOREIGN) &&
-            (ret->type == nullptr || !diag.ignoreScopeCheck)) {
-            DiagExpectedInitializerForToplevelVar(*ret);
-        }
+    CheckVarDeclModifiers(modifiers, ret.get(), scopeKind, keyToken);
+    bool hasNoType = ret->type == nullptr;
+    bool isCommonPlatform = ret->IsCommonOrPlatform();
+    if (hasNoType && isCommonPlatform) {
+        auto kind = ret->TestAttr(Attribute::COMMON) ? "common" : "platform";
+        auto keyword = ret->isVar ? "var" : "let";
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_type_with_cjmp_var, *ret, kind, keyword);
     }
     return ret;
 }
@@ -354,6 +371,8 @@ OwnedPtr<FuncDecl> ParserImpl::ParsePropMemberDecl(const std::set<AST::Modifier>
     }
 
     ret->end = ret->funcBody->end;
+
+    mpImpl->CheckCJMPDecl(*ret);
     return ret;
 }
 
@@ -419,6 +438,394 @@ void ParserImpl::CheckOverflowAnno(PtrVector<Annotation>& annos, ScopeKind scope
         if (it->kind == AnnotationKind::NUMERIC_OVERFLOW) {
             DiagUnexpectedAnnoOn(*it, lookahead.Begin(), it->identifier, lookahead.Value());
             break;
+        }
+    }
+}
+
+void ParserImpl::CheckPropDeclJavaMirror(PropDecl& decl)
+{
+    if (decl.outerDecl && decl.outerDecl->TestAttr(Attribute::JAVA_MIRROR)) {
+        decl.EnableAttr(Attribute::JAVA_MIRROR);
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_java_mirror_prop_is_deprecated, decl);
+        if (decl.outerDecl && !decl.outerDecl->TestAttr(Attribute::ABSTRACT)) {
+            decl.DisableAttr(Attribute::ABSTRACT);
+        }
+
+        if (decl.TestAttr(Attribute::PRIVATE)) {
+            ParseDiagnoseRefactor(DiagKindRefactor::parse_java_mirror_cannot_have_private_member, decl);
+            decl.EnableAttr(Attribute::IS_BROKEN);
+            decl.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+        }
+
+        if (decl.TestAttr(Attribute::OPEN)) {
+            ParseDiagnoseRefactor(DiagKindRefactor::parse_java_mirror_cannot_have_open_prop, decl);
+            decl.EnableAttr(Attribute::IS_BROKEN);
+            decl.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+        }
+
+        if (!decl.getters.empty()) {
+            ParseDiagnoseRefactor(DiagKindRefactor::parse_java_mirror_prop_cannot_have_getter, decl);
+            decl.EnableAttr(Attribute::IS_BROKEN);
+        } else {
+            InsertPropGetterSignature(decl, Attribute::JAVA_MIRROR);
+        }
+
+        if (!decl.setters.empty()) {
+            ParseDiagnoseRefactor(DiagKindRefactor::parse_java_mirror_prop_cannot_have_setter, decl);
+            decl.EnableAttr(Attribute::IS_BROKEN);
+        } else if (decl.isVar) {
+            InsertPropSetterSignature(decl, Attribute::JAVA_MIRROR);
+        }
+    }
+}
+
+void ParserImpl::CheckPrimaryCtorDeclJavaMirror(PrimaryCtorDecl& ctor)
+{
+    if (ctor.outerDecl && ctor.outerDecl->TestAttr(Attribute::JAVA_MIRROR)) {
+        ctor.EnableAttr(Attribute::JAVA_MIRROR);
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_java_mirror_decl_cannot_have_primary_ctor, ctor);
+    }
+}
+
+void ParserImpl::CheckInitCtorDeclBody(FuncDecl& ctor)
+{
+    auto& fb = ctor.funcBody;
+    if ((!fb || !fb->body) && !ctor.TestAnyAttr(Attribute::COMMON, Attribute::JAVA_MIRROR, Attribute::OBJ_C_MIRROR)) {
+        DiagMissingBody("constructor", "", ctor.end);
+        if (!parseDeclFile) {
+            ctor.EnableAttr(Attribute::HAS_BROKEN);
+        }
+    }
+}
+
+void ParserImpl::CheckJavaInteropMember(Decl& decl)
+{
+    if (decl.outerDecl->TestAttr(Attribute::JAVA_MIRROR_SUBTYPE) && !decl.outerDecl->TestAttr(Attribute::JAVA_MIRROR)) {
+        if (decl.GetGeneric() != nullptr) {
+            ffiParser->Java().DiagJavaImplCannotBeGeneric(decl);
+            return;
+        }
+        if (decl.astKind == ASTKind::FUNC_DECL && decl.TestAttr(Attribute::CONSTRUCTOR, Attribute::STATIC)) {
+            ffiParser->Java().DiagJavaImplCannotHaveStaticInit(decl);
+            return;
+        }
+    }
+    auto pdecl = Ptr(&decl);
+    switch (decl.astKind) {
+        case ASTKind::FUNC_DECL: {
+            auto& fd = *StaticAs<ASTKind::FUNC_DECL>(pdecl);
+            if (fd.TestAttr(Attribute::CONSTRUCTOR)) {
+                CheckInitCtorDeclJavaMirror(fd);
+            } else if (fd.TestAttr(Attribute::FINALIZER) && fd.outerDecl->TestAttr(Attribute::JAVA_MIRROR)) {
+                ffiParser->Java().DiagJavaMirrorCannotHaveFinalizer(fd);
+            } else {
+                // method branch
+                CheckMemberFuncJavaMirror(fd);
+                ffiParser->CheckForeignNameAnnotation(fd);
+            }
+            break;
+        }
+        case ASTKind::PROP_DECL: {
+            auto& propDecl = *StaticAs<ASTKind::PROP_DECL>(pdecl);
+            CheckPropDeclJavaMirror(propDecl);
+            ffiParser->CheckForeignNameAnnotation(propDecl);
+            break;
+        }
+        case ASTKind::PRIMARY_CTOR_DECL: {
+            auto& ctorDecl = *StaticAs<ASTKind::PRIMARY_CTOR_DECL>(pdecl);
+            CheckPrimaryCtorDeclJavaMirror(ctorDecl);
+            break;
+        }
+
+        default: break;
+    }
+}
+
+void ParserImpl::CheckObjCInteropMember(Decl& member)
+{
+    if (member.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR_SUBTYPE)) {
+        if (member.GetGeneric() != nullptr) {
+            ffiParser->ObjC().DiagObjCImplCannotBeGeneric(member);
+            return;
+        }
+        if (member.astKind == ASTKind::FUNC_DECL && member.TestAttr(Attribute::CONSTRUCTOR, Attribute::STATIC)) {
+            ffiParser->ObjC().DiagObjCImplCannotHaveStaticInit(member);
+            return;
+        }
+    }
+    auto pMember = Ptr(&member);
+    switch (member.astKind) {
+        case ASTKind::FUNC_DECL: {
+            auto& fd = *StaticAs<ASTKind::FUNC_DECL>(pMember);
+            if (fd.TestAttr(Attribute::CONSTRUCTOR)) {
+                CheckInitCtorDeclObjCMirror(fd);
+                ffiParser->CheckForeignNameAnnotation(fd);
+            } else if (fd.TestAttr(Attribute::FINALIZER) && fd.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+                ffiParser->ObjC().DiagObjCMirrorCannotHaveFinalizer(fd);
+            }  else {
+                // method branch
+                CheckMemberFuncObjCMirror(fd);
+                ffiParser->CheckForeignNameAnnotation(fd);
+            }
+            break;
+        }
+        case ASTKind::VAR_DECL: {
+            auto& varDecl = *StaticAs<ASTKind::VAR_DECL>(pMember);
+            CheckVarDeclObjCMirror(varDecl);
+            break;
+        }
+        case ASTKind::PROP_DECL: {
+            auto& propDecl = *StaticAs<ASTKind::PROP_DECL>(pMember);
+            CheckPropDeclObjCMirror(propDecl);
+            ffiParser->CheckForeignNameAnnotation(propDecl);
+            break;
+        }
+        case ASTKind::PRIMARY_CTOR_DECL: {
+            auto& ctorDecl = *StaticAs<ASTKind::PRIMARY_CTOR_DECL>(pMember);
+            CheckPrimaryCtorDeclObjCMirror(ctorDecl);
+            break;
+        }
+
+        default: break;
+    }
+}
+
+void ParserImpl::CheckMemberFuncJavaMirror(FuncDecl& decl)
+{
+    if (!decl.outerDecl || !decl.outerDecl->TestAttr(Attribute::JAVA_MIRROR)) {
+        return;
+    }
+
+    decl.EnableAttr(Attribute::JAVA_MIRROR);
+
+    if (decl.TestAttr(Attribute::PRIVATE)) {
+        ffiParser->Java().DiagJavaMirrorCannotHavePrivateMember(decl);
+        decl.EnableAttr(Attribute::IS_BROKEN);
+        decl.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (HasModifier(decl.modifiers, TokenKind::CONST)) {
+        ffiParser->Java().DiagJavaMirrorCannotHaveConstMember(decl);
+        decl.EnableAttr(Attribute::IS_BROKEN);
+        decl.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    FFICheckClassLikeFuncBody(decl,
+        DiagKindRefactor::parse_java_mirror_function_must_have_return_type,
+        DiagKindRefactor::parse_java_mirror_function_cannot_have_body);
+}
+
+void ParserImpl::CheckMemberFuncObjCMirror(FuncDecl& func)
+{
+    if (func.outerDecl && func.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR_SUBTYPE)
+        && !func.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)
+        && !func.funcBody && !func.funcBody->paramLists.empty()
+        && !func.funcBody->paramLists[0]->params.empty()) {
+            ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_impl_member_must_have_foreign_name, func);
+    }
+
+    if (!func.outerDecl || !func.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+        return;
+    }
+
+    func.EnableAttr(Attribute::OBJ_C_MIRROR);
+
+    if (!func.HasAnno(AnnotationKind::FOREIGN_NAME) && !func.funcBody->paramLists[0]->params.empty()) {
+        ffiParser->ObjC().DiagObjCMirrorMemberMustHaveForeignName(func);
+        func.EnableAttr(Attribute::IS_BROKEN);
+        func.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (func.TestAttr(Attribute::PRIVATE)) {
+        ffiParser->ObjC().DiagObjCMirrorCannotHavePrivateMember(func);
+        func.EnableAttr(Attribute::IS_BROKEN);
+        func.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (HasModifier(func.modifiers, TokenKind::CONST)) {
+        ffiParser->ObjC().DiagObjCMirrorCannotHaveConstMember(func);
+        func.EnableAttr(Attribute::IS_BROKEN);
+        func.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    FFICheckClassLikeFuncBody(func,
+        DiagKindRefactor::parse_objc_mirror_method_must_have_return_type,
+        DiagKindRefactor::parse_objc_mirror_method_cannot_have_body);
+}
+
+void ParserImpl::CheckInitCtorDeclJavaMirror(FuncDecl& ctor)
+{
+    if (!ctor.TestAttr(Attribute::JAVA_MIRROR)) {
+        return;
+    }
+    ctor.EnableAttr(Attribute::JAVA_MIRROR);
+    ctor.DisableAttr(Attribute::ABSTRACT);
+    ctor.constructorCall = ConstructorCall::OTHER_INIT;
+
+    if (ctor.TestAttr(Attribute::STATIC)) {
+        ffiParser->Java().DiagJavaMirrorCannotHaveStaticInit(ctor);
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ctor.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (HasModifier(ctor.modifiers, TokenKind::CONST)) {
+        ffiParser->Java().DiagJavaMirrorCannotHaveConstMember(ctor);
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ctor.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (ctor.TestAttr(Attribute::PRIVATE)) {
+        ffiParser->Java().DiagJavaMirrorCannotHavePrivateMember(ctor);
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ctor.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (ctor.funcBody && ctor.funcBody->body) {
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ParseDiagnoseRefactor(
+            DiagKindRefactor::parse_java_mirror_constructor_cannot_have_body, ctor.funcBody->body->begin);
+    } else if (ctor.funcBody) {
+        auto body = MakeOwned<Block>();
+        body->EnableAttr(Attribute::COMPILER_ADD, Attribute::IMPLICIT_ADD);
+        body->begin = ctor.end;
+        body->curFile = ctor.curFile;
+        body->end = ctor.end;
+        body->ty = ctor.ty;
+        ctor.funcBody->body = std::move(body);
+    }
+}
+
+void ParserImpl::CheckInitCtorDeclObjCMirror(FuncDecl& ctor)
+{
+    if (ctor.outerDecl && ctor.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR_SUBTYPE)
+        && !ctor.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)
+        && !ctor.funcBody && !ctor.funcBody->paramLists.empty()
+        && !ctor.funcBody->paramLists[0]->params.empty()) {
+            ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_impl_member_must_have_foreign_name, ctor);
+    }
+
+    if (!ctor.outerDecl || !ctor.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+        return;
+    }
+    ctor.constructorCall = ConstructorCall::OTHER_INIT;
+    ctor.EnableAttr(Attribute::OBJ_C_MIRROR);
+
+    if (!ctor.HasAnno(AnnotationKind::FOREIGN_NAME) && !ctor.funcBody->paramLists[0]->params.empty()) {
+        ffiParser->ObjC().DiagObjCMirrorMemberMustHaveForeignName(ctor);
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ctor.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (ctor.TestAttr(Attribute::STATIC)) {
+        ffiParser->ObjC().DiagObjCMirrorCannotHaveStaticInit(ctor);
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ctor.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (HasModifier(ctor.modifiers, TokenKind::CONST)) {
+        ffiParser->ObjC().DiagObjCMirrorCannotHaveConstMember(ctor);
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ctor.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (ctor.TestAttr(Attribute::PRIVATE)) {
+        ffiParser->ObjC().DiagObjCMirrorCannotHavePrivateMember(ctor);
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ctor.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (ctor.funcBody && ctor.funcBody->body) {
+        ctor.EnableAttr(Attribute::IS_BROKEN);
+        ParseDiagnoseRefactor(
+            DiagKindRefactor::parse_objc_mirror_ctor_cannot_have_body, ctor.funcBody->body->begin);
+    } else if (ctor.funcBody) {
+        auto body = MakeOwned<Block>();
+        body->EnableAttr(Attribute::COMPILER_ADD, Attribute::IMPLICIT_ADD);
+        body->begin = ctor.end;
+        body->curFile = ctor.curFile;
+        body->end = ctor.end;
+        body->ty = ctor.ty;
+        ctor.funcBody->body = std::move(body);
+    }
+}
+
+void ParserImpl::CheckVarDeclObjCMirror(VarDecl& field) const
+{
+    if (!field.outerDecl || !field.outerDecl->TestAnyAttr(Attribute::OBJ_C_MIRROR)) {
+        return;
+    }
+
+    field.EnableAttr(Attribute::OBJ_C_MIRROR);
+
+    if (field.TestAttr(Attribute::PRIVATE)) {
+        ffiParser->ObjC().DiagObjCMirrorCannotHavePrivateMember(field);
+        field.EnableAttr(Attribute::IS_BROKEN);
+        field.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (field.TestAttr(Attribute::STATIC)) {
+        ffiParser->ObjC().DiagObjCMirrorFieldCannotBeStatic(field);
+        field.EnableAttr(Attribute::IS_BROKEN);
+        field.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+ 
+    if (field.initializer) {
+        ffiParser->ObjC().DiagObjCMirrorFieldCannotHaveInitializer(field);
+        field.EnableAttr(Attribute::IS_BROKEN);
+        field.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+}
+
+void ParserImpl::CheckPropDeclObjCMirror(PropDecl& prop)
+{
+    if (!prop.outerDecl || !prop.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+        return;
+    }
+    prop.EnableAttr(Attribute::OBJ_C_MIRROR);
+
+    if (prop.outerDecl && !prop.outerDecl->TestAttr(Attribute::ABSTRACT)) {
+        prop.DisableAttr(Attribute::ABSTRACT);
+    }
+
+    if (prop.TestAttr(Attribute::PRIVATE)) {
+        ffiParser->ObjC().DiagObjCMirrorCannotHavePrivateMember(prop);
+        prop.EnableAttr(Attribute::IS_BROKEN);
+        prop.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
+    }
+
+    if (!prop.getters.empty()) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_prop_cannot_have_getter, prop, prop.identifier);
+        prop.EnableAttr(Attribute::IS_BROKEN);
+    } else {
+        InsertPropGetterSignature(prop, Attribute::OBJ_C_MIRROR);
+    }
+
+    if (!prop.setters.empty()) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_prop_cannot_have_setter, prop, prop.identifier);
+        prop.EnableAttr(Attribute::IS_BROKEN);
+    } else if (prop.isVar) {
+        InsertPropSetterSignature(prop, Attribute::OBJ_C_MIRROR);
+    }
+}
+
+void ParserImpl::CheckPrimaryCtorDeclObjCMirror(PrimaryCtorDecl& ctor)
+{
+    if (!ctor.outerDecl || !ctor.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+        return;
+    }
+
+    ctor.EnableAttr(Attribute::OBJ_C_MIRROR);
+    ctor.EnableAttr(Attribute::IS_BROKEN);
+    ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_cannot_have_primary_ctor, ctor);
+}
+
+void ParserImpl::CheckCJMappingAttr(Decl& decl) const
+{
+    if (enableInteropCJMapping && decl.TestAttr(Attribute::PUBLIC)) {
+        // currently only support struct decl and enum decl.
+        if (decl.astKind == ASTKind::STRUCT_DECL || decl.astKind == ASTKind::ENUM_DECL) {
+            decl.EnableAttr(Attribute::JAVA_CJ_MAPPING);
         }
     }
 }
@@ -540,6 +947,11 @@ OwnedPtr<FuncDecl> ParserImpl::ParseFinalizer(
             funcDecl->EnableAttr(Attribute::HAS_BROKEN);
         }
     }
+    if (funcDecl->funcBody && funcDecl->funcBody->retType) {
+        ParseDiagnoseRefactor(
+            DiagKindRefactor::parse_invalid_return_type, *funcDecl->funcBody->retType, "finalizer");
+        funcDecl->EnableAttr(Attribute::HAS_BROKEN);
+    }
     return funcDecl;
 }
 
@@ -556,6 +968,9 @@ OwnedPtr<FuncDecl> ParserImpl::ParseConstructor(
     if (HasModifier(modifiers, TokenKind::STATIC)) {
         CheckNoDeprecatedAnno(annos, "static constructor");
     }
+    if (HasModifier(modifiers, TokenKind::COMMON)) {
+        funcDecl->EnableAttr(Attribute::COMMON);
+    }
     Next();
     CheckDeclarationInScope(scopeKind, DefKind::CONSTRUCTOR);
     funcDecl->funcBody = ParseFuncBody(scopeKind);
@@ -564,6 +979,8 @@ OwnedPtr<FuncDecl> ParserImpl::ParseConstructor(
     for (auto& it : initAttrs) {
         funcDecl->EnableAttr(it);
     }
+    funcDecl->modifiers.insert(modifiers.begin(), modifiers.end());
+    CheckVariableParams(*funcDecl);
     if (funcDecl->TestAttr(Attribute::STATIC)) {
         // Static init is always 'private'.
         funcDecl->EnableAttr(Attribute::PRIVATE);
@@ -572,15 +989,12 @@ OwnedPtr<FuncDecl> ParserImpl::ParseConstructor(
                 DiagKindRefactor::parse_static_init_can_not_accept_any_parameter, *funcDecl->funcBody->paramLists[0]);
         }
     }
-    funcDecl->modifiers.insert(modifiers.begin(), modifiers.end());
     if (funcDecl->funcBody) {
         funcDecl->end = funcDecl->funcBody->end;
     }
     ParseFuncDeclAnnos(annos, *funcDecl);
-    if (!funcDecl->funcBody || !funcDecl->funcBody->body) {
-        DiagMissingBody("constructor", "", funcDecl->end);
-        funcDecl->EnableAttr(Attribute::HAS_BROKEN);
-    }
+    CheckConstructorBody(*funcDecl, scopeKind);
+
     return funcDecl;
 }
 
@@ -609,10 +1023,12 @@ OwnedPtr<PrimaryCtorDecl> ParserImpl::ParsePrimaryConstructor(
     Next();
     if (scopeKind == ScopeKind::CLASS_BODY) {
         primaryCtorDecl->funcBody = ParseFuncBody(ScopeKind::PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS);
+        CheckVariableParams(*primaryCtorDecl);
         primaryCtorDecl->EnableAttr(Attribute::IN_CLASSLIKE);
     }
     if (scopeKind == ScopeKind::STRUCT_BODY) {
         primaryCtorDecl->funcBody = ParseFuncBody(ScopeKind::PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT);
+        CheckVariableParams(*primaryCtorDecl);
         primaryCtorDecl->EnableAttr(Attribute::IN_STRUCT);
     }
     primaryCtorDecl->EnableAttr(Attribute::CONSTRUCTOR);
@@ -627,13 +1043,19 @@ OwnedPtr<PrimaryCtorDecl> ParserImpl::ParsePrimaryConstructor(
     if (HasModifier(modifiers, TokenKind::UNSAFE)) {
         SetUnsafe(primaryCtorDecl.get(), modifiers);
     }
-    if (!primaryCtorDecl->funcBody || !primaryCtorDecl->funcBody->body) {
+    if ((!primaryCtorDecl->funcBody || !primaryCtorDecl->funcBody->body) &&
+        !primaryCtorDecl->TestAttr(Attribute::COMMON)) {
         DiagMissingBody("main constructor",
             !primaryCtorDecl->identifier.Valid() ? "" : " '" + primaryCtorDecl->identifier + "'", lastToken.End());
     }
     ParseFuncDeclAnnos(annos, *primaryCtorDecl);
     if (primaryCtorDecl->funcBody) {
         primaryCtorDecl->end = primaryCtorDecl->funcBody->end;
+    }
+    mpImpl->CheckCJMPDecl(*primaryCtorDecl);
+    if (primaryCtorDecl->funcBody && primaryCtorDecl->funcBody->retType) {
+        ParseDiagnoseRefactor(
+            DiagKindRefactor::parse_invalid_return_type, *primaryCtorDecl->funcBody->retType, "primary constructor");
     }
     return primaryCtorDecl;
 }
@@ -652,7 +1074,7 @@ template <typename T> bool ParserImpl::CheckSkipRcurOrPrematureEnd(T& ret)
     return false;
 }
 
-OwnedPtr<ClassBody> ParserImpl::ParseClassBody(const ClassDecl& cd)
+OwnedPtr<ClassBody> ParserImpl::ParseClassBody(ClassDecl& cd)
 {
     OwnedPtr<ClassBody> ret = MakeOwned<ClassBody>();
     if (!Skip(TokenKind::LCURL)) {
@@ -675,10 +1097,30 @@ OwnedPtr<ClassBody> ParserImpl::ParseClassBody(const ClassDecl& cd)
             DiagExpectSemiOrNewline();
         }
         auto decl = ParseDecl(ScopeKind::CLASS_BODY);
+        if (auto ctor = As<ASTKind::FUNC_DECL>(decl); ctor && ctor->TestAttr(Attribute::CONSTRUCTOR)) {
+            if (cd.TestAttr(Attribute::JAVA_MIRROR)) {
+                ctor->EnableAttr(Attribute::JAVA_MIRROR);
+            }
+            if (cd.TestAttr(Attribute::OBJ_C_MIRROR)) {
+                ctor->EnableAttr(Attribute::OBJ_C_MIRROR);
+            }
+            CheckInitCtorDeclBody(*ctor);
+        }
+
         if (decl->IsInvalid()) {
             continue;
         }
         SetMemberParentInheritableDecl(cd, decl);
+
+        if (auto fd = As<ASTKind::FUNC_DECL>(decl.get())) {
+            CheckClassLikeFuncBodyAbstractness(*fd);
+        } else if (auto pd = As<ASTKind::PROP_DECL>(decl.get())) {
+            CheckClassLikePropAbstractness(*pd);
+        }
+
+        CheckJavaInteropMember(*decl);
+        CheckObjCInteropMember(*decl);
+
         if (decl->astKind == ASTKind::PRIMARY_CTOR_DECL && decl->identifier != cd.identifier) {
             ret->decls.emplace_back(MakeOwned<InvalidDecl>(decl->begin));
             continue;
@@ -689,7 +1131,7 @@ OwnedPtr<ClassBody> ParserImpl::ParseClassBody(const ClassDecl& cd)
     return ret;
 }
 
-OwnedPtr<InterfaceBody> ParserImpl::ParseInterfaceBody(const AST::InterfaceDecl& id)
+OwnedPtr<InterfaceBody> ParserImpl::ParseInterfaceBody(InterfaceDecl& id)
 {
     if (!Skip(TokenKind::LCURL)) {
         ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_left_brace, lookahead, ConvertToken(lookahead));
@@ -709,6 +1151,16 @@ OwnedPtr<InterfaceBody> ParserImpl::ParseInterfaceBody(const AST::InterfaceDecl&
             continue;
         }
         SetMemberParentInheritableDecl(id, decl);
+
+        if (auto fd = As<ASTKind::FUNC_DECL>(decl.get())) {
+            CheckClassLikeFuncBodyAbstractness(*fd);
+        } else if (auto pd = As<ASTKind::PROP_DECL>(decl.get())) {
+            CheckClassLikePropAbstractness(*pd);
+        }
+
+        CheckJavaInteropMember(*decl);
+        CheckObjCInteropMember(*decl);
+
         ret->decls.emplace_back(std::move(decl));
     }
     ret->end = ret->rightCurlPos;
@@ -721,21 +1173,18 @@ OwnedPtr<Decl> ParserImpl::ParseEnumConstructor(
 {
     OwnedPtr<Decl> ret;
     std::string caseIdent = lookahead.Value();
-    Position caseBeginPos(lookahead.Begin());
     auto caseIdentPos(lookahead.Begin());
-    auto caseIdentEndPos{lookahead.End()};
     Next();
     if (caseIdent == INVALID_IDENTIFIER) {
         return MakeOwned<InvalidDecl>(lookahead.Begin());
     }
+    auto lkCopy(lookahead);
     ret = Skip(TokenKind::LPAREN)
-        ? ParseEnumConstructorWithArgs(
-            caseIdent, caseIdentPos, caseIdentEndPos, lookahead.Length(), caseBeginPos, annos)
-        : ParseNoArgsEnumConstructor(caseIdent, caseIdentPos, caseIdentEndPos, lookahead.Length(), caseBeginPos, annos);
+        ? ParseEnumConstructorWithArgs(lkCopy, annos)
+        : ParseNoArgsEnumConstructor(lkCopy, annos);
     [[maybe_unused]] ChainScope cs(*this, ret.get());
     if (!modifiers.empty()) {
         auto firstMod = *SortModifierByPos(modifiers)[0];
-        caseBeginPos = firstMod.begin;
         DiagExpectNoModifier(firstMod);
     }
     for (auto& anno : annos) {
@@ -746,12 +1195,8 @@ OwnedPtr<Decl> ParserImpl::ParseEnumConstructor(
     return ret;
 }
 
-OwnedPtr<Decl> ParserImpl::ParseEnumConstructorWithArgs(const std::string& caseIdent, const Position& caseIdentBegin,
-    const Position& caseIdentEnd, size_t caseIdentLength, const Position& casePos, PtrVector<Annotation>& annos)
+OwnedPtr<Decl> ParserImpl::ParseEnumConstructorWithArgs(const Token& id, PtrVector<Annotation>& annos)
 {
-    OwnedPtr<FuncDecl> ret = MakeOwned<FuncDecl>();
-    OwnedPtr<FuncBody> funcBody = MakeOwned<FuncBody>();
-    funcBody->begin = lastToken.Begin();
     OwnedPtr<FuncParamList> funcParamList = MakeOwned<FuncParamList>();
     funcParamList->leftParenPos = lastToken.Begin();
     int nameIndex = 1;
@@ -777,25 +1222,27 @@ OwnedPtr<Decl> ParserImpl::ParseEnumConstructorWithArgs(const std::string& caseI
     funcParamList->rightParenPos = lastToken.Begin();
     funcParamList->begin = funcParamList->leftParenPos;
     funcParamList->end = funcParamList->rightParenPos;
-    funcBody->paramLists.emplace_back(std::move(funcParamList));
-    ret->identifier = ParseIdentifierFromName(caseIdent, caseIdentBegin, caseIdentEnd, caseIdentLength);
-    ;
 
+    OwnedPtr<FuncBody> funcBody = MakeOwned<FuncBody>();
+    funcBody->begin = lastToken.Begin();
+    funcBody->paramLists.emplace_back(std::move(funcParamList));
     funcBody->end = lastToken.End();
+
+    OwnedPtr<FuncDecl> ret = MakeOwned<FuncDecl>();
+    ret->identifier = ParseIdentifierFromName(id.Value(), id.Begin(), id.End(), id.Length());
     ret->funcBody = std::move(funcBody);
-    ret->begin = casePos;
+    ret->begin = id.Begin();
     ret->end = lastToken.End();
     ret->EnableAttr(Attribute::ENUM_CONSTRUCTOR);
     ret->annotations = std::move(annos);
     return ret;
 }
 
-OwnedPtr<Decl> ParserImpl::ParseNoArgsEnumConstructor(const std::string& caseIdent, const Position& caseIdentBegin,
-    const Position& caseIdentEnd, size_t caseIdentLength, const Position& casePos, PtrVector<Annotation>& annos)
+OwnedPtr<Decl> ParserImpl::ParseNoArgsEnumConstructor(const Token& id, PtrVector<Annotation>& annos)
 {
     OwnedPtr<VarDecl> ret = MakeOwned<VarDecl>();
-    ret->identifier = ParseIdentifierFromName(caseIdent, caseIdentBegin, caseIdentEnd, caseIdentLength);
-    ret->begin = casePos;
+    ret->identifier = ParseIdentifierFromName(id.Value(), id.Begin(), id.End(), id.Length());
+    ret->begin = id.Begin();
     ret->end = lastToken.End();
     ret->isVar = false;
     ret->EnableAttr(Attribute::ENUM_CONSTRUCTOR);
@@ -853,25 +1300,24 @@ void ParserImpl::ParseInterfaceDeclOrClassDeclGeneric(InheritableDecl& ret)
     }
 }
 
-void ParserImpl::SetMemberParentInheritableDecl(const InheritableDecl& outer, const OwnedPtr<AST::Decl>& decl) const
+void ParserImpl::SetMemberParentInheritableDecl(InheritableDecl& ret, const OwnedPtr<AST::Decl>& decl) const
 {
-    auto outerPtr = const_cast<InheritableDecl*>(&outer);
-    decl->outerDecl = outerPtr;
+    decl->outerDecl = &ret;
     if (auto macroExpandDecl = DynamicCast<MacroExpandDecl*>(decl.get());
         macroExpandDecl && macroExpandDecl->invocation.decl) {
-        SetMemberParentInheritableDecl(outer, macroExpandDecl->invocation.decl);
+        SetMemberParentInheritableDecl(ret, macroExpandDecl->invocation.decl);
     } else if (auto pd = DynamicCast<AST::PrimaryCtorDecl*>(decl.get());
                pd && pd->funcBody && !pd->funcBody->paramLists.empty()) {
         for (auto& param : pd->funcBody->paramLists[0]->params) {
             if (param->isMemberParam) {
-                param->outerDecl = outerPtr;
+                param->outerDecl = &ret;
             }
         }
     } else if (auto func = DynamicCast<FuncDecl*>(decl.get()); func && func->funcBody) {
-        if (outer.IsClassLikeDecl()) {
-            func->funcBody->parentClassLike = StaticCast<ClassLikeDecl*>(outerPtr);
-        } else if (outer.astKind == ASTKind::ENUM_DECL) {
-            func->funcBody->parentEnum = StaticCast<EnumDecl*>(outerPtr);
+        if (ret.IsClassLikeDecl()) {
+            func->funcBody->parentClassLike = StaticCast<ClassLikeDecl*>(&ret);
+        } else if (ret.astKind == ASTKind::ENUM_DECL) {
+            func->funcBody->parentEnum = StaticCast<EnumDecl*>(&ret);
         }
     }
 }
@@ -930,6 +1376,7 @@ OwnedPtr<ClassDecl> ParserImpl::ParseClassDecl(
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
+    ffiParser->CheckClassLikeSignature(*ret, annos);
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     // Used to parse nested classDecl or primary ctor decl.
     SetPrimaryDecl(ret->identifier, ret->identifier.IsRaw());
@@ -937,6 +1384,11 @@ OwnedPtr<ClassDecl> ParserImpl::ParseClassDecl(
     RevertPrimaryDecl();
     ret->end = lastToken.End();
     ret->annotations = std::move(annos);
+
+    if (Interop::Java::IsDeclAppropriateForSyntheticClassGeneration(*ret)) {
+        Interop::Java::InsertSyntheticClassDecl(*ret, *currentFile);
+    }
+
     return ret;
 }
 
@@ -955,10 +1407,16 @@ OwnedPtr<InterfaceDecl> ParserImpl::ParseInterfaceDecl(
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
+    ffiParser->CheckClassLikeSignature(*ret, annos);
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     ret->body = ParseInterfaceBody(*ret);
     ret->end = lastToken.End();
     ret->annotations = std::move(annos);
+
+    if (Interop::Java::IsDeclAppropriateForSyntheticClassGeneration(*ret)) {
+        Interop::Java::InsertSyntheticClassDecl(*ret, *currentFile);
+    }
+
     return ret;
 }
 
@@ -972,6 +1430,13 @@ void ParserImpl::ParseCaseBody(EnumDecl& enumDecl)
         ParseDiagnoseRefactor(DiagKindRefactor::parse_unknown_enum_constructor, *caseBody);
     }
     SetMemberParentInheritableDecl(enumDecl, caseBody);
+    // common/platform enum attributes propagate to it's constructors to be used in further resolve
+    if (enumDecl.TestAttr(Attribute::PLATFORM)) {
+        caseBody->EnableAttr(Attribute::PLATFORM);
+    } else if (enumDecl.TestAttr(Attribute::COMMON)) {
+        caseBody->EnableAttr(Attribute::COMMON);
+    }
+
     enumDecl.constructors.emplace_back(std::move(caseBody));
 }
 
@@ -1047,6 +1512,7 @@ OwnedPtr<EnumDecl> ParserImpl::ParseEnumDecl(
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
+    CheckCJMappingAttr(*ret);
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     ret->identifier = ExpectIdentifierWithPos(*ret);
     if (Skip(TokenKind::LT)) {
@@ -1091,7 +1557,14 @@ OwnedPtr<StructBody> ParserImpl::ParseStructBody(StructDecl& sd)
         if (CheckSkipRcurOrPrematureEnd(ret)) {
             break;
         }
+
         auto decl = ParseDecl(ScopeKind::STRUCT_BODY);
+        if (auto ctor = As<ASTKind::FUNC_DECL>(decl); ctor && ctor->TestAttr(Attribute::CONSTRUCTOR)) {
+            if (sd.TestAttr(Attribute::JAVA_MIRROR)) {
+                ctor->EnableAttr(Attribute::JAVA_MIRROR);
+            }
+            CheckInitCtorDeclBody(*ctor);
+        }
         if (decl->IsInvalid()) {
             continue;
         }
@@ -1120,6 +1593,7 @@ OwnedPtr<StructDecl> ParserImpl::ParseStructDecl(
     for (auto& attr : attrs) {
         ret->EnableAttr(attr);
     }
+    CheckCJMappingAttr(*ret);
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     ret->identifier = ExpectIdentifierWithPos(*ret);
     if (Skip(TokenKind::LT)) {
@@ -1214,7 +1688,11 @@ OwnedPtr<ExtendDecl> ParserImpl::ParseExtendDecl(
     ret->keywordPos = lookahead.Begin();
     ret->identifier.SetPos(lookahead.Begin(), lookahead.Begin());
     CheckDeclarationInScope(scopeKind, DefKind::EXTEND);
-    if (!modifiers.empty() && !chainedAST.back()->TestAttr(Attribute::IS_BROKEN)) {
+    if (modifiers.size() == 1 && mpImpl->HasCJMPModifiers(*modifiers.begin())) {
+        mpImpl->CheckCJMPModifiers(modifiers);
+        auto attr = GetAttributeByModifier(modifiers.begin()->modifier);
+        ret->EnableAttr(attr.value());
+    } else if (!modifiers.empty() && !chainedAST.back()->TestAttr(Attribute::IS_BROKEN)) {
         DiagExpectNoModifier(*modifiers.begin());
     }
     ParseExtendedType(*ret);
@@ -1361,7 +1839,8 @@ std::vector<OwnedPtr<GenericConstraint>> ParserImpl::ParseGenericConstraints()
         SpreadAttrAndConsume(genericConstraint->type.get(), genericConstraint.get(), {TokenKind::UPPERBOUND});
         auto illegalConstraint = ParseGenericUpperBound(genericConstraint);
         if (!illegalConstraint) {
-            genericConstraint->begin = genericConstraint->type->begin;
+            genericConstraint->begin = genericConstraint->wherePos.IsZero() ?
+                genericConstraint->type->begin : genericConstraint->wherePos;
             genericConstraint->end = lastToken.End();
             ret.push_back(std::move(genericConstraint));
         }
@@ -1500,6 +1979,12 @@ OwnedPtr<FuncDecl> ParserImpl::ParseFuncDecl(
     }
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     ret->funcBody = ParseFuncBody(scopeKind);
+    if (ret->TestAttr(Attribute::COMMON) && !ret->funcBody->retType) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_common_function_must_have_return_type, *ret);
+    }
+    if (ret->TestAttr(Attribute::PLATFORM) && !ret->funcBody->retType) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_platform_function_must_have_return_type, *ret);
+    }
     if (HasModifier(modifiers, TokenKind::UNSAFE) || HasModifier(modifiers, TokenKind::FOREIGN)) {
         SetUnsafe(ret.get(), modifiers);
     }
@@ -1517,6 +2002,9 @@ OwnedPtr<FuncDecl> ParserImpl::ParseFuncDecl(
         }
     }
     SetDefaultFunc(scopeKind, *ret);
+    if (scopeKind != ScopeKind::CLASS_BODY && scopeKind != ScopeKind::INTERFACE_BODY) {
+        ffiParser->CheckForeignNameAnnotation(*ret);
+    }
     return ret;
 }
 
@@ -1535,21 +2023,23 @@ void ParserImpl::CheckFuncBody(ScopeKind scopeKind, FuncDecl& decl)
             ParseDiagnoseRefactor(DiagKindRefactor::parse_intrinsic_function_cannot_have_body, *fb->body);
         }
     }
-    bool isMember = fb && !fb->body && !decl.TestAttr(Attribute::FOREIGN) &&
-        !decl.TestAttr(Attribute::INTRINSIC) && scopeKind != ScopeKind::UNKNOWN_SCOPE;
-    if (isMember) {
-        if (scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::INTERFACE_BODY) {
+
+    auto const inClassLikeScope = scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::INTERFACE_BODY;
+
+    /*
+        Check here if a function could be abstract,
+        and when the outerDecl will be known - clarify it for mirrors / common declarations
+     */
+    if (fb && !fb->body && !parseDeclFile && scopeKind != ScopeKind::UNKNOWN_SCOPE
+        && !decl.TestAnyAttr(Attribute::FOREIGN, Attribute::INTRINSIC)) {
+        if (CanBeAbstract(decl, scopeKind)) {
             decl.EnableAttr(Attribute::ABSTRACT);
-            if (!decl.funcBody->retType && !fb->TestAttr(Attribute::HAS_BROKEN)) {
-                ParseDiagnoseRefactor(DiagKindRefactor::parse_abstract_func_must_have_return_type, lastToken.End());
-            }
-        } else {
-            if (!fb->TestAttr(Attribute::HAS_BROKEN)) {
-                DiagMissingBody("function",
-                    !decl.identifier.Valid() ? "" : " '" + decl.identifier + "'", lastToken.End());
-            }
+        } else if (!fb->TestAttr(Attribute::HAS_BROKEN) && !inClassLikeScope && !decl.TestAttr(Attribute::COMMON)) {
+            DiagMissingBody("function",
+                !decl.identifier.Valid() ? "" : " '" + decl.identifier + "'", lastToken.End());
         }
     }
+
     if (decl.TestAttr(Attribute::FOREIGN)) {
         if (decl.TestAttr(Attribute::GENERIC)) {
             ParseDiagnoseRefactor(DiagKindRefactor::parse_foreign_func_should_not_be_generic, *fb->generic);
@@ -1569,6 +2059,130 @@ void ParserImpl::CheckFuncBody(ScopeKind scopeKind, FuncDecl& decl)
         }
     }
     CheckVariableParams(decl);
+}
+
+void ParserImpl::FFICheckClassLikeFuncBody(
+    FuncDecl& decl,
+    DiagKindRefactor functionMustHaveReturnType,
+    DiagKindRefactor functionCanNotHaveBody)
+{
+    if (!decl.funcBody) {
+        return;
+    }
+    if (!decl.funcBody->retType && !decl.funcBody->TestAttr(Attribute::HAS_BROKEN)) {
+        ParseDiagnoseRefactor(functionMustHaveReturnType, decl);
+        decl.EnableAttr(Attribute::IS_BROKEN);
+    }
+    if (decl.funcBody->body) {
+        ParseDiagnoseRefactor(functionCanNotHaveBody, decl, decl.identifier);
+        decl.EnableAttr(Attribute::IS_BROKEN);
+    }
+}
+
+// TODO: move to JFFIParserImpl
+namespace {
+using Cangjie::ParserImpl;
+
+    bool IsAbstractClassAbstractFunction(
+        bool hasFuncAbstractModifier, bool hasClassAbstractModifier, const Node& classDecl)
+    {
+        return hasFuncAbstractModifier && classDecl.astKind == ASTKind::CLASS_DECL &&
+            hasClassAbstractModifier;
+    }
+}
+
+void ParserImpl::CheckClassLikeFuncBodyAbstractness(FuncDecl& decl)
+{
+    bool isCommon = decl.TestAttr(Attribute::COMMON);
+    auto outerModifiers = decl.outerDecl->modifiers;
+    bool inAbstract = HasModifier(outerModifiers, TokenKind::ABSTRACT);
+    bool inCJMP = HasModifier(outerModifiers, TokenKind::PLATFORM) || HasModifier(outerModifiers, TokenKind::COMMON);
+    bool inAbstractCJMP = inAbstract && inCJMP;
+
+    bool isJavaMirrorOrJavaMirrorSubtype =
+        decl.outerDecl->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE);
+    // explicit ABSTRACT modifier allowed only in COMMON ABSTRACT class or in JFFI
+    if (HasModifier(decl.modifiers, TokenKind::ABSTRACT) && !isCommon && !inAbstractCJMP &&
+        !isJavaMirrorOrJavaMirrorSubtype) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_explicitly_abstract_only_for_cjmp_abstract_class,
+            decl, "function");
+    }
+
+    if (decl.funcBody && decl.funcBody->body) {
+        return;
+    }
+
+    CJC_NULLPTR_CHECK(decl.outerDecl);
+    if (decl.TestAttr(Attribute::CONSTRUCTOR)) {
+        return;
+    }
+
+    if (decl.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+        decl.DisableAttr(Attribute::ABSTRACT);
+        return;
+    }
+
+    bool inClass = decl.outerDecl->astKind == ASTKind::CLASS_DECL;
+    bool inAbstractCJMPClass = inAbstractCJMP && inClass;
+
+    if (inAbstractCJMP && !HasModifier(decl.modifiers, TokenKind::ABSTRACT)) {
+        // OPEN func without ABSTRACT or COMMON must have body in CJMP ABSTRACT class
+        if (HasModifier(decl.modifiers, TokenKind::OPEN) && inAbstractCJMP) {
+            DiagMissingBody("function", !decl.identifier.Valid() ? "" : " '" + decl.identifier + "'", lastToken.End());
+        }
+        decl.DisableAttr(Attribute::ABSTRACT);
+    }
+
+    bool hasAbstractModifier = HasModifier(decl.modifiers, TokenKind::ABSTRACT);
+    bool hasOuterDeclAbstractModifier = HasModifier(decl.outerDecl->modifiers, TokenKind::ABSTRACT);
+    if (isJavaMirrorOrJavaMirrorSubtype) {
+        if ((IsAbstractClassAbstractFunction(hasAbstractModifier, hasOuterDeclAbstractModifier, *decl.outerDecl) ||
+            (decl.outerDecl->astKind == ASTKind::INTERFACE_DECL && !HasModifier(decl.modifiers, TokenKind::STATIC))) &&
+            !Interop::Java::IsImpl(*decl.outerDecl)) {
+            decl.EnableAttr(Attribute::ABSTRACT);
+            return;
+        } else {
+            decl.DisableAttr(Attribute::ABSTRACT);
+        }
+    }
+    
+    if (hasAbstractModifier && !inAbstractCJMPClass) {
+        Ptr<const Modifier> abstractMod = nullptr;
+        for (auto& modifier : decl.modifiers) {
+            if (modifier.modifier == TokenKind::ABSTRACT) {
+                abstractMod = Ptr(&modifier);
+            }
+        }
+        CJC_NULLPTR_CHECK(abstractMod);
+        ChainScope cs(*this, Ptr(&decl));
+        DiagIllegalModifierInScope(*abstractMod);
+        return;
+    }
+
+    if (isJavaMirrorOrJavaMirrorSubtype) {
+        return;
+    }
+
+    if (isCommon && decl.outerDecl->astKind == ASTKind::INTERFACE_DECL) {
+        decl.EnableAttr(Attribute::ABSTRACT);
+        return;
+    }
+    if (decl.TestAnyAttr(Attribute::FOREIGN, Attribute::INTRINSIC)) {
+        return;
+    }
+
+    auto& fb = decl.funcBody;
+    if (fb->TestAttr(Attribute::HAS_BROKEN)) {
+        return;
+    }
+    if (decl.TestAttr(Attribute::ABSTRACT) || (!decl.funcBody->body && !decl.TestAttr(Attribute::FINALIZER))) {
+        if (!decl.funcBody->retType) {
+            ParseDiagnoseRefactor(DiagKindRefactor::parse_abstract_func_must_have_return_type, lastToken.End());
+        }
+    } else if (!isCommon) {
+        decl.DisableAttr(Attribute::ABSTRACT);
+        DiagMissingBody("function", !decl.identifier.Valid() ? "" : " '" + decl.identifier + "'", lastToken.End());
+    }
 }
 
 void ParserImpl::CheckVariableParams(AST::FuncDecl& decl)

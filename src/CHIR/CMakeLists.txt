@@ -9,8 +9,10 @@ add_subdirectory(Analysis)
 add_subdirectory(AST2CHIR)
 add_subdirectory(Checker)
 add_subdirectory(Expression)
+add_subdirectory(GenerateVTable)
 add_subdirectory(Type)
 add_subdirectory(Visitor)
+add_subdirectory(NativeFFI)
 
 add_library(CangjieCHIRBase OBJECT ${CHIR_BASE_SRC})
 

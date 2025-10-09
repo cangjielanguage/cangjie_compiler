@@ -122,6 +122,10 @@ Range MakeRangeForDeclIdentifier(const Decl& decl)
             return MakeRange(decl.identifier);
         }
     } else if (auto ed = DynamicCast<const ExtendDecl*>(&decl); ed && ed->extendedType) {
+        // Recheck for decls from common part, we use the position of the decl due to no other available positions.
+        if (ed->TestAttr(AST::Attribute::FROM_COMMON_PART)) {
+            return MakeRange(ed->begin, ed->end);
+        }
         return MakeRange(ed->extendedType->begin, ed->extendedType->end);
     } else if (auto vpd = DynamicCast<const VarWithPatternDecl*>(&decl); vpd && vpd->irrefutablePattern) {
         return MakeRange(vpd->irrefutablePattern->begin, vpd->irrefutablePattern->end);
@@ -392,7 +396,7 @@ void DiagCannotHaveDefaultParam(DiagnosticEngine& diag, const FuncDecl& fd, cons
     (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_cannot_have_default_param, fp, funcType);
 }
 
-void DiagCannotInheritSealed(DiagnosticEngine& diag, const Decl& child, const Type& sealed)
+void DiagCannotInheritSealed(DiagnosticEngine& diag, const Decl& child, const Type& sealed, const bool& isCommon)
 {
     Ptr<const Decl> target = sealed.GetTarget();
     CJC_NULLPTR_CHECK(target);
@@ -409,10 +413,12 @@ void DiagCannotInheritSealed(DiagnosticEngine& diag, const Decl& child, const Ty
         }
     }
     const std::string inheritOrImplement = isImplement ? "implement" : "inherit";
+    const std::string importedOrCommon = isCommon ? "common-defined" : "imported";
     const std::string classOrInterface = target->astKind == ASTKind::CLASS_DECL ? "class" : "interface";
-    auto builder = diag.DiagnoseRefactor(
-        DiagKindRefactor::sema_cannot_inherit_sealed, range, inheritOrImplement, classOrInterface, target->identifier);
-    builder.AddHint(sealed, "sealed " + classOrInterface + " declared in package '" + target->fullPackageName + "'");
+    auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_cannot_inherit_sealed,
+        range, inheritOrImplement, importedOrCommon, classOrInterface, target->identifier);
+    const std::string declaredPos = isCommon ? "common package part" : ("package '" + target->fullPackageName + "'");
+    builder.AddHint(sealed, "sealed " + classOrInterface + " declared in " + declaredPos);
 }
 
 void DiagPackageMemberNotFound(

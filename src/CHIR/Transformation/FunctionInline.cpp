@@ -252,6 +252,9 @@ bool FunctionInline::CheckCanRewrite(const Apply& apply)
     if (InWhiteList(*func)) {
         return true;
     }
+    if (func->GetFuncKind() == FuncKind::INSTANCEVAR_INIT) {
+        return true;
+    }
     // Determine if we can inline by checking the size of callee exceed the threshold
     if (inlinedCountMap[globalFunc] >= INLINED_COUNT_THRESHOLD) {
         return false;

@@ -163,8 +163,62 @@ bool IsOverflowOperator(const std::string& name);
  * @return True if the type can be an integer type, false otherwise.
  */
 bool CanBeIntegerType(const Type& type);
+/**
+ * @brief Adjusts the type of a variable initialization.
+ *
+ * This function takes in a function type, an outer declaration, a CHIR builder, and a CHIR type,
+ * and returns a pointer to a FuncType. It is used to adjust the type of a variable initialization
+ * based on the given parameters.
+ *
+ * @param funcType The function type.
+ * @param outerDecl The outer declaration.
+ * @param builder The CHIR builder.
+ * @param chirType The CHIR type.
+ * @return A pointer to a FuncType.
+ */
+FuncType* AdjustVarInitType(
+    const FuncType& funcType, const AST::Decl& outerDecl, CHIRBuilder& builder, CHIRType& chirType);
+
+/**
+ * @brief Try to get a pointer to an object of type T from the cache.
+ *
+ * @param key The key associated with the object to retrieve.
+ * @param cache The cache containing key-value pairs where values are pointers to U.
+ * @return A pointer to the object of type T if found; otherwise, nullptr.
+ */
+template<typename U, typename T>
+inline typename std::enable_if<std::is_base_of_v<U, T>, T*>::type TryGetFromCache(const std::string& key,
+    const std::unordered_map<std::string, U*>& cache)
+{
+    auto it = cache.find(key);
+    return it == cache.end() ? nullptr : dynamic_cast<T*>(it->second);
+}
 
 void SetCompileTimeValueFlagRecursivly(Func& initFunc);
+
+/**
+ * @brief Retrieves the instantiated member type by given type and name.
+ *
+ * @param rootType root type
+ * @param names Member var name.
+ * @param builder The CHIR builder used for building the type.
+ * @return The instantiated member type.
+ */
+Type* GetInstMemberTypeByName(
+    const CustomType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder);
+
+/**
+ * @brief Retrieves the instantiated member type by given type and name, checking for read-only.
+ *
+ * @param rootType root type
+ * @param path Member var name.
+ * @param builder The CHIR builder used for building the type.
+ * @return A pair containing the type and a boolean flag indicating read-only status.
+ */
+std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
+    const CustomType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder);
+std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
+    const GenericType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder);
 } // namespace CHIR
 } // namespace Cangjie
 

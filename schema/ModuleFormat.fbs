@@ -296,13 +296,21 @@ table Decl {
   hash:DeclHash;
   // Specific information for each specific kind of declaration
   info:DeclInfo;
+
+  // record dependencies result of common part for CJMP
+  dependencies:[FullId];
 }
 
 enum AnnoKind : uint16 {
   Deprecated,
   TestRegistration,
   Frozen,
-  Custom
+  Custom,
+  JavaMirror,
+  JavaImpl,
+  ObjCMirror,
+  ObjCImpl,
+  ForeignName
 }
 
 // Current annotation representation is a balance between needs of @Deprecated
@@ -615,6 +623,7 @@ table ImportSpec {
   asIdentifier:string;
   reExport:AccessModifier = Private;
   isDecl:bool=false;
+  hasDoubleColon:bool;
 }
 
 table Imports {
@@ -640,6 +649,12 @@ struct CjoVersion {
   patch_num:uint8;
 }
 
+table FileInfo {
+  fileID:  uint32;
+  begin:   Position;
+  end:     Position;
+}
+
 // all SemaTys, decls are saved here, and indexed by other nodes.
 table Package {
   version:string;            // cjc version.
@@ -656,6 +671,8 @@ table Package {
   kind:PackageKind = Normal; // package kind.
   access:AccessLevel = Public;
   moduleName:string;
+  // append some info of File for CJMP
+  allFileInfo: [FileInfo];
 }
 
 root_type Package;

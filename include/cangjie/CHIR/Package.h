@@ -24,6 +24,7 @@ class Package {
 
 public:
     enum class AccessLevel : uint8_t {
+        INVALID = 0,
         INTERNAL,
         PROTECTED,
         PUBLIC
@@ -54,6 +55,8 @@ public:
     Func* GetPackageInitFunc() const;
     void SetPackageInitFunc(Func* func);
 
+    void SetPackageLiteralInitFunc(Func* func);
+    Func* GetPackageLiteralInitFunc() const;
     // ===--------------------------------------------------------------------===//
     // Imported Var and Function API
     // ===--------------------------------------------------------------------===//
@@ -117,11 +120,11 @@ public:
     // Others API
     // ===--------------------------------------------------------------------===//
     std::vector<CustomTypeDef*> GetAllCustomTypeDef() const;
+    std::vector<CustomTypeDef*> GetCurPkgCustomTypeDef() const;
     std::vector<CustomTypeDef*> GetAllImportedCustomTypeDef() const;
-
 private:
     std::string name;                                  // full package name, like "std.core"
-    AccessLevel pkgAccessLevel{};                      // public/internal/protected, get from AST
+    AccessLevel pkgAccessLevel{AccessLevel::INVALID};  // public/internal/protected, get from AST
 
     // imported decls
     std::vector<ImportedValue*> importedVarAndFuncs;
@@ -138,6 +141,7 @@ private:
     std::vector<EnumDef*> enums;
     std::vector<ExtendDef*> extends;
     Func* packageInitFunc = nullptr;
+    Func* packageLiteralInitFunc = nullptr; // global literals init function in one package
 };
 
 } // namespace Cangjie::CHIR

@@ -66,17 +66,25 @@ void ParserImpl::ParseQuoteDollarInterpolation(AST::QuoteExpr& qe)
     qe.exprs.emplace_back(std::move(ref));
 }
 
-void ParserImpl::ParseQuoteEscapeToken(std::vector<Token>& tokens)
+namespace Cangjie {
+const std::vector<TokenKind>& GetEscapeTokenKinds()
 {
     const static std::vector<TokenKind> ESCAPE_TOKEN_KINDS = {
         TokenKind::DOLLAR_IDENTIFIER, TokenKind::AT, TokenKind::DOLLAR, TokenKind::LPAREN, TokenKind::RPAREN};
+            return ESCAPE_TOKEN_KINDS;
+}
+}
+ 
+void ParserImpl::ParseQuoteEscapeToken(std::vector<Token>& tokens)
+{
     // In Lex/Lexer.cpp, IsMacroEscape() function, escaping of [ and ] is used in macro attribute input
     const static std::vector<TokenKind> ESCAPE_FOR_MACRO_NOT_FOR_QUOTE = {
         TokenKind::LSQUARE, TokenKind::RSQUARE};
     Skip(TokenKind::ILLEGAL);
-    if (SeeingAny(ESCAPE_TOKEN_KINDS)) {
+    if (SeeingAny(GetEscapeTokenKinds())) {
+        auto begin = lastToken.Begin();
         auto token = Peek();
-        tokens.emplace_back(token.kind, token.Value(), token.Begin(), token.End());
+        tokens.emplace_back(token.kind, token.Value(), begin, token.End());
     } else if (SeeingAny(ESCAPE_FOR_MACRO_NOT_FOR_QUOTE)) {
         auto builder = diag.DiagnoseRefactor(
             DiagKindRefactor::lex_unknown_start_of_token, lastToken.Begin(), lastToken.Value());

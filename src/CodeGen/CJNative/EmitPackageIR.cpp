@@ -311,29 +311,46 @@ llvm::Function* GetGVResetCallBack(CGModule& cgMod, llvm::FunctionType* callBack
     return wrapFunc;
 }
 
-void CallDependentPackageGlobalResetCall(IRBuilder2& irBuilder)
+void CollectDependentPackages(llvm::Function& func, std::vector<std::string>& giList)
+{
+    const std::string CALL_DEPENDENT_PACKAGE_INIT_SUFFIX =
+        SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX;
+    const std::string CALL_DEPENDENT_PACKAGES_INITS_SUFFIX =
+        SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX;
+    for (auto& block : func.getBasicBlockList()) {
+        for (auto& inst : block) {
+            auto ci = llvm::dyn_cast<llvm::CallInst>(&inst);
+            if (!ci) {
+                continue;
+            }
+            auto callee = ci->getCalledFunction();
+            if (!callee) {
+                continue;
+            }
+            auto calleeName = callee->getName();
+            auto calleeNamePrefixSize = calleeName.str().size() - CALL_DEPENDENT_PACKAGE_INIT_SUFFIX.size();
+            auto calleePrefix = calleeName.str().substr(0, calleeNamePrefixSize);
+            auto calleeSuffix = calleeName.str().substr(calleeNamePrefixSize);
+            if (calleeSuffix == CALL_DEPENDENT_PACKAGES_INITS_SUFFIX) {
+                CollectDependentPackages(*callee, giList);
+            } else if (calleeName.startswith(MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_PACKAGE_INIT_PREFIX)) {
+                giList.emplace_back(calleePrefix + CALL_DEPENDENT_PACKAGE_INIT_SUFFIX);
+            }
+        }
+    }
+}
+
+void CallDependentPackageGlobalResetCall(IRBuilder2 & irBuilder)
 {
     auto& cgCtx = irBuilder.GetCGContext();
     auto llvmMod = irBuilder.GetLLVMModule();
     auto llvmFunc = llvmMod->getFunction(cgCtx.GetCHIRPackage().GetPackageInitFunc()->GetIdentifierWithoutPrefix());
     CJC_ASSERT(llvmFunc);
     std::vector<std::string> giList;
-    for (auto& block : llvmFunc->getBasicBlockList()) {
-        for (auto& inst : block) {
-            std::string targetSuffix = SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION + MANGLE_FUNC_PARAM_TYPE_PREFIX +
-                MANGLE_VOID_TY_SUFFIX;
-            if (auto ci = llvm::dyn_cast<llvm::CallInst>(&inst);
-                ci && ci->getCalledFunction() && ci->getCalledFunction()->getName().startswith(
-                    MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_PACKAGE_INIT_PREFIX)) {
-                giList.emplace_back(ci->getCalledFunction()->getName().str()
-                    .substr(0, ci->getCalledFunction()->getName().str().size() - targetSuffix.size()) + targetSuffix);
-            }
-        }
-    }
+    CollectDependentPackages(*llvmFunc, giList);
     auto giFuncType = llvm::FunctionType::get(irBuilder.getVoidTy(), {}, false);
     for (auto gi : giList) {
-        auto flagResetFunc =
-            llvm::cast<llvm::Function>(llvmMod->getOrInsertFunction(gi, giFuncType).getCallee());
+        auto flagResetFunc = llvm::cast<llvm::Function>(llvmMod->getOrInsertFunction(gi, giFuncType).getCallee());
         flagResetFunc->addFnAttr(llvm::Attribute::NoInline);
         irBuilder.LLVMIRBuilder2::CreateCall(giFuncType, flagResetFunc);
     }

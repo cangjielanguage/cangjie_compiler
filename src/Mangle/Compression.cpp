@@ -153,7 +153,7 @@ bool IsVarDeclEncode(std::string& mangled)
         return true;
     } else if (isdigit(mangled[0])) {
         idx = ForwardName(mangled, isCompressed);
-        if (idx < n && mangled[idx] == MANGLE_LOCAL_VAR_PREFIX[0]) {
+        if (idx < n && mangled[idx] == MANGLE_COUNT_PREFIX[0]) {
             idx = ForwardNumber(mangled, idx + MANGLE_CHAR_LEN);
             if (idx < n && mangled[idx] == MANGLE_SUFFIX[0]) {
                 return true;
@@ -163,7 +163,7 @@ bool IsVarDeclEncode(std::string& mangled)
         } else if (idx < n && mangled[idx] == MANGLE_SUFFIX[0]) {
             return true;
         }
-    } else if (mangled[0] == MANGLE_LOCAL_VAR_PREFIX[0]) {
+    } else if (mangled[0] == MANGLE_COUNT_PREFIX[0]) {
         idx = ForwardNumber(mangled, idx + MANGLE_CHAR_LEN);
         if (idx < n && mangled[idx] == MANGLE_SUFFIX[0]) {
             return true;
@@ -718,7 +718,7 @@ std::tuple<size_t, EntityType, std::string, bool> TryNamePrefixPath(std::string&
         return std::tuple{nextIdx, entityTy, entityName, true};
     }
     size_t nameIdx = nextIdx;
-    if (nextIdx < n && mangled[nextIdx] == MANGLE_LOCAL_VAR_PREFIX[0]) {
+    if (nextIdx < n && mangled[nextIdx] == MANGLE_COUNT_PREFIX[0]) {
         nextIdx = ForwardNumber(mangled, nextIdx + MANGLE_CHAR_LEN);
     }
     if (nextIdx < n) {
@@ -791,7 +791,7 @@ std::tuple<size_t, EntityType, std::string, bool> TryExtendPath(std::string& man
         size_t fileIdx = nextIdx;
         nextIdx = ForwardFileNameNumber(mangled, nextIdx + MANGLE_CHAR_LEN);
         fileId = mangled.substr(fileIdx, nextIdx - fileIdx);
-        if (nextIdx < n && mangled[nextIdx] == MANGLE_LOCAL_VAR_PREFIX[0]) {
+        if (nextIdx < n && mangled[nextIdx] == MANGLE_COUNT_PREFIX[0]) {
             size_t localIdx = nextIdx;
             nextIdx = ForwardNumber(mangled, nextIdx);
             localId = mangled.substr(localIdx, nextIdx - localIdx);

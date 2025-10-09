@@ -120,9 +120,21 @@ set(LLVM_BIN_INSTALL_PATTERN
 set(LIB_PROFILE profile)
 set(LIB_FUZZER_NOMAIN fuzzer_no_main)
 set(LIB_PROFILE_NAME libclang_rt-${LIB_PROFILE}.a)
-if(DARWIN)
+if(MACOS)
     set(LIB_BUILTINS osx)
     set(LIB_BUILTINS_NAME libclang_rt.osx.a)
+elseif(IOS)
+    if(IOS_PLATFORM MATCHES "SIMULATOR")
+        set(LIB_BUILTINS iossim)
+        set(LIB_BUILTINS_NAME libclang_rt.iossim.a)
+        set(LIB_PROFILE profile_iossim)
+        set(LIB_PROFILE_NAME libclang_rt.profile_iossim.a)
+    else()
+        set(LIB_BUILTINS ios)
+        set(LIB_BUILTINS_NAME libclang_rt.ios.a)
+        set(LIB_PROFILE profile_ios)
+        set(LIB_PROFILE_NAME libclang_rt.profile_ios.a)
+    endif()
 else()
     set(LIB_BUILTINS builtins)
     set(LIB_BUILTINS_NAME libclang_rt-${LIB_BUILTINS}.a)
@@ -332,6 +344,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
         endif()
     elseif (NOT CANGJIE_SKIP_BUILD_CLANG_RT)
         compile_rtlib(cjnative INSTALL_PREFIX ${CMAKE_BINARY_DIR}/third_party/llvm)
+        ExternalProject_Get_Property(cjnative SOURCE_DIR)
     endif()
 
     if(NOT CANGJIE_SKIP_BUILD_CLANG_RT)
@@ -358,11 +371,11 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                 list(APPEND CLANG_RT_LIBS ${LIB_BUILTINS_PATH})
             endif()
             list(APPEND CLANG_RT_LIBS ${LIB_PROFILE_PATH})
-            if(NOT WIN32 AND NOT HM)
+            if(NOT WIN32 AND NOT IOS)
                 list(APPEND CLANG_RT_LIBS ${LIB_FUZZER_NOMAIN_PATH})
             endif()
         endif()
-        set(CLANG_RT_TARGET_SUFFIX ${CMAKE_SYSTEM_PROCESSOR})
+        set(CLANG_RT_TARGET_SUFFIX ${CMAKE_SYSTEM_PROCESSOR}$<$<BOOL:${ANDROID}>:-android>)
         if(CANGJIE_ASAN_SUPPORT)
             list(APPEND CLANG_RT_LIBS ${LIB_RTLIB_ROOT_PATH}/libclang_rt-asan.a)
             set(SANITIZER_COPY_CMD
@@ -375,7 +388,8 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                 ${LIB_RTLIB_ROOT_PATH}/libclang_rt-asan.a
                 ${CLANG_RT_TARGET_SUFFIX}
                 ${CANGJIE_BUILD_CJC}
-                ${THIRD_PARTY_LLVM})
+                ${THIRD_PARTY_LLVM}
+                ${IOS})
         elseif(CANGJIE_TSAN_SUPPORT)
             list(APPEND CLANG_RT_LIBS ${LIB_RTLIB_ROOT_PATH}/libclang_rt-tsan.a)
             set(SANITIZER_COPY_CMD
@@ -388,7 +402,8 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                 ${LIB_RTLIB_ROOT_PATH}/libclang_rt-tsan.a
                 ${CLANG_RT_TARGET_SUFFIX}
                 ${CANGJIE_BUILD_CJC}
-                ${THIRD_PARTY_LLVM})
+                ${THIRD_PARTY_LLVM}
+                ${IOS})
         elseif(CANGJIE_HWASAN_SUPPORT)
             list(APPEND CLANG_RT_LIBS ${LIB_RTLIB_ROOT_PATH}/libclang_rt-hwasan.a)
             set(SANITIZER_COPY_CMD
@@ -401,9 +416,10 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                 ${LIB_RTLIB_ROOT_PATH}/libclang_rt-hwasan.a
                 ${CMAKE_SYSTEM_PROCESSOR}
                 ${CANGJIE_BUILD_CJC}
-                ${THIRD_PARTY_LLVM})
+                ${THIRD_PARTY_LLVM}
+                ${IOS})
         endif()
-        if(NOT WIN32 AND NOT HM)
+        if(NOT WIN32 AND NOT IOS)
             set(FUZZER_NOMAIN_COPY_CMD
                 COMMAND
                 ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ExtractRtlib.cmake"
@@ -412,7 +428,8 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                 ${LIB_FUZZER_NOMAIN_PATH}
                 ${CLANG_RT_TARGET_SUFFIX}
                 ${CANGJIE_BUILD_CJC}
-                ${THIRD_PARTY_LLVM})
+                ${THIRD_PARTY_LLVM}
+                ${IOS})
         endif()
         if(NOT CANGJIE_ENABLE_ASAN AND NOT CANGJIE_ENABLE_ASAN_COV)
             # Generate version info and extract the profile library
@@ -430,6 +447,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                     ${CLANG_RT_TARGET_SUFFIX}
                     ${CANGJIE_BUILD_CJC}
                     ${THIRD_PARTY_LLVM}
+                    ${IOS}
                 COMMAND
                     ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ExtractRtlib.cmake"
                     ${CMAKE_BINARY_DIR}
@@ -438,6 +456,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                     ${CLANG_RT_TARGET_SUFFIX}
                     ${CANGJIE_BUILD_CJC}
                     ${THIRD_PARTY_LLVM}
+                    ${IOS}
                 ${FUZZER_NOMAIN_COPY_CMD}
                 ${SANITIZER_COPY_CMD}
                 ${COMMAND_REMOVE_AFTER_EXTRACTION}
@@ -458,7 +477,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                 ${CMAKE_BINARY_DIR}/third_party/llvm-rtlib/lib/*/libclang_rt.${LIB_BUILTINS}-${CMAKE_SYSTEM_PROCESSOR}.a
                 ${LIB_BUILTINS_PATH}
             )
-            if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
+            if(DARWIN)
                 set(LIB_BUILTINS_COPY_COMMAND)
             endif()
             add_custom_command(

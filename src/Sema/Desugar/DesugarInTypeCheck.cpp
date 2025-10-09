@@ -534,6 +534,12 @@ void DesugarVariadicCallExpr(ASTContext& ctx, CallExpr& ce, size_t fixedPosition
     // The position of `arrayLit` should not be used to report diagnostics.
     // We set them here to avoid zero position error while checking candidates.
     CopyBasicInfo(&ce, arrayLit.get());
+    if (idx >= ce.args.size()) { // no vararg, it desugars to an empty array
+        arrayLit->begin = arrayLit->end = ce.rightParenPos;
+    } else {
+        arrayLit->begin = ce.args[idx]->begin;
+        arrayLit->end = ce.args.back()->end;
+    }
     ctx.RemoveTypeCheckCache(*arrayLit);
     for (; idx < ce.args.size(); idx++) {
         if (!ce.args[idx]->name.Empty()) {
@@ -672,6 +678,8 @@ void DesugarPrimaryCtor(Decl& decl, PrimaryCtorDecl& fd)
             funcBody->body->body.push_back(ASTCloner::Clone(it->get(), SetIsClonedSourceCode));
             ++it;
         }
+    } else if (fd.TestAttr(Attribute::COMMON)) {
+        funcBody->body = nullptr;
     }
     funcBody->paramLists.push_back(std::move(funcParamList));
     DesugarPrimaryCtorSetPrimaryFunc(decl, fd, funcBody);

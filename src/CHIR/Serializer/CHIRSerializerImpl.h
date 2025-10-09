@@ -88,6 +88,7 @@ private:
     template <typename T, typename E> std::vector<uint32_t> GetId(const std::unordered_set<E*>& set) const;
     // other to save
     unsigned packageInitFunc{};
+    unsigned packageLiteralInitFunc{};
     uint32_t maxImportedValueId = 0;
     uint32_t maxImportedStructId = 0;
     uint32_t maxImportedClassId = 0;

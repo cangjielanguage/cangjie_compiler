@@ -12,6 +12,7 @@ set(INCREMENTALCOMPILATIONLOGGER_UT_SRC
     $<TARGET_OBJECTS:CangjieOption>
     $<TARGET_OBJECTS:CangjieProfileUtils>
     $<TARGET_OBJECTS:CangjieUnicodeUtils>
+    $<TARGET_OBJECTS:CangjieLex>
 )
 add_executable(IncrementalCompilationLoggerTest IncrementalCompilationLoggerTest.cpp)
 

@@ -707,6 +707,11 @@ OwnedPtr<ConstEvalResult> ComputeAnnotations(AST::Package& pkg, CompilerInstance
     if (opts.enIncrementalCompilation && ci.kind == IncreKind::NO_CHANGE) {
         doCompute = false;
     }
+    // CJMP does not fully support Annotation
+    if (ci.invocation.globalOptions.commonPartCjo != std::nullopt ||
+        ci.invocation.globalOptions.outputMode == GlobalOptions::OutputMode::CHIR) {
+        doCompute = false;
+    }
     if (!doCompute) {
         return {};
     }

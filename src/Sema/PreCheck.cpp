@@ -246,7 +246,11 @@ void TypeChecker::TypeCheckerImpl::CollectDeclMapAndCheckRedefinitionForOneSymbo
         bool privateGlobalInDifferentFile = sym.node->TestAttr(Attribute::GLOBAL, Attribute::PRIVATE) &&
             found.front()->TestAttr(Attribute::GLOBAL, Attribute::PRIVATE) &&
             sym.node->curFile != found.front()->curFile;
-        if (!privateGlobalInDifferentFile) {
+        bool multiPlat =
+            sym.node->TestAttr(Cangjie::AST::Attribute::COMMON) && found.front()->TestAttr(Attribute::PLATFORM);
+        multiPlat =
+            multiPlat || (sym.node->TestAttr(Attribute::PLATFORM) && found.front()->TestAttr(Attribute::COMMON));
+        if (!privateGlobalInDifferentFile && !multiPlat) {
             DiagRedefinitionWithFoundNode(diag, StaticCast<Decl>(*sym.node), *found.front());
         }
     }
@@ -390,7 +394,17 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetTyFromASTType(ASTContext& ctx, RefType&
     Utils::EraseIf(targets, [](Ptr<const Decl> d) { return !d || !d->IsTypeDecl(); });
 
     std::sort(targets.begin(), targets.end(),
-        [](Ptr<const Decl> d1, Ptr<const Decl> d2) { return d1->scopeLevel > d2->scopeLevel; });
+        [](Ptr<const Decl> d1, Ptr<const Decl> d2) {
+            if (d1->scopeLevel > d2->scopeLevel) {
+                return true;
+            } else if (d1->scopeLevel == d2->scopeLevel) {
+                // Ranking overloads also by platform > common
+                if (d1->TestAttr(Attribute::PLATFORM)) {
+                    return true;
+                }
+            }
+            return false;
+        });
 
     Ptr<Decl> target{nullptr};
     if (targets.empty()) {
@@ -410,7 +424,9 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetTyFromASTType(ASTContext& ctx, RefType&
         // The other case must be scopeTargets.size() > 1, so no need to check
         // this condition. scopeTargets is sorted, so only need to check whether
         // scope levels are equal or not. If they are equal then rt is ambiguous.
-        (targets[0]->scopeLevel > targets[1]->scopeLevel)) {
+        (targets[0]->scopeLevel > targets[1]->scopeLevel) ||
+        // With equal scope levels platform declaration are prefered over the common ones
+        (targets[0]->TestAttr(Attribute::PLATFORM))) {
         target = targets[0];
         if (auto builtin = DynamicCast<BuiltInDecl>(target); builtin && builtin->type == BuiltInType::CFUNC) {
             auto ty = GetTyFromASTCFuncType(ctx, rt);
@@ -447,6 +463,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetTyFromASTCFuncType(ASTContext& ctx, Ref
         paramTys.push_back(param->ty);
     }
     Ptr<Ty> retTy = funcType->retType->ty = GetTyFromASTType(ctx, funcType->retType.get());
+    funcType->ty = GetTyFromASTType(ctx, funcType);
     return typeManager.GetFunctionTy(std::move(paramTys), retTy, {.isC = true});
 }
 
@@ -638,6 +655,9 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetTyFromBuiltinDecl(const BuiltInDecl& bi
         case BuiltInType::VARRAY: {
             return GetBuiltInVArrayType(typeArgs);
         }
+        case BuiltInType::CFUNC: {
+            return GetBuiltinCFuncType(typeArgs);
+        }
         default:
             return TypeManager::GetInvalidTy();
     }
@@ -663,6 +683,14 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetBuiltInVArrayType(const std::vector<Ptr
     CJC_ASSERT(typeArgs.size() == 1);
     auto elemTy = typeArgs.empty() ? TypeManager::GetInvalidTy() : typeArgs[0];
     return typeManager.GetVArrayTy(*elemTy, 0);
+}
+
+Ptr<AST::Ty> TypeChecker::TypeCheckerImpl::GetBuiltinCFuncType(const std::vector<Ptr<AST::Ty>>& typeArgs)
+{
+    // the return type is CFunc<T>
+    CJC_ASSERT(typeArgs.size() == 1 && Ty::IsTyCorrect(typeArgs[0]));
+    return typeManager.GetFunctionTy(
+        typeArgs, typeArgs[0], {.isC = true, .isClosureTy = false, .hasVariableLenArg = false, .noCast = false});
 }
 
 std::vector<Ptr<Ty>> TypeChecker::TypeCheckerImpl::GetTyFromASTType(
@@ -1112,7 +1140,13 @@ void TypeChecker::TypeCheckerImpl::AddSuperClassObjectForClassDecl(ASTContext& c
         if (HasSuperClass(*cd)) {
             continue;
         }
-        AddObjectSuperClass(ctx, *cd);
+        if (cd->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE)) {
+            if (!AddJObjectSuperClassJavaInterop(ctx, *cd)) {
+                AddObjectSuperClass(ctx, *cd);
+            }
+        } else {
+            AddObjectSuperClass(ctx, *cd);
+        }
     }
 }
 
@@ -1561,6 +1595,7 @@ void TypeChecker::TypeCheckerImpl::PreCheckFuncRedefinition(const ASTContext& ct
             candidates[names] = {fd};
         }
     }
+    mpImpl->FilterOutCommonCandidatesIfPlatformExist(candidates);
     auto candidatesForImport = candidates;
     for (const auto& [names, funcs] : std::as_const(candidates)) {
         PreCheckMacroRedefinition(funcs);
@@ -1741,6 +1776,9 @@ void TypeChecker::TypeCheckerImpl::PreCheckUsage(ASTContext& ctx, const Package&
     PreSetDeclType(ctx);
     // Check invalid inherit of class, struct, enum, interface.
     PreCheckInvalidInherit(ctx, pkg);
+
+    // Check for CJMP decls
+    mpImpl->PreCheck4CJMP(pkg);
 }
 
 void TypeChecker::TypeCheckerImpl::PreCheckInvalidInherit(const ASTContext& ctx, const AST::Package& pkg)

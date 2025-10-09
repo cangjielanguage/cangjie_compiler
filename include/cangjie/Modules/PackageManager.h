@@ -34,7 +34,7 @@ struct PackageInfo {
      */
     std::unordered_set<PackageInfo*> deps;
 
-    explicit PackageInfo(std::string& fullPackageName) : fullPackageName(fullPackageName)
+    explicit PackageInfo(const std::string& fullPackageName) : fullPackageName(fullPackageName)
     {
     }
 };

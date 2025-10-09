@@ -197,30 +197,6 @@ struct InterpreterStack {
     }
 
     /**
-     * @brief Get a reference to the top element
-     *
-     * This method will be deprecated, avoid
-     */
-    template <typename T> const T& ArgsTop() const
-    {
-        CJC_ASSERT(!argStack.empty());
-        using S = std::decay_t<T>;
-
-        if constexpr (std::is_same_v<S, ITuple>) {
-            // #warning You shouldn't use ArgsTop with ITuple
-            abort();
-        } else if constexpr (std::is_same_v<S, IArray>) {
-            // #warning You shouldn't use ArgsTop with IArray
-            abort();
-        } else if constexpr (std::is_same_v<S, IObject>) {
-            // #warning You shouldn't use ArgsTop with IObject
-            abort();
-        } else {
-            return std::get<S>(argStack.back());
-        }
-    }
-
-    /**
      * @brief Get the top element as an IVal
      *
      * This method is slow, try to avoid it

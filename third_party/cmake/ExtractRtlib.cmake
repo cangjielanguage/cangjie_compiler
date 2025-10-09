@@ -12,12 +12,14 @@
 # ${CANGJIE_TARGET_ARCH} (arg 6)
 # ${CROSS_COMPILING} (arg 7)
 # ${THIRD_PARTY_LLVM} (arg 8)
+# ${IOS} (arg 9)
 set(CMAKE_BINARY_DIR ${CMAKE_ARGV3})
 set(SPECIFIC_LIB ${CMAKE_ARGV4})
 set(NEW_SPECIFIC_LIB_PATH ${CMAKE_ARGV5})
 set(CANGJIE_TARGET_ARCH ${CMAKE_ARGV6})
 set(CANGJIE_BUILD_CJC ${CMAKE_ARGV7})
 set(THIRD_PARTY_LLVM ${CMAKE_ARGV8})
+set(IOS ${CMAKE_ARGV9})
 
 set(LIB_SUFFIX ".a")
 
@@ -42,8 +44,13 @@ if(CANGJIE_BUILD_CJC) # It is native-compiling
         endif()
     endforeach()
 else() # It is cross-compiling
-    file(GLOB OLD_SPECIFIC_LIB_PATH
-        ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/lib/*/libclang_rt.${SPECIFIC_LIB}-${CANGJIE_TARGET_ARCH}${LIB_SUFFIX})
+    if(IOS)
+        file(GLOB OLD_SPECIFIC_LIB_PATH
+            ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/lib/*/libclang_rt.${SPECIFIC_LIB}${LIB_SUFFIX})
+    else()
+        file(GLOB OLD_SPECIFIC_LIB_PATH
+            ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/lib/*/libclang_rt.${SPECIFIC_LIB}-${CANGJIE_TARGET_ARCH}${LIB_SUFFIX})
+    endif()
 endif()
 
 # 2. Move the specific lib to a temporary location; currently we use the ${CMAKE_BINARY_DIR}/lib

@@ -23,6 +23,7 @@ class AttributeInfo;
 class ClassType;
 class Translator;
 class Value;
+class CustomTypeDef;
 
 class CHIRTypeCompare {
 public:
@@ -65,9 +66,13 @@ struct FuncCallType {
 };
 
 struct VTableSearchRes {
-    ClassType* instSrcParentType{nullptr};
-    FuncType* originalFuncType{nullptr}; // func type from current CustomType, not parent CustomType
+    ClassType* instSrcParentType{nullptr};     // instantiated by instantiate func type
+    ClassType* halfInstSrcParentType{nullptr}; // instantiated by current def
+    FuncType* originalFuncType{nullptr};       // a generic func type, from current def, not parent def
     FuncBase* instance{nullptr};
+    CustomTypeDef* originalDef{nullptr};       // this virtual func belongs to a vtable,
+                                               // and this vtable belongs to a CustomTypeDef
+    std::vector<GenericType*> genericTypeParams;
     size_t offset{0};
 };
 

@@ -10,16 +10,22 @@
  * MockUtils contains helper functions for MockManager, MockSupportManager and TestManager
  */
 
-#include "cangjie/Sema/MockUtils.h"
+#include "MockUtils.h"
+
 #include "cangjie/Sema/TestManager.h"
 #include "cangjie/Utils/ConstantsUtils.h"
 
 #include <regex>
 
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+#include "GenericInstantiation/PartialInstantiation.h"
+#endif
 #include "TypeCheckUtil.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/Mangle/BaseMangler.h"
+#include "cangjie/Sema/GenericInstantiationManager.h"
+#include "GenericInstantiation/GenericInstantiationManagerImpl.h"
 
 namespace Cangjie {
 
@@ -36,17 +42,10 @@ static constexpr std::string_view ZERO_VALUE_INTRINSIC_NAME = "zeroValue";
 
 } // namespace
 
-MockUtils::MockUtils(
-    ImportManager& importManager,
-    TypeManager& typeManager,
-    std::function<void(Node& node)> instantiate,
-    std::function<Ptr<Decl>(Decl& decl, const std::vector<Ptr<Ty>>& instTys, Ptr<Ty> baseTy)> getInstantiatedDecl,
-    std::function<std::unordered_set<Ptr<Decl>>(Decl& decl)> getInstantiatedDecls)
+MockUtils::MockUtils(ImportManager& importManager, TypeManager& typeManager, GenericInstantiationManager* gim)
     : importManager(importManager),
       typeManager(typeManager),
-      instantiate(std::move(instantiate)),
-      getInstantiatedDecl(std::move(getInstantiatedDecl)),
-      getInstantiatedDecls(std::move(getInstantiatedDecls)),
+      gim(gim),
       arrayDecl(importManager.GetCoreDecl<StructDecl>(STD_LIB_ARRAY)),
       stringDecl(importManager.GetCoreDecl<StructDecl>(STD_LIB_STRING)),
       optionDecl(importManager.GetCoreDecl<EnumDecl>(STD_LIB_OPTION)),
@@ -61,12 +60,59 @@ std::string MockUtils::spyObjVarName = "spiedObjectRef";
 std::string MockUtils::spyCallMarkerVarName = "shouldReturnZeroForSpy";
 std::string MockUtils::defaultAccessorSuffix = "$Buddy";
 
+void MockUtils::Instantiate(Node& node) const
+{
+    if (!IS_GENERIC_INSTANTIATION_ENABLED) {
+        return;
+    }
+    gim->impl->RecordExtend(node);
+    gim->impl->WalkNonGenericExtendedType();
+    if (Is<ClassDecl>(&node)) {
+        gim->impl->CheckNodeInstantiation(node);
+    } else {
+        Walker(
+            &node, gim->impl->instantiationWalkerID,
+            [this](auto node) { return gim->impl->CheckNodeInstantiation(*node); }).Walk();
+    }
+}
+
 std::optional<std::unordered_set<Ptr<Decl>>> MockUtils::TryGetInstantiatedDecls(Decl& decl) const
 {
     if (!decl.TestAttr(AST::Attribute::GENERIC) && !decl.ty->HasGeneric()) {
         return std::nullopt;
     }
-    return getInstantiatedDecls(decl);
+    return gim->impl->GetInstantiatedDecls(decl);
+}
+
+Ptr<Decl> MockUtils::GetInstantiatedMemberTarget(Ty& baseTy, Decl& target) const
+{
+    return gim->impl->GetInstantiatedMemberTarget(baseTy, target);
+}
+
+
+Ptr<Decl> MockUtils::GetInstantiatedDeclWithGenericInfo(Decl& decl, const std::vector<Ptr<Ty>>& instTys) const
+{
+    return gim->impl->GetInstantiatedDeclWithGenericInfo(gim->impl->ConstructGenericInfo(decl, instTys));
+}
+
+Ptr<ClassLikeDecl> MockUtils::GetInstantiatedDeclInCurrentPackage(const Ptr<const ClassLikeTy> classLikeToMockTy)
+{
+    if (!IS_GENERIC_INSTANTIATION_ENABLED) {
+        return RawStaticCast<ClassLikeDecl*>(Ty::GetDeclOfTy(classLikeToMockTy));
+    }
+    auto classLikeToMock = DynamicCast<ClassLikeDecl*>(classLikeToMockTy->commonDecl.get());
+    CJC_NULLPTR_CHECK(classLikeToMock);
+    Ptr<Decl> genericDecl;
+    if (classLikeToMock->TestAttr(Attribute::GENERIC)) {
+        genericDecl = classLikeToMock;
+    } else if (classLikeToMock->genericDecl) {
+        genericDecl = classLikeToMock->genericDecl;
+    } else {
+        return classLikeToMock;
+    }
+
+    auto genericInfo = gim->impl->ConstructGenericInfo(*genericDecl, typeManager.GetTypeArgs(*classLikeToMockTy));
+    return RawStaticCast<ClassLikeDecl*>(gim->impl->GetInstantiatedDeclWithGenericInfo(genericInfo));
 }
 
 std::string MockUtils::Mangle(const Decl& decl) const
@@ -124,6 +170,12 @@ bool MockUtils::IsMockAccessorRequired(const Decl& decl)
         return false;
     }
 
+    if (IS_GENERIC_INSTANTIATION_ENABLED &&
+        (decl.TestAttr(Attribute::GENERIC_INSTANTIATED) || decl.TestAttr(Attribute::GENERIC))
+    ) {
+        return true;
+    }
+
     if (decl.TestAttr(Attribute::PUBLIC) || decl.TestAttr(Attribute::PROTECTED)) {
         return false;
     }
@@ -131,29 +183,41 @@ bool MockUtils::IsMockAccessorRequired(const Decl& decl)
     return true;
 }
 
-Ptr<Decl> MockUtils::FindAccessorForMemberAccess(const MemberAccess& memberAccess, const Ptr<Decl> resolvedMember,
+Ptr<Decl> MockUtils::FindAccessorForMemberAccess(
+    const MemberAccess& memberAccess, const Ptr<Decl> resolvedMember,
     const std::vector<Ptr<Ty>>& instTys, AccessorKind kind) const
 {
     if (!resolvedMember || !IsMockAccessorRequired(*resolvedMember)) {
         return nullptr;
     }
 
+    if (IS_GENERIC_INSTANTIATION_ENABLED) {
+        for (auto tyVar : memberAccess.instTys) {
+            if (tyVar->HasGeneric()) {
+                return nullptr;
+            }
+        }
+    }
+
     auto baseTy = memberAccess.baseExpr->ty;
     auto baseDecl = Ty::GetDeclOfTy(baseTy);
-    if (!baseDecl || !Is<ClassDecl>(baseDecl) || !baseDecl->TestAttr(Attribute::MOCK_SUPPORTED)) {
+    if (!baseDecl || !Is<ClassDecl>(baseDecl) ||
+        (IS_GENERIC_INSTANTIATION_ENABLED && baseTy->HasGeneric()) || !baseDecl->TestAttr(Attribute::MOCK_SUPPORTED)
+    ) {
         return nullptr;
     }
 
-    auto baseClass = As<ASTKind::CLASS_DECL>(baseDecl);
+    Ptr<ClassDecl> baseClass = As<ASTKind::CLASS_DECL>(baseDecl);
     Ptr<ClassDecl> outerClass;
     if (baseClass->TestAttr(Attribute::GENERIC)) {
-        outerClass = RawStaticCast<ClassDecl*>(getInstantiatedDecl(*baseClass, baseTy->typeArgs, nullptr));
+        outerClass = GetInstantiatedDecl(baseClass, baseTy->typeArgs, IS_GENERIC_INSTANTIATION_ENABLED);
     } else if (baseClass->genericDecl != nullptr) {
         // Initially instantiated generic base type points to its original package's type
         // But we need to get the current package's version of that instantiated type
-        outerClass = RawStaticCast<ClassDecl*>(getInstantiatedDecl(*baseClass->genericDecl, baseTy->typeArgs, nullptr));
+        outerClass = GetInstantiatedDecl(
+            Ptr(As<ASTKind::CLASS_DECL>(baseClass->genericDecl)), baseTy->typeArgs, IS_GENERIC_INSTANTIATION_ENABLED);
     } else {
-        outerClass = RawStaticCast<ClassDecl*>(baseClass);
+        outerClass = baseClass;
     }
 
     return FindAccessor(*outerClass, resolvedMember, instTys, kind);
@@ -194,8 +258,8 @@ Ptr<FuncDecl> MockUtils::FindAccessor(Ptr<MemberAccess> ma, Ptr<Decl> target, Ac
     return As<ASTKind::FUNC_DECL>(accessor);
 }
 
-Ptr<Decl> MockUtils::FindAccessor(ClassDecl& outerClass, const Ptr<Decl> member,
-    [[maybe_unused]] const std::vector<Ptr<Ty>>& instTys, AccessorKind kind) const
+Ptr<Decl> MockUtils::FindAccessor(
+    ClassDecl& outerClass, const Ptr<Decl> member, const std::vector<Ptr<Ty>>& instTys, AccessorKind kind) const
 {
     for (auto& superDecl : outerClass.GetAllSuperDecls()) {
         // Accessors are generated only for classes
@@ -219,7 +283,9 @@ Ptr<Decl> MockUtils::FindAccessor(ClassDecl& outerClass, const Ptr<Decl> member,
                     return decl.get();
                 }
             } else { // For functions we search accessors by using mangled names due to overloading
-                auto originalMangledName = mangler.Mangle(*getInstantiatedDecl(*member, instTys, outerClass.ty));
+                auto instantiatedDecl = GetInstantiatedDecl(
+                    member, instTys, IS_GENERIC_INSTANTIATION_ENABLED, outerClass.ty);
+                auto originalMangledName = Mangle(*instantiatedDecl);
                 auto originalMangledNameGivenFromAccessor = MangleUtils::ComputeMangledNameWithCustomIdentifier(
                     *decl, originalIdentifier);
                 if (originalMangledName == originalMangledNameGivenFromAccessor) {
@@ -341,6 +407,13 @@ std::string MockUtils::GetOriginalIdentifierOfMockAccessor(const Decl& decl) con
     auto identifier = decl.identifier.Val().substr(
         0, decl.identifier.Val().size() - (MOCKED_ACCESSOR_SUFFIX + outerDeclSuffix).length());
 
+    if (IS_GENERIC_INSTANTIATION_ENABLED && decl.astKind == ASTKind::FUNC_DECL) {
+        auto& fd = static_cast<const FuncDecl&>(decl);
+        if (fd.funcBody->generic) {
+            identifier = identifier.substr(0, identifier.size() - BuildTypeArgumentList(decl).length());
+        }
+    }
+
     return identifier;
 }
 
@@ -380,9 +453,29 @@ std::string MockUtils::BuildArgumentList(const AST::Decl& decl) const
     return result.str();
 }
 
-std::string MockUtils::BuildTypeArgumentList([[maybe_unused]] const Decl& decl)
+std::string MockUtils::BuildTypeArgumentList(const Decl& decl)
 {
-    return "";
+    if (!IS_GENERIC_INSTANTIATION_ENABLED || decl.astKind != ASTKind::FUNC_DECL) {
+        return "";
+    }
+    auto& fd = static_cast<const FuncDecl&>(decl);
+
+    if (!fd.funcBody->generic) {
+        return "";
+    }
+
+    std::string typeArgs = "";
+    typeArgs += "<";
+    size_t i = 0;
+    for (auto& arg : fd.funcBody->generic->typeParameters) {
+        typeArgs += Ty::ToString(arg->ty);
+        if (i != fd.funcBody->generic->typeParameters.size() - 1) {
+            typeArgs += ",";
+        }
+        i++;
+    }
+    typeArgs += ">";
+    return typeArgs;
 }
 
 std::string MockUtils::BuildMockAccessorIdentifier(
@@ -466,11 +559,9 @@ OwnedPtr<AST::Expr> MockUtils::CreateIsSubtypeTypesCall(Ptr<AST::Ty> tyToCheck, 
 
 OwnedPtr<Expr> MockUtils::WrapCallTypeArgsIntoArray(const Decl& decl)
 {
-    CJC_ASSERT(getTypeForTypeParamDecl);
-
     std::vector<OwnedPtr<Expr>> getTypeCalls;
 
-    if (auto outerDecl = decl.outerDecl) {
+    if (auto outerDecl = decl.outerDecl; outerDecl) {
         if (auto generic = outerDecl->GetGeneric()) {
             for (auto& genericParam : generic->typeParameters) {
                 getTypeCalls.emplace_back(CreateGetTypeForTypeParameterCall(genericParam));
@@ -478,7 +569,7 @@ OwnedPtr<Expr> MockUtils::WrapCallTypeArgsIntoArray(const Decl& decl)
         }
     }
 
-    if (auto generic = decl.GetGeneric()) {
+    if (auto generic = decl.GetGeneric(); generic) {
         for (auto& genericParam : generic->typeParameters) {
             getTypeCalls.emplace_back(CreateGetTypeForTypeParameterCall(genericParam));
         }
@@ -548,6 +639,9 @@ Ptr<Ty> MockUtils::GetInstantiatedTy(const Ptr<Ty> ty, std::vector<TypeSubst>& t
 
 std::vector<TypeSubst> MockUtils::BuildGenericSubsts(const Ptr<InheritableDecl> decl)
 {
+    if (IS_GENERIC_INSTANTIATION_ENABLED) {
+        return {};
+    }
     std::vector<TypeSubst> genericSubsts;
     std::queue<Ptr<InheritableDecl>> workList;
     workList.push(decl);
@@ -643,20 +737,6 @@ std::vector<Ptr<Ty>> MockUtils::AddGenericIfNeeded(Decl& originalDecl, Decl& moc
     }
 
     return typeParamTys;
-}
-
-OwnedPtr<GenericParamDecl> MockUtils::CreateGenericParamDecl(Decl& decl)
-{
-    return CreateGenericParamDecl(decl, "T");
-}
-
-OwnedPtr<GenericParamDecl> MockUtils::CreateGenericParamDecl(Decl& decl, const std::string& name)
-{
-    auto typeParam = MakeOwned<GenericParamDecl>();
-    typeParam->identifier = name;
-    typeParam->ty = typeManager.GetGenericsTy(*typeParam);
-    typeParam->outerDecl = &decl;
-    return typeParam;
 }
 
 void MockUtils::SetGetTypeForTypeParamDecl(Package& pkg)
@@ -773,24 +853,50 @@ Ptr<FuncTy> MockUtils::EraseFuncTypes(Ptr<FuncTy> funcTy)
     return typeManager.GetFunctionTy(paramTys, typeManager.GetAnyTy());
 }
 
-bool MockUtils::MayContainInternalTypes(Ptr<AST::Ty> ty) const
+namespace {
+
+struct InternalTypesChecker {
+    bool Check(Ptr<Ty> ty)
+    {
+        if (visitedGenerics.count(ty) > 0) {
+            return false;
+        }
+
+        if (auto decl = Ty::GetDeclOfTy(ty)) {
+            if (decl->linkage == Linkage::INTERNAL) {
+                return true;
+            }
+            if (decl->outerDecl && Check(decl->outerDecl->ty)) {
+                return true;
+            }
+        }
+
+        for (auto paramTy : ty->typeArgs) {
+            if (Check(paramTy)) {
+                return true;
+            }
+        }
+
+        if (auto genericTy = DynamicCast<GenericsTy>(ty)) {
+            visitedGenerics.insert(ty);
+            for (auto upperBound : genericTy->upperBounds) {
+                if (Check(upperBound)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    std::unordered_set<Ptr<Ty>> visitedGenerics;
+};
+
+} // namespace
+
+bool MockUtils::MayContainInternalTypes(Ptr<Ty> ty) const
 {
-    if (auto decl = Ty::GetDeclOfTy(ty)) {
-        if (decl->linkage == Linkage::INTERNAL) {
-            return true;
-        }
-        if (decl->outerDecl && MayContainInternalTypes(decl->outerDecl->ty)) {
-            return true;
-        }
-    }
-
-    for (auto paramTy : ty->typeArgs) {
-        if (MayContainInternalTypes(paramTy)) {
-            return true;
-        }
-    }
-
-    return false;
+    return InternalTypesChecker{}.Check(ty);
 }
 
-}
+} // namespace Cangjie

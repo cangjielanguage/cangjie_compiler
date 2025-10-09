@@ -28,25 +28,32 @@ static const std::string& GetIdentifierToPrint(const AST::Decl& decl)
 using namespace AST;
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+// Annotation mangling rules here.
+// 1) Annotation Factory func: _CAF + package + orignalDecl + "Hv"
+// 2) each annotation var: _CAO + package + originalDecl + 64bit var index + "E"
+// 3) each annotation var init: _CAO + package + originalDecl + 64bit var index + "iiHv"
 GlobalVar* Translator::TranslateCustomAnnoInstanceSig(const Expr& expr, const Func& func, size_t i)
 {
-    auto name = func.GetIdentifierWithoutPrefix() + "_" + std::to_string(i);
-    auto gv = builder.CreateGlobalVar(
-        INVALID_LOCATION, builder.GetType<RefType>(TranslateType(*expr.ty)), name, name, "", func.GetPackageName());
+    auto name = func.GetIdentifierWithoutPrefix();
+    CJC_ASSERT(name.size() > 3UL);
+    // change _CAF prefix to _CAO
+    name[3UL] = 'O';
+    name += MANGLE_COUNT_PREFIX;
+    name += MangleUtils::DecimalToManglingNumber(std::to_string(i));
+    auto varName = name + MANGLE_SUFFIX;
+    auto gv = builder.CreateGlobalVar(INVALID_LOCATION,
+        builder.GetType<RefType>(TranslateType(*expr.ty)), varName, varName, "", func.GetPackageName());
     gv->EnableAttr(Attribute::COMPILER_ADD);
     gv->EnableAttr(Attribute::CONST);
     gv->Set<LinkTypeInfo>(Linkage::INTERNAL);
-    // change _CAN prefix to _CGF
-    auto initName = gv->GetSrcCodeIdentifier();
-    CJC_ASSERT(initName.size() > 3UL);
-    initName[2UL] = 'G';
-    initName[3UL] = 'F';
+    auto initName = std::move(name) + "iiHv";
     auto ty = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetVoidTy());
     auto init = builder.CreateFunc(INVALID_LOCATION, ty, initName, initName, "", func.GetPackageName());
     init->SetFuncKind(FuncKind::GLOBALVAR_INIT);
     init->Set<LinkTypeInfo>(Linkage::INTERNAL);
     init->EnableAttr(Attribute::CONST);
     init->EnableAttr(Attribute::COMPILER_ADD);
+    init->EnableAttr(Attribute::INITIALIZER);
     init->EnableAttr(Attribute::NO_INLINE);
     init->EnableAttr(Attribute::NO_REFLECT_INFO);
     initFuncsForAnnoFactory.push_back(init);
@@ -95,7 +102,8 @@ void Translator::TranslateAnnotationsArrayBody(const Decl& decl, Func& func)
         .args = std::vector<Value*>{array->GetResult(), rawArray->GetResult(), zero->GetResult(), annoArrSize},
         .thisType = builder.GetType<RefType>(arrayType)
     };
-    CreateAndAppendExpression<Apply>(builder.GetUnitTy(), *arrayInit, callContext, currentBlock);
+    auto retType = ReplaceRawGenericArgType(*(*arrayInit)->GetFuncType()->GetReturnType(), table, builder);
+    CreateAndAppendExpression<Apply>(retType, *arrayInit, callContext, currentBlock);
     // load all Annotation Instances from lifted gv and store them into the return value of annoFactoryFunc
     for (size_t i{0}; i < annoInsts.size(); ++i) {
         auto gv = annoInsts[i];

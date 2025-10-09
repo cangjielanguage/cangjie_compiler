@@ -79,7 +79,13 @@ std::vector<uint8_t> TokenSerialization::GetTokensBytes(const std::vector<Token>
         auto begin = tk.Begin();
         pushBytes(reinterpret_cast<const uint8_t*>(&(begin.fileID)), sizeof(uint32_t));
         pushBytes(reinterpret_cast<const uint8_t*>(&(begin.line)), sizeof(int32_t));
-        pushBytes(reinterpret_cast<const uint8_t*>(&(begin.column)), sizeof(int32_t));
+        auto& escapes = GetEscapeTokenKinds();
+        int32_t column = begin.column;
+        if (std::find(escapes.begin(), escapes.end(), tk.kind) != escapes.end() &&
+            column + 1 + static_cast<int>(strLen) == tk.End().column) {
+            ++column;
+        }
+        pushBytes(reinterpret_cast<const uint8_t*>(&column), sizeof(int32_t));
         pushBytes(reinterpret_cast<const uint8_t*>(&(tk.isSingleQuote)), sizeof(uint16_t));
         if (tk.kind == TokenKind::MULTILINE_RAW_STRING) {
             pushBytes(reinterpret_cast<const uint8_t*>(&(tk.delimiterNum)), sizeof(uint16_t));

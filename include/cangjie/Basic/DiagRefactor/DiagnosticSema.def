@@ -112,7 +112,7 @@ ERROR(sema_inherit_abstract_class_static_unimplement_func,
 ERROR(sema_cannot_override, "cannot override %s '%s'")
 ERROR(sema_invalid_member_visibility_in_class, "the visibility of an '%s' %s must be 'public' or 'protected'")
 ERROR(sema_weak_visibility, "a deriving member must be at least as visible as its base member", "%s")
-ERROR(sema_cannot_inherit_sealed, "cannot %s imported 'sealed' %s '%s'")
+ERROR(sema_cannot_inherit_sealed, "cannot %s %s 'sealed' %s '%s'")
 ERROR(sema_inherit_thread_context_invalid,
     "user defined decl '%s' not support to inherit, implement or extend 'ThreadContext'")
 ERROR(sema_inherit_thread_context_not_open,
@@ -166,6 +166,9 @@ ERROR(sema_export_extend_depend_non_export_extend,
 // Property
 ERROR(sema_property_must_have_accessors, "property must have accessors")
 ERROR(sema_immutable_property_with_setter, "immutable property cannot have setter")
+ERROR(sema_property_have_same_declaration_in_inherit_mut, "property '%s' should have 'mut' modifier")
+ERROR(sema_property_have_same_declaration_in_inherit_immut, "property '%s' should be immutable")
+ERROR(sema_property_must_implement_both, "property must implement both getter/setter of interface property '%s'")
 
 // Const evaluation
 ERROR(sema_expect_const, "expected 'const' %s", "%s")
@@ -189,10 +192,43 @@ ERROR(sema_inout_modify_heap_variable,
 ERROR(sema_inout_can_only_used_in_cfunc_calling, "'inout' can only be used in a 'CFunc' calling")
 ERROR(sema_inout_mismatch, "mismatch 'inout' of function argument with type '%s'")
 
-// interoperation
+// Java interoperation
 ERROR(sema_annotation_error_arg_num, "'%s' should have %s arg")
 ERROR(sema_annotation_error_arg_range, "'%s' only supports %s as arg")
 ERROR(sema_annotation_error_object, "'%s' can only modify %s")
+ERROR(sema_java_incorrect_use_between_types,
+    "type annotated with '@Java[\"ext\"]' can only be used within the declaration which has '@Java[\"ext\"]' "
+    "annotation")
+ERROR(sema_java_non_jtype, "%s type in %s '%s' with '@Java' must meet JType constraint")
+ERROR(sema_java_invalid_unit, "%s type in %s '%s' with '@Java' can not be 'Unit'")
+ERROR(sema_java_app_inherit_ext,
+    "only types annotated with '@Java[\"ext\"] can %s from a type annotated with '@Java[\"ext\"]'")
+ERROR(sema_java_unsupported_decl, "%s is not supported in %s '%s' annotated with '@Java'")
+ERROR(sema_missing_java_interop_annotation, "%s '%s' should have '@Java' annotation")
+ERROR(sema_generic_static_access, "cannot access static member with generic parameter in '@Java' types")
+ERROR(sema_primitive_type_as_generics_arg, "only reference types are available for '@Java' generics")
+ERROR(sema_meet_constraint_indirectly, "types that meet constraints by 'extend' cannot be used in '@Java' generics")
+ERROR(
+    sema_static_member_in_interface_must_has_body, "static functions in '@Java'-annotated interfaces must have a body")
+ERROR(sema_extend_a_java_type, "types annotated with '@Java' cannot be extended")
+ERROR(sema_generic_upper_bounds_must_be_java_in_java,
+    "generic type's upper bound in types annotated with '@Java' should be annotated with '@Java' too")
+ERROR(sema_define_java_annotation, "types annotated with '@Java' cannot be annotated with '@Annotation' together")
+ERROR(
+    sema_invalid_use_of_java_annotation, "imported Java annotations can only be used with types annotated with '@Java'")
+ERROR(
+    sema_invalid_use_of_annotation_jffi, "only imported Java annotations can be used with types annotated with '@Java'")
+ERROR(sema_annotation_not_applicable_jffi, "'@%s' not applicable to %s")
+ERROR(sema_cannot_use_annotation_jffi, "cannot use annotation here")
+ERROR(sema_shadow_cannot_in_type_args,
+    "'%s' is not allowd to be used here as type argument, because it shadows field '%s' with its super type '%s'")
+ERROR(sema_unsupported_type_argument_in_java_interop,
+    "type argument in java interoperation should meet 'JType' constraint")
+ERROR(sema_cjmapping_struct_generic_not_supported, "cjmapping struct generic %s is not supported")
+ERROR(sema_cjmapping_struct_inheritance_interface_not_supported, "cjmapping struct inheritance interface is not supported")
+ERROR(sema_cjmapping_decl_not_supported, "cjmapping decl type is not supported for %s")
+ERROR(sema_cjmapping_method_arg_not_supported, "argument type of cjmapping member function is not supported")
+ERROR(sema_cjmapping_method_ret_unsupported, "return type '%s' of function inside %s CJMapping is not supported")
 
 // VArray
 ERROR(sema_varray_size_match, "mismatch 'VArray' type's size", "expected size is %s, found %s")
@@ -221,9 +257,12 @@ ERROR(sema_mock_frozen_required,
 
 // effects
 ERROR(sema_command_handle_type_error, "the command handle type must implement 'effect.Command<T>'")
+ERROR(sema_resumption_handle_type_error, "the type of the resumption must extend 'effect.Resumption'")
+ERROR(sema_resumption_incorrect_return_type, "the return type of the resumption ('%s') does not match the type of the try block ('%s')")
 ERROR(sema_command_resumption_mismatch, "the parameter type of the resumption ('%s') does not match the result type of the command ('%s')")
 ERROR(sema_implicit_resume_outside_handler, "'resume' outside of an immediate handler must have a resumption argument")
 ERROR(sema_resume_no_with, "a resumption of non-Unit type '%s' must have a 'with' or 'throwing' clause")
+ERROR(sema_resume_wrong_resumption_type, "resumptions must be of type 'core.Resumption<T>', but actual type is '%s'")
 ERROR(sema_mismatching_handle_block, "The type of this handle block is '%s', which mismatches the smallest common supertype '%s' of previous branches.")
 ERROR(sema_return_in_try_handle_block, "Return statements are not allowed within try/handle blocks")
 ERROR(sema_command_incompatible_type, "type '%s' does not implement compatible instantiations of 'Command<T>'")
@@ -239,6 +278,72 @@ ERROR(sema_deprecation_override_error, "overridden %s '%s' should be marked with
 WARNING(sema_deprecation_override_warning, DEPRECATED, "overridden %s '%s' should be marked with @Deprecated")
 ERROR(sema_deprecation_redef_error, "redefined %s '%s' should be marked with @Deprecated")
 WARNING(sema_deprecation_redef_warning, DEPRECATED, "redefined %s '%s' should be marked with @Deprecated")
+
+// common/platform matching
+ERROR(sema_common_open_class_no_init, "please implement the constructor explicitly for common open class '%s'")
+ERROR(sema_multiple_common_implementations, "'common' %s has several platform implementations")
+ERROR(sema_common_direct_extension_has_duplicate_private_members, "declaration 'common' extend '%s' has a conflicting private %s '%s'")
+ERROR(sema_not_matched, "'%s' %s can not find '%s' match")
+ERROR(sema_platform_var_not_match_let, "'platform' '%s' can not match 'common' '%s'")
+ERROR(sema_platform_init_common_primary_constructor, "'platform' init can not be used to implement primary 'common' constructor")
+ERROR(platform_has_different_kind, "'platform' decl kind(%s) is not equal to 'common'(%s)")
+ERROR(sema_platform_primary_unmatched_var_decl,
+    "parameter in 'platform' primary constructor must also be a member variable declaration "
+    "if it's a member variable declaration in 'common' primary constructor")
+ERROR(common_non_exaustive_platfrom_exaustive_mismatch, "exhaustive 'common' %s cannot be matched with non-exhaustive 'platform' %s")
+ERROR(sema_platform_has_different_type, "'platform' %s type is not equal to 'common' type")
+ERROR(sema_platform_member_must_have_implementation, "the member %s must have body in 'platform' %s")
+ERROR(sema_platform_has_different_modifier, "'platform' %s modifier is not match 'common' modifier")
+ERROR(sema_platform_has_different_annotation, "'platform' %s annotation is not match 'common' annotation")
+ERROR(sema_platform_has_different_parameter, "'platform' function parameter is not match 'common' parameter")
+ERROR(sema_platform_has_different_super_type, "'platform' %s super types is not match 'common' super types")
+ERROR(sema_platform_has_duplicate_extensions, "declaration 'platform' extend '%s' has a conflicting extension")
+ERROR(sema_common_package_has_main, "main function cannot be used in common package part")
+ERROR(sema_common_static_let_cant_be_initialized_in_static_init, "'common' static let '%s' can not be initialized in static init")
+ERROR(sema_cjmp_abstract_class_member_has_no_explicit_modifier, "'%s' abstract class %s must have explicit '%s' or 'abstract' modifier")
+ERROR(sema_explicitly_abstract_can_not_have_body, "abstract %s can not have body")
+ERROR(sema_explicitly_abstract_only_for_cjmp_abstract_class, "only common/platform class can have explicitly abstract %s")
+ERROR(sema_open_abstract_platform_can_not_replace_open_common, "open common %s can not be overridden with abstract platform %s")
+
+// java mirror
+ERROR(sema_java_mirror_ctor_arg_must_be_java_mirror, "argument type of java-mirrored constructor must be of @JavaMirror type")
+ERROR(sema_java_mirror_method_arg_must_be_java_mirror, "argument type of java-mirrored function must be of @JavaMirror type")
+ERROR(sema_java_mirror_method_ret_unsupported, "return type '%s' of function inside %s class is not supported")
+ERROR(sema_java_mirror_prop_must_be_java_mirror, "property of java-mirrored declaration must be of @JavaMirror type")
+ERROR(sema_java_mirror_subtype_must_be_annotated, "super declaration '%s' is inheritable only for declaration annotated with @JavaMirror or @JavaImpl")
+ERROR(sema_java_mirror_cannot_inherit_pure_cangjie_type, "@JavaMirror-annotated declaration cannot inherit pure cangjie type")
+ERROR(sema_java_impl_cannot_inherit_pure_cangjie_type, "@JavaImpl-annotated declaration cannot inherit pure cangjie type")
+ERROR(sema_java_mirror_subtype_anno_must_inherit_mirror, "@JavaImpl-annotated declaration must inherit @JavaMirror-annotated declaration")
+ERROR(sema_java_mirror_cannot_be_extended_with_interface, "@JavaMirror class cannot be extended with interface")
+ERROR(sema_java_impl_cannot_be_extended_with_interface, "@JavaImpl class cannot be extended with interface")
+ERROR(sema_java_impl_redefinition, "redefinition of java declaration '%s'")
+ERROR(sema_java_mirror_interoplib_must_be_imported, "interoplib.interop must be imported to use java interoperability")
+ERROR(sema_java_interop_not_supported, "Java interoperability feature '%s' is not yet supported")
+WARNING(sema_java_interoplib_version_too_old, UNGROUPED,
+    "java interoplib.interop library's version is too old. Compiler was built expecting versoin '%s'. "
+    "Compatibility problems could happen. Use it at your own risk")
+WARNING(sema_java_interoplib_version_mismatch, UNGROUPED,
+    "java interoplib.interop library's version is '%s', but compiler was built expecting version '%s'. "
+    "Compatibility problems could happen. Use it at your own risk")
+
+// Objective-C mirror
+ERROR(sema_objc_mirror_ctor_param_must_be_objc_compatible, "param type of Objective-C mirror constructor must be Objective-C compatible")
+ERROR(sema_objc_mirror_method_param_must_be_objc_compatible, "param type of Objective-C mirror method must be Objective-C compatible")
+ERROR(sema_objc_mirror_method_ret_must_be_objc_compatible, "return type of Objective-C mirror method must be Objective-C compatible")
+ERROR(sema_objc_mirror_prop_must_be_objc_compatible, "Objective-C mirror property type must be Objective-C compatible")
+ERROR(sema_objc_mirror_field_must_be_objc_compatible, "Objective-C mirror field type must be Objective-C compatible")
+ERROR(sema_objc_mirror_decl_cannot_inherit, "Objective-C mirror cannot inherit other supertypes")
+ERROR(sema_objc_mirror_subtype_cannot_multiple_inherit, "Objective-C mirror subtype cannot inherit multiple types (only 1 interface or 1 class is allowed)")
+ERROR(sema_objc_mirror_subtype_must_be_annotated, "Objective-C mirror subtype must be annotated with @ObjCMirror or @ObjCImpl")
+ERROR(sema_objc_mirror_subtype_must_inherit_mirror, "Objective-C mirror subtype must inherit Objective-C mirror")
+ERROR(sema_objc_mirror_must_inherit_mirror, "@ObjCMirror declaration cannot inherit not @ObjCMirror declarations")
+ERROR(sema_objc_mirror_interoplib_must_be_imported, "interoplib.objc must be imported to use Objective-C interoperability")
+ERROR(sema_objc_interop_not_supported, "Objective-C interoperability feature '%s' is not yet supported")
+ERROR(sema_objc_pointer_argument_must_be_objc_compatible, "ObjCPointer can only be used with Objective-C compatible types")
+
+ERROR(sema_foreign_name_appeared_in_child, "@ForeignName could not appear on overridden declaration")
+ERROR(sema_foreign_name_conflicting_annotation, "Declaration '%s' has a conflicting @ForeignName annotation")
+ERROR(sema_foreign_name_conflicting_derived_annotation, "Declaration '%s' has a conflicting derived @ForeignName '%s'")
 
 // @IfAvailable
 ERROR(sema_ifavailable_arg_no_name, "the first argument of @IfAvailable expression must have a name")

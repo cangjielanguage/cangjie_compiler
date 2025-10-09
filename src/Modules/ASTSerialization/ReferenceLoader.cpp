@@ -168,6 +168,7 @@ void ASTLoader::ASTLoaderImpl::LoadRefs()
         CJC_NULLPTR_CHECK(declObj);
         CJC_NULLPTR_CHECK(decl);
         LoadDeclRefs(*declObj, *decl);
+        LoadDeclDependencies(*declObj, *decl);
     }
     for (auto [index, expr] : allLoadedExprs) {
         auto exprObj = GetFormatExprByIndex(static_cast<FormattedIndex>(index));
@@ -414,6 +415,19 @@ void ASTLoader::ASTLoaderImpl::LoadTypeAliasDeclRef(const PackageFormat::Decl& d
         refType->typeArguments.emplace_back(WrapTypeInNode(typeArg));
     }
     tad.type = std::move(refType);
+}
+
+void ASTLoader::ASTLoaderImpl::LoadDeclDependencies(const PackageFormat::Decl& decl, Decl& astDecl)
+{
+    auto rawDeps = decl.dependencies();
+    if (deserializingCommon && rawDeps) {
+        auto length = static_cast<uoffset_t>(rawDeps->size());
+        for (uoffset_t i = 0; i < length; i++) {
+            auto index = rawDeps->Get(i);
+            auto dependency = GetDeclFromIndex(index);
+            astDecl.dependencies.emplace_back(dependency);
+        }
+    }
 }
 
 void ASTLoader::ASTLoaderImpl::LoadDeclRefs(const PackageFormat::Decl& declObj, Decl& decl)

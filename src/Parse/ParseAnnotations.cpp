@@ -24,12 +24,17 @@ void ParserImpl::ParseAttributeAnnotation(Annotation& anno)
     auto pos = lookahead.Begin();
     anno.lsquarePos = pos;
     Next();
-    do {
+    while (true) {
         if (SeeingAny({TokenKind::IDENTIFIER, TokenKind::STRING_LITERAL}) || SeeingContextualKeyword()) {
-            anno.attrs.push_back(lookahead.Value());
+            anno.attrs.push_back(lookahead);
             Next();
         }
-    } while (Skip(TokenKind::COMMA));
+        if (Skip(TokenKind::COMMA)) {
+            anno.attrCommas.push_back(lastToken.Begin());
+            continue;
+        }
+        break;
+    }
     if (!Skip(TokenKind::RSQUARE)) {
         DiagExpectedRightDelimiter("[", pos);
         ConsumeUntil(TokenKind::NL);
@@ -293,6 +298,16 @@ void ParserImpl::CheckDeprecatedAnnotation(const Annotation& anno)
     }
 }
 
+void ParserImpl::CheckObjCMirrorAnnotation(const Annotation& anno) const
+{
+    static const std::string OBJ_C_MIRROR_NAME = "@ObjCMirror";
+    static const std::string OBJ_C_IMPL_NAME = "@ObjCImpl";
+
+    const auto& annotationName =
+        anno.kind == AnnotationKind::OBJ_C_MIRROR ? OBJ_C_MIRROR_NAME : OBJ_C_IMPL_NAME;
+    ffiParser->CheckZeroOrSingleStringLitArgAnnotation(anno, annotationName);
+}
+
 OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
 {
     if (this->enableCustomAnno && SeeingMacroCallDecl()) {
@@ -326,6 +341,21 @@ OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
         case AnnotationKind::DEPRECATED: {
             ParseAnnotationArguments(*annotation);
             CheckDeprecatedAnnotation(*annotation);
+            break;
+        }
+        case AnnotationKind::JAVA_MIRROR:
+        case AnnotationKind::JAVA_IMPL: {
+            ParseAnnotationArguments(*annotation);
+            break;
+        }
+        case AnnotationKind::FOREIGN_NAME: {
+            ParseAnnotationArguments(*annotation);
+            break;
+        }
+        case AnnotationKind::OBJ_C_MIRROR:
+        case AnnotationKind::OBJ_C_IMPL: {
+            ParseAnnotationArguments(*annotation);
+            CheckObjCMirrorAnnotation(*annotation);
             break;
         }
         default: {

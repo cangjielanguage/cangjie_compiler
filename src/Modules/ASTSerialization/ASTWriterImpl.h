@@ -36,6 +36,7 @@ struct DeclInfo {
     FormattedIndex ty;
     bool isTopLevel;
     flatbuffers::Offset<flatbuffers::Vector<TAnnoOffset>> annotations;
+    flatbuffers::Offset<flatbuffers::Vector<TFullIdOffset>> dependencies;
 };
 
 struct NodeInfo {
@@ -57,7 +58,14 @@ public:
     {
     }
 
+    void SetSerializingCommon();
+    void SetAttributesIfSerializingCommonPartOfPackage(AST::Package &package);
     void PreSaveFullExportDecls(AST::Package& package);
+    inline bool NeedToExportDecl(Ptr<const AST::Decl> decl);
+    void DFSCollectFilesDeclarations(Ptr<AST::File> file,
+        std::unordered_set<AST::File*>& alreadyVisitedFiles,
+        std::vector<Ptr<const AST::Decl>>& topLevelDeclsOrdered,
+        std::unordered_set<AST::Ty*>& usedTys);
     // Export external decls of a package AST to a buffer.
     void ExportAST(const AST::PackageDecl& package);
     void AST2FB(std::vector<uint8_t>& data, const AST::PackageDecl& package);
@@ -71,6 +79,7 @@ private:
     DiagnosticEngine& diag;
     ExportConfig config;
     bool exportFuncBody = true;
+    bool serializingCommon = false;
     flatbuffers::FlatBufferBuilder builder{INITIAL_FILE_SIZE};
     std::string packageDepInfo;
     const CjoManager& cjoManager;
@@ -80,6 +89,7 @@ private:
     // Save all file names in the package, the vector pos is file index.
     std::vector<TStringOffset> allFiles;
     std::vector<TImportsOffset> allFileImports;
+    std::vector<TFileInfoOffset> allFileInfo;
     std::vector<TTypeOffset> allTypes;
     std::vector<TDeclOffset> allDecls;
     std::vector<TExprOffset> allExprs;
@@ -96,6 +106,7 @@ private:
 
     std::unordered_set<Ptr<const AST::Decl>> topLevelDecls;
     std::unordered_set<Ptr<const AST::Decl>> preSavedDecls;
+    
     inline FormattedIndex PreSaveDecl(const AST::Decl& decl)
     {
         if (auto found = savedDeclMap.find(&decl); found != savedDeclMap.end()) {
@@ -160,6 +171,9 @@ private:
         {AST::ASTKind::GENERIC_PARAM_DECL, Proxy<AST::GenericParamDecl>(&ASTWriterImpl::SaveGenericParamDecl)},
     };
 
+    bool PlannedToBeSerialized(Ptr<const AST::Decl> decl);
+    std::vector<TFullIdOffset> CollectInitializationDependencies(const AST::Decl& decl,
+        std::set<const AST::Decl*> visited);
     TFuncBodyOffset SaveFuncBody(const AST::FuncBody& funcBody);
     // Save generic Information
     flatbuffers::Offset<PackageFormat::Generic> SaveGeneric(const AST::Decl& decl);
@@ -171,9 +185,10 @@ private:
     // the decl node.
     FormattedIndex GetDeclIndex(Ptr<const AST::Decl> decl);
     // Get full decl index from current package or imported packages.
-    TFullIdOffset GetFullDeclIndex(Ptr<AST::Decl> decl);
+    TFullIdOffset GetFullDeclIndex(Ptr<const AST::Decl> decl);
     std::vector<TAnnoOffset> SaveAnnotations(const AST::Decl& decl);
     std::vector<TAnnoArgOffset> SaveAnnotationArgs(const AST::Annotation& annotation);
+    flatbuffers::Offset<flatbuffers::Vector<AST::AttrSizeType>> SaveAttributes(const AST::AttributePack& attrs);
     template <class T> auto GetGenericDeclIndex(T& decl)
     {
         // NOTE: do not add partial instnatied decl's generic reference.

@@ -40,6 +40,37 @@ flatbuffers::Offset<flatbuffers::Vector<const NodeFormat::Position*>> NodeWriter
     return builder.CreateVectorOfStructs(positions.size(), filler);
 }
 
+flatbuffers::Offset<NodeFormat::FeaturesDirective> NodeWriter::SerializeFeaturesDirective(
+    AstFeaturesDirective featuresDirective)
+{
+    if (featuresDirective == nullptr) {
+        return flatbuffers::Offset<NodeFormat::FeaturesDirective>();
+    }
+    auto ftrNodeBase = SerializeNodeBase(featuresDirective);
+    auto commas = CreatePositionVector(featuresDirective->commaPoses);
+    std::vector<flatbuffers::Offset<NodeFormat::FeatureId>> itemsVec;
+    for (const auto& item : featuresDirective->content) {
+        itemsVec.emplace_back(SerializeFeatureId(item));
+    }
+    auto items = builder.CreateVector(itemsVec);
+    return NodeFormat::CreateFeaturesDirective(builder, ftrNodeBase, items, commas);
+}
+ 
+flatbuffers::Offset<NodeFormat::FeatureId> NodeWriter::SerializeFeatureId(const AST::FeatureId& content)
+{
+    auto nodeBase = SerializeNodeBase(&content);
+    std::vector<std::string> idents;
+    std::vector<Position> poses;
+    for (auto& ident : content.identifiers) {
+        idents.emplace_back(ident.Val());
+        poses.emplace_back(ident.Begin());
+    }
+    auto identifiers = builder.CreateVectorOfStrings(idents);
+    auto identPoses = CreatePositionVector(poses);
+    auto dotPoses = CreatePositionVector(content.dotPoses);
+    return NodeFormat::CreateFeatureId(builder, nodeBase, identifiers, identPoses, dotPoses);
+}
+
 flatbuffers::Offset<NodeFormat::PackageSpec> NodeWriter::SerializePackageSpec(AstPackageSpec packageSpec)
 {
     if (packageSpec == nullptr) {
@@ -121,6 +152,7 @@ flatbuffers::Offset<NodeFormat::File> NodeWriter::SerializeFile(AstFile file)
     auto fNodeBase = SerializeNodeBase(file);
     auto fileName = builder.CreateString(file->fileName);
     auto filePath = builder.CreateString(file->filePath);
+    auto feature = SerializeFeaturesDirective(file->feature.get());
     auto package = SerializePackageSpec(file->package.get());
     std::vector<flatbuffers::Offset<NodeFormat::ImportSpec>> importsVec;
     for (auto& import : file->imports) {
@@ -132,7 +164,7 @@ flatbuffers::Offset<NodeFormat::File> NodeWriter::SerializeFile(AstFile file)
     }
     auto imports = builder.CreateVector(importsVec);
     auto decls = FlatVectorCreateHelper<NodeFormat::Decl, Decl, AstDecl>(file->decls, &NodeWriter::SerializeDecl);
-    return NodeFormat::CreateFile(builder, fNodeBase, fileName, filePath, package, imports, decls);
+    return NodeFormat::CreateFile(builder, fNodeBase, fileName, filePath, package, imports, decls, feature);
 }
 
 flatbuffers::Offset<NodeFormat::MatchCase> NodeWriter::SerializeMatchCase(AstMatchCase matchcase)
@@ -1012,7 +1044,7 @@ flatbuffers::Offset<NodeFormat::Annotation> NodeWriter::SerializeAnnotation(AstA
     auto overlowStrategy = builder.CreateString(OverflowStrategyName(annotation->overflowStrategy));
     std::vector<flatbuffers::Offset<flatbuffers::String>> vecAttrs;
     for (auto& item : annotation->attrs) {
-        auto fbItem = builder.CreateString(item);
+        auto fbItem = builder.CreateString(item.Value());
         vecAttrs.push_back(fbItem);
     }
     auto fbAttrs = builder.CreateVector(vecAttrs);
@@ -1039,8 +1071,14 @@ std::vector<flatbuffers::Offset<NodeFormat::Token>> NodeWriter::TokensVectorCrea
     for (auto& token : tokenVector) {
         auto kind = static_cast<uint16_t>(token.kind);
         auto value = builder.CreateString(token.Value());
-        auto pos = FlatPosCreateHelper(token.Begin());
-        vecToken.push_back(NodeFormat::CreateToken(builder, kind, value, &pos));
+        auto& escapes = GetEscapeTokenKinds();
+        NodeFormat::Position pos;
+        if (std::find(escapes.begin(), escapes.end(), token.kind) != escapes.end() &&
+            token.Begin() + token.Value().size() + 1 == token.End()) {
+            pos = FlatPosCreateHelper(token.Begin() + 1);
+        } else {
+            pos = FlatPosCreateHelper(token.Begin());
+        }        vecToken.push_back(NodeFormat::CreateToken(builder, kind, value, &pos));
     }
     return vecToken;
 }

@@ -24,6 +24,7 @@
 #include "cangjie/CHIR/CHIRPrinter.h"
 #include "cangjie/CHIR/Interpreter/CHIR2BCHIR.h"
 #include "cangjie/CHIR/Serializer/CHIRDeserializer.h"
+#include "cangjie/CHIR/Serializer/CHIRSerializer.h"
 #include "cangjie/CHIR/UserDefinedType.h"
 #include "cangjie/Frontend/CompileStrategy.h"
 #include "cangjie/IncrementalCompilation/ASTCacheCalculator.h"
@@ -293,12 +294,6 @@ bool CompilerInstance::PerformMacroExpand()
 void CompilerInstance::CacheCompileArgs()
 {
     cachedInfo.compileArgs = invocation.globalOptions.ToSerialized();
-}
-
-void CompilerInstance::CacheSourcePackage(ASTCache&& ast, ASTCache&& imports)
-{
-    cachedInfo.curPkgASTCache = std::move(ast);
-    cachedInfo.importedASTCache = std::move(imports);
 }
 
 void CompilerInstance::CacheSemaUsage(SemanticInfo&& info)
@@ -879,28 +874,6 @@ ASTContext* CompilerInstance::GetASTContextByPackage(Ptr<Package> pkg) const
     return found != pkgCtxMap.end() ? found->second.get() : nullptr;
 }
 
-std::string CompilerInstance::GenerateFileWithExtension(const std::string& file, const std::string& extension) const
-{
-    GlobalOptions globalOptions = invocation.globalOptions;
-    std::string fileWithExtension;
-    auto packageName = file;
-    if (!globalOptions.compilePackage) {
-        if (FileUtil::IsDir(invocation.globalOptions.output)) {
-            std::string fileName = FileUtil::GetFileNameWithoutExtension(globalOptions.srcFiles[0]);
-            fileWithExtension = FileUtil::JoinPath(globalOptions.output, fileName) + extension;
-        } else {
-            fileWithExtension = FileUtil::AppendExtension(globalOptions.output, "", extension);
-        }
-    } else {
-        if (FileUtil::IsDir(invocation.globalOptions.output)) {
-            fileWithExtension = FileUtil::JoinPath(globalOptions.output, packageName) + extension;
-        } else {
-            fileWithExtension = globalOptions.output;
-        }
-    }
-    return fileWithExtension;
-}
-
 void CompilerInstance::AddSourceToMember()
 {
     if (!pkgs.empty()) {
@@ -1087,20 +1060,6 @@ bool CompilerInstance::ModularizeCompilation()
         invocation.globalOptions.indirectBuiltinDependencies.insert(objFile);
     }
     return packageManager->ResolveDependence(pkgs);
-}
-
-void CompilerInstance::AddDeclToPackage(OwnedPtr<Decl> decl)
-{
-    Ptr<File> targetFile = currentPkg->files.back().get();
-    decl->EnableAttr(Attribute::COMPILER_ADD);
-    decl->moduleName = Utils::GetRootPackageName(currentPkg->fullPackageName);
-    decl->fullPackageName = currentPkg->fullPackageName;
-    decl->curFile = targetFile;
-    for (auto& mem : decl->GetMemberDecls()) {
-        mem->curFile = targetFile;
-    }
-    // Add decl at the end of the last file in this package.
-    targetFile->decls.emplace_back(std::move(decl));
 }
 
 bool CompilerInstance::DeserializeCHIR()

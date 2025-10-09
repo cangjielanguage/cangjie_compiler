@@ -27,6 +27,7 @@ WARNING(driver_warning_invalid_path, DRIVER_ARG, "Invalid path: '%s'.%s")
 WARNING(driver_warning_not_pdba_file, DRIVER_ARG, "Not a .pdba file: '%s' ('%s').%s")
 WARNING(driver_warning_not_cjo_file, DRIVER_ARG, "Not a .cjo file: '%s' ('%s').%s")
 WARNING(driver_warning_not_cj_file, DRIVER_ARG, "Not a .cj file: '%s' ('%s').%s")
+WARNING(driver_warning_not_chir_file, DRIVER_ARG, "Not a .chir file: '%s' ('%s').%s")
 WARNING(driver_warning_not_bc_file, DRIVER_ARG, "Not a .bc file: '%s' ('%s').%s")
 WARNING(driver_warning_not_archive_file, DRIVER_ARG, "Not a .a file: '%s' ('%s').%s")
 WARNING(driver_warning_not_object_file, DRIVER_ARG, "Not a .o file: '%s' ('%s').%s")
@@ -51,6 +52,7 @@ ERROR(driver_invalid_unsupport_extension, "unsupported output extension '.%s', e
 ERROR(driver_invalid_require_extension, "output to '%s' is not allowed, extension '.%s' is required")
 ERROR(driver_path_exceeds_length_limit, "the path length for %s exceeds the system limit (%s characters)")
 ERROR(driver_unsupported_target_cpu, "cpu type '%s' is not supported for the current target")
+ERROR(driver_require_chir_directory, "expected one chir path to build")
 
 // condition compilation arg error and warnings
 ERROR(driver_cfg_value_err, "user defined condition should be like: k1=v1,k2=v2 or <directory path of cfg.toml>")

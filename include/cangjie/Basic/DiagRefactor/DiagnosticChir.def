@@ -47,4 +47,10 @@ WARNING(chir_unreachable_pattern, UNUSED, "unreachable pattern")
 ERROR(chir_eval_support, "const evaluation has been disabled by compiler option `--no-interp-const-eval`")
 ERROR(chir_annotation_not_applicable, "'@%s' not applicable to %s")
 
+// CJMP
+ERROR(frontend_can_not_handle_to_many_chir, "Can't handle more than one CHIR file")
+
+// Native FFI
+ERROR(chir_native_ffi_java_illegal_type_cast, "Illegal type cast from Java type '%s' to non Java type '%s'")
+
 ERROR(chir_diag_end, "chir_diag_end")

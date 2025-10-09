@@ -36,6 +36,31 @@ void WarnConflictImport(DiagnosticEngine& diag, const std::string& name, const R
     builder.AddNote(previous, "The previous was imported here");
 }
 
+void WarnRepeatedFeatureName(DiagnosticEngine& diag, std::string& name, const Range& current, const Range& previous)
+{
+    auto builder = diag.DiagnoseRefactor(DiagKindRefactor::feature_already_seen_name, current);
+    builder.AddNote(previous, "feature '" +  name + "' previously used here");
+}
+
+// void DiagForNullPackageFeature(DiagnosticEngine& diag, const Ptr<File> file, const Ptr<FeaturesDirective> refFeature)
+void DiagForNullPackageFeature(DiagnosticEngine& diag, const Range& current, const Ptr<FeaturesDirective> refFeature)
+{
+    auto builder = diag.DiagnoseRefactor(DiagKindRefactor::feature_null_declaration, current);
+    builder.AddNote(
+        MakeRange(refFeature->content[0].begin, refFeature->end),
+        "perhapse you meant these features");
+}
+
+void DiagForDifferentPackageFeatureConsistency(DiagnosticEngine& diag, const Ptr<FeaturesDirective> feature,
+    const Ptr<FeaturesDirective> refFeature)
+{
+    auto builder = diag.DiagnoseRefactor(DiagKindRefactor::feature_different_consistency,
+        MakeRange(feature->content[0].begin, feature->end));
+    builder.AddNote(
+        MakeRange(refFeature->content[0].begin, refFeature->end),
+        "perhapse you meant these features");
+}
+
 void DiagForDifferentPackageNames(DiagnosticEngine& diag,
     const std::map<std::pair<std::string, std::string>, std::pair<Position, bool>>& packageNamePosMap)
 {

@@ -64,6 +64,10 @@ const uint8_t OCT_BASE = 8;
 const uint8_t DEC_BASE = 10;
 const uint8_t HEX_BASE = 16;
 
+/// Get a list of contextual keyword.
+const std::vector<TokenKind>& GetContextualKeyword();
+bool IsContextualKeyword(std::string_view s);
+
 class Lexer {
 public:
     /// Create Lexer.

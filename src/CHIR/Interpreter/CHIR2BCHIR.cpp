@@ -43,7 +43,7 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslatePackage(
         // the object class isn't defined anywhere, so we force it's generation when compiling core
         bchir.AddSClass("_CN8std$core6ObjectE", Bchir::SClassInfo());
     }
-    TranslateClasses<ForConstEval>(chirPkg);
+    TranslateClassesLike<ForConstEval>(chirPkg);
     TranslateGlobalVars<ForConstEval>(chirPkg);
     TranslateFunctions<ForConstEval>(chirPkg);
     bchir.SetGlobalInitFunc(chirPkg.GetPackageInitFunc()->GetIdentifierWithoutPrefix());
@@ -106,6 +106,14 @@ bool CHIR2BCHIR::IsConstClass(const CustomTypeDef& def) const
     }
 };
 
+template <bool ForConstEval> void CHIR2BCHIR::TranslateClassesLike(const Package& chirPkg)
+{
+    TranslateClasses<ForConstEval>(chirPkg);
+    TranslateStucts<ForConstEval>(chirPkg);
+    TranslateEnums<ForConstEval>(chirPkg);
+    TranslateExtends<ForConstEval>(chirPkg);
+}
+
 template <bool ForConstEval> void CHIR2BCHIR::TranslateClasses(const Package& chirPkg)
 {
     for (const auto chirClass : chirPkg.GetAllClassDef()) {
@@ -124,6 +132,10 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslateClasses(const Package& ch
         CollectMethods(*chirClass, classInfo);
         AddClassInfo(chirClass->GetIdentifierWithoutPrefix(), std::move(classInfo), bchir, isIncremental);
     }
+}
+
+template <bool ForConstEval> void CHIR2BCHIR::TranslateStucts(const Package& chirPkg)
+{
     for (const auto chirClass : chirPkg.GetAllStructDef()) {
         if constexpr (ForConstEval) {
             if (!IsConstClass(*chirClass)) {
@@ -134,11 +146,19 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslateClasses(const Package& ch
         CollectMethods(*chirClass, classInfo);
         AddClassInfo(chirClass->GetIdentifierWithoutPrefix(), std::move(classInfo), bchir, isIncremental);
     }
+}
+
+template <bool ForConstEval> void CHIR2BCHIR::TranslateEnums(const Package& chirPkg)
+{
     for (const auto chirClass : chirPkg.GetAllEnumDef()) {
         Bchir::SClassInfo classInfo;
         CollectMethods(*chirClass, classInfo);
         AddClassInfo(chirClass->GetIdentifierWithoutPrefix(), std::move(classInfo), bchir, isIncremental);
     }
+}
+
+template <bool ForConstEval> void CHIR2BCHIR::TranslateExtends(const Package& chirPkg)
+{
     for (const auto chirClass : chirPkg.GetAllExtendDef()) {
         auto extendedDef = chirClass->GetExtendedCustomTypeDef();
         if constexpr (ForConstEval) {

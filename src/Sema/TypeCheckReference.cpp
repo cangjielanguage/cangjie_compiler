@@ -553,6 +553,9 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::FilterAndGetTargetsOfObjAccess(
 void TypeChecker::TypeCheckerImpl::InstantiateReferenceType(
     const ASTContext& ctx, NameReferenceExpr& expr, const TypeSubst& instantiateMap)
 {
+    if (expr.compilerAddedTyArgs) {
+        expr.typeArguments.clear();
+    }
     auto target = expr.GetTarget();
     if (!expr.GetTypeArgs().empty()) {
         // For partial generic typealias case.
@@ -783,6 +786,27 @@ void TypeChecker::TypeCheckerImpl::CheckLegalityOfReference(ASTContext& ctx, Nod
     Walker(&node, id, preVisit, postVisit).Walk();
 }
 
+std::string TypeChecker::TypeCheckerImpl::GetDiagnoseKindOfFuncDecl(const Ptr<Decl> target) const
+{
+    auto funcDecl = DynamicCast<const FuncDecl*>(target);
+    CJC_ASSERT(funcDecl);
+
+    if (target->TestAnyAttr(Attribute::CONSTRUCTOR)) {
+        return "constructor";
+    } else if (target->TestAttr(AST::Attribute::ENUM_CONSTRUCTOR)) {
+        if (funcDecl->outerDecl) {
+            auto enumName = funcDecl->outerDecl->identifier.GetRawText();
+            return "enum '" + enumName + "' constructor";
+        }
+
+        return "enum constructor";
+    } else if (funcDecl->op != TokenKind::ILLEGAL) {
+        return "operator";
+    }
+
+    return "function";
+}
+
 std::optional<std::string> TypeChecker::TypeCheckerImpl::GetDiagnoseKindOfFuncDecl(
     const Ptr<Node> usage,
     const Ptr<Decl> target
@@ -791,10 +815,6 @@ std::optional<std::string> TypeChecker::TypeCheckerImpl::GetDiagnoseKindOfFuncDe
     if (target->TestAnyAttr(Attribute::MACRO_FUNC)) {
         // deprecation of macroses checked in MACRO_EXPAND stage
         return std::nullopt;
-    }
-
-    if (target->TestAnyAttr(Attribute::CONSTRUCTOR)) {
-        return "constructor";
     }
 
     auto funcDecl = DynamicCast<const FuncDecl*>(target);
@@ -823,17 +843,14 @@ std::optional<std::string> TypeChecker::TypeCheckerImpl::GetDiagnoseKindOfFuncDe
         }
     } else if (funcDecl->isSetter) {
         return "property setter of";
-    } else if (funcDecl->op != TokenKind::ILLEGAL) {
-        return "operator";
-    } else {
-        return "function";
     }
 
-    return std::nullopt;
+    return GetDiagnoseKindOfFuncDecl(target);
 }
 
 std::string TypeChecker::TypeCheckerImpl::GetDiagnoseKindOfVarDecl(const Ptr<Decl> target) const
 {
+    CJC_ASSERT(target->astKind == ASTKind::VAR_DECL);
     if (target->TestAttr(AST::Attribute::ENUM_CONSTRUCTOR)) {
         if (auto vd = StaticCast<VarDecl*>(target); vd) {
             if (vd->outerDecl) {

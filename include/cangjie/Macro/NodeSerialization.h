@@ -54,6 +54,7 @@ using AstEnumPattern = Ptr<const Cangjie::AST::EnumPattern>;
 using AstMatchCase = Ptr<const Cangjie::AST::MatchCase>;
 using AstMatchCaseOther = Ptr<const Cangjie::AST::MatchCaseOther>;
 using AstFile = Ptr<const Cangjie::AST::File>;
+using AstFeaturesDirective = Ptr<const Cangjie::AST::FeaturesDirective>;
 using AstPackageSpec = Ptr<const Cangjie::AST::PackageSpec>;
 using AstImportSpec = Ptr<const Cangjie::AST::ImportSpec>;
 
@@ -214,6 +215,8 @@ private:
     flatbuffers::Offset<NodeFormat::ImportSpec> SerializeImportSpec(AstImportSpec importSpec);
     flatbuffers::Offset<NodeFormat::ImportContent> SerializeImportContent(const AST::ImportContent& content);
     flatbuffers::Offset<NodeFormat::PackageSpec> SerializePackageSpec(AstPackageSpec packageSpec);
+    flatbuffers::Offset<NodeFormat::FeaturesDirective> SerializeFeaturesDirective(AstFeaturesDirective featureDirective);
+    flatbuffers::Offset<NodeFormat::FeatureId> SerializeFeatureId(const AST::FeatureId& featureId);
 };
 
 template <typename K, typename U, typename V>

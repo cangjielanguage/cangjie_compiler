@@ -321,6 +321,9 @@ public:
         return ValueTypeConverter::VisitValue(o);
     }
 
+    void VisitSubValue(Func& o) override;
+    void VisitValueDefaultImpl(Value& o) override;
+
 protected:
     void VisitSubExpression(RawArrayAllocate& o) override;
     void VisitSubExpression(RawArrayAllocateWithException& o) override;

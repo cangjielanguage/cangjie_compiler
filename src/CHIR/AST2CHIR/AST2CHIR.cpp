@@ -9,7 +9,6 @@
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/Basic/Match.h"
-#include "cangjie/Basic/SourceManager.h"
 #include "cangjie/CHIR/AST2CHIR/AST2CHIRChecker.h"
 #include "cangjie/CHIR/AST2CHIR/CollectLocalConstDecl/CollectLocalConstDecl.h"
 #include "cangjie/CHIR/AST2CHIR/GlobalDeclAnalysis.h"
@@ -17,6 +16,7 @@
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/CHIR/Visitor/Visitor.h"
+#include "cangjie/CHIR/Serializer/CHIRDeserializer.h"
 #include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/Utils/ParallelUtil.h"
 
@@ -79,7 +79,9 @@ void AST2CHIR::CollectFuncsAndVars()
         for (auto& var : candidateVars) {
             // Skip the static variables which are inited by the `static init func`
             if (var->TestAttr(AST::Attribute::STATIC) && var->identifier != STATIC_INIT_VAR) {
-                if (varsInitedByStaticInitFunc.find(var) != varsInitedByStaticInitFunc.end()) {
+                bool fromCommon = var->TestAttr(AST::Attribute::FROM_COMMON_PART);
+                bool initedInStaticInit = varsInitedByStaticInitFunc.find(var) != varsInitedByStaticInitFunc.end();
+                if (!fromCommon && initedInStaticInit) {
                     continue;
                 }
             }
@@ -167,7 +169,7 @@ std::pair<InitOrder, bool> AST2CHIR::SortGlobalVarDecl(const AST::Package& pkg)
     }
 
     auto analysis = GlobalDeclAnalysis(
-        diag, gim, kind, funcsAndVars, localConstVars, staticInitFuncInfoMap);
+        diag, gim, kind, funcsAndVars, localConstVars, staticInitFuncInfoMap, outputCHIR, mergingPlatform);
     auto initOrder = analysis.Run(nodesWithDeps, fileAndVarMap, cachedInfo);
 
     // Speically, now we want to flattern the local const VarWithPattern decl which will be useful in translation later.
@@ -245,9 +247,13 @@ void AST2CHIR::FlatternPattern(const AST::Pattern& pattern, bool isLocalConst)
 void AST2CHIR::SetInitFuncForStaticVar()
 {
     for (auto& skipedStaticVar : varsInitedByStaticInitFunc) {
+        // If common var with platform one, need to skip
+        auto skipedStaticVarVal = globalCache.TryGet(*skipedStaticVar);
+        if (skipedStaticVarVal == nullptr || skipedStaticVar->platformImplementation) {
+            continue;
+        }
         CJC_ASSERT(skipedStaticVar->astKind == AST::ASTKind::VAR_DECL);
         // Also set the init func here
-        auto skipedStaticVarVal = globalCache.Get(*skipedStaticVar);
         if (auto skipedStaticVarInCHIR = DynamicCast<GlobalVar*>(skipedStaticVarVal)) {
             auto staticInitFuncInAST = staticInitFuncInfoMap.at(skipedStaticVar->outerDecl).staticInitFunc;
             auto staticInitFuncInCHIR = DynamicCast<Func*>(globalCache.Get(*staticInitFuncInAST));
@@ -260,7 +266,7 @@ void AST2CHIR::SetInitFuncForStaticVar()
 Translator AST2CHIR::CreateTranslator()
 {
     return Translator{builder, chirType, opts, gim, globalCache, localConstVars, localConstFuncs, kind,
-        annoFactoryFuncs, maybeUnreachable, isComputingAnnos, initFuncsForAnnoFactory};
+        deserializedVals, annoFactoryFuncs, maybeUnreachable, isComputingAnnos, initFuncsForAnnoFactory, types};
 }
 
 void AST2CHIR::TranslateInitOfGlobalVars(const AST::Package& pkg, const InitOrder& initOrder)
@@ -364,6 +370,9 @@ void AST2CHIR::TranslateAllDecls(const AST::Package& pkg, const InitOrder& initO
         TranslateTopLevelDeclsInParallel();
     } else {
         for (auto decl : globalAndMemberFuncs) {
+            if (!NeedTranslate(*decl)) {
+                continue;
+            }
             auto trans = CreateTranslator();
             trans.SetTopLevel(*decl);
             Translator::TranslateASTNode(*decl, trans);
@@ -399,13 +408,20 @@ void AST2CHIR::TranslateInParallel(const std::vector<Ptr<const AST::Decl>>& decl
 {
     Utils::ParallelUtil allDeclsParallel(builder, opts.GetJobs());
     allDeclsParallel.RunAST2CHIRInParallel(decls, chirType, opts, gim, globalCache, localConstVars, localConstFuncs,
-        kind, Translator::TranslateASTNode, maybeUnreachable, isComputingAnnos,
-        initFuncsForAnnoFactory, annoFactoryFuncs);
+        kind, deserializedVals, Translator::TranslateASTNode, maybeUnreachable, isComputingAnnos,
+        initFuncsForAnnoFactory, types, annoFactoryFuncs);
 }
 
 void AST2CHIR::TranslateTopLevelDeclsInParallel()
 {
-    TranslateInParallel(globalAndMemberFuncs);
+    // collect all top-level funcs into a vector.
+    std::vector<Ptr<const AST::Decl>> allDecls;
+    auto needTrans = [this](Ptr<const AST::Decl> decl) { return NeedTranslate(*decl); };
+    // Filter out decls that do not require translation.
+    std::copy_if(globalAndMemberFuncs.begin(), globalAndMemberFuncs.end(),
+        std::back_inserter(allDecls), needTrans);
+    TranslateInParallel(allDecls);
+
     std::vector<Ptr<const AST::Decl>> localFuncsGeneric; // generic decls
     std::vector<Ptr<const AST::Decl>> localFuncsOther; // instantiated or non-generic decls
     for (auto func : std::as_const(localConstFuncs.stableOrderValue)) {
@@ -428,13 +444,18 @@ void AST2CHIR::AST2CHIRCheck()
     // check customDefTypes
     auto customDefMap = chirType.GetAllTypeDef();
     for (auto& it : customDefMap) {
-        if (it.first->TestAttr(AST::Attribute::GENERIC, AST::Attribute::IMPORTED)) {
+        const AST::Node& astNode = *it.first;
+        const CHIR::CustomTypeDef& chirNode = *it.second;
+        if (astNode.TestAttr(AST::Attribute::GENERIC, AST::Attribute::IMPORTED)) {
             continue;
         }
-        if (it.second->TestAttr(Attribute::SKIP_ANALYSIS)) {
+        if (astNode.TestAttr(AST::Attribute::IMPORTED) && chirNode.TestAttr(Attribute::DESERIALIZED)) {
             continue;
         }
-        auto ret = AST2CHIRCheckCustomTypeDef(*it.first, *it.second, globalCache);
+        if (chirNode.TestAttr(Attribute::SKIP_ANALYSIS)) {
+            continue;
+        }
+        auto ret = AST2CHIRCheckCustomTypeDef(astNode, chirNode, globalCache);
         if (!ret) {
             this->failure = true;
             it.second->Dump();
@@ -453,6 +474,23 @@ void AST2CHIR::AST2CHIRCheck()
     }
 }
 
+/// Return true if chir was deserialized
+bool AST2CHIR::TryToDeserializeCHIR()
+{
+    auto& chirFiles = opts.inputChirFiles;
+    ToCHIR::Phase phase;
+    if (chirFiles.size() == 1) {
+        CHIRDeserializer::Deserialize(chirFiles.at(0), builder, phase, true);
+        mergingPlatform = true;
+        return true;
+    } else if (chirFiles.size() != 0) {
+        // synthetic limitation, however need to distinguish different chir sources
+        diag.DiagnoseRefactor(DiagKindRefactor::frontend_can_not_handle_to_many_chir, DEFAULT_POSITION);
+    }
+
+    return false;
+}
+
 static Package::AccessLevel BuildPackageAccessLevel(const AST::AccessLevel& level)
 {
     static std::unordered_map<AST::AccessLevel, Package::AccessLevel> accessLevelMap = {
@@ -468,7 +506,16 @@ static Package::AccessLevel BuildPackageAccessLevel(const AST::AccessLevel& leve
 
 bool AST2CHIR::ToCHIRPackage(AST::Package& node)
 {
-    package = builder.CreatePackage(node.fullPackageName);
+    // It can be not null in case of part of the package was deserialized from .chir
+    if (TryToDeserializeCHIR()) {
+        package = builder.GetCurPackage();
+        BuildDeserializedTable();
+    } else {
+        package = builder.CreatePackage(node.fullPackageName);
+        outputCHIR = opts.outputMode == GlobalOptions::OutputMode::CHIR;
+    }
+    // Translating common alongside with merging platform is not supported
+    CJC_ASSERT(!(outputCHIR && mergingPlatform));
     package->SetPackageAccessLevel(BuildPackageAccessLevel(node.accessible));
     RegisterAllSources();
     CJC_NULLPTR_CHECK(package);

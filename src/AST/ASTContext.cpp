@@ -116,8 +116,13 @@ AST::VarDeclAbstract& ASTContext::GetOuterVarDeclAbstract(AST::VarDecl& vd) cons
     return vd;
 }
 
-void ASTContext::InsertEnumConstructor(const std::string& name, size_t argSize, AST::Decl& decl)
+void ASTContext::InsertEnumConstructor(const std::string& name, size_t argSize, AST::Decl& decl, bool enableMacroInLsp)
 {
+    // Both the EnumConstructor nodes before and after expansion are added to the symbol table in LSP, need to skip
+    // nodes before macro expansion.
+    if (enableMacroInLsp && IsNodeInOriginalMacroCallNodes(decl)) {
+        return;
+    }
     auto iter = enumConstructors.find(name);
     if (iter != enumConstructors.cend()) {
         auto& argSizeToDecls = iter->second;
@@ -131,6 +136,29 @@ void ASTContext::InsertEnumConstructor(const std::string& name, size_t argSize, 
         enumConstructors.emplace(std::make_pair(
             name, std::unordered_map<size_t, std::vector<Ptr<Decl>>>{{argSize, std::vector<Ptr<Decl>>{&decl}}}));
     }
+}
+
+bool ASTContext::IsNodeInOriginalMacroCallNodes(AST::Decl& decl) const
+{
+    if (!decl.curFile) {
+        return false;
+    }
+    for (auto& originalMacroCallNode : decl.curFile->originalMacroCallNodes) {
+        if (originalMacroCallNode.get()->astKind != ASTKind::MACRO_EXPAND_DECL) {
+            return false;
+        }
+        auto med = StaticAs<ASTKind::MACRO_EXPAND_DECL>(originalMacroCallNode.get());
+        if (!med->invocation.decl.get() || med->invocation.decl->astKind != AST::ASTKind::ENUM_DECL) {
+            return false;
+        }
+        auto enumNode = StaticAs<ASTKind::ENUM_DECL>(med->invocation.decl.get());
+        for (auto& constructor : enumNode->constructors) {
+            if (constructor.get() == &decl) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 bool ASTContext::IsEnumConstructor(const std::string& name) const

@@ -161,6 +161,7 @@ void PrintPackage(unsigned indent, const Package& package)
 void PrintFile(unsigned indent, const File& file)
 {
     PrintIndent(indent, "File:", file.fileName, "{");
+    PrintNode(file.feature.get(), indent + ONE_INDENT, "features");
     PrintNode(file.package.get(), indent + ONE_INDENT, "package");
     for (auto& it : file.imports) {
         PrintNode(it.get(), indent + ONE_INDENT);
@@ -1328,9 +1329,29 @@ void PrintCommandTypePattern(unsigned indent, const CommandTypePattern& commandT
     }
 }
 
+void PrintFeaturesDirective(unsigned indent, const FeaturesDirective& featuresDirective)
+{
+    PrintIndent(indent, "FeaturesDirective:", "features", "{");
+    PrintIndent(indent + ONE_INDENT, "ids: ", "[");
+    if (!featuresDirective.content.empty()) {
+        std::stringstream ss;
+        for (size_t i = 0; i < featuresDirective.content.size(); i++) {
+            ss << featuresDirective.content[i].ToString();
+            if (i < featuresDirective.content.size() - 1) { ss << ", "; }
+        }
+        PrintIndent(indent + TWO_INDENT, ss.str());
+    } else {
+        PrintIndent(indent + TWO_INDENT, "// no feature arguments");
+    }
+    PrintIndent(indent + ONE_INDENT, "]");
+    PrintIndent(indent + ONE_INDENT, "position:", featuresDirective.begin.ToString(), featuresDirective.end.ToString());
+    PrintIndent(indent, "}");
+}
+
 void PrintPackageSpec(unsigned indent, const PackageSpec& package)
 {
     PrintIndent(indent, "PackageSpec:", package.packageName.Val(), "{");
+    PrintIndent(indent + ONE_INDENT, package.GetPackageName());
     if (!package.prefixPaths.empty()) {
         auto prefixPath = JoinStrings(package.prefixPaths, ".");
         PrintIndent(indent + ONE_INDENT, "prefixPath:", std::move(prefixPath));
@@ -1349,7 +1370,7 @@ void PrintImportSpec(unsigned indent, const ImportSpec& import)
             PrintIndent(indent + ONE_INDENT, "aliasName:", import.content.aliasName.Val());
         }
         if (!import.content.prefixPaths.empty()) {
-            PrintIndent(indent + ONE_INDENT, "prefixPaths:", JoinStrings(import.content.prefixPaths, "."));
+            PrintIndent(indent + ONE_INDENT, "prefixPaths:", import.content.GetPrefixPath());
         }
         if (import.modifier) {
             PrintIndent(indent + ONE_INDENT, "modifier:", TOKENS[static_cast<int>(import.modifier->modifier)]);
@@ -1357,22 +1378,13 @@ void PrintImportSpec(unsigned indent, const ImportSpec& import)
         PrintIndent(indent + ONE_INDENT, "isDecl:", import.content.isDecl);
         PrintIndent(indent, "}");
     } else {
-        std::string commonPrefix = JoinStrings(import.content.prefixPaths, ".");
+        std::string commonPrefix = import.content.GetPrefixPath();
         for (const auto& item : import.content.items) {
             PrintIndent(indent, "ImportSpec:", item.identifier.Val(), "{");
             if (item.kind == ImportKind::IMPORT_ALIAS) {
                 PrintIndent(indent + ONE_INDENT, "aliasName:", item.aliasName.Val());
             }
-            std::stringstream ss;
-            ss << commonPrefix;
-            if (!commonPrefix.empty() && !item.prefixPaths.empty()) {
-                ss << "." << JoinStrings(item.prefixPaths, ".");
-            } else if (!item.prefixPaths.empty()) {
-                ss << JoinStrings(item.prefixPaths, ".");
-            }
-            if (ss.rdbuf()->in_avail() != 0) {
-                PrintIndent(indent + ONE_INDENT, "prefixPaths:", ss.str());
-            }
+            PrintIndent(indent + ONE_INDENT, "prefixPaths:", item.GetPrefixPath());
             if (import.modifier) {
                 PrintIndent(indent + ONE_INDENT, "modifier:", TOKENS[static_cast<int>(import.modifier->modifier)]);
             }
@@ -1493,6 +1505,7 @@ void PrintNode([[maybe_unused]] Ptr<const Node> node, [[maybe_unused]] unsigned 
         [&indent](const CommandTypePattern& cmdTypePattern) { PrintCommandTypePattern(indent, cmdTypePattern); },
         [indent](const VarOrEnumPattern& ve) { PrintVarOrEnumPattern(indent, ve); },
         // ----------- package----------------------
+        [&indent](const FeaturesDirective& feature) { PrintFeaturesDirective(indent, feature); },
         [&indent](const PackageSpec& package) { PrintPackageSpec(indent, package); },
         [&indent](const ImportSpec& import) {
             if (import.IsImportMulti()) {

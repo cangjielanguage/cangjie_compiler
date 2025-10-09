@@ -447,22 +447,14 @@ bool IsStaticInit(const FuncBase& func);
 bool IsSuperOrThisCall(const AST::CallExpr& expr);
 
 /**
- * @brief Retrieves the instance map from an extend definition to the current type.
- *
- * @param exDef The extend definition.
- * @param curType The current type.
- * @return The instance map from the extend definition to the current type.
- */
-std::unordered_map<const GenericType*, Type*> GetInstMapFromExtendDefToCurType(
-    const ExtendDef& exDef, const Type& curType);
-
-/**
  * @brief Retrieves the instance map from the current definition to the current type.
  *
  * @param curType The current type definition.
  * @return The instance map from the current definition to the current type.
  */
 std::unordered_map<const GenericType*, Type*> GetInstMapFromCurDefToCurType(const CustomType& curType);
+
+std::unordered_map<const GenericType*, Type*> GetInstMapFromCurDefAndExDefToCurType(const CustomType& curType);
 
 /**
  * @brief Retrieves the instance map from a custom type definition and its parent.
@@ -481,7 +473,8 @@ void GetInstMapFromCustomDefAndParent(
  * @param builder The CHIR builder.
  * @param parents The vector to store the parent types.
  */
-void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vector<ClassType*>& parents);
+void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vector<ClassType*>& parents,
+    std::set<std::pair<const Type*, const Type*>>* visited = nullptr);
 
 /**
  * @brief Creates a box type reference for a given base type.
@@ -533,9 +526,8 @@ bool ParentDefIsFromExtend(const CustomTypeDef& cur, const ClassDef& parent);
 /**
  * @brief Visits function blocks in topological sort order.
  *
- * @param func The function to visit blocks for.
+ * @param funcBody The function body to visit blocks for.
  * @param preVisit The function to call before visiting an expression.
- * @param postVisit The function to call after visiting an expression.
  */
 void VisitFuncBlocksInTopoSort(const BlockGroup& funcBody, std::function<VisitResult(Expression&)> preVisit);
 
@@ -718,6 +710,14 @@ bool IsStructOrExtendMethod(const Value& value);
  * @return True if the value is a constructor, false otherwise.
  */
 bool IsConstructor(const Value& value);
+
+/**
+ * @brief get original value before cast.
+ * @param expr get original value if expr is cast.
+ * @return value before cast.
+ */
+Value* GetCastOriginalTarget(const Expression& expr);
+
 bool IsInstanceVarInit(const Value& value);
 
 std::vector<ClassType*> GetSuperTypesRecusively(Type& subType, CHIRBuilder& builder);
@@ -729,5 +729,14 @@ std::vector<VTableSearchRes> GetFuncIndexInVTable(
     Type& root, const FuncCallType& funcCallType, bool isStatic, CHIRBuilder& builder);
 
 bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType);
+
+/**
+ * @brief the input type may not have vtable, but the return type must have vtable.
+ * because CPointer<xxx>'s vtable is store in CPointer<Unit>
+ *
+ * @param type given type.
+ * @return type with vtable.
+ */
+BuiltinType* GetBuiltinTypeWithVTable(BuiltinType& type, CHIRBuilder& builder);
 } // namespace Cangjie::CHIR
 #endif

@@ -203,6 +203,24 @@ std::string Jsonfy(const std::map<std::string, DependencyInfoItem>& dependencies
     return out.str();
 }
 
+std::string Jsonfy(const std::set<std::string>& features)
+{
+    if (features.empty()) {
+        return "[]";
+    }
+    std::ostringstream out;
+    out << "[";
+    auto iter = features.cbegin();
+    out << "\"" << Jsonfy(*iter) << "\"";
+    ++iter;
+    while (iter != features.cend()) {
+        out << "," << "\"" << Jsonfy(*iter) << "\"";
+        ++iter;
+    }
+    out << "]";
+    return out.str();
+}
+
 Range GetPackageNameRange(const CjoManager& cjoManager, const ImportSpec& import)
 {
     auto& im = import.content;
@@ -218,8 +236,11 @@ Range GetPackageNameRange(const CjoManager& cjoManager, const ImportSpec& import
 void ImportManager::ExportAST(bool saveFileWithAbsPath, std::vector<uint8_t>& astData, const Package& pkg,
     const std::function<void(ASTWriter&)> additionalSerializations)
 {
-    ASTWriter writer(
-        diag, GeneratePkgDepInfo(pkg), {importSrcCode, false, saveFileWithAbsPath, opts.compileCjd}, *cjoManager);
+    ASTWriter writer(diag, GeneratePkgDepInfo(pkg),
+        {importSrcCode, false, opts.exportForTest, saveFileWithAbsPath, opts.compileCjd}, *cjoManager);
+    if (opts.outputMode == GlobalOptions::OutputMode::CHIR) {
+        writer.SetSerializingCommon();
+    }
     auto realWriter = &writer;
 
     auto packageDecl = cjoManager->GetPackageDecl(pkg.fullPackageName);
@@ -256,6 +277,9 @@ void ImportManager::ExportDeclsWithContent(bool saveFileWithAbsPath, Package& pa
     // NOTE: If 'importSrcCode' is disabled, we also do not need to export source code.
     auto writer = new ASTWriter(diag, GeneratePkgDepInfo(package), {importSrcCode, false, opts.exportForTest,
         saveFileWithAbsPath, opts.compileCjd}, *cjoManager);
+    if (opts.outputMode == GlobalOptions::OutputMode::CHIR) {
+        writer->SetSerializingCommon();
+    }
     writer->PreSaveFullExportDecls(package);
     if (auto [it, success] = astWriters.emplace(&package, writer); !success) {
         delete it->second;
@@ -390,9 +414,6 @@ bool ImportManager::CheckCjoPathLegality(const OwnedPtr<ImportSpec>& import, con
 {
     // Call guarantees the 'cjoPath' existing when it is not empty.
     if (cjoPath.empty()) {
-        const std::string helpInfo =
-            "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use "
-            "'--import-path' to specify the .cjo file path";
         Range range =
             isRecursive ? MakeRange(import->begin, import->begin + 1) : GetPackageNameRange(*cjoManager, *import);
         CJC_ASSERT(!range.HasZero()); // Except for IMPLICIT_ADD, there should be no zero.
@@ -401,7 +422,7 @@ bool ImportManager::CheckCjoPathLegality(const OwnedPtr<ImportSpec>& import, con
                 ? DiagKindRefactor::package_missed_cjo_main_pkg_part_for_test_pkg
                 : DiagKindRefactor::package_search_error,
             range, fullPackageName);
-        builder.AddHelp(DiagHelp(helpInfo));
+        builder.AddHelp(DiagHelp(Modules::NO_CJO_HELP_INFO));
         return false;
     }
     return true;
@@ -564,15 +585,16 @@ std::string ImportManager::GeneratePkgDepInfo(const Package& pkg, bool exportCJO
 {
     auto isStd = [](const std::string& fullPackageName) { return STANDARD_LIBS.count(fullPackageName) > 0; };
     std::map<std::string, DependencyInfoItem> dependencies;
+    std::set<std::string> refSet;
     for (auto& file : pkg.files) {
         for (auto& import : file->imports) {
             if (import->IsImportMulti() || import->TestAttr(Attribute::IMPLICIT_ADD)) {
                 continue;
             }
-            auto names = cjoManager->GetFullPackageNames(*import);
+            auto names = cjoManager->GetPossibleCjoNames(*import);
             CJC_ASSERT(!names.empty());
-            std::string longName = names.front();
-            std::string shortName = names.back();
+            std::string longName = FileUtil::ToPackageName(names.front());
+            std::string shortName = FileUtil::ToPackageName(names.back());
             auto iter = dependencies.find(longName);
             if (iter == dependencies.cend()) {
                 DependencyInfoItem dependInfo{"", "", false, {}};
@@ -591,13 +613,19 @@ std::string ImportManager::GeneratePkgDepInfo(const Package& pkg, bool exportCJO
             }
             dependencies.at(longName).imports.emplace(import.get());
         }
+        if (file->feature != nullptr) {
+            for (auto& feature : file->feature->content) {
+                refSet.insert(feature.ToString());
+            }
+        }
     }
     std::ostringstream out;
     out << "{"
         << "\"package\":\"" << Jsonfy(pkg.fullPackageName) << "\","
         << "\"isMacro\":" << Jsonfy(pkg.isMacroPackage) << ","
         << "\"accessLevel\":\"" << Jsonfy(pkg.accessible) << "\","
-        << "\"dependencies\":" << Jsonfy(dependencies, exportCJO) << "}";
+        << "\"dependencies\":" << Jsonfy(dependencies, exportCJO) << ","
+        << "\"features\":" << Jsonfy(refSet) << "}";
     return out.str();
 }
 
@@ -631,12 +659,110 @@ std::set<std::string> ImportManager::CollectDirectDepPkg(const Package& package)
                 continue;
             }
             // Collect all possible package names.
-            for (auto name : cjoManager->GetFullPackageNames(*import)) {
+            for (auto name : cjoManager->GetPossibleCjoNames(*import)) {
                 depPkgs.emplace(name);
             }
         }
     }
     return depPkgs;
+}
+static void ValidateFileFeatureSpec(DiagnosticEngine &diag,
+    const Package& pkg, std::unordered_map<std::string, bool>& refMap, Ptr<File>& refFile)
+{
+    size_t refSize = 0;
+    std::unordered_map<std::string, Range> rangeMap;
+    for (auto& file : pkg.files) {
+        CJC_NULLPTR_CHECK(file);
+        if (file->feature != nullptr) {
+            for (auto& feature : file->feature->content) {
+                std::string ftrStr = feature.ToString();
+                auto prevPos = rangeMap.find(ftrStr);
+                bool contains = prevPos != rangeMap.end();
+                Range current = MakeRange(feature.begin, feature.end);
+                if (contains) {
+                    WarnRepeatedFeatureName(diag, ftrStr, current, prevPos->second);
+                } else {
+                    rangeMap.emplace(ftrStr, current);
+                }
+            }
+            if (refSize < rangeMap.size()) {
+                refSize = rangeMap.size();
+                refFile = file;
+            }
+            rangeMap.clear();
+        }
+    }
+    for (auto& ftr : refFile->feature->content) {
+        refMap.emplace(ftr.ToString(), false);
+    }
+}
+ 
+static void CollectInvalidFeatureFiles(const Package& pkg, std::vector<Ptr<File>>& invalidFeatures,
+    std::unordered_map<std::string, bool>& refMap)
+{
+    for (auto& file : pkg.files) {
+        if (file->feature == nullptr) {
+            invalidFeatures.emplace_back(file);
+            continue;
+        }
+        bool hasInvalidName{false};
+        for (auto& feature : file->feature->content) {
+            std::string ftrStr = feature.ToString();
+            auto pair = refMap.find(ftrStr);
+            if (pair != refMap.end()) {
+                pair->second = true;
+            } else {
+                hasInvalidName = true;
+                invalidFeatures.emplace_back(file);
+                break;
+            }
+        }
+        if (!hasInvalidName) {
+            for (auto& pair : refMap) {
+                if (!pair.second) {
+                    invalidFeatures.emplace_back(file);
+                    break;
+                }
+            }
+        }
+        std::for_each(refMap.begin(), refMap.end(),
+            [](auto& pair) {
+                pair.second = false;
+            }
+        );
+    }
+}
+
+static void CheckPackageFeatureSpec(DiagnosticEngine& diag, const Package& pkg)
+{
+    std::unordered_map<std::string, bool> refMap;
+    std::vector<Ptr<File>> invalidFeatures;
+    Ptr<File> refFile;
+ 
+    ValidateFileFeatureSpec(diag, pkg, refMap, refFile);
+    CollectInvalidFeatureFiles(pkg, invalidFeatures, refMap);
+ 
+    if (!invalidFeatures.empty()) {
+        uint8_t counter = 0;
+        for (auto& file : invalidFeatures) {
+            if (counter > 1) { return; }
+            if (file->feature == nullptr) {
+                DiagForNullPackageFeature(diag, MakeRange(file->begin, file->end), refFile->feature);
+            } else {
+                auto& feature = file->feature;
+                DiagForDifferentPackageFeatureConsistency(diag, feature, refFile->feature);
+            }
+            counter++;
+        }
+    }
+}
+
+static bool IsRootPackage(const PackageSpec& p)
+{
+    if (p.hasDoubleColon && p.prefixPaths.size() == 1) {
+        return true;
+    }
+    return p.prefixPaths.empty();
 }
 
 static void CheckPackageSpecsIdentical(DiagnosticEngine& diag, const Package& pkg)
@@ -651,16 +777,15 @@ static void CheckPackageSpecsIdentical(DiagnosticEngine& diag, const Package& pk
             !Utils::InKeys(std::make_pair(DEFAULT_PACKAGE_NAME, std::string("public")), packageNamePosMap)) {
             packageNamePosMap[std::make_pair(DEFAULT_PACKAGE_NAME, "public")] = {file->begin, false};
         } else if (file->package != nullptr) {
-            auto names = file->package->prefixPaths;
-            if (names.empty() && !file->package->TestAttr(Attribute::PUBLIC)) {
+            if (IsRootPackage(*file->package) && !file->package->TestAttr(Attribute::PUBLIC)) {
                 DiagRootPackageModifier(diag, *file->package);
             }
-            names.emplace_back(file->package->packageName);
-            auto fullPackageName = Utils::JoinStrings(names, ".");
-            auto keyPair = std::make_pair(fullPackageName, GetAccessLevelStr(*file->package));
+            auto fullPackageName = file->package->GetPackageName();
+            auto keyPair = std::make_pair(std::move(fullPackageName), GetAccessLevelStr(*file->package));
+ 
             if (!Utils::InKeys(keyPair, packageNamePosMap)) {
-                auto position =
-                    names.size() == 1 ? file->package->packageName.Begin() : file->package->prefixPoses.front();
+                auto position = file->package->prefixPaths.empty()
+                    ? file->package->packageName.Begin() : file->package->prefixPoses.front();
                 packageNamePosMap[keyPair] = {position, true};
             }
         }
@@ -677,6 +802,9 @@ bool ImportManager::BuildIndex(
     cjoManager->UpdateSearchPath(cangjieModules);
 
     for (auto pkg : packages) {
+        if (pkg->HasFeature()) {
+            CheckPackageFeatureSpec(diag, *pkg);
+        }
         CheckPackageSpecsIdentical(diag, *pkg);
         if (opts.compileTestsOnly) {
             pkg->fullPackageName = pkg->fullPackageName + SourceManager::testPkgSuffix;
@@ -857,7 +985,7 @@ void ImportManager::AddImportedDeclsForSourcePackage(const AST::Package& pkg)
             }
             if (cjoManager->IsImportPackage(*import)) {
                 auto name = import->content.kind == ImportKind::IMPORT_SINGLE
-                    ? Utils::SplitQualifiedName(fullPackageName).back()
+                    ? Utils::SplitQualifiedName(fullPackageName, true).back()
                     : import->content.aliasName.Val();
                 declMap[name].emplace(pkgDecl);
                 declsImportedByNodeMap[pkg.fullPackageName][pkgDecl].emplace_back(import.get());

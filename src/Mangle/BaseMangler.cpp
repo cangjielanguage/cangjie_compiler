@@ -169,12 +169,22 @@ std::string DecimalToManglingNumber(const std::string& decimal)
 
 std::string BaseMangler::MangleFullPackageName(const std::string& packageName) const
 {
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    if (MangleUtils::STD_PKG_MANGLE.find(packageName) != MangleUtils::STD_PKG_MANGLE.end()) {
-        return MangleUtils::STD_PKG_MANGLE.at(packageName);
+    std::string orgName;
+    std::string newPkgName = packageName;
+    size_t pos = packageName.find(TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)]);
+    if (pos != std::string::npos) {
+        orgName = packageName.substr(0, pos + 1);
+        auto sz = std::string_view{TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)]}.size();
+        if (packageName.length() > pos + sz) {
+            newPkgName = packageName.substr(pos + sz, packageName.length() - pos - sz);
+        } else {
+            newPkgName = "";
+        }
     }
-    return MangleUtils::MangleName(packageName);
-#endif
+    if (MangleUtils::STD_PKG_MANGLE.find(newPkgName) != MangleUtils::STD_PKG_MANGLE.end()) {
+        return MangleUtils::STD_PKG_MANGLE.at(newPkgName);
+    }
+    return MangleUtils::MangleName(orgName + newPkgName);
 }
 
 std::string BaseMangler::MangleFullPackageName(const AST::Decl& decl) const
@@ -320,7 +330,7 @@ std::string BaseMangler::MangleVarDecl(const AST::Decl& decl, const std::vector<
     mangleStr += MangleUtils::MangleName(decl.identifier.Val());
 
     if (IsLocalVariable(decl) && manglerCtxTable.find(decl.fullPackageName) != manglerCtxTable.end()) {
-        mangleStr += MANGLE_LOCAL_VAR_PREFIX;
+        mangleStr += MANGLE_COUNT_PREFIX;
         auto manglerCtx = manglerCtxTable.at(decl.fullPackageName).get();
         if (!manglerCtx) {
             return "";
@@ -624,7 +634,7 @@ std::string BaseMangler::MangleExtendEntity(const AST::ExtendDecl& extendDecl,
         (IsHashable(fileName) ? HashToBase62(fileName) : (FileNameWithoutExtension(fileName) + MANGLE_DOLLAR_PREFIX));
     auto index = ctx->second->GetIndexOfExtend(extendDecl.curFile, &extendDecl);
     CJC_ASSERT(index.has_value());
-    mangled += MANGLE_LOCAL_VAR_PREFIX + MangleUtils::DecimalToManglingNumber(std::to_string(index.value()));
+    mangled += MANGLE_COUNT_PREFIX+ MangleUtils::DecimalToManglingNumber(std::to_string(index.value()));
     return mangled;
 }
 

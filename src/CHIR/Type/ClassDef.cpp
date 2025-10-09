@@ -29,6 +29,11 @@ ClassDef* ClassDef::GetSuperClassDef() const
     return superClassTy ? superClassTy->GetClassDef() : nullptr;
 }
 
+bool ClassDef::HasSuperClass() const
+{
+    return GetSuperClassDef() != nullptr;
+}
+
 void ClassDef::PrintAbstractMethod(std::stringstream& ss) const
 {
     for (auto& method : abstractMethods) {

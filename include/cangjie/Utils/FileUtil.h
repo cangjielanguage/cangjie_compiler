@@ -219,6 +219,14 @@ size_t GetFileSize(const std::string& filePath);
 std::optional<std::string> ReadFileContent(const std::string& filePath, std::string& failedReason);
 
 /**
+ * Write data into file.
+ * @param filePath string like "path/to/file".
+ * @param data string to be written into file.
+ * @return whether func invoked successfully.
+ */
+bool WriteToFile(const std::string& filePath, const std::string& data);
+
+/**
  * Write buffer into .cjo file.
  * @param filePath string like "path/file.cjo".
  * @param buffer save .ast file.
@@ -348,6 +356,18 @@ std::string ConvertFilenameToLibCangjieBaseFormat(const std::string& objectFile)
  * Convert filename '<file>.<ext>' to a form of 'libcangjie-<file><.extension>'
  */
 std::string ConvertFilenameToLibCangjieFormat(const std::string& objectFile, const std::string& extension);
+#else
+/**
+ * Convert filename '<file>.<ext>' to a form of 'cangjie-<file><sanitizerSuffix>'
+ */
+std::string ConvertFilenameToLibCangjieBaseFormat(
+    const std::string& objectFile, const std::string& sanitizerSuffix = "");
+
+/**
+ * Convert filename '<file>.<ext>' to a form of 'libcangjie-<file><sanitizerSuffix><.extension>'
+ */
+std::string ConvertFilenameToLibCangjieFormat(
+    const std::string& objectFile, const std::string& extension, const std::string& sanitizerSuffix = "");
 #endif
 
 std::string ConvertFilenameToLtoLibCangjieFormat(const std::string& objectFile);
@@ -421,6 +441,11 @@ std::string RemovePathPrefix(const std::string& absolutePath, const std::vector<
 void HideFile(const std::string& path);
 #endif
 bool IsSlash(char c);
+ 
+/// Get file name for a package when used as default temp/output file.
+/// e.g. for package a::b.c, returns a#b.c
+std::string ToCjoFileName(std::string_view fullPackageName);
+std::string ToPackageName(std::string_view cjoName);
 } // namespace FileUtil
 } // namespace Cangjie
 #endif // CANGJIE_UTILS_FILEUTIL_H

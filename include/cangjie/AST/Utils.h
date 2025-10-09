@@ -15,6 +15,7 @@
 
 #include <functional>
 
+#include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/Utils/CastingTemplate.h"
 
@@ -196,6 +197,11 @@ inline bool IsInstMemberVarInGenericDecl(const AST::VarDecl& vd)
         IsInDeclWithAttribute(vd, AST::Attribute::GENERIC);
 }
 
+inline bool IsCommonWithoutDefault(const Decl& decl)
+{
+    return decl.TestAttr(AST::Attribute::COMMON) && !decl.TestAttr(AST::Attribute::COMMON_WITH_DEFAULT);
+}
+
 bool IsVirtualMember(const AST::Decl& decl);
 
 inline bool IsStaticVar(const AST::Decl& decl)
@@ -209,13 +215,80 @@ inline bool IsStaticVar(const AST::Decl& decl)
  */
 inline bool IsMemberVarShouldBeSrcExported(const AST::VarDecl& vd)
 {
-    if (vd.astKind != ASTKind::VAR_DECL || !vd.outerDecl || !vd.initializer) {
+    // Non-const static member variables are not exported because the static init function cannot be invoked by users.
+    // Therefore source code export is not required.
+    if (!vd.outerDecl || !vd.initializer || vd.TestAttr(AST::Attribute::STATIC)) {
         return false;
     }
     auto& od = *vd.outerDecl;
     return (od.astKind == AST::ASTKind::STRUCT_DECL && StaticCast<AST::StructDecl>(od).HasConstOrFrozenInit()) ||
         (od.astKind == AST::ASTKind::CLASS_DECL && StaticCast<AST::ClassDecl>(od).HasConstOrFrozenInit());
 }
+
+struct VarDeclWithPosition {
+    Ptr<VarDecl> decl;
+    std::size_t fieldPosition;
+};
+
+/**
+ * Constructs list of class/struct instance variables with correct initialization order.
+ * The initialization order of instance variables in same file is preserved.
+ * The initializations of common/specific instance variables may be interleaved
+ * @param parentDecl Declaration of class/struct
+ * @returns List of declarations with their original declaration's index in class/struct
+ */
+std::vector<VarDeclWithPosition> GetVarsInitializationOrderWithPositions(const Decl& parentDecl);
+
+void InsertPropGetterSignature(PropDecl& prop, Attribute attrToBeSet);
+
+void InsertPropSetterSignature(PropDecl& prop, Attribute attrToBeSet);
+
+void InsertMirrorVarProp(ClassDecl& decl, Attribute attrToBeSet);
 } // namespace Cangjie::AST
+
+namespace Cangjie::Interop::Java {
+using namespace Cangjie::AST;
+
+
+bool IsImpl(const Decl& decl);
+bool IsJObject(const Decl& decl);
+/**
+ * For stages where packageName is not set yet
+ */
+bool IsJObject(const Decl& decl, const std::string& packageName);
+bool IsMirror(const Decl& decl);
+bool IsCJMapping(const Decl& decl);
+
+/**
+ * public func $getJavaRef(): Java_CFFI_JavaEntity {
+ *     return Java_CFFI_JavaEntity()
+ * }
+ */
+void InsertJavaRefGetterStubWithBody(ClassDecl& decl);
+
+bool IsDeclAppropriateForSyntheticClassGeneration(const Decl& decl);
+
+std::string GetSyntheticNameFromClassLike(const ClassLikeDecl& cld);
+
+/**
+    * Generates and inserts the synthetic class declaration.
+    * The synthetic class implements the given interface or abstract class and has the following structure:
+    *
+    * Example of generated synthetic
+    * ```
+    * // CL is interface or abstract class. If CL is interface then JObject will be added as super class
+    * class CL_impl <: CL {
+    *     init(ref: Java_CFFI_JavaEntity) { // inherited from JObject
+    *         $javaref = ref
+    *     }
+    *
+    *     public func $getJavaRef() { // inherited from JObject
+    *         return $javaref
+    *     }
+    * }
+    * ```
+    */
+void InsertSyntheticClassDecl(ClassLikeDecl& decl, File& file);
+}
 
 #endif

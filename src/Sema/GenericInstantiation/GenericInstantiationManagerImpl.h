@@ -108,7 +108,7 @@ public:
     Generic2InsMap GetAllGenericToInsDecls() const;
 
     friend class InstantiatedExtendRecorder;
-    friend class TestManager;
+    friend class MockUtils;
 
 private:
     Ptr<AST::Package> curPkg{nullptr};

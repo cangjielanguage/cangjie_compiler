@@ -336,6 +336,11 @@ public:
         return cjdFilePaths;
     }
 
+    DiagnosticEngine& GetDiagnosticEngine() const
+    {
+        return diag;
+    }
+
 private:
     DiagnosticEngine& diag;
     const GlobalOptions& opts;

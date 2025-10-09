@@ -7,10 +7,10 @@
 set(OHOS_PATH $ENV{OHOS_ROOT})
 set(CJNATIVE_BACKEND "cjnative")
 
-string(TOLOWER ${CMAKE_HOST_SYSTEM_NAME} lower_host_os)
-string(TOLOWER ${CMAKE_HOST_SYSTEM_PROCESSOR} lower_host_arch)
-if("${lower_host_os}" STREQUAL "darwin" AND "${lower_host_arch}" STREQUAL "arm64")
-        set(lower_host_arch "aarch64")
+string(TOLOWER ${CMAKE_HOST_SYSTEM_NAME} HOST_OS)
+string(TOLOWER ${CMAKE_HOST_SYSTEM_PROCESSOR} HOST_ARCH)
+if("${HOST_OS}" STREQUAL "darwin" AND "${HOST_ARCH}" STREQUAL "arm64")
+    set(HOST_ARCH "aarch64")
 endif()
 add_custom_command(
     OUTPUT
@@ -18,13 +18,13 @@ add_custom_command(
         ${CMAKE_BINARY_DIR}/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}/libclang_rt.profile.a
         ${CMAKE_BINARY_DIR}/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}/libunwind.a
     COMMAND ${CMAKE_COMMAND} -E copy
-        ${OHOS_PATH}/prebuilts/clang/ohos/${lower_host_os}-${lower_host_arch}/llvm/lib/clang/15.0.4/lib/${CMAKE_SYSTEM_PROCESSOR}-linux-ohos/libclang_rt.builtins.a
+        ${OHOS_PATH}/prebuilts/clang/ohos/${HOST_OS}-${HOST_ARCH}/llvm/lib/clang/15.0.4/lib/${CMAKE_SYSTEM_PROCESSOR}-linux-ohos/libclang_rt.builtins.a
         ${CMAKE_BINARY_DIR}/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}/libclang_rt.builtins.a
     COMMAND ${CMAKE_COMMAND} -E copy
-        ${OHOS_PATH}/prebuilts/clang/ohos/${lower_host_os}-${lower_host_arch}/llvm/lib/clang/15.0.4/lib/${CMAKE_SYSTEM_PROCESSOR}-linux-ohos/libclang_rt.profile.a
+        ${OHOS_PATH}/prebuilts/clang/ohos/${HOST_OS}-${HOST_ARCH}/llvm/lib/clang/15.0.4/lib/${CMAKE_SYSTEM_PROCESSOR}-linux-ohos/libclang_rt.profile.a
         ${CMAKE_BINARY_DIR}/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}/libclang_rt.profile.a
     COMMAND ${CMAKE_COMMAND} -E copy
-        ${OHOS_PATH}/prebuilts/clang/ohos/${lower_host_os}-${lower_host_arch}/llvm/lib/${CMAKE_SYSTEM_PROCESSOR}-linux-ohos/libunwind.a
+        ${OHOS_PATH}/prebuilts/clang/ohos/${HOST_OS}-${HOST_ARCH}/llvm/lib/${CMAKE_SYSTEM_PROCESSOR}-linux-ohos/libunwind.a
         ${CMAKE_BINARY_DIR}/lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_${CJNATIVE_BACKEND}/libunwind.a
     COMMENT "Copying OHOS libraries...")
 add_custom_target(external-deps-ohos ALL

@@ -29,6 +29,33 @@ Ptr<Value> Translator::Visit(const AST::ExtendDecl& decl)
 
     // step 3: set member func
     for (auto& member : decl.members) {
+        if (member->IsCommonMatchedWithPlatform()) {
+            /**
+             * Source Definitions:
+             *   // common.cj
+             *   common extend A {
+             *     common func foo:Unit {}
+             *   }
+             *
+             *   // platform.cj
+             *   platform extend A {
+             *     platform func foo:Unit { println("hello") }
+             *   }
+             *
+             * After Sema Merge:
+             *   platform extend A {
+             *     common func foo:Unit;     // Declaration from common extend
+             *     platform func foo:Unit {  // Implementation from platform extend
+             *       println("hello")
+             *     }
+             *   }
+             * Note:
+             * The common declaration of `foo` should be skiped  because it is already covered by the
+             * platform-specific implementation. This ensures that the platform implementation is used, avoiding
+             * redundancy.
+             */
+            continue;
+        }
         if (member->astKind == AST::ASTKind::FUNC_DECL) {
             auto func = VirtualCast<FuncBase*>(GetSymbolTable(*member));
             extendDef->AddMethod(func);

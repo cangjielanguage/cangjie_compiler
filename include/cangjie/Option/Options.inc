@@ -163,6 +163,7 @@ PREDEFVALUE(output_type_list, {
     VALUE("exe", "emit executable (default)", { BACKEND(CJNATIVE) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
     VALUE("staticlib", "emit static library", { BACKEND(CJNATIVE) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
     VALUE("dylib", "emit dynamic library", { BACKEND(CJNATIVE) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
+    VALUE("chir", "emit partially compiled package", { BACKEND(CJNATIVE) }, { GROUP(VISIBLE) }) COMMA
 #if !defined(CANGJIE_VISIBLE_OPTIONS_ONLY)
     VALUE("hotreload", "emit dynamic library with hot reload supports", { BACKEND(CJNATIVE) }, { GROUP(VISIBLE) })
 #endif
@@ -302,9 +303,14 @@ OPTION("--output", OUTPUT_FILE, SEPARATED, { BACKEND(ALL) },
 OPTION("--output-dir", OUTPUT_DIR, SEPARATED, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
     "Specify output directory (it affects '--output' option)")
+OPTION("--output-javagen-dir", OUTPUT_JAVA_GEN_DIR, SEPARATED, { BACKEND(ALL) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
+    "Specify output directory for javagen")
 OPTION("--no-prelude", NO_PRELUDE, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Not import cangjie std.core package by default, only applicable when compiling std.core")
+OPTION("--enable-interop-cjmapping", ENABLE_INTEROP_CJMAPPING, FLAG, {BACKEND(CJNATIVE)}, { GROUP(GLOBAL) COMMA GROUP(VISIBLE)}, nullptr, {},
+    MULTIPLE_OCCURRENCE, "enable cj data structure mapping for interop")
 OPTION("--static", STATIC, FLAG, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Statically link cangjie library")
@@ -566,7 +572,9 @@ OPTION("--import-path", IMPORT_PATH, SEPARATED, { BACKEND(ALL) },
 OPTION("--plugin", PLUGIN_PATH, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Specify the dynamic library path of compiler plugin")
-
+OPTION("--common-part-cjo", COMMON_PART_PATH, FLAG_WITH_ARG, { BACKEND(CJNATIVE) },
+    { GROUP(GLOBAL) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
+    "Add .cjo path for common part of package")
 OPTION("--incremental-compile", INCRE_COMPILE, FLAG, {BACKEND(CJNATIVE)},
     {GROUP(GLOBAL) COMMA GROUP(VISIBLE)}, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Enable incremental compilation.")
@@ -694,7 +702,7 @@ OPTION("--obf-config", OBF_CONFIG, SEPARATED, { BACKEND(CJNATIVE) },
     "Specify obfuscation configure file")
 OPTION("--obf-level", OBF_LEVEL, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
-    "Specify obfuscation level. Available value: 1 to 10 (5 by default)")
+    "Specify obfuscation level. Available value: 1 to 9 (5 by default)")
 OPTION("--obf-seed", OBF_SEED, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
     "Specify random seed for obfuscation algorithm. Available value: <number>")

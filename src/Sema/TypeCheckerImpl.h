@@ -27,6 +27,7 @@
 #include "cangjie/Sema/TypeChecker.h"
 #include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Utils/ProfileRecorder.h"
+#include "CJMP/MPTypeCheckerImpl.h"
 
 namespace Cangjie {
 class Synthesizer;
@@ -89,6 +90,7 @@ struct CollectDeclsInfo {
     std::vector<Ptr<AST::FuncDecl>> initFuncDecls;
     std::vector<Ptr<AST::Decl>> nonFuncDecls;
     std::vector<Ptr<AST::Decl>> staticFuncDecls;
+    std::vector<Ptr<AST::ArrayLit>> annotations;
 };
 
 enum class MatchResult {
@@ -98,6 +100,8 @@ enum class MatchResult {
 class TypeChecker::TypeCheckerImpl {
 public:
     explicit TypeCheckerImpl(CompilerInstance* ci);
+
+    ~TypeCheckerImpl();
 
     /**
      * Using control statement "for" to finish packages' typecheck. It invokes two functions as followed.
@@ -420,6 +424,10 @@ private:
      * NOTICE: it will change AST Node!
      */
     void AddObjectSuperClass(ASTContext& ctx, AST::ClassDecl& cd);
+    /**
+     * LLVM-java interop scenario.
+     */
+    bool AddJObjectSuperClassJavaInterop(ASTContext& ctx, AST::ClassDecl& cd);
     void AddDefaultSuperCall(const AST::FuncBody& funcBody) const;
     /**
      * If there is no default constructor, insert one.
@@ -467,11 +475,12 @@ private:
     /* Set integer overflow strategy before sema typechecking. */
     void SetIntegerOverflowStrategy() const;
     void CheckDefaultParamFuncsEntry(AST::File& file);
-    AST::VisitAction CheckDefaultParamFunc(AST::StructDecl& sd);
-    AST::VisitAction CheckDefaultParamFunc(AST::ClassDecl& cd, const AST::File& file);
+    AST::VisitAction CheckDefaultParamFunc(AST::StructDecl& sd) const;
+    AST::VisitAction CheckDefaultParamFunc(AST::ClassDecl& cd, const AST::File& file) const;
     AST::VisitAction CheckDefaultParamFunc(const AST::InterfaceDecl& ifd) const;
+    AST::VisitAction CheckDefaultParamFunc(const AST::EnumDecl& ed) const;
     void GetSingleParamFunc(AST::Decl& decl);
-    void CheckPrimaryCtorForClassOrStruct(AST::InheritableDecl& id, const std::string& typeName);
+    void CheckPrimaryCtorForClassOrStruct(AST::InheritableDecl& id);
     /**
      * ReturnExpr must in FuncBody and JumpExpr must in LoopExpr.
      */
@@ -609,6 +618,8 @@ private:
 
     void CheckSealedInheritance(const AST::Decl& child, const AST::Type& parent);
     void CheckThreadContextInheritance(const AST::Decl& decl, const AST::Type& parent);
+    void CheckJavaInteropLibImport(AST::Decl& decl);
+    void CheckObjCInteropLibImport(AST::Decl& decl);
     void CheckClassDecl(ASTContext& ctx, AST::ClassDecl& cd);
     void CheckInterfaceDecl(ASTContext& ctx, AST::InterfaceDecl& id);
     void CheckStructDecl(ASTContext& ctx, AST::StructDecl& sd);
@@ -674,7 +685,7 @@ private:
     bool ChkIncOrDecExpr(ASTContext& ctx, AST::Ty& target, AST::IncOrDecExpr& ide);
     Ptr<AST::Ty> SynTypeConvExpr(ASTContext& ctx, AST::TypeConvExpr& tce);
     Ptr<AST::Ty> SynNumTypeConvExpr(AST::TypeConvExpr& tce);
-    bool ChkCFuncConstructorExpr(ASTContext& ctx, AST::CallExpr& ce);
+    bool SynCFuncCall(ASTContext& ctx, AST::CallExpr& ce);
     bool ChkTypeConvExpr(ASTContext& ctx, AST::Ty& targetTy, AST::TypeConvExpr& tce);
     Ptr<AST::Ty> SynLoopControlExpr(const ASTContext& ctx, AST::JumpExpr& je) const;
     bool ChkLoopControlExpr(const ASTContext& ctx, AST::JumpExpr& je) const;
@@ -1259,8 +1270,11 @@ private:
     OwnedPtr<AST::CallExpr> CheckCustomAnnotation(ASTContext& ctx, const AST::Decl& decl, AST::Annotation& ann);
     bool HasModifier(const std::set<AST::Modifier>& modifiers, TokenKind kind) const;
 
-    void CheckLegalityOfUsage(ASTContext& ctx, AST::Package& pkg);
-    void CheckClosures(const ASTContext& ctx, AST::Node& node) const;
+    void CheckLegalityOfUsage(ASTContext &ctx, AST::Package &pkg);
+    void CheckClosures(const ASTContext &ctx, AST::Node &node) const;
+    
+    // Desugar primary constructor into `init` and fields before cjmp customDef merging
+    void CheckPrimaryCtorBeforeMerge(AST::Node& root);
     /**
      * Check whether the members are legal according to the members of
      * super class and interfaces. For example some functions should be overridden;
@@ -1583,6 +1597,7 @@ private:
     void CheckUsageOfDeprecatedSetter(const Ptr<AST::Node> usage);
     void CheckDeprecationLevelOnInheritors(const Ptr<AST::ClassLikeDecl> classLike);
     bool IsDeprecatedStrict(const Ptr<AST::Decl> decl) const;
+    std::string GetDiagnoseKindOfFuncDecl(const Ptr<AST::Decl> target) const;
     std::optional<std::string> GetDiagnoseKindOfFuncDecl(
             const Ptr<AST::Node> usage,
             const Ptr<AST::Decl> target
@@ -1689,6 +1704,8 @@ private:
     Ptr<AST::Node> deprecatedContext = nullptr;
     // strict version of outermost @Deprecated declaration
     Ptr<AST::Node> strictDeprecatedContext = nullptr;
+    // cjmp typechecker implementation class
+    class MPTypeCheckerImpl* mpImpl;
 };
 } // namespace Cangjie
 #endif

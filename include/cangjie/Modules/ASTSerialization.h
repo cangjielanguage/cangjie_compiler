@@ -45,6 +45,9 @@ public:
         const CjoManager& cjoManager);
     ~ASTWriter();
 
+    // Add for cjmp
+    void SetSerializingCommon();
+
     /** Export external decls of a package AST to a buffer. */
     void ExportAST(const AST::PackageDecl& package) const;
     /** Pre-save serialized generic decls, inlinable function, default functions, constant vardecls. */
@@ -79,6 +82,10 @@ public:
     std::string GetImportedPackageName() const;
     void SetImportSourceCode(bool enable) const;
     const std::vector<std::string> GetDependentPackageNames() const;
+    // Add for cjmp
+    void PreloadCommonPartOfPackage(AST::Package& pkg) const;
+    std::string PreReadAndSetPackageName();
+    std::vector<std::string> ReadFileNames() const;
 
     Ptr<AST::Ty> LoadType(FormattedIndex type) const;
     // A flag to avoid conflicts when we are reusing the AST serialiser from CHIR

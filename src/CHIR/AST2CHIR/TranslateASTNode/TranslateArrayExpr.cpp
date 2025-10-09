@@ -117,7 +117,7 @@ Ptr<Value> Translator::InitArrayByLambda(const AST::ArrayExpr& array)
     instParamTys.emplace_back(rawArrayRef->GetType());
     instParamTys.emplace_back(userInitFn->GetType());
     auto instantiedFuncTy = builder.GetType<FuncType>(instParamTys, arrayTy);
-    GenerateFuncCall(*initFn, instantiedFuncTy, instantiatedTypeArgs, rawArrayRef->GetType(),
+    GenerateFuncCall(*initFn, instantiedFuncTy, instantiatedTypeArgs, nullptr,
         std::vector<Value*>{rawArrayRef, userInitFn}, loc);
 
     return rawArrayRef;
@@ -143,7 +143,7 @@ Ptr<Value> Translator::InitArrayByItem(const AST::ArrayExpr& array)
 
 CHIR::Type* Translator::GetExactParentType(
     Type& fuzzyParentType, const AST::FuncDecl& resolvedFunction, FuncType& funcType,
-    std::vector<Type*>& funcInstTypeArgs, bool checkAbstractMethod, [[maybe_unused]] bool report)
+    std::vector<Type*>& funcInstTypeArgs, bool checkAbstractMethod, bool checkResult)
 {
     if (fuzzyParentType.IsNothing()) {
         return &fuzzyParentType;
@@ -209,66 +209,7 @@ CHIR::Type* Translator::GetExactParentType(
             }
         }
     }
-
-#ifndef NDEBUG
-    if (report && result == nullptr) {
-        const std::string msg = "can't find '" + funcName + "': " + funcType.ToString() + ", in " +
-            fuzzyParentType.ToString() + " related CustomTypeDef";
-        Errorln(msg);
-        for (auto tmp : builder.GetCurPackage()->GetClasses()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetStructs()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetEnums()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetExtends()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetImportedClasses()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetImportedStructs()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetImportedEnums()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetImportedExtends()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        CJC_ABORT();
-    }
-#endif
-    return result;
-}
-
-std::vector<VTableSearchRes> Translator::GetFuncIndexInVTable(
-    Type& root, const FuncCallType& funcCallType, bool isStatic, [[maybe_unused]] bool report)
-{
-    auto result = CHIR::GetFuncIndexInVTable(root, funcCallType, isStatic, builder);
-#ifndef NDEBUG
-    if (report && result.empty()) {
-        const std::string msg = "can't find '" + funcCallType.funcName + "': " +
-            funcCallType.funcType->ToString() + ", in " + root.ToString() + " vtable.";
-        Errorln(msg);
-        for (auto tmp : builder.GetCurPackage()->GetClasses()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetStructs()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetEnums()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        for (auto tmp : builder.GetCurPackage()->GetExtends()) {
-            std::cout << tmp->ToString() << std::endl;
-        }
-        CJC_ABORT();
-    }
-#endif
+    CJC_ASSERT(!checkResult || result != nullptr);
     return result;
 }
 
@@ -283,14 +224,14 @@ Ptr<Value> Translator::InitArrayByCollection(const AST::ArrayExpr& array)
     auto sizeTy = builder.GetInt64Ty();
 
     auto sizeGetInstFuncTy = builder.GetType<FuncType>(std::vector<Type*>({collection->GetType()}), sizeTy);
+    Type* originalObjType =
+        StaticCast<CustomType*>(collection->GetType()->StripAllRefs())->GetCustomTypeDef()->GetType();
+    originalObjType = builder.GetType<RefType>(originalObjType);
+    auto sizeGetOriginalFuncTy = builder.GetType<FuncType>(std::vector<Type*>({originalObjType}), sizeTy);
     auto collectionDerefType = StaticCast<RefType*>(collection->GetType())->GetBaseType();
     auto funcName = "$sizeget";
-    FuncCallType funcCallType{funcName, sizeGetInstFuncTy};
-    auto vtableRes =
-        GetFuncIndexInVTable(*collectionDerefType, funcCallType, false)[0];
-    InstInvokeCalleeInfo funcInfo{funcName, sizeGetInstFuncTy, vtableRes.originalFuncType, vtableRes.instSrcParentType,
-        StaticCast<ClassType*>(vtableRes.instSrcParentType->GetCustomTypeDef()->GetType()), std::vector<Type*>{},
-        collectionDerefType, vtableRes.offset};
+    InstInvokeCalleeInfo funcInfo{funcName, sizeGetInstFuncTy, sizeGetOriginalFuncTy,
+        std::vector<Type*>{}, std::vector<GenericType*>{}, collectionDerefType};
     Value* sizeVal = GenerateDynmaicDispatchFuncCall(funcInfo, std::vector<Value*>{}, collection)->GetResult();
 
     // Create the array `RawArrayAllocate(eleTy, collection.size)`
@@ -309,7 +250,7 @@ Ptr<Value> Translator::InitArrayByCollection(const AST::ArrayExpr& array)
     // if array init func is generic decl, then we will create `Apply` expr like: `Apply(init<xxx>, args)`
     // if array init func is instantiated decl, then we will create `Apply` expr like: `Apply(init, args)`
     auto instTys = array.initFunc->TestAttr(AST::Attribute::GENERIC) ? std::vector<Type*>{eleTy} : std::vector<Type*>{};
-    GenerateFuncCall(*initFn, instantiedFuncTy, instTys, rawArrayRef->GetType(),
+    GenerateFuncCall(*initFn, instantiedFuncTy, instTys, nullptr,
         std::vector<Value*>{rawArrayRef, collection}, loc);
 
     return rawArrayRef;

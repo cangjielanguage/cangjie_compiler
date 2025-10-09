@@ -307,6 +307,33 @@ private:
     std::optional<size_t> index{std::nullopt};
 };
 
+struct VirMethodOffset : public Annotation {
+public:
+    explicit VirMethodOffset() = default;
+    explicit VirMethodOffset(std::optional<size_t> v) : offset(v){};
+
+    static std::optional<size_t> Extract(const VirMethodOffset* info)
+    {
+        return info->offset;
+    }
+
+    std::unique_ptr<Annotation> Clone() override
+    {
+        return std::make_unique<VirMethodOffset>(offset);
+    }
+
+    std::string ToString() override
+    {
+        if (offset.has_value()) {
+            return "VirMethodOffset: " + std::to_string(offset.value());
+        }
+        return "";
+    }
+
+private:
+    std::optional<size_t> offset{std::nullopt};
+};
+
 // This class is used to manage CHIR Annotation's.
 class AnnotationMap final {
 public: // Set annotation T for this node, updating its value if it already exists

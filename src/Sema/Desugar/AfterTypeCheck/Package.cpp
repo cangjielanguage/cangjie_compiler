@@ -137,6 +137,10 @@ inline void AddReturnExprForFuncBody(FuncBody& fb, bool enableCoverage)
 
 void InsertStaticInitCall(InheritableDecl& decl, FuncDecl& staticInit)
 {
+    if (staticInit.TestAttr(Attribute::FROM_COMMON_PART)) {
+        // Static init was assigned as initializer in common part.
+        return;
+    }
     // Create and insert static initializing as the static member "let $init = static_init()" into typedecl.
     auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
     std::vector<OwnedPtr<FuncArg>> args;
@@ -147,6 +151,7 @@ void InsertStaticInitCall(InheritableDecl& decl, FuncDecl& staticInit)
     initVar->outerDecl = &decl;
     initVar->EnableAttr(Attribute::STATIC, Attribute::PRIVATE);
     initVar->toBeCompiled = staticInit.toBeCompiled;
+    initVar->fullPackageName = decl.fullPackageName;
     // Caller guarantees the 'decl' is class or struct.
     decl.IsClassLikeDecl() ? initVar->EnableAttr(Attribute::IN_CLASSLIKE) : initVar->EnableAttr(Attribute::IN_STRUCT);
     AddCurFile(*initVar, decl.curFile);

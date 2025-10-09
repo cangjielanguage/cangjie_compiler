@@ -51,6 +51,9 @@ void ASTChecker::CheckAST(Node& node)
         if (curNode->IsInvalid() || curNode->TestAttr(Attribute::IS_BROKEN)) {
             return VisitAction::SKIP_CHILDREN;
         }
+        if (curNode->TestAttr(Attribute::FROM_COMMON_PART)) {
+            return VisitAction::SKIP_CHILDREN;
+        }
         CheckNode(curNode);
         if (curNode->IsDecl()) {
             CheckDecl(curNode);
@@ -83,6 +86,9 @@ void ASTChecker::CheckBeginEnd(Ptr<Node> node)
     std::set<ASTKind> ignoredKindSet = {ASTKind::PACKAGE, ASTKind::PACKAGE_DECL};
     auto visitPre = [&ignoredKindSet, this](Ptr<Node> curNode) {
         if (curNode->IsInvalid() || curNode->TestAttr(Attribute::IS_BROKEN)) {
+            return VisitAction::SKIP_CHILDREN;
+        }
+        if (curNode->TestAttr(Attribute::FROM_COMMON_PART)) {
             return VisitAction::SKIP_CHILDREN;
         }
         if (ignoredKindSet.count(curNode->astKind) > 0) {
@@ -125,6 +131,9 @@ void ASTChecker::CheckAnnotation(Ptr<Node> node)
             break;
         case AnnotationKind::WHEN:
             AST_NULLPTR_CHECK(node, anno->condExpr);
+            break;
+        case AnnotationKind::ATTRIBUTE:
+            VEC_ZERO_POS_CHECK(node, anno->attrCommas);
             break;
         default:
             break;
@@ -267,6 +276,20 @@ void ASTChecker::CheckPackageSpec(Ptr<Node> node)
     if (ps->hasMacro) {
         ZERO_POSITION_CHECK(node, ps->macroPos);
     }
+}
+void ASTChecker::CheckFeaturesDirective(Ptr<Node> node)
+{
+    auto fs = StaticAs<ASTKind::FEATURES_DIRECTIVE>(node);
+    EMPTY_VEC_CHECK(node, fs->content);
+    VEC_ZERO_POS_CHECK(node, fs->commaPoses);
+}
+void ASTChecker::CheckFeatureId(Ptr<Node> node)
+{
+    auto fc = StaticAs<ASTKind::FEATURE_ID>(node);
+    for (auto &ident : fc->identifiers) {
+        EMPTY_IDENTIFIER_CHECK(node, ident);
+    }
+    VEC_ZERO_POS_CHECK(node, fc->dotPoses);
 }
 void ASTChecker::CheckStructBody(Ptr<Node> node)
 {
@@ -667,6 +690,7 @@ void ASTChecker::CheckSubscriptExpr(Ptr<Node> node)
     AST_NULLPTR_CHECK(node, se->baseExpr);
     ZERO_POSITION_CHECK(node, se->leftParenPos);
     VEC_AST_NULLPTR_CHECK(node, se->indexExprs);
+    VEC_ZERO_POS_CHECK(node, se->commaPos);
     ZERO_POSITION_CHECK(node, se->rightParenPos);
 }
 void ASTChecker::CheckUnaryExpr(Ptr<Node> node)

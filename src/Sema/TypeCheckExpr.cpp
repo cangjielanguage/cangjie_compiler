@@ -346,10 +346,14 @@ void TypeChecker::TypeCheckerImpl::HandleAlias(Ptr<Expr> expr, std::vector<Ptr<D
         if (auto realTarget = innerTypeAliasTarget->type->GetTarget(); realTarget) {
             target = realTarget;
             if (auto ref = DynamicCast<NameReferenceExpr*>(expr)) {
+                auto wasEmpty = ref->typeArguments.empty();
                 auto typeMapping = GenerateTypeMappingForTypeAliasUse(*aliasDecl, *ref);
                 SubstituteTypeArguments(*innerTypeAliasTarget, ref->typeArguments, typeMapping);
                 // Try to insert new typeArguments to ref's instTys.
                 UpdateInstTysWithTypeArgs(*ref);
+                if (wasEmpty && !ref->typeArguments.empty()) {
+                    ref->compilerAddedTyArgs = true;
+                }
             }
         }
     }

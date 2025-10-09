@@ -177,8 +177,8 @@ std::vector<Ptr<AST::Ty>> GetFuncBodyParamTys(const AST::FuncBody& fb);
 /**
  * Check whether src is an override or implementation of target.
  */
-bool IsOverrideOrShadow(
-    TypeManager& typeManager, const AST::FuncDecl& src, const AST::FuncDecl& target, Ptr<AST::Ty> baseTy = nullptr);
+bool IsOverrideOrShadow(TypeManager& typeManager, const AST::FuncDecl& src, const AST::FuncDecl& target,
+    const Ptr<AST::Ty> baseTy = nullptr, const Ptr<AST::Ty> expectInstParent = nullptr);
 bool IsOverrideOrShadow(
     TypeManager& typeManager, const AST::PropDecl& src, const AST::PropDecl& target, Ptr<AST::Ty> baseTy = nullptr);
 MultiTypeSubst GenerateTypeMappingBetweenFuncs(

@@ -192,7 +192,11 @@ bool TypeChecker::TypeCheckerImpl::IsLegalAccess(Symbol* curComposite, const Dec
             SearchTargetDeclForProtectMember(*curComposite->node, *outerDeclOfTarget, typeManager)));
     }
     // 4. otherwise accessing private decl must inside same decl.
-    return curComposite && curComposite->node == outerDeclOfTarget;
+    auto expectedOuter = outerDeclOfTarget;
+    if (expectedOuter->platformImplementation) {
+        expectedOuter = expectedOuter->platformImplementation;
+    }
+    return curComposite && curComposite->node == expectedOuter;
 }
 
 std::vector<Ptr<Decl>> TypeChecker::TypeCheckerImpl::GetAccessibleDecls(

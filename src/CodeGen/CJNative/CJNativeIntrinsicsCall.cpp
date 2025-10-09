@@ -38,6 +38,20 @@ llvm::Value* IRBuilder2::CallIntrinsic(
     if (auto iter = INTRINSIC_KIND_TO_ID_MAP.find(intrinsic.GetIntrinsicKind());
         iter != INTRINSIC_KIND_TO_ID_MAP.end()) {
         auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), iter->second, tys);
+        if (intrinsic.GetIntrinsicKind() == CHIR::IntrinsicKind::BLACK_BOX) {
+            CJC_ASSERT(args.size() == 1U);
+            if (!args[0]->getType()->isPointerTy()) {
+                return args[0];
+            }
+            llvm::PointerType *argType = llvm::cast<llvm::PointerType>(args[0]->getType());
+            if (argType->getAddressSpace() == 0) {
+                auto arg = CreateBitCast(args[0], getInt8Ty()->getPointerTo(0));
+                return CreateBitCast(CreateCall(func, arg), argType);
+            } else {
+                auto arg = CreateAddrSpaceCast(args[0], getInt8Ty()->getPointerTo(0));
+                return CreateAddrSpaceCast(CreateCall(func, arg), argType);
+            }
+        }
         return CreateCall(func, args);
     }
     CJC_ASSERT(false && "Unsupported intrinsic.");

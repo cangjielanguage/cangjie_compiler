@@ -20,30 +20,6 @@ using namespace Cangjie;
 using namespace Cangjie::AST;
 using namespace Cangjie::Utils;
 
-namespace {
-// Can NOT be used for import-multi.
-std::string GetPackageNameWithPaths(const ImportContent& content)
-{
-    std::stringstream ss;
-    if (content.kind == ImportKind::IMPORT_SINGLE || content.kind == ImportKind::IMPORT_ALIAS) {
-        for (const auto& prefix : content.prefixPaths) {
-            ss << prefix << ".";
-        }
-        ss << content.identifier.Val();
-        return ss.str();
-    }
-    auto it = content.prefixPaths.cbegin();
-    if (it != content.prefixPaths.cend()) {
-        ss << *it;
-        ++it;
-    }
-    for (; it != content.prefixPaths.cend(); ++it) {
-        ss << "." << *it;
-    }
-    return ss.str();
-}
-} // namespace
-
 void ParserImpl::ParseCommonImportSpec(PtrVector<ImportSpec>& imports, PtrVector<Annotation>& annos)
 {
     while (SeeingImport2() || (SeeingBuiltinAnnotation())) {
@@ -83,7 +59,7 @@ void ParserImpl::CheckImportSpec(PtrVector<ImportSpec>& imports)
 
         const auto& content = import->content;
         if (content.kind != ImportKind::IMPORT_MULTI) {
-            auto fullPackageName = GetPackageNameWithPaths(content);
+            auto fullPackageName = content.GetImportedPackageName();
             if (!content.TestAttr(Attribute::IS_BROKEN) && fullPackageName.size() > PACKAGE_NAME_LEN_LIMIT) {
                 auto packageNameBeginPos =
                     content.prefixPaths.empty() ? content.identifier.Begin() : content.prefixPoses[0];
@@ -92,9 +68,9 @@ void ParserImpl::CheckImportSpec(PtrVector<ImportSpec>& imports)
             }
             continue;
         }
-        auto commonPrefix = GetPackageNameWithPaths(content);
+        auto commonPrefix = content.GetImportedPackageName();
         for (const auto& item : content.items) {
-            auto suffix = GetPackageNameWithPaths(item);
+            auto suffix = item.GetImportedPackageName();
             auto fullPackageName = commonPrefix.empty() ? suffix : commonPrefix + "." + suffix;
             if (!item.TestAttr(Attribute::IS_BROKEN) && fullPackageName.size() > PACKAGE_NAME_LEN_LIMIT) {
                 auto packageNameBeginPos = content.prefixPaths.empty()
@@ -172,6 +148,7 @@ void ParserImpl::DesugarImportMulti(PtrVector<ImportSpec>& imports, ImportSpec& 
         desugaredImport->content.prefixPaths = import.content.prefixPaths;
         desugaredImport->content.prefixPoses = import.content.prefixPoses;
         desugaredImport->content.prefixDotPoses = import.content.prefixDotPoses;
+        desugaredImport->content.hasDoubleColon = import.content.hasDoubleColon;
 
         desugaredImport->content.prefixPaths.insert(
             desugaredImport->content.prefixPaths.end(), item.prefixPaths.begin(), item.prefixPaths.end());
@@ -205,7 +182,9 @@ bool ParserImpl::ParseImportSingle(ImportContent& content, bool inMultiImport)
 {
     SrcIdentifier curIdent;
     bool firstIter{true};
+    bool skipDc{false};
     do {
+        skipDc = false;
         if (!curIdent.Empty()) {
             content.prefixPaths.emplace_back(curIdent.Val());
             content.prefixPoses.emplace_back(curIdent.Begin());
@@ -241,11 +220,16 @@ bool ParserImpl::ParseImportSingle(ImportContent& content, bool inMultiImport)
             }
             content.EnableAttr(Attribute::IS_BROKEN);
             break;
-        } else if (firstIter) {
+        }
+        if (firstIter) {
             content.begin = curIdent.Begin();
             firstIter = false;
         }
-    } while (Skip(TokenKind::DOT));
+        if (content.prefixPaths.empty() && Skip(TokenKind::DOUBLE_COLON)) {
+            content.hasDoubleColon = true;
+            skipDc = true;
+        }
+    } while (skipDc || Skip(TokenKind::DOT));
 
     content.kind = curIdent == "*" ? ImportKind::IMPORT_ALL : ImportKind::IMPORT_SINGLE;
 
@@ -318,25 +302,4 @@ void ParserImpl::ParseImportAliasPart(ImportContent& content)
         content.aliasName = std::move(curIdent);
         content.end = lastToken.End();
     }
-}
-
-void ParserImpl::CheckAllowedAnnoOnImport(
-    PtrVector<Annotation>& annos, const PtrVector<ImportSpec>::iterator& importBegin,
-    const PtrVector<ImportSpec>::iterator& importEnd)
-{
-    if (importBegin == importEnd) {
-        return;
-    }
-
-    static const std::vector<AnnotationKind> allowedAnnoOnImport = {
-        AnnotationKind::WHEN,
-    };
-
-    (void)std::for_each(annos.begin(), annos.end(), [&, this](auto& anno) {
-        if (NotIn(anno->kind, allowedAnnoOnImport)) {
-            (void)std::for_each(importBegin, importEnd, [&, this](auto& import) {
-                DiagUnexpectedAnnoOn(*anno, import.get()->importPos, anno->identifier, "import");
-            });
-        }
-    });
 }

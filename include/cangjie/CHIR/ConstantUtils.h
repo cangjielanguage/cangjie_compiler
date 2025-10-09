@@ -18,6 +18,7 @@
 namespace Cangjie::CHIR {
 inline const std::string FUNC_MANGLE_NAME_MALLOC_CSTRING = "_CNat4LibC13mallocCStringHRNat6StringE";
 inline const std::string FUNC_MANGLE_NAME_CSTRING_SIZE = "_CNatXk4sizeHv";
+inline const std::string GLOBAL_VALUE_PREFIX = "@"; // identifier prefix
 constexpr size_t CLASS_REF_DIM{2};
 } // namespace Cangjie::CHIR
 #endif // CANGJIE_CHIR_CONSTANTUTILS_H

@@ -201,9 +201,10 @@ CHIRContext::~CHIRContext()
 // FileName API
 void CHIRContext::RegisterSourceFileName(unsigned fileId, const std::string& fileName) const
 {
-    if (this->fileNameMap->find(fileId) == this->fileNameMap->end()) {
-        this->fileNameMap->insert(std::make_pair(fileId, fileName));
-    }
+    // we need to insert or assign, because this `fileNameMap` may be set in deserialization when
+    // we are compiling platform package, so this old `fileNameMap` is from common package,
+    // it's not guaranteed that common package's file order and size are same with platform's
+    fileNameMap->insert_or_assign(fileId, fileName);
 }
 
 const std::string& CHIRContext::GetSourceFileName(unsigned fileId) const

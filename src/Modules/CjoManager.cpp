@@ -40,8 +40,8 @@ void AddDeclToMap(Decl& decl, std::map<std::string, OrderedDeclSet>& declMap)
             return VisitAction::WALK_CHILDREN;
         });
         walker.Walk();
-    } else if (auto funcDecl = DynamicCast<FuncDecl*>(&decl); funcDecl == nullptr ||
-               (!funcDecl->TestAttr(Attribute::MAIN_ENTRY) && funcDecl->identifier != MAIN_INVOKE)) {
+    } else if (auto funcDecl = DynamicCast<FuncDecl*>(&decl);
+        funcDecl == nullptr || (!funcDecl->TestAttr(Attribute::MAIN_ENTRY) && funcDecl->identifier != MAIN_INVOKE)) {
         // Main function won't be imported.
         declMap[decl.identifier].emplace(&decl);
     }
@@ -150,6 +150,16 @@ Ptr<std::unordered_map<std::string, Ptr<AST::Decl>>> CjoManager::GetExportIdDecl
     const std::string& fullPackageName) const
 {
     return impl->GetExportIdDeclMap(fullPackageName);
+}
+
+std::optional<std::vector<std::string>> CjoManager::PreReadCommonPartCjoFiles()
+{
+    return impl->PreReadCommonPartCjoFiles(*this);
+}
+
+Ptr<ASTLoader> CjoManager::GetCommonPartCjo(std::string expectedName) const
+{
+    return impl->GetCommonPartCjo(expectedName);
 }
 
 Ptr<PackageDecl> CjoManager::GetPackageDecl(const std::string& fullPackageName) const
@@ -262,6 +272,37 @@ bool CjoManagerImpl::IsReExportBy(const std::string& srcPackage, const std::stri
     return false;
 }
 
+bool CjoManager::NeedCollectDependency(std::string curName, bool isCurMacro, std::string depName) const
+{
+    if (depName == curName || impl->AlreadyLoaded(depName)) {
+        return false;
+    }
+
+    auto pkgInfo = impl->GetPackageInfo(depName);
+    if (!pkgInfo) {
+        // This common dependency was not imported in current platform part, so it need to be add manually
+        auto cjoPath = GetPackageCjoPath(depName);
+        if (!cjoPath || !LoadPackageHeader(depName, *cjoPath)) {
+            DiagnosticBuilder builder = GetDiag().DiagnoseRefactor(DiagKindRefactor::package_search_error,
+                DEFAULT_POSITION, depName);
+            builder.AddHelp(DiagHelp(Modules::NO_CJO_HELP_INFO));
+            return false;
+        }
+    }
+
+    // If current is macro package, only load decls for dependent macro package,
+    // otherwise, load decls for all dependent package (macro package was filtered before).
+    // NOTE: non-macro package's will never be used through macro package.
+    if (auto depPd = GetPackageDecl(depName); depPd) {
+        bool isDepMacro = depPd->srcPackage->isMacroPackage;
+        if (!isCurMacro || isDepMacro || depName == AST_PACKAGE_NAME || impl->IsReExportBy(curName, depName)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packages, bool fromLsp) const
 {
     // Add all directly imported package's loader.
@@ -279,7 +320,27 @@ void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packa
             }
         }
     }
+
     std::vector<Ptr<ASTLoader>> loaders;
+    // Load common part cjo
+    for (auto pkg : packages) {
+        if (impl->GetGlobalOptions().inputChirFiles.size() > 0) {
+            std::string expectedPackageName = pkg->fullPackageName;
+            auto commonLoader = GetCommonPartCjo(expectedPackageName);
+            if (!commonLoader) {
+                continue;
+            }
+            commonLoader->PreloadCommonPartOfPackage(*pkg);
+            commonLoader->LoadPackageDecls();
+            loaders.emplace_back(commonLoader);
+            for (auto commonDependencyName : commonLoader->GetDependentPackageNames()) {
+                if (NeedCollectDependency(expectedPackageName, pkg->isMacroPackage, commonDependencyName)) {
+                    q.push(impl->GetPackageInfo(commonDependencyName));
+                }
+            }
+        }
+    }
+
     while (!q.empty()) {
         auto cur = q.front();
         q.pop();
@@ -295,19 +356,12 @@ void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packa
         bool isCurMacro = cur->pkg->isMacroPackage;
         auto deps = cur->loader->GetDependentPackageNames();
         for (auto pkg : deps) {
-            if (pkg == pkgName) {
-                continue; // Ignore itself.
-            }
-            // If current is macro package, only load decls for dependent macro package,
-            // otherwise, load decls for all dependent package (macro package was filtered before).
-            // NOTE: non-macro package's will never be used through macro package.
-            if (auto depPd = GetPackageDecl(pkg); depPd &&
-                (!isCurMacro || depPd->srcPackage->isMacroPackage || pkg == AST_PACKAGE_NAME ||
-                    impl->IsReExportBy(pkgName, pkg))) {
+            if (NeedCollectDependency(pkgName, isCurMacro, pkg)) {
                 q.push(impl->GetPackageInfo(pkg));
             }
         }
     }
+
     for (auto loader : loaders) {
         loader->LoadRefs();
     }
@@ -328,6 +382,52 @@ void CjoManager::LoadAllDeclsAndRefs() const
             p.second->loader->LoadRefs();
         }
     }
+}
+
+// Reading common part .cjo is required before parsing to keep fileID stable.
+// This method only reads file content and does not build ast nodes.
+std::optional<std::vector<std::string>> CjoManagerImpl::PreReadCommonPartCjoFiles(CjoManager& cjoManager)
+{
+    // use `cjoFileCacheMap`
+    std::vector<uint8_t> buffer;
+    std::string failedReason;
+
+    if (!globalOptions.commonPartCjo) {
+        diag.DiagnoseRefactor(DiagKindRefactor::module_common_part_path_is_required, DEFAULT_POSITION);
+        return std::nullopt;
+    }
+
+    CJC_ASSERT(globalOptions.commonPartCjo);
+    std::string commonPartCjoPath = *globalOptions.commonPartCjo;
+    FileUtil::ReadBinaryFileToBuffer(commonPartCjoPath, buffer, failedReason);
+    if (!failedReason.empty()) {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor::module_read_file_to_buffer_failed, DEFAULT_POSITION, commonPartCjoPath, failedReason);
+        return {};
+    }
+
+    // name of package is unknown before parsing and reading .cjo, so fake is used.
+    std::string fakeName = "";
+    commonPartLoader = MakeOwned<ASTLoader>(std::move(buffer), fakeName, typeManager, cjoManager, globalOptions);
+    commonPartLoader->SetImportSourceCode(importSrcCode);
+    commonPartLoader->PreReadAndSetPackageName();
+
+    return commonPartLoader->ReadFileNames();
+}
+
+Ptr<ASTLoader> CjoManagerImpl::GetCommonPartCjo(std::string expectedName)
+{
+    CJC_ASSERT(commonPartLoader);
+    CJC_ASSERT(globalOptions.commonPartCjo);
+
+    std::string realName = commonPartLoader->PreReadAndSetPackageName();
+    if (realName != expectedName) {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor::module_common_cjo_wrong_package, DEFAULT_POSITION, realName, expectedName);
+        return nullptr;
+    }
+
+    return commonPartLoader.get();
 }
 
 OwnedPtr<ASTLoader> CjoManagerImpl::ReadCjo(
@@ -442,46 +542,76 @@ void CjoManager::AddPackageDeclMap(const std::string& fullPackageName, const std
     }
 }
 
+std::optional<std::string> CjoManager::GetPackageCjoPath(std::string fullPackageName) const
+{
+    if (auto found = impl->GetCjoFileCacheMap().find(fullPackageName); found != impl->GetCjoFileCacheMap().end()) {
+        return fullPackageName; // Set dummy path for cached cjo data.
+    } else {
+        return FileUtil::FindSerializationFile(fullPackageName, SERIALIZED_FILE_EXTENSION, GetSearchPath());
+    }
+
+    return std::nullopt;
+}
+
 std::pair<std::string, std::string> CjoManager::GetPackageCjo(const AST::ImportSpec& importSpec) const
 {
     std::string cjoPath;
-    std::string fullPackageName;
-    for (auto it : GetFullPackageNames(importSpec)) {
-        fullPackageName = it;
-        if (auto found = impl->GetCjoFileCacheMap().find(fullPackageName); found != impl->GetCjoFileCacheMap().end()) {
-            cjoPath = fullPackageName; // Set dummy path for cached cjo data.
+    std::string cjoName;
+    for (auto it : GetPossibleCjoNames(importSpec)) {
+        cjoName = it;
+        if (auto found = impl->GetCjoFileCacheMap().find(cjoName); found != impl->GetCjoFileCacheMap().end()) {
+            cjoPath = cjoName; // Set dummy path for cached cjo data.
         } else {
-            cjoPath = FileUtil::FindSerializationFile(fullPackageName, SERIALIZED_FILE_EXTENSION, GetSearchPath());
+            cjoPath = FileUtil::FindSerializationFile(cjoName, SERIALIZED_FILE_EXTENSION, GetSearchPath());
         }
         if (!cjoPath.empty()) {
             break;
         }
     }
-    CJC_ASSERT(!fullPackageName.empty());
+    CJC_ASSERT(!cjoName.empty());
+    auto cjoPackageName = FileUtil::ToPackageName(cjoName);
     // Store importSpec with packageName.
-    auto names = importSpec.content.prefixPaths;
-    names.emplace_back(importSpec.content.identifier);
-    std::string possibleName = Utils::JoinStrings(names, ".");
-    impl->AddImportedPackageName(&importSpec, std::make_pair(fullPackageName, fullPackageName == possibleName));
-    return {fullPackageName, cjoPath};
+    std::string possibleName = importSpec.content.GetImportedPackageName();
+    impl->AddImportedPackageName(&importSpec, std::make_pair(cjoPackageName,
+        cjoPackageName == possibleName && importSpec.content.kind != ImportKind::IMPORT_ALL));
+    return {cjoPackageName, cjoPath};
 }
 
-std::vector<std::string> CjoManager::GetFullPackageNames(const ImportSpec& import) const
+std::vector<std::string> CjoManager::GetPossibleCjoNames(const ImportSpec& import) const
 {
     // Multi-imports are desugared after parser which should not be used for get package name.
     CJC_ASSERT(import.content.kind != ImportKind::IMPORT_MULTI);
     if (import.content.prefixPaths.empty()) {
         return {import.content.identifier};
     }
-    std::string fullPackageName = Utils::JoinStrings(import.content.prefixPaths, ".");
+    std::string name;
+    std::string_view dot = TOKENS[static_cast<int>(TokenKind::DOT)];
+    bool needDc{import.content.hasDoubleColon};
+    for (size_t i{0}; i < import.content.prefixPaths.size(); ++i) {
+        name += import.content.prefixPaths[i];
+        if (i == import.content.prefixPaths.size() - 1) {
+            break;
+        }
+        if (i == 0 && needDc) {
+            name += ORG_NAME_SEPARATOR;
+            needDc = false;
+        } else {
+            name += dot;
+        }
+    }
     if (import.content.kind == ImportKind::IMPORT_ALL) {
-        return {fullPackageName};
+        return {std::move(name)};
     }
-    if (auto name = GetPackageNameByImport(import); !name.empty()) {
-        return {name};
+    if (auto it = GetPackageNameByImport(import); !it.empty()) {
+        return {FileUtil::ToCjoFileName(it)};
     }
-    [[maybe_unused]] std::string maybePackageName = fullPackageName + "." + import.content.identifier;
-    return {maybePackageName, fullPackageName};
+    // if needDc, this import must be of from a::b
+    // in this case, the only possible pacakge name is a::b
+    if (needDc) {
+        return {name + std::string{ORG_NAME_SEPARATOR} + import.content.identifier};
+    }
+    auto maybePackageName = name + std::string{dot} + import.content.identifier.Val();
+    return {std::move(maybePackageName), std::move(name)};
 }
 
 std::string CjoManager::GetPackageNameByImport(const AST::ImportSpec& importSpec) const

@@ -20,13 +20,15 @@ class GlobalDeclAnalysis {
 public:
     GlobalDeclAnalysis(DiagAdapter& ciDiag, const GenericInstantiationManager* gim, IncreKind kind,
         const ElementList<Ptr<const AST::Decl>>& funcsAndVars, const ElementList<Ptr<const AST::Decl>>& localConstVars,
-        const StaticInitInfoMap& staticInitFuncInfoMap)
+        const StaticInitInfoMap& staticInitFuncInfoMap, bool outputChir = false, bool mergingPlatform = false)
         : diag(&ciDiag),
           gim(gim),
           kind(kind),
           funcsAndVars(funcsAndVars),
           localConstVars(localConstVars),
-          staticInitFuncInfoMap(staticInitFuncInfoMap)
+          staticInitFuncInfoMap(staticInitFuncInfoMap),
+          outputChir(outputChir),
+          mergingPlatform(mergingPlatform)
     {
     }
 
@@ -58,7 +60,7 @@ private:
     void AdditionalAnalysisDepOfNonStaticCtor(const AST::FuncDecl& func,
         std::vector<Ptr<const AST::Decl>>& dependencies, std::vector<Ptr<const AST::Decl>>& localConstVarDeps);
     void AdditionalAnalysisDepOfStaticInit(
-        const Ptr<const AST::FuncDecl>& func, std::vector<Ptr<const AST::Decl>>& dependencies) const;
+        const Ptr<const AST::FuncDecl>& staticInit, std::vector<Ptr<const AST::Decl>>& dependencies) const;
 
     void WalkAndCollectDep(const AST::Node& curNode, std::vector<Ptr<const AST::Decl>>& dependencies,
         std::vector<Ptr<const AST::Decl>>& localConstVarDeps);
@@ -108,6 +110,8 @@ private:
     // A map to track the dependencies between the global/static variables and local const variables, this wil be used
     // to determine a final init order of all variables
     DeclDepMap globalVarsAndLocalConstVarsDepMap;
+    bool outputChir = false;
+    bool mergingPlatform = false;
 };
 
 template <class T> class DepsUnit {

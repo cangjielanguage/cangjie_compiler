@@ -17,7 +17,8 @@
 #include "cangjie/Driver/ToolOptions.h"
 #include "Toolchains/CJNATIVE/Linux_CJNATIVE.h"
 #include "Toolchains/CJNATIVE/Darwin_CJNATIVE.h"
-#include "Toolchains/CJNATIVE/Linux_CJNATIVE.h"
+#include "Toolchains/CJNATIVE/IOS_CJNATIVE.h"
+#include "Toolchains/CJNATIVE/Android_CJNATIVE.h"
 #include "Toolchains/CJNATIVE/MinGW_CJNATIVE.h"
 #include "Toolchains/CJNATIVE/Ohos_CJNATIVE.h"
 
@@ -31,6 +32,10 @@ bool CJNATIVEBackend::GenerateToolChain()
         case OSType::LINUX:
             if (driverOptions.target.env == Environment::OHOS) {
                 TC = std::make_unique<Ohos_CJNATIVE>(driver, driverOptions, backendCmds);
+                return true;
+            }
+            if (driverOptions.target.env == Environment::ANDROID) {
+                TC = std::make_unique<Android_CJNATIVE>(driver, driverOptions, backendCmds);
                 return true;
             }
             if (driverOptions.target.env == Environment::GNU ||
@@ -51,6 +56,9 @@ bool CJNATIVEBackend::GenerateToolChain()
             break;
         case OSType::DARWIN:
             TC = std::make_unique<Darwin_CJNATIVE>(driver, driverOptions, backendCmds);
+            return true;
+        case OSType::IOS:
+            TC = std::make_unique<IOS_CJNATIVE>(driver, driverOptions, backendCmds);
             return true;
         case OSType::UNKNOWN:
         default:

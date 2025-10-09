@@ -46,6 +46,7 @@ private:
     void CheckPropDeclAttributes(const PropDecl& pd) const;
     void CheckGenericFuncDeclAttributes(const FuncDecl& fd) const;
     void CheckAttributesForPropAndFuncDeclInClass(const ClassDecl& cd, Decl& member) const;
+    void CheckCJMPAttributesForPropAndFuncDeclInClass(const ClassDecl& cd, Decl& member) const;
 
     static void SetContextAttribute(const Decl& decl, Decl& memberDecl)
     {
@@ -281,6 +282,47 @@ void DeclAttributeChecker::CheckClassAttribute(ClassDecl& cd) const
     }
 }
 
+void DeclAttributeChecker::CheckCJMPAttributesForPropAndFuncDeclInClass(const ClassDecl& cd, Decl& member) const
+{
+    bool inCJMP = cd.TestAttr(Attribute::COMMON) || cd.TestAttr(Attribute::PLATFORM);
+    bool inAbstractCJMP = cd.TestAttr(Attribute::ABSTRACT) && inCJMP;
+
+    bool isCJMP = member.TestAttr(Attribute::COMMON) || member.TestAttr(Attribute::PLATFORM);
+    bool isAbstract = member.TestAttr(Attribute::ABSTRACT);
+
+    bool compilerAddedOrConstructor = member.TestAttr(Attribute::COMPILER_ADD) ||
+        member.TestAttr(Attribute::CONSTRUCTOR);
+    bool hasBody = false;
+    std::string memberKind;
+    if (member.astKind == ASTKind::FUNC_DECL) {
+        memberKind = "function";
+        auto func = StaticCast<FuncDecl*>(&member);
+        if (func->funcBody && func->funcBody->body) {
+            hasBody = true;
+        }
+    } else {
+        memberKind = "property";
+        auto prop = StaticCast<PropDecl*>(&member);
+        // dummy getters added in case of actually abstract property
+        if (!prop->getters.empty() && !prop->getters[0]->TestAttr(Attribute::COMPILER_ADD)) {
+            hasBody = true;
+        }
+    }
+
+    // It can be checked only at parsed, because now no deffirence between modifier and attriubute
+    if (hasBody && inCJMP && isAbstract) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_explicitly_abstract_can_not_have_body, member, memberKind);
+    }
+
+    bool checkedBefore = member.TestAttr(Attribute::FROM_COMMON_PART);
+    // member of `common abstract` must be explicitly marked with common or abstract or have body
+    if (inAbstractCJMP && !isCJMP && !isAbstract && !compilerAddedOrConstructor && !hasBody && !checkedBefore) {
+        auto cjmpKind = cd.TestAttr(Attribute::COMMON) ? "common" : "platform";
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_cjmp_abstract_class_member_has_no_explicit_modifier, member,
+            MakeRange(member.identifier), cjmpKind, memberKind, cjmpKind);
+    }
+}
+
 void DeclAttributeChecker::CheckAttributesForPropAndFuncDeclInClass(const ClassDecl& cd, Decl& member) const
 {
     if (member.astKind != ASTKind::PROP_DECL && member.astKind != ASTKind::FUNC_DECL) {
@@ -294,10 +336,13 @@ void DeclAttributeChecker::CheckAttributesForPropAndFuncDeclInClass(const ClassD
     //  1. member decl is static and not foreign;
     //  2. class decl is not abstract and not foreign;
     //  3. member decl can not be modified with 'open' in a non-inheritable object.
+    //  4. member decl is not in a mirror
     bool invalidAbstract = member.TestAttr(Attribute::ABSTRACT) &&
         ((member.TestAttr(Attribute::STATIC) && !member.TestAttr(Attribute::FOREIGN)) ||
-            (!cd.TestAttr(Attribute::ABSTRACT) && !cd.TestAttr(Attribute::FOREIGN)));
-    if (invalidAbstract) {
+            (!cd.TestAttr(Attribute::ABSTRACT) && !cd.TestAttr(Attribute::FOREIGN)))
+            && !member.TestAttr(Attribute::JAVA_MIRROR) && !cd.TestAttr(Attribute::OBJ_C_MIRROR);
+    if (invalidAbstract && !member.TestAttr(Attribute::COMMON_WITH_DEFAULT)) {
+        member.DisableAttr(Attribute::ABSTRACT); // It's not abstract, just missed body, so need to set correct attribute value for further checks
         diag.Diagnose(member, DiagKind::sema_missing_func_body, type, member.identifier.Val());
     }
     if (member.TestAttr(Attribute::ABSTRACT) && cd.TestAttr(Attribute::ABSTRACT)) {
@@ -306,6 +351,9 @@ void DeclAttributeChecker::CheckAttributesForPropAndFuncDeclInClass(const ClassD
                 MakeRange(member.identifier), "abstract", type);
         }
     }
+
+    CheckCJMPAttributesForPropAndFuncDeclInClass(cd, member);
+
     bool isInheritableClass = cd.TestAttr(Attribute::OPEN) || cd.TestAttr(Attribute::ABSTRACT);
     if (member.TestAttr(Attribute::OPEN)) {
         if (!isInheritableClass) {
@@ -331,7 +379,14 @@ void DeclAttributeChecker::CheckAttributesForPropAndFuncDeclInClass(const ClassD
 
 void DeclAttributeChecker::CheckPropDeclAttributes(const PropDecl& pd) const
 {
-    if (pd.TestAttr(Attribute::ABSTRACT) || opts.compileCjd) {
+    if (pd.outerDecl && pd.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+        return;
+    }
+
+    if (pd.TestAnyAttr(Attribute::ABSTRACT, Attribute::JAVA_MIRROR) || opts.compileCjd) {
+        return;
+    }
+    if (IsCommonWithoutDefault(pd)) {
         return;
     }
     if (pd.isVar) {
@@ -391,7 +446,8 @@ void TypeChecker::TypeCheckerImpl::CheckAllDeclAttributes(const ASTContext& ctx)
     std::vector<Symbol*> syms = GetAllDecls(ctx);
     for (auto& sym : syms) {
         if (auto decl = AST::As<ASTKind::DECL>(sym->node)) {
-            CJC_ASSERT(!decl->TestAttr(Attribute::IMPORTED) || decl->TestAttr(Attribute::TOOL_ADD));
+            CJC_ASSERT(!decl->TestAttr(Attribute::IMPORTED) || decl->TestAttr(Attribute::TOOL_ADD) ||
+                       decl->TestAttr(Attribute::FROM_COMMON_PART) || decl->TestAttr(Attribute::COMMON));
             DeclAttributeChecker(ci->invocation.globalOptions, diag, *decl).Check();
         }
     }

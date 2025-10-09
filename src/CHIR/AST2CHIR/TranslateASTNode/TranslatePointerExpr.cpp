@@ -6,6 +6,8 @@
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 
+#include "cangjie/CHIR/AST2CHIR/Utils.h"
+
 using namespace Cangjie::CHIR;
 using namespace Cangjie;
 
@@ -29,8 +31,8 @@ Ptr<Value> Translator::Visit(const AST::PointerExpr& expr)
                     argVal = CreateGetElementRefWithPath(TranslateLocation(expr), argVal,
                         argLeftValInfo.path, currentBlock, *lhsCustomType);
                 } else {
-                    auto memberType = lhsCustomType->GetInstMemberTypeByPath(argLeftValInfo.path, builder);
-                    auto getMember = CreateAndAppendExpression<Field>(
+                    auto memberType = GetInstMemberTypeByName(*lhsCustomType, argLeftValInfo.path, builder);
+                    auto getMember = CreateAndAppendExpression<FieldByName>(
                         TranslateLocation(expr), memberType, argVal, argLeftValInfo.path, currentBlock);
                     argVal = getMember->GetResult();
                 }

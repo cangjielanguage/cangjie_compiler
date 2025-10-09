@@ -23,6 +23,10 @@
 #include "cangjie/AST/Clone.h"
 #include "cangjie/Driver/DriverOptions.h"
 
+#include "MockManager.h"
+#include "MockSupportManager.h"
+#include "MockUtils.h"
+
 namespace Cangjie {
 
 using namespace AST;
@@ -54,38 +58,18 @@ bool IsAnyTypeParamUsedInTypeArgs(
     return false;
 }
 
-bool TestManager::ShouldBeMarkedAsContainingMockCreationCall(
-    const CallExpr& callExpr, const Ptr<FuncDecl> enclosingFunc) const
-{
-    auto resolvedFunc = callExpr.resolvedFunction;
-    if (!resolvedFunc || !resolvedFunc->funcBody || !resolvedFunc->funcBody->generic ||
-        !enclosingFunc->funcBody || !enclosingFunc->funcBody->generic
-    ) {
-        return false; // outside generics, mock creation calls (createMock / createSpy) can be used without restrictions
-    }
-
-    if (!MockManager::IsMockCall(callExpr) && !resolvedFunc->TestAttr(Attribute::CONTAINS_MOCK_CREATION_CALL)) {
-        return false;
-    }
-
-    if (auto nre = DynamicCast<NameReferenceExpr>(callExpr.baseFunc.get())) {
-        return IsAnyTypeParamUsedInTypeArgs(enclosingFunc->funcBody->generic->typeParameters, nre->typeArguments);
-    } else {
-        return false;
-    }
-}
-
 TestManager::TestManager(
     ImportManager& im, TypeManager& tm, DiagnosticEngine& diag, const GlobalOptions& compilationOptions)
     : importManager(im),
       typeManager(tm),
       diag(diag),
       testEnabled(compilationOptions.enableCompileTest),
-      mockCompatibleIfNeeded(testEnabled && compilationOptions.mock == MockSupportKind::DEFAULT),
-      explicitMockCompatible(compilationOptions.mock == MockSupportKind::ON),
-      mockCompatible(mockCompatibleIfNeeded || explicitMockCompatible),
-      mockCompileOnly(compilationOptions.mock == MockSupportKind::RUNTIME_ERROR),
-      exportForTest(compilationOptions.exportForTest)
+      mockMode(compilationOptions.mock),
+      mockCompatibleIfNeeded(testEnabled && mockMode == MockMode::DEFAULT),
+      mockCompatible(mockCompatibleIfNeeded || mockMode == MockMode::ON)
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+      , exportForTest(compilationOptions.exportForTest)
+#endif
 {}
 
 void TestManager::ReportDoesntSupportMocking(
@@ -99,10 +83,12 @@ void TestManager::ReportDoesntSupportMocking(
         MOCK_ON_COMPILATION_OPTION);
 }
 
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 void TestManager::ReportFrozenRequired(const FuncDecl& reportOn)
 {
     diag.DiagnoseRefactor(DiagKindRefactor::sema_mock_frozen_required, reportOn, reportOn.identifier);
 }
+#endif
 
 void TestManager::ReportUnsupportedType(const Expr& reportOn)
 {
@@ -135,32 +121,20 @@ bool TestManager::IsDeclGeneratedForTest(const Decl& decl)
     return MockUtils::IsMockAccessor(decl) || MockManager::IsMockClass(decl);
 }
 
+bool TestManager::IsMockAccessor(const Decl& decl)
+{
+    return MockUtils::IsMockAccessor(decl);
+}
+
 bool IsLocalDecl(const Decl& decl)
 {
     return (decl.outerDecl == nullptr || !decl.outerDecl->IsNominalDecl()) && !decl.TestAttr(Attribute::GLOBAL);
 }
 
-Ptr<ClassLikeDecl> TestManager::GetInstantiatedDeclInCurrentPackage(const Ptr<const ClassLikeTy> classLikeToMockTy)
-{
-    auto classLikeToMock = DynamicCast<ClassLikeDecl*>(classLikeToMockTy->commonDecl.get());
-    CJC_NULLPTR_CHECK(classLikeToMock);
-    Decl* genericDecl;
-    if (classLikeToMock->TestAttr(Attribute::GENERIC)) {
-        genericDecl = classLikeToMock;
-    } else if (classLikeToMock->genericDecl) {
-        genericDecl = classLikeToMock->genericDecl;
-    } else {
-        return classLikeToMock;
-    }
-
-    auto genericInfo = gim->impl->ConstructGenericInfo(*genericDecl, typeManager.GetTypeArgs(*classLikeToMockTy));
-    return RawStaticCast<ClassLikeDecl*>(gim->impl->GetInstantiatedDeclWithGenericInfo(genericInfo));
-}
-
 VisitAction TestManager::HandleCreateMockCall(CallExpr& callExpr, Package& pkg)
 {
     bool isMockCall = MockManager::IsMockCall(callExpr);
-    if (!isMockCall || callExpr.ty->HasGeneric()) {
+    if (!isMockCall || (callExpr.ty && callExpr.ty->HasGeneric())) {
         if (isMockCall) {
             callExpr.desugarExpr =
                 MockManager::CreateIllegalMockCallException(*callExpr.curFile, typeManager, importManager);
@@ -191,7 +165,7 @@ VisitAction TestManager::HandleCreateMockCall(CallExpr& callExpr, Package& pkg)
 
         callExpr.desugarExpr = MockManager::CreateInitCallOfMockClass(
             *mockClass, callExpr.args, typeManager, typeArgument->typeArgs, valueParamTys);
-    } else if (mockCompileOnly && testEnabled) {
+    } else if (mockMode == MockMode::RUNTIME_ERROR && testEnabled) {
         callExpr.desugarExpr = MockManager::CreateIllegalMockCallException(
             *callExpr.curFile, typeManager, importManager);
     } else if (!testEnabled) {
@@ -237,7 +211,7 @@ void TestManager::WrapWithRequireMockObjectIfNeeded(Ptr<AST::Expr> expr, Ptr<AST
 
 VisitAction TestManager::HandleMockAnnotatedLambda(const LambdaExpr& lambda)
 {
-    if (!lambda.TestAttr(Attribute::MOCK_SUPPORTED) || (mockCompileOnly && testEnabled)) {
+    if (!lambda.TestAttr(Attribute::MOCK_SUPPORTED) || (mockMode == MockMode::RUNTIME_ERROR && testEnabled)) {
         return VisitAction::WALK_CHILDREN;
     }
 
@@ -304,13 +278,14 @@ void TestManager::HandleMockCalls(Package& pkg)
             return HandleCreateMockCall(*callExpr, pkg);
         } else if (auto lambda = As<ASTKind::LAMBDA_EXPR>(node); lambda) {
             return HandleMockAnnotatedLambda(*lambda);
-        } else if (auto funcDecl = As<ASTKind::FUNC_DECL>(node); funcDecl &&
-            funcDecl->TestAttr(Attribute::CONTAINS_MOCK_CREATION_CALL) &&
-            funcDecl->funcBody && funcDecl->funcBody->generic &&
-            !funcDecl->HasAnno(AnnotationKind::FROZEN)
-        ) {
+        }
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+        if (auto funcDecl = As<ASTKind::FUNC_DECL>(node); funcDecl &&
+            funcDecl->TestAttr(Attribute::CONTAINS_MOCK_CREATION_CALL) && funcDecl->funcBody &&
+            funcDecl->funcBody->generic && !funcDecl->HasAnno(AnnotationKind::FROZEN)) {
             ReportFrozenRequired(*funcDecl);
         }
+#endif
         return VisitAction::WALK_CHILDREN;
     }).Walk();
 
@@ -327,15 +302,8 @@ Ptr<ClassDecl> TestManager::GenerateMockClassIfNeededAndGet(const CallExpr& call
         return nullptr;
     }
 
-    auto classLikeDecl = Ty::GetDeclOfTy(DynamicCast<const ClassLikeTy*>(typeArgument.get()));
-
-    Ptr<ClassLikeDecl> declToMock;
-    if (RequireInstantiation(*classLikeDecl)) {
-        declToMock = GetInstantiatedDeclInCurrentPackage(DynamicCast<const ClassLikeTy*>(typeArgument.get()));
-    } else {
-        declToMock = DynamicCast<ClassLikeDecl*>(classLikeDecl);
-    }
-
+    auto declToMock = mockUtils->GetInstantiatedDeclInCurrentPackage(
+        DynamicCast<const ClassLikeTy*>(typeArgument.get()));
     if (MockSupportManager::DoesClassLikeSupportMocking(*declToMock)) {
         auto [classDecl, generated] = mockManager->GenerateMockClassIfNeededAndGet(
             *declToMock, pkg, MockManager::GetMockKind(callExpr));
@@ -385,7 +353,7 @@ bool ShouldPrepareDecl(Node& node, const Package& pkg)
 
 void TestManager::PrepareDecls(Package& pkg)
 {
-    CJC_ASSERT(mockSupportManager && gim);
+    CJC_ASSERT(mockSupportManager);
 
     MockSupportManager::DeclsToPrepare decls;
 
@@ -412,7 +380,7 @@ void TestManager::PrepareDecls(Package& pkg)
 
 void TestManager::GenerateAccessors(Package& pkg)
 {
-    CJC_ASSERT(mockSupportManager && gim);
+    CJC_ASSERT(mockSupportManager);
 
     Walker(&pkg, Walker::GetNextWalkerID(), [this, &pkg](auto node) {
         if (!node->IsSamePackage(pkg) || Is<ExtendDecl>(node)) {
@@ -434,6 +402,11 @@ void TestManager::GenerateAccessors(Package& pkg)
             return VisitAction::SKIP_CHILDREN;
         }
 
+        // Don't generate accessors for generics themthelves, do it for instantiated versions
+        if (IS_GENERIC_INSTANTIATION_ENABLED && decl->TestAttr(Attribute::GENERIC)) {
+            return VisitAction::SKIP_CHILDREN;
+        }
+
         mockSupportManager->GenerateAccessors(*decl);
 
         return VisitAction::SKIP_CHILDREN;
@@ -444,7 +417,7 @@ void TestManager::GenerateAccessors(Package& pkg)
 
 void TestManager::PrepareToSpy(Package& pkg)
 {
-    CJC_ASSERT(mockSupportManager && gim);
+    CJC_ASSERT(mockSupportManager);
 
     mockSupportManager->GenerateSpyCallMarker(pkg);
 
@@ -459,12 +432,11 @@ void TestManager::PrepareToSpy(Package& pkg)
             return VisitAction::WALK_CHILDREN;
         }
 
-        /* Don't generate accessors for instantiated versions
-         * if the original generic declaration wasn't compiled with mocking support
-         * othewise we cannot guarantee that all other instantiated versions
-         * including from other packages' ones would be compatible with this declaration with accessors
-         */
         if (decl->genericDecl && !decl->genericDecl->TestAttr(Attribute::MOCK_SUPPORTED)) {
+            return VisitAction::SKIP_CHILDREN;
+        }
+
+        if (IS_GENERIC_INSTANTIATION_ENABLED && decl->TestAttr(Attribute::GENERIC)) {
             return VisitAction::SKIP_CHILDREN;
         }
 
@@ -478,10 +450,9 @@ void TestManager::PrepareToSpy(Package& pkg)
     mockSupportManager->WriteGeneratedMockDecls();
 }
 
-
 void TestManager::ReplaceCallsToForeignFunctions(Package& pkg)
 {
-    CJC_ASSERT(mockSupportManager && gim);
+    CJC_ASSERT(mockSupportManager);
 
     Walker(&pkg, Walker::GetNextWalkerID(), [](const Ptr<Node> node) {
         auto declNode = As<ASTKind::FUNC_DECL>(node.get());
@@ -528,7 +499,7 @@ bool IsMockAnnotedLambda(Ptr<Node> node)
 
 void TestManager::ReplaceCallsWithAccessors(Package& pkg)
 {
-    CJC_ASSERT(mockSupportManager && gim);
+    CJC_ASSERT(mockSupportManager);
 
     bool isInConstructor = false;
     bool isInMockAnnotatedLambda = false;
@@ -589,19 +560,6 @@ void TestManager::ReplaceCallsWithAccessors(Package& pkg)
     }).Walk();
 }
 
-void TestManager::DoInstantiate(Node& node) const
-{
-    gim->impl->RecordExtend(node);
-    gim->impl->WalkNonGenericExtendedType();
-    if (Is<ClassDecl>(&node)) {
-        gim->impl->CheckNodeInstantiation(node);
-    } else {
-        Walker(
-            &node, gim->impl->instantiationWalkerID,
-            [this](auto node) { return gim->impl->CheckNodeInstantiation(*node); }).Walk();
-    }
-}
-
 bool TestManager::ArePackagesMockSupportConsistent(
     const Package& currentPackage, const Package& importedPackage)
 {
@@ -629,6 +587,7 @@ void TestManager::CheckIfNoMockSupportDependencies(const Package& curPkg)
     }
 }
 
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 /*
  * It marks all generic functions which call createMock/createSpy with their generic parameters,
  * or call other such functions.
@@ -672,43 +631,31 @@ void TestManager::MarkMockCreationContainingGenericFuncs(Package& pkg) const
     }
 }
 
-void TestManager::MarkDeclsForTestIfNeeded(std::vector<Ptr<Package>> pkgs) const
+void TestManager::HandleDeclsToExportForTest(std::vector<Ptr<Package>> pkgs) const
 {
+    if (!exportForTest) {
+        return;
+    }
     for (auto& pkg : pkgs) {
-        auto shouldBeMarkedForMocks = explicitMockCompatible || (mockCompatibleIfNeeded && IsThereMockUsage(*pkg));
-
-        MarkMockCreationContainingGenericFuncs(*pkg);
-
-        if (!shouldBeMarkedForMocks && !exportForTest) {
-            continue;
-        }
-
         BaseMangler mangler;
-        auto manglerCtx = exportForTest ? mangler.PrepareContextForPackage(pkg) : nullptr;
+        auto manglerCtx = mangler.PrepareContextForPackage(pkg);
         auto isInExtend = false;
 
-        Walker(pkg, Walker::GetNextWalkerID(),
-            [this, &shouldBeMarkedForMocks, &mangler, &manglerCtx, &isInExtend]
-        (auto node) {
-            if (shouldBeMarkedForMocks) {
-                MockSupportManager::MarkNodeMockSupportedIfNeeded(*node);
+        Walker(pkg, Walker::GetNextWalkerID(), [&mangler, &manglerCtx, &isInExtend](auto node) {
+            if (auto ed = As<ASTKind::EXTEND_DECL>(node); ed && !ed->TestAttr(Attribute::IMPORTED)) {
+                manglerCtx->SaveExtend2CurFile(ed->curFile, ed);
+                isInExtend = true;
             }
-            if (exportForTest) {
-                if (auto ed = As<ASTKind::EXTEND_DECL>(node); ed && !ed->TestAttr(Attribute::IMPORTED)) {
-                    manglerCtx->SaveExtend2CurFile(ed->curFile, ed);
-                    isInExtend = true;
-                }
-                if (auto d = As<ASTKind::DECL>(node); d &&
-                    !d->TestAttr(Attribute::PRIVATE) &&
-                    (d->IsFuncOrProp() || Is<FuncParam>(d) || Is<ExtendDecl>(d)) &&
-                    (isInExtend || d->TestAttr(Attribute::FOREIGN))
-                ) {
-                    d->mangledName = mangler.Mangle(*d);
-                }
+            if (auto d = As<ASTKind::DECL>(node); d &&
+                !d->TestAttr(Attribute::PRIVATE) &&
+                (d->IsFuncOrProp() || Is<FuncParam>(d) || Is<ExtendDecl>(d)) &&
+                (isInExtend || d->TestAttr(Attribute::FOREIGN))
+            ) {
+                d->mangledName = mangler.Mangle(*d);
             }
             return VisitAction::WALK_CHILDREN;
-        }, [this, &isInExtend](const Ptr<Node> node) {
-            if (exportForTest && Is<ExtendDecl>(node) && !node->TestAttr(Attribute::IMPORTED)) {
+        }, [&isInExtend](const Ptr<Node> node) {
+            if (Is<ExtendDecl>(node) && !node->TestAttr(Attribute::IMPORTED)) {
                 isInExtend = false;
             }
             return VisitAction::KEEP_DECISION;
@@ -720,15 +667,61 @@ void TestManager::MarkDeclsForTestIfNeeded(std::vector<Ptr<Package>> pkgs) const
     }
 }
 
+bool TestManager::ShouldBeMarkedAsContainingMockCreationCall(
+    const CallExpr& callExpr, const Ptr<FuncDecl> enclosingFunc) const
+{
+    auto resolvedFunc = callExpr.resolvedFunction;
+    if (!resolvedFunc || !resolvedFunc->funcBody || !resolvedFunc->funcBody->generic ||
+        !enclosingFunc->funcBody || !enclosingFunc->funcBody->generic
+    ) {
+        return false; // outside generics, mock creation calls (createMock / createSpy) can be used without restrictions
+    }
+
+    if (!MockManager::IsMockCall(callExpr) && !resolvedFunc->TestAttr(Attribute::CONTAINS_MOCK_CREATION_CALL)) {
+        return false;
+    }
+
+    if (auto nre = DynamicCast<NameReferenceExpr>(callExpr.baseFunc.get())) {
+        return IsAnyTypeParamUsedInTypeArgs(enclosingFunc->funcBody->generic->typeParameters, nre->typeArguments);
+    } else {
+        return false;
+    }
+}
+#endif
+
+void TestManager::MarkDeclsForTestIfNeeded(std::vector<Ptr<Package>> pkgs) const
+{
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    HandleDeclsToExportForTest(pkgs);
+#endif
+    for (auto& pkg : pkgs) {
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+        MarkMockCreationContainingGenericFuncs(*pkg);
+        if (mockMode != MockMode::ON && (!mockCompatibleIfNeeded || !IsThereMockUsage(*pkg))) {
+            continue;
+        }
+#endif
+
+        Walker(pkg, Walker::GetNextWalkerID(), [](auto node) {
+            MockSupportManager::MarkNodeMockSupportedIfNeeded(*node);
+            return VisitAction::WALK_CHILDREN;
+        }).Walk();
+    }
+}
+
 bool TestManager::IsThereMockUsage(Package& pkg) const
 {
     bool mockUsageFound = false;
 
     Walker(&pkg, Walker::GetNextWalkerID(), [&pkg, &mockUsageFound](auto node) {
-        if (auto callExpr = As<ASTKind::CALL_EXPR>(node); callExpr && callExpr->IsSamePackage(pkg)) {
+        if (auto callExpr = As<ASTKind::CALL_EXPR>(node); callExpr &&
+            (!IS_GENERIC_INSTANTIATION_ENABLED || !callExpr->ty->HasGeneric()) &&
+            callExpr->IsSamePackage(pkg)
+        ) {
             auto resolvedFunc = callExpr->resolvedFunction;
             if (MockManager::IsMockCall(*callExpr) ||
-                (resolvedFunc && resolvedFunc->TestAttr(Attribute::CONTAINS_MOCK_CREATION_CALL))
+                (!IS_GENERIC_INSTANTIATION_ENABLED && resolvedFunc &&
+                    resolvedFunc->TestAttr(Attribute::CONTAINS_MOCK_CREATION_CALL))
             ) {
                 mockUsageFound = true;
                 return VisitAction::STOP_NOW;
@@ -792,7 +785,7 @@ void TestManager::PreparePackageForTestIfNeeded(Package& pkg)
     }
 
     std::optional<ManglerCtxGuard> manglerCtxGuard;
-    if (explicitMockCompatible || (mockCompatibleIfNeeded && IsThereMockUsage(pkg))) {
+    if (mockMode == MockMode::ON || (mockCompatibleIfNeeded && IsThereMockUsage(pkg))) {
         manglerCtxGuard.emplace(mockUtils->mangler, pkg);
 
         mockUtils->SetGetTypeForTypeParamDecl(pkg);
@@ -814,26 +807,7 @@ void TestManager::Init(GenericInstantiationManager* instantiationManager)
         return;
     }
 
-    gim = instantiationManager;
-
-    const bool doInstantiate = GetOptLevel() >= GlobalOptions::OptimizationLevel::O2;
-    mockUtils = new MockUtils(
-        importManager, typeManager,
-        [this, doInstantiate](Node& node) {
-            if (!IS_GENERIC_INSTANTIATION_ENABLED) {
-                return;
-            }
-
-            if (doInstantiate) {
-                DoInstantiate(node);
-            }
-        },
-        [](Decl& memberDecl,
-            [[maybe_unused]] const std::vector<Ptr<Ty>>& instTys, [[maybe_unused]] Ty* baseTy = nullptr) {
-            return Ptr(&memberDecl);
-        },
-        [this](const Decl& decl) { return gim->impl->GetInstantiatedDecls(decl); });
-
+    mockUtils = new MockUtils(importManager, typeManager, instantiationManager);
     mockSupportManager = MakeOwned<MockSupportManager>(typeManager, mockUtils);
 
     if (mockCompatible && testEnabled) {
@@ -846,9 +820,6 @@ TestManager::~TestManager()
     if (mockUtils != nullptr) {
         delete mockUtils;
         mockUtils = nullptr;
-    }
-    if (gim != nullptr) {
-        gim = nullptr;
     }
 }
 

@@ -90,6 +90,9 @@ public:
             // delele it if IR is valid after fix error in function inline
             return nullptr;
         }
+        if (func->TestAttr(Attribute::SKIP_ANALYSIS)) {
+            return nullptr;
+        }
         for (auto bb : func->GetBody()->GetBlocks()) {
             entrySets->emplace(bb, analysis->Bottom());
         }

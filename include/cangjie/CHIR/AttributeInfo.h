@@ -50,7 +50,19 @@ enum class Attribute {
                      ///< converted from a decl in current package that is not recompiled.
     UNREACHABLE,     ///< Mark a Block is unreachable.
     NO_SIDE_EFFECT,  ///< Mark a Func does't have side effect.
+    COMMON,          ///< Mark whether it's common declaration.
+    PLATFORM,        ///< Mark whether it's platform declaration.
     SKIP_ANALYSIS,   ///< Mark node that is not used for analysis.
+                     ///< e.g. Node can be skiped if it has no body when creating 'common part'
+    DESERIALIZED,    ///< Node deserialized from .chir file
+    INITIALIZER,     ///< Mark nodes that related to initialization process.
+                     ///< Marked functions are package initializer, file initializers, variable initializer or so.
+                     ///< On the block is used to search for it among other blocks of the function.
+    UNSAFE,   ///< Mark whether a function that was marked as `unsafe`
+    // Native FFI attributes
+    JAVA_MIRROR,      ///< Mark whether it's @JavaMirror declaration (binding for a java class).
+    JAVA_IMPL,        ///< Mark whether it's @JavaImpl declaration.
+
     ATTR_END
 };
 
@@ -65,9 +77,12 @@ const std::unordered_map<Attribute, std::string> ATTR_TO_STRING{{Attribute::STAT
     {Attribute::NO_REFLECT_INFO, "noReflectInfo"}, {Attribute::NO_INLINE, "noInline"},
     {Attribute::NO_DEBUG_INFO, "noDebugInfo"}, {Attribute::UNREACHABLE, "unreachable"},
     {Attribute::NO_SIDE_EFFECT, "noSideEffect"}, {Attribute::FINAL, "final"},
-    {Attribute::SKIP_ANALYSIS, "skip_analysis"},};
+    {Attribute::COMMON, "common"}, {Attribute::PLATFORM, "platform"},
+    {Attribute::SKIP_ANALYSIS, "skip_analysis"}, {Attribute::DESERIALIZED, "deserialized"},
+    {Attribute::INITIALIZER, "initializer"},
+    {Attribute::UNSAFE, "unsafe"}, {Attribute::JAVA_MIRROR, "javaMirror"}, {Attribute::JAVA_IMPL, "javaImpl"}};
 
-constexpr uint64_t ATTR_SIZE = 32;
+constexpr uint64_t ATTR_SIZE = 64;
 
 class AttributeInfo {
 public:

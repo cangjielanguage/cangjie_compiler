@@ -71,7 +71,7 @@ private:
      *          this function will do parse and macroexpand for it.
      * @note This function will modify the ast tree in compiler instance.
      */
-    void ParseAndMacroExpandCjd() const;
+    void ParseAndMergeCjds() const;
 };
 
 /**

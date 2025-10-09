@@ -11,6 +11,7 @@
  */
 
 #include "ParserImpl.h"
+#include "cangjie/AST/Match.h"
 
 namespace Cangjie {
 OwnedPtr<AST::File> Parser::ParseTopLevel()
@@ -44,7 +45,6 @@ std::vector<OwnedPtr<AST::Node>> Parser::ParseNodes(std::variant<ScopeKind, Expr
 {
     return impl->ParseNodes(scope, currentMacroCall, modifiers, std::move(annos));
 }
-
 void Parser::ParseAnnotationArguments(AST::Annotation& anno) const
 {
     return impl->ParseAnnotationArguments(anno);
@@ -120,6 +120,9 @@ void Parser::SetCompileOptions(const GlobalOptions& opts)
     impl->backend = opts.backend;
     impl->scanDepPkg = opts.scanDepPkg;
     impl->calculateLineNum = opts.enableTimer || opts.enableMemoryCollect;
+    impl->enableInteropCJMapping = opts.enableInteropCJMapping;
+    // set compile options for cjmp implementation
+    impl->mpImpl->SetCompileOptions(opts);
     // Effect handlers break backwards compatibility by introducing new
     // keywords, so we disable them from the parser unless the user
     // explicitly asks to compile with effect handler support
@@ -188,5 +191,104 @@ Ptr<Node> Parser::CurMacroCall() const
 Parser::~Parser()
 {
     delete impl;
+}
+
+// implementation of ParserImpl
+ParserImpl::ParserImpl(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
+    bool attachComment, bool parsingDeclFiles)
+    : diag(diag), sourceManager(sm),
+      lexer{std::make_unique<Lexer>(fileID, input, diag, sm, attachComment)},
+      enableAttachComment(attachComment), parseDeclFile{parsingDeclFiles}, mpImpl{new MPParserImpl(*this)},
+      ffiParser{new FFIParserImpl(*this)}
+{
+}
+
+ParserImpl::ParserImpl(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos,
+    bool attachComment, bool parsingDeclFiles)
+    : diag(diag), sourceManager(sm),
+      lexer{std::make_unique<Lexer>(input, diag, sm, pos, attachComment)},
+      enableAttachComment{attachComment}, parseDeclFile{parsingDeclFiles}, mpImpl{new MPParserImpl(*this)},
+      ffiParser{new FFIParserImpl(*this)}
+{
+}
+
+ParserImpl::ParserImpl(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm,
+    bool attachComment, bool parsingDeclFiles)
+    : diag(diag), sourceManager(sm),
+      lexer{std::make_unique<Lexer>(inputTokens, diag, sm, attachComment)},
+      enableAttachComment{attachComment}, parseDeclFile{parsingDeclFiles}, mpImpl{new MPParserImpl(*this)},
+      ffiParser{new FFIParserImpl(*this)}
+{
+}
+
+ParserImpl::~ParserImpl()
+{
+    delete mpImpl;
+    mpImpl = nullptr;
+
+    delete ffiParser;
+    ffiParser = nullptr;
+}
+
+/**
+ * Checks whether a member decl can be an abstract by context and already parsed info
+ * @param decl member declaration
+ */
+bool ParserImpl::CanBeAbstract(const AST::Decl& decl, ScopeKind scopeKind) const
+{
+    auto pdecl = Ptr(&decl);
+    switch (decl.astKind) {
+        case ASTKind::FUNC_DECL: {
+            auto fd = StaticAs<ASTKind::FUNC_DECL>(pdecl);
+            if (fd->funcBody && fd->funcBody->body) {
+                return false;
+            }
+            break;
+        }
+        case ASTKind::PROP_DECL: {
+            auto pd = StaticAs<ASTKind::PROP_DECL>(pdecl);
+            if (!pd->getters.empty() || !pd->setters.empty()) {
+                return false;
+            }
+            break;
+        }
+        case ASTKind::PRIMARY_CTOR_DECL: {
+            auto pcd = StaticAs<ASTKind::PRIMARY_CTOR_DECL>(pdecl);
+            if (!pcd->funcBody && pcd->funcBody->body) {
+                return false;
+            }
+            break;
+        }
+        default: break;
+    }
+
+    if (scopeKind == ScopeKind::INTERFACE_BODY) {
+        return true;
+    }
+    // modify to support common abstract
+    if (scopeKind == ScopeKind::CLASS_BODY && !decl.TestAttr(Attribute::COMMON)) {
+        return true;
+    }
+    return false;
+}
+
+void ParserImpl::CheckConstructorBody(AST::FuncDecl& ctor, ScopeKind scopeKind, bool inMacro)
+{
+    CJC_ASSERT(ctor.TestAttr(Attribute::CONSTRUCTOR));
+    if (ctor.funcBody && ctor.funcBody->retType) {
+        ParseDiagnoseRefactor(
+            DiagKindRefactor::parse_invalid_return_type, *ctor.funcBody->retType, "constructor");
+        ctor.EnableAttr(Attribute::HAS_BROKEN);
+    }
+    /*
+        If constructor parsed in macro or via libast does not have a body, then it's broken.
+        If constructor is in scope of class/struct and it does not have a body, then it's acceptable*.
+        * More concrete conditions are be checked during class/struct body parsing.
+    */
+    auto isInClassLike = scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::STRUCT_BODY;
+    if ((!isInClassLike || inMacro) && (!ctor.funcBody || !ctor.funcBody->body) && !ctor.TestAttr(Attribute::COMMON)) {
+        DiagMissingBody("constructor", "", ctor.end);
+        ctor.EnableAttr(Attribute::HAS_BROKEN);
+    }
 }
 }

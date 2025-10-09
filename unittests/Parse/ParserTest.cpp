@@ -359,9 +359,7 @@ a
     Walker walker(file.get(), [&](Ptr<Node> node) -> VisitAction {
         return match(*node)(
             [&](const PackageSpec& package) {
-                auto names = package.prefixPaths;
-                names.emplace_back(package.packageName);
-                packages = Utils::JoinStrings(names, ".");
+                packages = package.GetPackageName();
                 return VisitAction::WALK_CHILDREN;
             },
             [&](const ImportSpec& import) {
@@ -3205,4 +3203,75 @@ TEST_F(ParserTest, LSP)
     ASSERT_EQ(p.size(), 2);
     ASSERT_EQ(p[0].errorMessage, std::string{"illegal integer suffix 'i'"});
     ASSERT_EQ(p[1].errorMessage, std::string{"unexpected digit 'd' in decimal"});
+}
+
+TEST(PositionTest, Attribute)
+{
+    std::string code = R"(@Attribute[      Ham,    "string",]
+class C {})";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    auto file = parser.ParseTopLevel();
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    auto& c = *StaticCast<ClassDecl>(*file->decls[0]).annotations[0];
+    ASSERT_EQ(c.kind, AnnotationKind::ATTRIBUTE);
+    ASSERT_EQ(c.attrs.size(), 2);
+    EXPECT_EQ(c.attrs[0].kind, TokenKind::IDENTIFIER);
+    EXPECT_EQ(c.attrs[0].Begin(), Position(1, 18));
+    EXPECT_EQ(c.attrs[1].kind, TokenKind::STRING_LITERAL);
+    EXPECT_EQ(c.attrs[1].Begin(), Position(1, 26));
+    EXPECT_EQ(c.attrs[1].End(), Position(1, 34));
+    ASSERT_EQ(c.attrCommas.size(), 2);
+    EXPECT_EQ(c.attrCommas[0], Position(1, 21));
+    EXPECT_EQ(c.attrCommas[1], Position(1, 34));
+}
+ 
+TEST(PositionTest, QuoteEscape)
+{
+    std::string code = R"(let a = quote(\@ \( \) \$))";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    auto file = parser.ParseTopLevel();
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    auto& d = StaticCast<VarDecl>(*file->decls[0]);
+    auto& quote = StaticCast<QuoteExpr>(*d.initializer);
+    auto& tokens = StaticCast<TokenPart>(*quote.exprs[0]).tokens;
+    ASSERT_EQ(tokens.size(), 4);
+    EXPECT_EQ(tokens[0].Begin(), Position(1, 15));
+    EXPECT_EQ(tokens[1].Begin(), Position(1, 18));
+    EXPECT_EQ(tokens[2].Begin(), Position(1, 21));
+    EXPECT_EQ(tokens[3].Begin(), Position(1, 24));
+}
+ 
+TEST(PositionTest, SubscriptExpr)
+{
+    std::string code = "main() {b[1, 2]}";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    auto file = parser.ParseTopLevel();
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    auto& d = StaticCast<MainDecl>(*file->decls[0]);
+    auto& e = StaticCast<SubscriptExpr>(*d.funcBody->body->body[0]);
+    ASSERT_EQ(e.commaPos.size(), 1);
+    EXPECT_EQ(e.commaPos[0], Position(1, 12));
+}
+
+TEST(PositionTest, GenericConstraintBegin)
+{
+    std::string code = R"(func foo<T>(a: T): Unit where T <: ToString {})";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    auto file = parser.ParseTopLevel();
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    auto& foo = StaticCast<FuncDecl>(*file->decls[0]);
+    ASSERT_NE(foo.funcBody->generic, nullptr);
+    EXPECT_EQ(foo.funcBody->generic->genericConstraints[0]->begin, Position(1, 25));
 }

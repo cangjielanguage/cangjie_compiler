@@ -533,6 +533,75 @@ enum class Attribute {
      * R: PartialInstantiation, TestManager
      */
     CONTAINS_MOCK_CREATION_CALL,
+    // For compatibility, new enumerated values need add last.
+    /**
+     * Mark whether it is "common" declaration.
+     * W: Parser
+     * R: ASTSerialization, SEMA, AST2CHIR
+     */
+    COMMON,
+    /**
+     * Mark whether the decaration defined in common part of CP package.
+     */
+    FROM_COMMON_PART,
+    /**
+     * Inform if `platform enum` matched with non-exhaustive `common enum`
+     */
+    COMMON_NON_EXHAUSTIVE,
+    /**
+     * Mark whether it is "platform" declaration.
+     * W: ASTSerialization
+     * R: ASTChecker, AST2CHIR
+     */
+    PLATFORM,
+    /**
+     * Mark node that is common decl with default implementation.
+     * The decl is including common func/var/prop
+     * W: Parser
+     * R: SEMA, AST2CHIR
+     */
+    COMMON_WITH_DEFAULT,
+
+    /**
+     * Mark whether a class is java mirror (binding for a java class).
+     * W: Parser.
+     * R: Sema.
+     */
+    JAVA_MIRROR,
+    /**
+     * Mark whether a class is a successor of java mirror (direct or indirect child of java mirror class).
+     * W: Parser, Sema.
+     * R: Sema.
+     */
+    JAVA_MIRROR_SUBTYPE,
+    /**
+     * Mark whether a class is an Objective-C mirror (binding for a Objective-C class).
+     * W: Parser.
+     * R: Sema.
+     */
+    OBJ_C_MIRROR,
+    /**
+     * Mark whether a class is a successor of an Objective-C mirror (direct or indirect child of an Objective-C class).
+     * W: Parser.
+     * R: Sema.
+     */
+    OBJ_C_MIRROR_SUBTYPE,
+
+    /**
+     * Mark whether a pure cangjie decl is mapped to use by java side.
+     * W: Parser
+     * R: Sema.
+     */
+    JAVA_CJ_MAPPING,
+
+    /**
+     * Mark whether a node is a desugared mirror field decl.
+     * Usually the node is a prop decl.
+     * W: Parser.
+     * R: Sema.
+     */
+    DESUGARED_MIRROR_FIELD,
+
     AST_ATTR_END,
 };
 
@@ -608,6 +677,17 @@ static const std::unordered_map<AST::Attribute, std::string> ATTR2STR{
     {AST::Attribute::INTERFACE_IMPL, "INTERFACE_IMPL"},
     {AST::Attribute::FOR_TEST, "FOR_TEST"},
     {AST::Attribute::CONTAINS_MOCK_CREATION_CALL, "CONTAINS_MOCK_CREATION_CALL"},
+    {AST::Attribute::COMMON, "COMMON"},
+    {AST::Attribute::FROM_COMMON_PART, "FROM_COMMON_PART"},
+    {AST::Attribute::COMMON_NON_EXHAUSTIVE, "COMMON_NON_EXHAUSTIVE"},
+    {AST::Attribute::PLATFORM, "PLATFORM"},
+    {AST::Attribute::COMMON_WITH_DEFAULT, "COMMON_WITH_DEFAULT"},
+    {AST::Attribute::JAVA_MIRROR, "JAVA_MIRROR"},
+    {AST::Attribute::JAVA_MIRROR_SUBTYPE, "JAVA_MIRROR_SUBTYPE"},
+    {AST::Attribute::OBJ_C_MIRROR, "OBJ_C_MIRROR"},
+    {AST::Attribute::OBJ_C_MIRROR_SUBTYPE, "OBJ_C_MIRROR_SUBTYPE"},
+    {AST::Attribute::JAVA_CJ_MAPPING, "JAVA_CJ_MAPPING"},
+    {AST::Attribute::DESUGARED_MIRROR_FIELD, "DESUGARED_MIRROR_FIELD"},
     {AST::Attribute::AST_ATTR_END, "AST_ATTR_END"},
 };
 

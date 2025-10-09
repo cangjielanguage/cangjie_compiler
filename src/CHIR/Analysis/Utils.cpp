@@ -87,7 +87,7 @@ std::string ToPosInfo(const DebugLocation& loc, bool isPrintFileName)
 std::optional<size_t> IsInitialisingMemberVar(const Func& func, const StoreElementRef& store)
 {
     auto location = store.GetLocation();
-    if (func.IsConstructor() && location->IsParameter()) {
+    if ((func.IsConstructor() || func.GetFuncKind() == FuncKind::INSTANCEVAR_INIT) && location->IsParameter()) {
         auto& paths = store.GetPath();
         // func->GetParam(0) is the `this` arugment.
         if (location == func.GetParam(0) && paths.size() == 1) {
@@ -161,6 +161,22 @@ bool IsRefEnum(const Ptr<Type>& type)
         return static_cast<EnumType*>(type.get())->GetEnumDef()->GetCtors().empty();
     }
     return false;
+}
+
+Func* TryGetInstanceVarInitFromApply(const Expression& expr)
+{
+    if (expr.GetExprKind() == ExprKind::APPLY) {
+        auto applyExpr = StaticCast<Apply>(&expr);
+        auto callee = applyExpr->GetCallee();
+        if (callee->IsFuncWithBody()) {
+            auto func = VirtualCast<Func*>(callee);
+            if (func->IsInstanceVarInit()) {
+                return func;
+            }
+        }
+    }
+
+    return nullptr;
 }
 
 std::unordered_set<Value*> GetLambdaCapturedVarsRecursively(const Lambda& lambda)

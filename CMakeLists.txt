@@ -7,7 +7,7 @@
 cmake_minimum_required(VERSION 3.16.5)
 project(cangjie)
 set(CJ_SDK_VERSION "1.0.0")
-# add path for custom CMake modules and add cmake modules
+# Add path for custom CMake modules and add cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -129,7 +129,7 @@ if(CANGJIE_ASAN_SUPPORT)
     if(WIN32)
         message(FATAL_ERROR "Cangjie with asan support only supports on Linux/OHOS platform")
     endif()
-    # here just use add_compile_options for asan instrumentation
+    # Here just use add_compile_options for asan instrumentation
     # do not use add_link_options(-fsanitize=address) which will link library while using gcc specifically
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
     set(SANITIZER_SUBPATH /asan)
@@ -205,7 +205,10 @@ if(MINGW)
 endif()
 
 if(NOT TARGET_TRIPLE_DIRECTORY_PREFIX)
-    string(REPLACE "-" "_" TARGET_TRIPLE_DIRECTORY_PREFIX "${CMAKE_SYSTEM_NAME}_${CMAKE_SYSTEM_PROCESSOR}")
+    if(IOS AND IOS_PLATFORM MATCHES "SIMULATOR")
+        set(EXTRA_OS_SUFFIX _simulator)
+    endif()
+    string(REPLACE "-" "_" TARGET_TRIPLE_DIRECTORY_PREFIX "${CMAKE_SYSTEM_NAME}${EXTRA_OS_SUFFIX}_${CMAKE_SYSTEM_PROCESSOR}")
     string(TOLOWER "${TARGET_TRIPLE_DIRECTORY_PREFIX}" TARGET_TRIPLE_DIRECTORY_PREFIX)
 endif()
 
@@ -225,7 +228,7 @@ include(SetupAr)
 
 message(STATUS "Building with target=${TRIPLE}")
 
-if(DARWIN)
+if(MACOS)
     include(ReadDarwinSDKInfo)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0.0)
     set(CANGJIE_DISABLE_STACK_GROW_FEATURE ON)

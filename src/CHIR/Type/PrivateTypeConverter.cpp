@@ -66,7 +66,7 @@ void ExprTypeConverter::VisitSubExpression(Apply& o)
 {
     VisitExprDefaultImpl(o);
     for (auto& ty : o.instantiatedTypeArgs) {
-        ty = ConvertType(*ty);
+        ty = converter(*ty);
     }
     if (o.thisType != nullptr) {
         o.thisType = ConvertType(*o.thisType);
@@ -77,7 +77,7 @@ void ExprTypeConverter::VisitSubExpression(ApplyWithException& o)
 {
     VisitExprDefaultImpl(o);
     for (auto& ty : o.instantiatedTypeArgs) {
-        ty = ConvertType(*ty);
+        ty = converter(*ty);
     }
     if (o.thisType != nullptr) {
         o.thisType = ConvertType(*o.thisType);
@@ -90,7 +90,7 @@ void ExprTypeConverter::VisitSubExpression(Invoke& o)
     o.virMethodCtx.originalFuncType = ConvertFuncParamsAndRetType(*o.virMethodCtx.originalFuncType);
     o.thisType = ConvertType(*o.thisType);
     for (auto& ty : o.instantiatedTypeArgs) {
-        ty = ConvertType(*ty);
+        ty = converter(*ty);
     }
 }
 
@@ -100,7 +100,7 @@ void ExprTypeConverter::VisitSubExpression(InvokeWithException& o)
     o.virMethodCtx.originalFuncType = ConvertFuncParamsAndRetType(*o.virMethodCtx.originalFuncType);
     o.thisType = ConvertType(*o.thisType);
     for (auto& ty : o.instantiatedTypeArgs) {
-        ty = ConvertType(*ty);
+        ty = converter(*ty);
     }
 }
 
@@ -110,7 +110,7 @@ void ExprTypeConverter::VisitSubExpression(InvokeStatic& o)
     o.virMethodCtx.originalFuncType = ConvertFuncParamsAndRetType(*o.virMethodCtx.originalFuncType);
     o.thisType = ConvertType(*o.thisType);
     for (auto& ty : o.instantiatedTypeArgs) {
-        ty = ConvertType(*ty);
+        ty = converter(*ty);
     }
 }
 
@@ -120,7 +120,7 @@ void ExprTypeConverter::VisitSubExpression(InvokeStaticWithException& o)
     o.virMethodCtx.originalFuncType = ConvertFuncParamsAndRetType(*o.virMethodCtx.originalFuncType);
     o.thisType = ConvertType(*o.thisType);
     for (auto& ty : o.instantiatedTypeArgs) {
-        ty = ConvertType(*ty);
+        ty = converter(*ty);
     }
 }
 
@@ -134,7 +134,7 @@ void ExprTypeConverter::VisitSubExpression(Intrinsic& o)
 {
     VisitExprDefaultImpl(o);
     for (auto& ty : o.instantiatedTypeArgs) {
-        ty = ConvertType(*ty);
+        ty = converter(*ty);
     }
 }
 
@@ -142,7 +142,7 @@ void ExprTypeConverter::VisitSubExpression(IntrinsicWithException& o)
 {
     VisitExprDefaultImpl(o);
     for (auto& ty : o.instantiatedTypeArgs) {
-        ty = ConvertType(*ty);
+        ty = converter(*ty);
     }
 }
 
@@ -333,5 +333,53 @@ void TypeConverterForCC::VisitSubExpression(RawArrayAllocateWithException& o)
 {
     VisitExprDefaultImpl(o);
     o.elementType = converter(*o.elementType);
+}
+
+void TypeConverterForCC::VisitSubValue(Func& o)
+{
+    if (o.GetSrcCodeIdentifier() == GENERIC_VIRTUAL_FUNC) {
+        auto funcType = o.GetFuncType();
+        std::vector<Type*> newParamTys;
+        for (auto oldParamTy : funcType->GetParamTypes()) {
+            /**
+             *  func $GenericVirtualFunc(p: (Int64) -> Unit) {}
+             *  we need to convert type of `p` to $AutoEnvGenericBase, not to $AutoEnvInstBase, because
+             *  call site may be an `Invoke`, param type in method type is Generic-T,
+             *  so we can pass an object with any func type, generic func type or inst func type, both ok.
+             *  we don't need to convert to $AutoEnvGenericBase in $InstVirtualFunc, because its arg's type
+             *  must be inst func type
+            */
+            if (oldParamTy->IsCJFunc()) {
+                newParamTys.emplace_back(converter(*oldParamTy));
+            } else {
+                newParamTys.emplace_back(ConvertType(*oldParamTy));
+            }
+        }
+        auto newRetTy = ConvertType(*funcType->GetReturnType());
+        o.ty = builder.GetType<FuncType>(newParamTys, newRetTy, funcType->HasVarArg(), funcType->IsCFunc());
+        // convert generic type params
+        for (auto& genericTypeParam : o.genericTypeParams) {
+            genericTypeParam = StaticCast<GenericType*>(ConvertType(*genericTypeParam));
+        }
+
+        // convert param types
+        for (auto param : o.GetParams()) {
+            VisitValue(*param);
+        }
+    } else {
+        ValueTypeConverter::VisitSubValue(o);
+    }
+}
+
+void TypeConverterForCC::VisitValueDefaultImpl(Value& o)
+{
+    if (o.IsParameter()) {
+        if (auto func = StaticCast<Parameter&>(o).GetOwnerFunc(); func &&
+            func->GetSrcCodeIdentifier() == GENERIC_VIRTUAL_FUNC && o.ty->IsCJFunc()) {
+            o.ty = converter(*o.ty);
+            return;
+        }
+    }
+    ValueTypeConverter::VisitValueDefaultImpl(o);
 }
 } // namespace Cangjie::CHIR

@@ -190,9 +190,14 @@ template <> MemberVarInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const P
     auto rawMangledName = obj->rawMangledName()->str();
     auto type = GetType<Type>(obj->type());
     auto attributeInfo = CreateAttr(obj->attributes());
+    if (compilePlatform) {
+        attributeInfo.SetAttr(Attribute::DESERIALIZED, true);
+    }
     auto loc = Create<DebugLocation>(obj->loc());
     auto annoInfo = Create<AnnoInfo>(obj->annoInfo());
-    return MemberVarInfo{name, rawMangledName, type, attributeInfo, loc, annoInfo};
+    auto initializerFunc = GetValue<FuncBase>(obj->initializerFunc());
+    auto outerDef = GetCustomTypeDef<CustomTypeDef>(obj->outerDef());
+    return MemberVarInfo{name, rawMangledName, type, attributeInfo, loc, annoInfo, initializerFunc, outerDef};
 }
 
 template <> EnumCtorInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::EnumCtorInfo* obj)
@@ -270,6 +275,9 @@ template <> EnumDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const P
     auto identifier = obj->base()->identifier()->str();
     auto packageName = obj->base()->packageName()->str();
     auto attrs = CreateAttr(obj->base()->attributes());
+    if (compilePlatform) {
+        attrs.SetAttr(CHIR::Attribute::DESERIALIZED, true);
+    }
     auto imported = attrs.TestAttr(CHIR::Attribute::IMPORTED);
 
     auto result = builder.CreateEnum(DebugLocation(), srcCodeIdentifier, GetMangleNameFromIdentifier(identifier),
@@ -284,6 +292,9 @@ template <> StructDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const
     auto identifier = obj->base()->identifier()->str();
     auto packageName = obj->base()->packageName()->str();
     auto attrs = CreateAttr(obj->base()->attributes());
+    if (compilePlatform) {
+        attrs.SetAttr(CHIR::Attribute::DESERIALIZED, true);
+    }
     auto imported = attrs.TestAttr(CHIR::Attribute::IMPORTED);
 
     auto result = builder.CreateStruct(
@@ -299,6 +310,9 @@ template <> ClassDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const 
     auto packageName = obj->base()->packageName()->str();
     auto isClass = obj->kind() == PackageFormat::ClassDefKind::ClassDefKind_CLASS;
     auto attrs = CreateAttr(obj->base()->attributes());
+    if (compilePlatform) {
+        attrs.SetAttr(CHIR::Attribute::DESERIALIZED, true);
+    }
     auto imported = attrs.TestAttr(CHIR::Attribute::IMPORTED);
 
     auto result = builder.CreateClass(
@@ -314,6 +328,9 @@ template <> ExtendDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const
     auto packageName = obj->base()->packageName()->str();
     auto attrs = CreateAttr(obj->base()->attributes());
     auto imported = attrs.TestAttr(CHIR::Attribute::IMPORTED);
+    if (compilePlatform) {
+        attrs.SetAttr(CHIR::Attribute::DESERIALIZED, true);
+    }
     auto genericParams = GetType<GenericType>(obj->genericParams());
     auto result = builder.CreateExtend(
         DebugLocation(), GetMangleNameFromIdentifier(identifier), packageName, imported, genericParams);
@@ -538,8 +555,13 @@ template <> Func* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pack
     auto rawMangledName = obj->rawMangledName()->str();
     auto packageName = obj->packageName()->str();
     auto genericTypeParams = GetType<GenericType>(obj->genericTypeParams());
-    return builder.CreateFunc(DebugLocation(), funcTy, GetMangleNameFromIdentifier(identifier), srcCodeIdentifier,
-        rawMangledName, packageName, genericTypeParams);
+    auto result = builder.CreateFunc(DebugLocation(), funcTy, GetMangleNameFromIdentifier(identifier),
+        srcCodeIdentifier, rawMangledName, packageName, genericTypeParams);
+    // Indexes below are needed to modify correctly function body when merging CJMP initializers
+    result->SetLocalId(obj->localId());
+    result->SetBlockId(obj->localId());
+    result->SetBlockGroupId(obj->localId());
+    return result;
 }
 
 template <> BlockGroup* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::BlockGroup* obj)
@@ -630,6 +652,9 @@ template <> GlobalVar* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const
     auto packageName = obj->packageName()->str();
     auto rawMangledName = obj->rawMangledName()->str();
     auto attrs = CreateAttr(obj->base()->attributes());
+    if (compilePlatform) {
+        attrs.SetAttr(Attribute::DESERIALIZED, true);
+    }
     auto result = builder.CreateGlobalVar(
         DebugLocation(), type, GetMangleNameFromIdentifier(identifier), srcCodeIdentifier, rawMangledName, packageName);
     result->AppendAttributeInfo(attrs);
@@ -645,6 +670,9 @@ template <> ImportedFunc* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(co
     auto packageName = obj->packageName()->str();
     auto genericTypeParams = GetType<GenericType>(obj->genericTypeParams());
     auto attrs = CreateAttr(obj->base()->base()->attributes());
+    if (compilePlatform) {
+        attrs.SetAttr(Attribute::DESERIALIZED, true);
+    }
     auto importedFunc = builder.CreateImportedVarOrFunc<ImportedFunc>(type, GetMangleNameFromIdentifier(identifier),
         srcCodeIdentifier, rawMangledName, packageName, genericTypeParams);
     // Object configuration
@@ -666,6 +694,9 @@ template <> ImportedVar* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(con
     auto rawMangledName = obj->rawMangledName()->str();
     auto packageName = obj->packageName()->str();
     auto attrs = CreateAttr(obj->base()->base()->attributes());
+    if (compilePlatform) {
+        attrs.SetAttr(Attribute::DESERIALIZED, true);
+    }
     auto importedVar = builder.CreateImportedVarOrFunc<ImportedVar>(
         type, GetMangleNameFromIdentifier(identifier), srcCodeIdentifier, rawMangledName, packageName);
     // Object configuration
@@ -764,6 +795,20 @@ template <> GetElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(c
     return builder.CreateExpression<GetElementRef>(resultTy, location, path, parentBlock);
 }
 
+template <> GetElementByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(
+    const PackageFormat::GetElementByName* obj)
+{
+    auto parentBlock = GetValue<Block>(obj->base()->parentBlock());
+    auto location = GetValue<Value>(obj->base()->operands()->Get(0));
+    std::vector<std::string> names;
+    names.reserve(obj->names()->size());
+    for (const auto& name : *obj->names()) {
+        names.emplace_back(name->str());
+    }
+    auto resultTy = GetType<Type>(obj->base()->resultTy());
+    return builder.CreateExpression<GetElementByName>(resultTy, location, names, parentBlock);
+}
+
 template <>
 StoreElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::StoreElementRef* obj)
 {
@@ -774,6 +819,21 @@ StoreElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Packa
     auto path = std::vector<uint64_t>(obj->path()->begin(), obj->path()->end());
     auto resultTy = GetType<Type>(obj->base()->resultTy());
     return builder.CreateExpression<StoreElementRef>(resultTy, value, location, path, parentBlock);
+}
+
+template <>
+StoreElementByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::StoreElementByName* obj)
+{
+    auto parentBlock = GetValue<Block>(obj->base()->parentBlock());
+    auto value = GetValue<Value>(obj->base()->operands()->Get(0));
+    auto location = GetValue<Value>(obj->base()->operands()->Get(1));
+    std::vector<std::string> names;
+    names.reserve(obj->names()->size());
+    for (const auto& name : *obj->names()) {
+        names.emplace_back(name->str());
+    }
+    auto resultTy = GetType<Type>(obj->base()->resultTy());
+    return builder.CreateExpression<StoreElementByName>(resultTy, value, location, names, parentBlock);
 }
 
 template <> Apply* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Apply* obj)
@@ -805,6 +865,11 @@ template <> Invoke* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pa
     CJC_NULLPTR_CHECK(obj->base()->operands());
     auto operands = GetValue<Value>(obj->base()->operands());
     auto resultTy = GetType<Type>(obj->base()->resultTy());
+    auto tempTypes = GetType<Type>(obj->virMethodCtx()->genericTypeParams());
+    std::vector<GenericType*> genericTypes;
+    for (auto ty : tempTypes) {
+        genericTypes.emplace_back(Cangjie::StaticCast<GenericType*>(ty));
+    }
     auto invokeInfo = InvokeCallContext {
         .caller = operands[0],
         .funcCallCtx = FuncCallContext {
@@ -815,7 +880,7 @@ template <> Invoke* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pa
         .virMethodCtx = VirMethodContext {
             .srcCodeIdentifier = obj->virMethodCtx()->srcCodeIdentifier()->data(),
             .originalFuncType = GetType<FuncType>(obj->virMethodCtx()->originalFuncType()),
-            .offset = obj->virMethodCtx()->offset()
+            .genericTypeParams = std::move(genericTypes)
         }
     };
     return builder.CreateExpression<Invoke>(resultTy, invokeInfo, parentBlock);
@@ -830,6 +895,11 @@ template <> InvokeStatic* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(co
         args.push_back(GetValue(obj->base()->operands()->Get(i)));
     }
     auto resultTy = GetType<Type>(obj->base()->resultTy());
+    auto tempTypes = GetType<Type>(obj->virMethodCtx()->genericTypeParams());
+    std::vector<GenericType*> genericTypes;
+    for (auto ty : tempTypes) {
+        genericTypes.emplace_back(Cangjie::StaticCast<GenericType*>(ty));
+    }
     auto invokeInfo = InvokeCallContext {
         .caller = GetValue(obj->base()->operands()->Get(0)),
         .funcCallCtx = FuncCallContext {
@@ -840,7 +910,7 @@ template <> InvokeStatic* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(co
         .virMethodCtx = VirMethodContext {
             .srcCodeIdentifier = obj->virMethodCtx()->srcCodeIdentifier()->data(),
             .originalFuncType = GetType<FuncType>(obj->virMethodCtx()->originalFuncType()),
-            .offset = obj->virMethodCtx()->offset()
+            .genericTypeParams = std::move(genericTypes)
         }
     };
     return builder.CreateExpression<InvokeStatic>(resultTy, invokeInfo, parentBlock);
@@ -859,6 +929,11 @@ InvokeStaticWithException* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(
     auto resultTy = GetType<Type>(obj->base()->base()->resultTy());
     auto sucBlock = GetValue<Block>(obj->base()->successors()->Get(0));
     auto errBlock = GetValue<Block>(obj->base()->successors()->Get(1));
+    auto tempTypes = GetType<Type>(obj->virMethodCtx()->genericTypeParams());
+    std::vector<GenericType*> genericTypes;
+    for (auto ty : tempTypes) {
+        genericTypes.emplace_back(Cangjie::StaticCast<GenericType*>(ty));
+    }
     auto invokeInfo = InvokeCallContext {
         .caller = GetValue(obj->base()->base()->operands()->Get(0)),
         .funcCallCtx = FuncCallContext {
@@ -869,7 +944,7 @@ InvokeStaticWithException* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(
         .virMethodCtx = VirMethodContext {
             .srcCodeIdentifier = obj->virMethodCtx()->srcCodeIdentifier()->data(),
             .originalFuncType = GetType<FuncType>(obj->virMethodCtx()->originalFuncType()),
-            .offset = obj->virMethodCtx()->offset()
+            .genericTypeParams = std::move(genericTypes)
         }
     };
     return builder.CreateExpression<InvokeStaticWithException>(resultTy, invokeInfo, sucBlock, errBlock, parentBlock);
@@ -960,6 +1035,19 @@ template <> Field* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pac
     auto parentBlock = GetValue<Block>(obj->base()->parentBlock());
     auto resultTy = GetType<Type>(obj->base()->resultTy());
     return builder.CreateExpression<Field>(resultTy, val, indexes, parentBlock);
+}
+
+template <> FieldByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::FieldByName* obj)
+{
+    auto val = GetValue<Value>(obj->base()->operands()->Get(0));
+    std::vector<std::string> names;
+    names.reserve(obj->names()->size());
+    for (const auto& name : *obj->names()) {
+        names.emplace_back(name->str());
+    }
+    auto parentBlock = GetValue<Block>(obj->base()->parentBlock());
+    auto resultTy = GetType<Type>(obj->base()->resultTy());
+    return builder.CreateExpression<FieldByName>(resultTy, val, names, parentBlock);
 }
 
 template <>
@@ -1211,6 +1299,11 @@ InvokeWithException* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const P
     auto errBlock = GetValue<Block>(obj->base()->successors()->Get(1));
     auto parentBlock = GetValue<Block>(obj->base()->base()->parentBlock());
     auto resultTy = GetType<Type>(obj->base()->base()->resultTy());
+    auto tempTypes = GetType<Type>(obj->virMethodCtx()->genericTypeParams());
+    std::vector<GenericType*> genericTypes;
+    for (auto ty : tempTypes) {
+        genericTypes.emplace_back(Cangjie::StaticCast<GenericType*>(ty));
+    }
     auto invokeInfo = InvokeCallContext {
         .caller = operands[0],
         .funcCallCtx = FuncCallContext {
@@ -1221,7 +1314,7 @@ InvokeWithException* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const P
         .virMethodCtx = VirMethodContext {
             .srcCodeIdentifier = obj->virMethodCtx()->srcCodeIdentifier()->data(),
             .originalFuncType = GetType<FuncType>(obj->virMethodCtx()->originalFuncType()),
-            .offset = obj->virMethodCtx()->offset()
+            .genericTypeParams = std::move(genericTypes)
         }
     };
     return builder.CreateExpression<InvokeWithException>(resultTy, invokeInfo, sucBlock, errBlock, parentBlock);
@@ -1405,6 +1498,13 @@ void CHIRDeserializer::CHIRDeserializerImpl::ConfigBase(const PackageFormat::Bas
                 }
                 break;
             }
+            case PackageFormat::Annotation::Annotation_virMethodOffset: {
+                int64_t offset = static_cast<const PackageFormat::VirMethodOffset*>(anno)->offset();
+                if (offset != -1) {
+                    base.Set<CHIR::VirMethodOffset>(static_cast<size_t>(offset));
+                }
+                break;
+            }
             case PackageFormat::Annotation::Annotation_wrappedRawMethod:
                 base.Set<CHIR::WrappedRawMethod>(
                     GetValue<FuncBase>(static_cast<const PackageFormat::WrappedRawMethod*>(anno)->rawMethod()));
@@ -1466,10 +1566,17 @@ void CHIRDeserializer::CHIRDeserializerImpl::ConfigCustomTypeDef(
         obj.AddStaticMemberVar(var);
     }
     obj.AppendAttributeInfo(CreateAttr(buffer->attributes()));
+    if (compilePlatform) {
+        obj.EnableAttr(Attribute::DESERIALIZED);
+    }
     obj.SetAnnoInfo(Create<AnnoInfo>(buffer->annoInfo()));
     auto vtable =
         Create<VTableType, flatbuffers::Vector<flatbuffers::Offset<PackageFormat::VTableElement>>>(buffer->vtable());
     obj.SetVTable(vtable);
+    auto varInitializationFunc = GetValue<FuncBase>(buffer->varInitializationFunc());
+    if (varInitializationFunc) {
+        obj.SetVarInitializationFunc(varInitializationFunc);
+    }
 }
 
 void CHIRDeserializer::CHIRDeserializerImpl::ConfigExpression(const PackageFormat::Expression* buffer, Expression& obj)
@@ -1561,8 +1668,12 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
         obj.AddParam(*p);
     }
     auto body = GetValue<BlockGroup>(buffer->body());
-    CJC_NULLPTR_CHECK(body);
-    obj.InitBody(*body);
+    if (body) {
+        obj.InitBody(*body);
+    } else {
+        // 'common' function can be without body
+        CJC_ASSERT(obj.TestAttr(Attribute::COMMON));
+    }
     obj.SetFuncKind(FuncKind(buffer->funcKind()));
     if (buffer->retVal() != 0) {
         obj.SetReturnValue(*GetValue<LocalVar>(buffer->retVal()));
@@ -1571,6 +1682,9 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     obj.SetAnnoInfo(Create<AnnoInfo>(buffer->base()->annoInfo()));
     obj.SetParentRawMangledName(buffer->parentName()->str());
     obj.AppendAttributeInfo(CreateAttr(buffer->base()->attributes()));
+    if (compilePlatform) {
+        obj.EnableAttr(Attribute::DESERIALIZED);
+    }
     obj.SetPropLocation(Create<DebugLocation>(buffer->propLoc()));
     if (buffer->originalLambdaFuncType() != 0) {
         FuncSigInfo funcSig;
@@ -1612,7 +1726,6 @@ template <>
 void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::BlockGroup* buffer, BlockGroup& obj)
 {
     ConfigBase(buffer->base()->base(), obj);
-    CJC_NULLPTR_CHECK(buffer->blocks());
     GetValue<Block>(buffer->blocks());
     obj.SetEntryBlock(GetValue<Block>(buffer->entryBlock()));
     obj.identifier = buffer->base()->identifier()->str();
@@ -1941,11 +2054,25 @@ Expression* CHIRDeserializer::CHIRDeserializerImpl::GetExpression(uint32_t id)
                 ConfigExpression(static_cast<const PackageFormat::GetElementRef*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
+            case PackageFormat::ExpressionElem_GetElementByName:
+                id2Expression[id] = Deserialize<GetElementByName>(
+                    static_cast<const PackageFormat::GetElementByName*>(pool->exprs()->Get(id - 1)));
+                ConfigExpression(
+                    static_cast<const PackageFormat::GetElementByName*>(pool->exprs()->Get(id - 1))->base(),
+                    *id2Expression[id]);
+                break;
             case PackageFormat::ExpressionElem_StoreElementRef:
                 id2Expression[id] = Deserialize<StoreElementRef>(
                     static_cast<const PackageFormat::StoreElementRef*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
                     static_cast<const PackageFormat::StoreElementRef*>(pool->exprs()->Get(id - 1))->base(),
+                    *id2Expression[id]);
+                break;
+            case PackageFormat::ExpressionElem_StoreElementByName:
+                id2Expression[id] = Deserialize<StoreElementByName>(
+                    static_cast<const PackageFormat::StoreElementByName*>(pool->exprs()->Get(id - 1)));
+                ConfigExpression(
+                    static_cast<const PackageFormat::StoreElementByName*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
             case PackageFormat::ExpressionElem_Apply:
@@ -2108,6 +2235,12 @@ Expression* CHIRDeserializer::CHIRDeserializerImpl::GetExpression(uint32_t id)
                 id2Expression[id] =
                     Deserialize<Field>(static_cast<const PackageFormat::Field*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(static_cast<const PackageFormat::Field*>(pool->exprs()->Get(id - 1))->base(),
+                    *id2Expression[id]);
+                break;
+            case PackageFormat::ExpressionElem_FieldByName:
+                id2Expression[id] = Deserialize<FieldByName>(
+                    static_cast<const PackageFormat::FieldByName*>(pool->exprs()->Get(id - 1)));
+                ConfigExpression(static_cast<const PackageFormat::FieldByName*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
             case PackageFormat::ExpressionElem_RawArrayAllocate:
@@ -2418,13 +2551,19 @@ void CHIRDeserializer::CHIRDeserializerImpl::Run(const PackageFormat::CHIRPackag
     }
 
     // Config generic types
-    for (auto entry : genericTypeConfig) {
+    for (unsigned i = 0; i < genericTypeConfig.size(); i++) {
+        // for-loop is used because genericTypeConfig can be modified on the fly
+        auto genericType = genericTypeConfig[i].first;
+        auto rawGenericType = genericTypeConfig[i].second;
         // Fill in sub-fields
-        auto upperBounds = GetType<Type>(entry.second->upperBounds());
-        entry.first->SetUpperBounds(upperBounds);
+        auto upperBounds = GetType<Type>(rawGenericType->upperBounds());
+        genericType->SetUpperBounds(upperBounds);
     }
     // Package self's member
     builder.GetCurPackage()->SetPackageInitFunc(GetValue<Func>(pool->packageInitFunc()));
+    auto* reInitFunc = GetValue<Func>(pool->packageLiteralInitFunc());
+    CJC_ASSERT(reInitFunc != nullptr);
+    builder.GetCurPackage()->SetPackageLiteralInitFunc(reInitFunc);
     // Reset Imported values and defs under Package
     ResetImportedValuesUnderPackage();
     ResetImportedDefsUnderPackage();

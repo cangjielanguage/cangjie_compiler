@@ -122,8 +122,8 @@ std::string GenerateOverflowOperatorFuncMangleName(const std::string& name, Over
 
 std::string GenerateAnnotationFuncMangleName(const std::string& name)
 {
-    // "_CA" represents for compiler generated anonymous functions (lambdas).
-    return ReplaceManglePrefixWith(name, MANGLE_ANNOTATION_LAMBDA_PREFIX);
+    // replace "_CN" with "_CAF"
+    return MANGLE_CANGJIE_PREFIX + "AF" + name.substr(Cangjie::MANGLE_PREFIX_LEN + 1);
 }
 
 namespace ClosureConversion {

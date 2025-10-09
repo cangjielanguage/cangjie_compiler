@@ -23,8 +23,8 @@
 #include "cangjie/Utils/FileUtil.h"
 #include "cangjie/Utils/Semaphore.h"
 #include "cangjie/Utils/SipHash.h"
-#include "cangjie/Utils/Unicode.h"
 #include "cangjie/Utils/Utils.h"
+#include "cangjie/Utils/Unicode.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -39,6 +39,7 @@ namespace {
 const std::string CJO_EXTENSION = "cjo";
 const std::string BC_EXTENSION = "bc";
 const std::string CJ_EXTENSION = "cj";
+const std::string CHIR_EXTENSION = "chir";
 const std::string ARCHIVE_EXTENSION = "a";
 const std::string OBJECT_EXTENSION = "o";
 #ifdef _WIN32
@@ -66,6 +67,7 @@ std::string BoolToSerializedString(bool val)
 const std::unordered_map<ArchType, std::string> ARCH_STRING_MAP = {
     {ArchType::X86_64, "x86_64"},
     {ArchType::AARCH64, "aarch64"},
+    {ArchType::ARM64, "arm64"},
     {ArchType::UNKNOWN, "unknown"},
 };
 
@@ -74,6 +76,7 @@ const std::unordered_map<OSType, std::string> OS_STRING_MAP = {
     {OSType::WINDOWS, "w64"},
     {OSType::LINUX, "linux"},
     {OSType::DARWIN, "darwin"},
+    {OSType::IOS, "ios"},
     {OSType::UNKNOWN, "unknown"},
 };
 
@@ -143,6 +146,16 @@ std::string Triple::Info::VendorToString() const
 
 std::string Triple::Info::ToTripleString() const
 {
+    if (vendor == Vendor::APPLE) {
+        std::string triple = ArchToString() + "-" + VendorToString() + "-" + OSToString();
+        if (os == OSType::IOS) {
+            triple += apiLevel;
+        }
+        if (env != Environment::NOT_AVAILABLE) {
+            triple += "-" + EnvironmentToString();
+        }
+        return triple;
+    }
     return ArchToString() + "-" + OSToString() + "-" + EnvironmentToString();
 }
 
@@ -164,6 +177,9 @@ std::string Triple::Info::GetEffectiveTripleString() const
     }
     if (tripleString == "x86_64-windows-gnu") {
         return "x86_64-w64-mingw32";
+    }
+    if (tripleString == "aarch64-ios-simulator") {
+        return "arm64-apple-ios17.5-simulator";
     }
     return tripleString;
 }
@@ -551,7 +567,8 @@ void GlobalOptions::RefactJobs()
 
 void GlobalOptions::RefactAggressiveParallelCompileOption()
 {
-    if (target.os == Triple::OSType::WINDOWS || target.os == Triple::OSType::DARWIN) {
+    if (target.os == Triple::OSType::WINDOWS || target.os == Triple::OSType::DARWIN ||
+        target.os == Triple::OSType::IOS) {
         // When the user's input compile options contain `--apc` and the os is windows or mac,
         // aggressiveParallelCompile will be disabled because it is not supported yet.
         if (aggressiveParallelCompile.has_value() || aggressiveParallelCompileWithoutArg) {
@@ -630,6 +647,20 @@ bool GlobalOptions::HandleCJOExtension(DiagnosticEngine& diag, const std::string
         return false;
     }
     inputCjoFile = value;
+    return true;
+}
+
+bool GlobalOptions::HandleCHIRExtension(DiagnosticEngine& diag, const std::string& value)
+{
+    auto maybePath = ValidateInputFilePath(value, DiagKindRefactor::no_such_file_or_directory);
+    if (!maybePath.has_value()) {
+        return false;
+    }
+    if (GetFileExtension(maybePath.value()) != CHIR_EXTENSION) {
+        RaiseArgumentUnusedMessage(diag, DiagKindRefactor::driver_warning_not_chir_file, value, maybePath.value());
+        return true;
+    }
+    inputChirFiles.push_back(maybePath.value());
     return true;
 }
 
@@ -714,7 +745,8 @@ bool GlobalOptions::ProcessInputs(const std::vector<std::string>& inputs)
 {
     DiagnosticEngine diag;
     bool ret = true;
-    std::for_each(inputs.begin(), inputs.end(), [this, &ret, &diag](const std::string& value) {
+    bool needChir = (commonPartCjo != std::nullopt);
+    std::for_each(inputs.begin(), inputs.end(), [this, &ret, &diag, &needChir](const std::string& value) {
         if (!ret) {
             return;
         }
@@ -725,6 +757,9 @@ bool GlobalOptions::ProcessInputs(const std::vector<std::string>& inputs)
             ret = HandleCJExtension(diag, value);
         } else if (ext == BC_EXTENSION) {
             ret = HandleBCExtension(diag, value);
+        } else if (ext == CHIR_EXTENSION) {
+            needChir = false;
+            ret = HandleCHIRExtension(diag, value);
         } else if (ext == CJO_EXTENSION) {
             ret = HandleCJOExtension(diag, value);
         } else if (HasCJDExtension(value) && compileCjd) {
@@ -738,8 +773,8 @@ bool GlobalOptions::ProcessInputs(const std::vector<std::string>& inputs)
         (void)diag.DiagnoseRefactor(DiagKindRefactor::driver_require_package_directory, DEFAULT_POSITION);
         return false;
     }
-    if (compilePackage && packagePaths.size() > 1) {
-        (void)diag.DiagnoseRefactor(DiagKindRefactor::driver_require_one_package_directory, DEFAULT_POSITION);
+    if (needChir) {
+        (void)diag.DiagnoseRefactor(DiagKindRefactor::driver_require_chir_directory, DEFAULT_POSITION);
         return false;
     }
     return ret;
@@ -1245,6 +1280,8 @@ std::string GlobalOptions::OutputModeToSerializedString() const
             return "C";
         case OutputMode::SHARED_LIB:
             return "S";
+        case OutputMode::CHIR:
+            return "CH";
         default:
             CJC_ABORT();
             return "";
@@ -1378,6 +1415,7 @@ std::vector<std::string> GlobalOptions::ToSerialized() const
     result.emplace_back(BoolToSerializedString(enableMacroInLSP));
     result.emplace_back(BoolToSerializedString(enableCompileTest));
     result.emplace_back(BoolToSerializedString(implicitPrelude));
+    result.emplace_back(BoolToSerializedString(enableInteropCJMapping));
     result.emplace_back(BoolToSerializedString(chirEA));
     result.emplace_back(BoolToSerializedString(chirLICM));
     result.emplace_back(BoolToSerializedString(chirCC));

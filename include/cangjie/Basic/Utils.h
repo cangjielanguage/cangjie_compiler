@@ -27,8 +27,8 @@ uint64_t GetHash(const std::string& content);
 std::vector<std::string> SplitLines(const std::string& str);
 /// Split a string by customised \ref delimiter. Typically used in command line arguments parsing.
 std::vector<std::string> SplitString(const std::string& str, const std::string& delimiter);
-/// Split a string by '.'. For string segment surrounded by a pair of '`', the '`''s are removed.
-std::vector<std::string> SplitQualifiedName(const std::string& qualifiedName);
+/// \param splitDc whether to split by '::' as well.
+std::vector<std::string> SplitQualifiedName(const std::string& qualifiedName, bool splitDc = false);
 /// Join strings \ref strs with \ref delimiter.
 std::string JoinStrings(const std::vector<std::string>& strs, const std::string& delimiter);
 

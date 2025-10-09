@@ -22,6 +22,10 @@ namespace Cangjie::Modules {
 using namespace AST;
 void WarnUselessImport(DiagnosticEngine& diag, const Range& importRange, const Decl& decl);
 void WarnConflictImport(DiagnosticEngine& diag, const std::string& name, const Range& current, const Range& previous);
+void WarnRepeatedFeatureName(DiagnosticEngine& diag, std::string& name, const Range& current, const Range& previous);
+void DiagForNullPackageFeature(DiagnosticEngine& diag, const Range& current, const Ptr<FeaturesDirective> refFeature);
+void DiagForDifferentPackageFeatureConsistency(DiagnosticEngine& diag,
+    const Ptr<FeaturesDirective> feature, const Ptr<FeaturesDirective> refFeature);
 void DiagForDifferentPackageNames(DiagnosticEngine& diag,
     const std::map<std::pair<std::string, std::string>, std::pair<Position, bool>>& packageNamePosMap);
 void DiagRootPackageModifier(DiagnosticEngine& diag, const PackageSpec& packageSpec);

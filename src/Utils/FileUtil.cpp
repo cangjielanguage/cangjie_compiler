@@ -14,9 +14,9 @@
 
 #include <fstream>
 #include <istream>
-#include <sstream>
 #include <optional>
 #include <queue>
+#include <sstream>
 #include <string>
 #include <sys/stat.h>
 #include <vector>
@@ -26,14 +26,15 @@
 #include "cangjie/Driver/StdlibMap.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Utils/Unicode.h"
+#include "cangjie/Lex/Lexer.h"
 
 #ifdef _WIN32
+#include "cangjie/Basic/StringConvertor.h"
 #include <direct.h>
 #include <fileapi.h>
 #include <io.h>
 #include <windows.h>
 #include <winerror.h>
-#include "cangjie/Basic/StringConvertor.h"
 #ifndef PATH_MAX
 #define PATH_MAX MAX_PATH
 #endif
@@ -418,6 +419,32 @@ bool ReadBinaryFileToBuffer(
     }
     is.close();
     return failedReason.empty();
+}
+
+bool WriteToFile(const std::string& filePath, const std::string& data)
+{
+    if (!FileExist(filePath)) {
+        if (CreateDirs(filePath) != 0) {
+            Errorln("Failed to create file " + filePath);
+            return false;
+        }
+    }
+    std::string normalizedPath = Normalize(filePath);
+    std::ofstream file(normalizedPath);
+    if (!file.is_open()) {
+        Errorln("Failed to open file " + normalizedPath);
+        return false;
+    }
+
+    file << data;
+
+    bool didSucceed = !file.fail();
+    if (!didSucceed) {
+        Errorln("Failed to write to file " + normalizedPath);
+    }
+    file.close();
+
+    return didSucceed;
 }
 
 bool WriteBufferToASTFile(const std::string& filePath, const std::vector<uint8_t>& buffer)
@@ -833,14 +860,7 @@ inline bool IsKeyword(const std::string& str)
     }
     return keywordsSet.count(str) != 0;
 }
-
-inline bool IsContextualKeyword(const std::string& str)
-{
-    static const std::unordered_set<std::string> CONTEXTUAL_KEYWORDS = {
-        "public", "private", "protected", "override", "abstract", "sealed", "open", "redef", "internal"};
-    return CONTEXTUAL_KEYWORDS.count(str) != 0;
-}
-}
+} // namespace
 
 using namespace Unicode;
 bool IsIdentifier(const std::string& str, bool useContextualKeyWords)
@@ -1087,7 +1107,7 @@ std::string FindSerializationFile(
     const std::string& fullPackageName, const std::string& suffix, const std::vector<std::string>& searchPaths)
 {
     auto names = Utils::SplitQualifiedName(fullPackageName);
-    auto fileName = names.front() + DIR_SEPARATOR + fullPackageName;
+    auto fileName = ToCjoFileName(names.front()) + DIR_SEPARATOR + fullPackageName;
     auto filePath = FileUtil::FindFileByName(fileName + suffix, searchPaths, true).value_or("");
     if (filePath.empty()) {
         // TEMPORARILY, find file in direct path.
@@ -1175,4 +1195,36 @@ void HideFile(const std::string& path)
     (void)SetFileAttributesA(path.c_str(), FILE_ATTRIBUTE_HIDDEN | GetFileAttributesA(path.c_str()));
 }
 #endif
+
+std::string ToCjoFileName(std::string_view fullPackageName)
+{
+    std::string ret{};
+    size_t i{0};
+    for (; i < fullPackageName.size(); ++i) {
+        // replace first :: with # as organization name separator
+        if (fullPackageName[i] == ':' && i + 1 < fullPackageName.size() && fullPackageName[i + 1] == ':') {
+            ret += ORG_NAME_SEPARATOR;
+            i += strlen(TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)]);
+            break;
+        }
+        if (fullPackageName[i] == '.') {
+            break;
+        }
+        ret.push_back(fullPackageName[i]);
+    }
+    if (i < fullPackageName.size()) {
+        ret.insert(ret.end(), fullPackageName.begin() + i, fullPackageName.end());
+    }
+    return ret;
+}
+ 
+std::string ToPackageName(std::string_view cjoName)
+{
+    auto it = cjoName.find(ORG_NAME_SEPARATOR);
+    if (it != std::string::npos) {
+        return std::string{cjoName.substr(0, it)} + TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)] +
+            std::string{cjoName.substr(it + 1)};
+    }
+    return std::string{cjoName};
+}
 } // namespace Cangjie::FileUtil

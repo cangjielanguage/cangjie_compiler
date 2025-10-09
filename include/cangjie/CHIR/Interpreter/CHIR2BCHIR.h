@@ -75,7 +75,11 @@ private:
     /** @brief translate a CHIR package into BCHIR */
     template <bool ForConstEval> void TranslatePackage(
         const Package& chirPkg, const std::vector<CHIR::FuncBase*>& initFuncsForConstVar);
+    template <bool ForConstEval> void TranslateClassesLike(const Package& chirPkg);
     template <bool ForConstEval> void TranslateClasses(const Package& chirPkg);
+    template <bool ForConstEval> void TranslateStucts(const Package& chirPkg);
+    template <bool ForConstEval> void TranslateEnums(const Package& chirPkg);
+    template <bool ForConstEval> void TranslateExtends(const Package& chirPkg);
     template <bool ForConstEval> void TranslateGlobalVars(const Package& chirPkg);
     template <bool ForConstEval> void TranslateFunctions(const Package& chirPkg);
 

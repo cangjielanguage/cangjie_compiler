@@ -26,6 +26,7 @@ using TAnnoArgOffset = flatbuffers::Offset<PackageFormat::AnnoArg>;
 using TPatternOffset = flatbuffers::Offset<PackageFormat::Pattern>;
 using TFullIdOffset = flatbuffers::Offset<PackageFormat::FullId>;
 using TImportsOffset = flatbuffers::Offset<PackageFormat::Imports>;
+using TFileInfoOffset = flatbuffers::Offset<PackageFormat::FileInfo>;
 using TImportSpecOffset = flatbuffers::Offset<PackageFormat::ImportSpec>;
 using TFuncBodyOffset = flatbuffers::Offset<PackageFormat::FuncBody>;
 template <typename T> using TVectorOffset = flatbuffers::Offset<flatbuffers::Vector<T>>;

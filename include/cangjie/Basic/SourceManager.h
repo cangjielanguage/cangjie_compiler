@@ -125,6 +125,15 @@ public:
     bool IsSourceFileExist(const unsigned int id);
     int GetLineEnd(const Position& pos);
 
+    void SaveSourceFile(unsigned int fileID, std::string normalizedPath,
+        std::string buffer, uint64_t fileHash, std::optional<std::string> packageName = std::nullopt);
+
+    /**
+    * This add fake files info to `filePathToFileIDMap`,
+    * to keep the file id stable and consistent with previous compilations phase.
+    */
+    void ReserveCommonPartSources(std::vector<std::string> files);
+
     /**
      * Add a source to SourceManager.
      * @param path File path.

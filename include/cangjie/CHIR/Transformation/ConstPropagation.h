@@ -11,6 +11,7 @@
 #include "cangjie/CHIR/Analysis/ConstAnalysis.h"
 #include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/Transformation/DeadCodeElimination.h"
 #include "cangjie/CHIR/Utils.h"
 #include "cangjie/CHIR/Value.h"
 
@@ -55,7 +56,11 @@ public:
      * @return effect map affected by this pass.
      */
     const OptEffectCHIRMap& GetEffectMap() const;
-
+    /**
+     * @brief Get all funcs need to remove unreachable blocks.
+     * @return functions
+     */
+    const std::vector<const Func*>& GetFuncsNeedRemoveBlocks() const;
 private:
     struct RewriteInfo {
         Expression* oldExpr;
@@ -138,6 +143,7 @@ private:
     ConstAnalysisWrapper* analysisWrapper;
     const GlobalOptions& opts;
     static OptEffectCHIRMap effectMap;
+    std::vector<const Func*> funcsNeedRemoveBlocks;
 };
 
 } // namespace Cangjie::CHIR

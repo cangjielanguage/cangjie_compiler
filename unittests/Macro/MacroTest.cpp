@@ -361,6 +361,20 @@ TEST_F(MacroTest, DISABLED_MacroCall_Check_For_LSP_Paralle)
 }
 
 #ifndef _WIN32
+TEST_F(MacroTest, DISABLED_IfAvailable_In_LSP)
+{
+    auto src = srcPath + "test_IfAvailable_LSP.cj";
+    invocation.globalOptions.enableMacroInLSP = true;
+    invocation.globalOptions.enableParallelMacro = true;
+    invocation.globalOptions.executablePath = projectPath + "/output/bin/";
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->compileOnePackageFromSrcFiles = true;
+    instance->srcFilePaths = {src};
+    instance->Compile(CompileStage::SEMA);
+ 
+    Cangjie::MacroProcMsger::GetInstance().CloseMacroSrv();
+}
+
 TEST_F(MacroTest, DISABLED_MacroCall_Check_For_LSP_context)
 {
     std::string command = "cd " + definePath + " && cjc define_childMessage.cj --compile-macro";
@@ -397,6 +411,24 @@ TEST_F(MacroTest, DISABLED_MacroDiagReportForLsp)
     instance->Compile(CompileStage::SEMA);
 
     EXPECT_EQ(diag.GetErrorCount(), 1);
+    Cangjie::MacroProcMsger::GetInstance().CloseMacroSrv();
+}
+
+TEST_F(MacroTest, DISABLED_NoErrorInLSPMacro)
+{
+    std::string command = "cd " + definePath + " && cjc define.cj --compile-macro";
+    int err = system(command.c_str());
+    ASSERT_EQ(0, err);
+ 
+    auto src = srcPath + "derive_enum.cj";
+    invocation.globalOptions.enableMacroInLSP = true;
+    invocation.globalOptions.executablePath = projectPath + "/output/bin/";
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->compileOnePackageFromSrcFiles = true;
+    instance->srcFilePaths = {src};
+    instance->Compile(CompileStage::SEMA);
+ 
+    EXPECT_EQ(diag.GetErrorCount(), 0);
     Cangjie::MacroProcMsger::GetInstance().CloseMacroSrv();
 }
 

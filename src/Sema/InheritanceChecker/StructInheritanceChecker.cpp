@@ -27,10 +27,13 @@
 #include "cangjie/Modules/ModulesUtils.h"
 #include "cangjie/Sema/TestManager.h"
 #include "cangjie/Sema/TypeManager.h"
+#include "../NativeFFI/Java/AfterTypeCheck/Utils.h"
+
 
 #include "Diags.h"
 #include "TypeCheckUtil.h"
 #include "TypeCheckerImpl.h"
+#include "NativeFFI/Java/TypeCheck/InheritanceChecker.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -214,6 +217,48 @@ void DiagWeakVisibility(DiagnosticEngine& diag, const Decl& parent, const Decl& 
     builder.AddNote(parentNote);
 }
 
+// If node is from common part, check for decls extend or implement common decl.
+bool NeedRecheck(InheritableDecl& id)
+{
+    auto superDecls = id.GetAllSuperDecls();
+    std::vector<Ptr<ClassLikeDecl>> extendDecls;
+    if (id.astKind == ASTKind::EXTEND_DECL) {
+        auto ed = RawStaticCast<ExtendDecl*>(&id);
+        if (auto decl = Ty::GetDeclPtrOfTy(ed->extendedType->ty); decl && decl->IsNominalDecl()) {
+            // extend in common part for platform decl.
+            if (decl->TestAttr(Attribute::PLATFORM)) {
+                return true;
+            }
+            extendDecls = RawStaticCast<InheritableDecl*>(decl)->GetAllSuperDecls();
+        }
+    }
+    auto checkCommon = [](Ptr<ClassLikeDecl> it) { return it->TestAttr(Attribute::COMMON); };
+    return std::any_of(superDecls.cbegin(), superDecls.cend(), checkCommon) ||
+        std::any_of(extendDecls.cbegin(), extendDecls.cend(), checkCommon);
+}
+
+// Check whether inheritance rules need to be checked.
+bool NeedCheck(Node& node)
+{
+    if (!node.IsNominalDecl()) {
+        return false;
+    }
+    // Only incremental compilation case will meet generic instantiated decl.
+    // Decl from common part do not check again.
+    if (node.TestAttr(Attribute::GENERIC_INSTANTIATED)) {
+        return false;
+    }
+    // If node is from common part, check for decls extend or implement common decl.
+    if (node.TestAttr(Attribute::FROM_COMMON_PART)) {
+        // Except common decls.
+        if (node.TestAttr(Attribute::COMMON)) {
+            return false;
+        }
+        return NeedRecheck(*RawStaticCast<InheritableDecl*>(&node));
+    }
+    return true;
+}
+
 bool CompMemberSignatureByPosAndTy(Ptr<const MemberSignature> m1, Ptr<const MemberSignature> m2)
 {
     if (m1->decl != m2->decl) {
@@ -234,16 +279,14 @@ void StructInheritanceChecker::Check()
     if (pkg.TestAnyAttr(Attribute::IMPORTED, Attribute::TOOL_ADD)) {
         return;
     }
-    std::vector<Ptr<const InheritableDecl>> structDecls;
-    std::vector<Ptr<const ExtendDecl>> extendDecls;
+    std::vector<Ptr<InheritableDecl>> structDecls;
+    std::vector<Ptr<ExtendDecl>> extendDecls;
     Walker(&pkg, [&structDecls, &extendDecls](auto node) {
-        if (auto decl = DynamicCast<Decl*>(node); decl && decl->IsNominalDecl() &&
-            // Only incremental compilation case will meet generic instantiated decl.
-            !decl->TestAttr(Attribute::GENERIC_INSTANTIATED)) {
-            if (decl->astKind == ASTKind::EXTEND_DECL) {
-                extendDecls.emplace_back(RawStaticCast<ExtendDecl*>(decl));
+        if (NeedCheck(*node)) {
+            if (node->astKind == ASTKind::EXTEND_DECL) {
+                extendDecls.emplace_back(RawStaticCast<ExtendDecl*>(node));
             } else {
-                structDecls.emplace_back(RawStaticCast<InheritableDecl*>(decl));
+                structDecls.emplace_back(RawStaticCast<InheritableDecl*>(node));
             }
             return VisitAction::SKIP_CHILDREN;
         }
@@ -416,6 +459,10 @@ MemberMap StructInheritanceChecker::GetAndCheckInheritedMembers(const Inheritabl
     }
     if (!baseDecl || !Ty::IsTyCorrect(baseTy) || baseDecl->TestAttr(Attribute::IN_REFERENCE_CYCLE)) {
         return {};
+    }
+    // If common decl is with platform implementation, using platform one.
+    if (baseDecl->platformImplementation) {
+        baseDecl = RawStaticCast<InheritableDecl*>(baseDecl->platformImplementation);
     }
     CheckMembersWithInheritedDecls(*baseDecl);
     if (decl.curFile) {
@@ -644,6 +691,7 @@ void StructInheritanceChecker::DiagnoseForInheritedMember(
             CheckInheritanceAttributes(parent, *child.decl);
         }
     }
+    CheckNativeFFI(parent, child);
 }
 
 void StructInheritanceChecker::DiagnoseInheritedInsconsistType(const MemberSignature& member, const Node& node) const
@@ -807,6 +855,7 @@ void StructInheritanceChecker::DiagnoseForInheritedInterfaces(
                 CheckMutModifierCompatible(interface, *child.decl);
             }
         }
+        CheckNativeFFI(interface, child);
     }
     if (interface.decl->TestAttr(Attribute::DEFAULT)) {
         interface.decl->EnableAttr(Attribute::INTERFACE_IMPL);
@@ -815,8 +864,11 @@ void StructInheritanceChecker::DiagnoseForInheritedInterfaces(
 
 void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMap& members, const Decl& structDecl)
 {
-    if (structDecl.TestAttr(Attribute::FOREIGN)) {
-        return; // Do not check unimplemented function for foreign struct.
+    // Do not check unimplemented function for:
+    // 1. Foreign struct.
+    // 2. Mirror struct.
+    if (structDecl.TestAttr(Attribute::FOREIGN) || structDecl.TestAnyAttr(Attribute::OBJ_C_MIRROR)) {
+        return;
     }
     std::string prefix = structDecl.astKind == ASTKind::EXTEND_DECL ? "extend " : "";
     std::string structName = prefix + (structDecl.ty->IsNominal() ? structDecl.ty->name : structDecl.ty->String());
@@ -830,6 +882,13 @@ void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMa
         }
         if (IsBuiltInOperatorFuncInExtend(member, structDecl)) {
             continue;
+        }
+        // common inherit decl may not impletement all interface members.
+        if (structDecl.TestAttr(Attribute::COMMON) && member.isInheritedInterface) {
+            // impletement but no body
+            if (IsCommonWithoutDefault(*member.decl) && member.decl->outerDecl == &structDecl) {
+                continue;
+            }
         }
         // Unimplemented decls can be ignored if:
         // 1. decl is defined in foreign struct;
@@ -1144,16 +1203,17 @@ void StructInheritanceChecker::CheckPropertyInheritance(const MemberSignature& p
     auto childProp = RawStaticCast<const PropDecl*>(&child);
     if (childProp->isVar != parentProp->isVar) {
         if (parentProp->isVar) {
-            diag.Diagnose(
-                *childProp, DiagKind::sema_property_have_same_declaration_in_inherit_mut, childProp->identifier.Val());
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_property_have_same_declaration_in_inherit_mut, *childProp,
+                childProp->identifier.Val());
         } else {
-            diag.Diagnose(*childProp, DiagKind::sema_property_have_same_declaration_in_inherit_immut,
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_property_have_same_declaration_in_inherit_immut, *childProp,
                 childProp->identifier.Val());
         }
     } else if (childProp->isVar && (childProp->getters.empty() || childProp->setters.empty()) &&
         parentProp->TestAnyAttr(Attribute::DEFAULT, Attribute::ABSTRACT)) {
         // Currently, implemenation of default interface property must implement both getter/setter.
-        diag.Diagnose(*childProp, DiagKind::sema_property_must_implement_both, childProp->identifier.Val());
+        diag.DiagnoseRefactor(
+            DiagKindRefactor::sema_property_must_implement_both, *childProp, childProp->identifier.Val());
     }
     CheckAccessVisibility(*parentDecl, child, child);
 }
@@ -1276,9 +1336,9 @@ void StructInheritanceChecker::CheckMutModifierCompatible(const MemberSignature&
 }
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-std::vector<Ptr<const ExtendDecl>> StructInheritanceChecker::GetAllNeedCheckExtended()
+std::vector<Ptr<ExtendDecl>> StructInheritanceChecker::GetAllNeedCheckExtended()
 {
-    std::vector<Ptr<const ExtendDecl>> needCheckExtendDecls = {};
+    std::vector<Ptr<ExtendDecl>> needCheckExtendDecls = {};
     // If the extend decls are all imported from same package, do not check their inheritance again.
     auto filter = [&needCheckExtendDecls](const std::set<Ptr<ExtendDecl>> extends) -> void {
         std::unordered_set<std::string> pkgNames;
@@ -1315,3 +1375,13 @@ std::vector<Ptr<const ExtendDecl>> StructInheritanceChecker::GetAllNeedCheckExte
     return needCheckExtendDecls;
 }
 #endif
+
+void StructInheritanceChecker::CheckNativeFFI(
+    [[maybe_unused]] const MemberSignature& parent, [[maybe_unused]] const MemberSignature& child) const
+{
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    if (checkingDecls.size() > 0 && checkingDecls.back()) {
+        Interop::Java::CheckForeignName(diag, typeManager, parent, child, *checkingDecls.back());
+    }
+#endif
+}

@@ -26,7 +26,7 @@ bool TypeChecker::EnumSugarChecker::CheckVarDeclTargets()
     // Enum member without parameter is not supported to do type inference.
     std::vector<Ptr<Decl>> varDeclTargets;
     for (auto& target : enumSugarTargets) {
-        if (target->astKind == ASTKind::VAR_DECL) {
+        if (target->astKind == ASTKind::VAR_DECL && !target->TestAttr(Attribute::COMMON)) {
             varDeclTargets.push_back(target);
         }
     }

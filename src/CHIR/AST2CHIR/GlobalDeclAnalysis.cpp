@@ -293,16 +293,39 @@ void GlobalDeclAnalysis::AdditionalAnalysisDepOfNonStaticCtor(const AST::FuncDec
     }
 }
 
+/// Static member variable is a dependency if it's initialized in another file.
+/// This is required because of all direct initializers must be applied before static init,
+/// so files with direct initializers are dependencies for file with static init.
+static bool DoesStaticInitDependOnStaticVar(const Ptr<const AST::FuncDecl>& staticInit,
+    Ptr<Cangjie::AST::VarDecl> &staticVar)
+{
+    std::optional<unsigned int> staticVarInitializerFileId = std::nullopt;
+    if (staticVar->platformImplementation) {
+        auto platformStaticVar = DynamicCast<AST::VarDecl>(staticVar->platformImplementation);
+        CJC_NULLPTR_CHECK(platformStaticVar);
+        if (platformStaticVar->initializer) {
+            staticVarInitializerFileId = platformStaticVar->initializer->begin.fileID;
+        }
+    } else {
+        if (staticVar->initializer) {
+            staticVarInitializerFileId = staticVar->initializer->begin.fileID;
+        }
+    }
+
+    auto staticInitFileId = staticInit->begin.fileID;
+    return staticInitFileId != staticVarInitializerFileId;
+}
+
 void GlobalDeclAnalysis::AdditionalAnalysisDepOfStaticInit(
-    const Ptr<const AST::FuncDecl>& func, std::vector<Ptr<const AST::Decl>>& dependencies) const
+    const Ptr<const AST::FuncDecl>& staticInit, std::vector<Ptr<const AST::Decl>>& dependencies) const
 {
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    CJC_ASSERT(IsStaticInit(*func));
+    CJC_ASSERT(IsStaticInit(*staticInit));
 #endif
 
     // Get all the static member variables which are inited by this `static.init` func
     // and filter out the dependency to these static member variables
-    auto parentDecl = DynamicCast<const AST::InheritableDecl*>(func->outerDecl);
+    auto parentDecl = DynamicCast<const AST::InheritableDecl*>(staticInit->outerDecl);
     CJC_NULLPTR_CHECK(parentDecl);
     auto staticVars = GetStaticMemberVars(*parentDecl);
     std::vector<Ptr<const AST::Decl>> filtedDependencies;
@@ -312,7 +335,41 @@ void GlobalDeclAnalysis::AdditionalAnalysisDepOfStaticInit(
         }
         filtedDependencies.emplace_back(dep);
     }
+    for (auto& staticVar : staticVars) {
+        if (DoesStaticInitDependOnStaticVar(staticInit, staticVar)) {
+            filtedDependencies.emplace_back(staticVar);
+        }
+    }
+
     dependencies = filtedDependencies;
+}
+
+static void ReplaceCommonDependenciesWithPlatform(std::vector<Ptr<const AST::Decl>>& dependencies)
+{
+    for (size_t i = 0; i < dependencies.size(); i++) {
+        if (dependencies[i]->platformImplementation) {
+            dependencies[i] = dependencies[i]->platformImplementation;
+        }
+    }
+}
+
+static void SaveCJMPDependencies(Ptr<const AST::Decl> decl, std::vector<Ptr<const AST::Decl>>& dependencies)
+{
+    for (auto dependency : dependencies) {
+        decl->dependencies.emplace_back(dependency);
+    }
+}
+
+static void RestoreCJMPDependencies(Ptr<const AST::Decl> decl, std::vector<Ptr<const AST::Decl>>& dependencies)
+{
+    for (auto dependency : decl->dependencies) {
+        if (dependency->platformImplementation) {
+            dependencies.emplace_back(dependency);
+            dependencies.emplace_back(dependency->platformImplementation);
+        } else {
+            dependencies.emplace_back(dependency);
+        }
+    }
 }
 
 void GlobalDeclAnalysis::AnalysisDependency(const ElementList<Ptr<const AST::Decl>>& nodesWithDeps)
@@ -337,6 +394,13 @@ void GlobalDeclAnalysis::AnalysisDependency(const ElementList<Ptr<const AST::Dec
         std::vector<Ptr<const AST::Decl>> dependencies;
         std::vector<Ptr<const AST::Decl>> localConstVarDeps;
         AnalysisDepOf(*node, dependencies, localConstVarDeps);
+        if (outputChir) {
+            SaveCJMPDependencies(node, dependencies);
+        }
+        if (mergingPlatform) {
+            ReplaceCommonDependenciesWithPlatform(dependencies);
+            RestoreCJMPDependencies(node, dependencies);
+        }
         (void)std::remove_if(dependencies.begin(), dependencies.end(),
             [&node](const Ptr<const AST::Decl>& element) { return element == node; });
         funcsAndVarsDepMap.AddDeps(node, dependencies);
@@ -390,6 +454,9 @@ void GlobalDeclAnalysis::CheckUseBeforeInit(const std::vector<Ptr<const AST::Dec
     std::unordered_set<Ptr<const AST::Decl>> alreadyInited;
     for (auto& var : vars) {
         alreadyInited.emplace(var);
+        if (var->identifier == STATIC_INIT_VAR) {
+            continue;
+        }
 
         // Should not depends on any other vars initialized later
         auto pos = var2varDepsInFile.find(var);

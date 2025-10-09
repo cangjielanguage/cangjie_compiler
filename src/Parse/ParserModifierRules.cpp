@@ -26,6 +26,8 @@ static const std::unordered_map<TokenKind, AST::Attribute> TK2ATTRMAP = {
     {TokenKind::PRIVATE, AST::Attribute::PRIVATE},
     {TokenKind::INTERNAL, AST::Attribute::INTERNAL},
     {TokenKind::PROTECTED, AST::Attribute::PROTECTED},
+    {TokenKind::COMMON, AST::Attribute::COMMON},
+    {TokenKind::PLATFORM, AST::Attribute::PLATFORM},
     {TokenKind::OVERRIDE, AST::Attribute::OVERRIDE},
     {TokenKind::REDEF, AST::Attribute::REDEF},
     {TokenKind::ABSTRACT, AST::Attribute::ABSTRACT},
@@ -61,14 +63,29 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_COMM
     ACCESSIBLE_MODIFIERS
 };
 
+#define ACCESSIBLE_MODIFIERS_TOPLEVEL                                                                            \
+    {TokenKind::PUBLIC, {TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::PRIVATE}},                        \
+    {TokenKind::PROTECTED, {TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PRIVATE}},                        \
+    {TokenKind::INTERNAL, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::PRIVATE}},                        \
+    {TokenKind::PRIVATE,                                                                                         \
+        {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::PLATFORM, TokenKind::COMMON}}, \
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::PRIVATE}},                                              \
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::PRIVATE}}
+
+const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_ENUM_MODIFIERS = {
+    ACCESSIBLE_MODIFIERS_TOPLEVEL
+};
+
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> CLASS_BODY_VARIABLE_MODIFIERS = {
     ACCESSIBLE_MODIFIERS
     {TokenKind::STATIC, {}},
-    {TokenKind::CONST, {}},
+    {TokenKind::CONST, {TokenKind::COMMON, TokenKind::PLATFORM}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::CONST}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::CONST}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_STRUCT_MODIFIERS = {
-    ACCESSIBLE_MODIFIERS
+    ACCESSIBLE_MODIFIERS_TOPLEVEL
 };
 
 #define ACCESSIBLE_MODIFIERS_WITH_FOREIGN \
@@ -76,39 +93,51 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_STRU
     {TokenKind::PUBLIC, {TokenKind::FOREIGN, TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::PRIVATE}}, \
     {TokenKind::PROTECTED, {TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PRIVATE, TokenKind::SEALED}}, \
     {TokenKind::INTERNAL, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::PRIVATE, TokenKind::SEALED}}, \
-    {TokenKind::PRIVATE, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::SEALED}}, \
+    {TokenKind::PRIVATE, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::SEALED, \
+        TokenKind::COMMON, TokenKind::PLATFORM}}, \
     {TokenKind::SEALED, {TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::PRIVATE}},
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_CLASS_MODIFIERS = {
     ACCESSIBLE_MODIFIERS_WITH_FOREIGN
     {TokenKind::ABSTRACT, {}},
     {TokenKind::OPEN, {}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::PRIVATE}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::PRIVATE}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_INTERFACE_MODIFIERS = {
     ACCESSIBLE_MODIFIERS_WITH_FOREIGN
     {TokenKind::OPEN, {}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::PRIVATE}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::PRIVATE}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_VARIABLE_MODIFIERS = {
-    {TokenKind::FOREIGN, {TokenKind::UNSAFE, TokenKind::PUBLIC, TokenKind::CONST}},
+    {TokenKind::FOREIGN,
+        {TokenKind::UNSAFE, TokenKind::PUBLIC, TokenKind::CONST, TokenKind::PLATFORM, TokenKind::COMMON}},
     {TokenKind::PUBLIC, {TokenKind::FOREIGN, TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::PRIVATE}},
     {TokenKind::PROTECTED, {TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PRIVATE}},
     {TokenKind::INTERNAL, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::PRIVATE}},
-    {TokenKind::PRIVATE, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL}},
-    {TokenKind::CONST, {TokenKind::FOREIGN}},
+    {TokenKind::PRIVATE,
+        {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::PLATFORM, TokenKind::COMMON}},
+    {TokenKind::CONST, {TokenKind::FOREIGN, TokenKind::PLATFORM, TokenKind::COMMON}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::PRIVATE, TokenKind::CONST, TokenKind::FOREIGN}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::PRIVATE, TokenKind::CONST, TokenKind::FOREIGN}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_FUNCDECL_MODIFIERS = {
     {TokenKind::FOREIGN,
         {TokenKind::UNSAFE, TokenKind::PUBLIC, TokenKind::CONST, TokenKind::INTERNAL, TokenKind::PROTECTED,
-            TokenKind::PRIVATE}},
+            TokenKind::PRIVATE, TokenKind::COMMON}},
     {TokenKind::PUBLIC, {TokenKind::FOREIGN, TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::PRIVATE}},
     {TokenKind::PROTECTED, {TokenKind::FOREIGN, TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PRIVATE}},
     {TokenKind::INTERNAL, {TokenKind::FOREIGN, TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::PRIVATE}},
-    {TokenKind::PRIVATE, {TokenKind::FOREIGN, TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL}},
+    {TokenKind::PRIVATE, {TokenKind::FOREIGN, TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL,
+        TokenKind::COMMON}},
     {TokenKind::UNSAFE, {TokenKind::FOREIGN}},
-    {TokenKind::CONST, {TokenKind::FOREIGN}},
+    {TokenKind::CONST, {TokenKind::FOREIGN, TokenKind::COMMON, TokenKind::PLATFORM}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::PRIVATE, TokenKind::FOREIGN, TokenKind::CONST}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::PRIVATE, TokenKind::CONST}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> TOPLEVEL_MACRODECL_MODIFIERS = {
@@ -130,7 +159,10 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> CLASS_BODY_FU
     {TokenKind::OVERRIDE, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::OPERATOR, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::UNSAFE, {}},
-    {TokenKind::CONST, {TokenKind::OPEN}},
+    {TokenKind::CONST, {TokenKind::OPEN, TokenKind::COMMON, TokenKind::PLATFORM}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::CONST}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::CONST}},
+    {TokenKind::ABSTRACT, {}}
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> INTERFACE_BODY_FUNCDECL_MODIFIERS = {
@@ -141,8 +173,10 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> INTERFACE_BOD
     {TokenKind::UNSAFE, {}},
     {TokenKind::OVERRIDE, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::OPEN, {TokenKind::STATIC, TokenKind::REDEF}},
-    {TokenKind::CONST, {}},
+    {TokenKind::CONST, {TokenKind::COMMON, TokenKind::PLATFORM}},
     {TokenKind::PUBLIC, {}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::CONST}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::CONST}}
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> STRUCT_BODY_FUNCDECL_MODIFIERS = {
@@ -153,7 +187,9 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> STRUCT_BODY_F
     {TokenKind::UNSAFE, {}},
     {TokenKind::OVERRIDE, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::REDEF, {TokenKind::OPEN, TokenKind::OVERRIDE, TokenKind::OPERATOR}},
-    {TokenKind::CONST, {TokenKind::MUT}},
+    {TokenKind::CONST, {TokenKind::MUT, TokenKind::COMMON, TokenKind::PLATFORM}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::CONST}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::CONST}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> ENUM_BODY_FUNCDECL_MODIFIERS = {
@@ -163,7 +199,9 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> ENUM_BODY_FUN
     {TokenKind::UNSAFE, {}},
     {TokenKind::OVERRIDE, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::REDEF, {TokenKind::OVERRIDE, TokenKind::OPERATOR}},
-    {TokenKind::CONST, {}},
+    {TokenKind::CONST, {TokenKind::COMMON, TokenKind::PLATFORM}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::CONST}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::CONST}}
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> FUNC_BODY_FUNCDECL_MODIFIERS = {
@@ -175,6 +213,9 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> STRUCT_BODY_V
     ACCESSIBLE_MODIFIERS
     {TokenKind::STATIC, {}},
     {TokenKind::CONST, {}},
+    {TokenKind::CONST, {TokenKind::COMMON, TokenKind::PLATFORM}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM, TokenKind::CONST}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON, TokenKind::CONST}}
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> EXTEND_BODY_FUNCDECL_MODIFIERS = {
@@ -184,6 +225,8 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> EXTEND_BODY_F
     {TokenKind::STATIC, {TokenKind::MUT, TokenKind::OPERATOR}},
     {TokenKind::UNSAFE, {}},
     {TokenKind::CONST, {}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON}}
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> CLASS_BODY_PROP_MODIFIERS = {
@@ -196,6 +239,9 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> CLASS_BODY_PR
     {TokenKind::OPEN, {TokenKind::STATIC, TokenKind::INTERNAL, TokenKind::PRIVATE, TokenKind::REDEF}},
     {TokenKind::OVERRIDE, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::MUT, {}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON}},
+    {TokenKind::ABSTRACT, {}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> INTERFACE_BODY_PROP_MODIFIERS = {
@@ -205,6 +251,8 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> INTERFACE_BOD
     {TokenKind::OPEN, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::MUT, {}},
     {TokenKind::PUBLIC, {}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> STRUCT_BODY_PROP_MODIFIERS = {
@@ -213,6 +261,8 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> STRUCT_BODY_P
     {TokenKind::OVERRIDE, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::REDEF, {TokenKind::OVERRIDE}},
     {TokenKind::MUT, {}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> ENUM_BODY_PROP_MODIFIERS = {
@@ -220,12 +270,16 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> ENUM_BODY_PRO
     {TokenKind::STATIC, {TokenKind::OVERRIDE}},
     {TokenKind::OVERRIDE, {TokenKind::STATIC, TokenKind::REDEF}},
     {TokenKind::REDEF, {TokenKind::OVERRIDE}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON}},
 };
 
 const static std::unordered_map<TokenKind, std::vector<TokenKind>> EXTEND_BODY_PROP_MODIFIERS = {
     ACCESSIBLE_MODIFIERS
     {TokenKind::STATIC, {}},
     {TokenKind::MUT, {}},
+    {TokenKind::COMMON, {TokenKind::PLATFORM}},
+    {TokenKind::PLATFORM, {TokenKind::COMMON}},
 };
 
 // AGGREGATE means class and struct in Cangjie here.
@@ -234,7 +288,9 @@ const static std::unordered_map<TokenKind, std::vector<TokenKind>> EXTEND_BODY_P
     {TokenKind::PROTECTED, {TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PRIVATE, TokenKind::STATIC}}, \
     {TokenKind::INTERNAL, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::PRIVATE, TokenKind::STATIC}}, \
     {TokenKind::PRIVATE, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL, TokenKind::STATIC}}, \
-    {TokenKind::CONST, {}},
+    {TokenKind::CONST, {}}, \
+    {TokenKind::COMMON, {TokenKind::PLATFORM}}, \
+    {TokenKind::PLATFORM, {TokenKind::COMMON}},
 
 #define AGGREGATE_BODY_INIT_MODIFIERS \
     AGGREGATE_BODY_INSTANCE_INIT_MODIFIERS \
@@ -276,7 +332,7 @@ const static std::unordered_map<DefKind,
             },
         },
         {DefKind::STRUCT, {{ScopeKind::TOPLEVEL, TOPLEVEL_STRUCT_MODIFIERS}}},
-        {DefKind::ENUM, {{ScopeKind::TOPLEVEL, TOPLEVEL_COMMON_MODIFIERS}}},
+        {DefKind::ENUM, {{ScopeKind::TOPLEVEL, TOPLEVEL_ENUM_MODIFIERS}}},
         {DefKind::TYPE, {{ScopeKind::TOPLEVEL, TOPLEVEL_COMMON_MODIFIERS}}},
         {DefKind::CONSTRUCTOR,
             {

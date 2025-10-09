@@ -11,6 +11,7 @@
  */
 
 #include "cangjie/Basic/Utils.h"
+#include "cangjie/Lex/Token.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -78,10 +79,15 @@ std::vector<std::string> Utils::SplitString(const std::string& str, const std::s
     return res;
 }
 
-std::vector<std::string> Utils::SplitQualifiedName(const std::string& qualifiedName)
+std::vector<std::string> Utils::SplitQualifiedName(const std::string& qualifiedName, bool splitDc)
 {
     std::vector<std::string> names;
     std::string::size_type idx = 0;
+    std::string_view dc = TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)];
+    if (auto next = qualifiedName.find(dc); splitDc && next != std::string::npos) {
+        names.push_back(qualifiedName.substr(0, next));
+        idx = next + dc.size();
+    }
     while (idx < qualifiedName.size()) {
         if (qualifiedName[idx] == '.') {
             ++idx;

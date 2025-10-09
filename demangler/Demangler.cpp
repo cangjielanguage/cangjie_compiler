@@ -698,6 +698,10 @@ DemangleInfo<T> Demangler<T>::DemanglePackageName()
     DemangleInfo<T> di{ "", TypeKind::COMMON_DECL };
     if (pkg.IsEmpty()) {
         pkg = DemangleStringName();
+        auto pos = pkg.Find(':');
+        if (pos > -1 && pkg.Length() - pos > 0) {
+            pkg = pkg.SubStr(0, pos) + T{':'} + pkg.SubStr(pos, pkg.Length() - pos);
+        }
     }
     if (IsFileName()) {
         di.isPrivateDeclaration = true;

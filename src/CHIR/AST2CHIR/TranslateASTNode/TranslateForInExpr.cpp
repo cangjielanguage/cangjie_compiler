@@ -410,8 +410,8 @@ void Translator::TranslateForInStringLatchBlockGroup(Ptr<Value>& inductiveVar)
     auto constOne =
         CreateAndAppendConstantExpression<IntLiteral>(inductiveVal->GetType(), *currentBlock, 1UL);
     constOne->Set<GeneratedFromForIn>(true);
-    auto plusOne = CreateAndAppendExpression<BinaryExpression>(
-        loc, inductiveVal->GetType(), ExprKind::ADD, inductiveVal, constOne->GetResult(), currentBlock);
+    auto plusOne = CreateAndAppendExpression<BinaryExpression>(loc, inductiveVal->GetType(),
+        ExprKind::ADD, inductiveVal, constOne->GetResult(), OverflowStrategy::WRAPPING, currentBlock);
     plusOne->Set<GeneratedFromForIn>(true);
     CreateWrappedStore(loc, plusOne->GetResult(), inductiveVar, currentBlock);
     CreateAndAppendTerminator<Exit>(loc, currentBlock);
@@ -457,8 +457,8 @@ void Translator::TranslateForInCondControlFlow(Ptr<Value>& condVar)
     delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto constOne = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 1UL);
     constOne->Set<GeneratedFromForIn>(true);
-    auto decreaseOne = CreateAndAppendExpression<BinaryExpression>(
-        builder.GetInt64Ty(), ExprKind::SUB, delayExitSignalVal->GetResult(), constOne->GetResult(), currentBlock);
+    auto decreaseOne = CreateAndAppendExpression<BinaryExpression>(builder.GetInt64Ty(), ExprKind::SUB,
+        delayExitSignalVal->GetResult(), constOne->GetResult(), OverflowStrategy::WRAPPING, currentBlock);
     decreaseOne->Set<GeneratedFromForIn>(true);
     CreateWrappedStore(decreaseOne->GetResult(), delayExitSignal, currentBlock);
     auto constantFalse =
@@ -513,8 +513,8 @@ void Translator::UpdateDelayExitSignalInForInEnd(const ForIn& forIn)
     delayExitSignalVal->Set<GeneratedFromForIn>(true);
     auto constOne = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 1UL);
     constOne->Set<GeneratedFromForIn>(true);
-    auto decreaseOne = CreateAndAppendExpression<BinaryExpression>(
-        builder.GetInt64Ty(), ExprKind::SUB, delayExitSignalVal->GetResult(), constOne->GetResult(), currentBlock);
+    auto decreaseOne = CreateAndAppendExpression<BinaryExpression>(builder.GetInt64Ty(), ExprKind::SUB,
+        delayExitSignalVal->GetResult(), constOne->GetResult(), OverflowStrategy::WRAPPING, currentBlock);
     CreateWrappedStore(decreaseOne->GetResult(), delayExitSignal, currentBlock);
     Ptr<Value> funcRetValLocation = GetOuterBlockGroupReturnValLocation();
     if (funcRetValLocation != nullptr && forInExprReturnMap.count(forIn.GetResult()) != 0) {
@@ -524,11 +524,40 @@ void Translator::UpdateDelayExitSignalInForInEnd(const ForIn& forIn)
             currentBlock)->GetResult();
         CreateWrappedStore(loc, forInRetVal, funcRetValLocation, currentBlock);
     }
+    if (!tryCatchContext.empty()) {
+        GenerateSignalCheckForThrow();
+    }
     auto term = CreateAndAppendTerminator<Exit>(currentBlock);
     term->Set<SkipCheck>(SkipKind::SKIP_FORIN_EXIT);
 
     // if delayExitSignal value is equal to 0, we still need to translate the rest cangjie code as normal.
     currentBlock = delayExitFalseBlock;
+}
+
+void Translator::GenerateSignalCheckForThrow()
+{
+    auto constZero = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 0UL);
+    constZero->Set<GeneratedFromForIn>(true);
+    auto delayExitSignalVal =
+        CreateAndAppendExpression<Load>(builder.GetInt64Ty(), delayExitSignal, currentBlock);
+    delayExitSignalVal->Set<GeneratedFromForIn>(true);
+    auto hasThrow = CreateAndAppendExpression<BinaryExpression>(
+        builder.GetBoolTy(), ExprKind::GT, delayExitSignalVal->GetResult(), constZero->GetResult(), currentBlock);
+    auto throwBB = CreateBlock(); // if throw check is true, rethrow it to outer Exception block
+    auto exception = CreateAndAppendExpression<GetException>(builder.GetType<RefType>(builder.GetObjectTy()), throwBB);
+    auto baseETy = builder.GetType<RefType>(builder.GetObjectTy());
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    IntrisicCallContext callContext{IntrinsicKind::BEGIN_CATCH, {exception->GetResult()}};
+    auto eVal = CreateAndAppendExpression<Intrinsic>(baseETy, callContext, throwBB);
+#else
+    auto eVal = CreateAndAppendExpression<Intrinsic>(
+        baseETy, IntrinsicKind::BEGIN_CATCH, std::vector<Value*>{exception->GetResult()}, throwBB);
+#endif
+    CreateAndAppendTerminator<RaiseException>(eVal->GetResult(), tryCatchContext.top(), throwBB);
+    auto returnBB = CreateBlock(); // if throw check is false, return from cur func
+    auto br = CreateAndAppendTerminator<Branch>(hasThrow->GetResult(), throwBB, returnBB, currentBlock);
+    br->Set<GeneratedFromForIn>(true);
+    currentBlock = returnBB; // contents of returnBB is filled on the caller side
 }
 
 Ptr<Value> Translator::TranslateForInIterCondition(Ptr<Value>& iterNextLocation, Ptr<AST::Ty>& astTy)

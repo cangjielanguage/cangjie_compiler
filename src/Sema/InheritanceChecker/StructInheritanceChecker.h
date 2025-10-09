@@ -14,7 +14,6 @@
 #define CANGJIE_SEMA_INHERITANCE_CHECKER_H
 
 #include "cangjie/AST/Node.h"
-#include "cangjie/AST/Types.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Sema/TypeManager.h"
@@ -64,6 +63,7 @@ private:
     std::pair<MemberMap, MemberMap> GetVisibleExtendMembersForExtend(const InheritableDecl& decl);
     void CheckExtendExportDependence(
         const InheritableDecl& curExtend, const MemberSignature& interface, const MemberMap& implDecl);
+    void UpdateOverriddenFuncDeclCache(Ptr<Decl> child, Ptr<Decl> parent);
     MemberSignature UpdateInheritedMemberIfNeeded(
         MemberMap& inheritedMembers, const MemberSignature& child, bool inheritedInterfaces = false);
     bool ComputeInconsistentTypes(const MemberSignature& child, const MemberSignature& parent, MemberSignature& updated,
@@ -106,6 +106,9 @@ private:
     void CheckAllUpperBoundsConfliction();
     void CheckUpperBoundsConfliction(const Generic& generic);
 
+    /** Checks related to NativeFFI */
+    void CheckNativeFFI(const MemberSignature& parent, const MemberSignature& child) const;
+
     /**
      * Generates the built-in operator function and adds to ed.members.
      * e.g. operator func -(): Int64 { return -this }
@@ -147,7 +150,7 @@ private:
         return !pkg.files.empty() && *pkg.files.begin() && importManager.IsExtendAccessible(**pkg.files.begin(), ed);
     }
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    std::vector<Ptr<const ExtendDecl>> GetAllNeedCheckExtended();
+    std::vector<Ptr<ExtendDecl>> GetAllNeedCheckExtended();
 #endif
 
     DiagnosticEngine& diag;

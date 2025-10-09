@@ -138,13 +138,19 @@ bool Devirtualization::RewriteToBuiltinOp(CHIRBuilder& builder, const RewriteInf
         }
     }
     auto thisValue = invoke->GetObject();
-    Expression* castExpr = nullptr;
-    if (thisValue->IsLocalVar() && !thisValue->GetType()->IsPrimitive()) {
-        auto expr = StaticCast<LocalVar*>(thisValue)->GetExpr();
-        if (expr->GetExprKind() == ExprKind::BOX) {
+    std::vector<Expression*> castExprs;
+    std::function<void(LocalVar&)> findThisValue = [&thisValue, &castExprs, &findThisValue](LocalVar& tempVar) {
+        auto expr = tempVar.GetExpr();
+        if (expr->GetExprKind() == ExprKind::BOX || expr->GetExprKind() == ExprKind::TYPECAST) {
+            castExprs.emplace_back(expr);
             thisValue = expr->GetOperand(0);
-            castExpr = expr;
+            if (auto localVar = DynamicCast<LocalVar*>(thisValue)) {
+                findThisValue(*localVar);
+            }
         }
+    };
+    if (thisValue->IsLocalVar() && !thisValue->GetType()->IsPrimitive()) {
+        findThisValue(*StaticCast<LocalVar*>(thisValue));
     }
     if (!thisValue->GetType()->IsPrimitive()) {
         return false;
@@ -156,8 +162,10 @@ bool Devirtualization::RewriteToBuiltinOp(CHIRBuilder& builder, const RewriteInf
         op = BuiltinOpCreateNewBinary(builder, *invoke, targetExprKind, thisValue, args);
     }
     invoke->ReplaceWith(*op);
-    if (castExpr != nullptr && castExpr->GetResult()->GetUsers().empty()) {
-        castExpr->RemoveSelfFromBlock();
+    for (auto e : castExprs) {
+        if (e->GetResult()->GetUsers().empty()) {
+            e->RemoveSelfFromBlock();
+        }
     }
     if (isDebug) {
         std::string callName =
@@ -182,20 +190,20 @@ void Devirtualization::RewriteToApply(CHIRBuilder& builder, std::vector<RewriteI
         Type* thisType = builder.GetType<RefType>(rewriteInfo->thisType);
         auto& realFunc = rewriteInfo->realCallee;
 
-        bool isMutFunc =
-            realFunc->TestAttr(Attribute::MUT) || IsConstructor(*realFunc);
-        bool isNonMutFuncWithValueType =
-            !isMutFunc && (rewriteInfo->thisType->IsStruct() || rewriteInfo->thisType->IsEnum());
-        if (isNonMutFuncWithValueType) {
+        if ((rewriteInfo->thisType->IsStruct() || rewriteInfo->thisType->IsEnum()) &&
+            rewriteInfo->realCallee->Get<WrappedRawMethod>()) {
             thisType = rewriteInfo->thisType;
+            bool isMutFunc =
+                realFunc->TestAttr(Attribute::MUT) || IsConstructor(*realFunc) || IsInstanceVarInit(*realFunc);
+            if (isMutFunc) {
+                thisType = builder.GetType<RefType>(thisType);
+            }
             realFunc = rewriteInfo->realCallee->Get<WrappedRawMethod>();
         }
         auto args = invoke->GetOperands();
-        auto instThisType = args[0]->GetType();
+        auto instThisType = thisType;
         if (rewriteInfo->thisType->IsBuiltinType()) {
             instThisType = builder.GetType<RefType>(builder.GetAnyTy());
-        } else if (thisType->IsEqualOrSubTypeOf(*instThisType, builder)) {
-            instThisType = thisType;
         }
         auto instRetTy = invoke->GetResultType();
         auto typecastRes = TypeCastOrBoxIfNeeded(*args[0], *instThisType, builder, *parent, INVALID_LOCATION);
@@ -301,6 +309,7 @@ void Devirtualization::InstantiateFuncIfPossible(CHIRBuilder& builder, std::vect
             helper.SubstituteValue(newGroup, paramMap);
 
             FixCastProblemAfterInst(newGroup, builder);
+            newFunc->SetReturnValue(*newBlockGroupRetValue);
             frozenInstFuns.push_back(newFunc);
             frozenInstFuncMap[newId] = newFunc;
         }
@@ -492,7 +501,8 @@ FuncBase* Devirtualization::GetCandidateFromSpecificType(
     if (specificDef->IsAbstract() || specificDef->IsInterface()) {
         return nullptr;
     }
-    auto extendsOrImplements = devirtFuncInfo.defsMap[&specific];
+    auto customType = specific.GetClassDef()->GetType();
+    auto extendsOrImplements = devirtFuncInfo.defsMap[customType];
     for (auto oriDef : extendsOrImplements) {
         auto genericDef = oriDef->GetGenericDecl() != nullptr ? oriDef->GetGenericDecl() : oriDef;
         for (auto [parentTy, infos] : genericDef->GetVTable()) {
@@ -543,7 +553,7 @@ void Devirtualization::CollectCandidates(
             for (auto oriDef : extendsOrImplements) {
                 auto def = oriDef->GetGenericDecl() != nullptr ? oriDef->GetGenericDecl() : oriDef;
                 for (auto [parentTy, infos] : def->GetVTable()) {
-                    if (!expected->IsEqualOrSubTypeOf(*parentTy, builder)) {
+                    if (!expected->IsEqualOrSubTypeOf(*parentTy->StripAllRefs(), builder)) {
                         continue;
                     }
                     if (auto target = FindFunctionInVtable(parentTy, infos, method, builder)) {

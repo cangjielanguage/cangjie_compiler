@@ -195,16 +195,6 @@ public:
         return package;
     }
 
-    VirtualWrapperDepMap&& GetCurVirtualFuncWrapperDepForIncr()
-    {
-        return std::move(curVirtFuncWrapDep);
-    }
-
-    VirtualWrapperDepMap&& GetDeleteVirtualFuncWrapperForIncr()
-    {
-        return std::move(delVirtFuncWrapForIncr);
-    }
-
     std::unordered_set<Func*>&& GetSrcCodeImportedFuncs()
     {
         return std::move(srcCodeImportedFuncs);
@@ -330,11 +320,55 @@ private:
     std::pair<InitOrder, bool> SortGlobalVarDecl(const AST::Package& pkg);
 
     void SetGenericDecls() const;
-    void SetVTable();
     void SetExtendInfo();
     void UpdateExtendParent();
 
     Translator CreateTranslator();
+    /* Micro refactoring for CJMP. */
+    void TranslateFuncParams(const AST::FuncDecl& funcDecl, Func& func) const;
+    void TranslateVecDecl(const std::vector<Ptr<const AST::Decl>>& decls, Translator& trans) const;
+
+    /* Add methods for CJMP. */
+    // Try to deserialize common part for CJMP.
+    bool TryToDeserializeCHIR();
+    // Check whether the decl is deserialized for CJMP.
+    bool MaybeDeserialized(const AST::Decl& decl) const;
+    // Try to get deserialized node from package including CustomTypeDef (excluding Extend), Func, GlobalVar,
+    // ImportedValue.
+    template<typename T>
+    T* TryGetDeserialized(const AST::Decl& decl)
+    {
+        if (!MaybeDeserialized(decl)) {
+            return nullptr;
+        }
+        std::string key = GLOBAL_VALUE_PREFIX + decl.mangledName;
+        if (decl.TestAttr(AST::Attribute::FOREIGN) && decl.IsFunc()) {
+            key = decl.rawMangleName;
+        }
+        T* res = nullptr;
+        if constexpr (std::is_base_of_v<CustomTypeDef, T>) {
+            auto it = deserializedDefs.find(key);
+            res = it == deserializedDefs.end() ? nullptr : static_cast<T*>(it->second);
+        } else {
+            // get value
+            auto it = deserializedVals.find(key);
+            res = it == deserializedVals.end() ? nullptr : dynamic_cast<T*>(it->second);
+        }
+        if (res && !decl.TestAttr(AST::Attribute::PLATFORM)) {
+            deserializedDecls.insert(&decl);
+        }
+        return res;
+    }
+    // build symbol table for deserialized decls from common part.
+    void BuildDeserializedTable();
+ 
+    // Reset platform func for CJMP.
+    void ResetPlatformFunc(const AST::FuncDecl& funcDecl, Func& func);
+    // Check whether the decl need be translated for CJMP.
+    inline bool NeedTranslate(const AST::Decl& decl) const
+    {
+        return deserializedDecls.find(&decl) == deserializedDecls.end();
+    }
 
     const GlobalOptions& opts;
     const GenericInstantiationManager* gim;
@@ -422,6 +456,14 @@ private:
     std::unordered_map<Ptr<const AST::File>, std::vector<Ptr<const AST::Decl>>> fileAndVarMap;
 
     std::unordered_set<Ptr<const AST::Decl>> usedSrcImportedNonGenericDecls;
+    /* Add fields for CJMP. */
+    bool outputCHIR{false}; // Output type is CHIR
+    bool mergingPlatform{false}; // Merging platform part over already compiled chir
+    std::unordered_set<Ptr<const AST::Decl>> deserializedDecls; // decls which don't need to be retranslated.
+    // Deserialized node cache table, key is identifier.
+    std::unordered_map<std::string, CustomTypeDef*> deserializedDefs;
+    std::unordered_map<std::string, Value*> deserializedVals;
+
     std::unordered_set<Func*> srcCodeImportedFuncs;
     std::unordered_set<GlobalVar*> srcCodeImportedVars;
 

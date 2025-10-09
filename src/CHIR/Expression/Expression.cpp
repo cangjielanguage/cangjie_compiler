@@ -39,6 +39,24 @@ std::pair<size_t, size_t> GetAllocExprOfRetVal(const BlockGroup& body)
     CJC_ABORT();
     return {0, 0};
 }
+
+void GetAllSuperClassDefs(const ClassDef& def, std::unordered_set<ClassDef*>& allSuperDefs)
+{
+    for (auto parent : def.GetImplementedInterfaceDefs()) {
+        allSuperDefs.emplace(parent);
+        GetAllSuperClassDefs(*parent, allSuperDefs);
+    }
+    if (auto superClass = def.GetSuperClassDef()) {
+        allSuperDefs.emplace(superClass);
+        GetAllSuperClassDefs(*superClass, allSuperDefs);
+    }
+    for (auto extendDef : def.GetExtends()) {
+        for (auto parent : extendDef->GetImplementedInterfaceDefs()) {
+            allSuperDefs.emplace(parent);
+            GetAllSuperClassDefs(*parent, allSuperDefs);
+        }
+    }
+}
 }
 
 Expression::Expression(
@@ -362,14 +380,6 @@ void Expression::SetParent(Block* newParent)
     parent = newParent;
 }
 
-/*
- * @brief Replace any uses of @from with @to in this expression.
- *
- * @param from The source value.
- *
- * @param to The destination value.
- *
- */
 void Expression::ReplaceOperand(Value* oldOperand, Value* newOperand)
 {
     CJC_NULLPTR_CHECK(oldOperand);
@@ -474,6 +484,17 @@ std::string UnaryExpression::ToString(size_t indent) const
     ss << Expression::ToString(indent);
     ss << AddExtraComment(OverflowToString(overflowStrategy));
     return ss.str();
+}
+
+BinaryExpression::BinaryExpression(ExprKind kind, Value* lhs, Value* rhs, OverflowStrategy ofs, Block* parent)
+    : Expression(kind, {lhs, rhs}, {}, parent), overflowStrategy(ofs)
+{
+}
+
+BinaryExpression::BinaryExpression(ExprKind kind, Value* lhs, Value* rhs, Block* parent)
+    : Expression(kind, {lhs, rhs}, {}, parent)
+{
+    CJC_ASSERT(kind >= ExprKind::BITAND);
 }
 
 Value* BinaryExpression::GetLHSOperand() const
@@ -663,6 +684,40 @@ std::string GetElementRef::ToString([[maybe_unused]] size_t indent) const
     return ss.str();
 }
 
+// GetElementByName
+Value* GetElementByName::GetLocation() const
+{
+    return operands[0];
+}
+
+const std::vector<std::string>& GetElementByName::GetNames() const
+{
+    return names;
+}
+
+std::string GetElementByName::ToString([[maybe_unused]] size_t indent) const
+{
+    std::stringstream ss;
+    ss << GetExprKindName();
+    ss << "(";
+    ss << GetLocation()->GetIdentifier();
+    for (const auto& p : GetNames()) {
+        ss << ", " << p;
+    }
+    ss << ")";
+    ss << CommentToString();
+    return ss.str();
+}
+
+GetElementByName* GetElementByName::Clone(CHIRBuilder& builder, Block& parent) const
+{
+    auto newNode = builder.CreateExpression<GetElementByName>(result->GetType(), GetLocation(), GetNames(), &parent);
+    parent.AppendExpression(newNode);
+    newNode->GetResult()->AppendAttributeInfo(result->GetAttributeInfo());
+    return newNode;
+}
+
+// StoreElementRef
 Value* StoreElementRef::GetValue() const
 {
     return operands[0];
@@ -676,6 +731,46 @@ Value* StoreElementRef::GetLocation() const
 const std::vector<uint64_t>& StoreElementRef::GetPath() const
 {
     return path;
+}
+
+// StoreElementByName
+Value* StoreElementByName::GetValue() const
+{
+    return operands[0];
+}
+
+Value* StoreElementByName::GetLocation() const
+{
+    return operands[1];
+}
+
+const std::vector<std::string>& StoreElementByName::GetNames() const
+{
+    return names;
+}
+
+std::string StoreElementByName::ToString([[maybe_unused]] size_t indent) const
+{
+    std::stringstream ss;
+    ss << GetExprKindName();
+    ss << "(";
+    ss << GetValue()->GetIdentifier() << ", ";
+    ss << GetLocation()->GetIdentifier();
+    for (const auto& p : GetNames()) {
+        ss << ", " << p;
+    }
+    ss << ")";
+    ss << CommentToString();
+    return ss.str();
+}
+
+StoreElementByName* StoreElementByName::Clone(CHIRBuilder& builder, Block& parent) const
+{
+    auto newNode =
+        builder.CreateExpression<StoreElementByName>(result->GetType(), GetValue(), GetLocation(), GetNames(), &parent);
+    parent.AppendExpression(newNode);
+    newNode->GetResult()->AppendAttributeInfo(result->GetAttributeInfo());
+    return newNode;
 }
 
 FuncCall::FuncCall(ExprKind kind, const FuncCallContext& funcCallCtx, Block* parent)
@@ -777,12 +872,12 @@ FuncType* DynamicDispatch::GetMethodType() const
     return virMethodCtx.originalFuncType;
 }
 
-size_t DynamicDispatch::GetVirtualMethodOffset() const
+const std::vector<GenericType*>& DynamicDispatch::GetGenericTypeParams() const
 {
-    return virMethodCtx.offset;
+    return virMethodCtx.genericTypeParams;
 }
 
-ClassType* DynamicDispatch::GetInstSrcParentCustomTypeOfMethod(CHIRBuilder& builder) const
+std::vector<VTableSearchRes> DynamicDispatch::GetVirtualMethodInfo(CHIRBuilder& builder) const
 {
     auto thisTypeDeref = thisType->StripAllRefs();
     if (thisTypeDeref->IsThis()) {
@@ -796,8 +891,24 @@ ClassType* DynamicDispatch::GetInstSrcParentCustomTypeOfMethod(CHIRBuilder& buil
     FuncCallType funcCallType{virMethodCtx.srcCodeIdentifier, instFuncType, instantiatedTypeArgs};
     auto res = GetFuncIndexInVTable(*thisTypeDeref, funcCallType, IsInvokeStaticBase(), builder);
     CJC_ASSERT(!res.empty());
-    for (auto& r : res) {
-        if (r.offset == virMethodCtx.offset) {
+    return res;
+}
+
+size_t DynamicDispatch::GetVirtualMethodOffset(CHIRBuilder* builder) const
+{
+    auto offset = Get<VirMethodOffset>();
+    if (offset.has_value()) {
+        return offset.value();
+    } else {
+        CJC_NULLPTR_CHECK(builder);
+        return GetVirtualMethodInfo(*builder)[0].offset;
+    }
+}
+
+ClassType* DynamicDispatch::GetInstSrcParentCustomTypeOfMethod(CHIRBuilder& builder) const
+{
+    for (auto& r : GetVirtualMethodInfo(builder)) {
+        if (r.offset == GetVirtualMethodOffset()) {
             CJC_NULLPTR_CHECK(r.instSrcParentType);
             return r.instSrcParentType;
         }
@@ -822,6 +933,47 @@ Value* Invoke::GetObject() const
     return operands[0];
 }
 
+void Invoke::UpdateThisType()
+{
+    auto objType = GetObject()->GetType();
+    auto objDerefType = DynamicCast<ClassType*>(objType->StripAllRefs());
+    auto thisDerefType = DynamicCast<ClassType*>(thisType->StripAllRefs());
+    // for now, we only care about class type, maybe we can handle other types later
+    if (objDerefType == thisDerefType || objDerefType == nullptr || thisDerefType == nullptr) {
+        return;
+    }
+    // `ThisType` must be sub type or equal to object's type, in fact, they should be same,
+    // but original object may be casted to parent type for func param type matched.
+    // after function inlining, object may be changed to sub type of `ThisType`, so we need to update `ThisType`
+    auto parentDef = objDerefType->GetClassDef();
+    std::unordered_set<ClassDef*> allSuperDefs;
+    GetAllSuperClassDefs(*thisDerefType->GetClassDef(), allSuperDefs);
+    auto it = allSuperDefs.find(parentDef);
+    if (it == allSuperDefs.end()) {
+        SetThisType(objType);
+    }
+}
+
+void Invoke::ReplaceOperand(Value* oldOperand, Value* newOperand)
+{
+    auto needUpdateThisType = false;
+    if (GetObject() == oldOperand) {
+        needUpdateThisType = true;
+    }
+    Expression::ReplaceOperand(oldOperand, newOperand);
+    if (needUpdateThisType) {
+        UpdateThisType();
+    }
+}
+
+void Invoke::ReplaceOperand(size_t idx, Value* newOperand)
+{
+    Expression::ReplaceOperand(idx, newOperand);
+    if (idx == 0) {
+        UpdateThisType();
+    }
+}
+
 std::string Invoke::ToString([[maybe_unused]] size_t indent) const
 {
     std::stringstream ss;
@@ -830,10 +982,9 @@ std::string Invoke::ToString([[maybe_unused]] size_t indent) const
     ss << ThisTypeToString(thisType).AddDelimiterOrNot(", ").Str();
     ss << GetMethodName();
     ss << InstTypeArgsToString(instantiatedTypeArgs) << ": ";
-    // Method type: the return type is not sure.
-    ss << ParamTypesToString(*GetMethodType());
-    ss << StringWrapper(", ").AppendOrClear(ExprOperandsToString(GetArgs())).Str();
-    ss << ")(offset: " << virMethodCtx.offset << ")";
+    ss << GetMethodType()->ToString() << ", ";
+    ss << ExprOperandsToString(GetArgs());
+    ss << ")";
     ss << CommentToString();
     return ss.str();
 }
@@ -866,11 +1017,10 @@ std::string InvokeStatic::ToString([[maybe_unused]] size_t indent) const
     ss << ThisTypeToString(thisType).AddDelimiterOrNot(", ").Str();
     ss << GetMethodName();
     ss << InstTypeArgsToString(instantiatedTypeArgs) << ": ";
-    // Method type: the return type is not sure.
-    ss << ParamTypesToString(*GetMethodType()) << ", ";
+    ss << GetMethodType()->ToString() << ", ";
     ss << GetRTTIValue()->GetIdentifier();
     ss << StringWrapper(", ").AppendOrClear(ExprOperandsToString(GetArgs())).Str();
-    ss << ")(offset: " << virMethodCtx.offset << ")";
+    ss << ")";
     ss << CommentToString();
     return ss.str();
 }
@@ -1155,6 +1305,44 @@ std::string Field::ToString([[maybe_unused]] size_t indent) const
     return ss.str();
 }
 
+// Field
+FieldByName::FieldByName(Value* val, const std::vector<std::string>& names, Block* parent)
+    : Expression(ExprKind::FIELD_BY_NAME, {val}, {}, parent), names(names)
+{
+}
+
+Value* FieldByName::GetBase() const
+{
+    return operands[0];
+}
+
+const std::vector<std::string>& FieldByName::GetNames() const
+{
+    return names;
+}
+
+std::string FieldByName::ToString([[maybe_unused]] size_t indent) const
+{
+    std::stringstream ss;
+    ss << GetExprKindName();
+    ss << "(";
+    ss << GetBase()->GetIdentifier();
+    for (const auto& p : GetNames()) {
+        ss << ", " << p;
+    }
+    ss << ")";
+    ss << CommentToString();
+    return ss.str();
+}
+
+FieldByName* FieldByName::Clone(CHIRBuilder& builder, Block& parent) const
+{
+    auto newNode = builder.CreateExpression<FieldByName>(result->GetType(), GetBase(), GetNames(), &parent);
+    parent.AppendExpression(newNode);
+    newNode->GetResult()->AppendAttributeInfo(result->GetAttributeInfo());
+    return newNode;
+}
+
 // RawArrayAllocate
 RawArrayAllocate::RawArrayAllocate(Type* eleTy, Value* size, Block* parent)
     : Expression(ExprKind::RAW_ARRAY_ALLOCATE, {size}, {}, parent), elementType(eleTy)
@@ -1163,6 +1351,7 @@ RawArrayAllocate::RawArrayAllocate(Type* eleTy, Value* size, Block* parent)
 
 Value* RawArrayAllocate::GetSize() const
 {
+    CJC_ASSERT(!operands.empty());
     return operands[0];
 }
 
@@ -1201,6 +1390,7 @@ Value* RawArrayLiteralInit::GetRawArray() const
 
 size_t RawArrayLiteralInit::GetSize() const
 {
+    CJC_ASSERT(operands.size() > 0);
     return operands.size() - 1;
 }
 

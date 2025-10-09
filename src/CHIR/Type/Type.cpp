@@ -226,6 +226,13 @@ const std::vector<ExtendDef*>& Type::GetExtends(CHIRBuilder* builder) const
 #endif
 }
 
+std::vector<ClassType*> Type::GetSuperTypesRecusively([[maybe_unused]] CHIRBuilder& builder,
+    [[maybe_unused]] std::set<std::pair<const Type*, const Type*>>* visited)
+{
+    CJC_ABORT();
+    return std::vector<ClassType*>{};
+}
+
 IntType::IntType(TypeKind kind) : NumericType(kind)
 {
     CJC_ASSERT(kind >= TYPE_INT8 && kind <= TYPE_UINT_NATIVE);
@@ -286,16 +293,17 @@ CustomTypeDef* CustomType::GetCustomTypeDef() const
     return def;
 }
 
-std::vector<ClassType*> CustomType::GetSuperTypesRecusively(CHIRBuilder& builder)
+std::vector<ClassType*> CustomType::GetSuperTypesRecusively(CHIRBuilder& builder,
+    std::set<std::pair<const Type*, const Type*>>* visited)
 {
     std::vector<ClassType*> inheritanceList;
     for (auto interface : GetImplementedInterfaceTys(&builder)) {
-        GetAllInstantiatedParentType(*interface, builder, inheritanceList);
+        GetAllInstantiatedParentType(*interface, builder, inheritanceList, visited);
     }
     if (auto classTy = DynamicCast<ClassType*>(this)) {
         auto superClass = classTy->GetSuperClassTy(&builder);
         if (superClass != nullptr) {
-            GetAllInstantiatedParentType(*superClass, builder, inheritanceList);
+            GetAllInstantiatedParentType(*superClass, builder, inheritanceList, visited);
         }
     }
     return inheritanceList;
@@ -806,11 +814,12 @@ std::vector<VTableSearchRes> CustomType::GetFuncIndexInVTable(
     return result;
 }
 
-std::vector<ClassType*> CustomType::CalculateExtendImplementedInterfaceTys(CHIRBuilder& builder) const
+std::vector<ClassType*> CustomType::CalculateExtendImplementedInterfaceTys(CHIRBuilder& builder,
+    std::set<std::pair<const Type*, const Type*>>* visited) const
 {
     std::vector<ClassType*> allParents;
     for (auto extendDef : def->GetExtends()) {
-        if (!IsEqualOrInstantiatedTypeOf(*extendDef->GetExtendedType(), builder)) {
+        if (!IsEqualOrInstantiatedTypeOf(*extendDef->GetExtendedType(), builder, visited)) {
             continue;
         }
         auto res = extendDef->GetExtendedType()->CalculateGenericTyMapping(*this);
@@ -823,13 +832,14 @@ std::vector<ClassType*> CustomType::CalculateExtendImplementedInterfaceTys(CHIRB
     return allParents;
 }
 
-std::vector<ClassType*> CustomType::CalculateImplementedInterfaceTys(CHIRBuilder& builder)
+std::vector<ClassType*> CustomType::CalculateImplementedInterfaceTys(CHIRBuilder& builder,
+    std::set<std::pair<const Type*, const Type*>>* visited)
 {
     auto genericTypes = def->GetGenericTypeParams();
     if (!genericTypes.empty()) {
         CJC_ASSERT(argTys.size() == genericTypes.size());
     }
-    auto instSuperInterfaceTys = CalculateExtendImplementedInterfaceTys(builder);
+    auto instSuperInterfaceTys = CalculateExtendImplementedInterfaceTys(builder, visited);
     std::unordered_map<const GenericType*, Type*> replaceTable;
     for (size_t i = 0; i < genericTypes.size(); ++i) {
         replaceTable.emplace(genericTypes[i], argTys[i]);
@@ -841,14 +851,15 @@ std::vector<ClassType*> CustomType::CalculateImplementedInterfaceTys(CHIRBuilder
     return instSuperInterfaceTys;
 }
 
-std::vector<ClassType*> CustomType::GetImplementedInterfaceTys(CHIRBuilder* builder)
+std::vector<ClassType*> CustomType::GetImplementedInterfaceTys(CHIRBuilder* builder,
+    std::set<std::pair<const Type*, const Type*>>* visited)
 {
-    std::unique_lock<std::mutex> lock(setSuperInterfaceMtx);
+    std::unique_lock<std::recursive_mutex> lock(setSuperInterfaceMtx);
     if (hasSetSuperInterface) {
         return implementedInterfaceTys;
     } else {
         CJC_NULLPTR_CHECK(builder);
-        implementedInterfaceTys = CalculateImplementedInterfaceTys(*builder);
+        implementedInterfaceTys = CalculateImplementedInterfaceTys(*builder, visited);
         hasSetSuperInterface = true;
         return implementedInterfaceTys;
     }
@@ -1109,7 +1120,7 @@ std::pair<Type*, bool> GenericType::GetInstMemberTypeByPathCheckingReadOnly(
             if (concretType == nullptr) {
                 concretType = upperBound;
             } else {
-                if (upperBoundCustomType->IsEqualOrSubTypeOf(*concretType, builder)) {
+                if (upperBoundCustomType->IsEqualOrSubTypeOf(*concretType->StripAllRefs(), builder)) {
                     concretType = upperBound;
                 }
             }
@@ -1166,6 +1177,14 @@ Type* GetFieldOfType(Type& baseTy, uint64_t index, CHIRBuilder& builder)
         auto memberTys = classTy.GetInstantiatedMemberTys(builder);
         if (index < memberTys.size()) {
             type = memberTys[index];
+        }
+    } else if (baseTy.IsEnum()) {
+        if (index == 0) {
+            if (GetSelectorType(*StaticCast<EnumType&>(baseTy).GetEnumDef()) == Type::TypeKind::TYPE_BOOLEAN) {
+                type = builder.GetBoolTy();
+            } else {
+                type = builder.GetUInt32Ty();
+            }
         }
     } else if (baseTy.IsRawArray()) {
         type = StaticCast<RawArrayType&>(baseTy).GetElementType();
@@ -1228,15 +1247,16 @@ void Type::VisitTypeRecursively(const std::function<bool(const Type&)>& visitor)
     }
 }
 
-std::vector<ClassType*> BuiltinType::GetSuperTypesRecusively(CHIRBuilder& builder) const
+std::vector<ClassType*> BuiltinType::GetSuperTypesRecusively(CHIRBuilder& builder,
+    std::set<std::pair<const Type*, const Type*>>* visited)
 {
     std::vector<ClassType*> inheritanceList;
     for (auto extendDef : GetExtends(&builder)) {
-        if (!IsEqualOrInstantiatedTypeOf(*extendDef->GetExtendedType(), builder)) {
+        if (!IsEqualOrInstantiatedTypeOf(*extendDef->GetExtendedType(), builder, visited)) {
             continue;
         }
         for (auto interface : extendDef->GetImplementedInterfaceTys()) {
-            GetAllInstantiatedParentType(*interface, builder, inheritanceList);
+            GetAllInstantiatedParentType(*interface, builder, inheritanceList, visited);
         }
     }
     return inheritanceList;
@@ -1265,17 +1285,6 @@ std::vector<FuncBase*> BuiltinType::GetExtendMethods() const
 std::vector<FuncBase*> BuiltinType::GetDeclareAndExtendMethods([[maybe_unused]] CHIRBuilder& builder) const
 {
     return GetExtendMethods();
-}
-
-bool GenericType::SatisfyGenericConstraints(Type& type, CHIRBuilder& builder) const
-{
-    std::unordered_map<const GenericType*, Type*> replaceTable{{this, &type}};
-    for (auto upperBound : upperBounds) {
-        if (!type.IsEqualOrSubTypeOf(*ReplaceRawGenericArgType(*upperBound, replaceTable, builder), builder)) {
-            return false;
-        }
-    }
-    return true;
 }
 
 static bool TupleTypeIsEqualOrSub(const TupleType& subType, const TupleType& parentType, CHIRBuilder& builder)
@@ -1314,6 +1323,31 @@ static bool FuncTypeIsEqualOrSub(const FuncType& subType, const FuncType& parent
     return subType.GetReturnType()->IsEqualOrSubTypeOf(*parentType.GetReturnType(), builder);
 }
 
+static const ClassType* GetAutoEnvGenericBase(ClassType& type, CHIRBuilder& builder)
+{
+    CJC_ASSERT(type.IsAutoEnv());
+    if (type.IsAutoEnvGenericBase()) {
+        return &type;
+    }
+    return GetAutoEnvGenericBase(*type.GetSuperClassTy(&builder), builder);
+}
+
+static FuncType* ConvertClosureTypeToFuncType(ClassType& closureType, CHIRBuilder& builder)
+{
+    auto typeArgs = GetAutoEnvGenericBase(closureType, builder)->GetGenericArgs();
+    CJC_ASSERT(!typeArgs.empty());
+    auto retType = typeArgs.back();
+    typeArgs.pop_back();
+    return builder.GetType<FuncType>(typeArgs, retType);
+}
+
+static bool ClosureTypeIsEqualOrSub(ClassType& subType, ClassType& parentType, CHIRBuilder& builder)
+{
+    auto subFuncType = ConvertClosureTypeToFuncType(subType, builder);
+    auto parentFuncType = ConvertClosureTypeToFuncType(parentType, builder);
+    return FuncTypeIsEqualOrSub(*subFuncType, *parentFuncType, builder);
+}
+
 bool Type::SatisfyCType() const
 {
     // same logical with `AST::Ty::IsMetCType`
@@ -1324,16 +1358,46 @@ bool Type::SatisfyCType() const
     return builtinCType || isCStruct || IsCFunc() || varrayMeetCondition;
 }
 
-bool Type::IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder) const
+bool Type::IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder,
+    std::set<std::pair<const Type*, const Type*>>* visited) const
 {
+    /**
+     *  there may be an unresolvable inheritance relationship:
+     *  interface I<T> {}
+     *  abstract class C<T> {}
+     *  extend<T> C<T> <: I<T> where T <: I<T> {}
+     *  class D <: C<D> {}
+     *  main() {0}
+     *
+     *  if you want to know if class D is sub type of I<D>, that will be a disaster, because
+     *  parent type of class D is C<D>, and in `extend<T> C<T> <: I<T>`, interface I is class C's parent type,
+     *  so you only need to know if `C<D> <: I<D>` satisfy generic constraints which `T <: I<T>`, then you need to
+     *  compute if the `T` can be class D, that means you have to know if class D is sub type of I<D>, tail bites head.
+     *  so we need to check if the sub type and parent type have been visited, if visited, we don't think they have a
+     *  parent-child relationship and Sema does the same
+     */
+    std::set<std::pair<const Type*, const Type*>> empty;
+    visited = visited ? visited : &empty;
+    if (!visited->emplace(this, &parentType).second) {
+        return false;
+    }
+    if (this->IsRef() && parentType.IsRef()) {
+        auto subBaseType = StaticCast<const RefType*>(this)->GetBaseType();
+        auto parentBaseType = StaticCast<const RefType&>(parentType).GetBaseType();
+        return subBaseType->IsEqualOrSubTypeOf(*parentBaseType, builder, visited);
+    }
     auto thisDeref = this->StripAllRefs();
     auto parentDeref = parentType.StripAllRefs();
+    // we can't think class-A and class-A& is equal
+    if ((this->IsRef() || parentType.IsRef()) && (thisDeref == parentDeref)) {
+        return false;
+    }
     // Nothing type is all types' sub type, Any type is all types' parent type
     if (thisDeref == parentDeref || thisDeref->IsNothing() || parentDeref->IsAny()) {
         return true;
     }
     // invalid type shouldn't be compared, just return false
-    // if parent type is generic type, that means it can be any type
+    // if parent type is generic type, that means it can be any type, even if it has upper bounds
     if (thisDeref->IsInvalid() || parentDeref->IsInvalid() || parentDeref->IsGeneric()) {
         return false;
     }
@@ -1342,7 +1406,7 @@ bool Type::IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder) cons
     }
     if (thisDeref->IsGeneric()) {
         for (auto upperBound : StaticCast<GenericType*>(thisDeref)->GetUpperBounds()) {
-            if (!upperBound->IsEqualOrSubTypeOf(*parentDeref, builder)) {
+            if (!upperBound->StripAllRefs()->IsEqualOrSubTypeOf(*parentDeref, builder, visited)) {
                 return false;
             }
         }
@@ -1362,30 +1426,54 @@ bool Type::IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder) cons
         return FuncTypeIsEqualOrSub(
             *StaticCast<FuncType*>(thisDeref), *StaticCast<FuncType*>(parentDeref), builder);
     }
+    if (thisDeref->IsAutoEnv()) {
+        if (!parentDeref->IsAutoEnv()) {
+            return false;
+        }
+        return ClosureTypeIsEqualOrSub(
+            *StaticCast<ClassType*>(thisDeref), *StaticCast<ClassType*>(parentDeref), builder);
+    }
     std::vector<ClassType*> allParents;
     if (auto builtinType = DynamicCast<BuiltinType*>(thisDeref)) {
-        allParents = builtinType->GetSuperTypesRecusively(builder);
+        allParents = builtinType->GetSuperTypesRecusively(builder, visited);
     } else if (auto customType = DynamicCast<CustomType*>(thisDeref)) {
-        allParents = customType->GetSuperTypesRecusively(builder);
+        allParents = customType->GetSuperTypesRecusively(builder, visited);
     }
     for (auto pTy : allParents) {
         if (pTy == parentDeref) {
             return true;
         } else if (auto res = parentDeref->CalculateGenericTyMapping(*pTy); res.first) {
+            // we need to remove this `if` after new ir checker merged
             return true;
         }
     }
     return false;
 }
 
-bool Type::IsEqualOrInstantiatedTypeOf(const Type& genericRelatedType, CHIRBuilder& builder) const
+bool Type::IsEqualOrInstantiatedTypeOf(const Type& genericRelatedType, CHIRBuilder& builder,
+    std::set<std::pair<const Type*, const Type*>>* visited) const
 {
+    if (this == &genericRelatedType) {
+        return true;
+    }
     auto res = genericRelatedType.CalculateGenericTyMapping(*this);
     if (!res.first) {
         return false;
     }
     for (auto& it : res.second) {
-        if (!it.first->SatisfyGenericConstraints(*it.second, builder)) {
+        if (!it.second->SatisfyGenericConstraints(*it.first, builder, res.second, visited)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Type::SatisfyGenericConstraints(const GenericType& type, CHIRBuilder& builder,
+    const std::unordered_map<const GenericType*, Type*>& instMap,
+    std::set<std::pair<const Type*, const Type*>>* visited) const
+{
+    for (auto upperBound : type.GetUpperBounds()) {
+        if (!IsEqualOrSubTypeOf(*ReplaceRawGenericArgType(*upperBound, instMap, builder), builder, visited)) {
             return false;
         }
     }

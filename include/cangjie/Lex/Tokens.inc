@@ -167,11 +167,15 @@ TOKEN(UNIT_LITERAL, "unit_literal", "", 0) // Will not be produced from Lexer.
 TOKEN(DOLLAR_IDENTIFIER, "dollar_identifier", "", 0)
 TOKEN(ANNOTATION, "annotation", "", 0)
 TOKEN(AT_EXCL, "at_exclamation", "@!", 0)
+TOKEN(COMMON, "common", "common", 0)
+TOKEN(PLATFORM, "platform", "platform", 0)
 EXPERIMENTAL_TOKEN(PERFORM, "perform", "perform", 0)
 EXPERIMENTAL_TOKEN(RESUME, "resume", "resume", 0)
 EXPERIMENTAL_TOKEN(THROWING, "throwing", "throwing", 0)
 EXPERIMENTAL_TOKEN(HANDLE, "handle", "handle", 0)
 TOKEN(ILLEGAL, "illegal", "", 0)
+TOKEN(DOUBLE_COLON, "double_colon", "::", 0)
+TOKEN(FEATURES, "features", "features", 0)
 #ifdef EXPERIMENTAL_TOKEN_DEFAULT
 #undef EXPERIMENTAL_TOKEN
 #undef EXPERIMENTAL_TOKEN_DEFAULT

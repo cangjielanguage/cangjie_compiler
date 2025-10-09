@@ -72,6 +72,9 @@ void TypeChecker::TypeCheckerImpl::CheckAccessLevelValidity(Package& package)
             if (decl->TestAttr(Attribute::PRIVATE)) {
                 continue;
             }
+            if (decl->TestAttr(Attribute::FROM_COMMON_PART)) {
+                continue;
+            }
             CheckNonPrivateDeclAccessLevelValidity(*decl);
         }
     }
@@ -129,7 +132,7 @@ void TypeChecker::TypeCheckerImpl::CheckNominalDeclAccessLevelValidity(const Inh
     DiagLowerAccessLevelTypesUse(diag, id, limitedDecls);
     for (auto& it : id.GetMemberDeclPtrs()) {
         CJC_NULLPTR_CHECK(it);
-        if (!it->TestAttr(Attribute::PRIVATE)) {
+        if (!(it->TestAttr(Attribute::PRIVATE)) && !(it->TestAttr(Attribute::FROM_COMMON_PART))) {
             CheckNonPrivateDeclAccessLevelValidity(*it);
         }
     }
@@ -152,6 +155,9 @@ void TypeChecker::TypeCheckerImpl::CheckFuncAccessLevelValidity(const FuncDecl& 
         }
     }
     for (auto& param : (*fd.funcBody->paramLists[0]).params) {
+        if (fd.TestAttr(Attribute::FROM_COMMON_PART)) {
+            continue;
+        }
         CJC_ASSERT(param && param->type);
         if (auto [inDecl, accessible] = IsAccessible(param->ty, GetAccessLevel(fd)); !accessible) {
             (void)limitedDecls.emplace_back(*param->type, *inDecl);

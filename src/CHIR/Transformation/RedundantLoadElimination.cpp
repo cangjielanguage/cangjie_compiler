@@ -50,6 +50,9 @@ static void ModifyApplyCalleeInfo(const LocalVar& loadResult, Value& storeValue)
 
 void RedundantLoadElimination::RunOnFunc(const Ptr<const Func>& func, bool isDebug) const
 {
+    if (func->TestAttr(Attribute::SKIP_ANALYSIS)) {
+        return;
+    }
     auto analysis = std::make_unique<ReachingDefinitionAnalysis>(func);
     auto engine = Engine<ReachingDefinitionDomain>(func, std::move(analysis));
     auto result = engine.IterateToFixpoint();

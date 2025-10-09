@@ -252,6 +252,7 @@ static const std::string CJ_GET_CHILD_MESSAGES = "CJ_GetChildMessages";
 static const std::string CJ_CHECK_ADD_SPACE = "CJ_CheckAddSpace";
 static const std::string CJ_AST_DIAGREPORT = "CJ_AST_DiagReport";
 
+static const std::string BLACK_BOX_NAME = "blackBox";
 // ============================ cjnative only start ==============================
 static const std::string CROSS_ACCESS_BARRIER_NAME = "CrossAccessBarrier";
 static const std::string CREATE_EXPORT_HANDLE_NAME = "CreateExportHandle";
@@ -329,6 +330,7 @@ enum IntrinsicKind : uint16_t {
     GET_GC_FREED_SIZE,
     START_CJ_CPU_PROFILING,
     STOP_CJ_CPU_PROFILING,
+    BLACK_BOX,
     GET_MAX_HEAP_SIZE,
     GET_ALLOCATE_HEAP_SIZE,
     GET_REAL_HEAP_SIZE,
@@ -778,6 +780,7 @@ static const std::unordered_map<std::string, IntrinsicKind> runtimeIntrinsicMap 
     {GET_GC_FREED_SIZE_NAME, GET_GC_FREED_SIZE},
     {START_CJ_CPU_PROFILING_NAME, START_CJ_CPU_PROFILING},
     {STOP_CJ_CPU_PROFILING_NAME, STOP_CJ_CPU_PROFILING},
+    {BLACK_BOX_NAME, BLACK_BOX},
     {GET_MAX_HEAP_SIZE_NAME, GET_MAX_HEAP_SIZE},
     {GET_ALLOCATE_HEAP_SIZE_NAME, GET_ALLOCATE_HEAP_SIZE},
     {GET_REAL_HEAP_SIZE_NAME, GET_REAL_HEAP_SIZE},

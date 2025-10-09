@@ -9,9 +9,6 @@
 
 #include <fstream>
 
-#include "cangjie/CHIR/AST2CHIR/GenerateVTable/UpdateOperatorVTable.h"
-#include "cangjie/CHIR/AST2CHIR/GenerateVTable/VTableGenerator.h"
-#include "cangjie/CHIR/AST2CHIR/GenerateVTable/WrapVirtualFunc.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/CHIR/CHIRCasting.h"
@@ -634,6 +631,10 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
         chirFunc.SetParamDftValHostFunc(*VirtualCast<FuncBase*>(globalCache.Get(*astFunc.ownerFunc)));
     }
     chirFunc.SetFastNative(astFunc.isFastNative);
+
+    if (astFunc.TestAttr(AST::Attribute::UNSAFE)) {
+        chirFunc.EnableAttr(Attribute::UNSAFE);
+    }
 }
 
 void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
@@ -649,6 +650,22 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
     // when the callee of callExpr is abstract func, will create a `Invoke` node, so we don't need to put abstract
     // func into the `globalCache`,
     if (funcDecl.TestAttr(AST::Attribute::ABSTRACT)) {
+        return;
+    }
+    // Try get deserialized func.
+    Func* fn = TryGetDeserialized<Func>(funcDecl);
+    bool isPlatform = funcDecl.TestAttr(AST::Attribute::PLATFORM);
+    if (fn) {
+        if (isPlatform) {
+            ResetPlatformFunc(funcDecl, *fn);
+        }
+        globalCache.Set(funcDecl, *fn);
+        if (implicitDecls.count(&funcDecl) != 0) {
+            implicitFuncs.emplace(fn->GetIdentifierWithoutPrefix(), fn);
+        }
+        if (IsSrcCodeImportedGlobalDecl(funcDecl, opts)) {
+            srcCodeImportedFuncs.emplace(fn);
+        }
         return;
     }
     auto fnTy = chirType.TranslateType(*funcDecl.ty);
@@ -671,28 +688,25 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
     }
     auto srcCodeName = funcDecl.identifier;
     auto rawMangledName = funcDecl.rawMangleName;
-    Func* fn = builder.CreateFunc(loc, funcTy, mangledName, srcCodeName, rawMangledName, pkgName, genericParamTy);
+    fn = builder.CreateFunc(loc, funcTy, mangledName, srcCodeName, rawMangledName, pkgName, genericParamTy);
+    // This is the logic that applied when compiling common part of package
+    // Ideally such logic should be be visually discernible
+    if (funcDecl.TestAttr(AST::Attribute::COMMON)) {
+        fn->EnableAttr(Attribute::COMMON);
+        if (outputCHIR && !funcDecl.TestAttr(AST::Attribute::COMMON_WITH_DEFAULT)) {
+            fn->EnableAttr(Attribute::SKIP_ANALYSIS);
+        }
+    }
     BlockGroup* body = builder.CreateBlockGroup(*fn);
     fn->InitBody(*body);
 
     CJC_ASSERT(fn);
     SetFuncAttributeAndLinkageType(funcDecl, *fn);
-    if (IsSrcCodeImportedGlobalDecl(funcDecl, opts)) {
+    // for cjmp, want to serializer whole decl
+    if (IsSrcCodeImportedGlobalDecl(funcDecl, opts) && opts.outputMode != GlobalOptions::OutputMode::CHIR) {
         srcCodeImportedFuncs.emplace(fn);
     }
-    std::vector<DebugLocation> paramLoc;
-    if (IsInstanceMember(funcDecl)) {
-        paramLoc.emplace_back(INVALID_LOCATION);
-    }
-    for (auto& astParam : funcDecl.funcBody->paramLists[0]->params) {
-        paramLoc.emplace_back(TranslateLocationWithoutScope(builder.GetChirContext(), astParam->begin, astParam->end));
-    }
-    auto paramTypes = funcTy->GetParamTypes();
-    CJC_ASSERT(paramTypes.size() == paramLoc.size());
-    for (size_t i = 0; i < paramTypes.size(); ++i) {
-        builder.CreateParameter(paramTypes[i], paramLoc[i], *fn);
-    }
-
+    TranslateFuncParams(funcDecl, *fn);
     if (implicitDecls.count(&funcDecl) != 0) {
         implicitFuncs.emplace(fn->GetIdentifierWithoutPrefix(), fn);
     }
@@ -749,13 +763,22 @@ void AST2CHIR::CreatePseudoImportedFuncSignatureAndSetGlobalCache(const AST::Fun
 
 void AST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
 {
-    if (funcDecl.TestAttr(AST::Attribute::GENERIC)) {
+    ImportedFunc* fn = TryGetDeserialized<ImportedFunc>(funcDecl);
+    if (fn) {
+        globalCache.Set(funcDecl, *fn);
+        if (implicitDecls.count(&funcDecl) != 0) {
+            implicitFuncs.emplace(fn->GetIdentifierWithoutPrefix(), fn);
+        }
+        return;
+    }
+    bool isGeneric = funcDecl.TestAttr(AST::Attribute::GENERIC);
+    if (isGeneric) {
         TranslateFunctionGenericUpperBounds(chirType, funcDecl);
     }
     auto fnTy = chirType.TranslateType(*funcDecl.ty);
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     auto genericParamTy = GetGenericParamType(funcDecl, chirType);
-    auto fn = builder.CreateImportedVarOrFunc<ImportedFunc>(fnTy, funcDecl.mangledName, funcDecl.identifier,
+    fn = builder.CreateImportedVarOrFunc<ImportedFunc>(fnTy, funcDecl.mangledName, funcDecl.identifier,
         funcDecl.rawMangleName, funcDecl.fullPackageName, genericParamTy);
     CJC_NULLPTR_CHECK(fn);
     auto loc = TranslateLocationWithoutScope(builder.GetChirContext(), funcDecl.begin, funcDecl.end);
@@ -784,9 +807,14 @@ void AST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl&
 
 void AST2CHIR::CreateImportedValueSignatureAndSetGlobalCache(const AST::VarDecl& varDecl)
 {
+    ImportedVar* var = TryGetDeserialized<ImportedVar>(varDecl);
+    if (var) {
+        globalCache.Set(varDecl, *var);
+        return;
+    }
     auto varType = chirType.TranslateType(*varDecl.ty);
     auto refTy = builder.GetType<RefType>(varType);
-    auto var = builder.CreateImportedVarOrFunc<ImportedVar>(refTy, varDecl.mangledName, varDecl.identifier,
+    var = builder.CreateImportedVarOrFunc<ImportedVar>(refTy, varDecl.mangledName, varDecl.identifier,
         varDecl.rawMangleName, varDecl.fullPackageName);
     CJC_NULLPTR_CHECK(var);
     var->AppendAttributeInfo(BuildAttr(varDecl.GetAttrs()));
@@ -799,14 +827,22 @@ void AST2CHIR::CreateImportedValueSignatureAndSetGlobalCache(const AST::VarDecl&
 
 void AST2CHIR::CreateAndCacheGlobalVar(const AST::VarDecl& decl, bool isLocalConst)
 {
-    auto ty = builder.GetType<RefType>(chirType.TranslateType(*decl.ty));
+    if (auto gv = TryGetDeserialized<Value>(decl); gv) {
+        globalCache.Set(decl, *gv);
+        // for cjmp, want to serializer whole decl, it is a temp solution
+        if (IsSrcCodeImportedGlobalDecl(decl, opts)) {
+            srcCodeImportedVars.emplace(VirtualCast<GlobalVar*>(gv));
+        }
+        return;
+    }
     auto loc = TranslateLocationWithoutScope(builder.GetChirContext(), decl.begin, decl.end);
-    auto warnPos = GetVarLoc(builder.GetChirContext(), decl);
-    Value* gv = nullptr;
     auto mangledName = decl.mangledName;
     auto srcCodeName = decl.identifier;
     auto rawMangledName = decl.rawMangleName;
     auto packageName = decl.fullPackageName;
+    auto ty = builder.GetType<RefType>(chirType.TranslateType(*decl.ty));
+    auto warnPos = GetVarLoc(builder.GetChirContext(), decl);
+    Value* gv = nullptr;
     if (kind == IncreKind::INCR && !decl.toBeCompiled && !IsSrcCodeImportedGlobalDecl(decl, opts)) {
         gv = builder.CreateImportedVarOrFunc<ImportedVar>(ty, mangledName, srcCodeName, rawMangledName, packageName);
     } else {
@@ -825,8 +861,11 @@ void AST2CHIR::CreateAndCacheGlobalVar(const AST::VarDecl& decl, bool isLocalCon
     if (decl.IsConst()) {
         gv->EnableAttr(Attribute::CONST);
     }
-    if (IsSrcCodeImportedGlobalDecl(decl, opts)) {
+    if (IsSrcCodeImportedGlobalDecl(decl, opts) && opts.outputMode != GlobalOptions::OutputMode::CHIR) {
         srcCodeImportedVars.emplace(VirtualCast<GlobalVar*>(gv));
+    }
+    if (decl.TestAttr(AST::Attribute::COMMON)) {
+        gv->EnableAttr(Attribute::COMMON);
     }
     globalCache.Set(decl, *gv);
 }
@@ -959,6 +998,12 @@ static void SetCustomTypeDefAttr(CustomTypeDef& def, const AST::Decl& decl)
             structDef->SetCStruct(true);
         }
     }
+
+    if (Interop::Java::IsImpl(decl)) {
+        def.EnableAttr(Attribute::JAVA_IMPL);
+    } else if (Interop::Java::IsMirror(decl)) {
+        def.EnableAttr(Attribute::JAVA_MIRROR);
+    }
 }
 
 void AST2CHIR::CreateCustomTypeDef(const AST::Decl& decl, bool isImported)
@@ -972,28 +1017,35 @@ void AST2CHIR::CreateCustomTypeDef(const AST::Decl& decl, bool isImported)
     AST::Decl* uniqueDecl = nullptr;
     switch (decl.astKind) {
         case AST::ASTKind::CLASS_DECL:
-            customTypeDef = builder.CreateClass(loc,
-                identifier, mangledName, pkgName, true, isImported);
-            uniqueDecl = StaticCast<AST::ClassLikeTy*>(decl.ty)->commonDecl;
-            break;
         case AST::ASTKind::INTERFACE_DECL:
-            customTypeDef = builder.CreateClass(loc,
-                identifier, mangledName, pkgName, false, isImported);
+            customTypeDef = TryGetDeserialized<ClassDef>(decl);
+            if (customTypeDef == nullptr) {
+                customTypeDef = builder.CreateClass(
+                    loc, identifier, mangledName, pkgName, decl.astKind == AST::ASTKind::CLASS_DECL, isImported);
+            }
             uniqueDecl = StaticCast<AST::ClassLikeTy*>(decl.ty)->commonDecl;
             break;
         case AST::ASTKind::STRUCT_DECL:
-            customTypeDef =
-                builder.CreateStruct(loc, identifier, mangledName, pkgName, isImported);
+            customTypeDef = TryGetDeserialized<StructDef>(decl);
+            if (customTypeDef == nullptr) {
+                customTypeDef = builder.CreateStruct(loc, identifier, mangledName, pkgName, isImported);
+            }
             uniqueDecl = StaticCast<AST::StructTy*>(decl.ty)->decl;
             break;
         case AST::ASTKind::ENUM_DECL:
-            customTypeDef = builder.CreateEnum(loc, identifier, mangledName, pkgName, isImported,
-                StaticCast<AST::EnumDecl>(decl).hasEllipsis);
+            customTypeDef = TryGetDeserialized<EnumDef>(decl);
+            if (customTypeDef == nullptr) {
+                customTypeDef = builder.CreateEnum(
+                    loc, identifier, mangledName, pkgName, isImported, StaticCast<AST::EnumDecl>(decl).hasEllipsis);
+            }
             uniqueDecl = StaticCast<AST::EnumTy*>(decl.ty)->decl;
             break;
         case AST::ASTKind::EXTEND_DECL: {
-            auto gts = GetGenericParamType(decl, chirType);
-            customTypeDef = builder.CreateExtend(loc, mangledName, pkgName, isImported, gts);
+            customTypeDef = TryGetDeserialized<ExtendDef>(decl);
+            if (customTypeDef == nullptr) {
+                auto gts = GetGenericParamType(decl, chirType);
+                customTypeDef = builder.CreateExtend(loc, mangledName, pkgName, isImported, gts);
+            }
             break;
         }
         default:
@@ -1005,10 +1057,19 @@ void AST2CHIR::CreateCustomTypeDef(const AST::Decl& decl, bool isImported)
         !decl.toBeCompiled) {
         customTypeDef->EnableAttr(Attribute::NON_RECOMPILE);
     }
-    SetCustomTypeDefAttr(*customTypeDef, decl);
+    if (!customTypeDef->TestAttr(Attribute::DESERIALIZED)) {
+        SetCustomTypeDefAttr(*customTypeDef, decl);
+    }
     chirType.SetGlobalNominalCache(decl, *customTypeDef);
     if (uniqueDecl != nullptr && uniqueDecl != &decl) {
         chirType.SetGlobalNominalCache(*uniqueDecl, *customTypeDef);
+    }
+    if (decl.TestAttr(AST::Attribute::COMMON) && !decl.TestAttr(AST::Attribute::FROM_COMMON_PART)) {
+        customTypeDef->EnableAttr(Attribute::COMMON);
+    }
+    if (decl.TestAttr(AST::Attribute::PLATFORM)) {
+        customTypeDef->EnableAttr(Attribute::PLATFORM);
+        customTypeDef->DisableAttr(Attribute::COMMON);
     }
 }
 
@@ -1178,11 +1239,7 @@ void AST2CHIR::SetExtendInfo()
             continue;
         }
         if (auto builtinType = DynamicCast<BuiltinType*>(extendDef->GetExtendedType())) {
-            if (builtinType->IsCPointer()) {
-                builder.GetType<CPointerType>(builder.GetUnitTy())->AddExtend(*extendDef);
-            } else {
-                builtinType->AddExtend(*extendDef);
-            }
+            GetBuiltinTypeWithVTable(*builtinType, builder)->AddExtend(*extendDef);
         } else {
             auto customType = StaticCast<CustomType*>(extendDef->GetExtendedType());
             auto customTypeDef = customType->GetCustomTypeDef();
@@ -1193,43 +1250,42 @@ void AST2CHIR::SetExtendInfo()
     }
 }
 
-void AST2CHIR::SetVTable()
+namespace {
+/**
+ * Removes redundant deserialized extends, preserving only the most specific platform implementation.
+ * Example: Compiling linux-x86 target:
+ *   // common.cj (common definitions)
+ *   common extend Int64 {}
+ *   common extend Int64 {}
+ *
+ *   // linux.cj (platform-specific)
+ *   platform extend Int64 {}
+ *
+ *   // linux-x86.cj (architecture-specific)
+ *   platform extend Int64 {}
+ *
+ *  Produces after deserialization:
+ *   4 extends (2 common, 1 platform from linux.cj, 1 platform from linux-x86.cj)
+ *
+ *  This function removes the 3 deserialized extends, keeping only linux-x86.cj's version.
+ *
+ */
+void RemoveUnusedCJMPExtends(CHIR::Package& chirPkg, bool compilePlatform)
 {
-    Utils::ProfileRecorder::Start("TranslateNominalDecls", "SetVTable");
-    // NOTE: Vtable should be merged after all dependent been translated.
-    auto allCustomTypeDef = package->GetAllCustomTypeDef();
-    auto vtableGenerator = VTableGenerator(builder);
-    for (auto customDef : allCustomTypeDef) {
-        if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
-            continue;
-        }
-        vtableGenerator.GenerateVTable(*customDef);
+    if (!compilePlatform) {
+        return;
     }
-    Utils::ProfileRecorder::Stop("TranslateNominalDecls", "SetVTable");
+    auto extends = chirPkg.GetExtends();
+    auto it = std::remove_if(extends.begin(), extends.end(), [](const ExtendDef* ed) {
+        CJC_NULLPTR_CHECK(ed);
+        return ed->TestAttr(CHIR::Attribute::DESERIALIZED) &&
+            (ed->TestAttr(CHIR::Attribute::COMMON) || ed->TestAttr(CHIR::Attribute::PLATFORM));
+    });
 
-    UpdateOperatorVTable(*package, builder).Update();
-
-    Utils::ProfileRecorder::Start("TranslateNominalDecls", "SetWrapperFunc");
-    bool targetIsWin = opts.target.os == Triple::OSType::WINDOWS;
-    IncreKind tempKind = opts.enIncrementalCompilation ? kind : IncreKind::INVALID;
-    auto wrapper = WrapVirtualFunc(builder, cachedInfo, tempKind, targetIsWin);
-    for (auto customDef : allCustomTypeDef) {
-        if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
-            continue;
-        }
-        wrapper.CheckAndWrap(*customDef);
-    }
-    curVirtFuncWrapDep = wrapper.GetCurVirtFuncWrapDep();
-    delVirtFuncWrapForIncr = wrapper.GetDelVirtFuncWrapForIncr();
-    for (auto customDef : allCustomTypeDef) {
-        if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
-            continue;
-        }
-        Translator::WrapMutFunc(builder, *customDef);
-    }
-    Utils::ProfileRecorder::Stop("TranslateNominalDecls", "SetWrapperFunc");
+    extends.erase(it, extends.end());
+    chirPkg.SetExtends(std::move(extends));
 }
-
+} // namespace
 void AST2CHIR::TranslateNominalDecls(const AST::Package& pkg)
 {
     Utils::ProfileRecorder recorder("TranslateAllDecls", "TranslateNominalDecls");
@@ -1269,22 +1325,120 @@ void AST2CHIR::TranslateNominalDecls(const AST::Package& pkg)
     Utils::ProfileRecorder::Stop("TranslateNominalDecls", "SetGenericFuncMap");
 
     Utils::ProfileRecorder::Start("TranslateNominalDecls", "TranslateDecls");
-    for (auto decl : importedNominalDecls) {
-        Translator::TranslateASTNode(*decl, trans);
-    }
-    for (auto decl : importedGenericInstantiatedNominalDecls) {
-        Translator::TranslateASTNode(*decl, trans);
-    }
-    for (auto decl : nominalDecls) {
-        Translator::TranslateASTNode(*decl, trans);
-    }
-    for (auto decl : genericNominalDecls) {
-        Translator::TranslateASTNode(*decl, trans);
-    }
+    // Translate all nominal decls.
+    TranslateVecDecl(importedNominalDecls, trans);
+    TranslateVecDecl(importedGenericInstantiatedNominalDecls, trans);
+    TranslateVecDecl(nominalDecls, trans);
+    TranslateVecDecl(genericNominalDecls, trans);
+    // Update some info for nominal decls.
     Utils::ProfileRecorder::Stop("TranslateNominalDecls", "TranslateDecls");
-
+    RemoveUnusedCJMPExtends(*package, opts.inputChirFiles.size() == 1);
     SetExtendInfo();
     UpdateExtendParent();
-    SetVTable();
+}
+
+void AST2CHIR::TranslateFuncParams(const AST::FuncDecl& funcDecl, Func& func) const
+{
+    std::vector<DebugLocation> paramLoc;
+    if (IsInstanceMember(funcDecl)) {
+        paramLoc.emplace_back(INVALID_LOCATION);
+    }
+    for (auto& astParam : funcDecl.funcBody->paramLists[0]->params) {
+        paramLoc.emplace_back(TranslateLocationWithoutScope(builder.GetChirContext(), astParam->begin, astParam->end));
+    }
+    auto fnTy = func.GetFuncType();
+    CJC_NULLPTR_CHECK(fnTy);
+    auto paramTypes = fnTy->GetParamTypes();
+    CJC_ASSERT(paramTypes.size() == paramLoc.size());
+    for (size_t i = 0; i < paramTypes.size(); ++i) {
+        builder.CreateParameter(paramTypes[i], paramLoc[i], func);
+    }
+}
+
+void AST2CHIR::TranslateVecDecl(const std::vector<Ptr<const AST::Decl>>& decls, Translator& trans) const
+{
+    for (auto decl : decls) {
+        if (!NeedTranslate(*decl)) {
+            continue;
+        }
+        Translator::TranslateASTNode(*decl, trans);
+    }
+}
+
+// Add methods for CJMP
+// Check whether the decl is deserialized for CJMP.
+bool AST2CHIR::MaybeDeserialized(const AST::Decl& decl) const
+{
+    // When the platform is compiled and decl is from common part or generic instantiated or imported or platform decl.
+    if (mergingPlatform &&
+        decl.TestAnyAttr(AST::Attribute::PLATFORM, AST::Attribute::FROM_COMMON_PART,
+            AST::Attribute::GENERIC_INSTANTIATED, AST::Attribute::IMPORTED)) {
+        return true;
+    }
+    if (decl.outerDecl && decl.outerDecl->TestAttr(AST::Attribute::GENERIC_INSTANTIATED)) {
+        return true;
+    }
+    return false;
+}
+
+namespace {
+template<typename U, typename T, typename... Args>
+typename std::enable_if<std::is_base_of_v<U, T> && (... && std::is_same_v<std::vector<T*>, Args>), void>::type
+BuildDeserializedVec(std::unordered_map<std::string, U*>& table, const std::vector<T*>& first, const Args&... args)
+{
+    std::string id;
+    for (auto v : first) {
+        id = v->GetIdentifier();
+        // For foreign func we use rawMangledName as key
+        if (v->TestAttr(Attribute::FOREIGN)) {
+            // using rawmangledName
+            if constexpr (std::is_base_of_v<FuncBase, T>) {
+                id = v->GetRawMangledName();
+            } else if constexpr (std::is_same_v<ImportedValue, T>) {
+                if (auto fn = dynamic_cast<FuncBase*>(v)) {
+                    id = fn->GetRawMangledName();
+                }
+            }
+        }
+        table.emplace(id, v);
+    }
+    if constexpr (sizeof...(args) > 0) {
+        BuildDeserializedVec(table, args...);
+    }
+}
+}
+
+void AST2CHIR::BuildDeserializedTable()
+{
+    CJC_NULLPTR_CHECK(package);
+    // build for CustomTypeDef
+    std::vector<CustomTypeDef*> defs;
+    auto customDefs = package->GetAllCustomTypeDef();
+    auto importedCustomDefs = package->GetAllImportedCustomTypeDef();
+    BuildDeserializedVec(deserializedDefs, customDefs, importedCustomDefs);
+    // build for Value
+    BuildDeserializedVec(deserializedVals, package->GetImportedVarAndFuncs());
+    BuildDeserializedVec(deserializedVals, package->GetGlobalVars());
+    BuildDeserializedVec(deserializedVals, package->GetGlobalFuncs());
+    BuildDeserializedVec(deserializedVals,
+        std::vector<Func*>{package->GetPackageInitFunc(), package->GetPackageLiteralInitFunc()});
+}
+
+// Reset platform func for CJMP.
+void AST2CHIR::ResetPlatformFunc(const AST::FuncDecl& funcDecl, Func& func)
+{
+    // Reset body
+    auto body = builder.CreateBlockGroup(func);
+    func.ReplaceBody(*body);
+    TranslateFuncParams(funcDecl, func);
+    // Reset location
+    const auto& loc =
+        DebugLocation(TranslateLocationWithoutScope(builder.GetChirContext(), funcDecl.begin, funcDecl.end));
+    func.SetDebugLocation(loc);
+    // Reset attrs: to do incremental change.
+    SetFuncAttributeAndLinkageType(funcDecl, func);
+    func.EnableAttr(Attribute::PLATFORM);
+    func.DisableAttr(Attribute::COMMON);
+    func.DisableAttr(Attribute::SKIP_ANALYSIS);
 }
 } // namespace Cangjie::CHIR

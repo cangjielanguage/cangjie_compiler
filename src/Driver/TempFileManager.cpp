@@ -486,6 +486,7 @@ std::string TempFileManager::GetDylibSuffix() const
         case Triple::OSType::WINDOWS:
             return ".dll";
         case Triple::OSType::DARWIN:
+        case Triple::OSType::IOS:
             return ".dylib";
         case Triple::OSType::LINUX:
         case Triple::OSType::UNKNOWN:

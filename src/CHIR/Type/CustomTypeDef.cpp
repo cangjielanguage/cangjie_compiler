@@ -364,13 +364,16 @@ std::vector<VTableSearchRes> CustomTypeDef::GetFuncIndexInVTable(const FuncCallT
                 }
             }
             if (matched) {
-                auto instSrcParentTy =
-                    ReplaceRawGenericArgType(*const_cast<ClassType*>(mapIt.first), replaceTable, builder);
+                auto originalParentType = const_cast<ClassType*>(mapIt.first);
+                auto instSrcParentTy = ReplaceRawGenericArgType(*originalParentType, replaceTable, builder);
                 auto& funcInfo = mapIt.second[i];
-                res.emplace_back(VTableSearchRes{
+                res.emplace_back(VTableSearchRes {
                     .instSrcParentType = StaticCast<ClassType*>(instSrcParentTy),
+                    .halfInstSrcParentType = originalParentType,
                     .originalFuncType = funcInfo.typeInfo.originalType,
                     .instance = funcInfo.instance,
+                    .originalDef = const_cast<CustomTypeDef*>(this),
+                    .genericTypeParams = funcInfo.typeInfo.methodGenericTypeParams,
                     .offset = i
                 });
                 break;
@@ -408,7 +411,10 @@ std::vector<GenericType*> CustomTypeDef::GetGenericTypeParams() const
     std::vector<GenericType*> genericTypes;
     if (this->TestAttr(Attribute::GENERIC)) {
         for (auto ty : type->GetGenericArgs()) {
-            genericTypes.emplace_back(StaticCast<GenericType*>(ty));
+            // why can `ty` can be RefType?
+            if (auto gt = DynamicCast<GenericType*>(ty); gt) {
+                genericTypes.emplace_back(gt);
+            }
         }
     }
     return genericTypes;
@@ -562,6 +568,11 @@ void CustomTypeDef::EnableAttr(Attribute attr)
     attributeInfo.SetAttr(attr, true);
 }
 
+void CustomTypeDef::DisableAttr(Attribute attr)
+{
+    attributeInfo.SetAttr(attr, false);
+}
+
 bool CustomTypeDef::TestAttr(Attribute attr) const
 {
     return attributeInfo.TestAttr(attr);
@@ -570,6 +581,16 @@ bool CustomTypeDef::TestAttr(Attribute attr) const
 AttributeInfo CustomTypeDef::GetAttributeInfo() const
 {
     return attributeInfo;
+}
+
+FuncBase* CustomTypeDef::GetVarInitializationFunc() const
+{
+    return varInitializationFunc;
+}
+
+void CustomTypeDef::SetVarInitializationFunc(FuncBase* func)
+{
+    varInitializationFunc = func;
 }
 
 std::vector<GlobalVarBase*> CustomTypeDef::GetStaticMemberVars() const
@@ -689,5 +710,6 @@ CustomTypeDef* CustomTypeDef::GetGenericDecl() const
 
 bool CustomTypeDef::CanBeInherited() const
 {
+    // we shouldn't care about if current def is GENEIC_INSTANTIATED
     return IsInterface() || TestAttr(Attribute::VIRTUAL) || TestAttr(Attribute::ABSTRACT);
 }

@@ -24,7 +24,8 @@ inline std::map<Cangjie::AST::Attribute, Attribute> g_attrMap = {
     {Cangjie::AST::Attribute::COMPILER_ADD, Attribute::COMPILER_ADD},
     {Cangjie::AST::Attribute::IMPLICIT_ADD, Attribute::NO_DEBUG_INFO},
     {Cangjie::AST::Attribute::GENERIC, Attribute::GENERIC}, {Cangjie::AST::Attribute::IMPORTED, Attribute::IMPORTED},
-    {Cangjie::AST::Attribute::NO_REFLECT_INFO, Attribute::NO_REFLECT_INFO}};
+    {Cangjie::AST::Attribute::NO_REFLECT_INFO, Attribute::NO_REFLECT_INFO},
+    {Cangjie::AST::Attribute::COMMON, Attribute::COMMON}, {Cangjie::AST::Attribute::PLATFORM, Attribute::PLATFORM}};
 
 void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& func)
 {
@@ -39,6 +40,25 @@ void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& 
             chirTy.FillGenericArgType(StaticCast<AST::GenericsTy>(*type->ty));
         }
     }
+}
+
+FuncType* AdjustVarInitType(
+    const FuncType& funcType, const AST::Decl& outerDecl, CHIRBuilder& builder, CHIRType& chirType)
+{
+    auto params = funcType.GetParamTypes();
+    std::vector<Type*> paramsTy;
+    paramsTy.reserve(params.size() + 1); // additional 1 means the type of this.
+    auto thisTy = chirType.TranslateType(*outerDecl.ty);
+    // ClassLike decl has already been added ref type by `TranslateType`, so we just needs add ref type to
+    // constructor and mut function of non-classLike type.
+    if (outerDecl.astKind == AST::ASTKind::STRUCT_DECL) {
+        paramsTy.emplace_back(builder.GetType<RefType>(thisTy));
+    } else {
+        paramsTy.emplace_back(thisTy);
+    }
+    paramsTy.insert(paramsTy.end(), params.begin(), params.end());
+
+    return builder.GetType<FuncType>(paramsTy, funcType.GetReturnType());
 }
 
 FuncType* AdjustFuncType(FuncType& funcType, const AST::FuncDecl& funcDecl, CHIRBuilder& builder, CHIRType& chirType)
@@ -276,6 +296,84 @@ void SetCompileTimeValueFlagRecursivly(Func& initFunc)
         Visitor::Visit(body, preVisit);
     };
     setConstFlagForLambda(*initFunc.GetBody());
+}
+
+MemberVarInfo GetMemberVarByName(const CustomTypeDef& def, const std::string& varName)
+{
+    auto vars = def.GetAllInstanceVars();
+    for (auto it = vars.crbegin(); it != vars.crend(); ++it) {
+        if (it->name == varName) {
+            return *it;
+        }
+    }
+    CJC_ABORT();
+    return MemberVarInfo{.attributeInfo = AttributeInfo{}};
+}
+
+Type* GetInstMemberTypeByName(const CustomType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder)
+{
+    return GetInstMemberTypeByNameCheckingReadOnly(rootType, names, builder).first;
+}
+
+std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
+    const CustomType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder)
+{
+    if (names.empty()) {
+#ifdef NDEBUG
+        return {const_cast<CustomType*>(&rootType), false};
+#else
+        CJC_ABORT();
+#endif
+    }
+    auto customTypeDef = rootType.GetCustomTypeDef();
+    std::unordered_map<const GenericType*, Type*> instMap;
+    rootType.GetInstMap(instMap, builder);
+    auto currentName = names.front();
+    auto member = GetMemberVarByName(*customTypeDef, currentName);
+    // if one member is readonly in path, the result is readonly
+    bool isReadOnly = member.TestAttr(Attribute::READONLY);
+    auto memberTy = ReplaceRawGenericArgType(*member.type, instMap, builder);
+    if (names.size() > 1) {
+        auto pureMemberTy = memberTy->StripAllRefs();
+        if (pureMemberTy->IsNominal()) {
+            auto subNames = names;
+            subNames.erase(subNames.begin());
+            auto [memberType, isMemberReadOnly] =
+                GetInstMemberTypeByNameCheckingReadOnly(*StaticCast<CustomType*>(pureMemberTy), subNames, builder);
+            return {memberType, isReadOnly || isMemberReadOnly};
+        } else if (pureMemberTy->IsGeneric()) {
+            auto subNames = names;
+            subNames.erase(subNames.begin());
+            auto [memberType, isMemberReadOnly] =
+                GetInstMemberTypeByNameCheckingReadOnly(*StaticCast<GenericType*>(pureMemberTy), subNames, builder);
+            return {memberType, isReadOnly || isMemberReadOnly};
+        } else {
+            CJC_ABORT();
+        }
+    }
+    return {memberTy, isReadOnly};
+}
+
+std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
+    const GenericType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder)
+{
+    // Find the most child class type
+    Type* concreteType = nullptr;
+    for (auto upperBound : rootType.GetUpperBounds()) {
+        auto upperBoundCustomType = StaticCast<CustomType*>(upperBound->StripAllRefs());
+        if (upperBoundCustomType->GetCustomTypeDef()->IsClassLike()) {
+            if (concreteType == nullptr) {
+                concreteType = upperBound;
+            } else {
+                if (upperBoundCustomType->IsEqualOrSubTypeOf(*concreteType, builder)) {
+                    concreteType = upperBound;
+                }
+            }
+        }
+    }
+    CJC_NULLPTR_CHECK(concreteType);
+    return GetInstMemberTypeByNameCheckingReadOnly(
+        *StaticCast<CustomType*>(concreteType->StripAllRefs()), names, builder);
 }
 } // namespace CHIR
 } // namespace Cangjie

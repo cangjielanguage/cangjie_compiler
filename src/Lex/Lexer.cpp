@@ -42,6 +42,26 @@ inline bool IsSingleQuote(int32_t ch)
 }
 } // namespace
 
+namespace Cangjie {
+const std::vector<TokenKind>& GetContextualKeyword()
+{
+    static const std::vector<TokenKind> CONTEXTUAL_KEYWORD_TOKEN = {TokenKind::PUBLIC, TokenKind::PRIVATE,
+        TokenKind::INTERNAL, TokenKind::PROTECTED, TokenKind::OVERRIDE, TokenKind::REDEF, TokenKind::ABSTRACT,
+        TokenKind::SEALED, TokenKind::OPEN, TokenKind::COMMON, TokenKind::PLATFORM, TokenKind::FEATURES};
+    return CONTEXTUAL_KEYWORD_TOKEN;
+}
+bool IsContextualKeyword(std::string_view s)
+{
+    static std::unordered_set<std::string_view> names{};
+    if (names.empty()) {
+        for (auto ct : GetContextualKeyword()) {
+            names.insert(TOKENS[static_cast<int>(ct)]);
+        }
+    }
+    return names.count(s) == 1;
+}
+}
+
 bool LexerImpl::IsCurrentCharLineTerminator() const
 {
     if (Utils::GetLineTerminatorLength(pCurrent, pInputEnd) > 0) {
@@ -1579,6 +1599,14 @@ void LexerImpl::ScanSymbolQuest()
         ReadUTF8Char();
     }
 }
+ 
+void LexerImpl::ScanSymbolColon()
+{
+    ReadUTF8Char();
+    if (currentChar != ':') {
+        Back();
+    }
+}
 
 Token LexerImpl::GetSymbolToken(const char* pStart)
 {
@@ -1610,6 +1638,7 @@ Token LexerImpl::ScanSymbol(const char* pStart)
         {'|', &LexerImpl::ScanSymbolVerticalBar},
         {'?', &LexerImpl::ScanSymbolQuest},
         {'@', &LexerImpl::ScanSymbolAt},
+        {':', &LexerImpl::ScanSymbolColon},
     };
     if (currentChar == '$') {
         ReadUTF8Char();
@@ -1648,8 +1677,8 @@ Token LexerImpl::ScanFromTokens()
             tokens[curToken].kind = rkind;
             auto curPos = tokens[curToken].Begin();
             auto endPos = tokens[curToken].End();
-            tokens[curToken].SetValuePos(rval, curPos + 1, endPos + 1);
-            return {lkind, lval, curPos, endPos};
+            tokens[curToken].SetValuePos(std::string{rval}, curPos + 1, endPos + 1);
+            return {lkind, std::string{lval}, curPos, endPos};
         }
     }
     Token t = tokens[curToken];

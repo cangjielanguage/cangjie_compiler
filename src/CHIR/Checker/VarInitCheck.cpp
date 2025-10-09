@@ -24,6 +24,7 @@ void VarInitCheck::RunOnPackage(const Package* package, size_t threadNum)
         if (func->GetSrcCodeIdentifier().find("__ad_") == std::string::npos &&
             func->GetSrcCodeIdentifier() != STATIC_INIT_FUNC &&
             func->GetIdentifier().find("$Mocked") == std::string::npos &&
+            func->GetFuncKind() != FuncKind::INSTANCEVAR_INIT && // only cjnative for cjmp
             func->Get<SkipCheck>() != SkipKind::SKIP_VIC) {
             funcs.emplace_back(func);
         }
@@ -85,7 +86,7 @@ void VarInitCheck::CheckMemberFuncCall(const MaybeUninitDomain& state, const Fun
     // note: calling other initialiser of this class/struct is ok
     if (calleeFunc->GetOuterDeclaredOrExtendedDef() == initFunc.GetOuterDeclaredOrExtendedDef() &&
         !calleeFunc->IsConstructor() && !calleeFunc->TestAttr(Attribute::STATIC) &&
-        !state.GetMaybeUninitedLocalMembers().empty()) {
+        !state.GetMaybeUninitedLocalMembers().empty() && !calleeFunc->IsInstanceVarInit()) {
         if (auto arg = apply.GetArgs()[0]; arg == thisArg) {
             // class member function
             // func init(%0 : CA&)
@@ -108,16 +109,30 @@ void VarInitCheck::CheckMemberFuncCall(const MaybeUninitDomain& state, const Fun
     }
 }
 
+// Update only cjnative for cjmp
 void VarInitCheck::UseBeforeInitCheck(
     const Func* func, const ConstructorInitInfo* ctorInitInfo, const std::vector<MemberVarInfo>& members)
 {
+    bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+    if (isCommonFunctionWithoutBody) {
+        return; // Nothing to visit
+    }
     auto analysis = std::make_unique<MaybeUninitAnalysis>(func, ctorInitInfo);
     auto engine = Engine<MaybeUninitDomain>(func, std::move(analysis));
     auto result = engine.IterateToFixpoint();
     CJC_NULLPTR_CHECK(result);
 
-    const auto actionBeforeVisitExpr = [this, func, &members](
+    std::vector<const Func*> callStack{func};
+
+    const auto actionBeforeVisitExpr = [this, &callStack, &members](
                                            const MaybeUninitDomain& state, Expression* expr, size_t) {
+        if (expr->GetExprKind() == ExprKind::APPLY) {
+            if (auto varInitFunc = TryGetInstanceVarInitFromApply(*expr)) {
+                callStack.push_back(varInitFunc);
+            }
+        }
+        auto initialFunc = callStack[0];
+        auto curFunc = callStack.back();
         if (expr->GetExprKind() == ExprKind::LOAD) {
             if (CheckLoadToUninitedAllocation(state, *StaticCast<const Load*>(expr))) {
                 return;
@@ -128,19 +143,25 @@ void VarInitCheck::UseBeforeInitCheck(
                 return;
             }
         }
-        if (!func->IsConstructor()) {
+        if (!initialFunc->IsConstructor()) {
             return;
         }
         if (expr->GetExprKind() == ExprKind::LOAD) {
-            CheckLoadToUninitedCustomDefMember(state, func, StaticCast<const Load*>(expr), members);
+            CheckLoadToUninitedCustomDefMember(state, curFunc, StaticCast<const Load*>(expr), members);
         } else if (expr->GetExprKind() == ExprKind::STORE_ELEMENT_REF) {
-            CheckStoreToUninitedCustomDefMember(state, func, StaticCast<const StoreElementRef*>(expr), members);
+            CheckStoreToUninitedCustomDefMember(state, curFunc, StaticCast<const StoreElementRef*>(expr), members);
         } else if (expr->GetExprKind() == ExprKind::APPLY) {
-            CheckMemberFuncCall(state, *func, *StaticCast<Apply*>(expr));
+            CheckMemberFuncCall(state, *curFunc, *StaticCast<Apply*>(expr));
         }
     };
 
-    const auto actionAfterVisitExpr = [](const MaybeUninitDomain&, Expression*, size_t) {};
+    const auto actionAfterVisitExpr = [&callStack](const MaybeUninitDomain&, Expression* expr, size_t) {
+        if (expr->GetExprKind() == ExprKind::APPLY) {
+            if (auto varInitFunc = TryGetInstanceVarInitFromApply(*expr)) {
+                callStack.pop_back();
+            }
+        }
+    };
 
     const auto actionOnTerminator = [this, func, &members](const MaybeUninitDomain& state, const Terminator* terminator,
                                         std::optional<Block*>) {
@@ -317,6 +338,15 @@ void VarInitCheck::CheckStoreToUninitedCustomDefMember(const MaybeUninitDomain& 
 void VarInitCheck::RaiseUninitedDefMemberError(const MaybeUninitDomain& state, const Func* func,
     const std::vector<MemberVarInfo>& members, const std::vector<size_t>& uninitedMemberIdx) const
 {
+    // Skip report error when uninitedMember are all common member for CJMP.
+    if (std::all_of(uninitedMemberIdx.begin(), uninitedMemberIdx.end(),
+        [&members](size_t idx) {
+            auto member = members[idx];
+            // Skip COMMON which is just added(not deserialized ones), they may not yet be initialized and it's ok.
+            return member.TestAttr(Attribute::COMMON) && !member.TestAttr(Attribute::DESERIALIZED);
+        })) {
+        return;
+    }
     auto builder =
         diag->DiagnoseRefactor(DiagKindRefactor::chir_class_uninitialized_field, ToPosition(func->GetDebugLocation()));
     for (auto idx : uninitedMemberIdx) {
@@ -373,6 +403,10 @@ void VarInitCheck::RaiseIllegalMemberFunCallError(const Expression* apply, const
 void VarInitCheck::ReassignInitedLetVarCheck(const Func* func, const ConstructorInitInfo* ctorInitInfo,
     const std::vector<MemberVarInfo>& members) const
 {
+    bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+    if (isCommonFunctionWithoutBody) {
+        return; // Nothing to visit
+    }
     auto analysis = std::make_unique<MaybeInitAnalysis>(func, ctorInitInfo);
     auto engine = Engine<MaybeInitDomain>(func, std::move(analysis));
     auto result = engine.IterateToFixpoint();

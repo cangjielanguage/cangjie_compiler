@@ -14,6 +14,8 @@ if(CANGJIE_BUILD_CJC)
             Toolchains/CJNATIVE/Linux_CJNATIVE.cpp
             Toolchains/CJNATIVE/MinGW_CJNATIVE.cpp
             Toolchains/CJNATIVE/Darwin_CJNATIVE.cpp
+            Toolchains/CJNATIVE/IOS_CJNATIVE.cpp
+            Toolchains/CJNATIVE/Android_CJNATIVE.cpp
             Toolchains/CJNATIVE/Ohos_CJNATIVE.cpp)
     endif()
     file(GLOB DRIVER_SRC ${SRC_FILES})

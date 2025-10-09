@@ -72,6 +72,38 @@ public:
     const Func* func;
 
 private:
+// Add only cangjie native backend for cjmp
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    std::vector<Block*> GetBlocksToAnalyse(const Expression& expr) const
+    {
+        if (auto initVarFunc = TryGetInstanceVarInitFromApply(expr)) {
+            return initVarFunc->GetBody()->GetBlocks();
+        }
+
+        return {};
+    }
+
+    void VisitBlockNonTerminatorExpressionsWith(
+        std::function<void(const Domain&, Expression*, size_t)> actionBeforeVisitExpr,
+        std::function<void(const Domain&, Expression*, size_t)> actionAfterVisitExpr,
+        const Block& block, Domain& state)
+    {
+        auto exprs = block.GetNonTerminatorExpressions();
+        for (size_t i = 0; i < exprs.size(); ++i) {
+            auto& expr = exprs[i];
+            actionBeforeVisitExpr(state, expr, i);
+            SimulatingProcessingSingleExpression(state, expr);
+
+            auto blocks = GetBlocksToAnalyse(*expr);
+            for (auto innerBlock : blocks) {
+                VisitBlockNonTerminatorExpressionsWith(actionBeforeVisitExpr, actionAfterVisitExpr, *innerBlock, state);
+            }
+
+            actionAfterVisitExpr(state, expr, i);
+        }
+    }
+#endif
+
     void VisitBlockWith(std::function<void(const Domain&, Expression*, size_t)> actionBeforeVisitExpr,
         std::function<void(const Domain&, Expression*, size_t)> actionAfterVisitExpr,
         std::function<void(const Domain&, Terminator*, std::optional<Block*>)> actionOnTerminator, Block& block,
@@ -93,12 +125,9 @@ private:
         if (state.IsBottom()) {
             return;
         }
-        auto exprs = block.GetNonTerminatorExpressions();
-        for (size_t i = 0; i < exprs.size(); ++i) {
-            actionBeforeVisitExpr(state, exprs[i], i);
-            SimulatingProcessingSingleExpression(state, exprs[i]);
-            actionAfterVisitExpr(state, exprs[i], i);
-        }
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+        VisitBlockNonTerminatorExpressionsWith(actionBeforeVisitExpr, actionAfterVisitExpr, block, state);
+#endif
         auto terminator = block.GetTerminator();
         if (auto lambda = IsApplyToLambda(terminator); lambda) {
             // If it's apply to a lambda, we need to clear the state of vars captured by the lambda.

@@ -222,8 +222,9 @@ const std::unordered_map<CHIR::IntrinsicKind, llvm::Intrinsic::ID> INTRINSIC_KIN
     {CHIR::IntrinsicKind::ATOMIC_STORE, llvm::Intrinsic::cj_atomic_store},
     {CHIR::IntrinsicKind::ATOMIC_COMPARE_AND_SWAP, llvm::Intrinsic::cj_atomic_compare_swap},
     {CHIR::IntrinsicKind::ATOMIC_LOAD, llvm::Intrinsic::cj_atomic_load},
-    {CHIR::IntrinsicKind::ATOMIC_SWAP, llvm::Intrinsic::cj_atomic_swap}};
-
+    {CHIR::IntrinsicKind::ATOMIC_SWAP, llvm::Intrinsic::cj_atomic_swap},
+    {CHIR::IntrinsicKind::BLACK_BOX, llvm::Intrinsic::cj_blackhole},
+};
 bool IsCHIRWrapper(const std::string& chirFuncName);
 llvm::GlobalValue::LinkageTypes CHIRLinkage2LLVMLinkage(Linkage chirLinkage);
 void AddLinkageTypeMetadata(

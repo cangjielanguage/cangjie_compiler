@@ -9,5 +9,8 @@ if(CANGJIE_BUILD_CJC)
         ConditionalCompilation.cpp)
     add_library(CangjieConditionalCompilation OBJECT ${CONDITIONALCOMPILATION_SRC})
     target_compile_options(CangjieConditionalCompilation PRIVATE ${CJC_EXTRA_WARNINGS})
+    if(CANGJIE_ENABLE_GCOV)
+        target_compile_options(CangjieConditionalCompilation PUBLIC "-fno-exceptions")
+    endif()
 endif()
 

@@ -27,6 +27,7 @@ ERROR(parse_expected_module_name, "expected module name after keyword 'from', fo
 ERROR(parse_expected_right_delimiter, "unclosed delimiter: '%s'", "expected '%s' here", {
     "to match this opening '%s'",
 })
+ERROR(parse_invalid_return_type, "there should be no return type in a %s")
 
 ERROR(parse_unmatched_right_delimiter, "unmatched delimiter: '%s'", "unmatched delimiter")
 
@@ -254,7 +255,24 @@ WARNING(parse_unsafe_will_be_ignored, PARSER, "'unsafe' modifier will be ignored
 ERROR(parse_duplicated_annotation, "duplicated annotation: '%s'", "duplicated annotation here", {
     "the previous one is here"
 })
+ERROR(parse_conflict_annotation, "'%s' and '%s' annotations conflict on %s", "unexpected annotation", {
+    "because it is conflicted with this"
+})
 
+// common/platform
+ERROR(parse_common_and_platform_in_the_same_file, "'common' and 'platform' declarations can not be in the same file")
+ERROR(parse_common_function_must_have_return_type, "'common' function return type must be specified")
+ERROR(parse_platform_function_must_have_return_type, "'platform' function return type must be specified")
+ERROR(parse_platform_function_parameter_cannot_have_default_value, "'platform' %s parameter can not have default value")
+ERROR(parse_platform_member_must_have_implementation, "the member %s must have body in 'platform' %s")
+ERROR(parse_expected_type_with_cjmp_var, "'%s' %s type must be specified")
+ERROR(parse_cjmp_outdecl_miss_match, "%s is %s, but %s is not %s")
+ERROR(parse_cjmp_static_init, "static init can not be '%s'")
+ERROR(parse_common_in_non_common_file, "common declaration must be defined in common package part")
+ERROR(parse_platform_in_non_platform_file, "platform declaration must be defined in platform package part")
+ERROR(parse_cjmp_generic_decl, "generic declaration can not be '%s'")
+ERROR(parse_cjmp_pattern_decl, "%s pattern can not be '%s'")
+ERROR(parse_explicitly_abstract_only_for_cjmp_abstract_class, "only common/platform or Native FFI mirror abstract classes can have explicitly abstract %s")
 
 // Modifier related.
 ERROR(parse_illegal_modifier_in_scope, "unexpected modifier '%s' on %s%s", "unexpected modifier", {
@@ -294,6 +312,59 @@ ERROR(parse_deprecated_arguments_must_be_lit_const_expr, "argument of @Deprecate
 ERROR(parse_deprecated_empty_string_argument, "argument '%s' of @Deprecated must not be empty string")
 ERROR(parse_deprecated_unknown_argument, "unknown argument '%s' in @Deprecated")
 ERROR(parse_deprecated_invalid_target, "%s can not be target of @Deprecated")
+
+ERROR(parse_annotation_max_one_argument, "%s requires zero or one%s argument", "expected %s here")
+ERROR(parse_annotation_one_argument, "%s requires exactly one%s argument", "expected %s here")
+// interop
+ERROR(parse_foreign_name_on_ffi_decl_member, "@ForeignName could only be used on FFI declaration member")
+
+// java mirror
+ERROR(parse_java_mirror_function_cannot_have_body, "java-mirrored function '%s' cannot have body", "java-mirrored function cannot have body")
+ERROR(parse_java_mirror_function_must_have_return_type, "java-mirrored function must have return type", "java-mirrored function must have return type")
+ERROR(parse_java_mirror_prop_cannot_have_setter, "java-mirrored property cannot have setter", "java-mirrored property cannot have setter")
+ERROR(parse_java_mirror_prop_cannot_have_getter, "java-mirrored property cannot have getter", "java-mirrored property cannot have getter")
+WARNING(parse_java_mirror_prop_is_deprecated, PARSER, "java-mirrored property is deprecated, use field instead")
+ERROR(parse_java_mirror_decl_cannot_have_primary_ctor, "java-mirrored declaration cannot have primary constructor", "java-mirrored declaration cannot have primary constructor")
+ERROR(parse_java_mirror_constructor_cannot_have_body, "java-mirrored constructor cannot have body", "java-mirrored constructor cannot have body")
+ERROR(parse_java_mirror_cannot_have_private_member, "java-mirrored declaration cannot have private member")
+ERROR(parse_java_mirror_cannot_have_static_init, "java-mirrored declaration cannot have static initializer")
+ERROR(parse_java_mirror_cannot_have_finalizer, "java-mirrored declaration cannot have finalizer")
+ERROR(parse_java_mirror_cannot_have_const_member, "java-mirrored declaration cannot have const member")
+ERROR(parse_java_mirror_cannot_be_sealed, "@JavaMirror declaration cannot be sealed")
+ERROR(parse_java_impl_cannot_be_generic, "@JavaImpl declaration cannot be generic")
+ERROR(parse_java_impl_cannot_be_abstract, "@JavaImpl declaration cannot be abstract")
+ERROR(parse_java_impl_cannot_be_sealed, "@JavaImpl declaration cannot be sealed")
+ERROR(parse_java_impl_cannot_have_static_init, "@JavaImpl declaration cannot have static initializer")
+ERROR(parse_java_mirror_cannot_have_open_prop, "java-mirrored declaration cannot have open property")
+
+// java impl
+ERROR(parse_java_impl_cannot_be_open, "@JavaImpl class cannot be open")
+ERROR(parse_java_impl_cannot_be_interface, "interface cannot be @JavaImpl")
+
+// Objective-C mirror
+ERROR(parse_objc_mirror_cannot_have_primary_ctor, "@ObjCMirror declaration cannot have primary constructor", "@ObjCMirror declaration cannot have primary constructor")
+ERROR(parse_objc_mirror_ctor_cannot_have_body, "@ObjCMirror declaration constructor cannot have body", "@ObjCMirror declaration constructor cannot have body")
+ERROR(parse_objc_mirror_method_cannot_have_body, "@ObjCMirror declaration method '%s' cannot have body", "@ObjCMirror declaration method cannot have body")
+ERROR(parse_objc_mirror_method_must_have_return_type, "@ObjCMirror declaration method must have return type", "@ObjCMirror declaration method must have return type")
+ERROR(parse_objc_mirror_cannot_be_sealed, "@ObjCMirror declaration cannot be sealed")
+ERROR(parse_objc_mirror_cannot_have_private_member, "@ObjCMirror declaration cannot have private member")
+ERROR(parse_objc_mirror_cannot_have_static_init, "@ObjCMirror declaration cannot have static initializer")
+ERROR(parse_objc_mirror_cannot_have_finalizer, "@ObjCMirror declaration cannot have finalizer")
+ERROR(parse_objc_mirror_cannot_have_const_member, "@ObjCMirror declaration cannot have const member")
+ERROR(parse_objc_impl_cannot_be_generic, "@ObjCImpl declaration cannot be generic")
+ERROR(parse_objc_impl_cannot_be_abstract, "@ObjCImpl declaration cannot be abstract")
+ERROR(parse_objc_impl_cannot_be_sealed, "@ObjCImpl declaration cannot be sealed")
+ERROR(parse_objc_impl_cannot_have_static_init, "@ObjCImpl declaration cannot have static initializer")
+ERROR(parse_objc_impl_cannot_be_open, "@ObjCImpl class cannot be open")
+ERROR(parse_objc_impl_cannot_be_interface, "interface cannot be @ObjCImpl")
+ERROR(parse_objc_mirror_field_cannot_have_initializer, "@ObjCMirror declaration field cannot have initializer")
+ERROR(parse_objc_mirror_field_cannot_be_static, "@ObjCMirror declaration field cannot be 'static'")
+ERROR(parse_objc_mirror_prop_cannot_have_getter, "@ObjCMirror declaration property '%s' cannot have getter", "@ObjCMirror declaration property cannot have getter")
+ERROR(parse_objc_mirror_prop_cannot_have_setter, "@ObjCMirror declaration property '%s' cannot have setter", "@ObjCMirror declaration property cannot have setter")
+ERROR(parse_objc_mirror_member_must_have_foreign_name, "@ObjCMirror declaration member must have @ForeignName annotation", "@ObjCMirror declaration member must have @ForeignName annotation")
+ERROR(parse_objc_impl_member_must_have_foreign_name, "@ObjCImpl declaration member must have @ForeignName annotation", "@ObjCImpl declaration member must have @ForeignName annotation")
+
+ERROR(parse_objc_interop_not_supported, "Objective-C interoperability feature '%s' is not yet supported")
 
 ERROR(parse_diag_error, "%s", "%s")
 WARNING(parse_diag_warning, PARSER, "%s", "%s")

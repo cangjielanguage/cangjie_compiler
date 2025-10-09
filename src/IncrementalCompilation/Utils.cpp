@@ -109,7 +109,7 @@ std::vector<Ptr<Decl>> GetMembers(const Decl& decl)
 
 bool IsOOEAffectedDecl(const Decl& decl)
 {
-    CJC_ASSERT(!decl.TestAttr(Attribute::IMPORTED));
+    CJC_ASSERT(!decl.TestAttr(Attribute::IMPORTED) || decl.TestAttr(Attribute::FROM_COMMON_PART));
     // variable with initialiser or function with body can be affected by order. Other decls do not contain
     // expression and therefore cannot be affected by order.
     if (auto var = DynamicCast<VarDeclAbstract>(&decl)) {

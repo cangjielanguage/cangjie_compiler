@@ -10,10 +10,9 @@
  * This file implements macro conditional compilation related apis for compiler.
  */
 
-#include "cangjie/ConditionalCompilation/ConditionalCompilation.h"
-
 #include <regex>
 
+#include "ConditionalCompilationImpl.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
@@ -22,11 +21,14 @@
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Option/Option.h"
 #include "cangjie/Utils/FileUtil.h"
+#include "cangjie/ConditionalCompilation/ConditionalCompilation.h"
 
 using namespace Cangjie::FileUtil;
 using namespace Cangjie::Triple;
 
-namespace Cangjie::AST {
+using namespace Cangjie;
+using namespace Cangjie::AST;
+
 namespace {
 const std::string BACKEND_STR = "backend";
 const std::string ARCH_STR = "arch";
@@ -34,7 +36,6 @@ const std::string OS_STR = "os";
 const std::string CJC_VERSION_STR = "cjc_version";
 const std::string DEBUG_STR = "debug";
 const std::string TEST_STR = "test";
-const std::size_t CJC_VERSION_LENGTH = 6;
 // Condition value map.
 const std::unordered_set<std::string> TARGET_CONDITION = {
     BACKEND_STR,
@@ -108,99 +109,12 @@ const std::map<std::string, std::vector<std::string>> CONDITION_VALUES = {
             "Windows",
             "Linux",
             "macOS",
+            "iOS",
             "HarmonyOS",
         },
     },
 };
 } // namespace
-
-class ConditionalCompilationImpl {
-public:
-    explicit ConditionalCompilationImpl(CompilerInstance* c);
-    void HandleConditionalCompilation(const Package& root);
-    void HandleFileConditionalCompilation(File& file);
-
-private:
-    inline std::string GetBackendType() const
-    {
-        if (Utils::In(backendType, {Triple::BackendType::CJNATIVE})) {
-            return "cjnative";
-        } else {
-            return Triple::BackendToString(backendType);
-        }
-    }
-    inline std::string GetArchType() const
-    {
-        return triple.ArchToString();
-    }
-    std::string GetOSType() const;
-    inline std::string GetCJCVersion() const
-    {
-        std::string version = std::to_string(cjcVersion);
-        return std::to_string(cjcVersion);
-    }
-    std::string RefreshVersionStr(std::string& version) const
-    {
-        while (version.size() < CJC_VERSION_LENGTH) {
-            version = "0" + version;
-        }
-        return version;
-    }
-    inline std::string GetDebug() const
-    {
-        return std::to_string(static_cast<int>(debug));
-    }
-    inline std::string GetTest() const
-    {
-        return std::to_string(static_cast<int>(test));
-    }
-    std::string GetUserDefinedInfoByName(const std::string& name) const;
-    inline auto GetPassedValues() const
-    {
-        return passedCondition;
-    }
-    std::string GetRelatedInfo(const std::string& target) const
-    {
-        if (target == BACKEND_STR) {
-            return GetBackendType();
-        } else if (target == ARCH_STR) {
-            return GetArchType();
-        } else if (target == OS_STR) {
-            return GetOSType();
-        } else if (target == CJC_VERSION_STR) {
-            return GetCJCVersion();
-        } else if (target == DEBUG_STR) {
-            return GetDebug();
-        } else if (target == TEST_STR) {
-            return GetTest();
-        }
-        return GetUserDefinedInfoByName(target);
-    }
-
-    CompilerInstance* ci{nullptr};
-    Triple::BackendType backendType;
-    Triple::Info triple;
-    uint32_t cjcVersion;
-    bool debug;
-    bool test;
-    std::unordered_map<std::string, std::string> passedCondition;
-
-    bool EvalConditionExpr(const Expr& condition);
-
-    bool ConditionCheck(const std::string& conditionStr, const Position& begin, const std::string& right);
-
-    bool Eval(const BinaryExpr& expr, const std::string& left, const std::string& right) const;
-
-    bool EvalBinaryExpr(const BinaryExpr& be);
-    bool EvalParenExpr(const ParenExpr& pe);
-    bool EvalUnaryExpr(const UnaryExpr& ue) const;
-    bool EvalRefExpr(const RefExpr& re) const;
-
-    bool EvalLogicBinaryExpr(const BinaryExpr& be);
-    bool EvalJudgeBinaryExpr(const BinaryExpr& be);
-
-    template <typename T> bool EvalNodeCondition(Ptr<T> node);
-};
 
 static auto GetVersionUInt(const std::string& version) -> uint32_t
 {
@@ -283,6 +197,8 @@ std::string ConditionalCompilationImpl::GetOSType() const
     switch (triple.os) {
         case Triple::OSType::DARWIN:
             return "macOS";
+        case Triple::OSType::IOS:
+            return "iOS";
         case Triple::OSType::WINDOWS:
             return "Windows";
         case Triple::OSType::LINUX:
@@ -617,4 +533,21 @@ void ConditionalCompilation::HandleFileConditionalCompilation(File& file) const
 {
     impl->HandleFileConditionalCompilation(file);
 }
+
+std::string ConditionalCompilationImpl::GetRelatedInfo(const std::string& target) const
+{
+    if (target == BACKEND_STR) {
+        return GetBackendType();
+    } else if (target == ARCH_STR) {
+        return GetArchType();
+    } else if (target == OS_STR) {
+        return GetOSType();
+    } else if (target == CJC_VERSION_STR) {
+        return GetCJCVersion();
+    } else if (target == DEBUG_STR) {
+        return GetDebug();
+    } else if (target == TEST_STR) {
+        return GetTest();
+    }
+    return GetUserDefinedInfoByName(target);
 }

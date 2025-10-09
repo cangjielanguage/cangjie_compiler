@@ -217,6 +217,33 @@ void ParserImpl::DiagExpectedIdentifierImportSpec(Ptr<Node> node)
         "after keyword 'import'");
 }
 
+void ParserImpl::DiagExpectedIdentifierFeatureDirective(Ptr<Node> node)
+{
+    auto fs = StaticAs<ASTKind::FEATURES_DIRECTIVE>(node);
+    if (fs->content.empty()) {
+        if (lastToken.kind == TokenKind::DOT) { std::swap(lastToken, lookahead); }
+        DiagExpectedIdentifier(MakeRange(fs->begin, fs->begin + std::string("features").size()),
+            "a feature name", "after keyword 'features'", false);
+    } else if (IsRawIdentifier(lastToken.Value())) {
+        auto prevRange = fs->content.size() == 1 ? MakeRange(fs->begin, fs->begin + std::string("features").size()) :
+            MakeRange(fs->content[fs->content.size() - 2].begin, fs->content[fs->content.size() - 2].end);
+        std::swap(lastToken, lookahead);
+        DiagExpectedIdentifier(prevRange, "an identifier", "after this", false);
+        std::swap(lastToken, lookahead);
+    } else if (lastToken.kind == TokenKind::COMMA) {
+        std::stringstream ss;
+        ss << "after '"  << fs->content[fs->content.size() - 1].ToString() << lastToken.Value() << "'";
+        DiagExpectedIdentifier(MakeRange(fs->content[fs->content.size() - 1].begin, lastToken.End()), "an identifier",
+            ss.str(), false);
+    } else if (lastToken.kind == TokenKind::DOT) {
+        DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()), "an identifier",
+            "after '.' in qualified name", false);
+    } else  {
+        DiagExpectedIdentifier(MakeRange(fs->content[fs->content.size() - 1].begin, lastToken.End()), "';' or '<NL>'",
+            "after this", false);
+    }
+}
+
 void ParserImpl::DiagExpectedIdentifierGenericConstraint(Ptr<Node> node)
 {
     auto gc = StaticAs<ASTKind::GENERIC_CONSTRAINT>(node);
@@ -268,7 +295,7 @@ void ParserImpl::DiagExpectedIdentifierEnumDecl(Ptr<Node> node)
 }
 
 void ParserImpl::DiagExpectedIdentifier(
-    const Range& range, const std::string& expectedName, const std::string& afterName)
+    const Range& range, const std::string& expectedName, const std::string& afterName, const bool callHelp)
 {
     auto foundName = ConvertToken(lookahead);
     auto expectedMsg = expectedName;
@@ -291,7 +318,7 @@ void ParserImpl::DiagExpectedIdentifier(
     builder.AddMainHintArguments(expectedMsg);
     builder.AddHint(otherHintRange, otherHintMsg);
 
-    if (IsKeyWord(lookahead)) {
+    if (IsKeyWord(lookahead) && callHelp) {
         auto helpMes = std::string("you could escape keyword as ") + expectedName + " using '`'";
         auto help = DiagHelp(helpMes);
         help.AddSubstitution(lookahead, "`" + lookahead.Value() + "`");
@@ -323,6 +350,7 @@ static const std::unordered_map<ASTKind, std::pair<std::string, std::string>> KI
     {ASTKind::PROP_DECL, {"prop", "property declaration"}},
     {ASTKind::INTERPOLATION_EXPR, {"interpolation", "string interpolation"}},
     {ASTKind::PACKAGE_SPEC, {"package", "package declaration"}},
+    {ASTKind::FEATURES_DIRECTIVE, {"features", "features declarations"}},
 };
 
 static const std::unordered_map<ScopeKind, std::pair<std::string, std::string>> SCOPE_TO_DECL = {
@@ -532,8 +560,12 @@ void ParserImpl::DiagConflictedModifier(const Modifier& resMod, const Modifier& 
 
     builder.AddHint(resRange);
     if (node->IsDecl()) {
-        auto decl = RawStaticCast<const Decl*>(node);
-        builder.AddHint(MakeRange(decl->keywordPos, decl->keywordPos + hintN1.size()), hintN2);
+        auto decl = RawStaticCast<const Decl *>(node);
+        if (decl->astKind == ASTKind::VAR_DECL && decl->IsConst()) {
+            builder.AddHint(MakeRange(decl->identifier), hintN2);
+        } else {
+            builder.AddHint(MakeRange(decl->keywordPos, decl->keywordPos + hintN1.size()), hintN2);
+        }
     } else if (node->astKind == ASTKind::PACKAGE_SPEC) {
         auto pkgPos = StaticAs<ASTKind::PACKAGE_SPEC>(node)->packagePos;
         builder.AddHint(MakeRange(pkgPos, pkgPos + hintN1.size()), hintN2);
@@ -1370,6 +1402,52 @@ void ParserImpl::DiagDeprecatedInvalidTarget(
     ParseDiagnoseRefactor(DiagKindRefactor::parse_deprecated_invalid_target, node, invalidTarget);
 }
 
+void ParserImpl::DiagAnnotationExpectsOneArgument(const AST::Annotation& node, const std::string& annotationName)
+{
+    ParseDiagnoseRefactor(
+        DiagKindRefactor::parse_annotation_one_argument,
+        node, annotationName, "");
+}
+
+void ParserImpl::DiagAnnotationExpectsOneArgument(const Annotation& node, const std::string& annotationName,
+                                                  const std::string& argInfo)
+{
+    const Node* diagNode = node.args.size() == 1 ? StaticCast<Node*>(node.args[0].get().get()) : &node;
+    auto dbuilder = ParseDiagnoseRefactor(DiagKindRefactor::parse_annotation_one_argument, *diagNode,
+        annotationName, " " + argInfo);
+
+    switch (node.args.size()) {
+        case 1:
+            dbuilder.AddMainHintArguments(argInfo);
+            break;
+        default:
+            dbuilder.AddMainHintArguments("single " + argInfo + " for " + annotationName);
+            break;
+    }
+}
+
+void ParserImpl::DiagAnnotationMoreThanOneArgs(const Annotation& node, const std::string& annotationName)
+{
+    CJC_ASSERT(node.args.size() > 1);
+    auto dbuilder = ParseDiagnoseRefactor(
+        DiagKindRefactor::parse_annotation_max_one_argument,
+        node, annotationName, "");
+    dbuilder.AddMainHintArguments("single argument for " + annotationName);
+}
+
+void ParserImpl::DiagAnnotationMoreThanOneArgs(const Annotation& node, const std::string& annotationName,
+                                               const std::string& argInfo)
+{
+    const Node* diagNode = node.args.size() == 1 ? StaticCast<Node*>(node.args[0].get().get()) : &node;
+    auto dbuilder = ParseDiagnoseRefactor(DiagKindRefactor::parse_annotation_max_one_argument,
+        *diagNode, annotationName, " " + argInfo);
+    if (node.args.size() == 1) {
+        dbuilder.AddMainHintArguments(argInfo);
+    } else {
+        dbuilder.AddMainHintArguments("single " + argInfo + " for " + annotationName);
+    }
+}
+
 void ParserImpl::DiagUnexpectedTypeIn(
     const Type& type, const Position& inPos, const std::string& inStr, const std::string& noteStr)
 {
@@ -1434,4 +1512,5 @@ void ParserImpl::DiagRedundantModifiers(const Modifier& lowerModifier, const Mod
     builder.AddMainHintArguments("'" + tarStr + "'", resStr);
     builder.AddHint(tarRange);
 }
+
 } // namespace Cangjie

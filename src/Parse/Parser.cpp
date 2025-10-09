@@ -25,18 +25,6 @@
 using namespace Cangjie;
 using namespace Cangjie::AST;
 
-namespace {
-inline std::string GetPackageNameWithPaths(const PackageSpec& packageSpec)
-{
-    std::stringstream ss;
-    for (const auto& prefix : packageSpec.prefixPaths) {
-        ss << prefix << ".";
-    }
-    ss << packageSpec.packageName.Val();
-    return ss.str();
-}
-} // namespace
-
 Parser::Parser(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
     bool attachComment, bool parseDeclFile)
     : impl{new ParserImpl{fileID, input, diag, sm, attachComment, parseDeclFile}}
@@ -99,6 +87,15 @@ OwnedPtr<File> ParserImpl::ParseTopLevel()
     ret->filePath = source.path;
     ret->fileHash = source.fileHash;
     SkipBlank(TokenKind::NL);
+     /**
+     * preamble
+     *  : featureSpec? packageHeader? importSpec*
+     *  ;
+    */
+    // Parse features in TopLevel
+    if (SeeingFeature()) {
+        ParseFeatureDirective(ret->feature);
+    }
     PtrVector<Annotation> annos;
     if (SeeingBuiltinAnnotation()) {
         ParseAnnotations(annos);
@@ -108,7 +105,7 @@ OwnedPtr<File> ParserImpl::ParseTopLevel()
     std::set<Modifier> modifiers;
     ParseModifiers(modifiers);
     if (SeeingPackage() || SeeingMacroPackage()) {
-        ret->package = ParsePackageSpec(std::move(modifiers));
+        ret->package = ParsePackageHeader(std::move(modifiers));
         /**
          * packageHeader
          *     : packageModifier? PACKAGE NL* (packageName NL* DOT NL*)* packageName end+
@@ -212,7 +209,7 @@ void ParserImpl::ParseTopLevelDecl(File& file, PtrVector<Annotation>& annos)
     file.decls.emplace_back(std::move(decl));
 }
 
-OwnedPtr<PackageSpec> ParserImpl::ParsePackageSpec(std::set<Modifier>&& modifiers)
+OwnedPtr<PackageSpec> ParserImpl::ParsePackageHeader(std::set<Modifier>&& modifiers)
 {
     auto packageHeader = MakeOwned<PackageSpec>();
 
@@ -235,7 +232,9 @@ OwnedPtr<PackageSpec> ParserImpl::ParsePackageSpec(std::set<Modifier>&& modifier
 
     ChainScope cs(*this, packageHeader.get());
     SrcIdentifier curIdent;
+    bool skipDc{false};
     do {
+        skipDc = false;
         if (!curIdent.Empty()) {
             packageHeader->prefixPaths.emplace_back(curIdent.Val());
             packageHeader->prefixPoses.emplace_back(curIdent.Begin());
@@ -252,11 +251,15 @@ OwnedPtr<PackageSpec> ParserImpl::ParsePackageSpec(std::set<Modifier>&& modifier
             }
             break;
         }
-    } while (Skip(TokenKind::DOT));
+        if (packageHeader->prefixPaths.empty() && Skip(TokenKind::DOUBLE_COLON)) {
+            packageHeader->hasDoubleColon = true;
+            skipDc = true;
+        }
+    } while (skipDc || Skip(TokenKind::DOT));
     packageHeader->packageName = std::move(curIdent);
     packageHeader->end = curIdent.End();
     (void)CheckDeclModifiers(modifiers, ScopeKind::TOPLEVEL, DefKind::PACKAGE);
-    auto fullPackageName = GetPackageNameWithPaths(*packageHeader);
+    auto fullPackageName = packageHeader->GetPackageName();
     if (!packageHeader->TestAttr(Attribute::IS_BROKEN) && fullPackageName.size() > PACKAGE_NAME_LEN_LIMIT) {
         auto packageNameBeginPos =
             packageHeader->prefixPaths.empty() ? curIdent.Begin() : packageHeader->prefixPoses[0];
@@ -309,7 +312,7 @@ std::vector<OwnedPtr<Decl>> ParserImpl::ParseForeignDecls(
     return ret;
 }
 
-void ParserImpl::CheckNoDeprecatedAnno(const PtrVector<Annotation>& annos, const std::string invalidTarget)
+void ParserImpl::CheckNoDeprecatedAnno(const PtrVector<Annotation>& annos, const std::string& invalidTarget)
 {
     for (auto& anno : annos) {
         if (anno->kind == AnnotationKind::DEPRECATED) {
@@ -367,19 +370,13 @@ OwnedPtr<Decl> ParserImpl::ParsePropDecl(
         ret->isVar = true;
     }
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
+    auto inClassLikeScope = scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::INTERFACE_BODY;
     if (Skip(TokenKind::LCURL)) {
         ParsePropBody(modifiers, *ret);
-    } else if (scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::INTERFACE_BODY ||
-        scopeKind == ScopeKind::UNKNOWN_SCOPE) {
-        // abstract mem prop can have no body.
-        // UNKNOWN_SCOPE mean current macro call is in a nested macro call with parentheses, we can't
-        // determine the scope of it, so we don't mark it as an error now. e.g
-        // @Nochange(
-        // interface I1 {
-        //     @Nochange
-        //     public prop p : Int64
-        // })
-        ret->EnableAttr(Attribute::ABSTRACT);
+    } else if (inClassLikeScope || scopeKind == ScopeKind::UNKNOWN_SCOPE || ret->TestAttr(Attribute::COMMON)) {
+        if (CanBeAbstract(*ret, scopeKind)) {
+            ret->EnableAttr(Attribute::ABSTRACT);
+        }
         if (ret->type) {
             ret->end = ret->type->end;
         }
@@ -390,6 +387,49 @@ OwnedPtr<Decl> ParserImpl::ParsePropDecl(
     ret->annotations = std::move(annos);
     SetDefaultFunc(scopeKind, *ret);
     return ret;
+}
+
+void ParserImpl::CheckClassLikePropAbstractness(AST::PropDecl& prop)
+{
+    CJC_NULLPTR_CHECK(prop.outerDecl);
+    if (prop.outerDecl->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::OBJ_C_MIRROR)) {
+        prop.DisableAttr(Attribute::ABSTRACT);
+        return;
+    }
+    bool isJavaMirrorOrJavaMirrorSubtype =
+        prop.outerDecl->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE);
+    bool isCommon = prop.TestAttr(Attribute::COMMON);
+    auto outerModifiers = prop.outerDecl->modifiers;
+    bool inAbstract = HasModifier(outerModifiers, TokenKind::ABSTRACT);
+    bool inCJMP = HasModifier(outerModifiers, TokenKind::PLATFORM) || HasModifier(outerModifiers, TokenKind::COMMON);
+    bool inAbstractCJMP = inAbstract && inCJMP;
+    bool inClass = prop.outerDecl->astKind == ASTKind::CLASS_DECL;
+    bool inAbstractCJMPClass = inAbstractCJMP && inClass;
+
+    if (HasModifier(prop.modifiers, TokenKind::ABSTRACT) && !isCommon && !inAbstractCJMP &&
+        !isJavaMirrorOrJavaMirrorSubtype) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_explicitly_abstract_only_for_cjmp_abstract_class,
+            lastToken.End(), "property");
+    }
+
+    if (inAbstractCJMPClass && prop.TestAttr(Attribute::ABSTRACT) &&
+        !HasModifier(prop.modifiers, TokenKind::ABSTRACT)) {
+        prop.DisableAttr(Attribute::ABSTRACT);
+        return;
+    }
+
+    // `abstract` modifier valid only in COMMON ABSTRACT class
+    if (HasModifier(prop.modifiers, TokenKind::ABSTRACT) && !inAbstractCJMPClass) {
+        Ptr<const Modifier> abstractMod = nullptr;
+        for (auto& modifier : prop.modifiers) {
+            if (modifier.modifier == TokenKind::ABSTRACT) {
+                abstractMod = Ptr(&modifier);
+            }
+        }
+        CJC_NULLPTR_CHECK(abstractMod);
+        ChainScope cs(*this, Ptr(&prop));
+        DiagIllegalModifierInScope(*abstractMod);
+    }
 }
 
 void ParserImpl::DiagMissingPropertyBody(AST::PropDecl& prop)
@@ -443,6 +483,9 @@ void ParserImpl::ParseExtendBody(ExtendDecl& ed)
             break;
         }
         auto decl = ParseDecl(ScopeKind::EXTEND_BODY);
+        if (decl->IsInvalid()) {
+            continue;
+        }
         SetMemberParentInheritableDecl(ed, decl);
         ed.members.emplace_back(std::move(decl));
     }

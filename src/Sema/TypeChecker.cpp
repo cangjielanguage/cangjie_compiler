@@ -35,6 +35,9 @@
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/Utils.h"
+#include "NativeFFI/Java/BeforeTypeCheck/GenerateJavaMirror.h"
+#include "NativeFFI/ObjC/BeforeTypeCheck/Desugar.h"
+
 
 namespace Cangjie {
 using namespace Sema;
@@ -56,8 +59,17 @@ TypeChecker::TypeCheckerImpl::TypeCheckerImpl(CompilerInstance* ci)
       ci(ci),
       diag(ci->diag),
       importManager(ci->importManager),
-      backendType(ci->invocation.globalOptions.backend)
+      backendType(ci->invocation.globalOptions.backend),
+      mpImpl(new MPTypeCheckerImpl(*ci))
 {
+}
+
+TypeChecker::TypeCheckerImpl::~TypeCheckerImpl()
+{
+    if (mpImpl) {
+        delete mpImpl;
+        mpImpl = nullptr;
+    }
 }
 
 bool TypeChecker::TypeCheckerImpl::CheckThisTypeOfFuncBody(const FuncBody& fb) const
@@ -226,10 +238,6 @@ void TypeChecker::TypeCheckerImpl::AddRetTypeNode(FuncBody& fb) const
 
 bool TypeChecker::TypeCheckerImpl::CheckNormalFuncBody(ASTContext& ctx, FuncBody& fb, std::vector<Ptr<Ty>>& paramTys)
 {
-    if (fb.funcDecl && fb.funcDecl->IsFinalizer() && fb.retType && !fb.retType->TestAttr(Attribute::COMPILER_ADD)) {
-        diag.Diagnose(*fb.retType, DiagKind::sema_invalid_return_value_type, "finalizer");
-        return false;
-    }
     if (fb.paramLists.empty()) {
         return false;
     }
@@ -329,12 +337,16 @@ void AddReturnTypeForPropMemDecl(PropDecl& pd)
 /**
  *  Add Getter/Setter in the abstract property(no body) of Interface/Class.
  */
-void AddSetterGetterInProp(const ClassLikeDecl& cld)
+void AddSetterGetterInProp(const InheritableDecl& cld)
 {
     for (auto decl : cld.GetMemberDeclPtrs()) {
         CJC_ASSERT(decl);
-        if (decl->astKind != ASTKind::PROP_DECL || !decl->TestAttr(Attribute::ABSTRACT) ||
-            decl->TestAttr(Attribute::IMPORTED)) {
+        if (decl->astKind != ASTKind::PROP_DECL || decl->TestAttr(Attribute::IMPORTED) ||
+            decl->TestAttr(Attribute::FROM_COMMON_PART)) {
+            continue;
+        }
+        // abstract propDecl and commonWithoutDefault propDecl need add default getter and setter
+        if (!decl->TestAttr(Attribute::ABSTRACT) && !IsCommonWithoutDefault(*decl)) {
             continue;
         }
         auto propDecl = RawStaticCast<PropDecl*>(decl);
@@ -346,6 +358,7 @@ void AddSetterGetterInProp(const ClassLikeDecl& cld)
         getter->CloneAttrs(*propDecl);
         getter->DisableAttr(Attribute::MUT);
         getter->EnableAttr(Attribute::IMPLICIT_ADD);
+        getter->EnableAttr(Attribute::COMPILER_ADD);
         if (cld.astKind == ASTKind::INTERFACE_DECL) {
             getter->EnableAttr(Attribute::PUBLIC);
         }
@@ -433,11 +446,6 @@ bool TypeChecker::TypeCheckerImpl::CheckReturnThisInFuncBody(const FuncBody& fb)
 
 void TypeChecker::TypeCheckerImpl::CheckCtorFuncBody(ASTContext& ctx, FuncBody& fb)
 {
-    CJC_ASSERT(fb.retType);
-    if (!fb.retType->TestAttr(Attribute::COMPILER_ADD)) {
-        diag.Diagnose(*fb.retType, DiagKind::sema_invalid_return_value_type, "constructor");
-        return;
-    }
     CJC_ASSERT(fb.funcDecl); // Ctor must have related funcDecl.
     if (fb.parentClassLike) {
         if (auto attr = HasJavaAttr(*fb.parentClassLike); attr) {
@@ -1698,7 +1706,7 @@ void TypeChecker::TypeCheckerImpl::CheckFinalizer(const FuncDecl& fd)
     }
 }
 
-void TypeChecker::TypeCheckerImpl::CheckPrimaryCtorForClassOrStruct(InheritableDecl& id, const std::string& typeName)
+void TypeChecker::TypeCheckerImpl::CheckPrimaryCtorForClassOrStruct(InheritableDecl& id)
 {
     if (id.TestAttr(Attribute::IMPORTED)) {
         return; // Do not desugar primary ctor for imported type decl.
@@ -1709,6 +1717,7 @@ void TypeChecker::TypeCheckerImpl::CheckPrimaryCtorForClassOrStruct(InheritableD
     for (auto& decl : id.GetMemberDecls()) {
         if (auto fd = DynamicCast<PrimaryCtorDecl*>(decl.get()); fd) {
             if (primaryCtor) {
+                auto typeName = id.astKind == ASTKind::CLASS_DECL ? "class" : "struct";
                 diag.Diagnose(*fd, DiagKind::sema_multiple_primary_constructors, typeName, id.identifier.Val());
             } else {
                 primaryCtor = true;
@@ -1746,6 +1755,26 @@ void TypeChecker::TypeCheckerImpl::TypeCheckCompositeBody(
         }
         Synthesize(ctx, decl.get());
         CheckCTypeMember(*decl);
+    }
+}
+
+void TypeChecker::TypeCheckerImpl::CheckJavaInteropLibImport(Decl& decl)
+{
+    constexpr auto INTEROPLIB_JAVA_PACKAGE_NAME = "interoplib.interop";
+    auto interopPackage = importManager.GetPackageDecl(INTEROPLIB_JAVA_PACKAGE_NAME);
+    if (!interopPackage) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_java_mirror_interoplib_must_be_imported, decl);
+        decl.EnableAttr(Attribute::IS_BROKEN);
+    }
+}
+
+void TypeChecker::TypeCheckerImpl::CheckObjCInteropLibImport(Decl& decl)
+{
+    constexpr auto INTEROPLIB_OBJ_C_PACKAGE_NAME = "interoplib.objc";
+    auto interopPackage = importManager.GetPackageDecl(INTEROPLIB_OBJ_C_PACKAGE_NAME);
+    if (!interopPackage) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_objc_mirror_interoplib_must_be_imported, decl);
+        decl.EnableAttr(Attribute::IS_BROKEN);
     }
 }
 
@@ -2123,6 +2152,8 @@ void TypeChecker::TypeCheckerImpl::PostTypeCheck(std::vector<Ptr<ASTContext>>& c
         CheckInstDupSuperInterfacesEntry(*ctx->curPackage);
         // Check legality of usage after sema type completed.
         CheckLegalityOfUsage(*ctx, *ctx->curPackage);
+        // Check cjmp match rules.
+        mpImpl->MatchPlatformWithCommon(*ctx->curPackage);
         AddAttrForDefaultFuncParam(*ctx->curPackage);
         // Because of the cjlint checking policy, desugar of propDecl should be done in sema stage for now.
         DesugarForPropDecl(*ctx->curPackage);
@@ -2143,6 +2174,16 @@ void TypeChecker::TypeCheckerImpl::PrepareTypeCheck(ASTContext& ctx, Package& pk
 {
     // Reset search's cache.
     ctx.searcher->InvalidateCache();
+
+    CheckPrimaryCtorBeforeMerge(pkg);
+    // Merging common classes into platform if any
+    mpImpl->PrepareTypeCheck4CJMP(pkg);
+    
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    Interop::Java::PrepareTypeCheck(pkg);
+    Interop::ObjC::PrepareTypeCheck(pkg);
+#endif
+
     // Phase: add some default function.
     AddDefaultFunction(pkg);
     // Add built-in decls to core package.
@@ -2265,28 +2306,27 @@ bool HasCtorForTypeDecl(const InheritableDecl& id)
 }
 } // namespace
 
-VisitAction TypeChecker::TypeCheckerImpl::CheckDefaultParamFunc(StructDecl& sd)
+VisitAction TypeChecker::TypeCheckerImpl::CheckDefaultParamFunc(StructDecl& sd) const
 {
     CJC_ASSERT(sd.body);
     // Do not desugar for broken body.
     if (sd.body->TestAttr(Attribute::IS_BROKEN)) {
         return VisitAction::SKIP_CHILDREN;
     }
-    CheckPrimaryCtorForClassOrStruct(sd, "struct");
     if (!HasCtorForTypeDecl(sd)) {
         AddDefaultCtor(sd);
     }
+    AddSetterGetterInProp(sd);
     return VisitAction::WALK_CHILDREN;
 }
 
-VisitAction TypeChecker::TypeCheckerImpl::CheckDefaultParamFunc(ClassDecl& cd, const File& file)
+VisitAction TypeChecker::TypeCheckerImpl::CheckDefaultParamFunc(ClassDecl& cd, const File& file) const
 {
     CJC_ASSERT(cd.body);
     // Do not desugar for broken body.
     if (cd.body->TestAttr(Attribute::IS_BROKEN)) {
         return VisitAction::SKIP_CHILDREN;
     }
-    CheckPrimaryCtorForClassOrStruct(cd, "class");
     if (!HasCtorForTypeDecl(cd)) {
         AddDefaultCtor(cd);
     }
@@ -2363,6 +2403,12 @@ VisitAction TypeChecker::TypeCheckerImpl::CheckDefaultParamFunc(const InterfaceD
     return VisitAction::WALK_CHILDREN;
 }
 
+VisitAction TypeChecker::TypeCheckerImpl::CheckDefaultParamFunc(const EnumDecl& ed) const
+{
+    AddSetterGetterInProp(ed);
+    return VisitAction::WALK_CHILDREN;
+}
+
 void TypeChecker::TypeCheckerImpl::CheckDefaultParamFuncsEntry(File& file)
 {
     auto visitFunc = [&file, this](Ptr<Node> node) -> VisitAction {
@@ -2391,6 +2437,15 @@ void TypeChecker::TypeCheckerImpl::CheckDefaultParamFuncsEntry(File& file)
             case ASTKind::INTERFACE_DECL: {
                 auto ifd = StaticAs<ASTKind::INTERFACE_DECL>(node);
                 return CheckDefaultParamFunc(*ifd);
+            }
+            case ASTKind::ENUM_DECL: {
+                auto ed = StaticAs<ASTKind::ENUM_DECL>(node);
+                return CheckDefaultParamFunc(*ed);
+            }
+            case ASTKind::EXTEND_DECL: {
+                auto ed = StaticAs<ASTKind::EXTEND_DECL>(node);
+                AddSetterGetterInProp(*ed);
+                return VisitAction::WALK_CHILDREN;
             }
             case ASTKind::FUNC_PARAM:
                 // Nested function inside default param value is dealt inside GetSingleParamFunc, should skip here.

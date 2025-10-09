@@ -5,30 +5,30 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 // ASTKIND(ast kind, ast value for human reading, ast node, ast size for notify checking related code)
 #ifdef ASTKIND
-ASTKIND(ANNOTATION, "annotation", Annotation, 560)
+ASTKIND(ANNOTATION, "annotation", Annotation, 584)
 ASTKIND(MODIFIER, "modifier", Modifier, 264)
-ASTKIND(DECL, "*decl", Decl, 696) // begin of subtypes of Decl.
-ASTKIND(MAIN_DECL, "main_decl", MainDecl, 720)
-ASTKIND(FUNC_DECL, "func_decl", FuncDecl, 792)
-ASTKIND(MACRO_DECL, "macro_decl", MacroDecl, 752)
-ASTKIND(CLASS_LIKE_DECL, "class_like_decl", ClassLikeDecl, 784) // begin: subtypes of ClassLikeDecl and InheritableDecl.
-ASTKIND(CLASS_DECL, "class_decl", ClassDecl, 800)
-ASTKIND(INTERFACE_DECL, "interface_decl", InterfaceDecl, 792) // end: subtypes of ClassLikeDecl.
-ASTKIND(EXTEND_DECL, "extend_decl", ExtendDecl, 848)
-ASTKIND(ENUM_DECL, "enum_decl", EnumDecl, 888)
-ASTKIND(STRUCT_DECL, "struct_decl", StructDecl, 752) // end of subtypes of InheritableDecl.
-ASTKIND(TYPE_ALIAS_DECL, "type_alias_decl", TypeAliasDecl, 720)
-ASTKIND(PRIMARY_CTOR_DECL, "primary_ctor_decl", PrimaryCtorDecl, 712)
-ASTKIND(BUILTIN_DECL, "builtin_decl", BuiltInDecl, 696)
-ASTKIND(VAR_DECL, "var_decl", VarDecl, 776) // begin of subtypes of VarDecl and VarDeclAbstract.
-ASTKIND(PROP_DECL, "prop_decl", PropDecl, 864)
-ASTKIND(MACRO_EXPAND_PARAM, "macro_expand_param", MacroExpandParam, 1576)
-ASTKIND(FUNC_PARAM, "func_param", FuncParam, 840)                                // end of subtypes of VarDecl.
-ASTKIND(VAR_WITH_PATTERN_DECL, "var_with_pattern_decl", VarWithPatternDecl, 768) // end of subtypes of VarDeclAbstract.
-ASTKIND(GENERIC_PARAM_DECL, "generic_param_decl", GenericParamDecl, 712)
-ASTKIND(PACKAGE_DECL, "package_decl", PackageDecl, 704)
-ASTKIND(MACRO_EXPAND_DECL, "macro_expand_decl", MacroExpandDecl, 1432)
-ASTKIND(INVALID_DECL, "invalid_decl", InvalidDecl, 696) // end of subtypes of Decl.
+ASTKIND(DECL, "*decl", Decl, 728) // begin of subtypes of Decl.
+ASTKIND(MAIN_DECL, "main_decl", MainDecl, 752)
+ASTKIND(FUNC_DECL, "func_decl", FuncDecl, 824)
+ASTKIND(MACRO_DECL, "macro_decl", MacroDecl, 784)
+ASTKIND(CLASS_LIKE_DECL, "class_like_decl", ClassLikeDecl, 824) // begin: subtypes of ClassLikeDecl and InheritableDecl.
+ASTKIND(CLASS_DECL, "class_decl", ClassDecl, 840)
+ASTKIND(INTERFACE_DECL, "interface_decl", InterfaceDecl, 832) // end: subtypes of ClassLikeDecl.
+ASTKIND(EXTEND_DECL, "extend_decl", ExtendDecl, 888)
+ASTKIND(ENUM_DECL, "enum_decl", EnumDecl, 928)
+ASTKIND(STRUCT_DECL, "struct_decl", StructDecl, 792) // end of subtypes of InheritableDecl.
+ASTKIND(TYPE_ALIAS_DECL, "type_alias_decl", TypeAliasDecl, 760)
+ASTKIND(PRIMARY_CTOR_DECL, "primary_ctor_decl", PrimaryCtorDecl, 744)
+ASTKIND(BUILTIN_DECL, "builtin_decl", BuiltInDecl, 736)
+ASTKIND(VAR_DECL, "var_decl", VarDecl, 808) // begin of subtypes of VarDecl and VarDeclAbstract.
+ASTKIND(PROP_DECL, "prop_decl", PropDecl, 896)
+ASTKIND(MACRO_EXPAND_PARAM, "macro_expand_param", MacroExpandParam, 1608)
+ASTKIND(FUNC_PARAM, "func_param", FuncParam, 872)                                // end of subtypes of VarDecl.
+ASTKIND(VAR_WITH_PATTERN_DECL, "var_with_pattern_decl", VarWithPatternDecl, 800) // end of subtypes of VarDeclAbstract.
+ASTKIND(GENERIC_PARAM_DECL, "generic_param_decl", GenericParamDecl, 752)
+ASTKIND(PACKAGE_DECL, "package_decl", PackageDecl, 736)
+ASTKIND(MACRO_EXPAND_DECL, "macro_expand_decl", MacroExpandDecl, 1464)
+ASTKIND(INVALID_DECL, "invalid_decl", InvalidDecl, 728) // end of subtypes of Decl.
 ASTKIND(PATTERN, "*pattern", Pattern, 264)              // begin of subTypes of Pattern.
 ASTKIND(VAR_PATTERN, "var_pattern", VarPattern, 280)
 ASTKIND(CONST_PATTERN, "const_pattern", ConstPattern, 280)
@@ -69,7 +69,7 @@ ASTKIND(ASSIGN_EXPR, "assign_expr", AssignExpr, 480) // begin of OverloadableExp
 ASTKIND(UNARY_EXPR, "unary_expr", UnaryExpr, 464)
 ASTKIND(BINARY_EXPR, "binary_expr", BinaryExpr, 464)
 ASTKIND(INC_OR_DEC_EXPR, "inc_or_dec_expr", IncOrDecExpr, 464)
-ASTKIND(SUBSCRIPT_EXPR, "subscript_expr", SubscriptExpr, 512) // end of OverloadableExpr.
+ASTKIND(SUBSCRIPT_EXPR, "subscript_expr", SubscriptExpr, 528) // end of OverloadableExpr.
 ASTKIND(IS_EXPR, "is_expr", IsExpr, 464)
 ASTKIND(AS_EXPR, "as_expr", AsExpr, 464)
 ASTKIND(RANGE_EXPR, "range_expr", RangeExpr, 512)
@@ -112,8 +112,10 @@ ASTKIND(INTERFACE_BODY, "interface_body", InterfaceBody, 328)
 ASTKIND(DUMMY_BODY, "dummy_body", DummyBody, 256)
 ASTKIND(IMPORT_CONTENT, "import_content", ImportContent, 600)
 ASTKIND(IMPORT_SPEC, "import_spec", ImportSpec, 912)
-ASTKIND(PACKAGE_SPEC, "package_spec", PackageSpec, 456)
+ASTKIND(PACKAGE_SPEC, "package_spec", PackageSpec, 464)
 ASTKIND(PACKAGE, "package", Package, 392)
-ASTKIND(FILE, "file", File, 536)
+ASTKIND(FEATURE_ID, "feature_id", FeatureId, 304)
+ASTKIND(FEATURES_DIRECTIVE, "features_directive", FeaturesDirective, 304)
+ASTKIND(FILE, "file", File, 552)
 ASTKIND(NODE, "node", Node, 256)
 #endif

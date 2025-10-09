@@ -101,7 +101,7 @@ TEST_F(CastASTTests, VerifyCastingCount)
     size_t totalCount = static_cast<uint8_t>(AST::ASTKind::NODE) + 1;
     EXPECT_TRUE(totalCount > ignoredKind.size());
     size_t size = totalCount - ignoredKind.size();
-    EXPECT_EQ(size, 104);
+    EXPECT_EQ(size, 106);
     EXPECT_EQ(astPool.size(), size);
 
     // Added node's kind should same with key.

@@ -48,6 +48,12 @@ public:
             (void)checkStatus.erase(&node);
             return VisitAction::WALK_CHILDREN;
         }
+        if (node.TestAttr(Attribute::FROM_COMMON_PART)) {
+            return VisitAction::SKIP_CHILDREN;
+        }
+        if (node.TestAttr(Attribute::COMMON) && node.TestAttr(Attribute::IMPORTED)) {
+            return VisitAction::SKIP_CHILDREN;
+        }
         // Target can be ignored that:
         // 1. the target is type node's target.
         // 2. the target has ignored astKinds.

@@ -902,6 +902,25 @@ protected:
         }
     }
 
+    virtual void PreHandleFieldExpr(State<ValueDomain>& state, const Field* field)
+    {
+        auto dest = field->GetResult();
+        auto indexes = field->GetPath();
+        if (indexes.size() > 1) {
+            if (auto it = state.programState.find(dest); it == state.programState.end()) {
+                state.InitToTopOrTopRef(dest, dest->GetType()->IsRef());
+            }
+            return;
+        }
+        if (auto it = childrenMap.find(field->GetBase()); it != childrenMap.end()) {
+            auto& children = it->second;
+            if (indexes[0] < children.size()) {
+                return state.PropagateWithoutChildren(children[indexes[0]], field->GetResult());
+            }
+        }
+        state.SetToTopOrTopRef(dest, dest->GetType()->IsRef());
+    }
+
 private:
     void PreHandleMemoryExpr(State<ValueDomain>& state, const Expression* expression)
     {
@@ -1431,25 +1450,6 @@ private:
         }
     }
 
-    void PreHandleFieldExpr(State<ValueDomain>& state, const Field* field)
-    {
-        auto dest = field->GetResult();
-        auto indexes = field->GetPath();
-        if (indexes.size() > 1) {
-            if (auto it = state.programState.find(dest); it == state.programState.end()) {
-                state.InitToTopOrTopRef(dest, dest->GetType()->IsRef());
-            }
-            return;
-        }
-        if (auto it = childrenMap.find(field->GetBase()); it != childrenMap.end()) {
-            auto& children = it->second;
-            if (indexes[0] < children.size()) {
-                return state.PropagateWithoutChildren(children[indexes[0]], field->GetResult());
-            }
-        }
-        state.SetToTopOrTopRef(dest, dest->GetType()->IsRef());
-    }
-
     bool PreHandleNonCheckedTypeCast(State<ValueDomain>& state, const TypeCast* cast)
     {
         auto dest = cast->GetResult();
@@ -1509,7 +1509,7 @@ private:
     }
 
     // ============ functions that need to be implemented by a concrete analysis ============ //
-    virtual void HandleFuncParam(State<ValueDomain>& state, const Parameter* param, Value* refObj)
+    virtual void HandleFuncParam(State<ValueDomain>& state, Parameter* param, Value* refObj)
     {
         (void)state;
         (void)param;

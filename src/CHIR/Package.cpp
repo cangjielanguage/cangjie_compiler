@@ -13,8 +13,6 @@
 #include "cangjie/CHIR/Type/StructDef.h"
 #include "cangjie/CHIR/Value.h"
 
-#include <sstream>
-
 using namespace Cangjie::CHIR;
 
 Package::Package(const std::string& name) : name(name)
@@ -59,6 +57,16 @@ std::vector<EnumDef*> Package::GetEnums() const
 void Package::SetPackageInitFunc(Func* func)
 {
     packageInitFunc = func;
+}
+
+void Package::SetPackageLiteralInitFunc(Func* func)
+{
+    packageLiteralInitFunc = func;
+}
+
+Func* Package::GetPackageLiteralInitFunc() const
+{
+    return packageLiteralInitFunc;
 }
 
 void Package::SetImportedVarAndFuncs(std::vector<ImportedValue*>&& items)
@@ -290,6 +298,18 @@ std::vector<CustomTypeDef*> Package::GetAllImportedCustomTypeDef() const
     all.insert(all.end(), importedEnums.begin(), importedEnums.end());
     all.insert(all.end(), importedExtends.begin(), importedExtends.end());
 
+    return all;
+}
+
+std::vector<CustomTypeDef*> Package::GetCurPkgCustomTypeDef() const
+{
+    std::vector<CustomTypeDef*> all;
+ 
+    all.insert(all.end(), structs.begin(), structs.end());
+    all.insert(all.end(), classes.begin(), classes.end());
+    all.insert(all.end(), enums.begin(), enums.end());
+    all.insert(all.end(), extends.begin(), extends.end());
+ 
     return all;
 }
 

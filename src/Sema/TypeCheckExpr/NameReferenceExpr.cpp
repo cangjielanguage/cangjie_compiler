@@ -340,6 +340,8 @@ bool TypeChecker::TypeCheckerImpl::ChkRefExpr(ASTContext& ctx, Ty& target, NameR
     uint32_t matched = 0;
     CJC_ASSERT(refNode.IsReferenceExpr());
     RemoveDuplicateElements(targets);
+    // Add for cjmp
+    mpImpl->RemoveCommonCandidatesIfHasPlatform(targets);
     auto [genericIgnored, candidates] = CollectValidFuncTys(ctx, targets, refNode, DynamicCast<FuncTy*>(&target));
     TypeSubst resultMapping;
     Ptr<FuncDecl> matchedFd = nullptr;

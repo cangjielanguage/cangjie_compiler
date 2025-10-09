@@ -362,10 +362,23 @@ private:
 
     bool ChkDeclHasConstAllConstInitializers(const std::vector<OwnedPtr<Decl>>& decls)
     {
+        bool hasStaticConstInit = false;
+        bool hasNonStaticConstInit = false;
+        for (auto& decl : decls) {
+            if (decl->IsConst() && decl->TestAttr(Attribute::CONSTRUCTOR)) {
+                if (decl->TestAttr(Attribute::STATIC)) {
+                    hasStaticConstInit = true;
+                } else {
+                    hasNonStaticConstInit = true;
+                }
+            }
+        }
         auto res = true;
         for (auto& decl : decls) {
-            if (auto vda = DynamicCast<VarDeclAbstract*>(decl.get());
-                vda && vda->astKind != ASTKind::PROP_DECL && vda->initializer) {
+            if (auto vda = DynamicCast<VarDeclAbstract*>(decl.get()); vda && vda->astKind != ASTKind::PROP_DECL &&
+                vda->initializer &&
+                ((hasStaticConstInit && vda->TestAttr(Attribute::STATIC)) ||
+                    (hasNonStaticConstInit && !vda->TestAttr(Attribute::STATIC)))) {
                 res = ChkExpr(*vda->initializer, false) && res;
             }
         }

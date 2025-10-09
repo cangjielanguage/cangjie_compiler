@@ -353,6 +353,27 @@ void InitializationChecker::UpdateInitializationStatus(const AST::AssignExpr& as
     decl.EnableAttr(Attribute::INITIALIZED);
 }
 
+// For cjmp check common class/struct member instance variable init
+void InitializationChecker::CheckNonCommonVariablesInitInCommonDecl(const InheritableDecl& id)
+{
+    if (!id.TestAttr(Attribute::COMMON)) {
+        return;
+    }
+    // collect member decls
+    CollectDeclsInfo info = CollectDecls(id);
+    if (!info.initFuncDecls.empty()) {
+        return;
+    }
+    // if there is no initFuncDecls, common decl no-common member variable init check here
+    for (auto decl : info.nonFuncDecls) {
+        if (auto vd = DynamicCast<VarDecl *>(decl); vd) {
+            if (!vd->TestAttr(Attribute::COMMON) && vd->initializer == nullptr) {
+                diag.Diagnose(*decl, DiagKind::sema_class_uninitialized_field, decl->identifier.Val());
+            }
+        }
+    }
+}
+
 void InitializationChecker::CheckInitialization(Ptr<AST::Node> n)
 {
     if (!n || n->TestAttr(Attribute::HAS_BROKEN)) {
@@ -391,19 +412,21 @@ void InitializationChecker::CheckInitialization(Ptr<AST::Node> n)
                     fd.EnableAttr(Attribute::INITIALIZED);
                     CheckInitInFuncBody(*fd.funcBody);
                 }
+                CheckInitInExpr(fd.annotationsArray);
                 return VisitAction::SKIP_CHILDREN;
             }
             case ASTKind::EXTEND_DECL:
                 CheckInitInExtendDecl(StaticCast<ExtendDecl>(*n));
-                return VisitAction::WALK_CHILDREN;
+                StaticCast<ExtendDecl>(n)->EnableAttr(Attribute::INITIALIZED);
+                return VisitAction::SKIP_CHILDREN;
             case ASTKind::INTERFACE_DECL: {
                 auto& id = StaticCast<InterfaceDecl>(*n);
                 for (auto& si : id.inheritedTypes) {
                     CheckInitialization(si->GetTarget());
                 }
-                CheckInitInTypeDecl(id.body->decls);
+                CheckInitInTypeDecl(id);
                 id.EnableAttr(Attribute::INITIALIZED);
-                return VisitAction::WALK_CHILDREN;
+                return VisitAction::SKIP_CHILDREN;
             }
             case ASTKind::CLASS_DECL: {
                 auto& cd = StaticCast<ClassDecl>(*n);
@@ -411,6 +434,7 @@ void InitializationChecker::CheckInitialization(Ptr<AST::Node> n)
                     return VisitAction::SKIP_CHILDREN;
                 }
                 CheckInitInClassDecl(cd);
+                CheckNonCommonVariablesInitInCommonDecl(cd);
                 cd.EnableAttr(Attribute::INITIALIZED);
                 return VisitAction::SKIP_CHILDREN;
             }
@@ -421,14 +445,15 @@ void InitializationChecker::CheckInitialization(Ptr<AST::Node> n)
                 }
                 std::for_each(ed.constructors.begin(), ed.constructors.end(),
                     [](auto& it) { it->EnableAttr(Attribute::INITIALIZED); });
-                CheckInitInTypeDecl(ed.members);
+                CheckInitInTypeDecl(ed);
                 ed.EnableAttr(Attribute::INITIALIZED);
                 return VisitAction::SKIP_CHILDREN;
             }
             case ASTKind::STRUCT_DECL: {
                 auto& sd = StaticCast<StructDecl>(*n);
                 CheckStaticInitForTypeDecl(sd);
-                CheckInitInTypeDecl(sd.body->decls);
+                CheckInitInTypeDecl(sd);
+                CheckNonCommonVariablesInitInCommonDecl(sd);
                 sd.EnableAttr(Attribute::INITIALIZED);
                 return VisitAction::SKIP_CHILDREN;
             }
@@ -499,8 +524,7 @@ void InitializationChecker::CheckStaticInitForTypeDecl(const InheritableDecl& id
         }
     }
     for (auto decl : staticMembers) {
-        // any variable in .cj.d is correct to be not initialised
-        if (decl->TestAnyAttr(Attribute::INITIALIZED, Attribute::TOOL_ADD) || opts.compileCjd) {
+        if (decl->TestAnyAttr(Attribute::INITIALIZED, Attribute::TOOL_ADD, Attribute::COMMON) || opts.compileCjd) {
             continue;
         }
         auto builder =
@@ -537,7 +561,7 @@ void InitializationChecker::CheckInitInClassDecl(const ClassDecl& cd)
     }
     if (cd.body) {
         CheckStaticInitForTypeDecl(cd);
-        CheckInitInTypeDecl(cd.body->decls, superClassNonFuncDecls);
+        CheckInitInTypeDecl(cd, superClassNonFuncDecls);
     }
 }
 
@@ -558,7 +582,7 @@ void InitializationChecker::CheckInitInExtendDecl(const ExtendDecl& ed)
             }
         }
     }
-    CheckInitInTypeDecl(ed.members);
+    CheckInitInTypeDecl(ed);
     std::for_each(unInitNonFuncDecls.begin(), unInitNonFuncDecls.end(),
         [](Ptr<Decl> decl) { decl->DisableAttr(Attribute::INITIALIZED); });
 }
@@ -603,16 +627,30 @@ void InitializationChecker::CheckInitInVarWithPatternDecl(VarWithPatternDecl& vp
             return VisitAction::WALK_CHILDREN;
         }).Walk();
     }
+    CheckInitInExpr(vpd.annotationsArray);
 }
 
 void InitializationChecker::CheckInitInVarDecl(VarDecl& vd)
 {
     if (vd.initializer) {
+        if (IsInstanceMember(vd)) {
+            CJC_ASSERT(!currentInitializingVarDependencies);
+            currentInitializingVarDependencies = std::unordered_set<Ptr<const AST::Decl>>{};
+        }
+
         CheckInitInExpr(vd.initializer.get());
         vd.EnableAttr(Attribute::INITIALIZED);
+
+        // Save recored dependencies to variable decl if relevant
+        if (currentInitializingVarDependencies) {
+            auto& deps = *currentInitializingVarDependencies;
+            std::move(deps.begin(), deps.end(), std::back_inserter(vd.dependencies));
+            currentInitializingVarDependencies = std::nullopt;
+        }
     } else if (vd.TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
         vd.EnableAttr(Attribute::INITIALIZED);
     }
+    CheckInitInExpr(vd.annotationsArray);
 }
 
 void InitializationChecker::CheckLetFlag(const Expr& ae, const Expr& expr)
@@ -698,6 +736,7 @@ bool InitializationChecker::CheckInitInRefExpr(const RefExpr& re)
         diag.Diagnose(re, DiagKind::sema_illegal_usage_of_member, "this");
         return false;
     }
+    RecordInstanceVariableUsage(*target);
     if (CanSkipInitCheck(*target) || !IsOrderRelated(re, *target, target->IsNominalDecl())) {
         return true;
     }
@@ -756,6 +795,7 @@ bool InitializationChecker::CheckInitInMemberAccess(MemberAccess& ma)
     if (!ma.target) {
         return res;
     }
+    RecordInstanceVariableUsage(*ma.target);
     auto curStructOfMemberAccess = ScopeManager::GetCurSymbolByKind(SymbolKind::STRUCT, ctx, ma.scopeName);
     if (auto re = DynamicCast<RefExpr*>(ma.baseExpr.get()); re && ma.target->outerDecl &&
         !ma.target->TestAttr(Attribute::STATIC) && curStructOfMemberAccess &&
@@ -1486,13 +1526,9 @@ bool InitializationChecker::CheckIllegalRefExprAccess(
 }
 
 void InitializationChecker::CheckInitInTypeDecl(
-    const std::vector<OwnedPtr<Decl>>& decls, const std::vector<Ptr<Decl>>& superClassNonFuncDecls)
+    const Decl& inheritDecl, const std::vector<Ptr<Decl>>& superClassNonFuncDecls)
 {
-    CollectDeclsInfo info{};
-
-    for (auto& d : decls) {
-        CollectDecls(d, info);
-    }
+    CollectDeclsInfo info = CollectDecls(inheritDecl);
 
     // 1. non funcs
     for (auto nfd : info.nonFuncDecls) {
@@ -1521,7 +1557,8 @@ void InitializationChecker::CheckInitInTypeDecl(
     }
     // 3. constructors
     for (auto fd : info.initFuncDecls) {
-        if (fd == nullptr || fd->TestAttr(Attribute::INITIALIZATION_CHECKED)) {
+        if (fd == nullptr || fd->TestAttr(Attribute::INITIALIZATION_CHECKED) ||
+            (fd->TestAttr(Attribute::COMMON) && !fd->TestAttr(Attribute::COMMON_WITH_DEFAULT))) {
             continue;
         }
         CheckInitInConstructors(*fd, unInitNonFuncDecls);
@@ -1530,6 +1567,10 @@ void InitializationChecker::CheckInitInTypeDecl(
     // 4. non-static functions (include no-static properties)
     for (auto fd : info.funcDecls) {
         CheckInitialization(fd);
+    }
+
+    for (auto annoArray : info.annotations) {
+        CheckInitInExpr(annoArray);
     }
 }
 
@@ -1552,6 +1593,26 @@ void InitializationChecker::CheckInitInConstructors(FuncDecl& fd, const std::vec
         }
         return;
     }
+
+    if (auto classDecl = As<ASTKind::CLASS_DECL>(fd.funcBody->parentClassLike)) {
+        if (auto superClass = classDecl->GetSuperClassDecl(); superClass
+            && superClass->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE)) {
+                for (auto decl : unInitNonFuncDecls) {
+                    if (decl->astKind != ASTKind::VAR_DECL || !decl->TestAttr(Attribute::COMPILER_ADD)) {
+                        continue;
+                    }
+                    if (decl->identifier != Interop::Java::JAVA_REF_FIELD_NAME) {
+                        continue;
+                    }
+                    /*
+                        Only `javaref` field in mirrors and impls initialization has to be skipped.
+                        This field is initialized in JavaInterop desugar stage
+                    */
+                    decl->EnableAttr(Attribute::INITIALIZED);
+                }
+        }
+    }
+
     // If the constructor is terminated by 'ThrowExpr' directly,
     // the initialization check can be ignored, since the object will not be created.
     auto found = scopeTerminationKinds.find(fd.funcBody->scopeName);
@@ -1560,7 +1621,8 @@ void InitializationChecker::CheckInitInConstructors(FuncDecl& fd, const std::vec
     }
     auto definitelyUninitVars = ctorUninitVarsMap[&fd];
     for (auto decl : unInitNonFuncDecls) {
-        if (decl->TestAttr(Attribute::INITIALIZED) && definitelyUninitVars.count(decl) == 0) {
+        // Skip report error when the decl is common member for CJMP.
+        if (decl->TestAnyAttr(Attribute::INITIALIZED, Attribute::COMMON) && definitelyUninitVars.count(decl) == 0) {
             continue;
         }
         if (fd.TestAttr(Attribute::COMPILER_ADD, Attribute::PRIMARY_CONSTRUCTOR)) {
@@ -1572,7 +1634,7 @@ void InitializationChecker::CheckInitInConstructors(FuncDecl& fd, const std::vec
     }
 }
 
-void InitializationChecker::CollectDecls(const OwnedPtr<Decl>& decl, CollectDeclsInfo& info)
+void InitializationChecker::CollectToDeclsInfo(const OwnedPtr<Decl>& decl, CollectDeclsInfo& info)
 {
     if (decl->astKind == AST::ASTKind::PRIMARY_CTOR_DECL || decl->astKind == AST::ASTKind::MACRO_EXPAND_DECL) {
         return;
@@ -1595,9 +1657,38 @@ void InitializationChecker::CollectDecls(const OwnedPtr<Decl>& decl, CollectDecl
         if (decl->TestAttr(Attribute::STATIC)) {
             CheckInitialization(decl.get());
         } else {
-            info.nonFuncDecls.emplace_back(decl.get());
+            // Either invalid declaration or instance variable, that will be collected separately
+            CJC_ASSERT(decl->TestAttr(AST::Attribute::IS_BROKEN) || decl->TestAttr(AST::Attribute::HAS_BROKEN) ||
+                decl->astKind == ASTKind::VAR_WITH_PATTERN_DECL ||
+                (decl->astKind == ASTKind::VAR_DECL && !decl->IsStaticOrGlobal()));
         }
     }
+    if (decl->annotationsArray) {
+        info.annotations.push_back(decl->annotationsArray);
+    }
+}
+
+CollectDeclsInfo InitializationChecker::CollectDecls(const Decl& decl)
+{
+    CollectDeclsInfo info;
+    if (decl.annotationsArray) {
+        info.annotations.push_back(decl.annotationsArray);
+    }
+    if (auto enumDecl = DynamicCast<EnumDecl>(&decl)) {
+        for (auto& ctor: enumDecl->constructors) {
+            if (ctor->annotationsArray) {
+                info.annotations.push_back(ctor->annotationsArray);
+            }
+        }
+    }
+    for (auto& member : decl.GetMemberDecls()) {
+        CollectToDeclsInfo(member, info);
+    }
+    auto initOrder = GetVarsInitializationOrderWithPositions(decl);
+    for (auto& member : initOrder) {
+        info.nonFuncDecls.emplace_back(member.decl);
+    }
+    return info;
 }
 
 void InitializationChecker::GetNonFuncDeclsInSuperClass(
@@ -1675,4 +1766,18 @@ bool InitializationChecker::IsOrderRelated(const Node& checkNode, Node& targetNo
     }
     // Toplevel(except for var to var) or static decls are not order related.
     return !(targetNode.scopeLevel == 0 || isClassLikeOrStruct);
+}
+
+void InitializationChecker::RecordInstanceVariableUsage(const AST::Decl& target)
+{
+    if (!currentInitializingVarDependencies) {
+        return;
+    }
+
+    auto varDecl = DynamicCast<AST::VarDecl>(&target);
+    if (!varDecl || !IsInstanceMember(*varDecl)) {
+        return;
+    }
+
+    currentInitializingVarDependencies->emplace(Ptr(&target));
 }

@@ -196,7 +196,6 @@ private:
 
     IVal* AllocateValue(IVal&& value);
 
-
     // Invoke support
     Bchir::ByteCodeIndex FindMethod(Bchir::ByteCodeContent classId, Bchir::ByteCodeContent nameId);
 

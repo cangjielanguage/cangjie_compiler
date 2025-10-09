@@ -7,6 +7,7 @@
 ERROR(module_diag_begin, "")
 // file system error
 ERROR(module_read_file_to_buffer_failed, "read file '%s' failed, reason: '%s'")
+ERROR(module_common_part_path_is_required, "specify common part path of when compiling platform part of package.")
 ERROR(module_read_file_conflicted, "the file '%s' is a duplicate source file")
 WARNING(module_version_not_identical, PACKAGE_IMPORT, "ast file for '%s' created by cjc which version is '%s' and current cjc version is '%s', it may cause crash because lack information of declaration")
 ERROR(module_open_bcFile_failed, "can't open output file '%s': '%s'")
@@ -15,4 +16,6 @@ ERROR(module_same_name_with_indirect_dependent_pkg, "failed to load dependent pa
 
 // Used by lsp
 ERROR(module_unsupport_circular_dependencies, "packages %s are in circular dependencies.")
+ERROR(module_common_cjo_wrong_package, "common part is for another package '%s', expected the same as for current package '%s'.")
+
 ERROR(module_diag_end, "")

@@ -193,6 +193,7 @@ const std::unordered_map<CHIR::IntrinsicKind, std::string> INTRINSIC_KIND_TO_STR
 
     // Box cast intrinsic
     {CHIR::OBJECT_AS, "object.as"}, {CHIR::IS_NULL, "isNull"},
+    {CHIR::BLACK_BOX, "blackBox"}
 };
 
 const std::unordered_map<CHIR::Package::AccessLevel, std::string> PACKAGE_ACCESS_LEVEL_TO_STRING_MAP = {
@@ -250,6 +251,8 @@ std::string GetBlockStr(const Block& block, size_t indent = 0);
  * @return A string representing the function.
  */
 std::string GetFuncStr(const Func& func, size_t indent = 0);
+
+std::string FuncSymbolStr(const Func& func);
 
 /**
  * @brief Generates a string representation of a lambda expression.
@@ -335,7 +338,6 @@ StringWrapper ThisTypeToString(const Type* thisType);
 std::string InstTypeArgsToString(const std::vector<Type*>& instTypeArgs);
 std::string ExprOperandsToString(const std::vector<Value*>& args);
 std::string ExprWithExceptionOperandsToString(const std::vector<Value*>& args, const std::vector<Block*>& successors);
-std::string ParamTypesToString(const FuncType& funcType);
 std::string OverflowToString(Cangjie::OverflowStrategy ofStrategy);
 } // namespace Cangjie::CHIR
 

@@ -14,6 +14,8 @@
 #define CANGJIE_PARSE_PARSERIMPL_H
 
 #include "cangjie/Parse/Parser.h"
+#include "MPParserImpl.h"
+#include "NativeFFI/FFIParserImpl.h"
 
 namespace Cangjie {
 using namespace AST;
@@ -60,33 +62,12 @@ const std::vector<TokenKind>& GetTypeFirst();
 class ParserImpl final {
 public:
     ParserImpl(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
-        bool attachComment, bool parsingDeclFiles)
-        : diag(diag),
-          sourceManager(sm),
-          lexer{std::make_unique<Lexer>(fileID, input, diag, sm, attachComment)},
-          enableAttachComment(attachComment),
-          parseDeclFile{parsingDeclFiles}
-    {
-    }
+        bool attachComment, bool parsingDeclFiles);
     ParserImpl(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos,
-        bool attachComment, bool parsingDeclFiles)
-        : diag(diag),
-          sourceManager(sm),
-          lexer{std::make_unique<Lexer>(input, diag, sm, pos, attachComment)},
-          enableAttachComment{attachComment},
-          parseDeclFile{parsingDeclFiles}
-    {
-    }
+        bool attachComment, bool parsingDeclFiles);
     ParserImpl(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm, bool attachComment,
-        bool parsingDeclFiles)
-        : diag(diag),
-          sourceManager(sm),
-          lexer{std::make_unique<Lexer>(inputTokens, diag, sm, attachComment)},
-          enableAttachComment{attachComment},
-          parseDeclFile{parsingDeclFiles}
-    {
-    }
-    ~ParserImpl() = default;
+        bool parsingDeclFiles);
+    ~ParserImpl();
 
     size_t GetLineNum() const;
 
@@ -186,7 +167,6 @@ private:
     bool SkipAmbiguousToken();
 
     bool SkipCombinedDoubleArrow();
-    bool SkipCombinedBackarrow();
 
     inline bool SeeingImport2()
     {
@@ -197,6 +177,10 @@ private:
     inline bool SeeingPackage()
     {
         return Seeing(TokenKind::PACKAGE);
+    }
+    inline bool SeeingFeature()
+    {
+        return Seeing(TokenKind::FEATURES);
     }
     inline bool SeeingMacroPackage()
     {
@@ -300,6 +284,7 @@ private:
     bool parseDeclFile{false};
 
     bool enableEH{false};
+    bool enableInteropCJMapping{false};
     Triple::BackendType backend{Triple::BackendType::CJNATIVE};
     bool calculateLineNum{false};
     // we store line number info from all tokens
@@ -307,6 +292,15 @@ private:
     std::list<std::pair<unsigned, unsigned>> allTokensInOneFile;
     TokenVecMap commentsMap;
     uint8_t Precedence(TokenKind kind) const;
+
+    // cjmp parser implementation class
+    friend class MPParserImpl;
+    class MPParserImpl* mpImpl;
+
+    friend class FFIParserImpl;
+    friend class JFFIParserImpl;
+    friend class OCFFIParserImpl;
+    class FFIParserImpl* ffiParser;
 
     /// Common initializer shared among constructors.
     void Init();
@@ -369,6 +363,10 @@ private:
     bool SeeingOperator()
     {
         return (Peek().kind >= TokenKind::DOT) && (Peek().kind <= TokenKind::WILDCARD);
+    }
+    bool SeeingSoftKeyword()
+    {
+        return Peek().kind == TokenKind::FEATURES;
     }
     bool SeeingExpr();
     // modifiers
@@ -546,7 +544,7 @@ private:
     void AssignCurFile(const OwnedPtr<AST::File>& file) const;
     void ParseWhenModifierHandler(std::vector<OwnedPtr<AST::Decl>>& ret, std::vector<OwnedPtr<AST::Annotation>>& annos);
 
-    OwnedPtr<AST::PackageSpec> ParsePackageSpec(std::set<AST::Modifier>&& modifiers);
+    OwnedPtr<AST::PackageSpec> ParsePackageHeader(std::set<AST::Modifier>&& modifiers);
     // return: seeing end of file.
     bool ParsePackageHeaderEnd();
     void ParseTopLevelDecls(AST::File& file, std::vector<OwnedPtr<AST::Annotation>>& annos);
@@ -616,12 +614,8 @@ private:
     void SetDefaultFunc(ScopeKind scopeKind, AST::Decl& decl) const;
     void ParseCaseBody(AST::EnumDecl& enumDecl);
     void ParseEnumBody(AST::EnumDecl& enumDecl);
-    OwnedPtr<AST::Decl> ParseEnumConstructorWithArgs(const std::string& caseIdent, const Position& caseIdentBegin,
-        const Position& caseIdentEnd, size_t caseIdentLength, const Position& casePos,
-        PtrVector<AST::Annotation>& annos);
-    OwnedPtr<AST::Decl> ParseNoArgsEnumConstructor(const std::string& caseIdent, const Position& caseIdentBegin,
-        const Position& caseIdentEnd, size_t caseIdentLength, const Position& casePos,
-        PtrVector<AST::Annotation>& annos);
+    OwnedPtr<AST::Decl> ParseEnumConstructorWithArgs(const Token& id, PtrVector<AST::Annotation>& annos);
+    OwnedPtr<AST::Decl> ParseNoArgsEnumConstructor(const Token& id, PtrVector<AST::Annotation>& annos);
     OwnedPtr<AST::StructBody> ParseStructBody(AST::StructDecl& sd);
     void ParseStructInheritedTypes(AST::StructDecl& structDecl);
     void ParseExtendedType(AST::ExtendDecl& extendDecl);
@@ -777,8 +771,8 @@ private:
     OwnedPtr<AST::Expr> ParseUnsafeBlock();
     bool DiagForBlock(const AST::Block& block);
     template <typename T> bool CheckSkipRcurOrPrematureEnd(T& ret);
-    OwnedPtr<AST::ClassBody> ParseClassBody(const AST::ClassDecl& cd);
-    OwnedPtr<AST::InterfaceBody> ParseInterfaceBody(const AST::InterfaceDecl& id);
+    OwnedPtr<AST::ClassBody> ParseClassBody(AST::ClassDecl& cd);
+    OwnedPtr<AST::InterfaceBody> ParseInterfaceBody(AST::InterfaceDecl& id);
     OwnedPtr<AST::Decl> ParseEnumConstructor(
         const std::set<AST::Modifier>& modifiers, PtrVector<AST::Annotation>& annos);
     OwnedPtr<AST::TypePattern> ParseTypePattern(const Position& begin);
@@ -795,6 +789,8 @@ private:
         const std::set<AST::Attribute>& attributes = {}, bool isVar = false, bool inDecl = false);
     OwnedPtr<AST::SpawnExpr> ParseSpawnExpr();
     OwnedPtr<AST::SynchronizedExpr> ParseSynchronizedExpr();
+    void ParseFeatureDirective(OwnedPtr<FeaturesDirective>& features);
+    bool ParseFeatureId(OwnedPtr<FeaturesDirective>& features);
     void ParseCommonImportSpec(PtrVector<AST::ImportSpec>& imports, PtrVector<AST::Annotation>& annos);
     void CheckImportSpec(PtrVector<AST::ImportSpec>& imports);
     void CheckTypeArgumentsInEnumPattern(Ptr<const AST::EnumPattern> enumPattern);
@@ -809,8 +805,6 @@ private:
     void ParseImportMulti(AST::ImportContent& content);
     void ParseImportAliasPart(AST::ImportContent& content);
     void ParseImportSpecInTop(PtrVector<AST::ImportSpec>& imports, PtrVector<AST::Annotation>& annos);
-    void CheckAllowedAnnoOnImport(PtrVector<AST::Annotation>& annos,
-        const PtrVector<AST::ImportSpec>::iterator& importBegin, const PtrVector<AST::ImportSpec>::iterator& importEnd);
     std::vector<OwnedPtr<AST::RefExpr>> TryParseIdentifierList(
         AST::Expr& expr, const std::string& attrName, const Position& pos);
     bool SeeingBuiltinAnnotation();
@@ -841,8 +835,6 @@ private:
     /// Note that trailing comma is invalid if there are zero elements.
     void ParseZeroOrMoreSepTrailing(std::function<void(const Position&)>&& storeSeparator,
         std::function<void()>&& parseElement, TokenKind end, TokenKind separator = TokenKind::COMMA);
-    void ParseZeroOrMoreWithSeparator(TokenKind separator, std::vector<Position>& positions,
-        const std::function<void()>& parseElement, TokenKind terminator);
     void ParseZeroOrMoreWithSeparator(TokenKind separator, const std::function<void(const Position)>& storeSeparator,
         const std::function<void()>& parseElement, TokenKind terminator);
     void CheckOverflowAnno(
@@ -859,11 +851,11 @@ private:
     void CheckBaseOfTrailingClosureExpr(const OwnedPtr<AST::Expr>& baseExpr);
     template <typename T> void ParseFuncDeclAnnos(std::vector<OwnedPtr<AST::Annotation>>& annos, T& funcDecl);
     // Move this to sema.
-    void CheckNoDeprecatedAnno(const PtrVector<AST::Annotation>& annos, const std::string invalidTarget);
+    void CheckNoDeprecatedAnno(const PtrVector<AST::Annotation>& annos, const std::string& invalidTarget);
     void CheckDeprecationOfFuncParam(const AST::FuncParam& param);
     std::string GetSingleLineContent(const Position& begin, const Position& end) const;
-    void DiagExpectedIdentifier(
-        const Range& range, const std::string& expectedName = "a name", const std::string& afterName = "after this");
+    void DiagExpectedIdentifier(const Range& range, const std::string& expectedName = "a name",
+        const std::string& afterName = "after this", const bool callHelp = true);
     void DiagExpectedIdentifierWithNode(Ptr<AST::Node> node);
     void DiagImportingByPackageNameIsNotSupported(const Position& expectPos);
     void DiagNameLengthOverflow(const Range& r, const std::string& tar, size_t maxLength, size_t realLength);
@@ -1030,6 +1022,7 @@ private:
         {AST::ASTKind::GENERIC_CONSTRAINT, &ParserImpl::DiagExpectedIdentifierGenericConstraint},
         {AST::ASTKind::IMPORT_CONTENT, &ParserImpl::DiagExpectedIdentifierImportContent},
         {AST::ASTKind::IMPORT_SPEC, &ParserImpl::DiagExpectedIdentifierImportSpec},
+        {AST::ASTKind::FEATURES_DIRECTIVE, &ParserImpl::DiagExpectedIdentifierFeatureDirective},
         {AST::ASTKind::PACKAGE_SPEC, &ParserImpl::DiagExpectedIdentifierPackageSpec},
         {AST::ASTKind::PROP_DECL, &ParserImpl::DiagExpectedIdentifierPropDecl},
         {AST::ASTKind::REF_TYPE, &ParserImpl::DiagExpectedIdentifierRefType},
@@ -1051,6 +1044,7 @@ private:
     void DiagExpectedIdentifierGenericConstraint(Ptr<AST::Node> node);
     void DiagExpectedIdentifierImportContent(Ptr<AST::Node> node);
     void DiagExpectedIdentifierImportSpec(Ptr<AST::Node> node);
+    void DiagExpectedIdentifierFeatureDirective(Ptr<Node> node);
     void DiagExpectedIdentifierPackageSpec(Ptr<AST::Node> node);
     void DiagExpectedIdentifierPropDecl(Ptr<AST::Node> node);
     void DiagExpectedIdentifierRefType(Ptr<AST::Node>);
@@ -1067,8 +1061,42 @@ private:
     void DiagExpectedIdentifierMacroExpandDecl(Ptr<AST::Node> node);
     void DiagExpectedIdentifierMacroExpandExpr(Ptr<AST::Node> node);
     void CheckLeftExpression(const Token& preT, const OwnedPtr<AST::Expr>& base, const Token& tok);
-    void CheckWildcardInExpr(const OwnedPtr<AST::Expr>& root);
-    void SetMemberParentInheritableDecl(const AST::InheritableDecl& outer, const OwnedPtr<AST::Decl>& decl) const;
+    void CheckWildcardInExpr(const OwnedPtr<AST::Expr> &root);
+    void CheckVarDeclModifiers(
+        std::set<AST::Modifier> modifiers, Ptr<AST::VarDecl> varDecl, ScopeKind scopeKind, const Token& keyToken);
+    void DiagAnnotationExpectsOneArgument(const AST::Annotation& node, const std::string& annotationName);
+    void DiagAnnotationExpectsOneArgument(const AST::Annotation& node, const std::string& annotationName,
+        const std::string& argInfo);
+    void DiagAnnotationMoreThanOneArgs(const AST::Annotation& node, const std::string& annotationName);
+    void DiagAnnotationMoreThanOneArgs(const AST::Annotation& node, const std::string& annotationName,
+        const std::string& argInfo);
+
+    // Cangjie Native & Java/ObjC FFI
+    void CheckObjCMirrorAnnotation(const AST::Annotation& anno) const;
+    // Check whether member decl can be abstract
+    bool CanBeAbstract(const AST::Decl& decl, ScopeKind scopeKind) const;
+    void CheckConstructorBody(AST::FuncDecl& ctor, ScopeKind scopeKind, bool inMacro = false);
+    void SetMemberParentInheritableDecl(AST::InheritableDecl& ret, const OwnedPtr<AST::Decl>& decl) const;
+    void FFICheckClassLikeFuncBody(
+        FuncDecl& decl,
+        DiagKindRefactor functionMustHaveReturnType,
+        DiagKindRefactor functionCanNotHaveBody);
+    void CheckClassLikePropAbstractness(AST::PropDecl& prop);
+    void CheckClassLikeFuncBodyAbstractness(AST::FuncDecl& decl);
+    void CheckJavaInteropMember(Decl& decl);
+    void CheckObjCInteropMember(Decl& member);
+    void CheckPropDeclJavaMirror(AST::PropDecl& decl);
+    void CheckPrimaryCtorDeclJavaMirror(AST::PrimaryCtorDecl& ctor);
+    void CheckMemberFuncJavaMirror(AST::FuncDecl& decl);
+    void CheckMemberFuncObjCMirror(AST::FuncDecl& func);
+    void CheckCJMappingAttr(Decl& decl) const;
+    void CheckInitCtorDeclBody(AST::FuncDecl& ctor);
+    void CheckInitCtorDeclJavaMirror(AST::FuncDecl& ctor);
+    void CheckInitCtorDeclObjCMirror(AST::FuncDecl& ctor);
+    void CheckVarDeclObjCMirror(AST::VarDecl& field) const;
+    void CheckPropDeclObjCMirror(AST::PropDecl& prop);
+    void CheckPrimaryCtorDeclObjCMirror(AST::PrimaryCtorDecl& ctor);
+
     friend class Parser;
 
     template <typename... Args>

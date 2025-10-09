@@ -52,6 +52,7 @@ inline bool IsSuperPackage(const std::string& srcFullPackageName, const std::str
     auto pureTargetFullPackageName = ImportManager::IsTestPackage(targetFullPackageName) ?
         ImportManager::GetMainPartPkgNameForTestPkg(targetFullPackageName) : targetFullPackageName;
     if (pureTargetFullPackageName.rfind(pureSrcFullPackageName, 0) == 0) {
+        // don't split org name, make it part of root package name.
         auto srcNames = Utils::SplitQualifiedName(pureSrcFullPackageName);
         auto targetNames = Utils::SplitQualifiedName(pureTargetFullPackageName);
         return srcNames.size() + 1 == targetNames.size();
@@ -94,6 +95,10 @@ inline AST::OrderedDeclSet GetVisibleDeclToMap(
     });
     return ret;
 }
+
+const std::string NO_CJO_HELP_INFO =
+    "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use "
+    "'--import-path' to specify the .cjo file path";
 } // namespace Cangjie::Modules
 
 #endif

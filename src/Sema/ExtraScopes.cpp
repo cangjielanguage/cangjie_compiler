@@ -249,6 +249,9 @@ void TypeChecker::TypeCheckerImpl::GenerateTypeMappingForBaseExpr(const Expr& ba
         CJC_NULLPTR_CHECK(maTarget->outerDecl->ty);
         auto instBaseTy = typeManager.GetInstantiatedTy(ma.baseExpr->ty, directMapping.u2i);
         auto promoteMapping = promotion.GetPromoteTypeMapping(*instBaseTy, *maTarget->outerDecl->ty);
+        if (realBase->ty != instBaseTy) {
+            typeManager.PackMapping(typeMapping, GenerateTypeMapping(*realBase, instBaseTy->typeArgs));
+        }
         auto baseTypeArgs = ma.baseExpr->GetTypeArgs();
         std::unordered_set<Ptr<Ty>> baseTyArgs;
         std::for_each(

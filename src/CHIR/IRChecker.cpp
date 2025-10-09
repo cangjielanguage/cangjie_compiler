@@ -285,8 +285,14 @@ private:
         auto ret = CheckIdentifier(value.GetIdentifier());
         ret = CheckValueReferenceType(value) && ret;
 
-        if (value.GetInitFunc() == nullptr && value.GetInitializer() == nullptr) {
+        bool noInitializer = value.GetInitFunc() == nullptr && value.GetInitializer() == nullptr;
+        if (noInitializer) {
+            if (value.TestAttr(Attribute::COMMON)) {
+                // common can have no initalizer only when compiling common part.
+                return ret;
+            }
             Errorln("GlobalVar " + value.GetIdentifier() + " should have either initializer or initFunc");
+            ret = false;
         }
         return ret;
     }
@@ -526,7 +532,7 @@ private:
                 continue;
             }
             std::string expectTy = "Struct-" + structT.GetIdentifierWithoutPrefix();
-            if (func->IsConstructor() || func->TestAttr(Attribute::MUT)) {
+            if (func->IsConstructor() || func->TestAttr(Attribute::MUT) || func->IsInstanceVarInit()) {
                 expectTy = expectTy + "&";
             }
             CJC_ASSERT(func->GetType()->IsFunc());
@@ -536,7 +542,7 @@ private:
                 continue;
             }
             Type* baseTy = funcTy->GetParamTypes()[0];
-            if (func->IsConstructor() || func->TestAttr(Attribute::MUT)) {
+            if (IsConstructor(*func) || func->TestAttr(Attribute::MUT) || func->IsInstanceVarInit()) {
                 if (!baseTy->IsRef()) {
                     ret = MemberFuncCheckError(*func, expectTy) && ret;
                     continue;
@@ -932,6 +938,9 @@ private:
     // func mangledName can not be same with other node.
     bool CheckFunc(const Func& func)
     {
+        if (func.TestAttr(Attribute::SKIP_ANALYSIS)) {
+            return true; // Nothing to visit
+        }
         auto ret = CheckIdentifier(func.GetIdentifier());
         if (!func.GetBody()) {
             auto err = "func " + func.GetIdentifier() + " doesn't have body";
@@ -1009,6 +1018,9 @@ private:
     {
         bool ret = true;
         std::unordered_set<std::string> idSet;
+        if (body.TestAttr(Attribute::SKIP_ANALYSIS)) {
+            return true;
+        }
         Visitor::Visit(body, [this, &ret, &idSet](BlockGroup& blockGroup) {
             ret = CheckBlockGroup(blockGroup) && ret;
             ret = CheckLocalId(blockGroup, idSet) && ret;
@@ -1364,6 +1376,15 @@ private:
             {ExprKind::GET_RTTI_STATIC, [&ret, &expr, this]() {
                 ret = CheckGetRTTI(Cangjie::StaticCast<GetRTTIStatic>(expr));
             }},
+            {ExprKind::GET_ELEMENT_BY_NAME, [&ret, &expr, this]() {
+                ret = CheckGetElementByName(Cangjie::StaticCast<GetElementByName>(expr));
+            }},
+            {ExprKind::STORE_ELEMENT_BY_NAME, [&ret, &expr, this]() {
+                ret = CheckStoreElementByName(Cangjie::StaticCast<StoreElementByName>(expr));
+            }},
+            {ExprKind::FIELD_BY_NAME, [&ret, &expr, this]() {
+                ret = CheckFieldByName(Cangjie::StaticCast<FieldByName>(expr));
+            }},
         };
         if (auto iter = actionMap.find(expr.GetExprKind()); iter != actionMap.end()) {
             iter->second();
@@ -1407,6 +1428,21 @@ private:
             return false;
         }
         return true;
+    }
+
+    bool CheckGetElementByName([[maybe_unused]] const GetElementByName& expr) const
+    {
+        return false;
+    }
+
+    bool CheckStoreElementByName([[maybe_unused]] const StoreElementByName& expr) const
+    {
+        return false;
+    }
+
+    bool CheckFieldByName([[maybe_unused]] const FieldByName& expr) const
+    {
+        return false;
     }
 
     bool CheckConstant(const Constant& expr) const
@@ -2057,7 +2093,7 @@ private:
         // check ref info of args
         for (size_t i = 0; i < args.size(); i++) {
             bool refOK = true;
-            if (i == 0 && (func->TestAttr(Attribute::MUT) || IsConstructor(*func))) {
+            if (i == 0 && (func->TestAttr(Attribute::MUT) || IsConstructor(*func) || IsInstanceVarInit(*func))) {
                 refOK = CheckFuncArgType(*args[i]->GetType(), funcType->IsCFunc(), true);
             } else {
                 refOK = CheckFuncArgType(*args[i]->GetType(), funcType->IsCFunc());
@@ -2385,7 +2421,7 @@ private:
         // check ref info of args
         for (size_t i = 0; i < args.size(); i++) {
             bool refOK = true;
-            if (i == 0 && (func->TestAttr(Attribute::MUT) || IsConstructor(*func))) {
+            if (i == 0 && (func->TestAttr(Attribute::MUT) || IsConstructor(*func) || IsInstanceVarInit(*func))) {
                 refOK = CheckFuncArgType(*args[i]->GetType(), funcType->IsCFunc(), true);
             } else {
                 refOK = CheckFuncArgType(*args[i]->GetType(), funcType->IsCFunc());

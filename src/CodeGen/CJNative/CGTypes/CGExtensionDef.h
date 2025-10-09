@@ -27,6 +27,15 @@
 namespace Cangjie::CodeGen {
 class CGExtensionDef {
 public:
+    // Indicates the interpretation of 'value' based on the `isTypeInfo` flag.
+    // 1. When `isTypeInfo` is true: `value` represents `typeInfo`
+    // 2. When `isTypeInfo` is false: `value` represents `typeArgs`
+    // (Note: These typeArgs are typically passed by the runtime, not read from `typeInfo`)
+    struct InnerTiInfo {
+        llvm::Value* value;
+        bool isTypeInfo;
+    };
+
     explicit CGExtensionDef(CGModule& cgMod, const CHIR::CustomTypeDef& chirDef);
 
     std::pair<uint32_t, std::vector<std::pair<const CHIR::Type*, const CHIR::Type*>>> Emit();
@@ -44,7 +53,7 @@ public:
     static bool FoundGenericTypeAndCollectPath(
         const CHIR::Type& srcType, CHIR::GenericType& gt, std::vector<size_t>& path);
     static llvm::Value* GetTypeInfoWithPath(IRBuilder2& irBuilder, const CHIR::Type& type, llvm::Value* entryTypeArgs,
-        std::queue<size_t>&& remainPath, std::unordered_map<const CHIR::Type*, llvm::Value*>& innerTypeInfoMap);
+        std::queue<size_t>&& remainPath, std::unordered_map<const CHIR::Type*, InnerTiInfo>& innerTypeMap);
 
 private:
     bool CreateExtensionDefForType(const CHIR::ClassType& inheritedType);
@@ -80,7 +89,7 @@ private:
      * eg: for 'Array<(Option<T>, Int64)>' map will contains:
      * typeinfo of '(Option<T>, Int64)', typeinfo of 'Option<T>' in accessing order.
      */
-    std::unordered_map<const CHIR::Type*, llvm::Value*> innerTypeInfoMap;
+    std::unordered_map<const CHIR::Type*, InnerTiInfo> innerTypeMap;
     /**
      * Map of the path to get generic type from 'extendedType'.
      * eg: decl is 'extend<T> A<Int64, Option<(Int64, T)>> {}', path for 'T' is '1, 0, 1'.

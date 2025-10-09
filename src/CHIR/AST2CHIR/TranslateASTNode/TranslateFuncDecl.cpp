@@ -5,9 +5,9 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/AST/Node.h"
+#include "cangjie/AST/Utils.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
-#include "cangjie/AST/Utils.h"
 #include "cangjie/CHIR/AttributeInfo.h"
 #include "cangjie/CHIR/Utils.h"
 
@@ -176,8 +176,9 @@ Ptr<Value> Translator::Visit(const AST::FuncDecl& func)
     if (func.TestAnyAttr(AST::Attribute::INTRINSIC, AST::Attribute::ABSTRACT, AST::Attribute::FOREIGN)) {
         return nullptr;
     }
-
-    // checks that make sure local const funcs are translated exactly once
+    if (IsCommonWithoutDefault(func)) {
+        return nullptr;
+    }
     bool isLifted = localConstFuncs.HasElement(&func);
     if (isLifted && !IsTopLevel(func)) {
         return nullptr;
@@ -239,7 +240,11 @@ Ptr<Value> Translator::Visit(const AST::FuncBody& funcBody)
         auto func = funcBody.funcDecl;
         if (IsInstanceConstructor(*func)) {
             CJC_NULLPTR_CHECK(func->outerDecl);
-            ret = TranslateConstructorFunc(*func->outerDecl, funcBody);
+            if (func->outerDecl->TestAnyAttr(AST::Attribute::COMMON, AST::Attribute::PLATFORM)) {
+                ret = TranslateConstructorFunc(*func->outerDecl, funcBody);
+            } else {
+                ret = TranslateConstructorFuncInline(*func->outerDecl, funcBody);
+            }
         } else if (IsInstanceMember(*func)) {
             ret = TranslateInstanceMemberFunc(*func->outerDecl, funcBody);
         } else {
@@ -254,6 +259,9 @@ Ptr<Value> Translator::Visit(const AST::FuncBody& funcBody)
 
 Ptr<Block> Translator::TranslateFuncBody(const AST::FuncBody& funcBody)
 {
+    if (funcBody.body == nullptr) {
+        return CreateBlock();
+    }
     CJC_ASSERT(funcBody.body);
     Visit(*funcBody.body);
     CJC_ASSERT(currentBlock);
@@ -324,7 +332,88 @@ bool HasDelegatedThisCall(const AST::FuncBody& func)
 }
 } // unnamed namespace
 
+void Translator::TranslateVariablesInit(const AST::Decl& parent, CHIR::Parameter& thisVar)
+{
+    auto offset = GetSuperInstanceVarSize(*thisVar.GetType());
+    CustomTypeDef* typeDef = GetNominalSymbolTable(parent).get();
+
+    std::unordered_map<std::string, MemberVarInfo*> varInfoByName;
+    auto memberVars = typeDef->GetDirectInstanceVars();
+    for (auto& varDef : memberVars) {
+        varInfoByName.emplace(varDef.name, &varDef);
+    }
+    auto initOrder = AST::GetVarsInitializationOrderWithPositions(parent);
+    for (auto [member, fieldPosition] : initOrder) {
+        // Fields declared in primary constructor cannot have initializer
+        CJC_ASSERT(!member->isMemberParam || !member->initializer);
+
+        MemberVarInfo* varInfo = varInfoByName.at(member->identifier);
+        if (ShouldTranslateMember(parent, *member)) {
+            Translator trans = Copy();
+            auto initializerFunc = trans.TranslateVarInit(*member);
+            varInfo->initializerFunc = initializerFunc;
+        }
+
+        auto varInitFunc = varInfo->initializerFunc;
+        if (varInitFunc) {
+            std::vector<Value*> args{&thisVar};
+            auto loc = TranslateLocation(*member);
+            auto apply = CreateAndAppendExpression<Apply>(
+                loc, varInitFunc->GetReturnType(), varInitFunc, FuncCallContext{
+                .args = args,
+                .thisType = thisVar.GetType()}, currentBlock);
+
+            auto value = apply->GetResult();
+            std::vector<uint64_t> path = {offset + fieldPosition};
+            auto pureCurObjType = StaticCast<RefType*>(thisVar.GetType())->GetBaseType();
+            CJC_ASSERT(!pureCurObjType->IsRef() && pureCurObjType->IsNominal());
+            auto pureCurObjCustomType = StaticCast<CustomType*>(pureCurObjType);
+            auto memberType = pureCurObjCustomType->GetInstMemberTypeByPath(path, builder);
+            if (value->GetType() == memberType) {
+                CreateAndAppendExpression<StoreElementRef>(
+                    loc, builder.GetUnitTy(), value, &thisVar, path, currentBlock);
+            } else {
+                auto castedValue = TypeCastOrBoxIfNeeded(*value, *memberType, loc);
+                CreateAndAppendExpression<StoreElementRef>(
+                    loc, builder.GetUnitTy(), castedValue, &thisVar, path, currentBlock);
+            }
+        }
+    }
+    typeDef->SetDirectInstanceVars(memberVars);
+}
+
 Ptr<Value> Translator::TranslateConstructorFunc(const AST::Decl& parent, const AST::FuncBody& funcBody)
+{
+    CJC_NULLPTR_CHECK(funcBody.funcDecl);
+    auto curFunc = GetCurrentFunc();
+    CJC_NULLPTR_CHECK(curFunc);
+    // Binding the implicit `this` with the first param of the function.
+    auto thisVar = curFunc->GetParam(0);
+    CJC_NULLPTR_CHECK(thisVar);
+    SetSymbolTable(parent, *thisVar);
+    // Create init blocks and initializers for constructor. NOTE: do not create 'GoTo' from entry to init here.
+    // Return init block for callee to uniformly create 'GoTo' from entry in 'Visit FuncDecl'.
+    auto initBlock = CreateBlock();
+    currentBlock = initBlock;
+    // insert member decl initializer if this constructor does not have delegate this call
+    if (!HasDelegatedThisCall(funcBody)) {
+        CustomTypeDef* typeDef = GetNominalSymbolTable(parent).get();
+        FuncBase* varInitFunc = typeDef->GetVarInitializationFunc();
+        CJC_NULLPTR_CHECK(varInitFunc);
+        std::vector<Value*> args{thisVar};
+        auto loc = TranslateLocation(funcBody);
+        CreateAndAppendExpression<Apply>(loc, varInitFunc->GetReturnType(), varInitFunc, FuncCallContext{
+            .args = args,
+            .thisType = thisVar->GetType()}, currentBlock);
+    }
+    // After generated the initializers, the 'currentBlock' may change.
+    auto lastBlock = currentBlock;
+    auto bodyBlock = TranslateFuncBody(funcBody);
+    CreateAndAppendTerminator<GoTo>(bodyBlock, lastBlock);
+    return initBlock;
+}
+
+Ptr<Value> Translator::TranslateConstructorFuncInline(const AST::Decl& parent, const AST::FuncBody& funcBody)
 {
     CJC_NULLPTR_CHECK(funcBody.funcDecl);
     auto curFunc = GetCurrentFunc();

@@ -140,13 +140,13 @@ enum class Color {
  *   then, `a.visitOrder` < `b.visitOrder`.
  */
 struct DefNode {
-    const VarDeclAbstract& var;
+    const Decl& var;
     std::vector<UseEdge> usage;  // Current variable uses other variables.
     std::vector<UseEdge> usedBy; // Current variable is used by other variables.
     int visitOrder = -1;         // This field reflects the declaration order of current variable in the file
     Color color{Color::WHITE};
 
-    explicit DefNode(const VarDeclAbstract& v) : var(v)
+    explicit DefNode(const Decl& v) : var(v)
     {
     }
 };
@@ -189,9 +189,9 @@ private:
  * The def-use graph
  */
 struct DefUseGraph {
-    DefNode& GetOrBuildNode(const VarDeclAbstract& var)
+    DefNode& GetOrBuildNode(const Decl& var)
     {
-        Ptr<const VarDeclAbstract> vda = &var;
+        Ptr<const Decl> vda = &var;
         if (auto vpd = DynamicCast<const VarWithPatternDecl*>(vda)) {
             vpdMap.Add(*vpd);
         } else if (auto vd = DynamicCast<const VarDecl*>(vda)) {
@@ -210,7 +210,7 @@ struct DefUseGraph {
         return *rawPtr;
     }
 
-    void AddEdge(const VarDeclAbstract& user, const VarDeclAbstract& used, const Expr& refExpr)
+    void AddEdge(const Decl& user, const VarDeclAbstract& used, const Expr& refExpr)
     {
         auto& userNode = GetOrBuildNode(user);
         auto& usedNode = GetOrBuildNode(used);
@@ -229,14 +229,14 @@ struct DefUseGraph {
         usedNode.usedBy.emplace_back(refExpr, pos, refName, userNode);
     }
 
-    void AddEdge(const VarDeclAbstract& user, const VarDeclAbstract& used)
+    void AddEdge(const Decl& user, const VarDeclAbstract& used)
     {
         auto& userNode = GetOrBuildNode(user);
         auto& usedNode = GetOrBuildNode(used);
         userNode.usage.emplace_back(usedNode);
         usedNode.usedBy.emplace_back(userNode);
     }
-    std::map<Ptr<const VarDeclAbstract>, OwnedPtr<DefNode>, CmpNodeByPos> nodes;
+    std::map<Ptr<const Decl>, OwnedPtr<DefNode>, CmpNodeByPos> nodes;
     VarWithPatternDeclMap vpdMap;
 };
 
@@ -328,6 +328,14 @@ void GlobalVarChecker::CollectForStaticInit(const FuncDecl& staticInit, const st
         if (auto ae = DynamicCast<AssignExpr*>(node); ae && ae->leftValue && ae->rightExpr) {
             auto target = DynamicCast<VarDecl*>(ae->leftValue->GetTarget());
             if (target && staticVars.count(target) != 0 && visited.count(target) == 0) {
+                target->EnableAttr(AST::Attribute::INITIALIZED);
+                bool isLet = !target->isVar;
+                bool isCommon = target->TestAttr(AST::Attribute::COMMON);
+                bool isStatic = target->TestAttr(AST::Attribute::STATIC);
+                if (isLet && isCommon && isStatic) {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_common_static_let_cant_be_initialized_in_static_init,
+                        *node, target->identifier.Val());
+                }
                 currentNode = &graph.GetOrBuildNode(*target);
                 // Update visitOrder when initializing static members inside static init.
                 currentNode->visitOrder = visitOrder++;
@@ -339,6 +347,9 @@ void GlobalVarChecker::CollectForStaticInit(const FuncDecl& staticInit, const st
         return VisitAction::WALK_CHILDREN;
     };
     Walker(staticInit.funcBody.get(), preVisit).Walk();
+    currentNode = &graph.GetOrBuildNode(staticInit);
+    currentNode->visitOrder = visitOrder++;
+    CollectVarUsageBFS(staticInit);
 }
 
 /**
@@ -361,7 +372,7 @@ template <typename DeclType> void GlobalVarChecker::CollectForStaticVar(const De
             staticInit = fd;
         }
     }
-    if (staticInit != nullptr && !uninitStaticVars.empty()) {
+    if (staticInit != nullptr) {
         // Static constructor is used to initialize static member variables,
         // we should collect usage inside 'static init' after all static member has been collected.
         CollectForStaticInit(*staticInit, uninitStaticVars);
@@ -552,8 +563,14 @@ bool GlobalVarChecker::CheckVarUsageForDefNode(const DefNode& defNode) const
             continue;
         }
         if (usedNode.visitOrder >= defNode.visitOrder) {
+            std::string identifierPrefix = (defNode.var.astKind == ASTKind::FUNC_DECL && defNode.var.outerDecl)
+                ? (defNode.var.outerDecl->identifier.Val() + ".")
+                : "";
+            std::string identifier = (defNode.var.astKind != ASTKind::VAR_WITH_PATTERN_DECL)
+                ? (identifierPrefix + defNode.var.identifier.Val())
+                : usage.refNode.GetTarget()->identifier.Val();
             diag.Diagnose(usage.refNode, usage.refPos, DiagKind::sema_global_var_used_before_initialization,
-                usage.refName, usage.refNode.GetTarget()->identifier.Val());
+                usage.refName, identifier);
             return false;
         }
     }

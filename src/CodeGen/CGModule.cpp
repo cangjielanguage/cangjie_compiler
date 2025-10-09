@@ -87,6 +87,8 @@ CGModule::CGModule(SubCHIRPackage& subCHIRPackage, CGPkgContext& cgPkgCtx)
 #ifdef __APPLE__
     } else if (options.target.arch == Triple::ArchType::AARCH64 && options.target.os == Triple::OSType::DARWIN) {
         cffi = std::make_unique<MacAArch64CJNativeCGCFFI>(*this);
+    } else if (options.target.arch == Triple::ArchType::AARCH64 && options.target.os == Triple::OSType::IOS) {
+        cffi = std::make_unique<MacAArch64CJNativeCGCFFI>(*this);
 #endif
     } else {
         // Rollback to linux x86_64 abi.
@@ -198,6 +200,7 @@ namespace {
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 inline void SetCFFIStub(const CHIR::Value& func, llvm::Function* function)
 {
+    CJC_NULLPTR_CHECK(function);
     if (func.IsFuncWithBody()) {
         const CHIR::Func& funcNode = VirtualCast<const CHIR::Func&>(func);
         if (funcNode.IsCFunc()) {
@@ -216,6 +219,7 @@ inline void SetCFFIStub(const CHIR::Value& func, llvm::Function* function)
 void AddToGenericParamMapUnderExtendScope(const llvm::Function* function, std::unique_ptr<CGFunction>& cgFunc,
     const CHIR::FuncBase& f, std::optional<size_t> outerTIIdx)
 {
+    CJC_NULLPTR_CHECK(function);
     auto extendDef = StaticCast<CHIR::ExtendDef*>(f.GetParentCustomTypeDef());
     auto extendedType = extendDef->GetExtendedType();
     for (auto gt : extendDef->GetGenericTypeParams()) {
@@ -224,7 +228,7 @@ void AddToGenericParamMapUnderExtendScope(const llvm::Function* function, std::u
         auto outerTi = function->getArg(static_cast<unsigned>(outerTIIdx.value()));
         (void)cgFunc->genericParamsMap.emplace(gt, [outerTi, path, extendedType](IRBuilder2& irBuilder) {
             auto entryTypeArgs = irBuilder.GetTypeArgsFromTypeInfo(outerTi);
-            std::unordered_map<const CHIR::Type*, llvm::Value*> map;
+            std::unordered_map<const CHIR::Type*, CGExtensionDef::InnerTiInfo> map;
             std::queue<size_t> remainPath;
             for (auto idx : path) {
                 remainPath.push(idx);
@@ -238,6 +242,7 @@ void AddToGenericParamMapUnderExtendScope(const llvm::Function* function, std::u
 void AddToGenericParamMapWithOuterTI(const llvm::Function* function, std::unique_ptr<CGFunction>& cgFunc,
     const CHIR::Value& func, std::optional<size_t> outerTIIdx)
 {
+    CJC_NULLPTR_CHECK(function);
     uint32_t idx = 0;
     auto outerTiArg = function->getArg(static_cast<unsigned>(outerTIIdx.value()));
     outerTiArg->setName("outerTI");
@@ -388,6 +393,7 @@ CGValue* CGModule::GetOrInsertGlobalVariable(const CHIR::Value* chirGV)
 
 CGValue* CGModule::GetMappedCGValue(const CHIR::Value* chirValue)
 {
+    CJC_NULLPTR_CHECK(chirValue);
     if (auto cgValue = GetMappedValue(chirValue); cgValue) {
         return cgValue;
     }

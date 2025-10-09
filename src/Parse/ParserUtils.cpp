@@ -19,14 +19,6 @@ namespace Cangjie {
 const static std::unordered_map<TokenKind, TokenKind> MATCHING_OPENING_BRACKET_OF{{TokenKind::RCURL, TokenKind::LCURL},
     {TokenKind::RSQUARE, TokenKind::LSQUARE}, {TokenKind::RPAREN, TokenKind::LPAREN}};
 
-const std::vector<TokenKind>& GetContextualKeyword()
-{
-    static const std::vector<TokenKind> CONTEXTUAL_KEYWORD_TOKEN = {
-        TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::PROTECTED, TokenKind::OVERRIDE, TokenKind::ABSTRACT,
-        TokenKind::SEALED, TokenKind::OPEN,    TokenKind::REDEF,     TokenKind::INTERNAL
-    };
-    return CONTEXTUAL_KEYWORD_TOKEN;
-}
 const std::vector<TokenKind>& GetTypeFirst()
 {
     static const std::vector<TokenKind> TYPE_FIRST_TOKEN = {
@@ -154,7 +146,7 @@ bool ParserImpl::SeeingExpr()
         return true;
     }
     return SeeingLiteral() || SeeingPrimitiveTypeAndLParen() || SeeingPrimitiveTypeAndDot() || SeeingMacroCall() ||
-        SeeingBuiltinAnnotation();
+        SeeingBuiltinAnnotation() || SeeingSoftKeyword();
 }
 
 bool ParserImpl::SeeingCombinator(const std::vector<TokenKind>& kinds)
@@ -238,20 +230,6 @@ bool ParserImpl::SkipCombinedDoubleArrow()
     return false;
 }
 
-bool ParserImpl::SkipCombinedBackarrow()
-{
-    if (SeeingCombinator(combinedBackarrow)) {
-        auto i = combinedBackarrow.size();
-        while (i-- > 0) {
-            Next();
-        }
-        lastToken = Token{TokenKind::BACKARROW, "<-", lastToken.Begin(),
-            lastToken.Begin() + std::string_view{"<-"}.size()};
-        return true;
-    }
-    return false;
-}
-
 bool ParserImpl::Skip(TokenKind kind)
 {
     if (Peek().kind == kind) {
@@ -306,14 +284,6 @@ void ParserImpl::ParseZeroOrMoreSepTrailing(std::function<void(const Position&)>
         } else {
             break;
         }
-    }
-}
-
-void ParserImpl::ParseZeroOrMoreWithSeparator(TokenKind separator, std::vector<Position>& positions,
-    const std::function<void()>& parseElement, TokenKind terminator)
-{
-    if (!Seeing(terminator)) {
-        ParseOneOrMoreWithSeparator(separator, positions, parseElement);
     }
 }
 
@@ -636,7 +606,8 @@ SrcIdentifier ParserImpl::ExpectIdentifierWithPos(AST::Node& node)
 SrcIdentifier ParserImpl::ExpectPackageIdentWithPos(AST::Node& node)
 {
     Position tkPos{INVALID_POSITION};
-    if (Skip(TokenKind::IDENTIFIER) || Skip(TokenKind::PACKAGE_IDENTIFIER) || SkipKeyWordIdentifier()) {
+    if (Skip(TokenKind::IDENTIFIER) || Skip(TokenKind::PACKAGE_IDENTIFIER) ||
+        SkipKeyWordIdentifier() || Skip(TokenKind::COMMON)) {
         return ParseIdentifierFromToken(lastToken);
     }
     if (!node.TestAttr(AST::Attribute::HAS_BROKEN)) {
@@ -782,8 +753,9 @@ bool ParserImpl::SeeingAnnotationTrailingClosure(const std::vector<TokenKind>& t
         return false;
     }
     auto tokens = lexer->LookAheadSkipNL(tokenKinds.size() + 1);
+    auto& contextual = GetContextualKeyword();
     if (tokens.front().kind == TokenKind::IDENTIFIER ||
-        (tokens.front().kind >= TokenKind::PUBLIC && tokens.front().kind <= TokenKind::OPEN)) {
+        std::binary_search(contextual.begin(), contextual.end(), tokens.front().kind)) {
         return tokens.back().kind == TokenKind::LSQUARE;
     }
     return false;

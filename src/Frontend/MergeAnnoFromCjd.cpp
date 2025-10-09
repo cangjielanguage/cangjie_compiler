@@ -24,6 +24,37 @@ using namespace Cangjie;
 using namespace Cangjie::AST;
 
 namespace {
+void ExpandToAPILevel(MacroInvocation& invocation)
+{
+    auto apiLevelAnno = std::find_if(invocation.decl->annotations.begin(), invocation.decl->annotations.end(),
+        [](auto& anno) { return anno && anno->identifier.Val() == "APILevel"; });
+    if (apiLevelAnno != invocation.decl->annotations.end()) {
+        return;
+    }
+    auto expandedDecl = invocation.decl.get();
+    auto apilevelAnno = MakeOwned<Annotation>();
+    apilevelAnno->identifier = SrcIdentifier("APILevel");
+    // level:
+    CJC_ASSERT(invocation.attrs.size() > 0 && invocation.attrs[0].kind == TokenKind::INTEGER_LITERAL);
+    apilevelAnno->args.emplace_back(
+        CreateFuncArg(CreateLitConstExpr(LitConstKind::INTEGER, invocation.attrs[0].Value(), Ty::GetInitialTy()), ""));
+    // syscap:
+    std::string lastIdentifier;
+    for (size_t i = 1; i < invocation.attrs.size(); ++i) {
+        if (invocation.attrs[i].kind == TokenKind::IDENTIFIER) {
+            lastIdentifier = invocation.attrs[i].Value();
+        }
+        // Only support string for now, syscap must be a string literal.
+        if (invocation.attrs[i].kind == TokenKind::STRING_LITERAL) {
+            apilevelAnno->args.emplace_back(
+                CreateFuncArg(CreateLitConstExpr(LitConstKind::STRING, invocation.attrs[i].Value(), Ty::GetInitialTy()),
+                    lastIdentifier));
+        }
+    }
+    apilevelAnno->kind = AnnotationKind::CUSTOM;
+    expandedDecl->annotations.emplace_back(std::move(apilevelAnno));
+}
+
 bool IsSameType(Ptr<Type> lt, Ptr<Ty> rty);
 // Only extend's extendedType or class/struct/enum/interface/extend's inheritedType can be in.
 bool IsSameType(Ptr<Type> lt, Ptr<Type> rt)
@@ -244,10 +275,16 @@ bool IsSameFuncByIdentifier(Ptr<FuncBody> lb, Ptr<FuncBody> rb)
         return false;
     }
     for (size_t i = 0; i < lb->paramLists[0]->params.size(); ++i) {
-        if (lb->paramLists[0]->params[i]->identifier.Val() != rb->paramLists[0]->params[i]->identifier.Val()) {
+        Ptr<FuncParam> expandedParam = lb->paramLists[0]->params[i].get();
+        if (auto mep = DynamicCast<MacroExpandParam>(lb->paramLists[0]->params[i].get());
+            mep && mep->invocation.identifier == "APILevel") {
+            ExpandToAPILevel(mep->invocation);
+            expandedParam = StaticCast<FuncParam>(mep->invocation.decl.get());
+        }
+        if (expandedParam->identifier.Val() != rb->paramLists[0]->params[i]->identifier.Val()) {
             return false;
         }
-        if (!IsSameType(lb->paramLists[0]->params[i]->type.get(), rb->paramLists[0]->params[i]->ty)) {
+        if (!IsSameType(expandedParam->type.get(), rb->paramLists[0]->params[i]->ty)) {
             return false;
         }
         CJC_ASSERT(rb->ty->IsFunc());
@@ -285,6 +322,7 @@ void ColllectPattern(Ptr<Pattern> pattern, std::unordered_map<Ptr<Decl>, Ptr<Dec
             for (size_t i = 0; i < lep->patterns.size(); ++i) {
                 ColllectPattern(lep->patterns[i].get(), topDeclMapping, annos);
             }
+            break;
         }
         case ASTKind::VAR_OR_ENUM_PATTERN: {
             auto lvep = StaticCast<VarOrEnumPattern>(pattern);
@@ -378,14 +416,20 @@ void MergeTopLevelDecl(
     Ptr<Package> target, Ptr<Package> source, std::unordered_map<Ptr<Decl>, Ptr<Decl>>& topDeclMapping)
 {
     auto topDeclMapInsert = [&topDeclMapping](OwnedPtr<Decl>& toplevelDecl) {
-        if (toplevelDecl->astKind == ASTKind::MAIN_DECL) {
+        Ptr<Decl> expandedDecl = toplevelDecl.get();
+        if (auto med = DynamicCast<MacroExpandDecl>(toplevelDecl.get());
+            med && med->invocation.identifier == "APILevel") {
+            ExpandToAPILevel(med->invocation);
+            expandedDecl = med->invocation.decl.get();
+        }
+        if (expandedDecl->astKind == ASTKind::MAIN_DECL) {
             return;
         }
-        if (auto vwpd = DynamicCast<VarWithPatternDecl>(toplevelDecl.get())) {
+        if (auto vwpd = DynamicCast<VarWithPatternDecl>(expandedDecl.get())) {
             ColllectPattern(vwpd->irrefutablePattern.get(), topDeclMapping, vwpd->annotations);
             return;
         }
-        topDeclMapping.emplace(toplevelDecl, nullptr);
+        topDeclMapping.emplace(expandedDecl, nullptr);
     };
     IterateToplevelDecls(*source, topDeclMapInsert);
     auto topDeclMapMatch = [&topDeclMapping](OwnedPtr<Decl>& toplevelDecl) {
@@ -425,7 +469,12 @@ void MergeMemberDecl(std::pair<const Ptr<Decl>, Ptr<Decl>>& declPair)
 {
     std::unordered_map<Ptr<Decl>, Ptr<Decl>> memberMapping;
     for (auto& member : declPair.first->GetMemberDeclPtrs()) {
-        memberMapping.emplace(member, nullptr);
+        Ptr<Decl> extendedDecl = member;
+        if (auto med = DynamicCast<MacroExpandDecl>(member); med && med->invocation.identifier == "APILevel") {
+            ExpandToAPILevel(med->invocation);
+            extendedDecl = med->invocation.decl.get();
+        }
+        memberMapping.emplace(extendedDecl, nullptr);
     }
     for (auto& member : declPair.second->GetMemberDeclPtrs()) {
         auto found = std::find_if(memberMapping.begin(), memberMapping.end(),
@@ -453,13 +502,19 @@ void MergeMemberDecl(std::pair<const Ptr<Decl>, Ptr<Decl>>& declPair)
         auto s = StaticCast<FuncDecl>(memberPair.first);
         auto t = StaticCast<FuncDecl>(memberPair.second);
         for (size_t i = 0; i < s->funcBody->paramLists[0]->params.size(); ++i) {
-            for (auto& anno : s->funcBody->paramLists[0]->params[i]->annotations) {
+            Ptr<FuncParam> expandedParam = s->funcBody->paramLists[0]->params[i].get();
+            if (auto mep = DynamicCast<MacroExpandParam>(s->funcBody->paramLists[0]->params[i].get());
+                mep && mep->invocation.identifier == "APILevel") {
+                ExpandToAPILevel(mep->invocation);
+                expandedParam = StaticCast<FuncParam>(mep->invocation.decl.get());
+            }
+            for (auto& anno : expandedParam->annotations) {
                 if (anno->kind != AnnotationKind::CUSTOM) {
                     continue;
                 }
                 t->funcBody->paramLists[0]->params[i]->annotations.emplace_back(std::move(anno));
             }
-            s->funcBody->paramLists[0]->params[i]->annotations.clear();
+            expandedParam->annotations.clear();
         }
     }
 }

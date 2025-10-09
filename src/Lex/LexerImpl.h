@@ -149,14 +149,14 @@ private:
     const char* pCurrent{nullptr};  // point to the current character
     const char* pResetCurrent{nullptr};
     int32_t currentChar{-1}; // currently processing character
-    std::unordered_map<std::string, TokenKind> tokenMap{};
+    std::unordered_map<std::string_view, TokenKind> tokenMap{};
     unsigned lineResetOffsetsFromBase{0};
     TokenKind tokenKind{TokenKind::ILLEGAL};
     Position pos;
     Position posBase{0, 1, 1};
     // ambiguous tokens like <=, <<, <<=, ??, will be splited for parser case. e.g.(a < b, c >= d) and let a: ??T = 1
     bool splitAmbiguousToken = true;
-    const std::unordered_map<TokenKind, std::tuple<TokenKind, std::string, TokenKind, std::string>>
+    const std::unordered_map<TokenKind, std::tuple<TokenKind, std::string_view, TokenKind, std::string_view>>
         ambiCombinedTokensDegTable{
             {TokenKind::COALESCING, {TokenKind::QUEST, "?", TokenKind::QUEST, "?"}},
             {TokenKind::RSHIFT_ASSIGN, {TokenKind::GT, ">", TokenKind::GE, ">="}},
@@ -226,6 +226,7 @@ private:
     void ScanSymbolTilde();
     void ScanSymbolCaret();
     void ScanSymbolQuest();
+    void ScanSymbolColon();
     Token GetSymbolToken(const char* pStart);
     Token ScanSymbol(const char* pStart);
     std::pair<Token, bool> ScanComment(const char* pStart, bool allowNewLine = true);
@@ -296,13 +297,21 @@ private:
     void Init()
     {
         for (unsigned char i = 0; i < static_cast<unsigned char>(TokenKind::IDENTIFIER); i++) {
-            tokenMap[std::string(TOKENS[i])] = static_cast<TokenKind>(i);
+            tokenMap[TOKENS[i]] = static_cast<TokenKind>(i);
         }
         // @! is added after TokenKind::IDENTIFIER
         auto atExclIndex = static_cast<unsigned char>(TokenKind::AT_EXCL);
-        tokenMap[std::string{TOKENS[atExclIndex]}] = static_cast<TokenKind>(atExclIndex);
+        tokenMap[TOKENS[atExclIndex]] = static_cast<TokenKind>(atExclIndex);
+        auto commonIndex = static_cast<unsigned char>(TokenKind::COMMON);
+        tokenMap[TOKENS[commonIndex]] = static_cast<TokenKind>(commonIndex);
+        auto platformIndex = static_cast<unsigned char>(TokenKind::PLATFORM);
+        tokenMap[TOKENS[platformIndex]] = static_cast<TokenKind>(platformIndex);
+        auto dcIndex = static_cast<unsigned char>(TokenKind::DOUBLE_COLON);
+        tokenMap[TOKENS[dcIndex]] = static_cast<TokenKind>(dcIndex);
         tokenMap["true"] = TokenKind::BOOL_LITERAL;
         tokenMap["false"] = TokenKind::BOOL_LITERAL;
+        auto ftrIndex = static_cast<unsigned char>(TokenKind::FEATURES);
+        tokenMap[TOKENS[ftrIndex]] = TokenKind::FEATURES;
     }
     void Back();
     bool IsCharOrString() const;

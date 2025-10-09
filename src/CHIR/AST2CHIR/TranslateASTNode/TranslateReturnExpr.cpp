@@ -33,6 +33,11 @@ int64_t Translator::CalculateDelayExitLevelForReturn()
     }
     return level;
 }
+ 
+int64_t Translator::CalculateDelayExitLevelForThrow()
+{
+    return CalculateDelayExitLevelForReturn() + 1;
+}
 
 Ptr<Value> Translator::GetOuterBlockGroupReturnValLocation()
 {

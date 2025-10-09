@@ -132,8 +132,9 @@ public:
      * @param name The name of the enum constructor.
      * @param argSize The size of the arguments for the enum constructor.
      * @param decl The declaration of the enum type.
-    */
-    void InsertEnumConstructor(const std::string& name, size_t argSize, AST::Decl& decl);
+     * @param enableMacroInLsp Whether enable macro in LSP.
+     */
+    void InsertEnumConstructor(const std::string& name, size_t argSize, AST::Decl& decl, bool enableMacroInLsp);
     bool IsEnumConstructor(const std::string& name) const;
     /**
      * @brief Find an enum constructor.
@@ -198,6 +199,7 @@ private:
      * and the second element is the name of the scope it locates to make an declaration unique.
      */
     std::unordered_map<std::pair<std::string, std::string>, std::vector<Ptr<AST::Decl>>, HashPair> declMap;
+    bool IsNodeInOriginalMacroCallNodes(AST::Decl& decl) const;
 };
 
 /**

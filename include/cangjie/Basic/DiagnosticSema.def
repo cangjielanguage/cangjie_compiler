@@ -213,7 +213,6 @@ ERROR(sema_multiple_primary_constructors, "%s '%s' cannot have more than one pri
 ERROR(sema_interface_is_not_inheritable, "'%s' interface is not able to be inherited")
 ERROR(sema_interface_is_not_implementable, "'%s' interface is not able to be implemented explicitly")
 ERROR(sema_inherit_duplicate_interface, "%s '%s' inherits or implements duplicate interface '%s'")
-ERROR(sema_invalid_return_value_type, "there should be no return value type in a %s")
 ERROR(sema_return_unit, "return expressions in a constructor must be either 'return' or 'return ()'")
 ERROR(sema_illegal_place_of_calling_this_or_super, "call to '%s' must be first expression in constructor of %s '%s'")
 ERROR(sema_illegal_place_of_calling_this_primary_constructor, "invalid calling 'this' in primary constructor ")
@@ -281,10 +280,6 @@ ERROR(sema_invalid_position_of_this_type, "'This' type is not allowed here")
 
 // Property
 ERROR(sema_property_override_implement_type_diff, "The type of the override/implement property must be the same")
-ERROR(sema_property_have_same_declaration_in_inherit_mut, "property '%s' should have 'mut' modifier")
-ERROR(sema_property_have_same_declaration_in_inherit_immut, "property '%s' should be immutable")
-ERROR(sema_property_must_implement_both, "property must implement both getter/setter of interface property '%s'")
-
 //
 WARNING(typealias_unused_type_parameters, UNUSED, "type arg(s) %s are not used")
 WARNING(

@@ -64,6 +64,27 @@ Source::Source(unsigned int fileID, std::string path, std::string buffer, uint64
     }
 }
 
+void SourceManager::SaveSourceFile(
+    unsigned int fileID,
+    std::string normalizedPath,
+    std::string buffer,
+    uint64_t fileHash,
+    std::optional<std::string> packageName)
+{
+    sources.emplace_back(fileID, normalizedPath, buffer, fileHash, packageName);
+    filePathToFileIDMap.emplace(normalizedPath, fileID);
+}
+
+void SourceManager::ReserveCommonPartSources(std::vector<std::string> files)
+{
+    for (size_t i = 0; i < files.size(); i++) {
+        auto file = files.at(i);
+        uint64_t fileHash = 0;
+        SaveSourceFile(static_cast<unsigned int>(i + 1), files.at(i), "", fileHash);
+        filePathToFileIDMap.emplace(file, i + 1);
+    }
+}
+
 unsigned int SourceManager::AddSource(
     const std::string& path, const std::string& buffer, std::optional<std::string> packageName)
 {
@@ -78,8 +99,7 @@ unsigned int SourceManager::AddSource(
         return static_cast<unsigned>(existed->second);
     } else {
         auto fileID = static_cast<unsigned int>(sources.size());
-        sources.emplace_back(fileID, normalizePath, buffer, fileHash, packageName);
-        filePathToFileIDMap.emplace(normalizePath, fileID);
+        SaveSourceFile(fileID, normalizePath, buffer, fileHash, packageName);
         return fileID;
     }
 }

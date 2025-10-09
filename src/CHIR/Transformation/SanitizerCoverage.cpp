@@ -622,8 +622,8 @@ std::vector<Value*> SanitizerCoverage::GenerateArrayCmp(
         auto multiple = builder.CreateConstantExpression<IntLiteral>(
             loc, builder.GetInt64Ty(), parent, GetMultipleFromType(*elementType));
         multiple->MoveBefore(&apply);
-        auto calSize = builder.CreateExpression<BinaryExpression>(
-            loc, builder.GetInt64Ty(), ExprKind::MUL, sizeN->GetResult(), multiple->GetResult(), parent);
+        auto calSize = builder.CreateExpression<BinaryExpression>(loc, builder.GetInt64Ty(),
+            ExprKind::MUL, sizeN->GetResult(), multiple->GetResult(), OverflowStrategy::WRAPPING, parent);
         calSize->MoveBefore(&apply);
         auto sizeNCasted = builder.CreateExpression<TypeCast>(loc, builder.GetUInt32Ty(), calSize->GetResult(), parent);
         sizeNCasted->MoveBefore(&apply);
@@ -931,8 +931,8 @@ std::vector<Expression*> SanitizerCoverage::GenerateInline8bitExpr(
     };
     auto readPoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUInt8Ty(), callContext1, parent);
     auto one = builder.CreateConstantExpression<IntLiteral>(loc, builder.GetUInt8Ty(), parent, 1UL);
-    auto addRes = builder.CreateExpression<BinaryExpression>(
-        loc, builder.GetUInt8Ty(), ExprKind::ADD, readPoint->GetResult(), one->GetResult(), parent);
+    auto addRes = builder.CreateExpression<BinaryExpression>(loc, builder.GetUInt8Ty(),
+        ExprKind::ADD, readPoint->GetResult(), one->GetResult(), OverflowStrategy::WRAPPING, parent);
     auto callContext2 = IntrisicCallContext {
         .kind = IntrinsicKind::CPOINTER_WRITE,
         .args = std::vector<Value*>{loadGlobal->GetResult(), offset->GetResult(), addRes->GetResult()},
@@ -1035,7 +1035,7 @@ ImportedValue* SanitizerCoverage::GetImportedFunc(const std::string& mangledName
 Func* SanitizerCoverage::CreateInitFunc(
     const std::string& name, FuncType& funcType, [[maybe_unused]] const DebugLocation& loc)
 {
-    auto func = builder.CreateFunc(loc, &funcType, name, name, "", "");
+    auto func = builder.CreateFunc(loc, &funcType, name, name, "", packageName);
     auto body = builder.CreateBlockGroup(*func);
     func->InitBody(*body);
     func->EnableAttr(Attribute::NO_INLINE);

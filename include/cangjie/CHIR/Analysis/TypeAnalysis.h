@@ -101,8 +101,7 @@ public:
      * @param isDebug flag whether print debug log.
      * @param realRetTyMap extra info to detect real type from apply expression.
      */
-    TypeAnalysis(
-        const Func* func, CHIRBuilder& builder, bool isDebug, const std::unordered_map<Func*, Type*>& realRetTyMap);
+    TypeAnalysis(const Func* func, CHIRBuilder& builder, bool isDebug, const DevirtualizationInfo& devirtInfo);
 
     ~TypeAnalysis() final
     {
@@ -126,7 +125,7 @@ public:
     void PrintDebugMessage(const Expression* expr, const TypeValue* absVal) const;
 
 private:
-    void HandleFuncParam(TypeDomain& state, const Parameter* param, Value* refObj) override;
+    void HandleFuncParam(TypeDomain& state, Parameter* param, Value* refObj) override;
 
     void HandleAllocateExpr(TypeDomain& state, const Allocate* expression, Value* newObj) override;
 
@@ -142,11 +141,19 @@ private:
 
     void HandleDefaultExpr(TypeDomain& state, const Expression* expr) const;
 
+    Value* PreHandleDefaultExpr(TypeDomain& state, const Expression* expr) const;
+
+    void UpdateDefaultValue(TypeDomain& state, Value* value, Value* refObj, Type* relType = nullptr) const;
+
     void PreHandleGetElementRefExpr(TypeDomain& state, const GetElementRef* getElemRef) override;
+
+    void PreHandleFieldExpr(TypeDomain& state, const Field* field) override;
 
     std::optional<Block*> HandleTerminatorEffect(TypeDomain& state, const Terminator* terminator) override;
 
     const std::unordered_map<Func*, Type*>& realRetTyMap;
+
+    const ConstMemberVarCollector::ConstMemberMapType& constMemberTypeMap;
 };
 
 } // namespace Cangjie::CHIR

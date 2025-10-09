@@ -71,6 +71,33 @@ std::string TypeValue::GetKindString(DevirtualTyKind clsTyKind) const
     }
 }
 
+namespace {
+Type* GetRealGenericRetType(const Apply& apply, Type& genericType, const Func* calleeFunc, CHIRBuilder& builder)
+{
+    auto instTypes = apply.GetInstantiatedTypeArgs();
+    auto genericTypes = calleeFunc->GetGenericTypeParams();
+    CJC_ASSERT(instTypes.size() == genericTypes.size());
+    std::unordered_map<const GenericType*, Type*> genericMap;
+    for (size_t i = 0; i < instTypes.size(); ++i) {
+        genericMap[genericTypes[i]] = instTypes[i];
+    }
+    if (calleeFunc->GetParentCustomTypeDef() != nullptr) {
+        auto def = calleeFunc->GetParentCustomTypeDef();
+        auto thisType = apply.GetThisType()->StripAllRefs();
+        if (thisType->IsClassOrStruct()) {
+            auto customType = StaticCast<CustomType*>(thisType);
+            auto defGenericParams = def->GetGenericTypeParams();
+            auto genericArgs = customType->GetGenericArgs();
+            CJC_ASSERT(defGenericParams.size() == genericArgs.size());
+            for (size_t i = 0; i < customType->GetGenericArgs().size(); ++i) {
+                genericMap[defGenericParams[i]] = genericArgs[i];
+            }
+        }
+    }
+    return ReplaceRawGenericArgType(genericType, genericMap, builder);
+}
+}
+
 CHIRBuilder* TypeValue::builder{nullptr};
 template <> const std::string Analysis<TypeDomain>::name = "type-analysis";
 template <> const std::optional<unsigned> Analysis<TypeDomain>::blockLimit = std::nullopt;
@@ -94,8 +121,9 @@ template <> bool IsTrackedGV<ValueDomain<TypeValue>>(const GlobalVar& gv)
 }
 
 TypeAnalysis::TypeAnalysis(
-    const Func* func, CHIRBuilder& builder, bool isDebug, const std::unordered_map<Func*, Type*>& realRetTyMap)
-    : ValueAnalysis(func, builder, isDebug), realRetTyMap(realRetTyMap)
+    const Func* func, CHIRBuilder& builder, bool isDebug, const DevirtualizationInfo& devirtInfo)
+    : ValueAnalysis(func, builder, isDebug), realRetTyMap(devirtInfo.GetReturnTypeMap()),
+      constMemberTypeMap(devirtInfo.GetConstMemberMap())
 {
 }
 
@@ -148,8 +176,8 @@ void TypeAnalysis::HandleNormalExpressionEffect(TypeDomain& state, const Express
             }
         }
     }
-    auto resutlType = expression->GetResult()->GetType();
-    if (isDebug && !resutlType->IsRef() && !resutlType->IsGeneric()) {
+    auto resultType = expression->GetResult()->GetType();
+    if (isDebug && !resultType->IsRef() && !resultType->IsGeneric()) {
         if (auto absVal = state.CheckAbstractValue(expression->GetResult()); absVal) {
             PrintDebugMessage(expression, absVal);
         }
@@ -216,17 +244,25 @@ void TypeAnalysis::HandleApplyExpr(TypeDomain& state, const Apply* apply, Value*
 {
     auto callee = apply->GetCallee();
     if (!callee->IsFuncWithBody()) {
+        HandleDefaultExpr(state, apply);
         return;
     }
 
     Func* calleeFunc = DynamicCast<Func*>(callee);
     auto it = realRetTyMap.find(calleeFunc);
     if (it == realRetTyMap.end()) {
+        HandleDefaultExpr(state, apply);
         return;
     }
-    auto& relType = it->second;
-    auto dest = refObj ? refObj : apply->GetResult();
-    return state.Update(dest, std::make_unique<TypeValue>(DevirtualTyKind::SUBTYPE_OF, relType));
+    auto realRetTy = it->second;
+    if (realRetTy->IsGenericRelated()) {
+        realRetTy = GetRealGenericRetType(*apply, *realRetTy, calleeFunc, builder);
+        if (realRetTy == nullptr) {
+            // cannot get real generic return type, return.
+            return;
+        }
+    }
+    return UpdateDefaultValue(state, apply->GetResult(), refObj, realRetTy);
 }
 
 // =============== Transfer functions for TypeCast expression =============== //
@@ -300,68 +336,147 @@ template <typename TTypeCast> void TypeAnalysis::HandleTypeCastExpr(TypeDomain& 
     }
 }
 
+template <class MemberAccess>
+static Type* GetInnerTypeFromGetElementRef(const MemberAccess& ma, CHIRBuilder& builder)
+{
+    const auto& path = ma.GetPath();
+    auto locationType = ma.GetOperands()[0]->GetType();
+    for (size_t i = 0; i < path.size() - 1; ++i) {
+        auto index = path[i];
+        locationType = GetFieldOfType(*locationType, index, builder);
+    }
+    return locationType;
+}
+
+static const CustomTypeDef* CheckMemberDefineInWhichParent(CustomType& type, size_t index)
+{
+    auto def = type.GetCustomTypeDef();
+    auto memberInfo = def->GetInstanceVar(index);
+    return memberInfo.outerDef == nullptr ? def : memberInfo.outerDef;
+}
+
+/// override value analysis, check if virtual member type has specific type.
 void TypeAnalysis::PreHandleGetElementRefExpr(TypeDomain& state, const GetElementRef* getElemRef)
 {
-    HandleDefaultExpr(state, getElemRef);
+    auto locationType = GetInnerTypeFromGetElementRef(*getElemRef, builder)->StripAllRefs();
+    if (!locationType->IsClassOrStruct()) {
+        return HandleDefaultExpr(state, getElemRef);
+    }
+    auto path = getElemRef->GetPath();
+    auto index = path[path.size() - 1];
+    if (path.size() == 1) {
+        // %1: result type = GetElementRef(location obj, path)
+        // when size is 1, the location type is location obj's type, this type may be analysed to a more accurate type.
+        // when size is greater than 1, the location type is member var's type of location obj, we don't analysis it
+        auto srcAbsVal = state.CheckAbstractObjectRefBy(getElemRef->GetLocation());
+        if (srcAbsVal) {
+            auto srcVal = state.CheckAbstractValue(srcAbsVal);
+            if (srcVal) {
+                locationType = srcVal->GetSpecificType();
+            }
+        }
+    }
+    auto customType = StaticCast<CustomType*>(locationType);
+    // get member define in which parent.
+    auto def = CheckMemberDefineInWhichParent(*customType, index);
+    auto it = constMemberTypeMap.find(def);
+    if (it == constMemberTypeMap.end()) {
+        return HandleDefaultExpr(state, getElemRef);
+    }
+    auto it2 = it->second.find(index);
+    if (it2 == it->second.end()) {
+        return HandleDefaultExpr(state, getElemRef);
+    }
+    auto instanceType = it2->second->StripAllRefs();
+    auto refObj = state.GetTwoLevelRefAndSetToTop(getElemRef->GetResult(), getElemRef);
+    UpdateDefaultValue(state, getElemRef->GetResult(), refObj, instanceType);
+}
+
+/// override value analysis, check if virtual member type has specific type.
+void TypeAnalysis::PreHandleFieldExpr(TypeDomain& state, const Field* field)
+{
+    auto locationType = GetInnerTypeFromGetElementRef(*field, builder)->StripAllRefs();
+    if (!locationType->IsClassOrStruct()) {
+        return HandleDefaultExpr(state, field);
+    }
+    auto path = field->GetPath();
+    auto index = path[path.size() - 1];
+    if (path.size() == 1) {
+        // %1: result type = Field(location obj, path)
+        // when size is 1, the location type is location obj's type, this type may be analysed to a more accurate type.
+        // when size is greater than 1, the location type is member var's type of location obj, we don't analysis it
+        auto srcVal = state.CheckAbstractValue(field->GetBase());
+        if (srcVal) {
+            locationType = srcVal->GetSpecificType();
+        }
+    }
+    auto customType = StaticCast<CustomType*>(locationType);
+    // get member define in which parent.
+    auto def = CheckMemberDefineInWhichParent(*customType, index);
+    auto it = constMemberTypeMap.find(def);
+    if (it == constMemberTypeMap.end()) {
+        return HandleDefaultExpr(state, field);
+    }
+    auto it2 = it->second.find(index);
+    if (it2 == it->second.end()) {
+        return HandleDefaultExpr(state, field);
+    }
+    auto instanceType = it2->second->StripAllRefs();
+    auto refObj = state.GetReferencedObjAndSetToTop(field->GetResult(), field);
+    UpdateDefaultValue(state, field->GetResult(), refObj, instanceType);
 }
 
 void TypeAnalysis::HandleDefaultExpr(TypeDomain& state, const Expression* expr) const
 {
-    // only using result type to analyse state
-    // must meet following conditions:
-    // 1. expr do not have branch
-    // 2. expr do not have more accurate state info
-    // 3. keep state if expr is re-analyse
+    auto refObj = PreHandleDefaultExpr(state, expr);
+    UpdateDefaultValue(state, expr->GetResult(), refObj, nullptr);
+}
+
+Value* TypeAnalysis::PreHandleDefaultExpr(TypeDomain& state, const Expression* expr) const
+{
     auto result = expr->GetResult();
     auto resType = result->GetType();
-    if (resType->IsPrimitive() || resType->IsStruct() || resType->IsEnum()) {
-        state.SetToTopOrTopRef(result, false);
-        state.Update(result, std::make_unique<TypeValue>(DevirtualTyKind::EXACTLY, resType));
-        return;
-    }
     if (!resType->IsRef()) {
         state.SetToTopOrTopRef(result, false);
-        return;
+        return nullptr;
     }
     auto firstRefBaseType = StaticCast<RefType*>(resType)->GetBaseType();
-    if (firstRefBaseType->IsPrimitive() || firstRefBaseType->IsStruct() || firstRefBaseType->IsEnum()) {
-        auto resVal = state.GetReferencedObjAndSetToTop(result, expr);
-        state.Update(resVal, std::make_unique<TypeValue>(DevirtualTyKind::EXACTLY, firstRefBaseType));
-        return;
-    }
-    if (firstRefBaseType->IsClass()) {
-        auto classDef = StaticCast<ClassType*>(firstRefBaseType)->GetClassDef();
-        auto kind =
-            !classDef->IsInterface() && !classDef->TestAttr(Attribute::VIRTUAL) && !classDef->IsAbstract() ?
-            DevirtualTyKind::EXACTLY : DevirtualTyKind::SUBTYPE_OF;
-        auto resVal = state.GetReferencedObjAndSetToTop(result, expr);
-        state.Update(resVal, std::make_unique<TypeValue>(kind, firstRefBaseType));
-        return;
-    }
     if (!firstRefBaseType->IsRef()) {
-        state.GetReferencedObjAndSetToTop(result, expr);
+        auto refObj = state.GetReferencedObjAndSetToTop(result, expr);
+        return refObj;
+    }
+    auto refObj = state.GetTwoLevelRefAndSetToTop(result, expr);
+    return refObj;
+}
+
+void TypeAnalysis::UpdateDefaultValue(
+    TypeDomain& state, Value* value, Value* refObj, Type* relType) const
+{
+    if (value == nullptr) {
         return;
     }
-    auto secondRefBaseType = StaticCast<RefType*>(firstRefBaseType)->GetBaseType();
-    auto resVal = state.GetTwoLevelRefAndSetToTop(result, expr);
-    if (secondRefBaseType->IsClass()) {
-        auto classDef = StaticCast<ClassType*>(secondRefBaseType)->GetClassDef();
+    auto dest = refObj ? refObj : value;
+    auto type = relType == nullptr ? value->GetType()->StripAllRefs() : relType;
+    if (type->IsBox()) {
+        type = StaticCast<BoxType*>(type)->GetBaseType();
+    }
+    if (type->IsPrimitive() || type->IsStruct() || type->IsEnum()) {
+        state.Update(dest, std::make_unique<TypeValue>(DevirtualTyKind::EXACTLY, type));
+    }
+    if (type->IsClass()) {
+        auto classDef = StaticCast<ClassType*>(type)->GetClassDef();
         auto kind =
             !classDef->IsInterface() && !classDef->TestAttr(Attribute::VIRTUAL) && !classDef->IsAbstract() ?
             DevirtualTyKind::EXACTLY : DevirtualTyKind::SUBTYPE_OF;
-        state.Update(resVal, std::make_unique<TypeValue>(kind, secondRefBaseType));
+        state.Update(dest, std::make_unique<TypeValue>(kind, type));
     }
 }
 
-void TypeAnalysis::HandleFuncParam(TypeDomain& state, const Parameter* param, Value* refObj)
+void TypeAnalysis::HandleFuncParam(TypeDomain& state, Parameter* param, Value* refObj)
 {
     if (!refObj) {
         return;
     }
-
-    auto baseTy = param->GetType()->StripAllRefs();
-    if (baseTy->IsClass()) {
-        state.Update(refObj, std::make_unique<TypeValue>(DevirtualTyKind::SUBTYPE_OF, StaticCast<ClassType*>(baseTy)));
-    }
+    UpdateDefaultValue(state, param, refObj, nullptr);
 }
 }  // namespace Cangjie::CHIR

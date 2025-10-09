@@ -53,7 +53,7 @@ void Ohos_CJNATIVE::GenerateLinkingTool(const std::vector<TempFileInfo>& objFile
     if (driverOptions.IsLTOEnabled()) {
         GenerateLinkOptionsForLTO(*tool.get());
     } else if (driverOptions.EnableHwAsan()) {
-        // same args as lto except GenerateLinkOptionsForLTO
+        // Same args as lto except GenerateLinkOptionsForLTO
         tool->AppendArg("-z", "notext");
     } else {
         tool->AppendArg("-z", "noexecstack");
@@ -88,23 +88,21 @@ void Ohos_CJNATIVE::GenerateLinkOptions(Tool& tool)
 {
     tool.AppendArg("-l:libcangjie-runtime.so");
     for (auto& option : LINUX_CJNATIVE_LINK_OPTIONS) {
-        // no libgcc_s.so in hm toolchain
+        // No libgcc_s.so in hm toolchain
         if (option.compare("-l gcc_s") != 0) {
             tool.AppendArg(option);
         }
     }
     tool.AppendArg("-lclang_rt.builtins");
-    // remind runtime to remove dependency of unwind_s in hm
+    // Remind runtime to remove dependency of unwind_s in hm
     tool.AppendArg("-lunwind");
 }
 
 void Ohos_CJNATIVE::HandleSanitizerDependencies(Tool& tool)
 {
-    tool.AppendArg("-lpthread");
-    tool.AppendArg("-lrt");
-    tool.AppendArg("-lm");
-    tool.AppendArg("-ldl");
-    tool.AppendArg("-lresolv");
-    // ohos has no gcc_s, unwind (has same function as gcc_s) is
+    for (const auto& arg : {"-lpthread", "-lrt", "-lm", "-ldl", "-lresolv"}) {
+        tool.AppendArg(arg);
+    }
+    // The ohos has no gcc_s, unwind (has same function as gcc_s) is
     // always linked in GenerateLinkOptions
 }

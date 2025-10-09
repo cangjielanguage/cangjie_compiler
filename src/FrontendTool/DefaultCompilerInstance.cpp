@@ -22,6 +22,7 @@
 #include "cangjie/Modules/PackageManager.h"
 #include "cangjie/Utils/FileUtil.h"
 #include "cangjie/Utils/ProfileRecorder.h"
+#include "cangjie/AST/Walker.h"
 
 #if (defined RELEASE)
 #include "cangjie/Utils/Signal.h"
@@ -137,10 +138,13 @@ bool DefaultCompilerInstance::PerformCHIRCompilation()
 std::string DefaultCIImpl::GenerateFileName(const std::string& fullPackageName, const std::string& idx) const
 {
     std::string fileName;
+    auto pkgNameSuffix = FileUtil::ToCjoFileName(fullPackageName);
     if (ci.invocation.globalOptions.compilePackage) {
-        fileName = (idx.empty() ? "" : (idx + "-")) + fullPackageName;
+        fileName = (idx.empty() ? "" : (idx + "-")) + pkgNameSuffix;
     } else if (fullPackageName != DEFAULT_PACKAGE_NAME) {
-        fileName = (idx.empty() ? "" : (idx + "-")) + fullPackageName;
+        fileName = (idx.empty() ? "" : (idx + "-")) + pkgNameSuffix;
+    } else if (ci.invocation.globalOptions.srcFiles.empty()) {
+        fileName = (idx.empty() ? "" : (idx + "-")) + pkgNameSuffix;
     } else {
         fileName = (idx.empty() ? "" : (idx + "-")) +
             FileUtil::GetFileNameWithoutExtension(ci.invocation.globalOptions.srcFiles[0]);
@@ -176,7 +180,7 @@ bool DefaultCIImpl::SaveCjo(const AST::Package& pkg)
     if (pkg.IsEmpty()) {
         return true;
     }
-    auto pkgName = pkg.fullPackageName;
+    auto pkgName = FileUtil::ToCjoFileName(pkg.fullPackageName);
     // If compiled with the `-g` or '--coverage', files should be saved with absolute paths.
     // When compiling stdlib without options '--coverage', do not save file with abs path.
     // Then can not debugging stdlib with abs path.
@@ -189,7 +193,7 @@ bool DefaultCIImpl::SaveCjo(const AST::Package& pkg)
     Utils::ProfileRecorder::Start("Save cjo and bchir", "Serialize ast");
     ci.importManager.ExportAST(saveFileWithAbsPath, astData, pkg);
     Utils::ProfileRecorder::Stop("Save cjo and bchir", "Serialize ast");
-    // Write astData into file according to given package name by '-output' opt.
+    // Write astData into file according to given package name by '--output' opt.
     TempFileInfo astFileInfo =
         TempFileManager::Instance().CreateNewFileInfo(TempFileInfo{pkgName, ""}, TempFileKind::O_CJO);
     std::string astFileName = astFileInfo.filePath;
@@ -429,4 +433,4 @@ bool DefaultCompilerInstance::CodegenOnePackage(AST::Package& pkg, bool enableIn
 {
     return impl->CodegenOnePackage(pkg, enableIncrement);
 }
-} // namespace Cangjie
+}

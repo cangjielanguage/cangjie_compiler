@@ -12,6 +12,13 @@ if(CANGJIE_ENABLE_COMPILER_TSAN)
     add_link_options("${TSAN_FLAGS}")
 endif()
 
+if(IOS)
+    get_directory_property(SRC_COMPILE_OPTIONS COMPILE_OPTIONS)
+    list(REMOVE_ITEM SRC_COMPILE_OPTIONS "--target=${TRIPLE}")
+    set_directory_properties(PROPERTIES COMPILE_OPTIONS "${SRC_COMPILE_OPTIONS}")
+    add_compile_options(--target=${CXX_COMPATIABLE_TRIPLE})
+endif()
+
 set(CJC_EXTRA_WARNINGS -Woverloaded-virtual -Wvla -Wconversion -Wfloat-equal -Wunused -Wdelete-non-virtual-dtor -Wswitch-default -Wcast-qual -Wextra -Wformat=2 -Wno-missing-field-initializers -Wno-format-nonliteral -Wno-sign-conversion)
 # -Wno-sign-conversion here to be removed by next MR
 if(${CMAKE_SYSTEM_NAME} EQUAL Darwin)
@@ -236,7 +243,7 @@ if(MINGW AND CMAKE_BUILD_TYPE MATCHES "^(Debug|RelWithDebInfo|MinSizeRelWithDebI
         DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 endif()
 
-# autosdk, IDE need this library.
+# The autosdk, IDE need this library.
 set(FRONTEND_SRC_OBJECTS
     $<TARGET_OBJECTS:CangjieASTCommon>
     $<TARGET_OBJECTS:CangjieASTExtra>
@@ -281,7 +288,7 @@ if(NOT WIN_DEBUG_USE_STATIC_LIB)
     endif()
 endif()
 
-#  we should remove this once the LSPCompilerInstance is out of compiler
+#  We should remove this once the LSPCompilerInstance is out of compiler
 if(WIN_DEBUG_USE_STATIC_LIB)
     install(TARGETS cangjie-lsp DESTINATION "tools/lib")
 endif()
@@ -293,7 +300,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND AND NOT WIN_DEBUG_USE_STATIC_LIB)
         LIBRARY DESTINATION tools/lib)
 endif()
 
-#LSPMacroServer for lsp
+# LSPMacroServer for lsp
 add_executable(LSPMacroServer main-macrosrv.cpp)
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     add_dependencies(LSPMacroServer cjnative)
@@ -324,7 +331,7 @@ else()
 endif()
 install(TARGETS LSPMacroServer DESTINATION "tools/bin")
 
-#chir-dis
+# The chir-dis
 add_executable(chir-dis main-chir-dis.cpp)
 if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
     add_dependencies(chir-dis cjnative)
@@ -337,7 +344,7 @@ target_link_libraries(
     # Required by CangjieBasic
     ${CMAKE_DL_LIBS})
 
-target_link_libraries(chir-dis boundscheck-static) # depended by LLVMCore in ${LINK_LIBS} and interrupt signal handler
+target_link_libraries(chir-dis boundscheck-static) # Depended by LLVMCore in ${LINK_LIBS} and interrupt signal handler
 target_include_directories(chir-dis PRIVATE ${BOUNDSCHECK}/include)
 
 add_dependencies(chir-dis CangjieFlatbuffersHeaders)

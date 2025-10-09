@@ -416,7 +416,7 @@ GlobalVarBase::GlobalVarBase(std::string srcCodeIdentifier, std::string rawMangl
 {
 }
 
-Func* GlobalVarBase::GetInitFunc() const
+Func* GlobalVar::GetInitFunc() const
 {
     return initFunc;
 }
@@ -439,7 +439,7 @@ const std::string& GlobalVarBase::GetPackageName() const
     return packageName;
 }
 
-void GlobalVarBase::SetInitializer(LiteralValue& literalValue)
+void GlobalVar::SetInitializer(LiteralValue& literalValue)
 {
     this->initializer = &literalValue;
     this->initFunc = nullptr;
@@ -452,15 +452,15 @@ void GlobalVarBase::DestroySelf()
     }
 }
 
-LiteralValue* GlobalVarBase::GetInitializer() const
+LiteralValue* GlobalVar::GetInitializer() const
 {
     return this->initializer;
 }
 
-void GlobalVarBase::SetInitFunc(Func& func)
+void GlobalVar::SetInitFunc(Func& func)
 {
-    CJC_ASSERT(initializer == nullptr);
     this->initFunc = &func;
+    initializer = nullptr; // platform var need to clear
 }
 
 const std::string& GlobalVarBase::GetRawMangledName() const
@@ -1028,9 +1028,6 @@ Type* FuncBase::GetParentCustomTypeOrExtendedType() const
     if (declaredParent == nullptr) {
         return nullptr;
     }
-    if (auto exDef = DynamicCast<ExtendDef*>(declaredParent)) {
-        return exDef->GetExtendedType();
-    }
     return declaredParent->GetType();
 }
 
@@ -1099,9 +1096,20 @@ bool FuncBase::IsGVInit() const
     return funcKind == FuncKind::GLOBALVAR_INIT;
 }
 
+bool FuncBase::IsStaticInit() const
+{
+    return (funcKind == FuncKind::CLASS_CONSTRUCTOR || funcKind == FuncKind::STRUCT_CONSTRUCTOR) &&
+        srcCodeIdentifier == "static.init";
+}
+
 bool FuncBase::IsPrimalConstructor() const
 {
     return funcKind == FuncKind::PRIMAL_CLASS_CONSTRUCTOR || funcKind == FuncKind::PRIMAL_STRUCT_CONSTRUCTOR;
+}
+
+bool FuncBase::IsInstanceVarInit() const
+{
+    return funcKind == FuncKind::INSTANCEVAR_INIT;
 }
 
 bool FuncBase::IsCFunc() const
@@ -1229,6 +1237,21 @@ uint64_t Func::GenerateLocalId()
     return localId++;
 }
 
+void Func::SetLocalId(uint64_t id)
+{
+    localId = id;
+}
+
+void Func::SetBlockId(uint64_t id)
+{
+    blockId = id;
+}
+
+void Func::SetBlockGroupId(uint64_t id)
+{
+    blockGroupId = id;
+}
+
 void Func::DestroyFuncBody()
 {
     for (auto b : body.GetBody()->GetBlocks()) {
@@ -1261,6 +1284,13 @@ void Func::InitBody(BlockGroup& newBody)
     if (newBody.GetOwnerFunc() != this) {
         newBody.SetOwnerFunc(this);
     }
+}
+
+void Func::ReplaceBody(BlockGroup& newBody)
+{
+    DestroyFuncBody();
+    body.parameters.clear();
+    InitBody(newBody);
 }
 
 void Func::InheritIDFromFunc(const Func& func)
@@ -1344,6 +1374,9 @@ void Func::SetPropLocation(const DebugLocation& loc)
 
 size_t Func::GetExpressionsNum() const
 {
+    if (!GetBody()) {
+        return 0;
+    }
     return GetBody()->GetExpressionsNum();
 }
 

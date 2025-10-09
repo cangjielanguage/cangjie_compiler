@@ -53,8 +53,8 @@ bool MachO::PrepareDependencyPath()
 void MachO::GenerateArchiveTool(const std::vector<TempFileInfo>& objFiles)
 {
     auto tool = std::make_unique<Tool>(arPath, ToolType::BACKEND, driverOptions.environment.allVariables);
-    // c for no warn if the library had to be created
-    // r for replacing existing or insert new file(s) into the archive
+    // The c for no warn if the library had to be created
+    // The r for replacing existing or insert new file(s) into the archive
     tool->AppendArg("cr");
 
     // When we reach here, we must be at the final phase of the compilation,
@@ -107,24 +107,24 @@ void MachO::HandleLLVMLinkOptions(const std::vector<TempFileInfo>& objFiles, Too
 
     auto cangjieLibPath =
         FileUtil::JoinPath(FileUtil::JoinPath(driver.cangjieHome, "lib"), driverOptions.GetCangjieLibTargetPathName());
-    // 1. -L library path
+    // 1. The -L library path
     HandleLibrarySearchPaths(tool, cangjieLibPath);
 
     // 2. cjstart.o
     tool.AppendArg(FileUtil::JoinPath(cangjieLibPath, "section.o"));
     tool.AppendArg(FileUtil::JoinPath(cangjieLibPath, "cjstart.o"));
 
-    // 3. frontend output or input files
-    // 3.1 frontend output files (.o)
-    // 3.2 pass to the linker in the order of input files (.o, .a, -l)
+    // 3. Frontend output or input files
+    // 3.1 Frontend output files (.o)
+    // 3.2 Pass to the linker in the order of input files (.o, .a, -l)
     SortInputlibraryFileAndAppend(tool, objFiles);
-    // note that the pgo options must be inserted after those from SortInputlibraryFileAndAppend
+    // Note that the pgo options must be inserted after those from SortInputlibraryFileAndAppend
     tool.AppendArgIf(driverOptions.enablePgoInstrGen, "-u", "___llvm_profile_runtime");
     tool.AppendArgIf(driverOptions.enablePgoInstrGen || driverOptions.enableCoverage,
         FileUtil::JoinPath(cangjieLibPath, GetClangRTProfileLibraryName()));
-    // 4. built-in library dependencies
+    // 4. The built-in library dependencies
     GenerateLinkOptionsOfBuiltinLibs(tool);
-    // 5. system library dependencies required by the backend
+    // 5. System library dependencies required by the backend
     GenerateLinkOptions(tool);
 }
 
@@ -147,7 +147,7 @@ void MachO::HandleLibrarySearchPaths(Tool& tool, const std::string& cangjieLibPa
     // Append LIBRARY_PATH as search paths
     tool.AppendArg(PrependToPaths("-L", GetLibraryPaths()));
     if (driverOptions.IsCrossCompiling()) {
-        tool.AppendArg("-rpath-link");
+        tool.AppendArg("-L");
         tool.AppendArg(cangjieRuntimeLibPath);
     }
 }
@@ -198,7 +198,7 @@ void MachO::AddSystemLibraryPaths()
 
 bool MachO::ProcessGeneration(std::vector<TempFileInfo>& objFiles)
 {
-    // '--output-type=staticlib', one more step to go, create an archive file consisting of all generated object files
+    // The '--output-type=staticlib', one more step to go, create an archive file consisting of all generated object files
     if (driverOptions.outputMode == GlobalOptions::OutputMode::STATIC_LIB) {
         GenerateArchiveTool(objFiles);
         return true;
@@ -291,7 +291,7 @@ void MachO::GenerateLinkOptionsOfBuiltinLibsForStaticLink(Tool& tool) const
                 // we use -l<libname> passing style.
                 auto cangjieLibPath = FileUtil::JoinPath(FileUtil::JoinPath(driver.cangjieHome, "lib"),
                     driverOptions.GetCangjieLibTargetPathName());
-                // search sanitizer path
+                // Search sanitizer path
                 if (driverOptions.sanitizerType != GlobalOptions::SanitizerType::NONE) {
                     cangjieLibPath = FileUtil::JoinPath(cangjieLibPath, driverOptions.SanitizerTypeToShortString());
                 }

@@ -213,7 +213,7 @@ struct ChangePollutedMap {
 
     inline std::set<std::string> GetAccessibleDeclName(const AST::Decl& decl) const
     {
-        auto pair = std::make_pair(decl.fullPackageName, decl.identifier);
+        auto pair = std::make_pair(decl.fullPackageName, decl.identifier.Val());
         auto found = declAliasMap.find(pair);
         return found == declAliasMap.end() ? std::set<std::string>{decl.identifier} : found->second;
     }

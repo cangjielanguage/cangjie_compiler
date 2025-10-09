@@ -17,7 +17,7 @@
 using namespace Cangjie::CHIR;
 
 DeadCodeElimination::DeadCodeElimination(CHIRBuilder& builder, DiagAdapter& diag,
-    std::string& packageName)
+    const std::string& packageName)
     : builder(builder), diag(diag), currentPackageName(packageName)
 {
 }
@@ -180,6 +180,10 @@ void DeadCodeElimination::ReportUnusedCode(const Package& package, const GlobalO
 
     for (auto func : package.GetGlobalFuncs()) {
         ReportUnusedFunc(*func, opts);
+        bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+        if (isCommonFunctionWithoutBody) {
+            continue; // Nothing to visit
+        }
         ReportUnusedCodeInFunc(*func->GetBody(), opts);
     }
 }
@@ -509,6 +513,10 @@ void DeadCodeElimination::UselessExprEliminationForFunc(const Func& func, bool i
 void DeadCodeElimination::NothingTypeExprElimination(const Package& package, bool isDebug)
 {
     for (auto func : package.GetGlobalFuncs()) {
+        bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+        if (isCommonFunctionWithoutBody) {
+            continue; // Nothing to visit
+        }
         NothingTypeExprEliminationForFunc(*func->GetBody(), isDebug);
     }
 }
@@ -633,6 +641,21 @@ void DeadCodeElimination::NothingTypeExprEliminationForFunc(BlockGroup& funcBody
 void DeadCodeElimination::UnreachableBlockElimination(const Package& package, bool isDebug) const
 {
     for (auto func : package.GetGlobalFuncs()) {
+        bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+        if (isCommonFunctionWithoutBody) {
+            continue; // Nothing to visit
+        }
+        UnreachableBlockEliminationForFunc(*func->GetBody(), isDebug);
+    }
+}
+
+void DeadCodeElimination::UnreachableBlockElimination(const std::vector<const Func*>& funcs, bool isDebug) const
+{
+    for (auto& func : funcs) {
+        bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+        if (isCommonFunctionWithoutBody) {
+            continue; // Nothing to visit
+        }
         UnreachableBlockEliminationForFunc(*func->GetBody(), isDebug);
     }
 }
@@ -670,6 +693,11 @@ void DeadCodeElimination::UnreachableBlockWarningReporterInParallel(const Packag
 {
     Utils::TaskQueue taskQueue(threadsNum);
     for (auto func : package.GetGlobalFuncs()) {
+        bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+        if (isCommonFunctionWithoutBody) {
+            continue; // Nothing to visit
+        }
+
         taskQueue.AddTask<void>([this, func, &maybeUnreachableBlocks]() {
             bool isPrinted = false;
             Visitor::Visit(*func, [this, &isPrinted, &maybeUnreachableBlocks](Block& block) {
@@ -818,6 +846,10 @@ void DeadCodeElimination::BreakBranchConnection(const Block& block) const
 void DeadCodeElimination::ClearUnreachableMarkBlock(const Package& package) const
 {
     for (auto func : package.GetGlobalFuncs()) {
+        bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+        if (isCommonFunctionWithoutBody) {
+            continue; // Nothing to visit
+        }
         ClearUnreachableMarkBlockForFunc(*func->GetBody());
     }
 }

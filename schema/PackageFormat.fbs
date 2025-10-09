@@ -289,7 +289,11 @@ table IsCapturedClassInCC {
 table EnumCaseIndex {
   index: int64 = -1;
 }
- 
+
+table VirMethodOffset {
+  offset: int64 = -1;
+}
+
 table WrappedRawMethod {
   rawMethod: uint32; // use values id
 }
@@ -310,6 +314,7 @@ union Annotation {
   skipCheck: SkipCheck,
   neverOverflowInfo: NeverOverflowInfo,
   enumCaseIndex: EnumCaseIndex,
+  virMethodOffset: VirMethodOffset,
   wrappedRawMethod: WrappedRawMethod,
   variantTypeCastWrapper : VariantTypeCastWrapper
 }
@@ -426,6 +431,7 @@ enum FuncKind: uint8 {
   ANNOFACTORY_FUNC,
   MACRO_FUNC,
   DEFAULT_PARAMETER_FUNC,
+  INSTANCEVAR_INIT
 }
 
 table ImportedValue {
@@ -540,6 +546,8 @@ table MemberVarInfo {
   attributes: uint64;
   loc: DebugLocation;
   annoInfo : AnnoInfo;
+  initializerFunc: uint32;
+  outerDef: uint32; // use defs id
 }
 
 
@@ -580,6 +588,7 @@ table CustomTypeDef {
   annoInfo: AnnoInfo;
   vtable: [VTableElement];
   extends: [uint32]; // use defs id
+  varInitializationFunc: uint32;
 }
 
 table EnumCtorInfo {
@@ -683,7 +692,9 @@ enum CHIRExprKind: uint8 {
   LOAD,
   STORE,
   GET_ELEMENT_REF,
+  GET_ELEMENT_BY_NAME,
   STORE_ELEMENT_REF,
+  STORE_ELEMENT_BY_NAME,
   // Complext
   IF,
   LOOP,
@@ -696,6 +707,7 @@ enum CHIRExprKind: uint8 {
   DEBUGEXPR,
   TUPLE,
   FIELD,
+  FIELD_BY_NAME,
   APPLY,
   INVOKE,
   INVOKE_STATIC,
@@ -783,6 +795,7 @@ enum IntrinsicKind: uint16 {
   GET_GC_FREED_SIZE,
   START_CJ_CPU_PROFILING,
   STOP_CJ_CPU_PROFILING,
+  BLACK_BOX,
   GET_MAX_HEAP_SIZE,
   GET_ALLOCATE_HEAP_SIZE,
   GET_REAL_HEAP_SIZE,
@@ -1178,15 +1191,25 @@ table GetElementRef {
   path: [uint64];
 }
 
+table GetElementByName {
+  base: Expression;
+  names: [string];
+}
+
 table StoreElementRef {
   base: Expression;
   path: [uint64];
 }
 
+table StoreElementByName {
+  base: Expression;
+  names: [string];
+}
+
 table VirMethodContext {
   srcCodeIdentifier: string(shared);
   originalFuncType: uint32; // use types id
-  offset: uint64; // size_t
+  genericTypeParams: [uint32]; // use types id
 }
 
 table Apply {
@@ -1314,6 +1337,11 @@ table Tuple {
 table Field {
   base: Expression;
   path: [uint64];
+}
+
+table FieldByName {
+  base: Expression;
+  names: [string];
 }
 
 table RawArrayAllocate {
@@ -1482,7 +1510,9 @@ union ExpressionElem {
   Load,
   Store,
   GetElementRef,
+  GetElementByName,
   StoreElementRef,
+  StoreElementByName,
   Apply,
   Invoke,
   TypeCast,
@@ -1504,6 +1534,7 @@ union ExpressionElem {
   SpawnWithException,
   Tuple,
   Field,
+  FieldByName,
   RawArrayAllocate,
   RawArrayLiteralInit,
   RawArrayInitByValue,
@@ -1548,6 +1579,7 @@ union ValueElem {
 }
 
 enum PackageAccessLevel: uint8 {
+  INVALID,
   INTERNAL,
   PROTECTED,
   PUBLIC,
@@ -1570,6 +1602,7 @@ table CHIRPackage {
   defs: [CustomTypeDefElem];
   packageInitFunc: uint32;  // use values id
   phase: Phase;
+  packageLiteralInitFunc: uint32;  // use valueID (Func)
   maxImportedValueId: uint32;
   maxImportedStructId: uint32;
   maxImportedClassId: uint32;

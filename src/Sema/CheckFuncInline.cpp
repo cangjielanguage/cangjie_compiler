@@ -241,7 +241,7 @@ void TypeChecker::TypeCheckerImpl::CheckInlineFunctions(const std::vector<Ptr<Pa
         }
     }
     auto opts = ci->invocation.globalOptions;
-    if (!opts.chirLLVM || opts.enableCompileTest || opts.enableHotReload || opts.mock == MockSupportKind::ON) {
+    if (!opts.chirLLVM || opts.enableCompileTest || opts.enableHotReload || opts.mock == MockMode::ON) {
         return; // If current compilation is not supporting inlining, quit here.
     }
     // 2. Collect all inline functions defined in source package and all called imported inline functions.

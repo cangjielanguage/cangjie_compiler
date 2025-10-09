@@ -21,6 +21,20 @@ std::vector<Expression*> GetNonDebugUsers(const Value& val)
 }
 }  // namespace
 
+bool CheckLambdaUsingForMultiThread(const Lambda& lambda)
+{
+    auto returnTy = lambda.GetReturnType();
+    if (returnTy == nullptr) {
+        return false;
+    }
+    returnTy = returnTy->StripAllRefs();
+    if (!returnTy->IsClass()) {
+        return false;
+    }
+    auto classDef = StaticCast<ClassType*>(returnTy)->GetClassDef();
+    return classDef->GetPackageName() == "std.core" && classDef->GetSrcCodeIdentifier() == "Future";
+}
+
 LambdaInline::LambdaInline(CHIRBuilder& builder, const GlobalOptions& opts)
     : opts(opts), inlinePass(builder, GlobalOptions::OptimizationLevel::O2, opts.chirDebugOptimizer)
 {
@@ -53,6 +67,11 @@ void LambdaInline::InlineLambda(const std::vector<Lambda*>& funcs)
  */
 bool LambdaInline::IsLambdaPassToEasyFunc(const Lambda& lambda) const
 {
+    // 0. lambda is not using for multi-thread
+    if (CheckLambdaUsingForMultiThread(lambda)) {
+        return false;
+    }
+
     // 1. judge if lambda is a parameter of an apply.
     auto users = lambda.GetResult()->GetUsers();
     CJC_ASSERT(users.size() == 1 && users[0]->IsApply());

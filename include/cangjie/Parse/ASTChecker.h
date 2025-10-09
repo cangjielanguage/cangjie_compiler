@@ -76,6 +76,12 @@
             /** CollectInfo(node, #id);  */                                                                            \
         }                                                                                                              \
     } while (0)
+#define EMPTY_VEC_CHECK(node, vec)                                                                                     \
+    do {                                                                                                               \
+        if ((vec).empty()) {                                                                                           \
+            /** CollectInfo(node, #vec);  */                                                                           \
+        }                                                                                                              \
+    } while (0)
 
 namespace Cangjie::AST {
 class ASTChecker {

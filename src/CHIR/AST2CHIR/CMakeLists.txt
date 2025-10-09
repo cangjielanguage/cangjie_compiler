@@ -7,5 +7,4 @@
 file(GLOB AST2CHIR_SRC *.cpp)
 add_subdirectory(TranslateASTNode)
 add_subdirectory(CollectLocalConstDecl)
-add_subdirectory(GenerateVTable)
 set(CHIR_BASE_SRC ${CHIR_BASE_SRC} ${AST2CHIR_SRC} PARENT_SCOPE)

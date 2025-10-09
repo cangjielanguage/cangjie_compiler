@@ -380,6 +380,9 @@ PackageFormat::FuncKind Serialize(const FuncKind& kind)
         case FuncKind::DEFAULT_PARAMETER_FUNC:
             ret = FuncKind_DEFAULT_PARAMETER_FUNC;
             break;
+        case FuncKind::INSTANCEVAR_INIT:
+            ret = FuncKind_INSTANCEVAR_INIT;
+            break;
         case FuncKind::FUNCKIND_END:
             CJC_ABORT();
             break;
@@ -537,8 +540,14 @@ PackageFormat::CHIRExprKind Serialize(const ExprKind& kind)
         case ExprKind::GET_ELEMENT_REF:
             ret = CHIRExprKind_GET_ELEMENT_REF;
             break;
+        case ExprKind::GET_ELEMENT_BY_NAME:
+            ret = CHIRExprKind_GET_ELEMENT_BY_NAME;
+            break;
         case ExprKind::STORE_ELEMENT_REF:
             ret = CHIRExprKind_STORE_ELEMENT_REF;
+            break;
+        case ExprKind::STORE_ELEMENT_BY_NAME:
+            ret = CHIRExprKind_STORE_ELEMENT_BY_NAME;
             break;
         case ExprKind::IF:
             ret = CHIRExprKind_IF;
@@ -569,6 +578,9 @@ PackageFormat::CHIRExprKind Serialize(const ExprKind& kind)
             break;
         case ExprKind::FIELD:
             ret = CHIRExprKind_FIELD;
+            break;
+        case ExprKind::FIELD_BY_NAME:
+            ret = CHIRExprKind_FIELD_BY_NAME;
             break;
         case ExprKind::APPLY:
             ret = CHIRExprKind_APPLY;
@@ -792,6 +804,9 @@ PackageFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
             break;
         case STOP_CJ_CPU_PROFILING:
             ret = IntrinsicKind_STOP_CJ_CPU_PROFILING;
+            break;
+        case BLACK_BOX:
+            ret = IntrinsicKind_BLACK_BOX;
             break;
         case GET_MAX_HEAP_SIZE:
             ret = IntrinsicKind_GET_MAX_HEAP_SIZE;
@@ -1677,8 +1692,11 @@ PackageFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
 PackageFormat::PackageAccessLevel Serialize(const Package::AccessLevel& kind)
 {
     using namespace PackageFormat;
-    auto ret = PackageAccessLevel_INTERNAL;
+    auto ret = PackageAccessLevel_INVALID;
     switch (kind) {
+        case Package::AccessLevel::INVALID:
+            ret = PackageAccessLevel_INVALID;
+            break;
         case Package::AccessLevel::INTERNAL:
             ret = PackageAccessLevel_INTERNAL;
             break;
@@ -1814,7 +1832,7 @@ TEST_F(CHIRSerialzierTest, FuncKindEnum)
     using Cangjie::CHIR::FuncKind;
     FuncKind enumBegin = FuncKind::DEFAULT;
     FuncKind enumEnd =
-        FuncKind::DEFAULT_PARAMETER_FUNC; // make sure this is max one we defined exclude pseudo-value FUNCKIND_END
+        FuncKind::INSTANCEVAR_INIT; // make sure this is max one we defined exclude pseudo-value FUNCKIND_END
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     EXPECT_EQ(static_cast<size_t>(enumEnd) + 1, static_cast<size_t>(FuncKind::FUNCKIND_END));
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
@@ -1868,7 +1886,7 @@ TEST_F(CHIRSerialzierTest, IntrinsicKindEnum)
 TEST_F(CHIRSerialzierTest, PackageAccessLevelEnum)
 {
     using namespace PackageFormat;
-    Package::AccessLevel enumBegin = Package::AccessLevel::INTERNAL;
+    Package::AccessLevel enumBegin = Package::AccessLevel::INVALID;
     Package::AccessLevel enumEnd = Package::AccessLevel::PUBLIC; // make sure this is max one we defined
 
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);

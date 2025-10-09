@@ -735,6 +735,25 @@ bool TypeManager::IsGenericSubtype(Ty& leaf, Ty& root, bool implicitBoxed, bool 
     return false;
 }
 
+// Treating platform and common classes/struct/enums types as subtypes of each other
+bool IsCommonAndPlatformRelation(const Ty& leafTy, const Ty& rootTy)
+{
+    if (!leafTy.IsNominal() || !rootTy.IsNominal()) {
+        return false;
+    }
+    auto leafDecl = Ty::GetDeclOfTy(&leafTy);
+    auto rootDecl = Ty::GetDeclOfTy(&rootTy);
+    if (leafDecl && rootDecl) {
+        leafDecl = leafDecl->platformImplementation == nullptr ? leafDecl : leafDecl->platformImplementation;
+        rootDecl = rootDecl->platformImplementation == nullptr ? rootDecl : rootDecl->platformImplementation;
+        if (!leafDecl->TestAttr(Attribute::PLATFORM) || !rootDecl->TestAttr(Attribute::PLATFORM)) {
+            return false;
+        }
+        return leafDecl == rootDecl;
+    }
+    return false;
+}
+
 bool TypeManager::IsClassLikeSubtype(Ty& leaf, Ty& root, bool implicitBoxed, bool allowOptionBox)
 {
     if (auto thisTyOfLeaf = DynamicCast<ClassThisTy*>(&leaf); thisTyOfLeaf && thisTyOfLeaf->declPtr) {
@@ -771,7 +790,7 @@ bool TypeManager::IsPlaceholderEqual(Ty& leaf, Ty& root)
 
 bool TypeManager::IsClassTyEqual(Ty& leaf, Ty& root)
 {
-    if (&leaf == &root) {
+    if (&leaf == &root || IsCommonAndPlatformRelation(leaf, root)) {
         return true;
     }
     if (auto ctt = DynamicCast<ClassThisTy*>(&leaf); ctt) {
@@ -1006,7 +1025,9 @@ bool TypeManager::IsSubtype(Ptr<Ty> leaf, Ptr<Ty> root, bool implicitBoxed, bool
         return cacheResult->second;
     }
     auto cacheEntry = subtypeCache.emplace(std::make_pair(cacheKey, false)).first;
-    if (IsPlaceholderSubtype(*leaf, *root)) {
+    if (IsCommonAndPlatformRelation(*leaf, *root)) {
+        cacheEntry->second = true;
+    } else if (IsPlaceholderSubtype(*leaf, *root)) {
         cacheEntry->second = true;
     } else if (IsGenericSubtype(*leaf, *root, implicitBoxed, allowOptionBox)) {
         cacheEntry->second = true;
@@ -1148,7 +1169,7 @@ TypeCompatibility TypeManager::CheckTypeCompatibility(
     if (!Ty::AreTysCorrect(std::set{lvalue, rvalue})) {
         return TypeCompatibility::INCOMPATIBLE;
     }
-    if (lvalue == rvalue) {
+    if (lvalue == rvalue || IsCommonAndPlatformRelation(*lvalue, *rvalue)) {
         return TypeCompatibility::IDENTICAL;
     }
     if (IsSubtype(lvalue, rvalue, implicitBoxed)) {
@@ -1658,9 +1679,10 @@ std::set<Ptr<ExtendDecl>> TypeManager::GetBuiltinTyExtends(Ty& ty)
     return {};
 }
 
-std::optional<bool> TypeManager::GetOverrideCache(const AST::FuncDecl* src, const AST::FuncDecl* target, Ty* baseTy)
+std::optional<bool> TypeManager::GetOverrideCache(
+    const AST::FuncDecl* src, const AST::FuncDecl* target, Ty* baseTy, Ty* expectInstParent)
 {
-    OverrideOrShadowKey key(src, target, baseTy);
+    OverrideOrShadowKey key(src, target, baseTy, expectInstParent);
     auto it = overrideOrShadowCache.find(key);
     if (it != overrideOrShadowCache.end()) {
         return it->second;
@@ -1668,10 +1690,14 @@ std::optional<bool> TypeManager::GetOverrideCache(const AST::FuncDecl* src, cons
     return {};
 }
 
-void TypeManager::AddOverrideCache(const AST::FuncDecl* src, const AST::FuncDecl* target, Ty* baseTy, bool val)
+void TypeManager::AddOverrideCache(
+    const AST::FuncDecl& src, const AST::FuncDecl& target, Ty* baseTy, Ty* expectInstParent, bool val)
 {
-    OverrideOrShadowKey key(src, target, baseTy);
+    OverrideOrShadowKey key(&src, &target, baseTy, expectInstParent);
     overrideOrShadowCache.emplace(key, val);
+    if (val && src.outerDecl && src.outerDecl == Ty::GetDeclPtrOfTy(baseTy)) {
+        UpdateTopOverriddenFuncDeclCache(&src, &target);
+    }
 }
 
 std::set<Ptr<ExtendDecl>> TypeManager::GetDeclExtends(const InheritableDecl& decl)
@@ -1917,12 +1943,49 @@ bool TypeManager::IsFuncDeclSubType(const AST::FuncDecl& decl, const AST::FuncDe
     auto declType = StaticCast<FuncTy*>(decl.ty);
     auto resolvedFuncType = DynamicCast<FuncTy*>(funcDecl.ty);
     if (resolvedFuncType && decl.identifier == funcDecl.identifier &&
-        declType->paramTys == resolvedFuncType->paramTys && IsSubtype(declType->retTy, resolvedFuncType->retTy)) {
+        IsFuncParameterTypesIdentical(declType->paramTys, resolvedFuncType->paramTys) &&
+        IsSubtype(declType->retTy, resolvedFuncType->retTy)) {
         return true;
     }
     return false;
 }
 #endif
+
+bool TypeManager::IsFuncDeclEqualType(const AST::FuncDecl& decl, const AST::FuncDecl& funcDecl)
+{
+    return IsFuncDeclSubType(decl, funcDecl) && IsFuncDeclSubType(funcDecl, decl);
+}
+
+void TypeManager::UpdateTopOverriddenFuncDeclCache(const AST::Decl* src, const AST::Decl* target)
+{
+    if (auto funcDecl = DynamicCast<AST::FuncDecl>(src)) {
+        auto& temp = overrideCache[funcDecl];
+        temp.emplace_back(StaticCast<AST::FuncDecl*>(target));
+    } else if (auto propDecl = DynamicCast<AST::PropDecl>(src)) {
+        auto targetPropDecl = StaticCast<AST::PropDecl*>(target);
+        if (!propDecl->getters.empty() && !targetPropDecl->getters.empty()) {
+            auto& temp = overrideCache[propDecl->getters.front().get()];
+            temp.emplace_back(targetPropDecl->getters.front().get());
+        }
+        if (!propDecl->setters.empty() && !targetPropDecl->setters.empty()) {
+            auto& temp = overrideCache[propDecl->setters.front().get()];
+            temp.emplace_back(targetPropDecl->setters.front().get());
+        }
+    }
+}
+
+Ptr<const AST::FuncDecl> TypeManager::GetTopOverriddenFuncDecl(const AST::FuncDecl* funcDecl) const
+{
+    const auto& decls = overrideCache.find(funcDecl);
+    if (decls == overrideCache.end() || decls->second.empty()) {
+        return nullptr;
+    }
+    Ptr<const AST::FuncDecl> ret = decls->second.front();
+    while ((overrideCache.find(ret) != overrideCache.end()) && !(overrideCache.find(ret)->second.empty())) {
+        ret = overrideCache.find(ret)->second.front();
+    }
+    return ret;
+}
 
 Ptr<Decl> TypeManager::GetOverrideDeclInClassLike(
     AST::Decl& baseDecl, const AST::FuncDecl& funcDecl, bool withAbstractOverrides)
@@ -2110,13 +2173,14 @@ std::set<Ptr<Ty>> TypeManager::ApplySubstPackNonUniq(
     return GetInstantiatedTys(t1, maps.inst);
 }
 
-bool TypeManager::PairIsOverrideOrImpl(const Decl& child, const Decl& parent, const Ptr<AST::Ty> baseTy)
+bool TypeManager::PairIsOverrideOrImpl(
+    const Decl& child, const Decl& parent, const Ptr<AST::Ty> baseTy, const Ptr<AST::Ty> parentTy)
 {
     if (child.astKind != parent.astKind || child.identifier.Val() != parent.identifier.Val()) {
         return false;
     }
     return child.astKind == ASTKind::FUNC_DECL
-        ? IsOverrideOrShadow(*this, StaticCast<FuncDecl>(child), StaticCast<FuncDecl>(parent), baseTy)
+        ? IsOverrideOrShadow(*this, StaticCast<FuncDecl>(child), StaticCast<FuncDecl>(parent), baseTy, parentTy)
         : IsOverrideOrShadow(*this, StaticCast<PropDecl>(child), StaticCast<PropDecl>(parent), baseTy);
 }
 

@@ -682,6 +682,7 @@ OwnedPtr<SubscriptExpr> ASTCloner::CloneSubscriptExpr(const SubscriptExpr& se, c
     for (auto& it : se.indexExprs) {
         expr->indexExprs.push_back(CloneExpr(it.get(), visitor));
     }
+    expr->commaPos = se.commaPos;
     expr->rightParenPos = se.rightParenPos;
     expr->isTupleAccess = se.isTupleAccess;
     return expr;
@@ -1145,6 +1146,7 @@ OwnedPtr<Decl> ASTCloner::CloneDecl(Ptr<Decl> decl, const VisitFunc& visitor)
     ret->moduleName = decl->moduleName;
     ret->fullPackageName = decl->fullPackageName;
     ret->outerDecl = decl->outerDecl;
+    ret->platformImplementation = decl->platformImplementation;
     ret->checkFlag = decl->checkFlag;
     ret->captureIndex = decl->captureIndex;
     ret->linkage = decl->linkage;
@@ -1431,6 +1433,7 @@ OwnedPtr<Annotation> ASTCloner::CloneAnnotation(const Annotation& annotation, co
     ret->definedPackage = annotation.definedPackage;
     ret->identifier = annotation.identifier;
     ret->attrs = annotation.attrs;
+    ret->attrCommas = annotation.attrCommas;
     ret->adAnnotation = annotation.adAnnotation;
     ret->rsquarePos = annotation.rsquarePos;
     ret->lsquarePos = annotation.lsquarePos;

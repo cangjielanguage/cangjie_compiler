@@ -373,6 +373,9 @@ FuncKind DeSerialize(const PackageFormat::FuncKind& kind)
         case FuncKind_DEFAULT_PARAMETER_FUNC:
             ret = FuncKind::DEFAULT_PARAMETER_FUNC;
             break;
+        case FuncKind_INSTANCEVAR_INIT:
+            ret = FuncKind::INSTANCEVAR_INIT;
+            break;
     }
     return ret;
 }
@@ -531,8 +534,14 @@ ExprKind DeSerialize(const PackageFormat::CHIRExprKind& kind)
         case CHIRExprKind_GET_ELEMENT_REF:
             ret = ExprKind::GET_ELEMENT_REF;
             break;
+        case CHIRExprKind_GET_ELEMENT_BY_NAME:
+            ret = ExprKind::GET_ELEMENT_BY_NAME;
+            break;
         case CHIRExprKind_STORE_ELEMENT_REF:
             ret = ExprKind::STORE_ELEMENT_REF;
+            break;
+        case CHIRExprKind_STORE_ELEMENT_BY_NAME:
+            ret = ExprKind::STORE_ELEMENT_BY_NAME;
             break;
             // Complext
         case CHIRExprKind_IF:
@@ -565,6 +574,9 @@ ExprKind DeSerialize(const PackageFormat::CHIRExprKind& kind)
             break;
         case CHIRExprKind_FIELD:
             ret = ExprKind::FIELD;
+            break;
+        case CHIRExprKind_FIELD_BY_NAME:
+            ret = ExprKind::FIELD_BY_NAME;
             break;
         case CHIRExprKind_APPLY:
             ret = ExprKind::APPLY;
@@ -785,6 +797,9 @@ IntrinsicKind DeSerialize(const PackageFormat::IntrinsicKind& kind)
             break;
         case IntrinsicKind_STOP_CJ_CPU_PROFILING:
             ret = STOP_CJ_CPU_PROFILING;
+            break;
+        case IntrinsicKind_BLACK_BOX:
+            ret = BLACK_BOX;
             break;
         case IntrinsicKind_GET_MAX_HEAP_SIZE:
             ret = GET_MAX_HEAP_SIZE;
@@ -1690,6 +1705,9 @@ Package::AccessLevel DeSerialize(const PackageFormat::PackageAccessLevel& kind)
     using namespace PackageFormat;
     auto ret = Package::AccessLevel::INTERNAL;
     switch (kind) {
+        case PackageAccessLevel_INVALID:
+            ret = Package::AccessLevel::INVALID;
+            break;
         case PackageAccessLevel_INTERNAL:
             ret = Package::AccessLevel::INTERNAL;
             break;

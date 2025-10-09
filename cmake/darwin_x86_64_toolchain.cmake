@@ -9,6 +9,7 @@ include("${CMAKE_DIR}/darwin_toolchain.cmake")
 set(CMAKE_SYSTEM_PROCESSOR "x86_64")
 
 set(TRIPLE x86_64-apple-darwin)
+set(MACOS ON)
 
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "${CMAKE_HOST_SYSTEM_NAME}" AND "${CMAKE_SYSTEM_PROCESSOR}" STREQUAL
                                                                    "${CMAKE_HOST_SYSTEM_PROCESSOR}")

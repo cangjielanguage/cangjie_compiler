@@ -340,9 +340,17 @@ bool TypeChecker::TypeCheckerImpl::ChkVarPattern(const ASTContext& ctx, Ty& targ
 {
     if (p.varDecl->identifier != V_COMPILER) {
         auto decls = ctx.GetDeclsByName({p.varDecl->identifier, p.varDecl->scopeName});
-        auto iter = std::find_if(decls.cbegin(), decls.cend(), [&p](auto decl) { return decl != p.varDecl.get(); });
-        if (iter != decls.cend()) {
-            auto decl = *iter;
+        
+        for (const auto& decl : decls) {
+            if (decl == p.varDecl.get()) {
+                continue;
+            }
+
+            if (p.varDecl->TestAttr(Attribute::PLATFORM) && decl->TestAttr(Attribute::COMMON)) {
+                // common variable can be matched with VarWithDeclPattern on platform
+                continue;
+            }
+
             // The variable has been defined in this MatchCase, e.g., `case (x, x) => {}`.
             // Or it conflicts with definition in while-let body, e.g., `while (let a <- 1) { let a = 1 }`
             DiagRedefinitionWithFoundNode(diag, *p.varDecl, *decl);

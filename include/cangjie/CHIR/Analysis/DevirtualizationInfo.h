@@ -15,10 +15,12 @@
 
 #include <unordered_map>
 
+#include "cangjie/CHIR/Analysis/ConstMemberVarCollector.h"
 #include "cangjie/CHIR/Package.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Value.h"
+#include "cangjie/Option/Option.h"
 
 namespace Cangjie::CHIR {
 
@@ -38,7 +40,8 @@ public:
     DevirtualizationInfo() = delete;
 
     /// constructor of info collector for devirtualization pass.
-    explicit DevirtualizationInfo(const Package* package) : package(package)
+    explicit DevirtualizationInfo(const Package* package, const GlobalOptions& opts)
+        : package(package), opts(opts)
     {
     }
 
@@ -60,6 +63,11 @@ public:
     bool CheckCustomTypeInternal(const CustomTypeDef& def) const;
 
     /**
+     * @brief collect const members to devirt.
+     */
+    void CollectConstMemberVarType();
+
+    /**
      * @brief subType map inheritance info
      */
     struct InheritanceInfo {
@@ -75,6 +83,9 @@ public:
     /// return subtype map.
     const SubTypeMap& GetSubtypeMap() const;
 
+    /// return const member type map.
+    const ConstMemberVarCollector::ConstMemberMapType& GetConstMemberMap() const;
+
     /// return real runtime return type map.
     const std::unordered_map<Func*, Type*>& GetReturnTypeMap() const;
 
@@ -82,13 +93,17 @@ public:
     std::unordered_map<const Type*, std::vector<CustomTypeDef*>> defsMap;
 
 private:
+    void CollectReturnTypeMap(Func& func);
+
     SubTypeMap subtypeMap;
 
     std::unordered_map<Func*, Type*> realRuntimeRetTyMap;
 
-    void CollectReturnTypeMap(Func& func);
+    ConstMemberVarCollector::ConstMemberMapType constMemberTypeMap;
 
     const Package* package;
+
+    const GlobalOptions opts;
 };
 } // namespace Cangjie::CHIR
 #endif // CANGJIE_DEVIRTUALIZATION_INFO_COLLECT_H

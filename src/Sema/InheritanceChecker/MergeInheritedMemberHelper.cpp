@@ -18,6 +18,7 @@
 #include "cangjie/Sema/TypeManager.h"
 
 #include "TypeCheckUtil.h"
+#include "NativeFFI/Java/TypeCheck/InheritanceChecker.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -120,6 +121,17 @@ bool StructInheritanceChecker::ComputeInconsistentTypes(const MemberSignature& c
     return hasConsistentReturnTy;
 }
 
+void StructInheritanceChecker::UpdateOverriddenFuncDeclCache(Ptr<Decl> child, Ptr<Decl> parent)
+{
+    if (checkingDecls.empty()) {
+        return;
+    }
+
+    if (child->outerDecl == checkingDecls.back()) {
+        typeManager.UpdateTopOverriddenFuncDeclCache(child, parent);
+    }
+}
+
 /**
  * Update @p child value into the @p members
  * NOTE: Do not report error here.
@@ -158,8 +170,12 @@ MemberSignature StructInheritanceChecker::UpdateInheritedMemberIfNeeded(
         } else if (inconsistentType) {
             SetPossibleInconsistentType(parent, child, inconsistentTypes);
         }
+
+        CheckNativeFFI(parent, child);
+
         if (shouldUpdate) {
             if (parent.decl->TestAttr(Attribute::ABSTRACT) || !child.decl->TestAttr(Attribute::ABSTRACT)) {
+                UpdateOverriddenFuncDeclCache(child.decl, parent.decl);
                 it->second = updated; // Override stored value to child.
             }
             it->second.replaceOther = true;

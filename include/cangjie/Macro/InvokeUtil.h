@@ -68,12 +68,6 @@ namespace InvokeRuntime {
      * @param libPath Dynamic library path.
      * @return HANDLE Handle for the dynamic library.
      */
-    /**
-     * @brief Open dynamic lib, save it to singleton variable.
-     *
-     * @param libPath Dynamic library path.
-     * @return HANDLE Handle for the dynamic library.
-     */
     HANDLE OpenSymbolTable(const std::string& libPath);
 #elif defined(__linux__) || defined(__APPLE__)
     /**

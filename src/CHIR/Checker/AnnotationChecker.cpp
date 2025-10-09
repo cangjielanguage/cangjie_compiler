@@ -57,9 +57,22 @@ public:
     {
     }
 
+    static bool IsImported(const Decl& decl)
+    {
+        if (decl.outerDecl) {
+            if (auto generic = decl.outerDecl->genericDecl) {
+                return generic->TestAttr(AST::Attribute::IMPORTED);
+            }
+        }
+        if (decl.genericDecl) {
+            return decl.genericDecl->TestAttr(AST::Attribute::IMPORTED);
+        }
+        return decl.TestAttr(AST::Attribute::IMPORTED);
+    }
+
     void CollectAnnoInfo(const Decl& decl, const CustomTypeDef& type) &&
     {
-        if (decl.TestAttr(AST::Attribute::IMPORTED) || (tr.opts.enIncrementalCompilation && !decl.toBeCompiled)) {
+        if (SkipCollectCustomAnnoInfo(decl)) {
             // from ast node directly read annotation target info
             for (auto& anno : decl.annotations) {
                 if (anno->kind == AST::AnnotationKind::ANNOTATION) {
@@ -175,7 +188,7 @@ private:
         if (tr.opts.enIncrementalCompilation && !decl.toBeCompiled) {
             return true;
         }
-        return decl.TestAttr(AST::Attribute::IMPORTED);
+        return IsImported(decl);
     }
 
     // collect @Annotation info placed on `decl`
@@ -325,17 +338,18 @@ void Translator::CollectValueAnnotation(const Decl& decl)
     }
     AnnotationTranslator{*this, builder, opts}.CollectAnnoInfo(decl);
 }
-void GlobalVarInitializer::InsertAnnotationVarInit(std::vector<Ptr<Value>>& initFuncs) const
+
+#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+void GlobalVarInitializer::InsertAnnotationVarInitInto(Func& packageInit)
 {
     for (auto& info : g_annoInfo) {
-        for (auto func : info.second.funcs) {
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-            initFuncsForConstVar.emplace_back(func);
-#endif
-            (void)initFuncs.emplace_back(func);
+        for (auto init : info.second.funcs) {
+            initFuncsForConstVar.emplace_back(init);
+            InsertInitializerIntoPackageInitializer(*init, packageInit);
         }
     }
 }
+#endif
 
 namespace {
 struct AnnotationTarget {

@@ -45,6 +45,11 @@ const OptEffectCHIRMap& RangePropagation::GetEffectMap() const
     return effectMap;
 }
 
+const std::vector<const Func*>& RangePropagation::GetFuncsNeedRemoveBlocks() const
+{
+    return funcsNeedRemoveBlocks;
+}
+
 void RangePropagation::RunOnPackage(const Ptr<const Package>& package, bool isDebug)
 {
     for (auto func : package->GetGlobalFuncs()) {
@@ -85,12 +90,14 @@ void RangePropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug)
             }
         }
     };
-    const auto actionOnTerminator = [this, isDebug](const RangeDomain& /* state */, Terminator* terminator,
+    bool doBlockElimination = false;
+    const auto actionOnTerminator = [this, isDebug, &doBlockElimination](const RangeDomain&, Terminator* terminator,
                                         std::optional<Block*> targetSucc) {
         switch (terminator->GetExprKind()) {
             case ExprKind::BRANCH:
             case ExprKind::MULTIBRANCH:
                 if (targetSucc.has_value()) {
+                    doBlockElimination = true;
                     return RewriteBranchTerminator(terminator, targetSucc.value(), isDebug);
                 }
                 break;
@@ -101,6 +108,9 @@ void RangePropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug)
     result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
     for (auto& rewriteInfo : toBeRewrited) {
         RewriteToConstExpr(rewriteInfo, isDebug);
+    }
+    if (doBlockElimination) {
+        funcsNeedRemoveBlocks.push_back(func.get());
     }
 }
 

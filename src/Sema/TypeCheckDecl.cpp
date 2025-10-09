@@ -35,16 +35,17 @@ using namespace Sema;
 using namespace TypeCheckUtil;
 
 namespace {
-void InsertEnumConstructors(ASTContext& ctx, const EnumDecl& ed)
+void InsertEnumConstructors(ASTContext& ctx, const EnumDecl& ed, bool enableMacroInLsp)
 {
     for (auto& ctor : ed.constructors) {
         CJC_NULLPTR_CHECK(ctor);
         if (ctor->astKind == ASTKind::VAR_DECL) {
-            ctx.InsertEnumConstructor(ctor->identifier, 0, *ctor);
+            ctx.InsertEnumConstructor(ctor->identifier, 0, *ctor, enableMacroInLsp);
         } else if (ctor->astKind == ASTKind::FUNC_DECL) {
             auto& fd = StaticCast<FuncDecl&>(*ctor);
             CJC_ASSERT(fd.funcBody && fd.funcBody->paramLists.size() == 1 && fd.funcBody->paramLists.front());
-            ctx.InsertEnumConstructor(fd.identifier, fd.funcBody->paramLists.front()->params.size(), fd);
+            ctx.InsertEnumConstructor(
+                fd.identifier, fd.funcBody->paramLists.front()->params.size(), fd, enableMacroInLsp);
         }
     }
 }
@@ -121,6 +122,9 @@ void TypeChecker::TypeCheckerImpl::CheckEntryFunc(FuncDecl& fd)
     bool invalid = !fd.curFile || !fd.curFile->curPackage;
     if (invalid || !fd.TestAttr(Attribute::GLOBAL)) {
         return; // Do not need diagnose.
+    }
+    if (fd.curFile->isCommon) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_common_package_has_main, fd);
     }
     if (!mainFunctionMap.empty() &&
         (mainFunctionMap.find(fd.curFile) == mainFunctionMap.end() ||
@@ -393,7 +397,7 @@ void TypeChecker::TypeCheckerImpl::BuildImportedEnumConstructorMap(ASTContext& c
                 if (!ed || visited.count(ed) != 0) {
                     continue;
                 }
-                InsertEnumConstructors(ctx, *ed);
+                InsertEnumConstructors(ctx, *ed, ci->invocation.globalOptions.enableMacroInLSP);
             }
         }
     }
@@ -404,7 +408,7 @@ void TypeChecker::TypeCheckerImpl::BuildEnumConstructorMap(ASTContext& ctx) cons
     auto syms = GetSymsByASTKind(ctx, ASTKind::ENUM_DECL);
     for (auto sym : syms) {
         if (auto ed = DynamicCast<EnumDecl*>(sym->node)) {
-            InsertEnumConstructors(ctx, *ed);
+            InsertEnumConstructors(ctx, *ed, ci->invocation.globalOptions.enableMacroInLSP);
         }
     }
 }
@@ -562,6 +566,17 @@ void TypeChecker::TypeCheckerImpl::CheckStructDecl(ASTContext& ctx, StructDecl& 
     CJC_NULLPTR_CHECK(sd.body);
     TypeCheckCompositeBody(ctx, sd, sd.body->decls);
     CheckRecursiveConstructorCall(sd.body->decls);
+    if (sd.TestAnyAttr(Attribute::JAVA_CJ_MAPPING)) {
+        CheckJavaInteropLibImport(sd);
+        if (sd.generic) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_cjmapping_struct_generic_not_supported,
+                MakeRange(sd.generic->leftAnglePos, sd.generic->rightAnglePos), std::string{sd.identifier});
+        }
+        if (!sd.inheritedTypes.empty()) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor::sema_cjmapping_struct_inheritance_interface_not_supported, MakeRange(sd.identifier));
+        }
+    }
 }
 
 void TypeChecker::TypeCheckerImpl::GetRevTypeMapping(

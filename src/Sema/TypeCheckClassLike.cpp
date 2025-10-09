@@ -57,6 +57,10 @@ void TypeChecker::TypeCheckerImpl::CheckSealedInheritance(const Decl& child, con
         }
         // Otherwise, both parent and child are imported,
         // which is orphan extension and the error is reported by `CheckExtendOrphanRule`.
+        if (target->TestAttr(Attribute::PLATFORM) && !child.TestAttr(Attribute::FROM_COMMON_PART)) {
+            // Parent is imported, and child is defined in current package.
+            DiagCannotInheritSealed(diag, child, parent, true);
+        }
     }
 }
 
@@ -118,6 +122,12 @@ void TypeChecker::TypeCheckerImpl::CheckClassDecl(ASTContext& ctx, ClassDecl& cd
     }
     TypeCheckCompositeBody(ctx, cd, cd.body->decls);
     CheckRecursiveConstructorCall(cd.body->decls);
+    if (cd.TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE)) {
+        CheckJavaInteropLibImport(cd);
+    }
+    if (cd.TestAnyAttr(Attribute::OBJ_C_MIRROR, Attribute::OBJ_C_MIRROR_SUBTYPE)) {
+        CheckObjCInteropLibImport(cd);
+    }
 }
 
 void TypeChecker::TypeCheckerImpl::CheckAndAddSubDecls(
@@ -179,6 +189,30 @@ void TypeChecker::TypeCheckerImpl::AddObjectSuperClass(ASTContext& ctx, ClassDec
     }
 }
 
+bool TypeChecker::TypeCheckerImpl::AddJObjectSuperClassJavaInterop(ASTContext& ctx, ClassDecl& cd)
+{
+    using namespace Interop::Java;
+    if (ctx.fullPackageName == INTEROP_JAVA_LANG_PACKAGE && cd.identifier == INTEROP_JOBJECT_NAME) {
+        return false;
+    }
+    if (auto objectDecl = importManager.GetImportedDecl(
+        INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME)) {
+        CJC_ASSERT(objectDecl->astKind == ASTKind::CLASS_DECL);
+        auto tmp = MakeOwned<RefType>();
+        tmp->EnableAttr(AST::Attribute::COMPILER_ADD);
+        tmp->curFile = cd.curFile;
+        tmp->ref.identifier = SrcIdentifier{INTEROP_JOBJECT_NAME};
+        tmp->ref.target = objectDecl;
+        tmp->ty = tmp->ref.target->ty;
+        cd.inheritedTypes.insert(cd.inheritedTypes.begin(), std::move(tmp));
+        cd.EnableAttr(Attribute::JAVA_MIRROR_SUBTYPE);
+    } else {
+        ctx.diag.DiagnoseRefactor(DiagKindRefactor::sema_member_not_imported, cd.identifier.Begin(),
+                                  INTEROP_JAVA_LANG_PACKAGE + "." + INTEROP_JOBJECT_NAME);
+    }
+    return true;
+}
+
 void TypeChecker::TypeCheckerImpl::CheckInterfaceDecl(ASTContext& ctx, InterfaceDecl& id)
 {
     if (id.TestAttr(Attribute::IS_CHECK_VISITED)) {
@@ -199,4 +233,10 @@ void TypeChecker::TypeCheckerImpl::CheckInterfaceDecl(ASTContext& ctx, Interface
         }
     }
     TypeCheckCompositeBody(ctx, id, id.body->decls);
+    if (id.TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE)) {
+        CheckJavaInteropLibImport(id);
+    }
+    if (id.TestAnyAttr(Attribute::OBJ_C_MIRROR, Attribute::OBJ_C_MIRROR_SUBTYPE)) {
+        CheckObjCInteropLibImport(id);
+    }
 }

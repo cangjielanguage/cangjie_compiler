@@ -48,7 +48,8 @@ void DiagImmutableAccessMutableFunc(DiagnosticEngine& diag, const MemberAccess& 
 void DiagCannotAssignToImmutable(DiagnosticEngine& diag, const Expr& ae, const Expr& perpetrator);
 void DiagCannotOverride(DiagnosticEngine& diag, const Decl& child, const Decl& parent);
 void DiagCannotHaveDefaultParam(DiagnosticEngine& diag, const FuncDecl& fd, const FuncParam& fp);
-void DiagCannotInheritSealed(DiagnosticEngine& diag, const Decl& child, const Type& sealed);
+void DiagCannotInheritSealed(
+    DiagnosticEngine& diag, const Decl& child, const Type& sealed, const bool& isCommon = false);
 void DiagInvalidAssign(DiagnosticEngine& diag, const Node& node, const std::string& name);
 void DiagLowerAccessLevelTypesUse(DiagnosticEngine& diag, const Decl& outDecl,
     const std::vector<std::pair<Node&, Decl&>>& limitedDecls, const std::vector<Ptr<Decl>>& hintDecls = {});

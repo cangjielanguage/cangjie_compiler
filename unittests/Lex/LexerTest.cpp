@@ -756,7 +756,9 @@ TEST_F(LexerTest, TokenValues)
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::OPERATOR)]) == "operator");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::UPPERBOUND)]) == "<:");
     ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::SPAWN)]) == "spawn");
-    ASSERT_EQ(static_cast<unsigned int>(TokenKind::ILLEGAL) + 1, sizeof(TOKENS) / sizeof(*TOKENS));
+    ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)]) == "::");
+    ASSERT_TRUE(std::string(TOKENS[static_cast<int>(TokenKind::FEATURES)]) == "features");
+    ASSERT_EQ(static_cast<unsigned int>(TokenKind::FEATURES) + 1, sizeof(TOKENS) / sizeof(*TOKENS));
 }
 
 TEST_F(LexerTest, TokenKindValues)
@@ -888,8 +890,10 @@ TEST_F(LexerTest, TokenKindValues)
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::DOLLAR_IDENTIFIER)]) == "dollar_identifier");
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::ANNOTATION)]) == "annotation");
     ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::ILLEGAL)]) == "illegal");
+    ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::DOUBLE_COLON)]) == "double_colon");
+    ASSERT_TRUE(std::string(TOKEN_KIND_VALUES[static_cast<int>(TokenKind::FEATURES)]) == "features");
     ASSERT_EQ(
-        static_cast<unsigned int>(TokenKind::ILLEGAL) + 1, sizeof(TOKEN_KIND_VALUES) / sizeof(*TOKEN_KIND_VALUES));
+        static_cast<unsigned int>(TokenKind::FEATURES) + 1, sizeof(TOKEN_KIND_VALUES) / sizeof(*TOKEN_KIND_VALUES));
 }
 
 TEST_F(LexerTest, UTF8ToCodepoint)

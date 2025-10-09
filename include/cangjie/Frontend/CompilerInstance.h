@@ -424,8 +424,6 @@ public:
      */
     Ptr<AST::Package> currentPkg{nullptr};
 
-    void AddDeclToPackage(OwnedPtr<AST::Decl> decl);
-
     /**
      * @brief Get the CHIRContext
      */
@@ -524,11 +522,6 @@ protected:
 
     std::unordered_map<unsigned int, std::string> fileNameMap;
 
-    /**
-     * Generate the file path with the specified extension suffix.
-     */
-    std::string GenerateFileWithExtension(const std::string& file, const std::string& extension) const;
-
     // Merge source packages and imported packages, also init ASTContext here.
     void MergePackages();
     // Allowing only add source package once. Used for LSPCompilerInstance.
@@ -538,7 +531,6 @@ protected:
 #endif
 
     void CacheCompileArgs();
-    void CacheSourcePackage(ASTCache&& ast, ASTCache&& imports);
     void CacheSemaUsage(SemanticInfo&& info);
     void UpdateMangleNameForCachedInfo();
 

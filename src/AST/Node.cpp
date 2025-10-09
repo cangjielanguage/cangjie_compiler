@@ -503,6 +503,7 @@ void SubscriptExpr::Clear() noexcept
     for (auto& indexExpr : indexExprs) {
         indexExpr->Clear();
     }
+    commaPos.clear();
     Expr::Clear();
 }
 
@@ -984,6 +985,16 @@ Ptr<FuncDecl> Decl::GetDesugarDecl() const
     return nullptr;
 }
 
+bool Decl::IsCommonOrPlatform() const
+{
+    return TestAttr(AST::Attribute::COMMON) || TestAttr(AST::Attribute::PLATFORM);
+}
+
+bool Decl::IsCommonMatchedWithPlatform() const
+{
+    return TestAttr(AST::Attribute::COMMON) && platformImplementation;
+}
+
 /**
  * For debug, get the original Position of the node if it is from MacroCall in curfile, curPos otherwise.
  */
@@ -1019,6 +1030,60 @@ const std::string& Node::GetFullPackageName() const
     return EMPTY_PACKAGE_NAME;
 }
 
+std::string PackageSpec::GetPackageName() const
+{
+    std::stringstream ss;
+    for (size_t i{0}; i < prefixPaths.size(); ++i) {
+        ss << prefixPaths[i];
+        if (i == 0 && hasDoubleColon) {
+            ss << TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)];
+        } else {
+            ss << TOKENS[static_cast<int>(TokenKind::DOT)];
+        }
+    }
+    ss << packageName.Val();
+    return ss.str();
+}
+ 
+std::string ImportContent::GetPrefixPath() const
+{
+    std::stringstream ss;
+    for (size_t i{0}; i < prefixPaths.size(); ++i) {
+        ss << prefixPaths[i];
+        if (i == prefixPaths.size() - 1) {
+            break;
+        }
+        if (i == 0 && hasDoubleColon) {
+            // valid import do not end with ::
+            ss << TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)];
+        } else {
+            ss << TOKENS[static_cast<int>(TokenKind::DOT)];
+        }
+    }
+    return ss.str();
+}
+ 
+std::string ImportContent::GetImportedPackageName() const
+{
+    std::stringstream ss;
+    for (size_t i{0}; i < prefixPaths.size(); ++i) {
+        ss << prefixPaths[i];
+        // do not add . if this is the last of import xxx.*, because * is not part of package name
+        if (kind == ImportKind::IMPORT_ALL && i + 1 == prefixPaths.size()) {
+            continue;
+        }
+        if (i == 0 && hasDoubleColon) {
+            ss << TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)];
+        } else {
+            ss << TOKENS[static_cast<int>(TokenKind::DOT)];
+        }
+    }
+    if (kind != ImportKind::IMPORT_ALL) {
+        ss << identifier.Val();
+    }
+    return ss.str();
+}
+
 std::string ImportContent::ToString() const
 {
     std::function<void(std::stringstream&, const ImportContent&)> toString = [](auto& ss, auto& content) {
@@ -1045,6 +1110,20 @@ std::string ImportContent::ToString() const
         ss << std::endl;
     }
     ss << "}";
+    return ss.str();
+}
+
+std::string FeatureId::ToString() const
+{
+    std::stringstream ss;
+    size_t idx = 0;
+    for (const auto& ident : this->identifiers) {
+        ss << ident.Val();
+        if (idx < dotPoses.size()) {
+            ss << ".";
+            idx++;
+        }
+    }
     return ss.str();
 }
 

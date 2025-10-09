@@ -222,7 +222,7 @@ public:
      * @param idx The sepcified position.
      * @param newOperand The destination value.
      */
-    void ReplaceOperand(size_t idx, Value* newOperand);
+    virtual void ReplaceOperand(size_t idx, Value* newOperand);
 
     /**
      * @brief Replace old operand with the new one, if there are many old operands in same expression,
@@ -231,7 +231,7 @@ public:
      * @param oldOperand The source value.
      * @param newOperand The destination value.
      */
-    void ReplaceOperand(Value* oldOperand, Value* newOperand);
+    virtual void ReplaceOperand(Value* oldOperand, Value* newOperand);
 
     // ===--------------------------------------------------------------------===//
     // Modify Self
@@ -399,14 +399,8 @@ protected:
     ~BinaryExpression() override = default;
 
 private:
-    explicit BinaryExpression(ExprKind kind, Value* lhs, Value* rhs, Cangjie::OverflowStrategy ofs, Block* parent)
-        : Expression(kind, {lhs, rhs}, {}, parent), overflowStrategy(ofs)
-    {
-    }
-    explicit BinaryExpression(ExprKind kind, Value* lhs, Value* rhs, Block* parent)
-        : Expression(kind, {lhs, rhs}, {}, parent)
-    {
-    }
+    explicit BinaryExpression(ExprKind kind, Value* lhs, Value* rhs, OverflowStrategy ofs, Block* parent);
+    explicit BinaryExpression(ExprKind kind, Value* lhs, Value* rhs, Block* parent);
 
     BinaryExpression* Clone(CHIRBuilder& builder, Block& parent) const override;
 
@@ -577,8 +571,6 @@ private:
  * Cangjie Code:
  *      struct S { var a = 1 }
  *      var x = S().a  // `S()` is the location, the path is { 0 }
- *                     // not care about the location is value type or ref type, but usually
- *                     // the location is CustomType, not TupleType
  *
  * we only get the reference, not take up the memory, unless this reference is loaded
  */
@@ -614,6 +606,50 @@ private:
     GetElementRef* Clone(CHIRBuilder& builder, Block& parent) const override;
 
     std::vector<uint64_t> path;
+};
+
+/**
+ * @brief Compute the reference to the corresponding child element data
+ * from the data specified by `Location` base on `Name`.
+ *
+ * Cangjie Code:
+ *      struct S { var a = 1 }
+ *      var x = S().a  // `S()` is the location, the Name is { "a" }
+ *
+ * we only get the reference, not take up the memory, unless this reference is loaded
+ */
+class GetElementByName : public Expression {
+    friend class CHIRContext;
+    friend class CHIRBuilder;
+public:
+    // ===--------------------------------------------------------------------===//
+    // Base Information
+    // ===--------------------------------------------------------------------===//
+    /**
+     * @brief which reference to be compute
+     *
+     * @return a value with reference type
+     */
+    Value* GetLocation() const;
+
+    const std::vector<std::string>& GetNames() const;
+
+    // ===--------------------------------------------------------------------===//
+    // Others
+    // ===--------------------------------------------------------------------===//
+    std::string ToString(size_t indent = 0) const override;
+
+protected:
+    ~GetElementByName() override = default;
+
+private:
+    explicit GetElementByName(Value* location, const std::vector<std::string>& names, Block* parent)
+        : Expression(ExprKind::GET_ELEMENT_BY_NAME, {location}, {}, parent), names(names)
+    {
+    }
+    GetElementByName* Clone(CHIRBuilder& builder, Block& parent) const override;
+
+    std::vector<std::string> names;
 };
 
 /**
@@ -671,6 +707,55 @@ private:
 };
 
 /**
+ * @brief Store a value to the corresponding child element
+ *
+ * Cangjie Code:
+ *      struct S { var a = 1 }
+ *      var x = S()
+ *      x.a = 2  // `2` is the source value, `x` is the location, the name is { "a" }
+ */
+class StoreElementByName : public Expression {
+    friend class CHIRContext;
+    friend class CHIRBuilder;
+public:
+    // ===--------------------------------------------------------------------===//
+    // Base Information
+    // ===--------------------------------------------------------------------===//
+    /**
+     * @brief Retrieves the source value.
+     *
+     * @return The value.
+     */
+    Value* GetValue() const;
+    
+    /**
+     * @brief Retrieves the location.
+     *
+     * @return The location.
+     */
+    Value* GetLocation() const;
+
+    const std::vector<std::string>& GetNames() const;
+
+    // ===--------------------------------------------------------------------===//
+    // Others
+    // ===--------------------------------------------------------------------===//
+    std::string ToString(size_t indent = 0) const override;
+
+protected:
+    ~StoreElementByName() override = default;
+
+private:
+    explicit StoreElementByName(Value* value, Value* location, const std::vector<std::string>& names, Block* parent)
+        : Expression(ExprKind::STORE_ELEMENT_BY_NAME, {value, location}, {}, parent), names(names)
+    {
+    }
+
+    StoreElementByName* Clone(CHIRBuilder& builder, Block& parent) const override;
+    std::vector<std::string> names;
+};
+
+/**
  * @brief Context for a function calling
  */
 struct FuncCallContext {
@@ -685,7 +770,7 @@ struct FuncCallContext {
 struct VirMethodContext {
     std::string srcCodeIdentifier;       // function name
     FuncType* originalFuncType{nullptr}; // method signature type, from virtual method type in parent CustomTypeDef
-    size_t offset{0};                    // offset in vtable
+    std::vector<GenericType*> genericTypeParams;
 };
 
 /**
@@ -855,12 +940,14 @@ public:
      */
     FuncType* GetMethodType() const;
 
+    const std::vector<GenericType*>& GetGenericTypeParams() const;
+
     /**
      * @brief Retrieves the method's offset in vtable.
      *
      * @return The offset, greater than or equal to zero.
      */
-    size_t GetVirtualMethodOffset() const;
+    size_t GetVirtualMethodOffset(CHIRBuilder* builder = nullptr) const;
 
     // ===--------------------------------------------------------------------===//
     // Instantiated Types
@@ -876,6 +963,9 @@ protected:
     explicit DynamicDispatch(ExprKind kind, const InvokeCallContext& callContext, Block* parent);
 
     VirMethodContext virMethodCtx;
+
+private:
+    std::vector<VTableSearchRes> GetVirtualMethodInfo(CHIRBuilder& builder) const;
 };
 
 /**
@@ -898,7 +988,27 @@ public:
     // Base Information
     // ===--------------------------------------------------------------------===//
     /**
+     * @brief Replace old operand in specified position.
+     *
+     * @param idx The sepcified position.
+     * @param newOperand The destination value.
+     */
+    void ReplaceOperand(size_t idx, Value* newOperand) final;
+
+    /**
+     * @brief Replace old operand with the new one, if there are many old operands in same expression,
+     * then replace them all
+     *
+     * @param oldOperand The source value.
+     * @param newOperand The destination value.
+     */
+    void ReplaceOperand(Value* oldOperand, Value* newOperand) final;
+    
+    /**
      * @brief Retrieves the object of this Invoke operation.
+     * Object's type doesn't always equal to ThisType, maybe we use an object from sub type to call
+     * a virtual func from super type, then in order to func param type matched,
+     * this object need to be casted to super type, but ThisType is still the sub type.
      *
      * @return The object of this Invoke operation.
      */
@@ -923,6 +1033,8 @@ private:
     explicit Invoke(const InvokeCallContext& callContext, Block* parent);
 
     Invoke* Clone(CHIRBuilder& builder, Block& parent) const override;
+
+    void UpdateThisType();
 };
 
 /**
@@ -1333,6 +1445,43 @@ private:
     std::vector<uint64_t> path;
 };
 
+/**
+ * @brief Compute child element value from specific `Base` and `Name`.
+ * `FieldByName` is different from `GetElementByName`, `Base` in `FieldByName` is value type,
+ * but `Location` in `GetElementRef` is reference type
+ *
+ * Cangjie Code:
+ *      struct S {
+ *          let a = 1
+ *      }
+ *      let x = S()
+ *      println(x.a)  // use `FieldByName` to get first element value, `Base` is `x`, `Name` is {"a"}
+ */
+class FieldByName : public Expression {
+    friend class CHIRContext;
+    friend class CHIRBuilder;
+public:
+    // ===--------------------------------------------------------------------===//
+    // Base Information
+    // ===--------------------------------------------------------------------===//
+    Value* GetBase() const;
+
+    const std::vector<std::string>& GetNames() const;
+
+    // ===--------------------------------------------------------------------===//
+    // Others
+    // ===--------------------------------------------------------------------===//
+    std::string ToString(size_t indent = 0) const override;
+
+private:
+    explicit FieldByName(Value* val, const std::vector<std::string>& names, Block* parent);
+    ~FieldByName() override = default;
+
+    FieldByName* Clone(CHIRBuilder& builder, Block& parent) const override;
+
+    std::vector<std::string> names;
+};
+
 // ===--------------------------------------------------------------------===//
 // RawArray is an internal type used in struct Array of std.core
 // Its implementation of constructor and memory allocating is from CodeGen
@@ -1344,6 +1493,13 @@ private:
  *
  *  Cangjie Code:
  *      var x: Array<Int32> = [1, 2, 3]  // use `RawArrayAllocate` to get a memory to store `1, 2, 3`
+ *  CHIR:
+ *      %0: Int64 = Constant(3)
+ *      %1: RawArray<Int32>& = RawArrayAllocate(Int32, %0)
+ *      %2: Int32 = Constant(1)
+ *      %3: Int32 = Constant(2)
+ *      %4: Int32 = Constant(3)
+ *      %5: Unit = RawArrayLiteralInit(%1, %2, %3, %4)
  */
 class RawArrayAllocate : public Expression {
     friend class ExprTypeConverter;
@@ -1383,6 +1539,13 @@ private:
  *
  * Cangjie Code:
  *      var x: Array<Int32> = [1, 2, 3]  // use `RawArrayLiteralInit` to initialize `[1, 2, 3]`
+ * CHIR:
+ *      %0: Int64 = Constant(3)
+ *      %1: RawArray<Int32>& = RawArrayAllocate(Int32, %0)
+ *      %2: Int32 = Constant(1)
+ *      %3: Int32 = Constant(2)
+ *      %4: Int32 = Constant(3)
+ *      %5: Unit = RawArrayLiteralInit(%1, %2, %3, %4)
  */
 class RawArrayLiteralInit : public Expression {
     friend class CHIRContext;

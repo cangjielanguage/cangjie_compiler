@@ -63,7 +63,8 @@ private:
     void CheckInitInClassDecl(const AST::ClassDecl& cd);
     void CheckLetFlagInMemberAccess(
         const AST::Expr& ae, const AST::MemberAccess& ma, bool inInitFunction);
-    void CollectDecls(const OwnedPtr<AST::Decl>& decl, CollectDeclsInfo& info);
+    CollectDeclsInfo CollectDecls(const AST::Decl& decl);
+    void CollectToDeclsInfo(const OwnedPtr<AST::Decl>& decl, CollectDeclsInfo& info);
     void CheckInitInConstructors(
         AST::FuncDecl& fd, const std::vector<Ptr<AST::Decl>>& unInitNonFuncDecls);
     void CheckStaticInitForTypeDecl(const AST::InheritableDecl& id);
@@ -71,7 +72,7 @@ private:
      * Check the initialization status in a constructor
      * @param decls the decls in the body of a class or struct
      */
-    void CheckInitInTypeDecl(const std::vector<OwnedPtr<AST::Decl>>& decls,
+    void CheckInitInTypeDecl(const AST::Decl& inheritDecl,
         const std::vector<Ptr<AST::Decl>>& superClassNonFuncDecls = std::vector<Ptr<AST::Decl>>());
     void GetNonFuncDeclsInSuperClass(const AST::ClassDecl& cd, std::vector<Ptr<AST::Decl>>& superClassNonFuncDecls,
         std::set<Ptr<AST::Decl>>& superClasses);
@@ -115,7 +116,8 @@ private:
         variablesBeforeTeminatedScope.erase(scopeName);
         initVarsAfterTerminator.erase(scopeName);
     }
-
+    void CheckNonCommonVariablesInitInCommonDecl(const AST::InheritableDecl& id);
+    void RecordInstanceVariableUsage(const AST::Decl& target);
     const ASTContext& ctx;
     DiagnosticEngine& diag;
     const GlobalOptions& opts;
@@ -179,6 +181,11 @@ private:
      *     }
      */
     std::unordered_map<std::string, std::unordered_set<Ptr<const AST::Decl>>> initVarsAfterTerminator;
+    /**
+     * Holds a dependencies to other member variables when analyzing initializer of meber variable
+     * eg: let a = b + 1 // { b }
+     */
+    std::optional<std::unordered_set<Ptr<const AST::Decl>>> currentInitializingVarDependencies;
     /**
      * When current is in the context that may not run termination as normal, 'optionalCtxDepth' plus 1.
      * eg: at the right hand side of 'coalescing', 'and', 'or' expressions.

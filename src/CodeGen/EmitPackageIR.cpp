@@ -214,6 +214,8 @@ void RecordCodeInfoInCodeGen(const std::string& suffix, const CGModule& cgMod)
         }
     }
     std::string suffixWithModuleName = suffix + "(" + cgMod.GetLLVMModule()->getSourceFileName() + ")";
+    static std::mutex profileMutex;
+    std::lock_guard g{profileMutex};
     Utils::ProfileRecorder::RecordCodeInfo(
         "all generic ins llvm ir after " + suffixWithModuleName, static_cast<int64_t>(allInstantiated));
     Utils::ProfileRecorder::RecordCodeInfo(

@@ -9,7 +9,29 @@
 #include "cangjie/CHIR/CHIRCasting.h"
 #include "cangjie/CHIR/Visitor/Visitor.h"
 
-namespace Cangjie::CHIR {
+using namespace Cangjie::CHIR;
+namespace {
+bool NeedUnify(const Expression& expr)
+{
+    auto result = expr.GetResult();
+    if (result == nullptr) {
+        return false;
+    }
+    if (!result->GetType()->IsUnit()) {
+        return false;
+    }
+    if (result->GetUsers().empty()) {
+        return false;
+    }
+    if (auto constant = Cangjie::DynamicCast<const Constant*>(&expr)) {
+        if (constant->GetValue()->IsNullLiteral() || constant->GetValue()->IsUnitLiteral()) {
+            return false;
+        }
+    }
+    return true;
+}
+}
+
 UnitUnify::UnitUnify(CHIRBuilder& builder) : builder(builder)
 {
 }
@@ -28,8 +50,7 @@ void UnitUnify::RunOnFunc(const Ptr<Func>& func, bool isDebug)
         if (Is<GetRTTI>(expr) || Is<GetRTTIStatic>(expr)) {
             return VisitResult::CONTINUE;
         }
-        if (expr.GetResult() != nullptr && expr.GetResult()->GetType()->GetTypeKind() == Type::TypeKind::TYPE_UNIT &&
-            !expr.GetResult()->GetUsers().empty()) {
+        if (NeedUnify(expr)) {
             LoadOrCreateUnit(optUnit, expr.GetParentBlockGroup());
             expr.GetResult()->ReplaceWith(*optUnit->GetResult(), expr.GetParentBlockGroup());
             if (isDebug) {
@@ -50,4 +71,3 @@ void UnitUnify::LoadOrCreateUnit(Ptr<Constant>& constant, const Ptr<BlockGroup>&
     constant = builder.CreateConstantExpression<UnitLiteral>(builder.GetUnitTy(), entryBlock);
     constant->MoveBefore(entryBlock->GetExpressions()[0]);
 }
-} // namespace Cangjie::CHIR
