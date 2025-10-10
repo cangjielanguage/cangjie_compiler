@@ -4,7 +4,11 @@
 
 Cangjie is a general-purpose programming language designed for all-scenario application development, balancing development efficiency and runtime performance while providing a great programming experience. Cangjie features concise and efficient syntax, multi-paradigm programming, and type safety. For more information, please refer to the [Cangjie Language Development Guide](https://cangjie-lang.cn/docs?url=%2F1.0.0%2Fuser_manual%2Fsource_zh_cn%2Ffirst_understanding%2Fbasic.html) and the [Cangjie Programming Language White Paper](https://cangjie-lang.cn/docs?url=%2F0.53.18%2Fwhite_paper%2Fsource_zh_cn%2Fcj-wp-abstract.html).
 
-This repository provides the source code for the Cangjie compiler, which consists of two main parts: the compiler frontend and modified open-source LLVM components. The latter includes the LLVM backend, opt optimizer, llc, ld linker, and debugger. For details on third-party dependencies, see the [Third-Party Library Documentation](./third_party/README.md). The overall architecture is shown below:
+This repository provides the source code for the Cangjie compiler, which consists of two main parts: the compiler frontend and modified open-source LLVM components. The latter includes the LLVM backend, opt optimizer, llc, ld linker, and debugger. For details on third-party dependencies, see the [Third-Party Library Documentation](./third_party/README.md).
+
+## Architecture
+
+The overall architecture is shown below:
 
 ![Architecture Diagram](figures/Compiler_Architecture_Diagram.png)
 
@@ -12,37 +16,37 @@ This repository provides the source code for the Cangjie compiler, which consist
 
 - **Compiler Frontend**: Responsible for converting Cangjie source code from text to intermediate representation, including lexical, syntax, macro, and semantic analysis, ensuring code structure and semantics are correct, and preparing for backend code generation. This module depends on mingw-w64 to support Windows platform capabilities, enabling users to generate executable binaries that can call Windows APIs. It also relies on libboundscheck for safe function library access.
 
-    - **Lexer** breaks down Cangjie source code into meaningful tokens.
+  - **Lexer** breaks down Cangjie source code into meaningful tokens.
 
-    - **Parser** builds an Abstract Syntax Tree (AST) according to Cangjie grammar rules to reflect program structure.
+  - **Parser** builds an Abstract Syntax Tree (AST) according to Cangjie grammar rules to reflect program structure.
 
-    - **Semantic** performs type checking, type inference, and scope analysis on the AST to ensure semantic correctness.
+  - **Semantic** performs type checking, type inference, and scope analysis on the AST to ensure semantic correctness.
 
-    - **Mangler** handles symbol name mangling for Cangjie, and includes a demangler tool for reverse parsing.
+  - **Mangler** handles symbol name mangling for Cangjie, and includes a demangler tool for reverse parsing.
 
-    - **Package Management** manages and loads code modules, handles dependencies and namespace isolation, and supports multi-module collaborative development. This module uses the flatbuffer library for serialization and deserialization.
+  - **Package Management** manages and loads code modules, handles dependencies and namespace isolation, and supports multi-module collaborative development. This module uses the flatbuffer library for serialization and deserialization.
 
-    - **Macro** handles macro expansion, processing macro definitions and calls for code generation and reuse.
+  - **Macro** handles macro expansion, processing macro definitions and calls for code generation and reuse.
 
-    - **Condition Compile**: Conditional compilation allows compiling based on predefined or custom conditions; incremental compilation speeds up builds using previous compilation cache files.
+  - **Condition Compile**: Conditional compilation allows compiling based on predefined or custom conditions; incremental compilation speeds up builds using previous compilation cache files.
 
-    - **CHIR**: CHIR (Cangjie High Level IR) converts the AST to an intermediate representation and performs optimizations.
+  - **CHIR**: CHIR (Cangjie High Level IR) converts the AST to an intermediate representation and performs optimizations.
 
-    - **Codegen**: Translates the intermediate representation (CHIR) to LLVM IR, preparing for target machine code (LLVM BitCode) generation.
+  - **Codegen**: Translates the intermediate representation (CHIR) to LLVM IR, preparing for target machine code (LLVM BitCode) generation.
 
 - **LLVM**: Includes the compiler backend and related LLVM toolchain. The backend receives the intermediate representation from the frontend, optimizes it, generates target platform machine code, and links it into executable files.
 
-    - **opt**: Performs various optimizations on LLVM IR, such as constant folding and loop optimization, to improve code efficiency and quality.
+  - **opt**: Performs various optimizations on LLVM IR, such as constant folding and loop optimization, to improve code efficiency and quality.
 
-    - **llc**: Converts optimized LLVM IR to target platform machine code, supporting different hardware architectures.
+  - **llc**: Converts optimized LLVM IR to target platform machine code, supporting different hardware architectures.
 
-    - **ld**: Links multiple object files and libraries into the final executable, resolving symbol references and generating deployable program artifacts.
+  - **ld**: Links multiple object files and libraries into the final executable, resolving symbol references and generating deployable program artifacts.
 
-    - **debugger**: Provides debugging capabilities for the Cangjie language.
+  - **debugger**: Provides debugging capabilities for the Cangjie language.
 
 For more details on the LLVM toolchain and backend tools, refer to the [LLVM Command Guide](https://llvm.org/docs/CommandGuide/).
 
-- **OS**: The Cangjie compiler and LLVM toolchain currently support Windows x86-64, Linux x86-64/AArch64, and Mac x86/arm64. HarmonyOS support is under development. In addition to native compilation, the Cangjie compiler supports cross-compiling binaries for the ohos-aarch64 platform. For details, see the [Cangjie SDK Integration and Build Guide](https://gitcode.com/Cangjie/cangjie_build) and [Platform Support Roadmap](#platform-support-roadmap).
+- **OS**: The Cangjie compiler and LLVM toolchain currently support Windows x86-64, Linux x86-64/AArch64, and Mac x86/arm64. OHOS support is under development. In addition to native compilation, the Cangjie compiler supports cross-compiling binaries for the ohos-aarch64 platform. For details, see the [Cangjie SDK Integration and Build Guide](https://gitcode.com/Cangjie/cangjie_build) and [Platform Support Roadmap](#platform-support-roadmap).
 
 ## Directory Structure
 
@@ -88,11 +92,12 @@ cangjie_compiler/
 Currently, building Cangjie compiler artifacts directly in the Windows environment is not supported. Instead, you need to generate compiler artifacts that can run on Windows through cross-compilation in a Linux environment. For details, see the [Cangjie SDK Integration Build Guide](https://gitcode.com/Cangjie/cangjie_build/blob/dev/README_zh.md). For future support plans, refer to the [Platform Support Roadmap](#platform-support-roadmap).
 
 ## Platform Support Roadmap
-- Build Platform Evolution: Planned support for Windows Native builds of compiler artifacts by the end of 2025.
 
-- Compiler Runtime Platform Evolution: Planned support for running the compiler on the ohos (HarmonyOS PC) platform in 2026.
+- Build Platform Evolution: Planned support for Windows Native builds of compiler artifacts in 2025 Q4.
 
-- Cangjie Application Runtime Platform Evolution: Planned support for ohos-arm32 core features on 2025-09-30, but reflection and certain optimization features will not be included for the time being.
+- Compiler Runtime Platform Evolution: Planned support for running the compiler on the OHOS(PC) platform in 2026 Q2.
+
+- Cangjie Application Runtime Platform Evolution: Planned support for OHOS-ARM32 core features on 2025.10.20, reflection and dynamic loading、some compiler Optimization features will support on 2025 Q4.
 
 ## Building from Source
 
