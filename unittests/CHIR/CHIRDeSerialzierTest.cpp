@@ -729,6 +729,12 @@ IntrinsicKind DeSerialize(const PackageFormat::IntrinsicKind& kind)
         case IntrinsicKind_DECODE_STACK_TRACE:
             ret = DECODE_STACK_TRACE;
             break;
+        case IntrinsicKind_DUMP_CURRENT_THREAD_INFO:
+            ret = DUMP_CURRENT_THREAD_INFO;
+            break;
+        case IntrinsicKind_DUMP_ALL_THREADS_INFO:
+            ret = DUMP_ALL_THREADS_INFO;
+            break;
         case IntrinsicKind_CHR:
             ret = CHR;
             break;
