@@ -706,7 +706,8 @@ llvm::Constant* CGType::GenMTableOfTypeInfo()
     }
     auto& extendInterfaces = cgExtensionDef->GetExtendInterfaces();
     constexpr size_t bitsPerByte = 8U;
-    if (extendInterfaces.size() < sizeof(void*) * bitsPerByte - 1U) {
+    if (cgCtx.GetCompileOptions().target.arch != Triple::ArchType::ARM32 &&
+        extendInterfaces.size() < sizeof(void*) * bitsPerByte - 1U) {
         std::string flag(extendInterfaces.size(), '0');
         if (chirType.GetTypeArgs().empty()) {
             flag = std::string(extendInterfaces.size(), '1');

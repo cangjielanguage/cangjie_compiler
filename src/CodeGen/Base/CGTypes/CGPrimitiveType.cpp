@@ -42,6 +42,10 @@ llvm::Type* CGPrimitiveType::GenLLVMType()
                 llvmType = llvm::Type::getInt64Ty(llvmCtx);
                 break;
             }
+            if (archType == Triple::ArchType::ARM32) {
+                llvmType = llvm::Type::getInt32Ty(llvmCtx);
+                break;
+            }
             CJC_ASSERT(false && "Unsupported ArchType.");
             return nullptr;
         }

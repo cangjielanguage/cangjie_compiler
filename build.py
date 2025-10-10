@@ -101,6 +101,8 @@ def generate_cmake_defs(args):
     if args.target:
         if args.target == "aarch64-linux-ohos":
             toolchain_file = "ohos_aarch64_clang_toolchain.cmake"
+        elif args.target == "arm-linux-ohos":
+            toolchain_file = "ohos_arm_clang_toolchain.cmake"
         elif args.target == "x86_64-linux-ohos":
             toolchain_file = "ohos_x86_64_clang_toolchain.cmake"
         elif args.target == "x86_64-w64-mingw32":
@@ -161,6 +163,8 @@ def build(args):
             args.target = None
         elif args.target == "ohos-aarch64":
             args.target = "aarch64-linux-ohos"
+        elif args.target == "ohos-arm":
+            args.target = "arm-linux-ohos"
         elif args.target == "ohos-x86_64":
             args.target = "x86_64-linux-ohos"
         elif args.target == "windows-x86_64":
@@ -306,6 +310,8 @@ def install(args):
             args.host = None
         elif args.host == "ohos-aarch64":
             args.host = "aarch64-linux-ohos"
+        elif args.host == "ohos-arm":
+            args.host = "arm-linux-ohos"
         elif args.host == "ohos-x86_64":
             args.host = "x86_64-linux-ohos"
         elif args.host == "windows-x86_64":
@@ -499,6 +505,7 @@ SupportedTarget = [
     "native",
     "windows-x86_64",
     "ohos-aarch64",
+    "ohos-arm",
     "ohos-x86_64",
     "ios-simulator-aarch64",
     "ios-aarch64",

@@ -196,7 +196,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
             -DLLVM_ENABLE_ZLIB=OFF
             -DLLVM_ENABLE_ZSTD=OFF
             # Build both targets in case of cross-compilation.
-            -DLLVM_TARGETS_TO_BUILD=AArch64|X86
+            -DLLVM_TARGETS_TO_BUILD=ARM|AArch64|X86
             -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}
             -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH_ALT_SEP}
             -DCOMPILER_RT_ENABLE_IOS=OFF

@@ -65,7 +65,7 @@ const std::unordered_map<std::string, uint8_t> OUTPUT_MODE_MAP = {
 
 const std::unordered_map<std::string, ArchType> STRING_ARCH_MAP = {
     {"x86_64", ArchType::X86_64}, {"aarch64", ArchType::AARCH64}, {"arm64", ArchType::ARM64},
-    {"unknown", ArchType::UNKNOWN}
+    {"arm", ArchType::ARM32}, {"unknown", ArchType::UNKNOWN}
 };
 
 const std::unordered_map<std::string, OSType> STRING_OS_MAP = {

@@ -62,11 +62,7 @@ public:
         return StaticCast<const CHIR::FuncType&>(GetOriginal()).IsCFunc();
     }
 
-    void CalculateSizeAndAlign() override
-    {
-        size = sizeof(void*);
-        align = alignof(void*);
-    }
+    void CalculateSizeAndAlign() override;
 
     bool HasBasePtr() const
     {

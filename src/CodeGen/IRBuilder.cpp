@@ -228,7 +228,7 @@ void IRBuilder2::CreateUnBoxDeclare(const CHIR::Debug& debugNode, const CGValue&
     auto capturedCGType = CGType::GetOrCreate(cgMod, capturedTy);
     auto load = CreateLoad(cgValue);
     auto eleType = cgValue.GetCGType()->GetPointerElementType()->GetPointerElementType();
-    auto ret = CreateConstGEP1_32(getInt8Ty(), load, sizeof(void*));
+    auto ret = GetPayloadFromObject(load);
     auto layoutType = dynamic_cast<const CGClassType*>(eleType)->GetLayoutType();
     ret = CreateBitCast(ret, layoutType->getPointerTo(1));
     ret = LLVMIRBuilder2::CreateStructGEP(layoutType, ret, 0);

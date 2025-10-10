@@ -105,6 +105,7 @@ enum class ArchType : uint8_t {
     X86_64 = 0,
     AARCH64,
     ARM64,
+    ARM32,
     UNKNOWN,
 };
 

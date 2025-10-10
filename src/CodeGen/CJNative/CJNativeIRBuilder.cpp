@@ -322,6 +322,32 @@ void ConvertArgsType(llvm::IRBuilder<>& irBuilder, const llvm::Function* func, s
 }
 } // namespace
 
+llvm::Type* IRBuilder2::GetSizetType() const
+{
+    if (GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32) {
+        return llvm::Type::getInt32Ty(GetLLVMContext());
+    } else {
+        return llvm::Type::getInt64Ty(GetLLVMContext());
+    }
+}
+
+CHIR::Type::TypeKind IRBuilder2::GetTypeKindFromType(const CHIR::Type& ty) const
+{
+    auto typeKind = ty.GetTypeKind();
+    auto isArm32 = GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32;
+    if (typeKind == CHIR::Type::TypeKind::TYPE_UINT_NATIVE) {
+        typeKind = isArm32 ? CHIR::Type::TypeKind::TYPE_UINT32 : CHIR::Type::TypeKind::TYPE_UINT64;
+    } else if (typeKind == CHIR::Type::TypeKind::TYPE_INT_NATIVE) {
+        typeKind = isArm32 ? CHIR::Type::TypeKind::TYPE_INT32 : CHIR::Type::TypeKind::TYPE_INT64;
+    }
+    return typeKind;
+}
+
+size_t IRBuilder2::GetVoidPtrSize() const
+{
+    return sizeof(void*);
+}
+
 bool IRBuilder2::IsGlobalVariableBasePtr(llvm::Value* val) const
 {
     return llvm::isa<llvm::GlobalVariable>(val->stripInBoundsOffsets());
@@ -346,7 +372,8 @@ llvm::Instruction* IRBuilder2::CallGCReadWeakRef(std::vector<llvm::Value*> args)
 llvm::Instruction* IRBuilder2::CallGCReadAgg(std::vector<llvm::Value*> args)
 {
     // Func: void @llvm.cj.gcread.struct(i8 addr1* baseObj, i8 addr1* dst, i8 addr1*/ i8* src, i64 length)
-    auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcread_struct);
+    auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcread_struct, {GetSizetType()});
+    args[3] = CreateZExtOrTrunc(args[3], GetSizetType());
     ConvertArgsType(*this, func, args);
     return CreateCall(func, args);
 }
@@ -364,7 +391,8 @@ llvm::Instruction* IRBuilder2::CallGCReadStaticAgg(llvm::StructType* type, std::
     // 3 arguments.
     CJC_ASSERT(args.size() == 3);
     llvm::LLVMContext& ctx = getContext();
-    auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcread_static_struct);
+    auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcread_static_struct, {GetSizetType()});
+    args[2] = CreateZExtOrTrunc(args[2], GetSizetType());
     auto typeName = GetCodeGenTypeName(type);
     auto meta = llvm::MDTuple::get(ctx, {llvm::MDString::get(ctx, typeName)});
     ConvertArgsType(*this, func, args);
@@ -393,7 +421,8 @@ llvm::Instruction* IRBuilder2::CallGCWriteAgg(std::vector<llvm::Value*> args)
     // real type of third parameter: args[2]->getType()
     llvm::Type* type = llvm::Type::getInt8PtrTy(GetLLVMContext(), args[2]->getType()->getPointerAddressSpace());
     // Func: void @llvm.cj.gcwrite.struct(i8 addr1* baseObj, i8 addr1* dst, i8 addr1*/ i8* src, i64 length)
-    auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcwrite_struct, {type});
+    auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcwrite_struct, {type, GetSizetType()});
+    args[3] = CreateZExtOrTrunc(args[3], GetSizetType());
     ConvertArgsType(*this, func, args);
     return CreateCall(func, args);
 }
@@ -416,7 +445,8 @@ llvm::Instruction* IRBuilder2::CallGCWriteStaticAgg(llvm::StructType* type, std:
     }
     llvm::LLVMContext& ctx = getContext();
     auto func = llvm::Intrinsic::getDeclaration(
-        cgMod.GetLLVMModule(), static_cast<llvm::Intrinsic::ID>(llvm::Intrinsic::cj_gcwrite_static_struct));
+        cgMod.GetLLVMModule(), static_cast<llvm::Intrinsic::ID>(llvm::Intrinsic::cj_gcwrite_static_struct), {GetSizetType()});
+    args[2] = CreateZExtOrTrunc(args[2], GetSizetType());
     auto typeName = GetCodeGenTypeName(type);
     auto meta = llvm::MDTuple::get(ctx, {llvm::MDString::get(ctx, typeName)});
     ConvertArgsType(*this, func, args);
@@ -901,13 +931,13 @@ CGValue IRBuilder2::CreateGEP(
                 **(cgMod | chirExpr->GetTopLevelFunc()->GetParam(0)) == ret) {
                 // It means this param doesn't have typeinfo, no need to add the offset.
             } else if (!hasSkippedTypeInfo) {
-                offset = CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), sizeof(void*)));
+                offset = CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), GetVoidPtrSize()));
                 hasSkippedTypeInfo = true;
             }
             ret = CreateInBoundsGEP(getInt8Ty(), ret, offset);
         } else if (auto classCGType = dynamic_cast<const CGClassType*>(eleType)) {
             auto baseType = classCGType;
-            ret = CreateConstGEP1_32(getInt8Ty(), ret, sizeof(void*));
+            ret = GetPayloadFromObject(ret);
             auto layoutType = static_cast<const CGClassType*>(baseType)->GetLayoutType();
             ret = CreateBitCast(ret, layoutType->getPointerTo(1));
             ret = LLVMIRBuilder2::CreateStructGEP(layoutType, ret, idx + offsetForAutoEnv);
@@ -977,9 +1007,9 @@ void IRBuilder2::CreateCopyTo(ArrayCopyToInfo arrayCopyToInfo)
 
     if (!elemCGType->GetSize()) {
         auto func = llvm::Intrinsic::getDeclaration(
-            GetLLVMModule(), static_cast<llvm::Intrinsic::ID>(llvm::Intrinsic::cj_array_copy_generic));
+            GetLLVMModule(), static_cast<llvm::Intrinsic::ID>(llvm::Intrinsic::cj_array_copy_generic), {GetSizetType()});
         CreateCall(func->getFunctionType(), func,
-            {arrayCopyToInfo.dstBP, dstArrI8Ptr, arrayCopyToInfo.srcBP, srcArrI8Ptr, arrayCopyToInfo.dataSize});
+            {arrayCopyToInfo.dstBP, dstArrI8Ptr, arrayCopyToInfo.srcBP, srcArrI8Ptr, CreateZExtOrTrunc(arrayCopyToInfo.dataSize, GetSizetType())});
         return;
     }
 
@@ -987,12 +1017,12 @@ void IRBuilder2::CreateCopyTo(ArrayCopyToInfo arrayCopyToInfo)
         bool isRefType = arrayCopyToInfo.elemType->GetLLVMType() == CGType::GetRefType(GetLLVMContext());
         auto copyToInstrinsic = isRefType ? llvm::Intrinsic::cj_array_copy_ref : llvm::Intrinsic::cj_array_copy_struct;
         auto func =
-            llvm::Intrinsic::getDeclaration(GetLLVMModule(), static_cast<llvm::Intrinsic::ID>(copyToInstrinsic));
+            llvm::Intrinsic::getDeclaration(GetLLVMModule(), static_cast<llvm::Intrinsic::ID>(copyToInstrinsic), {GetSizetType()});
         // llvm.cj.array.copyto(i8 addrspace(1)* destBP, i8 addrspace(1)* <dest>,
         //    i8 addrspace(1)* srcBP, i8
         // addrspace(1)* <src>,  i64 <len>)
         CreateCall(func->getFunctionType(), func,
-            {arrayCopyToInfo.dstBP, dstArrI8Ptr, arrayCopyToInfo.srcBP, srcArrI8Ptr, arrayCopyToInfo.dataSize});
+            {arrayCopyToInfo.dstBP, dstArrI8Ptr, arrayCopyToInfo.srcBP, srcArrI8Ptr, CreateZExtOrTrunc(arrayCopyToInfo.dataSize, GetSizetType())});
     } else {
         auto align = llvm::Align(GetLLVMModule()->getDataLayout().getPrefTypeAlignment(elemCGType->GetLLVMType()));
         CreateMemMove(dstArrI8Ptr, align, srcArrI8Ptr, align, arrayCopyToInfo.dataSize); // Copy array data.
@@ -1251,7 +1281,7 @@ void InitArrayDataUG(IRBuilder2& irBuilder, llvm::Value* arrPtr, llvm::Value* ar
     llvm::Value* offset = irBuilder.CallIntrinsicGetFieldOffset({irBuilder.CreateTypeInfo(arrTy), index,
         /* pre-offset: arrLength */
         irBuilder.getInt32(8U)});
-    offset = irBuilder.CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), sizeof(void*)));
+    offset = irBuilder.CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), irBuilder.GetVoidPtrSize()));
     auto fieldType = arrTy.GetElementType();
     auto fieldAddr = irBuilder.CreateInBoundsGEP(irBuilder.getInt8Ty(), arrPtr, offset);
     auto fieldAddrCGType = CGType::GetOrCreate(
@@ -1530,7 +1560,7 @@ llvm::Value* GetCommonEnumAssociatedValue(IRBuilder2& irBuilder, const CHIR::Fie
             {enumCaseTT, irBuilder.getInt32(typeArgs.size()), irBuilder.CreateTypeInfoArray(typeArgs)});
         llvm::Value* fieldOffset =
             irBuilder.CallIntrinsicGetFieldOffset({enumCaseTi, irBuilder.getInt64(associatedValIdx)});
-        fieldOffset = irBuilder.CreateAdd(fieldOffset, llvm::ConstantInt::get(fieldOffset->getType(), sizeof(void*)));
+        fieldOffset = irBuilder.CreateAdd(fieldOffset, llvm::ConstantInt::get(fieldOffset->getType(), irBuilder.GetVoidPtrSize()));
         auto fieldAddr = irBuilder.CreateInBoundsGEP(irBuilder.getInt8Ty(), enumVal, fieldOffset);
         if (!fieldType->IsGeneric()) {
             auto fieldCGType = CGType::GetOrCreate(cgMod, fieldType);
@@ -1721,11 +1751,15 @@ llvm::Value* IRBuilder2::GetSize_32(const CHIR::Type& type)
         CreateBr(exitBB);
         SetInsertPoint(exitBB);
         auto sizePHI = CreatePHI(getInt32Ty(), 2U);
-        sizePHI->addIncoming(getInt32(sizeof(void*)), refSizeBB);
+        if (GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32) {
+            sizePHI->addIncoming(getInt32(4U), refSizeBB);
+        } else {
+            sizePHI->addIncoming(getInt32(GetVoidPtrSize()), refSizeBB);
+        }
         sizePHI->addIncoming(nonRefSize, nonRefSizeBB);
         return sizePHI;
     } else if (auto cgType = CGType::GetOrCreate(cgMod, &type); cgType->IsReference()) {
-        return getInt32(sizeof(void*));
+        return getInt32(GetVoidPtrSize());
     } else {
         return GetLayoutSize_32(type);
     }
@@ -1734,6 +1768,15 @@ llvm::Value* IRBuilder2::GetSize_32(const CHIR::Type& type)
 llvm::Value* IRBuilder2::GetSize_64(const CHIR::Type& type)
 {
     return CreateSExt(GetSize_32(type), getInt64Ty());
+}
+
+llvm::Value* IRBuilder2::GetSize_Native(const CHIR::Type& type)
+{
+    if (GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32) {
+        return GetSize_32(type);
+    } else {
+        return CreateSExt(GetSize_32(type), getInt64Ty());
+    } 
 }
 
 llvm::Value* IRBuilder2::GetAlign(const CHIR::Type& type, llvm::Type* targetType)
@@ -1755,7 +1798,7 @@ llvm::Value* IRBuilder2::GetAlign(const CHIR::Type& type, llvm::Type* targetType
     CreateBr(exitBB);
     SetInsertPoint(exitBB);
     auto sizePHI = CreatePHI(targetType, 2U);
-    sizePHI->addIncoming(llvm::ConstantInt::get(targetType, sizeof(void*)), refAlignBB);
+    sizePHI->addIncoming(llvm::ConstantInt::get(targetType, GetVoidPtrSize()), refAlignBB);
     sizePHI->addIncoming(nonRefAlign, nonRefAlignBB);
     return sizePHI;
 }
@@ -1817,8 +1860,9 @@ llvm::Value* IRBuilder2::GetTypeInfoFromObject(llvm::Value* obj)
 llvm::Value* IRBuilder2::GetPayloadFromObject(llvm::Value* obj)
 {
     auto p0i8 = getInt8PtrTy();
+    auto payloadIdx = GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32 ? 2U : 1U;
     auto payloadPtr =
-        CreateConstGEP1_32(p0i8, LLVMIRBuilder2::CreateBitCast(obj, p0i8->getPointerTo(1U)), 1U, "ti.payload");
+        CreateConstGEP1_32(p0i8, LLVMIRBuilder2::CreateBitCast(obj, p0i8->getPointerTo(1U)), payloadIdx, "ti.payload");
     GetCGContext().SetBasePtr(payloadPtr, obj);
     return payloadPtr;
 }

@@ -53,15 +53,13 @@ void CreateFunctionWrapperForNormalCases(
         builder.CreateBr(bb);
         builder.SetInsertPoint(bb);
     }
-    auto p0i8 = builder.getInt8PtrTy();
     auto p1i8 = builder.getInt8PtrTy(1);
     auto thisValOffset = cgType.HasSRet() ? 1U : 0U;
     auto thisVal = wrapperF->getArg(thisValOffset);
     thisVal->setName("this.withTI");
     auto p1This =
         CGType::GetOrCreate(cgMod, DeRef(cgType.GetParamType(0)->GetOriginal()))->GetLLVMType()->getPointerTo(1U);
-    auto dataPtr = builder.CreateBitCast(
-        builder.CreateConstGEP1_32(p0i8, builder.CreateBitCast(thisVal, p0i8->getPointerTo(1)), 1U), p1This);
+    auto dataPtr = builder.CreateBitCast(builder.GetPayloadFromObject(thisVal), p1This);
     if (!cgType.HasBasePtr()) {
         auto ti = builder.GetTypeInfoFromObject(thisVal);
         auto size = builder.GetSizeFromTypeInfo(ti);

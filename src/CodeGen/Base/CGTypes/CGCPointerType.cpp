@@ -59,4 +59,11 @@ llvm::Constant* CGCPointerType::GenTypeArgsOfTypeInfo()
     typeInfoOfGenericArgs->addAttribute(CJTI_TYPE_ARGS_ATTR);
     return llvm::ConstantExpr::getBitCast(typeInfoOfGenericArgs, p0i8);
 }
+
+void CGCPointerType::CalculateSizeAndAlign()
+{
+    llvm::DataLayout layOut = cgMod.GetLLVMModule()->getDataLayout();
+    size = layOut.getTypeAllocSize(llvmType);
+    align = layOut.getABITypeAlignment(llvmType);
+}
 } // namespace Cangjie::CodeGen

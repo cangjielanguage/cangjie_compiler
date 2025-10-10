@@ -350,6 +350,8 @@ void Gnu::HandleLibrarySearchPaths(Tool& tool, const std::string& cangjieLibPath
 std::string Gnu::GetEmulation() const
 {
     switch (driverOptions.target.arch) {
+        case Triple::ArchType::ARM32:
+            return "armelf_linux_eabi";
         case Triple::ArchType::X86_64:
             if (driverOptions.target.os == Triple::OSType::LINUX) {
                 return "elf_x86_64";

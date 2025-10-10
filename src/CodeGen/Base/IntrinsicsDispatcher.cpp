@@ -179,7 +179,7 @@ llvm::Value* GenerateArrayGetElemRef(IRBuilder2& irBuilder, const CHIRIntrinsicW
     if (!CGType::GetOrCreate(cgMod, arrTy)->GetSize()) {
         auto elemCGType = CGType::GetOrCreate(cgMod, arrTy->GetElementType());
         llvm::Value* offset = irBuilder.CreateMul(irBuilder.GetSize_64(elemCGType->GetOriginal()), indexVal);
-        offset = irBuilder.CreateAdd(offset, irBuilder.getInt64(sizeof(void*) + 8U)); // 8U:size of rawArray's len field
+        offset = irBuilder.CreateAdd(offset, irBuilder.getInt64(irBuilder.GetVoidPtrSize() + 8U)); // 8U:size of rawArray's len field
         auto elePtr = irBuilder.CreateInBoundsGEP(irBuilder.getInt8Ty(), arrayVal, offset);
         irBuilder.GetCGContext().SetBasePtr(elePtr, arrayVal);
         return irBuilder.CreateBitCast(
@@ -567,7 +567,7 @@ llvm::Value* GenerateBuiltinCall(IRBuilder2& irBuilder, const CHIRIntrinsicWrapp
             return irBuilder.CallIntrinsicForUninitialized(*intrinsic.GetResult()->GetType());
         case CHIR::IntrinsicKind::SIZE_OF: {
             auto typeArgs = intrinsic.GetInstantiatedTypeArgs();
-            return irBuilder.GetSize_64(*typeArgs[0]);
+            return irBuilder.GetSize_Native(*typeArgs[0]);
         }
         case CHIR::IntrinsicKind::ALIGN_OF: {
             auto cgRetTy = CGType::GetOrCreate(irBuilder.GetCGModule(), intrinsic.GetResult()->GetType());

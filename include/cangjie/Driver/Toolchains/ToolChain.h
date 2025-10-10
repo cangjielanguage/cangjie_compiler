@@ -119,6 +119,9 @@ protected:
                 if (tripleInfo.env == Triple::Environment::OHOS && tripleInfo.arch == Triple::ArchType::AARCH64) {
                     return "/lib/ld-musl-aarch64.so.1";
                 }
+                if (tripleInfo.env == Triple::Environment::OHOS && tripleInfo.arch == Triple::ArchType::ARM32) {
+                    return "/lib/ld-musl-arm.so.1";
+                }
                 if (tripleInfo.env == Triple::Environment::OHOS && tripleInfo.arch == Triple::ArchType::X86_64) {
                     return "/lib/ld-musl-x86_64.so.1";
                 }

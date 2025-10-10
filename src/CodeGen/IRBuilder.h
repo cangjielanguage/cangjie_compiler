@@ -192,6 +192,11 @@ public:
         return res;
     }
 
+    /** Platform dependent */
+    llvm::Type* GetSizetType() const;
+    size_t GetVoidPtrSize() const;
+    CHIR::Type::TypeKind GetTypeKindFromType(const CHIR::Type& ty) const;
+    
     /** GC Write Barrier Intrinsics */
     bool IsGlobalVariableBasePtr(llvm::Value* val) const;
     llvm::Instruction* CallGCRead(std::vector<llvm::Value*> args);
@@ -393,6 +398,7 @@ public:
     llvm::Value* GetLayoutSize_64(const CHIR::Type& type);
     llvm::Value* GetSize_32(const CHIR::Type& type);
     llvm::Value* GetSize_64(const CHIR::Type& type);
+    llvm::Value* GetSize_Native(const CHIR::Type& type);
     llvm::Value* GetAlign(const CHIR::Type& type, llvm::Type* targetType);
     llvm::Value* GetTypeKindFromTypeInfo(llvm::Value* typeInfo);
     llvm::Value* GetTypeForTypeParameter(llvm::Value* typeInfo);

@@ -32,12 +32,24 @@ llvm::Value* IRBuilder2::CallIntrinsic(
     return CallIntrinsic(intrinsic, args);
 }
 
+namespace {
+bool IsPlatformDependent(CHIR::IntrinsicKind intrinsicKind)
+{
+    if ((intrinsicKind >= CHIR::IntrinsicKind::GET_MAX_HEAP_SIZE && intrinsicKind <= CHIR::IntrinsicKind::GET_NATIVE_THREAD_NUMBER) ||
+        intrinsicKind == CHIR::IntrinsicKind::GET_GC_COUNT || intrinsicKind==CHIR::IntrinsicKind::GET_GC_FREED_SIZE) {
+        return true;
+    } else {
+        return false;
+    }
+}
+}
 llvm::Value* IRBuilder2::CallIntrinsic(
     const CHIRIntrinsicWrapper& intrinsic, const std::vector<llvm::Value*>& args, const std::vector<llvm::Type*>& tys)
 {
     if (auto iter = INTRINSIC_KIND_TO_ID_MAP.find(intrinsic.GetIntrinsicKind());
         iter != INTRINSIC_KIND_TO_ID_MAP.end()) {
-        auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), iter->second, tys);
+        std::vector<llvm::Type*> newTys = {GetSizetType()};
+        auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), iter->second, IsPlatformDependent(intrinsic.GetIntrinsicKind()) ? newTys : tys);
         if (intrinsic.GetIntrinsicKind() == CHIR::IntrinsicKind::BLACK_BOX) {
             CJC_ASSERT(args.size() == 1U);
             if (!args[0]->getType()->isPointerTy()) {
@@ -72,7 +84,9 @@ llvm::Value* IRBuilder2::CallSetLocation()
     // Func: anyregcc void @llvm.cj.set.location()
     auto setLocation = llvm::Intrinsic::getDeclaration(GetLLVMModule(), llvm::Intrinsic::cj_set_location);
     auto callInst = CreateCall(setLocation);
-    callInst->setCallingConv(llvm::CallingConv::AnyReg);
+    if (GetCGContext().GetCompileOptions().target.arch != Triple::ArchType::ARM32) {
+        callInst->setCallingConv(llvm::CallingConv::AnyReg);
+    }
     return callInst;
 }
 
@@ -189,7 +203,7 @@ void IRBuilder2::CallArrayIntrinsicSet(
     auto rawArrayCGType = CGType::GetOrCreate(cgMod, &arrTy);
     if (!rawArrayCGType->GetSize()) {
         llvm::Value* offset = CreateMul(GetSize_64(*arrTy.GetElementType()), index);
-        offset = CreateAdd(offset, getInt64(sizeof(void*) + 8U)); // 8U: size of rawArray's len field
+        offset = CreateAdd(offset, getInt64(GetVoidPtrSize() + 8U)); // 8U: size of rawArray's len field
         auto fieldAddr = CreateInBoundsGEP(getInt8Ty(), array, offset);
         fieldAddr = CreateBitCast(fieldAddr, elemType->getPointerTo(array->getType()->getPointerAddressSpace()));
         GetCGContext().SetBasePtr(fieldAddr, array);
@@ -233,8 +247,8 @@ llvm::Value* IRBuilder2::CallArrayIntrinsicGet(
     auto elemType = CGType::GetOrCreate(cgMod, elemCHIRTy)->GetLLVMType();
     auto rawArrayCGType = CGType::GetOrCreate(cgMod, &arrTy);
     if (!rawArrayCGType->GetSize()) {
-        llvm::Value* offset = CreateMul(GetSize_64(*elemCHIRTy), index);
-        offset = CreateAdd(offset, getInt64(sizeof(void*) + 8U)); // 8U: size of rawArray's len field
+        llvm::Value* offset = CreateMul(GetSize_64(*arrTy.GetElementType()), index);
+        offset = CreateAdd(offset, getInt64(GetVoidPtrSize() + 8U)); // 8U: size of rawArray's len field
         elePtr = CreateInBoundsGEP(getInt8Ty(), array, offset);
         elePtr = CreateBitCast(elePtr, elemType->getPointerTo(array->getType()->getPointerAddressSpace()));
         GetCGContext().SetBasePtr(elePtr, array);
@@ -260,8 +274,8 @@ llvm::Value* IRBuilder2::AcquireRawData(const CHIRIntrinsicWrapper& intrinsic)
     CJC_NULLPTR_CHECK(int1ty);
     auto tmp = CreateEntryAlloca(int1ty);
     (void)CreateStore(getFalse(), tmp);
-    auto isCopyPtr = CreatePtrToInt(tmp, llvm::Type::getInt64Ty(llvmCtx));
-    // i8* @cj_acquire_rawdata(i8 addrspace(1)*, i64)
+    auto isCopyPtr = CreateBitCast(tmp, llvm::Type::getInt8PtrTy(llvmCtx));
+    // i8* @cj_acquire_rawdata(i8 addrspace(1)*, i8*)
     auto func = llvm::Intrinsic::getDeclaration(
         cgMod.GetLLVMModule(), static_cast<llvm::Intrinsic::ID>(llvm::Intrinsic::cj_acquire_rawdata));
     return CreateCallOrInvoke(func, {args[0], isCopyPtr});
@@ -697,7 +711,7 @@ llvm::Value* IRBuilder2::GenerateOverflowWrappingFunc(
     CHIR::ExprKind opKind, const CHIR::Type& ty, [[maybe_unused]] std::vector<llvm::Value*>& argGenValues)
 {
     llvm::Type* type = CGType::GetOrCreate(cgMod, &ty)->GetLLVMType();
-    auto minVal = CodeGen::GetIntMaxOrMin(StaticCast<const CHIR::IntType&>(ty).GetTypeKind(), false);
+    auto minVal = CodeGen::GetIntMaxOrMin(GetCGModule(), StaticCast<const CHIR::IntType&>(ty), false);
     return llvm::ConstantInt::getSigned(type, opKind == CHIR::ExprKind::MOD ? 0 : minVal);
 }
 
@@ -1196,7 +1210,8 @@ llvm::Instruction* IRBuilder2::CallGCWriteGenericPayload(const std::vector<llvm:
     CJC_ASSERT(parameters.size() == 3U);
     llvm::Function* func =
         llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcwrite_generic_payload);
-    return CreateCall(func, parameters);
+    auto fixedParams = {parameters[0], parameters[1], parameters[2]};
+    return CreateCall(func, fixedParams);
 }
 
 llvm::Instruction* IRBuilder2::CallGCReadGeneric(const std::vector<llvm::Value*>& parameters)

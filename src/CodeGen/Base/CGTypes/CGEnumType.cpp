@@ -325,6 +325,7 @@ void CGEnumType::GenContainedCGTypes()
 
 void CGEnumType::CalculateSizeAndAlign()
 {
+    llvm::DataLayout layOut = cgMod.GetLLVMModule()->getDataLayout();
     switch (cgEnumTypeKind) {
         case CGEnumTypeKind::NON_EXHAUSTIVE_UNASSOCIATED:
         case CGEnumTypeKind::EXHAUSTIVE_UNASSOCIATED: {
@@ -334,8 +335,8 @@ void CGEnumType::CalculateSizeAndAlign()
         }
         case CGEnumTypeKind::NON_EXHAUSTIVE_ASSOCIATED:
         case CGEnumTypeKind::EXHAUSTIVE_OTHER: {
-            size = 8U;
-            align = 8U;
+            size = layOut.getTypeAllocSize(llvmType);
+            align = layOut.getABITypeAlignment(llvmType);
             return;
         }
         case CGEnumTypeKind::EXHAUSTIVE_ASSOCIATED_NONREF: {
@@ -356,8 +357,8 @@ void CGEnumType::CalculateSizeAndAlign()
             return;
         }
         case CGEnumTypeKind::EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF: {
-            size = 8U;
-            align = 8U;
+            size = layOut.getTypeAllocSize(llvmType);
+            align = layOut.getABITypeAlignment(llvmType);
             return;
         }
         case CGEnumTypeKind::EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T: {

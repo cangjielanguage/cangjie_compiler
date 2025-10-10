@@ -31,11 +31,7 @@ private:
         CJC_ASSERT(chirType.GetTypeKind() == CHIR::Type::TYPE_CSTRING);
     }
 
-    void CalculateSizeAndAlign() override
-    {
-        size = sizeof(void*);
-        align = alignof(void*);
-    }
+    void CalculateSizeAndAlign() override;
 };
 } // namespace CodeGen
 } // namespace Cangjie

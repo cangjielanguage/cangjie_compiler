@@ -277,6 +277,8 @@ TempFileInfo ToolChain::GetOutputFileInfo(const std::vector<TempFileInfo>& objFi
 std::string ToolChain::GetArchFolderName(const Triple::ArchType& arch) const
 {
     switch (arch) {
+        case Triple::ArchType::ARM32:
+            return "lib";
         case Triple::ArchType::X86_64:
         case Triple::ArchType::AARCH64:
             return "lib64";

@@ -249,6 +249,21 @@ private:
     ABIArgInfo GetMappingArgInfo(CHIR::StructType& chirTy, bool isArg);
 };
 
+class LinuxOhosArm32CJNativeCGCFFI : public LinuxAarch64CJNativeCGCFFI {
+public:
+    explicit LinuxOhosArm32CJNativeCGCFFI(CGModule& cgMod) : LinuxAarch64CJNativeCGCFFI(cgMod)
+    {
+    }
+    llvm::FunctionType* GetCFuncType(const CHIR::FuncType& chirFuncTy) override;
+    
+protected:
+    llvm::Type* GetStructReturnType(CHIR::StructType& chirTy, std::vector<llvm::Type*>& params) override;
+
+private:
+    ProcessKind GetParamType(CHIR::Type& chirTy, std::vector<llvm::Type*>& params);
+    ABIArgInfo GetMappingArgInfo(CHIR::StructType& chirTy, bool isArg);
+};
+
 } // namespace CodeGen
 } // namespace Cangjie
 #endif

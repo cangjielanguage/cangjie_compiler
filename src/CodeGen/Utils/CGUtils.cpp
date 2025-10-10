@@ -75,15 +75,31 @@ void GetGenericArgsFromCHIRTypeHelper(const Cangjie::CHIR::Type& type, std::vect
 
 namespace Cangjie {
 namespace CodeGen {
-int64_t GetIntMaxOrMin(const CHIR::IntType::TypeKind& typeKind, bool isMax)
+int64_t GetIntMaxOrMin(const CGModule& cgMod, const CHIR::IntType& ty, bool isMax)
 {
-    auto minMax = G_SIGNED_INT_MAP.at(typeKind);
-    return isMax ? minMax.second : minMax.first;
+    if (!ty.IsIntNative()) {
+        auto minMax = G_SIGNED_INT_MAP.at(ty.GetTypeKind());
+        return isMax ? minMax.second : minMax.first;
+    }
+    if (cgMod.GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32) {
+        auto minMax = G_SIGNED_INT_MAP.at(CHIR::Type::TypeKind::TYPE_INT32);
+        return isMax ? minMax.second : minMax.first;
+    } else {
+        auto minMax = G_SIGNED_INT_MAP.at(CHIR::Type::TypeKind::TYPE_INT64);
+        return isMax ? minMax.second : minMax.first;
+    }
 }
 
-uint64_t GetUIntMax(const CHIR::IntType::TypeKind& typeKind)
+uint64_t GetUIntMax(const CGModule& cgMod, const CHIR::IntType& ty)
 {
-    return G_UNSIGNED_INT_MAP.at(typeKind);
+    if (!ty.IsUIntNative()) {
+        return G_UNSIGNED_INT_MAP.at(ty.GetTypeKind());
+    }
+    if (cgMod.GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32) {
+        return G_UNSIGNED_INT_MAP.at(CHIR::Type::TypeKind::TYPE_UINT32);
+    } else {
+        return G_UNSIGNED_INT_MAP.at(CHIR::Type::TypeKind::TYPE_UINT64);
+    }
 }
 
 std::string GetTypeName(const CGType* type)

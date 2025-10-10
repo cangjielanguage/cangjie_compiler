@@ -253,7 +253,7 @@ llvm::Value* GenerateCommonEnum(IRBuilder2& irBuilder, const CHIR::Tuple& tuple)
             auto fieldAddrType = CGType::GetOrCreate(cgMod, CGType::GetRefTypeOf(cgCtx.GetCHIRBuilder(), *fieldType));
             llvm::Value* fieldOffset = irBuilder.CallIntrinsicGetFieldOffset({enumCaseTi, irBuilder.getInt64(idx)});
             fieldOffset =
-                irBuilder.CreateAdd(fieldOffset, llvm::ConstantInt::get(fieldOffset->getType(), sizeof(void*)));
+                irBuilder.CreateAdd(fieldOffset, llvm::ConstantInt::get(fieldOffset->getType(), irBuilder.GetVoidPtrSize()));
             auto fieldAddr = irBuilder.CreateInBoundsGEP(irBuilder.getInt8Ty(), enumVal, fieldOffset);
             if (!fieldType->IsGeneric()) {
                 auto fieldCGType = CGType::GetOrCreate(cgMod, fieldType);

@@ -68,7 +68,8 @@ const std::unordered_map<ArchType, std::string> ARCH_STRING_MAP = {
     {ArchType::X86_64, "x86_64"},
     {ArchType::AARCH64, "aarch64"},
     {ArchType::ARM64, "arm64"},
-    {ArchType::UNKNOWN, "unknown"},
+    {ArchType::ARM32, "arm"},
+    {ArchType::UNKNOWN, "unknown"}
 };
 
 const std::unordered_map<OSType, std::string> OS_STRING_MAP = {
@@ -174,6 +175,9 @@ std::string Triple::Info::GetEffectiveTripleString() const
     auto tripleString = ToTripleString();
     if (tripleString == "aarch64-linux-ohos") {
         return "aarch64-linux-gnu";
+    }
+    if (tripleString == "arm-linux-ohos") {
+        return "armv7a-linux-gnu";
     }
     if (tripleString == "x86_64-windows-gnu") {
         return "x86_64-w64-mingw32";
