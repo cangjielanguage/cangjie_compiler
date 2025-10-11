@@ -20,6 +20,7 @@ file(GLOB CLANG_LIBS_TO_REMOVE ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/lib/libcl
 
 if(KEEP_CLANG_CPP_LIBS)
     list(REMOVE_ITEM CLANG_LIBS_TO_REMOVE
+        "${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/lib/libclang.dylib"
         "${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/lib/libclang-cpp.dylib"
         "${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/lib/libclang-cpp.so.15"
         "${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/lib/libclang-cpp.so.15.0.4")
