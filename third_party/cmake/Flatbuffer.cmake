@@ -34,12 +34,6 @@ ExternalProject_Add(
         # Build only necessary targets.
         -DFLATBUFFERS_BUILD_FLATHASH=OFF
         -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}
-        ${FLATBUFFERS_COMPILE_OPTIONS}
-    PATCH_COMMAND
-        ${CMAKE_COMMAND}
-        -P
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ApplyFlatBuffer.cmake"
-        <SOURCE_DIR>
-        ${CMAKE_SOURCE_DIR}/third_party/flatbufferPatch.diff)
+        ${FLATBUFFERS_COMPILE_OPTIONS})
 externalproject_get_property(flatbuffers SOURCE_DIR)
 set(FLATBUFFERS_SRC ${SOURCE_DIR})
