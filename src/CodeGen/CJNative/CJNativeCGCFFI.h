@@ -254,10 +254,14 @@ public:
     explicit LinuxOhosArm32CJNativeCGCFFI(CGModule& cgMod) : LinuxAarch64CJNativeCGCFFI(cgMod)
     {
     }
+
     llvm::FunctionType* GetCFuncType(const CHIR::FuncType& chirFuncTy) override;
-    
+
 protected:
     llvm::Type* GetStructReturnType(CHIR::StructType& chirTy, std::vector<llvm::Type*>& params) override;
+    void ProcessInvocationArg(CHIR::StructType& chirParamTy, ProcessKind kind, size_t& argIdx,
+        std::vector<CGValue*>& args, IRBuilder2& builder) override;
+    std::unordered_map<Ptr<CHIR::Type>, ABIArgInfo> paramTypeMap;
 
 private:
     ProcessKind GetParamType(CHIR::Type& chirTy, std::vector<llvm::Type*>& params);

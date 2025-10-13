@@ -1212,6 +1212,44 @@ llvm::FunctionType* LinuxOhosArm32CJNativeCGCFFI::GetCFuncType(const CHIR::FuncT
     return resTy;
 }
 
+void LinuxOhosArm32CJNativeCGCFFI::ProcessInvocationArg(
+    CHIR::StructType& chirParamTy, ProcessKind kind, size_t& argIdx, std::vector<CGValue*>& args, IRBuilder2& builder)
+{
+    if (kind == ProcessKind::INDIRECT) {
+        return;
+    }
+    if (kind != ProcessKind::DIRECT) {
+        CJC_ASSERT(false && "ArgInfo in aarch64 cannot be Expand.");
+        return;
+    }
+    auto found = paramTypeMap.find(&chirParamTy);
+    CJC_ASSERT(found != paramTypeMap.end());
+    auto& info = found->second;
+    CJC_ASSERT(info.IsDirect());
+    CJC_ASSERT(argIdx < args.size());
+    auto arg = args[argIdx];
+    size_t actualSize = GetTypeSize(cgMod, chirParamTy);
+    if (info[0]->isIntegerTy()) {
+        auto numBits = static_cast<unsigned>(AsBits(actualSize));
+        auto actualIntTy = llvm::IntegerType::get(ctx.GetLLVMContext(), numBits);
+        const unsigned int addrSpace = arg->GetRawValue()->getType()->getPointerAddressSpace();
+        auto tmpVal = builder.CreateBitCast(arg->GetRawValue(), actualIntTy->getPointerTo(addrSpace));
+        tmpVal = builder.LLVMIRBuilder2::CreateLoad(actualIntTy, tmpVal);
+        if (GetTypeSize(cgMod, *info[0]) != actualSize) {
+            tmpVal = builder.CreateIntCast(tmpVal, info[0], false);
+        }
+        args[argIdx] = cgMod.CreateGhostCFuncArgValue(*tmpVal, *GetCGType(cgMod, *info[0]));
+    } else {
+        CJC_ASSERT(info[0]->isArrayTy());
+        auto tmpVal = builder.CreateEntryAlloca(info[0], nullptr, "arg.copy");
+        builder.CreateMemCpy(
+            tmpVal, GetAlign(cgMod, *info[0]), arg->GetRawValue(), GetAlign(cgMod, chirParamTy), actualSize);
+
+        args[argIdx] = cgMod.CreateGhostCFuncArgValue(
+            *builder.LLVMIRBuilder2::CreateLoad(info[0], tmpVal), *GetCGType(cgMod, *info[0]));
+    }
+}
+
 llvm::Type* LinuxOhosArm32CJNativeCGCFFI::GetStructReturnType(CHIR::StructType& chirTy, std::vector<llvm::Type*>& params)
 {
     auto& llvmCtx = ctx.GetLLVMContext();
@@ -1253,17 +1291,25 @@ ProcessKind LinuxOhosArm32CJNativeCGCFFI::GetParamType(CHIR::Type& chirTy, std::
     return ProcessKind::NO_PROCESS;
 }
 
-ABIArgInfo LinuxOhosArm32CJNativeCGCFFI::GetMappingArgInfo(CHIR::StructType& chirTy, [[maybe_unused]] bool isArg)
+ABIArgInfo LinuxOhosArm32CJNativeCGCFFI::GetMappingArgInfo(CHIR::StructType& chirTy, bool isArg)
 {
-    auto found = typeMap.find(&chirTy);
-    if (found != typeMap.end()) {
-        return found->second;
+    if (isArg) {
+        auto found = paramTypeMap.find(&chirTy);
+        if (found != paramTypeMap.end()) {
+            return found->second;
+        }
+    } else {
+        auto found = typeMap.find(&chirTy);
+        if (found != typeMap.end()) {
+            return found->second;
+        }
     }
     auto type = GetLLVMType(chirTy);
     size_t size = GetTypeSize(cgMod, *type);
     auto& llvmCtx = ctx.GetLLVMContext();
-    // TODO: Handle structure nesting
-    if (isArg && type->isStructTy()) {
+
+    // TODO: Handle structure nesting.
+    if (isArg) {
         auto st = llvm::dyn_cast<llvm::StructType>(type);
         size_t maxSize = 1;
         for (auto fdTy: st->elements()) {
@@ -1272,15 +1318,15 @@ ABIArgInfo LinuxOhosArm32CJNativeCGCFFI::GetMappingArgInfo(CHIR::StructType& chi
         }
         if (maxSize <= 4) {
             llvm::Type* baseTy = llvm::Type::getInt32Ty(llvmCtx);
-            llvm::Type* resTy = llvm::ArrayType::get(baseTy, static_cast<uint64_t>(size + 3)/4);
-            return typeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
+            llvm::Type* resTy = llvm::ArrayType::get(baseTy, static_cast<uint64_t>(size + 3) / 4);
+            return paramTypeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
         } else {
             llvm::Type* baseTy = llvm::Type::getInt64Ty(llvmCtx);
-            llvm::Type* resTy = llvm::ArrayType::get(baseTy, static_cast<uint64_t>(size + 7)/8);
-            return typeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
+            llvm::Type* resTy = llvm::ArrayType::get(baseTy, static_cast<uint64_t>(size + 7) / 8);
+            return paramTypeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
         }
     }
-    
+
     llvm::Type* base = nullptr;
     if (size_t members = 0; IsHomogeneousAggregate(*type, base, members)) {
         return typeMap.emplace(&chirTy, ABIArgInfo::GetDirect(llvm::ArrayType::get(base, members))).first->second;
