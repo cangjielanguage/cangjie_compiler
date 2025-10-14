@@ -777,6 +777,9 @@ IntrinsicKind DeSerialize(const PackageFormat::IntrinsicKind& kind)
         case IntrinsicKind_RAW_ARRAY_REFEQ: // cjnative only
             ret = RAW_ARRAY_REFEQ;
             break;
+        case IntrinsicKind_FUNC_REFEQ: // cjnative only
+            ret = FUNC_REFEQ;
+            break;
         case IntrinsicKind_OBJECT_ZERO_VALUE:
             ret = OBJECT_ZERO_VALUE;
             break;

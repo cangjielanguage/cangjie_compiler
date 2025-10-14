@@ -561,6 +561,8 @@ llvm::Value* GenerateBuiltinCall(IRBuilder2& irBuilder, const CHIRIntrinsicWrapp
     auto kind = intrinsic.GetIntrinsicKind();
     switch (kind) {
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+        case CHIR::IntrinsicKind::FUNC_REFEQ:
+            return irBuilder.CallIntrinsicFuncRefEq(parameters);
         case CHIR::IntrinsicKind::RAW_ARRAY_REFEQ:
 #endif
         case CHIR::IntrinsicKind::OBJECT_REFEQ:

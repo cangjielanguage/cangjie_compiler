@@ -1804,6 +1804,18 @@ llvm::Value* IRBuilder2::GetAlign(const CHIR::Type& type, llvm::Type* targetType
     return sizePHI;
 }
 
+llvm::Value* IRBuilder2::GetUUIDFromTypeInfo(llvm::Value* typeInfo)
+{
+    auto& llvmCtx = cgMod.GetLLVMContext();
+    auto typeInfoTy = CGType::GetOrCreateTypeInfoType(llvmCtx);
+    auto typeInfoPtrTy = typeInfoTy->getPointerTo();
+    auto ptr = CreateStructGEP(
+        typeInfoTy, LLVMIRBuilder2::CreateBitCast(typeInfo, typeInfoPtrTy), static_cast<uint64_t>(TYPEINFO_UUID));
+    auto inst = LLVMIRBuilder2::CreateLoad(llvm::Type::getInt32Ty(llvmCtx), ptr, "ti.uuid");
+    inst->setMetadata(llvm::LLVMContext::MD_invariant_load, llvm::MDNode::get(llvmCtx, {}));
+    return inst;
+}
+
 llvm::Value* IRBuilder2::GetTypeKindFromTypeInfo(llvm::Value* typeInfo)
 {
     auto& llvmCtx = cgMod.GetLLVMContext();

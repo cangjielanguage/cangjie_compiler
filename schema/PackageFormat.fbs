@@ -786,6 +786,7 @@ enum IntrinsicKind: uint16 {
   OBJECT_REFEQ,
 
   RAW_ARRAY_REFEQ,  // cjnative only
+  FUNC_REFEQ, // cjnative only
 
   OBJECT_ZERO_VALUE,
 
