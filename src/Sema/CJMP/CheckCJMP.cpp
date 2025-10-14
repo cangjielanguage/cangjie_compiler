@@ -387,6 +387,15 @@ bool MustMatchWithPlatform(const Decl& decl)
 }
 }
 
+bool NeedToReportMissingBody(const Decl& common, const Decl& platform)
+{
+    if (common.outerDecl && common.TestAttr(Attribute::COMMON_WITH_DEFAULT) && !common.TestAttr(Attribute::ABSTRACT) &&
+        platform.TestAttr(Attribute::ABSTRACT)) {
+        return true;
+    }
+    return false;
+}
+
 // PostTypeCheck for CJMP
 bool MPTypeCheckerImpl::MatchCJMPDeclAttrs(
     const std::vector<Attribute>& attrs, const Decl& common, const Decl& platform) const
@@ -394,6 +403,11 @@ bool MPTypeCheckerImpl::MatchCJMPDeclAttrs(
     for (auto attr : attrs) {
         if (common.TestAttr(attr) != platform.TestAttr(attr)) {
             if ((attr == Attribute::ABSTRACT || attr == Attribute::OPEN)) {
+                // Error `sema_platform_has_different_modifier` will be reported if common have body, but platform not.
+                // Diagnostic abort wrong modifiers is confusing.
+                if (NeedToReportMissingBody(common, platform)) {
+                    continue;
+                }
                 if (platform.TestAttr(Attribute::ABSTRACT) && common.TestAttr(Attribute::OPEN)) {
                     auto kindStr = common.astKind == ASTKind::FUNC_DECL ? "function" : "property";
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_open_abstract_platform_can_not_replace_open_common,

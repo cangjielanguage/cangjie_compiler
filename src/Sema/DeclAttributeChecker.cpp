@@ -342,7 +342,6 @@ void DeclAttributeChecker::CheckAttributesForPropAndFuncDeclInClass(const ClassD
             (!cd.TestAttr(Attribute::ABSTRACT) && !cd.TestAttr(Attribute::FOREIGN)))
             && !member.TestAttr(Attribute::JAVA_MIRROR) && !cd.TestAttr(Attribute::OBJ_C_MIRROR);
     if (invalidAbstract && !member.TestAttr(Attribute::COMMON_WITH_DEFAULT)) {
-        member.DisableAttr(Attribute::ABSTRACT); // It's not abstract, just missed body, so need to set correct attribute value for further checks
         diag.Diagnose(member, DiagKind::sema_missing_func_body, type, member.identifier.Val());
     }
     if (member.TestAttr(Attribute::ABSTRACT) && cd.TestAttr(Attribute::ABSTRACT)) {

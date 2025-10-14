@@ -1329,7 +1329,7 @@ private:
     void CheckIllegalMemberWalker(
         const ASTContext& ctx, Ptr<AST::Node> node, bool reportThis, const std::string& errorStr);
     void CheckIllegalMemberHelper(
-        const ASTContext& ctx, bool reportThis, const std::string& errorStr, const AST::RefExpr& re);
+        const ASTContext& ctx, bool reportThis, const std::string& errorStr, const AST::NameReferenceExpr& re);
 
     /** Checking Initialization APIs. */
     void CheckGlobalVarInitialization(ASTContext& ctx, const AST::Package& package);
