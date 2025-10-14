@@ -229,7 +229,8 @@ void CGModule::EraseUselessInstsAndDeclarations()
 
 void CGModule::EraseUselessGVAndFunctions()
 {
-    if (GetCGContext().GetCompileOptions().enableCompileDebug || GetCGContext().GetCompileOptions().enableCoverage) {
+    if (GetCGContext().GetCompileOptions().optimizationLevel >= GlobalOptions::OptimizationLevel::O2 || 
+        GetCGContext().GetCompileOptions().enableCoverage) {
         return;
     }
     TryPropagateLocalConstantVars(*module);
