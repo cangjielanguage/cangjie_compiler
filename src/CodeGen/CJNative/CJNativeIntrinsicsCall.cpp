@@ -35,12 +35,8 @@ llvm::Value* IRBuilder2::CallIntrinsic(
 namespace {
 bool IsPlatformDependent(CHIR::IntrinsicKind intrinsicKind)
 {
-    if ((intrinsicKind >= CHIR::IntrinsicKind::GET_MAX_HEAP_SIZE && intrinsicKind <= CHIR::IntrinsicKind::GET_NATIVE_THREAD_NUMBER) ||
-        intrinsicKind == CHIR::IntrinsicKind::GET_GC_COUNT || intrinsicKind==CHIR::IntrinsicKind::GET_GC_FREED_SIZE) {
-        return true;
-    } else {
-        return false;
-    }
+    return (intrinsicKind >= CHIR::IntrinsicKind::GET_MAX_HEAP_SIZE && intrinsicKind <= CHIR::IntrinsicKind::GET_NATIVE_THREAD_NUMBER) ||
+        intrinsicKind == CHIR::IntrinsicKind::GET_GC_COUNT || intrinsicKind==CHIR::IntrinsicKind::GET_GC_FREED_SIZE;
 }
 }
 llvm::Value* IRBuilder2::CallIntrinsic(
@@ -203,7 +199,7 @@ void IRBuilder2::CallArrayIntrinsicSet(
     auto rawArrayCGType = CGType::GetOrCreate(cgMod, &arrTy);
     if (!rawArrayCGType->GetSize()) {
         llvm::Value* offset = CreateMul(GetSize_64(*arrTy.GetElementType()), index);
-        offset = CreateAdd(offset, getInt64(GetVoidPtrSize() + 8U)); // 8U: size of rawArray's len field
+        offset = CreateAdd(offset, getInt64(GetPayloadOffset() + 8U)); // 8U: size of rawArray's len field
         auto fieldAddr = CreateInBoundsGEP(getInt8Ty(), array, offset);
         fieldAddr = CreateBitCast(fieldAddr, elemType->getPointerTo(array->getType()->getPointerAddressSpace()));
         GetCGContext().SetBasePtr(fieldAddr, array);
@@ -248,7 +244,7 @@ llvm::Value* IRBuilder2::CallArrayIntrinsicGet(
     auto rawArrayCGType = CGType::GetOrCreate(cgMod, &arrTy);
     if (!rawArrayCGType->GetSize()) {
         llvm::Value* offset = CreateMul(GetSize_64(*arrTy.GetElementType()), index);
-        offset = CreateAdd(offset, getInt64(GetVoidPtrSize() + 8U)); // 8U: size of rawArray's len field
+        offset = CreateAdd(offset, getInt64(GetPayloadOffset() + 8U)); // 8U: size of rawArray's len field
         elePtr = CreateInBoundsGEP(getInt8Ty(), array, offset);
         elePtr = CreateBitCast(elePtr, elemType->getPointerTo(array->getType()->getPointerAddressSpace()));
         GetCGContext().SetBasePtr(elePtr, array);
@@ -711,7 +707,7 @@ llvm::Value* IRBuilder2::GenerateOverflowWrappingFunc(
     CHIR::ExprKind opKind, const CHIR::Type& ty, [[maybe_unused]] std::vector<llvm::Value*>& argGenValues)
 {
     llvm::Type* type = CGType::GetOrCreate(cgMod, &ty)->GetLLVMType();
-    auto minVal = CodeGen::GetIntMaxOrMin(GetCGModule(), StaticCast<const CHIR::IntType&>(ty), false);
+    auto minVal = CodeGen::GetIntMaxOrMin(*this, StaticCast<const CHIR::IntType&>(ty), false);
     return llvm::ConstantInt::getSigned(type, opKind == CHIR::ExprKind::MOD ? 0 : minVal);
 }
 
@@ -1210,8 +1206,7 @@ llvm::Instruction* IRBuilder2::CallGCWriteGenericPayload(const std::vector<llvm:
     CJC_ASSERT(parameters.size() == 3U);
     llvm::Function* func =
         llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcwrite_generic_payload);
-    auto fixedParams = {parameters[0], parameters[1], parameters[2]};
-    return CreateCall(func, fixedParams);
+    return CreateCall(func, parameters);
 }
 
 llvm::Instruction* IRBuilder2::CallGCReadGeneric(const std::vector<llvm::Value*>& parameters)

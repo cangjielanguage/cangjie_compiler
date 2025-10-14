@@ -226,8 +226,8 @@ inline bool IsAtomicIntrinsic(const CHIR::IntrinsicKind& intrinsicKind)
         intrinsicKind <= CHIR::IntrinsicKind::ATOMIC_FETCH_XOR;
 }
 
-int64_t GetIntMaxOrMin(const CGModule& cgMod, const CHIR::IntType& ty, bool isMax);
-uint64_t GetUIntMax(const CGModule& cgMod, const CHIR::IntType& ty);
+int64_t GetIntMaxOrMin(IRBuilder2& irBuilder, const CHIR::IntType& ty, bool isMax);
+uint64_t GetUIntMax(IRBuilder2& irBuilder, const CHIR::IntType& ty);
 
 inline bool IsPassedByReference(llvm::Type* type)
 {

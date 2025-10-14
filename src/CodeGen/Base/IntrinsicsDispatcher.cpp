@@ -179,7 +179,7 @@ llvm::Value* GenerateArrayGetElemRef(IRBuilder2& irBuilder, const CHIRIntrinsicW
     if (!CGType::GetOrCreate(cgMod, arrTy)->GetSize()) {
         auto elemCGType = CGType::GetOrCreate(cgMod, arrTy->GetElementType());
         llvm::Value* offset = irBuilder.CreateMul(irBuilder.GetSize_64(elemCGType->GetOriginal()), indexVal);
-        offset = irBuilder.CreateAdd(offset, irBuilder.getInt64(irBuilder.GetVoidPtrSize() + 8U)); // 8U:size of rawArray's len field
+        offset = irBuilder.CreateAdd(offset, irBuilder.getInt64(irBuilder.GetPayloadOffset() + 8U)); // 8U:size of rawArray's len field
         auto elePtr = irBuilder.CreateInBoundsGEP(irBuilder.getInt8Ty(), arrayVal, offset);
         irBuilder.GetCGContext().SetBasePtr(elePtr, arrayVal);
         return irBuilder.CreateBitCast(

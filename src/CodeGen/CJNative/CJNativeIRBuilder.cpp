@@ -343,9 +343,18 @@ CHIR::Type::TypeKind IRBuilder2::GetTypeKindFromType(const CHIR::Type& ty) const
     return typeKind;
 }
 
-size_t IRBuilder2::GetVoidPtrSize() const
+// For 64 bit OS: sizeof a pointer is 8U
+// For 32 bit OS: sizeof a pointer is 4U
+size_t IRBuilder2::GetPtrSize() const
 {
-    return sizeof(void*);
+    return GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32 ? 4U : 8U;
+}
+
+// For 64 bit OS: {typeinfo*, <payload>}
+// For 32 bit OS: {typeinfo*, i32, <payload>} 
+size_t IRBuilder2::GetPayloadOffset() const
+{
+    return GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32 ? GetPtrSize() + 4U : GetPtrSize();
 }
 
 bool IRBuilder2::IsGlobalVariableBasePtr(llvm::Value* val) const
@@ -931,7 +940,7 @@ CGValue IRBuilder2::CreateGEP(
                 **(cgMod | chirExpr->GetTopLevelFunc()->GetParam(0)) == ret) {
                 // It means this param doesn't have typeinfo, no need to add the offset.
             } else if (!hasSkippedTypeInfo) {
-                offset = CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), GetVoidPtrSize()));
+                offset = CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), GetPayloadOffset()));
                 hasSkippedTypeInfo = true;
             }
             ret = CreateInBoundsGEP(getInt8Ty(), ret, offset);
@@ -1281,7 +1290,7 @@ void InitArrayDataUG(IRBuilder2& irBuilder, llvm::Value* arrPtr, llvm::Value* ar
     llvm::Value* offset = irBuilder.CallIntrinsicGetFieldOffset({irBuilder.CreateTypeInfo(arrTy), index,
         /* pre-offset: arrLength */
         irBuilder.getInt32(8U)});
-    offset = irBuilder.CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), irBuilder.GetVoidPtrSize()));
+    offset = irBuilder.CreateAdd(offset, llvm::ConstantInt::get(offset->getType(), irBuilder.GetPayloadOffset()));
     auto fieldType = arrTy.GetElementType();
     auto fieldAddr = irBuilder.CreateInBoundsGEP(irBuilder.getInt8Ty(), arrPtr, offset);
     auto fieldAddrCGType = CGType::GetOrCreate(
@@ -1560,7 +1569,7 @@ llvm::Value* GetCommonEnumAssociatedValue(IRBuilder2& irBuilder, const CHIR::Fie
             {enumCaseTT, irBuilder.getInt32(typeArgs.size()), irBuilder.CreateTypeInfoArray(typeArgs)});
         llvm::Value* fieldOffset =
             irBuilder.CallIntrinsicGetFieldOffset({enumCaseTi, irBuilder.getInt64(associatedValIdx)});
-        fieldOffset = irBuilder.CreateAdd(fieldOffset, llvm::ConstantInt::get(fieldOffset->getType(), irBuilder.GetVoidPtrSize()));
+        fieldOffset = irBuilder.CreateAdd(fieldOffset, llvm::ConstantInt::get(fieldOffset->getType(), irBuilder.GetPayloadOffset()));
         auto fieldAddr = irBuilder.CreateInBoundsGEP(irBuilder.getInt8Ty(), enumVal, fieldOffset);
         if (!fieldType->IsGeneric()) {
             auto fieldCGType = CGType::GetOrCreate(cgMod, fieldType);
@@ -1751,15 +1760,11 @@ llvm::Value* IRBuilder2::GetSize_32(const CHIR::Type& type)
         CreateBr(exitBB);
         SetInsertPoint(exitBB);
         auto sizePHI = CreatePHI(getInt32Ty(), 2U);
-        if (GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32) {
-            sizePHI->addIncoming(getInt32(4U), refSizeBB);
-        } else {
-            sizePHI->addIncoming(getInt32(GetVoidPtrSize()), refSizeBB);
-        }
+        sizePHI->addIncoming(getInt32(GetPtrSize()), refSizeBB);
         sizePHI->addIncoming(nonRefSize, nonRefSizeBB);
         return sizePHI;
     } else if (auto cgType = CGType::GetOrCreate(cgMod, &type); cgType->IsReference()) {
-        return getInt32(GetVoidPtrSize());
+        return getInt32(GetPayloadOffset());
     } else {
         return GetLayoutSize_32(type);
     }
@@ -1772,11 +1777,7 @@ llvm::Value* IRBuilder2::GetSize_64(const CHIR::Type& type)
 
 llvm::Value* IRBuilder2::GetSize_Native(const CHIR::Type& type)
 {
-    if (GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32) {
-        return GetSize_32(type);
-    } else {
-        return CreateSExt(GetSize_32(type), getInt64Ty());
-    } 
+    return GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32 ? GetSize_32(type) : GetSize_64(type);
 }
 
 llvm::Value* IRBuilder2::GetAlign(const CHIR::Type& type, llvm::Type* targetType)
@@ -1798,7 +1799,7 @@ llvm::Value* IRBuilder2::GetAlign(const CHIR::Type& type, llvm::Type* targetType
     CreateBr(exitBB);
     SetInsertPoint(exitBB);
     auto sizePHI = CreatePHI(targetType, 2U);
-    sizePHI->addIncoming(llvm::ConstantInt::get(targetType, GetVoidPtrSize()), refAlignBB);
+    sizePHI->addIncoming(llvm::ConstantInt::get(targetType, GetPayloadOffset()), refAlignBB);
     sizePHI->addIncoming(nonRefAlign, nonRefAlignBB);
     return sizePHI;
 }

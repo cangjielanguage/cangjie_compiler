@@ -194,7 +194,8 @@ public:
 
     /** Platform dependent */
     llvm::Type* GetSizetType() const;
-    size_t GetVoidPtrSize() const;
+    size_t GetPtrSize() const;
+    size_t GetPayloadOffset() const
     CHIR::Type::TypeKind GetTypeKindFromType(const CHIR::Type& ty) const;
     
     /** GC Write Barrier Intrinsics */
