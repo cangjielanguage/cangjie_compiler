@@ -334,7 +334,8 @@ void CGEnumType::CalculateSizeAndAlign()
             return;
         }
         case CGEnumTypeKind::NON_EXHAUSTIVE_ASSOCIATED:
-        case CGEnumTypeKind::EXHAUSTIVE_OTHER: {
+        case CGEnumTypeKind::EXHAUSTIVE_OTHER:
+        case CGEnumTypeKind::EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF: {
             size = layOut.getTypeAllocSize(llvmType);
             align = layOut.getABITypeAlignment(llvmType);
             return;
@@ -354,11 +355,6 @@ void CGEnumType::CalculateSizeAndAlign()
                 size = std::nullopt;
                 align = std::nullopt;
             }
-            return;
-        }
-        case CGEnumTypeKind::EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF: {
-            size = layOut.getTypeAllocSize(llvmType);
-            align = layOut.getABITypeAlignment(llvmType);
             return;
         }
         case CGEnumTypeKind::EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T: {
