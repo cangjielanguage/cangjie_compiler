@@ -60,6 +60,7 @@ autoconf/autom4te.cache
 
 third_party/flatbuffers
 third_party/boundscheck*
+third_party/libxml2-*
 third_party/llvm-project
 third_party/runtime
 third_party/pcre2-10.44-h1

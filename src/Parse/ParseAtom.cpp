@@ -1068,9 +1068,10 @@ OwnedPtr<AST::Expr> ParserImpl::ParseLeftParenExprInKind(ExprKind ek)
         }
     }
     // Not identifier.
-    OwnedPtr<Expr> expr = ParseExpr(ek == ExprKind::IF_COND_EXPR ? ExprKind::EXPR_IN_IF_COND_TUPLE
-            : ek == ExprKind::WHILE_COND_EXPR                    ? ExprKind::EXPR_IN_WHILE_COND_TUPLE
-                                                                 : ExprKind::EXPR_IN_TUPLE);
+    OwnedPtr<Expr> expr = ParseExpr(
+        ek == ExprKind::IF_COND_EXPR || ek == ExprKind::EXPR_IN_IF_COND_TUPLE ? ExprKind::EXPR_IN_IF_COND_TUPLE
+        : ek == ExprKind::WHILE_COND_EXPR || ek == ExprKind::EXPR_IN_WHILE_COND_TUPLE
+        ? ExprKind::EXPR_IN_WHILE_COND_TUPLE : ExprKind::EXPR_IN_TUPLE);
     if (Seeing(TokenKind::COMMA)) {
         // It's actually a tuple literal.
         auto ret = ParseTupleLitForParenExprComma(leftParenPos, std::move(expr));
