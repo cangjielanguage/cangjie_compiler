@@ -3163,16 +3163,18 @@ public class HilogChannel {
     auto& hilog = StaticCast<ClassDecl>(*d.invocation.decl);
     EXPECT_EQ(hilog.comments.innerComments.size(), 0);
     auto members = hilog.GetMemberDeclPtrs();
-    auto debug = StaticCast<FuncDecl>(StaticCast<MacroExpandDecl>(members[0])->invocation.decl.get());
+    auto debugAPI = StaticCast<MacroExpandDecl>(members[0]);
+    auto debug = StaticCast<FuncDecl>(debugAPI->invocation.decl.get());
     EXPECT_EQ(debug->begin, Position(19, 5));
     EXPECT_EQ(debug->end, Position(19, 63));
-    EXPECT_EQ(debug->comments.leadingComments.size(), 1);
-    EXPECT_EQ(debug->comments.trailingComments.size(), 0);
-    auto info = StaticCast<FuncDecl>(StaticCast<MacroExpandDecl>(members[1])->invocation.decl.get());
+    EXPECT_EQ(debugAPI->comments.leadingComments.size(), 1);
+    EXPECT_EQ(debugAPI->comments.trailingComments.size(), 0);
+    auto infoAPI = StaticCast<MacroExpandDecl>(members[1]);
+    auto info = StaticCast<FuncDecl>(infoAPI->invocation.decl.get());
     EXPECT_EQ(info->begin, Position(29, 5));
     EXPECT_EQ(info->end, Position(29, 62));
-    EXPECT_EQ(info->comments.leadingComments.size(), 1);
-    EXPECT_EQ(info->comments.trailingComments.size(), 0);
+    EXPECT_EQ(infoAPI->comments.leadingComments.size(), 1);
+    EXPECT_EQ(infoAPI->comments.trailingComments.size(), 0);
 }
 
 TEST(PositionTest, Finalizer)
