@@ -44,7 +44,7 @@ python3 build.py install;
 1. The `build.py clean` command clears temporary files in the workspace.
 2. The `build.py build` command initiates compilation:
    - The secondary option `-t` (i.e., `--build-type`) specifies the build product type, which can be `release`, `debug`, or `relwithdebuginfo`.
-   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [`cjdb` Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
+   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [cjdb Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
 3. The `build.py install` command installs the build products to the `output` directory.
 
 Verify the products:
@@ -93,7 +93,7 @@ python3 build.py install;
 1. The `build.py clean` command clears temporary files in the workspace.
 2. The `build.py build` command initiates compilation:
    - The secondary option `-t` (i.e., `--build-type`) specifies the build product type, which can be `release`, `debug`, or `relwithdebuginfo`.
-   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [`cjdb` Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
+   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [cjdb Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
 3. The `build.py install` command installs the build products to the `output` directory.
 
 Verify the products:
@@ -152,7 +152,7 @@ python3 build.py install --host windows-x86_64;
    - The secondary option `--target` specifies the target platform description, which can be `native` (current compilation platform), `windows-x86_64`, `ohos-aarch64`, `ohos-x86_64`, `ios-simulator-aarch64`, `ios-aarch64`, `android-aarch64`, `android-x86_64`.
    - The secondary option `--target-sysroot` passes the subsequent parameter to the C/C++ compiler as its `--sysroot` parameter.
    - The secondary option `--target-toolchain` specifies the path to the target platform toolchain, using the compiler in this path for cross-compilation.
-   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [`cjdb` Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
+   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [cjdb Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
 4. The `build.py install` command installs the build products to the `output` directory:
    - The secondary option `--host` specifies the target platform installation strategy, which can be `native` (current compilation platform), `windows-x86_64`, `ohos-aarch64`, `ohos-x86_64`, `ios-simulator-aarch64`, `ios-aarch64`, `android-aarch64`, `android-x86_64`.
 Verify the products:
@@ -206,7 +206,7 @@ python3 build.py install --host android-aarch64;
    - The secondary option `--product` specifies the build target products, which can be `all`, `cjc`, or `libs`.
    - The secondary option `--target` specifies the target platform description, which can be `native` (current compilation platform), `windows-x86_64`, `ohos-aarch64`, `ohos-x86_64`, `ios-simulator-aarch64`, `ios-aarch64`, `android-aarch64`, `android-x86_64`.
    - The secondary option `--android-ndk` specifies the path to the Android NDK.
-   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [`cjdb` Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
+   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [cjdb Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
 4. `build.py install` command installs the compiled output to the output directory:
    - The secondary option `--host` specifies the target platform installation strategy, which can be `native` (current compilation platform), `windows-x86_64`, `ohos-aarch64`, `ohos-x86_64`, `ios-simulator-aarch64`, `ios-aarch64`, `android-aarch64`, `android-x86_64`.
 
@@ -250,7 +250,7 @@ python3 build.py install --host android-aarch64
    - The secondary option `--product` specifies the build target products, which can be `all`, `cjc`, or `libs`.
    - The secondary option `--target` specifies the target platform description, which can be `native` (current compilation platform), `windows-x86_64`, `ohos-aarch64`, `ohos-x86_64`, `ios-simulator-aarch64`, `ios-aarch64`, `android-aarch64`, `android-x86_64`.
    - The secondary option `--android-ndk` specifies the path to the Android NDK.
-   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [`cjdb` Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
+   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [cjdb Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
 4. `build.py install` command installs the compiled output to the output directory:
    - The secondary option `--host` specifies the target platform installation strategy, which can be `native` (current compilation platform), `windows-x86_64`, `ohos-aarch64`, `ohos-x86_64`, `ios-simulator-aarch64`, `ios-aarch64`, `android-aarch64`, `android-x86_64`.
 
@@ -315,7 +315,7 @@ python3 build.py install;
    - The secondary option `--target` specifies the target platform description, which can be `native` (current compilation platform), `windows-x86_64`, `ohos-aarch64`, `ohos-x86_64`, `ios-simulator-aarch64`, `ios-aarch64`, `android-aarch64`, `android-x86_64`.
    - The secondary option `--target-sysroot` passes the following parameter to the C/C++ compiler as its `--sysroot` parameter.
    - The secondary option `--target-toolchain` specifies the path to the target platform toolchain, and the compiler under this path is used for cross-compilation.
-   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [`cjdb` Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
+   - The secondary option `--build-cjdb` enables cjdb (lldb) compilation. For more details about cjdb, refer to [cjdb Tool Introduction](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_en/cmd-tools/cjdb_manual.md).
 7. `build.py install` command installs the build products to the `output` directory:
    - The secondary option `--host` specifies the target platform installation strategy, which can be `native` (current compilation platform), `windows-x86_64`, `ohos-aarch64`, `ohos-x86_64`, `ios-simulator-aarch64`, `ios-aarch64`, `android-aarch64`, `android-x86_64`.
 
