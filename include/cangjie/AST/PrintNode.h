@@ -14,11 +14,13 @@
 #define CANGJIE_AST_PRINTNODE_H
 
 #include <string>
+#include <iostream>
 
 #include "cangjie/AST/Node.h"
 
 namespace Cangjie {
-void PrintNode(Ptr<const AST::Node> node, unsigned indent = 0, const std::string addition = "");
+void PrintNode(
+    Ptr<const AST::Node> node, unsigned indent = 0, const std::string& addition = "", std::ostream& stream = std::cout);
 } // namespace Cangjie
 
 #endif // CANGJIE_AST_PRINTNODE_H

@@ -19,13 +19,8 @@ using namespace Cangjie;
 namespace {
 std::unordered_map<Options::ID, std::function<bool(FrontendOptions&, OptionArgInstance&)>> g_actions = {
     {Options::ID::DUMP_TOKENS, OPTION_TRUE_ACTION(opts.dumpAction = FrontendOptions::DumpAction::DUMP_TOKENS)},
-    {Options::ID::DUMP_PARSE, OPTION_TRUE_ACTION(opts.dumpAction = FrontendOptions::DumpAction::DUMP_PARSE)},
-    {Options::ID::DUMP_AST, OPTION_TRUE_ACTION(opts.dumpAction = FrontendOptions::DumpAction::DUMP_AST)},
     {Options::ID::DUMP_SYMBOLS, OPTION_TRUE_ACTION(opts.dumpAction = FrontendOptions::DumpAction::DUMP_SYMBOLS)},
     {Options::ID::TYPE_CHECK, OPTION_TRUE_ACTION(opts.dumpAction = FrontendOptions::DumpAction::TYPE_CHECK)},
-    {Options::ID::DUMP_MACRO, OPTION_TRUE_ACTION(opts.dumpAction = FrontendOptions::DumpAction::DUMP_MACRO)},
-    {Options::ID::DUMP_IR, OPTION_TRUE_ACTION(opts.dumpAction = FrontendOptions::DumpAction::DUMP_IR)},
-    {Options::ID::DUMP_BC, OPTION_TRUE_ACTION(opts.dumpAction = FrontendOptions::DumpAction::DUMP_BC)},
     // DUMP_DEPENDENT_PACKAGE (--scan-dependency option) should be handled with extra care. The behavior of
     // the option has defined in GlobalOptions. Since, we are overriding its behavior here, we need to
     // set `scanDepPkg` field again.
@@ -38,7 +33,7 @@ std::unordered_map<Options::ID, std::function<bool(FrontendOptions&, OptionArgIn
     {Options::ID::DESERIALIZE_CHIR_AND_DUMP,
         [](FrontendOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
             opts.chirDeserialize = true;
-            opts.chirDumpDebugMode = true;
+            opts.dumpCHIR = true;
             opts.chirDeserializePath = arg.value;
             opts.dumpAction = FrontendOptions::DumpAction::DESERIALIZE_CHIR;
             return true;
