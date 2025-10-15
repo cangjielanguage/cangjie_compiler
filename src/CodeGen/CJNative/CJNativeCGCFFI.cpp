@@ -1308,43 +1308,28 @@ ABIArgInfo LinuxOhosArm32CJNativeCGCFFI::GetMappingArgInfo(CHIR::StructType& chi
     size_t size = GetTypeSize(cgMod, *type);
     auto& llvmCtx = ctx.GetLLVMContext();
 
-    // TODO: Handle structure nesting.
     if (isArg) {
-        auto st = llvm::dyn_cast<llvm::StructType>(type);
-        size_t maxSize = 1;
-        for (auto fdTy: st->elements()) {
-            size_t fdSize = GetTypeSize(cgMod, *fdTy);
-            maxSize = fdSize > maxSize ? fdSize : maxSize;
-        }
-        if (maxSize <= 4) {
-            llvm::Type* baseTy = llvm::Type::getInt32Ty(llvmCtx);
-            llvm::Type* resTy = llvm::ArrayType::get(baseTy, static_cast<uint64_t>(size + 3) / 4);
-            return paramTypeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
+        size_t alignment = GetTypeAlignment(cgMod, *type);
+        llvm::Type* baseTy = nullptr;
+        if (alignment <= 4) {
+            alignment = 4;
+            baseTy = llvm::Type::getInt32Ty(llvmCtx);
+        } else if (alignment >= 8) {
+            alignment = 8;
+            baseTy = llvm::Type::getInt64Ty(llvmCtx);
         } else {
-            llvm::Type* baseTy = llvm::Type::getInt64Ty(llvmCtx);
-            llvm::Type* resTy = llvm::ArrayType::get(baseTy, static_cast<uint64_t>(size + 7) / 8);
-            return paramTypeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
+            CJC_ASSERT(true && "Alignment should not be between 4 and 8 bytes.");
         }
-    }
-
-    llvm::Type* base = nullptr;
-    if (size_t members = 0; IsHomogeneousAggregate(*type, base, members)) {
-        return typeMap.emplace(&chirTy, ABIArgInfo::GetDirect(llvm::ArrayType::get(base, members))).first->second;
+        size = llvm::alignTo(size, alignment);
+        llvm::Type* resTy = llvm::ArrayType::get(baseTy, static_cast<uint64_t>(size) / alignment);
+        return paramTypeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
     }
 
     const size_t limitSizeOfSmallStruct = 4;
     if (size > limitSizeOfSmallStruct) {
         return typeMap.emplace(&chirTy, ABIArgInfo::GetIndirect()).first->second;
-    }
-
-    size_t alignment = GetTypeAlignment(cgMod, *type);
-    size = llvm::alignTo(size, BYTES_PER_WORD);
-
-    if (alignment < limitSizeOfSmallStruct && size == limitSizeOfSmallStruct) {
-        llvm::Type* baseTy = llvm::Type::getInt64Ty(llvmCtx);
-        llvm::Type* resTy = llvm::ArrayType::get(baseTy, static_cast<uint64_t>(size) / BYTES_PER_WORD);
+    } else {
+        llvm::Type* resTy = llvm::Type::getInt32Ty(llvmCtx);
         return typeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
     }
-    llvm::Type* resTy = llvm::IntegerType::get(llvmCtx, static_cast<unsigned>(size) * BITS_PER_BYTE);
-    return typeMap.emplace(&chirTy, ABIArgInfo::GetDirect(resTy)).first->second;
 }
