@@ -53,8 +53,7 @@ private:
      *                 'I1<T1> <: I2<Int64>', parentTy should be 'I2<Int64>'.
      *                 'I1<T1> <: I2<T1>', parentTy should be 'I2<T1>'.
      */
-    void ResolveOverrideOrShadow(
-        std::vector<Ptr<Decl>>& results, Decl& decl, Ptr<Ty> baseTy, Ptr<InterfaceTy> parentTy);
+    void ResolveOverrideOrShadow(std::vector<Ptr<Decl>>& results, Decl& decl, Ptr<InterfaceTy> parentTy);
     void FieldLookup(const ClassDecl& cd, const std::string& fieldName, std::vector<Ptr<Decl>>& results,
         const LookupInfo& info);
     void FieldLookup(
@@ -69,6 +68,20 @@ private:
         bool isSetter, std::vector<Ptr<Decl>>& results);
     bool FindRealResult(const Node& node, bool isSetter, std::vector<Ptr<Decl>>& results,
         std::multimap<Position, Ptr<Decl>>& resultsMap, bool isInDeclBody);
+
+    std::vector<std::pair<Ptr<Decl>, Ptr<InterfaceTy>>> resultsWithInstTyV;
+    void InsertResultsWithInstTy(size_t idx, Ptr<Decl> d, Ptr<InterfaceTy> interfaceTy)
+    {
+        if (idx >= resultsWithInstTyV.size()) {
+            resultsWithInstTyV.resize(idx + 1);
+        }
+        resultsWithInstTyV[idx] = std::make_pair(d, interfaceTy);
+    }
+    void SwapResultsWithInstTy(size_t oldIdx, size_t newIdx, Ptr<Decl> d, Ptr<InterfaceTy> interfaceTy)
+    {
+        resultsWithInstTyV.erase(resultsWithInstTyV.begin() + oldIdx);
+        InsertResultsWithInstTy(newIdx, d, interfaceTy);
+    }
 
     const ASTContext& ctx;
     DiagnosticEngine& diag;
@@ -179,57 +192,69 @@ void LookUpImpl::FieldLookupExtend(
             if (it == nullptr) {
                 continue;
             }
-            if (auto interfaceTy = DynamicCast<InterfaceTy*>(it->ty);
-                interfaceTy && interfaceTy->decl && !interfaceTy->decl->TestAttr(Attribute::IN_REFERENCE_CYCLE)) {
-                FieldLookup(*interfaceTy, fieldName, results, info);
+            auto interfaceDecl = Ty::GetDeclPtrOfTy(it->ty);
+            if (!interfaceDecl || interfaceDecl->TestAttr(Attribute::IN_REFERENCE_CYCLE)) {
+                continue;
             }
+            auto mappingExtendWithDecl = GenerateTypeMappingByTy(extend->ty, &ty);
+            auto interfaceTy = typeManager.GetInstantiatedTy(it->ty, mappingExtendWithDecl);
+            FieldLookup(*StaticCast<InterfaceTy>(interfaceTy), fieldName, results, info);
         }
     }
 }
 
-void LookUpImpl::ResolveOverrideOrShadow(
-    std::vector<Ptr<Decl>>& results, Decl& decl, Ptr<Ty> baseTy, Ptr<InterfaceTy> parentTy)
+void LookUpImpl::ResolveOverrideOrShadow(std::vector<Ptr<Decl>>& results, Decl& decl, Ptr<InterfaceTy> parentTy)
 {
     if (decl.astKind == ASTKind::PROP_DECL) {
         if (!decl.TestAttr(Attribute::ABSTRACT)) {
             Utils::EraseIf(results, [](auto it) { return it->TestAttr(Attribute::ABSTRACT); });
         }
     }
-    for (auto resIter = results.begin(); resIter != results.end(); ++resIter) {
+    for (size_t i = 0; i < results.size(); ++i) {
         // Caller guarantees 'decl' must be func or prop.
-        if ((*resIter) == nullptr ||
-            ((*resIter)->astKind != ASTKind::FUNC_DECL && (*resIter)->astKind != ASTKind::PROP_DECL)) {
+        if (results[i] == nullptr ||
+            (results[i]->astKind != ASTKind::FUNC_DECL && results[i]->astKind != ASTKind::PROP_DECL)) {
             continue;
         }
-        auto decl1 = RawStaticCast<Decl*>(&decl);
-        auto decl2 = RawStaticCast<Decl*>(*resIter);
-        if (!typeManager.PairIsOverrideOrImpl(*decl2, *decl1, baseTy, parentTy) &&
-            !typeManager.PairIsOverrideOrImpl(*decl1, *decl2, baseTy)) {
-            continue;
-        }
-        auto isSub = [this](const Ptr<Ty> leaf, const Ptr<Ty> root) {
-            auto tys = Promotion(typeManager).Promote(*leaf, *root);
-            bool ret = false;
-            for (auto ty : tys) {
-                ret = typeManager.IsSubtype(leaf, ty) || ret;
+        auto newDecl = RawStaticCast<Decl*>(&decl);
+        auto inResult = RawStaticCast<Decl*>(results[i]);
+        Ptr<Ty> inResultOuter = inResult->outerDecl->ty;
+        if (resultsWithInstTyV.size() > i && resultsWithInstTyV[i].second) {
+            inResultOuter = resultsWithInstTyV[i].second;
+        } else if (inResult->outerDecl->astKind == ASTKind::EXTEND_DECL &&
+            !typeManager.IsSubtype(inResultOuter, parentTy)) {
+            // If the decl in results is from extend, we need to check whether the outer type of decl in results
+            // is subtype of parentTy. If not, we need to get the instantiated type of the outer type of decl in
+            // results.
+            auto extendTy = inResult->outerDecl->ty;
+            auto extendedDecl = Ty::GetDeclPtrOfTy(extendTy);
+            if (extendedDecl) {
+                auto mappingExtendWithDecl = GenerateTypeMappingByTy(extendTy, extendedDecl->ty);
+                inResultOuter = typeManager.GetInstantiatedTy(inResultOuter, mappingExtendWithDecl);
             }
-            return ret;
-        };
-        if (isSub(decl1->outerDecl->ty, decl2->outerDecl->ty) ||
-            (decl2->TestAttr(Attribute::ABSTRACT) && !decl1->TestAttr(Attribute::ABSTRACT))) {
-            // If decl1 override or shadow the decl2, only reserved decl1.
-            results.erase(resIter);
+        }
+
+        if (!typeManager.PairIsOverrideOrImpl(*inResult, *newDecl, inResultOuter, parentTy) &&
+            !typeManager.PairIsOverrideOrImpl(*newDecl, *inResult, parentTy, inResultOuter)) {
+            continue;
+        }
+        if (typeManager.IsSubtype(parentTy, inResultOuter) ||
+            (inResult->TestAttr(Attribute::ABSTRACT) && !newDecl->TestAttr(Attribute::ABSTRACT))) {
+            // If newDecl override or shadow the inResult, only reserved decl1.
+            results.erase(results.begin() + i);
+            SwapResultsWithInstTy(i, results.size(), &decl, parentTy);
             results.emplace_back(&decl);
-        } else if (isSub(decl2->outerDecl->ty, decl1->outerDecl->ty) ||
-            (decl1->TestAttr(Attribute::ABSTRACT) && !decl2->TestAttr(Attribute::ABSTRACT))) {
-            // Do nothing. Reserved decl2.
+        } else if (typeManager.IsSubtype(inResultOuter, parentTy) ||
+            (newDecl->TestAttr(Attribute::ABSTRACT) && !inResult->TestAttr(Attribute::ABSTRACT))) {
+            // Do nothing. Reserved inResult.
         } else {
             // If the relationship is not override or shadow, both are saved.
-            results.emplace_back(&decl);
+            continue;
         }
         // Otherwise, do not insert current candidate into 'results'.
         return;
     }
+    InsertResultsWithInstTy(results.size(), &decl, parentTy);
     results.emplace_back(&decl);
 }
 
@@ -277,10 +302,7 @@ void LookUpImpl::FieldLookup(
             superInfo.lookupExtend = true;
             FieldLookup(*superClass, fieldName, results, superInfo);
         } else if (auto superInterface = DynamicCast<InterfaceDecl*>(super)) {
-            auto parentInstTys = Promotion(typeManager).Promote(*cd.ty, *superInterface->ty);
-            for (auto parentInstTy : parentInstTys) {
-                FieldLookup(*StaticCast<InterfaceTy>(parentInstTy), fieldName, results, {info.baseTy});
-            }
+            FieldLookup(*StaticCast<InterfaceTy>(it->ty), fieldName, results, {info.baseTy});
         }
     }
     if (info.lookupExtend) {
@@ -309,9 +331,10 @@ void LookUpImpl::FieldLookup(
             }
         }
         if (decl->IsFuncOrProp()) {
-            ResolveOverrideOrShadow(results, *decl, foundTy, &idTy);
+            ResolveOverrideOrShadow(results, *decl, &idTy);
         } else {
-            (void)results.emplace_back(decl.get());
+            InsertResultsWithInstTy(results.size(), decl.get(), &idTy);
+            results.emplace_back(decl.get());
         }
     }
     if (!info.lookupInherit) {
@@ -324,7 +347,7 @@ void LookUpImpl::FieldLookup(
         }
         if (auto interfaceTy = DynamicCast<InterfaceTy*>(it->ty);
             interfaceTy && interfaceTy->decl && !interfaceTy->decl->TestAttr(Attribute::IN_REFERENCE_CYCLE)) {
-            auto promTys = Promotion(typeManager).Promote(idTy, *interfaceTy);
+            auto promTys = Promotion(typeManager).Promote(idTy, *it->ty);
             for (auto promTy : promTys) {
                 FieldLookup(*StaticCast<InterfaceTy>(promTy), fieldName, results, {info.baseTy});
             }

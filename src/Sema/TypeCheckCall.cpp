@@ -601,6 +601,46 @@ bool CheckUseTrailingClosureWithFunctionType(
     diagBuilder.AddNote(candidate, MakeRangeForDeclIdentifier(candidate), "found candidate");
     return false;
 }
+
+void FilterOverriden(
+    TypeManager& tm, std::vector<OwnedPtr<FunctionMatchingUnit>>& candidates, std::vector<bool>& targetMark)
+{
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (!candidates[i]->fd.outerDecl) {
+            return;
+        }
+        auto instOuter1 = tm.ApplySubstPack(candidates[i]->fd.outerDecl->ty, candidates[i]->typeMapping);
+        if (!Ty::IsTyCorrect(instOuter1)) {
+            return;
+        }
+        auto instFuncTy1 = StaticCast<FuncTy*>(tm.ApplySubstPack(candidates[i]->fd.ty, candidates[i]->typeMapping));
+        auto& funcBody1 = candidates[i]->fd.funcBody;
+        for (size_t j = 0; j < candidates.size(); ++j) {
+            if (!candidates[j]->fd.outerDecl || i == j) {
+                continue;
+            }
+            auto instOuter2 = tm.ApplySubstPack(candidates[j]->fd.outerDecl->ty, candidates[j]->typeMapping);
+            // Do not handle overloaded candidates.-
+            if (!Ty::IsTyCorrect(instOuter2) || instOuter1 == instOuter2) {
+                continue;
+            }
+            auto instFuncTy2 = StaticCast<FuncTy*>(tm.ApplySubstPack(candidates[j]->fd.ty, candidates[j]->typeMapping));
+            auto& funcBody2 = candidates[j]->fd.funcBody;
+            auto sameSig = instFuncTy1 == instFuncTy2;
+            sameSig = sameSig && ((funcBody1->generic == nullptr) == (funcBody2->generic == nullptr));
+            if (sameSig && funcBody1->generic) {
+                sameSig = funcBody1->generic->typeParameters.size() == funcBody2->generic->typeParameters.size();
+                auto mappingOf2Func = GenerateTypeMappingBetweenFuncs(tm, candidates[i]->fd, candidates[j]->fd);
+                auto subFuncs = tm.GetInstantiatedTys(candidates[i]->fd.ty, mappingOf2Func);
+                sameSig = sameSig && Utils::In(candidates[j]->fd.ty, subFuncs);
+            }
+            if (tm.IsSubtype(instOuter1, instOuter2) && sameSig) {
+                targetMark[j] = false;
+                break;
+            }
+        }
+    }
+}
 } // namespace
 
 bool TypeChecker::TypeCheckerImpl::CheckArgsWithParamName(const CallExpr& ce, const FuncDecl& fd)
@@ -760,6 +800,7 @@ std::vector<size_t> TypeChecker::TypeCheckerImpl::ResolveOverload(
 {
     auto targetNum = candidates.size();
     std::vector<bool> targetMark(targetNum, true); // When get false, the target is excluded.
+    FilterOverriden(typeManager, candidates, targetMark);
     for (size_t i = 0; i < targetNum; ++i) {
         if (!targetMark[i]) {
             continue;

@@ -1962,6 +1962,9 @@ bool TypeManager::IsFuncDeclEqualType(const AST::FuncDecl& decl, const AST::Func
 
 void TypeManager::UpdateTopOverriddenFuncDeclCache(const AST::Decl* src, const AST::Decl* target)
 {
+    if (src == target) {
+        return;
+    }
     if (auto funcDecl = DynamicCast<AST::FuncDecl>(src)) {
         auto& temp = overrideCache[funcDecl];
         temp.emplace_back(StaticCast<AST::FuncDecl*>(target));
@@ -1984,8 +1987,12 @@ Ptr<const AST::FuncDecl> TypeManager::GetTopOverriddenFuncDecl(const AST::FuncDe
     if (decls == overrideCache.end() || decls->second.empty()) {
         return nullptr;
     }
-    Ptr<const AST::FuncDecl> ret = decls->second.front();
+    Ptr<const FuncDecl> ret = decls->second.front();
+    std::set<Ptr<const FuncDecl>> traversed;
     while ((overrideCache.find(ret) != overrideCache.end()) && !(overrideCache.find(ret)->second.empty())) {
+        if (auto [_, succ] = traversed.emplace(ret); !succ) {
+            return nullptr; // cycle detected
+        }
         ret = overrideCache.find(ret)->second.front();
     }
     return ret;

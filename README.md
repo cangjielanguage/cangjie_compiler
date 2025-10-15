@@ -187,9 +187,9 @@ This project is licensed under [Apache-2.0 with Runtime Library Exception](./LIC
 ## Related Repositories
 
 - [cangjie_docs](https://gitcode.com/Cangjie/cangjie_docs/tree/main/docs/dev-guide)
-- [cangjie_runtime](https://gitcode.com/openharmony-sig/third_party_cangjie_runtime)
-- [cangjie_tools](https://gitcode.com/openharmony-sig/third_party_cangjie_tools)
-- [cangjie_stdx](https://gitcode.com/openharmony-sig/third_party_cangjie_stdx)
+- [cangjie_runtime](https://gitcode.com/Cangjie/cangjie_runtime)
+- [cangjie_tools](https://gitcode.com/Cangjie/cangjie_tools)
+- [cangjie_stdx](https://gitcode.com/Cangjie/cangjie_stdx)
 - [cangjie_build](https://gitcode.com/Cangjie/cangjie_build)
 - [cangjie_test](https://gitcode.com/Cangjie/cangjie_test)
 
