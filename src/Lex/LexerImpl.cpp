@@ -40,7 +40,7 @@ std::vector<Token> Lexer::GetComments()
 {
     return std::move(impl->comments);
 }
-const std::vector<Token>& Lexer::GetTokenStream() const
+const std::set<Token>& Lexer::GetTokenStream() const
 {
     return impl->tokenStream;
 }
