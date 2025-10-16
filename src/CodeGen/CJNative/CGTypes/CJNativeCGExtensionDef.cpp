@@ -503,6 +503,9 @@ void GetOrderedParentTypesRecusively(
             continue;
         }
         parents.emplace_back(interface);
+        if (def.TestAttr(CHIR::Attribute::COMPILER_ADD) && def.IsExtend()) {
+            continue;
+        }
         GetOrderedParentTypesRecusively(*interface, parents, builder);
     }
 }
