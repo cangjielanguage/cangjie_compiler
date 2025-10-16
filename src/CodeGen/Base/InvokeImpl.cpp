@@ -90,7 +90,26 @@ llvm::Value* CodeGen::GenerateInvoke(IRBuilder2& irBuilder, const CHIRInvokeWrap
     auto concreteFuncType = static_cast<CGFunctionType*>(CGType::GetOrCreate(
         cgMod, funcType, CGType::TypeExtraInfo{0, true, false, true, invoke.GetInstantiatedTypeArgs()}));
     funcPtr = irBuilder.CreateBitCast(funcPtr, concreteFuncType->GetLLVMFunctionType()->getPointerTo());
-    return irBuilder.CreateCallOrInvoke(*concreteFuncType, funcPtr, argsVal);
+    auto result = irBuilder.CreateCallOrInvoke(*concreteFuncType, funcPtr, argsVal);
+
+    auto thisValue = **(cgMod | invoke.GetThisParam());
+    auto originalNonRefVal = cgCtx.GetOriginalNonRefValOfBoxedValue(thisValue);
+    if (originalNonRefVal && invoke.TestVritualMethodAttr(cgCtx.GetCHIRBuilder(), CHIR::Attribute::MUT)) {
+        auto [handleBoxedBB, handleEndBB] =
+            Vec2Tuple<2>(irBuilder.CreateAndInsertBasicBlocks({"handle_boxed", "handle_end"}));
+        auto thisValueTI = irBuilder.GetTypeInfoFromObject(thisValue);
+        irBuilder.CreateCondBr(irBuilder.CreateTypeInfoIsReferenceCall(thisValueTI), handleEndBB, handleBoxedBB);
+
+        irBuilder.SetInsertPoint(handleBoxedBB);
+        auto basePtr = cgCtx.GetBasePtrOf(originalNonRefVal);
+        auto sizeOfTI = irBuilder.GetSizeFromTypeInfo(thisValueTI);
+        std::vector<llvm::Value*> copyGenericParams{basePtr, originalNonRefVal, thisValue, sizeOfTI};
+        irBuilder.CallIntrinsicGCWriteGeneric(copyGenericParams);
+        irBuilder.CreateBr(handleEndBB);
+
+        irBuilder.SetInsertPoint(handleEndBB);
+    }
+    return result;
 #endif
 }
 

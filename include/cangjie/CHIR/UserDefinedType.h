@@ -73,6 +73,7 @@ struct VTableSearchRes {
     CustomTypeDef* originalDef{nullptr};       // this virtual func belongs to a vtable,
                                                // and this vtable belongs to a CustomTypeDef
     std::vector<GenericType*> genericTypeParams;
+    AttributeInfo attr;
     size_t offset{0};
 };
 

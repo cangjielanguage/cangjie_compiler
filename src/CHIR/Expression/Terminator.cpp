@@ -392,6 +392,18 @@ ClassType* DynamicDispatchWithException::GetInstSrcParentCustomTypeOfMethod(CHIR
     return nullptr;
 }
 
+AttributeInfo DynamicDispatchWithException::GetVirtualMethodAttr(CHIRBuilder& builder) const
+{
+    for (auto& r : GetVirtualMethodInfo(builder)) {
+        if (r.offset == GetVirtualMethodOffset()) {
+            CJC_NULLPTR_CHECK(r.instSrcParentType);
+            return r.attr;
+        }
+    }
+    CJC_ABORT();
+    return AttributeInfo{};
+}
+
 InvokeWithException::InvokeWithException(
     const InvokeCallContext& callContext, Block* sucBlock, Block* errBlock, Block* parent)
     : DynamicDispatchWithException(ExprKind::INVOKE_WITH_EXCEPTION, callContext, sucBlock, errBlock, parent)
