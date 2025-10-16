@@ -330,8 +330,8 @@ bool Demangler<T>::IsQualifiedType() const
     if (IsPrimitive<T>(mangledName[currentIndex])) {
         return true;
     }
-    // The {'C', 'R', 'N', 'T', 'P', 'A', 'k', 'V'} belong to the legal qualified type prefix.
-    for (auto prefix : { 'C', 'R', 'N', 'T', 'P', 'A', 'k', 'V' }) {
+    // The {'C', 'R', 'F', 'N', 'T', 'P', 'A', 'k', 'V', 'G'} belong to the legal qualified type prefix.
+    for (auto prefix : { 'C', 'R', 'F', 'N', 'T', 'P', 'A', 'k', 'V', 'G' }) {
         if (mangledName[currentIndex] == prefix) {
             return true;
         }
