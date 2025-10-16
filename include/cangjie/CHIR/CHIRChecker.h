@@ -86,7 +86,7 @@ private:
     /**
      * @brief global identifier must be unique
      */
-    void CheckGlobalIdentifier(const Value& value);
+    bool CheckGlobalValueIdentifier(const Value& value);
     void CheckTopLevelFunc(
         const Func* calculatedFunc, const Func& realFunc, const std::string& valueName, const std::string& valueId);
     void CheckFunc(const Func& func);
@@ -128,6 +128,17 @@ private:
     // ===--------------------------------------------------------------------===//
     void CheckStructDef(const StructDef& def);
     bool CheckParentCustomTypeDef(const FuncBase& func, const CustomTypeDef& def);
+    void CheckCustomTypeDef(const CustomTypeDef& def);
+    bool CheckCustomTypeDefIdentifier(const CustomTypeDef& def);
+    void CheckCustomType(const CustomTypeDef& def);
+    void CheckInstanceMemberVar(const CustomTypeDef& def);
+    void CheckStaticMemberVar(const CustomTypeDef& def);
+    void CheckVTable(const CustomTypeDef& def);
+    void CheckCStruct(const StructDef& def);
+    void CheckClassDef(const ClassDef& def);
+    void CheckAbstractMethod(const ClassDef& def);
+    void CheckEnumDef(const EnumDef& def);
+    void CheckExtendDef(const ExtendDef& def);
 
     // ===--------------------------------------------------------------------===//
     // Check Terminator
@@ -248,6 +259,8 @@ private:
     void CheckGetRTTIStatic(const GetRTTIStatic& expr, const Func& topLevelFunc);
     bool CheckThisTypeIsEqualOrSubTypeOfFuncParentType(
         Type& thisType, const FuncBase& func, const Expression& expr, const Func& topLevelFunc);
+    void CheckInout(const IntrinsicBase& expr, const Func& topLevelFunc);
+    void CheckInoutOpSrc(const Value& op, const IntrinsicBase& expr, const Func& topLevelFunc);
 
     // ===--------------------------------------------------------------------===//
     // Check Expressions

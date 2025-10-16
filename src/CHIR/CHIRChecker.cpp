@@ -28,34 +28,63 @@ std::string IndexToString(const size_t index)
     return std::to_string(index) + suffix;
 }
 
-bool IsStructOrCStruct(const Type& type, bool needToBeCStruct)
+bool IsStructOrCStruct(const Type& type, bool includeNormalStruct)
 {
     if (!type.IsStruct()) {
         return false;
     }
-    if (!needToBeCStruct) {
+    if (includeNormalStruct) {
         return true;
     }
     return Cangjie::StaticCast<const StructType&>(type).GetStructDef()->IsCStruct();
 }
 
-bool IsCType(const Type& type, bool needToBeCStruct = true)
+bool IsOptionalCType(const Type& type, bool includeNormalStruct, bool includeCString)
 {
     if (auto varray = Cangjie::DynamicCast<const VArrayType*>(&type)) {
-        return IsCType(*varray->GetElementType(), needToBeCStruct);
+        return IsOptionalCType(*varray->GetElementType(), includeNormalStruct, includeCString);
     } else if (auto tuple = Cangjie::DynamicCast<const TupleType*>(&type)) {
         for (auto t : tuple->GetElementTypes()) {
-            if (!IsCType(*t, needToBeCStruct)) {
+            if (!IsOptionalCType(*t, includeNormalStruct, includeCString)) {
                 return false;
             }
         }
         return true;
     } else if (auto ref = Cangjie::DynamicCast<const RefType*>(&type)) {
-        return IsCType(*ref->GetBaseType(), needToBeCStruct);
+        return IsOptionalCType(*ref->GetBaseType(), includeNormalStruct, includeCString);
+    } else if (auto cp = Cangjie::DynamicCast<const CPointerType*>(&type)) {
+        return IsOptionalCType(*cp->GetElementType(), includeNormalStruct, includeCString);
+    } else if (auto cf = Cangjie::DynamicCast<const FuncType*>(&type); cf && cf->IsCFunc()) {
+        if (!IsOptionalCType(*cf->GetReturnType(), includeNormalStruct, includeCString)) {
+            return false;
+        }
+        for (auto t : cf->GetParamTypes()) {
+            if (!IsOptionalCType(*t, includeNormalStruct, includeCString)) {
+                return false;
+            }
+        }
+        return true;
+    } else if (includeCString && type.IsCString()) {
+        return true;
     }
     auto k = type.GetTypeKind();
     return (k >= Type::TypeKind::TYPE_INT8 && k <= Type::TypeKind::TYPE_NOTHING) ||
-        type.IsCPointer() || type.IsCString() || type.IsCFunc() || IsStructOrCStruct(type, needToBeCStruct);
+        type.IsCPointer() || IsStructOrCStruct(type, includeNormalStruct);
+}
+
+bool IsCType(const Type& type)
+{
+    return IsOptionalCType(type, false, true);
+}
+
+bool IsCTypeInVArray(const Type& type)
+{
+    return IsOptionalCType(type, true, true);
+}
+
+bool IsCTypeInInout(const Type& type)
+{
+    return IsOptionalCType(type, true, false);
 }
 
 std::string GetExpressionString(const Expression& expr)
@@ -356,6 +385,9 @@ bool CHIRChecker::CheckPackage(const std::unordered_set<Rule>& r)
     ParallelCheck(&CHIRChecker::CheckGlobalVar, package.GetGlobalVars());
     ParallelCheck(&CHIRChecker::CheckImportedVarAndFuncs, package.GetImportedVarAndFuncs());
     ParallelCheck(&CHIRChecker::CheckStructDef, package.GetAllStructDef());
+    ParallelCheck(&CHIRChecker::CheckClassDef, package.GetAllClassDef());
+    ParallelCheck(&CHIRChecker::CheckEnumDef, package.GetAllEnumDef());
+    ParallelCheck(&CHIRChecker::CheckExtendDef, package.GetAllExtendDef());
 
     for (auto id : duplicatedGlobalIds) {
         Errorln("duplicated identifier `" + id + "` found.");
@@ -525,32 +557,55 @@ bool CHIRChecker::TypeIsExpected(const Type& srcType, const Type& dstType)
     return false;
 }
 
-void CHIRChecker::CheckGlobalIdentifier(const Value& value)
+bool CHIRChecker::CheckCustomTypeDefIdentifier(const CustomTypeDef& def)
+{
+    auto identifier = def.GetIdentifierWithoutPrefix();
+    // 1. identifier can't be empty
+    if (identifier.empty()) {
+        auto errMsg = def.ToString() + " doesn't have identifier.";
+        Errorln(errMsg);
+        return false;
+    }
+
+    // 2. identifier can't be duplicated
+    std::unique_lock<std::mutex> lock(checkIdentMutex);
+    if (!identifiers.emplace(identifier).second) {
+        duplicatedGlobalIds.emplace(identifier);
+        return false;
+    }
+    return true;
+}
+
+bool CHIRChecker::CheckGlobalValueIdentifier(const Value& value)
 {
     auto identifier = value.GetIdentifierWithoutPrefix();
     // 1. identifier can't be empty
     if (identifier.empty()) {
         auto errMsg = ValueSymbolToString(value) + " doesn't have identifier.";
         Errorln(errMsg);
-        return;
+        return false;
     }
 
     // 2. imported C func doesn't need to check duplicated id, there may be same id from different packages
     if (value.TestAttr(Attribute::IMPORTED) && value.GetType()->IsCFunc()) {
-        return;
+        return true;
     }
 
     // 3. identifier can't be duplicated
     std::unique_lock<std::mutex> lock(checkIdentMutex);
     if (!identifiers.emplace(identifier).second) {
         duplicatedGlobalIds.emplace(identifier);
+        return false;
     }
+    return true;
 }
 
 void CHIRChecker::CheckGlobalVar(const GlobalVarBase& var)
 {
     // 1. check identifier
-    CheckGlobalIdentifier(var);
+    if (!CheckGlobalValueIdentifier(var)) {
+        return;
+    }
 
     // 2. type must be ref
     if (!CheckTypeMustBeRef(*var.GetType())) {
@@ -621,7 +676,9 @@ void CHIRChecker::CheckImportedVarAndFuncs(const ImportedValue& value)
 bool CHIRChecker::CheckFuncBase(const FuncBase& func)
 {
     // 1. check identifier
-    CheckGlobalIdentifier(func);
+    if (!CheckGlobalValueIdentifier(func)) {
+        return false;
+    }
 
     // 2. check func type
     if (!CheckFuncType(func.GetType(), nullptr, func)) {
@@ -883,10 +940,254 @@ bool CHIRChecker::CheckParamTypes(
     return typeMatched;
 }
 
-void CHIRChecker::CheckStructDef(const StructDef& def)
+void CHIRChecker::CheckCustomType(const CustomTypeDef& def)
 {
+    auto type = def.GetType();
+    if (type == nullptr) {
+        Errorln(def.GetIdentifier() + " should set type.");
+        return;
+    }
+    if (def.GetCustomKind() == CustomDefKind::TYPE_STRUCT && !type->IsStruct()) {
+        Errorln(def.GetIdentifier() + " is struct definition, but its type is " + type->ToString() + ".");
+    } else if (def.GetCustomKind() == CustomDefKind::TYPE_CLASS && !type->IsClass()) {
+        Errorln(def.GetIdentifier() + " is class definition, but its type is " + type->ToString() + ".");
+    } else if (def.GetCustomKind() == CustomDefKind::TYPE_ENUM && !type->IsEnum()) {
+        Errorln(def.GetIdentifier() + " is enum definition, but its type is " + type->ToString() + ".");
+    } else if (def.GetCustomKind() == CustomDefKind::TYPE_EXTEND && !type->IsCustomType() && !type->IsBuiltinType()) {
+        Errorln(def.GetIdentifier() + " is extend definition, but its extended type is " + type->ToString() +
+            ", it should be custom type or builtin type.");
+    } else {
+        CJC_ABORT();
+    }
+}
+
+void CHIRChecker::CheckInstanceMemberVar(const CustomTypeDef& def)
+{
+    std::unordered_set<std::string> memberVarNames;
+    auto parentMemberVars = def.GetAllInstanceVars();
+    // 1. check current def's member vars
+    for (const auto& var : def.GetDirectInstanceVars()) {
+        parentMemberVars.pop_back();
+        // 1.1 member var should have name
+        if (var.name.empty()) {
+            Errorln("member var in " + def.GetIdentifier() + " doesn't have name.");
+            continue;
+        }
+        // 1.2 member var name can't be duplicated
+        if (memberVarNames.count(var.name) != 0) {
+            Errorln("duplicated member var name `" + var.name + "` in " + def.GetIdentifier() + ".");
+            continue;
+        }
+        // 1.3 member var's outer def can't be null
+        if (var.outerDef == nullptr) {
+            Errorln("member var " + var.name + " doesn't set outer CustomTypeDef.");
+            continue;
+        }
+        // 1.4 member var's outer def must be current def
+        if (var.outerDef != &def) {
+            Errorln("outer CustomTypeDef of member var " + var.name + " is " +
+                var.outerDef->GetIdentifier() + ", but it should be " + def.GetIdentifier() + ".");
+            continue;
+        }
+        // 1.5 member var's type can't be null
+        if (var.type == nullptr) {
+            Errorln("member var " + var.name + " doesn't set type.");
+            continue;
+        }
+    }
+
+    // 2. check parent def's member vars
+    for (const auto& var : parentMemberVars) {
+        if (var.TestAttr(Attribute::PUBLIC) || var.TestAttr(Attribute::PROTECTED)) {
+            if (memberVarNames.count(var.name) != 0 && var.outerDef != nullptr) {
+                Errorln("duplicated member var name `" + var.name + "` in " + def.GetIdentifier() +
+                    ", it has same name with parent class " + var.outerDef->GetIdentifier() + " member var.");
+            }
+        }
+    }
+}
+
+void CHIRChecker::CheckStaticMemberVar(const CustomTypeDef& def)
+{
+    for (auto var : def.GetStaticMemberVars()) {
+        // 1. must have Attribute::STATIC
+        if (!var->TestAttr(Attribute::STATIC)) {
+            Errorln("static member var " + var->GetIdentifier() + " of " + def.GetIdentifier() +
+                " doesn't have Attribute `STATIC`.");
+        }
+        // 2. parent custom type def can't be null
+        if (var->GetParentCustomTypeDef() == nullptr) {
+            Errorln("static member var " + var->GetIdentifier() + " doesn't set parent CustomTypeDef.");
+            continue;
+        } else if (var->GetParentCustomTypeDef() != &def) {
+            // 3. parent custom type def must be current def
+            Errorln("parent CustomTypeDef of static member var " + var->GetIdentifier() + " is " +
+                var->GetParentCustomTypeDef()->GetIdentifier() + ", but it should be " + def.GetIdentifier() + ".");
+            continue;
+        }
+    }
+}
+
+void CHIRChecker::CheckVTable(const CustomTypeDef& def)
+{
+    for (const auto& it : def.GetVTable()) {
+        auto parentInstType = it.first;
+        auto parentDef = parentInstType->GetClassDef();
+        auto parentOriginalType = parentDef->GetType();
+        const auto& parentVTable = parentDef->GetVTable();
+        auto parentIt = parentVTable.find(parentOriginalType);
+        // 1. the same src parent type must be found in parent def's vtable
+        if (parentIt == parentVTable.end()) {
+            Errorln("in vtable of " + def.GetIdentifier() + ", parent type " +
+                parentInstType->ToString() + " can't be found in vtable of parent class " +
+                parentDef->GetIdentifier() + ".");
+            continue;
+        }
+        // 2. virtual method num must be equal
+        if (it.second.size() != parentIt->second.size()) {
+            Errorln("in vtable of " + def.GetIdentifier() + ", parent type " +
+                parentInstType->ToString() + " has " + std::to_string(it.second.size()) +
+                " virtual method(s), but in vtable of parent class " + parentDef->GetIdentifier() +
+                ", this parent type has " + std::to_string(parentIt->second.size()) + " virtual method(s).");
+            continue;
+        }
+        // 3. only interface or abstract class can have unimplemented virtual method
+        bool defIsInterfaceOrAbstract = def.IsInterface() || def.TestAttr(Attribute::ABSTRACT);
+        for (size_t i = 0; i < it.second.size(); ++i) {
+            if (it.second[i].instance == nullptr && !defIsInterfaceOrAbstract) {
+                Errorln("in vtable of " + def.GetIdentifier() + ", parent type " + parentInstType->ToString() +
+                    ", the " + IndexToString(i) +
+                    " virtual method is unimplemented, but only interface or abstract class can have this kind of "
+                    "method.");
+            }
+        }
+    }
+}
+
+void CHIRChecker::CheckCustomTypeDef(const CustomTypeDef& def)
+{
+    // 1. check identifier
+    if (!CheckCustomTypeDefIdentifier(def)) {
+        return;
+    }
+
+    // 2. check type
+    CheckCustomType(def);
+
+    // 3. check instance member var
+    CheckInstanceMemberVar(def);
+
+    // 4. check static member var
+    CheckStaticMemberVar(def);
+
+    // 5. check vtable
+    CheckVTable(def);
+
+    // 6. check methods
     for (auto method : def.GetMethods()) {
         CheckParentCustomTypeDef(*method, def);
+    }
+
+    // 7. check parent type
+    for (auto parentType : def.GetImplementedInterfaceTys()) {
+        if (!parentType->GetClassDef()->IsInterface()) {
+            Errorln("there is non-interface type " + parentType->ToString() +
+                " in implemented interface list of " + def.GetIdentifier() + ".");
+        }
+    }
+}
+
+void CHIRChecker::CheckCStruct(const StructDef& def)
+{
+    if (!def.IsCStruct()) {
+        return;
+    }
+
+    // 1. member var's type must be CType
+    for (const auto& var : def.GetDirectInstanceVars()) {
+        if (var.type != nullptr && !IsCType(*var.type)) {
+            Errorln("in C-struct " + def.GetIdentifier() + ", member var " + var.name +
+                " has type " + var.type->ToString() + ", but it should be CType.");
+        }
+    }
+}
+void CHIRChecker::CheckStructDef(const StructDef& def)
+{
+    // 1. check custom type def
+    CheckCustomTypeDef(def);
+
+    // 2. check C-struct
+    CheckCStruct(def);
+}
+
+void CHIRChecker::CheckAbstractMethod(const ClassDef& def)
+{
+    for (const auto& method : def.GetAbstractMethods()) {
+        // 1. must have method name
+        if (method.methodName.empty()) {
+            Errorln("abstract method in " + def.GetIdentifier() + " doesn't have name.");
+            continue;
+        }
+        // 2. must have Attribute::ABSTRACT
+        if (!method.TestAttr(Attribute::ABSTRACT)) {
+            Errorln("abstract method " + method.methodName + " of " + def.GetIdentifier() +
+                " doesn't have Attribute `ABSTRACT`.");
+        }
+        // 3. must have method type
+        if (method.methodTy == nullptr || !method.methodTy->IsFunc()) {
+            Errorln("abstract method " + method.methodName + " of " + def.GetIdentifier() +
+                " doesn't have func type.");
+        }
+        // 4. parent custom type def can't be null
+        if (method.parent == nullptr) {
+            Errorln("abstract method " + method.methodName + " doesn't set parent CustomTypeDef.");
+        } else if (method.parent != &def) {
+            // 5. parent custom type def must be current def
+            Errorln("parent CustomTypeDef of abstract method " + method.methodName + " is " +
+                method.parent->GetIdentifier() + ", but it should be " + def.GetIdentifier() + ".");
+        }
+        // 6. abstract method must be public or protected
+        if (!method.TestAttr(Attribute::PUBLIC) && !method.TestAttr(Attribute::PROTECTED)) {
+            Errorln("abstract method " + method.methodName + " of " + def.GetIdentifier() +
+                " must be public or protected.");
+        }
+    }
+}
+
+void CHIRChecker::CheckEnumDef(const EnumDef& def)
+{
+    // 1. check custom type def
+    CheckCustomTypeDef(def);
+}
+
+void CHIRChecker::CheckExtendDef(const ExtendDef& def)
+{
+    // 1. check custom type def
+    CheckCustomTypeDef(def);
+
+    // 2. extended type can't be null
+    auto type = def.GetExtendedType();
+    if (type == nullptr) {
+        Errorln("extend definition " + def.GetIdentifier() + " doesn't set extended type.");
+    } else if (!type->IsCustomType() && !type->IsBuiltinType()) {
+        // 3. extended type must be custom type or builtin type
+        Errorln("extend definition " + def.GetIdentifier() + " extends " +
+            type->ToString() + ", it should be custom type or builtin type.");
+    }
+}
+
+void CHIRChecker::CheckClassDef(const ClassDef& def)
+{
+    // 1. check custom type def
+    CheckCustomTypeDef(def);
+
+    // 2. check abstract method
+    CheckAbstractMethod(def);
+
+    // 3. check super class
+    if (auto parent = def.GetSuperClassDef(); parent && !parent->TestAttr(Attribute::VIRTUAL)) {
+        Errorln("the super class " + parent->GetIdentifier() + " of class " + def.GetIdentifier() +
+            " isn't open class.");
     }
 }
 
@@ -1402,6 +1703,12 @@ void CHIRChecker::CheckExpression(const Expression& expr, const Func& topLevelFu
             [this, &expr, &topLevelFunc]() { CheckControlFlowExpression(expr, topLevelFunc); }},
         {ExprMajorKind::OTHERS, [this, &expr, &topLevelFunc]() { CheckOtherExpression(expr, topLevelFunc); }},
     };
+    // 1. expression must have parent block
+    if (expr.GetParentBlock() == nullptr) {
+        ErrorInFunc(topLevelFunc, "expression " + expr.ToString() + " doesn't have parent block.");
+        return;
+    }
+    // 2. non-terminator expression must have result
     if (!expr.IsTerminator() && !CheckHaveResult(expr, topLevelFunc)) {
         return;
     }
@@ -2630,6 +2937,124 @@ void CHIRChecker::CheckIntrinsicWithException(const IntrinsicWithException& expr
     CheckIntrinsicBase(IntrinsicBase(&expr), topLevelFunc);
 }
 
+void CHIRChecker::CheckInoutOpSrc(const Value& op, const IntrinsicBase& expr, const Func& topLevelFunc)
+{
+    auto type = op.GetType()->StripAllRefs();
+    if (!IsCTypeInInout(*type)) {
+        auto errMsg = "`inout` operand's type is `" + type->ToString() + "`, but C-type (exclude CString) is expected.";
+        ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), errMsg);
+        return;
+    }
+    if (op.IsBlock() || op.IsBlockGroup() || op.IsFunc() || op.IsLiteral()) {
+        ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), "`inout` operand can't be Block, BlockGroup, Literal or Func.");
+        return;
+    }
+    if (auto localVar = DynamicCast<const LocalVar*>(&op)) {
+        auto localExpr = localVar->GetExpr();
+        if (auto load = DynamicCast<const Load*>(localExpr)) {
+            CheckInoutOpSrc(*load->GetLocation(), expr, topLevelFunc);
+        } else if (auto ger = DynamicCast<const GetElementRef*>(localExpr)) {
+            auto locationType = ger->GetLocation()->GetType()->StripAllRefs();
+            for (auto p : ger->GetPath()) {
+                locationType = GetFieldOfType(*locationType, p, builder);
+                if (!IsCTypeInInout(*locationType)) {
+                    auto errMsg = "there is " + locationType->ToString() + " type that is calculated by path in " +
+                        op.ToString() + ", but C-type (exclude CString) is expected in `inout` operand chain.";
+                    ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), errMsg);
+                    return;
+                }
+            }
+            CheckInoutOpSrc(*ger->GetLocation(), expr, topLevelFunc);
+        } else if (auto field = DynamicCast<const Field*>(localExpr)) {
+            auto locationType = ger->GetLocation()->GetType()->StripAllRefs();
+            for (auto p : ger->GetPath()) {
+                locationType = GetFieldOfType(*locationType, p, builder);
+                if (!IsCTypeInInout(*locationType)) {
+                    auto errMsg = "there is " + locationType->ToString() + " type that is calculated by path in " +
+                        op.ToString() + ", but C-type (exclude CString) is expected in `inout` operand chain.";
+                    ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), errMsg);
+                    return;
+                }
+            }
+            CheckInoutOpSrc(*ger->GetLocation(), expr, topLevelFunc);
+        } else if (Is<TypeCastWithException>(localExpr) || Is<TypeCast>(localExpr)) {
+            CheckInoutOpSrc(*localExpr->GetOperand(0), expr, topLevelFunc);
+        } else if (!Is<FuncCallWithException>(localExpr) && !Is<FuncCall>(localExpr) &&
+                   !Is<AllocateWithException>(localExpr) && !Is<Allocate>(localExpr)) {
+            ErrorInExpr(topLevelFunc, *expr.GetRawExpr(),
+                "a wrong expression `" + op.ToString() + "` in `inout` operand chain.");
+            return;
+        }
+    }
+    // if operand is global var or parameter, do nothing
+}
+
+void CHIRChecker::CheckInout(const IntrinsicBase& expr, const Func& topLevelFunc)
+{
+    if (expr.GetIntrinsicKind() != IntrinsicKind::INOUT_PARAM) {
+        return;
+    }
+
+    // 1. can't have type args
+    if (!expr.GetInstantiatedTypeArgs().empty()) {
+        ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), "`inout` intrinsic can't have type args.");
+    }
+
+    // 2. only have 1 operand
+    if (!OperandNumIsEqual(1, *expr.GetRawExpr(), topLevelFunc)) {
+        return;
+    }
+
+    // 3. operand type must be ref, but can't be type&&
+    auto operands = expr.GetOperands();
+    auto opType = operands[0]->GetType();
+    if (!opType->IsRef()) {
+        ErrorInExpr(topLevelFunc, *expr.GetRawExpr(),
+            "`inout` operand's type is `" + opType->ToString() + "`, but ref type is expected.");
+        return;
+    }
+    auto baseType = StaticCast<RefType*>(opType)->GetBaseType();
+    if (baseType->IsRef()) {
+        ErrorInExpr(topLevelFunc, *expr.GetRawExpr(),
+            "`inout` operand's type is `" + opType->ToString() + "`, but type&& is NOT allowed.");
+        return;
+    }
+
+    // 4. operand type must be C-type (exclude CString)
+    CheckInoutOpSrc(*operands[0], expr, topLevelFunc);
+
+    // 5. result type must be CPointer
+    auto resultType = expr.GetResult()->GetType();
+    if (!resultType->IsCPointer()) {
+        TypeCheckError(*expr.GetRawExpr(), *expr.GetResult(), "CPointer", topLevelFunc);
+        return;
+    }
+
+    // 6. CPointer<xxx>, xxx must be CType, but can't be CString
+    if (!IsCTypeInInout(*resultType)) {
+        auto errMsg = "the pointed type of result CPointer is `" +
+            StaticCast<CPointerType*>(resultType)->GetElementType()->ToString() +
+            "`, but CType (exclude CString) is expected.";
+        ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), errMsg);
+        return;
+    }
+
+    // 7. result must be CFunc's arg
+    for (auto user : expr.GetResult()->GetUsers()) {
+        if (!Is<ApplyWithException>(user) && !Is<Apply>(user)) {
+            auto errMsg = "the result is used in a wrong expression `" + user->ToString() +
+                "`, the result must be used as CFunc's argument.";
+            ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), errMsg);
+            continue;
+        }
+        auto callee = ApplyBase(user).GetCallee();
+        if (!callee->GetType()->IsCFunc()) {
+            auto errMsg = "the result is used in a wrong expression `" + user->ToString() +
+                "`, the result must be used as CFunc's argument.";
+            ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), errMsg);
+        }
+    }
+}
 void CHIRChecker::CheckIntrinsicBase(const IntrinsicBase& expr, const Func& topLevelFunc)
 {
     if (topLevelFunc.GetIdentifier() == "@_CNbv4mockIG_HRNat5ArrayINNbv8StubModeEE" ||
@@ -2642,6 +3067,8 @@ void CHIRChecker::CheckIntrinsicBase(const IntrinsicBase& expr, const Func& topL
         expr.GetIntrinsicKind() == IntrinsicKind::NOT_IMPLEMENTED) {
         ErrorInExpr(topLevelFunc, *expr.GetRawExpr(), "intrinsic kind must be valid.");
     }
+    // 2. check `inout` intrinsic
+    CheckInout(expr, topLevelFunc);
 }
 
 void CHIRChecker::CheckAllocateWithException(const AllocateWithException& expr, const Func& topLevelFunc)
@@ -3194,10 +3621,20 @@ void CHIRChecker::CheckGetException(const GetException& expr, const Func& topLev
     }
     auto result = expr.GetResult();
     // 1. return type must be class&
-    if (!result->GetType()->IsRef() || !result->GetType()->StripAllRefs()->IsClass()) {
-        TypeCheckError(expr, *result, "Class&", topLevelFunc);
+    if (!result->GetType()->IsRef()) {
+        TypeCheckError(expr, *result, "Object&", topLevelFunc);
+         return;
     }
-    OperandNumIsEqual(0, expr, topLevelFunc);
+
+    auto baseType = StaticCast<RefType*>(result->GetType())->GetBaseType();
+    if (!baseType->IsClass()) {
+        TypeCheckError(expr, *result, "Object&", topLevelFunc);
+        return;
+    }
+
+    if (!CheckCustomTypeDefIsExpected(*StaticCast<ClassType*>(baseType)->GetClassDef(), CORE_PACKAGE_NAME, "Object")) {
+        TypeCheckError(expr, *result, "Object&", topLevelFunc);
+    }
 }
 
 void CHIRChecker::CheckSpawn(const Spawn& expr, const Func& topLevelFunc)
@@ -3221,14 +3658,20 @@ void CHIRChecker::CheckRawArrayLiteralInit(const RawArrayLiteralInit& expr, cons
     if (!OperandNumAtLeast(1, expr, topLevelFunc)) {
         return;
     }
+
+    // 1. result type must be Unit
     auto result = expr.GetResult();
     if (!result->GetType()->IsUnit()) {
         TypeCheckError(expr, *result, "Unit", topLevelFunc);
     }
+
+    // 2. the 1st operand must be RawArray&
     auto rawArray = expr.GetRawArray();
     if (!rawArray->GetType()->IsRef() || !rawArray->GetType()->StripAllRefs()->IsRawArray()) {
         TypeCheckError(expr, *rawArray, "RawArray&", topLevelFunc);
     }
+
+    // 3. all elements' type must be equal to RawArray's element type
     auto rawArrayEleTy = StaticCast<RawArrayType*>(rawArray->GetType()->StripAllRefs())->GetElementType();
     for (auto e : expr.GetElements()) {
         if (!e->GetType()->IsEqualOrSubTypeOf(*rawArrayEleTy, builder)) {
@@ -3273,7 +3716,7 @@ void CHIRChecker::CheckVArray(const VArray& expr, const Func& topLevelFunc)
     auto elemType = StaticCast<VArrayType*>(result->GetType())->GetElementType();
     // only use VArray to be parameter type in CFunc, its element type shouldn't be normal struct,
     // must be marked with @C
-    if (!IsCType(*elemType, false)) {
+    if (!IsCTypeInVArray(*elemType)) {
         auto errMsg = "its element type is " + elemType->ToString() + ", but a C type is expected.\n";
         auto hint =
             "    C type includes: numeric data types, Rune, Bool, Unit, Nothing, CPointer, CString, CFunc and Struct.";
@@ -3403,17 +3846,23 @@ void CHIRChecker::CheckGetInstantiateValue(const GetInstantiateValue& expr, cons
     if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
         return;
     }
+
+    // 1. operand must be FuncType
     auto func = expr.GetGenericResult();
     if (!func->GetType()->IsFunc()) {
         TypeCheckError(expr, *func, "Func", topLevelFunc);
         return;
     }
+
+    // 2. must have instantiated type args, or you will use FuncBase* directly
     auto instTypeArgs = expr.GetInstantiateTypes();
     if (instTypeArgs.empty()) {
         auto errMsg = "there must be instantiated type in `GetInstantiateValue`";
         ErrorInExpr(topLevelFunc, expr, errMsg);
         return;
     }
+
+    // 3. instantiated type args must satisfy all generic constraints
     std::vector<std::pair<const Value*, std::vector<GenericType*>>> funcAndGenericTypes;
     CollectFuncAndGenericTypesRecursively(*func, funcAndGenericTypes);
     CJC_ASSERT(!funcAndGenericTypes.empty());

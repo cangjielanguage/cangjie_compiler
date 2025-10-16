@@ -12,6 +12,7 @@
 #include "cangjie/CHIR/Checker/ConstSafetyCheck.h"
 #include "cangjie/CHIR/Checker/UnreachableBranchCheck.h"
 #include "cangjie/CHIR/Checker/VarInitCheck.h"
+#include "cangjie/CHIR/CHIRChecker.h"
 #include "cangjie/CHIR/GenerateVTable/GenerateVTable.h"
 #include "cangjie/CHIR/IRChecker.h"
 #include "cangjie/CHIR/Interpreter/ConstEval.h"
@@ -40,6 +41,7 @@
 #include "cangjie/CHIR/Visitor/Visitor.h"
 #include "cangjie/Driver/TempFileManager.h"
 #include "cangjie/Utils/CheckUtils.h"
+#include <unordered_set>
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 #include "cangjie/MetaTransformation/MetaTransform.h"
 #endif
@@ -758,7 +760,30 @@ bool ToCHIR::RunIRChecker(const Phase& phase)
     }
     Utils::ProfileRecorder recorder("CHIR", "IRCheck " + suffix);
     CJC_NULLPTR_CHECK(chirPkg);
-    return IRCheck(*chirPkg, opts, builder, phase);
+    auto checker = CHIRChecker(*chirPkg, opts, builder);
+    std::unordered_set<CHIRChecker::Rule> rules;
+    // after AST2CHIR, there are many empty block, we need to clean them
+    if (phase == Phase::RAW) {
+        rules.emplace(CHIRChecker::Rule::EMPTY_BLOCK);
+    }
+    // we need to translate correct InvokeStatic, but after function inline,
+    // some InvokeStatic may be optimized to Apply, we will handle it later
+    if (phase == Phase::RAW) {
+        rules.emplace(CHIRChecker::Rule::CHIR_GET_RTTI_STATIC_TYPE);
+    }
+    // CodeGen shouldn't know `GetInstantiateValue`, this expression should gone after closure conversion
+    if (phase == Phase::OPT) {
+        rules.emplace(CHIRChecker::Rule::GET_INSTANTIATE_VALUE_SHOULD_GONE);
+    }
+    // there may be something wrong, we will check this rule after CJMP's scheme done
+    if (!opts.commonPartCjo.has_value()) {
+        rules.emplace(CHIRChecker::Rule::CHECK_FUNC_BODY);
+    }
+    auto ok = checker.CheckPackage(rules);
+    if (!ok) {
+        DumpCHIRDebug("Broken_CHIR", false);
+    }
+    return ok;
 }
 
 void ToCHIR::RecordCodeInfoAtTheBegin()
