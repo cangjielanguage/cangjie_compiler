@@ -295,17 +295,51 @@ llvm::Value* HandleTransformToConcreteExpr(IRBuilder2& irBuilder, const CHIR::Ex
     auto& cgMod = irBuilder.GetCGModule();
     auto& castToConcreteExpr = StaticCast<const CHIR::TransformToConcrete&>(chirExpr);
 
-    auto cgVal = *(cgMod | castToConcreteExpr.GetSourceValue());
+    auto sourceValue = castToConcreteExpr.GetSourceValue();
+    auto cgVal = *(cgMod | sourceValue);
     auto targetCHIRType = castToConcreteExpr.GetTargetTy();
     auto targetCGType = CGType::GetOrCreate(cgMod, targetCHIRType);
     CJC_ASSERT(targetCGType->GetSize() && "target type must have size");
     auto srcCHIRType = castToConcreteExpr.GetSourceTy();
     const CGType* srcCGType = CGType::GetOrCreate(cgMod, srcCHIRType);
 
-    if (srcCHIRType->IsRef() && srcCHIRType->GetTypeArgs()[0]->IsGeneric()) {
-        srcCHIRType = srcCHIRType->GetTypeArgs()[0];
-        srcCGType = srcCGType->GetPointerElementType();
-        cgVal = CGValue(irBuilder.CreateLoad(cgVal), srcCGType);
+    if (IsGenericRef(*srcCHIRType)) {
+        CJC_ASSERT(sourceValue->IsLocalVar());
+        auto localVarExpr = StaticCast<CHIR::LocalVar>(sourceValue)->GetExpr();
+        if (localVarExpr->GetExprKind() == CHIR::ExprKind::GET_ELEMENT_REF) {
+            srcCHIRType = srcCHIRType->GetTypeArgs()[0];
+            auto [handleRefBB, handleNonRefBB, handleEndBB] =
+                Vec2Tuple<3>(irBuilder.CreateAndInsertBasicBlocks({"handle_ref", "handle_non_ref", "handle_end"}));
+            auto srcTi = irBuilder.CreateTypeInfo(*srcCHIRType);
+            irBuilder.CreateCondBr(irBuilder.CreateTypeInfoIsReferenceCall(srcTi), handleRefBB, handleNonRefBB);
+
+            irBuilder.SetInsertPoint(handleRefBB);
+            srcCGType = srcCGType->GetPointerElementType();
+            auto tmp1 = irBuilder.CreateLoad(cgVal);
+            irBuilder.CreateBr(handleEndBB);
+
+            irBuilder.SetInsertPoint(handleNonRefBB);
+            auto sizeOfSrc = irBuilder.GetSizeFromTypeInfo(srcTi);
+            // 1. Allocate memory for boxing srcValue.
+            llvm::Value* temp = irBuilder.CallIntrinsicAllocaGeneric({srcTi, sizeOfSrc});
+            // 2. store srcValue to temp
+            auto basePtrOfSrc = cgMod.GetCGContext().GetBasePtrOf(cgVal.GetRawValue());
+            std::vector<llvm::Value*> copyGenericParams{temp, basePtrOfSrc, cgVal.GetRawValue(), sizeOfSrc};
+            irBuilder.CallGCReadGeneric(copyGenericParams);
+            irBuilder.CreateBr(handleEndBB);
+
+            irBuilder.SetInsertPoint(handleEndBB);
+            auto phi = irBuilder.CreatePHI(targetCGType->GetLLVMType(), 2U); // 2U: ref and nonRef branch
+            phi->addIncoming(tmp1, handleRefBB);
+            phi->addIncoming(temp, handleNonRefBB);
+            cgMod.GetCGContext().SetBoxedValueMap(phi, cgVal.GetRawValue());
+
+            cgVal = CGValue(phi, srcCGType);
+        } else {
+            srcCHIRType = srcCHIRType->GetTypeArgs()[0];
+            srcCGType = srcCGType->GetPointerElementType();
+            cgVal = CGValue(irBuilder.CreateLoad(cgVal), srcCGType);
+        }
     }
 
     if (srcCHIRType->IsGeneric() && targetCGType->IsReference()) {

@@ -68,6 +68,7 @@ struct VTableSearchRes {
     ClassType* instSrcParentType{nullptr};
     FuncType* originalFuncType{nullptr}; // func type from current CustomType, not parent CustomType
     FuncBase* instance{nullptr};
+    AttributeInfo attr;
     size_t offset{0};
 };
 

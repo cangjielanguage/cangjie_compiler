@@ -872,10 +872,23 @@ public:
      */
     ClassType* GetInstSrcParentCustomTypeOfMethod(CHIRBuilder& builder) const;
 
+    // ===--------------------------------------------------------------------===//
+    // Others
+    // ===--------------------------------------------------------------------===//
+    /*
+     * @brief Retrieves virtual method's attribute.
+     *
+     * @return Virtual method's attribute.
+     */
+    AttributeInfo GetVirtualMethodAttr(CHIRBuilder& builder) const;
+
 protected:
     explicit DynamicDispatch(ExprKind kind, const InvokeCallContext& callContext, Block* parent);
 
     VirMethodContext virMethodCtx;
+
+private:
+    std::vector<VTableSearchRes> GetVirtualMethodInfo(CHIRBuilder& builder) const;
 };
 
 /**
