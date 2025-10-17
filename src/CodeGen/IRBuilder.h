@@ -193,7 +193,7 @@ public:
     }
 
     /** Platform dependent */
-    llvm::Type* GetSizetType() const;
+    llvm::Type* GetSizetLLVMType() const;
     size_t GetPtrSize() const;
     size_t GetPayloadOffset() const;
     CHIR::Type::TypeKind GetTypeKindFromType(const CHIR::Type& ty) const;

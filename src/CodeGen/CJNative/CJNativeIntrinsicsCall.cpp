@@ -44,7 +44,7 @@ llvm::Value* IRBuilder2::CallIntrinsic(
 {
     if (auto iter = INTRINSIC_KIND_TO_ID_MAP.find(intrinsic.GetIntrinsicKind());
         iter != INTRINSIC_KIND_TO_ID_MAP.end()) {
-        std::vector<llvm::Type*> newTys = {GetSizetType()};
+        std::vector<llvm::Type*> newTys = {GetSizetLLVMType()};
         auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), iter->second, IsPlatformDependent(intrinsic.GetIntrinsicKind()) ? newTys : tys);
         if (intrinsic.GetIntrinsicKind() == CHIR::IntrinsicKind::BLACK_BOX) {
             CJC_ASSERT(args.size() == 1U);
