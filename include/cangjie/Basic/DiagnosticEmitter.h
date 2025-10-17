@@ -21,8 +21,8 @@ public:
     DiagnosticEmitter(
         Diagnostic& d, bool nc, bool enableRangeCheckICE, std::basic_ostream<char>& o, SourceManager& sourceManager);
     ~DiagnosticEmitter();
-    // return false if some errors occurred.
-    bool Emit() const;
+    // return false if some errors occurred. If 'enableOnlyHint' is true, it won't emit error message.
+    bool Emit(bool enableOnlyHint = false) const;
 
 private:
     class DiagnosticEmitterImpl* impl;

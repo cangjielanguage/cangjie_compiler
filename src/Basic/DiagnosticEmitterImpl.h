@@ -72,7 +72,7 @@ public:
         : diag(d), noColor(nc), enableRangeCheckICE(enableRangeCheckICE), out(o), sm(sourceManager)
     {
     }
-    bool Emit();
+    bool Emit(bool enableOnlyHint = false);
 
 private:
     Diagnostic& diag;

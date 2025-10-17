@@ -888,14 +888,16 @@ bool IsTextOnlyWarning(const WarnGroup& warnGroup)
 }
 }
 
-bool DiagnosticEmitterImpl::Emit()
+bool DiagnosticEmitterImpl::Emit(bool enableOnlyHint)
 {
     const std::map<DiagSeverity, std::string_view> seveToStr = {
         {DiagSeverity::DS_ERROR, "error"}, {DiagSeverity::DS_WARNING, "warning"},
         {DiagSeverity::DS_NOTE, "note"},
     };
     if (seveToStr.find(diag.diagSeverity) != seveToStr.end()) {
-        EmitErrorMessage(diag.mainHint.color, std::string(seveToStr.at(diag.diagSeverity)), diag.errorMessage);
+        if (!enableOnlyHint) {
+            EmitErrorMessage(diag.mainHint.color, std::string(seveToStr.at(diag.diagSeverity)), diag.errorMessage);
+        }
     } else {
         CJC_ABORT();
     }
@@ -941,8 +943,8 @@ DiagnosticEmitter::~DiagnosticEmitter()
 {
     delete impl;
 }
-bool DiagnosticEmitter::Emit() const
+bool DiagnosticEmitter::Emit(bool enableOnlyHint) const
 {
-    return impl->Emit();
+    return impl->Emit(enableOnlyHint);
 }
 }

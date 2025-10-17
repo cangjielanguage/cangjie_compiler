@@ -172,6 +172,20 @@ public:
         return diagEngineErrorCode;
     }
 
+    DiagEngineErrorCode GetCategoryDiagnosticInfos(DiagCategory cate, std::vector<DiagnosticInfo>& diagOut)
+    {
+        diagOut.clear();
+        if (handler->GetKind() == DiagHandlerKind::COMPILER_HANDLER) {
+            if (diagEngineErrorCode != DiagEngineErrorCode::NO_ERRORS && checkRangeErrorCodeRatherICE) {
+                // Emit may cause unpredictable errors if diag engine error has been found before
+                return diagEngineErrorCode;
+            }
+            auto hk = static_cast<CompilerDiagnosticHandler*>(handler.get());
+            hk->EmitCategoryDiagnosticInfos(cate, diagOut);
+        }
+        return diagEngineErrorCode;
+    }
+
     void EmitCategoryGroup()
     {
         if (handler->GetKind() == DiagHandlerKind::COMPILER_HANDLER) {

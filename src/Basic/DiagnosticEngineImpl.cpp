@@ -221,6 +221,12 @@ DiagEngineErrorCode DiagnosticEngine::GetCategoryDiagnosticsString(DiagCategory 
 {
     return impl->GetCategoryDiagnosticsString(cate, diagOut);
 }
+
+DiagEngineErrorCode DiagnosticEngine::GetCategoryDiagnosticInfos(DiagCategory cate, std::vector<DiagnosticInfo>& diagOut)
+{
+    return impl->GetCategoryDiagnosticInfos(cate, diagOut);
+}
+
 void DiagnosticEngine::EmitCategoryGroup()
 {
     impl->EmitCategoryGroup();

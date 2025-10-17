@@ -455,6 +455,13 @@ public:
     static std::string InsertArguments(std::string& rawString, std::vector<std::string>& arguments);
 };
 
+struct DiagnosticInfo {
+    DiagSeverity severity;
+    Range range = MakeRange(DEFAULT_POSITION, DEFAULT_POSITION);
+    std::string msg; // main diagnostic message
+    std::string hint;
+};
+
 enum class DiagHandlerKind : uint8_t {
     HANDLER,
     COMPILER_HANDLER,
@@ -529,6 +536,7 @@ public:
     {
     }
     void EmitCategoryDiagnostics(DiagCategory cate);
+    void EmitCategoryDiagnosticInfos(DiagCategory cate, std::vector<DiagnosticInfo>& diagOut);
     void EmitDiagnoseGroup();
     void EmitDiagnosesInJson() noexcept;
     std::vector<Diagnostic> GetCategoryDiagnostic(
@@ -570,7 +578,8 @@ public:
         return success;
     }
     void EmitDiagnose(Diagnostic d);
-    
+    DiagnosticInfo GetDiagnosticInfo(Diagnostic d);
+
     /**
      * Save all diagnostic to a structure. For deduplication or some tools may need read from it.
      */
@@ -987,6 +996,7 @@ public:
     void EmitCategoryDiagnostics(DiagCategory cate);
 
     DiagEngineErrorCode GetCategoryDiagnosticsString(DiagCategory cate, std::string& diagOut);
+    DiagEngineErrorCode GetCategoryDiagnosticInfos(DiagCategory cate, std::vector<DiagnosticInfo>& diagOut);
     void EmitCategoryGroup();
     
     void SetErrorCountLimit(std::optional<unsigned int> errorCountLimit);

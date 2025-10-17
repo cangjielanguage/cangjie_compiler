@@ -534,6 +534,38 @@ bool MacroEvaluation::HasMacroCallInStrInterpolation(
     return true;
 }
 
+void MacroEvaluation::ProcessTokensInQuoteExpr(
+    TokenVector& input, size_t& startIndex, size_t& curIndex, MacroCall& macCall, bool reEval)
+{
+    // Start with 0 for the opening parenthesis we found
+    auto balance = 0;
+    auto inQuoteInterpolation = false;
+    while (curIndex < input.size()) {
+        // macro M in quote($(@M(111))) should be expanded
+        if (inQuoteInterpolation && input[curIndex].kind == TokenKind::AT) {
+            CreateChildMacroCall(input, startIndex, curIndex, macCall, reEval);
+            inQuoteInterpolation = false;
+        }
+        if (input[curIndex].kind == TokenKind::DOLLAR && input[curIndex + 1].kind == TokenKind::LPAREN) {
+            inQuoteInterpolation = true;
+        }
+        // ignore escaped parenthesis \( \)
+        if (input[curIndex].kind == TokenKind::LPAREN &&
+            input[curIndex].Begin() + input[curIndex].Value().size() + 1 != input[curIndex].End()) {
+            balance++;
+        } else if (input[curIndex].kind == TokenKind::RPAREN &&
+            input[curIndex].Begin() + input[curIndex].Value().size() + 1 != input[curIndex].End()) {
+            balance--;
+            // If balance reaches 0, we found the matching closing parenthesis
+            if (balance == 0) {
+                return;
+            }
+        }
+        curIndex++;
+    }
+    return;
+}
+
 void MacroEvaluation::CreateChildMacroCall(
     TokenVector& inputTokens, size_t& startIndex, size_t& curIndex, MacroCall& macCall, bool reEval)
 {
@@ -721,6 +753,11 @@ void MacroEvaluation::CreateMacroCallTree(MacroCall& macCall, bool reEval)
             std::find(escapePosVec.begin(), escapePosVec.end(), posTmp) == escapePosVec.end() &&
             (curIndex == tokenSize - 1 || !IsIdentifierOrContextualKeyword(inputTokens[curIndex + 1].kind))) {
             (void)ci->diag.Diagnose(posTmp, DiagKind::macro_expand_invalid_input_tokens);
+        }
+        if (inputTokens[curIndex].kind == TokenKind::QUOTE && inputTokens[curIndex + 1].kind == TokenKind::LPAREN) {
+            curIndex++;
+            ProcessTokensInQuoteExpr(inputTokens, startIndex, curIndex, macCall, reEval);
+            continue;
         }
         if (HasMacroCallInStrInterpolation(inputTokens, startIndex, curIndex, macCall)) {
             curIndex++;

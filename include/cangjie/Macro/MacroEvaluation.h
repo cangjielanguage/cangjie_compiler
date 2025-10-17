@@ -172,6 +172,8 @@ private:
      */
     bool CheckAttrTokens(std::vector<Token>& attrTokens, MacroCall& macCall);
 
+    void ProcessTokensInQuoteExpr(
+        TokenVector& input, size_t& startIndex, size_t& curIndex, MacroCall& macCall, bool retEval = false);
     bool HasMacroCallInStrInterpolation(const std::string& str, MacroCall& macCall);
     bool HasMacroCallInStrInterpolation(
         TokenVector& input, size_t startIndex, size_t curIndex, MacroCall& parentMacCall);

@@ -860,6 +860,28 @@ void CompilerDiagnosticHandler::EmitDiagnose(Diagnostic d)
     }
 }
 
+DiagnosticInfo CompilerDiagnosticHandler::GetDiagnosticInfo(Diagnostic d)
+{
+    DiagnosticInfo info{d.diagSeverity, d.mainHint.range, d.errorMessage};
+    bool noRangeCheckError = true;
+    std::ostringstream ss;
+    if (diag.HasSourceManager()) {
+        DiagnosticEmitter tmp = DiagnosticEmitter(d, true, !diag.IsCheckRangeErrorCodeRatherICE(),
+            ss, diag.GetSourceManager());
+        noRangeCheckError = tmp.Emit(true);
+    } else {
+        SourceManager sm;
+        DiagnosticEmitter tmp = DiagnosticEmitter(
+            d, true, !diag.IsCheckRangeErrorCodeRatherICE(), ss, sm);
+        noRangeCheckError = tmp.Emit();
+    }
+    if (!noRangeCheckError) {
+        diag.SetDiagEngineErrorCode(DiagEngineErrorCode::DIAG_RANGE_ERROR);
+    }
+    info.hint = ss.str();
+    return info;
+}
+
 void CompilerDiagnosticHandler::CacheTheCountInJsonFormat()
 {
     DiagnosticJsonFormatter formatter(diag);
@@ -911,6 +933,22 @@ void CompilerDiagnosticHandler::EmitCategoryDiagnostics(DiagCategory cate)
     auto targets = GetCategoryDiagnosticsSortedByRange(cate);
     for (auto& d : targets) {
         EmitDiagnose(d);
+    }
+    diagnostics.erase(cate);
+}
+
+void CompilerDiagnosticHandler::EmitCategoryDiagnosticInfos(DiagCategory cate, std::vector<DiagnosticInfo>& diagOut)
+{
+    diagOut.clear();
+    if (diagnostics.count(cate) == 0) {
+        return;
+    }
+    if (!CanBeEmitted(cate)) {
+        return;
+    }
+    auto targets = GetCategoryDiagnosticsSortedByRange(cate);
+    for (auto& d : targets) {
+        diagOut.emplace_back(GetDiagnosticInfo(d));
     }
     diagnostics.erase(cate);
 }
