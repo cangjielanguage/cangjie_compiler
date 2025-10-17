@@ -401,9 +401,10 @@ std::vector<llvm::Constant*> CGExtensionDef::GetEmptyExtensionDefContent(CGModul
 }
 
 bool CGExtensionDef::CreateExtensionDefForType(CGModule& cgMod, const std::string& extensionDefName,
-    const std::vector<llvm::Constant*>& content, bool isForExternalType)
+    const std::vector<llvm::Constant*>& content, const CHIR::ClassType& inheritedType, bool isForExternalType)
 {
-    auto extensionDefType = CGType::GetOrCreateExtensionDefType(cgMod.GetLLVMContext());
+    auto& llvmCtx = cgMod.GetLLVMContext();
+    auto extensionDefType = CGType::GetOrCreateExtensionDefType(llvmCtx);
     auto extensionDef =
         llvm::cast<llvm::GlobalVariable>(cgMod.GetLLVMModule()->getOrInsertGlobal(extensionDefName, extensionDefType));
     CJC_ASSERT(extensionDef);
@@ -413,6 +414,14 @@ bool CGExtensionDef::CreateExtensionDefForType(CGModule& cgMod, const std::strin
     extensionDef->setLinkage(llvm::GlobalValue::PrivateLinkage);
     extensionDef->setInitializer(llvm::ConstantStruct::get(extensionDefType, content));
     extensionDef->addAttribute(GC_MTABLE_ATTR);
+    if (inheritedType.GetTypeArgs().size() == 1) {
+        auto inheritedTypeMeta = UnwindGenericRelateType(llvmCtx, inheritedType);
+        extensionDef->setMetadata("inheritedType", llvm::MDTuple::get(llvmCtx, inheritedTypeMeta));
+    } else if (inheritedType.GetTypeArgs().empty()) {
+        auto inheritedTypeMeta = CGType::GetNameOfTypeInfoGV(inheritedType);
+        extensionDef->setMetadata(
+            "inheritedType", llvm::MDTuple::get(llvmCtx, llvm::MDString::get(llvmCtx, inheritedTypeMeta)));
+    }
     if (isForExternalType) {
         cgMod.AddExternalExtensionDef(extensionDef);
     } else {
@@ -441,7 +450,7 @@ bool CGExtensionDef::CreateExtensionDefForType(const CHIR::ClassType& inheritedT
     content[static_cast<size_t>(FUNC_TABLE)] =
         GenerateFuncTableForType(funcTableSize == 0 ? std::vector<CHIR::VirtualFuncInfo>() : found->second);
 
-    return CreateExtensionDefForType(cgMod, extendDefName, content, isForExternalType);
+    return CreateExtensionDefForType(cgMod, extendDefName, content, inheritedType, isForExternalType);
 }
 
 namespace {

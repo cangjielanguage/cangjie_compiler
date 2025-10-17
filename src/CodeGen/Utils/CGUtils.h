@@ -36,6 +36,8 @@ namespace CodeGen {
 class IRBuilder2;
 class CGValue;
 
+std::vector<llvm::Metadata*> UnwindGenericRelateType(llvm::LLVMContext& llvmCtx, const CHIR::Type& ty);
+
 inline std::string GenNameForBB(const std::string& name, [[maybe_unused]] uint64_t extraInfo = 0)
 {
     return name;
@@ -222,8 +224,7 @@ bool IsThisArgOfStructMethod(const CHIR::Value& chirValue);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 inline bool IsAtomicIntrinsic(const CHIR::IntrinsicKind& intrinsicKind)
 {
-    return intrinsicKind >= CHIR::IntrinsicKind::ATOMIC_LOAD &&
-        intrinsicKind <= CHIR::IntrinsicKind::ATOMIC_FETCH_XOR;
+    return intrinsicKind >= CHIR::IntrinsicKind::ATOMIC_LOAD && intrinsicKind <= CHIR::IntrinsicKind::ATOMIC_FETCH_XOR;
 }
 
 int64_t GetIntMaxOrMin(IRBuilder2& irBuilder, const CHIR::IntType& ty, bool isMax);
