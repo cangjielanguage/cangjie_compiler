@@ -13,6 +13,7 @@
 #ifndef CANGJIE_BASIC_POSITION_H
 #define CANGJIE_BASIC_POSITION_H
 
+#include <stdint.h>
 #include <string>
 
 namespace Cangjie {

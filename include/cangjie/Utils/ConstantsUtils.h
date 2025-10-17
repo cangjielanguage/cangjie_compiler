@@ -14,6 +14,7 @@
 #define CANGJIE_CONSTANTSUTILS_H
 
 #include <map>
+#include <stdint.h>
 #include <string>
 #include <string_view>
 
