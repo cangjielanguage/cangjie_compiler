@@ -235,6 +235,7 @@ bool GlobalOptions::PerformPostActions()
     success = success && CheckScanDependencyOptions();
     success = success && CheckSanitizerOptions();
     success = success && CheckLtoOptions();
+    success = success && CheckCompileAsExeOptions();
     success = success && CheckPgoOptions();
     success = success && ReprocessObfuseOption();
     RefactJobs();
@@ -511,6 +512,25 @@ bool GlobalOptions::CheckLtoOptions() const
     }
     if (optimizationLevel == OptimizationLevel::Os || optimizationLevel == OptimizationLevel::Oz) {
         Errorln("-Os and -Oz optimize options are not supported in LTO mode.");
+        return false;
+    }
+    return true;
+}
+
+bool GlobalOptions::CheckCompileAsExeOptions() const 
+{
+    if (!IsCompileAsExeEnabled()) {
+        return true;
+    }
+    if (IsCompileAsExeEnabled() && !IsLTOEnabled()){
+        DiagnosticEngine diag;
+        diag.DiagnoseRefactor(DiagKindRefactor::driver_invalid_compile_as_exe, DEFAULT_POSITION);
+        return false;
+    }
+    auto osType = target.GetOSFamily();
+    if(osType == OSType::WINDOWS || osType == OSType::DARWIN) {
+        DiagnosticEngine diag;
+        diag.DiagnoseRefactor(DiagKindRefactor::driver_invalid_compile_as_exe_platform, DEFAULT_POSITION);
         return false;
     }
     return true;

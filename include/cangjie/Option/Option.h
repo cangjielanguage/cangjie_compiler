@@ -556,6 +556,7 @@ public:
     // LTO optimization options
     enum class LTOMode : uint8_t { FULL_LTO, THIN_LTO, NO_LTO };
     LTOMode ltoMod = LTOMode::NO_LTO;
+    bool enableCompileAsExe = false;
 
     /**
      * @brief Checks whether LTO is enabled.
@@ -565,6 +566,11 @@ public:
     bool IsLTOEnabled() const
     {
         return ltoMod != LTOMode::NO_LTO;
+    }
+
+    bool IsCompileAsExeEnabled() const 
+    {
+        return enableCompileAsExe;
     }
 
     /**
@@ -1044,6 +1050,7 @@ private:
     bool CheckScanDependencyOptions() const;
     bool CheckSanitizerOptions() const;
     bool CheckLtoOptions() const;
+    bool CheckCompileAsExeOptions() const;
     bool CheckPgoOptions() const;
     bool CheckCompileMacro() const;
     void RefactJobs();
