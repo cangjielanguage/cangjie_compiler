@@ -247,6 +247,7 @@ void SpecifyPackageInitFunc(const CGModule& cgMod)
     cgMod.GetLLVMModule()
         ->getOrInsertNamedMetadata("pkg_init_func")
         ->addOperand(llvm::MDTuple::get(llvmCtx, llvm::MDString::get(llvmCtx, pkgInitFuncName)));
+    cgMod.GetCGContext().AddLLVMUsedVars(pkgInitFuncName);
 }
 
 void SetSymbolLinkageType(const CGModule& cgMod)

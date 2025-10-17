@@ -274,6 +274,9 @@ void SetLTOOptions(SetFuncType setOptionHandler, const DriverOptions& driverOpti
     setOptionHandler("--cj-lto-opt");
     setOptionHandler("--allow-multiple-definition");
     setOptionHandler("--plugin-opt=no-opaque-pointers");
+    if (driverOptions.IsCompileAsExeEnabled()) {
+        setOptionHandler("--compile-as-exe");
+    }
 }
 
 void SetPgoOptions(SetFuncType setOptionHandler, const DriverOptions& driverOptions)

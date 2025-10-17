@@ -68,7 +68,8 @@ ERROR(driver_cfg_file_read_failed, "read '%s' failed, due to '%s'")
 WARNING(driver_cfg_path_ignored, DRIVER_ARG,
     "conditional compilation has been set by key-value mode, cfg.toml will be ignored")
 
-
+ERROR(driver_invalid_compile_as_exe, "--compile-as-exe only takes effect when lto mode is enabled")
+ERROR(driver_invalid_compile_as_exe_platform, "Windows, Mac, IOS does not support --compile-as-exe")
 WARNING(driver_useless_option, DEPRECATED, "option '%s' is deprecated and will be removed in the future")
 
 // module arg warning
