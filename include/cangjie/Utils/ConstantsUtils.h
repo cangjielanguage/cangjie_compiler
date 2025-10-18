@@ -104,6 +104,7 @@ inline constexpr const char UNICODE_PACKAGE_NAME[] = "std.unicode";
 inline constexpr const char UNITTEST_MOCK_PACKAGE_NAME[] = "std.unittest.mock";
 inline constexpr const char UNITTEST_MOCK_INTERNAL_PACKAGE_NAME[] = "std.unittest.mock.internal";
 inline constexpr const char AST_PACKAGE_NAME[] = "std.ast";
+inline constexpr const char INTEROP_PACKAGE_NAME[] = "std.interop";
 inline constexpr const char NET_PACKAGE_NAME[] = "std.net";
 inline constexpr const char REFLECT_PACKAGE_NAME[] = "std.reflect";
 inline constexpr const char REF_PACKAGE_NAME[] = "std.ref";

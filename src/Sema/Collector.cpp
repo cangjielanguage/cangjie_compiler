@@ -306,7 +306,7 @@ void Collector::CollectFuncDecl(ASTContext& ctx, FuncDecl& fd, bool buildTrie)
     auto pkg = ctx.curPackage;
     static const std::unordered_set<std::string> intrinsicPkgs{CORE_PACKAGE_NAME, SYNC_PACKAGE_NAME, MATH_PACKAGE_NAME,
         OVERFLOW_PACKAGE_NAME, RUNTIME_PACKAGE_NAME, NET_PACKAGE_NAME, REFLECT_PACKAGE_NAME,
-        UNITTEST_MOCK_INTERNAL_PACKAGE_NAME, EFFECT_PACKAGE_NAME};
+        UNITTEST_MOCK_INTERNAL_PACKAGE_NAME, EFFECT_PACKAGE_NAME, INTEROP_PACKAGE_NAME};
     static const std::unordered_set<std::string> headlessIntrinsics{GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME,
         IS_SUBTYPE_TYPES_FUNC_NAME};
 

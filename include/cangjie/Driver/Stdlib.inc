@@ -24,6 +24,7 @@ STDLIB(SORT, "std", "sort")
 STDLIB(ARGOPT, "std", "argopt")
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 STDLIB(AST, "std", "ast")
+STDLIB(INTEROP, "std", "interop")
 #endif
 STDLIB(TIME, "std", "time")
 STDLIB(SYNC, "std", "sync")
