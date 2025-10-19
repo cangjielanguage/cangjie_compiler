@@ -97,7 +97,7 @@ OwnedPtr<Type> CreateFuncType(Ptr<FuncTy> ty);
 OwnedPtr<Expr> CreateBoolMatch(OwnedPtr<Expr> selector, OwnedPtr<Expr> trueBranch, OwnedPtr<Expr> falseBranch,
     Ptr<Ty> ty);
 
-StructDecl& GetStringDecl(ImportManager& importManager);
+StructDecl& GetStringDecl(const ImportManager& importManager);
 
 /**
  * Returns synthetic lambda call that includes nodes. The result of the call expr is the last node:

@@ -610,8 +610,7 @@ void GlobalOptions::RefactAggressiveParallelCompileOption()
 
     if (aggressiveParallelCompile.has_value()) {
         return;
-    } else if (optimizationLevel == OptimizationLevel::O0 || enableCompileDebug ||
-        aggressiveParallelCompileWithoutArg) {
+    } else if (optimizationLevel == OptimizationLevel::O0 || aggressiveParallelCompileWithoutArg) {
         // When the compile options contain `-O0`\'-g'\`--apc`, aggressiveParallelCompile will be enabled,
         // and the degree of parallelism is the same as that of `-j`.
         CJC_ASSERT(jobs.has_value());
@@ -1154,6 +1153,7 @@ std::string GlobalOptions::GetCangjieLibTargetPathName() const
     }
     name += "_" + target.ArchToString() + "_" + BackendToString(backend);
     return name;
+    
 }
 
 void GlobalOptions::SetCompilationCachedPath()

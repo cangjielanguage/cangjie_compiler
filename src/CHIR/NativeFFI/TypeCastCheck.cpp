@@ -80,7 +80,12 @@ std::optional<std::tuple<Type*, Type*>> TryExtractTypeCast(Expression& expr)
 
 void TypeCastCheck::RunOnFunc(const Func& func)
 {
-    Visitor::Visit(func, [this, &func](Expression& expr) {
+    std::function<VisitResult(Expression&)> visitor = [this, &func, &visitor](Expression& expr) {
+        if (expr.IsLambda()) {
+            Visitor::Visit(*StaticCast<Lambda>(expr).GetBody(), visitor);
+            return VisitResult::CONTINUE;
+        }
+
         auto typeCast = TryExtractTypeCast(expr);
         if (!typeCast) {
             return VisitResult::CONTINUE;
@@ -103,6 +108,7 @@ void TypeCastCheck::RunOnFunc(const Func& func)
         }
 
         return VisitResult::CONTINUE;
-    });
+    };
+    Visitor::Visit(func, visitor);
 }
 } // namespace Cangjie::CHIR::NativeFFI

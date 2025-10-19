@@ -438,7 +438,9 @@ void MacroExpansion::Execute(std::vector<OwnedPtr<AST::Package>>& packages)
     if (ci->invocation.globalOptions.enableCompileTest &&
         ci->invocation.globalOptions.outputMode == GlobalOptions::OutputMode::EXECUTABLE) {
         TestEntryConstructor::ConstructTestSuite(ci->invocation.globalOptions.moduleName, packages,
-            ci->importManager.GetAllImportedPackages(), ci->invocation.globalOptions.compileTestsOnly);
+            ci->importManager.GetAllImportedPackages(),
+            ci->invocation.globalOptions.compileTestsOnly,
+            ci->invocation.globalOptions.mock == MockMode::ON);
     }
     for (auto& package : packages) {
         AddCurFile(*package);

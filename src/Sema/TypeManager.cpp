@@ -1938,16 +1938,20 @@ void TypeManager::RestoreJavaGenericsTy(AST::Decl& decl) const
 }
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+
 bool TypeManager::IsFuncDeclSubType(const AST::FuncDecl& decl, const AST::FuncDecl& funcDecl)
 {
     auto declType = StaticCast<FuncTy*>(decl.ty);
     auto resolvedFuncType = DynamicCast<FuncTy*>(funcDecl.ty);
-    if (resolvedFuncType && decl.identifier == funcDecl.identifier &&
-        IsFuncParameterTypesIdentical(declType->paramTys, resolvedFuncType->paramTys) &&
-        IsSubtype(declType->retTy, resolvedFuncType->retTy)) {
+    if (resolvedFuncType && decl.identifier == funcDecl.identifier && IsFuncTySubType(*declType, *resolvedFuncType)) {
         return true;
     }
     return false;
+}
+
+bool TypeManager::IsFuncTySubType(const AST::FuncTy& type1, const AST::FuncTy& type2)
+{
+    return IsFuncParameterTypesIdentical(type1.paramTys, type2.paramTys) && IsSubtype(type1.retTy, type2.retTy);
 }
 #endif
 

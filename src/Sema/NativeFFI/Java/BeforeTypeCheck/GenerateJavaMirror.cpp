@@ -8,11 +8,14 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/ASTCasting.h"
 #include "cangjie/Utils/CastingTemplate.h"
+#include "Utils.h"
+#include "TypeCheckUtil.h"
+#include "cangjie/AST/Match.h"
 
 
 namespace Cangjie::Interop::Java {
 
-    void PrepareTypeCheck(Package& pkg)
+    void PrepareTypeCheck(Package& pkg, const ImportManager& importManager, TypeManager& typeManager)
     {
         for (auto& file : pkg.files) {
             for (auto& decl : file->decls) {
@@ -24,6 +27,9 @@ namespace Cangjie::Interop::Java {
                 if (IsMirror(*decl)) {
                     if (auto cd = DynamicCast<ClassDecl*>(decl.get())) {
                         InsertMirrorVarProp(*cd, Attribute::JAVA_MIRROR);
+                    } else if (auto id = As<ASTKind::INTERFACE_DECL>(decl.get())) {
+                        RemoveAbstractAttributeForJavaHasDefaultMethods(*id);
+                        InsertJavaHasDefaultMethodStubs(*id, importManager, typeManager);
                     }
                 }
             }

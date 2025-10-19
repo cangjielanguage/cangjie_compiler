@@ -38,6 +38,7 @@ public:
     static bool IsObjCMirror(const AST::Ty& ty);
     static bool IsObjCPointer(const AST::Decl& decl);
     static bool IsObjCPointer(const AST::Ty& ty);
+
 private:
     InteropLibBridge& bridge;
     TypeManager& typeManager;

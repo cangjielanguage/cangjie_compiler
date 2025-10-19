@@ -27,7 +27,7 @@
 #include "cangjie/Modules/ModulesUtils.h"
 #include "cangjie/Sema/TestManager.h"
 #include "cangjie/Sema/TypeManager.h"
-#include "../NativeFFI/Java/AfterTypeCheck/Utils.h"
+#include "NativeFFI/Java/AfterTypeCheck/Utils.h"
 
 
 #include "Diags.h"
@@ -266,6 +266,20 @@ bool CompMemberSignatureByPosAndTy(Ptr<const MemberSignature> m1, Ptr<const Memb
     }
     return CompTyByNames(m1->ty, m2->ty);
 }
+
+/**
+ * precondition: instance methods must be merged
+ */
+void GenerateNativeFFIJavaMirrorSyntheticWrapper(
+    InheritableDecl& decl, const MemberMap& interfaceMembers, const MemberMap& instanceMembers)
+{
+    if (!Interop::Java::IsSynthetic(decl)) {
+        return;
+    }
+    auto cd = StaticCast<ClassDecl*>(&decl);
+    Interop::Java::GenerateSyntheticClassMemberStubs(*cd, interfaceMembers, instanceMembers);
+}
+
 } // namespace
 
 void TypeChecker::TypeCheckerImpl::CheckInheritance(Package& pkg)
@@ -316,7 +330,7 @@ void StructInheritanceChecker::Check()
     CheckInstDupFuncsInNominalDecls();
 }
 
-void StructInheritanceChecker::CheckMembersWithInheritedDecls(const InheritableDecl& decl)
+void StructInheritanceChecker::CheckMembersWithInheritedDecls(InheritableDecl& decl)
 {
     if (structInheritedMembers.count(&decl) > 0) {
         return;
@@ -332,6 +346,7 @@ void StructInheritanceChecker::CheckMembersWithInheritedDecls(const InheritableD
     for (auto& interface : interfaceMembers) {
         CheckExtendExportDependence(decl, interface.second, visibleExtendMembers);
     }
+    GenerateNativeFFIJavaMirrorSyntheticWrapper(decl, interfaceMembers, instanceMembers);
     // 1. Merge & check members inherited in from super class or extended type of extend decl first.
     for (auto& member : decl.GetMemberDecls()) {
         if (!Ty::IsTyCorrect(member->ty) || !member->outerDecl || member->TestAttr(Attribute::CONSTRUCTOR)) {

@@ -40,18 +40,19 @@ std::string NormalizeJavaSignature(const std::string& sig)
  */
 void GenerateSyntheticClassFuncStub(ClassDecl& synthetic, FuncDecl& fd)
 {
-    OwnedPtr<FuncDecl> abstractFdStub = ASTCloner::Clone(Ptr(&fd));
+    OwnedPtr<FuncDecl> funcStub = ASTCloner::Clone(Ptr(&fd));
+    funcStub->DisableAttr(Attribute::DEFAULT);
 
     // remove foreign anno from cloned func decl
-    for (auto it = abstractFdStub->annotations.begin(); it != abstractFdStub->annotations.end(); ++it) {
+    for (auto it = funcStub->annotations.begin(); it != funcStub->annotations.end(); ++it) {
         if ((*it)->kind == AnnotationKind::FOREIGN_NAME) {
-            abstractFdStub->annotations.erase(it);
+            funcStub->annotations.erase(it);
             break;
         }
     }
 
-    abstractFdStub->outerDecl = Ptr(&synthetic);
-    synthetic.body->decls.emplace_back(std::move(abstractFdStub));
+    funcStub->outerDecl = Ptr(&synthetic);
+    synthetic.body->decls.emplace_back(std::move(funcStub));
 }
 
 void GenerateSyntheticClassPropStub(ClassDecl& synthetic, PropDecl& fd)
@@ -64,9 +65,15 @@ void GenerateSyntheticClassPropStub(ClassDecl& synthetic, PropDecl& fd)
 void GenerateSyntheticClassAbstractMemberImplStubs(ClassDecl& synthetic, const MemberMap& members)
 {
     for (const auto& idMemberSignature : members) {
-        auto& signature = idMemberSignature.second;
+        const auto& signature = idMemberSignature.second;
 
-        if (!signature.decl->TestAttr(Attribute::ABSTRACT)) {
+        // only abstract functions must be inside synthetic class
+        if (!signature.decl->TestAnyAttr(Attribute::ABSTRACT)) {
+            continue;
+        }
+
+        // JObject already has implementation of java ref getter
+        if (Interop::Java::IsJavaRefGetter(*signature.decl)) {
             continue;
         }
 
@@ -186,7 +193,7 @@ Ptr<VarDecl> GetJavaRefField(ClassDecl& mirrorLike)
         return GetJavaRefField(*superClass);
     }
 
-    CJC_ASSERT(mirrorLike.TestAttr(Attribute::JAVA_MIRROR));
+    CJC_ASSERT(mirrorLike.TestAttr(  Attribute::JAVA_MIRROR));
     CJC_ASSERT(IsJObject(mirrorLike));
     CJC_ASSERT(mirrorLike.body);
 
@@ -239,7 +246,8 @@ Ptr<FuncDecl> GetJavaRefGetter(ClassLikeDecl& mirror)
 
 OwnedPtr<Expr> CreateJavaRefCall(ClassLikeDecl& mirrorLike, FuncDecl& javaRefGetter, Ptr<File> curFile)
 {
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
+    CJC_ASSERT(mirrorLike.TestAnyAttr(
+        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
     auto thisRef = CreateThisRef(&mirrorLike, mirrorLike.ty, curFile);
     return CreateJavaRefCall(std::move(thisRef), javaRefGetter);
 }
@@ -247,7 +255,8 @@ OwnedPtr<Expr> CreateJavaRefCall(ClassLikeDecl& mirrorLike, FuncDecl& javaRefGet
 OwnedPtr<Expr> CreateJavaRefCall(ClassLikeDecl& mirrorLike, VarDecl& javaref, Ptr<File> curFile)
 {
     CJC_ASSERT(mirrorLike.astKind == ASTKind::CLASS_DECL);
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
+    CJC_ASSERT(mirrorLike.TestAnyAttr(
+        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
     auto thisRef = CreateThisRef(&mirrorLike, mirrorLike.ty, curFile);
     return CreateJavaRefCall(std::move(thisRef), javaref);
 }
@@ -286,7 +295,8 @@ OwnedPtr<Expr> CreateJavaRefCall(OwnedPtr<Expr> expr, VarDecl& javaref)
 
 OwnedPtr<Expr> CreateJavaRefCall(OwnedPtr<Expr> expr, ClassLikeDecl& mirrorLike)
 {
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
+    CJC_ASSERT(mirrorLike.TestAnyAttr(
+        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
     if (auto mirrorLikeClass = As<ASTKind::CLASS_DECL>(&mirrorLike)) {
         return CreateJavaRefCall(std::move(expr), *GetJavaRefField(*mirrorLikeClass));
     }
@@ -824,7 +834,7 @@ OwnedPtr<Expr> CreateMirrorConstructorCall(
 
 bool IsSynthetic(const Node& node)
 {
-    return node.astKind == ASTKind::CLASS_DECL && node.TestAttr(Attribute::COMPILER_ADD);
+    return node.TestAttr(Attribute::JAVA_MIRROR_SYNTHETIC_WRAPPER);
 }
 
 OwnedPtr<Expr> Utils::CreateOptionMatch(

@@ -50,7 +50,7 @@ Ptr<Value> Translator::Visit(const AST::ExtendDecl& decl)
              *     }
              *   }
              * Note:
-             * The common declaration of `foo` should be skiped  because it is already covered by the
+             * The common declaration of `foo` should be skiped because it is already covered by the
              * platform-specific implementation. This ensures that the platform implementation is used, avoiding
              * redundancy.
              */

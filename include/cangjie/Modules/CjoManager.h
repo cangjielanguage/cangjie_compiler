@@ -60,6 +60,10 @@ public:
     std::string GetPackageDepInfo(const std::string& cjoPath) const;
 
     Ptr<AST::PackageDecl> GetPackageDecl(const std::string& fullPackageName) const;
+    /* Load files from common part to current package.
+     * This is required to correctly handle imports from common part.
+     */
+    void LoadFilesOfCommonPart(Ptr<AST::Package> pkg);
     std::optional<std::vector<std::string>> PreReadCommonPartCjoFiles();
     Ptr<ASTLoader> GetCommonPartCjo(std::string expectedName) const;
     Ptr<AST::Package> GetPackage(const std::string& fullPackageName) const;

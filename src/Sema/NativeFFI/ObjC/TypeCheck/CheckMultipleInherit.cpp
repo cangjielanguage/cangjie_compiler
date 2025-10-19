@@ -18,7 +18,8 @@ using namespace Cangjie::Interop::ObjC;
 void CheckMultipleInherit::HandleImpl(TypeCheckContext& ctx)
 {
     auto superTypesCount = 0;
-    for (auto& parent : ctx.target.inheritedTypes) {
+    auto& inheritableDecl = dynamic_cast<InheritableDecl&>(ctx.target);
+    for (auto& parent : inheritableDecl.inheritedTypes) {
         if (parent->ty && parent->ty->IsObject()) {
             continue;
         }
@@ -26,7 +27,7 @@ void CheckMultipleInherit::HandleImpl(TypeCheckContext& ctx)
         superTypesCount++;
         if (superTypesCount > 1) {
             ctx.diag.DiagnoseRefactor(DiagKindRefactor::sema_objc_mirror_subtype_cannot_multiple_inherit, *parent);
-            ctx.target.EnableAttr(Attribute::IS_BROKEN);
+            inheritableDecl.EnableAttr(Attribute::IS_BROKEN);
             return;
         }
     }

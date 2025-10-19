@@ -1010,7 +1010,7 @@ std::set<Ptr<AST::Ty>> GetGenericParamsForCall(const AST::CallExpr& ce, const AS
     return ret;
 }
 
-std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(InheritableDecl& decl, TypeManager& typeManager,
+std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(const InheritableDecl& decl, TypeManager& typeManager,
     std::vector<OwnedPtr<Expr>>& valueArgs, const std::vector<Ptr<Ty>> instTys)
 {
     std::vector<Ptr<Ty>> valueParamTys;
@@ -1020,7 +1020,7 @@ std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(InheritableDecl& d
     return FindInitDecl(decl, typeManager, valueParamTys, instTys);
 }
 
-std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(InheritableDecl& decl, TypeManager& typeManager,
+std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(const InheritableDecl& decl, TypeManager& typeManager,
     const std::vector<Ptr<Ty>> valueParamTys, const std::vector<Ptr<Ty>> instTys)
 {
     auto initFuncDecl = GetMemberDecl<FuncDecl>(decl, "init", valueParamTys, typeManager);
@@ -1057,7 +1057,7 @@ OwnedPtr<CallExpr> CreateInitCall(const std::pair<Ptr<FuncDecl>, Ptr<Ty>> initDe
 }
 
 OwnedPtr<ThrowExpr> CreateThrowException(
-    ClassDecl& exceptionDecl, std::vector<OwnedPtr<Expr>> args, File& curFile, TypeManager& typeManager)
+    const ClassDecl& exceptionDecl, std::vector<OwnedPtr<Expr>> args, File& curFile, TypeManager& typeManager)
 {
     auto throwExpr = MakeOwned<ThrowExpr>();
     throwExpr->expr = CreateInitCall(FindInitDecl(exceptionDecl, typeManager, args).value(), args, curFile);

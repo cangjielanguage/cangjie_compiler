@@ -32,6 +32,11 @@ void FindMirrors::HandleImpl(InteropContext& ctx)
                         !ctx.typeMapper.IsObjCMirror(*classDecl)))) {
                 ctx.impls.emplace_back(classDecl);
             }
+
+            if (auto funcDecl = As<ASTKind::FUNC_DECL>(decl);
+                funcDecl && ctx.typeMapper.IsObjCMirror(*funcDecl)) {
+                ctx.mirrorTopLevelFuncs.emplace_back(funcDecl);
+            }
         }
     }
 }

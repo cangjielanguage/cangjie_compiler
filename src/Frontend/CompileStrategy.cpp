@@ -54,7 +54,8 @@ bool CompileStrategy::ConditionCompile() const
 
 void CompileStrategy::DesugarAfterSema() const
 {
-    ci->typeChecker->PerformDesugarAfterSema(ci->GetSourcePackages());
+    auto packages = ci->GetSourcePackages();
+    ci->typeChecker->PerformDesugarAfterSema(packages);
 }
 
 bool CompileStrategy::OverflowStrategy() const
@@ -184,7 +185,7 @@ public:
 
     bool PreReadCommonPartCjo() const
     {
-        bool hasInputCHIR = s.ci->invocation.globalOptions.inputChirFiles.size() > 0;
+        bool hasInputCHIR = s.ci->invocation.globalOptions.IsCompilingCJMP();
         if (hasInputCHIR) {
             auto mbFilesFromCommonPart = s.ci->importManager.GetCjoManager()->PreReadCommonPartCjoFiles();
             if (!mbFilesFromCommonPart) {

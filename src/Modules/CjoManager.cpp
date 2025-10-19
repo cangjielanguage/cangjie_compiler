@@ -303,6 +303,18 @@ bool CjoManager::NeedCollectDependency(std::string curName, bool isCurMacro, std
     return false;
 }
 
+void CjoManager::LoadFilesOfCommonPart(Ptr<Package> pkg)
+{
+    if (!impl->GetGlobalOptions().IsCompilingCJMP()) {
+        return;
+    }
+    auto commonLoader = GetCommonPartCjo(pkg->fullPackageName);
+    if (!commonLoader) {
+        return;
+    }
+    commonLoader->PreloadCommonPartOfPackage(*pkg);
+}
+
 void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packages, bool fromLsp) const
 {
     // Add all directly imported package's loader.
@@ -324,20 +336,14 @@ void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packa
     std::vector<Ptr<ASTLoader>> loaders;
     // Load common part cjo
     for (auto pkg : packages) {
-        if (impl->GetGlobalOptions().inputChirFiles.size() > 0) {
+        if (impl->GetGlobalOptions().IsCompilingCJMP()) {
             std::string expectedPackageName = pkg->fullPackageName;
             auto commonLoader = GetCommonPartCjo(expectedPackageName);
             if (!commonLoader) {
                 continue;
             }
-            commonLoader->PreloadCommonPartOfPackage(*pkg);
             commonLoader->LoadPackageDecls();
             loaders.emplace_back(commonLoader);
-            for (auto commonDependencyName : commonLoader->GetDependentPackageNames()) {
-                if (NeedCollectDependency(expectedPackageName, pkg->isMacroPackage, commonDependencyName)) {
-                    q.push(impl->GetPackageInfo(commonDependencyName));
-                }
-            }
         }
     }
 
@@ -572,8 +578,9 @@ std::pair<std::string, std::string> CjoManager::GetPackageCjo(const AST::ImportS
     auto cjoPackageName = FileUtil::ToPackageName(cjoName);
     // Store importSpec with packageName.
     std::string possibleName = importSpec.content.GetImportedPackageName();
-    impl->AddImportedPackageName(&importSpec, std::make_pair(cjoPackageName,
-        cjoPackageName == possibleName && importSpec.content.kind != ImportKind::IMPORT_ALL));
+    impl->AddImportedPackageName(&importSpec,
+        std::make_pair(
+            cjoPackageName, cjoPackageName == possibleName && importSpec.content.kind != ImportKind::IMPORT_ALL));
     return {cjoPackageName, cjoPath};
 }
 

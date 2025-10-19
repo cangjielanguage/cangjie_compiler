@@ -1665,6 +1665,11 @@ std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& d
             auto impl = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_JavaImpl,
                 builder.CreateString(annotation->identifier.Val()), args);
                 annotations.emplace_back(impl);
+        }  else if (annotation->kind == AST::AnnotationKind::JAVA_HAS_DEFAULT) {
+            auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
+            auto javaHasDefault = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_JavaHasDefault,
+                builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(javaHasDefault);
         } else if (annotation->kind == AST::AnnotationKind::OBJ_C_MIRROR) {
             auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
             auto mirror = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_ObjCMirror,

@@ -57,6 +57,10 @@ public:
     {
         return &theCStringTy;
     }
+    static Ptr<AST::PrimitiveTy> GetBoolTy()
+    {
+        return GetPrimitiveTy(AST::TypeKind::TYPE_BOOLEAN);
+    }
     /**
      * Check if there are generic types in ty.
      */
@@ -271,6 +275,7 @@ public:
      * whether the decl is override the funcDecl.
      */
     bool IsFuncDeclSubType(const AST::FuncDecl& decl, const AST::FuncDecl& funcDecl);
+    bool IsFuncTySubType(const AST::FuncTy& type1, const AST::FuncTy& type2);
 
     bool IsFuncDeclEqualType(const AST::FuncDecl& decl, const AST::FuncDecl& funcDecl);
 

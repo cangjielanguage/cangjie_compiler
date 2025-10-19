@@ -505,6 +505,7 @@ enum class AnnotationKind {
     C,
     JAVA_MIRROR,
     JAVA_IMPL,
+    JAVA_HAS_DEFAULT,
     OBJ_C_MIRROR,
     OBJ_C_IMPL,
     FOREIGN_NAME,

@@ -26,9 +26,14 @@ void OCFFIParserImpl::DiagObjCMirrorCannotHaveFinalizer(const Node& node) const
     p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_cannot_have_finalizer, node);
 }
 
-void OCFFIParserImpl::DiagObjCMirrorMemberMustHaveForeignName(const Node& node) const
+void OCFFIParserImpl::DiagObjCMirrorMethodMustHaveForeignName(const Node& node) const
 {
-    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_member_must_have_foreign_name, node);
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_method_must_have_foreign_name, node);
+}
+
+void OCFFIParserImpl::DiagObjCMirrorCtorMustHaveForeignName(const Node& node) const
+{
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_ctor_must_have_foreign_name, node);
 }
 
 void OCFFIParserImpl::DiagObjCMirrorCannotHavePrivateMember(const Node& node) const
@@ -89,4 +94,39 @@ void OCFFIParserImpl::DiagObjCImplCannotBeSealed(const Node& node) const
 void OCFFIParserImpl::DiagObjCImplCannotHaveStaticInit(const Node& node) const
 {
     p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_impl_cannot_have_static_init, node);
+}
+
+void OCFFIParserImpl::DiagObjCMirrorFuncCannotBeForeign(const FuncDecl& decl) const
+{
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_func_cannot_be_foreign, decl, decl.identifier.Val());
+}
+
+void OCFFIParserImpl::DiagObjCMirrorFuncCannotBeC(const FuncDecl& decl) const
+{
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_func_cannot_be_c, decl, decl.identifier.Val());
+}
+
+void OCFFIParserImpl::DiagObjCMirrorFuncCannotBeGeneric(const FuncDecl& decl) const
+{
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_func_cannot_be_generic, decl, decl.identifier.Val());
+}
+
+void OCFFIParserImpl::DiagObjCMirrorFuncCannotHaveBody(const FuncDecl& decl) const
+{
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_func_cannot_have_body, decl, decl.identifier.Val());
+}
+
+void OCFFIParserImpl::DiagObjCMirrorFuncMustHaveExplicitType(const FuncDecl& decl) const
+{
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_func_must_have_explicit_type, decl, decl.identifier.Val());
+}
+
+void OCFFIParserImpl::DiagObjCMirrorFuncCannotBeConst(const FuncDecl& decl) const
+{
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_func_cannot_be_const, decl, decl.identifier.Val());
+}
+
+void OCFFIParserImpl::DiagObjCMirrorFuncMustBeTopLevel(const FuncDecl& decl) const
+{
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_func_must_be_top_level, decl, decl.identifier.Val());
 }

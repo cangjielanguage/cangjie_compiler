@@ -67,7 +67,6 @@ void DesugarImpls::DesugarMethod(
 void DesugarImpls::DesugarCtor([[maybe_unused]] InteropContext& ctx, [[maybe_unused]] ClassDecl& impl, FuncDecl& ctor)
 {
     if (!ctx.factory.IsGeneratedCtor(ctor)) {
-        // Call this([[ImplCls alloc] init])
         ctor.funcBody->body = CreateBlock(Nodes(ctx.factory.CreateThrowUnreachableCodeExpr(*ctor.curFile)),
             TypeManager::GetPrimitiveTy(TypeKind::TYPE_NOTHING));
 

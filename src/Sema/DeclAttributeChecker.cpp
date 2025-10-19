@@ -336,11 +336,11 @@ void DeclAttributeChecker::CheckAttributesForPropAndFuncDeclInClass(const ClassD
     //  1. member decl is static and not foreign;
     //  2. class decl is not abstract and not foreign;
     //  3. member decl can not be modified with 'open' in a non-inheritable object.
-    //  4. member decl is not in a mirror
+    //  4. member decl is not in a obj c mirror
     bool invalidAbstract = member.TestAttr(Attribute::ABSTRACT) &&
         ((member.TestAttr(Attribute::STATIC) && !member.TestAttr(Attribute::FOREIGN)) ||
             (!cd.TestAttr(Attribute::ABSTRACT) && !cd.TestAttr(Attribute::FOREIGN)))
-            && !member.TestAttr(Attribute::JAVA_MIRROR) && !cd.TestAttr(Attribute::OBJ_C_MIRROR);
+            && !cd.TestAttr(Attribute::OBJ_C_MIRROR);
     if (invalidAbstract && !member.TestAttr(Attribute::COMMON_WITH_DEFAULT)) {
         diag.Diagnose(member, DiagKind::sema_missing_func_body, type, member.identifier.Val());
     }

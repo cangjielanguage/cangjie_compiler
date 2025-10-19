@@ -26,18 +26,20 @@ public:
     ~JFFIParserImpl() = default;
 
     void CheckAnnotation(const Annotation& anno) const;
-    void CheckMirrorSignature(AST::ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const;
-    void CheckImplSignature(AST::ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const;
+    void CheckMirrorSignature(ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const;
+    void CheckImplSignature(ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const;
+    void CheckJavaHasDefaultAnnotation(const Annotation& anno) const;
+    bool IsAbstractFunction(const FuncDecl& fd, const Decl& outerDecl) const;
 
-    void DiagJavaMirrorCannotHaveFinalizer(const AST::Node& node) const;
-    void DiagJavaMirrorCannotHavePrivateMember(const AST::Node& node) const;
-    void DiagJavaMirrorCannotHaveStaticInit(const AST::Node& node) const;
-    void DiagJavaMirrorCannotHaveConstMember(const AST::Node& node) const;
-    void DiagJavaImplCannotBeGeneric(const AST::Node& node) const;
-    void DiagJavaImplCannotBeAbstract(const AST::Node& node) const;
-    void DiagJavaImplCannotBeSealed(const AST::Node& node) const;
-    void DiagJavaMirrorCannotBeSealed(const AST::Node& node) const;
-    void DiagJavaImplCannotHaveStaticInit(const AST::Node& node) const;
+    void DiagJavaMirrorCannotHaveFinalizer(const Node& node) const;
+    void DiagJavaMirrorCannotHavePrivateMember(const Node& node) const;
+    void DiagJavaMirrorCannotHaveStaticInit(const Node& node) const;
+    void DiagJavaMirrorCannotHaveConstMember(const Node& node) const;
+    void DiagJavaImplCannotBeGeneric(const Node& node) const;
+    void DiagJavaImplCannotBeAbstract(const Node& node) const;
+    void DiagJavaImplCannotBeSealed(const Node& node) const;
+    void DiagJavaMirrorCannotBeSealed(const Node& node) const;
+    void DiagJavaImplCannotHaveStaticInit(const Node& node) const;
 
 private:
     void CheckMirrorAnnoArgs(const Annotation& anno) const;
@@ -47,7 +49,7 @@ private:
     void CheckImplAnnoTarget(const Annotation& anno) const;
 
     // Diag report
-    void DiagOuterDeclMissMatch(const AST::Node& node,
+    void DiagOuterDeclMissMatch(const Node& node,
         const std::string& p0, const std::string& p1, const std::string& p2, const std::string& p3) const;
 private:
     ParserImpl& p;

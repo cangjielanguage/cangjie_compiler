@@ -274,6 +274,7 @@ std::vector<OwnedPtr<ImportSpec>> ASTLoader::ASTLoaderImpl::LoadImportSpecs(cons
         importSpec->end = LoadPos(end);
 
         importSpec->EnableAttr(Attribute::IMPORTED);
+        importSpec->EnableAttr(Attribute::FROM_COMMON_PART);
         // This is WA to pass checks, because attributes do not deserialized for ImportSpec
         bool compilerAdded = rawImportSpec->end()->line() == 0;
         if (compilerAdded) {
@@ -626,6 +627,8 @@ OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageForma
         annotation->kind = AnnotationKind::JAVA_MIRROR;
     } else if (rawAnno.kind() == PackageFormat::AnnoKind_JavaImpl) {
         annotation->kind = AnnotationKind::JAVA_IMPL;
+    } else if (rawAnno.kind() == PackageFormat::AnnoKind_JavaHasDefault) {
+        annotation->kind = AnnotationKind::JAVA_HAS_DEFAULT;
     } else if (rawAnno.kind() == PackageFormat::AnnoKind_ObjCMirror) {
         annotation->kind = AnnotationKind::OBJ_C_MIRROR;
     } else if (rawAnno.kind() == PackageFormat::AnnoKind_ObjCImpl) {

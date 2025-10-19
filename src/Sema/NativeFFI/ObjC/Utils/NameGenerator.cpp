@@ -41,7 +41,7 @@ std::string NameGenerator::GenerateInitCjObjectName(const FuncDecl& target)
     return WRAPPER_PREFIX + name;
 }
 
-std::string NameGenerator::GenerateDeleteCjObjectName(const ClassDecl& target)
+std::string NameGenerator::GenerateDeleteCjObjectName(const Decl& target)
 {
     auto name = GetObjCFullDeclName(target);
     std::replace(name.begin(), name.end(), '.', '_');
@@ -142,6 +142,53 @@ std::string NameGenerator::GetObjCDeclName(const Decl& target)
     }
 
     return target.identifier;
+}
+
+std::vector<std::string> NameGenerator::GetObjCDeclSelectorComponents(const FuncDecl& target)
+{
+    auto fullName = GetObjCDeclName(target);
+    std::vector<std::string> result;
+    size_t pos = 0;
+    // split fullName by ':', excluding ':'
+    while (pos != std::string::npos && pos < fullName.size()) {
+        auto newPos = fullName.find_first_of(':', pos);
+        if (newPos == std::string::npos) {
+            result.push_back(fullName.substr(pos));
+            break;
+        }
+        result.push_back(fullName.substr(pos, newPos - pos));
+        newPos++;
+        pos = newPos;
+    }
+    size_t actualArgumentSize = 0;
+    for (auto&& paramList : target.funcBody->paramLists) {
+        actualArgumentSize += paramList->params.size();
+    }
+    // the normal situation: @ForeignName is exactly suited for the task
+    if ((actualArgumentSize == 0 && result.size() == 1) || actualArgumentSize == result.size()) {
+        return result;
+    }
+    // too many components, trim them to be compatible. It can happen with excess : symbols
+    while (actualArgumentSize < result.size()) {
+        result.pop_back();
+    }
+    // too few components, use argument names
+    if (actualArgumentSize > result.size()) {
+        // we actually want to add last argument to names to the end
+        // of the result, not first ones
+        std::vector<std::string> namedTail;
+        auto&& paramLists = target.funcBody->paramLists;
+        for (auto plIt = std::rbegin(paramLists); plIt != std::rend(paramLists); ++plIt) {
+            for (auto pIt = std::rbegin((*plIt)->params); pIt != std::rend((*plIt)->params); ++pIt) {
+                namedTail.push_back((*pIt)->identifier.Val());
+                if (namedTail.size() + result.size() == actualArgumentSize) {
+                    result.insert(std::end(result), std::rbegin(namedTail), std::rend(namedTail));
+                    return result;
+                }
+            }
+        }
+    }
+    return result;
 }
 
 std::string NameGenerator::GetObjCFullDeclName(const Decl& target)

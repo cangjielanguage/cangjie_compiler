@@ -797,6 +797,11 @@ bool IsCJMapping(const Decl& decl)
     return decl.TestAttr(Attribute::JAVA_CJ_MAPPING);
 }
 
+bool IsObject(const Decl& decl)
+{
+    return decl.ty->IsObject();
+}
+
 /**
  * public func $getJavaRef(): Java_CFFI_JavaEntity {
  *     return Java_CFFI_JavaEntity()
@@ -857,7 +862,7 @@ void InsertSyntheticClassDecl(ClassLikeDecl& decl, File& file)
         synthetic->EnableAttr(Attribute::PRIVATE);
     }
     synthetic->EnableAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE,
-        Attribute::COMPILER_ADD, Attribute::ABSTRACT);
+        Attribute::JAVA_MIRROR_SYNTHETIC_WRAPPER, Attribute::COMPILER_ADD, Attribute::ABSTRACT);
     synthetic->identifier = GetSyntheticNameFromClassLike(decl);
     synthetic->identifier.SetPos(decl.identifier.Begin(), decl.identifier.End());
 

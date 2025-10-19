@@ -369,7 +369,7 @@ void TestEntryConstructor::ConstructTestImports(AST::Package& pkg, TestModule& m
     }
 }
 
-void TestEntryConstructor::ConstructTestEntry(AST::Package& pkg, TestModule& module)
+void TestEntryConstructor::ConstructTestEntry(AST::Package& pkg, TestModule& module, bool mockEnabled)
 {
     // Construct test_entry function.
     auto entryFunc = MakeOwnedNode<FuncDecl>();
@@ -396,13 +396,18 @@ void TestEntryConstructor::ConstructTestEntry(AST::Package& pkg, TestModule& mod
     // 1. declare testsuite creation.
     auto pk = CreateSuiteVarDecl("testPkg", packageName, "TestPackage");
     entryFunc->funcBody->body->body.emplace_back(std::move(pk));
-    // 2. call add for each testcase decl.
+    // 2. enable mock optimization for benchmarks if needed
+    if (mockEnabled) {
+        entryFunc->funcBody->body->body.emplace_back(
+            CreateCallExpr(CreateMemberAccess(CreateRefExpr("testPkg"), "enableOptimizedMockForBench"), {}));
+    }
+    // 3. call add for each testcase decl.
     for (auto& testPackage : module.testPackages) {
         for (auto& it : testPackage->testRegisterFunctions) {
             entryFunc->funcBody->body->body.emplace_back(CreateMethodCall("testPkg", it, {}));
         }
     }
-    // 3. call testsuite execution, print result.
+    // 4. call testsuite execution, print result.
     auto fa = MakeOwnedNode<FuncArg>();
     fa->expr = CreateRefExpr("testPkg");
     std::vector<OwnedPtr<FuncArg>> args;
@@ -428,7 +433,7 @@ void TestEntryConstructor::ConstructTestEntry(AST::Package& pkg, TestModule& mod
     auto ifExpr = CreateIfExpr(std::move(binaryExpr), std::move(thenExprBlock));
     ifExpr->hasElse = false;
     entryFunc->funcBody->body->body.emplace_back(std::move(ifExpr));
-    // 4. Create result return, return 0.
+    // 5. Create result return, return 0.
     auto retExpr = MakeOwnedNode<ReturnExpr>();
     auto litExpr = MakeOwnedNode<LitConstExpr>();
     litExpr->kind = LitConstKind::INTEGER;
@@ -441,7 +446,7 @@ void TestEntryConstructor::ConstructTestEntry(AST::Package& pkg, TestModule& mod
 
 void TestEntryConstructor::ConstructTestSuite(const std::string& moduleName,
     std::vector<OwnedPtr<Package>>& srcPkgs, const std::vector<Ptr<PackageDecl>> importedPkgs,
-    bool compileTestsOnly)
+    bool compileTestsOnly, bool mockEnabled)
 {
     auto currentPkg = srcPkgs.back().get();
     auto importedMainPartPkgForTestPkg =
@@ -464,7 +469,7 @@ void TestEntryConstructor::ConstructTestSuite(const std::string& moduleName,
         return;
     }
     ConstructTestImports(*srcPkgs[0], testMod);
-    ConstructTestEntry(*srcPkgs[0], testMod);
+    ConstructTestEntry(*srcPkgs[0], testMod, mockEnabled);
 }
 
 Ptr<Package> TestEntryConstructor::FindMainPartPkgForTestPkg(

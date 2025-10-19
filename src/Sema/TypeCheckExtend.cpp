@@ -25,7 +25,9 @@ using namespace AST;
 
 void TypeChecker::TypeCheckerImpl::CheckExtendGenerics(const ExtendDecl& ed)
 {
-    if (!ed.generic || !Ty::IsTyCorrect(ed.extendedType->ty) || !ed.extendedType->ty->IsExtendable()) {
+    bool isMovedCommonED = !ed.TestAttr(Attribute::IMPORTED) && ed.TestAttr(Attribute::FROM_COMMON_PART) &&
+        ed.TestAttr(Attribute::COMMON);
+    if (!ed.generic || !Ty::IsTyCorrect(ed.extendedType->ty) || !ed.extendedType->ty->IsExtendable() || isMovedCommonED) {
         return;
     }
     auto usedGenericTys = GetAllGenericTys(ed.extendedType->ty);
@@ -402,6 +404,9 @@ void TypeChecker::TypeCheckerImpl::BuildExtendMap(ASTContext& ctx)
             PreCheckExtend(ctx, *ed);
         }
     }
+    // The matching of `common/platform extend` depends on the resolved symbol type.
+    // Here is the first step after resolving the final symbol type, and also the first step in processing extendDecl.
+    mpImpl->PrepareTypeCheck4CJMPExtension(*ci, scopeManager, ctx, allExtends);
     UpdateExtendMap(typeManager, allExtends);
 }
 

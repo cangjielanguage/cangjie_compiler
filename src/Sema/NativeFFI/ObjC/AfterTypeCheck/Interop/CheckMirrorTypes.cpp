@@ -28,4 +28,12 @@ void CheckMirrorTypes::HandleImpl(InteropContext& ctx)
 
         checker.Handle(typeCheckCtx);
     }
+
+    auto funcChecker = HandlerFactory<TypeCheckContext>::Start<CheckTopLevelFuncTypes>();
+
+    for (auto& mirror : ctx.mirrorTopLevelFuncs) {
+        auto typeCheckCtx = TypeCheckContext(*mirror, ctx.diag, ctx.typeMapper);
+
+        funcChecker.Handle(typeCheckCtx);
+    }
 }

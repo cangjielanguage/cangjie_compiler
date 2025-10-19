@@ -243,6 +243,9 @@ bool CheckUnusedImportImpl::IsImportContentUsed(ImportSpec& importSpec)
 void CheckUnusedImportImpl::ReportUnusedImports()
 {
     for (auto& importSpec : needCheckImport) {
+        if (importSpec->TestAttr(Attribute::IMPORTED) && importSpec->TestAttr(Attribute::FROM_COMMON_PART)) {
+            continue;
+        }
         if (IsImportContentUsed(*importSpec)) {
             continue;
         }

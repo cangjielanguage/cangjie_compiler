@@ -271,13 +271,13 @@ std::set<Ptr<AST::Ty>> GetGenericParamsForTy(const AST::Ty& ty);
 std::set<Ptr<AST::Ty>> GetGenericParamsForCall(const AST::CallExpr& ce, const AST::FuncDecl& fd);
 
 OwnedPtr<AST::ThrowExpr> CreateThrowException(
-    AST::ClassDecl& exceptionDecl, std::vector<OwnedPtr<AST::Expr>> args,
+    const AST::ClassDecl& exceptionDecl, std::vector<OwnedPtr<AST::Expr>> args,
     AST::File& curFile, TypeManager& typeManager);
 std::optional<std::pair<Ptr<AST::FuncDecl>, Ptr<AST::Ty>>> FindInitDecl(
-    AST::InheritableDecl& decl, TypeManager& typeManager,
+    const AST::InheritableDecl& decl, TypeManager& typeManager,
     std::vector<OwnedPtr<AST::Expr>>& valueArgs, const std::vector<Ptr<AST::Ty>> instTys = {});
 std::optional<std::pair<Ptr<AST::FuncDecl>, Ptr<AST::Ty>>> FindInitDecl(
-    AST::InheritableDecl& decl, TypeManager& typeManager,
+    const AST::InheritableDecl& decl, TypeManager& typeManager,
     const std::vector<Ptr<AST::Ty>> valueParamTys, const std::vector<Ptr<AST::Ty>> instTys = {});
 OwnedPtr<AST::CallExpr> CreateInitCall(
     const std::pair<Ptr<AST::FuncDecl>, Ptr<AST::Ty>> initDeclInfo,
@@ -304,7 +304,7 @@ static bool const IS_GENERIC_INSTANTIATION_ENABLED =
 #endif
 
 template <typename T> T* GetMemberDecl(
-    AST::Decl& decl, const std::string& identifier, std::vector<Ptr<AST::Ty>> paramTys, TypeManager& typeManager)
+    const AST::Decl& decl, const std::string& identifier, std::vector<Ptr<AST::Ty>> paramTys, TypeManager& typeManager)
 {
     for (auto& member : decl.GetMemberDecls()) {
         if (member->identifier != identifier) {

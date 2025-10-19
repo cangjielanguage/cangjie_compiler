@@ -11,6 +11,7 @@
  */
 
 #include "ASTFactory.h"
+#include "Desugar/AfterTypeCheck.h"
 #include "NativeFFI/ObjC/Utils/Common.h"
 #include "NativeFFI/Utils.h"
 #include "TypeCheckUtil.h"
@@ -19,6 +20,7 @@
 #include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/SafePointer.h"
+#include "cangjie/AST/ASTCasting.h"
 
 using namespace Cangjie::AST;
 using namespace Cangjie::TypeCheckUtil;
@@ -63,7 +65,10 @@ OwnedPtr<Expr> ASTFactory::UnwrapEntity(OwnedPtr<Expr> expr)
     }
 
     if (expr->ty->IsCoreOptionType()) {
-        CJC_ABORT(); // Option type is not supported
+        auto innerTy = expr->ty->typeArgs[0];
+        if (typeMapper.IsValidObjCMirror(*innerTy) || typeMapper.IsObjCImpl(*innerTy)) {
+            return UnwrapObjCMirrorOption(std::move(expr), innerTy);
+        }
     }
     if (typeMapper.IsObjCPointer(*expr->ty)) {
         CJC_ASSERT(expr->ty->typeArgs.size() == 1);
@@ -76,7 +81,7 @@ OwnedPtr<Expr> ASTFactory::UnwrapEntity(OwnedPtr<Expr> expr)
         );
     }
 
-    CJC_ASSERT(expr->ty->IsPrimitive());
+    CJC_ASSERT(expr->ty->IsPrimitive() || Ty::IsCStructType(*expr->ty));
     return expr;
 }
 
@@ -117,12 +122,244 @@ OwnedPtr<Expr> ASTFactory::WrapEntity(OwnedPtr<Expr> expr, Ty& wrapTy)
     }
 
     if (wrapTy.IsCoreOptionType()) {
-        CJC_ABORT(); // Option type is not supported
+        if (auto classALTy = DynamicCast<ClassLikeTy>(wrapTy.typeArgs[0])) {
+            if (auto decl = classALTy->commonDecl;
+                decl && decl->TestAnyAttr(Attribute::OBJ_C_MIRROR, Attribute::OBJ_C_MIRROR_SUBTYPE)) {
+                    return WrapObjCMirrorOption(expr, decl, expr->curFile);
+            }
+        }
     }
 
-    CJC_ASSERT(expr->ty->IsPrimitive());
-    CJC_ASSERT(wrapTy.IsPrimitive());
+    CJC_ASSERT(expr->ty->IsPrimitive() || Ty::IsCStructType(*expr->ty));
+    CJC_ASSERT(wrapTy.IsPrimitive() || Ty::IsCStructType(wrapTy));
     return expr;
+}
+
+// OptionType
+Ptr<Ty> ASTFactory::GetOptionTy(Ptr<Ty> ty)
+{
+    return typeManager.GetEnumTy(*GetOptionDecl(), {ty});
+}
+
+Ptr<EnumDecl> ASTFactory::GetOptionDecl()
+{
+    static auto decl = importManager.GetCoreDecl<EnumDecl>(STD_LIB_OPTION);
+    return decl;
+}
+
+Ptr<Decl> ASTFactory::GetOptionSomeDecl()
+{
+    static auto someDecl = Sema::Desugar::AfterTypeCheck::LookupEnumMember(GetOptionDecl(), OPTION_VALUE_CTOR);
+    return someDecl;
+}
+
+Ptr<Decl> ASTFactory::GetOptionNoneDecl()
+{
+    static auto noneDecl = Sema::Desugar::AfterTypeCheck::LookupEnumMember(GetOptionDecl(), OPTION_NONE_CTOR);
+    return noneDecl;
+}
+
+OwnedPtr<Expr> ASTFactory::CreateOptionSomeRef(Ptr<Ty> ty)
+{
+    auto someDeclRef = CreateRefExpr(*GetOptionSomeDecl());
+    auto optionActualTy = GetOptionTy(ty);
+    someDeclRef->ty = typeManager.GetFunctionTy({ty}, optionActualTy);
+    return someDeclRef;
+}
+
+OwnedPtr<Expr> ASTFactory::CreateOptionNoneRef(Ptr<Ty> ty)
+{
+    auto noneDeclRef = CreateRefExpr(*GetOptionNoneDecl());
+    auto optionActualTy = GetOptionTy(ty);
+    noneDeclRef->ty = optionActualTy;
+    return noneDeclRef;
+}
+
+OwnedPtr<Expr> ASTFactory::CreateOptionSomeCall(OwnedPtr<Expr> expr, Ptr<Ty> ty)
+{
+    std::vector<OwnedPtr<FuncArg>> someDeclCallArgs {};
+    someDeclCallArgs.emplace_back(CreateFuncArg(std::move(expr)));
+    auto someDeclCall = CreateCallExpr(CreateOptionSomeRef(ty), std::move(someDeclCallArgs));
+    someDeclCall->ty = GetOptionTy(ty);
+    someDeclCall->resolvedFunction = As<ASTKind::FUNC_DECL>(GetOptionSomeDecl());
+    someDeclCall->callKind = CallKind::CALL_DECLARED_FUNCTION;
+    return someDeclCall;
+}
+
+OwnedPtr<Expr> ASTFactory::CreateOptionMatch(
+    OwnedPtr<Expr> selector,
+    std::function<OwnedPtr<Expr>(VarDecl&)> someBranch,
+    std::function<OwnedPtr<Expr>()> noneBranch,
+    Ptr<Ty> ty)
+{
+    auto curFile = selector->curFile;
+    CJC_NULLPTR_CHECK(curFile);
+
+    auto& optTy = *selector->ty;
+    CJC_ASSERT(optTy.IsCoreOptionType());
+    auto optArgTy = optTy.typeArgs[0];
+
+    auto vp = CreateVarPattern(Cangjie::V_COMPILER, optArgTy);
+    vp->curFile = curFile;
+    vp->varDecl->curFile = curFile;
+    auto& someArgVar = *vp->varDecl;
+
+    auto somePattern = MakeOwnedNode<EnumPattern>();
+    somePattern->ty = selector->ty;
+    somePattern->constructor = CreateOptionSomeRef(optArgTy);
+    somePattern->patterns.emplace_back(std::move(vp));
+    somePattern->curFile = curFile;
+    auto caseSome = CreateMatchCase(std::move(somePattern), someBranch(someArgVar));
+
+    auto nonePattern = MakeOwnedNode<EnumPattern>();
+    nonePattern->constructor = CreateOptionNoneRef(optArgTy);
+    nonePattern->ty = nonePattern->constructor->ty;
+    nonePattern->curFile = curFile;
+    auto caseNone = CreateMatchCase(std::move(nonePattern), noneBranch());
+
+    return WithinFile(CreateMatchExpr(
+        std::move(selector),
+        Nodes<MatchCase>(std::move(caseSome), std::move(caseNone)), ty), curFile);
+}
+
+
+Ptr<Ty> ASTFactory::GetObjCTy()
+{
+    return typeManager.GetPointerTy(typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
+}
+
+OwnedPtr<Expr> ASTFactory::CreateObjCobjectNull()
+{
+    auto pointerExpr = MakeOwnedNode<PointerExpr>();
+    pointerExpr->type = MakeOwnedNode<Type>();
+    pointerExpr->type->ty = GetObjCTy();
+    pointerExpr->ty = pointerExpr->type->ty;
+    return pointerExpr;
+}
+
+/*
+    UNWRAP [OPTION -> HANDLE]
+    match(entity) {
+        None -> CPointer()
+        Some(t) -> Unwrap(t)
+    }
+*/
+OwnedPtr<Expr> ASTFactory::UnwrapObjCMirrorOption(
+    OwnedPtr<Expr> entity, Ptr<Ty> ty)
+{
+    auto curFile = entity->curFile;
+    CJC_NULLPTR_CHECK(curFile);
+    auto actualTy = ty;
+    return CreateOptionMatch(std::move(entity),
+        [this, curFile](VarDecl& e) {
+            auto unwrapped = UnwrapEntity(WithinFile(CreateRefExpr(e), curFile));
+            return unwrapped;
+        },
+        [this]() {
+            // CPointer<Unit>()
+            return CreateObjCobjectNull();
+        }, typeMapper.Cj2CType(actualTy));
+}
+/*
+    WRAP [HADNLE -> OPTION]
+    match (handle.isNull) {
+        case false => Some(T(handle)) | Some(getFromRegistry(handle))
+        case true => None
+    }
+ */
+OwnedPtr<Expr> ASTFactory::WrapObjCMirrorOption(
+    const Ptr<Expr> entity, Ptr<ClassLikeDecl> mirror, const Ptr<File> curFile)
+{
+    //CJC_ASSERT(ty->IsCoreOptionType());
+    // auto curFile = entity->curFile;
+    // CJC_NULLPTR_CHECK(curFile);
+    //CJC_ASSERT(IsMirror(*decl) || IsImpl(*decl));
+    std::vector<OwnedPtr<Node>> nodes;
+    auto baseTy = typeManager.GetPointerTy(typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    auto tmpVar = CreateTmpVarDecl(CreateType(baseTy), entity);
+    CopyBasicInfo(tmpVar->initializer.get(), tmpVar.get());
+    tmpVar->begin = entity->begin;
+    tmpVar->curFile = curFile;
+    auto objcrefExpr = CreateRefExpr(*tmpVar);
+
+    auto castTy = mirror->ty;
+    // case true => None
+    OwnedPtr<Expr> trueBranch = CreateOptionNoneRef(castTy);
+    // case false => wrap($tmp, T)
+    OwnedPtr<Expr> falseBranch =  WrapEntity(std::move(objcrefExpr), *castTy);
+
+    auto isInstanceCall = WithinFile(CreateGetObjcEntityOrNullCall(*tmpVar, curFile), curFile);
+    auto boolMatch = CreateBoolMatch(
+        std::move(isInstanceCall), std::move(trueBranch), std::move(falseBranch), GetOptionTy(castTy));
+    nodes.push_back(std::move(tmpVar));
+    nodes.push_back(std::move(boolMatch));
+    return WrapReturningLambdaCall(typeManager, std::move(nodes));
+}
+
+// Mirror(handle)
+OwnedPtr<Expr> ASTFactory::CreateMirrorConstructorCall(OwnedPtr<Expr> entity, Ptr<Ty> mirrorTy)
+{
+    auto curFile = entity->curFile;
+    auto classLikeTy = DynamicCast<ClassLikeTy*>(mirrorTy.get());
+    if (!classLikeTy) {
+        return nullptr;
+    }
+    if (auto decl = classLikeTy->commonDecl; decl && decl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+        Ptr<FuncDecl> mirrorCtor;
+
+        if (decl->astKind == ASTKind::INTERFACE_DECL ||
+            (decl->astKind == ASTKind::CLASS_DECL && decl->TestAttr(Attribute::ABSTRACT))) {
+            CJC_ABORT();
+        } else if (decl->astKind == AST::ASTKind::CLASS_DECL) {
+            auto cld = As<ASTKind::CLASS_LIKE_DECL>(decl);
+            CJC_ASSERT(cld);
+            mirrorCtor = GetGeneratedMirrorCtor(*cld);
+        } else {
+            CJC_ABORT();
+        }
+
+        auto ctorCall = CreateCall(mirrorCtor, curFile, std::move(entity));
+        if (ctorCall) {
+            ctorCall->callKind = CallKind::CALL_OBJECT_CREATION;
+            ctorCall->ty = mirrorTy;
+        }
+        return ctorCall;
+    }
+    CJC_ABORT();
+    return nullptr;
+}
+
+// handle.$obj.isNull()
+// tmp = handle.$obj
+// return tmp.isNull()
+OwnedPtr<Expr> ASTFactory::CreateGetObjcEntityOrNullCall(VarDecl &entity, Ptr<File> file)
+{
+    // CPointer<Unit>()
+    auto baseTy = typeManager.GetPointerTy(typeManager.GetInvalidTy());
+    auto extendTy = typeManager.GetTyForExtendMap(*baseTy);
+    auto extends = typeManager.GetBuiltinTyExtends(*extendTy);
+    CJC_ASSERT(extends.size() != 0);
+    auto members = (extends.begin())->get();
+    Ptr<Decl> isNullMember;
+    for (auto m : members->GetMemberDeclPtrs()) {
+        if (m->identifier.GetRawText() == "isNull") {
+            isNullMember = m;
+            break;
+        }
+    }
+    CJC_ASSERT(isNullMember);
+
+    auto isNullAccessMa = CreateMemberAccess(CreateRefExpr(entity), *isNullMember);
+    auto isNullAccess = WithinFile(std::move(isNullAccessMa), file);
+    isNullAccess->ty = bridge.GetNativeObjCIdTy();
+    isNullAccess->begin = entity.begin;
+    isNullAccess->curFile = entity.curFile;
+
+    auto resultCall = CreateCallExpr(std::move(isNullAccess), {},
+        nullptr, typeManager.GetBoolTy(), CallKind::CALL_DECLARED_FUNCTION);
+    auto result = WithinFile(std::move(resultCall), file);
+    result->ty = typeManager.GetBoolTy();
+    return result;
 }
 
 OwnedPtr<VarDecl> ASTFactory::CreateNativeHandleField(ClassDecl& target)
@@ -140,6 +377,7 @@ OwnedPtr<VarDecl> ASTFactory::CreateNativeHandleField(ClassDecl& target)
 
 OwnedPtr<Expr> ASTFactory::CreateNativeHandleInit(FuncDecl& ctor)
 {
+    CJC_NULLPTR_CHECK(ctor.outerDecl);
     auto& impl = *As<ASTKind::CLASS_LIKE_DECL>(ctor.outerDecl);
     auto& implTy = *StaticCast<ClassLikeTy>(impl.ty);
     auto& param = *ctor.funcBody->paramLists[0]->params.back();
@@ -152,7 +390,7 @@ OwnedPtr<Expr> ASTFactory::CreateNativeHandleInit(FuncDecl& ctor)
     return nativeObjHandleAssignExpr;
 }
 
-OwnedPtr<FuncDecl> ASTFactory::CreateInitCjObject(const ClassDecl& target, FuncDecl& ctor)
+OwnedPtr<FuncDecl> ASTFactory::CreateInitCjObject(const Decl& target, FuncDecl& ctor, bool generateForOneWayMapping)
 {
     auto curFile = ctor.curFile;
     auto registryIdTy = bridge.GetRegistryIdTy();
@@ -163,7 +401,6 @@ OwnedPtr<FuncDecl> ASTFactory::CreateInitCjObject(const ClassDecl& target, FuncD
     std::transform(ctorParams.begin(), ctorParams.end(), std::back_inserter(wrapperParams), [this](auto& p) {
         return CreateFuncParam(p->identifier.GetRawText(), nullptr, nullptr, typeMapper.Cj2CType(p->ty));
     });
-    auto objParamRef = CreateRefExpr(*wrapperParams[0]);
 
     std::vector<Ptr<Ty>> wrapperParamTys;
     std::transform(
@@ -175,15 +412,19 @@ OwnedPtr<FuncDecl> ASTFactory::CreateInitCjObject(const ClassDecl& target, FuncD
     wrapperParamLists.emplace_back(std::move(wrapperParamList));
 
     std::vector<OwnedPtr<FuncArg>> ctorCallArgs;
-    ctorCallArgs.emplace_back(CreateFuncArg(std::move(objParamRef)));
-
-    // skip first param, as it is needed only for restore @ObjCImpl instance.
-    for (size_t argIdx = 1; argIdx < ctorParams.size(); ++argIdx) {
+    size_t argIdx = 0;
+    if (!generateForOneWayMapping) {
+        auto objParamRef = CreateRefExpr(*wrapperParams[0]);
+        ctorCallArgs.emplace_back(CreateFuncArg(std::move(objParamRef)));
+        // skip first param, as it is needed only for restore @ObjCImpl instance.
+        argIdx = 1;
+    }
+    while (argIdx < ctorParams.size()) {
         auto& wrapperParam = wrapperParams[argIdx];
-
         auto paramRef = WithinFile(CreateRefExpr(*wrapperParam), curFile);
         OwnedPtr<FuncArg> ctorCallArg = CreateFuncArg(WrapEntity(std::move(paramRef), *ctorParams[argIdx]->ty));
         ctorCallArgs.emplace_back(std::move(ctorCallArg));
+        ++argIdx;
     }
 
     auto ctorCall = CreateCallExpr(
@@ -196,6 +437,8 @@ OwnedPtr<FuncDecl> ASTFactory::CreateInitCjObject(const ClassDecl& target, FuncD
     auto wrapperName = nameGenerator.GenerateInitCjObjectName(ctor);
 
     auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), wrapperTy);
+    wrapper->moduleName = ctor.moduleName;
+    wrapper->fullPackageName = ctor.fullPackageName;
     wrapper->EnableAttr(Attribute::C, Attribute::GLOBAL, Attribute::PUBLIC, Attribute::NO_MANGLE);
     wrapper->funcBody->funcDecl = wrapper.get();
     PutDeclToFile(*wrapper, *ctor.curFile);
@@ -203,35 +446,39 @@ OwnedPtr<FuncDecl> ASTFactory::CreateInitCjObject(const ClassDecl& target, FuncD
     return wrapper;
 }
 
-OwnedPtr<FuncDecl> ASTFactory::CreateDeleteCjObject(ClassDecl& target)
+OwnedPtr<FuncDecl> ASTFactory::CreateDeleteCjObject(Decl& target, bool generateForOneWayMapping)
 {
     auto registryIdTy = bridge.GetRegistryIdTy();
-
     auto param = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
     auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
     auto paramRef = CreateRefExpr(*param);
+    auto paramRefTmp = paramRef.get();
 
     std::vector<Ptr<Ty>> funcParamTys;
     funcParamTys.emplace_back(param->ty);
     auto funcTy = typeManager.GetFunctionTy(std::move(funcParamTys), unitTy, {.isC = true});
 
+    auto removeFromRegistryCall = CreateRemoveFromRegistryCall(std::move(paramRef));
+
+    std::vector<OwnedPtr<Node>> funcNodes;
+    if (!generateForOneWayMapping) {
+        auto getFromRegistryCall = CreateGetFromRegistryByIdCall(
+            ASTCloner::Clone(paramRefTmp), CreateRefType(static_cast<InheritableDecl&>(target)));
+        auto objTmpVarDecl =
+            CreateTmpVarDecl(CreateRefType(static_cast<InheritableDecl&>(target)), std::move(getFromRegistryCall));
+        auto nativeHandleExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), NATIVE_HANDLE_IDENT);
+        auto releaseCall = CreateObjCRuntimeReleaseCall(std::move(nativeHandleExpr));
+
+        funcNodes.emplace_back(std::move(objTmpVarDecl));
+        funcNodes.emplace_back(std::move(removeFromRegistryCall));
+        funcNodes.emplace_back(std::move(releaseCall));
+    } else {
+        funcNodes.emplace_back(std::move(removeFromRegistryCall));
+    }
+
     std::vector<OwnedPtr<FuncParam>> funcParams;
     funcParams.emplace_back(std::move(param));
     auto paramList = CreateFuncParamList(std::move(funcParams));
-
-    std::vector<OwnedPtr<Node>> funcNodes;
-    auto getFromRegistryCall =
-        CreateGetFromRegistryByIdCall(ASTCloner::Clone(paramRef.get()), CreateRefType(target));
-    auto removeFromRegistryCall = CreateRemoveFromRegistryCall(std::move(paramRef));
-
-    auto objTmpVarDecl = CreateTmpVarDecl(CreateRefType(target), std::move(getFromRegistryCall));
-    auto nativeHandleExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), NATIVE_HANDLE_IDENT);
-    auto releaseCall = CreateObjCRuntimeReleaseCall(std::move(nativeHandleExpr));
-
-    funcNodes.emplace_back(std::move(objTmpVarDecl));
-    funcNodes.emplace_back(std::move(removeFromRegistryCall));
-    funcNodes.emplace_back(std::move(releaseCall));
-
     std::vector<OwnedPtr<FuncParamList>> paramLists;
     paramLists.emplace_back(std::move(paramList));
 
@@ -244,6 +491,8 @@ OwnedPtr<FuncDecl> ASTFactory::CreateDeleteCjObject(ClassDecl& target)
     auto funcName = nameGenerator.GenerateDeleteCjObjectName(target);
 
     auto ret = CreateFuncDecl(funcName, std::move(funcBody), funcTy);
+    ret->moduleName = target.moduleName;
+    ret->fullPackageName = target.fullPackageName;
     ret->EnableAttr(Attribute::C, Attribute::GLOBAL, Attribute::PUBLIC, Attribute::NO_MANGLE);
     ret->funcBody->funcDecl = ret.get();
     PutDeclToFile(*ret, *target.curFile);
@@ -253,47 +502,54 @@ OwnedPtr<FuncDecl> ASTFactory::CreateDeleteCjObject(ClassDecl& target)
 
 OwnedPtr<FuncDecl> ASTFactory::CreateMethodWrapper(FuncDecl& method)
 {
-    auto registryIdTy = bridge.GetRegistryIdTy();
-
-    auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
-    auto registryIdParamRef = CreateRefExpr(*registryIdParam);
-    auto outerDecl = StaticAs<ASTKind::CLASS_DECL>(method.outerDecl);
+    auto outerDecl = static_cast<InheritableDecl*>(method.outerDecl.get());
+    CJC_NULLPTR_CHECK(outerDecl);
 
     auto wrapperParamList = MakeOwned<FuncParamList>();
     auto& wrapperParams = wrapperParamList->params;
-    wrapperParams.emplace_back(std::move(registryIdParam));
+
+    OwnedPtr<VarDecl> objTmpVarDecl;
+    OwnedPtr<MemberAccess> methodExpr;
+    if (method.TestAttr(Attribute::STATIC)) {
+        methodExpr = CreateMemberAccess(WithinFile(CreateRefExpr(*method.outerDecl), method.curFile), method);
+    } else {
+        auto registryIdTy = bridge.GetRegistryIdTy();
+        auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
+        auto registryIdParamRef = CreateRefExpr(*registryIdParam);
+        wrapperParams.emplace_back(std::move(registryIdParam));
+        auto getFromRegistryCall =
+            CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
+        objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
+        methodExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), method);
+    }
 
     auto& originParams = method.funcBody->paramLists[0]->params;
     std::transform(originParams.begin(), originParams.end(), std::back_inserter(wrapperParams), [this](auto& p) {
         auto convertedParamTy = typeMapper.Cj2CType(p->ty);
-        return CreateFuncParam(p->identifier.GetRawText(), CreateType(convertedParamTy), nullptr, convertedParamTy);
+        return CreateFuncParam(p->identifier.GetRawText(),
+            CreateType(convertedParamTy), nullptr, convertedParamTy);
     });
 
     std::vector<Ptr<Ty>> wrapperParamTys;
     std::transform(
         wrapperParams.begin(), wrapperParams.end(), std::back_inserter(wrapperParamTys), [](auto& p) { return p->ty; });
 
-    auto wrapperTy =
-        typeManager.GetFunctionTy(wrapperParamTys, typeMapper.Cj2CType(method.funcBody->retType->ty), {.isC = true});
+    auto& retTy = method.funcBody->retType->ty;
+    auto retWrapperTy = typeManager.GetFunctionTy(wrapperParamTys, typeMapper.Cj2CType(retTy), {.isC = true});
 
     std::vector<OwnedPtr<FuncParamList>> wrapperParamLists;
     wrapperParamLists.emplace_back(std::move(wrapperParamList));
 
-    std::vector<OwnedPtr<Node>> wrapperNodes;
-    auto getFromRegistryCall =
-        CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
-
-    auto objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
-    auto methodExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), method);
     methodExpr->curFile = method.curFile;
     methodExpr->begin = method.GetBegin();
     methodExpr->end = method.GetEnd();
 
     std::vector<OwnedPtr<FuncArg>> methodArgs;
-    // skip first param, as it is needed only for restore @ObjCImpl instance.
-    for (size_t i = 1; i < wrapperParams.size(); ++i) {
+    // check if need to skip first param, as it is needed only for restore @ObjCImpl instance in non-static method.
+    size_t index = method.TestAttr(Attribute::STATIC) ? 0 : 1;
+    for (size_t i = index; i < wrapperParams.size(); ++i) {
         auto wrapperParam = wrapperParams[i].get();
-        auto originParam = originParams[i - 1].get();
+        auto originParam = originParams[i - index].get();
 
         auto paramRef = CreateRefExpr(*wrapperParam);
         auto wrappedParamRef = WrapEntity(std::move(paramRef), *originParam->ty);
@@ -304,15 +560,20 @@ OwnedPtr<FuncDecl> ASTFactory::CreateMethodWrapper(FuncDecl& method)
     auto methodCall = CreateCallExpr(std::move(methodExpr), std::move(methodArgs), Ptr(&method),
         method.funcBody->retType->ty, CallKind::CALL_DECLARED_FUNCTION);
 
-    wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    std::vector<OwnedPtr<Node>> wrapperNodes;
+    if (!method.TestAttr(Attribute::STATIC)) {
+        wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    }
     wrapperNodes.emplace_back(UnwrapEntity(std::move(methodCall)));
 
-    auto wrapperBody = CreateFuncBody(std::move(wrapperParamLists), CreateType(wrapperTy->retTy),
-        CreateBlock(std::move(wrapperNodes), wrapperTy->retTy), wrapperTy);
+    auto wrapperBody = CreateFuncBody(std::move(wrapperParamLists), CreateType(retWrapperTy->retTy),
+        CreateBlock(std::move(wrapperNodes), retWrapperTy->retTy), retWrapperTy);
 
     auto wrapperName = nameGenerator.GenerateMethodWrapperName(method);
 
-    auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), wrapperTy);
+    auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), retWrapperTy);
+    wrapper->moduleName = method.moduleName;
+    wrapper->fullPackageName = method.fullPackageName;
     wrapper->EnableAttr(Attribute::C, Attribute::GLOBAL, Attribute::PUBLIC, Attribute::NO_MANGLE);
     wrapper->funcBody->funcDecl = wrapper.get();
 
@@ -323,15 +584,33 @@ OwnedPtr<FuncDecl> ASTFactory::CreateMethodWrapper(FuncDecl& method)
 
 OwnedPtr<FuncDecl> ASTFactory::CreateGetterWrapper(PropDecl& prop)
 {
-    auto registryIdTy = bridge.GetRegistryIdTy();
-
-    auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
-    auto registryIdParamRef = CreateRefExpr(*registryIdParam);
-    auto outerDecl = StaticAs<ASTKind::CLASS_DECL>(prop.outerDecl);
+    auto outerDecl = static_cast<InheritableDecl*>(prop.outerDecl.get());
+    CJC_NULLPTR_CHECK(outerDecl);
 
     auto wrapperParamList = MakeOwned<FuncParamList>();
     auto& wrapperParams = wrapperParamList->params;
-    wrapperParams.emplace_back(std::move(registryIdParam));
+
+    OwnedPtr<VarDecl> objTmpVarDecl;
+    OwnedPtr<MemberAccess> propGetterExpr;
+    if (prop.TestAttr(Attribute::STATIC)) {
+        propGetterExpr = CreateMemberAccess(WithinFile(CreateRefExpr(*outerDecl), prop.curFile),
+                                            *prop.getters[0].get());
+    } else {
+        auto registryIdTy = bridge.GetRegistryIdTy();
+        auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
+        auto registryIdParamRef = CreateRefExpr(*registryIdParam);
+        wrapperParams.emplace_back(std::move(registryIdParam));
+        auto getFromRegistryCall =
+            CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
+        objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
+        // Not sure if accessing the first getter is good
+        propGetterExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), *prop.getters[0].get());
+    }
+    propGetterExpr->curFile = prop.curFile;
+    propGetterExpr->begin = prop.GetBegin();
+    propGetterExpr->end = prop.GetEnd();
+    auto propGetterCall = CreateCallExpr(
+        std::move(propGetterExpr), {}, Ptr(prop.getters[0].get()), prop.ty, CallKind::CALL_DECLARED_FUNCTION);
 
     std::vector<Ptr<Ty>> wrapperParamTys;
     std::transform(
@@ -343,20 +622,9 @@ OwnedPtr<FuncDecl> ASTFactory::CreateGetterWrapper(PropDecl& prop)
     wrapperParamLists.emplace_back(std::move(wrapperParamList));
 
     std::vector<OwnedPtr<Node>> wrapperNodes;
-    auto getFromRegistryCall =
-        CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
-
-    auto objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
-    // Not sure if accessing the first getter is good
-    auto propGetterExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), *prop.getters[0].get());
-    propGetterExpr->curFile = prop.curFile;
-    propGetterExpr->begin = prop.GetBegin();
-    propGetterExpr->end = prop.GetEnd();
-
-    auto propGetterCall = CreateCallExpr(
-        std::move(propGetterExpr), {}, Ptr(prop.getters[0].get()), prop.ty, CallKind::CALL_DECLARED_FUNCTION);
-
-    wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    if (!prop.TestAttr(Attribute::STATIC)) {
+        wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    }
     wrapperNodes.emplace_back(UnwrapEntity(std::move(propGetterCall)));
 
     auto wrapperBody = CreateFuncBody(std::move(wrapperParamLists), ASTCloner::Clone(prop.type.get()),
@@ -365,6 +633,8 @@ OwnedPtr<FuncDecl> ASTFactory::CreateGetterWrapper(PropDecl& prop)
     auto wrapperName = nameGenerator.GeneratePropGetterWrapperName(prop);
 
     auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), wrapperTy);
+    wrapper->moduleName = prop.moduleName;
+    wrapper->fullPackageName = prop.fullPackageName;
     wrapper->EnableAttr(Attribute::C, Attribute::GLOBAL, Attribute::PUBLIC, Attribute::NO_MANGLE);
     wrapper->funcBody->funcDecl = wrapper.get();
 
@@ -378,19 +648,58 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(PropDecl& prop)
     auto registryIdTy = bridge.GetRegistryIdTy();
     auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
 
-    auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
-    auto registryIdParamRef = CreateRefExpr(*registryIdParam);
-
     auto convertedPropTy = typeMapper.Cj2CType(prop.ty);
     auto setterParam = CreateFuncParam(VALUE_IDENT, CreateType(convertedPropTy), nullptr, convertedPropTy);
     auto setterParamRef = CreateRefExpr(*setterParam);
 
-    auto outerDecl = StaticAs<ASTKind::CLASS_DECL>(prop.outerDecl);
+    auto outerDecl = static_cast<InheritableDecl*>(prop.outerDecl.get());
+    CJC_NULLPTR_CHECK(outerDecl);
 
     auto wrapperParamList = MakeOwned<FuncParamList>();
     auto& wrapperParams = wrapperParamList->params;
-    wrapperParams.emplace_back(std::move(registryIdParam));
-    wrapperParams.emplace_back(std::move(setterParam));
+
+    std::vector<OwnedPtr<Node>> wrapperNodes;
+
+    // Not sure if accessing the first setter is good
+    auto& setter = *prop.setters[0].get();
+    auto& originParams = setter.funcBody->paramLists[0]->params;
+    OwnedPtr<Expr> propSetterExpr;
+
+    OwnedPtr<Decl> objTmpVarDecl;
+
+    if (prop.TestAttr(Attribute::STATIC)) {
+        wrapperParams.emplace_back(std::move(setterParam));
+        propSetterExpr = CreateMemberAccess(WithinFile(CreateRefExpr(*outerDecl), prop.curFile), setter);
+        propSetterExpr->curFile = prop.curFile;
+        propSetterExpr->begin = prop.GetBegin();
+        propSetterExpr->end = prop.GetEnd();
+    } else {
+        auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
+        auto registryIdParamRef = CreateRefExpr(*registryIdParam);
+        auto getFromRegistryCall =
+            CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
+
+        objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
+
+        wrapperParams.emplace_back(std::move(registryIdParam));
+        wrapperParams.emplace_back(std::move(setterParam));
+        propSetterExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), setter);
+        propSetterExpr->curFile = prop.curFile;
+        propSetterExpr->begin = prop.GetBegin();
+        propSetterExpr->end = prop.GetEnd();
+    }
+    std::vector<OwnedPtr<FuncArg>> propSetterArgs;
+    // setter should have only one parameter
+    CJC_ASSERT(wrapperParams.size() <= 2);
+    {
+        auto wrapperParam = wrapperParams.back().get();
+        auto originParam = originParams.back().get();
+
+        auto paramRef = CreateRefExpr(*wrapperParam);
+        auto wrappedParamRef = WrapEntity(std::move(paramRef), *originParam->ty);
+        auto arg = CreateFuncArg(std::move(wrappedParamRef), wrapperParam->identifier, originParam->ty);
+        propSetterArgs.emplace_back(std::move(arg));
+    }
 
     std::vector<Ptr<Ty>> wrapperParamTys;
     std::transform(
@@ -401,35 +710,12 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(PropDecl& prop)
     std::vector<OwnedPtr<FuncParamList>> wrapperParamLists;
     wrapperParamLists.emplace_back(std::move(wrapperParamList));
 
-    std::vector<OwnedPtr<Node>> wrapperNodes;
-    auto getFromRegistryCall =
-        CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
-
-    auto objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
-    // Not sure if accessing the first setter is good
-    auto& setter = *prop.setters[0].get();
-    auto& originParams = setter.funcBody->paramLists[0]->params;
-    auto propSetterExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), setter);
-    propSetterExpr->curFile = prop.curFile;
-    propSetterExpr->begin = prop.GetBegin();
-    propSetterExpr->end = prop.GetEnd();
-
-    std::vector<OwnedPtr<FuncArg>> propSetterArgs;
-    // skip first param, as it is needed only for restore @ObjCImpl instance.
-    for (size_t i = 1; i < wrapperParams.size(); ++i) {
-        auto wrapperParam = wrapperParams[i].get();
-        auto originParam = originParams[i - 1].get();
-
-        auto paramRef = CreateRefExpr(*wrapperParam);
-        auto wrappedParamRef = WrapEntity(std::move(paramRef), *originParam->ty);
-        auto arg = CreateFuncArg(std::move(wrappedParamRef), wrapperParam->identifier, originParam->ty);
-        propSetterArgs.emplace_back(std::move(arg));
-    }
-
     auto propSetterCall = CreateCallExpr(
         std::move(propSetterExpr), std::move(propSetterArgs), Ptr(&setter), unitTy, CallKind::CALL_DECLARED_FUNCTION);
 
-    wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    if (objTmpVarDecl != nullptr) {
+        wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    }
     wrapperNodes.emplace_back(std::move(propSetterCall));
 
     auto wrapperBody = CreateFuncBody(std::move(wrapperParamLists), CreateUnitType(prop.curFile),
@@ -438,6 +724,8 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(PropDecl& prop)
     auto wrapperName = nameGenerator.GetPropSetterWrapperName(prop);
 
     auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), wrapperTy);
+    wrapper->moduleName = prop.moduleName;
+    wrapper->fullPackageName = prop.fullPackageName;
     wrapper->EnableAttr(Attribute::C, Attribute::GLOBAL, Attribute::PUBLIC, Attribute::NO_MANGLE);
     wrapper->funcBody->funcDecl = wrapper.get();
 
@@ -448,37 +736,44 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(PropDecl& prop)
 
 OwnedPtr<FuncDecl> ASTFactory::CreateGetterWrapper(VarDecl& field)
 {
-    auto registryIdTy = bridge.GetRegistryIdTy();
-
-    auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
-    auto registryIdParamRef = CreateRefExpr(*registryIdParam);
-    auto outerDecl = StaticAs<ASTKind::CLASS_DECL>(field.outerDecl);
+    auto outerDecl = static_cast<InheritableDecl*>(field.outerDecl.get());
+    CJC_NULLPTR_CHECK(outerDecl);
 
     auto wrapperParamList = MakeOwned<FuncParamList>();
     auto& wrapperParams = wrapperParamList->params;
-    wrapperParams.emplace_back(std::move(registryIdParam));
+
+    OwnedPtr<VarDecl> objTmpVarDecl;
+    OwnedPtr<MemberAccess> fieldExpr;
+    if (field.TestAttr(Attribute::STATIC)) {
+        fieldExpr = CreateMemberAccess(WithinFile(CreateRefExpr(*outerDecl), field.curFile), field);
+    } else {
+        auto registryIdTy = bridge.GetRegistryIdTy();
+        auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
+        auto registryIdParamRef = CreateRefExpr(*registryIdParam);
+        wrapperParams.emplace_back(std::move(registryIdParam));
+        auto getFromRegistryCall =
+            CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
+        objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
+        // Not sure if accessing the first getter is good
+        fieldExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), field);
+    }
+    fieldExpr->curFile = field.curFile;
+    fieldExpr->begin = field.GetBegin();
+    fieldExpr->end = field.GetEnd();
 
     std::vector<Ptr<Ty>> wrapperParamTys;
     std::transform(
         wrapperParams.begin(), wrapperParams.end(), std::back_inserter(wrapperParamTys), [](auto& p) { return p->ty; });
 
-    auto convertedFieldTy = typeMapper.Cj2CType(field.ty);
-    auto wrapperTy = typeManager.GetFunctionTy(wrapperParamTys, convertedFieldTy, {.isC = true});
+    auto wrapperTy = typeManager.GetFunctionTy(wrapperParamTys, typeMapper.Cj2CType(field.ty), {.isC = true});
 
     std::vector<OwnedPtr<FuncParamList>> wrapperParamLists;
     wrapperParamLists.emplace_back(std::move(wrapperParamList));
 
     std::vector<OwnedPtr<Node>> wrapperNodes;
-    auto getFromRegistryCall =
-        CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
-
-    auto objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
-    auto fieldExpr = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), field);
-    fieldExpr->curFile = field.curFile;
-    fieldExpr->begin = field.GetBegin();
-    fieldExpr->end = field.GetEnd();
-
-    wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    if (!field.TestAttr(Attribute::STATIC)) {
+        wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    }
     wrapperNodes.emplace_back(UnwrapEntity(std::move(fieldExpr)));
 
     auto wrapperBody = CreateFuncBody(std::move(wrapperParamLists), ASTCloner::Clone(field.type.get()),
@@ -488,6 +783,8 @@ OwnedPtr<FuncDecl> ASTFactory::CreateGetterWrapper(VarDecl& field)
     auto wrapperName = nameGenerator.GetFieldGetterWrapperName(field);
 
     auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), wrapperTy);
+    wrapper->moduleName = field.moduleName;
+    wrapper->fullPackageName = field.fullPackageName;
     wrapper->EnableAttr(Attribute::C, Attribute::GLOBAL, Attribute::PUBLIC, Attribute::NO_MANGLE);
     wrapper->funcBody->funcDecl = wrapper.get();
 
@@ -507,7 +804,8 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(VarDecl& field)
     auto setterParam = CreateFuncParam(VALUE_IDENT, CreateType(convertedFieldTy), nullptr, convertedFieldTy);
     auto setterParamRef = CreateRefExpr(*setterParam);
 
-    auto outerDecl = StaticAs<ASTKind::CLASS_DECL>(field.outerDecl);
+    auto outerDecl = static_cast<InheritableDecl*>(field.outerDecl.get());
+    CJC_NULLPTR_CHECK(outerDecl);
 
     auto wrapperParamList = MakeOwned<FuncParamList>();
     auto& wrapperParams = wrapperParamList->params;
@@ -544,6 +842,8 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(VarDecl& field)
     auto wrapperName = nameGenerator.GetFieldSetterWrapperName(field);
 
     auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), wrapperTy);
+    wrapper->moduleName = field.moduleName;
+    wrapper->fullPackageName = field.fullPackageName;
     wrapper->EnableAttr(Attribute::C, Attribute::GLOBAL, Attribute::PUBLIC, Attribute::NO_MANGLE);
     wrapper->funcBody->funcDecl = wrapper.get();
 
@@ -559,7 +859,7 @@ OwnedPtr<ThrowExpr> ASTFactory::CreateThrowUnreachableCodeExpr(File& file)
     return CreateThrowException(*exceptionDecl, {}, file, typeManager);
 }
 
-std::set<Ptr<FuncDecl>> ASTFactory::GetAllParentCtors(ClassDecl& target)
+std::set<Ptr<FuncDecl>> ASTFactory::GetAllParentCtors(ClassDecl& target) const
 {
     std::set<Ptr<FuncDecl>> result = {};
     for (auto& it : target.GetAllSuperDecls()) {
@@ -658,17 +958,22 @@ OwnedPtr<FuncDecl> ASTFactory::CreateImplCtor(ClassDecl& impl, FuncDecl& from)
     return ctor;
 }
 
-bool ASTFactory::IsGeneratedMember(const Decl& decl)
+bool ASTFactory::IsGeneratedMember(const Decl& decl) const
 {
-    return IsGeneratedNativeHandleField(decl) || IsGeneratedCtor(decl);
+    return IsGeneratedNativeHandleField(decl) || IsGeneratedHasInitedField(decl) || IsGeneratedCtor(decl);
 }
 
-bool ASTFactory::IsGeneratedNativeHandleField(const Decl& decl)
+bool ASTFactory::IsGeneratedNativeHandleField(const Decl& decl) const
 {
     return decl.identifier.Val() == NATIVE_HANDLE_IDENT;
 }
 
-bool ASTFactory::IsGeneratedCtor(const Decl& decl)
+bool ASTFactory::IsGeneratedHasInitedField(const Decl& decl) const
+{
+    return decl.TestAttr(Attribute::HAS_INITED_FIELD);
+}
+
+bool ASTFactory::IsGeneratedCtor(const Decl& decl) const
 {
     auto fd = DynamicCast<const FuncDecl*>(&decl);
     if (!fd || !fd->TestAttr(Attribute::CONSTRUCTOR) || !fd->funcBody) {
@@ -696,8 +1001,7 @@ Ptr<FuncDecl> ASTFactory::GetGeneratedMirrorCtor(Decl& decl)
     CJC_ASSERT(decl.astKind == ASTKind::CLASS_DECL);
     CJC_ASSERT(TypeMapper::IsValidObjCMirror(*decl.ty));
 
-    auto& classDecl = *StaticAs<ASTKind::CLASS_DECL>(&decl);
-    for (auto& member : classDecl.GetMemberDeclPtrs()) {
+    for (auto& member : decl.GetMemberDeclPtrs()) {
         if (auto fd = As<ASTKind::FUNC_DECL>(member); fd && IsGeneratedCtor(*fd)) {
             return fd;
         }
@@ -707,7 +1011,7 @@ Ptr<FuncDecl> ASTFactory::GetGeneratedMirrorCtor(Decl& decl)
     return nullptr;
 }
 
-Ptr<FuncDecl> ASTFactory::GetGeneratedImplCtor(const ClassDecl& impl, const FuncDecl& origin)
+Ptr<FuncDecl> ASTFactory::GetGeneratedImplCtor(const Decl& declArg, const FuncDecl& origin)
 {
     CJC_ASSERT(origin.TestAttr(Attribute::CONSTRUCTOR));
     CJC_NULLPTR_CHECK(origin.funcBody);
@@ -718,7 +1022,7 @@ Ptr<FuncDecl> ASTFactory::GetGeneratedImplCtor(const ClassDecl& impl, const Func
     // taking first param list probably is not the best idea
     const auto& originParams = originParamLists[0]->params;
 
-    for (auto& member: impl.GetMemberDeclPtrs()) {
+    for (auto& member : declArg.GetMemberDeclPtrs()) {
         if (auto fd = As<ASTKind::FUNC_DECL>(member); fd && IsGeneratedCtor(*fd)) {
             CJC_NULLPTR_CHECK(fd->funcBody);
 
@@ -758,6 +1062,7 @@ void ASTFactory::PutDeclToClassBody(Decl& decl, ClassDecl& target)
     decl.end = target.body->end;
     decl.outerDecl = &target;
     decl.curFile = target.curFile;
+    decl.fullPackageName = target.fullPackageName;
     decl.EnableAttr(Attribute::IN_CLASSLIKE);
 }
 
@@ -850,6 +1155,7 @@ OwnedPtr<CallExpr> ASTFactory::CreateObjCRuntimeMsgSendCall(
     auto retType = funcType->retType.get();
 
     auto cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(std::string(CFUNC_NAME));
+    CJC_NULLPTR_CHECK(cFuncDecl);
     auto cFuncRefExpr = CreateRefExpr(*cFuncDecl);
 
     cFuncRefExpr->ty = ty;
@@ -928,7 +1234,7 @@ OwnedPtr<CallExpr> ASTFactory::CreateAllocCall(OwnedPtr<Expr> className)
     return CreateCall(allocDecl, curFile, std::move(className));
 }
 
-OwnedPtr<CallExpr> ASTFactory::CreateAllocCall(ClassDecl& decl, Ptr<File> curFile)
+OwnedPtr<CallExpr> ASTFactory::CreateAllocCall(Decl& decl, Ptr<File> curFile)
 {
     auto objcname = nameGenerator.GetObjCDeclName(decl);
     auto classNameExpr =
@@ -1113,4 +1419,33 @@ Ptr<VarDecl> ASTFactory::GetObjCPointerPointerField()
         }
     }
     return result;
+}
+
+OwnedPtr<FuncDecl> ASTFactory::CreateFinalizer(ClassDecl& mirror)
+{
+    static auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
+    auto fbody = CreateFuncBody({}, nullptr, CreateBlock({}, unitTy), unitTy);
+    fbody->paramLists.emplace_back(MakeOwned<FuncParamList>());
+    auto nativeHandleExpr = CreateNativeHandleExpr(mirror, false, mirror.curFile);
+    auto releaseCall = CreateObjCRuntimeReleaseCall(std::move(nativeHandleExpr));
+    fbody->body->body.emplace_back(std::move(releaseCall));
+    auto fd = CreateFuncDecl("~init", std::move(fbody), typeManager.GetFunctionTy({}, unitTy));
+    PutDeclToClassBody(*fd, mirror);
+    fd->EnableAttr(Attribute::PRIVATE, Attribute::FINALIZER);
+    fd->linkage = Linkage::EXTERNAL;
+    fd->funcBody->funcDecl = fd.get();
+
+    return fd;
+}
+
+OwnedPtr<VarDecl> ASTFactory::CreateHasInitedField(ClassDecl& mirror)
+{
+    static auto boolTy = typeManager.GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
+    auto initializer = CreateLitConstExpr(LitConstKind::BOOL, "false", boolTy);
+    auto ret = CreateVarDecl(HAS_INITED_IDENT, std::move(initializer));
+    ret->isVar = true;
+    PutDeclToClassBody(*ret, mirror);
+    ret->EnableAttr(Attribute::PRIVATE, Attribute::NO_REFLECT_INFO, Attribute::HAS_INITED_FIELD);
+
+    return ret;
 }

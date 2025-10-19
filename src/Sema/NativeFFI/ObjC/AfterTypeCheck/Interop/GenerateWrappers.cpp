@@ -19,12 +19,12 @@ using namespace Cangjie::Interop::ObjC;
 
 void GenerateWrappers::HandleImpl(InteropContext& ctx)
 {
-    for (auto& impl : ctx.impls) {
-        if (impl->TestAttr(Attribute::IS_BROKEN)) {
-            continue;
+    auto genWrapper = [this, &ctx](Decl& decl) {
+        if (decl.TestAttr(Attribute::IS_BROKEN)) {
+            return;
         }
 
-        for (auto& memberDecl : impl->GetMemberDeclPtrs()) {
+        for (auto& memberDecl : decl.GetMemberDeclPtrs()) {
             if (memberDecl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::CONSTRUCTOR)) {
                 continue;
             }
@@ -38,18 +38,22 @@ void GenerateWrappers::HandleImpl(InteropContext& ctx)
 
             switch (memberDecl->astKind) {
                 case ASTKind::FUNC_DECL:
-                    GenerateWrapper(ctx, *StaticAs<ASTKind::FUNC_DECL>(memberDecl));
+                    this->GenerateWrapper(ctx, *StaticAs<ASTKind::FUNC_DECL>(memberDecl));
                     break;
                 case ASTKind::PROP_DECL:
-                    GenerateWrapper(ctx, *StaticAs<ASTKind::PROP_DECL>(memberDecl));
+                    this->GenerateWrapper(ctx, *StaticAs<ASTKind::PROP_DECL>(memberDecl));
                     break;
                 case ASTKind::VAR_DECL:
-                    GenerateWrapper(ctx, *StaticAs<ASTKind::VAR_DECL>(memberDecl));
+                    this->GenerateWrapper(ctx, *StaticAs<ASTKind::VAR_DECL>(memberDecl));
                     break;
                 default:
                     break;
             }
         }
+    };
+
+    for (auto& impl : ctx.impls) {
+        genWrapper(*impl);
     }
 }
 

@@ -51,7 +51,7 @@ public:
     void Check();
 
 private:
-    void CheckMembersWithInheritedDecls(const InheritableDecl& decl);
+    void CheckMembersWithInheritedDecls(InheritableDecl& decl);
     MemberMap GetAndCheckInheritedInterfaces(const InheritableDecl& decl);
     MemberMap GetInheritedSuperMembers(
         const InheritableDecl& decl, Ty& baseTy, const AST::File& curFile, bool ignoreExtends = false);
@@ -109,6 +109,7 @@ private:
     /** Checks related to NativeFFI */
     void CheckNativeFFI(const MemberSignature& parent, const MemberSignature& child) const;
 
+
     /**
      * Generates the built-in operator function and adds to ed.members.
      * e.g. operator func -(): Int64 { return -this }
@@ -125,7 +126,7 @@ private:
      */
     void CheckInstDupFuncsInNominalDecls();
     VisitAction CheckInstDupFuncsRecursively(Node& node);
-    void CheckInstMemberSignatures(const InheritableDecl& decl, const std::vector<Ptr<Ty>>& instTys);
+    void CheckInstMemberSignatures(InheritableDecl& decl, const std::vector<Ptr<Ty>>& instTys);
     void CheckInstantiatedDecl(Decl& decl, const std::vector<Ptr<Ty>>& instTys);
     /**
      * Get visible extend decls in stable order for given @p decl with @p instTys .

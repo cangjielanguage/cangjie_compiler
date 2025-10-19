@@ -18,6 +18,7 @@
 #include "cangjie/Mangle/CHIRManglingUtils.h"
 #include "cangjie/Utils/CastingTemplate.h"
 #include "cangjie/Utils/CheckUtils.h"
+#include "cangjie/CHIR/Type/PrivateTypeConverter.h"
 
 namespace Cangjie::CHIR {
 namespace {
@@ -631,10 +632,6 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
         chirFunc.SetParamDftValHostFunc(*VirtualCast<FuncBase*>(globalCache.Get(*astFunc.ownerFunc)));
     }
     chirFunc.SetFastNative(astFunc.isFastNative);
-
-    if (astFunc.TestAttr(AST::Attribute::UNSAFE)) {
-        chirFunc.EnableAttr(Attribute::UNSAFE);
-    }
 }
 
 void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
@@ -1250,42 +1247,6 @@ void AST2CHIR::SetExtendInfo()
     }
 }
 
-namespace {
-/**
- * Removes redundant deserialized extends, preserving only the most specific platform implementation.
- * Example: Compiling linux-x86 target:
- *   // common.cj (common definitions)
- *   common extend Int64 {}
- *   common extend Int64 {}
- *
- *   // linux.cj (platform-specific)
- *   platform extend Int64 {}
- *
- *   // linux-x86.cj (architecture-specific)
- *   platform extend Int64 {}
- *
- *  Produces after deserialization:
- *   4 extends (2 common, 1 platform from linux.cj, 1 platform from linux-x86.cj)
- *
- *  This function removes the 3 deserialized extends, keeping only linux-x86.cj's version.
- *
- */
-void RemoveUnusedCJMPExtends(CHIR::Package& chirPkg, bool compilePlatform)
-{
-    if (!compilePlatform) {
-        return;
-    }
-    auto extends = chirPkg.GetExtends();
-    auto it = std::remove_if(extends.begin(), extends.end(), [](const ExtendDef* ed) {
-        CJC_NULLPTR_CHECK(ed);
-        return ed->TestAttr(CHIR::Attribute::DESERIALIZED) &&
-            (ed->TestAttr(CHIR::Attribute::COMMON) || ed->TestAttr(CHIR::Attribute::PLATFORM));
-    });
-
-    extends.erase(it, extends.end());
-    chirPkg.SetExtends(std::move(extends));
-}
-} // namespace
 void AST2CHIR::TranslateNominalDecls(const AST::Package& pkg)
 {
     Utils::ProfileRecorder recorder("TranslateAllDecls", "TranslateNominalDecls");
@@ -1332,7 +1293,7 @@ void AST2CHIR::TranslateNominalDecls(const AST::Package& pkg)
     TranslateVecDecl(genericNominalDecls, trans);
     // Update some info for nominal decls.
     Utils::ProfileRecorder::Stop("TranslateNominalDecls", "TranslateDecls");
-    RemoveUnusedCJMPExtends(*package, opts.inputChirFiles.size() == 1);
+    ProcessCommonAndPlatformExtends();
     SetExtendInfo();
     UpdateExtendParent();
 }
@@ -1406,7 +1367,103 @@ BuildDeserializedVec(std::unordered_map<std::string, U*>& table, const std::vect
         BuildDeserializedVec(table, args...);
     }
 }
+
+std::vector<Ptr<const AST::Decl>> CollectCommonMatchedExtendDecls(
+    const std::vector<std::vector<Ptr<const AST::Decl>>>& declContainers)
+{
+    std::vector<Ptr<const AST::Decl>> commonDecls;
+    for (const auto& container : declContainers) {
+        for (const auto& decl : container) {
+            bool isCommonExtendDecl = decl->IsCommonMatchedWithPlatform() && decl->astKind == AST::ASTKind::EXTEND_DECL;
+            if (isCommonExtendDecl) {
+                commonDecls.push_back(decl);
+            }
+        }
+    }
+    return commonDecls;
 }
+
+std::unordered_map<const GenericType*, Type*> BuildGenericTypeMapping(
+    const std::vector<Ptr<const AST::Decl>>& commonDecls, CHIRType& chirType)
+{
+    std::unordered_map<const GenericType*, Type*> commonGenericTy2platformGenericTy;
+
+    for (const auto& commonDecl : commonDecls) {
+        if (commonDecl->TestAttr(AST::Attribute::GENERIC) && commonDecl->ty && !commonDecl->ty->typeArgs.empty()) {
+            for (size_t i = 0; i < commonDecl->ty->typeArgs.size(); i++) {
+                auto cTypeArg = commonDecl->ty->typeArgs[i];
+                auto pTypeArg = commonDecl->platformImplementation->ty->typeArgs[i];
+
+                if (cTypeArg->IsGeneric() && pTypeArg->IsGeneric()) {
+                    auto commonGenericTy = StaticCast<GenericType*>(chirType.TranslateType(*cTypeArg));
+                    auto platformGenericTy = chirType.TranslateType(*pTypeArg);
+                    commonGenericTy2platformGenericTy[commonGenericTy] = platformGenericTy;
+                }
+            }
+        }
+    }
+    return commonGenericTy2platformGenericTy;
+}
+
+void ConvertPlatformExtendMethods(
+    Package* package, CHIRBuilder& builder, const std::function<Type*(Type&)>& replaceGenericFunc)
+{
+    PrivateTypeConverter converter(replaceGenericFunc, builder);
+    auto postVisit = [&converter](Expression& e) {
+        converter.VisitExpr(e);
+        return VisitResult::CONTINUE;
+    };
+
+    for (auto extend : package->GetExtends()) {
+        if (!extend->TestAttr(CHIR::Attribute::PLATFORM)) {
+            continue;
+        }
+        for (auto func : extend->GetMethods()) {
+            if (func->TestAttr(CHIR::Attribute::DESERIALIZED)) {
+                auto f = DynamicCast<Func*>(func);
+                bool hasBodyFromCommonPart = f && f->GetBody();
+                if (hasBodyFromCommonPart) {
+                    Visitor::Visit(
+                        *f, [](Expression&) { return VisitResult::CONTINUE; }, postVisit);
+                }
+                converter.VisitValue(*f);
+            }
+        }
+    }
+}
+
+/**
+ * Removes redundant deserialized extends, preserving only the most specific platform implementation.
+ * Example: Compiling linux-x86 target:
+ *   // common.cj (common definitions)
+ *   common extend Int64 {}
+ *   common extend Int64 {}
+ *
+ *   // linux.cj (platform-specific)
+ *   platform extend Int64 {}
+ *
+ *   // linux-x86.cj (architecture-specific)
+ *   platform extend Int64 {}
+ *
+ *  Produces after deserialization:
+ *   4 extends (2 common, 1 platform from linux.cj, 1 platform from linux-x86.cj)
+ *
+ *  This function removes the 3 deserialized extends, keeping only linux-x86.cj's version.
+ *
+ */
+void RemoveUnusedCJMPExtends(CHIR::Package& chirPkg)
+{
+    auto extends = chirPkg.GetExtends();
+    auto it = std::remove_if(extends.begin(), extends.end(), [](const ExtendDef* ed) {
+        CJC_NULLPTR_CHECK(ed);
+        return ed->TestAttr(CHIR::Attribute::DESERIALIZED) &&
+            (ed->TestAttr(CHIR::Attribute::COMMON) || ed->TestAttr(CHIR::Attribute::PLATFORM));
+    });
+
+    extends.erase(it, extends.end());
+    chirPkg.SetExtends(std::move(extends));
+}
+} // namespace
 
 void AST2CHIR::BuildDeserializedTable()
 {
@@ -1440,5 +1497,45 @@ void AST2CHIR::ResetPlatformFunc(const AST::FuncDecl& funcDecl, Func& func)
     func.EnableAttr(Attribute::PLATFORM);
     func.DisableAttr(Attribute::COMMON);
     func.DisableAttr(Attribute::SKIP_ANALYSIS);
+
+    // Reset TypeArguments if has TypeArguments.
+    auto newGenericParamTys = GetGenericParamType(funcDecl, chirType);
+    auto oldGenericParamTys = func.GetGenericTypeParams();
+    std::unordered_map<const GenericType*, Type*> replaceTable;
+    if (!oldGenericParamTys.empty()) {
+        CJC_ASSERT(newGenericParamTys.size() == oldGenericParamTys.size());
+        for (size_t i = 0; i < oldGenericParamTys.size(); ++i) {
+            replaceTable[oldGenericParamTys[i]] = newGenericParamTys[i];
+        }
+        ConvertTypeFunc convertTypeFunc = [this, replaceTable](Type& type) {
+            return ReplaceRawGenericArgType(type, replaceTable, builder);
+        };
+        ValueTypeConverter converter(convertTypeFunc, builder);
+        converter.VisitSubValue(func);
+    }
+}
+
+void AST2CHIR::ProcessCommonAndPlatformExtends()
+{
+    bool compilePlatform = opts.IsCompilingCJMP();
+    if (!compilePlatform) {
+        return;
+    }
+
+    // Collect common generic extends and build type mapping
+    std::vector<Ptr<const AST::Decl>> commonDecls = CollectCommonMatchedExtendDecls(
+        {importedNominalDecls, importedGenericInstantiatedNominalDecls, nominalDecls, genericNominalDecls});
+    std::unordered_map<const GenericType*, Type*> commonGenericTy2platformGenericTy =
+        BuildGenericTypeMapping(commonDecls, chirType);
+
+    // 1. Convert platform extend methods if type mapping exists
+    if (!commonGenericTy2platformGenericTy.empty()) {
+        ConvertPlatformExtendMethods(package, builder, [this, &commonGenericTy2platformGenericTy](Type& type) {
+            return ReplaceRawGenericArgType(type, commonGenericTy2platformGenericTy, builder);
+        });
+    }
+
+    // 2. Clean up unused extends
+    RemoveUnusedCJMPExtends(*package);
 }
 } // namespace Cangjie::CHIR

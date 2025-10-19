@@ -470,6 +470,7 @@ private:
     void CheckSpecializationExtendDupImstantation(const AST::Ty& extendedDeclTy, const AST::ExtendDecl& compareExtend,
         const AST::InheritableDecl& beComparedDecl, const TypeSubst& instantMapping, const bool checkParent = false);
     void BuildImportedExtendMap();
+    void MergeCJMPExtensions(ASTContext& ctx, const std::unordered_set<Ptr<AST::ExtendDecl>>& extends);
     void BuildExtendMap(ASTContext& ctx);
     void CheckExtendRules(const ASTContext& ctx);
     /* Set integer overflow strategy before sema typechecking. */
@@ -1267,6 +1268,7 @@ private:
     bool NeedCheckBodyReturn(const AST::FuncBody& fb) const;
     void CheckAnnotations(ASTContext& ctx, AST::Decl& decl);
     void CheckAnnotationDecl(ASTContext& ctx, AST::Annotation& ann);
+    void CheckJavaHasDefaultAnnotation(AST::Annotation& ann, const AST::Decl& decl) const;
     OwnedPtr<AST::CallExpr> CheckCustomAnnotation(ASTContext& ctx, const AST::Decl& decl, AST::Annotation& ann);
     bool HasModifier(const std::set<AST::Modifier>& modifiers, TokenKind kind) const;
 
@@ -1329,7 +1331,7 @@ private:
     void CheckIllegalMemberWalker(
         const ASTContext& ctx, Ptr<AST::Node> node, bool reportThis, const std::string& errorStr);
     void CheckIllegalMemberHelper(
-        const ASTContext& ctx, bool reportThis, const std::string& errorStr, const AST::NameReferenceExpr& re);
+        const ASTContext& ctx, bool reportThis, const std::string& errorStr, const AST::NameReferenceExpr& nre);
 
     /** Checking Initialization APIs. */
     void CheckGlobalVarInitialization(ASTContext& ctx, const AST::Package& package);

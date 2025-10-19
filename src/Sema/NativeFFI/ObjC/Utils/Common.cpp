@@ -11,13 +11,16 @@
  */
 
 #include "Common.h"
-#include "TypeMapper.h"
 #include "ASTFactory.h"
+#include "TypeMapper.h"
 
 using namespace Cangjie::AST;
 using namespace Cangjie::Interop::ObjC;
 
-Ptr<ClassDecl> Cangjie::Interop::ObjC::GetMirrorSuperClass(const ClassLikeDecl& target)
+namespace {
+using namespace Cangjie;
+
+Ptr<ClassDecl> GetMirrorSuperClass(const ClassLikeDecl& target)
 {
     if (auto classDecl = DynamicCast<const ClassDecl*>(&target)) {
         auto superClass = classDecl->GetSuperClassDecl();
@@ -28,6 +31,20 @@ Ptr<ClassDecl> Cangjie::Interop::ObjC::GetMirrorSuperClass(const ClassLikeDecl& 
 
     return nullptr;
 }
+
+Ptr<Decl> FindMirrorMember(const std::string_view& mirrorMemberIdent,
+    const InheritableDecl& target)
+{
+    for (auto& memberDecl : target.GetMemberDeclPtrs()) {
+        if (memberDecl->identifier == mirrorMemberIdent) {
+            return memberDecl;
+        }
+    }
+
+    return Ptr<Decl>(nullptr);
+}
+
+} // namespace
 
 bool Cangjie::Interop::ObjC::HasMirrorSuperClass(const ClassLikeDecl& target)
 {
@@ -44,17 +61,5 @@ Ptr<VarDecl> Cangjie::Interop::ObjC::FindNativeVarHandle(const AST::ClassLikeDec
     }
 
     return As<ASTKind::VAR_DECL>(FindMirrorMember(ASTFactory::NATIVE_HANDLE_IDENT, target));
-}
-
-Ptr<Decl> Cangjie::Interop::ObjC::FindMirrorMember(const std::string_view& mirrorMemberIdent,
-    const InheritableDecl& target)
-{
-    for (auto& memberDecl: target.GetMemberDeclPtrs()) {
-        if (memberDecl->identifier == mirrorMemberIdent) {
-            return memberDecl;
-        }
-    }
-
-    return Ptr<Decl>(nullptr);
 }
 

@@ -23,13 +23,15 @@ public:
     }
     ~OCFFIParserImpl() = default;
 
-    void CheckAnnotation(const AST::Annotation& anno) const;
+    void CheckAnnotation(const AST::Annotation& anno, ScopeKind scopeKind) const;
     void CheckMirrorSignature(AST::ClassLikeDecl& decl, const PtrVector<AST::Annotation>& annos) const;
     void CheckImplSignature(AST::ClassLikeDecl& decl, const PtrVector<AST::Annotation>& annos) const;
+    void CheckMirrorSignature(AST::FuncDecl& decl, const PtrVector<AST::Annotation>& annos) const; 
 
     // Make private, when checking @ObjCMirror/@ObjCImpl decl members moved to this class
     void DiagObjCMirrorCannotHaveFinalizer(const AST::Node& node) const;
-    void DiagObjCMirrorMemberMustHaveForeignName(const AST::Node& node) const;
+    void DiagObjCMirrorMethodMustHaveForeignName(const AST::Node& node) const;
+    void DiagObjCMirrorCtorMustHaveForeignName(const AST::Node& node) const;
     void DiagObjCMirrorCannotHavePrivateMember(const AST::Node& node) const;
     void DiagObjCMirrorCannotHaveConstMember(const AST::Node& node) const;
     void DiagObjCMirrorCannotHaveStaticInit(const AST::Node& node) const;
@@ -40,11 +42,19 @@ public:
     void DiagObjCImplCannotHaveStaticInit(const AST::Node& node) const;
     void DiagObjCImplCannotBeGeneric(const AST::Node& node) const;
 
+    void DiagObjCMirrorFuncCannotBeForeign(const AST::FuncDecl& node) const;
+    void DiagObjCMirrorFuncCannotBeC(const AST::FuncDecl& node) const;
+    void DiagObjCMirrorFuncCannotBeGeneric(const AST::FuncDecl& node) const;
+    void DiagObjCMirrorFuncCannotHaveBody(const AST::FuncDecl& node) const;
+    void DiagObjCMirrorFuncMustHaveExplicitType(const AST::FuncDecl& node) const;
+    void DiagObjCMirrorFuncCannotBeConst(const AST::FuncDecl& node) const;
+    void DiagObjCMirrorFuncMustBeTopLevel(const AST::FuncDecl& node) const;
+
 private:
     void CheckMirrorAnnoArgs(const AST::Annotation& anno) const;
     void CheckImplAnnoArgs(const AST::Annotation& anno) const;
 
-    void CheckMirrorAnnoTarget(const AST::Annotation& anno) const;
+    void CheckMirrorAnnoTarget(const AST::Annotation& anno, ScopeKind scopeKind) const;
     void CheckImplAnnoTarget(const AST::Annotation& anno) const;
 
     void DiagObjCMirrorCannotBeSealed(const AST::Node& node) const;

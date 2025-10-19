@@ -18,9 +18,9 @@
 #include "Desugar/AfterTypeCheck.h"
 
 #include "AutoBoxing.h"
+#include "ExtraScopes.h"
 #include "NativeFFI/Java/AfterTypeCheck/JavaInteropManager.h"
 #include "NativeFFI/ObjC/AfterTypeCheck/Desugar.h"
-#include "ExtraScopes.h"
 #include "TypeCheckUtil.h"
 #include "TypeCheckerImpl.h"
 
@@ -285,9 +285,10 @@ void TypeChecker::PerformDesugarAfterSema(const std::vector<Ptr<Package>>& pkgs)
 }
 
 /** @p pkgs is set of source packages, desugar only needs to be done on source package. */
-void TypeChecker::TypeCheckerImpl::PerformDesugarAfterSema(const std::vector<Ptr<Package>>& pkgs)
+void TypeChecker::TypeCheckerImpl::PerformDesugarAfterSema(const std::vector<Ptr<AST::Package>>& pkgs)
 {
     TyVarScope ts(typeManager);
+
     for (auto& pkg : pkgs) {
         PerformDesugarAfterTypeCheck(*ci->pkgCtxMap[pkg], *pkg);
         TryDesugarForCoalescing(*pkg);
@@ -412,8 +413,8 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterTypeCheck(ASTContext& ctx,
     }
 
     jim.DesugarPackage(pkg);
-    Interop::ObjC::Desugar(Interop::ObjC::InteropContext(pkg, typeManager, importManager, diag, *ci->mangler,
-        ci->invocation.globalOptions.output));
+    Interop::ObjC::Desugar(Interop::ObjC::InteropContext(
+        pkg, typeManager, importManager, diag, *ci->mangler, ci->invocation.globalOptions.output));
 
     DesugarDeclsForPackage(pkg, ci->invocation.globalOptions.enableCoverage);
     std::function<VisitAction(Ptr<Node>)> preVisit = [this, &ctx](Ptr<Node> node) -> VisitAction {

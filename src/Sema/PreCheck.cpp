@@ -1115,6 +1115,10 @@ void TypeChecker::TypeCheckerImpl::ExposeGenericUpperBounds(ASTContext& ctx, con
 
 void TypeChecker::TypeCheckerImpl::CheckAssumption(ASTContext& ctx, const Decl& decl)
 {
+    if (decl.TestAttr(Attribute::COMMON) && decl.TestAttr(Attribute::FROM_COMMON_PART)) {
+        return;
+    }
+
     auto generic = decl.GetGeneric();
     if (generic == nullptr) {
         return;
@@ -1595,7 +1599,7 @@ void TypeChecker::TypeCheckerImpl::PreCheckFuncRedefinition(const ASTContext& ct
             candidates[names] = {fd};
         }
     }
-    mpImpl->FilterOutCommonCandidatesIfPlatformExist(candidates);
+    MPTypeCheckerImpl::FilterOutCommonCandidatesIfPlatformExist(candidates);
     auto candidatesForImport = candidates;
     for (const auto& [names, funcs] : std::as_const(candidates)) {
         PreCheckMacroRedefinition(funcs);
@@ -1758,6 +1762,9 @@ void TypeChecker::TypeCheckerImpl::PreCheckUsage(ASTContext& ctx, const Package&
     ResolveNames(ctx);
     // Build and check extend decls for each type.
     BuildExtendMap(ctx);
+
+    mpImpl->UpdatePlatformMemberGenericTy(
+        ctx, [this](ASTContext& ctx, ASTKind kind) { return this->GetSymsByASTKind(ctx, kind); });
     // Check duplicate interface inheritance for nominal decls. NOTE: Should resolve typeAlias first.
     StructDeclCircleOrDupCheck(ctx);
     // Check and set member's basic attributes.

@@ -224,11 +224,11 @@ ERROR(sema_shadow_cannot_in_type_args,
     "'%s' is not allowd to be used here as type argument, because it shadows field '%s' with its super type '%s'")
 ERROR(sema_unsupported_type_argument_in_java_interop,
     "type argument in java interoperation should meet 'JType' constraint")
-ERROR(sema_cjmapping_struct_generic_not_supported, "cjmapping struct generic %s is not supported")
-ERROR(sema_cjmapping_struct_inheritance_interface_not_supported, "cjmapping struct inheritance interface is not supported")
-ERROR(sema_cjmapping_decl_not_supported, "cjmapping decl type is not supported for %s")
-ERROR(sema_cjmapping_method_arg_not_supported, "argument type of cjmapping member function is not supported")
-ERROR(sema_cjmapping_method_ret_unsupported, "return type '%s' of function inside %s CJMapping is not supported")
+ERROR(sema_cjmapping_struct_generic_not_supported, "cangjie mirror struct type generic %s is not supported")
+ERROR(sema_cjmapping_struct_inheritance_interface_not_supported, "cangjie mirror struct type inheritance interface is not supported")
+ERROR(sema_cjmapping_decl_not_supported, "cangjie mirror decl type is not supported for %s")
+ERROR(sema_cjmapping_method_arg_not_supported, "argument type of cangjie mirror decl type member function is not supported")
+ERROR(sema_cjmapping_method_ret_unsupported, "return type '%s' of function inside %s type is not supported")
 
 // VArray
 ERROR(sema_varray_size_match, "mismatch 'VArray' type's size", "expected size is %s, found %s")
@@ -283,6 +283,7 @@ WARNING(sema_deprecation_redef_warning, DEPRECATED, "redefined %s '%s' should be
 ERROR(sema_common_open_class_no_init, "please implement the constructor explicitly for common open class '%s'")
 ERROR(sema_multiple_common_implementations, "'common' %s has several platform implementations")
 ERROR(sema_common_direct_extension_has_duplicate_private_members, "declaration 'common' extend '%s' has a conflicting private %s '%s'")
+ERROR(sema_common_direct_extension_has_common_private_members, "'common' and 'private' modifier conflict on %s '%s' declaration")
 ERROR(sema_not_matched, "'%s' %s can not find '%s' match")
 ERROR(sema_platform_var_not_match_let, "'platform' '%s' can not match 'common' '%s'")
 ERROR(sema_platform_init_common_primary_constructor, "'platform' init can not be used to implement primary 'common' constructor")
@@ -319,6 +320,8 @@ ERROR(sema_java_impl_cannot_be_extended_with_interface, "@JavaImpl class cannot 
 ERROR(sema_java_impl_redefinition, "redefinition of java declaration '%s'")
 ERROR(sema_java_mirror_interoplib_must_be_imported, "interoplib.interop must be imported to use java interoperability")
 ERROR(sema_java_interop_not_supported, "Java interoperability feature '%s' is not yet supported")
+ERROR(sema_variable_of_java_type, "%s can not store objects of java interoperability type '%s'")
+ERROR(sema_generic_parameter_of_java_type, "Can not instantiate generic '%s' with java interoperability type '%s'")
 WARNING(sema_java_interoplib_version_too_old, UNGROUPED,
     "java interoplib.interop library's version is too old. Compiler was built expecting versoin '%s'. "
     "Compatibility problems could happen. Use it at your own risk")
@@ -326,20 +329,30 @@ WARNING(sema_java_interoplib_version_mismatch, UNGROUPED,
     "java interoplib.interop library's version is '%s', but compiler was built expecting version '%s'. "
     "Compatibility problems could happen. Use it at your own risk")
 
+ERROR(sema_java_has_default_annotation_args, "'@JavaHasDefault' can't have arguments")
+ERROR(sema_java_has_default_annotation_is_in_wrong_place, "'@JavaHasDefault' can be used only on @JavaMirror interface methods.")
+ERROR(sema_java_has_default_conflict_with_static, "Illegal combination of '@JavaHasDefault' annotation and 'static' modifier.")
+
 // Objective-C mirror
-ERROR(sema_objc_mirror_ctor_param_must_be_objc_compatible, "param type of Objective-C mirror constructor must be Objective-C compatible")
-ERROR(sema_objc_mirror_method_param_must_be_objc_compatible, "param type of Objective-C mirror method must be Objective-C compatible")
-ERROR(sema_objc_mirror_method_ret_must_be_objc_compatible, "return type of Objective-C mirror method must be Objective-C compatible")
-ERROR(sema_objc_mirror_prop_must_be_objc_compatible, "Objective-C mirror property type must be Objective-C compatible")
-ERROR(sema_objc_mirror_field_must_be_objc_compatible, "Objective-C mirror field type must be Objective-C compatible")
+ERROR(sema_objc_interop_ctor_param_must_be_objc_compatible, "param type of %s constructor must be Objective-C compatible")
+ERROR(sema_objc_interop_method_param_must_be_objc_compatible, "param type of %s method must be Objective-C compatible")
+ERROR(sema_objc_interop_method_ret_must_be_objc_compatible, "return type of %s method must be Objective-C compatible")
+ERROR(sema_objc_interop_prop_must_be_objc_compatible, "%s property type must be Objective-C compatible")
+ERROR(sema_objc_interop_field_must_be_objc_compatible, "%s field type must be Objective-C compatible")
 ERROR(sema_objc_mirror_decl_cannot_inherit, "Objective-C mirror cannot inherit other supertypes")
 ERROR(sema_objc_mirror_subtype_cannot_multiple_inherit, "Objective-C mirror subtype cannot inherit multiple types (only 1 interface or 1 class is allowed)")
 ERROR(sema_objc_mirror_subtype_must_be_annotated, "Objective-C mirror subtype must be annotated with @ObjCMirror or @ObjCImpl")
-ERROR(sema_objc_mirror_subtype_must_inherit_mirror, "Objective-C mirror subtype must inherit Objective-C mirror")
+ERROR(sema_objc_mirror_subtype_must_inherit_mirror, "@ObjCImpl declaration must inherit @ObjCMirror")
 ERROR(sema_objc_mirror_must_inherit_mirror, "@ObjCMirror declaration cannot inherit not @ObjCMirror declarations")
 ERROR(sema_objc_mirror_interoplib_must_be_imported, "interoplib.objc must be imported to use Objective-C interoperability")
 ERROR(sema_objc_interop_not_supported, "Objective-C interoperability feature '%s' is not yet supported")
 ERROR(sema_objc_pointer_argument_must_be_objc_compatible, "ObjCPointer can only be used with Objective-C compatible types")
+ERROR(sema_objc_interop_toplevel_param_must_be_objc_compatible, "param type of Objective-C mirror top-level function '%s' must be Objective-C compatible")
+ERROR(sema_objc_interop_toplevel_ret_must_be_objc_compatible, "return type of Objective-C mirror top-level function '%s' must be Objective-C compatible")
+
+// CJMapping for Objective-C
+ERROR(sema_objc_cjmapping_inheritance_interface_not_supported, "cangjie mirror decl type inheritance interface is not supported")
+ERROR(sema_objc_cjmapping_generic_not_supported, "cangjie mirror decl type generic %s is not supported")
 
 ERROR(sema_foreign_name_appeared_in_child, "@ForeignName could not appear on overridden declaration")
 ERROR(sema_foreign_name_conflicting_annotation, "Declaration '%s' has a conflicting @ForeignName annotation")

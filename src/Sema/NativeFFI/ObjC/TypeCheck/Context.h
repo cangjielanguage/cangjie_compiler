@@ -20,12 +20,12 @@
 namespace Cangjie::Interop::ObjC {
 
 struct TypeCheckContext {
-    explicit TypeCheckContext(AST::ClassLikeDecl& target, DiagnosticEngine& diag, TypeMapper& typeMapper)
+    explicit TypeCheckContext(AST::Decl& target, DiagnosticEngine& diag, TypeMapper& typeMapper)
         : target(target), diag(diag), typeMapper(typeMapper)
     {
     }
 
-    AST::ClassLikeDecl& target;
+    AST::Decl& target;
     DiagnosticEngine& diag;
     TypeMapper& typeMapper;
 };

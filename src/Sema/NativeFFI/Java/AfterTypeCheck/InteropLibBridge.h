@@ -94,6 +94,11 @@ public:
     Ptr<FuncDecl> GetNewGlobalRefDecl();
 
     /**
+     * Java_CFFI_deleteGlobalReference
+     */
+    Ptr<FuncDecl> GetDeleteGlobalRefDecl();
+
+    /**
      * JNIEnv_ptr
      */
     Ptr<TypeAliasDecl> GetJniEnvPtrDecl();
@@ -374,6 +379,11 @@ public:
      * Java_CFFI_newGlobalReference(env, obj, isWeak)
      */
     OwnedPtr<CallExpr> CreateNewGlobalRefCall(OwnedPtr<Expr> env, OwnedPtr<Expr> obj, bool isWeak);
+
+    /**
+     * Java_CFFI_deleteGlobalReference(env, obj)
+     */
+    OwnedPtr<CallExpr> CreateDeleteGlobalRefCall(OwnedPtr<Expr> env, OwnedPtr<Expr> obj);
 
     /**
      * CFFI method call:

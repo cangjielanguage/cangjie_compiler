@@ -175,6 +175,7 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeFuncDeclBylambda(Decl& decl, Ow
     fdecl->EnableAttr(Attribute::GLOBAL);
     fdecl->EnableAttr(Attribute::PUBLIC);
     fdecl->EnableAttr(Attribute::NO_MANGLE);
+    fdecl->EnableAttr(Attribute::UNSAFE);
     fdecl->curFile = decl.curFile;
     fdecl->moduleName = decl.moduleName;
     fdecl->fullPackageName = decl.fullPackageName;

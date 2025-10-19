@@ -17,6 +17,10 @@ void DiagJavaImplRedefinitionInJava(DiagnosticEngine& diag, const ClassLikeDecl&
 void DiagJavaMirrorChildMustBeAnnotated(DiagnosticEngine& diag, const ClassLikeDecl& decl);
 void DiagJavaDeclCannotInheritPureCangjieType(DiagnosticEngine& diag, ClassLikeDecl& decl);
 void DiagJavaDeclCannotBeExtendedWithInterface(DiagnosticEngine& diag, ExtendDecl& decl);
-}
+void DiagUsageOfJavaTypes(DiagnosticEngine& diag, const Decl& varDecl, std::vector<Ptr<Decl>>&& javaDecls,
+    Ptr<Decl> nonJavaOuterDecl = nullptr);
+void DiagJavaTypesAsGenericParam(DiagnosticEngine& diag, const Node& expr, std::vector<Ptr<Decl>>&& javaDecls);
+
+} // namespace Cangjie::Interop::Java
 
 #endif // CANGJIE_SEMA_NATIVE_FFI_JAVA_DIAGS

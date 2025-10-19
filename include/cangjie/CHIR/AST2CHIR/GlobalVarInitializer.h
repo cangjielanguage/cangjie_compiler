@@ -74,7 +74,7 @@ private:
     T* TryGetDeserialized(const std::string& mangledName)
     {
         // merging platform
-        if (opts.inputChirFiles.size() == 1) {
+        if (opts.IsCompilingCJMP()) {
             return TryGetFromCache<Value, T>(GLOBAL_VALUE_PREFIX + mangledName, trans.deserializedVals);
         }
         return nullptr;

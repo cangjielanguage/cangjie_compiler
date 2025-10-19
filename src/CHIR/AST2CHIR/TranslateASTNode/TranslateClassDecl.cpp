@@ -293,19 +293,27 @@ void Translator::AddMemberMethodToCustomTypeDef(const AST::FuncDecl& decl, Custo
 
 inline bool Translator::IsOpenPlatformReplaceAbstractCommon(ClassDef& classDef, const AST::FuncDecl& decl) const
 {
+    // Case 1: Open methods in abstract classes
     bool isAbstractClass = classDef.IsClass() && classDef.IsAbstract();
     bool isOpenInAbstractClass = decl.TestAttr(AST::Attribute::OPEN) && isAbstractClass;
+    // Case 2: Static methods in interfaces
     bool isStaticAbstractInInterface = classDef.IsInterface() && decl.TestAttr(AST::Attribute::STATIC);
-    if (decl.TestAttr(AST::Attribute::PLATFORM) && (isOpenInAbstractClass || isStaticAbstractInInterface)) {
-        const std::string expectedMangledName = decl.mangledName;
+    // Case 3: Platform providing concrete implementation for abstract interface method
+    /**
+     * public common interface I {
+     *      common func foo1(): Unit
+     * }
+     *
+     * public platform interface I {
+     *      platform func foo1(): Unit { println("foo1 of I in platform") }
+     * }
+     *
+     */
+    bool isNonAbstractMemberInInterface = classDef.IsInterface() && !decl.TestAttr(AST::Attribute::ABSTRACT);
 
-        for (auto method : classDef.GetMethods()) {
-            if (method->GetIdentifierWithoutPrefix() == expectedMangledName) {
-                // implementation already added
-                return false;
-            }
-        }
-
+    if (decl.TestAttr(AST::Attribute::PLATFORM) &&
+        (isOpenInAbstractClass || isStaticAbstractInInterface || isStaticAbstractInInterface ||
+            isNonAbstractMemberInInterface)) {
         return true;
     }
 
@@ -332,19 +340,25 @@ void Translator::TranslateClassLikeMemberFuncDecl(ClassDef& classDef, const AST:
     // 3. a func, not ABSTRACT, should be found in global symbol table
     // It is not already translated if cjmp package is imported into current,
     // however in other cases adding platform declaration cause duplication.
-    bool needToTranslate = false;
-    if (IsOpenPlatformReplaceAbstractCommon(classDef, decl)) {
-        RemoveAbstractMethod(classDef, decl);
-        needToTranslate = true;
+    if (mergingPlatform && classDef.TestAttr(CHIR::Attribute::DESERIALIZED)) {
+        // Skip if method already exists in deserialized class
+        for (auto method : classDef.GetMethods()) {
+            if (method->GetIdentifierWithoutPrefix() == decl.mangledName) {
+                return;
+            }
+        }
+        if (IsOpenPlatformReplaceAbstractCommon(classDef, decl)) {
+            RemoveAbstractMethod(classDef, decl);
+        }
+        for (auto abstractMethod : classDef.GetAbstractMethods()) {
+            if (abstractMethod.GetASTMangledName() == decl.mangledName) {
+                return;
+            }
+        }
     }
-    needToTranslate |= !(decl.TestAttr(AST::Attribute::PLATFORM) && mergingPlatform);
-    if (!needToTranslate) {
-        return;
-    }
-
     if (decl.TestAttr(AST::Attribute::ABSTRACT)) {
         TranslateAbstractMethod(classDef, decl, false);
-    } else if (needToTranslate) {
+    } else {
         AddMemberMethodToCustomTypeDef(decl, classDef);
         if (classDef.IsInterface()) {
             // Member of interface should be recorded in abstract method.

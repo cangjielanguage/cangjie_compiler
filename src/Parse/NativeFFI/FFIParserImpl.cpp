@@ -70,7 +70,7 @@ void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos)
     }
 }
 
-void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos) const
+void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const
 {
     for (auto& it : annos) {
         auto& anno = *it;
@@ -85,9 +85,13 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos) const
                 CheckForeignNameAnnoTarget(anno);
                 break;
             }
+            case AnnotationKind::JAVA_HAS_DEFAULT: {
+                jp.CheckJavaHasDefaultAnnotation(anno);
+                break;
+            }
             case AnnotationKind::OBJ_C_MIRROR:
             case AnnotationKind::OBJ_C_IMPL: {
-                op.CheckAnnotation(anno);
+                op.CheckAnnotation(anno, scopeKind);
                 break;
             }
             default: continue;
@@ -179,6 +183,20 @@ void FFIParserImpl::CheckClassLikeSignature(AST::ClassLikeDecl& decl, const PtrV
         }
     }
 }
+
+
+void FFIParserImpl::CheckFuncSignature(AST::FuncDecl& decl, const PtrVector<Annotation>& annos) const
+{
+    for (auto& anno : annos) {
+        switch (anno->kind) {
+            case AnnotationKind::OBJ_C_MIRROR:
+                op.CheckMirrorSignature(decl, annos);
+                break;
+            default: break;
+        }
+    }
+}
+
 
 namespace Native::FFI {
 

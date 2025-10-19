@@ -19,9 +19,11 @@
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Utils.h"
 #include "../../../InheritanceChecker/StructInheritanceChecker.h"
+#include "NativeFFI/Utils.h"
 
 namespace Cangjie::Interop::Java {
 using namespace AST;
+using namespace Cangjie::Native::FFI;
 
 enum class ArrayOperationKind: uint8_t {
     CREATE,
@@ -218,6 +220,7 @@ bool IsMirror(const Ty& ty);
 
 bool IsImpl(const Decl& decl);
 bool IsImpl(const Ty& ty);
+bool IsCJMappingInterface(const Ty& ty);
 bool IsCJMapping(const Ty& ty);
 
 ArrayOperationKind GetArrayOperationKind(Decl& decl);
@@ -243,14 +246,6 @@ void WrapArg(std::vector<OwnedPtr<FuncArg>>* funcArgs, OwnedPtr<T>&& e)
     }
 }
 
-}
-
-template <typename T>
-OwnedPtr<T> WithinFile(OwnedPtr<T> node, Ptr<File> curFile)
-{
-    CJC_NULLPTR_CHECK(curFile);
-    node->curFile = curFile;
-    return node;
 }
 
 template <typename... Args>

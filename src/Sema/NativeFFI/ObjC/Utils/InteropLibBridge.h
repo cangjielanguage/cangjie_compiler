@@ -116,7 +116,8 @@ private:
         const auto interoplibObjCPackageName = "interoplib.objc";
         auto decl = importManager.GetImportedDecl(interoplibObjCPackageName, ident);
         if (!decl) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_member_not_imported, DEFAULT_POSITION, ident);
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_member_not_imported, DEFAULT_POSITION,
+                interoplibObjCPackageName + std::string(".") + ident);
             return Ptr(AST::As<K>(nullptr));
         }
 

@@ -17,17 +17,21 @@ using namespace Cangjie::Interop::ObjC;
 
 void GenerateInitCJObjectMethods::HandleImpl(InteropContext& ctx)
 {
-    for (auto& impl : ctx.impls) {
-        if (impl->TestAttr(Attribute::IS_BROKEN)) {
-            continue;
+    auto genNativeInitMethod = [&ctx](Decl& decl) {
+        if (decl.TestAttr(Attribute::IS_BROKEN)) {
+            return;
         }
 
-        for (auto& memberDecl : impl->GetMemberDeclPtrs()) {
+        for (auto& memberDecl : decl.GetMemberDeclPtrs()) {
             if (memberDecl->TestAttr(Attribute::IS_BROKEN)) {
                 continue;
             }
 
             if (!memberDecl->TestAttr(Attribute::CONSTRUCTOR)) {
+                continue;
+            }
+
+            if (!memberDecl->TestAttr(Attribute::PUBLIC)) {
                 continue;
             }
 
@@ -43,9 +47,14 @@ void GenerateInitCJObjectMethods::HandleImpl(InteropContext& ctx)
                 continue;
             }
 
-            auto initCjObject = ctx.factory.CreateInitCjObject(*impl, ctorDecl);
+            auto initCjObject = ctx.factory.CreateInitCjObject(decl, ctorDecl, false);
             CJC_ASSERT(initCjObject);
             ctx.genDecls.emplace_back(std::move(initCjObject));
         }
+    };
+
+    for (auto& impl : ctx.impls) {
+        genNativeInitMethod(*impl);
     }
+
 }

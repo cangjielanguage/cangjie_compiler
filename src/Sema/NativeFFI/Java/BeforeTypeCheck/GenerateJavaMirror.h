@@ -8,12 +8,13 @@
 #define CANGJIE_SEMA_NATIVE_FFI_JAVA_BEFORE_TYPECHECK_GENERATE_JAVA_MIRROR
 
 #include "cangjie/AST/Node.h"
+#include "cangjie/Modules/ImportManager.h"
 
 
 namespace Cangjie::Interop::Java {
 using namespace AST;
 
-void PrepareTypeCheck(Package& pkg);
+void PrepareTypeCheck(Package& pkg, const ImportManager& importManager, TypeManager& typeManager);
 }
 
 #endif

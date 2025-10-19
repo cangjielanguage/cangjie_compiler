@@ -8,12 +8,33 @@
 
 #include "cangjie/CHIR/CHIRCasting.h"
 #include "cangjie/CHIR/Expression/Terminator.h"
+#include "cangjie/CHIR/NativeFFI/Utils.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 
 using namespace Cangjie::CHIR;
-
 namespace {
-const std::string HAS_INITED_VAR_NAME = "$hasInited";
+
+std::vector<uint64_t> AddHasInitedField(ClassDef& classDef, CHIRBuilder& builder)
+{
+    // Java and Objective-C mirrors have this field generated from AST.
+    if (Native::FFI::IsMirror(classDef)) {
+        return Native::FFI::FindHasInitedField(classDef);
+    }
+
+    auto attributeInfo = AttributeInfo();
+    attributeInfo.SetAttr(Attribute::NO_REFLECT_INFO, true);
+    attributeInfo.SetAttr(Attribute::COMPILER_ADD, true);
+    attributeInfo.SetAttr(Attribute::PRIVATE, true);
+    attributeInfo.SetAttr(Attribute::HAS_INITED_FIELD, true);
+    classDef.AddInstanceVar(MemberVarInfo{
+        .name = Cangjie::HAS_INITED_IDENT,
+        .type = builder.GetBoolTy(),
+        .attributeInfo = attributeInfo,
+        .outerDef = &classDef
+    });
+
+    return std::vector<uint64_t>{ classDef.GetAllInstanceVarNum() - 1 };
+}
 
 void AddHasInitedFlagToImportedClass(const Package& package, CHIRBuilder& builder)
 {
@@ -21,17 +42,7 @@ void AddHasInitedFlagToImportedClass(const Package& package, CHIRBuilder& builde
         if (!classDef->GetFinalizer()) {
             continue;
         }
-        auto attributeInfo = AttributeInfo();
-        attributeInfo.SetAttr(Attribute::NO_REFLECT_INFO, true);
-        attributeInfo.SetAttr(Attribute::COMPILER_ADD, true);
-        attributeInfo.SetAttr(Attribute::PRIVATE, true);
-        auto memberVar = MemberVarInfo {
-            .name = HAS_INITED_VAR_NAME,
-            .type = builder.GetBoolTy(),
-            .attributeInfo = attributeInfo,
-            .outerDef = classDef
-        };
-        classDef->AddInstanceVar(memberVar);
+        AddHasInitedField(*classDef, builder);
     }
 }
 
@@ -123,18 +134,8 @@ void MarkClassHasInited::RunOnPackage(const Package& package, CHIRBuilder& build
         if (!classDef->GetFinalizer()) {
             continue;
         }
-        auto attributeInfo = AttributeInfo();
-        attributeInfo.SetAttr(Attribute::NO_REFLECT_INFO, true);
-        attributeInfo.SetAttr(Attribute::COMPILER_ADD, true);
-        attributeInfo.SetAttr(Attribute::PRIVATE, true);
-        auto memberVar = MemberVarInfo {
-            .name = HAS_INITED_VAR_NAME,
-            .type = builder.GetBoolTy(),
-            .attributeInfo = attributeInfo,
-            .outerDef = classDef
-        };
-        classDef->AddInstanceVar(memberVar);
-        auto index = std::vector<uint64_t>{classDef->GetAllInstanceVarNum() - 1};
+        auto index = AddHasInitedField(*classDef, builder);
+        CJC_ASSERT(!index.empty());
 
         for (auto& funcBase : classDef->GetMethods()) {
             if (auto func = DynamicCast<Func*>(funcBase); func && func->IsConstructor()) {

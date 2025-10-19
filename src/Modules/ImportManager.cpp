@@ -275,8 +275,8 @@ std::vector<uint8_t> ImportManager::ExportASTSignature(const Package& pkg)
 void ImportManager::ExportDeclsWithContent(bool saveFileWithAbsPath, Package& package)
 {
     // NOTE: If 'importSrcCode' is disabled, we also do not need to export source code.
-    auto writer = new ASTWriter(diag, GeneratePkgDepInfo(package), {importSrcCode, false, opts.exportForTest,
-        saveFileWithAbsPath, opts.compileCjd}, *cjoManager);
+    auto writer = new ASTWriter(diag, GeneratePkgDepInfo(package),
+        {importSrcCode, false, opts.exportForTest, saveFileWithAbsPath, opts.compileCjd}, *cjoManager);
     if (opts.outputMode == GlobalOptions::OutputMode::CHIR) {
         writer->SetSerializingCommon();
     }
@@ -454,6 +454,9 @@ bool ImportManager::ResolveImportedPackages(const std::vector<Ptr<Package>>& pac
     bool success = true;
     for (auto pkg : packages) {
         curPackage = pkg;
+        // Files of common part need to be loaded in advance,
+        // to be able to handle `import`s of common part.
+        cjoManager->LoadFilesOfCommonPart(pkg);
         success = ResolveImportedPackageHeaders(*curPackage, false) && success;
     }
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
@@ -782,10 +785,10 @@ static void CheckPackageSpecsIdentical(DiagnosticEngine& diag, const Package& pk
             }
             auto fullPackageName = file->package->GetPackageName();
             auto keyPair = std::make_pair(std::move(fullPackageName), GetAccessLevelStr(*file->package));
- 
+
             if (!Utils::InKeys(keyPair, packageNamePosMap)) {
-                auto position = file->package->prefixPaths.empty()
-                    ? file->package->packageName.Begin() : file->package->prefixPoses.front();
+                auto position = file->package->prefixPaths.empty() ? file->package->packageName.Begin()
+                                                                   : file->package->prefixPoses.front();
                 packageNamePosMap[keyPair] = {position, true};
             }
         }

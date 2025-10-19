@@ -122,7 +122,7 @@ OwnedPtr<Expr> CreateBoolMatch(
     return WithinFile(CreateMatchExpr(std::move(selector), std::move(matchCases), ty), curFile);
 }
 
-StructDecl& GetStringDecl(ImportManager& importManager)
+StructDecl& GetStringDecl(const ImportManager& importManager)
 {
     static auto decl = importManager.GetCoreDecl<StructDecl>(STD_LIB_STRING);
     CJC_NULLPTR_CHECK(decl);

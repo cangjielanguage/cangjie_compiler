@@ -324,6 +324,7 @@ OwnedPtr<CallExpr> JavaDesugarManager::DesugarJavaImplSuperCall(const FuncDecl& 
 {
     auto& paramList = *ctor.funcBody->paramLists[0];
     auto decl = As<ASTKind::CLASS_LIKE_DECL>(ctor.outerDecl);
+    CJC_NULLPTR_CHECK(decl);
     // super call
     auto superCall = TryGetSuperCall(ctor);
     CJC_NULLPTR_CHECK(superCall);
@@ -685,7 +686,7 @@ OwnedPtr<Expr> JavaDesugarManager::CreateIsInstanceCall(Ptr<VarDecl> jObjectVar,
     auto javaRefExpr = CreateJavaRefCall(WithinFile(CreateRefExpr(*jObjectVar), curFile));
 
     auto nameLit = CreateLitConstExpr(
-        LitConstKind::STRING, utils.GetJavaTypeSignature(*classTy),
+        LitConstKind::STRING, utils.GetJavaClassNormalizeSignature(*classTy),
         isInstanceOfDecl->funcBody->paramLists[0]->params[2]->ty);
 
     return CreateCall(isInstanceOfDecl, curFile, std::move(jniEnvCall), std::move(javaRefExpr), std::move(nameLit));
@@ -868,6 +869,7 @@ void JavaDesugarManager::DesugarMatchCase(MatchCase& matchCase)
         // Pattern under type pattern is always either wildcard or var
         CJC_ASSERT(varPat);
         auto originalTy = varPat->ty;
+        CJC_NULLPTR_CHECK(originalTy);
 
         pat->type = CreateType(jObjectDecl->ty);
         varPat->ty = jObjectDecl->ty;

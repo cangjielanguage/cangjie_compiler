@@ -41,7 +41,10 @@ void DesugarMirrors::HandleImpl(InteropContext& ctx)
                     auto& fd = *StaticAs<ASTKind::FUNC_DECL>(memberDecl);
                     if (fd.TestAttr(Attribute::CONSTRUCTOR)) {
                         DesugarCtor(ctx, *mirror, fd);
+                    } else if (fd.TestAttr(Attribute::FINALIZER)) {
+                        continue;
                     } else {
+                        // method branch
                         DesugarMethod(ctx, *mirror, fd);
                     }
                     break;
@@ -63,6 +66,13 @@ void DesugarMirrors::HandleImpl(InteropContext& ctx)
                     break;
             }
         }
+    }
+
+    for (auto&& mirror : ctx.mirrorTopLevelFuncs) {
+        if (mirror->TestAttr(Attribute::IS_BROKEN)) {
+            continue;
+        }
+        DesugarTopLevelFunc(ctx, *mirror);
     }
 }
 
@@ -104,9 +114,64 @@ void DesugarMirrors::DesugarMethod(InteropContext& ctx, ClassLikeDecl& mirror, F
 
     auto arpScopeCall = ctx.factory.CreateAutoreleasePoolScope(methodTy->retTy,
         Nodes(ctx.factory.CreateMethodCallViaMsgSend(method, std::move(nativeHandle), std::move(msgSendArgs))));
+    arpScopeCall->curFile = curFile;
 
     method.funcBody->body = CreateBlock({}, methodTy->retTy);
     method.funcBody->body->body.emplace_back(ctx.factory.WrapEntity(std::move(arpScopeCall), *methodTy->retTy));
+}
+
+void DesugarMirrors::DesugarTopLevelFunc(InteropContext& ctx, FuncDecl& func)
+{
+    auto methodTy = StaticCast<FuncTy>(func.ty);
+    std::vector<Ptr<Ty>> cParamTys;
+    std::transform(methodTy->paramTys.begin(), methodTy->paramTys.end(), std::back_inserter(cParamTys),
+        [&ctx](auto& paramTy) { return ctx.typeMapper.Cj2CType(paramTy); });
+    auto cFuncTy = ctx.typeManager.GetFunctionTy(
+        cParamTys,
+        ctx.typeMapper.Cj2CType(methodTy->retTy),
+        FuncTy::Config { .isC = true }
+    );
+    auto curFile = func.curFile;
+    std::vector<OwnedPtr<FuncParam>> funcParams;
+    std::transform(cParamTys.begin(), cParamTys.end(), std::back_inserter(funcParams),
+        [](auto& paramTy) { return CreateFuncParam("_", CreateType(paramTy), nullptr, paramTy); });
+    auto funcParamList = CreateFuncParamList(std::move(funcParams), nullptr);
+    std::vector<OwnedPtr<FuncParamList>> funcParamLists;
+    funcParamLists.push_back(std::move(funcParamList));
+    auto cFuncDecl = CreateFuncDecl(
+            func.identifier.Val(),
+            CreateFuncBody(std::move(funcParamLists), CreateType(cFuncTy->retTy), nullptr,
+                cFuncTy
+            )
+        );
+    CopyBasicInfo(&func, cFuncDecl);
+    cFuncDecl->EnableAttr(
+        Attribute::C,
+        Attribute::GLOBAL,
+        Attribute::NO_MANGLE,
+        Attribute::UNSAFE,
+        Attribute::FOREIGN
+    );
+    cFuncDecl->curFile = func.curFile;
+    cFuncDecl->moduleName = func.moduleName;
+    cFuncDecl->fullPackageName = func.fullPackageName;
+
+    std::vector<OwnedPtr<FuncArg>> nativeCallArgs;
+
+    auto& params = func.funcBody->paramLists[0]->params;
+    std::transform(params.begin(), params.end(), std::back_inserter(nativeCallArgs),
+        [&ctx, curFile](auto& param) { return CreateFuncArg(ctx.factory.UnwrapEntity(WithinFile(CreateRefExpr(*param), curFile))); });
+
+    auto funcAccess = WithinFile(CreateRefExpr(*cFuncDecl), func.curFile);
+
+    auto call = CreateCallExpr(std::move(funcAccess), std::move(nativeCallArgs), cFuncDecl, cFuncTy->retTy, CallKind::CALL_DECLARED_FUNCTION);
+    CopyBasicInfo(&func, call);
+
+    auto arpScopeCall = ctx.factory.CreateAutoreleasePoolScope(methodTy->retTy, Nodes(std::move(call)));
+
+    func.funcBody->body = CreateBlock({}, methodTy->retTy);
+    func.funcBody->body->body.emplace_back(ctx.factory.WrapEntity(std::move(arpScopeCall), *methodTy->retTy));
+    ctx.genDecls.push_back(std::move(cFuncDecl));
 }
 
 namespace {

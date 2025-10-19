@@ -83,6 +83,7 @@ const std::unordered_map<ASTKind, std::string> KIND_TO_STR = {
     {ASTKind::TUPLE_PATTERN, "tuple"},
     {ASTKind::WILDCARD_PATTERN, "wildcard"},
     {ASTKind::FUNC_PARAM, "parameter"},
+    {ASTKind::TYPE_ALIAS_DECL, "type"}
 };
 
 std::string GetDiagKind(const AST::Node& node)
@@ -175,11 +176,6 @@ bool MPParserImpl::CheckCJMPModifiersOf(const AST::Decl& decl) const
 {
     if (decl.IsCommonOrPlatform()) {
         auto kind = decl.TestAttr(Attribute::COMMON) ? "common" : "platform";
-        // generic decl
-        if (decl.TestAttr(Attribute::GENERIC)) {
-            ref->diag.DiagnoseRefactor(DiagKindRefactor::parse_cjmp_generic_decl, decl, kind);
-            return false;
-        }
         // tuple, enum, _ pattern
         if (decl.astKind == ASTKind::VAR_WITH_PATTERN_DECL && decl.TestAttr(Attribute::COMMON)) {
             auto& varDecl = StaticCast<AST::VarWithPatternDecl&>(decl);

@@ -10,6 +10,7 @@
 #include "TypeCheckUtil.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Create.h"
+#include "NativeFFI/Utils.h"
 
 namespace {
 
@@ -35,6 +36,7 @@ constexpr auto INTEROPLIB_JAVA_ENTITY_KIND_JBOOLEAN = "JBOOLEAN";
 // funcs
 constexpr auto INTEROPLIB_JNI_GET_ENV_ID = "Java_CFFI_get_env";
 constexpr auto INTEROPLIB_CFFI_NEW_GLOBAL_REF_ID = "Java_CFFI_newGlobalReference";
+constexpr auto INTEROPLIB_CFFI_DELETE_GLOBAL_REF_ID = "Java_CFFI_deleteGlobalReference";
 constexpr auto INTEROPLIB_CFFI_NEW_JAVA_OBJECT_ID = "Java_CFFI_newJavaObject";
 constexpr auto INTEROPLIB_CFFI_NEW_JAVA_ARRAY_ID = "Java_CFFI_newJavaArray";
 constexpr auto INTEROPLIB_CFFI_NEW_JAVA_PROXY_OBJECT_FOR_CJMAPPING_ID = "Java_CFFI_newJavaProxyObjectForCJMapping";
@@ -52,7 +54,6 @@ constexpr auto INTEROPLIB_CFFI_CALL_METHOD_DECL_ID = "Java_CFFI_callVirtualMetho
 constexpr auto INTEROPLIB_CFFI_NON_VIRT_CALL_METHOD_DECL_ID = "Java_CFFI_callMethod";
 constexpr auto INTEROPLIB_CFFI_CALL_STATIC_METHOD_DECL_ID = "Java_CFFI_callStaticMethod";
 constexpr auto INTEROPLIB_CFFI_UNWRAP_JAVA_ENTITY_METHOD_DECL_ID = "Java_CFFI_unwrapJavaEntityAsValue";
-constexpr auto INTEROPLIB_CFFI_UNWRAP_JAVA_MIRROR_METHOD_DECL_ID = "Java_CFFI_unwrapJavaMirror";
 constexpr auto INTEROPLIB_CFFI_GET_FROM_REGISTRY_METHOD_DECL_ID = "Java_CFFI_getFromRegistry";
 constexpr auto INTEROPLIB_CFFI_GET_FROM_REGISTRY_OPTION_METHOD_DECL_ID = "Java_CFFI_getFromRegistryOption";
 constexpr auto INTEROPLIB_CFFI_GET_FIELD_METHOD_DECL_ID = "Java_CFFI_getField";
@@ -85,6 +86,8 @@ using namespace Sema::Desugar::AfterTypeCheck;
 
 namespace Cangjie::Interop::Java {
 
+using namespace Cangjie::Native::FFI;
+
 // declarations
 
 Ptr<TypeAliasDecl> InteropLibBridge::GetJobjectDecl()
@@ -116,6 +119,11 @@ Decl& InteropLibBridge::GetJavaEntityKindJObject()
 Ptr<FuncDecl> InteropLibBridge::GetNewGlobalRefDecl()
 {
     return GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_CFFI_NEW_GLOBAL_REF_ID);
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetDeleteGlobalRefDecl()
+{
+    return GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_CFFI_DELETE_GLOBAL_REF_ID);
 }
 
 Ptr<FuncDecl> InteropLibBridge::GetGetJniEnvDecl()
@@ -201,11 +209,6 @@ Ptr<FuncDecl> InteropLibBridge::GetPutToRegistrySelfInitDecl()
 Ptr<FuncDecl> InteropLibBridge::GetUnwrapJavaEntityDecl()
 {
     return GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_CFFI_UNWRAP_JAVA_ENTITY_METHOD_DECL_ID);
-}
-
-Ptr<FuncDecl> InteropLibBridge::GetUnwrapJavaMirrorDecl()
-{
-    return GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_CFFI_UNWRAP_JAVA_MIRROR_METHOD_DECL_ID);
 }
 
 Ptr<FuncDecl> InteropLibBridge::GetGetFromRegistryByEntityOptionDecl()
@@ -750,6 +753,12 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateNewGlobalRefCall(OwnedPtr<Expr> env, 
     isWeakBoolValue->ty = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
 
     return CreateCall(GetNewGlobalRefDecl(), curFile, std::move(env), std::move(obj), std::move(isWeakBoolValue));
+}
+
+OwnedPtr<CallExpr> InteropLibBridge::CreateDeleteGlobalRefCall(OwnedPtr<Expr> env, OwnedPtr<Expr> obj)
+{
+    auto curFile = obj->curFile;
+    return CreateCall(GetDeleteGlobalRefDecl(), curFile, std::move(env), std::move(obj));
 }
 
 OwnedPtr<CallExpr> InteropLibBridge::CreateCallMethodCall(OwnedPtr<Expr> env, OwnedPtr<Expr> obj,

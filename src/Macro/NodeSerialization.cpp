@@ -55,7 +55,7 @@ flatbuffers::Offset<NodeFormat::FeaturesDirective> NodeWriter::SerializeFeatures
     auto items = builder.CreateVector(itemsVec);
     return NodeFormat::CreateFeaturesDirective(builder, ftrNodeBase, items, commas);
 }
- 
+
 flatbuffers::Offset<NodeFormat::FeatureId> NodeWriter::SerializeFeatureId(const AST::FeatureId& content)
 {
     auto nodeBase = SerializeNodeBase(&content);
@@ -1100,7 +1100,10 @@ flatbuffers::Offset<NodeFormat::MacroInvocation> NodeWriter::MacroInvocationCrea
     auto argsTokens = TokensVectorCreateHelper(macroInvocation.args);
     auto args = builder.CreateVector(argsTokens);
 
-    auto decl = SerializeDecl(macroInvocation.decl.get());
+    flatbuffers::Offset<NodeFormat::Decl> decl;
+    if (macroInvocation.decl != nullptr) {
+        decl = SerializeDecl(macroInvocation.decl.get());
+    }
     auto hasParenthesis = macroInvocation.hasParenthesis;
     auto isCompileTimeVisible = macroInvocation.isCompileTimeVisible;
     return NodeFormat::CreateMacroInvocation(builder, fullName, identifier, &identifierPos, &leftSquarePos,

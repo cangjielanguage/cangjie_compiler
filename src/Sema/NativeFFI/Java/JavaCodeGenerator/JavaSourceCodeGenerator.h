@@ -55,6 +55,7 @@ private:
         const std::vector<OwnedPtr<FuncParamList>>& paramLists, bool isNativeMethod = false);
     void ConstructResult() override;
     void AddClassDeclaration();
+    void AddInterfaceDeclaration();
     void AddLoadLibrary();
     void AddSelfIdField();
     void AddProperties();
@@ -76,6 +77,7 @@ private:
     void AddInstanceMethod(const FuncDecl& funcDecl);
     void AddStaticMethod(const FuncDecl& funcDecl);
     void AddMethods();
+    void AddInterfaceMethods();
     void AddEndClassParenthesis();
     void AddNativeInitCJObject(const std::vector<OwnedPtr<Cangjie::AST::FuncParam>> &params);
     void AddNativeDeleteCJObject();
@@ -83,6 +85,7 @@ private:
     void AddHeader();
     void AddPrivateCtorForCJMappring();
     void AddPrivateCtorForCJMappringEnum();
+    void AddEqualOrIdentityMethod(bool hasHascodeMethod, bool hasEqualsMethod, bool hasToStringMethod);
 };
 } // namespace Cangjie::Interop::Java
 

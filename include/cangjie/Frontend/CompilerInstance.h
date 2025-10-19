@@ -491,6 +491,11 @@ public:
     std::vector<const AST::Decl*> order;
 
     /// Used by CJLint
+    bool IsBuildTrie() const
+    {
+        return buildTrie;
+    }
+
     void SetBuildTrie(bool flag)
     {
         buildTrie = flag;

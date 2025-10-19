@@ -49,6 +49,16 @@ public:
      */
     OwnedPtr<AST::Expr> WrapEntity(OwnedPtr<AST::Expr> expr, AST::Ty& wrapTy);
 
+    // Option type handling
+    Ptr<AST::Ty> GetOptionTy(Ptr<AST::Ty> ty);
+    Ptr<AST::EnumDecl> GetOptionDecl();
+    Ptr<AST::Decl> GetOptionSomeDecl();
+    Ptr<AST::Decl> GetOptionNoneDecl();
+    OwnedPtr<AST::Expr> CreateOptionSomeRef(Ptr<AST::Ty> ty);
+    OwnedPtr<AST::Expr> CreateOptionNoneRef(Ptr<AST::Ty> ty);
+    OwnedPtr<AST::Expr> CreateOptionSomeCall(OwnedPtr<AST::Expr> expr, Ptr<AST::Ty> ty);
+    OwnedPtr<AST::Expr> CreateMirrorConstructorCall(OwnedPtr<AST::Expr> entity, Ptr<AST::Ty> mirrorTy);
+
     /**
      * Returns native handle for decl mirror/impl type.
      * If `isStatic`, then returns handle related to class. (objc_getClass)
@@ -68,8 +78,9 @@ public:
 
     OwnedPtr<AST::VarDecl> CreateNativeHandleField(AST::ClassDecl& target);
     OwnedPtr<AST::Expr> CreateNativeHandleInit(AST::FuncDecl& ctor);
-    OwnedPtr<AST::FuncDecl> CreateInitCjObject(const AST::ClassDecl& target, AST::FuncDecl& ctor);
-    OwnedPtr<AST::FuncDecl> CreateDeleteCjObject(AST::ClassDecl& target);
+    OwnedPtr<AST::FuncDecl> CreateInitCjObject(
+        const AST::Decl& target, AST::FuncDecl& ctor, bool generateForOneWayMapping = false);
+    OwnedPtr<AST::FuncDecl> CreateDeleteCjObject(AST::Decl& target, bool generateForOneWayMapping = false);
     /**
      * Returns generated top-level @C function (callable from obj-c) that calls @ObjCImpl `originMethod`.
      */
@@ -79,14 +90,15 @@ public:
     OwnedPtr<AST::FuncDecl> CreateGetterWrapper(AST::VarDecl& field);
     OwnedPtr<AST::FuncDecl> CreateSetterWrapper(AST::VarDecl& field);
     OwnedPtr<AST::ThrowExpr> CreateThrowUnreachableCodeExpr(AST::File& file);
-    std::set<Ptr<AST::FuncDecl>> GetAllParentCtors(AST::ClassDecl& target);
+    std::set<Ptr<AST::FuncDecl>> GetAllParentCtors(AST::ClassDecl& target) const;
     OwnedPtr<AST::FuncDecl> CreateImplCtor(AST::ClassDecl& target, AST::FuncDecl& from);
     OwnedPtr<AST::FuncDecl> CreateMirrorCtorDecl(AST::ClassDecl& target);
-    bool IsGeneratedMember(const AST::Decl& decl);
-    bool IsGeneratedNativeHandleField(const AST::Decl& decl);
-    bool IsGeneratedCtor(const AST::Decl& decl);
+    bool IsGeneratedMember(const AST::Decl& decl) const;
+    bool IsGeneratedNativeHandleField(const AST::Decl& decl) const;
+    bool IsGeneratedHasInitedField(const AST::Decl& decl) const;
+    bool IsGeneratedCtor(const AST::Decl& decl) const;
     Ptr<AST::FuncDecl> GetGeneratedMirrorCtor(AST::Decl& decl);
-    Ptr<AST::FuncDecl> GetGeneratedImplCtor(const AST::ClassDecl& impl, const AST::FuncDecl& origin);
+    Ptr<AST::FuncDecl> GetGeneratedImplCtor(const AST::Decl& declArg, const AST::FuncDecl& origin);
     OwnedPtr<AST::CallExpr> CreateObjCRuntimeMsgSendCall(
         OwnedPtr<AST::Expr> nativeHandle,
         const std::string& selector,
@@ -118,7 +130,7 @@ public:
     /**
      * ObjCRuntime.alloc(decl)
      */
-    OwnedPtr<AST::CallExpr> CreateAllocCall(AST::ClassDecl& decl, Ptr<AST::File> curFile);
+    OwnedPtr<AST::CallExpr> CreateAllocCall(AST::Decl& decl, Ptr<AST::File> curFile);
 
     OwnedPtr<AST::Expr> CreateMethodCallViaMsgSend(
         AST::FuncDecl& fd,
@@ -137,10 +149,25 @@ public:
     );
 
     OwnedPtr<AST::Expr> CreateAutoreleasePoolScope(Ptr<AST::Ty> ty, std::vector<OwnedPtr<AST::Node>> actions);
+    OwnedPtr<AST::FuncDecl> CreateFinalizer(AST::ClassDecl& mirror);
+    OwnedPtr<AST::VarDecl> CreateHasInitedField(AST::ClassDecl& mirror);
 
     OwnedPtr<AST::Expr> CreateUnsafePointerCast(OwnedPtr<AST::Expr> expr, Ptr<AST::Ty> elementType);
     Ptr<AST::FuncDecl> GetObjCPointerConstructor();
     Ptr<AST::VarDecl> GetObjCPointerPointerField();
+    OwnedPtr<AST::Expr> WrapObjCMirrorOption(
+        const Ptr<AST::Expr> entity, Ptr<AST::ClassLikeDecl> mirror, const Ptr<AST::File> curFile);
+    OwnedPtr<AST::Expr> CreateObjCobjectNull();
+    Ptr<AST::Ty> GetObjCTy();
+    OwnedPtr<AST::Expr> CreateGetObjcEntityOrNullCall(AST::VarDecl &entity, Ptr<AST::File> file);
+    OwnedPtr<AST::Expr> CreateOptionCast(Ptr<AST::VarDecl> jObjectVar, AST::ClassLikeDecl castDecl);
+    OwnedPtr<AST::Expr> UnwrapObjCMirrorOption(
+        OwnedPtr<AST::Expr> entity, Ptr<AST::Ty> ty);
+    OwnedPtr<AST::Expr> CreateOptionMatch(
+        OwnedPtr<AST::Expr> selector,
+        std::function<OwnedPtr<AST::Expr>(AST::VarDecl&)> someBranch,
+        std::function<OwnedPtr<AST::Expr>()> noneBranch,
+        Ptr<AST::Ty> ty);
 
     static constexpr auto NATIVE_HANDLE_IDENT = "$obj";
     static constexpr auto REGISTRY_ID_IDENT = "$registryId";

@@ -57,14 +57,7 @@ public:
     }
 
     /**
-     * Stage 1: for each mirror interface and abstract class, generate a class wich implements
-     * this interface/abstract class.
-     * Such classes are used as wrappers when interface or abstract class type object is returned from java
-     */
-    void GenerateSyntheticClass(File& file);
-
-    /**
-     * Stage 2-3: constructors generation and javaref field insertion.
+     * Stage 1-2: constructors generation and javaref field insertion.
      * The first step: generate members in `JObject` and insert empty constructor in other mirrors. ([doStub] = `false`)
      * The second step: fill pregenerated bodies ([doStub] = `false`)
      */
@@ -73,43 +66,39 @@ public:
     void GenerateInMirror(ClassDecl& classDecl, bool doStub);
 
     /**
-     * Stage 4: desugar constructors, methods, etc
+     * Stage 3: desugar constructors, methods, etc
      */
     void DesugarMirrors(File& file);
 
     /**
-     * Stage 5: generate constructors and native init/deinit/method call functions (callable from java) for @JavaImpl
+     * Stage 4: generate constructors and native init/deinit/method call functions (callable from java) for @JavaImpl
      */
     void GenerateInJavaImpls(File& file);
 
     /**
-     * Stage 6: desugar in @JavaImpl
+     * Stage 5: desugar in @JavaImpl
      */
     void DesugarInJavaImpls(File& file);
 
     /**
-     * Stage 7: desugar `as`, `is` where type operand is Java class
+     * Stage 6: desugar `as`, `is` where type operand is Java class
      */
     void DesugarTypechecks(File& file);
 
     void DesugarJavaMirror(ClassDecl& mirror);
-    /**
-     * for interfaces and abstract classes
-     */
-
-    void DesugarJavaMirror(ClassLikeDecl& mirror);
+    void DesugarJavaMirror(InterfaceDecl& mirror);
     void DesugarJavaImpl(ClassDecl& jimpl);
     void ProcessJavaMirrorImplStage(DesugarJavaMirrorImplStage stage, File& file);
     void ProcessCJImplStage(DesugarCJImplStage stage, File& file);
 
     /**
-     * Stage 1: generate constructors and native init/deinit/method call functions (callable from java) for CJMapping
+     * Stage 1-2: generate constructors and native init/deinit/method call functions (callable from java) for CJMapping
      * data structure
      */
     void GenerateInCJMapping(File& file);
 
     /**
-     * Stage 2: desugar in CJMapping data structure
+     * Stage 3: desugar in CJMapping data structure
      */
     void DesugarInCJMapping(File& file);
 
@@ -133,6 +122,18 @@ private:
      * }
      */
     void InsertJavaMirrorCtor(ClassDecl& decl, bool doStub);
+
+    /**
+     * var $hasInited: Bool = false
+     */
+    void InsertJavaMirrorHasInited(ClassDecl& mirror);
+
+    /**
+     * ~init() {
+     *     Java_CFFI_deleteGlobalReference(this.javaref)
+     * }
+     */
+    void InsertJavaMirrorFinalizer(ClassDecl& mirror);
 
     /**
      * Generates and inserts javaref getter as javaref field will be in synthetic class
@@ -477,6 +478,9 @@ private:
     void GenerateInJavaImpl(AST::ClassDecl* classDecl);
     void GenerateForCJStructMapping(AST::StructDecl* structDecl);
     void GenerateForCJEnumMapping(AST::EnumDecl& enumDecl);
+    void GenerateForCJInterfaceMapping(AST::InterfaceDecl& interfaceDecl);
+    void GenerateInterfaceFwdclassBody(AST::ClassDecl& fwdclassDecl, AST::InterfaceDecl& interfaceDecl);
+    OwnedPtr<FuncDecl> GenerateInterfaceFwdclassMethod(AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl);
     OwnedPtr<PrimitiveType> CreateUnitType();
 
     ImportManager& importManager;

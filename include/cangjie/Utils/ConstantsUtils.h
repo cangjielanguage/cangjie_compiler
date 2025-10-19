@@ -71,6 +71,7 @@ inline const std::string OPTION_NONE_CTOR = "None";
 inline const std::string ANY_NAME = "Any";
 inline const std::string OBJECT_NAME = "Object";
 inline const std::string JOBJECT_NAME = "JObject";
+inline const std::string OCOBJECT_NAME = "NSObject";
 inline const std::string CTYPE_NAME = "CType";
 inline const std::string RAW_ARRAY_NAME = "RawArray";
 constexpr std::string_view CPOINTER_NAME = "CPointer";
@@ -134,6 +135,8 @@ inline const std::string INST_VIRTUAL_FUNC = "$InstVirtualFunc";
 // CFFI
 inline const std::string CFFI_FUNC_SUFFIX = "$real";
 
+// Identifier for generated flag to check if instance of a class is initialized.
+inline const std::string HAS_INITED_IDENT = "$hasInited";
 
 namespace Interop::Java {
 inline const std::string INTEROP_JOBJECT_NAME = "JObject";
