@@ -15,6 +15,7 @@ import multiprocessing
 import os
 import platform
 import re
+import tarfile
 import shutil
 import stat
 import subprocess
@@ -156,6 +157,67 @@ def generate_cmake_defs(args):
 
     return result
 
+def download_and_patch_tinytoml():
+    """Set up the tinytoml third-party library"""
+    TINYTOML_DIR = os.path.join(HOME_DIR, "third_party", "tinytoml")
+    PATCH_FILE = os.path.join(TINYTOML_DIR, "fixFloatEqualError.patch")
+    TAR_PATH = os.path.join(TINYTOML_DIR, "tinytoml-0.4.tar.gz")
+    TINYTOMLTAR_PATH = os.path.join(TINYTOML_DIR, "tinytoml-0.4")
+
+    LOG.info("Setting up tinytoml...")
+
+    # Create Parent Directory
+    os.makedirs(os.path.dirname(TINYTOML_DIR), exist_ok=True)
+
+    try:
+
+        if not os.path.exists(TAR_PATH):
+            # Fetch tinytoml from the remote repostory
+            subprocess.run(
+                ["git", "clone", "https://gitee.com/src-openeuler/tinytoml.git",
+                 TINYTOML_DIR],
+                 check=True
+            )
+            # Switch to the specified tag
+            subprocess.run(
+                ["git", "checkout", "openEuler-24.03-LTS-SP1"],
+                cwd=TINYTOML_DIR,
+                check=True
+            )
+
+        # Extract the package
+        LOG.info("Extracting tinytoml package...")
+        with tarfile.open(TAR_PATH) as tar:
+            tar.extractall(path=TINYTOML_DIR)
+
+        # Apply Patch
+        patch_file_exists = os.path.exists(PATCH_FILE)
+        target_dir_exists = os.path.exists(TINYTOMLTAR_PATH) and os.path.isdir(TINYTOMLTAR_PATH)
+        if patch_file_exists and target_dir_exists:
+            LOG.info("Applying tinytoml patch...")
+            subprocess.run(
+                f"patch -p0 -l -f < {PATCH_FILE}",
+                cwd=TINYTOMLTAR_PATH,
+                shell=True,
+                check=True
+            )
+        else:
+            LOG.warning(f"Patch file not found: {PATCH_FILE}")
+
+        TOML_H_SRC = os.path.join(TINYTOMLTAR_PATH, "include", "toml", "toml.h")
+        TOML_H_DST = os.path.join(TINYTOML_DIR, "toml.h")
+
+        if os.path.exists(TOML_H_SRC):
+            LOG.info(f"Copying toml.h from {TOML_H_SRC} to {TOML_H_DST}")
+            shutil.copy2(TOML_H_SRC, TOML_H_DST)
+
+    except subprocess.CalledProcessError as e:
+        LOG.error(f"Failed to setup tinytoml: {str(e)}")
+        # Clean Files
+        if os.path.exists(TINYTOML_DIR):
+            shutil.rmtree(TINYTOML_DIR)
+        raise
+
 def build(args):
     # The target also affects the prefix concatenation of the compiler executable file; it is specific.
     if args.target:
@@ -180,6 +242,11 @@ def build(args):
 
     if args.gcc_toolchain and args.target and args.product != "cjc":
         LOG.warning("There is no intermediate or product targeting the host platform in this build, so --gcc-toolchain won't take effect")
+
+    # Add the tinytoml third-party library for acquisition and customize code application.
+    tinytoml_target = os.path.join(HOME_DIR, "third_party", "tinytoml", "toml.h")
+    if not os.path.exists(tinytoml_target):
+        download_and_patch_tinytoml()
 
     check_compiler(args)
 

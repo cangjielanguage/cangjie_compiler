@@ -32,6 +32,7 @@
 #include "cangjie/AST/Types.h"
 #include "cangjie/Basic/Linkage.h"
 #include "cangjie/Basic/Position.h"
+#include "cangjie/Basic/InteropCJPackageConfigReader.h"
 #include "cangjie/Lex/Token.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/ConstantsUtils.h"
@@ -2907,6 +2908,17 @@ struct Package : Node {
     bool isMacroPackage{false};
     bool noSubPkg{false};
     bool needExported{true}; /**< Parent path of package path is "src", there is no need to export this package. */
+
+    // ===--------------------------------------------------------------------===//
+    // Interop CJ Package Level Symbol Config
+    // ===--------------------------------------------------------------------===//
+    InteropCJStrategy interopCJApiStrategy = InteropCJStrategy::NONE;
+    InteropCJGenericStrategyType interopCJGenericTypeStrategy = InteropCJGenericStrategyType::NONE;
+    std::vector<std::string> interopCJIncludedApis;
+    std::vector<std::string> interopCJExcludedApis;
+    std::unordered_map<std::string, std::unordered_map<std::string, GenericTypeArguments>>
+        allowedInteropCJGenericInstantiations;
+    bool isInteropCJPackageConfig{false};
 
     Package() : Node(ASTKind::PACKAGE)
     {

@@ -25,9 +25,10 @@ using namespace AST;
 class JavaSourceCodeGenerator : public AbstractSourceCodeGenerator {
 public:
     JavaSourceCodeGenerator(
-        Decl* decl, const BaseMangler& mangler, const std::string& outputFilePath, std::string cjLibName);
+        Decl* decl, const BaseMangler& mangler, const std::string& outputFilePath, std::string cjLibName,
+        bool isInteropCJpackageConfig = false);
     JavaSourceCodeGenerator(Decl* decl, const BaseMangler& mangler, const std::optional<std::string>& folderPath,
-        const std::string& outputFileName, std::string cjLibName);
+        const std::string& outputFileName, std::string cjLibName, bool isInteropCJPackageConfig = false);
     static bool IsDeclAppropriateForGeneration(const Decl& declArg);
 
 private:
@@ -49,6 +50,7 @@ private:
     std::set<std::string> imports;
     const std::string cjLibName;
     const BaseMangler& mangler;
+    bool isInteropCJPackageConfig{false};
 
     std::string GenerateFuncParams(const std::vector<OwnedPtr<FuncParam>>& params, bool isNativeMethod = false);
     std::string GenerateFuncParamLists(
