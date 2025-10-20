@@ -937,9 +937,13 @@ private:
     Ptr<Value> TranslateFuncMemberAccess(const AST::MemberAccess& member);
     Value* WrapMemberMethodByLambda(const AST::FuncDecl& funcDecl, const InstCalleeInfo& instFuncType, Value* thisObj);
     bool IsVirtualFuncCall(
-        const ClassDef& obj, const AST::FuncDecl& funcDecl, bool isSuperCall);
-    InvokeCallContext GenerateInvokeCallContext(const InstCalleeInfo& instFuncType,
-        Value& caller, const AST::FuncDecl& callee, const std::vector<Value*>& args);
+        const CustomTypeDef& obj, const AST::FuncDecl& funcDecl, bool baseExprIsSuper);
+    InvokeCallContext GenerateInvokeCallContext(const InstCalleeInfo& instFuncType, Value& caller,
+        const AST::FuncDecl& callee, const std::vector<Value*>& args,
+        const OverflowStrategy strategy = OverflowStrategy::THROWING);
+    InstCalleeInfo GetInstCalleeInfoFromVarInit(const AST::RefExpr& expr);
+    std::pair<Type*, FuncCallType> GetExactParentTypeAndFuncType(
+        const AST::NameReferenceExpr& expr, Type& thisType, const AST::FuncDecl& funcDecl, bool isVirtualFuncCall);
     InstCalleeInfo GetInstCalleeInfoFromRefExpr(const AST::RefExpr& expr);
     InstCalleeInfo GetInstCalleeInfoFromMemberAccess(const AST::MemberAccess& expr);
     Ptr<Value> GetBaseFromMemberAccess(const AST::Expr& base);
@@ -1078,8 +1082,7 @@ private:
 
     void HandleInitializedArgVal(const AST::CallExpr& ce, std::vector<Value*>& args);
 
-    void TranslateThisObjectForNonStaticMemberFuncCall(
-        const AST::CallExpr& expr, std::vector<Value*>& args, bool needsMutableThis);
+    Value* TranslateThisObjectForNonStaticMemberFuncCall(const AST::CallExpr& expr, bool needsMutableThis);
     void TranslateTrivialArgsWithSugar(
         const AST::CallExpr& expr, std::vector<Value*>& args, const std::vector<Type*>& expectedArgTys);
     Value* TranslateTrivialArgWithNoSugar(const AST::FuncArg& arg, Type* expectedArgTy, const DebugLocation& loc);

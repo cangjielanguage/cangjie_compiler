@@ -104,43 +104,6 @@ std::unordered_map<const GenericType*, Type*> CollectReplaceTableFromAllParents(
     }
     return replaceTable;
 }
-
-/**
- * @brief Try to get instantiated sub type.
- *
- * @param genericSubType generic sub type.
- * @param instParentType instantiated parent type
- * @param builder CHIR builder
- * @return return genericSubType when
- *  1. `genericSubType` is not generic related
- *  2. `genericSubType` equals to `instParentType`
- *  3. `genericSubType` and `instParentType` don't have parent-child relationship
- *  return instantiated sub type when
- *  1. `genericSubType` and `instParentType` are same CustomTypeDef,
- *     but one is generic related, the other is instantiated type
- *  2. `genericSubType` and `instParentType` have parent-child relationship,
- *     and `genericSubType` is generic related sub type, `instParentType` is instantiated parent type
- */
-Type* GetInstSubType(Type& genericSubType, const ClassType& instParentType, CHIRBuilder& builder)
-{
-    if (!genericSubType.IsGenericRelated()) {
-        return &genericSubType;
-    }
-    if (&genericSubType == &instParentType) {
-        return &genericSubType;
-    }
-    auto [res, replaceTable] = genericSubType.CalculateGenericTyMapping(instParentType);
-    if (!res) {
-        for (auto p : genericSubType.GetSuperTypesRecusively(builder)) {
-            std::tie(res, replaceTable) = p->CalculateGenericTyMapping(instParentType);
-            if (res) {
-                break;
-            }
-        }
-    }
-    CJC_ASSERT(res);
-    return ReplaceRawGenericArgType(genericSubType, replaceTable, builder);
-}
 } // namespace
 
 void WrapMutFunc::CreateMutFuncWrapper(FuncBase* rawFunc, CustomTypeDef& curDef, ClassType& srcClassTy)

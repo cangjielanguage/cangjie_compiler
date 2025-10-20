@@ -44,11 +44,37 @@ Ptr<CHIR::Type> CreateTypeWithUpperBounds(CHIR::Type& baseType, CHIR::CHIRBuilde
     return &baseType;
 }
 
-bool IsInsideCFunc(const CHIR::Block& bl)
+bool InheritedChainHasCommon(const CustomTypeDef& def)
 {
-    if (bl.GetTopLevelFunc()->IsCFunc()) {
+    if (def.TestAttr(CHIR::Attribute::COMMON)) {
         return true;
     }
+    for (auto super : def.GetSuperTypesInCurDef()) {
+        auto superDef = super->GetCustomTypeDef();
+        if (InheritedChainHasCommon(*superDef)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FuncDeclIsOpen(const AST::FuncDecl& funcDecl)
+{
+    if (funcDecl.TestAnyAttr(AST::Attribute::GENERIC_INSTANTIATED,
+        AST::Attribute::PRIMARY_CONSTRUCTOR, AST::Attribute::CONSTRUCTOR, AST::Attribute::FINALIZER)) {
+        return false;
+    }
+    auto funcHasOpenFlag = funcDecl.TestAnyAttr(AST::Attribute::OPEN, AST::Attribute::ABSTRACT) ||
+        (funcDecl.outerDecl && funcDecl.outerDecl->astKind == AST::ASTKind::INTERFACE_DECL);
+    auto instanceMethodIsOpen = funcHasOpenFlag &&
+        (funcDecl.TestAttr(AST::Attribute::PUBLIC) || funcDecl.TestAttr(AST::Attribute::PROTECTED));
+    auto staticMethodIsOpen = funcDecl.outerDecl->IsClassLikeDecl() &&
+        funcDecl.TestAttr(AST::Attribute::STATIC) && !funcDecl.TestAttr(AST::Attribute::PRIVATE);
+    return instanceMethodIsOpen || staticMethodIsOpen;
+}
+
+bool IsInsideCFuncLambda(const CHIR::Block& bl)
+{
     auto expr = bl.GetParentBlockGroup()->GetOwnerExpression();
     while (expr) {
         if (auto lambda = Cangjie::DynamicCast<Lambda>(expr)) {
@@ -64,9 +90,9 @@ bool IsInsideCFunc(const CHIR::Block& bl)
 
 // `obj.foo()` is a virtual func call ?
 bool Translator::IsVirtualFuncCall(
-    const ClassDef& obj, const AST::FuncDecl& funcDecl, bool isSuperCall)
+    const CustomTypeDef& obj, const AST::FuncDecl& funcDecl, bool baseExprIsSuper)
 {
-    /** super function call must be `Apply`
+    /**
      *  open class A {
      *      public open func foo() {}
      *  }
@@ -78,23 +104,47 @@ bool Translator::IsVirtualFuncCall(
      *      }
      *  }
      */
-    if (isSuperCall) {
+    if (baseExprIsSuper || IsInsideCFuncLambda(*GetCurrentBlock())) {
         return false;
     }
-    auto funcDeclIsOpen = [&funcDecl]() {
-        if (funcDecl.TestAnyAttr(AST::Attribute::GENERIC_INSTANTIATED,
-            AST::Attribute::PRIMARY_CONSTRUCTOR, AST::Attribute::CONSTRUCTOR, AST::Attribute::FINALIZER)) {
-            return false;
-        }
-        auto funcHasOpenFlag = funcDecl.TestAnyAttr(AST::Attribute::OPEN, AST::Attribute::ABSTRACT) ||
-            (funcDecl.outerDecl && funcDecl.outerDecl->astKind == AST::ASTKind::INTERFACE_DECL);
-        auto instanceMethodIsOpen = funcHasOpenFlag &&
-            (funcDecl.TestAttr(AST::Attribute::PUBLIC) || funcDecl.TestAttr(AST::Attribute::PROTECTED));
-        auto staticMethodIsOpen = funcDecl.outerDecl->IsClassLikeDecl() &&
-            funcDecl.TestAttr(AST::Attribute::STATIC) && !funcDecl.TestAttr(AST::Attribute::PRIVATE);
-        return instanceMethodIsOpen || staticMethodIsOpen;
-    };
-    return !IsInsideCFunc(*currentBlock) && obj.CanBeInherited() && funcDeclIsOpen();
+    if (obj.CanBeInherited() && FuncDeclIsOpen(funcDecl)) {
+        return true;
+    }
+    /** we need to think about two cases:
+        1. the func call is in common package
+        common package cmp
+        public interface I { func foo() {} }
+        common public interface I2 <: I {}
+        public class C <: I2 {}
+        public func goo(x: C) { x.foo() } // for now, maybe I::foo is expected
+
+        platform package cmp
+        public interface I { func foo() {} }
+        platform public interface I2 <: I { func foo() {} }
+        public class C <: I2 {}
+
+        default package
+        import cmp.*
+        main() { goo(C()) } // we need to call I2::foo, so we need to use `Invoke`, not `Apply` in goo's body
+
+        2. the func call is in another package
+        common package cmp
+        public interface I { func foo() {} }
+        common public interface I2 <: I {}
+        public class C <: I2 {}
+
+        platform package cmp
+        public interface I { func foo() {} }
+        platform public interface I2 <: I { func foo() {} }
+        public class C <: I2 {}
+
+        default package
+        import cmp.*
+        main() { C().foo() } // we need to call I2::foo, so we need to use `Invoke`, not `Apply` here
+                             // this package imports cjo from common package, not platform package, so we can't
+                             // decide which function is expected according to the information in current package
+    */
+    return FuncDeclIsOpen(funcDecl) && funcDecl.outerDecl->IsOpen() && InheritedChainHasCommon(obj);
 }
 
 Ptr<Value> Translator::GetBaseFromMemberAccess(const AST::Expr& base)
@@ -154,14 +204,47 @@ Ptr<CHIR::Type> Translator::GetTypeOfInvokeStatic(const AST::Decl& funcDecl)
     return calledClassType;
 }
 
-Translator::InstCalleeInfo Translator::GetInstCalleeInfoFromRefExpr(const AST::RefExpr& expr)
+std::pair<CHIR::Type*, FuncCallType> Translator::GetExactParentTypeAndFuncType(
+    const AST::NameReferenceExpr& expr, Type& thisType, const AST::FuncDecl& funcDecl, bool isVirtualFuncCall)
 {
     auto funcType = StaticCast<FuncType*>(TranslateType(*expr.ty));
     auto paramTys = funcType->GetParamTypes();
-    auto funcDecl = StaticCast<AST::FuncDecl*>(expr.ref.target);
-    CJC_ASSERT(funcDecl->outerDecl != nullptr);
-    auto currentFunc = GetCurrentFunc();
-    CJC_NULLPTR_CHECK(currentFunc);
+    if (!funcDecl.TestAttr(AST::Attribute::STATIC)) {
+        paramTys.insert(paramTys.begin(), &thisType);
+        funcType = builder.GetType<FuncType>(paramTys, funcType->GetReturnType());
+    }
+    std::vector<Type*> funcInstArgs;
+    for (auto ty : expr.instTys) {
+        funcInstArgs.emplace_back(TranslateType(*ty));
+    }
+    auto thisDerefTy = thisType.StripAllRefs();
+    auto parentType = GetExactParentType(*thisDerefTy, funcDecl, *funcType, funcInstArgs, isVirtualFuncCall);
+    if (!funcDecl.TestAttr(AST::Attribute::STATIC)) {
+        CJC_ASSERT(!paramTys.empty());
+        /**
+            interface I {
+                mut func foo() { goo() }
+                mut func goo() {}
+            }
+            struct S <: I {
+                mut func goo() {}
+            }
+            S().foo() // even if foo's parent type is `I`, we shouldn't typecast `S()` from `S&` to `I&`,
+                      // because `S&` is a memory in stack, but `I&` is a memory in heap, so if typecast happened,
+                      // `S()` will be copied to heap, that will not implement `mut` semantic correctly.
+        */
+        if (thisDerefTy->IsStruct() && parentType != thisDerefTy && funcDecl.TestAttr(AST::Attribute::MUT)) {
+            paramTys[0] = &thisType;
+        } else if (parentType->IsClass()) {
+            paramTys[0] = AddRefIfFuncIsMutOrClass(*parentType, funcDecl, builder);
+            funcType = builder.GetType<FuncType>(paramTys, funcType->GetReturnType());
+        }
+    }
+    return {parentType, FuncCallType{funcDecl.identifier.Val(), funcType, funcInstArgs}};
+}
+
+Translator::InstCalleeInfo Translator::GetInstCalleeInfoFromVarInit(const AST::RefExpr& expr)
+{
     /**
      *  class A {
      *      static func foo() {}
@@ -170,73 +253,82 @@ Translator::InstCalleeInfo Translator::GetInstCalleeInfoFromRefExpr(const AST::R
      *  maybe we are translating `foo` in static member var `x`'s initializer, its initializer is a global func
      *  which added by CHIR, and this `foo` can't be from class A's sub type, must be from class A or its parent type
      */
+    auto funcType = StaticCast<FuncType*>(TranslateType(*expr.ty));
+    auto paramTys = funcType->GetParamTypes();
+    auto funcDecl = StaticCast<AST::FuncDecl*>(expr.ref.target);
+    CJC_NULLPTR_CHECK(funcDecl->outerDecl);
+    CJC_ASSERT(funcDecl->TestAttr(AST::Attribute::STATIC));
+    auto parentType = GetNominalSymbolTable(*funcDecl->outerDecl)->GetType();
+    return InstCalleeInfo {
+        .instParentCustomTy = parentType,
+        .thisType = parentType,
+        .instParamTys = paramTys,
+        .instRetTy = funcType->GetReturnType(),
+        .isVirtualFuncCall = false
+    };
+}
+
+Translator::InstCalleeInfo Translator::GetInstCalleeInfoFromRefExpr(const AST::RefExpr& expr)
+{
+    auto currentFunc = GetCurrentFunc();
+    CJC_NULLPTR_CHECK(currentFunc);
     if (currentFunc->IsGVInit() || currentFunc->IsStaticInit()) {
-        CJC_ASSERT(funcDecl->TestAttr(AST::Attribute::STATIC));
-        auto outerDecl = funcDecl->outerDecl;
-        CJC_NULLPTR_CHECK(outerDecl);
-        auto parentType = GetNominalSymbolTable(*outerDecl)->GetType();
-        return InstCalleeInfo {
-            .instParentCustomTy = parentType,
-            .thisType = parentType,
-            .instParamTys = paramTys,
-            .instRetTy = funcType->GetReturnType(),
-            .isVirtualFuncCall = false};
+        GetInstCalleeInfoFromVarInit(expr);
     }
-    /**
-     *  open class A {
-     *      static public func goo() { println(1) }
-     *  }
-     *  extend A {
-     *      static func foo() { goo() }
-     *  }
-     *  class B <: A {
-     *      static public func goo() { println(2) }
-     *  }
-     *  B.foo()  // should print "2"
-     */
-    auto parentType = currentFunc->GetParentCustomTypeOrExtendedType();
-    CJC_NULLPTR_CHECK(parentType);
-    if (parentType->IsClass() || IsStructMutFunction(*funcDecl)) {
-        parentType = builder.GetType<RefType>(parentType);
+    
+    // 1. calculate `thisType`
+    auto thisType = currentFunc->GetParentCustomTypeOrExtendedType();
+    CJC_NULLPTR_CHECK(thisType);
+    auto thisDerefTy = thisType;
+    auto funcDecl = StaticCast<AST::FuncDecl*>(expr.ref.target);
+    thisType = AddRefIfFuncIsMutOrClass(*thisType, *funcDecl, builder);
+
+    // 2. calculate if is virtual func call
+    auto caller = currentFunc->GetParentCustomTypeDef();
+    CJC_NULLPTR_CHECK(caller);
+    /*  a. for builtin type, the `caller` should be extend def, and this function call may be a dynamic dispatch
+          because of CJMP feature, you can read the comment in `IsVirtualFuncCall` for more details.
+        b. for custom type, the `caller` should be extended def, `currentFunc` may be called by sub type, for example:
+        open class A {
+            static public func goo() { println("1") }
+        }
+        extend A {
+            static func foo() { goo() }
+        }
+        class B <: A {
+            static public func goo() {  println("2") }
+        }
+        B.foo()  // should print "2"
+    */
+    if (auto customType = DynamicCast<CustomType*>(thisDerefTy)) {
+        caller = customType->GetCustomTypeDef();
     }
-    if (!funcDecl->TestAttr(AST::Attribute::STATIC)) {
-        paramTys.insert(paramTys.begin(), parentType);
-    }
-    bool isVirtualFuncCall = false;
-    auto thisType = parentType;
-    // if a func call is in instantiated member method, it can be a virtual func call, too
-    if (auto customType = DynamicCast<ClassType*>(parentType->StripAllRefs()); customType &&
-        IsVirtualFuncCall(*customType->GetClassDef(), *funcDecl, false)) {
+    auto isVirtualFuncCall = IsVirtualFuncCall(*caller, *funcDecl, false);
+
+    // 3. calculate parent type and func type
+    auto [parentType, funcCallType] = GetExactParentTypeAndFuncType(expr, *thisType, *funcDecl, isVirtualFuncCall);
+    if (isVirtualFuncCall) {
         thisType = builder.GetType<RefType>(builder.GetType<ThisType>());
-        isVirtualFuncCall = true;
-    }
-    std::vector<Type*> funcInstArgs;
-    for (auto ty : expr.instTys) {
-        funcInstArgs.emplace_back(TranslateType(*ty));
     }
     return InstCalleeInfo {
         .instParentCustomTy = parentType,
         .thisType = thisType,
-        .instParamTys = paramTys,
-        .instRetTy = funcType->GetReturnType(),
-        .instantiatedTypeArgs = funcInstArgs,
-        .isVirtualFuncCall = isVirtualFuncCall};
+        .instParamTys = funcCallType.funcType->GetParamTypes(),
+        .instRetTy = funcCallType.funcType->GetReturnType(),
+        .instantiatedTypeArgs = std::move(funcCallType.genericTypeArgs),
+        .isVirtualFuncCall = isVirtualFuncCall
+    };
 }
 
 Translator::InstCalleeInfo Translator::GetInstCalleeInfoFromMemberAccess(const AST::MemberAccess& expr)
 {
+    // 1. calculate `thisType`
     auto thisType = TranslateType(*expr.baseExpr->ty);
-    auto funcType = StaticCast<FuncType*>(TranslateType(*expr.ty));
-    auto paramTys = funcType->GetParamTypes();
     auto funcDecl = StaticCast<AST::FuncDecl*>(expr.target);
-    if (!funcDecl->TestAttr(AST::Attribute::STATIC)) {
-        paramTys.insert(paramTys.begin(), thisType);
-        funcType = builder.GetType<FuncType>(paramTys, funcType->GetReturnType());
-    }
-    std::vector<Type*> funcInstArgs;
-    for (auto ty : expr.instTys) {
-        funcInstArgs.emplace_back(TranslateType(*ty));
-    }
+    thisType = AddRefIfFuncIsMutOrClass(*thisType, *funcDecl, builder);
+
+    // 2. calculate if is virtual func call
+
     auto thisDerefTy = thisType->StripAllRefs();
     bool isVirtualFuncCall = false;
     bool isSuper = false;
@@ -245,25 +337,28 @@ Translator::InstCalleeInfo Translator::GetInstCalleeInfoFromMemberAccess(const A
     }
     // only `obj.foo()` and `T.foo()` need to calculate if is virtual func call
     // `classA.foo()` is Apply call
-    if (auto customType = DynamicCast<ClassType*>(thisDerefTy); customType &&
+    if (auto customType = DynamicCast<CustomType*>(thisDerefTy); customType &&
         !funcDecl->TestAttr(AST::Attribute::STATIC)) {
-        isVirtualFuncCall = IsVirtualFuncCall(*customType->GetClassDef(), *funcDecl, isSuper);
+        isVirtualFuncCall = IsVirtualFuncCall(*customType->GetCustomTypeDef(), *funcDecl, isSuper);
     } else if (auto genericType = DynamicCast<GenericType*>(thisDerefTy)) {
-        isVirtualFuncCall = true;
+    isVirtualFuncCall = true;
         // maybe T <: open class A & non-open class B, then it still not be virtual func call
         for (auto ty : genericType->GetUpperBounds()) {
             auto customDef = StaticCast<ClassType*>(ty->StripAllRefs())->GetClassDef();
             isVirtualFuncCall &= IsVirtualFuncCall(*customDef, *funcDecl, isSuper);
         }
     }
-    auto parentType = GetExactParentType(*thisDerefTy, *funcDecl, *funcType, funcInstArgs, isVirtualFuncCall);
+
+    // 3. calculate parent type and func type
+    auto [parentType, funcCallType] = GetExactParentTypeAndFuncType(expr, *thisType, *funcDecl, isVirtualFuncCall);
     return InstCalleeInfo {
         .instParentCustomTy = parentType,
         .thisType = thisType,
-        .instParamTys = paramTys,
-        .instRetTy = funcType->GetReturnType(),
-        .instantiatedTypeArgs = funcInstArgs,
-        .isVirtualFuncCall = isVirtualFuncCall};
+        .instParamTys = funcCallType.funcType->GetParamTypes(),
+        .instRetTy = funcCallType.funcType->GetReturnType(),
+        .instantiatedTypeArgs = std::move(funcCallType.genericTypeArgs),
+        .isVirtualFuncCall = isVirtualFuncCall
+    };
 }
 
 Value* Translator::GetWrapperFuncFromMemberAccess(Type& thisType, const std::string funcName,

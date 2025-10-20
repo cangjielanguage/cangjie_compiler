@@ -453,7 +453,7 @@ protected:
     ~Constant() override = default;
 
 private:
-    explicit Constant(LiteralValue* val, Block* parent) : Expression(ExprKind::CONSTANT, {val}, {}, parent)
+    explicit Constant(LiteralValue* val, Block* parent) : Expression(ExprKind::CONSTANT, {val}, parent)
     {
     }
 

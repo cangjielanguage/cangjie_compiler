@@ -69,13 +69,7 @@ FuncType* AdjustFuncType(FuncType& funcType, const AST::FuncDecl& funcDecl, CHIR
         std::vector<Type*> paramsTy;
         paramsTy.reserve(params.size() + 1); // additional 1 means the type of this.
         auto thisTy = chirType.TranslateType(*funcDecl.outerDecl->ty);
-        // ClassLike decl has already been added ref type by `TranslateType`, so we just needs add ref type to
-        // constructor and mut function of non-classLike type.
-        if (IsStructMutFunction(funcDecl)) {
-            paramsTy.emplace_back(builder.GetType<RefType>(thisTy));
-        } else {
-            paramsTy.emplace_back(thisTy);
-        }
+        paramsTy.emplace_back(AddRefIfFuncIsMutOrClass(*thisTy, funcDecl, builder));
         paramsTy.insert(paramsTy.end(), params.begin(), params.end());
 
         if (funcDecl.TestAttr(AST::Attribute::CONSTRUCTOR) || funcDecl.IsFinalizer()) {
@@ -374,6 +368,18 @@ std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
     CJC_NULLPTR_CHECK(concreteType);
     return GetInstMemberTypeByNameCheckingReadOnly(
         *StaticCast<CustomType*>(concreteType->StripAllRefs()), names, builder);
+}
+
+Type* AddRefIfFuncIsMutOrClass(Type& thisType, const AST::FuncDecl& funcDecl, CHIRBuilder& builder)
+{
+    if (thisType.IsRef()) {
+        return &thisType;
+    }
+    if (thisType.IsClassOrArray() || funcDecl.TestAnyAttr(AST::Attribute::MUT, AST::Attribute::CONSTRUCTOR)) {
+        return builder.GetType<RefType>(&thisType);
+    } else {
+        return &thisType;
+    }
 }
 } // namespace CHIR
 } // namespace Cangjie

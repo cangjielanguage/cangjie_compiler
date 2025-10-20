@@ -1452,4 +1452,25 @@ BuiltinType* GetBuiltinTypeWithVTable(BuiltinType& type, CHIRBuilder& builder)
     }
     return &type;
 }
+
+Type* GetInstSubType(Type& genericSubType, const ClassType& instParentType, CHIRBuilder& builder)
+{
+    if (!genericSubType.IsGenericRelated()) {
+        return &genericSubType;
+    }
+    if (&genericSubType == &instParentType) {
+        return &genericSubType;
+    }
+    auto [res, replaceTable] = genericSubType.CalculateGenericTyMapping(instParentType);
+    if (!res) {
+        for (auto p : genericSubType.GetSuperTypesRecusively(builder)) {
+            std::tie(res, replaceTable) = p->CalculateGenericTyMapping(instParentType);
+            if (res) {
+                break;
+            }
+        }
+    }
+    CJC_ASSERT(res);
+    return ReplaceRawGenericArgType(genericSubType, replaceTable, builder);
+}
 } // namespace Cangjie::CHIR

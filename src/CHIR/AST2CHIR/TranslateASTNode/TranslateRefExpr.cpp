@@ -201,11 +201,9 @@ Value* Translator::TranslateVarRef(const AST::RefExpr& refExpr)
     return varLeftValueBase;
 }
 
-InvokeCallContext Translator::GenerateInvokeCallContext(
-    const InstCalleeInfo& instFuncType, Value& caller, const AST::FuncDecl& callee, const std::vector<Value*>& args)
+InvokeCallContext Translator::GenerateInvokeCallContext(const InstCalleeInfo& instFuncType, Value& caller,
+    const AST::FuncDecl& callee, const std::vector<Value*>& args, const OverflowStrategy strategy)
 {
-    auto funcType = builder.GetType<FuncType>(instFuncType.instParamTys, instFuncType.instRetTy);
-    FuncCallType funcCallType{callee.identifier, funcType, instFuncType.instantiatedTypeArgs};
     auto tempDecl = typeManager.GetTopOverriddenFuncDecl(&callee);
     const AST::FuncDecl* originalFuncDecl = tempDecl ? tempDecl.get() : &callee;
     auto originalFuncType = StaticCast<FuncType*>(TranslateType(*originalFuncDecl->ty));
@@ -227,6 +225,10 @@ InvokeCallContext Translator::GenerateInvokeCallContext(
             originalGenericTypeParams.emplace_back(StaticCast<GenericType*>(TranslateType(*(genericTy->ty))));
         }
     }
+    auto funcName = callee.identifier.Val();
+    if (IsOverflowOpCall(callee)) {
+        funcName = OverflowStrategyPrefix(strategy) + funcName;
+    }
     
     auto invokeInfo = InvokeCallContext {
         .caller = &caller,
@@ -236,7 +238,7 @@ InvokeCallContext Translator::GenerateInvokeCallContext(
             .thisType = instFuncType.thisType
         },
         .virMethodCtx = VirMethodContext {
-            .srcCodeIdentifier = callee.identifier,
+            .srcCodeIdentifier = funcName,
             .originalFuncType = originalFuncType,
             .genericTypeParams = originalGenericTypeParams
         }

@@ -76,7 +76,7 @@ std::string MangleType(const CHIR::StructType& t, const std::vector<std::string>
     auto s = t.GetStructDef();
     CJC_NULLPTR_CHECK(s);
     std::stringstream ss;
-    std::string mangled = s->GetIdentifierWithoutPrefix();
+    auto mangled = s->GetIdentifierWithoutPrefix();
     ss << MANGLE_TYPE_STRUCT_PREFIX << Cangjie::CHIR::StripCangjiePrefix(mangled);
     for (auto argTy : t.GetGenericArgs()) {
         ss << MangleType(*argTy, genericsTypeStack, useGenericName);
@@ -91,7 +91,7 @@ std::string MangleType(const CHIR::EnumType& t, const std::vector<std::string>& 
     auto enumDef = t.GetEnumDef();
     CJC_NULLPTR_CHECK(enumDef);
     std::stringstream ss;
-    std::string mangled = enumDef->GetIdentifierWithoutPrefix();
+    auto mangled = enumDef->GetIdentifierWithoutPrefix();
     ss << MANGLE_NESTED_PREFIX << StripCangjiePrefix(mangled);
     for (auto argTy : t.GetGenericArgs()) {
         ss << MangleType(*argTy, genericsTypeStack, useGenericName);
@@ -133,7 +133,7 @@ std::string MangleType(const CHIR::ClassType& t, const std::vector<std::string>&
     auto c = t.GetClassDef();
     CJC_NULLPTR_CHECK(c);
     std::stringstream ss;
-    std::string mangled = c->GetIdentifierWithoutPrefix();
+    auto mangled = c->GetIdentifierWithoutPrefix();
     ss << "C" << StripCangjiePrefix(mangled);
     for (auto argTy : t.GetGenericArgs()) {
         ss << MangleType(*argTy, genericsTypeStack, useGenericName);

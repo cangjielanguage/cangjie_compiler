@@ -25,7 +25,13 @@ void AddHasInitedFlagToImportedClass(const Package& package, CHIRBuilder& builde
         attributeInfo.SetAttr(Attribute::NO_REFLECT_INFO, true);
         attributeInfo.SetAttr(Attribute::COMPILER_ADD, true);
         attributeInfo.SetAttr(Attribute::PRIVATE, true);
-        classDef->AddInstanceVar(MemberVarInfo{HAS_INITED_VAR_NAME, "", builder.GetBoolTy(), attributeInfo});
+        auto memberVar = MemberVarInfo {
+            .name = HAS_INITED_VAR_NAME,
+            .type = builder.GetBoolTy(),
+            .attributeInfo = attributeInfo,
+            .outerDef = classDef
+        };
+        classDef->AddInstanceVar(memberVar);
     }
 }
 
@@ -121,7 +127,13 @@ void MarkClassHasInited::RunOnPackage(const Package& package, CHIRBuilder& build
         attributeInfo.SetAttr(Attribute::NO_REFLECT_INFO, true);
         attributeInfo.SetAttr(Attribute::COMPILER_ADD, true);
         attributeInfo.SetAttr(Attribute::PRIVATE, true);
-        classDef->AddInstanceVar(MemberVarInfo{HAS_INITED_VAR_NAME, "", builder.GetBoolTy(), attributeInfo});
+        auto memberVar = MemberVarInfo {
+            .name = HAS_INITED_VAR_NAME,
+            .type = builder.GetBoolTy(),
+            .attributeInfo = attributeInfo,
+            .outerDef = classDef
+        };
+        classDef->AddInstanceVar(memberVar);
         auto index = std::vector<uint64_t>{classDef->GetAllInstanceVarNum() - 1};
 
         for (auto& funcBase : classDef->GetMethods()) {

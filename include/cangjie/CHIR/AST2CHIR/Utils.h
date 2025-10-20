@@ -219,6 +219,8 @@ std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
     const CustomType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder);
 std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
     const GenericType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder);
+
+Type* AddRefIfFuncIsMutOrClass(Type& thisType, const AST::FuncDecl& funcDecl, CHIRBuilder& builder);
 } // namespace CHIR
 } // namespace Cangjie
 

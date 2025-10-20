@@ -13,6 +13,7 @@
 #ifndef CANGJIE_BASIC_UTILS_H
 #define CANGJIE_BASIC_UTILS_H
 
+#include <stdint.h>
 #include <string>
 #include <vector>
 

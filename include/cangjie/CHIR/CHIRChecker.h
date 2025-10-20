@@ -127,7 +127,7 @@ private:
     // Check CustomTypeDef
     // ===--------------------------------------------------------------------===//
     void CheckStructDef(const StructDef& def);
-    bool CheckParentCustomTypeDef(const FuncBase& func, const CustomTypeDef& def);
+    bool CheckParentCustomTypeDef(const FuncBase& func, const CustomTypeDef& def, bool isInDef);
     void CheckCustomTypeDef(const CustomTypeDef& def);
     bool CheckCustomTypeDefIdentifier(const CustomTypeDef& def);
     void CheckCustomType(const CustomTypeDef& def);
