@@ -1509,10 +1509,21 @@ bool TypeChecker::TypeCheckerImpl::PreCheckFuncRedefinitionWithSameSignature(
             auto paramTys2 = funcTy2 ? funcTy2->paramTys : GetParamTys(*fd);
             // Get substituteMap S = [X11 -> X21, ..., X1n -> X2m]. from '*it' to 'fd' if exists.
             TypeSubst substituteMap = GetSubstituteMap(typeManager, **it, *fd);
+            bool visibilityMatch = true;
+            // Private functions in different files are not considered redefinitions.
+            bool bothTopLevel = !fd->IsMemberDecl() && !(*it)->IsMemberDecl();
+            bool bothPrivate = fd->TestAttr(Attribute::PRIVATE) && (*it)->TestAttr(Attribute::PRIVATE);
+            if (bothTopLevel && bothPrivate) {
+                CJC_NULLPTR_CHECK(fd->curFile);
+                CJC_NULLPTR_CHECK((*it)->curFile);
+                if (*(fd->curFile) != *((*it)->curFile)) {
+                    visibilityMatch = false;
+                }
+            }
             return typeManager.IsFuncParameterTypesIdentical(paramTys1, paramTys2, substituteMap) &&
                 fd->TestAttr(Attribute::STATIC) == (*it)->TestAttr(Attribute::STATIC) &&
                 fd->TestAttr(Attribute::CONSTRUCTOR) == (*it)->TestAttr(Attribute::CONSTRUCTOR) &&
-                fd->TestAttr(Attribute::MAIN_ENTRY) == (*it)->TestAttr(Attribute::MAIN_ENTRY);
+                fd->TestAttr(Attribute::MAIN_ENTRY) == (*it)->TestAttr(Attribute::MAIN_ENTRY) && visibilityMatch;
         });
         std::vector<Ptr<FuncDecl>> sameSigFuncs;
         std::copy(funcs.begin(), it1, std::back_inserter(sameSigFuncs));
