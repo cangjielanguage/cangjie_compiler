@@ -2884,6 +2884,10 @@ struct File : Node {
     {
         return fileName == r.fileName && filePath == r.filePath && fileHash == r.fileHash;
     }
+    bool operator!=(const File& r) const
+    {
+        return !(*this == r);
+    }
 };
 
 enum class AccessLevel {
