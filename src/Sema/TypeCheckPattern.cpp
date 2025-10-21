@@ -67,6 +67,7 @@ OwnedPtr<EnumPattern> VarOrEnumPatternToEnumPattern(ASTContext& ctx, const VarOr
     ep->constructor->end = vep.end;
     // Set symbol for LSP.
     ep->constructor->DisableAttr(Attribute::COMPILER_ADD);
+    ep->isInMacroCall = vep.isInMacroCall;
     if (vep.symbol) {
         auto nodeInfo = NodeInfo(*ep->constructor, vep.identifier, vep.symbol->scopeLevel, vep.symbol->scopeName);
         Collector::AddSymbol(ctx, nodeInfo, buildTrie);
