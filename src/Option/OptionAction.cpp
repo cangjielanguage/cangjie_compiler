@@ -316,7 +316,7 @@ bool ParseAndCheckConditionVar(
     std::string& id, std::unordered_map<std::string, std::string>& res, DiagnosticEngine& diag)
 {
     if (id.size() > std::string("``").size() && id[0] == '`') {
-        id.substr(1, id.size() - std::string("``").size()); // parse raw id
+        id = id.substr(1, id.size() - std::string("``").size()); // parse raw id
     }
     Unicode::NFC(id);
     if (BUILTIN_CONDITION.find(id) != BUILTIN_CONDITION.end()) {

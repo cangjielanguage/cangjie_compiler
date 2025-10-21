@@ -1107,11 +1107,12 @@ std::string FindSerializationFile(
     const std::string& fullPackageName, const std::string& suffix, const std::vector<std::string>& searchPaths)
 {
     auto names = Utils::SplitQualifiedName(fullPackageName);
-    auto fileName = ToCjoFileName(names.front()) + DIR_SEPARATOR + fullPackageName;
-    auto filePath = FileUtil::FindFileByName(fileName + suffix, searchPaths, true).value_or("");
+    auto packageName = ToCjoFileName(fullPackageName);
+    auto fileName = ToCjoFileName(names.front()) + DIR_SEPARATOR + packageName;
+    auto filePath = FindFileByName(fileName + suffix, searchPaths, true).value_or("");
     if (filePath.empty()) {
         // TEMPORARILY, find file in direct path.
-        return FileUtil::FindFileByName(fullPackageName + suffix, searchPaths, true).value_or("");
+        return FindFileByName(packageName + suffix, searchPaths, true).value_or("");
     }
     return filePath;
 }
@@ -1198,32 +1199,22 @@ void HideFile(const std::string& path)
 
 std::string ToCjoFileName(std::string_view fullPackageName)
 {
-    std::string ret{};
-    size_t i{0};
-    for (; i < fullPackageName.size(); ++i) {
-        // replace first :: with # as organization name separator
-        if (fullPackageName[i] == ':' && i + 1 < fullPackageName.size() && fullPackageName[i + 1] == ':') {
-            ret += ORG_NAME_SEPARATOR;
-            i += strlen(TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)]);
-            break;
-        }
-        if (fullPackageName[i] == '.') {
-            break;
-        }
-        ret.push_back(fullPackageName[i]);
+    auto dc = TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)];
+    constexpr std::string::difference_type dcSize = 2;
+    if (auto it = fullPackageName.find(dc); it != std::string::npos) {
+        // packageName@orgName
+        return std::string{fullPackageName.substr(it + dcSize)} + std::string{ORG_NAME_SEPARATOR}
+            + std::string{fullPackageName.substr(0, it)};
     }
-    if (i < fullPackageName.size()) {
-        ret.insert(ret.end(), fullPackageName.begin() + i, fullPackageName.end());
-    }
-    return ret;
+    return std::string{fullPackageName};
 }
  
 std::string ToPackageName(std::string_view cjoName)
 {
     auto it = cjoName.find(ORG_NAME_SEPARATOR);
     if (it != std::string::npos) {
-        return std::string{cjoName.substr(0, it)} + TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)] +
-            std::string{cjoName.substr(it + 1)};
+        return std::string{cjoName.substr(it + 1)} + TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)] +
+            std::string{cjoName.substr(0, it)};
     }
     return std::string{cjoName};
 }

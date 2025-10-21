@@ -568,7 +568,8 @@ std::pair<std::string, std::string> CjoManager::GetPackageCjo(const AST::ImportS
         if (auto found = impl->GetCjoFileCacheMap().find(cjoName); found != impl->GetCjoFileCacheMap().end()) {
             cjoPath = cjoName; // Set dummy path for cached cjo data.
         } else {
-            cjoPath = FileUtil::FindSerializationFile(cjoName, SERIALIZED_FILE_EXTENSION, GetSearchPath());
+            cjoPath = FileUtil::FindSerializationFile(FileUtil::ToPackageName(cjoName),
+                SERIALIZED_FILE_EXTENSION, GetSearchPath());
         }
         if (!cjoPath.empty()) {
             break;
@@ -594,20 +595,21 @@ std::vector<std::string> CjoManager::GetPossibleCjoNames(const ImportSpec& impor
     std::string name;
     std::string_view dot = TOKENS[static_cast<int>(TokenKind::DOT)];
     bool needDc{import.content.hasDoubleColon};
-    for (size_t i{0}; i < import.content.prefixPaths.size(); ++i) {
+    for (size_t i{needDc ? 1UL : 0UL}; i < import.content.prefixPaths.size(); ++i) {
         name += import.content.prefixPaths[i];
-        if (i == import.content.prefixPaths.size() - 1) {
-            break;
-        }
-        if (i == 0 && needDc) {
-            name += ORG_NAME_SEPARATOR;
-            needDc = false;
-        } else {
+        if (i != import.content.prefixPaths.size() - 1) {
             name += dot;
         }
+        needDc = false;
     }
+    auto appendOrg = [&import](const std::string& name) {
+        if (import.content.hasDoubleColon) {
+            return name + std::string{ORG_NAME_SEPARATOR} + import.content.prefixPaths[0];
+        }
+        return name;
+    };
     if (import.content.kind == ImportKind::IMPORT_ALL) {
-        return {std::move(name)};
+        return {appendOrg(name)};
     }
     if (auto it = GetPackageNameByImport(import); !it.empty()) {
         return {FileUtil::ToCjoFileName(it)};
@@ -615,10 +617,10 @@ std::vector<std::string> CjoManager::GetPossibleCjoNames(const ImportSpec& impor
     // if needDc, this import must be of from a::b
     // in this case, the only possible pacakge name is a::b
     if (needDc) {
-        return {name + std::string{ORG_NAME_SEPARATOR} + import.content.identifier};
+        return {appendOrg(import.content.identifier)};
     }
     auto maybePackageName = name + std::string{dot} + import.content.identifier.Val();
-    return {std::move(maybePackageName), std::move(name)};
+    return {appendOrg(maybePackageName), appendOrg(name)};
 }
 
 std::string CjoManager::GetPackageNameByImport(const AST::ImportSpec& importSpec) const

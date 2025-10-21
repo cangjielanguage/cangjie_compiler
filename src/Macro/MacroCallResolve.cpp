@@ -58,9 +58,9 @@ void FindMacroDefPkg(MacroCall& macCall, CompilerInstance* ci)
         macCall.libPath = FileUtil::JoinPath(
             FileUtil::JoinPath(basePath, ci->invocation.globalOptions.GetCangjieLibHostPathName()), libName);
     } else {
-        auto libName = "lib-macro_" + macroDefFunc->fullPackageName + LIB_SUFFIX;
+        auto libName = "lib-macro_" + FileUtil::ToCjoFileName(macroDefFunc->fullPackageName) + LIB_SUFFIX;
         auto names = Utils::SplitQualifiedName(macroDefFunc->fullPackageName);
-        auto fileName = names.front() + DIR_SEPARATOR + libName;
+        auto fileName = FileUtil::ToCjoFileName(names.front()) + DIR_SEPARATOR + libName;
         macCall.libPath = FileUtil::FindFileByName(fileName, ci->importManager.GetSearchPath()).value_or("");
         if (macCall.libPath.empty()) {
             // Temporarily, find file indirectly when the package is root package.
