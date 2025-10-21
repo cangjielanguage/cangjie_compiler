@@ -13,6 +13,7 @@
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/Sema/TestManager.h"
+#include "GenericInstantiation/PartialInstantiation.h"
 
 namespace Cangjie {
 
@@ -122,6 +123,10 @@ void MarkFuncMockSupportedIfNeeded(FuncDecl& decl)
 
 } // namespace
 
+void MockSupportManager::WriteUsedInternalDecl(Decl& decl) {
+    usedInternalDecls.insert(&decl);
+}
+
 void MockSupportManager::MarkNodeMockSupportedIfNeeded(Node& node)
 {
     auto decl = As<ASTKind::DECL>(&node);
@@ -167,6 +172,11 @@ void MockSupportManager::MarkMockAccessorWithAttributes(Decl& decl, AccessLevel 
 void MockSupportManager::PrepareDecls(DeclsToPrepare&& decls)
 {
     for (auto decl : decls.interfacesWithDefaults) {
+        // temporary exclusion std lib packages to preare default methods,
+        // to make stdlib compailable in mock-compatible way
+        if (decl->fullPackageName.rfind("std.", 0) == 0) {
+            continue;
+        }
         PrepareInterfaceDecl(*decl);
     }
 
@@ -183,7 +193,10 @@ void MockSupportManager::PrepareDecls(DeclsToPrepare&& decls)
     }
 
     for (auto decl : decls.functions) {
-        if (decl->TestAttr(Attribute::FOREIGN)) {
+        if (decl->TestAttr(Attribute::FOREIGN) &&
+            usedInternalDecls.find(decl) != usedInternalDecls.end() &&
+            !decl->funcBody->paramLists[0]->hasVariableLenArg // vararg C functions are not supported yet
+        ) {
             auto wrapperDecl = CreateForeignFunctionAccessorDecl(*decl);
             PrepareStaticDecl(*wrapperDecl);
             generatedMockDecls.emplace(std::move(wrapperDecl));
@@ -710,7 +723,9 @@ void MockSupportManager::GenerateAccessors(Decl& decl)
             }
             continue;
         }
-        if (auto funcDecl = As<ASTKind::FUNC_DECL>(member); funcDecl && funcDecl->IsFinalizer()) {
+        if (auto funcDecl = As<ASTKind::FUNC_DECL>(member); funcDecl &&
+            (funcDecl->IsFinalizer() || funcDecl->isFrozen)
+        ) {
             continue;
         }
         if (!MockUtils::IsMockAccessorRequired(*member)) {
@@ -848,6 +863,10 @@ OwnedPtr<FuncDecl> MockSupportManager::GenerateFuncAccessor(FuncDecl& methodDecl
         param->outerDecl = methodAccessor.get();
         auto refExpr = CreateRefExpr(*param);
         refExpr->curFile = param->curFile;
+
+        if (param->desugarDecl) {
+            param->desugarDecl->DisableAttr(Attribute::GENERIC_INSTANTIATED);
+        }
         mockedMethodArgRefs.emplace_back(CreateFuncArg(std::move(refExpr)));
     }
 
@@ -1497,7 +1516,7 @@ std::vector<Ptr<Ty>> MockSupportManager::CloneFuncDecl(Ptr<FuncDecl> fromDecl, P
     toDecl->ty = typeManager.GetInstantiatedTy(fromDecl->ty, typeSubsts);
 
     toDecl->funcBody->ty = toDecl->ty;
-    toDecl->funcBody->retType = MockUtils::CreateType<Type>(StaticCast<FuncTy>(toDecl->ty)->retTy);
+    toDecl->funcBody->retType = ASTCloner::Clone(fromDecl->funcBody->retType.get());
     toDecl->funcBody->funcDecl = toDecl;
     toDecl->funcBody->parentClassLike = toDecl->funcBody->parentClassLike;
 
@@ -1508,7 +1527,7 @@ std::vector<Ptr<Ty>> MockSupportManager::CloneFuncDecl(Ptr<FuncDecl> fromDecl, P
         CopyBasicInfo(param, clonedParam);
         clonedParam->CloneAttrs(*param);
         clonedParam->ty = typeManager.GetInstantiatedTy(param->ty, typeSubsts);
-        clonedParam->type = MockUtils::CreateType<Type>(clonedParam->ty);
+        clonedParam->type = ASTCloner::Clone(param->type.get());
         clonedParam->outerDecl = toDecl;
         clonedParam->identifier = param->identifier;
         paramList->params.emplace_back(std::move(clonedParam));
@@ -1521,6 +1540,7 @@ std::vector<Ptr<Ty>> MockSupportManager::CloneFuncDecl(Ptr<FuncDecl> fromDecl, P
 void MockSupportManager::PrepareInterfaceDecl(InterfaceDecl& interfaceDecl)
 {
     if (IS_GENERIC_INSTANTIATION_ENABLED) {
+        // Do not support CJVM for now
         return;
     }
 
@@ -1601,8 +1621,8 @@ void MockSupportManager::PrepareClassWithDefaults(ClassDecl& classDecl, Interfac
 
     auto extendDecl = MakeOwned<ExtendDecl>();
     CopyBasicInfo(&classDecl, extendDecl);
-    extendDecl->extendedType = MockUtils::CreateType<Type>(classDecl.ty);
-    extendDecl->inheritedTypes.emplace_back(MockUtils::CreateType<Type>(accessorInterfaceDecl->ty));
+    extendDecl->extendedType = MockUtils::CreateType<RefType>(classDecl.ty);
+    extendDecl->inheritedTypes.emplace_back(MockUtils::CreateType<RefType>(accessorInterfaceDecl->ty));
     extendDecl->ty = classDecl.ty;
     extendDecl->linkage = accessorInterfaceDecl->linkage;
     extendDecl->fullPackageName = classDecl.fullPackageName;
@@ -1640,8 +1660,12 @@ void MockSupportManager::PrepareClassWithDefaults(ClassDecl& classDecl, Interfac
         accessorImplDecl->identifier = accessorDecl->identifier;
         accessorImplDecl->outerDecl = extendDecl;
         accessorImplDecl->curFile = extendDecl->curFile;
-        CJC_ASSERT(accessorImplDecl->TestAttr(Attribute::ABSTRACT));
-        accessorImplDecl->DisableAttr(Attribute::ABSTRACT);
+        if (accessorDecl->TestAttr(Attribute::STATIC)) {
+            accessorImplDecl->EnableAttr(Attribute::REDEF);
+        } else {
+            CJC_ASSERT(accessorImplDecl->TestAttr(Attribute::ABSTRACT));
+            accessorImplDecl->DisableAttr(Attribute::ABSTRACT);
+        }
         accessorImplDecl->EnableAttr(Attribute::GENERATED_TO_MOCK);
 
         std::vector<OwnedPtr<FuncArg>> args;

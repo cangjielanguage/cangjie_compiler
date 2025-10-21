@@ -525,7 +525,7 @@ Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
 
     auto target = expr.baseFunc->GetTarget();
     CJC_NULLPTR_CHECK(target);
-    std::string identfifier = target->identifier;
+    std::string identifier = target->identifier;
 
     // Translate code position info
     const auto& loc = TranslateLocation(expr);
@@ -542,11 +542,12 @@ Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
         packageName = target->fullPackageName;
     }
     CHIR::IntrinsicKind intrinsicKind{NOT_INTRINSIC};
-    if (auto it = packageMap.find(packageName); it != packageMap.end()) {
-        CJC_ASSERT(it->second.find(identfifier) != it->second.end());
-        intrinsicKind = it->second.at(identfifier);
-    } else if (auto it1 = headlessIntrinsics.find(identfifier); it1 != headlessIntrinsics.end()) {
+    // Should handle headlessIntrinsics first, because it can appear in any package
+    if (auto it1 = headlessIntrinsics.find(identifier); it1 != headlessIntrinsics.end()) {
         intrinsicKind = it1->second;
+    } else if (auto it = packageMap.find(packageName); it != packageMap.end()) {
+        CJC_ASSERT(it->second.find(identifier) != it->second.end());
+        intrinsicKind = it->second.at(identifier);
     }
 
     // Translate arguments

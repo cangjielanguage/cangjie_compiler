@@ -74,6 +74,7 @@ private:
     void WrapWithRequireMockObjectIfNeeded(Ptr<AST::Expr> expr, Ptr<AST::Decl> target);
     AST::VisitAction HandleMockAnnotatedLambda(const AST::LambdaExpr& lambda);
     void ReportDoesntSupportMocking(const AST::Expr& reportOn, const std::string& name, const std::string& package);
+    void ReportDoesntSupportFrozen(const AST::Expr& reportOn);
     void ReportUnsupportedType(const AST::Expr& reportOn);
     void ReportNotInTestMode(const AST::Expr& reportOn);
     void ReportMockDisabled(const AST::Expr& reportOn);
@@ -86,6 +87,7 @@ private:
     bool ShouldBeMarkedAsContainingMockCreationCall(
         const AST::CallExpr& callExpr, const Ptr<AST::FuncDecl> enclosingFunc) const;
     void HandleDeclsToExportForTest(std::vector<Ptr<AST::Package>> pkgs) const;
+    void CollectInternalDeclUsages(AST::Package& pkg);
 #endif
 };
 

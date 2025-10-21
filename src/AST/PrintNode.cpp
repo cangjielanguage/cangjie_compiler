@@ -77,11 +77,8 @@ void PrintBasic(unsigned indent, const Node& node, std::ostream& stream = std::c
         PrintIndent(
             stream, indent, "linkage:", static_cast<int>(d->linkage), ", isConst:", static_cast<int>(d->IsConst()));
         if (!d->mangledName.empty()) {
-            PrintIndent(indent, "mangledName:", "\"" + d->mangledName + "\"");
-        } else {
-            PrintIndent(indent, "ptr:", &node);
+            PrintIndent(stream, indent, "mangledName:", "\"" + d->mangledName + "\"");
         }
-
         if (d->annotationsArray) {
             PrintNode(d->annotationsArray.get(), indent, "annotationsArray", stream);
         }
