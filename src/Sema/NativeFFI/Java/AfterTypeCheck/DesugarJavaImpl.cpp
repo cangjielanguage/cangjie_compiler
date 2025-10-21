@@ -685,7 +685,7 @@ OwnedPtr<Expr> JavaDesugarManager::CreateIsInstanceCall(Ptr<VarDecl> jObjectVar,
     auto javaRefExpr = CreateJavaRefCall(WithinFile(CreateRefExpr(*jObjectVar), curFile));
 
     auto nameLit = CreateLitConstExpr(
-        LitConstKind::STRING, utils.GetJavaTypeSignature(*classTy),
+        LitConstKind::STRING, utils.GetJavaClassNormalizeSignature(*classTy),
         isInstanceOfDecl->funcBody->paramLists[0]->params[2]->ty);
 
     return CreateCall(isInstanceOfDecl, curFile, std::move(jniEnvCall), std::move(javaRefExpr), std::move(nameLit));
