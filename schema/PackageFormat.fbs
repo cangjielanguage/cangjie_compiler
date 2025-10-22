@@ -298,6 +298,10 @@ table WrappedRawMethod {
   rawMethod: uint32; // use values id
 }
 
+table OverrideSrcFuncType {
+  type: uint32;  // use types id
+}
+
 table VariantTypeCastWrapper {
   lambdaCache: [uint32]; // use exprs id
 }
@@ -316,7 +320,8 @@ union Annotation {
   enumCaseIndex: EnumCaseIndex,
   virMethodOffset: VirMethodOffset,
   wrappedRawMethod: WrappedRawMethod,
-  variantTypeCastWrapper : VariantTypeCastWrapper
+  variantTypeCastWrapper : VariantTypeCastWrapper,
+  overrideSrcFuncType : OverrideSrcFuncType
 }
 
 table Base {

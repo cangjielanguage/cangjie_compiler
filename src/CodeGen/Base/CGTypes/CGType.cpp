@@ -30,6 +30,7 @@
 #include "IRBuilder.h"
 #include "Utils/CGCommonDef.h"
 #include "Utils/CGUtils.h"
+#include "cangjie/CHIR/Annotation.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/Mangle/CHIRTypeManglingUtils.h"
 #include "cangjie/Utils/CheckUtils.h"
@@ -195,7 +196,8 @@ CGType* CGType::GetOrCreate(CGModule& cgModule, const Cangjie::CHIR::Type* chirT
 CGType* CGType::GetOrCreateWithNode(CGModule& cgModule, const CHIR::Value* chirNode, bool allowBasePtr,
     bool forWrapper)
 {
-    auto chirTy = chirNode->GetType();
+    bool flag = chirNode->IsFunc() && chirNode->Get<CHIR::OverrideSrcFuncType>();
+    auto chirTy = flag ? chirNode->Get<CHIR::OverrideSrcFuncType>() : chirNode->GetType();
     CGType* cgType = nullptr;
     if (DynamicCast<const CHIR::LocalVar*>(chirNode)) {
         cgType = CGTypeMgr::GetConcreteCGTypeFor(cgModule, *chirTy, TypeExtraInfo{0, true, false, false, {}});

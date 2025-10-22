@@ -141,13 +141,7 @@ std::string ValueSymbolToString(const Value& value)
 bool GenericTypeIsInContainer(const Type& type, const std::vector<GenericType*>& container)
 {
     if (type.IsGeneric()) {
-        if (auto& genericTy = Cangjie::StaticCast<const GenericType&>(type); genericTy.orphanFlag) {
-            auto upperBounds = genericTy.GetUpperBounds();
-            CJC_ASSERT(upperBounds.size() == 1);
-            return GenericTypeIsInContainer(*upperBounds[0], container);
-        } else {
-            return std::find(container.begin(), container.end(), &type) != container.end();
-        }
+        return std::find(container.begin(), container.end(), &type) != container.end();
     }
     for (auto ty : type.GetTypeArgs()) {
         if (!GenericTypeIsInContainer(*ty, container)) {
@@ -280,19 +274,13 @@ std::string VectorTypesToString(
     return res;
 }
 
-bool HasOrphanGeneric(const Type& type)
+bool IsBoxRefType(const Type& type)
 {
-    bool flag = false;
-    auto visitor = [&flag](const Type& ty) {
-        if (auto genericType = Cangjie::DynamicCast<const GenericType*>(&ty);
-            genericType && genericType->orphanFlag) {
-            flag = true;
-            return false;
-        }
-        return true;
-    };
-    type.VisitTypeRecursively(visitor);
-    return flag;
+    if (!type.IsRef()) {
+        return false;
+    }
+    auto baseType = Cangjie::StaticCast<const RefType&>(type).GetBaseType();
+    return baseType->IsBox();
 }
 
 bool IsFuncTypeOrClosureBaseRefType(const Type& type)
@@ -555,8 +543,8 @@ bool CHIRChecker::TypeIsExpected(const Type& srcType, const Type& dstType)
     if (srcType.StripAllRefs()->IsAny() && dstType.IsClassRef()) {
         return true;
     }
-    // orphan generic type is a hack, will be removed later
-    if (HasOrphanGeneric(srcType) || HasOrphanGeneric(dstType)) {
+    // a hack way, we will fix later
+    if (IsBoxRefType(srcType) || IsBoxRefType(dstType)) {
         return true;
     }
     return false;

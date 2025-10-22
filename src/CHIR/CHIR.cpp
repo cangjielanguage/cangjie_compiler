@@ -1463,10 +1463,12 @@ void ToCHIR::UpdateMemberVarPath()
 void ToCHIR::CreateVTableAndUpdateFuncCall()
 {
     Utils::ProfileRecorder record("CHIR", "CreateVTableAndUpdateFuncCall");
-    auto generator = GenerateVTable(*chirPkg, builder, opts);
+    auto allDefs = chirPkg->GetAllCustomTypeDef();
+    auto generator = GenerateVTable(*chirPkg, allDefs, builder, opts);
     generator.CreateVTable();
     generator.UpdateOperatorVirFunc();
     generator.CreateVirtualFuncWrapper(kind, cachedInfo, curVirtFuncWrapDep, delVirtFuncWrapForIncr);
+    generator.SetSrcFuncType();
     generator.CreateMutFuncWrapper();
     generator.UpdateFuncCall();
 

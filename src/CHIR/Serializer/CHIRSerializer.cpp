@@ -273,6 +273,13 @@ template <> flatbuffers::Offset<PackageFormat::Base> CHIRSerializer::CHIRSeriali
         annos.emplace_back(PackageFormat::CreateVirMethodOffset(builder, offsetNum).Union());
     };
 
+    // OverrideSrcFuncType
+    annoHandler[typeid(CHIR::OverrideSrcFuncType)] = [this, &annos, &annoTypes](Annotation* anno) {
+        annoTypes.push_back(PackageFormat::Annotation::Annotation_overrideSrcFuncType);
+        auto funcType = GetId<Type>(OverrideSrcFuncType::Extract(StaticCast<CHIR::OverrideSrcFuncType*>(anno)));
+        annos.emplace_back(PackageFormat::CreateOverrideSrcFuncType(builder, funcType).Union());
+    };
+    
     annoHandler[typeid(CHIR::AnnoFactoryInfo)] = Empty;
 
     for (auto& entry : obj.GetAnno().GetAnnos()) {

@@ -632,7 +632,8 @@ private:
     void SetSymbolTable(const AST::Node& node, Value& val, bool isLocal = true);
     Ptr<Value> GetSymbolTable(const AST::Node& node) const;
     Ptr<CustomTypeDef> GetNominalSymbolTable(const AST::Node& node);
-    Ptr<Value> TypeCastOrBoxIfNeeded(Value& val, Type& expectedTy, const DebugLocation& loc, bool needCheck = true);
+    Ptr<Value> TypeCastOrBoxIfNeeded(
+        Value& val, Type& expectedTy, const DebugLocation& loc = INVALID_LOCATION, bool needCheck = true);
     Ptr<Block> GetBlockByAST(const AST::Block& block)
     {
         auto val = GetSymbolTable(block);

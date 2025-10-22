@@ -35,51 +35,15 @@ bool FuncTypeHasOuterGenericType(const FuncType& funcType, const std::vector<Gen
 
 bool FuncTypeMatch(const FuncType& parentFuncType, const FuncType& curFuncType)
 {
-    std::function<bool(const Type&, const Type&)> typeIsMatched =
-        [&typeIsMatched](const Type& type1, const Type& type2) {
-        if (type1.GetTypeKind() != type2.GetTypeKind()) {
-            return false;
-        }
-        if (type1.IsGeneric() && type2.IsGeneric()) {
-            return true;
-        }
-        auto typeArgs1 = type1.GetTypeArgs();
-        auto typeArgs2 = type2.GetTypeArgs();
-        if (typeArgs1.size() != typeArgs2.size()) {
-            return false;
-        }
-        for (size_t i = 0; i < typeArgs1.size(); ++i) {
-            if (!typeIsMatched(*typeArgs1[i], *typeArgs2[i])) {
-                return false;
-            }
-        }
-        return true;
-    };
-    auto paramTypeIsMatched = [&typeIsMatched](const Type& type1, const Type& type2) {
-        if ((type1.IsGeneric() || type1.IsRef()) && (type2.IsGeneric() || type2.IsRef())) {
-            return true;
-        } else {
-            return typeIsMatched(type1, type2);
-        }
-    };
     auto parentFuncParamTypes = parentFuncType.GetParamTypes();
     auto curFuncParamTypes = curFuncType.GetParamTypes();
     CJC_ASSERT(parentFuncParamTypes.size() == curFuncParamTypes.size());
     for (size_t i = 0; i < parentFuncParamTypes.size(); ++i) {
-        if (!paramTypeIsMatched(*parentFuncParamTypes[i], *curFuncParamTypes[i])) {
+        if (!VirMethodParamTypeIsMatched(*parentFuncParamTypes[i], *curFuncParamTypes[i])) {
             return false;
         }
     }
-    auto returnTypeIsMatched = [&typeIsMatched](const Type& type1, const Type& type2) {
-        if (type1.IsGeneric() && type2.IsGeneric()) {
-            return true;
-        }
-        if (type1.IsRef() && type2.IsRef()) {
-            return true;
-        }
-        return typeIsMatched(type1, type2);
-    };
-    return returnTypeIsMatched(*parentFuncType.GetReturnType(), *curFuncType.GetReturnType());
+    return VirMethodRetureTypeIsMatched(*parentFuncType.GetReturnType(), *curFuncType.GetReturnType());
 }
 
 bool FuncIsOverride(const FuncBase& curFunc, const Type& selfTy)
@@ -256,19 +220,7 @@ WrapVirtualFunc::WrapperFuncGenericTable WrapVirtualFunc::GetReplaceTableForVirt
     WrapperFuncGenericTable resultTable;
     size_t newGenericIdx = 0;
     for (size_t i = 0; i < genericParentTypeArgs.size(); ++i) {
-        auto instArgTy = instParentTypeArgs[i];
-        if (instArgTy->IsGeneric() || instArgTy->IsClassOrArray()) {
-            resultTable.replaceTable.emplace(genericParentTypeArgs[i], instArgTy);
-        } else {
-            auto srcIdentifier = 'T' + std::to_string(newGenericIdx++);
-            auto tyIdentifier = funcIdentifier + '_' + srcIdentifier;
-            auto funcGenericParam = builder.GetType<GenericType>(tyIdentifier, srcIdentifier);
-            funcGenericParam->orphanFlag = true;
-            funcGenericParam->SetUpperBounds(std::vector<Type*>{instArgTy});
-            funcGenericParam->skipCheck = true;
-            resultTable.replaceTable.emplace(genericParentTypeArgs[i], funcGenericParam);
-            resultTable.inverseReplaceTable.emplace(funcGenericParam, instArgTy);
-        }
+        resultTable.replaceTable.emplace(genericParentTypeArgs[i], instParentTypeArgs[i]);
     }
     auto& parentMethodGenericTys = parentFuncInfo.typeInfo.methodGenericTypeParams;
     for (auto& parentMethodGenericTy : parentMethodGenericTys) {
@@ -289,44 +241,58 @@ WrapVirtualFunc::WrapperFuncGenericTable WrapVirtualFunc::GetReplaceTableForVirt
     return resultTable;
 }
 
-void WrapVirtualFunc::CreateVirtualWrapperFunc(Func& func, FuncType& wrapperTy,
-    const VirtualFuncInfo& funcInfo, Type& selfTy, WrapVirtualFunc::WrapperFuncGenericTable& genericTable)
+void WrapVirtualFunc::CreateWrapperFuncBody(Func& wrapperFunc,
+    const VirtualFuncInfo& childFuncInfo, Type& selfTy, WrapVirtualFunc::WrapperFuncGenericTable& genericTable)
 {
-    auto rawFunc = funcInfo.instance;
-    auto wrapperRetTy = wrapperTy.GetReturnType();
-    BlockGroup* body = builder.CreateBlockGroup(func);
-    func.InitBody(*body);
+    /*
+        interface I<T> {
+            func foo(a: T) {}
+        }
+            class <: I<Bool> {
+                func foo(a: Bool) {}
+                public func foo_wrapper(a: Box<Bool>&) {
+                    foo(UnBox(a))
+                }
+            }
+    */
+    // if there is override method in child class, `rawFunc` is this method, otherwise is parent class method
+    auto rawFunc = childFuncInfo.instance;
+    auto wrapperFuncType = wrapperFunc.GetFuncType();
+    auto wrapperRetTy = wrapperFuncType->GetReturnType();
+    auto body = builder.CreateBlockGroup(wrapperFunc);
+    wrapperFunc.InitBody(*body);
 
     std::vector<Value*> args;
-    for (auto ty : wrapperTy.GetParamTypes()) {
-        args.emplace_back(builder.CreateParameter(ty, INVALID_LOCATION, func));
+    for (auto ty : wrapperFuncType->GetParamTypes()) {
+        args.emplace_back(builder.CreateParameter(ty, INVALID_LOCATION, wrapperFunc));
     }
 
     auto entry = builder.CreateBlock(body);
     body->SetEntryBlock(entry);
     auto ret =
         CreateAndAppendExpression<Allocate>(builder, builder.GetType<RefType>(wrapperRetTy), wrapperRetTy, entry);
-    func.SetReturnValue(*ret->GetResult());
+    wrapperFunc.SetReturnValue(*ret->GetResult());
 
-    Type* instParentType = funcInfo.typeInfo.parentType;
+    Type* instParentType = childFuncInfo.typeInfo.parentType;
     if (instParentType->IsClassOrArray() || (instParentType->IsStruct() && rawFunc->TestAttr(Attribute::MUT))) {
         instParentType = builder.GetType<RefType>(instParentType);
     }
-    auto instTy =
-        StaticCast<FuncType*>(ReplaceRawGenericArgType(wrapperTy, genericTable.inverseReplaceTable, builder));
-    auto paramInstTy = instTy->GetParamTypes();
+    auto expectedParamTypes = wrapperFuncType->GetParamTypes();
+    for (auto& ty : expectedParamTypes) {
+        ty = RemoveBoxTypeShellIfNeed(*ty);
+    }
     if (!rawFunc->TestAttr(Attribute::STATIC)) {
-        paramInstTy[0] = instParentType;
+        expectedParamTypes[0] = instParentType;
     }
 
     Type* applyRetTy = rawFunc->GetFuncType()->GetReturnType();
     if (applyRetTy->IsGenericRelated()) {
-        applyRetTy = instTy->GetReturnType();
+        applyRetTy = RemoveBoxTypeShellIfNeed(*wrapperRetTy);
     }
 
-    CJC_ASSERT(args.size() == paramInstTy.size());
-    for (size_t i = 0; i < paramInstTy.size(); ++i) {
-        args[i] = TypeCastOrBoxIfNeeded(*args[i], *paramInstTy[i], builder, *entry, INVALID_LOCATION);
+    CJC_ASSERT(args.size() == expectedParamTypes.size());
+    for (size_t i = 0; i < expectedParamTypes.size(); ++i) {
+        args[i] = TypeCastOrBoxIfNeeded(*args[i], *expectedParamTypes[i], builder, *entry, INVALID_LOCATION);
     }
     std::vector<Type*> instArgTypes;
     instArgTypes.reserve(genericTable.funcGenericTypeParams.size());
@@ -343,7 +309,7 @@ void WrapVirtualFunc::CreateVirtualWrapperFunc(Func& func, FuncType& wrapperTy,
         .thisType = thisInstTy}, entry);
 
     auto res = TypeCastOrBoxIfNeeded(*apply->GetResult(), *wrapperRetTy, builder, *entry, INVALID_LOCATION);
-    CreateAndAppendExpression<Store>(builder, builder.GetUnitTy(), res, func.GetReturnValue(), entry);
+    CreateAndAppendExpression<Store>(builder, builder.GetUnitTy(), res, wrapperFunc.GetReturnValue(), entry);
     entry->AppendExpression(builder.CreateTerminator<Exit>(entry));
 }
 
@@ -352,17 +318,28 @@ FuncType* WrapVirtualFunc::GetWrapperFuncType(FuncType& parentFuncTyWithoutThisA
 {
     auto erasedFuncTy =
         StaticCast<FuncType*>(ReplaceRawGenericArgType(parentFuncTyWithoutThisArg, replaceTable, builder));
-    auto wrapperParamTy = erasedFuncTy->GetParamTypes();
+    auto wrapperParamTypes = erasedFuncTy->GetParamTypes();
     auto wrapperRetTy = erasedFuncTy->GetReturnType();
+    auto parentParamTypes = parentFuncTyWithoutThisArg.GetParamTypes();
+    auto parentRetType = parentFuncTyWithoutThisArg.GetReturnType();
+    CJC_ASSERT(wrapperParamTypes.size() == parentParamTypes.size());
+    for (size_t i = 0; i < wrapperParamTypes.size(); ++i) {
+        if (!VirMethodParamTypeIsMatched(*wrapperParamTypes[i], *parentParamTypes[i])) {
+            wrapperParamTypes[i] = CreateBoxRefTypeIfNeed(*wrapperParamTypes[i], builder);
+        }
+    }
+    if (!VirMethodRetureTypeIsMatched(*wrapperRetTy, *parentRetType)) {
+        wrapperRetTy = CreateBoxRefTypeIfNeed(*wrapperRetTy, builder);
+    }
 
     if (!isStatic) {
         Type* thisArgTy = builder.GetType<RefType>(&selfTy); // builder.GetType<RefType>(funcInfo.typeInfo.parentType);
         if (!selfTy.IsClassOrArray()) {
             thisArgTy = builder.GetType<RefType>(builder.GetAnyTy());
         }
-        wrapperParamTy.insert(wrapperParamTy.begin(), thisArgTy);
+        wrapperParamTypes.insert(wrapperParamTypes.begin(), thisArgTy);
     }
-    return builder.GetType<FuncType>(wrapperParamTy, wrapperRetTy);
+    return builder.GetType<FuncType>(wrapperParamTypes, wrapperRetTy);
 }
 
 FuncType* WrapVirtualFunc::RemoveThisArg(FuncType* funcTy)
@@ -414,6 +391,7 @@ FuncBase* WrapVirtualFunc::CreateVirtualWrapperIfNeeded(const VirtualFuncInfo& f
     funcBase->Set<WrappedRawMethod>(curFunc);
     funcBase->AppendAttributeInfo(curFunc->GetAttributeInfo());
     funcBase->EnableAttr(Attribute::NO_REFLECT_INFO);
+    funcBase->EnableAttr(Attribute::NO_DEBUG_INFO);
     customTypeDef.AddMethod(funcBase);
     // For cjmp, try delete virutal wrapper function when final func gererated.
     TryDeleteVirtuallWrapperFunc(customTypeDef, *funcBase, builder);
@@ -433,7 +411,7 @@ FuncBase* WrapVirtualFunc::CreateVirtualWrapperIfNeeded(const VirtualFuncInfo& f
     }
     // 5. Create the function body if the raw function is not imported
     auto func = StaticCast<Func*>(funcBase);
-    CreateVirtualWrapperFunc(*func, *wrapperTy, funcInfo, selfTy, genericTable);
+    CreateWrapperFuncBody(*func, funcInfo, selfTy, genericTable);
     return func;
 }
 

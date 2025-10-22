@@ -233,6 +233,18 @@ std::vector<ClassType*> Type::GetSuperTypesRecusively([[maybe_unused]] CHIRBuild
     return std::vector<ClassType*>{};
 }
 
+bool Type::IsBoxRefTypeOf(const Type& baseType) const
+{
+    if (!this->IsRef()) {
+        return false;
+    }
+    auto boxType = StaticCast<const RefType*>(this)->GetBaseType();
+    if (!boxType->IsBox()) {
+        return false;
+    }
+    return StaticCast<BoxType*>(boxType)->GetBaseType() == &baseType;
+}
+
 IntType::IntType(TypeKind kind) : NumericType(kind)
 {
     CJC_ASSERT(kind >= TYPE_INT8 && kind <= TYPE_UINT_NATIVE);

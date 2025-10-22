@@ -266,11 +266,6 @@ std::pair<FuncBase*, bool> CustomTypeDef::GetExpectedFunc(
         bool matched = true;
         for (size_t i = 0; i < originalFuncParamTys.size(); ++i) {
             auto instType = ReplaceRawGenericArgType(*originalFuncParamTys[i], replaceTable, builder);
-            if (auto genericTy = DynamicCast<GenericType*>(instType); genericTy && genericTy->orphanFlag) {
-                auto upperBounds = genericTy->GetUpperBounds();
-                CJC_ASSERT(upperBounds.size() == 1);
-                instType = upperBounds[0];
-            }
             if (!instParamTys[i]->IsGeneric() && instType != instParamTys[i]) {
                 matched = false;
                 break;

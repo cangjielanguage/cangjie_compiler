@@ -254,6 +254,9 @@ public:
     void VisitSubValue(Func& o) override;
     void VisitSubValue(ImportedFunc& o) override;
     void VisitValueDefaultImpl(Value& o) override;
+
+private:
+    void VisitFuncBase(FuncBase& o);
 };
 
 class CustomDefTypeConverter : public virtual TypeConverter, public CustomDefTypeFunctor<void(CustomTypeDef& o)> {

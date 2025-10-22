@@ -36,8 +36,8 @@ private:
     };
     FuncBase* CreateVirtualWrapperIfNeeded(const VirtualFuncInfo& funcInfo,
         const VirtualFuncInfo& parentFuncInfo, Type& selfTy, CustomTypeDef& customTypeDef, const ClassType& parentTy);
-    void CreateVirtualWrapperFunc(Func& func, FuncType& wrapperTy,
-        const VirtualFuncInfo& funcInfo, Type& selfTy, WrapVirtualFunc::WrapperFuncGenericTable& genericTable);
+    void CreateWrapperFuncBody(Func& wrapperFunc,
+        const VirtualFuncInfo& childFuncInfo, Type& selfTy, WrapVirtualFunc::WrapperFuncGenericTable& genericTable);
     WrapperFuncGenericTable GetReplaceTableForVirtualFunc(
         const ClassType& parentTy, const std::string& funcIdentifier, const VirtualFuncInfo& parentFuncInfo);
     FuncType* RemoveThisArg(FuncType* funcTy);

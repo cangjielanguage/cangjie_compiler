@@ -393,9 +393,8 @@ FuncType* ConvertRealFuncTypeToVirtualFuncType(const FuncType& type, CHIRBuilder
  * @param needCheck A flag indicating if a check is needed.
  * @return The value after type casting or boxing if needed.
  */
-Ptr<Value> TypeCastOrBoxIfNeeded(
-    Value& val, Type& expectedTy, CHIRBuilder& builder, Block& parentBlock, const DebugLocation& loc,
-    bool needCheck = true);
+Ptr<Value> TypeCastOrBoxIfNeeded(Value& val, Type& expectedTy, CHIRBuilder& builder, Block& parentBlock,
+    const DebugLocation& loc = INVALID_LOCATION, bool needCheck = true);
 
 /**
  * @brief Creates and appends an expression to the builder.
@@ -752,5 +751,13 @@ BuiltinType* GetBuiltinTypeWithVTable(BuiltinType& type, CHIRBuilder& builder);
  * type, `instParentType` is instantiated parent type. return `genericsSubType` directly otherwise.
  */
 Type* GetInstSubType(Type& genericSubType, const ClassType& instParentType, CHIRBuilder& builder);
+
+bool VirMethodParamTypeIsMatched(const Type& type1, const Type& type2);
+
+bool VirMethodRetureTypeIsMatched(const Type& type1, const Type& type2);
+
+Type* RemoveBoxTypeShellIfNeed(Type& type);
+
+Type* CreateBoxRefTypeIfNeed(Type& baseTy, CHIRBuilder& builder);
 } // namespace Cangjie::CHIR
 #endif

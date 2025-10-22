@@ -53,4 +53,12 @@ std::string WrappedRawMethod::ToString()
 
     return "wrapped raw method: " + rawMethod->GetIdentifier();
 }
+
+std::string OverrideSrcFuncType::ToString()
+{
+    if (type == nullptr) {
+        return "";
+    }
+    return "OverrideSrcFuncType: " + type->ToString();
+}
 } // namespace Cangjie::CHIR
