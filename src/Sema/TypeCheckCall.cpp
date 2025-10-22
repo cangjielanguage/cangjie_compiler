@@ -687,7 +687,8 @@ bool TypeChecker::TypeCheckerImpl::IsGenericCall(const ASTContext& ctx, const Ca
         auto decl = Ty::GetDeclPtrOfTy(baseType);
         // Check whether decl is generic
         if (decl && decl->TestAttr(Attribute::GENERIC) &&
-            (decl->astKind != ASTKind::ENUM_DECL || fd.TestAttr(Attribute::ENUM_CONSTRUCTOR))) {
+            (decl->astKind != ASTKind::ENUM_DECL || fd.TestAttr(Attribute::ENUM_CONSTRUCTOR) ||
+                fd.TestAttr(Attribute::STATIC))) {
             return true;
         }
         // 5. If the target function is a member of generic structure decl, and the base's extends/implements the
