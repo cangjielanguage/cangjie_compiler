@@ -725,7 +725,7 @@ Type* GetInstParentCustomTypeForApplyCallee(const Apply& expr, CHIRBuilder& buil
 Type* GetInstParentCustomTypeForAweCallee(const ApplyWithException& expr, CHIRBuilder& builder);
 
 std::vector<VTableSearchRes> GetFuncIndexInVTable(
-    Type& root, const FuncCallType& funcCallType, bool isStatic, CHIRBuilder& builder);
+    Type& root, const FuncCallType& funcCallType, CHIRBuilder& builder);
 
 bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType);
 

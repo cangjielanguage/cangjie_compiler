@@ -16,6 +16,7 @@
 #include "Utils/CGUtils.h"
 #include "cangjie/CHIR/Type/CustomTypeDef.h"
 #include "cangjie/CHIR/Value.h"
+#include "cangjie/Utils/CheckUtils.h"
 
 using namespace Cangjie;
 using namespace CodeGen;
@@ -318,13 +319,14 @@ llvm::Constant* CGExtensionDef::GenerateWhereConditionFn()
     return whereCondFn;
 }
 
-llvm::Constant* CGExtensionDef::GenerateFuncTableForType(const std::vector<CHIR::VirtualFuncInfo>& virtualFuncInfos)
+llvm::Constant* CGExtensionDef::GenerateFuncTableForType(const CHIR::VTableInType& vtableInType)
 {
     auto i8PtrType = llvm::Type::getInt8PtrTy(cgCtx.GetLLVMContext());
-    auto funcTableSize = virtualFuncInfos.size();
-    if (funcTableSize == 0) {
+    if (vtableInType.IsEmpty()) {
         return llvm::Constant::getNullValue(i8PtrType);
     }
+    auto funcTableSize = vtableInType.GetMethodNum();
+    CJC_ASSERT(funcTableSize != 0);
     auto tableType = llvm::ArrayType::get(i8PtrType, funcTableSize);
     auto funcTableGV =
         llvm::cast<llvm::GlobalVariable>(cgMod.GetLLVMModule()->getOrInsertGlobal(extendDefName + ".ft", tableType));
@@ -334,9 +336,9 @@ llvm::Constant* CGExtensionDef::GenerateFuncTableForType(const std::vector<CHIR:
     funcTableGV->setLinkage(llvm::GlobalVariable::PrivateLinkage);
     std::vector<llvm::Constant*> funcTable(funcTableSize);
     for (size_t i = 0; i < funcTableSize; ++i) {
-        auto funcInfo = virtualFuncInfos[i];
-        if (funcInfo.instance) {
-            auto function = cgMod.GetOrInsertCGFunction(funcInfo.instance)->GetRawFunction();
+        const auto& funcInfo = vtableInType.GetVirtualMethods()[i];
+        if (auto method = funcInfo.GetVirtualMethod()) {
+            auto function = cgMod.GetOrInsertCGFunction(method)->GetRawFunction();
             funcTable[i] = llvm::ConstantExpr::getBitCast(function, i8PtrType);
         } else {
             funcTable[i] = llvm::ConstantPointerNull::get(llvm::Type::getInt8PtrTy(cgMod.GetLLVMContext()));
@@ -432,9 +434,8 @@ bool CGExtensionDef::CreateExtensionDefForType(CGModule& cgMod, const std::strin
 
 bool CGExtensionDef::CreateExtensionDefForType(const CHIR::ClassType& inheritedType)
 {
-    auto& vtable = chirDef.GetVTable();
-    auto found = vtable.find(const_cast<CHIR::ClassType*>(&inheritedType));
-    auto funcTableSize = found == vtable.end() ? 0 : found->second.size();
+    auto found = chirDef.GetDefVTable().GetExpectedTypeVTable(inheritedType);
+    auto funcTableSize = found.IsEmpty() ? 0 : found.GetMethodNum();
     if (funcTableSize == 0 && inheritedType.GetClassDef()->IsClass()) {
         return false;
     }
@@ -447,8 +448,7 @@ bool CGExtensionDef::CreateExtensionDefForType(const CHIR::ClassType& inheritedT
     content[static_cast<size_t>(IS_INTERFACE_TI)] =
         llvm::ConstantInt::get(llvm::Type::getInt8Ty(cgCtx.GetLLVMContext()), static_cast<uint64_t>(isTi));
     content[static_cast<size_t>(WHERE_CONDITION_FN)] = GenerateWhereConditionFn();
-    content[static_cast<size_t>(FUNC_TABLE)] =
-        GenerateFuncTableForType(funcTableSize == 0 ? std::vector<CHIR::VirtualFuncInfo>() : found->second);
+    content[static_cast<size_t>(FUNC_TABLE)] = GenerateFuncTableForType(found);
 
     return CreateExtensionDefForType(cgMod, extendDefName, content, inheritedType, isForExternalType);
 }

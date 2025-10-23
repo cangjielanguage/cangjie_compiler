@@ -195,10 +195,10 @@ private:
                 VisitType(*ctor.funcType);
             }
         }
-        for (auto vTable : def.GetVTable()) {
-            for (auto funcInfo : vTable.second) {
-                if (funcInfo.instance) {
-                    VisitValue(*funcInfo.instance);
+        for (const auto& vTable : def.GetDefVTable().GetTypeVTables()) {
+            for (const auto& funcInfo : vTable.GetVirtualMethods()) {
+                if (funcInfo.GetVirtualMethod()) {
+                    VisitValue(*funcInfo.GetVirtualMethod());
                 }
             }
         }
@@ -471,7 +471,7 @@ private:
 };
 
 void CreateNewExtendDef(Package& package, CustomTypeDef& curDef, ClassType& parentType,
-    const std::vector<VirtualFuncInfo>& virtualFunc, CHIRBuilder& builder)
+    const std::vector<VirtualMethodInfo>& virtualFunc, CHIRBuilder& builder)
 {
     auto mangledName = "extend_" + curDef.GetIdentifier() + "_p_" + parentType.ToString();
     auto genericParams = curDef.GetGenericTypeParams();
@@ -484,9 +484,11 @@ void CreateNewExtendDef(Package& package, CustomTypeDef& curDef, ClassType& pare
         extendDef->EnableAttr(Attribute::GENERIC);
     }
 
-    VTableType vtable;
-    vtable.emplace(&parentType, virtualFunc);
-    extendDef->SetVTable(vtable);
+    VTableInDef vtable;
+    for (auto it : virtualFunc) {
+        vtable.AddNewItemToTypeVTable(parentType, std::move(it));
+    }
+    extendDef->SetVTable(std::move(vtable));
 }
 
 void CreateExtendDefForImportedCustomTypeDef(Package& package, CHIRBuilder& builder, bool incr)
@@ -522,9 +524,9 @@ void CreateExtendDefForImportedCustomTypeDef(Package& package, CHIRBuilder& buil
         if (def->IsExtend()) {
             continue;
         }
-        for (const auto& it : def->GetVTable()) {
-            if (ParentDefIsFromExtend(*def, *(it.first->GetClassDef()))) {
-                CreateNewExtendDef(package, *def, *it.first, it.second, builder);
+        for (const auto& it : def->GetDefVTable().GetTypeVTables()) {
+            if (ParentDefIsFromExtend(*def, *(it.GetSrcParentType()->GetClassDef()))) {
+                CreateNewExtendDef(package, *def, *it.GetSrcParentType(), it.GetVirtualMethods(), builder);
                 continue;
             }
         }
@@ -533,16 +535,15 @@ void CreateExtendDefForImportedCustomTypeDef(Package& package, CHIRBuilder& buil
 
 void ReplaceCustomTypeDefVtable(CustomTypeDef& def, const std::unordered_map<Value*, Value*>& symbol)
 {
-    auto vtable = def.GetVTable();
+    auto& vtable = def.GetModifiableDefVTable().GetModifiableTypeVTables();
     for (auto& vtableIt : vtable) {
-        for (size_t i = 0; i < vtableIt.second.size(); ++i) {
-            auto res = symbol.find(vtableIt.second[i].instance);
+        for (auto& it : vtableIt.GetModifiableVirtualMethods()) {
+            auto res = symbol.find(it.GetVirtualMethod());
             if (res != symbol.end()) {
-                vtableIt.second[i].instance = VirtualCast<FuncBase*>(res->second);
+                it.SetVirtualMethod(VirtualCast<FuncBase*>(res->second));
             }
         }
     }
-    def.SetVTable(vtable);
 }
 
 void ReplaceCustomTypeDefAndExtendVtable(CustomTypeDef& def, const std::unordered_map<Value*, Value*>& symbol)

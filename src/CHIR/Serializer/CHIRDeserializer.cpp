@@ -238,37 +238,32 @@ AbstractMethodInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageF
 }
 
 template <>
-VirtualFuncTypeInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::VirtualFuncTypeInfo* obj)
+VirtualMethodInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::VirtualMethodInfo* obj)
 {
-    auto sigType = GetType<FuncType>(obj->sigType());
+    auto condition = FuncSigInfo {
+        .funcName = obj->funcName()->str(),
+        .funcType = GetType<FuncType>(obj->sigType()),
+        .genericTypeParams = GetType<GenericType>(obj->methodGenericTypeParams())
+    };
+    auto funcPtr = GetValue<FuncBase>(obj->instance());
+    auto attributeInfo = CreateAttr(obj->attributes());
     auto originalType = GetType<FuncType>(obj->originalType());
     auto parentType = GetType<Type>(obj->parentType());
     auto returnType = GetType<Type>(obj->returnType());
-    auto methodGenericTypeParams = GetType<GenericType>(obj->methodGenericTypeParams());
-
-    return VirtualFuncTypeInfo{sigType, originalType, parentType, returnType, methodGenericTypeParams};
-}
-
-template <> VirtualFuncInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::VirtualFuncInfo* obj)
-{
-    auto srcCodeIdentifier = obj->srcCodeIdentifier()->str();
-    auto instance = GetValue<FuncBase>(obj->instance());
-    auto attributeInfo = CreateAttr(obj->attributes());
-    auto typeInfo = Create<VirtualFuncTypeInfo>(obj->typeInfo());
-    return VirtualFuncInfo{srcCodeIdentifier, instance, attributeInfo, typeInfo};
+    return VirtualMethodInfo(std::move(condition), funcPtr, attributeInfo, *originalType, *parentType, *returnType);
 }
 
 template <>
-VTableType CHIRDeserializer::CHIRDeserializerImpl::Create(
-    const flatbuffers::Vector<flatbuffers::Offset<PackageFormat::VTableElement>>* obj)
+VTableInDef CHIRDeserializer::CHIRDeserializerImpl::Create(
+    const flatbuffers::Vector<flatbuffers::Offset<PackageFormat::VTableInType>>* obj)
 {
-    VTableType vtable = {};
+    VTableInDef vtableInDef;
     for (auto item : *obj) {
-        auto ty = GetType<ClassType>(item->ty());
-        std::vector<VirtualFuncInfo> info = Create<VirtualFuncInfo>(item->info());
-        vtable[ty] = info;
+        auto ty = GetType<ClassType>(item->srcParentType());
+        std::vector<VirtualMethodInfo> info = Create<VirtualMethodInfo>(item->virtualMethods());
+        vtableInDef.AddNewItemToTypeVTable(*ty, std::move(info));
     }
-    return vtable;
+    return vtableInDef;
 }
 
 // =========================== Custom Type Define Deserializer ==============================
@@ -1579,8 +1574,8 @@ void CHIRDeserializer::CHIRDeserializerImpl::ConfigCustomTypeDef(
     }
     obj.SetAnnoInfo(Create<AnnoInfo>(buffer->annoInfo()));
     auto vtable =
-        Create<VTableType, flatbuffers::Vector<flatbuffers::Offset<PackageFormat::VTableElement>>>(buffer->vtable());
-    obj.SetVTable(vtable);
+        Create<VTableInDef, flatbuffers::Vector<flatbuffers::Offset<PackageFormat::VTableInType>>>(buffer->vtable());
+    obj.SetVTable(std::move(vtable));
     auto varInitializationFunc = GetValue<FuncBase>(buffer->varInitializationFunc());
     if (varInitializationFunc) {
         obj.SetVarInitializationFunc(varInitializationFunc);

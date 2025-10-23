@@ -24,21 +24,21 @@ public:
     void GenerateVTable(CustomTypeDef& customTypeDef);
 
 private:
-    void MergeVtable(ClassType& instParentTy, VTableType& vtable);
+    void MergeVtable(ClassType& instParentTy, VTableInDef& vtable);
     void CollectCurDefMethodsMayBeInVtable(const CustomTypeDef& def, std::vector<FuncBase*>& publicFuncs);
     std::vector<FuncBase*> GetAllMethods(const CustomTypeDef& def);
     std::vector<FuncBase*> GetAllMethods(const Type& ty);
-    VirtualFuncInfo CreateVirtualFuncInfo(const AbstractMethodInfo& method,
+    VirtualMethodInfo CreateVirtualFuncInfo(const AbstractMethodInfo& method,
         Type& originalParentType, const std::unordered_map<const GenericType*, Type*>& replaceTable);
-    VirtualFuncInfo CreateVirtualFuncInfo(
+    VirtualMethodInfo CreateVirtualFuncInfo(
         FuncBase& method, Type& originalParentType, const std::unordered_map<const GenericType*, Type*>& replaceTable);
-    bool UpdateVtable(VirtualFuncInfo& curFuncInfo, VTableType& vtable);
-    bool IsSigTypeMatched(const VirtualFuncInfo& curFuncInfo, const VirtualFuncInfo& funcInfoInVtable);
+    bool UpdateVtable(VirtualMethodInfo& curFuncInfo, VTableInDef& vtable);
+    bool IsSigTypeMatched(const VirtualMethodInfo& curFuncInfo, const VirtualMethodInfo& funcInfoInVtable);
     bool VirtualFuncShouldAddToVTableInItsOwnParent(ClassType& ownParent, ClassType& alreadyIn);
-    void UpdateAbstractMethodInVtable(VTableType& vtable);
+    void UpdateAbstractMethodInVtable(VTableInDef& vtable);
     void UpdateAbstractMethodWithImplementedMethod(
-        VTableType& vtable, const ClassType& curParentTy, VirtualFuncInfo& abstractFuncInfo);
-    std::vector<VirtualFuncInfo> CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef);
+        VTableInDef& vtable, const ClassType& curParentTy, VirtualMethodInfo& abstractFuncInfo);
+    std::vector<VirtualMethodInfo> CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef);
     std::unordered_map<const GenericType*, Type*> GetInstMapFromDefIncludeParents(
         const CustomTypeDef& def, const Type& curType);
     std::vector<FuncBase*> CollectMethodsIncludeParentsMayBeInVtable(const CustomTypeDef& curDef);

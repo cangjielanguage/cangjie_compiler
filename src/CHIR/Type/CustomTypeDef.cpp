@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <optional>
+#include <utility>
 
 #include "cangjie/CHIR/CHIRCasting.h"
 #include "cangjie/CHIR/ToStringUtils.h"
@@ -192,32 +193,27 @@ void CustomTypeDef::PrintMethod(std::stringstream& ss) const
 void CustomTypeDef::PrintVTable(std::stringstream& ss) const
 {
     unsigned indent = 1;
-    if (vtable.size() > 0) {
-        PrintIndent(ss, indent);
-        ss << "vtable {\n";
-        ++indent;
-        for (auto& vtableIt : vtable) {
+    const auto& vtables = vtable.GetTypeVTables();
+    if (vtables.empty()) {
+        return;
+    }
+    PrintIndent(ss, indent++);
+    ss << "vtable {\n";
+    for (const auto& vtableInType : vtables) {
+        PrintIndent(ss, indent++);
+        ss << vtableInType.GetSrcParentType()->ToString() << " {\n";
+        for (const auto& funcInfo : vtableInType.GetVirtualMethods()) {
             PrintIndent(ss, indent);
-            ss << vtableIt.first->ToString() << " {\n";
-            ++indent;
-            for (auto& funcInfo : vtableIt.second) {
-                PrintIndent(ss, indent);
-                ss << "@" << funcInfo.srcCodeIdentifier;
-                if (funcInfo.srcCodeIdentifier != "$Placeholder") {
-                    ss << ": " << funcInfo.typeInfo.originalType->ToString();
-                    ss << " => " <<
-                        (funcInfo.instance ? funcInfo.instance->GetIdentifier() : "[abstract]");
-                }
-                ss << "\n";
-            }
-            --indent;
-            PrintIndent(ss, indent);
-            ss << "}\n";
+            ss << "@" << funcInfo.GetMethodName();
+            ss << ": " << funcInfo.GetOriginalFuncType()->ToString();
+            ss << "=> " << (funcInfo.GetVirtualMethod() ? funcInfo.GetVirtualMethod()->GetIdentifier() : "[abstract]");
+            ss << "\n";
         }
-        --indent;
-        PrintIndent(ss, indent);
+        PrintIndent(ss, --indent);
         ss << "}\n";
     }
+    PrintIndent(ss, --indent);
+    ss << "}\n";
 }
 
 std::pair<FuncBase*, bool> CustomTypeDef::GetExpectedFunc(
@@ -324,52 +320,23 @@ std::pair<FuncBase*, bool> CustomTypeDef::GetExpectedFunc(
 }
 
 std::vector<VTableSearchRes> CustomTypeDef::GetFuncIndexInVTable(const FuncCallType& funcCallType,
-    bool isStatic, std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder) const
+    std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder) const
 {
-    auto& funcName = funcCallType.funcName;
-    auto& funcInstTypeArgs = funcCallType.genericTypeArgs;
-    auto instArgTys = funcCallType.funcType->GetParamTypes();
-    if (!isStatic) {
-        CJC_ASSERT(!instArgTys.empty());
-        instArgTys.erase(instArgTys.begin());
-    }
     std::vector<VTableSearchRes> res;
-    for (auto& mapIt : vtable) {
-        for (size_t i = 0; i < mapIt.second.size(); ++i) {
-            if (mapIt.second[i].srcCodeIdentifier != funcName) {
-                continue;
-            }
-            auto genericParamTys = mapIt.second[i].typeInfo.sigType->GetParamTypes();
-            if (genericParamTys.size() != instArgTys.size()) {
-                continue;
-            }
-            auto genericTypeParams = mapIt.second[i].typeInfo.methodGenericTypeParams;
-            if (genericTypeParams.size() != funcInstTypeArgs.size()) {
-                continue;
-            }
-            for (size_t j = 0; j < genericTypeParams.size(); ++j) {
-                replaceTable.emplace(genericTypeParams[j], funcInstTypeArgs[j]);
-            }
-            bool matched = true;
-            for (size_t j = 0; j < genericParamTys.size(); ++j) {
-                auto declaredInstType = ReplaceRawGenericArgType(*genericParamTys[j], replaceTable, builder);
-                if (!ParamTypeIsEquivalent(*declaredInstType, *instArgTys[j])) {
-                    matched = false;
-                    break;
-                }
-            }
-            if (matched) {
-                auto originalParentType = const_cast<ClassType*>(mapIt.first);
+    for (const auto& vtableIt : vtable.GetTypeVTables()) {
+        for (size_t i = 0; i < vtableIt.GetMethodNum(); ++i) {
+            const auto& funcInfo = vtableIt.GetVirtualMethods()[i];
+            if (funcInfo.FuncSigIsMatched(funcCallType, replaceTable, builder)) {
+                auto originalParentType = vtableIt.GetSrcParentType();
                 auto instSrcParentTy = ReplaceRawGenericArgType(*originalParentType, replaceTable, builder);
-                auto& funcInfo = mapIt.second[i];
                 res.emplace_back(VTableSearchRes {
                     .instSrcParentType = StaticCast<ClassType*>(instSrcParentTy),
                     .halfInstSrcParentType = originalParentType,
-                    .originalFuncType = funcInfo.typeInfo.originalType,
-                    .instance = funcInfo.instance,
+                    .originalFuncType = funcInfo.GetOriginalFuncType(),
+                    .instance = funcInfo.GetVirtualMethod(),
                     .originalDef = const_cast<CustomTypeDef*>(this),
-                    .genericTypeParams = funcInfo.typeInfo.methodGenericTypeParams,
-                    .attr = funcInfo.attr,
+                    .genericTypeParams = funcInfo.GetGenericTypeParams(),
+                    .attr = funcInfo.GetAttributeInfo(),
                     .offset = i
                 });
                 break;
@@ -484,35 +451,34 @@ void CustomTypeDef::AddExtend(ExtendDef& extend)
     extends.emplace_back(&extend);
 }
 
-const VTableType& CustomTypeDef::GetVTable() const
+const VTableInDef& CustomTypeDef::GetDefVTable() const
 {
     return vtable;
 }
 
-void CustomTypeDef::SetVTable(const VTableType& table)
+VTableInDef& CustomTypeDef::GetModifiableDefVTable()
 {
-    vtable = table;
+    return vtable;
+}
+
+void CustomTypeDef::SetVTable(VTableInDef&& table)
+{
+    vtable = std::move(table);
 }
 
 void CustomTypeDef::UpdateVtableItem(ClassType& srcClassTy,
     size_t index, FuncBase* newFunc, Type* newParentTy, const std::string newName)
 {
-    auto& funcInfo = vtable[&srcClassTy][index];
-    funcInfo.instance = newFunc;
-    if (newFunc != nullptr) {
-        funcInfo.typeInfo.originalType = newFunc->GetFuncType();
-    }
-    if (newParentTy != nullptr) {
-        funcInfo.typeInfo.parentType = newParentTy;
-    }
-    if (!newName.empty()) {
-        funcInfo.srcCodeIdentifier = newName;
-    }
+    vtable.UpdateItemInTypeVTable(srcClassTy, index, newFunc, newParentTy, newName);
 }
 
-void CustomTypeDef::AddVtableItem(ClassType& srcClassTy, VirtualFuncInfo&& info)
+void CustomTypeDef::AddVtableItem(ClassType& srcClassTy, VirtualMethodInfo&& info)
 {
-    vtable[&srcClassTy].push_back(std::move(info));
+    for (auto& vtableIt : vtable.GetModifiableTypeVTables()) {
+        if (vtableIt.GetSrcParentType() == &srcClassTy) {
+            vtableIt.AppendNewMethod(std::forward<VirtualMethodInfo>(info));
+        }
+    }
 }
 
 CustomDefKind CustomTypeDef::GetCustomKind() const

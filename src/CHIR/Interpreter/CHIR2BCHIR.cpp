@@ -56,14 +56,14 @@ template <bool ForConstEval> void CHIR2BCHIR::TranslatePackage(
 
 static void CollectMethods(const CustomTypeDef& chirClass, Bchir::SClassInfo& classInfo)
 {
-    for (const auto& it : chirClass.GetVTable()) {
-        for (const auto& funcInfo : it.second) {
-            if (!funcInfo.typeInfo.sigType) {
+    for (const auto& it : chirClass.GetDefVTable().GetTypeVTables()) {
+        for (const auto& funcInfo : it.GetVirtualMethods()) {
+            if (funcInfo.GetMethodSigType() == nullptr) {
                 continue;
             }
-            auto methodName = MangleMethodName(funcInfo.srcCodeIdentifier, *funcInfo.typeInfo.sigType);
-            if (funcInfo.instance != nullptr) {
-                classInfo.vtable.emplace(methodName, funcInfo.instance->GetIdentifierWithoutPrefix());
+            auto methodName = MangleMethodName(funcInfo.GetMethodName(), *funcInfo.GetMethodSigType());
+            if (funcInfo.GetVirtualMethod() != nullptr) {
+                classInfo.vtable.emplace(methodName, funcInfo.GetVirtualMethod()->GetIdentifierWithoutPrefix());
             } // else, this class/interface does not implement the method
         }
     }

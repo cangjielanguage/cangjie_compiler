@@ -200,13 +200,12 @@ void WrapMutFunc::Run(CustomTypeDef& customTypeDef)
     if (!structTy) {
         return;
     }
-    for (auto& [srcTy, infos] : customTypeDef.GetVTable()) {
-        for (size_t i = 0; i < infos.size(); ++i) {
-            if (!infos[i].instance) {
+    for (auto& vtableIt : customTypeDef.GetDefVTable().GetTypeVTables()) {
+        for (auto& methodInfo : vtableIt.GetVirtualMethods()) {
+            if (methodInfo.GetVirtualMethod() == nullptr) {
                 continue;
             }
-            CJC_NULLPTR_CHECK(infos[i].instance);
-            auto rawFunc = infos[i].instance;
+            auto rawFunc = methodInfo.GetVirtualMethod();
             while (auto base = rawFunc->Get<WrappedRawMethod>()) {
                 rawFunc = base;
             }
@@ -217,7 +216,7 @@ void WrapMutFunc::Run(CustomTypeDef& customTypeDef)
                 ex && ex->GetExtendedCustomTypeDef() == rawFunc->GetParentCustomTypeDef()) {
                 continue;
             }
-            CreateMutFuncWrapper(rawFunc, customTypeDef, *StaticCast<ClassType*>(srcTy));
+            CreateMutFuncWrapper(rawFunc, customTypeDef, *vtableIt.GetSrcParentType());
         }
     }
 }

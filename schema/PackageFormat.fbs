@@ -555,25 +555,24 @@ table MemberVarInfo {
   outerDef: uint32; // use defs id
 }
 
-
-table VirtualFuncTypeInfo {
+table VirtualMethodInfo {
+  // condition
+  funcName : string(shared);
   sigType : uint32; // use types id
+  methodGenericTypeParams : [uint32]; // use types id
+  // result
+  instance : uint32; // used value Id
+  attributes: uint64;
   originalType : uint32; // use types id
   parentType : uint32; // use types id
   returnType : uint32; // use types id
-  methodGenericTypeParams : [uint32]; // use types id
 }
 
-table VirtualFuncInfo {
-  srcCodeIdentifier : string(shared);
-  instance : uint32; // used value Id
-  attributes: uint64;
-  typeInfo : VirtualFuncTypeInfo;
-}
-
-table VTableElement {
-  ty : uint32; // use types id
-  info : [VirtualFuncInfo];
+table VTableInType {
+  // the first level
+  srcParentType : uint32; // use types id
+  // the second level
+  virtualMethods : [VirtualMethodInfo];
 }
 
 table CustomTypeDef {
@@ -591,7 +590,7 @@ table CustomTypeDef {
   staticMemberVars: [uint32]; // use values id
   attributes: uint64;
   annoInfo: AnnoInfo;
-  vtable: [VTableElement];
+  vtable: [VTableInType];
   extends: [uint32]; // use defs id
   varInitializationFunc: uint32;
 }

@@ -350,8 +350,8 @@ public:
             return it->second;
         }
         uint16_t cnt = 0U;
-        for (auto& it : classDef->GetVTable()) {
-            if (it.first->GetClassDef()->IsClass() && !it.second.empty()) {
+        for (auto& it : classDef->GetDefVTable().GetTypeVTables()) {
+            if (it.GetSrcParentType()->GetClassDef()->IsClass() && !it.GetVirtualMethods().empty()) {
                 ++cnt;
             }
         }

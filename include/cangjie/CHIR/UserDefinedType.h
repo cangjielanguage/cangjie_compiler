@@ -11,6 +11,8 @@
 #include "cangjie/CHIR/AttributeInfo.h"
 #include <functional>
 #include <map>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Cangjie::CHIR {
@@ -24,31 +26,7 @@ class ClassType;
 class Translator;
 class Value;
 class CustomTypeDef;
-
-class CHIRTypeCompare {
-public:
-    bool operator()(const Type* key1, const Type* key2) const;
-};
-
-struct VirtualFuncTypeInfo {
-    FuncType* sigType{nullptr}; // instantiated type, (param types)->Unit, param types exclude `this` type
-    FuncType* originalType{nullptr}; // virtual func's original func type from parent def, (param types)->retType,
-                                     // param types include `this` type
-    Type* parentType{nullptr}; // CustomType or extended type(may be primitive type)
-    Type* returnType{nullptr}; // instantiated type
-    std::vector<GenericType*> methodGenericTypeParams; // store `T` of `func foo<T>()`
-};
-
-// for vtable
-struct VirtualFuncInfo {
-    std::string srcCodeIdentifier;
-    FuncBase* instance{nullptr};
-    AttributeInfo attr;
-    VirtualFuncTypeInfo typeInfo; // store virtual func's type info,
-                                  // if virtual func need to be wrappered, don't update type info
-};
-
-using VTableType = std::map<ClassType*, std::vector<VirtualFuncInfo>, CHIRTypeCompare>;
+class CHIRBuilder;
 
 using TranslateASTNodeFunc = std::function<Value*(const Cangjie::AST::Decl&, Translator&)>;
 
@@ -63,6 +41,113 @@ struct FuncCallType {
     std::string funcName;         // src code name
     FuncType* funcType{nullptr};  // inst type, including `this` type and return type
     std::vector<Type*> genericTypeArgs;
+};
+
+class VirtualMethodInfo {
+public:
+    VirtualMethodInfo(FuncSigInfo&& c, FuncBase* func, const AttributeInfo& a, FuncType& o, Type& p, Type& r);
+
+    // ===--------------------------------------------------------------------===//
+    // Get
+    // ===--------------------------------------------------------------------===//
+    AttributeInfo GetAttributeInfo() const;
+    const FuncSigInfo& GetCondition() const;
+    std::vector<GenericType*> GetGenericTypeParams() const;
+    Type* GetInstParentType() const;
+    Type* GetMethodInstRetType() const;
+    std::string GetMethodName() const;
+    FuncType* GetMethodSigType() const;
+    FuncType* GetOriginalFuncType() const;
+    FuncBase* GetVirtualMethod() const;
+
+    // ===--------------------------------------------------------------------===//
+    // Set
+    // ===--------------------------------------------------------------------===//
+    void SetFuncName(const std::string& newName);
+    void SetInstParentType(Type& newParentTy);
+    void SetOriginalFuncType(FuncType& newFuncType);
+    void SetVirtualMethod(FuncBase* newFunc);
+    void UpdateMethodInfo(const VirtualMethodInfo& newInfo);
+    void ConvertPrivateType(
+        std::function<FuncType*(FuncType&)>& convertFuncParamsAndRetType, std::function<Type*(Type&)>& convertType);
+    
+    // ===--------------------------------------------------------------------===//
+    // Judgement
+    // ===--------------------------------------------------------------------===//
+    bool FuncSigIsMatched(const FuncSigInfo& other, CHIRBuilder& builder) const;
+    bool FuncSigIsMatched(const FuncCallType& other,
+        std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder) const;
+    bool TestAttr(Attribute a) const;
+
+private:
+    // condition
+    FuncSigInfo condition;
+    // result
+    FuncBase* instance{nullptr};
+    AttributeInfo attr;
+    FuncType* originalType{nullptr}; // virtual func's original func type from parent def, (param types)->retType,
+                                     // param types include `this` type
+    Type* parentType{nullptr}; // CustomType or extended type(may be primitive type)
+    Type* returnType{nullptr}; // instantiated type
+};
+
+class VTableInType {
+public:
+    VTableInType();
+    explicit VTableInType(ClassType& p);
+    VTableInType(ClassType& p, std::vector<VirtualMethodInfo>&& methods);
+
+    // ===--------------------------------------------------------------------===//
+    // Get
+    // ===--------------------------------------------------------------------===//
+    size_t GetMethodNum() const;
+    std::vector<VirtualMethodInfo>& GetModifiableVirtualMethods();
+    ClassType* GetSrcParentType() const;
+    const std::vector<VirtualMethodInfo>& GetVirtualMethods() const;
+
+    // ===--------------------------------------------------------------------===//
+    // Set
+    // ===--------------------------------------------------------------------===//
+    void AppendNewMethod(VirtualMethodInfo&& newMethod);
+    void ConvertPrivateType(
+        std::function<FuncType*(FuncType&)>& convertFuncParamsAndRetType, std::function<Type*(Type&)>& convertType);
+
+    // ===--------------------------------------------------------------------===//
+    // Judgement
+    // ===--------------------------------------------------------------------===//
+    bool TheFirstLevelIsMatched(const ClassType& parentType) const;
+    bool IsEmpty() const;
+    
+private:
+    // the 1st level
+    ClassType* srcParentType{nullptr};
+    std::unordered_map<Type*, std::unordered_set<ClassType*>> genericConstraints;
+    // the 2nd level
+    std::vector<VirtualMethodInfo> virtualMethods;
+};
+
+class VTableInDef {
+public:
+    // ===--------------------------------------------------------------------===//
+    // Get
+    // ===--------------------------------------------------------------------===//
+    const VTableInType& GetExpectedTypeVTable(const ClassType& srcParentType) const;
+    std::vector<VTableInType>& GetModifiableTypeVTables();
+    const std::vector<VTableInType>& GetTypeVTables() const;
+    
+    // ===--------------------------------------------------------------------===//
+    // Set
+    // ===--------------------------------------------------------------------===//
+    void AddNewItemToTypeVTable(ClassType& srcParent, VirtualMethodInfo&& funcInfo);
+    void AddNewItemToTypeVTable(ClassType& srcParent, std::vector<VirtualMethodInfo>&& funcInfos);
+    void UpdateItemInTypeVTable(
+        ClassType& srcClassTy, size_t index, FuncBase* newFunc, Type* newParentTy, const std::string& newName);
+
+private:
+    // src parent type -> vtable index, just for fast lookup
+    std::unordered_map<const ClassType*, size_t> srcParentIndex;
+    std::vector<VTableInType> vtables;
+    VTableInType empty;
 };
 
 struct VTableSearchRes {
