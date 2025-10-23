@@ -841,6 +841,22 @@ bool AcceptPlaceholderTarget(const AST::Node& n)
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 bool IsNeedRuntimeCheck(TypeManager& typeManager, Ty& srcTy, Ty& targetTy)
 {
+    auto isFinalType = [](Ty& ty) {
+        if (ty.IsStruct() || ty.IsEnum() || ty.IsPointer() || ty.IsCString() || ty.IsPrimitive() || Is<VArrayTy>(ty) ||
+            ty.IsArray()) {
+            return true;
+        }
+        if (ty.IsClass()) {
+            auto decl = Ty::GetDeclPtrOfTy(&ty);
+            return decl && !decl->TestAnyAttr(Attribute::ABSTRACT, Attribute::OPEN);
+        }
+        return false;
+    };
+    if (isFinalType(srcTy) && isFinalType(targetTy)) {
+        auto srcDecl = Ty::GetDeclPtrOfTy(&srcTy);
+        auto targetDecl = Ty::GetDeclPtrOfTy(&targetTy);
+        return srcDecl == targetDecl;
+    }
     return (srcTy.IsClassLike() && targetTy.IsClassLike()) || srcTy.IsGeneric() || targetTy.IsGeneric() ||
         srcTy.HasGeneric() || targetTy.HasGeneric() || typeManager.IsSubtype(&srcTy, &targetTy, true, false) ||
         typeManager.IsSubtype(&targetTy, &srcTy, true, false);
