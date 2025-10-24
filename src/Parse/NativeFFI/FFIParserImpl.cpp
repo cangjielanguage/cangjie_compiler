@@ -90,7 +90,8 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
                 break;
             }
             case AnnotationKind::OBJ_C_MIRROR:
-            case AnnotationKind::OBJ_C_IMPL: {
+            case AnnotationKind::OBJ_C_IMPL:
+            case AnnotationKind::OBJ_C_INIT: {
                 op.CheckAnnotation(anno, scopeKind);
                 break;
             }
@@ -162,6 +163,16 @@ void FFIParserImpl::CheckZeroOrSingleStringLitArgAnnotation(const AST::Annotatio
         return;
     }
 }
+
+void FFIParserImpl::CheckNoArgAnnotation(const AST::Annotation &anno, const std::string &annotationName) const
+{
+    if (anno.args.empty()) {
+        return;
+    }
+
+    p.DiagAnnotationShouldNotHaveArgs(anno, annotationName);
+}
+
 
 void FFIParserImpl::CheckClassLikeSignature(AST::ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const
 {

@@ -138,6 +138,16 @@ public:
         std::vector<OwnedPtr<AST::Expr>> rawArgs
     );
 
+    /**
+     * Creates method call of `fd` passing exact parameters mapping with  unwrapping and `handle`.
+     */
+    OwnedPtr<AST::Expr> CreateMethodCallViaMsgSend(AST::FuncDecl& fd, OwnedPtr<AST::Expr> handle);
+
+    /**
+     * Creates alloc-init chain over $fd.outerDecl as native handle with corresponding parameters passed
+     */
+    OwnedPtr<AST::Expr> CreateAllocInitCall(AST::FuncDecl& fd);
+
     OwnedPtr<AST::Expr> CreatePropGetterCallViaMsgSend(
         AST::PropDecl& pd,
         OwnedPtr<AST::Expr> nativeHandle

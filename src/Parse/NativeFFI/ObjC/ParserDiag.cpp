@@ -12,6 +12,8 @@
 
 #include "../../ParserImpl.h"
 #include "OCFFIParserImpl.h"
+#include "cangjie/AST/Node.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -69,6 +71,20 @@ void OCFFIParserImpl::DiagObjCMirrorFieldCannotBeStatic(const AST::Node& node) c
 void OCFFIParserImpl::DiagObjCImplCannotBeGeneric(const Node& node) const
 {
     p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_impl_cannot_be_generic, node);
+}
+
+void OCFFIParserImpl::DiagObjCInitFuncMustBeStatic(const Node& node) const
+{
+    CJC_ASSERT(!node.TestAttr(Attribute::STATIC));
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_init_method_must_be_static, node);
+}
+
+void OCFFIParserImpl::DiagObjCInitFuncMustBeInMirrorClass(const FuncDecl& fd) const
+{
+    CJC_ASSERT(!fd.outerDecl || !fd.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)
+        || fd.outerDecl->astKind != ASTKind::CLASS_DECL);
+
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_init_method_must_be_in_mirror_class, fd);
 }
 
 void OCFFIParserImpl::DiagObjCImplCannotBeOpen(const Node& node) const

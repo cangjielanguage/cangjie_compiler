@@ -63,3 +63,12 @@ Ptr<VarDecl> Cangjie::Interop::ObjC::FindNativeVarHandle(const AST::ClassLikeDec
     return As<ASTKind::VAR_DECL>(FindMirrorMember(ASTFactory::NATIVE_HANDLE_IDENT, target));
 }
 
+bool Cangjie::Interop::ObjC::IsStaticInitMethod(const Node& node)
+{
+    const auto fd = DynamicCast<const FuncDecl*>(&node);
+    if (!fd) {
+        return false;
+    }
+
+    return fd->TestAttr(Attribute::OBJ_C_INIT);
+}

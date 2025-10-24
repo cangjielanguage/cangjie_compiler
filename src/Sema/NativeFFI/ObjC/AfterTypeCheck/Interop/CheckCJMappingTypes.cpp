@@ -22,8 +22,8 @@ void CheckCJMappingTypes::HandleImpl(InteropContext& ctx)
                        .Use<CheckGeneric>()
                        .Use<CheckMemberTypes>(InteropType::CJ_Mapping);
 
-    for (auto& cjmapping : ctx.cjMappings) {
-        auto typeCheckCtx = TypeCheckContext(*cjmapping, ctx.diag, ctx.typeMapper);
+    for (auto cjmapping : ctx.cjMappings) {
+        auto typeCheckCtx = TypeCheckContext(*cjmapping, ctx.diag, ctx.typeMapper,  ctx.typeManager);
         checker.Handle(typeCheckCtx);
     }
 }

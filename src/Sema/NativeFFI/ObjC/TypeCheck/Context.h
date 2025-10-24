@@ -20,14 +20,15 @@
 namespace Cangjie::Interop::ObjC {
 
 struct TypeCheckContext {
-    explicit TypeCheckContext(AST::Decl& target, DiagnosticEngine& diag, TypeMapper& typeMapper)
-        : target(target), diag(diag), typeMapper(typeMapper)
+    explicit TypeCheckContext(AST::Decl& target, DiagnosticEngine& diag, TypeMapper& typeMapper,
+        TypeManager &typeManager) : target(target), diag(diag), typeMapper(typeMapper), typeManager(typeManager)
     {
     }
 
     AST::Decl& target;
     DiagnosticEngine& diag;
     TypeMapper& typeMapper;
+    TypeManager& typeManager;
 };
 
 } // namespace Cangjie::Interop::ObjC

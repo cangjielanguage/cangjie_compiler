@@ -25,6 +25,7 @@ namespace Cangjie::Interop::ObjC {
  */
 Ptr<AST::VarDecl> FindNativeVarHandle(const AST::ClassLikeDecl& target);
 bool HasMirrorSuperClass(const AST::ClassLikeDecl& target);
+bool IsStaticInitMethod(const AST::Node& node);
 
 } // namespace Cangjie::Interop::ObjC
 
