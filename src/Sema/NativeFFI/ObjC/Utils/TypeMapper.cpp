@@ -256,9 +256,6 @@ bool TypeMapper::IsObjCCompatible(const Ty& ty)
                 return false;
             };
             CJC_ASSERT(ty.typeArgs[0]);
-            if (ty.typeArgs[0]->IsCoreOptionType()) { // no nested options
-                return false;
-            }
             if (IsValidObjCMirror(*ty.typeArgs[0]) || IsObjCImpl(*ty.typeArgs[0])) {
                 return true;
             }
