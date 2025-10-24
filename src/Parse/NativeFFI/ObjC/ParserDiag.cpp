@@ -28,16 +28,6 @@ void OCFFIParserImpl::DiagObjCMirrorCannotHaveFinalizer(const Node& node) const
     p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_cannot_have_finalizer, node);
 }
 
-void OCFFIParserImpl::DiagObjCMirrorMethodMustHaveForeignName(const Node& node) const
-{
-    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_method_must_have_foreign_name, node);
-}
-
-void OCFFIParserImpl::DiagObjCMirrorCtorMustHaveForeignName(const Node& node) const
-{
-    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_ctor_must_have_foreign_name, node);
-}
-
 void OCFFIParserImpl::DiagObjCMirrorCannotHavePrivateMember(const Node& node) const
 {
     p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_mirror_cannot_have_private_member, node);

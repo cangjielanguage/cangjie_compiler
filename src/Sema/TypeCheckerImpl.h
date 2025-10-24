@@ -418,7 +418,11 @@ private:
     /**
      * Add Object to all ClassDecls' inheritedTypes if there is no one.
      */
-    void AddSuperClassObjectForClassDecl(ASTContext& ctx);
+    void AddSuperClassObjectForClassDecl(ASTContext& ctx);    
+    /**
+     * Add super interface to all ClassDecls' inheritedTypes if there is no one.
+     */
+    void AddSuperInterfaceForClassLikeDecl(ASTContext& ctx);
     void CheckAndAddSubDecls(
         const AST::Type& type, AST::ClassDecl& cd, bool& hasSuperClass, int& superClassLikeNum) const;
     bool HasSuperClass(AST::ClassDecl& cd) const;
@@ -428,9 +432,13 @@ private:
      */
     void AddObjectSuperClass(ASTContext& ctx, AST::ClassDecl& cd);
     /**
-     * LLVM-java interop scenario.
+     * CJNative-java interop scenario.
      */
-    bool AddJObjectSuperClassJavaInterop(ASTContext& ctx, AST::ClassDecl& cd);
+    bool AddJObjectSuperClassJavaInterop(ASTContext& ctx, AST::ClassDecl& cd);    
+    /**
+     * CJNative-objc interop scenario.
+     */
+    void AddObjCIdSuperInterfaceObjCInterop(ASTContext& ctx, AST::ClassLikeDecl& classLikeDecl);
     void AddDefaultSuperCall(const AST::FuncBody& funcBody) const;
     /**
      * If there is no default constructor, insert one.

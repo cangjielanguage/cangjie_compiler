@@ -29,7 +29,8 @@ public:
     std::string GetFieldSetterWrapperName(const AST::VarDecl& target);
 
     /**
-     * Returns name declared in @ForeignName or target.identifier if no foreign name specified
+     * Returns name declared in @ForeignName or target.identifier if no foreign name specified.
+     * The only one exception is function: If it has one param, then target.identifier + ":" will be returned.
      */
     std::string GetObjCDeclName(const AST::Decl& target);
 
@@ -45,8 +46,12 @@ public:
      */
     std::string GetObjCFullDeclName(const AST::Decl& target);
 
-private:
+    /**
+     * Gets the pointer to value of @ForeignName anno or @ObjCMirror/@ObjCImpl annos or returns nullptr.
+     */
     Ptr<std::string> GetUserDefinedObjCName(const AST::Decl& target);
+
+private:
     const BaseMangler& mangler;
 };
 } // namespace Cangjie::Interop::ObjC

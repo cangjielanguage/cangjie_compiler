@@ -9,11 +9,10 @@
 
 #include "cangjie/AST/Node.h"
 
-
 namespace Cangjie::Interop::ObjC {
-using namespace AST;
 
-void PrepareTypeCheck(Package& pkg);
+void PrepareTypeCheck(AST::Package& pkg);
+
 }
 
 #endif // CANGJIE_SEMA_NATIVE_FFI_OBJ_C_BEFORE_TYPECHECK_DESUGAR

@@ -316,4 +316,23 @@ std::string GetSyntheticNameFromClassLike(const ClassLikeDecl& cld);
 void InsertSyntheticClassDecl(ClassLikeDecl& decl, File& file);
 }
 
+namespace Cangjie::Interop::ObjC {
+
+bool IsDeclAppropriateForSyntheticClassGeneration(const AST::Decl& decl);
+
+/**
+ * Generates and inserts the synthetic class declaration.
+ * The synthetic class implements the given interface and has the following structure:
+ *
+ * Example of generated synthetic
+ * ```
+ * interface CL <: ObjCId {}
+ * 
+ * class CL$impl <: CL {}
+ * ```
+ */
+void InsertSyntheticClassDecl(AST::ClassLikeDecl& decl, AST::File& file);
+
+}
+
 #endif

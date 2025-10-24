@@ -149,6 +149,17 @@ constexpr auto JAVA_REF_GETTER_FUNC_NAME = "$getJavaRef";
 constexpr auto INTEROPLIB_CFFI_JAVA_ENTITY = "Java_CFFI_JavaEntity";
 } // namespace Cangjie::Interop::Java
 
+namespace Interop::ObjC {
+inline const std::string OBJ_C_ID_IDENT = "ObjCId";
+inline const std::string OBJ_C_POINTER_IDENT = "ObjCPointer";
+inline const std::string INTEROPLIB_OBJ_C_PACKAGE_IDENT = "interoplib.objc";
+inline const std::string OBJ_C_LANG_PACKAGE_IDENT = "objc.lang";
+inline const std::string NATIVE_HANDLE_IDENT = "$obj";
+inline const std::string REGISTRY_ID_IDENT = "$registryId";
+inline const std::string SYNTHETIC_CLASS_SUFFIX = "$impl";
+inline const std::string NATIVE_HANDLE_GETTER_IDENT = "$getObj";
+} // namespace Interop::ObjC
+
 // Headless instrinsics
 inline const std::string GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME = "getTypeForTypeParameter";
 inline const std::string IS_SUBTYPE_TYPES_FUNC_NAME = "isSubtypeTypes";

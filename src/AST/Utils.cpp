@@ -892,3 +892,40 @@ void InsertSyntheticClassDecl(ClassLikeDecl& decl, File& file)
     file.decls.emplace_back(std::move(synthetic));
 }
 } // namespace Cangjie::Interop::Java
+
+namespace Cangjie::Interop::ObjC {
+
+std::string GetSyntheticNameFromClassLike(const ClassLikeDecl& classLikeDecl)
+{
+    return classLikeDecl.identifier.Val() + SYNTHETIC_CLASS_SUFFIX;
+}
+
+bool IsDeclAppropriateForSyntheticClassGeneration(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::OBJ_C_MIRROR) && decl.astKind == ASTKind::INTERFACE_DECL;
+}
+
+// abstract on parser stage, on sema stage abstractness will be removed
+void InsertSyntheticClassDecl(ClassLikeDecl& decl, File& file)
+{
+    auto synthetic = MakeOwned<ClassDecl>();
+    synthetic->CloneAttrs(decl);
+    synthetic->EnableAttr(Attribute::OBJ_C_MIRROR_SYNTHETIC_WRAPPER, Attribute::COMPILER_ADD, Attribute::ABSTRACT);
+    synthetic->DisableAttr(Attribute::OBJ_C_MIRROR);
+    synthetic->identifier = GetSyntheticNameFromClassLike(decl);
+    synthetic->identifier.SetPos(decl.identifier.Begin(), decl.identifier.End());
+
+    synthetic->inheritedTypes.emplace_back(CreateRefType(decl));
+
+    synthetic->fullPackageName = decl.fullPackageName;
+    SetPositionAndCurFileByProvidedNode(*synthetic, decl);
+
+    synthetic->body = MakeOwned<ClassBody>();
+    SetPositionAndCurFileByProvidedNode(*synthetic->body, *synthetic);
+
+    synthetic->moduleName = ::Cangjie::Utils::GetRootPackageName(decl.fullPackageName);
+
+    file.decls.emplace_back(std::move(synthetic));
+}
+
+} // namespace Cangjie::Interop::ObjC

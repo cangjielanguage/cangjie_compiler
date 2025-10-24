@@ -213,6 +213,27 @@ bool TypeChecker::TypeCheckerImpl::AddJObjectSuperClassJavaInterop(ASTContext& c
     return true;
 }
 
+void TypeChecker::TypeCheckerImpl::AddObjCIdSuperInterfaceObjCInterop(ASTContext& ctx, ClassLikeDecl& classLikeDecl)
+{
+    using namespace Interop::ObjC;
+    if (ctx.fullPackageName == OBJ_C_LANG_PACKAGE_IDENT && classLikeDecl.identifier == OBJ_C_ID_IDENT) {
+        return;
+    }
+    if (auto id = importManager.GetImportedDecl(OBJ_C_LANG_PACKAGE_IDENT, OBJ_C_ID_IDENT)) {
+        CJC_ASSERT(id->astKind == ASTKind::INTERFACE_DECL);
+        auto tmp = MakeOwned<RefType>();
+        tmp->EnableAttr(AST::Attribute::COMPILER_ADD);
+        tmp->curFile = classLikeDecl.curFile;
+        tmp->ref.identifier = SrcIdentifier{OBJ_C_ID_IDENT};
+        tmp->ref.target = id;
+        tmp->ty = tmp->ref.target->ty;
+        classLikeDecl.inheritedTypes.emplace_back(std::move(tmp));
+    } else {
+        ctx.diag.DiagnoseRefactor(DiagKindRefactor::sema_member_not_imported, classLikeDecl.identifier.Begin(),
+            OBJ_C_LANG_PACKAGE_IDENT + "." + OBJ_C_ID_IDENT);
+    }
+}
+
 void TypeChecker::TypeCheckerImpl::CheckInterfaceDecl(ASTContext& ctx, InterfaceDecl& id)
 {
     if (id.TestAttr(Attribute::IS_CHECK_VISITED)) {

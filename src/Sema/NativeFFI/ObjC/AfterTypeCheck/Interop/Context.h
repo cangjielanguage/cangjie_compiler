@@ -42,6 +42,7 @@ struct InteropContext {
     std::vector<Ptr<AST::FuncDecl>> mirrorTopLevelFuncs;
     std::vector<Ptr<AST::ClassDecl>> impls;
     std::vector<Ptr<AST::Decl>> cjMappings;
+    std::vector<Ptr<AST::ClassDecl>> synWrappers;
     std::vector<OwnedPtr<AST::Decl>> genDecls;
 
     DiagnosticEngine& diag;

@@ -5,8 +5,8 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "TypeMapper.h"
-#include "cangjie/AST/Match.h"
 #include "cangjie/AST/ASTCasting.h"
+#include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 
 using namespace Cangjie;
@@ -31,9 +31,6 @@ static constexpr auto FLOAT_TYPE = "float";
 static constexpr auto DOUBLE_TYPE = "double";
 static constexpr auto BOOL_TYPE = "BOOL";
 static constexpr auto STRUCT_TYPE_PREFIX = "struct ";
-
-static constexpr auto OBJC_LANG_PACKAGE = "objc.lang";
-static constexpr auto OBJC_POINTER_TYPE = "ObjCPointer";
 } // namespace
 
 Ptr<Ty> TypeMapper::Cj2CType(Ptr<Ty> cjty) const
@@ -105,9 +102,13 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
             CJC_ABORT();
             return UNSUPPORTED_TYPE;
         case TypeKind::TYPE_CLASS:
-        case TypeKind::TYPE_INTERFACE:
-            if (IsValidObjCMirror(from) || IsObjCImpl(from) || IsObjCCJMapping(from)) {
+            if (IsObjCMirror(from) || IsObjCImpl(from) || IsObjCCJMapping(from)) {
                 return from.name + "*";
+            }
+            return UNSUPPORTED_TYPE;
+        case TypeKind::TYPE_INTERFACE:
+            if (IsObjCMirror(from)) {
+                return "id<" + from.name + ">";
             }
             return UNSUPPORTED_TYPE;
         case TypeKind::TYPE_POINTER:
@@ -183,9 +184,14 @@ bool TypeMapper::IsObjCMirror(const Decl& decl)
     return decl.TestAttr(Attribute::OBJ_C_MIRROR);
 }
 
+bool TypeMapper::IsSyntheticWrapper(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::OBJ_C_MIRROR_SYNTHETIC_WRAPPER);
+}
+
 bool TypeMapper::IsObjCMirrorSubtype(const Decl& decl)
 {
-    return IsObjCMirrorSubtype(*decl.ty);
+    return IsValidObjCMirrorSubtype(*decl.ty);
 }
 
 bool TypeMapper::IsObjCImpl(const Decl& decl)
@@ -209,9 +215,8 @@ bool TypeMapper::IsValidObjCMirror(const Ty& ty)
         return false;
     }
 
-    // all super interfaces must be @ObjCMirror
     for (auto parent : classLikeTy->GetSuperInterfaceTys()) {
-        if (!IsObjCMirror(*parent->decl)) {
+        if (!IsValidObjCMirror(*parent)) {
             return false;
         }
     }
@@ -225,31 +230,14 @@ bool TypeMapper::IsValidObjCMirror(const Ty& ty)
         return IsValidObjCMirror(*classTy->GetSuperClassTy());
     }
 
-    return false;
+    return true;
 }
 
-bool TypeMapper::IsObjCMirrorSubtype(const Ty& ty)
+bool TypeMapper::IsValidObjCMirrorSubtype(const Ty& ty)
 {
     if (auto classTy = DynamicCast<ClassTy*>(&ty);
-        classTy && classTy->GetSuperClassTy() && !classTy->GetSuperClassTy()->IsObject()
-    ) {
-        if (!IsObjCMirrorSubtype(*classTy->GetSuperClassTy()) &&
-            (!classTy->GetSuperClassTy()->decl || !IsObjCMirror(*classTy->GetSuperClassTy()->decl))) {
-            return false;
-        }
-        return true;
-    }
-
-    if (auto ity = DynamicCast<ClassLikeTy*>(&ty)) {
-        if (ity->GetSuperInterfaceTys().empty()) {
-            return false;
-        }
-
-        for (auto parent : ity->GetSuperInterfaceTys()) {
-            if (IsObjCMirror(*parent->decl)) {
-                return true;
-            }
-        }
+        classTy && classTy->GetSuperClassTy() && !classTy->GetSuperClassTy()->IsObject()) {
+        return IsValidObjCMirrorSubtype(*classTy->GetSuperClassTy()) || IsValidObjCMirror(*classTy->GetSuperClassTy());
     }
 
     return false;
@@ -267,20 +255,26 @@ bool TypeMapper::IsObjCMirror(const Ty& ty)
     return classLikeTy && classLikeTy->commonDecl && IsObjCMirror(*classLikeTy->commonDecl);
 }
 
+bool TypeMapper::IsSyntheticWrapper(const Ty& ty)
+{
+    auto classLikeTy = DynamicCast<ClassLikeTy*>(&ty);
+    return classLikeTy && classLikeTy->commonDecl && IsSyntheticWrapper(*classLikeTy->commonDecl);
+}
+
 namespace {
 
 bool IsObjCPointerImpl(const StructDecl& structDecl)
 {
-    if (structDecl.fullPackageName != OBJC_LANG_PACKAGE) {
+    if (structDecl.fullPackageName != OBJ_C_LANG_PACKAGE_IDENT) {
         return false;
     }
-    if (structDecl.identifier.Val() != OBJC_POINTER_TYPE) {
+    if (structDecl.identifier.Val() != OBJ_C_POINTER_IDENT) {
         return false;
     }
     return true;
 }
 
-}
+} // namespace
 
 bool TypeMapper::IsObjCPointer(const Decl& decl)
 {

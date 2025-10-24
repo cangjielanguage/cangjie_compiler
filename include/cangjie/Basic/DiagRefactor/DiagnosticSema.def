@@ -353,6 +353,11 @@ ERROR(sema_objc_interop_not_supported, "Objective-C interoperability feature '%s
 ERROR(sema_objc_pointer_argument_must_be_objc_compatible, "ObjCPointer can only be used with Objective-C compatible types")
 ERROR(sema_objc_interop_toplevel_param_must_be_objc_compatible, "param type of Objective-C mirror top-level function '%s' must be Objective-C compatible")
 ERROR(sema_objc_interop_toplevel_ret_must_be_objc_compatible, "return type of Objective-C mirror top-level function '%s' must be Objective-C compatible")
+ERROR(sema_objc_method_must_have_foreign_name,
+    "%s declaration method '%s' with more than one parameter must have @ForeignName annotation",
+    "%s declaration method with more than one parameter must have must have @ForeignName annotation")
+ERROR(sema_objc_ctor_must_have_foreign_name,
+    "%s declaration constructor with more than one parameter must have @ForeignName annotation")
 
 // CJMapping for Objective-C
 ERROR(sema_objc_cjmapping_inheritance_interface_not_supported, "cangjie mirror decl type inheritance interface is not supported")

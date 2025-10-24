@@ -372,7 +372,7 @@ void TypeChecker::TypeCheckerImpl::AddDefaultCtor(InheritableDecl& decl) const
 
     // Do not add default constructor to Objective-C mirrors declarations
     // because it requires explicitly added one
-    if (decl.TestAnyAttr(Attribute::OBJ_C_MIRROR)) {
+    if (decl.TestAnyAttr(Attribute::OBJ_C_MIRROR, Attribute::OBJ_C_MIRROR_SYNTHETIC_WRAPPER)) {
         return;
     }
 

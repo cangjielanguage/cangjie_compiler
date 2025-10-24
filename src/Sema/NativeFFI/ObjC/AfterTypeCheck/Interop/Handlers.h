@@ -43,7 +43,7 @@ public:
 };
 
 /**
- * Creates and inserts field of type `NativeObjCId` in all hierarchy root @ObjCMirror declarations.
+ * Creates and inserts a field of type `NativeObjCId` in all hierarchy root @ObjCMirror declarations.
  *
  * `public var $obj: NativeObjCId`
  */
@@ -53,11 +53,37 @@ public:
 };
 
 /**
+ * Creates and inserts an accessor instance method for `$obj: NativeObjCId` field for each @ObjCMirror interface
+ * declaration(according to inheritance).
+ *
+ * `public func $getObj(): NativeObjCId`
+ */
+class InsertNativeHandleGetterDecl : public Handler<InsertNativeHandleGetterDecl, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+/**
+ * Creates and inserts a body of `$getObj(): NativeObjCId` for each @ObjCMirror/@ObjCImpl(according to inheritance)
+ * class:
+ *
+ * ```cangjie
+ * public func $getObj(): NativeObjCId { // decl was inserted in `InsertNativeHandleGetterDecl`
+ *     $obj
+ * }
+ * ```
+ */
+class InsertNativeHandleGetterBody : public Handler<InsertNativeHandleGetterBody, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+/**
  * Creates and inserts constructors skeletons for each @ObjCMirror class:
  *
  * `public init($obj: NativeObjCId)`
  */
-class InsertMirrorCtorDecl : public Handler<InsertMirrorCtorDecl, InteropContext> {
+class InsertBaseCtorDecl : public Handler<InsertBaseCtorDecl, InteropContext> {
 public:
     void HandleImpl(InteropContext& ctx);
 };
@@ -77,7 +103,7 @@ public:
  * }
  * ```
  */
-class InsertMirrorCtorBody : public Handler<InsertMirrorCtorBody, InteropContext> {
+class InsertBaseCtorBody : public Handler<InsertBaseCtorBody, InteropContext> {
 public:
     void HandleImpl(InteropContext& ctx);
 };
@@ -87,7 +113,7 @@ public:
  * ```cangjie
  * private var $hasInited: Bool = false
  * ~init() {
- *     unsafe { ObjCRuntime.release($obj) }
+ *     unsafe { objCRelease($obj) }
  * }
  * ```
  */
@@ -115,40 +141,41 @@ private:
  * Desugars all members of every @ObjCMirror declarations.
  * Methods are desugared as follows:
  * 1. If method returns @ObjCMirror/@ObjCImpl value:
- * 1.1 Generates proper ObjCRuntime.msgSend call, e.g. ```unsafe { CFunc<(NativeObjCId, NativeObjCSel, ...ArgTypes) ->
- * NativeObjCId>(ObjCRuntime.msgSend)($obj, ObjCRuntime.registerName("${methodForeignName}"), ...args) }```. 1.2 Wraps
- * it with ObjCRuntime.withAutoreleasePoolObj call, e.g. ```ObjCRuntime.withAutoreleasePool{ => // msgSend call })```.
- * 1.3 Wraps it with ctor call of return value type, e.g. ```M(// ObjCRuntime.withAutoreleasePool call)```.
+ * 1.1 Generates proper objCMsgSend call, e.g. ```unsafe { CFunc<(NativeObjCId, NativeObjCSel, ...ArgTypes) ->
+ * NativeObjCId>(objCMsgSend())($obj, registerName("${methodForeignName}"), ...args) }```.
+ * 1.2 Wraps it with withAutoreleasePoolObj call, e.g. ```withAutoreleasePoolObj{ => // msgSend call })```.
+ * 1.3 Wraps it with ctor call of return value type, e.g. ```M(// withAutoreleasePool call)```.
  *
  * 2. Else if method returns Objective-C compatible primitive type value:
- * 2.1 Generates proper ObjCRuntime.msgSend call, e.g. ```unsafe { CFunc<(NativeObjCId, NativeObjCSel, ...ArgTypes) ->
- * RetType>(ObjCRuntime.msgSend)($obj, ObjCRuntime.registerName("${methodForeignName}"), ...args) }```
+ * 2.1 Generates proper objCMsgSend call, e.g. ```unsafe { CFunc<(NativeObjCId, NativeObjCSel, ...ArgTypes) ->
+ * RetType>(objCMsgSend())($obj, registerName("${methodForeignName}"), ...args) }```.
+ * 2.2 Wraps it with withAutoreleasePool<RetType> call, e.g. ```withAutoreleasePool<RetType>{ => // msgSend call })```.
  *
- * 3. Body is inserted in the ctor declaration generated on previous steps.
+ * 3. Body is inserted into the ctor declaration generated on previous steps.
  *
  * Prop getters are desugared as follows:
  * 1. If prop has @ObjCMirror/@ObjCImpl value:
- * 1.1 Generates proper ObjCRuntime.msgSend call, e.g. ```unsafe { CFunc<(ObjCId, ObjCSel) ->
- * ObjCId>(ObjCRuntime.msgSend)($obj, ObjCRuntime.registerName("foo")) }```. 1.2 Wraps it with
- * ObjCRuntime.withAutoreleasePoolObj call, e.g. ```ObjCRuntime.withAutoreleasePool{ => // msgSend call })```. 1.3 Wraps
- * it with ObjCRuntime.getFromRegistry call, e.g. ```ObjCRuntime.getFromRegistry(...// ObjCRuntime.withAutoreleasePool
- * call)```.
+ * 1.1 Generates proper ObjCRuntime.msgSend call, e.g. ```unsafe { CFunc<(NativeObjCId, NativeObjCSel) ->
+ * NativeObjCId>(objCMsgSend())($obj, registerName("foo")) }```. 1.2 Wraps it with
+ * withAutoreleasePoolObj call, e.g. ```withAutoreleasePoolObj{ => // msgSend call })```.
+ * 1.3 Wraps it with getFromRegistry call, e.g. ```getFromRegistry(...//
+ * ObjCRuntime.withAutoreleasePool call)```.
  *
  * 2. Else if prop has Objective-C compatible primitive type value:
- * 2.1 Generates proper ObjCRuntime.msgSend call, e.g. ```unsafe { CFunc<(ObjCId, ObjCSel) ->
- * RetType>(ObjCRuntime.msgSend)($obj, ObjCRuntime.registerName("foo"), ...args) }```
+ * 2.1 Generates proper objCMsgSend() call, e.g. ```unsafe { CFunc<(NativeObjCId, NativeObjCSel) ->
+ * RetType>(objCMsgSend())($obj, registerName("foo"), ...args) }```
  *
  * 3. Accessor body is inserted in the corresponding declaration generated on previous steps.
  *
  * Prop setters are desugared as follows:
- * Generates proper ObjCRuntime.msgSend call, e.g. ```unsafe { CFunc<(ObjCId, ObjCSel, ObjCId) ->
- * Unit>(ObjCRuntime.msgSend)($obj, ObjCRuntime.registerName("setFoo:"), value.$obj) }```.
+ * Generates proper objCMsgSend call, e.g. ```unsafe { CFunc<(NativeObjCId, NativeObjCSel, NativeObjCId) ->
+ * Unit>(objCMsgSend())($obj, registerName("setFoo:"), value.$getObj) }```.
  *
  * Fields are desugared as follows:
  * 1. On parse stage, all fields are replaced with corresponding prop declaration.
- * 2. Prop getter is essentially ObjCRuntime.getInstanceVariable call (getInstanceVariableObj for object types wrapped
+ * 2. Prop getter is essentially getInstanceVariable call (getInstanceVariableObj for object types wrapped
  * with getFromRegistryByHandle call).
- * 3. Prop setter (@ObjCMirror field is always var) is essentially ObjCRuntime.setInstanceVariable
+ * 3. Prop setter (@ObjCMirror field is always var) is essentially setInstanceVariable
  * (setInstanceVariableObj for object type) call.
  *
  * @ObjCInit static method initializers are desugared the same way as init-constructors.
@@ -167,6 +194,11 @@ private:
     void DesugarStaticMethodInitializer(InteropContext& ctx, AST::FuncDecl& initializer);
     void DesugarProp(InteropContext& ctx, AST::ClassLikeDecl& mirror, AST::PropDecl& prop);
     void DesugarField(InteropContext& ctx, AST::ClassLikeDecl& mirror, AST::PropDecl& field);
+};
+
+class DesugarSyntheticWrappers : public Handler<DesugarSyntheticWrappers, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
 };
 
 /**
@@ -211,9 +243,11 @@ public:
     void HandleImpl(InteropContext& ctx);
 
 private:
-    void DesugarMethod(InteropContext& ctx, AST::ClassDecl& impl, AST::FuncDecl& method);
-    void DesugarCtor(InteropContext& ctx, AST::ClassDecl& impl, AST::FuncDecl& ctor);
+    void Desugar(InteropContext& ctx, AST::ClassDecl& impl, AST::FuncDecl& method);
+    // void DesugarCtor(InteropContext& ctx, AST::ClassDecl& impl, AST::FuncDecl& ctor);
     void Desugar(InteropContext& ctx, AST::ClassDecl& impl, AST::PropDecl& prop);
+    void DesugarCallExpr(InteropContext& ctx, AST::ClassDecl& impl, AST::CallExpr& ce);
+    void DesugarGetForPropDecl(InteropContext& ctx, AST::ClassDecl& impl, AST::MemberAccess& ma);
 };
 
 /**

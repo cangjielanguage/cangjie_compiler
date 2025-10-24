@@ -9,8 +9,9 @@
 #include "cangjie/AST/ASTCasting.h"
 #include "cangjie/Utils/CastingTemplate.h"
 
-namespace Cangjie::Interop::ObjC {
+using namespace Cangjie::AST;
 
+namespace Cangjie::Interop::ObjC {
     void PrepareTypeCheck(Package& pkg)
     {
         for (auto& file : pkg.files) {

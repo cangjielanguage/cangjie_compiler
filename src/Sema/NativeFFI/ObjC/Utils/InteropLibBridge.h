@@ -49,6 +49,8 @@ public:
      */
     Ptr<AST::TypeAliasDecl> GetNativeObjCSuperPtrDecl();
 
+    Ptr<AST::Ty> GetNativeObjCSuperPtrTy();
+
     /**
      * Gets RegistryId declaration.
      * An opaque identifier for Cangjie mirror objects.
@@ -93,15 +95,17 @@ public:
 
     Ptr<AST::FuncDecl> GetGetClassDecl();
 
-    /**
-     * Gets ObjCRuntime declaration.
-     * This struct exports interface of an Objective-C runtime.
-     */
-    Ptr<AST::StructDecl> GetObjCRuntimeDecl();
+    Ptr<AST::FuncDecl> GetWithMethodEnvDecl();
 
-    OwnedPtr<AST::MemberAccess> CreateObjCRuntimeMsgSendExpr();
+    Ptr<AST::FuncDecl> GetWithMethodEnvObjDecl();
 
-    OwnedPtr<AST::MemberAccess> CreateObjCRuntimeReleaseExpr();
+    Ptr<AST::FuncDecl> GetObjCMsgSendDecl();
+
+    Ptr<AST::FuncDecl> GetObjCMsgSendSuperDecl();
+
+    Ptr<AST::FuncDecl> GetObjCReleaseDecl();
+
+    Ptr<AST::FuncDecl> GetGetProtocolDecl();
 
     /**
      * Get objc.lang.ObjCPointer declaration
@@ -109,8 +113,6 @@ public:
     Ptr<AST::StructDecl> GetObjCPointerDecl();
 
 private:
-    OwnedPtr<AST::RefExpr> CreateObjCRuntimeRefExpr();
-
     template <AST::ASTKind K = AST::ASTKind::DECL> auto GetInteropLibDecl(const std::string& ident)
     {
         const auto interoplibObjCPackageName = "interoplib.objc";

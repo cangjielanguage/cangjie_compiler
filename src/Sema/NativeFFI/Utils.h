@@ -111,7 +111,7 @@ StructDecl& GetStringDecl(const ImportManager& importManager);
  */
 
 OwnedPtr<CallExpr> WrapReturningLambdaCall(TypeManager& typeManager, std::vector<OwnedPtr<Node>> nodes);
-OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(TypeManager& typeManager, std::vector<OwnedPtr<Node>> nodes);
+OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(TypeManager& typeManager, std::vector<OwnedPtr<Node>> nodes, std::vector<OwnedPtr<FuncParam>> lambdaParams = {});
 
 /**
  * Returns trimmed cangjie library name.
@@ -124,6 +124,8 @@ std::string GetCangjieLibName(const std::string& outputLibPath, const std::strin
 
 std::string GetMangledMethodName(const BaseMangler& mangler, const std::vector<OwnedPtr<FuncParam>>& params,
     const std::string& methodName);
+
+Ptr<Annotation> GetForeignNameAnnotation(const Decl& decl);
 
 } // namespace Cangjie::Interop::Java
 

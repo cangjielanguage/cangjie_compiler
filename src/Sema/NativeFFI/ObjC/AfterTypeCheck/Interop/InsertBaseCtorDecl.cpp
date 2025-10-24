@@ -7,38 +7,39 @@
 /**
  * @file
  *
- * This file implements inserting NativeObjCId field in Objective-C mirrors
+ * This file implements generating and inserting a constructor declaration of native handle
  */
 
-#include "NativeFFI/ObjC/Utils/Common.h"
 #include "Handlers.h"
+#include "NativeFFI/ObjC/Utils/Common.h"
+#include "NativeFFI/Utils.h"
 
+namespace Cangjie::Interop::ObjC {
 using namespace Cangjie::AST;
-using namespace Cangjie::Interop::ObjC;
+using namespace Cangjie::Native::FFI;
 
-void InsertNativeHandleField::HandleImpl(InteropContext& ctx)
+void InsertBaseCtorDecl::HandleImpl(InteropContext& ctx)
 {
     for (auto& mirror : ctx.mirrors) {
         if (mirror->TestAttr(Attribute::IS_BROKEN)) {
             continue;
         }
+
         auto mirrorClass = As<ASTKind::CLASS_DECL>(mirror);
-        if (!mirrorClass || HasMirrorSuperClass(*mirrorClass)) {
+        if (!mirrorClass) {
             continue;
         }
 
-        auto nativeObjCIdField = ctx.factory.CreateNativeHandleField(*mirrorClass);
-        CJC_NULLPTR_CHECK(nativeObjCIdField);
-        mirrorClass->body->decls.emplace_back(std::move(nativeObjCIdField));
+        auto ctor = ctx.factory.CreateBaseCtorDecl(*mirrorClass);
+        mirrorClass->body->decls.emplace_back(std::move(ctor));
     }
 
     for (auto& wrapper: ctx.synWrappers) {
         if (wrapper->TestAttr(Attribute::IS_BROKEN)) {
             continue;
         }
-        auto nativeObjCIdField = ctx.factory.CreateNativeHandleField(*wrapper);
-        CJC_NULLPTR_CHECK(nativeObjCIdField);
-        wrapper->body->decls.emplace_back(std::move(nativeObjCIdField));
+        auto ctor = ctx.factory.CreateBaseCtorDecl(*wrapper);
+        wrapper->body->decls.emplace_back(std::move(ctor));
     }
 
     for (auto& impl : ctx.impls) {
@@ -52,8 +53,8 @@ void InsertNativeHandleField::HandleImpl(InteropContext& ctx)
 
         CJC_ASSERT(HasMirrorSuperInterface(*impl));
 
-        auto nativeObjCIdField = ctx.factory.CreateNativeHandleField(*impl);
-        CJC_NULLPTR_CHECK(nativeObjCIdField);
-        impl->body->decls.emplace_back(std::move(nativeObjCIdField));
+        auto ctor = ctx.factory.CreateBaseCtorDecl(*impl);
+        impl->body->decls.emplace_back(std::move(ctor));
     }
 }
+} // namespace Cangjie::Interop::ObjC
