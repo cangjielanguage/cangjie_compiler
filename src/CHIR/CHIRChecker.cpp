@@ -3053,11 +3053,8 @@ void CHIRChecker::CheckInout(const IntrinsicBase& expr, const Func& topLevelFunc
         if (Is<ApplyWithException>(user) || Is<Apply>(user)) {
             continue;
         } else if (Is<InvokeWithException>(user) || Is<Invoke>(user)) {
-            auto invokeBase = InvokeBase(user);
-            if (invokeBase.GetMethodName() == GENERIC_VIRTUAL_FUNC) {
-                ErrorInExpr(topLevelFunc, *expr.GetRawExpr(),
-                    errMsgBase + "the result can't be used in FuncType with generic type.");
-            } else if (invokeBase.GetMethodName() != INST_VIRTUAL_FUNC) {
+            auto funcName = InvokeBase(user).GetMethodName();
+            if (funcName != INST_VIRTUAL_FUNC && funcName != GENERIC_VIRTUAL_FUNC) {
                 ErrorInExpr(topLevelFunc, *expr.GetRawExpr(),
                     errMsgBase + "the result can't be used as virtual method's argument.");
             }

@@ -273,7 +273,7 @@ Translator::InstCalleeInfo Translator::GetInstCalleeInfoFromRefExpr(const AST::R
     auto currentFunc = GetCurrentFunc();
     CJC_NULLPTR_CHECK(currentFunc);
     if (currentFunc->IsGVInit() || currentFunc->IsStaticInit()) {
-        GetInstCalleeInfoFromVarInit(expr);
+        return GetInstCalleeInfoFromVarInit(expr);
     }
     
     // 1. calculate `thisType`
