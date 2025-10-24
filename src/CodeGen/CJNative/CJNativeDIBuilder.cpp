@@ -74,7 +74,7 @@ llvm::DIType* DIBuilder::CreateInterfaceType(const CHIR::ClassType& interfaceTy)
     auto mangledName = interfaceTy.ToString();
 
     auto& position = interfaceDef->GetDebugLocation();
-    auto name = "Interface$" +GenerateCustomTypeName(interfaceTy,false);
+    auto name = "Interface$" + GenerateCustomTypeName(interfaceTy, false);
     auto diFile = GetOrCreateFile(position);
     auto classSize = 64u;
     auto defPackage = createNameSpace(diCompileUnit, interfaceDef->GetPackageName(), false);
@@ -99,7 +99,7 @@ llvm::DIType* DIBuilder::CreateInterfaceType(const CHIR::ClassType& interfaceTy)
     }
     CreateGetGenericFunc(interfaceTy, fwdDecl, elements);
     replaceArrays(fwdDecl, getOrCreateArray(elements));
-    return createTypedef(fwdDecl,GenerateCustomTypeName(interfaceTy,false), diFile, 0, diCompileUnit);
+    return createTypedef(fwdDecl, GenerateCustomTypeName(interfaceTy, false), diFile, 0, diCompileUnit);
 }
 
 void DIBuilder::CreateClassMemberType(const CHIR::ClassType& classTy, llvm::Type* classLayout,
@@ -185,10 +185,10 @@ llvm::DICompositeType* DIBuilder::CreateEnumWithArgsType(
     auto defPackage = createNameSpace(diCompileUnit, enumDef->GetPackageName(), false);
     auto& position = enumDef->GetDebugLocation();
     auto diFile = GetOrCreateFile(position);
-    auto name =GenerateCustomTypeName(enumTy,false);
+    auto name = GenerateCustomTypeName(enumTy, false);
     uint64_t maxSize = 0;
     for (size_t ctorIndex = 0; ctorIndex < enumTy.GetConstructorInfos(cgMod.GetCGContext().GetCHIRBuilder()).size();
-         ctorIndex++) {
+        ctorIndex++) {
         auto enumCtorlayoutType = CGType::GetOrCreateEnumCtorLayoutType(cgMod, enumTy, ctorIndex,
             enumTy.GetConstructorInfos(cgMod.GetCGContext().GetCHIRBuilder())[ctorIndex].funcType->GetParamTypes());
         maxSize = std::max(maxSize, GetTypeSize(enumCtorlayoutType));
@@ -226,7 +226,7 @@ llvm::DICompositeType* DIBuilder::CreateEnumClassType(const CHIR::EnumType& enum
     auto& position = enumDef->GetDebugLocation();
     auto diFile = GetOrCreateFile(position);
     auto layout = cgMod.GetLLVMModule()->getDataLayout().getStructLayout(enumCtorlayoutType);
-    auto name =GenerateCustomTypeName(enumTy,false);
+    auto name = GenerateCustomTypeName(enumTy, false);
     std::string ctorName = name + "_ctor_" + std::to_string(ctorIndex);
     auto enumClassType =
         createStructType(subEnumType, ctorName, diFile, 0u, totalSize, 0u, llvm::DINode::FlagZero, nullptr, {});
