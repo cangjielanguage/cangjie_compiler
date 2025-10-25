@@ -157,7 +157,6 @@ Func* Translator::ClearOrCreateVarInitFunc(const AST::Decl& decl)
         auto identifier = decl.identifier + POSTFIX;
         auto rawMangledName = decl.rawMangleName + POSTFIX;
         auto pkgName = outerDecl.fullPackageName;
-        auto genericParamTy = GetGenericParamType(outerDecl, chirTy);
         const std::vector<Type*> params = {};
 
         auto returnTy = decl.ty;
@@ -174,7 +173,7 @@ Func* Translator::ClearOrCreateVarInitFunc(const AST::Decl& decl)
         auto loc = DebugLocation(TranslateLocationWithoutScope(builder.GetChirContext(), decl.begin, decl.end));
 
         auto customTypeDef = chirTy.GetGlobalNominalCache(outerDecl);
-        func = builder.CreateFunc(loc, funcType, mangledName, identifier, rawMangledName, pkgName, genericParamTy);
+        func = builder.CreateFunc(loc, funcType, mangledName, identifier, rawMangledName, pkgName);
         customTypeDef->AddMethod(func);
         func->SetFuncKind(FuncKind::INSTANCEVAR_INIT);
         func->EnableAttr(Attribute::PRIVATE);

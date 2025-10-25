@@ -650,27 +650,32 @@ bool MPTypeCheckerImpl::MatchCommonNominalDeclWithPlatform(const InheritableDecl
     if (!MatchCJMPDeclAnnotations({AnnotationKind::DEPRECATED}, commonDecl, *platformDecl)) {
         return false;
     }
-    // The check of the super types of `extend` Decl occurs in the `MergeCJMPExtensions` phase.
-    // Therefore, we do not need to check its super types again.
-    if (commonDecl.astKind != ASTKind::EXTEND_DECL) {
-        auto comSupInters = commonDecl.GetSuperInterfaceTys();
-        auto platSupInters = StaticCast<InheritableDecl>(platformDecl)->GetSuperInterfaceTys();
-        if (comSupInters.size() != platSupInters.size()) {
+    // Match super types.
+    std::set<Ptr<InterfaceTy>> comSupInters;
+    auto platSupInters = StaticCast<InheritableDecl>(platformDecl)->GetSuperInterfaceTys();
+    std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>> genericTyMap;
+    MapCJMPGenericTypeArgs(genericTyMap, commonDecl, *platformDecl);
+    if (!genericTyMap.empty()) {
+        for (auto superInterface : commonDecl.GetSuperInterfaceTys())
+            comSupInters.emplace(StaticCast<InterfaceTy*>(ReplaceCommonGenericTy(genericTyMap, superInterface)));
+    } else {
+        comSupInters = commonDecl.GetSuperInterfaceTys();
+    }
+    if (comSupInters.size() != platSupInters.size()) {
+        DiagNotMatchedSuperType(diag, *platformDecl);
+        return false;
+    }
+    bool match = false;
+    for (auto& comSupInter : comSupInters) {
+        for (auto& platSupInter : platSupInters) {
+            if (typeManager.IsTyEqual(comSupInter, platSupInter)) {
+                match = true;
+                break;
+            }
+        }
+        if (!match) {
             DiagNotMatchedSuperType(diag, *platformDecl);
             return false;
-        }
-        bool match = false;
-        for (auto& comSupInter : comSupInters) {
-            for (auto& platSupInter : platSupInters) {
-                if (typeManager.IsTyEqual(comSupInter, platSupInter)) {
-                    match = true;
-                    break;
-                }
-            }
-            if (!match) {
-                DiagNotMatchedSuperType(diag, *platformDecl);
-                return false;
-            }
         }
     }
     // Match super class if need.
@@ -829,6 +834,13 @@ bool MPTypeCheckerImpl::MatchCJMPVar(VarDecl& platformVar, VarDecl& commonVar)
         return false;
     }
     auto cType = commonVar.ty;
+    if (platformVar.IsMemberDecl()) {
+        std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>> genericTyMapForNominals;
+        MapCJMPGenericTypeArgs(genericTyMapForNominals, *commonVar.outerDecl, *platformVar.outerDecl);
+        if (!genericTyMapForNominals.empty()) {
+            cType = ReplaceCommonGenericTy(genericTyMapForNominals, cType);
+        }
+    }
     auto pType = platformVar.ty;
     if (!typeManager.IsTyEqual(cType, pType)) {
         auto platformKind = platformVar.isVar ? "var" : "let";
@@ -1010,6 +1022,9 @@ Ptr<AST::Ty> MPTypeCheckerImpl::GetPlatformGenericTy(
 void MPTypeCheckerImpl::MapCJMPGenericTypeArgs(std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>>& genericTyMap,
     const AST::Decl& commonDecl, const AST::Decl& platformDecl)
 {
+    if (!(commonDecl.TestAttr(Attribute::GENERIC) && platformDecl.TestAttr(Attribute::GENERIC))) {
+        return;
+    }
     // 1. Handle nominalDecl type parameters
     if (commonDecl.IsNominalDecl() && commonDecl.ty && !commonDecl.ty->typeArgs.empty()) {
         for (size_t i = 0; i < commonDecl.ty->typeArgs.size(); i++) {
@@ -1137,6 +1152,11 @@ void MPTypeCheckerImpl::UpdateGenericTyInMemberFromCommon(
     Walker walker(member, [this, &genericTyMap](Ptr<Node> node) -> VisitAction {
         if (node->ty) {
             node->ty = ReplaceCommonGenericTy(genericTyMap, node->ty);
+        }
+        if (auto ref = DynamicCast<NameReferenceExpr*>(node); ref) {
+            for (auto& instTy : ref->instTys) {
+                instTy = ReplaceCommonGenericTy(genericTyMap, instTy);
+            }
         }
         return VisitAction::WALK_CHILDREN;
     });
