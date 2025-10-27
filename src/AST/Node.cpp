@@ -936,7 +936,7 @@ Ptr<Generic> Decl::GetGeneric() const
     }
     if (auto vd = DynamicCast<const VarDecl*>(this);
         vd && vd->outerDecl && vd->outerDecl->astKind == ASTKind::ENUM_DECL) {
-        return StaticAs<ASTKind::ENUM_DECL>(vd->outerDecl)->generic.get();
+        return vd->outerDecl->generic.get();
     }
     return generic.get();
 }

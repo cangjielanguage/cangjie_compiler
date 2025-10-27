@@ -15,6 +15,7 @@
 
 #include <stdint.h>
 #include <string>
+#include <cstdint>
 
 namespace Cangjie {
 enum class PositionStatus {
