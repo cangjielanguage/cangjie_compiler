@@ -94,7 +94,7 @@ public:
     {
         enableCollectTokenStream = true;
     }
-    const std::set<Token>& GetTokenStream() const
+    const std::vector<Token>& GetTokenStream() const
     {
         return tokenStream;
     }
@@ -185,8 +185,7 @@ private:
     bool enableCollect{false};
     bool enableCollectTokenStream{false};
     std::vector<Token> collectTokens;
-    std::set<Token> tokenStream; // use set because ParseModifiers before import may cause the tokens of the first decl
-        // to be Scan()'ed multiple times.
+    std::vector<Token> tokenStream;
     mutable bool success{true};                                     /// Used for diagnostic.
     mutable std::vector<std::pair<const char*, bool>> stringStarts; /// Used for diagnostic, string start position.
     mutable std::vector<const char*> interpolations; /// Used for diagnostic, string interpolation position.

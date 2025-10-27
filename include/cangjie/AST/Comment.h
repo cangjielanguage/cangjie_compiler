@@ -84,6 +84,18 @@ struct CommentGroups {
     }
     std::string ToString() const;
 };
+
+/**
+ * all comment groups in the token stream and location-related information
+ */
+struct CommentGroupsLocInfo {
+    std::vector<CommentGroup> commentGroups;
+    // key: groupIndex value: preTokenIndex in tokenStream(ignore nl, semi, comment)
+    std::unordered_map<size_t, size_t> cgPreInfo;
+    // key: groupIndex value: followTokenIndex in tokenStream(ignore nl, comment, end)
+    std::unordered_map<size_t, size_t> cgFollowInfo;
+    const std::vector<Token>& tkStream;
+};
 }
 
 #endif // CANGJIE_AST_COMMENT_H

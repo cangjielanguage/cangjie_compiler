@@ -778,15 +778,11 @@ bool ToCHIR::RunIRChecker(const Phase& phase)
     if (!opts.commonPartCjo.has_value()) {
         rules.emplace(CHIRChecker::Rule::CHECK_FUNC_BODY);
     }
-#ifdef NDEBUG
     auto ok = checker.CheckPackage(rules);
     if (!ok) {
         DumpCHIRDebug("Broken_CHIR", false);
     }
     return ok;
-#else
-    return true;
-#endif
 }
 
 void ToCHIR::RecordCodeInfoAtTheBegin()

@@ -110,7 +110,7 @@ public:
     std::list<Token> LookAheadSkipNL(size_t num);
     /// Return all comments collected, and clear the comment cache
     std::vector<Token> GetComments();
-    const std::set<Token>& GetTokenStream() const;
+    const std::vector<Token>& GetTokenStream() const;
 
     /// Cache the current lookahead and read pointer.
     void SetResetPoint();
