@@ -718,7 +718,11 @@ public:
     enum class CHIRMode : uint8_t { NA, STANDARD, WITH_ID, ALL };
 
     bool codegenDebugMode = false;
-    bool chirDumpDebugMode = false;
+    bool dumpAST = false; 
+    bool dumpCHIR = false;
+    bool dumpIR = false;
+    bool dumpAll = false; // dump all of AST, CHIR, IR
+    bool dumpToScreen = false; // dump to screen instead of file
     bool chirDeserialize = false;
     std::string chirDeserializePath;
 

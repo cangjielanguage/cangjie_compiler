@@ -78,6 +78,11 @@ void CHIRPrinter::PrintCFG(const Func& func, const std::string& path)
     fout.close();
 }
 
+void CHIRPrinter::PrintPackage(const Package& package, std::ostream& os)
+{
+    os << package.ToString() << std::endl;
+}
+
 void CHIRPrinter::PrintPackage(const Package& package, const std::string& fullPath)
 {
     std::fstream fout;
@@ -86,7 +91,7 @@ void CHIRPrinter::PrintPackage(const Package& package, const std::string& fullPa
         std::cerr << "open file: " << fullPath << " failed!" << std::endl;
         return;
     }
-    fout << package.ToString() << std::endl;
+    PrintPackage(package, fout);
     fout.close();
 }
 

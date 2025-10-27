@@ -54,36 +54,12 @@ static bool PerformDumpAction(DefaultCompilerInstance& instance, const FrontendO
     switch (dumpAction) {
         case FrontendOptions::DumpAction::DUMP_TOKENS:
             return instance.DumpTokens();
-        case FrontendOptions::DumpAction::DUMP_PARSE:
-            ret = instance.Compile(CompileStage::PARSE);
-            for (auto srcPkg : instance.GetSourcePackages()) {
-                PrintNode(srcPkg);
-            }
-            break;
         case FrontendOptions::DumpAction::DUMP_SYMBOLS:
             ret = instance.Compile(CompileStage::SEMA);
             instance.DumpSymbols();
             break;
-        case FrontendOptions::DumpAction::DUMP_AST:
-            ret = instance.Compile(CompileStage::MANGLING);
-            for (auto srcPkg : instance.GetSourcePackages()) {
-                PrintNode(srcPkg, 0, "after MANGLING");
-            }
-            break;
         case FrontendOptions::DumpAction::TYPE_CHECK:
             ret = instance.Compile(CompileStage::CHIR);
-            break;
-        case FrontendOptions::DumpAction::DUMP_IR:
-            ret = instance.Compile(CompileStage::CODEGEN);
-            instance.DumpIR();
-            break;
-        case FrontendOptions::DumpAction::DUMP_BC:
-            ret = instance.Compile(CompileStage::CODEGEN);
-            instance.DumpBC();
-            break;
-        case FrontendOptions::DumpAction::DUMP_MACRO:
-            ret = instance.Compile(CompileStage::MACRO_EXPAND);
-            instance.DumpMacro();
             break;
         case FrontendOptions::DumpAction::DUMP_DEP_PKG:
             ret = instance.Compile(CompileStage::IMPORT_PACKAGE);

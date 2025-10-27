@@ -25,13 +25,8 @@ public:
     enum class DumpAction {
         NO_ACTION,        /**< No specific action. */
         DUMP_TOKENS,      /**< Dump tokens. */
-        DUMP_PARSE,       /**< Dump ast. */
-        DUMP_AST,         /**< Dump ast after semantic check. */
         DUMP_SYMBOLS,     /**< Dump symbols after semantic check. */
-        DUMP_IR,          /**< Dump readable ir. */
-        DUMP_BC,          /**< Dump machine-readable bitcode */
         TYPE_CHECK,       /**< Parse ast and do typecheck. */
-        DUMP_MACRO,       /**< Dump evaluated tokens in macro expansion. */
         DUMP_DEP_PKG,      /**< Dump dependent packages of current package. */
         DESERIALIZE_CHIR, /**< Deserialize Chir. */
     };

@@ -888,8 +888,24 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
     }},
     { Options::ID::DEBUG_CODEGEN, OPTION_TRUE_ACTION(opts.codegenDebugMode = true) },
     { Options::ID::CHIR_OPT_DEBUG, OPTION_TRUE_ACTION(opts.chirDebugOptimizer = true) },
-    { Options::ID::DUMP_CHIR_DEBUG, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
-        opts.chirDumpDebugMode = true;
+    { Options::ID::DUMP_AST, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
+        opts.dumpAST = true;
+        return true;
+    }},
+    { Options::ID::DUMP_CHIR, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
+        opts.dumpCHIR = true;
+        return true;
+    }},
+    { Options::ID::DUMP_IR, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
+        opts.dumpIR = true;
+        return true;
+    }},
+    { Options::ID::DUMP_ALL, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
+        opts.dumpAll = true;
+        return true;
+    }},
+    { Options::ID::DUMP_TO_SCREEN, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {
+        opts.dumpToScreen = true;
         return true;
     }},
     { Options::ID::EMIT_CHIR, [](GlobalOptions& opts, [[maybe_unused]] const OptionArgInstance& arg) {

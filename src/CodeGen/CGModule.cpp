@@ -155,9 +155,11 @@ void CGModule::GenIncremental()
         if (llvm::verifyModule(*module, &llvmStdout)) {
             InternalError("Incremental part failed to be compiled");
         }
-        DumpIR(*module, cgCtx->GetCurrentPkgName() + "/Incre/" + module->getSourceFileName() + ".incre.bc",
-            option.codegenDebugMode);
-
+        if (NeedDumpIRToFile(option)) {
+            const auto& dp = GenDumpPath(
+                option.output, cgCtx->GetCurrentPkgName(), "Incre", module->getSourceFileName(), "incre.ll");
+            DumpIR(*module, dp);
+        }
         auto newModule = incrementalGen->LinkModules(ReleaseLLVMModule(), cgCtx->GetCachedMangleMap());
         for (auto name: incrementalGen->GetIncrLLVMUsedNames()) {
             GetCGContext().AddLLVMUsedVars(name);

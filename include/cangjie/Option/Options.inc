@@ -226,27 +226,12 @@ OPTION("--dump-tokens", DUMP_TOKENS, FLAG, { BACKEND(ALL) },
     { GROUP(FRONTEND) COMMA GROUP(STABLE) },
     nullptr, {}, MULTIPLE_OCCURRENCE,
     "Print all of the tokens in one compile unit")
-OPTION("--dump-parse", DUMP_PARSE, FLAG, { BACKEND(ALL) },
-    { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Print AST after parser")
-OPTION("--dump-ast", DUMP_AST, FLAG, { BACKEND(ALL) },
-    { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Print AST after semantic analysis")
 OPTION("--dump-symbols", DUMP_SYMBOLS, FLAG, { BACKEND(ALL) },
     { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Print symbols after semantic analysis")
-OPTION("--dump-ir", DUMP_IR, FLAG, { BACKEND(ALL) },
-    { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Print human readable IR")
-OPTION("--dump-bc", DUMP_BC, FLAG, { BACKEND(ALL) },
-    { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Dump machine-readable LLVM bitcode")
 OPTION("--typecheck", TYPE_CHECK, FLAG, { BACKEND(ALL) },
     { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Parse and check type of input file(s)")
-OPTION("--dump-macro", DUMP_MACRO, FLAG, { BACKEND(ALL) },
-    { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Dump tokens after macro expansion")
 OPTION("-d", COMPILE_CJD, FLAG, { BACKEND(ALL) },
     { GROUP(FRONTEND) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Compile declaration file(s) (.cj.d)")
@@ -343,9 +328,21 @@ OPTION("--enable-eh", ENABLE_EFFECTS, FLAG, { BACKEND(CJNATIVE) },
     { GROUP(GLOBAL) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Enables experimental support for effect handlers")
 #endif
-OPTION("--dump-chir-debug", DUMP_CHIR_DEBUG, FLAG, { BACKEND(ALL) },
-    { GROUP(GLOBAL) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Dump CHIR readable txt file when compiling for debug")
+OPTION("--dump-ast", DUMP_AST, FLAG, { BACKEND(ALL) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Dump human ast when compiling for debug")
+OPTION("--dump-chir", DUMP_CHIR, FLAG, { BACKEND(ALL) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Dump human readable CHIR when compiling for debug")
+OPTION("--dump-ir", DUMP_IR, FLAG, { BACKEND(ALL) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Dump human readable IR")
+OPTION("--dump-all", DUMP_ALL, FLAG, { BACKEND(ALL) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Dump all of AST, CHIR, IR")
+OPTION("--dump-to-screen", DUMP_TO_SCREEN, FLAG, { BACKEND(ALL) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Dump to screen instead of file")
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 OPTION("--debug-annotations", DUMP_ANNOTATIONS_DEBUG, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
