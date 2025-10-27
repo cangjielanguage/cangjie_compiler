@@ -290,6 +290,9 @@ bool ShouldExportSource(const VarDecl& varDecl)
     if (!Ty::IsTyCorrect(varDecl.ty) || !varDecl.initializer || varDecl.TestAttr(Attribute::IMPORTED)) {
         return false;
     }
+    if (varDecl.IsCommonMatchedWithPlatform()) {
+        return false;
+    }
     // If 'varDecl' is not global variable and:
     // it does not have outerDecl or it is an instance member variable in generic decl, always export initializer.
     if (!varDecl.TestAttr(Attribute::GLOBAL) && (!varDecl.outerDecl || IsInstMemberVarInGenericDecl(varDecl))) {
