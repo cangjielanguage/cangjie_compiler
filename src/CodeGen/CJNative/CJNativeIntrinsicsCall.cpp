@@ -8,12 +8,14 @@
 
 #include "Base/CGTypes/CGArrayType.h"
 #include "Base/CGTypes/CGClassType.h"
+#include "Base/CGTypes/CGType.h"
 #include "Base/CHIRExprWrapper.h"
 #include "CGModule.h"
 #include "IRAttribute.h"
 #include "Utils/CGCommonDef.h"
 #include "Utils/CGUtils.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
+#include "cangjie/CHIR/Type/Type.h"
 
 namespace Cangjie::CodeGen {
 
@@ -134,6 +136,53 @@ llvm::Value* IRBuilder2::CallStackTraceIntrinsic(const CHIRIntrinsicWrapper& sys
             CGType::GetOrCreate(cgMod, CGType::GetRefTypeOfCHIRInt8(cgCtx.GetCHIRBuilder())));
         parameters.emplace_back(&tempVal);
         return CallIntrinsicFunction(retCGType->GetLLVMType(), "CJ_MCC_DecodeStackTrace", parameters, {});
+    }
+    CJC_ASSERT(false && "Unsupported syscall.");
+    return nullptr;
+}
+
+llvm::Value* IRBuilder2::CallThreadInfoIntrinsic(const CHIRIntrinsicWrapper& syscall, std::vector<CGValue*>& parameters)
+{
+    auto intrinsicKind = syscall.GetIntrinsicKind();
+    auto& cgCtx = GetCGContext();
+    if (intrinsicKind == CHIR::IntrinsicKind::DUMP_CURRENT_THREAD_INFO) {
+        auto retCHIRType = syscall.GetResult()->GetType();
+        auto retCGType = CGType::GetOrCreate(cgMod, retCHIRType);
+        // Get the structDef of ThreadShapshotInfo
+        auto snapShotInfoDef = StaticCast<CHIR::StructType*>(retCHIRType)->GetStructDef();
+        // Get the CHIRType of RawArray<StackTraceData>
+        auto arrayStackTraceType = StaticCast<CHIR::RawArrayType*>(DeRef(*snapShotInfoDef->GetInstanceVar(2).type));
+        auto arrayStackTraceVal = CGValue(CreateBitCast(CreateTypeInfo(*arrayStackTraceType), getInt8PtrTy()),
+            CGType::GetOrCreate(cgMod, CGType::GetRefTypeOfCHIRInt8(cgCtx.GetCHIRBuilder())));
+        parameters.emplace_back(&arrayStackTraceVal);
+        // Get the CHIRType of RawArray<UInt8>
+        auto charArrayType = StaticCast<CHIR::RawArrayType*>(DeRef(*snapShotInfoDef->GetInstanceVar(0).type));
+        auto charArrayVal = CGValue(CreateBitCast(CreateTypeInfo(*charArrayType), getInt8PtrTy()),
+            CGType::GetOrCreate(cgMod, CGType::GetRefTypeOfCHIRInt8(cgCtx.GetCHIRBuilder())));
+        parameters.emplace_back(&charArrayVal);
+        return CallIntrinsicFunction(retCGType->GetLLVMType(), "CJ_MCC_GetCurrentThreadSnapshot", parameters, {});
+    } else if (intrinsicKind == CHIR::IntrinsicKind::DUMP_ALL_THREADS_INFO) {
+        // Add three parameters, (TypeInfo* Array<ThreadSnapInfo>, TypeInfo* Array<StackTraceData>, TypeInfo* RawArray<UInt8>)
+        auto retCHIRType = syscall.GetResult()->GetType();
+        auto retCGType = CGType::GetOrCreate(cgMod, retCHIRType);
+        // Get the CHIRType of RawArray<ThreadSnapInfo>
+        auto arraySnapshotType = StaticCast<CHIR::RawArrayType*>(DeRef(*retCHIRType));
+        // Get the structDef of ThreadShapshotInfo
+        auto snapShotInfoDef = StaticCast<CHIR::StructType*>(arraySnapshotType->GetTypeArgs()[0])->GetStructDef();
+        auto arraySnapshotVal = CGValue(CreateBitCast(CreateTypeInfo(*arraySnapshotType), getInt8PtrTy()),
+            CGType::GetOrCreate(cgMod, CGType::GetRefTypeOfCHIRInt8(cgCtx.GetCHIRBuilder())));
+        parameters.emplace_back(&arraySnapshotVal);
+        // Get the CHIRType of RawArray<StackTraceData>
+        auto arrayStackTraceType = StaticCast<CHIR::RawArrayType*>(DeRef(*snapShotInfoDef->GetInstanceVar(2).type));
+        auto arrayStackTraceVal = CGValue(CreateBitCast(CreateTypeInfo(*arrayStackTraceType), getInt8PtrTy()),
+            CGType::GetOrCreate(cgMod, CGType::GetRefTypeOfCHIRInt8(cgCtx.GetCHIRBuilder())));
+        parameters.emplace_back(&arrayStackTraceVal);
+        // Get the CHIRType of RawArray<UInt8>
+        auto charArrayType = StaticCast<CHIR::RawArrayType*>(DeRef(*snapShotInfoDef->GetInstanceVar(0).type));
+        auto charArrayVal = CGValue(CreateBitCast(CreateTypeInfo(*charArrayType), getInt8PtrTy()),
+            CGType::GetOrCreate(cgMod, CGType::GetRefTypeOfCHIRInt8(cgCtx.GetCHIRBuilder())));
+        parameters.emplace_back(&charArrayVal);
+        return CallIntrinsicFunction(retCGType->GetLLVMType(), "CJ_MCC_GetAllThreadSnapshot", parameters, {});
     }
     CJC_ASSERT(false && "Unsupported syscall.");
     return nullptr;

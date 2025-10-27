@@ -736,6 +736,12 @@ PackageFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
         case DECODE_STACK_TRACE:
             ret = IntrinsicKind_DECODE_STACK_TRACE;
             break;
+        case DUMP_CURRENT_THREAD_INFO:
+            ret = IntrinsicKind_DUMP_CURRENT_THREAD_INFO;
+            break;
+        case DUMP_ALL_THREADS_INFO:
+            ret = IntrinsicKind_DUMP_ALL_THREADS_INFO;
+            break;
         case CHR:
             ret = IntrinsicKind_CHR;
             break;

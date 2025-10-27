@@ -327,6 +327,8 @@ public:
     llvm::Value* CallRuntimeIntrinsics(const CHIRIntrinsicWrapper& syscall, const std::vector<CGValue*>& parameters);
     ///*----------------- Fill Or Get StackTrace related --------------------//
     llvm::Value* CallStackTraceIntrinsic(const CHIRIntrinsicWrapper& syscall, std::vector<CGValue*>& parameters);
+    ///*----------------- ThreadInfo related --------------//
+    llvm::Value* CallThreadInfoIntrinsic(const CHIRIntrinsicWrapper& syscall, std::vector<CGValue*>& parameters);
     ///*----------------- Math related --------------------//
     llvm::Value* CallMathIntrinsics(const CHIRIntrinsicWrapper& intrinsic, std::vector<llvm::Value*>& parameters);
     ///*----------------- zeroValue related --------------------//

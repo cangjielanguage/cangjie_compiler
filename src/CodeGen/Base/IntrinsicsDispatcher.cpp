@@ -59,6 +59,8 @@ CGIntrinsicKind GetCGIntrinsicKind(CHIR::IntrinsicKind intrinsicKind)
         return CGIntrinsicKind::MATH;
     } else if (IsStackTraceIntrinsic(intrinsicKind)) {
         return CGIntrinsicKind::STACK_TRACE;
+    } else if (IsThreadInfoIntrinsic(intrinsicKind)) {
+        return CGIntrinsicKind::THREAD_INFO;
     } else if (IsReflectIntrinsic(intrinsicKind)) {
         return CGIntrinsicKind::REFLECT;
     } else if (IsVArrayIntrinsic(intrinsicKind)) {
@@ -693,6 +695,12 @@ llvm::Value* GenerateStackTraceIntrinsics(IRBuilder2& irBuilder, const CHIRIntri
     return irBuilder.CallStackTraceIntrinsic(intrinsic, parameters);
 }
 
+llvm::Value* GenerateThreadInfoIntrinsics(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper& intrinsic)
+{
+    auto parameters = HandleSyscallIntrinsicArguments(irBuilder, intrinsic.GetOperands());
+    return irBuilder.CallThreadInfoIntrinsic(intrinsic, parameters);
+}
+
 llvm::Value* GenerateFutureIntrinsics(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper& intrinsic)
 {
     auto parameters = HandleSyscallIntrinsicArguments(irBuilder, intrinsic.GetOperands());
@@ -778,6 +786,7 @@ llvm::Value* GenerateIntrinsic(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper
         {CGIntrinsicKind::OVERFLOW_APPLY, &GenerateOverflowApply},
         {CGIntrinsicKind::SYNC, &GenerateSyncIntrinsics},
         {CGIntrinsicKind::STACK_TRACE, &GenerateStackTraceIntrinsics},
+        {CGIntrinsicKind::THREAD_INFO, &GenerateThreadInfoIntrinsics},
         {CGIntrinsicKind::FUTURE, &GenerateFutureIntrinsics},
         {CGIntrinsicKind::EXCEPTION_CATCH, &GenerateExceptionCatchIntrinsics},
         {CGIntrinsicKind::BUILTIN, &GenerateBuiltinCall},
