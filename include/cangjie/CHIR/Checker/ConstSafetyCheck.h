@@ -16,7 +16,7 @@
 namespace Cangjie::CHIR {
 class ConstSafetyCheck {
 public:
-    using ConstAnalysisWrapper = AnalysisWrapper<ConstAnalysis, ConstDomain>;
+    using ConstAnalysisWrapper = AnalysisWrapper<ConstAnalysis<ConstStatePool>, ConstDomain>;
 
     explicit ConstSafetyCheck(ConstAnalysisWrapper* constAnalysisWrapper);
 

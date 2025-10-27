@@ -7,7 +7,7 @@
 #ifndef CANGJIE_CHIR_TRANSFORMATION_CONST_PROPAGATION_H
 #define CANGJIE_CHIR_TRANSFORMATION_CONST_PROPAGATION_H
 
-#include "cangjie/CHIR/Analysis/AnalysisWrapper.h"
+#include "cangjie/CHIR/Analysis/ConstAnalysisWrapper.h"
 #include "cangjie/CHIR/Analysis/ConstAnalysis.h"
 #include "cangjie/CHIR/Expression/Terminator.h"
 #include "cangjie/CHIR/Package.h"
@@ -21,11 +21,6 @@ namespace Cangjie::CHIR {
  */
 class ConstPropagation {
 public:
-    /**
-     * @brief const analysis wrapper to call const analysis.
-     */
-    using ConstAnalysisWrapper = AnalysisWrapper<ConstAnalysis, ConstDomain>;
-
     /**
      * @brief constructor to do const propagation.
      * @param builder CHIR builder for generating IR.

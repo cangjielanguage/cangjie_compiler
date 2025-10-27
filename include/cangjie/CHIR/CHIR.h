@@ -15,14 +15,15 @@
 
 #include "cangjie/CHIR/AST2CHIR/AST2CHIR.h"
 #include "cangjie/CHIR/Analysis/ValueRangeAnalysis.h"
+#include "cangjie/CHIR/Analysis/ConstAnalysisWrapper.h"
 #include "cangjie/CHIR/CHIRBuilder.h"
 #include "cangjie/CHIR/DiagAdapter.h"
 
 namespace Cangjie::CHIR {
 class ToCHIR {
 public:
-    ToCHIR(CompilerInstance& ci, AST::Package& pkg, AnalysisWrapper<ConstAnalysis, ConstDomain>& constAnalysisWrapper,
-        CHIRBuilder& builder)
+    ToCHIR(CompilerInstance& ci, AST::Package& pkg,
+        AnalysisWrapper<ConstAnalysis<ConstStatePool>, ConstDomain>& constAnalysisWrapper, CHIRBuilder& builder)
         : ci(ci),
           opts(ci.invocation.globalOptions),
           typeManager(ci.typeManager),
@@ -138,7 +139,7 @@ private:
     void UnreachableBlockReporter();
     void NothingTypeExprElimination();
     void UselessExprElimination();
-    void UnreachableBranchReporter();
+    void UnreachableBranchReporter(ConstAnalysisWrapper& constAnalysis);
     void UselessFuncElimination();
     void RedundantLoadElimination();
     void UselessAllocateElimination();
@@ -149,8 +150,8 @@ private:
     void RunMarkClassHasInited();
     void RunMergingBlocks(const std::string& firstName, const std::string& secondName);
     bool RunVarInitChecking();
-    bool RunConstantPropagationAndSafetyCheck();
-    bool RunConstantPropagation();
+    bool RunConstantPropagationAndSafetyCheck(ConstAnalysisWrapper& constAnalysis);
+    bool RunConstantPropagation(ConstAnalysisWrapper& constAnalysis);
     void RunRangePropagation();
     bool RunNativeFFIChecks();
     void RunArrayListConstStartOpt();
@@ -170,7 +171,7 @@ private:
     void RecordCodeInfoAtTheEnd();
     void RecordCHIRExprNum(const std::string& suffix);
     bool RunAnalysisForCJLint();
-    void RunConstantAnalysis();
+    ConstAnalysisWrapper RunConstantAnalysis();
     // run semantic checks that have to be performed on CHIR
     bool RunAnnotationChecks();
     void EraseDebugExpr();
@@ -207,7 +208,7 @@ private:
     bool needToOptGenericDecl = false;
     CHIRBuilder& builder;
     uint64_t debugFileIndex{0};
-    AnalysisWrapper<ConstAnalysis, ConstDomain>& constAnalysisWrapper;
+    AnalysisWrapper<ConstAnalysis<ConstStatePool>, ConstDomain>& constAnalysisWrapper;
     OptEffectCHIRMap effectMap;
     OptEffectStrMap strEffectMap;
     VirtualWrapperDepMap curVirtFuncWrapDep;

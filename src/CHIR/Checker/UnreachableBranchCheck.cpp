@@ -122,7 +122,10 @@ void UnreachableBranchCheck::RunOnFunc(const Ptr<Func> func)
         return; // Nothing to visit
     }
     auto result = analysisWrapper->CheckFuncResult(func);
-    CJC_ASSERT(result);
+    CJC_ASSERT(result != std::nullopt);
+    if (result == nullptr) {
+        return;
+    }
 
     const auto actionBeforeVisitExpr = [](const ConstDomain&, Expression*, size_t) {};
     const auto actionAfterVisitExpr = [](const ConstDomain&, Expression*, size_t) {};
@@ -163,5 +166,5 @@ void UnreachableBranchCheck::RunOnFunc(const Ptr<Func> func)
         }
     };
 
-    result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
+    result.value()->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
 }
