@@ -189,6 +189,11 @@ Ptr<Node> Parser::CurMacroCall() const
     return impl->curMacroCall;
 }
 
+void Parser::AttachCommentToNodes(std::vector<OwnedPtr<AST::Node>>& nodes)
+{
+    impl->AttachCommentToNodes(nodes);
+}
+
 Parser::~Parser()
 {
     delete impl;

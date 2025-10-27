@@ -206,6 +206,9 @@ protected:
     const Token& LastToken() const;
     Ptr<AST::Node> CurMacroCall() const;
 
+    /// Attach comment to node (typically by macro expansion)
+    void AttachCommentToNodes(std::vector<OwnedPtr<AST::Node>>& nodes);
+
 private:
     class ParserImpl* impl;
 };

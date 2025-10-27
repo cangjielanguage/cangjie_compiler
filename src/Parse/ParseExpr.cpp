@@ -459,7 +459,7 @@ OwnedPtr<IfAvailableExpr> ParserImpl::ParseIfAvailable()
     
     auto parseLambda = [this, &bad] () -> OwnedPtr<LambdaExpr> {
         auto expr1 = ParseExpr();
-        if (auto e1 = Is<LambdaExpr>(expr1)) {
+        if (Is<LambdaExpr>(expr1)) {
             return OwnedPtr{StaticCast<LambdaExpr>(expr1.release())};
         } else {
             ParseDiagnoseRefactor(DiagKindRefactor::parse_ifavailable_not_lambda, *expr1);
