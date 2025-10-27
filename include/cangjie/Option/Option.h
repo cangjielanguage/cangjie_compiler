@@ -523,6 +523,10 @@ public:
 
     bool enableMemoryCollect = false; /**< Whether enable memory usage report. */
 
+    enum class InteropLanguage : uint8_t { NA, Java, ObjC };
+
+    InteropLanguage targetInteropLanguage{InteropLanguage::NA};
+
     std::optional<unsigned int> errorCountLimit = 8; /**< limits the amount of errors compiler prints */
 
 #ifdef CANGJIE_CHIR_WFC_OFF

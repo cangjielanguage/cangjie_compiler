@@ -309,8 +309,8 @@ OPTION("--output-javagen-dir", OUTPUT_JAVA_GEN_DIR, SEPARATED, { BACKEND(ALL) },
 OPTION("--no-prelude", NO_PRELUDE, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Not import cangjie std.core package by default, only applicable when compiling std.core")
-OPTION("--enable-interop-cjmapping", ENABLE_INTEROP_CJMAPPING, FLAG, {BACKEND(CJNATIVE)}, { GROUP(GLOBAL) COMMA GROUP(VISIBLE)}, nullptr, {},
-    MULTIPLE_OCCURRENCE, "enable cj data structure mapping for interop")
+OPTION("--enable-interop-cjmapping", ENABLE_INTEROP_CJMAPPING, FLAG_WITH_ARG, {BACKEND(CJNATIVE)}, { GROUP(GLOBAL) COMMA GROUP(VISIBLE)}
+    ,nullptr, {}, MULTIPLE_OCCURRENCE, "enable cj data structure mapping for interop")
 OPTION("--static", STATIC, FLAG, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Statically link cangjie library")

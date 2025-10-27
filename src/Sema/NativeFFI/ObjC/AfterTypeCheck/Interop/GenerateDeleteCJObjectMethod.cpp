@@ -11,19 +11,31 @@
  */
 
 #include "Handlers.h"
+#include "cangjie/AST/Match.h"
 
 using namespace Cangjie::AST;
 using namespace Cangjie::Interop::ObjC;
 
 void GenerateDeleteCJObjectMethod::HandleImpl(InteropContext& ctx)
 {
-    for (auto& impl : ctx.impls) {
-        if (impl->TestAttr(Attribute::IS_BROKEN)) {
-            continue;
+    auto genNativeDeleteMethod = [this, &ctx](Decl& decl) {
+        if (decl.TestAttr(Attribute::IS_BROKEN)) {
+            return;
         }
-
-        auto deleteCjObject = ctx.factory.CreateDeleteCjObject(*impl);
+        bool forOneWayMapping = false;
+        forOneWayMapping = this->interopType == InteropType::CJ_Mapping && As<ASTKind::STRUCT_DECL>(&decl);
+        auto deleteCjObject = ctx.factory.CreateDeleteCjObject(decl, forOneWayMapping);
         CJC_ASSERT(deleteCjObject);
         ctx.genDecls.emplace_back(std::move(deleteCjObject));
+    };
+
+    if (interopType == InteropType::ObjC_Mirror) {
+        for (auto& impl : ctx.impls) {
+            genNativeDeleteMethod(*impl);
+        }
+    } else if (interopType == InteropType::CJ_Mapping) {
+        for (auto& cjmapping : ctx.cjMappings) {
+            genNativeDeleteMethod(*cjmapping);
+        }
     }
 }

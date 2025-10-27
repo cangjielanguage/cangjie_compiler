@@ -28,6 +28,11 @@ public:
     void HandleImpl(TypeCheckContext& ctx);
 };
 
+class CheckInheritanceInterface : public Handler<CheckInheritanceInterface, TypeCheckContext> {
+public:
+    void HandleImpl(TypeCheckContext& ctx);
+};
+
 class CheckMultipleInherit : public Handler<CheckMultipleInherit, TypeCheckContext> {
 public:
     void HandleImpl(TypeCheckContext& ctx);
@@ -55,7 +60,7 @@ public:
 
 class CheckMemberTypes : public Handler<CheckMemberTypes, TypeCheckContext> {
 public:
-    explicit CheckMemberTypes()
+    explicit CheckMemberTypes(InteropType interopType) : interopType(interopType)
     {
     }
     void HandleImpl(TypeCheckContext& ctx);
@@ -68,6 +73,8 @@ private:
     void CheckPropTypes(AST::PropDecl& pd, TypeCheckContext& ctx);
     void CheckVarTypes(AST::VarDecl& vd, TypeCheckContext& ctx);
     std::string GetDeclInteropName();
+
+    InteropType interopType;
 };
 
 class CheckTopLevelFuncTypes : public Handler<CheckTopLevelFuncTypes, TypeCheckContext> {

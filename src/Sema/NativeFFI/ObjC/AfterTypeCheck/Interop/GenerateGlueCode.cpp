@@ -19,12 +19,21 @@ using namespace Cangjie::Interop::ObjC;
 
 void GenerateGlueCode::HandleImpl(InteropContext& ctx)
 {
-    for (auto& impl : ctx.impls) {
-        if (impl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::HAS_BROKEN)) {
-            continue;
+    auto genGlueCode = [this, &ctx](Decl& decl) {
+        if (decl.TestAnyAttr(Attribute::IS_BROKEN, Attribute::HAS_BROKEN)) {
+            return;
         }
-
-        auto codegen = ObjCGenerator(ctx, impl, "objc-gen", ctx.cjLibOutputPath);
+        auto codegen = ObjCGenerator(ctx, &decl, "objc-gen", ctx.cjLibOutputPath, this->interopType);
         codegen.Generate();
+    };
+
+    if (interopType == InteropType::ObjC_Mirror) {
+        for (auto& impl : ctx.impls) {
+            genGlueCode(*impl);
+        }
+    } else if (interopType == InteropType::CJ_Mapping) {
+        for (auto& cjmapping : ctx.cjMappings) {
+            genGlueCode(*cjmapping);
+        }
     }
 }

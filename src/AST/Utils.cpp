@@ -802,6 +802,11 @@ bool IsObject(const Decl& decl)
     return decl.ty->IsObject();
 }
 
+bool IsFwdClass(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD);
+}
+
 /**
  * public func $getJavaRef(): Java_CFFI_JavaEntity {
  *     return Java_CFFI_JavaEntity()

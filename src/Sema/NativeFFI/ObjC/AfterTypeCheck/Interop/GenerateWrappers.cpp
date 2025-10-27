@@ -23,7 +23,6 @@ void GenerateWrappers::HandleImpl(InteropContext& ctx)
         if (decl.TestAttr(Attribute::IS_BROKEN)) {
             return;
         }
-
         for (auto& memberDecl : decl.GetMemberDeclPtrs()) {
             if (memberDecl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::CONSTRUCTOR)) {
                 continue;
@@ -52,8 +51,14 @@ void GenerateWrappers::HandleImpl(InteropContext& ctx)
         }
     };
 
-    for (auto& impl : ctx.impls) {
-        genWrapper(*impl);
+    if (interopType == InteropType::ObjC_Mirror) {
+        for (auto& impl : ctx.impls) {
+            genWrapper(*impl);
+        }
+    } else if (interopType == InteropType::CJ_Mapping) {
+        for (auto& cjmapping : ctx.cjMappings) {
+            genWrapper(*cjmapping);
+        }
     }
 }
 

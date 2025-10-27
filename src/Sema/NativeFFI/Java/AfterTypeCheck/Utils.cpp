@@ -193,8 +193,9 @@ Ptr<VarDecl> GetJavaRefField(ClassDecl& mirrorLike)
         return GetJavaRefField(*superClass);
     }
 
-    CJC_ASSERT(mirrorLike.TestAttr(  Attribute::JAVA_MIRROR));
-    CJC_ASSERT(IsJObject(mirrorLike));
+    CJC_ASSERT(mirrorLike.TestAttr(
+        Attribute::JAVA_MIRROR) || mirrorLike.TestAttr(Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD));
+    CJC_ASSERT(IsJObject(mirrorLike) || IsFwdClass(mirrorLike));
     CJC_ASSERT(mirrorLike.body);
 
     for (auto& member : mirrorLike.body->decls) {
@@ -247,7 +248,7 @@ Ptr<FuncDecl> GetJavaRefGetter(ClassLikeDecl& mirror)
 OwnedPtr<Expr> CreateJavaRefCall(ClassLikeDecl& mirrorLike, FuncDecl& javaRefGetter, Ptr<File> curFile)
 {
     CJC_ASSERT(mirrorLike.TestAnyAttr(
-        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
+        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE, Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD));
     auto thisRef = CreateThisRef(&mirrorLike, mirrorLike.ty, curFile);
     return CreateJavaRefCall(std::move(thisRef), javaRefGetter);
 }
@@ -256,7 +257,7 @@ OwnedPtr<Expr> CreateJavaRefCall(ClassLikeDecl& mirrorLike, VarDecl& javaref, Pt
 {
     CJC_ASSERT(mirrorLike.astKind == ASTKind::CLASS_DECL);
     CJC_ASSERT(mirrorLike.TestAnyAttr(
-        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
+        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE, Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD));
     auto thisRef = CreateThisRef(&mirrorLike, mirrorLike.ty, curFile);
     return CreateJavaRefCall(std::move(thisRef), javaref);
 }
@@ -285,7 +286,7 @@ OwnedPtr<Expr> CreateJavaRefCall(OwnedPtr<Expr> expr, VarDecl& javaref)
 
     CJC_ASSERT(expr->ty->IsClassLike());
     CJC_ASSERT(StaticCast<ClassLikeTy*>(expr->ty)->commonDecl->TestAnyAttr(
-        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
+        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE, Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD));
 
     auto curFile = expr->curFile;
     CJC_NULLPTR_CHECK(curFile);
@@ -296,7 +297,7 @@ OwnedPtr<Expr> CreateJavaRefCall(OwnedPtr<Expr> expr, VarDecl& javaref)
 OwnedPtr<Expr> CreateJavaRefCall(OwnedPtr<Expr> expr, ClassLikeDecl& mirrorLike)
 {
     CJC_ASSERT(mirrorLike.TestAnyAttr(
-        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE));
+        Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE, Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD));
     if (auto mirrorLikeClass = As<ASTKind::CLASS_DECL>(&mirrorLike)) {
         return CreateJavaRefCall(std::move(expr), *GetJavaRefField(*mirrorLikeClass));
     }
@@ -776,14 +777,27 @@ bool IsImpl(const Ty& ty)
     return classLikeTy && classLikeTy->commonDecl && IsImpl(*classLikeTy->commonDecl);
 }
 
+bool IsCJMappingInterface(const Ty& ty)
+{
+    auto interfaceTy = DynamicCast<InterfaceTy*>(&ty);
+    return interfaceTy && interfaceTy->decl && IsCJMapping(*interfaceTy->decl);
+}
+
 bool IsCJMapping(const Ty& ty)
 {
-    // currently only support struct type and enum type
+    // currently only support struct type, enum type, class type.
     if (auto structTy = DynamicCast<StructTy*>(&ty)) {
         return structTy->decl && IsCJMapping(*structTy->decl);
-    } else if (auto enumTy = DynamicCast<EnumTy*>(&ty)) {
+    } 
+    
+    if (auto enumTy = DynamicCast<EnumTy*>(&ty)) {
         return enumTy->decl && IsCJMapping(*enumTy->decl);
     }
+
+    if (auto classTy = DynamicCast<ClassTy*>(&ty)) {
+        return classTy && classTy->decl && IsCJMapping(*classTy->decl);
+    }
+    
     return false;
 }
 

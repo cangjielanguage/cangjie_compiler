@@ -222,6 +222,7 @@ bool IsImpl(const Decl& decl);
 bool IsImpl(const Ty& ty);
 bool IsCJMappingInterface(const Ty& ty);
 bool IsCJMapping(const Ty& ty);
+bool IsCJMappingInterface(const Ty& ty);
 
 ArrayOperationKind GetArrayOperationKind(Decl& decl);
 

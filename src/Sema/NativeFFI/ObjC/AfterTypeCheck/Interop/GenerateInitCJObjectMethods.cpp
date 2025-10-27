@@ -7,7 +7,7 @@
 /**
  * @file
  *
- * This file implements generating init Cangjie object method for @ObjCImpls.
+ * This file implements generating init Cangjie object method for @ObjCImpls and CJMapping.
  */
 
 #include "Handlers.h"
@@ -17,11 +17,10 @@ using namespace Cangjie::Interop::ObjC;
 
 void GenerateInitCJObjectMethods::HandleImpl(InteropContext& ctx)
 {
-    auto genNativeInitMethod = [&ctx](Decl& decl) {
+    auto genNativeInitMethod = [this, &ctx](Decl& decl) {
         if (decl.TestAttr(Attribute::IS_BROKEN)) {
             return;
         }
-
         for (auto& memberDecl : decl.GetMemberDeclPtrs()) {
             if (memberDecl->TestAttr(Attribute::IS_BROKEN)) {
                 continue;
@@ -43,18 +42,25 @@ void GenerateInitCJObjectMethods::HandleImpl(InteropContext& ctx)
             auto& ctorDecl = *StaticAs<ASTKind::FUNC_DECL>(memberDecl);
 
             // skip original ctors
-            if (!ctx.factory.IsGeneratedCtor(ctorDecl)) {
+            if (this->interopType == InteropType::ObjC_Mirror && !ctx.factory.IsGeneratedCtor(ctorDecl)) {
                 continue;
             }
-
-            auto initCjObject = ctx.factory.CreateInitCjObject(decl, ctorDecl, false);
+            bool forOneWayMapping = false;
+            forOneWayMapping = this->interopType == InteropType::CJ_Mapping && As<ASTKind::STRUCT_DECL>(&decl);
+            auto initCjObject = ctx.factory.CreateInitCjObject(decl, ctorDecl, forOneWayMapping);
             CJC_ASSERT(initCjObject);
             ctx.genDecls.emplace_back(std::move(initCjObject));
         }
     };
 
-    for (auto& impl : ctx.impls) {
-        genNativeInitMethod(*impl);
+    if (interopType == InteropType::ObjC_Mirror) {
+        for (auto& impl : ctx.impls) {
+            genNativeInitMethod(*impl);
+        }
+    } else if (interopType == InteropType::CJ_Mapping) {
+        for (auto& cjmapping : ctx.cjMappings) {
+            genNativeInitMethod(*cjmapping);
+        }
     }
 
 }

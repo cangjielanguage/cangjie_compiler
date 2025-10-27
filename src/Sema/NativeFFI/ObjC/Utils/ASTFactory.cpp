@@ -64,6 +64,13 @@ OwnedPtr<Expr> ASTFactory::UnwrapEntity(OwnedPtr<Expr> expr)
         return CreateNativeHandleExpr(std::move(expr));
     }
 
+    if (typeMapper.IsObjCCJMapping(*expr->ty)) {
+        if (auto structTy = StaticCast<StructTy>(expr->ty.get())) {
+            return CreatePutToRegistryCall(std::move(expr));
+        }
+        CJC_ABORT(); // other CJMapping is not supported
+    }
+
     if (expr->ty->IsCoreOptionType()) {
         auto innerTy = expr->ty->typeArgs[0];
         if (typeMapper.IsValidObjCMirror(*innerTy) || typeMapper.IsObjCImpl(*innerTy)) {
@@ -119,6 +126,13 @@ OwnedPtr<Expr> ASTFactory::WrapEntity(OwnedPtr<Expr> expr, Ty& wrapTy)
             typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
         return CreateCallExpr(std::move(ctorRef), Nodes<FuncArg>(CreateFuncArg(std::move(unitPtrExpr))), ctor, &wrapTy,
             CallKind::CALL_STRUCT_CREATION);
+    }
+
+    if (typeMapper.IsObjCCJMapping(wrapTy)) {
+        if (auto structTy = StaticCast<StructTy>(&wrapTy)) {
+            return CreateGetFromRegistryByIdCall(std::move(expr), CreateRefType(*(structTy->decl)));
+        }
+        CJC_ABORT(); // other CJMapping is not supported
     }
 
     if (wrapTy.IsCoreOptionType()) {
@@ -526,7 +540,7 @@ OwnedPtr<FuncDecl> ASTFactory::CreateMethodWrapper(FuncDecl& method)
     auto& originParams = method.funcBody->paramLists[0]->params;
     std::transform(originParams.begin(), originParams.end(), std::back_inserter(wrapperParams), [this](auto& p) {
         auto convertedParamTy = typeMapper.Cj2CType(p->ty);
-        return CreateFuncParam(p->identifier.GetRawText(),
+        return CreateFuncParam(p->identifier.GetRawText() + (typeMapper.IsObjCCJMapping(*(p->ty)) ? "Id" : ""),
             CreateType(convertedParamTy), nullptr, convertedParamTy);
     });
 
@@ -1112,7 +1126,7 @@ OwnedPtr<CallExpr> ASTFactory::CreateGetFromRegistryByIdCall(OwnedPtr<Expr> regi
     auto getFromRegistryByIdExpr = CreateRefExpr(*getFromRegistryByIdDecl);
 
     auto ty = typeArg->ty;
-    CJC_ASSERT(TypeMapper::IsObjCImpl(*ty));
+    CJC_ASSERT(TypeMapper::IsObjCImpl(*ty) || TypeMapper::IsObjCCJMapping(*ty));
 
     std::vector<OwnedPtr<FuncArg>> args;
     args.emplace_back(CreateFuncArg(std::move(registryId)));

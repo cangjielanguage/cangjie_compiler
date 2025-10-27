@@ -285,6 +285,7 @@ private:
 
     bool enableEH{false};
     bool enableInteropCJMapping{false};
+    GlobalOptions::InteropLanguage targetInteropLanguage{GlobalOptions::InteropLanguage::NA};
     Triple::BackendType backend{Triple::BackendType::CJNATIVE};
     bool calculateLineNum{false};
     // we store line number info from all tokens
