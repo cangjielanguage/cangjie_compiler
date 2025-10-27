@@ -374,6 +374,7 @@ std::vector<VTableSearchRes> CustomTypeDef::GetFuncIndexInVTable(const FuncCallT
                     .instance = funcInfo.instance,
                     .originalDef = const_cast<CustomTypeDef*>(this),
                     .genericTypeParams = funcInfo.typeInfo.methodGenericTypeParams,
+                    .attr = funcInfo.attr,
                     .offset = i
                 });
                 break;

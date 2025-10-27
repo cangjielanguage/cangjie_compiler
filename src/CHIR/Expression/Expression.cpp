@@ -917,6 +917,18 @@ ClassType* DynamicDispatch::GetInstSrcParentCustomTypeOfMethod(CHIRBuilder& buil
     return nullptr;
 }
 
+AttributeInfo DynamicDispatch::GetVirtualMethodAttr(CHIRBuilder& builder) const
+{
+    for (auto& r : GetVirtualMethodInfo(builder)) {
+        if (r.offset == GetVirtualMethodOffset()) {
+            CJC_NULLPTR_CHECK(r.instSrcParentType);
+            return r.attr;
+        }
+    }
+    CJC_ABORT();
+    return AttributeInfo{};
+}
+
 // Invoke
 Invoke::Invoke(const InvokeCallContext& callContext, Block* parent)
     : DynamicDispatch(ExprKind::INVOKE, callContext, parent)
