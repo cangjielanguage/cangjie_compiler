@@ -57,27 +57,7 @@ bool IsOpenDecl(const Decl& decl)
     return decl.TestAnyAttr(AST::Attribute::ABSTRACT, AST::Attribute::OPEN) || decl.astKind == ASTKind::INTERFACE_DECL;
 };
 
-/**
- * Check whether the location where the instantiation is triggered is in the context with Open semantics.
- * Return true if expr is in a member of an open class or interface.
- */
-bool IsInOpenContext(const std::vector<Ptr<AST::Decl>>& contextDecl)
-{
-    bool isInOpenContext = !contextDecl.empty();
-    if (isInOpenContext) {
-        auto toplevelDecl = contextDecl.front();
-        if (toplevelDecl->IsNominalDecl()) {
-            isInOpenContext = IsOpenDecl(*toplevelDecl);
-        } else {
-            // In global function if outer is null, and global function context can be instantated.
-            auto outer = GetOuterStructDecl(*toplevelDecl);
-            isInOpenContext = outer == nullptr || IsOpenDecl(*outer);
-        }
-    }
-    return isInOpenContext;
-}
-
-bool RequireInstantiation(const Decl& decl, bool isInOpenContext)
+bool RequireInstantiation(const Decl& decl)
 {
     if (IsCPointerFrozenMember(decl)) {
         return true;
@@ -91,8 +71,8 @@ bool RequireInstantiation(const Decl& decl, bool isInOpenContext)
         }
         if (decl.TestAttr(Attribute::GENERIC)) {
             auto& members = decl.GetMemberDecls();
-            return std::any_of(members.begin(), members.end(),
-                [&isInOpenContext](auto& member) { return RequireInstantiation(*member, isInOpenContext); });
+            return std::any_of(
+                members.begin(), members.end(), [](auto& member) { return RequireInstantiation(*member); });
         }
         return false;
     }
@@ -106,7 +86,7 @@ bool RequireInstantiation(const Decl& decl, bool isInOpenContext)
     //      class A <: I { static func foo(): Int64 {1} }
     //      class B <: I { static func foo(): Int64 {2} }
     // CallExpr `foo()` cannot pointer to any instantation version, it must be a static-invoke.
-    if (IsVirtualMember(decl) || isInOpenContext) {
+    if (IsVirtualMember(decl)) {
         return false;
     }
     if (decl.IsConst()) {

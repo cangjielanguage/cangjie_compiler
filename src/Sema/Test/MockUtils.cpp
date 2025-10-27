@@ -17,9 +17,7 @@
 
 #include <regex>
 
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 #include "GenericInstantiation/PartialInstantiation.h"
-#endif
 #include "TypeCheckUtil.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
@@ -171,8 +169,7 @@ bool MockUtils::IsMockAccessorRequired(const Decl& decl)
     }
 
     if (IS_GENERIC_INSTANTIATION_ENABLED &&
-        (decl.TestAttr(Attribute::GENERIC_INSTANTIATED) || decl.TestAttr(Attribute::GENERIC))
-    ) {
+        (decl.TestAttr(Attribute::GENERIC_INSTANTIATED) || decl.TestAttr(Attribute::GENERIC))) {
         return true;
     }
 
@@ -261,6 +258,9 @@ Ptr<FuncDecl> MockUtils::FindAccessor(Ptr<MemberAccess> ma, Ptr<Decl> target, Ac
 Ptr<Decl> MockUtils::FindAccessor(
     ClassDecl& outerClass, const Ptr<Decl> member, const std::vector<Ptr<Ty>>& instTys, AccessorKind kind) const
 {
+    if (member->TestAttr(Attribute::IN_EXTEND)) {
+        return nullptr;
+    }
     for (auto& superDecl : outerClass.GetAllSuperDecls()) {
         // Accessors are generated only for classes
         if (superDecl->astKind != ASTKind::CLASS_DECL) {

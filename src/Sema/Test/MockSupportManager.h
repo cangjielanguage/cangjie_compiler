@@ -59,12 +59,14 @@ public:
     void CollectDeclsToPrepare(AST::Decl& decl, DeclsToPrepare& decls);
 
     void PrepareClassWithDefaults(AST::ClassDecl& classDecl, AST::InterfaceDecl& interfaceDecl);
+    void WriteUsedInternalDecl(AST::Decl& decl);
 
 private:
     TypeManager& typeManager;
     Ptr<MockUtils> mockUtils;
     std::set<OwnedPtr<AST::Decl>> generatedMockDecls;
     std::unordered_map<Ptr<AST::Decl>, Ptr<AST::VarDecl>> genericMockVarsDecls;
+    std::unordered_set<Ptr<AST::Decl>> usedInternalDecls;
 
     std::unordered_map<Ptr<AST::Ty>, std::unordered_set<Ptr<AST::Ty>>> defaultInterfaceAccessorExtends;
 

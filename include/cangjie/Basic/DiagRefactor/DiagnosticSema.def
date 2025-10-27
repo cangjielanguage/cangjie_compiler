@@ -252,6 +252,8 @@ ERROR(sema_mock_wrong_static_decl, "static/top-level declaration to mock shouldn
 ERROR(sema_mock_doesnt_support_mocking,
     "'%s' doesn't support mocking, please be sure that its package '%s' is mock-compatible (was compiled with %s "
     "compilation option)")
+ERROR(sema_mock_frozen_unsupported,
+    "mocking of frozen declarations (marked with @Frozen annotation) are not supported")
 ERROR(sema_mock_frozen_required,
     "generic wrapper function '%s' for createMock/createSpy calls should be marked with @Frozen annotation")
 

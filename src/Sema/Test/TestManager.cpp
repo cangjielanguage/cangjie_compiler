@@ -83,6 +83,11 @@ void TestManager::ReportDoesntSupportMocking(
         MOCK_ON_COMPILATION_OPTION);
 }
 
+void TestManager::ReportDoesntSupportFrozen(const Expr& reportOn)
+{
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_mock_frozen_unsupported, reportOn);
+}
+
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 void TestManager::ReportFrozenRequired(const FuncDecl& reportOn)
 {
@@ -249,6 +254,11 @@ VisitAction TestManager::HandleMockAnnotatedLambda(const LambdaExpr& lambda)
         (lastExprTarget->outerDecl && lastExprTarget->outerDecl->TestAttr(Attribute::PRIVATE))
     ) {
         ReportWrongStaticDecl(lambda);
+        return VisitAction::WALK_CHILDREN;
+    }
+
+    if (auto funcDecl = As<ASTKind::FUNC_DECL>(lastExprTarget); funcDecl && funcDecl->isFrozen) {
+        ReportDoesntSupportFrozen(lambda);
         return VisitAction::WALK_CHILDREN;
     }
 
@@ -667,6 +677,29 @@ void TestManager::HandleDeclsToExportForTest(std::vector<Ptr<Package>> pkgs) con
     }
 }
 
+void TestManager::CollectInternalDeclUsages(Package& pkg)
+{
+    Walker(&pkg, Walker::GetNextWalkerID(), [&pkg, this](auto node) {
+        Ptr<Decl> target;
+        if (auto ma = As<ASTKind::MEMBER_ACCESS>(node); ma) {
+            target = ma->target;
+        }
+        if (auto re = As<ASTKind::REF_EXPR>(node); re) {
+            target = re->ref.target;
+        }
+        if (!target) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        if (target->fullPackageName != pkg.fullPackageName) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        if (MockUtils::IsMockAccessorRequired(*target) && target->linkage == Linkage::INTERNAL) {
+            mockSupportManager->WriteUsedInternalDecl(*target);
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+}
+
 bool TestManager::ShouldBeMarkedAsContainingMockCreationCall(
     const CallExpr& callExpr, const Ptr<FuncDecl> enclosingFunc) const
 {
@@ -691,16 +724,12 @@ bool TestManager::ShouldBeMarkedAsContainingMockCreationCall(
 
 void TestManager::MarkDeclsForTestIfNeeded(std::vector<Ptr<Package>> pkgs) const
 {
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     HandleDeclsToExportForTest(pkgs);
-#endif
     for (auto& pkg : pkgs) {
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         MarkMockCreationContainingGenericFuncs(*pkg);
         if (mockMode != MockMode::ON && (!mockCompatibleIfNeeded || !IsThereMockUsage(*pkg))) {
             continue;
         }
-#endif
 
         Walker(pkg, Walker::GetNextWalkerID(), [](auto node) {
             MockSupportManager::MarkNodeMockSupportedIfNeeded(*node);
@@ -790,6 +819,7 @@ void TestManager::PreparePackageForTestIfNeeded(Package& pkg)
 
         mockUtils->SetGetTypeForTypeParamDecl(pkg);
         mockUtils->SetIsSubtypeTypes(pkg);
+        CollectInternalDeclUsages(pkg);
         GenerateAccessors(pkg);
         PrepareToSpy(pkg);
         PrepareDecls(pkg);
