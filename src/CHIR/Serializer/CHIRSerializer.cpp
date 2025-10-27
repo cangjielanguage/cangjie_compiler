@@ -1267,15 +1267,7 @@ flatbuffers::Offset<PackageFormat::VirtualMethodInfo> CHIRSerializer::CHIRSerial
     auto sigType = GetId<Type>(obj.GetMethodSigType());
     auto genericTypeParams = GetId<Type>(obj.GetGenericTypeParams());
     // result
-    bool needSkipInstance = false;
-    auto instance = obj.GetVirtualMethod();
-    if (instance && instance->IsFuncWithBody()) {
-        if (auto f = DynamicCast<Func*>(instance); f && !f->GetBody()) {
-            // instance may be removed body when removeUnusedImported, do not serializer it
-            needSkipInstance = true;
-        }
-    }
-    uint32_t funcPtr = needSkipInstance ? 0 : GetId<Value>(instance);
+    uint32_t funcPtr = GetId<Value>(obj.GetVirtualMethod());
     auto attributes = obj.GetAttributeInfo().GetRawAttrs().to_ulong();
     auto originalType = GetId<Type>(obj.GetOriginalFuncType());
     auto parentType = GetId<Type>(obj.GetInstParentType());

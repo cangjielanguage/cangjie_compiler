@@ -372,7 +372,7 @@ std::pair<std::vector<Type*>, Type*> CreateFuncTypeWithBoxType(
         }
     }
     Type* retType = ReplaceRawGenericArgType(*instFuncTypeArgs.back(), replaceTable, builder);
-    if (!VirMethodRetureTypeIsMatched(*retType, *parentFuncType->GetReturnType())) {
+    if (!VirMethodReturnTypeIsMatched(*retType, *parentFuncType->GetReturnType())) {
         retType = CreateBoxRefTypeIfNeed(*retType, builder);
     }
     return {paramTypes, retType};

@@ -232,9 +232,7 @@ void CustomDefTypeConverter::VisitDefDefaultImpl(CustomTypeDef& o)
     std::function<Type*(Type&)> func2 = [this](Type& ty) {
         return ConvertType(ty);
     };
-    for (auto& it : o.vtable.GetModifiableTypeVTables()) {
-        it.ConvertPrivateType(func1, func2);
-    }
+    o.vtable.ConvertPrivateType(func1, func2);
 }
 
 void CustomDefTypeConverter::VisitSubDef(StructDef& o)

@@ -385,14 +385,20 @@ size_t DynamicDispatchWithException::GetVirtualMethodOffset(CHIRBuilder* builder
 
 ClassType* DynamicDispatchWithException::GetInstSrcParentCustomTypeOfMethod(CHIRBuilder& builder) const
 {
+    ClassType* result = nullptr;
     for (auto& r : GetVirtualMethodInfo(builder)) {
         if (r.offset == GetVirtualMethodOffset()) {
-            CJC_NULLPTR_CHECK(r.instSrcParentType);
-            return r.instSrcParentType;
+            auto def = r.instSrcParentType->GetClassDef();
+            const auto& parentFuncInfo = def->GetDefVTable().GetExpectedTypeVTable(*def->GetType());
+            auto originalType = parentFuncInfo.GetVirtualMethods()[r.offset].GetOriginalFuncType();
+            if (VirMethodTypeIsMatched(*originalType, *GetMethodType())) {
+                CJC_NULLPTR_CHECK(r.instSrcParentType);
+                return r.instSrcParentType;
+            }
         }
     }
-    CJC_ABORT();
-    return nullptr;
+    CJC_NULLPTR_CHECK(result);
+    return result;
 }
 
 AttributeInfo DynamicDispatchWithException::GetVirtualMethodAttr(CHIRBuilder& builder) const

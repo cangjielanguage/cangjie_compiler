@@ -912,8 +912,13 @@ ClassType* DynamicDispatch::GetInstSrcParentCustomTypeOfMethod(CHIRBuilder& buil
 {
     for (auto& r : GetVirtualMethodInfo(builder)) {
         if (r.offset == GetVirtualMethodOffset()) {
-            CJC_NULLPTR_CHECK(r.instSrcParentType);
-            return r.instSrcParentType;
+            auto def = r.instSrcParentType->GetClassDef();
+            const auto& parentFuncInfo = def->GetDefVTable().GetExpectedTypeVTable(*def->GetType());
+            auto originalType = parentFuncInfo.GetVirtualMethods()[r.offset].GetOriginalFuncType();
+            if (VirMethodTypeIsMatched(*originalType, *GetMethodType())) {
+                CJC_NULLPTR_CHECK(r.instSrcParentType);
+                return r.instSrcParentType;
+            }
         }
     }
     CJC_ABORT();

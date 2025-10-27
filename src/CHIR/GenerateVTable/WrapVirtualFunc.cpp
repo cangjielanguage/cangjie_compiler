@@ -43,7 +43,7 @@ bool FuncTypeMatch(const FuncType& parentFuncType, const FuncType& curFuncType)
             return false;
         }
     }
-    return VirMethodRetureTypeIsMatched(*parentFuncType.GetReturnType(), *curFuncType.GetReturnType());
+    return VirMethodReturnTypeIsMatched(*parentFuncType.GetReturnType(), *curFuncType.GetReturnType());
 }
 
 bool FuncIsOverride(const FuncBase& curFunc, const Type& selfTy)
@@ -330,7 +330,7 @@ FuncType* WrapVirtualFunc::GetWrapperFuncType(FuncType& parentFuncTyWithoutThisA
             wrapperParamTypes[i] = CreateBoxRefTypeIfNeed(*wrapperParamTypes[i], builder);
         }
     }
-    if (!VirMethodRetureTypeIsMatched(*wrapperRetTy, *parentRetType)) {
+    if (!VirMethodReturnTypeIsMatched(*wrapperRetTy, *parentRetType)) {
         wrapperRetTy = CreateBoxRefTypeIfNeed(*wrapperRetTy, builder);
     }
 

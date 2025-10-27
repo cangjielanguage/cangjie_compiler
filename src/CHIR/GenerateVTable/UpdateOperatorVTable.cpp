@@ -171,26 +171,26 @@ Func* UpdateOperatorVTable::GenerateBuiltinOverflowOperatorFunc(
 }
 
 void UpdateOperatorVTable::RewriteOneVtableEntry(
-    ClassType& infType, CustomTypeDef& user, const VirtualMethodInfo& funcInfo, size_t index)
+    ClassType& infType, CustomTypeDef& user, const VirtualMethodInfo& methodInfo, size_t index)
 {
     static std::vector<std::string> SPLIT_OPERATOR_NAME_PREFIX = {"&", "~", "%"};
-    if (IsBuiltinOverflowOperator(user, funcInfo)) {
+    if (IsBuiltinOverflowOperator(user, methodInfo)) {
         // for builtin overflow operator, insert compiler generated functions into vtable
         auto& extDef = StaticCast<ExtendDef>(user);
         for (size_t j{0}; j < SPLIT_OPERATOR_NAME_PREFIX.size(); ++j) {
-            auto name = SPLIT_OPERATOR_NAME_PREFIX[j] + funcInfo.GetMethodName();
-            auto ovfFunc = GenerateBuiltinOverflowOperatorFunc(funcInfo.GetMethodName(), OVF_STRATEGIES[j], extDef,
-                funcInfo.GetMethodSigType()->GetNumOfParams() == 1);
+            auto name = SPLIT_OPERATOR_NAME_PREFIX[j] + methodInfo.GetMethodName();
+            auto ovfFunc = GenerateBuiltinOverflowOperatorFunc(methodInfo.GetMethodName(), OVF_STRATEGIES[j], extDef,
+                methodInfo.GetMethodSigType()->GetNumOfParams() == 1);
             extDef.AddMethod(ovfFunc);
             if (j == SPLIT_OPERATOR_NAME_PREFIX.size() - 1) {
                 // check again to prevent incorrect rewrite
                 const auto& vt = user.GetDefVTable().GetExpectedTypeVTable(infType).GetVirtualMethods()[index];
-                CJC_ASSERT(vt.GetMethodName() == funcInfo.GetMethodName());
-                CJC_ASSERT(vt.GetMethodSigType() == funcInfo.GetMethodSigType());
+                CJC_ASSERT(vt.GetMethodName() == methodInfo.GetMethodName());
+                CJC_ASSERT(vt.GetMethodSigType() == methodInfo.GetMethodSigType());
                 // reuse the vtable entry to keep the vector index
                 user.UpdateVtableItem(infType, index, ovfFunc, extDef.GetExtendedType(), std::move(name));
             } else {
-                auto newFuncInfo = funcInfo;
+                auto newFuncInfo = methodInfo;
                 newFuncInfo.SetFuncName(std::move(name));
                 newFuncInfo.SetVirtualMethod(ovfFunc);
                 newFuncInfo.SetInstParentType(*extDef.GetExtendedType());
@@ -201,17 +201,17 @@ void UpdateOperatorVTable::RewriteOneVtableEntry(
     } else {
         // otherwise for normal overflow operator, repeat the user defined function in vtable
         for (size_t j{0}; j < SPLIT_OPERATOR_NAME_PREFIX.size(); ++j) {
-            auto name = SPLIT_OPERATOR_NAME_PREFIX[j] + funcInfo.GetMethodName();
+            auto name = SPLIT_OPERATOR_NAME_PREFIX[j] + methodInfo.GetMethodName();
             if (j == SPLIT_OPERATOR_NAME_PREFIX.size() - 1) {
                 // check again to prevent incorrect rewrite
                 const auto& vt = user.GetDefVTable().GetExpectedTypeVTable(infType).GetVirtualMethods()[index];
-                CJC_ASSERT(vt.GetMethodName() == funcInfo.GetMethodName());
-                CJC_ASSERT(vt.GetMethodSigType() == funcInfo.GetMethodSigType());
-                user.UpdateVtableItem(infType, index, funcInfo.GetVirtualMethod(), nullptr, std::move(name));
+                CJC_ASSERT(vt.GetMethodName() == methodInfo.GetMethodName());
+                CJC_ASSERT(vt.GetMethodSigType() == methodInfo.GetMethodSigType());
+                user.UpdateVtableItem(infType, index, methodInfo.GetVirtualMethod(), nullptr, std::move(name));
             } else {
-                auto newFuncInfo = funcInfo;
-                newFuncInfo.SetFuncName(std::move(name));
-                user.AddVtableItem(infType, std::move(newFuncInfo));
+                auto newMethodInfo = methodInfo;
+                newMethodInfo.SetFuncName(std::move(name));
+                user.AddVtableItem(infType, std::move(newMethodInfo));
             }
         }
     }

@@ -1484,6 +1484,21 @@ bool TypeIsMatched(const Type& type1, const Type& type2)
     return true;
 }
 
+bool VirMethodTypeIsMatched(const FuncType& type1, const FuncType& type2)
+{
+    auto type1ParamTypes = type1.GetParamTypes();
+    auto type2ParamTypes = type2.GetParamTypes();
+    if (type1ParamTypes.size() != type2ParamTypes.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < type1ParamTypes.size(); ++i) {
+        if (!VirMethodParamTypeIsMatched(*type1ParamTypes[i], *type2ParamTypes[i])) {
+            return false;
+        }
+    }
+    return VirMethodReturnTypeIsMatched(*type1.GetReturnType(), *type2.GetReturnType());
+}
+
 bool VirMethodParamTypeIsMatched(const Type& type1, const Type& type2)
 {
     // FuncType will be converted to Class-AutoEnv&, so we can treat it as class&
@@ -1497,7 +1512,7 @@ bool VirMethodParamTypeIsMatched(const Type& type1, const Type& type2)
     }
 }
 
-bool VirMethodRetureTypeIsMatched(const Type& type1, const Type& type2)
+bool VirMethodReturnTypeIsMatched(const Type& type1, const Type& type2)
 {
     if (type1.IsGeneric() && type2.IsGeneric()) {
         return true;

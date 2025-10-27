@@ -202,11 +202,6 @@ ClassType* VTableInType::GetSrcParentType() const
     return srcParentType;
 }
 
-bool VTableInType::TheFirstLevelIsMatched(const ClassType& parentType) const
-{
-    return srcParentType == &parentType;
-}
-
 void VTableInType::AppendNewMethod(VirtualMethodInfo&& newMethod)
 {
     virtualMethods.emplace_back(std::move(newMethod));
@@ -243,7 +238,7 @@ const std::vector<VTableInType>& VTableInDef::GetTypeVTables() const
 
 const VTableInType& VTableInDef::GetExpectedTypeVTable(const ClassType& srcParentType) const
 {
-    auto it = srcParentIndex.find(&srcParentType);
+    auto it = srcParentIndex.find(const_cast<ClassType*>(&srcParentType));
     if (it != srcParentIndex.end()) {
         return vtables[it->second];
     }
@@ -268,6 +263,19 @@ void VTableInDef::AddNewItemToTypeVTable(ClassType& srcParent, std::vector<Virtu
     CJC_ASSERT(it == srcParentIndex.end());
     vtables.emplace_back(srcParent, std::forward<std::vector<VirtualMethodInfo>>(funcInfos));
     srcParentIndex[&srcParent] = vtables.size() - 1;
+}
+
+void VTableInDef::ConvertPrivateType(
+    std::function<FuncType*(FuncType&)>& convertFuncParamsAndRetType, std::function<Type*(Type&)>& convertType)
+{
+    for (auto& vtable : vtables) {
+        vtable.ConvertPrivateType(convertFuncParamsAndRetType, convertType);
+    }
+    std::unordered_map<ClassType*, size_t> newTypeMap;
+    for (auto& it : srcParentIndex) {
+        newTypeMap[StaticCast<ClassType*>(convertType(*it.first))] = it.second;
+    }
+    srcParentIndex = std::move(newTypeMap);
 }
 
 void VTableInDef::UpdateItemInTypeVTable(

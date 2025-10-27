@@ -38,7 +38,7 @@ private:
     void AddRewriteInfo(ClassDef& def, size_t index);
     void RewriteVtable();
     void RewriteOneVtableEntry(
-        ClassType& infType, CustomTypeDef& user, const VirtualMethodInfo& funcInfo, size_t index);
+        ClassType& infType, CustomTypeDef& user, const VirtualMethodInfo& methodInfo, size_t index);
     Func* GenerateBuiltinOverflowOperatorFunc(
         const std::string& name, OverflowStrategy ovf, const ExtendDef& user, bool isBinary);
     void RewriteVtableEntryRec(const ClassDef& inf, CustomTypeDef& user, const RewriteVtableInfo& info);
