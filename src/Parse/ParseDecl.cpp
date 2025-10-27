@@ -828,9 +828,21 @@ void ParserImpl::CheckPrimaryCtorDeclObjCMirror(PrimaryCtorDecl& ctor)
 void ParserImpl::CheckCJMappingAttr(Decl& decl) const
 {
     if (enableInteropCJMapping && decl.TestAttr(Attribute::PUBLIC)) {
-        // currently only support struct decl and enum decl.
-        if (decl.astKind == ASTKind::STRUCT_DECL || decl.astKind == ASTKind::ENUM_DECL) {
-            decl.EnableAttr(Attribute::JAVA_CJ_MAPPING);
+        // currently only support struct decl and enum decl, enum decl, class decl.
+        bool isCJMappingClass = decl.astKind == ASTKind::CLASS_DECL && !decl.TestAttr(Attribute::ABSTRACT) &&
+            !decl.TestAttr(Attribute::JAVA_MIRROR) && !decl.TestAttr(Attribute::JAVA_MIRROR_SUBTYPE);
+        // support java type
+        if (decl.astKind == ASTKind::STRUCT_DECL || decl.astKind == ASTKind::ENUM_DECL || isCJMappingClass ||
+            decl.astKind == ASTKind::INTERFACE_DECL) {
+            if (targetInteropLanguage == GlobalOptions::InteropLanguage::Java) {
+                decl.EnableAttr(Attribute::JAVA_CJ_MAPPING);
+            }
+        }
+        // support objc type
+        if (decl.astKind == ASTKind::STRUCT_DECL) {
+            if (targetInteropLanguage == GlobalOptions::InteropLanguage::ObjC) {
+                decl.EnableAttr(Attribute::OBJ_C_CJ_MAPPING);
+            } 
         }
     }
 }
@@ -1394,6 +1406,8 @@ OwnedPtr<ClassDecl> ParserImpl::ParseClassDecl(
         Interop::Java::InsertSyntheticClassDecl(*ret, *currentFile);
     }
 
+    CheckCJMappingAttr(*ret);
+
     return ret;
 }
 
@@ -1412,6 +1426,7 @@ OwnedPtr<InterfaceDecl> ParserImpl::ParseInterfaceDecl(
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
+    CheckCJMappingAttr(*ret);
     ffiParser->CheckClassLikeSignature(*ret, annos);
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     ret->body = ParseInterfaceBody(*ret);
@@ -1421,6 +1436,8 @@ OwnedPtr<InterfaceDecl> ParserImpl::ParseInterfaceDecl(
     if (Interop::Java::IsDeclAppropriateForSyntheticClassGeneration(*ret)) {
         Interop::Java::InsertSyntheticClassDecl(*ret, *currentFile);
     }
+
+    CheckCJMappingAttr(*ret);
 
     return ret;
 }

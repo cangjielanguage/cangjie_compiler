@@ -47,6 +47,7 @@ constexpr auto READONLY_MODIFIER = "readonly";
 constexpr auto STATIC_FUNC_MODIFIER = "+";
 constexpr auto INSTANCE_MODIFIER = "-";
 constexpr auto STATIC_MODIFIER = "static";
+constexpr auto FINAL_MODIFIER = "__attribute__((objc_subclassing_restricted))";
 
 constexpr auto VOID_TYPE = "void";
 constexpr auto VOID_POINTER_TYPE = "void*";
@@ -57,12 +58,15 @@ constexpr auto INT64_T = "int64_t";
 constexpr auto SELF_WEAKLINK_NAME = "$registryId";
 constexpr auto SELF_NAME = "self";
 constexpr auto SETTER_PARAM_NAME = "value";
+constexpr auto REGISTRY_ID_PARAM_NAME = "registryId";
 
 constexpr auto INITIALIZE_FUNC_NAME = "initialize";
 constexpr auto INIT_FUNC_NAME = "init";
 constexpr auto DELETE_FUNC_NAME = "deleteCJObject";
 constexpr auto DEALLOC_FUNC_NAME = "dealloc";
 constexpr auto INIT_CJ_RUNTIME_NAME = "InitCJRuntime";
+constexpr auto INIT_WITH_REGISTRY_ID_NAME = "InitWithRegistryId";
+constexpr auto INIT_WITH_REGISTRY_ID_SIGNATURE = "- (id)InitWithRegistryId:(int64_t)registryId";
 constexpr auto NSLOG_FUNC_NAME = "NSLog";
 constexpr auto EXIT_FUNC_NAME = "exit";
 constexpr auto DLOPEN_FUNC_NAME = "dlopen";
@@ -113,11 +117,12 @@ std::string ToDecl(ObjCFunctionType fType)
 }
 
 ObjCGenerator::ObjCGenerator(InteropContext& ctx, Ptr<Decl> declArg, const std::string& outputFilePath,
-    const std::string& cjLibOutputPath)
+    const std::string& cjLibOutputPath, InteropType interopType)
     : outputFilePath(outputFilePath),
       cjLibOutputPath(cjLibOutputPath),
       decl(declArg),
-      ctx(ctx)
+      ctx(ctx),
+      interopType(interopType)
 {
 }
 
@@ -352,33 +357,36 @@ std::string ObjCGenerator::GenerateCCall(const std::string& funcName, const std:
     return result;
 }
 
+std::string ObjCGenerator::WrapperCallByInitForCJMappingReturn(const Ty& retTy, const std::string& nativeCall) const
+{
+    std::string result =
+        std::string("[[") + retTy.name + " alloc]" + INIT_WITH_REGISTRY_ID_NAME + ": " + nativeCall + "]";
+    return result;
+}
+
 /*
  *  return CJImpl_ObjC_cjworld_A_goo(arg1, arg2, ... arg3);
  */
 std::string ObjCGenerator::GenerateDefaultFunctionImplementation(
-    const std::string& name, const Ty& retTy, const ArgsList args, const ObjCFunctionType type) const
+    const std::string& name, const Ty& retTy, const ArgsList args, [[maybe_unused]] const ObjCFunctionType type) const
 {
     std::string result = retTy.IsUnit() ? "" : RETURN_KEYWORD;
     result += " ";
+    std::string nativeCall = "";
     if (ctx.typeMapper.IsValidObjCMirror(retTy) || ctx.typeMapper.IsObjCImpl(retTy)) {
-        result += "(__bridge " + ctx.typeMapper.Cj2ObjCForObjC(retTy) + ")";
+        nativeCall += "(__bridge " + ctx.typeMapper.Cj2ObjCForObjC(retTy) + ")";
     }
-    result += name + "(";
-    if (type != ObjCFunctionType::INSTANCE) {
-        result += ");";
-        return result;
-    }
-    if (args.size() != 0) {
-        for (size_t i = 0; i < args.size(); i++) {
-            result += args.at(i).second;
-            if (i != args.size() - 1) {
-                result += ", ";
-            }
+    nativeCall += name + "(";
+    for (size_t i = 0; i < args.size(); i++) {
+        nativeCall += args.at(i).second;
+        if (i != args.size() - 1) {
+            nativeCall += ", ";
         }
-    } else {
-        result += string(SELF_NAME) + "." + SELF_WEAKLINK_NAME;
     }
-    result += ");";
+    nativeCall += ");";
+    result +=
+        ctx.typeMapper.IsObjCCJMapping(retTy) ? WrapperCallByInitForCJMappingReturn(retTy, nativeCall) : nativeCall;
+    result += ";";
     return result;
 }
 
@@ -593,8 +601,10 @@ void ObjCGenerator::GenerateInterfaceDecl()
     if (isClassInheritedFromClass) {
         AddWithIndent(GenerateImport("\"" + superClassPtr->identifier.Val() + ".h\""), GenerationTarget::HEADER);
     }
-
-    auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*classDecl);
+    if (interopType == InteropType::CJ_Mapping && dynamic_cast<StructDecl*>(decl.get())) {
+        AddWithIndent(FINAL_MODIFIER, GenerationTarget::HEADER);
+    }
+    auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
     resultH += INTERFACE_KEYWORD;
     resultH += " ";
     resultH += objCDeclName;
@@ -636,7 +646,11 @@ std::string ObjCGenerator::GenerateFuncParamLists(
         switch (format) {
             case FunctionListFormat::DECLARATION:
                 if (i != 0) {
-                    auto name = *componentIterator++;
+                    /*
+                     * for CJMapping Objective-C method signature, label shouldn't generate
+                     * as it would be more user-friendly to keep both side method signatures the same
+                     */
+                    auto name = interopType == InteropType::ObjC_Mirror ? *componentIterator++ : "";
                     genParams += name + ":"; // label
                 } else {
                     genParams += ":";
@@ -676,6 +690,11 @@ std::string ObjCGenerator::GenerateFuncParamLists(
 std::string ObjCGenerator::GenerateSetterParamLists(const std::string& type) const
 {
     return ":(" + type + ")" + SETTER_PARAM_NAME;
+}
+
+bool ObjCGenerator::SkipSetterForValueTypeDecl(Decl& declArg) const
+{
+    return interopType == InteropType::CJ_Mapping && DynamicCast<StructTy*>(declArg.ty.get()) != nullptr;
 }
 
 /*
@@ -778,7 +797,9 @@ void ObjCGenerator::AddConstructors()
             continue;
         }
 
-        const auto ctor = ctx.factory.GetGeneratedImplCtor(*decl, funcDecl).get();
+        const auto ctor = interopType == InteropType::ObjC_Mirror
+                          ? ctx.factory.GetGeneratedImplCtor(*decl, funcDecl).get()
+                          : &funcDecl;
         CJC_ASSERT(ctor);
         const std::string& retType = ID_TYPE;
         const auto selectorComponents = ctx.nameGenerator.GetObjCDeclSelectorComponents(funcDecl);
@@ -794,15 +815,16 @@ void ObjCGenerator::AddConstructors()
         AddWithIndent(GenerateIfStatement(SELF_NAME, GenerateObjCCall(SUPER_KEYWORD, INIT_FUNC_NAME), EQ_OP),
             GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
         AddWithIndent(GenerateAssignment(string(SELF_NAME) + "." + SELF_WEAKLINK_NAME,
-            GenerateCCall(cjWrapperName,
-                ConvertParamsListToCallableParamsString(funcDecl.funcBody->paramLists, true))) +
-                ";",
+            GenerateCCall(cjWrapperName, ConvertParamsListToCallableParamsString(
+                funcDecl.funcBody->paramLists, interopType == InteropType::ObjC_Mirror))) + ";",
             GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
         AddWithIndent(GenerateReturn(SELF_NAME), GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
-        generatedCtors.insert(selectorComponents);
+        if (interopType == InteropType::ObjC_Mirror) {
+            generatedCtors.insert(selectorComponents);
+        }
     }
     ClassDecl* classDecl = dynamic_cast<ClassDecl*>(decl.get());
-    if (classDecl) {
+    if (interopType == InteropType::ObjC_Mirror && classDecl) {
         auto ctorsToGenerate = ctx.factory.GetAllParentCtors(*classDecl);
         for (auto ctor : ctorsToGenerate) {
             // public superconstructors & non-public own constructors
@@ -830,6 +852,14 @@ void ObjCGenerator::AddConstructors()
         }
     }
 
+    if (interopType == InteropType::CJ_Mapping) {
+        AddWithIndent(INIT_WITH_REGISTRY_ID_SIGNATURE, GenerationTarget::BOTH, OptionalBlockOp::OPEN);
+        AddWithIndent(GenerateIfStatement(SELF_NAME, GenerateObjCCall(SUPER_KEYWORD, INIT_FUNC_NAME), EQ_OP),
+            GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
+        AddWithIndent(GenerateAssignment(string(SELF_NAME) + "." + SELF_WEAKLINK_NAME, REGISTRY_ID_PARAM_NAME) + ";",
+            GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
+        AddWithIndent(GenerateReturn(SELF_NAME), GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
+    }
 }
 
 /*
@@ -880,6 +910,10 @@ ArgsList ObjCGenerator::ConvertParamsListToArgsList(
         for (size_t i = 0; i < paramLists[0]->params.size(); i++) {
             OwnedPtr<FuncParam>& cur = paramLists[0]->params[i];
             auto name = cur->identifier.Val();
+            if (ctx.typeMapper.IsObjCCJMapping(*cur->ty)) {
+                name += ".";
+                name += SELF_WEAKLINK_NAME;
+            }
             name = GenerateArgumentCast(*cur->ty, std::move(name));
             result.push_back(std::pair<std::string, std::string>(MapCJTypeToObjCType(cur), name));
         }

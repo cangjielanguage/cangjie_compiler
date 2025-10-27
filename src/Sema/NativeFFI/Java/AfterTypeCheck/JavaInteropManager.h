@@ -23,14 +23,14 @@ class JavaInteropManager {
 public:
     JavaInteropManager(ImportManager& importManager, TypeManager& typeManager, DiagnosticEngine& diag,
         const BaseMangler& mangler, const std::optional<std::string>& javagenOutputPath, const std::string outputPath,
-        bool enableInteropCJMapping = false)
+        GlobalOptions::InteropLanguage& targetInteropLanguage)
         : importManager(importManager),
           typeManager(typeManager),
           diag(diag),
           mangler(mangler),
           javagenOutputPath(javagenOutputPath),
           outputPath(outputPath),
-          enableInteropCJMapping(enableInteropCJMapping)
+          targetInteropLanguage(targetInteropLanguage)
     {
     }
 
@@ -66,7 +66,7 @@ private:
      * Flag that informs on presence of any @JavaMirror- or @JavaImpl-annotated entities in the compilation package
      */
     bool hasMirrorOrImpl = false;
-    bool enableInteropCJMapping = false;
+    GlobalOptions::InteropLanguage& targetInteropLanguage;
 };
 } // namespace Cangjie::Interop::Java
 

@@ -61,6 +61,36 @@ bool JavaDesugarManager::FillMethodParamsByArg(std::vector<OwnedPtr<FuncParam>>&
         auto entity = lib.CreateGetFromRegistryCall(
             WithinFile(CreateRefExpr(jniEnvPtrParam), funcDecl.curFile), std::move(paramRef), arg->ty);
         methodArg = CreateFuncArg(WithinFile(std::move(entity), funcDecl.curFile));
+    } else if (IsCJMappingInterface(*arg->ty)) {
+        Ptr<Ty> fwdTy(nullptr);
+        for (auto it : classLikeTy->directSubtypes) {
+            if (it->name == classLikeTy->name + "_fwd") {
+                fwdTy = it;
+                break;
+            }
+        }
+        CJC_ASSERT(fwdTy);
+
+        auto fwdClassDecl = Ty::GetDeclOfTy(fwdTy);
+        auto curFile = fwdClassDecl->curFile;
+
+        Ptr<FuncDecl> ctor(nullptr);
+        for (auto& member : fwdClassDecl->GetMemberDecls()) {
+            if (auto fd = As<ASTKind::FUNC_DECL>(member); fd && fd->TestAttr(Attribute::CONSTRUCTOR)) {
+                ctor = fd;
+                break;
+            }
+        }
+        CJC_ASSERT(ctor);
+
+        auto entity = lib.CreateJavaEntityJobjectCall(std::move(paramRef));
+        std::vector<OwnedPtr<FuncArg>> ctorCallArgs;
+        ctorCallArgs.push_back(CreateFuncArg(std::move(entity)));
+
+        auto fdRef = WithinFile(CreateRefExpr(*ctor), curFile);
+        auto fwdClassInstance =
+            CreateCallExpr(std::move(fdRef), std::move(ctorCallArgs), ctor, fwdTy, CallKind::CALL_OBJECT_CREATION);
+        methodArg = CreateFuncArg(WithinFile(std::move(fwdClassInstance), funcDecl.curFile));
     } else {
         methodArg = CreateFuncArg(std::move(paramRef));
     }
@@ -125,6 +155,9 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeMethod(FuncDecl& sampleMethod, 
         } else if (auto retEnumTy = DynamicCast<EnumTy*>(retTy)) {
             std::string clazzName = retEnumTy->decl->fullPackageName + "." + retTy->name;
             createCJMappingCall(clazzName, false);
+        } else if (auto retClassTy = DynamicCast<ClassTy*>(retTy)) {
+            std::string clazzName = retClassTy->decl->fullPackageName + "." + retTy->name;
+            createCJMappingCall(clazzName, true);
         }
     } else {
         OwnedPtr<Expr> methodResRef = WithinFile(CreateRefExpr(*methodCallRes), curFile);

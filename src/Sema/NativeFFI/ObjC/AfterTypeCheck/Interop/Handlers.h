@@ -102,10 +102,13 @@ public:
  */
 class GenerateDeleteCJObjectMethod : public Handler<GenerateDeleteCJObjectMethod, InteropContext> {
 public:
-    explicit GenerateDeleteCJObjectMethod()
+    explicit GenerateDeleteCJObjectMethod(InteropType interopType) : interopType(interopType)
     {
     }
     void HandleImpl(InteropContext& ctx);
+
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -178,10 +181,13 @@ private:
  */
 class GenerateInitCJObjectMethods : public Handler<GenerateInitCJObjectMethods, InteropContext> {
 public:
-    explicit GenerateInitCJObjectMethods()
+    explicit GenerateInitCJObjectMethods(InteropType interopType) : interopType(interopType)
     {
     }
     void HandleImpl(InteropContext& ctx);
+
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -218,7 +224,7 @@ private:
  */
 class GenerateWrappers : public Handler<GenerateWrappers, InteropContext> {
 public:
-    explicit GenerateWrappers()
+    explicit GenerateWrappers(InteropType interopType) : interopType(interopType)
     {
     }
     void HandleImpl(InteropContext& ctx);
@@ -230,6 +236,8 @@ private:
     void GenerateSetterWrapper(InteropContext& ctx, AST::PropDecl& prop);
     void GenerateWrapper(InteropContext& ctx, AST::VarDecl& field);
     void GenerateSetterWrapper(InteropContext& ctx, AST::VarDecl& field);
+    bool SkipSetterForValueTypeDecl(AST::Decl& decl) const;
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -240,10 +248,13 @@ private:
  */
 class GenerateGlueCode : public Handler<GenerateGlueCode, InteropContext> {
 public:
-    explicit GenerateGlueCode()
+    explicit GenerateGlueCode(InteropType interopType) : interopType(interopType)
     {
     }
     void HandleImpl(InteropContext& ctx);
+
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -268,6 +279,33 @@ public:
 class DrainGeneratedDecls : public Handler<DrainGeneratedDecls, InteropContext> {
 public:
     void HandleImpl(InteropContext& ctx);
+};
+
+/**
+ * Finds all Cangjie declarations which are mapped to Objective-C side.
+ */
+class FindCJMapping : public Handler<FindCJMapping, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+/**
+ * Performs all necessary syntax and semantic checks on CJMapping declarations.
+ */
+class CheckCJMappingTypes : public Handler<CheckCJMappingTypes, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+class DesugarCJMappings : public Handler<DesugarCJMappings, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+
+private:
+    void DesugarMethod(InteropContext& ctx, AST::Decl& cjMapping, AST::FuncDecl& method);
+    void DesugarCtor(InteropContext& ctx, AST::Decl& cjMapping, AST::FuncDecl& ctor);
+    void DesugarProp(InteropContext& ctx, AST::Decl& cjMapping, AST::PropDecl& prop);
+    void DesugarField(InteropContext& ctx, AST::Decl& cjMapping, AST::PropDecl& field);
 };
 
 } // namespace Cangjie::Interop::ObjC

@@ -121,7 +121,7 @@ void JavaDesugarManager::InsertJavaRefVarDecl(ClassDecl& decl)
 void JavaDesugarManager::InsertJavaMirrorCtor(ClassDecl& decl, bool doStub)
 {
     auto curFile = decl.curFile;
-    auto isJObject = IsJObject(decl);
+    auto isJObject = IsJObject(decl) || decl.TestAttr(Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD);
     auto& javaEntityDecl = *lib.GetJavaEntityDecl();
 
     auto param = CreateFuncParam("$ref", CreateRefType(javaEntityDecl), nullptr, javaEntityDecl.ty);
@@ -417,7 +417,7 @@ void JavaDesugarManager::AddJavaMirrorMethodBody(const ClassLikeDecl& mirror, Fu
 void JavaDesugarManager::DesugarJavaMirrorMethod(FuncDecl& fun, ClassLikeDecl& mirror)
 {
     CJC_ASSERT(!fun.TestAttr(Attribute::CONSTRUCTOR) &&
-        (fun.TestAttr(Attribute::JAVA_MIRROR)));
+        (fun.TestAttr(Attribute::JAVA_MIRROR) || fun.TestAttr(Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD)));
     AddJavaMirrorMethodBody(mirror, fun, CreateJavaRefCall(mirror, mirror.curFile));
 }
 

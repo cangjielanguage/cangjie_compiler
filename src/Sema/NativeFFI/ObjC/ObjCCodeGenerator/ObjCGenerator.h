@@ -32,7 +32,7 @@ using ArgsList = std::vector<std::pair<std::string, std::string>>;
 class ObjCGenerator {
 public:
     ObjCGenerator(InteropContext& ctx, Ptr<AST::Decl> declArg, const std::string& outputFilePath,
-        const std::string& cjLibOutputPath);
+        const std::string& cjLibOutputPath, InteropType interopType);
     void Generate();
 
 private:
@@ -43,6 +43,7 @@ private:
     size_t currentBlockIndent = 0;
     Ptr<AST::Decl> decl;
     InteropContext& ctx;
+    InteropType interopType;
 
     void OpenBlock();
     void CloseBlock(bool newLineBefore, bool newLineAfter);
@@ -79,6 +80,7 @@ private:
         std::vector<OwnedPtr<AST::FuncParamList>>& paramLists, bool withSelf) const;
     std::string GenerateSetterParamLists(const std::string& type) const;
     std::string WrapperCallByInitForCJMappingReturn(const AST::Ty& retTy, const std::string& nativeCall) const;
+    bool SkipSetterForValueTypeDecl(AST::Decl& declArg) const;
 
     void GenerateForwardDeclarations();
     void GenerateStaticFunctionsReferences();
