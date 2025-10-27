@@ -365,7 +365,9 @@ ERROR(sema_ifavailable_unknow_arg_name, "unknown parameter name '%s'")
 
 // @APILevel
 ERROR(sema_apilevel_multi_anno, "annotate more than one '@!APILevel'")
-ERROR(sema_only_literal_support, "only literal values are supported for now")
+WARNING(sema_apilevel_missing_arg, APILEVEL_CHECK,
+    "annotation missing named argument '%s' or unable to read as numerical value")
+ERROR(sema_only_literal_support, "only %s literal values are supported for now")
 ERROR(sema_apilevel_ref_higher,
     "cannot reference '%s'(level: %s) which higher than level of the current scope(level: %s)")
 WARNING(sema_apilevel_syscap_warning, APILEVEL_CHECK, "inappropriate syscap '%s'")

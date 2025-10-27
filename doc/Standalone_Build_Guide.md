@@ -43,7 +43,7 @@ python3 build.py install;
 
 1. `build.py clean` 命令用于清空工作区临时文件。
 2. `build.py build` 命令开始执行编译：
-    - 二级选项 `-t` 即 `--build-type`，指定编译产物类型，可以是 `release`、`debug` 或 `relwithdebuginfo`。
+    - 二级选项 `-t` 即 `--build-type`，指定编译产物类型，可以是 `release`、`debug` 或 `relwithdebinfo`。
     - 二级选项 `--build-cjdb` 选项开启 cjdb(lldb) 编译，了解更多更多关于 cjdb 内容，请参阅 [`cjdb` 工具介绍](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_zh_cn/cmd-tools/cjdb_manual.md)。
 3. `build.py install` 命令将编译产物安装到 `output` 目录下。
 
@@ -92,7 +92,7 @@ python3 build.py install;
 
 1. `build.py clean` 命令用于清空工作区临时文件。
 2. `build.py build` 命令开始执行编译：
-    - 二级选项 `-t` 即 `--build-type`，指定编译产物类型，可以是 `release`、`debug` 或 `relwithdebuginfo`。
+    - 二级选项 `-t` 即 `--build-type`，指定编译产物类型，可以是 `release`、`debug` 或 `relwithdebinfo`。
     - 二级选项 `--build-cjdb` 选项开启 cjdb(lldb) 编译，了解更多更多关于 cjdb 内容，请参阅 [`cjdb` 工具介绍](https://gitcode.com/Cangjie/cangjie_docs/blob/main/docs/tools/source_zh_cn/cmd-tools/cjdb_manual.md)。
 3. `build.py install` 命令将编译产物安装到 `output` 目录下。
 
@@ -147,7 +147,7 @@ python3 build.py install --host windows-x86_64;
 1. `CMAKE_PREFIX_PATH` 环境变量用来指定 cmake 用于将产物生成到目标平台对应的文件夹中。
 2. `build.py clean` 命令用于清空工作区临时文件。
 3. `build.py build` 命令开始执行编译：
-    - 二级选项 `-t` 即 `--build-type`，可以是 `release`、`debug` 或 `relwithdebuginfo`。
+    - 二级选项 `-t` 即 `--build-type`，可以是 `release`、`debug` 或 `relwithdebinfo`。
     - 二级选项 `--product` 指定构建目标产物， 可以是 `all`、`cjc` 或 `libs`。
     - 二级选项 `--target` 选项指定目标平台描述，可以是 `native`(当前编译平台)、`windows-x86_64`、`ohos-aarch64`、`ohos-x86_64`、`ios-aarch64`、`android-aarch64`、`android-x86_64`、`ios-simulator-aarch64`、`ios-aarch64`。
     - 二级选项 `--target-sysroot` 选项将后面的参数传递给 C/C++ 编译器作为其 `--sysroot` 参数。
@@ -203,7 +203,7 @@ python3 build.py install --host android-aarch64;
 1. `ANDROID_NDK_ROOT` 环境变量用来设置 Android NDK 的路径。
 2. `build.py clean` 命令用于清空工作区临时文件。
 3. `build.py build` 命令开始执行编译：
-    - 二级选项 `-t` 即 `--build-type`，可以是 `release`、`debug` 或 `relwithdebuginfo`。
+    - 二级选项 `-t` 即 `--build-type`，可以是 `release`、`debug` 或 `relwithdebinfo`。
     - 二级选项 `--product` 指定构建目标产物， 可以是 `all`、`cjc` 或 `libs`。
     - 二级选项 `--target` 选项指定目标平台描述，可以是 `native`(当前编译平台)、`windows-x86_64`、`ohos-aarch64`、`ohos-x86_64`、`ios-aarch64`、`android-aarch64`、`android-x86_64`、`ios-simulator-aarch64`、`ios-aarch64`。
     - 二级选项 `--android-ndk` 选项指定 Android NDK 的路径。
@@ -246,7 +246,7 @@ python3 build.py install --host android-aarch64
 1. `ANDROID_NDK_ROOT` 环境变量用来设置 Android NDK 的路径。
 2. `build.py clean` 命令用于清空工作区临时文件。
 3. `build.py build` 命令开始执行编译：
-    - 二级选项 `-t` 即 `--build-type`，可以是 `release`、`debug` 或 `relwithdebuginfo`。
+    - 二级选项 `-t` 即 `--build-type`，可以是 `release`、`debug` 或 `relwithdebinfo`。
     - 二级选项 `--product` 指定构建目标产物， 可以是 `all`、`cjc` 或 `libs`。
     - 二级选项 `--target` 选项指定目标平台描述，可以是 `native`(当前编译平台)、`windows-x86_64`、`ohos-aarch64`、`ohos-x86_64`、`ios-aarch64`、`android-aarch64`、`android-x86_64`、`ios-simulator-aarch64`、`ios-aarch64`。
     - 二级选项 `--android-ndk` 选项指定 Android NDK 的路径。
@@ -309,7 +309,7 @@ python3 build.py install;
 4. `TOOLCHAIN_BIN` 环境变量用来设置 Xcode 工具链的二进制文件路径。
 5. `build.py clean` 命令用于清空工作区临时文件。
 6. `build.py build` 命令开始执行编译：
-    - 二级选项 `-t` 即 `--build-type`，可以是 `release`、`debug` 或 `relwithdebuginfo`。
+    - 二级选项 `-t` 即 `--build-type`，可以是 `release`、`debug` 或 `relwithdebinfo`。
     - 二级选项 `--product` 指定构建目标产物， 可以是 `all`、`cjc` 或 `libs`。
     - 二级选项 `--target` 选项指定目标平台描述，可以是 `native`(当前编译平台)、`windows-x86_64`、`ohos-aarch64`、`ohos-x86_64`、`ios-aarch64`、`android-aarch64`、`android-x86_64`、`ios-simulator-aarch64`、`ios-aarch64`。
     - 二级选项 `--target-sysroot` 选项将后面的参数传递给 C/C++ 编译器作为其 `--sysroot` 参数。
@@ -329,7 +329,7 @@ python3 build.py install;
 `build` 选项用于构建工程文件。它提供了如下二级选项：
 
 - `-h, --help`：用于展示二级选项的帮助信息。
-- `-t, --build-type`：用于指定编译产物类型，可以是 `release`、`debug` 或 `relwithdebuginfo`。
+- `-t, --build-type`：用于指定编译产物类型，可以是 `release`、`debug` 或 `relwithdebinfo`。
 - `--print-cmd`：用于展示构建脚本配置的完整 cmake 命令。
 - `-j, --jobs JOBS`：并发执行构建任务数。
 - `--link-jobs LINK_JOBS`：并发执行链接任务数。

@@ -291,7 +291,7 @@ void TypeChecker::TypeCheckerImpl::CheckIllegalMemberWalker(
                 return VisitAction::SKIP_CHILDREN;
             }
             if (refExpr && (refExpr->isThis || refExpr->isSuper)) {
-                CheckIllegalMemberHelper(ctx, reportThis, errorStr, *refExpr);
+                CheckIllegalMemberHelper(ctx, reportThis, errorStr, *ma);
             }
             return VisitAction::SKIP_CHILDREN;
         } else {

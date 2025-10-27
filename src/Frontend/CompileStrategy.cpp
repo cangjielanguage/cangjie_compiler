@@ -386,7 +386,8 @@ std::mutex g_sourceManageLock;
 void ParseAndMergeCjd(Ptr<CompilerInstance> ci, std::pair<const std::string, std::string> cjdInfo)
 {
     std::string failedReason;
-    auto sourceCode = FileUtil::ReadFileContent(cjdInfo.second, failedReason);
+    auto cjoPath = cjdInfo.second;
+    auto sourceCode = FileUtil::ReadFileContent(cjoPath, failedReason);
     if (!failedReason.empty() || !sourceCode.has_value()) {
         // In the LSP scenario, the cjd file path cannot be obtained based on the dependency package information
         // configured in the cache. The cjd file path is searched in searchPath.
@@ -406,7 +407,7 @@ void ParseAndMergeCjd(Ptr<CompilerInstance> ci, std::pair<const std::string, std
     SourceManager& sm = ci->diag.GetSourceManager();
     {
         std::lock_guard<std::mutex> guardOfSm(g_sourceManageLock);
-        fileId = sm.AddSource(cjdInfo.second, sourceCode.value(), cjdInfo.first);
+        fileId = sm.AddSource(cjoPath, sourceCode.value(), cjdInfo.first);
     }
     auto fileAst =
         Parser(fileId, sourceCode.value(), ci->diag, ci->diag.GetSourceManager(), false, true).ParseTopLevel();
@@ -461,6 +462,7 @@ void CompileStrategy::ParseAndMergeCjds() const
     for (auto& future : futures) {
         future.get();
     }
+    ci->diag.EmitCategoryGroup();
     option.compileCjd = false;
     Utils::ProfileRecorder::Stop("ImportPackages", "ParseAndMergeCjds");
 }
