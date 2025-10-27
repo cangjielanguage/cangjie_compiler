@@ -956,6 +956,7 @@ table PackageSpec {
   packageNamePos:Position;
   accessible:AccessibleKind=ACCESSIBLE_PUBLIC;
   hasMacro:bool;
+  hasDoubleColon: bool;
 }
 
 enum ImportKind:int8 {
@@ -980,6 +981,7 @@ table ImportContent {
   items:[ImportContent];
   commaPoses:[Position];
   rightCurlPos:Position;
+  hasDoubleColon: bool;
 }
 
 enum ReExportKind:int8{

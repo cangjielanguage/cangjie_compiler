@@ -92,7 +92,7 @@ flatbuffers::Offset<NodeFormat::PackageSpec> NodeWriter::SerializePackageSpec(As
         : packageSpec->modifier->modifier == TokenKind::PROTECTED ? NodeFormat::AccessibleKind_ACCESSIBLE_PROTECTED
                                                                   : NodeFormat::AccessibleKind_ACCESSIBLE_PUBLIC;
     return NodeFormat::CreatePackageSpec(builder, paNodeBase, &macroPos, &packagePos, prefixPaths, prefixPoses,
-        prefixDotPoses, packageName, &packageNamePos, accessible, packageSpec->hasMacro);
+        prefixDotPoses, packageName, &packageNamePos, accessible, packageSpec->hasMacro, packageSpec->hasDoubleColon);
 }
 
 flatbuffers::Offset<NodeFormat::ImportContent> NodeWriter::SerializeImportContent(const AST::ImportContent& content)
@@ -124,7 +124,7 @@ flatbuffers::Offset<NodeFormat::ImportContent> NodeWriter::SerializeImportConten
         NodeFormat::Position(content.rightCurlPos.fileID, content.rightCurlPos.line, content.rightCurlPos.column);
 
     return NodeFormat::CreateImportContent(builder, icNodeBase, kind, prefixPaths, prefixPoses, prefixDotPoses, ident,
-        &identPos, &asPos, asIdent, &asIdentPos, &leftCurlPos, items, commaPoses, &rightCurlPos);
+        &identPos, &asPos, asIdent, &asIdentPos, &leftCurlPos, items, commaPoses, &rightCurlPos, content.hasDoubleColon);
 }
 
 flatbuffers::Offset<NodeFormat::ImportSpec> NodeWriter::SerializeImportSpec(AstImportSpec importSpec)
