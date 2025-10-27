@@ -122,7 +122,7 @@ public:
      * @brief create a bound domain.
      * @param isTop create top is true else bottom.
      */
-    explicit ValueDomain(bool isTop) : kind(isTop ? ValueKind::TOP : ValueKind::BOTTOM)
+    ValueDomain(bool isTop) : kind(isTop ? ValueKind::TOP : ValueKind::BOTTOM)
     {
     }
 
@@ -130,7 +130,7 @@ public:
      * @brief create a ref domain.
      * @param ref ref to create domain.
      */
-    explicit ValueDomain(Ref* ref) : kind(ValueKind::REF), ref(ref)
+    ValueDomain(Ref* ref) : kind(ValueKind::REF), ref(ref)
     {
     }
 
@@ -138,7 +138,7 @@ public:
      * @brief create an object domain.
      * @param absVal object to create domain.
      */
-    explicit ValueDomain(std::unique_ptr<AbstractValue> absVal) : kind(ValueKind::VAL), absVal(std::move(absVal))
+    ValueDomain(std::unique_ptr<AbstractValue> absVal) : kind(ValueKind::VAL), absVal(std::move(absVal))
     {
     }
 

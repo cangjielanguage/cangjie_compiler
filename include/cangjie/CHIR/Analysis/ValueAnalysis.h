@@ -7,6 +7,7 @@
 #ifndef CANGJIE_CHIR_ANALYSIS_VALUE_ANALYSIS_H
 #define CANGJIE_CHIR_ANALYSIS_VALUE_ANALYSIS_H
 
+#include "cangjie/CHIR/Analysis/ActiveStatePool.h"
 #include "cangjie/CHIR/Analysis/Utils.h"
 #include "cangjie/CHIR/Analysis/ValueDomain.h"
 #include "cangjie/CHIR/CHIRCasting.h"
@@ -22,21 +23,27 @@
 #include <variant>
 #include <vector>
 
+namespace {
+template <class T, template<class...> class U>
+inline constexpr bool is_instance_of_v = std::false_type{};
+
+template <template<class...> class U, class... Vs>
+inline constexpr bool is_instance_of_v<U<Vs...>, U> = std::true_type{};
+}
+
 namespace Cangjie::CHIR {
-template <typename ValueDomain> class ValueAnalysis;
+template <typename ValueDomain, typename ValueStatePool> class ValueAnalysis;
 
 /**
  * @brief abstract state to store CHIR value state, mainly store value and reference state.
  * @tparam ValueDomain abstract domain to store status of CHIR value.
  */
-template <typename ValueDomain,
+template <typename ValueDomain, typename ValueStatePool = DefaultStatePool<ValueDomain>,
     typename = std::enable_if_t<std::is_base_of_v<AbstractDomain<ValueDomain>, ValueDomain>>>
-class State final : public AbstractDomain<State<ValueDomain>> {
-    friend class ValueAnalysis<ValueDomain>;
+class State final : public AbstractDomain<State<ValueDomain, ValueStatePool>> {
+    friend class ValueAnalysis<ValueDomain, ValueStatePool>;
 
 public:
-    /// state map type from CHIR value to valueDomain
-    using ProgramState = std::unordered_map<Value*, ValueDomain>;
     /// reference map from CHIR ref to object or other ref.
     using RefMap = std::unordered_map<const Ref*, std::variant<Ref*, AbstractObject*>>;
     /// children map from parent value to its child object.
@@ -71,7 +78,7 @@ public:
      * @brief copy constructor
      * @param rhs other state to copy.
      */
-    State(const State<ValueDomain>& rhs)
+    State(const State<ValueDomain, ValueStatePool>& rhs)
     {
         this->kind = rhs.kind;
         this->programState = rhs.programState;
@@ -89,7 +96,7 @@ public:
      * @param rhs other state to copy.
      * @return copied state.
      */
-    State& operator=(const State<ValueDomain>& rhs)
+    State& operator=(const State<ValueDomain, ValueStatePool>& rhs)
     {
         this->kind = rhs.kind;
         this->programState = rhs.programState;
@@ -109,7 +116,7 @@ public:
      * @param rhs other state to join.
      * @return true if state changed.
      */
-    bool Join(const State<ValueDomain>& rhs) override
+    bool Join(const State<ValueDomain, ValueStatePool>& rhs) override
     {
         if (rhs.kind == ReachableKind::UNREACHABLE) {
             return false;
@@ -117,7 +124,7 @@ public:
             *this = rhs;
             return true;
         } else {
-            auto changed = MapJoin<Value*, ValueDomain>(programState, rhs.programState);
+            auto changed = MapJoin<ValueDomain>(programState, rhs.programState);
             // We can consider only do the Join operations on living Refs.
             changed |= RefMapJoin(rhs);
             return changed;
@@ -135,8 +142,8 @@ public:
         } else {
             std::stringstream ss;
             ss << "programState: { ";
-            for (auto& [k, v] : std::as_const(programState)) {
-                ss << k->GetIdentifier() << " -> " << v.ToString() << ", ";
+            for (auto it = programState.Begin(); it != programState.End(); it++) {
+                ss << it->first->GetIdentifier() << " -> " << it->second.ToString() << ", ";
             }
             ss << "}\n";
             ss << "refMap: { ";
@@ -162,10 +169,10 @@ public:
     template <typename Arg, typename = std::enable_if<std::is_constructible_v<ValueDomain, Arg>>>
     void Update(Value* dest, Arg&& absVal)
     {
-        if (auto it = programState.find(dest); it != programState.end()) {
+        if (auto it = programState.Find(dest); it != programState.End()) {
             it->second = std::forward<Arg>(absVal);
         } else {
-            programState.emplace(dest, std::forward<Arg>(absVal));
+            programState.emplace(dest, ValueDomain(std::forward<Arg>(absVal)));
         }
     }
 
@@ -176,7 +183,7 @@ public:
      */
     void SetToBound(Value* dest, bool isTop)
     {
-        if (auto it = programState.find(dest); it != programState.end()) {
+        if (auto it = programState.Find(dest); it != programState.End()) {
             it->second.SetSelfToBound(isTop);
         } else {
             programState.emplace(dest, ValueDomain(isTop));
@@ -190,7 +197,7 @@ public:
      */
     void TrySetToTopOrTopRef(Value* dest, bool isRef)
     {
-        if (auto it = programState.find(dest); it != programState.end()) {
+        if (auto it = programState.Find(dest); it != programState.End()) {
             return;
         }
         InitToTopOrTopRef(dest, isRef);
@@ -203,7 +210,7 @@ public:
      */
     void SetToTopOrTopRef(Value* dest, bool isRef)
     {
-        if (auto it = programState.find(dest); it != programState.end()) {
+        if (auto it = programState.Find(dest); it != programState.End()) {
             if (isRef) {
                 it->second = Ref::GetTopRefInstance();
             } else {
@@ -218,8 +225,8 @@ public:
     /// abstract value of value @p dest.
     auto CheckAbstractValue(Value* obj) const
     {
-        auto it = programState.find(obj);
-        return it != programState.end() ? it->second.CheckAbsVal() : nullptr;
+        auto it = programState.Find(obj);
+        return it != programState.End() ? it->second.CheckAbsVal() : nullptr;
     }
 
     /**
@@ -244,8 +251,8 @@ public:
      */
     const ValueDomain* CheckAbstractValueWithTopBottom(Value* obj) const
     {
-        auto it = programState.find(obj);
-        return it != programState.end() ? &it->second : nullptr;
+        auto it = programState.Find(obj);
+        return it != programState.End() ? &it->second : nullptr;
     }
 
     /**
@@ -254,7 +261,7 @@ public:
      * @param dest destination state pass to
      * @param state state input to update, null if update state self.
      */
-    void Propagate(Value* src, Value* dest, State<ValueDomain>* state = nullptr)
+    void Propagate(Value* src, Value* dest, State<ValueDomain, ValueStatePool>* state = nullptr)
     {
         auto targetState = !state ? this : state;
         auto targetProgramState = &targetState->programState;
@@ -289,7 +296,7 @@ public:
             // What we do is creating the children for dest and propagating the state of children in order.
             auto& srcChildren = srcIt->second;
             const auto setChildState = [this, &srcChildren, targetProgramState](AbstractObject* child, size_t index) {
-                targetProgramState->emplace(child, programState.at(srcChildren[index]));
+                targetProgramState->emplace(child, programState.At(srcChildren[index]));
             };
             targetState->CreateChildren(dest, srcChildren.size(), setChildState);
         }
@@ -303,8 +310,8 @@ public:
      */
     AbstractObject* CheckAbstractObjectRefBy(Value* refVal) const
     {
-        auto it = programState.find(refVal);
-        if (it != programState.end()) {
+        auto it = programState.Find(refVal);
+        if (it != programState.End()) {
             CJC_ASSERT(it->second.GetKind() == ValueDomain::ValueKind::REF);
             auto refIt = refMap.find(it->second.GetRef());
             if (refIt != refMap.end()) {
@@ -328,7 +335,7 @@ public:
         if (auto it = childrenMap->find(obj); it != childrenMap->end()) {
             return it->second;
         }
-        if (auto it = programState.find(obj); it != programState.end()) {
+        if (auto it = programState.Find(obj); it != programState.End()) {
             if (it->second.GetKind() == ValueDomain::ValueKind::REF) {
                 auto ref = it->second.GetRef();
                 if (auto refIt = refMap.find(ref); refIt != refMap.end()) {
@@ -387,36 +394,36 @@ public:
     /// check value is bottom
     bool CheckValueIsBottom(const Ptr<Value>& value) const
     {
-        auto it = programState.find(value);
-        return it != programState.end() && it->second.GetKind() == ValueDomain::ValueKind::BOTTOM;
+        auto it = programState.Find(value);
+        return it != programState.End() && it->second.GetKind() == ValueDomain::ValueKind::BOTTOM;
     }
 
     /// check value is top
     bool CheckValueIsTop(const Ptr<Value>& value) const
     {
-        auto it = programState.find(value);
-        return it != programState.end() && it->second.GetKind() == ValueDomain::ValueKind::TOP;
+        auto it = programState.Find(value);
+        return it != programState.End() && it->second.GetKind() == ValueDomain::ValueKind::TOP;
     }
 
     bool CheckValueIsObject(const Ptr<Value>& value) const
     {
-        auto it = programState.find(value);
-        return it != programState.end() && it->second.GetKind() == ValueDomain::ValueKind::VAL;
+        auto it = programState.Find(value);
+        return it != programState.End() && it->second.GetKind() == ValueDomain::ValueKind::VAL;
     }
 
     bool CheckValueIsRef(const Ptr<Value>& value) const
     {
-        auto it = programState.find(value);
-        return it != programState.end() && it->second.GetKind() == ValueDomain::ValueKind::REF;
+        auto it = programState.Find(value);
+        return it != programState.End() && it->second.GetKind() == ValueDomain::ValueKind::REF;
     }
 
     /// clear all states.
     void ClearState()
     {
-        for (auto& it : programState) {
-            if (it.second.GetKind() == ValueDomain::ValueKind::VAL) {
+        for (auto it = programState.Begin(); it != programState.End(); ++it) {
+            if (it->second.GetKind() == ValueDomain::ValueKind::VAL) {
                 // set to top
-                it.second = true;
+                it->second = true;
             }
         }
     }
@@ -426,7 +433,7 @@ private:
     {
         auto& allocateMap = createTwoLevelRef ? allocatedTwoLevelRefMap : allocatedRefMap;
         Ref* ref = nullptr;
-        bool isStaticRef = &ValueAnalysis<ValueDomain>::globalState == this;
+        bool isStaticRef = &ValueAnalysis<ValueDomain, ValueStatePool>::globalState == this;
         if (expr) {
             if (auto it = allocateMap->find(expr); it != allocateMap->end()) {
                 ref = it->second;
@@ -442,7 +449,8 @@ private:
 
     AbstractObject* CreateNewObject(std::string objectName, const Expression* expr = nullptr)
     {
-        objectName = &ValueAnalysis<ValueDomain>::globalState == this ? "s" + objectName : objectName;
+        objectName =
+            &ValueAnalysis<ValueDomain, ValueStatePool>::globalState == this ? "s" + objectName : objectName;
         AbstractObject* obj = nullptr;
         if (expr) {
             if (auto it = allocatedObjMap->find(expr); it != allocatedObjMap->end()) {
@@ -462,7 +470,7 @@ private:
      */
     void InitToTopOrTopRef(Value* dest, bool isRef)
     {
-        CJC_ASSERT(programState.find(dest) == programState.end());
+        CJC_ASSERT(programState.Find(dest) == programState.End());
         if (isRef) {
             programState.emplace(dest, Ref::GetTopRefInstance());
         } else {
@@ -474,17 +482,20 @@ private:
      * Propagate the state of value @p src to @p dest. Comparing to the function @fn Propagate,
      * this function won't propagate the state of these values' children.
      */
-    void PropagateWithoutChildren(Value* src, Value* dest, ProgramState* state = nullptr)
+    void PropagateWithoutChildren(Value* src, Value* dest, ValueStatePool* state = nullptr)
     {
         state = !state ? &this->programState : state;
         if (!src->IsParameter() && !src->IsLocalVar()) {
             CJC_ASSERT(src->IsFunc());
-            return (void)state->try_emplace(dest, /* isTop = */ true);
+            if (state->Find(dest) == state->End()) {
+                state->emplace(dest, true);
+            }
+            return;
         }
-        if (auto it = state->find(dest); it != state->end()) {
-            it->second = programState.at(src);
+        if (auto it = state->Find(dest); it != state->End()) {
+            it->second = programState.At(src);
         } else {
-            state->emplace(dest, programState.at(src));
+            state->emplace(dest, programState.At(src));
         }
     }
 
@@ -523,8 +534,8 @@ private:
     void SetNonTopChildrenStateToTop(const std::vector<AbstractObject*>& children)
     {
         for (auto child : children) {
-            auto childIt = programState.find(child);
-            CJC_ASSERT(childIt != programState.end());
+            auto childIt = programState.Find(child);
+            CJC_ASSERT(childIt != programState.End());
             if (childIt->second.GetKind() == ValueDomain::ValueKind::VAL) {
                 childIt->second = /* isTop = */ true;
             }
@@ -533,7 +544,7 @@ private:
 
     void StoreGVChildrenState(Value* src, AbstractObject* dest)
     {
-        auto& gs = ValueAnalysis<ValueDomain>::globalState;
+        auto& gs = ValueAnalysis<ValueDomain, ValueStatePool>::globalState;
         auto srcChildrenIt = childrenMap->find(src);
         if (srcChildrenIt == childrenMap->end()) {
             return;
@@ -542,8 +553,8 @@ private:
         auto destChildren = gs.GetChildren(dest);
         CJC_ASSERT(srcChildren.size() == destChildren.size());
         for (size_t i = 0; i < srcChildren.size(); ++i) {
-            auto srcStateIt = programState.find(srcChildren[i]);
-            CJC_ASSERT(srcStateIt != programState.end());
+            auto srcStateIt = programState.Find(srcChildren[i]);
+            CJC_ASSERT(srcStateIt != programState.End());
             auto& objState = srcStateIt->second;
             if (objState.GetKind() == ValueDomain::ValueKind::VAL) {
                 gs.Update(destChildren[i], objState);
@@ -559,23 +570,25 @@ private:
 
     void LoadGVChildrenState(AbstractObject* src, LocalVar* dest)
     {
-        auto objChildrenIt = ValueAnalysis<ValueDomain>::globalState.childrenMap->find(src);
-        if (objChildrenIt == ValueAnalysis<ValueDomain>::globalState.childrenMap->end()) {
+        auto objChildrenIt = ValueAnalysis<ValueDomain, ValueStatePool>::globalState.childrenMap->find(src);
+        if (objChildrenIt == ValueAnalysis<ValueDomain, ValueStatePool>::globalState.childrenMap->end()) {
             return;
         }
         auto& objChildren = objChildrenIt->second;
         const auto setChildState = [this, &objChildren](AbstractObject* child, size_t index) {
-            auto& srcState = ValueAnalysis<ValueDomain>::globalState.programState.at(objChildren[index]);
+            auto& srcState =
+                ValueAnalysis<ValueDomain, ValueStatePool>::globalState.programState.At(objChildren[index]);
             programState.emplace(child, srcState);
             if (srcState.GetKind() != ValueDomain::ValueKind::REF) {
                 return;
             }
             if (auto ref = srcState.GetRef(); !ref->IsTopRefInstance() && refMap.find(ref) == refMap.end()) {
-                auto& obj = ValueAnalysis<ValueDomain>::globalState.refMap.at(ref);
+                auto& obj = ValueAnalysis<ValueDomain, ValueStatePool>::globalState.refMap.at(ref);
                 refMap.try_emplace(ref, obj);
                 CJC_ASSERT(std::holds_alternative<AbstractObject*>(obj));
-                programState.insert(
-                    *ValueAnalysis<ValueDomain>::globalState.programState.find(std::get<AbstractObject*>(obj)));
+                auto it = ValueAnalysis<ValueDomain, ValueStatePool>::globalState.programState.Find(
+                    std::get<AbstractObject*>(obj));
+                programState.Insert(it->first, it->second);
             }
         };
         if (auto it = childrenMap->find(dest); it != childrenMap->end()) {
@@ -589,7 +602,7 @@ private:
         }
     }
 
-    bool RefMapJoin(const State<ValueDomain>& rhs)
+    bool RefMapJoin(const State<ValueDomain, ValueStatePool>& rhs)
     {
         const auto action = [this, &rhs](const Ref* key, std::variant<Ref*, AbstractObject*>& v1,
             const std::variant<Ref*, AbstractObject*>& v2) -> bool {
@@ -628,7 +641,7 @@ private:
         return MapJoinTemplate<const Ref*, std::variant<Ref*, AbstractObject*>>(refMap, rhs.refMap, action);
     }
 
-    Ref* MergeRef(Ref* lhs, Ref* rhs, const ProgramState& rhsProgramState, const RefMap& rhsRefMap)
+    Ref* MergeRef(Ref* lhs, Ref* rhs, const ValueStatePool& rhsProgramState, const RefMap& rhsRefMap)
     {
         const auto getAbsObject = [](const RefMap& refMap1, Ref* ref) -> AbstractObject* {
             auto it = refMap1.find(ref);
@@ -646,15 +659,15 @@ private:
         CJC_ASSERT(lhsObj && rhsObj);
 
         auto newObj = CreateNewObject(GetObjName(absObjPool->size()));
-        ValueDomain newAbsVal = programState.at(lhsObj); // should be a clone
-        newAbsVal.Join(rhsProgramState.at(rhsObj));
-        programState.emplace(newObj, std::move(newAbsVal));
+        ValueDomain newAbsVal = programState.At(lhsObj); // should be a clone
+        newAbsVal.Join(rhsProgramState.At(rhsObj));
+        programState.emplace(newObj, ValueDomain(std::move(newAbsVal)));
         refMap.emplace(newRef, newObj);
         return newRef;
     }
 
 private:
-    ProgramState programState;
+    ValueStatePool programState;
     RefMap refMap;
     ChildrenMap* childrenMap;
     AllocatedRefMap* allocatedRefMap;
@@ -689,7 +702,8 @@ template <typename TDomain> inline TDomain HandleNonNullLiteralValue(const Liter
  * @brief abstract value analysis of ValueDomain.
  * @tparam ValueDomain specific ValueDomain
  */
-template <typename ValueDomain> class ValueAnalysis : public Analysis<State<ValueDomain>> {
+template <typename ValueDomain, typename ValueStatePool = DefaultStatePool<ValueDomain>>
+class ValueAnalysis : public Analysis<State<ValueDomain, ValueStatePool>> {
 public:
     using isValueAnalysis = void;
 
@@ -703,7 +717,7 @@ public:
      * @param isDebug flag whether print debug log.
      */
     ValueAnalysis(const Func* func, CHIRBuilder& builder, bool isDebug = false)
-        : Analysis<State<ValueDomain>>(func, isDebug), builder(builder)
+        : Analysis<State<ValueDomain, ValueStatePool>>(func, isDebug), builder(builder)
     {
     }
 
@@ -743,9 +757,9 @@ public:
      * @brief get bottom of state
      * @return return bottom state.
      */
-    State<ValueDomain> Bottom() final
+    State<ValueDomain, ValueStatePool> Bottom() final
     {
-        return State<ValueDomain>(
+        return State<ValueDomain, ValueStatePool>(
             &childrenMap, &allocatedTwoLevelRefMap, &allocatedRefMap, &allocatedObjMap, &refPool, &absObjPool);
     }
 
@@ -753,7 +767,7 @@ public:
      * @brief init function entry state.
      * @param state state to store function entry state.
      */
-    void InitializeFuncEntryState(State<ValueDomain>& state) override
+    void InitializeFuncEntryState(State<ValueDomain, ValueStatePool>& state) override
     {
         state.kind = ReachableKind::REACHABLE;
         for (auto param : this->func->GetParams()) {
@@ -770,7 +784,7 @@ public:
      * @brief init lambda entry state.
      * @param state state to store lambda entry state.
      */
-    void InitializeLambdaEntryState(State<ValueDomain>& state) override
+    void InitializeLambdaEntryState(State<ValueDomain, ValueStatePool>& state) override
     {
         CJC_ASSERT(this->currentLambda.has_value());
         for (auto param : this->currentLambda.value()->GetParams()) {
@@ -788,7 +802,7 @@ public:
      * @param state state to store lambda capture vars.
      * @param lambda analysed lambda.
      */
-    void HandleVarStateCapturedByLambda(State<ValueDomain>& state, const Lambda* lambda) override
+    void HandleVarStateCapturedByLambda(State<ValueDomain, ValueStatePool>& state, const Lambda* lambda) override
     {
         for (auto var : GetLambdaCapturedVarsRecursively(*lambda)) {
             state.SetSelfAndChildrenStateToTop(var);
@@ -800,7 +814,7 @@ public:
      * @param state state to store lambda capture vars.
      * @param lambda analysed lambda.
      */
-    void PreHandleLambdaExpression(State<ValueDomain>& state, const Lambda* lambda) override
+    void PreHandleLambdaExpression(State<ValueDomain, ValueStatePool>& state, const Lambda* lambda) override
     {
         state.SetToBound(lambda->GetResult(), /* isTop = */ true);
     }
@@ -810,7 +824,7 @@ public:
      * @param state state to store all domain.
      * @param expression normal expression to analyse domain.
      */
-    void PropagateExpressionEffect(State<ValueDomain>& state, const Expression* expression) final
+    void PropagateExpressionEffect(State<ValueDomain, ValueStatePool>& state, const Expression* expression) final
     {
         switch (expression->GetExprMajorKind()) {
             case ExprMajorKind::MEMORY_EXPR:
@@ -839,7 +853,8 @@ public:
      * @param terminator normal terminators to analyse domain.
      * @return blocks may goto after analysing.
      */
-    std::optional<Block*> PropagateTerminatorEffect(State<ValueDomain>& state, const Terminator* terminator) override
+    std::optional<Block*> PropagateTerminatorEffect(
+        State<ValueDomain, ValueStatePool>& state, const Terminator* terminator) override
     {
         switch (terminator->GetExprKind()) {
             case ExprKind::APPLY_WITH_EXCEPTION: {
@@ -872,24 +887,24 @@ public:
     }
 
     /// state of global variables.
-    static State<ValueDomain> globalState;
+    static State<ValueDomain, ValueStatePool> globalState;
     /// children map of global variables.
-    static typename State<ValueDomain>::ChildrenMap globalChildrenMap;
+    static typename State<ValueDomain, ValueStatePool>::ChildrenMap globalChildrenMap;
     /// allocate ref map of global variables.
-    static typename State<ValueDomain>::AllocatedRefMap globalAllocatedRefMap;
+    static typename State<ValueDomain, ValueStatePool>::AllocatedRefMap globalAllocatedRefMap;
     /// allocate object map of global variables.
-    static typename State<ValueDomain>::AllocatedObjMap globalAllocatedObjMap;
+    static typename State<ValueDomain, ValueStatePool>::AllocatedObjMap globalAllocatedObjMap;
     /// all global reference
     static std::vector<std::unique_ptr<Ref>> globalRefPool;
     /// all global object
     static std::vector<std::unique_ptr<AbstractObject>> globalAbsObjPool;
 
 protected:
-    virtual void PreHandleGetElementRefExpr(State<ValueDomain>& state, const GetElementRef* getElemRef)
+    virtual void PreHandleGetElementRefExpr(State<ValueDomain, ValueStatePool>& state, const GetElementRef* getElemRef)
     {
         auto dest = getElemRef->GetResult();
-        auto destIt = state.programState.find(dest);
-        if (destIt == state.programState.end()) {
+        auto destIt = state.programState.Find(dest);
+        if (destIt == state.programState.End()) {
             auto destRef = state.CreateNewRef(getElemRef);
             state.programState.emplace(dest, destRef);
             state.refMap.emplace(destRef, FindTargetElement(state, getElemRef));
@@ -902,12 +917,12 @@ protected:
         }
     }
 
-    virtual void PreHandleFieldExpr(State<ValueDomain>& state, const Field* field)
+    virtual void PreHandleFieldExpr(State<ValueDomain, ValueStatePool>& state, const Field* field)
     {
         auto dest = field->GetResult();
         auto indexes = field->GetPath();
         if (indexes.size() > 1) {
-            if (auto it = state.programState.find(dest); it == state.programState.end()) {
+            if (auto it = state.programState.Find(dest); it == state.programState.End()) {
                 state.InitToTopOrTopRef(dest, dest->GetType()->IsRef());
             }
             return;
@@ -922,7 +937,7 @@ protected:
     }
 
 private:
-    void PreHandleMemoryExpr(State<ValueDomain>& state, const Expression* expression)
+    void PreHandleMemoryExpr(State<ValueDomain, ValueStatePool>& state, const Expression* expression)
     {
         switch (expression->GetExprKind()) {
             case ExprKind::ALLOCATE: {
@@ -954,7 +969,7 @@ private:
         }
     }
 
-    bool PreHandleOthersExpr(State<ValueDomain>& state, const Expression* expression)
+    bool PreHandleOthersExpr(State<ValueDomain, ValueStatePool>& state, const Expression* expression)
     {
         switch (expression->GetExprKind()) {
             case ExprKind::CONSTANT: {
@@ -1006,10 +1021,10 @@ private:
         }
     }
 
-    void PreHandleConstantExpr(State<ValueDomain>& state, const Constant* constant)
+    void PreHandleConstantExpr(State<ValueDomain, ValueStatePool>& state, const Constant* constant)
     {
         auto dest = constant->GetResult();
-        if (state.programState.find(dest) != state.programState.end()) {
+        if (state.programState.Find(dest) != state.programState.End()) {
             return;
         }
         if (constant->IsConstantNull()) {
@@ -1023,7 +1038,8 @@ private:
         }
     }
 
-    template <typename TElemRef> AbstractObject* FindTargetElement(State<ValueDomain>& state, const TElemRef* elemRef)
+    template <typename TElemRef> AbstractObject* FindTargetElement(
+        State<ValueDomain, ValueStatePool>& state, const TElemRef* elemRef)
     {
         auto loc = elemRef->GetLocation();
         if (loc->IsGlobal() || loc->TestAttr(Attribute::STATIC)) {
@@ -1035,8 +1051,8 @@ private:
             return AbstractObject::GetTopObjInstance();
         }
 
-        auto locIt = state.programState.find(loc);
-        if (locIt == state.programState.end()) {
+        auto locIt = state.programState.Find(loc);
+        if (locIt == state.programState.End()) {
             if (this->isDebug) {
                 std::cout << "Value Analysis: use-before-initialization detected";
             }
@@ -1059,7 +1075,7 @@ private:
         return childrenIt->second[paths[0]];
     }
 
-    void PreHandleStoreExpr(State<ValueDomain>& state, const Store* store)
+    void PreHandleStoreExpr(State<ValueDomain, ValueStatePool>& state, const Store* store)
     {
         /*
          * We are storing to a Ref. And there are two cases (can be splitted into four).
@@ -1112,10 +1128,17 @@ private:
         if (location->IsGlobal() || location->TestAttr(Attribute::STATIC)) {
             return HandleStoreToGlobal(state, location, value);
         }
-        auto valIt = state.programState.find(value);
-        CJC_ASSERT(valIt != state.programState.end());
-        auto locIt = state.programState.find(location);
-        CJC_ASSERT(locIt != state.programState.end());
+        auto valIt = state.programState.Find(value);
+        auto locIt = state.programState.Find(location);
+        if (is_instance_of_v<ValueStatePool, ActiveStatePool>) {
+            if (valIt == state.programState.End() || locIt == state.programState.End()) {
+                // dead state will delete in active state mode
+                state.SetToTopOrTopRef(location, true);
+                return;
+            }
+        }
+        CJC_ASSERT(valIt != state.programState.End());
+        CJC_ASSERT(locIt != state.programState.End());
         auto& locVal = locIt->second;
         CJC_ASSERT(locVal.GetKind() == ValueDomain::ValueKind::REF);
         auto locRef = locVal.GetRef();
@@ -1148,13 +1171,13 @@ private:
         }
     }
 
-    void HandleStoreToGlobal(State<ValueDomain>& state, Value* location, Value* value)
+    void HandleStoreToGlobal(State<ValueDomain, ValueStatePool>& state, Value* location, Value* value)
     {
         if (this->isStable || !location->IsGlobalVarInCurPackage()) {
             return;
         }
         auto gv = VirtualCast<GlobalVar*>(location);
-        if (!gv->TestAttr(Attribute::READONLY) || globalState.programState.find(gv) == globalState.programState.end()) {
+        if (!gv->TestAttr(Attribute::READONLY) || globalState.programState.Find(gv) == globalState.programState.End()) {
             return;
         }
         auto targetObj = globalState.CheckAbstractObjectRefBy(gv);
@@ -1173,7 +1196,7 @@ private:
         }
     }
 
-    void PreHandleLoadExpr(State<ValueDomain>& state, const Load* load)
+    void PreHandleLoadExpr(State<ValueDomain, ValueStatePool>& state, const Load* load)
     {
         /*
          * We are loading from a Ref. Similar to the store expression, there are also two cases here.
@@ -1207,9 +1230,16 @@ private:
             return HandleLoadFromGlobal(state, load);
         }
         auto dest = load->GetResult();
-        auto locIt = state.programState.find(loc);
-        CJC_ASSERT(locIt != state.programState.end());
+        auto locIt = state.programState.Find(loc);
         auto& locVal = locIt->second;
+        if (is_instance_of_v<ValueStatePool, ActiveStatePool>) {
+            if (locIt == state.programState.End()) {
+                // dead state will delete in active state mode
+                state.SetToTopOrTopRef(dest, dest->GetType()->IsRef());
+                return;
+            }
+        }
+        CJC_ASSERT(locIt != state.programState.End());
         CJC_ASSERT(locVal.GetKind() == ValueDomain::ValueKind::REF);
         if (locVal.GetRef()->IsTopRefInstance()) {
             return state.SetToTopOrTopRef(dest, dest->GetType()->IsRef());
@@ -1239,10 +1269,10 @@ private:
         }
     }
 
-    void HandleLoadFromGlobal(State<ValueDomain>& state, const Load* load)
+    void HandleLoadFromGlobal(State<ValueDomain, ValueStatePool>& state, const Load* load)
     {
         auto dest = load->GetResult();
-        if (state.programState.find(dest) != state.programState.end()) {
+        if (state.programState.Find(dest) != state.programState.End()) {
             return;
         }
         auto loc = load->GetLocation();
@@ -1258,8 +1288,8 @@ private:
             CJC_ASSERT(!initializer->IsNullLiteral());
             state.programState.emplace(dest, HandleNonNullLiteralValue<ValueDomain>(initializer));
         } else {
-            auto gvIt = globalState.programState.find(globalVar);
-            if (gvIt == globalState.programState.end()) {
+            auto gvIt = globalState.programState.Find(globalVar);
+            if (gvIt == globalState.programState.End()) {
                 return state.InitToTopOrTopRef(dest, dest->GetType()->IsRef());
             }
             auto gRefIt = globalState.refMap.find(gvIt->second.GetRef());
@@ -1274,8 +1304,8 @@ private:
                 CJC_ASSERT(oRefIt != globalState.refMap.end());
                 auto obj = std::get<AbstractObject*>(oRefIt->second);
                 state.refMap.emplace(oRef, obj);
-                auto objIt = globalState.programState.find(obj);
-                CJC_ASSERT(objIt != globalState.programState.end());
+                auto objIt = globalState.programState.Find(obj);
+                CJC_ASSERT(objIt != globalState.programState.End());
                 state.programState.emplace(obj, objIt->second);
             } else {
                 auto obj = std::get<AbstractObject*>(gRefIt->second);
@@ -1285,7 +1315,7 @@ private:
         }
     }
 
-    void PreHandleStoreElementRefExpr(State<ValueDomain>& state, const StoreElementRef* storeElemRef)
+    void PreHandleStoreElementRefExpr(State<ValueDomain, ValueStatePool>& state, const StoreElementRef* storeElemRef)
     {
         auto value = storeElemRef->GetValue();
         if (value->IsGlobal() || value->TestAttr(Attribute::STATIC)) {
@@ -1298,7 +1328,8 @@ private:
         state.PropagateWithoutChildren(value, targetObj);
     }
 
-    template <typename TAllocate> Value* PreHandleAllocateExpr(State<ValueDomain>& state, const TAllocate* allocate)
+    template <typename TAllocate>
+    Value* PreHandleAllocateExpr(State<ValueDomain, ValueStatePool>& state, const TAllocate* allocate)
     {
         // In our framework, we associate a *single* memory location with every static allocation site.
         // That is, when we meet an Allocation expression again, we won't come up with a new Ref, instead
@@ -1335,7 +1366,8 @@ private:
         }
     }
 
-    template <typename TApply> std::optional<Block*> PreHandleApplyExpr(State<ValueDomain>& state, const TApply* apply)
+    template <typename TApply> std::optional<Block*>
+    PreHandleApplyExpr(State<ValueDomain, ValueStatePool>& state, const TApply* apply)
     {
         // check if this apply is a call to a mut func of a struct
         if (auto callee = apply->GetCallee(); callee->TestAttr(Attribute::MUT)) {
@@ -1362,7 +1394,7 @@ private:
     }
 
     template <typename TInvoke>
-    std::optional<Block*> PreHandleInvokeExpr(State<ValueDomain>& state, const TInvoke* invoke)
+    std::optional<Block*> PreHandleInvokeExpr(State<ValueDomain, ValueStatePool>& state, const TInvoke* invoke)
     {
         auto refObj = PreHandleFuncCall(state, invoke);
 
@@ -1374,7 +1406,8 @@ private:
         }
     }
 
-    template <typename T> Value* PreHandleFuncCall(State<ValueDomain>& state, const T* apply)
+    template <typename T>
+    Value* PreHandleFuncCall(State<ValueDomain, ValueStatePool>& state, const T* apply)
     {
         auto dest = apply->GetResult();
         auto ty = dest->GetType();
@@ -1387,7 +1420,8 @@ private:
         }
     }
 
-    static void SetObjChildrenStateToTop(State<ValueDomain>& state, Value* root, Type* rootTy, CHIRBuilder& builder)
+    static void SetObjChildrenStateToTop(
+        State<ValueDomain, ValueStatePool>& state, Value* root, Type* rootTy, CHIRBuilder& builder)
     {
         std::vector<bool> childrenTypes;
         if (rootTy->GetTypeKind() == Type::TypeKind::TYPE_STRUCT) {
@@ -1430,7 +1464,7 @@ private:
         }
     }
 
-    void PreHandleTupleExpr(State<ValueDomain>& state, const Tuple* tuple)
+    void PreHandleTupleExpr(State<ValueDomain, ValueStatePool>& state, const Tuple* tuple)
     {
         state.SetToBound(tuple->GetResult(), /* isTop = */ true);
 
@@ -1450,7 +1484,7 @@ private:
         }
     }
 
-    bool PreHandleNonCheckedTypeCast(State<ValueDomain>& state, const TypeCast* cast)
+    bool PreHandleNonCheckedTypeCast(State<ValueDomain, ValueStatePool>& state, const TypeCast* cast)
     {
         auto dest = cast->GetResult();
         if (dest->GetUsers().size() == 1U && dest->GetUsers()[0]->GetExprKind() == ExprKind::MULTIBRANCH) {
@@ -1491,14 +1525,16 @@ private:
     }
 
     template <typename TRawArrayAllocate>
-    std::optional<Block*> PreHandleRawArrayAllocate(State<ValueDomain>& state, const TRawArrayAllocate* allocate)
+    std::optional<Block*> PreHandleRawArrayAllocate(
+        State<ValueDomain, ValueStatePool>& state, const TRawArrayAllocate* allocate)
     {
         state.GetReferencedObjAndSetToTop(allocate->GetResult(), allocate);
         return std::nullopt;
     }
 
     template <typename TIntrinsic>
-    std::optional<Block*> PreHandleInoutIntrinsic(State<ValueDomain>& state, const TIntrinsic* intrinsic)
+    std::optional<Block*> PreHandleInoutIntrinsic(
+        State<ValueDomain, ValueStatePool>& state, const TIntrinsic* intrinsic)
     {
         auto param = intrinsic->GetOperand(0);
         if (!param->IsLocalVar()) {
@@ -1509,14 +1545,15 @@ private:
     }
 
     // ============ functions that need to be implemented by a concrete analysis ============ //
-    virtual void HandleFuncParam(State<ValueDomain>& state, Parameter* param, Value* refObj)
+    virtual void HandleFuncParam(State<ValueDomain, ValueStatePool>& state, Parameter* param, Value* refObj)
     {
         (void)state;
         (void)param;
         (void)refObj;
     }
 
-    virtual void HandleAllocateExpr(State<ValueDomain>& state, const Allocate* expression, Value* refObj)
+    virtual void HandleAllocateExpr(
+        State<ValueDomain, ValueStatePool>& state, const Allocate* expression, Value* refObj)
     {
         (void)state;
         (void)expression;
@@ -1524,7 +1561,7 @@ private:
     }
 
     virtual std::optional<Block*> HandleAllocateWithExceptionTerminator(
-        State<ValueDomain>& state, const AllocateWithException* allocate, Value* refObj)
+        State<ValueDomain, ValueStatePool>& state, const AllocateWithException* allocate, Value* refObj)
     {
         (void)state;
         (void)allocate;
@@ -1532,7 +1569,7 @@ private:
         return std::nullopt;
     }
 
-    virtual void HandleApplyExpr(State<ValueDomain>& state, const Apply* apply, Value* refObj)
+    virtual void HandleApplyExpr(State<ValueDomain, ValueStatePool>& state, const Apply* apply, Value* refObj)
     {
         (void)state;
         (void)apply;
@@ -1540,7 +1577,7 @@ private:
     }
 
     virtual std::optional<Block*> HandleApplyWithExceptionTerminator(
-        State<ValueDomain>& state, const ApplyWithException* apply, Value* refObj)
+        State<ValueDomain, ValueStatePool>& state, const ApplyWithException* apply, Value* refObj)
     {
         (void)state;
         (void)apply;
@@ -1548,7 +1585,7 @@ private:
         return std::nullopt;
     }
 
-    virtual void HandleInvokeExpr(State<ValueDomain>& state, const Invoke* invoke, Value* refObj)
+    virtual void HandleInvokeExpr(State<ValueDomain, ValueStatePool>& state, const Invoke* invoke, Value* refObj)
     {
         (void)state;
         (void)invoke;
@@ -1556,7 +1593,7 @@ private:
     }
 
     virtual std::optional<Block*> HandleInvokeWithExceptionTerminator(
-        State<ValueDomain>& state, const InvokeWithException* invoke, Value* refObj)
+        State<ValueDomain, ValueStatePool>& state, const InvokeWithException* invoke, Value* refObj)
     {
         (void)state;
         (void)invoke;
@@ -1564,23 +1601,24 @@ private:
         return std::nullopt;
     }
 
-    virtual void HandleNormalExpressionEffect(State<ValueDomain>& state, const Expression* expression)
+    virtual void HandleNormalExpressionEffect(State<ValueDomain, ValueStatePool>& state, const Expression* expression)
     {
         (void)state;
         (void)expression;
     }
 
-    virtual std::optional<Block*> HandleTerminatorEffect(State<ValueDomain>& state, const Terminator* terminator)
+    virtual std::optional<Block*> HandleTerminatorEffect(
+        State<ValueDomain, ValueStatePool>& state, const Terminator* terminator)
     {
         (void)state;
         (void)terminator;
         return std::nullopt;
     }
 
-    typename State<ValueDomain>::ChildrenMap childrenMap;
-    typename State<ValueDomain>::AllocatedRefMap allocatedRefMap;
-    typename State<ValueDomain>::AllocatedRefMap allocatedTwoLevelRefMap;
-    typename State<ValueDomain>::AllocatedObjMap allocatedObjMap;
+    typename State<ValueDomain, ValueStatePool>::ChildrenMap childrenMap;
+    typename State<ValueDomain, ValueStatePool>::AllocatedRefMap allocatedRefMap;
+    typename State<ValueDomain, ValueStatePool>::AllocatedRefMap allocatedTwoLevelRefMap;
+    typename State<ValueDomain, ValueStatePool>::AllocatedObjMap allocatedObjMap;
     std::vector<std::unique_ptr<Ref>> refPool;
     std::vector<std::unique_ptr<AbstractObject>> absObjPool;
 

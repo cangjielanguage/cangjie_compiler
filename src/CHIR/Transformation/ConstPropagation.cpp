@@ -31,7 +31,10 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
         return; // Nothing to check
     }
     auto result = analysisWrapper->CheckFuncResult(func);
-    CJC_ASSERT(result);
+    CJC_ASSERT(result != std::nullopt);
+    if (result == nullptr) {
+        return;
+    }
 
     std::vector<RewriteInfo> toBeRewrited;
     const auto actionBeforeVisitExpr = [](const ConstDomain&, Expression*, size_t) {};
@@ -92,7 +95,7 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
         }
     };
 
-    result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
+    result.value()->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
 
     for (auto& rewriteInfo : toBeRewrited) {
         RewriteToConstExpr(rewriteInfo, isDebug);
