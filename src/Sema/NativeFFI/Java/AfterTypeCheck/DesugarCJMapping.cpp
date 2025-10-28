@@ -11,6 +11,7 @@
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
+#include "cangjie/AST/Symbol.h"
 
 namespace Cangjie::Interop::Java {
 using namespace Cangjie::Native::FFI;
@@ -34,7 +35,7 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateCJMappingNativeDeleteCjObjectFunc(Dec
 }
 
 // Current support struct, class type.
-void JavaDesugarManager::GenerateForCJStructOrClassTypeMapping(AST::Decl* decl)
+void JavaDesugarManager::GenerateForCJStructOrClassTypeMapping(const File &file, AST::Decl* decl)
 {
     CJC_ASSERT(decl && IsCJMapping(*decl));
     auto classDecl = DynamicCast<AST::ClassDecl*>(decl);
@@ -43,7 +44,9 @@ void JavaDesugarManager::GenerateForCJStructOrClassTypeMapping(AST::Decl* decl)
 
     std::vector<FuncDecl*> generatedCtors;
     for (auto& member : decl->GetMemberDecls()) {
-        if (member->TestAnyAttr(Attribute::IS_BROKEN, Attribute::PRIVATE, Attribute::PROTECTED, Attribute::INTERNAL)) {
+        if (member->TestAnyAttr(Attribute::IS_BROKEN, Attribute::PRIVATE, Attribute::PROTECTED, Attribute::INTERNAL) ||
+            (file.curPackage.get()->isInteropCJPackageConfig && member.get()->symbol &&
+            !member.get()->symbol->isNeedExposedToInterop)) {
             continue;
         }
         if (auto fd = As<ASTKind::FUNC_DECL>(member.get())) {
@@ -210,8 +213,11 @@ void JavaDesugarManager::GenerateInCJMapping(File& file)
             continue;
         }
         auto structDecl = As<ASTKind::STRUCT_DECL>(decl.get());
+        if (file.curPackage.get()->isInteropCJPackageConfig && !structDecl->symbol->isNeedExposedToInterop) {
+            continue;
+        }
         if (structDecl && IsCJMapping(*structDecl)) {
-            GenerateForCJStructOrClassTypeMapping(structDecl);
+            GenerateForCJStructOrClassTypeMapping(file, structDecl);
             continue;
         }
         auto enumDecl = As<ASTKind::ENUM_DECL>(decl.get());
@@ -221,7 +227,7 @@ void JavaDesugarManager::GenerateInCJMapping(File& file)
         }
         auto classDecl = As<ASTKind::CLASS_DECL>(decl.get());
         if (classDecl && IsCJMapping(*classDecl)) {
-            GenerateForCJStructOrClassTypeMapping(classDecl);
+            GenerateForCJStructOrClassTypeMapping(file, classDecl);
             continue;
         }
     }
@@ -237,7 +243,8 @@ void JavaDesugarManager::DesugarInCJMapping(File& file)
 
         const std::string fileJ = decl.get()->identifier.Val() + ".java";
         auto codegen = JavaSourceCodeGenerator(decl.get(), mangler, javaCodeGenPath, fileJ,
-            GetCangjieLibName(outputLibPath, decl.get()->GetFullPackageName()));
+            GetCangjieLibName(outputLibPath, decl.get()->GetFullPackageName()),
+                              file.curPackage.get()->isInteropCJPackageConfig);
         codegen.Generate();
     }
 }

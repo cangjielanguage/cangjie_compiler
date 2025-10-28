@@ -977,7 +977,7 @@ SourceManager& CompilerInstance::GetSourceManager()
     return sm;
 }
 
-std::vector<Ptr<Package>> CompilerInstance::GetSourcePackages() const
+std::vector<Ptr<Package>> CompilerInstance::GetSourcePackages()
 {
     std::vector<Ptr<Package>> packages;
     for (auto& srcPkg : srcPkgs) {

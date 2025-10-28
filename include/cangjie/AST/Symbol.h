@@ -70,6 +70,7 @@ struct Symbol {
     const ASTKind astKind{ASTKind::NODE}; /**< AST kind, for quick filter. */
     Ptr<Decl> target{nullptr};                /**< Target for all ref symbol. */
     bool invertedIndexBeenDeleted{false}; /**< Mark whether inverted index has been deleted. */
+    bool isNeedExposedToInterop{false};   /**< CJinterop need expose symbol for target language */
     void UnbindTarget()
     {
         target = nullptr;

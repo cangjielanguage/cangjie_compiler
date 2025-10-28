@@ -37,7 +37,7 @@ public:
     void PerformDesugarAfterInstantiation(ASTContext& ctx, AST::Package& pkg) const;
 
     // Desugar after sema.
-    void PerformDesugarAfterSema(const std::vector<Ptr<AST::Package>>& pkgs) const;
+    void PerformDesugarAfterSema(std::vector<Ptr<AST::Package>>& pkgs) const;
 
     /**
      * Synthesize the given @p expr in given @p scopeName and return the found candidate decls or types.

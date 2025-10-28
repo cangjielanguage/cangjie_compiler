@@ -119,8 +119,11 @@ public:
      */
     void PerformDesugarAfterInstantiation(ASTContext& ctx, AST::Package& pkg);
 
+    // Parse package config file and storage to corresponding pkg.
+    void ParsePackageConfigFile(Ptr<AST::Package>& pkg, InteropCJPackageConfigReader packagesFullConfig);
+
     // Desugar after sema.
-    void PerformDesugarAfterSema(const std::vector<Ptr<AST::Package>>& pkgs);
+    void PerformDesugarAfterSema(std::vector<Ptr<AST::Package>>& pkgs);
 
     /**
      * Synthesize the given @p expr in given @p scopeName and return the found candidate decls or types.
