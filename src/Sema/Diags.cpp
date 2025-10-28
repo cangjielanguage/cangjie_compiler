@@ -253,7 +253,11 @@ void DiagMismatchedTypes(DiagnosticEngine& diag, const Node& node, const Node& t
     CJC_ASSERT(Ty::IsTyCorrect(type.ty));
     if (type.ShouldDiagnose() && !because.empty()) {
         auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_mismatched_types_because, node);
-        builder.AddMainHintArguments(type.ty->String(), node.ty->String());
+        auto tyStr = node.ty->String();
+        if (auto thisTy = DynamicCast<ClassThisTy*>(node.ty); thisTy) {
+            tyStr = ClassTy(thisTy->name, *thisTy->declPtr, thisTy->typeArgs).String();
+        }
+        builder.AddMainHintArguments(type.ty->String(), tyStr);
         builder.AddHint(type, type.ty->String(), because);
     } else {
         DiagMismatchedTypesWithFoundTy(diag, node, *type.ty, *node.ty);
