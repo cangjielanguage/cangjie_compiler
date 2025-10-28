@@ -15,6 +15,49 @@
 #include <future>
 
 namespace Cangjie::CHIR {
+namespace {
+// Huge block size, do nothing
+const size_t OVERHEAD_BLOCK_SIZE = 1000U;
+// Big size, use active pool
+const size_t USE_ACTIVE_BLOCK_SIZE = 300U;
+// Huge block size, do nothing when compiling in serial
+const size_t SERIAL_OVERHEAD_BLOCK_SIZE = 300U;
+// Big size, use active pool in serial
+const size_t SERIAL_USE_ACTIVE_BLOCK_SIZE = 150U;
+
+size_t GetBlockSize(const Expression& expr)
+{
+    size_t blockSize = 0;
+    if (expr.GetExprKind() != ExprKind::LAMBDA) {
+        return blockSize;
+    }
+    auto lambdaBody = Cangjie::StaticCast<const Lambda&>(expr).GetBody();
+    blockSize += lambdaBody->GetBlocks().size();
+    auto postVisit = [&blockSize](Expression& e) {
+        blockSize += GetBlockSize(e);
+        return VisitResult::CONTINUE;
+    };
+    Visitor::Visit(*lambdaBody, postVisit);
+    return blockSize;
+}
+
+size_t CountBlockSize(const Func& func)
+{
+    size_t blockSize = func.GetBody()->GetBlocks().size();
+    if (blockSize > OVERHEAD_BLOCK_SIZE) {
+        return OVERHEAD_BLOCK_SIZE + 1;
+    }
+    for (auto block : func.GetBody()->GetBlocks()) {
+        for (auto e : block->GetExpressions()) {
+            blockSize += GetBlockSize(*e);
+            if (blockSize > OVERHEAD_BLOCK_SIZE) {
+                return OVERHEAD_BLOCK_SIZE + 1;
+            }
+        }
+    }
+    return blockSize;
+}
+}
 
 /**
  * @brief wrapper class of constant analysis pass, using to do parallel or check works.
@@ -40,6 +83,7 @@ public:
     template <typename... Args>
     void RunOnPackage(const Package* package, bool isDebug, size_t threadNum, Args&&... args)
     {
+        compileThreadNum = threadNum;
         if (threadNum == 1) {
             RunOnPackageInSerial(package, isDebug, std::forward<Args>(args)...);
         } else {
@@ -98,7 +142,6 @@ public:
         }
     }
 
-
     /**
      * @brief clear analysis result
      */
@@ -127,9 +170,20 @@ public:
     }
 
 private:
-    bool JudgeUsingPool(const Func* func)
+    std::optional<bool> JudgeUsingPool(const Func* func)
     {
-        return func->GetBody()->GetBlocks().size() > 300;
+        auto size = CountBlockSize(*func);
+        if (compileThreadNum > 1) {
+            if (size > OVERHEAD_BLOCK_SIZE) {
+                return std::nullopt;
+            }
+            return size > USE_ACTIVE_BLOCK_SIZE;
+        } else {
+            if (size > SERIAL_OVERHEAD_BLOCK_SIZE) {
+                return std::nullopt;
+            }
+            return size > SERIAL_USE_ACTIVE_BLOCK_SIZE;
+        }
     }
 
     template <typename... Args>
@@ -137,15 +191,21 @@ private:
     {
         SetUpGlobalVarState(*package, isDebug, std::forward<Args>(args)...);
         for (auto func : package->GetGlobalFuncs()) {
-            if (ShouldBeAnalysed(*func)) {
-                if (JudgeUsingPool(func)) {
-                    if (auto res = RunOnFuncWithPool(func, isDebug, std::forward<Args>(args)...)) {
-                        funcWithPoolDomain.emplace(func);
-                    }
-                } else {
-                    if (auto res = RunOnFunc(func, isDebug, std::forward<Args>(args)...)) {
-                        resultsMap.emplace(func, std::move(res));
-                    }
+            if (!ShouldBeAnalysed(*func)) {
+                continue;
+            }
+            auto judgeRes = JudgeUsingPool(func);
+            if (judgeRes == std::nullopt) {
+                // overhead huge size, do nothing
+                funcWithPoolDomain.emplace(func);
+            } else if (judgeRes.value()) {
+                // use acitve pool
+                if (auto res = RunOnFuncWithPool(func, isDebug, std::forward<Args>(args)...)) {
+                    funcWithPoolDomain.emplace(func);
+                }
+            } else {
+                if (auto res = RunOnFunc(func, isDebug, std::forward<Args>(args)...)) {
+                    resultsMap.emplace(func, std::move(res));
                 }
             }
         }
@@ -164,7 +224,12 @@ private:
             if (!ShouldBeAnalysed(*func)) {
                 continue;
             }
-            if (JudgeUsingPool(func)) {
+            auto judgeRes = JudgeUsingPool(func);
+            if (judgeRes == std::nullopt) {
+                // overhead huge size, do nothing
+                funcWithPoolDomain.emplace(func);
+            } else if (judgeRes.value()) {
+                // use acitve pool
                 resultsPool.emplace_back(taskQueue.AddTask<ResTyPool>(
                     [func, isDebug, &args..., this]() { return RunOnFuncWithPool(func, isDebug, std::forward<Args>(args)...); },
                     // Roughly use the number of Blocks as the cost of task weight
@@ -214,6 +279,7 @@ private:
     std::unordered_map<const Func*, std::unique_ptr<Results<ConstDomain>>> resultsMap;
     std::unordered_set<const Func*> funcWithPoolDomain;
     CHIRBuilder& builder;
+    size_t compileThreadNum = 1;
 };
 
 } // namespace Cangjie::CHIR

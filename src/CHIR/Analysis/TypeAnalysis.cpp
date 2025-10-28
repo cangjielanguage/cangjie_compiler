@@ -100,7 +100,7 @@ Type* GetRealGenericRetType(const Apply& apply, Type& genericType, const Func* c
 
 CHIRBuilder* TypeValue::builder{nullptr};
 template <> const std::string Analysis<TypeDomain>::name = "type-analysis";
-template <> const std::optional<unsigned> Analysis<TypeDomain>::blockLimit = std::nullopt;
+template <> const std::optional<unsigned> Analysis<TypeDomain>::blockLimit = 300;
 template <> TypeDomain::ChildrenMap ValueAnalysis<TypeValueDomain>::globalChildrenMap{};
 template <> TypeDomain::AllocatedRefMap ValueAnalysis<TypeValueDomain>::globalAllocatedRefMap{};
 template <> TypeDomain::AllocatedObjMap ValueAnalysis<TypeValueDomain>::globalAllocatedObjMap{};

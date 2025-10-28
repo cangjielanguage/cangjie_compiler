@@ -535,6 +535,11 @@ private:
     {
         for (auto child : children) {
             auto childIt = programState.Find(child);
+            if (is_instance_of_v<ValueStatePool, ActiveStatePool>) {
+                if (childIt == programState.End()) {
+                    continue;
+                }
+            }
             CJC_ASSERT(childIt != programState.End());
             if (childIt->second.GetKind() == ValueDomain::ValueKind::VAL) {
                 childIt->second = /* isTop = */ true;
