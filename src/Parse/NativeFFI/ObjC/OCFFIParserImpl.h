@@ -34,8 +34,6 @@ public:
 
     // Make private, when checking @ObjCMirror/@ObjCImpl decl members moved to this class
     void DiagObjCMirrorCannotHaveFinalizer(const AST::Node& node) const;
-    void DiagObjCMirrorMethodMustHaveForeignName(const AST::Node& node) const;
-    void DiagObjCMirrorCtorMustHaveForeignName(const AST::Node& node) const;
     void DiagObjCMirrorCannotHavePrivateMember(const AST::Node& node) const;
     void DiagObjCMirrorCannotHaveConstMember(const AST::Node& node) const;
     void DiagObjCMirrorCannotHaveStaticInit(const AST::Node& node) const;

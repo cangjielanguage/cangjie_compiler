@@ -21,11 +21,15 @@ namespace Cangjie::Interop::ObjC {
 
 /**
  *  Returns native handle field declaration for `target` mirror/impl declaration
- *
  */
-Ptr<AST::VarDecl> FindNativeVarHandle(const AST::ClassLikeDecl& target);
+Ptr<AST::VarDecl> GetNativeVarHandle(const AST::ClassDecl& target);
 bool HasMirrorSuperClass(const AST::ClassLikeDecl& target);
 bool IsStaticInitMethod(const AST::Node& node);
+bool HasMirrorSuperInterface(const AST::ClassLikeDecl& target);
+Ptr<AST::FuncDecl> GetNativeHandleGetter(const AST::ClassLikeDecl& target);
+Ptr<AST::ClassDecl> GetSyntheticWrapper(const AST::ClassLikeDecl& target);
+Ptr<AST::FuncDecl> GetFinalizer(const AST::ClassDecl& target);
+bool IsSyntheticWrapper(const AST::Decl& decl);
 
 } // namespace Cangjie::Interop::ObjC
 

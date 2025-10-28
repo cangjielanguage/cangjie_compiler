@@ -141,6 +141,19 @@ std::string NameGenerator::GetObjCDeclName(const Decl& target)
         return *foreignName;
     }
 
+    // funcs have special rules
+    if (auto fd = DynamicCast<const FuncDecl*>(&target); fd) {
+        // No params case
+        if (!fd->funcBody || fd->funcBody->paramLists.empty() || fd->funcBody->paramLists[0]->params.empty()) {
+            return target.identifier;
+        }
+
+        // Taking first paramlist probably is not the best option.
+        if (fd->funcBody->paramLists[0]->params.size() == 1) {
+            return target.identifier + ":";
+        }
+    }
+
     return target.identifier;
 }
 

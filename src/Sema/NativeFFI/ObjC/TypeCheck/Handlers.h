@@ -18,22 +18,12 @@
 
 namespace Cangjie::Interop::ObjC {
 
-class CheckInterface : public Handler<CheckInterface, TypeCheckContext> {
-public:
-    void HandleImpl(TypeCheckContext& ctx);
-};
-
 class CheckAbstractClass : public Handler<CheckAbstractClass, TypeCheckContext> {
 public:
     void HandleImpl(TypeCheckContext& ctx);
 };
 
 class CheckInheritanceInterface : public Handler<CheckInheritanceInterface, TypeCheckContext> {
-public:
-    void HandleImpl(TypeCheckContext& ctx);
-};
-
-class CheckMultipleInherit : public Handler<CheckMultipleInherit, TypeCheckContext> {
 public:
     void HandleImpl(TypeCheckContext& ctx);
 };
@@ -83,6 +73,11 @@ private:
 };
 
 class CheckTopLevelFuncTypes : public Handler<CheckTopLevelFuncTypes, TypeCheckContext> {
+public:
+    void HandleImpl(TypeCheckContext& ctx);
+};
+
+class CheckForeignName: public Handler<CheckForeignName, TypeCheckContext> {
 public:
     void HandleImpl(TypeCheckContext& ctx);
 };

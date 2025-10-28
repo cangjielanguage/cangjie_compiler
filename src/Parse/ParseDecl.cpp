@@ -546,10 +546,14 @@ void ParserImpl::CheckObjCInteropMember(Decl& member)
 {
     if (member.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR_SUBTYPE)) {
         if (member.GetGeneric() != nullptr) {
+            member.outerDecl->EnableAttr(Attribute::IS_BROKEN);
+            member.EnableAttr(Attribute::IS_BROKEN);
             ffiParser->ObjC().DiagObjCImplCannotBeGeneric(member);
             return;
         }
-        if (member.astKind == ASTKind::FUNC_DECL && member.TestAttr(Attribute::CONSTRUCTOR, Attribute::STATIC)) {
+        if (member.astKind == ASTKind::FUNC_DECL && member.TestAttr(Attribute::CONSTRUCTOR, Attribute::STATIC)) {      
+            member.outerDecl->EnableAttr(Attribute::IS_BROKEN);
+            member.EnableAttr(Attribute::IS_BROKEN);
             ffiParser->ObjC().DiagObjCImplCannotHaveStaticInit(member);
             return;
         }
@@ -562,6 +566,8 @@ void ParserImpl::CheckObjCInteropMember(Decl& member)
                 CheckInitCtorDeclObjCMirror(fd);
                 ffiParser->CheckForeignNameAnnotation(fd);
             } else if (fd.TestAttr(Attribute::FINALIZER) && fd.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+                fd.outerDecl->EnableAttr(Attribute::IS_BROKEN);
+                fd.EnableAttr(Attribute::IS_BROKEN);
                 ffiParser->ObjC().DiagObjCMirrorCannotHaveFinalizer(fd);
             }  else {
                 // method branch
@@ -624,24 +630,11 @@ void ParserImpl::CheckMemberFuncJavaMirror(FuncDecl& decl)
 
 void ParserImpl::CheckMemberFuncObjCMirror(FuncDecl& func)
 {
-    if (func.outerDecl && func.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR_SUBTYPE)
-        && !func.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)
-        && !func.funcBody && !func.funcBody->paramLists.empty()
-        && !func.funcBody->paramLists[0]->params.empty()) {
-            ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_impl_method_must_have_foreign_name, func);
-    }
-
     if (!func.outerDecl || !func.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
         return;
     }
 
     func.EnableAttr(Attribute::OBJ_C_MIRROR);
-
-    if (!func.HasAnno(AnnotationKind::FOREIGN_NAME) && !func.funcBody->paramLists[0]->params.empty()) {
-        ffiParser->ObjC().DiagObjCMirrorMethodMustHaveForeignName(func);
-        func.EnableAttr(Attribute::IS_BROKEN);
-        func.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
-    }
 
     if (func.TestAttr(Attribute::PRIVATE)) {
         ffiParser->ObjC().DiagObjCMirrorCannotHavePrivateMember(func);
@@ -704,24 +697,11 @@ void ParserImpl::CheckInitCtorDeclJavaMirror(FuncDecl& ctor)
 
 void ParserImpl::CheckInitCtorDeclObjCMirror(FuncDecl& ctor)
 {
-    if (ctor.outerDecl && ctor.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR_SUBTYPE)
-        && !ctor.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)
-        && !ctor.funcBody && !ctor.funcBody->paramLists.empty()
-        && !ctor.funcBody->paramLists[0]->params.empty()) {
-            ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_impl_ctor_must_have_foreign_name, ctor);
-    }
-
     if (!ctor.outerDecl || !ctor.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
         return;
     }
     ctor.constructorCall = ConstructorCall::OTHER_INIT;
     ctor.EnableAttr(Attribute::OBJ_C_MIRROR);
-
-    if (!ctor.HasAnno(AnnotationKind::FOREIGN_NAME) && !ctor.funcBody->paramLists[0]->params.empty()) {
-        ffiParser->ObjC().DiagObjCMirrorCtorMustHaveForeignName(ctor);
-        ctor.EnableAttr(Attribute::IS_BROKEN);
-        ctor.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
-    }
 
     if (ctor.TestAttr(Attribute::STATIC)) {
         ffiParser->ObjC().DiagObjCMirrorCannotHaveStaticInit(ctor);
@@ -1439,6 +1419,9 @@ OwnedPtr<InterfaceDecl> ParserImpl::ParseInterfaceDecl(
     }
 
     CheckCJMappingAttr(*ret);
+    if (Interop::ObjC::IsDeclAppropriateForSyntheticClassGeneration(*ret)) {
+        Interop::ObjC::InsertSyntheticClassDecl(*ret, *currentFile);
+    }
 
     return ret;
 }
@@ -2115,6 +2098,7 @@ void ParserImpl::CheckClassLikeFuncBodyAbstractness(FuncDecl& decl)
     bool inAbstract = HasModifier(outerModifiers, TokenKind::ABSTRACT);
     bool inCJMP = HasModifier(outerModifiers, TokenKind::PLATFORM) || HasModifier(outerModifiers, TokenKind::COMMON);
     bool inAbstractCJMP = inAbstract && inCJMP;
+    bool inObjCMirror = decl.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR);
 
     bool isJavaMirrorOrJavaMirrorSubtype =
         decl.outerDecl->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE);
@@ -2134,7 +2118,7 @@ void ParserImpl::CheckClassLikeFuncBodyAbstractness(FuncDecl& decl)
         return;
     }
 
-    if (decl.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+    if (inObjCMirror) {
         decl.DisableAttr(Attribute::ABSTRACT);
         return;
     }

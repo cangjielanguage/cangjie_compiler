@@ -643,6 +643,13 @@ enum class Attribute {
      */
     HAS_INITED_FIELD,
 
+    /**
+     * Mark whether a class is a wrapper synthetic class generated for every mirror interface.
+     * W: Parser.
+     * R: Sema.
+     */
+    OBJ_C_MIRROR_SYNTHETIC_WRAPPER,
+
     AST_ATTR_END,
 };
 
@@ -731,6 +738,7 @@ static const std::unordered_map<AST::Attribute, std::string> ATTR2STR{
     {AST::Attribute::OBJ_C_CJ_MAPPING, "OBJ_C_CJ_MAPPING"},
     {AST::Attribute::DESUGARED_MIRROR_FIELD, "DESUGARED_MIRROR_FIELD"},
     {AST::Attribute::HAS_INITED_FIELD, "HAS_INITED_FIELD"},
+    {AST::Attribute::OBJ_C_MIRROR_SYNTHETIC_WRAPPER, "OBJ_C_MIRROR_SYNTHETIC_WRAPPER"},
     {AST::Attribute::AST_ATTR_END, "AST_ATTR_END"},
 };
 

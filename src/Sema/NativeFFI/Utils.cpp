@@ -136,13 +136,14 @@ OwnedPtr<CallExpr> WrapReturningLambdaCall(TypeManager& typeManager, std::vector
     return CreateCallExpr(std::move(lambda), {}, nullptr, retTy);
 }
 
-OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(TypeManager& typeManager, std::vector<OwnedPtr<Node>> nodes)
+OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(TypeManager& typeManager, std::vector<OwnedPtr<Node>> nodes, std::vector<OwnedPtr<FuncParam>> lambdaParams)
 {
     auto curFile = nodes[0]->curFile;
     CJC_ASSERT(!nodes.empty());
-    std::vector<OwnedPtr<FuncParam>> lambdaCallParams;
-    std::vector<OwnedPtr<FuncParamList>> paramLists;
-    paramLists.push_back(CreateFuncParamList(std::move(lambdaCallParams)));
+    std::vector<Ptr<Ty>> lambdaParamTys;
+    std::transform(
+        lambdaParams.begin(), lambdaParams.end(), std::back_inserter(lambdaParamTys), [](auto& p) { return p->ty; });
+    auto paramLists = Nodes<FuncParamList>(CreateFuncParamList(std::move(lambdaParams)));
     auto retTy = nodes.back()->ty;
     auto retExpr = CreateReturnExpr(ASTCloner::Clone(Ptr(As<ASTKind::EXPR>(nodes.back().get()))));
     retExpr->ty = TypeManager::GetNothingTy();
@@ -156,7 +157,7 @@ OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(TypeManager& typeManager, std::vect
     retExpr->refFuncBody = lambda->funcBody.get();
     lambda->funcBody->body->body.push_back(std::move(retExpr));
     lambda->curFile = curFile;
-    lambda->ty = typeManager.GetFunctionTy({}, retTy);
+    lambda->ty = typeManager.GetFunctionTy(std::move(lambdaParamTys), retTy);
     return lambda;
 }
 
@@ -195,6 +196,13 @@ std::string GetMangledMethodName(const BaseMangler& mangler,
     }
 
     return name;
+}
+
+Ptr<Annotation> GetForeignNameAnnotation(const Decl& decl)
+{
+    auto it = std::find_if(decl.annotations.begin(), decl.annotations.end(),
+        [](const auto& anno) { return anno->kind == AnnotationKind::FOREIGN_NAME; });
+    return it != decl.annotations.end() ? it->get() : nullptr;
 }
 
 }

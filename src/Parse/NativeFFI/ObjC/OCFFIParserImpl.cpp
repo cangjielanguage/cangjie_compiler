@@ -127,7 +127,6 @@ void OCFFIParserImpl::CheckMirrorAnnoArgs(const Annotation& anno) const
 void OCFFIParserImpl::CheckImplAnnoArgs(const Annotation& anno) const
 {
     static const std::string OBJC_IMPL_NAME = "@ObjCImpl";
-
     p.ffiParser->CheckZeroOrSingleStringLitArgAnnotation(anno, OBJC_IMPL_NAME);
 }
 

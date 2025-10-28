@@ -18,10 +18,10 @@ using namespace Cangjie::Interop::ObjC;
 
 void CheckMemberTypes::HandleImpl(TypeCheckContext& ctx)
 {
-    auto isMirrorSubtype = ctx.typeMapper.IsObjCMirrorSubtype(ctx.target);
+    auto isImpl = ctx.typeMapper.IsObjCImpl(*ctx.target.ty);
     for (auto& decl : ctx.target.GetMemberDeclPtrs()) {
         // Only public members of exported declarations must be checked.
-        if (isMirrorSubtype && !decl->TestAttr(Attribute::PUBLIC)) {
+        if (isImpl && !decl->TestAttr(Attribute::PUBLIC)) {
             continue;
         }
 

@@ -22,7 +22,7 @@ void CheckImplInheritMirror::HandleImpl(TypeCheckContext& ctx)
         return;
     }
 
-    if (ctx.typeMapper.IsObjCMirrorSubtype(*ctx.target.ty)) {
+    if (ctx.typeMapper.IsValidObjCMirrorSubtype(*ctx.target.ty)) {
         return;
     }
 

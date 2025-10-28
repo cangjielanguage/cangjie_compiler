@@ -34,12 +34,14 @@ public:
     static bool IsObjCImpl(const AST::Decl& decl);
     static bool IsObjCCJMapping(const AST::Decl& decl);
     static bool IsValidObjCMirror(const AST::Ty& ty);
-    static bool IsObjCMirrorSubtype(const AST::Ty& ty);
+    static bool IsValidObjCMirrorSubtype(const AST::Ty& ty);
     static bool IsObjCImpl(const AST::Ty& ty);
     static bool IsObjCMirror(const AST::Ty& ty);
     static bool IsObjCPointer(const AST::Decl& decl);
     static bool IsObjCPointer(const AST::Ty& ty);
     static bool IsObjCCJMapping(const AST::Ty& ty);
+    static bool IsSyntheticWrapper(const AST::Decl& decl);
+    static bool IsSyntheticWrapper(const AST::Ty& ty);
 
 private:
     InteropLibBridge& bridge;

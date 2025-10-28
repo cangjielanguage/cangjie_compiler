@@ -1144,12 +1144,33 @@ void TypeChecker::TypeCheckerImpl::AddSuperClassObjectForClassDecl(ASTContext& c
         if (HasSuperClass(*cd)) {
             continue;
         }
+
+        if (cd->TestAnyAttr(Attribute::OBJ_C_MIRROR, Attribute::OBJ_C_MIRROR_SUBTYPE, Attribute::OBJ_C_MIRROR_SYNTHETIC_WRAPPER)) {
+            continue;
+        }
+
         if (cd->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE)) {
             if (!AddJObjectSuperClassJavaInterop(ctx, *cd)) {
                 AddObjectSuperClass(ctx, *cd);
             }
         } else {
             AddObjectSuperClass(ctx, *cd);
+        }
+    }
+}
+
+void TypeChecker::TypeCheckerImpl::AddSuperInterfaceForClassLikeDecl(ASTContext& ctx)
+{
+    // TODO: move it to Interop::ObjC
+    std::vector<Symbol*> syms = GetAllDecls(ctx);
+    for (auto& sym : syms) {
+        CJC_ASSERT(sym && sym->node);
+        if (!sym->node->TestAnyAttr(Attribute::OBJ_C_MIRROR, Attribute::OBJ_C_MIRROR_SUBTYPE)) {
+            continue;
+        }
+        
+        if (auto classLikeDecl = As<ASTKind::CLASS_LIKE_DECL>(sym->node); classLikeDecl) {
+            AddObjCIdSuperInterfaceObjCInterop(ctx, *classLikeDecl);
         }
     }
 }
@@ -1771,6 +1792,8 @@ void TypeChecker::TypeCheckerImpl::PreCheckUsage(ASTContext& ctx, const Package&
     CheckAllDeclAttributes(ctx);
     // Add Object as super class for class declaration.
     AddSuperClassObjectForClassDecl(ctx);
+    // Add super interface for class declaration.
+    AddSuperInterfaceForClassLikeDecl(ctx);
     // Collector assumption collection of generic declaration.
     CollectAndCheckAssumption(ctx);
     // Check extend generic param & reset inheritance checking flag.

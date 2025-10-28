@@ -4,12 +4,22 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-#include "InheritanceChecker.h"
+/**
+ * @file
+ *
+ * This file implements utility class that process inheritance of structured types.
+ */
 
-#include "NativeFFI/Java/AfterTypeCheck/Utils.h"
+#include "OCStructInheritanceCheckerImpl.h"
+#include "../../Utils.h"
 #include "cangjie/AST/Clone.h"
+#include "cangjie/AST/Match.h"
 
-namespace Cangjie::Interop::Java {
+using namespace Cangjie;
+using namespace Cangjie::AST;
+using namespace Cangjie::Native::FFI;
+
+namespace Cangjie::Interop::ObjC {
 
 namespace {
 
@@ -59,7 +69,7 @@ void DiagConflictingForeignName(
         "While checking declaration '" + checkingDecl.identifier + "'");
 }
 
-bool NeedCheck(const MemberSignature& parent, const MemberSignature& child)
+bool NeedCheckForeignName(const MemberSignature& parent, const MemberSignature& child)
 {
     if (child.decl->outerDecl->TestAttr(Attribute::IMPORTED)) {
         return false;
@@ -69,11 +79,11 @@ bool NeedCheck(const MemberSignature& parent, const MemberSignature& child)
     }
     CJC_ASSERT(child.decl->IsFuncOrProp());
 
-    if (!parent.decl->outerDecl->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE)) {
+    if (!parent.decl->outerDecl->TestAnyAttr(Attribute::OBJ_C_MIRROR, Attribute::OBJ_C_MIRROR_SUBTYPE)) {
         return false;
     }
-    if (!child.decl->outerDecl->TestAnyAttr(Attribute::JAVA_MIRROR, Attribute::JAVA_MIRROR_SUBTYPE)) {
-        // @JavaMirror anottation might be missing here, will report it later
+    if (!child.decl->outerDecl->TestAnyAttr(Attribute::OBJ_C_MIRROR, Attribute::OBJ_C_MIRROR_SUBTYPE)) {
+        // @ObjCMirror anottation might be missing here, will report it later
         return false;
     }
     if (parent.decl->outerDecl == child.decl->outerDecl) {
@@ -88,7 +98,7 @@ bool NeedCheck(const MemberSignature& parent, const MemberSignature& child)
 void CheckForeignName(DiagnosticEngine& diag, TypeManager& typeManager, const MemberSignature& parent,
     const MemberSignature& child, const Decl& checkingDecl)
 {
-    if (!NeedCheck(parent, child)) {
+    if (!NeedCheckForeignName(parent, child)) {
         return;
     }
 
@@ -129,4 +139,80 @@ void CheckForeignName(DiagnosticEngine& diag, TypeManager& typeManager, const Me
     }
 }
 
-} // namespace Cangjie::Interop::Java
+namespace {
+
+/**
+ * @brief Generates a synthetic function stub based on an existing function declaration.
+ *
+ * This function creates a clone of the provided function declaration (fd),
+ * replaces its outerDecl to synthetic class, and then inserts the
+ * modified function declaration into the specified synthetic class declaration.
+ *
+ * @param synthetic The class declaration where the cloned function stub will be inserted.
+ * @param fd The original function declaration that will be cloned and modified.
+ */
+void GenerateSyntheticClassFuncStub(ClassDecl& synthetic, FuncDecl& fd)
+{
+    OwnedPtr<FuncDecl> funcStub = ASTCloner::Clone(Ptr(&fd));
+
+    // remove foreign anno from cloned func decl
+    for (auto it = funcStub->annotations.begin(); it != funcStub->annotations.end(); ++it) {
+        if ((*it)->kind == AnnotationKind::FOREIGN_NAME) {
+            funcStub->annotations.erase(it);
+            break;
+        }
+    }
+
+    funcStub->outerDecl = Ptr(&synthetic);
+    synthetic.body->decls.emplace_back(std::move(funcStub));
+}
+
+void GenerateSyntheticClassPropStub([[maybe_unused]] ClassDecl& synthetic, [[maybe_unused]] PropDecl& pd)
+{
+    auto propStub = ASTCloner::Clone(Ptr(&pd));
+
+    // remove foreign anno from cloned func decl
+    for (auto it = propStub->annotations.begin(); it != propStub->annotations.end(); ++it) {
+        if ((*it)->kind == AnnotationKind::FOREIGN_NAME) {
+            propStub->annotations.erase(it);
+            break;
+        }
+    }
+
+    propStub->outerDecl = Ptr(&synthetic);
+    synthetic.body->decls.emplace_back(std::move(propStub));
+}
+
+void GenerateSyntheticClassAbstractMemberImplStubs(ClassDecl& synthetic, const MemberMap& members)
+{
+    for (const auto& idMemberSignature : members) {
+        const auto& signature = idMemberSignature.second;
+
+        // only abstract functions must be inside synthetic class
+        if (!signature.decl->TestAttr(Attribute::ABSTRACT)) {
+            continue;
+        }
+
+        switch (signature.decl->astKind) {
+            case ASTKind::FUNC_DECL:
+                GenerateSyntheticClassFuncStub(synthetic, *StaticAs<ASTKind::FUNC_DECL>(signature.decl));
+                break;
+            case ASTKind::PROP_DECL:
+                GenerateSyntheticClassPropStub(synthetic, *StaticAs<ASTKind::PROP_DECL>(signature.decl));
+                break;
+            default:
+                continue;
+        }
+    }
+}
+
+} // namespace
+
+void GenerateSyntheticClassMemberStubs(
+    ClassDecl& synthetic, const MemberMap& interfaceMembers, const MemberMap& instanceMembers)
+{
+    GenerateSyntheticClassAbstractMemberImplStubs(synthetic, interfaceMembers);
+    GenerateSyntheticClassAbstractMemberImplStubs(synthetic, instanceMembers);
+}
+
+} // namespace Cangjie::Interop::ObjC

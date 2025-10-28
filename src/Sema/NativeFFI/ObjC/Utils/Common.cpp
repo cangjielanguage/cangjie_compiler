@@ -14,17 +14,16 @@
 #include "ASTFactory.h"
 #include "TypeMapper.h"
 
+namespace Cangjie::Interop::ObjC {
 using namespace Cangjie::AST;
-using namespace Cangjie::Interop::ObjC;
 
 namespace {
-using namespace Cangjie;
 
 Ptr<ClassDecl> GetMirrorSuperClass(const ClassLikeDecl& target)
 {
     if (auto classDecl = DynamicCast<const ClassDecl*>(&target)) {
         auto superClass = classDecl->GetSuperClassDecl();
-        if (superClass && TypeMapper::IsValidObjCMirror(*superClass->ty)) {
+        if (superClass && TypeMapper::IsObjCMirror(*superClass->ty)) {
             return superClass;
         }
     }
@@ -32,10 +31,9 @@ Ptr<ClassDecl> GetMirrorSuperClass(const ClassLikeDecl& target)
     return nullptr;
 }
 
-Ptr<Decl> FindMirrorMember(const std::string_view& mirrorMemberIdent,
-    const InheritableDecl& target)
+Ptr<Decl> FindMirrorMember(const std::string_view& mirrorMemberIdent, const InheritableDecl& target)
 {
-    for (auto& memberDecl : target.GetMemberDeclPtrs()) {
+    for (auto memberDecl : target.GetMemberDeclPtrs()) {
         if (memberDecl->identifier == mirrorMemberIdent) {
             return memberDecl;
         }
@@ -46,24 +44,35 @@ Ptr<Decl> FindMirrorMember(const std::string_view& mirrorMemberIdent,
 
 } // namespace
 
-bool Cangjie::Interop::ObjC::HasMirrorSuperClass(const ClassLikeDecl& target)
+bool HasMirrorSuperClass(const ClassLikeDecl& target)
 {
     return GetMirrorSuperClass(target) != nullptr;
 }
 
-Ptr<VarDecl> Cangjie::Interop::ObjC::FindNativeVarHandle(const AST::ClassLikeDecl& target)
+bool HasMirrorSuperInterface(const ClassLikeDecl& target)
 {
-    CJC_ASSERT(TypeMapper::IsValidObjCMirror(*target.ty) || TypeMapper::IsObjCImpl(*target.ty));
+    for (auto parentTy : target.GetSuperInterfaceTys()) {
+        if (TypeMapper::IsObjCMirror(*parentTy)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+Ptr<VarDecl> GetNativeVarHandle(const ClassDecl& target)
+{
+    CJC_ASSERT(TypeMapper::IsObjCMirror(*target.ty) || TypeMapper::IsObjCImpl(*target.ty) || TypeMapper::IsSyntheticWrapper(target));
 
     auto mirrorSuperClass = GetMirrorSuperClass(target);
     if (mirrorSuperClass != nullptr) {
-        return FindNativeVarHandle(*mirrorSuperClass);
+        return GetNativeVarHandle(*mirrorSuperClass);
     }
 
-    return As<ASTKind::VAR_DECL>(FindMirrorMember(ASTFactory::NATIVE_HANDLE_IDENT, target));
+    return As<ASTKind::VAR_DECL>(FindMirrorMember(NATIVE_HANDLE_IDENT, target));
 }
 
-bool Cangjie::Interop::ObjC::IsStaticInitMethod(const Node& node)
+bool IsStaticInitMethod(const Node& node)
 {
     const auto fd = DynamicCast<const FuncDecl*>(&node);
     if (!fd) {
@@ -72,3 +81,47 @@ bool Cangjie::Interop::ObjC::IsStaticInitMethod(const Node& node)
 
     return fd->TestAttr(Attribute::OBJ_C_INIT);
 }
+
+Ptr<FuncDecl> GetNativeHandleGetter(const ClassLikeDecl& target)
+{
+    CJC_ASSERT(TypeMapper::IsObjCMirror(*target.ty) || TypeMapper::IsObjCImpl(*target.ty) || TypeMapper::IsSyntheticWrapper(target));
+
+    auto mirrorSuperClass = GetMirrorSuperClass(target);
+    if (mirrorSuperClass != nullptr) {
+        return GetNativeHandleGetter(*mirrorSuperClass);
+    }
+
+    return As<ASTKind::FUNC_DECL>(FindMirrorMember(NATIVE_HANDLE_GETTER_IDENT, target));
+}
+
+Ptr<ClassDecl> GetSyntheticWrapper(const ClassLikeDecl& target)
+{
+    CJC_ASSERT(TypeMapper::IsObjCMirror(*target.ty));
+
+    for (auto child : target.subDecls) {
+        if (child->TestAttr(Attribute::OBJ_C_MIRROR_SYNTHETIC_WRAPPER) &&
+            child->identifier == (target.identifier + SYNTHETIC_CLASS_SUFFIX) // redundant check?
+        ) {
+            return As<ASTKind::CLASS_DECL>(child);
+        }
+    }
+
+    return nullptr;
+}
+
+Ptr<FuncDecl> GetFinalizer(const ClassDecl& target)
+{
+    for (auto member : target.GetMemberDeclPtrs()) {
+        if (member->TestAttr(Attribute::FINALIZER)) {
+            return StaticAs<ASTKind::FUNC_DECL>(member);
+        }
+    }
+
+    return nullptr;
+}
+
+bool IsSyntheticWrapper(const AST::Decl& decl) {
+    return TypeMapper::IsSyntheticWrapper(*decl.ty);
+}
+
+} // namespace Cangjie::Interop::ObjC
