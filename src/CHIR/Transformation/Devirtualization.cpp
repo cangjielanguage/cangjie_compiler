@@ -39,8 +39,9 @@ void Devirtualization::RunOnFunc(const Func* func, CHIRBuilder& builder)
     if (result == nullptr && frozenStates.count(func) != 0) {
         result = frozenStates.at(func).get();
     }
-    CJC_ASSERT(result);
-
+    if (result == nullptr) {
+        return;
+    }
     const auto actionBeforeVisitExpr = [this, &builder](const TypeDomain& state, Expression* expr, size_t) {
         if (expr->GetExprKind() != ExprKind::INVOKE) {
             return;

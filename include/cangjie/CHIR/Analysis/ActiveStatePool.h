@@ -238,6 +238,9 @@ public:
 
     ActiveStateNode* Insert(Value* obj, ValueDomain domain)
     {
+        if (data.count(obj) != 0) {
+            return &obj2StateNode[obj];
+        }
         data.emplace(obj, std::move(domain));
         obj2StateNode[obj] = ActiveStateNode(obj);
         auto stateNode = &obj2StateNode[obj];
