@@ -94,6 +94,7 @@ const std::unordered_set<CHIR::IntrinsicKind> BUILTIN_FUNC_SET = {
     /// This comment is used to keep the code neat under format.
     CHIR::IntrinsicKind::OBJECT_REFEQ,
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
+    CHIR::IntrinsicKind::FUNC_REFEQ,
     CHIR::IntrinsicKind::RAW_ARRAY_REFEQ,
 #endif
     CHIR::IntrinsicKind::OBJECT_ZERO_VALUE,

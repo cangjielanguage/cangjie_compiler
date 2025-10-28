@@ -1468,4 +1468,46 @@ llvm::Value* IRBuilder2::CallInteropIntrinsics(
 {
     return CallIntrinsic(intrinsic, parameters);
 }
+
+namespace {
+llvm::Value* GetRealUUIDForAutoEnvClass(IRBuilder2& irBuilder, llvm::Value* obj)
+{
+    auto i80PtrTy = irBuilder.getInt8PtrTy();
+    auto i81PtrTy = irBuilder.getInt8PtrTy(1U);
+    const size_t realAutoEnvClassIdx = 2;
+    auto [judgeBB, wrapperClassBB, endBB] = Vec2Tuple<3>(irBuilder.CreateAndInsertBasicBlocks({"judge", "wrapperClass", "end"}));
+    
+    auto newObjPtr = irBuilder.CreateEntryAlloca(i81PtrTy, nullptr, "obj");
+    irBuilder.CreateStore(obj, newObjPtr);
+    irBuilder.CreateBr(judgeBB);
+
+    irBuilder.SetInsertPoint(judgeBB);
+    auto newObj0 = irBuilder.CreateLoad(i81PtrTy, newObjPtr);
+    auto cgTi = CGValue(irBuilder.CreateBitCast(irBuilder.GetTypeInfoFromObject(newObj0), i80PtrTy), CGType::GetOrCreate(irBuilder.GetCGModule(), CGType::GetRefTypeOfCHIRInt8(irBuilder.GetCGContext().GetCHIRBuilder())));
+    auto isWrapperClass = irBuilder.CallIntrinsicFunction(llvm::Type::getInt1Ty(irBuilder.GetLLVMContext()), "CJ_MCC_IsWrapperClassForAutoEnv", {&cgTi}, {});
+    irBuilder.CreateCondBr(isWrapperClass, wrapperClassBB, endBB);
+
+    irBuilder.SetInsertPoint(wrapperClassBB);
+    auto newObj1 = irBuilder.CreateLoad(i81PtrTy, newObjPtr);
+    auto payload = irBuilder.GetPayloadFromObject(newObj1);
+    auto realAutoEnvClass = irBuilder.CreateConstGEP1_32(i81PtrTy, irBuilder.CreateBitCast(payload, i81PtrTy->getPointerTo(1U)), static_cast<unsigned>(realAutoEnvClassIdx), "realAutoEnvClass");
+    auto loadInst = irBuilder.CallGCRead({newObj1, realAutoEnvClass});
+    irBuilder.CreateStore(loadInst, newObjPtr);
+    irBuilder.CreateBr(judgeBB);
+
+    irBuilder.SetInsertPoint(endBB);
+    auto newObj2 = irBuilder.CreateLoad(i81PtrTy, newObjPtr);
+    auto ti = irBuilder.GetTypeInfoFromObject(newObj2);
+    auto uuid = irBuilder.GetUUIDFromTypeInfo(ti);
+    return uuid;
+} 
+}
+
+llvm::Value* IRBuilder2::CallIntrinsicFuncRefEq(std::vector<CGValue*> parameters)
+{
+    CJC_ASSERT(parameters.size() == 2 && "Func refEq should have two parameters");
+    auto realUUID0 = GetRealUUIDForAutoEnvClass(*this, **parameters[0]);
+    auto realUUID1 = GetRealUUIDForAutoEnvClass(*this, **parameters[1]);
+    return CreateICmpEQ(realUUID0, realUUID1);
+}
 } // namespace Cangjie::CodeGen

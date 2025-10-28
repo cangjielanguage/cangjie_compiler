@@ -352,6 +352,8 @@ public:
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     ///*----------------- FFI OHOS related --------------------//
     llvm::Value* CallInteropIntrinsics(const CHIRIntrinsicWrapper& intrinsic, const std::vector<CGValue*>& parameters);
+    ///*----------------- Func RefEq related --------------------//
+    llvm::Value* CallIntrinsicFuncRefEq(std::vector<CGValue*> parameters);
     ///*----------------- VArray related --------------------//
     void CallVArrayIntrinsicIndexCheck(const CGValue* arrayPtr, std::vector<llvm::Value*>& index);
     void CreateVArrayStore(CGValue* cgValue, llvm::Value* place);
@@ -403,6 +405,7 @@ public:
     llvm::Value* GetSize_64(const CHIR::Type& type);
     llvm::Value* GetSize_Native(const CHIR::Type& type);
     llvm::Value* GetAlign(const CHIR::Type& type, llvm::Type* targetType);
+    llvm::Value* GetUUIDFromTypeInfo(llvm::Value* typeInfo);
     llvm::Value* GetTypeKindFromTypeInfo(llvm::Value* typeInfo);
     llvm::Value* GetTypeForTypeParameter(llvm::Value* typeInfo);
     llvm::Value* GetTypeArgsFromTypeInfo(llvm::Value* typeInfo);

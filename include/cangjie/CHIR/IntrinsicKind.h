@@ -109,7 +109,7 @@ static const std::string FUTURE_INIT_NAME = "futureInit";
 static const std::string OBJECT_REFEQ_NAME = "intrinsicRefEq";
 
 static const std::string RAW_ARRAY_REFEQ_NAME = "intrinsicRefEqRawArray"; // cjnative only
-
+static const std::string FUNC_REFEQ_NAME = "intrinsicRefEqFunc"; // cjnative only
 static const std::string OBJECT_ZERO_VALUE_NAME = "zeroValue";
 
 static const std::string IS_THREAD_OBJECT_INITED_NAME = "isThreadObjectInited";
@@ -323,6 +323,7 @@ enum IntrinsicKind : uint16_t {
     OBJECT_REFEQ,
 
     RAW_ARRAY_REFEQ, // cjnative only
+    FUNC_REFEQ, // cjnative only
 
     OBJECT_ZERO_VALUE,
 
@@ -797,6 +798,7 @@ static const std::unordered_map<std::string, IntrinsicKind> runtimeIntrinsicMap 
     {CREATE_EXPORT_HANDLE_NAME, CREATE_EXPORT_HANDLE},
     {GET_EXPORTED_REF_NAME, GET_EXPORTED_REF},
     {REMOVE_EXPORTED_REF_NAME, REMOVE_EXPORTED_REF},
+    {FUNC_REFEQ_NAME, FUNC_REFEQ},
 };
 static const std::unordered_map<std::string, IntrinsicKind> mathIntrinsicMap = {
     {ABS_NAME, ABS},

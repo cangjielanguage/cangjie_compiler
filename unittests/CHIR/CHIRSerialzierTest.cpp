@@ -784,6 +784,9 @@ PackageFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
         case RAW_ARRAY_REFEQ:
             ret = IntrinsicKind_RAW_ARRAY_REFEQ;
             break;
+        case FUNC_REFEQ:
+            ret = IntrinsicKind_FUNC_REFEQ;
+            break;
         case OBJECT_ZERO_VALUE:
             ret = IntrinsicKind_OBJECT_ZERO_VALUE;
             break;

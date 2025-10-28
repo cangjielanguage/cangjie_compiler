@@ -33,6 +33,8 @@ bool BCHIRInterpreter::InterpretIntrinsic0()
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         case RAW_ARRAY_REFEQ:
             [[fallthrough]];
+        case FUNC_REFEQ:
+            [[fallthrough]];
 #endif
         case OBJECT_REFEQ:
             InterpretRefEq();
