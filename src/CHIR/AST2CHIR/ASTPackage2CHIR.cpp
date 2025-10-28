@@ -13,8 +13,10 @@
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/CHIR/CHIRCasting.h"
 #include "cangjie/CHIR/ConstantUtils.h"
+#include "cangjie/CHIR/Type/CustomTypeDef.h"
 #include "cangjie/CHIR/Type/ExtendDef.h"
 #include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Visitor/Visitor.h"
 #include "cangjie/Mangle/CHIRManglingUtils.h"
 #include "cangjie/Utils/CastingTemplate.h"
 #include "cangjie/Utils/CheckUtils.h"
@@ -891,7 +893,7 @@ void AST2CHIR::CacheTopLevelDeclToGlobalSymbolTable()
 
     CreateGlobalVarSignature(globalAndStaticVars);
     creatingLocalConstVarSignature = true;
-    
+
     // collect Annotation of global vars
     auto tr = CreateTranslator();
     for (auto var : globalAndStaticVars) {
@@ -1293,7 +1295,7 @@ void AST2CHIR::TranslateNominalDecls(const AST::Package& pkg)
     TranslateVecDecl(genericNominalDecls, trans);
     // Update some info for nominal decls.
     Utils::ProfileRecorder::Stop("TranslateNominalDecls", "TranslateDecls");
-    ProcessCommonAndPlatformExtends();
+    ProcessCommonAndPlatformNominals();
     SetExtendInfo();
     UpdateExtendParent();
 }
@@ -1368,14 +1370,13 @@ BuildDeserializedVec(std::unordered_map<std::string, U*>& table, const std::vect
     }
 }
 
-std::vector<Ptr<const AST::Decl>> CollectCommonMatchedExtendDecls(
+std::vector<Ptr<const AST::Decl>> CollectCommonMatchedDecls(
     const std::vector<std::vector<Ptr<const AST::Decl>>>& declContainers)
 {
     std::vector<Ptr<const AST::Decl>> commonDecls;
     for (const auto& container : declContainers) {
         for (const auto& decl : container) {
-            bool isCommonExtendDecl = decl->IsCommonMatchedWithPlatform() && decl->astKind == AST::ASTKind::EXTEND_DECL;
-            if (isCommonExtendDecl) {
+            if (decl->IsCommonMatchedWithPlatform()) {
                 commonDecls.push_back(decl);
             }
         }
@@ -1405,7 +1406,7 @@ std::unordered_map<const GenericType*, Type*> BuildGenericTypeMapping(
     return commonGenericTy2platformGenericTy;
 }
 
-void ConvertPlatformExtendMethods(
+void ConvertPlatformMemberMethods(
     Package* package, CHIRBuilder& builder, const std::function<Type*(Type&)>& replaceGenericFunc)
 {
     PrivateTypeConverter converter(replaceGenericFunc, builder);
@@ -1414,11 +1415,11 @@ void ConvertPlatformExtendMethods(
         return VisitResult::CONTINUE;
     };
 
-    for (auto extend : package->GetExtends()) {
-        if (!extend->TestAttr(CHIR::Attribute::PLATFORM)) {
+    for (auto decl : package->GetAllCustomTypeDef()) {
+        if (!decl->TestAttr(CHIR::Attribute::PLATFORM)) {
             continue;
         }
-        for (auto func : extend->GetMethods()) {
+        for (auto func : decl->GetMethods()) {
             if (func->TestAttr(CHIR::Attribute::DESERIALIZED)) {
                 auto f = DynamicCast<Func*>(func);
                 bool hasBodyFromCommonPart = f && f->GetBody();
@@ -1515,7 +1516,7 @@ void AST2CHIR::ResetPlatformFunc(const AST::FuncDecl& funcDecl, Func& func)
     }
 }
 
-void AST2CHIR::ProcessCommonAndPlatformExtends()
+void AST2CHIR::ProcessCommonAndPlatformNominals()
 {
     bool compilePlatform = opts.IsCompilingCJMP();
     if (!compilePlatform) {
@@ -1523,14 +1524,14 @@ void AST2CHIR::ProcessCommonAndPlatformExtends()
     }
 
     // Collect common generic extends and build type mapping
-    std::vector<Ptr<const AST::Decl>> commonDecls = CollectCommonMatchedExtendDecls(
+    std::vector<Ptr<const AST::Decl>> commonDecls = CollectCommonMatchedDecls(
         {importedNominalDecls, importedGenericInstantiatedNominalDecls, nominalDecls, genericNominalDecls});
     std::unordered_map<const GenericType*, Type*> commonGenericTy2platformGenericTy =
         BuildGenericTypeMapping(commonDecls, chirType);
 
     // 1. Convert platform extend methods if type mapping exists
     if (!commonGenericTy2platformGenericTy.empty()) {
-        ConvertPlatformExtendMethods(package, builder, [this, &commonGenericTy2platformGenericTy](Type& type) {
+        ConvertPlatformMemberMethods(package, builder, [this, &commonGenericTy2platformGenericTy](Type& type) {
             return ReplaceRawGenericArgType(type, commonGenericTy2platformGenericTy, builder);
         });
     }

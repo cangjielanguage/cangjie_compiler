@@ -10,7 +10,10 @@
  */
 
 #include "ParserImpl.h"
+#include "cangjie/AST/Node.h"
 #include "cangjie/AST/Utils.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
+#include <functional>
 
 using namespace Cangjie;
 using namespace AST;
@@ -107,7 +110,7 @@ void MPParserImpl::SetCompileOptions(const GlobalOptions& opts)
     this->compilePlatform = (opts.commonPartCjo != std::nullopt);
 }
 
-bool MPParserImpl::CheckCJMPModifiers(const std::set<AST::Modifier> &modifiers) const
+bool MPParserImpl::CheckCJMPModifiers(const std::set<AST::Modifier>& modifiers) const
 {
     auto currentFile = ref->currentFile;
     if (ref->HasModifier(modifiers, TokenKind::PLATFORM)) {
@@ -172,10 +175,34 @@ bool MPParserImpl::HasCJMPModifiers(const AST::Modifier& modifier) const
     return (modifier.modifier == TokenKind::COMMON || modifier.modifier == TokenKind::PLATFORM);
 }
 
+static bool CheckGenericDeclFrozen(const AST::Decl& decl, DiagnosticEngine& diag)
+{
+    if (decl.HasAnno(AnnotationKind::FROZEN)) {
+        const AST::Node* reportAt = &decl;
+
+        auto found = std::find_if(decl.annotations.begin(), decl.annotations.end(),
+            [](auto& item) { return item->kind == AnnotationKind::FROZEN; });
+        if (found != decl.annotations.end()) {
+            reportAt = &**found; // unwrap interator, then unwrap OwnedPtr
+        }
+        diag.DiagnoseRefactor(
+            DiagKindRefactor::sema_common_generic_frozen_not_supported, *reportAt, decl.identifier.Val());
+        return false;
+    }
+
+    return true;
+}
+
 bool MPParserImpl::CheckCJMPModifiersOf(const AST::Decl& decl) const
 {
     if (decl.IsCommonOrPlatform()) {
         auto kind = decl.TestAttr(Attribute::COMMON) ? "common" : "platform";
+        // generic decl
+        if (decl.TestAttr(Attribute::GENERIC)) {
+            if (!CheckGenericDeclFrozen(decl, ref->diag)) {
+                return false;
+            }
+        }
         // tuple, enum, _ pattern
         if (decl.astKind == ASTKind::VAR_WITH_PATTERN_DECL && decl.TestAttr(Attribute::COMMON)) {
             auto& varDecl = StaticCast<AST::VarWithPatternDecl&>(decl);
@@ -191,7 +218,7 @@ bool MPParserImpl::CheckCJMPModifiersOf(const AST::Decl& decl) const
     }
     bool ret = true;
     // Check whether modifiers are same between members and outer decl.
-    for (auto &member : decl.GetMemberDeclPtrs()) {
+    for (auto& member : decl.GetMemberDeclPtrs()) {
         ret = CheckCJMPModifiersBetween(*member, decl) && ret;
     }
     return ret;

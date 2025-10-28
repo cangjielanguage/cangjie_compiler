@@ -307,6 +307,8 @@ ERROR(sema_cjmp_abstract_class_member_has_no_explicit_modifier, "'%s' abstract c
 ERROR(sema_explicitly_abstract_can_not_have_body, "abstract %s can not have body")
 ERROR(sema_explicitly_abstract_only_for_cjmp_abstract_class, "only common/platform class can have explicitly abstract %s")
 ERROR(sema_open_abstract_platform_can_not_replace_open_common, "open common %s can not be overridden with abstract platform %s")
+ERROR(sema_common_generic_frozen_not_supported, "common/specific declaration %s with generics cannot be @Frozen")
+ERROR(sema_common_generic_rename_not_supported, "common/specific generic rename is not supported yet")
 
 // java mirror
 ERROR(sema_java_mirror_ctor_arg_must_be_java_mirror, "argument type of java-mirrored constructor must be of @JavaMirror type")

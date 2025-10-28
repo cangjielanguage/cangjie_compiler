@@ -361,7 +361,7 @@ private:
     }
     // build symbol table for deserialized decls from common part.
     void BuildDeserializedTable();
- 
+
     // Reset platform func for CJMP.
     void ResetPlatformFunc(const AST::FuncDecl& funcDecl, Func& func);
     // Check whether the decl need be translated for CJMP.
@@ -369,7 +369,7 @@ private:
     {
         return deserializedDecls.find(&decl) == deserializedDecls.end();
     }
-    void ProcessCommonAndPlatformExtends();
+    void ProcessCommonAndPlatformNominals();
     const GlobalOptions& opts;
     const GenericInstantiationManager* gim;
     ImportManager& importManager;

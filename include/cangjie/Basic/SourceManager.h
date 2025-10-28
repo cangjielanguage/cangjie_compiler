@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <cstdint>
 
 #include "cangjie/Basic/Position.h"
 #include "cangjie/Basic/Utils.h"

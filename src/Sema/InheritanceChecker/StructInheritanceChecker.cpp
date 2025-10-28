@@ -18,6 +18,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "../NativeFFI/Java/AfterTypeCheck/Utils.h"
+#include "NativeFFI/Java/AfterTypeCheck/Utils.h"
+#include "cangjie/AST/AttributePack.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Types.h"
@@ -27,8 +30,6 @@
 #include "cangjie/Modules/ModulesUtils.h"
 #include "cangjie/Sema/TestManager.h"
 #include "cangjie/Sema/TypeManager.h"
-#include "NativeFFI/Java/AfterTypeCheck/Utils.h"
-
 
 #include "Diags.h"
 #include "TypeCheckUtil.h"
@@ -124,46 +125,6 @@ std::string StringifyInconsistentTypes(
     std::set<Ptr<const Ty>, CmpTyByName> sortedTys(inconsistentTypes.cbegin(), inconsistentTypes.cend());
     sortedTys.erase(childTy);
     return "'" + Ty::GetTypesToStr(sortedTys, "', '") + "'";
-}
-
-std::vector<std::unordered_set<Ptr<Ty>>> GetAllGenericUpperBounds(TypeManager& tyMgr, const Decl& decl)
-{
-    auto generic = decl.GetGeneric();
-    if (!generic) {
-        return {};
-    }
-    std::vector<std::unordered_set<Ptr<Ty>>> allUpperBounds;
-    for (auto& type : generic->typeParameters) {
-        auto genericTy = DynamicCast<GenericsTy*>(type->ty);
-        if (!genericTy) {
-            continue;
-        }
-        // NOTE: Since 'upperBounds' contains all direct and transitive non-generic upperbounds,
-        //       we also need to collect generic upperBounds to check generic constraints correctly.
-        std::set<Ptr<Ty>> tys(genericTy->upperBounds.begin(), genericTy->upperBounds.end());
-        std::queue<Ptr<GenericsTy>> q;
-        q.push(genericTy);
-        std::unordered_set<Ptr<GenericsTy>> traversedTy = {};
-        while (!q.empty()) {
-            auto gTy = q.front();
-            q.pop();
-            if (auto [_, success] = traversedTy.emplace(gTy); !success) {
-                continue;
-            }
-            for (auto upper : gTy->upperBounds) {
-                if (upper->IsGeneric()) {
-                    q.push(RawStaticCast<GenericsTy*>(upper));
-                    tys.emplace(upper);
-                }
-            }
-        }
-        if (tys.size() > 1) {
-            allUpperBounds.emplace_back(std::unordered_set<Ptr<Ty>>{tyMgr.GetIntersectionTy(tys)});
-        } else {
-            allUpperBounds.emplace_back(tys.begin(), tys.end());
-        }
-    }
-    return allUpperBounds;
 }
 
 // Caller guarantees the given 'index' has corresponding constraint node.
@@ -281,6 +242,50 @@ void GenerateNativeFFIJavaMirrorSyntheticWrapper(
 }
 
 } // namespace
+
+namespace Cangjie {
+
+std::vector<std::unordered_set<Ptr<Ty>>> GetAllGenericUpperBounds(TypeManager& tyMgr, const Decl& decl)
+{
+    auto generic = decl.GetGeneric();
+    if (!generic) {
+        return {};
+    }
+    std::vector<std::unordered_set<Ptr<Ty>>> allUpperBounds;
+    for (auto& type : generic->typeParameters) {
+        auto genericTy = DynamicCast<GenericsTy*>(type->ty);
+        if (!genericTy) {
+            continue;
+        }
+        // NOTE: Since 'upperBounds' contains all direct and transitive non-generic upperbounds,
+        //       we also need to collect generic upperBounds to check generic constraints correctly.
+        std::set<Ptr<Ty>> tys(genericTy->upperBounds.begin(), genericTy->upperBounds.end());
+        std::queue<Ptr<GenericsTy>> q;
+        q.push(genericTy);
+        std::unordered_set<Ptr<GenericsTy>> traversedTy = {};
+        while (!q.empty()) {
+            auto gTy = q.front();
+            q.pop();
+            if (auto [_, success] = traversedTy.emplace(gTy); !success) {
+                continue;
+            }
+            for (auto upper : gTy->upperBounds) {
+                if (upper->IsGeneric()) {
+                    q.push(RawStaticCast<GenericsTy*>(upper));
+                    tys.emplace(upper);
+                }
+            }
+        }
+        if (tys.size() > 1) {
+            allUpperBounds.emplace_back(std::unordered_set<Ptr<Ty>>{tyMgr.GetIntersectionTy(tys)});
+        } else {
+            allUpperBounds.emplace_back(tys.begin(), tys.end());
+        }
+    }
+    return allUpperBounds;
+}
+
+} // namespace Cangjie
 
 void TypeChecker::TypeCheckerImpl::CheckInheritance(Package& pkg)
 {
@@ -1148,29 +1153,40 @@ void StructInheritanceChecker::CheckAccessVisibility(const Decl& parent, const D
     }
 }
 
-void StructInheritanceChecker::CheckGenericTypeArgInfo(
-    const MemberSignature& parent, const MemberSignature& child) const
+static size_t GenericsCount(const Decl& decl)
 {
-    auto parentGeneric = parent.decl->GetGeneric();
-    auto childGeneric = child.decl->GetGeneric();
-    bool diffStatus = parent.decl->TestAttr(Attribute::STATIC) != child.decl->TestAttr(Attribute::STATIC);
-    if (!parentGeneric || !childGeneric || diffStatus) {
+    auto generic = decl.GetGeneric();
+    if (!generic) {
+        return 0;
+    }
+    return generic->typeParameters.size();
+}
+
+namespace Cangjie {
+void CheckGenericTypeBoundsMapped(const Decl& parent, const Decl& child,
+    std::vector<std::unordered_set<Ptr<Ty>>> parentBounds, std::vector<std::unordered_set<Ptr<Ty>>> childBounds,
+    DiagnosticEngine& diag, TypeManager& typeManager)
+{
+    if (GenericsCount(parent) != GenericsCount(child)) {
+        diag.Diagnose(child, DiagKind::sema_generic_member_type_argument_different, child.identifier.Val());
         return;
     }
-    if (parentGeneric->typeParameters.size() != childGeneric->typeParameters.size()) {
-        diag.Diagnose(*child.decl, DiagKind::sema_generic_member_type_argument_different, child.decl->identifier.Val());
-        return;
+    auto childGeneric = child.GetGeneric();
+    TypeSubst typeMapping = typeManager.GenerateGenericMappingFromGeneric(parent, child);
+
+    if (!childGeneric) {
+      return;
     }
-    TypeSubst typeMapping = typeManager.GenerateGenericMappingFromGeneric(*parent.decl, *child.decl);
-    CJC_ASSERT(parent.upperBounds.size() == child.upperBounds.size());
+
+    CJC_ASSERT(parentBounds.size() == childBounds.size());
     // Child's constraint should be looser or same with the parent's constraint;
-    for (size_t i = 0; i < parent.upperBounds.size(); ++i) {
-        auto childUppers = child.upperBounds[i];
+    for (size_t i = 0; i < parentBounds.size(); ++i) {
+        auto childUppers = childBounds[i];
         (void)childUppers.erase(typeManager.GetAnyTy()); // Remove upper bound of type 'Any'.
         if (childUppers.empty()) {
             continue; // Empty upperBounds is always looser.
         }
-        auto& parentUppers = parent.upperBounds[i];
+        auto& parentUppers = parentBounds[i];
         std::unordered_set<Ptr<Ty>> instUppers;
         for (auto it : parentUppers) {
             instUppers.emplace(typeManager.GetInstantiatedTy(it, typeMapping));
@@ -1179,7 +1195,7 @@ void StructInheritanceChecker::CheckGenericTypeArgInfo(
         for (auto upper : childUppers) {
             // At least one parent upperBounds is the subtype of child upperBound.
             childLooser = std::any_of(instUppers.begin(), instUppers.end(),
-                [this, &upper](auto it) { return typeManager.IsSubtype(it, upper); });
+                [&typeManager, &upper](auto it) { return typeManager.IsSubtype(it, upper); });
             if (!childLooser) {
                 break;
             }
@@ -1189,7 +1205,7 @@ void StructInheritanceChecker::CheckGenericTypeArgInfo(
                 break;
             }
             // Cannot exist any child upperBound that is the subtype of parent upperBound.
-            childLooser = !std::any_of(childUppers.begin(), childUppers.end(), [this, &upper](auto it) {
+            childLooser = !std::any_of(childUppers.begin(), childUppers.end(), [&typeManager, &upper](auto it) {
                 return !typeManager.IsTyEqual(it, upper) && typeManager.IsSubtype(it, upper);
             });
         }
@@ -1201,6 +1217,37 @@ void StructInheritanceChecker::CheckGenericTypeArgInfo(
             builder.AddNote("parent constraint is " + parentConstraints);
         }
     }
+}
+} // namespace Cangjie
+
+void StructInheritanceChecker::CheckGenericTypeArgInfo(const Decl& parent, const Decl& child)
+{
+    auto parentGeneric = parent.GetGeneric();
+    auto childGeneric = child.GetGeneric();
+
+    if (parentGeneric->typeParameters.size() != childGeneric->typeParameters.size()) {
+        diag.Diagnose(child, DiagKind::sema_generic_member_type_argument_different, child.identifier.Val());
+        return;
+    }
+
+    auto parentBounds = GetAllGenericUpperBounds(typeManager, parent);
+    auto childBounds = GetAllGenericUpperBounds(typeManager, child);
+
+    Cangjie::CheckGenericTypeBoundsMapped(parent, child, parentBounds, childBounds, diag, typeManager);
+}
+
+void StructInheritanceChecker::CheckGenericTypeArgInfo(
+    const MemberSignature& parent, const MemberSignature& child) const
+{
+    auto parentGeneric = parent.decl->GetGeneric();
+    auto childGeneric = child.decl->GetGeneric();
+    bool diffStatus = parent.decl->TestAttr(Attribute::STATIC) != child.decl->TestAttr(Attribute::STATIC);
+    if (!parentGeneric || !childGeneric || diffStatus) {
+        return;
+    }
+
+    Cangjie::CheckGenericTypeBoundsMapped(
+        *parent.decl, *child.decl, parent.upperBounds, child.upperBounds, diag, typeManager);
 }
 
 void StructInheritanceChecker::CheckPropertyInheritance(const MemberSignature& parent, const Decl& child) const

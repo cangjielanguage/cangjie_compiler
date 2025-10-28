@@ -12,11 +12,21 @@
 
 #include "MPTypeCheckerImpl.h"
 
+#include "../Sema/InheritanceChecker/StructInheritanceChecker.h"
 #include "Collector.h"
 #include "Diags.h"
 #include "TypeCheckUtil.h"
-#include "cangjie/AST/Walker.h"
 #include "cangjie/AST/Clone.h"
+#include "cangjie/AST/Node.h"
+#include "cangjie/AST/Types.h"
+#include "cangjie/AST/Walker.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
+#include "cangjie/Modules/ImportManager.h"
+#include "cangjie/Option/Option.h"
+#include "cangjie/Sema/CommonTypeAlias.h"
+#include "cangjie/Sema/TypeManager.h"
+#include "cangjie/Utils/CastingTemplate.h"
+#include <optional>
 
 using namespace Cangjie;
 using namespace AST;
@@ -550,13 +560,6 @@ bool MustMatchWithPlatform(const Decl& decl)
     }
     return true;
 }
-
-bool IsValidFunctionPairForGenericMapping(const FuncDecl& cFunc, const FuncDecl& pFunc)
-{
-    return pFunc.funcBody && cFunc.funcBody && pFunc.funcBody->generic && cFunc.funcBody->generic &&
-        (cFunc.funcBody->generic->typeParameters.size() == pFunc.funcBody->generic->typeParameters.size()) &&
-        (cFunc.funcBody->generic->genericConstraints.size() == pFunc.funcBody->generic->genericConstraints.size());
-}
 } // namespace
 
 bool NeedToReportMissingBody(const Decl& common, const Decl& platform)
@@ -632,6 +635,45 @@ bool MPTypeCheckerImpl::MatchCJMPDeclAnnotations(
     return true;
 }
 
+static void CheckGenericRenamed(const AST::Decl& platform, const AST::Decl& common, DiagnosticEngine& diag)
+{
+    if (platform.astKind != ASTKind::CLASS_DECL && platform.astKind != ASTKind::STRUCT_DECL && platform.astKind != ASTKind::ENUM_DECL && platform.astKind != ASTKind::INTERFACE_DECL) {
+        // generic rename is not supported for class/struct yet
+        return;
+    }
+    auto platformGeneric = platform.GetGeneric();
+    auto commonGeneric = common.GetGeneric();
+
+    if (!commonGeneric || !platformGeneric) {
+        return;
+    }
+
+    auto& commonParameters = commonGeneric->typeParameters;
+    auto& platformParameters = platformGeneric->typeParameters;
+
+    size_t size = commonParameters.size();
+    if (size != platformParameters.size()) {
+        return;
+    }
+
+    for (size_t i = 0; i < size; ++i) {
+        if (commonParameters[i]->identifier.Val() != platformParameters[i]->identifier.Val()) {
+            auto& genericParam = *platformParameters[i];
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_common_generic_rename_not_supported, genericParam);
+        }
+    }
+}
+
+void MPTypeCheckerImpl::CheckCommonSpecificGenericMatch(const AST::Decl& platformDecl, const AST::Decl& commonDecl)
+{
+    // check generic countraints
+    auto parentBounds = GetAllGenericUpperBounds(typeManager, commonDecl);
+    auto childBounds = GetAllGenericUpperBounds(typeManager, platformDecl);
+
+    CheckGenericTypeBoundsMapped(commonDecl, platformDecl, parentBounds, childBounds, diag, typeManager);
+    CheckGenericRenamed(platformDecl, commonDecl, diag);
+}
+
 // Match common nominal decl with platform for details.
 bool MPTypeCheckerImpl::MatchCommonNominalDeclWithPlatform(const InheritableDecl& commonDecl)
 {
@@ -653,11 +695,13 @@ bool MPTypeCheckerImpl::MatchCommonNominalDeclWithPlatform(const InheritableDecl
     // Match super types.
     std::set<Ptr<InterfaceTy>> comSupInters;
     auto platSupInters = StaticCast<InheritableDecl>(platformDecl)->GetSuperInterfaceTys();
-    std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>> genericTyMap;
+    TypeSubst genericTyMap;
     MapCJMPGenericTypeArgs(genericTyMap, commonDecl, *platformDecl);
     if (!genericTyMap.empty()) {
-        for (auto superInterface : commonDecl.GetSuperInterfaceTys())
-            comSupInters.emplace(StaticCast<InterfaceTy*>(ReplaceCommonGenericTy(genericTyMap, superInterface)));
+        for (auto superInterface : commonDecl.GetSuperInterfaceTys()) {
+            auto updatedInterfaceType = typeManager.GetInstantiatedTy(superInterface, genericTyMap);
+            comSupInters.emplace(StaticCast<InterfaceTy*>(updatedInterfaceType));
+        }
     } else {
         comSupInters = commonDecl.GetSuperInterfaceTys();
     }
@@ -687,7 +731,19 @@ bool MPTypeCheckerImpl::MatchCommonNominalDeclWithPlatform(const InheritableDecl
             return false;
         }
     }
+
+    CheckCommonSpecificGenericMatch(*platformDecl, commonDecl);
+
     return true;
+}
+
+static size_t GenericsCount(const Decl& decl)
+{
+    auto generic = decl.GetGeneric();
+    if (!generic) {
+        return 0;
+    }
+    return generic->typeParameters.size();
 }
 
 bool MPTypeCheckerImpl::IsCJMPDeclMatchable(const Decl& lhsDecl, const Decl& rhsDecl) const
@@ -708,6 +764,11 @@ bool MPTypeCheckerImpl::IsCJMPDeclMatchable(const Decl& lhsDecl, const Decl& rhs
             return false;
         }
     }
+
+    if (GenericsCount(lhsDecl) != GenericsCount(rhsDecl)) {
+        return false;
+    }
+
     // need check Attribute::ABSTRACT for abstract class?
     std::vector<Attribute> matchedAttrs = { Attribute::STATIC, Attribute::MUT, Attribute::PRIVATE, Attribute::PUBLIC,
         Attribute::PROTECTED, Attribute::FOREIGN, Attribute::UNSAFE, Attribute::C, Attribute::OPEN,
@@ -740,10 +801,10 @@ bool MPTypeCheckerImpl::MatchCJMPFunction(FuncDecl& platformFunc, FuncDecl& comm
     }
 
     bool isGenericFuncMatch = false;
-    std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>> genericTyMap;
+    TypeSubst genericTyMap;
     MapCJMPGenericTypeArgs(genericTyMap, commonFunc, platformFunc);
     if (!genericTyMap.empty()) {
-        auto newCommonFuncTy = StaticCast<FuncTy*>(ReplaceCommonGenericTy(genericTyMap, commonFunc.ty));
+        auto newCommonFuncTy = StaticCast<FuncTy*>(typeManager.GetInstantiatedTy(commonFunc.ty, genericTyMap));
         auto platformFuncTy = StaticCast<FuncTy*>(platformFunc.ty);
         if (typeManager.IsFuncTySubType(*platformFuncTy, *newCommonFuncTy)) {
             isGenericFuncMatch = true;
@@ -788,6 +849,15 @@ bool MPTypeCheckerImpl::MatchCJMPFunction(FuncDecl& platformFunc, FuncDecl& comm
             }
         }
     }
+
+    if (GenericsCount(commonFunc) != GenericsCount(platformFunc)) {
+        diag.Diagnose(
+            platformFunc, DiagKind::sema_generic_member_type_argument_different, platformFunc.identifier.Val());
+        return false;
+    }
+
+    CheckCommonSpecificGenericMatch(platformFunc, commonFunc);
+
     return TrySetPlatformImpl(platformFunc, commonFunc, "function");
 }
 
@@ -812,18 +882,38 @@ bool MPTypeCheckerImpl::MatchCJMPProp(PropDecl& platformProp, PropDecl& commonPr
     return ret;
 }
 
+bool MPTypeCheckerImpl::MatchEnumFuncTypes(const FuncDecl& platform, const FuncDecl& common)
+{
+    if (typeManager.IsFuncDeclEqualType(platform, common)) {
+        // if types are equal
+        return true;
+    }
+
+    TypeSubst genericTyMap;
+    MapCJMPGenericTypeArgs(genericTyMap, common, platform);
+    if (genericTyMap.empty()) {
+        return false;
+    }
+
+    auto mappedCommonType = typeManager.GetInstantiatedTy(common.ty, genericTyMap);
+    return typeManager.IsTyEqual(mappedCommonType, platform.ty);
+}
+
 bool MPTypeCheckerImpl::MatchCJMPEnumConstructor(Decl& platformDecl, Decl& commonDecl)
 {
     if (!IsCJMPDeclMatchable(platformDecl, commonDecl)) {
         return false;
     }
-    if (platformDecl.astKind == ASTKind::FUNC_DECL) {
-        auto platformFunc = StaticAs<ASTKind::FUNC_DECL>(&platformDecl);
-        auto commonFunc = StaticAs<ASTKind::FUNC_DECL>(&commonDecl);
-        if (!typeManager.IsFuncDeclEqualType(*platformFunc, *commonFunc)) {
+
+    // identifiers are already checked
+    if (platformDecl.astKind == ASTKind::FUNC_DECL) { // enum constructrs with values
+        auto& platformFunc = StaticCast<FuncDecl>(platformDecl);
+        auto& commonFunc = StaticCast<FuncDecl>(commonDecl);
+        if (!MatchEnumFuncTypes(platformFunc, commonFunc)) {
             return false;
         }
     }
+
     auto enumName = platformDecl.outerDecl->identifier.GetRawText();
     return TrySetPlatformImpl(platformDecl, commonDecl, "enum '" + enumName + "' constructor");
 }
@@ -835,10 +925,10 @@ bool MPTypeCheckerImpl::MatchCJMPVar(VarDecl& platformVar, VarDecl& commonVar)
     }
     auto cType = commonVar.ty;
     if (platformVar.IsMemberDecl()) {
-        std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>> genericTyMapForNominals;
+        TypeSubst genericTyMapForNominals;
         MapCJMPGenericTypeArgs(genericTyMapForNominals, *commonVar.outerDecl, *platformVar.outerDecl);
         if (!genericTyMapForNominals.empty()) {
-            cType = ReplaceCommonGenericTy(genericTyMapForNominals, cType);
+            cType = typeManager.GetInstantiatedTy(cType, genericTyMapForNominals);
         }
     }
     auto pType = platformVar.ty;
@@ -884,6 +974,7 @@ bool MPTypeCheckerImpl::TryMatchVarWithPatternWithVarDecls(
     return matchedAll;
 }
 
+// this is never invoked for nominal decls
 bool MPTypeCheckerImpl::MatchPlatformDeclWithCommonDecls(
     AST::Decl& platformDecl, const std::vector<Ptr<AST::Decl>>& commonDecls)
 {
@@ -1002,25 +1093,9 @@ void MPTypeCheckerImpl::MatchPlatformWithCommon(Package& pkg)
     }
 }
 
-void MPTypeCheckerImpl::SetGenericTyMapping(
-    std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>>& genericTyMap, Ptr<AST::Ty> commonType, Ptr<AST::Ty> platformType)
-{
-    genericTyMap[commonType] = platformType;
-}
-
-Ptr<AST::Ty> MPTypeCheckerImpl::GetPlatformGenericTy(
-    const std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>>& genericTyMap, Ptr<AST::Ty> commonType)
-{
-    auto it = genericTyMap.find(commonType);
-    if (it != genericTyMap.end()) {
-        return it->second;
-    }
-    return nullptr;
-}
-
 // Maps type parameters between common and platform declarations.
-void MPTypeCheckerImpl::MapCJMPGenericTypeArgs(std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>>& genericTyMap,
-    const AST::Decl& commonDecl, const AST::Decl& platformDecl)
+void MPTypeCheckerImpl::MapCJMPGenericTypeArgs(
+    TypeSubst& genericTyMap, const AST::Decl& commonDecl, const AST::Decl& platformDecl)
 {
     if (!(commonDecl.TestAttr(Attribute::GENERIC) && platformDecl.TestAttr(Attribute::GENERIC))) {
         return;
@@ -1028,134 +1103,32 @@ void MPTypeCheckerImpl::MapCJMPGenericTypeArgs(std::unordered_map<Ptr<AST::Ty>, 
     // 1. Handle nominalDecl type parameters
     if (commonDecl.IsNominalDecl() && commonDecl.ty && !commonDecl.ty->typeArgs.empty()) {
         for (size_t i = 0; i < commonDecl.ty->typeArgs.size(); i++) {
-            if (commonDecl.ty->typeArgs[i]->IsGeneric()) {
-                SetGenericTyMapping(genericTyMap, commonDecl.ty->typeArgs[i], platformDecl.ty->typeArgs[i]);
+            auto commonType = commonDecl.ty->typeArgs[i];
+
+            if (commonType->IsGeneric()) {
+                Ptr<TyVar> commonGeneric = RawStaticCast<TyVar*>(commonType);
+                genericTyMap[commonGeneric] = platformDecl.ty->typeArgs[i];
             }
         }
     }
 
-    // 2. Handle function type parameters
-    if (commonDecl.astKind != ASTKind::FUNC_DECL || platformDecl.astKind != ASTKind::FUNC_DECL) {
+    CheckCommonSpecificGenericMatch(platformDecl, commonDecl);
+    if (GenericsCount(commonDecl) != GenericsCount(platformDecl)) {
         return;
     }
-    auto& cFunc = StaticCast<FuncDecl>(commonDecl);
-    auto& pFunc = StaticCast<FuncDecl>(platformDecl);
-    if (!IsValidFunctionPairForGenericMapping(cFunc, pFunc)) {
-        return;
-    }
-    auto& cTypeParameters = cFunc.funcBody->generic->typeParameters;
-    auto& pTypeParameters = pFunc.funcBody->generic->typeParameters;
-    auto& cGenericConstraints = cFunc.funcBody->generic->genericConstraints;
-    auto& pGenericConstraints = pFunc.funcBody->generic->genericConstraints;
-    std::unordered_map<Ptr<Ty>, unsigned> cGenericIdx;
-    std::unordered_map<Ptr<Ty>, unsigned> pGenericIdx;
-    for (unsigned idx = 0; idx < cTypeParameters.size(); ++idx) {
-        cGenericIdx.emplace(cTypeParameters[idx]->ty, idx);
-        pGenericIdx.emplace(pTypeParameters[idx]->ty, idx);
-    }
-    if (CalculatedGenericConstraintsStr(cGenericConstraints, cGenericIdx) !=
-        CalculatedGenericConstraintsStr(pGenericConstraints, pGenericIdx)) {
-        return;
-    }
-    for (size_t i = 0; i < cTypeParameters.size(); i++) {
-        SetGenericTyMapping(genericTyMap, cTypeParameters[i]->ty, pTypeParameters[i]->ty);
-    }
+    auto mapping = typeManager.GenerateGenericMappingFromGeneric(commonDecl, platformDecl);
+    genericTyMap.insert(mapping.begin(), mapping.end());
 }
 
-Ptr<AST::Ty> MPTypeCheckerImpl::ReplaceFunctionTy(
-    const std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>>& genericTyMap, Ptr<AST::Ty> funcTy)
-{
-    auto originalFuncTy = StaticCast<const FuncTy*>(funcTy);
-    std::vector<Ptr<Ty>> paramTypes;
-    bool modified = false;
-    
-    for (auto& paramTy : originalFuncTy->paramTys) {
-        auto processedParam = ReplaceCommonGenericTy(genericTyMap, paramTy);
-        paramTypes.emplace_back(processedParam);
-        if (processedParam != paramTy) {
-            modified = true;
-        }
-    }
-    
-    auto retTy = ReplaceCommonGenericTy(genericTyMap, originalFuncTy->retTy);
-    if (retTy != originalFuncTy->retTy) {
-        modified = true;
-    }
-    
-    if (modified) {
-        return typeManager.GetFunctionTy(paramTypes, retTy);
-    }
-    
-    return funcTy;
-}
-
-Ptr<AST::Ty> MPTypeCheckerImpl::ReplaceCompositeTy(
-    const std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>>& genericTyMap, Ptr<AST::Ty> ty)
-{
-    std::vector<Ptr<Ty>> newTypeArgs;
-    bool modified = false;
-    for (auto& typeArg : ty->typeArgs) {
-        auto processedArg = ReplaceCommonGenericTy(genericTyMap, typeArg);
-        newTypeArgs.emplace_back(processedArg);
-        if (processedArg != typeArg) {
-            modified = true;
-        }
-    }
-    if (modified) {
-        auto decl = Ty::GetDeclPtrOfTy(ty);
-        switch (ty->kind) {
-            case TypeKind::TYPE_CLASS:
-                return typeManager.GetClassTy(*StaticCast<ClassDecl>(decl), newTypeArgs);
-            case TypeKind::TYPE_INTERFACE:
-                return typeManager.GetInterfaceTy(*StaticCast<InterfaceDecl>(decl), newTypeArgs);
-            case TypeKind::TYPE_ENUM:
-                return typeManager.GetEnumTy(*StaticCast<EnumDecl>(decl), newTypeArgs);
-            case TypeKind::TYPE_STRUCT:
-                return typeManager.GetStructTy(*StaticCast<StructDecl>(decl), newTypeArgs);
-            case TypeKind::TYPE_TUPLE:
-                return typeManager.GetTupleTy(newTypeArgs);
-            case TypeKind::TYPE_ARRAY:
-                return typeManager.GetArrayTy(newTypeArgs[0], 0);
-            case TypeKind::TYPE_POINTER:
-                return typeManager.GetPointerTy(newTypeArgs[0]);
-            case TypeKind::TYPE_VARRAY:
-                return typeManager.GetVArrayTy(*newTypeArgs[0], 0);
-            default:
-                CJC_ASSERT(false && "Unsupported type with arguments");
-                return ty;
-        }
-    }
-    return ty;
-}
-
-Ptr<AST::Ty> MPTypeCheckerImpl::ReplaceCommonGenericTy(
-    const std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>>& genericTyMap, Ptr<AST::Ty> commonTy)
-{
-    auto ty = commonTy;
-    if (ty->IsGeneric()) {
-        if (auto newTy = GetPlatformGenericTy(genericTyMap, ty); newTy) {
-            ty = newTy;
-        }
-    }
-    if (ty->kind == TypeKind::TYPE_FUNC) {
-        return ReplaceFunctionTy(genericTyMap, ty);
-    }
-    if (!ty->typeArgs.empty()) {
-        return ReplaceCompositeTy(genericTyMap, ty);
-    }
-    return ty;
-}
-
-void MPTypeCheckerImpl::UpdateGenericTyInMemberFromCommon(
-    std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>>& genericTyMap, OwnedPtr<AST::Decl>& member)
+void MPTypeCheckerImpl::UpdateGenericTyInMemberFromCommon(TypeSubst& genericTyMap, Ptr<AST::Decl>& member)
 {
     Walker walker(member, [this, &genericTyMap](Ptr<Node> node) -> VisitAction {
         if (node->ty) {
-            node->ty = ReplaceCommonGenericTy(genericTyMap, node->ty);
+            node->ty = typeManager.GetInstantiatedTy(node->ty, genericTyMap);
         }
         if (auto ref = DynamicCast<NameReferenceExpr*>(node); ref) {
             for (auto& instTy : ref->instTys) {
-                instTy = ReplaceCommonGenericTy(genericTyMap, instTy);
+                instTy = typeManager.GetInstantiatedTy(instTy, genericTyMap);
             }
         }
         return VisitAction::WALK_CHILDREN;
@@ -1184,11 +1157,21 @@ void MPTypeCheckerImpl::UpdatePlatformMemberGenericTy(
         if (decl->TestAttr(Attribute::COMMON) && decl->TestAttr(Attribute::GENERIC)) {
             auto platformDecl = decl->platformImplementation;
             if (platformDecl) {
-                std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>> genericTyMap;
+                TypeSubst genericTyMap;
                 MapCJMPGenericTypeArgs(genericTyMap, *decl, *platformDecl);
                 for (auto& member : platformDecl->GetMemberDecls()) {
                     if (member->TestAttr(Attribute::FROM_COMMON_PART)) {
-                        UpdateGenericTyInMemberFromCommon(genericTyMap, member);
+                        auto ptr = member.get();
+                        UpdateGenericTyInMemberFromCommon(genericTyMap, ptr);
+                    }
+                }
+
+                if (auto en = DynamicCast<EnumDecl>(platformDecl)) {
+                    for (auto& ctor : en->constructors) {
+                        auto platformCtor = ctor->platformImplementation;
+                        if (platformCtor) {
+                            UpdateGenericTyInMemberFromCommon(genericTyMap, platformCtor);
+                        }
                     }
                 }
             }

@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <cstdint>
 #include <unordered_map>
 #include <optional>
 

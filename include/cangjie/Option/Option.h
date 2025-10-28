@@ -14,6 +14,7 @@
 #define CANGJIE_OPTION_OPTION_H
 
 #include <climits>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <set>
@@ -69,7 +70,6 @@ enum class DiagFormat : uint8_t { JSON, NO_COLOR, DEFAULT };
  * default: compile with no passed explicit mock option
  * */
 enum class MockMode : uint8_t { ON, OFF, RUNTIME_ERROR, DEFAULT };
-
 
 class Option {
 public:

@@ -82,6 +82,7 @@ private:
     void CheckSameNameInheritanceInfo(const MemberSignature& parent, const Decl& child) const;
     void CheckInheritanceAttributes(const MemberSignature& parent, const Decl& child) const;
     void CheckPropertyInheritance(const MemberSignature& parent, const Decl& child) const;
+    void CheckGenericTypeArgInfo(const Decl& parent, const Decl& child);
     void CheckGenericTypeArgInfo(const MemberSignature& parent, const MemberSignature& child) const;
     void CheckInheritanceForInterface(const MemberSignature& interface, const MemberSignature& child) const;
     bool CheckImplementationRelation(const MemberSignature& parent, const MemberSignature& child) const;
@@ -108,7 +109,6 @@ private:
 
     /** Checks related to NativeFFI */
     void CheckNativeFFI(const MemberSignature& parent, const MemberSignature& child) const;
-
 
     /**
      * Generates the built-in operator function and adds to ed.members.
@@ -201,5 +201,12 @@ private:
         bool needUpdate;
     };
 };
+
+std::vector<std::unordered_set<Ptr<Ty>>> GetAllGenericUpperBounds(TypeManager& tyMgr, const Decl& decl);
+
+void CheckGenericTypeBoundsMapped(const Decl& parent, const Decl& child,
+    std::vector<std::unordered_set<Ptr<Ty>>> parentBounds, std::vector<std::unordered_set<Ptr<Ty>>> childBounds,
+    DiagnosticEngine& diag, TypeManager& typeManager);
+
 } // namespace Cangjie
 #endif
