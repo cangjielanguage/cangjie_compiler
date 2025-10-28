@@ -1448,6 +1448,14 @@ void ParserImpl::DiagAnnotationMoreThanOneArgs(const Annotation& node, const std
     }
 }
 
+void ParserImpl::DiagAnnotationShouldNotHaveArgs(const Annotation& node, const std::string& annotationName)
+{
+    CJC_ASSERT(!node.args.empty());
+    const Node* diagNode = StaticCast<Node*>(node.args[0].get().get());
+    auto dbuilder = ParseDiagnoseRefactor(DiagKindRefactor::parse_annotation_no_arguments,
+        *diagNode, annotationName);
+}
+
 void ParserImpl::DiagUnexpectedTypeIn(
     const Type& type, const Position& inPos, const std::string& inStr, const std::string& noteStr)
 {

@@ -1060,6 +1060,7 @@ private:
     void DiagAnnotationMoreThanOneArgs(const AST::Annotation& node, const std::string& annotationName);
     void DiagAnnotationMoreThanOneArgs(const AST::Annotation& node, const std::string& annotationName,
         const std::string& argInfo);
+    void DiagAnnotationShouldNotHaveArgs(const Annotation& node, const std::string& annotationName);
 
     // Cangjie Native & Java/ObjC FFI
     void CheckObjCMirrorAnnotation(const AST::Annotation& anno) const;

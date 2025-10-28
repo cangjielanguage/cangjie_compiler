@@ -12,7 +12,9 @@
 
 #include "Handlers.h"
 #include "NativeFFI/Utils.h"
+#include "NativeFFI/ObjC/Utils/Common.h"
 #include "cangjie/AST/Create.h"
+#include "cangjie/AST/Utils.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include <iterator>
 
@@ -43,6 +45,8 @@ void DesugarMirrors::HandleImpl(InteropContext& ctx)
                         DesugarCtor(ctx, *mirror, fd);
                     } else if (fd.TestAttr(Attribute::FINALIZER)) {
                         continue;
+                    } else if (IsStaticInitMethod(fd)) {
+                        DesugarStaticMethodInitializer(ctx, fd);
                     } else {
                         // method branch
                         DesugarMethod(ctx, *mirror, fd);
@@ -77,28 +81,30 @@ void DesugarMirrors::HandleImpl(InteropContext& ctx)
 }
 
 void DesugarMirrors::DesugarCtor(InteropContext& ctx, ClassLikeDecl& mirror, FuncDecl& ctor)
-{
+{ 
+    CJC_ASSERT(ctor.TestAttr(Attribute::CONSTRUCTOR));
     auto curFile = ctor.curFile;
-    CJC_NULLPTR_CHECK(ctor.funcBody);
-    CJC_ASSERT(!ctor.funcBody->paramLists.empty());
-
-    auto& params = ctor.funcBody->paramLists[0]->params;
     auto& generatedCtor = *ctx.factory.GetGeneratedMirrorCtor(mirror);
     auto thisCall = CreateThisCall(mirror, generatedCtor, generatedCtor.ty, curFile);
-    auto allocCall = ctx.factory.CreateAllocCall(*StaticAs<ASTKind::CLASS_DECL>(&mirror), curFile);
 
-    std::vector<OwnedPtr<Expr>> initArgs;
-    std::transform(params.begin(), params.end(), std::back_inserter(initArgs), [&ctx, curFile](auto& param) {
-        auto unwrapped = ctx.factory.UnwrapEntity(WithinFile(CreateRefExpr(*param), curFile));
-        return unwrapped;
-    });
-
-    auto initCall = ctx.factory.CreateMethodCallViaMsgSend(ctor, std::move(allocCall), std::move(initArgs));
-
+    auto initCall = ctx.factory.CreateAllocInitCall(ctor);
     thisCall->args.emplace_back(CreateFuncArg(std::move(initCall)));
 
     ctor.constructorCall = ConstructorCall::OTHER_INIT;
     ctor.funcBody->body->body.emplace_back(std::move(thisCall));
+}
+
+void DesugarMirrors::DesugarStaticMethodInitializer(InteropContext& ctx, FuncDecl& initializer)
+{
+    CJC_ASSERT(IsStaticInitMethod(initializer));
+    auto curFile = initializer.curFile;
+    auto retTy = StaticCast<FuncTy>(initializer.ty)->retTy;
+
+    auto initCall = ctx.factory.CreateAllocInitCall(initializer);
+    auto returnExpr = WithinFile(CreateReturnExpr(std::move(initCall)), curFile);
+    returnExpr->ty = TypeManager::GetNothingTy();
+    initializer.funcBody->body = CreateBlock({}, retTy);
+    initializer.funcBody->body->body.emplace_back(std::move(returnExpr));
 }
 
 void DesugarMirrors::DesugarMethod(InteropContext& ctx, ClassLikeDecl& mirror, FuncDecl& method)

@@ -315,6 +315,7 @@ ERROR(parse_deprecated_invalid_target, "%s can not be target of @Deprecated")
 
 ERROR(parse_annotation_max_one_argument, "%s requires zero or one%s argument", "expected %s here")
 ERROR(parse_annotation_one_argument, "%s requires exactly one%s argument", "expected %s here")
+ERROR(parse_annotation_no_arguments, "%s accepts no arguments", "unexpected argument(s)")
 // interop
 ERROR(parse_foreign_name_on_ffi_decl_member, "@ForeignName could only be used on FFI declaration member")
 
@@ -372,6 +373,8 @@ ERROR(parse_objc_mirror_func_cannot_have_body, "@ObjCMirror top-level function '
 ERROR(parse_objc_mirror_func_must_have_explicit_type, "@ObjCMirror top-level function '%s' must have result type explicitly specified")
 ERROR(parse_objc_mirror_func_cannot_be_const, "@ObjCMirror top-level function '%s' cannot be const")
 ERROR(parse_objc_mirror_func_must_be_top_level, "@ObjCMirror function '%s' can only be declared on top-level")
+ERROR(parse_objc_init_method_must_be_static, "@ObjCInit method must be modified with 'static'")
+ERROR(parse_objc_init_method_must_be_in_mirror_class, "@ObjCInit method must be declared within '@ObjCMirror' class")
 
 ERROR(parse_objc_interop_not_supported, "Objective-C interoperability feature '%s' is not yet supported")
 

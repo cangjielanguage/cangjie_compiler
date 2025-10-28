@@ -1264,6 +1264,40 @@ OwnedPtr<Expr> ASTFactory::CreateMethodCallViaMsgSend(
         std::move(nativeHandle), objcname, typeMapper.Cj2CType(StaticCast<FuncTy>(fd.ty)->retTy), std::move(rawArgs));
 }
 
+OwnedPtr<Expr> ASTFactory::CreateMethodCallViaMsgSend(FuncDecl& fd, OwnedPtr<Expr> handle)
+{
+    CJC_NULLPTR_CHECK(fd.outerDecl);
+    CJC_ASSERT(TypeMapper::IsObjCCompatible(*fd.outerDecl->ty));
+    CJC_NULLPTR_CHECK(fd.funcBody);
+    CJC_ASSERT(!fd.funcBody->paramLists.empty());
+
+    auto curFile = handle->curFile;
+    auto& params = fd.funcBody->paramLists[0]->params;
+
+    std::vector<OwnedPtr<Expr>> args;
+    std::transform(params.begin(), params.end(), std::back_inserter(args), [this ,curFile](auto& param) {
+        auto unwrapped = UnwrapEntity(WithinFile(CreateRefExpr(*param), curFile));
+        return unwrapped;
+    });
+
+    return CreateMethodCallViaMsgSend(fd, std::move(handle), std::move(args));
+}
+
+OwnedPtr<Expr> ASTFactory::CreateAllocInitCall(FuncDecl& fd)
+{   
+    // object instantiation is allowed only for:
+    // - init constructor
+    // - @ObjCInit method
+    CJC_ASSERT(fd.TestAttr(Attribute::CONSTRUCTOR) || IsStaticInitMethod(fd));
+    CJC_NULLPTR_CHECK(fd.outerDecl);
+    CJC_ASSERT(fd.outerDecl->astKind == ASTKind::CLASS_DECL);
+    auto& mirror = *StaticAs<ASTKind::CLASS_DECL>(fd.outerDecl);
+    auto curFile = mirror.curFile;
+
+    auto allocCall = CreateAllocCall(mirror, curFile);
+    return CreateMethodCallViaMsgSend(fd, std::move(allocCall));
+}
+
 OwnedPtr<Expr> ASTFactory::CreatePropGetterCallViaMsgSend(PropDecl& pd, OwnedPtr<Expr> nativeHandle)
 {
     auto objcname = nameGenerator.GetObjCDeclName(pd);

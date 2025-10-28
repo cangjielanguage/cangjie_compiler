@@ -24,6 +24,10 @@ public:
     ~OCFFIParserImpl() = default;
 
     void CheckAnnotation(const AST::Annotation& anno, ScopeKind scopeKind) const;
+    /**
+     * Checks `@ObjCInit` annotation correctness within `fd` as a target
+     */
+    void CheckInitAnnotation(AST::FuncDecl& fd) const;
     void CheckMirrorSignature(AST::ClassLikeDecl& decl, const PtrVector<AST::Annotation>& annos) const;
     void CheckImplSignature(AST::ClassLikeDecl& decl, const PtrVector<AST::Annotation>& annos) const;
     void CheckMirrorSignature(AST::FuncDecl& decl, const PtrVector<AST::Annotation>& annos) const; 
@@ -41,6 +45,8 @@ public:
 
     void DiagObjCImplCannotHaveStaticInit(const AST::Node& node) const;
     void DiagObjCImplCannotBeGeneric(const AST::Node& node) const;
+    void DiagObjCInitFuncMustBeStatic(const AST::Node& node) const;
+    void DiagObjCInitFuncMustBeInMirrorClass(const AST::FuncDecl& node) const;
 
     void DiagObjCMirrorFuncCannotBeForeign(const AST::FuncDecl& node) const;
     void DiagObjCMirrorFuncCannotBeC(const AST::FuncDecl& node) const;
@@ -53,9 +59,11 @@ public:
 private:
     void CheckMirrorAnnoArgs(const AST::Annotation& anno) const;
     void CheckImplAnnoArgs(const AST::Annotation& anno) const;
+    void CheckInitAnnoArgs(const AST::Annotation& anno) const;
 
     void CheckMirrorAnnoTarget(const AST::Annotation& anno, ScopeKind scopeKind) const;
     void CheckImplAnnoTarget(const AST::Annotation& anno) const;
+    void CheckInitAnnoTarget(const AST::Annotation& anno) const;
 
     void DiagObjCMirrorCannotBeSealed(const AST::Node& node) const;
 

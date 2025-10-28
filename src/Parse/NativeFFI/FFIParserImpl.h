@@ -31,6 +31,7 @@ public:
     void CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const;
     void CheckForeignNameAnnotation(Decl& decl) const;
     void CheckZeroOrSingleStringLitArgAnnotation(const AST::Annotation &anno, const std::string &annotationName) const;
+    void CheckNoArgAnnotation(const AST::Annotation &anno, const std::string &annotationName) const;
 
     void CheckClassLikeSignature(AST::ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const;
     void CheckFuncSignature(AST::FuncDecl& decl, const PtrVector<Annotation>& annos) const;

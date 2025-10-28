@@ -601,6 +601,11 @@ enum class Attribute {
      */
     OBJ_C_MIRROR_SUBTYPE,
     /**
+     * Marks whether a cangjie method is an Objective-C init.
+     */
+    OBJ_C_INIT,
+
+    /**
      * Mark whether a pure cangjie decl is mapped to use by java side.
      * W: Parser
      * R: Sema.
