@@ -858,14 +858,19 @@ OwnedPtr<FuncDecl> MockSupportManager::GenerateFuncAccessor(FuncDecl& methodDecl
     memberAccessOriginal->ty = needEraseTypes ? erasedAccessor->ty : originalFuncTy;
 
     std::vector<OwnedPtr<FuncArg>> mockedMethodArgRefs {};
-    for (auto& param : methodAccessor->funcBody->paramLists[0]->params) {
+    auto& accessorParams = methodAccessor->funcBody->paramLists[0]->params;
+    for (std::size_t param_idx = 0; param_idx < accessorParams.size(); ++param_idx) {
+        auto& param = accessorParams[param_idx];
         param->ty = typeManager.GetInstantiatedTy(param->ty, typeSubst);
         param->outerDecl = methodAccessor.get();
         auto refExpr = CreateRefExpr(*param);
         refExpr->curFile = param->curFile;
 
         if (param->desugarDecl) {
-            param->desugarDecl->DisableAttr(Attribute::GENERIC_INSTANTIATED);
+            auto& originalParam = methodDecl.funcBody->paramLists[0]->params[param_idx];
+            CJC_ASSERT(originalParam->desugarDecl);
+            param->desugarDecl = GenerateFuncAccessor(*originalParam->desugarDecl);
+            param->desugarDecl->ownerFunc = methodAccessor;
         }
         mockedMethodArgRefs.emplace_back(CreateFuncArg(std::move(refExpr)));
     }
@@ -905,6 +910,14 @@ OwnedPtr<FuncDecl> MockSupportManager::GenerateFuncAccessor(FuncDecl& methodDecl
         MarkMockAccessorWithAttributes(*methodAccessor, AccessLevel::PUBLIC);
         methodAccessor->linkage = Linkage::EXTERNAL;
         methodDecl.linkage = Linkage::EXTERNAL;
+    }
+
+    // Mangling has to be done after outer function identifier is set
+    for (auto& param : accessorParams) {
+        if (param->desugarDecl) {
+            param->desugarDecl->mangledName.clear();
+            param->desugarDecl->mangledName = mockUtils->Mangle(*param->desugarDecl);
+        }
     }
 
     if (needEraseTypes) {
