@@ -21,9 +21,6 @@ ERROR(parse_varray_with_paren, "expected '(' or '{' after 'VArray' for 'VArray' 
 ERROR(parse_expected_import, "expected 'import' after module name, found %s", "expected 'import' here", {
     "after module name"
 })
-ERROR(parse_expected_module_name, "expected module name after keyword 'from', found %s", "expected module name here", {
-    "after keyword 'from'"
-})
 ERROR(parse_expected_right_delimiter, "unclosed delimiter: '%s'", "expected '%s' here", {
     "to match this opening '%s'",
 })
