@@ -278,6 +278,8 @@ private:
 
     void PushSelfParams(std::vector<OwnedPtr<FuncParam>>& params, std::string name = "self");
 
+    OwnedPtr<CallExpr> GetFwdClassInstance(OwnedPtr<RefExpr> paramRef, Decl& fwdClassDecl);
+
     bool FillMethodParamsByArg(std::vector<OwnedPtr<FuncParam>>& params, std::vector<OwnedPtr<FuncArg>>& callArgs,
         FuncDecl& funcDecl, OwnedPtr<FuncParam>& arg, FuncParam& jniEnvPtrParam);
 
@@ -488,9 +490,40 @@ private:
     void GenerateForCJStructOrClassTypeMapping(const File &file, AST::Decl* decl);
     void GenerateForCJEnumMapping(AST::EnumDecl& enumDecl);
     void GenerateForCJExtendMapping(AST::ExtendDecl& extendDecl);
+
+    /**
+     * for a cj-mapping interface:
+     * 
+     * public interface CJMappingInterface {
+     *   public func foo() : Unit {...}
+     * }
+     * 
+     * the following forward class and native method will be generated:
+     * 
+     * class CJMappingInterface_fwd <: CJMappingInterface { // Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD
+     *     public let javaref: Java_CFFI_JavaEntity
+     * 
+     *     public init(ref: Java_CFFI_JavaEntity) {...}
+     * 
+     *     public func foo(): Unit {
+     *         jniCall("Java/A", "foo", "()V", [])
+     *     }
+     * 
+     *     public func foo_default_impl(): Unit {...} // Attribute::JAVA_CJ_MAPPING_INTERFACE_DEFAULT
+     * } 
+     * 
+     * @C
+     * public func Java_CJMappingInterface_1fwd_foo_1default_1impl(env, _: jclass, javaref: jobject) {
+     *     return CJMappingInterface_fwd(javaref).foo_default_impl()
+     * }
+     */
     void GenerateForCJInterfaceMapping(AST::InterfaceDecl& interfaceDecl);
+    void GenerateNativeForCJInterfaceMapping(AST::ClassDecl& classDecl);
     void GenerateInterfaceFwdclassBody(AST::ClassDecl& fwdclassDecl, AST::InterfaceDecl& interfaceDecl);
     OwnedPtr<FuncDecl> GenerateInterfaceFwdclassMethod(AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl);
+    OwnedPtr<FuncDecl> GenerateInterfaceFwdclassDefaultMethod(
+        AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl);
+
     OwnedPtr<PrimitiveType> CreateUnitType();
     void GenerateForCJOpenClassMapping(AST::ClassDecl& classDecl);
     void GenerateClassFwdclassBody(AST::ClassDecl& fwdclassDecl, AST::ClassDecl& classDecl, std::vector<std::pair<Ptr<FuncDecl>, Ptr<FuncDecl>>>& pairCtors);

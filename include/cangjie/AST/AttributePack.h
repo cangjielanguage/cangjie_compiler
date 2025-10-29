@@ -620,7 +620,7 @@ enum class Attribute {
     OBJ_C_CJ_MAPPING,
 
     /**
-     * Mark whether a class decl is a forward class for cangjie interface.
+     * Mark whether a class decl is an interface-forward class.
      * A forward class is used to forward the method call to Java side.
      * W: Sema.
      * R: Sema.
@@ -649,6 +649,13 @@ enum class Attribute {
      * R: Sema.
      */
     OBJ_C_MIRROR_SYNTHETIC_WRAPPER,
+
+    /**
+     * Mark whether a function in interface-forward class is a default implementation of cj-mapping interface.
+     * W: Sema.
+     * R: Sema.
+     */
+    CJ_MIRROR_JAVA_INTERFACE_DEFAULT,
 
     AST_ATTR_END,
 };
