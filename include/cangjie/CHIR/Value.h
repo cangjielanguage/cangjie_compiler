@@ -655,6 +655,7 @@ public:
 
     FuncBase* GetParamDftValHostFunc() const;
     void SetParamDftValHostFunc(FuncBase& hostFunc);
+    void ClearParamDftValHostFunc();
 
     // ===--------------------------------------------------------------------===//
     // Signature Infomation
