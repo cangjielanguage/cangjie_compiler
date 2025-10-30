@@ -16,6 +16,26 @@
 namespace Cangjie::Interop::Java {
 using namespace Cangjie::Native::FFI;
 
+Ptr<VarDecl> GetFwdClassField(ClassDecl& fwdDecl, std::string identifier)
+{
+   for (auto& member : fwdDecl.body->decls) {
+        if (auto varDecl = As<ASTKind::VAR_DECL>(member); varDecl && varDecl->identifier == identifier) {
+            return varDecl;
+        }
+    }
+    return nullptr;
+}
+
+Ptr<FuncDecl> GetFwdClassMethod(ClassDecl& fwdDecl, std::string identifier)
+{
+   for (auto& member : fwdDecl.body->decls) {
+        if (auto funcDecl = As<ASTKind::FUNC_DECL>(member); funcDecl && funcDecl->identifier == identifier) {
+            return funcDecl;
+        }
+    }
+    return nullptr;
+}
+
 // Support Struct decl and Enum decl for now.
 OwnedPtr<Decl> JavaDesugarManager::GenerateCJMappingNativeDeleteCjObjectFunc(Decl& decl)
 {
@@ -32,6 +52,46 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateCJMappingNativeDeleteCjObjectFunc(Dec
     paramLists.push_back(CreateFuncParamList(std::move(params)));
 
     return GenerateNativeFuncDeclBylambda(decl, wrappedNodesLambda, paramLists, *jniEnvPtrParam, unitTy, funcName);
+}
+
+OwnedPtr<Decl> JavaDesugarManager::GenerateCJMappingNativeDetachCjObjectFunc(ClassDecl& fwdDecl, ClassDecl& classDecl)
+{
+    std::vector<OwnedPtr<FuncParam>> params;
+    FuncParam* jniEnvPtrParam = nullptr;
+    OwnedPtr<Expr> selfParamRef;
+    GenerateFuncParamsForNativeDeleteCjObject(fwdDecl, params, jniEnvPtrParam, selfParamRef);
+    constexpr int SELF_REF_INDEX = 2;
+    constexpr int OBJ_REF_INDEX = 1;
+    OwnedPtr<Expr> envParamRef = WithinFile(CreateRefExpr(*jniEnvPtrParam), fwdDecl.curFile);
+    OwnedPtr<Expr> objParamRef = WithinFile(CreateRefExpr(*params[OBJ_REF_INDEX]), fwdDecl.curFile);
+
+
+    auto javaEntityCall = lib.CreateJavaEntityJobjectCall(std::move(objParamRef));
+    auto reg = lib.CreateGetFromRegistryCall(std::move(envParamRef), std::move(selfParamRef), fwdDecl.ty);
+    auto controllerVar = GetFwdClassField(fwdDecl, JAVA_OBJECT_CONTROLLER_NAME);
+    auto varAccess = CreateMemberAccess(std::move(reg), *controllerVar);
+    auto detachCjObjectFd = lib.GetDetachCJObjectDecl();
+    auto retTy = StaticCast<FuncTy*>(detachCjObjectFd->ty)->retTy;
+    auto funcAccess = CreateMemberAccess(std::move(varAccess), *detachCjObjectFd);
+
+    std::vector<OwnedPtr<FuncArg>> args;
+    OwnedPtr<Expr> selfParamRefTmp = WithinFile(CreateRefExpr(*params[SELF_REF_INDEX]), fwdDecl.curFile);
+    OwnedPtr<Expr> envParamRefTmp = WithinFile(CreateRefExpr(*jniEnvPtrParam), fwdDecl.curFile);
+    OwnedPtr<Expr> objParamRefTmp = WithinFile(CreateRefExpr(*params[OBJ_REF_INDEX]), fwdDecl.curFile);
+    args.push_back(CreateFuncArg(std::move(envParamRefTmp)));
+    args.push_back(CreateFuncArg(std::move(objParamRefTmp)));
+    args.push_back(CreateFuncArg(std::move(selfParamRefTmp)));
+
+    auto methodCall = CreateCallExpr(std::move(funcAccess), std::move(args), detachCjObjectFd, retTy,
+        CallKind::CALL_DECLARED_FUNCTION);
+
+    auto wrappedNodesLambda = WrapReturningLambdaExpr(typeManager, Nodes(std::move(methodCall)));
+    Ptr<Ty> unitTy = typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT).get();
+    auto funcName = GetJniDetachCjObjectFuncName(classDecl);
+    std::vector<OwnedPtr<FuncParamList>> paramLists;
+    paramLists.push_back(CreateFuncParamList(std::move(params)));
+
+    return GenerateNativeFuncDeclBylambda(fwdDecl, wrappedNodesLambda, paramLists, *jniEnvPtrParam, unitTy, funcName);
 }
 
 // Current support struct, class type.
@@ -189,6 +249,347 @@ void JavaDesugarManager::GenerateForCJInterfaceMapping(AST::InterfaceDecl& inter
     generatedDecls.push_back(std::move(fwdclassDecl));
 }
 
+void JavaDesugarManager::InsertJavaObjectControllerVarDecl(ClassDecl& fwdClassDecl, ClassDecl& classDecl)
+{
+    auto& javaObjectControllerDecl = *lib.GetJavaObjectControllerDecl();
+    auto controllerRefType = CreateRefType(javaObjectControllerDecl);
+
+    auto instantTy = typeManager.GetClassTy(classDecl, classDecl.ty->typeArgs);
+    auto varTy = typeManager.GetClassTy(javaObjectControllerDecl, {std::move(instantTy)});
+    controllerRefType->ty = varTy;
+
+    auto instantiationRefType = CreateRefType(classDecl);
+    controllerRefType->typeArguments.emplace_back(std::move(instantiationRefType));
+
+    auto javaObjectControllerVarDecl = CreateVarDecl(JAVA_OBJECT_CONTROLLER_NAME, nullptr, controllerRefType);
+    javaObjectControllerVarDecl->ty = varTy; 
+    javaObjectControllerVarDecl->curFile = fwdClassDecl.curFile;
+
+    Modifier publicMod = Modifier(TokenKind::PUBLIC, javaObjectControllerVarDecl->begin);
+    publicMod.curFile = fwdClassDecl.curFile;
+    javaObjectControllerVarDecl->modifiers.emplace(std::move(publicMod));
+
+    javaObjectControllerVarDecl->isVar = false;
+    javaObjectControllerVarDecl->outerDecl = Ptr(&fwdClassDecl);
+    javaObjectControllerVarDecl->fullPackageName = fwdClassDecl.fullPackageName;
+
+    fwdClassDecl.body->decls.push_back(std::move(javaObjectControllerVarDecl));
+}
+
+OwnedPtr<PrimitiveType> GetInt64PrimitiveType() {
+    OwnedPtr<PrimitiveType> type = MakeOwned<PrimitiveType>();
+    type->str = "UInt64";
+    type->kind = AST::TypeKind::TYPE_UINT64;
+    type->ty = TypeManager::GetPrimitiveTy(AST::TypeKind::TYPE_UINT64);
+    return type;
+}
+
+void JavaDesugarManager::InsertOverrideMaskVar(AST::ClassDecl& fwdClassDecl)
+{
+    auto overrideMaskVar = CreateVarDecl(JAVA_OVERRIDE_MASK_NAME, nullptr, GetInt64PrimitiveType());
+    overrideMaskVar->ty = TypeManager::GetPrimitiveTy(AST::TypeKind::TYPE_UINT64); 
+    overrideMaskVar->curFile = fwdClassDecl.curFile;
+
+    Modifier publicMod = Modifier(TokenKind::PUBLIC, overrideMaskVar->begin);
+    publicMod.curFile = fwdClassDecl.curFile;
+    overrideMaskVar->modifiers.emplace(std::move(publicMod));
+
+    overrideMaskVar->isVar = false;
+    overrideMaskVar->outerDecl = Ptr(&fwdClassDecl);
+    overrideMaskVar->fullPackageName = fwdClassDecl.fullPackageName;
+
+    fwdClassDecl.body->decls.push_back(std::move(overrideMaskVar));
+}
+
+
+OwnedPtr<FuncDecl> JavaDesugarManager::GenerateFwdClassCtor(ClassDecl& fwdDecl, ClassDecl& classDecl, FuncDecl& oriCtorDecl)
+{
+    auto ctor = ASTCloner::Clone(Ptr(&oriCtorDecl));
+
+    auto curFile = classDecl.curFile;
+
+    auto& javaEntityDecl = *lib.GetJavaEntityDecl();
+    auto int64Type = GetInt64PrimitiveType();
+    auto javaEntityFuncParam = CreateFuncParam("$ref", CreateRefType(javaEntityDecl), nullptr, javaEntityDecl.ty);
+    auto maskFuncParam = CreateFuncParam("mask", std::move(int64Type), nullptr, TypeManager::GetPrimitiveTy(AST::TypeKind::TYPE_UINT64));
+
+    std::vector<Ptr<Ty>> paramTys = {javaEntityFuncParam->ty, maskFuncParam->ty};
+    for (auto paramTy : StaticCast<FuncTy*>(oriCtorDecl.ty.get())->paramTys) {
+        paramTys.push_back(paramTy);
+    }
+
+    // func call name
+    // param
+    auto initDecl = lib.GetJavaObjectControllerInitDecl();
+    auto javaEntityParamExpr = CreateRefExpr(*javaEntityFuncParam);
+    auto strTy = initDecl->funcBody->paramLists[0]->params[1]->ty;
+    auto classNameExpr = CreateLitConstExpr(LitConstKind::STRING, utils.GetJavaClassNormalizeSignature(*classDecl.ty), strTy);
+
+    auto lhsController = WithinFile(CreateRefExpr(*GetFwdClassField(fwdDecl, JAVA_OBJECT_CONTROLLER_NAME)), curFile);
+    auto rhsController = lib.CreateJavaObjectControllerCall(std::move(javaEntityParamExpr), std::move(classNameExpr), classDecl);    
+    auto controllerAssignment = CreateAssignExpr(std::move(lhsController), std::move(rhsController), TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+
+    auto lhsMask = WithinFile(CreateRefExpr(*GetFwdClassField(fwdDecl, JAVA_OVERRIDE_MASK_NAME)), curFile);
+    auto rhsMask = WithinFile(CreateRefExpr(*maskFuncParam), curFile);     
+    auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
+    auto maskAssignment = CreateAssignExpr(std::move(lhsMask), std::move(rhsMask), unitTy);  
+
+    auto ctorTy = typeManager.GetFunctionTy(paramTys, fwdDecl.ty);
+
+    auto superCall = CreateSuperCall(*oriCtorDecl.outerDecl, oriCtorDecl, oriCtorDecl.ty);
+    for (auto& param : ctor->funcBody->paramLists[0]->params) {
+         auto paramRef = WithinFile(CreateRefExpr(*param), curFile);
+        superCall->args.push_back(CreateFuncArg(std::move(paramRef)));
+    }
+
+    ctor->funcBody->paramLists[0]->params.insert(ctor->funcBody->paramLists[0]->params.begin(), std::move(maskFuncParam));
+    ctor->funcBody->paramLists[0]->params.insert(ctor->funcBody->paramLists[0]->params.begin(), std::move(javaEntityFuncParam));
+
+    auto& block = ctor->funcBody->body;
+    block->body.clear();
+
+    block->body.emplace_back(std::move(superCall));
+    block->body.emplace_back(std::move(controllerAssignment));
+    block->body.emplace_back(std::move(maskAssignment));
+
+    ctor->funcBody->ty = ctorTy;
+    ctor->ty = ctorTy;
+    ctor->outerDecl = &fwdDecl;
+    ctor->funcBody->funcDecl = ctor.get();
+    ctor->funcBody->parentClassLike = &classDecl;
+    return ctor;
+}
+
+void JavaDesugarManager::InsertAttachCJObject(ClassDecl& fwdDecl, ClassDecl& classDecl)
+{
+    auto curFile = fwdDecl.curFile;
+
+    auto attachCJObjectDecl = lib.GetAttachCJObjectDecl();
+    auto javaCffiEntityDecl = lib.GetJavaEntityDecl();
+    
+    auto javaCffiEntityTy = lib.GetJavaEntityTy();
+
+    auto javaEnvFuncParam = lib.CreateEnvFuncParam();
+
+    auto funcTy = typeManager.GetFunctionTy({javaEnvFuncParam->ty}, javaCffiEntityTy);
+
+    std::vector<OwnedPtr<Node>> bodyNodes;
+
+    auto controllerRefExpr = WithinFile(CreateRefExpr(*GetFwdClassField(fwdDecl, JAVA_OBJECT_CONTROLLER_NAME)), curFile);
+    auto funcAccess = CreateMemberAccess(std::move(controllerRefExpr), *attachCJObjectDecl);
+
+    std::vector<OwnedPtr<FuncArg>> args;
+    auto javaEnvRefExpr = CreateRefExpr(*javaEnvFuncParam);
+    args.push_back(CreateFuncArg(std::move(javaEnvRefExpr)));
+
+    auto methodCall = CreateCallExpr(std::move(funcAccess), std::move(args), attachCJObjectDecl, javaCffiEntityTy,
+        CallKind::CALL_DECLARED_FUNCTION);
+    auto returnExpr = CreateReturnExpr(std::move(methodCall));
+    bodyNodes.push_back(std::move(returnExpr));
+
+    std::vector<OwnedPtr<FuncParam>> params;
+    params.push_back(std::move(javaEnvFuncParam));
+    auto paramList = CreateFuncParamList(std::move(params));
+    std::vector<OwnedPtr<FuncParamList>> paramLists;
+    paramLists.push_back(std::move(paramList));
+
+    auto funcBody =
+        CreateFuncBody(std::move(paramLists), CreateRefType(*javaCffiEntityDecl), CreateBlock(std::move(bodyNodes), javaCffiEntityTy), javaCffiEntityTy);
+
+    auto fd = CreateFuncDecl(attachCJObjectDecl->identifier.Val(), std::move(funcBody), funcTy);
+
+    fd->fullPackageName = fwdDecl.fullPackageName;
+    fd->outerDecl = &fwdDecl;
+    fd->funcBody->funcDecl = fd.get();
+    fd->constructorCall = ConstructorCall::SUPER;
+    fd->EnableAttr(Attribute::PUBLIC, Attribute::IN_CLASSLIKE);
+    fd->funcBody->parentClassLike = &classDecl;
+
+    fwdDecl.body->decls.emplace_back(std::move(fd));
+}
+
+OwnedPtr<FuncDecl> JavaDesugarManager::GenerateFwdClassMethod(ClassDecl& fwdDecl, ClassDecl& classDecl, FuncDecl& oriMethodDecl, int index)
+{
+    auto fun = ASTCloner::Clone(Ptr(&oriMethodDecl));
+    auto curFile = classDecl.curFile;
+    CJC_NULLPTR_CHECK(curFile);
+
+    // generate thenbody
+    // let env = Java_CFFI_get_env()
+    OwnedPtr<CallExpr> jniEnvCall = lib.CreateGetJniEnvCall(curFile);
+    if (!jniEnvCall) {
+        fun->EnableAttr(Attribute::IS_BROKEN);
+        return nullptr;
+    }
+    auto envVar = CreateVarDecl(ENV, std::move(jniEnvCall), nullptr);
+
+    // let localRef = attachCJObject(env)
+    auto attachCJObjectDecl = GetFwdClassMethod(fwdDecl, "attachCJObject");
+    auto attachRefExpr = WithinFile(CreateRefExpr(*envVar), curFile);
+    auto attachCallExpr = CreateCall(attachCJObjectDecl, curFile, std::move(attachRefExpr));
+    auto localRefVar = CreateVarDecl("localRef", std::move(attachCallExpr), nullptr);
+
+    // deleteLocalRef(env, localRef)
+    auto deleteLocalRefDecl = lib.GetDeleteLocalRefDecl();
+    std::vector<OwnedPtr<FuncArg>> deleteCallArgs;
+    auto deleteEnvRef = WithinFile(CreateRefExpr(*envVar), curFile);
+    auto deleteLocalRef = WithinFile(CreateRefExpr(*localRefVar), curFile);
+    auto deleteCallExpr = CreateCall(deleteLocalRefDecl, curFile, std::move(deleteEnvRef), std::move(deleteLocalRef));
+ 
+    // Java_CFFI_callVirtualMethod
+    auto& paramList = *fun->funcBody->paramLists[0].get();
+    auto callEnvRef = WithinFile(CreateRefExpr(*envVar), curFile);
+    auto callLocalRef = WithinFile(CreateRefExpr(*localRefVar), curFile);
+    OwnedPtr<Expr> methodCall = lib.CreateCFFICallMethodCall(
+                std::move(callEnvRef), std::move(callLocalRef),
+                MemberJNISignature(utils, *fun),
+                paramList, *curFile);
+    if (!methodCall) {
+        fun->EnableAttr(Attribute::IS_BROKEN);
+        return nullptr;
+    }
+    
+    auto methodCallRes = WithinFile(CreateTmpVarDecl(nullptr, std::move(methodCall)), curFile);
+    auto callResRef = WithinFile(CreateRefExpr(*methodCallRes), curFile);
+    auto unwrapJavaEntityCall = lib.UnwrapJavaEntity(std::move(callResRef), fun->funcBody->retType->ty, fwdDecl);
+    if (!unwrapJavaEntityCall) {
+        fun->EnableAttr(Attribute::IS_BROKEN);
+        return nullptr;
+    }
+
+    std::vector<OwnedPtr<Node>> thenBodyNodes;
+    auto thenRetExpr = CreateReturnExpr(std::move(unwrapJavaEntityCall), fun->funcBody.get());
+    thenRetExpr->ty = TypeManager::GetNothingTy();
+    thenRetExpr->refFuncBody = fun->funcBody.get();
+    thenBodyNodes.push_back(std::move(envVar));
+    thenBodyNodes.push_back(std::move(localRefVar));
+    thenBodyNodes.push_back(std::move(methodCallRes));
+    thenBodyNodes.push_back(std::move(deleteCallExpr));
+    thenBodyNodes.push_back(std::move(thenRetExpr));
+    auto thenBodyBlock = CreateBlock(std::move(thenBodyNodes), fun->funcBody->retType->ty);
+
+    // generate elsebody
+    auto superRef = WithinFile(CreateSuperRef(Ptr(&classDecl), classDecl.ty), curFile);
+    auto superMemAcess = CreateMemberAccess(std::move(superRef), oriMethodDecl);
+    std::vector<OwnedPtr<FuncArg>> superCallArgs;
+    for (auto& param : fun->funcBody->paramLists[0]->params) {
+         auto paramRef = WithinFile(CreateRefExpr(*param), curFile);
+        superCallArgs.push_back(CreateFuncArg(std::move(paramRef)));
+    }
+    auto superCall = CreateCallExpr(std::move(superMemAcess), std::move(superCallArgs), Ptr(&oriMethodDecl), oriMethodDecl.ty,
+                          CallKind::CALL_DECLARED_FUNCTION);
+    auto elseRetExpr = CreateReturnExpr(std::move(superCall), fun->funcBody.get());
+    std::vector<OwnedPtr<Node>> elseBodyNodes;
+    elseBodyNodes.push_back(std::move(elseRetExpr));
+    auto elseBodyBlock = CreateBlock(std::move(elseBodyNodes), fun->funcBody->retType->ty);
+
+    // generate condexpr (overrideMask & 1) != 0
+    auto uint64Ty = typeManager.GetPrimitiveTy(TypeKind::TYPE_UINT64);
+    auto litExprZero = CreateLitConstExpr(LitConstKind::INTEGER, "0", uint64Ty);
+    unsigned long mask = 1 << index;
+    auto litExprOne = CreateLitConstExpr(LitConstKind::INTEGER, std::to_string(mask), uint64Ty);
+    auto overrideMaskRefExpr = WithinFile(CreateRefExpr(*GetFwdClassField(fwdDecl, JAVA_OVERRIDE_MASK_NAME)), curFile);
+    auto binaryExpr1 = CreateBinaryExpr(std::move(overrideMaskRefExpr), std::move(litExprOne), TokenKind::BITAND);
+    auto parenExpr = MakeOwned<ParenExpr>();
+    parenExpr->expr = std::move(binaryExpr1);
+    parenExpr->EnableAttr(Attribute::COMPILER_ADD);
+    parenExpr->ty = uint64Ty;
+    auto condExpr = CreateBinaryExpr(std::move(parenExpr), std::move(litExprZero), TokenKind::NOTEQ);
+    condExpr->ty = typeManager.GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
+
+    auto ifExpr = CreateIfExpr(std::move(condExpr), std::move(thenBodyBlock), std::move(elseBodyBlock), fun->funcBody->retType->ty);
+    std::vector<OwnedPtr<Node>> funcBodyNodes;
+    funcBodyNodes.push_back(std::move(ifExpr));
+
+    fun->funcBody->body = CreateBlock(std::move(funcBodyNodes), fun->funcBody->retType->ty);
+    fun->funcBody->ty = TypeManager::GetNothingTy();
+
+    fun->outerDecl = &fwdDecl;
+    fun->funcBody->parentClassLike = &classDecl;
+
+    return fun;
+}
+
+void JavaDesugarManager::GenerateClassFwdclassBody(AST::ClassDecl& fwdClassDecl, AST::ClassDecl& classDecl,
+    std::vector<std::pair<Ptr<FuncDecl>, Ptr<FuncDecl>>>& pairCtors)
+{
+    InsertJavaObjectControllerVarDecl(fwdClassDecl, classDecl);
+    InsertOverrideMaskVar(fwdClassDecl);
+    for (auto& decl : classDecl.GetMemberDecls()) {
+        if (decl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::PRIVATE, Attribute::INTERNAL, Attribute::DEFAULT)) {
+            continue;
+        }
+        auto fd = As<ASTKind::FUNC_DECL>(decl.get());
+        if (fd && fd->TestAttr(Attribute::CONSTRUCTOR) && !fd->TestAttr(Attribute::STATIC)) {
+            auto fwdCtor = GenerateFwdClassCtor(fwdClassDecl, classDecl, *fd);
+            pairCtors.emplace_back(fd, fwdCtor);
+            fwdClassDecl.body->decls.push_back(std::move(fwdCtor));
+        }
+    }
+
+    InsertAttachCJObject(fwdClassDecl, classDecl);
+
+    int index = 0;
+    for (auto& decl : classDecl.GetMemberDecls()) {
+        if (decl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::PRIVATE, Attribute::INTERNAL, Attribute::DEFAULT)) {
+            continue;
+        }
+        if (auto fd = As<ASTKind::FUNC_DECL>(decl.get()); fd && !fd->TestAttr(Attribute::CONSTRUCTOR) &&
+            !fd->TestAttr(Attribute::STATIC) && fd->TestAttr(Attribute::OPEN)) {
+            fwdClassDecl.body->decls.push_back(GenerateFwdClassMethod(fwdClassDecl, classDecl, *fd, index));
+            index++;
+        }
+    }
+}
+
+void JavaDesugarManager::GenerateForCJOpenClassMapping(AST::ClassDecl& classDecl)
+{
+    auto fwdclassDecl = MakeOwned<ClassDecl>();
+    fwdclassDecl->identifier = classDecl.identifier.Val() + "_fwd";
+    fwdclassDecl->identifier.SetPos(classDecl.identifier.Begin(), classDecl.identifier.End());
+    fwdclassDecl->fullPackageName = classDecl.fullPackageName;
+    fwdclassDecl->moduleName = ::Cangjie::Utils::GetRootPackageName(classDecl.fullPackageName);
+    fwdclassDecl->curFile = classDecl.curFile;
+
+    fwdclassDecl->inheritedTypes.emplace_back(CreateRefType(classDecl));
+
+    fwdclassDecl->ty = typeManager.GetClassTy(*fwdclassDecl, classDecl.ty->typeArgs);
+    auto classLikeTy = DynamicCast<ClassLikeTy*>(classDecl.ty);
+    CJC_ASSERT(classLikeTy);
+    classLikeTy->directSubtypes.insert(fwdclassDecl->ty);
+
+    fwdclassDecl->EnableAttr(Attribute::PUBLIC, Attribute::COMPILER_ADD, Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD);
+
+    fwdclassDecl->body = MakeOwned<ClassBody>();
+    
+    std::vector<std::pair<Ptr<FuncDecl>, Ptr<FuncDecl>>> pairCtors;
+    GenerateClassFwdclassBody(*fwdclassDecl, classDecl, pairCtors);
+
+    std::vector<FuncDecl*> generatedCtors;
+    for (auto& member : classDecl.GetMemberDecls()) {
+        if (member->TestAnyAttr(Attribute::IS_BROKEN, Attribute::PRIVATE)) {
+            continue;
+        }
+        auto fd = As<ASTKind::FUNC_DECL>(member.get());
+        if (fd && !fd->TestAttr(Attribute::CONSTRUCTOR)) {
+            auto nativeMethod = GenerateNativeMethod(*fd, classDecl);
+            if (nativeMethod != nullptr) {
+                generatedDecls.push_back(std::move(nativeMethod));
+            }
+            continue;
+        }
+    }
+
+    if (!pairCtors.empty()) {
+        generatedDecls.push_back(GenerateCJMappingNativeDetachCjObjectFunc(*fwdclassDecl, classDecl));
+        for (const auto& pair : pairCtors) {
+            generatedDecls.push_back(GenerateNativeInitCjObjectFunc(*pair.first, false, true, pair.second));
+        }
+    }
+
+    generatedDecls.push_back(std::move(fwdclassDecl));
+}
+
 void JavaDesugarManager::GenerateFwdClassInCJMapping(File& file) 
 {
     for (auto& decl : file.decls) {
@@ -198,6 +599,13 @@ void JavaDesugarManager::GenerateFwdClassInCJMapping(File& file)
         auto interfaceDecl = As<ASTKind::INTERFACE_DECL>(decl.get());
         if (interfaceDecl && IsCJMapping(*interfaceDecl)) {
             GenerateForCJInterfaceMapping(*interfaceDecl);
+            continue;
+        }
+
+        auto classDecl = As<ASTKind::CLASS_DECL>(decl.get());
+        if (classDecl && IsCJMapping(*classDecl) && classDecl->TestAttr(Attribute::OPEN)) {
+            GenerateForCJOpenClassMapping(*classDecl);
+            continue;
         }
     }
 }
@@ -226,7 +634,7 @@ void JavaDesugarManager::GenerateInCJMapping(File& file)
             continue;
         }
         auto classDecl = As<ASTKind::CLASS_DECL>(decl.get());
-        if (classDecl && IsCJMapping(*classDecl)) {
+        if (classDecl && IsCJMapping(*classDecl) && !classDecl->TestAttr(Attribute::OPEN)) {
             GenerateForCJStructOrClassTypeMapping(file, classDecl);
             continue;
         }

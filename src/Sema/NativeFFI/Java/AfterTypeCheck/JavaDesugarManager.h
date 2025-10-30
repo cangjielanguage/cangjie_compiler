@@ -302,6 +302,8 @@ private:
 
     std::string GetJniDeleteCjObjectFuncName(const Decl& decl) const;
 
+    std::string GetJniDetachCjObjectFuncName(const Decl& decl) const;
+
     /**
      * @C public func Java_<type_signature>_deleteCJObject(env: JNIEnv_ptr, obj: jobject, self: jlong): Unit {
      *     Java_CFFI_deleteCJObject<type>(env, self, { objToDelete: <type> => objToDelete.javaref })
@@ -317,6 +319,8 @@ private:
      *   }
      */
     OwnedPtr<Decl> GenerateCJMappingNativeDeleteCjObjectFunc(Decl& decl);
+
+    OwnedPtr<Decl> GenerateCJMappingNativeDetachCjObjectFunc(ClassDecl& fwdDecl, ClassDecl& classDecl);
 
     // A helper function to for the ctor of Enum.
     void GenerateNativeInitCJObjectEnumCtor(AST::EnumDecl& enumDecl);
@@ -346,7 +350,7 @@ private:
      *     )
      * }
      */
-    OwnedPtr<Decl> GenerateNativeInitCjObjectFunc(FuncDecl& ctor, bool isClassLikeDecl);
+    OwnedPtr<Decl> GenerateNativeInitCjObjectFunc(FuncDecl& ctor, bool isClassLikeDecl, bool isOpenClass = false, Ptr<FuncDecl> fwdCtor = nullptr);
 
     /**
      * for func [fun]:
@@ -487,6 +491,13 @@ private:
     void GenerateInterfaceFwdclassBody(AST::ClassDecl& fwdclassDecl, AST::InterfaceDecl& interfaceDecl);
     OwnedPtr<FuncDecl> GenerateInterfaceFwdclassMethod(AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl);
     OwnedPtr<PrimitiveType> CreateUnitType();
+    void GenerateForCJOpenClassMapping(AST::ClassDecl& classDecl);
+    void GenerateClassFwdclassBody(AST::ClassDecl& fwdclassDecl, AST::ClassDecl& classDecl, std::vector<std::pair<Ptr<FuncDecl>, Ptr<FuncDecl>>>& pairCtors);
+    void InsertJavaObjectControllerVarDecl(ClassDecl& fwdClassDecl, ClassDecl& classDecl);
+    void InsertOverrideMaskVar(AST::ClassDecl& fwdclassDecl);
+    OwnedPtr<FuncDecl> GenerateFwdClassCtor(ClassDecl& fwdDecl, ClassDecl& classDecl, FuncDecl& oriCtorDecl);
+    void InsertAttachCJObject(ClassDecl& fwdDecl, ClassDecl& classDecl);
+    OwnedPtr<FuncDecl> GenerateFwdClassMethod(ClassDecl& fwdDecl, ClassDecl& classDecl, FuncDecl& oriMethodDecl, int index);
 
     ImportManager& importManager;
     TypeManager& typeManager;

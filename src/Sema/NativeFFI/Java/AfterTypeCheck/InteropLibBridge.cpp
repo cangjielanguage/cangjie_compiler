@@ -76,6 +76,10 @@ constexpr auto INTEROPLIB_CFFI_JAVA_METHODID_CONSTR_ID = "Java_CFFI_MethodIDCons
 constexpr auto INTEROPLIB_CFFI_JAVA_METHODID_CONSTR_STATIC_ID = "Java_CFFI_MethodIDConstrStatic";
 constexpr auto INTEROPLIB_CFFI_JAVA_FIELDID_CONSTR_ID = "Java_CFFI_FieldIDConstr";
 constexpr auto INTEROPLIB_CFFI_JAVA_FIELDID_CONSTR_STATIC_ID = "Java_CFFI_FieldIDConstrStatic";
+constexpr auto INTEROPLIB_JAVA_OBJECT_CONTROLLER = "JavaObjectController";
+constexpr auto DELETE_LOCAL_REF = "deleteLocalRef";
+constexpr auto DETACH_CJ_OBJECT = "detachCJObject";
+constexpr auto ATTACH_CJ_OBJECT = "attachCJObject";
 
 } // namespace
 
@@ -98,6 +102,11 @@ Ptr<TypeAliasDecl> InteropLibBridge::GetJobjectDecl()
 Ptr<StructDecl> InteropLibBridge::GetJavaEntityDecl()
 {
     return GetInteropLibDecl<ASTKind::STRUCT_DECL>(INTEROPLIB_CFFI_JAVA_ENTITY);
+}
+
+Ptr<ClassDecl> InteropLibBridge::GetJavaObjectControllerDecl()
+{
+    return GetInteropLibDecl<ASTKind::CLASS_DECL>(INTEROPLIB_JAVA_OBJECT_CONTROLLER);
 }
 
 Ptr<TypeAliasDecl> InteropLibBridge::GetJniEnvPtrDecl()
@@ -326,6 +335,38 @@ Ptr<FuncDecl> InteropLibBridge::GetFieldIdConstrStatic()
     return GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_CFFI_JAVA_FIELDID_CONSTR_STATIC_ID);
 }
 
+Ptr<FuncDecl> InteropLibBridge::GetJavaObjectControllerMethodDecl(std::string methodName)
+{
+    auto classDecl = GetJavaObjectControllerDecl();
+    for (auto& member : classDecl->GetMemberDecls()) {
+        auto funcDecl = As<ASTKind::FUNC_DECL>(member.get());
+        if (funcDecl && funcDecl->identifier == methodName) {
+            return funcDecl;
+        }
+    }
+
+    CJC_ASSERT(false && "JavaObjectController doesn't have method");
+    return nullptr;
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetJavaObjectControllerInitDecl()
+{
+    return GetJavaObjectControllerMethodDecl("init");
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetAttachCJObjectDecl()
+{
+    return GetJavaObjectControllerMethodDecl(ATTACH_CJ_OBJECT);
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetDetachCJObjectDecl()
+{
+    return GetJavaObjectControllerMethodDecl(DETACH_CJ_OBJECT);
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetDeleteLocalRefDecl() {
+    return GetInteropLibDecl<ASTKind::FUNC_DECL>(DELETE_LOCAL_REF);
+}
 // ty
 
 Ptr<Ty> InteropLibBridge::GetJNIEnvPtrTy()
@@ -1201,6 +1242,28 @@ OwnedPtr<Expr> InteropLibBridge::WrapExceptionHandling(OwnedPtr<Expr> env, Owned
     args.emplace_back(CreateFuncArg(std::move(env)));
     args.emplace_back(CreateFuncArg(std::move(action)));
     return CreateCallExpr(std::move(fdRef), std::move(args), nullptr, retTy, CallKind::CALL_DECLARED_FUNCTION);
+}
+
+OwnedPtr<CallExpr> InteropLibBridge::CreateJavaObjectControllerCall(OwnedPtr<Expr> javaEntity, OwnedPtr<Expr> className, ClassDecl& classDecl)
+{
+    auto funcDecl = GetJavaObjectControllerInitDecl();
+    auto javaObjectCtroDecl = GetJavaObjectControllerDecl();
+
+    auto curFile = classDecl.curFile;
+    auto instantiationRefType = CreateRefType(classDecl);
+    auto instantiationTy = typeManager.GetClassTy(classDecl, classDecl.ty->typeArgs);
+
+    std::vector<OwnedPtr<FuncArg>> callArgs;
+    callArgs.push_back(CreateFuncArg(std::move(javaEntity)));
+    callArgs.push_back(CreateFuncArg(std::move(className)));
+    
+    auto fdRefexpr = CreateRefExpr(*funcDecl);
+    fdRefexpr->ref.identifier = javaObjectCtroDecl->identifier;
+    fdRefexpr->typeArguments.emplace_back(std::move(instantiationRefType));
+    auto fdRef = WithinFile(std::move(fdRefexpr), curFile);
+    
+    auto callTy = typeManager.GetClassTy(*javaObjectCtroDecl, {std::move(instantiationTy)});
+    return CreateCallExpr(std::move(fdRef), std::move(callArgs), funcDecl, callTy, CallKind::CALL_OBJECT_CREATION);
 }
 
 namespace {
