@@ -1157,7 +1157,10 @@ llvm::DIType* DIBuilder::CreateEnumType(const CHIR::EnumType& enumTy, const CHIR
         CJC_ASSERT(cgType->IsOptionLike() || cgType->IsAllAssociatedValuesAreNonRef());
         // There are just two cases where we cannot calculate enum size: OptionLike and EnumWithNonRef.
         // Ugly implementation, needs to be refactored
-        auto prefix = cgType->IsOptionLike() ? "E2$" : "E3$";
+        auto prefix = "E3$";
+        if (cgType->IsOptionLike()) {
+            prefix = enumTy.IsOption() ? "" : "E2$";
+        }
         auto name = prefix + RemoveCustomTypePrefix(GenerateTypeName(enumTy));
         auto size = 64 + enumDef->GetAllInstanceVars().size() * 64;
         size = cgType->IsOptionLike() ? size + 32 : size; // The size of Int32 is 32-bit.
@@ -1220,6 +1223,9 @@ llvm::DICompositeType* DIBuilder::GetOrCreateEnumCtorType(const CHIR::EnumType& 
             auto enumDITy = createEnumerator(ctorName, fieldIdx);
             ctors.push_back(enumDITy);
             fieldIdx++;
+        }
+        if (isOption) {
+            name = "E2$" + name;
         }
     } else {
         for (auto& it : enumDef->GetCtors()) {
