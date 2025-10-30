@@ -17,6 +17,7 @@
 #include "TypeCheckUtil.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Types.h"
+#include "cangjie/AST/Walker.h"
 #include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/SafePointer.h"
@@ -90,9 +91,32 @@ OwnedPtr<Expr> ASTFactory::UnwrapEntity(OwnedPtr<Expr> expr)
     if (typeMapper.IsObjCPointer(*expr->ty)) {
         CJC_ASSERT(expr->ty->typeArgs.size() == 1);
         auto elementType = expr->ty->typeArgs[0];
-        auto field = GetObjCPointerPointerField();
+        auto field = bridge.GetObjCPointerPointerField();
         auto fieldRef = CreateRefExpr(*field, *expr);
-        return CreateUnsafePointerCast(CreateMemberAccess(std::move(expr), *field), typeMapper.Cj2CType(elementType));
+        return CreateUnsafePointerCast(
+            CreateMemberAccess(std::move(expr), *field),
+            typeMapper.Cj2CType(elementType)
+        );
+    }
+    if (typeMapper.IsObjCFunc(*expr->ty)) {
+        CJC_ASSERT(expr->ty->typeArgs.size() == 1);
+        auto mappedTy = typeMapper.Cj2CType(expr->ty);
+        auto getter = bridge.GetObjCFuncFPointerAccessor();
+        CJC_ASSERT(mappedTy->IsPointer());
+        return CreateUnsafePointerCast(
+            CreateMemberCall(std::move(expr), getter),
+            mappedTy->typeArgs[0]
+        );
+    }
+    if (typeMapper.IsObjCBlock(*expr->ty)) {
+        CJC_ASSERT(expr->ty->typeArgs.size() == 1);
+        auto mappedTy = typeMapper.Cj2CType(expr->ty);
+        auto abiPtr = bridge.GetObjCBlockAbiPointerAccessor();
+        CJC_ASSERT(mappedTy->IsPointer());
+        return CreateUnsafePointerCast(
+            CreateMemberCall(std::move(expr), abiPtr),
+            mappedTy->typeArgs[0]
+        );
     }
 
     CJC_ASSERT(expr->ty->IsPrimitive() || expr->ty->IsPointer() || Ty::IsCStructType(*expr->ty));
@@ -125,13 +149,47 @@ OwnedPtr<Expr> ASTFactory::WrapEntity(OwnedPtr<Expr> expr, Ty& wrapTy)
     if (typeMapper.IsObjCPointer(wrapTy)) {
         CJC_ASSERT(expr->ty->IsPointer());
         CJC_ASSERT(wrapTy.typeArgs.size() == 1);
-        auto ctor = GetObjCPointerConstructor();
+        auto ctor = bridge.GetObjCPointerConstructor();
         CJC_ASSERT(ctor);
         auto ctorRef = CreateRefExpr(*ctor, *expr);
-        ctorRef->typeArguments.emplace_back(CreateType(wrapTy.typeArgs[0]));
-        auto unitPtrExpr = CreateUnsafePointerCast(std::move(expr), typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
+        ctorRef->instTys.push_back(wrapTy.typeArgs[0]);
+        ctorRef->typeArguments.push_back(CreateType(wrapTy.typeArgs[0]));
+        auto unitPtrExpr = CreateUnsafePointerCast(
+            std::move(expr),
+            typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
         return CreateCallExpr(std::move(ctorRef), Nodes<FuncArg>(CreateFuncArg(std::move(unitPtrExpr))), ctor, &wrapTy,
             CallKind::CALL_STRUCT_CREATION);
+    }
+
+    if (typeMapper.IsObjCFunc(wrapTy)) {
+        CJC_ASSERT(expr->ty->IsPointer());
+        CJC_ASSERT(wrapTy.typeArgs.size() == 1);
+        auto ctor = bridge.GetObjCFuncConstructor();
+        CJC_ASSERT(ctor);
+        auto ctorRef = CreateRefExpr(*ctor, *expr);
+        ctorRef->instTys.push_back(wrapTy.typeArgs[0]);
+        ctorRef->typeArguments.push_back(CreateType(wrapTy.typeArgs[0]));
+        auto unitPtrExpr = CreateUnsafePointerCast(
+            std::move(expr),
+            typeManager.GetFunctionTy(
+                {},
+                typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT),
+                {.isC = true}
+            ));
+        return CreateCallExpr(std::move(ctorRef), Nodes<FuncArg>(CreateFuncArg(std::move(unitPtrExpr))), ctor, &wrapTy,
+            CallKind::CALL_STRUCT_CREATION);
+    }
+
+    if (typeMapper.IsObjCBlock(wrapTy)) {
+        CJC_ASSERT(expr->ty->IsPointer());
+        CJC_ASSERT(wrapTy.typeArgs.size() == 1);
+        auto ctor = bridge.GetObjCBlockConstructor();
+        CJC_ASSERT(ctor);
+        auto ctorRef = CreateRefExpr(*ctor, *expr);
+        ctorRef->instTys.push_back(wrapTy.typeArgs[0]);
+        ctorRef->typeArguments.push_back(CreateType(wrapTy.typeArgs[0]));
+        return CreateCallExpr(std::move(ctorRef), Nodes<FuncArg>(CreateFuncArg(std::move(expr))), ctor, &wrapTy,
+            CallKind::CALL_OBJECT_CREATION);
     }
 
     if (typeMapper.IsObjCCJMapping(wrapTy)) {
@@ -1335,7 +1393,7 @@ OwnedPtr<Expr> ASTFactory::CreateMethodCallViaMsgSend(FuncDecl& fd, OwnedPtr<Exp
 }
 
 OwnedPtr<Expr> ASTFactory::CreateAllocInitCall(FuncDecl& fd)
-{   
+{
     // object instantiation is allowed only for:
     // - init constructor
     // - @ObjCInit method
@@ -1365,6 +1423,40 @@ OwnedPtr<Expr> ASTFactory::CreatePropSetterCallViaMsgSend(PropDecl& pd, OwnedPtr
         std::move(nativeHandle), objcname, typeMapper.Cj2CType(pd.ty), Nodes<Expr>(std::move(arg)));
 }
 
+OwnedPtr<Expr> ASTFactory::CreateFuncCallViaOpaquePointer(
+    OwnedPtr<Expr> ptr,
+    Ptr<Ty> retTy,
+    std::vector<OwnedPtr<Expr>> args)
+{
+    std::vector<Ptr<Ty>> argTys;
+    for (auto& rawArg : args) {
+        argTys.push_back(rawArg->ty);
+    }
+    auto ty = typeManager.GetFunctionTy(
+        argTys,
+        retTy,
+        { .isC = true }
+    );
+    auto cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(std::string(CFUNC_NAME));
+    auto cFuncRefExpr = CreateRefExpr(*cFuncDecl);
+
+    cFuncRefExpr->ty = ty;
+    cFuncRefExpr->instTys.emplace_back(ty);
+
+    // CFunc<...>(ptr)
+
+    auto cFuncCallExpr = CreateCallExpr(std::move(cFuncRefExpr), Nodes<FuncArg>(CreateFuncArg(std::move(ptr))),
+        nullptr, ty, CallKind::CALL_FUNCTION_PTR);
+
+    std::vector<OwnedPtr<FuncArg>> actualArgs;
+    std::transform(args.begin(), args.end(), std::back_inserter(actualArgs),
+        [](auto&& argExpr) { return CreateFuncArg(std::move(argExpr)); });
+
+    // CFunc<...>(ptr)(...)
+    return CreateCallExpr(
+        std::move(cFuncCallExpr), std::move(actualArgs), nullptr, retTy, CallKind::CALL_FUNCTION_PTR);
+}
+
 OwnedPtr<Expr> ASTFactory::CreateAutoreleasePoolScope(Ptr<Ty> ty, std::vector<OwnedPtr<Node>> actions)
 {
     CJC_ASSERT(typeMapper.IsObjCCompatible(*ty));
@@ -1372,16 +1464,16 @@ OwnedPtr<Expr> ASTFactory::CreateAutoreleasePoolScope(Ptr<Ty> ty, std::vector<Ow
 
     Ptr<FuncDecl> arpdecl;
     OwnedPtr<RefExpr> arpref;
-    if (ty->IsPrimitive() || typeMapper.IsObjCPointer(*ty)) {
+    if (typeMapper.IsObjCObjectType(*ty) || typeMapper.IsObjCBlock(*ty)) {
+        arpdecl = bridge.GetWithAutoreleasePoolObjDecl();
+        arpref = CreateRefExpr(*arpdecl);
+    } else {
         arpdecl = bridge.GetWithAutoreleasePoolDecl();
         auto unwrappedTy = typeMapper.Cj2CType(ty);
         arpref = CreateRefExpr(*arpdecl);
         arpref->instTys.emplace_back(unwrappedTy);
         arpref->ty = typeManager.GetInstantiatedTy(arpdecl->ty, GenerateTypeMapping(*arpdecl, arpref->instTys));
         arpref->typeArguments.emplace_back(CreateType(unwrappedTy));
-    } else {
-        arpdecl = bridge.GetWithAutoreleasePoolObjDecl();
-        arpref = CreateRefExpr(*arpdecl);
     }
 
     auto args = Nodes<FuncArg>(CreateFuncArg(WrapReturningLambdaExpr(typeManager, std::move(actions))));
@@ -1461,33 +1553,11 @@ OwnedPtr<Expr> ASTFactory::CreateUnsafePointerCast(OwnedPtr<Expr> expr, Ptr<Ty> 
     return ptrExpr;
 }
 
-Ptr<FuncDecl> ASTFactory::GetObjCPointerConstructor()
-{
-    Ptr<FuncDecl> result = nullptr;
-    auto outer = bridge.GetObjCPointerDecl();
-    for (auto& member : outer->body->decls) {
-        if (auto funcDecl = DynamicCast<FuncDecl*>(member.get())) {
-            if (funcDecl->TestAttr(Attribute::CONSTRUCTOR) && funcDecl->funcBody && funcDecl->funcBody->paramLists[0] &&
-                funcDecl->funcBody->paramLists[0]->params.size() == 1) {
-                result = funcDecl;
-            }
-        }
-    }
-    return result;
-}
-
-Ptr<VarDecl> ASTFactory::GetObjCPointerPointerField()
-{
-    Ptr<VarDecl> result = nullptr;
-    auto outer = bridge.GetObjCPointerDecl();
-    for (auto& member : outer->body->decls) {
-        if (auto fieldDecl = DynamicCast<VarDecl*>(member.get())) {
-            if (fieldDecl->ty->IsPointer()) {
-                result = fieldDecl;
-            }
-        }
-    }
-    return result;
+void ASTFactory::SetDesugarExpr(Ptr<Expr> original, OwnedPtr<Expr> desugared) {
+    original->desugarExpr = std::move(desugared);
+    original->desugarExpr->sourceExpr = original;
+    CopyBasicInfo(original, original->desugarExpr);
+    AddCurFile(*original->desugarExpr, original->curFile);
 }
 
 OwnedPtr<FuncDecl> ASTFactory::CreateFinalizer(ClassDecl& target)

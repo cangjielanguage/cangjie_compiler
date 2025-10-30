@@ -111,15 +111,31 @@ public:
      * Get objc.lang.ObjCPointer declaration
     */
     Ptr<AST::StructDecl> GetObjCPointerDecl();
+    Ptr<AST::FuncDecl> GetObjCPointerConstructor();
+    Ptr<AST::VarDecl> GetObjCPointerPointerField();
+
+    /**
+     * Get objc.lang.ObjCFunc declaration
+    */
+    Ptr<AST::StructDecl> GetObjCFuncDecl();
+    Ptr<AST::FuncDecl> GetObjCFuncConstructor();
+    Ptr<AST::FuncDecl> GetObjCFuncFPointerAccessor();
+
+    /**
+     * Get objc.lang.ObjCBlock declaration
+    */
+    Ptr<AST::ClassDecl> GetObjCBlockDecl();
+    Ptr<AST::FuncDecl> GetObjCBlockConstructor();
+    Ptr<AST::FuncDecl> GetObjCBlockAbiPointerAccessor();
+    Ptr<AST::FuncDecl> GetObjCBlockFPointerAccessor();
 
 private:
     template <AST::ASTKind K = AST::ASTKind::DECL> auto GetInteropLibDecl(const std::string& ident)
     {
-        const auto interoplibObjCPackageName = "interoplib.objc";
-        auto decl = importManager.GetImportedDecl(interoplibObjCPackageName, ident);
+        auto decl = importManager.GetImportedDecl(INTEROPLIB_OBJ_C_PACKAGE_IDENT, ident);
         if (!decl) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_member_not_imported, DEFAULT_POSITION,
-                interoplibObjCPackageName + std::string(".") + ident);
+                INTEROPLIB_OBJ_C_PACKAGE_IDENT + std::string(".") + ident);
             return Ptr(AST::As<K>(nullptr));
         }
 
@@ -129,8 +145,7 @@ private:
 
     template <AST::ASTKind K = AST::ASTKind::DECL> auto GetObjCLangDecl(const std::string& ident)
     {
-        const auto objcLangPackageName = "objc.lang";
-        auto decl = importManager.GetImportedDecl(objcLangPackageName, ident);
+        auto decl = importManager.GetImportedDecl(OBJ_C_LANG_PACKAGE_IDENT, ident);
         if (!decl) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_member_not_imported, DEFAULT_POSITION, ident);
             return Ptr(AST::As<K>(nullptr));

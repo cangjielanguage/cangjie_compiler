@@ -25,7 +25,7 @@ public:
         : bridge(bridge), typeManager(typeManager)
     {
     }
-    
+
     std::string Cj2ObjCForObjC(const AST::Ty& from) const;
     Ptr<AST::Ty> Cj2CType(Ptr<AST::Ty> cjty) const;
     static bool IsObjCCompatible(const AST::Ty& ty);
@@ -42,7 +42,14 @@ public:
     static bool IsObjCCJMapping(const AST::Ty& ty);
     static bool IsSyntheticWrapper(const AST::Decl& decl);
     static bool IsSyntheticWrapper(const AST::Ty& ty);
+    static bool IsObjCObjectType(const AST::Ty& ty);
 
+    static bool IsObjCFunc(const AST::Decl& decl);
+    static bool IsObjCFunc(const AST::Ty& ty);
+    static bool IsObjCBlock(const AST::Decl& decl);
+    static bool IsObjCBlock(const AST::Ty& ty);
+    static bool IsObjCFuncOrBlock(const AST::Decl& decl);
+    static bool IsObjCFuncOrBlock(const AST::Ty& ty);
 private:
     InteropLibBridge& bridge;
     TypeManager& typeManager;

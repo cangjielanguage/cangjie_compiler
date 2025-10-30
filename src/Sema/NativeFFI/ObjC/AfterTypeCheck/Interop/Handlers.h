@@ -306,9 +306,25 @@ public:
 };
 
 /**
+ * Report errors on usage of ObjCFunc with ObjC-incompatible types
+ */
+class CheckObjCFuncTypeArguments : public Handler<CheckObjCFuncTypeArguments, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+/**
  * Rewrite pointer access performed by ObjCPointer methods to proper FFI calls
  */
 class RewriteObjCPointerAccess : public Handler<RewriteObjCPointerAccess, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+/**
+ * Rewrite pointer access performed by ObjCPointer methods to proper FFI calls
+ */
+class RewriteObjCFuncCall : public Handler<RewriteObjCFuncCall, InteropContext> {
 public:
     void HandleImpl(InteropContext& ctx);
 };

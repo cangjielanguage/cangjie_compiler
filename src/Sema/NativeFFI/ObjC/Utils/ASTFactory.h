@@ -138,15 +138,24 @@ public:
         OwnedPtr<AST::Expr> nativeHandle
     );
     OwnedPtr<AST::Expr> CreatePropSetterCallViaMsgSend(
-        AST::PropDecl& pd, OwnedPtr<AST::Expr> nativeHandle, OwnedPtr<AST::Expr> arg);
+        AST::PropDecl& pd,
+        OwnedPtr<AST::Expr> nativeHandle,
+        OwnedPtr<AST::Expr> arg
+    );
+
+    OwnedPtr<AST::Expr> CreateFuncCallViaOpaquePointer(
+        OwnedPtr<AST::Expr> ptr,
+        Ptr<AST::Ty> retTy,
+        std::vector<OwnedPtr<AST::Expr>> args
+    );
 
     OwnedPtr<AST::Expr> CreateAutoreleasePoolScope(Ptr<AST::Ty> ty, std::vector<OwnedPtr<AST::Node>> actions);
     OwnedPtr<AST::FuncDecl> CreateFinalizer(AST::ClassDecl& target);
     OwnedPtr<AST::VarDecl> CreateHasInitedField(AST::ClassDecl& target);
 
     OwnedPtr<AST::Expr> CreateUnsafePointerCast(OwnedPtr<AST::Expr> expr, Ptr<AST::Ty> elementType);
-    Ptr<AST::FuncDecl> GetObjCPointerConstructor();
-    Ptr<AST::VarDecl> GetObjCPointerPointerField();
+
+    void SetDesugarExpr(Ptr<AST::Expr> original, OwnedPtr<AST::Expr> desugared);
     OwnedPtr<AST::Expr> WrapObjCMirrorOption(
         const Ptr<AST::Expr> entity, Ptr<AST::ClassLikeDecl> mirror, const Ptr<AST::File> curFile);
     OwnedPtr<AST::Expr> CreateObjCobjectNull();

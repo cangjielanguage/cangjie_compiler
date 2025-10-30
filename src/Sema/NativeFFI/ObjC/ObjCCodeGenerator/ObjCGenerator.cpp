@@ -373,7 +373,7 @@ std::string ObjCGenerator::GenerateDefaultFunctionImplementation(
     std::string result = retTy.IsUnit() ? "" : RETURN_KEYWORD;
     result += " ";
     std::string nativeCall = "";
-    if (ctx.typeMapper.IsObjCMirror(retTy) || ctx.typeMapper.IsObjCImpl(retTy)) {
+    if (ctx.typeMapper.IsObjCObjectType(retTy)) {
         nativeCall += "(__bridge " + ctx.typeMapper.Cj2ObjCForObjC(retTy) + ")";
     }
     nativeCall += name + "(";
@@ -383,7 +383,7 @@ std::string ObjCGenerator::GenerateDefaultFunctionImplementation(
             nativeCall += ", ";
         }
     }
-    nativeCall += ");";
+    nativeCall += ")";
     result +=
         ctx.typeMapper.IsObjCCJMapping(retTy) ? WrapperCallByInitForCJMappingReturn(retTy, nativeCall) : nativeCall;
     result += ";";
@@ -456,8 +456,12 @@ void ObjCGenerator::GenerateForwardDeclarations()
 {
     std::set<Ptr<Decl>> dependencies;
     auto walker = [this, &dependencies](Ptr<Ty> ty, auto& self) -> void {
-        if (ctx.typeMapper.IsObjCImpl(*ty) || ctx.typeMapper.IsObjCMirror(*ty)) {
-            dependencies.insert(Ty::GetDeclOfTy(ty));
+        if (ctx.typeMapper.IsObjCObjectType(*ty)) {
+            if (ty->IsCoreOptionType()) {
+                dependencies.insert(Ty::GetDeclOfTy(ty->typeArgs[0]));
+            } else {
+                dependencies.insert(Ty::GetDeclOfTy(ty));
+            }
         }
         for (auto&& typeArg : ty->typeArgs) {
             self(typeArg, self);
@@ -477,7 +481,7 @@ void ObjCGenerator::GenerateForwardDeclarations()
             case ASTKind::INTERFACE_DECL:
                 keyword = PROTOCOL_KEYWORD;
                 break;
-            default: 
+            default:
                 CJC_ABORT();
         }
         AddWithIndent(GenerateImport("\"" + dep->identifier.Val() + ".h\""), GenerationTarget::SOURCE);
@@ -497,7 +501,7 @@ void ObjCGenerator::GenerateStaticFunctionsReferences()
             const auto& funcDecl = *StaticAs<ASTKind::FUNC_DECL>(declPtr.get());
             CJC_ASSERT(funcDecl.ty->IsFunc());
             auto& retTy = *StaticCast<const FuncTy*>(funcDecl.ty)->retTy;
-            const auto retType = ctx.typeMapper.IsValidObjCMirror(retTy) || ctx.typeMapper.IsObjCImpl(retTy) || ctx.typeMapper.IsObjCPointer(retTy)
+            const auto retType = ctx.typeMapper.IsObjCObjectType(retTy) || ctx.typeMapper.IsObjCBlock(retTy)
                 ? VOID_POINTER_TYPE
                 : ctx.typeMapper.Cj2ObjCForObjC(retTy);
             std::string argTypes = "";
@@ -630,7 +634,7 @@ void ObjCGenerator::GenerateInterfaceDecl()
  *  STATIC_REF: (arg1Type, arg2Type, ...argNType)
  */
 std::string ObjCGenerator::GenerateFuncParamLists(
-    const std::vector<OwnedPtr<FuncParamList>>& paramLists, 
+    const std::vector<OwnedPtr<FuncParamList>>& paramLists,
     const std::vector<std::string>& selectorComponents,
     FunctionListFormat format, const ObjCFunctionType type)
 {
@@ -870,7 +874,7 @@ void ObjCGenerator::AddMethods()
 {
     for (OwnedPtr<Decl>& declPtr : decl->GetMemberDecls()) {
         if (ctx.factory.IsGeneratedMember(*declPtr.get())) { continue; }
-        
+
         if (!declPtr->TestAttr(Attribute::PUBLIC)) { continue; }
         if (declPtr->astKind == ASTKind::FUNC_DECL &&
             !declPtr->TestAnyAttr(Attribute::CONSTRUCTOR, Attribute::FINALIZER)) {
@@ -971,16 +975,17 @@ std::string ObjCGenerator::MapCJTypeToObjCType(const OwnedPtr<FuncParam>& param)
 
 std::string ObjCGenerator::GenerateArgumentCast(const Ty& retTy, std::string value) const
 {
-    if (ctx.typeMapper.IsObjCImpl(retTy)) {
+    const auto& actualTy = retTy.IsCoreOptionType() ? *retTy.typeArgs[0] : retTy;
+    if (ctx.typeMapper.IsObjCImpl(actualTy)) {
         return CAST_TO_VOID_PTR + std::move(value);
     }
-    if (ctx.typeMapper.IsObjCMirror(retTy)) {
+    if (ctx.typeMapper.IsObjCMirror(actualTy) || ctx.typeMapper.IsObjCBlock(actualTy)) {
         return CAST_TO_VOID_PTR_RETAINED + std::move(value);
     }
-    if (ctx.typeMapper.IsObjCPointer(retTy)) {
+    if (ctx.typeMapper.IsObjCPointer(actualTy)) {
         return CAST_TO_VOID_PTR_UNSAFE + std::move(value);
-    } 
+    }
     return value;
 }
-    
+
 } // namespace Cangjie::Interop::ObjC

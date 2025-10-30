@@ -31,20 +31,37 @@ static constexpr auto FLOAT_TYPE = "float";
 static constexpr auto DOUBLE_TYPE = "double";
 static constexpr auto BOOL_TYPE = "BOOL";
 static constexpr auto STRUCT_TYPE_PREFIX = "struct ";
+
+template<class TypeRep, class ToString>
+std::string buildFunctionalCType(const std::vector<TypeRep>& argTypes,
+    const TypeRep& resultType,
+    char designator,
+    ToString toString)
+{
+    std::string result = toString(resultType);
+    result.append({ '(', designator, ')', '(' });
+    for (auto& argType : argTypes) {
+        result.append(toString(argType));
+        result.push_back(',');
+    }
+    if (result.back() == ',') {
+        result.pop_back();
+    }
+    result.push_back(')');
+    return result;
+}
+
 } // namespace
 
 Ptr<Ty> TypeMapper::Cj2CType(Ptr<Ty> cjty) const
 {
     CJC_NULLPTR_CHECK(cjty);
 
-    if (cjty->IsCoreOptionType()) {
-        auto innerTy = cjty->typeArgs[0];
-        CJC_ASSERT(innerTy);
-        if (IsValidObjCMirror(*innerTy) || IsObjCImpl(*innerTy)) {
-            return bridge.GetNativeObjCIdTy();
-        }
+    if (IsObjCCJMapping(*cjty)) {
+        return bridge.GetRegistryIdTy();
     }
-    if (IsValidObjCMirror(*cjty) || IsObjCImpl(*cjty)) {
+
+    if (IsObjCObjectType(*cjty)) {
         return bridge.GetNativeObjCIdTy();
     }
 
@@ -52,10 +69,25 @@ Ptr<Ty> TypeMapper::Cj2CType(Ptr<Ty> cjty) const
         CJC_ASSERT(cjty->typeArgs.size() == 1);
         return typeManager.GetPointerTy(Cj2CType(cjty->typeArgs[0]));
     }
-    if (IsObjCCJMapping(*cjty)) {
-        return bridge.GetRegistryIdTy();
-    }
 
+    if (IsObjCFunc(*cjty)) {
+        CJC_ASSERT(cjty->typeArgs.size() == 1);
+        std::vector<Ptr<Ty>> realTypeArgs;
+        auto actualFuncType = DynamicCast<FuncTy>(cjty->typeArgs[0]);
+        CJC_NULLPTR_CHECK(actualFuncType);
+        for (auto paramTy : actualFuncType->paramTys) {
+            realTypeArgs.push_back(Cj2CType(paramTy));
+        }
+        return typeManager.GetPointerTy(
+            typeManager.GetFunctionTy(
+                realTypeArgs,
+                Cj2CType(actualFuncType->retTy),
+                { .isC = true }
+            ));
+    }
+    if (IsObjCBlock(*cjty)) {
+        return bridge.GetNativeObjCIdTy();
+    }
     CJC_ASSERT(cjty->IsBuiltin() || Ty::IsCStructType(*cjty));
     return cjty;
 }
@@ -99,10 +131,30 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
             } else if (Ty::IsCStructType(from)) {
                 return STRUCT_TYPE_PREFIX + from.name;
             }
+            if (IsObjCFunc(from)) {
+                auto actualFuncType = DynamicCast<FuncTy>(from.typeArgs[0]);
+                if (!actualFuncType) {
+                    return UNSUPPORTED_TYPE;
+                }
+                return buildFunctionalCType(actualFuncType->paramTys,
+                    actualFuncType->retTy,
+                    '*',
+                    [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
+            }
             CJC_ABORT();
             return UNSUPPORTED_TYPE;
         case TypeKind::TYPE_CLASS:
-            if (IsObjCMirror(from) || IsObjCImpl(from) || IsObjCCJMapping(from)) {
+            if (IsObjCBlock(from)) {
+                auto actualFuncType = DynamicCast<FuncTy>(from.typeArgs[0]);
+                if (!actualFuncType) {
+                    return UNSUPPORTED_TYPE;
+                }
+                return buildFunctionalCType(actualFuncType->paramTys,
+                    actualFuncType->retTy,
+                    '^',
+                    [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
+            }
+            if (IsObjCObjectType(from)) {
                 return from.name + "*";
             }
             return UNSUPPORTED_TYPE;
@@ -112,13 +164,24 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
             }
             return UNSUPPORTED_TYPE;
         case TypeKind::TYPE_POINTER:
+            if (from.typeArgs[0]->kind == TypeKind::TYPE_FUNC) {
+                return Cj2ObjCForObjC(*from.typeArgs[0]);
+            }
             return Cj2ObjCForObjC(*from.typeArgs[0]) + "*";
+        case TypeKind::TYPE_FUNC:
+            {
+                auto actualFuncType = DynamicCast<FuncTy>(&from);
+                return buildFunctionalCType(actualFuncType->paramTys,
+                        actualFuncType->retTy,
+                        '*',
+                        [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
+            }
         case TypeKind::TYPE_ENUM:
             if (!from.IsCoreOptionType()) {
                 CJC_ABORT();
                 return UNSUPPORTED_TYPE;
             };
-            if (IsValidObjCMirror(*from.typeArgs[0]) || IsObjCImpl(*from.typeArgs[0])) {
+            if (IsObjCObjectType(*from.typeArgs[0])) {
                 return Cj2ObjCForObjC(*from.typeArgs[0]);
             }
         default:
@@ -154,14 +217,39 @@ bool TypeMapper::IsObjCCompatible(const Ty& ty)
             if (IsObjCPointer(ty)) {
                 CJC_ASSERT(ty.typeArgs.size() == 1);
                 return IsObjCCompatible(*ty.typeArgs[0]);
-            } else if (Ty::IsCStructType(ty)) {
+            }
+            if (Ty::IsCStructType(ty)) {
                 return true;
+            }
+            if (IsObjCFunc(ty)) {
+                CJC_ASSERT(ty.typeArgs.size() == 1);
+                auto tyArg = ty.typeArgs[0];
+                if (!tyArg->IsFunc() || tyArg->IsCFunc()) {
+                    return false;
+                }
+                return std::all_of(
+                    std::begin(tyArg->typeArgs),
+                    std::end(tyArg->typeArgs),
+                    [](auto ty) { return IsObjCCompatible(*ty); }
+                );
             }
             return false;
         case TypeKind::TYPE_CLASS:
         case TypeKind::TYPE_INTERFACE:
             if (IsValidObjCMirror(ty) || IsObjCImpl(ty)) {
                 return true;
+            }
+            if (IsObjCBlock(ty)) {
+                CJC_ASSERT(ty.typeArgs.size() == 1);
+                auto tyArg = ty.typeArgs[0];
+                if (!tyArg->IsFunc() || tyArg->IsCFunc()) {
+                    return false;
+                }
+                return std::all_of(
+                    std::begin(tyArg->typeArgs),
+                    std::end(tyArg->typeArgs),
+                    [](auto ty) { return IsObjCCompatible(*ty); }
+                );
             }
         case TypeKind::TYPE_ENUM:
             if (!ty.IsCoreOptionType()) {
@@ -261,6 +349,15 @@ bool TypeMapper::IsSyntheticWrapper(const Ty& ty)
     return classLikeTy && classLikeTy->commonDecl && IsSyntheticWrapper(*classLikeTy->commonDecl);
 }
 
+bool TypeMapper::IsObjCObjectType(const Ty& ty) {
+    if (ty.IsCoreOptionType()) {
+        CJC_ASSERT(ty.typeArgs.size() == 1);
+        return IsObjCObjectType(*ty.typeArgs[0]);
+    }
+    return IsObjCMirror(ty) || IsObjCImpl(ty)
+        || IsSyntheticWrapper(ty) || IsObjCCJMapping(ty);
+}
+
 namespace {
 
 bool IsObjCPointerImpl(const StructDecl& structDecl)
@@ -268,7 +365,29 @@ bool IsObjCPointerImpl(const StructDecl& structDecl)
     if (structDecl.fullPackageName != OBJ_C_LANG_PACKAGE_IDENT) {
         return false;
     }
-    if (structDecl.identifier.Val() != OBJ_C_POINTER_IDENT) {
+    if (structDecl.identifier != OBJ_C_POINTER_IDENT) {
+        return false;
+    }
+    return true;
+}
+
+bool IsObjCFuncImpl(const StructDecl& structDecl)
+{
+    if (structDecl.fullPackageName != OBJ_C_LANG_PACKAGE_IDENT) {
+        return false;
+    }
+    if (structDecl.identifier != OBJ_C_FUNC_IDENT) {
+        return false;
+    }
+    return true;
+}
+
+bool IsObjCBlockImpl(const ClassDecl& decl)
+{
+    if (decl.fullPackageName != OBJ_C_LANG_PACKAGE_IDENT) {
+        return false;
+    }
+    if (decl.identifier != OBJ_C_BLOCK_IDENT) {
         return false;
     }
     return true;
@@ -290,6 +409,48 @@ bool TypeMapper::IsObjCPointer(const Ty& ty)
         return IsObjCPointerImpl(*structTy->decl);
     }
     return false;
+}
+
+bool TypeMapper::IsObjCFunc(const Decl& decl)
+{
+    if (auto structDecl = DynamicCast<StructDecl*>(&decl)) {
+        return IsObjCFuncImpl(*structDecl);
+    }
+    return false;
+}
+
+bool TypeMapper::IsObjCFunc(const Ty& ty)
+{
+    if (auto structTy = DynamicCast<StructTy*>(&ty)) {
+        return IsObjCFuncImpl(*structTy->decl);
+    }
+    return false;
+}
+
+bool TypeMapper::IsObjCBlock(const Decl& decl)
+{
+    if (auto classDecl = DynamicCast<ClassDecl*>(&decl)) {
+        return IsObjCBlockImpl(*classDecl);
+    }
+    return false;
+}
+
+bool TypeMapper::IsObjCBlock(const Ty& ty)
+{
+    if (auto classTy = DynamicCast<ClassTy*>(&ty)) {
+        return IsObjCBlockImpl(*classTy->decl);
+    }
+    return false;
+}
+
+bool TypeMapper::IsObjCFuncOrBlock(const Decl& decl)
+{
+    return IsObjCFunc(decl) || IsObjCBlock(decl);
+}
+
+bool TypeMapper::IsObjCFuncOrBlock(const Ty& ty)
+{
+    return IsObjCFunc(ty) || IsObjCBlock(ty);
 }
 
 bool TypeMapper::IsObjCCJMapping(const Decl& decl)

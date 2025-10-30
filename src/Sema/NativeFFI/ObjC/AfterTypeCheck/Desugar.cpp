@@ -34,6 +34,7 @@ void Cangjie::Interop::ObjC::Desugar(InteropContext&& ctx)
         .Use<GenerateGlueCode>(InteropType::ObjC_Mirror)
         .Use<CheckObjCPointerTypeArguments>()
         .Use<RewriteObjCPointerAccess>()
+        .Use<RewriteObjCFuncCall>()
         .Use<DrainGeneratedDecls>()
         .Handle(ctx);
 
@@ -45,6 +46,8 @@ void Cangjie::Interop::ObjC::Desugar(InteropContext&& ctx)
         .Use<GenerateGlueCode>(InteropType::CJ_Mapping)
         .Use<CheckObjCPointerTypeArguments>()
         .Use<RewriteObjCPointerAccess>()
+        .Use<CheckObjCFuncTypeArguments>()
+        .Use<RewriteObjCFuncCall>()
         .Use<DrainGeneratedDecls>()
         .Handle(ctx);
 }
