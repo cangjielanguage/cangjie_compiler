@@ -265,7 +265,7 @@ private:
         return typeName;
     }
 
-  std::string GenerateCustomTypeName(const CHIR::CustomType& type, bool needPkgPrefix = true)
+    std::string GenerateCustomTypeName(const CHIR::CustomType& type, bool needPkgPrefix = true)
     {
         if (type.IsAutoEnvBase()) {
             return GenerateClosureTypeName(StaticCast<const CHIR::ClassType&>(type));
