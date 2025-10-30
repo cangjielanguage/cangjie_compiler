@@ -85,7 +85,7 @@ FuncType* AdjustFuncType(FuncType& funcType, const AST::FuncDecl& funcDecl, CHIR
     return &funcType;
 }
 
-DebugLocation GetVarLoc(const CHIRContext& cctx, const AST::Decl& decl)
+DebugLocation GetDeclLoc(const CHIRContext& cctx, const AST::Decl& decl)
 {
     auto& begin = decl.identifier.Begin();
     return TranslateLocationWithoutScope(cctx, begin, decl.identifier.End());
