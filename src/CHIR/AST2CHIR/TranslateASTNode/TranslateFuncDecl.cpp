@@ -33,7 +33,7 @@ void Translator::BindingFuncParam(
             continue;
         }
         auto loc = TranslateLocation(*param);
-        auto paramLoc = GetVarLoc(builder.GetChirContext(), *param);
+        auto paramLoc = GetDeclLoc(builder.GetChirContext(), *param);
         // Don't need to report unused parameter on defaut value parameter function.
         auto debug = CreateAndAppendExpression<Debug>(
             paramLoc, loc, builder.GetUnitTy(), arg, param->identifier.GetRawText(), block);

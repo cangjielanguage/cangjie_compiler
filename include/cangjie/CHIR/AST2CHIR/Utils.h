@@ -37,13 +37,13 @@ void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& 
 FuncType* AdjustFuncType(FuncType& funcType, const AST::FuncDecl& funcDecl, CHIRBuilder& builder, CHIRType& chirType);
 
 /**
- * @brief Retrieves the debug location of a variable.
+ * @brief Retrieves the debug location of an AST declaration.
  *
  * @param cctx The CHIR context.
- * @param decl The declaration of the variable.
+ * @param decl The AST declaration.
  * @return Debug location of the variable.
  */
-DebugLocation GetVarLoc(const CHIRContext& cctx, const AST::Decl& decl);
+DebugLocation GetDeclLoc(const CHIRContext& cctx, const AST::Decl& decl);
 
 /**
  * @brief Translates a code location without considering the scope.

@@ -61,7 +61,7 @@ Ptr<Value> Translator::TranslateLeftValueOfVarDecl(const AST::VarDecl& decl, boo
             // Debug is only useful for allocated value, but not for implicit added
             // it will generate bug in cjdb if we generate debug expr for implicit added
             if (!decl.TestAttr(AST::Attribute::IMPLICIT_ADD)) {
-                CreateAndAppendExpression<Debug>(GetVarLoc(builder.GetChirContext(), decl), varPos, builder.GetUnitTy(),
+                CreateAndAppendExpression<Debug>(GetDeclLoc(builder.GetChirContext(), decl), varPos, builder.GetUnitTy(),
                     leftValue, decl.identifier, currentBlock);
             }
             leftValue->AppendAttributeInfo(BuildVarDeclAttr(decl));
@@ -81,7 +81,7 @@ void Translator::StoreRValueToLValue(const AST::VarDecl& decl, Value& rval, Ptr<
     if (lval != nullptr) {
         CreateWrappedStore(varPos, TypeCastOrBoxIfNeeded(rval, *leftType, varPos), lval, currentBlock);
     } else {
-        auto warnPos = GetVarLoc(builder.GetChirContext(), decl);
+        auto warnPos = GetDeclLoc(builder.GetChirContext(), decl);
         lval = TypeCastOrBoxIfNeeded(rval, *leftType, varPos);
         // If disable `-g` option, let variable still need create `Debug` node for DCE print warning.
         // Note: there is a special case exist only disable '-g' option: the LocalVar's debug node will be overwritten,
