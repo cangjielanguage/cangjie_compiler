@@ -151,31 +151,7 @@ if(CMAKE_BUILD_TYPE MATCHES Release AND MINGW)
     # case is defined in GCC Runtime Libraries Exception and has no GPL issue.
     target_link_options(cjc PRIVATE -static)
 endif()
-
-if(CANGJIE_VISIBLE_OPTIONS_ONLY)
-    # `cjc` and `cjc-release` are identical except that `cjc` supports all compile options but
-    # `cjc-release` supports visible options only. Visible options are features that are ready to be
-    # released to users.
-    add_executable(cjc-release main.cpp ${CANGJIE_SRC_COMMON_OBJECTS_LIST} $<TARGET_OBJECTS:CangjieOption>)
-    add_dependencies(cjc-release cjc)
-    # Since `cjc` is almost identical to `cjc-release`, they always have the same link flags, link
-    # options, link libraries, etc. We get the properties of `cjc` and apply them on `cjc-release` here.
-    include(ApplyProperties)
-    apply_properties(
-        FROM_TARGET cjc
-        TO_TARGET cjc-release
-        PROPERTY_NAMES
-            LINK_FLAGS
-            INCLUDE_DIRECTORIES
-            LINK_OPTIONS
-            LINK_LIBRARIES)
-    install(
-        PROGRAMS ${CMAKE_BINARY_DIR}/bin/cjc-release${CMAKE_EXECUTABLE_SUFFIX}
-        DESTINATION bin/
-        RENAME cjc${CMAKE_EXECUTABLE_SUFFIX})
-else()
-    install(TARGETS cjc)
-endif()
+install(TARGETS cjc)
 
 # `cjc-frontend.exe` is a special wrapper executable to run our compiler frontend on windows.
 # On windows platform, symbolic link can only be created with command prompt with administrator

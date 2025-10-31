@@ -179,6 +179,9 @@ public:
     /// Skip next token if token kind satisfied
     bool Skip(TokenKind kind);
 
+    /// Attach comment to node (typically by macro expansion)
+    void AttachCommentToNodes(std::vector<OwnedPtr<AST::Node>>& nodes);
+
 protected:
     /// used by QueryParser
     /// Peek next token, save it to lookAhead
@@ -205,9 +208,6 @@ protected:
     const Token& LookAhead() const;
     const Token& LastToken() const;
     Ptr<AST::Node> CurMacroCall() const;
-
-    /// Attach comment to node (typically by macro expansion)
-    void AttachCommentToNodes(std::vector<OwnedPtr<AST::Node>>& nodes);
 
 private:
     class ParserImpl* impl;

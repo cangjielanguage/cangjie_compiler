@@ -590,38 +590,14 @@ std::vector<std::string> CjoManager::GetPossibleCjoNames(const ImportSpec& impor
 {
     // Multi-imports are desugared after parser which should not be used for get package name.
     CJC_ASSERT(import.content.kind != ImportKind::IMPORT_MULTI);
-    if (import.content.prefixPaths.empty()) {
-        return {import.content.identifier};
-    }
-    std::string name;
-    std::string_view dot = TOKENS[static_cast<int>(TokenKind::DOT)];
-    bool needDc{import.content.hasDoubleColon};
-    for (size_t i{needDc ? 1UL : 0UL}; i < import.content.prefixPaths.size(); ++i) {
-        name += import.content.prefixPaths[i];
-        if (i != import.content.prefixPaths.size() - 1) {
-            name += dot;
-        }
-        needDc = false;
-    }
-    auto appendOrg = [&import](const std::string& name) {
-        if (import.content.hasDoubleColon) {
-            return name + std::string{ORG_NAME_SEPARATOR} + import.content.prefixPaths[0];
-        }
-        return name;
-    };
-    if (import.content.kind == ImportKind::IMPORT_ALL) {
-        return {appendOrg(name)};
-    }
     if (auto it = GetPackageNameByImport(import); !it.empty()) {
         return {FileUtil::ToCjoFileName(it)};
     }
-    // if needDc, this import must be of from a::b
-    // in this case, the only possible pacakge name is a::b
-    if (needDc) {
-        return {appendOrg(import.content.identifier)};
+    std::vector<std::string> possibleNames;
+    for (auto& name : import.content.GetPossiblePackageNames()) {
+        possibleNames.emplace_back(FileUtil::ToCjoFileName(name));
     }
-    auto maybePackageName = name + std::string{dot} + import.content.identifier.Val();
-    return {appendOrg(maybePackageName), appendOrg(name)};
+    return possibleNames;
 }
 
 std::string CjoManager::GetPackageNameByImport(const AST::ImportSpec& importSpec) const

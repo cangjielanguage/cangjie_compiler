@@ -1084,6 +1084,41 @@ std::string ImportContent::GetImportedPackageName() const
     return ss.str();
 }
 
+
+std::vector<std::string> ImportContent::GetPossiblePackageNames() const
+{
+    // Multi-imports are desugared after parser which should not be used for get package name.
+    CJC_ASSERT(kind != ImportKind::IMPORT_MULTI);
+    if (prefixPaths.empty()) {
+        return {identifier};
+    }
+    std::stringstream ss;
+    for (size_t i{0}; i < prefixPaths.size(); ++i) {
+        ss << prefixPaths[i];
+        // do not add . if this is the last of import xxx.*, because * is not part of package name
+        if (i + 1 == prefixPaths.size()) {
+            continue;
+        }
+        if (i == 0 && hasDoubleColon) {
+            ss << TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)];
+        } else {
+            ss << TOKENS[static_cast<int>(TokenKind::DOT)];
+        }
+    }
+    if (kind == ImportKind::IMPORT_ALL) {
+        return {ss.str()};
+    }
+    if (hasDoubleColon && prefixPaths.size() == 1) {
+        ss << TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)] << identifier.Val();
+        return {ss.str()};
+    }
+    if (prefixPaths.empty()) {
+        return {identifier.Val()};
+    }
+    // this order is important for resolving imported names
+    return {ss.str() + std::string{TOKENS[static_cast<int>(TokenKind::DOT)]} + identifier.Val(), ss.str()};
+}
+
 std::string ImportContent::ToString() const
 {
     std::function<void(std::stringstream&, const ImportContent&)> toString = [](auto& ss, auto& content) {
