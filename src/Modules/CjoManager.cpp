@@ -565,7 +565,8 @@ std::pair<std::string, std::string> CjoManager::GetPackageCjo(const AST::ImportS
     std::string cjoName;
     for (auto it : GetPossibleCjoNames(importSpec)) {
         cjoName = it;
-        if (auto found = impl->GetCjoFileCacheMap().find(cjoName); found != impl->GetCjoFileCacheMap().end()) {
+        if (auto found = impl->GetCjoFileCacheMap().find(FileUtil::ToPackageName(cjoName));
+            found != impl->GetCjoFileCacheMap().end()) {
             cjoPath = cjoName; // Set dummy path for cached cjo data.
         } else {
             cjoPath = FileUtil::FindSerializationFile(FileUtil::ToPackageName(cjoName),
