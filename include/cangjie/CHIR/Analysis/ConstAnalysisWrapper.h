@@ -20,11 +20,8 @@ namespace {
 const size_t OVERHEAD_BLOCK_SIZE = 1000U;
 // Big size, use active pool
 const size_t USE_ACTIVE_BLOCK_SIZE = 300U;
-// Huge block size, do nothing when compiling in serial
-const size_t SERIAL_OVERHEAD_BLOCK_SIZE = 300U;
-// Big size, use active pool in serial
-const size_t SERIAL_USE_ACTIVE_BLOCK_SIZE = 150U;
 
+/// Get all block size from a lambda, get 0 if not a lambda.
 size_t GetBlockSize(const Expression& expr)
 {
     size_t blockSize = 0;
@@ -41,6 +38,7 @@ size_t GetBlockSize(const Expression& expr)
     return blockSize;
 }
 
+/// count all blocks in func, including lambda expr.
 size_t CountBlockSize(const Func& func)
 {
     size_t blockSize = func.GetBody()->GetBlocks().size();
@@ -173,17 +171,10 @@ private:
     std::optional<bool> JudgeUsingPool(const Func* func)
     {
         auto size = CountBlockSize(*func);
-        if (compileThreadNum > 1) {
-            if (size > OVERHEAD_BLOCK_SIZE) {
-                return std::nullopt;
-            }
-            return size > USE_ACTIVE_BLOCK_SIZE;
-        } else {
-            if (size > SERIAL_OVERHEAD_BLOCK_SIZE) {
-                return std::nullopt;
-            }
-            return size > SERIAL_USE_ACTIVE_BLOCK_SIZE;
+        if (size > OVERHEAD_BLOCK_SIZE) {
+            return std::nullopt;
         }
+        return size > USE_ACTIVE_BLOCK_SIZE;
     }
 
     template <typename... Args>
@@ -199,11 +190,12 @@ private:
                 // overhead huge size, do nothing
                 funcWithPoolDomain.emplace(func);
             } else if (judgeRes.value()) {
-                // use acitve pool
+                // middle size, use acitve pool
                 if (auto res = RunOnFuncWithPool(func, isDebug, std::forward<Args>(args)...)) {
                     funcWithPoolDomain.emplace(func);
                 }
             } else {
+                // normal const analysis
                 if (auto res = RunOnFunc(func, isDebug, std::forward<Args>(args)...)) {
                     resultsMap.emplace(func, std::move(res));
                 }
@@ -229,12 +221,13 @@ private:
                 // overhead huge size, do nothing
                 funcWithPoolDomain.emplace(func);
             } else if (judgeRes.value()) {
-                // use acitve pool
+                // middle size, use acitve pool
                 resultsPool.emplace_back(taskQueue.AddTask<ResTyPool>(
                     [func, isDebug, &args..., this]() { return RunOnFuncWithPool(func, isDebug, std::forward<Args>(args)...); },
                     // Roughly use the number of Blocks as the cost of task weight
                     func->GetBody()->GetBlocks().size()));
             } else {
+                // normal const analysis
                 results.emplace_back(taskQueue.AddTask<ResTy>(
                     [func, isDebug, &args..., this]() { return RunOnFunc(func, isDebug, std::forward<Args>(args)...); },
                     func->GetBody()->GetBlocks().size()));

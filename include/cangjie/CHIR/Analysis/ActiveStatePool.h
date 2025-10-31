@@ -13,12 +13,35 @@
 #include "cangjie/CHIR/Analysis/ValueDomain.h"
 
 namespace Cangjie::CHIR {
+
+/**
+ * @file ActiveStatePool.h
+ * @brief Containers for mapping CHIR Value pointers to ValueDomain instances.
+ *
+ * This header provides two pool implementations:
+ * - DefaultStatePool: a thin wrapper around std::unordered_map<Value*, ValueDomain>.
+ * - ActiveStatePool: a bounded pool that keeps insertion order via a doubly-linked
+ *   list (ActiveStateNode) and evicts oldest entries when capacity is exceeded.
+ *
+ * Both pools expose a similar API (Begin/End/Find/Insert/At/Join/emplace) so they
+ * can be used interchangeably for value analysis state storage.
+ */
+
+/**
+ * @brief Default (unbounded) state pool.
+ *
+ * Lightweight mapping Value* -> ValueDomain backed by std::unordered_map.
+ * Provides basic iteration, lookup and join utilities.
+ *
+ * @tparam ValueDomain Domain type stored for each Value pointer.
+ */
 template <typename ValueDomain>
 class DefaultStatePool {
 public:
     using ConstIterator = typename std::unordered_map<Value*, ValueDomain>::const_iterator;
     using Iterator = typename std::unordered_map<Value*, ValueDomain>::iterator;
 
+    /** @name Iteration */ /// @{
     ConstIterator Begin() const
     {
         return data.begin();
@@ -38,22 +61,42 @@ public:
     {
         return data.end();
     }
+    /// @}
 
+    /** @name Lookup */ /// @{
+    /**
+     * @brief Find mapping for @p value.
+     * @return const_iterator to entry or End().
+     */
     ConstIterator Find(Value* value) const
     {
         return data.find(value);
     }
 
+    /**
+     * @brief Find mapping for @p value (non-const).
+     * @return iterator to entry or End().
+     */
     Iterator Find(Value* value)
     {
         return data.find(value);
     }
+    /// @}
 
+    /**
+     * @brief Insert a mapping value -> domain.
+     * @param value pointer key
+     * @param domain stored domain
+     */
     void Insert(Value* value, ValueDomain domain)
     {
         data.emplace(value, std::move(domain));
     }
 
+    /**
+     * @brief Access the domain for @p value. Throws if not present.
+     * @return reference to ValueDomain
+     */
     ValueDomain& At(Value* value)
     {
         return data.at(value);
@@ -64,11 +107,19 @@ public:
         return data.at(value);
     }
 
+    /**
+     * @brief Join another DefaultStatePool into this one.
+     * @param rhs right-hand side pool
+     * @return true if any entry in this pool changed as a result of the join.
+     */
     bool Join(const DefaultStatePool<ValueDomain>& rhs)
     {
         return MapJoin<Value*, ValueDomain>(data, rhs.data);
     }
 
+    /**
+     * @brief Perfect-forwarding emplace into underlying map.
+     */
     template<typename... Args>
     std::pair<Iterator, bool> emplace(Args&&... args)
     {
@@ -79,31 +130,60 @@ private:
     std::unordered_map<Value*, ValueDomain> data;
 };
 
+/**
+ * @brief MapJoin adaptor for DefaultStatePool to enable generic join usage.
+ * @tparam Domain domain type, must derive from AbstractDomain<Domain>.
+ */
 template <typename Domain, typename = std::enable_if_t<std::is_base_of_v<AbstractDomain<Domain>, Domain>>>
 bool MapJoin(DefaultStatePool<Domain>& lhs, const DefaultStatePool<Domain>& rhs)
 {
     return lhs.Join(rhs);
 }
 
+/**
+ * @brief Doubly-linked node used by ActiveStatePool to track insertion order.
+ */
 struct ActiveStateNode {
     ActiveStateNode() {}
-    ActiveStateNode(Value* value) : value(value) {}
-    ActiveStateNode* prev = nullptr;
-    ActiveStateNode* next = nullptr;
+    explicit ActiveStateNode(Value* value) : value(value) {}
+    ActiveStateNode* prev = nullptr; /**< previous (older) node */
+    ActiveStateNode* next = nullptr; /**< next (newer) node */
 
-    Value* value = nullptr;
+    Value* value = nullptr; /**< associated Value pointer */
 };
 
+/**
+ * @brief Bounded active state pool with eviction and insertion-order tracking.
+ *
+ * ActiveStatePool stores a mapping Value* -> ValueDomain and maintains a
+ * doubly-linked list of ActiveStateNode to record insertion order. When the
+ * number of entries exceeds MAX_STATE_POOL_SIZE the oldest entries are evicted
+ * until the size reaches BASE_STATE_POOL_SIZE.
+ *
+ * The API mirrors DefaultStatePool and adds Insert/emplace that return the
+ * ActiveStateNode* for the inserted value.
+ *
+ * @tparam ValueDomain domain type stored per Value; must derive from AbstractDomain<ValueDomain>.
+ */
 template <typename ValueDomain>
 class ActiveStatePool {
 public:
     using ConstIterator = typename std::unordered_map<Value*, ValueDomain>::const_iterator;
     using Iterator = typename std::unordered_map<Value*, ValueDomain>::iterator;
 
+    /**
+     * @brief Construct an empty ActiveStatePool.
+     */
     explicit ActiveStatePool()
     {
     }
 
+    /**
+     * @brief Deep-copy constructor.
+     *
+     * Produces an independent pool with copied ValueDomain entries and newly
+     * constructed ActiveStateNode instances preserving the original insertion order.
+     */
     ActiveStatePool(const ActiveStatePool<ValueDomain>& other)
     {
         init();
@@ -133,6 +213,10 @@ public:
         }
     }
 
+    /**
+     * @brief Deep-copy assignment.
+     * @return reference to this
+     */
     ActiveStatePool& operator=(const ActiveStatePool<ValueDomain>& other)
     {
         init();
@@ -163,6 +247,9 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Move constructor transfers ownership of internal structures.
+     */
     ActiveStatePool(ActiveStatePool<ValueDomain>&& other)
     {
         first = other.first;
@@ -174,6 +261,10 @@ public:
         obj2StateNode = std::move(other.obj2StateNode);
     }
 
+    /**
+     * @brief Move assignment transfers ownership.
+     * @return reference to this
+     */
     ActiveStatePool& operator=(ActiveStatePool<ValueDomain>&& other)
     {
         first = other.first;
@@ -190,6 +281,7 @@ public:
     {
     }
 
+    /** @name Iteration */ /// @{
     ConstIterator Begin() const
     {
         return data.begin();
@@ -209,21 +301,41 @@ public:
     {
         return data.end();
     }
+    /// @}
 
+    /** @name Lookup */ /// @{
+    /**
+     * @brief Find mapping for @p value (const).
+     * @return const_iterator to entry or End().
+     */
     ConstIterator Find(Value* value) const
     {
         return data.find(value);
     }
 
+    /**
+     * @brief Find mapping for @p value (non-const).
+     * @return iterator to entry or End().
+     */
     Iterator Find(Value* value)
     {
         return data.find(value);
     }
+    /// @}
 
+    /**
+     * @brief Access stored domain for @p value.
+     *
+     * If the value is not present in the pool a reference to a shared TOP domain
+     * instance is returned (TOP_REF_STATE for reference types, TOP_STATE for others).
+     *
+     * @param value pointer to Value
+     * @return reference to ValueDomain
+     */
     ValueDomain& At(Value* value)
     {
         if (data.count(value) == 0) {
-            return TOP_STATE;
+            return GetTopState(*value);
         }
         return data.at(value);
     }
@@ -231,11 +343,20 @@ public:
     const ValueDomain& At(Value* value) const
     {
         if (data.count(value) == 0) {
-            return TOP_STATE;
+            return GetTopState(*value);
         }
         return data.at(value);
     }
 
+    /**
+     * @brief Insert a new mapping and append its node to the tail of the list.
+     *
+     * If the object already exists, the existing node pointer is returned.
+     *
+     * @param obj Value* key
+     * @param domain ValueDomain value to store
+     * @return pointer to the ActiveStateNode associated with the object
+     */
     ActiveStateNode* Insert(Value* obj, ValueDomain domain)
     {
         if (data.count(obj) != 0) {
@@ -259,11 +380,23 @@ public:
         return stateNode;
     }
 
+    /**
+     * @brief Emplace wrapper for Insert.
+     */
     ActiveStateNode* emplace(Value* obj, ValueDomain domain)
     {
         return Insert(obj, std::move(domain));
     }
 
+    /**
+     * @brief Join another ActiveStatePool into this one.
+     *
+     * Existing keys are joined using ValueDomain::Join; newly inserted keys do
+     * not mark the result as changed.
+     *
+     * @param other pool to join from
+     * @return true if any existing domain changed
+     */
     bool Join(const ActiveStatePool<ValueDomain>& other)
     {
         bool changed = false;
@@ -280,6 +413,9 @@ public:
     }
 
 private:
+    /**
+     * @brief Reset internal roots and clear maps.
+     */
     void init()
     {
         first = nullptr;
@@ -288,6 +424,11 @@ private:
         obj2StateNode.clear();
     }
 
+    /**
+     * @brief Evict oldest entries when pool exceeds MAX_STATE_POOL_SIZE.
+     *
+     * Eviction continues until the pool size falls to BASE_STATE_POOL_SIZE.
+     */
     void CheckPoolOverflow()
     {
         if (data.size() < MAX_STATE_POOL_SIZE) {
@@ -304,17 +445,32 @@ private:
         }
     }
 
+    /**
+     * @brief Return shared TOP state for a Value not present in the pool.
+     * @param value reference to Value
+     * @return reference to TOP ValueDomain (ref or non-ref)
+     */
+    static ValueDomain& GetTopState(Value& value)
+    {
+        auto type = value.GetType();
+        if (type != nullptr && type->IsRef()) {
+            return TOP_REF_STATE;
+        }
+        return TOP_STATE;
+    }
+
     // can not merge ValueDomain and stateNode to one, because keep same api with default one.
-    std::unordered_map<Value*, ValueDomain> data;
-    std::unordered_map<Value*, ActiveStateNode> obj2StateNode;
+    std::unordered_map<Value*, ValueDomain> data;            /**< mapping Value* -> ValueDomain */
+    std::unordered_map<Value*, ActiveStateNode> obj2StateNode; /**< mapping Value* -> node */
 
-    ActiveStateNode* first = nullptr;
-    ActiveStateNode* tails = nullptr;
+    ActiveStateNode* first = nullptr; /**< oldest node (head) */
+    ActiveStateNode* tails = nullptr; /**< newest node (tail) */
 
-    static ValueDomain TOP_STATE;
+    static ValueDomain TOP_STATE;      /**< shared TOP state for non-ref values */
+    static ValueDomain TOP_REF_STATE;  /**< shared TOP state for ref values */
     
-    static size_t MAX_STATE_POOL_SIZE;
-    static size_t BASE_STATE_POOL_SIZE;
+    static size_t MAX_STATE_POOL_SIZE;  /**< eviction high-water threshold */
+    static size_t BASE_STATE_POOL_SIZE; /**< eviction low-water threshold */
 };
 
 template<typename Domain, typename = std::enable_if_t<std::is_base_of_v<AbstractDomain<Domain>, Domain>>>
@@ -329,6 +485,8 @@ template <typename ValueDomain>
 size_t ActiveStatePool<ValueDomain>::BASE_STATE_POOL_SIZE = 80;
 template <typename ValueDomain>
 ValueDomain ActiveStatePool<ValueDomain>::TOP_STATE = ValueDomain(true);
+template <typename ValueDomain>
+ValueDomain ActiveStatePool<ValueDomain>::TOP_REF_STATE = ValueDomain(Ref::GetTopRefInstance());
 }  // namespace Cangjie::CHIR
 
 #endif
