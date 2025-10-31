@@ -501,19 +501,19 @@ VarDecl& TypeChecker::TypeCheckerImpl::CreateFrame(ASTContext& ctx, TryExpr& te,
     re->ty = frameClassTy;
     re->instTys.push_back(tryExprTy);
 
-    auto frameInit = CreateMemberAccess(std::move(re), "init");
-    CJC_ASSERT(frameInit->target);
-    frameInit->targets.emplace_back(StaticCast<FuncDecl*>(frameInit->target));
-
     EncloseTryLambda(ctx, te.tryLambda);
 
     // We cannot just pass the lambda directly to the constructor, because then the call
     // to ChkCallExpr would delete the desugaring information, so we bind the lambda to
     // a variable before calling the constructor
     auto lambdaVarDecl = CreateVarDecl("$frameLambda", std::move(te.tryLambda));
-    AST::CopyNodeScopeInfo(re, lambdaVarDecl);
+    ctx.AddDeclName(std::make_pair("$frameLambda", lambdaVarDecl->scopeName), *lambdaVarDecl);
     auto lambdaVar = CreateRefExpr(*lambdaVarDecl);
-    AST::CopyNodeScopeInfo(re, lambdaVar);
+    AST::CopyNodeScopeInfo(lambdaVar, re);
+
+    auto frameInit = CreateMemberAccess(std::move(re), "init");
+    CJC_ASSERT(frameInit->target);
+    frameInit->targets.emplace_back(StaticCast<FuncDecl*>(frameInit->target));
 
     std::vector<OwnedPtr<FuncArg>> args;
     args.emplace_back(CreateFuncArg(std::move(lambdaVar)));
@@ -877,9 +877,9 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
 
             // Like in createFrame, we can't just pass the lambda to `setHandler`
             OwnedPtr<AST::VarDecl> handlerLambdaVarDecl = CreateVarDecl("$handlerLambda", std::move(handlerLambda));
-            AST::CopyNodeScopeInfo(re, handlerLambdaVarDecl);
+            ctx.AddDeclName(std::make_pair("$handlerLambda", handlerLambdaVarDecl->scopeName), *handlerLambdaVarDecl);
             auto handlerLambdaVar = CreateRefExpr(*handlerLambdaVarDecl);
-            AST::CopyNodeScopeInfo(re, handlerLambdaVar);
+            AST::CopyNodeScopeInfo(handlerLambdaVar, handlerLambdaVarDecl);
 
             std::vector<OwnedPtr<FuncArg>> args;
             args.emplace_back(CreateFuncArg(std::move(handlerLambdaVar)));
