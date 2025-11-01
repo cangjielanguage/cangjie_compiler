@@ -262,8 +262,8 @@ std::string LineToString(TokenVector& line)
         } else if (token.kind == TokenKind::JSTRING_LITERAL) {
             ret += "J" + quote + ProcessQuotaMarksForSingle(token.Value()) + quote + blank;
         } else if (token.kind == TokenKind::RUNE_LITERAL) {
-            // For case: let c = '\''
-            ret += ((token == "\'") ? "r\'\\'\'" : "r\'" + token.Value() + "\'") + blank;
+            // For case: let c = r'\''
+            ret += ((token == "\'") ? "r\'\\'\'" : "r" + quote + token.Value() + quote) + blank;
         } else if (token.kind == TokenKind::MULTILINE_STRING) {
             ret += GetMultiStringValue(token) + blank;
         } else if (token.kind == TokenKind::MULTILINE_RAW_STRING) {
