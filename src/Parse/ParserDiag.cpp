@@ -10,6 +10,7 @@
  * This file implements the Parser.
  */
 
+#include <cstddef>
 #include <utility>
 
 #include "ParserImpl.h"
@@ -1099,6 +1100,25 @@ void ParserImpl::DiagExpectedDeclaration(ScopeKind scopeKind)
 void ParserImpl::DiagExpectedDeclaration(const Position& pos, const std::string& str)
 {
     auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_decl, pos, str);
+}
+
+void ParserImpl::DiagAndSuggestKeywordForExpectedDeclaration(
+    const std::vector<std::string>& keywords, size_t minLevDis, ScopeKind scopeKind)
+{
+    auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_decl, lookahead, ConvertToken(lookahead));
+    if (scopeKind == ScopeKind::TOPLEVEL) {
+        auto note = SubDiagnostic("only declarations or macro expressions can be used in the top-level");
+        builder.AddNote(note);
+    }
+    if (Seeing(TokenKind::IDENTIFIER)) {
+        const std::string& ident = lookahead.Value();
+        for (const auto& keyword : keywords) {
+            if (LevenshteinDistance(ident, keyword) <= minLevDis) {
+                builder.AddHelp("did you mean '" + keyword + "'?");
+                break;
+            }
+        }
+    }
 }
 
 void ParserImpl::DiagUnExpectedModifierOnDeclaration(const Decl& vd)

@@ -22,11 +22,11 @@ using namespace Cangjie::Utils;
 
 void ParserImpl::ParseCommonImportSpec(PtrVector<ImportSpec>& imports, PtrVector<Annotation>& annos)
 {
-    while (SeeingImport2() || (SeeingBuiltinAnnotation())) {
+    while (SeeingImport() || (SeeingBuiltinAnnotation())) {
         if (SeeingBuiltinAnnotation()) {
             ParseAnnotations(annos);
         }
-        if (!SeeingImport2()) {
+        if (!SeeingImport()) {
             break;
         }
         ParseImportSpec(imports, annos);

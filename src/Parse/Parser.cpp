@@ -64,6 +64,32 @@ bool ParserImpl::ParsePackageHeaderEnd()
     return seeingFileEnd;
 }
 
+void ParserImpl::CheckAndHandleUnexpectedTopLevelDeclAfterFeatures()
+{
+    if (!SeeingPackage() && !SeeingMacroPackage() && !SeeingImport() && !Seeing(TokenKind::SEMI) &&
+        !SeeingDecl() && !SeeingMacroCallDecl() && !SeeingInitializer() && !SeeingFinalizer() &&
+        !Seeing(TokenKind::END)) {
+        DiagAndSuggestKeywordForExpectedDeclaration({"features", "macro", "package", "import", "func", "let", "var",
+            "const", "enum", "type", "struct", "class", "interface", "extend", "main"});
+        auto consumeTarget = [this]() {
+            return SeeingPackage() || SeeingMacroPackage() || Seeing(TokenKind::SEMI) || SeeingImport() ||
+                SeeingDecl() || SeeingMacroCallDecl() || SeeingInitializer() || SeeingFinalizer();
+        };
+        ConsumeUntilAny(consumeTarget, false);
+    }
+}
+
+void ParserImpl::CheckExpectedTopLevelDeclWhenNoPackage()
+{
+    bool maybeConstDecl = lastToken.kind == TokenKind::CONST;
+    bool maybeForeignBlock = lastToken.kind == TokenKind::FOREIGN && Seeing(TokenKind::LCURL);
+    if (!SeeingImport() && !Seeing(TokenKind::SEMI) && !SeeingDecl() && !SeeingMacroCallDecl() && !maybeConstDecl &&
+        !maybeForeignBlock && !SeeingInitializer() && !SeeingFinalizer() && !Seeing(TokenKind::END)) {
+        DiagAndSuggestKeywordForExpectedDeclaration({"macro", "package", "import", "func", "let", "var", "const",
+            "enum", "type", "struct", "class", "interface", "extend", "main"});
+    }
+}
+
 size_t ParserImpl::GetLineNum() const
 {
     std::unordered_set<int64_t> lines;
@@ -93,8 +119,10 @@ OwnedPtr<File> ParserImpl::ParseTopLevel()
      *  ;
     */
     // Parse features in TopLevel
-    if (SeeingFeature()) {
+    if (SeeingFeatures()) {
         ParseFeatureDirective(ret->feature);
+    } else {
+        CheckAndHandleUnexpectedTopLevelDeclAfterFeatures();
     }
     PtrVector<Annotation> annos;
     if (SeeingBuiltinAnnotation()) {
@@ -123,6 +151,7 @@ OwnedPtr<File> ParserImpl::ParseTopLevel()
             annos.clear();
         }
     } else {
+        CheckExpectedTopLevelDeclWhenNoPackage();
         scope.ResetParserScope();
     }
     // Parse importSpec in TopLevel.
