@@ -94,7 +94,7 @@ inline const std::string MACRO_OBJECT_NAME = "MACRO_OBJECT";
 constexpr std::string_view IF_AVAILABLE = "IfAvailable";
 
 // Standard library package name
-// Please do not change the const char[] type to std::string type because the initialization order of 
+// Please do not change the const char[] type to std::string type because the initialization order of
 // std::string and std::map types across translation units is undefined,especially on the Windows platform.
 inline const std::string DEFAULT_PACKAGE_NAME = "default";
 inline constexpr const char CORE_PACKAGE_NAME[] = "std.core";
@@ -156,6 +156,8 @@ constexpr auto ENV = "env";
 namespace Interop::ObjC {
 inline const std::string OBJ_C_ID_IDENT = "ObjCId";
 inline const std::string OBJ_C_POINTER_IDENT = "ObjCPointer";
+inline const std::string OBJ_C_FUNC_IDENT = "ObjCFunc";
+inline const std::string OBJ_C_BLOCK_IDENT = "ObjCBlock";
 inline const std::string INTEROPLIB_OBJ_C_PACKAGE_IDENT = "interoplib.objc";
 inline const std::string OBJ_C_LANG_PACKAGE_IDENT = "objc.lang";
 inline const std::string NATIVE_HANDLE_IDENT = "$obj";
@@ -167,7 +169,7 @@ inline const std::string NATIVE_HANDLE_GETTER_IDENT = "$getObj";
 // Headless instrinsics
 inline const std::string GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME = "getTypeForTypeParameter";
 inline const std::string IS_SUBTYPE_TYPES_FUNC_NAME = "isSubtypeTypes";
- 
+
 constexpr std::string_view ORG_NAME_SEPARATOR{"@"};
 } // namespace Cangjie
 #endif // CANGJIE_CONSTANTSUTILS_H

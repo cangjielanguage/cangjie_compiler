@@ -359,6 +359,8 @@ ERROR(sema_objc_method_must_have_foreign_name,
     "%s declaration method with more than one parameter must have must have @ForeignName annotation")
 ERROR(sema_objc_ctor_must_have_foreign_name,
     "%s declaration constructor with more than one parameter must have @ForeignName annotation")
+ERROR(sema_objc_func_argument_must_be_objc_compatible, "%s can only be used with function type over Objective-C compatible types")
+ERROR(sema_objc_func_call_property_can_only_be_called, "%s property 'call' can only be called directly, no other operations are permitted")
 
 // CJMapping for Objective-C
 ERROR(sema_objc_cjmapping_inheritance_interface_not_supported, "cangjie mirror decl type inheritance interface is not supported")

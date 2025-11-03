@@ -43,6 +43,10 @@ constexpr auto INTEROPLIB_OBJ_C_MSG_SEND = "objCMsgSend";
 constexpr auto INTEROPLIB_OBJ_C_MSG_SEND_SUPER = "objCMsgSendSuper";
 constexpr auto INTEROPLIB_OBJ_C_RELEASE = "objCRelease";
 
+// objc.lang
+constexpr auto OBJ_C_FUNC_GET_FPOINTER = "unsafeGetFunctionPointer";
+constexpr auto OBJ_C_BLOCK_GET_ABI_POINTER = "unsafeGetNativeABIPointer";
+
 } // namespace
 
 Ptr<TypeAliasDecl> InteropLibBridge::GetNativeObjCIdDecl()
@@ -200,6 +204,151 @@ Ptr<FuncDecl> InteropLibBridge::GetObjCReleaseDecl()
 
 Ptr<StructDecl> InteropLibBridge::GetObjCPointerDecl()
 {
-    static auto decl = GetObjCLangDecl<ASTKind::STRUCT_DECL>(OBJ_C_POINTER_IDENT);
-    return decl;
+    static auto result = GetObjCLangDecl<ASTKind::STRUCT_DECL>(OBJ_C_POINTER_IDENT);
+    return result;
+}
+
+Ptr<StructDecl> InteropLibBridge::GetObjCFuncDecl()
+{
+    static auto result =  GetObjCLangDecl<ASTKind::STRUCT_DECL>(OBJ_C_FUNC_IDENT);
+    return result;
+}
+
+Ptr<ClassDecl> InteropLibBridge::GetObjCBlockDecl() {
+    static auto result = GetObjCLangDecl<ASTKind::CLASS_DECL>(OBJ_C_BLOCK_IDENT);
+    return result;
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetObjCPointerConstructor()
+{
+    static Ptr<FuncDecl> result = nullptr;
+    if (result) {
+        return result;
+    }
+    auto outer = GetObjCPointerDecl();
+    for (auto& member : outer->body->decls) {
+        if (auto funcDecl = DynamicCast<FuncDecl*>(member.get())) {
+            if (funcDecl->TestAttr(Attribute::CONSTRUCTOR)
+                && funcDecl->funcBody
+                && funcDecl->funcBody->paramLists[0]
+                && funcDecl->funcBody->paramLists[0]->params.size() == 1) {
+                result = funcDecl;
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+Ptr<VarDecl> InteropLibBridge::GetObjCPointerPointerField()
+{
+    static Ptr<VarDecl> result = nullptr;
+    if (result) {
+        return result;
+    }
+    auto outer = GetObjCPointerDecl();
+    for (auto& member : outer->body->decls) {
+        if (auto fieldDecl = DynamicCast<VarDecl*>(member.get())) {
+            if (fieldDecl->ty->IsPointer()) {
+                result = fieldDecl;
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetObjCFuncConstructor()
+{
+    static Ptr<FuncDecl> result = nullptr;
+    if (result) {
+        return result;
+    }
+    auto outer = GetObjCFuncDecl();
+    for (auto& member : outer->body->decls) {
+        if (auto funcDecl = DynamicCast<FuncDecl*>(member.get())) {
+            if (funcDecl->TestAttr(Attribute::CONSTRUCTOR)
+                && funcDecl->funcBody
+                && funcDecl->funcBody->paramLists[0]
+                && funcDecl->funcBody->paramLists[0]->params.size() == 1) {
+                result = funcDecl;
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetObjCFuncFPointerAccessor()
+{
+    static Ptr<FuncDecl> result = nullptr;
+    if (result != nullptr) {
+        return result;
+    }
+    auto outer = GetObjCFuncDecl();
+    for (auto& member : outer->body->decls) {
+        if (auto funcDecl = DynamicCast<FuncDecl*>(member.get())) {
+            if (funcDecl->identifier == OBJ_C_FUNC_GET_FPOINTER) {
+                result = funcDecl;
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+
+Ptr<FuncDecl> InteropLibBridge::GetObjCBlockConstructor() {
+    static Ptr<FuncDecl> result = nullptr;
+    if (result) {
+        return result;
+    }
+    auto outer = GetObjCBlockDecl();
+    for (auto& member : outer->body->decls) {
+        if (auto funcDecl = DynamicCast<FuncDecl*>(member.get())) {
+            if (funcDecl->TestAttr(Attribute::CONSTRUCTOR)
+                && funcDecl->funcBody
+                && funcDecl->funcBody->paramLists[0]
+                && funcDecl->funcBody->paramLists[0]->params.size() == 1) {
+                result = funcDecl;
+                break;
+            }
+        }
+    }
+    return result;
+}
+Ptr<FuncDecl> InteropLibBridge::GetObjCBlockFPointerAccessor()
+{
+    static Ptr<FuncDecl> result = nullptr;
+    if (result != nullptr) {
+        return result;
+    }
+    auto outer = GetObjCBlockDecl();
+    for (auto& member : outer->body->decls) {
+        if (auto funcDecl = DynamicCast<FuncDecl*>(member.get())) {
+            if (funcDecl->identifier == OBJ_C_FUNC_GET_FPOINTER) {
+                result = funcDecl;
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetObjCBlockAbiPointerAccessor()
+{
+    static Ptr<FuncDecl> result = nullptr;
+    if (result != nullptr) {
+        return result;
+    }
+    auto outer = GetObjCBlockDecl();
+    for (auto& member : outer->body->decls) {
+        if (auto funcDecl = DynamicCast<FuncDecl*>(member.get())) {
+            if (funcDecl->identifier == OBJ_C_BLOCK_GET_ABI_POINTER) {
+                result = funcDecl;
+                break;
+            }
+        }
+    }
+    return result;
 }

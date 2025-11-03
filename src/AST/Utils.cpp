@@ -880,10 +880,10 @@ void InsertSyntheticClassDecl(ClassLikeDecl& decl, File& file)
         synthetic->inheritedTypes.emplace_back(std::move(jobject));
     }
     synthetic->inheritedTypes.emplace_back(CreateRefType(decl));
-    
+
     synthetic->fullPackageName = decl.fullPackageName;
     SetPositionAndCurFileByProvidedNode(*synthetic, decl);
-    
+
     synthetic->body = MakeOwned<ClassBody>();
     SetPositionAndCurFileByProvidedNode(*synthetic->body, *synthetic);
 
