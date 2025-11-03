@@ -84,6 +84,11 @@ public:
     Ptr<EnumDecl> GetJavaEntityKindDecl();
 
     /**
+     * JavaObjectController<T>
+     */
+    Ptr<ClassDecl> GetJavaObjectControllerDecl();
+
+    /**
      * Java_CFFI_JavaEntityKind.JOBJECT
      */
     Decl& GetJavaEntityKindJObject();
@@ -276,6 +281,27 @@ public:
     Ptr<FuncDecl> GetMethodIdConstrStatic();
     Ptr<FuncDecl> GetFieldIdConstr();
     Ptr<FuncDecl> GetFieldIdConstrStatic();
+    
+ 
+     /**
+     * JavaObjectController init() decl
+     */
+    Ptr<FuncDecl> GetJavaObjectControllerInitDecl();
+    
+    /**
+     * JavaObjectController attachCJObject() decl
+     */
+    Ptr<FuncDecl> GetAttachCJObjectDecl();
+
+    /**
+     * JavaObjectController detachCJObject() decl
+     */
+    Ptr<FuncDecl> GetDetachCJObjectDecl();
+
+    /**
+     * deleteLocalRef()
+     */
+    Ptr<FuncDecl> GetDeleteLocalRefDecl();
 
     /**
      * JNIEnv_ptr ty
@@ -361,6 +387,11 @@ public:
         const std::string& classTypeSignature,
         const std::string& constructorSignature,
         std::vector<OwnedPtr<Expr>> args);
+    
+    /**
+     * JavaObjectController<T>(javaEntity, className)
+     */
+    OwnedPtr<CallExpr> CreateJavaObjectControllerCall(OwnedPtr<Expr> javaEntity, OwnedPtr<Expr> className, ClassDecl& classDecl);
 
     /**
      * Java_CFFI_newJavaArray(env, signature, [args])
@@ -622,6 +653,8 @@ private:
     {
         return ImportDecl<K>(INTEROP_JAVA_LANG_PACKAGE, declname);
     }
+
+    Ptr<FuncDecl> GetJavaObjectControllerMethodDecl(std::string methodName);
 
     ImportManager& importManager;
     TypeManager& typeManager;

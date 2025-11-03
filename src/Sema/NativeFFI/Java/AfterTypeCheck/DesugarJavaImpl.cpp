@@ -558,6 +558,14 @@ std::string JavaDesugarManager::GetJniInitCjObjectFuncNameForVarDecl(const AST::
     return "Java_" + fqname + "_" + mangledFuncName + "initCJObject";
 }
 
+std::string JavaDesugarManager::GetJniDetachCjObjectFuncName(const Decl& decl) const
+{
+    std::string fqname = GetJavaFQName(decl);
+    MangleJNIName(fqname);
+
+    return "Java_" + fqname + "_detachCJObject";
+}
+
 std::string JavaDesugarManager::GetJniDeleteCjObjectFuncName(const Decl& decl) const
 {
     std::string fqname = GetJavaFQName(decl);

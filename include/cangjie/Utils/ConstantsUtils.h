@@ -147,6 +147,10 @@ inline const std::string INTEROP_JAVA_LANG_PACKAGE = "java.lang";
 inline const std::string JAVA_REF_FIELD_NAME = "$javaref";
 constexpr auto JAVA_REF_GETTER_FUNC_NAME = "$getJavaRef";
 constexpr auto INTEROPLIB_CFFI_JAVA_ENTITY = "Java_CFFI_JavaEntity";
+constexpr auto JAVA_OBJECT_CONTROLLER = "JavaObjectController";
+constexpr auto JAVA_OBJECT_CONTROLLER_NAME = "controller";
+constexpr auto JAVA_OVERRIDE_MASK_NAME = "overrideMask";
+constexpr auto ENV = "env";
 } // namespace Cangjie::Interop::Java
 
 namespace Interop::ObjC {

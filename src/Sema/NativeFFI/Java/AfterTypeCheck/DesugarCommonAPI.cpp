@@ -220,10 +220,14 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeFuncDeclBylambda(Decl& decl, Ow
  * when isClassLikeDecl is true: argument ctor: generated constructor mapped with Java_ClassName_initCJObject func
  * when isClassLikeDecl is false: argument ctor: origin constructor mapped with Java_ClassName_initCJObject func
  */
-OwnedPtr<Decl> JavaDesugarManager::GenerateNativeInitCjObjectFunc(FuncDecl& ctor, bool isClassLikeDecl)
+OwnedPtr<Decl> JavaDesugarManager::GenerateNativeInitCjObjectFunc(FuncDecl& ctor, bool isClassLikeDecl, bool isOpenClass, Ptr<FuncDecl> fwdCtor)
 {
     if (isClassLikeDecl) {
         CJC_ASSERT(!ctor.funcBody->paramLists[0]->params.empty()); // it contains obj: JavaEntity as minimum
+    }
+
+    if (isOpenClass) {
+        CJC_ASSERT(fwdCtor);
     }
 
     // func decl arguments construction
@@ -231,17 +235,25 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeInitCjObjectFunc(FuncDecl& ctor
     std::vector<OwnedPtr<FuncArg>> ctorCallArgs;
     PushEnvParams(params);
     PushObjParams(params);
+
     auto curFile = ctor.curFile;
     CJC_NULLPTR_CHECK(curFile);
     auto& jniEnvPtrParam = *(params[0]);
     auto objParamRef = WithinFile(CreateRefExpr(*params[1]), curFile);
-    if (isClassLikeDecl) {
+    if (isClassLikeDecl || isOpenClass) {
         auto objAsEntity = lib.CreateJavaEntityJobjectCall(std::move(objParamRef));
         auto objWeakRef = lib.CreateNewGlobalRefCall(
             WithinFile(CreateRefExpr(jniEnvPtrParam), curFile), std::move(objAsEntity), true);
         ctorCallArgs.push_back(CreateFuncArg(std::move(objWeakRef)));
     }
-
+    
+    if (isOpenClass) {
+        auto overrideMaskParam = CreateFuncParam(JAVA_OVERRIDE_MASK_NAME, lib.CreateJlongType(), nullptr, lib.GetJlongTy());
+        auto paramRef = WithinFile(CreateRefExpr(*overrideMaskParam), curFile);
+        ctorCallArgs.push_back(CreateFuncArg(std::move(paramRef)));
+        params.push_back(std::move(overrideMaskParam));
+    }
+    
     for (size_t argIdx = 0; argIdx < ctor.funcBody->paramLists[0]->params.size(); ++argIdx) {
         auto& arg = ctor.funcBody->paramLists[0]->params[argIdx];
 
@@ -257,9 +269,17 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeInitCjObjectFunc(FuncDecl& ctor
     std::vector<OwnedPtr<FuncParamList>> paramLists;
     paramLists.push_back(CreateFuncParamList(std::move(params)));
 
-    auto ctorRef = WithinFile(CreateRefExpr(ctor), curFile);
-    auto objectCtorCall = CreateCallExpr(
-        std::move(ctorRef), std::move(ctorCallArgs), Ptr(&ctor), ctor.outerDecl->ty, CallKind::CALL_OBJECT_CREATION);
+    OwnedPtr<CallExpr> objectCtorCall;
+
+    if (isOpenClass) {
+        auto fwdCtorRef = WithinFile(CreateRefExpr(*fwdCtor), curFile);
+        objectCtorCall = CreateCallExpr(std::move(fwdCtorRef), std::move(ctorCallArgs), fwdCtor,
+            fwdCtor->outerDecl->ty, CallKind::CALL_OBJECT_CREATION);
+    } else {
+        auto ctorRef = WithinFile(CreateRefExpr(ctor), curFile);
+        objectCtorCall = CreateCallExpr(std::move(ctorRef), std::move(ctorCallArgs), Ptr(&ctor), ctor.outerDecl->ty,
+            CallKind::CALL_OBJECT_CREATION);
+    }
 
     auto putToRegistryCall = lib.CreatePutToRegistryCall(std::move(objectCtorCall));
     auto bodyLambda = WrapReturningLambdaExpr(typeManager, Nodes(std::move(putToRegistryCall)));
