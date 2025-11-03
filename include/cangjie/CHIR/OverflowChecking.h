@@ -88,14 +88,7 @@ public:
         if (std::is_signed<T>::value && !std::is_signed<K>::value && x < 0) {
             isOverflow = true;
         } else if (!std::is_signed<T>::value && std::is_signed<K>::value) {
-            using LargerType = typename std::conditional<sizeof(T) <= sizeof(K), K, T>::type;
-            constexpr auto tmax = static_cast<LargerType>(std::numeric_limits<T>::max());
-            constexpr auto kmax = static_cast<LargerType>(std::numeric_limits<K>::max());
-            if constexpr (tmax > kmax) {
-                isOverflow = x > static_cast<T>(std::numeric_limits<K>::max());
-            } else {
-                isOverflow = static_cast<K>(x) > std::numeric_limits<K>::max();
-            }
+            isOverflow = x > static_cast<T>(std::numeric_limits<K>::max());
         } else {
             using LargerType = typename std::conditional<sizeof(T) <= sizeof(K), K, T>::type;
             constexpr auto tmax = static_cast<LargerType>(std::numeric_limits<T>::max());
