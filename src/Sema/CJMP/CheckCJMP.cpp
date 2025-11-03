@@ -119,11 +119,10 @@ void DiagNotMatchedDecl(DiagnosticEngine &diag, const AST::Decl& decl, const std
             info = "variable with pattern";
         } else if (decl.astKind == ASTKind::EXTEND_DECL) {
             auto& ed = StaticCast<const ExtendDecl&>(decl);
-            if (Ty::IsTyCorrect(ed.ty.get())) {
-                info = "extend '" + GetTypeNameFromTy(ed.extendedType->ty.get(), false, {}) + "'";
-            } else {
-                info = "extend '" + DynamicCast<AST::RefType>(ed.extendedType.get())->ref.identifier + "'";
-            }
+            info = DeclKindToString(decl) + " '" +
+                (Ty::IsTyCorrect(ed.ty.get()) ? GetTypeNameFromTy(ed.extendedType->ty.get(), false, {})
+                                              : decl.identifier.GetRawText()) +
+                "'";
         } else {
             info = DeclKindToString(decl) + " '" + decl.identifier.GetRawText() + "'";
         }
@@ -890,7 +889,7 @@ bool MPTypeCheckerImpl::MatchEnumFuncTypes(const FuncDecl& platform, const FuncD
     }
 
     TypeSubst genericTyMap;
-    MapCJMPGenericTypeArgs(genericTyMap, common, platform);
+    MapCJMPGenericTypeArgs(genericTyMap, *common.outerDecl, *platform.outerDecl);
     if (genericTyMap.empty()) {
         return false;
     }
@@ -1163,15 +1162,6 @@ void MPTypeCheckerImpl::UpdatePlatformMemberGenericTy(
                     if (member->TestAttr(Attribute::FROM_COMMON_PART)) {
                         auto ptr = member.get();
                         UpdateGenericTyInMemberFromCommon(genericTyMap, ptr);
-                    }
-                }
-
-                if (auto en = DynamicCast<EnumDecl>(platformDecl)) {
-                    for (auto& ctor : en->constructors) {
-                        auto platformCtor = ctor->platformImplementation;
-                        if (platformCtor) {
-                            UpdateGenericTyInMemberFromCommon(genericTyMap, platformCtor);
-                        }
                     }
                 }
             }
