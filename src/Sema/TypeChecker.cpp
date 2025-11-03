@@ -1574,6 +1574,7 @@ bool TypeChecker::TypeCheckerImpl::CheckWithEffectiveCache(
             }
         }
     }
+    node->Clear();
     return CheckAndCache(ctx, target, node, key);
 }
 
