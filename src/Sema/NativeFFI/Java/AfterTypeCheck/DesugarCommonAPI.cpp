@@ -31,6 +31,28 @@ inline void JavaDesugarManager::PushSelfParams(std::vector<OwnedPtr<FuncParam>>&
     params.push_back(CreateFuncParam(name, lib.CreateJlongType(), nullptr, lib.GetJlongTy()));
 }
 
+OwnedPtr<CallExpr> JavaDesugarManager::GetFwdClassInstance(OwnedPtr<RefExpr> paramRef, Decl& fwdClassDecl)
+{
+        Ptr<FuncDecl> ctor(nullptr);
+        for (auto& member : fwdClassDecl.GetMemberDecls()) {
+            if (auto fd = As<ASTKind::FUNC_DECL>(member); fd && fd->TestAttr(Attribute::CONSTRUCTOR)) {
+                ctor = fd;
+                break;
+            }
+        }
+        CJC_ASSERT(ctor);
+
+        auto curFile = fwdClassDecl.curFile;
+
+        auto entity = lib.CreateJavaEntityJobjectCall(std::move(paramRef));
+        std::vector<OwnedPtr<FuncArg>> ctorCallArgs;
+        ctorCallArgs.push_back(CreateFuncArg(std::move(entity)));
+
+        auto fwdTy = fwdClassDecl.ty;
+        auto fdRef = WithinFile(CreateRefExpr(*ctor), curFile);
+        return CreateCallExpr(std::move(fdRef), std::move(ctorCallArgs), ctor, fwdTy, CallKind::CALL_OBJECT_CREATION);
+}
+
 bool JavaDesugarManager::FillMethodParamsByArg(std::vector<OwnedPtr<FuncParam>>& params,
     std::vector<OwnedPtr<FuncArg>>& callArgs, FuncDecl& funcDecl, OwnedPtr<FuncParam>& arg, FuncParam& jniEnvPtrParam)
 {
@@ -64,7 +86,7 @@ bool JavaDesugarManager::FillMethodParamsByArg(std::vector<OwnedPtr<FuncParam>>&
     } else if (IsCJMappingInterface(*arg->ty)) {
         Ptr<Ty> fwdTy(nullptr);
         for (auto it : classLikeTy->directSubtypes) {
-            if (it->name == classLikeTy->name + "_fwd") {
+            if (it->name == classLikeTy->name + JAVA_FWD_CLASS_SUFFIX) {
                 fwdTy = it;
                 break;
             }
@@ -72,24 +94,8 @@ bool JavaDesugarManager::FillMethodParamsByArg(std::vector<OwnedPtr<FuncParam>>&
         CJC_ASSERT(fwdTy);
 
         auto fwdClassDecl = Ty::GetDeclOfTy(fwdTy);
-        auto curFile = fwdClassDecl->curFile;
 
-        Ptr<FuncDecl> ctor(nullptr);
-        for (auto& member : fwdClassDecl->GetMemberDecls()) {
-            if (auto fd = As<ASTKind::FUNC_DECL>(member); fd && fd->TestAttr(Attribute::CONSTRUCTOR)) {
-                ctor = fd;
-                break;
-            }
-        }
-        CJC_ASSERT(ctor);
-
-        auto entity = lib.CreateJavaEntityJobjectCall(std::move(paramRef));
-        std::vector<OwnedPtr<FuncArg>> ctorCallArgs;
-        ctorCallArgs.push_back(CreateFuncArg(std::move(entity)));
-
-        auto fdRef = WithinFile(CreateRefExpr(*ctor), curFile);
-        auto fwdClassInstance =
-            CreateCallExpr(std::move(fdRef), std::move(ctorCallArgs), ctor, fwdTy, CallKind::CALL_OBJECT_CREATION);
+        auto fwdClassInstance = GetFwdClassInstance(std::move(paramRef), *fwdClassDecl);
         methodArg = CreateFuncArg(WithinFile(std::move(fwdClassInstance), funcDecl.curFile));
     } else {
         methodArg = CreateFuncArg(std::move(paramRef));
@@ -112,7 +118,12 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeMethod(FuncDecl& sampleMethod, 
     PushObjParams(params, "_");
     auto& jniEnvPtrParam = *params[0];
     if (!sampleMethod.TestAttr(Attribute::STATIC)) {
-        PushSelfParams(params);
+        if (sampleMethod.TestAttr(Attribute::CJ_MIRROR_JAVA_INTERFACE_DEFAULT)) {
+            PushObjParams(params, JAVA_SELF_OBJECT);
+        } else {
+            PushSelfParams(params);
+        }
+
     }
     auto& selfParam = *params.back();
 
@@ -125,6 +136,11 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeMethod(FuncDecl& sampleMethod, 
     OwnedPtr<MemberAccess> methodAccess;
     if (sampleMethod.TestAttr(Attribute::STATIC)) {
         methodAccess = CreateMemberAccess(WithinFile(CreateRefExpr(decl), curFile), sampleMethod);
+    } else if (sampleMethod.TestAttr(Attribute::CJ_MIRROR_JAVA_INTERFACE_DEFAULT)) {
+        auto& objParam = *params[2];
+        auto paramRef = WithinFile(CreateRefExpr(objParam), curFile);
+        auto fwdClassInstance = GetFwdClassInstance(std::move(paramRef), decl);
+        methodAccess = CreateMemberAccess(std::move(fwdClassInstance), sampleMethod);
     } else {
         auto reg = lib.CreateGetFromRegistryCall(
             WithinFile(CreateRefExpr(jniEnvPtrParam), curFile), WithinFile(CreateRefExpr(selfParam), curFile), decl.ty);

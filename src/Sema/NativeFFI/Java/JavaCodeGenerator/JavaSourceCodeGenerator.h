@@ -85,6 +85,21 @@ private:
     void AddStaticMethod(const FuncDecl& funcDecl);
     void AddMethods();
     void AddInterfaceMethods();
+
+    /**
+     * This Class is used to forward default call to CJ side.
+     * final class CJMappingInterface_fwd {
+     *     private CJMappingInterface_fwd() {}
+     *     static {
+     *         loadLibrary("UNNAMED");
+     *     }
+     * 
+     *     public static native void foo_default_impl(CJMappingInterface selfobj);
+     * }
+     */
+    void AddInterfaceFwdClass();
+    void AddInterfaceFwdClassNativeMethod();
+
     void AddEndClassParenthesis();
     void AddNativeInitCJObject(const std::vector<OwnedPtr<Cangjie::AST::FuncParam>> &params, const FuncDecl& ctor);
     void AddNativeDeleteCJObject();
