@@ -487,6 +487,7 @@ private:
     void GenerateInJavaImpl(AST::ClassDecl* classDecl);
     void GenerateForCJStructOrClassTypeMapping(const File &file, AST::Decl* decl);
     void GenerateForCJEnumMapping(AST::EnumDecl& enumDecl);
+    void GenerateForCJExtendMapping(AST::ExtendDecl& extendDecl);
     void GenerateForCJInterfaceMapping(AST::InterfaceDecl& interfaceDecl);
     void GenerateInterfaceFwdclassBody(AST::ClassDecl& fwdclassDecl, AST::InterfaceDecl& interfaceDecl);
     OwnedPtr<FuncDecl> GenerateInterfaceFwdclassMethod(AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl);

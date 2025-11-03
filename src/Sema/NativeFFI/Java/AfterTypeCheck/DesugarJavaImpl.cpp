@@ -668,19 +668,29 @@ void JavaDesugarManager::DesugarJavaImpl(ClassDecl& jimpl)
 
 void JavaDesugarManager::DesugarInJavaImpls(File& file)
 {
+    // origin reference decl mapping to its all extendDecl
+    std::map<Ptr<Decl>, std::vector<Ptr<ExtendDecl>>> ref2extend;
+    // origin reference decl which need generate java glue code file
+    std::vector<Ptr<Decl>> genDecls;
     for (auto& decl : file.decls) {
-        if (auto cdecl = As<ASTKind::CLASS_DECL>(decl.get())) {
+        if (auto extendDecl = As<ASTKind::EXTEND_DECL>(decl.get())) {
+            if (auto rt = DynamicCast<const RefType *>(extendDecl->extendedType.get())) {
+                ref2extend[rt->ref.target].emplace_back(extendDecl);
+            }
+        } else if (auto cdecl = As<ASTKind::CLASS_DECL>(decl.get())) {
             if (cdecl->TestAttr(Attribute::IS_BROKEN) || !IsImpl(*cdecl)) {
                 continue;
             }
             DesugarJavaImpl(*cdecl);
-
-            if (JavaSourceCodeGenerator::IsDeclAppropriateForGeneration(*cdecl)) {
-                const std::string fileJ = cdecl->identifier.Val() + ".java";
-                auto codegen = JavaSourceCodeGenerator(cdecl, mangler, javaCodeGenPath, fileJ,
-                    GetCangjieLibName(outputLibPath, cdecl->GetFullPackageName()));
-                codegen.Generate();
-            }
+            genDecls.emplace_back(decl.get());
+        }
+    }
+    for (auto decl : genDecls) {
+        if (JavaSourceCodeGenerator::IsDeclAppropriateForGeneration(*decl)) {
+            const std::string fileJ = decl->identifier.Val() + ".java";
+            auto codegen = JavaSourceCodeGenerator(decl, mangler, javaCodeGenPath, fileJ,
+                GetCangjieLibName(outputLibPath, decl->GetFullPackageName()), ref2extend[decl]);
+            codegen.Generate();
         }
     }
 }

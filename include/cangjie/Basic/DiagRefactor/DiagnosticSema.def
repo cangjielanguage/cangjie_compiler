@@ -324,6 +324,7 @@ ERROR(sema_java_impl_cannot_be_extended_with_interface, "@JavaImpl class cannot 
 ERROR(sema_java_impl_redefinition, "redefinition of java declaration '%s'")
 ERROR(sema_java_mirror_interoplib_must_be_imported, "interoplib.interop must be imported to use java interoperability")
 ERROR(sema_java_interop_not_supported, "Java interoperability feature '%s' is not yet supported")
+ERROR(sema_extend_ref_target_cannot_be_java_impl, "extend declaration ref target cannot be java impl")
 ERROR(sema_variable_of_java_type, "%s can not store objects of java interoperability type '%s'")
 ERROR(sema_generic_parameter_of_java_type, "Can not instantiate generic '%s' with java interoperability type '%s'")
 WARNING(sema_java_interoplib_version_too_old, UNGROUPED,

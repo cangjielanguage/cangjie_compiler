@@ -155,6 +155,11 @@ std::string GetJavaMemberName(const Decl& decl);
 bool HasPredefinedJavaName(const ClassLikeDecl& decl);
 
 /**
+ * Returns fully-qualified name of the extend decl
+ */
+std::string GetJavaFQNameFromExtendDecl(const ExtendDecl& extendDecl);
+
+/**
  * Returns fully-qualified name of the decl or fq-name specified in @JavaMirror as attribute,
  * which is suitable for specifying in JNI calls
  */

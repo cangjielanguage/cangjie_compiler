@@ -111,6 +111,19 @@ JavaSourceCodeGenerator::JavaSourceCodeGenerator(Decl* decl, const BaseMangler& 
 {
 }
 
+JavaSourceCodeGenerator::JavaSourceCodeGenerator(Decl* decl, const BaseMangler& mangler,
+    const std::optional<std::string>& outputFolderPath, const std::string& outputFileName, std::string cjLibName,
+    std::vector<Ptr<ExtendDecl>> extends, bool isInteropCJPackageConfig)
+    : AbstractSourceCodeGenerator(
+          outputFolderPath.value_or(JavaSourceCodeGenerator::DEFAULT_OUTPUT_DIR), outputFileName),
+      decl(decl),
+      cjLibName(std::move(cjLibName)),
+      mangler(mangler),
+      extendDecls(extends),
+      isInteropCJPackageConfig(isInteropCJPackageConfig)
+{
+}
+
 bool JavaSourceCodeGenerator::IsDeclAppropriateForGeneration(const Decl& declArg)
 {
     return (IsImpl(declArg) &&
@@ -348,44 +361,55 @@ void JavaSourceCodeGenerator::AddSelfIdField()
 
 void JavaSourceCodeGenerator::AddProperties()
 {
+    std::vector<Ptr<Decl>> propDecls;
+    for (auto extendDecl : extendDecls) {
+        for (OwnedPtr<Decl>& declPtr : extendDecl->GetMemberDecls()) {
+            if (declPtr->astKind == ASTKind::PROP_DECL && !declPtr->TestAttr(Attribute::COMPILER_ADD)) {
+                propDecls.emplace_back(declPtr.get());
+            }
+        }
+    }
     for (OwnedPtr<Decl>& declPtr : decl->GetMemberDecls()) {
         if (declPtr->astKind == ASTKind::PROP_DECL && !declPtr->TestAttr(Attribute::COMPILER_ADD)) {
-            const PropDecl& propDecl = *StaticAs<ASTKind::PROP_DECL>(declPtr.get());
-            const OwnedPtr<FuncDecl>& funcDecl = propDecl.getters[0];
-            const std::string type =
-                MapCJTypeToJavaType(funcDecl->funcBody->retType, &imports, &decl->fullPackageName, false);
+            propDecls.emplace_back(declPtr.get());
+        }
+    }
+    for (auto& pdecl : propDecls) {
+        const PropDecl& propDecl = *StaticAs<ASTKind::PROP_DECL>(pdecl);
+        const OwnedPtr<FuncDecl>& funcDecl = propDecl.getters[0];
+        const std::string type =
+            MapCJTypeToJavaType(funcDecl->funcBody->retType, &imports, &decl->fullPackageName, false);
 
-            std::string varDecl = GetJavaMemberName(propDecl);
-            std::string varDeclSuffix = varDecl;
-            varDeclSuffix[0] = static_cast<char>(toupper(varDeclSuffix[0]));
+        std::string varDecl = GetJavaMemberName(propDecl);
+        std::string varDeclSuffix = varDecl;
+        varDeclSuffix[0] = static_cast<char>(toupper(varDeclSuffix[0]));
 
-            std::string getSignature = "get" + varDeclSuffix;
+        std::string getSignature = "get" + varDeclSuffix;
 
-            bool isStaticProp = propDecl.TestAttr(Attribute::STATIC);
+        bool isStaticProp = propDecl.TestAttr(Attribute::STATIC);
  
-            // add getter
-            std::string getPublicHead = isStaticProp ? "public static " : "public ";
-            AddWithIndent(TAB, getPublicHead + type + " " + getSignature + "() {");
-            std::string getSelfStr = isStaticProp ? "" : "this.self";
-            AddWithIndent(TAB2, "return " + getSignature + "Impl(" + getSelfStr + ");");
+        // add getter
+        std::string getPublicHead = isStaticProp ? "public static " : "public ";
+        AddWithIndent(TAB, getPublicHead + type + " " + getSignature + "() {");
+        std::string getSelfStr = isStaticProp ? "" : "this.self";
+        AddWithIndent(TAB2, "return " + getSignature + "Impl(" + getSelfStr + ");");
+        AddWithIndent(TAB, "}\n");
+        std::string getNativeHead = isStaticProp ? "public static native " : "public native ";
+        std::string getSelfNativeStr = isStaticProp ? "" : "long self";
+        AddWithIndent(TAB, getNativeHead + type + " " + getSignature + "Impl(" + getSelfNativeStr + ");\n");
+
+        // add setter
+        if (!propDecl.setters.empty()) {
+            std::string setPublicHead = isStaticProp ? "public static void " : "public void ";
+            std::string setSignature = "set" + varDeclSuffix;
+            AddWithIndent(TAB,setPublicHead + setSignature + "(" + type + " " + varDecl + ") {");
+            std::string setSelfStr = isStaticProp ? "" : "this.self, ";
+            AddWithIndent(TAB2, setSignature + "Impl(" + setSelfStr + varDecl + ");");
             AddWithIndent(TAB, "}\n");
-            std::string getNativeHead = isStaticProp ? "public static native " : "public native ";
-            std::string getSelfNativeStr = isStaticProp ? "" : "long self";
-            AddWithIndent(TAB, getNativeHead + type + " " + getSignature + "Impl(" + getSelfNativeStr + ");\n");
- 
-            // add setter
-            if (!propDecl.setters.empty()) {
-                std::string setPublicHead = isStaticProp ? "public static void " : "public void ";
-                std::string setSignature = "set" + varDeclSuffix;
-                AddWithIndent(TAB,setPublicHead + setSignature + "(" + type + " " + varDecl + ") {");
-                std::string setSelfStr = isStaticProp ? "" : "this.self, ";
-                AddWithIndent(TAB2, setSignature + "Impl(" + setSelfStr + varDecl + ");");
-                AddWithIndent(TAB, "}\n");
-                std::string setNativeHead = isStaticProp ? "public static native void " : "public native void ";
-                std::string setSelfNativeStr = isStaticProp ? "" : "long self, ";
-                AddWithIndent(
-                    TAB, setNativeHead + setSignature + "Impl(" + setSelfNativeStr + type + " " + varDecl + ");\n");
-            }
+            std::string setNativeHead = isStaticProp ? "public static native void " : "public native void ";
+            std::string setSelfNativeStr = isStaticProp ? "" : "long self, ";
+            AddWithIndent(
+                TAB, setNativeHead + setSignature + "Impl(" + setSelfNativeStr + type + " " + varDecl + ");\n");
         }
     }
 }
@@ -772,27 +796,41 @@ void JavaSourceCodeGenerator::AddMethods()
     bool hasEqualsMethod = false;
     bool hasToStringMethod = false;
     bool isOpen = decl->TestAttr(Attribute::OPEN);
+    std::vector<Ptr<Decl>> funcDecls;
+    for (auto extendDecl : extendDecls) {
+        for (OwnedPtr<Decl>& declPtr : extendDecl->GetMemberDecls()) {
+            if (IsCJMapping(*decl) && !declPtr->TestAttr(Attribute::PUBLIC)) {
+                continue;
+            }
+            if (!declPtr->TestAttr(Attribute::PRIVATE) && IsFuncDeclAndNotConstructor(declPtr)) {
+                funcDecls.emplace_back(declPtr.get());
+            }
+        }
+    }
     for (OwnedPtr<Decl>& declPtr : decl->GetMemberDecls()) {
         bool needGenerate = (isOpen && declPtr->TestAttr(Attribute::PROTECTED)) || declPtr->TestAttr(Attribute::PUBLIC);
         if (IsCJMapping(*decl) && !needGenerate) {
             continue;
         }
         if (!declPtr->TestAttr(Attribute::PRIVATE) && IsFuncDeclAndNotConstructor(declPtr)) {
-            const FuncDecl& funcDecl = *StaticAs<ASTKind::FUNC_DECL>(declPtr.get());
-            // Hidden interopCJ configure unexposed symbol.
-            if (isInteropCJPackageConfig && funcDecl.symbol && !funcDecl.symbol->isNeedExposedToInterop) {
-                continue;
+            funcDecls.emplace_back(declPtr.get());
+        }
+    }
+    for (auto& fdecl : funcDecls) {
+        const FuncDecl& funcDecl = *StaticAs<ASTKind::FUNC_DECL>(fdecl);
+        // Hidden interopCJ configure unexposed symbol.
+        if (isInteropCJPackageConfig && funcDecl.symbol && !funcDecl.symbol->isNeedExposedToInterop) {
+            continue;
+        }
+        if (funcDecl.funcBody && funcDecl.funcBody->retType) {
+            if (funcDecl.TestAttr(Attribute::STATIC)) {
+                AddStaticMethod(funcDecl);
+            } else {
+                AddInstanceMethod(funcDecl);
             }
-            if (funcDecl.funcBody && funcDecl.funcBody->retType) {
-                if (funcDecl.TestAttr(Attribute::STATIC)) {
-                    AddStaticMethod(funcDecl);
-                } else {
-                    AddInstanceMethod(funcDecl);
-                }
-                hasHashcodeMethod = GetJavaMemberName(funcDecl) == JAVA_OBJECT_HASHCODE_METHOD_NAME;
-                hasEqualsMethod = GetJavaMemberName(funcDecl) == JAVA_OBJECT_EQUALS_METHOD_NAME;
-                hasToStringMethod = GetJavaMemberName(funcDecl) == JAVA_OBJECT_TOSTRING_METHOD_NAME;
-            }
+            hasHashcodeMethod = GetJavaMemberName(funcDecl) == JAVA_OBJECT_HASHCODE_METHOD_NAME;
+            hasEqualsMethod = GetJavaMemberName(funcDecl) == JAVA_OBJECT_EQUALS_METHOD_NAME;
+            hasToStringMethod = GetJavaMemberName(funcDecl) == JAVA_OBJECT_TOSTRING_METHOD_NAME;
         }
     }
     AddEqualOrIdentityMethod(hasHashcodeMethod, hasEqualsMethod, hasToStringMethod);

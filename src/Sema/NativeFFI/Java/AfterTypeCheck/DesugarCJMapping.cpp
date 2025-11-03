@@ -196,6 +196,47 @@ void JavaDesugarManager::GenerateForCJEnumMapping(AST::EnumDecl& enumDecl)
     generatedDecls.push_back(GenerateCJMappingNativeDeleteCjObjectFunc(enumDecl));
 }
 
+void JavaDesugarManager::GenerateForCJExtendMapping(AST::ExtendDecl& extendDecl)
+{
+    CJC_ASSERT(IsCJMapping(extendDecl));
+
+    if (auto rt = DynamicCast<const RefType *>(extendDecl.extendedType.get())) {
+        if (IsImpl(*rt->ref.target)) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_extend_ref_target_cannot_be_java_impl, extendDecl);
+            return;
+        }
+    }
+
+    for (auto& member : extendDecl.GetMemberDecls()) {
+        if (member->TestAttr(Attribute::IS_BROKEN) || !member->TestAttr(Attribute::PUBLIC)) {
+            continue;
+        }
+        if (auto fd = As<ASTKind::FUNC_DECL>(member.get())) {
+            generatedDecls.push_back(GenerateNativeMethod(*fd, extendDecl));
+        } else if (member->astKind == ASTKind::PROP_DECL && !member->TestAttr(Attribute::COMPILER_ADD)) {
+            const PropDecl& propDecl = *StaticAs<ASTKind::PROP_DECL>(member.get());
+            if (!propDecl.getters.empty()) {
+                const OwnedPtr<FuncDecl>& getFuncDecl = propDecl.getters[0];
+                auto getSignature = GetJniMethodNameForProp(propDecl, false);
+                auto nativeGetMethod = GenerateNativeMethod(*getFuncDecl.get(), extendDecl);
+                if (nativeGetMethod != nullptr) {
+                    nativeGetMethod->identifier = getSignature;
+                    generatedDecls.push_back(std::move(nativeGetMethod));
+                }
+            }
+            if (!propDecl.setters.empty()) {
+                const OwnedPtr<FuncDecl>& setFuncDecl = propDecl.setters[0];
+                auto setSignature = GetJniMethodNameForProp(propDecl, true);
+                auto nativeSetMethod = GenerateNativeMethod(*setFuncDecl.get(), extendDecl);
+                if (nativeSetMethod != nullptr) {
+                    nativeSetMethod->identifier = setSignature;
+                    generatedDecls.push_back(std::move(nativeSetMethod));
+                }
+            }
+        }
+    }
+}
+
 OwnedPtr<FuncDecl> JavaDesugarManager::GenerateInterfaceFwdclassMethod(
     AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl)
 {
@@ -638,20 +679,36 @@ void JavaDesugarManager::GenerateInCJMapping(File& file)
             GenerateForCJStructOrClassTypeMapping(file, classDecl);
             continue;
         }
+        auto extendDecl = As<ASTKind::EXTEND_DECL>(decl.get());
+        if (extendDecl && IsCJMapping(*extendDecl)) {
+            GenerateForCJExtendMapping(*extendDecl);
+        }
     }
 }
 
 void JavaDesugarManager::DesugarInCJMapping(File& file)
 {
+    // origin reference decl mapping to its all extendDecl
+    std::map<Ptr<Decl>, std::vector<Ptr<ExtendDecl>>> ref2extend;
+    // origin reference decl which need generate java glue code file
+    std::vector<Ptr<Decl>> genDecls;
     for (auto& decl : file.decls) {
         if (!decl.get()->TestAttr(Attribute::PUBLIC) || decl.get()->TestAttr(Attribute::IS_BROKEN) ||
             !JavaSourceCodeGenerator::IsDeclAppropriateForGeneration(*decl.get()) || !IsCJMapping(*decl.get())) {
             continue;
         }
-
+        if (auto extendDecl = As<ASTKind::EXTEND_DECL>(decl.get())) {
+            if (auto rt = DynamicCast<const RefType *>(extendDecl->extendedType.get())) {
+                ref2extend[rt->ref.target].emplace_back(extendDecl);
+            }
+        } else {
+            genDecls.emplace_back(decl.get());
+        }
+    }
+    for (auto decl : genDecls) {
         const std::string fileJ = decl.get()->identifier.Val() + ".java";
         auto codegen = JavaSourceCodeGenerator(decl.get(), mangler, javaCodeGenPath, fileJ,
-            GetCangjieLibName(outputLibPath, decl.get()->GetFullPackageName()),
+            GetCangjieLibName(outputLibPath, decl.get()->GetFullPackageName()), ref2extend[decl],
                               file.curPackage.get()->isInteropCJPackageConfig);
         codegen.Generate();
     }

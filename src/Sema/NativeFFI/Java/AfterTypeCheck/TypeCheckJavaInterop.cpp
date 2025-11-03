@@ -420,6 +420,7 @@ void JavaInteropManager::CheckCJMappingDeclSupportRange(Decl& decl)
         case ASTKind::ENUM_DECL:
         case ASTKind::CLASS_DECL:
         case ASTKind::INTERFACE_DECL:
+        case ASTKind::EXTEND_DECL:
             break;
         default:
             diag.DiagnoseRefactor(DiagKindRefactor::sema_cjmapping_decl_not_supported, MakeRange(decl.identifier),

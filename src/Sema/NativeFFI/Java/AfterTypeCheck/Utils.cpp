@@ -490,8 +490,18 @@ std::string GetFQNameJoinBy(const std::string& name, std::string_view separator)
 
 }
 
+std::string GetJavaFQNameFromExtendDecl(const ExtendDecl& extendDecl)
+{
+    auto rt = DynamicCast<const RefType *>(extendDecl.extendedType.get());
+    CJC_ASSERT(rt);
+    return GetJavaFQName(*rt->ref.target);
+}
+
 std::string GetJavaFQName(const Decl& decl)
 {
+    if (auto extendDecl = DynamicCast<const ExtendDecl*>(&decl)) {
+        return GetJavaFQNameFromExtendDecl(*extendDecl);
+    }
     if (auto classlikeDecl = DynamicCast<const ClassLikeDecl*>(&decl)) {
         auto attr = GetJavaMirrorAnnoAttr(*classlikeDecl);
         if (attr) {
