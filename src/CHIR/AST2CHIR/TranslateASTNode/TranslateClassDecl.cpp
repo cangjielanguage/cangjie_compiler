@@ -180,6 +180,7 @@ Func* Translator::ClearOrCreateVarInitFunc(const AST::Decl& decl)
         func->SetFuncKind(FuncKind::INSTANCEVAR_INIT);
         func->EnableAttr(Attribute::PRIVATE);
         func->EnableAttr(Attribute::COMPILER_ADD);
+        func->EnableAttr(Attribute::MUT);
 
         builder.CreateParameter(funcType->GetParamType(0), loc, *func);
         body = builder.CreateBlockGroup(*func);
@@ -188,6 +189,8 @@ Func* Translator::ClearOrCreateVarInitFunc(const AST::Decl& decl)
     blockGroupStack.emplace_back(body);
     auto entry = builder.CreateBlock(body);
     body->SetEntryBlock(entry);
+    auto thisVar = func->GetParam(0);
+    CreateAndAppendExpression<Debug>(builder.GetUnitTy(), thisVar, "this", func->GetEntryBlock());
 
     return func;
 }
