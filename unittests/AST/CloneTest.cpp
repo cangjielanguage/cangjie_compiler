@@ -21,8 +21,8 @@ class CloneTest : public testing::Test {
 protected:
     void SetUp() override
     {
-        parser = new Parser(code, diag, sm);
-        file = parser->ParseTopLevel();
+        Parser parser(code, diag, sm);
+        file = parser.ParseTopLevel();
     }
     std::string code = R"(
         let clockPort   = 12
@@ -83,7 +83,6 @@ protected:
             return 0
         }
 )";
-    Parser* parser;
     DiagnosticEngine diag;
     SourceManager sm;
     OwnedPtr<File> file;

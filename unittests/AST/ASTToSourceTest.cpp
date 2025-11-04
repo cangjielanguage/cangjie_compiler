@@ -37,14 +37,18 @@ protected:
 TEST_F(ASTToSourceTest, VarDeclToString)
 {
     std::string srcVarDecl = R"(public   let a = "hello world!")";
-    Parser* parser = new Parser(srcVarDecl, diag, sm);
-    OwnedPtr<File> file = parser->ParseTopLevel();
-    EXPECT_EQ(srcVarDecl, file->decls[0]->ToString());
+    {
+        Parser parser(srcVarDecl, diag, sm);
+        OwnedPtr<File> file = parser.ParseTopLevel();
+        EXPECT_EQ(srcVarDecl, file->decls[0]->ToString());
+    }
 
     srcVarDecl = R"(var cc    = "hello world!")";
-    parser = new Parser(srcVarDecl, diag, sm);
-    file = parser->ParseTopLevel();
-    EXPECT_EQ(srcVarDecl, file->decls[0]->ToString());
+    {
+        Parser parser(srcVarDecl, diag, sm);
+        OwnedPtr<File> file = parser.ParseTopLevel();
+        EXPECT_EQ(srcVarDecl, file->decls[0]->ToString());
+    }
 
     srcVarDecl = R"(public
 
@@ -56,35 +60,39 @@ TEST_F(ASTToSourceTest, VarDeclToString)
                       =
 
                     "hello world!")";
-    parser = new Parser(srcVarDecl, diag, sm);
-    file = parser->ParseTopLevel();
-    EXPECT_EQ(srcVarDecl, file->decls[0]->ToString());
+    {
+        Parser parser(srcVarDecl, diag, sm);
+        OwnedPtr<File> file = parser.ParseTopLevel();
+        EXPECT_EQ(srcVarDecl, file->decls[0]->ToString());
+    }
 
     // Comments.
     srcVarDecl = R"(public/*foo*/   let a/*ty infer*/ = "hello world!")";
-    parser = new Parser(srcVarDecl, diag, sm);
-    file = parser->ParseTopLevel();
-    Ptr<VarDecl> vd = RawStaticCast<VarDecl*>(file->decls[0].get());
-    sm.AddSource("", srcVarDecl);
-    Source& source = sm.GetSource(1);
-    size_t origin = 0;
-    auto comments = parser->GetCommentsMap()[0];
-    std::unordered_map<size_t, Token> commentsInside;
-    for (auto& comment : comments) {
-        if (comment.Begin().line >= vd->end.line) {
-            commentsInside.insert_or_assign(source.PosToOffset(comment.Begin()) - origin, comment);
+    {
+        Parser parser(srcVarDecl, diag, sm);
+        OwnedPtr<File> file = parser.ParseTopLevel();
+        Ptr<VarDecl> vd = RawStaticCast<VarDecl*>(file->decls[0].get());
+        sm.AddSource("", srcVarDecl);
+        Source& source = sm.GetSource(1);
+        size_t origin = 0;
+        auto comments = parser.GetCommentsMap()[0];
+        std::unordered_map<size_t, Token> commentsInside;
+        for (auto& comment : comments) {
+            if (comment.Begin().line >= vd->end.line) {
+                commentsInside.insert_or_assign(source.PosToOffset(comment.Begin()) - origin, comment);
+            }
         }
-    }
-    std::string result = vd->ToString();
-    auto it = result.begin();
-    for (auto& it1 : commentsInside) {
-        int i = 0;
-        for (auto& ch : it1.second.Value()) {
-            *(it + it1.first + i) = ch;
-            i++;
+        std::string result = vd->ToString();
+        auto it = result.begin();
+        for (auto& it1 : commentsInside) {
+            int i = 0;
+            for (auto& ch : it1.second.Value()) {
+                *(it + it1.first + i) = ch;
+                i++;
+            }
         }
+        EXPECT_EQ(result, srcVarDecl);
     }
-    EXPECT_EQ(result, srcVarDecl);
 }
 
 TEST_F(ASTToSourceTest, CallExprToString)
@@ -96,16 +104,16 @@ TEST_F(ASTToSourceTest, CallExprToString)
     backgroundOpacity: 0.5,
     isMenu: true
 ))";
-    Parser* parser = new Parser(srcCallExpr, diag, sm);
-    OwnedPtr<Expr> ce = parser->ParseExpr();
+    Parser parser(srcCallExpr, diag, sm);
+    OwnedPtr<Expr> ce = parser.ParseExpr();
     EXPECT_EQ(srcCallExpr, ce->ToString());
 }
 
 TEST_F(ASTToSourceTest, ArrayLitToString)
 {
     std::string srcArrayLit = "[  20.px()  , 0.px(),   20.px(), 0.px()]";
-    Parser* parser = new Parser(srcArrayLit, diag, sm);
-    OwnedPtr<Expr> al = parser->ParseExpr();
+    Parser parser(srcArrayLit, diag, sm);
+    OwnedPtr<Expr> al = parser.ParseExpr();
     EXPECT_EQ(srcArrayLit, al->ToString());
 }
 
@@ -119,7 +127,7 @@ TEST_F(ASTToSourceTest, ToStringCov)
     EXPECT_FALSE(pStr.empty());
 
     std::string srcArrayExpr = "VArray(repeat: 1)";
-    Parser* parser = new Parser(srcArrayExpr, diag, sm);
-    OwnedPtr<Expr> al = parser->ParseExpr();
+    Parser parser(srcArrayExpr, diag, sm);
+    OwnedPtr<Expr> al = parser.ParseExpr();
     EXPECT_FALSE(al->ToString().empty());
 }

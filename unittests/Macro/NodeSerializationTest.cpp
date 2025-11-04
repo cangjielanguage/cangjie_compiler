@@ -4,6 +4,7 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include <cstdlib>
 #include <string>
 #include "gtest/gtest.h"
 #include "cangjie/Macro/NodeSerialization.h"
@@ -109,8 +110,9 @@ TEST_F(NodeSerializationTest, BinaryExpr_Serialization)
     // Check specific offset of BinaryExpr using flatc generated methods.
     auto ptr = binaryExprParser.ParseExpr();
     NodeWriter binaryExprWriter(ptr.get());
-    uint8_t* buffer = binaryExprWriter.ExportNode();
-    buffer = buffer + 4; // move the pointer to the real position of the flatbuffer
+    uint8_t* rawBuffer = binaryExprWriter.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
     auto fbNode = NodeFormat::GetNode(buffer);
     EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_EXPR);
     auto fbExpr = fbNode->root_as_EXPR();
@@ -129,6 +131,7 @@ TEST_F(NodeSerializationTest, BinaryExpr_Serialization)
     auto parenRightExprStr = onlyExprAsBinary->right_expr()->expr_as_LIT_CONST_EXPR()->literal();
     EXPECT_EQ(parenLeftExprStr->str(), "3");
     EXPECT_EQ(parenRightExprStr->str(), "4");
+    free(rawBuffer);
 }
 
 TEST_F(NodeSerializationTest, UnaryExpr_Serialization)
@@ -141,14 +144,16 @@ TEST_F(NodeSerializationTest, UnaryExpr_Serialization)
     // unaryExpr: !2
     auto ptr = unaryExprParser.ParseExpr();
     NodeWriter unaryExprWriter(ptr.get());
-    uint8_t* buffer = unaryExprWriter.ExportNode();
-    buffer = buffer + 4; // move the pointer to the real position of the flatbuffer
+    uint8_t* rawBuffer = unaryExprWriter.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
     auto fbNode = NodeFormat::GetNode(buffer);
     EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_EXPR);
     EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), NodeFormat::AnyExpr_UNARY_EXPR);
     auto fbUnaryExpr = fbNode->root_as_EXPR()->expr_as_UNARY_EXPR();
     auto onlyExpr = fbUnaryExpr->expr()->expr_as_LIT_CONST_EXPR()->literal();
     EXPECT_EQ(onlyExpr->str(), "2");
+    free(rawBuffer);
 }
 
 TEST_F(NodeSerializationTest, VarDecl_Serialization)
@@ -161,8 +166,9 @@ TEST_F(NodeSerializationTest, VarDecl_Serialization)
     // varDecl: var a = 2 + 3
     auto ptr = varDeclParser.ParseDecl(ScopeKind::FUNC_BODY);
     NodeWriter varDeclWriter(ptr.get());
-    uint8_t* buffer = varDeclWriter.ExportNode();
-    buffer = buffer + 4; // move the pointer to the real position of the flatbuffer
+    uint8_t* rawBuffer = varDeclWriter.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
     auto fbNode = NodeFormat::GetNode(buffer);
     EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_DECL);
     EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), NodeFormat::AnyDecl_VAR_DECL);
@@ -170,6 +176,7 @@ TEST_F(NodeSerializationTest, VarDecl_Serialization)
     EXPECT_EQ(fbVarDecl->is_var(), true);
     EXPECT_EQ(fbVarDecl->base()->identifier()->str(), "a");
     EXPECT_EQ(fbVarDecl->initializer()->expr_type(), NodeFormat::AnyExpr_BINARY_EXPR);
+    free(rawBuffer);
 }
 
 TEST_F(NodeSerializationTest, FuncDecl_Serialization)
@@ -181,8 +188,9 @@ TEST_F(NodeSerializationTest, FuncDecl_Serialization)
     Parser funcDeclParser{funcDecl, diag, sm};
     auto ptr = funcDeclParser.ParseDecl(ScopeKind::TOPLEVEL);
     NodeWriter funcDeclWriter(ptr.get());
-    uint8_t* buffer = funcDeclWriter.ExportNode();
-    buffer = buffer + 4; // move the pointer to the real position of the flatbuffer
+    uint8_t* rawBuffer = funcDeclWriter.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
     auto fbNode = NodeFormat::GetNode(buffer);
     EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_DECL);
     EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), NodeFormat::AnyDecl_FUNC_DECL);
@@ -210,6 +218,7 @@ TEST_F(NodeSerializationTest, FuncDecl_Serialization)
         realEnumVec.push_back(fbNodeType);
     }
     EXPECT_EQ(expectEnumVec, realEnumVec);
+    free(rawBuffer);
 }
 
 TEST_F(NodeSerializationTest, ClassDecl_Serialization)
@@ -221,8 +230,9 @@ TEST_F(NodeSerializationTest, ClassDecl_Serialization)
     Parser classDeclParser{classDecl, diag, sm};
     auto ptr = classDeclParser.ParseDecl(ScopeKind::TOPLEVEL);
     NodeWriter classDeclWriter(ptr.get());
-    uint8_t* buffer = classDeclWriter.ExportNode();
-    buffer = buffer + 4; // point to the real pos of buffer
+    uint8_t* rawBuffer = classDeclWriter.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    uint8_t* buffer = rawBuffer + 4; // point to the real pos of buffer
     auto fbNode = NodeFormat::GetNode(buffer);
     EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_DECL);
     EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), NodeFormat::AnyDecl_CLASS_DECL);
@@ -268,6 +278,7 @@ TEST_F(NodeSerializationTest, ClassDecl_Serialization)
     EXPECT_EQ(secondPart, "in_channels_");
     // test superClassType, interfaceType, sub_decls
     // test generic
+    free(rawBuffer);
 }
 
 TEST_F(NodeSerializationTest, InterfaceDecl_Serialization)
@@ -279,14 +290,16 @@ TEST_F(NodeSerializationTest, InterfaceDecl_Serialization)
     Parser interfaceDeclParser{interfaceDecl, diag, sm};
     auto ptr = interfaceDeclParser.ParseDecl(ScopeKind::TOPLEVEL);
     NodeWriter interfaceDeclWriter(ptr.get());
-    uint8_t* buffer = interfaceDeclWriter.ExportNode();
-    buffer = buffer + 4; // point to the real pos of buffer
+    uint8_t* rawBuffer = interfaceDeclWriter.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    uint8_t* buffer = rawBuffer + 4; // point to the real pos of buffer
     auto fbNode = NodeFormat::GetNode(buffer);
     EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_DECL);
     EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), NodeFormat::AnyDecl_INTERFACE_DECL);
     // test interface name
     auto fbInterfaceDecl = fbNode->root_as_DECL()->decl_as_INTERFACE_DECL();
     EXPECT_EQ(fbInterfaceDecl->base()->identifier()->str(), "MyInterface");
+    free(rawBuffer);
 }
 
 TEST_F(NodeSerializationTest, IfExpr_Serialization)
@@ -298,11 +311,13 @@ TEST_F(NodeSerializationTest, IfExpr_Serialization)
     Parser ifExprParser{ifExpr, diag, sm};
     auto ptr = ifExprParser.ParseExpr();
     NodeWriter ifExprWriter(ptr.get());
-    uint8_t* buffer = ifExprWriter.ExportNode();
-    buffer = buffer + 4; // move the pointer to the real position of the flatbuffer
+    uint8_t* rawBuffer = ifExprWriter.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
     auto fbNode = NodeFormat::GetNode(buffer);
     EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_EXPR);
     EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), NodeFormat::AnyExpr_IF_EXPR);
+    free(rawBuffer);
 }
 
 TEST_F(NodeSerializationTest, LambdaExpr_Serialization)
@@ -317,8 +332,9 @@ TEST_F(NodeSerializationTest, LambdaExpr_Serialization)
     // Some fields of FuncBody are set to default(null) in lambdaExpr
     auto ptr = lambdaExprParser.ParseExpr();
     NodeWriter lambdaWriter(ptr.get());
-    uint8_t* buffer = lambdaWriter.ExportNode();
-    buffer = buffer + 4;
+    uint8_t* rawBuffer = lambdaWriter.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    uint8_t* buffer = rawBuffer + 4;
     auto fbNode = NodeFormat::GetNode(buffer);
     EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_EXPR);
     EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), NodeFormat::AnyExpr_LAMBDA_EXPR);
@@ -352,4 +368,5 @@ TEST_F(NodeSerializationTest, LambdaExpr_Serialization)
         realNodeType.push_back(fbNode->root_type());
     }
     EXPECT_EQ(expectNodeType, realNodeType);
+    free(rawBuffer);
 }

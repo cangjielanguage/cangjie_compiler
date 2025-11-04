@@ -3199,7 +3199,8 @@ class C {
 
 TEST_F(ParserTest, LSP)
 {
-    Parser parser = Parser("package 1di", diag, sm);
+    std::string lspCode = "package 1di";
+    Parser parser(lspCode, diag, sm);
     OwnedPtr<File> file = parser.ParseTopLevel();
     auto p = diag.GetCategoryDiagnostic(DiagCategory::LEX);
     ASSERT_EQ(p.size(), 2);
