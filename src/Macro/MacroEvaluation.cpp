@@ -717,6 +717,9 @@ bool MacroEvaluation::NeedCreateMacroCallTree(MacroCall& macCall, bool reEval)
     // Can not find macrodef.
     if (IsMacroDefUndeclared(macCall)) {
         macCall.status = MacroEvalStatus::FAIL;
+    }
+    // if macroCall status fail, macro is not find, return false.
+    if (macCall.status == MacroEvalStatus::FAIL) {
         return false;
     }
     // For annotation case, should change Macro to Annotation.
