@@ -513,7 +513,7 @@ void ParserImpl::CheckInitCtorDeclBody(FuncDecl& ctor)
 void ParserImpl::CheckJavaInteropMember(Decl& decl)
 {
     if (decl.outerDecl->TestAttr(Attribute::JAVA_MIRROR_SUBTYPE) && !decl.outerDecl->TestAttr(Attribute::JAVA_MIRROR)) {
-        if (decl.GetGeneric() != nullptr) {
+        if (decl.GetGeneric() != nullptr && !decl.TestAttr(Attribute::JAVA_CJ_MAPPING)) {
             ffiParser->Java().DiagJavaImplCannotBeGeneric(decl);
             return;
         }

@@ -104,6 +104,7 @@ struct JavaInteropTypeChecker {
             case TypeKind::TYPE_INT64:
             case TypeKind::TYPE_FLOAT32:
             case TypeKind::TYPE_FLOAT64:
+            case TypeKind::TYPE_GENERICS:
                 return true;
             case TypeKind::TYPE_ENUM:
                 if (!ty.IsCoreOptionType() || ty.typeArgs[0]->IsCoreOptionType()) {
@@ -164,7 +165,7 @@ struct JavaInteropTypeChecker {
         auto isJavaArray = IsJArray(*fdecl.outerDecl);
         for (auto& paramList : fdecl.funcBody->paramLists) {
             for (auto& param : paramList->params) {
-                if (!IsJavaCompatible(*param->ty) && (!isJavaArray || !param->ty->IsGeneric())) {
+                if (!IsJavaCompatible(*param->ty) && !isJavaArray) {
                     diag.DiagnoseRefactor(errkind, *param);
                     fdecl.EnableAttr(Attribute::IS_BROKEN);
                     fdecl.outerDecl->EnableAttr(Attribute::HAS_BROKEN);
@@ -240,9 +241,11 @@ struct JavaInteropTypeChecker {
             } else {
                 node = &fd;
             }
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_cjmapping_method_ret_unsupported, *node,
-                Ty::ToString(fd.funcBody->retType->ty), GetJavaClassKind());
-            fd.EnableAttr(Attribute::IS_BROKEN);
+            if (!fd.funcBody->retType->ty->IsGeneric()) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_cjmapping_method_ret_unsupported, *node,
+                    Ty::ToString(fd.funcBody->retType->ty), GetJavaClassKind());
+                fd.EnableAttr(Attribute::IS_BROKEN);
+            }
         }
 
         CheckCJMappingCompatibleParamTypes(fd);

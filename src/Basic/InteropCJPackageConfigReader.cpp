@@ -155,7 +155,10 @@ bool InteropCJPackageConfigReader::Parse(const std::string& filePath)
 
                                                 for (const auto& type : typeArgs) {
                                                     if (type.is<std::string>()) {
-                                                        types.push_back(type.as<std::string>());
+                                                        std::string typeStr = type.as<std::string>();
+                                                        types.push_back(typeStr);
+                                                        GenericTypeArguments visibleFuncs;
+                                                        pkgConfig.allowedInteropCJGenericInstantiations[name][typeStr] = visibleFuncs;
                                                     }
                                                 }
 

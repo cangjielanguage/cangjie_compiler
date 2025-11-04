@@ -101,8 +101,8 @@ void JavaDesugarManager::GenerateForCJStructOrClassTypeMapping(const File &file,
     auto classDecl = DynamicCast<AST::ClassDecl*>(decl);
     auto structDecl = DynamicCast<AST::StructDecl*>(decl);
     CJC_ASSERT((classDecl || structDecl) && "Not a support ref type.");
-
     std::vector<FuncDecl*> generatedCtors;
+
     for (auto& member : decl->GetMemberDecls()) {
         if (member->TestAnyAttr(Attribute::IS_BROKEN, Attribute::PRIVATE, Attribute::PROTECTED, Attribute::INTERNAL) ||
             (file.curPackage.get()->isInteropCJPackageConfig && member.get()->symbol &&
@@ -113,9 +113,18 @@ void JavaDesugarManager::GenerateForCJStructOrClassTypeMapping(const File &file,
             if (fd->TestAttr(Attribute::CONSTRUCTOR)) {
                 generatedCtors.push_back(fd);
             } else {
-                auto nativeMethod = GenerateNativeMethod(*fd, *decl);
-                if (nativeMethod != nullptr) {
-                    generatedDecls.push_back(std::move(nativeMethod));
+                if (isGenericGlueCode) {
+                    for (auto genericConfig : genericConfigsVector) {
+                        auto nativeMethod = GenerateNativeMethod(*fd, *decl, genericConfig);
+                        if (nativeMethod != nullptr) {
+                            generatedDecls.push_back(std::move(nativeMethod));
+                        }
+                    }
+                } else {
+                    auto nativeMethod = GenerateNativeMethod(*fd, *decl);
+                    if (nativeMethod != nullptr) {
+                        generatedDecls.push_back(std::move(nativeMethod));
+                    }
                 }
             }
         }
@@ -123,7 +132,47 @@ void JavaDesugarManager::GenerateForCJStructOrClassTypeMapping(const File &file,
     if (!generatedCtors.empty()) {
         generatedDecls.push_back(GenerateCJMappingNativeDeleteCjObjectFunc(*decl));
         for (auto generatedCtor : generatedCtors) {
-            generatedDecls.push_back(GenerateNativeInitCjObjectFunc(*generatedCtor, false));
+            if (isGenericGlueCode) {
+                for (auto genericConfig : genericConfigsVector) {
+                    generatedDecls.push_back(GenerateNativeInitCjObjectFunc(*generatedCtor, false, false, nullptr, genericConfig));
+                }
+            } else {
+                generatedDecls.push_back(GenerateNativeInitCjObjectFunc(*generatedCtor, false));
+            }
+        }
+    }
+}
+
+void JavaDesugarManager::InitGenericConfigs(
+    const File& file, const AST::Decl* decl, std::vector<GenericConfigInfo*>& genericConfigs)
+{
+    // Collect information on the names of generic configuration methods
+    // such as: {GenericClass<int32>, symbols: ["find", "value"]>}
+    std::unordered_map<std::string, std::unordered_set<std::string>> visibleFuncs;
+    for (const auto& outerPair : file.curPackage->allowedInteropCJGenericInstantiations) {
+        const auto declSymbolName = outerPair.first;
+        const auto& innerMap = outerPair.second;
+        if (declSymbolName != decl->identifier.Val()) {
+            continue;
+        }
+        for (const auto& innerPair : innerMap) {
+            const std::string typeStr = innerPair.first;
+            const GenericTypeArguments& args = innerPair.second;
+            std::unordered_set<std::string> funcNames = args.symbols;
+            std::vector<std::string> actualTypes;
+            SplitAndTrim(typeStr, actualTypes);
+            std::vector<std::pair<std::string, std::string>> instTypes;
+            const auto typeArgs = decl->ty->typeArgs;
+            for (size_t i = 0; i < typeArgs.size(); i++) {
+                instTypes.push_back(std::make_pair(typeArgs[i]->name, actualTypes[i]));
+            }
+            std::string declName = decl->identifier.Val();
+            std::string declWInstStr = declName + JoinVector(actualTypes);
+            GenericConfigInfo* declGenericConfig = new GenericConfigInfo(declName, declWInstStr, instTypes, funcNames);
+            genericConfigs.push_back(declGenericConfig);
+            if (!isGenericGlueCode) {
+                isGenericGlueCode = true;
+            }
         }
     }
 }
@@ -717,6 +766,8 @@ void JavaDesugarManager::GenerateInCJMapping(File& file)
         if (astDecl && astDecl->TestAttr(Attribute::IS_BROKEN)) {
             continue;
         }
+        // Initialize generic-related data type information.
+        InitGenericConfigs(file, decl.get(), genericConfigsVector);
         auto structDecl = As<ASTKind::STRUCT_DECL>(decl.get());
         if (file.curPackage.get()->isInteropCJPackageConfig && structDecl && !structDecl->symbol->isNeedExposedToInterop) {
             continue;
@@ -766,11 +817,21 @@ void JavaDesugarManager::DesugarInCJMapping(File& file)
         }
     }
     for (auto decl : genDecls) {
-        const std::string fileJ = decl.get()->identifier.Val() + ".java";
-        auto codegen = JavaSourceCodeGenerator(decl.get(), mangler, javaCodeGenPath, fileJ,
-            GetCangjieLibName(outputLibPath, decl.get()->GetFullPackageName()), ref2extend[decl],
-                              file.curPackage.get()->isInteropCJPackageConfig);
-        codegen.Generate();
+        if (IsCJMappingGeneric(*decl)) {
+            for (auto& config : genericConfigsVector) {
+                const std::string fileJ = config->declInstName + ".java";
+                auto codegen = JavaSourceCodeGenerator(decl.get(), mangler, javaCodeGenPath, fileJ,
+                    GetCangjieLibName(outputLibPath, decl.get()->GetFullPackageName()), config,
+                    file.curPackage.get()->isInteropCJPackageConfig);
+                codegen.Generate();
+            }
+        } else {
+            const std::string fileJ = decl.get()->identifier.Val() + ".java";
+            auto codegen = JavaSourceCodeGenerator(decl.get(), mangler, javaCodeGenPath, fileJ,
+                GetCangjieLibName(outputLibPath, decl.get()->GetFullPackageName()), ref2extend[decl],
+                file.curPackage.get()->isInteropCJPackageConfig);
+            codegen.Generate();
+        }
     }
 }
 
