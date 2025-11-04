@@ -30,8 +30,7 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
     if (isCommonFunctionWithoutBody) {
         return; // Nothing to check
     }
-    auto result = analysisWrapper->CheckFuncResult(func);
-    CJC_ASSERT(result != std::nullopt);
+    auto result = analysisWrapper->CheckFuncResult(*func);
     if (result == nullptr) {
         return;
     }
@@ -95,7 +94,7 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
         }
     };
 
-    result.value()->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
+    result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
 
     for (auto& rewriteInfo : toBeRewrited) {
         RewriteToConstExpr(rewriteInfo, isDebug);

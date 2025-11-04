@@ -290,10 +290,10 @@ void ToCHIR::NothingTypeExprElimination()
     DumpCHIRToFile("NothingTypeExprElimination");
 }
 
-void ToCHIR::UnreachableBranchReporter(ConstAnalysisWrapper& constAnalysis)
+void ToCHIR::UnreachableBranchReporter()
 {
     Utils::ProfileRecorder recorder("CHIR Opt", "UnreachableBranchReporter");
-    auto check = CHIR::UnreachableBranchCheck(&constAnalysis, diag, pkg.fullPackageName);
+    auto check = CHIR::UnreachableBranchCheck(&constAnalysisWrapper, diag, pkg.fullPackageName);
     check.RunOnPackage(*chirPkg, opts.GetJobs());
 }
 
@@ -491,21 +491,19 @@ void ToCHIR::RunMergingBlocks(const std::string& firstName, const std::string& s
     DumpCHIRToFile(secondName);
 }
 
-ConstAnalysisWrapper ToCHIR::RunConstantAnalysis()
+void ToCHIR::RunConstantAnalysis()
 {
     Utils::ProfileRecorder recorder("CHIR Opt", "Constant Analysis");
-    ConstAnalysisWrapper ca(builder);
-    ca.RunOnPackage(chirPkg, opts.chirDebugOptimizer, opts.GetJobs(), &diag);
-    return ca;
+    constAnalysisWrapper.RunOnPackage(chirPkg, opts.chirDebugOptimizer, opts.GetJobs(), &diag);
 }
 
-bool ToCHIR::RunConstantPropagation(ConstAnalysisWrapper& constAnalysis)
+bool ToCHIR::RunConstantPropagation()
 {
     Utils::ProfileRecorder recorder("CHIR Opt", "Constant Propagation & Safety Check");
     size_t threadNum = opts.GetJobs();
     DeadCodeElimination dce(builder, diag, pkg.fullPackageName);
     if (threadNum == 1) {
-        auto cp = CHIR::ConstPropagation(builder, &constAnalysis, opts);
+        auto cp = CHIR::ConstPropagation(builder, &constAnalysisWrapper, opts);
         MergeEffectMap(cp.GetEffectMap(), effectMap);
         cp.RunOnPackage(chirPkg, opts.chirDebugOptimizer, ci.isCJLint);
         dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(), opts.chirDebugOptimizer);
@@ -519,7 +517,7 @@ bool ToCHIR::RunConstantPropagation(ConstAnalysisWrapper& constAnalysis)
         std::vector<std::unique_ptr<CHIR::ConstPropagation>> cpList;
         for (size_t idx = 0; idx < funcNum; ++idx) {
             auto func = globalFuncs.at(idx);
-            auto cp = std::make_unique<CHIR::ConstPropagation>(*builderList[idx], &constAnalysis, opts);
+            auto cp = std::make_unique<CHIR::ConstPropagation>(*builderList[idx], &constAnalysisWrapper, opts);
             taskQueue.AddTask<void>([constPropagation = cp.get(), func, isDebug, isCJLint]() {
                 return constPropagation->RunOnFunc(func, isDebug, isCJLint);
             });
@@ -539,10 +537,10 @@ bool ToCHIR::RunConstantPropagation(ConstAnalysisWrapper& constAnalysis)
     return diag.GetErrorCount() == 0;
 }
 
-bool ToCHIR::RunConstantPropagationAndSafetyCheck(ConstAnalysisWrapper& constAnalysis)
+bool ToCHIR::RunConstantPropagationAndSafetyCheck()
 {
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    return RunConstantPropagation(constAnalysis);
+    return RunConstantPropagation();
 #endif
 }
 
@@ -686,19 +684,19 @@ bool ToCHIR::RunOptimizationPassAndRulesChecking()
     Utils::ProfileRecorder recorder("CHIR", "CHIR Opt");
 
     NothingTypeExprElimination();
-    auto constAnalysisResults = RunConstantAnalysis();
+    RunConstantAnalysis();
     if (!RunVarInitChecking()) {
         return false;
     }
     if (!RunNativeFFIChecks()) {
         return false;
     }
-    UnreachableBranchReporter(constAnalysisResults);
+    UnreachableBranchReporter();
     // this instantance of block elimination is to maintain dead code warnings
     UnreachableBlockElimination();
     ReportUnusedCode();
     RunArrayListConstStartOpt();
-    if (!RunConstantPropagationAndSafetyCheck(constAnalysisResults)) {
+    if (!RunConstantPropagationAndSafetyCheck()) {
         return false;
     }
     UnreachableBlockElimination();
@@ -938,7 +936,7 @@ bool ToCHIR::RunAnalysisForCJLint()
 {
     Utils::ProfileRecorder recorder("CHIR", "CHIR Opt");
     NothingTypeExprElimination();
-    auto constAnalysisResults = RunConstantAnalysis();
+    RunConstantAnalysis();
     if (!RunVarInitChecking()) {
         return false;
     }
@@ -946,8 +944,8 @@ bool ToCHIR::RunAnalysisForCJLint()
         return false;
     }
     UnreachableBlockElimination();
-    if (RunConstantPropagationAndSafetyCheck(constAnalysisResults)) {
-        constAnalysisResults.InvalidateAllAnalysisResults();
+    if (RunConstantPropagationAndSafetyCheck()) {
+        constAnalysisWrapper.InvalidateAllAnalysisResults();
         RunConstantAnalysis();
         return true;
     }
