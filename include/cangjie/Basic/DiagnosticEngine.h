@@ -233,6 +233,10 @@ struct Range {
             (static_cast<size_t>(begin.column) << 16u) ^ (static_cast<size_t>(begin.fileID) << 24u) ^
             (static_cast<size_t>(begin.line) << 32u) ^ (static_cast<size_t>(begin.column) << 40u);
     }
+    bool EqualForHash(const Range& right) const
+    {
+        return begin.fileID == right.begin.fileID && begin == right.begin && end == right.end;
+    }
     bool IsDefault() const
     {
         return begin == DEFAULT_POSITION && end == DEFAULT_POSITION;
@@ -547,7 +551,7 @@ public:
     struct equalFunc {
         bool operator()(const Diagnostic& a, const Diagnostic& b) const
         {
-            return a.mainHint.range == b.mainHint.range && (a.diagSeverity == b.diagSeverity);
+            return a.mainHint.range.EqualForHash(b.mainHint.range) && (a.diagSeverity == b.diagSeverity);
         }
     };
     void Clear() const override
