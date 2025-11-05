@@ -103,6 +103,9 @@ void DesugarImpls::DesugarCallExpr(InteropContext& ctx, ClassDecl& impl, CallExp
     if (!ctx.typeMapper.IsObjCMirror(*fd->outerDecl->ty)) {
         return;
     }
+    if (fd->propDecl && fd->propDecl->TestAttr(Attribute::DESUGARED_MIRROR_FIELD)) {
+        return;
+    }
     auto fdTy = StaticCast<FuncTy>(fd->ty);
     auto curFile = ce.curFile;
 
