@@ -805,7 +805,7 @@ OwnedPtr<TrailingClosureExpr> ParserImpl::ParseTrailingClosureExpr(OwnedPtr<Expr
     OwnedPtr<TrailingClosureExpr> ret = MakeOwned<TrailingClosureExpr>();
     std::vector<OwnedPtr<Annotation>> annos;
     ParseAnnotations(annos);
-
+    SetBeginToAnnotationsBegin(*ret, annos);
     ret->leftLambda = lastToken.Begin();
     Next();
     ret->lambda = ParseLambdaExprWithTrailingClosure();

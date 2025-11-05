@@ -205,7 +205,6 @@ void PrintAnnotation(unsigned indent, const Annotation& anno, std::ostream& stre
         PrintNode(arg.get(), indent + TWO_INDENT, "", stream);
     }
     PrintIndent(stream, indent + ONE_INDENT, "]");
-    PrintIndent(stream, indent + ONE_INDENT, "adAnnotation:", anno.adAnnotation);
     PrintNode(anno.condExpr.get(), indent + ONE_INDENT, "condExpr", stream);
     PrintIndent(stream, indent + ONE_INDENT, "target:", anno.target);
     PrintNode(anno.baseExpr.get(), indent + ONE_INDENT, "baseExpr", stream);

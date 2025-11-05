@@ -1395,6 +1395,7 @@ OwnedPtr<Expr> ParserImpl::ParseAnnotationLambdaExpr(bool isTailClosure)
             DiagExpectedDeclaration(ret->begin, "lambda expression");
         }
     }
+    SetBeginToAnnotationsBegin(*ret, annos);
     return ret;
 }
 

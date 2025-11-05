@@ -5,12 +5,12 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 // ASTKIND(ast kind, ast value for human reading, ast node, ast size for notify checking related code)
 #ifdef ASTKIND
-ASTKIND(ANNOTATION, "annotation", Annotation, 584)
+ASTKIND(ANNOTATION, "annotation", Annotation, 512)
 ASTKIND(MODIFIER, "modifier", Modifier, 264)
 ASTKIND(DECL, "*decl", Decl, 728) // begin of subtypes of Decl.
 ASTKIND(MAIN_DECL, "main_decl", MainDecl, 752)
 ASTKIND(FUNC_DECL, "func_decl", FuncDecl, 824)
-ASTKIND(MACRO_DECL, "macro_decl", MacroDecl, 784)
+ASTKIND(MACRO_DECL, "macro_decl", MacroDecl, 744)
 ASTKIND(CLASS_LIKE_DECL, "class_like_decl", ClassLikeDecl, 824) // begin: subtypes of ClassLikeDecl and InheritableDecl.
 ASTKIND(CLASS_DECL, "class_decl", ClassDecl, 840)
 ASTKIND(INTERFACE_DECL, "interface_decl", InterfaceDecl, 832) // end: subtypes of ClassLikeDecl.

@@ -315,9 +315,6 @@ void ASTChecker::CheckInheritableDecl(Ptr<Node> node)
 void ASTChecker::CheckMacroDecl(Ptr<Node> node)
 {
     auto md = StaticAs<ASTKind::MACRO_DECL>(node);
-
-    ZERO_POSITION_CHECK(node, md->leftParenPos);
-    ZERO_POSITION_CHECK(node, md->rightParenPos);
     AST_NULLPTR_CHECK(node, md->funcBody);
 }
 void ASTChecker::CheckMacroExpandDecl(Ptr<Node> node)
