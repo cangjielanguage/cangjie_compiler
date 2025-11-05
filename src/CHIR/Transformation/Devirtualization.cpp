@@ -325,17 +325,11 @@ void Devirtualization::InstantiateFuncIfPossible(CHIRBuilder& builder, std::vect
 
 namespace {
 void BuildOrphanTypeReplaceTable(
-    const Cangjie::CHIR::Type* mayBeGeneric, std::unordered_map<const GenericType*, Type*>& replaceTable)
+    const Cangjie::CHIR::Type* mayBeGeneric, const std::unordered_map<const GenericType*, Type*>& replaceTable)
 {
-    if (auto genericType = Cangjie::DynamicCast<const GenericType*>(mayBeGeneric);
-        genericType && genericType->orphanFlag) {
-        CJC_ASSERT(genericType->GetUpperBounds().size() == 1);
-        replaceTable.emplace(genericType, genericType->GetUpperBounds()[0]);
-    } else {
-        auto genericTypeArgs = mayBeGeneric->GetTypeArgs();
-        for (size_t i = 0; i < genericTypeArgs.size(); ++i) {
-            BuildOrphanTypeReplaceTable(genericTypeArgs[i], replaceTable);
-        }
+    auto genericTypeArgs = mayBeGeneric->GetTypeArgs();
+    for (size_t i = 0; i < genericTypeArgs.size(); ++i) {
+        BuildOrphanTypeReplaceTable(genericTypeArgs[i], replaceTable);
     }
 }
 

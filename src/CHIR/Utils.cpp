@@ -1247,7 +1247,7 @@ std::vector<ClassType*> GetSuperTypesRecusively(Type& subType, CHIRBuilder& buil
     return result;
 }
 
-static bool MeetAutoEnvBase(const Type& subType, const Type& superType)
+bool MeetAutoEnvBase(const Type& subType, const Type& superType)
 {
     return subType.IsAutoEnvInstBase() && superType.IsAutoEnvGenericBase() &&
         Cangjie::StaticCast<const ClassType&>(subType).GetClassDef()->GetSuperClassTy() == &superType;
@@ -1258,15 +1258,8 @@ bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType)
     if (&paramType == &argType) {
         return true;
     }
-    if (auto g = DynamicCast<const GenericType*>(&paramType); g && g->orphanFlag) {
-        auto upperBounds = g->GetUpperBounds();
-        CJC_ASSERT(upperBounds.size() == 1);
-        return upperBounds[0] == &argType;
-    }
-    if (auto g = DynamicCast<const GenericType*>(&argType); g && g->orphanFlag) {
-        auto upperBounds = g->GetUpperBounds();
-        CJC_ASSERT(upperBounds.size() == 1);
-        return upperBounds[0] == &paramType;
+    if (argType.IsBoxRefTypeOf(paramType) || paramType.IsBoxRefTypeOf(argType)) {
+        return true;
     }
     return MeetAutoEnvBase(*argType.StripAllRefs(), *paramType.StripAllRefs());
 }
@@ -1472,5 +1465,73 @@ Type* GetInstSubType(Type& genericSubType, const ClassType& instParentType, CHIR
     }
     CJC_ASSERT(res);
     return ReplaceRawGenericArgType(genericSubType, replaceTable, builder);
+}
+
+bool TypeIsMatched(const Type& type1, const Type& type2)
+{
+    if (type1.GetTypeKind() != type2.GetTypeKind()) {
+        return false;
+    }
+    auto typeArgs1 = type1.GetTypeArgs();
+    auto typeArgs2 = type2.GetTypeArgs();
+    if (typeArgs1.size() != typeArgs2.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < typeArgs1.size(); ++i) {
+        if (!TypeIsMatched(*typeArgs1[i], *typeArgs2[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool VirMethodParamTypeIsMatched(const Type& type1, const Type& type2)
+{
+    // FuncType will be converted to Class-AutoEnv&, so we can treat it as class&
+    if ((type1.IsGeneric() || type1.IsRef() || type1.IsFunc()) &&
+        (type2.IsGeneric() || type2.IsRef() || type2.IsFunc())) {
+        return true;
+    } else if (type1.IsStructArray() && type2.IsStructArray()) {
+        return true;
+    } else {
+        return TypeIsMatched(type1, type2);
+    }
+}
+
+bool VirMethodRetureTypeIsMatched(const Type& type1, const Type& type2)
+{
+    if (type1.IsGeneric() && type2.IsGeneric()) {
+        return true;
+    }
+    // FuncType will be converted to Class-AutoEnv&, so we can treat it as class&
+    // in fact, there can't be ref type in parent virtual method, but a func type in child virtual method
+    // but we don't care about this kind of case here, let ir checker do
+    if ((type1.IsRef() || type1.IsFunc()) && (type2.IsRef() || type2.IsFunc())) {
+        return true;
+    }
+    if (type1.IsStructArray() && type2.IsStructArray()) {
+        return true;
+    }
+    return TypeIsMatched(type1, type2);
+}
+
+Type* RemoveBoxTypeShellIfNeed(Type& type)
+{
+    if (!type.IsRef()) {
+        return &type;
+    }
+    auto baseType = StaticCast<RefType&>(type).GetBaseType();
+    if (!baseType->IsBox()) {
+        return &type;
+    }
+    return StaticCast<BoxType*>(baseType)->GetBaseType();
+}
+
+Type* CreateBoxRefTypeIfNeed(Type& baseType, CHIRBuilder& builder)
+{
+    if (baseType.IsRef()) {
+        return &baseType;
+    }
+    return builder.GetType<RefType>(builder.GetType<BoxType>(&baseType));
 }
 } // namespace Cangjie::CHIR

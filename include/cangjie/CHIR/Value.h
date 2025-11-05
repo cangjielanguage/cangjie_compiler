@@ -619,6 +619,7 @@ private:
 
 class FuncBase : public virtual Value {
     friend class TypeConverterForCC;
+    friend class ValueTypeConverter;
     friend class CustomTypeDef;
     friend class ImportedFunc;
     friend class Func;

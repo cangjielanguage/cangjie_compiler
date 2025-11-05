@@ -39,8 +39,9 @@ bool CalleeIsMutFuncFromParent(Type* thisType, FuncBase* callee, const Func& top
 }
 } // namespace
 
-GenerateVTable::GenerateVTable(Package& pkg, CHIRBuilder& b, const Cangjie::GlobalOptions& opts)
-    : package(pkg), builder(b), opts(opts)
+GenerateVTable::GenerateVTable(
+    Package& pkg, const std::vector<CustomTypeDef*>& defs, CHIRBuilder& b, const Cangjie::GlobalOptions& opts)
+    : package(pkg), candidateDefs(defs), builder(b), opts(opts)
 {
 }
 
@@ -48,7 +49,7 @@ void GenerateVTable::CreateVTable()
 {
     Utils::ProfileRecorder recorder("GenerateVTable", "CreateVTable");
     auto vtableGenerator = VTableGenerator(builder);
-    for (auto customDef : package.GetAllCustomTypeDef()) {
+    for (auto customDef : candidateDefs) {
         if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
             continue;
         }
@@ -68,7 +69,7 @@ void GenerateVTable::CreateVirtualFuncWrapper(const IncreKind& kind, const Compi
     bool targetIsWin = opts.target.os == Triple::OSType::WINDOWS;
     IncreKind tempKind = opts.enIncrementalCompilation ? kind : IncreKind::INVALID;
     auto wrapper = WrapVirtualFunc(builder, increCachedInfo, tempKind, targetIsWin);
-    for (auto customDef : package.GetAllCustomTypeDef()) {
+    for (auto customDef : candidateDefs) {
         if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
             continue;
         }
@@ -78,11 +79,37 @@ void GenerateVTable::CreateVirtualFuncWrapper(const IncreKind& kind, const Compi
     delVirtFuncWrapForIncr = wrapper.GetDelVirtFuncWrapForIncr();
 }
 
+void GenerateVTable::SetSrcFuncType() const
+{
+    Utils::ProfileRecorder recorder("GenerateVTable", "SetSrcFuncType");
+    auto getSrcFuncType = [](const ClassDef& parentDef, size_t index) -> FuncType* {
+        const auto& vtable = parentDef.GetVTable();
+        auto parentType = parentDef.GetType();
+        auto it = vtable.find(parentType);
+        CJC_ASSERT(it != vtable.end());
+        CJC_ASSERT(index < it->second.size());
+        auto srcFuncType = it->second[index].typeInfo.originalType;
+        CJC_NULLPTR_CHECK(srcFuncType);
+        return srcFuncType;
+    };
+    for (auto customTypeDef : candidateDefs) {
+        const auto& vtable = customTypeDef->GetVTable();
+        for (const auto& it : vtable) {
+            for (size_t i = 0; i < it.second.size(); ++i) {
+                auto& funcInfo = it.second[i];
+                if (funcInfo.instance != nullptr) {
+                    funcInfo.instance->Set<OverrideSrcFuncType>(getSrcFuncType(*it.first->GetClassDef(), i));
+                }
+            }
+        }
+    }
+}
+
 void GenerateVTable::CreateMutFuncWrapper()
 {
     Utils::ProfileRecorder recorder("GenerateVTable", "CreateMutFuncWrapper");
     auto wrapper = WrapMutFunc(builder);
-    for (auto customDef : package.GetAllCustomTypeDef()) {
+    for (auto customDef : candidateDefs) {
         if (customDef->TestAttr(Attribute::SKIP_ANALYSIS)) {
             continue;
         }

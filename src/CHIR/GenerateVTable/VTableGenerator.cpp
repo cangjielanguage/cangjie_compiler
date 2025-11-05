@@ -265,13 +265,8 @@ bool VTableGenerator::IsSigTypeMatched(const VirtualFuncInfo& curFuncInfo, const
     bool typeMatch = true;
     // check param types
     for (size_t i = 0; i < paramTysInMethod.size(); ++i) {
-        auto paramTyInMethod = paramTysInMethod[i];
-        if (paramTyInMethod->IsGeneric() && StaticCast<GenericType*>(paramTyInMethod)->orphanFlag) {
-            auto& upperBounds = StaticCast<GenericType*>(paramTyInMethod)->GetUpperBounds();
-            CJC_ASSERT(upperBounds.size() == 1);
-            paramTyInMethod = upperBounds[0];
-        }
-        if (paramTysInVtable[i] != ReplaceRawGenericArgType(*paramTyInMethod, replaceTable, builder)) {
+        auto paramTyInMethod = ReplaceRawGenericArgType(*paramTysInMethod[i], replaceTable, builder);
+        if (!ParamTypeIsEquivalent(*paramTyInMethod, *paramTysInVtable[i])) {
             typeMatch = false;
             break;
         }

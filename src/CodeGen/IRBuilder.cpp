@@ -452,6 +452,9 @@ void IRBuilder2::CreateGenericParaDeclare(const CGFunction& cgFunc)
     if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
         return;
     }
+    if (cgFunc.chirFunc.TestAttr(CHIR::Attribute::NO_DEBUG_INFO)) {
+        return;
+    }
     auto chirFunc = dynamic_cast<const CHIR::Func*>(&cgFunc.GetOriginal());
     size_t genericIndex = 0;
     auto null = llvm::ConstantPointerNull::get(llvm::Type::getInt8PtrTy(cgMod.GetLLVMContext()));

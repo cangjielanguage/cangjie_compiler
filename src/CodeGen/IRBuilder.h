@@ -103,7 +103,7 @@ public:
     llvm::Instruction* CreateStore(
         llvm::Value* val, llvm::Value* ptr, const Cangjie::CHIR::Type* type, bool isVolatile = false);
 
-    llvm::Instruction* CreateStore(const CGValue& cgVal, const CGValue& cgDestAddr);
+    llvm::Instruction* CreateStore(const CGValue& cgVal, const CGValue& cgDestAddr, CHIR::Type* boxType = nullptr);
 
     CGValue CreateGEP(const CGValue& cgVal, const std::vector<uint64_t>& idxList, const llvm::Twine& name = "");
     llvm::Value* CreateGEP(

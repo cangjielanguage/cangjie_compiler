@@ -180,14 +180,22 @@ void ValueTypeConverter::VisitValueDefaultImpl(Value& o)
     o.ty = ConvertType(*o.ty);
 }
 
-void ValueTypeConverter::VisitSubValue(Func& o)
+void ValueTypeConverter::VisitFuncBase(FuncBase& o)
 {
     o.ty = ConvertFuncParamsAndRetType(*o.GetFuncType());
+    auto srcFuncType = o.Get<OverrideSrcFuncType>();
+    if (srcFuncType != nullptr) {
+        o.Set<OverrideSrcFuncType>(ConvertFuncParamsAndRetType(*srcFuncType));
+    }
     // convert generic type params
     for (auto& genericTypeParam : o.genericTypeParams) {
         genericTypeParam = StaticCast<GenericType*>(ConvertType(*genericTypeParam));
     }
+}
 
+void ValueTypeConverter::VisitSubValue(Func& o)
+{
+    VisitFuncBase(o);
     // convert param types
     for (auto param : o.GetParams()) {
         VisitValue(*param);
@@ -196,12 +204,7 @@ void ValueTypeConverter::VisitSubValue(Func& o)
 
 void ValueTypeConverter::VisitSubValue(ImportedFunc& o)
 {
-    o.ty = ConvertFuncParamsAndRetType(*o.GetFuncType());
-    // convert generic type params
-    for (auto& genericTypeParam : o.genericTypeParams) {
-        genericTypeParam = StaticCast<GenericType*>(ConvertType(*genericTypeParam));
-    }
-
+    VisitFuncBase(o);
     // convert param types
     for (auto& param : o.paramInfo) {
         param.type = ConvertType(*param.type);

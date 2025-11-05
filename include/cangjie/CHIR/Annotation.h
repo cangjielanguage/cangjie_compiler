@@ -21,6 +21,8 @@
 namespace Cangjie::CHIR {
 
 class FuncBase;
+class FuncType;
+
 struct Annotation {
     Annotation() = default;
     Annotation(const Annotation&) = default;
@@ -332,6 +334,27 @@ public:
 
 private:
     std::optional<size_t> offset{std::nullopt};
+};
+
+struct OverrideSrcFuncType : public Annotation {
+public:
+    explicit OverrideSrcFuncType() = default;
+    explicit OverrideSrcFuncType(FuncType* ty) : type(ty){};
+
+    static FuncType* Extract(const OverrideSrcFuncType* info)
+    {
+        return info->type;
+    }
+
+    std::unique_ptr<Annotation> Clone() override
+    {
+        return std::make_unique<OverrideSrcFuncType>(type);
+    }
+
+    std::string ToString() override;
+
+private:
+    FuncType* type{nullptr};
 };
 
 // This class is used to manage CHIR Annotation's.

@@ -1513,6 +1513,10 @@ void CHIRDeserializer::CHIRDeserializerImpl::ConfigBase(const PackageFormat::Bas
                 base.Set<CHIR::WrappedRawMethod>(
                     GetValue<FuncBase>(static_cast<const PackageFormat::WrappedRawMethod*>(anno)->rawMethod()));
                 break;
+            case PackageFormat::Annotation::Annotation_overrideSrcFuncType:
+                base.Set<CHIR::OverrideSrcFuncType>(
+                    GetType<FuncType>(static_cast<const PackageFormat::OverrideSrcFuncType*>(anno)->type()));
+                break;
             default:
                 continue;
         }

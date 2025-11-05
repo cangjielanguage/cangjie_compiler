@@ -13,6 +13,7 @@
 #include "Base/CHIRExprWrapper.h"
 #include "CGModule.h"
 #include "IRBuilder.h"
+#include "cangjie/CHIR/Annotation.h"
 #include "cangjie/CHIR/Type/ClassDef.h"
 #include "cangjie/CHIR/Value.h"
 
@@ -62,6 +63,22 @@ llvm::Value* HandleStoreExpr(IRBuilder2& irBuilder, const CHIR::Store& store)
         llvm::dyn_cast<llvm::Function>(valueVal.GetRawValue())
             ->addAttributeAtIndex(static_cast<unsigned>(llvm::AttributeList::FunctionIndex),
                 llvm::Attribute::get(cgMod.GetLLVMContext(), CJ2C_ATTR));
+    }
+    // if store a value into a boxtype addr which has been allocated for function return type, need to check the real
+    // return type from OverrideSrcFuncType
+    // 1. for Box<UInt32>& override T, we will translate from Store(Box<UInt32>& xxx, Box<UInt32>&& xxx) into Store(T,
+    // T&)
+    // 2. for Box<Enum<UInt32>>& override Enum<T>, we will translate from Store(Box<Enum<UInt32>>& xxx,
+    // Box<Enum<UInt32>>&& xxx) into Store(Enum<T>&, Enum<T>&)
+    if (auto var = DynamicCast<CHIR::LocalVar*>(addr); var && var->IsRetValue() &&
+        store.GetTopLevelFunc()->Get<CHIR::OverrideSrcFuncType>() && DeRef(*addr->GetType())->IsBox()) {
+        auto overrideSrcRetType = store.GetTopLevelFunc()->Get<CHIR::OverrideSrcFuncType>()->GetReturnType();
+        auto ptrCGType = CGType::GetOrCreate(
+            cgMod, CGType::GetRefTypeOf(cgMod.GetCGContext().GetCHIRBuilder(), *overrideSrcRetType));
+        auto valCGType = !overrideSrcRetType->IsGeneric() ? ptrCGType : CGType::GetOrCreate(cgMod, overrideSrcRetType);
+        return irBuilder.CreateStore(CGValue(valueVal.GetRawValue(), valCGType, valueVal.IsSRetArg()),
+            CGValue((cgMod | addr)->GetRawValue(), ptrCGType, (cgMod | addr)->IsSRetArg()),
+            DeRef(*addr->GetType())->GetTypeArgs()[0]);
     }
     return irBuilder.CreateStore(valueVal, *(cgMod | addr));
 }

@@ -7,7 +7,7 @@
 #include "cangjie/CHIR/Transformation/ClosureConversion.h"
 
 #include "cangjie/CHIR/Annotation.h"
-#include "cangjie/CHIR/GenerateVTable/VTableGenerator.h"
+#include "cangjie/CHIR/GenerateVTable/GenerateVTable.h"
 #include "cangjie/CHIR/CHIRCasting.h"
 #include "cangjie/CHIR/Transformation/FunctionInline.h"
 #include "cangjie/CHIR/Transformation/LambdaInline.h"
@@ -75,46 +75,6 @@ void GetAllGenericType(Type& type, std::vector<Type*>& result)
     }
 }
 
-Ptr<Type> GetInstTypeFromOrphanGenericType(Ptr<Type> type)
-{
-    if (!type->IsGeneric()) {
-        return nullptr;
-    }
-    auto gTy = StaticCast<GenericType*>(type);
-    if (gTy->GetUpperBounds().size() == 1 && gTy->orphanFlag) {
-        return gTy->GetUpperBounds()[0];
-    }
-    return nullptr;
-}
-
-Ptr<Type> GetOriFuncTypeFromOrphanType(Ptr<Type> type, CHIRBuilder& builder)
-{
-    if (!type->IsFunc()) {
-        return type;
-    }
-    auto funcType = StaticCast<FuncType*>(type);
-    std::vector<Type*> originalArgs;
-    bool isOrphan = false;
-    for (auto argType : funcType->GetParamTypes()) {
-        if (auto oriType = GetInstTypeFromOrphanGenericType(argType); oriType != nullptr) {
-            originalArgs.push_back(oriType);
-            isOrphan = true;
-            continue;
-        } else {
-            originalArgs.push_back(argType);
-        }
-    }
-    auto retType = funcType->GetReturnType();
-    if (auto oriRetType = GetInstTypeFromOrphanGenericType(funcType->GetReturnType()); oriRetType != nullptr) {
-        isOrphan = true;
-        retType = oriRetType;
-    }
-    if (isOrphan) {
-        funcType = builder.GetType<FuncType>(originalArgs, retType);
-    }
-    return funcType;
-}
-
 void SetAutoEnvImplDefAttr(ClassDef& def)
 {
     def.EnableAttr(Attribute::COMPILER_ADD);
@@ -153,6 +113,7 @@ void SetMemberMethodAttr(Func& func, bool isConst)
     func.EnableAttr(Attribute::NO_REFLECT_INFO);
     func.EnableAttr(Attribute::INTERNAL);
     func.EnableAttr(Attribute::PUBLIC);
+    func.EnableAttr(Attribute::NO_DEBUG_INFO);
     func.Set<LinkTypeInfo>(Linkage::INTERNAL);
     if (isConst) {
         func.EnableAttr(Attribute::CONST);
@@ -362,6 +323,7 @@ void CreateVirtualFuncInAutoEnvBaseDef(ClassDef& autoEnvBaseDef,
     AttributeInfo attr;
     attr.SetAttr(Attribute::ABSTRACT, true);
     attr.SetAttr(Attribute::PUBLIC, true);
+    attr.SetAttr(Attribute::NO_DEBUG_INFO, true);
 
     std::string mangleName;
     if (funcName == GENERIC_VIRTUAL_FUNC) {
@@ -374,36 +336,44 @@ void CreateVirtualFuncInAutoEnvBaseDef(ClassDef& autoEnvBaseDef,
         methodTy, params, attr, AnnoInfo{}, std::vector<GenericType*>{}, false, &autoEnvBaseDef});
 }
 
-std::pair<std::vector<Type*>, Type*> CreateFuncTypeWithOrphanT(
-    const std::string& typePrefix, const std::vector<Type*>& instFuncTypeArgs,
+FuncType* GetMethodTypeInAutoEnvGenericDef(const ClassDef& def)
+{
+    if (def.GetType()->IsAutoEnvGenericBase()) {
+        auto abstractMethods = def.GetAbstractMethods();
+        CJC_ASSERT(abstractMethods.size() == 1);
+        return Cangjie::StaticCast<FuncType*>(abstractMethods[0].methodTy);
+    }
+    auto superDef = def.GetSuperClassDef();
+    CJC_NULLPTR_CHECK(superDef);
+    return GetMethodTypeInAutoEnvGenericDef(*superDef);
+}
+
+std::pair<std::vector<Type*>, Type*> CreateFuncTypeWithBoxType(
+    const ClassDef& curDef, const std::vector<Type*>& instFuncTypeArgs,
     const std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder)
 {
+    auto parentFuncType = GetMethodTypeInAutoEnvGenericDef(curDef);
+    auto genericParamTypes = parentFuncType->GetParamTypes();
     std::vector<Type*> paramTypes;
+    CJC_ASSERT(!genericParamTypes.empty());
+    genericParamTypes.erase(genericParamTypes.begin());
     CJC_ASSERT(!instFuncTypeArgs.empty());
+    // `parentFuncType` should be (Class-AutoEnv&, T1, T2, ... Tn) -> Tn+1
+    // so `genericParamTypes` should be (T1, T2, ... Tn)
+    // `instFuncTypeArgs` should be (T1, T2, ... Tn, Tn+1), `Tn+1` is return type
+    // so genericParamTypes.size() == instFuncTypeArgs.size() - 1
+    CJC_ASSERT(genericParamTypes.size() == instFuncTypeArgs.size() - 1);
     for (size_t i = 0; i < instFuncTypeArgs.size() - 1; ++i) {
-        auto ty = instFuncTypeArgs[i];
-        auto tyDeref = ty->StripAllRefs();
-        if (tyDeref->IsGeneric() || tyDeref->IsClass() || tyDeref->IsFunc()) {
-            paramTypes.emplace_back(ReplaceRawGenericArgType(*ty, replaceTable, builder));
-            continue;
+        auto paramTy = ReplaceRawGenericArgType(*instFuncTypeArgs[i], replaceTable, builder);
+        if (!VirMethodParamTypeIsMatched(*genericParamTypes[i], *paramTy)) {
+            paramTypes.emplace_back(CreateBoxRefTypeIfNeed(*paramTy, builder));
+        } else {
+            paramTypes.emplace_back(paramTy);
         }
-        auto tName = "T" + std::to_string(i);
-        auto tMangledName = typePrefix + "_cc_" + tName;
-        auto genericType = builder.GetType<GenericType>(tMangledName, tName);
-        genericType->orphanFlag = true;
-        genericType->skipCheck = true;
-        genericType->SetUpperBounds(std::vector<Type*>{ReplaceRawGenericArgType(*ty, replaceTable, builder)});
-        paramTypes.emplace_back(genericType);
     }
     Type* retType = ReplaceRawGenericArgType(*instFuncTypeArgs.back(), replaceTable, builder);
-    if (!retType->StripAllRefs()->IsGeneric()) {
-        auto tName = "rT";
-        auto tMangledName = typePrefix + "_cc_" + tName;
-        auto genericType = builder.GetType<GenericType>(tMangledName, tName);
-        genericType->orphanFlag = true;
-        genericType->skipCheck = true;
-        genericType->SetUpperBounds(std::vector<Type*>{ReplaceRawGenericArgType(*retType, replaceTable, builder)});
-        retType = genericType;
+    if (!VirMethodRetureTypeIsMatched(*retType, *parentFuncType->GetReturnType())) {
+        retType = CreateBoxRefTypeIfNeed(*retType, builder);
     }
     return {paramTypes, retType};
 }
@@ -492,11 +462,9 @@ std::vector<GenericType*> CreateGenericTypeParamForAutoEnvImplDef(const Value& s
     return visiableGenericTypes;
 }
 
-Value* CastTypeFromAutoEnvRefToFuncType(Type& srcFuncType, Value& autoEnvObj,
+Value* CastTypeFromAutoEnvRefToFuncType(FuncType& srcFuncType, Value& autoEnvObj,
     Expression& user, const std::vector<Type*>& genericTypeParams, CHIRBuilder& builder)
 {
-    CJC_ASSERT(srcFuncType.IsFunc());
-    auto unboxRetTy = &srcFuncType;
     /**
      * when a class inherit an instantiated class, this child class does not rewrite parent's one function
      * Interface A<T> {
@@ -504,11 +472,11 @@ Value* CastTypeFromAutoEnvRefToFuncType(Type& srcFuncType, Value& autoEnvObj,
      * }
      * class B <: A<Bool> {
      * }
-     * In B, we will generate a func B::foo with type T->T to meet consistent function signatures in vtable
-     * However when we got a function call B::foo(true), we should get its real function type Bool->Bool,
+     * In B, we will generate a func B::foo with type (Box<Bool>&) -> Unit to meet consistent function signatures in vtable
+     * However when we got a function call B::foo(true), we should get its real function type (Bool) -> Unit,
      *   and type info is stored in orphan flag in generic type.
      */
-    unboxRetTy = GetOriFuncTypeFromOrphanType(unboxRetTy, builder);
+    Type* unboxRetTy = RemoveBoxTypeShellIfNeed(srcFuncType);
     if (auto giv = DynamicCast<GetInstantiateValue*>(&user)) {
         auto allInstTypes = giv->GetInstantiateTypes();
         std::unordered_map<const GenericType*, Type*> replaceMap;
@@ -1690,8 +1658,8 @@ void ClosureConversion::CreateGenericOverrideMethodInAutoEnvImplDef(ClassDef& au
         // first param in lambda is `env`
         srcFuncParamTypesAndRetType.erase(srcFuncParamTypesAndRetType.begin());
     }
-    auto [newFuncParamTypes, newFuncRetType] = CreateFuncTypeWithOrphanT(
-        srcFunc.GetIdentifierWithoutPrefix(), srcFuncParamTypesAndRetType, originalTypeToNewType, builder);
+    auto [newFuncParamTypes, newFuncRetType] = CreateFuncTypeWithBoxType(
+        autoEnvImplDef, srcFuncParamTypesAndRetType, originalTypeToNewType, builder);
     auto classRefTy = builder.GetType<RefType>(autoEnvImplDef.GetType());
     newFuncParamTypes.insert(newFuncParamTypes.begin(), classRefTy);
     auto newFuncTy = builder.GetType<FuncType>(newFuncParamTypes, newFuncRetType);
@@ -1975,33 +1943,14 @@ ClassDef* ClosureConversion::CreateAutoEnvImplDef(const std::string& className,
     classDef->SetType(*classTy);
 
     // 3. set super type
-    /**
-     * when a class inherit an instantiated class, this child class does not override parent's virtual function
-     * Interface A<T> {
-     *     static func foo(a: T) {}
-     * }
-     * class B <: A<Bool> {
-     * }
-     * In class `B`, we will generate a func B::foo with type (T)->T to meet consistent function signatures in vtable
-     * However when we got a function call B::foo(true), we should get its real function type (Bool)->Bool.
-     * So the class `AutoEnvImpl`'s super type should be `AutoEnvBase<Bool, Bool>` instead of `AutoEnvBase<T, T>`
-     */
     std::vector<Type*> superClassGenericArgs;
     auto memberFuncType = StaticCast<FuncType*>(srcFunc.GetType());
     if (memberFuncType->IsGenericRelated()) {
         for (auto paramTy : memberFuncType->GetParamTypes()) {
-            if (auto orphanType = GetInstTypeFromOrphanGenericType(paramTy)) {
-                superClassGenericArgs.push_back(orphanType);
-            } else {
-                superClassGenericArgs.emplace_back(ReplaceRawGenericArgType(*paramTy, originalTypeToNewType, builder));
-            }
+            superClassGenericArgs.emplace_back(ReplaceRawGenericArgType(*paramTy, originalTypeToNewType, builder));
         }
-        if (auto retOrphanType = GetInstTypeFromOrphanGenericType(memberFuncType->GetReturnType())) {
-            superClassGenericArgs.push_back(retOrphanType);
-        } else {
-            superClassGenericArgs.emplace_back(
-                ReplaceRawGenericArgType(*memberFuncType->GetReturnType(), originalTypeToNewType, builder));
-        }
+        auto retType = memberFuncType->GetReturnType();
+        superClassGenericArgs.emplace_back(ReplaceRawGenericArgType(*retType, originalTypeToNewType, builder));
     }
     /**
      * if func type is generic related, the class `AutoEnvImpl` inherits `AutoEnvGenericBase<...>`,
@@ -2238,7 +2187,7 @@ void ClosureConversion::ReplaceUserPoint(FuncBase& srcFunc, Expression& user, Cl
     castToBaseType->MoveBefore(&user);
 
     auto res = CastTypeFromAutoEnvRefToFuncType(
-        *srcFunc.GetType(), *castToBaseType->GetResult(), user, GetOutDefDeclaredTypes(srcFunc), builder);
+        *srcFunc.GetFuncType(), *castToBaseType->GetResult(), user, GetOutDefDeclaredTypes(srcFunc), builder);
     user.ReplaceOperand(&srcFunc, res);
 }
 
@@ -2285,7 +2234,7 @@ void ClosureConversion::ReplaceUserPoint(
             .thisType = thisTy}, awe->GetSuccessBlock(), awe->GetErrorBlock(), user.GetParentBlock());
         awe->ReplaceWith(*newApply);
     } else {
-        auto res = CastTypeFromAutoEnvRefToFuncType(*srcFunc.GetResult()->GetType(),
+        auto res = CastTypeFromAutoEnvRefToFuncType(*StaticCast<FuncType*>(srcFunc.GetResult()->GetType()),
             *autoEnvObj, user, GetOutDefDeclaredTypes(*srcFunc.GetResult()), builder);
         user.ReplaceOperand(srcFunc.GetResult(), res);
     }
@@ -2493,19 +2442,21 @@ void ClosureConversion::ConvertExpressions()
 
 void ClosureConversion::CreateVTableForAutoEnvDef()
 {
-    auto vtableGenerator = VTableGenerator(builder);
-    for (auto& it : genericAutoEnvBaseDefs) {
-        vtableGenerator.GenerateVTable(*it.second);
-    }
-    for (auto& it : instAutoEnvBaseDefs) {
-        vtableGenerator.GenerateVTable(*it.second);
-    }
-    for (auto& it : instAutoEnvWrapperDefs) {
-        vtableGenerator.GenerateVTable(*it.second);
-    }
-    for (auto& it : autoEnvImplDefs) {
-        vtableGenerator.GenerateVTable(*it.second);
-    }
+    auto insertDef =
+        [](const std::unordered_map<std::string, ClassDef*>& candidateDefs, std::vector<CustomTypeDef*>& targetDefs) {
+            for (const auto& it : candidateDefs) {
+                targetDefs.emplace_back(it.second);
+            }
+        };
+    std::vector<CustomTypeDef*> defs;
+    insertDef(genericAutoEnvBaseDefs, defs);
+    insertDef(instAutoEnvBaseDefs, defs);
+    insertDef(instAutoEnvWrapperDefs, defs);
+    insertDef(autoEnvImplDefs, defs);
+
+    auto generator = GenerateVTable(package, defs, builder, opts);
+    generator.CreateVTable();
+    generator.SetSrcFuncType();
 }
 
 ClassDef* ClosureConversion::CreateAutoEnvWrapper(const std::string& className, ClassType& superClassType)
@@ -2546,10 +2497,9 @@ Func* ClosureConversion::CreateGenericMethodInAutoEnvWrapper(ClassDef& autoEnvWr
     auto memberVars = autoEnvWrapperDef.GetDirectInstanceVars();
     CJC_ASSERT(memberVars.size() == 1);
     auto memberVarType = StaticCast<ClassType*>(memberVars[0].type->StripAllRefs());
-    auto funcNamePrefix = autoEnvWrapperDef.GetIdentifierWithoutPrefix();
     std::unordered_map<const GenericType*, Type*> emptyTable;
-    auto [paramTypes, retType] = CreateFuncTypeWithOrphanT(
-        funcNamePrefix, memberVarType->GetGenericArgs(), emptyTable, builder);
+    auto [paramTypes, retType] = CreateFuncTypeWithBoxType(
+        autoEnvWrapperDef, memberVarType->GetGenericArgs(), emptyTable, builder);
     auto autoEnvWrapperRefType = builder.GetType<RefType>(autoEnvWrapperDef.GetType());
     paramTypes.insert(paramTypes.begin(), autoEnvWrapperRefType);
     auto funcType = builder.GetType<FuncType>(paramTypes, retType);
@@ -2659,11 +2609,11 @@ void ClosureConversion::CreateInstMethodInAutoEnvWrapper(ClassDef& autoEnvWrappe
     func->SetReturnValue(*retVal->GetResult());
 
     auto& params = func->GetParams();
-    auto applyArgs = std::vector<Value*>(params.begin(), params.end());
-    auto customType = autoEnvWrapperDef.GetType();
-    auto apply = CreateAndAppendExpression<Apply>(builder, retType, &genericFunc, FuncCallContext{
-        .args = applyArgs,
-        .thisType = customType}, entry);
+    auto context = FuncCallContext {
+        .args = std::vector<Value*>(params.begin(), params.end()),
+        .thisType = autoEnvWrapperDef.GetType()
+    };
+    auto apply = CreateAndAppendExpression<Apply>(builder, retType, &genericFunc, context, entry);
 
     CreateAndAppendExpression<Store>(
         builder, builder.GetType<UnitType>(), apply->GetResult(), retVal->GetResult(), entry);
