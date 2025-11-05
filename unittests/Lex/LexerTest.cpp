@@ -468,9 +468,9 @@ TEST_F(LexerTest, Identifier)
     abc `abc` `int`
     )";
     std::vector<std::string> expectPrivate = {"abc", "`abc`", "`int`"};
-    Lexer* lexer = new Lexer(identifier, diag, sm);
+    Lexer lexer(identifier, diag, sm);
     for (;;) {
-        Token tok = lexer->Next();
+        Token tok = lexer.Next();
         if (tok.kind == TokenKind::IDENTIFIER) {
             if (i >= expectPrivate.size()) {
                 break;
@@ -504,9 +504,9 @@ TEST_F(LexerTest, AnnotationToken)
     i = 0;
     std::string test = R"(@int @`a123` @abc @ abc @123 @_ @__ )"; // @123 is @ and 123
     std::vector<std::string> expectPrivate = {"@int", "@`a123`", "@abc", "@_", "@__"};
-    Lexer* lexerchar = new Lexer(test, diag, sm);
+    Lexer lexerchar(test, diag, sm);
     for (;;) {
-        Token tok = lexerchar->Next();
+        Token tok = lexerchar.Next();
         if (tok.kind == TokenKind::ANNOTATION) {
             if (i >= expectPrivate.size()) {
                 break;
@@ -628,9 +628,9 @@ TEST_F(LexerTest, ErrorPrint)
         123._1
         0x213.123p123_2
         )";
-    Lexer* lexerError = new Lexer(strError, diag, sm);
+    Lexer lexerError(strError, diag, sm);
     for (;;) {
-        Token tok = lexerError->Next();
+        Token tok = lexerError.Next();
         if (tok.kind == TokenKind::END) {
             break;
         }
@@ -908,8 +908,8 @@ TEST_F(LexerTest, Diagnose)
 {
     std::string str = R"(abc def)";
     auto fileid = sm.AddSource("test", str);
-    Lexer* lexer = new Lexer(fileid, str, diag, sm);
-    Token tok = lexer->Next();
+    Lexer lexer(fileid, str, diag, sm);
+    Token tok = lexer.Next();
     EXPECT_EQ(tok.End(), Position(1, 1, 4));
     DiagnosticEngine diag;
     diag.DiagnoseRefactor(DiagKindRefactor::parse_this_type_not_allow, tok.Begin());
@@ -922,9 +922,9 @@ TEST_F(LexerTest, PrintAsciiControlCode)
     SourceManager sm;
     auto fileid = sm.AddSource("test.cj", str);
     diag.SetSourceManager(&sm);
-    Lexer* lexer = new Lexer(fileid, str, diag, sm);
-    Token tok = lexer->Next();
-    lexer->Next();
+    Lexer lexer(fileid, str, diag, sm);
+    Token tok = lexer.Next();
+    lexer.Next();
     auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
     EXPECT_EQ(diagnostics.size(), 1);
 

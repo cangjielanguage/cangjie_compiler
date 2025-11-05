@@ -60,8 +60,8 @@ TEST_F(LexerTerminatorTest, ScanComment)
     std::vector<std::string> terminator = {"//abc\n", "//abc\r\n"};
     Position expect_pos = {0, 1, 6};
     for (size_t i = 0; i < terminator.size(); i++) {
-        Lexer* lexer = new Lexer(terminator[i], diag, sm2);
-        Token tok = lexer->Next();
+        Lexer lexer(terminator[i], diag, sm2);
+        Token tok = lexer.Next();
         Position endPos = tok.End();
         EXPECT_EQ(endPos, expect_pos);
     }
