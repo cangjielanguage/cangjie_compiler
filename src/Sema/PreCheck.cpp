@@ -1115,7 +1115,7 @@ void TypeChecker::TypeCheckerImpl::ExposeGenericUpperBounds(ASTContext& ctx, con
 
 void TypeChecker::TypeCheckerImpl::CheckAssumption(ASTContext& ctx, const Decl& decl)
 {
-    if (decl.TestAttr(Attribute::COMMON) && decl.TestAttr(Attribute::FROM_COMMON_PART)) {
+    if (decl.TestAttr(Attribute::FROM_COMMON_PART)) {
         return;
     }
 
