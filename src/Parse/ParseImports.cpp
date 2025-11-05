@@ -225,7 +225,7 @@ bool ParserImpl::ParseImportSingle(ImportContent& content, bool inMultiImport)
             content.begin = curIdent.Begin();
             firstIter = false;
         }
-        if (content.prefixPaths.empty() && Skip(TokenKind::DOUBLE_COLON)) {
+        if (content.prefixPaths.empty() && !inMultiImport && Skip(TokenKind::DOUBLE_COLON)) {
             content.hasDoubleColon = true;
             skipDc = true;
         }
