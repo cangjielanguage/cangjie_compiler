@@ -65,8 +65,8 @@ constexpr auto INIT_FUNC_NAME = "init";
 constexpr auto DELETE_FUNC_NAME = "deleteCJObject";
 constexpr auto DEALLOC_FUNC_NAME = "dealloc";
 constexpr auto INIT_CJ_RUNTIME_NAME = "InitCJRuntime";
-constexpr auto INIT_WITH_REGISTRY_ID_NAME = "InitWithRegistryId";
-constexpr auto INIT_WITH_REGISTRY_ID_SIGNATURE = "- (id)InitWithRegistryId:(int64_t)registryId";
+constexpr auto INIT_WITH_REGISTRY_ID_NAME = "initWithRegistryId";
+constexpr auto INIT_WITH_REGISTRY_ID_SIGNATURE = "- (id)initWithRegistryId:(int64_t)registryId";
 constexpr auto NSLOG_FUNC_NAME = "NSLog";
 constexpr auto EXIT_FUNC_NAME = "exit";
 constexpr auto DLOPEN_FUNC_NAME = "dlopen";
@@ -651,10 +651,10 @@ std::string ObjCGenerator::GenerateFuncParamLists(
             case FunctionListFormat::DECLARATION:
                 if (i != 0) {
                     /*
-                     * for CJMapping Objective-C method signature, label shouldn't generate
+                     * for CJMapping Objective-C method signature, label shouldn't generate if not use @ForeignName
                      * as it would be more user-friendly to keep both side method signatures the same
                      */
-                    auto name = interopType == InteropType::ObjC_Mirror ? *componentIterator++ : "";
+                    auto name = selectorComponents.size() > 1 ? *componentIterator++ : "";
                     genParams += name + ":"; // label
                 } else {
                     genParams += ":";
