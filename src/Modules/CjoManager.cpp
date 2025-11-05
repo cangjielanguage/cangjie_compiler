@@ -278,18 +278,6 @@ bool CjoManager::NeedCollectDependency(std::string curName, bool isCurMacro, std
         return false;
     }
 
-    auto pkgInfo = impl->GetPackageInfo(depName);
-    if (!pkgInfo) {
-        // This common dependency was not imported in current platform part, so it need to be add manually
-        auto cjoPath = GetPackageCjoPath(depName);
-        if (!cjoPath || !LoadPackageHeader(depName, *cjoPath)) {
-            DiagnosticBuilder builder = GetDiag().DiagnoseRefactor(DiagKindRefactor::package_search_error,
-                DEFAULT_POSITION, depName);
-            builder.AddHelp(DiagHelp(Modules::NO_CJO_HELP_INFO));
-            return false;
-        }
-    }
-
     // If current is macro package, only load decls for dependent macro package,
     // otherwise, load decls for all dependent package (macro package was filtered before).
     // NOTE: non-macro package's will never be used through macro package.

@@ -2802,13 +2802,18 @@ struct ImportSpec : Node {
     Position importPos; /**< Position of 'import'. */
     ImportContent content;
     std::vector<OwnedPtr<Annotation>> annotations; /**< Annotation set of the ImportSpec. */
+    /**< Implicitly export all imported decls, initialized with true to  ensure compatibility. */
+    bool withImplicitExport{true};
     ImportSpec() : Node(ASTKind::IMPORT_SPEC)
     {
     }
 
-    bool IsReExport() const
+    bool IsReExport(bool noSubPkg = false) const
     {
-        return modifier && modifier->modifier != TokenKind::PRIVATE;
+        if (!modifier || modifier->modifier == TokenKind::PRIVATE) {
+            return false;
+        }
+        return noSubPkg ? modifier->modifier != TokenKind::INTERNAL : true;
     }
     bool IsImportAll() const
     {
@@ -2925,6 +2930,10 @@ struct Package : Node {
         allowedInteropCJGenericInstantiations;
     bool isInteropCJPackageConfig{false};
 
+private:
+    std::vector<std::string> allDependentStdPkgs; /**< Record all dependent standard packages. */
+
+public:
     Package() : Node(ASTKind::PACKAGE)
     {
     }
@@ -2955,6 +2964,15 @@ struct Package : Node {
             }
         }
         return false;
+    }
+
+    void AddDependentStdPkg(const std::string& pkgName)
+    {
+        allDependentStdPkgs.emplace_back(pkgName);
+    }
+    const std::vector<std::string>& GetAllDependentStdPkgs() const
+    {
+        return allDependentStdPkgs;
     }
 };
 

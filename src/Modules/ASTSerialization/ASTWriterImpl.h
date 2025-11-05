@@ -106,7 +106,9 @@ private:
 
     std::unordered_set<Ptr<const AST::Decl>> topLevelDecls;
     std::unordered_set<Ptr<const AST::Decl>> preSavedDecls;
-    
+
+    std::unordered_set<std::string> importedDeclPkgNames;
+
     inline FormattedIndex PreSaveDecl(const AST::Decl& decl)
     {
         if (auto found = savedDeclMap.find(&decl); found != savedDeclMap.end()) {
@@ -209,6 +211,7 @@ private:
         }
         return builder.CreateVector<FormattedIndex>(superInterfaceTypes);
     }
+    void MarkImplicitExportOfImportSpec(AST::Package& package);
 
     NodeInfo PackNodeInfo(const AST::Node& node);
     /** NOTE: Main entrance of 'SaveExpr' is only from 'SaveFuncBody', 'SaveVarDecl' and 'SaveVarWithPatternDecl'. */

@@ -435,27 +435,29 @@ void CompileStrategy::ParseAndMergeCjds() const
         return;
     }
     Utils::ProfileRecorder::Start("ImportPackages", "ParseAndMergeCjds");
-    auto cjdPaths = ci->importManager.GetDepPkgCjdPaths();
+    auto cjoPaths = ci->importManager.GetDepPkgCjoPaths();
     std::vector<std::future<void>> futures;
-    futures.reserve(cjdPaths.size());
+    futures.reserve(cjoPaths.size());
     // Reuse current CompilerInstance, but the Parser in the macro expansion phase uses the DParser.
     option.compileCjd = true;
-    // cjdInfo is [fullPackageName, cjdPath].
-    for (auto& cjdInfo : cjdPaths) {
+    // cjoInfo is [fullPackageName, cjoInfo].
+    for (auto& cjoInfo : cjoPaths) {
+        auto cjoPath = cjoInfo.second;
+        cjoInfo.second = cjoPath.substr(0, cjoPath.rfind(SERIALIZED_FILE_EXTENSION)) + CJ_D_FILE_EXTENSION;
         if (option.jobs == 1) {
-            ParseAndMergeCjd(ci, cjdInfo);
+            ParseAndMergeCjd(ci, cjoInfo);
         } else {
             // In the LSP scenario, concurrent calls may occur.
             std::lock_guard<std::mutex> guard(g_cjdAstCacheLock);
-            auto [iter, succ] = g_cjdAstCache.try_emplace(cjdInfo.first, nullptr);
+            auto [iter, succ] = g_cjdAstCache.try_emplace(cjoInfo.first, nullptr);
             if (!succ && iter->second) {
-                auto originPkg = ci->importManager.GetPackage(cjdInfo.first);
+                auto originPkg = ci->importManager.GetPackage(cjoInfo.first);
                 if (!originPkg) {
-                    InternalError(cjdInfo.first + " cannot find origin ast");
+                    InternalError(cjoInfo.first + " cannot find origin ast");
                 }
                 MergeCusAnno(originPkg, iter->second.get());
             } else {
-                futures.emplace_back(std::async(std::launch::async, ParseAndMergeCjd, ci, cjdInfo));
+                futures.emplace_back(std::async(std::launch::async, ParseAndMergeCjd, ci, cjoInfo));
             }
         }
     }
