@@ -17,6 +17,7 @@
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/RecoverDesugar.h"
 #include "NativeFFI/Java/TypeCheck/TypeCheckAnnotation.h"
+#include "NativeFFI/ObjC/TypeCheck/TypeCheckAnnotation.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -189,6 +190,10 @@ void TypeChecker::TypeCheckerImpl::CheckAnnotations(ASTContext& ctx, Decl& decl)
             }
             case AnnotationKind::JAVA_HAS_DEFAULT: {
                 Interop::Java::CheckJavaHasDefaultAnnotation(diag, *anno, decl);
+                break;
+            }
+            case AnnotationKind::FOREIGN_SETTER_NAME: {
+                Interop::ObjC::CheckForeignSetterNameAnnotation(diag, *anno, decl);
                 break;
             }
             default: {

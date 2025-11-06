@@ -13,6 +13,7 @@
 #ifndef CANGJIE_PARSE_PARSER_H
 #define CANGJIE_PARSE_PARSER_H
 
+#include "cangjie/AST/Node.h"
 #include "cangjie/AST/NodeX.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Lex/Lexer.h"
@@ -51,6 +52,7 @@ const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_KIND = {
     {"JavaHasDefault", AST::AnnotationKind::JAVA_HAS_DEFAULT},
     {"ObjCMirror", AST::AnnotationKind::OBJ_C_MIRROR}, {"ObjCImpl", AST::AnnotationKind::OBJ_C_IMPL},
     {"ObjCInit", AST::AnnotationKind::OBJ_C_INIT}, {"ForeignName", AST::AnnotationKind::FOREIGN_NAME},
+    {"ForeignGetterName", AST::AnnotationKind::FOREIGN_GETTER_NAME}, {"ForeignSetterName", AST::AnnotationKind::FOREIGN_SETTER_NAME},
     {"CallingConv", AST::AnnotationKind::CALLING_CONV}, {"C", AST::AnnotationKind::C},
     {"Attribute", AST::AnnotationKind::ATTRIBUTE}, {"Intrinsic", AST::AnnotationKind::INTRINSIC},
     {"OverflowThrowing", AST::AnnotationKind::NUMERIC_OVERFLOW},

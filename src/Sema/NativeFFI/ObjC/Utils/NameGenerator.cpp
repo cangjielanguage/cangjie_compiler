@@ -14,6 +14,8 @@
 #include "NameGenerator.h"
 #include "cangjie/AST/Match.h"
 #include "NativeFFI/Utils.h"
+#include "cangjie/AST/Node.h"
+#include "cangjie/Utils/CheckUtils.h"
 
 using namespace Cangjie::AST;
 using namespace Cangjie::Interop::ObjC;
@@ -155,6 +157,44 @@ std::string NameGenerator::GetObjCDeclName(const Decl& target)
     }
 
     return target.identifier;
+}
+
+std::string NameGenerator::GetObjCGetterName(const Decl& target)
+{
+    auto foreignName = GetSingleArgumentAnnotationValue(target, AnnotationKind::FOREIGN_GETTER_NAME);
+    if (foreignName) {
+        return *foreignName;
+    }
+
+    foreignName = GetUserDefinedObjCName(target);
+    if (foreignName) {
+        return *foreignName;
+    }
+
+    return target.identifier;
+}
+
+std::string NameGenerator::GetObjCSetterName(const Decl& target)
+{
+    auto foreignName = GetSingleArgumentAnnotationValue(target, AnnotationKind::FOREIGN_SETTER_NAME);
+    if (foreignName) {
+        return *foreignName;
+    }
+
+    foreignName = GetUserDefinedObjCName(target);
+    if (foreignName) {
+        return MakeSetterName(*foreignName);
+    }
+
+    return MakeSetterName(target.identifier);
+}
+
+std::string NameGenerator::MakeSetterName(std::string propName)
+{
+    auto newName = propName;
+    std::transform(
+        newName.begin(), newName.begin() + 1, newName.begin(), [](unsigned char c) { return std::toupper(c); });
+    return "set" + newName + ":";
 }
 
 std::vector<std::string> NameGenerator::GetObjCDeclSelectorComponents(const FuncDecl& target)
