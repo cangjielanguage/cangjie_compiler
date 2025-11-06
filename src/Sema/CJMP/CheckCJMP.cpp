@@ -634,35 +634,6 @@ bool MPTypeCheckerImpl::MatchCJMPDeclAnnotations(
     return true;
 }
 
-static void CheckGenericRenamed(const AST::Decl& platform, const AST::Decl& common, DiagnosticEngine& diag)
-{
-    if (platform.astKind != ASTKind::CLASS_DECL && platform.astKind != ASTKind::STRUCT_DECL && platform.astKind != ASTKind::ENUM_DECL && platform.astKind != ASTKind::INTERFACE_DECL) {
-        // generic rename is not supported for class/struct yet
-        return;
-    }
-    auto platformGeneric = platform.GetGeneric();
-    auto commonGeneric = common.GetGeneric();
-
-    if (!commonGeneric || !platformGeneric) {
-        return;
-    }
-
-    auto& commonParameters = commonGeneric->typeParameters;
-    auto& platformParameters = platformGeneric->typeParameters;
-
-    size_t size = commonParameters.size();
-    if (size != platformParameters.size()) {
-        return;
-    }
-
-    for (size_t i = 0; i < size; ++i) {
-        if (commonParameters[i]->identifier.Val() != platformParameters[i]->identifier.Val()) {
-            auto& genericParam = *platformParameters[i];
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_common_generic_rename_not_supported, genericParam);
-        }
-    }
-}
-
 void MPTypeCheckerImpl::CheckCommonSpecificGenericMatch(const AST::Decl& platformDecl, const AST::Decl& commonDecl)
 {
     // check generic countraints
@@ -670,7 +641,6 @@ void MPTypeCheckerImpl::CheckCommonSpecificGenericMatch(const AST::Decl& platfor
     auto childBounds = GetAllGenericUpperBounds(typeManager, platformDecl);
 
     CheckGenericTypeBoundsMapped(commonDecl, platformDecl, parentBounds, childBounds, diag, typeManager);
-    CheckGenericRenamed(platformDecl, commonDecl, diag);
 }
 
 // Match common nominal decl with platform for details.
