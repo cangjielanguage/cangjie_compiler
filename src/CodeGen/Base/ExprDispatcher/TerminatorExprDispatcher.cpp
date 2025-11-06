@@ -85,14 +85,6 @@ llvm::Value* HandleTerminatorExpression(IRBuilder2& irBuilder, const CHIR::Expre
         case CHIR::ExprKind::GOTO: {
             auto& goTo = StaticCast<const CHIR::GoTo&>(chirExpr);
             auto succ = goTo.GetSuccessors()[0];
-            if (irBuilder.GetCGContext().GetCompileOptions().enableCompileDebug &&
-                !goTo.GetDebugLocation().IsInvalidPos() && chirExpr.GetParentBlock()->GetExpressionsNum() > 1) {
-                auto func = irBuilder.GetInsertFunction();
-                auto gotoBB = llvm::BasicBlock::Create(
-                    irBuilder.GetLLVMContext(), "goto", func, cgMod.GetMappedBB(succ));
-                irBuilder.CreateBr(gotoBB);
-                irBuilder.SetInsertPoint(gotoBB);
-            }
             return irBuilder.CreateBr(cgMod.GetMappedBB(succ));
         }
         case CHIR::ExprKind::EXIT: {
