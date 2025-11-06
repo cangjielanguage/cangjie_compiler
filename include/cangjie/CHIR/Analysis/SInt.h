@@ -209,13 +209,6 @@ struct SInt final {
     /// Check if val is mask with input bits, bits < BITS_PER_WORD
     bool IsMask(unsigned bits) const;
 
-    /// Check if this SInt contains a non-empty sequence of ones without remainder
-    bool IsShiftedMask() const;
-
-    /// Check if this SInt contains a non-empty sequence of ones without remainder. If true, \p index specify the
-    /// index of the lowest set bit and \p len specify the length of the mask. Otherwise, both parameters are unchanged
-    bool IsShiftedMask(unsigned& index, unsigned& len) const;
-
     /// Returns a SInt with the same width as this, and with low bits zero-masked and high bits right shift to the
     /// least significant bits
     SInt HighBits(unsigned num) const;

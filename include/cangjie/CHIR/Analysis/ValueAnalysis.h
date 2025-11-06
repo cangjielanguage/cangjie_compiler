@@ -39,7 +39,7 @@ template <typename ValueDomain, typename ValueStatePool> class ValueAnalysis;
  * @brief abstract state to store CHIR value state, mainly store value and reference state.
  * @tparam ValueDomain abstract domain to store status of CHIR value.
  */
-template <typename ValueDomain, typename ValueStatePool = DefaultStatePool<ValueDomain>,
+template <typename ValueDomain, typename ValueStatePool = FullStatePool<ValueDomain>,
     typename = std::enable_if_t<std::is_base_of_v<AbstractDomain<ValueDomain>, ValueDomain>>>
 class State final : public AbstractDomain<State<ValueDomain, ValueStatePool>> {
     friend class ValueAnalysis<ValueDomain, ValueStatePool>;
@@ -708,7 +708,7 @@ template <typename TDomain> inline TDomain HandleNonNullLiteralValue(const Liter
  * @brief abstract value analysis of ValueDomain.
  * @tparam ValueDomain specific ValueDomain
  */
-template <typename ValueDomain, typename ValueStatePool = DefaultStatePool<ValueDomain>>
+template <typename ValueDomain, typename ValueStatePool = FullStatePool<ValueDomain>>
 class ValueAnalysis : public Analysis<State<ValueDomain, ValueStatePool>> {
 public:
     using isValueAnalysis = void;

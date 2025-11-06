@@ -15,48 +15,6 @@
 #include <future>
 
 namespace Cangjie::CHIR {
-namespace {
-// Huge block size, do nothing
-const size_t OVERHEAD_BLOCK_SIZE = 1000U;
-// Big size, use active pool
-const size_t USE_ACTIVE_BLOCK_SIZE = 300U;
-
-/// Get all block size from a lambda, get 0 if not a lambda.
-size_t GetBlockSize(const Expression& expr)
-{
-    size_t blockSize = 0;
-    if (expr.GetExprKind() != ExprKind::LAMBDA) {
-        return blockSize;
-    }
-    auto lambdaBody = Cangjie::StaticCast<const Lambda&>(expr).GetBody();
-    blockSize += lambdaBody->GetBlocks().size();
-    auto postVisit = [&blockSize](Expression& e) {
-        blockSize += GetBlockSize(e);
-        return VisitResult::CONTINUE;
-    };
-    Visitor::Visit(*lambdaBody, postVisit);
-    return blockSize;
-}
-
-/// count all blocks in func, including lambda expr.
-size_t CountBlockSize(const Func& func)
-{
-    size_t blockSize = func.GetBody()->GetBlocks().size();
-    if (blockSize > OVERHEAD_BLOCK_SIZE) {
-        return OVERHEAD_BLOCK_SIZE + 1;
-    }
-    for (auto block : func.GetBody()->GetBlocks()) {
-        for (auto e : block->GetExpressions()) {
-            blockSize += GetBlockSize(*e);
-            if (blockSize > OVERHEAD_BLOCK_SIZE) {
-                return OVERHEAD_BLOCK_SIZE + 1;
-            }
-        }
-    }
-    return blockSize;
-}
-}
-
 /**
  * @brief wrapper class of constant analysis pass, using to do parallel or check works.
  */
@@ -66,9 +24,7 @@ public:
      * @brief wrapper of const analysis.
      * @param builder CHIR builder for generating IR.
      */
-    explicit ConstAnalysisWrapper(CHIRBuilder& builder) : builder(builder)
-    {
-    }
+    explicit ConstAnalysisWrapper(CHIRBuilder& builder);
 
     /**
      * @brief main method to analysis from wrapper class.
@@ -81,7 +37,6 @@ public:
     template <typename... Args>
     void RunOnPackage(const Package* package, bool isDebug, size_t threadNum, Args&&... args)
     {
-        compileThreadNum = threadNum;
         if (threadNum == 1) {
             RunOnPackageInSerial(package, isDebug, std::forward<Args>(args)...);
         } else {
@@ -128,74 +83,37 @@ public:
      * @param func function to return analysis result
      * @return analysis result
      */
-    std::optional<Results<ConstDomain>*> CheckFuncResult(const Func* func)
-    {
-        if (auto it = resultsMap.find(func); it != resultsMap.end()) {
-            return it->second.get();
-        } else if (funcWithPoolDomain.count(func) != 0) {
-            // pool domain result only using for analysis.
-            return nullptr;
-        } else {
-            return nullptr;
-        }
-    }
+    Results<ConstDomain>* CheckFuncResult(const Func& func);
 
     /**
      * @brief clear analysis result
      */
-    void InvalidateAllAnalysisResults()
-    {
-        funcWithPoolDomain.clear();
-        resultsMap.clear();
-    }
-
-    /**
-     * @brief clear analysis result of certain function
-     * @param func function to clear analysis result
-     * @return whether clear is happened
-     */
-    bool InvalidateAnalysisResult(const Func* func)
-    {
-        if (auto it = resultsMap.find(func); it != resultsMap.end()) {
-            resultsMap.erase(it);
-            return true;
-        }
-        if (auto it = funcWithPoolDomain.find(func); it != funcWithPoolDomain.end()) {
-            funcWithPoolDomain.erase(it);
-            return true;
-        }
-        return false;
-    }
+    void InvalidateAllAnalysisResults();
 
 private:
-    std::optional<bool> JudgeUsingPool(const Func* func)
-    {
-        auto size = CountBlockSize(*func);
-        if (size > OVERHEAD_BLOCK_SIZE) {
-            return std::nullopt;
-        }
-        return size > USE_ACTIVE_BLOCK_SIZE;
-    }
+    enum class AnalysisStrategy {
+        SkipAnalysis,
+        FullStatePool,
+        ActiveStatePool
+    };
+
+    AnalysisStrategy ChooseAnalysisStrategy(const Func& func);
+
+    /// Compute block size helpers
+    static size_t GetBlockSize(const Expression& expr);
+    static size_t CountBlockSize(const Func& func);
 
     template <typename... Args>
     void RunOnPackageInSerial(const Package* package, bool isDebug, Args&&... args)
     {
         SetUpGlobalVarState(*package, isDebug, std::forward<Args>(args)...);
         for (auto func : package->GetGlobalFuncs()) {
-            if (!ShouldBeAnalysed(*func)) {
-                continue;
-            }
-            auto judgeRes = JudgeUsingPool(func);
-            if (judgeRes == std::nullopt) {
-                // overhead huge size, do nothing
-                funcWithPoolDomain.emplace(func);
-            } else if (judgeRes.value()) {
-                // middle size, use acitve pool
+            auto judgeRes = ChooseAnalysisStrategy(*func);
+            if (judgeRes == AnalysisStrategy::ActiveStatePool) {
                 if (auto res = RunOnFuncWithPool(func, isDebug, std::forward<Args>(args)...)) {
                     funcWithPoolDomain.emplace(func);
                 }
-            } else {
-                // normal const analysis
+            } else if (judgeRes == AnalysisStrategy::FullStatePool) {
                 if (auto res = RunOnFunc(func, isDebug, std::forward<Args>(args)...)) {
                     resultsMap.emplace(func, std::move(res));
                 }
@@ -213,21 +131,13 @@ private:
         std::vector<Cangjie::Utils::TaskResult<ResTy>> results;
         std::vector<Cangjie::Utils::TaskResult<ResTyPool>> resultsPool;
         for (auto func : package->GetGlobalFuncs()) {
-            if (!ShouldBeAnalysed(*func)) {
-                continue;
-            }
-            auto judgeRes = JudgeUsingPool(func);
-            if (judgeRes == std::nullopt) {
-                // overhead huge size, do nothing
-                funcWithPoolDomain.emplace(func);
-            } else if (judgeRes.value()) {
-                // middle size, use acitve pool
+            auto judgeRes = ChooseAnalysisStrategy(*func);
+            if (judgeRes == AnalysisStrategy::ActiveStatePool) {
                 resultsPool.emplace_back(taskQueue.AddTask<ResTyPool>(
                     [func, isDebug, &args..., this]() { return RunOnFuncWithPool(func, isDebug, std::forward<Args>(args)...); },
                     // Roughly use the number of Blocks as the cost of task weight
                     func->GetBody()->GetBlocks().size()));
-            } else {
-                // normal const analysis
+            } else if (judgeRes == AnalysisStrategy::FullStatePool) {
                 results.emplace_back(taskQueue.AddTask<ResTy>(
                     [func, isDebug, &args..., this]() { return RunOnFunc(func, isDebug, std::forward<Args>(args)...); },
                     func->GetBody()->GetBlocks().size()));
@@ -248,14 +158,6 @@ private:
         }
     }
 
-    bool ShouldBeAnalysed(const Func& func)
-    {
-        if (resultsMap.find(&func) != resultsMap.end() || funcWithPoolDomain.find(&func) != funcWithPoolDomain.end()) {
-            return false;
-        }
-        return ConstAnalysis<ConstStatePool>::Filter(func);
-    }
-
     template <typename... Args> void SetUpGlobalVarState(const Package& package, bool isDebug, Args&&... args)
     {
         ConstAnalysis<ConstStatePool>::InitialiseLetGVState(package, builder);
@@ -272,7 +174,6 @@ private:
     std::unordered_map<const Func*, std::unique_ptr<Results<ConstDomain>>> resultsMap;
     std::unordered_set<const Func*> funcWithPoolDomain;
     CHIRBuilder& builder;
-    size_t compileThreadNum = 1;
 };
 
 } // namespace Cangjie::CHIR

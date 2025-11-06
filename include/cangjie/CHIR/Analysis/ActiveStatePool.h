@@ -19,7 +19,7 @@ namespace Cangjie::CHIR {
  * @brief Containers for mapping CHIR Value pointers to ValueDomain instances.
  *
  * This header provides two pool implementations:
- * - DefaultStatePool: a thin wrapper around std::unordered_map<Value*, ValueDomain>.
+ * - FullStatePool: a thin wrapper around std::unordered_map<Value*, ValueDomain>.
  * - ActiveStatePool: a bounded pool that keeps insertion order via a doubly-linked
  *   list (ActiveStateNode) and evicts oldest entries when capacity is exceeded.
  *
@@ -36,7 +36,7 @@ namespace Cangjie::CHIR {
  * @tparam ValueDomain Domain type stored for each Value pointer.
  */
 template <typename ValueDomain>
-class DefaultStatePool {
+class FullStatePool {
 public:
     using ConstIterator = typename std::unordered_map<Value*, ValueDomain>::const_iterator;
     using Iterator = typename std::unordered_map<Value*, ValueDomain>::iterator;
@@ -108,11 +108,11 @@ public:
     }
 
     /**
-     * @brief Join another DefaultStatePool into this one.
+     * @brief Join another FullStatePool into this one.
      * @param rhs right-hand side pool
      * @return true if any entry in this pool changed as a result of the join.
      */
-    bool Join(const DefaultStatePool<ValueDomain>& rhs)
+    bool Join(const FullStatePool<ValueDomain>& rhs)
     {
         return MapJoin<Value*, ValueDomain>(data, rhs.data);
     }
@@ -131,11 +131,11 @@ private:
 };
 
 /**
- * @brief MapJoin adaptor for DefaultStatePool to enable generic join usage.
+ * @brief MapJoin adaptor for FullStatePool to enable generic join usage.
  * @tparam Domain domain type, must derive from AbstractDomain<Domain>.
  */
 template <typename Domain, typename = std::enable_if_t<std::is_base_of_v<AbstractDomain<Domain>, Domain>>>
-bool MapJoin(DefaultStatePool<Domain>& lhs, const DefaultStatePool<Domain>& rhs)
+bool MapJoin(FullStatePool<Domain>& lhs, const FullStatePool<Domain>& rhs)
 {
     return lhs.Join(rhs);
 }
@@ -160,7 +160,7 @@ struct ActiveStateNode {
  * number of entries exceeds MAX_STATE_POOL_SIZE the oldest entries are evicted
  * until the size reaches BASE_STATE_POOL_SIZE.
  *
- * The API mirrors DefaultStatePool and adds Insert/emplace that return the
+ * The API mirrors FullStatePool and adds Insert/emplace that return the
  * ActiveStateNode* for the inserted value.
  *
  * @tparam ValueDomain domain type stored per Value; must derive from AbstractDomain<ValueDomain>.
@@ -190,11 +190,8 @@ public:
         if (other.first == nullptr) {
             return;
         }
-        for (auto& it : other.data) {
-            data.emplace(it.first, it.second);
-            auto newNode = ActiveStateNode(it.first);
-            obj2StateNode.emplace(it.first, newNode);
-        }
+        data = other.data;
+        obj2StateNode = other.obj2StateNode;
         for (auto& it : other.data) {
             auto& newNode = obj2StateNode.at(it.first);
             auto& node = other.obj2StateNode.at(it.first);
@@ -223,11 +220,8 @@ public:
         if (other.first == nullptr) {
             return *this;
         }
-        for (auto& it : other.data) {
-            data.emplace(it.first, it.second);
-            auto newNode = ActiveStateNode(it.first);
-            obj2StateNode.emplace(it.first, newNode);
-        }
+        data = other.data;
+        obj2StateNode = other.obj2StateNode;
         for (auto& it : other.data) {
             auto& newNode = obj2StateNode.at(it.first);
             auto& node = other.obj2StateNode.at(it.first);
@@ -479,12 +473,16 @@ bool MapJoin(ActiveStatePool<Domain>& lhs, const ActiveStatePool<Domain>& rhs)
     return lhs.Join(rhs);
 }
 
+// eviction high-water mark
 template <typename ValueDomain>
 size_t ActiveStatePool<ValueDomain>::MAX_STATE_POOL_SIZE = 120;
+// eviction low-water mark
 template <typename ValueDomain>
 size_t ActiveStatePool<ValueDomain>::BASE_STATE_POOL_SIZE = 80;
+// non-ref top state
 template <typename ValueDomain>
 ValueDomain ActiveStatePool<ValueDomain>::TOP_STATE = ValueDomain(true);
+// non-ref top state
 template <typename ValueDomain>
 ValueDomain ActiveStatePool<ValueDomain>::TOP_REF_STATE = ValueDomain(Ref::GetTopRefInstance());
 }  // namespace Cangjie::CHIR

@@ -177,7 +177,7 @@ template <> std::vector<std::unique_ptr<Ref>> ValueAnalysis<ConstValueDomain>::g
 template <> std::vector<std::unique_ptr<AbstractObject>> ValueAnalysis<ConstValueDomain>::globalAbsObjPool;
 template <> ConstDomain ValueAnalysis<ConstValueDomain>::globalState;
 
-using ConstStatePool = DefaultStatePool<ConstValueDomain>;
+using ConstStatePool = FullStatePool<ConstValueDomain>;
 
 using ConstActivePool = ActiveStatePool<ConstValueDomain>;
 using ConstPoolDomain = State<ConstValueDomain, ConstActivePool>;

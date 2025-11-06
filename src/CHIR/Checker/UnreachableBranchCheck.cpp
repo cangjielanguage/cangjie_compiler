@@ -121,8 +121,7 @@ void UnreachableBranchCheck::RunOnFunc(const Ptr<Func> func)
     if (isCommonFunctionWithoutBody) {
         return; // Nothing to visit
     }
-    auto result = analysisWrapper->CheckFuncResult(func);
-    CJC_ASSERT(result != std::nullopt);
+    auto result = analysisWrapper->CheckFuncResult(*func);
     if (result == nullptr) {
         return;
     }
@@ -166,5 +165,5 @@ void UnreachableBranchCheck::RunOnFunc(const Ptr<Func> func)
         }
     };
 
-    result.value()->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
+    result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
 }
