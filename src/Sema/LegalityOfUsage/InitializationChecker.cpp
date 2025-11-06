@@ -919,7 +919,7 @@ bool InitializationChecker::CheckInitInExpr(Ptr<Node> node)
         case ASTKind::PAREN_EXPR:
             return CheckInitInExpr(StaticCast<ParenExpr>(node)->expr.get());
         case ASTKind::LAMBDA_EXPR:
-            CheckInitialization(StaticCast<LambdaExpr>(node)->funcBody.get());
+            CheckInitInFuncBody(*StaticCast<LambdaExpr>(node)->funcBody.get());
             return true;
         case ASTKind::ARRAY_LIT:
             return std::all_of(StaticCast<ArrayLit>(node)->children.begin(), StaticCast<ArrayLit>(node)->children.end(),
