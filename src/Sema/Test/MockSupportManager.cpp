@@ -1677,8 +1677,8 @@ void MockSupportManager::PrepareClassWithDefaults(ClassDecl& classDecl, Interfac
             accessorImplDecl->EnableAttr(Attribute::REDEF);
         } else {
             CJC_ASSERT(accessorImplDecl->TestAttr(Attribute::ABSTRACT));
-            accessorImplDecl->DisableAttr(Attribute::ABSTRACT);
         }
+        accessorImplDecl->DisableAttr(Attribute::ABSTRACT);
         accessorImplDecl->EnableAttr(Attribute::GENERATED_TO_MOCK);
 
         std::vector<OwnedPtr<FuncArg>> args;
@@ -1776,6 +1776,13 @@ std::tuple<Ptr<InterfaceDecl>, Ptr<FuncDecl>> MockSupportManager::FindDefaultAcc
     return {accessorInterfaceDecl, accessorDecl};
 }
 
+Ptr<AST::FuncDecl> MockSupportManager::FindDefaultAccessorImplementation(
+    Ptr<AST::Decl> baseDecl, Ptr<AST::FuncDecl> accessorDecl)
+{
+    auto extendDecl = typeManager.GetExtendDeclByMember(*accessorDecl, *baseDecl->ty);
+    return MockUtils::FindMemberDecl<FuncDecl>(*extendDecl, accessorDecl->identifier);
+}
+
 void MockSupportManager::ReplaceInterfaceDefaultFunc(
     AST::Expr& originalExpr, Ptr<Decl> outerClassLike, bool isInMockAnnotatedLambda)
 {
@@ -1838,11 +1845,13 @@ void MockSupportManager::ReplaceInterfaceDefaultFunc(
                 maExpr->desugarExpr = std::move(matchExpr);
             } else if (HasDefaultInterfaceAccessor(maExpr->baseExpr->ty, buddyInterfaceDecl->ty)) {
                 // C.foo |-> C.foo$Buddy
-                auto buddyMa = CreateMemberAccess(ASTCloner::Clone(Ptr(maExpr->baseExpr.get())), *buddyFuncDecl);
+                auto buddyFuncImplDecl =
+                    FindDefaultAccessorImplementation(maExpr->baseExpr->GetTarget(), buddyFuncDecl);
+                auto buddyMa = CreateMemberAccess(ASTCloner::Clone(Ptr(maExpr->baseExpr.get())), *buddyFuncImplDecl);
                 CopyBasicInfo(maExpr, buddyMa);
                 buddyMa->EnableAttr(Attribute::GENERATED_TO_MOCK);
                 buddyMa->ty = typeManager.GetInstantiatedTy(
-                    buddyFuncDecl->ty, GenerateTypeMapping(*buddyFuncDecl, maExpr->instTys));
+                    buddyFuncImplDecl->ty, GenerateTypeMapping(*buddyFuncImplDecl, maExpr->instTys));
                 buddyMa->instTys = maExpr->instTys;
                 maExpr->desugarExpr = std::move(buddyMa);
             }
@@ -1881,10 +1890,12 @@ void MockSupportManager::ReplaceInterfaceDefaultFunc(
         if (funcDecl->TestAttr(Attribute::STATIC)) {
             if (!outerClassLike || HasDefaultInterfaceAccessor(outerClassLike->ty, buddyInterfaceDecl->ty)) {
                 // foo |-> foo$Buddy
-                auto buddyFuncRef = CreateRefExpr(*buddyFuncDecl);
+                auto buddyFuncImplDecl =
+                    FindDefaultAccessorImplementation(outerClassLike, buddyFuncDecl);
+                auto buddyFuncRef = CreateRefExpr(*buddyFuncImplDecl);
                 CopyBasicInfo(refExpr, buddyFuncRef);
                 buddyFuncRef->ty = typeManager.GetInstantiatedTy(
-                    buddyFuncDecl->ty, GenerateTypeMapping(*buddyFuncDecl, refExpr->instTys));
+                    buddyFuncImplDecl->ty, GenerateTypeMapping(*buddyFuncImplDecl, refExpr->instTys));
                 buddyFuncRef->instTys = refExpr->instTys;
 
                 refExpr->desugarExpr = std::move(buddyFuncRef);
@@ -1976,16 +1987,18 @@ void MockSupportManager::ReplaceInterfaceDefaultFuncInCall(
                 callExpr->desugarExpr = std::move(matchExpr);
             } else if (HasDefaultInterfaceAccessor(maExpr->baseExpr->ty, buddyInterfaceDecl->ty)) {
                 // C.foo() |-> C.foo$Buddy()
-                auto buddyMa = CreateMemberAccess(ASTCloner::Clone(Ptr(maExpr->baseExpr.get())), *buddyFuncDecl);
+                auto buddyFuncImplDecl =
+                    FindDefaultAccessorImplementation(maExpr->baseExpr->GetTarget(), buddyFuncDecl);
+                auto buddyMa = CreateMemberAccess(ASTCloner::Clone(Ptr(maExpr->baseExpr.get())), *buddyFuncImplDecl);
                 CopyBasicInfo(maExpr, buddyMa);
                 buddyMa->EnableAttr(Attribute::GENERATED_TO_MOCK);
                 buddyMa->ty = typeManager.GetInstantiatedTy(
-                    buddyFuncDecl->ty, GenerateTypeMapping(*buddyFuncDecl, maExpr->instTys));
+                    buddyFuncImplDecl->ty, GenerateTypeMapping(*buddyFuncImplDecl, maExpr->instTys));
                 buddyMa->instTys = maExpr->instTys;
 
                 auto buddyCall = ASTCloner::Clone(Ptr(callExpr));
                 buddyCall->baseFunc = std::move(buddyMa);
-                buddyCall->resolvedFunction = buddyFuncDecl;
+                buddyCall->resolvedFunction = buddyFuncImplDecl;
 
                 callExpr->desugarExpr = std::move(buddyCall);
             }
@@ -2028,15 +2041,17 @@ void MockSupportManager::ReplaceInterfaceDefaultFuncInCall(
         if (callExpr->resolvedFunction->TestAttr(Attribute::STATIC)) {
             if (!outerClassLike || HasDefaultInterfaceAccessor(outerClassLike->ty, buddyInterfaceDecl->ty)) {
                 // foo() |-> foo$Buddy()
-                auto buddyFuncRef = CreateRefExpr(*buddyFuncDecl);
+                auto buddyFuncImplDecl =
+                    FindDefaultAccessorImplementation(outerClassLike, buddyFuncDecl);
+                auto buddyFuncRef = CreateRefExpr(*buddyFuncImplDecl);
                 CopyBasicInfo(refExpr, buddyFuncRef);
                 buddyFuncRef->ty = typeManager.GetInstantiatedTy(
-                    buddyFuncDecl->ty, GenerateTypeMapping(*buddyFuncDecl, refExpr->instTys));
+                    buddyFuncImplDecl->ty, GenerateTypeMapping(*buddyFuncImplDecl, refExpr->instTys));
                 buddyFuncRef->instTys = refExpr->instTys;
 
                 auto buddyCallExpr = ASTCloner::Clone(Ptr(callExpr));
                 buddyCallExpr->baseFunc = std::move(buddyFuncRef);
-                buddyCallExpr->resolvedFunction = buddyFuncDecl;
+                buddyCallExpr->resolvedFunction = buddyFuncImplDecl;
 
                 callExpr->desugarExpr = std::move(buddyCallExpr);
             }
