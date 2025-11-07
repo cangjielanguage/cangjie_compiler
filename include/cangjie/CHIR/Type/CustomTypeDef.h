@@ -214,9 +214,10 @@ public:
     * @param srcClassTy a class which function belongs to
     * @param info virtual function info
     */
-    void AddVtableItem(ClassType& srcClassTy, VirtualFuncInfo&& info);
-    const VTableType& GetVTable() const;
-    void SetVTable(const VTableType& table);
+    void AddVtableItem(ClassType& srcClassTy, VirtualMethodInfo&& info);
+    const VTableInDef& GetDefVTable() const;
+    VTableInDef& GetModifiableDefVTable();
+    void SetVTable(VTableInDef&& table);
 
     /**
     * @brief update virtual function in vtable
@@ -234,12 +235,10 @@ public:
     * @brief get virtual function's index in vtable
     *
     * @param funcCallType function name and type
-    * @param isStatic function is static or not
     * @param replaceTable an auxiliary map
     * @param builder CHIR builder
     */
-    std::vector<VTableSearchRes> GetFuncIndexInVTable(
-        const FuncCallType& funcCallType, bool isStatic,
+    std::vector<VTableSearchRes> GetFuncIndexInVTable(const FuncCallType& funcCallType,
         std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder) const;
 
     // ===--------------------------------------------------------------------===//
@@ -291,7 +290,7 @@ protected:
     std::vector<GlobalVarBase*> staticVars;       /**< static member variables */
     AttributeInfo attributeInfo;                  /**< attribute */
     AnnoInfo annoInfo;                            /**< struct/class/enum annoInfo */
-    VTableType vtable;
+    VTableInDef vtable;
     std::vector<ExtendDef*> extends;
     FuncBase* varInitializationFunc = nullptr; /**< Func for initializing instance variables with initializers */
 };

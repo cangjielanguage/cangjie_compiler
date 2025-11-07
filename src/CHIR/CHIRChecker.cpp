@@ -1025,31 +1025,31 @@ void CHIRChecker::CheckStaticMemberVar(const CustomTypeDef& def)
 
 void CHIRChecker::CheckVTable(const CustomTypeDef& def)
 {
-    for (const auto& it : def.GetVTable()) {
-        auto parentInstType = it.first;
+    for (const auto& it : def.GetDefVTable().GetTypeVTables()) {
+        auto parentInstType = it.GetSrcParentType();
         auto parentDef = parentInstType->GetClassDef();
         auto parentOriginalType = parentDef->GetType();
-        const auto& parentVTable = parentDef->GetVTable();
-        auto parentIt = parentVTable.find(parentOriginalType);
+        const auto& parentVTables = parentDef->GetDefVTable();
+        const auto& parentVTable = parentVTables.GetExpectedTypeVTable(*parentOriginalType);
         // 1. the same src parent type must be found in parent def's vtable
-        if (parentIt == parentVTable.end()) {
+        if (parentVTable.IsEmpty()) {
             Errorln("in vtable of " + def.GetIdentifier() + ", parent type " +
                 parentInstType->ToString() + " can't be found in vtable of parent class " +
                 parentDef->GetIdentifier() + ".");
             continue;
         }
         // 2. virtual method num must be equal
-        if (it.second.size() != parentIt->second.size()) {
+        if (it.GetMethodNum() != parentVTable.GetMethodNum()) {
             Errorln("in vtable of " + def.GetIdentifier() + ", parent type " +
-                parentInstType->ToString() + " has " + std::to_string(it.second.size()) +
+                parentInstType->ToString() + " has " + std::to_string(it.GetMethodNum()) +
                 " virtual method(s), but in vtable of parent class " + parentDef->GetIdentifier() +
-                ", this parent type has " + std::to_string(parentIt->second.size()) + " virtual method(s).");
+                ", this parent type has " + std::to_string(parentVTable.GetMethodNum()) + " virtual method(s).");
             continue;
         }
         // 3. only interface or abstract class can have unimplemented virtual method
         bool defIsInterfaceOrAbstract = def.IsInterface() || def.TestAttr(Attribute::ABSTRACT);
-        for (size_t i = 0; i < it.second.size(); ++i) {
-            if (it.second[i].instance == nullptr && !defIsInterfaceOrAbstract) {
+        for (size_t i = 0; i < it.GetMethodNum(); ++i) {
+            if (it.GetVirtualMethods()[i].GetVirtualMethod() == nullptr && !defIsInterfaceOrAbstract) {
                 Errorln("in vtable of " + def.GetIdentifier() + ", parent type " + parentInstType->ToString() +
                     ", the " + IndexToString(i) +
                     " virtual method is unimplemented, but only interface or abstract class can have this kind of "
@@ -1217,6 +1217,11 @@ void CHIRChecker::CheckFunc(const Func& func)
 
     // 7. check unreachable op and unreachable generic type
     CheckUnreachableOpAndGenericTyInFuncBody(*func.GetBody());
+
+    // 8. can't be abstract
+    if (func.TestAttr(Attribute::ABSTRACT)) {
+        Errorln("func " + func.GetIdentifier() + " shouldn't have attribute: ABSTRACT.");
+    }
 }
 
 void CHIRChecker::CheckFuncParams(
@@ -2297,38 +2302,38 @@ bool CHIRChecker::CheckVirtualMethod(
     const VirMethodFullContext& methodCtx, const Expression& expr, const Func& topLevelFunc)
 {
     // 1. check vtable must exist
-    auto vtable = CheckVTableExist(*methodCtx.thisType, *methodCtx.srcParentType, expr, topLevelFunc);
-    if (vtable.empty()) {
+    auto vtablePtr = CheckVTableExist(*methodCtx.thisType, *methodCtx.srcParentType, expr, topLevelFunc);
+    if (vtablePtr == nullptr) {
         return false;
     }
     // 2. offset can't be out of bounds
-    if (methodCtx.offset >= vtable.size()) {
+    if (methodCtx.offset >= (*vtablePtr).size()) {
         auto errMsg = "invoke a wrong virtual method in " + GetExpressionString(expr) +
             ", parent type " + methodCtx.srcParentType->ToString() + " in vtable of " +
-            methodCtx.thisType->ToString() + ", only has " + std::to_string(vtable.size()) +
+            methodCtx.thisType->ToString() + ", only has " + std::to_string((*vtablePtr).size()) +
             " virtual method(s), but the offset is " + std::to_string(methodCtx.offset) + ".";
         ErrorInFunc(topLevelFunc, errMsg);
         return false;
     }
-    const auto& funcInfo = vtable[methodCtx.offset];
+    const auto& funcInfo = (*vtablePtr)[methodCtx.offset];
     auto errMsgBase = "invoke a wrong virtual method in " + GetExpressionString(expr) +
         ", in vtable of [" + methodCtx.thisType->ToString() + "][" + methodCtx.srcParentType->ToString() + "], the " +
         std::to_string(methodCtx.offset) + "-th ";
     // 3. `InvokeStatic` must call a static member method
     // 4. `Invoke` must call a non-static member method
-    if (expr.IsInvokeStaticBase() && !funcInfo.attr.TestAttr(Attribute::STATIC)) {
+    if (expr.IsInvokeStaticBase() && !funcInfo.TestAttr(Attribute::STATIC)) {
         auto errMsg = errMsgBase + "virtual method is not static, `InvokeStatic` should call a static method.";
         ErrorInFunc(topLevelFunc, errMsg);
         return false;
-    } else if (!expr.IsInvokeStaticBase() && funcInfo.attr.TestAttr(Attribute::STATIC)) {
+    } else if (!expr.IsInvokeStaticBase() && funcInfo.TestAttr(Attribute::STATIC)) {
         auto errMsg = errMsgBase + "virtual method is static, `Invoke` shouldn't call a static method.";
         ErrorInFunc(topLevelFunc, errMsg);
         return false;
     }
     bool result = true;
     // 5. src code identifer must be same
-    if (funcInfo.srcCodeIdentifier != methodCtx.srcCodeIdentifier) {
-        auto errMsg = errMsgBase + "virtual method's name is " + funcInfo.srcCodeIdentifier +
+    if (funcInfo.GetMethodName() != methodCtx.srcCodeIdentifier) {
+        auto errMsg = errMsgBase + "virtual method's name is " + funcInfo.GetMethodName() +
             ", but the method name in expression is " + methodCtx.srcCodeIdentifier + ".";
         ErrorInFunc(topLevelFunc, errMsg);
         result = false;
@@ -2442,53 +2447,55 @@ bool CHIRChecker::InstTypeArgsSatisfyGenericConstraints(
     return true;
 }
 
-std::vector<VirtualFuncInfo> CHIRChecker::CheckVTableExist(const BuiltinType& thisType, const ClassType& srcParentType)
+const std::vector<VirtualMethodInfo>* CHIRChecker::CheckVTableExist(
+    const BuiltinType& thisType, const ClassType& srcParentType)
 {
     for (auto extendDef : thisType.GetExtends(&builder)) {
         auto [res, replaceTable] = extendDef->GetExtendedType()->CalculateGenericTyMapping(thisType);
         CJC_ASSERT(res);
-        for (auto& it : extendDef->GetVTable()) {
-            auto instType = ReplaceRawGenericArgType(*it.first, replaceTable, builder);
+        for (const auto& vtableIt : extendDef->GetDefVTable().GetTypeVTables()) {
+            auto instType = ReplaceRawGenericArgType(*vtableIt.GetSrcParentType(), replaceTable, builder);
             if (instType == &srcParentType) {
-                return it.second;
+                return &vtableIt.GetVirtualMethods();
             }
         }
     }
-    return std::vector<VirtualFuncInfo>{};
+    return nullptr;
 }
 
-std::vector<VirtualFuncInfo> CHIRChecker::CheckVTableExist(const CustomType& thisType, const ClassType& srcParentType)
+const std::vector<VirtualMethodInfo>* CHIRChecker::CheckVTableExist(
+    const CustomType& thisType, const ClassType& srcParentType)
 {
     auto replaceTable = GetInstMapFromCurDefToCurType(thisType);
-    for (auto& it : thisType.GetCustomTypeDef()->GetVTable()) {
-        auto instType = ReplaceRawGenericArgType(*it.first, replaceTable, builder);
+    for (const auto& vtableIt : thisType.GetCustomTypeDef()->GetDefVTable().GetTypeVTables()) {
+        auto instType = ReplaceRawGenericArgType(*vtableIt.GetSrcParentType(), replaceTable, builder);
         if (instType == &srcParentType) {
-            return it.second;
+            return &vtableIt.GetVirtualMethods();
         }
     }
     for (auto extendDef : thisType.GetCustomTypeDef()->GetExtends()) {
         // maybe we can meet `extend<T> A<B<T>> {}`, and `curType` is A<Int32>, then ignore this def,
         // so not need to check `res`
         auto [res, replaceTable2] = extendDef->GetExtendedType()->CalculateGenericTyMapping(thisType);
-        for (auto& it : extendDef->GetVTable()) {
-            auto instType = ReplaceRawGenericArgType(*it.first, replaceTable2, builder);
+        for (const auto& vtableIt : extendDef->GetDefVTable().GetTypeVTables()) {
+            auto instType = ReplaceRawGenericArgType(*vtableIt.GetSrcParentType(), replaceTable2, builder);
             if (instType == &srcParentType) {
-                return it.second;
+                return &vtableIt.GetVirtualMethods();
             }
         }
     }
-    return std::vector<VirtualFuncInfo>{};
+    return nullptr;
 }
 
-std::vector<VirtualFuncInfo> CHIRChecker::CheckVTableExist(const ClassType& srcParentType, const Func& topLevelFunc)
+const std::vector<VirtualMethodInfo>* CHIRChecker::CheckVTableExist(const ClassType& srcParentType, const Func& topLevelFunc)
 {
     auto parentType = topLevelFunc.GetParentCustomTypeOrExtendedType();
     CJC_NULLPTR_CHECK(parentType);
     if (auto builtinType = DynamicCast<BuiltinType*>(parentType)) {
         for (auto def : GetBuiltinTypeWithVTable(*builtinType, builder)->GetExtends()) {
-            for (auto& it : def->GetVTable()) {
-                if (it.first == &srcParentType) {
-                    return it.second;
+            for (const auto& vtableIt : def->GetDefVTable().GetTypeVTables()) {
+                if (vtableIt.GetSrcParentType() == &srcParentType) {
+                    return &vtableIt.GetVirtualMethods();
                 }
             }
         }
@@ -2497,9 +2504,9 @@ std::vector<VirtualFuncInfo> CHIRChecker::CheckVTableExist(const ClassType& srcP
         auto customDef = customType->GetCustomTypeDef();
         auto [res, replaceTable] = customDef->GetType()->CalculateGenericTyMapping(*customType);
         CJC_ASSERT(res);
-        for (auto& it : customDef->GetVTable()) {
-            if (ReplaceRawGenericArgType(*it.first, replaceTable, builder) == &srcParentType) {
-                return it.second;
+        for (const auto& vtableIt : customDef->GetDefVTable().GetTypeVTables()) {
+            if (ReplaceRawGenericArgType(*vtableIt.GetSrcParentType(), replaceTable, builder) == &srcParentType) {
+                return &vtableIt.GetVirtualMethods();
             }
         }
         for (auto extendDef : customDef->GetExtends()) {
@@ -2507,32 +2514,33 @@ std::vector<VirtualFuncInfo> CHIRChecker::CheckVTableExist(const ClassType& srcP
             if (!res2) {
                 continue;
             }
-            for (auto& it : extendDef->GetVTable()) {
-                if (ReplaceRawGenericArgType(*it.first, replaceTable2, builder) == &srcParentType) {
-                    return it.second;
+            for (const auto& vtableIt : extendDef->GetDefVTable().GetTypeVTables()) {
+                if (ReplaceRawGenericArgType(*vtableIt.GetSrcParentType(), replaceTable2, builder) == &srcParentType) {
+                    return &vtableIt.GetVirtualMethods();
                 }
             }
         }
     }
-    return std::vector<VirtualFuncInfo>{};
+    return nullptr;
 }
 
-std::vector<VirtualFuncInfo> CHIRChecker::CheckVTableExist(const GenericType& thisType, const ClassType& srcParentType)
+const std::vector<VirtualMethodInfo>* CHIRChecker::CheckVTableExist(
+    const GenericType& thisType, const ClassType& srcParentType)
 {
     for (auto upperBound : thisType.GetUpperBounds()) {
         auto res = CheckVTableExist(*StaticCast<ClassType*>(upperBound->StripAllRefs()), srcParentType);
-        if (!res.empty()) {
+        if (res != nullptr) {
             return res;
         }
     }
-    return std::vector<VirtualFuncInfo>{};
+    return nullptr;
 }
 
-std::vector<VirtualFuncInfo> CHIRChecker::CheckVTableExist(
+const std::vector<VirtualMethodInfo>* CHIRChecker::CheckVTableExist(
     const Type& thisType, const ClassType& srcParentType, const Expression& expr, const Func& topLevelFunc)
 {
     // 1. in thisType's vtable, we must find `srcParentType`
-    std::vector<VirtualFuncInfo> res;
+    const std::vector<VirtualMethodInfo>* res = nullptr;
     if (auto bType = DynamicCast<const BuiltinType*>(&thisType)) {
         res = CheckVTableExist(*bType, srcParentType);
     } else if (auto cType = DynamicCast<const CustomType*>(&thisType)) {
@@ -2544,7 +2552,7 @@ std::vector<VirtualFuncInfo> CHIRChecker::CheckVTableExist(
     } else {
         CJC_ABORT();
     }
-    if (res.empty()) {
+    if (res == nullptr) {
         std::string errMsg;
         if (thisType.IsBuiltinType() || thisType.IsCustomType()) {
             errMsg = "invoke a wrong virtual method in `" + GetExpressionString(expr) +

@@ -779,15 +779,11 @@ bool ToCHIR::RunIRChecker(const Phase& phase)
     if (!opts.commonPartCjo.has_value()) {
         rules.emplace(CHIRChecker::Rule::CHECK_FUNC_BODY);
     }
-#ifdef NDEBUG
     auto ok = checker.CheckPackage(rules);
     if (!ok) {
         DumpCHIRToFile("Broken_CHIR");
     }
     return ok;
-#else
-    return true;
-#endif
 }
 
 void ToCHIR::RecordCodeInfoAtTheBegin()
@@ -1222,14 +1218,14 @@ bool ToCHIR::Run()
         return false;
     }
     RecordCHIRExprNum("opt");
-    RemoveUnusedImports(false);
     DoClosureConversion();
     RecordCHIRExprNum("cc");
     CreateBoxTypeForRecursionValueType();
     if (!RunConstantEvaluation()) {
         return false;
     }
-    RemoveUnusedImports(true);
+    // must be after `RunConstantEvaluation`, because we need to calculate const var from imported package
+    RemoveUnusedImports();
 
     // annotation check depends on const eval
     if (!RunAnnotationChecks()) {

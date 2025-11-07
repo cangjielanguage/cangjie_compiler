@@ -8,6 +8,7 @@
 
 #include "cangjie/CHIR/Utils.h"
 #include "cangjie/CHIR/Visitor/Visitor.h"
+#include <functional>
 
 namespace Cangjie::CHIR {
 FuncType* TypeConverter::ConvertFuncParamsAndRetType(const FuncType& input)
@@ -224,23 +225,14 @@ void CustomDefTypeConverter::VisitDefDefaultImpl(CustomTypeDef& o)
     for (auto& var : o.instanceVars) {
         var.type = ConvertType(*var.type);
     }
-    VTableType newVtable;
-    for (auto& it : o.vtable) {
-        auto newKey = ConvertType(*it.first);
-        for (auto& funcInfo : it.second) {
-            funcInfo.typeInfo.sigType = ConvertFuncParamsAndRetType(*funcInfo.typeInfo.sigType);
-            funcInfo.typeInfo.originalType = ConvertFuncParamsAndRetType(*funcInfo.typeInfo.originalType);
-            funcInfo.typeInfo.returnType = ConvertType(*funcInfo.typeInfo.returnType);
-            if (funcInfo.typeInfo.parentType) {
-                funcInfo.typeInfo.parentType = ConvertType(*funcInfo.typeInfo.parentType);
-            }
-            if (funcInfo.instance) {
-                funcInfo.instance->ty = ConvertFuncParamsAndRetType(*funcInfo.instance->GetFuncType());
-            }
-        }
-        newVtable.emplace(StaticCast<ClassType*>(newKey), it.second);
-    }
-    o.vtable = newVtable;
+    
+    std::function<FuncType*(FuncType&)> func1 = [this](FuncType& ty) {
+        return ConvertFuncParamsAndRetType(ty);
+    };
+    std::function<Type*(Type&)> func2 = [this](Type& ty) {
+        return ConvertType(ty);
+    };
+    o.vtable.ConvertPrivateType(func1, func2);
 }
 
 void CustomDefTypeConverter::VisitSubDef(StructDef& o)

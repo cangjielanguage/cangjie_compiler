@@ -11,6 +11,7 @@
 #include "cangjie/CHIR/Type/ExtendDef.h"
 #include "cangjie/CHIR/Type/Type.h"
 #include "cangjie/CHIR/Utils.h"
+#include <utility>
 
 using namespace Cangjie;
 using namespace Cangjie::CHIR;
@@ -51,11 +52,6 @@ std::unordered_map<const GenericType*, Type*> GetInstMapFromDefAndExtends(const 
     return replaceTable;
 }
 
-void AddNewItemToVTable(ClassType& srcParent, VirtualFuncInfo& funcInfo, VTableType& vtable)
-{
-    vtable[&srcParent].emplace_back(funcInfo);
-}
-
 bool FuncMayBeInVtable(const FuncBase& func)
 {
     if (func.IsConstructor() || func.IsFinalizer()) {
@@ -74,26 +70,19 @@ bool FuncMayBeInVtable(const FuncBase& func)
         (func.TestAttr(Attribute::STATIC) && !func.TestAttr(Attribute::PRIVATE));
 }
 
-void UpdateInstanceAttr(VTableType& vtable)
+void UpdateInstanceAttr(VTableInDef& vtable)
 {
     // copy attr to instance
-    for (auto vtableIt : vtable) {
-        for (auto infoIt : vtableIt.second) {
-            if (infoIt.instance == nullptr) {
+    for (auto& vtableIt : vtable.GetModifiableTypeVTables()) {
+        for (auto& infoIt : vtableIt.GetModifiableVirtualMethods()) {
+            if (infoIt.GetVirtualMethod() == nullptr) {
                 continue;
             }
-            if (!infoIt.instance->TestAttr(Attribute::VIRTUAL)) {
-                infoIt.instance->EnableAttr(Attribute::FINAL);
+            if (!infoIt.GetVirtualMethod()->TestAttr(Attribute::VIRTUAL)) {
+                infoIt.GetVirtualMethod()->EnableAttr(Attribute::FINAL);
             }
         }
     }
-}
-
-void UpdateFuncInfo(VirtualFuncInfo& oldItem, const VirtualFuncInfo& newItem)
-{
-    auto originalFuncType = oldItem.typeInfo.originalType;
-    oldItem = newItem;
-    oldItem.typeInfo.originalType = originalFuncType;
 }
 
 bool TypeIsMatched(const Type& type1, const Type& type2)
@@ -188,7 +177,7 @@ void VTableGenerator::CollectCurDefMethodsMayBeInVtable(const CustomTypeDef& def
     }
 }
 
-VirtualFuncInfo VTableGenerator::CreateVirtualFuncInfo(const AbstractMethodInfo& method,
+VirtualMethodInfo VTableGenerator::CreateVirtualFuncInfo(const AbstractMethodInfo& method,
     Type& originalParentType, const std::unordered_map<const GenericType*, Type*>& replaceTable)
 {
     auto originalFuncType = StaticCast<FuncType*>(method.methodTy);
@@ -203,13 +192,12 @@ VirtualFuncInfo VTableGenerator::CreateVirtualFuncInfo(const AbstractMethodInfo&
     auto sigType = builder.GetType<FuncType>(instParamTypes, builder.GetUnitTy());
     auto instParentType = ReplaceRawGenericArgType(originalParentType, replaceTable, builder);
     auto instRetType = ReplaceRawGenericArgType(*originalFuncType->GetReturnType(), replaceTable, builder);
-    auto typeInfo = VirtualFuncTypeInfo{
-        sigType, originalFuncType, instParentType, instRetType, method.methodGenericTypeParams};
-
-    return VirtualFuncInfo{method.methodName, nullptr, method.attributeInfo, typeInfo};
+    auto condition = FuncSigInfo{method.methodName, sigType, method.methodGenericTypeParams};
+    return VirtualMethodInfo(
+        std::move(condition), nullptr, method.attributeInfo, *originalFuncType, *instParentType, *instRetType);
 }
 
-VirtualFuncInfo VTableGenerator::CreateVirtualFuncInfo(
+VirtualMethodInfo VTableGenerator::CreateVirtualFuncInfo(
     FuncBase& method, Type& originalParentType, const std::unordered_map<const GenericType*, Type*>& replaceTable)
 {
     auto originalFuncType = StaticCast<FuncType*>(method.GetType());
@@ -224,54 +212,25 @@ VirtualFuncInfo VTableGenerator::CreateVirtualFuncInfo(
     auto sigType = builder.GetType<FuncType>(instParamTypes, builder.GetUnitTy());
     auto instParentType = ReplaceRawGenericArgType(originalParentType, replaceTable, builder);
     auto instRetType = ReplaceRawGenericArgType(*originalFuncType->GetReturnType(), replaceTable, builder);
-    auto typeInfo = VirtualFuncTypeInfo{
-        sigType, originalFuncType, instParentType, instRetType, method.GetGenericTypeParams()};
-
-    return VirtualFuncInfo{method.GetSrcCodeIdentifier(), &method, method.GetAttributeInfo(), typeInfo};
+    auto condition = FuncSigInfo{method.GetSrcCodeIdentifier(), sigType, method.GetGenericTypeParams()};
+    return VirtualMethodInfo(
+        std::move(condition), &method, method.GetAttributeInfo(), *originalFuncType, *instParentType, *instRetType);
 }
 
-bool VTableGenerator::IsSigTypeMatched(const VirtualFuncInfo& curFuncInfo, const VirtualFuncInfo& funcInfoInVtable)
+bool VTableGenerator::IsSigTypeMatched(const VirtualMethodInfo& curFuncInfo, const VirtualMethodInfo& funcInfoInVtable)
 {
     // static method can not override non-static method
-    if (curFuncInfo.attr.TestAttr(Attribute::STATIC) != funcInfoInVtable.attr.TestAttr(Attribute::STATIC)) {
+    if (curFuncInfo.GetAttributeInfo().TestAttr(Attribute::STATIC) !=
+        funcInfoInVtable.GetAttributeInfo().TestAttr(Attribute::STATIC)) {
         return false;
     }
 
     // abstract method can not override implemented method
-    if (curFuncInfo.instance == nullptr && funcInfoInVtable.instance != nullptr) {
+    if (curFuncInfo.GetVirtualMethod() == nullptr && funcInfoInVtable.GetVirtualMethod() != nullptr) {
         return false;
     }
 
-    // func name not matched
-    if (curFuncInfo.srcCodeIdentifier != funcInfoInVtable.srcCodeIdentifier) {
-        return false;
-    }
-    auto paramTysInMethod = curFuncInfo.typeInfo.sigType->GetParamTypes();
-    auto paramTysInVtable = funcInfoInVtable.typeInfo.sigType->GetParamTypes();
-    // param size not matched
-    if (paramTysInVtable.size() != paramTysInMethod.size()) {
-        return false;
-    }
-    auto genericTyParamsInMethod = curFuncInfo.typeInfo.methodGenericTypeParams;
-    auto genericTyParamsInVtable = funcInfoInVtable.typeInfo.methodGenericTypeParams;
-    // generic type param size not matched
-    if (genericTyParamsInMethod.size() != genericTyParamsInVtable.size()) {
-        return false;
-    }
-    std::unordered_map<const GenericType*, Type*> replaceTable;
-    for (size_t i = 0; i < genericTyParamsInVtable.size(); ++i) {
-        replaceTable[genericTyParamsInMethod[i]] = genericTyParamsInVtable[i];
-    }
-    bool typeMatch = true;
-    // check param types
-    for (size_t i = 0; i < paramTysInMethod.size(); ++i) {
-        auto paramTyInMethod = ReplaceRawGenericArgType(*paramTysInMethod[i], replaceTable, builder);
-        if (!ParamTypeIsEquivalent(*paramTyInMethod, *paramTysInVtable[i])) {
-            typeMatch = false;
-            break;
-        }
-    }
-    return typeMatch;
+    return funcInfoInVtable.FuncSigIsMatched(curFuncInfo.GetCondition(), builder);
 }
 
 bool VTableGenerator::VirtualFuncShouldAddToVTableInItsOwnParent(ClassType& ownParent, ClassType& alreadyIn)
@@ -289,7 +248,7 @@ bool VTableGenerator::VirtualFuncShouldAddToVTableInItsOwnParent(ClassType& ownP
     return std::find(inheritanceList.begin(), inheritanceList.end(), &alreadyIn) == inheritanceList.end();
 }
 
-bool VTableGenerator::UpdateVtable(VirtualFuncInfo& curFuncInfo, VTableType& vtable)
+bool VTableGenerator::UpdateVtable(VirtualMethodInfo& curFuncInfo, VTableInDef& vtable)
 {
     // update rules:
     // 1. method in sub type udpate method in parent type
@@ -297,10 +256,10 @@ bool VTableGenerator::UpdateVtable(VirtualFuncInfo& curFuncInfo, VTableType& vta
     // 3. method in class update method in brother interface
     // 4. method in interface can NOT update method in brother class
     bool maybeAddNewItemToVtable = true;
-    for (auto& vtableIt : vtable) {
-        for (auto& funcInfo : vtableIt.second) {
+    for (auto& vtableIt : vtable.GetModifiableTypeVTables()) {
+        for (auto& funcInfo : vtableIt.GetModifiableVirtualMethods()) {
             if (IsSigTypeMatched(curFuncInfo, funcInfo)) {
-                UpdateFuncInfo(funcInfo, curFuncInfo);
+                funcInfo.UpdateMethodInfo(curFuncInfo);
                 // if a function declared in sub type updates its parent type's vtable, then don't need to
                 // add new item to vtable
                 // but if a function updates its brother type's vtable(rules 2 and 3), then maybe this function
@@ -317,7 +276,7 @@ bool VTableGenerator::UpdateVtable(VirtualFuncInfo& curFuncInfo, VTableType& vta
                         C1: { foo: ()->Unit, C1::foo } --> but still need to add it in C1's vtable
                     }
                 */
-                auto parentTy = DynamicCast<ClassType*>(curFuncInfo.typeInfo.parentType);
+                auto parentTy = DynamicCast<ClassType*>(curFuncInfo.GetInstParentType());
                 if (parentTy == nullptr) {
                     // if current function is declared in struct or enum, it must be sub type
                     maybeAddNewItemToVtable = false;
@@ -326,7 +285,7 @@ bool VTableGenerator::UpdateVtable(VirtualFuncInfo& curFuncInfo, VTableType& vta
                     // update one function from class's parent interface or class's brother interface,
                     // but it can't be guaranteed which function is visited first, so `&=` is needed
                     maybeAddNewItemToVtable &=
-                        VirtualFuncShouldAddToVTableInItsOwnParent(*parentTy, *vtableIt.first);
+                        VirtualFuncShouldAddToVTableInItsOwnParent(*parentTy, *vtableIt.GetSrcParentType());
                 }
                 break;
             }
@@ -336,7 +295,7 @@ bool VTableGenerator::UpdateVtable(VirtualFuncInfo& curFuncInfo, VTableType& vta
     return maybeAddNewItemToVtable;
 }
 
-void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableType& vtable)
+void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableInDef& vtable)
 {
     auto replaceTable = GetInstMapFromDefAndExtends(instParentTy);
     auto parentDef = instParentTy.GetClassDef();
@@ -353,7 +312,7 @@ void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableType& vtable)
         auto funcInfo = CreateVirtualFuncInfo(abstractMethod, *parentDef->GetType(), replaceTable);
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
         if (maybeAddNewItemToVtable) {
-            AddNewItemToVTable(instParentTy, funcInfo, vtable);
+            vtable.AddNewItemToTypeVTable(instParentTy, std::move(funcInfo));
         }
     }
 
@@ -365,26 +324,26 @@ void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableType& vtable)
         CJC_NULLPTR_CHECK(parentType);
         auto funcInfo = CreateVirtualFuncInfo(*func, *parentType, replaceTable);
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
-        if (maybeAddNewItemToVtable && IsVirtualFunction(*funcInfo.instance)) {
-            AddNewItemToVTable(instParentTy, funcInfo, vtable);
+        if (maybeAddNewItemToVtable && IsVirtualFunction(*funcInfo.GetVirtualMethod())) {
+            vtable.AddNewItemToTypeVTable(instParentTy, std::move(funcInfo));
         }
     }
 }
 
 void VTableGenerator::UpdateAbstractMethodWithImplementedMethod(
-    VTableType& vtable, const ClassType& curParentTy, VirtualFuncInfo& abstractFuncInfo)
+    VTableInDef& vtable, const ClassType& curParentTy, VirtualMethodInfo& abstractFuncInfo)
 {
     bool done = false;
-    for (auto& vtableIt : vtable) {
+    for (auto& vtableIt : vtable.GetModifiableTypeVTables()) {
         // must be from brother interface
         // Note: method declared in class also can override method in interface,
         // but this case has been handled in front step
-        if (vtableIt.first->GetClassDef()->IsClass() || vtableIt.first == &curParentTy) {
+        if (vtableIt.GetSrcParentType()->GetClassDef()->IsClass() || vtableIt.GetSrcParentType() == &curParentTy) {
             continue;
         }
-        for (auto& funcInfo : vtableIt.second) {
+        for (auto& funcInfo : vtableIt.GetModifiableVirtualMethods()) {
             // skip abstract method, need use implemented method to override abstract method
-            if (funcInfo.instance == nullptr) {
+            if (funcInfo.GetVirtualMethod() == nullptr) {
                 continue;
             }
             if (IsSigTypeMatched(funcInfo, abstractFuncInfo)) {
@@ -399,15 +358,15 @@ void VTableGenerator::UpdateAbstractMethodWithImplementedMethod(
     }
 }
 
-void VTableGenerator::UpdateAbstractMethodInVtable(VTableType& vtable)
+void VTableGenerator::UpdateAbstractMethodInVtable(VTableInDef& vtable)
 {
-    for (auto& vtableIt : vtable) {
-        for (auto& funcInfo : vtableIt.second) {
+    for (auto& vtableIt : vtable.GetModifiableTypeVTables()) {
+        for (auto& funcInfo : vtableIt.GetModifiableVirtualMethods()) {
             // skip non-abstract method, only update abstract method
-            if (funcInfo.instance != nullptr) {
+            if (funcInfo.GetVirtualMethod() != nullptr) {
                 continue;
             }
-            UpdateAbstractMethodWithImplementedMethod(vtable, *vtableIt.first, funcInfo);
+            UpdateAbstractMethodWithImplementedMethod(vtable, *vtableIt.GetSrcParentType(), funcInfo);
         }
     }
 }
@@ -483,9 +442,9 @@ std::vector<FuncBase*> VTableGenerator::CollectMethodsIncludeParentsMayBeInVtabl
     return methods;
 }
 
-std::vector<VirtualFuncInfo> VTableGenerator::CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef)
+std::vector<VirtualMethodInfo> VTableGenerator::CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef)
 {
-    std::vector<VirtualFuncInfo> allMethods;
+    std::vector<VirtualMethodInfo> allMethods;
     std::unordered_map<const GenericType*, Type*> emptyTable;
     if (auto extendDef = DynamicCast<const ExtendDef*>(&curDef)) {
         auto brotherDefs = CollectBrotherDefs(*extendDef, builder);
@@ -498,7 +457,7 @@ std::vector<VirtualFuncInfo> VTableGenerator::CollectAllPublicAndProtectedMethod
                 auto parentType = func->GetParentCustomTypeOrExtendedType();
                 CJC_NULLPTR_CHECK(parentType);
                 auto funcInfo = CreateVirtualFuncInfo(*func, *parentType, replaceTable);
-                allMethods.emplace_back(funcInfo);
+                allMethods.emplace_back(std::move(funcInfo));
             }
         }
     } else if (auto classDef = DynamicCast<ClassDef*>(&curDef)) {
@@ -510,7 +469,7 @@ std::vector<VirtualFuncInfo> VTableGenerator::CollectAllPublicAndProtectedMethod
             if (aMethod.attributeInfo.TestAttr(Attribute::PUBLIC) ||
                 aMethod.attributeInfo.TestAttr(Attribute::PROTECTED)) {
                 auto funcInfo = CreateVirtualFuncInfo(aMethod, *classDef->GetType(), emptyTable);
-                allMethods.emplace_back(funcInfo);
+                allMethods.emplace_back(std::move(funcInfo));
             }
         }
     }
@@ -535,7 +494,7 @@ void VTableGenerator::GenerateVTable(CustomTypeDef& customTypeDef)
     }
     auto inheritanceList = customTypeDef.GetSuperTypesRecusively(builder);
 
-    VTableType vtable;
+    VTableInDef vtable;
     // 1. merge all parent vtable, from grand-parent to parent
     for (auto parent : inheritanceList) {
         MergeVtable(*parent, vtable);
@@ -566,18 +525,19 @@ void VTableGenerator::GenerateVTable(CustomTypeDef& customTypeDef)
     //   c. methods in current def, current extended def and current extended parent def
     // not include methods declared in current parent def, they have been handled in step 1
     auto publicAndProtectedMethods = CollectAllPublicAndProtectedMethods(customTypeDef);
-    for (auto funcInfo : publicAndProtectedMethods) {
+    for (auto& funcInfo : publicAndProtectedMethods) {
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
         if (!maybeAddNewItemToVtable) {
             continue;
         }
-        if (funcInfo.instance == nullptr) {
-            AddNewItemToVTable(*StaticCast<ClassType*>(customTypeDef.GetType()), funcInfo, vtable);
-        } else if (customTypeDef.IsClassLike() && IsVirtualFunction(*funcInfo.instance)) {
-            auto srcParentType = StaticCast<ClassType*>(funcInfo.instance->GetParentCustomTypeOrExtendedType());
-            AddNewItemToVTable(*srcParentType, funcInfo, vtable);
+        if (funcInfo.GetVirtualMethod() == nullptr) {
+            vtable.AddNewItemToTypeVTable(*StaticCast<ClassType*>(customTypeDef.GetType()), std::move(funcInfo));
+        } else if (customTypeDef.IsClassLike() && IsVirtualFunction(*funcInfo.GetVirtualMethod())) {
+            auto srcParentType =
+                StaticCast<ClassType*>(funcInfo.GetVirtualMethod()->GetParentCustomTypeOrExtendedType());
+            vtable.AddNewItemToTypeVTable(*srcParentType, std::move(funcInfo));
         }
     }
     UpdateInstanceAttr(vtable);
-    customTypeDef.SetVTable(vtable);
+    customTypeDef.SetVTable(std::move(vtable));
 }

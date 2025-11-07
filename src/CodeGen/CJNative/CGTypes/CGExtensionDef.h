@@ -63,7 +63,7 @@ private:
      * The first element is FuncPtr if the second is `false` or TypeInfo if the second is `true`.
      */
     std::pair<llvm::Constant*, bool> GenerateInterfaceFn(const CHIR::ClassType& inheritedType);
-    llvm::Constant* GenerateFuncTableForType(const std::vector<CHIR::VirtualFuncInfo>& virtualFuncInfos);
+    llvm::Constant* GenerateFuncTableForType(const CHIR::VTableInType& vtableInType);
     llvm::Constant* GenerateWhereConditionFn();
     llvm::Value* CreateTypeComparison(
         IRBuilder2& irBuilder, llvm::Value* typeInfo, const CHIR::Type& staticType, const std::string& prefix);

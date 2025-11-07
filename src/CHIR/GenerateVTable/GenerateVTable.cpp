@@ -83,22 +83,20 @@ void GenerateVTable::SetSrcFuncType() const
 {
     Utils::ProfileRecorder recorder("GenerateVTable", "SetSrcFuncType");
     auto getSrcFuncType = [](const ClassDef& parentDef, size_t index) -> FuncType* {
-        const auto& vtable = parentDef.GetVTable();
-        auto parentType = parentDef.GetType();
-        auto it = vtable.find(parentType);
-        CJC_ASSERT(it != vtable.end());
-        CJC_ASSERT(index < it->second.size());
-        auto srcFuncType = it->second[index].typeInfo.originalType;
+        const auto& vtable = parentDef.GetDefVTable().GetExpectedTypeVTable(*parentDef.GetType());
+        CJC_ASSERT(!vtable.IsEmpty());
+        CJC_ASSERT(index < vtable.GetMethodNum());
+        auto srcFuncType = vtable.GetVirtualMethods()[index].GetOriginalFuncType();
         CJC_NULLPTR_CHECK(srcFuncType);
         return srcFuncType;
     };
     for (auto customTypeDef : candidateDefs) {
-        const auto& vtable = customTypeDef->GetVTable();
+        const auto& vtable = customTypeDef->GetDefVTable().GetTypeVTables();
         for (const auto& it : vtable) {
-            for (size_t i = 0; i < it.second.size(); ++i) {
-                auto& funcInfo = it.second[i];
-                if (funcInfo.instance != nullptr) {
-                    funcInfo.instance->Set<OverrideSrcFuncType>(getSrcFuncType(*it.first->GetClassDef(), i));
+            for (size_t i = 0; i < it.GetMethodNum(); ++i) {
+                auto& funcInfo = it.GetVirtualMethods()[i];
+                if (auto instance = funcInfo.GetVirtualMethod()) {
+                    instance->Set<OverrideSrcFuncType>(getSrcFuncType(*it.GetSrcParentType()->GetClassDef(), i));
                 }
             }
         }
@@ -125,13 +123,15 @@ FuncBase* GenerateVTable::GetMutFuncWrapper(const Type& thisType, const std::vec
     for (auto arg : args) {
         paramTypes.emplace_back(arg->GetType());
     }
+    if (!callee.TestAttr(Attribute::STATIC)) {
+        paramTypes.erase(paramTypes.begin());
+    }
     auto funcCallType = FuncCallType {
         .funcName = callee.GetSrcCodeIdentifier(),
         .funcType = builder.GetType<FuncType>(paramTypes, &retType),
         .genericTypeArgs = instTypeArgs
     };
-    auto vtableRes = GetFuncIndexInVTable(
-        *thisType.StripAllRefs(), funcCallType, callee.TestAttr(Attribute::STATIC), builder);
+    auto vtableRes = GetFuncIndexInVTable(*thisType.StripAllRefs(), funcCallType, builder);
     CJC_ASSERT(vtableRes.size() == 1);
     auto wrapperName = CHIRMangling::GenerateVirtualFuncMangleName(
         &callee, *vtableRes[0].originalDef, vtableRes[0].halfInstSrcParentType, false);

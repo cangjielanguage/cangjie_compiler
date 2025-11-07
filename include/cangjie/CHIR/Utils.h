@@ -725,7 +725,7 @@ Type* GetInstParentCustomTypeForApplyCallee(const Apply& expr, CHIRBuilder& buil
 Type* GetInstParentCustomTypeForAweCallee(const ApplyWithException& expr, CHIRBuilder& builder);
 
 std::vector<VTableSearchRes> GetFuncIndexInVTable(
-    Type& root, const FuncCallType& funcCallType, bool isStatic, CHIRBuilder& builder);
+    Type& root, const FuncCallType& funcCallType, CHIRBuilder& builder);
 
 bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType);
 
@@ -752,9 +752,11 @@ BuiltinType* GetBuiltinTypeWithVTable(BuiltinType& type, CHIRBuilder& builder);
  */
 Type* GetInstSubType(Type& genericSubType, const ClassType& instParentType, CHIRBuilder& builder);
 
+bool VirMethodTypeIsMatched(const FuncType& type1, const FuncType& type2);
+
 bool VirMethodParamTypeIsMatched(const Type& type1, const Type& type2);
 
-bool VirMethodRetureTypeIsMatched(const Type& type1, const Type& type2);
+bool VirMethodReturnTypeIsMatched(const Type& type1, const Type& type2);
 
 Type* RemoveBoxTypeShellIfNeed(Type& type);
 

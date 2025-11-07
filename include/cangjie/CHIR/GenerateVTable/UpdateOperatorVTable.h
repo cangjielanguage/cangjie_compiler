@@ -37,7 +37,8 @@ private:
     void CollectOverflowOperatorsOnInterface(ClassDef& def);
     void AddRewriteInfo(ClassDef& def, size_t index);
     void RewriteVtable();
-    void RewriteOneVtableEntry(ClassType& infType, CustomTypeDef& user, const VirtualFuncInfo& funcInfo, size_t index);
+    void RewriteOneVtableEntry(
+        ClassType& infType, CustomTypeDef& user, const VirtualMethodInfo& methodInfo, size_t index);
     Func* GenerateBuiltinOverflowOperatorFunc(
         const std::string& name, OverflowStrategy ovf, const ExtendDef& user, bool isBinary);
     void RewriteVtableEntryRec(const ClassDef& inf, CustomTypeDef& user, const RewriteVtableInfo& info);

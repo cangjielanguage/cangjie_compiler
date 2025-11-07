@@ -887,9 +887,12 @@ std::vector<VTableSearchRes> DynamicDispatch::GetVirtualMethodInfo(CHIRBuilder& 
     for (auto arg : GetArgs()) {
         instParamTypes.emplace_back(arg->GetType());
     }
+    if (!IsInvokeStaticBase()) {
+        instParamTypes.erase(instParamTypes.begin());
+    }
     auto instFuncType = builder.GetType<FuncType>(instParamTypes, builder.GetUnitTy());
     FuncCallType funcCallType{virMethodCtx.srcCodeIdentifier, instFuncType, instantiatedTypeArgs};
-    auto res = GetFuncIndexInVTable(*thisTypeDeref, funcCallType, IsInvokeStaticBase(), builder);
+    auto res = GetFuncIndexInVTable(*thisTypeDeref, funcCallType, builder);
     CJC_ASSERT(!res.empty());
     return res;
 }
@@ -909,8 +912,13 @@ ClassType* DynamicDispatch::GetInstSrcParentCustomTypeOfMethod(CHIRBuilder& buil
 {
     for (auto& r : GetVirtualMethodInfo(builder)) {
         if (r.offset == GetVirtualMethodOffset()) {
-            CJC_NULLPTR_CHECK(r.instSrcParentType);
-            return r.instSrcParentType;
+            auto def = r.instSrcParentType->GetClassDef();
+            const auto& parentFuncInfo = def->GetDefVTable().GetExpectedTypeVTable(*def->GetType());
+            auto originalType = parentFuncInfo.GetVirtualMethods()[r.offset].GetOriginalFuncType();
+            if (VirMethodTypeIsMatched(*originalType, *GetMethodType())) {
+                CJC_NULLPTR_CHECK(r.instSrcParentType);
+                return r.instSrcParentType;
+            }
         }
     }
     CJC_ABORT();

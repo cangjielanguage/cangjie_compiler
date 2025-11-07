@@ -77,7 +77,7 @@ private:
     template <typename FBT, typename T> std::vector<flatbuffers::Offset<FBT>> SerializeVec(const std::vector<T>& vec);
     template <typename FBT, typename T>
     std::vector<flatbuffers::Offset<FBT>> SerializeSetToVec(const std::unordered_set<T>& set) const;
-    std::vector<flatbuffers::Offset<PackageFormat::VTableElement>> SerializeVTable(const VTableType& obj);
+    std::vector<flatbuffers::Offset<PackageFormat::VTableInType>> SerializeVTable(const VTableInDef& obj);
     // Dispatchers
     template <typename T> flatbuffers::Offset<void> Dispatch(const T& obj);
 

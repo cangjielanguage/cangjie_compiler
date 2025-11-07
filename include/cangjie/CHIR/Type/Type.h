@@ -721,12 +721,11 @@ public:
      * @brief Retrieves the index of a function in the virtual table.
      *
      * @param funcCallType Function name and type.
-     * @param isStatic Indicates whether the function is static.
      * @param builder The CHIR builder used for building the function.
      * @return The virtual table search result.
      */
     std::vector<VTableSearchRes> GetFuncIndexInVTable(
-        const FuncCallType& funcCallType, bool isStatic, CHIR::CHIRBuilder& builder) const;
+        const FuncCallType& funcCallType, CHIR::CHIRBuilder& builder) const;
     
     /**
      * @brief Retrieves the declared and extended methods.

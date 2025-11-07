@@ -1258,46 +1258,34 @@ template <> flatbuffers::Offset<PackageFormat::Lambda> CHIRSerializer::CHIRSeria
 }
 
 // ======================= Custom Type Def Serializers =========================
-
 template <>
-flatbuffers::Offset<PackageFormat::VirtualFuncTypeInfo> CHIRSerializer::CHIRSerializerImpl::Serialize(
-    const VirtualFuncTypeInfo& obj)
+flatbuffers::Offset<PackageFormat::VirtualMethodInfo> CHIRSerializer::CHIRSerializerImpl::Serialize(
+    const VirtualMethodInfo& obj)
 {
-    auto sigType = GetId<Type>(obj.sigType);
-    auto originalType = GetId<Type>(obj.originalType);
-    auto parentType = GetId<Type>(obj.parentType);
-    auto returnType = GetId<Type>(obj.returnType);
-    auto methodGenericTypeParams = GetId<Type>(obj.methodGenericTypeParams);
-    return PackageFormat::CreateVirtualFuncTypeInfoDirect(builder, sigType, originalType, parentType, returnType,
-        methodGenericTypeParams.empty() ? nullptr : &methodGenericTypeParams);
+    // condition
+    std::string funcName = obj.GetMethodName();
+    auto sigType = GetId<Type>(obj.GetMethodSigType());
+    auto genericTypeParams = GetId<Type>(obj.GetGenericTypeParams());
+    // result
+    uint32_t funcPtr = GetId<Value>(obj.GetVirtualMethod());
+    auto attributes = obj.GetAttributeInfo().GetRawAttrs().to_ulong();
+    auto originalType = GetId<Type>(obj.GetOriginalFuncType());
+    auto parentType = GetId<Type>(obj.GetInstParentType());
+    auto returnType = GetId<Type>(obj.GetMethodInstRetType());
+
+    return PackageFormat::CreateVirtualMethodInfoDirect(builder, funcName.data(), sigType,
+        genericTypeParams.empty() ? nullptr : &genericTypeParams, funcPtr, attributes, originalType, parentType,
+        returnType);
 }
 
-template <>
-flatbuffers::Offset<PackageFormat::VirtualFuncInfo> CHIRSerializer::CHIRSerializerImpl::Serialize(
-    const VirtualFuncInfo& obj)
+std::vector<flatbuffers::Offset<PackageFormat::VTableInType>> CHIRSerializer::CHIRSerializerImpl::SerializeVTable(
+    const VTableInDef& obj)
 {
-    std::string srcId = obj.srcCodeIdentifier;
-    bool needSkipInstance = false;
-    if (obj.instance && obj.instance->IsFuncWithBody()) {
-        if (auto f = DynamicCast<Func*>(obj.instance); f && !f->GetBody()) {
-            // instance may be removed body when removeUnusedImported, do not serializer it
-            needSkipInstance = true;
-        }
-    }
-    uint32_t ins = needSkipInstance ? 0 : GetId<Value>(obj.instance);
-    auto attributes = obj.attr.GetRawAttrs().to_ulong();
-    auto typeInfo = Serialize<PackageFormat::VirtualFuncTypeInfo>(obj.typeInfo);
-    return PackageFormat::CreateVirtualFuncInfoDirect(builder, srcId.data(), ins, attributes, typeInfo);
-}
-
-std::vector<flatbuffers::Offset<PackageFormat::VTableElement>> CHIRSerializer::CHIRSerializerImpl::SerializeVTable(
-    const VTableType& obj)
-{
-    std::vector<flatbuffers::Offset<PackageFormat::VTableElement>> retval;
-    for (auto& elem : obj) {
-        auto ty = GetId<Type>(elem.first);
-        auto info = SerializeVec<PackageFormat::VirtualFuncInfo>(elem.second);
-        retval.push_back(PackageFormat::CreateVTableElementDirect(builder, ty, &info));
+    std::vector<flatbuffers::Offset<PackageFormat::VTableInType>> retval;
+    for (const auto& elem : obj.GetTypeVTables()) {
+        auto ty = GetId<Type>(elem.GetSrcParentType());
+        auto info = SerializeVec<PackageFormat::VirtualMethodInfo>(elem.GetVirtualMethods());
+        retval.push_back(PackageFormat::CreateVTableInTypeDirect(builder, ty, &info));
     }
     return retval;
 }
@@ -1322,7 +1310,7 @@ flatbuffers::Offset<PackageFormat::CustomTypeDef> CHIRSerializer::CHIRSerializer
     auto staticMemberVars = GetId<Value>(obj.GetStaticMemberVars());
     auto attributes = obj.GetAttributeInfo().GetRawAttrs().to_ulong();
     auto annoInfo = Serialize<PackageFormat::AnnoInfo>(obj.GetAnnoInfo());
-    auto vtable = SerializeVTable(static_cast<const VTableType&>(obj.GetVTable()));
+    auto vtable = SerializeVTable(obj.GetDefVTable());
     auto varInitializationFunc = GetId<Value>(obj.GetVarInitializationFunc());
     return PackageFormat::CreateCustomTypeDefDirect(builder, base, kind, customTypeDefID, srcCodeIdentifier.data(),
         identifier.data(), packageName.data(), type, genericDecl, methods.empty() ? nullptr : &methods,

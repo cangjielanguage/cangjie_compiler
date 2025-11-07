@@ -228,12 +228,12 @@ private:
     bool CheckInvokeThisType(
         Type& objType, const Type* thisType, const Expression& expr, const Func& topLevelFunc);
     bool CheckVirtualMethod(const VirMethodFullContext& methodCtx, const Expression& expr, const Func& topLevelFunc);
-    std::vector<VirtualFuncInfo> CheckVTableExist(
+    const std::vector<VirtualMethodInfo>* CheckVTableExist(
         const Type& thisType, const ClassType& srcParentType, const Expression& expr, const Func& topLevelFunc);
-    std::vector<VirtualFuncInfo> CheckVTableExist(const BuiltinType& thisType, const ClassType& srcParentType);
-    std::vector<VirtualFuncInfo> CheckVTableExist(const CustomType& thisType, const ClassType& srcParentType);
-    std::vector<VirtualFuncInfo> CheckVTableExist(const ClassType& srcParentType, const Func& topLevelFunc);
-    std::vector<VirtualFuncInfo> CheckVTableExist(const GenericType& thisType, const ClassType& srcParentType);
+    const std::vector<VirtualMethodInfo>* CheckVTableExist(const BuiltinType& thisType, const ClassType& srcParentType);
+    const std::vector<VirtualMethodInfo>* CheckVTableExist(const CustomType& thisType, const ClassType& srcParentType);
+    const std::vector<VirtualMethodInfo>* CheckVTableExist(const ClassType& srcParentType, const Func& topLevelFunc);
+    const std::vector<VirtualMethodInfo>* CheckVTableExist(const GenericType& thisType, const ClassType& srcParentType);
     bool CheckVirtualMethodFuncType(const FuncType& declaredType,
         const FuncType& callSiteType, const std::string& errMsgBase, const Func& topLevelFunc);
     void CheckInvokeFuncArgs(const std::vector<Value*>& args,

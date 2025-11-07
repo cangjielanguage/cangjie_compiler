@@ -508,42 +508,6 @@ bool CheckVar(const Cangjie::AST::VarDecl& decl, const Value& chirNode)
     }
     return true;
 }
-
-/// Search for vtable method duplication.
-//  O(n^2) is okay because of average table size
-inline FuncBase* CheckVtableCopy(const std::vector<VirtualFuncInfo>& tableMethods)
-{
-    auto size = tableMethods.size();
-
-    for (size_t i = 0; i < size; i++) {
-        auto instance1 = tableMethods[i].instance;
-
-        for (size_t j = i + 1; j < size; j++) {
-            auto instance2 = tableMethods[j].instance;
-
-            if (instance1 == instance2 && tableMethods[i].srcCodeIdentifier == tableMethods[j].srcCodeIdentifier) {
-                return instance1;
-            }
-        }
-    }
-
-    return nullptr;
-}
-
-bool CheckVtableHasNoDuplicates(const CustomTypeDef& customTypeDef)
-{
-    for (auto& [srcTy, tableMethods] : customTypeDef.GetVTable()) {
-        const auto duplicate = CheckVtableCopy(tableMethods);
-        if (duplicate) {
-            Errorln(customTypeDef.GetIdentifier() + " has method duplication in vtable: '"
-                + duplicate->GetSrcCodeIdentifier() + "'.");
-
-            return false;
-        }
-    }
-
-    return true;
-}
 } // namespace
 
 namespace Cangjie::CHIR {
@@ -565,10 +529,6 @@ bool AST2CHIRCheckCustomTypeDef(
         ret = false;
     }
 
-    // NOTE: measurements are accumulated
-    Utils::ProfileRecorder::Start("AST to CHIR Translation", "Checking VTable duplication");
-    CheckVtableHasNoDuplicates(chirNode);
-    Utils::ProfileRecorder::Stop("AST to CHIR Translation", "Checking VTable duplication");
     if (astNode.astKind == AST::ASTKind::CLASS_DECL || astNode.astKind == AST::ASTKind::INTERFACE_DECL) {
         return CheckClassLike(static_cast<const AST::ClassLikeDecl&>(decl), chirNode, globalCache) && ret;
     } else if (astNode.astKind == AST::ASTKind::ENUM_DECL) {

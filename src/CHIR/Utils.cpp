@@ -1408,8 +1408,7 @@ Type* GetInstParentCustomTypeForAweCallee(const ApplyWithException& expr, CHIRBu
     return GetInstParentCustomTyOfCallee(*expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder);
 }
 
-std::vector<VTableSearchRes> GetFuncIndexInVTable(
-    Type& root, const FuncCallType& funcCallType, bool isStatic, CHIRBuilder& builder)
+std::vector<VTableSearchRes> GetFuncIndexInVTable(Type& root, const FuncCallType& funcCallType, CHIRBuilder& builder)
 {
     std::vector<VTableSearchRes> result;
     if (auto genericTy = DynamicCast<GenericType*>(&root)) {
@@ -1417,19 +1416,19 @@ std::vector<VTableSearchRes> GetFuncIndexInVTable(
         CJC_ASSERT(!upperBounds.empty());
         for (auto upperBound : upperBounds) {
             ClassType* upperClassType = StaticCast<ClassType*>(StaticCast<RefType*>(upperBound)->GetBaseType());
-            result = GetFuncIndexInVTable(*upperClassType, funcCallType, isStatic, builder);
+            result = GetFuncIndexInVTable(*upperClassType, funcCallType, builder);
             if (!result.empty()) {
                 break;
             }
         }
     } else if (auto classTy = DynamicCast<CustomType*>(&root)) {
-        result = classTy->GetFuncIndexInVTable(funcCallType, isStatic, builder);
+        result = classTy->GetFuncIndexInVTable(funcCallType, builder);
     } else {
         std::unordered_map<const GenericType*, Type*> empty;
         auto extendDefs = root.GetExtends(&builder);
         CJC_ASSERT(!extendDefs.empty());
         for (auto ex : extendDefs) {
-            result = ex->GetFuncIndexInVTable(funcCallType, isStatic, empty, builder);
+            result = ex->GetFuncIndexInVTable(funcCallType, empty, builder);
             if (!result.empty()) {
                 break;
             }
@@ -1485,6 +1484,21 @@ bool TypeIsMatched(const Type& type1, const Type& type2)
     return true;
 }
 
+bool VirMethodTypeIsMatched(const FuncType& type1, const FuncType& type2)
+{
+    auto type1ParamTypes = type1.GetParamTypes();
+    auto type2ParamTypes = type2.GetParamTypes();
+    if (type1ParamTypes.size() != type2ParamTypes.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < type1ParamTypes.size(); ++i) {
+        if (!VirMethodParamTypeIsMatched(*type1ParamTypes[i], *type2ParamTypes[i])) {
+            return false;
+        }
+    }
+    return VirMethodReturnTypeIsMatched(*type1.GetReturnType(), *type2.GetReturnType());
+}
+
 bool VirMethodParamTypeIsMatched(const Type& type1, const Type& type2)
 {
     // FuncType will be converted to Class-AutoEnv&, so we can treat it as class&
@@ -1498,7 +1512,7 @@ bool VirMethodParamTypeIsMatched(const Type& type1, const Type& type2)
     }
 }
 
-bool VirMethodRetureTypeIsMatched(const Type& type1, const Type& type2)
+bool VirMethodReturnTypeIsMatched(const Type& type1, const Type& type2)
 {
     if (type1.IsGeneric() && type2.IsGeneric()) {
         return true;

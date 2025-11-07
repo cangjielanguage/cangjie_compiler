@@ -794,7 +794,7 @@ Type* CustomType::GetExactParentType(
 }
 
 std::vector<VTableSearchRes> CustomType::GetFuncIndexInVTable(
-    const FuncCallType& funcCallType, bool isStatic, CHIRBuilder& builder) const
+    const FuncCallType& funcCallType, CHIRBuilder& builder) const
 {
     std::unordered_map<const GenericType*, Type*> replaceTable;
     auto classInstArgs = this->GetTypeArgs();
@@ -806,7 +806,7 @@ std::vector<VTableSearchRes> CustomType::GetFuncIndexInVTable(
         replaceTable.emplace(classGenericArgs[i], classInstArgs[i]);
     }
 
-    auto result = GetCustomTypeDef()->GetFuncIndexInVTable(funcCallType, isStatic, replaceTable, builder);
+    auto result = GetCustomTypeDef()->GetFuncIndexInVTable(funcCallType, replaceTable, builder);
     if (!result.empty()) {
         return result;
     }
@@ -818,7 +818,7 @@ std::vector<VTableSearchRes> CustomType::GetFuncIndexInVTable(
         for (size_t i = 0; i < classInstArgs.size(); ++i) {
             CollectGenericReplaceTable(*extendedTyGenericArgs[i], *classInstArgs[i], replaceTable);
         }
-        result = ex->GetFuncIndexInVTable(funcCallType, isStatic, replaceTable, builder);
+        result = ex->GetFuncIndexInVTable(funcCallType, replaceTable, builder);
         if (!result.empty()) {
             return result;
         }
