@@ -68,6 +68,9 @@ private:
         }
     };
 
+    template <typename TConstDomain>
+    void VisitFunc(const Func& func, bool isDebug, bool isCJLint, Results<TConstDomain>& result);
+
     // ==================== Rewrite Non-terminator Expressions ==================== //
 
     /**
@@ -116,8 +119,8 @@ private:
      *
      * note: We don't rewrite `0 - a` to `-a` as CodeGen will rewrite `-a` to `0 - a`.
      */
-    template <typename T>
-    void TrySimplifyingBinaryExpr(const ConstDomain& state, const Ptr<BinaryExpression>& binary, bool isDebug);
+    template <typename T, typename tConstDomain>
+    void TrySimplifyingBinaryExpr(const tConstDomain& state, const Ptr<BinaryExpression>& binary, bool isDebug);
     
     /**
      * This function will replaced all use of the result of the expression @p expr with the value

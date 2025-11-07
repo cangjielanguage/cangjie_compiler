@@ -28,6 +28,9 @@ public:
 private:
     void PrintWarning(const Terminator& node, Block& block, std::set<Block*>& hasProcessed, bool isRecursive = false);
 
+    template <typename TConstDomain>
+    void VisitFunc(Results<TConstDomain>& result);
+
     DiagAdapter& diag;
     ConstAnalysisWrapper* analysisWrapper;
 

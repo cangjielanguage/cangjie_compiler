@@ -111,26 +111,14 @@ void UnreachableBranchCheck::PrintWarning(
     }
 }
 
-void UnreachableBranchCheck::RunOnFunc(const Ptr<Func> func)
+template <typename TConstDomain>
+void UnreachableBranchCheck::VisitFunc(Results<TConstDomain>& result) 
 {
-    // we should check the generic func, not the instantiated func.
-    if (func->TestAttr(Attribute::GENERIC_INSTANTIATED)) {
-        return;
-    }
-    bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
-    if (isCommonFunctionWithoutBody) {
-        return; // Nothing to visit
-    }
-    auto result = analysisWrapper->CheckFuncResult(*func);
-    if (result == nullptr) {
-        return;
-    }
-
-    const auto actionBeforeVisitExpr = [](const ConstDomain&, Expression*, size_t) {};
-    const auto actionAfterVisitExpr = [](const ConstDomain&, Expression*, size_t) {};
+    const auto actionBeforeVisitExpr = [](const TConstDomain&, Expression*, size_t) {};
+    const auto actionAfterVisitExpr = [](const TConstDomain&, Expression*, size_t) {};
 
     const auto actionOnTerminator = [this](
-                                        const ConstDomain&, Terminator* terminator, std::optional<Block*> targetSucc) {
+            const TConstDomain&, Terminator* terminator, std::optional<Block*> targetSucc) {
         switch (terminator->GetExprKind()) {
             case ExprKind::BRANCH: {
                 if (targetSucc.has_value()) {
@@ -164,6 +152,22 @@ void UnreachableBranchCheck::RunOnFunc(const Ptr<Func> func)
                 break;
         }
     };
+    result.VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
+}
 
-    result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
+void UnreachableBranchCheck::RunOnFunc(const Ptr<Func> func)
+{
+    // we should check the generic func, not the instantiated func.
+    if (func->TestAttr(Attribute::GENERIC_INSTANTIATED)) {
+        return;
+    }
+    bool isCommonFunctionWithoutBody = func->TestAttr(Attribute::SKIP_ANALYSIS);
+    if (isCommonFunctionWithoutBody) {
+        return; // Nothing to visit
+    }
+    if (auto result = analysisWrapper->CheckFuncResult(*func); result) {
+        VisitFunc<ConstDomain>(*result);
+    } else if (auto resultPool = analysisWrapper->CheckFuncActiveResult(*func); resultPool) {
+        VisitFunc<ConstPoolDomain>(*resultPool);
+    }
 }

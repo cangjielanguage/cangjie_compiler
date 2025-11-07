@@ -30,15 +30,31 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
     if (isCommonFunctionWithoutBody) {
         return; // Nothing to check
     }
-    auto result = analysisWrapper->CheckFuncResult(*func);
-    if (result == nullptr) {
-        return;
+    if (auto result = analysisWrapper->CheckFuncResult(*func); result) {
+        VisitFunc<ConstDomain>(*func, isDebug, isCJLint, *result);
+    } else if (auto resultPool = analysisWrapper->CheckFuncActiveResult(*func); resultPool) {
+        VisitFunc<ConstPoolDomain>(*func, isDebug, isCJLint, *resultPool);
     }
+}
 
+const OptEffectCHIRMap& ConstPropagation::GetEffectMap() const
+{
+    return effectMap;
+}
+
+const std::vector<const Func*>& ConstPropagation::GetFuncsNeedRemoveBlocks() const
+{
+    return funcsNeedRemoveBlocks;
+}
+
+template <typename TConstDomain>
+void ConstPropagation::VisitFunc(const Func& func, bool isDebug, bool isCJLint, Results<TConstDomain>& result)
+{
     std::vector<RewriteInfo> toBeRewrited;
-    const auto actionBeforeVisitExpr = [](const ConstDomain&, Expression*, size_t) {};
-    const auto actionAfterVisitExpr = [this, &toBeRewrited, func, isDebug, isCJLint](
-                                          const ConstDomain& state, Expression* expr, size_t index) {
+    std::unordered_map<Terminator*, std::pair<LiteralValue*, Block*>> targetSuccMap;
+    const auto actionBeforeVisitExpr = [](const TConstDomain&, Expression*, size_t) {};
+    const auto actionAfterVisitExpr = [this, &toBeRewrited, &func, isDebug, isCJLint](
+                                          const TConstDomain& state, Expression* expr, size_t index) -> void {
         auto exprType = expr->GetResult()->GetType();
         if (expr->IsBinaryExpr()) {
             if (auto absVal = state.CheckAbstractValue(expr->GetResult()); absVal) {
@@ -65,13 +81,11 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
             auto absVal = state.CheckAbstractValue(expr->GetResult());
             if (absVal) {
                 toBeRewrited.emplace_back(expr, index, GenerateConstExpr(exprType, absVal, isCJLint));
-                RecordEffectMap(expr, func);
+                RecordEffectMap(expr, &func);
             }
         }
     };
-
-    std::unordered_map<Terminator*, std::pair<LiteralValue*, Block*>> targetSuccMap;
-    const auto actionOnTerminator = [this, &targetSuccMap, isCJLint](const ConstDomain& state, Terminator* terminator,
+    const auto actionOnTerminator = [this, &targetSuccMap, isCJLint](const TConstDomain& state, Terminator* terminator,
                                         std::optional<Block*> targetSucc) {
         if (!targetSucc.has_value()) {
             return;
@@ -93,9 +107,7 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
                 break;
         }
     };
-
-    result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
-
+    result.VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
     for (auto& rewriteInfo : toBeRewrited) {
         RewriteToConstExpr(rewriteInfo, isDebug);
     }
@@ -103,19 +115,10 @@ void ConstPropagation::RunOnFunc(const Ptr<const Func>& func, bool isDebug, bool
         RewriteTerminator(terminator, v.first, v.second, isDebug);
     }
     if (!targetSuccMap.empty()) {
-        funcsNeedRemoveBlocks.push_back(func.get());
+        funcsNeedRemoveBlocks.push_back(&func);
     }
 }
 
-const OptEffectCHIRMap& ConstPropagation::GetEffectMap() const
-{
-    return effectMap;
-}
-
-const std::vector<const Func*>& ConstPropagation::GetFuncsNeedRemoveBlocks() const
-{
-    return funcsNeedRemoveBlocks;
-}
 Ptr<LiteralValue> ConstPropagation::GenerateConstExpr(
     const Ptr<Type>& type, const Ptr<const ConstValue>& constVal, bool isCJLint)
 {
@@ -170,9 +173,9 @@ static bool SkipCP(const Expression& expr, const GlobalOptions& opts)
     return false;
 }
 
-template <typename T>
+template <typename T, typename TConstDomain>
 void ConstPropagation::TrySimplifyingBinaryExpr(
-    const ConstDomain& state, const Ptr<BinaryExpression>& binary, bool isDebug)
+    const TConstDomain& state, const Ptr<BinaryExpression>& binary, bool isDebug)
 {
     if (SkipCP(*binary, opts)) {
         return;
