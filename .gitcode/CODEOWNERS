@@ -30,6 +30,7 @@ OAT.xml @xuanjz
 /include/cangjie/Option/ @Yessy @neilliuistaken
 /include/cangjie/Parse/ @kkkkkkkbbbbbbb @wyq1213
 /include/cangjie/Sema/ @huohuixin @wyq1213 
+/include/cangjie/Sema/NativeFFI @tinychong @JasmineZhu @jiadiliu
 /include/cangjie/Utils/ @Augus_Jan @wyq1213
 /src/AST/ @Augus_Jan @wyq1213
 /src/Basic/ @Cangjie-hljyaozhen @wyq1213
