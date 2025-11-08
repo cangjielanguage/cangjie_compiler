@@ -519,7 +519,7 @@ def package_mingw_dependencies(args):
     copy_files_to(os.path.join(mingw_path, "x86_64-w64-mingw32"), dll_dependencies, os.path.join(mingw_package_path, "dll"))
     lib_dependencies = ["crt2.o", "dllcrt2.o", "libadvapi32.a", "libkernel32.a", "libm.a", "libmingw32.a",
                             "libmingwex.a", "libmoldname.a", "libmsvcrt.a", "libpthread.a", "libshell32.a", "libuser32.a",
-                            "libws2_32.a", "libcrypt32.a", "crtbegin.o", "crtend.o"]
+                            "libws2_32.a", "libcrypt32.a", "crtbegin.o", "crtend.o", "CRT_glob.o"]
     copy_files_to(os.path.join(mingw_path, "x86_64-w64-mingw32/lib"), lib_dependencies, os.path.join(mingw_package_path, "lib"))
 
     subprocess.run(["tar", "-C", "mingw", "-zcf", "windows-x86_64-mingw.tar.gz", "dll", "lib"],

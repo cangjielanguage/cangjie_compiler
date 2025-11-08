@@ -161,6 +161,7 @@ void MinGW_CJNATIVE::GenerateLinkingTool(const std::vector<TempFileInfo>& objFil
         auto crtfastmathFilepath = GetGccLibFile("crtfastmath.o", gccLibPath);
         tool->AppendArgIf(FileUtil::FileExist(crtfastmathFilepath), crtfastmathFilepath);
     }
+    tool->AppendArgIf(driverOptions.outputMode == GlobalOptions::OutputMode::EXECUTABLE, mingwLibPath + "CRT_glob.o");
     HandleLLVMLinkOptions(objFiles, gccLibPath, *tool, cjldScript);
     // extra ld options given by -ld-options
     tool->AppendArg(GetGccLibFile(gccCrtFilePair.second, gccLibPath));
