@@ -5,7 +5,17 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.#include <cstdio>
 
 #include <fstream>
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <sstream>
 #include <string>
+#ifdef _WIN32
+#include <process.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "gtest/gtest.h"
 
@@ -23,6 +33,67 @@ using namespace Cangjie::Utils;
 using namespace Cangjie::FileUtil;
 using namespace Cangjie::FloatFormat;
 using namespace AST;
+
+namespace {
+std::string GetSystemTempDir()
+{
+#ifdef _WIN32
+    char buffer[MAX_PATH] = {0};
+    DWORD len = GetTempPathA(MAX_PATH, buffer);
+    if (len == 0 || len > MAX_PATH) {
+        return ".";
+    }
+    return std::string(buffer, len);
+#else
+    const char* tmp = std::getenv("TMPDIR");
+    if (tmp == nullptr || *tmp == '\0') {
+        return "/tmp";
+    }
+    return tmp;
+#endif
+}
+
+std::string MakeTempPath(const std::string& prefix)
+{
+    static std::atomic<uint64_t> counter {0};
+    uint64_t value = ++counter;
+    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+#ifdef _WIN32
+    int pid = _getpid();
+#else
+    int pid = getpid();
+#endif
+    std::ostringstream oss;
+    oss << prefix << "_" << static_cast<unsigned long long>(now) << "_" << pid << "_" << value;
+    return FileUtil::JoinPath(GetSystemTempDir(), oss.str());
+}
+
+bool CreateSymlinkCrossPlatform(const std::string& target, const std::string& linkPath, bool isDir)
+{
+#ifdef _WIN32
+#ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2
+#endif
+    DWORD flags = isDir ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0;
+    if (CreateSymbolicLinkA(linkPath.c_str(), target.c_str(), flags | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0) {
+        return true;
+    }
+    DWORD err = GetLastError();
+    if (err == ERROR_INVALID_PARAMETER) {
+        if (CreateSymbolicLinkA(linkPath.c_str(), target.c_str(), flags) != 0) {
+            return true;
+        }
+        err = GetLastError();
+    }
+    if (err == ERROR_PRIVILEGE_NOT_HELD) {
+        return false;
+    }
+    return false;
+#else
+    return symlink(target.c_str(), linkPath.c_str()) == 0;
+#endif
+}
+} // namespace
 
 #ifdef PROJECT_SOURCE_DIR
 // Gets the absolute path of the project from the compile parameter.
@@ -68,6 +139,84 @@ TEST(UtilsTest, FindProgramByName)
     name = "bash";
     res = FindProgramByName(name, {"test/test"});
     EXPECT_EQ(res, "");
+}
+
+TEST(UtilsTest, RemoveDirectoryNonExist)
+{
+    std::string path = MakeTempPath("cj_remove_dir_not_exist");
+    EXPECT_FALSE(RemoveDirectoryRecursively(path));
+}
+
+TEST(UtilsTest, RemoveDirectoryRemoveFile)
+{
+    std::string tempFile = MakeTempPath("cj_remove_dir_file") + ".txt";
+    std::ofstream ofs(tempFile);
+    ofs << "test";
+    ofs.close();
+
+    EXPECT_FALSE(RemoveDirectoryRecursively(tempFile));
+    (void)FileUtil::Remove(tempFile);
+}
+
+TEST(UtilsTest, RemoveDirectorySuccess)
+{
+    std::string base = MakeTempPath("cj_remove_dir_success");
+    std::string nested = FileUtil::JoinPath(base, "nested");
+    std::string nestedFile = FileUtil::JoinPath(nested, "file.txt");
+    std::string anotherFile = FileUtil::JoinPath(base, "root.txt");
+    EXPECT_EQ(0, CreateDirs(nested));
+    std::ofstream(nestedFile) << "nested";
+    std::ofstream(anotherFile) << "root";
+
+    EXPECT_TRUE(RemoveDirectoryRecursively(base));
+    EXPECT_FALSE(FileExist(base));
+
+    if (FileExist(base)) {
+        RemoveDirectoryRecursively(base);
+    }
+}
+
+TEST(UtilsTest, RemoveDirectoryWithSymlinkChild)
+{
+    std::string outside = MakeTempPath("cj_remove_symlink_outside") + ".txt";
+    std::string base = MakeTempPath("cj_remove_dir_symlink_child");
+    EXPECT_EQ(0, CreateDirs(base + DIR_SEPARATOR));
+    std::ofstream(outside) << "outside";
+    std::string linkPath = FileUtil::JoinPath(base, "link");
+    if (!CreateSymlinkCrossPlatform(outside, linkPath, false)) {
+        RemoveDirectoryRecursively(base);
+        (void)FileUtil::Remove(outside);
+        GTEST_SKIP() << "Skip symlink child test: cannot create symbolic link on this platform.";
+        return;
+    }
+
+    EXPECT_TRUE(RemoveDirectoryRecursively(base));
+    EXPECT_TRUE(FileExist(outside));
+
+    (void)FileUtil::Remove(outside);
+    if (FileExist(base)) {
+        RemoveDirectoryRecursively(base);
+    }
+}
+
+TEST(UtilsTest, RemoveDirectoryTargetIsSymlink)
+{
+    std::string base = MakeTempPath("cj_remove_dir_real");
+    std::string baseFile = FileUtil::JoinPath(base, "file.txt");
+    EXPECT_EQ(0, CreateDirs(base + DIR_SEPARATOR));
+    std::ofstream(baseFile) << "data";
+    std::string linkPath = MakeTempPath("cj_remove_dir_symlink_root");
+    if (!CreateSymlinkCrossPlatform(base, linkPath, true)) {
+        RemoveDirectoryRecursively(base);
+        GTEST_SKIP() << "Skip symlink directory test: cannot create symbolic link on this platform.";
+        return;
+    }
+
+    EXPECT_TRUE(RemoveDirectoryRecursively(linkPath));
+    EXPECT_TRUE(FileExist(base));
+
+    RemoveDirectoryRecursively(base);
+    (void)FileUtil::Remove(linkPath);
 }
 
 TEST(UtilsTest, GetFilePath)

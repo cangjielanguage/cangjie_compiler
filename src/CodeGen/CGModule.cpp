@@ -155,7 +155,7 @@ void CGModule::GenIncremental()
         if (llvm::verifyModule(*module, &llvmStdout)) {
             InternalError("Incremental part failed to be compiled");
         }
-        if (NeedDumpIRToFile(option)) {
+        if (option.NeedDumpIRToFile()) {
             const auto& dp = GenDumpPath(
                 option.output, cgCtx->GetCurrentPkgName(), "Incre", module->getSourceFileName(), "incre.ll");
             DumpIR(*module, dp);

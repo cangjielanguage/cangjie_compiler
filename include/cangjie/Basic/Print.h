@@ -85,44 +85,6 @@ template <typename... Args> inline void PrintIndent(unsigned indent, const Args.
     Println(args...);
 }
 
-template <typename... Args> inline void Print(std::ostream& stream, Args&&... args)
-{
-    ((stream << args << ' '), ...);
-}
-
-inline void Println(std::ostream& stream)
-{
-    stream << std::endl;
-}
-
-template <typename Arg> inline void Println(std::ostream& stream, Arg&& arg)
-{
-    stream << std::forward<Arg>(arg) << std::endl;
-}
-
-template <typename Arg, typename... Args> inline void Println(std::ostream& stream, Arg&& arg, Args&&... args)
-{
-    stream << std::forward<Arg>(arg);
-    ((stream << ' ' << std::forward<Args>(args)), ...);
-    stream << std::endl;
-}
-
-template <typename... Args> inline void PrintNoSplit(std::ostream& stream, Args&&... args)
-{
-    (stream << ... << args);
-}
-
-inline void PrintIndentOnly(std::ostream& stream, unsigned indent, unsigned numSpaces = 2)
-{
-    stream << std::string(indent * numSpaces, ' ');
-}
-
-template <typename... Args> inline void PrintIndent(std::ostream& stream, unsigned indent, const Args... args)
-{
-    PrintIndentOnly(stream, indent);
-    Println(stream, args...);
-}
-
 template <typename Opt, typename Desc>
 inline void PrintCommandDesc(const Opt& option, const Desc& desc, int optionWidth)
 {

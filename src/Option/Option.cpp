@@ -1263,6 +1263,51 @@ void GlobalOptions::UpdateCachedDirName(const std::string& fullPackageName)
     std::tie(compilationCachedDir, compilationCachedFileName) = GenerateNamesOfCachedDirAndFile(fullPackageName);
 }
 
+bool GlobalOptions::NeedDumpAST() const
+{
+    return dumpAll || dumpAST;
+}
+
+bool GlobalOptions::NeedDumpASTToFile() const
+{
+    return NeedDumpAST() && !dumpToScreen;
+}
+
+bool GlobalOptions::NeedDumpASTToScreen() const
+{
+    return NeedDumpAST() && dumpToScreen;
+}
+
+bool GlobalOptions::NeedDumpCHIR() const
+{
+    return dumpAll || dumpCHIR;
+}
+
+bool GlobalOptions::NeedDumpCHIRToFile() const
+{
+    return NeedDumpCHIR() && !dumpToScreen;
+}
+
+bool GlobalOptions::NeedDumpCHIRToScreen() const
+{
+    return NeedDumpCHIR() && dumpToScreen;
+}
+
+bool GlobalOptions::NeedDumpIR() const
+{
+    return dumpAll || dumpIR;
+}
+
+bool GlobalOptions::NeedDumpIRToFile() const
+{
+    return (NeedDumpIR() && !dumpToScreen) || codegenDebugMode;
+}
+
+bool GlobalOptions::NeedDumpIRToScreen() const
+{
+    return NeedDumpIR() && dumpToScreen;
+}
+
 std::string GlobalOptions::PassedWhenKeyValueToSerializedString() const
 {
     std::string result;

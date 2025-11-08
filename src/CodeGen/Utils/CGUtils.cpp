@@ -8,6 +8,7 @@
 
 #include <queue>
 #include <sstream>
+#include <cctype>
 
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/InstrTypes.h"
@@ -487,48 +488,22 @@ CGType* FixedCGTypeOfFuncArg(CGModule& cgMod, const CHIR::Value& chirFuncArg, ll
     return cgType;
 }
 
-bool NeedDumpIR(const GlobalOptions& options)
-{
-    return options.dumpAll || options.dumpIR;
-}
-
-bool NeedDumpIRToFile(const GlobalOptions& options)
-{
-    return (NeedDumpIR(options) && !options.dumpToScreen) || options.codegenDebugMode;
-}
-
-bool NeedDumpIRToScreen(const GlobalOptions& options)
-{
-    return NeedDumpIR(options) && options.dumpToScreen;
-}
-
 void ClearOldIRDumpFiles(const std::string& output, const std::string& pkgName)
 {
+    // Clear all previously dumped IR phase directories for the given package.
+    // New IR dumping now uses numbered directories with human-readable phase suffixes
+    // (e.g. 0_TranslateCHIRNode, 1_GenExtensionDefs, ... Final, Incre). Instead of a
+    // fixed maxSubDirNum heuristic we remove any matching directories under <pkg>_IR.
     std::string dumpDir;
     if (FileUtil::IsDir(output)) {
         dumpDir = FileUtil::JoinPath(output, pkgName + "_IR");
     } else {
         dumpDir = FileUtil::GetFileBase(output) + "_IR";
     }
-    std::string subName = "Incre";
-    std::string subDir = FileUtil::JoinPath(dumpDir, subName);
-    if (FileUtil::FileExist(subDir)) {
-        for (auto file : FileUtil::GetAllFilesUnderCurrentPath(subDir, "ll")) {
-            std::string fullPath = FileUtil::JoinPath(subDir, file);
-            (void)FileUtil::Remove(fullPath);
-        }
+    if (!FileUtil::FileExist(dumpDir)) {
+        return;
     }
-    size_t maxSubDirNum = 3; // assume it is same as in GenSubCHIRPackage
-    for (size_t i = 0; i <= maxSubDirNum; ++i) {
-        subName = std::to_string(i) + "_subModules";
-        subDir = FileUtil::JoinPath(dumpDir, subName);
-        if (FileUtil::FileExist(subDir)) {
-            for (auto file : FileUtil::GetAllFilesUnderCurrentPath(subDir, "ll")) {
-                std::string fullPath = FileUtil::JoinPath(subDir, file);
-                (void)FileUtil::Remove(fullPath);
-            }
-        }
-    }
+    FileUtil::RemoveDirectoryRecursively(dumpDir);
 }
 
 std::string GenDumpPath(const std::string& output, const std::string& pkgName, const std::string& subName,

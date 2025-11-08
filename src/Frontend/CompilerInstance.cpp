@@ -156,10 +156,7 @@ void DumpAST(const std::vector<Ptr<Package>>& srcPkgs, const std::string& output
     static size_t fileNum = 0;
     if (!checkDumpDir) {
         if (FileUtil::FileExist(dumpDir)) {
-            for (auto file : FileUtil::GetAllFilesUnderCurrentPath(dumpDir, ".txt")) {
-                std::string fullPath = FileUtil::JoinPath(dumpDir, file);
-                (void)FileUtil::Remove(fullPath);
-            }
+            FileUtil::RemoveDirectoryRecursively(dumpDir);
         }
         checkDumpDir = true;
     }
@@ -167,7 +164,7 @@ void DumpAST(const std::vector<Ptr<Package>>& srcPkgs, const std::string& output
     if (!FileUtil::FileExist(dumpPath)) {
         FileUtil::CreateDirs(dumpPath);
     }
-    std::ofstream ofs(dumpPath);
+    std::ofstream ofs(FileUtil::NormalizePath(dumpPath));
     if (!ofs) {
         Errorln("Cannot open file to dump AST: " + dumpPath);
         return;
@@ -177,31 +174,6 @@ void DumpAST(const std::vector<Ptr<Package>>& srcPkgs, const std::string& output
     }
     ofs.close();
     fileNum++;
-}
-
-bool NeedDumpAST(const GlobalOptions& opts)
-{
-    return opts.dumpAll || opts.dumpAST;
-}
-
-bool NeedDumpASTToFile(const GlobalOptions& opts)
-{
-    return NeedDumpAST(opts) && !opts.dumpToScreen;
-}
-
-bool NeedDumpASTToScreen(const GlobalOptions& opts)
-{
-    return NeedDumpAST(opts) && opts.dumpToScreen;
-}
-
-bool NeedDumpCHIR(const GlobalOptions& opts)
-{
-    return opts.dumpAll || opts.dumpCHIR;
-}
-
-bool NeedDumpCHIRToScreen(const GlobalOptions& opts)
-{
-    return NeedDumpCHIR(opts) && opts.dumpToScreen;
 }
 } // namespace
 
@@ -222,7 +194,7 @@ bool CompilerInstance::Compile(CompileStage stage)
         }
     }
     // Dump AST to screen if needed before mangling stage.
-    if (NeedDumpASTToScreen(invocation.globalOptions) && i < static_cast<int>(CompileStage::MANGLING)) {
+    if (invocation.globalOptions.NeedDumpASTToScreen() && i < static_cast<int>(CompileStage::MANGLING)) {
         DumpASTToScreen(GetSourcePackages());
     }
     diag.ReportErrorAndWarningCount();
@@ -346,7 +318,7 @@ bool CompilerInstance::PerformParse()
             IncrementalCompilationLogger::GetInstance().InitLogFile(incrLogPath);
             IncrementalCompilationLogger::GetInstance().WriteBuffToFile();
         }
-        if (NeedDumpASTToFile(globalOpts)) {
+        if (globalOpts.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), globalOpts.output, "parse");
         }
     }
@@ -356,7 +328,7 @@ bool CompilerInstance::PerformParse()
 bool CompilerInstance::PerformConditionCompile()
 {
     auto ret = compileStrategy->ConditionCompile();
-    if (!srcPkgs.empty() && NeedDumpASTToFile(invocation.globalOptions)) {
+    if (!srcPkgs.empty() && invocation.globalOptions.NeedDumpASTToFile()) {
         DumpAST(GetSourcePackages(), invocation.globalOptions.output, "condcomp");
     }
     return ret;
@@ -381,7 +353,7 @@ bool CompilerInstance::PerformMacroExpand()
         }
         Println("}");
     }
-    if (!srcPkgs.empty() && NeedDumpASTToFile(invocation.globalOptions)) {
+    if (!srcPkgs.empty() && invocation.globalOptions.NeedDumpASTToFile()) {
         DumpAST(GetSourcePackages(), invocation.globalOptions.output, "macroexp");
     }
     return ret;
@@ -562,7 +534,7 @@ bool CompilerInstance::PerformIncrementalScopeAnalysis()
 bool CompilerInstance::PerformImportPackage()
 {
     auto ret = compileStrategy->ImportPackages();
-    if (!srcPkgs.empty() && NeedDumpASTToFile(invocation.globalOptions)) {
+    if (!srcPkgs.empty() && invocation.globalOptions.NeedDumpASTToFile()) {
         DumpAST(GetSourcePackages(), invocation.globalOptions.output, "import");
     }
     return ret;
@@ -571,7 +543,7 @@ bool CompilerInstance::PerformImportPackage()
 bool CompilerInstance::PerformSema()
 {
     auto ret = compileStrategy->Sema();
-    if (!srcPkgs.empty() && NeedDumpASTToFile(invocation.globalOptions)) {
+    if (!srcPkgs.empty() && invocation.globalOptions.NeedDumpASTToFile()) {
         DumpAST(GetSourcePackages(), invocation.globalOptions.output, "sema");
     }
     return ret;
@@ -583,7 +555,7 @@ bool CompilerInstance::PerformOverflowStrategy()
         return true;
     }
     compileStrategy->OverflowStrategy();
-    if (!srcPkgs.empty() && NeedDumpASTToFile(invocation.globalOptions)) {
+    if (!srcPkgs.empty() && invocation.globalOptions.NeedDumpASTToFile()) {
         DumpAST(GetSourcePackages(), invocation.globalOptions.output, "overflow");
     }
     return true;
@@ -593,7 +565,7 @@ bool CompilerInstance::PerformDesugarAfterSema()
 {
     testManager->MarkDeclsForTestIfNeeded(GetSourcePackages());
     compileStrategy->DesugarAfterSema();
-    if (!srcPkgs.empty() && NeedDumpASTToFile(invocation.globalOptions)) {
+    if (!srcPkgs.empty() && invocation.globalOptions.NeedDumpASTToFile()) {
         DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar");
     }
     return true;
@@ -634,7 +606,7 @@ bool CompilerInstance::PerformGenericInstantiation()
         CJC_ASSERT(astCtx);
         typeChecker->PerformDesugarAfterInstantiation(*astCtx, *srcPkg);
     }
-    if (!srcPkgs.empty() && NeedDumpASTToFile(invocation.globalOptions)) {
+    if (!srcPkgs.empty() && invocation.globalOptions.NeedDumpASTToFile()) {
         DumpAST(GetSourcePackages(), invocation.globalOptions.output, "genericinst");
     }
     return true;
@@ -855,8 +827,8 @@ bool CompilerInstance::PerformMangling()
         }
     }
 #endif
-    // when dump to screen, only dump once and only dump the ast of mangle stage
-    if (!srcPkgs.empty() && NeedDumpAST(invocation.globalOptions)) {
+    // when dump to screen, only dump once and dump the ast immediately after mangling
+    if (!srcPkgs.empty() && invocation.globalOptions.NeedDumpAST()) {
         DumpAST(GetSourcePackages(), invocation.globalOptions.output, "mangle", invocation.globalOptions.dumpToScreen);
     }
     return true;
@@ -877,7 +849,7 @@ bool CompilerInstance::GenerateCHIRForPkg(AST::Package& pkg)
     CHIR::ToCHIR convertor(*this, pkg, constAnalysisWrapper, builder1);
     bool success = convertor.Run();
     auto chirPkg = convertor.GetPackage();
-    if (chirPkg && NeedDumpCHIRToScreen(invocation.globalOptions)) {
+    if (chirPkg && invocation.globalOptions.NeedDumpCHIRToScreen()) {
         CHIR::CHIRPrinter::PrintPackage(*chirPkg, std::cout);
     }
     if (!success) {

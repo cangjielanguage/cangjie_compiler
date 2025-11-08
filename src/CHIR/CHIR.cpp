@@ -203,7 +203,7 @@ static void UpdateEffectMapToString(OptEffectCHIRMap& oldMap, OptEffectStrMap& n
 
 void ToCHIR::DumpCHIRToFile(const std::string& suffix)
 {
-    if (opts.dumpToScreen || (!opts.dumpCHIR && !opts.dumpAll)) {
+    if (!opts.NeedDumpCHIRToFile()) {
         return;
     }
     CJC_NULLPTR_CHECK(chirPkg);
@@ -225,15 +225,12 @@ void ToCHIR::DumpCHIRToFile(const std::string& suffix)
     } else {
         debugDir = FileUtil::GetFileBase(outputPath) + "_CHIR";
     }
-    static bool checkDebugDir = false;
-    if (!checkDebugDir) {
+    static bool clearDumpDir = false;
+    if (!clearDumpDir) {
         if (FileUtil::FileExist(debugDir)) {
-            for (auto file : FileUtil::GetAllFilesUnderCurrentPath(debugDir, extension)) {
-                std::string fullPath = FileUtil::JoinPath(debugDir, file);
-                (void)FileUtil::Remove(fullPath);
-            }
+            FileUtil::RemoveDirectoryRecursively(debugDir);
         }
-        checkDebugDir = true;
+        clearDumpDir = true;
     }
     std::string fullPath = FileUtil::JoinPath(debugDir, fileName);
     if (!FileUtil::FileExist(fullPath)) {
@@ -1200,7 +1197,7 @@ bool ToCHIR::Run()
     }
 #endif
     if (opts.emitCHIRPhase == GlobalOptions::CandidateEmitCHIRPhase::RAW) {
-        EmitCHIR(outputPath, *chirPkg, Phase::RAW, (opts.dumpCHIR || opts.dumpAll));
+        EmitCHIR(outputPath, *chirPkg, Phase::RAW, opts.NeedDumpCHIR());
         return true;
     }
     RecordCHIRExprNum("trans");
@@ -1244,7 +1241,7 @@ bool ToCHIR::Run()
         return false;
     }
     if (opts.emitCHIRPhase == GlobalOptions::CandidateEmitCHIRPhase::OPT) {
-        EmitCHIR(outputPath, *chirPkg, Phase::OPT, (opts.dumpCHIR || opts.dumpAll));
+        EmitCHIR(outputPath, *chirPkg, Phase::OPT, opts.NeedDumpCHIR());
     } else if (opts.saveTemps) {
         auto tempFileInfo =
             TempFileManager::Instance().CreateNewFileInfo({.fileName = chirPkg->GetName()}, TempFileKind::O_CHIR);

@@ -17,16 +17,52 @@
 
 #include "cangjie/AST/ASTCasting.h"
 #include "cangjie/AST/Utils.h"
+#include "cangjie/Basic/Utils.h"
 #include "cangjie/Basic/Match.h"
-#include "cangjie/Basic/Print.h"
 #include "cangjie/Basic/StringConvertor.h"
 #include "cangjie/Utils/Utils.h"
 
 namespace Cangjie {
 using namespace AST;
-
 using namespace Utils;
 using namespace Meta;
+
+// Local-only ostream printing helpers.
+// Marked static to limit linkage to this translation unit and avoid accidental reuse elsewhere.
+namespace {
+template <typename... Args> static inline void Print(std::ostream& stream, Args&&... args)
+{
+    ((stream << args << ' '), ...);
+}
+
+template <typename Arg> static inline void Println(std::ostream& stream, Arg&& arg)
+{
+    stream << std::forward<Arg>(arg) << std::endl;
+}
+
+template <typename Arg, typename... Args> static inline void Println(std::ostream& stream, Arg&& arg, Args&&... args)
+{
+    stream << std::forward<Arg>(arg);
+    ((stream << ' ' << std::forward<Args>(args)), ...);
+    stream << std::endl;
+}
+
+template <typename... Args> static inline void PrintNoSplit(std::ostream& stream, Args&&... args)
+{
+    (stream << ... << args);
+}
+
+static inline void PrintIndentOnly(std::ostream& stream, unsigned indent, unsigned numSpaces = 2)
+{
+    stream << std::string(indent * numSpaces, ' ');
+}
+
+template <typename... Args> static inline void PrintIndent(std::ostream& stream, unsigned indent, const Args... args)
+{
+    PrintIndentOnly(stream, indent);
+    Println(stream, args...);
+}
+} // namespace
 
 namespace {
 const unsigned ONE_INDENT = 1u;

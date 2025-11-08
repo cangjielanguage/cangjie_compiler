@@ -478,7 +478,7 @@ void CHIRSplitter::SaveSubCHIRPackagesInfo()
     CJC_ASSERT(tempPath.has_value() && "Incorrect file name encoding.");
     path = tempPath.value();
 #endif
-    if (NeedDumpIRToFile(cgPkgCtx.GetGlobalOptions())) {
+    if (cgPkgCtx.GetGlobalOptions().NeedDumpIRToFile()) {
         DumpIR(module, path);
     } else {
         CodeGen::SaveToBitcodeFile(module, path);
