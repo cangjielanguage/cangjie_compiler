@@ -130,6 +130,8 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
                 return Cj2ObjCForObjC(*from.typeArgs[0]) + "*";
             } else if (Ty::IsCStructType(from)) {
                 return STRUCT_TYPE_PREFIX + from.name;
+            } else if (IsObjCCJMapping(from)) {
+                return from.name + "*";
             }
             if (IsObjCFunc(from)) {
                 auto actualFuncType = DynamicCast<FuncTy>(from.typeArgs[0]);

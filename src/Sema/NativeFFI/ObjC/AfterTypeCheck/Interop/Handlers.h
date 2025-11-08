@@ -353,17 +353,6 @@ public:
     void HandleImpl(InteropContext& ctx);
 };
 
-class DesugarCJMappings : public Handler<DesugarCJMappings, InteropContext> {
-public:
-    void HandleImpl(InteropContext& ctx);
-
-private:
-    void DesugarMethod(InteropContext& ctx, AST::Decl& cjMapping, AST::FuncDecl& method);
-    void DesugarCtor(InteropContext& ctx, AST::Decl& cjMapping, AST::FuncDecl& ctor);
-    void DesugarProp(InteropContext& ctx, AST::Decl& cjMapping, AST::PropDecl& prop);
-    void DesugarField(InteropContext& ctx, AST::Decl& cjMapping, AST::PropDecl& field);
-};
-
 } // namespace Cangjie::Interop::ObjC
 
 #endif // CANGJIE_SEMA_DESUGAR_OBJ_C_INTEROP_INTEROP_HANDLERS
