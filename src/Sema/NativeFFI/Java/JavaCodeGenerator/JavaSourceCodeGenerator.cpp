@@ -903,8 +903,11 @@ void JavaSourceCodeGenerator::AddInterfaceMethods()
                 methodSignature += isDefault ? ") {" : ");";
                 AddWithIndent(TAB, methodSignature);
                 if (isDefault) {
-                    std::string defaultCall = decl->identifier.Val() + JAVA_FWD_CLASS_SUFFIX + "." +
-                        funcDecl.identifier.Val() + JAVA_INTERFACE_FWD_CLASS_DEFAULT_METHOD_SUFFIX + "(this";
+                    auto& declParams = funcDecl.funcBody->paramLists[0]->params;
+                    auto defaultFuncIdentifier = funcIdentifier + JAVA_INTERFACE_FWD_CLASS_DEFAULT_METHOD_SUFFIX;
+                    auto mangledNativeName = GetMangledMethodName(mangler, declParams, defaultFuncIdentifier);
+                    std::string defaultCall =
+                        decl->identifier.Val() + JAVA_FWD_CLASS_SUFFIX + "." + mangledNativeName + "(this";
                     auto params = GenerateParamLists(funcDecl.funcBody->paramLists, FuncParamToString);
                     if (params != "") {
                         defaultCall += ", " + params;
@@ -943,7 +946,9 @@ void JavaSourceCodeGenerator::AddInterfaceFwdClassNativeMethod()
                 continue;
             }
             if (funcDecl.funcBody && funcDecl.funcBody->retType) {
-                auto funcIdentifier = GetJavaMemberName(funcDecl);
+                auto& params = funcDecl.funcBody->paramLists[0]->params;
+                auto funcIdentifier = GetJavaMemberName(funcDecl) + JAVA_INTERFACE_FWD_CLASS_DEFAULT_METHOD_SUFFIX;
+                auto mangledNativeName = GetMangledMethodName(mangler, params, funcIdentifier);
                 const std::string retType =
                     MapCJTypeToJavaType(funcDecl.funcBody->retType, &imports, &decl->fullPackageName);
                 std::string methodSignature;
@@ -955,7 +960,7 @@ void JavaSourceCodeGenerator::AddInterfaceFwdClassNativeMethod()
                 methodSignature += JAVA_WHITESPACE;
                 methodSignature += retType;
                 methodSignature += JAVA_WHITESPACE;
-                methodSignature += funcIdentifier + JAVA_INTERFACE_FWD_CLASS_DEFAULT_METHOD_SUFFIX;
+                methodSignature += mangledNativeName;
                 methodSignature += "(";
                 methodSignature += decl->identifier.Val() + JAVA_WHITESPACE + JAVA_SELF_OBJECT;
                 std::string argsWithTypes = GenerateFuncParamLists(funcDecl.funcBody->paramLists, false);
