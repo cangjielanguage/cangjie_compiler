@@ -529,6 +529,9 @@ void TestManager::ReplaceCallsWithAccessors(Package& pkg)
         if (auto classLikeDecl = DynamicCast<ClassLikeDecl>(node)) {
             CJC_ASSERT(!outerClassLike);
             outerClassLike = classLikeDecl;
+        } else if (auto extendDecl = DynamicCast<ExtendDecl>(node)) {
+            CJC_ASSERT(!outerClassLike);
+            outerClassLike = extendDecl->extendedType->GetTarget();
         }
 
         if ((node->curFile && !node->IsSamePackage(pkg))) {
@@ -564,6 +567,9 @@ void TestManager::ReplaceCallsWithAccessors(Package& pkg)
         }
         if (auto classLikeDecl = DynamicCast<ClassLikeDecl>(node)) {
             CJC_ASSERT(outerClassLike == classLikeDecl);
+            outerClassLike = nullptr;
+        } else if (auto extendDecl = DynamicCast<ExtendDecl>(node)) {
+            CJC_ASSERT(outerClassLike == extendDecl->extendedType->GetTarget());
             outerClassLike = nullptr;
         }
         return VisitAction::KEEP_DECISION;

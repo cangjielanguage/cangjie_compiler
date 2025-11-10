@@ -94,6 +94,7 @@ private:
     Ptr<T> FindGeneratedGlobalDecl(Ptr<AST::File> file, const std::string& identifier);
     std::tuple<Ptr<AST::InterfaceDecl>, Ptr<AST::FuncDecl>> FindDefaultAccessorInterfaceAndFunction(
         Ptr<AST::FuncDecl> original);
+    Ptr<AST::FuncDecl> FindDefaultAccessorImplementation(Ptr<AST::Decl> baseDecl, Ptr<AST::FuncDecl> accessorDecl);
     void TransformAccessorCallForMutOperation(
         AST::NameReferenceExpr& originalNre, AST::Expr& replacedNre, AST::Expr& topLevelExpr);
     void ReplaceSubMemberAccessWithAccessor(
