@@ -66,28 +66,38 @@ bool ParserImpl::ParsePackageHeaderEnd()
 
 void ParserImpl::CheckAndHandleUnexpectedTopLevelDeclAfterFeatures()
 {
-    if (!SeeingPackage() && !SeeingMacroPackage() && !SeeingImport() && !Seeing(TokenKind::SEMI) &&
-        !SeeingDecl() && !SeeingMacroCallDecl() && !SeeingInitializer() && !SeeingFinalizer() &&
-        !Seeing(TokenKind::END)) {
+    if (!IsExpectedTokenAfterFeaturesOrPackage(true)) {
         DiagAndSuggestKeywordForExpectedDeclaration({"features", "macro", "package", "import", "func", "let", "var",
             "const", "enum", "type", "struct", "class", "interface", "extend", "main"});
         auto consumeTarget = [this]() {
-            return SeeingPackage() || SeeingMacroPackage() || Seeing(TokenKind::SEMI) || SeeingImport() ||
-                SeeingDecl() || SeeingMacroCallDecl() || SeeingInitializer() || SeeingFinalizer();
+            return IsExpectedTokenAfterFeaturesOrPackage(true);
         };
         ConsumeUntilAny(consumeTarget, false);
     }
 }
 
-void ParserImpl::CheckExpectedTopLevelDeclWhenNoPackage()
+void ParserImpl::CheckExpectedTopLevelDeclWhenNoPackage(
+    const PtrVector<Annotation>& annos, const std::set<Modifier>& modifiers)
 {
-    bool maybeConstDecl = lastToken.kind == TokenKind::CONST;
-    bool maybeForeignBlock = lastToken.kind == TokenKind::FOREIGN && Seeing(TokenKind::LCURL);
-    if (!SeeingImport() && !Seeing(TokenKind::SEMI) && !SeeingDecl() && !SeeingMacroCallDecl() && !maybeConstDecl &&
-        !maybeForeignBlock && !SeeingInitializer() && !SeeingFinalizer() && !Seeing(TokenKind::END)) {
+    if (!annos.empty() || !modifiers.empty()) {
+        return;
+    }
+    if (!IsExpectedTokenAfterFeaturesOrPackage(false)) {
         DiagAndSuggestKeywordForExpectedDeclaration({"macro", "package", "import", "func", "let", "var", "const",
             "enum", "type", "struct", "class", "interface", "extend", "main"});
     }
+}
+
+bool ParserImpl::IsExpectedTokenAfterFeaturesOrPackage(bool allowPackageKeyword)
+{
+    if (Seeing(TokenKind::SEMI) || SeeingImport() || SeeingDecl() || SeeingMacroCallDecl() || SeeingInitializer() ||
+        SeeingFinalizer() || SeeingBuiltinAnnotation() || Seeing(TokenKind::END)) {
+        return true;
+    }
+    if (allowPackageKeyword && (SeeingPackage() || SeeingMacroPackage())) {
+        return true;
+    }
+    return false;
 }
 
 size_t ParserImpl::GetLineNum() const
@@ -151,7 +161,7 @@ OwnedPtr<File> ParserImpl::ParseTopLevel()
             annos.clear();
         }
     } else {
-        CheckExpectedTopLevelDeclWhenNoPackage();
+        CheckExpectedTopLevelDeclWhenNoPackage(annos, modifiers);
         scope.ResetParserScope();
     }
     // Parse importSpec in TopLevel.

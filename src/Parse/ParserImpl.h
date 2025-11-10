@@ -542,7 +542,9 @@ private:
     // return: seeing end of file.
     bool ParsePackageHeaderEnd();
     void CheckAndHandleUnexpectedTopLevelDeclAfterFeatures();
-    void CheckExpectedTopLevelDeclWhenNoPackage();
+    void CheckExpectedTopLevelDeclWhenNoPackage(
+        const PtrVector<AST::Annotation>& annos, const std::set<AST::Modifier>& modifiers);
+    bool IsExpectedTokenAfterFeaturesOrPackage(bool allowPackageKeyword);
     void ParseTopLevelDecls(AST::File& file, std::vector<OwnedPtr<AST::Annotation>>& annos);
     void ParseTopLevelDecl(AST::File& file, std::vector<OwnedPtr<AST::Annotation>>& annos);
     void ParseAnnotations(PtrVector<AST::Annotation>& annos);
