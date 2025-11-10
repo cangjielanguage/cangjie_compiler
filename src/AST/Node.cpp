@@ -1122,8 +1122,13 @@ std::vector<std::string> ImportContent::GetPossiblePackageNames() const
 std::string ImportContent::ToString() const
 {
     std::function<void(std::stringstream&, const ImportContent&)> toString = [](auto& ss, auto& content) {
-        for (const auto& prefix : content.prefixPaths) {
-            ss << prefix << ".";
+        for (size_t i{0}; i < content.prefixPaths.size(); ++i) {
+            ss << content.prefixPaths[i];
+            if (i == 0 && content.hasDoubleColon) {
+                ss << TOKENS[static_cast<int>(TokenKind::DOUBLE_COLON)];
+            } else {
+                ss << TOKENS[static_cast<int>(TokenKind::DOT)];
+            }
         }
         if (content.kind != ImportKind::IMPORT_MULTI) {
             ss << content.identifier.Val();
