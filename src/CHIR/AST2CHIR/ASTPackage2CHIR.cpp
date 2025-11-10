@@ -762,10 +762,37 @@ void AST2CHIR::CreatePseudoImportedFuncSignatureAndSetGlobalCache(const AST::Fun
     globalCache.Set(funcDecl, *fn);
 }
 
+namespace {
+void ConvertImportedFunctionType(
+    ImportedFunc& fn, const AST::FuncDecl& funcDecl, CHIRType& chirType, CHIRBuilder& builder)
+{
+    auto fnTy = chirType.TranslateType(*funcDecl.ty);
+    fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
+    if (fn.GetFuncType() == fnTy) {
+        return;
+    }
+    auto [success, tempTable] = fn.GetFuncType()->CalculateGenericTyMapping(*fnTy);
+    CJC_ASSERT(success);
+    auto replaceTable = tempTable;
+
+    ConvertTypeFunc convertTypeFunc = [replaceTable](Type& type) {
+        if (!type.IsGeneric()) {
+            return &type;
+        }
+        auto it = replaceTable.find(StaticCast<GenericType*>(&type));
+        return it != replaceTable.end() ? it->second : &type;
+    };
+
+    ValueTypeConverter converter(convertTypeFunc, builder);
+    converter.VisitSubValue(fn);
+}
+} // namespace
+
 void AST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
 {
     ImportedFunc* fn = TryGetDeserialized<ImportedFunc>(funcDecl);
     if (fn) {
+        ConvertImportedFunctionType(*fn, funcDecl, chirType, builder);
         globalCache.Set(funcDecl, *fn);
         if (implicitDecls.count(&funcDecl) != 0) {
             implicitFuncs.emplace(fn->GetIdentifierWithoutPrefix(), fn);
@@ -1309,7 +1336,7 @@ void AST2CHIR::TranslateNominalDecls(const AST::Package& pkg)
     TranslateVecDecl(genericNominalDecls, trans);
     // Update some info for nominal decls.
     Utils::ProfileRecorder::Stop("TranslateNominalDecls", "TranslateDecls");
-    ProcessCommonAndPlatformNominals();
+    ProcessCommonAndPlatformExtends();
     SetExtendInfo();
     UpdateExtendParent();
 }
@@ -1390,7 +1417,7 @@ std::vector<Ptr<const AST::Decl>> CollectCommonMatchedDecls(
     std::vector<Ptr<const AST::Decl>> commonDecls;
     for (const auto& container : declContainers) {
         for (const auto& decl : container) {
-            if (decl->IsCommonMatchedWithPlatform()) {
+            if (decl->IsCommonMatchedWithPlatform() && decl->astKind == AST::ASTKind::EXTEND_DECL) {
                 commonDecls.push_back(decl);
             }
         }
@@ -1429,7 +1456,7 @@ void ConvertPlatformMemberMethods(
         return VisitResult::CONTINUE;
     };
 
-    for (auto decl : package->GetAllCustomTypeDef()) {
+    for (auto decl : package->GetExtends()) {
         if (!decl->TestAttr(CHIR::Attribute::PLATFORM)) {
             continue;
         }
@@ -1520,7 +1547,13 @@ void AST2CHIR::ResetPlatformFunc(const AST::FuncDecl& funcDecl, Func& func)
     if (!oldGenericParamTys.empty()) {
         CJC_ASSERT(newGenericParamTys.size() == oldGenericParamTys.size());
         for (size_t i = 0; i < oldGenericParamTys.size(); ++i) {
+            if (oldGenericParamTys[i] == newGenericParamTys[i]) {
+                continue;
+            }
             replaceTable[oldGenericParamTys[i]] = newGenericParamTys[i];
+        }
+        if (replaceTable.empty()) {
+            return;
         }
         ConvertTypeFunc convertTypeFunc = [this, replaceTable](Type& type) {
             return ReplaceRawGenericArgType(type, replaceTable, builder);
@@ -1530,7 +1563,7 @@ void AST2CHIR::ResetPlatformFunc(const AST::FuncDecl& funcDecl, Func& func)
     }
 }
 
-void AST2CHIR::ProcessCommonAndPlatformNominals()
+void AST2CHIR::ProcessCommonAndPlatformExtends()
 {
     bool compilePlatform = opts.IsCompilingCJMP();
     if (!compilePlatform) {
