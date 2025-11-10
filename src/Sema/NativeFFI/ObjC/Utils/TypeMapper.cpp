@@ -161,6 +161,9 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
             }
             return UNSUPPORTED_TYPE;
         case TypeKind::TYPE_INTERFACE:
+            if (IsObjCId(from)) {
+                return "id";
+            }
             if (IsObjCMirror(from)) {
                 return "id<" + from.name + ">";
             }
@@ -464,4 +467,21 @@ bool TypeMapper::IsObjCCJMapping(const Ty& ty)
 {
     auto structTy = DynamicCast<StructTy*>(&ty);
     return structTy && structTy->decl && IsObjCCJMapping(*structTy->decl);
+}
+
+bool TypeMapper::IsObjCId(const Ty& ty)
+{
+    auto interfaceTy = DynamicCast<InterfaceTy*>(&ty);
+    return interfaceTy && interfaceTy->declPtr && IsObjCId(*interfaceTy->declPtr);
+}
+
+bool TypeMapper::IsObjCId(const Decl& decl)
+{
+    if (decl.fullPackageName != OBJ_C_LANG_PACKAGE_IDENT) {
+        return false;
+    }
+    if (decl.identifier != OBJ_C_ID_IDENT) {
+        return false;
+    }
+    return true;
 }

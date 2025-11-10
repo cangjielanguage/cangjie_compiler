@@ -460,6 +460,11 @@ void ObjCGenerator::GenerateForwardDeclarations()
     std::set<Ptr<Decl>> dependencies;
     auto walker = [this, &dependencies](Ptr<Ty> ty, auto& self) -> void {
         if (ctx.typeMapper.IsObjCObjectType(*ty)) {
+            // ObjCId is `id` representative which is builtin type for Objective-C
+            if (TypeMapper::IsObjCId(*ty)) {
+                return;
+            }
+
             if (ty->IsCoreOptionType()) {
                 dependencies.insert(Ty::GetDeclOfTy(ty->typeArgs[0]));
             } else {

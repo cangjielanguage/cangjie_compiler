@@ -130,7 +130,7 @@ OwnedPtr<Expr> ASTFactory::WrapEntity(OwnedPtr<Expr> expr, Ty& wrapTy)
         auto classLikeTy = StaticCast<ClassLikeTy>(&wrapTy);
         auto mirror = As<ASTKind::CLASS_DECL>(classLikeTy->commonDecl);
         if (!mirror) {
-            mirror = GetSyntheticWrapper(*classLikeTy->commonDecl);
+            mirror = GetSyntheticWrapper(importManager, *classLikeTy->commonDecl);
             CJC_NULLPTR_CHECK(mirror);
         }
 
@@ -387,7 +387,7 @@ OwnedPtr<Expr> ASTFactory::CreateMirrorConstructorCall(OwnedPtr<Expr> entity, Pt
         if (decl->astKind == ASTKind::CLASS_DECL) {
           cld = StaticAs<ASTKind::CLASS_DECL>(decl);
         } else {
-          cld = GetSyntheticWrapper(*decl);
+          cld = GetSyntheticWrapper(importManager, *decl);
         }
         CJC_NULLPTR_CHECK(cld);
         auto mirrorCtor = GetGeneratedBaseCtor(*cld);
@@ -853,8 +853,6 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(VarDecl& field)
     auto registryIdTy = bridge.GetRegistryIdTy();
     auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
 
-    auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
-    auto registryIdParamRef = CreateRefExpr(*registryIdParam);
     auto convertedFieldTy = typeMapper.Cj2CType(field.ty);
     auto setterParam = CreateFuncParam(VALUE_IDENT, CreateType(convertedFieldTy), nullptr, convertedFieldTy);
     auto setterParamRef = CreateRefExpr(*setterParam);
@@ -864,9 +862,27 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(VarDecl& field)
 
     auto wrapperParamList = MakeOwned<FuncParamList>();
     auto& wrapperParams = wrapperParamList->params;
-    wrapperParams.emplace_back(std::move(registryIdParam));
-    wrapperParams.emplace_back(std::move(setterParam));
+    std::vector<OwnedPtr<Node>> wrapperNodes;
+    OwnedPtr<MemberAccess> lhs;
+    if (field.TestAttr(Attribute::STATIC)) {
+        lhs = CreateMemberAccess(WithinFile(CreateRefExpr(*outerDecl), field.curFile), field);
+    } else {
+        auto registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), nullptr, registryIdTy);
+        auto registryIdParamRef = CreateRefExpr(*registryIdParam);
+        wrapperParams.emplace_back(std::move(registryIdParam));
 
+        auto getFromRegistryCall = CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
+        auto objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
+        lhs = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), field);
+        wrapperNodes.emplace_back(std::move(objTmpVarDecl));
+    }
+    auto assignFieldExpr = CreateAssignExpr(std::move(lhs), WrapEntity(std::move(setterParamRef), *field.ty), unitTy);
+    assignFieldExpr->curFile = field.curFile;
+    assignFieldExpr->begin = field.GetBegin();
+    assignFieldExpr->end = field.GetEnd();
+    wrapperNodes.emplace_back(std::move(assignFieldExpr));
+
+    wrapperParams.emplace_back(std::move(setterParam));
     std::vector<Ptr<Ty>> wrapperParamTys;
     std::transform(
         wrapperParams.begin(), wrapperParams.end(), std::back_inserter(wrapperParamTys), [](auto& p) { return p->ty; });
@@ -875,19 +891,6 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(VarDecl& field)
 
     std::vector<OwnedPtr<FuncParamList>> wrapperParamLists;
     wrapperParamLists.emplace_back(std::move(wrapperParamList));
-
-    std::vector<OwnedPtr<Node>> wrapperNodes;
-    auto getFromRegistryCall = CreateGetFromRegistryByIdCall(std::move(registryIdParamRef), CreateRefType(*outerDecl));
-
-    auto objTmpVarDecl = CreateTmpVarDecl(CreateRefType(*outerDecl), std::move(getFromRegistryCall));
-    auto lhs = CreateMemberAccess(CreateRefExpr(*objTmpVarDecl), field);
-    auto assignFieldExpr = CreateAssignExpr(std::move(lhs), WrapEntity(std::move(setterParamRef), *field.ty), unitTy);
-    assignFieldExpr->curFile = field.curFile;
-    assignFieldExpr->begin = field.GetBegin();
-    assignFieldExpr->end = field.GetEnd();
-
-    wrapperNodes.emplace_back(std::move(objTmpVarDecl));
-    wrapperNodes.emplace_back(std::move(assignFieldExpr));
 
     auto wrapperBody = CreateFuncBody(std::move(wrapperParamLists), CreateUnitType(field.curFile),
         CreateBlock(std::move(wrapperNodes), wrapperTy->retTy), wrapperTy);

@@ -15,6 +15,7 @@
 #define CANGJIE_SEMA_OBJ_C_UTILS_COMMON_H
 
 #include "cangjie/AST/Node.h"
+#include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Utils/SafePointer.h"
 
 namespace Cangjie::Interop::ObjC {
@@ -27,7 +28,7 @@ bool HasMirrorSuperClass(const AST::ClassLikeDecl& target);
 bool IsStaticInitMethod(const AST::Node& node);
 bool HasMirrorSuperInterface(const AST::ClassLikeDecl& target);
 Ptr<AST::FuncDecl> GetNativeHandleGetter(const AST::ClassLikeDecl& target);
-Ptr<AST::ClassDecl> GetSyntheticWrapper(const AST::ClassLikeDecl& target);
+Ptr<AST::ClassDecl> GetSyntheticWrapper(const ImportManager& importManager, const AST::ClassLikeDecl& target);
 Ptr<AST::FuncDecl> GetFinalizer(const AST::ClassDecl& target);
 bool IsSyntheticWrapper(const AST::Decl& decl);
 
