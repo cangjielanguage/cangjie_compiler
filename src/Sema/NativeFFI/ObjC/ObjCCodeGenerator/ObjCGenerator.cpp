@@ -65,8 +65,8 @@ constexpr auto INIT_FUNC_NAME = "init";
 constexpr auto DELETE_FUNC_NAME = "deleteCJObject";
 constexpr auto DEALLOC_FUNC_NAME = "dealloc";
 constexpr auto INIT_CJ_RUNTIME_NAME = "InitCJRuntime";
-constexpr auto INIT_WITH_REGISTRY_ID_NAME = "InitWithRegistryId";
-constexpr auto INIT_WITH_REGISTRY_ID_SIGNATURE = "- (id)InitWithRegistryId:(int64_t)registryId";
+constexpr auto INIT_WITH_REGISTRY_ID_NAME = "initWithRegistryId";
+constexpr auto INIT_WITH_REGISTRY_ID_SIGNATURE = "- (id)initWithRegistryId:(int64_t)registryId";
 constexpr auto NSLOG_FUNC_NAME = "NSLog";
 constexpr auto EXIT_FUNC_NAME = "exit";
 constexpr auto DLOPEN_FUNC_NAME = "dlopen";
@@ -454,6 +454,9 @@ std::string ObjCGenerator::GenerateImport(const std::string& name)
 
 void ObjCGenerator::GenerateForwardDeclarations()
 {
+    if (ctx.typeMapper.IsObjCCJMapping(*decl->ty)) {
+        return;
+    }
     std::set<Ptr<Decl>> dependencies;
     auto walker = [this, &dependencies](Ptr<Ty> ty, auto& self) -> void {
         if (ctx.typeMapper.IsObjCObjectType(*ty)) {
@@ -729,7 +732,7 @@ void ObjCGenerator::AddProperties()
         const auto& staticType =
             varDecl.TestAttr(Attribute::STATIC) ? ObjCFunctionType::STATIC : ObjCFunctionType::INSTANCE;
         const std::string& type = ctx.typeMapper.Cj2ObjCForObjC(*varDecl.ty);
-        bool genSetter = varDecl.isVar;
+        bool genSetter = varDecl.isVar && !SkipSetterForValueTypeDecl(*decl);
         const auto modeModifier = genSetter ? READWRITE_MODIFIER : READONLY_MODIFIER;
         const auto name = ctx.nameGenerator.GetObjCDeclName(varDecl);
         AddWithIndent(GeneratePropertyDeclaration(staticType, modeModifier, type, name));
@@ -975,6 +978,9 @@ std::string ObjCGenerator::MapCJTypeToObjCType(const OwnedPtr<FuncParam>& param)
 
 std::string ObjCGenerator::GenerateArgumentCast(const Ty& retTy, std::string value) const
 {
+    if (ctx.typeMapper.IsObjCCJMapping(retTy)) {
+        return value + "." + SELF_WEAKLINK_NAME;
+    }
     const auto& actualTy = retTy.IsCoreOptionType() ? *retTy.typeArgs[0] : retTy;
     if (ctx.typeMapper.IsObjCImpl(actualTy)) {
         return CAST_TO_VOID_PTR + std::move(value);

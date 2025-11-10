@@ -82,9 +82,11 @@ void GenerateWrappers::GenerateWrapper(InteropContext& ctx, PropDecl& prop)
 
 void GenerateWrappers::GenerateSetterWrapper(InteropContext& ctx, PropDecl& prop)
 {
-    auto wrapper = ctx.factory.CreateSetterWrapper(prop);
-    CJC_NULLPTR_CHECK(wrapper);
-    ctx.genDecls.emplace_back(std::move(wrapper));
+    if (!SkipSetterForValueTypeDecl(*prop.outerDecl.get())) {
+        auto wrapper = ctx.factory.CreateSetterWrapper(prop);
+        CJC_NULLPTR_CHECK(wrapper);
+        ctx.genDecls.emplace_back(std::move(wrapper));
+    }
 }
 
 void GenerateWrappers::GenerateWrapper(InteropContext& ctx, VarDecl& field)
@@ -104,7 +106,14 @@ void GenerateWrappers::GenerateWrapper(InteropContext& ctx, VarDecl& field)
 
 void GenerateWrappers::GenerateSetterWrapper(InteropContext& ctx, VarDecl& field)
 {
-    auto wrapper = ctx.factory.CreateSetterWrapper(field);
-    CJC_NULLPTR_CHECK(wrapper);
-    ctx.genDecls.emplace_back(std::move(wrapper));
+    if (!SkipSetterForValueTypeDecl(*field.outerDecl.get())) {
+        auto wrapper = ctx.factory.CreateSetterWrapper(field);
+        CJC_NULLPTR_CHECK(wrapper);
+        ctx.genDecls.emplace_back(std::move(wrapper));
+    }
+}
+
+bool GenerateWrappers::SkipSetterForValueTypeDecl(Decl& decl) const
+{
+    return interopType == InteropType::CJ_Mapping && DynamicCast<StructTy*>(decl.ty.get()) != nullptr;
 }
