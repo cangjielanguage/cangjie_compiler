@@ -654,10 +654,10 @@ std::string ObjCGenerator::GenerateFuncParamLists(
             case FunctionListFormat::DECLARATION:
                 if (i != 0) {
                     /*
-                     * for CJMapping Objective-C method signature, label shouldn't generate
+                     * for CJMapping Objective-C method signature, label shouldn't generate if not use @ForeignName
                      * as it would be more user-friendly to keep both side method signatures the same
                      */
-                    auto name = interopType == InteropType::ObjC_Mirror ? *componentIterator++ : "";
+                    auto name = selectorComponents.size() > 1 ? *componentIterator++ : "";
                     genParams += name + ":"; // label
                 } else {
                     genParams += ":";
