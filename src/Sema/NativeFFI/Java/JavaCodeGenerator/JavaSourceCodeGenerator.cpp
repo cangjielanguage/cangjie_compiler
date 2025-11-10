@@ -913,6 +913,9 @@ void JavaSourceCodeGenerator::AddInterfaceMethods()
                         defaultCall += ", " + params;
                     }
                     defaultCall += ");";
+                    if (retType != "void") {
+                        defaultCall = "return " + defaultCall;
+                    }
                     AddWithIndent(TAB2, defaultCall);
                     AddWithIndent(TAB, "}");
                 }
