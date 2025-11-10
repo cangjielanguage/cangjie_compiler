@@ -15,6 +15,30 @@
 using namespace Cangjie::AST;
 using namespace Cangjie::Interop::ObjC;
 
+void GenerateInitCJObjectMethods::GenNativeInitMethodForEnumCtor(InteropContext& ctx, AST::EnumDecl& enumDecl)
+{
+    if (enumDecl.TestAttr(Attribute::IS_BROKEN)) {
+        return;
+    }
+
+    if (this->interopType == InteropType::ObjC_Mirror) {
+        return;
+    }
+
+    for (auto& ctor : enumDecl.constructors) {
+        OwnedPtr<Decl> initCjObject;
+        if (ctor->astKind == ASTKind::FUNC_DECL) {
+            auto fd = As<ASTKind::FUNC_DECL>(ctor.get());
+            CJC_NULLPTR_CHECK(fd);
+            initCjObject = ctx.factory.CreateInitCjObject(enumDecl, *fd, true);
+        } else if (ctor->astKind == ASTKind::VAR_DECL) {
+            auto varDecl = As<ASTKind::VAR_DECL>(ctor.get());
+            initCjObject = ctx.factory.CreateInitCjObjectForEnumNoParams(enumDecl, *varDecl);
+        }
+        ctx.genDecls.emplace_back(std::move(initCjObject));
+    }
+}
+
 void GenerateInitCJObjectMethods::HandleImpl(InteropContext& ctx)
 {
     auto genNativeInitMethod = [this, &ctx](Decl& decl) {
@@ -62,7 +86,11 @@ void GenerateInitCJObjectMethods::HandleImpl(InteropContext& ctx)
         }
     } else if (interopType == InteropType::CJ_Mapping) {
         for (auto& cjmapping : ctx.cjMappings) {
-            genNativeInitMethod(*cjmapping);
+            if (auto enumDecl = As<ASTKind::ENUM_DECL>(cjmapping)) {
+                GenNativeInitMethodForEnumCtor(ctx, *enumDecl);
+            } else {
+                genNativeInitMethod(*cjmapping);
+            }
         }
     }
 

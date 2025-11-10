@@ -226,6 +226,7 @@ public:
 
 private:
     InteropType interopType{InteropType::NA};
+    void GenNativeInitMethodForEnumCtor(InteropContext& ctx, AST::EnumDecl& enumDecl);
 };
 
 /**

@@ -59,6 +59,7 @@ constexpr auto SELF_WEAKLINK_NAME = "$registryId";
 constexpr auto SELF_NAME = "self";
 constexpr auto SETTER_PARAM_NAME = "value";
 constexpr auto REGISTRY_ID_PARAM_NAME = "registryId";
+constexpr auto TMP_REG_ID = "regId";
 
 constexpr auto INITIALIZE_FUNC_NAME = "initialize";
 constexpr auto INIT_FUNC_NAME = "init";
@@ -784,6 +785,35 @@ void ObjCGenerator::AddProperties()
     }
 }
 
+void ObjCGenerator::AddCtorsForCjMappingEnum(AST::EnumDecl& enumDecl)
+{
+    const std::string enumName = enumDecl.identifier;
+    for (auto& ctor : enumDecl.constructors) {
+        std::string result = "";
+        const ::std::string retType = enumName + "*";
+        const ::std::string ctorName = ctor->identifier.Val();
+        result += GenerateFunctionDeclaration(ObjCFunctionType::STATIC, retType, ctorName);
+        std::vector<std::string> argList;
+        std::string nativeFuncName = ctx.nameGenerator.GenerateInitCjObjectName(*ctor.get());
+
+        if (ctor->astKind == ASTKind::FUNC_DECL) {
+            auto funcDecl = As<ASTKind::FUNC_DECL>(ctor.get());
+            const auto selectorComponents = ctx.nameGenerator.GetObjCDeclSelectorComponents(*funcDecl);
+            result += GenerateFuncParamLists(funcDecl->funcBody->paramLists, selectorComponents,
+                FunctionListFormat::DECLARATION, ObjCFunctionType::STATIC,
+                GetForeignNameAnnotation(*funcDecl) != nullptr);
+            argList = ConvertParamsListToCallableParamsString(funcDecl->funcBody->paramLists, false);
+        }
+        AddWithIndent(result, GenerationTarget::BOTH, OptionalBlockOp::OPEN);
+        AddWithIndent(
+            GenerateAssignment(string(INT64_T) + " " + string(TMP_REG_ID), GenerateCCall(nativeFuncName, argList)) +
+                ";",
+            GenerationTarget::SOURCE);
+        AddWithIndent(GenerateReturn(WrapperCallByInitForCJMappingReturn(*enumDecl.ty, string(TMP_REG_ID))),
+            GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
+    }
+}
+
 void ObjCGenerator::AddConstructors()
 {
     std::set<std::vector<std::string>> generatedCtors = {};
@@ -875,6 +905,10 @@ void ObjCGenerator::AddConstructors()
         AddWithIndent(GenerateAssignment(string(SELF_NAME) + "." + SELF_WEAKLINK_NAME, REGISTRY_ID_PARAM_NAME) + ";",
             GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
         AddWithIndent(GenerateReturn(SELF_NAME), GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
+
+        if (auto enumDecl = As<ASTKind::ENUM_DECL>(decl)) {
+            AddCtorsForCjMappingEnum(*enumDecl);
+        }
     }
 }
 

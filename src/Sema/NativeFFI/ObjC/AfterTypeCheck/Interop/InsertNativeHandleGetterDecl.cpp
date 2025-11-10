@@ -46,7 +46,7 @@ void InsertNativeHandleGetterDecl::HandleImpl(InteropContext& ctx)
         }
     }
 
-    for (auto& wrapper: ctx.synWrappers) {
+    for (auto& wrapper : ctx.synWrappers) {
         if (wrapper->TestAttr(Attribute::IS_BROKEN)) {
             continue;
         }

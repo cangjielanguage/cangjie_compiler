@@ -31,4 +31,4 @@ void DesugarSyntheticWrappers::HandleImpl(InteropContext& ctx)
         wrapper->DisableAttr(Attribute::ABSTRACT);
     }
 }
-}
+} // namespace Cangjie::Interop::ObjC

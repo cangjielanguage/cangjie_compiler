@@ -23,7 +23,16 @@ void GenerateWrappers::HandleImpl(InteropContext& ctx)
         if (decl.TestAttr(Attribute::IS_BROKEN)) {
             return;
         }
-        for (auto& memberDecl : decl.GetMemberDeclPtrs()) {
+
+        std::vector<Ptr<Decl>> results;
+        if (auto ed = DynamicCast<const EnumDecl*>(&decl); ed) {
+            for (auto& mem : ed->members) {
+                results.push_back(mem.get());
+            }
+        } else {
+            results = decl.GetMemberDeclPtrs();
+        }
+        for (auto& memberDecl : results) {
             if (memberDecl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::CONSTRUCTOR)) {
                 continue;
             }

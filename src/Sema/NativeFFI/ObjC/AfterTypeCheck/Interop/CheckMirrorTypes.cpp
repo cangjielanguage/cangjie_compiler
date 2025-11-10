@@ -20,7 +20,7 @@ void CheckMirrorTypes::HandleImpl(InteropContext& ctx)
 {
     auto checker = HandlerFactory<TypeCheckContext>::Start<CheckAbstractClass>()
                        .Use<CheckMirrorInheritMirror>()
-                       .Use<CheckInitMethod>()                       
+                       .Use<CheckInitMethod>()
                        .Use<CheckForeignName>()
                        .Use<CheckMemberTypes>(InteropType::ObjC_Mirror);
 

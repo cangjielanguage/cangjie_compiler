@@ -90,6 +90,7 @@ private:
     void GenerateInterfaceDecl();
     void AddProperties();
     void AddConstructors();
+    void AddCtorsForCjMappingEnum(AST::EnumDecl& enumDecl);
     void AddMethods();
     void WriteToFile();
 
