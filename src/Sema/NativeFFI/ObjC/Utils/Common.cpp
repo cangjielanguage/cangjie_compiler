@@ -94,19 +94,16 @@ Ptr<FuncDecl> GetNativeHandleGetter(const ClassLikeDecl& target)
     return As<ASTKind::FUNC_DECL>(FindMirrorMember(NATIVE_HANDLE_GETTER_IDENT, target));
 }
 
-Ptr<ClassDecl> GetSyntheticWrapper(const ClassLikeDecl& target)
+Ptr<ClassDecl> GetSyntheticWrapper(const ImportManager& importManager, const ClassLikeDecl& target)
 {
     CJC_ASSERT(TypeMapper::IsObjCMirror(*target.ty));
+    auto* synthetic =
+        importManager.GetImportedDecl<ClassDecl>(target.fullPackageName, target.identifier + SYNTHETIC_CLASS_SUFFIX);
 
-    for (auto child : target.subDecls) {
-        if (child->TestAttr(Attribute::OBJ_C_MIRROR_SYNTHETIC_WRAPPER) &&
-            child->identifier == (target.identifier + SYNTHETIC_CLASS_SUFFIX) // redundant check?
-        ) {
-            return As<ASTKind::CLASS_DECL>(child);
-        }
-    }
+    CJC_NULLPTR_CHECK(synthetic);
+    CJC_ASSERT(IsSyntheticWrapper(*synthetic));
 
-    return nullptr;
+    return Ptr(synthetic);
 }
 
 Ptr<FuncDecl> GetFinalizer(const ClassDecl& target)
@@ -120,7 +117,8 @@ Ptr<FuncDecl> GetFinalizer(const ClassDecl& target)
     return nullptr;
 }
 
-bool IsSyntheticWrapper(const AST::Decl& decl) {
+bool IsSyntheticWrapper(const AST::Decl& decl)
+{
     return TypeMapper::IsSyntheticWrapper(*decl.ty);
 }
 

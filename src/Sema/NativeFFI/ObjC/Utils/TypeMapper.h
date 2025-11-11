@@ -50,6 +50,8 @@ public:
     static bool IsObjCBlock(const AST::Ty& ty);
     static bool IsObjCFuncOrBlock(const AST::Decl& decl);
     static bool IsObjCFuncOrBlock(const AST::Ty& ty);
+    static bool IsObjCId(const AST::Ty& ty);
+    static bool IsObjCId(const AST::Decl& decl);
 private:
     InteropLibBridge& bridge;
     TypeManager& typeManager;
