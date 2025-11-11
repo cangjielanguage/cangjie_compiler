@@ -176,14 +176,31 @@ IVal Interpreter::ByteCodeToIval(const Bchir::Definition& def, const Bchir& bchi
 #else
             return {IValUtils::PrimitiveValue<IIntNat>(static_cast<int32_t>(def.Get8bytes(1)))};
 #endif
-        case OpCode::FLOAT16:
-            return {IValUtils::PrimitiveValue<IFloat16>(static_cast<float>(def.Get(1)))};
-        case OpCode::FLOAT32:
-            return {IValUtils::PrimitiveValue<IFloat32>(static_cast<float>(def.Get(1)))};
+        case OpCode::FLOAT16: {
+            // Value for a FLOAT16 instruction is a 32-bit float.
+            uint32_t tmp = def.Get(1);
+            float f;
+            auto ret = memcpy_s(&f, sizeof(f), &tmp, sizeof(float));
+            if (ret != EOK) {
+                CJC_ASSERT(false);
+                return {INullptr()};
+            }
+            return {IValUtils::PrimitiveValue<IFloat16>(f)};
+        }
+        case OpCode::FLOAT32: {
+            uint32_t tmp = def.Get(1);
+            float f;
+            auto ret = memcpy_s(&f, sizeof(f), &tmp, sizeof(float));
+            if (ret != EOK) {
+                CJC_ASSERT(false);
+                return {INullptr()};
+            }
+            return {IValUtils::PrimitiveValue<IFloat32>(f)};
+        }
         case OpCode::FLOAT64: {
             auto tmp = def.Get8bytes(1);
             double d;
-            auto ret = memcpy_s(&d, sizeof(double), &tmp, sizeof(double));
+            auto ret = memcpy_s(&d, sizeof(d), &tmp, sizeof(double));
             if (ret != EOK) {
                 CJC_ASSERT(false);
                 return {INullptr()};
