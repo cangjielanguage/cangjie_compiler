@@ -519,6 +519,7 @@ std::string JavaDesugarManager::GetJniMethodName(const FuncDecl& method)
 std::string JavaDesugarManager::GetJniMethodNameForProp(const PropDecl& propDecl, bool isSet) const
 {
     std::string varDecl = GetJavaMemberName(propDecl);
+    MangleJNIName(varDecl);
     std::string varDeclSuffix = varDecl;
     varDeclSuffix[0] = static_cast<char>(toupper(varDeclSuffix[0]));
     std::string fqname = GetJavaFQName(*(propDecl.outerDecl));
