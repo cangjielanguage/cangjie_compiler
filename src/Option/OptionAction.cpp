@@ -637,7 +637,8 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
      }},
 #endif
     { Options::ID::COMMON_PART_PATH, [](GlobalOptions& opts, const OptionArgInstance& arg) {
-        opts.commonPartCjo = opts.ValidateInputFilePath(arg.value, DiagKindRefactor::driver_invalid_binary_file);
+        opts.commonPartCjo = GlobalOptions::ValidateInputFilePath(
+            arg.value, DiagKindRefactor::driver_invalid_binary_file);
         return true;
     }},
     { Options::ID::INCRE_COMPILE, OPTION_TRUE_ACTION(opts.enIncrementalCompilation = true) },
