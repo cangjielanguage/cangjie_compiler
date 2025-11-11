@@ -228,6 +228,13 @@ void ParserImpl::ParseAnnotations(PtrVector<Annotation>& annos)
     }
 }
 
+void ParserImpl::SetBeginToAnnotationsBegin(Node& node, const PtrVector<Annotation>& annos)
+{
+    if (!annos.empty()) {
+        node.begin = annos.front()->begin;
+    }
+}
+
 OwnedPtr<Annotation> ParserImpl::ParseCustomAnnotation()
 {
     bool isCompileTimeVisible{false};

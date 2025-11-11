@@ -528,9 +528,10 @@ TEST_F(ParseCommentTest, Example4)
     auto& foo = StaticCast<FuncDecl>(*file->decls[0]);
     ASSERT_EQ(foo.funcBody->paramLists[0]->params.size(), 2);
     auto& nameParam = StaticCast<VarDecl>(*foo.funcBody->paramLists[0]->params[0]);
-    ASSERT_EQ(nameParam.comments.trailingComments.size(), 1);
-    EXPECT_EQ(nameParam.comments.trailingComments[0].cms[0].info.Value(), "// username");
+    ASSERT_EQ(nameParam.comments.trailingComments.size(), 0);
     auto& ageParam = StaticCast<VarDecl>(*foo.funcBody->paramLists[0]->params[1]);
+    ASSERT_EQ(ageParam.comments.leadingComments.size(), 1);
+    EXPECT_EQ(ageParam.comments.leadingComments[0].cms[0].info.Value(), "// username");
     ASSERT_EQ(ageParam.comments.trailingComments.size(), 1);
     EXPECT_EQ(ageParam.comments.trailingComments[0].cms[0].info.Value(), "// userage");
     ASSERT_EQ(foo.funcBody->retType->comments.trailingComments.size(), 1);
@@ -546,9 +547,8 @@ TEST_F(ParseCommentTest, Example4_2)
     OwnedPtr<File> file2 = parser2.ParseTopLevel();
     auto& bar = StaticCast<FuncDecl>(*file2->decls[0]);
     ASSERT_EQ(bar.funcBody->paramLists[0]->params.size(), 2);
-    auto& ageParam2 = StaticCast<VarDecl>(*bar.funcBody->paramLists[0]->params[1]);
-    ASSERT_EQ(ageParam2.comments.trailingComments.size(), 1);
-    EXPECT_EQ(ageParam2.comments.trailingComments[0].cms[0].info.Value(), "// user age");
+    ASSERT_EQ(bar.funcBody->paramLists[0]->comments.innerComments.size(), 1);
+    EXPECT_EQ(bar.funcBody->paramLists[0]->comments.innerComments[0].cms[0].info.Value(), "// user age");
     ASSERT_EQ(bar.comments.trailingComments.size(), 1);
     EXPECT_EQ(bar.comments.trailingComments[0].cms[0].info.Value(), "// nothing to return{}");
 }
@@ -564,7 +564,7 @@ TEST_F(ParseCommentTest, Example5)
 }
 func bar() {
     let nums = ArrayList(
-        1, // first element
+        1, // second element
         2,
         // third element
         3,
@@ -583,7 +583,7 @@ func f5() {
     auto& bar = StaticCast<FuncDecl>(*file->decls[1]);
     auto& nums = StaticCast<VarDecl>(*bar.funcBody->body->body[0]);
     auto& arrayList = StaticCast<CallExpr>(*nums.initializer);
-    EXPECT_EQ(arrayList.args[0]->comments.trailingComments[0].cms[0].info.Value(), "// first element");
+    EXPECT_EQ(arrayList.args[1]->comments.leadingComments[0].cms[0].info.Value(), "// second element");
     EXPECT_EQ(arrayList.args[2]->comments.leadingComments[0].cms[0].info.Value(), "// third element");
     auto& f5 = StaticCast<FuncDecl>(*file->decls[2]);
     auto& ret = StaticCast<BinaryExpr>(*StaticCast<ReturnExpr>(*f5.funcBody->body->body[0]).expr);

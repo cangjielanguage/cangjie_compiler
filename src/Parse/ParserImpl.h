@@ -548,6 +548,7 @@ private:
     void ParseTopLevelDecls(AST::File& file, std::vector<OwnedPtr<AST::Annotation>>& annos);
     void ParseTopLevelDecl(AST::File& file, std::vector<OwnedPtr<AST::Annotation>>& annos);
     void ParseAnnotations(PtrVector<AST::Annotation>& annos);
+    void SetBeginToAnnotationsBegin(Node& node, const PtrVector<Annotation>& annos);
     OwnedPtr<AST::Annotation> ParseCustomAnnotation();
     OwnedPtr<AST::Annotation> ParseAnnotation();
     void ParseModifiers(std::set<AST::Modifier>& modifiers);
@@ -772,7 +773,7 @@ private:
     OwnedPtr<AST::ClassBody> ParseClassBody(AST::ClassDecl& cd);
     OwnedPtr<AST::InterfaceBody> ParseInterfaceBody(AST::InterfaceDecl& id);
     OwnedPtr<AST::Decl> ParseEnumConstructor(
-        const std::set<AST::Modifier>& modifiers, PtrVector<AST::Annotation>& annos);
+        const std::set<AST::Modifier>& modifiers, PtrVector<AST::Annotation>&& annos);
     OwnedPtr<AST::TypePattern> ParseTypePattern(const Position& begin);
     OwnedPtr<AST::ConstPattern> ParseConstPattern();
 

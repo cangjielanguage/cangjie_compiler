@@ -112,6 +112,12 @@ void TestManager::ReportMockDisabled(const Expr& reportOn)
 
 void TestManager::ReportWrongStaticDecl(const Expr& reportOn)
 {
+    if (auto lambda = DynamicCast<LambdaExpr>(&reportOn)) {
+        // excluding @EnsurePreparedToMock itself from error position
+        diag.DiagnoseRefactor(
+            DiagKindRefactor::sema_mock_wrong_static_decl, MakeRange(lambda->funcBody->body->leftCurlPos, lambda->end));
+        return;
+    }
     diag.DiagnoseRefactor(
         DiagKindRefactor::sema_mock_wrong_static_decl, reportOn);
 }

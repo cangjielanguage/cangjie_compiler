@@ -1469,7 +1469,6 @@ OwnedPtr<Annotation> PartialInstantiation::InstantiateAnnotation(const Annotatio
     ret->identifier = annotation.identifier;
     ret->attrs = annotation.attrs;
     ret->attrCommas = annotation.attrCommas;
-    ret->adAnnotation = annotation.adAnnotation;
     ret->rsquarePos = annotation.rsquarePos;
     ret->lsquarePos = annotation.lsquarePos;
     for (auto& arg : annotation.args) {

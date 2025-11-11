@@ -31,7 +31,7 @@ target_link_libraries(
     GTest::gtest_main)
 add_test(NAME ParseTypeAliasTest COMMAND ParseTypeAliasTest)
 
-add_executable(ParseCommentTest ParseCommentTest.cpp)
+add_executable(ParseCommentTest ParseCommentTest.cpp ParseCommentTest2.cpp)
 target_link_libraries(
     ParseCommentTest
     cangjie-lsp

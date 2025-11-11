@@ -607,6 +607,7 @@ template <typename T> OwnedPtr<T> ParserImpl::ParseMacroCall(
     // May have multiple annotations include macro or builtin annotation. But Now annos Only have builtin annotations.
     if (!annos.empty()) {
         macroCall->annotations = std::move(annos);
+        SetBeginToAnnotationsBegin(*macroCall, macroCall->annotations);
     }
     ParseMacroInvocation(scopeKind, modifiers, macroCall->invocation);
     if (macroCall->invocation.decl) {
