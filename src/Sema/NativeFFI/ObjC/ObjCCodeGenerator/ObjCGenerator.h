@@ -70,7 +70,8 @@ private:
     std::string GenerateFuncParamLists(const std::vector<OwnedPtr<AST::FuncParamList>>& paramLists,
         const std::vector<std::string>& selectorComponents,
         FunctionListFormat format = FunctionListFormat::DECLARATION,
-        const ObjCFunctionType type = ObjCFunctionType::INSTANCE);
+        const ObjCFunctionType type = ObjCFunctionType::INSTANCE,
+        bool hasForeignNameAnno = true);
     std::string MapCJTypeToObjCType(const OwnedPtr<AST::Type>& type);
     std::string MapCJTypeToObjCType(const OwnedPtr<AST::FuncParam>& param);
 
