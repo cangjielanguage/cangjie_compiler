@@ -1779,6 +1779,7 @@ std::tuple<Ptr<InterfaceDecl>, Ptr<FuncDecl>> MockSupportManager::FindDefaultAcc
 Ptr<AST::FuncDecl> MockSupportManager::FindDefaultAccessorImplementation(
     Ptr<AST::Decl> baseDecl, Ptr<AST::FuncDecl> accessorDecl)
 {
+    CJC_NULLPTR_CHECK(baseDecl);
     auto extendDecl = typeManager.GetExtendDeclByMember(*accessorDecl, *baseDecl->ty);
     return MockUtils::FindMemberDecl<FuncDecl>(*extendDecl, accessorDecl->identifier);
 }
