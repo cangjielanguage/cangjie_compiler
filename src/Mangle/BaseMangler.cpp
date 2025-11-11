@@ -605,16 +605,15 @@ std::string BaseMangler::MangleDecl(const Decl& decl, const std::vector<Ptr<Node
                 (decl.identifier.Val().size() - MANGLE_PROP_LEN) ? "ps" : "pg";
         } else {
             std::string name = decl.identifier;
-            if (decl.astKind == ASTKind::GENERIC_PARAM_DECL) {
-                if (decl.outerDecl->TestAnyAttr(Attribute::COMMON, Attribute::PLATFORM)) {
-                    auto genericsTy = StaticCast<const GenericsTy*>(decl.ty);
-                    auto result = std::find_if(genericsTypeStack.rbegin(), genericsTypeStack.rend(),
-                        [&genericsTy](const std::string& name) { return name == genericsTy->name; });
-                    auto index = static_cast<size_t>(std::distance(result, genericsTypeStack.rend())) - MANGLE_CHAR_LEN;
-                    CJC_ASSERT(result != genericsTypeStack.rend() && "Using undeclared generic type!");
-                    auto number = MangleUtils::DecimalToManglingNumber(std::to_string(index));
-                    name = MANGLE_GENERIC_TYPE_PREFIX + number;
-                }
+            if (decl.astKind == ASTKind::GENERIC_PARAM_DECL && decl.outerDecl &&
+                decl.outerDecl->TestAnyAttr(Attribute::COMMON, Attribute::PLATFORM)) {
+                auto genericsTy = StaticCast<const GenericsTy*>(decl.ty);
+                auto result = std::find_if(genericsTypeStack.rbegin(), genericsTypeStack.rend(),
+                    [&genericsTy](const std::string& name) { return name == genericsTy->name; });
+                auto index = static_cast<size_t>(std::distance(result, genericsTypeStack.rend())) - MANGLE_CHAR_LEN;
+                CJC_ASSERT(result != genericsTypeStack.rend() && "Using undeclared generic type!");
+                auto number = MangleUtils::DecimalToManglingNumber(std::to_string(index));
+                name = MANGLE_GENERIC_TYPE_PREFIX + number;
             } else if (decl.TestAttr(Attribute::HAS_INITIAL)) {
                 // eg: c.2 ==> pos = 1, name = c, idx = "2"
                 size_t pos = decl.identifier.Val().find(MANGLE_DOT_PREFIX);
