@@ -18,6 +18,7 @@
 #include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Sema/TypeManager.h"
+#include "InheritanceChecker/MemberSignature.h"
 
 namespace Cangjie::Interop::Java {
 using namespace AST;
@@ -44,7 +45,7 @@ class JavaDesugarManager {
 public:
     JavaDesugarManager(ImportManager& importManager, TypeManager& typeManager, DiagnosticEngine& diag,
                        const BaseMangler& mangler, const std::optional<std::string>& javaCodeGenPath,
-                       const std::string& outputLibPath)
+                       const std::string& outputLibPath, const std::unordered_map<Ptr<const InheritableDecl>, MemberMap>& memberMap)
         : importManager(importManager),
           typeManager(typeManager),
           utils(importManager, typeManager),
@@ -52,7 +53,8 @@ public:
           mangler(mangler),
           lib(importManager, typeManager, diag, utils),
           javaCodeGenPath(javaCodeGenPath),
-          outputLibPath(outputLibPath)
+          outputLibPath(outputLibPath),
+          memberMap(memberMap)
     {
             lib.CheckInteropLibVersion();
     }
@@ -65,6 +67,8 @@ public:
     void GenerateInMirrors(File& file, bool doStub);
 
     void GenerateInMirror(ClassDecl& classDecl, bool doStub);
+
+    void GenerateInSynthetic(ClassDecl& cd);
 
     /**
      * Stage 3: desugar constructors, methods, etc
@@ -580,6 +584,9 @@ private:
      * Top-level declarations generated during desugaring. Should be added at the end of file desugaring
      */
     std::vector<OwnedPtr<Decl>> generatedDecls;
+
+    // contains the member signatures of structs.
+    const std::unordered_map<Ptr<const AST::InheritableDecl>, MemberMap>& memberMap;
 };
 
 } // namespace Cangjie::Interop::Java

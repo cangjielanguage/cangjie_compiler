@@ -290,6 +290,22 @@ struct Node {
     }
 
     /**
+     * Whether a declaration is InterfaceDecl.
+     */
+    bool IsInterfaceDecl() const noexcept
+    {
+        return astKind == ASTKind::INTERFACE_DECL;
+    }
+
+    /**
+     * Whether a declaration is abstract ClassDecl.
+     */
+    bool IsAbstractClass() const noexcept
+    {
+        return astKind == ASTKind::CLASS_DECL && this->TestAttr(Attribute::ABSTRACT);
+    }
+
+    /**
      * Whether a node is ClassBody or InterfaceBody.
      */
     bool IsClassLikeDeclBody() const noexcept

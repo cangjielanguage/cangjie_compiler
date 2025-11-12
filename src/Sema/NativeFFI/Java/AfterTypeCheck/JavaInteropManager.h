@@ -12,6 +12,7 @@
 #ifndef CANGJIE_SEMA_NATIVE_FFI_JAVA_DESUGAR_INTEROP_MANAGER
 #define CANGJIE_SEMA_NATIVE_FFI_JAVA_DESUGAR_INTEROP_MANAGER
 
+#include "InheritanceChecker/MemberSignature.h"
 #include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Sema/TypeManager.h"
@@ -42,7 +43,18 @@ public:
     void CheckJavaImplTypes(ClassLikeDecl& decl);
     void CheckCJMappingType(Decl& decl);
     void CheckCJMappingDeclSupportRange(Decl& decl);
-    void DesugarPackage(Package& pkg);
+
+    /**
+     * DesugarPackage is responsible for coordinating the desugaring process of Java interop features within a package.
+     * It processes Java mirror and impl stubs, actual desugaring, and typechecks for both Java mirrors and CJMappings
+     * depending on the compilation configuration and presence of Java interop entities.
+     *
+     * @param pkg The package that contains files to be desugared.
+     * @param memberMap A reference to a collection containing member signature metadata,
+     *        used for generating method stubs in synthetic classes.
+     *        This collection contains method signatures of all structs.
+     */
+    void DesugarPackage(Package& pkg, const std::unordered_map<Ptr<const InheritableDecl>, MemberMap>& memberMap);
 
 private:
     void CheckUsageOfJavaTypes(Decl& decl);

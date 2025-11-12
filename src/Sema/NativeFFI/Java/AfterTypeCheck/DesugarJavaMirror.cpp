@@ -11,9 +11,11 @@
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/AST/Match.h"
+#include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/ConstantsUtils.h"
 #include "Utils.h"
 #include "NativeFFI/Utils.h"
+#include "NativeFFI/Java/AfterTypeCheck/Utils.h"
 #include "cangjie/AST/Utils.h"
 
 
@@ -585,6 +587,17 @@ void JavaDesugarManager::GenerateInMirror(ClassDecl& classDecl, bool doStub)
     }
 }
 
+void JavaDesugarManager::GenerateInSynthetic(ClassDecl& cd)
+{
+    if (IsSynthetic(cd)) {
+        if (auto id = DynamicCast<InheritableDecl*>(&cd)) {
+            GenerateSyntheticClassMemberStubs(cd, memberMap.at(id));
+        } else {
+            CJC_ABORT_WITH_MSG("Illegal state: synthetic classes expected to be InheritableDecl*");
+        }
+    }
+}
+
 void JavaDesugarManager::ReplaceCallsWithArrayJavaEntityGet(File& file)
 {
     Walker(&file, Walker::GetNextWalkerID(), [this, &file](auto node) {
@@ -698,6 +711,9 @@ void JavaDesugarManager::GenerateInMirrors(File& file, bool doStub)
             }
             if (auto classDecl = As<ASTKind::CLASS_DECL>(cldecl)) {
                 GenerateInMirror(*classDecl, doStub);
+                if (doStub) {
+                    GenerateInSynthetic(*classDecl);
+                }
             }
             if (doStub && cldecl->astKind == ASTKind::INTERFACE_DECL) {
                 InsertAbstractJavaRefGetter(*cldecl);

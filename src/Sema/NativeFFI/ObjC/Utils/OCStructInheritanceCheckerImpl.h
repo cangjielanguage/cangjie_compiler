@@ -25,9 +25,6 @@ void CheckAnnotation(DiagnosticEngine& diag, TypeManager& typeManager, Annotatio
     const MemberSignature& parent, const MemberSignature& child, const Decl& checkingDecl);
 void CheckForeignAnnotations(DiagnosticEngine& diag, TypeManager& typeManager, const MemberSignature& parent,
     const MemberSignature& child, const AST::Decl& checkingDecl);
-void GenerateSyntheticClassMemberStubs(
-    AST::ClassDecl& synthetic, const MemberMap& interfaceMembers, const MemberMap& instanceMembers);
-
 } // namespace Cangjie::Interop::ObjC
 
 #endif // CANGJIE_SEMA_OBJ_C_UTILS_STRUCT_INHERITANCE_CHECKER_IMPL_H

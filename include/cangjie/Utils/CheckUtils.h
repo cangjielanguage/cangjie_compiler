@@ -23,14 +23,40 @@
             abort();                                                                                                   \
         }                                                                                                              \
     }
+#define CJC_ASSERT_WITH_MSG(f, msg)                                                                                    \
+    {                                                                                                                  \
+        if (!(f)) {                                                                                                    \
+            fprintf(stderr, "CJC_ASSERT failed at %s:%d: %s\n", __FILE__, __LINE__, msg);                             \
+            abort();                                                                                                   \
+        }                                                                                                              \
+    }
 #define CJC_ABORT() abort()
+#define CJC_ABORT_WITH_MSG(msg)                                                                                        \
+    {                                                                                                                  \
+        fprintf(stderr, "CJC_ABORT at %s:%d: %s\n", __FILE__, __LINE__, msg);                                          \
+        abort();                                                                                                       \
+    }
 #else
 #ifdef NDEBUG
 #define CJC_ASSERT(f) static_cast<void>(f)
+#define CJC_ASSERT_WITH_MSG(f, msg) (static_cast<void>(f), static_cast<void>(msg))
 #define CJC_ABORT()
+#define CJC_ABORT_WITH_MSG(msg) static_cast<void>(msg)
 #else
 #define CJC_ASSERT(f) assert(f)
+#define CJC_ASSERT_WITH_MSG(f, msg)                                                                                    \
+    {                                                                                                                  \
+        if (!(f)) {                                                                                                    \
+            fprintf(stderr, "CJC_ASSERT failed at %s:%d: %s\n", __FILE__, __LINE__, msg);                             \
+            assert(f);                                                                                                 \
+        }                                                                                                              \
+    }
 #define CJC_ABORT() abort()
+#define CJC_ABORT_WITH_MSG(msg)                                                                                        \
+    {                                                                                                                  \
+        fprintf(stderr, "CJC_ABORT at %s:%d: %s\n", __FILE__, __LINE__, msg);                                          \
+        abort();                                                                                                       \
+    }
 #endif
 #endif
 

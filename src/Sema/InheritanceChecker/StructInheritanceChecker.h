@@ -18,23 +18,11 @@
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Modules/ImportManager.h"
+#include "MemberSignature.h"
 
 namespace Cangjie {
 using namespace AST;
-struct MemberSignature {
-    Ptr<Decl> decl = nullptr;
-    Ptr<Ty> ty = nullptr;
-    Ptr<Ty> structTy = nullptr;
-    Ptr<ExtendDecl> extendDecl = nullptr; // If the member is a member of another visible extension, it points to the
-                                          // extension declaration. Otherwise, it is null.
-    std::vector<std::unordered_set<Ptr<Ty>>> upperBounds;
-    std::unordered_set<Ptr<const Ty>> inconsistentTypes; // List of the corresponding types came from super-types which
-                                                         // are inconsistent
-    bool shouldBeImplemented = false;                    // True: if this member has multiple default implementation.
-    bool replaceOther = false;                           // True: if this member override others.
-    bool isInheritedInterface = false; // True: if current member is implementing inherited interface decl.
-};
-using MemberMap = std::multimap<std::string, MemberSignature>;
+
 class StructInheritanceChecker {
 public:
     StructInheritanceChecker(DiagnosticEngine& diag, TypeManager& manger, Package& pkg, ImportManager& importManager,
@@ -50,8 +38,10 @@ public:
      */
     void Check();
 
+    std::unordered_map<Ptr<const InheritableDecl>, MemberMap> MoveStructInheritedMembers();
+
 private:
-    void CheckMembersWithInheritedDecls(InheritableDecl& decl);
+    void CheckMembersWithInheritedDecls(const InheritableDecl& decl);
     MemberMap GetAndCheckInheritedInterfaces(const InheritableDecl& decl);
     MemberMap GetInheritedSuperMembers(
         const InheritableDecl& decl, Ty& baseTy, const AST::File& curFile, bool ignoreExtends = false);
@@ -126,7 +116,7 @@ private:
      */
     void CheckInstDupFuncsInNominalDecls();
     VisitAction CheckInstDupFuncsRecursively(Node& node);
-    void CheckInstMemberSignatures(InheritableDecl& decl, const std::vector<Ptr<Ty>>& instTys);
+    void CheckInstMemberSignatures(const InheritableDecl& decl, const std::vector<Ptr<Ty>>& instTys);
     void CheckInstantiatedDecl(Decl& decl, const std::vector<Ptr<Ty>>& instTys);
     /**
      * Get visible extend decls in stable order for given @p decl with @p instTys .
@@ -151,7 +141,7 @@ private:
         return !pkg.files.empty() && *pkg.files.begin() && importManager.IsExtendAccessible(**pkg.files.begin(), ed);
     }
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    std::vector<Ptr<ExtendDecl>> GetAllNeedCheckExtended();
+    std::vector<Ptr<const ExtendDecl>> GetAllNeedCheckExtended();
 #endif
 
     DiagnosticEngine& diag;

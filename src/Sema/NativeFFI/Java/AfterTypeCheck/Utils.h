@@ -18,7 +18,8 @@
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Utils.h"
-#include "../../../InheritanceChecker/StructInheritanceChecker.h"
+#include "InheritanceChecker/MemberSignature.h"
+#include "InheritanceChecker/MemberSignature.h"
 #include "NativeFFI/Utils.h"
 
 namespace Cangjie::Interop::Java {
@@ -222,7 +223,6 @@ bool IsJArray(const Ty& ty);
 
 bool IsMirror(const Ty& ty);
 
-bool IsImpl(const Decl& decl);
 bool IsImpl(const Ty& ty);
 bool IsCJMappingInterface(const Ty& ty);
 bool IsCJMapping(const Ty& ty);
@@ -304,11 +304,6 @@ Ptr<MemberDecl> FindFirstMemberDecl(
     return nullptr;
 }
 
-void GenerateSyntheticClassMemberStubs(
-    ClassDecl& synthetic,
-    const MemberMap& interfaceMembers,
-    const MemberMap& instanceMembers);
-
 
 /**
  * Returns FQ name of marker class for Cangjie side constructor of Java class
@@ -316,6 +311,8 @@ void GenerateSyntheticClassMemberStubs(
 std::string GetConstructorMarkerFQName();
 std::string GetConstructorMarkerClassName();
 OwnedPtr<ClassDecl> CreateConstructorMarkerClassDecl();
+
+void GenerateSyntheticClassMemberStubs(ClassDecl& synthetic, const MemberMap& members);
 
 } // namespace Cangjie::Interop::Java
 
