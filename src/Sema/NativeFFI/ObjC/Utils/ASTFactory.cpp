@@ -443,7 +443,9 @@ OwnedPtr<VarDecl> ASTFactory::CreateNativeHandleField(ClassDecl& target)
 
     auto nativeHandleField = CreateVarDecl(NATIVE_HANDLE_IDENT, nullptr, CreateType(nativeHandleTy));
     nativeHandleField->ty = nativeHandleTy;
-    nativeHandleField->EnableAttr(Attribute::PUBLIC);
+    // mark it initialized because sema initialization analysis is run before
+    // objc desugaring
+    nativeHandleField->EnableAttr(Attribute::PUBLIC, Attribute::INITIALIZED);
 
     PutDeclToClassLikeBody(*nativeHandleField, target);
 
