@@ -236,24 +236,22 @@ size_t CountSkippedMembersBefore(const Decl& decl, size_t offset)
         std::vector<size_t> offsets;
         auto members = GetRealIndexingMembers(decl.GetMemberDecls(), decl.TestAttr(Attribute::GENERIC));
         for (auto it = members.begin(); it != members.end(); ++it) {
+            auto member = *it;
             size_t off = static_cast<size_t>(std::distance(members.begin(), it));
-            if (IsVirtualMember(**it) || IsStaticVar(**it)) {
-                offsets.emplace_back(off);
+            if ((member->astKind != ASTKind::VAR_DECL && !RequireInstantiation(*member)) || IsStaticVar(*member) ||
+                IsStaticInitializer(*member)) {
+                continue;
             }
+            offsets.emplace_back(off);
         }
         found = g_skippedMemberOffsets.emplace(&decl, std::move(offsets)).first;
     }
-    size_t count = 0;
-    for (size_t off : found->second) {
-        if (off < offset) {
-            count++;
-        } else if (off == offset) {
-            return std::numeric_limits<size_t>::max();
-        } else {
-            break;
+    for (size_t i = 0; i < found->second.size(); ++i) {
+        if (found->second[i] == offset) {
+            return offset - i;
         }
     }
-    return count;
+    return std::numeric_limits<size_t>::max();
 }
 
 Ptr<Decl> GetMemberByOffset(const Decl& decl, size_t offset)

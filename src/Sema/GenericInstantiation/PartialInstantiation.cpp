@@ -1353,7 +1353,8 @@ OwnedPtr<StructBody> PartialInstantiation::InstantiateStructBody(const StructBod
     ret->leftCurlPos = sb.leftCurlPos;
     for (auto& it : sb.decls) {
         if (it->astKind == ASTKind::PRIMARY_CTOR_DECL ||
-            (it->astKind != ASTKind::VAR_DECL && !RequireInstantiation(*it)) || IsStaticVar(*it)) {
+            (it->astKind != ASTKind::VAR_DECL && !RequireInstantiation(*it)) || IsStaticVar(*it) ||
+            IsStaticInitializer(*it)) {
             continue;
         }
         ret->decls.push_back(InstantiateDecl(it.get(), visitor));
