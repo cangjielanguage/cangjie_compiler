@@ -14,7 +14,7 @@
 #include <future>
 #include <queue>
 
-using namespace Cangjie::CHIR;
+namespace Cangjie::CHIR {
 
 DeadCodeElimination::DeadCodeElimination(CHIRBuilder& builder, DiagAdapter& diag,
     const std::string& packageName)
@@ -274,10 +274,25 @@ void DeadCodeElimination::ReportUnusedFunc(const Func& func, const GlobalOptions
     }
 }
 
+static bool IsFuncForBinaryInThisPackage(
+    const Func& func, const GlobalOptions opts, const std::string& curPkgName)
+{
+    if (opts.outputMode != GlobalOptions::OutputMode::EXECUTABLE) {
+        return false;
+    }
+    if (func.IsGVInit() || func.TestAttr(Attribute::COMPILER_ADD)) {
+        // skip global init func and compile added func.
+        return false;
+    }
+    if (func.GetPackageName() != curPkgName) {
+        return false;
+    }
+    return true;
+}
+
 static bool IsExternalDecl(const Value& v)
 {
-    using namespace Cangjie;
-    if (v.Get<LinkTypeInfo>() == Linkage::EXTERNAL) {
+    if (v.Get<LinkTypeInfo>() == Cangjie::Linkage::EXTERNAL) {
         return true;
     }
     // const var/func never have external linkage
@@ -913,10 +928,6 @@ bool DeadCodeElimination::CheckUselessFunc(const Func& func, const GlobalOptions
         return opts.outputMode == GlobalOptions::OutputMode::STATIC_LIB ||
             opts.outputMode == GlobalOptions::OutputMode::SHARED_LIB;
     }
-    // Do not check the functions that can be exported.
-    if (IsExternalDecl(func)) {
-        return false;
-    }
     // The func is in vtable.
     if (func.IsVirtualFunc()) {
         return false;
@@ -927,6 +938,14 @@ bool DeadCodeElimination::CheckUselessFunc(const Func& func, const GlobalOptions
     }
     // The Finalizer func of a class, can not be removed.
     if (func.GetFuncKind() == Cangjie::CHIR::FINALIZER) {
+        return false;
+    }
+    // skip function compiled for binary only.
+    if (IsFuncForBinaryInThisPackage(func, opts, currentPackageName)) {
+        return true;
+    }
+    // Do not check the functions that can be exported.
+    if (IsExternalDecl(func)) {
         return false;
     }
     if (!opts.disableReflection) {
@@ -1098,3 +1117,4 @@ void DeadCodeElimination::DiagUnusedCode(
         diag.DiagnoseRefactor(diagKind, nodeRange.second, args...);
     }
 }
+}  // namespace Cangjie::CHIR
