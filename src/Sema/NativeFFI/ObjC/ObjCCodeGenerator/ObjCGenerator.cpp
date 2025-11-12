@@ -644,7 +644,8 @@ void ObjCGenerator::GenerateInterfaceDecl()
 std::string ObjCGenerator::GenerateFuncParamLists(
     const std::vector<OwnedPtr<FuncParamList>>& paramLists,
     const std::vector<std::string>& selectorComponents,
-    FunctionListFormat format, const ObjCFunctionType type)
+    FunctionListFormat format, const ObjCFunctionType type,
+    bool hasForeignNameAnno)
 {
     auto componentIterator = std::begin(selectorComponents);
     // skip function name
@@ -662,7 +663,7 @@ std::string ObjCGenerator::GenerateFuncParamLists(
                      * for CJMapping Objective-C method signature, label shouldn't generate if not use @ForeignName
                      * as it would be more user-friendly to keep both side method signatures the same
                      */
-                    auto name = selectorComponents.size() > 1 ? *componentIterator++ : "";
+                    auto name = hasForeignNameAnno ? *componentIterator++ : "";
                     genParams += name + ":"; // label
                 } else {
                     genParams += ":";
@@ -822,7 +823,7 @@ void ObjCGenerator::AddConstructors()
 
         std::string result = "";
         result += GenerateFunctionDeclaration(staticType, retType, selectorComponents[0]);
-        result += GenerateFuncParamLists(funcDecl.funcBody->paramLists, selectorComponents, FunctionListFormat::DECLARATION, staticType);
+        result += GenerateFuncParamLists(funcDecl.funcBody->paramLists, selectorComponents, FunctionListFormat::DECLARATION, staticType, GetForeignNameAnnotation(funcDecl) != nullptr);
         AddWithIndent(result, GenerationTarget::BOTH, OptionalBlockOp::OPEN);
         AddWithIndent(GenerateIfStatement(SELF_NAME, GenerateObjCCall(SUPER_KEYWORD, INIT_FUNC_NAME), EQ_OP),
             GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
@@ -858,7 +859,8 @@ void ObjCGenerator::AddConstructors()
             std::string result = "";
             result += GenerateFunctionDeclaration(ObjCFunctionType::INSTANCE, ID_TYPE, selectorComponents[0]);
             result += GenerateFuncParamLists(
-                ctor->funcBody->paramLists, selectorComponents, FunctionListFormat::DECLARATION, ObjCFunctionType::INSTANCE);
+                ctor->funcBody->paramLists, selectorComponents, FunctionListFormat::DECLARATION, ObjCFunctionType::INSTANCE,
+                GetForeignNameAnnotation(*ctor) != nullptr);
             AddWithIndent(result, GenerationTarget::BOTH, OptionalBlockOp::OPEN);
             AddWithIndent(FAIL_CALL_UNINIT_CTOR, GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
             generatedCtors.insert(selectorComponents);
@@ -897,7 +899,7 @@ void ObjCGenerator::AddMethods()
                 std::string result = "";
                 result += GenerateFunctionDeclaration(staticType, retType, selectorComponents[0]);
                 result +=
-                    GenerateFuncParamLists(funcDecl.funcBody->paramLists, selectorComponents, FunctionListFormat::DECLARATION, staticType);
+                    GenerateFuncParamLists(funcDecl.funcBody->paramLists, selectorComponents, FunctionListFormat::DECLARATION, staticType, GetForeignNameAnnotation(funcDecl) != nullptr);
                 AddWithIndent(result, GenerationTarget::BOTH, OptionalBlockOp::OPEN);
                 AddWithIndent(
                     GenerateDefaultFunctionImplementation(ctx.nameGenerator.GenerateMethodWrapperName(funcDecl), *retTy,
