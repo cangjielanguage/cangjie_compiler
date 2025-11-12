@@ -38,7 +38,7 @@ ERROR(lex_unterminated_interpolation, "unterminated string interpolation", "unte
 })
 
 ERROR(lex_multiline_string_start_from_newline,
-    "multi-line string may need start with newline character", "excepted starting with newline character", {
+    "multi-line string must start with newline character", "expected to start with newline character", {
     "because it is in multi-line string"
 })
 
