@@ -47,7 +47,7 @@ void UserTimer::Start(const std::string& title, const std::string& subtitle, con
     }
     // Not the first time, must be done, reset the status.
     if ((*infoIt).isDone) {
-#if defined(__APPLE__) || defined(__MINGW64__)
+#if defined(__APPLE__) || defined(__MINGW64__) || defined(__ohos__)
         (*infoIt).start = std::chrono::system_clock::now();
 #else
         (*infoIt).start = std::chrono::high_resolution_clock::now();
@@ -63,7 +63,7 @@ void UserTimer::Stop(const std::string& title, const std::string& subtitle, cons
     });
     CJC_ASSERT(infoIt != infoList.end() && !(*infoIt).isDone);
 
-#if defined(__APPLE__) || defined(__MINGW64__)
+#if defined(__APPLE__) || defined(__MINGW64__) || defined(__ohos__)
     (*infoIt).end = std::chrono::system_clock::now();
 #else
     (*infoIt).end = std::chrono::high_resolution_clock::now();

@@ -20,6 +20,7 @@ void Ohos_CJNATIVE::AddCRuntimeLibraryPaths()
     for (const auto& path : driverOptions.toolChainPaths) {
         AddCRuntimeLibraryPath(path);
     }
+    AddCRuntimeLibraryPath(FileUtil::JoinPath(driver.cangjieHome, "lib/" + driverOptions.GetCangjieLibTargetPathName()));
 }
 
 bool Ohos_CJNATIVE::PrepareDependencyPath()
@@ -87,6 +88,7 @@ void Ohos_CJNATIVE::GenerateLinkingTool(const std::vector<TempFileInfo>& objFile
 void Ohos_CJNATIVE::GenerateLinkOptions(Tool& tool)
 {
     tool.AppendArg("-l:libcangjie-runtime.so");
+    tool.AppendArg("-L" + FileUtil::JoinPath(driver.cangjieHome, "lib/" + driverOptions.GetCangjieLibTargetPathName()));
     for (auto& option : LINUX_CJNATIVE_LINK_OPTIONS) {
         // No libgcc_s.so in hm toolchain
         if (option.compare("-l gcc_s") != 0) {

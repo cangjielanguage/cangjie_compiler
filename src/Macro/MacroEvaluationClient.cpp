@@ -13,8 +13,12 @@
 #include "cangjie/Macro/MacroEvaluation.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 #if defined(__linux__) || defined(__APPLE__)
-#include <sys/select.h>
+#ifdef __ohos__
+#include <signal.h>
+#else
 #include <sys/signal.h>
+#endif
+#include <sys/select.h>
 #include <sys/wait.h>
 #else
 #include <windows.h>

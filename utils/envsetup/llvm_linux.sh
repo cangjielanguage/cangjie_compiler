@@ -29,8 +29,16 @@ case "${shell_name}" in
         compdef _gnu_generic cjc cjc-frontend
         script_dir=$(cd "$(dirname "$(readlink -f "${(%):-%N}")")"; pwd)
         ;;
-    "sh" | "bash")
+    "bash")
         script_dir=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"; pwd)
+        ;;
+    "sh")
+        if [ -f "envsetup.sh" ]; then
+            script_dir=$(pwd)
+        else
+            echo "[ERROR] Switch to the directory containing envsetup.sh and run it."
+            return 1
+        fi
         ;;
     *)
         echo "[ERROR] Unsupported shell: ${shell_name}, please switch to bash, sh or zsh."
@@ -40,10 +48,19 @@ esac
 
 export CANGJIE_HOME=${script_dir}
 
-hw_arch=$(arch)
+sys_name=$(uname -s)
+if [ "$sys_name" = "HarmonyOS" ]; then
+    sys_name="_ohos"
+    hw_arch=$(uname -m)
+else
+    sys_name=""
+    hw_arch=$(arch)
+fi
 if [ "$hw_arch" = "" ]; then
     hw_arch="x86_64"
 fi
+
 export PATH=${CANGJIE_HOME}/bin:${CANGJIE_HOME}/tools/bin:$PATH:${HOME}/.cjpm/bin
-export LD_LIBRARY_PATH=${CANGJIE_HOME}/runtime/lib/linux_${hw_arch}_cjnative:${CANGJIE_HOME}/tools/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=${CANGJIE_HOME}/runtime/lib/linux${sys_name}_${hw_arch}_cjnative:${CANGJIE_HOME}/tools/lib:${LD_LIBRARY_PATH}
 unset hw_arch
+unset sys_name
