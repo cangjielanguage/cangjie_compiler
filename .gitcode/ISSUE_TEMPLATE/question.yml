@@ -1,0 +1,29 @@
+name: 问题咨询|Question
+description: 如果您对Cangjie社区有疑问，欢迎反馈咨询。
+title: "[问题咨询]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢提出问题，我们将安排人答复！
+  - type: textarea
+    attributes:
+      label: 问题描述
+      description: 请描述下您的问题
+    validations:
+      required: true
+  - type: checkboxes
+    id: version
+    attributes:
+      label: 受影响的分支版本
+      description: 请选择您的问题涉及的分支版本：
+      options:
+        - label: dev
+          required: false
+        - label: main
+          required: false
+        - label: release/1.0
+          required: false
+    validations:
+      required: true
