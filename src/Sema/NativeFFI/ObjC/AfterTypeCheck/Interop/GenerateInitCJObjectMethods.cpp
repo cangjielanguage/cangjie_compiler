@@ -45,8 +45,11 @@ void GenerateInitCJObjectMethods::HandleImpl(InteropContext& ctx)
             if (this->interopType == InteropType::ObjC_Mirror && !ctx.factory.IsGeneratedCtor(ctorDecl)) {
                 continue;
             }
+            if (this->interopType == InteropType::CJ_Mapping && !ctx.typeMapper.IsObjCCJMappingMember(ctorDecl)) {
+                continue;
+            }
             bool forOneWayMapping = false;
-            forOneWayMapping = this->interopType == InteropType::CJ_Mapping && As<ASTKind::STRUCT_DECL>(&decl);
+            forOneWayMapping = this->interopType == InteropType::CJ_Mapping && ctx.typeMapper.IsOneWayMapping(decl);
             auto initCjObject = ctx.factory.CreateInitCjObject(decl, ctorDecl, forOneWayMapping);
             CJC_ASSERT(initCjObject);
             ctx.genDecls.emplace_back(std::move(initCjObject));

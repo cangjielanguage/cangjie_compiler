@@ -32,14 +32,12 @@ public:
     static bool IsObjCMirror(const AST::Decl& decl);
     static bool IsObjCMirrorSubtype(const AST::Decl& decl);
     static bool IsObjCImpl(const AST::Decl& decl);
-    static bool IsObjCCJMapping(const AST::Decl& decl);
     static bool IsValidObjCMirror(const AST::Ty& ty);
     static bool IsValidObjCMirrorSubtype(const AST::Ty& ty);
     static bool IsObjCImpl(const AST::Ty& ty);
     static bool IsObjCMirror(const AST::Ty& ty);
     static bool IsObjCPointer(const AST::Decl& decl);
     static bool IsObjCPointer(const AST::Ty& ty);
-    static bool IsObjCCJMapping(const AST::Ty& ty);
     static bool IsSyntheticWrapper(const AST::Decl& decl);
     static bool IsSyntheticWrapper(const AST::Ty& ty);
     static bool IsObjCObjectType(const AST::Ty& ty);
@@ -52,6 +50,17 @@ public:
     static bool IsObjCFuncOrBlock(const AST::Ty& ty);
     static bool IsObjCId(const AST::Ty& ty);
     static bool IsObjCId(const AST::Decl& decl);
+
+    // Check whether a decl need mapping into objc (with OBJ_C_CJ_MAPPING).
+    static bool IsObjCCJMapping(const AST::Decl& decl);
+    // Check whether a decl need mapping into objc (with oneway: only objc call cangjie).
+    static bool IsOneWayMapping(const AST::Decl& decl);
+    // Check whether the member decl need mapping into objc.
+    static bool IsObjCCJMappingMember(const AST::Decl& decl);
+    static bool IsValidCJMapping(const AST::Ty& ty);
+    static bool IsObjCCJMapping(const AST::Ty& ty);
+    static bool IsOneWayMapping(const AST::Ty& ty);
+    static bool IsPrimitiveMapping(const AST::Ty& ty);
 private:
     InteropLibBridge& bridge;
     TypeManager& typeManager;

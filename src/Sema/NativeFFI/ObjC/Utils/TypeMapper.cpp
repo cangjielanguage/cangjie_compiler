@@ -452,13 +452,12 @@ bool TypeMapper::IsObjCFuncOrBlock(const Ty& ty)
 
 bool TypeMapper::IsObjCCJMapping(const Decl& decl)
 {
-    return decl.TestAttr(Attribute::OBJ_C_CJ_MAPPING);
-}
-
-bool TypeMapper::IsObjCCJMapping(const Ty& ty)
-{
-    auto structTy = DynamicCast<StructTy*>(&ty);
-    return structTy && structTy->decl && IsObjCCJMapping(*structTy->decl);
+    // Currently, we only support CJ mapping for non-generic decl.
+    bool isGeneric = decl.generic != nullptr;
+    bool isStruct = decl.astKind == ASTKind::STRUCT_DECL;
+    bool isNonOpenClass = decl.astKind == ASTKind::CLASS_DECL && !decl.IsOpen();
+    bool isSupportedType = isStruct || isNonOpenClass;
+    return decl.TestAttr(Attribute::OBJ_C_CJ_MAPPING) && !isGeneric && isSupportedType;
 }
 
 bool TypeMapper::IsObjCId(const Ty& ty)
@@ -476,4 +475,96 @@ bool TypeMapper::IsObjCId(const Decl& decl)
         return false;
     }
     return true;
+}
+
+bool TypeMapper::IsObjCCJMapping(const Ty& ty)
+{
+    if (auto decl = Ty::GetDeclOfTy(&ty)) {
+        return IsObjCCJMapping(*decl);
+    }
+    return false;
+}
+
+bool TypeMapper::IsOneWayMapping(const Decl& decl)
+{
+    // struct, non-open class
+    return decl.astKind == ASTKind::STRUCT_DECL || (decl.astKind == ASTKind::CLASS_DECL && !decl.IsOpen());
+}
+
+namespace {
+bool SupportMembers(const Decl& decl, const std::vector<ASTKind>& kinds) {
+    for (const auto& kind : kinds) {
+        if (decl.astKind == kind) {
+            return true;
+        }
+    }
+    return false;
+}
+}
+
+bool TypeMapper::IsObjCCJMappingMember(const AST::Decl& decl)
+{
+    CJC_ASSERT(decl.IsMemberDecl());
+    auto& outerDecl = *decl.outerDecl;
+    CJC_ASSERT(IsObjCCJMapping(outerDecl));
+    // Non-open class
+    if (outerDecl.astKind == ASTKind::CLASS_DECL) {
+        if (!outerDecl.IsOpen() && !SupportMembers(decl, {ASTKind::FUNC_DECL})) {
+            return false;
+        }
+    }
+    if (decl.astKind == ASTKind::FUNC_DECL) {
+        if (auto fnTy = DynamicCast<FuncTy>(decl.ty)) {
+            // Constructor do not check return type.
+            bool isValid = decl.TestAttr(Attribute::CONSTRUCTOR) ? true : IsValidCJMapping(*fnTy->retTy);
+            return isValid && std::all_of(std::begin(fnTy->paramTys), std::end(fnTy->paramTys),
+                [](auto ty) { return IsValidCJMapping(*ty); });
+        }
+    } else if (decl.astKind == ASTKind::PROP_DECL || decl.astKind == ASTKind::VAR_DECL) {
+        return IsValidCJMapping(*decl.ty);
+    }
+    return false;
+}
+
+bool TypeMapper::IsOneWayMapping(const Ty& ty)
+{
+    if (!ty.IsStruct() && !ty.IsClass()) {
+        return false;
+    }
+    auto decl = Ty::GetDeclOfTy(&ty);
+    CJC_ASSERT(decl);
+    return IsOneWayMapping(*decl);
+}
+
+bool TypeMapper::IsValidCJMapping(const Ty& ty)
+{
+    if (ty.HasGeneric()) {
+        return false;
+    }
+    return IsPrimitiveMapping(ty) || IsObjCCJMapping(ty);
+}
+
+bool TypeMapper::IsPrimitiveMapping(const Ty& ty)
+{
+    switch (ty.kind) {
+        case TypeKind::TYPE_UNIT:
+        case TypeKind::TYPE_INT8:
+        case TypeKind::TYPE_INT16:
+        case TypeKind::TYPE_INT32:
+        case TypeKind::TYPE_INT64:
+        case TypeKind::TYPE_INT_NATIVE:
+        case TypeKind::TYPE_IDEAL_INT:
+        case TypeKind::TYPE_UINT8:
+        case TypeKind::TYPE_UINT16:
+        case TypeKind::TYPE_UINT32:
+        case TypeKind::TYPE_UINT64:
+        case TypeKind::TYPE_UINT_NATIVE:
+        case TypeKind::TYPE_FLOAT32:
+        case TypeKind::TYPE_FLOAT64:
+        case TypeKind::TYPE_IDEAL_FLOAT:
+        case TypeKind::TYPE_BOOLEAN:
+            return true;
+        default:
+            return false;
+    }
 }

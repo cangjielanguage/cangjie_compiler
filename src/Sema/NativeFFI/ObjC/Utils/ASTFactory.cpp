@@ -76,10 +76,7 @@ OwnedPtr<Expr> ASTFactory::UnwrapEntity(OwnedPtr<Expr> expr)
     }
 
     if (typeMapper.IsObjCCJMapping(*expr->ty)) {
-        if (auto structTy = StaticCast<StructTy>(expr->ty.get())) {
-            return CreatePutToRegistryCall(std::move(expr));
-        }
-        CJC_ABORT(); // other CJMapping is not supported
+        return CreatePutToRegistryCall(std::move(expr));
     }
 
     if (expr->ty->IsCoreOptionType()) {
@@ -193,8 +190,8 @@ OwnedPtr<Expr> ASTFactory::WrapEntity(OwnedPtr<Expr> expr, Ty& wrapTy)
     }
 
     if (typeMapper.IsObjCCJMapping(wrapTy)) {
-        if (auto structTy = StaticCast<StructTy>(&wrapTy)) {
-            return CreateGetFromRegistryByIdCall(std::move(expr), CreateRefType(*(structTy->decl)));
+        if (auto decl = Ty::GetDeclOfTy<InheritableDecl>(&wrapTy)) {
+            return CreateGetFromRegistryByIdCall(std::move(expr), CreateRefType(*decl));
         }
         CJC_ABORT(); // other CJMapping is not supported
     }
