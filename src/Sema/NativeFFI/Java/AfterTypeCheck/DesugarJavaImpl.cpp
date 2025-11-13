@@ -397,10 +397,9 @@ void JavaDesugarManager::DesugarJavaImplConstructor(FuncDecl& ctor, FuncDecl& pa
 
             if (!ctor.funcBody->body->body.empty()) {
                 auto firstNode = ctor.funcBody->body->body[0].get();
-                if (auto callExpr = As<ASTKind::CALL_EXPR>(firstNode);
-                    callExpr && (callExpr->callKind == CallKind::CALL_SUPER_FUNCTION)) {
-                        // This super call `callExpr` will be removed in `JavaSourceCodeGenerator`
-                        callExpr->EnableAttr(Attribute::JAVA_MIRROR, Attribute::UNREACHABLE);
+                if (auto callExpr = As<ASTKind::CALL_EXPR>(firstNode); callExpr && IsSuperConstructorCall(*callExpr)) {
+                    // This super-constructor call `callExpr` will be removed in `JavaSourceCodeGenerator`
+                    callExpr->EnableAttr(Attribute::JAVA_MIRROR, Attribute::UNREACHABLE);
                 }
             }
 
@@ -458,7 +457,7 @@ OwnedPtr<FuncDecl> JavaDesugarManager::GenerateJavaImplConstructor(FuncDecl& sam
     block->body.erase(std::remove_if(block->body.begin(), block->body.end(),
         [](auto& node) {
             if (auto call = As<ASTKind::CALL_EXPR>(node.get())) {
-                return call->callKind == CallKind::CALL_SUPER_FUNCTION;
+                return IsSuperConstructorCall(*call);
             }
             return false;
         }),

@@ -142,6 +142,8 @@ std::string GetMangledMethodName(const BaseMangler& mangler, const std::vector<O
 
 Ptr<Annotation> GetForeignNameAnnotation(const Decl& decl);
 
+bool IsSuperConstructorCall(const CallExpr& call);
+
 } // namespace Cangjie::Interop::Java
 
 #endif // CANGJIE_SEMA_NATIVE_FFI_UTILS

@@ -205,4 +205,13 @@ Ptr<Annotation> GetForeignNameAnnotation(const Decl& decl)
     return it != decl.annotations.end() ? it->get() : nullptr;
 }
 
+bool IsSuperConstructorCall(const CallExpr& call)
+{
+    auto baseFunc = As<ASTKind::REF_EXPR>(call.baseFunc.get());
+    if (!baseFunc || !baseFunc->isSuper) {
+        return false;
+    }
+    return call.callKind == CallKind::CALL_SUPER_FUNCTION;
 }
+
+} // namespace Cangjie::Native::FFI

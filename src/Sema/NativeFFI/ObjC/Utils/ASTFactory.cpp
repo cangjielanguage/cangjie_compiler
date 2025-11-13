@@ -1008,7 +1008,7 @@ OwnedPtr<FuncDecl> ASTFactory::CreateImplCtor(ClassDecl& target, FuncDecl& from)
     auto& body = ctor->funcBody->body->body;
     body.erase(std::remove_if(body.begin(), body.end(), [](auto& node) {
         if (auto call = As<ASTKind::CALL_EXPR>(node.get())) {
-            return call->callKind == CallKind::CALL_SUPER_FUNCTION;
+            return IsSuperConstructorCall(*call);
         }
         return false;
         }), body.end());
