@@ -32,14 +32,12 @@ static constexpr auto DOUBLE_TYPE = "double";
 static constexpr auto BOOL_TYPE = "BOOL";
 static constexpr auto STRUCT_TYPE_PREFIX = "struct ";
 
-template<class TypeRep, class ToString>
-std::string buildFunctionalCType(const std::vector<TypeRep>& argTypes,
-    const TypeRep& resultType,
-    char designator,
-    ToString toString)
+template <class TypeRep, class ToString>
+std::string buildFunctionalCType(
+    const std::vector<TypeRep>& argTypes, const TypeRep& resultType, char designator, ToString toString)
 {
     std::string result = toString(resultType);
-    result.append({ '(', designator, ')', '(' });
+    result.append({'(', designator, ')', '('});
     for (auto& argType : argTypes) {
         result.append(toString(argType));
         result.push_back(',');
@@ -79,11 +77,7 @@ Ptr<Ty> TypeMapper::Cj2CType(Ptr<Ty> cjty) const
             realTypeArgs.push_back(Cj2CType(paramTy));
         }
         return typeManager.GetPointerTy(
-            typeManager.GetFunctionTy(
-                realTypeArgs,
-                Cj2CType(actualFuncType->retTy),
-                { .isC = true }
-            ));
+            typeManager.GetFunctionTy(realTypeArgs, Cj2CType(actualFuncType->retTy), {.isC = true}));
     }
     if (IsObjCBlock(*cjty)) {
         return bridge.GetNativeObjCIdTy();
@@ -138,9 +132,7 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
                 if (!actualFuncType) {
                     return UNSUPPORTED_TYPE;
                 }
-                return buildFunctionalCType(actualFuncType->paramTys,
-                    actualFuncType->retTy,
-                    '*',
+                return buildFunctionalCType(actualFuncType->paramTys, actualFuncType->retTy, '*',
                     [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
             }
             CJC_ABORT();
@@ -151,9 +143,7 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
                 if (!actualFuncType) {
                     return UNSUPPORTED_TYPE;
                 }
-                return buildFunctionalCType(actualFuncType->paramTys,
-                    actualFuncType->retTy,
-                    '^',
+                return buildFunctionalCType(actualFuncType->paramTys, actualFuncType->retTy, '^',
                     [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
             }
             if (IsObjCObjectType(from)) {
@@ -173,14 +163,11 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
                 return Cj2ObjCForObjC(*from.typeArgs[0]);
             }
             return Cj2ObjCForObjC(*from.typeArgs[0]) + "*";
-        case TypeKind::TYPE_FUNC:
-            {
-                auto actualFuncType = DynamicCast<FuncTy>(&from);
-                return buildFunctionalCType(actualFuncType->paramTys,
-                        actualFuncType->retTy,
-                        '*',
-                        [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
-            }
+        case TypeKind::TYPE_FUNC: {
+            auto actualFuncType = DynamicCast<FuncTy>(&from);
+            return buildFunctionalCType(
+                actualFuncType->paramTys, actualFuncType->retTy, '*', [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
+        }
         case TypeKind::TYPE_ENUM:
             if (!from.IsCoreOptionType()) {
                 CJC_ABORT();
@@ -232,11 +219,8 @@ bool TypeMapper::IsObjCCompatible(const Ty& ty)
                 if (!tyArg->IsFunc() || tyArg->IsCFunc()) {
                     return false;
                 }
-                return std::all_of(
-                    std::begin(tyArg->typeArgs),
-                    std::end(tyArg->typeArgs),
-                    [](auto ty) { return IsObjCCompatible(*ty); }
-                );
+                return std::all_of(std::begin(tyArg->typeArgs), std::end(tyArg->typeArgs),
+                    [](auto ty) { return IsObjCCompatible(*ty); });
             }
             return false;
         case TypeKind::TYPE_CLASS:
@@ -250,11 +234,8 @@ bool TypeMapper::IsObjCCompatible(const Ty& ty)
                 if (!tyArg->IsFunc() || tyArg->IsCFunc()) {
                     return false;
                 }
-                return std::all_of(
-                    std::begin(tyArg->typeArgs),
-                    std::end(tyArg->typeArgs),
-                    [](auto ty) { return IsObjCCompatible(*ty); }
-                );
+                return std::all_of(std::begin(tyArg->typeArgs), std::end(tyArg->typeArgs),
+                    [](auto ty) { return IsObjCCompatible(*ty); });
             }
         case TypeKind::TYPE_ENUM:
             if (!ty.IsCoreOptionType()) {
@@ -328,12 +309,23 @@ bool TypeMapper::IsValidObjCMirror(const Ty& ty)
 
 bool TypeMapper::IsValidObjCMirrorSubtype(const Ty& ty)
 {
-    if (auto classTy = DynamicCast<ClassTy*>(&ty);
-        classTy && classTy->GetSuperClassTy() && !classTy->GetSuperClassTy()->IsObject()) {
-        return IsValidObjCMirrorSubtype(*classTy->GetSuperClassTy()) || IsValidObjCMirror(*classTy->GetSuperClassTy());
+    auto classTy = DynamicCast<ClassTy*>(&ty);
+    if (!classTy) {
+        return false;
     }
 
-    return false;
+    auto hasMirrorSuperInterface = false;
+    for (auto superInterfaceTy : classTy->GetSuperInterfaceTys()) {
+        if (!IsValidObjCMirror(*superInterfaceTy)) {
+            return false;
+        }
+        hasMirrorSuperInterface = true;
+    }
+    if (!classTy->GetSuperClassTy() || classTy->GetSuperClassTy()->IsObject()) {
+        return hasMirrorSuperInterface;
+    }
+
+    return IsValidObjCMirrorSubtype(*classTy->GetSuperClassTy()) || IsValidObjCMirror(*classTy->GetSuperClassTy());
 }
 
 bool TypeMapper::IsObjCImpl(const Ty& ty)
@@ -354,13 +346,13 @@ bool TypeMapper::IsSyntheticWrapper(const Ty& ty)
     return classLikeTy && classLikeTy->commonDecl && IsSyntheticWrapper(*classLikeTy->commonDecl);
 }
 
-bool TypeMapper::IsObjCObjectType(const Ty& ty) {
+bool TypeMapper::IsObjCObjectType(const Ty& ty)
+{
     if (ty.IsCoreOptionType()) {
         CJC_ASSERT(ty.typeArgs.size() == 1);
         return IsObjCObjectType(*ty.typeArgs[0]);
     }
-    return IsObjCMirror(ty) || IsObjCImpl(ty)
-        || IsSyntheticWrapper(ty) || IsObjCCJMapping(ty);
+    return IsObjCMirror(ty) || IsObjCImpl(ty) || IsSyntheticWrapper(ty) || IsObjCCJMapping(ty);
 }
 
 namespace {
