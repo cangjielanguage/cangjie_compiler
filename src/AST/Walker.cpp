@@ -78,9 +78,6 @@ VisitAction WalkerT<NodeT>::Walk(Ptr<NodeT> curNode) const
                 auto package = StaticAs<ASTKind::PACKAGE>(curNode);
                 // In mock process, genericInstantiatedDecls may change during iteration, so don't using iterator
                 for (size_t i = 0; i < package->genericInstantiatedDecls.size(); ++i) {
-                    if (package->genericInstantiatedDecls[i]->TestAttr(Attribute::FROM_COMMON_PART)) {
-                        continue;
-                    }
                     if (Walk(package->genericInstantiatedDecls[i].get()) == VisitAction::STOP_NOW) {
                         return VisitAction::STOP_NOW;
                     }
