@@ -401,8 +401,7 @@ Ptr<Value> Translator::TranslateConstructorFunc(const AST::Decl& parent, const A
         FuncBase* varInitFunc = typeDef->GetVarInitializationFunc();
         CJC_NULLPTR_CHECK(varInitFunc);
         std::vector<Value*> args{thisVar};
-        auto loc = TranslateLocation(funcBody);
-        CreateAndAppendExpression<Apply>(loc, varInitFunc->GetReturnType(), varInitFunc, FuncCallContext{
+        CreateAndAppendExpression<Apply>(DebugLocation(), varInitFunc->GetReturnType(), varInitFunc, FuncCallContext{
             .args = args,
             .thisType = thisVar->GetType()}, currentBlock);
     }
