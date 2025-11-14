@@ -284,6 +284,10 @@ void TypeChecker::TypeCheckerImpl::CheckIllegalMemberWalker(
             if (refExpr && ((refExpr->isThis && reportThis) || refExpr->isSuper)) {
                 diag.Diagnose(*ma, DiagKind::sema_assignment_of_member_variable_cannot_use_this_or_super,
                     refExpr->ref.identifier.Val(), errorStr);
+                return VisitAction::SKIP_CHILDREN;
+            }
+            if (refExpr && (refExpr->isThis || refExpr->isSuper)) {
+                CheckIllegalMemberHelper(ctx, reportThis, errorStr, *ma);
             }
             return VisitAction::SKIP_CHILDREN;
         } else {
@@ -294,13 +298,13 @@ void TypeChecker::TypeCheckerImpl::CheckIllegalMemberWalker(
 }
 
 void TypeChecker::TypeCheckerImpl::CheckIllegalMemberHelper(
-    const ASTContext& ctx, bool reportThis, const std::string& errorStr, const RefExpr& re)
+    const ASTContext& ctx, bool reportThis, const std::string& errorStr, const NameReferenceExpr& nre)
 {
-    auto target = re.ref.target;
+    auto target = nre.GetTarget();
     bool isInstanceMember = target != nullptr && target->outerDecl && target->outerDecl->IsNominalDecl() &&
         !target->TestAnyAttr(Attribute::CONSTRUCTOR, Attribute::ENUM_CONSTRUCTOR, Attribute::STATIC);
     if (isInstanceMember) {
-        Symbol* symOfExprStruct = ScopeManager::GetCurSymbolByKind(SymbolKind::STRUCT, ctx, re.scopeName);
+        Symbol* symOfExprStruct = ScopeManager::GetCurSymbolByKind(SymbolKind::STRUCT, ctx, nre.scopeName);
         if (symOfExprStruct == nullptr) {
             return; // If the reference is not inside any structure decl, quit now.
         }
@@ -310,14 +314,18 @@ void TypeChecker::TypeCheckerImpl::CheckIllegalMemberHelper(
         CJC_NULLPTR_CHECK(symOfDeclStruct->node);
         CJC_NULLPTR_CHECK(symOfExprStruct->node);
         bool inSameDecl = symOfExprStruct == symOfDeclStruct;
+        std::string identifier = nre.astKind == ASTKind::REF_EXPR ? StaticCast<RefExpr>(&nre)->ref.identifier.Val()
+                                                                  : StaticCast<MemberAccess>(&nre)->field.Val();
+        Position pos =
+            nre.astKind == ASTKind::REF_EXPR ? nre.GetBegin() : StaticCast<MemberAccess>(&nre)->field.Begin();
         if (inSameDecl && reportThis) {
             // Report error when this reference and declaration are in same decl.
-            diag.Diagnose(re, DiagKind::sema_assignment_of_member_variable_cannot_use_this_or_super,
-                re.ref.identifier.Val(), errorStr);
+            diag.Diagnose(
+                pos, DiagKind::sema_assignment_of_member_variable_cannot_use_this_or_super, identifier, errorStr);
         } else if (!inSameDecl && typeManager.IsSubtype(symOfExprStruct->node->ty, symOfExprStruct->node->ty)) {
             // Report error when this reference and declaration are in decls which have inheritance relation.
-            diag.Diagnose(re, DiagKind::sema_assignment_of_member_variable_cannot_use_this_or_super,
-                re.ref.identifier.Val(), errorStr);
+            diag.Diagnose(
+                pos, DiagKind::sema_assignment_of_member_variable_cannot_use_this_or_super, identifier, errorStr);
         }
     }
 }

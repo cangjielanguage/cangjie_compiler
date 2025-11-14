@@ -16,12 +16,12 @@
 #include <map>
 #include <set>
 
+#include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/ScopeManagerApi.h"
 #include "cangjie/AST/Symbol.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
-#include "cangjie/AST/Create.h"
 
 namespace Cangjie::TypeCheckUtil {
 using namespace AST;
@@ -35,8 +35,8 @@ std::vector<TypeKind> GetIdealTypesByKind(TypeKind type)
 {
     if (type == TypeKind::TYPE_IDEAL_INT) {
         return {TypeKind::TYPE_INT8, TypeKind::TYPE_INT16, TypeKind::TYPE_INT32, TypeKind::TYPE_INT_NATIVE,
-                TypeKind::TYPE_INT64, TypeKind::TYPE_UINT8, TypeKind::TYPE_UINT16,
-                TypeKind::TYPE_UINT32, TypeKind::TYPE_UINT64, TypeKind::TYPE_UINT_NATIVE};
+            TypeKind::TYPE_INT64, TypeKind::TYPE_UINT8, TypeKind::TYPE_UINT16, TypeKind::TYPE_UINT32,
+            TypeKind::TYPE_UINT64, TypeKind::TYPE_UINT_NATIVE};
     } else if (type == TypeKind::TYPE_IDEAL_FLOAT) {
         return {TypeKind::TYPE_FLOAT16, TypeKind::TYPE_FLOAT32, TypeKind::TYPE_FLOAT64};
     }
@@ -277,25 +277,39 @@ MultiTypeSubst GenerateTypeMappingBetweenFuncs(TypeManager& typeManager, const F
 }
 
 // Check if src is an override or implement of target. DO NOT call 'Synthesize'.
-bool IsOverrideOrShadow(TypeManager& typeManager, const FuncDecl& src, const FuncDecl& target, Ptr<Ty> baseTy)
+bool IsOverrideOrShadow(TypeManager& typeManager, const FuncDecl& src, const FuncDecl& target, const Ptr<Ty> baseTy,
+    const Ptr<AST::Ty> expectInstParent)
 {
-    if (auto ret = typeManager.GetOverrideCache(&src, &target, baseTy); ret.has_value()) {
+    if (auto ret = typeManager.GetOverrideCache(&src, &target, baseTy, expectInstParent); ret.has_value()) {
         return ret.value();
     }
     auto srcFt = DynamicCast<FuncTy*>(src.ty);
     auto targetFt = DynamicCast<FuncTy*>(target.ty);
-    MultiTypeSubst mts = GenerateTypeMappingBetweenFuncs(typeManager, src, target);
-    auto typeMappings = ExpandMultiTypeSubst(mts, {srcFt, targetFt});
+    MultiTypeSubst mts;
+    if (expectInstParent) {
+        CJC_ASSERT(src.outerDecl && Is<InheritableDecl>(src.outerDecl));
+        MergeTypeSubstToMultiTypeSubst(mts, GenerateTypeMappingByTy(target.outerDecl->ty, expectInstParent));
+        auto substituteToParent = Promotion(typeManager).Promote(*src.outerDecl->ty, *target.outerDecl->ty);
+        for (auto p : substituteToParent) {
+            MergeTypeSubstToMultiTypeSubst(mts, GenerateTypeMappingByTy(p, expectInstParent));
+        }
+        if (target.TestAttr(Attribute::GENERIC) && src.TestAttr(Attribute::GENERIC)) {
+            MergeTypeSubstToMultiTypeSubst(mts, typeManager.GenerateGenericMappingFromGeneric(target, src));
+        }
+    } else {
+        mts = GenerateTypeMappingBetweenFuncs(typeManager, src, target);
+    }
+    std::set<TypeSubst> typeMappings = ExpandMultiTypeSubst(mts, {srcFt, targetFt});
     for (auto typeMapping : typeMappings) {
         auto srcParamTys = srcFt ? srcFt->paramTys : GetParamTys(src);
         auto targetParamTys = targetFt ? targetFt->paramTys : GetParamTys(target);
         if (srcParamTys.size() != targetParamTys.size()) {
-            typeManager.AddOverrideCache(&src, &target, baseTy, false);
+            typeManager.AddOverrideCache(src, target, baseTy, expectInstParent, false);
             return false;
         }
         // Only generate typeMapping by base type, if functions' outerDecls are irrelevant.
-        // eg: interface I1 { func foo() : Int64 }, interface I2 { func foo() : Int64}
-        // class/interface Type3 <: I1&I2 { func foo() : Int64 {0}}
+        // eg: interface I1 { func foo(): Int64 }, interface I2 { func foo(): Int64 }
+        // class/interface Type3 <: I1 & I2 { func foo() : Int64 {0}}
         if (Ty::IsTyCorrect(baseTy) && Is<InterfaceDecl>(src.outerDecl) && Is<InterfaceDecl>(target.outerDecl)) {
             auto parentStructTy = typeManager.GetInstantiatedTy(target.outerDecl->ty, typeMapping);
             auto childStructTy = typeManager.GetInstantiatedTy(src.outerDecl->ty, typeMapping);
@@ -313,11 +327,11 @@ bool IsOverrideOrShadow(TypeManager& typeManager, const FuncDecl& src, const Fun
             it = typeManager.GetInstantiatedTy(it, typeMapping);
         }
         if (typeManager.IsFuncParameterTypesIdentical(srcParamTys, targetParamTys)) {
-            typeManager.AddOverrideCache(&src, &target, baseTy, true);
+            typeManager.AddOverrideCache(src, target, baseTy, expectInstParent, true);
             return true;
         }
     }
-    typeManager.AddOverrideCache(&src, &target, baseTy, false);
+    typeManager.AddOverrideCache(src, target, baseTy, expectInstParent, false);
     return false;
 }
 
@@ -325,8 +339,8 @@ bool IsOverrideOrShadow(TypeManager& typeManager, const FuncDecl& src, const Fun
 bool IsOverrideOrShadow(TypeManager& typeManager, const PropDecl& src, const PropDecl& target, Ptr<Ty> baseTy)
 {
     CJC_ASSERT(src.outerDecl);
-    auto mst = typeManager.GenerateStructDeclTypeMapping(*src.outerDecl);
-    auto typeMapping = MultiTypeSubstToTypeSubst(mst);
+    MultiTypeSubst mts = typeManager.GenerateStructDeclTypeMapping(*src.outerDecl);
+    auto typeMapping = MultiTypeSubstToTypeSubst(mts);
     // Only generate typeMapping by base type, if functions' outerDecls are irrelevant.
     // eg: interface I1 { func foo() : Int64 }, interface I2 { func foo() : Int64}
     // class/interface Type3 <: I1&I2 { func foo() : Int64 {0}}
@@ -334,8 +348,8 @@ bool IsOverrideOrShadow(TypeManager& typeManager, const PropDecl& src, const Pro
         auto parentStructTy = typeManager.GetInstantiatedTy(target.outerDecl->ty, typeMapping);
         auto childStructTy = typeManager.GetInstantiatedTy(src.outerDecl->ty, typeMapping);
         if (!typeManager.IsSubtype(childStructTy, parentStructTy)) {
-            typeManager.GenerateGenericMapping(mst, *baseTy);
-            typeMapping.merge(MultiTypeSubstToTypeSubst(mst));
+            typeManager.GenerateGenericMapping(mts, *baseTy);
+            typeMapping.merge(MultiTypeSubstToTypeSubst(mts));
         }
     }
     auto srcTy = src.type ? src.type->ty : src.ty;
@@ -705,79 +719,62 @@ TyVars GetTyVarsToSolve(const SubstPack& maps)
     return ret;
 }
 
-// The argument hasTy and tyInArgOrder will be modified.
-void CollectParamTyInArgsOrderAccordingToArgName(const FuncDecl& fd, const std::vector<bool>& marks,
-    const std::string argName, std::vector<bool>& hasTy, std::vector<Ptr<Ty>>& tyInArgOrder)
-{
-    if (auto res = GetParamTyAccordingToArgName(fd, argName)) {
-        auto [ty, index] = res.value();
-        tyInArgOrder.push_back(ty);
-        if (marks[index]) {
-            // When mark[index] is true, the current argument's type has been added to argsTy already.
-            // A parameter cannot be assigned two values. So return false.
-            tyInArgOrder.clear();
-            return;
-        }
-        hasTy[index] = true;
-    } else {
-        tyInArgOrder.clear();
-    }
-}
-
 /**
  * This function is only used to collect param types in arguments order and will NOT report diagnostics.
  */
-std::vector<Ptr<Ty>> GetParamTysInArgsOrder(
-    TypeManager& tyMgr, const CallExpr& ce, const FuncDecl& fd)
+std::vector<Ptr<Ty>> GetParamTysInArgsOrder(TypeManager& tyMgr, const CallExpr& ce, const FuncDecl& fd)
 {
     if (!fd.funcBody || fd.funcBody->paramLists.empty()) {
         return {};
     }
     auto& paramList = fd.funcBody->paramLists[0];
-    // Record the type of the default parameter first.
-    std::vector<bool> hasTy;
-    for (auto& param : paramList->params) {
-        hasTy.push_back(param->TestAttr(Attribute::HAS_INITIAL));
+    // Record whether the position of parameters has ty.
+    std::vector<bool> paramHasTy(paramList->params.size(), false);
+    // If a parameter has a default value, it is already specified as ty by default.
+    for (size_t i = 0; i < paramList->params.size(); ++i) {
+        paramHasTy[i] = paramList->params[i]->TestAttr(Attribute::HAS_INITIAL);
     }
-    // Help to mark the arguments whose type have been added to argsTy.
-    std::vector<bool> marks(ce.args.size(), false);
+
     // Help to record whether named argument has been appear.
     bool namedArgFound = false;
-    size_t pos = 0;
-    size_t funcDeclParamListLen = paramList->params.size();
     std::vector<Ptr<Ty>> tyInArgOrder;
-    for (auto& arg : ce.args) {
-        std::string argName = GetArgName(fd, *arg);
+    for (size_t i = 0; i < ce.args.size(); ++i) {
+        std::string argName = GetArgName(fd, *ce.args[i]);
         if (argName.empty()) {
-            // Positional argument can not appear after named argument.
+            // Unnamed argument can not appear after named argument.
             if (namedArgFound) {
                 return {};
             }
-            if (pos < funcDeclParamListLen) {
-                CJC_NULLPTR_CHECK(paramList->params[pos]);
-                tyInArgOrder.push_back(paramList->params[pos]->ty);
-                hasTy[pos] = true;
+            // So the index of the unnamed parameter argument should match the index of the formal parameter.
+            if (i < paramList->params.size()) {
+                CJC_NULLPTR_CHECK(paramList->params[i]);
+                tyInArgOrder.emplace_back(paramList->params[i]->ty);
+                paramHasTy[i] = true;
             } else if (fd.TestAttr(Attribute::C)) {
                 // For C FFI variable-length arguments.
                 tyInArgOrder.emplace_back(tyMgr.GetCTypeTy());
             } else if (HasJavaAttr(fd)) {
+                // For JavaScript or Java FFI variable-length arguments.
                 tyInArgOrder.emplace_back(tyMgr.GetAnyTy());
             } else {
                 // Cangjie's variable-length arguments are handled by `ChkVariadicCallExpr`.
                 // The number of arguments mismatches the number of parameters here.
                 return {};
             }
-            marks[pos] = true;
-            ++pos;
+            continue;
+        }
+        // Named argument.
+        namedArgFound = true;
+        if (auto res = GetParamTyAccordingToArgName(fd, argName)) {
+            auto [ty, index] = res.value();
+            tyInArgOrder.emplace_back(ty);
+            CJC_ASSERT(index < paramHasTy.size());
+            paramHasTy[index] = true;
         } else {
-            namedArgFound = true;
-            CollectParamTyInArgsOrderAccordingToArgName(fd, marks, argName, hasTy, tyInArgOrder);
-            if (tyInArgOrder.empty()) {
-                return {};
-            }
+            return {};
         }
     }
-    for (auto it : std::as_const(hasTy)) {
+    for (auto it : std::as_const(paramHasTy)) {
         if (!it) {
             return {};
         }
@@ -794,7 +791,7 @@ bool IsEnumCtorWithoutTypeArgs(const Expr& expr, Ptr<const Decl> target)
         // For enum like 'None'.
         return expr.GetTypeArgs().empty();
     } else if (auto ma = DynamicCast<const MemberAccess*>(&expr);
-               ma && ma->baseExpr && ma->baseExpr->IsReferenceExpr()) {
+        ma && ma->baseExpr && ma->baseExpr->IsReferenceExpr()) {
         auto baseTypeArgs = ma->baseExpr->GetTypeArgs();
         auto baseDecl = ma->baseExpr->GetTarget();
         CJC_NULLPTR_CHECK(baseDecl);
@@ -822,9 +819,9 @@ const std::unordered_set<AST::ASTKind> PLACEHOLDABLE_NODES{ASTKind::PATTERN, AST
     ASTKind::CONST_PATTERN, ASTKind::TUPLE_PATTERN, ASTKind::ENUM_PATTERN, ASTKind::VAR_OR_ENUM_PATTERN,
     ASTKind::TYPE_PATTERN, ASTKind::EXCEPT_TYPE_PATTERN, ASTKind::WILDCARD_PATTERN, ASTKind::CALL_EXPR,
     ASTKind::PAREN_EXPR, ASTKind::MEMBER_ACCESS, ASTKind::REF_EXPR, ASTKind::OPTIONAL_EXPR,
-    ASTKind::OPTIONAL_CHAIN_EXPR, ASTKind::MATCH_EXPR, ASTKind::BLOCK,
-    ASTKind::IF_EXPR, ASTKind::TRY_EXPR, ASTKind::LAMBDA_EXPR, ASTKind::TRAIL_CLOSURE_EXPR, ASTKind::SPAWN_EXPR,
-    ASTKind::MATCH_CASE, ASTKind::MATCH_CASE_OTHER, ASTKind::FUNC_ARG, ASTKind::FUNC_BODY, ASTKind::FUNC_PARAM};
+    ASTKind::OPTIONAL_CHAIN_EXPR, ASTKind::MATCH_EXPR, ASTKind::BLOCK, ASTKind::IF_EXPR, ASTKind::TRY_EXPR,
+    ASTKind::LAMBDA_EXPR, ASTKind::TRAIL_CLOSURE_EXPR, ASTKind::SPAWN_EXPR, ASTKind::MATCH_CASE,
+    ASTKind::MATCH_CASE_OTHER, ASTKind::FUNC_ARG, ASTKind::FUNC_BODY, ASTKind::FUNC_PARAM};
 
 bool AcceptPlaceholderTarget(const AST::Node& n)
 {
@@ -834,6 +831,21 @@ bool AcceptPlaceholderTarget(const AST::Node& n)
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
 bool IsNeedRuntimeCheck(TypeManager& typeManager, Ty& srcTy, Ty& targetTy)
 {
+    auto isFinalType = [](Ty& ty) {
+        if (ty.IsStruct() || ty.IsEnum() || ty.IsPointer() || ty.IsCString() || ty.IsPrimitive() || Is<VArrayTy>(ty)) {
+            return true;
+        }
+        if (ty.IsClass()) {
+            auto decl = Ty::GetDeclPtrOfTy(&ty);
+            return decl && !decl->TestAnyAttr(Attribute::ABSTRACT, Attribute::OPEN);
+        }
+        return false;
+    };
+    if (isFinalType(srcTy) && isFinalType(targetTy)) {
+        auto srcDecl = Ty::GetDeclPtrOfTy(&srcTy);
+        auto targetDecl = Ty::GetDeclPtrOfTy(&targetTy);
+        return srcDecl == targetDecl;
+    }
     return (srcTy.IsClassLike() && targetTy.IsClassLike()) || srcTy.IsGeneric() || targetTy.IsGeneric() ||
         srcTy.HasGeneric() || targetTy.HasGeneric() || typeManager.IsSubtype(&srcTy, &targetTy, true, false) ||
         typeManager.IsSubtype(&targetTy, &srcTy, true, false);
@@ -858,7 +870,7 @@ Ptr<AST::TypeAliasDecl> GetLastTypeAliasTargetVisit(
     }
     return target;
 }
-}
+} // namespace
 
 Ptr<AST::TypeAliasDecl> GetLastTypeAliasTarget(AST::TypeAliasDecl& decl)
 {
@@ -878,8 +890,7 @@ void MergeSubstPack(SubstPack& target, const SubstPack& src)
 // decide if one type is subtype/supertype of all types. subtype or supertype is specified by lessThan
 bool LessThanAll(Ptr<Ty> ty, const std::set<Ptr<Ty>>& tys, const std::function<bool(Ptr<Ty>, Ptr<Ty>)>& lessThan)
 {
-    return std::all_of(
-        tys.cbegin(), tys.cend(), [ty, &lessThan](Ptr<Ty> element) { return lessThan(ty, element); });
+    return std::all_of(tys.cbegin(), tys.cend(), [ty, &lessThan](Ptr<Ty> element) { return lessThan(ty, element); });
 }
 
 Ptr<Ty> FindSmallestTy(const std::set<Ptr<Ty>>& tys, const std::function<bool(Ptr<Ty>, Ptr<Ty>)>& lessThan)
@@ -920,9 +931,7 @@ void TryEnforceCandidate(TyVar& tv, const std::set<Ptr<Decl>>& candidates, TypeM
         declTys.emplace(d->ty);
     }
     auto pro = Promotion(tyMgr);
-    auto isSuperDecl = [&pro](Ptr<Ty> sup, Ptr<Ty> sub) {
-        return sub && sup && !pro.Promote(*sub, *sup).empty();
-    };
+    auto isSuperDecl = [&pro](Ptr<Ty> sup, Ptr<Ty> sub) { return sub && sup && !pro.Promote(*sub, *sup).empty(); };
     // try to find the most general type
     auto uniq = FindSmallestTy(declTys, isSuperDecl);
     if (Ty::IsTyCorrect(uniq)) {
@@ -1006,26 +1015,18 @@ std::set<Ptr<AST::Ty>> GetGenericParamsForCall(const AST::CallExpr& ce, const AS
     return ret;
 }
 
-std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(
-    InheritableDecl& decl,
-    TypeManager& typeManager,
-    std::vector<OwnedPtr<Expr>>& valueArgs,
-    const std::vector<Ptr<Ty>> instTys)
+std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(InheritableDecl& decl, TypeManager& typeManager,
+    std::vector<OwnedPtr<Expr>>& valueArgs, const std::vector<Ptr<Ty>> instTys)
 {
     std::vector<Ptr<Ty>> valueParamTys;
     std::transform(
-        valueArgs.begin(), valueArgs.end(), std::back_inserter(valueParamTys),
-        [] (auto & arg) { return arg->ty; }
-    );
+        valueArgs.begin(), valueArgs.end(), std::back_inserter(valueParamTys), [](auto& arg) { return arg->ty; });
 
     return FindInitDecl(decl, typeManager, valueParamTys, instTys);
 }
 
-std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(
-    InheritableDecl& decl,
-    TypeManager& typeManager,
-    const std::vector<Ptr<Ty>> valueParamTys,
-    const std::vector<Ptr<Ty>> instTys)
+std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(InheritableDecl& decl, TypeManager& typeManager,
+    const std::vector<Ptr<Ty>> valueParamTys, const std::vector<Ptr<Ty>> instTys)
 {
     auto initFuncDecl = GetMemberDecl<FuncDecl>(decl, "init", valueParamTys, typeManager);
 
@@ -1034,21 +1035,15 @@ std::optional<std::pair<Ptr<FuncDecl>, Ptr<Ty>>> FindInitDecl(
     }
 
     return std::make_pair(
-        initFuncDecl,
-        typeManager.GetInstantiatedTy(initFuncDecl->ty, GenerateTypeMapping(decl, instTys)));
+        initFuncDecl, typeManager.GetInstantiatedTy(initFuncDecl->ty, GenerateTypeMapping(decl, instTys)));
 }
 
-OwnedPtr<CallExpr> CreateInitCall(
-    const std::pair<Ptr<FuncDecl>, Ptr<Ty>> initDeclInfo,
-    std::vector<OwnedPtr<Expr>>& valueArgs,
-    File& curFile,
-    const std::vector<Ptr<Ty>> instTys)
+OwnedPtr<CallExpr> CreateInitCall(const std::pair<Ptr<FuncDecl>, Ptr<Ty>> initDeclInfo,
+    std::vector<OwnedPtr<Expr>>& valueArgs, File& curFile, const std::vector<Ptr<Ty>> instTys)
 {
     std::vector<OwnedPtr<FuncArg>> valueFuncArgs;
-    std::transform(
-        valueArgs.begin(), valueArgs.end(), std::back_inserter(valueFuncArgs),
-        [] (auto & arg) { return CreateFuncArg(std::move(arg)); }
-    );
+    std::transform(valueArgs.begin(), valueArgs.end(), std::back_inserter(valueFuncArgs),
+        [](auto& arg) { return CreateFuncArg(std::move(arg)); });
 
     auto call = MakeOwned<CallExpr>();
     auto initDecl = initDeclInfo.first;

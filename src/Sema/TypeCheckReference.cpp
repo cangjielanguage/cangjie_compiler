@@ -553,6 +553,9 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::FilterAndGetTargetsOfObjAccess(
 void TypeChecker::TypeCheckerImpl::InstantiateReferenceType(
     const ASTContext& ctx, NameReferenceExpr& expr, const TypeSubst& instantiateMap)
 {
+    if (expr.compilerAddedTyArgs) {
+        expr.typeArguments.clear();
+    }
     auto target = expr.GetTarget();
     if (!expr.GetTypeArgs().empty()) {
         // For partial generic typealias case.

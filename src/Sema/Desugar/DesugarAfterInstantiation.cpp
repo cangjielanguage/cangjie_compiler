@@ -137,8 +137,7 @@ void AutoBoxing::TryOptionBox(EnumTy& target, Expr& expr)
     auto baseFunc = CreateRefExpr(OPTION_VALUE_CTOR);
     baseFunc->EnableAttr(Attribute::IMPLICIT_ADD);
     baseFunc->ref.target = optionDecl;
-    baseFunc->ty =
-        typeManager.GetInstantiatedTy(optionDecl->ty, GenerateTypeMapping(*ed, target.typeArgs));
+    baseFunc->ty = typeManager.GetInstantiatedTy(optionDecl->ty, GenerateTypeMapping(*ed, target.typeArgs));
 
     std::vector<OwnedPtr<FuncArg>> arg;
     if (expr.desugarExpr) {
@@ -242,6 +241,10 @@ VisitAction AutoBoxing::AddOptionBoxHandleIfExpr(const IfExpr& ie)
     if (ie.hasElse && ie.elseBody) {
         if (auto block = DynamicCast<Block*>(ie.elseBody.get()); block) {
             AddOptionBoxHandleBlock(*block, *ie.ty);
+        } else if (auto elseifExpr = DynamicCast<IfExpr*>(ie.elseBody.get());
+            elseifExpr && Ty::IsTyCorrect(elseifExpr->ty) && NeedBoxOption(*elseifExpr->ty, *ie.ty)) {
+            TryOptionBox(*StaticCast<EnumTy*>(ie.ty), *elseifExpr);
+            elseifExpr->ty = ie.ty;
         }
     }
     return VisitAction::WALK_CHILDREN;

@@ -993,6 +993,29 @@ bool FileExist(const std::string& path, [[maybe_unused]] bool caseSensitive)
     } while (FindNextFileA(hFind, &findData));
     FindClose(hFind);
     return false;
+#elif defined(__APPLE__) || defined(__linux__)
+    if (!Access(path, FM_EXIST)) {
+        return false;
+    }
+    if (!caseSensitive) {
+        return true;
+    }
+    size_t lastSlash = path.find_last_of(DIR_SEPARATOR);
+    std::string dirPath = (lastSlash == std::string::npos) ? "." : path.substr(0, lastSlash);
+    std::string fileName = (lastSlash == std::string::npos) ? path : path.substr(lastSlash + 1);
+    DIR* dir = opendir(dirPath.c_str());
+    if (!dir) {
+        return false;
+    }
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (fileName == entry->d_name) {
+            closedir(dir);
+            return true;
+        }
+    }
+    closedir(dir);
+    return false;
 #else
     return Access(path, FM_EXIST);
 #endif

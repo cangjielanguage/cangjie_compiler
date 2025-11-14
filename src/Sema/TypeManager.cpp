@@ -1658,9 +1658,10 @@ std::set<Ptr<ExtendDecl>> TypeManager::GetBuiltinTyExtends(Ty& ty)
     return {};
 }
 
-std::optional<bool> TypeManager::GetOverrideCache(const AST::FuncDecl* src, const AST::FuncDecl* target, Ty* baseTy)
+std::optional<bool> TypeManager::GetOverrideCache(
+    const AST::FuncDecl* src, const AST::FuncDecl* target, Ty* baseTy, Ty* expectInstParent)
 {
-    OverrideOrShadowKey key(src, target, baseTy);
+    OverrideOrShadowKey key(src, target, baseTy, expectInstParent);
     auto it = overrideOrShadowCache.find(key);
     if (it != overrideOrShadowCache.end()) {
         return it->second;
@@ -1668,9 +1669,10 @@ std::optional<bool> TypeManager::GetOverrideCache(const AST::FuncDecl* src, cons
     return {};
 }
 
-void TypeManager::AddOverrideCache(const AST::FuncDecl* src, const AST::FuncDecl* target, Ty* baseTy, bool val)
+void TypeManager::AddOverrideCache(
+    const AST::FuncDecl& src, const AST::FuncDecl& target, Ty* baseTy, Ty* expectInstParent, bool val)
 {
-    OverrideOrShadowKey key(src, target, baseTy);
+    OverrideOrShadowKey key(&src, &target, baseTy, expectInstParent);
     overrideOrShadowCache.emplace(key, val);
 }
 
@@ -2110,13 +2112,14 @@ std::set<Ptr<Ty>> TypeManager::ApplySubstPackNonUniq(
     return GetInstantiatedTys(t1, maps.inst);
 }
 
-bool TypeManager::PairIsOverrideOrImpl(const Decl& child, const Decl& parent, const Ptr<AST::Ty> baseTy)
+bool TypeManager::PairIsOverrideOrImpl(
+    const Decl& child, const Decl& parent, const Ptr<AST::Ty> baseTy, const Ptr<AST::Ty> parentTy)
 {
     if (child.astKind != parent.astKind || child.identifier.Val() != parent.identifier.Val()) {
         return false;
     }
     return child.astKind == ASTKind::FUNC_DECL
-        ? IsOverrideOrShadow(*this, StaticCast<FuncDecl>(child), StaticCast<FuncDecl>(parent), baseTy)
+        ? IsOverrideOrShadow(*this, StaticCast<FuncDecl>(child), StaticCast<FuncDecl>(parent), baseTy, parentTy)
         : IsOverrideOrShadow(*this, StaticCast<PropDecl>(child), StaticCast<PropDecl>(parent), baseTy);
 }
 
