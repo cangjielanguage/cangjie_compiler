@@ -36,8 +36,6 @@ bool InvokeMethod(MacroCall& macCall, CompilerInstance* ci)
     if (ci->invocation.globalOptions.enableMacroInLSP) {
         // Collect parent name for MacroContext in child process.
         CollectParentMacroName(macCall);
-        // Return and FindMacroDefMethod in child process for lsp.
-        return true;
     }
     return macCall.FindMacroDefMethod(ci);
 }
@@ -255,6 +253,7 @@ bool MacroCall::ResolveMacroCall(CompilerInstance* instance)
     if (!bindInvokeFunc) {
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         (void)instance->diag.Diagnose(GetBeginPos(), DiagKind::macro_cannot_find_method, GetFullName());
+        status = MacroEvalStatus::FAIL;
 #endif
         return false;
     }
