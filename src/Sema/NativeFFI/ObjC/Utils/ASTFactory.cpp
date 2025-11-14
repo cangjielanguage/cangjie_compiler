@@ -340,18 +340,16 @@ OwnedPtr<Expr> ASTFactory::UnwrapObjCMirrorOption(
 }
 /*
     WRAP [HADNLE -> OPTION]
-    match (handle.isNull) {
+    {
+    match (handle.isNull()) {
         case false => Some(T(handle)) | Some(getFromRegistry(handle))
         case true => None
     }
+    }()
  */
 OwnedPtr<Expr> ASTFactory::WrapObjCMirrorOption(
     const Ptr<Expr> entity, Ptr<ClassLikeDecl> mirror, const Ptr<File> curFile)
 {
-    //CJC_ASSERT(ty->IsCoreOptionType());
-    // auto curFile = entity->curFile;
-    // CJC_NULLPTR_CHECK(curFile);
-    //CJC_ASSERT(IsMirror(*decl) || IsImpl(*decl));
     std::vector<OwnedPtr<Node>> nodes;
     auto baseTy = typeManager.GetPointerTy(typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
     auto tmpVar = CreateTmpVarDecl(CreateType(baseTy), entity);
@@ -369,6 +367,8 @@ OwnedPtr<Expr> ASTFactory::WrapObjCMirrorOption(
     auto isInstanceCall = WithinFile(CreateGetObjcEntityOrNullCall(*tmpVar, curFile), curFile);
     auto boolMatch = CreateBoolMatch(
         std::move(isInstanceCall), std::move(trueBranch), std::move(falseBranch), GetOptionTy(castTy));
+    boolMatch->begin = entity->begin;
+    boolMatch->end = entity->end;
     nodes.push_back(std::move(tmpVar));
     nodes.push_back(std::move(boolMatch));
     return WrapReturningLambdaCall(typeManager, std::move(nodes));
@@ -415,10 +415,10 @@ OwnedPtr<Expr> ASTFactory::CreateGetObjcEntityOrNullCall(VarDecl &entity, Ptr<Fi
     auto extends = typeManager.GetBuiltinTyExtends(*extendTy);
     CJC_ASSERT(extends.size() != 0);
     auto members = (extends.begin())->get();
-    Ptr<Decl> isNullMember;
+    Ptr<FuncDecl> isNullMember;
     for (auto m : members->GetMemberDeclPtrs()) {
         if (m->identifier.GetRawText() == "isNull") {
-            isNullMember = m;
+            isNullMember = StaticAs<ASTKind::FUNC_DECL>(m);
             break;
         }
     }
@@ -431,7 +431,7 @@ OwnedPtr<Expr> ASTFactory::CreateGetObjcEntityOrNullCall(VarDecl &entity, Ptr<Fi
     isNullAccess->curFile = entity.curFile;
 
     auto resultCall = CreateCallExpr(std::move(isNullAccess), {},
-        nullptr, typeManager.GetBoolTy(), CallKind::CALL_DECLARED_FUNCTION);
+        isNullMember, typeManager.GetBoolTy(), CallKind::CALL_DECLARED_FUNCTION);
     auto result = WithinFile(std::move(resultCall), file);
     result->ty = typeManager.GetBoolTy();
     return result;
@@ -610,7 +610,7 @@ OwnedPtr<FuncDecl> ASTFactory::CreateMethodWrapper(FuncDecl& method)
         auto originParam = originParams[i - index].get();
 
         auto paramRef = CreateRefExpr(*wrapperParam);
-        auto wrappedParamRef = WrapEntity(std::move(paramRef), *originParam->ty);
+        auto wrappedParamRef = WrapEntity(WithinFile(std::move(paramRef), method.curFile), *originParam->ty);
         auto arg = CreateFuncArg(std::move(wrappedParamRef), wrapperParam->identifier, originParam->ty);
         methodArgs.emplace_back(std::move(arg));
     }
