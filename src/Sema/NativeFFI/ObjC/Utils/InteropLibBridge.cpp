@@ -44,12 +44,100 @@ constexpr auto INTEROPLIB_OBJ_C_MSG_SEND = "objCMsgSend";
 constexpr auto INTEROPLIB_OBJ_C_MSG_SEND_SUPER = "objCMsgSendSuper";
 constexpr auto INTEROPLIB_OBJ_C_RELEASE = "objCRelease";
 constexpr auto INTEROPLIB_OBJ_C_RESPONSE_TO_SELECTOR = "respondsToSelector";
+constexpr auto INTEROPLIB_OBJ_C_AUTO_RELEASE = "objCAutorelease";
+constexpr auto INTEROPLIB_OBJ_C_RETAIN = "objCRetain";
+constexpr auto INTEROPLIB_FORWARDER_MUTEX = "ForwarderMutex";
+constexpr auto MUTEX_LOCK_IDENT = "lock";
+constexpr auto MUTEX_UNLOCK_IDENT = "unlock";
 
 // objc.lang
 constexpr auto OBJ_C_FUNC_GET_FPOINTER = "unsafeGetFunctionPointer";
 constexpr auto OBJ_C_BLOCK_GET_ABI_POINTER = "unsafeGetNativeABIPointer";
 
+template<typename T>
+Ptr<T> GetMemberOfDecl(Decl& decl, std::function<bool(const Decl&)> pred)
+{
+    Ptr<Decl> result = nullptr;
+    for (auto& member : decl.GetMemberDeclPtrs()) {
+        if (pred(*member)) {
+            result = member;
+            break;
+        }
+    }
+    return Cangjie::DynamicCast<T>(result);
+}
 } // namespace
+
+/**
+ * Gets ForwarderMutex declaration.
+ */
+Ptr<TypeAliasDecl> InteropLibBridge::GetForwarderMutexDecl()
+{
+    static auto decl = GetInteropLibDecl<ASTKind::TYPE_ALIAS_DECL>(INTEROPLIB_FORWARDER_MUTEX);
+    return decl;
+}
+
+/**
+ * Gets ForwarderMutex semantic type (std.sync.Mutex).
+ */
+Ptr<Ty> InteropLibBridge::GetForwarderMutexTy()
+{
+    return GetForwarderMutexDecl()->type->ty;
+}
+
+/**
+ * Gets the lock decl of ForwarderMutex (std.sync.Mutex).
+ */
+Ptr<FuncDecl> InteropLibBridge::GetMutexLock()
+{
+    static Ptr<FuncDecl> result = nullptr;
+    if (result) {
+        return result;
+    }
+    auto decl = Ty::GetDeclOfTy(GetForwarderMutexTy());
+    CJC_NULLPTR_CHECK(decl);
+    result = GetMemberOfDecl<FuncDecl>(*decl, [](const Decl& mem) {
+        return mem.identifier == MUTEX_LOCK_IDENT;
+    });
+    CJC_NULLPTR_CHECK(result);
+    return result;
+}
+
+/**
+ * Gets the unlock decl of ForwarderMutex (std.sync.Mutex).
+ */
+Ptr<FuncDecl> InteropLibBridge::GetMutexUnlock()
+{
+    static Ptr<FuncDecl> result = nullptr;
+    if (result) {
+        return result;
+    }
+    auto decl = Ty::GetDeclOfTy(GetForwarderMutexTy());
+    CJC_NULLPTR_CHECK(decl);
+    result = GetMemberOfDecl<FuncDecl>(*decl, [](const Decl& mem) {
+        return mem.identifier == MUTEX_UNLOCK_IDENT;
+    });
+    CJC_NULLPTR_CHECK(result);
+    return result;
+}
+
+/**
+ * Gets the constructor decl of ForwarderMutex.
+ */
+Ptr<FuncDecl> InteropLibBridge::GetMutexConstructor()
+{
+    static Ptr<FuncDecl> result = nullptr;
+    if (result) {
+        return result;
+    }
+    auto decl = Ty::GetDeclOfTy(GetForwarderMutexTy());
+    CJC_NULLPTR_CHECK(decl);
+    result = GetMemberOfDecl<FuncDecl>(*decl, [](const Decl& mem) {
+        return mem.TestAttr(Attribute::CONSTRUCTOR);
+    });
+    CJC_NULLPTR_CHECK(result);
+    return result;
+}
 
 Ptr<TypeAliasDecl> InteropLibBridge::GetNativeObjCIdDecl()
 {
@@ -213,6 +301,18 @@ Ptr<FuncDecl> InteropLibBridge::GetObjCRespondsToSelectorDecl()
 Ptr<FuncDecl> InteropLibBridge::GetObjCReleaseDecl()
 {
     static auto decl = GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_OBJ_C_RELEASE);
+    return decl;
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetObjCRetainDecl()
+{
+    static auto decl = GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_OBJ_C_RETAIN);
+    return decl;
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetObjCAutoReleaseDecl()
+{
+    static auto decl = GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_OBJ_C_AUTO_RELEASE);
     return decl;
 }
 

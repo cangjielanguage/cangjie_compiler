@@ -44,6 +44,7 @@ private:
     Ptr<AST::Decl> decl;
     InteropContext& ctx;
     InteropType interopType;
+    std::stringstream buffer;
 
     void OpenBlock();
     void CloseBlock(bool newLineBefore, bool newLineAfter);
@@ -72,6 +73,7 @@ private:
         FunctionListFormat format = FunctionListFormat::DECLARATION,
         const ObjCFunctionType type = ObjCFunctionType::INSTANCE,
         bool hasForeignNameAnno = true);
+    std::string GenerateArgumentCast(const AST::Ty& retTy, std::string value) const;
     std::string MapCJTypeToObjCType(const OwnedPtr<AST::Type>& type);
     std::string MapCJTypeToObjCType(const OwnedPtr<AST::FuncParam>& param);
 
@@ -83,21 +85,45 @@ private:
     std::string WrapperCallByInitForCJMappingReturn(const AST::Ty& retTy, const std::string& nativeCall) const;
     bool SkipSetterForValueTypeDecl(AST::Decl& declArg) const;
 
+    void GenerateImports(const std::string& objCDeclName);
     void GenerateForwardDeclarations();
-    void GenerateStaticFunctionsReferences();
+    void GenerateStaticReferences();
     void GenerateFunctionSymbolsInitialization();
     void GenerateFunctionSymInit(const std::string& fName);
     void GenerateInterfaceDecl();
     void GenerateProtocolDecl();
+    void GenerateInitializer(const std::string& objCDeclName);
     void AddProperties();
     void AddConstructors();
-    void AddCtorsForCjMappingEnum(AST::EnumDecl& enumDecl);
+    void GenerateDeleteObject();
+    void GenerateDealloc();
     void AddMethods();
     void WriteToFile();
     void WriteToHeader();
     void WriteToSource();
 
-    std::string GenerateArgumentCast(const AST::Ty& retTy, std::string value) const;
+    // Generate for cj mapping
+    void GenerateExternalDeclarations4CJMapping();
+    void AddConstructors4CJMapping();
+    void AddConstructor4CJMapping(AST::FuncDecl& ctor);
+    void GenerateMethods4CJMapping();
+    void GenerateMethod4CJMapping(AST::FuncDecl& fn);
+    void AddProperties4CJMapping();
+    void AddInitWithRegistryId();
+    void AddReinitWithRegistryId();
+    void AddRelease();
+    void AddCalcMask(const std::vector<Ptr<AST::FuncDecl>>& overrides);
+    bool GenerateDeleteObject4CJMapping();
+    void AddCtorsForCjMappingEnum(AST::EnumDecl& enumDecl);
+
+    // Write buffer helper functions
+    void WriteSeq(const std::vector<std::string>& statements);
+    void WriteIf(
+        const std::string& cond, const std::function<void()> then, const std::function<void()> other = nullptr);
+    void WriteFunc(const std::string& signature, const std::function<void()> body);
+    void WriteFor(const std::string& header, const std::function<void()> loop);
+    void WriteBlock(
+        std::function<void()> action, const std::string& pre = "", const std::string& suf = "", bool flush = false);
 };
 } // namespace Cangjie::Interop::ObjC
 

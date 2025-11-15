@@ -36,7 +36,7 @@ void GenerateWrappers::HandleImpl(InteropContext& ctx)
             if (memberDecl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::CONSTRUCTOR)) {
                 continue;
             }
-            if (!memberDecl->TestAnyAttr(Attribute::PUBLIC)) {
+            if (interopType == InteropType::ObjC_Mirror && !memberDecl->TestAnyAttr(Attribute::PUBLIC)) {
                 continue;
             }
 

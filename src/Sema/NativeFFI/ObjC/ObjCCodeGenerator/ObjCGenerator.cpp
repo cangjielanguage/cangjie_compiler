@@ -50,12 +50,14 @@ constexpr auto STATIC_MODIFIER = "static";
 constexpr auto FINAL_MODIFIER = "__attribute__((objc_subclassing_restricted))";
 
 constexpr auto VOID_TYPE = "void";
+constexpr auto BOOL_TYPE = "bool";
 constexpr auto VOID_POINTER_TYPE = "void*";
 constexpr auto ID_TYPE = "id";
 constexpr auto UNSUPPORTED_TYPE = "UNSUPPORTED_TYPE";
 constexpr auto INT64_T = "int64_t";
 
 constexpr auto SELF_WEAKLINK_NAME = "$registryId";
+constexpr auto INITED_FROM_OBJC_NAME = "$initedFromObjC";
 constexpr auto SELF_NAME = "self";
 constexpr auto SETTER_PARAM_NAME = "value";
 constexpr auto REGISTRY_ID_PARAM_NAME = "registryId";
@@ -63,11 +65,14 @@ constexpr auto TMP_REG_ID = "regId";
 
 constexpr auto INITIALIZE_FUNC_NAME = "initialize";
 constexpr auto INIT_FUNC_NAME = "init";
+constexpr auto RETAIN_FUNC_NAME = "retain";
 constexpr auto DELETE_FUNC_NAME = "deleteCJObject";
 constexpr auto DEALLOC_FUNC_NAME = "dealloc";
 constexpr auto INIT_CJ_RUNTIME_NAME = "InitCJRuntime";
 constexpr auto INIT_WITH_REGISTRY_ID_NAME = "initWithRegistryId";
 constexpr auto INIT_WITH_REGISTRY_ID_SIGNATURE = "- (id)initWithRegistryId:(int64_t)registryId";
+constexpr auto REINIT_WITH_REGISTRY_ID_SIGNATURE = "- (id)reinitWithRegistryId:(int64_t)registryId";
+constexpr auto RELEASE_SIGNATURE = "- (oneway void)release";
 constexpr auto NSLOG_FUNC_NAME = "NSLog";
 constexpr auto EXIT_FUNC_NAME = "exit";
 constexpr auto DLOPEN_FUNC_NAME = "dlopen";
@@ -99,6 +104,38 @@ constexpr auto FAIL_CALL_UNINIT_CTOR = "[self doesNotRecognizeSelector:_cmd];";
 constexpr auto STRING_FORMAT = "@\"%s\"";
 
 constexpr auto INDENT_SIZE = 4;
+
+template <typename... Args> inline std::string Join(Args&&... args)
+{
+    std::stringstream ss;
+    ((ss << args), ...);
+    return ss.str();
+}
+
+template <typename T>
+std::string JoinVec(const std::vector<T>& vec, std::function<std::string(const T&)> trans,
+    const std::string& sep = ", ", const std::string& pre = "", const std::string& suf = "", bool force = true)
+{
+    std::stringstream ss;
+    auto it = vec.cbegin();
+    if (it == vec.end()) {
+        if (!force) {
+            return "";
+        }
+        ss << pre << suf;
+        return ss.str();
+    }
+    ss << pre;
+    do {
+        ss << trans(*it);
+        ++it;
+        if (it != vec.cend()) {
+            ss << sep;
+        }
+    } while (it != vec.cend());
+    ss << suf;
+    return ss.str();
+}
 } // namespace
 
 namespace Cangjie::Interop::ObjC {
@@ -165,113 +202,21 @@ void ObjCGenerator::Generate()
     }
 
     const auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
-    AddWithIndent(GenerateImport(FOUNDATION_IMPORT), GenerationTarget::HEADER);
-    AddWithIndent(GenerateImport(STDDEF_IMPORT), GenerationTarget::HEADER);
-    AddWithIndent(GenerateImport("\"" + objCDeclName + ".h\""), GenerationTarget::SOURCE);
-    AddWithIndent(GenerateImport(CJ_IMPORT), GenerationTarget::SOURCE);
-    AddWithIndent(GenerateImport(DLFCN_IMPORT), GenerationTarget::SOURCE);
-    AddWithIndent(GenerateImport(STDLIB_IMPORT), GenerationTarget::SOURCE);
-
+    GenerateImports(objCDeclName);
     GenerateForwardDeclarations();
-    GenerateStaticFunctionsReferences();
-    AddWithIndent(GenerateStaticReference(CJ_DLL_HANLDE, string(VOID_TYPE) + "*", NULL_KW),
-        GenerationTarget::SOURCE);
-    AddWithIndent(GenerateStaticReference(CJ_RTIME_PARAMS,
-        string(STRUCT_KEYWORD) + " " + RTIME_PARAM_KEYWORD, "{0}"),
-        GenerationTarget::SOURCE);
+    GenerateExternalDeclarations4CJMapping();
+    GenerateStaticReferences();
+
     GenerateInterfaceDecl();
 
     AddConstructors();
-    AddWithIndent(GenerateFunctionDeclaration(
-        ObjCFunctionType::STATIC, VOID_TYPE, INITIALIZE_FUNC_NAME),
-        GenerationTarget::BOTH, OptionalBlockOp::OPEN);
-    AddWithIndent(GenerateIfStatement(SELF_NAME,
-        GenerateObjCCall(objCDeclName, CLASS_KEYWORD),
-        EQ_CHECK_OP),
-        GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
-    AddWithIndent(GenerateAssignment(CJ_RTIME_PARAMS_LOG_LEVEL, RTLOG_ERROR) + ";", GenerationTarget::SOURCE);
-    AddWithIndent(GenerateIfStatement(GenerateCCall(INIT_CJ_RUNTIME_NAME,
-        std::vector<std::string>{"&" + string(CJ_RTIME_PARAMS)}),
-        E_OK, NOT_EQ_OP),
-        GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
-    AddWithIndent(GenerateCCall(NSLOG_FUNC_NAME,
-        std::vector<std::string>{FAIL_INIT_CJ_RT_MSG}) + ";",
-        GenerationTarget::SOURCE);
-    AddWithIndent(GenerateCCall(EXIT_FUNC_NAME, std::vector<std::string>{"1"}) + ";",
-        GenerationTarget::SOURCE);
-
-    CloseBlock(false, true);
-
-    auto cjLibName = Native::FFI::GetCangjieLibName(cjLibOutputPath, decl->fullPackageName, false);
-    // Crutch that solves issue when cjLibOutputPath is dir or not provided.
-    if (cjLibName.find("lib", 0) != 0) {
-        cjLibName = "lib" + cjLibName;
-    }
-    size_t extIdx = cjLibName.find_last_of(".");
-    if (extIdx == std::string::npos || cjLibName.substr(extIdx) != ".dylib") {
-        cjLibName += ".dylib"; // what if we compile on linux target?
-    }
-
-    cjLibName = "\"" + cjLibName + "\"";
-    AddWithIndent(GenerateIfStatement(GenerateCCall(LOAD_LIB_FUNC_NAME,
-        std::vector<std::string>{cjLibName}),
-        E_OK, NOT_EQ_OP),
-        GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
-    AddWithIndent(GenerateCCall(NSLOG_FUNC_NAME,
-        std::vector<std::string>{FAIL_INIT_CJ_LIB}) + ";",
-        GenerationTarget::SOURCE);
-    AddWithIndent(GenerateCCall(EXIT_FUNC_NAME, std::vector<std::string>{"1"}) + ";",
-        GenerationTarget::SOURCE);
-
-    CloseBlock(false, true);
-
-    AddWithIndent(
-        GenerateIfStatement(
-            "(" +
-            GenerateAssignment(
-                CJ_DLL_HANLDE,
-                GenerateCCall(
-                    DLOPEN_FUNC_NAME,
-                    std::vector<std::string>{cjLibName, RTLD_LAZY})) +
-            ")",
-            NULL_KW,
-            EQ_CHECK_OP),
-        GenerationTarget::SOURCE,
-        OptionalBlockOp::OPEN);
-    AddWithIndent(GenerateCCall(NSLOG_FUNC_NAME,
-        std::vector<std::string>{FAIL_OPEN_CJ_LIB}) + ";",
-        GenerationTarget::SOURCE);
-    AddWithIndent(GenerateCCall(NSLOG_FUNC_NAME,
-        std::vector<std::string>{
-            STRING_FORMAT, GenerateCCall(DLERROR_FUNC_NAME)}) + ";",
-        GenerationTarget::SOURCE);
-    AddWithIndent(GenerateCCall(EXIT_FUNC_NAME, std::vector<std::string>{"1"}) + ";",
-        GenerationTarget::SOURCE);
-
-    CloseBlock(false, true);
-
-    GenerateFunctionSymbolsInitialization();
-
-    CloseBlock(false, true);
-    CloseBlock(false, true);
+    
+    GenerateInitializer(objCDeclName);
 
     AddProperties();
     AddMethods();
-
-    AddWithIndent(GenerateFunctionDeclaration(ObjCFunctionType::INSTANCE, VOID_TYPE,
-        DELETE_FUNC_NAME),
-        GenerationTarget::BOTH, OptionalBlockOp::OPEN);
-    AddWithIndent(GenerateDefaultFunctionImplementation(ctx.nameGenerator.GenerateDeleteCjObjectName(*decl),
-        *ctx.typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT),
-        {std::pair<std::string, std::string>(INT64_T, string(SELF_NAME) + "." + SELF_WEAKLINK_NAME)}),
-        GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
-
-    AddWithIndent(GenerateFunctionDeclaration(
-        ObjCFunctionType::INSTANCE, VOID_TYPE, DEALLOC_FUNC_NAME),
-        GenerationTarget::BOTH, OptionalBlockOp::OPEN);
-    AddWithIndent(GenerateObjCCall(SELF_NAME,
-        DELETE_FUNC_NAME) + ";",
-        GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
+    GenerateDeleteObject();
+    GenerateDealloc();
 
     AddWithIndent(END_KEYWORD, GenerationTarget::BOTH);
     WriteToFile();
@@ -455,6 +400,16 @@ std::string ObjCGenerator::GenerateImport(const std::string& name)
     return string(IMPORT_KEYWORD) + " " + name;
 }
 
+void ObjCGenerator::GenerateImports(const std::string& objCDeclName)
+{
+    AddWithIndent(GenerateImport(FOUNDATION_IMPORT), GenerationTarget::HEADER);
+    AddWithIndent(GenerateImport(STDDEF_IMPORT), GenerationTarget::HEADER);
+    AddWithIndent(GenerateImport("\"" + objCDeclName + ".h\""), GenerationTarget::SOURCE);
+    AddWithIndent(GenerateImport(CJ_IMPORT), GenerationTarget::SOURCE);
+    AddWithIndent(GenerateImport(DLFCN_IMPORT), GenerationTarget::SOURCE);
+    AddWithIndent(GenerateImport(STDLIB_IMPORT), GenerationTarget::SOURCE);
+}
+
 void ObjCGenerator::GenerateForwardDeclarations()
 {
     std::set<Ptr<Decl>> dependencies;
@@ -498,7 +453,7 @@ void ObjCGenerator::GenerateForwardDeclarations()
     }
 }
 
-void ObjCGenerator::GenerateStaticFunctionsReferences()
+void ObjCGenerator::GenerateStaticReferences()
 {
     for (auto& declPtr : ctx.genDecls) {
         // Must be filtered out earlier
@@ -524,6 +479,10 @@ void ObjCGenerator::GenerateStaticFunctionsReferences()
                 GenerateStaticFunctionReference(funcDecl.identifier, retType, argTypes), GenerationTarget::SOURCE);
         }
     }
+    // static variable
+    AddWithIndent(GenerateStaticReference(CJ_DLL_HANLDE, string(VOID_TYPE) + "*", NULL_KW), GenerationTarget::SOURCE);
+    AddWithIndent(GenerateStaticReference(CJ_RTIME_PARAMS, string(STRUCT_KEYWORD) + " " + RTIME_PARAM_KEYWORD, "{0}"),
+        GenerationTarget::SOURCE);
 }
 
 /*
@@ -614,7 +573,7 @@ void ObjCGenerator::GenerateInterfaceDecl()
     if (isClassInheritedFromClass) {
         AddWithIndent(GenerateImport("\"" + superClassPtr->identifier.Val() + ".h\""), GenerationTarget::HEADER);
     }
-    if (interopType == InteropType::CJ_Mapping && ctx.typeMapper.IsOneWayMapping(*decl)) {
+    if (interopType == InteropType::CJ_Mapping && ctx.typeMapper.IsOneWayMapping(*decl) && !decl->IsOpen()) {
         AddWithIndent(FINAL_MODIFIER, GenerationTarget::HEADER);
     }
     auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
@@ -788,6 +747,8 @@ void ObjCGenerator::AddProperties()
             GenerationTarget::SOURCE,
             OptionalBlockOp::CLOSE);
     }
+    // Add properties for cj mapping
+    AddProperties4CJMapping();
 }
 
 void ObjCGenerator::AddCtorsForCjMappingEnum(AST::EnumDecl& enumDecl)
@@ -817,6 +778,67 @@ void ObjCGenerator::AddCtorsForCjMappingEnum(AST::EnumDecl& enumDecl)
         AddWithIndent(GenerateReturn(WrapperCallByInitForCJMappingReturn(*enumDecl.ty, string(TMP_REG_ID))),
             GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
     }
+}
+
+/*
+ *  Generate `+ initialize`
+ */
+void ObjCGenerator::GenerateInitializer(const string& objCDeclName)
+{
+    AddWithIndent(GenerateFunctionDeclaration(ObjCFunctionType::STATIC, VOID_TYPE, INITIALIZE_FUNC_NAME),
+        GenerationTarget::BOTH, OptionalBlockOp::OPEN);
+    AddWithIndent(GenerateIfStatement(SELF_NAME, GenerateObjCCall(objCDeclName, CLASS_KEYWORD), EQ_CHECK_OP),
+        GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
+    AddWithIndent(GenerateAssignment(CJ_RTIME_PARAMS_LOG_LEVEL, RTLOG_ERROR) + ";", GenerationTarget::SOURCE);
+    AddWithIndent(GenerateIfStatement(
+                      GenerateCCall(INIT_CJ_RUNTIME_NAME, std::vector<std::string>{"&" + string(CJ_RTIME_PARAMS)}),
+                      E_OK, NOT_EQ_OP),
+        GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
+    AddWithIndent(
+        GenerateCCall(NSLOG_FUNC_NAME, std::vector<std::string>{FAIL_INIT_CJ_RT_MSG}) + ";", GenerationTarget::SOURCE);
+    AddWithIndent(GenerateCCall(EXIT_FUNC_NAME, std::vector<std::string>{"1"}) + ";", GenerationTarget::SOURCE);
+
+    CloseBlock(false, true);
+
+    auto cjLibName = Native::FFI::GetCangjieLibName(cjLibOutputPath, decl->fullPackageName, false);
+    // Crutch that solves issue when cjLibOutputPath is dir or not provided.
+    if (cjLibName.find("lib", 0) != 0) {
+        cjLibName = "lib" + cjLibName;
+    }
+    size_t extIdx = cjLibName.find_last_of(".");
+    if (extIdx == std::string::npos || cjLibName.substr(extIdx) != ".dylib") {
+        cjLibName += ".dylib"; // what if we compile on linux target?
+    }
+
+    cjLibName = "\"" + cjLibName + "\"";
+    AddWithIndent(
+        GenerateIfStatement(GenerateCCall(LOAD_LIB_FUNC_NAME, std::vector<std::string>{cjLibName}), E_OK, NOT_EQ_OP),
+        GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
+    AddWithIndent(
+        GenerateCCall(NSLOG_FUNC_NAME, std::vector<std::string>{FAIL_INIT_CJ_LIB}) + ";", GenerationTarget::SOURCE);
+    AddWithIndent(GenerateCCall(EXIT_FUNC_NAME, std::vector<std::string>{"1"}) + ";", GenerationTarget::SOURCE);
+
+    CloseBlock(false, true);
+
+    AddWithIndent(GenerateIfStatement("(" +
+                          GenerateAssignment(CJ_DLL_HANLDE,
+                              GenerateCCall(DLOPEN_FUNC_NAME, std::vector<std::string>{cjLibName, RTLD_LAZY})) +
+                          ")",
+                      NULL_KW, EQ_CHECK_OP),
+        GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
+    AddWithIndent(
+        GenerateCCall(NSLOG_FUNC_NAME, std::vector<std::string>{FAIL_OPEN_CJ_LIB}) + ";", GenerationTarget::SOURCE);
+    AddWithIndent(
+        GenerateCCall(NSLOG_FUNC_NAME, std::vector<std::string>{STRING_FORMAT, GenerateCCall(DLERROR_FUNC_NAME)}) + ";",
+        GenerationTarget::SOURCE);
+    AddWithIndent(GenerateCCall(EXIT_FUNC_NAME, std::vector<std::string>{"1"}) + ";", GenerationTarget::SOURCE);
+
+    CloseBlock(false, true);
+
+    GenerateFunctionSymbolsInitialization();
+
+    CloseBlock(false, true);
+    CloseBlock(false, true);
 }
 
 void ObjCGenerator::AddConstructors()
@@ -902,19 +924,29 @@ void ObjCGenerator::AddConstructors()
             generatedCtors.insert(selectorComponents);
         }
     }
+    // Add init for cj mapping
+    AddConstructors4CJMapping();
+}
 
-    if (interopType == InteropType::CJ_Mapping) {
-        AddWithIndent(INIT_WITH_REGISTRY_ID_SIGNATURE, GenerationTarget::BOTH, OptionalBlockOp::OPEN);
-        AddWithIndent(GenerateIfStatement(SELF_NAME, GenerateObjCCall(SUPER_KEYWORD, INIT_FUNC_NAME), EQ_OP),
-            GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
-        AddWithIndent(GenerateAssignment(string(SELF_NAME) + "." + SELF_WEAKLINK_NAME, REGISTRY_ID_PARAM_NAME) + ";",
-            GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
-        AddWithIndent(GenerateReturn(SELF_NAME), GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
-
-        if (auto enumDecl = As<ASTKind::ENUM_DECL>(decl)) {
-            AddCtorsForCjMappingEnum(*enumDecl);
-        }
+void ObjCGenerator::GenerateDeleteObject()
+{
+    if (GenerateDeleteObject4CJMapping()) {
+        return;
     }
+    AddWithIndent(GenerateFunctionDeclaration(ObjCFunctionType::INSTANCE, VOID_TYPE, DELETE_FUNC_NAME),
+        GenerationTarget::BOTH, OptionalBlockOp::OPEN);
+    AddWithIndent(GenerateDefaultFunctionImplementation(ctx.nameGenerator.GenerateDeleteCjObjectName(*decl),
+                      *ctx.typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT),
+                      {std::pair<std::string, std::string>(INT64_T, string(SELF_NAME) + "." + SELF_WEAKLINK_NAME)}),
+        GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
+}
+
+void ObjCGenerator::GenerateDealloc()
+{
+    AddWithIndent(GenerateFunctionDeclaration(ObjCFunctionType::INSTANCE, VOID_TYPE, DEALLOC_FUNC_NAME),
+        GenerationTarget::BOTH, OptionalBlockOp::OPEN);
+    AddWithIndent(
+        GenerateObjCCall(SELF_NAME, DELETE_FUNC_NAME) + ";", GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
 }
 
 /*
@@ -927,10 +959,10 @@ void ObjCGenerator::AddMethods()
 
         if (!declPtr->TestAttr(Attribute::PUBLIC)) { continue; }
         
-        if (interopType == InteropType::CJ_Mapping && !ctx.typeMapper.IsObjCCJMappingMember(*declPtr)) {
+        if (interopType == InteropType::CJ_Mapping &&
+            (!ctx.typeMapper.IsObjCCJMappingMember(*declPtr) || declPtr->IsOpen())) {
             continue;
         }
-
         if (declPtr->astKind == ASTKind::FUNC_DECL &&
             !declPtr->TestAnyAttr(Attribute::CONSTRUCTOR, Attribute::FINALIZER)) {
             const FuncDecl& funcDecl = *StaticAs<ASTKind::FUNC_DECL>(declPtr.get());
@@ -955,6 +987,8 @@ void ObjCGenerator::AddMethods()
             }
         }
     }
+    // Add methods for cj mapping
+    GenerateMethods4CJMapping();
 }
 
 ArgsList ObjCGenerator::ConvertParamsListToArgsList(
@@ -1072,4 +1106,331 @@ void ObjCGenerator::GenerateProtocolDecl()
     WriteToHeader();
 }
 
+// CJMapping
+
+/**
+ * ObjC runtime functions used to calculate override-mask
+ *
+ */
+void ObjCGenerator::GenerateExternalDeclarations4CJMapping()
+{
+    // If there is no forwarder class, it will not be generated.
+    if (interopType != InteropType::CJ_Mapping || ctx.fwdClassMap.empty()) {
+        return;
+    }
+    resSource += R"(
+typedef struct objc_method* Method;
+extern IMP method_getImplementation(Method);
+extern Method class_getInstanceMethod(Class, SEL);
+extern id objc_getClass(const char *);
+)";
+}
+
+/**
+ * Constructors for cjmapping type
+ */
+void ObjCGenerator::AddConstructors4CJMapping()
+{
+    if (interopType != InteropType::CJ_Mapping) {
+        return;
+    }
+    // initWithRegistryId
+    AddInitWithRegistryId();
+    // For enum
+    if (auto enumDecl = As<ASTKind::ENUM_DECL>(decl)) {
+        AddCtorsForCjMappingEnum(*enumDecl);
+    }
+    if (!decl->IsOpen()) {
+        return;
+    }
+    // init
+    auto fwd = ctx.fwdClassMap.at(decl);
+    CJC_ASSERT(fwd);
+    for (auto declPtr : fwd->GetMemberDeclPtrs()) {
+        if (declPtr->TestAttr(Attribute::CONSTRUCTOR)) {
+            AddConstructor4CJMapping(*StaticCast<FuncDecl>(declPtr));
+        }
+    }
+}
+
+/**
+ * for open member func.
+ */
+void ObjCGenerator::GenerateMethods4CJMapping()
+{
+    if (interopType != InteropType::CJ_Mapping || !decl->IsOpen()) {
+        return;
+    }
+    // For open class
+    AddReinitWithRegistryId();
+    AddRelease();
+    // Member
+    auto fwd = ctx.fwdClassMap.at(decl);
+    CJC_ASSERT(fwd);
+    std::vector<Ptr<FuncDecl>> overrides;
+    for (auto declPtr : fwd->GetMemberDeclPtrs()) {
+        if (declPtr->TestAttr(Attribute::OVERRIDE)) {
+            overrides.emplace_back(StaticCast<FuncDecl>(declPtr));
+            GenerateMethod4CJMapping(*StaticCast<FuncDecl>(declPtr));
+        }
+    }
+    AddCalcMask(overrides);
+}
+
+/**
+ * open method
+ * - (int64_t)add1:(int64_t)x  {
+ *     if (self.$initedFromObjC) {
+ *         CJImpl_ObjC_glue_A_fwd_add1(self.$registryId, x);
+ *     } else {
+ *         CJImpl_ObjC_glue_A_add1(self.$registryId, x);
+ *     }
+ * }
+ */
+void ObjCGenerator::GenerateMethod4CJMapping(AST::FuncDecl& fn)
+{
+    auto fnTy = DynamicCast<FuncTy>(fn.ty);
+    CJC_ASSERT(fnTy);
+    auto originalOpenFn = ctx.fwdOverrideTable.at(&fn);
+    CJC_ASSERT(originalOpenFn);
+    std::vector<Ptr<FuncParam>> params;
+    auto& fwdParams = fn.funcBody->paramLists[0]->params;
+    std::vector<std::string> callArgs{"self.$registryId"};
+    std::transform(fwdParams.begin(), fwdParams.end(), std::back_inserter(params), [](auto& p) { return p.get(); });
+    auto transAndCollectArgs = [this, &callArgs](const Ptr<FuncParam>& p) {
+        auto pname = p->identifier.Val();
+        callArgs.emplace_back(pname);
+        return ":(" + ctx.typeMapper.Cj2ObjCForObjC(*p->ty) + ")" + pname;
+    };
+    auto sig = Join("-(", ctx.typeMapper.Cj2ObjCForObjC(*fnTy->retTy), ")", fn.identifier.Val(),
+        JoinVec<Ptr<FuncParam>>(params, transAndCollectArgs, " ", "", "", false));
+    // Write into header
+    res += Join(sig, ";\n");
+
+    auto argStr = JoinVec<std::string>(
+        callArgs, [](auto& arg) { return arg; }, ", ", "(", ");");
+    auto ifThen = [this, &fn, &argStr]() {
+        WriteSeq({Join("return ", ctx.nameGenerator.GenerateMethodWrapperName(fn), argStr)});
+    };
+    auto ifElse = [this, originalOpenFn, &argStr]() {
+        WriteSeq({Join("return ", ctx.nameGenerator.GenerateMethodWrapperName(*originalOpenFn), argStr)});
+    };
+    // Write into source
+    WriteFunc(sig, [this, ifThen, ifElse]() { WriteIf("self.$initedFromObjC", ifThen, ifElse); });
+}
+
+/**
+ * construnctor
+ * -(id)init :(ty)name :(ty)name {
+ *     if (self = [super init]) {
+ *         self.$registryId = CJImpl_xxx_init_FWD_xxx();
+ *         self.initedFromObjc = true;
+ *     }
+ * }
+ */
+void ObjCGenerator::AddConstructor4CJMapping(AST::FuncDecl& ctor)
+{
+    std::vector<Ptr<FuncParam>> params;
+    auto& fwdParams = ctor.funcBody->paramLists[0]->params;
+    auto const offset = 2;
+    std::vector<std::string> callArgs{CAST_TO_VOID_PTR + string("self"), "[self calcOverrideMask]"};
+    std::transform(
+        fwdParams.begin() + offset, fwdParams.end(), std::back_inserter(params), [](auto& p) { return p.get(); });
+    auto transAndCollectArgs = [this, &callArgs](const Ptr<FuncParam>& p) {
+        auto pname = p->identifier.Val();
+        callArgs.emplace_back(pname);
+        return ":(" + ctx.typeMapper.Cj2ObjCForObjC(*p->ty) + ")" + pname;
+    };
+    const auto initSig = Join("-(id)init", JoinVec<Ptr<FuncParam>>(params, transAndCollectArgs, " ", "", "", false));
+    // Write into header
+    res += Join(initSig, ";\n");
+
+    auto wrapperName = ctx.nameGenerator.GenerateInitCjObjectName(ctor);
+    auto argStr = JoinVec<std::string>(
+        callArgs, [](auto& arg) { return arg; }, ", ", "(", ");");
+    auto callStr = Join(wrapperName, argStr);
+    auto ifThen = [this, &callStr]() {
+        WriteSeq({Join(SELF_NAME, ".", INITED_FROM_OBJC_NAME, " = ", "true;"),
+            Join(SELF_NAME, ".", SELF_WEAKLINK_NAME, " = ", callStr),
+            Join("[", SELF_NAME, " ", RETAIN_FUNC_NAME, "];")});
+    };
+    // Write into source
+    WriteFunc(initSig, [this, ifThen]() {
+        WriteIf("self = [super init]", ifThen);
+        WriteSeq({Join("return ", SELF_NAME, ";")});
+    });
+}
+
+/**
+ * Properties for cjmapping type
+ */
+void ObjCGenerator::AddProperties4CJMapping()
+{
+    if (interopType != InteropType::CJ_Mapping || !decl->IsOpen()) {
+        return;
+    }
+    // @property (readwrite) bool $initedFromObjC;
+    res += Join(PROPERTY_KEYWORD, " (", READWRITE_MODIFIER, ") ", BOOL_TYPE, " ", INITED_FROM_OBJC_NAME, ";\n");
+}
+
+/**
+ * initWithRegistryId
+ */
+void ObjCGenerator::AddInitWithRegistryId()
+{
+    AddWithIndent(INIT_WITH_REGISTRY_ID_SIGNATURE, GenerationTarget::BOTH, OptionalBlockOp::OPEN);
+    AddWithIndent(GenerateIfStatement(SELF_NAME, GenerateObjCCall(SUPER_KEYWORD, INIT_FUNC_NAME), EQ_OP),
+        GenerationTarget::SOURCE, OptionalBlockOp::OPEN);
+    if (decl->IsOpen()) {
+        AddWithIndent(GenerateAssignment(string(SELF_NAME) + "." + INITED_FROM_OBJC_NAME, "false") + ";",
+            GenerationTarget::SOURCE);
+    }
+    AddWithIndent(GenerateAssignment(string(SELF_NAME) + "." + SELF_WEAKLINK_NAME, REGISTRY_ID_PARAM_NAME) + ";",
+        GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
+
+    AddWithIndent(GenerateReturn(SELF_NAME), GenerationTarget::SOURCE, OptionalBlockOp::CLOSE);
+}
+
+/**
+ * reinitWithRegistryId
+ */
+void ObjCGenerator::AddReinitWithRegistryId()
+{
+    res += Join(REINIT_WITH_REGISTRY_ID_SIGNATURE, ";\n");
+    // implementation
+    WriteFunc(REINIT_WITH_REGISTRY_ID_SIGNATURE, [this]() {
+        WriteSeq({Join(SELF_NAME, ".", SELF_WEAKLINK_NAME, " = ", REGISTRY_ID_PARAM_NAME, ";"),
+            Join("[", SELF_NAME, " ", RETAIN_FUNC_NAME, "];"), Join("return ", SELF_NAME, ";")});
+    });
+}
+
+/**
+ * - (void)deleteCJObject
+ */
+bool ObjCGenerator::GenerateDeleteObject4CJMapping()
+{
+    if (interopType != InteropType::CJ_Mapping || !decl->IsOpen()) {
+        return false;
+    }
+    const auto deleteSig = "- (void)deleteCJObject";
+    WriteFunc(deleteSig, [this]() {
+        WriteIf("!self.$initedFromObjC", [this]() {
+            auto deleteFuncName = ctx.nameGenerator.GenerateDeleteCjObjectName(*decl);
+            WriteSeq({Join(deleteFuncName, "(self.$registryId);")});
+        });
+    });
+    return true;
+}
+
+/**
+ * - (oneway void) release
+ */
+void ObjCGenerator::AddRelease()
+{
+    auto fwd = ctx.fwdClassMap.at(decl);
+    CJC_ASSERT(fwd);
+    res += RELEASE_SIGNATURE + std::string(";\n");
+
+    auto ifThen = [this, fwd]() {
+        auto lockFuncName = ctx.nameGenerator.GenerateLockCjObjectName(*fwd);
+        WriteSeq({"int64_t idToDelete = self.$registryId;", Join(lockFuncName, "(idToDelete);")});
+        WriteIf(
+            "1 == CFGetRetainCount((__bridge CFTypeRef)self)",
+            [this, fwd]() {
+                auto deleteFuncName = ctx.nameGenerator.GenerateDeleteCjObjectName(*fwd);
+                WriteSeq({"self.$registryId = -1;", Join(deleteFuncName, "(idToDelete);")});
+            },
+            [this, fwd]() {
+                auto unlockFuncName = ctx.nameGenerator.GenerateUnlockCjObjectName(*fwd);
+                WriteSeq({Join(unlockFuncName, "(idToDelete);")});
+            });
+    };
+    auto body = [this, ifThen]() {
+        WriteSeq({"[super release];"});
+        WriteIf("self.$initedFromObjC && 1 == CFGetRetainCount((__bridge CFTypeRef)self)", ifThen);
+    };
+    WriteFunc(RELEASE_SIGNATURE, body);
+}
+
+/**
+ * - (uint64_t)calcOverrideMask
+ */
+void ObjCGenerator::AddCalcMask(const std::vector<Ptr<FuncDecl>>& overrides)
+{
+    resSource += R"(
+static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
+    int max = len;
+    if (max > 64) {
+        max = 64;
+    }
+    uint64_t mask = 0;
+    for (int i = 0; i < max; i++) {
+        SEL m = methods[i];
+        bool override = method_getImplementation(class_getInstanceMethod(baseCls, m)) !=
+            method_getImplementation(class_getInstanceMethod(selfCls, m));
+        if (override) {
+            mask |= (UINT64_C(1) << i);
+        }
+    }
+    return mask;
+}
+
+)";
+    const auto calcOverrideMaskSig = "- (uint64_t)calcOverrideMask";
+    auto genSel = [](const Ptr<FuncDecl>& fn) {
+        CJC_ASSERT(fn && fn->funcBody && fn->funcBody->paramLists.size() == 1);
+        return "@selector(" + fn->identifier.Val() + std::string(fn->funcBody->paramLists[0]->params.size(), ':') + ")";
+    };
+    auto calcOverrideMaskBody = [this, &overrides, genSel]() {
+        WriteSeq({Join("Class baseCls = objc_getClass(\"", ctx.nameGenerator.GetObjCDeclName(*decl), "\");"),
+            "Class selfCls = [self class];", JoinVec<Ptr<FuncDecl>>(overrides, genSel, ", ", "SEL methods[] = {", "};"),
+            Join("return calcMask(baseCls, selfCls, methods, ", overrides.size(), ");")});
+    };
+    WriteFunc(calcOverrideMaskSig, calcOverrideMaskBody);
+}
+
+void ObjCGenerator::WriteFunc(const std::string& signature, const std::function<void()> body)
+{
+    buffer << std::string(currentBlockIndent, ' ') << signature;
+    WriteBlock(body, "", "\n\n", true);
+}
+
+void ObjCGenerator::WriteFor(const std::string& header, const std::function<void()> loop)
+{
+    buffer << std::string(currentBlockIndent, ' ') << Join("for (", header, ")");
+    WriteBlock(loop);
+    buffer << std::endl;
+}
+
+void ObjCGenerator::WriteIf(
+    const std::string& cond, const std::function<void()> then, const std::function<void()> other)
+{
+    buffer << std::string(currentBlockIndent, ' ') << Join("if (", cond, ")");
+    WriteBlock(then);
+    if (other) {
+        WriteBlock(other, " else");
+    }
+    buffer << std::endl;
+}
+
+void ObjCGenerator::WriteBlock(std::function<void()> action, const std::string& pre, const std::string& suf, bool flush)
+{
+    buffer << Join(pre, " {") << std::endl;
+    currentBlockIndent += INDENT_SIZE;
+    action();
+    currentBlockIndent -= INDENT_SIZE;
+    buffer << std::string(currentBlockIndent, ' ') << Join("}", suf);
+    if (flush) {
+        resSource += buffer.str();
+        buffer.str("");
+        buffer.clear();
+    }
+}
+
+void ObjCGenerator::WriteSeq(const std::vector<std::string>& statements)
+{
+    for (auto& statement : statements) {
+        buffer << std::string(currentBlockIndent, ' ') << statement << std::endl;
+    }
+}
 } // namespace Cangjie::Interop::ObjC

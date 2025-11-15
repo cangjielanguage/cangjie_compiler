@@ -27,6 +27,26 @@ public:
     }
 
     /**
+     * Gets ForwarderMutex declaration.
+     */
+    Ptr<AST::TypeAliasDecl> GetForwarderMutexDecl();
+    /**
+     * Gets ForwarderMutex semantic type (std.sync.Mutex).
+     */
+    Ptr<AST::Ty> GetForwarderMutexTy();
+    /**
+     * Gets the constructor decl of ForwarderMutex.
+     */
+    Ptr<AST::FuncDecl> GetMutexConstructor();
+    /**
+     * Gets the lock decl of ForwarderMutex.
+     */
+    Ptr<AST::FuncDecl> GetMutexLock();
+    /**
+     * Gets the unlock decl of ForwarderMutex.
+     */
+    Ptr<AST::FuncDecl> GetMutexUnlock();
+    /**
      * Gets NativeObjCId declaration.
      * id or Instance Method Pointer type.
      */
@@ -110,6 +130,10 @@ public:
     Ptr<AST::FuncDecl> GetObjCRespondsToSelectorDecl();
 
     Ptr<AST::FuncDecl> GetGetProtocolDecl();
+
+    Ptr<AST::FuncDecl> GetObjCRetainDecl();
+
+    Ptr<AST::FuncDecl> GetObjCAutoReleaseDecl();
 
     /**
      * Get objc.lang.ObjCPointer declaration
