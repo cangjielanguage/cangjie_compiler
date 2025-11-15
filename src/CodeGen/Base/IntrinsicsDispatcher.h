@@ -50,7 +50,6 @@ enum class CGIntrinsicKind {
     FUTURE,
     NET,
     FFI_JAVA,
-    INTEROP,
     VARRAY,
     RUNTIME,
     EXCEPTION_CATCH,

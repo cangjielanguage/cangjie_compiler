@@ -968,10 +968,6 @@ enum IntrinsicKind: uint16 {
   MULTICONDITION_WAIT,
   MULTICONDITION_NOTIFY,
   MULTICONDITION_NOTIFY_ALL,
-  CROSS_ACCESS_BARRIER,
-  CREATE_EXPORT_HANDLE,
-  GET_EXPORTED_REF,
-  REMOVE_EXPORTED_REF,
   // ============================ cjnative only end =================
 
   // Syscall

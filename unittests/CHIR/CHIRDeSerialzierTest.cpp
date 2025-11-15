@@ -1265,18 +1265,6 @@ IntrinsicKind DeSerialize(const PackageFormat::IntrinsicKind& kind)
         case IntrinsicKind_MULTICONDITION_NOTIFY_ALL:
             ret = MULTICONDITION_NOTIFY_ALL;
             break;
-        case IntrinsicKind_CROSS_ACCESS_BARRIER:
-            ret = CROSS_ACCESS_BARRIER;
-            break;
-        case IntrinsicKind_CREATE_EXPORT_HANDLE:
-            ret = CREATE_EXPORT_HANDLE;
-            break;
-        case IntrinsicKind_GET_EXPORTED_REF:
-            ret = GET_EXPORTED_REF;
-            break;
-        case IntrinsicKind_REMOVE_EXPORTED_REF:
-            ret = REMOVE_EXPORTED_REF;
-            break;
         // ============================ cjnative only end =================
         // Syscall
         // AST lib FFI

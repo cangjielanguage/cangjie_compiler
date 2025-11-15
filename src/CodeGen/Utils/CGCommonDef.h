@@ -205,10 +205,6 @@ const std::unordered_map<CHIR::IntrinsicKind, llvm::Intrinsic::ID> INTRINSIC_KIN
     {CHIR::IntrinsicKind::STOP_CJ_CPU_PROFILING, llvm::Intrinsic::cj_stop_cpu_profiling},
     {CHIR::IntrinsicKind::INVOKE_GC, llvm::Intrinsic::cj_invoke_gc},
     {CHIR::IntrinsicKind::SET_GC_THRESHOLD, llvm::Intrinsic::cj_set_gc_threshold},
-    {CHIR::IntrinsicKind::CROSS_ACCESS_BARRIER, llvm::Intrinsic::cj_cross_access_barrier},
-    {CHIR::IntrinsicKind::CREATE_EXPORT_HANDLE, llvm::Intrinsic::cj_create_export_handle},
-    {CHIR::IntrinsicKind::GET_EXPORTED_REF, llvm::Intrinsic::cj_get_exported_ref},
-    {CHIR::IntrinsicKind::REMOVE_EXPORTED_REF, llvm::Intrinsic::cj_remove_exported_ref},
     // math
     {CHIR::IntrinsicKind::ABS, llvm::Intrinsic::abs}, {CHIR::IntrinsicKind::POW, llvm::Intrinsic::pow},
     {CHIR::IntrinsicKind::POWI, llvm::Intrinsic::powi}, {CHIR::IntrinsicKind::FABS, llvm::Intrinsic::fabs},

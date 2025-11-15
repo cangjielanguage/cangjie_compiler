@@ -1389,10 +1389,4 @@ llvm::Value* IRBuilder2::CreateTypeInfo(const CHIR::Type* type, bool canChangeBB
     }
     return CreateTypeInfo(*type, canChangeBB);
 }
-
-llvm::Value* IRBuilder2::CallInteropIntrinsics(
-    const CHIRIntrinsicWrapper& intrinsic, const std::vector<CGValue*>& parameters)
-{
-    return CallIntrinsic(intrinsic, parameters);
-}
 } // namespace Cangjie::CodeGen

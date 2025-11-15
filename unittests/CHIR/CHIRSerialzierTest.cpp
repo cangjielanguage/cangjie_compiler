@@ -1264,18 +1264,6 @@ PackageFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
         case MULTICONDITION_NOTIFY_ALL:
             ret = IntrinsicKind_MULTICONDITION_NOTIFY_ALL;
             break;
-        case CROSS_ACCESS_BARRIER:
-            ret = IntrinsicKind_CROSS_ACCESS_BARRIER;
-            break;
-        case CREATE_EXPORT_HANDLE:
-            ret = IntrinsicKind_CREATE_EXPORT_HANDLE;
-            break;
-        case GET_EXPORTED_REF:
-            ret = IntrinsicKind_GET_EXPORTED_REF;
-            break;
-        case REMOVE_EXPORTED_REF:
-            ret = IntrinsicKind_REMOVE_EXPORTED_REF;
-            break;
         case FFI_CJ_AST_LEX:
             ret = IntrinsicKind_FFI_CJ_AST_LEX;
             break;

@@ -342,8 +342,6 @@ public:
     void CreateRefStore(CGValue* cgValue, llvm::Value* basePtr, llvm::Value* place, bool isBaseObjStruct);
     ///*----------------- unit test related --------------------//
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    ///*----------------- FFI OHOS related --------------------//
-    llvm::Value* CallInteropIntrinsics(const CHIRIntrinsicWrapper& intrinsic, const std::vector<CGValue*>& parameters);
     ///*----------------- VArray related --------------------//
     void CallVArrayIntrinsicIndexCheck(const CGValue* arrayPtr, std::vector<llvm::Value*>& index);
     void CreateVArrayStore(CGValue* cgValue, llvm::Value* place);
