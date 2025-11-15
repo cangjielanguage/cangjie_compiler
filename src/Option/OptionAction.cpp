@@ -229,7 +229,7 @@ bool ParseTargetTriple(GlobalOptions& opts, const std::string& triple)
     if (auto env = STRING_ENVIRONMENT_MAP.find(envStr); env != STRING_ENVIRONMENT_MAP.end()) {
         opts.target.env = env->second;
         if (opts.target.env == Environment::ANDROID) {
-            opts.target.apiLevel = "31";
+            opts.target.apiLevel = "26";
             Infoln("ANDROID API level is not suggested in the target. Use API level " +
                 opts.target.apiLevel + " by default.");
         }
@@ -237,6 +237,7 @@ bool ParseTargetTriple(GlobalOptions& opts, const std::string& triple)
     } else if (envStr.rfind(ENVIRONMENT_STRING_MAP.at(Environment::ANDROID), 0) == 0) {
         opts.target.env = Environment::ANDROID;
         opts.target.apiLevel = envStr.substr(7); // 7 is the length of "android"
+        // TODO: add apiLevel 判断
     } else {
         Errorln("The environment \"" + envStr + "\" is not found or supported!");
         return false;
@@ -1044,9 +1045,6 @@ namespace Cangjie {
 std::string Triple::Info::EnvironmentToString() const
 {
     if (auto search = ENVIRONMENT_STRING_MAP.find(env); search != ENVIRONMENT_STRING_MAP.end()) {
-        if (env == Environment::ANDROID) {
-            return search->second + apiLevel;
-        }
         return search->second;
     } else {
         return "";
