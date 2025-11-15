@@ -213,19 +213,9 @@ void ToolChain::AppendLibrariesFromInput(std::vector<std::tuple<std::string, uin
     }
 }
 
-void ToolChain::AppendLinkOptionFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples)
-{
-    for (const std::tuple<std::string, uint64_t>& optionTuple : driverOptions.inputLinkOptionOrder) {
-        std::string option = std::get<0>(optionTuple);
-        if (!option.empty()) {
-            inputOrderTuples.emplace_back(std::make_tuple(option, std::get<1>(optionTuple)));
-        }
-    }
-}
-
 void ToolChain::AppendLinkOptionsFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples)
 {
-    for (const std::tuple<std::string, uint64_t>& optionTuple : driverOptions.inputLinkOptionsOrder) {
+    for (const std::tuple<std::string, uint64_t>& optionTuple : driverOptions.inputLinkOptionOrder) {
         std::string option = std::get<0>(optionTuple);
         auto splitArgs = Utils::SplitString(option, " ");
         for (const auto& arg : splitArgs) {
@@ -245,7 +235,6 @@ void ToolChain::SortInputlibraryFileAndAppend(Tool& tool, const std::vector<Temp
 
     AppendObjectsFromInput(inputOrderTuples);
     AppendLibrariesFromInput(inputOrderTuples);
-    AppendLinkOptionFromInput(inputOrderTuples);
     AppendLinkOptionsFromInput(inputOrderTuples);
     // need to maintain front-to-back relative position
     std::stable_sort(inputOrderTuples.begin(), inputOrderTuples.end(),

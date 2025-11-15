@@ -445,8 +445,6 @@ public:
     std::vector<std::tuple<std::string, uint64_t>> inputFileOrder;
     // Mark the input library(-l) files and their input order.
     std::vector<std::tuple<std::string, uint64_t>> inputLibraryOrder;
-    // Mark the input link options and their input order.
-    std::vector<std::tuple<std::string, uint64_t>> inputLinkOptionsOrder;
     // Mark the input link option and their input order.
     std::vector<std::tuple<std::string, uint64_t>> inputLinkOptionOrder;
 

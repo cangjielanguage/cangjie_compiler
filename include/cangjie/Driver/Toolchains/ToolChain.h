@@ -163,7 +163,6 @@ protected:
         std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples);
     void AppendObjectsFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples);
     void AppendLibrariesFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples);
-    void AppendLinkOptionFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples);
     void AppendLinkOptionsFromInput(std::vector<std::tuple<std::string, uint64_t>>& inputOrderTuples);
     void SortInputlibraryFileAndAppend(Tool& tool, const std::vector<TempFileInfo>& objFiles);
     TempFileInfo GetOutputFileInfo(const std::vector<TempFileInfo>& objFiles) const;

@@ -778,10 +778,8 @@ void GlobalOptions::CollectOrderedInputFiles(ArgInstance& arg, uint64_t idx)
             OptionArgInstance& optArg = *static_cast<OptionArgInstance*>(&arg);
             if (optArg.info.GetID() == Options::ID::LIBRARY) {
                 inputLibraryOrder.push_back(std::make_tuple(optArg.value, idx));
-            } else if (optArg.info.GetID() == Options::ID::LINK_OPTION) {
-                inputLinkOptionOrder.push_back(std::make_tuple(optArg.value, idx));
             } else if (optArg.info.GetID() == Options::ID::LINK_OPTIONS) {
-                inputLinkOptionsOrder.push_back(std::make_tuple(optArg.value, idx));
+                inputLinkOptionOrder.push_back(std::make_tuple(optArg.value, idx));
             }
             break;
         }

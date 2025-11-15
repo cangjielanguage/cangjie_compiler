@@ -80,10 +80,6 @@ std::unordered_map<Options::ID, std::function<bool(DriverOptions&, OptionArgInst
         }
         return true;
     }},
-    { Options::ID::LINK_OPTION, [](DriverOptions& opts, const OptionArgInstance& arg) {
-        opts.linkOption.emplace_back(arg.value);
-        return true;
-    }},
     { Options::ID::LINK_OPTIONS, [](DriverOptions& opts, const OptionArgInstance& arg) {
         opts.linkOptions.emplace_back(arg.value);
         return true;
