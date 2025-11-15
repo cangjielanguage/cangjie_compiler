@@ -1165,18 +1165,6 @@ bool CompilerInstance::DetectCangjieModules()
         return false;
     }
     cangjieModules = FileUtil::JoinPath(modulesName, libPathName);
-    if (!FileUtil::FileExist(cangjieModules) && (invocation.globalOptions.target.env == Triple::Environment::ANDROID)) {
-        auto candidateNames = FileUtil::GetAllDirsUnderCurrentPath(modulesName);
-        auto tripleLen = Utils::SplitString(libPathName, "_").size();
-        for (auto & candidateName: candidateNames){
-            candidateName = FileUtil::GetDirName(candidateName);
-            auto parts = Utils::SplitString(candidateName, "_");
-            if(parts.size() == tripleLen && Utils::StartsWith(parts[1], "android") 
-            && invocation.globalOptions.target.ArchToString() == parts[2]){
-                cangjieModules = FileUtil::JoinPath(modulesName, candidateName);
-            }
-        }
-    }
     if (!FileUtil::FileExist(cangjieModules)) {
         diag.DiagnoseRefactor(DiagKindRefactor::frontend_failed_to_detect_cangjie_modules,
             MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), "target library path is not exist : " + cangjieModules);

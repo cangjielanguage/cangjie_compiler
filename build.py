@@ -60,10 +60,12 @@ TARGET_DICTIONARY = {
     "windows-x86_64": "x86_64-w64-mingw32",
     "ios-simulator-aarch64": "arm64-apple-ios11-simulator",
     "ios-aarch64": "arm64-apple-ios11",
-    "android-aarch64": "aarch64-linux-android",
-    "android26-aarch64": "aarch64-linux-android",
+    "android-aarch64": "aarch64-linux-android31",
+    "android31-aarch64": "aarch64-linux-android31",
+    "android26-aarch64": "aarch64-linux-android26",
     "android-x86_64": "x86_64-linux-android",
-    "android26-x86_64": "x86_64-linux-android"
+    "android31-x86_64": "x86_64-linux-android31",
+    "android26-x86_64": "x86_64-linux-android26"
 }
 
 def resolve_path(path):
