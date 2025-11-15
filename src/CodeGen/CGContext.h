@@ -322,6 +322,21 @@ public:
 
     void SetBasePtr(const llvm::Value* val, llvm::Value* basePtr);
     llvm::Value* GetBasePtrOf(llvm::Value* val) const;
+
+    void SetBoxedValueMap(llvm::Value* boxedRefVal, llvm::Value* originalNonRefVal)
+    {
+        (void)nonRefBox2RefMap.emplace(boxedRefVal, originalNonRefVal);
+    }
+
+    llvm::Value* GetOriginalNonRefValOfBoxedValue(llvm::Value* boxedRefVal) const
+    {
+        auto itor = nonRefBox2RefMap.find(boxedRefVal);
+        if (itor != nonRefBox2RefMap.end()) {
+            return itor->second;
+        } else {
+            return nullptr;
+        }
+    }
 #endif
 
     void Add2CGTypePool(CGType* cgType);
@@ -385,6 +400,8 @@ private:
     std::unordered_map<const CHIR::EnumDef*, std::vector<llvm::Constant*>> enumInfoCache;
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     std::map<llvm::Function*, std::vector<CHIR::DebugLocation>> debugLocOfRetExpr;
+    // Key: boxed ref value; Value: original non-ref value
+    std::unordered_map<llvm::Value*, llvm::Value*> nonRefBox2RefMap;
 #endif
 };
 } // namespace CodeGen

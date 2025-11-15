@@ -380,6 +380,15 @@ public:
             return StaticCast<const CHIR::InvokeWithException&>(chirExpr).GetVirtualMethodOffset();
         }
     }
+
+    bool TestVritualMethodAttr(CHIR::CHIRBuilder& builder, CHIR::Attribute attr) const
+    {
+        if (GetExprKind() == CHIR::ExprKind::INVOKE) {
+            return StaticCast<const CHIR::Invoke&>(chirExpr).GetVirtualMethodAttr(builder).TestAttr(attr);
+        } else {
+            return StaticCast<const CHIR::InvokeWithException&>(chirExpr).GetVirtualMethodAttr(builder).TestAttr(attr);
+        }
+    }
 };
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
