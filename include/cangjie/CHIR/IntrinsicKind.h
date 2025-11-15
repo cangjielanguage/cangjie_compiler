@@ -252,13 +252,6 @@ static const std::string CJ_GET_CHILD_MESSAGES = "CJ_GetChildMessages";
 static const std::string CJ_CHECK_ADD_SPACE = "CJ_CheckAddSpace";
 static const std::string CJ_AST_DIAGREPORT = "CJ_AST_DiagReport";
 
-// ============================ cjnative only start ==============================
-static const std::string CROSS_ACCESS_BARRIER_NAME = "CrossAccessBarrier";
-static const std::string CREATE_EXPORT_HANDLE_NAME = "CreateExportHandle";
-static const std::string GET_EXPORTED_REF_NAME = "GetExportedRef";
-static const std::string REMOVE_EXPORTED_REF_NAME = "RemoveExportedRef";
-// ============================ cjnative only end ==============================
-
 /**
  * @brief In the future we should generate intrinsic/xxx node in CHIR
  *        to represent intrinsic functions. That way we don't need intrinsic
@@ -440,10 +433,6 @@ enum IntrinsicKind : uint16_t {
     MULTICONDITION_WAIT,
     MULTICONDITION_NOTIFY,
     MULTICONDITION_NOTIFY_ALL,
-    CROSS_ACCESS_BARRIER,
-    CREATE_EXPORT_HANDLE,
-    GET_EXPORTED_REF,
-    REMOVE_EXPORTED_REF,
     // ============================ cjnative only end =================
 
     // Syscall
@@ -737,13 +726,6 @@ static const std::unordered_map<std::string, IntrinsicKind> reflectIntrinsicMap 
 #endif
 };
 
-static const std::unordered_map<std::string, IntrinsicKind> interOpIntrinsicMap = {
-    {CROSS_ACCESS_BARRIER_NAME, CROSS_ACCESS_BARRIER},
-    {CREATE_EXPORT_HANDLE_NAME, CREATE_EXPORT_HANDLE},
-    {GET_EXPORTED_REF_NAME, GET_EXPORTED_REF},
-    {REMOVE_EXPORTED_REF_NAME, REMOVE_EXPORTED_REF}
-};
-
 static const std::unordered_map<std::string, IntrinsicKind> cjnativeSyncIntrinsicMap = {
     {ATOMIC_LOAD_NAME, ATOMIC_LOAD},
     {ATOMIC_STORE_NAME, ATOMIC_STORE},
@@ -784,10 +766,6 @@ static const std::unordered_map<std::string, IntrinsicKind> runtimeIntrinsicMap 
     {GET_THREAD_NUMBER_NAME, GET_THREAD_NUMBER},
     {GET_BLOCKING_THREAD_NUMBER_NAME, GET_BLOCKING_THREAD_NUMBER},
     {GET_NATIVE_THREAD_NUMBER_NAME, GET_NATIVE_THREAD_NUMBER},
-    {CROSS_ACCESS_BARRIER_NAME, CROSS_ACCESS_BARRIER},
-    {CREATE_EXPORT_HANDLE_NAME, CREATE_EXPORT_HANDLE},
-    {GET_EXPORTED_REF_NAME, GET_EXPORTED_REF},
-    {REMOVE_EXPORTED_REF_NAME, REMOVE_EXPORTED_REF},
 };
 static const std::unordered_map<std::string, IntrinsicKind> mathIntrinsicMap = {
     {ABS_NAME, ABS},

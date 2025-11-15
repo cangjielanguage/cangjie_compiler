@@ -35,11 +35,6 @@ CGIntrinsicKind GetCGIntrinsicKind(CHIR::IntrinsicKind intrinsicKind)
             return CGIntrinsicKind::CSTRING_INIT;
         case CHIR::IntrinsicKind::INOUT_PARAM:
             return CGIntrinsicKind::INOUT_PARAM;
-        case CHIR::IntrinsicKind::CROSS_ACCESS_BARRIER:
-        case CHIR::IntrinsicKind::CREATE_EXPORT_HANDLE:
-        case CHIR::IntrinsicKind::GET_EXPORTED_REF:
-        case CHIR::IntrinsicKind::REMOVE_EXPORTED_REF:
-            return CGIntrinsicKind::INTEROP;
         default:
             break;
     }
@@ -395,12 +390,6 @@ llvm::Value* GenerateMathIntrinsics(IRBuilder2& irBuilder, const CHIRIntrinsicWr
     transform(parameters.begin(), parameters.end(), back_inserter(args),
         [](const CGValue* value) { return value->GetRawValue(); });
     return irBuilder.CallMathIntrinsics(intrinsic, args);
-}
-
-llvm::Value* GenerateInteropIntrinsics(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper& intrinsic)
-{
-    auto parameters = HandleSyscallIntrinsicArguments(irBuilder, intrinsic.GetOperands());
-    return irBuilder.CallInteropIntrinsics(intrinsic, parameters);
 }
 #endif
 
@@ -786,7 +775,6 @@ llvm::Value* GenerateIntrinsic(IRBuilder2& irBuilder, const CHIRIntrinsicWrapper
         {CGIntrinsicKind::VECTOR, &GenerateVectorIntrinsics},
         {CGIntrinsicKind::MATH, &GenerateMathIntrinsics},
         {CGIntrinsicKind::PREINITIALIZE, &GeneratePreInitializeIntrinsics},
-        {CGIntrinsicKind::INTEROP, &GenerateInteropIntrinsics},
 #endif
         {CGIntrinsicKind::RUNTIME, &GenerateRuntimeIntrinsics},
     };

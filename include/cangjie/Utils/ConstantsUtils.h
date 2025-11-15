@@ -116,8 +116,6 @@ inline const std::string STD_LIB_OPTION = "Option";
 inline const std::string STD_LIB_STRING = "String";
 inline const std::string STD_LIB_WAIT_QUEUE = "WaitQueue";
 inline const std::string STD_LIB_WEAK_REF = "WeakRef";
-inline const std::string INTEROP_LIB_EXPORTED_REF = "ExportedRef";
-inline const std::string INTEROP_LIB_FOREIGN_PROXY = "ForeignProxy";
 
 // Global init function name for CHIR, CodeGen.
 inline const std::string ANNOTATION_VAR_POSTFIX{"@Annotation@"};
