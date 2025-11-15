@@ -488,13 +488,6 @@ OPTION("--opt-options", OPT_OPTIONS, SEPARATED, { BACKEND(CJNATIVE) },
 OPTION("--llc-options", LLC_OPTIONS, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) }, nullptr, {}, SINGLE_OCCURRENCE,
     "Options directly passed to llc, put the value into \"\" when there is space in it")
-OPTION("--link-option", LINK_OPTION, SEPARATED, { BACKEND(ALL) },
-    { GROUP(DRIVER) COMMA GROUP(STABLE)
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-        COMMA GROUP(VISIBLE)
-#endif
-    }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "An option directly passed to linker")
 OPTION("--link-options", LINK_OPTIONS, SEPARATED, { BACKEND(ALL) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE)
     }, nullptr, {}, MULTIPLE_OCCURRENCE,
