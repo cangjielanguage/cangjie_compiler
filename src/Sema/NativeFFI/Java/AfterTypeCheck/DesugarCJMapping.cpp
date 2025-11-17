@@ -718,7 +718,7 @@ void JavaDesugarManager::GenerateInCJMapping(File& file)
             continue;
         }
         auto structDecl = As<ASTKind::STRUCT_DECL>(decl.get());
-        if (file.curPackage.get()->isInteropCJPackageConfig && !structDecl->symbol->isNeedExposedToInterop) {
+        if (file.curPackage.get()->isInteropCJPackageConfig && structDecl && !structDecl->symbol->isNeedExposedToInterop) {
             continue;
         }
         if (structDecl && IsCJMapping(*structDecl)) {

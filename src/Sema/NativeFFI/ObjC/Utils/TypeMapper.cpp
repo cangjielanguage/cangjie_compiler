@@ -165,6 +165,7 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
             return Cj2ObjCForObjC(*from.typeArgs[0]) + "*";
         case TypeKind::TYPE_FUNC: {
             auto actualFuncType = DynamicCast<FuncTy>(&from);
+            CJC_NULLPTR_CHECK(actualFuncType);
             return buildFunctionalCType(
                 actualFuncType->paramTys, actualFuncType->retTy, '*', [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
         }
