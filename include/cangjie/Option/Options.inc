@@ -690,7 +690,7 @@ OPTION("--obf-config", OBF_CONFIG, SEPARATED, { BACKEND(CJNATIVE) },
     "Specify obfuscation configure file")
 OPTION("--obf-level", OBF_LEVEL, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
-    "Specify obfuscation level. Available value: 1 to 10 (5 by default)")
+    "Specify obfuscation level. Available value: 1 to 9 (5 by default)")
 OPTION("--obf-seed", OBF_SEED, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(DRIVER) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
     "Specify random seed for obfuscation algorithm. Available value: <number>")
