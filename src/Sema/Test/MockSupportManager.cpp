@@ -1425,11 +1425,20 @@ Ptr<Expr> MockSupportManager::ReplaceFieldSetWithAccessor(AssignExpr& assignExpr
     auto leftValue = assignExpr.leftValue.get();
     OwnedPtr<CallExpr> accessorCall;
     if (auto refExpr = As<ASTKind::REF_EXPR>(leftValue); refExpr) {
-        if (!refExpr->GetTarget()) {
+        auto target = refExpr->GetTarget();
+        if (!target) {
             return nullptr;
         }
-        accessorCall = GenerateAccessorCallForTopLevelVariable(*refExpr, AccessorKind::TOP_LEVEL_VARIABLE_SETTER);
-        if (!accessorCall) {
+        if (target->TestAttr(Attribute::GLOBAL)) {
+            accessorCall = GenerateAccessorCallForTopLevelVariable(*refExpr, AccessorKind::TOP_LEVEL_VARIABLE_SETTER);
+            if (!accessorCall) {
+                return nullptr;
+            }
+        } else if (!isInConstructor) {
+            // TODO: Should be replaced with call to accessor for member variable
+            //       Such expressions may appear in body of extend methods
+            return nullptr;
+        } else {
             return nullptr;
         }
     } else if (auto memberAccess = As<ASTKind::MEMBER_ACCESS>(leftValue); memberAccess) {
