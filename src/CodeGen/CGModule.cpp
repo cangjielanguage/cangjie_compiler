@@ -224,7 +224,7 @@ void AddToGenericParamMapUnderExtendScope(const llvm::Function* function, std::u
         auto outerTi = function->getArg(static_cast<unsigned>(outerTIIdx.value()));
         (void)cgFunc->genericParamsMap.emplace(gt, [outerTi, path, extendedType](IRBuilder2& irBuilder) {
             auto entryTypeArgs = irBuilder.GetTypeArgsFromTypeInfo(outerTi);
-            std::unordered_map<const CHIR::Type*, llvm::Value*> map;
+            std::unordered_map<const CHIR::Type*, CGExtensionDef::InnerTiInfo> map;
             std::queue<size_t> remainPath;
             for (auto idx : path) {
                 remainPath.push(idx);
