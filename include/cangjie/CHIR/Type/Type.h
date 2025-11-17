@@ -375,9 +375,11 @@ public:
      */
     void VisitTypeRecursively(const std::function<bool(const Type&)>& visitor) const;
 
-    bool IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder) const;
+    bool IsEqualOrSubTypeOf(const Type& parentType, CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
-    bool IsEqualOrInstantiatedTypeOf(const Type& genericRelatedType, CHIRBuilder& builder) const;
+    bool IsEqualOrInstantiatedTypeOf(const Type& genericRelatedType, CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
     virtual std::vector<FuncBase*> GetDeclareAndExtendMethods(CHIRBuilder& builder) const;
 
@@ -424,7 +426,8 @@ public:
      *
      *  so the result of `CPointer<Bool>.GetSuperTypesRecusively()` is {I1, I2, I6}
      */
-    std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder) const;
+    std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
     const std::vector<ExtendDef*>& GetExtends(CHIRBuilder* builder = nullptr) const override;
     void AddExtend(ExtendDef& extend);
@@ -648,7 +651,8 @@ public:
      * @param builder The CHIR builder used for building the types.
      * @return A vector of implemented interface types.
      */
-    std::vector<ClassType*> GetImplementedInterfaceTys(CHIRBuilder* builder);
+    std::vector<ClassType*> GetImplementedInterfaceTys(CHIRBuilder* builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr);
     
     /**
      * @brief Retrieves the implemented interface types without extension.
@@ -730,14 +734,16 @@ protected:
     std::vector<Type*> instantiatedMemberTys;
 
 private:
-    std::vector<ClassType*> CalculateImplementedInterfaceTys(CHIRBuilder& builder);
+    std::vector<ClassType*> CalculateImplementedInterfaceTys(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr);
     std::vector<Type*> CalculateCurDefInstantiatedMemberTys(CHIRBuilder& builder);
-    std::vector<ClassType*> CalculateExtendImplementedInterfaceTys(CHIRBuilder& builder) const;
+    std::vector<ClassType*> CalculateExtendImplementedInterfaceTys(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
 private:
     bool hasSetSuperInterface{false};
     bool hasSetInstMemberTy{false};
-    std::mutex setSuperInterfaceMtx;
+    std::recursive_mutex setSuperInterfaceMtx;
     std::mutex setInstMemberTyMtx;
 };
 
@@ -1077,7 +1083,8 @@ public:
      * @param builder The CHIR builder used for building the type.
      * @return True if the generic constraints are satisfied, false otherwise.
      */
-    bool SatisfyGenericConstraints(Type& type, CHIRBuilder& builder) const;
+    bool SatisfyGenericConstraints(Type& type, CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr) const;
 
     size_t Hash() const override;
     bool operator==(const Type& other) const override;
