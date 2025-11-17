@@ -21,9 +21,8 @@ void FindCJMapping::HandleImpl(InteropContext& ctx)
 {
     for (auto& file : ctx.pkg.files) {
         for (auto& decl : file->decls) {
-            if (auto structDecl = As<ASTKind::STRUCT_DECL>(decl);
-                structDecl && ctx.typeMapper.IsObjCCJMapping(*structDecl)) {
-                ctx.cjMappings.emplace_back(structDecl);
+            if (ctx.typeMapper.IsObjCCJMapping(*decl)) {
+                ctx.cjMappings.emplace_back(decl);
             }
         }
     }

@@ -35,6 +35,10 @@ void GenerateWrappers::HandleImpl(InteropContext& ctx)
                 continue;
             }
 
+            if (interopType == InteropType::CJ_Mapping && !ctx.typeMapper.IsObjCCJMappingMember(*memberDecl)) {
+                continue;
+            }
+
             switch (memberDecl->astKind) {
                 case ASTKind::FUNC_DECL:
                     this->GenerateWrapper(ctx, *StaticAs<ASTKind::FUNC_DECL>(memberDecl));

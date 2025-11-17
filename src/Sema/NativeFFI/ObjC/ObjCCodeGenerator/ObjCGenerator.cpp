@@ -451,9 +451,6 @@ std::string ObjCGenerator::GenerateImport(const std::string& name)
 
 void ObjCGenerator::GenerateForwardDeclarations()
 {
-    if (ctx.typeMapper.IsObjCCJMapping(*decl->ty)) {
-        return;
-    }
     std::set<Ptr<Decl>> dependencies;
     auto walker = [this, &dependencies](Ptr<Ty> ty, auto& self) -> void {
         if (ctx.typeMapper.IsObjCObjectType(*ty)) {
@@ -480,6 +477,7 @@ void ObjCGenerator::GenerateForwardDeclarations()
     for (auto&& dep : dependencies) {
         std::string keyword;
         switch (dep->astKind) {
+            case ASTKind::STRUCT_DECL:
             case ASTKind::CLASS_DECL:
                 keyword = CLASS_FWD_KEYWORD;
                 break;
@@ -610,7 +608,7 @@ void ObjCGenerator::GenerateInterfaceDecl()
     if (isClassInheritedFromClass) {
         AddWithIndent(GenerateImport("\"" + superClassPtr->identifier.Val() + ".h\""), GenerationTarget::HEADER);
     }
-    if (interopType == InteropType::CJ_Mapping && dynamic_cast<StructDecl*>(decl.get())) {
+    if (interopType == InteropType::CJ_Mapping && ctx.typeMapper.IsOneWayMapping(*decl)) {
         AddWithIndent(FINAL_MODIFIER, GenerationTarget::HEADER);
     }
     auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
@@ -730,6 +728,10 @@ void ObjCGenerator::AddProperties()
         if (ctx.factory.IsGeneratedNativeHandleField(*declPtr)) {
             continue;
         }
+        
+        if (interopType == InteropType::CJ_Mapping && !ctx.typeMapper.IsObjCCJMappingMember(*declPtr)) {
+            continue;
+        }
 
         const auto& varDecl = *As<ASTKind::VAR_DECL>(declPtr.get());
         const auto& staticType =
@@ -802,6 +804,10 @@ void ObjCGenerator::AddConstructors()
 
         const FuncDecl& funcDecl = *StaticAs<ASTKind::FUNC_DECL>(declPtr.get());
         if (!funcDecl.funcBody) {
+            continue;
+        }
+
+        if (interopType == InteropType::CJ_Mapping && !ctx.typeMapper.IsObjCCJMappingMember(*declPtr)) {
             continue;
         }
 
@@ -881,6 +887,11 @@ void ObjCGenerator::AddMethods()
         if (ctx.factory.IsGeneratedMember(*declPtr.get())) { continue; }
 
         if (!declPtr->TestAttr(Attribute::PUBLIC)) { continue; }
+        
+        if (interopType == InteropType::CJ_Mapping && !ctx.typeMapper.IsObjCCJMappingMember(*declPtr)) {
+            continue;
+        }
+
         if (declPtr->astKind == ASTKind::FUNC_DECL &&
             !declPtr->TestAnyAttr(Attribute::CONSTRUCTOR, Attribute::FINALIZER)) {
             const FuncDecl& funcDecl = *StaticAs<ASTKind::FUNC_DECL>(declPtr.get());
