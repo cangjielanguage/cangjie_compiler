@@ -21,7 +21,9 @@
 
 namespace Cangjie::Interop::ObjC {
 
-void CheckForeignName(DiagnosticEngine& diag, TypeManager& typeManager, const MemberSignature& parent,
+void CheckAnnotation(DiagnosticEngine& diag, TypeManager& typeManager, AnnotationKind annotationKind,
+    const MemberSignature& parent, const MemberSignature& child, const Decl& checkingDecl);
+void CheckForeignAnnotations(DiagnosticEngine& diag, TypeManager& typeManager, const MemberSignature& parent,
     const MemberSignature& child, const AST::Decl& checkingDecl);
 void GenerateSyntheticClassMemberStubs(
     AST::ClassDecl& synthetic, const MemberMap& interfaceMembers, const MemberMap& instanceMembers);

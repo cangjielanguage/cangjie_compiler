@@ -511,6 +511,8 @@ enum class AnnotationKind {
     OBJ_C_IMPL,
     OBJ_C_INIT, // Indicate a method as Objective-C init.
     FOREIGN_NAME,
+    FOREIGN_GETTER_NAME,
+    FOREIGN_SETTER_NAME,
     ATTRIBUTE,
     /**
      * NOTE: 'OVERFLOW' is a macro in early versions of glibc (VERSION < 2.27).

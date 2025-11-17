@@ -408,7 +408,8 @@ std::string ObjCGenerator::GenerateFunctionDeclaration(
  * Note: <...> are optional.
  */
 std::string ObjCGenerator::GeneratePropertyDeclaration(
-    const ObjCFunctionType staticType, const std::string& mode, const std::string& type, const std::string& name) const
+    const ObjCFunctionType staticType, const std::string& mode, const std::string& type, const std::string& name,
+    const std::string& getterName, const std::string& setterName) const
 {
     std::string result = "";
     if (name == "" || type == "") {
@@ -427,12 +428,8 @@ std::string ObjCGenerator::GeneratePropertyDeclaration(
 
     if (name != SELF_WEAKLINK_NAME) {
         result += ", ";
-        result += GETTER_KEYWORD + name;
+        result += GETTER_KEYWORD + getterName;
         if (mode == READWRITE_MODIFIER) {
-            std::string capitalizedName = name;
-            std::transform(capitalizedName.begin(), capitalizedName.begin() + 1, capitalizedName.begin(),
-                [](unsigned char c) { return std::toupper(c); });
-            const auto& setterName = "set" + capitalizedName + ":";
             result += ", ";
             result += SETTER_KEYWORD + setterName;
         }
@@ -702,7 +699,7 @@ std::string ObjCGenerator::GenerateFuncParamLists(
 
 std::string ObjCGenerator::GenerateSetterParamLists(const std::string& type) const
 {
-    return ":(" + type + ")" + SETTER_PARAM_NAME;
+    return "(" + type + ")" + SETTER_PARAM_NAME;
 }
 
 bool ObjCGenerator::SkipSetterForValueTypeDecl(Decl& declArg) const
@@ -717,7 +714,7 @@ void ObjCGenerator::AddProperties()
 {
     auto registryIdType = CreateType(TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64));
     AddWithIndent(
-        GeneratePropertyDeclaration(ObjCFunctionType::INSTANCE, READWRITE_MODIFIER, INT64_T, SELF_WEAKLINK_NAME)
+        GeneratePropertyDeclaration(ObjCFunctionType::INSTANCE, READWRITE_MODIFIER, INT64_T, SELF_WEAKLINK_NAME, SELF_WEAKLINK_NAME, NameGenerator::MakeSetterName(SELF_WEAKLINK_NAME))
     );
 
     for (OwnedPtr<Decl>& declPtr : decl->GetMemberDecls()) {
@@ -741,10 +738,12 @@ void ObjCGenerator::AddProperties()
         bool genSetter = varDecl.isVar && !SkipSetterForValueTypeDecl(*decl);
         const auto modeModifier = genSetter ? READWRITE_MODIFIER : READONLY_MODIFIER;
         const auto name = ctx.nameGenerator.GetObjCDeclName(varDecl);
-        AddWithIndent(GeneratePropertyDeclaration(staticType, modeModifier, type, name));
+        const auto getterName = ctx.nameGenerator.GetObjCGetterName(varDecl);
+        const auto setterName = ctx.nameGenerator.GetObjCSetterName(varDecl);
+        AddWithIndent(GeneratePropertyDeclaration(staticType, modeModifier, type, name, getterName, setterName));
 
         std::string getterResult = "";
-        getterResult += GenerateFunctionDeclaration(staticType, type, name);
+        getterResult += GenerateFunctionDeclaration(staticType, type, getterName);
         ArgsList argList = ArgsList();
         if (staticType == ObjCFunctionType::INSTANCE) {
             argList.emplace_back(INT64_T, string(SELF_NAME) + "." + SELF_WEAKLINK_NAME);
@@ -759,10 +758,6 @@ void ObjCGenerator::AddProperties()
         if (!genSetter) {
             continue;
         }
-        std::string setterName = name;
-        std::transform(setterName.begin(), setterName.begin() + 1, setterName.begin(),
-            [](unsigned char c) { return std::toupper(c); });
-        setterName = "set" + setterName;
 
         ArgsList setterArgsList = ArgsList();
         if (staticType == ObjCFunctionType::INSTANCE) {

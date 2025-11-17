@@ -7,6 +7,7 @@
 #include "ParserImpl.h"
 
 #include "cangjie/AST/Match.h"
+#include "cangjie/AST/Node.h"
 #include "cangjie/Basic/Print.h"
 
 using namespace Cangjie;
@@ -355,6 +356,8 @@ OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
             ParseAnnotationArguments(*annotation);
             break;
         }
+        case AnnotationKind::FOREIGN_GETTER_NAME:
+        case AnnotationKind::FOREIGN_SETTER_NAME:
         case AnnotationKind::FOREIGN_NAME: {
             ParseAnnotationArguments(*annotation);
             break;

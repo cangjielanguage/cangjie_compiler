@@ -1414,16 +1414,13 @@ OwnedPtr<Expr> ASTFactory::CreateAllocInitCall(FuncDecl& fd)
 
 OwnedPtr<Expr> ASTFactory::CreatePropGetterCallViaMsgSend(PropDecl& pd, OwnedPtr<Expr> nativeHandle)
 {
-    auto objcname = nameGenerator.GetObjCDeclName(pd);
+    auto objcname = nameGenerator.GetObjCGetterName(pd);
     return CreateObjCMsgSendCall(std::move(nativeHandle), objcname, typeMapper.Cj2CType(pd.ty), {});
 }
 
 OwnedPtr<Expr> ASTFactory::CreatePropSetterCallViaMsgSend(PropDecl& pd, OwnedPtr<Expr> nativeHandle, OwnedPtr<Expr> arg)
 {
-    auto objcname = nameGenerator.GetObjCDeclName(pd);
-    std::transform(
-        objcname.begin(), objcname.begin() + 1, objcname.begin(), [](unsigned char c) { return std::toupper(c); });
-    objcname = "set" + objcname + ":";
+    auto objcname = nameGenerator.GetObjCSetterName(pd);
     return CreateObjCMsgSendCall(
         std::move(nativeHandle), objcname, typeMapper.Cj2CType(pd.ty), Nodes<Expr>(std::move(arg)));
 }

@@ -61,7 +61,7 @@ private:
     std::string GenerateFunctionDeclaration(
         const ObjCFunctionType type, const std::string& returnType, const std::string& name) const;
     std::string GeneratePropertyDeclaration(const ObjCFunctionType staticType, const std::string& mode,
-        const std::string& type, const std::string& name) const;
+        const std::string& type, const std::string& name, const std::string& getterName, const std::string& setterName) const;
     std::string GenerateImport(const std::string& name);
     std::string GenerateStaticFunctionReference(
         const std::string& funcName, const std::string& retType, const std::string& argTypes) const;

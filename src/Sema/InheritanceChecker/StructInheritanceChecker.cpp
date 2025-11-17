@@ -1459,7 +1459,7 @@ void StructInheritanceChecker::CheckNativeFFI(
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     if (checkingDecls.size() > 0 && checkingDecls.back()) {
         Interop::Java::CheckForeignName(diag, typeManager, parent, child, *checkingDecls.back());
-        Interop::ObjC::CheckForeignName(diag, typeManager, parent, child, *checkingDecls.back());
+        Interop::ObjC::CheckForeignAnnotations(diag, typeManager, parent, child, *checkingDecls.back());
     }
 #endif
 }

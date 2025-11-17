@@ -12,8 +12,11 @@
 
 #include "OCStructInheritanceCheckerImpl.h"
 #include "../../Utils.h"
+#include "InheritanceChecker/StructInheritanceChecker.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Match.h"
+#include "cangjie/AST/Node.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
 
 using namespace Cangjie;
 using namespace Cangjie::AST;
@@ -33,20 +36,20 @@ std::string GetAnnoValue(Ptr<Annotation> anno)
     return litExpr->stringValue;
 }
 
-void DiagConflictingForeignName(
-    DiagnosticEngine& diag, const Decl& declWithAnno, const Decl& otherDecl, const Decl& checkingDecl)
+void DiagConflictingAnnotation(
+    DiagnosticEngine& diag, const Decl& declWithAnno, const Decl& otherDecl, const Decl& checkingDecl, AnnotationKind annotationKind)
 {
-    auto anno = GetForeignNameAnnotation(declWithAnno);
+    auto anno = GetAnnotation(declWithAnno, annotationKind);
     CJC_ASSERT(anno);
 
     auto builder = [&diag, &anno, &declWithAnno]() {
         if (!anno->TestAttr(Attribute::COMPILER_ADD)) {
             auto declWithAnnoRange = MakeRange(anno->GetBegin(), declWithAnno.identifier.End());
             return diag.DiagnoseRefactor(DiagKindRefactor::sema_foreign_name_conflicting_annotation, declWithAnno,
-                declWithAnnoRange, declWithAnno.identifier);
+                declWithAnnoRange, declWithAnno.identifier, anno->identifier);
         } else {
             return diag.DiagnoseRefactor(DiagKindRefactor::sema_foreign_name_conflicting_derived_annotation,
-                declWithAnno, MakeRange(declWithAnno.identifier), declWithAnno.identifier, GetAnnoValue(anno));
+                declWithAnno, MakeRange(declWithAnno.identifier), declWithAnno.identifier, anno->identifier, GetAnnoValue(anno));
         }
     }();
 
@@ -54,15 +57,15 @@ void DiagConflictingForeignName(
     if (otherAnno && !otherAnno->TestAttr(Attribute::COMPILER_ADD)) {
         auto otherDeclRange = MakeRange(otherAnno->GetBegin(), otherDecl.identifier.End());
         builder.AddNote(
-            otherDecl, otherDeclRange, "Other declaration '" + otherDecl.identifier + "' has a different @ForeignName");
+            otherDecl, otherDeclRange, "Other declaration '" + otherDecl.identifier + "' has a different @" + anno->identifier);
     } else if (otherAnno) {
         builder.AddNote(otherDecl, MakeRange(otherDecl.identifier),
-            "Other declaration '" + otherDecl.identifier + "' has a different derived @ForeignName '" +
+            "Other declaration '" + otherDecl.identifier + "' has a different derived @" + anno->identifier + " '" +
                 GetAnnoValue(otherAnno) + "'");
     } else {
         auto otherDeclRange = MakeRange(otherDecl.identifier);
         builder.AddNote(
-            otherDecl, otherDeclRange, "Other declaration '" + otherDecl.identifier + "' doesn't have a @ForeignName");
+            otherDecl, otherDeclRange, "Other declaration '" + otherDecl.identifier + "' doesn't have a @" + anno->identifier);
     }
 
     builder.AddNote(checkingDecl, MakeRange(checkingDecl.identifier),
@@ -95,48 +98,56 @@ bool NeedCheckForeignName(const MemberSignature& parent, const MemberSignature& 
 
 } // namespace
 
-void CheckForeignName(DiagnosticEngine& diag, TypeManager& typeManager, const MemberSignature& parent,
-    const MemberSignature& child, const Decl& checkingDecl)
+void CheckAnnotation(DiagnosticEngine& diag, TypeManager& typeManager, AnnotationKind annotationKind,
+    const MemberSignature& parent, const MemberSignature& child, const Decl& checkingDecl)
 {
     if (!NeedCheckForeignName(parent, child)) {
         return;
     }
 
-    auto childAnno = GetForeignNameAnnotation(*child.decl);
-    auto parentAnno = GetForeignNameAnnotation(*parent.decl);
+    auto childAnno = GetAnnotation(*child.decl, annotationKind);
+    auto parentAnno = GetAnnotation(*parent.decl, annotationKind);
     if (!childAnno && !parentAnno) {
         return;
     }
 
     if (!typeManager.IsSubtype(child.structTy, parent.structTy)) {
         if (!childAnno && parentAnno) {
-            DiagConflictingForeignName(diag, *parent.decl, *child.decl, checkingDecl);
+            DiagConflictingAnnotation(diag, *parent.decl, *child.decl, checkingDecl, annotationKind);
         } else if (!parentAnno && childAnno) {
-            DiagConflictingForeignName(diag, *child.decl, *parent.decl, checkingDecl);
+            DiagConflictingAnnotation(diag, *child.decl, *parent.decl, checkingDecl, annotationKind);
         } else if (GetAnnoValue(childAnno) != GetAnnoValue(parentAnno)) {
-            DiagConflictingForeignName(diag, *parent.decl, *child.decl, checkingDecl);
+            DiagConflictingAnnotation(diag, *parent.decl, *child.decl, checkingDecl, annotationKind);
         }
         return;
     }
 
     if (childAnno && !childAnno->TestAttr(Attribute::COMPILER_ADD)) {
         auto range = MakeRange(childAnno->GetBegin(), child.decl->identifier.End());
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_foreign_name_appeared_in_child, *child.decl, range);
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_foreign_name_appeared_in_child, *child.decl, range, childAnno->identifier);
     } else if (childAnno && !parentAnno) {
-        DiagConflictingForeignName(diag, *child.decl, *parent.decl, checkingDecl);
+        DiagConflictingAnnotation(diag, *child.decl, *parent.decl, checkingDecl, annotationKind);
     } else if (!childAnno && parentAnno && child.replaceOther) {
         // NOTE: When replaceOther is true, then this method is overriding some other parent one
         // And if there is no ForeignName, then that parent also hadn't ForeignName. But current
         // parent do have it
-        DiagConflictingForeignName(diag, *parent.decl, *child.decl, checkingDecl);
+        DiagConflictingAnnotation(diag, *parent.decl, *child.decl, checkingDecl, annotationKind);
     } else if (!childAnno && parentAnno) {
         auto clonedAnno = ASTCloner::Clone(parentAnno);
         clonedAnno->EnableAttr(Attribute::COMPILER_ADD);
         CopyBasicInfo(child.decl, clonedAnno.get());
         child.decl->annotations.emplace_back(std::move(clonedAnno));
     } else if (GetAnnoValue(childAnno) != GetAnnoValue(parentAnno)) {
-        DiagConflictingForeignName(diag, *parent.decl, *child.decl, checkingDecl);
+        DiagConflictingAnnotation(diag, *parent.decl, *child.decl, checkingDecl, annotationKind);
     }
+}
+
+void CheckForeignAnnotations(DiagnosticEngine& diag, TypeManager& typeManager, const MemberSignature& parent,
+    const MemberSignature& child, const Decl& checkingDecl)
+{
+    CheckAnnotation(diag, typeManager, AnnotationKind::FOREIGN_NAME, parent, child, checkingDecl);
+    CheckAnnotation(diag, typeManager, AnnotationKind::FOREIGN_GETTER_NAME, parent, child, checkingDecl);
+    CheckAnnotation(diag, typeManager, AnnotationKind::FOREIGN_SETTER_NAME, parent, child, checkingDecl);
 }
 
 namespace {

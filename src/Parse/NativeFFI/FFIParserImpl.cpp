@@ -12,9 +12,11 @@
 
 #include "../ParserImpl.h"
 #include "cangjie/AST/Match.h"
+#include "cangjie/AST/Node.h"
 #include "cangjie/AST/Utils.h"
 
 #include "FFIParserImpl.h"
+#include "cangjie/Lex/Token.h"
 
 namespace Cangjie {
 using namespace AST;
@@ -85,6 +87,12 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
                 CheckForeignNameAnnoTarget(anno);
                 break;
             }
+            case AnnotationKind::FOREIGN_GETTER_NAME:
+            case AnnotationKind::FOREIGN_SETTER_NAME: {
+                CheckForeignGetterSetterNameAnnoArgs(anno);
+                CheckForeignGetterSetterNameAnnoTarget(anno);
+                break;
+            }
             case AnnotationKind::JAVA_HAS_DEFAULT: {
                 jp.CheckJavaHasDefaultAnnotation(anno);
                 break;
@@ -121,6 +129,26 @@ void FFIParserImpl::CheckForeignNameAnnoArgs(const Annotation& anno) const
 
     if (anno.args.size() != 1 || !IsLitString(anno.args[0]->expr)) {
         p.DiagAnnotationExpectsOneArgument(anno, FOREIGN_NAME_NAME, "'String' literal");
+        return;
+    }
+}
+
+void FFIParserImpl::CheckForeignGetterSetterNameAnnoTarget(const Annotation& anno) const
+{
+    if (p.SeeingAny({TokenKind::PROP})) {
+        return;
+    }
+
+    if (anno.kind == AnnotationKind::FOREIGN_GETTER_NAME || anno.kind == AnnotationKind::FOREIGN_SETTER_NAME) {
+        auto& lah = p.lookahead;
+        p.DiagUnexpectedAnnoOn(anno, lah.Begin(), anno.identifier, lah.Value());
+    }
+}
+
+void FFIParserImpl::CheckForeignGetterSetterNameAnnoArgs(const Annotation& anno) const
+{
+    if (anno.args.size() != 1 || !IsLitString(anno.args[0]->expr) || !anno.args[0]->name.Empty()) {
+        p.DiagAnnotationExpectsOneArgument(anno, "@" + anno.identifier.Val(), "'String' literal");
         return;
     }
 }

@@ -44,6 +44,9 @@ private:
     void CheckForeignNameAnnoArgs(const Annotation& anno) const;
     void CheckForeignNameAnnoTarget(const Annotation& anno) const;
 
+    void CheckForeignGetterSetterNameAnnoArgs(const Annotation& anno) const;
+    void CheckForeignGetterSetterNameAnnoTarget(const Annotation& anno) const;
+
     ParserImpl& p;
     JFFIParserImpl jp;
     OCFFIParserImpl op;

@@ -141,6 +141,9 @@ std::string GetMangledMethodName(const BaseMangler& mangler, const std::vector<O
     const std::string& methodName);
 
 Ptr<Annotation> GetForeignNameAnnotation(const Decl& decl);
+Ptr<Annotation> GetAnnotation(const Decl& decl, AnnotationKind annotationKind);
+
+Ptr<std::string> GetSingleArgumentAnnotationValue(const Decl& target, AnnotationKind annotationKind);
 
 bool IsSuperConstructorCall(const CallExpr& call);
 

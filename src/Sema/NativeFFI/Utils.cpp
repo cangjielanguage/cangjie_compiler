@@ -8,6 +8,7 @@
 #include "TypeCheckUtil.h"
 
 #include "Desugar/AfterTypeCheck.h"
+#include "cangjie/AST/Node.h"
 #include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/AST/Match.h"
@@ -212,6 +213,35 @@ bool IsSuperConstructorCall(const CallExpr& call)
         return false;
     }
     return call.callKind == CallKind::CALL_SUPER_FUNCTION;
+}
+
+Ptr<Annotation> GetAnnotation(const Decl& decl, AnnotationKind annotationKind)
+{
+    auto it = std::find_if(decl.annotations.begin(), decl.annotations.end(),
+        [annotationKind](const auto& anno) { return anno->kind == annotationKind; });
+    return it != decl.annotations.end() ? it->get() : nullptr;
+}
+
+Ptr<std::string> GetSingleArgumentAnnotationValue(const Decl& target, AnnotationKind annotationKind)
+{
+    for (auto& anno : target.annotations) {
+        if (anno->kind != annotationKind) {
+            continue;
+        }
+
+        CJC_ASSERT(anno->args.size() == 1);
+        if (anno->args.empty()) {
+            break;
+        }
+
+        CJC_ASSERT(anno->args[0]->expr->astKind == ASTKind::LIT_CONST_EXPR);
+        auto lce = As<ASTKind::LIT_CONST_EXPR>(anno->args[0]->expr.get());
+        CJC_ASSERT(lce);
+
+        return &lce->stringValue;
+    }
+
+    return nullptr;
 }
 
 } // namespace Cangjie::Native::FFI
