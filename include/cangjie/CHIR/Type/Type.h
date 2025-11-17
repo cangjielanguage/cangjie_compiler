@@ -597,7 +597,8 @@ public:
      *
      *  so the result of `C2.GetSuperTypesRecusively()` is {I1 ~ I6, C1}
      */
-    std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder);
+    std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder,
+        std::set<std::pair<const Type*, const Type*>>* visited = nullptr);
 
     /**
      * @brief Retrieves the instance map for generic types.

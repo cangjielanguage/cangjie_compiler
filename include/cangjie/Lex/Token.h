@@ -18,6 +18,7 @@
 #include <ostream>
 #include <unordered_map>
 #include <vector>
+#include <cstdint>
 
 #include "cangjie/Basic/Position.h"
 #include "cangjie/Utils/CheckUtils.h"

@@ -12,7 +12,7 @@
 #ifndef CJ_INVOKE_API_H
 #define CJ_INVOKE_API_H
 
-#include "stdint.h"
+#include <cstdint>
 
 /**
  * Type that represents error codes. The programmer can quickly check the
