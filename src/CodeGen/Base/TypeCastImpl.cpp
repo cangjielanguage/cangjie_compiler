@@ -571,8 +571,9 @@ llvm::Value* GenerateGenericTypeCast(IRBuilder2& irBuilder, const CGValue& cgSrc
             irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(srcValue), elementType->getPointerTo(1U));
         return irBuilder.CreateLoad(elementType, srcPayload);
     } else if (targetIsOptionLike && srcIsOptionLike && StaticCast<CGEnumType*>(targetCGType)->IsOptionLikeT() &&
-        StaticCast<CGEnumType*>(srcCGType)->IsOptionLikeNonRef()) { // Enum<non-ref> -> Enum<(orphan)>
-        // 1. allocate memory for boxing srcValue
+        (StaticCast<CGEnumType*>(srcCGType)->IsOptionLikeRef() ||
+            StaticCast<CGEnumType*>(srcCGType)->IsOptionLikeNonRef())) {
+        // 1. allocate memory
         auto typeInfoOfSrc = irBuilder.CreateTypeInfo(srcTy);
         llvm::Value* temp =
             irBuilder.CallClassIntrinsicAlloc({typeInfoOfSrc, irBuilder.GetLayoutSize_32(*DeRef(srcTy))});
