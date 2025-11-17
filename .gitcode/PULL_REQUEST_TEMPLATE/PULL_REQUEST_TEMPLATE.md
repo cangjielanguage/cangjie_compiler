@@ -1,8 +1,32 @@
-### 变更内容
-请提供此 Pull Request 的变更内容描述。
+## Change Details (Required)
 
-### 测试情况
-请提供此PR相关的测试验证情况描述，如不涉及写明原因。
+Please describe the changes in this Pull Request.
 
-### 其他信息
-在这里可以添加任何与这个 Pull Request 相关的其他说明。
+## Change Type (Required)
+
+Please describe the type of changes in this Pull Request (reason). **Simply save and click the checkbox, or when editing, change `[ ]` to `[x]` for the relevant item.**
+
+- [ ] Feature
+- [ ] Bugfix
+- [ ] Build Process or Auxiliary Tool Changes
+- [ ] Documentation Update
+
+## Self-Check of Changes (Required)
+
+**Please do not modify or delete the following options. Simply save and click the checkbox, or when editing, change `[ ]` to `[x]` for the relevant item.**
+
+### Local Compilation Verification Results:
+
+- [ ] Cangjie Compiler compiled successfully
+- [ ] Cangjie Runtime compiled successfully
+- [ ] Cangjie Standard Library compiled successfully
+- [ ] Not applicable (select this option for auxiliary tool changes or documentation updates)
+
+### Local Test Case Verification Results:
+
+- [ ] Pass. Please provide screenshots below.
+- [ ] Not applicable. Please explain the reasons below.
+
+## Related Issues (Required)
+
+Please provide links to issues related to this Pull Request.

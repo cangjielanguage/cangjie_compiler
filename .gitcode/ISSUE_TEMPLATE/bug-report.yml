@@ -1,0 +1,55 @@
+name: 缺陷反馈|Bug
+description: 当您发现了一个缺陷，需要向社区反馈时，请使用此模板。
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢对仓颉社区的支持与关注，欢迎反馈缺陷。
+  - type: textarea
+    attributes:
+      label: 发生了什么问题？
+      description: 提供尽可能多的信息描述产生了什么问题：
+      placeholder: ""
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 期望行为是什么？
+      description: 描述期望行为或效果应如何：
+      placeholder: ""
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 如何复现该缺陷
+      description: 提供尽可能多的信息描述如何复现该缺陷：
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 其他补充信息
+      description: 补充下其他您认为需要提供的信息：
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: cjc版本信息
+      description: 请将cjc -v的输出结果以图片或者文字的形式填写在下方：
+      placeholder: ""
+    validations:
+      required: true
+  - type: checkboxes
+    attributes:
+      label: 分支版本信息
+      description: 在哪些分支版本存在该缺陷？
+      options:
+        - label: dev
+          required: false
+        - label: main
+          required: false
+        - label: release/1.0
+          required: false
+    validations:
+      required: true
