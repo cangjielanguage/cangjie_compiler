@@ -846,19 +846,14 @@ private:
 
         using LValType = decltype(left->GetVal());
         using RValType = decltype(right->GetVal());
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wsign-conversion"
-#endif
+        // Use common type for bitwise operations to avoid sign-conversion warnings
+        using CommonType = std::common_type_t<LValType, RValType>;
         const static std::unordered_map<ExprKind, std::function<LValType(LValType, RValType)>> ops = {
-            {ExprKind::LSHIFT, [](LValType x, RValType y) { return x << y; }},
-            {ExprKind::RSHIFT, [](LValType x, RValType y) { return x >> y; }},
-            {ExprKind::BITAND, [](LValType x, RValType y) { return x & y; }},
-            {ExprKind::BITXOR, [](LValType x, RValType y) { return x ^ y; }},
-            {ExprKind::BITOR, [](LValType x, RValType y) { return x | y; }}};
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+            {ExprKind::LSHIFT, [](LValType x, RValType y) { return static_cast<LValType>(static_cast<CommonType>(x) << static_cast<CommonType>(y)); }},
+            {ExprKind::RSHIFT, [](LValType x, RValType y) { return static_cast<LValType>(static_cast<CommonType>(x) >> static_cast<CommonType>(y)); }},
+            {ExprKind::BITAND, [](LValType x, RValType y) { return static_cast<LValType>(static_cast<CommonType>(x) & static_cast<CommonType>(y)); }},
+            {ExprKind::BITXOR, [](LValType x, RValType y) { return static_cast<LValType>(static_cast<CommonType>(x) ^ static_cast<CommonType>(y)); }},
+            {ExprKind::BITOR, [](LValType x, RValType y) { return static_cast<LValType>(static_cast<CommonType>(x) | static_cast<CommonType>(y)); }}};
 
         auto op = ops.find(kind);
         CJC_ASSERT(op != ops.end());

@@ -564,9 +564,9 @@ std::pair<std::string, std::string> JavaSourceCodeGenerator::GenNativeSuperArgCa
         auto pid = Cangjie::Stoi(parts[i]);
         CJC_ASSERT(pid.has_value());
         auto index = pid.value();
-        auto& pname = params[index]->identifier.Val();
+        auto& pname = params[static_cast<size_t>(index)]->identifier.Val();
         args.push_back(pname);
-        nativeParams.push_back(mpTy(params[index]->ty) + " " + pname);
+        nativeParams.push_back(mpTy(params[static_cast<size_t>(index)]->ty) + " " + pname);
     }
     std::string superCall = id + "(" + Cangjie::Utils::JoinStrings(args, ", ") + ")";
     std::string nativeFnDecl = "public static native " + mpTy(arg.ty) + " " + id +

@@ -1622,7 +1622,7 @@ size_t CollectFileCG(const std::vector<CNode>& nodes, CommentGroupsLocInfo& cgIn
             break;
         }
     }
-    cgInfo.cgs.erase(cgInfo.cgs.begin() + end + 1, cgInfo.cgs.end());
+    cgInfo.cgs.erase(cgInfo.cgs.begin() + static_cast<long>(end) + 1, cgInfo.cgs.end());
     return begin;
 }
 } // namespace

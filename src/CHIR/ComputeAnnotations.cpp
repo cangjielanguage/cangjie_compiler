@@ -550,7 +550,7 @@ private:
         if (auto d = DynamicCast<InheritableDecl>(&decl)) {
             return TakeSubPkg(*d);
         }
-        if (auto t = DynamicCast<TypeAliasDecl>(&decl)) {
+        if (Is<TypeAliasDecl>(&decl)) {
             /// type alias are replaced after SEMA
             return false;
         }

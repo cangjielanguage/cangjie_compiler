@@ -91,7 +91,7 @@ void CHIR2BCHIR::TranslateTerminatorExpression(Context& ctx, const Expression& e
             auto idx = ctx.def.NextIndex();
             // we dont store mangled name here
             PushOpCodeWithAnnotations<false, true>(
-                ctx, OpCode::INVOKE_EXC, expr, static_cast<unsigned>(expr.GetNumOfOperands()), 0);
+                ctx, OpCode::INVOKE_EXC, expr, static_cast<unsigned>(expr.GetNumOfOperands()), 0u);
             auto methodName = MangleMethodName<true>(invoke->GetMethodName(), *invoke->GetMethodType());
             ctx.def.AddMangledNameAnnotation(idx, methodName);
             TranslateTryTerminatorJumps(ctx, *invoke);

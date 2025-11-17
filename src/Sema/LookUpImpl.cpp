@@ -79,7 +79,7 @@ private:
     }
     void SwapResultsWithInstTy(size_t oldIdx, size_t newIdx, Ptr<Decl> d, Ptr<InterfaceTy> interfaceTy)
     {
-        resultsWithInstTyV.erase(resultsWithInstTyV.begin() + oldIdx);
+        resultsWithInstTyV.erase(resultsWithInstTyV.begin() + static_cast<long>(oldIdx));
         InsertResultsWithInstTy(newIdx, d, interfaceTy);
     }
 
@@ -241,7 +241,7 @@ void LookUpImpl::ResolveOverrideOrShadow(std::vector<Ptr<Decl>>& results, Decl& 
         if (typeManager.IsSubtype(parentTy, inResultOuter) ||
             (inResult->TestAttr(Attribute::ABSTRACT) && !newDecl->TestAttr(Attribute::ABSTRACT))) {
             // If newDecl override or shadow the inResult, only reserved decl1.
-            results.erase(results.begin() + i);
+            results.erase(results.begin() + static_cast<long>(i));
             SwapResultsWithInstTy(i, results.size(), &decl, parentTy);
             results.emplace_back(&decl);
         } else if (typeManager.IsSubtype(inResultOuter, parentTy) ||
@@ -301,7 +301,7 @@ void LookUpImpl::FieldLookup(
             auto superInfo = info;
             superInfo.lookupExtend = true;
             FieldLookup(*superClass, fieldName, results, superInfo);
-        } else if (auto superInterface = DynamicCast<InterfaceDecl*>(super)) {
+        } else if (Is<InterfaceDecl*>(super)) {
             FieldLookup(*StaticCast<InterfaceTy>(it->ty), fieldName, results, {info.baseTy});
         }
     }

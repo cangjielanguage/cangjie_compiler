@@ -19,21 +19,30 @@ if(IOS)
     add_compile_options(--target=${CXX_COMPATIABLE_TRIPLE})
 endif()
 
-set(CJC_EXTRA_WARNINGS -Woverloaded-virtual -Wvla -Wconversion -Wfloat-equal -Wunused -Wdelete-non-virtual-dtor -Wswitch-default -Wcast-qual -Wextra -Wformat=2 -Wno-missing-field-initializers -Wno-format-nonliteral -Wno-sign-conversion)
-# -Wno-sign-conversion here to be removed by next MR
+set(CJC_EXTRA_WARNINGS -Woverloaded-virtual -Wvla -Wconversion -Wfloat-equal -Wunused -Wdelete-non-virtual-dtor -Wcast-qual -Wextra -Wformat=2 -Wno-missing-field-initializers -Wno-format-nonliteral)
 if(${CMAKE_SYSTEM_NAME} EQUAL Darwin)
     # mac uses llvm headers for std, and llvm headers have the following warning(s)
     set(CJC_EXTRA_WARNINGS ${CJC_EXTRA_WARNINGS} -Wno-float-equal)
     # mac headers have warning on undefed macro(s) (FFI_GO_CLOSURES), so use -Wno-undef
     set(CJC_EXTRA_WARNINGS ${CJC_EXTRA_WARNINGS} -Wno-undef)
 endif()
+if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL "AppleClang")
     # g++ on some platform has harsher check on -Werror=shadow, in that it does not allow function parameters to share the same name with class members, which is actually bad in constructor. So we disable this on some platform.
     set(CJC_EXTRA_WARNINGS ${CJC_EXTRA_WARNINGS} -Wshadow)
+endif()
+set(CJC_EXTRA_WARNINGS ${CJC_EXTRA_WARNINGS} -Wno-switch-default)
 
 # when including llvm header files, the following warnings have to be excluded
 set(CJC_WITH_LLVM_EXTRA_WARNINGS ${CJC_EXTRA_WARNINGS} -Wno-sign-conversion -Wno-unused-parameter -Wno-float-conversion -Wno-shadow)
-# gcc on some platform does not recognise these options
-set(CJC_WITH_LLVM_EXTRA_WARNINGS ${CJC_WITH_LLVM_EXTRA_WARNINGS} -Wno-implicit-int-conversion -Wno-shorten-64-to-32 -Wno-implicit-int-float-conversion)
+include(CheckCXXCompilerFlag)
+if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL "AppleClang")
+    # gcc does not recognise these options
+    set(CJC_WITH_LLVM_EXTRA_WARNINGS ${CJC_WITH_LLVM_EXTRA_WARNINGS} -Wno-implicit-int-conversion -Wno-shorten-64-to-32 -Wno-implicit-int-float-conversion)
+    check_cxx_compiler_flag("-Wno-unnecessary-virtual-specifier" COMPILER_SUPPORTS_UNNECESSARY_VIRTUAL)
+    if(COMPILER_SUPPORTS_UNNECESSARY_VIRTUAL)
+        set(CJC_WITH_LLVM_EXTRA_WARNINGS ${CJC_WITH_LLVM_EXTRA_WARNINGS} -Wno-unnecessary-virtual-specifier)
+    endif()
+endif()
 
 if(NOT CANGJIE_BUILD_CJC AND CANGJIE_BUILD_STD_SUPPORT)
     add_subdirectory(AST)

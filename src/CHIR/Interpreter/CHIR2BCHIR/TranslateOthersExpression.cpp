@@ -148,7 +148,7 @@ void CHIR2BCHIR::TranslateInvoke(Context& ctx, const Expression& expr)
     auto idx = ctx.def.NextIndex();
     // we dont store mangled name here
     PushOpCodeWithAnnotations<false, true>(
-        ctx, OpCode::INVOKE, expr, static_cast<unsigned>(expr.GetNumOfOperands()), 0);
+        ctx, OpCode::INVOKE, expr, static_cast<unsigned>(expr.GetNumOfOperands()), 0u);
     auto methodName = MangleMethodName<true>(invokeExpr->GetMethodName(), *invokeExpr->GetMethodType());
     ctx.def.AddMangledNameAnnotation(idx, methodName);
 }
@@ -196,7 +196,7 @@ void CHIR2BCHIR::TranslateBox(Context& ctx, const Box& expr)
 {
     auto opIdx = ctx.def.Size();
     CJC_ASSERT(opIdx <= static_cast<size_t>(Bchir::BYTECODE_CONTENT_MAX));
-    PushOpCodeWithAnnotations<false>(ctx, OpCode::BOX, expr, 0);
+    PushOpCodeWithAnnotations<false>(ctx, OpCode::BOX, expr, 0u);
     auto ty = expr.GetSourceTy();
     if (ty->IsStruct()) {
         auto structTy = StaticCast<const StructType*>(ty);
