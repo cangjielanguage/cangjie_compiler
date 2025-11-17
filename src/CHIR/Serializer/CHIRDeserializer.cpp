@@ -52,7 +52,11 @@ bool CHIRDeserializer::Deserialize(const std::string& fileName, Cangjie::CHIR::C
         Errorln(failedReason, ".");
         return false;
     }
-    flatbuffers::Verifier verifier(serializationInfo.data(), serializationInfo.size());
+    // Disable max depth and max tables verification.
+    flatbuffers::Verifier::Options options;
+    options.max_depth = std::numeric_limits<::flatbuffers::uoffset_t>::max();
+    options.max_tables = std::numeric_limits<::flatbuffers::uoffset_t>::max();
+    flatbuffers::Verifier verifier(serializationInfo.data(), serializationInfo.size(), options);
     if (!verifier.VerifyBuffer<PackageFormat::CHIRPackage>()) {
         Errorln("validation of '", fileName, "' failed, please confirm it was created by compiler whose version is '",
             CANGJIE_VERSION, "'.");

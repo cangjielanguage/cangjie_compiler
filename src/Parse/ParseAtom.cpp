@@ -1080,7 +1080,9 @@ OwnedPtr<AST::Expr> ParserImpl::ParseLeftParenExprInKind(ExprKind ek)
     }
 
     if (!Skip(TokenKind::RPAREN)) {
-        DiagExpectedRightDelimiter("(", leftParenPos);
+        if (!Is<InvalidExpr>(expr)) { // do not report an error again if the previous ParseExpr fails
+            DiagExpectedRightDelimiter("(", leftParenPos);
+        }
         ConsumeUntilAny({TokenKind::NL, TokenKind::SEMI, TokenKind::RPAREN});
     }
     Position rightParenPos = lastToken.Begin();
