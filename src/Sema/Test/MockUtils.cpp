@@ -380,9 +380,29 @@ std::string MockUtils::BuildArgumentList(const AST::Decl& decl) const
     return result.str();
 }
 
-std::string MockUtils::BuildTypeArgumentList([[maybe_unused]] const Decl& decl)
+std::string MockUtils::BuildTypeArgumentList(const Decl& decl)
 {
-    return "";
+    if (!IS_GENERIC_INSTANTIATION_ENABLED || decl.astKind != ASTKind::FUNC_DECL) {
+        return "";
+    }
+    auto& fd = static_cast<const FuncDecl&>(decl);
+
+    if (!fd.funcBody->generic) {
+        return "";
+    }
+
+    std::string typeArgs = "";
+    typeArgs += "<";
+    size_t i = 0;
+    for (auto& arg : fd.funcBody->generic->typeParameters) {
+        typeArgs += Ty::ToString(arg->ty);
+        if (i != fd.funcBody->generic->typeParameters.size() - 1) {
+            typeArgs += ",";
+        }
+        i++;
+    }
+    typeArgs += ">";
+    return typeArgs;
 }
 
 std::string MockUtils::BuildMockAccessorIdentifier(
@@ -773,24 +793,50 @@ Ptr<FuncTy> MockUtils::EraseFuncTypes(Ptr<FuncTy> funcTy)
     return typeManager.GetFunctionTy(paramTys, typeManager.GetAnyTy());
 }
 
-bool MockUtils::MayContainInternalTypes(Ptr<AST::Ty> ty) const
+namespace {
+
+struct InternalTypesChecker {
+    bool Check(Ptr<Ty> ty)
+    {
+        if (visitedGenerics.count(ty) > 0) {
+            return false;
+        }
+
+        if (auto decl = Ty::GetDeclOfTy(ty)) {
+            if (decl->linkage == Linkage::INTERNAL) {
+                return true;
+            }
+            if (decl->outerDecl && Check(decl->outerDecl->ty)) {
+                return true;
+            }
+        }
+
+        for (auto paramTy : ty->typeArgs) {
+            if (Check(paramTy)) {
+                return true;
+            }
+        }
+
+        if (auto genericTy = DynamicCast<GenericsTy>(ty)) {
+            visitedGenerics.insert(ty);
+            for (auto upperBound : genericTy->upperBounds) {
+                if (Check(upperBound)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    std::unordered_set<Ptr<Ty>> visitedGenerics;
+};
+
+} // namespace
+
+bool MockUtils::MayContainInternalTypes(Ptr<Ty> ty) const
 {
-    if (auto decl = Ty::GetDeclOfTy(ty)) {
-        if (decl->linkage == Linkage::INTERNAL) {
-            return true;
-        }
-        if (decl->outerDecl && MayContainInternalTypes(decl->outerDecl->ty)) {
-            return true;
-        }
-    }
-
-    for (auto paramTy : ty->typeArgs) {
-        if (MayContainInternalTypes(paramTy)) {
-            return true;
-        }
-    }
-
-    return false;
+    return InternalTypesChecker{}.Check(ty);
 }
 
-}
+} // namespace Cangjie

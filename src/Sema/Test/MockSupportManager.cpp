@@ -665,7 +665,7 @@ void MockSupportManager::PrepareToSpy(Decl& decl)
     auto spiedObjectDecl = GenerateSpiedObjectVar(decl);
 
     for (auto& member : classLikeDecl->GetMemberDecls()) {
-        if (auto funcDecl = As<ASTKind::FUNC_DECL>(member); funcDecl) {
+        if (auto funcDecl = As<ASTKind::FUNC_DECL>(member); funcDecl && !funcDecl->IsFinalizer()) {
             GenerateSpyCallHandler(*funcDecl, *spiedObjectDecl);
         }
     }
@@ -1185,21 +1185,21 @@ bool MockSupportManager::IsMemberAccessOnThis(const MemberAccess& memberAccess) 
  *  }
  */
 void MockSupportManager::TransformAccessorCallForMutOperation(
-    MemberAccess& originalMa, Expr& replacedMa, Expr& topLevelExpr)
+    NameReferenceExpr& originalNre, Expr& replacedNre, Expr& topLevelExpr)
 {
     CJC_ASSERT(Is<AssignExpr>(topLevelExpr) ||
         (Is<CallExpr>(topLevelExpr) &&
             DynamicCast<CallExpr*>(&topLevelExpr)->resolvedFunction->TestAttr(Attribute::MUT)));
 
     auto tmpVarDecl = CreateTmpVarDecl(
-        MockUtils::CreateType<Type>(replacedMa.ty),
-        ASTCloner::Clone(Ptr(&replacedMa)));
+        MockUtils::CreateType<Type>(replacedNre.ty),
+        ASTCloner::Clone(Ptr(&replacedNre)));
     tmpVarDecl->isVar = true;
 
     auto tmpVarRefToMutate = CreateRefExpr(*tmpVarDecl);
     tmpVarRefToMutate->ref.identifier = tmpVarDecl->identifier;
-    tmpVarRefToMutate->curFile = replacedMa.curFile;
-    tmpVarRefToMutate->ty = originalMa.ty;
+    tmpVarRefToMutate->curFile = replacedNre.curFile;
+    tmpVarRefToMutate->ty = originalNre.ty;
 
     OwnedPtr<Expr> newTopLevelExpr = ASTCloner::Clone(Ptr(&topLevelExpr));
     Ptr<Expr> mutBaseExpr;
@@ -1218,11 +1218,11 @@ void MockSupportManager::TransformAccessorCallForMutOperation(
         MockUtils::CreateType<RefType>(newTopLevelExpr->ty), std::move(newTopLevelExpr));
     auto mutResultVarRef = CreateRefExpr(*mutResultVarDecl);
     mutResultVarRef->ref.identifier = mutResultVarDecl->identifier;
-    mutResultVarRef->curFile = replacedMa.curFile;
+    mutResultVarRef->curFile = replacedNre.curFile;
 
     auto ty = topLevelExpr.ty;
 
-    auto newOriginalMa = ASTCloner::Clone(Ptr(&originalMa));
+    auto newOriginalMa = ASTCloner::Clone(Ptr(&originalNre));
     newOriginalMa->desugarExpr = nullptr;
 
     auto backAssignExpr = CreateAssignExpr(std::move(newOriginalMa), std::move(tmpVarRefToAssign));
@@ -1242,7 +1242,7 @@ void MockSupportManager::TransformAccessorCallForMutOperation(
     auto lambda = CreateLambdaExpr(
         CreateFuncBody(
             std::move(paramLists),
-            MockUtils::CreateType<Type>(replacedMa.ty), CreateBlock(std::move(nodes), ty), ty)
+            MockUtils::CreateType<Type>(replacedNre.ty), CreateBlock(std::move(nodes), ty), ty)
     );
     lambda->ty = typeManager.GetFunctionTy({}, ty);
     lambda->funcBody->ty = lambda->ty;
@@ -1253,10 +1253,10 @@ void MockSupportManager::TransformAccessorCallForMutOperation(
 void MockSupportManager::ReplaceSubMemberAccessWithAccessor(
     const MemberAccess& memberAccess, bool isInConstructor, const Ptr<Expr> topLevelMutExpr)
 {
-    if (auto subMa = As<ASTKind::MEMBER_ACCESS>(ExtractLastDesugaredExpr(*memberAccess.baseExpr)); subMa) {
-        auto replacedSubMa = ReplaceExprWithAccessor(*subMa, isInConstructor, true);
-        if (topLevelMutExpr && replacedSubMa) {
-            TransformAccessorCallForMutOperation(*subMa, *replacedSubMa, *topLevelMutExpr);
+    if (auto nre = DynamicCast<NameReferenceExpr*>(ExtractLastDesugaredExpr(*memberAccess.baseExpr)); nre) {
+        auto replacedNre = ReplaceExprWithAccessor(*nre, isInConstructor, true);
+        if (topLevelMutExpr && replacedNre) {
+            TransformAccessorCallForMutOperation(*nre, *replacedNre, *topLevelMutExpr);
         }
     }
 }
@@ -1522,6 +1522,7 @@ void MockSupportManager::PrepareInterfaceDecl(InterfaceDecl& interfaceDecl)
         if (!funcDecl || !funcDecl->TestAttr(Attribute::DEFAULT)) {
             continue;
         }
+
 
         funcDeclsWithDefault.push_back(funcDecl);
     }
@@ -1919,8 +1920,9 @@ void MockSupportManager::ReplaceInterfaceDefaultFuncInCall(
                 auto originalCall = ASTCloner::Clone(Ptr(callExpr));
                 originalCall->EnableAttr(Attribute::GENERATED_TO_MOCK);
 
+                auto retTy = StaticCast<FuncTy*>(maExpr->ty)->retTy;
                 auto matchExpr = CreateBoolMatch(
-                    std::move(selector), std::move(buddyCall), std::move(originalCall), callExpr->ty);
+                    std::move(selector), std::move(buddyCall), std::move(originalCall), retTy);
 
                 callExpr->desugarExpr = std::move(matchExpr);
             } else if (HasDefaultInterfaceAccessor(maExpr->baseExpr->ty, buddyInterfaceDecl->ty)) {
@@ -1960,9 +1962,10 @@ void MockSupportManager::ReplaceInterfaceDefaultFuncInCall(
             };
             auto originalCall = ASTCloner::Clone(Ptr(callExpr));
             originalCall->EnableAttr(Attribute::GENERATED_TO_MOCK);
+            auto retTy = StaticCast<FuncTy*>(maExpr->ty)->retTy;
             auto matchExpr = MockUtils::CreateTypeCast(
                 CreateRefExpr(*baseExprVar), buddyInterfaceDecl->ty,
-                std::move(createBuddyCall), std::move(originalCall), callExpr->ty);
+                std::move(createBuddyCall), std::move(originalCall), retTy);
 
             auto blockExpr = CreateBlock({}, callExpr->ty);
             blockExpr->body.emplace_back(std::move(baseExprVar));
@@ -2010,9 +2013,10 @@ void MockSupportManager::ReplaceInterfaceDefaultFuncInCall(
             };
             auto originalCall = ASTCloner::Clone(Ptr(callExpr));
             originalCall->EnableAttr(Attribute::GENERATED_TO_MOCK);
+            auto retTy = StaticCast<FuncTy*>(refExpr->ty)->retTy;
             auto matchExpr = MockUtils::CreateTypeCast(
                 std::move(thisExpr), buddyInterfaceDecl->ty,
-                std::move(createBuddyCall), std::move(originalCall), refExpr->ty);
+                std::move(createBuddyCall), std::move(originalCall), retTy);
 
             callExpr->desugarExpr = std::move(matchExpr);
         }
