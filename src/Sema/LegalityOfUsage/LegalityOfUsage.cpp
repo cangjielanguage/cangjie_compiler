@@ -81,7 +81,7 @@ void TypeChecker::TypeCheckerImpl::CheckLegalityOfUsage(ASTContext& ctx, AST::Pa
     if (!ci->invocation.globalOptions.disableSemaVic) {
         InitializationChecker::Check(*ci, ctx, &pkg);
     }
-    CheckGlobalVarInitialization(ctx, pkg);
+    CheckGlobalVarInitialization(pkg);
     // CFunc must be called in an unsafe block.
     CheckLegalityOfUnsafeAndInout(pkg);
     // Check structure declaration inheritance.

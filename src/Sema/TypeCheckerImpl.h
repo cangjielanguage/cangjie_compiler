@@ -1318,7 +1318,7 @@ private:
         const ASTContext& ctx, bool reportThis, const std::string& errorStr, const AST::RefExpr& re);
 
     /** Checking Initialization APIs. */
-    void CheckGlobalVarInitialization(ASTContext& ctx, const AST::Package& package);
+    void CheckGlobalVarInitialization(const AST::Package& package);
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     void CheckStaticMembersWithGeneric(const AST::Package& pkg);
