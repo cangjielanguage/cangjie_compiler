@@ -29,8 +29,8 @@ OAT.xml @xuanjz
 /include/cangjie/Modules/ @Augus_Jan @wyq1213
 /include/cangjie/Option/ @Yessy @neilliuistaken
 /include/cangjie/Parse/ @kkkkkkkbbbbbbb @wyq1213
-/include/cangjie/Sema/ @huohuixin @wyq1213 
-/include/cangjie/Sema/NativeFFI @Jiangjiji0527
+/include/cangjie/Sema/NativeFFI/ @Jiangjiji0527
+/include/cangjie/Sema/ @huohuixin @wyq1213
 /include/cangjie/Utils/ @Augus_Jan @wyq1213
 /src/AST/ @Augus_Jan @wyq1213
 /src/Basic/ @Cangjie-hljyaozhen @wyq1213
@@ -52,8 +52,8 @@ OAT.xml @xuanjz
 /src/Parse/ParseMacro.cpp @xiaxue0215 @mini-tang
 /src/Sema/Desugar/DesugarMacro.cpp @xiaxue0215 @mini-tang
 /src/Sema/Desugar/DesugarMacro.h @xiaxue0215 @mini-tang
+/src/Sema/NativeFFI/ @Jiangjiji0527
 /src/Sema/ @huohuixin @wyq1213
-/src/Sema/NativeFFI @Jiangjiji0527
 /src/Utils/ @Augus_Jan @wyq1213
 /unittests/AST/ @Augus_Jan @wyq1213
 /unittests/Basic/ @Cangjie-hljyaozhen @wyq1213
