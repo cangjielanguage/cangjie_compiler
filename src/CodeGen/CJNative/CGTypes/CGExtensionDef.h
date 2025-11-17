@@ -40,7 +40,8 @@ public:
     }
     static std::vector<llvm::Constant*> GetEmptyExtensionDefContent(CGModule& cgMod, const CHIR::Type& targetType);
     static bool CreateExtensionDefForType(CGModule& cgMod, const std::string& extensionDefName,
-        const std::vector<llvm::Constant*>& content, bool isForExternalType = false);
+        const std::vector<llvm::Constant*>& content, const CHIR::ClassType& inheritedType,
+        bool isForExternalType = false);
     static bool FoundGenericTypeAndCollectPath(
         const CHIR::Type& srcType, CHIR::GenericType& gt, std::vector<size_t>& path);
     static llvm::Value* GetTypeInfoWithPath(IRBuilder2& irBuilder, const CHIR::Type& type, llvm::Value* entryTypeArgs,

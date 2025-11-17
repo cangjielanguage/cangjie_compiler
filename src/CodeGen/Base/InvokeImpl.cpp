@@ -23,6 +23,21 @@ using namespace Cangjie;
 using namespace CodeGen;
 using namespace CHIR;
 
+namespace {
+llvm::MDTuple* GenObjTyMetaForVirtualCall(IRBuilder2& irBuilder, const CHIR::Type& ty)
+{
+    CJC_ASSERT(ty.GetTypeArgs().size() <= 1);
+    llvm::LLVMContext& llvmCtx = irBuilder.GetCGContext().GetLLVMContext();
+    std::vector<llvm::Metadata*> objTyMeta{};
+    if (ty.GetTypeArgs().size() == 1) {
+        objTyMeta = UnwindGenericRelateType(llvmCtx, ty);
+    } else {
+        std::string tiName = CGType::GetNameOfTypeInfoGV(ty);
+        objTyMeta.emplace_back(llvm::MDString::get(llvmCtx, tiName));
+    }
+    return llvm::MDTuple::get(llvmCtx, objTyMeta);
+}
+} // namespace
 llvm::Value* CodeGen::GenerateInvoke(IRBuilder2& irBuilder, const CHIRInvokeWrapper& invoke)
 {
     irBuilder.SetCHIRExpr(&invoke);
@@ -42,35 +57,38 @@ llvm::Value* CodeGen::GenerateInvoke(IRBuilder2& irBuilder, const CHIRInvokeWrap
     if (!objType->IsAutoEnv()) {
         auto ti = irBuilder.GetTypeInfoFromObject(objVal->GetRawValue());
         auto vtableOffset = invoke.GetVirtualMethodOffset();
-        if (auto introType = StaticCast<const CHIR::ClassType*>(invoke.GetOuterType(cgCtx.GetCHIRBuilder()));
-            introType->GetClassDef()->IsInterface()) {
+        auto idxOfVFunc = irBuilder.getInt64(vtableOffset);
+        auto introType = StaticCast<const CHIR::ClassType*>(invoke.GetOuterType(cgCtx.GetCHIRBuilder()));
+        if (introType->GetClassDef()->IsInterface()) {
             auto introTi = irBuilder.CreateTypeInfo(introType);
-            funcPtr = irBuilder.CallIntrinsicMTable({ti, introTi, irBuilder.getInt64(vtableOffset)});
+            funcPtr = irBuilder.CallIntrinsicMTable({ti, introTi, idxOfVFunc});
         } else {
             auto vtableSizeOfIntroType = cgCtx.GetVTableSizeOf(introType);
             CJC_ASSERT(vtableSizeOfIntroType > 0);
             auto idxOfIntroType = irBuilder.getInt64(vtableSizeOfIntroType - 1U);
-            auto idxOfVFunc = irBuilder.getInt64(vtableOffset);
             funcPtr = irBuilder.CallIntrinsicGetVTableFunc(ti, idxOfIntroType, idxOfVFunc);
             auto& llvmCtx = cgCtx.GetLLVMContext();
             auto meta = llvm::MDTuple::get(llvmCtx, llvm::MDString::get(llvmCtx, GetTypeQualifiedName(*introType)));
             llvm::cast<llvm::Instruction>(funcPtr)->setMetadata("IntroType", meta);
+        }
+        if (introType->GetTypeArgs().size() <= 1) {
+            auto objTyMeta = GenObjTyMetaForVirtualCall(irBuilder, *introType);
+            llvm::cast<llvm::Instruction>(funcPtr)->setMetadata("objType", objTyMeta);
         }
     } else {
         auto i8PtrTy = irBuilder.getInt8PtrTy();
         auto funcName = invoke.GetMethodName();
         auto methodIdx = CHIR::GetMethodIdxInAutoEnvObject(funcName);
         auto payload = irBuilder.GetPayloadFromObject(**objVal);
-        auto vritualPtr = irBuilder.CreateConstGEP1_32(
-            i8PtrTy, irBuilder.LLVMIRBuilder2::CreateBitCast(
-                payload, i8PtrTy->getPointerTo(1U)), static_cast<unsigned>(methodIdx), "virtualFPtr");
+        auto vritualPtr = irBuilder.CreateConstGEP1_32(i8PtrTy,
+            irBuilder.LLVMIRBuilder2::CreateBitCast(payload, i8PtrTy->getPointerTo(1U)),
+            static_cast<unsigned>(methodIdx), "virtualFPtr");
         auto loadInst = irBuilder.LLVMIRBuilder2::CreateLoad(i8PtrTy, vritualPtr);
         loadInst->setMetadata(llvm::LLVMContext::MD_invariant_load, llvm::MDNode::get(cgMod.GetLLVMContext(), {}));
         funcPtr = llvm::cast<llvm::Value>(loadInst);
     }
-    auto concreteFuncType =
-        static_cast<CGFunctionType*>(CGType::GetOrCreate(
-            cgMod, funcType, CGType::TypeExtraInfo{0, true, false, true, invoke.GetInstantiatedTypeArgs()}));
+    auto concreteFuncType = static_cast<CGFunctionType*>(CGType::GetOrCreate(
+        cgMod, funcType, CGType::TypeExtraInfo{0, true, false, true, invoke.GetInstantiatedTypeArgs()}));
     funcPtr = irBuilder.CreateBitCast(funcPtr, concreteFuncType->GetLLVMFunctionType()->getPointerTo());
     auto result = irBuilder.CreateCallOrInvoke(*concreteFuncType, funcPtr, argsVal);
 
@@ -108,21 +126,26 @@ llvm::Value* CodeGen::GenerateInvokeStatic(IRBuilder2& irBuilder, const CHIRInvo
     llvm::Value* ti = **(cgMod | invokeStatic.GetRTTIValue());
     llvm::Value* funcPtr = nullptr;
     auto vtableOffset = invokeStatic.GetVirtualMethodOffset();
+    auto idxOfVFunc = irBuilder.getInt64(vtableOffset);
     auto& cgCtx = cgMod.GetCGContext();
-    if (auto introType = StaticCast<const CHIR::ClassType*>(invokeStatic.GetOuterType(cgCtx.GetCHIRBuilder()));
-        introType->GetClassDef()->IsInterface()) {
+    auto introType = StaticCast<const CHIR::ClassType*>(invokeStatic.GetOuterType(cgCtx.GetCHIRBuilder()));
+    if (introType->GetClassDef()->IsInterface()) {
         auto introTi = irBuilder.CreateTypeInfo(introType);
-        funcPtr = irBuilder.CallIntrinsicMTable({ti, introTi, irBuilder.getInt64(vtableOffset)});
+        funcPtr = irBuilder.CallIntrinsicMTable({ti, introTi, idxOfVFunc});
     } else {
         auto vtableSizeOfIntroType = cgCtx.GetVTableSizeOf(introType);
         CJC_ASSERT(vtableSizeOfIntroType > 0);
         auto idxOfIntroType = irBuilder.getInt64(vtableSizeOfIntroType - 1U);
-        auto idxOfVFunc = irBuilder.getInt64(vtableOffset);
         funcPtr = irBuilder.CallIntrinsicGetVTableFunc(ti, idxOfIntroType, idxOfVFunc);
         auto& llvmCtx = cgCtx.GetLLVMContext();
         auto meta = llvm::MDTuple::get(llvmCtx, llvm::MDString::get(llvmCtx, GetTypeQualifiedName(*introType)));
         llvm::cast<llvm::Instruction>(funcPtr)->setMetadata("IntroType", meta);
     }
+    if (introType->GetTypeArgs().size() <= 1) {
+        auto objTyMeta = GenObjTyMetaForVirtualCall(irBuilder, *introType);
+        llvm::cast<llvm::Instruction>(funcPtr)->setMetadata("objType", objTyMeta);
+    }
+
     auto funcType = invokeStatic.GetMethodType();
     auto concreteFuncType = static_cast<CGFunctionType*>(CGType::GetOrCreate(
         cgMod, funcType, CGType::TypeExtraInfo{0, true, true, false, invokeStatic.GetInstantiatedTypeArgs()}));
