@@ -30,25 +30,19 @@ function(compile_rtlib target_name)
     if(CANGJIE_ASAN_SUPPORT)
         set(SANITIZER_BUILD_TARGET -DCOMPILER_RT_SANITIZERS_TO_BUILD=asan)
         list(APPEND LLVM_RTLIBS libclang_rt.asan-${CMAKE_SYSTEM_PROCESSOR}.a)
-        # clean out warning settings, otherwise cannot compile sanitizers
-        set(WARNINGS_SETTINGS "")
     elseif(CANGJIE_TSAN_SUPPORT)
         set(SANITIZER_BUILD_TARGET -DCOMPILER_RT_SANITIZERS_TO_BUILD=tsan)
         list(APPEND LLVM_RTLIBS libclang_rt.tsan-${CMAKE_SYSTEM_PROCESSOR}.a)
-        # clean out warning settings, otherwise cannot compile sanitizers
-        set(WARNINGS_SETTINGS "")
     elseif(CANGJIE_HWASAN_SUPPORT)
         list(APPEND LLVM_RTLIBS libclang_rt.hwasan-${CMAKE_SYSTEM_PROCESSOR}.a)
-        # clean out warning settings, otherwise cannot compile sanitizers
-        set(WARNINGS_SETTINGS "")
     endif()
 
     # Setting flags for cross-compiling
     set(RTLIBS_C_FLAGS
-        "${WARNINGS_SETTINGS} ${C_OTHER_FLAGS} -pipe -fno-common -fno-strict-aliasing -fstack-protector-all -O3 -U_FORTIFY_SOURCE --sysroot=${CMAKE_SYSROOT} --prefix=${CANGJIE_TARGET_TOOLCHAIN}"
+        "${C_OTHER_FLAGS} -pipe -fno-common -fno-strict-aliasing -fstack-protector-all -O3 -U_FORTIFY_SOURCE --sysroot=${CMAKE_SYSROOT} --prefix=${CANGJIE_TARGET_TOOLCHAIN}"
     )
     set(RTLIBS_CXX_FLAGS
-        "${WARNINGS_SETTINGS} ${C_OTHER_FLAGS} -pipe -fno-common -fno-strict-aliasing -fstack-protector-all -O3 -U_FORTIFY_SOURCE --sysroot=${CMAKE_SYSROOT} --prefix=${CANGJIE_TARGET_TOOLCHAIN}"
+        "${C_OTHER_FLAGS} -pipe -fno-common -fno-strict-aliasing -fstack-protector-all -O3 -U_FORTIFY_SOURCE --sysroot=${CMAKE_SYSROOT} --prefix=${CANGJIE_TARGET_TOOLCHAIN}"
     )
 
     # The -fPIE option is not provided on Windows.
