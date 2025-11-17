@@ -447,6 +447,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetTyFromASTCFuncType(ASTContext& ctx, Ref
         paramTys.push_back(param->ty);
     }
     Ptr<Ty> retTy = funcType->retType->ty = GetTyFromASTType(ctx, funcType->retType.get());
+    funcType->ty = GetTyFromASTType(ctx, funcType);
     return typeManager.GetFunctionTy(std::move(paramTys), retTy, {.isC = true});
 }
 
@@ -638,6 +639,9 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetTyFromBuiltinDecl(const BuiltInDecl& bi
         case BuiltInType::VARRAY: {
             return GetBuiltInVArrayType(typeArgs);
         }
+        case BuiltInType::CFUNC: {
+            return GetBuiltinCFuncType(typeArgs);
+        }
         default:
             return TypeManager::GetInvalidTy();
     }
@@ -663,6 +667,14 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::GetBuiltInVArrayType(const std::vector<Ptr
     CJC_ASSERT(typeArgs.size() == 1);
     auto elemTy = typeArgs.empty() ? TypeManager::GetInvalidTy() : typeArgs[0];
     return typeManager.GetVArrayTy(*elemTy, 0);
+}
+
+Ptr<AST::Ty> TypeChecker::TypeCheckerImpl::GetBuiltinCFuncType(const std::vector<Ptr<AST::Ty>>& typeArgs)
+{
+    // the return type is CFunc<T>
+    CJC_ASSERT(typeArgs.size() == 1 && Ty::IsTyCorrect(typeArgs[0]));
+    return typeManager.GetFunctionTy(
+        typeArgs, typeArgs[0], {.isC = true, .isClosureTy = false, .hasVariableLenArg = false, .noCast = false});
 }
 
 std::vector<Ptr<Ty>> TypeChecker::TypeCheckerImpl::GetTyFromASTType(

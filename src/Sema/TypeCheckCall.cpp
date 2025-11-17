@@ -2315,7 +2315,7 @@ bool TypeChecker::TypeCheckerImpl::ChkCallBaseRefExpr(
     ctx.targetTypeMap[re] = ctx.targetTypeMap[&ce]; // For enum sugar type infer.
     Synthesize(ctx, re);
     if (auto builtin = DynamicCast<BuiltInDecl>(re->ref.target); builtin && builtin->type == BuiltInType::CFUNC) {
-        return ChkCFuncConstructorExpr(ctx, ce);
+        return SynCFuncCall(ctx, ce);
     }
     if (!re->ref.target && re->ref.targets.empty()) {
         return false;

@@ -528,6 +528,49 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynPointerExpr(ASTContext& ctx, PointerExp
     return cptrExpr.ty;
 }
 
+bool TypeChecker::TypeCheckerImpl::SynCFuncCall(ASTContext& ctx, CallExpr& ce)
+{
+    auto callee = DynamicCast<RefExpr>(&*ce.baseFunc);
+    if (!callee) {
+        ce.ty = TypeManager::GetInvalidTy();
+        return false;
+    }
+    ce.ty = Synthesize(ctx, ce.baseFunc.get());
+    if (!Ty::IsTyCorrect(ce.baseFunc->ty) || !Ty::IsTyCorrect(ce.ty)) {
+        ce.ty = TypeManager::GetInvalidTy();
+        return false;
+    }
+    if (ce.ty->IsCFunc()) {
+        if (ce.args.size() != 1) {
+            diag.Diagnose(*ce.baseFunc, DiagKind::sema_cfunc_too_many_arguments);
+            ce.ty = TypeManager::GetInvalidTy();
+            return false;
+        }
+        Synthesize(ctx, ce.args[0]);
+        if (!Ty::IsTyCorrect(ce.args[0]->ty)) {
+            ce.ty = TypeManager::GetInvalidTy();
+            return false;
+        }
+        bool res{true};
+        if (!ce.args[0]->name.Empty()) {
+            diag.Diagnose(ce.args[0]->name.Begin(), ce.args[0]->name.End(), DiagKind::sema_unknown_named_argument,
+                ce.args[0]->name.Val());
+            // the program is invalid, yet the type check can still pass if all other checks hold, do not goto INVALID
+            // here
+            res = false;
+        }
+        // only CFunc<...>(CPointer(...)) is valid
+        if (ce.args[0]->ty->IsPointer()) {
+            ce.ty = ce.baseFunc->ty;
+            return res;
+        }
+    }
+    // Otherwise, report error and return a invalid ty.
+    diag.Diagnose(*ce.args[0], DiagKind::sema_cfunc_ctor_must_be_cpointer);
+    ce.ty = TypeManager::GetInvalidTy();
+    return false;
+}
+
 bool TypeChecker::TypeCheckerImpl::ChkBuiltinCall(ASTContext& ctx, Ty& target, CallExpr& ce)
 {
     static bool (TypeCheckerImpl::*const(CHK_FUNCS[]))(ASTContext&, AST::Ty&, AST::CallExpr&) = {
@@ -684,22 +727,28 @@ bool TypeChecker::TypeCheckerImpl::ChkCFuncCall([[maybe_unused]] ASTContext& ctx
     if (!ce.baseFunc) {
         return false;
     }
-    auto baseTarget = ce.baseFunc->GetTarget();
-    if (!baseTarget || !Is<BuiltInDecl>(baseTarget) || !Is<FuncTy>(target)) {
+
+    if (!ce.baseFunc->GetTarget()) {
         return false;
     }
-    auto t1 = StaticCast<BuiltInDecl>(baseTarget);
-    if (t1->type != BuiltInType::CFUNC) {
+    Ptr<Decl> realTarget = GetRealTarget(ce.baseFunc, ce.baseFunc->GetTarget());
+
+    if (!realTarget->IsBuiltIn() || !RawStaticCast<BuiltInDecl*>(realTarget)->IsType(BuiltInType::CFUNC)) {
         return false;
     }
-    auto& target1 = StaticCast<FuncTy>(target);
-    auto tar = target1.retTy;
-    if (tar->IsInvalid()) {
+
+    if (!target.IsInvalid() && !target.IsCFunc()) {
         ce.ty = TypeManager::GetInvalidTy();
         return false;
     }
-    ce.ty = tar;
-    return true;
+
+    ce.baseFunc->SetTarget(realTarget);
+
+    bool ret = SynCFuncCall(ctx, ce);
+    if (!ret) {
+        ce.ty = TypeManager::GetInvalidTy();
+    }
+    return ret;
 }
 
 bool TypeChecker::TypeCheckerImpl::IsBuiltinTypeAlias(const Decl& decl, const AST::TypeKind kind) const
