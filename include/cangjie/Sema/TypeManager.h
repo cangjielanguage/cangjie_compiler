@@ -200,8 +200,10 @@ public:
     Ptr<AST::Ty> GetTyForExtendMap(AST::Ty& ty);
     /** Get builtin ty extends. For array ty & cpointer ty, will only return instantiated extends. */
     std::set<Ptr<AST::ExtendDecl>> GetBuiltinTyExtends(AST::Ty& ty);
-    std::optional<bool> GetOverrideCache(const AST::FuncDecl* src, const AST::FuncDecl* target, AST::Ty* baseTy);
-    void AddOverrideCache(const AST::FuncDecl* src, const AST::FuncDecl* target, AST::Ty* baseTy, bool val);
+    std::optional<bool> GetOverrideCache(
+        const AST::FuncDecl* src, const AST::FuncDecl* target, AST::Ty* baseTy, AST::Ty* expectInstParent);
+    void AddOverrideCache(
+        const AST::FuncDecl& src, const AST::FuncDecl& target, AST::Ty* baseTy, AST::Ty* expectInstParent, bool val);
     /** Get extends for given generic/instantiated @p decl */
     std::set<Ptr<AST::ExtendDecl>> GetDeclExtends(const AST::InheritableDecl& decl);
     /** Get origin extends for given builtin ty. For array ty & cpointer ty, will only return generic extends.*/
@@ -275,7 +277,8 @@ public:
      */
     std::pair<bool, bool> IsExtendInheritRelation(const AST::ExtendDecl& r, const AST::ExtendDecl& l);
 
-    bool PairIsOverrideOrImpl(const AST::Decl& child, const AST::Decl& parent, const Ptr<AST::Ty> baseTy = nullptr);
+    bool PairIsOverrideOrImpl(const AST::Decl& child, const AST::Decl& parent, const Ptr<AST::Ty> baseTy = nullptr,
+        const Ptr<AST::Ty> parentTy = nullptr);
 
     // Try to constrain tv by tyCtor as an upperbound.
     // tyCtor's type args must be GenericsTy.
@@ -472,15 +475,18 @@ private:
         const AST::FuncDecl* src{nullptr};
         const AST::FuncDecl* target{nullptr};
         const AST::Ty* baseTy{nullptr};
+        const AST::Ty* expectInstParent{nullptr};
 
-        OverrideOrShadowKey(const AST::FuncDecl* s, const AST::FuncDecl* t, AST::Ty* b) : src(s), target(t), baseTy(b)
+        OverrideOrShadowKey(const AST::FuncDecl* s, const AST::FuncDecl* t, const AST::Ty* b, const AST::Ty* e)
+            : src(s), target(t), baseTy(b), expectInstParent(e)
         {
         }
     };
     struct OverrideOrShadowEqual {
         bool operator()(const OverrideOrShadowKey& lhs, const OverrideOrShadowKey& rhs) const
         {
-            return std::tie(lhs.src, lhs.target, lhs.baseTy) == std::tie(rhs.src, rhs.target, rhs.baseTy);
+            return std::tie(lhs.src, lhs.target, lhs.baseTy, lhs.expectInstParent) ==
+                std::tie(rhs.src, rhs.target, rhs.baseTy, rhs.expectInstParent);
         }
     };
     struct OverrideOrShadowHash {
@@ -490,6 +496,7 @@ private:
             ret = hash_combine(ret, key.src);
             ret = hash_combine(ret, key.target);
             ret = hash_combine(ret, key.baseTy);
+            ret = hash_combine(ret, key.expectInstParent);
             return ret;
         }
     };

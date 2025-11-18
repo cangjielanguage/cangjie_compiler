@@ -59,6 +59,49 @@ TEST(UtilsTest, FileExist)
     EXPECT_TRUE(res);
 }
 
+TEST(UtilsTest, FileExist_CaseSensitive)
+{
+#ifdef _WIN32
+    std::string path = "C:/Windows/System32/Cmd.exe";
+    bool res = FileExist(path, true);
+    EXPECT_FALSE(res);
+    res = FileExist(path, false);
+    EXPECT_TRUE(res);
+#elif defined(__APPLE__)
+    std::string path = "/bin/Bash";
+    bool res = FileExist(path, true);
+    EXPECT_FALSE(res);
+    res = FileExist(path, false);
+    EXPECT_TRUE(res);
+#else
+    std::string path = "/bin/Bash";
+    bool res = FileExist(path, true);
+    EXPECT_FALSE(res);
+    res = FileExist(path, false);
+    EXPECT_FALSE(res);
+#endif
+
+#ifdef _WIN32
+    path = "utilstest";
+    res = FileExist(path, true);
+    EXPECT_FALSE(res);
+    res = FileExist(path, false);
+    EXPECT_TRUE(res);
+#elif defined(__APPLE__)
+    path = "utilstest";
+    res = FileExist(path, true);
+    EXPECT_FALSE(res);
+    res = FileExist(path, false);
+    EXPECT_TRUE(res);
+#else
+    path = "utilstest";
+    res = FileExist(path, true);
+    EXPECT_FALSE(res);
+    res = FileExist(path, false);
+    EXPECT_FALSE(res);
+#endif
+}
+
 TEST(UtilsTest, FindProgramByName)
 {
     std::string name = "./good";
