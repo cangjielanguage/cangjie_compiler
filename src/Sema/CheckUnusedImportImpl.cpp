@@ -31,7 +31,8 @@ private:
     void CollectNeedCheckImports();
     bool IsImportContentUsed(AST::ImportSpec& importSpec);
     bool IsImportContentUsedInMacro(AST::ImportSpec& importSpec);
-    void AddUsedExtendDeclTarget(const Ptr<AST::ExtendDecl> ed, std::set<Ptr<Decl>>& usedSet) const;
+    void AddUsedExtendDeclTarget(
+        const Ptr<AST::ExtendDecl> ed, std::map<std::string, std::set<Ptr<Decl>>>& usedMap) const;
     void AddUsedTarget(Node& node, Ptr<Decl> target);
     void AddUsedPackage(Node& node);
     void ReportUnusedImports();
@@ -47,13 +48,18 @@ private:
 
 } // namespace
 
-void CheckUnusedImportImpl::AddUsedExtendDeclTarget(const Ptr<AST::ExtendDecl> ed, std::set<Ptr<Decl>>& usedSet) const
+void CheckUnusedImportImpl::AddUsedExtendDeclTarget(
+    const Ptr<AST::ExtendDecl> ed, std::map<std::string, std::set<Ptr<Decl>>>& usedMap) const
 {
+    Ptr<Decl> target = nullptr;
     for (auto& type : ed->inheritedTypes) {
-        usedSet.emplace(type->GetTarget());
+        if (target = type->GetTarget(); target) {
+            usedMap[target->GetFullPackageName()].emplace(target);
+        }
     }
     if (ed->extendedType && ed->extendedType->GetTarget()) {
-        usedSet.emplace(ed->extendedType->GetTarget());
+        target = ed->extendedType->GetTarget();
+        usedMap[target->GetFullPackageName()].emplace(target);
     }
 
     if (!ed->generic) {
@@ -62,8 +68,8 @@ void CheckUnusedImportImpl::AddUsedExtendDeclTarget(const Ptr<AST::ExtendDecl> e
 
     for (auto& gc : ed->generic->genericConstraints) {
         for (auto& ub : gc->upperBounds) {
-            if (auto ubDecl = ub->GetTarget(); ubDecl) {
-                usedSet.emplace(ubDecl);
+            if (target = ub->GetTarget(); target) {
+                usedMap[target->GetFullPackageName()].emplace(target);
             }
         }
     }
@@ -76,7 +82,7 @@ void CheckUnusedImportImpl::AddUsedTarget(Node& node, Ptr<Decl> target)
     if (target->outerDecl != nullptr) {
         foundInAST.emplace(target->outerDecl);
         if (auto ed = DynamicCast<ExtendDecl>(target->outerDecl); ed != nullptr) {
-            AddUsedExtendDeclTarget(ed, foundInAST);
+            AddUsedExtendDeclTarget(ed, usedPackageInAST);
         }
     }
 
@@ -91,7 +97,7 @@ void CheckUnusedImportImpl::AddUsedTarget(Node& node, Ptr<Decl> target)
     if (target->outerDecl != nullptr) {
         foundInFile.emplace(target->outerDecl);
         if (auto ed = DynamicCast<ExtendDecl>(target->outerDecl); ed != nullptr) {
-            AddUsedExtendDeclTarget(ed, foundInFile);
+            AddUsedExtendDeclTarget(ed, fileUsed);
         }
     }
 }

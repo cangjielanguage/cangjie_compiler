@@ -13,6 +13,7 @@
 #include "cangjie/AST/PrintNode.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/Match.h"
+#include "cangjie/Driver/Driver.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -184,7 +185,7 @@ TEST_F(TypeCheckerTest, DISABLED_MacroDiagInLSPTest)
 
 TEST_F(TypeCheckerTest, DISABLED_NoDiagInLSPMacroCallTest)
 {
-    srcPath = projectPath + "/unittests/Sema/SemaCharFiles/";
+    srcPath = projectPath + "/unittests/Sema/SemaCangjieFiles/";
     std::string command = "cjc " + srcPath + "AddClassTyInfoMacro.cj --compile-macro -Woff all";
     int err = system(command.c_str());
     ASSERT_EQ(0, err);
@@ -194,6 +195,31 @@ TEST_F(TypeCheckerTest, DISABLED_NoDiagInLSPMacroCallTest)
     instance->compileOnePackageFromSrcFiles = true;
 
     instance->srcFilePaths = {srcPath + "NoDiagInLSPMacroCall.cj"};
+    invocation.globalOptions.outputMode = GlobalOptions::OutputMode::STATIC_LIB;
+    invocation.globalOptions.enableCompileTest = true;
+    instance->Compile(CompileStage::SEMA);
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    Cangjie::MacroProcMsger::GetInstance().CloseMacroSrv();
+}
+
+TEST_F(TypeCheckerTest, DISABLED_NoDiagInLSPMacroCallForTest)
+{
+    srcPath = projectPath + "/unittests/Sema/SemaCangjieFiles/";
+    std::vector<std::string> argStrs = {"cjc", "--compile-macro", "-Woff", "all", srcPath + "ModifyClassBuildFunc.cj"};
+    DiagnosticEngine driverDiag;
+    std::unique_ptr<Driver> driver = std::make_unique<Driver>(argStrs, driverDiag, projectPath + "/output/bin/cjc");
+    driver->driverOptions->customizedSysroot = true;
+    bool succ = driver->ParseArgs();
+    EXPECT_TRUE(succ);
+
+    succ = driver->ExecuteCompilation();
+    EXPECT_TRUE(succ);
+
+    instance->invocation.globalOptions.enableMacroInLSP = true;
+    invocation.globalOptions.executablePath = projectPath + "/output/bin/";
+    instance->compileOnePackageFromSrcFiles = true;
+
+    instance->srcFilePaths = {srcPath + "NoDiagInLSPMacroCallNode.cj"};
     invocation.globalOptions.outputMode = GlobalOptions::OutputMode::STATIC_LIB;
     invocation.globalOptions.enableCompileTest = true;
     instance->Compile(CompileStage::SEMA);

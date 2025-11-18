@@ -687,7 +687,8 @@ bool TypeChecker::TypeCheckerImpl::IsGenericCall(const ASTContext& ctx, const Ca
         auto decl = Ty::GetDeclPtrOfTy(baseType);
         // Check whether decl is generic
         if (decl && decl->TestAttr(Attribute::GENERIC) &&
-            (decl->astKind != ASTKind::ENUM_DECL || fd.TestAttr(Attribute::ENUM_CONSTRUCTOR))) {
+            (decl->astKind != ASTKind::ENUM_DECL || fd.TestAttr(Attribute::ENUM_CONSTRUCTOR) ||
+                fd.TestAttr(Attribute::STATIC))) {
             return true;
         }
         // 5. If the target function is a member of generic structure decl, and the base's extends/implements the
@@ -2315,7 +2316,7 @@ bool TypeChecker::TypeCheckerImpl::ChkCallBaseRefExpr(
     ctx.targetTypeMap[re] = ctx.targetTypeMap[&ce]; // For enum sugar type infer.
     Synthesize(ctx, re);
     if (auto builtin = DynamicCast<BuiltInDecl>(re->ref.target); builtin && builtin->type == BuiltInType::CFUNC) {
-        return ChkCFuncConstructorExpr(ctx, ce);
+        return SynCFuncCall(ctx, ce);
     }
     if (!re->ref.target && re->ref.targets.empty()) {
         return false;
