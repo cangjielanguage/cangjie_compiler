@@ -1149,7 +1149,12 @@ std::string GlobalOptions::GetCangjieLibTargetPathName() const
 {
     std::string name = target.OSToString();
     if (target.env != Triple::Environment::GNU && target.env != Triple::Environment::NOT_AVAILABLE) {
-        name += "_" + target.EnvironmentToString();
+        std::string envName = target.EnvironmentToString();
+        if (target.apiLevel == Triple::MIN_ANDROID_API && target.env == Triple::Environment::ANDROID) {
+            auto envNameLen = envName.size();
+            envName.erase(envNameLen - Triple::MIN_ANDROID_API.size());
+        }
+        name += "_" + envName;
     }
     name += "_" + target.ArchToString() + "_" + BackendToString(backend);
     return name;

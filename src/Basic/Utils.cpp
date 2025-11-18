@@ -131,11 +131,6 @@ uint8_t Utils::GetLineTerminatorLength(const char* pStr, const char* pEnd)
     }
 }
 
-bool Utils::StartsWith(std::string_view str , std::string_view prefix)
-{
-    return str.size() >= prefix.size() && str.compare(0, prefix.size(), prefix) == 0;
-}
-
 #ifdef _WIN32
 typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
 

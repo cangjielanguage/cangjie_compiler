@@ -33,7 +33,6 @@ std::vector<std::string> SplitString(const std::string& str, const std::string& 
 std::vector<std::string> SplitQualifiedName(const std::string& qualifiedName, bool splitDc = false);
 /// Join strings \ref strs with \ref delimiter.
 std::string JoinStrings(const std::vector<std::string>& strs, const std::string& delimiter);
-bool StartsWith(std::string_view str, std::string_view prefix);
 /**
  * check whether character(s) start from pStr is `LineTerminator`
  * if it is a Windows LineTerminator '\r\n', return 2
