@@ -14,6 +14,7 @@
 #define CANGJIE_FRONTEND_CJDCOMPILERINSTANCE_H
 
 #include "cangjie/FrontendTool/DefaultCompilerInstance.h"
+#include "cangjie/Utils/ProfileRecorder.h"
 
 namespace Cangjie {
 /// Compiler instance that compiles .cj.d file. This ci skips all stages after sema, except that it still produces a

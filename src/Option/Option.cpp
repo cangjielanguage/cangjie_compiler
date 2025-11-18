@@ -1060,9 +1060,15 @@ std::optional<std::string> GlobalOptions::CheckInputFilePath(const std::string& 
 #endif
 
 std::optional<std::string> GlobalOptions::ValidateInputFilePath(
-    const std::string& path, const DiagKindRefactor notFoundError) const
+    const std::string& path, const DiagKindRefactor notFoundError)
 {
     DiagnosticEngine diag;
+    return ValidateInputFilePath(path, notFoundError, diag);
+}
+
+std::optional<std::string> GlobalOptions::ValidateInputFilePath(
+    const std::string& path, const DiagKindRefactor notFoundError, DiagnosticEngine& diag)
+{
     if (IsAbsolutePathAboveLengthLimit(path)) {
         (void)diag.DiagnoseRefactor(DiagKindRefactor::driver_path_exceeds_length_limit, DEFAULT_POSITION, path,
             std::to_string(FILE_PATH_MAX_LENGTH));

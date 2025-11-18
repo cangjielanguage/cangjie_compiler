@@ -40,5 +40,13 @@ target_link_libraries(
     GTest::gtest
     GTest::gtest_main
     TestCompilerInstanceObject)
-
 add_test(NAME ParseCommentTest COMMAND ParseCommentTest)
+
+add_executable(CheckCjdTest CheckCjdTest.cpp)
+target_link_libraries(
+    CheckCjdTest
+    cangjie-lsp
+    ${CMAKE_DL_LIBS}
+    GTest::gtest
+    GTest::gtest_main)
+add_test(NAME CheckCjdTest COMMAND CheckCjdTest)
