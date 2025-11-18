@@ -1437,6 +1437,7 @@ OwnedPtr<Expr> ASTFactory::CreateFuncCallViaOpaquePointer(
         { .isC = true }
     );
     auto cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(std::string(CFUNC_NAME));
+    CJC_NULLPTR_CHECK(cFuncDecl);
     auto cFuncRefExpr = CreateRefExpr(*cFuncDecl);
 
     cFuncRefExpr->ty = ty;
