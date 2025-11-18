@@ -1134,14 +1134,14 @@ bool ToCHIR::Run()
         return false;
     }
     RecordCHIRExprNum("opt");
-    RemoveUnusedImports(false);
     DoClosureConversion();
     RecordCHIRExprNum("cc");
     CreateBoxTypeForRecursionValueType();
     if (!RunConstantEvaluation()) {
         return false;
     }
-    RemoveUnusedImports(true);
+    // must be after `RunConstantEvaluation`, because we need to calculate const var from imported package
+    RemoveUnusedImports();
 
     // annotation check depends on const eval
     if (!RunAnnotationChecks()) {

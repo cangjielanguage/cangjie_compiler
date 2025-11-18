@@ -481,7 +481,8 @@ void GetInstMapFromCustomDefAndParent(
  * @param builder The CHIR builder.
  * @param parents The vector to store the parent types.
  */
-void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vector<ClassType*>& parents);
+void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vector<ClassType*>& parents,
+    std::set<std::pair<const Type*, const Type*>>* visited = nullptr);
 
 /**
  * @brief Creates a box type reference for a given base type.

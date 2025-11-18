@@ -9,6 +9,7 @@
 
 #include <bitset>
 #include <unordered_map>
+#include <cstdint>
 
 namespace Cangjie::CHIR {
 

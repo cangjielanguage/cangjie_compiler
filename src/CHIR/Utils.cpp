@@ -727,20 +727,21 @@ std::unordered_map<const GenericType*, Type*> GetInstMapFromCurDefToCurType(cons
     return replaceTable;
 }
 
-void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vector<ClassType*>& parents)
+void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vector<ClassType*>& parents,
+    std::set<std::pair<const Type*, const Type*>>* visited)
 {
     if (std::find(parents.begin(), parents.end(), &cur) != parents.end()) {
         return;
     }
 
     for (auto ex : cur.GetCustomTypeDef()->GetExtends()) {
-        if (!cur.IsEqualOrInstantiatedTypeOf(*ex->GetExtendedType(), builder)) {
+        if (!cur.IsEqualOrInstantiatedTypeOf(*ex->GetExtendedType(), builder, visited)) {
             continue;
         }
         auto replaceTable = GetInstMapFromExtendDefToCurType(*ex, cur);
         for (auto interface : ex->GetImplementedInterfaceTys()) {
             std::vector<ClassType*> extendParents;
-            GetAllInstantiatedParentType(*interface, builder, extendParents);
+            GetAllInstantiatedParentType(*interface, builder, extendParents, visited);
             for (size_t i = 0; i < extendParents.size(); ++i) {
                 extendParents[i] =
                     Cangjie::StaticCast<ClassType*>(ReplaceRawGenericArgType(*extendParents[i], replaceTable, builder));
@@ -750,11 +751,11 @@ void GetAllInstantiatedParentType(ClassType& cur, CHIRBuilder& builder, std::vec
             }
         }
     }
-    for (auto interface : cur.GetImplementedInterfaceTys(&builder)) {
-        GetAllInstantiatedParentType(*interface, builder, parents);
+    for (auto interface : cur.GetImplementedInterfaceTys(&builder, visited)) {
+        GetAllInstantiatedParentType(*interface, builder, parents, visited);
     }
     if (auto superClassTy = cur.GetSuperClassTy(&builder)) {
-        GetAllInstantiatedParentType(*superClassTy, builder, parents);
+        GetAllInstantiatedParentType(*superClassTy, builder, parents, visited);
     }
     parents.emplace_back(&cur);
 }

@@ -18,6 +18,7 @@
 #include <vector>
 #include <unordered_map>
 #include <optional>
+#include <cstdint>
 
 namespace Cangjie {
 
