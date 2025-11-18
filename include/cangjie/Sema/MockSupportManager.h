@@ -92,7 +92,7 @@ private:
     std::tuple<Ptr<AST::InterfaceDecl>, Ptr<AST::FuncDecl>> FindDefaultAccessorInterfaceAndFunction(
         Ptr<AST::FuncDecl> original);
     void TransformAccessorCallForMutOperation(
-        AST::MemberAccess& originalMa, AST::Expr& replacedMa, AST::Expr& topLevelExpr);
+        AST::NameReferenceExpr& originalNre, AST::Expr& replacedNre, AST::Expr& topLevelExpr);
     void ReplaceSubMemberAccessWithAccessor(
         const AST::MemberAccess& memberAccess, bool isInConstructor, const Ptr<AST::Expr> topLevelMutExpr = nullptr);
     Ptr<AST::Expr> ReplaceTopLevelVariableGetWithAccessor(AST::RefExpr& refExpr);

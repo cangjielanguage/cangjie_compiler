@@ -549,48 +549,51 @@ bool IsVirtualMember(const Decl& decl)
     if (!decl.outerDecl) {
         return false;
     }
-
-    /**
-     * rule 2: function in non-open and non-abstract class, is not virtual function
-     * class A {
-     *     // The following functions are not semantic virtual functions since the class is not `open`,
-     *     // they will never be overrode even if they have `open` flag.
-     *     public open func foo() {}
-     *     open func goo() {}
-     * }
-     */
-    auto isInNonOpenClass = decl.outerDecl->astKind == AST::ASTKind::CLASS_DECL &&
-        !decl.outerDecl->TestAnyAttr(AST::Attribute::ABSTRACT, AST::Attribute::OPEN);
-    if (isInNonOpenClass) {
-        return false;
+    // rule 2: function in interface, is must be virtual function.
+    if (decl.outerDecl->astKind == AST::ASTKind::INTERFACE_DECL) {
+        return true;
     }
-
-    // rule 3: non-default static function, constructor and distructor are not virtual function
-    //         The default function needs to be dispatched to the subtype.
-    if (auto fd = DynamicCast<FuncDecl>(&decl);
-        (decl.TestAttr(AST::Attribute::STATIC) && !decl.TestAttr(AST::Attribute::DEFAULT)) ||
-        decl.TestAttr(AST::Attribute::CONSTRUCTOR) || (fd && fd->IsFinalizer())) {
-        return false;
-    }
-
-    // rule 4: generic instantiated function, is not virtual function
-    if (decl.TestAttr(AST::Attribute::GENERIC_INSTANTIATED)) {
-        return false;
-    }
-
-    // rule 5: function defined within an extend is not virtual function
+    // rule 3: function defined within an extend is not virtual function.
     if (decl.outerDecl->astKind == AST::ASTKind::EXTEND_DECL) {
         return false;
     }
-    // rule 6: only public or protected function has the opportunity to be overrode
-    if (decl.outerDecl->astKind == AST::ASTKind::CLASS_DECL && !decl.TestAttr(AST::Attribute::PUBLIC) &&
-        !decl.TestAttr(AST::Attribute::PROTECTED)) {
+    // rule 3: function defined within a non-class is not virtual function.
+    if (decl.outerDecl->astKind != AST::ASTKind::CLASS_DECL) {
+ 
         return false;
     }
-
-    // rule 7: if the base function has open modifier, or is abstract,
-    // or is defined within interface, it must be virtual function
-    return decl.TestAnyAttr(AST::Attribute::OPEN, AST::Attribute::ABSTRACT) ||
-        decl.outerDecl->astKind == AST::ASTKind::INTERFACE_DECL;
+    // rule 4: function defined within a non-open or non-abstract class is not virtual function.
+    if (!decl.outerDecl->TestAnyAttr(AST::Attribute::ABSTRACT, AST::Attribute::OPEN)) {
+        return false;
+    }
+    if (!decl.IsFuncOrProp()) {
+        return false;
+    }
+    // Only abstract classes or open class member functions or properties should remain here.
+    if (auto fd = DynamicCast<FuncDecl>(&decl)) {
+        // rule 3.1: constructor/finalizer and generic instantiated function but not java function must not be
+        // virtual.
+        bool specFunc = decl.TestAttr(AST::Attribute::CONSTRUCTOR) || (fd && fd->IsFinalizer()) ||
+            (decl.TestAttr(AST::Attribute::GENERIC_INSTANTIATED) &&
+                !decl.TestAnyAttr(AST::Attribute::JAVA_APP, AST::Attribute::JAVA_EXT));
+        if (specFunc) {
+            return false;
+        }
+    }
+    if (!decl.TestAttr(AST::Attribute::STATIC)) {
+        // rule 3.2: non-static private/internal function must not be virtual.
+        if (decl.TestAnyAttr(AST::Attribute::PRIVATE, AST::Attribute::INTERNAL)) {
+            return false;
+        }
+        // rule 3.3: non-static abstract or open function must be virtual.
+        if (!decl.TestAnyAttr(AST::Attribute::ABSTRACT, AST::Attribute::OPEN)) {
+            return false;
+        }
+    } else if (decl.TestAttr(AST::Attribute::STATIC, AST::Attribute::PRIVATE)) {
+        // rule 4: for static function or static propraty decleration, private is not virtual, otherwise it will
+        // be a virtual function when it is in the open class.
+        return false;
+    }
+    return true;
 }
 } // namespace Cangjie::AST

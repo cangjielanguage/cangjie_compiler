@@ -42,9 +42,15 @@ public:
         return OwnedPtr<T>(static_cast<T*>(clonedNode.release()));
     }
 
-    static Ptr<AST::Decl> GetGeneralDecl(const AST::Decl& clonedDecl)
+    static Ptr<AST::Decl> GetGeneralDecl(AST::Decl& clonedDecl)
     {
-        return clonedDecl.genericDecl ? clonedDecl.genericDecl : ins2generic.at(&clonedDecl);
+        if (clonedDecl.genericDecl) {
+            return clonedDecl.genericDecl;
+        } else if (clonedDecl.TestAttr(AST::Attribute::GENERATED_TO_MOCK)) {
+            return &clonedDecl;
+        } else {
+            return ins2generic.at(&clonedDecl);
+        }
     }
 
     static std::unordered_set<Ptr<AST::Decl>> GetInstantiatedDecl(const AST::Decl& genericDecl)
