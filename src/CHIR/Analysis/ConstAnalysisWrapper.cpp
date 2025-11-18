@@ -60,16 +60,25 @@ Results<ConstDomain>* ConstAnalysisWrapper::CheckFuncResult(const Func& func)
     }
 }
 
+Results<ConstPoolDomain>* ConstAnalysisWrapper::CheckFuncActiveResult(const Func& func)
+{
+    if (auto it = resultsPoolMap.find(&func); it != resultsPoolMap.end()) {
+        return it->second.get();
+    } else {
+        return nullptr;
+    }
+}
+
 void ConstAnalysisWrapper::InvalidateAllAnalysisResults()
 {
-    funcWithPoolDomain.clear();
+    resultsPoolMap.clear();
     resultsMap.clear();
 };
 
 ConstAnalysisWrapper::AnalysisStrategy ConstAnalysisWrapper::ChooseAnalysisStrategy(const Func& func)
 {
     if (resultsMap.find(&func) != resultsMap.end() ||
-        funcWithPoolDomain.find(&func) != funcWithPoolDomain.end()) {
+        resultsPoolMap.find(&func) != resultsPoolMap.end()) {
         // already analysed
         return AnalysisStrategy::SkipAnalysis;
     }

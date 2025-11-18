@@ -86,6 +86,13 @@ public:
     Results<ConstDomain>* CheckFuncResult(const Func& func);
 
     /**
+     * @brief return result of analysis for certain function
+     * @param func function to return analysis result
+     * @return analysis result
+     */
+    Results<ConstPoolDomain>* CheckFuncActiveResult(const Func& func);
+
+    /**
      * @brief clear analysis result
      */
     void InvalidateAllAnalysisResults();
@@ -111,7 +118,7 @@ private:
             auto judgeRes = ChooseAnalysisStrategy(*func);
             if (judgeRes == AnalysisStrategy::ActiveStatePool) {
                 if (auto res = RunOnFuncWithPool(func, isDebug, std::forward<Args>(args)...)) {
-                    funcWithPoolDomain.emplace(func);
+                    resultsPoolMap.emplace(func, std::move(res));
                 }
             } else if (judgeRes == AnalysisStrategy::FullStatePool) {
                 if (auto res = RunOnFunc(func, isDebug, std::forward<Args>(args)...)) {
@@ -153,7 +160,7 @@ private:
         }
         for (auto& result: resultsPool) {
             if (auto res = result.get()) {
-                funcWithPoolDomain.emplace(res->func);
+                resultsPoolMap.emplace(res->func, std::move(res));
             }
         }
     }
@@ -172,7 +179,7 @@ private:
     }
 
     std::unordered_map<const Func*, std::unique_ptr<Results<ConstDomain>>> resultsMap;
-    std::unordered_set<const Func*> funcWithPoolDomain;
+    std::unordered_map<const Func*, std::unique_ptr<Results<ConstPoolDomain>>> resultsPoolMap;
     CHIRBuilder& builder;
 };
 

@@ -23,9 +23,9 @@ public:
      * @brief constructor for dead code elimination pass.
      * @param builder CHIR builder for generating IR.
      * @param diag cangjie error or warning reporter.
-     * @param packageName this package name.
+     * @param curPkg this package.
      */
-    explicit DeadCodeElimination(CHIRBuilder& builder, DiagAdapter& diag, const std::string& packageName);
+    explicit DeadCodeElimination(CHIRBuilder& builder, DiagAdapter& diag, const Package& curPkg);
 
     /**
      * @brief process to do useless function elimination.
@@ -86,10 +86,7 @@ public:
 private:
     CHIRBuilder& builder;
     DiagAdapter& diag;
-    const std::string& currentPackageName;
-    const std::string GLOBAL_INIT_MANGLED_NAME = "_global_init";
-    const std::string STD_CORE_FUTURE_MANGLED_NAME = "_CNat6Future";
-    const std::string STD_CORE_EXECUTE_CLOSURE_MANGLED_NAME = "executeClosure";
+    const Package& curPkg;
 
     // =============== Functions for Useless Variable Check =============== //
     void UselessVariableCheckForFunc(const BlockGroup& funcBody, bool isDebug);
@@ -103,7 +100,7 @@ private:
     static bool CheckAllUsersIsNotUse(const Value& value, const std::vector<Expression*>& users);
 
     // =============== Functions for Useless Func Elimination =============== //
-    bool CheckUselessFunc(const Func& func, const GlobalOptions& opts);
+    bool CheckUselessFunc(const Func& func, const GlobalOptions& opts, bool usingReflectPackage);
 
     // =============== Functions for Unreachable Block Elimination =============== //
     bool CheckUselessBlock(const Block& block) const;
