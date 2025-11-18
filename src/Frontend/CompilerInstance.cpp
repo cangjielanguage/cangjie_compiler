@@ -1158,12 +1158,13 @@ bool CompilerInstance::DetectCangjieModules()
         return false;
     }
     auto libPathName = invocation.globalOptions.GetCangjieLibTargetPathName();
+    auto modulesName = FileUtil::JoinPath(cangjieHome, "modules");
     if (libPathName.empty()) {
         diag.DiagnoseRefactor(DiagKindRefactor::frontend_failed_to_detect_cangjie_modules,
             MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), "target library path name is empty");
         return false;
     }
-    cangjieModules = FileUtil::JoinPath(FileUtil::JoinPath(cangjieHome, "modules"), libPathName);
+    cangjieModules = FileUtil::JoinPath(modulesName, libPathName);
     if (!FileUtil::FileExist(cangjieModules)) {
         diag.DiagnoseRefactor(DiagKindRefactor::frontend_failed_to_detect_cangjie_modules,
             MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), "target library path is not exist : " + cangjieModules);

@@ -53,6 +53,20 @@ DELTA_JOBS = 2
 MAKE_JOBS = multiprocessing.cpu_count() + DELTA_JOBS
 
 PYTHON_EXECUTABLE = sys.executable
+TARGET_DICTIONARY = {
+    "native": None,
+    "ohos-aarch64": "aarch64-linux-ohos",
+    "ohos-x86_64": "x86_64-linux-ohos",
+    "windows-x86_64": "x86_64-w64-mingw32",
+    "ios-simulator-aarch64": "arm64-apple-ios11-simulator",
+    "ios-aarch64": "arm64-apple-ios11",
+    "android-aarch64": "aarch64-linux-android31",
+    "android31-aarch64": "aarch64-linux-android31",
+    "android26-aarch64": "aarch64-linux-android26",
+    "android-x86_64": "x86_64-linux-android",
+    "android31-x86_64": "x86_64-linux-android31",
+    "android26-x86_64": "x86_64-linux-android26"
+}
 
 def resolve_path(path):
     if os.path.isabs(path):
@@ -224,24 +238,7 @@ def download_and_patch_tinytoml():
 def build(args):
     # The target also affects the prefix concatenation of the compiler executable file; it is specific.
     if args.target:
-        if args.target == "native":
-            args.target = None
-        elif args.target == "ohos-aarch64":
-            args.target = "aarch64-linux-ohos"
-        elif args.target == "ohos-arm":
-            args.target = "arm-linux-ohos"
-        elif args.target == "ohos-x86_64":
-            args.target = "x86_64-linux-ohos"
-        elif args.target == "windows-x86_64":
-            args.target = "x86_64-w64-mingw32"
-        elif args.target == "ios-simulator-aarch64":
-            args.target = "arm64-apple-ios11-simulator"
-        elif args.target == "ios-aarch64":
-            args.target = "arm64-apple-ios11"
-        elif args.target == "android-aarch64":
-            args.target = "aarch64-linux-android31"
-        elif args.target == "android-x86_64":
-            args.target = "x86_64-linux-android31"
+        args.target = TARGET_DICTIONARY[args.target]
 
     if args.gcc_toolchain and args.target and args.product != "cjc":
         LOG.warning("There is no intermediate or product targeting the host platform in this build, so --gcc-toolchain won't take effect")
@@ -381,24 +378,7 @@ def unit_test(args):
 def install(args):
     """install targets"""
     if args.host:
-        if args.host == "native":
-            args.host = None
-        elif args.host == "ohos-aarch64":
-            args.host = "aarch64-linux-ohos"
-        elif args.host == "ohos-arm":
-            args.host = "arm-linux-ohos"
-        elif args.host == "ohos-x86_64":
-            args.host = "x86_64-linux-ohos"
-        elif args.host == "windows-x86_64":
-            args.host = "x86_64-w64-mingw32"
-        elif args.host == "ios-simulator-aarch64":
-            args.host = "arm64-apple-ios11-simulator"
-        elif args.host == "ios-aarch64":
-            args.host = "arm64-apple-ios11"
-        elif args.host == "android-aarch64":
-            args.host = "aarch64-linux-android"
-        elif args.host == "android-x86_64":
-            args.host = "x86_64-linux-android"
+        args.host = TARGET_DICTIONARY[args.host]
 
     LOG.info("begin install targets...")
     targets = []
@@ -576,18 +556,6 @@ class BuildType(Enum):
         except KeyError:
             return s.build_type
 
-SupportedTarget = [
-    "native",
-    "windows-x86_64",
-    "ohos-aarch64",
-    "ohos-arm",
-    "ohos-x86_64",
-    "ios-simulator-aarch64",
-    "ios-aarch64",
-    "android-aarch64",
-    "android-x86_64"
-]
-
 def main():
     """build entry"""
     parser = argparse.ArgumentParser(description="build cangjie project")
@@ -630,7 +598,7 @@ def main():
         "--gcc-toolchain", dest="gcc_toolchain", help="Specify toolchain for cjc, stdlib & BE build"
     )
     parser_build.add_argument(
-        "--target", dest="target", type=str, choices=SupportedTarget,
+        "--target", dest="target", type=str, choices=TARGET_DICTIONARY.keys(),
         help="build a second stdlib for the target triple specified"
     )
     parser_build.add_argument(
@@ -681,7 +649,7 @@ def main():
 
     parser_install = subparsers.add_parser("install", help="install targets")
     parser_install.add_argument(
-        "--host", dest="host", type=str, choices=SupportedTarget,
+        "--host", dest="host", type=str, choices=TARGET_DICTIONARY.keys(),
         help="Generate installation package for the host. When --prefix is specified, this option will not take effect"
     )
     parser_install.add_argument(
