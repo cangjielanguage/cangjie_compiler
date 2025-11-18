@@ -3278,3 +3278,109 @@ TEST(PositionTest, GenericConstraintBegin)
     ASSERT_NE(foo.funcBody->generic, nullptr);
     EXPECT_EQ(foo.funcBody->generic->genericConstraints[0]->begin, Position(1, 25));
 }
+
+TEST(ParserTest1, IntLiteral)
+{
+    std::string code = "let a = 0u32";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    EXPECT_EQ(diagnostics.size(), 0);
+}
+TEST(ParserTest1, IntLiteralu32)
+{
+    std::string code = "let a = 0__u32";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    EXPECT_EQ(diagnostics.size(), 0);
+}
+TEST(ParserTest1, RangeLiteral)
+{
+    std::string code = "let a = 0127..11";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    EXPECT_EQ(diagnostics.size(), 0);
+}
+TEST(ParserTest1, RangeLiteral0x)
+{
+    std::string code = "let a = 0x127..11";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    EXPECT_EQ(diagnostics.size(), 0);
+}
+TEST(ParserTest1, IntLiteralDot)
+{
+    std::string code = "let a = 000.a";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].errorMessage, std::string{"cannot start a(n) integer literal with '00'"});
+}
+TEST_F(ParserTest, IntLiteralDot2)
+{
+    std::string code = "let a = 00___1.a";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].errorMessage, std::string{"cannot start a(n) integer literal with '00___'"});
+}
+TEST(ParserTest1, FloatLiteralDot)
+{
+    std::string code = "let a = 0001.3";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].errorMessage, std::string{"cannot start a(n) float literal with '000'"});
+}
+TEST(ParserTest1, ZeroUnderscore)
+{
+    std::string code = "let a = 0_a";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].errorMessage, std::string{"unexpected digit 'a' in decimal"});
+}
+TEST(ParserTest1, ZeroUnderscore2)
+{
+    std::string code = "let a = 00_a";
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm);
+    auto file = parser.ParseTopLevel();
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::LEX);
+    ASSERT_EQ(diagnostics.size(), 2);
+    EXPECT_EQ(diagnostics[0].errorMessage, std::string{"cannot start a(n) integer literal with '0'"});
+    EXPECT_EQ(diagnostics[1].errorMessage, std::string{"unexpected digit 'a' in decimal"});
+}
