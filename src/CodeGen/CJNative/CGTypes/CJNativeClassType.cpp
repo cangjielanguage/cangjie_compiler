@@ -160,7 +160,7 @@ void CGClassType::PreActionOfGenTypeTemplate()
 void CGClassType::PostActionOfGenTypeInfo()
 {
     /*
-        1. Mark a class of which size needs trro be updated at runtime by:
+        1. Mark a class of which size needs to be updated at runtime by:
             a. not set TypeExt flag
             b. set TypeExt flag, but has no TypeExt global variable
             c. set TypeExt flag, has TypeExt global variable, but the first byte of TypeExt is '0x0'
