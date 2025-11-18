@@ -332,11 +332,6 @@ OPTION("--profile-compile-time", PROFILE_COMPILE_TIME, FLAG, { BACKEND(ALL) },
 OPTION("--profile-compile-memory", PROFILE_COMPILE_MEMORY, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(VISIBLE) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Print memory usage of all phases in the compilation")
-#ifndef DISABLE_EFFECT_HANDLERS
-OPTION("--enable-eh", ENABLE_EFFECTS, FLAG, { BACKEND(CJNATIVE) },
-    { GROUP(GLOBAL) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Enables experimental support for effect handlers")
-#endif
 OPTION("--dump-chir-debug", DUMP_CHIR_DEBUG, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Dump CHIR readable txt file when compiling for debug")

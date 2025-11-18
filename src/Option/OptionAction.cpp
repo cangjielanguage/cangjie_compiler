@@ -934,9 +934,6 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
     { Options::ID::DISCARD_EH_FRAME, OPTION_TRUE_ACTION(opts.discardEhFrame = true) },
     {Options::ID::JOBS, ParseJobs},
     {Options::ID::AGGRESSIVE_PARALLEL_COMPILE, ParseAPCJobs},
-#ifndef DISABLE_EFFECT_HANDLERS
-    {Options::ID::ENABLE_EFFECTS, OPTION_TRUE_ACTION(opts.enableEH = true) },
-#endif
 #endif // CANGJIE_CODEGEN_CJNATIVE_BACKEND
 };
 } // namespace
