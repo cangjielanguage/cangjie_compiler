@@ -1274,7 +1274,10 @@ OwnedPtr<Expr> ASTFactory::CreateWithMethodEnvScope(OwnedPtr<Expr> nativeHandle,
 
     Ptr<FuncDecl> withMethodEnvDecl;
     OwnedPtr<RefExpr> withMethodEnvRef;
-    if (retTy->IsPrimitive() || typeMapper.IsObjCPointer(*retTy)) {
+    if (typeMapper.IsObjCObjectType(*retTy)) {
+        withMethodEnvDecl = bridge.GetWithMethodEnvObjDecl();
+        withMethodEnvRef = CreateRefExpr(*withMethodEnvDecl);
+    } else {
         withMethodEnvDecl = bridge.GetWithMethodEnvDecl();
         auto unwrappedTy = typeMapper.Cj2CType(retTy);
         withMethodEnvRef = CreateRefExpr(*withMethodEnvDecl);
@@ -1282,9 +1285,6 @@ OwnedPtr<Expr> ASTFactory::CreateWithMethodEnvScope(OwnedPtr<Expr> nativeHandle,
         withMethodEnvRef->ty = typeManager.GetInstantiatedTy(
             withMethodEnvDecl->ty, GenerateTypeMapping(*withMethodEnvDecl, withMethodEnvRef->instTys));
         withMethodEnvRef->typeArguments.emplace_back(CreateType(unwrappedTy));
-    } else {
-        withMethodEnvDecl = bridge.GetWithMethodEnvObjDecl();
-        withMethodEnvRef = CreateRefExpr(*withMethodEnvDecl);
     }
     auto receiverParam =
         WithinFile(CreateFuncParam("receiver", nullptr, nullptr, bridge.GetNativeObjCIdTy()), nativeHandle->curFile);
@@ -1518,17 +1518,16 @@ OwnedPtr<CallExpr> ASTFactory::CreateGetInstanceVariableCall(const PropDecl& fie
 {
     Ptr<FuncDecl> getInstVarDecl;
     OwnedPtr<RefExpr> getInstVarRef;
-    if (field.ty->IsPrimitive()) {
+    if (typeMapper.IsObjCObjectType(*field.ty)) {
+        getInstVarDecl = bridge.GetGetInstanceVariableObjDecl();
+        getInstVarRef = CreateRefExpr(*getInstVarDecl);
+    } else {
         getInstVarDecl = bridge.GetGetInstanceVariableDecl();
         getInstVarRef = CreateRefExpr(*getInstVarDecl);
 
-        getInstVarRef->instTys.emplace_back(field.ty);
+        getInstVarRef->instTys.emplace_back(typeMapper.Cj2CType(field.ty));
         getInstVarRef->ty = typeManager.GetInstantiatedTy(
             getInstVarDecl->ty, GenerateTypeMapping(*getInstVarDecl, getInstVarRef->instTys));
-        getInstVarRef->typeArguments.emplace_back(CreateType(field.ty));
-    } else {
-        getInstVarDecl = bridge.GetGetInstanceVariableObjDecl();
-        getInstVarRef = CreateRefExpr(*getInstVarDecl);
     }
 
     auto objcname = nameGenerator.GetObjCDeclName(field);
@@ -1547,17 +1546,16 @@ OwnedPtr<CallExpr> ASTFactory::CreateSetInstanceVariableCall(
 {
     Ptr<FuncDecl> setInstVarDecl;
     OwnedPtr<RefExpr> setInstVarRef;
-    if (field.ty->IsPrimitive()) {
+    if (typeMapper.IsObjCObjectType(*field.ty)) {
+        setInstVarDecl = bridge.GetSetInstanceVariableObjDecl();
+        setInstVarRef = CreateRefExpr(*setInstVarDecl);
+    } else {
         setInstVarDecl = bridge.GetSetInstanceVariableDecl();
         setInstVarRef = CreateRefExpr(*setInstVarDecl);
 
-        setInstVarRef->instTys.emplace_back(field.ty);
+        setInstVarRef->instTys.emplace_back(typeMapper.Cj2CType(field.ty));
         setInstVarRef->ty = typeManager.GetInstantiatedTy(
             setInstVarDecl->ty, GenerateTypeMapping(*setInstVarDecl, setInstVarRef->instTys));
-        setInstVarRef->typeArguments.emplace_back(CreateType(field.ty));
-    } else {
-        setInstVarDecl = bridge.GetSetInstanceVariableObjDecl();
-        setInstVarRef = CreateRefExpr(*setInstVarDecl);
     }
 
     auto objcname = nameGenerator.GetObjCDeclName(field);
