@@ -208,6 +208,12 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
             -DCMAKE_AR=${CMAKE_AR}
             -DCMAKE_RANLIB=${CMAKE_RANLIB}
             -DCMAKE_CXX_STANDARD=17)
+        if(OHOS)
+            list(APPEND LLVM_CMAKE_ARGS
+                -DOHOS=ON
+                -DLLVM_HOST_TRIPLE=${TRIPLE}
+                -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/${TRIPLE}_toolchain.cmake)
+        endif()
         if(CANGJIE_BUILD_CJDB)
             if(NOT WIN32)
                 list(APPEND LLVM_CMAKE_ARGS ${LLVM_BUILD_ARG}
@@ -366,14 +372,12 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
         endif()
         set(CLANG_RT_LIBS)
         # copy the builtin and profile library
-        if(NOT OHOS)
-            if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64" OR DARWIN)
-                list(APPEND CLANG_RT_LIBS ${LIB_BUILTINS_PATH})
-            endif()
-            list(APPEND CLANG_RT_LIBS ${LIB_PROFILE_PATH})
-            if(NOT WIN32 AND NOT IOS)
-                list(APPEND CLANG_RT_LIBS ${LIB_FUZZER_NOMAIN_PATH})
-            endif()
+        if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64" OR DARWIN)
+            list(APPEND CLANG_RT_LIBS ${LIB_BUILTINS_PATH})
+        endif()
+        list(APPEND CLANG_RT_LIBS ${LIB_PROFILE_PATH})
+        if(NOT WIN32 AND NOT IOS)
+            list(APPEND CLANG_RT_LIBS ${LIB_FUZZER_NOMAIN_PATH})
         endif()
         set(CLANG_RT_TARGET_SUFFIX ${CMAKE_SYSTEM_PROCESSOR}$<$<BOOL:${ANDROID}>:-android>)
         if(CANGJIE_ASAN_SUPPORT)
@@ -531,6 +535,36 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
     endif()
     if(OHOS)
         include(AddOHOSLibs)
+        if(CANGJIE_BUILD_CJC)
+            install(
+                DIRECTORY ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/
+                DESTINATION ${THIRD_PARTY_LLVM}
+                ${LLVM_INSTALL_PATTERN})
+            install(
+                DIRECTORY ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/bin
+                DESTINATION ${THIRD_PARTY_LLVM}
+                FILES_MATCHING
+                ${LLVM_BIN_INSTALL_PATTERN}
+                )
+            set(CRT_LIBS_PATH ${CANGJIE_TARGET_SYSROOT}/usr/lib/aarch64-linux-ohos)
+            install(
+                FILES
+                    ${CRT_LIBS_PATH}/crti.o
+                    ${CRT_LIBS_PATH}/crtn.o
+                    ${CRT_LIBS_PATH}/libc.a
+                    ${CRT_LIBS_PATH}/libc.so
+                    ${CRT_LIBS_PATH}/libm.a
+                    ${CRT_LIBS_PATH}/Scrt1.o
+                DESTINATION lib/${TARGET_TRIPLE_DIRECTORY_PREFIX}_cjnative)
+
+            set(LLVM_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/include PARENT_SCOPE)
+            # for other targets to use
+            foreach(LIB_NAME ${LLVM_DEP_LIB_NAMES})
+                list(APPEND LLVM_LIBS ${LLVM_LIB_PATH}/${LIB_NAME})
+            endforeach()
+            list(APPEND LLVM_LIBS ${LLVM_LINK_FLAGS})
+            set(LLVM_LIBS ${LLVM_LIBS} PARENT_SCOPE)
+        endif()
     endif()
 
     set(BINARY_TARGET_DEPENDS runtime)

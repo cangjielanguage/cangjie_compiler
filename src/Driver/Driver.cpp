@@ -85,7 +85,7 @@ bool DeleteInstance(DefaultCompilerInstance* instance)
 {
     Utils::ProfileRecorder recorder("DeleteInstance", "CompleteTime");
     delete instance;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ohos__)
     (void)malloc_trim(0); // After the memory is released, the heap memory space shrinks to the minimum size, which
                           // makes better use of the memory space and avoids memory waste.
 #endif

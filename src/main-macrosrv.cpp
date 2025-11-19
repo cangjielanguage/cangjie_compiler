@@ -16,7 +16,11 @@
 #include <windows.h>
 #else
 #include <csignal>
+#ifdef __ohos__
+#include <signal.h>
+#else
 #include <sys/signal.h>
+#endif
 #include <sys/stat.h>
 #endif
 

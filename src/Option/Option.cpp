@@ -1148,7 +1148,11 @@ void GlobalOptions::ReadPathsFromEnvironmentVars(const std::unordered_map<std::s
 
 std::string GlobalOptions::GetCangjieLibHostPathName() const
 {
-    return host.OSToString() + "_" + host.ArchToString() + "_" + BackendToString(backend);
+    std::string name = host.OSToString();
+    if (target.env == Triple::Environment::OHOS) {
+        name += "_" + host.EnvironmentToString();
+    }
+    return name + "_" + host.ArchToString() + "_" + BackendToString(backend);
 }
 
 std::string GlobalOptions::GetCangjieLibTargetPathName() const
