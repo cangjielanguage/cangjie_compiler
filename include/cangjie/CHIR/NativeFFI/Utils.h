@@ -17,7 +17,6 @@
 
 namespace Cangjie::CHIR::Native::FFI {
     bool IsMirror(const CHIR::ClassDef& classDef);
-    std::vector<uint64_t> FindHasInitedField(const CHIR::ClassDef& classDef);
 }
 
 #endif

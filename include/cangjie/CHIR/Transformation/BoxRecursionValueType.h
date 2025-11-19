@@ -25,7 +25,7 @@ public:
     /**
      * @brief main process to add box and unbox expressions.
      */
-    void CreateBoxTypeForRecursionValueType();
+    void Run();
 
 private:
     void CreateBoxTypeForRecursionEnum();

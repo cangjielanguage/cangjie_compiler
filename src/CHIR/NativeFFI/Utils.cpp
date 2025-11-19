@@ -31,20 +31,3 @@ bool Cangjie::CHIR::Native::FFI::IsMirror(const ClassDef& classDef)
 {
     return IsObjCMirror(classDef) || IsJavaMirror(classDef);
 }
-
-std::vector<uint64_t> Cangjie::CHIR::Native::FFI::FindHasInitedField(const ClassDef& classDef)
-{
-    auto index = std::vector<uint64_t>{};
-    const auto ivars = classDef.GetDirectInstanceVars();
-    const auto superMembersNum = classDef.GetAllInstanceVarNum() - ivars.size();
-    for (size_t i = 0; i < ivars.size(); ++i) {
-        const auto ivar = ivars[i];
-
-        if (ivar.TestAttr(Attribute::HAS_INITED_FIELD)) {
-            index.emplace_back(superMembersNum + i);
-            break;
-        }
-    }
-
-    return index;
-}

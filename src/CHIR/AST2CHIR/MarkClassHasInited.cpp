@@ -12,13 +12,17 @@
 #include "cangjie/CHIR/Type/ClassDef.h"
 
 using namespace Cangjie::CHIR;
-namespace {
 
-std::vector<uint64_t> AddHasInitedField(ClassDef& classDef, CHIRBuilder& builder)
+MarkClassHasInited::MarkClassHasInited(CHIRBuilder& builder)
+    : builder(builder)
+{
+}
+
+void MarkClassHasInited::AddHasInitedFlagToClassDef(ClassDef& classDef)
 {
     // Java and Objective-C mirrors have this field generated from AST.
     if (Native::FFI::IsMirror(classDef)) {
-        return Native::FFI::FindHasInitedField(classDef);
+        return;
     }
 
     auto attributeInfo = AttributeInfo();
@@ -32,66 +36,34 @@ std::vector<uint64_t> AddHasInitedField(ClassDef& classDef, CHIRBuilder& builder
         .attributeInfo = attributeInfo,
         .outerDef = &classDef
     });
-
-    return std::vector<uint64_t>{ classDef.GetAllInstanceVarNum() - 1 };
 }
 
-void AddHasInitedFlagToImportedClass(const Package& package, CHIRBuilder& builder)
+void MarkClassHasInited::AddGuardToFinalizer(ClassDef& classDef)
 {
-    for (auto classDef : package.GetImportedClasses()) {
-        if (!classDef->GetFinalizer()) {
-            continue;
-        }
-        AddHasInitedField(*classDef, builder);
-    }
-}
-
-void InitHasInitedFlagToFalse(Ptr<Func> initFunc, CHIRBuilder& builder, std::vector<uint64_t> path)
-{
-    auto boolTy = builder.GetBoolTy();
-    auto entry = initFunc->GetEntryBlock();
-    auto falseVal = builder.CreateConstantExpression<BoolLiteral>(boolTy, entry, false);
-    auto thisArg = initFunc->GetParam(0);
-    CJC_NULLPTR_CHECK(thisArg);
-    auto storeRef =
-        builder.CreateExpression<StoreElementRef>(builder.GetUnitTy(), falseVal->GetResult(), thisArg, path, entry);
-    entry->InsertExprIntoHead(*storeRef);
-    entry->InsertExprIntoHead(*falseVal);
-}
-
-void ReAssignHasInitedToTrue(Ptr<Func> initFunc, CHIRBuilder& builder, std::vector<uint64_t> path)
-{
-    auto boolTy = builder.GetBoolTy();
-    auto thisArg = initFunc->GetParam(0);
-    for (auto block : initFunc->GetBody()->GetBlocks()) {
-        auto terminator = block->GetTerminator();
-        if (!terminator || terminator->GetExprKind() != ExprKind::EXIT) {
-            continue;
-        }
-        auto parent = terminator->GetParentBlock();
-        auto terminatorAnnos = terminator->MoveAnnotation();
-        terminator->RemoveSelfFromBlock();
-        auto trueVal = builder.CreateConstantExpression<BoolLiteral>(boolTy, parent, true);
-        auto storeRef =
-            builder.CreateExpression<StoreElementRef>(builder.GetUnitTy(), trueVal->GetResult(), thisArg, path, parent);
-        auto exit = builder.CreateTerminator<Exit>(parent);
-        exit->SetAnnotation(std::move(terminatorAnnos));
-        parent->AppendExpressions({trueVal, storeRef, exit});
-    }
-}
-
-void AddGuardToFinalizer(Ptr<ClassDef> classDef, CHIRBuilder& builder, std::vector<uint64_t> path)
-{
-    auto finalizer = Cangjie::DynamicCast<Cangjie::CHIR::Func*>(classDef->GetFinalizer());
+    auto finalizer = Cangjie::DynamicCast<Cangjie::CHIR::Func*>(classDef.GetFinalizer());
     if (!finalizer) {
-        // While doing incremental compilation, the finalizer may be an ImportedFunc.
+        // the finalizer may be an ImportedFunc when:
+        // 1. incremental compilation
+        // 2. class is imported
         return;
     }
+    /*
+        class CA {
+            var hasInited: Bool
+            ~init() {
+                if (!hasInited) {
+                    return;
+                }
+                ...
+            }
+        }
+    */
     auto block = builder.CreateBlock(finalizer->GetBody());
     auto thisArg = finalizer->GetParam(0);
     CJC_NULLPTR_CHECK(thisArg);
     auto boolTy = builder.GetBoolTy();
-    auto ref = builder.CreateExpression<GetElementRef>(builder.GetType<RefType>(boolTy), thisArg, path, block);
+    auto path = std::vector<std::string>{ Cangjie::HAS_INITED_IDENT };
+    auto ref = builder.CreateExpression<GetElementByName>(builder.GetType<RefType>(boolTy), thisArg, path, block);
     auto load = builder.CreateExpression<Load>(boolTy, ref->GetResult(), block);
 
     auto entry = finalizer->GetEntryBlock();
@@ -101,9 +73,62 @@ void AddGuardToFinalizer(Ptr<ClassDef> classDef, CHIRBuilder& builder, std::vect
     block->AppendExpressions({ref, load, cond});
     finalizer->GetBody()->SetEntryBlock(block);
 }
-} // namespace
 
-void MarkClassHasInited::RunOnPackage(const Package& package, CHIRBuilder& builder)
+void MarkClassHasInited::AssignHasInitedFlagToFalseInConstructorHead(Func& constructor)
+{
+    /*
+        class CA {
+            var hasInited: Bool
+            init() {
+                hasInited = false
+                ...
+            }
+        }
+    */
+    auto boolTy = builder.GetBoolTy();
+    auto entry = constructor.GetEntryBlock();
+    auto falseVal = builder.CreateConstantExpression<BoolLiteral>(boolTy, entry, false);
+    auto thisArg = constructor.GetParam(0);
+    CJC_NULLPTR_CHECK(thisArg);
+    auto path = std::vector<std::string>{ Cangjie::HAS_INITED_IDENT };
+    auto storeRef =
+        builder.CreateExpression<StoreElementByName>(builder.GetUnitTy(), falseVal->GetResult(), thisArg, path, entry);
+    entry->InsertExprIntoHead(*storeRef);
+    entry->InsertExprIntoHead(*falseVal);
+}
+
+void MarkClassHasInited::AssignHasInitedFlagToTrueInConstructorExit(Func& constructor)
+{
+    /*
+        class CA {
+            var hasInited: Bool
+            init() {
+                ...
+                if (xxx) {
+                    ...
+                    hasInited = true
+                }
+                hasInited = true
+            }
+        }
+    */
+    auto boolTy = builder.GetBoolTy();
+    auto thisArg = constructor.GetParam(0);
+    for (auto block : constructor.GetBody()->GetBlocks()) {
+        auto terminator = block->GetTerminator();
+        if (!terminator || terminator->GetExprKind() != ExprKind::EXIT) {
+            continue;
+        }
+        auto trueVal = builder.CreateConstantExpression<BoolLiteral>(boolTy, block, true);
+        trueVal->MoveBefore(terminator);
+        auto path = std::vector<std::string>{ Cangjie::HAS_INITED_IDENT };
+        auto storeRef =
+            builder.CreateExpression<StoreElementByName>(builder.GetUnitTy(), trueVal->GetResult(), thisArg, path, block);
+        storeRef->MoveBefore(terminator);
+    }
+}
+
+void MarkClassHasInited::RunOnPackage(const Package& package)
 {
     /**
      * To prevent any use-before-intialisation behaviour, we add a member variable
@@ -125,25 +150,21 @@ void MarkClassHasInited::RunOnPackage(const Package& package, CHIRBuilder& build
      *                                              }
      */
 
-    // Add member variable `hasInited: bool` to all imported classes that have finalizer.
-    // As any CHIR-added member won't be exported, we cannot see that the imported class has
-    // this member variable. We need to add it by ourself.
-    AddHasInitedFlagToImportedClass(package, builder);
-
-    for (auto classDef : package.GetClasses()) {
-        if (!classDef->GetFinalizer()) {
+    for (auto classDef : package.GetAllClassDef()) {
+        if (classDef->GetFinalizer() == nullptr) {
             continue;
         }
-        auto index = AddHasInitedField(*classDef, builder);
-        CJC_ASSERT(!index.empty());
-
-        for (auto& funcBase : classDef->GetMethods()) {
-            if (auto func = DynamicCast<Func*>(funcBase); func && func->IsConstructor()) {
-                InitHasInitedFlagToFalse(func, builder, index);
-                ReAssignHasInitedToTrue(func, builder, index);
+        AddHasInitedFlagToClassDef(*classDef);
+        for (auto funcBase : classDef->GetMethods()) {
+            if (!funcBase->IsConstructor()) {
+                continue;
+            }
+            if (auto func = DynamicCast<Func*>(funcBase)) {
+                AssignHasInitedFlagToFalseInConstructorHead(*func);
+                AssignHasInitedFlagToTrueInConstructorExit(*func);
             }
         }
 
-        AddGuardToFinalizer(classDef, builder, index);
+        AddGuardToFinalizer(*classDef);
     }
 }
