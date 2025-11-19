@@ -452,6 +452,7 @@ public:
      */
     std::vector<ClassType*> GetSuperTypesRecusively(CHIRBuilder& builder,
         std::set<std::pair<const Type*, const Type*>>* visited = nullptr) override;
+    std::vector<ClassType*> GetSuperTypes(CHIRBuilder& builder) const;
 
     const std::vector<ExtendDef*>& GetExtends(CHIRBuilder* builder = nullptr) const override;
     void AddExtend(ExtendDef& extend);
@@ -786,6 +787,8 @@ public:
         superClassTy = nullptr;
         hasSetSuperClass = false;
     }
+
+    bool IsDirectSuperTypeOf(Type& subType, CHIRBuilder& builder) const;
 
     std::vector<AbstractMethodInfo> GetInstAbstractMethodTypes(CHIRBuilder& builder) const;
 private:

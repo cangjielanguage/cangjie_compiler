@@ -431,7 +431,7 @@ llvm::Constant* CGEnumType::GenFieldsOfTypeInfo()
             break;
     }
     std::vector<llvm::Constant*> fieldConstants = GenTypeInfoConstantVectorForTypes(cgMod, fieldTypes);
-    return GenTypeInfoArray(cgMod, CGType::GetNameOfTypeInfoGV(chirType) + ".fields", fieldConstants);
+    return GenTypeInfoArray(cgMod, CGType::GetNameOfTypeInfoGV(chirType) + ".fields", fieldConstants, CJTI_FIELDS_ATTR);
 }
 
 llvm::Constant* CGEnumType::GenOffsetsOfTypeInfo()

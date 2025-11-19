@@ -199,8 +199,7 @@ void FixCastProblemAfterInst(Ptr<BlockGroup> group, CHIRBuilder& builder)
         if (e.GetExprKind() == ExprKind::LAMBDA) {
             auto lambda = StaticCast<Lambda*>(&e);
             FixCastProblemAfterInst(lambda->GetBody(), builder);
-        }
-        if (e.GetExprKind() == ExprKind::INSTANCEOF) {
+        } else if (e.GetExprKind() == ExprKind::INSTANCEOF) {
             // fix instanceOf problem
             auto instance = StaticCast<InstanceOf*>(&e);
             auto objType = instance->GetObject()->GetType();
@@ -218,8 +217,7 @@ void FixCastProblemAfterInst(Ptr<BlockGroup> group, CHIRBuilder& builder)
                     builder.CreateConstantExpression<BoolLiteral>(builder.GetBoolTy(), e.GetParentBlock(), false);
                 e.ReplaceWith(*falseExpr);
             }
-        }
-        if (e.GetExprKind() == ExprKind::TRANSFORM_TO_CONCRETE) {
+        } else if (e.GetExprKind() == ExprKind::TRANSFORM_TO_CONCRETE) {
             // change transformToConcrete to box/unbox/typecast
             auto& cast = StaticCast<TransformToConcrete&>(e);
             if (!cast.GetSourceTy()->IsGenericRelated()) {
@@ -238,8 +236,7 @@ void FixCastProblemAfterInst(Ptr<BlockGroup> group, CHIRBuilder& builder)
                 StaticCast<LocalVar*>(newCast)->GetExpr()->MoveBefore(&e);
                 e.RemoveSelfFromBlock();
             }
-        }
-        if (e.GetExprKind() == ExprKind::TRANSFORM_TO_GENERIC) {
+        } else if (e.GetExprKind() == ExprKind::TRANSFORM_TO_GENERIC) {
             // change TransformToGeneric to box/unbox/typecast
             auto cast = StaticCast<TransformToGeneric*>(&e);
             if (!cast->GetTargetTy()->IsGenericRelated()) {
@@ -259,8 +256,7 @@ void FixCastProblemAfterInst(Ptr<BlockGroup> group, CHIRBuilder& builder)
                 StaticCast<LocalVar*>(newCast)->GetExpr()->MoveBefore(&e);
                 e.RemoveSelfFromBlock();
             }
-        }
-        if (e.GetExprKind() == ExprKind::TYPECAST) {
+        } else if (e.GetExprKind() == ExprKind::TYPECAST) {
             /* change typecast to unbox/box
              * func foo<T>(a: T) {
              *   let b: CA<T> = TypeCast(a, CA<T>)   // typecast to CA<T>

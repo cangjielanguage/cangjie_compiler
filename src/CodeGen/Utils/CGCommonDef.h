@@ -84,6 +84,8 @@ enum TypeTemplateFields : uint8_t {
 enum ExtensionDefFields : uint8_t {
     TYPE_PARAM_COUNT = 0,         // i32
     IS_INTERFACE_TI,              // i8
+    FLAG,                         // i8
+    FUNC_TABLE_SIZE,              // i16
     TARGET_TYPE,                  // i8*
     INTERFACE_FN_OR_INTERFACE_TI, // i8*
     WHERE_CONDITION_FN,           // i8*

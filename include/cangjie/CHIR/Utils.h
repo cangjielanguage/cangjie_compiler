@@ -738,5 +738,15 @@ bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType);
  * @return type with vtable.
  */
 BuiltinType* GetBuiltinTypeWithVTable(BuiltinType& type, CHIRBuilder& builder);
+
+/**
+ * @brief try to get instantiated parent type from instantiated subtype and generic parent type.
+ *
+ * @param instSubType instantiated subtype.
+ * @param genericParentType generic parent type.
+ * @param builder CHIR builder.
+ * @return instantiated parent type when `instSubType` and `genericParentType` have parent-child relationship.
+ */
+ Type* GetInstParentType(Type& instSubType, Type& genericParentType, CHIRBuilder& builder);
 } // namespace Cangjie::CHIR
 #endif

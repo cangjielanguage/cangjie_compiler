@@ -81,7 +81,7 @@ void EnumCtorTIOrTTGenerator::GenerateNonGenericEnumCtorTypeInfo(llvm::GlobalVar
 
     auto fieldConstants = CGCustomType::GenTypeInfoConstantVectorForTypes(cgMod, fieldsTypes);
     typeInfoVec[static_cast<size_t>(TYPEINFO_FIELDS)] =
-        CGCustomType::GenTypeInfoArray(cgMod, tiName + ".fields", fieldConstants);
+        CGCustomType::GenTypeInfoArray(cgMod, tiName + ".fields", fieldConstants, CJTI_FIELDS_ATTR);
 
     auto layoutType = GetLLVMStructType(cgMod, fieldsTypes, GetClassObjLayoutName(className));
     typeInfoVec[static_cast<size_t>(TYPEINFO_SIZE)] = llvm::ConstantInt::get(i32Ty, 8U);
