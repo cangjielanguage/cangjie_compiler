@@ -170,6 +170,9 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
                 actualFuncType->paramTys, actualFuncType->retTy, '*', [this](Ptr<Ty> t) { return Cj2ObjCForObjC(*t); });
         }
         case TypeKind::TYPE_ENUM:
+            if (IsObjCCJMapping(from)) {
+                return from.name + "*";
+            }
             if (!from.IsCoreOptionType()) {
                 CJC_ABORT();
                 return UNSUPPORTED_TYPE;
@@ -453,8 +456,9 @@ bool TypeMapper::IsObjCCJMapping(const Decl& decl)
     // Currently, we only support CJ mapping for non-generic decl.
     bool isGeneric = decl.generic != nullptr;
     bool isStruct = decl.astKind == ASTKind::STRUCT_DECL;
+    bool isEnum = decl.astKind == ASTKind::ENUM_DECL;
     bool isNonOpenClass = decl.astKind == ASTKind::CLASS_DECL && !decl.IsOpen();
-    bool isSupportedType = isStruct || isNonOpenClass;
+    bool isSupportedType = isStruct || isEnum ||isNonOpenClass;
     return decl.TestAttr(Attribute::OBJ_C_CJ_MAPPING) && !isGeneric && isSupportedType;
 }
 
@@ -485,8 +489,9 @@ bool TypeMapper::IsObjCCJMapping(const Ty& ty)
 
 bool TypeMapper::IsOneWayMapping(const Decl& decl)
 {
-    // struct, non-open class
-    return decl.astKind == ASTKind::STRUCT_DECL || (decl.astKind == ASTKind::CLASS_DECL && !decl.IsOpen());
+    // struct, enum, non-open class
+    return decl.astKind == ASTKind::STRUCT_DECL || decl.astKind == ASTKind::ENUM_DECL ||
+        (decl.astKind == ASTKind::CLASS_DECL && !decl.IsOpen());
 }
 
 namespace {
@@ -526,7 +531,7 @@ bool TypeMapper::IsObjCCJMappingMember(const AST::Decl& decl)
 
 bool TypeMapper::IsOneWayMapping(const Ty& ty)
 {
-    if (!ty.IsStruct() && !ty.IsClass()) {
+    if (!ty.IsStruct() && !ty.IsEnum() &&!ty.IsClass()) {
         return false;
     }
     auto decl = Ty::GetDeclOfTy(&ty);

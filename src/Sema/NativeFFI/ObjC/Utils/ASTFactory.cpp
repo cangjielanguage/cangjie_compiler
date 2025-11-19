@@ -38,7 +38,8 @@ constexpr auto FINALIZER_IDENT = "~init";
 
 OwnedPtr<Expr> ASTFactory::CreateNativeHandleExpr(OwnedPtr<Expr> entity)
 {
-    CJC_ASSERT(typeMapper.IsObjCMirror(*entity->ty) || typeMapper.IsObjCImpl(*entity->ty)|| typeMapper.IsSyntheticWrapper(*entity->ty));
+    CJC_ASSERT(typeMapper.IsObjCMirror(*entity->ty) || typeMapper.IsObjCImpl(*entity->ty) ||
+        typeMapper.IsSyntheticWrapper(*entity->ty));
     auto entityTy = StaticCast<ClassLikeTy>(entity->ty);
     auto curFile = entity->curFile;
     auto getter = GetNativeHandleGetter(*entityTy->commonDecl);
@@ -382,9 +383,9 @@ OwnedPtr<Expr> ASTFactory::CreateMirrorConstructorCall(OwnedPtr<Expr> entity, Pt
     if (auto decl = classLikeTy->commonDecl; decl && decl->TestAttr(Attribute::OBJ_C_MIRROR)) {
         Ptr<ClassDecl> cld;
         if (decl->astKind == ASTKind::CLASS_DECL) {
-          cld = StaticAs<ASTKind::CLASS_DECL>(decl);
+            cld = StaticAs<ASTKind::CLASS_DECL>(decl);
         } else {
-          cld = GetSyntheticWrapper(importManager, *decl);
+            cld = GetSyntheticWrapper(importManager, *decl);
         }
         CJC_NULLPTR_CHECK(cld);
         auto mirrorCtor = GetGeneratedBaseCtor(*cld);
@@ -493,6 +494,37 @@ OwnedPtr<FuncDecl> ASTFactory::CreateInitCjObject(const Decl& target, FuncDecl& 
         CreateBlock(Nodes<Node>(std::move(putToRegistryCall)), registryIdTy), wrapperTy);
 
     auto wrapperName = nameGenerator.GenerateInitCjObjectName(ctor);
+
+    auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), wrapperTy);
+    wrapper->moduleName = ctor.moduleName;
+    wrapper->fullPackageName = ctor.fullPackageName;
+    wrapper->EnableAttr(Attribute::C, Attribute::GLOBAL, Attribute::PUBLIC, Attribute::NO_MANGLE);
+    wrapper->funcBody->funcDecl = wrapper.get();
+    PutDeclToFile(*wrapper, *ctor.curFile);
+
+    return wrapper;
+}
+
+OwnedPtr<FuncDecl> ASTFactory::CreateInitCjObjectForEnumNoParams(AST::EnumDecl& target, AST::VarDecl& ctor)
+{
+    auto curFile = ctor.curFile;
+    CJC_NULLPTR_CHECK(curFile);
+    auto registryIdTy = bridge.GetRegistryIdTy();
+
+    auto wrapperParamList = MakeOwned<FuncParamList>();
+    std::vector<Ptr<Ty>> wrapperParamTys;
+    std::vector<OwnedPtr<FuncParamList>> wrapperParamLists;
+    wrapperParamLists.emplace_back(std::move(wrapperParamList));
+
+    // createMemRef
+    auto enumRef = WithinFile(CreateRefExpr(target), curFile);
+    auto ctorCall = CreateMemberAccess(std::move(enumRef), ctor.identifier);
+    auto putToRegistryCall = CreatePutToRegistryCall(std::move(ctorCall));
+
+    auto wrapperName = nameGenerator.GenerateInitCjObjectName(ctor);
+    auto wrapperTy = typeManager.GetFunctionTy(wrapperParamTys, registryIdTy, {.isC = true});
+    auto wrapperBody = CreateFuncBody(std::move(wrapperParamLists), CreateType(registryIdTy),
+        CreateBlock(Nodes<Node>(std::move(putToRegistryCall)), registryIdTy), wrapperTy);
 
     auto wrapper = CreateFuncDecl(wrapperName, std::move(wrapperBody), wrapperTy);
     wrapper->moduleName = ctor.moduleName;

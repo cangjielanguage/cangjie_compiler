@@ -77,7 +77,7 @@ public:
     void HandleImpl(TypeCheckContext& ctx);
 };
 
-class CheckForeignName: public Handler<CheckForeignName, TypeCheckContext> {
+class CheckForeignName : public Handler<CheckForeignName, TypeCheckContext> {
 public:
     void HandleImpl(TypeCheckContext& ctx);
 };

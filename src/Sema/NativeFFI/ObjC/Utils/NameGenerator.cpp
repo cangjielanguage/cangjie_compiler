@@ -31,6 +31,12 @@ constexpr auto WRAPPER_SETTER_SUFFIX = "_set";
 NameGenerator::NameGenerator(const BaseMangler& mangler) : mangler(mangler) {
 }
 
+std::string NameGenerator::GenerateInitCjObjectName(const VarDecl& target)
+{
+    std::string name = target.outerDecl->identifier.Val() + '_' + target.identifier.Val();
+    return WRAPPER_PREFIX + name;
+}
+
 std::string NameGenerator::GenerateInitCjObjectName(const FuncDecl& target)
 {
     auto& params =  target.funcBody->paramLists[0]->params;
@@ -41,6 +47,17 @@ std::string NameGenerator::GenerateInitCjObjectName(const FuncDecl& target)
     std::replace(name.begin(), name.end(), ':', '_');
 
     return WRAPPER_PREFIX + name;
+}
+
+std::string NameGenerator::GenerateInitCjObjectName(const Decl& target)
+{
+    if (auto funcDecl = DynamicCast<const FuncDecl*>(&target)) {
+        return GenerateInitCjObjectName(*funcDecl);
+    } else if (auto varDecl = DynamicCast<const VarDecl*>(&target)) {
+        return GenerateInitCjObjectName(*varDecl);
+    }
+    CJC_ABORT();
+    return "";
 }
 
 std::string NameGenerator::GenerateDeleteCjObjectName(const Decl& target)

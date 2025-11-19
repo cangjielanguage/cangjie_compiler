@@ -562,7 +562,7 @@ void ParserImpl::CheckObjCInteropMember(Decl& member)
             ffiParser->ObjC().DiagObjCImplCannotBeGeneric(member);
             return;
         }
-        if (member.astKind == ASTKind::FUNC_DECL && member.TestAttr(Attribute::CONSTRUCTOR, Attribute::STATIC)) {      
+        if (member.astKind == ASTKind::FUNC_DECL && member.TestAttr(Attribute::CONSTRUCTOR, Attribute::STATIC)) {
             member.outerDecl->EnableAttr(Attribute::IS_BROKEN);
             member.EnableAttr(Attribute::IS_BROKEN);
             ffiParser->ObjC().DiagObjCImplCannotHaveStaticInit(member);
