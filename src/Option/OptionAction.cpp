@@ -229,7 +229,7 @@ bool ParseTargetTriple(GlobalOptions& opts, const std::string& triple)
     if (auto env = STRING_ENVIRONMENT_MAP.find(envStr); env != STRING_ENVIRONMENT_MAP.end()) {
         opts.target.env = env->second;
         if (opts.target.env == Environment::ANDROID) {
-            opts.target.apiLevel = Triple::DEFALUT_ANDROID_API;
+            opts.target.apiLevel = Triple::MIN_ANDROID_API;
             Infoln("ANDROID API level is not suggested in the target. Use API level " +
                 opts.target.apiLevel + " by default.");
         }
