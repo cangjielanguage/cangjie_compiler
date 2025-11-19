@@ -197,9 +197,7 @@ llvm::Value* HandleTransformToGenericExpr(IRBuilder2& irBuilder, const CHIR::Exp
     }
     auto srcCHIRType = castToGenericExpr.GetSourceTy();
     // 1. Allocate memory for boxing srcValue.
-    auto typeInfoOfSrc = irBuilder.CreateTypeInfo(*srcCHIRType);
-    llvm::Value* temp =
-        irBuilder.CallClassIntrinsicAlloc({typeInfoOfSrc, irBuilder.GetLayoutSize_32(*DeRef(*srcCHIRType))});
+    llvm::Value* temp = irBuilder.CallClassIntrinsicAlloc(*DeRef(*srcCHIRType));
     // 2. store srcValue to temp
     auto payloadPtr = irBuilder.GetPayloadFromObject(temp);
 
@@ -233,9 +231,7 @@ llvm::Value* HandleBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
 
     if (srcCGType->GetSize()) {
         // 1. Allocate memory for boxing srcValue.
-        auto typeInfoOfSrc = irBuilder.CreateTypeInfo(*srcCHIRType);
-        llvm::Value* temp =
-            irBuilder.CallClassIntrinsicAlloc({typeInfoOfSrc, irBuilder.GetLayoutSize_32(*DeRef(*srcCHIRType))});
+        llvm::Value* temp = irBuilder.CallClassIntrinsicAlloc(*DeRef(*srcCHIRType));
         // 2. store srcValue to temp
         auto payloadPtr = irBuilder.GetPayloadFromObject(temp);
         auto addr = irBuilder.CreateBitCast(payloadPtr,
@@ -248,10 +244,9 @@ llvm::Value* HandleBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
         (void)irBuilder.CreateStore(cgVal, CGValue(addr, addrType));
         return temp;
     } else if (IsThisArgOfStructMethod(*srcObject)) {
-        auto typeInfoOfSrc = irBuilder.CreateTypeInfo(*srcCHIRType);
-        auto size = irBuilder.GetLayoutSize_32(*DeRef(*srcCHIRType));
-        auto tmp = irBuilder.CallClassIntrinsicAlloc({typeInfoOfSrc, size});
+        auto tmp = irBuilder.CallClassIntrinsicAlloc(*DeRef(*srcCHIRType));
         auto payloadPtr = irBuilder.GetPayloadFromObject(tmp);
+        auto size = irBuilder.GetLayoutSize_32(*DeRef(*srcCHIRType));
         // Note: in this branch, it means:
         // - we are assigning a "struct" that doesn't begin with TypeInfo* to an address
         //   that should begin with TypeInfo*.

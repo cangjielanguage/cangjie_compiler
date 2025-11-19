@@ -761,5 +761,15 @@ bool VirMethodReturnTypeIsMatched(const Type& type1, const Type& type2);
 Type* RemoveBoxTypeShellIfNeed(Type& type);
 
 Type* CreateBoxRefTypeIfNeed(Type& baseTy, CHIRBuilder& builder);
+
+/**
+ * @brief try to get instantiated parent type from instantiated subtype and generic parent type.
+ *
+ * @param instSubType instantiated subtype.
+ * @param genericParentType generic parent type.
+ * @param builder CHIR builder.
+ * @return instantiated parent type when `instSubType` and `genericParentType` have parent-child relationship.
+ */
+Type* GetInstParentType(Type& instSubType, Type& genericParentType, CHIRBuilder& builder);
 } // namespace Cangjie::CHIR
 #endif

@@ -143,7 +143,11 @@ llvm::Constant* CGArrayType::GenTypeArgsOfTypeInfo()
 llvm::Constant* CGArrayType::GenSuperOfTypeInfo()
 {
     auto rawArrayElementType = DeRef(*StaticCast<const CHIR::RawArrayType&>(chirType).GetElementType());
-    auto ti = CGType::GetOrCreate(cgMod, rawArrayElementType)->GetOrCreateTypeInfo();
+    auto elemCGType = CGType::GetOrCreate(cgMod, rawArrayElementType);
+    auto ti = elemCGType->GetOrCreateTypeInfo();
+    if (elemCGType->IsStaticGI()) {
+        cgCtx.AddDependentPartialOrderOfTypes(ti, this->typeInfo);
+    }
     return llvm::ConstantExpr::getBitCast(ti, CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext()));
 }
 

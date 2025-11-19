@@ -93,27 +93,10 @@ void CGStructType::CalculateSizeAndAlign()
 
 llvm::Constant* CGStructType::GenFieldsOfTypeInfo()
 {
-    auto p0i8 = llvm::Type::getInt8PtrTy(cgMod.GetLLVMContext());
-    if (chirType.IsGeneric()) {
-        return llvm::ConstantPointerNull::get(p0i8);
-    }
-
-    std::vector<llvm::Constant*> filedConstants;
     auto& structType = StaticCast<const CHIR::StructType&>(chirType);
     auto& nonConstStructType = const_cast<CHIR::StructType&>(structType);
-    for (auto fieldType : nonConstStructType.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())) {
-        (void)filedConstants.emplace_back(CGType::GetOrCreate(cgMod, DeRef(*fieldType))->GetOrCreateTypeInfo());
-    }
-    auto typeInfoType = CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext());
-    llvm::ArrayType* ArrayType = llvm::ArrayType::get(typeInfoType, filedConstants.size());
-    auto temp = llvm::ConstantArray::get(ArrayType, filedConstants);
-
-    llvm::GlobalVariable* globalArrayPtr = static_cast<llvm::GlobalVariable*>(
-        cgMod.GetLLVMModule()->getOrInsertGlobal(CGType::GetNameOfTypeInfoGV(chirType) + ".fields", ArrayType));
-    globalArrayPtr->setInitializer(temp);
-    globalArrayPtr->setLinkage(llvm::GlobalValue::PrivateLinkage);
-    globalArrayPtr->addAttribute(CJTI_FIELDS_ATTR);
-    return llvm::ConstantExpr::getBitCast(globalArrayPtr, p0i8);
+    auto fieldConstants = GenTypeInfoConstantVectorForTypes(cgMod, nonConstStructType.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder()));
+    return GenTypeInfoArray(cgMod, CGType::GetNameOfTypeInfoGV(chirType) + ".fields", fieldConstants, CJTI_FIELDS_ATTR);
 }
 
 } // namespace Cangjie::CodeGen
