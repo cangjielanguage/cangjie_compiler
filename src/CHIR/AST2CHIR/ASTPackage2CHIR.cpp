@@ -957,7 +957,7 @@ void AST2CHIR::CreatePseudoDefForAnnoOnlyDecl(const AST::Decl& decl)
         sym = builder.CreateClass(tr.TranslateLocation(decl), decl.identifier.Val(), decl.mangledName,
             decl.fullPackageName, Is<AST::ClassDecl>(cl), false);
     }
-    if (auto cl = DynamicCast<AST::StructDecl>(&decl)) {
+    if (Is<AST::StructDecl>(&decl)) {
         sym = builder.CreateStruct(
             tr.TranslateLocation(decl), decl.identifier.Val(), decl.mangledName, decl.fullPackageName, false);
     }
@@ -965,7 +965,7 @@ void AST2CHIR::CreatePseudoDefForAnnoOnlyDecl(const AST::Decl& decl)
         sym = builder.CreateEnum(tr.TranslateLocation(decl), decl.identifier.Val(), decl.mangledName,
             decl.fullPackageName, false, cl->hasEllipsis);
     }
-    if (auto cl = DynamicCast<AST::ExtendDecl>(&decl)) {
+    if (Is<AST::ExtendDecl>(&decl)) {
         sym = builder.CreateExtend(tr.TranslateLocation(decl), decl.mangledName, decl.fullPackageName, false);
     }
     if (sym) {
@@ -985,7 +985,7 @@ void AST2CHIR::CreatePseudoDefForAnnoOnlyDecl(const AST::Decl& decl)
         }
         val = fn;
     }
-    if (auto var = DynamicCast<AST::VarDecl>(&decl)) {
+    if (Is<AST::VarDecl>(&decl)) {
         val = builder.CreateGlobalVar(tr.TranslateLocation(decl), builder.GetType<RefType>(builder.GetInt64Ty()),
             decl.mangledName, decl.identifier, decl.rawMangleName, decl.fullPackageName);
     }
