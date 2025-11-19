@@ -157,7 +157,7 @@ void VarInitCheck::UseBeforeInitCheck(
 
     const auto actionAfterVisitExpr = [&callStack](const MaybeUninitDomain&, Expression* expr, size_t) {
         if (expr->GetExprKind() == ExprKind::APPLY) {
-            if (TryGetInstanceVarInitFromApply(*expr)) {
+            if (auto varInitFunc = TryGetInstanceVarInitFromApply(*expr)) {
                 callStack.pop_back();
             }
         }
