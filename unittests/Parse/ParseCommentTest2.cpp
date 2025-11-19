@@ -253,3 +253,23 @@ TEST_F(ParseCommentTest, Enum2)
     ASSERT_EQ(r.comments.leadingComments.size(), 1);
     EXPECT_EQ(r.comments.leadingComments[0].cms[0].info.Value(), "/* comment 2 */");
 }
+
+TEST_F(ParseCommentTest, IntLiteral)
+{
+    code = R"(func foo() {
+    @synmmetry func s() {
+        // 等待crdRegistrationMgr初始化完成
+        0
+    }
+    let a = 0
+})";
+    Parser parser(code, diag, sm, {0, 1, 1}, true);
+    OwnedPtr<File> file = parser.ParseTopLevel();
+    auto& a = StaticCast<FuncDecl>(*file->decls[0]);
+    auto& block = *a.funcBody->body;
+    auto& macro = StaticCast<MacroExpandExpr>(*block.body[0]);
+    auto& s = StaticCast<FuncDecl>(*macro.invocation.decl);
+    auto& zero = StaticCast<LitConstExpr>(*s.funcBody->body->body[0]);
+    ASSERT_EQ(zero.comments.leadingComments.size(), 1);
+    EXPECT_EQ(zero.comments.leadingComments[0].cms[0].info.Value(), "// 等待crdRegistrationMgr初始化完成");
+}
