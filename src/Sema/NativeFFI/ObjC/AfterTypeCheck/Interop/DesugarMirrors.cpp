@@ -185,6 +185,7 @@ void DesugarMirrors::DesugarTopLevelFunc(InteropContext& ctx, FuncDecl& func)
     CopyBasicInfo(&func, call);
 
     auto arpScopeCall = ctx.factory.CreateAutoreleasePoolScope(methodTy->retTy, Nodes(std::move(call)));
+    arpScopeCall->curFile = curFile;
 
     func.funcBody->body = CreateBlock({}, methodTy->retTy);
     func.funcBody->body->body.emplace_back(ctx.factory.WrapEntity(std::move(arpScopeCall), *methodTy->retTy));
@@ -209,6 +210,8 @@ void DesugarGetter(InteropContext& ctx, ClassLikeDecl& mirror, PropDecl& prop)
     auto nativeHandle = ctx.factory.CreateNativeHandleExpr(mirror, prop.TestAttr(Attribute::STATIC), curFile);
     auto arpScopeCall = ctx.factory.CreateAutoreleasePoolScope(
         prop.ty, Nodes(ctx.factory.CreatePropGetterCallViaMsgSend(prop, std::move(nativeHandle))));
+    arpScopeCall->curFile = curFile;
+
     getter->funcBody->body = CreateBlock({}, prop.ty);
     getter->funcBody->body->body.emplace_back(ctx.factory.WrapEntity(std::move(arpScopeCall), *prop.ty));
 }
@@ -232,6 +235,7 @@ void DesugarSetter(InteropContext& ctx, ClassLikeDecl& mirror, PropDecl& prop)
 
     auto arpScopeCall = ctx.factory.CreateAutoreleasePoolScope(
         unitTy, Nodes(ctx.factory.CreatePropSetterCallViaMsgSend(prop, std::move(nativeHandle), std::move(arg))));
+    arpScopeCall->curFile = curFile;
 
     setter->funcBody->body->body.emplace_back(std::move(arpScopeCall));
 }

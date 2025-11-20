@@ -1518,6 +1518,7 @@ OwnedPtr<CallExpr> ASTFactory::CreateGetInstanceVariableCall(const PropDecl& fie
 {
     Ptr<FuncDecl> getInstVarDecl;
     OwnedPtr<RefExpr> getInstVarRef;
+    auto curFile = nativeHandle->curFile;
     if (typeMapper.IsObjCObjectType(*field.ty)) {
         getInstVarDecl = bridge.GetGetInstanceVariableObjDecl();
         getInstVarRef = CreateRefExpr(*getInstVarDecl);
@@ -1532,13 +1533,14 @@ OwnedPtr<CallExpr> ASTFactory::CreateGetInstanceVariableCall(const PropDecl& fie
 
     auto objcname = nameGenerator.GetObjCDeclName(field);
     auto nameExpr =
-        WithinFile(CreateLitConstExpr(LitConstKind::STRING, objcname, GetStringDecl(importManager).ty), field.curFile);
+        WithinFile(CreateLitConstExpr(LitConstKind::STRING, objcname, GetStringDecl(importManager).ty), curFile);
 
     auto args = Nodes<FuncArg>(CreateFuncArg(std::move(nativeHandle)), CreateFuncArg(std::move(nameExpr)));
 
     auto retTy = StaticCast<FuncTy>(getInstVarRef->ty)->retTy;
-    return CreateCallExpr(
-        std::move(getInstVarRef), std::move(args), getInstVarDecl, retTy, CallKind::CALL_DECLARED_FUNCTION);
+    return WithinFile(CreateCallExpr(std::move(getInstVarRef), std::move(args), getInstVarDecl, retTy,
+                          CallKind::CALL_DECLARED_FUNCTION),
+        curFile);
 }
 
 OwnedPtr<CallExpr> ASTFactory::CreateSetInstanceVariableCall(
@@ -1546,6 +1548,7 @@ OwnedPtr<CallExpr> ASTFactory::CreateSetInstanceVariableCall(
 {
     Ptr<FuncDecl> setInstVarDecl;
     OwnedPtr<RefExpr> setInstVarRef;
+    auto curFile = nativeHandle->curFile;
     if (typeMapper.IsObjCObjectType(*field.ty)) {
         setInstVarDecl = bridge.GetSetInstanceVariableObjDecl();
         setInstVarRef = CreateRefExpr(*setInstVarDecl);
@@ -1560,13 +1563,13 @@ OwnedPtr<CallExpr> ASTFactory::CreateSetInstanceVariableCall(
 
     auto objcname = nameGenerator.GetObjCDeclName(field);
     auto nameExpr =
-        WithinFile(CreateLitConstExpr(LitConstKind::STRING, objcname, GetStringDecl(importManager).ty), field.curFile);
+        WithinFile(CreateLitConstExpr(LitConstKind::STRING, objcname, GetStringDecl(importManager).ty), curFile);
 
     auto args = Nodes<FuncArg>(
         CreateFuncArg(std::move(nativeHandle)), CreateFuncArg(std::move(nameExpr)), CreateFuncArg(std::move(value)));
 
-    return CreateCallExpr(std::move(setInstVarRef), std::move(args), setInstVarDecl,
-        TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT), CallKind::CALL_DECLARED_FUNCTION);
+    return WithinFile(CreateCallExpr(std::move(setInstVarRef), std::move(args), setInstVarDecl,
+        TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT), CallKind::CALL_DECLARED_FUNCTION), curFile);
 }
 
 OwnedPtr<Expr> ASTFactory::CreateUnsafePointerCast(OwnedPtr<Expr> expr, Ptr<Ty> elementType)
