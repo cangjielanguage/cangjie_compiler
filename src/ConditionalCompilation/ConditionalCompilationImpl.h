@@ -14,6 +14,7 @@
 #define CANGJIE_CONDITIONALCOMPILATION_CONDITIONALCOMPILATIONIMPL_H
 
 #include <regex>
+#include <optional>
 
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Walker.h"
@@ -48,6 +49,10 @@ private:
     {
         return triple.ArchToString();
     }
+    inline std::string GetEnv() const
+    {
+        return triple.EnvironmentToSimpleString();
+    }
     std::string GetOSType() const;
     inline std::string GetCJCVersion() const
     {
@@ -62,12 +67,12 @@ private:
     {
         return std::to_string(static_cast<int>(test));
     }
-    std::string GetUserDefinedInfoByName(const std::string& name) const;
+    std::optional<std::string> GetUserDefinedInfoByName(const std::string& name) const;
     inline auto GetPassedValues() const
     {
         return passedCondition;
     }
-    std::string GetRelatedInfo(const std::string& target) const;
+    std::optional<std::string> GetRelatedInfo(const std::string& target) const;
 
     CompilerInstance* ci{nullptr};
     Triple::BackendType backendType;
