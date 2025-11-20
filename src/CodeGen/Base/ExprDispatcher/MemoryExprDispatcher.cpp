@@ -56,7 +56,7 @@ llvm::Value* HandleStoreExpr(IRBuilder2& irBuilder, const CHIR::Store& store)
         // If stored location is function's ret of unit type, do nothing.
         return nullptr;
     }
-    irBuilder.EmitLocation(CHIRExprWrapper(store));
+    irBuilder.EmitLocation(CHIRExprWrapper(store), true);
     auto valueVal = *(cgMod | value);
     if (value->TestAttr(CHIR::Attribute::FOREIGN)) {
         CJC_NULLPTR_CHECK(llvm::dyn_cast<llvm::Function>(valueVal.GetRawValue()));

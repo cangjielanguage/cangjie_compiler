@@ -174,7 +174,7 @@ public:
     void CreateLocalVarPointer(const CHIR::Debug& debugNode, const CGValue& cgValue);
     void CreateUnBoxDeclare(const CHIR::Debug& debugNode, const CGValue& cgValue);
     void CreateEnvDeclare(const CHIR::GetElementRef& getEleRef, llvm::Value* gep);
-    void EmitLocation(const CHIRExprWrapper& debugNode);
+    void EmitLocation(const CHIRExprWrapper& debugNode, const bool removable = false);
     llvm::Type* HandleArgPointerType(const CGType& argType) const;
     void CreateValuePointer(const CHIR::Debug& debugNode, const CGValue& cgValue);
     void CreateBoxedValueForValueType(const CHIR::Debug& debugNode, const CGValue& cgValue);

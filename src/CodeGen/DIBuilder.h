@@ -56,7 +56,7 @@ public:
         llvm::Value* value, llvm::BasicBlock& curBB);
     void EmitGenericDeclare(
         const CHIR::GenericType& genericTy, llvm::Value* arg, llvm::BasicBlock& curBB, size_t index);
-    llvm::DILocation* CreateDILoc(const CHIRExprWrapper& chirNode);
+    llvm::DILocation* CreateDILoc(const CHIRExprWrapper& chirNode, const bool removable = false);
     llvm::DILocation* CreateDILoc(llvm::DIScope* currentScope, const CHIR::Position& position);
 
     void CreateCompileUnit(const std::string& pkgName);

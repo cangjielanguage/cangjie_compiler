@@ -472,12 +472,12 @@ void IRBuilder2::CreateGenericParaDeclare(const CGFunction& cgFunc)
     }
 }
 
-void IRBuilder2::EmitLocation(const CHIRExprWrapper& debugNode)
+void IRBuilder2::EmitLocation(const CHIRExprWrapper& debugNode, const bool removable)
 {
     if (!cgMod.GetCGContext().IsLineInfoEnabled()) {
         return;
     }
-    llvm::DILocation* diLoc = cgMod.diBuilder->CreateDILoc(debugNode);
+    llvm::DILocation* diLoc = cgMod.diBuilder->CreateDILoc(debugNode, removable);
     SetCurrentDebugLocation(diLoc);
 }
 
