@@ -1143,7 +1143,7 @@ template <OpCode op, typename T, typename S> bool BCHIRInterpreter::BinOpInt(Can
         return PushIfNotOverflow<T, S>(overflow, res, strat);
     } else if constexpr (op == OpCode::UN_BITNOT) {
         auto a1 = interpStack.ArgsPop<T>();
-        S res = ~a1.content;
+        S res = static_cast<S>(~a1.content);
         interpStack.ArgsPush(IValUtils::PrimitiveValue<T, S>(res));
         return false;
     } else if constexpr (op == OpCode::BIN_LSHIFT || op == OpCode::BIN_RSHIFT || op == OpCode::BIN_LSHIFT_EXC ||

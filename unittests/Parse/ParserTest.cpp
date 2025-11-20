@@ -107,7 +107,7 @@ TEST(ParserTest1, PositionTest)
                 position.push_back(std::make_pair(ib.end.line, ib.end.column));
                 return VisitAction::SKIP_CHILDREN;
             },
-            [&](const Node& node) { return VisitAction::WALK_CHILDREN; }, []() { return VisitAction::WALK_CHILDREN; });
+            [&](const Node&) { return VisitAction::WALK_CHILDREN; }, []() { return VisitAction::WALK_CHILDREN; });
     });
     walker.Walk();
     EXPECT_TRUE(position.size() == expectPosition.size());
@@ -602,11 +602,11 @@ TEST(ParserTest1, ClassDecl)
     unsigned int counter = 0;
     Walker walker(file.get(), [&counter](Ptr<Node> node) -> VisitAction {
         return match(*node)(
-            [&counter](const ClassDecl& decl) {
+            [&counter](const ClassDecl&) {
                 counter++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&counter](const FuncDecl& decl) {
+            [&counter](const FuncDecl&) {
                 counter++;
                 return VisitAction::SKIP_CHILDREN;
             },
@@ -847,7 +847,7 @@ TEST(ParserTest1, IfExpr)
                 ifnum++;
                 if (expr.hasElse) {
                     match (*expr.elseBody.get())(
-                        [&](const Block& block) { elsenum++; }, [&](const IfExpr& expr) { elseifnum++; });
+                        [&](const Block&) { elsenum++; }, [&](const IfExpr&) { elseifnum++; });
                 }
                 return VisitAction::WALK_CHILDREN;
             },
@@ -884,19 +884,19 @@ TEST(ParserTest1, QuoteExpr1)
     int memberaccessnum = 0;
     Walker walker(file.get(), [&](Ptr<Node> node) -> VisitAction {
         return match(*node)(
-            [&](const BinaryExpr& expr) {
+            [&](const BinaryExpr&) {
                 binarynum++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const CallExpr& expr) {
+            [&](const CallExpr&) {
                 callnum++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const RefExpr& expr) {
+            [&](const RefExpr&) {
                 refnum++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const MemberAccess& ma) {
+            [&](const MemberAccess&) {
                 memberaccessnum++;
                 return VisitAction::WALK_CHILDREN;
             },
@@ -941,7 +941,7 @@ TEST(ParserTest1, QuoteExpr2)
 
     Walker walker(file.get(), [&](Ptr<Node> node) -> VisitAction {
         return match(*node)(
-            [&](const BinaryExpr& expr) {
+            [&](const BinaryExpr&) {
                 binarynum++;
                 return VisitAction::WALK_CHILDREN;
             },
@@ -1012,7 +1012,7 @@ TEST(ParserTest1, QuoteExpr3)
                 if (retExpr.expr) {
                     match (*retExpr.expr)([&](const QuoteExpr& expr) {
                         quotenum++;
-                        exprsnum = expr.exprs.size();
+                        exprsnum = static_cast<int>(expr.exprs.size());
                     });
                 }
                 return VisitAction::WALK_CHILDREN;
@@ -1042,7 +1042,7 @@ TEST(ParserTest1, ThrowExpr)
 
     Walker walker(file.get(), [&](Ptr<Node> node) -> VisitAction {
         return match(*node)(
-            [&](const ThrowExpr& expr) {
+            [&](const ThrowExpr&) {
                 thrownum++;
                 return VisitAction::WALK_CHILDREN;
             },
@@ -1072,7 +1072,7 @@ TEST(ParserTest1, StrInterpolationExpr)
     int strIntnum = 0;
     bool isClonedSourceCode = false;
     Walker walker(file.get(), [&](Ptr<Node> node) -> VisitAction {
-        return match(*node)([&](const StrInterpolationExpr& expr) { return VisitAction::WALK_CHILDREN; },
+        return match(*node)([&](const StrInterpolationExpr&) { return VisitAction::WALK_CHILDREN; },
             [&](const InterpolationExpr& expr) {
                 if (strIntnum == 0) {
                     EXPECT_EQ(expr.begin.column, 22);
@@ -1259,31 +1259,31 @@ TEST(ParserTest1, PatternMatch)
     int enumPatternEexpct = 6;
     Walker walker(file.get(), [&](Ptr<Node> node) -> VisitAction {
         return match(*node)(
-            [&](const ConstPattern& pattern) {
+            [&](const ConstPattern&) {
                 constPattern++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const VarPattern& pattern) {
+            [&](const VarPattern&) {
                 varPattern++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const WildcardPattern& pattern) {
+            [&](const WildcardPattern&) {
                 wildcardPattern++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const TuplePattern& pattern) {
+            [&](const TuplePattern&) {
                 tuplePattern++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const TypePattern& pattern) {
+            [&](const TypePattern&) {
                 typePattern++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const EnumPattern& pattern) {
+            [&](const EnumPattern&) {
                 enumPattern++;
                 return VisitAction::WALK_CHILDREN;
             },
-            [&](const WildcardExpr& wildcard) {
+            [&](const WildcardExpr&) {
                 wildcardPattern++;
                 return VisitAction::WALK_CHILDREN;
             },
@@ -1327,11 +1327,11 @@ TEST(ParserTest1, ForInExpr)
         return match(*node)(
             [&patternLists, &patternGuardLists](const ForInExpr& expr) {
                 match (*expr.pattern.get())(
-                    [&patternLists](const VarPattern& e) { patternLists.push_back("VarPattern"); },
-                    [&patternLists](const WildcardPattern& e) { patternLists.push_back("WildcardPattern"); });
+                    [&patternLists](const VarPattern&) { patternLists.push_back("VarPattern"); },
+                    [&patternLists](const WildcardPattern&) { patternLists.push_back("WildcardPattern"); });
                 if (expr.patternGuard) {
                     match (*expr.patternGuard.get())(
-                        [&patternGuardLists](const BinaryExpr& e) { patternGuardLists.push_back("BinaryExpr"); });
+                        [&patternGuardLists](const BinaryExpr&) { patternGuardLists.push_back("BinaryExpr"); });
                 }
                 return VisitAction::WALK_CHILDREN;
             },
@@ -1376,9 +1376,9 @@ TEST(ParserTest1, WhileExpr)
         return match(*node)(
             [&condLists](const WhileExpr& e) {
                 match (*e.condExpr.get())(
-                    [&condLists](const BinaryExpr& expr) { condLists.push_back(std::string("BinaryExpr")); },
-                    [&condLists](const ParenExpr& expr) { condLists.push_back(std::string("ParenExpr")); },
-                    [&condLists](const LitConstExpr& expr) { condLists.push_back(std::string("LitConstExpr")); });
+                    [&condLists](const BinaryExpr&) { condLists.push_back(std::string("BinaryExpr")); },
+                    [&condLists](const ParenExpr&) { condLists.push_back(std::string("ParenExpr")); },
+                    [&condLists](const LitConstExpr&) { condLists.push_back(std::string("LitConstExpr")); });
                 return VisitAction::WALK_CHILDREN;
             },
             []() { return VisitAction::WALK_CHILDREN; });
@@ -1418,8 +1418,8 @@ TEST(ParserTest1, DoWhileExpr)
         return match(*node)(
             [&condLists](const DoWhileExpr& expr) {
                 match (*expr.condExpr.get())(
-                    [&condLists](const ParenExpr& expr) { condLists.push_back(std::string("ParenExpr")); },
-                    [&condLists](const BinaryExpr& expr) { condLists.push_back(std::string("BinaryExpr")); });
+                    [&condLists](const ParenExpr&) { condLists.push_back(std::string("ParenExpr")); },
+                    [&condLists](const BinaryExpr&) { condLists.push_back(std::string("BinaryExpr")); });
                 return VisitAction::WALK_CHILDREN;
             },
             []() { return VisitAction::WALK_CHILDREN; });
@@ -1561,18 +1561,18 @@ TEST(ParserTest1, CallExpr)
 
                 numParams.push_back(e.args.size());
                 for (auto& it : e.args) {
-                    match (*it->expr.get())([&exprNames](const RefExpr& e) { exprNames.push_back("RefExpr"); },
-                        [&exprNames](const LitConstExpr& e) { exprNames.push_back("LitConstExpr"); },
-                        [&exprNames](const BinaryExpr& e) { exprNames.push_back("BinaryExpr"); },
-                        [&exprNames](const AssignExpr& e) { exprNames.push_back("AssignExpr"); },
-                        [&exprNames](const IfExpr& e) { exprNames.push_back("IfExpr"); },
-                        [&exprNames](const WhileExpr& e) { exprNames.push_back("WhileExpr"); }, []() {});
+                    match (*it->expr.get())([&exprNames](const RefExpr&) { exprNames.push_back("RefExpr"); },
+                        [&exprNames](const LitConstExpr&) { exprNames.push_back("LitConstExpr"); },
+                        [&exprNames](const BinaryExpr&) { exprNames.push_back("BinaryExpr"); },
+                        [&exprNames](const AssignExpr&) { exprNames.push_back("AssignExpr"); },
+                        [&exprNames](const IfExpr&) { exprNames.push_back("IfExpr"); },
+                        [&exprNames](const WhileExpr&) { exprNames.push_back("WhileExpr"); }, []() {});
                 }
                 std::function<int(int, Ptr<Node>)> getNum = [&](int n, Ptr<Node> expr) {
                     return match(*expr)(
                         [&](const CallExpr& e) { return getNum(n, e.baseFunc.get()) + 1; }, [&]() { return n; });
                 };
-                numExprs.push_back(getNum(1, e.baseFunc.get()));
+                numExprs.push_back(static_cast<unsigned>(getNum(1, e.baseFunc.get())));
                 return VisitAction::SKIP_CHILDREN;
             },
             []() { return VisitAction::WALK_CHILDREN; });
@@ -1772,11 +1772,11 @@ TEST(ParserTest1, RangeExpr)
         std::vector<std::string> exprList;
         Walker walker(expr.get(), [&exprList](Ptr<Node> node) -> VisitAction {
             return match(*node)(
-                [&exprList](const RangeExpr& e) {
+                [&exprList](const RangeExpr&) {
                     exprList.push_back("RangeExpr");
                     return VisitAction::WALK_CHILDREN;
                 },
-                [&exprList](const BinaryExpr& e) {
+                [&exprList](const BinaryExpr&) {
                     exprList.push_back("BinaryExpr");
                     return VisitAction::WALK_CHILDREN;
                 },
@@ -1907,15 +1907,15 @@ TEST(ParserTest1, LambdaExpr)
     std::vector<std::string> exprs;
     Walker walker(file.get(), [&exprs](Ptr<Node> node) -> VisitAction {
         return match(*node)(
-            [&exprs](const LambdaExpr& e) {
+            [&exprs](const LambdaExpr&) {
                 exprs.push_back("LambdaExpr");
                 return VisitAction::SKIP_CHILDREN;
             },
-            [&exprs](const LitConstExpr& e) {
+            [&exprs](const LitConstExpr&) {
                 exprs.push_back("LitConstExpr");
                 return VisitAction::SKIP_CHILDREN;
             },
-            [&exprs](const TupleLit& e) {
+            [&exprs](const TupleLit&) {
                 exprs.push_back("TupleLit");
                 return VisitAction::SKIP_CHILDREN;
             },

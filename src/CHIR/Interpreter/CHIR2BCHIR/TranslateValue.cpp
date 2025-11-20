@@ -44,7 +44,7 @@ void CHIR2BCHIR::TranslateValue(Context& ctx, const Value& value)
             // This is an hack because $has_applied_pkg_init_func is not a real mangled name. It's
             // not unique amongst packages. T0D0: issue 2079
             auto opIdx = ctx.def.NextIndex();
-            PushOpCodeWithAnnotations<false>(ctx, OpCode::GVAR, value, 0);
+            PushOpCodeWithAnnotations<false>(ctx, OpCode::GVAR, value, 0u);
             auto fixedMangledName = CHIR::GV_PKG_INIT_ONCE_FLAG + "-" + bchir.packageName;
             ctx.def.AddMangledNameAnnotation(opIdx, fixedMangledName);
         } else {

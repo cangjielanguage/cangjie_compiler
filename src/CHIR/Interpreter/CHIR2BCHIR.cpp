@@ -526,7 +526,7 @@ void CHIR2BCHIR::TranslateAllocate(Context& ctx, const Expression& expr)
         auto numberOfFields = classTy->GetClassDef()->GetAllInstanceVarNum();
         auto idx = ctx.def.NextIndex();
         auto opCode = withException ? OpCode::ALLOCATE_CLASS_EXC : OpCode::ALLOCATE_CLASS;
-        PushOpCodeWithAnnotations<false, true>(ctx, opCode, expr, 0, static_cast<unsigned>(numberOfFields));
+        PushOpCodeWithAnnotations<false, true>(ctx, opCode, expr, 0u, static_cast<unsigned>(numberOfFields));
         ctx.def.AddMangledNameAnnotation(idx, classTy->GetClassDef()->GetIdentifierWithoutPrefix());
     } else if (ty->IsStruct()) {
         auto structTy = StaticCast<const StructType*>(ty);

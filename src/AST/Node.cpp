@@ -121,7 +121,7 @@ Position GetMacroCallEndPosforLsp(uint32_t newPos, uint32_t first, const Positio
  */
 Position GetMacroSourcePos(const MacroInvocation& invocation, const Position& pos, bool isLowerBound = false)
 {
-    auto key = invocation.isCurFile ? pos.Hash32() : static_cast<const uint32_t>(pos.column);
+    auto key = invocation.isCurFile ? pos.Hash32() : static_cast<uint32_t>(pos.column);
     if (isLowerBound) {
         // Get end position.
         if (invocation.isForLSP) { // For lsp.

@@ -689,7 +689,7 @@ void MockUtils::UpdateRefTypesTarget(Ptr<Type> type, Ptr<Generic> oldGeneric, Pt
     if (auto genericTy = DynamicCast<GenericsTy*>(refType->ty); genericTy) {
         auto typeParamIndex = GetIndexOfGenericTypeParam(genericTy, oldGeneric);
         if (typeParamIndex != -1) {
-            refType->ref.target = newGeneric->typeParameters[typeParamIndex].get();
+            refType->ref.target = newGeneric->typeParameters[static_cast<size_t>(typeParamIndex)].get();
         }
     }
 
