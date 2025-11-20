@@ -516,7 +516,7 @@ bool CHIRChecker::CheckHaveResult(const Expression& expr, const Func& topLevelFu
 
 void CHIRChecker::ShouldNotHaveResult(const Terminator& expr, const Func& topLevelFunc)
 {
-    if (expr.GetResult()) {
+    if (auto result = expr.GetResult()) {
         ErrorInExpr(topLevelFunc, expr, "this terminator shouldn't have result.");
     }
 }
@@ -2545,7 +2545,7 @@ const std::vector<VirtualMethodInfo>* CHIRChecker::CheckVTableExist(
         res = CheckVTableExist(*bType, srcParentType);
     } else if (auto cType = DynamicCast<const CustomType*>(&thisType)) {
         res = CheckVTableExist(*cType, srcParentType);
-    } else if (Is<ThisType>(&thisType)) {
+    } else if (auto tType = DynamicCast<const ThisType*>(&thisType)) {
         res = CheckVTableExist(srcParentType, topLevelFunc);
     } else if (auto gType = DynamicCast<const GenericType*>(&thisType)) {
         res = CheckVTableExist(*gType, srcParentType);
@@ -2969,7 +2969,7 @@ void CHIRChecker::CheckInoutOpSrc(const Value& op, const IntrinsicBase& expr, co
                 }
             }
             CheckInoutOpSrc(*ger->GetLocation(), expr, topLevelFunc);
-        } else if (Is<Field*>(localExpr)) {
+        } else if (auto field = DynamicCast<const Field*>(localExpr)) {
             auto locationType = ger->GetLocation()->GetType()->StripAllRefs();
             for (auto p : ger->GetPath()) {
                 locationType = GetFieldOfType(*locationType, p, builder);

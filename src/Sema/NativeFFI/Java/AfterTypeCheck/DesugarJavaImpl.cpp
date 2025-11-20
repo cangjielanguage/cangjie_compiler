@@ -542,7 +542,7 @@ std::string JavaDesugarManager::GetJniInitCjObjectFuncName(const FuncDecl& ctor,
                                                              isGeneratedCtor);
     MangleJNIName(mangledFuncName);
 
-    if (Is<EnumDecl>(ctor.outerDecl)) {
+    if (auto enumDecl = As<ASTKind::ENUM_DECL>(ctor.outerDecl)) {
         mangledFuncName = ctor.identifier + mangledFuncName;
     }
 
