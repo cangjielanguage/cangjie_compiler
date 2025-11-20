@@ -35,5 +35,9 @@ void GenerateGlueCode::HandleImpl(InteropContext& ctx)
         for (auto& cjmapping : ctx.cjMappings) {
             genGlueCode(*cjmapping);
         }
+    } else if (interopType == InteropType::CJ_Mapping_Interface) {
+        for (auto& cjmapping : ctx.cjMappingInterfaces) {
+            genGlueCode(*cjmapping);
+        }
     }
 }

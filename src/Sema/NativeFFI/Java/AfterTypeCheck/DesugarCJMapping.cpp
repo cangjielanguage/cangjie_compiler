@@ -625,7 +625,7 @@ void JavaDesugarManager::GenerateClassFwdclassBody(AST::ClassDecl& fwdClassDecl,
 void JavaDesugarManager::GenerateForCJOpenClassMapping(AST::ClassDecl& classDecl)
 {
     auto fwdclassDecl = MakeOwned<ClassDecl>();
-    fwdclassDecl->identifier = classDecl.identifier.Val() + "_fwd";
+    fwdclassDecl->identifier = classDecl.identifier.Val() + JAVA_FWD_CLASS_SUFFIX;
     fwdclassDecl->identifier.SetPos(classDecl.identifier.Begin(), classDecl.identifier.End());
     fwdclassDecl->fullPackageName = classDecl.fullPackageName;
     fwdclassDecl->moduleName = ::Cangjie::Utils::GetRootPackageName(classDecl.fullPackageName);

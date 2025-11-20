@@ -159,6 +159,11 @@ ObjCGenerator::ObjCGenerator(InteropContext& ctx, Ptr<Decl> declArg, const std::
 */
 void ObjCGenerator::Generate()
 {
+    if (this->interopType == InteropType::CJ_Mapping_Interface) {
+        GenerateProtocolDecl();
+        return;
+    }
+
     const auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
     AddWithIndent(GenerateImport(FOUNDATION_IMPORT), GenerationTarget::HEADER);
     AddWithIndent(GenerateImport(STDDEF_IMPORT), GenerationTarget::HEADER);
@@ -993,10 +998,20 @@ std::vector<std::string> ObjCGenerator::ConvertParamsListToCallableParamsString(
 
 void ObjCGenerator::WriteToFile()
 {
+    WriteToHeader();
+    WriteToSource();
+}
+
+void ObjCGenerator::WriteToHeader()
+{
     auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
     auto headerPath = outputFilePath + "/" + objCDeclName + ".h";
     FileUtil::WriteToFile(headerPath, res);
+}
 
+void ObjCGenerator::WriteToSource()
+{
+    auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
     auto sourcePath = outputFilePath + "/" + objCDeclName + ".m";
     FileUtil::WriteToFile(sourcePath, resSource);
 }
@@ -1028,13 +1043,33 @@ std::string ObjCGenerator::GenerateArgumentCast(const Ty& retTy, std::string val
     if (ctx.typeMapper.IsObjCImpl(actualTy)) {
         return CAST_TO_VOID_PTR + std::move(value);
     }
-    if (ctx.typeMapper.IsObjCMirror(actualTy) || ctx.typeMapper.IsObjCBlock(actualTy)) {
+    if (ctx.typeMapper.IsObjCMirror(actualTy) || ctx.typeMapper.IsObjCBlock(actualTy) ||
+        ctx.typeMapper.IsObjCCJMappingInterface(actualTy)) {
         return CAST_TO_VOID_PTR_RETAINED + std::move(value);
     }
     if (ctx.typeMapper.IsObjCPointer(actualTy)) {
         return CAST_TO_VOID_PTR_UNSAFE + std::move(value);
     }
     return value;
+}
+
+void ObjCGenerator::GenerateProtocolDecl()
+{
+    const auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
+    AddWithIndent(GenerateImport(FOUNDATION_IMPORT), GenerationTarget::HEADER);
+    AddWithIndent(GenerateImport(STDDEF_IMPORT), GenerationTarget::HEADER);
+
+    std::string protocolDecl = "";
+    protocolDecl += PROTOCOL_KEYWORD;
+    protocolDecl += " ";
+    protocolDecl += objCDeclName;
+
+    AddWithIndent(protocolDecl, GenerationTarget::HEADER);
+
+    AddMethods();
+
+    AddWithIndent(END_KEYWORD, GenerationTarget::HEADER);
+    WriteToHeader();
 }
 
 } // namespace Cangjie::Interop::ObjC

@@ -18,6 +18,19 @@ using namespace Cangjie::Interop::ObjC;
 
 void InsertNativeHandleField::HandleImpl(InteropContext& ctx)
 {
+    if (interopType == InteropType::Fwd_Class) {
+        for (auto& fwdClass : ctx.fwdClasses) {
+            if (fwdClass->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+
+            auto nativeObjCIdField = ctx.factory.CreateNativeHandleField(*fwdClass);
+            CJC_NULLPTR_CHECK(nativeObjCIdField);
+            fwdClass->body->decls.emplace_back(std::move(nativeObjCIdField));
+        }
+        return;
+    }
+
     for (auto& mirror : ctx.mirrors) {
         if (mirror->TestAttr(Attribute::IS_BROKEN)) {
             continue;

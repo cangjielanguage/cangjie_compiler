@@ -657,6 +657,14 @@ enum class Attribute {
      */
     CJ_MIRROR_JAVA_INTERFACE_DEFAULT,
 
+    /**
+     * Mark whether a class decl is an interface-forward class.
+     * A forward class is used to forward the method call to ObjC side.
+     * W: Sema.
+     * R: Sema.
+     */
+    CJ_MIRROR_OBJC_INTERFACE_FWD,
+
     AST_ATTR_END,
 };
 
@@ -751,6 +759,7 @@ static const std::unordered_map<AST::Attribute, std::string> ATTR2STR{
     {AST::Attribute::HAS_INITED_FIELD, "HAS_INITED_FIELD"},
     {AST::Attribute::OBJ_C_MIRROR_SYNTHETIC_WRAPPER, "OBJ_C_MIRROR_SYNTHETIC_WRAPPER"},
     {AST::Attribute::CJ_MIRROR_JAVA_INTERFACE_DEFAULT, "CJ_MIRROR_JAVA_INTERFACE_DEFAULT"},
+    {AST::Attribute::CJ_MIRROR_OBJC_INTERFACE_FWD, "CJ_MIRROR_OBJC_INTERFACE_FWD"},
     {AST::Attribute::AST_ATTR_END, "AST_ATTR_END"},
 };
 

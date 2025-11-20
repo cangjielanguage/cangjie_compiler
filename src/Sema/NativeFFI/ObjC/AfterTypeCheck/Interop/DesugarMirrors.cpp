@@ -24,12 +24,12 @@ using namespace Cangjie::Native::FFI;
 
 void DesugarMirrors::HandleImpl(InteropContext& ctx)
 {
-    for (auto& mirror : ctx.mirrors) {
-        if (mirror->TestAttr(Attribute::IS_BROKEN)) {
-            continue;
+    auto genMirrorLikeClassBody = [this, &ctx](ClassLikeDecl& decl) {
+        if (decl.TestAttr(Attribute::IS_BROKEN)) {
+            return;
         }
 
-        for (auto& memberDecl : mirror->GetMemberDeclPtrs()) {
+        for (auto& memberDecl : decl.GetMemberDeclPtrs()) {
             if (memberDecl->TestAttr(Attribute::IS_BROKEN)) {
                 continue;
             }
@@ -43,23 +43,23 @@ void DesugarMirrors::HandleImpl(InteropContext& ctx)
                 case ASTKind::FUNC_DECL: {
                     auto& fd = *StaticAs<ASTKind::FUNC_DECL>(memberDecl);
                     if (fd.TestAttr(Attribute::CONSTRUCTOR)) {
-                        DesugarCtor(ctx, *mirror, fd);
+                        DesugarCtor(ctx, decl, fd);
                     } else if (fd.TestAttr(Attribute::FINALIZER)) {
                         continue;
                     } else if (IsStaticInitMethod(fd)) {
                         DesugarStaticMethodInitializer(ctx, fd);
                     } else {
                         // method branch
-                        DesugarMethod(ctx, *mirror, fd);
+                        DesugarMethod(ctx, decl, fd);
                     }
                     break;
                 }
                 case ASTKind::PROP_DECL: {
                     auto& pd = *StaticAs<ASTKind::PROP_DECL>(memberDecl);
                     if (memberDecl->TestAttr(Attribute::DESUGARED_MIRROR_FIELD)) {
-                        DesugarField(ctx, *mirror, pd);
+                        DesugarField(ctx, decl, pd);
                     } else {
-                        DesugarProp(ctx, *mirror, pd);
+                        DesugarProp(ctx, decl, pd);
                     }
                     break;
                 }
@@ -71,6 +71,17 @@ void DesugarMirrors::HandleImpl(InteropContext& ctx)
                     break;
             }
         }
+    };
+
+    if (interopType == InteropType::Fwd_Class) {
+        for (auto& fwdClass : ctx.fwdClasses) {
+            genMirrorLikeClassBody(*fwdClass);
+        }
+        return;
+    }
+
+    for (auto& mirror : ctx.mirrors) {
+        genMirrorLikeClassBody(*mirror);
     }
 
     for (auto&& mirror : ctx.mirrorTopLevelFuncs) {

@@ -39,7 +39,7 @@ constexpr auto FINALIZER_IDENT = "~init";
 OwnedPtr<Expr> ASTFactory::CreateNativeHandleExpr(OwnedPtr<Expr> entity)
 {
     CJC_ASSERT(typeMapper.IsObjCMirror(*entity->ty) || typeMapper.IsObjCImpl(*entity->ty) ||
-        typeMapper.IsSyntheticWrapper(*entity->ty));
+        typeMapper.IsSyntheticWrapper(*entity->ty) || typeMapper.IsObjCFwdClass(*entity->ty));
     auto entityTy = StaticCast<ClassLikeTy>(entity->ty);
     auto curFile = entity->curFile;
     auto getter = GetNativeHandleGetter(*entityTy->commonDecl);
@@ -51,7 +51,8 @@ OwnedPtr<Expr> ASTFactory::CreateNativeHandleExpr(OwnedPtr<Expr> entity)
 
 OwnedPtr<Expr> ASTFactory::CreateNativeHandleExpr(ClassLikeTy& ty, Ptr<File> curFile)
 {
-    CJC_ASSERT(typeMapper.IsObjCMirror(ty) || typeMapper.IsObjCImpl(ty) || typeMapper.IsSyntheticWrapper(ty));
+    CJC_ASSERT(typeMapper.IsObjCMirror(ty) || typeMapper.IsObjCImpl(ty) || typeMapper.IsSyntheticWrapper(ty) ||
+        typeMapper.IsObjCFwdClass(ty));
     auto thisRef = CreateThisRef(ty.commonDecl, &ty, curFile);
 
     return CreateNativeHandleExpr(std::move(thisRef));
@@ -195,6 +196,24 @@ OwnedPtr<Expr> ASTFactory::WrapEntity(OwnedPtr<Expr> expr, Ty& wrapTy)
             return CreateGetFromRegistryByIdCall(std::move(expr), CreateRefType(*decl));
         }
         CJC_ABORT(); // other CJMapping is not supported
+    }
+
+    if (typeMapper.IsObjCCJMappingInterface(wrapTy)) {
+        CJC_ASSERT(expr->ty->IsPointer());
+        auto classLikeTy = StaticCast<ClassLikeTy>(&wrapTy);
+        Ptr<Ty> fwdTy(nullptr);
+        for (auto it : classLikeTy->directSubtypes) {
+            if (it->name == classLikeTy->name + OBJ_C_FWD_CLASS_SUFFIX) {
+                fwdTy = it;
+                break;
+            }
+        }
+        CJC_ASSERT(fwdTy);
+        auto fwdClassDecl = Ty::GetDeclOfTy(fwdTy);
+
+        auto ctor = GetGeneratedBaseCtor(*fwdClassDecl);
+        return CreateCallExpr(CreateRefExpr(*ctor), Nodes<FuncArg>(CreateFuncArg(std::move(expr))), ctor, fwdTy,
+            CallKind::CALL_OBJECT_CREATION);
     }
 
     if (wrapTy.IsCoreOptionType()) {
@@ -1095,7 +1114,7 @@ Ptr<FuncDecl> ASTFactory::GetGeneratedBaseCtor(Decl& decl)
 {
     CJC_ASSERT(decl.astKind == ASTKind::CLASS_DECL);
     CJC_ASSERT(TypeMapper::IsObjCMirror(*decl.ty) || TypeMapper::IsObjCImpl(*decl.ty) ||
-        TypeMapper::IsSyntheticWrapper(*decl.ty));
+        TypeMapper::IsSyntheticWrapper(*decl.ty) || TypeMapper::IsObjCFwdClass(*decl.ty));
 
     for (auto& member : decl.GetMemberDeclPtrs()) {
         if (auto fd = As<ASTKind::FUNC_DECL>(member); fd && IsGeneratedCtor(*fd)) {
