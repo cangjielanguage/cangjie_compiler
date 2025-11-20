@@ -286,7 +286,8 @@ std::vector<OwnedPtr<ImportSpec>> ASTLoader::ASTLoaderImpl::LoadImportSpecs(cons
 
         LoadImportContent(importSpec->content, *rawImportSpec);
         LoadNodePos(*rawImportSpec, *importSpec);
-
+        // By default, 'withImplicitExport()' will return true.
+        importSpec->withImplicitExport = rawImportSpec->withImplicitExport();
         importSpecsVec.emplace_back(std::move(importSpec));
     }
     return importSpecsVec;
@@ -432,6 +433,13 @@ OwnedPtr<AST::Package> ASTLoader::ASTLoaderImpl::PreLoadImportedPackageNode()
     for (uoffset_t i = 0; i < nImports; i++) {
         std::string importItem = package->imports()->Get(i)->str();
         importedFullPackageNames.emplace_back(importItem);
+    }
+    if (package->allDependentStdPkgs()) {
+        uoffset_t nDepStdPkgs = package->allDependentStdPkgs()->size();
+        for (uoffset_t i = 0; i < nDepStdPkgs; i++) {
+            std::string depStdPkg = package->allDependentStdPkgs()->Get(i)->str();
+            packageNode->AddDependentStdPkg(depStdPkg);
+        }
     }
     return packageNode;
 }

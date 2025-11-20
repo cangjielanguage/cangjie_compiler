@@ -625,6 +625,7 @@ table ImportSpec {
   reExport:AccessModifier = Private;
   isDecl:bool=false;
   hasDoubleColon:bool;
+  withImplicitExport:bool=true;
 }
 
 table Imports {
@@ -674,6 +675,8 @@ table Package {
   moduleName:string;
   // append some info of File for CJMP
   allFileInfo: [FileInfo];
+  // record all std full package name sependency.
+  allDependentStdPkgs:[string];
 }
 
 root_type Package;

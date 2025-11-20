@@ -99,6 +99,8 @@ OwnedPtr<ResumeExpr> CreateResumeExpr(Decl& var);
 OwnedPtr<TypePattern> CreateTypePattern(
     OwnedPtr<Pattern>&& pattern, OwnedPtr<Type>&& type, Expr& selector
 );
+OwnedPtr<ImportSpec> CreateImportSpec(
+    const std::string& fullPackageName, const std::string& item = "*", const std::string& alias = "");
 } // namespace Cangjie::AST
 
 #endif // CANGJIE_AST_CREATE_H

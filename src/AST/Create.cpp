@@ -722,4 +722,26 @@ OwnedPtr<TypePattern> CreateTypePattern(
     typePattern->curFile = selector.curFile;
     return typePattern;
 }
+
+OwnedPtr<ImportSpec> CreateImportSpec(
+    const std::string& fullPackageName, const std::string& item, const std::string& alias)
+{
+    auto import = MakeOwned<ImportSpec>();
+    auto names = Utils::SplitQualifiedName(fullPackageName);
+    CJC_ASSERT(names.size() >= 1 && !item.empty());
+    if (!alias.empty()) {
+        import->content.kind = ImportKind::IMPORT_ALIAS;
+    } else if (item != "*") {
+        import->content.kind = ImportKind::IMPORT_SINGLE;
+    } else {
+        import->content.kind = ImportKind::IMPORT_ALL;
+    }
+    import->content.prefixPaths = names;
+    import->content.identifier = item;
+    import->content.identifier.SetPos(DEFAULT_POSITION, DEFAULT_POSITION);
+    import->content.aliasName = alias;
+    import->content.aliasName.SetPos(DEFAULT_POSITION, DEFAULT_POSITION);
+    import->EnableAttr(Attribute::COMPILER_ADD, Attribute::IMPLICIT_ADD, Attribute::PRIVATE);
+    return import;
+}
 } // namespace Cangjie::AST

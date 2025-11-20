@@ -185,9 +185,9 @@ public:
     std::unordered_set<std::string> GetUsedSTDLibFiles(DepType type)
     {
         std::unordered_set<std::string> result;
-        for (auto& item : stdDepsMap) {
-            if (item.second == type || item.second == DepType::BOTH) {
-                (void)result.emplace(item.first);
+        for (auto& [cjoPath, typeWithFullPkgName] : stdDepsMap) {
+            if (typeWithFullPkgName.first == type || typeWithFullPkgName.first == DepType::BOTH) {
+                (void)result.emplace(cjoPath);
             }
         }
         return result;
@@ -295,6 +295,11 @@ public:
     Ptr<AST::Package> GetPackage(const std::string& fullPackageName) const;
     void SetImportedPackageFromASTNode(std::vector<OwnedPtr<AST::Package>>& pkgs);
     using DeclImportsMap = std::unordered_map<Ptr<const AST::Decl>, std::vector<Ptr<const AST::ImportSpec>>>;
+    /**
+     * Note: After the macro expansion, the ImportSpec pointer returned by this interface might be unreliable.
+     * @param fullPackageName [in]: full package name.
+     * @return map of imported decl to the 'ImportSpec' which imports the decl.
+     */
     const DeclImportsMap& GetImportsOfDecl(const std::string& fullPackageName) const
     {
         static const DeclImportsMap EMPTY{};
@@ -331,9 +336,9 @@ public:
     void DeleteASTWriters() noexcept;
     void DeleteASTLoaders() noexcept;
 
-    std::unordered_map<std::string, std::string> GetDepPkgCjdPaths()
+    std::unordered_map<std::string, std::string> GetDepPkgCjoPaths()
     {
-        return cjdFilePaths;
+        return cjoFilePaths;
     }
 
     DiagnosticEngine& GetDiagnosticEngine() const
@@ -366,8 +371,8 @@ private:
     std::map<std::string, AST::OrderedDeclSet> importedDeclsMap;
     std::unordered_map<Ptr<const AST::Package>, ASTWriter*> astWriters;
 
-    /** Store the cjo file path of STD packages on used. */
-    std::unordered_map<std::string, DepType> stdDepsMap;
+    /** Store all standard package dependencies. Key is cjopath, value is pair of DepType and fullPackageName. */
+    std::unordered_map<std::string, std::pair<DepType, std::string>> stdDepsMap;
 
     /** Direct imported macro packages. */
     std::unordered_set<Ptr<AST::Package>> directMacroDeps;
@@ -394,7 +399,7 @@ private:
     bool HandleParsedPackage(
         const AST::Package& package, const std::string& filePath, bool isUsedAsCommon, bool isRecursive);
 
-    void SaveDepPkgCjdPath(const std::string& fullPackageName, const std::string& cjoPath);
+    void SaveDepPkgCjoPath(const std::string& fullPackageName, const std::string& cjoPath);
 
     /**
      * Resolve all packages imported.
@@ -468,8 +473,8 @@ private:
     Ptr<AST::Package> curPackage;
     TypeManager& typeManager;
 
-    // Key is cjd fullPackageName, and value is .cj.d file path.
-    std::unordered_map<std::string, std::string> cjdFilePaths;
+    // Key is cjd fullPackageName, and value is .cjo file path.
+    std::unordered_map<std::string, std::string> cjoFilePaths;
 };
 } // namespace Cangjie
 #endif // CANGJIE_MODULES_IMPORTMANAGER_H

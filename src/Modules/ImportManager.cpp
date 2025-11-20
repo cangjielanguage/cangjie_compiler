@@ -21,6 +21,7 @@
 #include "ModulesDiag.h"
 
 #include "cangjie/AST/Clone.h"
+#include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
@@ -34,28 +35,6 @@ using namespace AST;
 using namespace Modules;
 
 namespace {
-OwnedPtr<ImportSpec> CreateImportSpec(
-    const std::string& fullPackageName, const std::string& item = "*", const std::string& alias = "")
-{
-    auto import = MakeOwned<ImportSpec>();
-    auto names = Utils::SplitQualifiedName(fullPackageName);
-    CJC_ASSERT(names.size() >= 1 && !item.empty());
-    if (!alias.empty()) {
-        import->content.kind = ImportKind::IMPORT_ALIAS;
-    } else if (item != "*") {
-        import->content.kind = ImportKind::IMPORT_SINGLE;
-    } else {
-        import->content.kind = ImportKind::IMPORT_ALL;
-    }
-    import->content.prefixPaths = names;
-    import->content.identifier = item;
-    import->content.identifier.SetPos(DEFAULT_POSITION, DEFAULT_POSITION);
-    import->content.aliasName = alias;
-    import->content.aliasName.SetPos(DEFAULT_POSITION, DEFAULT_POSITION);
-    import->EnableAttr(Attribute::COMPILER_ADD, Attribute::IMPLICIT_ADD, Attribute::PRIVATE);
-    return import;
-}
-
 void AddImport(
     File& file, const std::string& fullPackageName, const std::string& item = "*", const std::string& alias = "")
 {
@@ -237,7 +216,14 @@ void ImportManager::ExportAST(bool saveFileWithAbsPath, std::vector<uint8_t>& as
     const std::function<void(ASTWriter&)> additionalSerializations)
 {
     ASTWriter writer(diag, GeneratePkgDepInfo(pkg),
-        {importSrcCode, false, opts.exportForTest, saveFileWithAbsPath, opts.compileCjd}, *cjoManager);
+        {
+            .exportContent = importSrcCode,
+            .exportForIncr = false,
+            .exportForTest = opts.exportForTest,
+            .needAbsPath = saveFileWithAbsPath,
+            .compileCjd = opts.compileCjd,
+        },
+        *cjoManager);
     if (opts.outputMode == GlobalOptions::OutputMode::CHIR) {
         writer.SetSerializingCommon();
     }
@@ -260,8 +246,13 @@ void ImportManager::ExportAST(bool saveFileWithAbsPath, std::vector<uint8_t>& as
 
 std::vector<uint8_t> ImportManager::ExportASTSignature(const Package& pkg)
 {
-    ASTWriter writer(
-        diag, {}, {.exportContent = true, .exportForIncr = true, .compileCjd = opts.compileCjd}, *cjoManager);
+    ASTWriter writer(diag, {},
+        {
+            .exportContent = true,
+            .exportForIncr = true,
+            .compileCjd = opts.compileCjd,
+        },
+        *cjoManager);
     auto packageDecl = cjoManager->GetPackageDecl(pkg.fullPackageName);
     CJC_NULLPTR_CHECK(packageDecl);
     writer.PreSaveFullExportDecls(*packageDecl->srcPackage);
@@ -276,7 +267,14 @@ void ImportManager::ExportDeclsWithContent(bool saveFileWithAbsPath, Package& pa
 {
     // NOTE: If 'importSrcCode' is disabled, we also do not need to export source code.
     auto writer = new ASTWriter(diag, GeneratePkgDepInfo(package),
-        {importSrcCode, false, opts.exportForTest, saveFileWithAbsPath, opts.compileCjd}, *cjoManager);
+        {
+            .exportContent = importSrcCode,
+            .exportForIncr = false,
+            .exportForTest = opts.exportForTest,
+            .needAbsPath = saveFileWithAbsPath,
+            .compileCjd = opts.compileCjd,
+        },
+        *cjoManager);
     if (opts.outputMode == GlobalOptions::OutputMode::CHIR) {
         writer->SetSerializingCommon();
     }
@@ -305,17 +303,21 @@ bool ImportManager::HandleParsedPackage(
         // so we need collect STD deps for this package and its dependent packages.
         cjoManager->SetOnlyUsedByMacro(package.fullPackageName, false);
         HandleSTDPackage(package.fullPackageName, filePath, isRecursive);
+        for (auto depStdPkg : package.GetAllDependentStdPkgs()) {
+            auto [it, succ] = cjoFilePaths.emplace(depStdPkg, "");
+            if (succ) {
+                it->second = FileUtil::FindSerializationFile(depStdPkg, SERIALIZED_FILE_EXTENSION, GetSearchPath());
+            }
+            HandleSTDPackage(depStdPkg, it->second, true);
+        }
         return ResolveImportedPackageHeaders(package, true);
     }
     return true;
 }
 
-void ImportManager::SaveDepPkgCjdPath(const std::string& fullPackageName, const std::string& cjoPath)
+void ImportManager::SaveDepPkgCjoPath(const std::string& fullPackageName, const std::string& cjoPath)
 {
-    // Replace the suffix directly. Ensure that .cjo and .cj.d are in the same path.
-    std::string cjdPath = cjoPath.substr(0, cjoPath.rfind(SERIALIZED_FILE_EXTENSION));
-    cjdPath = cjdPath + CJ_D_FILE_EXTENSION;
-    cjdFilePaths.emplace(fullPackageName, cjdPath);
+    cjoFilePaths.emplace(fullPackageName, cjoPath);
 }
 
 bool ImportManager::ResolveImportedPackageForFile(File& file, bool isRecursive)
@@ -326,12 +328,12 @@ bool ImportManager::ResolveImportedPackageForFile(File& file, bool isRecursive)
     bool isMacroRelated = curPkg->isMacroPackage || IsMacroRelatedPackageName(curPkg->fullPackageName);
     auto relation = Modules::GetPackageRelation(curPackage->fullPackageName, curPkg->fullPackageName);
     for (auto& import : file.imports) {
-        if (import->IsImportMulti()) {
+        if (import->IsImportMulti() || !import->withImplicitExport) {
             continue;
         }
         auto isVisible = import->IsReExport() && Modules::IsVisible(*import, relation);
         auto [fullPackageName, cjoPath] = cjoManager->GetPackageCjo(*import);
-        SaveDepPkgCjdPath(fullPackageName, cjoPath);
+        SaveDepPkgCjoPath(fullPackageName, cjoPath);
         // 1. Handle the package which has been parsed before.
         auto package = cjoManager->GetPackage(fullPackageName);
         if (package != nullptr) {
@@ -347,7 +349,6 @@ bool ImportManager::ResolveImportedPackageForFile(File& file, bool isRecursive)
             }
             continue;
         }
-
         auto isMainPartPkgForTestPkg = opts.compileTestsOnly && IsTestPackage(curPkg->fullPackageName) &&
             GetMainPartPkgNameForTestPkg(curPkg->fullPackageName) == fullPackageName;
         // 2. Check and try to load cjo data.
@@ -378,6 +379,13 @@ bool ImportManager::ResolveImportedPackageForFile(File& file, bool isRecursive)
             curPackage->isMacroPackage || macroReExportCommonPackage) {
             // If package is needed for CodeGen, we also should collect the standard library dependencies.
             HandleSTDPackage(fullPackageName, cjoPath, isRecursive);
+            for (auto depStdPkg : package->GetAllDependentStdPkgs()) {
+                auto [it, succ] = cjoFilePaths.emplace(depStdPkg, "");
+                if (succ) {
+                    it->second = FileUtil::FindSerializationFile(depStdPkg, SERIALIZED_FILE_EXTENSION, GetSearchPath());
+                }
+                HandleSTDPackage(depStdPkg, it->second, true);
+            }
         } else {
             cjoManager->SetOnlyUsedByMacro(fullPackageName, true);
         }
@@ -397,15 +405,15 @@ void ImportManager::SetImportedPackageFromASTNode(std::vector<OwnedPtr<AST::Pack
 void ImportManager::HandleSTDPackage(const std::string& fullPackageName, const std::string& cjoPath, bool isRecursive)
 {
     auto type = isRecursive ? DepType::INDIRECT : DepType::DIRECT;
-    auto item = stdDepsMap.find(cjoPath);
-    if (item != stdDepsMap.end()) {
-        if (item->second != type) {
-            item->second = DepType::BOTH;
+    auto typeWithFullPkgName = stdDepsMap.find(cjoPath);
+    if (typeWithFullPkgName != stdDepsMap.end()) {
+        if (typeWithFullPkgName->second.first != type) {
+            typeWithFullPkgName->second.first = DepType::BOTH;
         }
         return;
     }
     if ((STANDARD_LIBS.find(fullPackageName) != STANDARD_LIBS.end()) && FileUtil::FileExist(cjoPath)) {
-        stdDepsMap.emplace(cjoPath, type);
+        stdDepsMap.emplace(cjoPath, std::make_pair(type, fullPackageName));
     }
 }
 
@@ -458,6 +466,9 @@ bool ImportManager::ResolveImportedPackages(const std::vector<Ptr<Package>>& pac
         // to be able to handle `import`s of common part.
         cjoManager->LoadFilesOfCommonPart(pkg);
         success = ResolveImportedPackageHeaders(*curPackage, false) && success;
+        for (auto [_, typeWithFullPkgName] : stdDepsMap) {
+            curPackage->AddDependentStdPkg(typeWithFullPkgName.second);
+        }
     }
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     cjoManager->LoadPackageDeclsOnDemand(packages);
@@ -669,8 +680,8 @@ std::set<std::string> ImportManager::CollectDirectDepPkg(const Package& package)
     }
     return depPkgs;
 }
-static void ValidateFileFeatureSpec(DiagnosticEngine &diag,
-    const Package& pkg, std::unordered_map<std::string, bool>& refMap, Ptr<File>& refFile)
+static void ValidateFileFeatureSpec(
+    DiagnosticEngine& diag, const Package& pkg, std::unordered_map<std::string, bool>& refMap, Ptr<File>& refFile)
 {
     size_t refSize = 0;
     std::unordered_map<std::string, Range> rangeMap;
@@ -699,9 +710,9 @@ static void ValidateFileFeatureSpec(DiagnosticEngine &diag,
         refMap.emplace(ftr.ToString(), false);
     }
 }
- 
-static void CollectInvalidFeatureFiles(const Package& pkg, std::vector<Ptr<File>>& invalidFeatures,
-    std::unordered_map<std::string, bool>& refMap)
+
+static void CollectInvalidFeatureFiles(
+    const Package& pkg, std::vector<Ptr<File>>& invalidFeatures, std::unordered_map<std::string, bool>& refMap)
 {
     for (auto& file : pkg.files) {
         if (file->feature == nullptr) {
@@ -728,11 +739,7 @@ static void CollectInvalidFeatureFiles(const Package& pkg, std::vector<Ptr<File>
                 }
             }
         }
-        std::for_each(refMap.begin(), refMap.end(),
-            [](auto& pair) {
-                pair.second = false;
-            }
-        );
+        std::for_each(refMap.begin(), refMap.end(), [](auto& pair) { pair.second = false; });
     }
 }
 
@@ -741,14 +748,16 @@ static void CheckPackageFeatureSpec(DiagnosticEngine& diag, const Package& pkg)
     std::unordered_map<std::string, bool> refMap;
     std::vector<Ptr<File>> invalidFeatures;
     Ptr<File> refFile;
- 
+
     ValidateFileFeatureSpec(diag, pkg, refMap, refFile);
     CollectInvalidFeatureFiles(pkg, invalidFeatures, refMap);
- 
+
     if (!invalidFeatures.empty()) {
         uint8_t counter = 0;
         for (auto& file : invalidFeatures) {
-            if (counter > 1) { return; }
+            if (counter > 1) {
+                return;
+            }
             if (file->feature == nullptr) {
                 DiagForNullPackageFeature(diag, MakeRange(file->begin, file->end), refFile->feature);
             } else {
@@ -899,6 +908,9 @@ void ImportManager::UpdateFileNodeImportInfo(Package& package, const File& file,
         auto [_, cjoPath] = cjoManager->GetPackageCjo(*import);
         if (cjoPath.empty()) {
             InternalError("Failed to resolve imports for macro file");
+        }
+        if (!import->IsImportAll() && !cjoManager->IsImportPackage(*import)) {
+            import->content.isDecl = true;
         }
     }
     // MacroExpansion will never change import declarations, just copy file import map for new file and remove old one.
@@ -1352,8 +1364,7 @@ bool ImportManager::IsExtendMemberAccessible(
 
     auto curPkgName = file.curPackage->fullPackageName;
     if (opts.compileTestsOnly && !member.TestAttr(Attribute::PRIVATE) && extend->TestAttr(Attribute::FOR_TEST) &&
-        IsTestPackage(curPkgName) &&
-        GetMainPartPkgNameForTestPkg(curPkgName) == member.fullPackageName) {
+        IsTestPackage(curPkgName) && GetMainPartPkgNameForTestPkg(curPkgName) == member.fullPackageName) {
         return true;
     }
     // Access to extended members must meet the following four requirements:

@@ -269,9 +269,8 @@ void ClearAnnoInfoOfDepPkg(ImportManager& importManager)
             std::remove_if(decl->annotations.begin(), decl->annotations.end(), isCustomAnno), decl->annotations.end());
         return VisitAction::WALK_CHILDREN;
     };
-    auto cjdPaths = importManager.GetDepPkgCjdPaths();
-    for (auto& cjdInfo : cjdPaths) {
-        auto depPkg = importManager.GetPackage(cjdInfo.first);
+    for (auto& [fullPackageName, _] : importManager.GetDepPkgCjoPaths()) {
+        auto depPkg = importManager.GetPackage(fullPackageName);
         if (!depPkg) {
             continue;
         }
