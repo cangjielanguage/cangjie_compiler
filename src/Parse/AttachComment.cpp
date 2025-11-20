@@ -26,6 +26,8 @@
 #include "ParserImpl.h"
 
 #include <stack>
+#include <functional>
+#include <algorithm>
 #include "cangjie/AST/Walker.h"
 #include "cangjie/AST/ASTCasting.h"
 
@@ -69,15 +71,139 @@ std::ostream& operator<<(std::ostream& out, CNode node)
     return out;
 }
 
+std::string CNodeToString(CNode node) __attribute__((used));
+std::string CNodeToString(CNode node)
+{
+    std::stringstream ss;
+    ss << node;
+    return ss.str();
+}
+
+bool IsPositionContained(const Position& pos, Node* node)
+{
+    if (!node || pos.IsZero()) {
+        return false;
+    }
+    return node->begin <= pos && pos <= node->end;
+}
+
+bool IsNodeContained(Node* inner, Node* outer)
+{
+    if (!inner || !outer || inner == outer) {
+        return false;
+    }
+    return outer->begin <= inner->begin && inner->end <= outer->end;
+}
+
 std::string CNodeToString(const std::vector<CNode>& nodes) __attribute__((used));
 std::string CNodeToString(const std::vector<CNode>& nodes)
 {
+    if (nodes.empty()) {
+        return "[]";
+    }
+    
+    std::vector<Node*> nodeList;
+    std::vector<const Position*> positionList;
+    
+    for (const auto& node : nodes) {
+        if (auto n = std::get_if<Node*>(&node)) {
+            if (*n) {
+                nodeList.push_back(*n);
+            }
+        } else if (auto p = std::get_if<const Position*>(&node)) {
+            if (*p && !(*p)->IsZero()) {
+                positionList.push_back(*p);
+            }
+        }
+    }
+    
+    struct TreeNode {
+        Node* node;
+        std::vector<TreeNode*> children;
+        std::vector<const Position*> tokens;
+    };
+    
+    std::vector<TreeNode> treeNodes;
+    treeNodes.reserve(nodeList.size());
+    for (auto* n : nodeList) {
+        treeNodes.push_back({n, {}, {}});
+    }
+    
+    std::vector<TreeNode*> roots;
+    for (size_t i = 0; i < treeNodes.size(); ++i) {
+        TreeNode* bestParent = nullptr;
+        for (size_t j = 0; j < treeNodes.size(); ++j) {
+            if (i != j && IsNodeContained(treeNodes[i].node, treeNodes[j].node)) {
+                if (!bestParent || IsNodeContained(treeNodes[j].node, bestParent->node)) {
+                    bestParent = &treeNodes[j];
+                }
+            }
+        }
+        if (bestParent) {
+            bestParent->children.push_back(&treeNodes[i]);
+        } else {
+            roots.push_back(&treeNodes[i]);
+        }
+    }
+    
+    for (const Position* pos : positionList) {
+        TreeNode* bestNode = nullptr;
+        for (auto& tn : treeNodes) {
+            if (IsPositionContained(*pos, tn.node)) {
+                if (!bestNode || IsNodeContained(tn.node, bestNode->node)) {
+                    bestNode = &tn;
+                }
+            }
+        }
+        if (bestNode) {
+            bestNode->tokens.push_back(pos);
+        }
+    }
+    
     std::stringstream ss;
-    ss << "[";
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        ss << nodes[i];
-        if (i + 1 < nodes.size()) {
-            ss << ", ";
+    ss << "[\n";
+    std::function<void(const TreeNode*, int)> printNode = [&](const TreeNode* tn, int indent) {
+        std::string indentStr(indent * 2, ' ');
+        ss << indentStr;
+        if (auto n = tn->node) {
+            ss << "Node<" << (void*)n << ", " << ASTKIND_TO_STR.at(n->astKind)
+               << ">[" << n->begin << ", " << n->end << "]";
+        }
+        if (!tn->tokens.empty()) {
+            ss << " {\n";
+            for (const Position* pos : tn->tokens) {
+                ss << indentStr << "  Pos[" << pos->line << ", " << pos->column << "]\n";
+            }
+            ss << indentStr << "}";
+        }
+        ss << "\n";
+        for (auto child : tn->children) {
+            printNode(child, indent + 1);
+        }
+    };
+    
+    std::vector<const Position*> orphanedPositions;
+    for (auto pos : positionList) {
+        bool found = false;
+        for (auto& tn : treeNodes) {
+            if (IsPositionContained(*pos, tn.node)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            orphanedPositions.push_back(pos);
+        }
+    }
+    
+    for (TreeNode* root : roots) {
+        printNode(root, 1);
+    }
+    
+    if (!orphanedPositions.empty()) {
+        ss << "  [ORPHANED POSITIONS - BUG IN COMPILER]\n";
+        for (const Position* pos : orphanedPositions) {
+            ss << "    Pos[" << pos->line << ", " << pos->column << "]\n";
         }
     }
     ss << "]";
@@ -943,8 +1069,12 @@ private:
                 auto e = StaticCast<MacroExpandExpr>(node);
                 VisitAnnotations(e->annotations);
                 VisitInvocation(e->invocation);
-                for (auto& n : e->invocation.nodes) {
-                    VisitChild(n);
+                if (e->invocation.decl) {
+                    VisitChild(e->invocation.decl);
+                } else {
+                    for (auto& n : e->invocation.nodes) {
+                        VisitChild(n);
+                    }
                 }
                 VisitToken(e->invocation.rightParenPos);
                 break;
