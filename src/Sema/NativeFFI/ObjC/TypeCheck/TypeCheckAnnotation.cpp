@@ -9,6 +9,9 @@
 #include "cangjie/AST/Node.h"
 #include "cangjie/Utils/CheckUtils.h"
 
+using namespace Cangjie;
+using namespace Cangjie::AST;
+
 namespace Cangjie::Interop::ObjC {
 
 void CheckForeignSetterNameAnnotation(DiagnosticEngine& diag, const Annotation& ann, const Decl& decl)
