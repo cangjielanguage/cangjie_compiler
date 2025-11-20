@@ -55,10 +55,22 @@ else()
             set(LLDB_CMAKE_SHARED_LINKER_FLAGS "${LLDB_CMAKE_SHARED_LINKER_FLAGS} -s")
         endif()
     endif()
-    list(APPEND LLDB_CMAKE_ARGS ${LLVM_BUILD_ARG}
-        -DLLDB_ENABLE_LIBEDIT=1
-        -DLLVM_ENABLE_TERMINFO=1
-        -DCURSES_NEED_NCURSES=1)
+    if (OHOS)
+        list(APPEND LLDB_CMAKE_ARGS ${LLVM_BUILD_ARG}
+            -DLLDB_ENABLE_PYTHON=OFF
+            -DLLDB_INCLUDE_TESTS=OFF
+            -DLLDB_ENABLE_LIBEDIT=OFF
+            -DLLVM_ENABLE_TERMINFO=OFF
+            -DNATIVE_Clang_DIR=${LLVM_GC_BINARY_DIR}/NATIVE/tools/bin
+            -DNATIVE_LLVM_DIR=${LLVM_GC_BINARY_DIR}/NATIVE/tools/bin
+            -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/aarch64-linux-ohos_toolchain.cmake
+        )
+    else()
+        list(APPEND LLDB_CMAKE_ARGS ${LLVM_BUILD_ARG}
+            -DLLDB_ENABLE_LIBEDIT=1
+            -DLLVM_ENABLE_TERMINFO=1
+            -DCURSES_NEED_NCURSES=1)
+    endif()
 endif()
 
 if(NOT "${LLDB_CMAKE_C_FLAGS}" STREQUAL "")
@@ -82,10 +94,15 @@ endif()
 set(CANGJIE_FRONTEND_IMPLIB ${CMAKE_BINARY_DIR}/lib/libcangjie-frontend.dll.a)
 set(CANGJIE_LSP_IMPLIB ${CMAKE_BINARY_DIR}/lib/libcangjie-lsp.dll.a)
 
+if (NOT OHOS)
+    list(APPEND LLDB_CMAKE_ARGS ${LLDB_CMAKE_ARGS}
+        -DLLDB_ENABLE_PYTHON=ON
+        -DLLDB_RELOCATABLE_PYTHON=ON
+        -DLLDB_EMBED_PYTHON_HOME=OFF
+    )
+endif()
+
 list(APPEND LLDB_CMAKE_ARGS ${LLDB_CMAKE_ARGS}
-    -DLLDB_ENABLE_PYTHON=ON
-    -DLLDB_RELOCATABLE_PYTHON=ON
-    -DLLDB_EMBED_PYTHON_HOME=OFF
     -DLLDB_ENABLE_LZMA=false
     -DLLDB_ENABLE_LIBXML2=true
     -DCANGJIE_ROOT=${CMAKE_SOURCE_DIR}
@@ -160,7 +177,7 @@ if(CMAKE_CROSSCOMPILING AND WIN32)
         USE_SOURCE_PERMISSIONS
         PATTERN ${LLVM_GC_LLDB_INSTALL_PREFIX}/lib/python${TARGET_PATHON_VERSION}/site-packages/lldb/lldb-argdumper.exe EXCLUDE
     )
-else()
+elseif(NOT OHOS)
     install(
         DIRECTORY ${LLVM_GC_LLDB_INSTALL_PREFIX}/lib/python${TARGET_PATHON_VERSION}
         DESTINATION third_party/llvm/lib
