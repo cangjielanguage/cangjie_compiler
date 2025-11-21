@@ -38,7 +38,7 @@ private:
     void UpdateAbstractMethodInVtable(VTableInDef& vtable);
     void UpdateAbstractMethodWithImplementedMethod(
         VTableInDef& vtable, const ClassType& curParentTy, VirtualMethodInfo& abstractFuncInfo);
-    std::vector<VirtualMethodInfo> CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef);
+    std::unordered_map<std::string, VirtualMethodInfo> CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef);
     std::unordered_map<const GenericType*, Type*> GetInstMapFromDefIncludeParents(
         const CustomTypeDef& def, const Type& curType);
     std::vector<FuncBase*> CollectMethodsIncludeParentsMayBeInVtable(const CustomTypeDef& curDef);

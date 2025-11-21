@@ -15,7 +15,8 @@ class CGCustomType : public CGType {
 public:
     static std::vector<llvm::Constant*> GenTypeInfoConstantVectorForTypes(
         CGModule& cgMod, const std::vector<CHIR::Type*>& chirTypes);
-    static llvm::Constant* GenTypeInfoArray(CGModule& cgMod, std::string name, std::vector<llvm::Constant*> constants);
+    static llvm::Constant* GenTypeInfoArray(
+        CGModule& cgMod, std::string name, std::vector<llvm::Constant*> constants, const std::string_view& attr);
     static llvm::Constant* GenOffsetsArray(CGModule& cgMod, std::string name, llvm::StructType* layoutType);
 
 protected:

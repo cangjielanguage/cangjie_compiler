@@ -303,6 +303,7 @@ void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableInDef& vtable)
     std::vector<FuncBase*> publicAndProtectedFuncs;
     CollectCurDefMethodsMayBeInVtable(*parentDef, publicAndProtectedFuncs);
 
+    std::unordered_map<std::string, VirtualMethodInfo> newMethodsInVTable;
     // update vtable
     // 1. visit all abstract methods in parent def
     for (auto abstractMethod : parentDef->GetAbstractMethods()) {
@@ -312,7 +313,7 @@ void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableInDef& vtable)
         auto funcInfo = CreateVirtualFuncInfo(abstractMethod, *parentDef->GetType(), replaceTable);
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
         if (maybeAddNewItemToVtable) {
-            vtable.AddNewItemToTypeVTable(instParentTy, std::move(funcInfo));
+            newMethodsInVTable.emplace(abstractMethod.GetASTMangledName(), std::move(funcInfo));
         }
     }
 
@@ -325,7 +326,14 @@ void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableInDef& vtable)
         auto funcInfo = CreateVirtualFuncInfo(*func, *parentType, replaceTable);
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
         if (maybeAddNewItemToVtable && IsVirtualFunction(*funcInfo.GetVirtualMethod())) {
-            vtable.AddNewItemToTypeVTable(instParentTy, std::move(funcInfo));
+            newMethodsInVTable.emplace(func->GetIdentifierWithoutPrefix(), std::move(funcInfo));
+        }
+    }
+    // 3. only for correct virtual method order
+    for (auto& name : parentDef->GetAllMethodMangledNames()) {
+        auto it = newMethodsInVTable.find(name);
+        if (it != newMethodsInVTable.end()) {
+            vtable.AddNewItemToTypeVTable(instParentTy, std::move(it->second));
         }
     }
 }
@@ -442,9 +450,10 @@ std::vector<FuncBase*> VTableGenerator::CollectMethodsIncludeParentsMayBeInVtabl
     return methods;
 }
 
-std::vector<VirtualMethodInfo> VTableGenerator::CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef)
+std::unordered_map<std::string, VirtualMethodInfo> VTableGenerator::CollectAllPublicAndProtectedMethods(
+    const CustomTypeDef& curDef)
 {
-    std::vector<VirtualMethodInfo> allMethods;
+    std::unordered_map<std::string, VirtualMethodInfo> allMethods;
     std::unordered_map<const GenericType*, Type*> emptyTable;
     if (auto extendDef = DynamicCast<const ExtendDef*>(&curDef)) {
         auto brotherDefs = CollectBrotherDefs(*extendDef, builder);
@@ -457,7 +466,7 @@ std::vector<VirtualMethodInfo> VTableGenerator::CollectAllPublicAndProtectedMeth
                 auto parentType = func->GetParentCustomTypeOrExtendedType();
                 CJC_NULLPTR_CHECK(parentType);
                 auto funcInfo = CreateVirtualFuncInfo(*func, *parentType, replaceTable);
-                allMethods.emplace_back(std::move(funcInfo));
+                allMethods.emplace(func->GetIdentifierWithoutPrefix(), std::move(funcInfo));
             }
         }
     } else if (auto classDef = DynamicCast<ClassDef*>(&curDef)) {
@@ -469,7 +478,7 @@ std::vector<VirtualMethodInfo> VTableGenerator::CollectAllPublicAndProtectedMeth
             if (aMethod.attributeInfo.TestAttr(Attribute::PUBLIC) ||
                 aMethod.attributeInfo.TestAttr(Attribute::PROTECTED)) {
                 auto funcInfo = CreateVirtualFuncInfo(aMethod, *classDef->GetType(), emptyTable);
-                allMethods.emplace_back(std::move(funcInfo));
+                allMethods.emplace(aMethod.GetASTMangledName(), std::move(funcInfo));
             }
         }
     }
@@ -480,7 +489,7 @@ std::vector<VirtualMethodInfo> VTableGenerator::CollectAllPublicAndProtectedMeth
             auto parentType = func->GetParentCustomTypeOrExtendedType();
             CJC_NULLPTR_CHECK(parentType);
             auto funcInfo = CreateVirtualFuncInfo(*func, *parentType, emptyTable);
-            allMethods.emplace_back(funcInfo);
+            allMethods.emplace(func->GetIdentifierWithoutPrefix(), std::move(funcInfo));
         }
     }
 
@@ -525,17 +534,32 @@ void VTableGenerator::GenerateVTable(CustomTypeDef& customTypeDef)
     //   c. methods in current def, current extended def and current extended parent def
     // not include methods declared in current parent def, they have been handled in step 1
     auto publicAndProtectedMethods = CollectAllPublicAndProtectedMethods(customTypeDef);
-    for (auto& funcInfo : publicAndProtectedMethods) {
+    std::unordered_map<std::string, VirtualMethodInfo> newMethodsInVTable;
+    for (auto& [name, funcInfo] : publicAndProtectedMethods) {
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
         if (!maybeAddNewItemToVtable) {
             continue;
         }
         if (funcInfo.GetVirtualMethod() == nullptr) {
-            vtable.AddNewItemToTypeVTable(*StaticCast<ClassType*>(customTypeDef.GetType()), std::move(funcInfo));
+            newMethodsInVTable.emplace(name, std::move(funcInfo));
         } else if (customTypeDef.IsClassLike() && IsVirtualFunction(*funcInfo.GetVirtualMethod())) {
-            auto srcParentType =
-                StaticCast<ClassType*>(funcInfo.GetVirtualMethod()->GetParentCustomTypeOrExtendedType());
-            vtable.AddNewItemToTypeVTable(*srcParentType, std::move(funcInfo));
+            newMethodsInVTable.emplace(name, std::move(funcInfo));
+        }
+    }
+    if (auto classDef = DynamicCast<ClassDef*>(&customTypeDef)) {
+        for (const auto& name : classDef->GetAllMethodMangledNames()) {
+            auto it = newMethodsInVTable.find(name);
+            if (it == newMethodsInVTable.end()) {
+                continue;
+            }
+            auto& funcInfo = it->second;
+            if (funcInfo.GetVirtualMethod() == nullptr) {
+                vtable.AddNewItemToTypeVTable(*StaticCast<ClassType*>(customTypeDef.GetType()), std::move(funcInfo));
+            } else {
+                auto srcParentType =
+                    StaticCast<ClassType*>(funcInfo.GetVirtualMethod()->GetParentCustomTypeOrExtendedType());
+                vtable.AddNewItemToTypeVTable(*srcParentType, std::move(funcInfo));
+            }
         }
     }
     UpdateInstanceAttr(vtable);

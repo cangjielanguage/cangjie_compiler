@@ -15,24 +15,6 @@ using namespace Cangjie;
 using namespace Cangjie::CHIR;
 
 namespace {
-bool FuncTypeHasOuterGenericType(const FuncType& funcType, const std::vector<GenericType*>& funcGenericTypeParams)
-{
-    auto unorderedGenericTypeParams =
-        std::unordered_set<const Type*>(funcGenericTypeParams.begin(), funcGenericTypeParams.end());
-    bool hasOuterGenericType = false;
-    auto visitor = [&unorderedGenericTypeParams, &hasOuterGenericType](const Type& type) {
-        if (hasOuterGenericType) {
-            return true;
-        }
-        if (type.IsGeneric() && unorderedGenericTypeParams.find(&type) == unorderedGenericTypeParams.end()) {
-            hasOuterGenericType = true;
-        }
-        return true;
-    };
-    funcType.VisitTypeRecursively(visitor);
-    return hasOuterGenericType;
-}
-
 bool FuncTypeMatch(const FuncType& parentFuncType, const FuncType& curFuncType)
 {
     auto parentFuncParamTypes = parentFuncType.GetParamTypes();
@@ -46,11 +28,6 @@ bool FuncTypeMatch(const FuncType& parentFuncType, const FuncType& curFuncType)
     return VirMethodReturnTypeIsMatched(*parentFuncType.GetReturnType(), *curFuncType.GetReturnType());
 }
 
-bool FuncIsOverride(const FuncBase& curFunc, const Type& selfTy)
-{
-    return curFunc.GetParentCustomTypeDef()->GetType() == &selfTy;
-}
-
 bool JudgeIfNeedVirtualWrapper(
     const VirtualMethodInfo& parentFuncInfo, const FuncBase& virtualFunc, const Type& selfTy)
 {
@@ -61,62 +38,8 @@ bool JudgeIfNeedVirtualWrapper(
     if (!selfTy.IsClassOrArray() && !virtualFunc.TestAttr(Attribute::STATIC)) {
         return true;
     }
-
-    /*  first, we need to clear a defination `generic-related`, if we say a function is generic-related,
-        that means there is generic type in function type, and this generic type must be from current function,
-        not from its parent class
-        e.g.
-        class A<T> {
-            func foo1(a: T) {}         // foo1 is NOT generic-related, because T is from class A
-            func foo2(a: A<T>) {}      // foo2 is NOT generic-related, because T is from class A
-            func foo3() {}             // foo3 is NOT generic-related, because there isn't generic type
-            func goo1<U>(b: U) {}      // goo1 is generic-related, because U is from func goo1
-            func goo2<U>(): A<U> {}    // goo2 is generic-related, because U is from func goo2
-        }
-        there are some rules to create or NOT create wrapper function:
-        1. virtual function is NOT generic-related, and its parent CustomTypeDef doesn't have generic type param
-            wrapper function doesn't need to be created
-        2. virtual function is NOT generic-related, but its parent CustomTypeDef has generic type param
-          2.1 there is NOT override function in sub CustomTypeDef
-            wrapper function needs to be created
-          2.2 there is override function in sub CustomTypeDef
-            wrapper function doesn't need to be created
-        3. virtual function is generic-related
-          3.1 there is NOT override function in sub CustomTypeDef
-            wrapper function needs to be created
-          3.2 there is override function in sub CustomTypeDef
-            3.2.1 if the function type in sub CustomTypeDef's virtual function is matched
-                  the function type in parent CustomTypeDef's virtual function, wrapper function isn't needed
-            3.2.2 if the function type in sub CustomTypeDef's virtual function is mismatched
-                  the function type in parent CustomTypeDef's virtual function, wrapper function is needed
-
-        there are some rules to explain what is function type MATCHED:
-        1. for param type
-            generic type and ref type are matched, including generic T and generic U is matched,
-            class A and class B is matched, generic T and class A is matched
-            for other types, CHIR pointer must be same
-        2. for return type
-            class A and class B are matched, generic T and generic U are matched, class A and generic T
-            are mismatched
-            for other types, CHIR pointer must be same
-    */
-    auto parentDef = virtualFunc.GetParentCustomTypeDef();
-    CJC_NULLPTR_CHECK(parentDef);
-    bool parentDefHasGenericType = !parentDef->GetGenericTypeParams().empty();
     auto parentFuncType = parentFuncInfo.GetOriginalFuncType();
-    auto parentFuncTypeParams = parentFuncInfo.GetGenericTypeParams();
-    bool funcHasOuterGenericType = FuncTypeHasOuterGenericType(*parentFuncType, parentFuncTypeParams);
-    if (!funcHasOuterGenericType && !parentDefHasGenericType) {
-        return false;
-    } else if (!funcHasOuterGenericType && parentDefHasGenericType) {
-        return !FuncIsOverride(virtualFunc, selfTy);
-    } else {
-        if (!FuncIsOverride(virtualFunc, selfTy)) {
-            return true;
-        } else {
-            return !FuncTypeMatch(*parentFuncType, *virtualFunc.GetFuncType());
-        }
-    }
+    return !FuncTypeMatch(*parentFuncType, *virtualFunc.GetFuncType());
 }
 
 // maybe we can not deserialize virutal wrapper function, because it's not in source code

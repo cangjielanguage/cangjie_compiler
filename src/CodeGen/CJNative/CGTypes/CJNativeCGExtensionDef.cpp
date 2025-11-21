@@ -16,7 +16,7 @@
 #include "Utils/CGUtils.h"
 #include "cangjie/CHIR/Type/CustomTypeDef.h"
 #include "cangjie/CHIR/Value.h"
-#include "cangjie/Utils/CheckUtils.h"
+#include <cstdint>
 
 using namespace Cangjie;
 using namespace CodeGen;
@@ -217,7 +217,7 @@ llvm::Value* CGExtensionDef::GetTypeInfoOfGeneric(IRBuilder2& irBuilder, CHIR::G
 {
     std::stack<std::pair<const CHIR::Type*, std::queue<size_t>>> candidates;
     std::queue<size_t> remainPath;
-    auto currentType = targetType;
+    const CHIR::Type* currentType = targetType;
     for (auto idx : gtAccessPathMap[&gt]) {
         remainPath.push(idx);
     }
@@ -387,12 +387,14 @@ std::vector<llvm::Constant*> CGExtensionDef::GetEmptyExtensionDefContent(CGModul
 {
     auto& llvmCtx = cgMod.GetLLVMContext();
     auto i8NullVal = llvm::ConstantInt::getNullValue(llvm::Type::getInt8Ty(llvmCtx));
+    auto i16NullVal = llvm::ConstantInt::getNullValue(llvm::Type::getInt16Ty(llvmCtx));
     auto i8PtrNullVal = llvm::ConstantInt::getNullValue(llvm::Type::getInt8PtrTy(llvmCtx));
     std::vector<llvm::Constant*> defConstants(static_cast<unsigned>(EXTENSION_DEF_FIELDS_NUM));
     defConstants[static_cast<size_t>(IS_INTERFACE_TI)] = i8NullVal;
     defConstants[static_cast<size_t>(INTERFACE_FN_OR_INTERFACE_TI)] = i8PtrNullVal;
     defConstants[static_cast<size_t>(WHERE_CONDITION_FN)] = i8PtrNullVal;
     defConstants[static_cast<size_t>(FUNC_TABLE)] = i8PtrNullVal;
+    defConstants[static_cast<size_t>(FUNC_TABLE_SIZE)] = i16NullVal;
     defConstants[static_cast<size_t>(TARGET_TYPE)] = GetTargetType(cgMod, targetType);
     auto cgType = CGType::GetOrCreate(cgMod, &targetType);
     auto i32Ty = llvm::Type::getInt32Ty(llvmCtx);
@@ -436,7 +438,7 @@ bool CGExtensionDef::CreateExtensionDefForType(const CHIR::ClassType& inheritedT
 {
     auto found = chirDef.GetDefVTable().GetExpectedTypeVTable(inheritedType);
     auto funcTableSize = found.IsEmpty() ? 0 : found.GetMethodNum();
-    if (funcTableSize == 0 && inheritedType.GetClassDef()->IsClass()) {
+    if (funcTableSize == 0 && inheritedType.GetClassDef()->IsInterface() && &inheritedType == targetType) {
         return false;
     }
 
@@ -446,24 +448,19 @@ bool CGExtensionDef::CreateExtensionDefForType(const CHIR::ClassType& inheritedT
     auto [iFnOrTi, isTi] = GenerateInterfaceFn(inheritedType);
     content[static_cast<size_t>(INTERFACE_FN_OR_INTERFACE_TI)] = iFnOrTi;
     content[static_cast<size_t>(IS_INTERFACE_TI)] =
-        llvm::ConstantInt::get(llvm::Type::getInt8Ty(cgCtx.GetLLVMContext()), static_cast<uint64_t>(isTi));
+        llvm::ConstantInt::get(llvm::Type::getInt8Ty(cgCtx.GetLLVMContext()), static_cast<uint8_t>(isTi));
+    content[static_cast<size_t>(FLAG)] =
+        llvm::ConstantInt::get(llvm::Type::getInt8Ty(cgCtx.GetLLVMContext()),
+        static_cast<uint8_t>(inheritedType.IsDirectSuperTypeOf(*targetType, cgCtx.GetCHIRBuilder()) ? 0b10000000 : 0b00000000));
     content[static_cast<size_t>(WHERE_CONDITION_FN)] = GenerateWhereConditionFn();
     content[static_cast<size_t>(FUNC_TABLE)] = GenerateFuncTableForType(found);
+    content[static_cast<size_t>(FUNC_TABLE_SIZE)] =
+        llvm::ConstantInt::get(llvm::Type::getInt16Ty(cgCtx.GetLLVMContext()), funcTableSize);
 
     return CreateExtensionDefForType(cgMod, extendDefName, content, inheritedType, isForExternalType);
 }
 
 namespace {
-bool HasStaticMethods(const CHIR::CustomTypeDef& chirDef)
-{
-    for (auto method : chirDef.GetMethods()) {
-        if (method->TestAttr(Cangjie::CHIR::Attribute::STATIC)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 void GetOrderedParentTypesRecusively(
     CHIR::ClassType& type, std::list<const CHIR::ClassType*>& parents, CHIR::CHIRBuilder& builder)
 {
@@ -518,11 +515,7 @@ std::pair<uint32_t, std::vector<std::pair<const CHIR::Type*, const CHIR::Type*>>
         CollectGenericParamIndicesMap();
         std::list<const CHIR::ClassType*> orderedInheritedTypes;
         if (chirDef.GetCustomKind() == CHIR::CustomDefKind::TYPE_CLASS) {
-            auto& def = StaticCast<CHIR::ClassDef>(chirDef);
-            auto isClassOrHasStaticMethods = def.IsClass() || HasStaticMethods(chirDef);
-            if (isClassOrHasStaticMethods) {
-                orderedInheritedTypes.push_back(StaticCast<CHIR::ClassType>(targetType));
-            }
+            orderedInheritedTypes.push_back(StaticCast<CHIR::ClassType>(targetType));
         }
         CHIR::CHIRBuilder& chirBuilder = cgMod.GetCGContext().GetCHIRBuilder();
         GetOrderedParentTypesRecusively(chirDef, orderedInheritedTypes, chirBuilder);

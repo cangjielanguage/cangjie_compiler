@@ -627,5 +627,31 @@ bool IsThisArgOfStructMethod(const CHIR::Value& chirValue)
     }
     return true;
 }
+
+bool IsModifiableClass(const CHIR::Type& chirTy)
+{
+    if (!chirTy.IsClass()) {
+        return false;
+    }
+    auto classDef = StaticCast<const CHIR::ClassType&>(chirTy).GetClassDef();
+    return classDef->IsClass() &&
+        !classDef->TestAttr(CHIR::Attribute::COMPILER_ADD) && !classDef->TestAttr(CHIR::Attribute::VIRTUAL);
+}
+
+bool IsSizeTrustedInCompileUnit(CGModule& cgMod, const CHIR::Type& chirTy)
+{
+    if (!IsModifiableClass(chirTy)) {
+        return false;
+    }
+    auto cgType = CGType::GetOrCreate(cgMod, &chirTy);
+    if (!cgType->GetSize()) {
+        return false;
+    }
+    auto typePackageName = StaticCast<const CHIR::ClassType&>(chirTy).GetClassDef()->GetPackageName();
+    auto typeModuleName = typePackageName.substr(0, typePackageName.find("."));
+    auto compileUnitPkgName = cgMod.GetCGContext().GetCHIRPackage().GetName();
+    auto compileUnitModuleName = compileUnitPkgName.substr(0, compileUnitPkgName.find("."));
+    return typeModuleName == compileUnitModuleName;
+}
 } // namespace CodeGen
 } // namespace Cangjie

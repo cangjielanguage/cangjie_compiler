@@ -84,7 +84,11 @@ llvm::Constant* CGVArrayType::GenTypeArgsOfTypeInfo()
 llvm::Constant* CGVArrayType::GenSuperOfTypeInfo()
 {
     auto varrayElementType = DeRef(*StaticCast<const CHIR::VArrayType&>(chirType).GetElementType());
+    auto elemCGType = CGType::GetOrCreate(cgMod, varrayElementType);
     auto ti = CGType::GetOrCreate(cgMod, varrayElementType)->GetOrCreateTypeInfo();
+    if (elemCGType->IsStaticGI()) {
+        cgCtx.AddDependentPartialOrderOfTypes(ti, this->typeInfo);
+    }
     return llvm::ConstantExpr::getBitCast(ti, CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext()));
 }
 } // namespace Cangjie::CodeGen

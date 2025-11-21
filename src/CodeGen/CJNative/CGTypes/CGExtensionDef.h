@@ -80,7 +80,7 @@ private:
     const CHIR::CustomTypeDef& chirDef;
     std::string typeMangle;
     std::string extendDefName;
-    const CHIR::Type* targetType{nullptr};
+    CHIR::Type* targetType{nullptr};
     bool isForExternalType = false;
     llvm::Constant* whereCondFn{nullptr};
     std::unordered_map<const CHIR::Type*, std::function<llvm::Value*(IRBuilder2&)>> genericParamsMap;

@@ -440,6 +440,9 @@ inline bool IsExternalDefinedType(const CHIR::Type& type)
     }
     return dynamic_cast<const CHIR::CustomType&>(type).GetCustomTypeDef()->TestAttr(CHIR::Attribute::IMPORTED);
 }
+
+bool IsModifiableClass(const CHIR::Type& chirTy);
+bool IsSizeTrustedInCompileUnit(CGModule& cgMod, const CHIR::Type& chirTy);
 } // namespace CodeGen
 } // namespace Cangjie
 

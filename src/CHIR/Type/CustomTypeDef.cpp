@@ -26,7 +26,7 @@
 
 using namespace Cangjie::CHIR;
 
-void CustomTypeDef::AddMethod(FuncBase* method)
+void CustomTypeDef::AddMethod(FuncBase* method, [[maybe_unused]] bool recordOrder)
 {
     CJC_NULLPTR_CHECK(method);
     method->declaredParent = this;
