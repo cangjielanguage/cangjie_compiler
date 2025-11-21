@@ -368,6 +368,7 @@ ERROR(parse_objc_mirror_func_cannot_be_const, "@ObjCMirror top-level function '%
 ERROR(parse_objc_mirror_func_must_be_top_level, "@ObjCMirror function '%s' can only be declared on top-level")
 ERROR(parse_objc_init_method_must_be_static, "@ObjCInit method must be modified with 'static'")
 ERROR(parse_objc_init_method_must_be_in_mirror_class, "@ObjCInit method must be declared within '@ObjCMirror' class")
+ERROR(parse_objc_optional_method_must_be_in_mirror_class, "@ObjCOptional method must be declared within '@ObjCMirror' class")
 
 ERROR(parse_objc_interop_not_supported, "Objective-C interoperability feature '%s' is not yet supported")
 

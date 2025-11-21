@@ -24,6 +24,7 @@ constexpr auto INTEROPLIB_NATIVE_OBJ_C_SEL = "NativeObjCSel";
 constexpr auto INTEROPLIB_NATIVE_OBJ_C_SUPER_PTR = "NativeObjCSuperPtr";
 constexpr auto INTEROPLIB_REGISTRY_ID = "RegistryId";
 constexpr auto INTEROPLIB_OBJ_C_UNREACHABLE_CODE_EXCEPTION = "ObjCUnreachableCodeException";
+constexpr auto INTEROPLIB_OBJ_C_OPTIONAL_METHOD_UNIMPLEMENTED_EXCEPTION = "ObjCOptionalMethodUnimplementedException";
 constexpr auto INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_NATIVE_HANDLE = "getFromRegistryByNativeHandle";
 constexpr auto INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_ID = "getFromRegistryById";
 constexpr auto INTEROPLIB_OBJ_C_PUT_TO_REGISTRY = "putToRegistry";
@@ -42,6 +43,7 @@ constexpr auto INTEROPLIB_OBJ_C_WITH_METHOD_ENV_OBJ = "withMethodEnvObj";
 constexpr auto INTEROPLIB_OBJ_C_MSG_SEND = "objCMsgSend";
 constexpr auto INTEROPLIB_OBJ_C_MSG_SEND_SUPER = "objCMsgSendSuper";
 constexpr auto INTEROPLIB_OBJ_C_RELEASE = "objCRelease";
+constexpr auto INTEROPLIB_OBJ_C_RESPONSE_TO_SELECTOR = "respondsToSelector";
 
 // objc.lang
 constexpr auto OBJ_C_FUNC_GET_FPOINTER = "unsafeGetFunctionPointer";
@@ -91,6 +93,12 @@ Ptr<Ty> InteropLibBridge::GetRegistryIdTy()
 Ptr<ClassDecl> InteropLibBridge::GetObjCUnreachableCodeExceptionDecl()
 {
     static auto decl = GetInteropLibDecl<ASTKind::CLASS_DECL>(INTEROPLIB_OBJ_C_UNREACHABLE_CODE_EXCEPTION);
+    return decl;
+}
+
+Ptr<ClassDecl> InteropLibBridge::GetObjCOptionalMethodUnimplementedExceptionDecl()
+{
+    static auto decl = GetInteropLibDecl<ASTKind::CLASS_DECL>(INTEROPLIB_OBJ_C_OPTIONAL_METHOD_UNIMPLEMENTED_EXCEPTION);
     return decl;
 }
 
@@ -193,6 +201,12 @@ Ptr<FuncDecl> InteropLibBridge::GetObjCMsgSendDecl()
 Ptr<FuncDecl> InteropLibBridge::GetObjCMsgSendSuperDecl()
 {
     static auto decl = GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_OBJ_C_MSG_SEND_SUPER);
+    return decl;
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetObjCRespondsToSelectorDecl()
+{
+    static auto decl = GetInteropLibDecl<ASTKind::FUNC_DECL>(INTEROPLIB_OBJ_C_RESPONSE_TO_SELECTOR);
     return decl;
 }
 

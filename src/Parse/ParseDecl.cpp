@@ -585,6 +585,7 @@ void ParserImpl::CheckObjCInteropMember(Decl& member)
                 CheckMemberFuncObjCMirror(fd);
                 ffiParser->CheckForeignNameAnnotation(fd);
                 ffiParser->ObjC().CheckInitAnnotation(fd);
+                ffiParser->ObjC().CheckOptionalAnnotation(fd);
             }
             break;
         }

@@ -77,6 +77,14 @@ void OCFFIParserImpl::DiagObjCInitFuncMustBeInMirrorClass(const FuncDecl& fd) co
     p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_init_method_must_be_in_mirror_class, fd);
 }
 
+void OCFFIParserImpl::DiagObjCOptionalFuncMustBeInMirrorClass(const FuncDecl& fd) const
+{
+    CJC_ASSERT(!fd.outerDecl || !fd.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)
+        || fd.outerDecl->astKind != ASTKind::CLASS_DECL);
+
+    p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_optional_method_must_be_in_mirror_class, fd);
+}
+
 void OCFFIParserImpl::DiagObjCImplCannotBeOpen(const Node& node) const
 {
     p.ParseDiagnoseRefactor(DiagKindRefactor::parse_objc_impl_cannot_be_open, node);

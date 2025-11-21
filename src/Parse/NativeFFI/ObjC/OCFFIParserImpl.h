@@ -28,9 +28,10 @@ public:
      * Checks `@ObjCInit` annotation correctness within `fd` as a target
      */
     void CheckInitAnnotation(AST::FuncDecl& fd) const;
+    void CheckOptionalAnnotation(AST::FuncDecl& fd) const;
     void CheckMirrorSignature(AST::ClassLikeDecl& decl, const PtrVector<AST::Annotation>& annos) const;
     void CheckImplSignature(AST::ClassLikeDecl& decl, const PtrVector<AST::Annotation>& annos) const;
-    void CheckMirrorSignature(AST::FuncDecl& decl, const PtrVector<AST::Annotation>& annos) const; 
+    void CheckMirrorSignature(AST::FuncDecl& decl, const PtrVector<AST::Annotation>& annos) const;
 
     // Make private, when checking @ObjCMirror/@ObjCImpl decl members moved to this class
     void DiagObjCMirrorCannotHaveFinalizer(const AST::Node& node) const;
@@ -45,6 +46,7 @@ public:
     void DiagObjCImplCannotBeGeneric(const AST::Node& node) const;
     void DiagObjCInitFuncMustBeStatic(const AST::Node& node) const;
     void DiagObjCInitFuncMustBeInMirrorClass(const AST::FuncDecl& node) const;
+    void DiagObjCOptionalFuncMustBeInMirrorClass(const AST::FuncDecl& fd) const;
 
     void DiagObjCMirrorFuncCannotBeForeign(const AST::FuncDecl& node) const;
     void DiagObjCMirrorFuncCannotBeC(const AST::FuncDecl& node) const;
@@ -58,10 +60,12 @@ private:
     void CheckMirrorAnnoArgs(const AST::Annotation& anno) const;
     void CheckImplAnnoArgs(const AST::Annotation& anno) const;
     void CheckInitAnnoArgs(const AST::Annotation& anno) const;
+    void CheckOptionalAnnoArgs(const AST::Annotation& anno) const;
 
     void CheckMirrorAnnoTarget(const AST::Annotation& anno, ScopeKind scopeKind) const;
     void CheckImplAnnoTarget(const AST::Annotation& anno) const;
     void CheckInitAnnoTarget(const AST::Annotation& anno) const;
+    void CheckOptionalAnnoTarget(const AST::Annotation& anno) const;
 
     void DiagObjCMirrorCannotBeSealed(const AST::Node& node) const;
 

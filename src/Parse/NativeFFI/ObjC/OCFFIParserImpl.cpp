@@ -36,6 +36,11 @@ void OCFFIParserImpl::CheckAnnotation(const Annotation& anno, ScopeKind scopeKin
             CheckInitAnnoTarget(anno);
             break;
         }
+        case AnnotationKind::OBJ_C_OPTIONAL: {
+            CheckOptionalAnnoArgs(anno);
+            CheckOptionalAnnoTarget(anno);
+            break;
+        }
         default: CJC_ABORT(); // Unexpected annotation
     }
 }
@@ -136,6 +141,12 @@ void OCFFIParserImpl::CheckInitAnnoArgs(const Annotation& anno) const
     p.ffiParser->CheckNoArgAnnotation(anno, OBJC_INIT_NAME);
 }
 
+void OCFFIParserImpl::CheckOptionalAnnoArgs(const Annotation& anno) const
+{
+    static const std::string OBJC_OPTIONAL_NAME = "@ObjCOptional";
+    p.ffiParser->CheckNoArgAnnotation(anno, OBJC_OPTIONAL_NAME);
+}
+
 void OCFFIParserImpl::CheckMirrorAnnoTarget(const Annotation& anno, ScopeKind scopeKind) const
 {
     if (p.SeeingAny({TokenKind::CLASS, TokenKind::INTERFACE})) {
@@ -173,6 +184,39 @@ void OCFFIParserImpl::CheckInitAnnoTarget(const Annotation& anno) const
     if (anno.kind == AnnotationKind::OBJ_C_INIT) {
         auto& lah = p.lookahead;
         p.DiagUnexpectedAnnoOn(anno, lah.Begin(), anno.identifier, lah.Value());
+    }
+}
+
+void OCFFIParserImpl::CheckOptionalAnnoTarget(const Annotation& anno) const
+{
+    if (p.Seeing(TokenKind::FUNC)) {
+        return;
+    }
+
+    if (anno.kind == AnnotationKind::OBJ_C_OPTIONAL) {
+        auto& lah = p.lookahead;
+        p.DiagUnexpectedAnnoOn(anno, lah.Begin(), anno.identifier, lah.Value());
+    }
+}
+
+void OCFFIParserImpl::CheckOptionalAnnotation(AST::FuncDecl& fd) const
+{
+    CJC_ASSERT(!fd.TestAttr(Attribute::CONSTRUCTOR));
+
+    for (auto& anno : fd.annotations) {
+        if (anno->kind != AnnotationKind::OBJ_C_OPTIONAL) {
+            continue;
+        }
+
+        if (!fd.outerDecl || fd.outerDecl->astKind != ASTKind::CLASS_DECL
+            || !fd.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
+                DiagObjCOptionalFuncMustBeInMirrorClass(fd);
+                fd.EnableAttr(Attribute::IS_BROKEN);
+        }
+
+        if (!fd.TestAttr(Attribute::IS_BROKEN)) {
+            fd.EnableAttr(Attribute::OBJ_C_OPTIONAL);
+        }
     }
 }
 

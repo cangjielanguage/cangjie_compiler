@@ -130,11 +130,18 @@ void DesugarMirrors::DesugarMethod(InteropContext& ctx, ClassLikeDecl& mirror, F
         [&ctx, curFile](auto& param) { return ctx.factory.UnwrapEntity(WithinFile(CreateRefExpr(*param), curFile)); });
 
     auto arpScopeCall = ctx.factory.CreateAutoreleasePoolScope(methodTy->retTy,
-        Nodes(ctx.factory.CreateMethodCallViaMsgSend(method, std::move(nativeHandle), std::move(msgSendArgs))));
+        Nodes(ctx.factory.CreateMethodCallViaMsgSend(method, ASTCloner::Clone(nativeHandle.get()), std::move(msgSendArgs))));
     arpScopeCall->curFile = curFile;
 
     method.funcBody->body = CreateBlock({}, methodTy->retTy);
-    method.funcBody->body->body.emplace_back(ctx.factory.WrapEntity(std::move(arpScopeCall), *methodTy->retTy));
+
+    if (method.HasAnno(AST::AnnotationKind::OBJ_C_OPTIONAL)) {
+        auto guardCall = ctx.factory.CreateOptionalMethodGuard(std::move(arpScopeCall), ASTCloner::Clone(nativeHandle.get()), method.identifier, curFile);
+        guardCall->curFile = curFile;
+        method.funcBody->body->body.emplace_back(std::move(guardCall));
+    } else {
+        method.funcBody->body->body.emplace_back(ctx.factory.WrapEntity(std::move(arpScopeCall), *methodTy->retTy));
+    }
 }
 
 void DesugarMirrors::DesugarTopLevelFunc(InteropContext& ctx, FuncDecl& func)

@@ -99,7 +99,8 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
             }
             case AnnotationKind::OBJ_C_MIRROR:
             case AnnotationKind::OBJ_C_IMPL:
-            case AnnotationKind::OBJ_C_INIT: {
+            case AnnotationKind::OBJ_C_INIT:
+            case AnnotationKind::OBJ_C_OPTIONAL: {
                 op.CheckAnnotation(anno, scopeKind);
                 break;
             }

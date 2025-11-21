@@ -510,6 +510,7 @@ enum class AnnotationKind {
     OBJ_C_MIRROR,
     OBJ_C_IMPL,
     OBJ_C_INIT, // Indicate a method as Objective-C init.
+    OBJ_C_OPTIONAL,
     FOREIGN_NAME,
     FOREIGN_GETTER_NAME,
     FOREIGN_SETTER_NAME,
