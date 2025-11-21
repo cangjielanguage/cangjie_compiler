@@ -608,21 +608,9 @@ struct DiscardedHelper {
         };
 
         auto unitifyTry = [&unitifyBlock](TryExpr& te) {
-            if (te.tryLambda) {
-                unitifyBlock(*(te.tryLambda->funcBody->body));
-            } else {
-                unitifyBlock(*(te.tryBlock));
-            }
+            unitifyBlock(*(te.tryBlock));
             for (auto& cb : te.catchBlocks) {
                 unitifyBlock(*cb);
-            }
-
-            for (auto& h : te.handlers) {
-                if (h.desugaredLambda) {
-                    unitifyBlock(*h.desugaredLambda->funcBody->body);
-                }
-                CJC_NULLPTR_CHECK(h.block);
-                unitifyBlock(*h.block);
             }
         };
 

@@ -553,16 +553,6 @@ struct ASTHasherImpl {
         HashExpr<whatTypeToHash>(te);
         SUPERHash<whatTypeToHash>(te.throwPos, te.expr);
     }
-    template <int whatTypeToHash> void HashPerformExpr(const PerformExpr& pe)
-    {
-        HashExpr<whatTypeToHash>(pe);
-        SUPERHash<whatTypeToHash>(pe.performPos, pe.expr);
-    }
-    template <int whatTypeToHash> void HashResumeExpr(const ResumeExpr& re)
-    {
-        HashExpr<whatTypeToHash>(re);
-        SUPERHash<whatTypeToHash>(re.resumePos);
-    }
     template <int whatTypeToHash> void HashTrailingClosureExpr(const TrailingClosureExpr& tce)
     {
         HashExpr<whatTypeToHash>(tce);

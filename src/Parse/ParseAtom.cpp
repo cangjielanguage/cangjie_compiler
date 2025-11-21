@@ -221,9 +221,6 @@ OwnedPtr<Expr> ParserImpl::ParseInterpolationExpr(const std::string& value, cons
     auto hasSkipNewline = newlineSkipped;
     std::unique_ptr<Lexer> curlexer = std::move(lexer);
     lexer = std::make_unique<Lexer>(wrapInBracket, diag, diag.GetSourceManager(), basePos);
-    if (enableEH) {
-        lexer->SetEHEnabled(true);
-    }
     ret->block = ParseBlock(ScopeKind::FUNC_BODY);
     if (!ret->block || ret->block->body.empty() || Peek().kind != TokenKind::END) {
         lexer = std::move(curlexer);
@@ -427,102 +424,6 @@ OwnedPtr<Block> ParserImpl::ParseExprOrDeclsInMatchCase()
     return exprOrDecls;
 }
 
-static OwnedPtr<LambdaExpr> CreateLambdaFromBlock(
-    OwnedPtr<Block> block, const Expr& expr, OwnedPtr<FuncParamList> paramList)
-{
-    std::vector<OwnedPtr<FuncParamList>> paramLists;
-    paramList->begin = expr.begin;
-    paramList->end = expr.end;
-    paramLists.emplace_back(std::move(paramList));
-    auto fb = CreateFuncBody(std::move(paramLists), nullptr, std::move(block));
-
-    // create the lambda expression
-    auto le = CreateLambdaExpr(std::move(fb));
-    le->begin = expr.begin;
-    le->end = expr.end;
-
-    return le;
-}
-
-static void DesugarTry(const OwnedPtr<TryExpr>& expr)
-{
-    if (expr->handlers.empty()) {
-        return;
-    }
-
-    // To: {=> try{...} catch{...}}
-    // create block for function body
-    OwnedPtr<Block> lambdaBlock;
-    if (expr->catchBlocks.empty()) {
-        // Careful: CHIR2 cannot compile a Try block without catch or finally.
-        // Even if the catch block has a finally clause, we will remove it and turn
-        // it into a lambda
-        lambdaBlock = ASTCloner::Clone(expr->tryBlock.get(), SetIsClonedSourceCode);
-    } else {
-        auto teWithoutHandle = ASTCloner::Clone(expr.get(), SetIsClonedSourceCode);
-        teWithoutHandle->handlers.clear();
-        teWithoutHandle->finallyBlock = nullptr;
-        teWithoutHandle->ty = expr->ty;
-        std::vector<OwnedPtr<Node>> lambdaBodyExprs;
-        lambdaBodyExprs.emplace_back(std::move(teWithoutHandle));
-        lambdaBlock = CreateBlock(std::move(lambdaBodyExprs));
-    }
-    expr->tryLambda = CreateLambdaFromBlock(std::move(lambdaBlock), *expr->tryBlock, MakeOwned<FuncParamList>());
-
-    // handler lambdas
-    for (auto& handler : expr->handlers) {
-        auto cmdPat = RawStaticCast<CommandTypePattern*>(handler.commandPattern.get());
-        // no multiple command type patterns, it will be forbidden in typechecking
-        if (expr->TestAttr(Attribute::HAS_BROKEN) || cmdPat->TestAttr(Attribute::IS_BROKEN) ||
-            cmdPat->types[0]->TestAttr(Attribute::IS_BROKEN)) {
-            expr->EnableAttr(Attribute::HAS_BROKEN);
-            return;
-        }
-        auto paramList = MakeOwned<FuncParamList>();
-
-        auto originalCommandPatternType = cmdPat->types[0].get();
-        auto commandTy = originalCommandPatternType->ty;
-        auto commandPattern = ASTCloner::Clone(originalCommandPatternType);
-        OwnedPtr<FuncParam> command;
-        if (auto varPattern = DynamicCast<VarPattern*>(cmdPat->pattern.get()); varPattern) {
-            command = CreateFuncParam(varPattern->varDecl->identifier, std::move(commandPattern), nullptr, commandTy);
-        } else {
-            command = CreateFuncParam("_", std::move(commandPattern), nullptr, commandTy);
-        }
-        CopyBasicInfo(cmdPat->pattern, command);
-        paramList->params.emplace_back(std::move(command));
-
-        handler.desugaredLambda = CreateLambdaFromBlock(
-            ASTCloner::Clone(handler.block.get(), SetIsClonedSourceCode), *handler.block, std::move(paramList));
-    }
-
-    if (expr->finallyBlock) {
-        expr->finallyLambda = CreateLambdaFromBlock(ASTCloner::Clone(expr->finallyBlock.get(), SetIsClonedSourceCode),
-            *expr->finallyBlock, MakeOwned<FuncParamList>());
-    }
-}
-
-void ParserImpl::ParseHandleBlock(TryExpr& tryExpr)
-{
-    auto handler = Handler();
-    handler.pos = lastToken.Begin();
-    Position leftParenPos{0, 0, 0};
-    if (Skip(TokenKind::LPAREN)) {
-        leftParenPos = lastToken.Begin();
-    } else if (!tryExpr.TestAttr(Attribute::HAS_BROKEN)) {
-        DiagExpectedLeftParenAfter(handler.pos, "handle");
-        tryExpr.EnableAttr(Attribute::HAS_BROKEN);
-    }
-    // handle clause will have one or two arguments
-    handler.commandPattern = ParseCommandTypePattern();
-    if (!Skip(TokenKind::RPAREN) && leftParenPos.line != 0 && !tryExpr.TestAttr(Attribute::HAS_BROKEN)) {
-        DiagExpectedRightDelimiter("(", leftParenPos);
-        tryExpr.EnableAttr(Attribute::HAS_BROKEN);
-    }
-    handler.block = ParseBlock(ScopeKind::FUNC_BODY);
-    tryExpr.handlers.emplace_back(std::move(handler));
-}
-
 void ParserImpl::ParseCatchBlock(TryExpr& tryExpr)
 {
     tryExpr.catchPosVector.push_back(lastToken.Begin());
@@ -559,10 +460,8 @@ OwnedPtr<TryExpr> ParserImpl::ParseTryExpr()
         tryExpr->EnableAttr(Attribute::HAS_BROKEN);
         tryExpr->EnableAttr(Attribute::IS_BROKEN);
     }
-    while (Seeing(TokenKind::HANDLE) || Seeing(TokenKind::CATCH)) {
-        if (Skip(TokenKind::HANDLE)) {
-            ParseHandleBlock(*tryExpr);
-        } else if (Skip(TokenKind::CATCH)) {
+    while (Seeing(TokenKind::CATCH)) {
+        if (Skip(TokenKind::CATCH)) {
             ParseCatchBlock(*tryExpr);
         }
     }
@@ -570,16 +469,13 @@ OwnedPtr<TryExpr> ParserImpl::ParseTryExpr()
         tryExpr->finallyPos = lastToken.Begin();
         tryExpr->finallyBlock = ParseBlock(ScopeKind::FUNC_BODY);
     } else {
-        if (tryExpr->catchBlocks.empty() && tryExpr->handlers.empty() && tryExpr->resourceSpec.empty() &&
+        if (tryExpr->catchBlocks.empty() && tryExpr->resourceSpec.empty() &&
             !tryExpr->TestAttr(Attribute::HAS_BROKEN)) {
-            DiagExpectedCatchOrHandleOrFinallyAfterTry(*tryExpr);
+            DiagExpectedCatchOrFinallyAfterTry(*tryExpr);
             tryExpr->EnableAttr(Attribute::HAS_BROKEN);
         }
     }
     tryExpr->end = lastToken.End();
-    if (!tryExpr->TestAttr(Attribute::HAS_BROKEN)) {
-        DesugarTry(tryExpr);
-    }
     return tryExpr;
 }
 
@@ -630,59 +526,6 @@ OwnedPtr<Pattern> ParserImpl::ParseExceptTypePattern()
     } else {
         ParseDiagnoseRefactor(
             DiagKindRefactor::parse_expected_wildcard_or_exception_pattern, lookahead, ConvertToken(lookahead));
-        return MakeInvalid<InvalidPattern>(lookahead.Begin());
-    }
-}
-
-OwnedPtr<Pattern> ParserImpl::ParseCommandTypePattern()
-{
-    auto parsePatterns = [this](CommandTypePattern& commandPattern) {
-        do {
-            if (lastToken.kind == TokenKind::BITOR) {
-                commandPattern.bitOrPosVector.emplace_back(lastToken.Begin());
-            }
-            commandPattern.types.emplace_back(ParseType());
-        } while (Skip(TokenKind::BITOR));
-    };
-    if (Skip(TokenKind::WILDCARD)) {
-        auto wildCardPos = lastToken.Begin();
-        auto wildCardPattern = MakeOwned<WildcardPattern>(wildCardPos);
-        if (Skip(TokenKind::COLON)) {
-            OwnedPtr<CommandTypePattern> commandPattern = MakeOwned<CommandTypePattern>();
-            commandPattern->colonPos = lastToken.Begin();
-            commandPattern->begin = wildCardPos;
-            commandPattern->pattern = std::move(wildCardPattern);
-            parsePatterns(*commandPattern);
-            if (!commandPattern->types.empty()) {
-                commandPattern->end = commandPattern->types.back()->end;
-            }
-            return commandPattern;
-        } else {
-            ParseDiagnoseRefactor(
-                DiagKindRefactor::parse_expected_colon_in_effect_pattern, lookahead, ConvertToken(lookahead));
-            return MakeInvalid<InvalidPattern>(lookahead.Begin());
-        }
-    } else if (Seeing(TokenKind::IDENTIFIER) || SeeingContextualKeyword()) {
-        OwnedPtr<CommandTypePattern> commandPattern = MakeOwned<CommandTypePattern>();
-        auto ident = ParseIdentifierFromToken(lookahead);
-        Position begin = lookahead.Begin();
-        commandPattern->begin = begin;
-        commandPattern->pattern = MakeOwned<VarPattern>(std::move(ident), begin);
-        commandPattern->patternPos = lookahead.Begin();
-        Next();
-        if (!Skip(TokenKind::COLON)) {
-            ParseDiagnoseRefactor(
-                DiagKindRefactor::parse_expected_colon_in_effect_pattern, lookahead, ConvertToken(lookahead));
-        }
-        commandPattern->colonPos = lastToken.Begin();
-        parsePatterns(*commandPattern);
-        if (!commandPattern->types.empty()) {
-            commandPattern->end = commandPattern->types.back()->end;
-        }
-        return commandPattern;
-    } else {
-        ParseDiagnoseRefactor(
-            DiagKindRefactor::parse_expected_wildcard_or_effect_pattern, lookahead, ConvertToken(lookahead));
         return MakeInvalid<InvalidPattern>(lookahead.Begin());
     }
 }
@@ -915,41 +758,6 @@ OwnedPtr<ThrowExpr> ParserImpl::ParseThrowExpr()
     if (ret->expr) {
         ret->end = ret->expr->end;
     }
-    return ret;
-}
-
-OwnedPtr<PerformExpr> ParserImpl::ParsePerformExpr()
-{
-    OwnedPtr<PerformExpr> ret = MakeOwned<PerformExpr>();
-    ret->performPos = lastToken.Begin();
-    ret->begin = lookahead.Begin();
-    ret->expr = ParseExpr();
-    if (ret->expr) {
-        ret->end = ret->expr->end;
-    }
-    return ret;
-}
-
-OwnedPtr<ResumeExpr> ParserImpl::ParseResumeExpr()
-{
-    OwnedPtr<ResumeExpr> ret = MakeOwned<ResumeExpr>();
-    ret->resumePos = lastToken.Begin();
-    ret->begin = lookahead.Begin();
-    ret->end = lookahead.End();
-    if (Skip(TokenKind::WITH)) {
-        ret->withPos = lastToken.Begin();
-        ret->withExpr = ParseExpr();
-        if (ret->withExpr) {
-            ret->end = ret->withExpr->end;
-        }
-    } else if (Skip(TokenKind::THROWING)) {
-        ret->throwingPos = lastToken.Begin();
-        ret->throwingExpr = ParseExpr();
-        if (ret->throwingExpr) {
-            ret->end = ret->throwingExpr->end;
-        }
-    }
-
     return ret;
 }
 

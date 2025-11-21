@@ -94,8 +94,6 @@ OwnedPtr<IfExpr> CreateIfExpr(OwnedPtr<Expr> condExpr, OwnedPtr<Block> body,
 OwnedPtr<VarDecl> CreateVarDecl(
     const std::string& varName, OwnedPtr<Expr> initializer = nullptr, Ptr<Type> type = nullptr);
 OwnedPtr<ThrowExpr> CreateThrowExpr(Decl& var);
-OwnedPtr<PerformExpr> CreatePerformExpr(Decl& var);
-OwnedPtr<ResumeExpr> CreateResumeExpr(Decl& var);
 OwnedPtr<TypePattern> CreateTypePattern(
     OwnedPtr<Pattern>&& pattern, OwnedPtr<Type>&& type, Expr& selector
 );

@@ -68,24 +68,6 @@ void Lexer::ClearStringParts(const Token& t)
     impl->stringPartsMap.erase(t);
 }
 
-void Lexer::SetEHEnabled(bool enabled) const
-{
-    static const auto EH_KEYWORDS = {
-        TokenKind::PERFORM,
-        TokenKind::RESUME,
-        TokenKind::THROWING,
-        TokenKind::HANDLE
-    };
-    for (auto keyword : EH_KEYWORDS) {
-        const auto tokenStr = TOKENS[static_cast<size_t>(keyword)];
-        if (enabled) {
-            impl->tokenMap[tokenStr] = keyword;
-        } else {
-            impl->tokenMap.erase(tokenStr);
-        }
-    }
-}
-
 const std::vector<StringPart>& Lexer::GetStrParts(const Token& t)
 {
     return impl->GetStrParts(t);

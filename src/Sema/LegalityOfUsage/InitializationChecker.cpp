@@ -972,21 +972,6 @@ bool InitializationChecker::CheckInitInExpr(Ptr<Node> node)
         case ASTKind::JUMP_EXPR:
             UpdateScopeStatus(*node);
             return true;
-        case ASTKind::PERFORM_EXPR: {
-            auto& pe = StaticCast<PerformExpr>(*node);
-            return CheckInitInExpr(pe.expr);
-        }
-        case ASTKind::RESUME_EXPR: {
-            auto& re = StaticCast<ResumeExpr>(*node);
-            bool result = true;
-            if (re.withExpr) {
-                result = result && CheckInitInExpr(re.withExpr);
-            }
-            if (re.throwingExpr) {
-                result = result && CheckInitInExpr(re.throwingExpr);
-            }
-            return result;
-        }
         case ASTKind::LET_PATTERN_DESTRUCTOR: {
             auto& lpd = StaticCast<LetPatternDestructor>(*node);
             return std::all_of(lpd.patterns.cbegin(), lpd.patterns.cend(),
@@ -1065,11 +1050,7 @@ bool InitializationChecker::CheckInitInTryExpr(const TryExpr& te)
         }
     }
     ++tryDepth;
-    if (te.tryLambda) {
-        CheckInitialization(te.tryLambda.get());
-    } else {
-        CheckInitialization(te.tryBlock.get());
-    }
+    CheckInitialization(te.tryBlock.get());
     --tryDepth;
     if (!te.catchBlocks.empty()) {
         for (auto& catchPattern : te.catchPatterns) {
@@ -1077,13 +1058,6 @@ bool InitializationChecker::CheckInitInTryExpr(const TryExpr& te)
         }
         for (auto& catchBlock : te.catchBlocks) {
             CheckInitialization(catchBlock.get());
-        }
-    }
-    if (!te.handlers.empty()) {
-        // If there are handlers, we need to check them
-        for (const auto& handler : te.handlers) {
-            result = result && CheckInitInExpr(handler.commandPattern.get());
-            CheckInitialization(handler.desugaredLambda.get());
         }
     }
     if (te.finallyBlock) {

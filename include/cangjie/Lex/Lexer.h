@@ -118,14 +118,7 @@ public:
     unsigned GetFileID() const;
 
     void ClearStringParts(const Token& t);
-
-    /**
-     * @brief Enable lexing of EH keywords
-     *
-     * @param enabled Whether to enable or disable EH tokens lexing
-    */
-    void SetEHEnabled(bool enabled) const;
-
+    
     // Parse/Macro.
     const std::vector<StringPart>& GetStrParts(const Token& t);
     /// Read all tokens until the END token, excluded. After this, the Lexer cannot yield any more token.

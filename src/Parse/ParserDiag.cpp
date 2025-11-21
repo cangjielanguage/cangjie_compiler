@@ -983,11 +983,10 @@ void ParserImpl::DiagMatchCase(DiagnosticBuilder& builder)
     }
 }
 
-void ParserImpl::DiagExpectedCatchOrHandleOrFinallyAfterTry(const TryExpr& te)
+void ParserImpl::DiagExpectedCatchOrFinallyAfterTry(const TryExpr& te)
 {
-    auto diagKind = this->enableEH ? DiagKindRefactor::parse_expected_catch_or_handle_or_finally_in_try
-                                        : DiagKindRefactor::parse_expected_catch_or_finally_in_try;
-    auto builder = ParseDiagnoseRefactor(diagKind, lookahead, ConvertToken(lookahead));
+    auto builder = ParseDiagnoseRefactor(
+        DiagKindRefactor::parse_expected_catch_or_finally_in_try, lookahead, ConvertToken(lookahead));
     builder.AddHint(MakeRange(te.begin, te.tryBlock->end));
 }
 

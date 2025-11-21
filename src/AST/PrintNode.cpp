@@ -597,31 +597,9 @@ void PrintTryExpr(unsigned indent, const TryExpr& expr)
         PrintIndent(indent + TWO_INDENT, "}");
         PrintIndent(indent + ONE_INDENT, "}");
     }
-    for (const auto& handler : expr.handlers) {
-        PrintIndent(indent + ONE_INDENT, "Handle", "{");
-        PrintIndent(indent + TWO_INDENT, "HandlePattern", "{");
-        PrintIndent(indent + THREE_INDENT, "CommandTypePattern:");
-        PrintNode(handler.commandPattern.get(), indent + THREE_INDENT);
-        PrintIndent(indent + TWO_INDENT, "}");
-        PrintIndent(indent + TWO_INDENT, "HandleBlock", "{");
-        PrintNode(handler.block.get(), indent + THREE_INDENT);
-        PrintIndent(indent + TWO_INDENT, "}");
-        PrintIndent(indent + TWO_INDENT, "DesugaredLambda", "{");
-        PrintNode(handler.desugaredLambda.get(), indent + THREE_INDENT);
-        PrintIndent(indent + TWO_INDENT, "}");
-        PrintIndent(indent + ONE_INDENT, "}");
-    }
     PrintIndent(indent + ONE_INDENT, "FinallyBlock", "{");
     PrintNode(expr.finallyBlock.get(), indent + TWO_INDENT);
     PrintIndent(indent + ONE_INDENT, "}");
-    if (!expr.handlers.empty()) {
-        PrintIndent(indent + ONE_INDENT, "TryLambda", "{");
-        PrintNode(expr.tryLambda.get(), indent + TWO_INDENT);
-        PrintIndent(indent + ONE_INDENT, "}");
-        PrintIndent(indent + ONE_INDENT, "FinallyLambda", "{");
-        PrintNode(expr.finallyLambda.get(), indent + TWO_INDENT);
-        PrintIndent(indent + ONE_INDENT, "}");
-    }
     PrintIndent(indent, "}");
 }
 
@@ -630,23 +608,6 @@ void PrintThrowExpr(unsigned indent, const ThrowExpr& expr)
     PrintIndent(indent, "ThrowExpr", "{");
     PrintBasic(indent + ONE_INDENT, expr);
     PrintNode(expr.expr.get(), indent + ONE_INDENT, "expr");
-    PrintIndent(indent, "}");
-}
-
-void PrintPerformExpr(unsigned indent, const PerformExpr& expr)
-{
-    PrintIndent(indent, "PerformExpr", "{");
-    PrintBasic(indent + ONE_INDENT, expr);
-    PrintNode(expr.expr.get(), indent + ONE_INDENT, "PerformExpr");
-    PrintIndent(indent, "}");
-}
-
-void PrintResumeExpr(unsigned indent, const ResumeExpr& expr)
-{
-    PrintIndent(indent, "ResumeExpr", "{");
-    PrintBasic(indent + ONE_INDENT, expr);
-    PrintNode(expr.withExpr.get(), indent + ONE_INDENT, "WithExpr");
-    PrintNode(expr.throwingExpr.get(), indent + ONE_INDENT, "ThrowingExpr");
     PrintIndent(indent, "}");
 }
 
@@ -1320,14 +1281,6 @@ void PrintVarOrEnumPattern(unsigned indent, const VarOrEnumPattern& ve)
     PrintIndent(indent, "}");
 }
 
-void PrintCommandTypePattern(unsigned indent, const CommandTypePattern& commandTypePattern)
-{
-    PrintNode(commandTypePattern.pattern.get(), indent + ONE_INDENT);
-    for (auto& type : commandTypePattern.types) {
-        PrintNode(type.get(), indent + ONE_INDENT);
-    }
-}
-
 void PrintPackageSpec(unsigned indent, const PackageSpec& package)
 {
     PrintIndent(indent, "PackageSpec:", package.packageName.Val(), "{");
@@ -1426,8 +1379,6 @@ void PrintNode([[maybe_unused]] Ptr<const Node> node, [[maybe_unused]] unsigned 
         [&indent](const MatchExpr& expr) { PrintMatchExpr(indent, expr); },
         [&indent](const TryExpr& expr) { PrintTryExpr(indent, expr); },
         [&indent](const ThrowExpr& expr) { PrintThrowExpr(indent, expr); },
-        [&indent](const PerformExpr& expr) { PrintPerformExpr(indent, expr); },
-        [&indent](const ResumeExpr& expr) { PrintResumeExpr(indent, expr); },
         [&indent](const ReturnExpr& expr) { PrintReturnExpr(indent, expr); },
         [&indent](const JumpExpr& expr) { PrintJumpExpr(indent, expr); },
         [&indent](const ForInExpr& expr) { PrintForInExpr(indent, expr); },
@@ -1490,7 +1441,6 @@ void PrintNode([[maybe_unused]] Ptr<const Node> node, [[maybe_unused]] unsigned 
         [&indent](const TypePattern& typePattern) { PrintBasicpePattern(indent, typePattern); },
         [&indent](const EnumPattern& enumPattern) { PrintEnumPattern(indent, enumPattern); },
         [&indent](const ExceptTypePattern& exceptTypePattern) { PrintExceptTypePattern(indent, exceptTypePattern); },
-        [&indent](const CommandTypePattern& cmdTypePattern) { PrintCommandTypePattern(indent, cmdTypePattern); },
         [indent](const VarOrEnumPattern& ve) { PrintVarOrEnumPattern(indent, ve); },
         // ----------- package----------------------
         [&indent](const PackageSpec& package) { PrintPackageSpec(indent, package); },

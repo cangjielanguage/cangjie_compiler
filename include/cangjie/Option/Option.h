@@ -494,8 +494,6 @@ public:
 
     bool exportForTest = false; /** Export some additional kinds of declaration specifically for using them in tests */
 
-    bool enableEH = false; /** Whether support for effect handlers is enabled */
-
     MockSupportKind mock = MockSupportKind::DEFAULT; /**< Whether enable mocking. */
 
     DiagFormat diagFormat = DiagFormat::DEFAULT; /** Whether output diagnostic with color*/

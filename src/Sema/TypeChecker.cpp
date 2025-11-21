@@ -1071,17 +1071,6 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::Synthesize(ASTContext& ctx, Ptr<Node> node
             node->ty = SynThrowExpr(*curCtx, *StaticAs<ASTKind::THROW_EXPR>(node));
             break;
         }
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-        // Effect handlers are only enabled in the CJNative backend, for now
-        case ASTKind::PERFORM_EXPR: {
-            node->ty = SynPerformExpr(*curCtx, *StaticAs<ASTKind::PERFORM_EXPR>(node));
-            break;
-        }
-        case ASTKind::RESUME_EXPR: {
-            node->ty = SynResumeExpr(*curCtx, *StaticAs<ASTKind::RESUME_EXPR>(node));
-            break;
-        }
-#endif // CANGJIE_CODEGEN_CJNATIVE_BACKEND
         case ASTKind::TYPE_ALIAS_DECL: {
             CheckTypeAlias(*curCtx, *StaticAs<ASTKind::TYPE_ALIAS_DECL>(node));
             break;
@@ -1300,7 +1289,6 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
             }
                 // These patterns are supported, so do type infer framework.
             case ASTKind::EXCEPT_TYPE_PATTERN:
-            case ASTKind::COMMAND_TYPE_PATTERN:
             case ASTKind::WILDCARD_PATTERN:
             case ASTKind::CONST_PATTERN:
             case ASTKind::TYPE_PATTERN:

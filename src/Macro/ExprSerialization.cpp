@@ -442,22 +442,12 @@ flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeTryExpr(AstExpr expr)
         FlatVectorCreateHelper<NodeFormat::Block, Block, AstBlock>(tryExpr->catchBlocks, &NodeWriter::SerializeBlock);
     auto fbCatchPatterns = FlatVectorCreateHelper<NodeFormat::Pattern, Pattern, AstPattern>(
         tryExpr->catchPatterns, &NodeWriter::SerializePattern);
-    std::vector<flatbuffers::Offset<NodeFormat::Handler>> vecHandlers;
-    for (auto& handler : tryExpr->handlers) {
-        auto fbPos = FlatPosCreateHelper(handler.pos);
-        auto fbCommandPattern = SerializePattern(handler.commandPattern.get());
-        auto fbHandleBlock = SerializeBlock(handler.block.get());
-        auto fbHanlder =
-            NodeFormat::CreateHandler(builder, &fbPos, fbCommandPattern, fbHandleBlock);
-        vecHandlers.push_back(fbHanlder);
-    }
-    auto fbHandlers = builder.CreateVector(vecHandlers);
     auto finallyPos = FlatPosCreateHelper(tryExpr->finallyPos);
     auto fbFinallyBlock = SerializeBlock(tryExpr->finallyBlock.get());
     auto fbTryExpr =
         NodeFormat::CreateTryExpr(builder, fbNodeBase, fbResource, tryExpr->isDesugaredFromTryWithResources,
             fbTryBlock, fbCatchBlocks, fbCatchPatterns, &finallyPos, fbFinallyBlock,
-            &fbLParenPos, &fbRParenPos, fbCommaPos, fbCatchPos, fbCatchLParenPos, fbCatchRParenPos, fbHandlers);
+            &fbLParenPos, &fbRParenPos, fbCommaPos, fbCatchPos, fbCatchLParenPos, fbCatchRParenPos);
     return NodeFormat::CreateExpr(builder, fbNodeBase, NodeFormat::AnyExpr_TRY_EXPR, fbTryExpr.Union());
 }
 
@@ -468,28 +458,6 @@ flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeThrowExpr(AstExpr exp
     auto fbExpr = SerializeExpr(throwExpr->expr.get());
     auto fbThrowExpr = NodeFormat::CreateThrowExpr(builder, fbNodeBase, fbExpr);
     return NodeFormat::CreateExpr(builder, fbNodeBase, NodeFormat::AnyExpr_THROW_EXPR, fbThrowExpr.Union());
-}
-
-flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializePerformExpr(AstExpr expr)
-{
-    auto performExpr = RawStaticCast<const PerformExpr*>(expr);
-    auto fbNodeBase = SerializeNodeBase(performExpr);
-    auto fbExpr = SerializeExpr(performExpr->expr.get());
-    auto fbPerformExpr = NodeFormat::CreatePerformExpr(builder, fbNodeBase, fbExpr);
-    return NodeFormat::CreateExpr(builder, fbNodeBase, NodeFormat::AnyExpr_PERFORM_EXPR, fbPerformExpr.Union());
-}
-
-flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeResumeExpr(AstExpr expr)
-{
-    auto resumeExpr = RawStaticCast<const ResumeExpr*>(expr);
-    auto fbNodeBase = SerializeNodeBase(resumeExpr);
-    auto withPos = FlatPosCreateHelper(resumeExpr->withPos);
-    auto withExpr = SerializeExpr(resumeExpr->withExpr);
-    auto throwingPos = FlatPosCreateHelper(resumeExpr->throwingPos);
-    auto throwingExpr = SerializeExpr(resumeExpr->throwingExpr);
-    auto fbResumeExpr =
-        NodeFormat::CreateResumeExpr(builder, fbNodeBase, &withPos, withExpr, &throwingPos, throwingExpr);
-    return NodeFormat::CreateExpr(builder, fbNodeBase, NodeFormat::AnyExpr_RESUME_EXPR, fbResumeExpr.Union());
 }
 
 flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializePrimitiveTypeExpr(AstExpr expr)
@@ -661,8 +629,6 @@ flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeExpr(AstExpr expr)
             {ASTKind::MATCH_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeMatchExpr(expr); }},
             {ASTKind::TRY_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeTryExpr(expr); }},
             {ASTKind::THROW_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeThrowExpr(expr); }},
-            {ASTKind::PERFORM_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializePerformExpr(expr); }},
-            {ASTKind::RESUME_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeResumeExpr(expr); }},
             {ASTKind::JUMP_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeJumpExpr(expr); }},
             {ASTKind::WHILE_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeWhileExpr(expr); }},
             {ASTKind::DO_WHILE_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeDoWhileExpr(expr); }},

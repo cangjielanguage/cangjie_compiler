@@ -98,18 +98,6 @@ Parser& Parser::EnableCustomAnno()
     return *this;
 }
 
-Parser& Parser::SetEHEnabled(bool enabled)
-{
-    impl->enableEH = enabled;
-    impl->lexer->SetEHEnabled(enabled);
-    return *this;
-}
-
-bool Parser::IsEHEnabled() const
-{
-    return impl->enableEH;
-}
-
 TokenVecMap Parser::GetCommentsMap() const
 {
     return impl->commentsMap;
@@ -120,10 +108,6 @@ void Parser::SetCompileOptions(const GlobalOptions& opts)
     impl->backend = opts.backend;
     impl->scanDepPkg = opts.scanDepPkg;
     impl->calculateLineNum = opts.enableTimer || opts.enableMemoryCollect;
-    // Effect handlers break backwards compatibility by introducing new
-    // keywords, so we disable them from the parser unless the user
-    // explicitly asks to compile with effect handler support
-    SetEHEnabled(opts.enableEH);
 }
 
 bool Parser::Skip(TokenKind kind)

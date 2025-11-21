@@ -584,23 +584,6 @@ void ASTChecker::CheckThrowExpr(Ptr<Node> node)
     ZERO_POSITION_CHECK(node, te->throwPos);
     AST_NULLPTR_CHECK(node, te->expr);
 }
-void ASTChecker::CheckPerformExpr(Ptr<Node> node)
-{
-    auto pe = StaticAs<ASTKind::PERFORM_EXPR>(node);
-    ZERO_POSITION_CHECK(node, pe->performPos);
-    AST_NULLPTR_CHECK(node, pe->expr)   ;
-}
-void ASTChecker::CheckResumeExpr(Ptr<Node> node)
-{
-    auto re = StaticAs<ASTKind::RESUME_EXPR>(node);
-    ZERO_POSITION_CHECK(node, re->resumePos);
-    if (re->withExpr) {
-        ZERO_POSITION_CHECK(node, re->withPos);
-    }
-    if (re->throwingExpr) {
-        ZERO_POSITION_CHECK(node, re->throwingPos);
-    }
-}
 void ASTChecker::CheckTrailingClosureExpr(Ptr<Node> node)
 {
     auto tce = StaticAs<ASTKind::TRAIL_CLOSURE_EXPR>(node);
@@ -618,11 +601,6 @@ void ASTChecker::CheckTryExpr(Ptr<Node> node)
     VEC_ZERO_POS_CHECK(node, te->catchPosVector);
     VEC_AST_NULLPTR_CHECK(node, te->catchBlocks);
     VEC_AST_NULLPTR_CHECK(node, te->catchPatterns);
-    for (const auto& handler : te->handlers) {
-        ZERO_POSITION_CHECK(node, handler.pos);
-        AST_NULLPTR_CHECK(node, handler.block);
-        AST_NULLPTR_CHECK(node, handler.commandPattern);
-    }
 }
 void ASTChecker::CheckTupleLit(Ptr<Node> node)
 {
@@ -697,16 +675,6 @@ void ASTChecker::CheckEnumPattern(Ptr<Node> node)
 void ASTChecker::CheckExceptTypePattern(Ptr<Node> node)
 {
     auto etp = StaticAs<ASTKind::EXCEPT_TYPE_PATTERN>(node);
-    AST_NULLPTR_CHECK(node, etp->pattern);
-    ZERO_POSITION_CHECK(node, etp->patternPos);
-    ZERO_POSITION_CHECK(node, etp->colonPos);
-    VEC_AST_NULLPTR_CHECK(node, etp->types);
-    VEC_ZERO_POS_CHECK(node, etp->bitOrPosVector);
-}
-
-void ASTChecker::CheckCommandTypePattern(Ptr<Node> node)
-{
-    auto etp = StaticAs<ASTKind::COMMAND_TYPE_PATTERN>(node);
     AST_NULLPTR_CHECK(node, etp->pattern);
     ZERO_POSITION_CHECK(node, etp->patternPos);
     ZERO_POSITION_CHECK(node, etp->colonPos);
