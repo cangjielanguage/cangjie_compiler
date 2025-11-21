@@ -26,10 +26,10 @@
 namespace {
 // judge if generic type is instance of a certain type. 
 template <class T, template<class...> class U>
-inline constexpr bool is_instance_of_v = std::false_type{};
+inline constexpr bool IsInstanceOfValue = std::false_type{};
 
 template <template<class...> class U, class... Vs>
-inline constexpr bool is_instance_of_v<U<Vs...>, U> = std::true_type{};
+inline constexpr bool IsInstanceOfValue<U<Vs...>, U> = std::true_type{};
 }
 
 namespace Cangjie::CHIR {
@@ -493,6 +493,11 @@ private:
             }
             return;
         }
+        if (IsInstanceOfValue<ValueStatePool, ActiveStatePool> && state->Find(src) == state->End()) {
+            // It is possible that state can not find src in active state mode.
+            // state is gone normally because oversize of state pool, skip propagation.
+            return;
+        }
         if (auto it = state->Find(dest); it != state->End()) {
             it->second = programState.At(src);
         } else {
@@ -536,7 +541,7 @@ private:
     {
         for (auto child : children) {
             auto childIt = programState.Find(child);
-            if (is_instance_of_v<ValueStatePool, ActiveStatePool>) {
+            if (IsInstanceOfValue<ValueStatePool, ActiveStatePool>) {
                 if (childIt == programState.End()) {
                     continue;
                 }
@@ -639,7 +644,10 @@ private:
             } else {
                 CJC_ASSERT(std::holds_alternative<AbstractObject*>(v1));
                 CJC_ASSERT(std::holds_alternative<AbstractObject*>(v2));
-                CJC_ASSERT(std::get<AbstractObject*>(v1) == std::get<AbstractObject*>(v2));
+                if (IsInstanceOfValue<ValueStatePool, FullStatePool>) {
+                    // Value of ref may change not using active state pool.
+                    CJC_ASSERT(std::get<AbstractObject*>(v1) == std::get<AbstractObject*>(v2));
+                }
             }
             return false;
         };
@@ -1136,7 +1144,7 @@ private:
         }
         auto valIt = state.programState.Find(value);
         auto locIt = state.programState.Find(location);
-        if (is_instance_of_v<ValueStatePool, ActiveStatePool>) {
+        if (IsInstanceOfValue<ValueStatePool, ActiveStatePool>) {
             if (valIt == state.programState.End() || locIt == state.programState.End()) {
                 // dead state will delete in active state mode
                 state.SetToTopOrTopRef(location, true);
@@ -1238,7 +1246,7 @@ private:
         auto dest = load->GetResult();
         auto locIt = state.programState.Find(loc);
         auto& locVal = locIt->second;
-        if (is_instance_of_v<ValueStatePool, ActiveStatePool>) {
+        if (IsInstanceOfValue<ValueStatePool, ActiveStatePool>) {
             if (locIt == state.programState.End()) {
                 // dead state will delete in active state mode
                 state.SetToTopOrTopRef(dest, dest->GetType()->IsRef());
