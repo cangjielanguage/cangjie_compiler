@@ -585,38 +585,35 @@ void LexerImpl::ProcessNumberFloatSuffix(const char& prefix, bool isFloat)
 }
 
 // illegal start decimal part,e.g 01、0_1
-const char* LexerImpl::GetIllegalStartDecimalPart(const char* pStart, const char* pEnd) const
+bool LexerImpl::IsIllegalStartDecimalPart(const char* pStart, const char* pEnd) const
 {
     if (pStart > pEnd) {
-        return nullptr;
+        return false;
     }
     const char* start = pStart;
     if (*start != '0') {
-        return nullptr;
+        return false;
     }
     // decimal starts with 0
     start++;
     if (start > pEnd) {
-        return nullptr;
+        return false;
     }
     if (isdigit(*start)) {
-        return start;
+        return true;
     }
     if (*start != '_') {
-        return nullptr;
+        return false;
     }
 
     // decimal starts with 0_
     start++;
     if (start > pEnd) {
-        return nullptr;
+        return false;
     }
     for (; start <= pEnd && *start == '_'; start++) {
     }
-    if (start <= pEnd && isdigit(*start)) {
-        return start;
-    }
-    return nullptr;
+    return start <= pEnd && isdigit(*start);
 }
 
 Token LexerImpl::ScanNumber(const char* pStart)
@@ -626,12 +623,11 @@ Token LexerImpl::ScanNumber(const char* pStart)
     const char* reasonPoint{pStart};
     bool hasDigit = false; // hasDigit is true when digit present
     // 1. Process integer part.
-    const char* ptr{};
     if (currentChar != '.') {
         if (ScanNumberIntegerPart(pStart, base, prefix, hasDigit, reasonPoint)) {
-            if (ptr = GetIllegalStartDecimalPart(pStart, pCurrent); ptr) {
+            if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "integer", std::string{pStart, ptr});
+                    DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "integer", std::string{*pStart});
             }
             Back();
             return Token(tokenKind, std::string(pStart, pNext), pos, GetPos(pNext));
@@ -645,34 +641,26 @@ Token LexerImpl::ScanNumber(const char* pStart)
             if (!isxdigit(GetNextChar(0))) {
                 DiagSmallExpectedDigit(hasDigit, prefix);
                 Back();
-                if (success && (ptr = GetIllegalStartDecimalPart(pStart, pCurrent))) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "float", std::string{pStart, ptr});
-                }
                 return Token(tokenKind, std::string(pStart, pNext), pos, GetPos(pNext));
             }
         } else {
             if (!isdigit(GetNextChar(0))) {
                 DiagSmallExpectedDigit(hasDigit, prefix);
                 Back();
-                if (success && (ptr = GetIllegalStartDecimalPart(pStart, pCurrent))) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "float", std::string{pStart, ptr});
-                }
                 return Token(tokenKind, std::string(pStart, pNext), pos, GetPos(pNext));
             }
         }
         hasDigit = false;
         isFloat = true;
-        if (ptr = GetIllegalStartDecimalPart(pStart, pCurrent); ptr) {
+        if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "float", std::string{pStart, ptr});
+                DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "float", std::string{*pStart});
         }
         ScanNumberDecimalPart(base, prefix, hasDigit, reasonPoint);
     } else {
-        if (ptr = GetIllegalStartDecimalPart(pStart, pCurrent); ptr) {
+        if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "integer", std::string{pStart, ptr});
+                DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "integer", std::string{*pStart});
         }
     }
     DiagSmallExpectedDigit(hasDigit, prefix);
@@ -2061,7 +2049,7 @@ void LexerImpl::CollectToken(const Token& token)
     }
 }
 
-inline void LexerImpl::DiagSmallExpectedDigit(bool hasDigit, char base)
+inline void LexerImpl::DiagSmallExpectedDigit(const bool& hasDigit, const char base)
 {
     if (!hasDigit && success) {
         DiagExpectedDigit(base);

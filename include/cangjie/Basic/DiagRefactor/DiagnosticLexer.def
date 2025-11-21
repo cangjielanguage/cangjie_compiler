@@ -9,7 +9,7 @@ ERROR(lex_unknown_start_of_token, "unknown start of token: %s", "unknown start o
 ERROR(lex_unexpected_digit, "unexpected digit '%s' in %s", "unexpected digit", {
     "because %s"
 })
-ERROR(lex_cannot_start_with_digit, "cannot start a(n) %s literal with '%s'", "unexpected digit(s)")
+ERROR(lex_cannot_start_with_digit, "cannot start a(n) %s literal with a '%s' digit", "unexpected digit")
 ERROR(lex_expected_digit, "expected %s digit, found '%s'", "expected %s digit")
 ERROR(lex_unexpected_decimal_point, "unexpected decimal point '.' in %s base number", "unexpected decimal point", {
     "because of this %s prefix"
