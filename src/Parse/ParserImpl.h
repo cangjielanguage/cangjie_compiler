@@ -224,8 +224,6 @@ private:
         {TokenKind::QUOTE, &ParserImpl::ParseQuoteExpr},
         {TokenKind::TRY, &ParserImpl::ParseTryExpr},
         {TokenKind::THROW, &ParserImpl::ParseThrowExpr},
-        {TokenKind::PERFORM, &ParserImpl::ParsePerformExpr},
-        {TokenKind::RESUME, &ParserImpl::ParseResumeExpr},
         {TokenKind::RETURN, &ParserImpl::ParseReturnExpr},
         {TokenKind::FOR, &ParserImpl::ParseForInExpr},
         {TokenKind::WHILE, &ParserImpl::ParseWhileExpr},
@@ -299,7 +297,6 @@ private:
     bool enableAttachComment{false};
     bool parseDeclFile{false};
 
-    bool enableEH{false};
     Triple::BackendType backend{Triple::BackendType::CJNATIVE};
     bool calculateLineNum{false};
     // we store line number info from all tokens
@@ -733,8 +730,6 @@ private:
     /// recursively, and it DOES NOT mean whether the condition is good or not.
     bool CheckCondition(AST::Expr* e);
     OwnedPtr<AST::ThrowExpr> ParseThrowExpr();
-    OwnedPtr<AST::PerformExpr> ParsePerformExpr();
-    OwnedPtr<AST::ResumeExpr> ParseResumeExpr();
     // Parse 'this' or 'super'.
     OwnedPtr<AST::RefExpr> ParseThisOrSuper() const;
     OwnedPtr<AST::ReturnExpr> ParseReturnExpr();
@@ -761,11 +756,9 @@ private:
     OwnedPtr<AST::Decl> ParseVarDecl(
         const ScopeKind& scopeKind, const std::set<AST::Modifier>& modifiers, const Token& keyToken);
     OwnedPtr<AST::TryExpr> ParseTryExpr();
-    void ParseHandleBlock(AST::TryExpr& tryExpr);
     void ParseCatchBlock(AST::TryExpr& tryExpr);
     void ParseTryWithResource(const ScopeKind& scopeKind, AST::TryExpr& tryExpr);
     OwnedPtr<AST::Pattern> ParseExceptTypePattern();
-    OwnedPtr<AST::Pattern> ParseCommandTypePattern();
     OwnedPtr<AST::ForInExpr> ParseForInExpr();
     OwnedPtr<AST::RefExpr> ParseRefExpr(ExprKind ek = ExprKind::ALL);
     OwnedPtr<AST::Expr> ParseWildcardExpr();
@@ -911,7 +904,7 @@ private:
     void DiagExpectedLeftParenAfter(const Position& pos, const std::string& str);
     void DiagMatchCaseExpectedExprOrDecl();
     void DiagMatchCaseBodyCannotBeEmpty(const Position& pos);
-    void DiagExpectedCatchOrHandleOrFinallyAfterTry(const AST::TryExpr& te);
+    void DiagExpectedCatchOrFinallyAfterTry(const AST::TryExpr& te);
     void DiagExpectedSelectorOrMatchExprBody(const Position& pos);
     void DiagRedefinedResourceName(
         const std::pair<std::string, Position>& cur, const std::pair<std::string, Position>& pre);

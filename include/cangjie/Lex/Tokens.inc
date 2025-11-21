@@ -7,10 +7,6 @@
 // TOKEN(token id, token value for human reading, token literal, token priority)
 // Note that stdlib/ast/AnyKind.cj should be modified at the same time that this file has been changed.
 #ifdef TOKEN
-#ifndef EXPERIMENTAL_TOKEN
-#define EXPERIMENTAL_TOKEN TOKEN
-#define EXPERIMENTAL_TOKEN_DEFAULT
-#endif
 TOKEN(DOT, "dot", ".", 0)
 TOKEN(COMMA, "comma", ",", 0)
 TOKEN(LPAREN, "l_paren", "(", 0)
@@ -167,13 +163,5 @@ TOKEN(UNIT_LITERAL, "unit_literal", "", 0) // Will not be produced from Lexer.
 TOKEN(DOLLAR_IDENTIFIER, "dollar_identifier", "", 0)
 TOKEN(ANNOTATION, "annotation", "", 0)
 TOKEN(AT_EXCL, "at_exclamation", "@!", 0)
-EXPERIMENTAL_TOKEN(PERFORM, "perform", "perform", 0)
-EXPERIMENTAL_TOKEN(RESUME, "resume", "resume", 0)
-EXPERIMENTAL_TOKEN(THROWING, "throwing", "throwing", 0)
-EXPERIMENTAL_TOKEN(HANDLE, "handle", "handle", 0)
 TOKEN(ILLEGAL, "illegal", "", 0)
-#ifdef EXPERIMENTAL_TOKEN_DEFAULT
-#undef EXPERIMENTAL_TOKEN
-#undef EXPERIMENTAL_TOKEN_DEFAULT
-#endif
 #endif

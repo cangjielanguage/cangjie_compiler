@@ -110,9 +110,6 @@ public:
     std::size_t GetProcessedTokens() const;
     std::string GetPrimaryDeclIdentRawValue() const;
 
-    Parser& SetEHEnabled(bool enabled);
-    bool IsEHEnabled() const;
-
     Parser& SetModuleName(const std::string& name);
     Parser& SetPrimaryDecl(const std::string& decl);
     Parser& SetForImport(bool isForImport);

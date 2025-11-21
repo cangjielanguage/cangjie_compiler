@@ -862,7 +862,6 @@ private:
         {ASTKind::LIT_CONST_EXPR, Proxy(&ConstEvaluationChecker::ChkLitConstExpr)},
         {ASTKind::RETURN_EXPR, Proxy(&ConstEvaluationChecker::ChkReturnExpr)},
         {ASTKind::THROW_EXPR, Proxy(&ConstEvaluationChecker::ChkInnerExpr<const ThrowExpr&>)},
-        {ASTKind::PERFORM_EXPR, Proxy(&ConstEvaluationChecker::ChkInnerExpr<const PerformExpr&>)},
         {ASTKind::PAREN_EXPR, Proxy(&ConstEvaluationChecker::ChkInnerExpr<const ParenExpr&>)},
         {ASTKind::UNARY_EXPR, Proxy(&ConstEvaluationChecker::ChkInnerExpr<const UnaryExpr&>)},
         {ASTKind::IS_EXPR, Proxy(&ConstEvaluationChecker::ChkLeftExpr<const IsExpr&>)},

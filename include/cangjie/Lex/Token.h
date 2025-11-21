@@ -44,25 +44,6 @@ inline const char* TOKENS[] = {
 #undef TOKEN
 };
 
-/**
- * @brief Check if a given token is experimental
- *
- * @param token The `const char*` representation of the token to check
- * @return bool Whether `token` is experimental
- */
-inline bool IsExperimental(const char* token)
-{
-#define TOKEN(ID, VALUE, LITERAL, PRECEDENCE)
-#define EXPERIMENTAL_TOKEN(ID, VALUE, LITERAL, PRECEDENCE)  \
-    if (strcmp(token, LITERAL) == 0) {                      \
-        return true;                                        \
-    }
-#include "cangjie/Lex/Tokens.inc"
-#undef TOKEN
-#undef EXPERIMENTAL_TOKEN
-    return false;
-}
-
 inline const uint8_t TOKEN_TO_OPERATOR_PRECEDENCE[NUM_TOKENS] = {
 #define TOKEN(ID, VALUE, LITERAL, PRECEDENCE) PRECEDENCE,
 #include "cangjie/Lex/Tokens.inc"

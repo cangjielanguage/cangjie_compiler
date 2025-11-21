@@ -186,8 +186,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializePattern(AstPattern
                 [](NodeWriter& nw, AstPattern pattern) { return nw.SerializeVarOrEnumPattern(pattern); }},
             {ASTKind::EXCEPT_TYPE_PATTERN,
                 [](NodeWriter& nw, AstPattern pattern) { return nw.SerializeExceptTypePattern(pattern); }},
-            {ASTKind::COMMAND_TYPE_PATTERN,
-                [](NodeWriter& nw, AstPattern pattern) { return nw.SerializeCommandTypePattern(pattern); }},
             {ASTKind::WILDCARD_PATTERN,
                 [](NodeWriter& nw, AstPattern pattern) { return nw.SerializeWildcardPattern(pattern); }},
         };
@@ -301,22 +299,6 @@ flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeExceptTypePattern(
         builder, fbNodeBase, fbPattern, &patternPos, &colonPos, fbTypes, bitOrPosVector);
     return NodeFormat::CreatePattern(
         builder, fbNodeBase, NodeFormat::AnyPattern_EXCEPT_TYPE_PATTERN, fbExceptTypePattern.Union());
-}
-
-flatbuffers::Offset<NodeFormat::Pattern> NodeWriter::SerializeCommandTypePattern(AstPattern pattern)
-{
-    auto effectTypePattern = RawStaticCast<const CommandTypePattern*>(pattern);
-    auto fbNodeBase = SerializeNodeBase(effectTypePattern);
-    auto fbPattern = SerializePattern(effectTypePattern->pattern.get());
-    auto patternPos = FlatPosCreateHelper(effectTypePattern->patternPos);
-    auto colonPos = FlatPosCreateHelper(effectTypePattern->colonPos);
-    auto fbTypes =
-        FlatVectorCreateHelper<NodeFormat::Type, Type, AstType>(effectTypePattern->types, &NodeWriter::SerializeType);
-    auto bitOrPosVector = CreatePositionVector(effectTypePattern->bitOrPosVector);
-    auto fbCommandTypePattern = NodeFormat::CreateCommandTypePattern(
-        builder, fbNodeBase, fbPattern, &patternPos, &colonPos, fbTypes, bitOrPosVector);
-    return NodeFormat::CreatePattern(
-        builder, fbNodeBase, NodeFormat::AnyPattern_COMMAND_TYPE_PATTERN, fbCommandTypePattern.Union());
 }
 
 flatbuffers::Offset<NodeFormat::FuncParam> NodeWriter::SerializeFuncParam(AstFuncParam funcParam)

@@ -130,8 +130,6 @@ bool ParserImpl::SeeingExpr()
         TokenKind::QUOTE,
         TokenKind::TRY,
         TokenKind::THROW,
-        TokenKind::PERFORM,
-        TokenKind::RESUME,
         TokenKind::RETURN,
         TokenKind::CONTINUE,
         TokenKind::BREAK,
