@@ -383,7 +383,7 @@ void TypeChecker::TypeCheckerImpl::ParsePackageConfigFile(Ptr<AST::Package>& pkg
                 For member decl in includeApis and inside STRUCT_DECL, but STRUCT_DECL not in includeApis, need Warning &
                 insert STRUCT_DECL in includeApis.
             */
-            if (!structDecl->symbol->isNeedExposedToInterop) {
+            if (structDecl && !structDecl->symbol->isNeedExposedToInterop) {
                 for (auto& member : structDecl->GetMemberDecls()) {
                     if (member->symbol && member->symbol->isNeedExposedToInterop) {
                         structDecl->symbol->isNeedExposedToInterop = true;
@@ -398,7 +398,7 @@ void TypeChecker::TypeCheckerImpl::ParsePackageConfigFile(Ptr<AST::Package>& pkg
                   modifiers are prohibited from exposing symbols for interoperability, and users are notified
                   via a Warning.
                 */
-                if (structDecl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::PRIVATE, Attribute::PROTECTED)) {
+                if (structDecl && structDecl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::PRIVATE, Attribute::PROTECTED)) {
                     structDecl->symbol->isNeedExposedToInterop = false;
                     std::cerr << "Warning: " << structDecl->symbol->name << " is config to exposed but it not "
                               << "public symbol, so it is hiddened." << std::endl;
