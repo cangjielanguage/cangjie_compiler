@@ -330,7 +330,7 @@ OPTION("--enable-eh", ENABLE_EFFECTS, FLAG, { BACKEND(CJNATIVE) },
 #endif
 OPTION("--dump-ast", DUMP_AST, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
-    "Dump human ast when compiling for debug")
+    "Dump human readable AST when compiling for debug")
 OPTION("--dump-chir", DUMP_CHIR, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Dump human readable CHIR when compiling for debug")

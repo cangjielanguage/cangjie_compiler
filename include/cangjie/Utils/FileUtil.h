@@ -16,7 +16,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #ifdef _MSC_VER
@@ -90,6 +89,13 @@ bool CheckCommandLineInjection(const std::string& cmd);
  * @return string with escaped backtick.
  */
 std::string TransferEscapeBacktick(const std::string& s);
+
+/**
+ * Recursively remove directory and its contents.
+ * @param dirPath target directory.
+ * @return true if directory removed successfully.
+ */
+bool RemoveDirectoryRecursively(const std::string& dirPath);
 
 /**
  * Get file name from filePath.

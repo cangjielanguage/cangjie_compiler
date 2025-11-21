@@ -399,10 +399,6 @@ inline std::string GetConstantArrayName(const std::string& string)
 
 CGType* FixedCGTypeOfFuncArg(CGModule& cgMod, const CHIR::Value& chirFuncArg, llvm::Value& llvmValue);
 
-bool NeedDumpIRToFile(const GlobalOptions& options);
-
-bool NeedDumpIRToScreen(const GlobalOptions& options);
-
 void ClearOldIRDumpFiles(const std::string& output, const std::string& pkgName);
 
 std::string GenDumpPath(const std::string& output, const std::string& pkgName, const std::string& subName,
