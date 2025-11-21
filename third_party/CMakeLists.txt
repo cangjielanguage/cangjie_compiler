@@ -73,7 +73,7 @@ list(TRANSFORM LLVM_DEP_LIB_NAMES PREPEND "lib")
 list(TRANSFORM LLVM_DEP_LIB_NAMES APPEND "${LLVM_LIB_SUFFIX}")
 set(LLVM_LINK_FLAGS -lpthread -lm)
 
-if(CANGJIE_BUILD_CJDB AND NOT WIN32)
+if(CANGJIE_BUILD_CJDB AND NOT WIN32 AND NOT OHOS)
     list(APPEND LLVM_LINK_FLAGS -lncurses)
     if(NOT DARWIN)
         list(APPEND LLVM_LINK_FLAGS -ltinfo)
@@ -215,7 +215,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                 -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/${TRIPLE}_toolchain.cmake)
         endif()
         if(CANGJIE_BUILD_CJDB)
-            if(NOT WIN32)
+            if(NOT WIN32 AND NOT OHOS)
                 list(APPEND LLVM_CMAKE_ARGS ${LLVM_BUILD_ARG}
                     -DLLVM_ENABLE_TERMINFO=1
                     -DCURSES_NEED_NCURSES=1)
