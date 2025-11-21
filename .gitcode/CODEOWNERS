@@ -30,7 +30,6 @@ OAT.xml @xuanjz
 /include/cangjie/Option/ @Yessy @neilliuistaken
 /include/cangjie/Parse/ @kkkkkkkbbbbbbb @wyq1213
 /include/cangjie/Sema/ @huohuixin @wyq1213
-/include/cangjie/Sema/NativeFFI/ @Jiangjiji0527
 /include/cangjie/Utils/ @Augus_Jan @wyq1213
 /src/AST/ @Augus_Jan @wyq1213
 /src/Basic/ @Cangjie-hljyaozhen @wyq1213
@@ -50,10 +49,14 @@ OAT.xml @xuanjz
 /src/Parse/ @kkkkkkkbbbbbbb @wyq1213
 /src/Parse/ParseQuote.cpp @xiaxue0215 @mini-tang
 /src/Parse/ParseMacro.cpp @xiaxue0215 @mini-tang
+/src/Parse/NativeFFI/ @JasmineZhu
 /src/Sema/ @huohuixin @wyq1213
-/src/Sema/NativeFFI/ @Jiangjiji0527
+/src/Sema/NativeFFI/ @JasmineZhu
 /src/Sema/Desugar/DesugarMacro.cpp @xiaxue0215 @mini-tang
 /src/Sema/Desugar/DesugarMacro.h @xiaxue0215 @mini-tang
+/src/Sema/Test/ @JasmineZhu
+/src/Sema/Test/ @JasmineZhu
+/src/CHIR/CJMP/ @JasmineZhu
 /src/Utils/ @Augus_Jan @wyq1213
 /unittests/AST/ @Augus_Jan @wyq1213
 /unittests/Basic/ @Cangjie-hljyaozhen @wyq1213
