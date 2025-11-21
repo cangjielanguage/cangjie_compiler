@@ -310,6 +310,11 @@ void MockSupportManager::CollectDeclsToPrepare(Decl& decl, DeclsToPrepare& decls
         return;
     }
 
+    if (decl.IsConst()) {
+        // "const" functions are not supported
+        return;
+    }
+
     if (decl.TestAttr(Attribute::PRIVATE) || decl.TestAttr(Attribute::MAIN_ENTRY)) {
         return;
     }
@@ -1638,6 +1643,11 @@ void MockSupportManager::PrepareClassWithDefaults(ClassDecl& classDecl, Interfac
         interfaceDecl.curFile, interfaceDecl.identifier + MockUtils::defaultAccessorSuffix);
     if (!accessorInterfaceDecl) {
         // Interface is in package, which was compiled without mocking support
+        return;
+    }
+
+    if (classDecl.TestAttr(Attribute::GENERIC)) {
+        // TODO: Support generic classes to mock methods with default implementation
         return;
     }
 
