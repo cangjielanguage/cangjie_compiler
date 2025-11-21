@@ -250,7 +250,7 @@ private:
     Token ScanBackquotedIdentifier(const char* pStart);
     void ScanIdentifierOrKeyword(Token& res, const char* pStart);
     Token ScanSingleOrMultiLineString(const char* pStart);
-    const char* GetIllegalStartDecimalPart(const char* pStart, const char* pEnd) const;
+    const char* GetIllegalStartDecimalPart(const char* pStart, const char* pEnd, bool isInteger) const;
     void DiagUnexpectedDecimalPoint(const char* reasonPoint);
     void DiagExpectedDigit(const char base);
     inline void DiagSmallExpectedDigit(bool hasDigit, char base);
