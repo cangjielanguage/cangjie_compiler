@@ -212,6 +212,8 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
             list(APPEND LLVM_CMAKE_ARGS
                 -DOHOS=ON
                 -DLLVM_HOST_TRIPLE=${TRIPLE}
+                -DCANGJIE_TARGET_TOOLCHAIN=${CANGJIE_TARGET_TOOLCHAIN}
+                -DCANGJIE_TARGET_SYSROOT=${CANGJIE_TARGET_SYSROOT}
                 -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/${TRIPLE}_toolchain.cmake)
         endif()
         if(CANGJIE_BUILD_CJDB)
