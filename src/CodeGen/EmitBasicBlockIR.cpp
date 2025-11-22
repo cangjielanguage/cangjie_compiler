@@ -22,20 +22,26 @@ namespace Cangjie {
 namespace CodeGen {
 class BasicBlockGeneratorImpl : public IRGeneratorImpl {
 public:
-    BasicBlockGeneratorImpl(CGModule& cgMod, const CHIR::Block& chirBB) : cgMod(cgMod)
+    BasicBlockGeneratorImpl(CGModule& cgMod, const CHIR::Block& entryBB)
+        : cgMod(cgMod),
+          entryBB(entryBB),
+          functionToEmitIR(cgMod.GetOrInsertCGFunction(entryBB.GetTopLevelFunc())->GetRawFunction())
     {
-        worklist.reserve(chirBB.GetParentBlockGroup()->GetBlocks().size());
-        (void)worklist.emplace_back(&chirBB);
     }
 
     void EmitIR() override;
 
 private:
-    void CreateLandingPad(const CHIR::Block* block) const;
+    void CreateBasicBlocks(const CHIR::Block& chirBB);
+    void CreateBasicBlocksIRs(const CHIR::Block& chirBB);
+    void CreateLandingPad(const CHIR::Block& chirBB) const;
 
 private:
     CGModule& cgMod;
-    std::vector<const CHIR::Block*> worklist;
+    const CHIR::Block& entryBB;
+    llvm::Function* functionToEmitIR;
+    // This DFS auxiliary set specifically addresses cycle detection and handling within Block structures.
+    std::set<const CHIR::Block*> auxSet;
 };
 
 template <> class IRGenerator<BasicBlockGeneratorImpl> : public IRGenerator<> {
@@ -48,50 +54,63 @@ public:
 
 void BasicBlockGeneratorImpl::EmitIR()
 {
-    if (worklist.empty()) {
+    // Emit all basicBlock to function.
+    auxSet.clear();
+    CreateBasicBlocks(entryBB);
+
+    // Emit expressions for each basicBlock.
+    auxSet.clear();
+    CreateBasicBlocksIRs(entryBB);
+}
+
+void BasicBlockGeneratorImpl::CreateBasicBlocks(const CHIR::Block& chirBB)
+{
+    if (auxSet.find(&chirBB) != auxSet.end()) {
         return;
     }
 
-    auto parentFunc = worklist.at(0)->GetTopLevelFunc();
-    auto functionToEmitIR = cgMod.GetOrInsertCGFunction(parentFunc)->GetRawFunction();
-    //  Emit all basicBlock to function.
-    for (size_t idx = 0; idx < worklist.size(); ++idx) {
-        auto currChirBB = worklist.at(idx);
-        if (auto bb = cgMod.GetMappedBB(currChirBB); bb == nullptr) {
-            bb = llvm::BasicBlock::Create(cgMod.GetLLVMContext(),
-                PREFIX_FOR_BB_NAME + currChirBB->GetIdentifierWithoutPrefix(), functionToEmitIR);
-            cgMod.SetOrUpdateMappedBB(currChirBB, bb);
-        }
-        CreateLandingPad(currChirBB);
-
-        for (auto succChirBB : currChirBB->GetSuccessors()) {
-            // Some BasicBlock may have back edges.
-            if (std::find(worklist.rbegin(), worklist.rend(), succChirBB) != worklist.rend()) {
-                continue;
-            }
-            (void)worklist.emplace_back(succChirBB);
-        }
+    if (!cgMod.GetMappedBB(&chirBB)) {
+        auto bbName = PREFIX_FOR_BB_NAME + chirBB.GetIdentifierWithoutPrefix();
+        auto bb = llvm::BasicBlock::Create(cgMod.GetLLVMContext(), bbName, functionToEmitIR);
+        cgMod.SetOrUpdateMappedBB(&chirBB, bb);
     }
-    // Emit expressions for each basicBlock.
-    for (auto& idx : worklist) {
-        EmitExpressionIR(cgMod, idx->GetExpressions());
+    CreateLandingPad(chirBB);
+    auxSet.emplace(&chirBB);
+
+    for (auto succChirBB : chirBB.GetSuccessors()) {
+        CreateBasicBlocks(*succChirBB);
     }
 }
 
-void BasicBlockGeneratorImpl::CreateLandingPad(const CHIR::Block* block) const
+void BasicBlockGeneratorImpl::CreateBasicBlocksIRs(const CHIR::Block& chirBB)
 {
-    if (!block->IsLandingPadBlock()) {
+    if (auxSet.find(&chirBB) != auxSet.end()) {
+        return;
+    }
+
+    CJC_ASSERT(cgMod.GetMappedBB(&chirBB));
+    EmitExpressionIR(cgMod, chirBB.GetExpressions());
+    auxSet.emplace(&chirBB);
+
+    for (auto succChirBB : chirBB.GetSuccessors()) {
+        CreateBasicBlocksIRs(*succChirBB);
+    }
+}
+
+void BasicBlockGeneratorImpl::CreateLandingPad(const CHIR::Block& chirBB) const
+{
+    if (!chirBB.IsLandingPadBlock()) {
         return;
     }
 
     IRBuilder2 irBuilder(cgMod);
-    CodeGenBlockScope codeGenBlockScope(irBuilder, *block);
+    CodeGenBlockScope codeGenBlockScope(irBuilder, chirBB);
     auto landingPad = irBuilder.CreateLandingPad(CGType::GetLandingPadType(cgMod.GetLLVMContext()), 0);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    if (block->GetExceptions().empty()) {
+    if (chirBB.GetExceptions().empty()) {
         landingPad->addClause(llvm::Constant::getNullValue(irBuilder.getInt8PtrTy()));
     } else {
-        for (auto exceptClass : block->GetExceptions()) {
+        for (auto exceptClass : chirBB.GetExceptions()) {
             auto exceptName = exceptClass->GetClassDef()->GetIdentifierWithoutPrefix();
             auto typeInfo = irBuilder.CreateTypeInfo(*exceptClass);
             auto clause = irBuilder.CreateBitCast(typeInfo, irBuilder.getInt8PtrTy());
