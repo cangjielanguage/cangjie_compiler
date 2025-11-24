@@ -69,6 +69,8 @@ public:
      */
     Ptr<AST::ClassDecl> GetObjCUnreachableCodeExceptionDecl();
 
+    Ptr<AST::ClassDecl> GetObjCOptionalMethodUnimplementedExceptionDecl();
+
     Ptr<AST::FuncDecl> GetGetFromRegistryByNativeHandleDecl();
 
     Ptr<AST::FuncDecl> GetGetFromRegistryByIdDecl();
@@ -104,6 +106,8 @@ public:
     Ptr<AST::FuncDecl> GetObjCMsgSendSuperDecl();
 
     Ptr<AST::FuncDecl> GetObjCReleaseDecl();
+
+    Ptr<AST::FuncDecl> GetObjCRespondsToSelectorDecl();
 
     Ptr<AST::FuncDecl> GetGetProtocolDecl();
 

@@ -372,6 +372,31 @@ OwnedPtr<Expr> ASTFactory::WrapObjCMirrorOption(
     return WrapReturningLambdaCall(typeManager, std::move(nodes));
 }
 
+OwnedPtr<Expr> ASTFactory::CreateOptionalMethodGuard(OwnedPtr<Expr> msgSend, OwnedPtr<Expr> id, const std::string& selector,
+    const Ptr<File> curFile)
+{
+    std::vector<OwnedPtr<Node>> nodes;
+    auto baseTy = msgSend->ty;
+    auto selectorCall = CreateRegisterNameCall(selector, curFile);
+    auto isRespondToSelectorCall = CreateObjCRespondsToSelectorCall(
+        std::move(id),
+        std::move(selectorCall),
+        curFile
+    );
+
+    // case true => return msgSend(...)
+    OwnedPtr<Expr> trueBranch = std::move(msgSend);
+
+    // case false => throw Exception(...)
+    OwnedPtr<Expr> falseBranch = WithinFile(CreateThrowOptionalMethodUnimplemented(*curFile), curFile);
+
+    auto boolMatch = CreateBoolMatch(
+        std::move(isRespondToSelectorCall), std::move(trueBranch), std::move(falseBranch), baseTy); //, baseTy, nothingTy);
+
+    nodes.push_back(std::move(boolMatch));
+    return WrapReturningLambdaCall(typeManager, std::move(nodes));
+}
+
 // Mirror(handle)
 OwnedPtr<Expr> ASTFactory::CreateMirrorConstructorCall(OwnedPtr<Expr> entity, Ptr<Ty> mirrorTy)
 {
@@ -940,6 +965,13 @@ OwnedPtr<FuncDecl> ASTFactory::CreateSetterWrapper(VarDecl& field)
     return wrapper;
 }
 
+OwnedPtr<ThrowExpr> ASTFactory::CreateThrowOptionalMethodUnimplemented(File& file)
+{
+    auto exceptionDecl = bridge.GetObjCOptionalMethodUnimplementedExceptionDecl();
+    CJC_NULLPTR_CHECK(exceptionDecl);
+    return CreateThrowException(*exceptionDecl, {}, file, typeManager);
+}
+
 OwnedPtr<ThrowExpr> ASTFactory::CreateThrowUnreachableCodeExpr(File& file)
 {
     auto exceptionDecl = bridge.GetObjCUnreachableCodeExceptionDecl();
@@ -1265,6 +1297,18 @@ OwnedPtr<Expr> ASTFactory::CreateObjCReleaseCall(OwnedPtr<Expr> nativeHandle)
     args.emplace_back(CreateFuncArg(std::move(nativeHandle)));
     return CreateCallExpr(std::move(releaseExpr), std::move(args), nullptr,
         TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT), CallKind::CALL_DECLARED_FUNCTION);
+}
+
+OwnedPtr<Expr> ASTFactory::CreateObjCRespondsToSelectorCall(OwnedPtr<Expr> id, OwnedPtr<Expr> sel, Ptr<File> file)
+{
+    auto responseToSelDecl = bridge.GetObjCRespondsToSelectorDecl();
+    auto responseToSelExpr = CreateRefExpr(*responseToSelDecl);
+
+    std::vector<OwnedPtr<FuncArg>> args;
+    args.emplace_back(CreateFuncArg(std::move(id)));
+    args.emplace_back(CreateFuncArg(std::move(sel)));
+    return WithinFile(CreateCallExpr(std::move(responseToSelExpr), std::move(args), responseToSelDecl,
+        typeManager.GetBoolTy(), CallKind::CALL_DECLARED_FUNCTION), file);
 }
 
 OwnedPtr<Expr> ASTFactory::CreateWithMethodEnvScope(OwnedPtr<Expr> nativeHandle, Ptr<Ty> retTy,

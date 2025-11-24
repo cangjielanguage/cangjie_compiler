@@ -98,6 +98,7 @@ public:
     OwnedPtr<AST::FuncDecl> CreateGetterWrapper(AST::VarDecl& field);
     OwnedPtr<AST::FuncDecl> CreateSetterWrapper(AST::VarDecl& field);
     OwnedPtr<AST::ThrowExpr> CreateThrowUnreachableCodeExpr(AST::File& file);
+    OwnedPtr<AST::ThrowExpr> CreateThrowOptionalMethodUnimplemented(AST::File& file);
     std::set<Ptr<AST::FuncDecl>> GetAllParentCtors(AST::ClassDecl& target) const;
     OwnedPtr<AST::FuncDecl> CreateImplCtor(AST::ClassDecl& target, AST::FuncDecl& from);
     OwnedPtr<AST::FuncDecl> CreateBaseCtorDecl(AST::ClassDecl& target);
@@ -118,6 +119,7 @@ public:
     OwnedPtr<AST::CallExpr> CreateRegisterNameCall(OwnedPtr<AST::Expr> selectorExpr);
     OwnedPtr<AST::CallExpr> CreateRegisterNameCall(const std::string& selector, Ptr<AST::File> curFile);
     OwnedPtr<AST::Expr> CreateGetClassCall(AST::ClassTy& ty, Ptr<AST::File> curFile);
+    OwnedPtr<AST::Expr> CreateObjCRespondsToSelectorCall(OwnedPtr<AST::Expr> id, OwnedPtr<AST::Expr> sel, Ptr<AST::File> file);
 
     /**
      * alloc($classHandle)
@@ -194,6 +196,15 @@ public:
      * putToRegistry($obj)
      */
     OwnedPtr<AST::CallExpr> CreatePutToRegistryCall(OwnedPtr<AST::Expr> nativeHandle);
+
+    /**
+     * match(respondsToSelector($obj, selector)) {
+     *      true => msgSend()
+     *      false => throw ObjCOptionalMethodUnimplementedException()
+     * }
+    */
+    OwnedPtr<AST::Expr> CreateOptionalMethodGuard(OwnedPtr<AST::Expr> msgSend, OwnedPtr<AST::Expr> id, const std::string& selector,
+        const Ptr<AST::File> curFile);
 
 private:
     void PutDeclToClassLikeBody(AST::Decl& decl, AST::ClassLikeDecl& target);

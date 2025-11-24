@@ -606,6 +606,11 @@ enum class Attribute {
     OBJ_C_INIT,
 
     /**
+     * Marks cangjie method as @optional in Objective-C side
+     */
+    OBJ_C_OPTIONAL,
+
+    /**
      * Mark whether a pure cangjie decl is mapped to use by java side.
      * W: Parser
      * R: Sema.
@@ -744,6 +749,7 @@ static const std::unordered_map<AST::Attribute, std::string> ATTR2STR{
     {AST::Attribute::OBJ_C_MIRROR, "OBJ_C_MIRROR"},
     {AST::Attribute::OBJ_C_MIRROR_SUBTYPE, "OBJ_C_MIRROR_SUBTYPE"},
     {AST::Attribute::OBJ_C_INIT, "OBJ_C_INIT"},
+    {AST::Attribute::OBJ_C_OPTIONAL, "OBJ_C_OPTIONAL"},
     {AST::Attribute::JAVA_CJ_MAPPING, "JAVA_CJ_MAPPING"},
     {AST::Attribute::OBJ_C_CJ_MAPPING, "OBJ_C_CJ_MAPPING"},
     {AST::Attribute::CJ_MIRROR_JAVA_INTERFACE_FWD, "CJ_MIRROR_JAVA_INTERFACE_FWD"},
