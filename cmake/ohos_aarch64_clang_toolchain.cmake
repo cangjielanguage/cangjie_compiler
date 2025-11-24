@@ -15,9 +15,6 @@ endif()
 set(TRIPLE aarch64-linux-ohos)
 set(OHOS ON)
 
-set(BUILD_TOOLS_ROOT "/opt/buildtools")
-set(OHOS_ROOT "${BUILD_TOOLS_ROOT}/ohos/ohos_root")
-
 # We add --target option for clang only since gcc does not support --target option.
 # In case of gcc, cross compilation requires a target-specific gcc (a cross compiler).
 add_compile_options(--target=${TRIPLE})
@@ -30,8 +27,6 @@ add_compile_options(-mbranch-protection=pac-ret)
 
 set(CMAKE_C_FLAGS "-fno-emulated-tls ${CMAKE_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "-fno-emulated-tls ${CMAKE_CXX_FLAGS}")
-set(CANGJIE_TARGET_TOOLCHAIN "${OHOS_ROOT}/prebuilts/clang/ohos/linux-x86_64/llvm/bin")
-set(CMAKE_SYSROOT "${OHOS_ROOT}/out/sdk/obj/third_party/musl/sysroot")
 set(CMAKE_RANLIB "${CANGJIE_TARGET_TOOLCHAIN}/llvm-ranlib")
 
 set(TARGET_TRIPLE_DIRECTORY_PREFIX "linux_ohos_aarch64")
