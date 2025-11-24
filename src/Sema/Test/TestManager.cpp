@@ -519,10 +519,10 @@ void TestManager::ReplaceCallsWithAccessors(Package& pkg)
 
     bool isInConstructor = false;
     bool isInMockAnnotatedLambda = false;
-    Ptr<Decl> outerClassLike;
+    Ptr<Ty> outerTy;
 
     Walker(&pkg, Walker::GetNextWalkerID(),
-        [this, &isInConstructor, &isInMockAnnotatedLambda, &outerClassLike, &pkg](const Ptr<Node> node) {
+        [this, &isInConstructor, &isInMockAnnotatedLambda, &outerTy, &pkg](const Ptr<Node> node) {
         if (node->astKind == ASTKind::PRIMARY_CTOR_DECL) {
             // Primary init has been already desugared to regular init
             return VisitAction::SKIP_CHILDREN;
@@ -532,12 +532,12 @@ void TestManager::ReplaceCallsWithAccessors(Package& pkg)
             isInMockAnnotatedLambda = true;
         }
 
-        if (auto classLikeDecl = DynamicCast<ClassLikeDecl>(node)) {
-            CJC_ASSERT(!outerClassLike);
-            outerClassLike = classLikeDecl;
+        if (auto inheritableDecl = DynamicCast<InheritableDecl>(node)) {
+            CJC_ASSERT(!outerTy);
+            outerTy = inheritableDecl->ty;
         } else if (auto extendDecl = DynamicCast<ExtendDecl>(node)) {
-            CJC_ASSERT(!outerClassLike);
-            outerClassLike = extendDecl->extendedType->GetTarget();
+            CJC_ASSERT(!outerTy);
+            outerTy = extendDecl->extendedType->ty;
         }
 
         if ((node->curFile && !node->IsSamePackage(pkg))) {
@@ -560,23 +560,23 @@ void TestManager::ReplaceCallsWithAccessors(Package& pkg)
 
         if (auto expr = As<ASTKind::EXPR>(node); expr) {
             mockSupportManager->ReplaceExprWithAccessor(*expr, isInConstructor);
-            mockSupportManager->ReplaceInterfaceDefaultFunc(*expr, outerClassLike, isInMockAnnotatedLambda);
+            mockSupportManager->ReplaceInterfaceDefaultFunc(*expr, outerTy, isInMockAnnotatedLambda);
         }
 
         return VisitAction::WALK_CHILDREN;
-    }, [&isInConstructor, &isInMockAnnotatedLambda, &outerClassLike](const Ptr<Node> node) {
+    }, [&isInConstructor, &isInMockAnnotatedLambda, &outerTy](const Ptr<Node> node) {
         if (node->TestAttr(Attribute::CONSTRUCTOR)) {
             isInConstructor = false;
         }
         if (IsMockAnnotedLambda(node)) {
             isInMockAnnotatedLambda = false;
         }
-        if (auto classLikeDecl = DynamicCast<ClassLikeDecl>(node)) {
-            CJC_ASSERT(outerClassLike == classLikeDecl);
-            outerClassLike = nullptr;
+        if (auto inheritableDecl = DynamicCast<InheritableDecl>(node)) {
+            CJC_ASSERT(outerTy == inheritableDecl->ty);
+            outerTy = nullptr;
         } else if (auto extendDecl = DynamicCast<ExtendDecl>(node)) {
-            CJC_ASSERT(outerClassLike == extendDecl->extendedType->GetTarget());
-            outerClassLike = nullptr;
+            CJC_ASSERT(outerTy == extendDecl->extendedType->ty);
+            outerTy = nullptr;
         }
         return VisitAction::KEEP_DECISION;
     }).Walk();
