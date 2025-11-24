@@ -20,6 +20,23 @@ using namespace Cangjie::Native::FFI;
 
 void InsertFinalizer::HandleImpl(InteropContext& ctx)
 {
+    if (interopType == InteropType::Fwd_Class) {
+        for (auto& fwdClass : ctx.fwdClasses) {
+            if (fwdClass->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+
+            auto hasInitedField = ctx.factory.CreateHasInitedField(*fwdClass);
+            CJC_NULLPTR_CHECK(hasInitedField);
+            fwdClass->body->decls.emplace_back(std::move(hasInitedField));
+
+            auto finalizer = ctx.factory.CreateFinalizer(*fwdClass);
+            CJC_NULLPTR_CHECK(finalizer);
+            fwdClass->body->decls.emplace_back(std::move(finalizer));
+        }
+        return;
+    }
+
     for (auto& mirror : ctx.mirrors) {
         if (mirror->TestAttr(Attribute::IS_BROKEN)) {
             continue;

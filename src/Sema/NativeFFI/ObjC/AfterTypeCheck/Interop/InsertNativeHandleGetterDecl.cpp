@@ -19,6 +19,22 @@ using namespace Cangjie::Interop::ObjC;
 
 void InsertNativeHandleGetterDecl::HandleImpl(InteropContext& ctx)
 {
+    if (interopType == InteropType::Fwd_Class) {
+        for (auto& fwdClass : ctx.fwdClasses) {
+            if (fwdClass->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+            if (GetNativeHandleGetter(*fwdClass)) {
+                continue;
+            }
+
+            auto nativeHandleGetterDecl = ctx.factory.CreateNativeHandleGetterDecl(*fwdClass);
+            CJC_NULLPTR_CHECK(nativeHandleGetterDecl);
+            fwdClass->body->decls.emplace_back(std::move(nativeHandleGetterDecl));
+        }
+        return;
+    }
+
     for (auto& mirror : ctx.mirrors) {
         if (mirror->TestAttr(Attribute::IS_BROKEN)) {
             continue;

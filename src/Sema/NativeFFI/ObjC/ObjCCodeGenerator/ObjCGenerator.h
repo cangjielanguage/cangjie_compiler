@@ -88,11 +88,14 @@ private:
     void GenerateFunctionSymbolsInitialization();
     void GenerateFunctionSymInit(const std::string& fName);
     void GenerateInterfaceDecl();
+    void GenerateProtocolDecl();
     void AddProperties();
     void AddConstructors();
     void AddCtorsForCjMappingEnum(AST::EnumDecl& enumDecl);
     void AddMethods();
     void WriteToFile();
+    void WriteToHeader();
+    void WriteToSource();
 
     std::string GenerateArgumentCast(const AST::Ty& retTy, std::string value) const;
 };

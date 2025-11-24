@@ -21,6 +21,20 @@ using namespace Cangjie::Native::FFI;
 
 void InsertNativeHandleGetterBody::HandleImpl(InteropContext& ctx)
 {
+    if (interopType == InteropType::Fwd_Class) {
+        for (auto& fwdClass : ctx.fwdClasses) {
+            if (fwdClass->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+
+            auto getterDecl = GetNativeHandleGetter(*fwdClass);
+            CJC_NULLPTR_CHECK(getterDecl);
+            auto nativeHandleFieldExpr = ctx.factory.CreateNativeHandleFieldExpr(*fwdClass);
+            getterDecl->funcBody->body->body.emplace_back(std::move(nativeHandleFieldExpr));
+        }
+        return;
+    }
+
     for (auto& mirror : ctx.mirrors) {
         if (mirror->TestAttr(Attribute::IS_BROKEN)) {
             continue;

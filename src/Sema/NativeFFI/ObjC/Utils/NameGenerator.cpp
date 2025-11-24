@@ -171,6 +171,15 @@ std::string NameGenerator::GetObjCDeclName(const Decl& target)
         if (fd->funcBody->paramLists[0]->params.size() == 1) {
             return target.identifier + ":";
         }
+
+        if (fd->funcBody->paramLists[0]->params.size() > 1) {
+            std::string colons;
+            auto paramSize = fd->funcBody->paramLists[0]->params.size();
+            for (size_t i = 0; i < paramSize; i++) {
+                colons += ":";
+            }
+            return target.identifier + colons;
+        }
     }
 
     return target.identifier;

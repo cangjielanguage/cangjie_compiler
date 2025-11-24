@@ -20,6 +20,18 @@ using namespace Cangjie::Native::FFI;
 
 void InsertBaseCtorDecl::HandleImpl(InteropContext& ctx)
 {
+    if (interopType == InteropType::Fwd_Class) {
+        for (auto& fwdClass : ctx.fwdClasses) {
+            if (fwdClass->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+
+            auto ctor = ctx.factory.CreateBaseCtorDecl(*fwdClass);
+            fwdClass->body->decls.emplace_back(std::move(ctor));
+        }
+        return;
+    }
+
     for (auto& mirror : ctx.mirrors) {
         if (mirror->TestAttr(Attribute::IS_BROKEN)) {
             continue;

@@ -154,7 +154,7 @@ std::string TypeMapper::Cj2ObjCForObjC(const Ty& from) const
             if (IsObjCId(from)) {
                 return "id";
             }
-            if (IsObjCMirror(from)) {
+            if (IsObjCMirror(from) || IsObjCCJMappingInterface(from)) {
                 return "id<" + from.name + ">";
             }
             return UNSUPPORTED_TYPE;
@@ -353,7 +353,14 @@ bool TypeMapper::IsObjCObjectType(const Ty& ty)
         CJC_ASSERT(ty.typeArgs.size() == 1);
         return IsObjCObjectType(*ty.typeArgs[0]);
     }
-    return IsObjCMirror(ty) || IsObjCImpl(ty) || IsSyntheticWrapper(ty) || IsObjCCJMapping(ty);
+    return IsObjCMirror(ty) || IsObjCImpl(ty) || IsSyntheticWrapper(ty) || IsObjCCJMapping(ty) ||
+        IsObjCCJMappingInterface(ty);
+}
+
+bool TypeMapper::IsObjCFwdClass(const Ty& ty)
+{
+    auto classLikeTy = DynamicCast<ClassLikeTy*>(&ty);
+    return classLikeTy && classLikeTy->commonDecl && IsObjCFwdClass(*classLikeTy->commonDecl);
 }
 
 namespace {
@@ -462,6 +469,18 @@ bool TypeMapper::IsObjCCJMapping(const Decl& decl)
     return decl.TestAttr(Attribute::OBJ_C_CJ_MAPPING) && !isGeneric && isSupportedType;
 }
 
+bool TypeMapper::IsObjCCJMappingInterface(const Decl& decl)
+{
+    bool isGeneric = decl.generic != nullptr;
+    bool isInterface = decl.astKind == ASTKind::INTERFACE_DECL;
+    return decl.TestAttr(Attribute::OBJ_C_CJ_MAPPING) && !isGeneric && isInterface;
+}
+
+bool TypeMapper::IsObjCFwdClass(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::CJ_MIRROR_OBJC_INTERFACE_FWD);
+}
+
 bool TypeMapper::IsObjCId(const Ty& ty)
 {
     auto interfaceTy = DynamicCast<InterfaceTy*>(&ty);
@@ -483,6 +502,14 @@ bool TypeMapper::IsObjCCJMapping(const Ty& ty)
 {
     if (auto decl = Ty::GetDeclOfTy(&ty)) {
         return IsObjCCJMapping(*decl);
+    }
+    return false;
+}
+
+bool TypeMapper::IsObjCCJMappingInterface(const Ty& ty)
+{
+    if (auto decl = Ty::GetDeclOfTy(&ty)) {
+        return IsObjCCJMappingInterface(*decl);
     }
     return false;
 }
@@ -544,7 +571,7 @@ bool TypeMapper::IsValidCJMapping(const Ty& ty)
     if (ty.HasGeneric()) {
         return false;
     }
-    return IsPrimitiveMapping(ty) || IsObjCCJMapping(ty);
+    return IsPrimitiveMapping(ty) || IsObjCCJMapping(ty) || IsObjCCJMappingInterface(ty);
 }
 
 bool TypeMapper::IsPrimitiveMapping(const Ty& ty)

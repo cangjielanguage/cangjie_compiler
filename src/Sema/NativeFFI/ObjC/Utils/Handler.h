@@ -22,6 +22,8 @@ enum class InteropType {
     NA,
     ObjC_Mirror,
     CJ_Mapping,
+    CJ_Mapping_Interface,
+    Fwd_Class,
 };
 
 /**

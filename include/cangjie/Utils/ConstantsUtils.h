@@ -167,6 +167,7 @@ inline const std::string NATIVE_HANDLE_IDENT = "$obj";
 inline const std::string REGISTRY_ID_IDENT = "$registryId";
 inline const std::string SYNTHETIC_CLASS_SUFFIX = "$impl";
 inline const std::string NATIVE_HANDLE_GETTER_IDENT = "$getObj";
+inline const std::string OBJ_C_FWD_CLASS_SUFFIX = "_fwd";
 } // namespace Interop::ObjC
 
 // Headless instrinsics

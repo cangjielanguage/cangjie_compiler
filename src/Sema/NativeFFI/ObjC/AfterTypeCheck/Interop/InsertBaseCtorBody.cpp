@@ -22,6 +22,25 @@ using namespace Cangjie::Native::FFI;
 
 void InsertBaseCtorBody::HandleImpl(InteropContext& ctx)
 {
+    if (interopType == InteropType::Fwd_Class) {
+        for (auto& fwdClass : ctx.fwdClasses) {
+            if (fwdClass->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+
+            auto ctor = ctx.factory.GetGeneratedBaseCtor(*fwdClass);
+            CJC_NULLPTR_CHECK(ctor);
+            auto curFile = ctor->curFile;
+
+            auto handleParam = WithinFile(CreateRefExpr(*ctor->funcBody->paramLists[0]->params[0]), curFile);
+            auto lhs = ctx.factory.CreateNativeHandleFieldExpr(*fwdClass);
+            static auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
+            auto nativeHandleAssignExpr = CreateAssignExpr(std::move(lhs), std::move(handleParam), unitTy);
+            ctor->funcBody->body->body.emplace_back(std::move(nativeHandleAssignExpr));
+        }
+        return;
+    }
+
     for (auto& mirror : ctx.mirrors) {
         if (mirror->TestAttr(Attribute::IS_BROKEN)) {
             continue;

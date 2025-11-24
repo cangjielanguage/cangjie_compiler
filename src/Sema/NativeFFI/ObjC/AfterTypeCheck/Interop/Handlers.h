@@ -49,7 +49,12 @@ public:
  */
 class InsertNativeHandleField : public Handler<InsertNativeHandleField, InteropContext> {
 public:
+    explicit InsertNativeHandleField(InteropType interopType) : interopType(interopType)
+    {
+    }
     void HandleImpl(InteropContext& ctx);
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -60,7 +65,12 @@ public:
  */
 class InsertNativeHandleGetterDecl : public Handler<InsertNativeHandleGetterDecl, InteropContext> {
 public:
+    explicit InsertNativeHandleGetterDecl(InteropType interopType) : interopType(interopType)
+    {
+    }
     void HandleImpl(InteropContext& ctx);
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -75,7 +85,12 @@ public:
  */
 class InsertNativeHandleGetterBody : public Handler<InsertNativeHandleGetterBody, InteropContext> {
 public:
+    explicit InsertNativeHandleGetterBody(InteropType interopType) : interopType(interopType)
+    {
+    }
     void HandleImpl(InteropContext& ctx);
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -85,7 +100,12 @@ public:
  */
 class InsertBaseCtorDecl : public Handler<InsertBaseCtorDecl, InteropContext> {
 public:
+    explicit InsertBaseCtorDecl(InteropType interopType) : interopType(interopType)
+    {
+    }
     void HandleImpl(InteropContext& ctx);
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -105,7 +125,12 @@ public:
  */
 class InsertBaseCtorBody : public Handler<InsertBaseCtorBody, InteropContext> {
 public:
+    explicit InsertBaseCtorBody(InteropType interopType) : interopType(interopType)
+    {
+    }
     void HandleImpl(InteropContext& ctx);
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -119,7 +144,12 @@ public:
  */
 class InsertFinalizer : public Handler<InsertFinalizer, InteropContext> {
 public:
+    explicit InsertFinalizer(InteropType interopType) : interopType(interopType)
+    {
+    }
     void HandleImpl(InteropContext& ctx);
+private:
+    InteropType interopType{InteropType::NA};
 };
 
 /**
@@ -182,9 +212,13 @@ private:
  */
 class DesugarMirrors : public Handler<DesugarMirrors, InteropContext> {
 public:
+    explicit DesugarMirrors(InteropType interopType) : interopType(interopType)
+    {
+    }
     void HandleImpl(InteropContext& ctx);
 
 private:
+    InteropType interopType{InteropType::NA};
     void DesugarTopLevelFunc(InteropContext& ctx, AST::FuncDecl& func);
     void DesugarMethod(InteropContext& ctx, AST::ClassLikeDecl& mirror, AST::FuncDecl& method);
     void DesugarCtor(InteropContext& ctx, AST::ClassLikeDecl& mirror, AST::FuncDecl& ctor);
@@ -347,12 +381,37 @@ public:
 };
 
 /**
+ * Finds all Cangjie interface declarations which are mapped to Objective-C side.
+ */
+class FindCJMappingInterface : public Handler<FindCJMappingInterface, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+/**
+ * Finds all forward classes previously generated.
+ */
+class FindFwdClass : public Handler<FindFwdClass, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+/**
  * Performs all necessary syntax and semantic checks on CJMapping declarations.
  */
 class CheckCJMappingTypes : public Handler<CheckCJMappingTypes, InteropContext> {
 public:
     void HandleImpl(InteropContext& ctx);
 };
+
+/**
+ * Generate and insert a forward class for each CJ-Mapping interface
+ */
+class InsertFwdClasses : public Handler<InsertFwdClasses, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
 
 } // namespace Cangjie::Interop::ObjC
 
