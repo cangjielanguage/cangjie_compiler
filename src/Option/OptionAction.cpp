@@ -89,7 +89,6 @@ const std::unordered_map<std::string, Environment> STRING_ENVIRONMENT_MAP = {
 const std::unordered_map<Environment, std::string> ENVIRONMENT_STRING_MAP = {
     {Environment::OHOS, "ohos"},
     {Environment::GNU, "gnu"},
-    {Environment::GNU, "mingw32"},
     {Environment::ANDROID, "android"},
     {Environment::SIMULATOR, "simulator"}, 
     {Environment::NOT_AVAILABLE, ""},
@@ -1051,6 +1050,16 @@ std::string Triple::Info::EnvironmentToString() const
         if (env == Environment::ANDROID) {
             return search->second + apiLevel;
         }
+        return search->second;
+    } else {
+        return "";
+    }
+}
+
+// conditionalCompilation doesn't need android + api level
+std::string Triple::Info::EnvironmentToSimpleString() const
+{
+    if (auto search = ENVIRONMENT_STRING_MAP.find(env); search != ENVIRONMENT_STRING_MAP.end()) {
         return search->second;
     } else {
         return "";

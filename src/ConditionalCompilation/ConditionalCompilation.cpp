@@ -36,6 +36,8 @@ const std::string OS_STR = "os";
 const std::string CJC_VERSION_STR = "cjc_version";
 const std::string DEBUG_STR = "debug";
 const std::string TEST_STR = "test";
+const std::string ENV_STR = "env";
+const std::string CONDITION_TRUE = "1"; // Used in debug and test condition variable.
 // Condition value map.
 const std::unordered_set<std::string> TARGET_CONDITION = {
     BACKEND_STR,
@@ -44,6 +46,7 @@ const std::unordered_set<std::string> TARGET_CONDITION = {
     CJC_VERSION_STR,
     DEBUG_STR,
     TEST_STR,
+    ENV_STR,
 };
 // Condition supported op map.
 const std::unordered_map<std::string, std::vector<TokenKind>> CONDITION_OP = {
@@ -87,6 +90,13 @@ const std::unordered_map<std::string, std::vector<TokenKind>> CONDITION_OP = {
         TEST_STR,
         {},
     },
+    {
+        ENV_STR,
+        {
+            TokenKind::EQUAL,
+            TokenKind::NOTEQ,
+        }
+    }
 };
 // Condition supported values map.
 const std::map<std::string, std::vector<std::string>> CONDITION_VALUES = {
@@ -110,8 +120,17 @@ const std::map<std::string, std::vector<std::string>> CONDITION_VALUES = {
             "Linux",
             "macOS",
             "iOS",
-            "HarmonyOS",
         },
+    },
+    {
+        ENV_STR,
+        {
+            "",
+            "gnu",
+            "ohos",
+            "simulator",
+            "android",
+        }
     },
 };
 } // namespace
@@ -210,11 +229,11 @@ std::string ConditionalCompilationImpl::GetOSType() const
     return triple.OSToString();
 }
 
-std::string ConditionalCompilationImpl::GetUserDefinedInfoByName(const std::string& name) const
+std::optional<std::string> ConditionalCompilationImpl::GetUserDefinedInfoByName(const std::string& name) const
 {
     auto passedValues = GetPassedValues();
     if (passedValues.count(name) == 0) {
-        return "";
+        return std::nullopt; // "" is one of env options. 
     }
 
     return passedValues.at(name);
@@ -239,15 +258,13 @@ bool ConditionalCompilationImpl::ConditionCheck(
             DiagKindRefactor::conditional_compilation_not_support_this_condition, begin, conditionStr);
         return false;
     }
-    // Check `backend` and `os` condition value.
+    // Check `arch`, `env`, `backend` and `os` condition value.
     if (CONDITION_VALUES.count(conditionStr) > 0 && !Utils::In(right, CONDITION_VALUES.at(conditionStr))) {
         std::string supportedValues = "";
         for (const auto& it : CONDITION_VALUES.at(conditionStr)) {
             supportedValues += it + " ";
         }
-        if (!supportedValues.empty()) {
-            supportedValues.pop_back();
-        }
+        supportedValues.pop_back();
         (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_not_support_builtin_value, begin,
             conditionStr, right, supportedValues);
         return false;
@@ -313,7 +330,7 @@ bool ConditionalCompilationImpl::EvalJudgeBinaryExpr(const BinaryExpr& be)
         return false;
     }
     auto relatedInfo = GetRelatedInfo(conditionStr);
-    if (relatedInfo.empty()) {
+    if (!relatedInfo.has_value()) {
         return false;
     }
     // Filter not support op.
@@ -327,7 +344,7 @@ bool ConditionalCompilationImpl::EvalJudgeBinaryExpr(const BinaryExpr& be)
         std::string version = std::to_string(GetVersionUInt(right->stringValue));
         right->stringValue = RefreshVersionStr(version);
     }
-    auto leftValue = relatedInfo;
+    auto leftValue = relatedInfo.value();
     return Eval(be, leftValue, right->stringValue);
 }
 
@@ -363,11 +380,16 @@ bool ConditionalCompilationImpl::EvalUnaryExpr(const UnaryExpr& ue) const
         (void)ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_invalid_condition_expr, ue.begin);
         return false;
     }
-    auto relatedInfo = GetRelatedInfo(conditionExpr->ref.identifier);
-    if (relatedInfo.empty()) {
+    if (ue.op != TokenKind::NOT) { // -debug or -test should compile error
+        auto builder = ci->diag.DiagnoseRefactor(DiagKindRefactor::conditional_compilation_invalid_condition_expr, ue.begin);
+        builder.AddNote("debug and test builtin conditions only support the logic ! operator");
         return false;
     }
-    return relatedInfo != "1";
+    auto relatedInfo = GetRelatedInfo(conditionExpr->ref.identifier);
+    if (!relatedInfo.has_value()) {
+        return false;
+    }
+    return relatedInfo.value() != CONDITION_TRUE; // !debug or !test
 }
 
 bool ConditionalCompilationImpl::EvalRefExpr(const RefExpr& re) const
@@ -377,10 +399,10 @@ bool ConditionalCompilationImpl::EvalRefExpr(const RefExpr& re) const
         return false;
     }
     auto relatedInfo = GetRelatedInfo(re.ref.identifier);
-    if (relatedInfo.empty()) {
+    if (!relatedInfo.has_value()) {
         return false;
     }
-    return relatedInfo == "1";
+    return relatedInfo.value() == CONDITION_TRUE;
 }
 
 bool ConditionalCompilationImpl::EvalConditionExpr(const Expr& condition)
@@ -534,20 +556,23 @@ void ConditionalCompilation::HandleFileConditionalCompilation(File& file) const
     impl->HandleFileConditionalCompilation(file);
 }
 
-std::string ConditionalCompilationImpl::GetRelatedInfo(const std::string& target) const
+std::optional<std::string> ConditionalCompilationImpl::GetRelatedInfo(const std::string& target) const
 {
-    if (target == BACKEND_STR) {
-        return GetBackendType();
-    } else if (target == ARCH_STR) {
-        return GetArchType();
-    } else if (target == OS_STR) {
-        return GetOSType();
-    } else if (target == CJC_VERSION_STR) {
-        return GetCJCVersion();
-    } else if (target == DEBUG_STR) {
-        return GetDebug();
-    } else if (target == TEST_STR) {
-        return GetTest();
+    // only used in this function
+    const std::map<const std::string, std::function<std::string()>> conditionMap = {
+        {ARCH_STR, [this]() -> std::string { return GetArchType(); }},
+        {BACKEND_STR, [this]() -> std::string { return GetBackendType(); }},
+        {CJC_VERSION_STR, [this]() -> std::string { return GetCJCVersion(); }},
+        {DEBUG_STR, [this]() -> std::string { return GetDebug(); }},
+        {ENV_STR, [this]() -> std::string { return GetEnv(); }},
+        {TEST_STR, [this]() -> std::string { return GetTest(); }},
+        {OS_STR, [this]() -> std::string { return GetOSType(); }},
+    };
+    std::optional<std::string> ret;
+    if (conditionMap.find(target) != conditionMap.end()) {
+        ret = conditionMap.at(target)();
+    } else {
+        ret = GetUserDefinedInfoByName(target);
     }
-    return GetUserDefinedInfoByName(target);
+    return ret;
 }
