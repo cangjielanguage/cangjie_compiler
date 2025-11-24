@@ -138,6 +138,7 @@ void DesugarImpls::DesugarCallExpr(InteropContext& ctx, ClassDecl& impl, CallExp
 
             return Nodes<Node>(std::move(msgSendSuperCall));
         });
+    withMethodEnvCall->curFile = ce.curFile;
 
     ce.desugarExpr = ctx.factory.WrapEntity(std::move(withMethodEnvCall), *fdTy->retTy);
 }
@@ -174,5 +175,6 @@ void DesugarImpls::DesugarGetForPropDecl(InteropContext& ctx, ClassDecl& impl, M
 
             return Nodes<Node>(std::move(msgSendSuperCall));
         });
+    withMethodEnvCall->curFile = ma.curFile;
     ma.desugarExpr = ctx.factory.WrapEntity(std::move(withMethodEnvCall), *ma.ty);
 }
