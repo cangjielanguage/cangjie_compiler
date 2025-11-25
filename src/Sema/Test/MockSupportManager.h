@@ -13,9 +13,9 @@
 #ifndef CANGJIE_SEMA_MOCK_SUPPORT_MANAGER_H
 #define CANGJIE_SEMA_MOCK_SUPPORT_MANAGER_H
 
-#include "cangjie/Sema/TypeManager.h"
-#include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Mangle/BaseMangler.h"
+#include "cangjie/Modules/ImportManager.h"
+#include "cangjie/Sema/TypeManager.h"
 
 #include "MockUtils.h"
 
@@ -31,10 +31,8 @@ public:
     void GenerateAccessors(AST::Decl& decl);
     Ptr<AST::Expr> ReplaceExprWithAccessor(
         AST::Expr& originalExpr, bool isInConstructor, bool isSubMemberAccess = false);
-    void ReplaceInterfaceDefaultFunc(
-        AST::Expr& originalExpr, Ptr<AST::Decl> outerClassLike, bool isInMockAnnotatedLambda);
-    void ReplaceInterfaceDefaultFuncInCall(
-        AST::Node& node, Ptr<AST::Decl> outerClassLike, bool isInMockAnnotatedLambda);
+    void ReplaceInterfaceDefaultFunc(AST::Expr& originalExpr, Ptr<AST::Ty> outerTy, bool isInMockAnnotatedLambda);
+    void ReplaceInterfaceDefaultFuncInCall(AST::Node& node, Ptr<AST::Ty> outerty, bool isInMockAnnotatedLambda);
     static void MarkNodeMockSupportedIfNeeded(AST::Node& node);
     void WriteGeneratedMockDecls();
     void PrepareToSpy(AST::Decl& decl);
@@ -90,22 +88,19 @@ private:
     Ptr<AST::Expr> ReplaceFieldGetWithAccessor(AST::MemberAccess& memberAccess, bool isInConstructor);
     Ptr<AST::Expr> ReplaceFieldSetWithAccessor(AST::AssignExpr& assignExpr, bool isInConstructor);
     Ptr<AST::Expr> ReplaceMemberAccessWithAccessor(AST::MemberAccess& memberAccess, bool isInConstructor);
-    template <typename T>
-    Ptr<T> FindGeneratedGlobalDecl(Ptr<AST::File> file, const std::string& identifier);
+    template <typename T> Ptr<T> FindGeneratedGlobalDecl(Ptr<AST::File> file, const std::string& identifier);
     std::tuple<Ptr<AST::InterfaceDecl>, Ptr<AST::FuncDecl>> FindDefaultAccessorInterfaceAndFunction(
         Ptr<AST::FuncDecl> original);
-    Ptr<AST::FuncDecl> FindDefaultAccessorImplementation(Ptr<AST::Decl> baseDecl, Ptr<AST::FuncDecl> accessorDecl);
+    Ptr<AST::FuncDecl> FindDefaultAccessorImplementation(Ptr<AST::Ty> baseTy, Ptr<AST::FuncDecl> accessorDecl);
     void TransformAccessorCallForMutOperation(
         AST::NameReferenceExpr& originalNre, AST::Expr& replacedNre, AST::Expr& topLevelExpr);
     void ReplaceSubMemberAccessWithAccessor(
         const AST::MemberAccess& memberAccess, bool isInConstructor, const Ptr<AST::Expr> topLevelMutExpr = nullptr);
     Ptr<AST::Expr> ReplaceTopLevelVariableGetWithAccessor(AST::RefExpr& refExpr);
-    OwnedPtr<AST::CallExpr> GenerateAccessorCallForTopLevelVariable(
-        const AST::RefExpr& refExpr, AccessorKind kind);
+    OwnedPtr<AST::CallExpr> GenerateAccessorCallForTopLevelVariable(const AST::RefExpr& refExpr, AccessorKind kind);
     void GenerateVarDeclAccessors(AST::VarDecl& fieldDecl, AccessorKind getterKind, AccessorKind setterKind);
     void PrepareStaticDecl(AST::Decl& decl);
-    std::vector<OwnedPtr<AST::MatchCase>> GenerateHandlerMatchCases(
-        const AST::FuncDecl& funcDecl,
+    std::vector<OwnedPtr<AST::MatchCase>> GenerateHandlerMatchCases(const AST::FuncDecl& funcDecl,
         OwnedPtr<AST::EnumPattern> optionFuncTyPattern, OwnedPtr<AST::CallExpr> handlerCallExpr);
     Ptr<AST::Decl> GenerateSpiedObjectVar(const AST::Decl& decl);
 
