@@ -537,6 +537,39 @@ void Translator::TranslateTrivialArgs(
     }
 }
 
+
+Type* Translator::HandleSpecialIntrinsic(
+    IntrinsicKind intrinsicKind, std::vector<Value*>& args, Type* retTy)
+{
+    if (intrinsicKind == BLACK_BOX) {
+        /// black hole args change to reference.
+        for (auto& arg : args) {
+            auto type = arg->GetType();
+            if (type->IsRef()) {
+                continue;
+            }
+            Ptr<Value> newArg = arg;
+            if (arg->IsLocalVar()) {
+                auto localVar = StaticCast<LocalVar*>(arg);
+                auto expr = localVar->GetExpr();
+                if (expr->IsLoad()) {
+                    newArg = StaticCast<Load*>(expr)->GetLocation();
+                    retTy = newArg->GetType();
+                } else {
+                    auto loc = arg->GetDebugLocation();
+                    retTy = builder.GetType<RefType>(type);
+                    newArg =
+                        CreateAndAppendExpression<Allocate>(loc, retTy, type, currentBlock)->GetResult();
+                    (void)CreateAndAppendExpression<Store>(
+                        loc, builder.GetUnitTy(), arg, newArg, currentBlock)->GetResult();
+                }
+            }
+            arg = newArg;
+        }
+    }
+    return retTy;
+}
+
 Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
 {
     // Conditions to check if this is a call to intrinsic
@@ -573,6 +606,7 @@ Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
     // Translate arguments
     std::vector<Value*> args;
     TranslateTrivialArgs(expr, args, std::vector<Type*>{});
+    auto retTy = HandleSpecialIntrinsic(intrinsicKind, args, ty);
     auto ne = StaticCast<AST::NameReferenceExpr*>(expr.baseFunc.get());
     // wrap this into the `GenerateFuncCall` API
     auto callContext = IntrisicCallContext {
@@ -580,7 +614,7 @@ Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
         .args = args,
         .instTypeArgs = TranslateASTTypes(ne->instTys)
     };
-    auto intriVar = TryCreate<Intrinsic>(currentBlock, loc, ty, callContext)->GetResult();
+    auto intriVar = TryCreate<Intrinsic>(currentBlock, loc, retTy, callContext)->GetResult();
 
     // what is this for
     if (expr.ty->IsUnit()) {
@@ -588,6 +622,9 @@ Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
         return CreateAndAppendConstantExpression<UnitLiteral>(builder.GetUnitTy(), *currentBlock)->GetResult();
     }
 
+    if (retTy != ty && intrinsicKind == BLACK_BOX) {
+        return CreateAndAppendExpression<Load>(ty, intriVar, currentBlock)->GetResult();
+    }
     return intriVar;
 }
 

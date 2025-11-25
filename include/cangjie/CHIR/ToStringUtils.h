@@ -189,6 +189,7 @@ const std::unordered_map<CHIR::IntrinsicKind, std::string> INTRINSIC_KIND_TO_STR
 
     // Box cast intrinsic
     {CHIR::OBJECT_AS, "object.as"}, {CHIR::IS_NULL, "isNull"},
+    {CHIR::BLACK_BOX, "blackBox"}
 };
 
 const std::unordered_map<CHIR::Package::AccessLevel, std::string> PACKAGE_ACCESS_LEVEL_TO_STRING_MAP = {

@@ -793,6 +793,9 @@ PackageFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
         case STOP_CJ_CPU_PROFILING:
             ret = IntrinsicKind_STOP_CJ_CPU_PROFILING;
             break;
+        case BLACK_BOX:
+            ret = IntrinsicKind_BLACK_BOX;
+            break;
         case GET_MAX_HEAP_SIZE:
             ret = IntrinsicKind_GET_MAX_HEAP_SIZE;
             break;
