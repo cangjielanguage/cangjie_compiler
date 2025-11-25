@@ -75,19 +75,46 @@ protected:
         invocation.globalOptions.disableReflection = true;
         invocation.globalOptions.importPaths = {packagePath};
         invocation.globalOptions.compilationCachedPath = ".";
+
+        // Compile core mock.
+        auto coreFile = srcPath + "coremock.cj";
+        std::string failedReason;
+        auto content = FileUtil::ReadFileContent(coreFile, failedReason);
+        if (!content.has_value()) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor::module_read_file_to_buffer_failed, DEFAULT_POSITION, coreFile, failedReason);
+        }
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+        // create modules dir.
+        auto modulesName = FileUtil::JoinPath(instance->cangjieHome, "modules");
+        auto libPathName = invocation.globalOptions.GetCangjieLibTargetPathName();
+        auto cangjieModules = FileUtil::JoinPath(modulesName, libPathName);
+        if (!FileUtil::FileExist(cangjieModules)) {
+            FileUtil::CreateDirs(FileUtil::JoinPath(cangjieModules, ""));
+        }
+        instance->code = std::move(content.value());
+        instance->invocation.globalOptions.implicitPrelude = false;
+        instance->Compile(CompileStage::DESUGAR_AFTER_SEMA);
+        std::vector<uint8_t> astData;
+        instance->importManager.ExportAST(false, astData, *instance->GetSourcePackages()[0]);
+
+        std::string coreCjo = FileUtil::JoinPath(cangjieModules, "std.core.cjo");
+        if (FileUtil::FileExist(coreCjo)) {
+            FileUtil::Remove(coreCjo);
+        }
+        FileUtil::WriteBufferToASTFile(coreCjo, astData);
+        instance->invocation.globalOptions.implicitPrelude = true;
+
         for (unsigned int i = 0; i < fileNames.size(); i++) {
             auto srcFile = srcPath + fileNames[i] + ".cj";
-            std::string failedReason;
-            auto content = FileUtil::ReadFileContent(srcFile, failedReason);
+            content = FileUtil::ReadFileContent(srcFile, failedReason);
             if (!content.has_value()) {
                 diag.DiagnoseRefactor(
                     DiagKindRefactor::module_read_file_to_buffer_failed, DEFAULT_POSITION, srcFile, failedReason);
             }
             instance = std::make_unique<TestCompilerInstance>(invocation, diag);
             instance->code = std::move(content.value());
-            instance->invocation.globalOptions.implicitPrelude = false;
             instance->Compile();
-
             std::vector<uint8_t> astData;
             instance->importManager.ExportAST(false, astData, *instance->GetSourcePackages()[0]);
             allAstData[fileNames[i]] = astData;
@@ -95,6 +122,7 @@ protected:
             ASSERT_TRUE(FileUtil::WriteBufferToASTFile(astFile, astData));
             diag.Reset();
         }
+        instance->invocation.globalOptions.implicitPrelude = false;
     }
 
 #ifdef PROJECT_SOURCE_DIR
@@ -105,9 +133,8 @@ protected:
     // Assume the initial is in the build directory.
     std::string projectPath = "..";
 #endif
-    std::vector<std::string> fileNames{"vardecl", "funcdecl", "math", "recorddecl", "interfacedecl", "classdecl"};
-    std::vector<std::string> fullNames{
-        "goodboy/vardecl", "badboy/funcdecl", "math", "badboy/recorddecl", "badboy/interfacedecl", "goodboy/classdecl"};
+    std::vector<std::string> fileNames{
+        "vardecl", "funcdecl", "math", "recorddecl", "interfacedecl", "classdecl", "extenddecl"};
     std::string packagePath = "testTempFiles";
     std::string srcPath;
     DiagnosticEngine diag;
@@ -117,7 +144,7 @@ protected:
 };
 
 // Test for package with only one cangjie file.
-TEST_F(PackageTest, DISABLED_SingleFile_Package)
+TEST_F(PackageTest, SingleFile_Package)
 {
     std::vector<std::set<std::string>> expectDecls{{"a", "b", "c", "d"},
         {"fun1", "fun1", "fun2", "fun3", "fun4", "a...0", "b...0", "c...0", "a...1"}, {"plus"}, {"Rectangle"},
@@ -157,7 +184,7 @@ TEST_F(PackageTest, DISABLED_SingleFile_Package)
     }
 }
 
-TEST_F(PackageTest, DISABLED_SingleFile_LoadCache_Package)
+TEST_F(PackageTest, SingleFile_LoadCache_Package)
 {
     std::vector<std::set<std::string>> expectDecls{{"a", "b", "c", "d"},
         {"fun1", "fun1", "fun2", "fun3", "fun4", "a...0", "b...0", "c...0", "a...1"}, {"plus"}, {"Rectangle"},
@@ -200,7 +227,7 @@ TEST_F(PackageTest, DISABLED_SingleFile_LoadCache_Package)
 }
 
 // Test for one package with multi cangjie files.
-TEST_F(PackageTest, DISABLED_MultiFile_Package)
+TEST_F(PackageTest, MultiFile_Package)
 {
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->srcDirs = {srcPath};
@@ -255,7 +282,7 @@ TEST_F(PackageTest, DISABLED_MultiFile_Package)
     EXPECT_TRUE(diag.GetErrorCount() == 0);
 }
 
-TEST_F(PackageTest, DISABLED_ImportPackage)
+TEST_F(PackageTest, ImportPackage)
 {
 #ifdef _WIN32
     srcPath = projectPath + "\\unittests\\Modules\\ImportPackage\\";
@@ -315,7 +342,7 @@ bool NoImportedContent(CompilerInstance& ci)
 }
 } // namespace
 
-TEST_F(PackageTest, DISABLED_LSPBasicCompileCost)
+TEST_F(PackageTest, LSPBasicCompileCost)
 {
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
@@ -376,7 +403,7 @@ TEST_F(PackageTest, DISABLED_LSPImportLotPkgsCompileCost)
     EXPECT_TRUE(diag.GetErrorCount() == 0);
 }
 
-TEST_F(PackageTest, DISABLED_LSPCompileComposition)
+TEST_F(PackageTest, LSPCompileComposition)
 {
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
@@ -404,24 +431,21 @@ TEST_F(PackageTest, DISABLED_LSPCompileComposition)
     EXPECT_EQ(callExpr->resolvedFunction->identifier, "composition");
 }
 
-TEST_F(PackageTest, DISABLED_LSPCompileWithConstraint)
+TEST_F(PackageTest, LSPCompileWithConstraint)
 {
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
     instance->code = R"(
+        import extenddecl.*
         main() {
-            match (0) {
-                case x: ToString => 0
-                case x: ?Any => 1  // unreachable
-                case _ => 2 // unreachable
-            }
+            0
         }
     )";
     instance->importManager.SetSourceCodeImportStatus(false);
     instance->Compile(CompileStage::SEMA);
-    EXPECT_TRUE(diag.GetErrorCount() == 0);
-    EXPECT_TRUE(diag.GetWarningCount() == 2);
-    auto enumDecl = instance->importManager.GetCoreDecl<EnumDecl>("Option");
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    EXPECT_EQ(diag.GetWarningCount(), 1);
+    auto enumDecl = instance->importManager.GetImportedDecl<EnumDecl>("extenddecl", "EnumExtend");
     ASSERT_TRUE(enumDecl != nullptr);
     ASSERT_TRUE(instance->typeManager != nullptr);
     auto extends = instance->typeManager->GetDeclExtends(*enumDecl);
@@ -444,7 +468,7 @@ TEST_F(PackageTest, DISABLED_LSPCompileWithConstraint)
     EXPECT_EQ(count, 3);
 }
 
-TEST_F(PackageTest, DISABLED_LSPImportFunctionWithNamedParam)
+TEST_F(PackageTest, LSPImportFunctionWithNamedParam)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -487,7 +511,7 @@ TEST_F(PackageTest, DISABLED_LSPImportFunctionWithNamedParam)
     }
 }
 
-TEST_F(PackageTest, DISABLED_ExportVisibleMembersForLSP)
+TEST_F(PackageTest, ExportVisibleMembersForLSP)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -528,7 +552,7 @@ TEST_F(PackageTest, DISABLED_ExportVisibleMembersForLSP)
     EXPECT_TRUE(std::equal(res.cbegin(), res.cend(), expected.cbegin(), expected.cend()));
 }
 
-TEST_F(PackageTest, DISABLED_ConstNotExportInitializerForLSP)
+TEST_F(PackageTest, ConstNotExportInitializerForLSP)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -566,7 +590,7 @@ TEST_F(PackageTest, DISABLED_ConstNotExportInitializerForLSP)
     }
 }
 
-TEST_F(PackageTest, DISABLED_ForbiddenRunInstantiation)
+TEST_F(PackageTest, ForbiddenRunInstantiation)
 {
     Cangjie::ICE::TriggerPointSetter iceSetter(static_cast<int64_t>(Cangjie::ICE::UNITTEST_TP));
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -588,7 +612,7 @@ TEST_F(PackageTest, DISABLED_ForbiddenRunInstantiation)
     EXPECT_FALSE(res);
 }
 
-TEST_F(PackageTest, DISABLED_LoadBuiltInDecl)
+TEST_F(PackageTest, LoadBuiltInDecl)
 {
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
@@ -615,7 +639,7 @@ TEST_F(PackageTest, DISABLED_LoadBuiltInDecl)
     EXPECT_TRUE(diag.GetErrorCount() == 0);
 }
 
-TEST_F(PackageTest, DISABLED_MangleEnumExportId)
+TEST_F(PackageTest, MangleEnumExportId)
 {
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
@@ -672,7 +696,7 @@ public func test() {
     EXPECT_EQ(genericDecls.size(), exportIds.size());
 }
 
-TEST_F(PackageTest, DISABLED_LSPExportInterfaceFuncFromMacro)
+TEST_F(PackageTest, LSPExportInterfaceFuncFromMacro)
 {
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->code = R"(
@@ -704,7 +728,7 @@ TEST_F(PackageTest, DISABLED_LSPExportInterfaceFuncFromMacro)
     EXPECT_EQ(diag.GetErrorCount(), 0);
 }
 
-TEST_F(PackageTest, DISABLED_ImportManager_API)
+TEST_F(PackageTest, ImportManager_API)
 {
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
@@ -721,7 +745,7 @@ TEST_F(PackageTest, DISABLED_ImportManager_API)
     EXPECT_FALSE(importPkgs.empty()); // default 'core'.
 }
 
-TEST_F(PackageTest, DISABLED_LSPExportInvalidVpd)
+TEST_F(PackageTest, LSPExportInvalidVpd)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -740,7 +764,7 @@ TEST_F(PackageTest, DISABLED_LSPExportInvalidVpd)
     EXPECT_NE(diag.GetErrorCount(), 0);
 }
 
-TEST_F(PackageTest, DISABLED_LSPExportInvisibleMembers)
+TEST_F(PackageTest, LSPExportInvisibleMembers)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -764,7 +788,7 @@ TEST_F(PackageTest, DISABLED_LSPExportInvisibleMembers)
     EXPECT_NE(diag.GetErrorCount(), 0);
 }
 
-TEST_F(PackageTest, DISABLED_CheckCjoPathLegality)
+TEST_F(PackageTest, CheckCjoPathLegality)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -776,7 +800,7 @@ TEST_F(PackageTest, DISABLED_CheckCjoPathLegality)
 }
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-TEST_F(PackageTest, DISABLED_SemanticUsage)
+TEST_F(PackageTest, SemanticUsage)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -920,15 +944,14 @@ namespace Cangjie::Sema::Desugar::AfterTypeCheck {
 SemanticInfo GetSemanticUsage(TypeManager& typeManager, const std::vector<Ptr<Package>>& pkgs);
 } // namespace Cangjie::Sema::Desugar::AfterTypeCheck
 
-TEST_F(PackageTest, DISABLED_IncrementalMergedSemanticUsage)
+TEST_F(PackageTest, IncrementalMergedSemanticUsage)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->invocation.globalOptions.implicitPrelude = true;
     instance->invocation.globalOptions.enIncrementalCompilation = true;
     instance->code = R"(
-        macro package pkg
-        import std.ast.*
+        package pkg
         import std.core
         var a: Any = 1
         var b: Rune = 'a'
@@ -954,9 +977,6 @@ TEST_F(PackageTest, DISABLED_IncrementalMergedSemanticUsage)
         }
         enum E {
             E1 | E2(A)
-        }
-        public macro M(input: Tokens) {
-            input
         }
         main() {
             1.foo()
@@ -1035,7 +1055,7 @@ TEST_F(PackageTest, DISABLED_IncrementalMergedSemanticUsage)
     }
 }
 
-TEST_F(PackageTest, DISABLED_UsageOfTypeAlias)
+TEST_F(PackageTest, UsageOfTypeAlias)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -1065,7 +1085,7 @@ TEST_F(PackageTest, DISABLED_UsageOfTypeAlias)
     EXPECT_TRUE(checked);
 }
 
-TEST_F(PackageTest, DISABLED_UsageOfOnTheLeftOfPipeline)
+TEST_F(PackageTest, UsageOfOnTheLeftOfPipeline)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -1102,7 +1122,7 @@ TEST_F(PackageTest, DISABLED_UsageOfOnTheLeftOfPipeline)
     EXPECT_TRUE(checked);
 }
 
-TEST_F(PackageTest, DISABLED_LoadAnnotationTarget)
+TEST_F(PackageTest, LoadAnnotationTarget)
 {
     diag.ClearError();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
@@ -1147,7 +1167,7 @@ TEST_F(PackageTest, DISABLED_LoadAnnotationTarget)
 }
 #endif
 
-TEST_F(PackageTest, DISABLED_LoadPackageFromCjo)
+TEST_F(PackageTest, LoadPackageFromCjo)
 {
     CompilerInvocation testInvocation;
 #ifdef __x86_64__
@@ -1166,20 +1186,17 @@ TEST_F(PackageTest, DISABLED_LoadPackageFromCjo)
     testIns->code = "main() {}";
     testIns->Compile(CompileStage::IMPORT_PACKAGE);
 
-    auto& searchPath = testIns->importManager.GetSearchPath();
-    auto getCjoPath = [&searchPath](const std::string& fullPkgName) {
-        return FileUtil::FindSerializationFile(fullPkgName, SERIALIZED_FILE_EXTENSION, searchPath);
-    };
-
-    std::unordered_set<std::string> fullPkgNames = {
-        "std.math",
-        "std.sync",
-        "std.time",
+    std::unordered_map<std::string, std::string> fullPkgName2CjoFileNames = {
+        {"classdecl", "classdecl.cjo"},
+        {"extenddecl", "extenddecl.cjo"},
+        {"funcdecl", "funcdecl.cjo"},
+        {"vardecl", "vardecl.cjo"},
+        {"recorddecl", "recorddecl.cjo"},
     };
     std::unordered_map<std::string, Ptr<Package>> pkgName2PkgNodeMap;
 
-    auto checkPkg = [&testIns, &pkgName2PkgNodeMap, &getCjoPath](const std::string& pkgName) {
-        auto pkg = testIns->importManager.LoadPackageFromCjo(pkgName, getCjoPath(pkgName));
+    auto checkPkg = [this, &testIns, &pkgName2PkgNodeMap](const std::string& pkgName, const std::string& cjoFileName) {
+        auto pkg = testIns->importManager.LoadPackageFromCjo(pkgName, FileUtil::JoinPath(packagePath, cjoFileName));
         EXPECT_NE(pkg, nullptr);
         auto found = std::as_const(pkgName2PkgNodeMap).find(pkgName);
         if (found == pkgName2PkgNodeMap.cend()) {
@@ -1197,8 +1214,47 @@ TEST_F(PackageTest, DISABLED_LoadPackageFromCjo)
         }
     };
     for (size_t i = 0; i < 2; ++i) {
-        for (auto& fullPkgName : std::as_const(fullPkgNames)) {
-            checkPkg(fullPkgName);
+        for (auto& [fullPkgName, cjoFileName] : std::as_const(fullPkgName2CjoFileNames)) {
+            checkPkg(fullPkgName, cjoFileName);
         }
     }
+}
+
+TEST_F(PackageTest, ImportOptFlag)
+{
+    diag.ClearError();
+    std::vector<std::string> fileNames = {"a", "b", "c", "d", "e", "f", "middle"};
+    for (auto fileName : fileNames) {
+        auto subDir = fileName == "middle" ? "middle" : "top";
+        auto srcFile =
+            FileUtil::JoinPath(FileUtil::JoinPath(srcPath, "ImportOpt" + DIR_SEPARATOR + subDir), fileName + ".cj");
+        std::string failedReason;
+        auto content = FileUtil::ReadFileContent(srcFile, failedReason);
+        if (!content.has_value()) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor::module_read_file_to_buffer_failed, DEFAULT_POSITION, srcFile, failedReason);
+        }
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+        instance->invocation.globalOptions.implicitPrelude = true;
+        instance->code = std::move(content.value());
+        instance->Compile();
+        instance->PerformDesugarAfterSema();
+        std::vector<uint8_t> astData;
+        instance->importManager.ExportAST(false, astData, *instance->GetSourcePackages()[0]);
+        std::string astFile = packagePath + fileName + ".cjo";
+        FileUtil::WriteBufferToASTFile(astFile, astData);
+        diag.Reset();
+    }
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->code = R"(
+        import middle.*
+        main() {}
+    )";
+    bool ret = instance->Compile(CompileStage::IMPORT_PACKAGE);
+    EXPECT_TRUE(ret);
+    auto depPkgs = instance->importManager.GetAllImportedPackages();
+    EXPECT_EQ(depPkgs.size(), 8); // 8 is size of {a, c, d, e, f, middle, core, default}
+    auto found = std::find_if(
+        depPkgs.begin(), depPkgs.end(), [](Ptr<PackageDecl>& pkg) { return pkg->GetFullPackageName() == "b"; });
+    EXPECT_EQ(found, depPkgs.end());
 }

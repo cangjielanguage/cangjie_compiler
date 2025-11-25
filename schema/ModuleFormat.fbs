@@ -675,7 +675,7 @@ table Package {
   moduleName:string;
   // append some info of File for CJMP
   allFileInfo: [FileInfo];
-  // record all std full package name sependency.
+  // record all std full package name dependencies.
   allDependentStdPkgs:[string];
 }
 
