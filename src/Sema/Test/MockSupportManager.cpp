@@ -1358,7 +1358,7 @@ Ptr<Expr> MockSupportManager::ReplaceMemberAccessWithAccessor(MemberAccess& memb
     Ptr<Expr> parentMutExpr = nullptr;
     if (auto ce = DynamicCast<CallExpr*>(memberAccess.callOrPattern)) {
         if (auto resolvedFunction = ce->resolvedFunction; resolvedFunction &&
-            resolvedFunction->TestAttr(Attribute::MUT) && Is<StructDecl>(resolvedFunction->outerDecl)) {
+            resolvedFunction->TestAttr(Attribute::MUT) && Is<StructDecl>(mockUtils->GetOuterDecl(*resolvedFunction))) {
             parentMutExpr = ce;
         }
     }

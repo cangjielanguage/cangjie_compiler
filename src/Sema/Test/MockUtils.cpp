@@ -583,6 +583,19 @@ OwnedPtr<Expr> MockUtils::WrapCallTypeArgsIntoArray(const Decl& decl)
     return arrayLitOfGetTypeCalls;
 }
 
+Ptr<AST::Decl> MockUtils::GetOuterDecl(AST::Decl& decl) const
+{
+    if (!decl.outerDecl) {
+        return nullptr;
+    }
+
+    if (auto extendDecl = DynamicCast<ExtendDecl>(decl.outerDecl)) {
+        return Ty::GetDeclOfTy(extendDecl->extendedType->ty);
+    }
+
+    return decl.outerDecl;
+}
+
 Ptr<ClassDecl> MockUtils::GetExtendedClassDecl(FuncDecl& decl) const
 {
     CJC_ASSERT(decl.TestAttr(Attribute::IN_EXTEND));
