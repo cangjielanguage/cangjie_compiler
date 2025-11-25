@@ -3,7 +3,7 @@
     "Name": "cangjie_compiler",
     "License": "Apache-2.0 with Runtime Library Exceptions",
     "License File": "LICENSE",
-    "Version NUmber": "1.0.0",
+    "Version Number": "1.1.0-alpha.41",
     "Owner": "xuanjiazhen@huawei.com",
     "Upstream URL": "https://cangjie-lang.cn/",
     "Description": "Cangjie is a general-purpose programming language designed for all-scenario application development. It balances development efficiency and runtime performance, providing an excellent programming experience. Cangjie features concise and efficient syntax, multi-paradigm programming, and type safety. "
