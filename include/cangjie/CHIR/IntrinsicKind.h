@@ -83,8 +83,8 @@ static const std::string BIT_CAST_NAME = "bitCast";
  * The intrinsic doesn't have a declaration and for its call,
  * it's intended to be generated dynamically in the compiler front-end
  */
-static const std::string GET_TYPE_FOR_TYPE_PARAMETER_NAME = GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME;
-static const std::string IS_SUBTYPE_TYPES_NAME = IS_SUBTYPE_TYPES_FUNC_NAME;
+static const std::string GET_TYPE_FOR_TYPE_PARAMETER_NAME = "getTypeForTypeParameter";
+static const std::string IS_SUBTYPE_TYPES_NAME = "isSubtypeTypes";
 
 // Package runtime
 static const std::string INVOKE_GC_NAME = "invokeGC";
