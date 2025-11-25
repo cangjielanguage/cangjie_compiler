@@ -1543,7 +1543,7 @@ std::vector<Ptr<Ty>> MockSupportManager::CloneFuncDecl(Ptr<FuncDecl> fromDecl, P
     toDecl->ty = typeManager.GetInstantiatedTy(fromDecl->ty, typeSubsts);
 
     toDecl->funcBody->ty = toDecl->ty;
-    toDecl->funcBody->retType = ASTCloner::Clone(fromDecl->funcBody->retType.get());
+    toDecl->funcBody->retType = MockUtils::CreateType<Type>(StaticCast<FuncTy>(toDecl->ty)->retTy);
     toDecl->funcBody->funcDecl = toDecl;
     toDecl->funcBody->parentClassLike = toDecl->funcBody->parentClassLike;
 
@@ -1554,7 +1554,7 @@ std::vector<Ptr<Ty>> MockSupportManager::CloneFuncDecl(Ptr<FuncDecl> fromDecl, P
         CopyBasicInfo(param, clonedParam);
         clonedParam->CloneAttrs(*param);
         clonedParam->ty = typeManager.GetInstantiatedTy(param->ty, typeSubsts);
-        clonedParam->type = ASTCloner::Clone(param->type.get());
+        clonedParam->type = MockUtils::CreateType<Type>(clonedParam->ty);
         clonedParam->outerDecl = toDecl;
         clonedParam->identifier = param->identifier;
         paramList->params.emplace_back(std::move(clonedParam));
