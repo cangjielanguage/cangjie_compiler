@@ -584,67 +584,36 @@ void LexerImpl::ProcessNumberFloatSuffix(const char& prefix, bool isFloat)
     Back();
 }
 
-// illegal start decimal part: matches regex 0+_* (one or more zeros, followed by zero or more underscores)
-// e.g 01、0_1、00_、000
-// IntegerLiteral: DecimalLiteral '_'* IntegerSuffix? | ... (binary, octal, hexadecimal);
-// DecimalLiteral:
-//    DecimalDigit
-//  | DecimalDigitWithoutZero (DecimalDigit | '_')*;
-const char* LexerImpl::GetIllegalStartDecimalPart(const char* pStart, const char* pEnd, bool isInteger) const
+// illegal start decimal part,e.g 01、0_1
+bool LexerImpl::IsIllegalStartDecimalPart(const char* pStart, const char* pEnd) const
 {
-    if (pStart == pEnd) {
-        return nullptr;
+    if (pStart > pEnd) {
+        return false;
     }
-    // reset pEnd to begin of integer suffix if exists
-    if (isInteger) {
-        auto suffix = pStart;
-        while (suffix < pEnd) {
-            if (*suffix == 'i' || *suffix == 'u') {
-                // in form 0+_+u32, reset pEnd to begin of _
-                while (suffix > pStart && *(suffix - 1) == '_') {
-                    --suffix;
-                }
-                pEnd = suffix;
-                break;
-            }
-            ++suffix;
-        }
+    const char* start = pStart;
+    if (*start != '0') {
+        return false;
+    }
+    // decimal starts with 0
+    start++;
+    if (start > pEnd) {
+        return false;
+    }
+    if (isdigit(*start)) {
+        return true;
+    }
+    if (*start != '_') {
+        return false;
     }
 
-    const char* ptr = pStart;
-    if (*ptr != '0') {
-        return nullptr;
+    // decimal starts with 0_
+    start++;
+    if (start > pEnd) {
+        return false;
     }
-    while (ptr < pEnd && *ptr == '0') {
-        ptr++;
+    for (; start <= pEnd && *start == '_'; start++) {
     }
-    const char* zeroEnd = ptr;
-    bool hasUnderscore = false;
-    while (ptr < pEnd && *ptr == '_') {
-        hasUnderscore = true;
-        ptr++;
-    }
-    // If we found _ after 0's, return the end of that sequence
-    if (hasUnderscore) {
-        // in 0+_+[a-z], the underscores are allowed, return end of 0's if more than one
-        if (ptr < pEnd && !isdigit(*ptr)) {
-            --zeroEnd;
-            if (zeroEnd > pStart) {
-                return zeroEnd;
-            }
-            return nullptr;
-        }
-        return ptr;
-    }
-    if (pStart + 1 == pEnd) {
-        // single 0 is legal
-        return nullptr;
-    }
-    // If it's pure 0's (no _), exclude the last 0 if length > 1
-    if (zeroEnd == pEnd && isInteger) {
-        --zeroEnd;
-    }
-    return zeroEnd;
+    return start <= pEnd && isdigit(*start);
 }
 
 Token LexerImpl::ScanNumber(const char* pStart)
@@ -654,12 +623,11 @@ Token LexerImpl::ScanNumber(const char* pStart)
     const char* reasonPoint{pStart};
     bool hasDigit = false; // hasDigit is true when digit present
     // 1. Process integer part.
-    const char* ptr{};
     if (currentChar != '.') {
         if (ScanNumberIntegerPart(pStart, base, prefix, hasDigit, reasonPoint)) {
-            if (prefix == 'd' && (ptr = GetIllegalStartDecimalPart(pStart, pCurrent, true)); ptr) {
+            if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "integer", std::string{pStart, ptr});
+                    DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "integer", std::string{*pStart});
             }
             Back();
             return Token(tokenKind, std::string(pStart, pNext), pos, GetPos(pNext));
@@ -673,39 +641,26 @@ Token LexerImpl::ScanNumber(const char* pStart)
             if (!isxdigit(GetNextChar(0))) {
                 DiagSmallExpectedDigit(hasDigit, prefix);
                 Back();
-                if (success && prefix == 'd' && (ptr = GetIllegalStartDecimalPart(pStart, pCurrent, false))) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "float", std::string{pStart, ptr});
-                }
                 return Token(tokenKind, std::string(pStart, pNext), pos, GetPos(pNext));
             }
         } else {
             if (!isdigit(GetNextChar(0))) {
                 DiagSmallExpectedDigit(hasDigit, prefix);
                 Back();
-                // 000.a report
-                // 001..2 do not report
-                // 001.3 report
-                auto nextChar = GetNextChar(1);
-                if (success && prefix == 'd' && nextChar != '.' && (ptr = GetIllegalStartDecimalPart(pStart, pCurrent, !isdigit(nextChar)))) {
-                    std::string fori = isdigit(nextChar) ? "float" : "integer";
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), fori, std::string{pStart, ptr});
-                }
                 return Token(tokenKind, std::string(pStart, pNext), pos, GetPos(pNext));
             }
         }
         hasDigit = false;
         isFloat = true;
-        if (prefix == 'd' && (ptr = GetIllegalStartDecimalPart(pStart, pCurrent, false)); ptr) {
+        if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "float", std::string{pStart, ptr});
+                DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "float", std::string{*pStart});
         }
         ScanNumberDecimalPart(base, prefix, hasDigit, reasonPoint);
     } else {
-        if (prefix == 'd' && (ptr = GetIllegalStartDecimalPart(pStart, pCurrent, true)); ptr) {
+        if (IsIllegalStartDecimalPart(pStart, pCurrent)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "integer", std::string{pStart, ptr});
+                DiagKindRefactor::lex_cannot_start_with_digit, GetPos(pStart), "integer", std::string{*pStart});
         }
     }
     DiagSmallExpectedDigit(hasDigit, prefix);
@@ -2094,7 +2049,7 @@ void LexerImpl::CollectToken(const Token& token)
     }
 }
 
-inline void LexerImpl::DiagSmallExpectedDigit(bool hasDigit, char base)
+inline void LexerImpl::DiagSmallExpectedDigit(const bool& hasDigit, const char base)
 {
     if (!hasDigit && success) {
         DiagExpectedDigit(base);
