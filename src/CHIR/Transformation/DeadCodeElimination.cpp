@@ -937,16 +937,20 @@ bool DeadCodeElimination::CheckUselessFunc(const Func& func, const GlobalOptions
         return opts.outputMode == GlobalOptions::OutputMode::STATIC_LIB ||
             opts.outputMode == GlobalOptions::OutputMode::SHARED_LIB;
     }
-    // The func is in vtable.
+    if (func.IsCFunc() && func.TestAttr(Attribute::PUBLIC)) {
+        // C func may use in c code.
+        return false;
+    }
     if (func.IsVirtualFunc()) {
+        // The func is in vtable.
         return false;
     }
-    // should be revised
     if (func.GetFuncKind() == Cangjie::CHIR::CLASS_CONSTRUCTOR) {
+        // should be revised
         return false;
     }
-    // The Finalizer func of a class, can not be removed.
     if (func.GetFuncKind() == Cangjie::CHIR::FINALIZER) {
+        // The Finalizer func of a class, can not be removed.
         return false;
     }
     if (usingReflectPackage && !opts.disableReflection && func.TestAttr(Attribute::PUBLIC) &&
