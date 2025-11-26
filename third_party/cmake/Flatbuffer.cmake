@@ -13,7 +13,10 @@ else()
 endif()
 
 # for CloudDragon, download in Prebuild
-if(NOT EXISTS ${FLATBUFFERS_SRC}/CMakeLists.txt)
+if(EXISTS ${FLATBUFFERS_SRC}/CMakeLists.txt)
+    set(FLATBUFFERS_DOWNLOAD_ARGS 
+        SOURCE_DIR ${FLATBUFFERS_SRC})
+else()
     set(REPOSITORY_PATH https://gitcode.com/openharmony/third_party_flatbuffers.git)
     message(STATUS "Set flatbuffers REPOSITORY_PATH: ${REPOSITORY_PATH}")
     set(FLATBUFFERS_DOWNLOAD_ARGS
