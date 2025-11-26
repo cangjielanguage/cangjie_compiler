@@ -201,14 +201,14 @@ OwnedPtr<Expr> ASTFactory::WrapEntity(OwnedPtr<Expr> expr, Ty& wrapTy)
     if (typeMapper.IsObjCCJMappingInterface(wrapTy)) {
         CJC_ASSERT(expr->ty->IsPointer());
         auto classLikeTy = StaticCast<ClassLikeTy>(&wrapTy);
-        Ptr<Ty> fwdTy(nullptr);
+        Ptr<Ty> fwdTy = TypeManager::GetInvalidTy();
         for (auto it : classLikeTy->directSubtypes) {
             if (it->name == classLikeTy->name + OBJ_C_FWD_CLASS_SUFFIX) {
                 fwdTy = it;
                 break;
             }
         }
-        CJC_ASSERT(fwdTy);
+        CJC_ASSERT(Ty::IsTyCorrect(fwdTy));
         auto fwdClassDecl = Ty::GetDeclOfTy(fwdTy);
 
         auto ctor = GetGeneratedBaseCtor(*fwdClassDecl);

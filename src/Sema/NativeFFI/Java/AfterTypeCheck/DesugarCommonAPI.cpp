@@ -84,14 +84,14 @@ bool JavaDesugarManager::FillMethodParamsByArg(std::vector<OwnedPtr<FuncParam>>&
             WithinFile(CreateRefExpr(jniEnvPtrParam), funcDecl.curFile), std::move(paramRef), arg->ty);
         methodArg = CreateFuncArg(WithinFile(std::move(entity), funcDecl.curFile));
     } else if (IsCJMappingInterface(*arg->ty)) {
-        Ptr<Ty> fwdTy(nullptr);
+        Ptr<Ty> fwdTy = TypeManager::GetInvalidTy();
         for (auto it : classLikeTy->directSubtypes) {
             if (it->name == classLikeTy->name + JAVA_FWD_CLASS_SUFFIX) {
                 fwdTy = it;
                 break;
             }
         }
-        CJC_ASSERT(fwdTy);
+        CJC_ASSERT(Ty::IsTyCorrect(fwdTy));
 
         auto fwdClassDecl = Ty::GetDeclOfTy(fwdTy);
 
