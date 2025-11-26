@@ -386,7 +386,7 @@ void BoxRecursionValueType::CreateBoxTypeForRecursionStruct()
     }
 }
 
-void BoxRecursionValueType::CreateBoxTypeForRecursionValueType()
+void BoxRecursionValueType::Run()
 {
     CreateBoxTypeForRecursionEnum();
     CreateBoxTypeForRecursionStruct();
@@ -403,8 +403,11 @@ void BoxRecursionValueType::InsertBoxAndUnboxExprForRecursionValueType()
     std::vector<std::pair<Tuple*, std::vector<size_t>>> tuples;
     std::vector<std::pair<TypeCast*, std::vector<size_t>>> typecasts;
     std::vector<Field*> fields;
-    auto visitor = [&storeElementRefs, &getElementRefs, &tuples, &typecasts, &fields, this](Expression& e) {
-        if (e.GetExprKind() == CHIR::ExprKind::STORE_ELEMENT_REF) {
+    std::function<VisitResult(Expression&)> visitor = [&, this](Expression& e) {
+        if (e.GetExprKind() == CHIR::ExprKind::LAMBDA) {
+            auto& lambda = StaticCast<Lambda&>(e);
+            Visitor::Visit(*lambda.GetBody(), visitor);
+        } else if (e.GetExprKind() == CHIR::ExprKind::STORE_ELEMENT_REF) {
             auto& ser = StaticCast<StoreElementRef&>(e);
             if (StoreElementRefNeedBox(ser, builder)) {
                 storeElementRefs.emplace_back(&ser);

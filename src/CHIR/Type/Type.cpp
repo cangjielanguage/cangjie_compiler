@@ -32,17 +32,26 @@ static size_t HashArgTypes(const std::vector<Type*>& argTys)
     return hashVal;
 }
 
-static const std::string PrintArgTys(const std::vector<Type*>& argTys)
+static const std::string PrintArgTys(const std::string& prefix,
+    const std::vector<Type*>& argTys, const std::string& suffix, bool isSrcCodeString = false)
 {
     std::stringstream ss;
     if (argTys.size() == 0) {
         return "";
     }
-    ss << "<" << argTys[0]->ToString();
-    for (size_t loop = 1; loop < argTys.size(); loop++) {
-        ss << "," << argTys[loop]->ToString();
+    if (isSrcCodeString) {
+        ss << prefix << argTys[0]->ToSrcCodeString();
+    } else {
+        ss << prefix << argTys[0]->ToString();
     }
-    ss << ">";
+    for (size_t loop = 1; loop < argTys.size(); loop++) {
+        if (isSrcCodeString) {
+            ss << "," << argTys[loop]->ToSrcCodeString();
+        } else {
+            ss << "," << argTys[loop]->ToString();
+        }
+    }
+    ss << suffix;
     return ss.str();
 }
 
@@ -127,6 +136,11 @@ std::string Type::ToString() const
 {
     auto ite = TYPEKIND_TO_STRING.find(kind);
     return ite == TYPEKIND_TO_STRING.end() ? "UnknownType" : ite->second;
+}
+
+std::string Type::ToSrcCodeString() const
+{
+    return ToString();
 }
 
 Type* Type::StripAllRefs() const
@@ -271,6 +285,25 @@ std::string FuncType::ToString() const
     }
     ss << ")";
     ss << " -> " << GetReturnType()->ToString();
+    return isCFunc ? "CFunc<" + ss.str() + ">" : ss.str();
+}
+
+std::string FuncType::ToSrcCodeString() const
+{
+    std::stringstream ss;
+    ss << "(";
+    auto paramTys = GetParamTypes();
+    for (unsigned i = 0; i < paramTys.size(); i++) {
+        if (i > 0) {
+            ss << ", ";
+        }
+        ss << paramTys[i]->ToSrcCodeString();
+    }
+    if (IsCFunc() && HasVarArg()) {
+        ss << "...";
+    }
+    ss << ")";
+    ss << " -> " << GetReturnType()->ToSrcCodeString();
     return isCFunc ? "CFunc<" + ss.str() + ">" : ss.str();
 }
 
@@ -488,6 +521,14 @@ std::vector<FuncBase*> CustomType::GetDeclareAndExtendMethods(CHIRBuilder& build
     return allMethods;
 }
 
+std::string CustomType::ToSrcCodeString() const
+{
+    std::stringstream ss;
+    ss << def->GetSrcCodeIdentifier();
+    ss << PrintArgTys("<", argTys, ">", true);
+    return ss.str();
+}
+
 size_t CustomType::Hash() const
 {
     std::size_t hashVal = HashArgTypes(argTys);
@@ -513,7 +554,7 @@ std::string ClassType::ToString() const
     if (def != nullptr) {
         ss << "-" << def->GetIdentifierWithoutPrefix();
     }
-    ss << PrintArgTys(argTys);
+    ss << PrintArgTys("<", argTys, ">");
     return ss.str();
 }
 
@@ -936,7 +977,7 @@ std::string StructType::ToString() const
     if (def != nullptr) {
         ss << "-" << def->GetIdentifierWithoutPrefix();
     }
-    ss << PrintArgTys(argTys);
+    ss << PrintArgTys("<", argTys, ">");
     return ss.str();
 }
 
@@ -978,7 +1019,7 @@ std::string EnumType::ToString() const
     if (def != nullptr) {
         ss << "-" << def->GetIdentifierWithoutPrefix();
     }
-    ss << PrintArgTys(argTys);
+    ss << PrintArgTys("<", argTys, ">");
     return ss.str();
 }
 
@@ -1029,7 +1070,14 @@ std::string TupleType::ToString() const
 {
     std::stringstream ss;
     ss << "Tuple";
-    ss << PrintArgTys(argTys);
+    ss << PrintArgTys("(", argTys, ")");
+    return ss.str();
+}
+
+std::string TupleType::ToSrcCodeString() const
+{
+    std::stringstream ss;
+    ss << PrintArgTys("(", argTys, ")", true);
     return ss.str();
 }
 
@@ -1047,6 +1095,24 @@ std::string RawArrayType::ToString() const
     }
     ss << prefix;
     ss << elemTy->ToString();
+    ss << suffix;
+    return ss.str();
+}
+
+std::string RawArrayType::ToSrcCodeString() const
+{
+    CJC_ASSERT(!argTys.empty());
+    auto elemTy = argTys[0];
+    CJC_NULLPTR_CHECK(elemTy);
+    std::stringstream ss;
+    std::string prefix;
+    std::string suffix;
+    for (unsigned int i = 0; i < dims; i++) {
+        prefix += "RawArray<";
+        suffix += ">";
+    }
+    ss << prefix;
+    ss << elemTy->ToSrcCodeString();
     ss << suffix;
     return ss.str();
 }
@@ -1069,6 +1135,13 @@ std::string VArrayType::ToString() const
 {
     std::stringstream ss;
     ss << "VArray<" << argTys[0]->ToString() << ", $" << std::to_string(size) << ">";
+    return ss.str();
+}
+
+std::string VArrayType::ToSrcCodeString() const
+{
+    std::stringstream ss;
+    ss << "VArray<" << argTys[0]->ToSrcCodeString() << ", $" << std::to_string(size) << ">";
     return ss.str();
 }
 
@@ -1100,7 +1173,15 @@ std::string CPointerType::ToString() const
 {
     std::stringstream ss;
     ss << "CPointer";
-    ss << PrintArgTys(argTys);
+    ss << PrintArgTys("<", argTys, ">");
+    return ss.str();
+}
+
+std::string CPointerType::ToSrcCodeString() const
+{
+    std::stringstream ss;
+    ss << "CPointer";
+    ss << PrintArgTys("<", argTys, ">", true);
     return ss.str();
 }
 
@@ -1111,10 +1192,24 @@ std::string RefType::ToString() const
     return ss.str();
 }
 
+std::string RefType::ToSrcCodeString() const
+{
+    std::stringstream ss;
+    ss << argTys[0]->ToSrcCodeString();
+    return ss.str();
+}
+
 std::string BoxType::ToString() const
 {
     std::stringstream ss;
     ss << "Box<" << argTys[0]->ToString() << ">";
+    return ss.str();
+}
+
+std::string BoxType::ToSrcCodeString() const
+{
+    std::stringstream ss;
+    ss << argTys[0]->ToSrcCodeString();
     return ss.str();
 }
 
@@ -1123,12 +1218,15 @@ std::string ThisType::ToString() const
     return "This";
 }
 
+std::string ThisType::ToSrcCodeString() const
+{
+    return "This";
+}
+
 void GenericType::SetUpperBounds(const std::vector<Type*>& args)
 {
     for (auto arg : args) {
-        if (!orphanFlag) {
-            CJC_ASSERT(!arg->StripAllRefs()->IsValueType() && "Generic type upper bound should NOT be value type!");
-        }
+        CJC_ASSERT(!arg->StripAllRefs()->IsValueType() && "Generic type upper bound should NOT be value type!");
     }
     upperBounds = args;
     std::sort(upperBounds.begin(), upperBounds.end(), [](auto l, auto r) {
@@ -1182,12 +1280,13 @@ bool GenericType::operator==(const Type& other) const
 std::string GenericType::ToString() const
 {
     std::stringstream ss;
-    if (orphanFlag) {
-        ss << "(orphan)" << upperBounds[0]->ToString();
-    } else {
-        ss << "Generic-" << identifier;
-    }
+    ss << "Generic-" << identifier;
     return ss.str();
+}
+
+std::string GenericType::ToSrcCodeString() const
+{
+    return srcCodeIdentifier;
 }
 
 namespace Cangjie::CHIR {

@@ -455,7 +455,7 @@ flatbuffers::Offset<PackageFormat::GenericType> CHIRSerializer::CHIRSerializerIm
     auto identifier = obj.GetIdentifier();
     auto srcCodeIndentifier = obj.GetSrcCodeIdentifier();
     auto upperBounds = GetId<Type>(obj.GetUpperBounds());
-    return PackageFormat::CreateGenericTypeDirect(builder, base, obj.orphanFlag, obj.skipCheck, identifier.data(),
+    return PackageFormat::CreateGenericTypeDirect(builder, base, identifier.data(),
         srcCodeIndentifier.data(), upperBounds.empty() ? nullptr : &upperBounds);
 }
 

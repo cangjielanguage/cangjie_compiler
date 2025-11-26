@@ -132,6 +132,7 @@ public:
     virtual ~Type() = default;
 
     virtual std::string ToString() const;
+    virtual std::string ToSrcCodeString() const;
 
     void Dump() const;
 
@@ -574,6 +575,7 @@ public:
     }
 
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
 
     size_t Hash() const override;
 
@@ -746,6 +748,8 @@ public:
 
     const std::vector<ExtendDef*>& GetExtends(CHIRBuilder* builder = nullptr) const override;
 
+    std::string ToSrcCodeString() const override;
+
     size_t Hash() const override;
 
     bool operator==(const Type& other) const override;
@@ -868,6 +872,7 @@ public:
     }
 
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
 
 private:
     explicit TupleType(const std::vector<Type*>& argTys) : Type(TypeKind::TYPE_TUPLE)
@@ -881,6 +886,7 @@ private:
 class RefType : public Type {
 public:
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
 
     Type* GetBaseType() const
     {
@@ -912,6 +918,7 @@ private:
 class BoxType : public Type {
 public:
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
 
     Type* GetBaseType() const
     {
@@ -930,6 +937,7 @@ private:
 class ThisType : public Type {
 public:
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
 
 private:
     explicit ThisType() : Type(TypeKind::TYPE_THIS)
@@ -942,6 +950,7 @@ private:
 class RawArrayType : public BuiltinType {
 public:
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
 
     size_t Hash() const override;
 
@@ -971,6 +980,7 @@ private:
 class VArrayType : public BuiltinType {
 public:
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
 
     size_t Hash() const override;
 
@@ -1045,6 +1055,7 @@ private:
 struct CPointerType : BuiltinType {
 public:
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
 
     Type* GetElementType() const
     {
@@ -1108,14 +1119,11 @@ public:
     size_t Hash() const override;
     bool operator==(const Type& other) const override;
     std::string ToString() const override;
+    std::string ToSrcCodeString() const override;
     std::string GetIdentifier() const
     {
         return identifier;
     }
-
-    bool orphanFlag = false;
-    // mark unimplemented free T
-    bool skipCheck = false;
 
 private:
     explicit GenericType(const std::string& identifier, const std::string& srcName)

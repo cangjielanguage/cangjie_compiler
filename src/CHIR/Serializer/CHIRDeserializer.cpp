@@ -427,8 +427,6 @@ template <> GenericType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(con
     auto identifier = obj->identifier()->str();
     auto srcCodeIndentifier = obj->srcCodeIdentifier()->str();
     auto genericType = builder.GetType<GenericType>(identifier, srcCodeIndentifier);
-    genericType->orphanFlag = obj->orphanFlag();
-    genericType->skipCheck = obj->skipCheck();
     genericTypeConfig.emplace_back(genericType, obj);
     return genericType;
 }

@@ -195,8 +195,6 @@ table CPointerType {
 
 table GenericType {
   base: Type;
-  orphanFlag: bool = false;
-  skipCheck: bool = false;
   identifier: string(shared);
   srcCodeIdentifier: string(shared);
   upperBounds: [uint32]; // use types id

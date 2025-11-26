@@ -46,7 +46,7 @@ static const std::vector<FuncInfo> functionInlineWhiteList = {
     FuncInfo("set", "Array", {NOT_CARE}, ANY_TYPE, "std.core"),
     FuncInfo("[]", "Array", {NOT_CARE}, ANY_TYPE, "std.core"),
     FuncInfo("copyTo", "Array", {NOT_CARE}, ANY_TYPE, "std.core"),
-    FuncInfo("utf8Size", "", {NOT_CARE}, ANY_TYPE, "std.core"),
+    FuncInfo("utf8Size", "Rune", {NOT_CARE}, ANY_TYPE, "std.core"),
     FuncInfo("[]", "String", {NOT_CARE}, ANY_TYPE, "std.core"),
     FuncInfo("init", "ArrayList", {NOT_CARE}, ANY_TYPE, "std.collection"),
     FuncInfo("get", "ArrayList", {NOT_CARE}, ANY_TYPE, "std.collection"),

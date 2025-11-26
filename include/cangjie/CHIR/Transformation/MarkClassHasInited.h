@@ -16,12 +16,31 @@ namespace Cangjie::CHIR {
  */
 class MarkClassHasInited {
 public:
+    explicit MarkClassHasInited(CHIRBuilder& builder);
+
     /**
-     * @brief Main process to add has invited flag to class.
-     * @param package package to do optimization.
-     * @param builder CHIR builder for generating IR.
+     * Process the given package to add hasInited flag to classes with finalizers.
+     * For each class that has a finalizer, this method:
+     * 1. Adds a `hasInited` boolean field to the class
+     * 2. Sets `hasInited = false` at the beginning of each constructor
+     * 3. Sets `hasInited = true` at all exit points of each constructor
+     * 4. Adds a guard in the finalizer to prevent execution if `hasInited` is false
+     * 
+     * This prevents use-before-initialization issues by ensuring finalizers
+     * only execute for properly initialized objects.
+     * 
+     * @param package The package to process
      */
-    static void RunOnPackage(const Package& package, CHIRBuilder& builder);
+    void RunOnPackage(const Package& package);
+
+private:
+    void AddHasInitedFlagToClassDef(ClassDef& classDef);
+    void AddGuardToFinalizer(ClassDef& classDef);
+    void AssignHasInitedFlagToFalseInConstructorHead(Func& constructor);
+    void AssignHasInitedFlagToTrueInConstructorExit(Func& constructor);
+
+private:
+    CHIRBuilder& builder;
 };
 } // namespace Cangjie::CHIR
 

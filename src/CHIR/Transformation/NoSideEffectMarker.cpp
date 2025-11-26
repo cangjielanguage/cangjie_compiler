@@ -6,68 +6,29 @@
 
 #include "cangjie/CHIR/Transformation/NoSideEffectMarker.h"
 
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Type/CustomTypeDef.h"
-#include "cangjie/Utils/CastingTemplate.h"
-#include "cangjie/Utils/TaskQueue.h"
-#include "cangjie/CHIR/Analysis/Utils.h"
+using namespace Cangjie::CHIR;
 
-namespace Cangjie::CHIR {
-
-static const std::unordered_set<std::string> STD_NO_SIDE_EFFECT_LIST = {
-#include "cangjie/CHIR/Transformation/StdNoSideEffectwhiteList.inc"
-};
-
-static const std::vector<std::string> NO_SIDE_EFFECT_PACKAGES = {"std"};
-
-void NoSideEffectMarker::RunOnPackage(const Ptr<const Package>& package, bool isDebug)
+NoSideEffectMarker::NoSideEffectMarker(Package& package) : package(package)
 {
-    for (auto func : package->GetGlobalFuncs()) {
-        RunOnFunc(func, isDebug);
-    }
-    for (auto imported : package->GetImportedVarAndFuncs()) {
-        if (!imported->IsImportedVar()) {
-            RunOnFunc(imported, isDebug);
+}
+
+void NoSideEffectMarker::Run()
+{
+    for (auto func : package.GetGlobalFuncs()) {
+        for (auto element : functionWhiteList) {
+            if (IsExpectedFunction(*func, element)) {
+                func->EnableAttr(Attribute::NO_SIDE_EFFECT);
+            }
         }
     }
-}
-
-void NoSideEffectMarker::RunOnFunc(const Ptr<Value>& value, bool isDebug)
-{
-    std::string packageName;
-    std::string mangleName;
-    if (auto func = DynamicCast<FuncBase>(value)) {
-        packageName = func->GetPackageName();
-        mangleName = func->GetRawMangledName();
-    } else {
-        return;
-    }
-    if (!CheckPackage(packageName)) {
-        return;
-    }
-    if (STD_NO_SIDE_EFFECT_LIST.count(mangleName) == 0) {
-        return;
-    }
-    value->EnableAttr(Attribute::NO_SIDE_EFFECT);
-
-    if (isDebug) {
-        std::string message = "[NoSideEffectMarker] The call to function " + value->GetSrcCodeIdentifier() +
-            ToPosInfo(value->GetDebugLocation()) + " has been mark as no side effect.\n";
-        std::cout << message;
-    }
-}
-
-bool NoSideEffectMarker::CheckPackage(const std::string& packageName)
-{
-    for (const auto& whitePackage : NO_SIDE_EFFECT_PACKAGES) {
-        if (whitePackage.size() > packageName.size()) {
+    for (Value* value : package.GetImportedVarAndFuncs()) {
+        if (value->IsImportedVar()) {
             continue;
         }
-        if (packageName.compare(0, whitePackage.length(), whitePackage) == 0) {
-            return true;
+        for (auto element : functionWhiteList) {
+            if (IsExpectedFunction(*VirtualCast<FuncBase*>(value), element)) {
+                value->EnableAttr(Attribute::NO_SIDE_EFFECT);
+            }
         }
     }
-    return false;
 }
-
-} // namespace Cangjie::CHIR

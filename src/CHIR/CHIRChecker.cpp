@@ -2961,6 +2961,9 @@ void CHIRChecker::CheckInoutOpSrc(const Value& op, const IntrinsicBase& expr, co
             auto locationType = ger->GetLocation()->GetType()->StripAllRefs();
             for (auto p : ger->GetPath()) {
                 locationType = GetFieldOfType(*locationType, p, builder);
+                if (locationType == nullptr) {
+                    return;
+                }
                 if (!IsCTypeInInout(*locationType)) {
                     auto errMsg = "there is " + locationType->ToString() + " type that is calculated by path in " +
                         op.ToString() + ", but C-type (exclude CString) is expected in `inout` operand chain.";
@@ -2969,10 +2972,13 @@ void CHIRChecker::CheckInoutOpSrc(const Value& op, const IntrinsicBase& expr, co
                 }
             }
             CheckInoutOpSrc(*ger->GetLocation(), expr, topLevelFunc);
-        } else if (Is<Field*>(localExpr)) {
-            auto locationType = ger->GetLocation()->GetType()->StripAllRefs();
-            for (auto p : ger->GetPath()) {
+        } else if (auto field = DynamicCast<const Field*>(localExpr)) {
+            auto locationType = field->GetBase()->GetType()->StripAllRefs();
+            for (auto p : field->GetPath()) {
                 locationType = GetFieldOfType(*locationType, p, builder);
+                if (locationType == nullptr) {
+                    return;
+                }
                 if (!IsCTypeInInout(*locationType)) {
                     auto errMsg = "there is " + locationType->ToString() + " type that is calculated by path in " +
                         op.ToString() + ", but C-type (exclude CString) is expected in `inout` operand chain.";
@@ -2980,7 +2986,7 @@ void CHIRChecker::CheckInoutOpSrc(const Value& op, const IntrinsicBase& expr, co
                     return;
                 }
             }
-            CheckInoutOpSrc(*ger->GetLocation(), expr, topLevelFunc);
+            CheckInoutOpSrc(*field->GetBase(), expr, topLevelFunc);
         } else if (Is<TypeCastWithException>(localExpr) || Is<TypeCast>(localExpr)) {
             CheckInoutOpSrc(*localExpr->GetOperand(0), expr, topLevelFunc);
         } else if (!Is<FuncCallWithException>(localExpr) && !Is<FuncCall>(localExpr) &&
