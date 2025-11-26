@@ -786,6 +786,9 @@ IntrinsicKind DeSerialize(const PackageFormat::IntrinsicKind& kind)
         case IntrinsicKind_STOP_CJ_CPU_PROFILING:
             ret = STOP_CJ_CPU_PROFILING;
             break;
+        case IntrinsicKind_BLACK_BOX:
+            ret = BLACK_BOX;
+            break;
         case IntrinsicKind_GET_MAX_HEAP_SIZE:
             ret = GET_MAX_HEAP_SIZE;
             break;

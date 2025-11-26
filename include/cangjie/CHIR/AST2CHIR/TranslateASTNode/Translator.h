@@ -1183,6 +1183,9 @@ private:
     std::pair<Ptr<Block>, Ptr<Block>> TranslateExceptionPattern(const AST::Pattern& pattern, Ptr<Value> eVal);
 
     GenericType* TranslateCompleteGenericType(AST::GenericsTy& ty);
+
+    // intrinsic special
+    Type* HandleSpecialIntrinsic(IntrinsicKind intrinsicKind, std::vector<Value*>& args, Type* retTy);
 };
 
 static const std::unordered_map<Cangjie::TokenKind, ExprKind> op2ExprKind = {
