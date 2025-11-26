@@ -209,6 +209,11 @@ private:
         return Ptr(RawStaticCast<T*>(GetInstantiatedDeclWithGenericInfo(*memberDeclInInstantiatedClass, instTys)));
     }
 
+    /**
+     * Extracts outer decl if it's class/interfacr/struct decl
+     * If outer decl is extend, extracts extended type
+     */
+    Ptr<AST::Decl> GetOuterDecl(AST::Decl& decl) const;
     Ptr<AST::ClassDecl> GetExtendedClassDecl(AST::FuncDecl& decl) const;
     void UpdateRefTypesTarget(
         Ptr<AST::Type> type, Ptr<AST::Generic> oldGeneric, Ptr<AST::Generic> newGeneric) const;
