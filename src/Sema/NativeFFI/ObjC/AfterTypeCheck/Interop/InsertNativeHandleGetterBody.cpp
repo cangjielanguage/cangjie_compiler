@@ -30,6 +30,7 @@ void InsertNativeHandleGetterBody::HandleImpl(InteropContext& ctx)
             auto getterDecl = GetNativeHandleGetter(*fwdClass);
             CJC_NULLPTR_CHECK(getterDecl);
             auto nativeHandleFieldExpr = ctx.factory.CreateNativeHandleFieldExpr(*fwdClass);
+            CJC_NULLPTR_CHECK(getterDecl->funcBody->body);
             getterDecl->funcBody->body->body.emplace_back(std::move(nativeHandleFieldExpr));
         }
         return;

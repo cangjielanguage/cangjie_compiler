@@ -1005,14 +1005,14 @@ void ObjCGenerator::WriteToFile()
 void ObjCGenerator::WriteToHeader()
 {
     auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
-    auto headerPath = outputFilePath + "/" + objCDeclName + ".h";
+    auto headerPath = FileUtil::JoinPath(outputFilePath, objCDeclName + ".h");
     FileUtil::WriteToFile(headerPath, res);
 }
 
 void ObjCGenerator::WriteToSource()
 {
     auto objCDeclName = ctx.nameGenerator.GetObjCDeclName(*decl);
-    auto sourcePath = outputFilePath + "/" + objCDeclName + ".m";
+    auto sourcePath = FileUtil::JoinPath(outputFilePath, objCDeclName + ".m");
     FileUtil::WriteToFile(sourcePath, resSource);
 }
 
