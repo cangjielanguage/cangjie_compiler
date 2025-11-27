@@ -374,6 +374,16 @@ flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeDeclOfFuncParam(const
         builder, SerializeDeclBase(funcParam), NodeFormat::AnyDecl_FUNC_PARAM, fbFuncParam.Union());
 }
 
+flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeDeclOfMacroExpandParam(const Decl* decl)
+{
+    auto mep = RawStaticCast<const MacroExpandParam*>(decl);
+    auto base = SerializeFuncParam(mep);
+    auto invocation = MacroInvocationCreateHelper(mep->invocation);
+    auto mepNode = NodeFormat::CreateMacroExpandParam(builder, base, invocation);
+    return NodeFormat::CreateDecl(
+        builder, SerializeDeclBase(mep), NodeFormat::AnyDecl_MACRO_EXPAND_PARAM, mepNode.Union());
+}
+ 
 flatbuffers::Offset<NodeFormat::Block> NodeWriter::SerializeBlock(AstBlock block)
 {
     if (block == nullptr) {
@@ -871,6 +881,7 @@ flatbuffers::Offset<NodeFormat::Decl> NodeWriter::SerializeDecl(AstDecl decl)
             {ASTKind::MACRO_EXPAND_DECL,
                 [](NodeWriter& nw, AstDecl decl) { return nw.SerializeMacroExpandDecl(decl); }},
             {ASTKind::FUNC_PARAM, [](NodeWriter& nw, AstDecl decl) { return nw.SerializeDeclOfFuncParam(decl); }},
+            {ASTKind::MACRO_EXPAND_PARAM, [](NodeWriter& nw, AstDecl decl) { return nw.SerializeDeclOfMacroExpandParam(decl); }},
             {ASTKind::VAR_WITH_PATTERN_DECL,
                 [](NodeWriter& nw, AstDecl decl) { return nw.SerializeVarWithPatternDecl(decl); }},
         };
@@ -1079,7 +1090,8 @@ std::vector<flatbuffers::Offset<NodeFormat::Token>> NodeWriter::TokensVectorCrea
             pos = FlatPosCreateHelper(token.Begin() + 1);
         } else {
             pos = FlatPosCreateHelper(token.Begin());
-        }        vecToken.push_back(NodeFormat::CreateToken(builder, kind, value, &pos));
+        }
+        vecToken.push_back(NodeFormat::CreateToken(builder, kind, value, &pos));
     }
     return vecToken;
 }
