@@ -51,6 +51,7 @@ class CastASTTests : public testing::Test {
 protected:
     static void SetUpTestCase()
     {
+#ifndef CANGJIE_ENABLE_GCOV
 #define ASTKIND(KIND, VALUE, TYPE, SIZE)                                                                               \
     if constexpr (IgnoredType<AST::TYPE>()) {                                                                          \
         auto nodePtr = MakeOwned<AST::TYPE>();                                                                         \
@@ -59,6 +60,7 @@ protected:
     }
 #include "cangjie/AST/ASTKind.inc"
 #undef ASTKIND
+#endif
         astPool.emplace_back(MakeOwned<AST::Modifier>(TokenKind::OPEN, DEFAULT_POSITION));
         astMap.emplace(AST::ASTKind::MODIFIER, astPool.back().get());
 

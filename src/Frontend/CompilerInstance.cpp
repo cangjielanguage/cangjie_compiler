@@ -288,17 +288,21 @@ void MetaTransformPlugin::RegisterCallbackTo(MetaTransformPluginBuilder& mtm) co
 bool CompilerInstance::PerformPluginLoad()
 {
     for (auto pluginPath : invocation.globalOptions.pluginPaths) { // loop for all plugins
+#ifndef CANGJIE_ENABLE_GCOV
         try {
+#endif
             auto metaTransformPlugin = MetaTransformPlugin::Get(pluginPath);
             if (!metaTransformPlugin.IsValid()) {
                 diag.DiagnoseRefactor(DiagKindRefactor::not_a_valid_plugin, DEFAULT_POSITION, pluginPath);
             }
             AddPluginHandle(metaTransformPlugin.GetHandle());
             metaTransformPlugin.RegisterCallbackTo(metaTransformPluginBuilder); // register MetaTransform into builder
+#ifndef CANGJIE_ENABLE_GCOV
         } catch (...) {
             diag.DiagnoseRefactor(DiagKindRefactor::not_a_valid_plugin, DEFAULT_POSITION, pluginPath);
             return false;
         }
+#endif
     }
     return true;
 }

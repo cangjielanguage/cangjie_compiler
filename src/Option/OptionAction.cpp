@@ -242,7 +242,9 @@ bool ParseTargetTriple(GlobalOptions& opts, const std::string& triple)
             }
         }
         if (!opts.target.apiLevel.empty()) {
+#ifndef CANGJIE_ENABLE_GCOV
             try {
+#endif
                 const int num{std::stoi(opts.target.apiLevel)};
                 // The default Android magic version number is 10000.
                 // The minimum Android API level that cangjie supports.
@@ -250,9 +252,11 @@ bool ParseTargetTriple(GlobalOptions& opts, const std::string& triple)
                     Errorln("The Android API level is not supported in the target."
                         " Please use a valid API level which is larger than 26.");
                 }
+#ifndef CANGJIE_ENABLE_GCOV
             } catch (std::exception const&) {
                 Errorln("The Android API level is illegal. Please use a valid API level which is greater than or equal to 26.");
             }
+#endif
         }
     } else {
         Errorln("The environment \"" + envStr + "\" is not found or supported!");

@@ -674,8 +674,6 @@ private:
     OwnedPtr<AST::Expr> ParseCallExpr(OwnedPtr<AST::Expr> baseExpr);
     AST::SuffixKind ParseSuffix(OwnedPtr<AST::Expr>& baseExpr);
     void ParseBaseExprPostfix(OwnedPtr<AST::Expr>& baseExpr, ExprKind ek = ExprKind::ALL);
-    OwnedPtr<AST::Expr> ParseOptionalExpr(
-        const Position questPos, OwnedPtr<AST::Expr> baseExpr, AST::SuffixKind suffix) const;
     void ParseQuestSuffixExpr(OwnedPtr<AST::Expr>& expr);
     OwnedPtr<AST::Expr> ParseAtom(ExprKind ek = ExprKind::ALL);
     bool IsNeedToCreateOptionalChain(TokenKind token, AST::Expr& expr) const;
@@ -834,8 +832,6 @@ private:
     /// Note that trailing comma is invalid if there are zero elements.
     void ParseZeroOrMoreSepTrailing(std::function<void(const Position&)>&& storeSeparator,
         std::function<void()>&& parseElement, TokenKind end, TokenKind separator = TokenKind::COMMA);
-    void ParseZeroOrMoreWithSeparator(TokenKind separator, const std::function<void(const Position)>& storeSeparator,
-        const std::function<void()>& parseElement, TokenKind terminator);
     void CheckOverflowAnno(
         std::vector<OwnedPtr<AST::Annotation>>& annos, ScopeKind scopeKind = ScopeKind::UNKNOWN_SCOPE);
     void CheckAnnotationAnno(PtrVector<AST::Annotation>& annos, std::set<AST::Modifier> modifiers);

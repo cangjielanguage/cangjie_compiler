@@ -50,7 +50,9 @@ using namespace Cangjie;
 
 int main(int argc, const char** argv, const char** envp)
 {
+#ifndef CANGJIE_ENABLE_GCOV
     try {
+#endif
 #if (defined RELEASE)
         RegisterSignalHandler();
 #endif
@@ -101,10 +103,8 @@ int main(int argc, const char** argv, const char** envp)
 #ifndef CANGJIE_ENABLE_GCOV
     } catch (const NullPointerException& nullPointerException) {
         Cangjie::ICE::TriggerPointSetter iceSetter(nullPointerException.GetTriggerPoint());
-#else
-    } catch (const std::exception& nullPointerException) {
-#endif
         InternalError("null pointer");
     }
+#endif
     return EXIT_CODE_SUCCESS;
 }

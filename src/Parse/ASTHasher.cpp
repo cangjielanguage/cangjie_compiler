@@ -409,11 +409,6 @@ struct ASTHasherImpl {
         SUPERHash<whatTypeToHash>(fd.funcBody, static_cast<int64_t>(fd.op));
     }
 
-    template <int whatTypeToHash> void HashPrimaryCtorDecl(const PrimaryCtorDecl& pc)
-    {
-        HashDecl<whatTypeToHash>(pc);
-        SUPERHash<whatTypeToHash>(pc.funcBody);
-    }
     template <int whatTypeToHash> void HashVarWithPatternDecl(const VarWithPatternDecl& vwp)
     {
         HashVarDeclAbstract<whatTypeToHash>(vwp);
@@ -1161,17 +1156,6 @@ void (*ASTHasherImpl::hashFuncMapNonPosition[nodeKind])(ASTHasherImpl&, Ptr<cons
 #include "cangjie/AST/ASTKind.inc"
 #undef ASTKIND
 };
-
-ASTHasher::hash_type ASTHasher::HashWithPos(Ptr<const Node> node)
-{
-    ASTHasherImpl a{};
-    return a.Hash<ALL>(node);
-}
-ASTHasher::hash_type ASTHasher::HashNoPos(Ptr<const Node> node)
-{
-    ASTHasherImpl a{};
-    return a.Hash<NON_POSITION>(node);
-}
 
 ASTHasher::hash_type ASTHasher::HashSpecs(const Package& pk)
 {
