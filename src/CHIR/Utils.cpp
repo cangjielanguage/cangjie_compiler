@@ -1246,6 +1246,10 @@ bool ParamTypeIsEquivalent(const Type& paramType, const Type& argType)
     if (&paramType == &argType) {
         return true;
     }
+    // `NothingType` is any type's sub type, so it's equivalent to any type
+    if (argType.IsNothing()) {
+        return true;
+    }
     if (argType.IsBoxRefTypeOf(paramType) || paramType.IsBoxRefTypeOf(argType)) {
         return true;
     }
