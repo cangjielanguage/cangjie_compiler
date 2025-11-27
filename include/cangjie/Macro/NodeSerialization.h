@@ -193,7 +193,6 @@ private:
     flatbuffers::Offset<NodeFormat::Decl> SerializeInterfaceDecl(AstDecl decl);
     flatbuffers::Offset<NodeFormat::Decl> SerializeEnumDecl(AstDecl decl);
     flatbuffers::Offset<NodeFormat::Decl> SerializePrimaryCtorDecl(AstDecl decl);
-    flatbuffers::Offset<NodeFormat::Decl> SerializeMacroExpandParamOfDecl(const AST::Decl* decl);
     flatbuffers::Offset<NodeFormat::VarDecl> SerializeVarDecl(const AST::VarDecl* varDecl);
     flatbuffers::Offset<NodeFormat::MainDecl> SerializeMainDecl(const AST::MainDecl* mainDecl);
     flatbuffers::Offset<NodeFormat::FuncDecl> SerializeFuncDecl(const AST::FuncDecl* funcDecl);
@@ -201,6 +200,7 @@ private:
     flatbuffers::Offset<NodeFormat::MacroExpandDecl> SerializeMacroExpandDecl(
         const AST::MacroExpandDecl* macroExpandDecl);
     flatbuffers::Offset<NodeFormat::Decl> SerializeDeclOfFuncParam(const AST::Decl* decl);
+    flatbuffers::Offset<NodeFormat::Decl> SerializeDeclOfMacroExpandParam(const AST::Decl* decl); 
     flatbuffers::Offset<NodeFormat::FuncBody> SerializeFuncBody(AstFuncBody funcBody);
     flatbuffers::Offset<NodeFormat::FuncParam> SerializeFuncParam(AstFuncParam funcParam);
     flatbuffers::Offset<NodeFormat::FuncParam> SerializeMacroExpandParam(AstMacroExpandParam mep);
