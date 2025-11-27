@@ -287,6 +287,11 @@ std::string GetTypeQualifiedNameOfCustomType(const CHIR::CustomType& type, bool 
     } else {
         auto def = type.GetCustomTypeDef();
         auto packageName = def->GetGenericDecl() ? def->GetGenericDecl()->GetPackageName() : def->GetPackageName();
+        // Replace "::" between organization name and package name with a single character "/"
+        // e.g., com::pkga.b -> com/pkga.b
+        if (auto splitterIt = packageName.find("::"); splitterIt != std::string::npos) {
+            packageName.replace(splitterIt, 2U, "/");
+        }
         ss << packageName << ':' << GetCustomTypeIdentifier(type);
         if (auto typeArgs = type.GetGenericArgs(); !typeArgs.empty()) {
             ss << MANGLE_LT_PREFIX << GetTypeArgsQualifiedName(typeArgs, forNameFieldOfTi) << MANGLE_GT_PREFIX;
