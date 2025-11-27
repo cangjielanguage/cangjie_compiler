@@ -493,14 +493,29 @@ void MPTypeCheckerImpl::FilterOutCommonCandidatesIfPlatformExist(
 }
 
 // TypeCheck for CJMP
-void MPTypeCheckerImpl::RemoveCommonCandidatesIfHasPlatform(std::vector<Ptr<FuncDecl>>& candidates) const
+void MPTypeCheckerImpl::RemoveCommonCandidatesIfHasPlatform(std::vector<Ptr<FuncDecl>>& candidates)
 {
-    bool hasPlatformCandidate = std::find_if(
-        candidates.begin(), candidates.end(),
-        [](const Ptr<FuncDecl> decl) { return decl->TestAttr(Attribute::PLATFORM); }
-    ) != candidates.end();
-    if (hasPlatformCandidate) {
-        Utils::EraseIf(candidates, [](const Ptr<FuncDecl> decl) { return decl->TestAttr(Attribute::COMMON); });
+    std::vector<Ptr<FuncDecl>> platformDecls;
+    for (auto it = candidates.begin(); it != candidates.end(); ++it) {
+        if ((*it)->TestAttr(Attribute::PLATFORM)) {
+            platformDecls.emplace_back(*it);
+        }
+    }
+    for (const auto& platformFunc : platformDecls) {
+        Utils::EraseIf(candidates, [&platformFunc, this](const Ptr<FuncDecl> candidate) {
+            if (!candidate->TestAttr(Attribute::COMMON)) {
+                return false;
+            }
+            TypeSubst genericTyMap;
+            MapCJMPGenericTypeArgs(genericTyMap, *candidate, *platformFunc);
+            if (!genericTyMap.empty()) {
+                auto newCommonFuncTy = StaticCast<FuncTy*>(typeManager.GetInstantiatedTy(candidate->ty, genericTyMap));
+                auto platformFuncTy = StaticCast<FuncTy*>(platformFunc->ty);
+                return typeManager.IsFuncTySubType(*platformFuncTy, *newCommonFuncTy);
+            } else {
+                return typeManager.IsFuncDeclSubType(*platformFunc, *candidate);
+            }
+        });
     }
 }
 
