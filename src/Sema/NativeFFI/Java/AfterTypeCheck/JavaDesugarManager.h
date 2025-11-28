@@ -290,7 +290,8 @@ private:
 
     Ptr<Ty> GetInstantyForGenericTy(Decl& decl, const std::unordered_map<std::string, Ptr<Ty>> &actualTyArgMap);
 
-    OwnedPtr<Decl> GenerateNativeMethod(FuncDecl& sampleMethod, Decl& decl, const GenericConfigInfo* genericConfig = nullptr);
+    OwnedPtr<Decl> GenerateNativeMethod(FuncDecl& sampleMethod, Decl& decl,
+        const GenericConfigInfo* genericConfig = nullptr);
 
     void GenerateFuncParamsForNativeDeleteCjObject(
         Decl& decl, std::vector<OwnedPtr<FuncParam>>& params, FuncParam*& jniEnv, OwnedPtr<Expr>& selfRef);
@@ -301,11 +302,13 @@ private:
 
     std::string GetJniMethodName(const FuncDecl& method, const std::string* genericActualName = nullptr);
 
-    std::string GetJniMethodNameForProp(const PropDecl& propDecl, bool isSet) const;
+    std::string GetJniMethodNameForProp(const PropDecl& propDecl, bool isSet,
+        const std::string* genericActualName = nullptr) const;
 
     std::string GetJniSuperArgFuncName(const ClassLikeDecl& outer, const std::string& id) const;
 
-    std::string GetJniInitCjObjectFuncName(const FuncDecl& ctor, bool isGeneratedCtor, const std::string* genericActualName = nullptr);
+    std::string GetJniInitCjObjectFuncName(const FuncDecl& ctor, bool isGeneratedCtor,
+        const std::string* genericActualName = nullptr);
 
     std::string GetJniInitCjObjectFuncNameForVarDecl(const VarDecl& ctor) const;
 

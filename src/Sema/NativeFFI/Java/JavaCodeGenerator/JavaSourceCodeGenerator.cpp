@@ -505,7 +505,8 @@ std::string JavaSourceCodeGenerator::GenerateConstructorForEnumDecl(const OwnedP
     declaration.append(JAVA_WHITESPACE);
     declaration.append("static");
     declaration.append(JAVA_WHITESPACE);
-    declaration.append(ctor.get()->outerDecl->identifier.Val());
+    std::string enumName = genericConfig ? genericConfig->declInstName : decl->identifier.Val();
+    declaration.append(enumName);
     declaration.append(JAVA_WHITESPACE);
 
     std::string params;
@@ -702,7 +703,7 @@ void JavaSourceCodeGenerator::AddConstructor(const FuncDecl& ctor)
 
 void JavaSourceCodeGenerator::AddAllCtorsForCJMappingEnum(const EnumDecl& enumDecl)
 {
-    const std::string enumName = enumDecl.identifier;
+    std::string enumName = genericConfig ? genericConfig->declInstName : enumDecl.identifier.Val();
     for (auto& constructor : enumDecl.constructors) {
         std::string declaration = GenerateConstructorForEnumDecl(constructor);
 
@@ -1090,7 +1091,8 @@ void JavaSourceCodeGenerator::AddPrivateCtorForCJMappring()
 
 void JavaSourceCodeGenerator::AddPrivateCtorForCJMappringEnum()
 {
-    std::string signature = "private " + decl->identifier.Val() + " (long id) {";
+    std::string enumName = genericConfig ? genericConfig->declInstName : decl->identifier.Val();
+    std::string signature = "private " + enumName + " (long id) {";
     AddWithIndent(TAB, signature);
     AddWithIndent(TAB2, "self = id;");
     AddWithIndent(TAB, "}\n");

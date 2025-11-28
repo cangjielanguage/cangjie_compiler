@@ -518,13 +518,14 @@ std::string JavaDesugarManager::GetJniMethodName(const FuncDecl& method, const s
     return "Java_" + fqname + "_" + mangledFuncName;
 }
 
-std::string JavaDesugarManager::GetJniMethodNameForProp(const PropDecl& propDecl, bool isSet) const
+std::string JavaDesugarManager::GetJniMethodNameForProp(const PropDecl& propDecl, bool isSet,
+    const std::string* genericActualName) const
 {
     std::string varDecl = GetJavaMemberName(propDecl);
     MangleJNIName(varDecl);
     std::string varDeclSuffix = varDecl;
     varDeclSuffix[0] = static_cast<char>(toupper(varDeclSuffix[0]));
-    std::string fqname = GetJavaFQName(*(propDecl.outerDecl));
+    std::string fqname = GetJavaFQName(*(propDecl.outerDecl), genericActualName);
     MangleJNIName(fqname);
     return "Java_" + fqname + (isSet ? "_set" : "_get") + varDeclSuffix + "Impl";
     ;
