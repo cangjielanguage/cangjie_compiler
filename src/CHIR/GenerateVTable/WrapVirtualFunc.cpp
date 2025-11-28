@@ -29,7 +29,7 @@ bool FuncTypeMatch(const FuncType& parentFuncType, const FuncType& curFuncType)
 }
 
 bool JudgeIfNeedVirtualWrapper(
-    const VirtualMethodInfo& parentFuncInfo, const FuncBase& virtualFunc, const Type& selfTy)
+    const VirtualMethodInfo& parentFuncInfo, const FuncBase& virtualFunc, const Type& selfTy, CHIRBuilder& builder)
 {
     /** if struct and enum inherit interface, for non-static function, wrapper func is needed
      *  because `this` in struct is value type, and in interface is ref type
@@ -38,6 +38,35 @@ bool JudgeIfNeedVirtualWrapper(
     if (!selfTy.IsClassOrArray() && !virtualFunc.TestAttr(Attribute::STATIC)) {
         return true;
     }
+    /*  there are two cases which need to wrap virtual function:
+     *  case 1:
+     *  this case is a little complex, the following 4 conditions must be satisfied:
+     *    a. one class inherit two different interfaces, these two interfaces don't have parent-child relationship
+     *    b. these two interfaces have the same method, one is abstract but the other is not.
+     *    c. the interface which its method has default implementation has generic type parameter.
+     *    d. this sub class doesn't override the method in the interface.
+     *     e.g:
+     *     interface I1    { func foo(): Unit }
+     *     interface I2<T> { func foo() {}    }
+     *     class A <: I1 & I2<Bool> {}
+     *  case 2:
+     *  one class inherit another class, there is an open method in the parent class and the sub class override
+     *  this method. But the two methods' parameter types are different.
+     *     e.g:
+     *     open class A<T> {
+     *         public open func foo(a: T) {}
+     *     }
+     *     class B <: A<Bool> {
+     *         public func foo(a: Bool) {}
+     *     }
+    */
+    // case 1
+    auto funcParentType = virtualFunc.GetParentCustomTypeDef()->GetType();
+    if (funcParentType != &selfTy && funcParentType->IsGenericRelated() &&
+        !funcParentType->IsEqualOrSubTypeOf(*parentFuncInfo.GetInstParentType(), builder)) {
+        return true;
+    }
+    // case 2
     auto parentFuncType = parentFuncInfo.GetOriginalFuncType();
     return !FuncTypeMatch(*parentFuncType, *virtualFunc.GetFuncType());
 }
@@ -280,7 +309,7 @@ FuncBase* WrapVirtualFunc::CreateVirtualWrapperIfNeeded(const VirtualMethodInfo&
 {
     auto curFunc = funcInfo.GetVirtualMethod();
     // 1. Judge if need virtual wrapper
-    if (!JudgeIfNeedVirtualWrapper(parentFuncInfo, *curFunc, selfTy)) {
+    if (!JudgeIfNeedVirtualWrapper(parentFuncInfo, *curFunc, selfTy, builder)) {
         return nullptr;
     }
     auto isStatic = curFunc->TestAttr(Attribute::STATIC);

@@ -514,15 +514,15 @@ llvm::PointerType* CGType::GetOrCreateTypeInfoPtrType(llvm::LLVMContext& llvmCtx
 
 llvm::StructType* CGType::GetClassTTExtTypeVer1(llvm::LLVMContext& llvmCtx)
 {
-    auto type = llvm::StructType::getTypeByName(llvmCtx, "ext_class_tt_ver_1");
+    auto type = llvm::StructType::getTypeByName(llvmCtx, "ext_class_type_ver_1");
     if (type == nullptr) {
         std::vector<llvm::Type*> containedTypes = {
-            CGType::GetOrCreateTypeTemplateType(llvmCtx)->getPointerTo(),
+            llvm::Type::getInt8PtrTy(llvmCtx),
             llvm::Type::getInt16Ty(llvmCtx),
             llvm::Type::getInt32Ty(llvmCtx),
             llvm::Type::getInt8Ty(llvmCtx)
         };
-        type = llvm::StructType::create(llvmCtx, containedTypes, "ext_class_tt_ver_1");
+        type = llvm::StructType::create(llvmCtx, containedTypes, "ext_class_type_ver_1");
     }
     return type;
 }
