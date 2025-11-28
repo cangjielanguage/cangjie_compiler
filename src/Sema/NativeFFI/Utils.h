@@ -137,8 +137,7 @@ OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(TypeManager& typeManager, std::vect
 std::string GetCangjieLibName(const std::string& outputLibPath, const std::string& fullPackageName,
     bool trimmed = true);
 
-std::string GetMangledMethodName(const BaseMangler& mangler, const std::vector<OwnedPtr<FuncParam>>& params,
-    const std::string& methodName);
+std::string GetMangledMethodName(const BaseMangler& mangler, const std::vector<OwnedPtr<FuncParam>>& params, const std::string& methodName);
 
 Ptr<Annotation> GetForeignNameAnnotation(const Decl& decl);
 Ptr<Annotation> GetAnnotation(const Decl& decl, AnnotationKind annotationKind);

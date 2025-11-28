@@ -21,6 +21,7 @@
 
 namespace Cangjie::Interop::Java {
 using namespace AST;
+using namespace std;
 
 const std::string JAVA_ARRAY_GET_FOR_REF_TYPES = "$javaarrayget";
 const std::string JAVA_ARRAY_SET_FOR_REF_TYPES = "$javaarrayset";
@@ -281,9 +282,15 @@ private:
     OwnedPtr<CallExpr> GetFwdClassInstance(OwnedPtr<RefExpr> paramRef, Decl& fwdClassDecl);
 
     bool FillMethodParamsByArg(std::vector<OwnedPtr<FuncParam>>& params, std::vector<OwnedPtr<FuncArg>>& callArgs,
-        FuncDecl& funcDecl, OwnedPtr<FuncParam>& arg, FuncParam& jniEnvPtrParam);
+        FuncDecl& funcDecl, OwnedPtr<FuncParam>& arg, FuncParam& jniEnvPtrParam, Ptr<Ty> actualTy);
 
-    OwnedPtr<Decl> GenerateNativeMethod(FuncDecl& sampleMethod, Decl& decl);
+    void GetArgsAndRetGenericActualTyVector(FuncDecl& ctor, const std::vector<std::pair<std::string, std::string>> instTypes,
+        std::unordered_map<std::string, Ptr<Ty>> &actualTyArgMap, std::vector<Ptr<Ty>> &funcTyParams,
+        std::vector<OwnedPtr<Type>> &ActualPrimitiveType);
+
+    Ptr<Ty> GetInstantyForGenericTy(Decl& decl, const std::unordered_map<std::string, Ptr<Ty>> &actualTyArgMap);
+
+    OwnedPtr<Decl> GenerateNativeMethod(FuncDecl& sampleMethod, Decl& decl, const GenericConfigInfo* genericConfig = nullptr);
 
     void GenerateFuncParamsForNativeDeleteCjObject(
         Decl& decl, std::vector<OwnedPtr<FuncParam>>& params, FuncParam*& jniEnv, OwnedPtr<Expr>& selfRef);
@@ -292,13 +299,13 @@ private:
         std::vector<OwnedPtr<FuncParamList>>& paramLists, FuncParam& jniEnvPtrParam, Ptr<Ty>& retTy,
         std::string funcName);
 
-    std::string GetJniMethodName(const FuncDecl& method);
+    std::string GetJniMethodName(const FuncDecl& method, const std::string* genericActualName = nullptr);
 
     std::string GetJniMethodNameForProp(const PropDecl& propDecl, bool isSet) const;
 
     std::string GetJniSuperArgFuncName(const ClassLikeDecl& outer, const std::string& id) const;
 
-    std::string GetJniInitCjObjectFuncName(const FuncDecl& ctor, bool isGeneratedCtor);
+    std::string GetJniInitCjObjectFuncName(const FuncDecl& ctor, bool isGeneratedCtor, const std::string* genericActualName = nullptr);
 
     std::string GetJniInitCjObjectFuncNameForVarDecl(const VarDecl& ctor) const;
 
@@ -352,7 +359,8 @@ private:
      *     )
      * }
      */
-    OwnedPtr<Decl> GenerateNativeInitCjObjectFunc(FuncDecl& ctor, bool isClassLikeDecl, bool isOpenClass = false, Ptr<FuncDecl> fwdCtor = nullptr);
+    OwnedPtr<Decl> GenerateNativeInitCjObjectFunc(FuncDecl& ctor, bool isClassLikeDecl, bool isOpenClass = false, Ptr<FuncDecl> fwdCtor = nullptr,
+         const GenericConfigInfo* genericConfig = nullptr);
 
     /**
      * for func [fun]:
@@ -530,6 +538,7 @@ private:
     void InsertJavaObjectControllerVarDecl(ClassDecl& fwdClassDecl, ClassDecl& classDecl);
     void InsertOverrideMaskVar(AST::ClassDecl& fwdclassDecl);
     OwnedPtr<FuncDecl> GenerateFwdClassCtor(ClassDecl& fwdDecl, ClassDecl& classDecl, FuncDecl& oriCtorDecl);
+    void InitGenericConfigs(const File& file, const AST::Decl* decl, std::vector<GenericConfigInfo*>& genericConfigs);
     void InsertAttachCJObject(ClassDecl& fwdDecl, ClassDecl& classDecl);
     OwnedPtr<FuncDecl> GenerateFwdClassMethod(ClassDecl& fwdDecl, ClassDecl& classDecl, FuncDecl& oriMethodDecl, int index);
 
@@ -541,6 +550,8 @@ private:
     InteropLibBridge lib;
     const std::optional<std::string>& javaCodeGenPath;
     const std::string& outputLibPath;
+    std::vector<GenericConfigInfo*> genericConfigsVector;
+    bool isGenericGlueCode = {false};
 
     /**
      * Top-level declarations generated during desugaring. Should be added at the end of file desugaring

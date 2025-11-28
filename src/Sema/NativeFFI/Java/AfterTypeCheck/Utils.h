@@ -32,6 +32,34 @@ enum class ArrayOperationKind: uint8_t {
     GET_LENGTH
 };
 
+/*
+Generic Config Example:
+generic_object_configuration = [
+    { name = "GenericClass", type_arguments = ["Int32"]},
+    { name = "GenericClass<Int32>", symbols = [
+        "getValue",
+        "GenericClass",
+        "value",
+        "setValue"
+    ]}
+]
+*/
+struct GenericConfigInfo {
+    // Reference type symbol name, such as: GenericClass
+    std::string declSymbolName;
+    // Definition name with generics, such as: GenericClassint32
+    std::string declInstName;
+    // item: <"T", "int32">
+    std::vector<std::pair<std::string, std::string>> instTypes;
+    // Config func symbol name, such as: "getValue", "GenericClass", "value", "setValue"
+    std::unordered_set<std::string> funcNames;
+    GenericConfigInfo(std::string name, std::string declInstName, std::vector<std::pair<std::string, std::string>> &insts, std::unordered_set<std::string> &funcs)
+        : declSymbolName(name), declInstName(declInstName), instTypes(insts), funcNames(funcs)
+    {
+    }
+};
+
+
 class Utils final {
 public:
     Utils(ImportManager& importManager, TypeManager& typeManager);
@@ -163,7 +191,7 @@ std::string GetJavaFQNameFromExtendDecl(const ExtendDecl& extendDecl);
  * Returns fully-qualified name of the decl or fq-name specified in @JavaMirror as attribute,
  * which is suitable for specifying in JNI calls
  */
-std::string GetJavaFQName(const Decl& decl);
+std::string GetJavaFQName(const Decl& decl, const std::string* genericActualName = nullptr);
 
 /**
  * Returns fully-qualified name of the decl or fq-name specified in @JavaMirror as attribute,
@@ -203,8 +231,7 @@ void MangleJNIName(std::string& name);
  * Performs mangling of `javaTy` with `mangler`. If `javaTy` is a mirrror or impl, then it returns `jobjectTy`
  */
 std::string GetMangledJniInitCjObjectFuncName(const BaseMangler& mangler,
-    const std::vector<OwnedPtr<FuncParam>>& params,
-    bool isGeneratedCtor);
+    const std::vector<OwnedPtr<FuncParam>>& params, bool isGeneratedCtor);
 
 std::string GetMangledJniInitCjObjectFuncNameForEnum(
     const BaseMangler& mangler, const std::vector<OwnedPtr<FuncParam>>& params, const std::string funcName);
@@ -227,7 +254,11 @@ bool IsImpl(const Decl& decl);
 bool IsImpl(const Ty& ty);
 bool IsCJMappingInterface(const Ty& ty);
 bool IsCJMapping(const Ty& ty);
-bool IsCJMappingInterface(const Ty& ty);
+bool IsCJMappingGeneric(const Decl& decl);
+void SplitAndTrim(std::string str, std::vector<std::string>& types);
+std::string JoinVector(const std::vector<std::string>& vec, const std::string& delimiter = "");
+std::string GetGenericActualType(GenericConfigInfo* config, std::string genericName);
+TypeKind GetGenericActualTypeKind(std::string configType);
 
 ArrayOperationKind GetArrayOperationKind(Decl& decl);
 

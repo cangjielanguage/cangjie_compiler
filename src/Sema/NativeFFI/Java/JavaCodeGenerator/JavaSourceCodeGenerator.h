@@ -18,6 +18,8 @@
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Types.h"
 #include "cangjie/Mangle/BaseMangler.h"
+#include "NativeFFI/Java/AfterTypeCheck/JavaDesugarManager.h"
+#include "NativeFFI/Java/AfterTypeCheck/Utils.h"
 
 namespace Cangjie::Interop::Java {
 using namespace AST;
@@ -32,17 +34,20 @@ public:
     JavaSourceCodeGenerator(Decl* decl, const BaseMangler& mangler, const std::optional<std::string>& folderPath,
         const std::string& outputFileName, std::string cjLibName, std::vector<Ptr<ExtendDecl>> extends,
         bool isInteropCJPackageConfig = false);
+    JavaSourceCodeGenerator(Decl* decl, const BaseMangler& mangler, const std::optional<std::string>& outputFolderPath,
+        const std::string& outputFileName, std::string cjLibName, GenericConfigInfo* genericConfig,
+        bool isInteropCJPackageConfig);
     static bool IsDeclAppropriateForGeneration(const Decl& declArg);
 
 private:
     static const std::string DEFAULT_OUTPUT_DIR;
     static const std::string IGNORE_IMPORT;
     static std::string AddImport(Ptr<Ty> ty, std::set<std::string>* javaImports, const std::string* curPackageName);
-    static std::string MapCJTypeToJavaType(const Ptr<Ty> ty, std::set<std::string>* javaImports,
+    std::string MapCJTypeToJavaType(const Ptr<Ty> ty, std::set<std::string>* javaImports,
         const std::string* curPackageName, bool isNativeMethod = false);
-    static std::string MapCJTypeToJavaType(const OwnedPtr<Type>& type, std::set<std::string>* javaImports,
+    std::string MapCJTypeToJavaType(const OwnedPtr<Type>& type, std::set<std::string>* javaImports,
         const std::string* curPackageName, bool isNativeMethod = false);
-    static std::string MapCJTypeToJavaType(const OwnedPtr<FuncParam>& param, std::set<std::string>* javaImports,
+    std::string MapCJTypeToJavaType(const OwnedPtr<FuncParam>& param, std::set<std::string>* javaImports,
         const std::string* curPackageName, bool isNativeMethod = false);
     static std::string GenerateParams(const std::vector<OwnedPtr<FuncParam>>& params,
         const std::function<std::string(const OwnedPtr<FuncParam>& ptr)>& transform);
@@ -54,6 +59,7 @@ private:
     const std::string cjLibName;
     const BaseMangler& mangler;
     std::vector<Ptr<ExtendDecl>> extendDecls;
+    GenericConfigInfo* genericConfig = nullptr;
     bool isInteropCJPackageConfig{false};
 
     std::string GenerateFuncParams(const std::vector<OwnedPtr<FuncParam>>& params, bool isNativeMethod = false);
@@ -117,6 +123,8 @@ private:
     void AddAttachCJObject();
     void AddDetachCJObject();
     void AddNativeDetachCJObject();
+    bool IsGenericParam(const Ptr<Ty> ty);
+    bool IsVisibalFunc(const FuncDecl& funcDecl);
 };
 } // namespace Cangjie::Interop::Java
 

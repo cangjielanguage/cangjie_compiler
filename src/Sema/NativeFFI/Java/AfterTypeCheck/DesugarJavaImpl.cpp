@@ -500,14 +500,17 @@ Ptr<Ty> JavaDesugarManager::GetJNITy(Ptr<Ty> ty)
     if (IsCJMapping(*ty)) {
         return jlongTy;
     }
+    if (ty->kind == TypeKind::TYPE_GENERICS) {
+        return nullptr;
+    }
     CJC_ASSERT(ty->IsBuiltin());
     return ty;
 }
 
-std::string JavaDesugarManager::GetJniMethodName(const FuncDecl& method)
+std::string JavaDesugarManager::GetJniMethodName(const FuncDecl& method, const std::string* genericActualName)
 {
     auto sampleJavaName = GetJavaMemberName(method);
-    std::string fqname = GetJavaFQName(*(method.outerDecl));
+    std::string fqname = GetJavaFQName(*(method.outerDecl), genericActualName);
     MangleJNIName(fqname);
     auto mangledFuncName = GetMangledMethodName(mangler, method.funcBody->paramLists[0]->params, sampleJavaName);
     MangleJNIName(mangledFuncName);
@@ -534,9 +537,9 @@ inline std::string JavaDesugarManager::GetJniSuperArgFuncName(const ClassLikeDec
     return "Java_" + fqname + "_super" + id;
 }
 
-std::string JavaDesugarManager::GetJniInitCjObjectFuncName(const FuncDecl& ctor, bool isGeneratedCtor)
+std::string JavaDesugarManager::GetJniInitCjObjectFuncName(const FuncDecl& ctor, bool isGeneratedCtor, const std::string* genericActualName)
 {
-    std::string fqname = GetJavaFQName(*(ctor.outerDecl));
+    std::string fqname = GetJavaFQName(*(ctor.outerDecl), genericActualName);
     MangleJNIName(fqname);
     auto mangledFuncName = GetMangledJniInitCjObjectFuncName(mangler, ctor.funcBody->paramLists[0]->params,
                                                              isGeneratedCtor);
