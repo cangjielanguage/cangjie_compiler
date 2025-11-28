@@ -701,10 +701,11 @@ void InitializationChecker::CheckLetFlagInMemberAccess(const Expr& ae, const Mem
         if (Utils::In(realBaseExpr->astKind, {ASTKind::CALL_EXPR, ASTKind::SUBSCRIPT_EXPR}) && isStructBase) {
             DiagCannotAssignToImmutable(diag, ae, *realBaseExpr);
         }
-        if (auto bma = DynamicCast<MemberAccess*>(ma.baseExpr.get()); bma) {
-            bool invalidPropAccess = bma->target && bma->target->astKind == ASTKind::PROP_DECL && isStructBase;
+        if (auto nameRef = DynamicCast<NameReferenceExpr*>(ma.baseExpr.get()); nameRef) {
+            bool invalidPropAccess =
+                nameRef->GetTarget() && nameRef->GetTarget()->astKind == ASTKind::PROP_DECL && isStructBase;
             if (invalidPropAccess) {
-                DiagCannotAssignToImmutable(diag, ae, *bma);
+                DiagCannotAssignToImmutable(diag, ae, *nameRef);
             }
         }
     }
