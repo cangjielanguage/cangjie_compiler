@@ -25,6 +25,7 @@
 #include "cangjie/Utils/SipHash.h"
 #include "cangjie/Utils/Utils.h"
 #include "cangjie/Utils/Unicode.h"
+#include "NativeFFI/Java/OptionChecker.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -258,6 +259,7 @@ bool GlobalOptions::PerformPostActions()
     success = success && CheckCompileAsExeOptions();
     success = success && CheckPgoOptions();
     success = success && ReprocessObfuseOption();
+    success = success && Interop::Java::CheckExportJavaPathOption(*this);
     RefactJobs();
     RefactAggressiveParallelCompileOption();
     DisableStaticStdForOhos();

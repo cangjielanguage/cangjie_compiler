@@ -78,6 +78,7 @@ WARNING(driver_unsupport_compile_source_file_with_path, UNSUPPORT_COMPILE_SOURCE
 
 // warning of deprecated option which will be removed in future
 WARNING(driver_deprecated_option, DEPRECATED, "option '%s' is deprecated and will be removed in future%s.")
+WARNING(driver_deprecated_option_recommended, DEPRECATED, "option '%s' is deprecated and will be removed in future, use '%s' instead.")
 // pgo errors
 ERROR(driver_pgo_both_gen_and_use, "using both '--pgo-instr-gen' and '--pgo-instr-use' is not allowed.")
 ERROR(driver_pgo_invalid_profile_extension, "Not a .profdata file: '%s'")
@@ -85,5 +86,8 @@ ERROR(driver_pgo_invalid_profile_extension, "Not a .profdata file: '%s'")
 // Plugin
 ERROR(not_a_valid_plugin, "'%s' is not a valid compiler plugin to be loaded or executed")
 ERROR(plugin_throws_exception, "exception occurs while executing compiler plugin(s)")
+
+
+ERROR(driver_simultanious_deprecated_and_recommmended_option_usage, "deprecated '%s' option is used at the same time with recommended '%s' one. Use one of them.")
 
 ERROR(driver_diag_end, "")

@@ -6,6 +6,8 @@
 
 set(OPTION_SRC OptionAction.cpp Option.cpp OptionTable.cpp)
 
+add_subdirectory(NativeFFI)
+
 add_library(CangjieOption OBJECT ${OPTION_SRC})
 target_compile_options(CangjieOption PRIVATE ${CJC_EXTRA_WARNINGS})
 if(CANGJIE_VISIBLE_OPTIONS_ONLY)

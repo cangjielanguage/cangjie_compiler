@@ -692,8 +692,8 @@ void JavaDesugarManager::DesugarInJavaImpls(File& file)
     for (auto decl : genDecls) {
         if (JavaSourceCodeGenerator::IsDeclAppropriateForGeneration(*decl)) {
             const std::string fileJ = decl->identifier.Val() + ".java";
-            auto codegen = JavaSourceCodeGenerator(decl, mangler, javaCodeGenPath, fileJ,
-                GetCangjieLibName(outputLibPath, decl->GetFullPackageName()), ref2extend[decl]);
+            auto codegen = JavaSourceCodeGenerator(*decl, mangler, javaCodeGenPath, fileJ,
+                GetCangjieLibName(outputLibPath, decl->GetFullPackageName()), ref2extend[decl], exportJavaPath);
             codegen.Generate();
         }
     }

@@ -202,7 +202,7 @@ PREDEFVALUE(mock_mode, {
  *      `{ BACKEND(CJNATIVE) COMMA BACKEND(OTHER) }`.
  *    - If your option is a temporary option or is not ready to be released, they you
  *      could give your option group `{ GROUP(GLOBAL) }`. If your option is tested and
- *      is listed on `cjc` user manual, they you may mark your option as `GROUP(VISIBLE)`.
+ *      is listed on `cjc` user manual, then you may mark your option as `GROUP(VISIBLE)`.
  *    - Does your option have a short name? Set ALIAS to your option's one character
  *      short name if it has one, set ALIAS `nullptr` otherwise.
  *    - If your option has SEPARATED kind but only recognizes values from a list of
@@ -288,9 +288,15 @@ OPTION("--output", OUTPUT_FILE, SEPARATED, { BACKEND(ALL) },
 OPTION("--output-dir", OUTPUT_DIR, SEPARATED, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
     "Specify output directory (it affects '--output' option)")
-OPTION("--output-javagen-dir", OUTPUT_JAVA_GEN_DIR, SEPARATED, { BACKEND(ALL) },
+OPTION("--output-javagen-dir", OUTPUT_JAVA_GEN_DIR, SEPARATED, { BACKEND(CJNATIVE) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
-    "Specify output directory for javagen")
+    "Specify output directory for generated @JavaImpl java classes. This option is deprecated because "
+    "it does not reconstruct folders based on class packages; all generated classes are "
+    "placed in the specified folder. Use --export-java-path instead.")
+OPTION("--export-java-path", EXPORT_JAVA_PATH, SEPARATED, { BACKEND(CJNATIVE) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, SINGLE_OCCURRENCE,
+    "Specify output directory for generated @JavaImpl java classes. "
+    "It reconstructs folders based on class packages, class com.java.T will have path <specified_dir>/com/java/T.java")
 OPTION("--no-prelude", NO_PRELUDE, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Not import cangjie std.core package by default, only applicable when compiling std.core")

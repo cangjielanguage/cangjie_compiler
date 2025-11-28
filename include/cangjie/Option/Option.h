@@ -466,7 +466,9 @@ public:
 
     std::optional<std::string> outputDir = std::nullopt;
 
-    std::optional<std::string> outputJavaGenDir = std::nullopt;
+    std::optional<std::string> outputJavaGenDir = std::nullopt; // Deprecated
+
+    std::optional<std::string> exportJavaPath = std::nullopt;
 
     std::vector<std::string> importPaths; /**< .cjo search paths */
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
