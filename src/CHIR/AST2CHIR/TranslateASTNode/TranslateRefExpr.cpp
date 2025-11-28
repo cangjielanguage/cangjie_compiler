@@ -211,10 +211,7 @@ InvokeCallContext Translator::GenerateInvokeCallContext(const InstCalleeInfo& in
         auto outerDecl = originalFuncDecl->outerDecl;
         CJC_NULLPTR_CHECK(outerDecl);
         auto parentType = GetNominalSymbolTable(*outerDecl)->GetType();
-        if (parentType->IsReferenceType() ||
-            (parentType->IsStruct() && originalFuncDecl->TestAttr(AST::Attribute::MUT))) {
-            parentType = builder.GetType<RefType>(parentType);
-        }
+        parentType = AddRefIfFuncIsMutOrClass(*parentType, *originalFuncDecl, builder);
         auto paramTypes = originalFuncType->GetParamTypes();
         paramTypes.insert(paramTypes.begin(), parentType);
         originalFuncType = builder.GetType<FuncType>(paramTypes, originalFuncType->GetReturnType());
@@ -225,8 +222,8 @@ InvokeCallContext Translator::GenerateInvokeCallContext(const InstCalleeInfo& in
             originalGenericTypeParams.emplace_back(StaticCast<GenericType*>(TranslateType(*(genericTy->ty))));
         }
     }
-    auto funcName = callee.identifier.Val();
-    if (IsOverflowOpCall(callee)) {
+    auto funcName = originalFuncDecl->identifier.Val();
+    if (IsOverflowOpCall(*originalFuncDecl)) {
         funcName = OverflowStrategyPrefix(strategy) + funcName;
     }
     
