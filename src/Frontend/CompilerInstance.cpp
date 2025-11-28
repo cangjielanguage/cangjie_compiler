@@ -146,25 +146,29 @@ void DumpAST(const std::vector<Ptr<Package>>& srcPkgs, const std::string& output
         DumpASTToScreen(srcPkgs);
         return;
     }
-    std::string dumpPath, dumpDir;
-    if (FileUtil::IsDir(outputOfProduct)) {
-        dumpDir = FileUtil::JoinPath(outputOfProduct, pkgName + "_AST");
-    } else {
-        dumpDir = FileUtil::GetFileBase(outputOfProduct) + "_AST";
-    }
+    static std::string dumpDir;
     static bool checkDumpDir = false;
     static size_t fileNum = 0;
     if (!checkDumpDir) {
+        if (FileUtil::IsDir(outputOfProduct)) {
+            dumpDir = FileUtil::JoinPath(outputOfProduct, pkgName + "_AST");
+        } else {
+            dumpDir = FileUtil::GetFileBase(outputOfProduct) + "_AST";
+        }
         if (FileUtil::FileExist(dumpDir)) {
             FileUtil::RemoveDirectoryRecursively(dumpDir);
         }
+        FileUtil::CreateDirs(dumpDir + DIR_SEPARATOR);
         checkDumpDir = true;
     }
-    dumpPath = FileUtil::JoinPath(dumpDir, std::to_string(fileNum) + "_" + prefix + "_ast" + ".txt");
-    if (!FileUtil::FileExist(dumpPath)) {
-        FileUtil::CreateDirs(dumpPath);
+    auto realDirPath = Cangjie::FileUtil::GetAbsPath(dumpDir);
+    if (!realDirPath.has_value()) {
+        Errorln("Cannot get absolute path of dump directory: " + dumpDir, ", not dump ", prefix, " AST");
+        return;
     }
-    std::ofstream ofs(FileUtil::NormalizePath(dumpPath));
+    std::string dumpPath =
+        FileUtil::JoinPath(realDirPath.value(), std::to_string(fileNum) + "_" + prefix + "_ast" + ".txt");
+    std::ofstream ofs(dumpPath);
     if (!ofs) {
         Errorln("Cannot open file to dump AST: " + dumpPath);
         return;
