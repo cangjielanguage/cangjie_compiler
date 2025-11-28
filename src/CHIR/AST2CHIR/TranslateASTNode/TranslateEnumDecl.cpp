@@ -48,8 +48,12 @@ Ptr<Value> Translator::Visit(const AST::EnumDecl& decl)
         switch (ctor->astKind) {
             case AST::ASTKind::VAR_DECL: {
                 // default enum member store as {} -> EnumType
-                enumDef->AddCtor(
-                    {ctor->identifier, ctor->mangledName, builder.GetType<FuncType>(std::vector<Type*>{}, chirType)});
+                enumDef->AddCtor({
+                    .name = ctor->identifier,
+                    .mangledName = ctor->mangledName,
+                    .funcType = builder.GetType<FuncType>(std::vector<Type*>{}, chirType),
+                    .annoInfo = CreateAnnoFactoryFuncSig(*ctor, enumDef)
+                });
                 break;
             }
             case AST::ASTKind::FUNC_DECL: {
@@ -62,8 +66,12 @@ Ptr<Value> Translator::Visit(const AST::EnumDecl& decl)
                         paramTypes.emplace_back(TranslateType(*ctor->ty->typeArgs[i]));
                     }
                 }
-                enumDef->
-                    AddCtor({ctor->identifier, ctor->mangledName, builder.GetType<FuncType>(paramTypes, chirType)});
+                enumDef->AddCtor({
+                        .name = ctor->identifier,
+                        .mangledName = ctor->mangledName,
+                        .funcType = builder.GetType<FuncType>(paramTypes, chirType),
+                        .annoInfo = CreateAnnoFactoryFuncSig(*ctor, enumDef)
+                    });
                 break;
             }
             default: {

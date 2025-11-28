@@ -17,6 +17,7 @@ struct EnumCtorInfo {
     std::string name;
     std::string mangledName;
     FuncType* funcType; /**< (AssociatedType_1, ..., AssociatedType_N) -> EnumType */
+    AnnoInfo annoInfo;
 };
 
 class EnumDef : public CustomTypeDef {
