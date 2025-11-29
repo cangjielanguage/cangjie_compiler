@@ -186,12 +186,16 @@ std::string GetCangjieLibName(const std::string& outputLibPath, const std::strin
 }
 
 std::string GetMangledMethodName(const BaseMangler& mangler,
-    const std::vector<OwnedPtr<FuncParam>>& params, const std::string& methodName)
+    const std::vector<OwnedPtr<FuncParam>>& params, const std::string& methodName, GenericConfigInfo* genericConfig)
 {
     std::string name(methodName);
 
     for (auto& param : params) {
-        auto mangledParam = mangler.MangleType(*param->ty);
+        auto paramTy = param->ty;
+        if (genericConfig && param->ty->HasGeneric()) {
+            paramTy = GetGenericInstTy(genericConfig, param->ty->name);
+        }
+        std::string mangledParam = mangler.MangleType(*paramTy);
         std::replace(mangledParam.begin(), mangledParam.end(), '.', '_');
         name += mangledParam;
     }
@@ -242,6 +246,67 @@ Ptr<std::string> GetSingleArgumentAnnotationValue(const Decl& target, Annotation
     }
 
     return nullptr;
+}
+
+OwnedPtr<PrimitiveType> GetPrimitiveType(std::string typeName, AST::TypeKind typekind) {
+    OwnedPtr<PrimitiveType> type = MakeOwned<PrimitiveType>();
+    type->str = typeName;
+    type->kind = typekind;
+    type->ty = TypeManager::GetPrimitiveTy(typekind);
+    return type;
+}
+
+std::string GetGenericActualType(GenericConfigInfo* config, std::string genericName)
+{
+    CJC_ASSERT(config);
+    for (size_t i = 0; i < config->instTypes.size(); ++i) {
+        if (config->instTypes[i].first == genericName) {
+            std::string instType = config->instTypes[i].second;
+            return instType;
+        }
+    }
+    return "";
+}
+
+// Current generic just support primitive type
+TypeKind GetGenericActualTypeKind(std::string configType) {
+    static const std::unordered_map<std::string, TypeKind> typeMap = {
+        {"Int8", TypeKind::TYPE_INT8},
+        {"Int16", TypeKind::TYPE_INT16},
+        {"Int32", TypeKind::TYPE_INT32},
+        {"Int64", TypeKind::TYPE_INT64},
+        {"Float16", TypeKind::TYPE_FLOAT16},
+        {"Float32", TypeKind::TYPE_FLOAT32},
+        {"Float64", TypeKind::TYPE_FLOAT64},
+        {"Boolean", TypeKind::TYPE_BOOLEAN},
+    };
+    auto it = typeMap.find(configType);
+    CJC_ASSERT(it != typeMap.end());
+    return it->second;
+}
+
+Ptr<Ty> GetGenericInstTy(GenericConfigInfo* config, std::string genericName) {
+    auto actualTypeName = GetGenericActualType(config, genericName);
+    return GetGenericInstTy(actualTypeName);
+}
+
+Ptr<Ty> GetGenericInstTy(std::string typeStr) {
+    auto typeKind = GetGenericActualTypeKind(typeStr);
+    // Current only support primitive type.
+    auto ty = TypeManager::GetPrimitiveTy(typeKind);
+    return ty;
+}
+
+OwnedPtr<Type> GetGenericInstType(GenericConfigInfo* config, std::string genericName) {
+    auto actualTypeName = GetGenericActualType(config, genericName);
+    return GetGenericInstType(actualTypeName);
+}
+
+OwnedPtr<Type> GetGenericInstType(std::string typeStr) {
+    auto typeKind = GetGenericActualTypeKind(typeStr);
+    // Current only support primitive type.
+    auto type = GetPrimitiveType(typeStr, typeKind);
+    return type;
 }
 
 } // namespace Cangjie::Native::FFI
