@@ -1862,7 +1862,7 @@ std::vector<Ptr<FuncDecl>> TypeChecker::TypeCheckerImpl::FilterCandidates(
         }
         // Check candidate's accessibility, filter invisible candidate.
         Symbol* sym = ScopeManager::GetCurSymbolByKind(SymbolKind::STRUCT, ctx, ce.baseFunc->scopeName);
-        return !IsLegalAccess(sym, *fd, *ce.baseFunc);
+        return !IsLegalAccess(sym, *fd, *ce.baseFunc, importManager, typeManager);
     };
     candidates.erase(std::remove_if(candidates.begin(), candidates.end(), isInvalidAndInvisible), candidates.end());
 
