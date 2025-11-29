@@ -1415,6 +1415,7 @@ void ToCHIR::Canonicalization()
     generator.CreateVirtualFuncWrapper(kind, cachedInfo, curVirtFuncWrapDep, delVirtFuncWrapForIncr);
     generator.SetSrcFuncType();
     generator.CreateMutFuncWrapper();
+    DumpCHIRToFile("CreateVTable");
 
     // 2. calculate virtual method offset and store it in Invoke/InvokeStatic
     // 3. update callee of Apply, it may be replaced by mut wrapper func
