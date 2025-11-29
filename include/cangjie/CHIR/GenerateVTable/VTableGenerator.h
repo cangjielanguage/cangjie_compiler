@@ -37,7 +37,7 @@ private:
     bool VirtualFuncShouldAddToVTableInItsOwnParent(ClassType& ownParent, ClassType& alreadyIn);
     void UpdateAbstractMethodInVtable(VTableType& vtable);
     void UpdateAbstractMethodWithImplementedMethod(
-        VTableInDef& vtable, const ClassType& curParentTy, VirtualMethodInfo& abstractFuncInfo);
+        VTableType& vtable, const ClassType& curParentTy, VirtualFuncInfo& abstractFuncInfo);
     std::unordered_map<std::string, VirtualFuncInfo> CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef);
     std::unordered_map<const GenericType*, Type*> GetInstMapFromDefIncludeParents(
         const CustomTypeDef& def, const Type& curType);
