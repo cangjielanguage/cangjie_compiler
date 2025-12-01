@@ -231,7 +231,8 @@ void DIBuilder::SetSubprogram(const CHIR::Func* func, llvm::Function* function)
     auto funcIdentifier = lineInfoOnly || IsParaInitFunc(*func)
         ? "" 
         : GenerateGenericFuncName(func->GetSrcCodeIdentifier(), func->GetOriginalGenericTypeParams());
-    auto& position = func->GetDebugLocation();
+    auto rawMethod = func->Get<CHIR::WrappedRawMethod>();
+    auto& position = rawMethod ? rawMethod->GetDebugLocation() : func->GetDebugLocation();
     auto diFile = GetOrCreateFile(position);
     bool isGV = funcName.find(MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_VARIABLE_INIT_PREFIX) == 0;
     bool isCompilerAddInit = func->GetSrcCodeIdentifier() == "init" && func->TestAttr(CHIR::Attribute::NO_DEBUG_INFO);

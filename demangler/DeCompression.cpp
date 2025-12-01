@@ -45,13 +45,17 @@ inline size_t StripCangjieAt(T& identifier, size_t idx)
     return idx;
 }
 
-// Get identifier without prefix "_C"
+// Get identifier without prefix "_C" or "_CV"
 template<typename T>
 inline size_t StripCangjiePrefix(T& identifier, size_t idx)
 {
     if (idx + MANGLE_CHAR_LEN < identifier.Length() && identifier[idx] == MANGLE_UNDERSCORE_PREFIX &&
         identifier[idx + MANGLE_CHAR_LEN] == 'C') {
-        return idx + PREFIX_LEN;
+        if(idx + MANGLE_CHAR_LEN  * 2 < identifier.Length() && identifier[idx + MANGLE_CHAR_LEN  * 2] == 'V') {
+            return idx + PREFIX_LEN + MANGLE_CHAR_LEN;
+        } else {
+            return idx + PREFIX_LEN;
+        }
     }
     return idx;
 }
@@ -281,7 +285,7 @@ inline size_t ForwardFileNameNumber(T& mangled, size_t idx)
         if (curIdx >= mangled.Length()) {
             return idx;
         }
-        if (mangled[curIdx] == MANGLE_FILE_NUMBER_END) {
+        if (mangled[curIdx] == MANGLE_END) {
             return ++curIdx;
         }
         if (curIdx + 1 - idx == FILE_HASH_LEN) {
@@ -766,7 +770,7 @@ T DeCompression<T>::CJMangledDeCompression(bool isType)
     if (demangled.IsEmpty() || isType || !IsSamePrefix(demangled, MANGLE_CANGJIE_PREFIX, this->pid)) {
         return this->mangledName;
     }
-    // Skip "_C"
+    // Skip "_C" or "_CV"
     this->pid = StripCangjiePrefix(demangled, this->pid);
     demangled = this->mangledName.SubStr(this->pid);
     if (IsGlobalEncode(demangled)) {
