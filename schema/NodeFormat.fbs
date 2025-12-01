@@ -852,7 +852,8 @@ union AnyDecl {
   EXTEND_DECL: ExtendDecl,
   MACRO_DECL: MacroDecl,
   MACRO_EXPAND_DECL: MacroExpandDecl,
-  FUNC_PARAM: FuncParam
+  FUNC_PARAM: FuncParam,
+  MACRO_EXPAND_PARAM: MacroExpandParam
 }
 
 table Decl {
