@@ -1,76 +1,86 @@
 /.gitcode/ @xuanjz
-/figures/ @Timi3 @neilliuistaken
-/cmake/ @neilliuistaken @Yessy 
-/demangler/ @neilliuistaken @Yessy 
-*.md @amy_mayun @luojianing
-build.py @neilliuistaken @Yessy 
-CMakeLists.txt @neilliuistaken @Yessy 
-OAT.xml @xuanjz
+/cmake/ @neilliuistaken
+/demangler/ @Yessy
+/doc/ @luojianing
+/figures/ @luojianing
+
+/include/cangjie/AST/ @Augus_Jan
+/include/cangjie/AST/ASTKind.inc @mini-tang
+/include/cangjie/Basic/ @Cangjie-hljyaozhen
+/include/cangjie/CHIR/ @Mr_Kang_Yi
+/include/cangjie/CHIR/Interpreter @claudio_
+/include/cangjie/CHIR/Serializer @Cangjie-hljyaozhen
+/include/cangjie/CodeGen/ @Yessy
+/include/cangjie/ConditionalCompilation/ @mini-tang
+/include/cangjie/Driver/ @neilliuistaken
+/include/cangjie/Frontend/ @wyq1213
+/include/cangjie/FrontendTool/ @wyq1213
+/include/cangjie/IncrementalCompilation/ @Cangjie-hljyaozhen
+/include/cangjie/Lex/ @kkkkkkkbbbbbbb
+/include/cangjie/Lex/Tokens.inc @mini-tang
+/include/cangjie/Macro/ @mini-tang
+/include/cangjie/Mangle/ @Yessy
+/include/cangjie/MetaTransformation/ @Timi3
+/include/cangjie/Modules/ @Augus_Jan
+/include/cangjie/Option/ @neilliuistaken
+/include/cangjie/Parse/ @kkkkkkkbbbbbbb
+/include/cangjie/Sema/ @huohuixin
+/include/cangjie/Utils/ @wyq1213
+
 /integration_build/ @zichexuelan
-/utils/ @Timi3 @neilliuistaken
-/schema/ @Timi3 @mini-tang
-/doc/ @amy_mayun @luojianing
-/third_party/ @Timi3 @neilliuistaken
-/include/cangjie/AST/ @Augus_Jan @wyq1213
-/include/cangjie/AST/ASTKind.inc @Augus_Jan @wyq1213 @xiaxue0215 @mini-tang
-/include/cangjie/Basic/ @Cangjie-hljyaozhen @wyq1213
-/include/cangjie/CHIR/ @Mr_Kang_Yi @Tadddy @wyq1213
-/include/cangjie/CodeGen/ @Yessy @neilliuistaken
-/include/cangjie/ConditionalCompilation/ @xiaxue0215 @mini-tang
-/include/cangjie/Driver/ @Yessy @neilliuistaken
-/include/cangjie/Frontend/ @Timi3 @neilliuistaken
-/include/cangjie/FrontendTool/ @Timi3 @neilliuistaken
-/include/cangjie/IncrementalCompilation/ @Cangjie-hljyaozhen @wyq1213
-/include/cangjie/Lex/ @kkkkkkkbbbbbbb @wyq1213
-/include/cangjie/Lex/Tokens.inc @kkkkkkkbbbbbbb @wyq1213 @xiaxue0215 @mini-tang
-/include/cangjie/Macro/ @xiaxue0215 @mini-tang
-/include/cangjie/Mangle/ @Yessy @neilliuistaken
-/include/cangjie/MetaTransformation/ @Timi3 @wyq1213
-/include/cangjie/Modules/ @Augus_Jan @wyq1213
-/include/cangjie/Option/ @Yessy @neilliuistaken
-/include/cangjie/Parse/ @kkkkkkkbbbbbbb @wyq1213
-/include/cangjie/Sema/ @huohuixin @wyq1213
-/include/cangjie/Utils/ @Augus_Jan @wyq1213
-/src/AST/ @Augus_Jan @wyq1213
-/src/Basic/ @Cangjie-hljyaozhen @wyq1213
-/src/CHIR/ @Mr_Kang_Yi @Tadddy @wyq1213
-/src/CodeGen/ @Yessy @neilliuistaken
-/src/ConditionalCompilation/ @xiaxue0215 @mini-tang
-/src/Driver/ @Yessy @neilliuistaken
-/src/Frontend/ @Timi3 @neilliuistaken
-/src/FrontendTool/ @Timi3 @neilliuistaken
-/src/IncrementalCompilation/ @Cangjie-hljyaozhen @wyq1213
-/src/Lex/ @kkkkkkkbbbbbbb @wyq1213
-/src/Macro/ @xiaxue0215 @mini-tang
-/src/Mangle/ @Yessy @neilliuistaken
-/src/MetaTransformation/ @Timi3 @wyq1213
-/src/Modules/ @Augus_Jan @wyq1213
-/src/Option/ @Yessy @neilliuistaken
-/src/Parse/ @kkkkkkkbbbbbbb @wyq1213
-/src/Parse/ParseQuote.cpp @xiaxue0215 @mini-tang
-/src/Parse/ParseMacro.cpp @xiaxue0215 @mini-tang
-/src/Parse/NativeFFI/ @JasmineZhu
-/src/Sema/ @huohuixin @wyq1213
+/schema/ @mini-tang
+/schema/ModuleFormat.fbs @Augus_Jan
+
+/src/AST/ @Augus_Jan
+/src/Basic/ @Cangjie-hljyaozhen
+/src/CHIR/ @Mr_Kang_Yi
+/src/CodeGen/ @Yessy
+/src/ConditionalCompilation/ @mini-tang
+/src/Driver/ @neilliuistaken
+/src/Frontend/ @wyq1213
+/src/FrontendTool/ @wyq1213
+/src/IncrementalCompilation/ @Cangjie-hljyaozhen
+/src/Lex/ @kkkkkkkbbbbbbb
+/src/Macro/ @mini-tang
+/src/Mangle/ @Yessy
+/src/MetaTransformation/ @Timi3
+/src/Modules/ @Augus_Jan
+/src/Option/ @neilliuistaken
+/src/Parse/ @kkkkkkkbbbbbbb
+/src/Parse/ParseQuote.cpp @mini-tang
+/src/Parse/ParseMacro.cpp @mini-tang
+/src/Sema/ @huohuixin
+/src/Sema/GenericInstantiation @Augus_Jan
 /src/Sema/NativeFFI/ @JasmineZhu
-/src/Sema/Desugar/DesugarMacro.cpp @xiaxue0215 @mini-tang
-/src/Sema/Desugar/DesugarMacro.h @xiaxue0215 @mini-tang
-/src/Sema/Test/ @JasmineZhu
-/src/Sema/Test/ @JasmineZhu
-/src/CHIR/CJMP/ @JasmineZhu
-/src/Utils/ @Augus_Jan @wyq1213
-/unittests/AST/ @Augus_Jan @wyq1213
-/unittests/Basic/ @Cangjie-hljyaozhen @wyq1213
-/unittests/CHIR/ @Mr_Kang_Yi @Tadddy @wyq1213
-/unittests/CodeGen/ @Yessy @neilliuistaken
-/unittests/ConditionalCompilation/ @xiaxue0215 @mini-tang
-/unittests/Driver/ @Yessy @neilliuistaken
-/unittests/Frontend/ @Timi3 @neilliuistaken
-/unittests/IncrCompile/ @Cangjie-hljyaozhen @wyq1213
-/unittests/Lex/ @kkkkkkkbbbbbbb @wyq1213
-/unittests/Macro/ @xiaxue0215 @mini-tang
-/unittests/Modules/ @Augus_Jan @wyq1213
-/unittests/Option/ @Yessy @neilliuistaken
-/unittests/Parse/ @kkkkkkkbbbbbbb @wyq1213
-/unittests/Sema/ @huohuixin @wyq1213
-/unittests/TestCompilerInstance/ @kkkkkkkbbbbbbb @wyq1213
-/unittests/Utils/ @Augus_Jan @wyq1213
+/src/Seme/Test/ @JasmineZhu
+/src/Sema/CJMP/ @JasmineZhu
+/src/Sema/Desugar/DesugarMacro.cpp @mini-tang
+/src/Sema/Desugar/DesugarMacro.h @mini-tang
+/src/Utils/ @wyq1213
+
+/third_party/ @neilliuistaken
+
+/unittests/AST/ @Augus_Jan
+/unittests/Basic/ @Cangjie-hljyaozhen
+/unittests/CHIR/ @Mr_Kang_Yi
+/unittests/CodeGen/ @Yessy
+/unittests/ConditionalCompilation/ @mini-tang
+/unittests/Driver/ @neilliuistaken
+/unittests/Frontend/ @wyq1213
+/unittests/IncrCompile/ @Cangjie-hljyaozhen
+/unittests/Lex/ @kkkkkkkbbbbbbb
+/unittests/Macro/ @mini-tang
+/unittests/Modules/ @Augus_Jan
+/unittests/Option/ @neilliuistaken
+/unittests/Parse/ @kkkkkkkbbbbbbb
+/unittests/Sema/ @huohuixin
+/unittests/TestCompilerInstance/ @kkkkkkkbbbbbbb
+/unittests/Utils/ @wyq1213
+
+/utils/ @neilliuistaken 
+build.py @neilliuistaken
+CMakeLists.txt @neilliuistaken
+LICENSE @xuanjz
+OAT.xml @xuanjz
+Open_Source_Software_Notice.docx @xuanjz
+*.md @luojianing
