@@ -185,9 +185,6 @@ OwnedPtr<LitConstExpr> ParserImpl::GetLitConstExprFromStr(
     } else if (token.kind == TokenKind::STRING_LITERAL) {
         ret->kind = LitConstKind::STRING;
         ret->stringKind = StringKind::NORMAL;
-    } else if (token.kind == TokenKind::JSTRING_LITERAL) {
-        ret->kind = LitConstKind::JSTRING;
-        ret->stringKind = StringKind::JSTRING;
     }
     ret->stringValue = StringConvertor::Normalize(value);
     ret->codepoint = StringConvertor::UTF8ToCodepoint(ret->stringValue);
@@ -253,9 +250,6 @@ OwnedPtr<Expr> ParserImpl::ParseInterpolationExpr(const std::string& value, cons
 
 OwnedPtr<Expr> ParserImpl::ProcessStringInterpolation(const Token& token)
 {
-    if (token.kind == TokenKind::JSTRING_LITERAL) {
-        return GetLitConstExprFromStr(token.Value(), token, token.Begin());
-    }
     std::vector<StringPart> strParts = lexer->GetStrParts(token);
     auto tokenValue = token.Value();
     if (strParts.size() == 1) {

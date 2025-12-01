@@ -61,6 +61,7 @@ add_library(CangjieCommonUtilFFI OBJECT
             ICEUtil.cpp
             Semaphore.cpp
             StdUtils/StdUtils.cpp)
+set_source_files_properties(StdUtils/StdUtils.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions")
 add_library(CangjieUnicodeUtils OBJECT ${UNICODE_UTIL_SRC})
 
 target_include_directories(CangjieUnicodeUtils PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

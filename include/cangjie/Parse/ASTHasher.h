@@ -22,8 +22,6 @@ public:
     static void Init(const GlobalOptions& op);
 
     using hash_type = size_t;
-    static hash_type HashWithPos(Ptr<const Node> node);
-    static hash_type HashNoPos(Ptr<const Node> node);
     static hash_type HashDeclBody(Ptr<const AST::Decl> decl);
     static hash_type HashDeclSignature(Ptr<const AST::Decl> decl);
     // hash package specs and import specs of package

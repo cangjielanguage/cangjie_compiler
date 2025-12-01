@@ -213,8 +213,6 @@ std::string CNodeToString(const std::vector<CNode>& nodes)
 
 struct CNodeWalker {
     std::function<void(CNode)> enterFunc;
-    std::function<void(CNode)> exitFunc;
-
     void Visit(CNode node)
     {
         if (auto n = std::get_if<Node*>(&node)) {
@@ -222,14 +220,9 @@ struct CNodeWalker {
                 return;
             }
         }
-        if (enterFunc) {
-            enterFunc(node);
-        }
+        enterFunc(node);
         if (auto n = std::get_if<Node*>(&node)) {
             VisitChildren(*n);
-        }
-        if (exitFunc) {
-            exitFunc(node);
         }
     }
 
@@ -355,9 +348,7 @@ private:
                     VisitToken(it->bitAndPos);
                 }
                 VisitGenericConstraints(c->generic);
-                if (c->body) {
-                    VisitChild(c->body);
-                }
+                VisitChild(c->body);
                 break;
             }
             case ASTKind::CLASS_BODY: {
@@ -462,13 +453,9 @@ private:
                 VisitModifiers(vp->modifiers);
                 VisitToken(vp->keywordPos);
                 VisitIdentifier(vp->identifier);
-                if (vp->irrefutablePattern) {
-                    VisitChild(vp->irrefutablePattern);
-                }
-                if (vp->initializer) {
-                    VisitToken(vp->assignPos);
-                    VisitChild(vp->initializer);
-                }
+                VisitChild(vp->irrefutablePattern);
+                VisitToken(vp->assignPos);
+                VisitChild(vp->initializer);
                 break;
             }
             case ASTKind::MACRO_EXPAND_PARAM: {
@@ -1333,7 +1320,7 @@ std::vector<CNode> CollectPtrsOfASTNodes(Ptr<File> node)
             ptrs.push_back(cnode);
         }
     };
-    CNodeWalker w{collect, {}};
+    CNodeWalker w{collect};
     w.Visit(node);
     return ptrs;
 }
@@ -1635,7 +1622,7 @@ size_t AttachCommentToNode(const std::vector<CNode>& nodes, size_t curNodeIdx,
                     ppos = std::get<const Position*>(nodes[curNodeIdx]);
                 }
             }
-            // no node, all nodes are tokens, this is a invalid Node
+            // no node, all nodes are tokens, this is an invalid Node
             // this comment adds to file or is discarded, because we do not add comments to tokens
             if (!node) {
                 break;
@@ -1658,6 +1645,7 @@ size_t AttachCommentToNode(const std::vector<CNode>& nodes, size_t curNodeIdx,
             }
         }
 
+        // move this after trailing comment because that has a higher priority
         if (curCgBegin >= curNodeBegin && curCgBegin < curNodeEnd) {
             if (!node) {
                 if (nodeStack.empty()) {

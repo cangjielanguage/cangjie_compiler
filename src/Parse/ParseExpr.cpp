@@ -786,20 +786,6 @@ void ParserImpl::ParseQuestSuffixExpr(OwnedPtr<Expr>& expr)
     }
 }
 
-OwnedPtr<Expr> ParserImpl::ParseOptionalExpr(
-    const Position questPos, OwnedPtr<Expr> baseExpr, SuffixKind suffix) const
-{
-    if (suffix == SuffixKind::QUEST) {
-        OwnedPtr<OptionalExpr> ret = MakeOwned<OptionalExpr>();
-        ret->questPos = questPos;
-        ret->begin = baseExpr->begin;
-        ret->end = baseExpr->end;
-        ret->baseExpr = std::move(baseExpr);
-        return ret;
-    }
-    return baseExpr;
-}
-
 OwnedPtr<TrailingClosureExpr> ParserImpl::ParseTrailingClosureExpr(OwnedPtr<Expr> baseExpr)
 {
     OwnedPtr<TrailingClosureExpr> ret = MakeOwned<TrailingClosureExpr>();
