@@ -203,18 +203,22 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeInitCjObjectFuncForEnumCtorNoPa
 
 void JavaDesugarManager::GenerateNativeInitCJObjectEnumCtor(AST::EnumDecl& enumDecl)
 {
-    auto nativeMethod = MakeOwned<Decl>();
     for (auto& ctor : enumDecl.constructors) {
         if (ctor->astKind == ASTKind::FUNC_DECL) {
             auto fd = As<ASTKind::FUNC_DECL>(ctor.get());
             CJC_NULLPTR_CHECK(fd);
-            nativeMethod = GenerateNativeInitCjObjectFunc(*fd, false);
+            if (isGenericGlueCode) {
+                for (auto genericConfig : genericConfigsVector) {
+                    generatedDecls.push_back(GenerateNativeInitCjObjectFunc(*fd, false, false, nullptr, genericConfig));
+                }
+            } else {
+                generatedDecls.push_back(GenerateNativeInitCjObjectFunc(*fd, false));
+            }
         } else if (ctor->astKind == ASTKind::VAR_DECL) {
             auto varDecl = As<ASTKind::VAR_DECL>(ctor.get());
             CJC_NULLPTR_CHECK(varDecl);
-            nativeMethod = GenerateNativeInitCjObjectFuncForEnumCtorNoParams(enumDecl, *varDecl);
+            generatedDecls.push_back(GenerateNativeInitCjObjectFuncForEnumCtorNoParams(enumDecl, *varDecl));
         }
-        generatedDecls.push_back(std::move(nativeMethod));
     }
 }
 
@@ -229,15 +233,35 @@ void JavaDesugarManager::GenerateForCJEnumMapping(AST::EnumDecl& enumDecl)
             continue;
         }
         if (auto fd = As<ASTKind::FUNC_DECL>(member.get())) {
-            generatedDecls.push_back(GenerateNativeMethod(*fd, enumDecl));
+            if (isGenericGlueCode) {
+                for (auto genericConfig : genericConfigsVector) {
+                    generatedDecls.push_back(GenerateNativeMethod(*fd, enumDecl, genericConfig));
+                }
+            } else {
+                generatedDecls.push_back(GenerateNativeMethod(*fd, enumDecl));
+            }
         } else if (member->astKind == ASTKind::PROP_DECL && !member->TestAttr(Attribute::COMPILER_ADD)) {
             const PropDecl& propDecl = *StaticAs<ASTKind::PROP_DECL>(member.get());
             const OwnedPtr<FuncDecl>& funcDecl = propDecl.getters[0];
-            auto getSignature = GetJniMethodNameForProp(propDecl, false);
-            auto nativeMethod = GenerateNativeMethod(*funcDecl.get(), enumDecl);
-            if (nativeMethod != nullptr) {
-                nativeMethod->identifier = getSignature;
-                generatedDecls.push_back(std::move(nativeMethod));
+            if (isGenericGlueCode) {
+                for (auto genericConfig : genericConfigsVector) {
+                    auto getSignature = GetJniMethodNameForProp(propDecl, false);
+                    if (genericConfig && !genericConfig->declInstName.empty()) {
+                        getSignature = GetJniMethodNameForProp(propDecl, false, &genericConfig->declInstName);
+                    }
+                    auto nativeMethod = GenerateNativeMethod(*funcDecl.get(), enumDecl, genericConfig);
+                    if (nativeMethod != nullptr) {
+                        nativeMethod->identifier = getSignature;
+                        generatedDecls.push_back(std::move(nativeMethod));
+                    }
+                }
+            } else {
+                auto getSignature = GetJniMethodNameForProp(propDecl, false);
+                auto nativeMethod = GenerateNativeMethod(*funcDecl.get(), enumDecl);
+                if (nativeMethod != nullptr) {
+                    nativeMethod->identifier = getSignature;
+                    generatedDecls.push_back(std::move(nativeMethod));
+                }
             }
         }
     }

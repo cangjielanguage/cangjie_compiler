@@ -421,6 +421,24 @@ OwnedPtr<Decl> JavaDesugarManager::GenerateNativeInitCjObjectFunc(FuncDecl& ctor
         auto fwdCtorRef = WithinFile(CreateRefExpr(*fwdCtor), curFile);
         objectCtorCall = CreateCallExpr(std::move(fwdCtorRef), std::move(ctorCallArgs), fwdCtor,
             fwdCtor->outerDecl->ty, CallKind::CALL_OBJECT_CREATION);
+    } else if (ctor.outerDecl->ty->HasGeneric() && ctor.outerDecl->astKind == ASTKind::ENUM_DECL) {
+        auto enumDecl = StaticCast<EnumDecl*>(ctor.outerDecl);
+        auto enumRefExpr = WithinFile(CreateRefExpr(*enumDecl), curFile);
+        enumRefExpr->typeArguments = std::move(actualPrimitiveType);
+        auto enumTy = GetInstantyForGenericTy(*ctor.outerDecl, actualTyArgMap);
+        enumRefExpr->ty = enumTy;
+        auto retTy = StaticCast<FuncTy*>(ctor.ty)->retTy;
+        Ptr<FuncTy> funcTy;
+        if (retTy->HasGeneric()) {
+            funcTy = typeManager.GetFunctionTy(funcTyParams, enumTy, {.isC = true});
+        } else {
+            funcTy = typeManager.GetFunctionTy(funcTyParams, retTy, {.isC = true});
+        }
+        OwnedPtr<MemberAccess> methodAccess = CreateMemberAccess(std::move(enumRefExpr), ctor);
+        methodAccess->curFile = curFile;
+        methodAccess->ty = funcTy;
+        objectCtorCall = CreateCallExpr(std::move(methodAccess), std::move(ctorCallArgs), Ptr(&ctor), enumTy,
+            CallKind::CALL_OBJECT_CREATION);
     } else if (ctor.outerDecl->ty->HasGeneric()) {
         auto instantiationRefExpr = CreateRefExpr(ctor);
         auto retTy = StaticCast<FuncTy*>(ctor.ty)->retTy;
