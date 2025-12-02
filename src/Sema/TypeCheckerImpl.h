@@ -544,6 +544,9 @@ private:
     void ReArrangeForInStringExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
     void DesugarTryWithResourcesExpr(ASTContext& ctx, AST::TryExpr& te);
 
+    OwnedPtr<AST::Expr> ConstructOptionMatch(OwnedPtr<AST::Expr> selector, OwnedPtr<AST::Block> someExpr,
+        OwnedPtr<AST::Block> otherExpr, AST::RefExpr& someVar, Ptr<AST::Ty> someTy) const;
+
     /* Synthesize specialized for desugar after sema. Will not recover previous desugar results */
     Ptr<AST::Ty> SynthesizeWithoutRecover(ASTContext& ctx, Ptr<AST::Node> node);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
