@@ -606,7 +606,8 @@ std::string BaseMangler::MangleDecl(const Decl& decl, const std::vector<Ptr<Node
         } else {
             std::string name = decl.identifier;
             if (decl.astKind == ASTKind::GENERIC_PARAM_DECL && decl.outerDecl &&
-                decl.outerDecl->TestAnyAttr(Attribute::COMMON, Attribute::PLATFORM)) {
+                decl.outerDecl->TestAnyAttr(Attribute::COMMON, Attribute::PLATFORM) &&
+                decl.outerDecl->TestAttr(Attribute::GENERIC)) {
                 auto genericsTy = StaticCast<const GenericsTy*>(decl.ty);
                 auto result = std::find_if(genericsTypeStack.rbegin(), genericsTypeStack.rend(),
                     [&genericsTy](const std::string& name) { return name == genericsTy->name; });

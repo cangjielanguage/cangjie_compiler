@@ -192,7 +192,13 @@ void CollectBodyToQueue(const Decl& decl, std::queue<Ptr<Decl>>& queue)
     }).Walk();
 }
 
-void CollectFullExportParamDecl(std::vector<Ptr<Decl>>& decls, FuncDecl& fd, std::queue<Ptr<Decl>>& queue)
+bool IsGenericInCommonSerialization(bool serializingCommon, const Decl& decl)
+{
+    return serializingCommon && decl.outerDecl && decl.outerDecl->TestAttr(Attribute::GENERIC);
+}
+
+void CollectFullExportParamDecl(
+    std::vector<Ptr<Decl>>& decls, FuncDecl& fd, std::queue<Ptr<Decl>>& queue, bool serializingCommon)
 {
     if (!Ty::IsTyCorrect(fd.ty)) {
         return;
@@ -200,8 +206,9 @@ void CollectFullExportParamDecl(std::vector<Ptr<Decl>>& decls, FuncDecl& fd, std
     // When 'fd''s type is correct, following conditions must fit.
     CJC_NULLPTR_CHECK(fd.funcBody);
     CJC_ASSERT(!fd.funcBody->paramLists.empty());
-    bool fullExport =
-        fd.isConst || fd.isInline || fd.isFrozen || IsDefaultImplementation(fd);
+    bool fullExport = fd.isConst || fd.isInline || fd.isFrozen || IsDefaultImplementation(fd) ||
+        IsGenericInCommonSerialization(serializingCommon, fd);
+
     if (fullExport) {
         decls.emplace_back(&fd);
         CollectBodyToQueue(fd, queue);
@@ -602,7 +609,7 @@ void ASTWriter::ASTWriterImpl::PreSaveFullExportDecls(Package& package)
         // Since signature of public decl must only using external type, we do not need to check type separately.
         // Collect generic, inline, default toplevel & member decls.
         if (auto fd = DynamicCast<FuncDecl*>(decl)) {
-            CollectFullExportParamDecl(fullExportDecls, *fd, searchingQueue);
+            CollectFullExportParamDecl(fullExportDecls, *fd, searchingQueue, serializingCommon);
         } else if (auto pd = DynamicCast<PropDecl*>(decl)) {
             auto addToQueue = [&searchingQueue](auto& it) { searchingQueue.push(it.get()); };
             std::for_each(pd->getters.begin(), pd->getters.end(), addToQueue);
@@ -619,7 +626,7 @@ void ASTWriter::ASTWriterImpl::PreSaveFullExportDecls(Package& package)
         }
         for (auto& member : decl->GetMemberDecls()) {
             CJC_NULLPTR_CHECK(member);
-            if (member->linkage != Linkage::INTERNAL) {
+            if (member->linkage != Linkage::INTERNAL || IsGenericInCommonSerialization(serializingCommon, *member)) {
                 searchingQueue.emplace(member.get());
             }
         }
@@ -1331,8 +1338,10 @@ TFuncBodyOffset ASTWriter::ASTWriterImpl::SaveFuncBody(const FuncBody& funcBody)
     // 3. funcbody of inline function;
     // 4. funcBody of constant decl;
     // 5. funcBody of default implementation which is defined in interface.
+    // 6. funcBody of generic-related functions from common side
     // NOTE: desugared param function has same 'outerDecl' and 'GLOBAL' attribute will its owner function.
-    bool shouldExportBody = config.exportContent && exportFuncBody && (!fd || CanBeSrcExported(*fd));
+    bool shouldExportBody = config.exportContent && exportFuncBody &&
+        (!fd || CanBeSrcExported(*fd) || IsGenericInCommonSerialization(serializingCommon, *fd));
     bool validBody = shouldExportBody && Ty::IsTyCorrect(funcBody.ty) && funcBody.body;
     auto bodyIdx = validBody ? SaveExpr(*funcBody.body) : INVALID_FORMAT_INDEX;
     // CaptureKind is need if the 'funcBody' is exported.

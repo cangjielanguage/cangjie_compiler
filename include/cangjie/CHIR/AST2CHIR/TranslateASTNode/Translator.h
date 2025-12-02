@@ -722,9 +722,12 @@ private:
     inline bool IsOpenPlatformReplaceAbstractCommon(ClassDef& classDef, const AST::FuncDecl& decl) const;
     inline void RemoveAbstractMethod(ClassDef& classDef, const AST::FuncDecl& decl) const;
     void TranslateClassLikeMemberFuncDecl(ClassDef& classDef, const AST::FuncDecl& decl);
+    bool SkipMemberFuncInPlatformMerging(ClassDef& classDef, const AST::FuncDecl& decl);
+    void AddMemberFunctionGenericInstantiations(
+        ClassDef& classDef, const std::vector<AST::FuncDecl*>& instFuncs, const AST::FuncDecl& originalDecl);
     void AddMemberPropDecl(CustomTypeDef& def, const AST::PropDecl& decl);
     void TranslateAbstractMethod(ClassDef& classDef, const AST::FuncDecl& decl, bool hasBody);
-    
+
     /* Add methods for CJMP. */
     // Micro refactoring for CJMP.
     void SetClassSuperClass(ClassDef& classDef, const AST::ClassLikeDecl& decl);

@@ -59,7 +59,9 @@ void Translator::TranslateClassLikeDecl(ClassDef& classDef, const AST::ClassLike
     classDef.Set<LinkTypeInfo>(isImportedInstantiated ? Linkage::INTERNAL : decl.linkage);
 
     // common and platform upper bounds are same, do not set again
-    if (!(mergingPlatform && decl.TestAttr(AST::Attribute::PLATFORM) && !decl.TestAttr(AST::Attribute::IMPORTED))) {
+    // platform instantiations require inheritance setup because common side uses templates without instantiation
+    if (!mergingPlatform || !decl.TestAttr(AST::Attribute::PLATFORM) || decl.TestAttr(AST::Attribute::IMPORTED) ||
+        decl.TestAttr(AST::Attribute::GENERIC_INSTANTIATED)) {
         // set super class
         SetClassSuperClass(classDef, decl);
         // set implemented interface
@@ -96,7 +98,9 @@ void Translator::TranslateClassLikeDecl(ClassDef& classDef, const AST::ClassLike
 
 void Translator::AddMemberVarDecl(CustomTypeDef& def, const AST::VarDecl& decl)
 {
-    if (decl.TestAttr(AST::Attribute::PLATFORM)) {
+    // Member variables of generic instantiated classes or structs need to be regenerated because the common side
+    // doesn't have instantiated versions.
+    if (decl.TestAttr(AST::Attribute::PLATFORM) && !def.TestAttr(Attribute::GENERIC_INSTANTIATED)) {
         return;
     }
     if (decl.TestAttr(AST::Attribute::STATIC)) {
@@ -258,11 +262,28 @@ Func* Translator::TranslateVarsInit(const AST::Decl& decl)
 
 bool Translator::ShouldTranslateMember(const AST::Decl& decl, const AST::Decl& member) const
 {
-    if (mergingPlatform && !decl.TestAttr(AST::Attribute::IMPORTED) && decl.TestAttr(AST::Attribute::PLATFORM) &&
-        member.TestAttr(AST::Attribute::FROM_COMMON_PART)) {
+    if (!mergingPlatform) {
+        return true;
+    }
+
+    if (decl.TestAttr(AST::Attribute::IMPORTED)) {
+        return true;
+    }
+
+    if (!decl.TestAttr(AST::Attribute::PLATFORM)) {
+        return true;
+    }
+
+    if (decl.TestAttr(AST::Attribute::GENERIC_INSTANTIATED)) {
+        // Always translate since common side doesn't have instantiated versions
+        return true;
+    }
+
+    if (member.TestAttr(AST::Attribute::FROM_COMMON_PART)) {
         // Skip decls from common part when compiling platform
         return false;
     }
+
     return true;
 }
 
@@ -337,28 +358,15 @@ inline void Translator::RemoveAbstractMethod(ClassDef& classDef, const AST::Func
 
 void Translator::TranslateClassLikeMemberFuncDecl(ClassDef& classDef, const AST::FuncDecl& decl)
 {
+    // Handle member function during platform merging with deserialized classes
+    if (SkipMemberFuncInPlatformMerging(classDef, decl)) {
+        return;
+    }
+
+    // Handle abstract and regular member functions
     // 1. if func is ABSTRACT, it should be put into `abstractMethods`, not `methods`
     // 2. virtual func need to put into vtable
-    //    ps: an abstract func may be not a virtual func, it depends on the logic of `IsVirtualFunction`
     // 3. a func, not ABSTRACT, should be found in global symbol table
-    // It is not already translated if cjmp package is imported into current,
-    // however in other cases adding platform declaration cause duplication.
-    if (mergingPlatform && classDef.TestAttr(CHIR::Attribute::DESERIALIZED)) {
-        // Skip if method already exists in deserialized class
-        for (auto method : classDef.GetMethods()) {
-            if (method->GetIdentifierWithoutPrefix() == decl.mangledName) {
-                return;
-            }
-        }
-        if (IsOpenPlatformReplaceAbstractCommon(classDef, decl)) {
-            RemoveAbstractMethod(classDef, decl);
-        }
-        for (auto abstractMethod : classDef.GetAbstractMethods()) {
-            if (abstractMethod.GetASTMangledName() == decl.mangledName) {
-                return;
-            }
-        }
-    }
     if (decl.TestAttr(AST::Attribute::ABSTRACT)) {
         TranslateAbstractMethod(classDef, decl, false);
     } else {
@@ -366,6 +374,59 @@ void Translator::TranslateClassLikeMemberFuncDecl(ClassDef& classDef, const AST:
         if (classDef.IsInterface()) {
             // Member of interface should be recorded in abstract method.
             TranslateAbstractMethod(classDef, decl, true);
+        }
+    }
+}
+
+bool Translator::SkipMemberFuncInPlatformMerging(ClassDef& classDef, const AST::FuncDecl& decl)
+{
+    // Check if we're in platform merging mode with deserialized class
+    if (!mergingPlatform || !classDef.TestAttr(CHIR::Attribute::DESERIALIZED)) {
+        return false;
+    }
+
+    auto it = genericFuncMap.find(&decl);
+
+    // Check if member function already exists in deserialized class
+    for (auto method : classDef.GetMethods()) {
+        if (method->GetIdentifierWithoutPrefix() == decl.mangledName) {
+            if (it != genericFuncMap.end()) {
+                AddMemberFunctionGenericInstantiations(classDef, it->second, decl);
+            }
+            return true; // Member function already exists, skip processing
+        }
+    }
+
+    // Handle platform member function replacing abstract common method
+    if (IsOpenPlatformReplaceAbstractCommon(classDef, decl)) {
+        RemoveAbstractMethod(classDef, decl);
+    }
+
+    // Check if member function exists in abstract methods
+    for (auto abstractMethod : classDef.GetAbstractMethods()) {
+        if (abstractMethod.GetASTMangledName() == decl.mangledName) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void Translator::AddMemberFunctionGenericInstantiations(
+    ClassDef& classDef, const std::vector<AST::FuncDecl*>& instFuncs, const AST::FuncDecl& originalDecl)
+{
+    for (auto instFunc : instFuncs) {
+        CJC_NULLPTR_CHECK(instFunc->outerDecl);
+        CJC_ASSERT(instFunc->outerDecl == originalDecl.outerDecl);
+
+        // Add the instantiated member function to class
+        classDef.AddMethod(VirtualCast<FuncBase*>(GetSymbolTable(*instFunc)));
+
+        // Add member function parameter desugar declarations to class
+        for (auto& param : instFunc->funcBody->paramLists[0]->params) {
+            if (param->desugarDecl != nullptr) {
+                classDef.AddMethod(VirtualCast<FuncBase>(GetSymbolTable(*param->desugarDecl)));
+            }
         }
     }
 }
