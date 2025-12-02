@@ -119,6 +119,9 @@ std::string GetMacroFuncName(const std::string& fullPackageName, bool isAttr, co
     auto macroFuncName = (isAttr ? prefixForAttrMacro : prefixForPlainMacro) + ident + "_" + fullPackageName;
     /* '.' is not allowed in cangjie function name, so replace '.' to '_' */
     std::replace(macroFuncName.begin(), macroFuncName.end(), '.', '_');
+
+    /* ':' is not allowed in cangjie function name, so replace ':' to '_' */
+    std::replace(macroFuncName.begin(), macroFuncName.end(), ':', '_');
     return macroFuncName;
 }
 
