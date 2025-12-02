@@ -127,7 +127,7 @@ void DIBuilder::CreateClassMemberType(const CHIR::ClassType& classTy, llvm::Type
         auto elementTy = nonConstClassType.GetInstantiatedMemberTys(chirBuilder)[i];
         auto elemType = GetOrCreateType(*elementTy);
         auto cgElemType = classLayout->getStructElementType(elementIndex);
-        if (IsReferenceType(*elementTy, cgMod)) {
+        if (IsReferenceType(*elementTy, cgMod) && !IsOption(*elementTy)) {
             elemType = CreatePointerType(elemType, CreateRefType()->getSizeInBits());
         }
         auto bitInSize = GetTypeSize(cgElemType);
@@ -240,7 +240,7 @@ llvm::DICompositeType* DIBuilder::CreateEnumClassType(const CHIR::EnumType& enum
     size_t argIndex = 1;
     for (auto argTy : constructor.funcType->GetParamTypes()) {
         auto argType = GetOrCreateType(*argTy);
-        if (IsReferenceType(*argTy, cgMod) || argTy->IsRawArray()) {
+        if (IsReferenceType(*argTy, cgMod) && !IsOption(*argTy)) {
             argType = CreatePointerType(argType, CreateRefType()->getSizeInBits());
         }
         auto offset = layout->getElementOffsetInBits(argIndex) + sizeofPointer;
