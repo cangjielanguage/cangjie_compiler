@@ -273,3 +273,23 @@ TEST_F(ParseCommentTest, IntLiteral)
     ASSERT_EQ(zero.comments.leadingComments.size(), 1);
     EXPECT_EQ(zero.comments.leadingComments[0].cms[0].info.Value(), "// 等待crdRegistrationMgr初始化完成");
 }
+
+TEST_F(ParseCommentTest, MatchNoSelector)
+{
+    code = R"(let a = match {
+    case Some(3) => print(5) // comment1
+    case _ => print(1) // comment2
+})";
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm, {0, 1, 1}, true);
+    OwnedPtr<File> file = parser.ParseTopLevel();
+    auto& a = StaticCast<VarDecl>(*file->decls[0]);
+    auto& match = StaticCast<MatchExpr>(*a.initializer);
+    ASSERT_EQ(match.matchCaseOthers.size(), 2);
+    auto& case1 = *match.matchCaseOthers[0];
+    ASSERT_EQ(case1.comments.trailingComments.size(), 1);
+    EXPECT_EQ(case1.comments.trailingComments[0].cms[0].info.Value(), "// comment1");
+    auto& case2 = *match.matchCaseOthers[1];
+    ASSERT_EQ(case2.comments.trailingComments.size(), 1);
+    EXPECT_EQ(case2.comments.trailingComments[0].cms[0].info.Value(), "// comment2");
+}

@@ -28,6 +28,7 @@
 #include <stack>
 #include <functional>
 #include <algorithm>
+#include <set>
 #include "cangjie/AST/Walker.h"
 #include "cangjie/AST/ASTCasting.h"
 
@@ -78,141 +79,11 @@ std::string CNodeToString(CNode node)
     ss << node;
     return ss.str();
 }
-
-bool IsPositionContained(const Position& pos, Node* node)
-{
-    if (!node || pos.IsZero()) {
-        return false;
-    }
-    return node->begin <= pos && pos <= node->end;
-}
-
-bool IsNodeContained(Node* inner, Node* outer)
-{
-    if (!inner || !outer || inner == outer) {
-        return false;
-    }
-    return outer->begin <= inner->begin && inner->end <= outer->end;
-}
-
-std::string CNodeToString(const std::vector<CNode>& nodes) __attribute__((used));
-std::string CNodeToString(const std::vector<CNode>& nodes)
-{
-    if (nodes.empty()) {
-        return "[]";
-    }
-    
-    std::vector<Node*> nodeList;
-    std::vector<const Position*> positionList;
-    
-    for (const auto& node : nodes) {
-        if (auto n = std::get_if<Node*>(&node)) {
-            if (*n) {
-                nodeList.push_back(*n);
-            }
-        } else if (auto p = std::get_if<const Position*>(&node)) {
-            if (*p && !(*p)->IsZero()) {
-                positionList.push_back(*p);
-            }
-        }
-    }
-    
-    struct TreeNode {
-        Node* node;
-        std::vector<TreeNode*> children;
-        std::vector<const Position*> tokens;
-    };
-    
-    std::vector<TreeNode> treeNodes;
-    treeNodes.reserve(nodeList.size());
-    for (auto* n : nodeList) {
-        treeNodes.push_back({n, {}, {}});
-    }
-    
-    std::vector<TreeNode*> roots;
-    for (size_t i = 0; i < treeNodes.size(); ++i) {
-        TreeNode* bestParent = nullptr;
-        for (size_t j = 0; j < treeNodes.size(); ++j) {
-            if (i != j && IsNodeContained(treeNodes[i].node, treeNodes[j].node)) {
-                if (!bestParent || IsNodeContained(treeNodes[j].node, bestParent->node)) {
-                    bestParent = &treeNodes[j];
-                }
-            }
-        }
-        if (bestParent) {
-            bestParent->children.push_back(&treeNodes[i]);
-        } else {
-            roots.push_back(&treeNodes[i]);
-        }
-    }
-    
-    for (const Position* pos : positionList) {
-        TreeNode* bestNode = nullptr;
-        for (auto& tn : treeNodes) {
-            if (IsPositionContained(*pos, tn.node)) {
-                if (!bestNode || IsNodeContained(tn.node, bestNode->node)) {
-                    bestNode = &tn;
-                }
-            }
-        }
-        if (bestNode) {
-            bestNode->tokens.push_back(pos);
-        }
-    }
-    
-    std::stringstream ss;
-    ss << "[\n";
-    std::function<void(const TreeNode*, int)> printNode = [&](const TreeNode* tn, int indent) {
-        std::string indentStr(static_cast<size_t>(indent) * 2, ' ');
-        ss << indentStr;
-        if (auto n = tn->node) {
-            ss << "Node<" << (void*)n << ", " << ASTKIND_TO_STR.at(n->astKind)
-               << ">[" << n->begin << ", " << n->end << "]";
-        }
-        if (!tn->tokens.empty()) {
-            ss << " {\n";
-            for (const Position* pos : tn->tokens) {
-                ss << indentStr << "  Pos[" << pos->line << ", " << pos->column << "]\n";
-            }
-            ss << indentStr << "}";
-        }
-        ss << "\n";
-        for (auto child : tn->children) {
-            printNode(child, indent + 1);
-        }
-    };
-    
-    std::vector<const Position*> orphanedPositions;
-    for (auto pos : positionList) {
-        bool found = false;
-        for (auto& tn : treeNodes) {
-            if (IsPositionContained(*pos, tn.node)) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            orphanedPositions.push_back(pos);
-        }
-    }
-    
-    for (TreeNode* root : roots) {
-        printNode(root, 1);
-    }
-    
-    if (!orphanedPositions.empty()) {
-        ss << "  [ORPHANED POSITIONS - BUG IN COMPILER]\n";
-        for (const Position* pos : orphanedPositions) {
-            ss << "    Pos[" << pos->line << ", " << pos->column << "]\n";
-        }
-    }
-    ss << "]";
-    return ss.str();
-}
 #endif
 
 struct CNodeWalker {
     std::function<void(CNode)> enterFunc;
+    std::function<void(CNode)> exitFunc;
     void Visit(CNode node)
     {
         if (auto n = std::get_if<Node*>(&node)) {
@@ -223,6 +94,9 @@ struct CNodeWalker {
         enterFunc(node);
         if (auto n = std::get_if<Node*>(&node)) {
             VisitChildren(*n);
+        }
+        if (exitFunc) {
+            exitFunc(node);
         }
     }
 
@@ -1305,6 +1179,56 @@ private:
     }
 };
 
+#ifndef NDEBUG
+void DumpPos(File& file) __attribute__((used));
+void DumpPos(File& file)
+{
+    int index{0};
+    size_t indent{0};
+    std::stack<bool> hasChildren;
+    auto enter = [&index, &indent, &hasChildren](CNode cnode) {
+        if (auto node = std::get_if<Node*>(&cnode)) {
+            if ((*node)->astKind == ASTKind::FILE) {
+                return;
+            }
+            if (!hasChildren.empty()) {
+                std::cout << '\n';
+            }
+            std::cout << std::string(indent * 2, ' ') << index << ": " << ASTKIND_TO_STR.at((*node)->astKind) << ' '
+                << (*node)->begin << " {" ;
+            ++indent;
+            if (!hasChildren.empty()) {
+                hasChildren.top() = true;
+            }
+            hasChildren.push(false);
+        } else {
+            const Position* pos = std::get<const Position*>(cnode);
+            std::cout << '\n' << std::string(indent * 2, ' ') << index << ": Pos(" << pos->line << ", " << pos->column
+                << ")";
+            hasChildren.top() = true;
+        }
+        ++index;
+    };
+    auto exit = [&indent, &hasChildren](CNode cnode) {
+        if (auto node = std::get_if<Node*>(&cnode)) {
+            if ((*node)->astKind == ASTKind::FILE) {
+                return;
+            }
+            --indent;
+            if (hasChildren.top()) {
+                std::cout << '\n' << std::string(indent * 2, ' ') << "} " << (*node)->end;
+            } else {
+                std::cout << '}';
+            }
+            hasChildren.pop();
+        }
+    };
+    CNodeWalker w{enter, exit};
+    w.Visit(&file);
+    std::cout << '\n';
+}
+#endif
+
 // collect ptrs of ast nodes, ignore file, annotation and modifier
 std::vector<CNode> CollectPtrsOfASTNodes(Ptr<File> node)
 {
@@ -1488,21 +1412,6 @@ void AddInnerComment(Node& node, CommentGroup& cg)
     AddComment(node, cg, CommentPlace::INNER);
 }
 
-size_t AttachCommentToAheadNode(
-    Ptr<Node> node, const Position& searchEnd, std::vector<CommentGroup>& commentGroups, size_t cgIdx)
-{
-    AddTrailingComment(*node, commentGroups[cgIdx]);
-    while (cgIdx + 1 < commentGroups.size()) {
-        CJC_ASSERT(!commentGroups[cgIdx + 1].cms.empty());
-        if (commentGroups[cgIdx + 1].cms[0].info.Begin() >= searchEnd) {
-            break;
-        }
-        ++cgIdx;
-        AddTrailingComment(*node, commentGroups[cgIdx]);
-    }
-    return cgIdx;
-}
-
 /**
  * all comment groups in the token stream and location-related information
  */
@@ -1516,7 +1425,7 @@ struct CommentGroupsLocInfo {
 };
 
 // return the index of the next comment group needs to be attached
-size_t AttachCommentToOuterNode(const std::vector<CNode>& nodes, size_t nodeOffsetIdx,
+size_t AttachCommentToOuterNode(const std::vector<CNode>& nodes,
     CommentGroupsLocInfo& cgInfo, size_t cgIdx, std::stack<size_t>& nodeStack)
 {
     CJC_ASSERT(!nodes.empty());
@@ -1542,11 +1451,6 @@ size_t AttachCommentToOuterNode(const std::vector<CNode>& nodes, size_t nodeOffs
     }
     if (cgIdx >= cgInfo.cgs.size()) {
         return cgIdx;
-    }
-    auto [findFlag, searchEnd] = WhetherExistNextNodeBeforeOuterNodeEnd(nodes, nodeOffsetIdx, outerNode, nodeStack);
-    if (!findFlag) {
-        cgIdx = AttachCommentToAheadNode(outerNode, searchEnd, cgInfo.cgs, cgIdx);
-        ++cgIdx;
     }
     return cgIdx;
 }
@@ -1603,11 +1507,8 @@ size_t AttachCommentToNode(const std::vector<CNode>& nodes, size_t curNodeIdx,
             }
         } else {
             if (!nodeStack.empty() && End(nodes[nodeStack.top()]) < curCgBegin) {
-                cgIdx = AttachCommentToOuterNode(nodes, curNodeIdx, cgInfo, cgIdx, nodeStack);
+                cgIdx = AttachCommentToOuterNode(nodes, cgInfo, cgIdx, nodeStack);
                 break;
-            }
-            if (cgInfo.cgPreInfo.find(cgIdx) == cgInfo.cgPreInfo.end()) {
-                break; // bad node location
             }
             if (curNodeEnd <= cgInfo.tkStream[cgInfo.cgPreInfo[cgIdx]].Begin()) {
                 break;
@@ -1640,21 +1541,7 @@ size_t AttachCommentToNode(const std::vector<CNode>& nodes, size_t curNodeIdx,
             if (!nodeStack.empty()) {
                 // rule 5, no nodes after cg in current scope, attach to nearest smallest node as inner cg
                 AddInnerComment(*std::get<Node*>(nodes[nodeStack.top()]), curCg);
-            } else {
-                cgIdx = AttachCommentToAheadNode(node, searchEnd, cgInfo.cgs, cgIdx); // rule2
             }
-        }
-
-        // move this after trailing comment because that has a higher priority
-        if (curCgBegin >= curNodeBegin && curCgBegin < curNodeEnd) {
-            if (!node) {
-                if (nodeStack.empty()) {
-                    break; // add to file directly
-                }
-                AddInnerComment(*std::get<Node*>(nodes[nodeStack.top()]), curCg);
-                continue;
-            }
-            AddInnerComment(*node, curCg); // rule2
         }
     }
     return cgIdx;
@@ -1707,10 +1594,6 @@ void AttachCommentToSortedNodes(std::vector<CNode>& nodes, CommentGroupsLocInfo&
     }
     std::stack<size_t> nodeStack;
     for (size_t i = 0; i < nodes.size() && cgIdx < cgInfo.cgs.size(); ++i) {
-        auto begin = Begin(nodes[i]);
-        if (begin.line < 1 || begin.column < 1) { // bad node pos
-            continue;
-        }
         cgIdx = AttachCommentToNode(nodes, i, cgInfo, cgIdx, nodeStack);
     }
 }
