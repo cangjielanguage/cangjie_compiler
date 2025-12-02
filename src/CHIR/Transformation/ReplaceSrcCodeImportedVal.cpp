@@ -8,10 +8,10 @@
 
 #include "cangjie/CHIR/Analysis/Utils.h"
 #include "cangjie/CHIR/CHIR.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Visitor/Visitor.h"
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/Utils/Visitor/Visitor.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 

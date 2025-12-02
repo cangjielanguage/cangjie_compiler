@@ -18,8 +18,8 @@
 #endif
 #include "IRAttribute.h"
 #include "IRBuilder.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 using namespace Cangjie;
 using namespace CodeGen;

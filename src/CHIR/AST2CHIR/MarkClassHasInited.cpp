@@ -6,12 +6,28 @@
 
 #include "cangjie/CHIR/Transformation/MarkClassHasInited.h"
 
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/NativeFFI/Utils.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
 
 using namespace Cangjie::CHIR;
+
+namespace {
+bool IsObjCMirror(const ClassDef& classDef)
+{
+    return classDef.TestAttr(Attribute::OBJ_C_MIRROR);
+}
+
+bool IsJavaMirror(const ClassDef& classDef)
+{
+    return classDef.TestAttr(Attribute::JAVA_MIRROR);
+}
+
+bool IsMirror(const ClassDef& classDef)
+{
+    return IsObjCMirror(classDef) || IsJavaMirror(classDef);
+}
+} // namespace
 
 MarkClassHasInited::MarkClassHasInited(CHIRBuilder& builder)
     : builder(builder)
@@ -21,7 +37,7 @@ MarkClassHasInited::MarkClassHasInited(CHIRBuilder& builder)
 void MarkClassHasInited::AddHasInitedFlagToClassDef(ClassDef& classDef)
 {
     // Java and Objective-C mirrors have this field generated from AST.
-    if (Native::FFI::IsMirror(classDef)) {
+    if (IsMirror(classDef)) {
         return;
     }
 

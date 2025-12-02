@@ -7,11 +7,11 @@
 #ifndef CANGJIE_CHIR_TRANSFORMATION_SANITIZER_COVERAGE_H
 #define CANGJIE_CHIR_TRANSFORMATION_SANITIZER_COVERAGE_H
 
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/DiagAdapter.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/Utils/DiagAdapter.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 #include "cangjie/Option/Option.h"
 
 namespace Cangjie::CHIR {

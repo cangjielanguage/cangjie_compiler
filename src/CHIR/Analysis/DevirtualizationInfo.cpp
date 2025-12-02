@@ -12,9 +12,9 @@
 
 #include "cangjie/CHIR/Analysis/DevirtualizationInfo.h"
 
-#include "cangjie/CHIR/CHIRContext.h"
-#include "cangjie/CHIR/Type/ExtendDef.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/IR/CHIRContext.h"
+#include "cangjie/CHIR/IR/Type/ExtendDef.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/Utils/Casting.h"
 #include "cangjie/Modules/ModulesUtils.h"
 

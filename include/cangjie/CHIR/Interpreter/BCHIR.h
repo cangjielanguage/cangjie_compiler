@@ -19,8 +19,8 @@
 
 #include "cangjie/CHIR/Interpreter/OpCodes.h"
 #include "cangjie/CHIR/Interpreter/InterpreterValue.h"
-#include "cangjie/CHIR/Type/Type.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR::Interpreter {
 

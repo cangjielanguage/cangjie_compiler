@@ -11,7 +11,7 @@
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/CHIR/CHIR.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR {
 

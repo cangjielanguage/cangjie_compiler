@@ -8,7 +8,7 @@
 #define CANGJIE_CHIR_GLOBALVARINITIALIZER_H
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
 
 namespace Cangjie::CHIR {

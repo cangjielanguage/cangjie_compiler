@@ -13,9 +13,9 @@
 #define CANGJIE_CHIREXPRWRAPPER_H
 
 #include "cangjie/Basic/Print.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 namespace Cangjie {
 namespace CodeGen {

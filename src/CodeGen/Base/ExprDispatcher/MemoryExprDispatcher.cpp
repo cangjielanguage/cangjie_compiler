@@ -13,9 +13,9 @@
 #include "Base/CHIRExprWrapper.h"
 #include "CGModule.h"
 #include "IRBuilder.h"
-#include "cangjie/CHIR/Annotation.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Annotation.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CodeGen {
 llvm::Value* HandleLoadExpr(IRBuilder2& irBuilder, const CHIR::Load& load)

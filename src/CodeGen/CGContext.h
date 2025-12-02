@@ -24,8 +24,8 @@
 #include "CJNative/CHIRSplitter.h"
 #endif
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 
 namespace llvm::Intrinsic {
 typedef unsigned ID;

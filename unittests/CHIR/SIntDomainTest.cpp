@@ -7,7 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "cangjie/CHIR/Analysis/SIntDomain.h"
-#include "cangjie/CHIR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
 
 using namespace Cangjie::CHIR;
 

@@ -14,8 +14,8 @@
 #ifndef CANGJIE_CHIR_NO_SIDE_EFFECT_MARKER_H
 #define CANGJIE_CHIR_NO_SIDE_EFFECT_MARKER_H
 
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 namespace Cangjie::CHIR {
 class NoSideEffectMarker {

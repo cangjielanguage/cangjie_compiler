@@ -15,13 +15,13 @@
 #include "CGModule.h"
 #include "CJNative/CGTypes/EnumCtorTIOrTTGenerator.h"
 #include "Utils/CGCommonDef.h"
-#include "cangjie/CHIR/DebugLocation.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
-#include "cangjie/CHIR/Type/StructDef.h"
-#include "cangjie/CHIR/Type/Type.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/DebugLocation.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie {
 namespace CHIR {

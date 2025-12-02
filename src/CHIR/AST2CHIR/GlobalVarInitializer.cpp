@@ -8,10 +8,10 @@
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
-#include "cangjie/CHIR/Annotation.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/IR/Annotation.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 using namespace Cangjie;
 using namespace CHIR;

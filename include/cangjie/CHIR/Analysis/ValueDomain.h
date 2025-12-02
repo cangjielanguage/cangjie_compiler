@@ -8,7 +8,7 @@
 #define CANGJIE_CHIR_ANALYSIS_VALUE_DOMAIN_H
 
 #include "cangjie/CHIR/Analysis/Analysis.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 #include <algorithm>
 #include <memory>

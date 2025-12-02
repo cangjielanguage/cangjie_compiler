@@ -8,7 +8,7 @@
 #define CANGJIE_CHIR_SERIALIZER_DESERIALIZER_H
 
 #include "cangjie/CHIR/CHIR.h"
-#include "cangjie/CHIR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
 
 #include <string>
 

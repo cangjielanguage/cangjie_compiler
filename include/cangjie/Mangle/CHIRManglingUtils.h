@@ -13,8 +13,8 @@
 #ifndef CANGJIE_MANGLE_CHIRMANGLINGUTILS_H
 #define CANGJIE_MANGLE_CHIRMANGLINGUTILS_H
 
-#include "cangjie/CHIR/Type/Type.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIRMangling {
 inline const std::string MANGLE_VIRTUAL_PREFIX = "_CV";

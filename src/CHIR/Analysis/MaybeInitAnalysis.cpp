@@ -7,7 +7,7 @@
 #include "cangjie/CHIR/Analysis/MaybeInitAnalysis.h"
 
 #include "cangjie/CHIR/Analysis/Utils.h"
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 
 using namespace Cangjie::CHIR;
 

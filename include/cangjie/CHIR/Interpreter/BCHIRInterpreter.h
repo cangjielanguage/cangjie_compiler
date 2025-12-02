@@ -28,7 +28,7 @@
 #include "cangjie/CHIR/Interpreter/InterpreterEnv.h"
 #include "cangjie/CHIR/Interpreter/InterpreterStack.h"
 #include "cangjie/CHIR/Interpreter/InterpreterValueUtils.h"
-#include "cangjie/CHIR/OverflowChecking.h"
+#include "cangjie/CHIR/Checker/OverflowChecking.h"
 #include <cmath>
 #include <cstring>
 #include <fstream>

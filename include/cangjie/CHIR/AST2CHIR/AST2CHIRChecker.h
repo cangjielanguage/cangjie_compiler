@@ -9,8 +9,8 @@
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h"
-#include "cangjie/CHIR/Type/CHIRType.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/CHIRType.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR {
 bool AST2CHIRCheckCustomTypeDef(

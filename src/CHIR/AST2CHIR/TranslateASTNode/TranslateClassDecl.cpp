@@ -6,8 +6,8 @@
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/UserDefinedType.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/UserDefinedType.h"
 #include "cangjie/Mangle/CHIRTypeManglingUtils.h"
 #include "cangjie/Modules/ModulesUtils.h"
 

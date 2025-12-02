@@ -16,7 +16,7 @@
 #include "IRBuilder.h"
 #include "IRGenerator.h"
 #include "Utils/BlockScopeImpl.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie {
 namespace CodeGen {

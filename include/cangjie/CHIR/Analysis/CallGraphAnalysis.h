@@ -7,9 +7,9 @@
 #ifndef CANGJIE_CHIR_CALLGRAPH_ANALYSIS_H
 #define CANGJIE_CHIR_CALLGRAPH_ANALYSIS_H
 
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Transformation/Devirtualization.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/Optimization/Devirtualization.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR {
 

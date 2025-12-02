@@ -15,8 +15,8 @@
 
 #include <unordered_map>
 
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Expression/Expression.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/IR/Expression/Expression.h"
 
 namespace Cangjie::CHIR {
 class ConstMemberVarCollector {

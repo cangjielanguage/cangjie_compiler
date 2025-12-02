@@ -7,10 +7,10 @@
 #include "cangjie/CHIR/Transformation/FlatForInExpr.h"
 
 #include "cangjie/CHIR/Analysis/Utils.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/GeneratedFromForIn.h"
-#include "cangjie/CHIR/Utils.h"
-#include "cangjie/CHIR/Visitor/Visitor.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Annotation.h"
+#include "cangjie/CHIR/Utils/Utils.h"
+#include "cangjie/CHIR/Utils/Visitor/Visitor.h"
 
 #include <future>
 #include <queue>

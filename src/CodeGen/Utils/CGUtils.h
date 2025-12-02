@@ -19,9 +19,9 @@
 
 #include "Base/CGTypes/CGFunctionType.h"
 #include "Utils/CGCommonDef.h"
-#include "cangjie/CHIR/CHIRContext.h"
-#include "cangjie/CHIR/Type/StructDef.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/IR/CHIRContext.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/Mangle/CHIRTypeManglingUtils.h"
 #include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/Utils/Utils.h"

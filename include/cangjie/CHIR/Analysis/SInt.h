@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <iomanip>
 
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 namespace Cangjie::CHIR {
 /**

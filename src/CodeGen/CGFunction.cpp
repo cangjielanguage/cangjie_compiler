@@ -13,7 +13,7 @@
 #include "Utils/BlockScopeImpl.h"
 #include "Utils/CGCommonDef.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/AttributeInfo.h"
+#include "cangjie/CHIR/IR/AttributeInfo.h"
 
 namespace Cangjie::CodeGen {
 void EmitBasicBlockIR(CGModule& cgMod, const CHIR::Block& chirBB);

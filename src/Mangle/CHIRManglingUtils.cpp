@@ -12,11 +12,11 @@
 
 #include "cangjie/Mangle/CHIRManglingUtils.h"
 
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/CustomTypeDef.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
-#include "cangjie/CHIR/Type/StructDef.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/CustomTypeDef.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
 #include "cangjie/Utils/CastingTemplate.h"
 #include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Mangle/CHIRTypeManglingUtils.h"

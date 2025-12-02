@@ -8,7 +8,7 @@
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/Basic/Match.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 #include <stack>
 

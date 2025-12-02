@@ -23,7 +23,7 @@
 #endif
 #include "Utils/BlockScopeImpl.h"
 #include "Utils/CGCommonDef.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CodeGen {
 llvm::Value* HandleExitExpression(IRBuilder2& irBuilder, const CHIR::Exit& exitExpr)

@@ -5,7 +5,7 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "CGTest.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 #include "cangjie/CodeGen/CGUtils.h"
 
 using TypeKind = Cangjie::CHIR::Type::TypeKind;

@@ -22,7 +22,7 @@
 #include "IRBuilder.h"
 #include "Utils/CGCommonDef.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 namespace Cangjie::CodeGen {
 class CGExtensionDef {

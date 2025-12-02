@@ -35,8 +35,8 @@
 #ifndef CANGJIE_CHIR_CREATE_EXTEND_DEF_FOR_IMPORTED_PARENT_H
 #define CANGJIE_CHIR_CREATE_EXTEND_DEF_FOR_IMPORTED_PARENT_H
 
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/Package.h"
 
 namespace Cangjie::CHIR {
 class CreateExtendDefForImportedParent {

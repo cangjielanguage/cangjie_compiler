@@ -14,8 +14,8 @@
 #include "IRAttribute.h"
 #include "Utils/CGCommonDef.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 namespace Cangjie::CodeGen {
 

@@ -11,7 +11,7 @@
 #include "Base/CHIRExprWrapper.h"
 #include "Base/OverflowDispatcher.h"
 #include "IRBuilder.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CodeGen {
 llvm::Value* HandleNegExpression(IRBuilder2& irBuilder, llvm::Value* value)

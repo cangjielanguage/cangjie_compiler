@@ -16,10 +16,10 @@
 #include "CGContext.h"
 #include "CGModule.h"
 #include "CJNative/CHIRSplitter.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
-#include "cangjie/CHIR/Type/StructDef.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
 
 namespace Cangjie {
 namespace CodeGen {

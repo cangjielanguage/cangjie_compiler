@@ -7,8 +7,8 @@
 #ifndef CANGJIE_CHIR_REPLACE_SRC_CODE_IMPORTED_VAL_H
 #define CANGJIE_CHIR_REPLACE_SRC_CODE_IMPORTED_VAL_H
 
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/Package.h"
 
 namespace Cangjie::CHIR {
 class ReplaceSrcCodeImportedVal {

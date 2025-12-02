@@ -7,8 +7,8 @@
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/AST/Walker.h"
-#include "cangjie/CHIR/ConstantUtils.h"
-#include "cangjie/CHIR/IntrinsicKind.h"
+#include "cangjie/CHIR/Utils/ConstantUtils.h"
+#include "cangjie/CHIR/IR/IntrinsicKind.h"
 
 using namespace Cangjie::CHIR;
 using namespace Cangjie;

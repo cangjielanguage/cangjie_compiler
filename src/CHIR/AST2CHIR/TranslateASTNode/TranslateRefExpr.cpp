@@ -7,8 +7,8 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
-#include "cangjie/CHIR/ConstantUtils.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/Utils/ConstantUtils.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 #include "cangjie/Mangle/CHIRManglingUtils.h"
 
 using namespace Cangjie::AST;

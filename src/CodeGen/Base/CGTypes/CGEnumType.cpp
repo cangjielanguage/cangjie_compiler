@@ -12,7 +12,7 @@
 #include "CJNative/CGTypeInfo.h"
 #endif
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
 #include "cangjie/Option/Option.h"
 
 namespace Cangjie::CodeGen {

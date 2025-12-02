@@ -16,10 +16,10 @@
 #include <unordered_map>
 
 #include "cangjie/CHIR/Analysis/ConstMemberVarCollector.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/Type.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 #include "cangjie/Option/Option.h"
 
 namespace Cangjie::CHIR {

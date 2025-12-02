@@ -12,8 +12,8 @@
 #include "cangjie/CHIR/Analysis/BoolDomain.h"
 #include "cangjie/CHIR/Analysis/SIntDomain.h"
 #include "cangjie/CHIR/Analysis/ValueAnalysis.h"
-#include "cangjie/CHIR/DiagAdapter.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Utils/DiagAdapter.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 namespace Cangjie::CHIR {
 class ValueRange {

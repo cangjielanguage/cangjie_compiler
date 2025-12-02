@@ -15,7 +15,7 @@
 #include <securec.h>
 
 #include "cangjie/CHIR/Interpreter/Utils.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 using namespace Cangjie::CHIR;
 using namespace Interpreter;

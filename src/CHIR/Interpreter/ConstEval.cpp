@@ -18,9 +18,9 @@
 #include <cangjie/CHIR/Interpreter/BCHIRInterpreter.h>
 #include <cangjie/CHIR/Interpreter/BCHIRLinker.h>
 #include <cangjie/CHIR/Interpreter/CHIR2BCHIR.h>
-#include <cangjie/CHIR/LiteralValue.h>
-#include <cangjie/CHIR/Type/ClassDef.h>
-#include <cangjie/CHIR/Type/EnumDef.h>
+#include <cangjie/CHIR/IR/Value/LiteralValue.h>
+#include <cangjie/CHIR/IR/Type/ClassDef.h>
+#include <cangjie/CHIR/IR/Type/EnumDef.h>
 #include <cangjie/Utils/ProfileRecorder.h>
 
 using Cangjie::CHIR::Interpreter::ConstEvalPass;

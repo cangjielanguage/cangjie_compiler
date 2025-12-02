@@ -10,9 +10,9 @@
 #include "CGContext.h"
 #include "CGModule.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
-#include "cangjie/CHIR/Type/StructDef.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
 #include "cangjie/Mangle/CHIRTypeManglingUtils.h"
 
 namespace Cangjie::CodeGen {

@@ -14,7 +14,7 @@
 #include "IRBuilder.h"
 #include "Utils/BlockScopeImpl.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 
 namespace Cangjie::CodeGen {

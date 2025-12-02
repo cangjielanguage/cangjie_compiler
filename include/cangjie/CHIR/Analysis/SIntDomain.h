@@ -11,7 +11,7 @@
 #include "cangjie/CHIR/Analysis/ConstantRange.h"
 #include "cangjie/CHIR/Analysis/SInt.h"
 #include "cangjie/CHIR/Analysis/Utils.h"
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 
 namespace Cangjie::CHIR {
 /**

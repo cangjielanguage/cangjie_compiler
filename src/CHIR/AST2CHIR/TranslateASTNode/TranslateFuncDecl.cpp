@@ -8,8 +8,8 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
-#include "cangjie/CHIR/AttributeInfo.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/IR/AttributeInfo.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 #include <mutex>
 static std::mutex g_memberVarMutex;

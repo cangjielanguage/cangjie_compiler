@@ -9,7 +9,7 @@
 
 #include "llvm/IR/Value.h"
 
-#include "cangjie/CHIR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
 
 namespace Cangjie {
 namespace CodeGen {

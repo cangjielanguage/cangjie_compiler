@@ -7,7 +7,7 @@
 #include "cangjie/CHIR/Analysis/ValueRangeAnalysis.h"
 
 #include <climits>
-#include "cangjie/CHIR/OverflowChecking.h"
+#include "cangjie/CHIR/Checker/OverflowChecking.h"
 #include "cangjie/CHIR/Analysis/Arithmetic.h"
 
 namespace Cangjie::CHIR {

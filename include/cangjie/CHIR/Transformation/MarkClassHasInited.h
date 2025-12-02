@@ -7,8 +7,8 @@
 #ifndef CANGJIE_CHIR_TRANSFORMATION_MARK_CLASS_HASINITED_H
 #define CANGJIE_CHIR_TRANSFORMATION_MARK_CLASS_HASINITED_H
 
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/Package.h"
 
 namespace Cangjie::CHIR {
 /**

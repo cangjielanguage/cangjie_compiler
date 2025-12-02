@@ -169,8 +169,8 @@
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
-#include "cangjie/CHIR/GeneratedFromForIn.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/Annotation.h"
+#include "cangjie/CHIR/IR/Package.h"
 
 using namespace Cangjie::CHIR;
 using namespace Cangjie;

@@ -9,7 +9,7 @@
 
 #include "cangjie/CHIR/Analysis/DevirtualizationInfo.h"
 #include "cangjie/CHIR/Analysis/ValueAnalysis.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR {
 

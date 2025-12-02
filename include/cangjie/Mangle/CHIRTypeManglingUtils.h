@@ -13,7 +13,7 @@
 #ifndef CANGJIE_MANGLE_CHIRTYPEMANGLINGUTILS_H
 #define CANGJIE_MANGLE_CHIRTYPEMANGLINGUTILS_H
 
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 #include "cangjie/Mangle/MangleUtils.h"
 
 namespace Cangjie::CHIR {

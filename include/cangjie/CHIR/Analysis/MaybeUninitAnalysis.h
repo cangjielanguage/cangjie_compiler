@@ -8,8 +8,8 @@
 #define CANGJIE_CHIR_ANALYSIS_MAYBE_UNINIT_ANALYSIS_H
 
 #include "cangjie/CHIR/Analysis/GenKillAnalysis.h"
-#include "cangjie/CHIR/Type/CustomTypeDef.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/CustomTypeDef.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR {
 /**

@@ -10,8 +10,8 @@
 #include "cangjie/CHIR/Analysis/ConstAnalysisWrapper.h"
 #include "cangjie/CHIR/Analysis/ConstAnalysis.h"
 #include "cangjie/CHIR/Analysis/Utils.h"
-#include "cangjie/CHIR/DiagAdapter.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/Utils/DiagAdapter.h"
+#include "cangjie/CHIR/IR/Package.h"
 #include "cangjie/Utils/TaskQueue.h"
 
 namespace Cangjie::CHIR {

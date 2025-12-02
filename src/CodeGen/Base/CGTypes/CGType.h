@@ -13,8 +13,8 @@
 #include "llvm/IR/DerivedTypes.h"
 
 #include "cangjie/Basic/UGTypeKind.h"
-#include "cangjie/CHIR/Type/CustomTypeDef.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/CustomTypeDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 #include "cangjie/Utils/CheckUtils.h"
 
 namespace Cangjie {

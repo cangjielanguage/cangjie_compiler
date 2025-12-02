@@ -4,7 +4,7 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-#include "cangjie/CHIR/IntrinsicKind.h"
+#include "cangjie/CHIR/IR/IntrinsicKind.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 
 using namespace Cangjie::CHIR;

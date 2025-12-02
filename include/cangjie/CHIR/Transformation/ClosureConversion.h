@@ -7,8 +7,8 @@
 #ifndef CANGJIE_CHIR_TRANSFORMATION_CLOSURE_CONVERSION_H
 #define CANGJIE_CHIR_TRANSFORMATION_CLOSURE_CONVERSION_H
 
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/Package.h"
 #include "cangjie/Option/Option.h"
 
 namespace Cangjie::CHIR {

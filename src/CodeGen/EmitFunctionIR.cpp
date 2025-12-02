@@ -18,8 +18,8 @@
 #include "IRGenerator.h"
 #include "Utils/CGCommonDef.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace {
 using namespace Cangjie;

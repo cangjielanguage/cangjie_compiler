@@ -7,9 +7,9 @@
 #ifndef CANGJIE_CHIR_TRANSFORMATION_FLAT_FORIN_EXPR_H
 #define CANGJIE_CHIR_TRANSFORMATION_FLAT_FORIN_EXPR_H
 
-#include "cangjie/CHIR/CHIRContext.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/CHIRContext.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Package.h"
 
 namespace Cangjie::CHIR {
 /**

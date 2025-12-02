@@ -14,7 +14,7 @@
 #include "IRBuilder.h"
 #include "Utils/BlockScopeImpl.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
 
 namespace {
 using namespace Cangjie;

@@ -7,7 +7,7 @@
 #include "cangjie/CHIR/AST2CHIR/CollectLocalConstDecl/CollectLocalConstDecl.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/Utils/CastingTemplate.h"
 
 using namespace Cangjie;

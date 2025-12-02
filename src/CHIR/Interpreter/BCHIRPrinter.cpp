@@ -16,9 +16,9 @@
 #include "cangjie/CHIR/Interpreter/BCHIRPrinter.h"
 
 #include "cangjie/Basic/Print.h"
-#include "cangjie/CHIR/IntrinsicKind.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/IntrinsicKind.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 #include "cangjie/Utils/FileUtil.h"
 
 using namespace Cangjie::CHIR::Interpreter;

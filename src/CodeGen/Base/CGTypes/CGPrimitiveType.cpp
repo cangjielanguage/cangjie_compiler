@@ -7,7 +7,7 @@
 #include "Base/CGTypes/CGPrimitiveType.h"
 
 #include "CGModule.h"
-#include "cangjie/CHIR/CHIRContext.h"
+#include "cangjie/CHIR/IR/CHIRContext.h"
 
 namespace Cangjie::CodeGen {
 llvm::Type* CGPrimitiveType::GenLLVMType()

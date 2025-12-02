@@ -10,12 +10,12 @@
  * This file implements a translation from CHIR to BCHIR.
  */
 #include "cangjie/CHIR/Interpreter/CHIR2BCHIR.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
 #include "cangjie/CHIR/Interpreter/Utils.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/StructDef.h"
-#include "cangjie/CHIR/Utils.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
+#include "cangjie/CHIR/Utils/Utils.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 using namespace Cangjie::CHIR;
 using namespace Interpreter;

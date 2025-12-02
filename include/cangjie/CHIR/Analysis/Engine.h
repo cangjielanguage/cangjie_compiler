@@ -8,9 +8,9 @@
 #define CANGJIE_CHIR_ANALYSIS_ENGINE_H
 
 #include "cangjie/CHIR/Analysis/Results.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Utils.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/Utils.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 #include <deque>
 #include <unordered_set>

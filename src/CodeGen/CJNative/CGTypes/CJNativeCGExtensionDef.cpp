@@ -14,8 +14,8 @@
 
 #include "Base/CGTypes/CGCustomType.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Type/CustomTypeDef.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/CustomTypeDef.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 #include <cstdint>
 
 using namespace Cangjie;
