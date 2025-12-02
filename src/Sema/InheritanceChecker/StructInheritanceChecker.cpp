@@ -970,9 +970,9 @@ void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMa
         for (auto member : unImplementedMembers) {
             std::string identifierName;
             if (unImplementedDecl.count(member->decl) > 1) {
-                identifierName = member->decl->identifier.Val() + ", of type: " + member->ty->String();
+                identifierName = "'" + member->decl->identifier.Val() + "', of type: " + member->ty->String();
             } else {
-                identifierName = member->decl->identifier.Val();
+                identifierName = "'" + member->decl->identifier.Val() + "'";
             }
             std::string abstractType =
                 member->decl->outerDecl->astKind == ASTKind::CLASS_DECL ? "abstract" : "interface";
