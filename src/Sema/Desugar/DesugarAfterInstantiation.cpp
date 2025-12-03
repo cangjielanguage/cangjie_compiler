@@ -263,6 +263,10 @@ VisitAction AutoBoxing::AddOptionBoxHandleIfExpr(const IfExpr& ie)
     if (ie.hasElse && ie.elseBody) {
         if (auto block = DynamicCast<Block*>(ie.elseBody.get()); block) {
             AddOptionBoxHandleBlock(*block, *ie.ty);
+        } else if (auto elseIfExpr = DynamicCast<IfExpr*>(ie.elseBody.get());
+            elseIfExpr && Ty::IsTyCorrect(elseIfExpr->ty) && NeedBoxOption(*elseIfExpr->ty, *ie.ty)) {
+            TryOptionBox(*StaticCast<EnumTy*>(ie.ty), *elseIfExpr);
+            elseIfExpr->ty = ie.ty;
         }
     }
     return VisitAction::WALK_CHILDREN;

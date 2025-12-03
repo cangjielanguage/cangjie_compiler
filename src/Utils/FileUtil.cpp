@@ -24,9 +24,9 @@
 #include "cangjie/Basic/Print.h"
 #include "cangjie/Basic/Utils.h"
 #include "cangjie/Driver/StdlibMap.h"
+#include "cangjie/Lex/Lexer.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Utils/Unicode.h"
-#include "cangjie/Lex/Lexer.h"
 
 #ifdef _WIN32
 #include "cangjie/Basic/StringConvertor.h"
@@ -545,8 +545,7 @@ bool RemoveDirectoryRecursively(const std::string& dirPath)
 #endif
 }
 
-bool ReadBinaryFileToBuffer(
-    const std::string& filePath, std::vector<uint8_t>& buffer, std::string& failedReason)
+bool ReadBinaryFileToBuffer(const std::string& filePath, std::vector<uint8_t>& buffer, std::string& failedReason)
 {
     failedReason.clear();
     std::ifstream is(filePath, std::ifstream::in | std::ifstream::binary);
@@ -807,9 +806,8 @@ size_t GetFileSize(const std::string& filePath)
 #endif
 }
 
-inline bool AddFileIfNeeded(
-    const std::string& fileName, std::vector<std::string>& allFiles,
-    bool shouldSkipTestFiles, bool shouldSkipRegularFiles)
+inline bool AddFileIfNeeded(const std::string& fileName, std::vector<std::string>& allFiles, bool shouldSkipTestFiles,
+    bool shouldSkipRegularFiles)
 {
     auto findTestSuffix = fileName.rfind(TEST_FILE_NAME);
     // Not compile test, and file is ending with '_test.cj'.
@@ -885,8 +883,7 @@ std::vector<Directory> GetDirectories(const std::string& path)
 }
 #else
 std::vector<std::string> GetAllFilesUnderCurrentPath(
-    const std::string& path, const std::string& extension,
-    bool shouldSkipTestFiles, bool shouldSkipRegularFiles)
+    const std::string& path, const std::string& extension, bool shouldSkipTestFiles, bool shouldSkipRegularFiles)
 {
     std::vector<std::string> allFiles;
     DIR* dir = opendir(path.c_str());
@@ -1094,8 +1091,7 @@ std::string ConvertFilenameToLibCangjieBaseFormat(const std::string& objectFile)
     return ConvertPackageNameToLibCangjieBaseFormat(fullPackageName);
 }
 
-std::string ConvertFilenameToLibCangjieFormat(
-    const std::string& objectFile, const std::string& extension)
+std::string ConvertFilenameToLibCangjieFormat(const std::string& objectFile, const std::string& extension)
 {
     auto fullPackageName = GetFileNameWithoutExtension(objectFile);
     auto base = ConvertPackageNameToLibCangjieBaseFormat(fullPackageName);
@@ -1145,7 +1141,7 @@ bool Access(const std::string& path, FileMode mode)
 
 bool FileExist(const std::string& path, [[maybe_unused]] bool caseSensitive)
 {
-#ifdef _WIN32
+#if defined(_WIN32)
     if (!Access(path, FM_EXIST)) {
         return false;
     }
@@ -1168,6 +1164,29 @@ bool FileExist(const std::string& path, [[maybe_unused]] bool caseSensitive)
         }
     } while (FindNextFileA(hFind, &findData));
     FindClose(hFind);
+    return false;
+#elif defined(__APPLE__) || defined(__linux__) // On WSL case, we need to consider case sensitivity.
+    if (!Access(path, FM_EXIST)) {
+        return false;
+    }
+    if (!caseSensitive) {
+        return true;
+    }
+    size_t lastSlash = path.find_last_of(DIR_SEPARATOR);
+    std::string fileName = (lastSlash == std::string::npos) ? path : path.substr(lastSlash + 1);
+    std::string dirPath = (lastSlash == std::string::npos) ? "." : path.substr(0, lastSlash);
+    DIR* dir = opendir(dirPath.c_str());
+    if (!dir) {
+        return false;
+    }
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (fileName == std::string(entry->d_name)) {
+            closedir(dir);
+            return true;
+        }
+    }
+    closedir(dir);
     return false;
 #else
     return Access(path, FM_EXIST);
@@ -1238,9 +1257,8 @@ int32_t CreateDirs(const std::string& directoryPath)
             continue;
         }
         if (i - fileNameStartIdx > FILE_NAME_MAX_LENGTH) {
-            std::string msg = "Failed to create directory: " + std::string(tmpDirPath)
-                + "\nthe directory name cannot be longer than "
-                + std::to_string(FILE_NAME_MAX_LENGTH) + " characters.";
+            std::string msg = "Failed to create directory: " + std::string(tmpDirPath) +
+                "\nthe directory name cannot be longer than " + std::to_string(FILE_NAME_MAX_LENGTH) + " characters.";
             Errorln(msg);
             return -1;
         }
@@ -1359,12 +1377,12 @@ std::string ToCjoFileName(std::string_view fullPackageName)
     constexpr std::string::difference_type dcSize = 2;
     if (auto it = fullPackageName.find(dc); it != std::string::npos) {
         // packageName@orgName
-        return std::string{fullPackageName.substr(it + dcSize)} + std::string{ORG_NAME_SEPARATOR}
-            + std::string{fullPackageName.substr(0, it)};
+        return std::string{fullPackageName.substr(it + dcSize)} + std::string{ORG_NAME_SEPARATOR} +
+            std::string{fullPackageName.substr(0, it)};
     }
     return std::string{fullPackageName};
 }
- 
+
 std::string ToPackageName(std::string_view cjoName)
 {
     auto it = cjoName.find(ORG_NAME_SEPARATOR);
