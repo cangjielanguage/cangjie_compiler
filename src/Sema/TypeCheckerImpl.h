@@ -563,6 +563,12 @@ private:
     void ReArrangeForInRangeExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
     void ReArrangeForInIterExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
     void ReArrangeForInStringExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
+    OwnedPtr<AST::TryExpr> CreateTryInFinally(
+        ASTContext& ctx, AST::ClassDecl& exceptionDecl, AST::FuncTy& someTy, AST::VarDecl& x, AST::VarDecl& freshExc);
+    OwnedPtr<AST::TryExpr> CreateTryCatchFinally(ASTContext& ctx, AST::ClassDecl& exceptionDecl, AST::FuncTy& someTy,
+        AST::VarDecl& x, AST::VarDecl& freshExc, OwnedPtr<AST::Block> tryBlock);
+    OwnedPtr<AST::Block> CreateOuterTryBlock(ASTContext& ctx, AST::ClassDecl& exceptionDecl, AST::FuncTy& someTy,
+        AST::EnumTy& noneTy, std::vector<OwnedPtr<AST::VarDecl>>& resourceSpec, OwnedPtr<AST::Block> block);
     void DesugarTryWithResourcesExpr(ASTContext& ctx, AST::TryExpr& te);
 
     OwnedPtr<AST::Expr> ConstructOptionMatch(OwnedPtr<AST::Expr> selector, OwnedPtr<AST::Block> someExpr,
