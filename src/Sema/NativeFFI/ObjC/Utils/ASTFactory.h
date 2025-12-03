@@ -196,6 +196,10 @@ public:
      * putToRegistry($obj)
      */
     OwnedPtr<AST::CallExpr> CreatePutToRegistryCall(OwnedPtr<AST::Expr> nativeHandle);
+    /**
+     * getFromRegistry<typeArg>(registryId)
+     */
+    OwnedPtr<AST::CallExpr> CreateGetFromRegistryByIdCall(OwnedPtr<AST::Expr> registryId, OwnedPtr<AST::Type> typeArg);
 
     /**
      * match(respondsToSelector($obj, selector)) {
@@ -211,10 +215,6 @@ private:
     void PutDeclToClassBody(AST::Decl& decl, AST::ClassDecl& target);
     void PutDeclToInterfaceBody(AST::Decl& decl, AST::InterfaceDecl& target);
     void PutDeclToFile(AST::Decl& decl, AST::File& target);
-    /**
-     * getFromRegistry<typeArg>(registryId)
-     */
-    OwnedPtr<AST::CallExpr> CreateGetFromRegistryByIdCall(OwnedPtr<AST::Expr> registryId, OwnedPtr<AST::Type> typeArg);
 
     OwnedPtr<AST::CallExpr> CreateGetFromRegistryByNativeHandleCall(
         OwnedPtr<AST::Expr> nativeHandle, OwnedPtr<AST::Type> typeArg);

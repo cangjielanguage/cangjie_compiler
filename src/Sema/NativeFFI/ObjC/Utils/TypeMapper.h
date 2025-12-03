@@ -55,6 +55,7 @@ public:
     static bool IsObjCCJMapping(const AST::Decl& decl);
     static bool IsObjCCJMappingInterface(const AST::Decl& decl);
     static bool IsObjCFwdClass(const AST::Decl& decl);
+    static bool IsObjCFwdClass4Open(const AST::Decl& decl);
     // Check whether a decl need mapping into objc (with oneway: only objc call cangjie).
     static bool IsOneWayMapping(const AST::Decl& decl);
     // Check whether the member decl need mapping into objc.
@@ -65,6 +66,7 @@ public:
     static bool IsOneWayMapping(const AST::Ty& ty);
     static bool IsPrimitiveMapping(const AST::Ty& ty);
     static bool IsObjCFwdClass(const AST::Ty& ty);
+    static bool IsObjCFwdClass4Open(const AST::Ty& ty);
 private:
     InteropLibBridge& bridge;
     TypeManager& typeManager;

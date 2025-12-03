@@ -24,6 +24,8 @@ public:
     std::string GenerateInitCjObjectName(const AST::FuncDecl& target);
     std::string GenerateInitCjObjectName(const AST::Decl& target);
     std::string GenerateDeleteCjObjectName(const AST::Decl& target);
+    std::string GenerateLockCjObjectName(const AST::Decl& target);
+    std::string GenerateUnlockCjObjectName(const AST::Decl& target);
     std::string GenerateMethodWrapperName(const AST::FuncDecl& target);
     std::string GeneratePropGetterWrapperName(const AST::PropDecl& target);
     std::string GetPropSetterWrapperName(const AST::PropDecl& target);

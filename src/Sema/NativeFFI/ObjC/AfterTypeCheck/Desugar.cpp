@@ -33,6 +33,7 @@ void Cangjie::Interop::ObjC::Desugar(InteropContext&& ctx)
         .Handle(ctx);
 
     HandlerFactory<InteropContext>::Start<FindCJMapping>()
+        .Use<GenerateFwdClass>()
         .Use<GenerateInitCJObjectMethods>(InteropType::CJ_Mapping)
         .Use<GenerateDeleteCJObjectMethod>(InteropType::CJ_Mapping)
         .Use<GenerateWrappers>(InteropType::CJ_Mapping)

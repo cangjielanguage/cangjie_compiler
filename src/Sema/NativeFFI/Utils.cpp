@@ -146,7 +146,9 @@ OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(TypeManager& typeManager, std::vect
         lambdaParams.begin(), lambdaParams.end(), std::back_inserter(lambdaParamTys), [](auto& p) { return p->ty; });
     auto paramLists = Nodes<FuncParamList>(CreateFuncParamList(std::move(lambdaParams)));
     auto retTy = nodes.back()->ty;
-    auto retExpr = CreateReturnExpr(ASTCloner::Clone(Ptr(As<ASTKind::EXPR>(nodes.back().get()))));
+    auto unsafeBlock = CreateBlock(Nodes(ASTCloner::Clone(Ptr(As<ASTKind::EXPR>(nodes.back().get())))), retTy);
+    unsafeBlock->EnableAttr(Attribute::UNSAFE);
+    auto retExpr = CreateReturnExpr(std::move(unsafeBlock));
     retExpr->ty = TypeManager::GetNothingTy();
     nodes.pop_back();
     auto lambda = CreateLambdaExpr(

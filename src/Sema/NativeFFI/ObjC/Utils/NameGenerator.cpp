@@ -24,6 +24,8 @@ using namespace Cangjie::Native::FFI;
 namespace {
 constexpr auto WRAPPER_PREFIX = "CJImpl_ObjC_";
 constexpr auto DELETE_CJ_OBJECT_SUFFIX = "_deleteCJObject";
+constexpr auto LOCK_CJ_OBJECT_SUFFIX = "_lockCJObject";
+constexpr auto UNLOCK_CJ_OBJECT_SUFFIX = "_unlockCJObject";
 constexpr auto WRAPPER_GETTER_SUFFIX = "_get";
 constexpr auto WRAPPER_SETTER_SUFFIX = "_set";
 } // namespace
@@ -67,6 +69,24 @@ std::string NameGenerator::GenerateDeleteCjObjectName(const Decl& target)
     std::replace(name.begin(), name.end(), ':', '_');
 
     return WRAPPER_PREFIX + name + DELETE_CJ_OBJECT_SUFFIX;
+}
+
+std::string NameGenerator::GenerateLockCjObjectName(const AST::Decl& target)
+{
+    auto name = GetObjCFullDeclName(target);
+    std::replace(name.begin(), name.end(), '.', '_');
+    std::replace(name.begin(), name.end(), ':', '_');
+
+    return WRAPPER_PREFIX + name + LOCK_CJ_OBJECT_SUFFIX;
+}
+
+std::string NameGenerator::GenerateUnlockCjObjectName(const AST::Decl& target)
+{
+    auto name = GetObjCFullDeclName(target);
+    std::replace(name.begin(), name.end(), '.', '_');
+    std::replace(name.begin(), name.end(), ':', '_');
+
+    return WRAPPER_PREFIX + name + UNLOCK_CJ_OBJECT_SUFFIX;
 }
 
 std::string NameGenerator::GenerateMethodWrapperName(const FuncDecl& target)

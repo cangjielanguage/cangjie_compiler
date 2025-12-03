@@ -1281,7 +1281,7 @@ OwnedPtr<CallExpr> ASTFactory::CreateGetFromRegistryByIdCall(OwnedPtr<Expr> regi
     auto getFromRegistryByIdExpr = CreateRefExpr(*getFromRegistryByIdDecl);
 
     auto ty = typeArg->ty;
-    CJC_ASSERT(TypeMapper::IsObjCImpl(*ty) || TypeMapper::IsObjCCJMapping(*ty));
+    CJC_ASSERT(TypeMapper::IsObjCImpl(*ty) || TypeMapper::IsObjCCJMapping(*ty) || TypeMapper::IsObjCFwdClass4Open(*ty));
 
     std::vector<OwnedPtr<FuncArg>> args;
     args.emplace_back(CreateFuncArg(std::move(registryId)));
