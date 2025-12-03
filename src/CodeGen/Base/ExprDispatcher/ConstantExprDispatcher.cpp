@@ -9,7 +9,7 @@
 #include "CGModule.h"
 #include "DIBuilder.h"
 #include "IRBuilder.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CodeGen {
 llvm::Value* HandleConstantExpression(IRBuilder2& irBuilder, const CHIR::Constant& chirConst)

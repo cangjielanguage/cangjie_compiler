@@ -12,7 +12,7 @@
 #include "CJNative/CGTypeInfo.h"
 #endif
 #include "IRBuilder.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
 
 namespace Cangjie::CodeGen {
 EnumCtorTIOrTTGenerator::EnumCtorTIOrTTGenerator(

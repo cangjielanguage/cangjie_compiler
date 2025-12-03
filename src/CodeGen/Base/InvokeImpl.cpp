@@ -15,9 +15,9 @@
 #include "Base/CHIRExprWrapper.h"
 #include "CGModule.h"
 #include "IRBuilder.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 using namespace Cangjie;
 using namespace CodeGen;

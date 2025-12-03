@@ -15,7 +15,7 @@
 #include "Base/CGTypes/CGClassType.h"
 #include "Base/CHIRExprWrapper.h"
 #include "IRBuilder.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
 
 using namespace Cangjie;
 using namespace CodeGen;

@@ -9,7 +9,7 @@
 
 #include "cangjie/CHIR/Analysis/Engine.h"
 #include "cangjie/CHIR/Analysis/ConstAnalysis.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/Package.h"
 #include "cangjie/Utils/TaskQueue.h"
 
 #include <future>

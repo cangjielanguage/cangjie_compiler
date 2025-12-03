@@ -13,7 +13,7 @@
 #endif
 #include "DIBuilder.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 
 namespace Cangjie {
 namespace CodeGen {

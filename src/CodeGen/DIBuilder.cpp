@@ -9,7 +9,7 @@
 #include "Base/CGTypes/CGType.h"
 #include "Utils/CGUtils.h"
 #include "cangjie/Basic/SourceManager.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 #include "cangjie/Utils/CastingTemplate.h"
 #include "cangjie/Utils/CheckUtils.h"
 

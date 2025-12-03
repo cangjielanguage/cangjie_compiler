@@ -7,9 +7,9 @@
 #include "cangjie/CHIR/AST2CHIR/AST2CHIRChecker.h"
 
 #include "cangjie/Utils/ProfileRecorder.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Utils.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/Utils.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 using namespace Cangjie;
 using namespace Cangjie::CHIR;

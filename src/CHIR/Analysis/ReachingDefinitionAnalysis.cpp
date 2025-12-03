@@ -7,8 +7,8 @@
 #include "cangjie/CHIR/Analysis/ReachingDefinitionAnalysis.h"
 
 #include "cangjie/CHIR/Analysis/Utils.h"
-#include "cangjie/CHIR/Type/StructDef.h"
-#include "cangjie/CHIR/Visitor/Visitor.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
+#include "cangjie/CHIR/Utils/Visitor/Visitor.h"
 
 using namespace Cangjie;
 using namespace Cangjie::CHIR;

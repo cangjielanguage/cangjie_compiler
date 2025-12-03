@@ -9,8 +9,8 @@
 
 #include "llvm/IR/Module.h"
 
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/Package.h"
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/FrontendTool/IncrementalCompilerInstance.h"
 #include "cangjie/Option/Option.h"

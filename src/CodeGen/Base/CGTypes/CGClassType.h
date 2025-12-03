@@ -8,7 +8,7 @@
 #define CANGJIE_CGCLASSTYPE_H
 
 #include "Base/CGTypes/CGCustomType.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 namespace Cangjie {
 namespace CodeGen {

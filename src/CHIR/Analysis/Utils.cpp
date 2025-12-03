@@ -9,8 +9,8 @@
 #include <mutex>
 #include <queue>
 
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 namespace Cangjie::CHIR {
 namespace {

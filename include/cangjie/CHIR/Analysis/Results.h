@@ -9,8 +9,8 @@
 
 #include "cangjie/CHIR/Analysis/Analysis.h"
 #include "cangjie/CHIR/Analysis/Utils.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 #include <functional>
 

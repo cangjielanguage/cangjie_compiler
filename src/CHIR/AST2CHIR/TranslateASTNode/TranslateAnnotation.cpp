@@ -5,12 +5,10 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
 
-#ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-#include "AnnoFactoryInfo.h"
+#include "cangjie/CHIR/IR/Annotation.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
 #include "cangjie/Mangle/CHIRManglingUtils.h"
-#endif
 
 using namespace Cangjie::CHIR;
 using namespace Cangjie;

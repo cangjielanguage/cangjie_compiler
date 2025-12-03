@@ -7,7 +7,7 @@
 #ifndef CANGJIE_CHIR_ANALYSIS_BOOL_DOMAIN_H
 #define CANGJIE_CHIR_ANALYSIS_BOOL_DOMAIN_H
 
-#include "cangjie/CHIR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
 
 namespace Cangjie::CHIR {
 using PtrSymbol = Ptr<Value>;

@@ -16,8 +16,8 @@
 #include "Base/CGTypes/CGArrayType.h"
 #include "CGContext.h"
 #include "cangjie/Basic/UGTypeKind.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 #include "cangjie/Option/Option.h"
 
 namespace Cangjie {

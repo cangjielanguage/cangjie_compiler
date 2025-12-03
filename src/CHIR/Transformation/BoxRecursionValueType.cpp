@@ -6,10 +6,10 @@
 
 #include "cangjie/CHIR/Transformation/BoxRecursionValueType.h"
 
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
-#include "cangjie/CHIR/Type/StructDef.h"
-#include "cangjie/CHIR/Visitor/Visitor.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
+#include "cangjie/CHIR/Utils/Visitor/Visitor.h"
 
 using namespace Cangjie;
 using namespace Cangjie::CHIR;

@@ -13,7 +13,7 @@
 #ifndef CANGJIE_UTILS_CASTING_H
 #define CANGJIE_UTILS_CASTING_H
 
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/AST/ASTCasting.h"
 
 #endif

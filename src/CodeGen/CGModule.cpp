@@ -23,9 +23,9 @@
 #include "IRBuilder.h"
 #include "IncrementalGen/IncrementalGen.h"
 #include "Utils/CGCommonDef.h"
-#include "cangjie/CHIR/AttributeInfo.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/AttributeInfo.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 
 namespace Cangjie::CodeGen {

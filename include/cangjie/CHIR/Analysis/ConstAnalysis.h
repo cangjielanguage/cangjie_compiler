@@ -10,10 +10,10 @@
 #include <cmath>
 
 #include "cangjie/CHIR/Analysis/ValueAnalysis.h"
-#include "cangjie/CHIR/DiagAdapter.h"
-#include "cangjie/CHIR/OverflowChecking.h"
-#include "cangjie/CHIR/Utils.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/Utils/DiagAdapter.h"
+#include "cangjie/CHIR/Checker/OverflowChecking.h"
+#include "cangjie/CHIR/Utils/Utils.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR {
 

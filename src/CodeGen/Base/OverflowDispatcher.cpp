@@ -16,8 +16,8 @@
 #include "Base/ExprDispatcher/ExprDispatcher.h"
 #include "Base/IntrinsicsDispatcher.h"
 #include "Base/LogicalOpImpl.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie {
 namespace CodeGen {

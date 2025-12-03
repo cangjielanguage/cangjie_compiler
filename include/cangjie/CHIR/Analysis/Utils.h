@@ -9,8 +9,8 @@
 
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/CHIR/Analysis/Analysis.h"
-#include "cangjie/CHIR/DebugLocation.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/DebugLocation.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 #include <functional>
 #include <unordered_map>

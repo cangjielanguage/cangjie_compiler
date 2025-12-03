@@ -21,9 +21,9 @@
 
 #include "cangjie/CHIR/Analysis/CallGraphAnalysis.h"
 
-#include "cangjie/CHIR/Transformation/Devirtualization.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Visitor/Visitor.h"
+#include "cangjie/CHIR/Optimization/Devirtualization.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/Utils/Visitor/Visitor.h"
 
 namespace Cangjie::CHIR {
 

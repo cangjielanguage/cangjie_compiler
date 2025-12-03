@@ -15,7 +15,7 @@
 
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/CHIR/Interpreter/OpCodes.h"
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/Option/Option.h"
 
 #include <fstream>

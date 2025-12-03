@@ -11,8 +11,8 @@
  */
 #include "cangjie/CHIR/Interpreter/CHIR2BCHIR.h"
 #include "cangjie/CHIR/Interpreter/Utils.h"
-#include "cangjie/CHIR/Type/Type.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 using namespace Cangjie::CHIR;
 using namespace Interpreter;

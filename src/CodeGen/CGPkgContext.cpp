@@ -7,8 +7,8 @@
 #include "CGPkgContext.h"
 
 #include "CGModule.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 
 namespace Cangjie::CodeGen {

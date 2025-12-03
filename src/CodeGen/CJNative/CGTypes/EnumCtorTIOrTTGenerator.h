@@ -16,9 +16,9 @@
 #include "Base/CGTypes/CGType.h"
 
 #include "Utils/CGCommonDef.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
-#include "cangjie/CHIR/Type/Type.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie {
 namespace CodeGen {

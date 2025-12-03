@@ -16,8 +16,8 @@
 
 #include "cangjie/Basic/Print.h"
 #include "cangjie/Basic/Version.h"
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/CHIRPrinter.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/Utils/CHIRPrinter.h"
 #include "cangjie/CHIR/Serializer/CHIRDeserializer.h"
 #include "cangjie/Utils/FileUtil.h"
 #include "cangjie/Utils/Signal.h"

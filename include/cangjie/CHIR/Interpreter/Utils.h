@@ -13,12 +13,12 @@
 #ifndef CANGJIE_CHIR_INTERRETER_UTILS_H
 #define CANGJIE_CHIR_INTERRETER_UTILS_H
 
-#include "cangjie/CHIR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/CHIR/Interpreter/InterpreterValue.h"
 #include "cangjie/CHIR/Interpreter/OpCodes.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 namespace Cangjie::CHIR::Interpreter {
 

@@ -5,7 +5,7 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/CHIR/Analysis/TypeAnalysis.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 #include <queue>
 

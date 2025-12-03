@@ -12,8 +12,8 @@
 #include "CJNative/CGTypeInfo.h"
 #endif
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
 
 namespace Cangjie::CodeGen {
 

@@ -13,8 +13,8 @@
 #include "CJNative/CGCFFI.h"
 #endif
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CodeGen {
 CGFunctionType::CGFunctionType(

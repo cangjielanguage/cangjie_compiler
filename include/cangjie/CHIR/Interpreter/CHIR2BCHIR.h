@@ -17,12 +17,12 @@
 #include <functional>
 
 #include "cangjie/Basic/SourceManager.h"
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/CHIR/Interpreter/BCHIRPrinter.h"
-#include "cangjie/CHIR/Package.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Package.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 #include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Option/Option.h"
 

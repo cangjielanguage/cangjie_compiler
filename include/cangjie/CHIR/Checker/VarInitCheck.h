@@ -9,10 +9,10 @@
 
 #include "cangjie/CHIR/Analysis/MaybeInitAnalysis.h"
 #include "cangjie/CHIR/Analysis/MaybeUninitAnalysis.h"
-#include "cangjie/CHIR/CHIRCasting.h"
-#include "cangjie/CHIR/DiagAdapter.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/DiagAdapter.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Package.h"
 
 namespace Cangjie::CHIR {
 

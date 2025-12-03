@@ -11,7 +11,7 @@
 #include "CGModule.h"
 #include "IRBuilder.h"
 #include "IRGenerator.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 using namespace Cangjie::CHIR;
 

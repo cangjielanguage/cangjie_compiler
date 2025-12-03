@@ -14,8 +14,8 @@
 #define CANGJIE_UTILS_PARALLELUTIL_H
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/UserDefinedType.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/Utils/UserDefinedType.h"
 #include "cangjie/Utils/TaskQueue.h"
 
 #include <memory>

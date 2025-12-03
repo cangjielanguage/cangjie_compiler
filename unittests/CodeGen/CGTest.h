@@ -14,10 +14,10 @@
 #define CANGJIE_CG_TEST_H
 #include <gtest/gtest.h>
 
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/CHIRContext.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/CHIRContext.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 using namespace Cangjie::CHIR;
 

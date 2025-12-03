@@ -8,7 +8,7 @@
 #define CANGJIE_CGFUNCTIONTYPE_H
 
 #include "Base/CGTypes/CGType.h"
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 
 namespace Cangjie {
 namespace CodeGen {

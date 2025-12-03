@@ -12,8 +12,8 @@
 
 #include "cangjie/CHIR/Analysis/ConstMemberVarCollector.h"
 
-#include "cangjie/CHIR/Utils.h"
-#include "cangjie/CHIR/Visitor/Visitor.h"
+#include "cangjie/CHIR/Utils/Utils.h"
+#include "cangjie/CHIR/Utils/Visitor/Visitor.h"
 #include "cangjie/Utils/Casting.h"
 
 namespace Cangjie::CHIR {

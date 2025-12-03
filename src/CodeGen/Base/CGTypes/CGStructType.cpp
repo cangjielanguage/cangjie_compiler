@@ -10,7 +10,7 @@
 #include "CGContext.h"
 #include "CGModule.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Type/StructDef.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
 #include "cangjie/Option/Option.h"
 
 namespace Cangjie::CodeGen {

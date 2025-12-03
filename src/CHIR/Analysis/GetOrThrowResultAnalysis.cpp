@@ -6,8 +6,8 @@
 
 #include "cangjie/CHIR/Analysis/GetOrThrowResultAnalysis.h"
 #include "cangjie/CHIR/Analysis/Utils.h"
-#include "cangjie/CHIR/Type/StructDef.h"
-#include "cangjie/CHIR/Utils.h"
+#include "cangjie/CHIR/IR/Type/StructDef.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 using namespace Cangjie::CHIR;
 

@@ -6,7 +6,7 @@
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
-#include "cangjie/CHIR/Type/ExtendDef.h"
+#include "cangjie/CHIR/IR/Type/ExtendDef.h"
 #include "cangjie/Modules/ModulesUtils.h"
 
 using namespace Cangjie::CHIR;

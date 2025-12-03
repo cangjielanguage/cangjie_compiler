@@ -13,11 +13,11 @@
 
 #include "cangjie/Basic/Print.h"
 #include "cangjie/CHIR/CHIR.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/IntrinsicKind.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/IntrinsicKind.h"
 #include "cangjie/CHIR/Serializer/CHIRSerializer.h"
-#include "cangjie/CHIR/Type/CustomTypeDef.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/CustomTypeDef.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 using namespace Cangjie::CHIR;
 

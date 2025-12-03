@@ -8,7 +8,7 @@
 #define CANGJIE_CGARRAYTYPE_H
 
 #include "Base/CGTypes/CGType.h"
-#include "cangjie/CHIR/Type/Type.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
 
 namespace Cangjie {
 namespace CodeGen {

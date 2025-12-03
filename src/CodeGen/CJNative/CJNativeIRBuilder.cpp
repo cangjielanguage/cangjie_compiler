@@ -17,8 +17,8 @@
 #include "CGModule.h"
 #include "IRAttribute.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Type/EnumDef.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/EnumDef.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CodeGen {
 llvm::Value* IRBuilder2::FixFuncArg(const CGValue& srcValue, const CGType& destType, bool isThisArgInStructMut)

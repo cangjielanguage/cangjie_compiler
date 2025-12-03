@@ -13,9 +13,9 @@
 #include <securec.h>
 #include <thread>
 
-#include "cangjie/CHIR/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/Interpreter/BCHIRInterpreter.h"
-#include "cangjie/CHIR/IntrinsicKind.h"
+#include "cangjie/CHIR/IR/IntrinsicKind.h"
 #include "cangjie/Utils/ConstantsUtils.h"
 
 using namespace Cangjie;

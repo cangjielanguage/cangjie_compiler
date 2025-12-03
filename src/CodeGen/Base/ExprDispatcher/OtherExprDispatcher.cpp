@@ -23,9 +23,9 @@
 #include "IRAttribute.h"
 #include "IRBuilder.h"
 #include "Utils/CGUtils.h"
-#include "cangjie/CHIR/Expression/Terminator.h"
-#include "cangjie/CHIR/Type/ClassDef.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace {
 using namespace Cangjie;

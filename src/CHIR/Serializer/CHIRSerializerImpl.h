@@ -21,13 +21,13 @@
 #include <iostream>
 #include <queue>
 
-#include "cangjie/CHIR/CHIRBuilder.h"
-#include "cangjie/CHIR/CHIRContext.h"
-#include "cangjie/CHIR/Package.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/CHIRContext.h"
+#include "cangjie/CHIR/IR/Package.h"
 #include "cangjie/CHIR/Serializer/CHIRSerializer.h"
-#include "cangjie/CHIR/Type/Type.h"
-#include "cangjie/CHIR/UserDefinedType.h"
-#include "cangjie/CHIR/Value.h"
+#include "cangjie/CHIR/IR/Type/Type.h"
+#include "cangjie/CHIR/Utils/UserDefinedType.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR {
 
