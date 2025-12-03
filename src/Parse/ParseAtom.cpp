@@ -408,7 +408,10 @@ OwnedPtr<Block> ParserImpl::ParseExprOrDeclsInMatchCase()
         }
         if (SeeingMacroCallDecl() || SeeingDecl() || SeeingExpr()) {
             auto node = ParseExprOrDecl(ScopeKind::FUNC_BODY);
-            exprOrDecls->begin = node->begin;
+            // only set the begin of the block when parsing the first expr of the block
+            if (exprOrDecls->body.empty()) {
+                exprOrDecls->begin = node->begin;
+            }
             exprOrDecls->body.emplace_back(std::move(node));
         } else {
             DiagMatchCaseExpectedExprOrDecl();
