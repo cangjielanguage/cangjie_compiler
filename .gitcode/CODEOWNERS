@@ -52,7 +52,7 @@
 /src/Sema/ @huohuixin
 /src/Sema/GenericInstantiation @Augus_Jan
 /src/Sema/NativeFFI/ @JasmineZhu
-/src/Seme/Test/ @JasmineZhu
+/src/Sema/Test/ @JasmineZhu
 /src/Sema/CJMP/ @JasmineZhu
 /src/Sema/Desugar/DesugarMacro.cpp @mini-tang
 /src/Sema/Desugar/DesugarMacro.h @mini-tang
