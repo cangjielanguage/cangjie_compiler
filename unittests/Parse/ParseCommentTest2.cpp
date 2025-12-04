@@ -293,3 +293,29 @@ TEST_F(ParseCommentTest, MatchNoSelector)
     ASSERT_EQ(case2.comments.trailingComments.size(), 1);
     EXPECT_EQ(case2.comments.trailingComments[0].cms[0].info.Value(), "// comment2");
 }
+
+TEST_F(ParseCommentTest, MatchWithSelector)
+{
+    code = R"(let a = match { 
+case 1 => 
+//comment on 1
+1
+// comment on ()
+() //comment on case
+case _ => 1
+    })";
+    diag.SetSourceManager(&sm);
+    Parser parser(code, diag, sm, {0, 1, 1}, true);
+    OwnedPtr<File> file = parser.ParseTopLevel();
+    auto& a = StaticCast<VarDecl>(*file->decls[0]);
+    auto& match = StaticCast<MatchExpr>(*a.initializer);
+    auto& case1 = *match.matchCaseOthers[0];
+    auto& bl = *case1.exprOrDecls;
+    ASSERT_EQ(bl.comments.leadingComments.size(), 1);
+    EXPECT_EQ(bl.comments.leadingComments[0].cms[0].info.Value(), "//comment on 1");
+    auto paren = *case1.exprOrDecls->body[1];
+    ASSERT_EQ(paren.comments.leadingComments.size(), 1);
+    EXPECT_EQ(paren.comments.leadingComments[0].cms[0].info.Value(), "// comment on ()");
+    ASSERT_EQ(case1.comments.trailingComments.size(), 1);
+    EXPECT_EQ(case1.comments.trailingComments[0].cms[0].info.Value(), "//comment on case");
+}
