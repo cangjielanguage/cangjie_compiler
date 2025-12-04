@@ -42,7 +42,9 @@ void Devirtualization::RunOnFunc(const Func* func, CHIRBuilder& builder)
     if (result == nullptr) {
         return;
     }
-    const auto actionBeforeVisitExpr = [this, &builder](const TypeDomain& state, Expression* expr, size_t) {
+    std::optional<std::unordered_set<const GenericType*>> visibleGenericTypes = std::nullopt;
+    const auto actionBeforeVisitExpr =
+        [this, &builder, &visibleGenericTypes, func](const TypeDomain& state, Expression* expr, size_t) {
         if (expr->GetExprKind() != ExprKind::INVOKE) {
             return;
         }
@@ -63,6 +65,28 @@ void Devirtualization::RunOnFunc(const Func* func, CHIRBuilder& builder)
             {invoke->GetMethodName(), std::move(paramTys), invoke->GetInstantiatedTypeArgs()});
         if (!realCallee) {
             return;
+        }
+        if (thisType->IsGenericRelated()) {
+            if (visibleGenericTypes == std::nullopt) {
+                auto types = GetVisiableGenericTypes(*func);
+                visibleGenericTypes = std::unordered_set<const GenericType*>(types.begin(), types.end());
+            }
+            /*
+             * if subtype's generic args are more than its parent, a free generic type will be introduced:
+             * inteface I {
+             *   func foo()
+             * }
+             * class CA<T> <: I {
+             *   public func foo() {}
+             * }
+             * func goo(a: I) {
+             *   a.foo()
+             * }
+             * CA<T> is only candicate of foo call, but will introduce a free template args, skip this case.
+             */
+            if (!CheckAllGenericTypeVisible(*thisType, visibleGenericTypes.value())) {
+                return;
+            }
         }
         rewriteInfos.emplace_back(RewriteInfo{invoke, realCallee, thisType, invoke->GetInstantiatedTypeArgs()});
     };
@@ -488,14 +512,6 @@ std::pair<FuncBase*, Type*> Devirtualization::FindRealCallee(
     }
 }
 
-static bool IsOpenClass(const ClassDef& def)
-{
-    if (def.IsInterface() || def.IsAbstract()) {
-        return true;
-    }
-    return def.TestAttr(Attribute::VIRTUAL);
-}
-
 FuncBase* Devirtualization::GetCandidateFromSpecificType(
     CHIRBuilder& builder, ClassType& specific, const FuncSig& method) const
 {
@@ -520,16 +536,21 @@ void Devirtualization::CollectCandidates(
     CHIRBuilder& builder, ClassType* specific, std::pair<FuncBase*, Type*>& res, const FuncSig& method) const
 {
     auto specificDef = specific->GetClassDef();
-    if (IsOpenClass(*specificDef) && !devirtFuncInfo.CheckCustomTypeInternal(*specificDef)) {
+    if (specificDef->CanBeInherited() && !devirtFuncInfo.CheckCustomTypeInternal(*specificDef)) {
         // skip open classes with external linkage
         return;
     }
     // 1. Get candidate from this type
     auto targetFromSpecificType = GetCandidateFromSpecificType(builder, *specific, method);
     if (targetFromSpecificType != nullptr) {
-        res = {targetFromSpecificType, specific};
+        if (res.first == nullptr) {
+            res = {targetFromSpecificType, specific};
+        } else if (res.first != targetFromSpecificType) {
+            res = {nullptr, nullptr};
+            return;
+        }
     }
-    if (!IsOpenClass(*specificDef)) {
+    if (!specificDef->CanBeInherited()) {
         // non-open class do not need try its subtype
         return;
     }
@@ -541,17 +562,17 @@ void Devirtualization::CollectCandidates(
     }
     // 2. Get candidate from subtypes
     for (auto& inheritInfo : it->second) {
-        auto expected = inheritInfo.parentInstType;
+        auto expected = inheritInfo.parentType;
         std::unordered_map<const GenericType*, Type*> replaceTable;
         if (!IsValidSubType(builder, expected, specific, replaceTable)) {
             continue;
         }
-        auto subtype = ReplaceRawGenericArgType(*(inheritInfo.subInstType), replaceTable, builder);
-        auto subtypeClass = DynamicCast<ClassType*>(subtype);
-        if (!subtypeClass ||
-            (!subtypeClass->GetClassDef()->IsInterface() &&
-                !subtypeClass->GetClassDef()->TestAttr(Attribute::ABSTRACT))) {
-            auto extendsOrImplements = devirtFuncInfo.defsMap[subtypeClass];
+        auto subtype = ReplaceRawGenericArgType(*(inheritInfo.subType), replaceTable, builder);
+        auto subtypeCustom = DynamicCast<CustomType*>(subtype);
+        if (!subtypeCustom ||
+            (!subtypeCustom->GetCustomTypeDef()->IsInterface() &&
+                !subtypeCustom->GetCustomTypeDef()->TestAttr(Attribute::ABSTRACT))) {
+            auto extendsOrImplements = devirtFuncInfo.defsMap[subtypeCustom];
             for (auto oriDef : extendsOrImplements) {
                 auto def = oriDef->GetGenericDecl() != nullptr ? oriDef->GetGenericDecl() : oriDef;
                 for (const auto& vtableIt : def->GetDefVTable().GetTypeVTables()) {
@@ -561,7 +582,7 @@ void Devirtualization::CollectCandidates(
                     if (auto target = FindFunctionInVtable(
                         vtableIt.GetSrcParentType(), vtableIt.GetVirtualMethods(), method, builder)) {
                         if (res.first == nullptr) {
-                            res = {target, subtypeClass};
+                            res = {target, subtypeCustom};
                         } else if (res.first != target) {
                             res = {nullptr, nullptr};
                             return;
@@ -570,8 +591,8 @@ void Devirtualization::CollectCandidates(
                 }
             }
         }
-        if (subtypeClass) {
-            CollectCandidates(builder, subtypeClass, res, method);
+        if (subtypeCustom && subtypeCustom->IsClass()) {
+            CollectCandidates(builder, StaticCast<ClassType*>(subtypeCustom), res, method);
         }
     }
 }
@@ -593,6 +614,20 @@ bool Devirtualization::CheckFuncHasInvoke(const BlockGroup& bg)
         }
     }
     return false;
+}
+
+bool Devirtualization::CheckAllGenericTypeVisible(
+    const Type& type, const std::unordered_set<const GenericType*>& visibleSet)
+{
+    if (type.IsGeneric() && visibleSet.count(StaticCast<const GenericType*>(&type)) == 0) {
+        return false;
+    }
+    for (auto t : type.GetTypeArgs()) {
+        if (!CheckAllGenericTypeVisible(*t, visibleSet)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::vector<Func*> Devirtualization::CollectContainInvokeExprFuncs(const Ptr<const Package>& package)

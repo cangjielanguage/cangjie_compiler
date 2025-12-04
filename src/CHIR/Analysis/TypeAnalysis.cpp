@@ -346,9 +346,11 @@ static Type* GetInnerTypeFromMemberAccess(const MemberAccess& ma, CHIRBuilder& b
     const auto& path = ma.GetPath();
     auto locationType = ma.GetOperands()[0]->GetType();
     for (size_t i = 0; i < path.size() - 1; ++i) {
+        CJC_NULLPTR_CHECK(locationType);
         auto index = path[i];
         locationType = GetFieldOfType(*locationType, index, builder);
     }
+    CJC_NULLPTR_CHECK(locationType);
     return locationType;
 }
 
@@ -360,7 +362,7 @@ static const CustomTypeDef* CheckMemberDefineInWhichParent(CustomType& type, siz
 }
 
 template <typename TMemberAccess>
-void TypeAnalysis::HandleMemeberAccess(TypeDomain& state, const TMemberAccess* memberAccess) const
+void TypeAnalysis::HandleMemberAccess(TypeDomain& state, const TMemberAccess* memberAccess) const
 {
     auto locationType = GetInnerTypeFromMemberAccess(*memberAccess, builder)->StripAllRefs();
     if (!locationType->IsClassOrStruct()) {
@@ -379,7 +381,7 @@ void TypeAnalysis::HandleMemeberAccess(TypeDomain& state, const TMemberAccess* m
     if (it2 == it->second.end()) {
         return HandleDefaultExpr(state, memberAccess);
     }
-    auto geneircSubType = it2->second->StripAllRefs();
+    auto resType = it2->second->StripAllRefs();
     // member define:
     //   class XX<T> {
     //     let member: I<T> = CA<T>()
@@ -389,13 +391,12 @@ void TypeAnalysis::HandleMemeberAccess(TypeDomain& state, const TMemberAccess* m
     //     let x = XX<Int64>()
     //     x.member.func()
     //       => type of x.member will be a inst parent type I<Int64>. To Get CA<Int64>, we need inst sub type from
-    //          generic sub type CA<T> and inst parent type I<Int64>.
-    auto ResultInstParentType = memberAccess->GetResult()->GetType()->StripAllRefs();
-    if(!ResultInstParentType->IsClass()) {
-        return HandleDefaultExpr(state, memberAccess);
+    //          parent XX's generic type params.
+    if (resType->IsGenericRelated()) {
+        auto [res, mapping] = def->GetType()->CalculateGenericTyMapping(*locationType);
+        CJC_ASSERT(res);
+        resType = ReplaceRawGenericArgType(*resType, mapping, builder);
     }
-    auto instanceType =
-        GetInstSubType(*geneircSubType, *static_cast<ClassType*>(ResultInstParentType), builder);
     AbstractObject* refObj;
     if constexpr (std::is_same_v<GetElementRef, TMemberAccess>) {
         refObj = state.GetTwoLevelRefAndSetToTop(memberAccess->GetResult(), memberAccess);
@@ -403,17 +404,17 @@ void TypeAnalysis::HandleMemeberAccess(TypeDomain& state, const TMemberAccess* m
         // else is field
         refObj = state.GetReferencedObjAndSetToTop(memberAccess->GetResult(), memberAccess);
     }
-    UpdateDefaultValue(state, memberAccess->GetResult(), refObj, instanceType);
+    UpdateDefaultValue(state, memberAccess->GetResult(), refObj, resType);
 }
 
 void TypeAnalysis::PreHandleGetElementRefExpr(TypeDomain& state, const GetElementRef* getElemRef)
 {
-    HandleMemeberAccess(state, getElemRef);
+    HandleMemberAccess(state, getElemRef);
 }
 
 void TypeAnalysis::PreHandleFieldExpr(TypeDomain& state, const Field* field)
 {
-    HandleMemeberAccess(state, field);
+    HandleMemberAccess(state, field);
 }
 
 void TypeAnalysis::HandleDefaultExpr(TypeDomain& state, const Expression* expr) const
