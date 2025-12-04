@@ -32,34 +32,6 @@ enum class ArrayOperationKind: uint8_t {
     GET_LENGTH
 };
 
-/*
-Generic Config Example:
-generic_object_configuration = [
-    { name = "GenericClass", type_arguments = ["Int32"]},
-    { name = "GenericClass<Int32>", symbols = [
-        "getValue",
-        "GenericClass",
-        "value",
-        "setValue"
-    ]}
-]
-*/
-struct GenericConfigInfo {
-    // Reference type symbol name, such as: GenericClass
-    std::string declSymbolName;
-    // Definition name with generics, such as: GenericClassint32
-    std::string declInstName;
-    // item: <"T", "int32">
-    std::vector<std::pair<std::string, std::string>> instTypes;
-    // Config func symbol name, such as: "getValue", "GenericClass", "value", "setValue"
-    std::unordered_set<std::string> funcNames;
-    GenericConfigInfo(std::string name, std::string declInstName, std::vector<std::pair<std::string, std::string>> &insts, std::unordered_set<std::string> &funcs)
-        : declSymbolName(name), declInstName(declInstName), instTypes(insts), funcNames(funcs)
-    {
-    }
-};
-
-
 class Utils final {
 public:
     Utils(ImportManager& importManager, TypeManager& typeManager);
@@ -257,8 +229,7 @@ bool IsCJMapping(const Ty& ty);
 bool IsCJMappingGeneric(const Decl& decl);
 void SplitAndTrim(std::string str, std::vector<std::string>& types);
 std::string JoinVector(const std::vector<std::string>& vec, const std::string& delimiter = "");
-std::string GetGenericActualType(GenericConfigInfo* config, std::string genericName);
-TypeKind GetGenericActualTypeKind(std::string configType);
+std::string ReplaceClassName(std::string& classTypeSignature, std::string newSegment);
 
 ArrayOperationKind GetArrayOperationKind(Decl& decl);
 

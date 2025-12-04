@@ -52,8 +52,7 @@ void JavaDesugarManager::GetArgsAndRetGenericActualTyVector(FuncDecl& ctor, cons
                     return p.first == typeName;
                 });
             if (it != instTypes.end()) {
-                auto actualTypeKind = GetGenericActualTypeKind(it->second);
-                Ptr<Ty> actualTy = TypeManager::GetPrimitiveTy(actualTypeKind);
+                Ptr<Ty> actualTy = GetGenericInstTy(it->second);
                 actualTy->name = typeName;
                 actualTyArgMap[typeName] = actualTy;
                 return actualTy;

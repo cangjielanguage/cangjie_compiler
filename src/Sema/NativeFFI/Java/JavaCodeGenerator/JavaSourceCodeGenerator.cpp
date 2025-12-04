@@ -298,8 +298,7 @@ std::string JavaSourceCodeGenerator::MapCJTypeToJavaType(const OwnedPtr<Type>& t
     CJC_ASSERT(type && type->ty);
     if (IsGenericParam(type->ty)) {
         // Current generic only support primitive type.
-        auto genericActualTy =
-            TypeManager::GetPrimitiveTy(GetGenericActualTypeKind(GetGenericActualType(genericConfig, type->ty->name)));
+        auto genericActualTy = GetGenericInstTy(genericConfig, type->ty->name);
         return MapCJTypeToJavaType(genericActualTy, javaImports, curPackageName, isNativeMethod);
     }
     return MapCJTypeToJavaType(type->ty, javaImports, curPackageName, isNativeMethod);
@@ -312,8 +311,7 @@ std::string JavaSourceCodeGenerator::MapCJTypeToJavaType(const OwnedPtr<FuncPara
     auto paraTy = param->type->ty;
     if (IsGenericParam(paraTy)) {
         // Current generic only support primitive type.
-        auto genericActualTy =
-            TypeManager::GetPrimitiveTy(GetGenericActualTypeKind(GetGenericActualType(genericConfig, paraTy->name)));
+        auto genericActualTy = GetGenericInstTy(genericConfig, paraTy->name);
         return MapCJTypeToJavaType(genericActualTy, javaImports, curPackageName, isNativeMethod);
     }
     return MapCJTypeToJavaType(param->type->ty, javaImports, curPackageName, isNativeMethod);
@@ -883,8 +881,10 @@ void JavaSourceCodeGenerator::AddMethods()
     for (auto& fdecl : funcDecls) {
         const FuncDecl& funcDecl = *StaticAs<ASTKind::FUNC_DECL>(fdecl);
         // Hidden interopCJ configure unexposed symbol.
-        if (isInteropCJPackageConfig && funcDecl.symbol && !funcDecl.symbol->isNeedExposedToInterop &&
-            !IsVisibalFunc(funcDecl)) {
+        if (isInteropCJPackageConfig && funcDecl.symbol && !funcDecl.symbol->isNeedExposedToInterop) {
+            continue;
+        }
+        if (!IsVisibalFunc(funcDecl)) {
             continue;
         }
         if (funcDecl.funcBody && funcDecl.funcBody->retType) {
@@ -967,9 +967,9 @@ void JavaSourceCodeGenerator::AddInterfaceMethods()
                 if (isDefault) {
                     auto& declParams = funcDecl.funcBody->paramLists[0]->params;
                     auto defaultFuncIdentifier = funcIdentifier + JAVA_INTERFACE_FWD_CLASS_DEFAULT_METHOD_SUFFIX;
-                    auto mangledNativeName = GetMangledMethodName(mangler, declParams, defaultFuncIdentifier);
-                    std::string defaultCall =
-                        decl->identifier.Val() + JAVA_FWD_CLASS_SUFFIX + "." + mangledNativeName + "(this";
+                    auto mangledNativeName = GetMangledMethodName(mangler, declParams, defaultFuncIdentifier, genericConfig);
+                    std::string interfaceName = genericConfig ? genericConfig->declInstName : decl->identifier.Val();
+                    std::string defaultCall = interfaceName + JAVA_FWD_CLASS_SUFFIX + "." + mangledNativeName + "(this";
                     auto params = GenerateParamLists(funcDecl.funcBody->paramLists, FuncParamToString);
                     if (params != "") {
                         defaultCall += ", " + params;
@@ -1008,13 +1008,16 @@ void JavaSourceCodeGenerator::AddInterfaceFwdClassNativeMethod()
         }
         if (!declPtr->TestAttr(Attribute::PRIVATE) && IsFuncDeclAndNotConstructor(declPtr)) {
             const FuncDecl& funcDecl = *StaticAs<ASTKind::FUNC_DECL>(declPtr.get());
-            if (!declPtr->TestAttr(Attribute::DEFAULT) && !IsVisibalFunc(funcDecl)) {
+            if (!declPtr->TestAttr(Attribute::DEFAULT)) {
+                continue;
+            }
+            if (!IsVisibalFunc(funcDecl)) {
                 continue;
             }
             if (funcDecl.funcBody && funcDecl.funcBody->retType) {
                 auto& params = funcDecl.funcBody->paramLists[0]->params;
                 auto funcIdentifier = GetJavaMemberName(funcDecl) + JAVA_INTERFACE_FWD_CLASS_DEFAULT_METHOD_SUFFIX;
-                auto mangledNativeName = GetMangledMethodName(mangler, params, funcIdentifier);
+                auto mangledNativeName = GetMangledMethodName(mangler, params, funcIdentifier, genericConfig);
                 const std::string retType =
                     MapCJTypeToJavaType(funcDecl.funcBody->retType, &imports, &decl->fullPackageName);
                 std::string methodSignature;
@@ -1028,7 +1031,8 @@ void JavaSourceCodeGenerator::AddInterfaceFwdClassNativeMethod()
                 methodSignature += JAVA_WHITESPACE;
                 methodSignature += mangledNativeName;
                 methodSignature += "(";
-                methodSignature += decl->identifier.Val() + JAVA_WHITESPACE + JAVA_SELF_OBJECT;
+                std::string interfaceName = genericConfig ? genericConfig->declInstName : decl->identifier.Val();
+                methodSignature += interfaceName + JAVA_WHITESPACE + JAVA_SELF_OBJECT;
                 std::string argsWithTypes = GenerateFuncParamLists(funcDecl.funcBody->paramLists, false);
                 if (argsWithTypes != "") {
                     methodSignature += ", " + argsWithTypes;

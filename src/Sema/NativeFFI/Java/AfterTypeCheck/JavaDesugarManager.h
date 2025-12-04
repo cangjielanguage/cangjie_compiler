@@ -382,13 +382,13 @@ private:
      *
      * where *UnwrapJavaEntity* - generated unwrapper for Ret type value.
      */
-    void DesugarJavaMirrorMethod(FuncDecl& fun, ClassLikeDecl& mirror);
+    void DesugarJavaMirrorMethod(FuncDecl& fun, ClassLikeDecl& mirror, GenericConfigInfo *config = nullptr);
 
     /**
      * used in DesugarJavaMirrorMethod for method's body generation
      *
      */
-    void AddJavaMirrorMethodBody(const ClassLikeDecl& mirror, FuncDecl& fun, OwnedPtr<Expr> javaRefCall);
+    void AddJavaMirrorMethodBody(ClassLikeDecl& mirror, FuncDecl& fun, OwnedPtr<Expr> javaRefCall, GenericConfigInfo *config = nullptr);
 
     /**
      * for prop [prop]:
@@ -528,12 +528,12 @@ private:
      *     return CJMappingInterface_fwd(javaref).foo_default_impl()
      * }
      */
-    void GenerateForCJInterfaceMapping(AST::InterfaceDecl& interfaceDecl);
+    void GenerateForCJInterfaceMapping(File& file, AST::InterfaceDecl& interfaceDecl);
     void GenerateNativeForCJInterfaceMapping(AST::ClassDecl& classDecl);
-    void GenerateInterfaceFwdclassBody(AST::ClassDecl& fwdclassDecl, AST::InterfaceDecl& interfaceDecl);
-    OwnedPtr<FuncDecl> GenerateInterfaceFwdclassMethod(AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl);
+    void GenerateInterfaceFwdclassBody(AST::ClassDecl& fwdclassDecl, AST::InterfaceDecl& interfaceDecl, GenericConfigInfo *config = nullptr);
+    OwnedPtr<FuncDecl> GenerateInterfaceFwdclassMethod(AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl, GenericConfigInfo *config = nullptr);
     OwnedPtr<FuncDecl> GenerateInterfaceFwdclassDefaultMethod(
-        AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl);
+        AST::ClassDecl& fwdclassDecl, FuncDecl& interfaceFuncDecl, GenericConfigInfo *config = nullptr);
 
     OwnedPtr<PrimitiveType> CreateUnitType();
     void GenerateForCJOpenClassMapping(AST::ClassDecl& classDecl);
@@ -544,6 +544,25 @@ private:
     void InitGenericConfigs(const File& file, const AST::Decl* decl, std::vector<GenericConfigInfo*>& genericConfigs);
     void InsertAttachCJObject(ClassDecl& fwdDecl, ClassDecl& classDecl);
     OwnedPtr<FuncDecl> GenerateFwdClassMethod(ClassDecl& fwdDecl, ClassDecl& classDecl, FuncDecl& oriMethodDecl, int index);
+    OwnedPtr<ClassDecl> InitInterfaceFwdClassDecl(AST::InterfaceDecl& interfaceDecl);
+    /**
+     * If function param or return param is generic ty, replace it to instance ty by genericConfig.
+     */
+    void ReplaceGenericTyForFunc(Ptr<FuncDecl> funcDecl, GenericConfigInfo* genericConfig);
+    /**
+     * Add this. for interface fwdclass default method that call self method, and replace generic ty to instance ty by genericConfig.
+     * from
+     * interface B {
+     * func test() {test2()}
+     * func test2()
+     * }
+     * to
+     * class B_fwd {
+     * func test() {this.test2()} // add this.
+     * func test2(){}
+     * }
+     */
+    OwnedPtr<AST::MemberAccess> GenThisMemAcessForSelfMethod(Ptr<FuncDecl> fd, Ptr<InterfaceDecl> interfaceDecl, GenericConfigInfo* genericConfig);
 
     ImportManager& importManager;
     TypeManager& typeManager;
@@ -553,6 +572,7 @@ private:
     InteropLibBridge lib;
     const std::optional<std::string>& javaCodeGenPath;
     const std::string& outputLibPath;
+    // genericConfigsVector only can use at IMPL_GENERATE stage. 
     std::vector<GenericConfigInfo*> genericConfigsVector;
     bool isGenericGlueCode = {false};
 

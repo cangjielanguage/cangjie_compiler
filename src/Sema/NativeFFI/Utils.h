@@ -22,6 +22,33 @@
 namespace Cangjie::Native::FFI {
 using namespace AST;
 
+/*
+Generic Config Example:
+generic_object_configuration = [
+    { name = "GenericClass", type_arguments = ["Int32"]},
+    { name = "GenericClass<Int32>", symbols = [
+        "getValue",
+        "GenericClass",
+        "value",
+        "setValue"
+    ]}
+]
+*/
+struct GenericConfigInfo {
+    // Reference type symbol name
+    std::string declSymbolName;
+    // Definition name with generics, such as: GenericClassint32
+    std::string declInstName;
+    // item: <"T", "int32">
+    std::vector<std::pair<std::string, std::string>> instTypes;
+    // Config func symbol name
+    std::unordered_set<std::string> funcNames;
+    GenericConfigInfo(std::string name, std::string declInstName, std::vector<std::pair<std::string, std::string>> &insts, std::unordered_set<std::string> &funcs)
+        : declSymbolName(name), declInstName(declInstName), instTypes(insts), funcNames(funcs)
+    {
+    }
+};
+
 enum class ArrayOperationKind: uint8_t {
     CREATE,
     GET,
@@ -137,7 +164,8 @@ OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(TypeManager& typeManager, std::vect
 std::string GetCangjieLibName(const std::string& outputLibPath, const std::string& fullPackageName,
     bool trimmed = true);
 
-std::string GetMangledMethodName(const BaseMangler& mangler, const std::vector<OwnedPtr<FuncParam>>& params, const std::string& methodName);
+std::string GetMangledMethodName(const BaseMangler& mangler, const std::vector<OwnedPtr<FuncParam>>& params,
+    const std::string& methodName, GenericConfigInfo* genericConfig = nullptr);
 
 Ptr<Annotation> GetForeignNameAnnotation(const Decl& decl);
 Ptr<Annotation> GetAnnotation(const Decl& decl, AnnotationKind annotationKind);
@@ -145,6 +173,14 @@ Ptr<Annotation> GetAnnotation(const Decl& decl, AnnotationKind annotationKind);
 Ptr<std::string> GetSingleArgumentAnnotationValue(const Decl& target, AnnotationKind annotationKind);
 
 bool IsSuperConstructorCall(const CallExpr& call);
+
+OwnedPtr<PrimitiveType> GetPrimitiveType(std::string typeName, AST::TypeKind typekind);
+OwnedPtr<Type> GetGenericInstType(std::string typeStr);
+OwnedPtr<Type> GetGenericInstType(GenericConfigInfo* config, std::string genericName);
+std::string GetGenericActualType(GenericConfigInfo* config, std::string genericName);
+TypeKind GetGenericActualTypeKind(std::string configType);
+Ptr<Ty> GetGenericInstTy(GenericConfigInfo* config, std::string genericName);
+Ptr<Ty> GetGenericInstTy(std::string typeStr);
 
 } // namespace Cangjie::Interop::Java
 

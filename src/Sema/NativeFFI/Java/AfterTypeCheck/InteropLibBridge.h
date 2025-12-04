@@ -37,6 +37,24 @@ struct MemberJNISignature {
             signature = utils.GetJavaTypeSignature(retTy, paramTys);
     }
 
+    // Constructor added for using generic types in Java
+    MemberJNISignature(Utils& utils, FuncDecl& member, GenericConfigInfo* genericConfig)
+    {
+        auto jobject = StaticAs<ASTKind::CLASS_LIKE_DECL>(member.outerDecl);
+        CJC_ASSERT(jobject);
+        Ptr<Ty> ty = jobject->ty;
+        classTypeSignature = utils.GetJavaClassNormalizeSignature(*ty);
+        // turn "cj/A" to "cj/A${type}"
+        classTypeSignature = ReplaceClassName(classTypeSignature, genericConfig->declInstName);
+        name = GetJavaMemberName(member);
+
+        CJC_ASSERT(member.astKind == ASTKind::FUNC_DECL);
+
+        auto& retTy = *member.funcBody->retType->ty;
+        std::vector<Ptr<Ty>> paramTys = Native::FFI::GetParamTys(*member.funcBody->paramLists[0]);
+        signature = utils.GetJavaTypeSignature(retTy, paramTys);
+    }
+
     MemberJNISignature(Utils& utils, PropDecl& member)
         : MemberJNISignature(utils, member, StaticAs<ASTKind::CLASS_LIKE_DECL>(member.outerDecl))
     {
