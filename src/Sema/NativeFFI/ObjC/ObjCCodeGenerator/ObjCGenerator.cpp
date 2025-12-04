@@ -439,6 +439,7 @@ void ObjCGenerator::GenerateForwardDeclarations()
         std::string keyword;
         switch (dep->astKind) {
             case ASTKind::STRUCT_DECL:
+            case ASTKind::ENUM_DECL:
             case ASTKind::CLASS_DECL:
                 keyword = CLASS_FWD_KEYWORD;
                 break;
