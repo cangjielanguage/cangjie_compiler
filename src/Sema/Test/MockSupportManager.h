@@ -62,7 +62,7 @@ public:
 private:
     TypeManager& typeManager;
     Ptr<MockUtils> mockUtils;
-    std::set<OwnedPtr<AST::Decl>> generatedMockDecls;
+    std::vector<OwnedPtr<AST::Decl>> generatedMockDecls;
     std::unordered_map<Ptr<AST::Decl>, Ptr<AST::VarDecl>> genericMockVarsDecls;
     std::unordered_set<Ptr<AST::Decl>> usedInternalDecls;
 

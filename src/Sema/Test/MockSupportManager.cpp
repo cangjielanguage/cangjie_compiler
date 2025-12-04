@@ -199,7 +199,7 @@ void MockSupportManager::PrepareDecls(DeclsToPrepare&& decls)
         ) {
             auto wrapperDecl = CreateForeignFunctionAccessorDecl(*decl);
             PrepareStaticDecl(*wrapperDecl);
-            generatedMockDecls.emplace(std::move(wrapperDecl));
+            generatedMockDecls.emplace_back(std::move(wrapperDecl));
         } else {
             if (decl->outerDecl &&
                 (decl->outerDecl->TestAttr(Attribute::GENERIC) || decl->outerDecl->genericDecl)) {
@@ -443,7 +443,7 @@ void MockSupportManager::PrepareStaticDecl(Decl& decl)
         newVarDecl->fullPackageName = decl.fullPackageName;
 
         varDecl = newVarDecl.get();
-        generatedMockDecls.insert(std::move(newVarDecl));
+        generatedMockDecls.emplace_back(std::move(newVarDecl));
         genericMockVarsDecls.emplace(&decl, varDecl);
     }
 
@@ -488,9 +488,9 @@ void MockSupportManager::PrepareStaticDecl(Decl& decl)
 
 void MockSupportManager::GenerateVarDeclAccessors(VarDecl& fieldDecl, AccessorKind getterKind, AccessorKind setterKind)
 {
-    generatedMockDecls.insert(GenerateVarDeclAccessor(fieldDecl, getterKind));
+    generatedMockDecls.emplace_back(GenerateVarDeclAccessor(fieldDecl, getterKind));
     if (fieldDecl.isVar) {
-        generatedMockDecls.insert(GenerateVarDeclAccessor(fieldDecl, setterKind));
+        generatedMockDecls.emplace_back(GenerateVarDeclAccessor(fieldDecl, setterKind));
     }
     fieldDecl.EnableAttr(Attribute::MOCK_SUPPORTED);
 }
@@ -516,7 +516,7 @@ void MockSupportManager::GenerateSpyCallMarker(Package& package)
     varDecl->fullPackageName = package.fullPackageName;
     varDecl->TestAttr(Attribute::GENERATED_TO_MOCK);
 
-    generatedMockDecls.insert(std::move(varDecl));
+    generatedMockDecls.emplace_back(std::move(varDecl));
 }
 
 Ptr<Decl> MockSupportManager::GenerateSpiedObjectVar(const Decl& decl)
@@ -542,7 +542,7 @@ Ptr<Decl> MockSupportManager::GenerateSpiedObjectVar(const Decl& decl)
 
     auto varRef = varDecl.get();
 
-    generatedMockDecls.insert(std::move(varDecl));
+    generatedMockDecls.emplace_back(std::move(varDecl));
 
     return varRef;
 }
@@ -738,17 +738,17 @@ void MockSupportManager::GenerateAccessors(Decl& decl)
         }
 
         if (auto propDecl = As<ASTKind::PROP_DECL>(member.get()); propDecl) {
-            generatedMockDecls.insert(GeneratePropAccessor(*propDecl));
+            generatedMockDecls.emplace_back(GeneratePropAccessor(*propDecl));
         } else if (auto methodDecl = As<ASTKind::FUNC_DECL>(member.get()); methodDecl) {
             if (!IS_GENERIC_INSTANTIATION_ENABLED) {
-                generatedMockDecls.insert(GenerateFuncAccessor(*RawStaticCast<FuncDecl*>(methodDecl)));
+                generatedMockDecls.emplace_back(GenerateFuncAccessor(*RawStaticCast<FuncDecl*>(methodDecl)));
             }
             if (auto instantiatedDecls = mockUtils->TryGetInstantiatedDecls(*methodDecl)) {
                 for (auto& instantiatedDecl : *instantiatedDecls) {
-                    generatedMockDecls.insert(GenerateFuncAccessor(*RawStaticCast<FuncDecl*>(instantiatedDecl)));
+                    generatedMockDecls.emplace_back(GenerateFuncAccessor(*RawStaticCast<FuncDecl*>(instantiatedDecl)));
                 }
             } else if (IS_GENERIC_INSTANTIATION_ENABLED) {
-                generatedMockDecls.insert(GenerateFuncAccessor(*RawStaticCast<FuncDecl*>(methodDecl)));
+                generatedMockDecls.emplace_back(GenerateFuncAccessor(*RawStaticCast<FuncDecl*>(methodDecl)));
             }
         } else if (auto fieldDecl = As<ASTKind::VAR_DECL>(member.get()); fieldDecl) {
             GenerateVarDeclAccessors(*fieldDecl, AccessorKind::FIELD_GETTER, AccessorKind::FIELD_SETTER);
@@ -926,7 +926,7 @@ OwnedPtr<FuncDecl> MockSupportManager::GenerateFuncAccessor(FuncDecl& methodDecl
     }
 
     if (needEraseTypes) {
-        generatedMockDecls.insert(std::move(erasedAccessor));
+        generatedMockDecls.emplace_back(std::move(erasedAccessor));
     }
 
     return methodAccessor;
@@ -1186,7 +1186,8 @@ bool MockSupportManager::NeedToSearchCallsToReplaceWithAccessors(Node& node)
 void MockSupportManager::WriteGeneratedMockDecls()
 {
     while (!generatedMockDecls.empty()) {
-        auto accessorDecl = std::move(generatedMockDecls.extract(generatedMockDecls.begin()).value());
+        auto accessorDecl = std::move(generatedMockDecls.front());
+        generatedMockDecls.erase(generatedMockDecls.begin());
         mockUtils->Instantiate(*accessorDecl);
         if (auto outerDecl = As<ASTKind::CLASS_DECL>(accessorDecl->outerDecl); outerDecl) {
             outerDecl->body->decls.emplace_back(std::move(accessorDecl));
@@ -1618,7 +1619,7 @@ void MockSupportManager::PrepareInterfaceDecl(InterfaceDecl& interfaceDecl)
     }
 
     interfaceDecl.EnableAttr(Attribute::MOCK_SUPPORTED);
-    generatedMockDecls.emplace(std::move(accessorInterface));
+    generatedMockDecls.emplace_back(std::move(accessorInterface));
 }
 
 template <typename T>
@@ -1741,7 +1742,7 @@ void MockSupportManager::PrepareClassWithDefaults(ClassDecl& classDecl, Interfac
 
     typeManager.declToExtendMap[&classDecl].insert(extendDecl.get());
     defaultInterfaceAccessorExtends[classDecl.ty].insert(accessorInterfaceDecl->ty);
-    generatedMockDecls.emplace(std::move(extendDecl));
+    generatedMockDecls.emplace_back(std::move(extendDecl));
 }
 
 namespace {
