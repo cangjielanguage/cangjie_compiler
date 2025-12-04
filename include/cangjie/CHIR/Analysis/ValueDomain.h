@@ -352,6 +352,11 @@ public:
         return absVal ? absVal.get() : nullptr;
     }
 
+    bool IsRef() const
+    {
+        return kind == ValueKind::REF;
+    }
+
 private:
     ValueKind kind;
     Ref* ref;
