@@ -36,6 +36,57 @@ constexpr auto FINALIZER_IDENT = "~init";
 
 } // namespace
 
+std::vector<OwnedPtr<FuncParamList>> ASTFactory::CreateParamLists(std::vector<OwnedPtr<FuncParam>>&& params)
+{
+    std::vector<OwnedPtr<FuncParamList>> paramLists;
+    paramLists.emplace_back(CreateFuncParamList(std::move(params)));
+    return paramLists;
+}
+
+std::vector<OwnedPtr<FuncParam>>& ASTFactory::GetParams(const FuncDecl& fn)
+{
+    auto& fnBody = fn.funcBody;
+    CJC_NULLPTR_CHECK(fnBody);
+    auto& paramLists = fnBody->paramLists;
+    CJC_ASSERT(paramLists.size() == 1);
+    return paramLists[0]->params;
+}
+
+OwnedPtr<VarDecl> ASTFactory::CreateVar(
+    const std::string& name, Ptr<Ty> ty, bool isVar, OwnedPtr<Expr> initializer)
+{
+    auto ret = MakeOwned<VarDecl>();
+    ret->identifier = name;
+    ret->ty = ty;
+    ret->isVar = isVar;
+    ret->EnableAttr(Attribute::COMPILER_ADD, Attribute::IMPLICIT_ADD, Attribute::NO_REFLECT_INFO);
+    if (initializer) {
+        ret->initializer = std::move(initializer);
+    }
+    ret->toBeCompiled = true;
+    return ret;
+}
+
+OwnedPtr<FuncDecl> ASTFactory::CreateFunc(const std::string& name, Ptr<FuncTy> fnTy,
+    std::vector<OwnedPtr<FuncParam>>&& params, std::vector<OwnedPtr<Node>>&& nodes)
+{
+    auto retTy = fnTy->retTy;
+    auto ty = nodes.empty() ? retTy : nodes.back()->ty;
+    auto body = Cangjie::AST::CreateBlock(std::move(nodes), ty);
+    auto fnBody = Cangjie::AST::CreateFuncBody(CreateParamLists(std::move(params)), CreateType(retTy), std::move(body), retTy);
+    auto fn = Cangjie::AST::CreateFuncDecl(name, std::move(fnBody), fnTy);
+    fn->funcBody->funcDecl = fn.get();
+    return fn;
+}
+
+OwnedPtr<ParenExpr> ASTFactory::CreateParenExpr(OwnedPtr<Expr> expr)
+{
+    auto parenExpr = MakeOwnedNode<ParenExpr>();
+    parenExpr->ty = expr->ty;
+    parenExpr->expr = std::move(expr);
+    return std::move(parenExpr);
+}
+
 OwnedPtr<Expr> ASTFactory::CreateNativeHandleExpr(OwnedPtr<Expr> entity)
 {
     CJC_ASSERT(typeMapper.IsObjCMirror(*entity->ty) || typeMapper.IsObjCImpl(*entity->ty) ||
