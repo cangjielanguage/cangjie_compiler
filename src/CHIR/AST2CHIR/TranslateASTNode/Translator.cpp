@@ -173,7 +173,7 @@ Ptr<Func> Translator::CreateEmptyGVInitFunc(const std::string& mangledName, cons
         blockGroup = builder.CreateBlockGroup(*func);
         func->ReplaceBody(*blockGroup);
     } else {
-        auto funcTy = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetVoidTy());
+        auto funcTy = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetUnitTy());
         func = builder.CreateFunc(INVALID_LOCATION, funcTy, mangledName, identifier, rawMangledName, pkgName);
         blockGroup = builder.CreateBlockGroup(*func);
         func->SetFuncKind(FuncKind::GLOBALVAR_INIT);
@@ -193,6 +193,10 @@ Ptr<Func> Translator::CreateEmptyGVInitFunc(const std::string& mangledName, cons
     blockGroup->SetEntryBlock(entry);
     SetFuncBlockGroup(*blockGroup);
     SetCurrentBlock(*entry);
+
+    auto unitTyRef = builder.GetType<RefType>(builder.GetUnitTy());
+    auto retVal = CreateAndAppendExpression<Allocate>(unitTyRef, builder.GetUnitTy(), entry);
+    func->SetReturnValue(*retVal->GetResult());
 
     return func;
 }

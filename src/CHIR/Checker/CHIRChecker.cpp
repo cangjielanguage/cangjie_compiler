@@ -699,6 +699,26 @@ bool CHIRChecker::CheckFuncBase(const FuncBase& func)
     return true;
 }
 
+void CHIRChecker::CheckRetureTypeIfIsVoid(const FuncBase& topLevelFunc, const FuncType& funcType, bool needBeVoid)
+{
+    if (needBeVoid) {
+        // for now, we only check this rule for specific function, other functions' return type can be `Void` or not
+        if (!ReturnTypeShouldBeVoid(topLevelFunc)) {
+            return;
+        }
+        if (!funcType.GetReturnType()->IsVoid()) {
+            auto errMsg = "function " + topLevelFunc.GetIdentifier() + " is global var init, its return type is " +
+                funcType.GetReturnType()->ToString() + ", but `Void` is expected";
+            Errorln(errMsg);
+        }
+    } else {
+        if (funcType.GetReturnType()->IsVoid()) {
+            auto errMsg = "function " + topLevelFunc.GetIdentifier() + " return type can't be `Void` in current stage";
+            Errorln(errMsg);
+        }
+    }
+}
+
 bool CHIRChecker::CheckFuncType(const Type* type, const Lambda* lambda, const FuncBase& topLevelFunc)
 {
     // 1. must have func type
@@ -737,12 +757,10 @@ bool CHIRChecker::CheckFuncType(const Type* type, const Lambda* lambda, const Fu
         return false;
     }
 
-    // 5. global var init func's return type must be `Void`
-    if (lambda == nullptr && topLevelFunc.IsGVInit() && !funcType->GetReturnType()->IsVoid()) {
-        auto errMsg = "function " + topLevelFunc.GetIdentifier() + "is global var init, its return type is " +
-            funcType->GetReturnType()->ToString() + ", but `Void` is expected";
-        Errorln(errMsg);
-        return false;
+    // 5. some funtions' return type must be `Void`
+    if (lambda == nullptr) {
+        CheckRetureTypeIfIsVoid(
+            topLevelFunc, *funcType, optionalRules.find(Rule::RETURN_TYPE_NEED_BE_VOID) != optionalRules.end());
     }
 
     // 6. check param type
@@ -1283,8 +1301,8 @@ void CHIRChecker::CheckFuncRetValue(
     const LocalVar* retVal, const Type& retType, const Lambda* lambda, const Func& topLevelFunc)
 {
     if (retVal == nullptr) {
-        // 1. return value can be null only when return type is Unit, Nothing or Void
-        if (!retType.IsUnit() && !retType.IsNothing() && !retType.IsVoid()) {
+        // 1. return value can be null only when return type is Nothing or Void
+        if (!retType.IsNothing() && !retType.IsVoid()) {
             ErrorInLambdaOrFunc(topLevelFunc, lambda, "you should set a return value.");
         }
     } else if (!retVal->GetType()->IsRef()) {

@@ -77,7 +77,7 @@ FuncType* AdjustFuncType(FuncType& funcType, const AST::FuncDecl& funcDecl, CHIR
         paramsTy.insert(paramsTy.end(), params.begin(), params.end());
 
         if (funcDecl.TestAttr(AST::Attribute::CONSTRUCTOR) || funcDecl.IsFinalizer()) {
-            return builder.GetType<FuncType>(paramsTy, builder.GetVoidTy());
+            return builder.GetType<FuncType>(paramsTy, builder.GetUnitTy());
         } else {
             return builder.GetType<FuncType>(paramsTy, funcType.GetReturnType());
         }

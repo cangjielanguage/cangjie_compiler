@@ -254,7 +254,7 @@ private:
     explicit LocalVar(Type* ty, std::string indexStr, Expression* expr);
     ~LocalVar() override = default;
 
-    void SetRetValue();
+    void SetRetValue(bool flag);
 
 private:
     Expression* expr;        // The owner of this result value.
@@ -608,6 +608,7 @@ private:
 
     LocalVar* GetReturnValue() const;
     void SetReturnValue(LocalVar& ret);
+    void ClearReturnValueOnly();
 
     explicit FuncBody();
 
@@ -725,6 +726,25 @@ public:
     // ===--------------------------------------------------------------------===//
     virtual void DestroySelf();
 
+    /**
+     * @brief Replace the return value of this function and update the function type accordingly.
+     *
+     * This method updates the function's return type based on the new return value:
+     * - If `newRet` is nullptr, the function's return type is changed to Void.
+     * - If `newRet` is not nullptr, the function's return type is set to the base type
+     *   extracted from `newRet`'s RefType.
+     *
+     * Note: This is a base class implementation that only updates the function type.
+     * The derived class `Func` overrides this to also update the function body's return value.
+     *
+     * @param newRet The new return value LocalVar. If nullptr, the function will return Void.
+     *               Must be a RefType if not nullptr.
+     * @param builder The CHIRBuilder used to create or get the updated function type.
+     *
+     * @see Func::ReplaceReturnValue for the full implementation that also updates the body.
+     */
+    virtual void ReplaceReturnValue(LocalVar* newRet, CHIRBuilder& builder);
+
 protected:
     std::string srcCodeIdentifier; // origin name
     std::string rawMangledName;
@@ -810,6 +830,25 @@ public:
     // Modify Self
     // ===--------------------------------------------------------------------===//
     void DestroySelf() override;
+
+    /**
+     * @brief Replace the return value of this function and update both the function type and body.
+     *
+     * This method performs a complete replacement of the function's return value:
+     * 1. Updates the function type's return type (via base class implementation).
+     * 2. Clears the old return value's ret flag if it exists.
+     * 3. Updates the function body's return value:
+     *    - If `newRet` is nullptr, clears the return value (function returns Void).
+     *    - Otherwise, sets `newRet` as the new return value.
+     *
+     * This is typically used during optimization passes, such as when converting
+     * Unit return types to Void (see OptFuncRetType::Unit2Void).
+     *
+     * @param newRet The new return value LocalVar. If nullptr, the function will return Void
+     *               and the body's return value will be cleared. Must be a RefType if not nullptr.
+     * @param builder The CHIRBuilder used to create or get the updated function type.
+     */
+    void ReplaceReturnValue(LocalVar* newRet, CHIRBuilder& builder) override;
 
     // ===--------------------------------------------------------------------===//
     // Incremental Compile

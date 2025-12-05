@@ -83,7 +83,7 @@ Ptr<Value> Translator::TranslateStructArray(const AST::ArrayLit& array)
     for (auto arg : args) {
         instParamTys.emplace_back(arg->GetType());
     }
-    auto instantiedFuncTy = builder.GetType<FuncType>(instParamTys, builder.GetVoidTy());
+    auto instantiedFuncTy = builder.GetType<FuncType>(instParamTys, builder.GetUnitTy());
     GenerateFuncCall(*initFn, instantiedFuncTy, {}, result->GetType(), args, loc);
     result = CreateAndAppendExpression<Load>(arrayTy, result, currentBlock)->GetResult();
     return result;

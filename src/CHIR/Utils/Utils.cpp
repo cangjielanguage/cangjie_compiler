@@ -1562,4 +1562,12 @@ Type* GetInstParentType(Type& instSubType, Type& genericParentType, CHIRBuilder&
     CJC_ASSERT(res);
     return ReplaceRawGenericArgType(genericParentType, replaceTable, builder);
 }
+
+bool ReturnTypeShouldBeVoid(const FuncBase& func)
+{
+    // 1. global var init function
+    // 2. finalizer
+    // 3. constructor, not include static constructor
+    return func.IsGVInit() || func.IsFinalizer() || (func.IsConstructor() && !func.TestAttr(Attribute::STATIC));
+}
 } // namespace Cangjie::CHIR

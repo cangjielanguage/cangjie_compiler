@@ -159,6 +159,7 @@ private:
     bool RulesChecking();
     void RunOptimizationPass();
     void RunUnitUnify();
+    void OptimizeFuncReturnType();
     DevirtualizationInfo CollectDevirtualizationInfo();
     bool RunConstantEvaluation();
     bool RunIRChecker(const Phase& phase);

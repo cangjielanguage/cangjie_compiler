@@ -2262,7 +2262,7 @@ const std::vector<GenericType*>& Lambda::GetGenericTypeParams() const
 
 void Lambda::SetReturnValue(LocalVar& ret)
 {
-    ret.SetRetValue();
+    ret.SetRetValue(true);
     body.SetReturnValue(ret);
 }
 

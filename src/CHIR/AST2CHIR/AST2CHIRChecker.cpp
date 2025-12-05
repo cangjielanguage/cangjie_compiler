@@ -293,6 +293,9 @@ bool CheckInheritDeclGlobalMember(
     }
     // member func
     if (decl.astKind == Cangjie::AST::ASTKind::FUNC_DECL) {
+        if (StaticCast<const Cangjie::AST::FuncDecl&>(decl).TestAttr(AST::Attribute::CONSTRUCTOR) || StaticCast<const Cangjie::AST::FuncDecl&>(decl).IsFinalizer()) {
+            return true;
+        }
         if (!decl.TestAttr(Cangjie::AST::Attribute::STATIC) && !CheckMethodType(*decl.ty, *chirCache->GetType())) {
             Errorln(chirCache->GetIdentifier() + " is expected to be promoted " + Cangjie::AST::Ty::ToString(decl.ty) +
                 ".");

@@ -45,7 +45,7 @@ GlobalVar* Translator::TranslateCustomAnnoInstanceSig(const Expr& expr, const Fu
     gv->EnableAttr(Attribute::CONST);
     gv->Set<LinkTypeInfo>(Linkage::INTERNAL);
     auto initName = std::move(name) + "iiHv";
-    auto ty = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetVoidTy());
+    auto ty = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetUnitTy());
     auto init = builder.CreateFunc(INVALID_LOCATION, ty, initName, initName, "", func.GetPackageName());
     init->SetFuncKind(FuncKind::GLOBALVAR_INIT);
     init->Set<LinkTypeInfo>(Linkage::INTERNAL);
@@ -145,7 +145,7 @@ void Translator::TranslateAnnotationsArrayBody(const Decl& decl, Func& func)
     currentBlock->GetTerminator()->RemoveSelfFromBlock();
     for (size_t i{0}; i < annoInsts.size(); ++i) {
         CreateAndAppendExpression<Apply>(
-            builder.GetVoidTy(), annoInsts[i]->GetInitFunc(), FuncCallContext{}, currentBlock);
+            builder.GetUnitTy(), annoInsts[i]->GetInitFunc(), FuncCallContext{}, currentBlock);
     }
     CreateAndAppendTerminator<Exit>(currentBlock);
     blockGroupStack.pop_back();

@@ -1719,7 +1719,7 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     // set identifier for convenient comparision.
     obj.identifier = buffer->base()->identifier()->str();
     if (buffer->isRetVal()) {
-        obj.SetRetValue();
+        obj.SetRetValue(true);
     }
 }
 

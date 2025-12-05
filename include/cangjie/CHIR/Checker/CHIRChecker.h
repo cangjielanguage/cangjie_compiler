@@ -19,10 +19,11 @@ namespace Cangjie::CHIR {
 class CHIRChecker {
 public:
     enum class Rule {
-        EMPTY_BLOCK,            // there must be expressions in block, one block can't be empty
-        CHECK_FUNC_BODY,         // check all expressions in func body, including their types
+        EMPTY_BLOCK,                        // there must be expressions in block, one block can't be empty
+        CHECK_FUNC_BODY,                    // check all expressions in func body, including their types
         GET_INSTANTIATE_VALUE_SHOULD_GONE,  // `GetInstantiateValue` shouldn't be in IR
-        CHIR_GET_RTTI_STATIC_TYPE   // type in GetRTTIStatic should be This or Generic type
+        CHIR_GET_RTTI_STATIC_TYPE,          // type in GetRTTIStatic should be This or Generic type
+        RETURN_TYPE_NEED_BE_VOID            // global func's return type need to be `Void`
     };
     CHIRChecker(const Package& package, const Cangjie::GlobalOptions& opts, CHIRBuilder& builder);
 
@@ -103,6 +104,7 @@ private:
     bool CheckCFuncType(const FuncType& funcType, const Lambda* lambda, const FuncBase& topLevelFunc);
     void CheckFuncRetValue(
         const LocalVar* retVal, const Type& retType, const Lambda* lambda, const Func& topLevelFunc);
+    void CheckRetureTypeIfIsVoid(const FuncBase& topLevelFunc, const FuncType& funcType, bool needBeVoid);
     void CheckBlockGroup(const BlockGroup& blockGroup, const Func& topLevelFunc);
     void CheckBlock(const Block& block, const Func& topLevelFunc);
     /**
