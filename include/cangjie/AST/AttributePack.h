@@ -602,11 +602,15 @@ enum class Attribute {
     OBJ_C_MIRROR_SUBTYPE,
     /**
      * Marks whether a cangjie method is an Objective-C init.
+     * W: Parser.
+     * R: Sema.
      */
     OBJ_C_INIT,
 
     /**
      * Marks cangjie method as @optional in Objective-C side
+     * W: Parser.
+     * R: Sema.
      */
     OBJ_C_OPTIONAL,
 

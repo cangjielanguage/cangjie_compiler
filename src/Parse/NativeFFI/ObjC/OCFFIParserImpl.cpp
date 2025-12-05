@@ -208,7 +208,7 @@ void OCFFIParserImpl::CheckOptionalAnnotation(AST::FuncDecl& fd) const
             continue;
         }
 
-        if (!fd.outerDecl || fd.outerDecl->astKind != ASTKind::CLASS_DECL
+        if (!fd.outerDecl || fd.outerDecl->astKind != ASTKind::INTERFACE_DECL
             || !fd.outerDecl->TestAttr(Attribute::OBJ_C_MIRROR)) {
                 DiagObjCOptionalFuncMustBeInMirrorClass(fd);
                 fd.EnableAttr(Attribute::IS_BROKEN);
