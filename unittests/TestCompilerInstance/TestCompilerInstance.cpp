@@ -66,7 +66,7 @@ bool TestCompilerInstance::ParseCode()
     if (!file->package) {
         package->fullPackageName = DEFAULT_PACKAGE_NAME;
     } else {
-        package->fullPackageName = file->package->packageName;
+        package->fullPackageName = file->package->GetPackageName();
     }
     file->curPackage = package.get();
     package->files.push_back(std::move(file));
