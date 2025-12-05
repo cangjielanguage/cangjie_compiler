@@ -287,7 +287,7 @@ bool TypeChecker::TypeCheckerImpl::CheckRefTypeCheckAccessLegality(
     const ASTContext& ctx, RefType& rt, const Decl& target)
 {
     auto sym = ScopeManager::GetCurSymbolByKind(SymbolKind::STRUCT, ctx, rt.scopeName);
-    if (!IsLegalAccess(sym, target, rt)) {
+    if (!IsLegalAccess(sym, target, rt, importManager, typeManager)) {
         diag.Diagnose(rt, DiagKind::sema_invalid_access_control, target.identifier.Val());
         // Unbind target-user relationship when error happens.
         ReplaceTarget(&rt, nullptr);
@@ -349,7 +349,7 @@ void TypeChecker::TypeCheckerImpl::CheckQualifiedType(const ASTContext& ctx, Qua
     }
     // Get field target and check access legality.
     auto sym = ScopeManager::GetCurSymbolByKind(SymbolKind::STRUCT, ctx, qt.scopeName);
-    if (!IsLegalAccess(sym, *target, qt)) {
+    if (!IsLegalAccess(sym, *target, qt, importManager, typeManager)) {
         diag.Diagnose(qt, DiagKind::sema_invalid_access_control, target->identifier.Val());
     }
     // Type must have typeArguments when its target is a generic type declaration.

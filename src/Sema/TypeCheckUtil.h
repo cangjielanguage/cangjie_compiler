@@ -334,5 +334,13 @@ template <typename T> T* GetMemberDecl(
 
     return nullptr;
 }
+
+/**
+ * Filter out the targets without access rights in the searched targets.
+ * @param curComposite Represents the position of the referrer.
+ * NOTICE: Whether the modifier will be downgraded in spec is not yet determined.
+ */
+bool IsLegalAccess(AST::Symbol* curComposite, const AST::Decl& d, const AST::Node& node, ImportManager& importManager,
+    TypeManager& typeManager);
 } // namespace Cangjie::TypeCheckUtil
 #endif

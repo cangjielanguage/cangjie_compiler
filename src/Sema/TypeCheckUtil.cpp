@@ -22,6 +22,7 @@
 #include "cangjie/AST/Symbol.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
+#include "cangjie/Modules/ModulesUtils.h"
 
 namespace Cangjie::TypeCheckUtil {
 using namespace AST;
@@ -1157,6 +1158,114 @@ Ptr<FuncDecl> GenerateIsSubtypeTypesIntrinsic(Package& pkg, TypeManager& typeMan
     std::rotate(file->decls.rbegin(), file->decls.rbegin() + 1, file->decls.rend());
 
     return declPtr;
+}
+
+bool SearchTargetDeclForProtectMember(const Node& curComposite, const Decl& outerDeclOfTarget, TypeManager& typeManager)
+{
+    auto typeDecl = &curComposite;
+    // For protected members, need check the extended type.
+    if (curComposite.astKind == ASTKind::EXTEND_DECL) {
+        auto outerED = RawStaticCast<const ExtendDecl*>(&curComposite);
+        auto decl = Ty::GetDeclPtrOfTy(outerED->extendedType->ty);
+        if (decl == &outerDeclOfTarget) {
+            return true;
+        }
+        if (decl) {
+            typeDecl = decl; // Let the BFS search start from the extended declaration.
+        }
+    }
+    // For protected members, need check superclass.
+    if (typeDecl->IsClassLikeDecl()) {
+        auto outerCLD = RawStaticCast<const ClassLikeDecl*>(typeDecl);
+        std::queue<Ptr<const InheritableDecl>> res;
+        res.push(outerCLD);
+        while (!res.empty()) {
+            auto iter = res.front();
+            if (iter == &outerDeclOfTarget) {
+                return true;
+            }
+            for (const auto& extend : typeManager.GetDeclExtends(*iter)) {
+                res.push(extend);
+            }
+            if (auto cd = DynamicCast<ClassDecl*>(iter); cd && cd->GetSuperClassDecl()) {
+                auto superClass = cd->GetSuperClassDecl();
+                res.push(superClass);
+            }
+            res.pop();
+        }
+    }
+    return false;
+}
+
+inline bool IsNormalCtorRef(const AST::Node& node)
+{
+    auto re = DynamicCast<RefExpr>(&node);
+    return !re || (!re->isThis && !re->isSuper);
+}
+
+bool IsLegalAccess(Symbol* curComposite, const Decl& d, const AST::Node& node, ImportManager& importManager,
+    TypeManager& typeManager)
+{
+    auto vd = DynamicCast<const VarDecl*>(&d);
+    auto fd = DynamicCast<const FuncDecl*>(&d);
+    auto cld = DynamicCast<const ClassLikeDecl*>(&d);
+    if (!vd && !fd && !cld) {
+        // There are four kinds of members in class, VarDecl, funcDecl, classDecl and interfaceDecl. If decl is not one
+        // of these, then there is no need to check visibility.
+        return true;
+    }
+    // Public & external decls are always accessible. But public in extend may not export.
+    // The node with 'IN_CORE' or 'IN_MACRO' attribute is created by compiler,
+    // allowing access any kind of decl for special.
+    if (node.TestAnyAttr(Attribute::IN_CORE, Attribute::IN_MACRO)) {
+        return true;
+    }
+    if (!node.IsSamePackage(d) && node.curFile && node.astKind == ASTKind::MEMBER_ACCESS) {
+        auto ma = StaticCast<MemberAccess>(&node);
+        if (ma->baseExpr && ma->baseExpr->ty &&
+            !importManager.IsExtendMemberAccessible(*node.curFile, d, *ma->baseExpr->ty)) {
+            return false;
+        }
+    }
+    if (d.TestAttr(Attribute::PUBLIC)) {
+        return true;
+    }
+    CJC_ASSERT(node.curFile && node.curFile->curPackage);
+    auto relation = Modules::GetPackageRelation(node.curFile->curPackage->fullPackageName, d.GetFullPackageName());
+    // `flag` indicates whether the type name is used to construct an object outside a type declaration
+    // or in a type without inheritance relationship.
+    bool flag = IsClassOrEnumConstructor(d) && !d.TestAttr(Attribute::PRIVATE) && IsNormalCtorRef(node) &&
+        (!curComposite || !SearchTargetDeclForProtectMember(*curComposite->node, *d.outerDecl, typeManager));
+    if (d.TestAttr(Attribute::GLOBAL) || flag) {
+        // When decl is private it can only be accessed in same file,
+        if (d.TestAttr(Attribute::PRIVATE)) {
+            // In the LSP, the 'node' may be a new ast node, 'curFile' pointer consistency cannot be ensured.
+            return node.curFile && d.curFile && *node.curFile == *d.curFile;
+        }
+        return Modules::IsVisible(d, relation);
+    }
+    Ptr<Decl> outerDeclOfTarget = d.outerDecl;
+    if (outerDeclOfTarget == nullptr || !outerDeclOfTarget->IsNominalDecl()) {
+        return true; // Access local decls, must be valid (outerDecl is empty or non-nominal decl).
+    }
+    CJC_ASSERT(!curComposite || curComposite->node);
+    // 1. When decl is internal, checking the package relation.
+    if (d.TestAttr(Attribute::INTERNAL)) {
+        return Modules::IsVisible(d, relation);
+    } else if (d.TestAttr(Attribute::PROTECTED)) {
+        // 2. when decl is protected, checking the package relation, if relation is none, checking composite relation.
+        // 3. Access decl in same composite decl is always allowed.
+        return Modules::IsVisible(d, relation) ||
+            (curComposite &&
+                (curComposite->node == outerDeclOfTarget ||
+                    SearchTargetDeclForProtectMember(*curComposite->node, *outerDeclOfTarget, typeManager)));
+    }
+    // 4. otherwise accessing private decl must inside same decl.
+    auto expectedOuter = outerDeclOfTarget;
+    if (expectedOuter->platformImplementation) {
+        expectedOuter = expectedOuter->platformImplementation;
+    }
+    return curComposite && curComposite->node == expectedOuter;
 }
 
 } // namespace Cangjie::TypeCheckUtil

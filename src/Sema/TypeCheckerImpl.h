@@ -1312,13 +1312,6 @@ private:
     void CheckStaticVarAccessNonStatic(const AST::VarDecl& vd);
 
     /**
-     * Filter out the targets without access rights in the searched targets.
-     * @param curComposite Represents the position of the referrer.
-     * NOTICE: Whether the modifier will be downgraded in spec is not yet determined.
-     */
-    bool IsLegalAccess(AST::Symbol* curComposite, const AST::Decl& d, const AST::Node& node) const;
-
-    /**
      * Check non-function access control of the objective target. The target cannot be a
      * function here. If is legal, return true, else return false;
      */
