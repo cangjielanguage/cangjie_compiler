@@ -6,7 +6,7 @@
 
 cmake_minimum_required(VERSION 3.16.5)
 project(cangjie)
-set(CJ_SDK_VERSION "1.1.0-alpha.36")
+set(CJ_SDK_VERSION "1.1.0-alpha.37")
 # Add path for custom CMake modules and add cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
