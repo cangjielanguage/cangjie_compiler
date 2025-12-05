@@ -420,9 +420,7 @@ void ObjCGenerator::GenerateForwardDeclarations()
                 return;
             }
 
-            if (ty->IsCoreOptionType()) {
-                dependencies.insert(Ty::GetDeclOfTy(ty->typeArgs[0]));
-            } else {
+            if (!ty->IsCoreOptionType()) {
                 dependencies.insert(Ty::GetDeclOfTy(ty));
             }
         }
