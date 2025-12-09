@@ -290,7 +290,9 @@ void PkgMetadataInfo::GeneratePkgMetadata() const
     llvm::NamedMDNode* pkgInfo = llvmMod->getOrInsertNamedMetadata(METADATA_PKG);
     auto names = Utils::SplitQualifiedName(module.GetCGContext().GetCurrentPkgName());
     auto moduleName = names.front();
+    ReplaceDelimiterAfterOrgName(moduleName);
     auto pkgName = module.GetCGContext().GetCurrentPkgName();
+    ReplaceDelimiterAfterOrgName(pkgName);
     auto currentIdx = subCHIRPkg.subCHIRPackageIdx;
     std::string version = ""; // for dynamic loading
     pkgInfo->addOperand(

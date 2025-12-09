@@ -434,6 +434,7 @@ inline bool IsExternalDefinedType(const CHIR::Type& type)
 
 bool IsModifiableClass(const CHIR::Type& chirTy);
 bool IsSizeTrustedInCompileUnit(CGModule& cgMod, const CHIR::Type& chirTy);
+void ReplaceDelimiterAfterOrgName(std::string& packageName);
 } // namespace CodeGen
 } // namespace Cangjie
 
