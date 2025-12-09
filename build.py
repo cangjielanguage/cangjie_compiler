@@ -334,6 +334,7 @@ def set_cangjie_env(args):
     os.environ[LD_LIBRARY_PATH] = PATH_ENV_SEPERATOR.join([
         os.path.join(HOME_DIR, "output/lib"),
         os.path.join(HOME_DIR, "output/runtime/lib/{os}_{arch}_cjnative".format(os=CJ_OS_NAME, arch=CJ_ARCH_NAME)),
+        os.path.join(HOME_DIR, "output/tools/lib"),
         os.environ.get(LD_LIBRARY_PATH, "")
     ])
     LOG.info("set cangjie env: %s=%s", LD_LIBRARY_PATH, os.environ[LD_LIBRARY_PATH])

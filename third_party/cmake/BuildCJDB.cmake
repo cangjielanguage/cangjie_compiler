@@ -63,6 +63,8 @@ else()
             -DLLVM_ENABLE_TERMINFO=OFF
             -DNATIVE_Clang_DIR=${LLVM_GC_BINARY_DIR}/NATIVE/tools/bin
             -DNATIVE_LLVM_DIR=${LLVM_GC_BINARY_DIR}/NATIVE/tools/bin
+            -DCANGJIE_TARGET_TOOLCHAIN=${CANGJIE_TARGET_TOOLCHAIN}
+            -DCANGJIE_TARGET_SYSROOT=${CANGJIE_TARGET_SYSROOT}
             -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/aarch64-linux-ohos_toolchain.cmake
         )
     else()

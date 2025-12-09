@@ -13,10 +13,7 @@ set(CMAKE_SYSTEM_NAME Linux)
 # set the processor or handware name of the target system
 set(CMAKE_SYSTEM_PROCESSOR aarch64)
 
-set(BUILD_TOOLS_ROOT "/opt/buildtools")
-set(OHOS_ROOT "${BUILD_TOOLS_ROOT}/ohos/ohos_root")
-set(CMAKE_SYSROOT ${OHOS_ROOT}/out/sdk/obj/third_party/musl/sysroot)
-
+set(CMAKE_SYSROOT ${CANGJIE_TARGET_SYSROOT})
 set(TRIPLE aarch64-linux-ohos)
 set(CMAKE_C_COMPILER_TARGET   ${TRIPLE})
 set(CMAKE_CXX_COMPILER_TARGET ${TRIPLE})
