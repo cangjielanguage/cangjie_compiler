@@ -850,20 +850,6 @@ public:
      */
     void ReplaceReturnValue(LocalVar* newRet, CHIRBuilder& builder) override;
 
-    // ===--------------------------------------------------------------------===//
-    // Incremental Compile
-    // ===--------------------------------------------------------------------===//
-    /**
-     * Gets the RawMangledName of parent if parent is ExtendDecl. Returns null otherwise. This function is only used in
-     * collection of CHIR optimisation in incremental compilation and should not be used elsewhere.
-     */
-    const std::string& GetParentRawMangledName() const;
-    /**
-     * Sets the RawMangledName if parent is ExtendDecl. This function is only used in collection of CHIR optimisation
-     * in incremental compilation and should not be used elsewhere.
-     */
-    void SetParentRawMangledName(const std::string& name);
-
 private:
     void DestroyFuncBody();
     void RemoveBody();

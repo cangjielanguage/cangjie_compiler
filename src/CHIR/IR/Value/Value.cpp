@@ -1409,16 +1409,6 @@ LocalVar* Func::GetReturnValue() const
     return body.GetReturnValue();
 }
 
-void Func::SetParentRawMangledName(const std::string& name)
-{
-    parentName = name;
-}
-
-const std::string& Func::GetParentRawMangledName() const
-{
-    return parentName;
-}
-
 uint64_t Func::GenerateBlockId()
 {
     return blockId++;

@@ -4,6 +4,12 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+/**
+ * @file
+ *
+ * This file aims to optimize the function return type.
+ */
+
 #ifndef CANGJIE_CHIR_OPT_FUNC_RET_TYPE_H
 #define CANGJIE_CHIR_OPT_FUNC_RET_TYPE_H
 
@@ -20,8 +26,7 @@ public:
      *
      * This optimization pass converts functions with Unit return type to Void return type.
      * Unit and Void are semantically equivalent (both represent no meaningful return value),
-     * but certain functions (constructors, finalizers, global variable initializers) should
-     * explicitly return Void for consistency and code generation purposes.
+     * but Unit return type need llvm to allocate memory for the return value while Void not.
      *
      * The optimization performs the following steps for each affected function:
      * 1. Replaces the function's return value with nullptr (changing return type to Void).

@@ -103,7 +103,6 @@ table Type {
   kind: CHIRTypeKind;
   typeID: uint32; // current id in types
   argTys: [uint32]; // use types id
-  refDims: uint8 = 0;
 }
 
 table RuneType {
@@ -161,16 +160,11 @@ table FuncType {
 
 table CustomType {
   base: Type;
-  implementedInterfaceTys: [uint32]; // use types id
-  instantiatedMemberTys: [uint32]; // use types id
   customTypeDef: uint32; // use defs id
-  hasSetSuperInterface: bool = false;
-  hasSetInstMemberTy: bool = false;
 }
 
 table EnumType {
   base: CustomType;
-  isBoxed: bool = false;
 }
 
 table StructType {
@@ -179,8 +173,6 @@ table StructType {
 
 table ClassType {
   base: CustomType;
-  superClassTy: uint32; // use type id
-  hasSetSuperClass: bool = false;
 }
 
 table CStringType {
@@ -300,10 +292,6 @@ table OverrideSrcFuncType {
   type: uint32;  // use types id
 }
 
-table VariantTypeCastWrapper {
-  lambdaCache: [uint32]; // use exprs id
-}
-
 union Annotation {
   needCheckArrayBound: NeedCheckArrayBound,
   needCheckCast: NeedCheckCast,
@@ -318,7 +306,6 @@ union Annotation {
   enumCaseIndex: EnumCaseIndex,
   virMethodOffset: VirMethodOffset,
   wrappedRawMethod: WrappedRawMethod,
-  variantTypeCastWrapper : VariantTypeCastWrapper,
   overrideSrcFuncType : OverrideSrcFuncType
 }
 
@@ -474,6 +461,7 @@ table ImportedVar {
   packageName: string(shared);
   srcCodeIdentifier: string(shared);
   rawMangledName: string(shared);
+  declaredParent: uint32; // use defs id
 }
 
 table Block {
@@ -523,7 +511,6 @@ table Func {
   params: [uint32]; // use values id
   retVal: uint32; // use values id
 
-  parentName: string(shared);
   propLoc: DebugLocation;
 
   localId: uint64;

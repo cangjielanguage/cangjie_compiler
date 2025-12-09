@@ -137,7 +137,7 @@ Value* Translator::TranslateThisOrSuperRef(const AST::RefExpr& refExpr)
     CJC_ASSERT(thisLeftValueInfo.path.empty());
     auto thisLeftValueBase = thisLeftValueInfo.base;
     auto thisLeftValueBaseTy = thisLeftValueInfo.base->GetType();
-    CJC_ASSERT(thisLeftValueBaseTy->GetRefDims() <= 1);
+    CJC_ASSERT(GetRefDims(*thisLeftValueBaseTy) <= 1);
     if (thisLeftValueBaseTy->IsValueOrGenericTypeWithRefDims(1)) {
         auto loadThis = CreateAndAppendExpression<Load>(
             loc, StaticCast<RefType*>(thisLeftValueBaseTy)->GetBaseType(), thisLeftValueBase, currentBlock);

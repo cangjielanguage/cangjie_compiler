@@ -354,8 +354,7 @@ template <> flatbuffers::Offset<PackageFormat::Type> CHIRSerializer::CHIRSeriali
     auto typeId = GetId<Type>(&obj);
     auto kind = PackageFormat::CHIRTypeKind(obj.GetTypeKind());
     auto argTys = GetId<Type>(obj.GetTypeArgs());
-    auto refDims = obj.GetRefDims();
-    return PackageFormat::CreateTypeDirect(builder, kind, typeId, argTys.empty() ? nullptr : &argTys, refDims);
+    return PackageFormat::CreateTypeDirect(builder, kind, typeId, argTys.empty() ? nullptr : &argTys);
 }
 
 template <>
@@ -430,7 +429,7 @@ flatbuffers::Offset<PackageFormat::CustomType> CHIRSerializer::CHIRSerializerImp
 {
     auto base = Serialize<PackageFormat::Type>(static_cast<const Type&>(obj));
     auto customTypeDef = GetId<CustomTypeDef>(obj.GetCustomTypeDef());
-    return PackageFormat::CreateCustomTypeDirect(builder, base, nullptr, nullptr, customTypeDef);
+    return PackageFormat::CreateCustomType(builder, base, customTypeDef);
 }
 
 template <>
@@ -508,8 +507,7 @@ template <>
 flatbuffers::Offset<PackageFormat::EnumType> CHIRSerializer::CHIRSerializerImpl::Serialize(const EnumType& obj)
 {
     auto base = Serialize<PackageFormat::CustomType>(static_cast<const CustomType&>(obj));
-    bool isBoxed = obj.IsBox();
-    return PackageFormat::CreateEnumType(builder, base, isBoxed);
+    return PackageFormat::CreateEnumType(builder, base);
 }
 
 template <>
@@ -630,7 +628,6 @@ template <> flatbuffers::Offset<PackageFormat::Func> CHIRSerializer::CHIRSeriali
     auto params = GetId<Value>(obj.GetParams());
     auto retVal = GetId<Value>(obj.GetReturnValue());
 
-    auto parentName = obj.GetParentRawMangledName();
     auto propLoc = Serialize<PackageFormat::DebugLocation>(obj.GetPropLocation());
     auto localId = obj.localId;
     auto blockId = obj.blockId;
@@ -639,7 +636,7 @@ template <> flatbuffers::Offset<PackageFormat::Func> CHIRSerializer::CHIRSeriali
         packageName.data(), declaredParent, genericDecl, funcKind, obj.IsFastNative(), obj.IsCFFIWrapper(),
         oriLambdaFuncTy, oriLambdaGenericTypeParams.empty() ? nullptr : &oriLambdaGenericTypeParams,
         genericTypeParams.empty() ? nullptr : &genericTypeParams, paramDftValHostFunc, body,
-        params.empty() ? nullptr : &params, retVal, parentName.data(), propLoc, localId, blockId, blockGroupId);
+        params.empty() ? nullptr : &params, retVal, propLoc, localId, blockId, blockGroupId);
 }
 
 template <>
@@ -702,8 +699,9 @@ flatbuffers::Offset<PackageFormat::ImportedVar> CHIRSerializer::CHIRSerializerIm
     auto packageName = obj.GetPackageName();
     auto srcCodeIdentifier = obj.GetSrcCodeIdentifier();
     auto rawMangledName = obj.GetRawMangledName();
+    auto declaredParent = GetId<CustomTypeDef>(obj.GetParentCustomTypeDef());
     return PackageFormat::CreateImportedVarDirect(
-        builder, base, packageName.c_str(), srcCodeIdentifier.c_str(), rawMangledName.c_str());
+        builder, base, packageName.c_str(), srcCodeIdentifier.c_str(), rawMangledName.c_str(), declaredParent);
 }
 
 // ======================= Literal Value Serializers ===========================

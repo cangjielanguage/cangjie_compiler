@@ -1570,4 +1570,18 @@ bool ReturnTypeShouldBeVoid(const FuncBase& func)
     // 3. constructor, not include static constructor
     return func.IsGVInit() || func.IsFinalizer() || (func.IsConstructor() && !func.TestAttr(Attribute::STATIC));
 }
+
+uint64_t GetRefDims(const Type& type)
+{
+    if (!type.IsRef()) {
+        return 0;
+    }
+    uint64_t dims = 1;
+    auto baseType = StaticCast<RefType&>(type).GetBaseType();
+    while (baseType->IsRef()) {
+        dims++;
+        baseType = StaticCast<RefType&>(*baseType).GetBaseType();
+    }
+    return dims;
+}
 } // namespace Cangjie::CHIR
