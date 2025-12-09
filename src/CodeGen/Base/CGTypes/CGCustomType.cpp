@@ -162,8 +162,15 @@ llvm::Constant* CGCustomType::GenNameOfTypeTemplate()
     auto& customType = static_cast<const CHIR::CustomType&>(chirType);
     auto customDefShortName = CHIR::GetCustomTypeIdentifier(customType);
     auto customDef = customType.GetCustomTypeDef();
-    return cgMod.GenerateTypeNameConstantString(
-        (chirType.IsAutoEnvBase() ? "" : (customDef->GetPackageName() + ":")) + customDefShortName, false);
+    // to ensure compatibility, when dealing with scenarios involving package name containing organization name,
+    // we need to generate names as follows:
+    // "orgName::pkgName:xxx.ti.name" = "orgName/pkgName:xxx.ti"
+    // oldPrefix is "orgName::pkgName" and newPrefix is "orgName/pkgName"
+    auto packageName = customDef->GetPackageName();
+    auto oldPrefix = (chirType.IsAutoEnvBase() ? "" : (packageName + ":"));
+    ReplaceDelimiterAfterOrgName(packageName);
+    auto newPrefix = (chirType.IsAutoEnvBase() ? "" : (packageName + ":"));
+    return cgMod.GenerateTypeNameConstantString(oldPrefix + customDefShortName, false, newPrefix + customDefShortName);
 }
 
 llvm::Constant* CGCustomType::GenFieldsNumOfTypeTemplate()
