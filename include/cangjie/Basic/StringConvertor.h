@@ -14,7 +14,7 @@
 #ifndef CANGJIE_BASIC_STRINGCONVERTOR_H
 #define CANGJIE_BASIC_STRINGCONVERTOR_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <cstdint>

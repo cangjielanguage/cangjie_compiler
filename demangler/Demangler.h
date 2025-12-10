@@ -15,7 +15,7 @@
 #endif
 #include <functional>
 #include <cassert>
-#include <stdint.h>
+#include <cstdint>
 
 namespace Cangjie {
 

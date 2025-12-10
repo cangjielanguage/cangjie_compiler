@@ -14,7 +14,7 @@
 #define CANGJIE_LEX_TOKEN_H
 
 #include <cstring>
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <ostream>
 #include <unordered_map>
