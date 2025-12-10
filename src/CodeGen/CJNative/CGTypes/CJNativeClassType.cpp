@@ -156,4 +156,38 @@ void CGClassType::PreActionOfGenTypeTemplate()
         typeTemplate->addAttribute(GC_FINALIZER_ATTR);
     }
 }
+
+void CGClassType::PostActionOfGenTypeInfo()
+{
+    /*
+        1. Mark a class of which size needs to be updated at runtime by:
+            a. not set TypeExt flag
+            b. set TypeExt flag, but has no TypeExt global variable
+            c. set TypeExt flag, has TypeExt global variable, but the third field of TypeExt is '0x0'
+        2. Mark a class of which size doesn't need to be updated at runtime by:
+            a. set TypeExt flag, has TypeExt global variable, but the third byte of TypeExt is '0x1'
+        The following is marking a class of which size doesn't need to be updated at runtime.
+    */
+    auto classDef = StaticCast<CHIR::ClassType>(chirType).GetClassDef();
+    if (classDef->TestAttr(CHIR::Attribute::COMPILER_ADD) || !IsModifiableClass(chirType) || !IsStaticGI()) {
+        typeInfo->addAttribute(HAS_EXT_PART);
+        auto& llvmCtx = cgCtx.GetLLVMContext();
+        auto extPartType = CGType::GetClassTTExtTypeVer1(llvmCtx);
+        auto extPart = llvm::cast<llvm::GlobalVariable>(cgMod.GetLLVMModule()->getOrInsertGlobal(
+            "ext_" + typeInfo->getName().str(), extPartType));
+        auto size = cgMod.GetLLVMModule()->getDataLayout().getTypeAllocSize(extPartType);
+        std::vector<llvm::Constant*> cons = {
+            llvm::ConstantExpr::getBitCast(typeInfo, llvm::Type::getInt8PtrTy(llvmCtx)),
+            llvm::ConstantInt::get(llvm::Type::getInt16Ty(llvmCtx), 1U),
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmCtx), size),
+            llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvmCtx), 1U)
+        };
+        extPart->setConstant(true);
+        extPart->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+        extPart->setInitializer(llvm::ConstantStruct::get(extPartType, cons));
+        extPart->addAttribute(GC_TI_EXT_ATTR);
+        extPart->setLinkage(llvm::GlobalValue::LinkageTypes::PrivateLinkage);
+        cgCtx.AddLLVMUsedVars(extPart->getName().str());
+    }
+}
 } // namespace Cangjie::CodeGen

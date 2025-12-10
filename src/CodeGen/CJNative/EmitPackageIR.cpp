@@ -35,9 +35,11 @@ void CreatePrintStackTraceCall(IRBuilder2& irBuilder, llvm::Value* exceptionValu
     auto exceptionTi = irBuilder.GetTypeInfoFromObject(exceptionValue);
     // Get the func ptr of `printStackTrace`
     // `printStackTrace` is the 3rd virtual method defined in `class Error`
-    auto idxOfError = irBuilder.getInt64(0U);
+    auto idxOfError = irBuilder.getInt64(1U);
     auto idxOfPrintStackTrace = irBuilder.getInt64(2U);
-    auto funcInt8Ptr = irBuilder.CallIntrinsicGetVTableFunc(exceptionTi, idxOfError, idxOfPrintStackTrace);
+    auto funcInt8Ptr = irBuilder.CallIntrinsicGetVTableFunc(
+        exceptionTi, idxOfError, idxOfPrintStackTrace,
+        irBuilder.CreateTypeInfo(printStackTraceFuncNode->GetParentCustomTypeDef()->GetType()));
     auto meta =
         llvm::MDTuple::get(cgCtx.GetLLVMContext(), llvm::MDString::get(cgCtx.GetLLVMContext(), "std.core:Error"));
     funcInt8Ptr->setMetadata("IntroType", meta);

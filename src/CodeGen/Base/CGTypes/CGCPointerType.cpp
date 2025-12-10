@@ -49,7 +49,11 @@ llvm::Constant* CGCPointerType::GenTypeArgsOfTypeInfo()
     auto typeInfoPtrTy = CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext());
     auto p0i8 = llvm::Type::getInt8PtrTy(cgMod.GetLLVMContext());
 
-    std::vector<llvm::Constant*> constants{CGType::GetOrCreate(cgMod, DeRef(*genericArg))->GetOrCreateTypeInfo()};
+    auto elemCGType = CGType::GetOrCreate(cgMod, DeRef(*genericArg));
+    std::vector<llvm::Constant*> constants{elemCGType->GetOrCreateTypeInfo()};
+    if (elemCGType->IsStaticGI()) {
+        cgCtx.AddDependentPartialOrderOfTypes(constants[0], this->typeInfo);
+    }
 
     auto typeOfGenericArgsGV = llvm::ArrayType::get(typeInfoPtrTy, constants.size());
     auto typeInfoOfGenericArgs = llvm::cast<llvm::GlobalVariable>(cgMod.GetLLVMModule()->getOrInsertGlobal(

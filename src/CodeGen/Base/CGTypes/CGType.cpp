@@ -49,15 +49,6 @@ bool HasGenericTypeArg(const CHIR::Type& type)
     }
     return false;
 }
-
-bool CanMallocUseFixedSize(const CHIR::Type& chirType)
-{
-    if (!chirType.IsClass()) {
-        return true;
-    }
-    auto classDef = StaticCast<CHIR::ClassType>(chirType).GetClassDef();
-    return classDef->TestAttr(CHIR::Attribute::VIRTUAL) || !classDef->TestAttr(CHIR::Attribute::PUBLIC);
-}
 } // namespace
 
 CGType* CGTypeMgr::GetConcreteCGTypeFor(CGModule& cgMod, const CHIR::Type& chirType,
@@ -265,8 +256,8 @@ llvm::GlobalVariable* CGType::GetOrCreateTypeInfo()
     cgMod.GetCGContext().AddCodeGenAddedFuncsOrVars(chirType, tiName);
     CJC_ASSERT(typeInfo && "This type does not have a typeinfo GV, please check the caller.");
     typeInfo->addAttribute(GC_KLASS_ATTR);
-    if (CanMallocUseFixedSize(chirType)) {
-        typeInfo->addAttribute(GC_CAN_MALLOC_WITH_FIXED_SIZE);
+    if (!IsModifiableClass(chirType)) {
+        typeInfo->addAttribute(NOT_MODIFIABLE_CLASS_ATTR);
     }
     if (!typeInfo->hasInitializer()) {
         cgMod.DelayGenTypeInfo(this);
@@ -519,6 +510,21 @@ llvm::PointerType* CGType::GetOrCreateTypeInfoPtrType(llvm::LLVMContext& llvmCtx
     return CGType::GetOrCreateTypeInfoType(llvmCtx)->getPointerTo();
 }
 
+llvm::StructType* CGType::GetClassTTExtTypeVer1(llvm::LLVMContext& llvmCtx)
+{
+    auto type = llvm::StructType::getTypeByName(llvmCtx, "ext_class_type_ver_1");
+    if (type == nullptr) {
+        std::vector<llvm::Type*> containedTypes = {
+            llvm::Type::getInt8PtrTy(llvmCtx),
+            llvm::Type::getInt16Ty(llvmCtx),
+            llvm::Type::getInt32Ty(llvmCtx),
+            llvm::Type::getInt8Ty(llvmCtx)
+        };
+        type = llvm::StructType::create(llvmCtx, containedTypes, "ext_class_type_ver_1");
+    }
+    return type;
+}
+
 llvm::StructType* CGType::GetOrCreateTypeTemplateType(llvm::LLVMContext& llvmCtx)
 {
     auto typeTemplateType = llvm::StructType::getTypeByName(llvmCtx, "TypeTemplate");
@@ -550,15 +556,18 @@ llvm::StructType* CGType::GetOrCreateExtensionDefType(llvm::LLVMContext& llvmCtx
 {
     auto extensionDefType = llvm::StructType::getTypeByName(llvmCtx, "ExtensionDef");
     if (extensionDefType == nullptr) {
+        auto i16Ty = llvm::Type::getInt16Ty(llvmCtx);
         auto i32Ty = llvm::Type::getInt32Ty(llvmCtx);
         auto i8PtrTy = llvm::Type::getInt8PtrTy(llvmCtx);
         extensionDefType = llvm::StructType::create(llvmCtx, "ExtensionDef");
         std::vector<llvm::Type*> bodyVec(static_cast<size_t>(EXTENSION_DEF_FIELDS_NUM));
         bodyVec[static_cast<size_t>(TYPE_PARAM_COUNT)] = i32Ty;
         bodyVec[static_cast<size_t>(IS_INTERFACE_TI)] = llvm::Type::getInt8Ty(llvmCtx);
+        bodyVec[static_cast<size_t>(FLAG)] = llvm::Type::getInt8Ty(llvmCtx);
         bodyVec[static_cast<size_t>(TARGET_TYPE)] = i8PtrTy;
         bodyVec[static_cast<size_t>(INTERFACE_FN_OR_INTERFACE_TI)] = i8PtrTy;
         bodyVec[static_cast<size_t>(FUNC_TABLE)] = i8PtrTy;
+        bodyVec[static_cast<size_t>(FUNC_TABLE_SIZE)] = i16Ty;
         bodyVec[static_cast<size_t>(WHERE_CONDITION_FN)] = i8PtrTy;
         SetStructTypeBody(extensionDefType, bodyVec);
     }
@@ -642,7 +651,7 @@ void CGType::GenTypeInfo()
     typeInfoVec[static_cast<size_t>(TYPEINFO_FIELDS_NUM)] = GenFieldsNumOfTypeInfo();
     typeInfoVec[static_cast<size_t>(TYPEINFO_FIELDS)] = GenFieldsOfTypeInfo();
     typeInfoVec[static_cast<size_t>(TYPEINFO_SIZE)] = GenSizeOfTypeInfo();
-    typeInfoVec[static_cast<size_t>(TYPEINFO_UUID)] = llvm::Constant::getNullValue(llvm::Type::getInt32Ty(llvmCtx));
+    typeInfoVec[static_cast<size_t>(TYPEINFO_UUID)] = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvmCtx), 0);
     typeInfoVec[static_cast<size_t>(TYPEINFO_ALIGN)] = GenAlignOfTypeInfo();
     typeInfoVec[static_cast<size_t>(TYPEINFO_SOURCE_GENERIC)] = GenSourceGenericOfTypeInfo();
     typeInfoVec[static_cast<size_t>(TYPEINFO_TYPE_ARGS_NUM)] = GenTypeArgsNumOfTypeInfo();

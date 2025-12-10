@@ -578,5 +578,42 @@ bool IsThisArgOfStructMethod(const CHIR::Value& chirValue)
     }
     return true;
 }
+
+bool IsModifiableClass(const CHIR::Type& chirTy)
+{
+    if (!chirTy.IsClass()) {
+        return false;
+    }
+    auto classDef = StaticCast<const CHIR::ClassType&>(chirTy).GetClassDef();
+    return classDef->IsClass() &&
+        !classDef->TestAttr(CHIR::Attribute::COMPILER_ADD) && !classDef->TestAttr(CHIR::Attribute::VIRTUAL);
+}
+
+bool IsSizeTrustedInCompileUnit(CGModule& cgMod, const CHIR::Type& chirTy)
+{
+    if (!IsModifiableClass(chirTy)) {
+        return false;
+    }
+    auto cgType = CGType::GetOrCreate(cgMod, &chirTy);
+    if (!cgType->GetSize()) {
+        return false;
+    }
+    auto typePackageName = StaticCast<const CHIR::ClassType&>(chirTy).GetClassDef()->GetPackageName();
+    auto compileUnitPkgName = cgMod.GetCGContext().GetCHIRPackage().GetName();
+    CJC_ASSERT(!typePackageName.empty() && !compileUnitPkgName.empty() && "Invalid package name.");
+    size_t pos = 0;
+    char ch = typePackageName[pos];
+    while (ch == compileUnitPkgName[pos]) {
+        if (ch == '.') {
+            return true;
+        }
+        ++pos;
+        if (pos == typePackageName.size() || pos == compileUnitPkgName.size()) {
+            return true;
+        }
+        ch = typePackageName[pos];
+    }
+    return false;
+}
 } // namespace CodeGen
 } // namespace Cangjie

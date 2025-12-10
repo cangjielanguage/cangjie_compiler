@@ -432,7 +432,9 @@ public:
     llvm::Instruction* CallGCWriteGenericPayload(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallGCReadGeneric(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallIntrinsicMTable(const std::vector<llvm::Value*>& parameters);
-    llvm::Instruction* CallIntrinsicGetVTableFunc(llvm::Value* ti, llvm::Value* introTypeIdx, llvm::Value* funcOffset);
+    llvm::Instruction* CallIntrinsicMethodOuterType(const std::vector<llvm::Value*>& parameters);
+    llvm::Instruction* CallIntrinsicGetVTableFunc(
+        llvm::Value* ti, llvm::Value* introTypeIdx, llvm::Value* funcOffset, llvm::Value* introTI);
     llvm::Instruction* CallIntrinsicAssignGeneric(const std::vector<llvm::Value*>& parameters);
 
     llvm::Value* CreateTypeInfoIsReferenceCall(llvm::Value* ti);

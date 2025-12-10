@@ -644,6 +644,7 @@ table ClassDef {
   isAnnotation: bool = false;
   superClass: uint32; // use types id
   abstractMethods: [AbstractMethodInfo];
+  allMethodMangledNames: [string];
 }
 
 enum CHIRExprKind: uint8 {

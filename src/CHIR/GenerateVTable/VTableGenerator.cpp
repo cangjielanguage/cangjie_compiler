@@ -349,6 +349,7 @@ void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableType& vtable)
     std::vector<FuncBase*> publicAndProtectedFuncs;
     CollectCurDefMethodsMayBeInVtable(*parentDef, publicAndProtectedFuncs);
 
+    std::unordered_map<std::string, VirtualFuncInfo> newMethodsInVTable;
     // update vtable
     // 1. visit all abstract methods in parent def
     for (auto abstractMethod : parentDef->GetAbstractMethods()) {
@@ -358,7 +359,7 @@ void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableType& vtable)
         auto funcInfo = CreateVirtualFuncInfo(abstractMethod, *parentDef->GetType(), replaceTable);
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
         if (maybeAddNewItemToVtable) {
-            AddNewItemToVTable(instParentTy, funcInfo, vtable);
+            newMethodsInVTable.emplace(abstractMethod.GetASTMangledName(), std::move(funcInfo));
         }
     }
 
@@ -371,7 +372,14 @@ void VTableGenerator::MergeVtable(ClassType& instParentTy, VTableType& vtable)
         auto funcInfo = CreateVirtualFuncInfo(*func, *parentType, replaceTable);
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
         if (maybeAddNewItemToVtable && IsVirtualFunction(*funcInfo.instance)) {
-            AddNewItemToVTable(instParentTy, funcInfo, vtable);
+            newMethodsInVTable.emplace(func->GetIdentifierWithoutPrefix(), std::move(funcInfo));
+        }
+    }
+    // 3. only for correct virtual method order
+    for (auto& name : parentDef->GetAllMethodMangledNames()) {
+        auto it = newMethodsInVTable.find(name);
+        if (it != newMethodsInVTable.end()) {
+            AddNewItemToVTable(instParentTy, it->second, vtable);
         }
     }
 }
@@ -488,9 +496,10 @@ std::vector<FuncBase*> VTableGenerator::CollectMethodsIncludeParentsMayBeInVtabl
     return methods;
 }
 
-std::vector<VirtualFuncInfo> VTableGenerator::CollectAllPublicAndProtectedMethods(const CustomTypeDef& curDef)
+std::unordered_map<std::string, VirtualFuncInfo> VTableGenerator::CollectAllPublicAndProtectedMethods(
+    const CustomTypeDef& curDef)
 {
-    std::vector<VirtualFuncInfo> allMethods;
+    std::unordered_map<std::string, VirtualFuncInfo> allMethods;
     std::unordered_map<const GenericType*, Type*> emptyTable;
     if (auto extendDef = DynamicCast<const ExtendDef*>(&curDef)) {
         auto brotherDefs = CollectBrotherDefs(*extendDef, builder);
@@ -503,7 +512,7 @@ std::vector<VirtualFuncInfo> VTableGenerator::CollectAllPublicAndProtectedMethod
                 auto parentType = func->GetParentCustomTypeOrExtendedType();
                 CJC_NULLPTR_CHECK(parentType);
                 auto funcInfo = CreateVirtualFuncInfo(*func, *parentType, replaceTable);
-                allMethods.emplace_back(funcInfo);
+                allMethods.emplace(func->GetIdentifierWithoutPrefix(), std::move(funcInfo));
             }
         }
     } else if (auto classDef = DynamicCast<ClassDef*>(&curDef)) {
@@ -515,7 +524,7 @@ std::vector<VirtualFuncInfo> VTableGenerator::CollectAllPublicAndProtectedMethod
             if (aMethod.attributeInfo.TestAttr(Attribute::PUBLIC) ||
                 aMethod.attributeInfo.TestAttr(Attribute::PROTECTED)) {
                 auto funcInfo = CreateVirtualFuncInfo(aMethod, *classDef->GetType(), emptyTable);
-                allMethods.emplace_back(funcInfo);
+                allMethods.emplace(aMethod.GetASTMangledName(), std::move(funcInfo));
             }
         }
     }
@@ -526,7 +535,7 @@ std::vector<VirtualFuncInfo> VTableGenerator::CollectAllPublicAndProtectedMethod
             auto parentType = func->GetParentCustomTypeOrExtendedType();
             CJC_NULLPTR_CHECK(parentType);
             auto funcInfo = CreateVirtualFuncInfo(*func, *parentType, emptyTable);
-            allMethods.emplace_back(funcInfo);
+            allMethods.emplace(func->GetIdentifierWithoutPrefix(), std::move(funcInfo));
         }
     }
 
@@ -571,16 +580,32 @@ void VTableGenerator::GenerateVTable(CustomTypeDef& customTypeDef)
     //   c. methods in current def, current extended def and current extended parent def
     // not include methods declared in current parent def, they have been handled in step 1
     auto publicAndProtectedMethods = CollectAllPublicAndProtectedMethods(customTypeDef);
-    for (auto funcInfo : publicAndProtectedMethods) {
+    std::unordered_map<std::string, VirtualFuncInfo> newMethodsInVTable;
+    for (auto& [name, funcInfo] : publicAndProtectedMethods) {
         auto maybeAddNewItemToVtable = UpdateVtable(funcInfo, vtable);
         if (!maybeAddNewItemToVtable) {
             continue;
         }
         if (funcInfo.instance == nullptr) {
-            AddNewItemToVTable(*StaticCast<ClassType*>(customTypeDef.GetType()), funcInfo, vtable);
+            newMethodsInVTable.emplace(name, std::move(funcInfo));
         } else if (customTypeDef.IsClassLike() && IsVirtualFunction(*funcInfo.instance)) {
-            auto srcParentType = StaticCast<ClassType*>(funcInfo.instance->GetParentCustomTypeOrExtendedType());
-            AddNewItemToVTable(*srcParentType, funcInfo, vtable);
+            newMethodsInVTable.emplace(name, std::move(funcInfo));
+        }
+    }
+    if (auto classDef = DynamicCast<ClassDef*>(&customTypeDef)) {
+        for (const auto& name : classDef->GetAllMethodMangledNames()) {
+            auto it = newMethodsInVTable.find(name);
+            if (it == newMethodsInVTable.end()) {
+                continue;
+            }
+            auto& funcInfo = it->second;
+            if (funcInfo.instance == nullptr) {
+                AddNewItemToVTable(*StaticCast<ClassType*>(customTypeDef.GetType()), funcInfo, vtable);
+            } else {
+                auto srcParentType =
+                    StaticCast<ClassType*>(funcInfo.instance->GetParentCustomTypeOrExtendedType());
+                AddNewItemToVTable(*srcParentType, funcInfo, vtable);
+            }
         }
     }
     UpdateInstanceAttr(vtable);

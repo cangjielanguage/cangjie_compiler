@@ -373,6 +373,7 @@ public:
 
     static std::string GetNameOfTypeInfoGV(const CHIR::Type& chirType);
     static std::string GetNameOfTypeTemplateGV(const CHIR::Type& chirType);
+    static llvm::StructType* GetClassTTExtTypeVer1(llvm::LLVMContext& llvmCtx);
 
 protected:
     CGType(CGModule& cgMod, CGContext& cgCtx, const CHIR::Type& chirType, CGTypeKind cgTypeKind = CGTypeKind::OTHERS);

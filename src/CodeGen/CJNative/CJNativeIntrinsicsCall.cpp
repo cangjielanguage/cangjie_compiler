@@ -696,11 +696,11 @@ llvm::Function* GetGCIntrinsicAlloc(const CGModule& cgMod)
 llvm::Value* IRBuilder2::CallClassIntrinsicAlloc(const CHIR::Type& type)
 {
     auto value = CallClassIntrinsicAlloc({CreateTypeInfo(type), GetLayoutSize_32(type)});
+    auto& llvmCtx = getContext();
     if (type.IsClass()) {
         CJC_ASSERT(!type.IsAutoEnvBase() && "Should not reach here, please check CHIR.");
         auto& classDef = *static_cast<const CHIR::ClassType&>(type).GetClassDef();
         std::vector<llvm::Metadata*> mallocType;
-        auto& llvmCtx = getContext();
         if (classDef.GetFinalizer()) {
             mallocType.emplace_back(llvm::MDString::get(llvmCtx, GC_FINALIZER_ATTR));
         }
@@ -711,6 +711,9 @@ llvm::Value* IRBuilder2::CallClassIntrinsicAlloc(const CHIR::Type& type)
             auto meta = llvm::MDTuple::get(llvmCtx, mallocType);
             value->setMetadata("MallocType", meta);
         }
+    }
+    if (IsSizeTrustedInCompileUnit(cgMod, type)) {
+        value->setMetadata("TrustedSize", llvm::MDNode::get(llvmCtx, {}));
     }
     return value;
 }
@@ -1275,11 +1278,21 @@ llvm::Instruction* IRBuilder2::CallIntrinsicMTable(const std::vector<llvm::Value
     return CreateCall(func, fixedParams);
 }
 
+llvm::Instruction* IRBuilder2::CallIntrinsicMethodOuterType(const std::vector<llvm::Value*>& parameters)
+{
+    CJC_ASSERT(parameters.size() == 3U);
+    llvm::Function* func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_get_method_outertype);
+    auto fixedParams = {
+        CreateBitCast(parameters[0], getInt8PtrTy()), CreateBitCast(parameters[1], getInt8PtrTy()), parameters[2]};
+    return CreateCall(func, fixedParams);
+}
+
 llvm::Instruction* IRBuilder2::CallIntrinsicGetVTableFunc(
-    llvm::Value* ti, llvm::Value* introTypeIdx, llvm::Value* funcOffset)
+    llvm::Value* ti, llvm::Value* introTypeIdx, llvm::Value* funcOffset, llvm::Value* introTI)
 {
     llvm::Function* func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_get_vtable_func);
-    return CreateCall(func, {CreateBitCast(ti, getInt8PtrTy()), introTypeIdx, funcOffset});
+    auto i8Ptr = getInt8PtrTy();
+    return CreateCall(func, {CreateBitCast(ti, i8Ptr), introTypeIdx, funcOffset, CreateBitCast(introTI, i8Ptr)});
 }
 
 // parameters = {i8 any addrspace* dst, i8 addrspace(1)* src, TypeInfo* ti}

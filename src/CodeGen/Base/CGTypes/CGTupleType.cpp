@@ -90,26 +90,10 @@ llvm::Constant* CGTupleType::GenOffsetsOfTypeInfo()
 
 llvm::Constant* CGTupleType::GenFieldsOfTypeInfo()
 {
-    auto p0i8 = llvm::Type::getInt8PtrTy(cgMod.GetLLVMContext());
-    std::vector<llvm::Constant*> fieldConstants;
     auto instanceMemberTypes = StaticCast<const CHIR::TupleType&>(chirType).GetElementTypes();
-    for (auto type : instanceMemberTypes) {
-        auto derefType = DeRef(*type);
-        (void)fieldConstants.emplace_back(CGType::GetOrCreate(cgMod, derefType)->GetOrCreateTypeInfo());
-    }
-
-    if (fieldConstants.empty()) {
-        return llvm::Constant::getNullValue(p0i8);
-    }
-
-    auto typeInfoPtrTy = CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext());
-    auto typeOfFieldsGV = llvm::ArrayType::get(typeInfoPtrTy, fieldConstants.size());
-    auto typeInfoOfFields = llvm::cast<llvm::GlobalVariable>(
-        cgMod.GetLLVMModule()->getOrInsertGlobal(CGType::GetNameOfTypeInfoGV(chirType) + ".fields", typeOfFieldsGV));
-    typeInfoOfFields->setInitializer(llvm::ConstantArray::get(typeOfFieldsGV, fieldConstants));
-    typeInfoOfFields->setLinkage(llvm::GlobalValue::LinkageTypes::PrivateLinkage);
-    typeInfoOfFields->addAttribute(CJTI_FIELDS_ATTR);
-    return llvm::ConstantExpr::getBitCast(typeInfoOfFields, p0i8);
+    auto fieldConstants = CGCustomType::GenTypeInfoConstantVectorForTypes(cgMod, instanceMemberTypes);
+    return CGCustomType::GenTypeInfoArray(
+        cgMod, CGType::GetNameOfTypeInfoGV(chirType) + ".fields", fieldConstants, CJTI_FIELDS_ATTR);
 }
 
 llvm::Constant* CGTupleType::GenSourceGenericOfTypeInfo()
@@ -134,7 +118,11 @@ llvm::Constant* CGTupleType::GenTypeArgsOfTypeInfo()
 
     std::vector<llvm::Constant*> constants;
     for (auto arg : genericArgs) {
-        (void)constants.emplace_back(CGType::GetOrCreate(cgMod, DeRef(*arg))->GetOrCreateTypeInfo());
+        auto elemCGType = CGType::GetOrCreate(cgMod, DeRef(*arg));
+        auto it = constants.emplace_back(elemCGType->GetOrCreateTypeInfo());
+        if (elemCGType->IsStaticGI()) {
+            cgCtx.AddDependentPartialOrderOfTypes(it, this->typeInfo);
+        }
     }
 
     auto typeOfGenericArgsGV = llvm::ArrayType::get(typeInfoPtrTy, constants.size());
