@@ -59,6 +59,7 @@ TARGET_DICTIONARY = {
     "ohos-x86_64": "x86_64-linux-ohos",
     "windows-x86_64": "x86_64-w64-mingw32",
     "ios-simulator-aarch64": "arm64-apple-ios11-simulator",
+    "ios-simulator-x86_64": "x86_64-apple-ios11-simulator",
     "ios-aarch64": "arm64-apple-ios11",
     "android-aarch64": "aarch64-linux-android31",
     "android31-aarch64": "aarch64-linux-android31",
@@ -124,6 +125,8 @@ def generate_cmake_defs(args):
             toolchain_file = "mingw_x86_64_toolchain.cmake"
         elif args.target == "arm64-apple-ios11-simulator":
             toolchain_file = "ios_simulator_arm64_toolchain.cmake"
+        elif args.target == "x86_64-apple-ios11-simulator":
+            toolchain_file = "ios_simulator_x86_64_toolchain.cmake"
         elif args.target == "arm64-apple-ios11":
             toolchain_file = "ios_arm64_toolchain.cmake"
         elif "aarch64-linux-android" in args.target:
