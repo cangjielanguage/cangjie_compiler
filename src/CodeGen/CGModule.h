@@ -218,7 +218,7 @@ public:
 
     std::unique_ptr<DIBuilder> diBuilder;
 
-    llvm::Constant* GenerateTypeNameConstantString(const std::string& typeMangledName, bool isWeakODR) const;
+    llvm::Constant* GenerateTypeNameConstantString(const std::string& typeMangledName, bool isWeakODR, const std::string& qualifiedName = "") const;
 
     llvm::Value* GenerateUnitTypeValue();
 

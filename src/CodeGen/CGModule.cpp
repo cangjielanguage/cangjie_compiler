@@ -496,11 +496,12 @@ void CGModule::InitDebugInfo()
     diBuilder->CreateNameSpace(GetCGContext().GetCurrentPkgName()); // Create current package as namespace.
 }
 
-llvm::Constant* CGModule::GenerateTypeNameConstantString(const std::string& typeMangledName, bool isWeakODR) const
+llvm::Constant* CGModule::GenerateTypeNameConstantString(const std::string& typeMangledName, bool isWeakODR, const std::string& qualifiedName) const
 {
     auto linkageType =
         isWeakODR ? llvm::GlobalValue::LinkageTypes::WeakODRLinkage : llvm::GlobalValue::LinkageTypes::PrivateLinkage;
-    auto strConstant = llvm::ConstantDataArray::getString(module->getContext(), typeMangledName);
+    auto strConstant =
+        llvm::ConstantDataArray::getString(module->getContext(), qualifiedName != "" ? qualifiedName : typeMangledName);
     auto globalValue = module->getOrInsertGlobal(typeMangledName + ".name", strConstant->getType());
     auto klassName = llvm::cast<llvm::GlobalVariable>(globalValue);
     klassName->setInitializer(strConstant);

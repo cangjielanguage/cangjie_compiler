@@ -639,5 +639,11 @@ bool IsSizeTrustedInCompileUnit(CGModule& cgMod, const CHIR::Type& chirTy)
     }
     return false;
 }
+
+void ReplaceDelimiterAfterOrgName(std::string& packageName) {
+    if (auto splitterIt = packageName.find("::"); splitterIt != std::string::npos) {
+        packageName.replace(splitterIt, 2U, "/");
+    }
+}
 } // namespace CodeGen
 } // namespace Cangjie
