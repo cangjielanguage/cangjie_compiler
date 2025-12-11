@@ -1462,19 +1462,27 @@ void ConvertPlatformMemberMethods(
     };
 
     for (auto decl : package->GetExtends()) {
+        // Skip non-platform extends
         if (!decl->TestAttr(CHIR::Attribute::PLATFORM)) {
             continue;
         }
+
         for (auto func : decl->GetMethods()) {
-            if (func->TestAttr(CHIR::Attribute::DESERIALIZED)) {
-                auto f = DynamicCast<Func*>(func);
-                bool hasBodyFromCommonPart = f && f->GetBody();
-                if (hasBodyFromCommonPart) {
-                    Visitor::Visit(
-                        *f, [](Expression&) { return VisitResult::CONTINUE; }, postVisit);
-                }
-                converter.VisitValue(*f);
+            // Skip non-deserialized functions
+            if (!func->TestAttr(CHIR::Attribute::DESERIALIZED)) {
+                continue;
             }
+
+            auto f = DynamicCast<Func*>(func);
+            if (!f) {
+                continue;
+            }
+
+            bool hasBodyFromCommonPart = f->GetBody();
+            if (hasBodyFromCommonPart) {
+                Visitor::Visit(*f, [](Expression&) { return VisitResult::CONTINUE; }, postVisit);
+            }
+            converter.VisitValue(*f);
         }
     }
 }
