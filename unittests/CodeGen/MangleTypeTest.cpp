@@ -6,7 +6,7 @@
 
 #include "CGTest.h"
 #include "cangjie/CHIR/IR/Type/Type.h"
-#include "cangjie/CodeGen/CGUtils.h"
+#include "../src/CodeGen/Utils/CGUtils.h"
 
 using TypeKind = Cangjie::CHIR::Type::TypeKind;
 using namespace Cangjie::CodeGen;
@@ -43,11 +43,11 @@ TEST_F(MangleTypeTest, CustomTypes)
     // construct a ClassType a.Alpha
     auto classDef = builder.CreateClass(defaultLoc, "Alpha", "_CN1a5AlphaE", "a", true, true);
     auto classTy = builder.GetType<ClassType>(classDef);
-    EXPECT_EQ(MangleType(*classTy), "_CCN1a5AlphaE");
+    EXPECT_EQ(MangleType(*classTy), "CN1a5AlphaE");
     // construct the StructType: a.SomeStruct
     auto structDef = builder.CreateStruct(defaultLoc, "Some", "_CN1a10SomeStructE", "a", true);
     auto structTy = builder.GetType<StructType>(structDef);
-    EXPECT_EQ(MangleType(*structTy), "Rrecord._CN1a10SomeStructE");
+    EXPECT_EQ(MangleType(*structTy), "RN1a10SomeStructE");
 }
 #endif
 
@@ -55,17 +55,17 @@ TEST_F(MangleTypeTest, FuncTypes)
 {
     // construct a funcTy (Int64, Int64) -> Int64
     auto funcTy = builder.GetType<FuncType>(std::vector<Type*>{int64Ty, int64Ty}, int64Ty);
-    EXPECT_EQ(MangleType(*funcTy), "lll");
+    EXPECT_EQ(MangleType(*funcTy), "F0lllE");
 }
 
 TEST_F(MangleTypeTest, TupleTypes)
 {
     // construct a tupleType (Int8, Int16, Int32)
     auto tupleTy = builder.GetType<TupleType>(std::vector<Type*>{int8Ty, int16Ty, int32Ty});
-    EXPECT_EQ(MangleType(*tupleTy), "T3_asiE");
+    EXPECT_EQ(MangleType(*tupleTy), "T2_asiE");
     // construct a tupleType ((Int8, Int16, Int32), Int64)
     auto nestedTupleTy = builder.GetType<TupleType>(std::vector<Type*>{tupleTy, int64Ty});
-    EXPECT_EQ(MangleType(*nestedTupleTy), "T2_T3_asiElE");
+    EXPECT_EQ(MangleType(*nestedTupleTy), "T1_T2_asiElE");
 }
 
 TEST_F(MangleTypeTest, RawArrayTypes)
@@ -73,7 +73,7 @@ TEST_F(MangleTypeTest, RawArrayTypes)
     // construct a RawArrayType Int8[3]
     auto rawArrayTy = builder.GetType<RawArrayType>(int8Ty, 3);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    EXPECT_EQ(MangleType(*rawArrayTy), "A3_aE");
+    EXPECT_EQ(MangleType(*rawArrayTy), "A2_a");
 #endif
 }
 

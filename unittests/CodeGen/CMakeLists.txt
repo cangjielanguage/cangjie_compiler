@@ -4,27 +4,25 @@
 #
 # See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-set(CANGJIE_CG_DEP_OBJECTS
-    $<TARGET_OBJECTS:CangjieCodeGen>
-    $<TARGET_OBJECTS:CangjieCHIRBase>
-    )
-
 file(GLOB CG_TEST_SRC *.cpp)
-add_executable(CGTests
+
+add_executable(CodeGenTests
     ${CG_TEST_SRC}
-    ${CANGJIE_CG_DEP_OBJECTS}
     ${CMAKE_SOURCE_DIR}/src/Basic/Print.cpp)
+
 target_link_libraries(
-    CGTests
-    ${LLVM_LIBS}
+    CodeGenTests
+    cangjie-frontend
     GTest::gtest
     GTest::gtest_main)
 
-add_test(NAME CGTests COMMAND CGTests)
+add_test(NAME CodeGenTests COMMAND CodeGenTests)
 
 if(CANGJIE_DOWNLOAD_DEPS)
-    add_dependencies(CGTests binary-deps)
+    add_dependencies(CodeGenTests binary-deps)
 elseif(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
-    add_dependencies(CGTests cjnative)
+    add_dependencies(CodeGenTests cjnative)
 endif()
-target_include_directories(CGTests PRIVATE ${LLVM_INCLUDE_DIRS})
+
+target_include_directories(CodeGenTests PRIVATE ${CMAKE_SOURCE_DIR}/src/CodeGen)
+target_include_directories(CodeGenTests PRIVATE ${LLVM_INCLUDE_DIRS})
