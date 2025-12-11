@@ -551,6 +551,12 @@ private:
     void ReArrangeForInRangeExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
     void ReArrangeForInIterExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
     void ReArrangeForInStringExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
+    OwnedPtr<AST::TryExpr> CreateTryInFinally(
+        ASTContext& ctx, AST::ClassDecl& exceptionDecl, AST::FuncTy& someTy, AST::VarDecl& x, AST::VarDecl& freshExc);
+    OwnedPtr<AST::TryExpr> CreateTryCatchFinally(ASTContext& ctx, AST::ClassDecl& exceptionDecl, AST::FuncTy& someTy,
+        AST::VarDecl& x, AST::VarDecl& freshExc, OwnedPtr<AST::Block> tryBlock);
+    OwnedPtr<AST::Block> CreateOuterTryBlock(ASTContext& ctx, AST::ClassDecl& exceptionDecl, AST::FuncTy& someTy,
+        AST::EnumTy& noneTy, std::vector<OwnedPtr<AST::VarDecl>>& resourceSpec, OwnedPtr<AST::Block> block);
     void DesugarTryWithResourcesExpr(ASTContext& ctx, AST::TryExpr& te);
 
     OwnedPtr<AST::Expr> ConstructOptionMatch(OwnedPtr<AST::Expr> selector, OwnedPtr<AST::Block> someExpr,
@@ -1291,13 +1297,6 @@ private:
      * Check non-static member accessed by static variable.
      */
     void CheckStaticVarAccessNonStatic(const AST::VarDecl& vd);
-
-    /**
-     * Filter out the targets without access rights in the searched targets.
-     * @param curComposite Represents the position of the referrer.
-     * NOTICE: Whether the modifier will be downgraded in spec is not yet determined.
-     */
-    bool IsLegalAccess(AST::Symbol* curComposite, const AST::Decl& d, const AST::Node& node) const;
 
     /**
      * Check non-function access control of the objective target. The target cannot be a

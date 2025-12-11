@@ -82,7 +82,7 @@ OwnedPtr<MatchExpr> CreateMatchExpr(FuncTy& someTy, VarDecl& freshExc, OwnedPtr<
 }
 
 // Create `x.isClosed()` or `x.close()`.
-OwnedPtr<CallExpr> CreateCallExpr(VarDecl& vd, const std::string& func)
+OwnedPtr<CallExpr> CreateCallExpr(VarDecl& vd, Decl& func)
 {
     auto baseFunc = CreateMemberAccess(CreateRefExpr(vd), func);
     if (baseFunc->target != nullptr && baseFunc->target->astKind == ASTKind::FUNC_DECL) {
@@ -94,6 +94,8 @@ OwnedPtr<CallExpr> CreateCallExpr(VarDecl& vd, const std::string& func)
     CopyBasicInfo(&vd, callExpr.get());
     return callExpr;
 }
+
+} // namespace
 
 /** Create the following try-catch expression.
  *      try {
@@ -107,15 +109,34 @@ OwnedPtr<CallExpr> CreateCallExpr(VarDecl& vd, const std::string& func)
  *          }
  *      }
  */
-OwnedPtr<TryExpr> CreateTryInFinally(ClassDecl& exceptionDecl, FuncTy& someTy, VarDecl& x, VarDecl& freshExc)
+OwnedPtr<TryExpr> TypeChecker::TypeCheckerImpl::CreateTryInFinally(
+    ASTContext& ctx, ClassDecl& exceptionDecl, FuncTy& someTy, VarDecl& x, VarDecl& freshExc)
 {
     CJC_ASSERT(Ty::IsTyCorrect(freshExc.ty) && freshExc.ty->typeArgs.size() == 1);
     auto vp = CreateVarPattern(V_COMPILER, freshExc.ty->typeArgs.front());
     // `if`
     std::vector<OwnedPtr<Node>> thenBlockNodes;
-    (void)thenBlockNodes.emplace_back(CreateCallExpr(x, "close"));
-    auto ifExpr = CreateIfExpr(
-        CreateUnaryExpr(CreateCallExpr(x, "isClosed"), TokenKind::NOT), CreateBlock(std::move(thenBlockNodes)));
+
+    auto findFunc = [this, &ctx, &x](const std::string& fieldName) -> Ptr<Decl> {
+        LookupInfo info{x.ty, x.curFile, true, true, false};
+        std::vector<Ptr<Decl>> decls = FieldLookup(ctx, Ty::GetDeclPtrOfTy(x.ty), fieldName, info);
+        Ptr<Decl> func = nullptr;
+        for (auto& decl : decls) {
+            if (auto funcDecl = DynamicCast<FuncDecl*>(decl); funcDecl && funcDecl->funcBody &&
+                !funcDecl->funcBody->paramLists.empty() && funcDecl->funcBody->paramLists.front()->params.size() == 0) {
+                func = decl;
+                break;
+            }
+        }
+        // The error should have been reported in type checking phase.
+        CJC_NULLPTR_CHECK(func);
+        return func;
+    };
+
+    (void)thenBlockNodes.emplace_back(CreateCallExpr(x, *findFunc("close")));
+
+    auto ifExpr = CreateIfExpr(CreateUnaryExpr(CreateCallExpr(x, *findFunc("isClosed")), TokenKind::NOT),
+        CreateBlock(std::move(thenBlockNodes)));
     // `match`
     auto matchExp = CreateMatchExpr(someTy, freshExc, CreateThrowExpr(*vp));
     // `v: Exception`
@@ -156,8 +177,8 @@ OwnedPtr<TryExpr> CreateTryInFinally(ClassDecl& exceptionDecl, FuncTy& someTy, V
  *           }
  *       }
  */
-OwnedPtr<TryExpr> CreateTryCatchFinally(
-    ClassDecl& exceptionDecl, FuncTy& someTy, VarDecl& x, VarDecl& freshExc, OwnedPtr<Block> tryBlock)
+OwnedPtr<TryExpr> TypeChecker::TypeCheckerImpl::CreateTryCatchFinally(
+    ASTContext& ctx, ClassDecl& exceptionDecl, FuncTy& someTy, VarDecl& x, VarDecl& freshExc, OwnedPtr<Block> tryBlock)
 {
     CJC_ASSERT(Ty::IsTyCorrect(freshExc.ty) && freshExc.ty->IsEnum() && freshExc.ty->typeArgs.size() == 1);
     auto vp = CreateVarPattern(V_COMPILER, freshExc.ty->typeArgs.front());
@@ -171,7 +192,7 @@ OwnedPtr<TryExpr> CreateTryCatchFinally(
     std::vector<OwnedPtr<Node>> catchBlockNodes;
     (void)catchBlockNodes.emplace_back(std::move(assignExpr));
     std::vector<OwnedPtr<Node>> finallyBlockNodes;
-    (void)finallyBlockNodes.emplace_back(CreateTryInFinally(exceptionDecl, someTy, x, freshExc));
+    (void)finallyBlockNodes.emplace_back(CreateTryInFinally(ctx, exceptionDecl, someTy, x, freshExc));
     (void)finallyBlockNodes.emplace_back(CreateMatchExpr(someTy, freshExc, CreateUnitExpr()));
     auto tryExpr = MakeOwnedNode<TryExpr>();
     CopyBasicInfo(tryBlock.get(), tryExpr.get());
@@ -183,8 +204,8 @@ OwnedPtr<TryExpr> CreateTryCatchFinally(
 }
 
 // Create the outermost try-block.
-OwnedPtr<Block> CreateOuterTryBlock(ClassDecl& exceptionDecl, FuncTy& someTy, EnumTy& noneTy,
-    std::vector<OwnedPtr<VarDecl>>& resourceSpec, OwnedPtr<Block> block)
+OwnedPtr<Block> TypeChecker::TypeCheckerImpl::CreateOuterTryBlock(ASTContext& ctx, ClassDecl& exceptionDecl,
+    FuncTy& someTy, EnumTy& noneTy, std::vector<OwnedPtr<VarDecl>>& resourceSpec, OwnedPtr<Block> block)
 {
     auto tryBlock = std::move(block);
     for (auto iter = resourceSpec.rbegin(); iter != resourceSpec.rend(); ++iter) {
@@ -192,7 +213,7 @@ OwnedPtr<Block> CreateOuterTryBlock(ClassDecl& exceptionDecl, FuncTy& someTy, En
         auto freshExc = CreateVarDecl(RESOURCE_NAME, std::move(noneRef));
         freshExc->isVar = true;
         auto x = std::move(*iter);
-        auto tryCatchFinally = CreateTryCatchFinally(exceptionDecl, someTy, *x, *freshExc, std::move(tryBlock));
+        auto tryCatchFinally = CreateTryCatchFinally(ctx, exceptionDecl, someTy, *x, *freshExc, std::move(tryBlock));
         std::vector<OwnedPtr<Node>> tryBlockNodes;
         (void)tryBlockNodes.emplace_back(std::move(freshExc));
         (void)tryBlockNodes.emplace_back(std::move(x));
@@ -202,8 +223,6 @@ OwnedPtr<Block> CreateOuterTryBlock(ClassDecl& exceptionDecl, FuncTy& someTy, En
     resourceSpec.clear();
     return tryBlock;
 }
-
-} // namespace
 
 /**
  * *************** before desugar ***************
@@ -262,7 +281,7 @@ void TypeChecker::TypeCheckerImpl::DesugarTryWithResourcesExpr(ASTContext& ctx, 
         (void)te.tryBlock->body.emplace_back(CreateUnitExpr(unitTy));
         te.tryBlock->ty = unitTy;
     }
-    auto tryBlock = CreateOuterTryBlock(*exceptionDecl, *someTy, *noneTy, te.resourceSpec, std::move(te.tryBlock));
+    auto tryBlock = CreateOuterTryBlock(ctx, *exceptionDecl, *someTy, *noneTy, te.resourceSpec, std::move(te.tryBlock));
     // Only try-block needs `Synthesize`. `catch` and `finally` were checked by `SynTryWithResourcesExpr`.
     // And they will be moved to the desugar try expression.
     SynthesizeWithoutRecover(ctx, tryBlock.get());
