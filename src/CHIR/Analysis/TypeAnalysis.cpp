@@ -30,7 +30,11 @@ std::optional<std::unique_ptr<TypeValue>> TypeValue::Join(const TypeValue& rhs) 
             return nullptr;
         }
     } else {
-        return std::nullopt;
+        if (this->kind == DevirtualTyKind::EXACTLY && rhs.kind == DevirtualTyKind::SUBTYPE_OF) {
+            return std::make_unique<TypeValue>(DevirtualTyKind::SUBTYPE_OF, this->baseLineType); 
+        } else {
+            return std::nullopt;
+        }
     }
 }
 
