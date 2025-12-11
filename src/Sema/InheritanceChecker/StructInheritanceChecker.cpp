@@ -30,6 +30,7 @@
 #include "cangjie/Modules/ModulesUtils.h"
 #include "cangjie/Sema/TestManager.h"
 #include "cangjie/Sema/TypeManager.h"
+#include "NativeFFI/Java/AfterTypeCheck/Utils.h"
 
 #include "Diags.h"
 #include "TypeCheckUtil.h"
@@ -229,32 +230,6 @@ bool CompMemberSignatureByPosAndTy(Ptr<const MemberSignature> m1, Ptr<const Memb
     return CompTyByNames(m1->ty, m2->ty);
 }
 
-/**
- * precondition: instance methods must be merged
- */
-void GenerateNativeFFIJavaMirrorSyntheticWrapper(
-    InheritableDecl& decl, const MemberMap& interfaceMembers, const MemberMap& instanceMembers)
-{
-    if (!Interop::Java::IsSynthetic(decl)) {
-        return;
-    }
-    auto cd = StaticCast<ClassDecl*>(&decl);
-    Interop::Java::GenerateSyntheticClassMemberStubs(*cd, interfaceMembers, instanceMembers);
-}
-
-/**
- * precondition: instance methods must be merged
- */
-void GenerateNativeFFIObjCMirrorSyntheticWrapper(
-    InheritableDecl& decl, const MemberMap& interfaceMembers, const MemberMap& instanceMembers)
-{
-    if (!Interop::ObjC::IsSyntheticWrapper(decl)) {
-        return;
-    }
-    auto cd = StaticCast<ClassDecl*>(&decl);
-    Interop::ObjC::GenerateSyntheticClassMemberStubs(*cd, interfaceMembers, instanceMembers);
-}
-
 } // namespace
 
 namespace Cangjie {
@@ -305,6 +280,26 @@ void TypeChecker::TypeCheckerImpl::CheckInheritance(Package& pkg)
 {
     StructInheritanceChecker checker(diag, typeManager, pkg, importManager, ci->invocation.globalOptions);
     checker.Check();
+
+    auto movedMembers = checker.MoveStructInheritedMembers();
+    // Ensure javaCache is empty before moving in (it should be if called at the correct point in pipeline).
+    CJC_ASSERT_WITH_MSG(this->structMemberMap.empty(),
+        "structMemberMap should be empty when moving inherited members");
+
+    this->structMemberMap = std::move(movedMembers);
+}
+
+/**
+* Moves stored structInheritedMembers out of the StructInheritanceChecker.
+* After move, this instance must not be used again.
+*
+* NOTE: This can only be called once after check phase and before destruction.
+*/
+std::unordered_map<Ptr<const InheritableDecl>, MemberMap> StructInheritanceChecker::MoveStructInheritedMembers()
+{
+    auto out = std::move(structInheritedMembers);
+    structInheritedMembers.clear(); // The standard does not guarantee to leave `structInheritedMembers` empty
+    return out;
 }
 
 void StructInheritanceChecker::Check()
@@ -312,8 +307,8 @@ void StructInheritanceChecker::Check()
     if (pkg.TestAnyAttr(Attribute::IMPORTED, Attribute::TOOL_ADD)) {
         return;
     }
-    std::vector<Ptr<InheritableDecl>> structDecls;
-    std::vector<Ptr<ExtendDecl>> extendDecls;
+    std::vector<Ptr<const InheritableDecl>> structDecls;
+    std::vector<Ptr<const ExtendDecl>> extendDecls;
     Walker(&pkg, [&structDecls, &extendDecls](auto node) {
         if (NeedCheck(*node)) {
             if (node->astKind == ASTKind::EXTEND_DECL) {
@@ -349,7 +344,7 @@ void StructInheritanceChecker::Check()
     CheckInstDupFuncsInNominalDecls();
 }
 
-void StructInheritanceChecker::CheckMembersWithInheritedDecls(InheritableDecl& decl)
+void StructInheritanceChecker::CheckMembersWithInheritedDecls(const InheritableDecl& decl)
 {
     if (structInheritedMembers.count(&decl) > 0) {
         return;
@@ -365,8 +360,6 @@ void StructInheritanceChecker::CheckMembersWithInheritedDecls(InheritableDecl& d
     for (auto& interface : interfaceMembers) {
         CheckExtendExportDependence(decl, interface.second, visibleExtendMembers);
     }
-    GenerateNativeFFIJavaMirrorSyntheticWrapper(decl, interfaceMembers, instanceMembers);
-    GenerateNativeFFIObjCMirrorSyntheticWrapper(decl, interfaceMembers, instanceMembers);
     // 1. Merge & check members inherited in from super class or extended type of extend decl first.
     for (auto& member : decl.GetMemberDecls()) {
         if (!Ty::IsTyCorrect(member->ty) || !member->outerDecl || member->TestAttr(Attribute::CONSTRUCTOR)) {
@@ -897,6 +890,33 @@ void StructInheritanceChecker::DiagnoseForInheritedInterfaces(
     }
 }
 
+/**
+ * Diagnoses unimplemented interface members and abstract methods in structs/classes.
+ * 
+ * This method identifies members that should be implemented but are not, according to inheritance rules.
+ * 
+ * CHECK EXCLUSIONS (skips checking for):
+ * 1. Foreign structs (marked with FOREIGN attribute)
+ * 2. Mirror structs (marked with OBJ_C_MIRROR attribute)
+ * 
+ * MEMBER EXCLUSIONS (members that are skipped):
+ * 1. Non-inheritable members (non-properties, non-functions)
+ * 2. Members defined in extend declarations
+ * 3. Built-in operator functions in extend declarations
+ * 4. Common interface members with no body (IsCommonWithoutDefault)
+ * 5. Members defined in foreign types (member.decl->outerDecl has FOREIGN attribute)
+ * 6. Abstract members from abstract classes in extend declarations
+ * 7. Abstract members from interfaces inherited by extend declarations
+ * 
+ * UNIMPLEMENTED MEMBER DETECTION RULES:
+ * - An abstract member is unimplemented if:
+ *   * The member has ABSTRACT attribute
+ *   * The containing type is NOT abstract AND NOT an interface
+ *   * The member's outerDecl is the struct being checked
+ * 
+ * @param members Map of all members in the struct
+ * @param structDecl The struct/class/interface/extend being checked
+ */
 void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMap& members, const Decl& structDecl)
 {
     // Do not check unimplemented function for:
@@ -1413,9 +1433,9 @@ void StructInheritanceChecker::CheckMutModifierCompatible(const MemberSignature&
 }
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-std::vector<Ptr<ExtendDecl>> StructInheritanceChecker::GetAllNeedCheckExtended()
+std::vector<Ptr<const ExtendDecl>> StructInheritanceChecker::GetAllNeedCheckExtended()
 {
-    std::vector<Ptr<ExtendDecl>> needCheckExtendDecls = {};
+    std::vector<Ptr<const ExtendDecl>> needCheckExtendDecls = {};
     // If the extend decls are all imported from same package, do not check their inheritance again.
     auto filter = [&needCheckExtendDecls](const std::set<Ptr<ExtendDecl>> extends) -> void {
         std::unordered_set<std::string> pkgNames;

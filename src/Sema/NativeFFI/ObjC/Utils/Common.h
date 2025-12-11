@@ -17,6 +17,7 @@
 #include "cangjie/AST/Node.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Utils/SafePointer.h"
+#include "InheritanceChecker/MemberSignature.h"
 
 namespace Cangjie::Interop::ObjC {
 
@@ -31,6 +32,7 @@ Ptr<AST::FuncDecl> GetNativeHandleGetter(const AST::ClassLikeDecl& target);
 Ptr<AST::ClassDecl> GetSyntheticWrapper(const ImportManager& importManager, const AST::ClassLikeDecl& target);
 Ptr<AST::FuncDecl> GetFinalizer(const AST::ClassDecl& target);
 bool IsSyntheticWrapper(const AST::Decl& decl);
+void GenerateSyntheticClassAbstractMemberImplStubs(AST::ClassDecl& synthetic, const MemberMap& members);
 
 } // namespace Cangjie::Interop::ObjC
 

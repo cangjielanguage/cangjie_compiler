@@ -58,7 +58,7 @@ std::pair<Ptr<Ty>, Ptr<Decl>> GetRealReferenceType(const Node& node)
 } // namespace
 
 void StructInheritanceChecker::CheckInstMemberSignatures(
-    InheritableDecl& decl, const std::vector<Ptr<Ty>>& instTys)
+    const InheritableDecl& decl, const std::vector<Ptr<Ty>>& instTys)
 {
     if (instTriggerInfos.empty()) {
         return;

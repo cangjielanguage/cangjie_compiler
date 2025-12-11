@@ -22,18 +22,19 @@
 #include "NativeFFI/ObjC/Utils/InteropLibBridge.h"
 #include "NativeFFI/ObjC/Utils/NameGenerator.h"
 #include "NativeFFI/ObjC/Utils/TypeMapper.h"
+#include "InheritanceChecker/MemberSignature.h"
 
 namespace Cangjie::Interop::ObjC {
 
 struct InteropContext {
     explicit InteropContext(
         AST::Package& pkg, TypeManager& typeManager, ImportManager& importManager, DiagnosticEngine& diag,
-        const BaseMangler& mangler,
-        const std::string& cjLibOutputPath)
+        const BaseMangler& mangler, const std::string& cjLibOutputPath,
+        const std::unordered_map<Ptr<const AST::InheritableDecl>, MemberMap>& structMemberSignatures)
         : pkg(pkg), diag(diag), typeManager(typeManager), importManager(importManager), bridge(importManager, diag),
           typeMapper(bridge, typeManager), mangler(mangler), nameGenerator(mangler),
           factory(bridge, typeManager, nameGenerator, typeMapper, importManager),
-          cjLibOutputPath(cjLibOutputPath)
+          cjLibOutputPath(cjLibOutputPath), structMemberSignatures(structMemberSignatures)
     {
     }
 
@@ -60,6 +61,7 @@ struct InteropContext {
     NameGenerator nameGenerator;
     ASTFactory factory;
     const std::string& cjLibOutputPath;
+    const std::unordered_map<Ptr<const AST::InheritableDecl>, MemberMap>& structMemberSignatures;
 };
 
 } // namespace Cangjie::Interop::ObjC

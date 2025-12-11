@@ -168,6 +168,14 @@ private:
 };
 
 /**
+ * Inserts stubs for members of synthetic wrapper classes.
+ */
+class GenerateInSyntheticWrappers : public Handler<GenerateInSyntheticWrappers, InteropContext> {
+public:
+    void HandleImpl(InteropContext& ctx);
+};
+
+/**
  * Desugars all members of every @ObjCMirror declarations.
  * Methods are desugared as follows:
  * 1. If method returns @ObjCMirror/@ObjCImpl value:
