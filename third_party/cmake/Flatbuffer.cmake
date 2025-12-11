@@ -21,10 +21,10 @@ else()
     message(STATUS "Set flatbuffers REPOSITORY_PATH: ${REPOSITORY_PATH}")
     set(FLATBUFFERS_DOWNLOAD_ARGS
         GIT_REPOSITORY ${REPOSITORY_PATH}
-        GIT_TAG weekly_20251201
+        GIT_TAG a28912875aa5e275f4b98d9145ac58131658f81a
         GIT_PROGRESS ON
         GIT_CONFIG ${GIT_ARGS}
-        GIT_SHALLOW ON)
+        GIT_SHALLOW OFF)
 endif()
 
 ExternalProject_Add(
