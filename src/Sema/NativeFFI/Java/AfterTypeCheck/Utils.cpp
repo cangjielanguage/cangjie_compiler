@@ -548,7 +548,13 @@ ArrayOperationKind GetArrayOperationKind(Decl& decl)
     return ArrayOperationKind::GET;
 }
 
-std::string GetJavaPackage(const Decl& decl)
+std::string GetJavaPackageOrCJPackage(const Decl& decl)
+{
+    auto res = GetJavaPackageOrEmpty(decl);
+    return res.has_value()? res.value() : decl.GetFullPackageName();
+}
+
+std::optional<std::string> GetJavaPackageOrEmpty(const Decl& decl)
 {
     for (auto& anno : decl.annotations) {
         if (anno->kind != AnnotationKind::JAVA_MIRROR && anno->kind != AnnotationKind::JAVA_IMPL) {
@@ -568,12 +574,12 @@ std::string GetJavaPackage(const Decl& decl)
         if (beforeClassNamePos != std::string::npos) {
             fqname.erase(beforeClassNamePos);
         } else {
-            return "";
+            return std::nullopt;
         }
         return fqname;
     }
 
-    return decl.GetFullPackageName();
+    return std::nullopt;
 }
 
 void MangleJNIName(std::string& name)

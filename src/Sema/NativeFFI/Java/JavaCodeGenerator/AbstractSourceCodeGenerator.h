@@ -23,7 +23,6 @@ using namespace Cangjie::AST;
 
 class AbstractSourceCodeGenerator {
 public:
-    explicit AbstractSourceCodeGenerator(const std::string& outputFilePath);
     AbstractSourceCodeGenerator(const std::string& outputFolderPath, const std::string& outputFileName);
     virtual ~AbstractSourceCodeGenerator() = default;
 

@@ -541,7 +541,7 @@ void TypeChecker::TypeCheckerImpl::PerformDesugarAfterTypeCheck(ASTContext& ctx,
 {
     Interop::Java::JavaInteropManager jim(importManager, typeManager, diag, *ci->mangler,
         ci->invocation.globalOptions.outputJavaGenDir, ci->invocation.globalOptions.output,
-        ci->invocation.globalOptions.targetInteropLanguage);
+        ci->invocation.globalOptions.targetInteropLanguage, ci->invocation.globalOptions.exportJavaPath);
 
     jim.CheckImplRedefinition(pkg);
     for (auto& file : pkg.files) {

@@ -191,9 +191,14 @@ struct DestructedJavaClassName {
 DestructedJavaClassName DestructJavaClassName(const ClassLikeDecl& decl);
 
 /**
- * Returns package of the decl or package specified in @JavaMirror as attribute (omitting class name)
+ * Returns package specified in @JavaMirror as attribute if not found then returns decl package
  */
-std::string GetJavaPackage(const Decl& decl);
+std::string GetJavaPackageOrCJPackage(const Decl& decl);
+
+/**
+ * Returns package specified in @JavaMirror as attribute
+ */
+ std::optional<std::string> GetJavaPackageOrEmpty(const Decl& decl);
 
 /**
  * Mangles java name with JNI correspondence
