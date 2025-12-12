@@ -47,6 +47,7 @@
 /src/Modules/ @Augus_Jan
 /src/Option/ @neilliuistaken
 /src/Parse/ @kkkkkkkbbbbbbb
+/src/Parse/NativeFFI @JasmineZhu
 /src/Parse/ParseQuote.cpp @mini-tang
 /src/Parse/ParseMacro.cpp @mini-tang
 /src/Sema/ @huohuixin
