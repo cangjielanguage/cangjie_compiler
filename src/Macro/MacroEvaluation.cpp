@@ -434,6 +434,23 @@ void ExpandBuildInMacro(TokenVector& attrTokens, MacroCall& macCall)
         replaceTokens(begin, buildInMacro, pos);
     }
 }
+
+void refreshNewTokensPosition(std::vector<Position>& originPos, TokenVector& tokensToParse)
+{
+    for (size_t i = 0; i < tokensToParse.size(); i++) {
+        originPos.emplace_back(tokensToParse[i].Begin());
+    }
+    for (size_t i = 1; i < tokensToParse.size(); i++) {
+        auto begin = tokensToParse[i - 1].End() + 1;
+        auto end = begin + tokensToParse[i].Value().size();
+        // The positions of the two quoest token must be connected together without any spaces in between
+        if (tokensToParse[i].kind == TokenKind::QUEST && tokensToParse[i - 1].kind == TokenKind::QUEST) {
+            begin = tokensToParse[i - 1].End();
+            end = begin + tokensToParse[i].Value().size();
+        }
+        tokensToParse[i].SetValuePos(tokensToParse[i].Value(), begin, end);
+    }
+}
 } // namespace
 
 bool MacroEvaluation::CheckAttrTokens(TokenVector& attrTokens, MacroCall& macCall)
@@ -584,14 +601,7 @@ void MacroEvaluation::CreateChildMacroCall(
     // and parser relay on position information to collect macro input tokens
     std::vector<Position> originPos;
     if (reEval) {
-        for (size_t i = 0; i < tokensToParse.size(); i++) {
-            originPos.emplace_back(tokensToParse[i].Begin());
-        }
-        for (size_t i = 1; i < tokensToParse.size(); i++) {
-            auto begin = tokensToParse[i - 1].End() + 1;
-            auto end = begin + tokensToParse[i].Value().size();
-            tokensToParse[i].SetValuePos(tokensToParse[i].Value(), begin, end);
-        }
+        refreshNewTokensPosition(originPos, tokensToParse);
     }
     Parser parser{tokensToParse, diag, ci->diag.GetSourceManager(), false,
         ci->invocation.globalOptions.compileCjd};
