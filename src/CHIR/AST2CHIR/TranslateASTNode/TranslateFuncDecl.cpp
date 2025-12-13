@@ -144,10 +144,6 @@ void Translator::SetRawMangledNameForIncrementalCompile(const AST::FuncDecl& ast
     } else {
         chirFunc.SetRawMangledName(astFunc.rawMangleName);
     }
-
-    if (parent != nullptr) {
-        chirFunc.SetParentRawMangledName(parent->rawMangleName);
-    }
 }
 
 bool NeedCreateDebugForFirstParam(const Func& func)

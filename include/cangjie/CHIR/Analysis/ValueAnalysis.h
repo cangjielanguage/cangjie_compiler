@@ -10,13 +10,14 @@
 #include "cangjie/CHIR/Analysis/ActiveStatePool.h"
 #include "cangjie/CHIR/Analysis/Utils.h"
 #include "cangjie/CHIR/Analysis/ValueDomain.h"
-#include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/IR/Package.h"
 #include "cangjie/CHIR/IR/Type/ClassDef.h"
 #include "cangjie/CHIR/IR/Type/EnumDef.h"
 #include "cangjie/CHIR/IR/Type/StructDef.h"
 #include "cangjie/CHIR/IR/Type/Type.h"
 #include "cangjie/CHIR/IR/Value/Value.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 #include <iostream>
 #include <utility>
@@ -1196,7 +1197,7 @@ private:
         }
         auto targetObj = globalState.CheckAbstractObjectRefBy(gv);
         CJC_NULLPTR_CHECK(targetObj);
-        if (gv->GetType()->GetRefDims() == 1) {
+        if (GetRefDims(*gv->GetType()) == 1) {
             state.PropagateWithoutChildren(value, targetObj, &globalState.programState);
             state.StoreGVChildrenState(value, targetObj);
         } else {

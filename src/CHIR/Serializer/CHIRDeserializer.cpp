@@ -1681,7 +1681,6 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     }
     obj.SetRawMangledName(buffer->rawMangledName()->str());
     obj.SetAnnoInfo(Create<AnnoInfo>(buffer->base()->annoInfo()));
-    obj.SetParentRawMangledName(buffer->parentName()->str());
     obj.AppendAttributeInfo(CreateAttr(buffer->base()->attributes()));
     if (compilePlatform) {
         obj.EnableAttr(Attribute::DESERIALIZED);
@@ -1719,7 +1718,7 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     // set identifier for convenient comparision.
     obj.identifier = buffer->base()->identifier()->str();
     if (buffer->isRetVal()) {
-        obj.SetRetValue();
+        obj.SetRetValue(true);
     }
 }
 

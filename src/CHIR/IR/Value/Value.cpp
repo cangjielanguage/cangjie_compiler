@@ -351,9 +351,9 @@ Debug* LocalVar::GetDebugExpr() const
     return nullptr;
 }
 
-void LocalVar::SetRetValue()
+void LocalVar::SetRetValue(bool flag)
 {
-    isRetValue = true;
+    this->isRetValue = flag;
 }
 
 std::string LocalVar::ToString() const
@@ -953,6 +953,11 @@ void FuncBody::SetReturnValue(LocalVar& ret)
     retValue = &ret;
 }
 
+void FuncBody::ClearReturnValueOnly()
+{
+    retValue = nullptr;
+}
+
 /**
  * @brief get a `LocalVar` represent the returned value of this FuncBody.
  */
@@ -1003,6 +1008,35 @@ const std::string& FuncBase::GetPackageName() const
 FuncType* FuncBase::GetFuncType() const
 {
     return StaticCast<FuncType*>(GetType());
+}
+
+/**
+ * @brief Replace the return value of this function and update the function type accordingly.
+ *
+ * This method updates the function's return type based on the new return value:
+ * - If `newRet` is nullptr, the function's return type is changed to Void.
+ * - If `newRet` is not nullptr, the function's return type is set to the base type
+ *   extracted from `newRet`'s RefType.
+ *
+ * Note: This is a base class implementation that only updates the function type.
+ * The derived class `Func` overrides this to also update the function body's return value.
+ *
+ * @param newRet The new return value LocalVar. If nullptr, the function will return Void.
+ *               Must be a RefType if not nullptr.
+ * @param builder The CHIRBuilder used to create or get the updated function type.
+ */
+void FuncBase::ReplaceReturnValue(LocalVar* newRet, CHIRBuilder& builder)
+{
+    auto curFuncType = GetFuncType();
+    if (newRet == nullptr) {
+        // Change return type to Void
+        ty = builder.GetType<FuncType>(curFuncType->GetParamTypes(), builder.GetVoidTy());
+    } else {
+        // Extract base type from RefType and set it as the new return type
+        CJC_ASSERT(newRet->GetType()->IsRef());
+        auto retType = StaticCast<RefType*>(newRet->GetType())->GetBaseType();
+        ty = builder.GetType<FuncType>(curFuncType->GetParamTypes(), retType);
+    }
 }
 
 size_t FuncBase::GetNumOfParams() const
@@ -1267,6 +1301,44 @@ void Func::DestroyFuncBody()
     RemoveBody();
 }
 
+/**
+ * @brief Replace the return value of this function and update both the function type and body.
+ *
+ * This method performs a complete replacement of the function's return value:
+ * 1. Updates the function type's return type (via base class implementation).
+ * 2. Clears the old return value's ret flag if it exists.
+ * 3. Updates the function body's return value:
+ *    - If `newRet` is nullptr, clears the return value (function returns Void).
+ *    - Otherwise, sets `newRet` as the new return value.
+ *
+ * This is typically used during optimization passes, such as when converting
+ * Unit return types to Void (see OptFuncRetType::Unit2Void).
+ *
+ * @param newRet The new return value LocalVar. If nullptr, the function will return Void
+ *               and the body's return value will be cleared. Must be a RefType if not nullptr.
+ * @param builder The CHIRBuilder used to create or get the updated function type.
+ */
+void Func::ReplaceReturnValue(LocalVar* newRet, CHIRBuilder& builder)
+{
+    // Update the function type's return type
+    FuncBase::ReplaceReturnValue(newRet, builder);
+    
+    // Clear the old return value's ret flag if it exists
+    auto oldRet = body.GetReturnValue();
+    if (oldRet != nullptr) {
+        oldRet->SetRetValue(false);
+    }
+    
+    // Update the function body's return value
+    if (newRet == nullptr) {
+        // Clear return value (function returns Void)
+        body.ClearReturnValueOnly();
+    } else {
+        // Set the new return value
+        SetReturnValue(*newRet);
+    }
+}
+
 BlockGroup* Func::GetBody() const
 {
     return body.GetBody();
@@ -1328,23 +1400,13 @@ bool Func::HasReturnValue() const
 
 void Func::SetReturnValue(LocalVar& ret)
 {
-    ret.SetRetValue();
+    ret.SetRetValue(true);
     body.SetReturnValue(ret);
 }
 
 LocalVar* Func::GetReturnValue() const
 {
     return body.GetReturnValue();
-}
-
-void Func::SetParentRawMangledName(const std::string& name)
-{
-    parentName = name;
-}
-
-const std::string& Func::GetParentRawMangledName() const
-{
-    return parentName;
 }
 
 uint64_t Func::GenerateBlockId()

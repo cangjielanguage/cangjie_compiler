@@ -771,5 +771,21 @@ Type* CreateBoxRefTypeIfNeed(Type& baseTy, CHIRBuilder& builder);
  * @return instantiated parent type when `instSubType` and `genericParentType` have parent-child relationship.
  */
 Type* GetInstParentType(Type& instSubType, Type& genericParentType, CHIRBuilder& builder);
+
+/**
+ * @brief Checks if a function's return type should be `Void`.
+ *
+ * @param func The function to check.
+ * @return True if the function's return type should be `Void`, false otherwise.
+ */
+bool ReturnTypeShouldBeVoid(const FuncBase& func);
+
+/**
+ * @brief Retrieves the reference dimensions of a type.
+ *
+ * @param type The type to retrieve the reference dimensions from.
+ * @return The reference dimensions of the type.
+ */
+uint64_t GetRefDims(const Type& type);
 } // namespace Cangjie::CHIR
 #endif

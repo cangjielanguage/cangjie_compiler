@@ -258,9 +258,6 @@ std::string FuncSymbolStr(const Func& func)
                << func.GetOriginalLambdaType()->ToString();
         }
     }
-    if (!func.GetParentRawMangledName().empty()) {
-        ss << " extendParentName: " << func.GetParentRawMangledName();
-    }
     auto funcAnno = func.GetAnnoInfo();
     if (funcAnno.IsAvailable()) {
         ss << " funcAnnoInfo: " << funcAnno.mangledName;

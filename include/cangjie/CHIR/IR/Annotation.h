@@ -140,7 +140,7 @@ public:
     {
         std::map<Cangjie::Linkage, std::string> linkToString = {{Cangjie::Linkage::EXTERNAL, "external"},
             {Cangjie::Linkage::WEAK_ODR, "weak_odr"}, {Cangjie::Linkage::INTERNAL, "internal"},
-            {Cangjie::Linkage::LINKONCE_ODR, "linkonce_odr"}};
+            {Cangjie::Linkage::LINKONCE_ODR, "linkonce_odr"}, {Cangjie::Linkage::EXTERNAL_WEAK, "external_weak"}};
         return "linkType: " + linkToString[linkType];
     }
 

@@ -358,12 +358,6 @@ public:
     /** @brief Check whether two Type instances are equal. */
     virtual bool operator==(const Type& other) const;
 
-    /** @brief Get the nested levels of nested reference type. */
-    uint8_t GetRefDims() const
-    {
-        return refDims;
-    }
-
     std::vector<Type*> GetTypeArgs() const
     {
         return argTys;
@@ -424,7 +418,6 @@ protected:
      */
     std::vector<Type*> argTys;
     TypeKind kind : 8;  // The current base type of this type.
-    uint8_t refDims{0}; // The nested reference levels, default 0 indicate non-reference type.
 };
 
 class BuiltinType : public Type {
@@ -853,8 +846,6 @@ private:
     ~EnumType() override = default;
     friend class CHIRContext;
 
-    bool isBoxed = false; // Annotation: indicate EnumType is boxed.
-
     bool CheckIsBoxed(const EnumType& original,
         Type& curType, CHIRBuilder& builder, bool doCheck, std::unordered_set<Type*>& visited);
 };
@@ -909,7 +900,6 @@ private:
     explicit RefType(Type* baseType) : Type(TypeKind::TYPE_REFTYPE)
     {
         this->argTys.emplace_back(baseType);
-        this->refDims = static_cast<uint8_t>(baseType->GetRefDims() + static_cast<uint8_t>(1));
     }
     ~RefType() override = default;
     friend class CHIRContext;

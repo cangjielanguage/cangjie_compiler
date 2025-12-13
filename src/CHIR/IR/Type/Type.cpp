@@ -154,7 +154,7 @@ Type* Type::StripAllRefs() const
 
 bool Type::IsReferenceTypeWithRefDims(size_t dims) const
 {
-    if (refDims != dims) {
+    if (GetRefDims(*this) != dims) {
         return false;
     }
     return StripAllRefs()->IsReferenceType();
@@ -162,7 +162,7 @@ bool Type::IsReferenceTypeWithRefDims(size_t dims) const
 
 bool Type::IsValueOrGenericTypeWithRefDims(size_t dims) const
 {
-    if (refDims != dims) {
+    if (GetRefDims(*this) != dims) {
         return false;
     }
     auto strippedTy = StripAllRefs();

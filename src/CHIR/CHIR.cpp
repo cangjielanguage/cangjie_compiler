@@ -39,6 +39,7 @@
 #include "cangjie/CHIR/Transformation/SanitizerCoverage.h"
 #include "cangjie/CHIR/Optimization/UnitUnify.h"
 #include "cangjie/CHIR/Optimization/UselessAllocateElimination.h"
+#include "cangjie/CHIR/Optimization/OptFuncRetType.h"
 #include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/CHIR/Utils/Visitor/Visitor.h"
 #include "cangjie/Driver/TempFileManager.h"
@@ -629,9 +630,18 @@ DevirtualizationInfo ToCHIR::CollectDevirtualizationInfo()
     return devirtInfo;
 }
 
+void ToCHIR::OptimizeFuncReturnType()
+{
+    Utils::ProfileRecorder recorder("CHIR Opt", "Optimize Func Return Type");
+    OptFuncRetType optFuncRetType(*chirPkg, builder);
+    optFuncRetType.Unit2Void();
+    DumpCHIRToFile("OptimizeFuncReturnType");
+}
+
 void ToCHIR::RunOptimizationPass()
 {
     Utils::ProfileRecorder recorder("CHIR", "CHIR Opt");
+    OptimizeFuncReturnType();
     RunArrayListConstStartOpt();
     RunUnitUnify();
     auto devirtInfo = CollectDevirtualizationInfo();
@@ -700,6 +710,7 @@ bool ToCHIR::RunIRChecker(const Phase& phase)
     // CodeGen shouldn't know `GetInstantiateValue`, this expression should gone after closure conversion
     if (phase == Phase::OPT) {
         rules.emplace(CHIRChecker::Rule::GET_INSTANTIATE_VALUE_SHOULD_GONE);
+        rules.emplace(CHIRChecker::Rule::RETURN_TYPE_NEED_BE_VOID);
     }
     // there may be something wrong, we will check this rule after CJMP's scheme done
     if (!opts.commonPartCjo.has_value()) {

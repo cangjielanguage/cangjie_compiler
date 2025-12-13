@@ -4,6 +4,7 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "cangjie/AST/AttributePack.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/AST/Walker.h"
@@ -707,7 +708,7 @@ Translator::LeftValueInfo Translator::TranslateStructOrClassCtorCallAsLeftValue(
     auto [paramInstTys, retInstTy] = GetMemberFuncParamAndRetInstTypes(expr);
     auto paramInstTysWithoutThis = paramInstTys;
     paramInstTys.insert(paramInstTys.begin(), builder.GetType<RefType>(thisTy));
-    auto instTargetFuncTy = builder.GetType<FuncType>(paramInstTys, builder.GetVoidTy());
+    auto instTargetFuncTy = builder.GetType<FuncType>(paramInstTys, retInstTy);
 
     // Translate arguments
     std::vector<Value*> args;
@@ -766,7 +767,7 @@ Value* Translator::TranslateStructOrClassCtorCall(const AST::CallExpr& expr)
     auto [paramInstTys, retInstTy] = GetMemberFuncParamAndRetInstTypes(expr);
     auto paramInstTysWithoutThis = paramInstTys;
     paramInstTys.insert(paramInstTys.begin(), builder.GetType<RefType>(thisTy));
-    auto instTargetFuncTy = builder.GetType<FuncType>(paramInstTys, builder.GetVoidTy());
+    auto instTargetFuncTy = builder.GetType<FuncType>(paramInstTys, retInstTy);
 
     // Translate arguments
     std::vector<Value*> args;
@@ -1130,6 +1131,9 @@ std::pair<std::vector<Type*>, Type*> Translator::GetMemberFuncParamAndRetInstTyp
         funcType = StaticCast<FuncType*>(TranslateType(**genericTy->upperBounds.begin()));
     } else {
         funcType = StaticCast<FuncType*>(TranslateType(*expr.baseFunc->ty));
+    }
+    if (expr.resolvedFunction->TestAttr(AST::Attribute::CONSTRUCTOR) || expr.resolvedFunction->IsFinalizer()) {
+        return std::pair<std::vector<Type*>, Type*>{funcType->GetParamTypes(), builder.GetUnitTy()};
     }
     return std::pair<std::vector<Type*>, Type*>{funcType->GetParamTypes(), funcType->GetReturnType()};
 }

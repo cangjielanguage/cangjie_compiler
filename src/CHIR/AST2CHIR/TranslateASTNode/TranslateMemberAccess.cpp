@@ -679,7 +679,7 @@ Translator::LeftValueInfo Translator::TranslateMemberAccessAsLeftValue(const AST
             }
         }
 
-        auto baseValRefDims = baseVal->GetType()->GetRefDims();
+        auto baseValRefDims = GetRefDims(*baseVal->GetType());
         auto baseValTy = baseVal->GetType()->StripAllRefs();
         std::unordered_map<const GenericType*, Type*> instMap;
         if (auto baseValCustomTy = DynamicCast<CustomType*>(baseValTy)) {
@@ -690,7 +690,7 @@ Translator::LeftValueInfo Translator::TranslateMemberAccessAsLeftValue(const AST
         CJC_NULLPTR_CHECK(targetBaseASTTy);
         Type* targetBaseTy = TranslateType(*targetBaseASTTy);
         // Handle the case where the baseValTy is a generic which ref dims is zero
-        baseValRefDims = std::max(targetBaseTy->GetRefDims(), baseValRefDims);
+        baseValRefDims = std::max(GetRefDims(*targetBaseTy), baseValRefDims);
         targetBaseTy = targetBaseTy->StripAllRefs();
         targetBaseTy = ReplaceRawGenericArgType(*targetBaseTy, instMap, builder);
         for (size_t i = 0; i < baseValRefDims; ++i) {
