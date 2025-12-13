@@ -71,8 +71,8 @@ public:
      * @brief subType map inheritance info
      */
     struct InheritanceInfo {
-        ClassType* parentInstType;
-        Type* subInstType;
+        ClassType* parentType;
+        Type* subType;
     };
 
     /**
