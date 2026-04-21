@@ -12,7 +12,11 @@
 
 #include "cangjie/Driver/ToolOptions.h"
 
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
+
+#include "cangjie/Utils/FileUtil.h"
 
 namespace {
 using namespace Cangjie;
@@ -145,9 +149,29 @@ void SetVerifyOptions(SetFuncType setOptionHandler, [[maybe_unused]] const Drive
     setOptionHandler("--only-verify-out");
 }
 
+bool LinksStdReflect(const DriverOptions& driverOptions)
+{
+    static const std::string reflectName = "std.reflect.cjo";
+    auto matchDeps = [](const std::unordered_set<std::string>& deps) {
+        for (const auto& d : deps) {
+            if (Cangjie::FileUtil::GetFileName(d) == reflectName) {
+                return true;
+            }
+        }
+        return false;
+    };
+    return matchDeps(driverOptions.directBuiltinDependencies) || matchDeps(driverOptions.indirectBuiltinDependencies);
+}
+
 void SetOptions(SetFuncType setOptionHandler, const DriverOptions& driverOptions)
 {
     setOptionHandler("--cangjie-pipeline");
+    // Skip the LTO reflection downgrade when the program uses reflection APIs, since
+    // downgrading the reflect metadata it depends on would break them at runtime.
+    // Programs that don't use reflection still downgrade normally.
+    SetOptionIf(setOptionHandler,
+        driverOptions.IsLTOEnabled() && driverOptions.disableReflection && !LinksStdReflect(driverOptions),
+        "--cj-disable-lto-reflection");
     SetOptionIf(setOptionHandler, driverOptions.EnableAsan(), "-cj-asan=true");
     SetOptionIf(setOptionHandler, driverOptions.EnableTsan(), "-cj-tsan=true");
     SetOptionIf(setOptionHandler, driverOptions.EnableTsan(), "-tsan-instrument-atomics=false");
