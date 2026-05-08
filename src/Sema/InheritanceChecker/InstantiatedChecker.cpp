@@ -72,7 +72,10 @@ void StructInheritanceChecker::CheckInstMemberSignatures(
     }
     auto typeMapping = GenerateTypeMapping(decl, instTys);
     CheckMembersWithInheritedDecls(decl);
-    auto members = structInheritedMembers[&decl];
+    MemberMap members;
+    if (auto memberIt = structInheritedMembers.find(&decl); memberIt != structInheritedMembers.end()) {
+        members = memberIt->second;
+    }
     for (auto& member : decl.GetMemberDecls()) {
         CJC_NULLPTR_CHECK(member);
         if (!Ty::IsTyCorrect(member->GetTy()) || !member->outerDecl) {

@@ -441,8 +441,9 @@ MemberMap StructInheritanceChecker::GetAndCheckInheritedInterfaces(const Inherit
     // Merge inherited interfaces' members.
     for (auto iTy : interfaceTys) {
         auto interfaceDecl = Ty::GetDeclPtrOfTy<InheritableDecl>(iTy);
-        auto interfaceMembers = structInheritedMembers[interfaceDecl];
-        MergeInheritedMembers(members, interfaceMembers, *iTy, true);
+        if (auto it = structInheritedMembers.find(interfaceDecl); it != structInheritedMembers.end()) {
+            MergeInheritedMembers(members, it->second, *iTy, true);
+        }
     }
     DiagnoseForConflictInheritance(decl, members);
     return members;
@@ -458,7 +459,9 @@ MemberMap StructInheritanceChecker::GetInheritedSuperMembers(
 {
     MemberMap members;
     // Merge inherited class members.
-    MergeInheritedMembers(members, structInheritedMembers[&decl], baseTy);
+    if (auto it = structInheritedMembers.find(&decl); it != structInheritedMembers.end()) {
+        MergeInheritedMembers(members, it->second, baseTy);
+    }
     RemoveInvisibleMember(members, curFile.curPackage->fullPackageName);
     if (ignoreExtends) {
         return members;
@@ -474,9 +477,11 @@ MemberMap StructInheritanceChecker::GetInheritedSuperMembers(
             continue;
         }
         CheckMembersWithInheritedDecls(*extend);
-        auto extendMembers = structInheritedMembers[extend];
-        RemoveInvisibleMember(members, curFile.curPackage->fullPackageName);
-        MergeInheritedMembers(members, extendMembers, baseTy);
+        if (auto extendIt = structInheritedMembers.find(extend); extendIt != structInheritedMembers.end()) {
+            auto allVisibleMember = extendIt->second;
+            RemoveInvisibleMember(allVisibleMember, curFile.curPackage->fullPackageName);
+            MergeInheritedMembers(members, allVisibleMember, baseTy);
+        }
     }
     return members;
 }
