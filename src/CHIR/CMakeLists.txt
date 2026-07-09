@@ -24,7 +24,7 @@ target_include_directories(CangjieCHIRExtra PRIVATE ${BOUNDSCHECK}/include)
 add_dependencies(CangjieCHIRExtra CangjieFlatbuffersHeaders)
 target_include_directories(CangjieCHIRExtra PRIVATE ${FLATBUFFERS_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/Annotations)
 
-# CHIR.cpp indirectly includes PackageFormat_generated.h, this will be refactored later.
+# CHIR.cpp indirectly includes StdxChirFormat_generated.h, this will be refactored later.
 target_include_directories(CangjieCHIRBase PRIVATE ${FLATBUFFERS_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/Annotations)
 add_dependencies(CangjieCHIRBase CangjieFlatbuffersHeaders)
 

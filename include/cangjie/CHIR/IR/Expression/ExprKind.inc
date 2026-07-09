@@ -6,7 +6,7 @@
 
 // Tips:
 // 1. EXPRKIND(expression kind, exression name for human reading, Expression class)
-// 2. Remember to modify CHIRCasting.h and PackageFormat.fbs after adding a new expression
+// 2. Remember to modify CHIRCasting.h and StdxChirFormat.fbs after adding a new expression
 // 3. When adding a new unary/binary expression (including TRY_*), also update
 //    UNARY_EXPR_KIND_TABLE / BINARY_EXPR_KIND_TABLE in Expression.cpp, and the matching
 //    UnaryExprKind / BinaryExprKind enumerators if needed

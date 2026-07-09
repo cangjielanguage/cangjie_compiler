@@ -95,7 +95,23 @@ public:
         searchPath.emplace_back(".");
         searchPath.insert(searchPath.end(), globalOptions.environment.cangjiePaths.cbegin(),
             globalOptions.environment.cangjiePaths.cend());
+        // flatbuffers.cjo lives under $CANGJIE_HOME/third_party/flatbuffers/modules.
+        // Resolve home once: globalOptions → environment → parent of cangjieModules
+        // ($HOME/modules/<triple>). Prefer options/env so TypeCheckerTest / Macro* (mock
+        // modules under build/build, real std via CANGJIE_HOME=output) still find it;
+        // fall back to cangjieModules for PackageTest which only sets instance home.
         searchPath.emplace_back(cangjieModules);
+        std::string cangjieHome = globalOptions.cangjieHome;
+        if (cangjieHome.empty() && globalOptions.environment.cangjieHome.has_value()) {
+            cangjieHome = globalOptions.environment.cangjieHome.value();
+        }
+        if (cangjieHome.empty()) {
+            cangjieHome = FileUtil::GetDirPath(FileUtil::GetDirPath(cangjieModules));
+        }
+        if (!cangjieHome.empty()) {
+            searchPath.emplace_back(
+                FileUtil::JoinPath(cangjieHome, "third_party/flatbuffers/modules"));
+        }
     }
     const std::vector<std::string>& GetSearchPath() const
     {

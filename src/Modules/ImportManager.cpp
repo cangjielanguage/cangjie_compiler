@@ -230,6 +230,13 @@ void CollectStdDependency(std::map<std::string, std::set<std::string>>& stdDepen
     if (stdDependencies.find(stdpkg) != stdDependencies.end()) {
         return;
     }
+    // Only collect packages that ship as separately linkable std libs.
+    // Private support packages such as `flatbuffers` (force-linked into std.ast,
+    // cjo under third_party/flatbuffers/modules, no libcangjie-std-flatbuffers)
+    // must not appear in std-dependencies or cjpm will emit a missing -l.
+    if (STANDARD_LIBS.find(stdpkg) == STANDARD_LIBS.end()) {
+        return;
+    }
     std::string cjoPath = FileUtil::FindSerializationFile(
         FileUtil::ToPackageName(stdpkg), SERIALIZED_FILE_EXTENSION, importMgr.GetSearchPath());
     if (cjoPath.empty()) {
@@ -245,7 +252,11 @@ void CollectStdDependency(std::map<std::string, std::set<std::string>>& stdDepen
     CJC_NULLPTR_CHECK(stdPkgInfo);
     for (auto& file : stdPkgInfo->files) {
         for (auto& import : file->imports) {
-            importInfo.emplace(import->content.GetImportedPackageNameWithIsDecl());
+            auto imported = import->content.GetImportedPackageNameWithIsDecl();
+            if (STANDARD_LIBS.find(imported) == STANDARD_LIBS.end()) {
+                continue;
+            }
+            importInfo.emplace(imported);
         }
     }
     for (auto& importRes : importInfo) {

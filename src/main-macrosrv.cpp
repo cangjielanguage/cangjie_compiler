@@ -131,7 +131,7 @@ bool CheckPipe(int read, int write)
 #endif
 } // namespace
 
-int main(int argc, const char* argv[], [[maybe_unused]] const char** envp)
+int main(int argc, const char* argv[], const char** envp)
 {
     auto args = Utils::StringifyArgumentVector(argc, argv);
     if (!IsArgsValid(args)) {
@@ -158,6 +158,13 @@ int main(int argc, const char* argv[], [[maybe_unused]] const char** envp)
     }
     gpt.executablePath = cjcFolder;
     gpt.enableParallelMacro = args[IDX_OF_ENABLE_PARA] == "1" ? true : false;
+    // Inherit CANGJIE_HOME / CANGJIE_PATH from the parent process so std.ast can
+    // resolve flatbuffers.cjo under third_party/flatbuffers/modules.
+    auto environmentVars = Utils::StringifyEnvironmentPointer(envp);
+    gpt.ReadPathsFromEnvironmentVars(environmentVars);
+    // Prefer env CANGJIE_HOME; otherwise derive SDK root from cjc folder (.../bin -> ...).
+    auto detectedHome = FileUtil::GetDirPath(FileUtil::GetAbsPath(cjcFolder) | FileUtil::IdenticalFunc);
+    gpt.cangjieHome = gpt.environment.cangjieHome.value_or(detectedHome);
     DiagnosticEngine diag;
     CompilerInvocation compilerInvocation;
     compilerInvocation.globalOptions = gpt;

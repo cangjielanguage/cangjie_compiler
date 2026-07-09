@@ -13,7 +13,7 @@
 #ifndef CANGJIE_MODULES_ASTSERIALIZATION_ASTWRITER_IMPL_H
 #define CANGJIE_MODULES_ASTSERIALIZATION_ASTWRITER_IMPL_H
 
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 #include <optional>
 

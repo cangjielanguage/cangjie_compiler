@@ -13,7 +13,7 @@
 #ifndef CANGJIE_MODULES_ASTSERIALIZE_UTILS_H
 #define CANGJIE_MODULES_ASTSERIALIZE_UTILS_H
 
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 #include "cangjie/AST/Node.h"
 

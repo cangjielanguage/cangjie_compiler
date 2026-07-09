@@ -17,7 +17,7 @@
 #include "cangjie/AST/AttributePack.h"
 #include "cangjie/Option/Option.h"
 #include "cangjie/Utils/ICEUtil.h"
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Utils.h"

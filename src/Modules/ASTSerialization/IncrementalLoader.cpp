@@ -13,7 +13,7 @@
 
 #include <algorithm>
 
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 #include "cangjie/AST/Utils.h"
 #include "cangjie/Basic/Version.h"

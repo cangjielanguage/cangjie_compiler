@@ -14,7 +14,7 @@
 #define CANGJIE_MODULES_ASTSERIALIZATION_ASTLOADER_IMPL_H
 
 #include "cangjie/Option/Option.h"
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 #include "cangjie/AST/ASTCasting.h"
 #include "cangjie/Modules/ASTSerialization.h"

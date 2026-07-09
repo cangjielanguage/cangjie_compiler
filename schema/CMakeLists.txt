@@ -13,13 +13,7 @@
 # Generate cangjie code for libast using flatc with cangjie backend.
 set(FLATC_EXECUTABLE "${CMAKE_BINARY_DIR}/bin/flatc")
 
-set(FLATBUFFERS_SOURCE
-    ModuleFormat.fbs
-    CachedASTFormat.fbs
-    NodeFormat.fbs)
-
-list(APPEND FLATBUFFERS_SOURCE BCHIRFormat.fbs PackageFormat.fbs)
-list(APPEND FLATBUFFERS_SOURCE MacroMsgFormat.fbs)
+file(GLOB FLATBUFFERS_SOURCE CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.fbs")
 
 set(FLATC_OUTPUTS)
 foreach(FILE ${FLATBUFFERS_SOURCE})
@@ -38,3 +32,28 @@ set(FLATBUFFERS_INCLUDE_DIR
     ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_BINARY_DIR}/include
     PARENT_SCOPE)
 add_custom_target(CangjieFlatbuffersHeaders DEPENDS ${FLATC_OUTPUTS} ${FLATC_LIBAST_OUTPUTS})
+
+# Install flatbuffers toolchain and runtime support for std.ast / libast consumers.
+install(PROGRAMS ${FLATC_EXECUTABLE} DESTINATION third_party/flatbuffers/bin)
+install(DIRECTORY ${FLATBUFFERS_SOURCE_DIR}/include/flatbuffers
+    DESTINATION third_party/flatbuffers/include)
+install(
+    FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/StdxChirFormat.fbs
+        ${CMAKE_CURRENT_SOURCE_DIR}/StdAstFormat.fbs
+    DESTINATION schema)
+
+# Rewrite package std.ast -> package flatbuffers and expose API as public for std.ast consumers.
+# Glob *.cj at install time (ExternalProject sources are guaranteed present then).
+set(FLATBUFFERS_CANGJIE_SRC_DIR "${FLATBUFFERS_SOURCE_DIR}/cangjie")
+install(CODE "
+    execute_process(
+        COMMAND \"${CMAKE_COMMAND}\"
+            \"-DSRC_DIR=${FLATBUFFERS_CANGJIE_SRC_DIR}\"
+            \"-DDST_DIR=\${CMAKE_INSTALL_PREFIX}/third_party/flatbuffers/cangjie\"
+            -P \"${CMAKE_CURRENT_SOURCE_DIR}/install_flatbuffers_cangjie.cmake\"
+        RESULT_VARIABLE _fb_cj_install_result)
+    if(NOT _fb_cj_install_result EQUAL 0)
+        message(FATAL_ERROR \"Failed to install flatbuffers cangjie runtime\")
+    endif()
+")
