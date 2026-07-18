@@ -15,6 +15,15 @@
 
 namespace Cangjie::Utils {
 
+// NOTE: This SipHash-2-4 variant deviates from the standard: the message
+// length is never mixed into the final block, and inputs of up to 8 bytes are
+// zero-padded into a single block. Inputs whose zero-padded byte sequences are
+// identical therefore collide across types and widths, not only by appending
+// null bytes (e.g. "Chunked" vs "Chunked\0", or bool(true) vs uint32_t(1)).
+//
+// Deliberately left unfixed: this hash feeds incremental-compilation cache
+// keys (ASTHasher, ASTCacheCalculator, GetHashedObjFileName); changing it
+// would invalidate all existing incremental-compilation caches.
 class SipHash {
 public:
     template <std::size_t N> static uint64_t GetHashValue(const std::bitset<N>& rawData)
