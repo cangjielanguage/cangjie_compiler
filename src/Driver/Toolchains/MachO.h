@@ -45,6 +45,9 @@ protected:
 
     virtual void GenerateArchiveTool(const std::vector<TempFileInfo>& objFiles);
     void HandleLLVMLinkOptions(const std::vector<TempFileInfo>& objFiles, Tool& tool);
+    // For LTO staticlib production with -staticlib: only pass .bc files (user code + stdlib),
+    // skip runtime .a/.dylib, section.o, cjstart.o, and -L paths.
+    void AppendLTOBcInputs(const std::vector<TempFileInfo>& objFiles, Tool& tool);
     virtual void HandleLibrarySearchPaths(Tool& tool, const std::string& cangjieLibPath);
 
     virtual void AddCRuntimeLibraryPaths();
