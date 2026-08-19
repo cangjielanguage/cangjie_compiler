@@ -72,6 +72,8 @@ public:
     Ptr<AST::Ty> GetMatchedFuncInstTyByGivenTarget(
         MemberFuncWithInstTys& candidates, const AST::FuncDecl& target, AST::DataTy targetBaseTy);
 
+    bool IsImplementationFunc(const AST::FuncDecl& srcFunc, const AST::FuncDecl& superFunc);
+
     /**
      * Clear the global cache.
      */

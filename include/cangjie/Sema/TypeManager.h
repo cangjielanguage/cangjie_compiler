@@ -296,7 +296,7 @@ public:
      * map (e.g. Expr.toTokens → Node.toTokens without Node → ToTokens) still reaches
      * the true top.
      */
-    Ptr<const AST::FuncDecl> GetTopOverriddenFuncDecl(const AST::FuncDecl* funcDecl) const;
+    Ptr<const AST::FuncDecl> GetTopOverriddenFuncDecl(const AST::FuncDecl* funcDecl);
     /**
      * whether the decl is override the funcDecl.
      */

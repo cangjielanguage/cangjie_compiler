@@ -19,8 +19,8 @@
 #include "cangjie/CHIR/IR/CHIRBuilder.h"
 #include "cangjie/CHIR/IR/Expression/Terminator.h"
 #include "cangjie/CHIR/IR/Type/CHIRType.h"
-#include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/CHIR/IR/Value/Value.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/Option/Option.h"
 #include "cangjie/Sema/GenericInstantiationManager.h"
 #include "cangjie/Utils/CheckUtils.h"
@@ -37,10 +37,8 @@ public:
         const ElementList<Ptr<const AST::FuncDecl>>& localConstFuncs, const IncreKind& kind,
         const std::unordered_map<std::string, Value*>& deserializedVals,
         std::vector<std::pair<const AST::Decl*, Function*>>& annoFactories,
-        std::unordered_map<Block*, Expression*>& maybeUnreachable,
-        bool computeAnnotations,
-        std::vector<CHIR::Function*>& initFuncForAnnoFactory,
-        const Cangjie::TypeManager& typeManager)
+        std::unordered_map<Block*, Expression*>& maybeUnreachable, bool computeAnnotations,
+        std::vector<CHIR::Function*>& initFuncForAnnoFactory, Cangjie::TypeManager& typeManager)
         : builder(builder),
           chirTy(chirTy),
           globalSymbolTable(globalSymbolTable),
@@ -609,7 +607,7 @@ private:
     std::unordered_map<Block*, Expression*>& maybeUnreachable;
     bool isComputingAnnos{};
     std::vector<CHIR::Function*>& initFuncsForAnnoFactory;
-    const Cangjie::TypeManager& typeManager;
+    Cangjie::TypeManager& typeManager;
 
     class ScopeContext {
     public:

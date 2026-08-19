@@ -270,3 +270,23 @@ Ptr<Ty> OverrideFunctionResolver::GetMatchedFuncInstTyByGivenTarget(
     }
     return matchedTy;
 }
+
+bool OverrideFunctionResolver::IsImplementationFunc(const AST::FuncDecl& srcFunc, const AST::FuncDecl& superFunc)
+{
+    if (!srcFunc.outerDecl || !superFunc.outerDecl) {
+        return false;
+    }
+    CJC_ASSERT(srcFunc.GetTy()->IsFunc() && superFunc.GetTy()->IsFunc());
+    auto srcFuncTy = StaticCast<AST::FuncTy>(srcFunc.GetTy());
+    // Handle code: 'class B<T1> { func a(a: T1): Unit {} }; class A<T2> <: B<T2> { func a(a: T): Unit {} }', we need
+    // get mapping if [T1 |-> T2], and substitute function type '(T1)->Unit' to '(T2)->T'.
+    auto typeMappings =
+        Promotion(*typeManager).GetPromoteTypeMapping(*srcFunc.outerDecl->GetTy(), *superFunc.outerDecl->GetTy());
+    auto instSuperFuncTys = typeManager->GetInstantiatedTys(superFunc.GetTy(), typeMappings);
+    for (auto instSuperFuncTy : instSuperFuncTys) {
+        if (IsImplementationFunc(srcFunc, superFunc, srcFuncTy, StaticCast<AST::FuncTy>(instSuperFuncTy))) {
+            return true;
+        }
+    }
+    return false;
+}
