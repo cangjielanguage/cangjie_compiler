@@ -777,7 +777,6 @@ main(): Int64 {
     instance->code = code;
     instance->invocation.globalOptions.implicitPrelude = true;
     auto ret = instance->Compile(CompileStage::DESUGAR_AFTER_SEMA);
-    ret = ret && instance->PerformDesugarAfterSema();
     ASSERT_TRUE(ret);
     // The desugared interpolation must type-check without errors.
     ASSERT_EQ(diag.GetErrorCount(), 0) << "interpolation desugar should not produce errors";

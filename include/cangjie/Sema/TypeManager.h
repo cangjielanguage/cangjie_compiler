@@ -14,6 +14,8 @@
 #define CANGJIE_SEMA_TYPE_MANAGER_H
 
 #include <cassert>
+#include <mutex>
+#include <stack>
 #include <unordered_map>
 
 #include "cangjie/AST/Types.h"
@@ -579,6 +581,27 @@ private:
     template <typename TypeT, typename... Args> TypeT* GetTypeTy(Args&&... args);
     bool IsClassTyEqual(AST::Ty& leaf, AST::Ty& root);
     AST::DataTy GetExtendInterfaceSuperTy(AST::ClassTy& classTy, const AST::Ty& interfaceTy);
+
+    /**
+     * Walk @p func's outer inheritable decl supers and find the top-most function that
+     * @p func overrides. Used by GetTopOverriddenFuncDecl when overrideMap has no entry
+     * (e.g. imported Equatable.!=). Must not call IsOverrideOrShadow / PairIsOverrideOrImpl —
+     * those allocate ty vars and are unsafe once Sema has finished (e.g. during AST2CHIR).
+     */
+    Ptr<const AST::FuncDecl> FindTopOverriddenByInheritance(
+        const AST::FuncDecl& func, std::set<Ptr<const AST::FuncDecl>>& visited);
+
+    /**
+     * Serializes OverrideFunctionResolver::IsImplementationFunc invocations made by
+     * FindTopOverriddenByInheritance (and thus GetTopOverriddenFuncDecl). That call
+     * is not a pure read: in the generic branch it reaches TypeManager::GetTypeTy and
+     * writes the shared allocatedTys table (find + insert). When GetTopOverriddenFuncDecl
+     * runs concurrently (e.g. from AST2CHIR threads), multiple threads could mutate
+     * allocatedTys at once; this mutex makes that write race-free. It is held only across
+     * the IsImplementationFunc call itself, never across the recursive inheritance walk,
+     * so there is no self-deadlock.
+     */
+    mutable std::mutex overrideResolverImplMutex;
 
     /**
      * The class is used to store typeMapping and ctxVars as context condition of the recursive instantiation.

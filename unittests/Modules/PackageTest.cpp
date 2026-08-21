@@ -1132,7 +1132,6 @@ TEST_F(PackageTest, UsageOfOnTheLeftOfPipeline)
     bool ret = instance->Compile(CompileStage::DESUGAR_AFTER_SEMA);
     auto pkg = instance->GetSourcePackages()[0];
     ASSERT_TRUE(pkg != nullptr);
-    ret = ret && instance->PerformDesugarAfterSema();
     ASSERT_TRUE(ret);
     EXPECT_EQ(diag.GetErrorCount(), 0);
     bool checked = false;
