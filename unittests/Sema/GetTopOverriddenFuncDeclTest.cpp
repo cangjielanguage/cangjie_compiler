@@ -433,3 +433,110 @@ main(): Int64 {
     EXPECT_NE(QualName(top), "B.f");
     EXPECT_NE(QualName(top), "A.f");
 }
+
+TEST_F(GetTopOverriddenFuncDeclTest, GetTopOverriddenFuncThatSourceExported02)
+{
+    // 1) Compile the dependency package.
+    auto depCjo = CompileDependencyPackage("dep", R"(
+package dep
+public interface I<T> {
+    func f(a: T): Int64
+}
+public class A {}
+extend A {
+    public func f(a: Int64): Int64 {
+        return 1
+    }
+}
+extend A <: I<Int64> {}
+
+@Frozen
+public func foo() {
+    return A().f(5)
+}
+    )");
+    ASSERT_FALSE(depCjo.empty());
+
+    // 2) Compile the main package, which imports dep and calls B().f().
+    BeginMainPackage("dep", depCjo, R"(
+import dep.*
+main(): Int64 {
+    0
+}
+    )");
+    instance->invocation.globalOptions.optimizationLevel = GlobalOptions::OptimizationLevel::O2;
+    ASSERT_TRUE(instance->Compile(CompileStage::SEMA));
+    ASSERT_EQ(diag.GetErrorCount(), 0u);
+
+    // 3) The call B().f() must have resolved to the imported B.f declaration.
+    auto foo = instance->importManager->GetImportedDecl("dep", "foo");
+    auto callee = FindResolvedCallee("f", foo);
+    ASSERT_TRUE(callee) << "B().f() call did not resolve to a function";
+    EXPECT_TRUE(callee->TestAttr(Attribute::IMPORTED)) << "expected the callee to be the imported B.f";
+
+    // 4) Resolving the imported B.f must reach the abstract interface root I.f,
+    //    not B.f or A.f. This exercises the inheritance-walk fallback that the
+    //    API uses when the overrideMap is incomplete for imported declarations.
+    auto top = GetTop(callee.get());
+    ASSERT_TRUE(top);
+    EXPECT_EQ(QualName(top), "I.f");
+    EXPECT_TRUE(top->TestAttr(Attribute::ABSTRACT));
+    EXPECT_NE(QualName(top), "B.f");
+    EXPECT_NE(QualName(top), "A.f");
+}
+
+TEST_F(GetTopOverriddenFuncDeclTest, GetTopOverriddenFuncThatSourceExported03)
+{
+    // 1) Compile the dependency package.
+    auto depCjo = CompileDependencyPackage("dep", R"(
+package dep
+public interface I<T> {
+    func f(a: T): Int64
+}
+public open class A {
+    public open func f(a: Int64): Int64 {
+        return a + 1
+    }
+}
+extend A <: I<Int64> {}
+
+public class B <: A {
+    public func f(a: Int64): Int64 {
+        return a + 1
+    }
+}
+
+@Frozen
+public func foo() {
+    B().f(1)
+}
+    )");
+    ASSERT_FALSE(depCjo.empty());
+
+    // 2) Compile the main package, which imports dep and calls B().f().
+    BeginMainPackage("dep", depCjo, R"(
+import dep.*
+main(): Int64 {
+    0
+}
+    )");
+    instance->invocation.globalOptions.optimizationLevel = GlobalOptions::OptimizationLevel::O2;
+    ASSERT_TRUE(instance->Compile(CompileStage::SEMA));
+    ASSERT_EQ(diag.GetErrorCount(), 0u);
+
+    // 3) The call B().f() must have resolved to the imported B.f declaration.
+    auto foo = instance->importManager->GetImportedDecl("dep", "foo");
+    auto callee = FindResolvedCallee("f", foo);
+    ASSERT_TRUE(callee) << "B().f() call did not resolve to a function";
+    EXPECT_TRUE(callee->TestAttr(Attribute::IMPORTED)) << "expected the callee to be the imported B.f";
+
+    // 4) Resolving the imported B.f must reach the abstract interface root I.f,
+    //    not B.f or A.f. This exercises the inheritance-walk fallback that the
+    //    API uses when the overrideMap is incomplete for imported declarations.
+    auto top = GetTop(callee.get());
+    ASSERT_TRUE(top);
+    EXPECT_EQ(QualName(top), "I.f");
+    EXPECT_TRUE(top->TestAttr(Attribute::ABSTRACT));
+    EXPECT_NE(QualName(top), "B.f");
+    EXPECT_NE(QualName(top), "A.f");
+}

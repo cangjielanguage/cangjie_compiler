@@ -2299,56 +2299,7 @@ Ptr<const FuncDecl> LookupTopOverriddenFromMap(
         ret = it->second.front();
     }
 }
-
 } // namespace
-
-// IsImplementationFunc is not a pure read: in the generic branch it calls GetInstantiatedTy,
-// whose TyInstantiator reaches TypeManager::GetTypeTy and writes the shared allocatedTys table
-// (find + insert). When GetTopOverriddenFuncDecl runs concurrently (e.g. AST2CHIR), multiple
-// threads could mutate allocatedTys at once. The serialization mutex overrideResolverImplMutex
-// (a member of TypeManager) is held only across the IsImplementationFunc call itself, never
-// across the recursive inheritance walk below, so there is no self-deadlock.
-Ptr<const FuncDecl> TypeManager::FindTopOverriddenByInheritance(
-    const FuncDecl& func, std::set<Ptr<const FuncDecl>>& visited)
-{
-    if (auto [_, inserted] = visited.emplace(&func); !inserted) {
-        return nullptr;
-    }
-    auto outer = DynamicCast<InheritableDecl*>(func.outerDecl);
-    if (!outer) {
-        return nullptr;
-    }
-    Ptr<const FuncDecl> topMost = nullptr;
-    // GetAllSuperDecls is non-const but only reads the inheritance graph.
-    for (auto super : const_cast<InheritableDecl*>(outer)->GetAllSuperDecls()) {
-        if (super == outer) {
-            continue;
-        }
-        for (auto& member : super->GetMemberDecls()) {
-            auto parentFunc = DynamicCast<FuncDecl*>(member.get());
-            if (!parentFunc) {
-                continue;
-            }
-            bool isImpl = false;
-            {
-                std::lock_guard<std::mutex> lock(overrideResolverImplMutex);
-                isImpl = OverrideFunctionResolver(*this).IsImplementationFunc(func, *parentFunc);
-            }
-            if (!isImpl) {
-                continue;
-            }
-            auto parentTop = FindTopOverriddenByInheritance(*parentFunc, visited);
-            Ptr<const FuncDecl> candidate = parentTop ? parentTop : Ptr<const FuncDecl>(parentFunc);
-            if (!topMost) {
-                topMost = candidate;
-            } else if (candidate->TestAttr(Attribute::ABSTRACT) && !topMost->TestAttr(Attribute::ABSTRACT)) {
-                // Prefer the abstract root declaration for vtable / Invoke callee.
-                topMost = candidate;
-            }
-        }
-    }
-    return topMost;
-}
 
 Ptr<const AST::FuncDecl> TypeManager::GetTopOverriddenFuncDecl(const AST::FuncDecl* funcDecl)
 {
@@ -2370,9 +2321,13 @@ Ptr<const AST::FuncDecl> TypeManager::GetTopOverriddenFuncDecl(const AST::FuncDe
         seed = funcDecl->genericDecl ? StaticCast<const FuncDecl*>(funcDecl->genericDecl) : funcDecl;
     }
 
-    std::set<Ptr<const FuncDecl>> visited;
-    if (auto top = FindTopOverriddenByInheritance(*seed, visited)) {
-        return top;
+    MemberFuncSet tops;
+    {
+        std::lock_guard<std::mutex> lock(overrideResolverImplMutex);
+        tops = OverrideFunctionResolver(*this).GetTopOverriddenFuncs(*funcDecl->outerDecl->GetTy(), *seed);
+    }
+    if (!tops.empty()) {
+        return *tops.begin();
     }
     if (fromMap) {
         return fromMap;
