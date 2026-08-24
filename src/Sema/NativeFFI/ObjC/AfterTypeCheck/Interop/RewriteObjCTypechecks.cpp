@@ -306,14 +306,10 @@ void DesugarMatchCaseExpr(InteropContext& ctx, MatchCase& expr)
             pat->pattern->curFile = expr.curFile;
         }
 
-        auto varPat = DynamicCast<VarPattern>(pat->pattern.get());
-        CJC_ASSERT(varPat);
-        auto originalTy = varPat->GetTy().Ty();
-        CJC_NULLPTR_CHECK(originalTy);
-
+        auto varPat = StaticCast<VarPattern>(pat->pattern.get());
+        auto originalTy = varPat->DataTy();
         auto type = StaticCast<ClassTy>(originalTy);
         auto targetName = ctx.nameGenerator.GetObjCDeclName(*type->decl);
-
         pat->type = CreateType(objCIdDecl->DataTy());
         varPat->SetTy(objCIdDecl->GetTy());
         varPat->varDecl->SetTy(objCIdDecl->GetTy());

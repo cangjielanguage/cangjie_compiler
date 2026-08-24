@@ -419,11 +419,12 @@ bool ParserImpl::ParseModeSpecifier(ASTModalInfo& out)
 // Seeing a ModalInfo advance, without consuming any token.
 bool ParserImpl::SeeingModalInfo()
 {
+    constexpr size_t MODAL_LOOKAHEAD = 2;
     if (!Seeing(TokenKind::AT)) {
         return false;
     }
-    auto tokens = lexer->LookAheadSkipNL(2);
-    if (tokens.size() < 2) {
+    auto tokens = lexer->LookAheadSkipNL(MODAL_LOOKAHEAD);
+    if (tokens.size() < MODAL_LOOKAHEAD) {
         return false;
     }
     auto it = tokens.begin();

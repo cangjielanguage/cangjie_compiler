@@ -36,7 +36,7 @@ bool TypeChecker::TypeCheckerImpl::SynthesizeAndReplaceIdealTy(const CheckerCont
         // transparent. Constructor calls are not handled here: their modal is determined by the
         // selected init's `this` specifier (spec: only a matching init can construct C @m), not the
         // "any modal is valid" semantics of literals, so IDEAL does not apply.
-        if (node.astKind == ASTKind::LIT_CONST_EXPR && !typeManager.ImplementsCopyInterface(node.GetTy().Ty())) {
+        if (node.astKind == ASTKind::LIT_CONST_EXPR && !typeManager.ImplementsCopyInterface(node.DataTy())) {
             node.SetTy(node.GetTy().With(Mode::IDEAL));
         }
     }

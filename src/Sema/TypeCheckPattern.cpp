@@ -685,7 +685,7 @@ std::optional<ModalTy> TypeChecker::TypeCheckerImpl::ChkCommandTypePattern(
     }
     CJC_ASSERT(prCTys.size() == 1);
     if (Utils::In(
-            included, [this, &cmdTypePat](ModalTy ty) { return typeManager.IsSubtype(cmdTypePat->GetTy(), ty); })) {
+        included, [this, &cmdTypePat](ModalTy ty) { return typeManager.IsSubtype(cmdTypePat->GetTy(), ty); })) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_useless_command_type, *cmdTypePat);
     } else {
         included.emplace_back(cmdTypePat->GetTy());

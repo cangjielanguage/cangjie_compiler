@@ -1396,8 +1396,12 @@ Position ASTModalInfo::End() const
 
 size_t std::hash<Cangjie::AST::ModalTy>::operator()(Cangjie::AST::ModalTy modalTy) const
 {
+    // Boost-style hash_combine: golden-ratio constant plus bit-mixing shifts.
+    constexpr size_t HASH_GOLDEN_RATIO = 0x9e3779b9;
+    constexpr size_t HASH_LEFT_SHIFT = 6;
+    constexpr size_t HASH_RIGHT_SHIFT = 2;
     size_t tyHash = modalTy.Ty() ? modalTy.Ty()->Hash() : 0;
     size_t modeHash =
         static_cast<size_t>(std::hash<int>{}(Cangjie::ToIndex(modalTy.Mode())));
-    return tyHash ^ (modeHash + 0x9e3779b9 + (tyHash << 6) + (tyHash >> 2));
+    return tyHash ^ (modeHash + HASH_GOLDEN_RATIO + (tyHash << HASH_LEFT_SHIFT) + (tyHash >> HASH_RIGHT_SHIFT));
 }

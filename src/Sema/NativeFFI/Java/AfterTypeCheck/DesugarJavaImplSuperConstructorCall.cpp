@@ -281,7 +281,7 @@ OwnedPtr<FuncDecl> DesugarJavaImplSuperConstructorCall::CreateNativeFunc4Argumen
         auto funcParam =
             CreateFuncParam(memberParam->identifier.Val(), nullptr, nullptr, ModalTy{Ptr<Ty>(&jniParamTy)});
         auto ref = WithinFile(CreateRefExpr(*funcParam), memberFunc.curFile);
-        proxyCall->args.push_back(CreateFuncArg(UnwrapRefExpr(std::move(ref), memberParam->GetTy().Ty(), refWrapper)));
+        proxyCall->args.push_back(CreateFuncArg(UnwrapRefExpr(std::move(ref), memberParam->DataTy(), refWrapper)));
         funcParams.push_back(std::move(funcParam));
     }
     auto wrapper = WrapExprWithExceptionHandling({}, std::move(proxyCall), jniEnvParam, refWrapper);

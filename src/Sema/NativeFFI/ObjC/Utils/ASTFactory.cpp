@@ -1705,7 +1705,7 @@ OwnedPtr<Expr> ASTFactory::CreateObjCIsKindOfClassCall(OwnedPtr<Expr> id, OwnedP
     args.emplace_back(CreateFuncArg(std::move(id)));
     args.emplace_back(CreateFuncArg(std::move(cls)));
     return WithinFile(CreateCallExpr(std::move(kindOfClassExpr), std::move(args), kindOfClassDecl,
-                          {typeManager.GetBoolTy()}, CallKind::CALL_DECLARED_FUNCTION),
+        {typeManager.GetBoolTy()}, CallKind::CALL_DECLARED_FUNCTION),
         file);
 }
 
@@ -1718,7 +1718,7 @@ OwnedPtr<Expr> ASTFactory::CreateObjCConformsToProtocolCall(OwnedPtr<Expr> id, O
     args.emplace_back(CreateFuncArg(std::move(id)));
     args.emplace_back(CreateFuncArg(std::move(cls)));
     return WithinFile(CreateCallExpr(std::move(conformsToProtocolExpr), std::move(args), conformsToProtocolDecl,
-                          {typeManager.GetBoolTy()}, CallKind::CALL_DECLARED_FUNCTION),
+        {typeManager.GetBoolTy()}, CallKind::CALL_DECLARED_FUNCTION),
         file);
 }
 
@@ -1731,7 +1731,7 @@ OwnedPtr<Expr> ASTFactory::CreateObjCRespondsToSelectorCall(OwnedPtr<Expr> cls, 
     args.emplace_back(CreateFuncArg(std::move(cls)));
     args.emplace_back(CreateFuncArg(std::move(sel)));
     return WithinFile(CreateCallExpr(std::move(responseToSelExpr), std::move(args), responseToSelDecl,
-                          {typeManager.GetBoolTy()}, CallKind::CALL_DECLARED_FUNCTION),
+        {typeManager.GetBoolTy()}, CallKind::CALL_DECLARED_FUNCTION),
         file);
 }
 
@@ -1742,7 +1742,7 @@ OwnedPtr<Expr> ASTFactory::CreateGetSuperClassExpr(OwnedPtr<Expr> objCSuper, Ptr
     std::vector<OwnedPtr<FuncArg>> args;
     args.emplace_back(CreateFuncArg(std::move(objCSuper)));
     return WithinFile(CreateCallExpr(std::move(getSuperClassExpr), std::move(args), getSuperClassDecl,
-                          {bridge.GetNativeObjCClassTy()}, CallKind::CALL_DECLARED_FUNCTION),
+        {bridge.GetNativeObjCClassTy()}, CallKind::CALL_DECLARED_FUNCTION),
         file);
 }
 
@@ -2072,7 +2072,7 @@ OwnedPtr<CallExpr> ASTFactory::CreateSetInstanceVariableCall(
         CreateFuncArg(std::move(nativeHandle)), CreateFuncArg(std::move(nameExpr)), CreateFuncArg(std::move(value)));
 
     return WithinFile(CreateCallExpr(std::move(setInstVarRef), std::move(args), setInstVarDecl,
-                          {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)}, CallKind::CALL_DECLARED_FUNCTION),
+        {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)}, CallKind::CALL_DECLARED_FUNCTION),
         curFile);
 }
 

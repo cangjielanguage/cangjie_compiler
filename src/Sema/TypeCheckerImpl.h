@@ -1004,6 +1004,10 @@ private:
      */
     bool CheckCallCompatible(ASTContext& ctx, FunctionCandidate& candidate, AST::ModalTy target);
     /**
+     * infer mode of enum ctor call
+     */
+    ModalInfo InferEnumCtorMode(const AST::CallExpr& ce, AST::ModalTy target) const;
+    /**
      * Get the type of the this argument of call expression.
      * If ce is a RefExpr call, return the type decl in current scope.
      * DO NOT CALL this function for object creation without target type, it yields @~local modal, but any modal is ok.

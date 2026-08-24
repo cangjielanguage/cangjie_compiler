@@ -1797,7 +1797,7 @@ void TypeChecker::TypeCheckerImpl::CheckPropRedefinition(std::vector<PropDecl*>&
     };
     auto getDataTy = [](const PropDecl* pd) -> DataTy {
         if (pd->type && pd->type->GetTy().IsCorrect()) {
-            return pd->type->GetTy().Ty();
+            return pd->type->DataTy();
         }
         return nullptr;
     };
@@ -2116,7 +2116,7 @@ void TypeChecker::TypeCheckerImpl::PreCheckInvalidInherit(const ASTContext& ctx,
             if (it->GetTy()->IsCType()) {
                 diag.Diagnose(*it, kind, CTYPE_NAME);
             }
-            if (typeManager.IsCopyInterfaceTy(it->GetTy().Ty())) {
+            if (typeManager.IsCopyInterfaceTy(it->DataTy())) {
                 if (id->astKind == ASTKind::STRUCT_DECL) {
                     DynamicCast<StructDecl*>(id)->SetIsCopyType();
                 } else {

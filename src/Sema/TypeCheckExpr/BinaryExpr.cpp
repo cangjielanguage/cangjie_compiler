@@ -1246,7 +1246,6 @@ MatchResult TypeChecker::TypeCheckerImpl::PickConstaintFromTys(TyVar& tv, std::s
     }
 }
 
-// TODO
 MatchResult TypeChecker::TypeCheckerImpl::PickConstaintFromTys(
     ModalTy tv1, ModalTy tv2, std::set<std::pair<AST::ModalTy, AST::ModalTy>> tys, bool isUB)
 {

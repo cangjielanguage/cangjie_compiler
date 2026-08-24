@@ -50,7 +50,7 @@ void TypeChecker::TypeCheckerImpl::CheckSealedInheritance(const Decl& child, con
     if (target == nullptr) {
         return;
     }
-    if (child.astKind == ASTKind::STRUCT_DECL && typeManager.IsCopyInterfaceTy(parent.GetTy().Ty())) {
+    if (child.astKind == ASTKind::STRUCT_DECL && typeManager.IsCopyInterfaceTy(parent.DataTy())) {
         return;
     }
     if (target->TestAttr(Attribute::SEALED)) {

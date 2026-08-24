@@ -125,7 +125,9 @@ OwnedPtr<CallExpr> TypeChecker::TypeCheckerImpl::DesugarStrPartExpr(
                 auto toStringInterface = importManager.GetCoreDecl<InheritableDecl>(TOSTRING_NAME);
                 found = FieldLookup(ctx, toStringInterface, "toString");
             }
-            CJC_ASSERT(found.size() == 2);
+            // Two toString candidates are expected before filtering: the default version and one overload.
+            constexpr size_t TOSTRING_CANDIDATES_BEFORE_FILTER = 2;
+            CJC_ASSERT(found.size() == TOSTRING_CANDIDATES_BEFORE_FILTER);
             FilterToStringImpl(typeManager, found, ie->block->TyMode());
             CJC_ASSERT(found.size() == 1);
             auto toStringFunc = CreateMemberAccess(std::move(ie->block), *found[0]);

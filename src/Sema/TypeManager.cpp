@@ -1179,7 +1179,7 @@ bool TypeManager::IsModalSubtype(ModalInfo leaf, ModalInfo root)
 }
 
 // Whether @p ty is a copy type for modal/locality checking (spec: such types are not subject to locality
-// constraints). Copy types include:
+// constraints). Copy types include.
 // - CType subtypes (excluding CType itself)
 // - Primitive types: Int*, Float*, Bool, Rune, Nothing, Invalid
 // - Tuple whose elements are all copy types; VArray whose element type is a copy type
@@ -2593,7 +2593,7 @@ bool TypeManager::PairIsOverrideOrImpl(const Decl& child, const Decl& parent, co
     }
     return child.astKind == ASTKind::FUNC_DECL
         ? IsOverrideOrShadow(
-              *this, StaticCast<FuncDecl>(child), StaticCast<FuncDecl>(parent), baseTy, baseMode, parentTy, parentMode)
+            *this, StaticCast<FuncDecl>(child), StaticCast<FuncDecl>(parent), baseTy, baseMode, parentTy, parentMode)
         : IsOverrideOrShadow(*this, StaticCast<PropDecl>(child), StaticCast<PropDecl>(parent), baseTy);
 }
 
@@ -3042,7 +3042,7 @@ ModalTy TypeManager::SubstituteTypeAliasInTy(ModalTy ty, bool needSubstituteGene
         }
         case TypeKind::TYPE: {
             return {GetUnaliasedTypeFromTypeAlias(
-                        static_cast<TypeAliasTy&>(raw), dataArgs, needSubstituteGeneric, typeMapping),
+                static_cast<TypeAliasTy&>(raw), dataArgs, needSubstituteGeneric, typeMapping),
                 ty.Mode()};
         }
         case TypeKind::TYPE_TUPLE: {

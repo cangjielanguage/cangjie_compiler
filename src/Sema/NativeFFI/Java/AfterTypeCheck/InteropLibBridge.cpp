@@ -605,7 +605,7 @@ OwnedPtr<Expr> InteropLibBridge::CreateJavaEntityCall(OwnedPtr<Expr> arg)
         return CreateJavaEntityCall(cjExpr->curFile);
     }
 
-    if (IsOptionOfString(cjExpr->GetTy().Ty())) {
+    if (IsOptionOfString(cjExpr->DataTy())) {
         auto curFile = cjExpr->curFile;
         auto match = utils.CreateOptionMatch(std::move(cjExpr),
             [&](VarDecl& v) -> OwnedPtr<Expr> {

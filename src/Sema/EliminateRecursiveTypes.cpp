@@ -258,7 +258,7 @@ void CheckAndUpdateDeclTyWithNewTy(Decl& decl, const EnumTy& specifiedTy, TypeMa
     if (decl.GetTy()->IsTuple()) {
         auto tupleTy = RawStaticCast<TupleTy*>(decl.DataTy());
         bool hasSpecifiedTy = std::find_if(tupleTy->typeArgs.begin(), tupleTy->typeArgs.end(),
-                                  [specifiedPtr](const ModalTy& typeArg) { return typeArg.get() == specifiedPtr; }) !=
+            [specifiedPtr](const ModalTy& typeArg) { return typeArg.get() == specifiedPtr; }) !=
             tupleTy->typeArgs.end();
         if (!hasSpecifiedTy) {
             return;

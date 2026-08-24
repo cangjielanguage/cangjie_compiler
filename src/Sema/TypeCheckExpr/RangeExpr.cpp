@@ -29,7 +29,7 @@ bool TypeChecker::TypeCheckerImpl::CheckRangeElements(ASTContext& ctx, ModalTy e
         isWellTyped = false;
     }
     if (re.stepExpr) {
-        if (!Check(ctx, ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64)}, re.stepExpr.get())) {
+        if (!Check(ctx, {TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64)}, re.stepExpr.get())) {
             if (!CanSkipDiag(*re.stepExpr)) {
                 diag.Diagnose(re, DiagKind::sema_range_step_not_int64);
             }
@@ -107,15 +107,14 @@ ModalTy TypeChecker::TypeCheckerImpl::SynRangeExpr(ASTContext& ctx, RangeExpr& r
         return re.GetTy();
     }
     ModalTy elemTy = SynRangeExprInferElemTy(re, ctx);
-
     if (Ty::IsTyCorrect(elemTy) && elemTy->IsIdeal() && elemTy->IsInteger()) {
-        elemTy = ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64)};
+        elemTy = {TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64)};
     }
 
     if (!CheckRangeElements(ctx, elemTy, re)) {
         return re.GetTy();
     }
-    re.SetTy(ModalTy{typeManager.GetStructTy(*re.decl, {elemTy.Ty()})});
+    re.SetTy({typeManager.GetStructTy(*re.decl, {elemTy.Ty()})});
     return re.GetTy();
 }
 

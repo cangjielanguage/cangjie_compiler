@@ -913,7 +913,8 @@ public:
     std::string ToSrcCodeString() const override;
 
 private:
-    explicit TupleType(const std::vector<Type*>& argTys, ModalInfo modal = ModalInfo{}) : Type(TypeKind::TYPE_TUPLE, modal)
+    explicit TupleType(const std::vector<Type*>& argTys, ModalInfo modal = ModalInfo{})
+        : Type(TypeKind::TYPE_TUPLE, modal)
     {
         this->argTys = argTys;
     }

@@ -606,7 +606,6 @@ void ParserImpl::ParseExprWithRightExprOrType(OwnedPtr<Expr>& base, const Token&
                                           : StaticAs<ASTKind::AS_EXPR>(base.get())->asType = std::move(type);
     } else {
         auto rExpr = ParseExpr(tok, nullptr, ek);
-
         if (rExpr->TestAttr(Attribute::IS_BROKEN)) {
             // The right operand is broken; skip its tail but leave outer delimiters to the enclosing parser.
             auto isRecoverEnd = [this]() {

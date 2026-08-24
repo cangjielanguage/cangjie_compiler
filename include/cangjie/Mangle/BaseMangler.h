@@ -662,7 +662,6 @@ std::string DecimalToManglingNumber(const std::string& decimal);
 //               ::=                        # when all axes default
 //   <payload>   ::= <axis-degree>+
 //   <axis-degree>::= L|l                   # local  axis: ! / ?
-//
 // Axes are emitted in fixed order local -> unique -> immutable; default degrees (~) emit no
 // characters. Only the local axis is implemented today, but the payload builder is structured so
 // further axes can be added without breaking existing encodings.

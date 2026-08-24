@@ -815,7 +815,7 @@ Ptr<Value> Translator::TranslateRawArrayInitByValue(const AST::CallExpr& expr)
         args.emplace_back(TypeCastOrBoxIfNeeded(*TranslateExprArg(*expr.args[i]), *argTypes[i], loc));
     }
     CreateAndAppendExpression<RawArrayInitByValue>(
-        loc, builder.GetUnitTy(), args[0], args[1], args[2], currentBlock);
+        loc, builder.GetUnitTy(), args[0], args[1], args[INIT_BY_VALUE_ARGS - 1], currentBlock);
     return CreateAndAppendConstantExpression<UnitLiteral>(builder.GetUnitTy(), *currentBlock)->GetResult();
 }
 

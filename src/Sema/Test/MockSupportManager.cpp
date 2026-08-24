@@ -1108,7 +1108,7 @@ OwnedPtr<FuncDecl> MockSupportManager::GenerateVarDeclAccessor(VarDecl& fieldDec
     Ptr<FuncTy> accessorTy = isGetter
         ? typeManager.GetFunctionTy(std::vector<ModalTy>{}, fieldDecl.GetTy())
         : typeManager.GetFunctionTy(std::vector<ModalTy>{ModalTy{fieldDecl.GetTy()}},
-              {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
+            {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
     std::vector<OwnedPtr<Node>> body;
     std::vector<OwnedPtr<FuncParam>> accessorParams {};
 

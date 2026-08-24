@@ -78,6 +78,7 @@ ASTMode LocalModalToAST(Mode modal)
             return ASTMode::FULL;
         default:
             CJC_ABORT_WITH_MSG("Unhandled local modal.");
+            return {};
     }
 }
 

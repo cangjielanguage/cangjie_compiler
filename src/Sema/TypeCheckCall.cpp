@@ -24,7 +24,6 @@
 #include "LocalTypeArgumentSynthesis.h"
 #include "TypeCheckUtil.h"
 
-#include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
@@ -1311,7 +1310,7 @@ bool TypeChecker::TypeCheckerImpl::CheckGenericCallCompatible(
         return false;
     }
     if (fd.TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
-        auto targetMode = targetRet.IsCorrect() ? targetRet.Mode() : ce.modal.ToModalInfo();
+        auto targetMode = InferEnumCtorMode(ce, targetRet);
         for (size_t i{0}; i < paramTysInArgOrder.size(); ++i) {
             paramTysInArgOrder[i] = paramTysInArgOrder[i].With(targetMode);
         }
@@ -1504,6 +1503,39 @@ ModalTy TypeChecker::TypeCheckerImpl::GetThisParamTyInScope(const ASTContext& ct
     return {};
 }
 
+/// 1) if ce has mode, use it
+/// 2) else if \ref target present, use it
+/// 3) else if at least one arg is non copy type, use common mode of all non copy type args
+/// 4) otherwise use common mode of all args
+ModalInfo TypeChecker::TypeCheckerImpl::InferEnumCtorMode(const CallExpr& ce, ModalTy target) const
+{
+    if (ce.modal) {
+        return ce.modal.ToModalInfo();
+    }
+    if (target.IsCorrect()) {
+        return target.Mode();
+    }
+    std::vector<bool> nonCopy(ce.args.size(), false);
+    bool hasNonCopy{false};
+    for (size_t i{0}; i < ce.args.size(); ++i) {
+        nonCopy[i] = typeManager.ImplementsCopyInterface(ce.args[i]->DataTy());
+        hasNonCopy = nonCopy[i] | hasNonCopy;
+    }
+    std::set<ModalTy> tys;
+    if (hasNonCopy) {
+        for (size_t i{0}; i < ce.args.size(); ++i) {
+            if (nonCopy[i]) {
+                tys.insert(ce.args[i]->GetTy());
+            }
+        }
+    } else {
+        for (size_t i{0}; i < ce.args.size(); ++i) {
+            tys.insert(ce.args[i]->GetTy());
+        }
+    }
+    return JoinAndMeet::JoinMode(typeManager, tys);
+}
+
 bool TypeChecker::TypeCheckerImpl::CheckCallCompatible(ASTContext& ctx, FunctionCandidate& candidate, ModalTy target)
 {
     auto& ce = candidate.ce;
@@ -1513,7 +1545,7 @@ bool TypeChecker::TypeCheckerImpl::CheckCallCompatible(ASTContext& ctx, Function
         return false;
     }
     if (fd.TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
-        auto targetMode = target.IsCorrect() ? target.Mode() : ce.modal.ToModalInfo();
+        auto targetMode = InferEnumCtorMode(ce, target);
         for (size_t i{0}; i < paramTysInArgOrder.size(); ++i) {
             paramTysInArgOrder[i] = paramTysInArgOrder[i].With(targetMode);
         }
@@ -1798,6 +1830,12 @@ OwnedPtr<FunctionMatchingUnit> TypeChecker::TypeCheckerImpl::CheckCandidate(
             }
         }
         // otherwise it is let c = C(), any mode is accepted, no filter required here.
+    }
+    if (fd.TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
+        auto targetMode = InferEnumCtorMode(ce, targetRet);
+        for (size_t i{0}; i < paramTyInArgOrder.size(); ++i) {
+            paramTyInArgOrder[i] = paramTyInArgOrder[i].With(targetMode);
+        }
     }
     return candidate.stat.argNameValid ? MakeOwned<FunctionMatchingUnit>(fd, paramTyInArgOrder, typeMapping) : nullptr;
 }
@@ -2687,11 +2725,11 @@ static void RemoveMismatchedThisModeForCtorCall(const CallExpr& ce, std::vector<
     /* When call ctor with explicit mode, remove ctor of mismatching mode. This is to avoid such err msg.
     error: mismatched types
      ==> nolocalinit.cj:6:13:
-      | 
+      |
     6 |     let d = Dog() @local!
       |             ^^^ expected 'Class-Dog @local!', found 'Class-Dog'
-      | 
-    
+      |
+
     1 error generated, 1 error printed.
     */
     for (auto it = candidates.begin(); it != candidates.end();) {
