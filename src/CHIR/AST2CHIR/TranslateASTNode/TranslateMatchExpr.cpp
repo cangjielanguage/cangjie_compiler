@@ -449,7 +449,14 @@ void Translator::CollectingSubPatterns(AST::ModalTy patternTy,
         }
         auto tp = DynamicCast<AST::TuplePattern>(pattern);
         if (!tp || isEnumField) {
-            auto elementTy = TranslateType(ty);
+            (void)ty;
+            // Prefer GetFieldOfType so modal on the base (e.g. Enum/Tuple @local?) is
+            // propagated onto the Field result, consistent with CHIRChecker::CheckField.
+            Type* elementTy = value->GetType();
+            for (auto idx : indexes) {
+                elementTy = GetFieldOfType(*elementTy, idx, builder);
+                CJC_NULLPTR_CHECK(elementTy);
+            }
             auto elementVal = CreateAndAppendExpression<Field>(elementTy, value, indexes, currentBlock)->GetResult();
             queue.push(std::make_pair(pattern, elementVal));
             return;
@@ -920,8 +927,9 @@ std::unordered_map<size_t, std::vector<Ptr<Block>>> Translator::TranslateSecondL
         auto& firstPattern = *enumPattern.patterns[0];
         PrintDebugMessage(opts.chirDebugOptimizer, enumPattern);
         CJC_ASSERT(firstPattern.GetTy()->IsInteger() || firstPattern.GetTy()->IsRune());
-        auto selectorTy = TranslateType(firstPattern.GetTy());
         auto enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, enumPattern);
+        auto selectorTy = GetFieldOfType(*enumValueTuple->GetType()->StripAllRefs(), 1, builder);
+        CJC_NULLPTR_CHECK(selectorTy);
         auto secondSelectVar =
             CreateAndAppendExpression<Field>(selectorTy, enumValueTuple, std::vector<uint64_t>{1}, currentBlock)
                 ->GetResult();
@@ -958,13 +966,13 @@ void Translator::TranslateSecondLevelTable(Ptr<Block> endBlock, const Ptr<Block>
         hasGotoBase = hasGotoBase || current.ep.patterns.size() == 1;
         auto falseBlock = CreateBlock();
         std::queue<std::pair<Ptr<const AST::Pattern>, Ptr<Value>>> queue;
-        auto elementTys = StaticCast<AST::FuncTy>(current.ep.constructor->DataTy())->paramTys;
         // When first pattern is wildcard and current pattern is not, we need to check from first sub-pattern,
         // otherwise only need to start from second sub-pattern.
         size_t start = isWildcardPattern && current.ep.patterns[0]->astKind != AST::ASTKind::WILDCARD_PATTERN ? 0 : 1;
         for (size_t i = start; i < current.ep.patterns.size(); ++i) {
-            auto elementTy = TranslateType(elementTys[i]);
             auto enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, current.ep);
+            auto elementTy = GetFieldOfType(*enumValueTuple->GetType()->StripAllRefs(), 1 + i, builder);
+            CJC_NULLPTR_CHECK(elementTy);
             auto elementVal =
                 CreateAndAppendExpression<Field>(elementTy, enumValueTuple, std::vector<uint64_t>{1 + i}, currentBlock)
                     ->GetResult();

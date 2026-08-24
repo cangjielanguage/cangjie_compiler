@@ -737,10 +737,13 @@ std::vector<Value*> Translator::TranslateFuncArgs(
             // constructor
             thisObj = GetCurrentFunc()->GetParam(0);
         } else {
-            // For trivial constructor call site, the object allocation is lifted out and then pass into constructor as
-            // `this` arg
-            auto thisTy = chirTy.TranslateType(expr.GetTy())->StripAllRefs();
-            auto allocateThis = TryCreate<Allocate>(currentBlock, loc, builder.GetType<RefType>(thisTy), thisTy);
+            // Allocate with constructor `this` type when provided (matches init's this-modal).
+            // Call-site result modal (e.g. `F@local!`) is applied after Load by the caller.
+            Type* allocElemTy = expectedThisObjTy != nullptr
+                ? expectedThisObjTy->StripAllRefs()
+                : chirTy.TranslateType(expr.GetTy())->StripAllRefs();
+            auto allocateThis =
+                TryCreate<Allocate>(currentBlock, loc, builder.GetType<RefType>(allocElemTy), allocElemTy);
             allocateThis->Set<DebugLocationInfoForWarning>(loc);
             thisObj = allocateThis->GetResult();
         }
@@ -1003,9 +1006,9 @@ Translator::LeftValueInfo Translator::TranslateStructOrClassCtorCallAsLeftValue(
         return LeftValueInfo(nullptr, {});
     }
 
-    // Calculate instantiated callee func type
-    auto thisTy = chirTy.TranslateType(expr.GetTy())->StripAllRefs();
-    auto thisTyRef = builder.GetType<RefType>(thisTy);
+    // `this` must match constructor this-modal; call result modal is separate.
+    auto resultTy = chirTy.TranslateType(expr.GetTy())->StripAllRefs();
+    auto thisTyRef = GetThisTypeWithModal(*resultTy, *expr.resolvedFunction);
     auto [paramInstTys, retInstTy] = GetMemberFuncParamAndRetInstTypes(expr);
 
     // Translate arguments
@@ -1014,8 +1017,7 @@ Translator::LeftValueInfo Translator::TranslateStructOrClassCtorCallAsLeftValue(
     CJC_ASSERT(callee != nullptr && "TranslateApply: not supported callee now!");
     auto funcCallContext = FuncCallContext {
         .args = args,
-        // remove modal info from this type, but keep ref info
-        .thisType = builder.GetType<RefType>(thisTyRef->StripAllRefs())
+        .thisType = thisTyRef
     };
     CreateAndAppendApplyCallFromCallExpr(*callee, funcCallContext, *retInstTy, expr);
 
@@ -1059,9 +1061,11 @@ Value* Translator::TranslateStructOrClassCtorCall(const AST::CallExpr& expr)
     // Translate code position info
     const auto& loc = TranslateLocation(expr);
 
-    // Calculate instantiated callee func type
-    auto thisTy = chirTy.TranslateType(expr.GetTy())->StripAllRefs();
-    auto thisTyRef = builder.GetType<RefType>(thisTy);
+    // `this` for init must follow constructor this-modal (e.g. plain `init()` vs `init(this @local!)`),
+    // not the call-site result modal (`let a: F@local! = F()`).
+    auto resultTy = chirTy.TranslateType(expr.GetTy())->StripAllRefs();
+    auto thisTyRef = GetThisTypeWithModal(*resultTy, *expr.resolvedFunction);
+    auto thisTy = thisTyRef->StripAllRefs();
     auto [paramInstTys, retInstTy] = GetMemberFuncParamAndRetInstTypes(expr);
 
     // Translate arguments
@@ -1070,8 +1074,7 @@ Value* Translator::TranslateStructOrClassCtorCall(const AST::CallExpr& expr)
     CJC_ASSERT(callee != nullptr && "TranslateApply: not supported callee now!");
     auto funcCallContext = FuncCallContext {
         .args = args,
-        // remove modal info from this type, but keep ref info
-        .thisType = builder.GetType<RefType>(thisTy->StripAllRefs())
+        .thisType = thisTyRef
     };
     CreateAndAppendApplyCallFromCallExpr(*callee, funcCallContext, *retInstTy, expr);
 
@@ -1086,9 +1089,10 @@ Value* Translator::TranslateStructOrClassCtorCall(const AST::CallExpr& expr)
             load->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
             // should be: return nullptr;
         }
-        return load->GetResult();
+        // Cast to call result type when modal differs (Allocate/init used constructor this-modal).
+        return TypeCastOrBoxIfNeeded(*load->GetResult(), *resultTy, loc);
     }
-    return args[0];
+    return TypeCastOrBoxIfNeeded(*args[0], *builder.GetType<RefType>(resultTy), loc);
 }
 
 Ptr<Value> Translator::TranslateCFuncCtorCall(const AST::CallExpr& expr)
@@ -1350,7 +1354,9 @@ Ptr<Type> Translator::GetMemberFuncCallerInstType(const AST::CallExpr& expr, boo
     if (needExactTy && callerType != nullptr && expr.resolvedFunction != nullptr) {
         auto [paramInstTys, retInstTy] = GetMemberFuncParamAndRetInstTypes(expr);
         if (expr.resolvedFunction != nullptr && !expr.resolvedFunction->TestAttr(AST::Attribute::STATIC)) {
-            paramInstTys.insert(paramInstTys.begin(), callerType);
+            // Normalize this-modal to match method FuncType; otherwise GetExpectedFunc rejects
+            // modal overloads such as `append(this @local!, ...)`.
+            paramInstTys.insert(paramInstTys.begin(), GetThisTypeWithModal(*callerType, *expr.resolvedFunction));
         }
         auto instFuncType = builder.GetType<FuncType>(paramInstTys, retInstTy);
         std::vector<Type*> funcInstTypeArgs;

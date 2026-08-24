@@ -41,11 +41,14 @@ void Translator::HandleVarWithTupleAndEnumPattern(const AST::Pattern& pattern,
     for (size_t i = 0; i < subPatterns.size(); i++) {
         Ptr<Value> rVal = nullptr;
         if (leftValue != nullptr) {
-            auto fieldType = TranslateType(subPatterns[i]->GetTy());
             auto fieldIndex = isEnumPattern ? i + 1 : i; // add 1 to index when base type is enum
             std::vector<uint64_t> path{fieldIndex};
             auto baseValue = isEnumPattern ? CastEnumValueToConstructorTupleType(
                 leftValue, StaticCast<AST::EnumPattern&>(pattern)) : leftValue;
+            // Use GetFieldOfType so parent modal (e.g. Tuple @local?) is propagated to the
+            // Field result, matching CHIRChecker::CheckField.
+            auto fieldType = GetFieldOfType(*baseValue->GetType()->StripAllRefs(), fieldIndex, builder);
+            CJC_NULLPTR_CHECK(fieldType);
             rVal = CreateAndAppendExpression<Field>(fieldType, baseValue, std::move(path), currentBlock)->GetResult();
         }
         FlattenVarWithPatternDecl(*subPatterns[i], rVal, isLocalPattern);
