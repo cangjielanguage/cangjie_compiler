@@ -6,12 +6,10 @@
 
 #include "Diags.h"
 #include "JoinAndMeet.h"
-#include "NodeContext.h"
 #include "ScopeManager.h"
 #include "TypeCheckUtil.h"
 #include "TypeCheckerImpl.h"
 #include "cangjie/AST/ASTContext.h"
-#include "cangjie/AST/Create.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/ScopeManagerApi.h"
 #include "cangjie/AST/Utils.h"
@@ -723,11 +721,14 @@ private:
             return;
         }
         if (auto funcSym = ScopeManager::GetCurSatisfiedSymbolUntilTopLevel(ctx, expr.scopeName, [](Symbol& sym) {
-            if (auto func = DynamicCast<FuncDecl>(sym.node)) {
-                return func->TestAttr(Attribute::MAIN_ENTRY) || func->IsFinalizer() ||
-                    (func->TestAttr(Attribute::CONSTRUCTOR) && func->TestAttr(Attribute::STATIC));
+            auto func = DynamicCast<FuncDecl>(sym.node);
+            if (func == nullptr) {
+                return false;
             }
-            return false;
+            if (func->TestAttr(Attribute::MAIN_ENTRY) || func->IsFinalizer()) {
+                return true;
+            }
+            return func->TestAttr(Attribute::CONSTRUCTOR) && func->TestAttr(Attribute::STATIC);
         })) {
             DiagExclaveInForbiddenContext(expr, GetForbiddenContextName(*funcSym->node));
         }

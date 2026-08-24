@@ -87,13 +87,15 @@ private:
     /**
      * Get instantiated members from super types (interfaces or classes).
      */
-    void GetInstMemberFromSuper(AST::DataTy instBaseTy, Ptr<AST::InheritableDecl> baseDecl, MemberFuncsWithInstTys& funcs,
+    void GetInstMemberFromSuper(
+        AST::DataTy instBaseTy, Ptr<AST::InheritableDecl> baseDecl, MemberFuncsWithInstTys& funcs,
         const std::string& identifier, bool isCheckingInterface);
 
     /**
      * Merge member functions from extend declarations, selecting the subclass version in case of conflicts.
      */
-    void MergeExtendSuperMember(AST::DataTy instBaseTy, MemberFuncsWithInstTys& funcs, MemberFuncsWithInstTys& newFuncs);
+    void MergeExtendSuperMember(
+        AST::DataTy instBaseTy, MemberFuncsWithInstTys& funcs, MemberFuncsWithInstTys& newFuncs);
 
     /**
      * Merge new functions into existing functions, avoiding duplicates.

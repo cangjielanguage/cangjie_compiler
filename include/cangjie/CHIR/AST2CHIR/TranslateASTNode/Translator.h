@@ -151,8 +151,8 @@ public:
     /**
      * @brief Translates a type from AST to CHIR, applying AST modal via SubstituteModal.
      */
-     Ptr<Type> TranslateType(AST::ModalTy ty);
-    
+    Ptr<Type> TranslateType(AST::ModalTy ty);
+
     /**
      * @brief Retrieves the debug location information of a value.
      *

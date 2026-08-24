@@ -855,7 +855,8 @@ public:
     std::string ToString() const override;
 
 private:
-    explicit StructType(StructDef* structDef, const std::vector<Type*>& genericArgs = {}, ModalInfo modal = ModalInfo{});
+    explicit StructType(StructDef* structDef, const std::vector<Type*>& genericArgs = {},
+        ModalInfo modal = ModalInfo{});
     ~StructType() override = default;
     friend class CHIRContext;
 };

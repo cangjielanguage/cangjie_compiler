@@ -570,7 +570,8 @@ private:
         return subPatterns;
     }
 
-    static DestructedPattern FromTuplePattern(TypeManager& typeManager, TuplePattern& tuplePattern, ModalInfo targetMode)
+    static DestructedPattern FromTuplePattern(TypeManager& typeManager, TuplePattern& tuplePattern,
+        ModalInfo targetMode)
     {
         CJC_ASSERT(tuplePattern.GetTy().IsCorrect() && tuplePattern.GetTy()->IsTuple());
         const TupleTy& tupleTy = StaticCast<TupleTy>(*tuplePattern.GetTy());

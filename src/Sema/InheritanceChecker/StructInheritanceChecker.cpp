@@ -382,7 +382,8 @@ void StructInheritanceChecker::CheckMembersWithInheritedDecls(const InheritableD
         std::pair<MemberMap::const_iterator, MemberMap::const_iterator> inherited =
             visibleExtendMembers.equal_range(member->identifier);
         MemberSignature memberSig{
-            member, member->DataTy(), decl.DataTy(), GetThisParamModal(*member), nullptr, GetAllGenericUpperBounds(typeManager, *member)};
+            member, member->DataTy(), decl.DataTy(), GetThisParamModal(*member), nullptr,
+            GetAllGenericUpperBounds(typeManager, *member)};
         for (auto it = inherited.first; it != inherited.second; ++it) {
             CheckInheritedMember(it->second, memberSig);
         }
@@ -703,7 +704,8 @@ std::pair<MemberMap, MemberMap> StructInheritanceChecker::GetVisibleExtendMember
             }
             auto memberTy = typeManager.GetInstantiatedTy(edMember->DataTy(), typeMapping);
             auto structTy = typeManager.GetInstantiatedTy(extend->DataTy(), typeMapping);
-            MemberSignature sig{edMember, memberTy, structTy, GetThisParamModal(*edMember), extend, GetAllGenericUpperBounds(typeManager, *edMember)};
+            MemberSignature sig{edMember, memberTy, structTy, GetThisParamModal(*edMember), extend,
+                GetAllGenericUpperBounds(typeManager, *edMember)};
             (void)UpdateInheritedMemberIfNeeded(extendMap, sig);
         }
     }
@@ -790,7 +792,9 @@ void StructInheritanceChecker::DiagnoseForConflictInheritance(
         auto count = static_cast<size_t>(std::distance(found.first, found.second));
         // Only function and prop allow overloading.
         bool allFunc = std::all_of(found.first, found.second, [](auto& it) { return it.second.decl->IsFunc(); }) ||
-            std::all_of(found.first, found.second, [](auto it) { return it.second.decl->astKind == ASTKind::PROP_DECL; });
+            std::all_of(found.first, found.second, [](auto it) {
+                return it.second.decl->astKind == ASTKind::PROP_DECL;
+            });
         if (count > 1 && !allFunc) {
             auto diagBuilder = diag.DiagnoseRefactor(DiagKindRefactor::sema_inherit_super_member_kind_inconsistent,
                 decl, MakeRange(decl.identifier), identifier);

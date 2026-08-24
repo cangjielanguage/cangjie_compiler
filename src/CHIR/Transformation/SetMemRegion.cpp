@@ -54,7 +54,8 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
             return VisitResult::SKIP;
         }
         if (Is<FuncCall>(expr)) {
-            // 1. function call where the callee return type does not implement `Copyable` and has mode `local!` or `local?`
+            // 1. function call where the callee return type does not implement `Copyable` and has mode
+            // `local!` or `local?`
             if (expr.GetResult()->GetType()->StripAllRefs()->IsLocalRegion()) {
                 auto body = expr.GetFuncOrLambdaBody();
                 CJC_NULLPTR_CHECK(body);
