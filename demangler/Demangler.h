@@ -303,9 +303,16 @@ private:
     void SkipChar(char ch);
 
     void SkipOptionalChar(char ch);
-    bool IsLocalModifier() const;
-    T DemangleLocalModifier();
-    void AppendLocalModifierIfExists(DemangleInfo<T>& di);
+    /// Whether the current character starts a <mode-set> leader (`Q` or `W`).
+    bool IsModeLeader() const;
+    /// Whether the current character is the <this-mode> leader `W`.
+    bool IsThisMode() const;
+    /// Parse a <mode-set> (`Q<payload>E` or `W<payload>E`) and return the demangled modal
+    /// suffix, e.g. " @ local!" / " @ local?". The caller must ensure the current char is a leader.
+    T DemangleModeSet();
+    /// If the current position holds a <mode-set> (`Q<payload>E` | `W<payload>E`), parse it and append the
+    /// demangled modal suffix to \p di.
+    void AppendModeTypeIfExists(DemangleInfo<T>& di);
 
     void SkipString(const char pattern[]);
     void ErrorLog(const char* msg) const;

@@ -130,9 +130,10 @@ std::string GenerateAnnotationFuncMangleName(const std::string& name)
 namespace ClosureConversion {
 std::string GenerateGenericBaseClassMangleName(const FuncType& funcType)
 {
+    // axis-degree letters (uppercase = MUST/!, lowercase = MAYBE/?)
     static const std::map<CHIR::Mode, std::string> LOCAL_MODAL_TO_STRING = {
-        {CHIR::Mode::MAYBE, "?"},
-        {CHIR::Mode::MUST, "!"},
+        {CHIR::Mode::MAYBE, "l"},
+        {CHIR::Mode::MUST, "L"},
     };
     std::stringstream ss;
     // `$C` is a special prefix for closure conversion class declarations. `g` stands for generic.

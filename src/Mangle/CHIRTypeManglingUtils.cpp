@@ -214,7 +214,7 @@ std::string MangleArraySliceType(const CHIR::Type& t, const std::vector<std::str
     std::stringstream ss;
     ss << MANGLE_ARRAY_SLICE_PREFIX;
     ss << MangleType(*t.GetTypeArgs()[0], genericsTypeStack, useGenericName);
-    ss << MANGLE_SUFFIX << MangleUtils::MangleLocalModifier(t.GetModalInfo());
+    ss << MANGLE_SUFFIX << MangleUtils::MangleTypeMode(t.GetModalInfo());
     return ss.str();
 }
 

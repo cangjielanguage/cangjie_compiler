@@ -938,13 +938,13 @@ std::optional<std::string> PollutionAnalyzer::GetExtendedTypeRawMangleNameImpl(c
         case ASTKind::PRIMITIVE_TYPE: {
             auto primitiveType = StaticCast<const PrimitiveType*>(&extendedType);
             return ASTMangler::ManglePrimitiveType(*primitiveType) +
-                MangleUtils::MangleLocalModifier(primitiveType->modal.ToModalInfo());
+                MangleUtils::MangleTypeMode(primitiveType->modal.ToModalInfo());
         }
         case ASTKind::REF_TYPE: {
             auto refType = StaticCast<const RefType*>(&extendedType);
             // use special lookup rule for builtin non-primitive types
             if (auto specialName = LookupSpecialBuiltinType(*refType)) {
-                return *specialName + MangleUtils::MangleLocalModifier(refType->modal.ToModalInfo());
+                return *specialName + MangleUtils::MangleTypeMode(refType->modal.ToModalInfo());
             }
             typeId = &refType->ref.identifier.Val();
             break;

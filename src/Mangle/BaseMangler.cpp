@@ -172,34 +172,66 @@ std::string DecimalToManglingNumber(const std::string& decimal)
     return base62 + MANGLE_WILDCARD_PREFIX;
 }
 
-std::string MangleLocalModifier(ModalInfo modal)
+std::string MangleModePayload(ModalInfo modal)
 {
+    // Fixed axis order: local -> unique -> immutable. Only the local axis is implemented.
+    // axis-degree: uppercase letter = FULL (!), lowercase = HALF (?); NOT emits nothing.
+    std::string payload;
     switch (modal.local) {
         case Mode::NOT:
-            return "";
+            break;
         case Mode::HALF:
-            return "?";
+            payload += "l";
+            break;
         case Mode::FULL:
-            return "!";
+            payload += "L";
+            break;
         default:
             CJC_ABORT();
-            return "";
     }
+    return payload;
 }
 
-std::string MangleLocalModifier(CHIR::ModalInfo modal)
+std::string MangleTypeMode(ModalInfo modal)
 {
+    std::string payload = MangleModePayload(modal);
+    if (payload.empty()) {
+        return "";
+    }
+    return MANGLE_TYPE_MODE_PREFIX + payload + MANGLE_SUFFIX;
+}
+
+std::string MangleTypeMode(CHIR::ModalInfo modal)
+{
+    // Fixed axis order: local -> unique -> immutable. Only the local axis is implemented.
+    // axis-degree: uppercase letter = MUST (!), lowercase = MAYBE (?); NONE emits nothing.
+    std::string payload;
     switch (modal.Local()) {
         case CHIR::Mode::NONE:
-            return "";
+            break;
         case CHIR::Mode::MAYBE:
-            return "?";
+            payload += "l";
+            break;
         case CHIR::Mode::MUST:
-            return "!";
+            payload += "L";
+            break;
         default:
             CJC_ASSERT(false && "unexpected modal to be mangled");
             return "";
     }
+    if (payload.empty()) {
+        return "";
+    }
+    return MANGLE_TYPE_MODE_PREFIX + payload + MANGLE_SUFFIX;
+}
+
+std::string MangleThisMode(ModalInfo modal)
+{
+    std::string payload = MangleModePayload(modal);
+    if (payload.empty()) {
+        return "";
+    }
+    return MANGLE_THIS_MODE_PREFIX + payload + MANGLE_SUFFIX;
 }
 } // namespace MangleUtils
 
@@ -597,22 +629,23 @@ std::string BaseMangler::MangleFunctionDecl(const FuncDecl& funcDecl, const std:
     } else {
         mangled = MangleDecl(funcDecl, prefix, genericsTypeStack, true, false);
     }
-    // Add local modal mangling for instance member functions with local thisParam
-    // Check if it's an instance member function (has thisParam and not static)
+    mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX;
+    // Add local modal mangling for instance member functions with local thisParam.
+    // Check if it's an instance member function (has thisParam and not static).
+    // <this-mode> (W<payload>E) is emitted right after `H`, before the explicit params.
     if (!funcDecl.TestAttr(Attribute::STATIC) && funcDecl.funcBody) {
         auto& paramList = funcDecl.funcBody->paramLists[0];
         if (paramList->thisParam) {
             auto modalInfo = paramList->thisParam->modal.ToModalInfo();
-            mangled += MangleUtils::MangleLocalModifier(modalInfo);
+            mangled += MangleUtils::MangleThisMode(modalInfo);
         } else if (funcDecl.propDecl != nullptr) {
             // Accessor (getter/setter) no longer carries an explicit thisParam; its this-modal
             // is the modal of the owning property's type.
             auto propTy = funcDecl.propDecl->type ? funcDecl.propDecl->type->GetTy()
                 : funcDecl.propDecl->GetTy();
-            mangled += MangleUtils::MangleLocalModifier(propTy.Mode());
+            mangled += MangleUtils::MangleThisMode(propTy.Mode());
         }
     }
-    mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX;
 
     // Mangle function parameters.
     mangled += MangleFuncParams(funcDecl, genericsTypeStack, false);
@@ -1055,8 +1088,9 @@ std::string BaseMangler::MangleExportId(Decl& decl) const
             std::for_each(propDecl.setters.begin(), propDecl.setters.end(), mangleExport);
             // For modal-overloaded properties (multiple same-name PropDecl with different modal
             // on the prop type), include the modal so the PropDecl-level exportId stays unique.
+            // <prop-decl-export-id> ::= <path><prop-name>[<mode-set>] (type-mode, leader Q).
             auto propTy = propDecl.type ? propDecl.type->GetTy() : propDecl.GetTy();
-            return Mangle(propDecl) + MangleUtils::MangleLocalModifier(propTy.Mode());
+            return Mangle(propDecl) + MangleUtils::MangleTypeMode(propTy.Mode());
         },
         [](const PrimaryCtorDecl& /* primaryCtorDecl */) { return std::string(); },
         [&decl, this]() {
@@ -1098,8 +1132,7 @@ std::string BaseMangler::MangleEnumType(
     ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
 {
     CJC_ASSERT(ty.Kind() == TypeKind::TYPE_ENUM);
-    return MangleUtils::WithModal(
-        MangleUserDefinedType(ty, genericsTypeStack, declare, isCollectGTy), ty.Mode());
+    return MangleUserDefinedType(ty, genericsTypeStack, declare, isCollectGTy);
 }
 
 std::string BaseMangler::MangleRawArrayType(
