@@ -21,7 +21,7 @@ Ptr<Value> Translator::Visit(const AST::ExtendDecl& decl)
     CreateAnnotationInfo<ExtendDef>(decl, *extendDef, extendDef);
 
     // step 2: set extended type
-    auto extendedTy = chirTy.TranslateType(*decl.extendedType->GetTy());
+    auto extendedTy = chirTy.TranslateType(decl.extendedType->DataTy());
     if (extendedTy->IsRef()) {
         extendedTy = StaticCast<RefType*>(extendedTy)->GetBaseType();
     }
@@ -91,7 +91,7 @@ Ptr<Value> Translator::Visit(const AST::ExtendDecl& decl)
 
     // step 4: set implemented interface
     for (auto& superType : decl.GetStableSuperInterfaceTys()) {
-        auto someTy = TranslateType(*superType);
+        auto someTy = TranslateType(superType);
         auto realType = StaticCast<RefType*>(someTy)->GetBaseType();
         extendDef->AddImplementedInterfaceTy(*StaticCast<ClassType*>(realType));
     }
@@ -101,7 +101,7 @@ Ptr<Value> Translator::Visit(const AST::ExtendDecl& decl)
         CJC_NULLPTR_CHECK(decl.generic);
         auto genericDecl = decl.generic.get();
         for (auto& genericTy : genericDecl->typeParameters) {
-            chirTy.FillGenericArgType(*StaticCast<AST::GenericsTy*>(genericTy->GetTy()));
+            chirTy.FillGenericArgType(*StaticCast<AST::GenericsTy*>(genericTy->DataTy()));
         }
     }
     return nullptr;

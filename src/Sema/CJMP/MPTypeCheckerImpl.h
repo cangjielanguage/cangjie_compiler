@@ -71,7 +71,7 @@ private:
 
     bool IsCJMPDeclMatchable(AST::Decl& lhsDecl, AST::Decl& rhsDecl) const;
     bool MatchCJMPDeclAttrs(
-        const std::vector<AST::Attribute>& attrs, const AST::Decl& common, const AST::Decl& specific) const;
+        const std::vector<AST::Attribute>& attrs, AST::Decl& common, AST::Decl& specific) const;
     bool MatchCJMPDeclAnnotations(const AST::Decl& common, AST::Decl& specific) const;
     void PropagateCJMPDeclAnnotations(const AST::Decl& common, AST::Decl& specific) const;
     void PropagateDefaultArguments(const AST::FuncParamList& commonParams, const AST::FuncParamList& specificParams,
@@ -81,7 +81,7 @@ private:
     bool TrySetSpecificImpl(AST::Decl& specificDecl, AST::Decl& commonDecl, const std::string& kind);
     /// Returns `true` if there is not platform declaration,
     /// in other cases check that common can me matched with platform(e.g. modifiers conform)
-    bool MatchCommonNominalDeclWithSpecific(const AST::InheritableDecl& commonDecl);
+    bool MatchCommonNominalDeclWithSpecific(AST::InheritableDecl& commonDecl);
     void CheckCommonSpecificGenericMatch(const AST::Decl& specificDecl, const AST::Decl& commonDecl);
 
 public:

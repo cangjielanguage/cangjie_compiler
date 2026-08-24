@@ -362,7 +362,8 @@ template <> flatbuffers::Offset<PackageFormat::Type> CHIRSerializer::CHIRSeriali
 {
     auto kind = PackageFormat::CHIRTypeKind(obj.GetTypeKind());
     auto argTys = GetId<Type>(obj.GetTypeArgs());
-    return PackageFormat::CreateTypeDirect(builder, kind, argTys.empty() ? nullptr : &argTys);
+    auto modal = PackageFormat::CreateModalInfo(builder, PackageFormat::Mode(obj.GetModalInfo().Local()));
+    return PackageFormat::CreateTypeDirect(builder, kind, argTys.empty() ? nullptr : &argTys, modal);
 }
 
 template <>
@@ -703,6 +704,12 @@ static PackageFormat::CHIRExprKind ToPackageExprKind(const Expression& expr)
         case ExprKind::INTRINSIC:               return PackageFormat::CHIRExprKind_Intrinsic;
         case ExprKind::GET_RTTI:                return PackageFormat::CHIRExprKind_GetRtti;
         case ExprKind::GET_RTTI_STATIC:         return PackageFormat::CHIRExprKind_GetRttiStatic;
+        case ExprKind::EXCLAVE:
+            return PackageFormat::CHIRExprKind_Exclave;
+        case ExprKind::START_REGION:
+            return PackageFormat::CHIRExprKind_StartRegion;
+        case ExprKind::END_REGION:
+            return PackageFormat::CHIRExprKind_EndRegion;
         case ExprKind::FORIN_RANGE:
         case ExprKind::FORIN_ITER:
         case ExprKind::FORIN_CLOSED_RANGE:
@@ -1304,6 +1311,7 @@ template <> flatbuffers::Offset<void> CHIRSerializer::CHIRSerializerImpl::Dispat
                 StaticCast<const UnaryExpressionBase&>(obj)).Union();
         case ExprKind::GOTO:
         case ExprKind::EXIT:
+        case ExprKind::EXCLAVE:
         case ExprKind::RAISE_EXCEPTION:
         case ExprKind::LOAD:
         case ExprKind::STORE:
@@ -1315,6 +1323,8 @@ template <> flatbuffers::Offset<void> CHIRSerializer::CHIRSerializerImpl::Dispat
         case ExprKind::BOX:
         case ExprKind::UNBOX_TO_VALUE:
         case ExprKind::GET_EXCEPTION:
+        case ExprKind::START_REGION:
+        case ExprKind::END_REGION:
         case ExprKind::RAW_ARRAY_LITERAL_INIT:
         case ExprKind::RAW_ARRAY_INIT_BY_VALUE:
         case ExprKind::VARRAY:

@@ -12,7 +12,6 @@
 
 #include "DesugarInTypeCheck.h"
 
-#include <memory>
 #include <utility>
 #include <vector>
 
@@ -35,7 +34,7 @@ using namespace TypeCheckUtil;
 namespace {
 OwnedPtr<AST::Expr> TryDesugarFunctionCallExpr(OwnedPtr<AST::Expr> base)
 {
-    if (!Ty::IsInitialTy(base->GetTy()) && base->TyKind() != TypeKind::TYPE_FUNC) {
+    if (!Ty::IsInitialTy(base->DataTy()) && base->TyKind() != TypeKind::TYPE_FUNC) {
         // Try to desugar base as base.operator().
         // NOTE: 'curFile' and 'curMacroCall' will be set from caller of current method.
         auto newBase = MakeOwnedNode<MemberAccess>();
@@ -105,7 +104,7 @@ void IgnoreEmptyIntersection(std::vector<Ptr<Type>>& baseArgs)
 {
     for (auto it = baseArgs.begin(); it != baseArgs.end();) {
         CJC_ASSERT(*it != nullptr);
-        auto iTy = DynamicCast<IntersectionTy*>((*it)->GetTy());
+        auto iTy = DynamicCast<IntersectionTy>((*it)->DataTy());
         bool isEmpty = iTy && iTy->tys.empty();
         it = isEmpty ? baseArgs.erase(it) : it + 1;
     }
@@ -209,6 +208,22 @@ void DesugarPrimaryCtorHandleParamSetEachParam(
     }
 }
 
+void DesugarPrimaryCtorHandleThisParam(
+    Decl& decl, const PrimaryCtorDecl& fd, const OwnedPtr<FuncParamList>& funcParamList)
+{
+    if (fd.funcBody->paramLists.empty()) {
+        return;
+    }
+    auto& thisParam = fd.funcBody->paramLists[0]->thisParam;
+    if (!thisParam) {
+        return;
+    }
+    auto ret = ASTCloner::Clone<ThisParam>(thisParam.get(), SetIsClonedSourceCode);
+    ret->EnableAttr(Attribute::COMPILER_ADD);
+    ret->outerDecl = &decl;
+    funcParamList->thisParam = std::move(ret);
+}
+
 void DesugarPrimaryCtorHandleParam(Decl& decl, const PrimaryCtorDecl& fd, const OwnedPtr<FuncBody>& funcBody,
     const OwnedPtr<FuncParamList>& funcParamList)
 {
@@ -235,6 +250,7 @@ void DesugarPrimaryCtorHandleParam(Decl& decl, const PrimaryCtorDecl& fd, const 
         }
         funcParamList->params.push_back(std::move(param));
     }
+    DesugarPrimaryCtorHandleThisParam(decl, fd, funcParamList);
     // Member variable param.
     DesugarPrimaryCtorHandleParamSetEachParam(decl, fd, funcBody);
 }
@@ -567,21 +583,22 @@ void TypeChecker::TypeCheckerImpl::DesugarPointerCall(ASTContext& ctx, CallExpr&
     pointerExpr->type = MakeOwnedNode<Type>();
     ctx.RemoveTypeCheckCache(*pointerExpr);
     ctx.RemoveTypeCheckCache(*(pointerExpr->type));
-    auto baseFuncTy =
-        ce.baseFunc->GetTy() ? typeManager.SubstituteTypeAliasInTy(*ce.baseFunc->GetTy()) : TypeManager::GetInvalidTy();
+    auto baseFuncTy = ce.baseFunc->GetTy()
+        ? typeManager.SubstituteTypeAliasInTy(ce.baseFunc->GetTy())
+        : ModalTy{TypeManager::GetInvalidTy()};
     CJC_ASSERT(baseFuncTy);
     auto typeArgs = baseFuncTy->typeArgs;
     auto baseArgs = ce.baseFunc->GetTypeArgs();
     IgnoreEmptyIntersection(baseArgs);
     // Eg: type A<T> = Pointer<T>; A(v), type arg of this A is not useful.
     bool usefulTypeArg = !typeArgs.empty() && (!typeArgs[0]->IsGeneric() || !baseArgs.empty());
-    Ptr<Ty> argTy = nullptr;
+    ModalTy argTy{};
     if (usefulTypeArg) {
         argTy = typeArgs[0];
     } else if (!baseArgs.empty()) {
         argTy = baseArgs[0]->GetTy();
     }
-    pointerExpr->type->SetTy(typeManager.GetPointerTy(argTy));
+    pointerExpr->type->SetTy(ModalTy{typeManager.GetPointerTy(argTy.Ty())}.With(argTy ? argTy.Mode() : ModalInfo{}));
     if (!ce.args.empty()) {
         pointerExpr->arg = std::move(ce.args[0]);
     }
@@ -597,44 +614,30 @@ void TypeChecker::TypeCheckerImpl::DesugarPointerCall(ASTContext& ctx, CallExpr&
     AddCurFile(ce, ce.curFile);
 }
 
-void TypeChecker::TypeCheckerImpl::DesugarArrayCall(ASTContext& ctx, CallExpr& ce)
+void TypeChecker::TypeCheckerImpl::DesugarVArrayCall(ASTContext& ctx, CallExpr& ce)
 {
     auto arrayExpr = MakeOwnedNode<ArrayExpr>();
     arrayExpr->type = MakeOwnedNode<Type>();
     ctx.RemoveTypeCheckCache(*arrayExpr);
     ctx.RemoveTypeCheckCache(*(arrayExpr->type));
-    auto baseFuncTy =
-        ce.baseFunc->GetTy() ? typeManager.SubstituteTypeAliasInTy(*ce.baseFunc->GetTy()) : TypeManager::GetInvalidTy();
+    auto baseFuncTy = ce.baseFunc->GetTy()
+        ? typeManager.SubstituteTypeAliasInTy(ce.baseFunc->GetTy())
+        : ModalTy{TypeManager::GetInvalidTy()};
     CJC_ASSERT(baseFuncTy);
     auto typeArgs = typeManager.GetTypeArgs(*baseFuncTy); // ArrayTy has 'dims', must using function to get arguments.
     auto baseArgs = ce.baseFunc->GetTypeArgs();
     IgnoreEmptyIntersection(baseArgs);
-    if (auto varrTy = DynamicCast<VArrayTy*>(baseFuncTy); varrTy) {
-        Ptr<Ty> argTy = TypeManager::GetInvalidTy();
-        if (!typeArgs.empty()) {
-            argTy = typeArgs[0];
-        }
-        if (typeArgs[0]->IsGeneric() && !baseArgs.empty()) {
-            argTy = baseArgs[0]->GetTy();
-        }
-        arrayExpr->type->SetTy(typeManager.GetVArrayTy(*argTy, varrTy->size));
-        arrayExpr->isValueArray = true;
-    } else {
-        // Eg: type A<T> = Array<T>; A(size, v), type args of this A is not useful.
-        bool usefulTypeArg = !typeArgs.empty() && (!typeArgs[0]->IsGeneric() || !baseArgs.empty());
-        if (usefulTypeArg) {
-            arrayExpr->type->SetTy(typeManager.GetArrayTy(typeArgs[0], 1));
-        } else {
-            Ptr<Ty> argTy = TypeManager::GetInvalidTy();
-            if (!baseArgs.empty()) {
-                argTy = baseArgs[0]->GetTy();
-            }
-            arrayExpr->type->SetTy(typeManager.GetArrayTy(argTy, 1));
-        }
+    auto varrTy = DynamicCast<VArrayTy>(baseFuncTy.Ty());
+    Ptr<Ty> argTy = TypeManager::GetInvalidTy();
+    if (!typeArgs.empty()) {
+        argTy = typeArgs[0];
     }
-    for (auto& it : ce.args) {
-        (void)arrayExpr->args.emplace_back(std::move(it));
+    if (typeArgs[0]->IsGeneric() && !baseArgs.empty()) {
+        argTy = baseArgs[0]->DataTy();
     }
+    arrayExpr->type->SetTy({typeManager.GetVArrayTy(*argTy, varrTy->size), baseFuncTy.Mode()});
+    arrayExpr->isValueArray = true;
+    arrayExpr->args = std::move(ce.args);
     ce.args.clear();
     arrayExpr->scopeName = ce.scopeName;
     arrayExpr->sourceExpr = &ce;
@@ -688,12 +691,12 @@ void DesugarPrimaryCtor(Decl& decl, PrimaryCtorDecl& fd)
 }
 
 OwnedPtr<MemberAccess> DesugarRef2MemberAccess(
-    TypeManager& typeManager, Ptr<Decl> target, Ptr<RefExpr> field, Ptr<Ty> curTopDeclTy)
+    TypeManager& typeManager, Ptr<Decl> target, Ptr<RefExpr> field, ModalTy curTopDeclTy)
 {
     auto baseExpr = MakeOwned<RefExpr>();
     baseExpr->ref.identifier = target->outerDecl->identifier;
     // Get inst decl ty where the target static function in.
-    auto targetOuterDeclTy = Promotion(typeManager).Promote(*curTopDeclTy, *target->outerDecl->GetTy());
+    auto targetOuterDeclTy = Promotion(typeManager).Promote(curTopDeclTy, target->outerDecl->DataTy());
     // Promote should not return an empty container. When there are multiple versions of the parent type, directly use
     // the first element for the non-implementation check, and the uniqueness of the candidate should be guaranteed by
     // other diagnostics.
@@ -725,7 +728,7 @@ OwnedPtr<MemberAccess> DesugarRef2MemberAccess(
     return baseFunc;
 }
 
-void TypeChecker::TypeCheckerImpl::DesugarStaticRefCall2MemberAccessInCFuncLam(LambdaExpr& le, Ptr<Ty> curTopDeclTy)
+void TypeChecker::TypeCheckerImpl::DesugarStaticRefCall2MemberAccessInCFuncLam(LambdaExpr& le, ModalTy curTopDeclTy)
 {
     if (!le.GetTy()->IsCFunc()) {
         return;

@@ -25,13 +25,13 @@ using namespace Cangjie::AST;
 
 ParserImpl::ExprHandler ParserImpl::LookupExprHandler(TokenKind kind)
 {
-    static constexpr int FIRST_KIND = static_cast<int>(TokenKind::LPAREN);
-    static constexpr int LAST_KIND = static_cast<int>(TokenKind::RESUME);
-    static constexpr int ARRAY_SIZE = LAST_KIND - FIRST_KIND + 1;
+    static constexpr int firstKind = static_cast<int>(TokenKind::LPAREN);
+    static constexpr int lastKind = static_cast<int>(TokenKind::DEMODE);
+    static constexpr int arraySize = lastKind - firstKind + 1;
 
     // clang-format off
 SUPPRESS_WARNING("-Wcast-function-type-mismatch")
-    static const ExprHandler HANDLERS[ARRAY_SIZE] = {
+    static const ExprHandler handlers[arraySize] = {
         reinterpret_cast<ExprHandler>(&ParserImpl::ParseLeftParenExpr),
         nullptr, // RPAREN
         reinterpret_cast<ExprHandler>(&ParserImpl::ParseArrayLitExpr),
@@ -77,15 +77,18 @@ SUPPRESS_WARNING("-Wcast-function-type-mismatch")
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // BOOL_LITERAL..PLATFORM
         reinterpret_cast<ExprHandler>(&ParserImpl::ParsePerformExpr),
         reinterpret_cast<ExprHandler>(&ParserImpl::ParseResumeExpr),
+        nullptr, nullptr, nullptr, nullptr, nullptr, // THROWING..FEATURES
+        reinterpret_cast<ExprHandler>(&ParserImpl::ParseExclaveExpr),
+        nullptr, // DEMODE
     };
 UNSUPPRESS_WARNING()
     // clang-format on
 
-    int index = static_cast<int>(kind) - FIRST_KIND;
-    if (index < 0 || index >= ARRAY_SIZE) {
+    int index = static_cast<int>(kind) - firstKind;
+    if (index < 0 || index >= arraySize) {
         return nullptr;
     }
-    return HANDLERS[index];
+    return handlers[index];
 }
 
 OwnedPtr<Expr> ParserImpl::ParseAtom(ExprKind ek)
@@ -117,23 +120,59 @@ OwnedPtr<Expr> ParserImpl::ParseAtom(ExprKind ek)
     if (SeeingLiteral()) {
         return ParseLitConst();
     }
-    // Type convert expression.
-    if (SeeingPrimitiveTypeAndLParen()) {
-        return ParseTypeConvExpr();
-    }
-    // Optimize those Seeing().
-    // If seeing a primitive type + dot, should be a static function call like Int64.foo().
-    if (SeeingPrimitiveTypeAndDot()) {
-        auto ret = MakeOwned<PrimitiveTypeExpr>(LookupPrimitiveTypeKind(lookahead.kind));
-        ret->begin = lookahead.Begin();
-        Next(); // Consume the TYPE token but keep the DOT token.
-        ret->end = lastToken.End();
-        return ret;
+    if (SeeingPrimitiveType()) {
+        if (auto expr = ParsePrimitiveTypeExpr()) {
+            return expr;
+        }
     }
     if (Seeing(TokenKind::WILDCARD)) {
         return ParseWildcardExpr();
     }
     return GetInvalidExprInAtom(lookahead.Begin());
+}
+
+OwnedPtr<Expr> ParserImpl::ParsePrimitiveTypeExpr()
+{
+    auto token = Peek();
+    ParserScope scope(*this);
+    Next();
+    auto modal = ParseModalInfo();
+    if (token.kind <= TokenKind::RUNE && Seeing(TokenKind::LPAREN)) {
+        if (modal.HasLocal()) {
+            DiagUnexpectedModal(MakeRange(modal.LocalBegin(), modal.LocalEnd()));
+        }
+        return ParseTypeConvExprWith(std::move(token));
+    }
+    // Optimize those Seeing().
+    // If seeing a primitive type + dot, should be a static function call like Int64.foo().
+    // in this case, modal type is forbidden.
+    if (Seeing(TokenKind::DOT)) {
+        auto ret = MakeOwned<PrimitiveTypeExpr>(LookupPrimitiveTypeKind(token.kind));
+        ret->begin = token.Begin();
+        ret->end = lastToken.End();
+        if (modal.HasLocal()) {
+            DiagUnexpectedModal(MakeRange(modal.LocalBegin(), modal.LocalEnd()));
+            ret->EnableAttr(Attribute::HAS_BROKEN);
+        }
+        ret->modal = std::move(modal);
+        return ret;
+    }
+    scope.ResetParserScope();
+    if (modal) {
+        // rollback PrimitiveType + Modal tokens to keep the original diagnostics
+        return {};
+    }
+    // no valid input after PrimitiveType, return invalid expr
+    if (chainedAST.empty() || !chainedAST.back()->TestAttr(Attribute::HAS_BROKEN)) {
+        DiagExpectedExpression();
+        if (!chainedAST.empty()) {
+            chainedAST.back()->EnableAttr(Attribute::HAS_BROKEN);
+        }
+    }
+    Next(); // skip at least 1 token to avoid retrying the same primitive type.
+    auto ret = MakeOwned<InvalidExpr>(token.Begin());
+    ret->EnableAttr(Attribute::IS_BROKEN);
+    return ret;
 }
 
 OwnedPtr<Expr> ParserImpl::GetInvalidExprInAtom(Position pos)
@@ -944,7 +983,21 @@ OwnedPtr<ReturnExpr> ParserImpl::ParseReturnExpr()
         }
         ret->expr = ParseExpr();
         if (ret->expr->TestAttr(Attribute::IS_BROKEN)) {
-            ConsumeUntilAny({TokenKind::NL, TokenKind::SEMI});
+            // ParseExpr has already reported a broken return expression. Recover by skipping the malformed
+            // expression tail, but stop before tokens that may terminate an enclosing syntax construct.
+            auto isRecoverEnd = [this]() {
+                return SeeingAny({TokenKind::NL, TokenKind::SEMI, TokenKind::COMMA, TokenKind::RPAREN,
+                    TokenKind::RSQUARE, TokenKind::RCURL, TokenKind::CASE, TokenKind::END, TokenKind::DOUBLE_ARROW}) ||
+                    SeeingCombinator(combinedDoubleArrow);
+            };
+            // Do not consume the stop token here: delimiters like ')', ']', '}', ',', 'case', 'end' and '=>'
+            // should be handled by the outer parser. NL is still consumed by ConsumeUntilAny's newline handling.
+            ConsumeUntilAny(isRecoverEnd, false);
+            // A semicolon belongs to the return statement itself, so keep the previous behavior and record it.
+            if (Skip(TokenKind::SEMI)) {
+                ret->hasSemi = true;
+                ret->semiPos = lastToken.Begin();
+            }
         }
     }
     ret->end = ret->expr->end;
@@ -1322,6 +1375,11 @@ OwnedPtr<Expr> ParserImpl::ParseWildcardExpr()
     return expr;
 }
 
+DiagnosticBuilder ParserImpl::DiagUnexpectedModal(const Range& range)
+{
+    return ParseDiagnoseRefactor(DiagKindRefactor::parse_unexpected_modal_type, range);
+}
+
 OwnedPtr<RefExpr> ParserImpl::ParseRefExpr(ExprKind ek)
 {
     OwnedPtr<RefExpr> ret = MakeOwned<RefExpr>();
@@ -1330,30 +1388,29 @@ OwnedPtr<RefExpr> ParserImpl::ParseRefExpr(ExprKind ek)
     ret->begin = lookahead.Begin();
     ret->ref.identifier = ExpectIdentifierWithPos(*ret);
     ret->end = ret->begin + lookahead.Value().size();
-    if (!Seeing(TokenKind::LT)) {
-        return ret;
-    }
-    ParserScope scope(*this);
-    ret->leftAnglePos = lookahead.Begin();
-    Next();
-    // collecting diagnoses in `ParseTypeArguments` and storing these diagnoses to a cache
-    diag.Prepare();
-    auto [isGenericArgList, typeArguments] = ParseTypeArguments(ek);
-    if (isGenericArgList) {
-        // parse type success, handle those diagnoses which were stored in the cache
-        ret->typeArguments = std::move(typeArguments);
-        ret->rightAnglePos = lastToken.Begin();
-        diag.Commit();
-    } else {
-        diag.ClearTransaction();
-        // if it is like: if a<b {} or (a < b, c >= d), reset parser.
-        scope.ResetParserScope();
-        ret->leftAnglePos = INVALID_POSITION;
-        ret->rightAnglePos = INVALID_POSITION;
-    }
-    if (ret->rightAnglePos != INVALID_POSITION) {
-        ret->end = ret->rightAnglePos;
-        ret->end.column += 1;
+    if (Seeing(TokenKind::LT)) {
+        ParserScope scope(*this);
+        ret->leftAnglePos = lookahead.Begin();
+        Next();
+        // collecting diagnoses in `ParseTypeArguments` and storing these diagnoses to a cache
+        diag.Prepare();
+        auto [isGenericArgList, typeArguments] = ParseTypeArguments(ek);
+        if (isGenericArgList) {
+            // parse type success, handle those diagnoses which were stored in the cache
+            ret->typeArguments = std::move(typeArguments);
+            ret->rightAnglePos = lastToken.Begin();
+            diag.Commit();
+        } else {
+            diag.ClearTransaction();
+            // if it is like: if a<b {} or (a < b, c >= d), reset parser.
+            scope.ResetParserScope();
+            ret->leftAnglePos = INVALID_POSITION;
+            ret->rightAnglePos = INVALID_POSITION;
+        }
+        if (ret->rightAnglePos != INVALID_POSITION) {
+            ret->end = ret->rightAnglePos;
+            ret->end.column += 1;
+        }
     }
     return ret;
 }
@@ -1639,21 +1696,19 @@ OwnedPtr<LambdaExpr> ParserImpl::ParseBaseLambdaExpr()
     return ret;
 }
 
-OwnedPtr<AST::Expr> ParserImpl::ParseTypeConvExpr()
+/// Parse PrimitiveType (of data type) with LParen postfix
+OwnedPtr<AST::Expr> ParserImpl::ParseTypeConvExprWith(Token&& tok)
 {
     OwnedPtr<TypeConvExpr> ret = MakeOwned<TypeConvExpr>();
-    ret->begin = lookahead.Begin();
+    ret->begin = tok.Begin();
     OwnedPtr<PrimitiveType> type = MakeOwned<PrimitiveType>();
-    type->begin = lookahead.Begin();
-    type->end = lookahead.End();
-    type->str = lookahead.Value();
-    type->kind = LookupPrimitiveTypeKind(lookahead.kind);
-    Next();
+    type->begin = tok.Begin();
+    ret->end = type->end = tok.End();
+    type->str = tok.Value();
+    type->kind = LookupPrimitiveTypeKind(tok.kind);
     ret->type = std::move(type);
-    if (!Skip(TokenKind::LPAREN)) {
-        DiagExpectedLeftParenAfter(ret->begin, lastToken.Value());
-        return MakeOwned<InvalidExpr>(lookahead.Begin());
-    }
+    CJC_ASSERT(lookahead.kind == TokenKind::LPAREN); // caller guaranteed
+    Next();
     ret->leftParenPos = lastToken.Begin();
     ret->expr = ParseExpr();
     if (!Skip(TokenKind::RPAREN)) {
@@ -1662,6 +1717,8 @@ OwnedPtr<AST::Expr> ParserImpl::ParseTypeConvExpr()
         return MakeOwned<InvalidExpr>(lookahead.Begin());
     }
     ret->rightParenPos = lastToken.Begin();
+    // it is allowed to have mode after PrimitiveTypeExpr like CallExpr, e.g. Int64(...) @local!
+    ret->modal = ParseModalInfo();
     ret->end = lastToken.End();
     return ret;
 }

@@ -33,12 +33,12 @@ bool TypeChecker::TypeCheckerImpl::ChkFloatTypeOverflow(const LitConstExpr& lce)
     switch (lce.constNumValue.asFloat.flowStatus) {
         case Expr::FlowStatus::OVER: {
             (void)diag.DiagnoseRefactor(
-                DiagKindRefactor::sema_float_literal_too_large, lce, lce.GetTy()->String(), info.max);
+                DiagKindRefactor::sema_float_literal_too_large, lce, lce.GetTy().String(), info.max);
             return false;
         }
         case Expr::FlowStatus::UNDER: {
             (void)diag.DiagnoseRefactor(
-                DiagKindRefactor::sema_float_literal_too_small, lce, lce.GetTy()->String(), info.min);
+                DiagKindRefactor::sema_float_literal_too_small, lce, lce.GetTy().String(), info.min);
             return false;
         }
         default:
@@ -76,12 +76,10 @@ bool TypeChecker::TypeCheckerImpl::ChkFloatTypeOverflow(const LitConstExpr& lce)
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
-        (void)diag.DiagnoseRefactor(
-            DiagKindRefactor::sema_float_literal_too_small, lce, lce.GetTy()->String(), info.min);
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_float_literal_too_small, lce, lce.GetTy().String(), info.min);
         return false;
     } else if (value == info.inf) { // match the infinity bits
-        (void)diag.DiagnoseRefactor(
-            DiagKindRefactor::sema_float_literal_too_large, lce, lce.GetTy()->String(), info.max);
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_float_literal_too_large, lce, lce.GetTy().String(), info.max);
         return false;
     }
     return true;
@@ -89,21 +87,21 @@ bool TypeChecker::TypeCheckerImpl::ChkFloatTypeOverflow(const LitConstExpr& lce)
 
 bool TypeChecker::TypeCheckerImpl::ChkLitConstExprRange(LitConstExpr& lce)
 {
-    if (!Ty::IsTyCorrect(lce.GetTy())) {
+    if (!lce.GetTy().IsCorrect()) {
         return false;
     }
     InitializeLitConstValue(lce);
     // Ty::IsTyCorrect(lce.GetTy()) is checked by the caller.
     if (lce.GetTy()->IsInteger()) {
-        lce.constNumValue.asInt.SetOutOfRange(lce.GetTy());
+        lce.constNumValue.asInt.SetOutOfRange(lce.DataTy());
         if (lce.constNumValue.asInt.IsOutOfRange()) {
-            std::string typeName = lce.GetTy()->String();
+            std::string typeName = lce.GetTy().String();
             if (lce.GetTy()->IsIdeal()) {
                 typeName += "64";
             }
             (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_exceed_num_value_range,
                 lce, lce.stringValue, typeName);
-            lce.SetTy(TypeManager::GetInvalidTy());
+            lce.SetTy({TypeManager::GetInvalidTy()});
             return false;
         }
     } else if (lce.GetTy()->IsFloating()) {
@@ -115,11 +113,10 @@ bool TypeChecker::TypeCheckerImpl::ChkLitConstExprRange(LitConstExpr& lce)
 
 bool TypeChecker::TypeCheckerImpl::ReplaceIdealTy(Node& node)
 {
-    if (!Ty::IsTyCorrect(node.GetTy())) {
+    if (!node.GetTy().IsCorrect()) {
         return false;
     }
-    Ptr<Ty> idealTy = typeManager.ReplaceIdealTy(node.GetTy());
-    node.SetTy(idealTy);
+    node.SetTy(typeManager.ReplaceIdealTy(node.GetTy()));
     if (node.astKind == ASTKind::LIT_CONST_EXPR) {
         return ChkLitConstExprRange(*StaticAs<ASTKind::LIT_CONST_EXPR>(&node));
     }

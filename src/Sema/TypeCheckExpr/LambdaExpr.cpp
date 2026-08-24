@@ -11,6 +11,8 @@
 #include "TypeCheckUtil.h"
 #include "ExtraScopes.h"
 
+#include "cangjie/Frontend/CompilerInstance.h"
+
 using namespace Cangjie;
 using namespace AST;
 using namespace Sema;
@@ -18,6 +20,35 @@ using namespace TypeCheckUtil;
 using namespace Utils;
 
 namespace {
+// RAII guard that marks synthesis as running inside the body of a lambda that is a direct
+// argument of a generic call. While active, expressions that carry the lambda's contextual
+// return type (implicit-return, explicit `return`, bare-literal binary operands, and
+// if/tuple/paren sub-expressions) keep their ideal literal type (IDEAL_INT / IDEAL_FLOAT) pending
+// so generic type argument inference can unify them against the expected type.
+// See `SynLamExpr` and `ASTContext::inFuncArgLambdaBody`.
+class FuncArgLambdaBodyGuard {
+public:
+    FuncArgLambdaBodyGuard(ASTContext& ctx, const LambdaExpr& le) : ctx(&ctx), active(false)
+    {
+        if (ctx.funcArgReachable.count(&le) > 0) {
+            ctx.inFuncArgLambdaBody++;
+            active = true;
+        }
+    }
+    ~FuncArgLambdaBodyGuard()
+    {
+        if (active) {
+            ctx->inFuncArgLambdaBody--;
+        }
+    }
+    FuncArgLambdaBodyGuard(const FuncArgLambdaBodyGuard&) = delete;
+    FuncArgLambdaBodyGuard& operator=(const FuncArgLambdaBodyGuard&) = delete;
+
+private:
+    ASTContext* ctx;
+    bool active;
+};
+
 // we should clear the nodes in the block and then recheck the body according to the new `target`.
 void ClearLambdaBodyForReCheck(const LambdaExpr& le)
 {
@@ -99,10 +130,9 @@ void ClearCacheForNames(ASTContext& ctx, const LambdaExpr& le, const std::vector
     Walker(le.funcBody->body.get(), preAction, postAction).Walk();
 }
 
-void ClearInvalidTypeCheckCache(ASTContext& ctx, const LambdaExpr& le, const Ty& target)
+void ClearInvalidTypeCheckCache(ASTContext& ctx, const LambdaExpr& le, const ModalTy target)
 {
-    if ((ctx.lastTargetTypeMap.count(&le) == 0 || ctx.lastTargetTypeMap[&le] != &target) &&
-        IsAnyParamTypeOmitted(le)) {
+    if ((ctx.lastTargetTypeMap.count(&le) == 0 || ctx.lastTargetTypeMap[&le] != target) && IsAnyParamTypeOmitted(le)) {
         std::vector<std::string> names;
         CJC_ASSERT(le.funcBody && !le.funcBody->paramLists.empty());
         for (auto& param : le.funcBody->paramLists[0]->params) {
@@ -115,19 +145,13 @@ void ClearInvalidTypeCheckCache(ASTContext& ctx, const LambdaExpr& le, const Ty&
     }
 }
 
-// Return true if lambda has any mismatched parameter type and any of the parameter's type is omitted.
-bool IsLambdaIncompatible(const LambdaExpr& le, bool paramsMismatched)
-{
-    return paramsMismatched && IsAnyParamTypeOmitted(le);
-}
-
 // return: true if error, false if no error
 bool DiagInferParamTyFail(DiagnosticEngine& diag, LambdaExpr& le)
 {
     for (auto& node : le.funcBody->paramLists[0]->params) {
         if (!node->type) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_lambdaExpr_must_have_type_annotation, *node);
-            le.SetTy(TypeManager::GetInvalidTy());
+            le.SetTy({TypeManager::GetInvalidTy()});
             return true;
         }
     }
@@ -184,6 +208,80 @@ ParamMemUsage FindCandidatesFromSubscript(ASTContext& ctx, SubscriptExpr& se,
     }
     return {"", {}, {}};
 }
+
+FuncBody* GetFuncLikeFuncBody(Node& funcLike)
+{
+    if (auto fd = DynamicCast<FuncDecl>(&funcLike)) {
+        return fd->funcBody.get();
+    }
+    if (auto le = DynamicCast<LambdaExpr>(&funcLike)) {
+        return le->funcBody.get();
+    }
+    return nullptr;
+}
+
+std::string GetRefCaptureName(const NameReferenceExpr& nre)
+{
+    if (auto ma = DynamicCast<MemberAccess>(&nre)) {
+        if (ma->baseExpr && IsThisOrSuper(*ma->baseExpr)) {
+            return "this";
+        }
+        return ma->field.Val();
+    }
+    if (auto re = DynamicCast<RefExpr>(&nre)) {
+        if (re->isThis || re->isSuper) {
+            return "this";
+        }
+        if (auto target = re->GetTarget()) {
+            return target->identifier.Val();
+        }
+    }
+    return "";
+}
+
+bool IsImplicitThisMemberRef(const ASTContext& ctx, const RefExpr& re)
+{
+    if (re.isThis || re.isSuper) {
+        return false;
+    }
+    auto target = re.GetTarget();
+    if (!target || !target->IsMemberDecl() || target->TestAnyAttr(Attribute::STATIC, Attribute::GLOBAL)) {
+        return false;
+    }
+    return GetCurThisModal(ctx, re.scopeName).local != Mode::NOT;
+}
+
+/// Walk outer-scope refs in \p funcLike that requires local capture checking.
+/// for lambda with target type, capture @local? in non @local? lambda is error; for lambda without target type, this
+/// causes the lambda to be inferred @local? mode.
+template <typename Fn>
+void WalkFuncLikeLocalCaptureRefs(const ASTContext& ctx, const Node& funcLike, Block* body, Fn&& visit)
+{
+    Walker(body, [&ctx, &funcLike, &visit](Ptr<Node> node) {
+        if (node->astKind == ASTKind::LAMBDA_EXPR || node->astKind == ASTKind::FUNC_DECL) {
+            return VisitAction::SKIP_CHILDREN;
+        }
+        if (auto re = DynamicCast<RefExpr>(node)) {
+            if (re->isThis || re->isSuper) {
+                visit(*re);
+                return VisitAction::SKIP_CHILDREN;
+            }
+            if (IsImplicitThisMemberRef(ctx, *re)) {
+                visit(*re);
+                return VisitAction::SKIP_CHILDREN;
+            }
+            if (auto target = DynamicCast<VarDecl>(re->GetTarget());
+                target && !target->TestAnyAttr(Attribute::STATIC, Attribute::GLOBAL)) {
+                auto targetDefSite = ScopeManager::GetCurSymbolByKind(SymbolKind::FUNC_LIKE, ctx, target->scopeName);
+                if (!targetDefSite || !targetDefSite->node || targetDefSite->node == &funcLike) {
+                    return VisitAction::WALK_CHILDREN;
+                }
+                visit(*re);
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+}
 } // namespace
 
 void TypeChecker::TypeCheckerImpl::ResetLambdaForReinfer(ASTContext& ctx, const AST::LambdaExpr& le)
@@ -192,7 +290,7 @@ void TypeChecker::TypeCheckerImpl::ResetLambdaForReinfer(ASTContext& ctx, const 
     AddRetTypeNode(*le.funcBody);
     le.funcBody->Clear();
     Walker(le.funcBody->body.get(), [](Ptr<Node> node) {
-        if ((Is<Decl>(node) || Is<Expr>(node)) && !Ty::IsInitialTy(node->GetTy())) {
+        if ((Is<Decl>(node) || Is<Expr>(node)) && !Ty::IsInitialTy(node->DataTy())) {
             node->Clear();
         }
         return VisitAction::WALK_CHILDREN;
@@ -210,8 +308,8 @@ bool TypeChecker::TypeCheckerImpl::SolveLamExprParamTys(ASTContext& ctx, AST::La
         for (auto& node : le.funcBody->paramLists[0]->params) {
             node->SetTy(typeManager.GetInstantiatedTy(node->GetTy(), *sol));
         }
-        if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, le.funcBody.get())) && le.funcBody->body &&
-            Ty::IsTyCorrect(le.funcBody->body->GetTy())) {
+        if (Synthesize({ctx, SynPos::EXPR_ARG}, le.funcBody.get()).IsCorrect() && le.funcBody->body &&
+            le.funcBody->body->GetTy().IsCorrect()) {
             le.SetTy(le.funcBody->GetTy());
             successful = true;
         }
@@ -304,15 +402,15 @@ void TypeChecker::TypeCheckerImpl::TryInferFromSyntaxInfo(ASTContext& ctx, const
     Walker(le.funcBody.get(), memberScanner).Walk();
 
     for (auto& [id, decls] : candidates) {
-        TryEnforceCandidate(*StaticCast<TyVar*>(unsolvedParams[id]->GetTy()), decls, typeManager, memSigs[id],
+        TryEnforceCandidate(*StaticCast<TyVar>(unsolvedParams[id]->DataTy()), decls, typeManager, memSigs[id],
             resultConstrainedMemSigs[id]);
     }
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynLamExpr(ASTContext& ctx, LambdaExpr& le)
+ModalTy TypeChecker::TypeCheckerImpl::SynLamExpr(ASTContext& ctx, LambdaExpr& le)
 {
     if (le.funcBody == nullptr || le.funcBody->paramLists.empty()) {
-        return TypeManager::GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
     // Lambda's return type is added by compiler, so reset it here to allow re-checking.
     le.funcBody->retType.reset(nullptr);
@@ -321,22 +419,26 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynLamExpr(ASTContext& ctx, LambdaExpr& le
     le.funcBody->retType->end = le.end;
     CJC_ASSERT(le.funcBody && !le.funcBody->paramLists.empty());
     TyVarScope sc(typeManager);
+    // While synthesizing the body of a lambda that is a direct argument of a generic call,
+    // expressions carrying the lambda's contextual return type keep their ideal literal types
+    // pending so generic type argument inference can unify them against the expected type.
+    FuncArgLambdaBodyGuard bodyGuard(ctx, le);
     for (auto& node : le.funcBody->paramLists[0]->params) {
         CJC_NULLPTR_CHECK(node);
-        Ptr<Ty> ty = Synthesize({ctx, SynPos::NONE}, node->type.get());
+        ModalTy ty = Synthesize({ctx, SynPos::NONE}, node->type.get());
         if (Ty::IsTyCorrect(ty)) {
             node->SetTy(ty);
         } else if (ctx.funcArgReachable.count(&le) == 0 && !node->type) {
-            node->SetTy(typeManager.AllocTyVar("T-Lam", true));
+            node->SetTy({typeManager.AllocTyVar("T-Lam", true)});
         } else {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_lambdaExpr_must_have_type_annotation, *node);
-            le.SetTy(TypeManager::GetInvalidTy());
+            le.SetTy({TypeManager::GetInvalidTy()});
             return le.GetTy();
         }
     }
     TryInferFromSyntaxInfo(ctx, le);
     bool skipSolving = typeManager.GetInnermostUnsolvedTyVars().empty();
-    Ptr<Ty> leTy = nullptr;
+    ModalTy leTy{};
     {
         DiagSuppressor ds(diag);
         leTy = Synthesize({ctx, SynPos::EXPR_ARG}, le.funcBody.get());
@@ -346,8 +448,8 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynLamExpr(ASTContext& ctx, LambdaExpr& le
     }
     // `funcBody` containing invalid expressions can have valid types.
     // We have to use `funcBody->body` to determine if there are errors.
-    if (!Ty::IsTyCorrect(leTy) || !le.funcBody->body || !Ty::IsTyCorrect(le.funcBody->body->GetTy())) {
-        le.SetTy(TypeManager::GetInvalidTy());
+    if (!Ty::IsTyCorrect(leTy) || !le.funcBody->body || !le.funcBody->body->GetTy().IsCorrect()) {
+        le.SetTy({TypeManager::GetInvalidTy()});
         if (DiagInferParamTyFail(diag, le)) {
             return le.GetTy();
         }
@@ -360,40 +462,120 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynLamExpr(ASTContext& ctx, LambdaExpr& le
             }
         }
     }
-    if (auto ft = DynamicCast<FuncTy*>(le.GetTy())) {
+    if (auto ft = DynamicCast<FuncTy*>(le.DataTy())) {
         le.funcBody->retType->SetTy(ft->retTy);
     } else {
-        le.funcBody->retType->SetTy(TypeManager::GetInvalidTy());
+        le.funcBody->retType->SetTy({TypeManager::GetInvalidTy()});
+    }
+    if (le.GetTy().IsCorrect()) {
+        InferLamExprModal(ctx, le);
+        CheckLocalCaptures(ctx, le);
     }
     return le.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkLamExpr(ASTContext& ctx, Ty& target, LambdaExpr& le)
+void TypeChecker::TypeCheckerImpl::DiagInvalidLocalFuncType(const Node& le)
+{
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_invalid_local_func_type, le,
+        le.astKind == ASTKind::LAMBDA_EXPR ? "lambda" : "local function");
+}
+
+bool TypeChecker::TypeCheckerImpl::CheckLocalCapture(
+    const ASTContext& ctx, const Node& func, const RefExpr& expr) const
+{
+    auto funcLocal = func.TyMode().local;
+    auto receiver = GetReceiverTy(ctx, expr);
+    auto varMode = receiver.Mode();
+    if (typeManager.ImplementsCopyInterface(receiver.Ty())) {
+        return true;
+    }
+    if (funcLocal == Mode::NOT && varMode.local == Mode::NOT) {
+        return true;
+    }
+    if (funcLocal == Mode::HALF && varMode.local != Mode::FULL) {
+        return true;
+    }
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_bad_capture_local, expr,
+        varMode.LocalString(), GetRefCaptureName(expr), func.TyMode().LocalString(),
+        func.astKind == ASTKind::FUNC_DECL ? "function" : "lambda");
+    return false;
+}
+
+void TypeChecker::TypeCheckerImpl::CheckLocalCaptures(const ASTContext& ctx, Node& funcLike)
+{
+    if (!funcLike.GetTy().IsCorrect()) {
+        return;
+    }
+    auto body = GetFuncLikeFuncBody(funcLike);
+    if (!body || !body->body) {
+        return;
+    }
+    bool ok = true;
+    WalkFuncLikeLocalCaptureRefs(ctx, funcLike, &*body->body, [this, &ctx, &funcLike, &ok](const RefExpr& re) {
+        ok = CheckLocalCapture(ctx, funcLike, re) && ok;
+    });
+    if (!ok) {
+        funcLike.SetTy({TypeManager::GetInvalidTy()});
+        if (auto fb = GetFuncLikeFuncBody(funcLike)) {
+            fb->SetTy({TypeManager::GetInvalidTy()});
+        }
+    }
+}
+
+// @local? if captures a @local? var; otherwise @~local.
+void TypeChecker::TypeCheckerImpl::InferLamExprModal(ASTContext& ctx, LambdaExpr& le)
+{
+    if (!le.funcBody || !le.funcBody->body || !le.GetTy().IsCorrect()) {
+        return;
+    }
+
+    // capture @local! is error, so ignored here.
+    bool capturesLocalHalf = false;
+    WalkFuncLikeLocalCaptureRefs(
+        ctx, le, le.funcBody->body.get(), [this, &ctx, &capturesLocalHalf](const RefExpr& re) {
+            if (GetReceiverTy(ctx, re).Mode().local == Mode::HALF) {
+                capturesLocalHalf = true;
+            }
+        });
+
+    if (capturesLocalHalf) {
+        le.SetTy(le.GetTy().With(Mode::HALF));
+        le.funcBody->SetTy(le.funcBody->GetTy().With(Mode::HALF));
+    }
+}
+
+bool TypeChecker::TypeCheckerImpl::ChkLamExpr(ASTContext& ctx, ModalTy target, LambdaExpr& le)
 {
     CJC_ASSERT(le.funcBody != nullptr && !le.funcBody->paramLists.empty());
     ClearInvalidTypeCheckCache(ctx, le, target);
-    ctx.lastTargetTypeMap[&le] = &target;
-    if (target.IsAny() || (le.TestAttr(AST::Attribute::C) && target.IsCType())) {
+    ctx.lastTargetTypeMap[&le] = target;
+    if ((target && target->IsAny()) || (le.TestAttr(AST::Attribute::C) && target && target->IsCType())) {
         le.SetTy(Synthesize({ctx, SynPos::EXPR_ARG}, &le));
         (void)ReplaceIdealTy(le);
-        return Ty::IsTyCorrect(le.GetTy());
+        return le.GetTy().IsCorrect();
     }
-    Ptr<Ty> targetTy = TypeCheckUtil::UnboxOptionType(&target);
+    ModalTy targetTy = TypeCheckUtil::UnboxOptionType(target);
     if (!Ty::IsTyCorrect(targetTy) || !targetTy->IsFunc()) {
         auto ds = DiagSuppressor(diag);
         auto synTy = Synthesize({ctx, SynPos::EXPR_ARG}, &le);
-        le.SetTy(TypeManager::GetInvalidTy());
+        le.SetTy({TypeManager::GetInvalidTy()});
         if (!ds.HasError() && Ty::IsTyCorrect(synTy)) { // Only report type mismatch when no error happens.
-            DiagMismatchedTypesWithFoundTy(diag, le, target, *synTy);
+            DiagMismatchedTypesWithFoundTy(diag, le, target, synTy);
         }
         ds.ReportDiag();
         return false;
     }
+    if (targetTy.Mode().local == Mode::FULL) {
+        DiagInvalidLocalFuncType(le);
+        le.SetTy({TypeManager::GetInvalidTy()});
+        return false;
+    }
 
+    bool chkSucceeded = false;
     { // Suppress errors if check lambda failed. Only report when type check succeed.
         auto ds = DiagSuppressor(diag);
-        auto tgtTy = StaticCast<FuncTy*>(targetTy);
-        std::vector<Ptr<Ty>> lamParamTys;
+        auto tgtTy = StaticCast<FuncTy>(targetTy.Ty());
+        std::vector<ModalTy> lamParamTys;
         // Check arguments' types against parameters' types.
         bool paramsMatched = ChkLamParamTys(ctx, le, tgtTy->paramTys, lamParamTys);
         // In the check mode, a lambda's return type is explicitly given.
@@ -409,15 +591,20 @@ bool TypeChecker::TypeCheckerImpl::ChkLamExpr(ASTContext& ctx, Ty& target, Lambd
         if (ChkLamBody(ctx, *le.funcBody) && paramsMatched) {
             ds.ReportDiag();
             // The call to GetFunctionTy is necessary to create (cached) CPointer types if necessary.
-            le.funcBody->SetTy(typeManager.GetFunctionTy(lamParamTys, StaticCast<FuncTy*>(le.funcBody->GetTy())->retTy,
-                {tgtTy->isC, tgtTy->isClosureTy, tgtTy->hasVariableLenArg}));
+            ModalTy fnTy{typeManager.GetFunctionTy(lamParamTys, StaticCast<FuncTy*>(le.funcBody->DataTy())->retTy,
+                {tgtTy->isC, tgtTy->isClosureTy, tgtTy->hasVariableLenArg})};
+            le.funcBody->SetTy(fnTy.With(target.Mode()));
             le.SetTy(le.funcBody->GetTy());
-            return true;
-        } else if (IsLambdaIncompatible(le, !paramsMatched)) {
+            chkSucceeded = true;
+        } else if (!paramsMatched && IsAnyParamTypeOmitted(le)) {
             // User omitted parameter's type. We should quit early.
             ds.ReportDiag();
             return false;
         }
+    }
+    if (chkSucceeded) {
+        CheckLocalCaptures(ctx, le);
+        return le.GetTy().IsCorrect();
     }
     // In the LSP that uses macros, the ast before the macro expansion needs to save the complete ty information to
     // prevent 'Synthesize' skipping child nodes in the lambda body due to cache.
@@ -427,15 +614,15 @@ bool TypeChecker::TypeCheckerImpl::ChkLamExpr(ASTContext& ctx, Ty& target, Lambd
     le.funcBody->retType.reset(nullptr);
     auto bodyTy = Synthesize({ctx, SynPos::EXPR_ARG}, le.funcBody.get());
     if (Ty::IsTyCorrect(bodyTy) && !typeManager.IsSubtype(bodyTy, targetTy)) {
-        DiagMismatchedTypesWithFoundTy(diag, le, *targetTy, *bodyTy);
+        DiagMismatchedTypesWithFoundTy(diag, le, targetTy, bodyTy);
     }
-    le.funcBody->SetTy(TypeManager::GetInvalidTy());
+    le.funcBody->SetTy({TypeManager::GetInvalidTy()});
     le.SetTy(le.funcBody->GetTy());
     return false;
 }
 
 bool TypeChecker::TypeCheckerImpl::ChkLamParamTys(
-    ASTContext& ctx, LambdaExpr& le, const std::vector<Ptr<AST::Ty>>& tgtParamTys, std::vector<Ptr<Ty>>& lamParamTys)
+    ASTContext& ctx, LambdaExpr& le, const std::vector<AST::ModalTy>& tgtParamTys, std::vector<ModalTy>& lamParamTys)
 {
     CJC_ASSERT(le.funcBody && !le.funcBody->paramLists.empty());
     if (le.funcBody->paramLists[0]->params.size() != tgtParamTys.size()) {
@@ -447,15 +634,15 @@ bool TypeChecker::TypeCheckerImpl::ChkLamParamTys(
     size_t i = 0;
     for (auto& node : le.funcBody->paramLists[0]->params) {
         CJC_NULLPTR_CHECK(node);
-        Ptr<Ty> paramTy = tgtParamTys[i]; // Caller guarantees the 'paramTy' is valid.
+        ModalTy paramTy = tgtParamTys[i]; // Caller guarantees the 'paramTy' is valid.
         if (!Check(ctx, paramTy, node.get())) {
-            le.SetTy(TypeManager::GetInvalidTy());
+            le.SetTy({TypeManager::GetInvalidTy()});
             return false;
         }
         // Lambda's parameter type not support auto box.
         // NOTE: lambda should not report parameter type mismatch, only report lambda type mismatchs.
         if (!typeManager.IsSubtype(paramTy, node->GetTy(), false, false)) {
-            le.SetTy(TypeManager::GetInvalidTy());
+            le.SetTy({TypeManager::GetInvalidTy()});
             return false;
         }
         lamParamTys.push_back(node->GetTy());
@@ -466,10 +653,10 @@ bool TypeChecker::TypeCheckerImpl::ChkLamParamTys(
 
 bool TypeChecker::TypeCheckerImpl::ChkLamBody(ASTContext& ctx, FuncBody& lamFb)
 {
-    if (CheckFuncBody(ctx, lamFb) && Ty::IsTyCorrect(lamFb.GetTy()) && Ty::IsTyCorrect(lamFb.body->GetTy())) {
+    if (CheckFuncBody(ctx, lamFb) && lamFb.GetTy().IsCorrect() && lamFb.body->GetTy().IsCorrect()) {
         return true;
     }
     // Since the return type of lambda body is added in 'ChkLamExpr', all type mismatching errors are reported before.
-    lamFb.SetTy(TypeManager::GetInvalidTy());
+    lamFb.SetTy({TypeManager::GetInvalidTy()});
     return false;
 }

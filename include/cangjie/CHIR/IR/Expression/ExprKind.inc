@@ -17,6 +17,7 @@ MAJORKIND(TERMINATOR,
 EXPRKIND(GOTO, "GoTo", GoTo)
 EXPRKIND(BRANCH, "Branch", Branch)
 EXPRKIND(MULTIBRANCH, "MultiBranch", MultiBranch)
+EXPRKIND(EXCLAVE, "Exclave", Exclave)
 EXPRKIND(EXIT, "Exit", Exit)
 EXPRKIND(TRY_APPLY, "TryApply", TryApply)
 EXPRKIND(TRY_INVOKE, "TryInvoke", TryInvoke)
@@ -114,6 +115,8 @@ EXPRKIND(UNBOX_TO_REF, "UnBoxToRef", UnBoxToRef)
 
 EXPRKIND(GET_RTTI, "GetRTTI", GetRTTI)
 EXPRKIND(GET_RTTI_STATIC, "GetRTTIStatic", GetRTTIStatic)
+EXPRKIND(START_REGION, "StartRegion", StartRegion)
+EXPRKIND(END_REGION, "EndRegion", EndRegion)
 )
 
 #endif

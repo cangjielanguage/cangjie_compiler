@@ -46,21 +46,26 @@ const std::map<TokenKind, std::vector<TypeKind>> COMPOUND_ASSIGN_TYPE_MAP = {
 void DiagCannotAssignToSubscript(DiagnosticEngine& diag, const SubscriptExpr& se, const Expr& rightValue)
 {
     auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_cannot_assign_to_subscript, se);
-    CJC_ASSERT(se.baseExpr && Ty::IsTyCorrect(se.baseExpr->GetTy()));
+    CJC_ASSERT(se.baseExpr && se.baseExpr->GetTy().IsCorrect());
     if (se.baseExpr->GetTy()->IsExtendable()) {
-        std::string indexParams;
-        for (size_t i = 0; i < se.indexExprs.size(); ++i) {
-            CJC_ASSERT(se.indexExprs[i] && Ty::IsTyCorrect(se.indexExprs[i]->GetTy()));
-            indexParams += "index" + std::to_string(i) + ": " + se.indexExprs[i]->GetTy()->String() + ", ";
+        auto baseTy = se.baseExpr->GetTy();
+        std::string note("you may want to implement 'operator func[](");
+        if (!baseTy.IsDataType()) {
+            note += "this" + baseTy.Mode().AsTypeSuffixString() + ", ";
         }
-        builder.AddNote("you may want to implement 'operator func[](" + indexParams +
-            "value!: " + rightValue.GetTy()->String() + ")' for type '" + se.baseExpr->GetTy()->String() + "'");
+        for (size_t i = 0; i < se.indexExprs.size(); ++i) {
+            CJC_ASSERT(se.indexExprs[i] && se.indexExprs[i]->GetTy().IsCorrect());
+            note += "index" + std::to_string(i) + ": " + se.indexExprs[i]->GetTy().String() + ", ";
+        }
+        // drop mode here
+        note += "value!: " + rightValue.GetTy().String() + ")' for type '" + baseTy->String() + "'";
+        builder.AddNote(note);
     }
 }
 
 bool MaySubscriptAssignOnlyBeOverload(const Expr& baseExpr)
 {
-    return Ty::IsTyCorrect(baseExpr.GetTy()) && !baseExpr.GetTy()->IsBuiltin() && !baseExpr.GetTy()->IsRange() &&
+    return baseExpr.GetTy().IsCorrect() && !baseExpr.GetTy()->IsBuiltin() && !baseExpr.GetTy()->IsRange() &&
         !baseExpr.GetTy()->IsTuple();
 }
 
@@ -82,7 +87,7 @@ bool IsAssignableSubScriptExpr(
         isCompound ? DiagKind::sema_subscript_get_set_not_supported : DiagKind::sema_subscript_set_not_supported;
     auto indexTy = TypeManager::GetNonNullTy(se.indexExprs[0]->GetTy());
     auto baseTy = TypeManager::GetNonNullTy(se.baseExpr->GetTy());
-    if ((!baseTy->IsArray() && !Is<VArrayTy>(baseTy)) || (isOperatorOverload && !indexTy->IsInteger())) {
+    if ((!baseTy->IsArray() && !Is<VArrayTy>(*baseTy)) || (isOperatorOverload && !indexTy->IsInteger())) {
         (void)std::for_each(diags.begin(), diags.end(), [&diag](auto info) { (void)diag.Diagnose(info); });
         (void)diag.Diagnose(se, diagKind, baseTy->String(), indexTy->String());
         return false;
@@ -91,7 +96,7 @@ bool IsAssignableSubScriptExpr(
 }
 
 bool CheckMatchOfDimensionAndTypes(DiagnosticEngine& diag, TypeManager& typeManager,
-    std::pair<const std::vector<Ptr<Ty>>&, uint64_t&> tysOfExprAndItsIndex,
+    std::pair<const std::vector<ModalTy>&, uint64_t&> tysOfExprAndItsIndex,
     const std::pair<const TupleLit&, const TupleTy&>& tupleLitAndTy, const Expr& rightExpr)
 {
     auto [tupleLit, tupleTy] = tupleLitAndTy;
@@ -108,17 +113,17 @@ bool CheckMatchOfDimensionAndTypes(DiagnosticEngine& diag, TypeManager& typeMana
         auto rightTy = tupleTy.typeArgs[indexOfRightTy];
         CJC_NULLPTR_CHECK(rightTy);
         indexOfRightTy++;
-        const std::string leftDiagInfo = Ty::IsTyCorrect(leftValue->GetTy()) && !leftValue->IsInvalid()
-            ? ("'" + leftValue->GetTy()->String() + "'")
+        const std::string leftDiagInfo = leftValue->GetTy().IsCorrect() && !leftValue->IsInvalid()
+            ? ("'" + leftValue->GetTy().String() + "'")
             : "it";
         if (leftValue->astKind == ASTKind::TUPLE_LIT) {
             if (!rightTy->IsTuple()) {
                 DiagInvalidMultipleAssignExpr(diag, *leftValue, rightExpr,
-                    "can not assign " + leftDiagInfo + " with '" + rightExpr.GetTy()->String() + "'");
+                    "can not assign " + leftDiagInfo + " with '" + rightExpr.GetTy().String() + "'");
                 return false;
             }
             auto tupleLitAndTupleTy = std::pair<const TupleLit&, const TupleTy&>(
-                *StaticCast<TupleLit*>(leftValue.get()), *RawStaticCast<TupleTy*>(rightTy));
+                *StaticCast<TupleLit*>(leftValue.get()), *RawStaticCast<TupleTy*>(rightTy.Ty()));
             bool success =
                 CheckMatchOfDimensionAndTypes(diag, typeManager, tysOfExprAndItsIndex, tupleLitAndTupleTy, rightExpr);
             if (!success) {
@@ -127,7 +132,7 @@ bool CheckMatchOfDimensionAndTypes(DiagnosticEngine& diag, TypeManager& typeMana
             continue;
         }
         CJC_ASSERT(indexOfExprTys < tysOfExpr.size());
-        bool typeMatch = (Ty::IsTyCorrect(leftValue->GetTy()) && typeManager.IsSubtype(rightTy, leftValue->GetTy())) ||
+        bool typeMatch = (leftValue->GetTy().IsCorrect() && typeManager.IsSubtype(rightTy, leftValue->GetTy())) ||
             Ty::IsTyCorrect(tysOfExpr[indexOfExprTys]);
         indexOfExprTys++;
         if (!typeMatch) {
@@ -144,10 +149,10 @@ void CheckMultipleAssignExpr(DiagnosticEngine& diag, TypeManager& typeManager, A
     CJC_ASSERT(assignExpr.leftValue->astKind == ASTKind::TUPLE_LIT);
     auto& tupleLit = *StaticCast<TupleLit*>(assignExpr.leftValue.get());
     auto& rightExpr = *assignExpr.rightExpr;
-    CJC_ASSERT(Ty::IsTyCorrect(rightExpr.GetTy()));
+    CJC_ASSERT(rightExpr.GetTy().IsCorrect());
     // Collect tys of desugarExpr(except VarDecl) to help decide whether type match on corresponding single assign
     // expression.
-    std::vector<Ptr<Ty>> tysOfDesugarExpr;
+    std::vector<ModalTy> tysOfDesugarExpr;
     // Index of tysOfDesugarExprs, increase when travel a non-tupleLit of leftValue.
     uint64_t indexOfDesugaredTys = 0;
     CJC_ASSERT(assignExpr.desugarExpr->astKind == ASTKind::BLOCK);
@@ -158,18 +163,17 @@ void CheckMultipleAssignExpr(DiagnosticEngine& diag, TypeManager& typeManager, A
         (void)tysOfDesugarExpr.emplace_back(node->GetTy());
     }
     if (!rightExpr.GetTy()->IsTuple()) {
-        const std::string leftDiagInfo = Ty::IsTyCorrect(tupleLit.GetTy()) && !tupleLit.IsInvalid()
-            ? ("'" + tupleLit.GetTy()->String() + "'")
-            : "it";
-        DiagInvalidMultipleAssignExpr(diag, tupleLit, rightExpr,
-            "can not assign " + leftDiagInfo + " with '" + rightExpr.GetTy()->String() + "'");
-        assignExpr.SetTy(TypeManager::GetInvalidTy());
+        const std::string leftDiagInfo =
+            tupleLit.GetTy().IsCorrect() && !tupleLit.IsInvalid() ? ("'" + tupleLit.GetTy().String() + "'") : "it";
+        DiagInvalidMultipleAssignExpr(
+            diag, tupleLit, rightExpr, "can not assign " + leftDiagInfo + " with '" + rightExpr.GetTy().String() + "'");
+        assignExpr.SetTy({TypeManager::GetInvalidTy()});
         return;
     }
     auto success = CheckMatchOfDimensionAndTypes(diag, typeManager, {tysOfDesugarExpr, indexOfDesugaredTys},
-        {tupleLit, *RawStaticCast<TupleTy*>(rightExpr.GetTy())}, rightExpr);
+        {tupleLit, *RawStaticCast<TupleTy*>(rightExpr.DataTy())}, rightExpr);
     if (!success) {
-        assignExpr.SetTy(TypeManager::GetInvalidTy());
+        assignExpr.SetTy({TypeManager::GetInvalidTy()});
     }
 }
 } // namespace
@@ -200,8 +204,8 @@ bool TypeChecker::TypeCheckerImpl::IsAssignable(Expr& e, bool isCompound, const 
             DiagInvalidAssign(diag, e, getTargetName(*ma.target));
             return false;
         }
-        bool isVArraySize = ma.baseExpr && Ty::IsTyCorrect(ma.baseExpr->GetTy()) &&
-            Is<VArrayTy>(ma.baseExpr->GetTy()) && ma.desugarExpr && ma.desugarExpr->astKind == ASTKind::LIT_CONST_EXPR;
+        bool isVArraySize = ma.baseExpr && ma.baseExpr->GetTy().IsCorrect() && Is<VArrayTy>(*ma.baseExpr->GetTy()) &&
+            ma.desugarExpr && ma.desugarExpr->astKind == ASTKind::LIT_CONST_EXPR;
         if (isVArraySize) {
             (void)std::for_each(diags.begin(), diags.end(), [this](auto info) { (void)diag.Diagnose(info); });
             DiagCannotAssignToImmutable(diag, ma, ma);
@@ -230,10 +234,10 @@ void TypeChecker::TypeCheckerImpl::DiagnoseForSubscriptAssignExpr(
         bool areChildrenValid = true;
         for (auto& indexExpr : se.indexExprs) {
             CJC_NULLPTR_CHECK(indexExpr);
-            areChildrenValid = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, indexExpr.get())) &&
+            areChildrenValid = Synthesize({ctx, SynPos::EXPR_ARG}, indexExpr.get()).IsCorrect() &&
                 ReplaceIdealTy(*indexExpr) && areChildrenValid;
         }
-        areChildrenValid = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ae.rightExpr.get())) &&
+        areChildrenValid = Synthesize({ctx, SynPos::EXPR_ARG}, ae.rightExpr.get()).IsCorrect() &&
             ReplaceIdealTy(*ae.rightExpr) && areChildrenValid;
         if (areChildrenValid) {
             // If all the children are valid, there must be operator overloading errors.
@@ -251,14 +255,14 @@ void TypeChecker::TypeCheckerImpl::DiagnoseForSubscriptAssignExpr(
     }
 }
 
-std::optional<Ptr<Ty>> TypeChecker::TypeCheckerImpl::InferAssignExprCheckCaseOverloading(
+std::optional<ModalTy> TypeChecker::TypeCheckerImpl::InferAssignExprCheckCaseOverloading(
     ASTContext& ctx, AssignExpr& ae, std::vector<Diagnostic>& diags)
 {
     auto ds = DiagSuppressor(diag);
     if (!ae.desugarExpr && ae.leftValue && ae.leftValue->astKind == ASTKind::SUBSCRIPT_EXPR) {
         SubscriptExpr& se = StaticCast<SubscriptExpr&>(*ae.leftValue);
         DesugarSubscriptOverloadExpr(ctx, ae);
-        if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::UNUSED}, ae.desugarExpr.get()))) {
+        if (Synthesize({ctx, SynPos::UNUSED}, ae.desugarExpr.get()).IsCorrect()) {
             ds.ReportDiag();
             CJC_NULLPTR_CHECK(ae.desugarExpr);
             ae.SetTy(ae.desugarExpr->GetTy());
@@ -276,7 +280,7 @@ std::optional<Ptr<Ty>> TypeChecker::TypeCheckerImpl::InferAssignExprCheckCaseOve
         ctx.DeleteDesugarExpr(ae.desugarExpr);
     } else if (ae.isCompound) {
         DesugarOperatorOverloadExpr(ctx, ae);
-        if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::UNUSED}, ae.desugarExpr.get()))) {
+        if (Synthesize({ctx, SynPos::UNUSED}, ae.desugarExpr.get()).IsCorrect()) {
             ds.ReportDiag();
             ae.SetTy(ae.desugarExpr->GetTy());
             CallExpr& ce = StaticCast<CallExpr&>(*StaticCast<AssignExpr&>(*ae.desugarExpr).rightExpr);
@@ -297,33 +301,32 @@ std::optional<Ptr<Ty>> TypeChecker::TypeCheckerImpl::InferAssignExprCheckCaseOve
     return {};
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkAssignExpr(ASTContext& ctx, Ty& target, AssignExpr& ae)
+bool TypeChecker::TypeCheckerImpl::ChkAssignExpr(ASTContext& ctx, ModalTy target, AssignExpr& ae)
 {
-    if (!Ty::IsTyCorrect(SynAssignExpr(ctx, ae))) {
+    if (!SynAssignExpr(ctx, ae).IsCorrect()) {
         return false;
     }
-    Ptr<Ty> unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-    if (typeManager.IsSubtype(ae.GetTy(), &target)) {
+    if (typeManager.IsSubtype(ae.GetTy(), target)) {
         return true;
     } else {
         DiagMismatchedTypesWithFoundTy(
-            diag, ae, target, *unitTy, "the type of an assignment expression is always 'Unit'");
-        ae.SetTy(TypeManager::GetInvalidTy());
+            diag, ae, target, ae.GetTy(), "the type of an assignment expression is always 'Unit'");
+        ae.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMultipleAssignExpr(ASTContext& ctx, AST::AssignExpr& ae)
+ModalTy TypeChecker::TypeCheckerImpl::SynMultipleAssignExpr(ASTContext& ctx, AST::AssignExpr& ae)
 {
     Synthesize({ctx, SynPos::UNUSED}, ae.desugarExpr.get());
     CJC_NULLPTR_CHECK(ae.desugarExpr);
     ae.SetTy(ae.desugarExpr->GetTy());
     Synthesize({ctx, SynPos::EXPR_ARG}, ae.rightExpr.get());
     CJC_NULLPTR_CHECK(ae.rightExpr);
-    if (!Ty::IsTyCorrect(ae.rightExpr->GetTy())) {
+    if (!ae.rightExpr->GetTy().IsCorrect()) {
         return ae.GetTy();
     }
-    Ptr<Ty> rightTy = typeManager.ReplaceIdealTy(ae.rightExpr->GetTy());
+    auto rightTy = typeManager.ReplaceIdealTy(ae.rightExpr->GetTy());
     ae.rightExpr->SetTy(rightTy);
     { // Create a scope for DiagSuppressor.
         auto ds = DiagSuppressor(diag);
@@ -333,7 +336,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMultipleAssignExpr(ASTContext& ctx, AST
     return ae.GetTy();
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynAssignExpr(ASTContext& ctx, AssignExpr& ae)
+ModalTy TypeChecker::TypeCheckerImpl::SynAssignExpr(ASTContext& ctx, AssignExpr& ae)
 {
     if (ae.desugarExpr) {
         // It is a multiple assignment expression.
@@ -348,40 +351,40 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynAssignExpr(ASTContext& ctx, AssignExpr&
         return *ret;
     }
     CJC_ASSERT(ae.leftValue && ae.rightExpr);
-    ae.SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    ae.SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
     if (ae.leftValue->astKind == ASTKind::WILDCARD_EXPR) {
         if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ae.rightExpr.get()))) {
-            Ptr<Ty> rightTy = typeManager.ReplaceIdealTy(ae.rightExpr->GetTy());
+            auto rightTy = typeManager.ReplaceIdealTy(ae.rightExpr->GetTy());
             ae.rightExpr->SetTy(rightTy);
         } else {
-            ae.SetTy(TypeManager::GetInvalidTy());
+            ae.SetTy({TypeManager::GetInvalidTy()});
         }
         ae.leftValue->SetTy(ae.rightExpr->GetTy());
         return ae.GetTy();
     }
     auto lTy = Synthesize({ctx, SynPos::LEFT_VALUE}, ae.leftValue.get());
     if (lTy->IsInvalid()) {
-        ae.SetTy(TypeManager::GetInvalidTy());
-        return TypeManager::GetInvalidTy();
+        ae.SetTy({TypeManager::GetInvalidTy()});
+        return {TypeManager::GetInvalidTy()};
     }
-    lTy = Ty::GetPrimitiveUpperBound(lTy);
+    lTy = {Ty::GetPrimitiveUpperBound(lTy.Ty()), lTy.Mode()};
     if (!IsAssignable(*ae.leftValue, ae.isCompound, diagsForOverload)) {
-        return TypeManager::GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
 
     // Additional checks for compound assignment expressions:
     // If the assignment operator is not overloaded, only built-in types support compound assign expressions.
-    if (!PreCheckCompoundAssign(ctx, ae, *lTy, diagsForOverload)) {
-        return TypeManager::GetInvalidTy();
+    if (!PreCheckCompoundAssign(ctx, ae, lTy, diagsForOverload)) {
+        return {TypeManager::GetInvalidTy()};
     }
 
     if (ae.op == TokenKind::EXP_ASSIGN) {
         // Quick fix. Rules for **= are different from all other compound assignment expressions.
-        if (!CheckExponentByBaseTy(ctx, *lTy, *ae.leftValue, *ae.rightExpr)) {
+        if (!CheckExponentByBaseTy(ctx, lTy, *ae.leftValue, *ae.rightExpr)) {
             if (ae.ShouldDiagnose()) {
                 (void)diag.Diagnose(ae, DiagKind::sema_type_incompatible, "assignment");
             }
-            ae.SetTy(TypeManager::GetInvalidTy());
+            ae.SetTy({TypeManager::GetInvalidTy()});
         }
         return ae.GetTy();
     }
@@ -396,12 +399,12 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynAssignExpr(ASTContext& ctx, AssignExpr&
         if (ae.ShouldDiagnose() && !CanSkipDiag(*ae.rightExpr)) {
             (void)diag.Diagnose(ae, DiagKind::sema_type_incompatible, "assignment");
         }
-        return TypeManager::GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
     // If the above check passes, ae.rightExpr and ae.rightExpr->GetTy() must not be null.
     // Additional checks for shift assignment expressions: negative left value check and simple overflow check.
     if (!IsShiftAssignValid(ae)) {
-        return TypeManager::GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
     return ae.GetTy();
 }
@@ -413,7 +416,7 @@ bool TypeChecker::TypeCheckerImpl::IsShiftAssignValid(const AssignExpr& ae)
             (void)diag.Diagnose(*ae.rightExpr, DiagKind::sema_negative_shift_count);
             return false;
         }
-        if (Ty::IsTyCorrect(ae.leftValue->GetTy()) && ae.leftValue->GetTy()->IsInteger()) {
+        if (ae.leftValue->GetTy().IsCorrect() && ae.leftValue->GetTy()->IsInteger()) {
             if (ae.rightExpr->constNumValue.asInt.GreaterThanOrEqualBitLen(ae.leftValue->TyKind())) {
                 (void)diag.Diagnose(*ae.rightExpr, DiagKind::sema_shift_count_overflow);
                 return false;
@@ -424,11 +427,11 @@ bool TypeChecker::TypeCheckerImpl::IsShiftAssignValid(const AssignExpr& ae)
 }
 
 bool TypeChecker::TypeCheckerImpl::PreCheckCompoundAssign(
-    ASTContext& ctx, const AssignExpr& ae, const Ty& lTy, const std::vector<Diagnostic>& diags)
+    ASTContext& ctx, const AssignExpr& ae, ModalTy lTy, const std::vector<Diagnostic>& diags)
 {
     if (ae.isCompound) {
         const auto& typeCandidates = COMPOUND_ASSIGN_TYPE_MAP.at(ae.op);
-        if (Ty::IsInitialTy(&lTy) || !Utils::In(lTy.kind, typeCandidates)) {
+        if (Ty::IsInitialTy(lTy.Ty()) || !Utils::In(lTy.Kind(), typeCandidates)) {
             Synthesize({ctx, SynPos::EXPR_ARG}, ae.rightExpr.get());
             if (ae.ShouldDiagnose()) {
                 (void)std::for_each(diags.begin(), diags.end(), [this](auto info) { (void)diag.Diagnose(info); });

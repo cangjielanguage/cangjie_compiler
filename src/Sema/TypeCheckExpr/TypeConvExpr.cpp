@@ -15,7 +15,7 @@ using namespace Cangjie;
 using namespace Sema;
 using namespace TypeCheckUtil;
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynTypeConvExpr(ASTContext& ctx, TypeConvExpr& tce)
+ModalTy TypeChecker::TypeCheckerImpl::SynTypeConvExpr(ASTContext& ctx, TypeConvExpr& tce)
 {
     CJC_NULLPTR_CHECK(tce.expr);
     CJC_NULLPTR_CHECK(tce.type);
@@ -25,18 +25,20 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynTypeConvExpr(ASTContext& ctx, TypeConvE
         return SynNumTypeConvExpr(tce);
     }
 
-    // The TypeConvExpr supports conversion between primitive types and conversion from CPointer to CFunc.
-    // Therefore, the function should be returned in either of the above two branches.
-    // Otherwise, there must be errors reported by other modules or logic codes.
-    tce.SetTy(TypeManager::GetInvalidTy());
+    // CPointer to CFunc is handled elsewhere.
+    // Therefore, the function should return already.
+    // Otherwise, there must be errors reported.
+    tce.SetTy({TypeManager::GetInvalidTy()});
     return tce.GetTy();
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynNumTypeConvExpr(TypeConvExpr& tce)
+ModalTy TypeChecker::TypeCheckerImpl::SynNumTypeConvExpr(TypeConvExpr& tce)
 {
-    tce.SetTy(TypeManager::GetPrimitiveTy(StaticCast<PrimitiveType*>(tce.type.get())->kind));
-    if (!Ty::IsTyCorrect(tce.expr->GetTy()) || !Ty::IsTyCorrect(tce.GetTy())) {
-        tce.SetTy(TypeManager::GetInvalidTy());
+    // use explicit modal written after Int64(3) ...
+    // although most primitive types are copy type.
+    tce.SetTy({TypeManager::GetPrimitiveTy(StaticCast<PrimitiveType*>(tce.type.get())->kind), tce.modal.ToModalInfo()});
+    if (!tce.expr->GetTy().IsCorrect() || !tce.GetTy().IsCorrect()) {
+        tce.SetTy({TypeManager::GetInvalidTy()});
         return tce.GetTy();
     }
     // Case 0: expr is of Nothing type, e.g., `UInt32(return)`
@@ -55,20 +57,20 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynNumTypeConvExpr(TypeConvExpr& tce)
     if (!CanSkipDiag(*tce.expr)) {
         diag.Diagnose(*tce.expr, DiagKind::sema_numeric_convert_must_be_numeric);
     }
-    tce.SetTy(TypeManager::GetInvalidTy());
+    tce.SetTy({TypeManager::GetInvalidTy()});
     return tce.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkTypeConvExpr(ASTContext& ctx, Ty& targetTy, TypeConvExpr& tce)
+bool TypeChecker::TypeCheckerImpl::ChkTypeConvExpr(ASTContext& ctx, ModalTy targetTy, TypeConvExpr& tce)
 {
     // Additionally, given a context type T0 and an expression T1(t), since T1(t) : T1, we always require T1 <: T0.
-    if (Ty::IsTyCorrect(SynTypeConvExpr(ctx, tce)) && typeManager.IsSubtype(tce.GetTy(), &targetTy)) {
+    if (SynTypeConvExpr(ctx, tce).IsCorrect() && typeManager.IsSubtype(tce.GetTy(), targetTy)) {
         return true;
     } else {
         if (!CanSkipDiag(tce)) {
             DiagMismatchedTypes(diag, tce, targetTy);
         }
-        tce.SetTy(TypeManager::GetInvalidTy());
+        tce.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
 }

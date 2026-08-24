@@ -50,6 +50,9 @@ void TypeChecker::TypeCheckerImpl::CheckSealedInheritance(const Decl& child, con
     if (target == nullptr) {
         return;
     }
+    if (child.astKind == ASTKind::STRUCT_DECL && typeManager.IsCopyInterfaceTy(parent.GetTy().Ty())) {
+        return;
+    }
     if (target->TestAttr(Attribute::SEALED)) {
         if (target->TestAttr(Attribute::IMPORTED) && !child.TestAttr(Attribute::IMPORTED)) {
             // Parent is imported, and child is defined in current package.
@@ -141,7 +144,7 @@ void TypeChecker::TypeCheckerImpl::CheckClassDecl(ASTContext& ctx, ClassDecl& cd
 void TypeChecker::TypeCheckerImpl::CheckAndAddSubDecls(
     const Type& type, ClassDecl& cd, bool& hasSuperClass, int& superClassLikeNum) const
 {
-    auto target = Ty::IsTyCorrect(type.GetTy()) ? Ty::GetDeclPtrOfTy(type.GetTy()) : type.GetTarget();
+    auto target = type.GetTy().IsCorrect() ? Ty::GetDeclPtrOfTy(type.GetTy()) : type.GetTarget();
     if (auto id = AST::As<ASTKind::INTERFACE_DECL>(target); id) {
         id->subDecls.insert(&cd);
     } else if (auto superClass = AST::As<ASTKind::CLASS_DECL>(target); superClass) {
@@ -251,7 +254,7 @@ void TypeChecker::TypeCheckerImpl::CheckInterfaceDecl(ASTContext& ctx, Interface
     // Do type check for all implemented interfaces.
     for (auto& interfaceType : id.inheritedTypes) {
         Synthesize({ctx, SynPos::NONE}, interfaceType.get());
-        if (auto it = DynamicCast<InterfaceTy*>(interfaceType->GetTy()); it) {
+        if (auto it = DynamicCast<InterfaceTy*>(interfaceType->DataTy())) {
             it->decl->subDecls.insert(&id);
             CheckSealedInheritance(id, *interfaceType);
             CheckThreadContextInheritance(id, *interfaceType);

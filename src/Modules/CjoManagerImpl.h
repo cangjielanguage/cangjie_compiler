@@ -213,7 +213,7 @@ private:
     // Flag to track if BuildIndex has been called
     bool hasBuildIndex{false};
     // Cache for substituted type alias to real type.
-    std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>> typeAliasCache;
+    std::unordered_map<AST::ModalTy, AST::ModalTy> typeAliasCache;
 };
 } // namespace Cangjie
 #endif

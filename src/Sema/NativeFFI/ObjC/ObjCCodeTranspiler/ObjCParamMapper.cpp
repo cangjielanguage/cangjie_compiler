@@ -72,7 +72,7 @@ std::string ObjCParamMapper::GenerateFuncParamLists(
                 genParams += ")";
                 break;
             case FunctionListFormat::CANGJIE_DECL:
-                genParams += cur->identifier.Val() + ": " + Ty::ToString(cur->type->GetTy());
+                genParams += cur->identifier.Val() + ": " + Ty::ToString(cur->type->DataTy());
                 if (i != paramLists[0]->params.size() - 1) {
                     genParams += ", ";
                 }
@@ -239,10 +239,7 @@ struct EmittableObjCFuncMetainfo ObjCParamMapper::GetGetterForProp(
 }
 
 struct EmittableObjCFuncMetainfo ObjCParamMapper::GetSetterForProp(
-    struct EmittableObjCPropMetainfo prop,
-    Ptr<Ty> ty,
-    std::string getterName,
-    std::string getterWrapperName)
+    struct EmittableObjCPropMetainfo prop, ModalTy ty, std::string getterName, std::string getterWrapperName)
 {
     EmittableObjCFuncMetainfo setter;
     setter.isStatic             = prop.isStatic;

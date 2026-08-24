@@ -22,7 +22,7 @@ Translator::LeftValueInfo Translator::TranslateThisOrSuperRefAsLeftValue(const A
     CJC_ASSERT(curFunc);
     auto thisParam = GetImplicitThisParam();
     if (refExpr.isSuper) {
-        auto superTy = TranslateType(*refExpr.GetTy());
+        auto superTy = TranslateType(refExpr.GetTy());
         auto loc = TranslateLocation(refExpr);
         thisParam = TypeCastOrBoxIfNeeded(*thisParam, *superTy, loc);
     }
@@ -63,7 +63,7 @@ Translator::LeftValueInfo Translator::TranslateEnumMemberVarRef(const AST::RefEx
     auto loc = TranslateLocation(refExpr);
 
     // polish here
-    auto enumTy = StaticCast<EnumTy*>(refExpr.GetTy());
+    auto enumTy = StaticCast<EnumTy*>(refExpr.DataTy());
     auto enumType = StaticCast<EnumType*>(chirTy.TranslateType(*enumTy));
     uint64_t enumId = GetEnumCtorId(*target);
     auto selectorTy = GetSelectorType(*enumTy);
@@ -202,11 +202,10 @@ Value* Translator::TranslateVarRef(const AST::RefExpr& refExpr)
 }
 
 InvokeCallContext Translator::GenerateInvokeCallContext(const InstCalleeInfo& instFuncInfo, Value& caller,
-    const AST::FuncDecl& callee, const std::vector<Value*>& args, const OverflowStrategy strategy)
+    const std::vector<Value*>& args, const OverflowStrategy strategy)
 {
-    auto tempDecl = typeManager.GetTopOverriddenFuncDecl(&callee);
-    const AST::FuncDecl* originalFuncDecl = tempDecl ? tempDecl.get() : &callee;
-    auto method = StaticCast<Function*>(GetSymbolTable(*originalFuncDecl));
+    CJC_NULLPTR_CHECK(instFuncInfo.originalFuncDecl);
+    auto method = StaticCast<Function*>(GetSymbolTable(*instFuncInfo.originalFuncDecl));
     // the overflow strategy is NA in mock case, of course, it's a wrong choice, we have to use SATURATING as default
     // we choose SATURATING because SATURATING and NA are same in `OverflowStrategyPrefix`
     auto tempStrategy = strategy == OverflowStrategy::NA ? OverflowStrategy::SATURATING : strategy;
@@ -218,7 +217,7 @@ InvokeCallContext Translator::GenerateInvokeCallContext(const InstCalleeInfo& in
             .instTypeArgs = instFuncInfo.instantiatedTypeArgs,
             .thisType = instFuncInfo.thisType
         },
-        .overflowStrategy = IsOverflowOpCall(*originalFuncDecl) ? tempStrategy : OverflowStrategy::NA
+        .overflowStrategy = IsOverflowOpCall(*instFuncInfo.originalFuncDecl) ? tempStrategy : OverflowStrategy::NA
     };
 }
 
@@ -267,12 +266,12 @@ Value* Translator::WrapMemberMethodByLambda(
             CJC_ASSERT(thisObj == nullptr);
             auto rtti = CreateAndAppendExpression<GetRTTIStatic>(
                 builder.GetUnitTy(), instFuncType.thisType->StripAllRefs(), currentBlock)->GetResult();
-            auto invokeInfo = GenerateInvokeCallContext(instFuncType, *rtti, funcDecl, args);
+            auto invokeInfo = GenerateInvokeCallContext(instFuncType, *rtti, args);
             ret = CreateAndAppendExpression<InvokeStatic>(lambdaRetType, invokeInfo, currentBlock)->GetResult();
         } else {
             // Invoke
             CJC_NULLPTR_CHECK(thisObj);
-            auto invokeInfo = GenerateInvokeCallContext(instFuncType, *thisObj, funcDecl, args);
+            auto invokeInfo = GenerateInvokeCallContext(instFuncType, *thisObj, args);
             ret = CreateAndAppendExpression<Invoke>(lambdaRetType, invokeInfo, currentBlock)->GetResult();
         }
     } else {
@@ -374,7 +373,7 @@ Value* Translator::TranslateGlobalOrLocalFuncRef(const AST::RefExpr& refExpr, Va
     }
     // emplace back `Bool`
     for (auto ty : refExpr.instTys) {
-        instArgs.emplace_back(TranslateType(*ty));
+        instArgs.emplace_back(TranslateType(ty));
     }
 
     if (instArgs.empty()) {
@@ -382,7 +381,7 @@ Value* Translator::TranslateGlobalOrLocalFuncRef(const AST::RefExpr& refExpr, Va
     }
 
     // 3. create GetInstantiateValue
-    auto resTy = TranslateType(*refExpr.GetTy());
+    auto resTy = TranslateType(refExpr.GetTy());
     auto loc = TranslateLocation(refExpr);
     return CreateAndAppendExpression<GetInstantiateValue>(loc, resTy, &originalFunc, instArgs, currentBlock)
         ->GetResult();

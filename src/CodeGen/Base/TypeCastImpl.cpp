@@ -495,8 +495,8 @@ llvm::Value* GenerateGenericTypeCast(IRBuilder2& irBuilder, const CGValue& cgSrc
         if (srcCGType->GetSize()) {
             // 1. Allocate memory for boxing srcValue.
             auto typeInfoOfSrc = irBuilder.CreateTypeInfo(srcTy);
-            llvm::Value* temp =
-                irBuilder.CallIntrinsicAllocaGeneric({typeInfoOfSrc, irBuilder.GetLayoutSize_32(srcTy)});
+            llvm::Value* temp = irBuilder.CallIntrinsicAllocaGeneric(
+                {typeInfoOfSrc, irBuilder.GetLayoutSize_32(srcTy)}, targetTy.IsLocalRegion());
             // 2. store srcValue to temp
             auto payloadPtr = irBuilder.GetPayloadFromObject(temp);
             auto addr = irBuilder.CreateBitCast(payloadPtr, srcCGType->GetLLVMType()->getPointerTo(1));
@@ -535,7 +535,7 @@ llvm::Value* GenerateGenericTypeCast(IRBuilder2& irBuilder, const CGValue& cgSrc
     } else if (IsStructRef(srcTy) && IsDynamicClassRef(targetTy)) { // struct& -> class<T1>&
         auto ti = irBuilder.CreateTypeInfo(srcTy);
         auto size = irBuilder.GetLayoutSize_32(srcTy);
-        llvm::Value* temp = irBuilder.CallIntrinsicAllocaGeneric({ti, size});
+        llvm::Value* temp = irBuilder.CallIntrinsicAllocaGeneric({ti, size}, targetTy.IsLocalRegion());
         irBuilder.CallGCWriteGenericPayload({temp, srcValue, size});
         return temp;
     } else if (IsDynamicClassRef(srcTy) && IsStructRef(targetTy)) { // class<T1>& -> struct&
@@ -549,7 +549,7 @@ llvm::Value* GenerateGenericTypeCast(IRBuilder2& irBuilder, const CGValue& cgSrc
         IsDynamicStruct(targetTy)) { // struct<Int64> -> struct<T1>
         auto ti = irBuilder.CreateTypeInfo(srcTy);
         auto size = irBuilder.GetLayoutSize_32(srcTy);
-        llvm::Value* temp = irBuilder.CallIntrinsicAllocaGeneric({ti, size});
+        llvm::Value* temp = irBuilder.CallIntrinsicAllocaGeneric({ti, size}, targetTy.IsLocalRegion());
         irBuilder.CallGCWriteGenericPayload({temp, srcValue, size});
         return temp;
     } else if (IsDynamicStruct(srcTy) &&
@@ -568,7 +568,7 @@ llvm::Value* GenerateGenericTypeCast(IRBuilder2& irBuilder, const CGValue& cgSrc
         IsDynamicStruct(targetTy)) { // struct<Int64> -> struct<T1>
         auto ti = irBuilder.CreateTypeInfo(srcTy);
         auto size = irBuilder.GetLayoutSize_32(srcTy);
-        llvm::Value* temp = irBuilder.CallIntrinsicAllocaGeneric({ti, size});
+        llvm::Value* temp = irBuilder.CallIntrinsicAllocaGeneric({ti, size}, targetTy.IsLocalRegion());
         irBuilder.CallGCWriteGenericPayload({temp, srcValue, size});
         return temp;
     } else if (IsDynamicClass(srcTy) && IsStaticClass(targetTy)) { // class<T1> -> class<Int64>: do nothing

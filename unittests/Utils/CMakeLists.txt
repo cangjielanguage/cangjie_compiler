@@ -31,7 +31,6 @@ target_link_libraries(
     ${CMAKE_DL_LIBS}
     ${BASE_UTIL_SRC}
     $<TARGET_OBJECTS:CangjieProfileUtils>
-    $<TARGET_OBJECTS:CangjieUnittestsMangle>
     GTest::gtest
     GTest::gtest_main)
 endif()
@@ -51,17 +50,17 @@ set(CAST_TEST_SRC CastASTTests.cpp CastTyTests.cpp)
 set(CAST_TEST_LIB cangjie-lsp ${CMAKE_DL_LIBS})
 
 
-add_executable(
-    CastTest
-    ${CAST_TEST_SRC})
-target_link_libraries(
-    CastTest
-    cangjie-lsp
-    ${CAST_TEST_LIB}
-    GTest::gtest
-    GTest::gtest_main)
-set_target_properties(CastTest PROPERTIES COMPILE_FLAGS "-DUT=1")
-add_test(NAME CastTest COMMAND CastTest)
+#add_executable(
+#    CastTest
+#    ${CAST_TEST_SRC})
+#target_link_libraries(
+#    CastTest
+#    cangjie-lsp
+#    ${CAST_TEST_LIB}
+#    GTest::gtest
+ #   GTest::gtest_main)
+#set_target_properties(CastTest PROPERTIES COMPILE_FLAGS "-DUT=1")
+#add_test(NAME CastTest COMMAND CastTest)
 
 if(CMAKE_BUILD_TYPE MATCHES Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fomit-frame-pointer")

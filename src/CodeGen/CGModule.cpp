@@ -521,6 +521,10 @@ llvm::GlobalVariable* CGModule::GeneratePrivateUnnamedAddrConstant(
 {
     auto type = constVal->getType();
     auto res = llvm::cast<llvm::GlobalVariable>(module->getOrInsertGlobal(name, type));
+    if (res->hasInitializer()) {
+        return res;
+    }
+
     res->setConstant(true);
     res->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     AddLinkageTypeMetadata(*res, llvm::GlobalValue::PrivateLinkage, false);

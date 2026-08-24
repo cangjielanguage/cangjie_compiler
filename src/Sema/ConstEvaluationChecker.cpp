@@ -31,7 +31,7 @@ void DiagExpectConstExpr(DiagnosticEngine& diag, const Expr& expr, bool isWeak)
         builder.AddNote("cannot jump to non-constant context from a constant context");
     } else if (auto tryExpr = DynamicCast<const TryExpr*>(&expr); tryExpr && tryExpr->isDesugaredFromTryWithResources) {
         builder.AddNote("try-with-resources expressions are not constant");
-    } else if (Ty::IsTyCorrect(expr.GetTy()) && expr.GetTy()->IsStructArray() &&
+    } else if (expr.GetTy().IsCorrect() && expr.GetTy()->IsStructArray() &&
         (expr.astKind == ASTKind::LIT_CONST_EXPR || expr.astKind == ASTKind::ARRAY_LIT)) {
         CJC_ASSERT(!expr.GetTy()->typeArgs.empty() && expr.GetTy()->typeArgs.front());
         mainHint = "expressions of type 'Array' are not constant";
@@ -110,7 +110,7 @@ bool HasAnnotationDeclTarget(const Annotation& anno)
 bool IsStringBinaryExpr(const Expr& expr)
 {
     CJC_NULLPTR_CHECK(expr.desugarExpr);
-    if (!Ty::IsTyCorrect(expr.GetTy()) || expr.astKind != ASTKind::BINARY_EXPR ||
+    if (!expr.GetTy().IsCorrect() || expr.astKind != ASTKind::BINARY_EXPR ||
         expr.desugarExpr->astKind != ASTKind::CALL_EXPR) {
         return false;
     }
@@ -121,7 +121,7 @@ bool IsStringBinaryExpr(const Expr& expr)
     }
     auto& baseExpr = StaticCast<const MemberAccess&>(*ce.baseFunc).baseExpr;
     CJC_NULLPTR_CHECK(baseExpr);
-    if (!Ty::IsTyCorrect(baseExpr->GetTy()) || !baseExpr->GetTy()->IsString()) {
+    if (!baseExpr->GetTy().IsCorrect() || !baseExpr->GetTy()->IsString()) {
         return false;
     }
     auto baseFuncTarget = ce.baseFunc->GetTarget();
@@ -568,7 +568,7 @@ private:
 
     bool ChkLitConstExpr(const LitConstExpr& le)
     {
-        if (!Ty::IsTyCorrect(le.GetTy())) {
+        if (!le.GetTy().IsCorrect()) {
             return false;
         }
         if (le.GetTy()->IsStructArray()) {
@@ -622,7 +622,7 @@ private:
 
     bool ChkArrayLit(const ArrayLit& al, bool isWeak)
     {
-        if (!Ty::IsTyCorrect(al.GetTy())) {
+        if (!al.GetTy().IsCorrect()) {
             return false;
         }
         if (al.GetTy()->IsStructArray()) {
@@ -695,6 +695,12 @@ private:
         bool res = ChkExpr(*be.leftExpr, isWeak);
         res = ChkExpr(*be.rightExpr, isWeak) && res;
         return res;
+    }
+
+    bool ChkExclaveExpr(const ExclaveExpr& ee, bool isWeak)
+    {
+        CJC_NULLPTR_CHECK(ee.body);
+        return ChkBlock(*ee.body, isWeak);
     }
 
     bool ChkIfExpr(const IfExpr& ie, bool isWeak)
@@ -804,11 +810,11 @@ private:
     bool ChkSubscriptExpr(const SubscriptExpr& se, bool isWeak)
     {
         CJC_NULLPTR_CHECK(se.baseExpr);
-        if (!Ty::IsTyCorrect(se.baseExpr->GetTy())) {
+        if (!se.baseExpr->GetTy().IsCorrect()) {
             // There are semantic errors, and these errors should have been reported. Just return false.
             return false;
         }
-        if (!se.baseExpr->GetTy()->IsTuple() && !Is<VArrayTy*>(se.baseExpr->GetTy())) {
+        if (!se.baseExpr->GetTy()->IsTuple() && !Is<VArrayTy>(se.baseExpr->DataTy())) {
             DiagExpectConstExpr(diag, se, isWeak);
             return false;
         }
@@ -899,6 +905,7 @@ private:
         {ASTKind::BLOCK, Proxy(&ConstEvaluationChecker::ChkBlock)},
         {ASTKind::ASSIGN_EXPR, Proxy(&ConstEvaluationChecker::ChkAssignExpr)},
         {ASTKind::INC_OR_DEC_EXPR, Proxy(&ConstEvaluationChecker::ChkIncOrDecExpr)},
+        {ASTKind::EXCLAVE_EXPR, Proxy(&ConstEvaluationChecker::ChkExclaveExpr)},
     };
 
     DiagnosticEngine& diag;

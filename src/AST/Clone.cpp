@@ -16,7 +16,6 @@
 
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
-#include "cangjie/AST/NodeX.h"
 #include "cangjie/Basic/Match.h"
 #include "cangjie/Basic/Print.h"
 
@@ -159,6 +158,7 @@ OwnedPtr<Decl> ASTCloner::CloneFuncDecl(const FuncDecl& fd, const VisitFunc& vis
     auto ret = MakeOwned<FuncDecl>();
     ret->leftParenPos = fd.leftParenPos;
     ret->rightParenPos = fd.rightParenPos;
+    ret->modal = fd.modal;
     CJC_NULLPTR_CHECK(fd.funcBody);
     ret->funcBody = CloneNode(fd.funcBody.get(), visitor);
     ret->funcBody->funcDecl = ret.get(); // Reset funcDecl of funcBody to new function.
@@ -229,6 +229,7 @@ OwnedPtr<RefType> ASTCloner::CloneRefType(const RefType& type, const VisitFunc& 
     for (auto& it : type.typeArguments) {
         ret->typeArguments.push_back(CloneType(it.get(), visitor));
     }
+    ret->modal = type.modal;
     ret->rightAnglePos = type.rightAnglePos;
     ret->commaPos = type.commaPos;
     ret->bitAndPos = type.bitAndPos;
@@ -361,6 +362,7 @@ OwnedPtr<QualifiedType> ASTCloner::CloneQualifiedType(const QualifiedType& node,
     for (auto& it : node.typeArguments) {
         ret->typeArguments.push_back(CloneType(it.get(), visitor));
     }
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -370,6 +372,7 @@ OwnedPtr<ParenType> ASTCloner::CloneParenType(const ParenType& node, const Visit
     ret->type = CloneType(node.type.get(), visitor);
     ret->leftParenPos = node.leftParenPos;
     ret->rightParenPos = node.rightParenPos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -382,6 +385,7 @@ OwnedPtr<OptionType> ASTCloner::CloneOptionType(const OptionType& node, const Vi
     if (node.desugarType != nullptr) {
         ret->desugarType = Clone(node.desugarType.get(), visitor);
     }
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -396,6 +400,7 @@ OwnedPtr<FuncType> ASTCloner::CloneFuncType(const FuncType& node, const VisitFun
     ret->leftParenPos = node.leftParenPos;
     ret->rightParenPos = node.rightParenPos;
     ret->arrowPos = node.arrowPos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -408,6 +413,7 @@ OwnedPtr<TupleType> ASTCloner::CloneTupleType(const TupleType& node, const Visit
     ret->leftParenPos = node.leftParenPos;
     ret->rightParenPos = node.rightParenPos;
     ret->commaPosVector = node.commaPosVector;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -416,6 +422,7 @@ OwnedPtr<ConstantType> ASTCloner::CloneConstantType(const ConstantType& node, co
     auto ret = MakeOwned<ConstantType>();
     ret->constantExpr = CloneExpr(node.constantExpr.get(), visitor);
     ret->dollarPos = node.dollarPos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -426,6 +433,7 @@ OwnedPtr<VArrayType> ASTCloner::CloneVArrayType(const VArrayType& node, const Vi
     ret->typeArgument = CloneType(node.typeArgument.get(), visitor);
     ret->constantType = CloneType(node.constantType.get(), visitor);
     ret->rightAnglePos = node.rightAnglePos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -512,6 +520,12 @@ OwnedPtr<IfExpr> ASTCloner::CloneIfExpr(const IfExpr& ie, const VisitFunc& visit
     expr->elseBody = CloneExpr(ie.elseBody.get(), visitor);
     return expr;
 }
+OwnedPtr<PrimitiveTypeExpr> ASTCloner::ClonePrimitiveTypeExpr(const PrimitiveTypeExpr& ie)
+{
+    auto expr = MakeOwned<PrimitiveTypeExpr>(ie.typeKind);
+    expr->modal = ie.modal;
+    return expr;
+}
 
 OwnedPtr<TryExpr> ASTCloner::CloneTryExpr(const TryExpr& te, const VisitFunc& visitor)
 {
@@ -596,6 +610,17 @@ OwnedPtr<ReturnExpr> ASTCloner::CloneReturnExpr(const ReturnExpr& re, const Visi
     expr->returnPos = re.returnPos;
     expr->expr = CloneExpr(re.expr.get(), visitor);
     expr->refFuncBody = re.refFuncBody;
+    return expr;
+}
+OwnedPtr<ExclaveExpr> ASTCloner::CloneExclaveExpr(const ExclaveExpr& ee, const VisitFunc& visitor)
+{
+    auto expr = MakeOwned<ExclaveExpr>();
+    CopyNodeField(expr.get(), ee);
+    expr->exclavePos = ee.exclavePos;
+    if (ee.body) {
+        auto body = CloneExpr(ee.body.get(), visitor);
+        expr->body.reset(As<ASTKind::BLOCK>(body.release()));
+    }
     return expr;
 }
 
@@ -1078,6 +1103,7 @@ template <typename ExprT> OwnedPtr<ExprT> ASTCloner::CloneExpr(Ptr<ExprT> expr, 
         [](const WildcardExpr& /* we */) { return OwnedPtr<Expr>(MakeOwned<WildcardExpr>()); },
         [&visitor](const LetPatternDestructor& ld) { return OwnedPtr<Expr>(CloneLetPatternDestructor(ld, visitor)); },
         [&visitor](const IfAvailableExpr& ie) { return OwnedPtr<Expr>(CloneIfAvailableExpr(ie, visitor)); },
+        [&visitor](const ExclaveExpr& ee) { return OwnedPtr<Expr>(CloneExclaveExpr(ee, visitor)); },
         [&expr]() {
             // Invalid and ignored cases.
             auto invalidExpr = MakeOwned<InvalidExpr>(expr->begin);
@@ -1399,6 +1425,9 @@ OwnedPtr<FuncParamList> ASTCloner::CloneFuncParamList(const FuncParamList& fpl, 
     CopyNodeField(ret.get(), fpl);
     // Clone field in FuncParamList.
     ret->leftParenPos = fpl.leftParenPos;
+    if (fpl.thisParam) {
+        ret->thisParam = CloneThisParam(*fpl.thisParam, visitor);
+    }
     for (auto& it : fpl.params) {
         auto funcParam = MakeOwned<FuncParam>();
         auto d = CloneDecl(it.get(), visitor);
@@ -1409,6 +1438,20 @@ OwnedPtr<FuncParamList> ASTCloner::CloneFuncParamList(const FuncParamList& fpl, 
     ret->hasVariableLenArg = fpl.hasVariableLenArg;
     ret->rightParenPos = fpl.rightParenPos;
     ret->EnableAttr(Attribute::COMPILER_ADD);
+    return ret;
+}
+
+OwnedPtr<ThisParam> ASTCloner::CloneThisParam(const ThisParam& tp, [[maybe_unused]] const VisitFunc& visitor)
+{
+    auto ret = MakeOwned<ThisParam>();
+    CopyNodeField(ret.get(), tp);
+    ret->thisPos = tp.thisPos;
+    ret->modal = tp.modal;
+    ret->commaPos = tp.commaPos;
+    ret->outerDecl = tp.outerDecl;
+    for (auto& anno : tp.annotations) {
+        ret->annotations.emplace_back(Clone(anno.get(), visitor));
+    }
     return ret;
 }
 

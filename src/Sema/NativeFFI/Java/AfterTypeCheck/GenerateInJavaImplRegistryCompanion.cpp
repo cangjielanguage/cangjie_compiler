@@ -37,21 +37,18 @@ OwnedPtr<FuncDecl> GenerateInJavaImplRegistryCompanion::GenerateConstructor(Clas
     auto entityParamRef = WithinFile(CreateRefExpr(*entityParam), file);
     ctor->funcBody->paramLists[0]->params.emplace_back(std::move(entityParam));
 
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<ModalTy> paramTys;
     paramTys.push_back(javaEntityDecl->GetTy());
     auto ctorTy = typeManager.GetFunctionTy(paramTys, companion.GetTy());
 
     auto& block = ctor->funcBody->body;
     block->SetTy(companion.GetTy());
 
-    block->body.emplace_back(
-        ilib.CreatePutSetToRegistryCall(
-            ilib.CreateGetJniEnvCall(file),
-            std::move(entityParamRef),
-            CreateThisRef(&companion, companion.GetTy(), file)));
+    block->body.emplace_back(ilib.CreatePutSetToRegistryCall(ilib.CreateGetJniEnvCall(file), std::move(entityParamRef),
+        CreateThisRef(&companion, companion.DataTy(), file)));
 
-    ctor->funcBody->SetTy(ctorTy);
-    ctor->SetTy(ctorTy);
+    ctor->funcBody->SetTy({ctorTy});
+    ctor->SetTy({ctorTy});
     ctor->funcBody->funcDecl = ctor.get();
     ctor->constructorCall = ConstructorCall::SUPER;
     ctor->EnableAttr(Attribute::CONSTRUCTOR, Attribute::IN_CLASSLIKE, Attribute::PUBLIC);

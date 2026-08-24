@@ -27,33 +27,33 @@ void ChkIfImportLibAST(DiagnosticEngine& diag, const ImportManager& im, const Qu
 }
 } // namespace
 
-bool TypeChecker::TypeCheckerImpl::ChkQuoteExpr(ASTContext& ctx, Ty& target, QuoteExpr& qe)
+bool TypeChecker::TypeCheckerImpl::ChkQuoteExpr(ASTContext& ctx, ModalTy target, QuoteExpr& qe)
 {
     ChkIfImportLibAST(diag, importManager, qe);
-    if (!Ty::IsTyCorrect(Synthesize({ctx, SynPos::NONE}, &qe))) {
+    if (!Synthesize({ctx, SynPos::NONE}, &qe).IsCorrect()) {
         return false;
     }
-    if (!typeManager.IsSubtype(qe.GetTy(), &target)) {
+    if (!typeManager.IsSubtype(qe.GetTy(), target)) {
         DiagMismatchedTypes(diag, qe, target);
-        qe.SetTy(TypeManager::GetInvalidTy());
+        qe.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     if (qe.desugarExpr) {
-        if (!Check(ctx, &target, qe.desugarExpr.get())) {
-            qe.SetTy(TypeManager::GetInvalidTy());
+        if (!Check(ctx, target, qe.desugarExpr.get())) {
+            qe.SetTy({TypeManager::GetInvalidTy()});
             return false;
         }
     }
     return true;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynQuoteExpr(ASTContext& ctx, QuoteExpr& qe)
+ModalTy TypeChecker::TypeCheckerImpl::SynQuoteExpr(ASTContext& ctx, QuoteExpr& qe)
 {
     ChkIfImportLibAST(diag, importManager, qe);
     if (qe.desugarExpr) {
         qe.SetTy(Synthesize({ctx, SynPos::NONE}, qe.desugarExpr.get()));
     } else {
-        qe.SetTy(TypeManager::GetInvalidTy());
+        qe.SetTy({TypeManager::GetInvalidTy()});
     }
     return qe.GetTy();
 }

@@ -25,9 +25,8 @@ OwnedPtr<FuncParam> GenerateNativeBridgeForJavaImpl::ConvertJavaCompatibleToCTyp
     FuncParam& sample, File& curFile) const
 {
     auto& jniTy = jni.ConvertCangjieToJniTy(*sample.GetTy());
-    OwnedPtr<FuncParam> param = WithinFile(
-        CreateFuncParam(sample.identifier.GetRawText(), nullptr, nullptr, &jniTy),
-        &curFile);
+    OwnedPtr<FuncParam> param =
+        WithinFile(CreateFuncParam(sample.identifier.GetRawText(), nullptr, nullptr, {&jniTy}), &curFile);
     return param;
 }
 
@@ -115,11 +114,8 @@ OwnedPtr<FuncDecl> GenerateNativeBridgeForJavaImpl::CreateConstructorBridge(
             for (auto [userParam, ctypeParam] = std::tuple{userParams.begin(), cTypeUserParams.begin()};
                  userParam != userParams.end();
                  userParam++, ctypeParam++) {
-                    refWrapperCtorArgs.push_back(CreateFuncArg(
-                        UnwrapCTypeExprAsJavaCompatible(
-                            WithinFile(CreateRefExpr(*ctypeParam->get()), &curFile),
-                            userParam->get()->GetTy(), &companion)
-                    ));
+                refWrapperCtorArgs.push_back(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                    WithinFile(CreateRefExpr(*ctypeParam->get()), &curFile), userParam->get()->DataTy(), &companion)));
             }
 
             auto& refWrapper = *refWrapperUserCtor.outerDecl;
@@ -150,7 +146,7 @@ OwnedPtr<FuncDecl> GenerateNativeBridgeForJavaImpl::CreateInstanceMethodBridge(A
     FuncDecl& refWrapperFunc, ClassDecl& companion) const
 {
     File& curFile = *companion.curFile;
-    Ptr<Ty> retTy = StaticCast<FuncTy*>(refWrapperFunc.GetTy())->retTy;
+    ModalTy retTy = StaticCast<FuncTy*>(refWrapperFunc.DataTy())->retTy;
     auto& userParams = refWrapperFunc.funcBody->paramLists[0]->params;
 
     auto ctypeParams = ConvertJavaCompatibleToCTypeParams(userParams, curFile);
@@ -178,11 +174,8 @@ OwnedPtr<FuncDecl> GenerateNativeBridgeForJavaImpl::CreateInstanceMethodBridge(A
                 for (auto [userParam, ctypeParam] = std::tuple{userParams.begin(), ctypeUserParams.begin() + 1};
                     userParam != userParams.end();
                     userParam++, ctypeParam++) {
-                        methodCallArgs.push_back(CreateFuncArg(
-                            UnwrapCTypeExprAsJavaCompatible(
-                                WithinFile(CreateRefExpr(*ctypeParam->get()), &curFile),
-                                (*userParam)->GetTy(), &companion)
-                        ));
+                    methodCallArgs.push_back(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                        WithinFile(CreateRefExpr(*ctypeParam->get()), &curFile), (*userParam)->DataTy(), &companion)));
                 }
 
                 auto& ctor = ctx.GetJavaImplWrappingConstructor(refWrapper);
@@ -221,7 +214,7 @@ OwnedPtr<FuncDecl> GenerateNativeBridgeForJavaImpl::CreateStaticMethodBridge(
     FuncDecl& refWrapperFunc, ClassDecl& companion) const
 {
     File& curFile = *companion.curFile;
-    Ptr<Ty> retTy = StaticCast<FuncTy*>(refWrapperFunc.GetTy())->retTy;
+    ModalTy retTy = StaticCast<FuncTy*>(refWrapperFunc.DataTy())->retTy;
     auto& userParams = refWrapperFunc.funcBody->paramLists[0]->params;
     auto nativeFuncName = jni.GetJniMethodName(refWrapperFunc);
 
@@ -244,11 +237,8 @@ OwnedPtr<FuncDecl> GenerateNativeBridgeForJavaImpl::CreateStaticMethodBridge(
                 for (auto [userParam, ctypeParam] = std::tuple{userParams.begin(), ctypeUserParams.begin()};
                     userParam != userParams.end();
                     userParam++, ctypeParam++) {
-                        methodCallArgs.push_back(CreateFuncArg(
-                            UnwrapCTypeExprAsJavaCompatible(
-                                WithinFile(CreateRefExpr(*ctypeParam->get()), &curFile),
-                                (*userParam)->GetTy(), &companion)
-                        ));
+                    methodCallArgs.push_back(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                        WithinFile(CreateRefExpr(*ctypeParam->get()), &curFile), (*userParam)->DataTy(), &companion)));
                 }
 
                 auto methodAccess = CreateMemberAccess(WithinFile(CreateRefExpr(refWrapper), &curFile), refWrapperFunc);

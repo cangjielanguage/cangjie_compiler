@@ -60,17 +60,19 @@ JniBridge::JniBridge(
 
 OwnedPtr<FuncParam> JniBridge::CreateJniEnvParam(const std::string& name) const
 {
-    return CreateFuncParam(name, CreateType(&GetJniEnvPtrTy()), nullptr, &GetJniEnvPtrTy());
+    return CreateFuncParam(name, CreateType(ModalTy{Ptr<Ty>(&GetJniEnvPtrTy())}), nullptr, {&GetJniEnvPtrTy()});
 }
 
 OwnedPtr<FuncParam> JniBridge::CreateJniJobjectOrJclassParam(const std::string& name) const
 {
-    return CreateFuncParam(name, CreateType(&GetJniJobjectDeclTy()), nullptr, &GetJniJobjectDeclTy());
+    return CreateFuncParam(
+        name, CreateType(ModalTy{Ptr<Ty>(&GetJniJobjectDeclTy())}), nullptr, {&GetJniJobjectDeclTy()});
 }
 
 OwnedPtr<FuncParam> JniBridge::CreateRegistryIdParam(const std::string& name) const
 {
-    return CreateFuncParam(name, CreateType(&GetRegistryIdJavaTy()), nullptr, &GetRegistryIdJavaTy());
+    return CreateFuncParam(
+        name, CreateType(ModalTy{Ptr<Ty>(&GetRegistryIdJavaTy())}), nullptr, {&GetRegistryIdJavaTy()});
 }
 
 std::string JniBridge::GetJniMethodName(const FuncDecl& method) const

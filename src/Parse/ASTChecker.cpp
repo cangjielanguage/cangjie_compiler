@@ -31,6 +31,20 @@ void ASTChecker::CheckExpr(Ptr<Node> node)
     }
 }
 
+void ASTChecker::CheckThisParam(Ptr<Node> node)
+{
+    auto thisParam = StaticAs<ASTKind::THIS_PARAM>(node);
+    ZERO_POSITION_CHECK(node, thisParam->thisPos);
+    ZERO_POSITION_CHECK(node, thisParam->commaPos);
+}
+
+void ASTChecker::CheckExclaveExpr(Ptr<Node> node)
+{
+    auto exclaveExpr = StaticAs<ASTKind::EXCLAVE_EXPR>(node);
+    ZERO_POSITION_CHECK(node, exclaveExpr->exclavePos);
+    AST_NULLPTR_CHECK(node, exclaveExpr->body);
+}
+
 void ASTChecker::CheckIfExpr(Ptr<Node> node)
 {
     auto ifExpr = StaticAs<ASTKind::IF_EXPR>(node);

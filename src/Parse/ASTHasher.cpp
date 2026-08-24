@@ -220,6 +220,13 @@ struct ASTHasherImpl {
         }
     }
 
+    template <int whatTypeToHash = 0> void CombineHash(const ASTModalInfo& modal)
+    {
+        CombineHash<whatTypeToHash>(modal.AtBegin());
+        CombineHash<whatTypeToHash>(modal.LocalBegin());
+        CombineHash<whatTypeToHash>(static_cast<uint8_t>(modal.Local()));
+    }
+
     template <int whatTypeToHash, typename Arg> inline void SuperHash(const Arg& input)
     {
         if constexpr ((whatTypeToHash == ONLY_POSITION && std::is_same<Arg, Position>::value) ||
@@ -451,6 +458,7 @@ struct ASTHasherImpl {
     {
         HashExpr<whatTypeToHash>(ce);
         SUPERHash<whatTypeToHash>(ce.baseFunc, ce.args);
+        CombineHash<whatTypeToHash>(ce.modal);
     }
     template <int whatTypeToHash> void HashDoWhileExpr(const DoWhileExpr& dwe)
     {
@@ -495,7 +503,7 @@ struct ASTHasherImpl {
         if (auto maTarget = ma.target) {
             SUPERHash<whatTypeToHash>(maTarget->rawMangleName);
             CJC_ASSERT(maTarget->GetTy());
-            SUPERHash<whatTypeToHash>(maTarget->GetTy()->String());
+            SUPERHash<whatTypeToHash>(maTarget->GetTy().String());
         }
     }
     template <int whatTypeToHash> void HashTypeConvExpr(const TypeConvExpr& ntc)
@@ -532,7 +540,7 @@ struct ASTHasherImpl {
         if (auto refTarget = re.ref.target) {
             SUPERHash<whatTypeToHash>(refTarget->rawMangleName);
             CJC_ASSERT(refTarget->GetTy());
-            SUPERHash<whatTypeToHash>(refTarget->GetTy()->String());
+            SUPERHash<whatTypeToHash>(refTarget->GetTy().String());
         }
     }
     template <int whatTypeToHash> void HashReturnExpr(const ReturnExpr& re)
@@ -679,7 +687,7 @@ struct ASTHasherImpl {
     template <int whatTypeToHash> void HashPrimitiveType(const PrimitiveType& pt)
     {
         HashType<whatTypeToHash>(pt);
-        SUPERHash<whatTypeToHash>(static_cast<int64_t>(pt.kind));
+        SUPERHash<whatTypeToHash>(static_cast<int64_t>(pt.kind), pt.modal);
     }
     template <int whatTypeToHash> void HashQualifiedType(const QualifiedType& qt)
     {
@@ -688,7 +696,7 @@ struct ASTHasherImpl {
         if (auto refTarget = qt.target) {
             SUPERHash<whatTypeToHash>(refTarget->rawMangleName);
             CJC_ASSERT(refTarget->GetTy());
-            SUPERHash<whatTypeToHash>(refTarget->GetTy()->String());
+            SUPERHash<whatTypeToHash>(refTarget->GetTy().String());
         }
     }
 
@@ -699,7 +707,7 @@ struct ASTHasherImpl {
         if (auto refTarget = rt.ref.target) {
             SUPERHash<whatTypeToHash>(refTarget->rawMangleName);
             CJC_ASSERT(refTarget->GetTy());
-            SUPERHash<whatTypeToHash>(refTarget->GetTy()->String());
+            SUPERHash<whatTypeToHash>(refTarget->GetTy().String());
         }
     }
 
@@ -728,7 +736,7 @@ struct ASTHasherImpl {
     }
     template <int whatTypeToHash> void HashType(const Type& type)
     {
-        SUPERHash<whatTypeToHash>(type.typeParameterName);
+        SUPERHash<whatTypeToHash>(type.typeParameterName, type.modal);
     }
 
     template <int whatTypeToHash> void HashThisType(const ThisType& tt)
@@ -748,7 +756,7 @@ struct ASTHasherImpl {
     template <int whatTypeToHash> void HashPrimitiveTypeExpr(const PrimitiveTypeExpr& pte)
     {
         HashExpr<whatTypeToHash>(pte);
-        SUPERHash<whatTypeToHash>(static_cast<int64_t>(pte.typeKind));
+        SUPERHash<whatTypeToHash>(static_cast<int64_t>(pte.typeKind), pte.modal);
     }
     template <int whatTypeToHash> void HashInterpolationExpr(const InterpolationExpr& ie)
     {
@@ -776,6 +784,18 @@ struct ASTHasherImpl {
     {
         HashExpr<whatTypeToHash>(expr);
         SUPERHash<whatTypeToHash>(expr.GetArg(), expr.GetLambda1(), expr.GetLambda2());
+    }
+
+    template <int whatTypeToHash> void HashExclaveExpr(const ExclaveExpr& expr)
+    {
+        HashExpr<whatTypeToHash>(expr);
+        SUPERHash<whatTypeToHash>(expr.exclavePos, expr.body);
+    }
+
+    template <int whatTypeToHash> void HashThisParam(const ThisParam& tp)
+    {
+        HashNode<whatTypeToHash>(tp);
+        SUPERHash<whatTypeToHash>(tp.thisPos, tp.modal, tp.commaPos);
     }
 
     template <int whatTypeToHash> hash_type Hash(Ptr<const AST::Node> node)
@@ -1215,7 +1235,7 @@ ASTHasher::hash_type ASTHasher::SrcUseHash(const AST::Decl& decl)
     ASTHasherImpl a{};
     a.HashSpecificModifiers(decl,
         {TokenKind::OPEN, TokenKind::ABSTRACT, TokenKind::SEALED, TokenKind::MUT, TokenKind::STATIC, TokenKind::CONST,
-            TokenKind::FOREIGN});
+            TokenKind::FOREIGN, TokenKind::DEMODE});
     a.SrcUseHashAnnotations(decl.annotations);
     // FuncParam is for member param in primary ctor.
     if (decl.astKind == ASTKind::VAR_DECL || decl.astKind == ASTKind::FUNC_PARAM) {
@@ -1237,7 +1257,7 @@ ASTHasher::hash_type ASTHasher::HashMemberAPIs(std::vector<Ptr<const Decl>>&& me
     for (auto memberAPI : memberAPIs) {
         hasher.HashMemberSignature(*memberAPI);
         hasher.HashSpecificModifiers(*memberAPI, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::PRIVATE,
-            TokenKind::INTERNAL, TokenKind::MUT, TokenKind::STATIC});
+            TokenKind::INTERNAL, TokenKind::MUT, TokenKind::STATIC, TokenKind::DEMODE});
     }
     return hasher.value;
 }
@@ -1299,7 +1319,7 @@ static Ptr<FuncBody> GetFuncBody(const Decl& decl)
 ASTHasher::hash_type ASTHasher::BodyHash(const Decl& decl, const std::pair<bool, bool>& srcInfo, bool hashAnnos)
 {
     ASTHasherImpl a{};
-    a.HashSpecificModifiers(decl, {TokenKind::OVERRIDE, TokenKind::REDEF, TokenKind::UNSAFE});
+    a.HashSpecificModifiers(decl, {TokenKind::OVERRIDE, TokenKind::REDEF, TokenKind::UNSAFE, TokenKind::EXCLAVE});
     if (hashAnnos) {
         a.BodyHashAnnotations(decl.annotations);
     }
@@ -1368,7 +1388,7 @@ ASTHasher::hash_type ASTHasher::BodyHash(const Decl& decl, const std::pair<bool,
         for (auto visibleAPI : visibleAPIs) {
             a.HashMemberSignature(*visibleAPI);
             a.HashSpecificModifiers(*visibleAPI, {TokenKind::PUBLIC, TokenKind::PROTECTED, TokenKind::INTERNAL,
-                TokenKind::PRIVATE, TokenKind::MUT, TokenKind::STATIC});
+                TokenKind::PRIVATE, TokenKind::MUT, TokenKind::STATIC, TokenKind::DEMODE});
         }
     }
 

@@ -475,6 +475,14 @@ OwnedPtr<Expr> ASTLoader::ASTLoaderImpl::LoadForInExpr(const PackageFormat::Expr
     return fie;
 }
 
+OwnedPtr<Expr> ASTLoader::ASTLoaderImpl::LoadExclaveExpr(const PackageFormat::Expr& expr, int64_t exprIndex)
+{
+    auto ee = CreateAndLoadBasicInfo<ExclaveExpr>(expr, exprIndex);
+    CJC_ASSERT(expr.operands()->size() == 1);
+    ee->body = LoadExpr<Block>(expr.operands()->Get(0));
+    return ee;
+}
+
 OwnedPtr<MatchCaseOther> ASTLoader::ASTLoaderImpl::LoadMatchCaseOther(FormattedIndex index)
 {
     auto mcoObj = GetFormatExprByIndex(index);

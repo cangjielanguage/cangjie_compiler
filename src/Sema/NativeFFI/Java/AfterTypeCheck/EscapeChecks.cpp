@@ -24,14 +24,14 @@ namespace {
 void CollectJavaTypes(Ptr<Ty> ty, std::vector<Ptr<Decl>>& javaDecls)
 {
     if (ty->IsTuple()) {
-        for (auto typeArg : ty->typeArgs) {
+        for (auto typeArg : ty->TyArgs()) {
             CollectJavaTypes(typeArg, javaDecls);
         }
     }
 
     if (ty->IsCoreOptionType()) {
-        CJC_ASSERT(ty->typeArgs.size() == 1);
-        CollectJavaTypes(ty->typeArgs[0], javaDecls);
+        CJC_ASSERT(ty->TyArgs().size() == 1);
+        CollectJavaTypes(ty->TyArg(0), javaDecls);
     }
 
     if (auto decl = Ty::GetDeclOfTy(ty)) {
@@ -54,7 +54,7 @@ void CollectJavaTypesAndDiag(DiagnosticEngine& diag, const RefType& type)
 {
     std::vector<Ptr<Decl>> javaDecls;
     for (auto& typeArg : type.typeArguments) {
-        CollectJavaTypes(typeArg->GetTy(), javaDecls);
+        CollectJavaTypes(typeArg->DataTy(), javaDecls);
     }
     DiagJavaTypesAsGenericParam(diag, type, std::move(javaDecls));
 }
@@ -71,10 +71,10 @@ bool IsInstantiationWithJavaTypeAllowed(NameReferenceExpr& expr)
         return true;
     }
 
-    if (IsInstantiationWithJavaTypeAllowed(target->GetTy())) {
+    if (IsInstantiationWithJavaTypeAllowed(target->DataTy())) {
         return true;
     }
-    if (target->outerDecl && IsInstantiationWithJavaTypeAllowed(target->outerDecl->GetTy())) {
+    if (target->outerDecl && IsInstantiationWithJavaTypeAllowed(target->outerDecl->DataTy())) {
         return true;
     }
 
@@ -91,7 +91,7 @@ void JavaInteropManager::CheckGenericsInstantiation(Decl& decl)
                 CollectJavaTypesAndDiag(diag, *nameRefExpr);
             }
         } else if (auto refType = DynamicCast<RefType>(node)) {
-            if (!IsInstantiationWithJavaTypeAllowed(refType->GetTy())) {
+            if (!IsInstantiationWithJavaTypeAllowed(refType->DataTy())) {
                 CollectJavaTypesAndDiag(diag, *refType);
             }
         }

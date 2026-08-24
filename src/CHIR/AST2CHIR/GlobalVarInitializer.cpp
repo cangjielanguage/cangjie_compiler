@@ -552,7 +552,7 @@ bool GlobalVarInitializer::NeedVarLiteralInitFunc(const AST::Decl& decl)
     CJC_ASSERT(vd->initializer->astKind == AST::ASTKind::LIT_CONST_EXPR);
     auto litExpr = StaticCast<AST::LitConstExpr*>(vd->initializer.get());
     auto globalVar = StaticCast<GlobalVar*>(GetGlobalVariable(*vd));
-    globalVar->SetInitializer(*trans.TranslateLitConstant(*litExpr, *litExpr->GetTy()));
+    globalVar->SetInitializer(*trans.TranslateLitConstant(*litExpr, litExpr->GetTy()));
 
     // mutable var decl need to be initialized in `file_literal`, codegen will call `file_literal` in
     // macro expand situation, immutable var decl doesn't need to

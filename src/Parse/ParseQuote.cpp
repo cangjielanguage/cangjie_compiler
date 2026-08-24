@@ -58,7 +58,7 @@ void ParserImpl::ParseQuoteDollarInterpolation(AST::QuoteExpr& qe)
     if (isRawId) {
         ident = ParseNameFromRawIdentifier(ident);
     }
-    auto ref = CreateRefExpr({ident, token.Begin(), token.End(), isRawId}, nullptr, token.Begin());
+    auto ref = CreateRefExpr({ident, token.Begin(), token.End(), isRawId}, {}, token.Begin());
     ref->begin.column += 1;
     ref->end = token.End();
     ref->isQuoteDollar = true;

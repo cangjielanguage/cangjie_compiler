@@ -42,8 +42,8 @@ const std::unordered_map<ASTKind, std::string> PATTERN_ASTKIND_TO_STRING_MAP = {
     {ASTKind::ENUM_PATTERN, "enum"},
 };
 
-void CheckMatchExprSetTy(MatchExpr& me, Ptr<Ty> target, TypeManager& typeManager, ImportManager& impMgr,
-    const std::set<Ptr<Ty>>& matchCaseTys)
+void CheckMatchExprSetTy(MatchExpr& me, ModalTy target, TypeManager& typeManager, ImportManager& impMgr,
+    const std::set<ModalTy>& matchCaseTys)
 {
     // If any of branch equal to the target type, do not join branches' types (avoiding unexpected common supertype).
     if (matchCaseTys.find(target) != matchCaseTys.end()) {
@@ -52,12 +52,12 @@ void CheckMatchExprSetTy(MatchExpr& me, Ptr<Ty> target, TypeManager& typeManager
     }
     auto joinAndMeet = JoinAndMeet(typeManager, matchCaseTys, {}, &impMgr, me.curFile);
     auto joinRes = joinAndMeet.JoinAsVisibleTy();
-    me.SetTy(std::get_if<Ptr<Ty>>(&joinRes) ? std::get<Ptr<Ty>>(joinRes) : target);
+    me.SetTy(std::get_if<ModalTy>(&joinRes) ? std::get<ModalTy>(joinRes) : target);
 }
 } // namespace
 
 namespace Cangjie {
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMatchExpr(ASTContext& ctx, MatchExpr& me)
+ModalTy TypeChecker::TypeCheckerImpl::SynMatchExpr(ASTContext& ctx, MatchExpr& me)
 {
     if (me.selector) {
         return SynMatchExprHasSelector(ctx, me);
@@ -65,7 +65,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMatchExpr(ASTContext& ctx, MatchExpr& m
     return SynMatchExprNoSelector(ctx, me);
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkMatchExpr(ASTContext& ctx, Ty& target, MatchExpr& me)
+bool TypeChecker::TypeCheckerImpl::ChkMatchExpr(ASTContext& ctx, ModalTy target, MatchExpr& me)
 {
     if (me.selector) {
         return ChkMatchExprHasSelector(ctx, target, me);
@@ -73,7 +73,7 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchExpr(ASTContext& ctx, Ty& target, Mat
     return ChkMatchExprNoSelector(ctx, target, me);
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMatchExprHasSelector(ASTContext& ctx, MatchExpr& me)
+ModalTy TypeChecker::TypeCheckerImpl::SynMatchExprHasSelector(ASTContext& ctx, MatchExpr& me)
 {
     // Synthesize selector's ty.
     CJC_NULLPTR_CHECK(me.selector);
@@ -89,9 +89,9 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMatchExprHasSelector(ASTContext& ctx, M
     }
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynNormalMatchCaseBody(ASTContext& ctx, MatchExpr& me)
+ModalTy TypeChecker::TypeCheckerImpl::SynNormalMatchCaseBody(ASTContext& ctx, MatchExpr& me)
 {
-    std::set<Ptr<Ty>> matchCaseTyVec;
+    std::set<ModalTy> matchCaseTyVec;
     CJC_NULLPTR_CHECK(me.selector);
     auto selectorTy = me.selector->GetTy();
     bool isMatchCorrect = !me.matchCases.empty();
@@ -101,10 +101,10 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynNormalMatchCaseBody(ASTContext& ctx, Ma
         mc->SetCtxExprForPatterns(me.selector.get());
         if (Ty::IsTyCorrect(selectorTy)) {
             // Check whether pattern is compatible with selectorTy.
-            bool isPatOK = ChkMatchCasePatterns(ctx, selectorTy, *mc);
+            bool isPatOK = ChkMatchCasePatterns(ctx, selectorTy, *mc, me.selector.get());
             // Check the actions in a match case anyway.
             bool isGuardOK = ChkMatchCasePatGuard(ctx, *mc);
-            bool areActionsOK = ChkMatchCaseActions(ctx, nullptr, *mc);
+            bool areActionsOK = ChkMatchCaseActions(ctx, ModalTy{}, *mc);
             if (isPatOK && isGuardOK && areActionsOK) {
                 matchCaseTyVec.insert(mc->GetTy());
             } else {
@@ -113,14 +113,14 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynNormalMatchCaseBody(ASTContext& ctx, Ma
         }
     }
     if (!isMatchCorrect) {
-        me.SetTy(TypeManager::GetInvalidTy());
+        me.SetTy({TypeManager::GetInvalidTy()});
         return me.GetTy();
     }
 
     if (me.selector->GetTy()->HasPlaceholder()) {
         me.selector->SetTy(typeManager.TryGreedySubst(me.selector->GetTy()));
         for (auto& mc : me.matchCases) {
-            (void)ChkMatchCasePatterns(ctx, me.selector->GetTy(), *mc);
+            (void)ChkMatchCasePatterns(ctx, me.selector->GetTy(), *mc, me.selector.get());
         }
     }
     // Join match expr's ty.
@@ -131,7 +131,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynNormalMatchCaseBody(ASTContext& ctx, Ma
     if (optErrs) {
         if (me.sugarKind == Expr::SugarKind::IF_LET) {
             auto builder = diag.Diagnose(me, DiagKind::sema_diag_report_error_message,
-                "types " + Ty::ToString(me.matchCases[0]->GetTy()) + " and " + Ty::ToString(me.matchCases[1]->GetTy()) +
+                "types " + me.matchCases[0]->GetTy().String() + " and " + me.matchCases[1]->GetTy().String() +
                     " of the two branches of this 'if' expression mismatch");
             builder.AddNote(*optErrs);
         } else {
@@ -142,24 +142,24 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynNormalMatchCaseBody(ASTContext& ctx, Ma
 
     // Check pattern exhaustiveness and set unreachable attr of match cases.
     // Hotfix: ignore for desugared matchExpr.
-    if (Ty::IsTyCorrect(me.GetTy()) && me.sugarKind == Expr::SugarKind::NO_SUGAR &&
+    if (me.GetTy().IsCorrect() && me.sugarKind == Expr::SugarKind::NO_SUGAR &&
         !PatternUsefulness::CheckMatchExprHasSelectorExhaustivenessAndReachability(ctx.diag, typeManager, me)) {
-        me.SetTy(TypeManager::GetInvalidTy());
+        me.SetTy({TypeManager::GetInvalidTy()});
         return me.GetTy();
     }
     return me.GetTy();
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynQuestSugarMatchCaseBody(ASTContext& ctx, MatchExpr& me)
+ModalTy TypeChecker::TypeCheckerImpl::SynQuestSugarMatchCaseBody(ASTContext& ctx, MatchExpr& me)
 {
     auto selectorTy = me.selector->GetTy();
     if (!Ty::IsTyCorrect(selectorTy)) {
-        me.SetTy(TypeManager::GetInvalidTy());
+        me.SetTy({TypeManager::GetInvalidTy()});
         return me.GetTy();
     } else if (!selectorTy->IsCoreOptionType()) {
         auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_optional_chain_non_optional, me);
         builder.AddMainHintArguments(selectorTy->String());
-        me.SetTy(TypeManager::GetInvalidTy());
+        me.SetTy({TypeManager::GetInvalidTy()});
         return me.GetTy();
     }
     // Match desugared from e? always have 2 cases.
@@ -170,15 +170,15 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynQuestSugarMatchCaseBody(ASTContext& ctx
     CJC_NULLPTR_CHECK(mc0->patterns.front());
     mc0->SetCtxExprForPatterns(me.selector.get());
     // Desugared patterns are always compatible with selectorTy. Therefore, no error will be raised if e is correct.
-    (void)ChkMatchCasePatterns(ctx, selectorTy, *mc0);
+    (void)ChkMatchCasePatterns(ctx, selectorTy, *mc0, me.selector.get());
     // Desugared patterns have no pattern guards and hence skip the invocation of ChkMatchCasePatGuard.
-    (void)ChkMatchCaseActions(ctx, nullptr, *mc0);
+    (void)ChkMatchCaseActions(ctx, {}, *mc0);
 
     auto& mc1 = me.matchCases[1];
     CJC_ASSERT(mc1->patterns.size() == 1);
     CJC_NULLPTR_CHECK(mc1->patterns.front());
     mc1->SetCtxExprForPatterns(me.selector.get());
-    ChkMatchCasePatterns(ctx, selectorTy, *mc1);
+    ChkMatchCasePatterns(ctx, selectorTy, *mc1, me.selector.get());
     // Case 1 is merely a None constructor, whose type is the SAME as the type of CASE0. Return value can be ignored.
     (void)Check(ctx, mc0->GetTy(), mc1->exprOrDecls.get());
     mc1->SetTy(mc1->exprOrDecls->GetTy());
@@ -187,19 +187,19 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynQuestSugarMatchCaseBody(ASTContext& ctx
     return me.GetTy();
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMatchExprNoSelector(ASTContext& ctx, MatchExpr& me)
+ModalTy TypeChecker::TypeCheckerImpl::SynMatchExprNoSelector(ASTContext& ctx, MatchExpr& me)
 {
-    std::set<Ptr<Ty>> matchCaseTyVec;
+    std::set<ModalTy> matchCaseTyVec;
     bool hasInvalidCase = false;
     for (auto& mco : me.matchCaseOthers) {
-        if (!Ty::IsTyCorrect(SynMatchCaseNoSelector(ctx, *mco))) {
+        if (!SynMatchCaseNoSelector(ctx, *mco).IsCorrect()) {
             hasInvalidCase = true;
         } else {
             matchCaseTyVec.insert(mco->GetTy());
         }
     }
     if (hasInvalidCase) {
-        me.SetTy(TypeManager::GetInvalidTy());
+        me.SetTy({TypeManager::GetInvalidTy()});
         return me.GetTy();
     }
 
@@ -215,16 +215,16 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMatchExprNoSelector(ASTContext& ctx, Ma
 
     // Check exhaustiveness and set unreachable attr of match cases.
     if (!CheckMatchExprNoSelectorExhaustiveness(me, false)) {
-        me.SetTy(TypeManager::GetInvalidTy());
+        me.SetTy({TypeManager::GetInvalidTy()});
         return me.GetTy();
     }
     return me.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkMatchExprHasSelector(ASTContext& ctx, AST::Ty& target, AST::MatchExpr& me)
+bool TypeChecker::TypeCheckerImpl::ChkMatchExprHasSelector(ASTContext& ctx, AST::ModalTy target, AST::MatchExpr& me)
 {
     CJC_NULLPTR_CHECK(me.selector);
-    std::set<Ptr<Ty>> matchCaseTyVec;
+    std::set<ModalTy> matchCaseTyVec;
     bool isMatchCorrect =
         Synthesize({ctx, SynPos::EXPR_ARG}, me.selector.get()) && ReplaceIdealTy(*me.selector);
     auto selectorTy = me.selector->GetTy();
@@ -235,9 +235,9 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchExprHasSelector(ASTContext& ctx, AST:
         mc->SetCtxExprForPatterns(me.selector.get());
         // Check whether pattern has the sameTy with selectorTy.
         if (Ty::IsTyCorrect(selectorTy)) {
-            bool isPatOK = ChkMatchCasePatterns(ctx, selectorTy, *mc);
+            bool isPatOK = ChkMatchCasePatterns(ctx, selectorTy, *mc, me.selector.get());
             bool isGuardOK = ChkMatchCasePatGuard(ctx, *mc);
-            bool areActionsOK = ChkMatchCaseActions(ctx, &target, *mc);
+            bool areActionsOK = ChkMatchCaseActions(ctx, target, *mc);
             if (isPatOK && isGuardOK && areActionsOK) {
                 matchCaseTyVec.insert(mc->GetTy());
             } else {
@@ -247,7 +247,7 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchExprHasSelector(ASTContext& ctx, AST:
     }
 
     if (isMatchCorrect) {
-        CheckMatchExprSetTy(me, &target, typeManager, importManager, matchCaseTyVec);
+        CheckMatchExprSetTy(me, target, typeManager, importManager, matchCaseTyVec);
         // Check pattern exhaustiveness and set unreachable attr of match cases.
         if (me.sugarKind == Expr::SugarKind::NO_SUGAR &&
             !PatternUsefulness::CheckMatchExprHasSelectorExhaustivenessAndReachability(ctx.diag, typeManager, me)) {
@@ -255,14 +255,14 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchExprHasSelector(ASTContext& ctx, AST:
         }
     }
 
-    me.SetTy(isMatchCorrect ? me.GetTy() : TypeManager::GetInvalidTy());
+    me.SetTy(isMatchCorrect ? me.GetTy() : ModalTy{TypeManager::GetInvalidTy()});
     return isMatchCorrect;
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkMatchExprNoSelector(ASTContext& ctx, AST::Ty& target, AST::MatchExpr& me)
+bool TypeChecker::TypeCheckerImpl::ChkMatchExprNoSelector(ASTContext& ctx, AST::ModalTy target, AST::MatchExpr& me)
 {
     bool isWellTyped = true;
-    std::set<Ptr<Ty>> matchCaseTyVec;
+    std::set<ModalTy> matchCaseTyVec;
     for (auto& mco : me.matchCaseOthers) {
         if (!ChkMatchCaseNoSelector(ctx, target, *mco)) {
             isWellTyped = false;
@@ -272,24 +272,24 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchExprNoSelector(ASTContext& ctx, AST::
     }
 
     if (isWellTyped) {
-        CheckMatchExprSetTy(me, &target, typeManager, importManager, matchCaseTyVec);
+        CheckMatchExprSetTy(me, target, typeManager, importManager, matchCaseTyVec);
         // Check pattern exhaustiveness and set unreachable attr of match cases.
         if (!CheckMatchExprNoSelectorExhaustiveness(me, false)) {
             isWellTyped = false;
         }
     }
-    me.SetTy(isWellTyped ? me.GetTy() : TypeManager::GetInvalidTy());
+    me.SetTy(isWellTyped ? me.GetTy() : ModalTy{TypeManager::GetInvalidTy()});
     return isWellTyped;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynMatchCaseNoSelector(ASTContext& ctx, MatchCaseOther& mco)
+ModalTy TypeChecker::TypeCheckerImpl::SynMatchCaseNoSelector(ASTContext& ctx, MatchCaseOther& mco)
 {
     // Type of patternGuard (matchExpr) is boolean.
     if (Is<WildcardExpr>(mco.matchExpr.get())) {
-        mco.matchExpr->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        mco.matchExpr->SetTy(ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
     } else {
-        if (!Check(ctx, TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN), mco.matchExpr.get())) {
-            mco.matchExpr->SetTy(TypeManager::GetInvalidTy());
+        if (!Check(ctx, ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)}, mco.matchExpr.get())) {
+            mco.matchExpr->SetTy({TypeManager::GetInvalidTy()});
         }
     }
 
@@ -302,17 +302,17 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchCasePatGuard(ASTContext& ctx, const M
 {
     bool ret = true;
     if (mc.patternGuard) {
-        Ptr<Ty> boolTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
+        ModalTy boolTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)};
         ret = Check(ctx, boolTy, mc.patternGuard.get());
     }
     return ret;
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkMatchCaseActions(ASTContext& ctx, Ptr<Ty> target, MatchCase& mc)
+bool TypeChecker::TypeCheckerImpl::ChkMatchCaseActions(ASTContext& ctx, ModalTy target, MatchCase& mc)
 {
     bool ret = true;
     if (!mc.exprOrDecls) {
-        mc.SetTy(TypeManager::GetInvalidTy());
+        mc.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     if (!target) { // Synthesize the ty of exprOrDecls of each case.
@@ -321,7 +321,7 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchCaseActions(ASTContext& ctx, Ptr<Ty> 
     } else if (Check(ctx, target, mc.exprOrDecls.get())) { // Check whether exprOrDecls->GetTy() has given target ty.
         mc.SetTy(mc.exprOrDecls->GetTy());
     } else {
-        mc.SetTy(TypeManager::GetInvalidTy());
+        mc.SetTy({TypeManager::GetInvalidTy()});
         ret = false;
     }
     return ret;
@@ -401,43 +401,44 @@ bool TypeChecker::TypeCheckerImpl::ChkPatternsSameASTKind(const ASTContext& ctx,
     return true;
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkMatchCasePatterns(ASTContext& ctx, Ptr<Ty> target, MatchCase& mc)
+bool TypeChecker::TypeCheckerImpl::ChkMatchCasePatterns(
+    ASTContext& ctx, ModalTy target, MatchCase& mc, Ptr<Expr> selector)
 {
     if (!ChkNoVarPatternInOrPattern(ctx, mc.patterns) || !ChkPatternsSameASTKind(ctx, mc.patterns)) {
         for (auto& pattern : mc.patterns) {
             CJC_NULLPTR_CHECK(pattern);
-            pattern->SetTy(TypeManager::GetInvalidTy());
+            pattern->SetTy({TypeManager::GetInvalidTy()});
         }
         return false;
     }
     bool ret = true;
     for (auto& pattern : mc.patterns) {
-        auto safeTarget = target ? target : TypeManager::GetInvalidTy();
-        if (!ChkPattern(ctx, *safeTarget, *pattern)) {
+        ModalTy safeTarget = target.Ty() ? target : ModalTy{TypeManager::GetInvalidTy()};
+        if (!ChkPattern(ctx, safeTarget, *pattern, true, selector)) {
             ret = false;
         }
     }
     return ret;
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkMatchCaseNoSelector(ASTContext& ctx, Ty& target, MatchCaseOther& mco)
+bool TypeChecker::TypeCheckerImpl::ChkMatchCaseNoSelector(ASTContext& ctx, ModalTy target, MatchCaseOther& mco)
 {
     bool ret = true;
     // Type of patternGuard (matchExpr) is boolean.
     if (Is<WildcardExpr>(mco.matchExpr.get())) {
-        mco.matchExpr->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        mco.matchExpr->SetTy(ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
     } else {
-        if (!Check(ctx, TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN), mco.matchExpr.get())) {
-            mco.matchExpr->SetTy(TypeManager::GetInvalidTy());
+        if (!Check(ctx, ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)}, mco.matchExpr.get())) {
+            mco.matchExpr->SetTy({TypeManager::GetInvalidTy()});
             ret = false;
         }
     }
 
     // Check whether exprOrDecls->GetTy() has given target ty.
-    if (Check(ctx, &target, mco.exprOrDecls.get())) {
+    if (Check(ctx, target, mco.exprOrDecls.get())) {
         mco.SetTy(mco.exprOrDecls->GetTy());
     } else {
-        mco.SetTy(TypeManager::GetInvalidTy());
+        mco.SetTy({TypeManager::GetInvalidTy()});
         ret = false;
     }
     return ret;
@@ -453,7 +454,7 @@ bool TypeChecker::TypeCheckerImpl::CheckMatchExprNoSelectorExhaustiveness(MatchE
             hasDefault = true;
             defaultCase = i;
         }
-        if (Ty::IsInitialTy(matchCaseOther->GetTy())) {
+        if (Ty::IsInitialTy(matchCaseOther->DataTy())) {
             ret = false;
             diag.Diagnose(*matchCaseOther, DiagKind::sema_match_case_has_no_type);
             continue;
@@ -486,11 +487,11 @@ bool TypeChecker::TypeCheckerImpl::IsIrrefutablePattern(const Pattern& pattern)
                 [this](const OwnedPtr<Pattern>& p) { return IsIrrefutablePattern(*p); });
         }
         case AST::ASTKind::ENUM_PATTERN: {
-            if (!pattern.GetTy() || !pattern.GetTy()->IsEnum()) {
+            if (!pattern.DataTy() || !pattern.GetTy()->IsEnum()) {
                 return false;
             }
             auto& enumPattern = static_cast<const EnumPattern&>(pattern);
-            auto enumTy = RawStaticCast<EnumTy*>(pattern.GetTy());
+            auto enumTy = RawStaticCast<EnumTy*>(pattern.DataTy());
             return enumTy && enumTy->declPtr && enumTy->declPtr->constructors.size() == 1 &&
                 std::all_of(enumPattern.patterns.cbegin(), enumPattern.patterns.cend(),
                     [this](const OwnedPtr<Pattern>& p) { return IsIrrefutablePattern(*p); });

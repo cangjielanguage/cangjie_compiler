@@ -78,7 +78,7 @@ void MarkClassHasInited::AddGuardToFinalizer(ClassDef& classDef)
     auto block = builder.CreateBlock(finalizer->GetBody());
     auto thisArg = finalizer->GetParam(0);
     CJC_NULLPTR_CHECK(thisArg);
-    auto boolTy = builder.GetBoolTy();
+    auto boolTy = builder.WithModal(builder.GetBoolTy(), thisArg->GetType()->StripAllRefs()->GetModalInfo());
     auto path = std::vector<std::string>{ Cangjie::HAS_INITED_IDENT };
     auto ref = builder.CreateExpression<GetElementByName>(builder.GetType<RefType>(boolTy), thisArg, path, block);
     auto load = builder.CreateExpression<Load>(boolTy, ref->GetResult(), block);
@@ -102,11 +102,11 @@ void MarkClassHasInited::AssignHasInitedFlagToFalseInConstructorHead(Function& c
             }
         }
     */
-    auto boolTy = builder.GetBoolTy();
-    auto entry = constructor.GetEntryBlock();
-    auto falseVal = builder.CreateConstantExpression<BoolLiteral>(boolTy, entry, false);
     auto thisArg = constructor.GetParam(0);
     CJC_NULLPTR_CHECK(thisArg);
+    auto boolTy = builder.WithModal(builder.GetBoolTy(), thisArg->GetType()->StripAllRefs()->GetModalInfo());
+    auto entry = constructor.GetEntryBlock();
+    auto falseVal = builder.CreateConstantExpression<BoolLiteral>(boolTy, entry, false);
     auto path = std::vector<std::string>{ Cangjie::HAS_INITED_IDENT };
     auto storeRef =
         builder.CreateExpression<StoreElementByName>(builder.GetUnitTy(), falseVal->GetResult(), thisArg, path, entry);
@@ -129,8 +129,9 @@ void MarkClassHasInited::AssignHasInitedFlagToTrueInConstructorExit(Function& co
             }
         }
     */
-    auto boolTy = builder.GetBoolTy();
     auto thisArg = constructor.GetParam(0);
+    CJC_NULLPTR_CHECK(thisArg);
+    auto boolTy = builder.WithModal(builder.GetBoolTy(), thisArg->GetType()->StripAllRefs()->GetModalInfo());
     for (auto block : constructor.GetBody()->GetBlocks()) {
         auto terminator = block->GetTerminator();
         if (!terminator || terminator->GetExprKind() != ExprKind::EXIT) {

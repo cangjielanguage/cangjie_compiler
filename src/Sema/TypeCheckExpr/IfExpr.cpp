@@ -11,7 +11,6 @@
 #include "TypeCheckUtil.h"
 
 #include "cangjie/AST/Match.h"
-#include "cangjie/AST/RecoverDesugar.h"
 
 using namespace Cangjie;
 using namespace Sema;
@@ -30,34 +29,41 @@ bool IsIfExprWithoutElse(const IfExpr& ie)
 } // namespace
 
 // Syntax : if t1 then t2 else t3.
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIfExpr(const CheckerContext& ctx, IfExpr& ie)
+ModalTy TypeChecker::TypeCheckerImpl::SynIfExpr(const CheckerContext& ctx, IfExpr& ie)
 {
     SynPos pos = ctx.SynthPos();
     CJC_NULLPTR_CHECK(ie.condExpr);
     bool isWellTyped = CheckCondition(ctx.Ctx(), *ie.condExpr, false);
-    isWellTyped = ie.thenBody && Ty::IsTyCorrect(Synthesize(ctx.With(SynPos::EXPR_ARG), ie.thenBody.get())) && isWellTyped;
+    isWellTyped = ie.thenBody && Synthesize(ctx.With(SynPos::EXPR_ARG), ie.thenBody.get()).IsCorrect() && isWellTyped;
 
     if (IsIfExprWithoutElse(ie)) {
         // For the case that if-elseif without ending 'else' branch.
-        isWellTyped = (!ie.elseBody || Ty::IsTyCorrect(Synthesize(ctx.With(SynPos::EXPR_ARG), ie.elseBody.get()))) && isWellTyped;
-        ie.SetTy(isWellTyped ? RawStaticCast<Ty*>(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT))
-                             : TypeManager::GetInvalidTy());
+        isWellTyped =
+            (!ie.elseBody || Synthesize(ctx.With(SynPos::EXPR_ARG), ie.elseBody.get()).IsCorrect()) && isWellTyped;
+        ie.SetTy(isWellTyped ? ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)}
+            : ModalTy{TypeManager::GetInvalidTy()});
         return ie.GetTy();
     }
 
-    isWellTyped = ie.elseBody && Ty::IsTyCorrect(Synthesize(ctx.With(SynPos::EXPR_ARG), ie.elseBody.get())) && isWellTyped;
+    isWellTyped = ie.elseBody && Synthesize(ctx.With(SynPos::EXPR_ARG), ie.elseBody.get()).IsCorrect() && isWellTyped;
     if (!isWellTyped) {
-        ie.SetTy(TypeManager::GetInvalidTy());
-        return TypeManager::GetInvalidTy();
+        ie.SetTy({TypeManager::GetInvalidTy()});
+        return {TypeManager::GetInvalidTy()};
     }
 
-    ReplaceIdealTy(*ie.thenBody);
-    ReplaceIdealTy(*ie.elseBody);
+    // Keep ideal literal types pending for the then/else branches of an if expression used as
+    // the body of a generic-call lambda argument, so the result stays IDEAL and the generic type
+    // argument can be unified against the expected type (e.g. `TypeTest({ => if (c) { 0 } else { 1 } })`
+    // expecting `() -> Int32`).
+    if (ctx.Ctx().inFuncArgLambdaBody == 0) {
+        ReplaceIdealTy(*ie.thenBody);
+        ReplaceIdealTy(*ie.elseBody);
+    }
     ie.thenBody->SetTy(typeManager.GetThisRealTy(ie.thenBody->GetTy()));
     ie.elseBody->SetTy(typeManager.GetThisRealTy(ie.elseBody->GetTy()));
     // when an if expr is unused, its type is set to unit if possible
     if (pos == SynPos::UNUSED) {
-        ie.SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+        ie.SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
         return ie.GetTy();
     }
     auto thenTy = ie.thenBody->GetTy();
@@ -67,7 +73,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIfExpr(const CheckerContext& ctx, IfExp
         auto [optErrs, joinedIfTy] = JoinAndMeet::SetJoinedType(ie.GetTy(), joinRes);
         ie.SetTy(joinedIfTy);
         if (optErrs) {
-            std::string errMsg = "types " + Ty::ToString(thenTy) + " and " + Ty::ToString(elseTy);
+            std::string errMsg = "types " + thenTy.String() + " and " + elseTy.String();
             errMsg = ie.sourceExpr && ie.sourceExpr->astKind == ASTKind::IF_AVAILABLE_EXPR
                 ? errMsg + " of the two lambda of this '@IfAvailable' expression mismatch"
                 : errMsg + " of the two branches of this 'if' expression mismatch";
@@ -77,7 +83,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIfExpr(const CheckerContext& ctx, IfExp
     return ie.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkIfExpr(ASTContext& ctx, Ty& tgtTy, IfExpr& ie)
+bool TypeChecker::TypeCheckerImpl::ChkIfExpr(ASTContext& ctx, ModalTy tgtTy, IfExpr& ie)
 {
     CJC_NULLPTR_CHECK(ie.condExpr);
     CJC_NULLPTR_CHECK(ie.thenBody);
@@ -91,7 +97,7 @@ bool TypeChecker::TypeCheckerImpl::ChkIfExpr(ASTContext& ctx, Ty& tgtTy, IfExpr&
     }
 
     if (!isWellTyped) {
-        ie.SetTy(TypeManager::GetInvalidTy());
+        ie.SetTy({TypeManager::GetInvalidTy()});
     }
     return isWellTyped;
 }
@@ -134,7 +140,7 @@ bool TypeChecker::TypeCheckerImpl::SynLetPatternDestructor(
     ASTContext& ctx, LetPatternDestructor& lpd, bool suppressIntroducingVariableError)
 {
     CJC_NULLPTR_CHECK(lpd.initializer);
-    Ptr<Ty> boolTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
+    ModalTy boolTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)};
     for (auto& p : lpd.patterns) {
         p->ctxExpr = lpd.initializer.get();
         PropagateCtxExpr(*p, *p->ctxExpr);
@@ -145,20 +151,20 @@ bool TypeChecker::TypeCheckerImpl::SynLetPatternDestructor(
     // cannot have multiple pattern in one let with different astKind, e.g. let A|_ <- xxx
     // in this case, no need to check further
     if (!ChkPatternsSameASTKind(ctx, lpd.patterns)) {
-        lpd.SetTy(TypeManager::GetInvalidTy());
+        lpd.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     // intended shortcut &&: no need to check var pattern if it has already been reported by parent AST
     bool good = !suppressIntroducingVariableError && ChkNoVarPatternInOrPattern(ctx, lpd.patterns);
     bool subpatternsGood{true};
     for (auto& p : lpd.patterns) {
-        subpatternsGood = ChkPattern(ctx, *selectorTy, *p) && subpatternsGood;
+        subpatternsGood = ChkPattern(ctx, selectorTy, *p, true, lpd.initializer.get()) && subpatternsGood;
     }
     if (Ty::IsTyCorrect(selectorTy) && subpatternsGood) {
         lpd.SetTy(boolTy);
         return good;
     } else {
-        lpd.SetTy(TypeManager::GetInvalidTy());
+        lpd.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
 }
@@ -177,14 +183,14 @@ bool TypeChecker::TypeCheckerImpl::CheckCondition(ASTContext& ctx, Expr& e, bool
         return res;
     }
 
-    Ptr<Ty> boolTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
+    ModalTy boolTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)};
     if (Check(ctx, boolTy, &e)) {
         return true;
     }
 
     auto shouldDiag = e.ShouldDiagnose() && !CanSkipDiag(e);
     if (shouldDiag) {
-        DiagMismatchedTypes(diag, e, *boolTy);
+        DiagMismatchedTypes(diag, e, boolTy);
     }
     return false;
 }
@@ -192,7 +198,7 @@ bool TypeChecker::TypeCheckerImpl::CheckCondition(ASTContext& ctx, Expr& e, bool
 bool TypeChecker::TypeCheckerImpl::CheckBinaryCondition(
     ASTContext& ctx, BinaryExpr& e, bool suppressIntroducingVariableError)
 {
-    Ptr<Ty> boolTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
+    ModalTy boolTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)};
     if (!IsCondition(e)) {
         return Check(ctx, boolTy, &e);
     }
@@ -216,48 +222,46 @@ bool TypeChecker::TypeCheckerImpl::CheckBinaryCondition(
         e.SetTy(boolTy);
     } else {
         if (e.ShouldDiagnose() && !CanSkipDiag(e)) {
-            DiagMismatchedTypes(diag, e, *boolTy);
+            DiagMismatchedTypes(diag, e, boolTy);
         }
-        e.SetTy(TypeManager::GetInvalidTy());
+        e.SetTy({TypeManager::GetInvalidTy()});
     }
     res = res && !suppressIntroducingVariableError;
     return res;
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkIfExprNoElse(ASTContext& ctx, Ty& target, IfExpr& ie)
+bool TypeChecker::TypeCheckerImpl::ChkIfExprNoElse(ASTContext& ctx, ModalTy target, IfExpr& ie)
 {
-    Ptr<Ty> unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
+    ModalTy unitTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)};
     ie.SetTy(unitTy);
     Synthesize({ctx, SynPos::EXPR_ARG}, ie.thenBody.get());
     Synthesize({ctx, SynPos::EXPR_ARG}, ie.elseBody.get());
     // The ifExpr may only have 'then' branch or as the case that if-elseif without ending 'else' branch.
-    bool isWellTyped = Ty::IsTyCorrect(ie.thenBody->GetTy()) && (!ie.elseBody || Ty::IsTyCorrect(ie.elseBody->GetTy()));
-    bool isTargetMatched = typeManager.IsSubtype(unitTy, &target);
+    bool isWellTyped = ie.thenBody->GetTy().IsCorrect() && (!ie.elseBody || ie.elseBody->GetTy().IsCorrect());
+    bool isTargetMatched = typeManager.IsSubtype(unitTy, target);
     if (isWellTyped && !isTargetMatched) {
         DiagMismatchedTypesWithFoundTy(
-            diag, ie, target, *unitTy, "the type of an 'if' expression without an 'else' branch is always 'Unit'");
+            diag, ie, target, unitTy, "the type of an 'if' expression without an 'else' branch is always 'Unit'");
     }
     return isWellTyped && isTargetMatched;
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkIfExprTwoBranches(ASTContext& ctx, Ty& target, IfExpr& ie)
+bool TypeChecker::TypeCheckerImpl::ChkIfExprTwoBranches(ASTContext& ctx, ModalTy target, IfExpr& ie)
 {
     // Now both thenBody and elseBody are guaranteed to be non-nullable.
-    if (!Check(ctx, &target, ie.thenBody.get())) {
-        if (ie.ShouldDiagnose() && !CanSkipDiag(*ie.thenBody) &&
-            !typeManager.IsSubtype(ie.thenBody->GetTy(), &target)) {
+    if (!Check(ctx, target, ie.thenBody.get())) {
+        if (ie.ShouldDiagnose() && !CanSkipDiag(*ie.thenBody) && !typeManager.IsSubtype(ie.thenBody->GetTy(), target)) {
             DiagMismatchedTypes(diag, *ie.thenBody, target);
         }
     }
-    if (!Check(ctx, &target, ie.elseBody.get())) {
-        if (ie.ShouldDiagnose() && !CanSkipDiag(*ie.elseBody) &&
-            !typeManager.IsSubtype(ie.elseBody->GetTy(), &target)) {
+    if (!Check(ctx, target, ie.elseBody.get())) {
+        if (ie.ShouldDiagnose() && !CanSkipDiag(*ie.elseBody) && !typeManager.IsSubtype(ie.elseBody->GetTy(), target)) {
             DiagMismatchedTypes(diag, *ie.elseBody, target);
         }
     }
-    if (!Ty::IsTyCorrect(ie.thenBody->GetTy()) || !Ty::IsTyCorrect(ie.elseBody->GetTy())) {
+    if (!ie.thenBody->GetTy().IsCorrect() || !ie.elseBody->GetTy().IsCorrect()) {
         return false;
     }
-    ie.SetTy(&target);
+    ie.SetTy(target);
     return true;
 }

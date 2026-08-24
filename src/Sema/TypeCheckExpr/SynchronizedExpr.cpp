@@ -11,13 +11,13 @@
 using namespace Cangjie;
 using namespace AST;
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynSyncExpr(ASTContext& ctx, SynchronizedExpr& se)
+ModalTy TypeChecker::TypeCheckerImpl::SynSyncExpr(ASTContext& ctx, SynchronizedExpr& se)
 {
-    ChkSyncExpr(ctx, nullptr, se);
+    ChkSyncExpr(ctx, ModalTy{}, se);
     return se.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkSyncExpr(ASTContext& ctx, Ptr<Ty> tgtTy, SynchronizedExpr& se)
+bool TypeChecker::TypeCheckerImpl::ChkSyncExpr(ASTContext& ctx, ModalTy tgtTy, SynchronizedExpr& se)
 {
     bool isWellTyped = true;
     auto lockDecl = importManager.GetSyncDecl("Lock");
@@ -34,11 +34,11 @@ bool TypeChecker::TypeCheckerImpl::ChkSyncExpr(ASTContext& ctx, Ptr<Ty> tgtTy, S
         // The desugared expression must have 3 children: a mutex declaration, mutex.lock() and a try expression.
         CJC_ASSERT(b.size() == 3);
         // Handle the mutex variable declaration.
-        isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, b.at(0).get())) && isWellTyped;
+        isWellTyped = Synthesize({ctx, SynPos::EXPR_ARG}, b.at(0).get()).IsCorrect() && isWellTyped;
         // Handle the mutex.lock().
         { // Create a scope for DiagSuppressor. Suppress errors raised by mutex.lock().
             auto ds = DiagSuppressor(diag);
-            if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, b.at(1).get()))) {
+            if (Synthesize({ctx, SynPos::EXPR_ARG}, b.at(1).get()).IsCorrect()) {
                 ds.ReportDiag();
             } else {
                 isWellTyped = false;
@@ -46,12 +46,12 @@ bool TypeChecker::TypeCheckerImpl::ChkSyncExpr(ASTContext& ctx, Ptr<Ty> tgtTy, S
         }
         // The child at 2 is a try expression.
         auto te = RawStaticCast<TryExpr*>(b.at(2).get());
-        isWellTyped = (tgtTy ? ChkTryExpr(ctx, *tgtTy, *te) : Ty::IsTyCorrect(SynTryExpr(ctx, *te))) && isWellTyped;
-        se.desugarExpr->SetTy(isWellTyped ? te->GetTy() : TypeManager::GetInvalidTy());
+        isWellTyped = (tgtTy ? ChkTryExpr(ctx, tgtTy, *te) : SynTryExpr(ctx, *te).IsCorrect()) && isWellTyped;
+        se.desugarExpr->SetTy(isWellTyped ? te->GetTy() : ModalTy{TypeManager::GetInvalidTy()});
         se.SetTy(se.desugarExpr->GetTy());
     } else {
         isWellTyped = false;
-        se.SetTy(TypeManager::GetInvalidTy());
+        se.SetTy({TypeManager::GetInvalidTy()});
     }
     return isWellTyped;
 }

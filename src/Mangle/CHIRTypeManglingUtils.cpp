@@ -55,7 +55,10 @@ namespace Cangjie::CHIR {
 std::string MangleType(const Cangjie::CHIR::Type& t, const std::vector<std::string>& genericsTypeStack,
     bool useGenericName);
 
-// Type mangling for CHIR::TupleType
+// Type mangling for CHIR::TupleType.
+// NOTE: type-specific manglers below produce the body only; the local-modifier suffix is appended
+// once by the dispatcher MangleType(const Type&, ...). MangleArraySliceType is the exception: it
+// is not routed through that dispatcher and keeps its own suffix.
 std::string MangleType(const CHIR::TupleType& t, const std::vector<std::string>& genericsTypeStack,
     bool useGenericName)
 {
@@ -117,7 +120,8 @@ std::string MangleType(const CHIR::FuncType& t, const std::vector<std::string>& 
     }
     ss << retTy;
     if (t.GetParamTypes().empty()) {
-        return ss.str() + MANGLE_VOID_TY_SUFFIX + MANGLE_SUFFIX;
+        ss << MANGLE_VOID_TY_SUFFIX << MANGLE_SUFFIX;
+        return ss.str();
     }
     for (auto p : t.GetParamTypes()) {
         std::string mangled = MangleType(*p, genericsTypeStack, useGenericName);
@@ -156,7 +160,9 @@ std::string MangleType(const CHIR::RawArrayType& t, const std::vector<std::strin
 std::string MangleType(const CHIR::RefType& t, const std::vector<std::string>& genericsTypeStack,
     bool useGenericName)
 {
-    return MangleType(*t.GetBaseType(), genericsTypeStack, useGenericName);
+    std::stringstream ss;
+    ss << MangleType(*t.GetBaseType(), genericsTypeStack, useGenericName);
+    return ss.str();
 }
 
 std::string MangleType(const CHIR::VArrayType& t, const std::vector<std::string>& genericsTypeStack,
@@ -208,7 +214,7 @@ std::string MangleArraySliceType(const CHIR::Type& t, const std::vector<std::str
     std::stringstream ss;
     ss << MANGLE_ARRAY_SLICE_PREFIX;
     ss << MangleType(*t.GetTypeArgs()[0], genericsTypeStack, useGenericName);
-    ss << MANGLE_SUFFIX;
+    ss << MANGLE_SUFFIX << MangleUtils::MangleLocalModifier(t.GetModalInfo());
     return ss.str();
 }
 
@@ -219,40 +225,55 @@ std::string MangleType(const CHIR::Type& t)
     return MangleType(t, genericsTypeStack);
 }
 
-// Type mangling entry and dispatcher
+// Type mangling entry and dispatcher.
+// The local-modifier suffix is appended here for every kind so the type-specific helpers above
+// only emit the body. MangleArraySliceType is called directly (not through this dispatcher) and
+// therefore appends its own suffix.
 std::string MangleType(const CHIR::Type& t, const std::vector<std::string>& genericsTypeStack, bool useGenericName)
 {
     auto k = t.GetTypeKind();
     if (auto prim = ManglePrimitive(k); !prim.empty()) {
-        return prim;
+        return MangleUtils::WithModal(prim, t.GetModalInfo());
     }
     CJC_ASSERT(k != ChirTypeKind::TYPE_INVALID);
+    std::string body;
     switch (k) {
         case ChirTypeKind::TYPE_TUPLE:
-            return MangleType(StaticCast<const TupleType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const TupleType&>(t), genericsTypeStack, useGenericName);
+            break;
         case ChirTypeKind::TYPE_STRUCT:
-            return MangleType(StaticCast<const StructType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const StructType&>(t), genericsTypeStack, useGenericName);
+            break;
         case ChirTypeKind::TYPE_ENUM:
-            return MangleType(StaticCast<const EnumType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const EnumType&>(t), genericsTypeStack, useGenericName);
+            break;
         case ChirTypeKind::TYPE_FUNC:
-            return MangleType(StaticCast<const FuncType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const FuncType&>(t), genericsTypeStack, useGenericName);
+            break;
         case ChirTypeKind::TYPE_CLASS: {
-            return MangleType(StaticCast<const ClassType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const ClassType&>(t), genericsTypeStack, useGenericName);
+            break;
         }
         case ChirTypeKind::TYPE_RAWARRAY:
-            return MangleType(StaticCast<const RawArrayType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const RawArrayType&>(t), genericsTypeStack, useGenericName);
+            break;
         case ChirTypeKind::TYPE_REFTYPE:
-            return MangleType(StaticCast<const RefType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const RefType&>(t), genericsTypeStack, useGenericName);
+            break;
         case ChirTypeKind::TYPE_VARRAY:
-            return MangleType(StaticCast<const VArrayType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const VArrayType&>(t), genericsTypeStack, useGenericName);
+            break;
         case ChirTypeKind::TYPE_CPOINTER:
-            return MangleType(StaticCast<const CPointerType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const CPointerType&>(t), genericsTypeStack, useGenericName);
+            break;
         case ChirTypeKind::TYPE_GENERIC:
-            return MangleType(StaticCast<const GenericType&>(t), genericsTypeStack, useGenericName);
+            body = MangleType(StaticCast<const GenericType&>(t), genericsTypeStack, useGenericName);
+            break;
         default:
             CJC_ASSERT(false && "Unexpected type to be mangled.");
             return "";
     }
+    return MangleUtils::WithModal(body, t.GetModalInfo());
 }
 
 std::string MangleType(const CHIR::Type& t, const std::vector<std::string>& genericsTypeStack)
@@ -303,7 +324,9 @@ std::string GetTypeQualifiedNameOfCustomType(const CHIR::CustomType& type, bool 
 std::string GetTypeQualifiedName(const CHIR::Type& t, bool forNameFieldOfTi)
 {
     if (t.IsPrimitive()) {
-        return t.ToString();
+        // TI / qualified names are for data types only; omit modal suffixes like " @local?".
+        auto ite = TYPEKIND_TO_STRING.find(t.GetTypeKind());
+        return ite == TYPEKIND_TO_STRING.end() ? "UnknownType" : ite->second;
     }
     auto k = t.GetTypeKind();
     CJC_ASSERT(k != ChirTypeKind::TYPE_INVALID);

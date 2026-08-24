@@ -117,8 +117,8 @@ void PrintBasic(unsigned indent, const Node& node, std::ostream& stream = std::c
     if (!node.scopeName.empty()) {
         PrintIndent(stream, indent, "scopeName:", "\"" + node.scopeName + "\"");
     }
-    if (!Ty::IsInitialTy(node.GetTy())) {
-        PrintIndent(stream, indent, "ty:", node.GetTy()->String());
+    if (!Ty::IsInitialTy(node.DataTy())) {
+        PrintIndent(stream, indent, "ty:", node.GetTy().String());
     }
     PrintIndent(stream, indent, "ptr:", &node);
     const auto& fullPkgName = node.GetFullPackageName();
@@ -301,9 +301,25 @@ void PrintFuncParam(unsigned indent, const FuncParam& param, std::ostream& strea
     PrintIndent(stream, indent, "}");
 }
 
+void PrintThisParam(unsigned indent, const ThisParam& tp, std::ostream& stream = std::cout)
+{
+    PrintIndent(stream, indent, "ThisParam:", "{");
+    PrintBasic(indent + ONE_INDENT, tp, stream);
+    PrintAnnotations(tp, indent + ONE_INDENT, stream);
+    if (tp.modal) {
+        PrintIndent(stream, indent + ONE_INDENT, "modal:", tp.modal.ToModalInfo().ToString());
+    }
+    PrintNode(tp.type.get(), indent + ONE_INDENT, "type", stream);
+    PrintIndent(stream, indent, "}");
+}
+
 void PrintFuncParamList(unsigned indent, const FuncParamList& paramList, std::ostream& stream = std::cout)
 {
     PrintIndent(stream, indent, "FuncParamList {");
+    PrintBasic(indent + ONE_INDENT, paramList, stream);
+    if (paramList.thisParam) {
+        PrintNode(paramList.thisParam.get(), indent + ONE_INDENT, "thisParam", stream);
+    }
     if (paramList.params.empty()) {
         PrintIndent(stream, indent + ONE_INDENT, "// no Params");
     } else {
@@ -334,6 +350,9 @@ void PrintFuncDecl(unsigned indent, const FuncDecl& funcDecl, std::ostream& stre
     PrintIndent(stream, indent, "FuncDecl:", funcDecl.identifier.Val(), funcDecl.identifier.Begin(),
         funcDecl.identifier.End(), "{");
     PrintBasic(indent + ONE_INDENT, funcDecl, stream);
+    if (funcDecl.modal) {
+        PrintIndent(stream, indent + ONE_INDENT, "modal:", funcDecl.modal.ToModalInfo().ToString());
+    }
     if (funcDecl.TestAttr(Attribute::CONSTRUCTOR) && funcDecl.constructorCall == ConstructorCall::SUPER) {
         if (auto ce = DynamicCast<CallExpr*>(funcDecl.funcBody->body->body.begin()->get()); ce) {
             if (ce->TestAttr(Attribute::COMPILER_ADD)) {
@@ -1094,6 +1113,24 @@ void PrintRefExpr(unsigned indent, const RefExpr& refExpr, std::ostream& stream 
     PrintIndent(stream, indent, "}");
 }
 
+void PrintPrimitiveTypeExpr(unsigned indent, const PrimitiveTypeExpr& pte, std::ostream& stream = std::cout)
+{
+    PrintIndent(stream, indent, "PrimitiveTypeExpr:", pte.GetTy() ? pte.GetTy().String() : "unknown", "{");
+    PrintBasic(indent + ONE_INDENT, pte, stream);
+    if (pte.modal) {
+        PrintIndent(stream, indent + ONE_INDENT, "modal:", pte.modal.ToModalInfo().ToString());
+    }
+    PrintIndent(stream, indent, "}");
+}
+
+void PrintExclaveExpr(unsigned indent, const ExclaveExpr& expr, std::ostream& stream = std::cout)
+{
+    PrintIndent(stream, indent, "ExclaveExpr {");
+    PrintBasic(indent + ONE_INDENT, expr, stream);
+    PrintNode(expr.body.get(), indent + ONE_INDENT, "body", stream);
+    PrintIndent(stream, indent, "}");
+}
+
 void PrintSpawnExpr(unsigned indent, const SpawnExpr& expr, std::ostream& stream = std::cout)
 {
     PrintIndent(stream, indent, "SpawnExpr {");
@@ -1508,6 +1545,7 @@ void PrintNode(Ptr<const Node> node, unsigned indent, const std::string& additio
         // ----------- Decls --------------------
         [&indent, &stream](const GenericParamDecl& gpd) { PrintGenericParamDecl(indent, gpd, stream); },
         [&indent, &stream](const FuncParam& param) { PrintFuncParam(indent, param, stream); },
+        [&indent, &stream](const ThisParam& tp) { PrintThisParam(indent, tp, stream); },
         [&indent, &stream](const MacroExpandParam& macroExpand) { PrintMacroExpandParam(indent, macroExpand, stream); },
         [&indent, &stream](const FuncParamList& paramList) { PrintFuncParamList(indent, paramList, stream); },
         [&indent, &stream](const MainDecl& mainDecl) { PrintMainDecl(indent, mainDecl, stream); },
@@ -1559,9 +1597,8 @@ void PrintNode(Ptr<const Node> node, unsigned indent, const std::string& additio
         [&indent, &stream](const OptionalExpr& expr) { PrintOptionalExpr(indent, expr, stream); },
         [&indent, &stream](const OptionalChainExpr& expr) { PrintOptionalChainExpr(indent, expr, stream); },
         [&indent, &stream](const LetPatternDestructor& expr) { PrintLetPatternDestructor(indent, expr, stream); },
-        [&indent, &stream](const PrimitiveTypeExpr& pte) {
-            PrintIndent(stream, indent, "PrimitiveTypeExpr: " + pte.GetTy()->String());
-        },
+        [&indent, &stream](const PrimitiveTypeExpr& pte) { PrintPrimitiveTypeExpr(indent, pte, stream); },
+        [&indent, &stream](const ExclaveExpr& expr) { PrintExclaveExpr(indent, expr, stream); },
         [&indent, &stream](const SpawnExpr& expr) { PrintSpawnExpr(indent, expr, stream); },
         [&indent, &stream](const SynchronizedExpr& expr) { PrintSynchronizedExpr(indent, expr, stream); },
         [&indent, &stream](

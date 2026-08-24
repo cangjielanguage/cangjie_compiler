@@ -45,6 +45,7 @@ public:
      * @return The translated CHIR type.
      */
     Type* TranslateType(AST::Ty& ty);
+    Type* TranslateType(AST::ModalTy ty);
     
     /**
      * @brief Fills the generic argument types.

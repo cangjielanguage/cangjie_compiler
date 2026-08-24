@@ -12,6 +12,8 @@ public open class Object {
 
 public interface CType {}
 
+public interface Copyable {}
+
 public interface Any {}
 
 public interface ToString {}

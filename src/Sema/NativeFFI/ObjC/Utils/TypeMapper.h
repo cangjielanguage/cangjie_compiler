@@ -44,7 +44,7 @@ public:
 
     template <class TypeRep, class ToString>
     static MappedCType BuildFunctionalCType(const AST::FuncTy& funcType, const std::vector<TypeRep>& argTypes,
-        const TypeRep& resultType, bool isBlock, ToString toString);
+        TypeRep resultType, bool isBlock, ToString toString);
 
     static MappedCType Cj2ObjCForObjC(const AST::Ty& from);
     Ptr<AST::Ty> Cj2CType(Ptr<AST::Ty> cjty) const;

@@ -45,8 +45,6 @@ public:
 private:
     void RunOnFunc(const Ptr<Function>& func, bool isDebug);
 
-    void LoadOrCreateUnit(Ptr<Constant>& constant, const Ptr<BlockGroup>& group);
-
     CHIRBuilder& builder;
 };
 } // namespace Cangjie::CHIR

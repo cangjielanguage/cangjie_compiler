@@ -74,3 +74,13 @@ target_link_libraries(
     GTest::gtest
     GTest::gtest_main)
 add_test(NAME ToStringTest COMMAND ToStringTest)
+
+add_executable(ModalTyTest ModalTyTest.cpp)
+target_link_libraries(
+    ModalTyTest
+    ${CMAKE_DL_LIBS}
+    cangjie-lsp
+    boundscheck-static
+    GTest::gtest
+    GTest::gtest_main)
+add_test(NAME ModalTyTest COMMAND ModalTyTest)

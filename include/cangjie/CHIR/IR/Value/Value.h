@@ -127,7 +127,18 @@ public:
     void Dump() const;
 
     bool IsCompileTimeValue() const;
-    
+
+    /**
+     * @brief Retrieves the function or lambda body which this value belongs to.
+     *
+     * For a parameter/local-var/block/block-group/function, walks up to the owning
+     * function or lambda and returns its body. Returns nullptr for values that do
+     * not belong to a function or lambda body.
+     *
+     * @return The function or lambda body, or nullptr.
+     */
+    BlockGroup* GetFuncOrLambdaBody() const;
+
 protected:
     explicit Value(Type* ty, std::string identifier, ValueKind kind);
     virtual ~Value() = default;
@@ -376,8 +387,10 @@ class BlockGroup : public Value {
     friend class CHIRContext;
     friend class CHIRBuilder;
     friend class Block;
+    friend class Exclave;
     friend class Lambda;
     friend class ForIn;
+    friend class Expression;
 
 public:
     // ===--------------------------------------------------------------------===//
@@ -420,7 +433,7 @@ public:
     Expression* GetOwnerExpression() const;
 
     BlockGroup* Clone(CHIRBuilder& builder, Function& newFunc) const;
-    BlockGroup* Clone(CHIRBuilder& builder, Lambda& newLambda) const;
+    BlockGroup* Clone(CHIRBuilder& builder, Expression& newExpression) const;
 private:
     explicit BlockGroup(std::string identifier);
     ~BlockGroup() override = default;

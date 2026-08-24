@@ -13,7 +13,7 @@ using namespace Cangjie;
 
 Ptr<Value> Translator::Visit(const AST::PointerExpr& expr)
 {
-    auto ty = TranslateType(*expr.GetTy());
+    auto ty = TranslateType(expr.GetTy());
     CHIR::IntrinsicKind intrinsicKind;
     std::vector<Value*> args{};
 
@@ -37,7 +37,7 @@ Ptr<Value> Translator::Visit(const AST::PointerExpr& expr)
                     argVal = getMember->GetResult();
                 }
             }
-            auto ty1 = TranslateType(*expr.arg->GetTy());
+            auto ty1 = TranslateType(expr.arg->GetTy());
             auto callContext = IntrisicCallContext {
                 .kind = IntrinsicKind::INOUT_PARAM,
                 .args = std::vector<Value*>{argVal}

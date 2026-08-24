@@ -32,7 +32,7 @@ bool RequireInstantiation(const AST::Decl& decl);
 using VisitFunc = std::function<void(AST::Node&, AST::Node&)>;
 void DefaultVisitFunc(const AST::Node& source, const AST::Node& target);
 AST::MacroInvocation InstantiateMacroInvocation(const AST::MacroInvocation& me);
-OwnedPtr<AST::Generic> InstantiateGeneric(const AST::Generic& generic, const VisitFunc& visitor);
+
 class PartialInstantiation {
 public:
     template <typename T> static OwnedPtr<T> Instantiate(Ptr<T> node, const VisitFunc& visitFunc)
@@ -101,6 +101,7 @@ private:
     static OwnedPtr<AST::TokenPart> InstantiateTokenPart(const AST::TokenPart& tp, const VisitFunc& visitor);
     static OwnedPtr<AST::QuoteExpr> InstantiateQuoteExpr(const AST::QuoteExpr& qe, const VisitFunc& visitor);
     static OwnedPtr<AST::IfExpr> InstantiateIfExpr(const AST::IfExpr& ie, const VisitFunc& visitor);
+    static OwnedPtr<AST::PrimitiveTypeExpr> InstantiatePrimitiveTypeExpr(const AST::PrimitiveTypeExpr& pte);
     static OwnedPtr<AST::TryExpr> InstantiateTryExpr(const AST::TryExpr& te, const VisitFunc& visitor);
     static OwnedPtr<AST::ThrowExpr> InstantiateThrowExpr(const AST::ThrowExpr& te, const VisitFunc& visitor);
     static OwnedPtr<AST::ReturnExpr> InstantiateReturnExpr(const AST::ReturnExpr& re, const VisitFunc& visitor);
@@ -137,6 +138,7 @@ private:
         const AST::StrInterpolationExpr& sie, const VisitFunc& visitor);
     static OwnedPtr<AST::TrailingClosureExpr> InstantiateTrailingClosureExpr(
         const AST::TrailingClosureExpr& tc, const VisitFunc& visitor);
+    static OwnedPtr<AST::ExclaveExpr> InstantiateExclaveExpr(const AST::ExclaveExpr& ee, const VisitFunc& visitor);
     static OwnedPtr<AST::IsExpr> InstantiateIsExpr(const AST::IsExpr& ie, const VisitFunc& visitor);
     static OwnedPtr<AST::AsExpr> InstantiateAsExpr(const AST::AsExpr& ae, const VisitFunc& visitor);
     static OwnedPtr<AST::OptionalExpr> InstantiateOptionalExpr(const AST::OptionalExpr& oe, const VisitFunc& visitor);
@@ -162,6 +164,7 @@ private:
         const AST::GenericConstraint& gc, const VisitFunc& visitor);
     static OwnedPtr<AST::FuncBody> InstantiateFuncBody(const AST::FuncBody& fb, const VisitFunc& visitor);
     static OwnedPtr<AST::VarDecl> InstantiateFuncParam(const AST::FuncParam& fp, const VisitFunc& visitor);
+    static OwnedPtr<AST::VarDecl> InstantiateThisParam(const AST::ThisParam& tp, const VisitFunc& visitor);
     static OwnedPtr<AST::FuncParamList> InstantiateFuncParamList(
         const AST::FuncParamList& fpl, const VisitFunc& visitor);
     static OwnedPtr<AST::FuncArg> InstantiateFuncArg(const AST::FuncArg& fa, const VisitFunc& visitor);
@@ -187,7 +190,7 @@ private:
 };
 
 class TypeManager;
-using ReversedTypeSubst = std::map<Ptr<AST::Ty>, Ptr<TyVar>>;
+using ReversedTypeSubst = std::map<AST::DataTy, Ptr<TyVar>>;
 class TyGeneralizer {
 public:
     TyGeneralizer(TypeManager& tyMgr, const ReversedTypeSubst& mapping) : tyMgr(tyMgr), typeMapping(mapping)
@@ -196,21 +199,17 @@ public:
 
     ~TyGeneralizer() = default;
 
-    inline Ptr<AST::Ty> Generalize(Ptr<AST::Ty> ty)
-    {
-        return AST::Ty::IsTyCorrect(ty) ? Generalize(*ty) : ty;
-    }
+    AST::DataTy Generalize(AST::DataTy ty);
 
 private:
-    Ptr<AST::Ty> Generalize(AST::Ty& ty);
-    Ptr<AST::Ty> GetGeneralizedStructTy(AST::StructTy& structTy);
-    Ptr<AST::Ty> GetGeneralizedClassTy(AST::ClassTy& classTy);
-    Ptr<AST::Ty> GetGeneralizedInterfaceTy(AST::InterfaceTy& interfaceTy);
-    Ptr<AST::Ty> GetGeneralizedEnumTy(AST::EnumTy& enumTy);
-    Ptr<AST::Ty> GetGeneralizedArrayTy(AST::ArrayTy& arrayTy);
-    Ptr<AST::Ty> GetGeneralizedPointerTy(AST::PointerTy& cptrTy);
+    AST::DataTy GetGeneralizedStructTy(AST::StructTy& structTy);
+    AST::DataTy GetGeneralizedClassTy(AST::ClassTy& classTy);
+    AST::DataTy GetGeneralizedInterfaceTy(AST::InterfaceTy& interfaceTy);
+    AST::DataTy GetGeneralizedEnumTy(AST::EnumTy& enumTy);
+    AST::DataTy GetGeneralizedArrayTy(AST::ArrayTy& arrayTy);
+    AST::DataTy GetGeneralizedPointerTy(AST::PointerTy& cptrTy);
     // Get instantiated ty of set type 'IntersectionTy' and 'UnionTy'.
-    template <typename SetTy> Ptr<AST::Ty> GetGeneralizedSetTy(SetTy& ty);
+    template <typename SetTy> AST::DataTy GetGeneralizedSetTy(SetTy& ty);
 
     TypeManager& tyMgr;
     const ReversedTypeSubst& typeMapping;

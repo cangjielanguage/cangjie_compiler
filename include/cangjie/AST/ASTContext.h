@@ -68,7 +68,7 @@ struct InvertedIndex {
 // Names is constructed with 'declaration name, scopeName'
 using Names = std::pair<std::string, std::string>;
 // ty var -> upperbound -> AST nodes of generic constraints
-using GCBlames = std::map<Ptr<AST::Ty>, std::map<Ptr<AST::Ty>, std::set<Ptr<const AST::Node>>>>;
+using GCBlames = std::map<AST::ModalTy, std::map<AST::ModalTy, std::set<Ptr<const AST::Node>>>>;
 
 /** AST Context for sema and codegen. */
 class ASTContext {
@@ -164,13 +164,13 @@ public:
      */
     std::stack<Ptr<AST::Node>> currentCheckingNodes{};
 
-    std::unordered_map<Ptr<const AST::Node>, Ptr<AST::Ty>>
+    std::unordered_map<Ptr<const AST::Node>, AST::ModalTy>
         targetTypeMap; /**< The node should be inferred to the corresponding type. */
-    std::unordered_map<Ptr<const AST::Node>, Ptr<AST::Ty>>
+    std::unordered_map<Ptr<const AST::Node>, AST::ModalTy>
         lastTargetTypeMap; /**< Target last time the expr is checked */
     std::unordered_map<Ptr<const AST::Node>, AST::TypeCheckCache> typeCheckCache;
-    std::unordered_map<Ptr<AST::Ty>, OwnedPtr<AST::ClassDecl>> typeToAutoBoxedDeclMap;
-    std::unordered_map<Ptr<AST::Ty>, OwnedPtr<AST::ClassDecl>> typeToAutoBoxedDeclBaseMap;
+    std::unordered_map<AST::ModalTy, OwnedPtr<AST::ClassDecl>> typeToAutoBoxedDeclMap;
+    std::unordered_map<AST::ModalTy, OwnedPtr<AST::ClassDecl>> typeToAutoBoxedDeclBaseMap;
     std::unique_ptr<Searcher> searcher = std::make_unique<Searcher>();
     /** A vector for checking qualified types. */
     std::vector<Ptr<AST::PackageDecl>> packageDecls;
@@ -187,6 +187,15 @@ public:
      *  In case some of the func's generic args can't be solved, placeholders for these generic args will
      *  be propagated, and no new ones will need to be created. */
     std::unordered_set<Ptr<const AST::LambdaExpr>> funcArgReachable;
+
+    /** Nonzero while synthesizing the body of a lambda that is a direct argument of a generic call
+     *  (see `funcArgReachable`). While nonzero, ideal literal types (IDEAL_INT / IDEAL_FLOAT) of
+     *  expressions that carry the lambda's contextual return type are kept pending so generic
+     *  type argument inference can unify them against the expected type. This covers the
+     *  implicit-return expression, explicit `return`, binary-expression operands that are bare
+     *  literals, and if/tuple/paren sub-expressions. A literal whose sibling operand is already
+     *  concrete (e.g. `count():Int64 + 1`) is still unified to that concrete type. */
+    size_t inFuncArgLambdaBody{0};
 
 private:
     /** Mapping from VarDecl to the outer VarWithPatternDecl, helps for finding the initializer. */
@@ -208,14 +217,12 @@ private:
  */
 struct Candidate {
     std::vector<Ptr<AST::Decl>> decls;
-    std::unordered_set<Ptr<AST::Ty>> tys;
+    std::unordered_set<AST::ModalTy> tys;
     bool hasDecl;
     explicit Candidate(const std::vector<Ptr<AST::Decl>>& decls) : decls(decls), hasDecl(true)
     {
     }
-    explicit Candidate(const std::unordered_set<Ptr<AST::Ty>>& tys) : tys(tys), hasDecl(false)
-    {
-    }
+    explicit Candidate(const std::unordered_set<AST::ModalTy>& tys) : tys(tys), hasDecl(false) {}
     Candidate() = default;
 };
 } // namespace Cangjie

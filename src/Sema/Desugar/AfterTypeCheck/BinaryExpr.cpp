@@ -55,7 +55,7 @@ void BlockifyFlowExpr(BinaryExpr& be)
 namespace Cangjie::Sema::Desugar::AfterTypeCheck {
 void DesugarBinaryExpr(BinaryExpr& be)
 {
-    if (!Ty::IsTyCorrect(be.GetTy())) {
+    if (!be.GetTy().IsCorrect()) {
         return;
     }
     if (be.op == TokenKind::PIPELINE) {

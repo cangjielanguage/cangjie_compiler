@@ -9,6 +9,7 @@
 #include "cangjie/CHIR/IR/Type/ClassDef.h"
 #include "cangjie/CHIR/IR/Type/EnumDef.h"
 #include "cangjie/CHIR/IR/Type/StructDef.h"
+#include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/CHIR/Utils/Utils.h"
 
 namespace Cangjie::CHIR {
@@ -31,10 +32,10 @@ Type* CHIRType::TranslateTupleType(AST::TupleTy& tupleTy)
 
 Type* CHIRType::TranslateFuncType(const AST::FuncTy& fnTy)
 {
-    Type* retTy = TranslateType(*fnTy.retTy);
+    Type* retTy = TranslateType(fnTy.retTy);
     std::vector<Type*> paramTys;
     for (auto paramTy : fnTy.paramTys) {
-        auto pType = TranslateType(*paramTy);
+        auto pType = TranslateType(paramTy);
         if (fnTy.IsCFunc() && pType->IsVArray()) {
             pType = builder.GetType<RefType>(pType);
         }
@@ -48,7 +49,7 @@ Type* CHIRType::TranslateStructType(AST::StructTy& structTy)
 {
     std::vector<Type*> typeArgs;
     for (auto arg : structTy.typeArgs) {
-        typeArgs.emplace_back(TranslateType(*arg));
+        typeArgs.emplace_back(TranslateType(arg));
     }
     auto def = chirTypeCache.globalNominalCache.Get(*structTy.declPtr);
     auto type = builder.GetType<StructType>(StaticCast<StructDef*>(def), typeArgs);
@@ -61,7 +62,7 @@ Type* CHIRType::TranslateClassType(AST::ClassTy& classTy)
 {
     std::vector<Type*> typeArgs;
     for (auto arg : classTy.typeArgs) {
-        typeArgs.emplace_back(TranslateType(*arg));
+        typeArgs.emplace_back(TranslateType(arg));
     }
     auto def = chirTypeCache.globalNominalCache.Get(*classTy.declPtr);
     auto type = builder.GetType<ClassType>(StaticCast<ClassDef*>(def), typeArgs);
@@ -74,7 +75,7 @@ Type* CHIRType::TranslateInterfaceType(AST::InterfaceTy& interfaceTy)
 {
     std::vector<Type*> typeArgs;
     for (auto arg : interfaceTy.typeArgs) {
-        typeArgs.emplace_back(TranslateType(*arg));
+        typeArgs.emplace_back(TranslateType(arg));
     }
     auto def = chirTypeCache.globalNominalCache.Get(*interfaceTy.declPtr);
     auto type = builder.GetType<ClassType>(StaticCast<ClassDef*>(def), typeArgs);
@@ -87,7 +88,7 @@ Type* CHIRType::TranslateEnumType(AST::EnumTy& enumTy)
 {
     std::vector<Type*> typeArgs;
     for (auto arg : enumTy.typeArgs) {
-        typeArgs.emplace_back(TranslateType(*arg));
+        typeArgs.emplace_back(TranslateType(arg));
     }
     auto def = chirTypeCache.globalNominalCache.Get(*enumTy.declPtr);
     auto type = builder.GetType<EnumType>(StaticCast<EnumDef*>(def), typeArgs);
@@ -98,20 +99,20 @@ Type* CHIRType::TranslateEnumType(AST::EnumTy& enumTy)
 Type* CHIRType::TranslateArrayType(AST::ArrayTy& arrayTy)
 {
     // RawArrayType [elementTy, dims]
-    auto elementTy = TranslateType(*arrayTy.typeArgs[0]);
+    auto elementTy = TranslateType(arrayTy.typeArgs[0]);
     return builder.GetType<RawArrayType>(elementTy, arrayTy.dims);
 }
 
 Type* CHIRType::TranslateVArrayType(AST::VArrayTy& varrayTy)
 {
     // VArrayType size, [elementTy]
-    auto elementTy = TranslateType(*varrayTy.typeArgs[0]);
+    auto elementTy = TranslateType(varrayTy.typeArgs[0]);
     return builder.GetType<VArrayType>(elementTy, varrayTy.size);
 }
 
 Type* CHIRType::TranslateCPointerType(AST::PointerTy& pointerTy)
 {
-    auto elementTy = TranslateType(*pointerTy.typeArgs[0]);
+    auto elementTy = TranslateType(pointerTy.typeArgs[0]);
     return builder.GetType<CPointerType>(elementTy);
 }
 
@@ -124,7 +125,7 @@ void CHIRType::FillGenericArgType(AST::GenericsTy& ty)
     std::vector<Type*> chirTy;
     for (auto argTy : ty.upperBounds) {
         CJC_ASSERT(!argTy->IsGeneric());
-        chirTy.emplace_back(TranslateType(*argTy));
+        chirTy.emplace_back(TranslateType(argTy));
     }
     StaticCast<GenericType*>(it->second)->SetUpperBounds(chirTy);
 }
@@ -255,12 +256,27 @@ Type* CHIRType::TranslateType(AST::Ty& ty)
         }
     }
 
-    if (type->IsClassOrArray() || type->IsBox()) {
+    if (type->IsReferenceType()) {
         type = builder.GetType<RefType>(type);
     }
     chirTypeCache.typeMap[&ty] = type;
 
     return type;
+}
+
+Type* CHIRType::TranslateType(AST::ModalTy ty)
+{
+    CJC_ASSERT(ty && ty.Ty());
+    Type* base = TranslateType(*ty.Ty());
+    auto modal = ASTModal2CHIRModal(ty.Mode());
+    if (modal == Mode::NONE) {
+        return base;
+    }
+    Type* result = builder.WithModal(base->StripAllRefs(), modal);
+    if (base->IsRef()) {
+        result = builder.GetType<RefType>(result);
+    }
+    return result;
 }
 
 } // namespace Cangjie::CHIR

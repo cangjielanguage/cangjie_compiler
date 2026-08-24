@@ -89,6 +89,35 @@ static bool IsMemberFuncOfExtend(const AST::Decl* decl)
     return decl->outerDecl->astKind == AST::ASTKind::EXTEND_DECL;
 }
 
+// True when `func` is a desugared default-value function whose param is a non copy type not
+// @~local; the body is translated as if wrapped in `exclave {}`.
+static bool IsImplicitExclaveDefaultParamFunc(const AST::FuncDecl& func,
+    const Cangjie::TypeManager& typeManager)
+{
+    if (!func.ownerFunc || !func.TestAttr(AST::Attribute::HAS_INITIAL)) {
+        return false;
+    }
+    if (func.funcBody == nullptr || func.funcBody->paramLists.empty()) {
+        return false;
+    }
+    // Desugared name is `<paramName>.<paramIndex>`; match by name prefix.
+    for (auto& fp : func.funcBody->paramLists[0]->params) {
+        if (!fp) {
+            continue;
+        }
+        const auto& ident = func.identifier.Val();
+        const auto& name = fp->identifier.Val();
+        if (ident == name || ident.rfind(name + ".", 0) == 0) {
+            auto ty = fp->GetTy();
+            if (!Ty::IsTyCorrect(ty)) {
+                return false;
+            }
+            return !const_cast<Cangjie::TypeManager&>(typeManager).ImplementsCopyInterface(ty.Ty()) && ty.IsLocalType();
+        }
+    }
+    return false;
+}
+
 void Translator::SetRawMangledNameForIncrementalCompile(const AST::FuncDecl& astFunc, Function& chirFunc) const
 {
     AST::Decl* decl = nullptr;
@@ -219,9 +248,24 @@ Ptr<Value> Translator::Visit(const AST::FuncDecl& func)
                 ->GetResult();
         curFunc->SetReturnValue(*retVal);
     }
-    // Translate body.
-    auto block = Visit(*func.funcBody.get());
-    CreateAndAppendTerminator<GoTo>(StaticCast<Block*>(block.get()), entry);
+    // For desugared default-value functions whose param is a non copy not @~local type, the spec
+    // requires the body be translated as if wrapped in exclave
+    if (IsImplicitExclaveDefaultParamFunc(func, typeManager)) {
+        auto subGroup = builder.CreateBlockGroup(*currentBlock->GetTopLevelFunc());
+        auto exclave = CreateAndAppendTerminator<Exclave>(currentBlock);
+        exclave->InitBody(*subGroup);
+        exclave->SetDebugLocation(TranslateLocation(func));
+        blockGroupStack.emplace_back(subGroup);
+        auto subEntry = builder.CreateBlock(subGroup);
+        subGroup->SetEntryBlock(subEntry);
+        auto block = Visit(*func.funcBody);
+        CreateAndAppendTerminator<GoTo>(StaticCast<Block>(block.get()), subEntry);
+        blockGroupStack.pop_back();
+    } else {
+        // Translate body.
+        auto block = Visit(*func.funcBody);
+        CreateAndAppendTerminator<GoTo>(StaticCast<Block>(block.get()), entry);
+    }
     blockGroupStack.pop_back();
     return curFunc;
 }
@@ -440,6 +484,10 @@ Ptr<Value> Translator::TranslateConstructorFuncInline(const AST::Decl& parent, c
                 CJC_ASSERT(!pureCurObjType->IsRef() && pureCurObjType->IsNominal());
                 auto pureCurObjCustomType = StaticCast<CustomType*>(pureCurObjType);
                 auto memberType = pureCurObjCustomType->GetInstMemberTypeByPath(path, builder);
+                if (auto newType = builder.WithModal(value->GetType(), memberType->GetModalInfo());
+                    newType != value->GetType()) {
+                    value->SetType(*newType);
+                }
                 if (value->GetType() == memberType) {
                     CreateAndAppendExpression<StoreElementRef>(
                         loc, builder.GetUnitTy(), value, thisVar, path, currentBlock);
@@ -466,7 +514,7 @@ Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
         TranslateFunctionGenericUpperBounds(chirTy, func);
     }
     auto lambdaTrans = SetupContextForLambda(*func.funcBody->body);
-    auto funcTy = RawStaticCast<FuncType*>(TranslateType(*func.GetTy()));
+    auto funcTy = StaticCast<FuncType*>(TranslateType(func.GetTy()));
     // Create nested functions' body and parameters.
     CJC_NULLPTR_CHECK(currentBlock->GetTopLevelFunc());
     BlockGroup* body = builder.CreateBlockGroup(*currentBlock->GetTopLevelFunc());
@@ -475,7 +523,7 @@ Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
     // Only collect for generic function which has not been instantiated.
     if (auto generic = func.funcBody->generic.get(); generic && func.TestAttr(AST::Attribute::GENERIC)) {
         for (auto& type : generic->typeParameters) {
-            genericTys.emplace_back(RawStaticCast<GenericType*>(TranslateType(*type->GetTy())));
+            genericTys.emplace_back(StaticCast<GenericType*>(TranslateType(type->GetTy())));
         }
     }
     std::string lambdaMangleName = func.mangledName;

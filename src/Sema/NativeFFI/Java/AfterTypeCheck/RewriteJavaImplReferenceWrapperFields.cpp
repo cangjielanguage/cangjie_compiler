@@ -36,7 +36,7 @@ void InsertProxyPropertyGetter(PropDecl& prop, VarDecl& userField, VarDecl& regC
     getter.moduleName = prop.moduleName;
     getter.propDecl = &prop;
     getter.isGetter = true;
-    getter.SetTy(typeManager.GetFunctionTy({}, prop.GetTy()));
+    getter.SetTy({typeManager.GetFunctionTy({}, prop.GetTy())});
 
     getter.CloneAttrs(prop);
     getter.DisableAttr(Attribute::MUT);
@@ -72,14 +72,14 @@ void InsertProxyPropertySetter(PropDecl& prop, VarDecl& userField, VarDecl& regC
     setter.fullPackageName = prop.fullPackageName;
     setter.moduleName = prop.moduleName;
     setter.isSetter = true;
-    setter.SetTy(typeManager.GetFunctionTy({prop.GetTy()}, unitTy));
+    setter.SetTy({typeManager.GetFunctionTy({prop.GetTy()}, {unitTy})});
     setter.CloneAttrs(prop);
     setter.DisableAttr(Attribute::MUT);
     setter.EnableAttr(Attribute::COMPILER_ADD);
 
     setter.funcBody = WithinFile(MakeOwned<FuncBody>(), prop.curFile);
     auto& setterBody = *setter.funcBody;
-    setterBody.SetTy(unitTy);
+    setterBody.SetTy({unitTy});
     setterBody.EnableAttr(Attribute::COMPILER_ADD);
     setterBody.paramLists.push_back(WithinFile(MakeOwned<FuncParamList>(), prop.curFile));
     setterBody.paramLists.begin()->get()->EnableAttr(Attribute::COMPILER_ADD);
@@ -91,16 +91,14 @@ void InsertProxyPropertySetter(PropDecl& prop, VarDecl& userField, VarDecl& regC
     setterBody.funcDecl = &setter;
 
     setterBody.body = WithinFile(CreateBlock({}, prop.GetTy()), prop.curFile);
-    setterBody.body->SetTy(unitTy);
+    setterBody.body->SetTy({unitTy});
 
     // $reg.<actualField> = set
-    setterBody.body->body.emplace_back(
-        WithinFile(CreateAssignExpr(
-            CreateMemberAccess(
-                WithinFile(CreateRefExpr(regCompanionField), prop.curFile),
-                userField),
+    setterBody.body->body.emplace_back(WithinFile(
+        CreateAssignExpr(CreateMemberAccess(WithinFile(CreateRefExpr(regCompanionField), prop.curFile), userField),
             WithinFile(CreateRefExpr(setterParam), prop.curFile),
-            TypeManager::GetPrimitiveTy(AST::TypeKind::TYPE_UNIT)), prop.curFile));
+            {TypeManager::GetPrimitiveTy(AST::TypeKind::TYPE_UNIT)}),
+        prop.curFile));
 }
 
 } // namespace
@@ -133,7 +131,7 @@ void RewriteJavaImplReferenceWrapperFields::RelocateFields(AfterTypeCheckContext
         field.DisableAttr(Attribute::PRIVATE, Attribute::INTERNAL, Attribute::PUBLIC);
         field.EnableAttr(Attribute::PROTECTED);
         if (!field.initializer) {
-            field.initializer = utils.CreateZeroValue(field.GetTy(), *field.curFile);
+            field.initializer = utils.CreateZeroValue(field.DataTy(), *field.curFile);
         }
     }
 

@@ -689,10 +689,11 @@ llvm::Value* IRBuilder2::GenerateOverflowCheckedFunc(
 }
 
 namespace {
-llvm::Function* GetGCIntrinsicAlloc(const CGModule& cgMod)
+llvm::Function* GetGCIntrinsicAlloc(const CGModule& cgMod, bool isLocal)
 {
     auto module = cgMod.GetLLVMModule();
-    auto function = llvm::Intrinsic::getDeclaration(module, llvm::Intrinsic::cj_malloc_object);
+    auto function = llvm::Intrinsic::getDeclaration(module, static_cast<llvm::Intrinsic::ID>(
+        isLocal ? llvm::Intrinsic::cj_malloc_local_object : llvm::Intrinsic::cj_malloc_object));
     function->addAttributeAtIndex(static_cast<llvm::Intrinsic::ID>(llvm::AttributeList::ReturnIndex),
         llvm::Attribute::get(function->getContext(), llvm::Attribute::NoAlias));
     return function;
@@ -701,7 +702,7 @@ llvm::Function* GetGCIntrinsicAlloc(const CGModule& cgMod)
 
 llvm::Value* IRBuilder2::CallClassIntrinsicAlloc(const CHIR::Type& type)
 {
-    auto value = CallClassIntrinsicAlloc({CreateTypeInfo(type), GetLayoutSize_32(type)});
+    auto value = CallClassIntrinsicAlloc({CreateTypeInfo(type), GetLayoutSize_32(type)}, type.IsLocalRegion());
     auto& llvmCtx = getContext();
     if (type.IsClass()) {
         CJC_ASSERT(!type.IsAutoEnvBase() && "Should not reach here, please check CHIR.");
@@ -725,10 +726,10 @@ llvm::Value* IRBuilder2::CallClassIntrinsicAlloc(const CHIR::Type& type)
 }
 
 // parameters = {TypeInfo* ti, i32 size}
-llvm::Instruction* IRBuilder2::CallClassIntrinsicAlloc(const std::vector<llvm::Value*>& parameters)
+llvm::Instruction* IRBuilder2::CallClassIntrinsicAlloc(const std::vector<llvm::Value*>& parameters, bool isLocal)
 {
     CJC_ASSERT(parameters.size() == 2U);
-    auto allocFunc = GetGCIntrinsicAlloc(cgMod);
+    auto allocFunc = GetGCIntrinsicAlloc(cgMod, isLocal);
     auto fixedParams = {CreateBitCast(parameters[0], getInt8PtrTy()), parameters[1]};
     auto callInst = CreateCallOrInvoke(allocFunc, fixedParams);
     callInst->addAttributeAtIndex(
@@ -962,7 +963,8 @@ llvm::Value* IRBuilder2::CallAtomicIntrinsics(const CHIR::IntrinsicBase& intrins
             CJC_ASSERT(intrinsic.GetIntrinsicKind() == CHIR::ATOMIC_LOAD ||
                 intrinsic.GetIntrinsicKind() == CHIR::ATOMIC_SWAP);
             CJC_ASSERT(cgType->IsCGEnum());
-            auto boxVal = CallIntrinsicAllocaGeneric({CreateTypeInfo(*rstType), getInt32(8U)});
+            auto boxVal = CallIntrinsicAllocaGeneric(
+                {CreateTypeInfo(*rstType), getInt32(8U)}, rstType->IsLocalRegion());
             auto payloadPtr = GetPayloadFromObject(boxVal);
             CallGCWrite({res, boxVal, payloadPtr});
             return boxVal;
@@ -1239,12 +1241,13 @@ llvm::Instruction* IRBuilder2::CallIntrinsicIsTypeEqualTo(const std::vector<llvm
 }
 
 // parameters = {TypeInfo* ti, i32 size}
-llvm::Instruction* IRBuilder2::CallIntrinsicAllocaGeneric(const std::vector<llvm::Value*>& parameters)
+llvm::Instruction* IRBuilder2::CallIntrinsicAllocaGeneric(const std::vector<llvm::Value*>& parameters, bool isLocal)
 {
     auto curLoc = getCurrentDebugLocation();
     SetCurrentDebugLocation(llvm::DebugLoc());
     CJC_ASSERT(parameters.size() == 2U);
-    llvm::Function* func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_alloca_generic);
+    llvm::Function* func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(),
+        isLocal ? llvm::Intrinsic::cj_alloca_local_generic : llvm::Intrinsic::cj_alloca_generic);
     auto fixedParams = {CreateBitCast(parameters[0], getInt8PtrTy()), parameters[1]};
     auto inst = CreateCallOrInvoke(func, fixedParams);
     SetCurrentDebugLocation(curLoc);
@@ -1255,6 +1258,16 @@ llvm::Instruction* IRBuilder2::CallIntrinsicGCWriteGeneric(const std::vector<llv
 {
     CJC_ASSERT(parameters.size() == 4U);
     llvm::Function* func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcwrite_generic);
+    auto fixedParams = {parameters[0], CreateBitCast(parameters[1], getInt8PtrTy(1U)), parameters[2], parameters[3]};
+    return CreateCall(func, fixedParams);
+}
+
+llvm::Instruction* IRBuilder2::CallIntrinsicMaybeLocalWriteGeneric(
+    const std::vector<llvm::Value*>& parameters)
+{
+    CJC_ASSERT(parameters.size() == 4U);
+    llvm::Function* func = llvm::Intrinsic::getDeclaration(
+        cgMod.GetLLVMModule(), llvm::Intrinsic::cj_maybe_local_write_generic);
     auto fixedParams = {parameters[0], CreateBitCast(parameters[1], getInt8PtrTy(1U)), parameters[2], parameters[3]};
     return CreateCall(func, fixedParams);
 }
@@ -1354,7 +1367,7 @@ llvm::Value* IRBuilder2::CreateTypeInfoArray(const std::vector<CHIR::Type*>& typ
 llvm::Value* IRBuilder2::CreateTypeInfo(const CHIR::Type& gt,
     const std::unordered_map<const CHIR::Type*, std::function<llvm::Value*(IRBuilder2&)>>& map, bool canChangeBB)
 {
-    auto baseType = DeRef(const_cast<CHIR::Type&>(gt));
+    auto baseType = DeRef(const_cast<CHIR::Type&>(gt))->GetDataType(GetCGContext().GetCHIRBuilder());
     if (baseType->IsThis()) {
         CJC_ASSERT(cgFunction && "Should not reach here.");
         auto cgFuncType = cgFunction->GetCGFunctionType();

@@ -54,10 +54,11 @@ public:
         auto curTarget = node.GetTarget();
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
         bool valid = !curTarget || Is<Type>(node) || Utils::In(curTarget->astKind, ignoreKinds) ||
-            Ty::IsTyCorrect(curTarget->GetTy());
+            curTarget->GetTy().IsCorrect();
         CJC_ASSERT(valid);
 
-        valid = valid && Ty::IsTyCorrect(node.GetTy()) && !node.GetTy()->HasIdealTy() && !node.GetTy()->HasQuestTy();
+        valid = valid && node.GetTy().IsCorrect() && !node.GetTy()->HasIdealTy() && !node.GetTy()->HasQuestTy() &&
+            !node.GetTy()->HasIdealModal();
 #endif
         CJC_ASSERT(valid);
 
@@ -71,7 +72,7 @@ public:
                 target = fb->parentEnum;
             }
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-            valid = valid && (!target || Ty::IsTyCorrect(target->GetTy()));
+            valid = valid && (!target || target->GetTy().IsCorrect());
 #endif
             CJC_ASSERT(valid);
         }

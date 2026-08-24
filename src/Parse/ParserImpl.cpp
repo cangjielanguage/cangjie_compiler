@@ -350,4 +350,9 @@ const ParserImpl::CombinatorInfo* ParserImpl::LookupSeenCombinator()
     }
     return nullptr;
 }
+
+bool ParserImpl::SeeingPrimitiveType()
+{
+    return (Peek().kind >= TokenKind::INT8) && (Peek().kind <= TokenKind::UNIT);
+}
 }

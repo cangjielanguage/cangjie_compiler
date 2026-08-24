@@ -420,10 +420,21 @@ template <> ExtendDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const
 
 // =========================== Type Deserializer ==============================
 
+namespace {
+ModalInfo ReadModalInfo(const PackageFormat::Type* base)
+{
+    if (base->modal() != nullptr) {
+        return ModalInfo(static_cast<Mode>(base->modal()->local()));
+    }
+    return ModalInfo{};
+}
+} // namespace
+
 template <> Type* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Type* obj)
 {
     CJC_NULLPTR_CHECK(obj);
     auto kind = static_cast<Type::TypeKind>(obj->kind());
+    auto modal = ReadModalInfo(obj);
     switch (kind) {
         case Type::TYPE_INT8:
         case Type::TYPE_INT16:
@@ -435,29 +446,29 @@ template <> Type* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pack
         case Type::TYPE_UINT32:
         case Type::TYPE_UINT64:
         case Type::TYPE_UINT_NATIVE:
-            return builder.GetType<IntType>(kind);
+            return builder.GetType<IntType>(kind, modal);
         case Type::TYPE_FLOAT16:
         case Type::TYPE_FLOAT32:
         case Type::TYPE_FLOAT64:
-            return builder.GetType<FloatType>(kind);
+            return builder.GetType<FloatType>(kind, modal);
         case Type::TYPE_RUNE:
-            return builder.GetType<RuneType>();
+            return builder.GetType<RuneType>(modal);
         case Type::TYPE_BOOLEAN:
-            return builder.GetType<BooleanType>();
+            return builder.GetType<BooleanType>(modal);
         case Type::TYPE_UNIT:
-            return builder.GetType<UnitType>();
+            return builder.GetType<UnitType>(modal);
         case Type::TYPE_NOTHING:
-            return builder.GetType<NothingType>();
+            return builder.GetType<NothingType>(modal);
         case Type::TYPE_VOID:
-            return builder.GetType<VoidType>();
+            return builder.GetType<VoidType>(modal);
         case Type::TYPE_TUPLE:
-            return builder.GetType<TupleType>(GetType<Type>(obj->argTys()));
+            return builder.GetType<TupleType>(GetType<Type>(obj->argTys()), modal);
         case Type::TYPE_CPOINTER:
             CJC_NULLPTR_CHECK(obj->argTys());
             CJC_ASSERT(obj->argTys()->size() >= 1);
-            return builder.GetType<CPointerType>(GetType<Type>(obj->argTys()->Get(0)));
+            return builder.GetType<CPointerType>(GetType<Type>(obj->argTys()->Get(0)), modal);
         case Type::TYPE_CSTRING:
-            return builder.GetType<CStringType>();
+            return builder.GetType<CStringType>(modal);
         case Type::TYPE_REFTYPE:
             CJC_NULLPTR_CHECK(obj->argTys());
             CJC_ASSERT(obj->argTys()->size() >= 1);
@@ -467,7 +478,7 @@ template <> Type* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pack
             CJC_ASSERT(obj->argTys()->size() >= 1);
             return builder.GetType<BoxType>(GetType<Type>(obj->argTys()->Get(0)));
         case Type::TYPE_THIS:
-            return builder.GetType<ThisType>();
+            return builder.GetType<ThisType>(modal);
         case Type::TYPE_STRUCT:
         case Type::TYPE_ENUM:
         case Type::TYPE_CLASS:
@@ -490,7 +501,8 @@ template <> RawArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(co
     CJC_NULLPTR_CHECK(obj->base()->argTys());
     auto elemTy = GetType<Type>(obj->base()->argTys()->Get(0));
     auto dims = obj->dims();
-    return builder.GetType<RawArrayType>(elemTy, static_cast<unsigned>(dims));
+    auto modal = ReadModalInfo(obj->base());
+    return builder.GetType<RawArrayType>(elemTy, static_cast<unsigned>(dims), modal);
 }
 
 template <> VArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::VArrayType* obj)
@@ -498,7 +510,8 @@ template <> VArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     CJC_NULLPTR_CHECK(obj->base()->argTys());
     auto elemTy = GetType<Type>(obj->base()->argTys()->Get(0));
     auto size = obj->size();
-    return builder.GetType<VArrayType>(elemTy, size);
+    auto modal = ReadModalInfo(obj->base());
+    return builder.GetType<VArrayType>(elemTy, size, modal);
 }
 
 template <> FuncType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::FuncType* obj)
@@ -508,12 +521,13 @@ template <> FuncType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const 
     auto retTy = GetType<Type>(argTys->Get(argTys->size() - 1));
     auto hasVarLenParam = obj->hasVarArg();
     auto isCFuncType = obj->isCFuncType();
+    auto modal = ReadModalInfo(obj->base());
     std::vector<Type*> paramTys;
     CJC_ASSERT(argTys->size() > 0);
     for (size_t i = 0; i < argTys->size() - 1; ++i) {
         paramTys.emplace_back(GetType<Type>(argTys->Get(static_cast<unsigned>(i))));
     }
-    return builder.GetType<FuncType>(paramTys, retTy, hasVarLenParam, isCFuncType);
+    return builder.GetType<FuncType>(paramTys, retTy, hasVarLenParam, isCFuncType, modal);
 }
 
 template <> CustomType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::CustomType* obj)
@@ -521,12 +535,13 @@ template <> CustomType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     auto kind = Type::TypeKind(obj->base()->kind());
     auto def = GetCustomTypeDef<CustomTypeDef>(obj->customTypeDef());
     auto typeArgs = GetType<Type>(obj->base()->argTys());
+    auto modal = ReadModalInfo(obj->base());
     if (kind == Type::TypeKind::TYPE_CLASS) {
-        return builder.GetType<ClassType>(StaticCast<ClassDef*>(def), typeArgs);
+        return builder.GetType<ClassType>(StaticCast<ClassDef*>(def), typeArgs, modal);
     } else if (kind == Type::TypeKind::TYPE_ENUM) {
-        return builder.GetType<EnumType>(StaticCast<EnumDef*>(def), typeArgs);
+        return builder.GetType<EnumType>(StaticCast<EnumDef*>(def), typeArgs, modal);
     } else if (kind == Type::TypeKind::TYPE_STRUCT) {
-        return builder.GetType<StructType>(StaticCast<StructDef*>(def), typeArgs);
+        return builder.GetType<StructType>(StaticCast<StructDef*>(def), typeArgs, modal);
     } else {
         CJC_ABORT();
         return nullptr;
@@ -537,7 +552,8 @@ template <> GenericType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(con
 {
     auto identifier = obj->identifier()->str();
     auto srcCodeIndentifier = obj->srcCodeIdentifier()->str();
-    auto genericType = builder.GetType<GenericType>(identifier, srcCodeIndentifier);
+    auto modal = ReadModalInfo(obj->base());
+    auto genericType = builder.GetType<GenericType>(identifier, srcCodeIndentifier, modal);
     genericTypeConfig.emplace_back(genericType, obj);
     return genericType;
 }
@@ -604,6 +620,8 @@ template <> BlockGroup* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
         blockGroup = builder.CreateBlockGroup(*ownedExpression->GetTopLevelFunc());
         if (auto lambda = DynamicCast<Lambda*>(ownedExpression)) {
             lambda->InitBody(*blockGroup);
+        } else if (auto exclave = DynamicCast<Exclave*>(ownedExpression)) {
+            exclave->InitBody(*blockGroup);
         }
     }
     return blockGroup;
@@ -709,6 +727,7 @@ static std::pair<ExprKind, bool> CHIRExprKindToExprKind(PackageFormat::CHIRExprK
         case FK::CHIRExprKind_Branch:             return {ExprKind::BRANCH, false};
         case FK::CHIRExprKind_MultiBranch:        return {ExprKind::MULTIBRANCH, false};
         case FK::CHIRExprKind_Exit:               return {ExprKind::EXIT, false};
+        case FK::CHIRExprKind_Exclave:            return {ExprKind::EXCLAVE, false};
         case FK::CHIRExprKind_TryApply:           return {ExprKind::TRY_APPLY, true};
         case FK::CHIRExprKind_TryInvoke:          return {ExprKind::TRY_INVOKE, true};
         case FK::CHIRExprKind_TryIntrinsic:       return {ExprKind::TRY_INTRINSIC, true};
@@ -788,6 +807,8 @@ static std::pair<ExprKind, bool> CHIRExprKindToExprKind(PackageFormat::CHIRExprK
         case FK::CHIRExprKind_Intrinsic:          return {ExprKind::INTRINSIC, false};
         case FK::CHIRExprKind_GetRtti:            return {ExprKind::GET_RTTI, false};
         case FK::CHIRExprKind_GetRttiStatic:      return {ExprKind::GET_RTTI_STATIC, false};
+        case FK::CHIRExprKind_StartRegion:        return {ExprKind::START_REGION, false};
+        case FK::CHIRExprKind_EndRegion:          return {ExprKind::END_REGION, false};
         default:                     return {ExprKind::GOTO, false}; // unreachable
     }
 }
@@ -846,8 +867,14 @@ template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
             return DeserializeConstant(*resultTy, *StaticCast<LiteralValue*>(operands[0]), *owner);
         case ExprKind::EXIT:
             return builder.CreateTerminator<Exit>(owner);
+        case ExprKind::EXCLAVE:
+            return builder.CreateTerminator<Exclave>(owner);
         case ExprKind::GET_EXCEPTION:
             return builder.CreateExpression<GetException>(resultTy, owner);
+        case ExprKind::START_REGION:
+            return builder.CreateExpression<StartRegion>(resultTy, owner);
+        case ExprKind::END_REGION:
+            return builder.CreateExpression<EndRegion>(resultTy, owner);
         case ExprKind::GET_RTTI:
             CJC_ASSERT(operands.size() == 1);
             return builder.CreateExpression<GetRTTI>(resultTy, operands[0], owner);

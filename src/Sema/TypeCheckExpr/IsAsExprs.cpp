@@ -11,18 +11,18 @@
 using namespace Cangjie;
 using namespace Sema;
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIsExpr(ASTContext& ctx, IsExpr& ie)
+ModalTy TypeChecker::TypeCheckerImpl::SynIsExpr(ASTContext& ctx, IsExpr& ie)
 {
-    if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ie.leftExpr.get())) &&
-        Ty::IsTyCorrect(Synthesize({ctx, SynPos::NONE}, ie.isType.get())) && ReplaceIdealTy(*ie.leftExpr)) {
-        ie.SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+    if (Synthesize({ctx, SynPos::EXPR_ARG}, ie.leftExpr.get()).IsCorrect() &&
+        Synthesize({ctx, SynPos::NONE}, ie.isType.get()).IsCorrect() && ReplaceIdealTy(*ie.leftExpr)) {
+        ie.SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
     } else {
-        ie.SetTy(TypeManager::GetInvalidTy());
+        ie.SetTy({TypeManager::GetInvalidTy()});
     }
     return ie.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkIsExpr(ASTContext& ctx, Ty& target, IsExpr& ie)
+bool TypeChecker::TypeCheckerImpl::ChkIsExpr(ASTContext& ctx, ModalTy target, IsExpr& ie)
 {
     // Always type checking the expression even if the target type mismatches.
     auto ty = SynIsExpr(ctx, ie);
@@ -32,40 +32,40 @@ bool TypeChecker::TypeCheckerImpl::ChkIsExpr(ASTContext& ctx, Ty& target, IsExpr
     bool isWellTyped = ty->IsBoolean();
 
     auto boolTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
-    if (!typeManager.IsLitBoxableType(boolTy, &target)) {
-        DiagMismatchedTypesWithFoundTy(diag, ie, target, *boolTy);
+    if (!typeManager.IsLitBoxableType(boolTy, target.Ty())) {
+        DiagMismatchedTypesWithFoundTy(diag, ie, target, ModalTy{boolTy});
         isWellTyped = false;
     }
 
-    ie.SetTy(isWellTyped ? ie.GetTy() : TypeManager::GetInvalidTy());
+    ie.SetTy(isWellTyped ? ie.GetTy() : ModalTy{TypeManager::GetInvalidTy()});
     return isWellTyped;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynAsExpr(ASTContext& ctx, AsExpr& ae)
+ModalTy TypeChecker::TypeCheckerImpl::SynAsExpr(ASTContext& ctx, AsExpr& ae)
 {
-    if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ae.leftExpr.get())) &&
-        Ty::IsTyCorrect(Synthesize({ctx, SynPos::NONE}, ae.asType.get())) && ReplaceIdealTy(*ae.leftExpr)) {
+    if (Synthesize({ctx, SynPos::EXPR_ARG}, ae.leftExpr.get()).IsCorrect() &&
+        Synthesize({ctx, SynPos::NONE}, ae.asType.get()).IsCorrect() && ReplaceIdealTy(*ae.leftExpr)) {
         auto optionDecl = RawStaticCast<EnumDecl*>(importManager.GetCoreDecl("Option"));
         if (optionDecl) {
-            ae.SetTy(typeManager.GetEnumTy(*optionDecl, {ae.asType->GetTy()}));
+            ae.SetTy({typeManager.GetEnumTy(*optionDecl, {ae.asType->DataTy()})});
         } else {
             diag.Diagnose(ae, DiagKind::sema_no_core_object);
-            ae.SetTy(TypeManager::GetInvalidTy());
+            ae.SetTy({TypeManager::GetInvalidTy()});
         }
     } else {
-        ae.SetTy(TypeManager::GetInvalidTy());
+        ae.SetTy({TypeManager::GetInvalidTy()});
     }
     return ae.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkAsExpr(ASTContext& ctx, Ty& target, AsExpr& ae)
+bool TypeChecker::TypeCheckerImpl::ChkAsExpr(ASTContext& ctx, ModalTy target, AsExpr& ae)
 {
-    if (!Ty::IsTyCorrect(SynAsExpr(ctx, ae))) {
+    if (!SynAsExpr(ctx, ae).IsCorrect()) {
         return false;
     }
-    if (!CheckOptionBox(target, *ae.GetTy())) {
+    if (!CheckOptionBox(target, ae.GetTy())) {
         DiagMismatchedTypes(diag, ae, target);
-        ae.SetTy(TypeManager::GetInvalidTy());
+        ae.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     return true;

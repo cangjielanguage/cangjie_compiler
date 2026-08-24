@@ -13,6 +13,7 @@
 #include "Base/CHIRExprWrapper.h"
 #include "CGModule.h"
 #include "IRBuilder.h"
+#include "Utils/ModalWrite.h"
 #include "cangjie/CHIR/IR/Annotation.h"
 #include "cangjie/CHIR/IR/Type/ClassDef.h"
 #include "cangjie/CHIR/IR/Value/Value.h"
@@ -171,7 +172,8 @@ llvm::Value* HandleStoreExpr(IRBuilder2& irBuilder, const CHIR::Store& store)
             CGValue((cgMod | addr)->GetRawValue(), retAddrCGType, (cgMod | addr)->IsSRetArg()),
             DeRef(*addr->GetType())->GetTypeArgs()[0]);
     }
-    return irBuilder.CreateStore(valueVal, *(cgMod | addr));
+    return irBuilder.CreateStore(valueVal, *(cgMod | addr), nullptr,
+        ClassifyModalWrite(irBuilder.GetCGContext().GetCHIRBuilder(), store));
 }
 
 llvm::Value* GetElementRefOfOptionLikeT(
@@ -265,7 +267,7 @@ void HandleStoreElementRef(IRBuilder2& irBuilder, const CHIR::StoreElementRef& s
     if (!srcCGType->GetSize() && IsThisArgOfStructMethod(*rhs)) {
         auto typeInfoOfSrc = irBuilder.CreateTypeInfo(srcCGType->GetOriginal());
         auto size = irBuilder.GetLayoutSize_32(srcCGType->GetOriginal());
-        auto tmp = irBuilder.CallClassIntrinsicAlloc({typeInfoOfSrc, size});
+        auto tmp = irBuilder.CallClassIntrinsicAlloc({typeInfoOfSrc, size}, false);
         auto payloadPtr = irBuilder.GetPayloadFromObject(tmp);
         // Note: in this branch, it means:
         // - we are assigning a "struct" that doesn't begin with TypeInfo* to an address
@@ -292,7 +294,8 @@ void HandleStoreElementRef(IRBuilder2& irBuilder, const CHIR::StoreElementRef& s
                 ->addAttributeAtIndex(static_cast<unsigned>(llvm::AttributeList::FunctionIndex),
                     llvm::Attribute::get(cgMod.GetLLVMContext(), CJ2C_ATTR));
         }
-        irBuilder.CreateStore(*value, irBuilder.CreateGEP(*place, path));
+        irBuilder.CreateStore(*value, irBuilder.CreateGEP(*place, path), nullptr,
+            ClassifyModalWrite(irBuilder.GetCGContext().GetCHIRBuilder(), storeElementRef));
     }
 }
 

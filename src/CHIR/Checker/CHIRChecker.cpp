@@ -149,22 +149,6 @@ std::string ValueSymbolToString(const Value& value)
     }
 }
 
-/**
- * @brief generic type includes `T` and `class-A<U>`, we want to know `T` and `U` if is in container
- */
-bool GenericTypeIsInContainer(const Type& type, const std::vector<GenericType*>& container)
-{
-    if (type.IsGeneric()) {
-        return std::find(container.begin(), container.end(), &type) != container.end();
-    }
-    for (auto ty : type.GetTypeArgs()) {
-        if (!GenericTypeIsInContainer(*ty, container)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool IsUnreachableApply(const Type* thisType)
 {
     if (thisType == nullptr) {
@@ -631,6 +615,23 @@ void CHIRChecker::ShouldNotHaveResult(const Expression& expr, const Function& to
     }
 }
 
+/**
+ * @brief generic type includes `T` and `class-A<U>`, we want to know `T` and `U` if is in container
+ */
+bool CHIRChecker::GenericTypeIsInContainer(const Type& type, const std::vector<GenericType*>& container)
+{
+    if (type.IsGeneric()) {
+        auto dataType = type.GetDataType(builder);
+        return std::find(container.begin(), container.end(), dataType) != container.end();
+    }
+    for (auto ty : type.GetTypeArgs()) {
+        if (!GenericTypeIsInContainer(*ty, container)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool CHIRChecker::TypeIsExpected(const Type& srcType, const Type& dstType)
 {
     if (&srcType == &dstType) {
@@ -1020,7 +1021,7 @@ bool CHIRChecker::CheckParamTypes(
         (parentType->IsReferenceType() || topLevelFunc.TestAttr(Attribute::MUT) || funcIsInit());
     bool typeMatched = true;
     for (size_t i = 0; i < paramTypes.size(); ++i) {
-        auto pType = paramTypes[i];
+        auto pType = paramTypes[i]->GetDataType(builder);
         if (i == 0 && firstParamIsThis) {
             // a hack way, we need to replace Any& to correct type
             auto anyTyRef = builder.GetType<RefType>(builder.GetAnyTy());
@@ -1456,7 +1457,7 @@ void CHIRChecker::CheckUnreachableOpAndGenericTyInBG(const BlockGroup& blockGrou
             reachableValues.emplace_back(params[i]);
             // 1. generic type in lambda parameter must be reachable
             if (!GenericTypeIsInContainer(*params[i]->GetType(), reachableGenericTypes)) {
-                auto errMsg = "generic type " + params[i]->ToString(0) + "is unreachable, the type is " +
+                auto errMsg = "generic type " + params[i]->ToString(0) + " is unreachable, the type is " +
                     std::to_string(i) + "-th parameter in lambda " + lambda->GetIdentifier() + ".";
                 ErrorInFunc(*blockGroup.GetTopLevelFunc(), errMsg);
             }
@@ -1475,7 +1476,7 @@ void CHIRChecker::CheckUnreachableOpAndGenericTyInBG(const BlockGroup& blockGrou
             reachableValues.emplace_back(params[i]);
             // 2. generic type in global func parameter must be reachable
             if (!GenericTypeIsInContainer(*params[i]->GetType(), reachableGenericTypes)) {
-                auto errMsg = "generic type " + params[i]->ToString(0) + "is unreachable, the type is " +
+                auto errMsg = "generic type " + params[i]->ToString(0) + " is unreachable, the type is " +
                     std::to_string(i) + "-th parameter in function " + func->GetIdentifier() + ".";
                 ErrorInFunc(*func, errMsg);
             }
@@ -1578,7 +1579,7 @@ void CHIRChecker::CheckUnreachableGenericTypeInExpr(
         const auto& instantiatedTypeArgs = funcCall->GetInstantiatedTypeArgs();
         for (size_t i = 0; i < instantiatedTypeArgs.size(); ++i) {
             if (!GenericTypeIsInContainer(*instantiatedTypeArgs[i], reachableGenericTypes)) {
-                auto errMsg = "generic type " + instantiatedTypeArgs[i]->ToString() + "is unreachable, the type is " +
+                auto errMsg = "generic type " + instantiatedTypeArgs[i]->ToString() + " is unreachable, the type is " +
                     std::to_string(i) + "-th instantiated type args in expression " + expr.ToString(0) + ".";
                 ErrorInFunc(*expr.GetTopLevelFunc(), errMsg);
             }
@@ -1833,6 +1834,8 @@ void CHIRChecker::CheckTerminator(const Expression& expr, const Function& topLev
             CheckTryAllocate(StaticCast<const TryAllocate&>(expr), topLevelFunc); }},
         {ExprKind::TRY_RAW_ARRAY_ALLOCATE, [this, &expr, &topLevelFunc]() {
             CheckTryRawArrayAllocate(StaticCast<const TryRawArrayAllocate&>(expr), topLevelFunc); }},
+        {ExprKind::EXCLAVE, [this, &expr, &topLevelFunc]() {
+            CheckExclave(StaticCast<const Exclave&>(expr), topLevelFunc); }},
     };
     if (auto it = actionMap.find(expr.GetExprKind()); it != actionMap.end()) {
         it->second();
@@ -2783,7 +2786,7 @@ void CHIRChecker::CheckUnaryExprBase(const UnaryExpressionBase& expr, const Func
 {
     // 1. skip checking if operand type is Nothing
     auto operand = expr.GetOperand();
-    auto operandType = operand->GetType();
+    auto operandType = operand->GetType()->GetDataType(builder);
     if (operandType->IsNothing()) {
         return;
     }
@@ -2802,7 +2805,7 @@ void CHIRChecker::CheckUnaryExprBase(const UnaryExpressionBase& expr, const Func
 
     // 3. result type must equal to operand type
     auto result = expr.GetResult();
-    auto resultType = result->GetType();
+    auto resultType = result->GetType()->GetDataType(builder);
     if (operandType != resultType) {
         TypeCheckError(expr, *result, operandType->ToString(), topLevelFunc);
     }
@@ -2851,8 +2854,8 @@ void CHIRChecker::CheckCalculExpression(const BinaryExpressionBase& expr, const 
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     auto result = expr.GetResult();
     // 1. check operand type
     if (expr.GetOpKind() == BinaryExprKind::MOD) {
@@ -2877,7 +2880,7 @@ void CHIRChecker::CheckCalculExpression(const BinaryExpressionBase& expr, const 
     if (leftOpType != rightOpType) {
         auto errMsg = "left operand and right operand don't have same type in " + result->ToString(0) + ".";
         ErrorInFunc(topLevelFunc, errMsg);
-    } else if (result->GetType() != leftOpType) {
+    } else if (result->GetType()->GetDataType(builder) != leftOpType) {
         auto errMsg = "the result value and operand don't have same type in " + result->ToString(0) + ".";
         ErrorInFunc(topLevelFunc, errMsg);
     }
@@ -2890,15 +2893,15 @@ void CHIRChecker::CheckExponentiationExpression(const BinaryExpressionBase& expr
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     // 1. left operand's type must be Int64 or Float64
     if (leftOpType->GetTypeKind() != Type::TypeKind::TYPE_INT64 &&
         leftOpType->GetTypeKind() != Type::TypeKind::TYPE_FLOAT64) {
         TypeCheckError(expr, *leftOperand, "Int64 or Float64", topLevelFunc);
     }
     auto result = expr.GetResult();
-    auto resultType = result->GetType();
+    auto resultType = result->GetType()->GetDataType(builder);
     if (leftOpType->GetTypeKind() == Type::TypeKind::TYPE_INT64) {
         // 2. if left operand's type is Int64, right operand's type must be UInt64, and result type must be Int64
         if (rightOpType->GetTypeKind() != Type::TypeKind::TYPE_UINT64) {
@@ -2927,8 +2930,8 @@ void CHIRChecker::CheckBitExpression(const BinaryExpressionBase& expr, const Fun
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     // 1. operands' type must be Int
     if (!leftOpType->IsInteger()) {
         TypeCheckError(expr, *leftOperand, "Int", topLevelFunc);
@@ -2947,8 +2950,8 @@ void CHIRChecker::CheckCompareExpression(const BinaryExpressionBase& expr, const
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     auto result = expr.GetResult();
     // 1. operands' type must be same
     if (leftOpType != rightOpType) {
@@ -2957,7 +2960,7 @@ void CHIRChecker::CheckCompareExpression(const BinaryExpressionBase& expr, const
     }
 
     // 2. result type must be Bool
-    if (!result->GetType()->IsBoolean()) {
+    if (!result->GetType()->GetDataType(builder)->IsBoolean()) {
         TypeCheckError(expr, *result, "Bool", topLevelFunc);
     }
 }
@@ -2966,8 +2969,8 @@ void CHIRChecker::CheckLogicExpression(const BinaryExpressionBase& expr, const F
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     // 1. operands' type must be Bool
     if (!leftOpType->IsBoolean()) {
         TypeCheckError(expr, *leftOperand, "Bool", topLevelFunc);
@@ -3277,6 +3280,20 @@ void CHIRChecker::CheckTryRawArrayAllocate(const TryRawArrayAllocate& expr, cons
     CheckRawArrayAllocateBase(expr, topLevelFunc);
 }
 
+void CHIRChecker::CheckExclave(const Exclave& expr, const Function& topLevelFunc)
+{
+    // 1. shouldn't have result
+    ShouldNotHaveResult(expr, topLevelFunc);
+
+    // 2. shouldn't have operands
+    if (!OperandNumIsEqual(0, expr, topLevelFunc)) {
+        return;
+    }
+
+    // 3. body must be valid
+    CheckBlockGroup(*expr.GetBody(), topLevelFunc);
+}
+
 void CHIRChecker::CheckRawArrayAllocateBase(const RawArrayAllocateBase& expr, const Function& topLevelFunc)
 {
     // 1. result type must be RawArray&
@@ -3428,6 +3445,10 @@ void CHIRChecker::CheckOtherExpression(const Expression& expr, const Function& t
             CheckGetRTTI(StaticCast<const GetRTTI&>(expr), topLevelFunc); }},
         {ExprKind::GET_RTTI_STATIC, [this, &expr, &topLevelFunc]() {
             CheckGetRTTIStatic(StaticCast<const GetRTTIStatic&>(expr), topLevelFunc); }},
+        {ExprKind::START_REGION, [this, &expr, &topLevelFunc]() {
+            CheckStartRegion(StaticCast<const StartRegion&>(expr), topLevelFunc); }},
+        {ExprKind::END_REGION, [this, &expr, &topLevelFunc]() {
+            CheckEndRegion(StaticCast<const EndRegion&>(expr), topLevelFunc); }},
     };
     if (auto it = actionMap.find(expr.GetExprKind()); it != actionMap.end()) {
         it->second();
@@ -3465,7 +3486,7 @@ void CHIRChecker::CheckConstant(const Constant& expr, const Function& topLevelFu
 
     // 4. result type must equal to operand type
     auto result = expr.GetResult();
-    if (result->GetType() != valueType) {
+    if (result->GetType() != valueType && result->GetType()->GetDataType(builder) != valueType) {
         TypeCheckError(expr, *result, valueType->ToString(), topLevelFunc);
     }
 }
@@ -3833,11 +3854,15 @@ void CHIRChecker::CheckRawArrayInitByValue(const RawArrayInitByValue& expr, cons
         TypeCheckError(expr, *size, "Int64", topLevelFunc);
     }
     auto rawArray = expr.GetRawArray();
-    if (!rawArray->GetType()->IsRef() || !rawArray->GetType()->StripAllRefs()->IsRawArray()) {
+    auto rawArrayTy = rawArray->GetType();
+    if (!rawArrayTy->IsRef() || !rawArrayTy->StripAllRefs()->IsRawArray()) {
         TypeCheckError(expr, *rawArray, "RawArray&", topLevelFunc);
     } else {
         auto rawArrayEleTy = StaticCast<RawArrayType*>(rawArray->GetType()->StripAllRefs())->GetElementType();
-        if (rawArrayEleTy != expr.GetInitValue()->GetType()) {
+        auto initValueTy = expr.GetInitValue()->GetType();
+        auto initValueModal = initValueTy->StripAllRefs()->GetModalInfo();
+        auto rawArrayModal = rawArrayTy->StripAllRefs()->GetModalInfo();
+        if (rawArrayEleTy != initValueTy->GetDataType(builder) || !initValueModal.IsEqualOrSubModal(rawArrayModal)) {
             TypeCheckError(expr, *expr.GetInitValue(), rawArrayEleTy->ToString(), topLevelFunc);
         }
     }
@@ -4122,6 +4147,16 @@ void CHIRChecker::CheckGetRTTIStatic(const GetRTTIStatic& expr, const Function& 
         ErrorInExpr(topLevelFunc, expr,
             "RTTI type should be `This` or Generic type, but now it's " + expr.GetRTTIType()->ToString() + ".");
     }
+}
+
+void CHIRChecker::CheckStartRegion([[maybe_unused]] const StartRegion& expr,
+    [[maybe_unused]] const Function& topLevelFunc)
+{
+}
+
+void CHIRChecker::CheckEndRegion([[maybe_unused]] const EndRegion& expr,
+    [[maybe_unused]] const Function& topLevelFunc)
+{
 }
 
 void CHIRChecker::CheckMemoryExpression(const Expression& expr, const Function& topLevelFunc)

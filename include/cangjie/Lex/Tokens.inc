@@ -176,6 +176,8 @@ EXPERIMENTAL_TOKEN(HANDLE, "handle", "handle", 0)
 TOKEN(ILLEGAL, "illegal", "", 0)
 TOKEN(DOUBLE_COLON, "double_colon", "::", 0)
 TOKEN(FEATURES, "features", "features", 0)
+TOKEN(EXCLAVE, "exclave", "exclave", 0)
+TOKEN(DEMODE, "demode", "demode", 0)
 #ifdef EXPERIMENTAL_TOKEN_DEFAULT
 #undef EXPERIMENTAL_TOKEN
 #undef EXPERIMENTAL_TOKEN_DEFAULT

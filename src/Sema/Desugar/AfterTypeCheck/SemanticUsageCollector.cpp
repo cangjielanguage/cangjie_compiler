@@ -95,15 +95,15 @@ private:
         return "";
     }
 
-    void CollectUseOfParentByTy(const Ty& ty, UseInfo& usage, NameUsage& nameUsage) const
+    void CollectUseOfParentByTy(ModalTy ty, UseInfo& usage, NameUsage& nameUsage) const
     {
         // When accessed field is member of a type, we need to collect the accessed type.
-        if (auto typeDecl = Ty::GetDeclPtrOfTy(&ty)) {
+        if (auto typeDecl = Ty::GetDeclPtrOfTy(ty)) {
             (void)nameUsage.parentDecls.emplace(typeDecl->rawMangleName);
             // Only need to collect type of node when it is a baseExpr of memberAccess.
             (void)usage.usedDecls.emplace(typeDecl->rawMangleName);
-        } else if (Ty::IsTyCorrect(&ty)) {
-            (void)nameUsage.parentDecls.emplace(ASTMangler::MangleBuiltinType(Ty::KindName(ty.kind)));
+        } else if (ty.IsCorrect()) {
+            (void)nameUsage.parentDecls.emplace(ASTMangler::MangleBuiltinType(Ty::KindName(ty.Kind())));
         }
     }
 
@@ -116,10 +116,10 @@ private:
         // Collect real parent of accessd parent.
         CJC_NULLPTR_CHECK(decl.outerDecl->GetTy());
         auto& nameUsage = usage.usedNames[decl.identifier];
-        CollectUseOfParentByTy(*decl.outerDecl->GetTy(), usage, nameUsage);
-        if (currentTypeDecl && Ty::IsTyCorrect(currentTypeDecl->GetTy())) {
+        CollectUseOfParentByTy(decl.outerDecl->GetTy(), usage, nameUsage);
+        if (currentTypeDecl && currentTypeDecl->GetTy().IsCorrect()) {
             // Collect current 'this' parent decl.
-            CollectUseOfParentByTy(*currentTypeDecl->GetTy(), usage, nameUsage);
+            CollectUseOfParentByTy(currentTypeDecl->GetTy(), usage, nameUsage);
         }
     }
 
@@ -127,20 +127,18 @@ private:
         const MemberAccess& ma, const Decl& target, UseInfo& usage, NameUsage& nameUsage) const
     {
         CJC_NULLPTR_CHECK(target.outerDecl);
-        auto accessedTy = ma.isExposedAccess ? target.outerDecl->GetTy() : ma.baseExpr->GetTy();
+        auto accessedTy = ma.isExposedAccess ? target.outerDecl->DataTy() : ma.baseExpr->DataTy();
         if (Ty::IsTyCorrect(accessedTy)) {
-            CollectUseOfParentByTy(*accessedTy, usage, nameUsage);
+            CollectUseOfParentByTy({accessedTy}, usage, nameUsage);
         }
     }
 
     void CollectForEnumAndStructTypeUse(const Node& node, UseInfo& usage) const
     {
-        if (!Ty::IsTyCorrect(node.GetTy()) || (!node.GetTy()->IsEnum() && !node.GetTy()->IsStruct())) {
+        if (!node.GetTy().IsCorrect() || (!node.GetTy()->IsEnum() && !node.GetTy()->IsStruct())) {
             return;
         }
-        auto ed = Ty::GetDeclPtrOfTy(node.GetTy());
-        CJC_NULLPTR_CHECK(ed);
-        usage.usedDecls.emplace(ed->rawMangleName);
+        usage.usedDecls.emplace(Sema::GetTypeRawMangleName(node.GetTy()));
     }
 
     VisitAction CollectUseInfo(const Node& node, UseInfo& usage) const
@@ -276,10 +274,10 @@ private:
         }
         CJC_ASSERT(!id.rawMangleName.empty());
         CJC_NULLPTR_CHECK(id.GetTy());
+        auto typeKey = Sema::GetTypeRawMangleName(id.GetTy());
         auto decl = Ty::GetDeclPtrOfTy(id.GetTy());
         CJC_ASSERT(!decl || !decl->rawMangleName.empty());
-        auto& relation = decl ? info.relations[decl->rawMangleName]
-                              : info.builtInTypeRelations[ASTMangler::MangleBuiltinType(Ty::KindName(id.TyKind()))];
+        auto& relation = decl ? info.relations[typeKey] : info.builtInTypeRelations[typeKey];
         bool isExtend = false;
         if (Is<const ExtendDecl*>(&id)) {
             relation.extends.emplace(id.rawMangleName);
@@ -287,9 +285,8 @@ private:
         }
         auto& inherited = isExtend ? relation.extendedInterfaces : relation.inherits;
         for (auto& type : id.inheritedTypes) {
-            auto target = Ty::GetDeclPtrOfTy(type->GetTy()); // Type without target will never be valid inherited type.
-            CJC_ASSERT(target && !target->rawMangleName.empty());
-            inherited.emplace(target->rawMangleName);
+            CJC_ASSERT(Ty::IsTyCorrect(type->GetTy()));
+            inherited.emplace(Sema::GetTypeRawMangleName(type->GetTy()));
         }
     }
 
@@ -343,7 +340,7 @@ private:
         auto boxedTys = tyMgr.GetAllBoxedTys();
         tyMgr.ClearRecordUsedExtends(); // Unset collection status.
         for (auto ty : boxedTys) {
-            usage.boxedTypes.emplace(Sema::GetTypeRawMangleName(*ty));
+            usage.boxedTypes.emplace(Sema::GetTypeRawMangleName({ty}));
         }
         auto nodePtr = &node;
         if (node.astKind == ASTKind::VAR_DECL) {

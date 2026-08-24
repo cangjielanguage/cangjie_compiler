@@ -346,22 +346,30 @@ OwnedPtr<FuncDecl> TypeCheckUtil::CreateDefaultCtor(InheritableDecl& decl, bool 
     return initFunc;
 }
 
+Ptr<FuncBody> TypeCheckUtil::GetFuncBody(AST::Node& funcLike)
+{
+    if (auto fd = AST::As<ASTKind::FUNC_DECL>(&funcLike); fd) {
+        return fd->funcBody.get();
+    }
+    if (auto le = AST::As<ASTKind::LAMBDA_EXPR>(&funcLike); le) {
+        return le->funcBody.get();
+    }
+    if (auto md = AST::As<ASTKind::MACRO_DECL>(&funcLike); md) {
+        return md->desugarDecl->funcBody.get();
+    }
+    if (auto pcd = AST::As<ASTKind::PRIMARY_CTOR_DECL>(&funcLike); pcd) {
+        return pcd->funcBody.get();
+    }
+    return nullptr;
+}
+
 Ptr<FuncBody> TypeCheckUtil::GetCurFuncBody(const ASTContext& ctx, const std::string& scopeName)
 {
     auto sym = ScopeManager::GetCurSymbolByKind(SymbolKind::FUNC_LIKE, ctx, scopeName);
-    Ptr<FuncBody> ret{nullptr};
-    if (sym) {
-        if (auto fd = AST::As<ASTKind::FUNC_DECL>(sym->node); fd) {
-            ret = fd->funcBody.get();
-        } else if (auto le = AST::As<ASTKind::LAMBDA_EXPR>(sym->node); le) {
-            ret = le->funcBody.get();
-        } else if (auto md = AST::As<ASTKind::MACRO_DECL>(sym->node); md) {
-            ret = md->desugarDecl->funcBody.get();
-        } else if (auto pcd = AST::As<ASTKind::PRIMARY_CTOR_DECL>(sym->node); pcd) {
-            ret = pcd->funcBody.get();
-        }
+    if (sym && sym->node) {
+        return GetFuncBody(*sym->node);
     }
-    return ret;
+    return nullptr;
 }
 
 // if there is no default constructor, insert one.
@@ -428,10 +436,35 @@ void TypeChecker::TypeCheckerImpl::AddDefaultSuperCall(const FuncBody& funcBody)
     CopyBasicInfo(&funcBody, superCall->baseFunc.get());
     superCall->EnableAttr(Attribute::COMPILER_ADD);
     if (funcBody.body) {
-        if (funcBody.body->body.empty()) {
-            superCall->begin = funcBody.begin;
+        // Check if init has this @local! or this @local? and whole body is exclave
+        bool shouldInsertIntoExclave = false;
+        if (!funcBody.body->body.empty() && funcBody.body->body[0]->astKind == ASTKind::EXCLAVE_EXPR) {
+            // cannot use thisParam ty, Ty has not been deduced yet
+            auto& thisParam = funcBody.paramLists[0]->thisParam;
+            if (thisParam && thisParam->modal.ToModalInfo() != Mode::NOT) {
+                shouldInsertIntoExclave = true;
+            }
         }
-        funcBody.body->body.insert(funcBody.body->body.begin(), std::move(superCall));
+
+        if (shouldInsertIntoExclave) {
+            // skip invalid init body
+            if (!Is<ExclaveExpr>(funcBody.body->body[0])) {
+                return;
+            }
+            // Insert into the first line of the exclave body
+            auto exclave = StaticCast<ExclaveExpr*>(funcBody.body->body[0].get());
+            if (exclave->body) {
+                superCall->begin = exclave->body->leftCurlPos;
+                superCall->end = exclave->body->rightCurlPos;
+            }
+            exclave->body->body.insert(exclave->body->body.begin(), std::move(superCall));
+        } else {
+            // Original behavior: insert at beginning of function body
+            if (funcBody.body->body.empty()) {
+                superCall->begin = funcBody.begin;
+            }
+            funcBody.body->body.insert(funcBody.body->body.begin(), std::move(superCall));
+        }
     }
 }
 
@@ -514,14 +547,14 @@ void TypeChecker::TypeCheckerImpl::CheckValueTypeRecursiveDFSSwitch(Ptr<Decl> ro
     if (root->astKind != ASTKind::STRUCT_DECL && root->astKind != ASTKind::ENUM_DECL) {
         return;
     }
-    if (root->GetTy() != nullptr && root->GetTy()->IsEnum() && DynamicCast<RefEnumTy*>(root->GetTy())) {
+    if (root->GetTy() != nullptr && root->GetTy()->IsEnum() && DynamicCast<RefEnumTy>(root->DataTy())) {
         return;
     }
     auto checkField = [this, &path](const Decl& decl) {
-        if (decl.GetTy()->IsEnum() && DynamicCast<RefEnumTy*>(decl.GetTy())) {
+        if (decl.GetTy()->IsEnum() && DynamicCast<RefEnumTy*>(decl.DataTy())) {
             return;
         }
-        auto needCheckElemTy = Is<TupleTy*>(decl.GetTy()) || Is<VArrayTy*>(decl.GetTy());
+        auto needCheckElemTy = Is<TupleTy*>(decl.DataTy()) || Is<VArrayTy*>(decl.DataTy());
         if (!needCheckElemTy) {
             return CheckValueTypeRecursiveDFS(Ty::GetDeclOfTy(decl.GetTy()), path);
         }
@@ -574,14 +607,7 @@ void TypeChecker::TypeCheckerImpl::CheckRecursiveConstructorCall(const std::vect
     }
 }
 
-bool TypeChecker::TypeCheckerImpl::HasModifier(const std::set<Modifier>& modifiers, TokenKind kind) const
-{
-    return std::any_of(modifiers.begin(), modifiers.end(), [kind](const auto& it) { return it.modifier == kind; });
-}
-
-bool TypeChecker::TypeCheckerImpl::IsDeprecatedStrict(
-    const Ptr<Decl> decl
-) const
+bool TypeChecker::TypeCheckerImpl::IsDeprecatedStrict(const Ptr<Decl> decl) const
 {
     for (auto& anno: decl->annotations) {
         if (anno->kind == AnnotationKind::DEPRECATED) {
@@ -659,25 +685,25 @@ std::string TyVarBounds::ToString() const
     std::string s = "Lower bounds: ";
     s += "{";
     for (auto& ty : std::as_const(lbs)) {
-        s += Ty::ToString(ty) + ", ";
+        s += ty.String() + ", ";
     }
     s += "}\n";
     s += "Upper bounds: ";
     s += "{";
     for (auto& ty : std::as_const(ubs)) {
-        s += Ty::ToString(ty) + ", ";
+        s += ty.String() + ", ";
     }
     s += "}\n";
     s += "Sum: ";
     s += "{";
     for (auto& ty : std::as_const(sum)) {
-        s += Ty::ToString(ty) + ", ";
+        s += ty.String() + ", ";
     }
     s += "}\n";
     s += "Equals: ";
     s += "{";
     for (auto& ty : std::as_const(eq)) {
-        s += Ty::ToString(ty) + ", ";
+        s += ty.String() + ", ";
     }
     s += "}\n";
     return s;

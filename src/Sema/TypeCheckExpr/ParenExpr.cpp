@@ -9,15 +9,18 @@
 using namespace Cangjie;
 using namespace AST;
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynParenExpr(const CheckerContext& ctx, ParenExpr& pe)
+ModalTy TypeChecker::TypeCheckerImpl::SynParenExpr(const CheckerContext& ctx, ParenExpr& pe)
 {
     Synthesize(ctx, pe.expr.get());
-    if (!pe.expr || !Ty::IsTyCorrect(pe.expr->GetTy())) {
-        pe.SetTy(TypeManager::GetInvalidTy());
-        return TypeManager::GetInvalidTy();
+    if (!pe.expr || !pe.expr->GetTy().IsCorrect()) {
+        pe.SetTy({TypeManager::GetInvalidTy()});
+        return {TypeManager::GetInvalidTy()};
     }
 
-    if (pe.expr->GetTy()->IsIdeal()) {
+    // Keep ideal literal types pending for a parenthesized literal in the body of a generic-call
+    // lambda argument; parentheses must not break contextual type propagation (e.g. `TypeTest({=> (0)})`
+    // expecting `() -> Int32`).
+    if (pe.expr->GetTy()->IsIdeal() && ctx.Ctx().inFuncArgLambdaBody == 0) {
         ReplaceIdealTy(*pe.expr);
     }
     pe.SetTy(pe.expr->GetTy());
@@ -28,9 +31,9 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynParenExpr(const CheckerContext& ctx, Pa
     return pe.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkParenExpr(ASTContext& ctx, Ty& target, ParenExpr& pe)
+bool TypeChecker::TypeCheckerImpl::ChkParenExpr(ASTContext& ctx, ModalTy target, ParenExpr& pe)
 {
-    if (Check(ctx, &target, pe.expr.get())) {
+    if (Check(ctx, target, pe.expr.get())) {
         CJC_NULLPTR_CHECK(pe.expr); // When the Check's result is true, pe.expr must not be nullptr.
         pe.SetTy(pe.expr->GetTy());
         if (pe.expr->isConst) {
@@ -39,7 +42,7 @@ bool TypeChecker::TypeCheckerImpl::ChkParenExpr(ASTContext& ctx, Ty& target, Par
         }
         return true;
     } else {
-        pe.SetTy(TypeManager::GetInvalidTy());
+        pe.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
 }

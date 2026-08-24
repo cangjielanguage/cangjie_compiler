@@ -24,7 +24,7 @@ std::unordered_set<Ptr<const AST::StructTy>> CollectChangedStructTypes(
     const AST::Package& pkg, const std::unordered_set<Ptr<AST::Decl>>& declsToBeReCompiled);
 void HandleCtorForIncr(const AST::Package& pkg, std::map<std::string, Ptr<AST::Decl>>& mangledName2DeclMap,
     SemanticInfo& usageCache);
-std::string GetTypeRawMangleName(const AST::Ty& ty);
+std::string GetTypeRawMangleName(AST::ModalTy ty);
 void CollectCompilerAddedDeclUsage(const AST::Package& pkg, SemanticInfo& usageCache);
 void CollectRemovedMangles(const std::string& removed, SemanticInfo& semaInfo,
     std::unordered_set<std::string>& removedMangles);

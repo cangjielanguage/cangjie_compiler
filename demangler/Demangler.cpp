@@ -213,6 +213,11 @@ inline bool IsFunction(char ch)
     return ch == MANGLE_FUNCTION_PREFIX;
 }
 
+inline bool IsLocalModifierChar(char ch)
+{
+    return ch == '?' || ch == '!';
+}
+
 template<typename T>
 bool Demangler<T>::IsProp() const
 {
@@ -277,17 +282,21 @@ uint32_t Demangler<T>::DemangleLength()
         ++currentIndex;
         isValid = true;
     }
+#ifndef CANGJIE_ENABLE_GCOV
     try {
+#endif
         std::string numString = numStr.Str();
         long long num = std::stoll(numString);
         if (num > std::numeric_limits<uint32_t>::max() || num < 0) {
             return 0;
         }
         return static_cast<uint32_t>(num);
+#ifndef CANGJIE_ENABLE_GCOV
     } catch (const std::exception& ex) {
         // Failed to convert to int
         return 0;
     }
+#endif
 }
 
 template<typename T>
@@ -329,7 +338,7 @@ bool Demangler<T>::IsCFunctionWrapper() const
 }
 
 template<typename T>
-bool Demangler<T>::IsWrappedFunction() const 
+bool Demangler<T>::IsWrappedFunction() const
 {
     return mangledName.Find(MANGLE_WRAPPED_FUNCTION_PREFIX, 0) == 0;
 }
@@ -436,6 +445,37 @@ void Demangler<T>::SkipOptionalChar(char ch)
     return;
 }
 
+template <typename T> bool Demangler<T>::IsLocalModifier() const
+{
+    if (currentIndex >= mangledName.Length()) {
+        return false;
+    }
+    return IsLocalModifierChar(mangledName[currentIndex]);
+}
+
+template <typename T> T Demangler<T>::DemangleLocalModifier()
+{
+    if (!IsLocalModifier()) {
+        return T{};
+    }
+    char ch = mangledName[currentIndex];
+    ++currentIndex;
+    if (ch == '!') {
+        return T{" @local!"};
+    }
+    if (ch == '?') {
+        return T{" @local?"};
+    }
+    return T{ch};
+}
+
+template <typename T> void Demangler<T>::AppendLocalModifierIfExists(DemangleInfo<T>& di)
+{
+    if (IsLocalModifier()) {
+        di.genericConstraints += DemangleLocalModifier();
+    }
+}
+
 template<typename T>
 void Demangler<T>::SkipString(const char pattern[])
 {
@@ -485,6 +525,9 @@ T DemangleInfo<T>::GetFullName(const T& scopeRes, const uint32_t argsNum) const
                 }
             } else {
                 fullDemangledName += identifier;
+            }
+            if (IsFunctionLike() && type == TypeKind::FUNCTION_DECL && demangled.Find('(') != -1) {
+                return fullDemangledName;
             }
             fullDemangledName += GetGenericTypes();
             fullDemangledName += GetArgTypesName(argsNum);
@@ -544,6 +587,9 @@ template<typename T>
 T DemangleInfo<T>::GetArgTypesName(const uint32_t argsNum) const
 {
     if (args.IsEmpty()) {
+        if (type == TypeKind::FUNCTION_DECL && IsFunctionLike() && !functionParameterTypes.IsEmpty()) {
+            return T{"("} + functionParameterTypes + ")";
+        }
         return IsFunctionLike() ? "()" : T{};
     }
     if (IsFunctionLike()) {
@@ -955,6 +1001,7 @@ T Demangler<T>::DemangleArgTypes(const T& delimiter, uint32_t size)
         if (!isValid) {
             return T{};
         }
+        AppendLocalModifierIfExists(curDi);
         auto j = i % MAX_ARGS_SIZE;
         if (j == 0 && i != 0) {
             for (auto& arg : argsArr) {
@@ -1050,9 +1097,29 @@ DemangleInfo<T> Demangler<T>::DemangleNestedDecls(bool isClass, bool isParamInit
         if (PeekChar(ch) && IsFunction(ch)) {
             SkipChar(MANGLE_FUNCTION_PREFIX);
             typeKind = TypeKind::FUNCTION_DECL;
+            curDi.type = TypeKind::FUNCTION_DECL;
             auto funcTys = DemangleFunctionParameterTypes().args;
             curDi.functionParameterTypes = funcTys;
             SkipOptionalChar(END);
+            AppendLocalModifierIfExists(curDi);
+        } else if (IsLocalModifier()) {
+            if (currentIndex + MANGLE_CHAR_LEN < mangledName.Length() &&
+                IsFunction(mangledName[currentIndex + MANGLE_CHAR_LEN])) {
+                T thisPrefix = T{"this"} + DemangleLocalModifier();
+                SkipChar(MANGLE_FUNCTION_PREFIX);
+                typeKind = TypeKind::FUNCTION_DECL;
+                curDi.type = TypeKind::FUNCTION_DECL;
+                auto funcTys = DemangleFunctionParameterTypes().args;
+                if (funcTys.IsEmpty()) {
+                    curDi.functionParameterTypes = thisPrefix;
+                } else {
+                    curDi.functionParameterTypes = thisPrefix + T{ARGS_DELIMITER} + funcTys;
+                }
+                SkipOptionalChar(END);
+                AppendLocalModifierIfExists(curDi);
+            } else {
+                return Reject("mangle name is invalid");
+            }
         }
         auto j = i % MAX_ARGS_SIZE;
         if (j == 0 && i != 0) {
@@ -1084,6 +1151,7 @@ DemangleInfo<T> Demangler<T>::DemangleClass(TypeKind typeKind)
     ++currentIndex;         // Skip one character representing the typeKind
     auto di = DemangleCommonDecl(true);
     di.type = typeKind;
+    AppendLocalModifierIfExists(di);
     char ch;
     if (PeekChar(ch) && ch == END) {
         SkipChar(END);
@@ -1095,9 +1163,12 @@ template<typename T>
 DemangleInfo<T> Demangler<T>::DemangleCFuncType()
 {
     SkipString(MANGLE_C_FUNCTY_PREFIX);
-    DemangleInfo<T> di{ DemangleNextUnit().GetFullName(scopeResolution), TypeKind::FUNCTION };
+    auto returnDi = DemangleNextUnit();
+    AppendLocalModifierIfExists(returnDi);
+    DemangleInfo<T> di{ returnDi.GetFullName(scopeResolution), TypeKind::FUNCTION };
     di.args = DemangleArgTypes(ARGS_DELIMITER);
     SkipChar(END);
+    AppendLocalModifierIfExists(di);
     return di;
 }
 
@@ -1105,9 +1176,12 @@ template<typename T>
 DemangleInfo<T> Demangler<T>::DemangleFunction()
 {
     SkipString(MANGLE_FUNCTY_PREFIX);
-    DemangleInfo<T> di{ DemangleNextUnit().GetFullName(scopeResolution), TypeKind::FUNCTION };
+    auto returnDi = DemangleNextUnit();
+    AppendLocalModifierIfExists(returnDi);
+    DemangleInfo<T> di{ returnDi.GetFullName(scopeResolution), TypeKind::FUNCTION };
     di.args = DemangleArgTypes(ARGS_DELIMITER);
     SkipChar(END);
+    AppendLocalModifierIfExists(di);
     return di;
 }
 
@@ -1122,6 +1196,7 @@ DemangleInfo<T> Demangler<T>::DemangleTuple()
     auto generic = DemangleGenericTypes().GetFullName(scopeResolution);
     di.genericTypes = genericTypefilter(generic);
     SkipChar(END);
+    AppendLocalModifierIfExists(di);
     return di;
 }
 
@@ -1135,6 +1210,7 @@ DemangleInfo<T> Demangler<T>::DemangleRawArray()
         di.genericConstraints += "[]";
     }
     di.args = DemangleNextUnit().GetFullName(scopeResolution);
+    AppendLocalModifierIfExists(di);
     return di;
 }
 
@@ -1145,6 +1221,7 @@ DemangleInfo<T> Demangler<T>::DemangleVArray()
     SkipChar(MANGLE_VARRAY_PREFIX);
     uint32_t num = static_cast<uint32_t>(DemangleManglingNumber());
     di.genericTypes = DemangleGenericTypes().GetFullName(scopeResolution, num);
+    AppendLocalModifierIfExists(di);
     return di;
 }
 
@@ -1155,6 +1232,7 @@ DemangleInfo<T> Demangler<T>::DemangleCPointer()
     SkipChar(MANGLE_PTR_PREFIX);
     auto generic = DemangleType().GetFullName(scopeResolution);
     di.genericTypes = genericTypefilter(generic);
+    AppendLocalModifierIfExists(di);
     return di;
 }
 
@@ -1175,7 +1253,7 @@ DemangleInfo<T> Demangler<T>::DemangleCommonDecl(bool isClass)
     auto pkgDi = DemanglePackageName();
     di.pkgName = pkgDi.pkgName;
     di.isPrivateDeclaration = pkgDi.isPrivateDeclaration;
-    
+
     // Take the part before E as identifier and concatenate with scope resolution.
     DemangleInfo<T> nestedDi = DemangleNestedDecls(isClass);
     di.demangled = nestedDi.demangled;
@@ -1245,6 +1323,7 @@ DemangleInfo<T> Demangler<T>::DemanglePrimitive()
         SkipChar(ch);
     }
     DemangleInfo<T> di{ GetPrimitiveDemangleMap<T>(ch), TypeKind::PRIMITIVE };
+    AppendLocalModifierIfExists(di);
     return di;
 }
 
@@ -1252,7 +1331,9 @@ template<typename T>
 DemangleInfo<T> Demangler<T>::DemangleCStringType()
 {
     SkipChar(MANGLE_CSTRING_PREFIX);
-    return DemangleInfo<T>{ MANGLE_CSTRING_STR, TypeKind::CSTRING, isValid };
+    auto di = DemangleInfo<T>{ MANGLE_CSTRING_STR, TypeKind::CSTRING, isValid };
+    AppendLocalModifierIfExists(di);
+    return di;
 }
 
 template<typename T>
@@ -1274,7 +1355,9 @@ DemangleInfo<T> Demangler<T>::DemangleGenericType()
 #else
     name = T{ MANGLE_TUPLE_PREFIX } + UIntToString(gNumber);
 #endif
-    return DemangleInfo<T>{ name, TypeKind::GENERIC_TYPES, isValid };
+    auto di = DemangleInfo<T>{ name, TypeKind::GENERIC_TYPES, isValid };
+    AppendLocalModifierIfExists(di);
+    return di;
 }
 
 template<typename T>
@@ -1284,6 +1367,7 @@ DemangleInfo<T> Demangler<T>::DemangleType()
     if (IsQualifiedType()) {
         auto curDi = DemangleNextUnit();
         if (isValid) {
+            AppendLocalModifierIfExists(curDi);
             di.args = curDi.GetFullName(scopeResolution);
             return di;
         }
@@ -1305,6 +1389,7 @@ DemangleInfo<T> Demangler<T>::DemangleGenericTypes()
         if (!isValid) {
             break;
         }
+        AppendLocalModifierIfExists(curDi);
         if (!firstIteration) {
             argTypesFullName += T{ ARGS_DELIMITER_TYPE };
         }
@@ -1325,11 +1410,13 @@ DemangleInfo<T> Demangler<T>::DemangleFunctionParameterTypes()
         currentIndex += MANGLE_CHAR_LEN;
     } else {
         // Generic type may be next to a string, like "6<init>"
-        while (IsNotEndOfMangledName() && !IsCurrentCharDigit(mangledName[currentIndex])) {
+        // Stop before local modifier (!/?) after H<types> — it belongs to the function decl, not another param.
+        while (IsNotEndOfMangledName() && !IsCurrentCharDigit(mangledName[currentIndex]) && !IsLocalModifier()) {
             auto curDi = DemangleNextUnit();
             if (!isValid) {
                 break;
             }
+            AppendLocalModifierIfExists(curDi);
             if (!firstIteration) {
                 argTypesFullName += T{ ARGS_DELIMITER };
             }
@@ -1385,14 +1472,14 @@ DemangleInfo<T> Demangler<T>::DemangleInnerFunction()
 }
 
 template<typename T>
-DemangleInfo<T> Demangler<T>::DemangleWrappedFunction() 
+DemangleInfo<T> Demangler<T>::DemangleWrappedFunction()
 {
     auto endIndex = mangledName.Find(MANGLE_END, currentIndex);
     auto prefixIndex = currentIndex + strlen(MANGLE_WRAPPED_FUNCTION_PREFIX);
     mangledName = T(MANGLE_CANGJIE_PREFIX) + mangledName.SubStr(prefixIndex, endIndex - prefixIndex);
     auto di = DemangleDecl();
     di.demangled += WRAPPED_FUNCTION_SUFFIX_INFO;
-    di.type = TypeKind::WRAPPED_FUNCTION;    
+    di.type = TypeKind::WRAPPED_FUNCTION;
     return di;
 }
 

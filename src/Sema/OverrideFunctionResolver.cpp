@@ -21,19 +21,19 @@ using namespace Cangjie;
 using namespace AST;
 
 // Initialize static cache
-std::unordered_map<std::pair<Ptr<AST::Ty>, std::string>, MemberFuncsWithInstTys, HashPair>
+std::unordered_map<std::pair<DataTy, std::string>, MemberFuncsWithInstTys, HashPair>
     OverrideFunctionResolver::instTy2MembersCache;
 
 MemberFuncsWithInstTys OverrideFunctionResolver::GetInstMemberFuncWithInstTy(
-    AST::Ty& instBaseTy, const std::string& identifier)
+    DataTy instBaseTy, const std::string& identifier)
 {
     CJC_NULLPTR_CHECK(typeManager);
-    auto key = std::make_pair(&instBaseTy, identifier);
+    auto key = std::make_pair(instBaseTy, identifier);
     if (auto found = instTy2MembersCache.find(key); found != instTy2MembersCache.end()) {
         return found->second;
     }
     MemberFuncsWithInstTys funcs;
-    auto baseDecl = AST::Ty::GetDeclPtrOfTy<AST::InheritableDecl>(&instBaseTy);
+    auto baseDecl = Ty::GetDeclPtrOfTy<InheritableDecl>(instBaseTy);
     std::set<Ptr<AST::ExtendDecl>> extendDecls;
     if (baseDecl) {
         MemberFuncsWithInstTys superInterfaceFuncs;
@@ -43,7 +43,7 @@ MemberFuncsWithInstTys OverrideFunctionResolver::GetInstMemberFuncWithInstTy(
         CollectDeclMemberFunc(*baseDecl, instBaseTy, funcs, identifier);
         extendDecls = typeManager->GetDeclExtends(*baseDecl);
     } else {
-        extendDecls = typeManager->GetAllExtendsByTy(instBaseTy);
+        extendDecls = typeManager->GetAllExtendsByTy(*instBaseTy);
     }
 
     MemberFuncsWithInstTys allExtendFuncs;
@@ -64,10 +64,10 @@ MemberFuncsWithInstTys OverrideFunctionResolver::GetInstMemberFuncWithInstTy(
 }
 
 void OverrideFunctionResolver::CollectDeclMemberFunc(
-    AST::Decl& decl, AST::Ty& instBaseTy, MemberFuncsWithInstTys& funcs, const std::string& identifier)
+    AST::Decl& decl, AST::DataTy instBaseTy, MemberFuncsWithInstTys& funcs, const std::string& identifier)
 {
     CJC_NULLPTR_CHECK(typeManager);
-    auto mapping = TypeCheckUtil::GenerateTypeMappingByTy(decl.GetTy(), &instBaseTy);
+    auto mapping = TypeCheckUtil::GenerateTypeMappingByTy(decl.DataTy(), instBaseTy);
     for (auto& member : decl.GetMemberDecls()) {
         TypeCheckUtil::WorkForMembers(*member, [this, &funcs, &mapping, &identifier](auto& m) {
             if (m.identifier != identifier || m.astKind != AST::ASTKind::FUNC_DECL ||
@@ -75,7 +75,7 @@ void OverrideFunctionResolver::CollectDeclMemberFunc(
                 return;
             }
             auto memberFunc = StaticCast<AST::FuncDecl>(&m);
-            auto instMemberTy = typeManager->GetInstantiatedTy(memberFunc->GetTy(), mapping);
+            auto instMemberTy = typeManager->GetInstantiatedTy(memberFunc->DataTy(), mapping);
             // The instantiation type of a member function must be a FuncTy.
             CJC_ASSERT(instMemberTy && instMemberTy->IsFunc());
             auto instMemberFuncTy = StaticCast<AST::FuncTy>(instMemberTy);
@@ -86,7 +86,7 @@ void OverrideFunctionResolver::CollectDeclMemberFunc(
     }
 }
 
-void OverrideFunctionResolver::GetInstMemberFromSuper(AST::Ty& instBaseTy, Ptr<AST::InheritableDecl> baseDecl,
+void OverrideFunctionResolver::GetInstMemberFromSuper(AST::DataTy instBaseTy, Ptr<AST::InheritableDecl> baseDecl,
     MemberFuncsWithInstTys& funcs, const std::string& identifier, bool isCheckingInterface)
 {
     CJC_NULLPTR_CHECK(typeManager);
@@ -95,10 +95,10 @@ void OverrideFunctionResolver::GetInstMemberFromSuper(AST::Ty& instBaseTy, Ptr<A
         if (!notSkipSuper) {
             continue;
         }
-        auto superFuncs = GetInstMemberFuncWithInstTy(*type->GetTy(), identifier);
+        auto superFuncs = GetInstMemberFuncWithInstTy(type->DataTy(), identifier);
         MergeIntoFuncs(funcs, superFuncs);
     }
-    auto mappingBasePtrDecl2InstTy = TypeCheckUtil::GenerateTypeMappingByTy(baseDecl->GetTy(), &instBaseTy);
+    auto mappingBasePtrDecl2InstTy = TypeCheckUtil::GenerateTypeMappingByTy(baseDecl->DataTy(), instBaseTy);
     for (auto& superFunc : funcs) {
         std::unordered_set<Ptr<AST::FuncTy>> newTySet;
         for (auto& superFuncInstTy : superFunc.second) {
@@ -112,11 +112,11 @@ void OverrideFunctionResolver::GetInstMemberFromSuper(AST::Ty& instBaseTy, Ptr<A
 }
 
 void OverrideFunctionResolver::MergeExtendSuperMember(
-    AST::Ty& instBaseTy, MemberFuncsWithInstTys& funcs, MemberFuncsWithInstTys& newFuncs)
+    AST::DataTy instBaseTy, MemberFuncsWithInstTys& funcs, MemberFuncsWithInstTys& newFuncs)
 {
     CJC_NULLPTR_CHECK(typeManager);
     for (auto& newFunc : newFuncs) {
-        auto newFuncOuterInstTys = Promotion(*typeManager).Promote(instBaseTy, *newFunc.first->outerDecl->GetTy());
+        auto newFuncOuterInstTys = Promotion(*typeManager).Promote(instBaseTy, newFunc.first->outerDecl->DataTy());
         for (auto newFuncInstTy : newFunc.second) {
             if (IsImplementedInSameDirection(instBaseTy, *newFunc.first, newFuncInstTy, newFuncOuterInstTys, funcs)) {
                 continue;
@@ -166,8 +166,8 @@ bool OverrideFunctionResolver::IsImplementedByAny(
     return false;
 }
 
-bool OverrideFunctionResolver::IsImplementedInSameDirection(AST::Ty& instBaseTy, const AST::FuncDecl& newFunc,
-    const Ptr<AST::FuncTy> newFuncInstTy, const std::set<Ptr<AST::Ty>>& newFuncOuterDeclInstTys,
+bool OverrideFunctionResolver::IsImplementedInSameDirection(DataTy instBaseTy, const AST::FuncDecl& newFunc,
+    const Ptr<AST::FuncTy> newFuncInstTy, const std::set<DataTy>& newFuncOuterDeclInstTys,
     const MemberFuncsWithInstTys& funcs)
 {
     for (auto& func : funcs) {
@@ -182,7 +182,7 @@ bool OverrideFunctionResolver::IsImplementedInSameDirection(AST::Ty& instBaseTy,
             continue;
         }
         // Confirm subclass direction: any leaf type of the existing func must be a subtype of any root type.
-        auto funcOuterDeclInstTys = Promotion(*typeManager).Promote(instBaseTy, *func.first->outerDecl->GetTy());
+        auto funcOuterDeclInstTys = Promotion(*typeManager).Promote(instBaseTy, func.first->outerDecl->DataTy());
         for (auto root : newFuncOuterDeclInstTys) {
             if (std::any_of(funcOuterDeclInstTys.begin(), funcOuterDeclInstTys.end(),
                 [this, &root](auto leaf) { return typeManager->IsSubtype(leaf, root); })) {
@@ -235,7 +235,7 @@ void OverrideFunctionResolver::ClearCache()
 }
 
 Ptr<Ty> OverrideFunctionResolver::GetMatchedFuncInstTyByGivenTarget(
-    MemberFuncWithInstTys& candidates, const AST::FuncDecl& target, const Ptr<AST::Ty>& targetBaseTy)
+    MemberFuncWithInstTys& candidates, const FuncDecl& target, DataTy targetBaseTy)
 {
     CJC_NULLPTR_CHECK(typeManager);
     auto implFunc = candidates.first;
@@ -245,8 +245,8 @@ Ptr<Ty> OverrideFunctionResolver::GetMatchedFuncInstTyByGivenTarget(
     // Handle code: class B<T> { func a(a: T): Unit {} }; class A <: B<B1> {}, given 'targetBaseTy' is 'Class-A',
     // we need get mapping if [T |-> B1], and substitute function type '(T)->Unit' to '(B1)->T'.
     MultiTypeSubst typeMappings =
-        Promotion(*typeManager).GetPromoteTypeMapping(*targetBaseTy, *target.outerDecl->GetTy());
-    auto instFuncTys = typeManager->GetInstantiatedTys(target.GetTy(), typeMappings);
+        Promotion(*typeManager).GetPromoteTypeMapping(targetBaseTy, target.outerDecl->DataTy());
+    auto instFuncTys = typeManager->GetInstantiatedTys(target.DataTy(), typeMappings);
     Ptr<Ty> matchedTy = typeManager->GetInvalidTy();
     for (auto instTy : candidates.second) {
         Ptr<Ty> substImplFuncTy = instTy;

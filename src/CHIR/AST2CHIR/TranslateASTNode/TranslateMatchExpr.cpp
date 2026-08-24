@@ -26,7 +26,7 @@ bool Translator::CanOptimizeMatchToSwitch(const AST::MatchExpr& matchExpr)
         matchExpr.matchCases[0]->patterns[0]->astKind == AST::ASTKind::WILDCARD_PATTERN) {
         return false;
     }
-    const auto& type = matchExpr.selector->GetTy();
+    const auto& type = matchExpr.selector->DataTy();
     bool validSelectorTy = IsOptimizableTy(type) || (type->IsEnum() && IsOptimizableEnumTy(type));
     if (!validSelectorTy) {
         return false;
@@ -106,7 +106,7 @@ inline SourceExpr GetSourceExprByMatchExpr(const AST::MatchExpr& matchExpr)
 
 Ptr<Value> Translator::Visit(const AST::MatchExpr& matchExpr)
 {
-    auto matchTy = TranslateType(*matchExpr.GetTy());
+    auto matchTy = TranslateType(matchExpr.GetTy());
     Ptr<Value> retVal = HasTypeOfNothing(matchExpr) || matchTy->IsUnit() || matchTy->IsNothing() ? nullptr :
         CreateAndAppendExpression<Allocate>(builder.GetType<RefType>(matchTy), matchTy, currentBlock)->GetResult();
     if (matchExpr.matchMode) {
@@ -311,11 +311,15 @@ std::pair<Ptr<Block>, Ptr<Block>> Translator::TranslateOrPattern(
     return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc);
 }
 
-Ptr<Value> Translator::GetEnumIDValue(Ptr<AST::Ty> ty, Ptr<Value> selectorVal)
+Ptr<Value> Translator::GetEnumIDValue(AST::ModalTy ty, Ptr<Value> selectorVal)
 {
     CJC_ASSERT(ty && ty->kind == AST::TypeKind::TYPE_ENUM);
     auto enumDecl = StaticCast<AST::EnumDecl>(AST::Ty::GetDeclOfTy(ty));
-    auto selectorType = GetSelectorType(StaticCast<AST::EnumTy>(*ty));
+    // The discriminator field's data type is Bool/UInt32; the CHIR checker propagates the
+    // enum value's modal onto the field result (see GetFieldOfType), so the result type
+    // must carry the enum value's modal here too.
+    auto selectorType = builder.WithModal(
+        GetSelectorType(StaticCast<AST::EnumTy>(*ty)), selectorVal->GetType()->StripAllRefs()->GetModalInfo());
     if (!enumDecl->hasArguments) {
         return CreateWrappedTypeCast(selectorType, GetDerefedValue(selectorVal), currentBlock)->GetResult();
     }
@@ -422,7 +426,7 @@ std::pair<Ptr<Block>, Ptr<Block>> Translator::TranslateNestingCasePattern(const 
     return {falseBlock, trueBlock};
 }
 
-void Translator::CollectingSubPatterns(const Ptr<AST::Ty>& patternTy,
+void Translator::CollectingSubPatterns(AST::ModalTy patternTy,
     const std::vector<OwnedPtr<AST::Pattern>>& patterns, const Ptr<Value> value,
     std::queue<std::pair<Ptr<const AST::Pattern>, Ptr<Value>>>& queue, unsigned offset)
 {
@@ -431,11 +435,11 @@ void Translator::CollectingSubPatterns(const Ptr<AST::Ty>& patternTy,
     }
     // Expand patterns and push to queue.
     std::vector<uint64_t> indexes;
-    auto funcTy = DynamicCast<AST::FuncTy>(patternTy);
+    auto funcTy = DynamicCast<AST::FuncTy>(patternTy.Ty());
     // NOTE: When expected pattern type is type of function, current is destructing Enum
     // that we can only load first level field here.
     bool isEnumField = funcTy != nullptr;
-    using CollectFnType = std::function<void(Ptr<const AST::Pattern>, Ptr<AST::Ty>)>;
+    using CollectFnType = std::function<void(Ptr<const AST::Pattern>, AST::ModalTy)>;
     CollectFnType collectRecursively = [this, &indexes, &queue, &collectRecursively, &value, isEnumField](
                                            auto pattern, auto ty) {
         if (pattern->astKind == AST::ASTKind::WILDCARD_PATTERN) {
@@ -445,7 +449,7 @@ void Translator::CollectingSubPatterns(const Ptr<AST::Ty>& patternTy,
         }
         auto tp = DynamicCast<AST::TuplePattern>(pattern);
         if (!tp || isEnumField) {
-            auto elementTy = TranslateType(*ty);
+            auto elementTy = TranslateType(ty);
             auto elementVal = CreateAndAppendExpression<Field>(elementTy, value, indexes, currentBlock)->GetResult();
             queue.push(std::make_pair(pattern, elementVal));
             return;
@@ -474,7 +478,7 @@ void Translator::HandleVarPattern(
     currentBlock = trueBlock;
     auto val =
         varPattern.desugarExpr ? GetDerefedValue(value, TranslateLocation(varPattern)) : value;
-    auto varType = TranslateType(*varPattern.GetTy());
+    auto varType = TranslateType(varPattern.GetTy());
     const auto& loc = TranslateLocation(varPattern);
     if (opts.enableCompileDebug || opts.enableCoverage) {
         // When debug is enabled, the debug info of variable decl must be assigned with an alloca reference.
@@ -509,14 +513,17 @@ Ptr<Value> Translator::CastEnumValueToConstructorTupleType(Ptr<Value> enumValue,
     auto target = enumPattern.constructor->GetTarget();
     CJC_ASSERT(target->outerDecl && target->outerDecl->astKind == AST::ASTKind::ENUM_DECL);
     std::vector<Type*> resTypes = {GetSelectorType(StaticCast<AST::EnumTy>(*target->outerDecl->GetTy()))};
-    std::vector<Ptr<AST::Ty>> paramTys;
-    if (auto funcTy = DynamicCast<AST::FuncTy*>(enumPattern.constructor->GetTy())) {
+    std::vector<AST::ModalTy> paramTys;
+    if (auto funcTy = DynamicCast<AST::FuncTy*>(enumPattern.constructor->DataTy())) {
         paramTys = funcTy->paramTys;
     } else {
-        paramTys = enumPattern.constructor->GetTy()->typeArgs;
+        paramTys.reserve(enumPattern.constructor->GetTy()->TyArgs().size());
+        for (auto gTy : enumPattern.constructor->GetTy()->TyArgs()) {
+            paramTys.emplace_back(AST::ModalTy{gTy});
+        }
     }
     for (auto ty : paramTys) {
-        resTypes.emplace_back(TranslateType(*ty));
+        resTypes.emplace_back(TranslateType(ty));
     }
     auto res = TypeCastOrBoxIfNeeded(*enumValue, *builder.GetType<TupleType>(resTypes), enumValue->GetDebugLocation());
     auto enumId = GetEnumPatternID(enumPattern);
@@ -595,7 +602,7 @@ Ptr<Value> Translator::HandleTypePattern(const AST::TypePattern& typePattern, Pt
         // When pattern is always matched, do not return condition value.
         return nullptr;
     }
-    auto targetTy = TranslateType(*typePattern.type->GetTy());
+    auto targetTy = TranslateType(typePattern.type->GetTy());
     queue.push(std::make_pair(typePattern.pattern.get(), value));
     if (typePattern.needRuntimeTypeCheck) {
         return CreateAndAppendExpression<InstanceOf>(builder.GetBoolTy(), value, targetTy, currentBlock)->GetResult();
@@ -680,15 +687,15 @@ uint64_t Translator::GetJumpablePatternVal(const AST::Pattern& pattern)
     }
 }
 
-bool Translator::IsOptimizableTy(Ptr<AST::Ty> ty)
+bool Translator::IsOptimizableTy(AST::ModalTy ty)
 {
     return ty->IsInteger() || ty->IsRune();
 }
 
-bool Translator::IsOptimizableEnumTy(Ptr<AST::Ty> ty)
+bool Translator::IsOptimizableEnumTy(AST::ModalTy ty)
 {
     CJC_ASSERT(ty->IsEnum());
-    auto selectorKind = Cangjie::CHIR::GetSelectorType(*StaticCast<AST::EnumTy>(ty)->decl);
+    auto selectorKind = Cangjie::CHIR::GetSelectorType(*StaticCast<AST::EnumTy>(ty.Ty())->decl);
     if (selectorKind == Type::TypeKind::TYPE_BOOLEAN) {
         return false;
     }
@@ -698,7 +705,7 @@ bool Translator::IsOptimizableEnumTy(Ptr<AST::Ty> ty)
         return false;
     }
     for (auto& ctor : enumDecl->constructors) {
-        if (auto funcTy = DynamicCast<AST::FuncTy>(ctor->GetTy())) {
+        if (auto funcTy = DynamicCast<AST::FuncTy>(ctor->DataTy())) {
             CJC_ASSERT(!funcTy->paramTys.empty());
             if (!IsOptimizableTy(funcTy->paramTys[0])) {
                 return false;
@@ -778,7 +785,7 @@ void Translator::TranslateTrivialMatchAsTable(
     }
     currentBlock = baseBlock;
     Type* targetType;
-    if (auto enumTy = DynamicCast<AST::EnumTy>(match.selector->GetTy())) {
+    if (auto enumTy = DynamicCast<AST::EnumTy>(match.selector->DataTy())) {
         targetType = GetSelectorType(*enumTy);
     } else {
         targetType = builder.GetUInt64Ty();
@@ -913,7 +920,7 @@ std::unordered_map<size_t, std::vector<Ptr<Block>>> Translator::TranslateSecondL
         auto& firstPattern = *enumPattern.patterns[0];
         PrintDebugMessage(opts.chirDebugOptimizer, enumPattern);
         CJC_ASSERT(firstPattern.GetTy()->IsInteger() || firstPattern.GetTy()->IsRune());
-        auto selectorTy = TranslateType(*firstPattern.GetTy());
+        auto selectorTy = TranslateType(firstPattern.GetTy());
         auto enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, enumPattern);
         auto secondSelectVar =
             CreateAndAppendExpression<Field>(selectorTy, enumValueTuple, std::vector<uint64_t>{1}, currentBlock)
@@ -951,12 +958,12 @@ void Translator::TranslateSecondLevelTable(Ptr<Block> endBlock, const Ptr<Block>
         hasGotoBase = hasGotoBase || current.ep.patterns.size() == 1;
         auto falseBlock = CreateBlock();
         std::queue<std::pair<Ptr<const AST::Pattern>, Ptr<Value>>> queue;
-        auto elementTys = StaticCast<AST::FuncTy>(current.ep.constructor->GetTy())->paramTys;
+        auto elementTys = StaticCast<AST::FuncTy>(current.ep.constructor->DataTy())->paramTys;
         // When first pattern is wildcard and current pattern is not, we need to check from first sub-pattern,
         // otherwise only need to start from second sub-pattern.
         size_t start = isWildcardPattern && current.ep.patterns[0]->astKind != AST::ASTKind::WILDCARD_PATTERN ? 0 : 1;
         for (size_t i = start; i < current.ep.patterns.size(); ++i) {
-            auto elementTy = TranslateType(*elementTys[i]);
+            auto elementTy = TranslateType(elementTys[i]);
             auto enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, current.ep);
             auto elementVal =
                 CreateAndAppendExpression<Field>(elementTy, enumValueTuple, std::vector<uint64_t>{1 + i}, currentBlock)

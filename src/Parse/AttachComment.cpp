@@ -744,6 +744,7 @@ private:
                     VisitToken(a->commaPos);
                 }
                 VisitToken(e->rightParenPos);
+                VisitModal(e->modal);
                 break;
             }
             case ASTKind::FUNC_ARG: {
@@ -856,6 +857,7 @@ private:
                     VisitChild(ta);
                 }
                 VisitToken(t->rightAnglePos);
+                VisitModal(t->modal);
                 break;
             }
             case ASTKind::PAREN_TYPE: {
@@ -874,6 +876,7 @@ private:
                     VisitChild(ta);
                 }
                 VisitToken(t->rightAnglePos);
+                VisitModal(t->modal);
                 break;
             }
             case ASTKind::OPTION_TYPE: {
@@ -882,6 +885,7 @@ private:
                 for (auto& q : t->questVector) {
                     VisitToken(q);
                 }
+                VisitModal(t->modal);
                 break;
             }
             case ASTKind::CONSTANT_TYPE: {
@@ -898,6 +902,7 @@ private:
                 VisitToken(t->typeArgument->commaPos);
                 VisitChild(t->constantType);
                 VisitToken(t->rightAnglePos);
+                VisitModal(t->modal);
                 break;
             }
             case ASTKind::FUNC_TYPE: {
@@ -910,6 +915,7 @@ private:
                 VisitToken(t->rightParenPos);
                 VisitToken(t->arrowPos);
                 VisitChild(t->retType);
+                VisitModal(t->modal);
                 break;
             }
             case ASTKind::TUPLE_TYPE: {
@@ -922,6 +928,7 @@ private:
                     }
                 }
                 VisitToken(t->rightParenPos);
+                VisitModal(t->modal);
                 break;
             }
 
@@ -1047,6 +1054,13 @@ private:
                 // visit comma outside
                 break;
             }
+            case ASTKind::THIS_PARAM: {
+                auto p = StaticCast<ThisParam>(node);
+                VisitToken(p->thisPos);
+                VisitModal(p->modal);
+                VisitToken(p->commaPos);
+                break;
+            }
             case ASTKind::TYPE_ALIAS_DECL: {
                 auto t = StaticCast<TypeAliasDecl>(node);
                 VisitAnnotations(t->annotations);
@@ -1118,10 +1132,19 @@ private:
                 }
                 break;
             }
-            case ASTKind::PRIMITIVE_TYPE_EXPR:
-            case ASTKind::MODIFIER:
+            case ASTKind::EXCLAVE_EXPR: {
+                auto e = StaticCast<ExclaveExpr>(node);
+                VisitToken(e->exclavePos);
+                VisitChild(e->body);
+                break;
+            }
             case ASTKind::THIS_TYPE:
             case ASTKind::PRIMITIVE_TYPE:
+                VisitToken(node->begin);
+                VisitModal(StaticCast<Type>(node)->modal);
+                break;
+            case ASTKind::PRIMITIVE_TYPE_EXPR:
+            case ASTKind::MODIFIER:
             case ASTKind::JUMP_EXPR:
             case ASTKind::WILDCARD_PATTERN:
             case ASTKind::WILDCARD_EXPR:
@@ -1173,6 +1196,12 @@ private:
             VisitChild(gc);
             VisitToken(gc->commaPos);
         }
+    }
+
+    void VisitModal(const ASTModalInfo& modal)
+    {
+        VisitToken(modal.AtBegin());
+        VisitToken(modal.LocalBegin());
     }
 
     void VisitInvocation(const MacroInvocation& invocation)

@@ -68,6 +68,26 @@ template <typename... Types> inline size_t HashValue(const Types&... values)
     return hashVal;
 }
 
+enum class Mode : uint8_t {
+    NONE,
+    MAYBE,
+    MUST
+};
+
+class ModalInfo {
+public:
+    ModalInfo();
+    ModalInfo(Mode local);
+    Mode Local() const;
+    bool operator==(const ModalInfo& other) const;
+    bool operator!=(const ModalInfo& other) const;
+    bool IsSubModal(const ModalInfo& other) const;
+    bool IsEqualOrSubModal(const ModalInfo& other) const;
+    std::string ToString() const;
+private:
+    Mode local;
+};
+
 /*
  * @brief Definitions of all of the base types for the Type system.
  *
@@ -124,7 +144,7 @@ public:
     };
 
 protected:
-    explicit Type(TypeKind kind);
+    explicit Type(TypeKind kind, ModalInfo modal = ModalInfo{});
 
 public:
     virtual ~Type() = default;
@@ -302,6 +322,18 @@ public:
         return kind == TYPE_THIS;
     }
 
+    bool IsModal() const
+    {
+        return modal.Local() != Mode::NONE;
+    }
+
+    ModalInfo GetModalInfo() const
+    {
+        return modal;
+    }
+
+    Type* GetDataType(CHIRBuilder& builder) const;
+
     bool IsConstant() const;
 
     bool IsAny() const;
@@ -320,23 +352,23 @@ public:
         return kind == TYPE_CLASS || kind == TYPE_STRUCT;
     }
     bool IsBuiltinType() const;
-    bool IsValueType() const
-    {
-        return IsPrimitive() || IsEnum() || IsTuple() || IsStruct() || IsVArray() || IsCPointer() || IsCString() ||
-            IsFunc();
-    }
+    bool IsValueType() const;
 
-    bool IsValueOrGenericType() const
-    {
-        return IsValueType() || IsGeneric();
-    }
+    bool IsValueOrGenericType() const;
 
-    bool IsReferenceType() const
-    {
-        return IsClassOrArray() || IsBox() || IsThis();
-    }
+    bool IsReferenceType() const;
 
     Type* StripAllRefs() const;
+
+    bool IsCopyable() const;
+
+    bool IsLocalRegion() const;
+
+    /*
+     * @brief Whether a value of this type is *required* to live in the local region, i.e. its mode
+     *        is `local!` (`MUST`) rather than `local?` (`MAYBE`).
+     */
+    bool IsMustLocalRegion() const;
 
     bool IsReferenceTypeWithRefDims(size_t dims) const;
 
@@ -435,12 +467,16 @@ protected:
      */
     std::vector<Type*> argTys;
     TypeKind kind : 8;  // The current base type of this type.
+    ModalInfo modal;
+
+    std::string FormatWithModal(const std::string& baseStr) const;
+    friend class CHIRContext;
 };
 
 class BuiltinType : public Type {
     friend class CHIRSerializer;
 public:
-    explicit BuiltinType(TypeKind kind) : Type{kind} {}
+    explicit BuiltinType(TypeKind kind, ModalInfo modal = ModalInfo{}) : Type{kind, modal} {}
     ~BuiltinType() override = default;
 
     /** @brief visit all extend defs which meet the condition, and get their super interfaces recursively
@@ -502,7 +538,7 @@ class NumericType : public BuiltinType {
     };
 
 protected:
-    explicit NumericType(TypeKind kind) : BuiltinType(kind)
+    explicit NumericType(TypeKind kind, ModalInfo modal = ModalInfo{}) : BuiltinType(kind, modal)
     {
     }
     ~NumericType() override = default;
@@ -519,7 +555,7 @@ public:
 
 class FloatType : public NumericType {
 private:
-    explicit FloatType(TypeKind kind);
+    explicit FloatType(TypeKind kind, ModalInfo modal = ModalInfo{});
     ~FloatType() override = default;
     friend class CHIRContext;
 };
@@ -542,7 +578,7 @@ public:
     }
 
 private:
-    explicit IntType(TypeKind kind);
+    explicit IntType(TypeKind kind, ModalInfo modal = ModalInfo{});
     ~IntType() override = default;
     friend class CHIRContext;
 };
@@ -594,9 +630,9 @@ public:
     bool operator==(const Type& other) const override;
 
 private:
-    explicit FuncType(
-        const std::vector<Type*>& paramTys, Type* retTy, bool hasVarLenParam = false, bool isCFunc = false)
-        : Type(TypeKind::TYPE_FUNC), hasVarArg(hasVarLenParam), isCFunc(isCFunc)
+    explicit FuncType(const std::vector<Type*>& paramTys, Type* retTy, bool hasVarLenParam = false,
+        bool isCFunc = false, ModalInfo modal = ModalInfo{})
+        : Type(TypeKind::TYPE_FUNC, modal), hasVarArg(hasVarLenParam), isCFunc(isCFunc)
     {
         this->argTys = paramTys;
         this->argTys.emplace_back(retTy);
@@ -759,7 +795,8 @@ public:
     bool operator==(const Type& other) const override;
 
 protected:
-    explicit CustomType(TypeKind kind, CustomTypeDef* def, const std::vector<Type*>& typeArgs);
+    explicit CustomType(TypeKind kind, CustomTypeDef* def, const std::vector<Type*>& typeArgs = {},
+        ModalInfo modal = ModalInfo{});
     ~CustomType() override = default;
     friend class CHIRContext;
 
@@ -799,7 +836,7 @@ public:
 
     bool IsDirectSuperTypeOf(Type& subType, CHIRBuilder& builder) const;
 private:
-    explicit ClassType(ClassDef* classDef, const std::vector<Type*>& genericArgs = {});
+    explicit ClassType(ClassDef* classDef, const std::vector<Type*>& genericArgs = {}, ModalInfo modal = ModalInfo{});
     ~ClassType() override = default;
     friend class CHIRContext;
 
@@ -818,7 +855,7 @@ public:
     std::string ToString() const override;
 
 private:
-    explicit StructType(StructDef* structDef, const std::vector<Type*>& genericArgs = {});
+    explicit StructType(StructDef* structDef, const std::vector<Type*>& genericArgs = {}, ModalInfo modal = ModalInfo{});
     ~StructType() override = default;
     friend class CHIRContext;
 };
@@ -851,7 +888,7 @@ public:
     bool IsBoxed(CHIRBuilder& builder);
 
 private:
-    explicit EnumType(EnumDef* enumDef, const std::vector<Type*>& genericArgs = {});
+    explicit EnumType(EnumDef* enumDef, const std::vector<Type*>& genericArgs = {}, ModalInfo modal = ModalInfo{});
     ~EnumType() override = default;
     friend class CHIRContext;
 
@@ -875,7 +912,7 @@ public:
     std::string ToSrcCodeString() const override;
 
 private:
-    explicit TupleType(const std::vector<Type*>& argTys) : Type(TypeKind::TYPE_TUPLE)
+    explicit TupleType(const std::vector<Type*>& argTys, ModalInfo modal = ModalInfo{}) : Type(TypeKind::TYPE_TUPLE, modal)
     {
         this->argTys = argTys;
     }
@@ -939,7 +976,7 @@ public:
     std::string ToSrcCodeString() const override;
 
 private:
-    explicit ThisType() : Type(TypeKind::TYPE_THIS)
+    explicit ThisType(ModalInfo modal = ModalInfo{}) : Type(TypeKind::TYPE_THIS, modal)
     {
     }
     ~ThisType() override = default;
@@ -966,7 +1003,8 @@ public:
     }
 
 private:
-    explicit RawArrayType(Type* elemTy, unsigned int dims) : BuiltinType(TypeKind::TYPE_RAWARRAY), dims(dims)
+    explicit RawArrayType(Type* elemTy, unsigned int dims, ModalInfo modal = ModalInfo{})
+        : BuiltinType(TypeKind::TYPE_RAWARRAY, modal), dims(dims)
     {
         argTys.emplace_back(elemTy);
     }
@@ -997,7 +1035,8 @@ public:
     }
 
 private:
-    explicit VArrayType(Type* elemTy, int64_t size) : BuiltinType(TypeKind::TYPE_VARRAY), size(size)
+    explicit VArrayType(Type* elemTy, int64_t size, ModalInfo modal = ModalInfo{})
+        : BuiltinType(TypeKind::TYPE_VARRAY, modal), size(size)
     {
         argTys.emplace_back(elemTy);
     }
@@ -1009,7 +1048,7 @@ private:
 
 class RuneType : public BuiltinType {
 private:
-    explicit RuneType() : BuiltinType(TypeKind::TYPE_RUNE)
+    explicit RuneType(ModalInfo modal = ModalInfo{}) : BuiltinType(TypeKind::TYPE_RUNE, modal)
     {
     }
     ~RuneType() override = default;
@@ -1018,7 +1057,7 @@ private:
 
 class BooleanType : public BuiltinType {
 private:
-    explicit BooleanType() : BuiltinType(TypeKind::TYPE_BOOLEAN)
+    explicit BooleanType(ModalInfo modal = ModalInfo{}) : BuiltinType(TypeKind::TYPE_BOOLEAN, modal)
     {
     }
     ~BooleanType() override = default;
@@ -1027,7 +1066,7 @@ private:
 
 class UnitType : public BuiltinType {
 private:
-    explicit UnitType() : BuiltinType(TypeKind::TYPE_UNIT)
+    explicit UnitType(ModalInfo modal = ModalInfo{}) : BuiltinType(TypeKind::TYPE_UNIT, modal)
     {
     }
     ~UnitType() override = default;
@@ -1036,7 +1075,7 @@ private:
 
 class NothingType : public BuiltinType {
 private:
-    explicit NothingType() : BuiltinType(TypeKind::TYPE_NOTHING)
+    explicit NothingType(ModalInfo modal = ModalInfo{}) : BuiltinType(TypeKind::TYPE_NOTHING, modal)
     {
     }
     ~NothingType() override = default;
@@ -1045,7 +1084,7 @@ private:
 
 class CStringType : public BuiltinType {
 private:
-    explicit CStringType() : BuiltinType(TypeKind::TYPE_CSTRING)
+    explicit CStringType(ModalInfo modal = ModalInfo{}) : BuiltinType(TypeKind::TYPE_CSTRING, modal)
     {
     }
     ~CStringType() override = default;
@@ -1065,7 +1104,7 @@ public:
     const std::vector<ExtendDef*>& GetExtends(CHIRBuilder* builder = nullptr) const override;
 
 private:
-    explicit CPointerType(Type* elemTy) : BuiltinType(TypeKind::TYPE_CPOINTER)
+    explicit CPointerType(Type* elemTy, ModalInfo modal = ModalInfo{}) : BuiltinType(TypeKind::TYPE_CPOINTER, modal)
     {
         this->argTys.emplace_back(elemTy);
     }
@@ -1128,8 +1167,8 @@ public:
     }
 
 private:
-    explicit GenericType(const std::string& identifier, const std::string& srcName)
-        : Type(TypeKind::TYPE_GENERIC), identifier(identifier), srcCodeIdentifier(srcName)
+    explicit GenericType(const std::string& identifier, const std::string& srcName, ModalInfo modal = ModalInfo{})
+        : Type(TypeKind::TYPE_GENERIC, modal), identifier(identifier), srcCodeIdentifier(srcName)
     {
     }
     ~GenericType() override = default;
@@ -1144,7 +1183,7 @@ private:
 
 class VoidType : public BuiltinType {
 private:
-    explicit VoidType() : BuiltinType(TypeKind::TYPE_VOID)
+    explicit VoidType(ModalInfo modal = ModalInfo{}) : BuiltinType(TypeKind::TYPE_VOID, modal)
     {
     }
     ~VoidType() override = default;

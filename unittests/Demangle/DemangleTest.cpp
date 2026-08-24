@@ -4,6 +4,8 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include <string>
+
 #include "gtest/gtest.h"
 
 #define private public
@@ -26,4 +28,31 @@ TEST(DemangleTest, PackageNameColonDelimiter)
     Demangler<StdString> demangler_3("7abc:xyz");
     auto result_3 = demangler_3.DemanglePackageName();
     EXPECT_STREQ("abc::xyz", result_3.pkgName.Str());
+}
+
+TEST(DemangleTest, LocalParam)
+{
+    const char* mangled = "_CN18stdx.encoding.json9parseJsonHCNY_15JsonParserLocalE!";
+    Demangler<StdString> demangler(mangled, ".");
+    auto di = demangler.Demangle();
+    ASSERT_TRUE(di.IsValid());
+    EXPECT_STREQ("stdx.encoding.json", di.GetPkgName().Str());
+    EXPECT_STREQ("(stdx.encoding.json.JsonParserLocal)", di.GetArgTypesName().Str());
+    const char* expectedFull = "stdx.encoding.json.parseJson(stdx.encoding.json.JsonParserLocal) @local!";
+    std::string full =
+        std::string(di.GetPkgName().Str()) + "." + std::string(di.GetFullName(demangler.ScopeResolution()).Str());
+    EXPECT_STREQ(expectedFull, full.c_str());
+}
+
+TEST(DemangleTest, ThisParam)
+{
+    const char* mangled = "_CN18stdx.encoding.json14JsonArrayLocal3add!HCN18stdx.encoding.json14JsonValueLocalE!";
+    Demangler<StdString> demangler(mangled, ".");
+    auto di = demangler.Demangle();
+    ASSERT_TRUE(di.IsValid());
+    const char* expectedFull =
+        "stdx.encoding.json.JsonArrayLocal.add(this @local!, stdx.encoding.json.JsonValueLocal) @local!";
+    std::string full =
+        std::string(di.GetPkgName().Str()) + "." + std::string(di.GetFullName(demangler.ScopeResolution()).Str());
+    EXPECT_STREQ(expectedFull, full.c_str());
 }

@@ -36,7 +36,7 @@ OwnedPtr<CallExpr> CreateThisCall(
 
 OwnedPtr<PrimitiveType> CreateUnitType(Ptr<File> curFile);
 
-std::vector<Ptr<Ty>> GetParamTys(FuncParamList& params);
+std::vector<ModalTy> GetParamTys(FuncParamList& params);
 
 OwnedPtr<RefExpr> CreateSuperRef(Ptr<Decl> target, Ptr<Ty> ty);
 
@@ -82,8 +82,7 @@ template <typename... Args> OwnedPtr<CallExpr> CreateCall(Ptr<FuncDecl> fd, Ptr<
 
     (Details::WrapArg(&funcArgs, std::forward<OwnedPtr<Args>>(args)), ...);
 
-    auto funcTy = StaticCast<FuncTy*>(fd->GetTy());
-
+    auto funcTy = StaticCast<FuncTy*>(fd->DataTy());
     return CreateCallExpr(WithinFile(CreateRefExpr(*fd), curFile), std::move(funcArgs), fd, funcTy->retTy,
         CallKind::CALL_DECLARED_FUNCTION);
 }
@@ -97,17 +96,17 @@ OwnedPtr<CallExpr> CreateMemberCall(OwnedPtr<Expr> receiver, Ptr<FuncDecl> fd, O
 
     (Details::WrapArg(&funcArgs, std::forward<OwnedPtr<Args>>(args)), ...);
 
-    auto funcTy = StaticCast<FuncTy*>(fd->GetTy());
+    auto funcTy = StaticCast<FuncTy*>(fd->DataTy());
     auto ma = CreateMemberAccess(std::move(receiver), *fd);
     CopyBasicInfo(ma->baseExpr, ma);
     return CreateCallExpr(std::move(ma), std::move(funcArgs), fd, funcTy->retTy, CallKind::CALL_DECLARED_FUNCTION);
 }
 
-OwnedPtr<Type> CreateType(Ptr<Ty> ty);
+OwnedPtr<Type> CreateType(ModalTy ty);
 OwnedPtr<Type> CreateFuncType(Ptr<FuncTy> ty);
 
 OwnedPtr<Expr> CreateBoolMatch(
-    OwnedPtr<Expr> selector, OwnedPtr<Expr> trueBranch, OwnedPtr<Expr> falseBranch, Ptr<Ty> ty);
+    OwnedPtr<Expr> selector, OwnedPtr<Expr> trueBranch, OwnedPtr<Expr> falseBranch, ModalTy ty);
 
 StructDecl& GetStringDecl(const ImportManager& importManager);
 

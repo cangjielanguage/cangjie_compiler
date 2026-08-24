@@ -59,7 +59,9 @@ public:
     }
 
     std::string importedPackageName;
-    Ptr<AST::Ty> LoadType(FormattedIndex type);
+    AST::DataTy LoadType(FormattedIndex type);
+    std::vector<AST::ModalTy> LoadFuncSemaTyParamTypes(const PackageFormat::SemaTy& typeObj);
+    AST::ModalTy LoadFuncSemaTyRetType(const PackageFormat::SemaTy& typeObj);
     // A flag to avoid conflicts when we are reusing the AST serialiser from CHIR
     bool isChirNow = false;
 
@@ -75,7 +77,7 @@ private:
     // Store dependent package names in loading index order.
     std::vector<std::string> importedFullPackageNames;
     // Loaded all types and decls
-    std::vector<Ptr<AST::Ty>> allTypes;
+    std::vector<AST::DataTy> allTypes;
     // When exporting ast, we use fileOffest in each package and index is offset in vector puls 1.
     std::vector<unsigned int> allFileIds;
     std::unordered_map<unsigned int, Ptr<AST::File>> idToFileMap;
@@ -130,6 +132,7 @@ private:
     OwnedPtr<AST::Decl> LoadNominalDecl(const PackageFormat::Decl& decl, int64_t declIndex);
     OwnedPtr<AST::Decl> LoadTypeAliasDecl(const PackageFormat::Decl& decl, int64_t declIndex);
     OwnedPtr<AST::Decl> LoadBuiltInDecl(const PackageFormat::Decl& decl, int64_t declIndex);
+    OwnedPtr<AST::Decl> LoadThisParam(const PackageFormat::Decl& decl, int64_t declIndex);
     OwnedPtr<AST::Decl> LoadGenericParamDecl(const PackageFormat::Decl& decl, int64_t declIndex);
     OwnedPtr<AST::Decl> LoadInvalidDecl(const PackageFormat::Decl& decl);
     OwnedPtr<AST::Generic> LoadGeneric(AST::Decl& decl, const PackageFormat::Generic* generic);
@@ -226,7 +229,7 @@ private:
     // Load Position Node according to Position object.
     Position LoadPos(const PackageFormat::Position* posObj);
     void LoadImportContent(AST::ImportContent& content, const PackageFormat::ImportSpec& is) const;
-    std::vector<Ptr<AST::Ty>> LoadTypeArgs(const PackageFormat::SemaTy& typeObj);
+    std::vector<AST::DataTy> LoadTypeArgs(const PackageFormat::SemaTy& typeObj);
     void SetGenericTy(FormattedIndex type, const PackageFormat::SemaTy& typeObj);
     bool GetPrimitiveTy(FormattedIndex type, const PackageFormat::SemaTy* typeObj);
     template <typename TypeT, typename TypeDecl = void>
@@ -253,6 +256,7 @@ private:
         {PackageFormat::DeclKind_GenericParamDecl, &ASTLoaderImpl::LoadGenericParamDecl},
         {PackageFormat::DeclKind_TypeAliasDecl, &ASTLoaderImpl::LoadTypeAliasDecl},
         {PackageFormat::DeclKind_BuiltInDecl, &ASTLoaderImpl::LoadBuiltInDecl},
+        {PackageFormat::DeclKind_ThisParam, &ASTLoaderImpl::LoadThisParam},
     };
 
     using TyLoaderT = std::function<void(ASTLoaderImpl*, const FormattedIndex, const PackageFormat::SemaTy&)>;
@@ -303,6 +307,7 @@ private:
     OwnedPtr<AST::Expr> LoadMatchExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
     OwnedPtr<AST::Expr> LoadLetPatternDestructor(const PackageFormat::Expr& expr, int64_t exprIndex);
     OwnedPtr<AST::Expr> LoadForInExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
+    OwnedPtr<AST::Expr> LoadExclaveExpr(const PackageFormat::Expr& expr, int64_t exprIndex);
     OwnedPtr<AST::FuncArg> LoadFuncArg(FormattedIndex index);
     OwnedPtr<AST::MatchCase> LoadMatchCase(FormattedIndex index);
     OwnedPtr<AST::MatchCaseOther> LoadMatchCaseOther(FormattedIndex index);
@@ -341,6 +346,7 @@ private:
         {PackageFormat::ExprKind_MatchExpr, &ASTLoaderImpl::LoadMatchExpr},
         {PackageFormat::ExprKind_LetPatternDestructor, &ASTLoaderImpl::LoadLetPatternDestructor},
         {PackageFormat::ExprKind_ForInExpr, &ASTLoaderImpl::LoadForInExpr},
+        {PackageFormat::ExprKind_ExclaveExpr, &ASTLoaderImpl::LoadExclaveExpr},
     };
 
     /** Only can be used after all exprs has been loaded. */

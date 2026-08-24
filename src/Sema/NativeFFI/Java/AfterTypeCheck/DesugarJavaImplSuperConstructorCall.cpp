@@ -164,7 +164,8 @@ OwnedPtr<Expr> DesugarJavaImplSuperConstructorCall::WrapExprWithExceptionHandlin
         ret = WithinFile(CreateRefExpr(*res), curFile);
     } else {
         // Cangjie Type -> JavaEntity -> jobject
-        ret = ilib.UnwrapJavaEntity(ilib.WrapJavaEntity(WithinFile(CreateRefExpr(*res), curFile)), retTy, decl, true);
+        ret = ilib.UnwrapJavaEntity(
+            ilib.WrapJavaEntity(WithinFile(CreateRefExpr(*res), curFile)), retTy.Ty(), decl, true);
     }
     nodes.push_back(std::move(res));
     nodes.push_back(std::move(ret));
@@ -229,7 +230,7 @@ OwnedPtr<FuncDecl> DesugarJavaImplSuperConstructorCall::CreateMemberFunc4Argumen
     auto clonedExpr = ASTCloner::Clone(arg.expr.get(), replaceTarget);
     CJC_NULLPTR_CHECK(refWrapper.curFile);
 
-    std::vector<Ptr<Ty>> funcTyParams;
+    std::vector<ModalTy> funcTyParams;
     for (auto& param : funcParams) {
         funcTyParams.push_back(param->GetTy());
     }
@@ -237,7 +238,7 @@ OwnedPtr<FuncDecl> DesugarJavaImplSuperConstructorCall::CreateMemberFunc4Argumen
     OwnedPtr<FuncDecl> memberFn = CreateFuncDecl(funcName, MakeOwned<FuncBody>());
     auto& funcBody = *memberFn->funcBody;
     funcBody.SetTy(arg.expr->GetTy());
-    memberFn->SetTy(typeManager.GetFunctionTy(funcTyParams, arg.expr->GetTy()));
+    memberFn->SetTy(ModalTy{typeManager.GetFunctionTy(funcTyParams, arg.expr->GetTy())});
     funcBody.funcDecl = memberFn;
     funcBody.body = MakeOwned<Block>();
     auto& body = *funcBody.body;
@@ -277,9 +278,10 @@ OwnedPtr<FuncDecl> DesugarJavaImplSuperConstructorCall::CreateNativeFunc4Argumen
 
     for (auto& memberParam : memberFunc.funcBody->paramLists[0]->params) {
         auto& jniParamTy = jni.ConvertCangjieToJniTy(*memberParam->GetTy());
-        auto funcParam = CreateFuncParam(memberParam->identifier.Val(), nullptr, nullptr, &jniParamTy);
+        auto funcParam =
+            CreateFuncParam(memberParam->identifier.Val(), nullptr, nullptr, ModalTy{Ptr<Ty>(&jniParamTy)});
         auto ref = WithinFile(CreateRefExpr(*funcParam), memberFunc.curFile);
-        proxyCall->args.push_back(CreateFuncArg(UnwrapRefExpr(std::move(ref), memberParam->GetTy(), refWrapper)));
+        proxyCall->args.push_back(CreateFuncArg(UnwrapRefExpr(std::move(ref), memberParam->GetTy().Ty(), refWrapper)));
         funcParams.push_back(std::move(funcParam));
     }
     auto wrapper = WrapExprWithExceptionHandling({}, std::move(proxyCall), jniEnvParam, refWrapper);

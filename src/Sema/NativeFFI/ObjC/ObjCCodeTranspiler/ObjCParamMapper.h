@@ -69,11 +69,7 @@ public:
     );
 
     static struct EmittableObjCFuncMetainfo GetSetterForProp(
-        struct EmittableObjCPropMetainfo prop,
-        Ptr<AST::Ty> ty,
-        std::string getterName,
-        std::string getterWrapperName
-    );
+        struct EmittableObjCPropMetainfo prop, AST::ModalTy ty, std::string getterName, std::string getterWrapperName);
 
     inline static const std::string ID_TYPE = "id";
 private:

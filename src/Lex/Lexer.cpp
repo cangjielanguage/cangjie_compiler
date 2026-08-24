@@ -60,7 +60,7 @@ bool IsContextualKeyword(std::string_view s)
     }
     return names.count(s) == 1;
 }
-}
+} // namespace Cangjie
 
 bool LexerImpl::IsCurrentCharLineTerminator() const
 {
@@ -310,6 +310,8 @@ TokenKind LexerImpl::LookupKeyword(const std::string& literal)
         map[TOKENS[static_cast<unsigned char>(TokenKind::RESUME)]] = TokenKind::RESUME;
         map[TOKENS[static_cast<unsigned char>(TokenKind::THROWING)]] = TokenKind::THROWING;
         map[TOKENS[static_cast<unsigned char>(TokenKind::HANDLE)]] = TokenKind::HANDLE;
+        map[TOKENS[static_cast<unsigned char>(TokenKind::EXCLAVE)]] = TokenKind::EXCLAVE;
+        map[TOKENS[static_cast<unsigned char>(TokenKind::DEMODE)]] = TokenKind::DEMODE;
         return map;
     }();
     auto it = tokenMap.find(literal);
@@ -1688,7 +1690,7 @@ void LexerImpl::ScanSymbolQuest()
         ReadUTF8Char();
     }
 }
- 
+
 void LexerImpl::ScanSymbolColon()
 {
     ReadUTF8Char();

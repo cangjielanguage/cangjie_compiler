@@ -39,7 +39,7 @@ bool MaybeStruct(const Ty& ty)
         return false;
     }
     const GenericsTy& gty = static_cast<const GenericsTy&>(ty);
-    for (Ptr<Ty> upperBound : gty.upperBounds) {
+    for (ModalTy upperBound : gty.upperBounds) {
         if (upperBound && MaybeStruct(*upperBound)) {
             return true;
         }
@@ -59,7 +59,7 @@ void CheckMutationInStructNonMut(DiagnosticEngine& diag, const StructDecl& sd, c
     std::unordered_set<Ptr<Decl>> varDecls;
     for (auto& decl : sd.body->decls) {
         if (auto vd = DynamicCast<VarDecl*>(decl.get());
-            vd && !vd->TestAttr(Attribute::STATIC) && Ty::IsTyCorrect(vd->GetTy()) && !vd->GetTy()->IsArray()) {
+            vd && !vd->TestAttr(Attribute::STATIC) && vd->GetTy().IsCorrect() && !vd->GetTy()->IsArray()) {
             varDecls.emplace(vd);
         }
     }
@@ -248,8 +248,8 @@ void TypeChecker::TypeCheckerImpl::CheckMutationInStruct(const ASTContext& ctx, 
     Ptr<StructDecl> sd = nullptr;
     Symbol* outDecl = ScopeManager::GetCurOuterDeclOfScopeLevelX(ctx, expr, 0);
     // The `expr` may be nested in a `struct` or an `extend` of `struct`, and we use `StructTy` to get the `struct`.
-    if (outDecl && Ty::IsTyCorrect(outDecl->node->GetTy()) && outDecl->node->GetTy()->IsStruct()) {
-        sd = RawStaticCast<StructTy*>(outDecl->node->GetTy())->decl;
+    if (outDecl && outDecl->node->GetTy().IsCorrect() && outDecl->node->GetTy()->IsStruct()) {
+        sd = RawStaticCast<StructTy*>(outDecl->node->DataTy())->decl;
     }
     if (!sd) {
         return;
@@ -318,7 +318,7 @@ void TypeChecker::TypeCheckerImpl::CheckLetInstanceAccessMutableFunc(
         // it cannot access mutable function.
         auto vd = DynamicCast<VarDecl*>(baseExpr->GetTarget());
         bool immutableAccessMutableFunc = vd && (vd->astKind == ASTKind::PROP_DECL || !vd->isVar) &&
-            Ty::IsTyCorrect(vd->GetTy()) && !vd->GetTy()->IsClassLike();
+            vd->GetTy().IsCorrect() && !vd->GetTy()->IsClassLike();
         if (immutableAccessMutableFunc) {
             DiagImmutableAccessMutableFunc(diag, ma, *tempMa);
             return;
@@ -331,7 +331,7 @@ void TypeChecker::TypeCheckerImpl::CheckLetInstanceAccessMutableFunc(
                 diag.DiagnoseRefactor(DiagKindRefactor::sema_inout_modify_heap_variable, *baseExpr);
             }
             break;
-        } else if (Ty::IsTyCorrect(baseExpr->GetTy()) && !baseExpr->GetTy()->IsClassLike()) {
+        } else if (baseExpr->GetTy().IsCorrect() && !baseExpr->GetTy()->IsClassLike()) {
             DiagImmutableAccessMutableFunc(diag, ma, *tempMa);
             return;
         } else {

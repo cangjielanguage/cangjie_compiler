@@ -377,5 +377,9 @@ ERROR(parse_objc_interop_not_supported, "Objective-C interoperability feature '%
 ERROR(parse_diag_error, "%s", "%s")
 WARNING(parse_diag_warning, PARSER, "%s", "%s")
 
+// modal type
+ERROR(parse_unexpected_modal_type, "unexpected modal type here")
+ERROR(parse_unexpected_this_param, "unexpected this param on non member function or static function")
+
 // Don't add any diag after this kind.
 ERROR(parse_diag_end, "")

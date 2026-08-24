@@ -62,9 +62,9 @@ void CheckObjCFuncTypeArguments::HandleImpl(InteropContext& ctx)
             if (typeUsage && typeUsage->TestAttr(Attribute::COMPILER_ADD)) {
                 return VisitAction::SKIP_CHILDREN;
             }
-            if (typeUsage && typeUsage->GetTy() && typeUsage->GetTy()->typeArgs.size() == 1 &&
+            if (typeUsage && typeUsage->GetTy() && typeUsage->DataTy()->typeArgs.size() == 1 &&
                 ctx.typeMapper.IsObjCFuncOrBlock(*typeUsage->GetTy())) {
-                auto tyArg = typeUsage->GetTy()->typeArgs[0];
+                auto tyArg = typeUsage->DataTy()->TyArg(0);
                 auto valid = tyArg->IsFunc();
                 valid &= !tyArg->IsCFunc();
                 for (auto subTy : tyArg->typeArgs) {

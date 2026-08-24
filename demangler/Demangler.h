@@ -303,6 +303,9 @@ private:
     void SkipChar(char ch);
 
     void SkipOptionalChar(char ch);
+    bool IsLocalModifier() const;
+    T DemangleLocalModifier();
+    void AppendLocalModifierIfExists(DemangleInfo<T>& di);
 
     void SkipString(const char pattern[]);
     void ErrorLog(const char* msg) const;

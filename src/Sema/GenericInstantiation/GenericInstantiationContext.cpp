@@ -103,7 +103,7 @@ void GIM::GenericInstantiationManagerImpl::RestoreInstantiatedDeclTy() const
  */
 void GIM::GenericInstantiationManagerImpl::RestoreInstantiatedDeclTy(Decl& decl) const
 {
-    bool ignore = Ty::IsInitialTy(decl.GetTy()) || !decl.IsNominalDecl() || decl.astKind == ASTKind::EXTEND_DECL;
+    bool ignore = Ty::IsInitialTy(decl.DataTy()) || !decl.IsNominalDecl() || decl.astKind == ASTKind::EXTEND_DECL;
     if (ignore) {
         return;
     }
@@ -112,27 +112,27 @@ void GIM::GenericInstantiationManagerImpl::RestoreInstantiatedDeclTy(Decl& decl)
     }
     switch (decl.TyKind()) {
         case TypeKind::TYPE_CLASS: {
-            auto ty = RawStaticCast<ClassTy*>(decl.GetTy());
+            auto ty = RawStaticCast<ClassTy*>(decl.DataTy());
             ty->decl = StaticAs<ASTKind::CLASS_DECL>(&decl);
             ty->commonDecl = StaticAs<ASTKind::CLASS_DECL>(&decl);
-            auto thisTy = typeManager.GetClassThisTy(*ty->declPtr, ty->typeArgs);
+            auto thisTy = typeManager.GetClassThisTy(*ty->declPtr, ty->TyArgs());
             thisTy->decl = StaticAs<ASTKind::CLASS_DECL>(&decl);
             thisTy->commonDecl = StaticAs<ASTKind::CLASS_DECL>(&decl);
             break;
         }
         case TypeKind::TYPE_INTERFACE: {
-            auto ty = RawStaticCast<InterfaceTy*>(decl.GetTy());
+            auto ty = RawStaticCast<InterfaceTy*>(decl.DataTy().get());
             ty->decl = StaticAs<ASTKind::INTERFACE_DECL>(&decl);
             ty->commonDecl = StaticAs<ASTKind::INTERFACE_DECL>(&decl);
             break;
         }
         case TypeKind::TYPE_STRUCT: {
-            auto ty = RawStaticCast<StructTy*>(decl.GetTy());
+            auto ty = RawStaticCast<StructTy*>(decl.DataTy().get());
             ty->decl = StaticAs<ASTKind::STRUCT_DECL>(&decl);
             break;
         }
         case TypeKind::TYPE_ENUM: {
-            auto ty = RawStaticCast<EnumTy*>(decl.GetTy());
+            auto ty = RawStaticCast<EnumTy*>(decl.DataTy().get());
             ty->decl = StaticAs<ASTKind::ENUM_DECL>(&decl);
             break;
         }
@@ -226,7 +226,7 @@ void GIM::GenericInstantiationManagerImpl::BuildAbstractFuncMap()
 }
 
 static void AppendGenericFuncMap(
-    const AST::FuncDecl& genericDecl, const std::unordered_set<Ptr<AST::Decl>>& insFuncDecls, Generic2InsMap& result)
+    const FuncDecl& genericDecl, const std::unordered_set<Ptr<Decl>>& insFuncDecls, Generic2InsMap& result)
 {
     result.emplace(&genericDecl, insFuncDecls);
     for (size_t i = 0; i < genericDecl.funcBody->paramLists[0]->params.size(); ++i) {
@@ -234,9 +234,9 @@ static void AppendGenericFuncMap(
         if (genericParam->desugarDecl == nullptr) {
             continue;
         }
-        std::unordered_set<Ptr<AST::Decl>> insParamDecls;
+        std::unordered_set<Ptr<Decl>> insParamDecls;
         for (auto decl : insFuncDecls) {
-            auto& insParam = StaticCast<AST::FuncDecl*>(decl)->funcBody->paramLists[0]->params[i];
+            auto& insParam = StaticCast<FuncDecl*>(decl)->funcBody->paramLists[0]->params[i];
             CJC_NULLPTR_CHECK(insParam->desugarDecl);
             insParamDecls.emplace(insParam->desugarDecl.get());
         }
@@ -245,23 +245,23 @@ static void AppendGenericFuncMap(
 }
 
 static void AppendGenericPropMap(
-    const AST::PropDecl& propDecl, std::unordered_set<Ptr<AST::Decl>>& insPropDecls, Generic2InsMap& result)
+    const PropDecl& propDecl, std::unordered_set<Ptr<Decl>>& insPropDecls, Generic2InsMap& result)
 {
     for (size_t i = 0; i < propDecl.getters.size(); ++i) {
-        std::unordered_set<Ptr<AST::Decl>> insGetterDecls;
+        std::unordered_set<Ptr<Decl>> insGetterDecls;
         auto genericGetter = propDecl.getters[i].get();
         for (auto insProp : insPropDecls) {
-            auto instPopDecl = StaticCast<AST::PropDecl*>(insProp);
+            auto instPopDecl = StaticCast<PropDecl*>(insProp);
             CJC_ASSERT(propDecl.getters.size() == instPopDecl->getters.size());
             insGetterDecls.emplace(instPopDecl->getters[i].get());
         }
         AppendGenericFuncMap(*genericGetter, insGetterDecls, result);
     }
     for (size_t i = 0; i < propDecl.setters.size(); ++i) {
-        std::unordered_set<Ptr<AST::Decl>> insSetterDecls;
+        std::unordered_set<Ptr<Decl>> insSetterDecls;
         auto genericSetter = propDecl.setters[i].get();
         for (auto insProp : insPropDecls) {
-            auto instPopDecl = StaticCast<AST::PropDecl*>(insProp);
+            auto instPopDecl = StaticCast<PropDecl*>(insProp);
             CJC_ASSERT(propDecl.setters.size() == instPopDecl->setters.size());
             insSetterDecls.emplace(instPopDecl->setters[i].get());
         }
@@ -269,19 +269,19 @@ static void AppendGenericPropMap(
     }
 }
 
-void GIM::GenericInstantiationManagerImpl::AppendGenericMemberMap(const AST::Decl& genericDecl,
-    const std::unordered_set<Ptr<AST::Decl>>& insNominalDecls, Generic2InsMap& result) const
+void GIM::GenericInstantiationManagerImpl::AppendGenericMemberMap(
+    const Decl& genericDecl, const std::unordered_set<Ptr<Decl>>& insNominalDecls, Generic2InsMap& result) const
 {
     result.emplace(&genericDecl, insNominalDecls);
     for (auto& genericMember : genericDecl.GetMemberDecls()) {
-        if (genericMember->astKind != AST::ASTKind::FUNC_DECL && genericMember->astKind != AST::ASTKind::PROP_DECL) {
+        if (genericMember->astKind != ASTKind::FUNC_DECL && genericMember->astKind != ASTKind::PROP_DECL) {
             continue;
         }
         auto insMemberDecls = PartialInstantiation::GetInstantiatedDecl(*genericMember);
         if (insMemberDecls.empty()) {
             continue;
         }
-        if (auto genericMemberFunc = DynamicCast<const AST::FuncDecl*>(genericMember.get()); genericMemberFunc) {
+        if (auto genericMemberFunc = DynamicCast<const FuncDecl*>(genericMember.get()); genericMemberFunc) {
             AppendGenericFuncMap(*genericMemberFunc, insMemberDecls, result);
         } else {
             AppendGenericPropMap(*StaticCast<const PropDecl*>(genericMember.get()), insMemberDecls, result);
@@ -295,8 +295,8 @@ Generic2InsMap GIM::GenericInstantiationManagerImpl::GetAllGenericToInsDecls() c
     for (auto& mapIt : instantiatedDeclsMap) {
         if (mapIt.first->IsNominalDecl()) {
             AppendGenericMemberMap(*mapIt.first, mapIt.second, result);
-        } else if (mapIt.first->astKind == AST::ASTKind::FUNC_DECL) {
-            AppendGenericFuncMap(*StaticCast<const AST::FuncDecl*>(mapIt.first), mapIt.second, result);
+        } else if (mapIt.first->astKind == ASTKind::FUNC_DECL) {
+            AppendGenericFuncMap(*StaticCast<const FuncDecl*>(mapIt.first), mapIt.second, result);
         }
     }
     return result;

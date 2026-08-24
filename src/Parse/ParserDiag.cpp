@@ -951,7 +951,7 @@ void ParserImpl::DiagIllegalFunc(const OwnedPtr<FuncDecl>& funcDecl)
     builder.AddHint(MakeRange(funcDecl->keywordPos, funcDecl->keywordPos + std::string("func").size()));
 }
 
-void ParserImpl::DiagParseExpectedParenthis(const OwnedPtr<Type>& postType)
+void ParserImpl::DiagParseExpectedParenthesis(const OwnedPtr<Type>& postType)
 {
     auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_parentheses, lastToken);
     auto help = DiagHelp("should be surrounded by '(' and ')'");
@@ -1237,15 +1237,6 @@ void ParserImpl::DiagExpectedGetOrSetInProp(const Position& pos)
         ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_get_or_set_in_prop, lookahead, ConvertToken(lookahead));
 
     builder.AddHint(MakeRange(pos, "prop"));
-}
-
-void ParserImpl::DiagDuplicatedGetOrSet(const Node& node, const PropDecl& pd)
-{
-    auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_duplicated_get_or_set, lookahead, lookahead.Value());
-    builder.AddMainHintArguments(lookahead.Value());
-    builder.AddHint(node);
-
-    builder.AddHint(MakeRange(pd.begin, "prop"));
 }
 
 void ParserImpl::DiagUnknownPrimaryConstructor(const std::string& str)

@@ -215,7 +215,7 @@ protected:
         } else if (!enumDecl->hasArguments || DoesNotHaveEnumSubpattern(let)) {
             // Note: selector'ty is enum, and no enumPattern with param.
             res = TranslateTrivialPatternAsTable(
-                let, *GetEnumIDValue(*selectorTy, *selectorVal), enumDecl->constructors.size());
+                let, *GetEnumIDValue(selectorTy, *selectorVal), enumDecl->constructors.size());
         } else {
             res = TranslateEnumPatternMatchAsTable(let, *selectorVal);
         }
@@ -239,7 +239,7 @@ protected:
         auto tb = CreateBlock();
         auto fb = CreateBlock();
         auto firstDefaultBlock = fb;
-        auto firstSelectorVal = GetEnumIDValue(*let.initializer->GetTy(), enumVal);
+        auto firstSelectorVal = GetEnumIDValue(let.initializer->GetTy(), enumVal);
         Translator::EnumMatchInfo matchInfo;
         {
             Translator::ScopeContext context(tr);
@@ -324,7 +324,7 @@ protected:
         }
         tr.currentBlock = baseBlock;
         Type* targetType;
-        if (auto enumTy = DynamicCast<AST::EnumTy>(let.initializer->GetTy())) {
+        if (auto enumTy = DynamicCast<AST::EnumTy>(let.initializer->DataTy())) {
             targetType = tr.GetSelectorType(*enumTy);
         } else {
             targetType = tr.builder.GetUInt64Ty();
@@ -357,9 +357,9 @@ protected:
     {
         return tr.builder;
     }
-    Ptr<Value> GetEnumIDValue(Ty& ty, Value& selectorVal)
+    Ptr<Value> GetEnumIDValue(ModalTy ty, Value& selectorVal)
     {
-        return tr.GetEnumIDValue(&ty, &selectorVal);
+        return tr.GetEnumIDValue(ty, &selectorVal);
     }
     Ptr<Block> GetBlockByAST(const AST::Block& block)
     {
@@ -427,7 +427,7 @@ public:
     Ptr<Value> Translate(const IfExpr& e1)
     {
         e = &e1;
-        auto ifType = tr.TranslateType(*e1.GetTy());
+        auto ifType = tr.TranslateType(e1.GetTy());
         // generate an Allocate(Unit&) for debugging, so that the if expr can be stepped in
         bool forceGenerateUnit = opts.enableCompileDebug && IsEmptyIf(e1);
         if ((!HasTypeOfNothing(e1) && !ifType->IsUnit()) || forceGenerateUnit) {

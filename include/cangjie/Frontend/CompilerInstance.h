@@ -306,7 +306,7 @@ public:
      * @return set of Ptr<ExtendDecl>, if not found, return empty set.
      */
     std::set<Ptr<AST::ExtendDecl>> GetExtendDecls(
-        const std::variant<Ptr<AST::Ty>, Ptr<AST::InheritableDecl>>& type) const;
+        const std::variant<AST::ModalTy, Ptr<AST::InheritableDecl>>& type) const;
 
     /**
      * Obtains the extended members visible to the current file through the type declaration.
@@ -314,7 +314,7 @@ public:
      * @return vector of Ptr<ExtendDecl>, if not found, return empty set.
      */
     std::vector<Ptr<AST::Decl>> GetAllVisibleExtendMembers(
-        const std::variant<Ptr<AST::Ty>, Ptr<AST::InheritableDecl>>& type, const AST::File& curFile) const;
+        const std::variant<AST::ModalTy, Ptr<AST::InheritableDecl>>& type, const AST::File& curFile) const;
 
     /**
      * Get the candidate decls or types of given @p expr in given @p scopeName from sema cache @p ctx.

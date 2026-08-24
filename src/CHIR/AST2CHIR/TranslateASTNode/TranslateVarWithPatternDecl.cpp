@@ -30,7 +30,7 @@ void Translator::HandleVarWithVarPattern(
 void Translator::HandleVarWithTupleAndEnumPattern(const AST::Pattern& pattern,
     const std::vector<OwnedPtr<AST::Pattern>>& subPatterns, const Ptr<Value>& initNode, bool isLocalPattern)
 {
-    auto leftType = TranslateType(*(pattern.GetTy()));
+    auto leftType = TranslateType(pattern.GetTy());
     Ptr<Value> leftValue = nullptr;
     if (initNode != nullptr) {
         leftValue = GetDerefedValue(initNode);
@@ -41,7 +41,7 @@ void Translator::HandleVarWithTupleAndEnumPattern(const AST::Pattern& pattern,
     for (size_t i = 0; i < subPatterns.size(); i++) {
         Ptr<Value> rVal = nullptr;
         if (leftValue != nullptr) {
-            auto fieldType = TranslateType(*(subPatterns[i]->GetTy()));
+            auto fieldType = TranslateType(subPatterns[i]->GetTy());
             auto fieldIndex = isEnumPattern ? i + 1 : i; // add 1 to index when base type is enum
             std::vector<uint64_t> path{fieldIndex};
             auto baseValue = isEnumPattern ? CastEnumValueToConstructorTupleType(

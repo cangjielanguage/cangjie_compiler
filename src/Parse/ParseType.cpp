@@ -18,6 +18,8 @@
 using namespace Cangjie;
 using namespace AST;
 
+constexpr std::string_view LOCAL_MODE_SPECIFIER("local");
+
 // BaseType is atomicType in BNF.
 OwnedPtr<AST::Type> ParserImpl::ParseBaseType()
 {
@@ -28,7 +30,7 @@ OwnedPtr<AST::Type> ParserImpl::ParseBaseType()
     if (Skip(TokenKind::LPAREN)) {
         return ParseTypeWithParen();
     }
-    if (SeeingPrimTypes()) {
+    if (SeeingPrimitiveType()) {
         OwnedPtr<PrimitiveType> primType = MakeOwned<PrimitiveType>();
         primType->begin = lookahead.Begin();
         primType->end = lookahead.End();
@@ -70,6 +72,12 @@ OwnedPtr<AST::Type> ParserImpl::ParseVarrayType()
     //  ^ Parse the type argument of VArray.
     ret->typeArgument = ParseType();
     if (ret->typeArgument->IsInvalid()) {
+        return MakeOwned<InvalidType>(lookahead.Begin());
+    }
+    if (ret->typeArgument->modal.HasLocal()) {
+        DiagUnexpectedModal(MakeRange(ret->typeArgument->modal.LocalBegin(), ret->typeArgument->modal.LocalEnd()));
+        ret->EnableAttr(Attribute::IS_BROKEN);
+        ConsumeUntilAny({TokenKind::NL, TokenKind::GT});
         return MakeOwned<InvalidType>(lookahead.Begin());
     }
     // <T, $N>
@@ -136,15 +144,24 @@ OwnedPtr<AST::Type> ParserImpl::ParseQualifiedType()
 }
 
 OwnedPtr<AST::Type> ParserImpl::ParseTupleType(
-    std::vector<OwnedPtr<Type>> types, const Position lParenPos, const Position rParenPos) const
+    std::vector<OwnedPtr<Type>> types, const Position& lParenPos, const Position& rParenPos)
 {
     OwnedPtr<TupleType> tupleType = MakeOwned<TupleType>();
     tupleType->begin = lParenPos;
     tupleType->leftParenPos = lParenPos;
     tupleType->rightParenPos = rParenPos;
+    bool broken{false};
     for (auto& type : types) {
+        if (type->modal.HasLocal()) {
+            DiagUnexpectedModal(MakeRange(type->modal.LocalBegin(), type->modal.LocalEnd()));
+            type->EnableAttr(Attribute::IS_BROKEN);
+            broken = true;
+        }
         tupleType->commaPosVector.emplace_back(type->commaPos);
         tupleType->fieldTypes.emplace_back(std::move(type));
+    }
+    if (broken) {
+        return MakeOwned<InvalidType>(lParenPos);
     }
     tupleType->end = rParenPos;
     tupleType->end.column += 1;
@@ -224,7 +241,7 @@ OwnedPtr<AST::Type> ParserImpl::ParseTypeWithParen()
     return ParseFuncType(std::move(types), lParenPos, rParenPos);
 }
 
-OwnedPtr<ParenType> ParserImpl::ParseParenType(
+OwnedPtr<Type> ParserImpl::ParseParenType(
     const Position& lParenPos, const Position& rParenPos, OwnedPtr<Type> type)
 {
     if (!type->typeParameterName.empty()) {
@@ -232,6 +249,11 @@ OwnedPtr<ParenType> ParserImpl::ParseParenType(
             ParseDiagnoseRefactor(DiagKindRefactor::parse_only_tuple_and_func_type_allow_type_parameter_name,
                 MakeRange(type->begin, type->begin + type->typeParameterName.size()), type->typeParameterName);
         builder.AddNote("only tuple type and function type support type parameter name");
+    }
+    if (type->modal.HasLocal()) {
+        DiagUnexpectedModal(MakeRange(type->modal.LocalBegin(), type->modal.LocalEnd()));
+        type->EnableAttr(Attribute::IS_BROKEN);
+        return MakeOwned<InvalidType>(lParenPos);
     }
     OwnedPtr<ParenType> pt = MakeOwned<ParenType>();
     pt->type = std::move(type);
@@ -286,6 +308,16 @@ OwnedPtr<AST::Type> ParserImpl::ParsePrefixType()
         while (prevSkipNL && Skip(TokenKind::NL)) {
         }
         optionType->end = baseType->end;
+        const Type* componentForModal = baseType.get();
+        if (baseType->astKind == ASTKind::PAREN_TYPE) {
+            componentForModal = StaticCast<ParenType>(baseType.get())->type.get();
+        }
+        if (componentForModal != nullptr && componentForModal->modal.HasLocal()) {
+            DiagUnexpectedModal(
+                MakeRange(componentForModal->modal.LocalBegin(), componentForModal->modal.LocalEnd()));
+            baseType->EnableAttr(Attribute::IS_BROKEN);
+            return MakeOwned<InvalidType>(optionType->begin);
+        }
         optionType->componentType = std::move(baseType);
         return optionType;
     } else {
@@ -298,14 +330,119 @@ OwnedPtr<AST::Type> ParserImpl::ParseType()
 {
     auto postType = ParsePrefixType();
     if (Seeing(TokenKind::ARROW)) {
-            if (postType->astKind == ASTKind::FUNC_TYPE) {
-                DiagRedundantArrowAfterFunc(*postType);
-                ConsumeUntilAny({TokenKind::RCURL, TokenKind::NL}, false);
-            } else {
-                DiagParseExpectedParenthis(postType);
-            }
+        if (postType->astKind == ASTKind::FUNC_TYPE) {
+            DiagRedundantArrowAfterFunc(*postType);
+            ConsumeUntilAny({TokenKind::RCURL, TokenKind::NL}, false);
+        } else {
+            DiagParseExpectedParenthesis(postType);
+        }
+    }
+    postType->modal = ParseModalInfo();
+    if (postType->modal) {
+        postType->end = postType->modal.End();
     }
     return postType;
+}
+
+// Parse a modal that may trail a type/expr:
+//   modal : '@' modeSpecifier ;
+ASTModalInfo ParserImpl::ParseModalInfo()
+{
+    if (!SeeingModalInfo()) {
+        return {};
+    }
+    Skip(TokenKind::AT);
+    ASTModalInfo modalInfo{};
+    modalInfo.SetAt(lastToken.Begin());
+    if (!ParseModeSpecifier(modalInfo)) {
+        return {};
+    }
+    return modalInfo;
+}
+
+// Parse the mode specifier that follows the '@' (already consumed by the caller):
+//   modeSpecifier
+//       : '~' 'local'   // @~local  -> NOT
+//       | 'local' '!'   // @local!  -> FULL
+//       | 'local' '?'   // @local?  -> HALF
+//       ;
+// Contract: failure rolls back consumed tokens so the caller sees no advance.
+bool ParserImpl::ParseModeSpecifier(ASTModalInfo& out)
+{
+    ParserScope scope(*this);
+    bool hasTilde = false;
+    Position localBegin;
+    if (Seeing(TokenKind::BITNOT)) {
+        hasTilde = true;
+        localBegin = Peek().Begin();
+        Next();
+    }
+    if (!Seeing(TokenKind::IDENTIFIER) || Peek().Value() != LOCAL_MODE_SPECIFIER) {
+        scope.ResetParserScope();
+        return false;
+    }
+    if (hasTilde) {
+        if (lastToken.End() != Peek().Begin()) {
+            scope.ResetParserScope();
+            return false;
+        }
+    } else {
+        localBegin = Peek().Begin();
+    }
+    Next();
+    if (Seeing(TokenKind::NOT)) {
+        if (lastToken.End() != Peek().Begin()) {
+            scope.ResetParserScope();
+            return false;
+        }
+        Next();
+        out.SetLocal(ASTMode::FULL, localBegin);
+        return true;
+    }
+    if (Seeing(TokenKind::QUEST)) {
+        if (lastToken.End() != Peek().Begin()) {
+            scope.ResetParserScope();
+            return false;
+        }
+        Next();
+        out.SetLocal(ASTMode::HALF, localBegin);
+        return true;
+    }
+    if (hasTilde) {
+        out.SetLocal(ASTMode::NOT, localBegin);
+        return true;
+    }
+    scope.ResetParserScope();
+    return false;
+}
+
+// Seeing a ModalInfo advance, without consuming any token.
+bool ParserImpl::SeeingModalInfo()
+{
+    if (!Seeing(TokenKind::AT)) {
+        return false;
+    }
+    auto tokens = lexer->LookAheadSkipNL(2);
+    if (tokens.size() < 2) {
+        return false;
+    }
+    auto it = tokens.begin();
+    const Token& first = *it;
+    ++it;
+    const Token& second = *it;
+    if (first.kind == TokenKind::BITNOT) {
+        if (second.kind != TokenKind::IDENTIFIER || second.Value() != LOCAL_MODE_SPECIFIER) {
+            return false;
+        }
+        return first.End() == second.Begin();
+    }
+    if (first.kind == TokenKind::IDENTIFIER && first.Value() == LOCAL_MODE_SPECIFIER) {
+        if (second.kind != TokenKind::NOT && second.kind != TokenKind::QUEST) {
+            return false;
+        }
+        return first.End() == second.Begin();
+    }
+    return false;
 }
 
 OwnedPtr<AST::RefType> ParserImpl::ParseRefType(bool onlyRef)
@@ -347,6 +484,10 @@ std::pair<bool, std::vector<OwnedPtr<AST::Type>>> ParserImpl::ParseTypeArguments
             }
             auto type = ParseType();
             if (type && !type->TestAttr(Attribute::IS_BROKEN)) {
+                if (type->modal.HasLocal()) {
+                    DiagUnexpectedModal(MakeRange(type->modal.LocalBegin(), type->modal.LocalEnd()));
+                    type->EnableAttr(Attribute::IS_BROKEN);
+                }
                 ret.emplace_back(std::move(type));
             }
         }, TokenKind::GT);

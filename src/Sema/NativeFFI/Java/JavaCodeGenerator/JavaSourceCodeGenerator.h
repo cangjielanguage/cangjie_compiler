@@ -36,8 +36,8 @@ private:
     static const std::string DEFAULT_OUTPUT_DIR;
     static const std::string IGNORE_IMPORT;
     static std::string AddImport(Ptr<Ty> ty, std::set<std::string>* javaImports, const std::string* curPackageName);
-    std::string MapCJTypeToJavaType(const Ptr<Ty> ty, std::set<std::string>* javaImports,
-        const std::string* curPackageName, bool isNativeMethod = false);
+    std::string MapCJTypeToJavaType(
+        ModalTy ty, std::set<std::string>* javaImports, const std::string* curPackageName, bool isNativeMethod = false);
     std::string MapCJTypeToJavaType(const OwnedPtr<Type>& type, std::set<std::string>* javaImports,
         const std::string* curPackageName, bool isNativeMethod = false);
     std::string MapCJTypeToJavaType(const OwnedPtr<FuncParam>& param, std::set<std::string>* javaImports,

@@ -6,13 +6,14 @@
 
 #include "cangjie/CHIR/AST2CHIR/AST2CHIRChecker.h"
 
-#include "cangjie/Utils/ProfileRecorder.h"
+#include "cangjie/CHIR/AST2CHIR/Utils.h"
+#include "cangjie/CHIR/IR/Value/Value.h"
 #include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/Utils/Utils.h"
-#include "cangjie/CHIR/IR/Value/Value.h"
+#include "cangjie/Utils/ProfileRecorder.h"
 
 using namespace Cangjie;
-using namespace Cangjie::CHIR;
+using namespace CHIR;
 
 namespace {
 void Errorln(const std::string& info)
@@ -20,176 +21,181 @@ void Errorln(const std::string& info)
     std::cerr << "ast2chir checker error: " << info << std::endl;
 }
 
-bool CheckPrimitiveType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckPrimitiveType(AST::ModalTy astTy, const Type& chirTy)
 {
-    const std::map<Type::TypeKind, Cangjie::AST::TypeKind> chir2astTy = {
-        {Type::TypeKind::TYPE_INT8, Cangjie::AST::TypeKind::TYPE_INT8},
-        {Type::TypeKind::TYPE_INT16, Cangjie::AST::TypeKind::TYPE_INT16},
-        {Type::TypeKind::TYPE_INT32, Cangjie::AST::TypeKind::TYPE_INT32},
-        {Type::TypeKind::TYPE_INT64, Cangjie::AST::TypeKind::TYPE_INT64},
-        {Type::TypeKind::TYPE_INT_NATIVE, Cangjie::AST::TypeKind::TYPE_INT_NATIVE},
-        {Type::TypeKind::TYPE_UINT8, Cangjie::AST::TypeKind::TYPE_UINT8},
-        {Type::TypeKind::TYPE_UINT16, Cangjie::AST::TypeKind::TYPE_UINT16},
-        {Type::TypeKind::TYPE_UINT32, Cangjie::AST::TypeKind::TYPE_UINT32},
-        {Type::TypeKind::TYPE_UINT64, Cangjie::AST::TypeKind::TYPE_UINT64},
-        {Type::TypeKind::TYPE_UINT_NATIVE, Cangjie::AST::TypeKind::TYPE_UINT_NATIVE},
-        {Type::TypeKind::TYPE_FLOAT16, Cangjie::AST::TypeKind::TYPE_FLOAT16},
-        {Type::TypeKind::TYPE_FLOAT32, Cangjie::AST::TypeKind::TYPE_FLOAT32},
-        {Type::TypeKind::TYPE_FLOAT64, Cangjie::AST::TypeKind::TYPE_FLOAT64},
-        {Type::TypeKind::TYPE_RUNE, Cangjie::AST::TypeKind::TYPE_RUNE},
-        {Type::TypeKind::TYPE_BOOLEAN, Cangjie::AST::TypeKind::TYPE_BOOLEAN},
-        {Type::TypeKind::TYPE_UNIT, Cangjie::AST::TypeKind::TYPE_UNIT},
-        {Type::TypeKind::TYPE_NOTHING, Cangjie::AST::TypeKind::TYPE_NOTHING}};
+    const std::map<Type::TypeKind, AST::TypeKind> chir2astTy = {{Type::TypeKind::TYPE_INT8, AST::TypeKind::TYPE_INT8},
+        {Type::TypeKind::TYPE_INT16, AST::TypeKind::TYPE_INT16},
+        {Type::TypeKind::TYPE_INT32, AST::TypeKind::TYPE_INT32},
+        {Type::TypeKind::TYPE_INT64, AST::TypeKind::TYPE_INT64},
+        {Type::TypeKind::TYPE_INT_NATIVE, AST::TypeKind::TYPE_INT_NATIVE},
+        {Type::TypeKind::TYPE_UINT8, AST::TypeKind::TYPE_UINT8},
+        {Type::TypeKind::TYPE_UINT16, AST::TypeKind::TYPE_UINT16},
+        {Type::TypeKind::TYPE_UINT32, AST::TypeKind::TYPE_UINT32},
+        {Type::TypeKind::TYPE_UINT64, AST::TypeKind::TYPE_UINT64},
+        {Type::TypeKind::TYPE_UINT_NATIVE, AST::TypeKind::TYPE_UINT_NATIVE},
+        {Type::TypeKind::TYPE_FLOAT16, AST::TypeKind::TYPE_FLOAT16},
+        {Type::TypeKind::TYPE_FLOAT32, AST::TypeKind::TYPE_FLOAT32},
+        {Type::TypeKind::TYPE_FLOAT64, AST::TypeKind::TYPE_FLOAT64},
+        {Type::TypeKind::TYPE_RUNE, AST::TypeKind::TYPE_RUNE},
+        {Type::TypeKind::TYPE_BOOLEAN, AST::TypeKind::TYPE_BOOLEAN},
+        {Type::TypeKind::TYPE_UNIT, AST::TypeKind::TYPE_UNIT},
+        {Type::TypeKind::TYPE_NOTHING, AST::TypeKind::TYPE_NOTHING}};
     if (chir2astTy.count(chirTy.GetTypeKind()) == 0) {
-        Cangjie::InternalError("unsupported type kind");
+        InternalError("unsupported type kind");
     }
-    return chir2astTy.at(chirTy.GetTypeKind()) == astTy.kind;
+    return chir2astTy.at(chirTy.GetTypeKind()) == astTy.Kind();
 }
 
-bool CheckType(const Cangjie::AST::Ty& astTy, const Type& chirTy);
+bool CheckType(AST::ModalTy astTy, const Type& chirTy);
 
-bool CheckTypeArgs(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckTypeArgs(AST::ModalTy astTy, const Type& chirTy)
 {
-    auto astTyArgs = astTy.typeArgs;
+    auto astTyArgs = astTy->typeArgs;
     auto chirTyArgs = chirTy.GetTypeArgs();
     if (astTyArgs.size() != chirTyArgs.size()) {
         return false;
     }
     for (size_t i = 0; i < astTyArgs.size(); ++i) {
-        if (!CheckType(*astTyArgs[i], *chirTyArgs[i])) {
+        if (!CheckType(astTyArgs[i], *chirTyArgs[i])) {
             return false;
         }
     }
     return true;
 }
 
-bool CheckTupleType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckTupleType(AST::ModalTy astTy, const Type& chirTy)
 {
-    auto astTyArgs = astTy.typeArgs;
+    auto astTyArgs = astTy->typeArgs;
     auto chirTyArgs = chirTy.GetTypeArgs();
     if (astTyArgs.size() != chirTyArgs.size()) {
         return false;
     }
     for (size_t loop = 0; loop < astTyArgs.size(); loop++) {
-        if (!CheckType(*astTyArgs[loop], *chirTyArgs[loop])) {
+        if (!CheckType(astTyArgs[loop], *chirTyArgs[loop])) {
             return false;
         }
     }
     return true;
 }
 
-bool CheckFuncType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckFuncType(AST::ModalTy astTy, const Type& chirTy)
 {
-    auto astTyArgs = astTy.typeArgs;
+    auto astTyArgs = astTy->typeArgs;
     auto chirTyArgs = chirTy.GetTypeArgs();
     if (astTyArgs.size() != chirTyArgs.size()) {
         return false;
     }
     for (size_t loop = 0; loop < astTyArgs.size(); loop++) {
-        if (!CheckType(*astTyArgs[loop], *chirTyArgs[loop])) {
+        if (!CheckType(astTyArgs[loop], *chirTyArgs[loop])) {
             return false;
         }
     }
     return true;
 }
 
-bool CheckMethodType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckMethodType(AST::ModalTy astTy, const Type& chirTy)
 {
-    auto astTyArgs = astTy.typeArgs;
+    auto astTyArgs = astTy->typeArgs;
     auto chirTyArgs = chirTy.GetTypeArgs();
     if (astTyArgs.size() + 1 != chirTyArgs.size()) {
         return false;
     }
     for (size_t loop = 0; loop < astTyArgs.size(); loop++) {
-        if (!CheckType(*astTyArgs[loop], *chirTyArgs[loop + 1])) {
+        if (!CheckType(astTyArgs[loop], *chirTyArgs[loop + 1])) {
             return false;
         }
     }
     return true;
 }
 
-bool CheckStructType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckStructType(AST::ModalTy astTy, const Type& chirTy)
 {
-    if (!astTy.IsStruct()) {
+    if (!astTy->IsStruct()) {
         return false;
     }
-    auto astStruct = Cangjie::StaticCast<const Cangjie::AST::StructTy&>(astTy).declPtr;
-    auto chirStruct = Cangjie::StaticCast<const StructType&>(chirTy).GetStructDef();
+    auto astStruct = StaticCast<const AST::StructTy&>(*astTy).declPtr;
+    auto chirStruct = StaticCast<const StructType&>(chirTy).GetStructDef();
     if (astStruct->mangledName != chirStruct->GetIdentifierWithoutPrefix()) {
         return false;
     }
     return CheckTypeArgs(astTy, chirTy);
 }
 
-bool CheckClassType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckClassType(AST::ModalTy astTy, const Type& chirTy)
 {
-    if (!astTy.IsClass()) {
+    if (!astTy->IsClass()) {
         return false;
     }
-    auto astClass = Cangjie::StaticCast<const Cangjie::AST::ClassTy&>(astTy).declPtr;
-    auto chirClass = Cangjie::StaticCast<const ClassType&>(chirTy).GetClassDef();
+    auto astClass = StaticCast<const AST::ClassTy&>(*astTy).declPtr;
+    auto chirClass = StaticCast<const ClassType&>(chirTy).GetClassDef();
     if (astClass->mangledName != chirClass->GetIdentifierWithoutPrefix()) {
         return false;
     }
     return CheckTypeArgs(astTy, chirTy);
 }
 
-bool CheckInterfaceType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckInterfaceType(AST::ModalTy astTy, const Type& chirTy)
 {
-    if (!astTy.IsInterface()) {
+    if (!astTy->IsInterface()) {
         return false;
     }
-    auto astClass = Cangjie::StaticCast<const Cangjie::AST::InterfaceTy&>(astTy).declPtr;
-    auto chirClass = Cangjie::StaticCast<const ClassType&>(chirTy).GetClassDef();
+    auto astClass = StaticCast<const AST::InterfaceTy&>(*astTy).declPtr;
+    auto chirClass = StaticCast<const ClassType&>(chirTy).GetClassDef();
     if (astClass->mangledName != chirClass->GetIdentifierWithoutPrefix()) {
         return false;
     }
     return CheckTypeArgs(astTy, chirTy);
 }
 
-bool CheckEnumType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckEnumType(AST::ModalTy astTy, const Type& chirTy)
 {
-    if (!astTy.IsEnum()) {
+    if (!astTy->IsEnum()) {
         return false;
     }
-    auto astEnum = Cangjie::StaticCast<const Cangjie::AST::EnumTy&>(astTy).declPtr;
-    auto chirEnum = Cangjie::StaticCast<const EnumType&>(chirTy).GetEnumDef();
+    auto astEnum = StaticCast<const AST::EnumTy&>(*astTy).declPtr;
+    auto chirEnum = StaticCast<const EnumType&>(chirTy).GetEnumDef();
     if (astEnum->mangledName != chirEnum->GetIdentifierWithoutPrefix()) {
         return false;
     }
     return CheckTypeArgs(astTy, chirTy);
 }
 
-bool CheckRawArrayType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckRawArrayType(AST::ModalTy astTy, const Type& chirTy)
 {
-    if (!astTy.IsArray()) {
+    if (!astTy->IsArray()) {
         return false;
     }
-    auto astArray = Cangjie::StaticCast<const Cangjie::AST::ArrayTy&>(astTy);
-    auto& chirArray = Cangjie::StaticCast<const RawArrayType&>(chirTy);
-    return astArray.dims == chirArray.GetDims() && CheckType(*astTy.typeArgs[0], *chirTy.GetTypeArgs()[0]);
+    auto astArray = StaticCast<const AST::ArrayTy&>(*astTy);
+    auto& chirArray = StaticCast<const RawArrayType&>(chirTy);
+    return astArray.dims == chirArray.GetDims() && CheckType(astTy->typeArgs[0], *chirTy.GetTypeArgs()[0]);
 }
 
-bool CheckVArrayType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckVArrayType(AST::ModalTy astTy, const Type& chirTy)
 {
-    if (astTy.kind != Cangjie::AST::TypeKind::TYPE_VARRAY) {
+    if (astTy->kind != AST::TypeKind::TYPE_VARRAY) {
         return false;
     }
-    auto astArray = Cangjie::StaticCast<const Cangjie::AST::VArrayTy&>(astTy);
-    auto& chirArray = Cangjie::StaticCast<const VArrayType&>(chirTy);
-    return astArray.size == chirArray.GetSize() && CheckType(*astTy.typeArgs[0], *chirTy.GetTypeArgs()[0]);
+    auto astArray = StaticCast<const AST::VArrayTy&>(*astTy);
+    auto& chirArray = StaticCast<const VArrayType&>(chirTy);
+    return astArray.size == chirArray.GetSize() && CheckType(astTy->typeArgs[0], *chirTy.GetTypeArgs()[0]);
 }
 
-bool CheckCPointerType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckCPointerType(AST::ModalTy astTy, const Type& chirTy)
 {
-    if (!astTy.IsPointer()) {
+    if (!astTy->IsPointer()) {
         return false;
     }
-    return CheckType(*astTy.typeArgs[0], *chirTy.GetTypeArgs()[0]);
+    return CheckType(astTy->typeArgs[0], *chirTy.GetTypeArgs()[0]);
 }
 
-bool CheckType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
+bool CheckType(AST::ModalTy astTy, const Type& chirTy)
 {
+    if (chirTy.IsRef()) {
+        return CheckType(astTy, *chirTy.StripAllRefs());
+    }
+    if (ASTModal2CHIRModal(astTy.Mode()) != chirTy.GetModalInfo()) {
+        return false;
+    }
     if (chirTy.IsPrimitive()) {
         return CheckPrimitiveType(astTy, chirTy);
     } else if (chirTy.IsTuple()) {
@@ -213,14 +219,12 @@ bool CheckType(const Cangjie::AST::Ty& astTy, const Type& chirTy)
     } else if (chirTy.IsCPointer()) {
         return CheckCPointerType(astTy, chirTy);
     } else if (chirTy.IsCString()) {
-        return astTy.IsCString();
-    } else if (chirTy.IsRef()) {
-        return CheckType(astTy, *chirTy.GetTypeArgs()[0]);
+        return astTy->IsCString();
     }
     return true;
 }
 
-bool CheckClass(const Cangjie::AST::ClassDecl& decl, const ClassDef& classDef)
+bool CheckClass(const AST::ClassDecl& decl, const ClassDef& classDef)
 {
     if (!classDef.IsClass()) {
         Errorln(classDef.GetIdentifier() + " is expected to be a classDef.");
@@ -229,13 +233,13 @@ bool CheckClass(const Cangjie::AST::ClassDecl& decl, const ClassDef& classDef)
     AST::ClassTy* astSupClsTy = nullptr;
     for (auto& super : decl.inheritedTypes) {
         if (super->TyKind() == AST::TypeKind::TYPE_CLASS) {
-            astSupClsTy = StaticCast<AST::ClassTy*>(super->GetTy());
+            astSupClsTy = StaticCast<AST::ClassTy>(super->DataTy());
         }
     }
     auto chirSupClsTy = classDef.GetSuperClassTy();
     // check super class type
     if (astSupClsTy != nullptr && chirSupClsTy != nullptr) {
-        if (!CheckType(*astSupClsTy, *chirSupClsTy)) {
+        if (!CheckType(AST::ModalTy(astSupClsTy), *chirSupClsTy)) {
             Errorln(classDef.GetIdentifier() + " set wrong super class.");
             return false;
         }
@@ -269,10 +273,10 @@ const CustomTypeDef* GetParentCustomTypeDef(const Value& value)
 }
 
 bool CheckInheritDeclGlobalMember(
-    const Cangjie::AST::Decl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
+    const AST::Decl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
 {
     auto chirCache = globalCache.TryGet(decl);
-    if (chirCache == nullptr && decl.TestAttr(Cangjie::AST::Attribute::COMMON)) {
+    if (chirCache == nullptr && decl.TestAttr(AST::Attribute::COMMON)) {
         return true;
     }
     if (chirCache == nullptr) {
@@ -284,7 +288,7 @@ bool CheckInheritDeclGlobalMember(
         return true;
     }
     // check chir node have a right declaredParent
-    auto funcDecl = DynamicCast<const Cangjie::AST::FuncDecl*>(&decl);
+    auto funcDecl = DynamicCast<const AST::FuncDecl*>(&decl);
     if (funcDecl == nullptr || !IsStaticInit(*funcDecl)) {
         if (auto def = GetParentCustomTypeDef(*chirCache); def != &chirNode) {
             Errorln("not find " + chirCache->GetIdentifier() + " in " + chirNode.GetIdentifier() + ".");
@@ -292,25 +296,26 @@ bool CheckInheritDeclGlobalMember(
         }
     }
     // member func
-    if (decl.astKind == Cangjie::AST::ASTKind::FUNC_DECL) {
-        if (StaticCast<const Cangjie::AST::FuncDecl&>(decl).TestAttr(AST::Attribute::CONSTRUCTOR) || StaticCast<const Cangjie::AST::FuncDecl&>(decl).IsFinalizer()) {
+    if (decl.astKind == AST::ASTKind::FUNC_DECL) {
+        if (StaticCast<const AST::FuncDecl&>(decl).TestAttr(AST::Attribute::CONSTRUCTOR) ||
+            StaticCast<const AST::FuncDecl&>(decl).IsFinalizer()) {
             return true;
         }
-        if (!decl.TestAttr(Cangjie::AST::Attribute::STATIC) && !CheckMethodType(*decl.GetTy(), *chirCache->GetType())) {
-            Errorln(chirCache->GetIdentifier() + " is expected to be promoted " +
-                Cangjie::AST::Ty::ToString(decl.GetTy()) + ".");
+        if (!decl.TestAttr(AST::Attribute::STATIC) && !CheckMethodType(decl.GetTy(), *chirCache->GetType())) {
+            Errorln(
+                chirCache->GetIdentifier() + " is expected to be promoted " + AST::Ty::ToString(decl.DataTy()) + ".");
             return false;
         }
-        if (decl.TestAttr(Cangjie::AST::Attribute::STATIC) && !CheckFuncType(*decl.GetTy(), *chirCache->GetType())) {
-            Errorln(chirCache->GetIdentifier() + " is expected to be promoted " +
-                Cangjie::AST::Ty::ToString(decl.GetTy()) + ".");
+        if (decl.TestAttr(AST::Attribute::STATIC) && !CheckFuncType(decl.GetTy(), *chirCache->GetType())) {
+            Errorln(
+                chirCache->GetIdentifier() + " is expected to be promoted " + AST::Ty::ToString(decl.DataTy()) + ".");
             return false;
         }
     }
     return true;
 }
 
-bool CheckLocalVar(const Cangjie::AST::Decl& decl, const CustomTypeDef& chirNode)
+bool CheckLocalVar(const AST::Decl& decl, const CustomTypeDef& chirNode)
 {
     auto localVars = chirNode.GetAllInstanceVars();
     if (chirNode.GetCustomKind() == CustomDefKind::TYPE_CLASS) {
@@ -321,8 +326,8 @@ bool CheckLocalVar(const Cangjie::AST::Decl& decl, const CustomTypeDef& chirNode
         if (it.name != decl.identifier.Val()) {
             continue;
         }
-        if (!DynamicCast<AST::RefEnumTy*>(decl.GetTy()) && !CheckType(*decl.GetTy(), *it.type)) {
-            Errorln(it.name + " is expected to be " + Cangjie::AST::Ty::ToString(decl.GetTy()) + " in " +
+        if (!DynamicCast<AST::RefEnumTy*>(decl.DataTy()) && !CheckType(decl.GetTy(), *it.type)) {
+            Errorln(it.name + " is expected to be " + AST::Ty::ToString(decl.DataTy()) + " in " +
                 chirNode.GetIdentifier() + ".");
             return false;
         }
@@ -333,25 +338,25 @@ bool CheckLocalVar(const Cangjie::AST::Decl& decl, const CustomTypeDef& chirNode
 }
 
 bool CheckInheritDeclMembers(
-    const Cangjie::AST::InheritableDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
+    const AST::InheritableDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
 {
     auto ret = true;
     for (auto& it : decl.GetMemberDecls()) {
         // All of call to JArray constructors will be desugared, so we can skip the useless constructor member directly.
-        if (it->TestAttr(Cangjie::AST::Attribute::GENERIC)) {
+        if (it->TestAttr(AST::Attribute::GENERIC)) {
             continue;
         }
         // local member var not have a real node
-        if (it->astKind == Cangjie::AST::ASTKind::VAR_DECL && !it->TestAttr(Cangjie::AST::Attribute::STATIC)) {
+        if (it->astKind == AST::ASTKind::VAR_DECL && !it->TestAttr(AST::Attribute::STATIC)) {
             ret = CheckLocalVar(*it, chirNode) && ret;
             continue;
         }
         // primary ctor not have a cache
-        if (it->astKind == Cangjie::AST::ASTKind::PRIMARY_CTOR_DECL) {
+        if (it->astKind == AST::ASTKind::PRIMARY_CTOR_DECL) {
             continue;
         }
-        if (it->astKind == Cangjie::AST::ASTKind::PROP_DECL) {
-            auto& propDecl = Cangjie::StaticCast<Cangjie::AST::PropDecl&>(*it);
+        if (it->astKind == AST::ASTKind::PROP_DECL) {
+            auto& propDecl = StaticCast<AST::PropDecl&>(*it);
             for (auto& itp : propDecl.getters) {
                 ret = CheckInheritDeclGlobalMember(*itp, chirNode, globalCache) && ret;
             }
@@ -367,7 +372,7 @@ bool CheckInheritDeclMembers(
 }
 
 bool CheckClassLike(
-    const Cangjie::AST::ClassLikeDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
+    const AST::ClassLikeDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
 {
     if (chirNode.GetCustomKind() != CustomDefKind::TYPE_CLASS) {
         Errorln(chirNode.GetIdentifier() + " is expected to be a classDef/interfaceDef.");
@@ -383,16 +388,15 @@ bool CheckClassLike(
         ret = false;
     }
 
-    if (decl.astKind == Cangjie::AST::ASTKind::CLASS_DECL) {
-        ret = CheckClass(static_cast<const Cangjie::AST::ClassDecl&>(decl), classDef) && ret;
+    if (decl.astKind == AST::ASTKind::CLASS_DECL) {
+        ret = CheckClass(static_cast<const AST::ClassDecl&>(decl), classDef) && ret;
     } else {
         ret = CheckInterface(classDef) && ret;
     }
     return CheckInheritDeclMembers(decl, chirNode, globalCache) && ret;
 }
 
-bool CheckEnum(
-    const Cangjie::AST::EnumDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
+bool CheckEnum(const AST::EnumDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
 {
     if (chirNode.GetCustomKind() != CustomDefKind::TYPE_ENUM) {
         Errorln(chirNode.GetIdentifier() + " is expected to be a enumDef.");
@@ -401,8 +405,7 @@ bool CheckEnum(
     return CheckInheritDeclMembers(decl, chirNode, globalCache);
 }
 
-bool CheckStruct(
-    const Cangjie::AST::StructDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
+bool CheckStruct(const AST::StructDecl& decl, const CustomTypeDef& chirNode, const AST2CHIRNodeMap<Value>& globalCache)
 {
     if (chirNode.GetCustomKind() != CustomDefKind::TYPE_STRUCT) {
         Errorln(chirNode.GetIdentifier() + " is expected to be a structDef.");
@@ -411,7 +414,7 @@ bool CheckStruct(
     return CheckInheritDeclMembers(decl, chirNode, globalCache);
 }
 
-bool CheckFunc(const Cangjie::AST::FuncDecl& decl, const Value& chirNode)
+bool CheckFunc(const AST::FuncDecl& decl, const Value& chirNode)
 {
     if (!Is<Function>(chirNode)) {
         Errorln(chirNode.GetIdentifier() + " is expected to be a func.");
@@ -423,7 +426,7 @@ bool CheckFunc(const Cangjie::AST::FuncDecl& decl, const Value& chirNode)
     }
     auto astTy = decl.GetTy();
     auto chirTy = chirNode.GetType();
-    if (!CheckType(*astTy, *chirTy)) {
+    if (!CheckType(astTy, *chirTy)) {
         bool report = true;
         if (decl.TestAttr(AST::Attribute::SPECIFIC) && chirNode.TestAttr(Attribute::DESERIALIZED)) {
             // `specific` function type can be subtype of `common` function type.
@@ -432,14 +435,14 @@ bool CheckFunc(const Cangjie::AST::FuncDecl& decl, const Value& chirNode)
         }
 
         if (report) {
-            Errorln(chirNode.GetIdentifier() + " is expected to be " + Cangjie::AST::Ty::ToString(astTy) + ".");
+            Errorln(chirNode.GetIdentifier() + " is expected to be " + AST::Ty::ToString(astTy.Ty()) + ".");
             return false;
         }
     }
     return true;
 }
 
-bool CheckVar(const Cangjie::AST::VarDecl& decl, const Value& chirNode)
+bool CheckVar(const AST::VarDecl& decl, const Value& chirNode)
 {
     if (!Is<GlobalVar>(chirNode)) {
         Errorln(chirNode.GetIdentifier() + " is expected to be a globalVar.");
@@ -447,8 +450,9 @@ bool CheckVar(const Cangjie::AST::VarDecl& decl, const Value& chirNode)
     }
     auto astTy = decl.GetTy();
     auto chirTy = chirNode.GetType();
-    if (!CheckType(*astTy, *chirTy)) {
-        Errorln(chirNode.GetIdentifier() + " is expected to be " + Cangjie::AST::Ty::ToString(astTy) + ".");
+    CJC_NULLPTR_CHECK(chirTy);
+    if (!CheckType(astTy, *chirTy)) {
+        Errorln(chirNode.GetIdentifier() + " is expected to be " + astTy.String() + ".");
         return false;
     }
     return true;
@@ -497,4 +501,4 @@ bool AST2CHIRCheckValue(const AST::Node& astNode, const Value& chirNode)
     }
     return true;
 }
-} // namespace Cangjie::CHIR
+} // namespace CHIR

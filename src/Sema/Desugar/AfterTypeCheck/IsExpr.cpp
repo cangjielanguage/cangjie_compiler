@@ -27,7 +27,7 @@ namespace Cangjie::Sema::Desugar::AfterTypeCheck {
  * */
 void DesugarIsExpr(TypeManager& typeManager, IsExpr& ie)
 {
-    if (!Ty::IsTyCorrect(ie.GetTy()) || !ie.GetTy()->IsBoolean() || ie.desugarExpr) {
+    if (!ie.GetTy().IsCorrect() || !ie.GetTy()->IsBoolean() || ie.desugarExpr) {
         return;
     }
     CJC_NULLPTR_CHECK(ie.leftExpr);

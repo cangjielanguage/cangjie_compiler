@@ -715,6 +715,9 @@ OwnedPtr<Decl> ASTLoader::ASTLoaderImpl::LoadVarDecl(const PackageFormat::Decl& 
     varDecl->isVar = info->isVar();
     varDecl->isMemberParam = info->isMemberParam();
     varDecl->isConst = info->isConst();
+    if (info->demode()) {
+        varDecl->modifiers.emplace(TokenKind::DEMODE, DEFAULT_POSITION);
+    }
     LoadDeclBasicInfo(decl, *varDecl);
     if ((importSrcCode && !varDecl->TestAttr(AST::Attribute::COMMON)) || deserializingCommon) {
         varDecl->initializer = LoadExpr(info->initializer());
@@ -783,6 +786,9 @@ OwnedPtr<FuncParamList> ASTLoader::ASTLoaderImpl::LoadFuncParamList(const Packag
         }
         ret->params.emplace_back(std::move(param));
     }
+    if (funcParamList->thisParam() != INVALID_FORMAT_INDEX) {
+        ret->thisParam = LoadDecl<ThisParam>(funcParamList->thisParam());
+    }
     return ret;
 };
 
@@ -796,6 +802,13 @@ OwnedPtr<Decl> ASTLoader::ASTLoaderImpl::LoadFuncParam(const PackageFormat::Decl
     funcParam->isMemberParam = info->isMemberParam();
     funcParam->assignment = LoadExpr(info->defaultVal());
     return funcParam;
+}
+
+OwnedPtr<AST::Decl> ASTLoader::ASTLoaderImpl::LoadThisParam(const PackageFormat::Decl& decl, int64_t declIndex)
+{
+    auto tp = CreateAndLoadBasicInfo<ThisParam>(decl, declIndex);
+    LoadDeclBasicInfo(decl, *tp);
+    return tp;
 }
 
 void ASTLoader::ASTLoaderImpl::LoadFuncDeclAdvancedInfo(const PackageFormat::Decl& decl, FuncDecl& funcDecl)
@@ -955,6 +968,21 @@ OwnedPtr<Decl> ASTLoader::ASTLoaderImpl::LoadBuiltInDecl(const PackageFormat::De
     LoadDeclBasicInfo(decl, *bid);
     AddDeclToImportedPackage(*bid);
     bid->generic = LoadGeneric(*bid, decl.generic());
+    Ptr<File> fileForBid = nullptr;
+    if (auto found = idToFileMap.find(bid->begin.fileID); found != idToFileMap.end()) {
+        fileForBid = found->second;
+    }
+    CJC_NULLPTR_CHECK(fileForBid);
+    bid->curFile = fileForBid;
+    auto& members = bid->GetMemberDecls();
+    auto memberBody = info->body();
+    if (memberBody != nullptr && memberBody->size() != 0) {
+        for (uoffset_t i = 0; i < memberBody->size(); i++) {
+            auto index = memberBody->Get(i);
+            members.emplace_back(LoadDecl(index));
+            SetOuterDeclForMemberDecl(*members[i], *bid);
+        }
+    }
     return bid;
 }
 

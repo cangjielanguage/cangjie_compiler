@@ -134,7 +134,7 @@ ERROR(sema_interface_call_with_unimplemented_call, "static invocation contains u
 ERROR(sema_type_uninitialized_static_field, "the static member variable '%s' is not initialized")
 ERROR(sema_instance_func_cannot_be_used_in_finalizer, "instance %s cannot be used in the finalizer")
 ERROR(sema_no_non_param_constructor_in_super_class,
-    "there is no non-parameter constructor in super class, please invoke super call explicitly")
+    "there is no non-parameter constructor%s in super class, please invoke super call explicitly")
 ERROR(sema_non_abstract_class_cannot_be_sealed, "non-abstract class cannot be modified by 'sealed'")
 ERROR(sema_static_variable_use_generic_parameter, "static member cannot depend on generic parameter '%s'")
 ERROR(sema_cstruct_cannot_impl_interfaces, "struct with @C cannot implement interfaces")
@@ -408,6 +408,37 @@ ERROR(sema_hide_missing_hide, "should be marked with '@!Hide' to be hidden")
 ERROR(sema_hide_compile_time_invisible, "'@!Hide' annotation must be visible at compile time")
 ERROR(sema_hide_diff_param, "the parameter 'isChecked' of '@!Hide' is %s")
 WARNING(sema_hide_must_at_end, APILEVEL_CHECK, "annotation '%s' must be placed below all macros and annotations")
+
+// modal type
+ERROR(sema_unpexected_modal_type, "expected data type, got '%s'")
+ERROR(sema_bad_external_local_arg, "cannot pass argument of external @local! to @local! parameter '%s'")
+ERROR(sema_bad_internal_local_return, "cannot return expression of internal @local! type")
+ERROR(sema_exclave_outside_function, "exclave must be used in a function")
+ERROR(sema_exclave_invalid_func_signature,
+    "exclave must be used in func with @local! non copy param or @local!/@local? non copy return type")
+ERROR(sema_nested_exclave, "exclave cannot be nested", {"outer exclave is here"})
+ERROR(sema_copy_struct_bad_field, "cannot declare field '%s' of non copy type '%s' in copy type '%s'")
+ERROR(sema_illegal_copyable_type_usage,
+    "'Copyable' can only be used as a struct supertype or a generic upper bound")
+ERROR(sema_bad_capture_local, "cannot capture %s variable '%s' in %s %s")
+ERROR(sema_bad_local_assignment, "cannot assign%s to expression of '%s' type")
+ERROR(sema_bad_local_half_ma, "cannot assign to member of @local? value of non copy type outside its constructor"
+    "and finalizer")
+ERROR(sema_exclave_in_main, "cannot use exclave expression in %s")
+ERROR(sema_expected_data_type, "expected data type here, got modal type '%s'")
+ERROR(sema_member_var_initalizer_in_mixed_init, "member variable '%s' of non copy type '%s' cannot have initializer in "
+    "%s with initializers that have different this locality")
+ERROR(sema_init_modal_must_be_in_exclave, "whole body of %s constructor must be in exclave")
+ERROR(sema_finalizer_this_mode_mismatch,
+    "finalizer this mode '%s' must be a supertype of all initializer this mode '%s'")
+ERROR(sema_mode_on_non_constructor_call, "cannot specify mode for non constructor call")
+ERROR(sema_prop_redefinition, "overloaded instance property must be of the same data type")
+ERROR(sema_prop_method_target_type_mismatch, "expect the same data type '%s' as the property, got '%s'")
+ERROR(sema_property_setter_this_local_half_disallowed, "@local? setter is only allowed on Copyable property")
+ERROR(sema_invalid_local_func_type, "cannot define a %s with @local! function type")
+ERROR(sema_static_prop_overload, "static prop cannot be overloaded")
+ERROR(sema_cannot_access_local_var_outside_exclave,
+    "cannot access local variable %s of '%s' type outside exclave")
 
 WARNING(sema_unused_import, UNUSED, "unused import '%s'", "unused import")
 

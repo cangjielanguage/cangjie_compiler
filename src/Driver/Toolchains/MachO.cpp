@@ -130,10 +130,9 @@ void MachO::HandleLLVMLinkOptions(const std::vector<TempFileInfo>& objFiles, Too
     SortInputlibraryFileAndAppend(tool, objFiles);
     // Note that the pgo options must be inserted after those from SortInputlibraryFileAndAppend
     tool.AppendArgIf(driverOptions.enablePgoInstrGen, "-u", "___llvm_profile_runtime");
-    tool.AppendArgIf(driverOptions.enablePgoInstrGen || driverOptions.enableCoverage,
-        FileUtil::JoinPath(cangjieLibPath, GetClangRTProfileLibraryName()));
     // 4. The built-in library dependencies
     GenerateLinkOptionsOfBuiltinLibs(tool);
+    AppendClangRTProfileLibraryIfNeeded(tool);
     // 5. System library dependencies required by the backend
     GenerateLinkOptions(tool);
 }

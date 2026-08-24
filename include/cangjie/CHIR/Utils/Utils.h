@@ -736,7 +736,8 @@ bool IsInstanceVarInit(const Value& value);
 
 std::vector<ClassType*> GetSuperTypesRecusively(Type& subType, CHIRBuilder& builder);
 
-Type* GetInstParentCustomTypeForApplyCallee(const ApplyBase& expr, CHIRBuilder& builder);
+Type* GetInstParentCustomTyOfCallee(
+    const Value& value, const std::vector<Value*>& args, const Type* thisType, CHIRBuilder& builder);
 
 std::vector<VTableSearchRes> GetFuncIndexInVTable(
     Type& root, const FuncCallType& funcCallType, CHIRBuilder& builder);
@@ -826,5 +827,18 @@ std::string GetBinaryExprKindLiteral(BinaryExprKind kind);
  * @return The non-debug users of the value.
  */
 std::vector<Expression*> GetNonDebugUsers(const Value& val);
+
+/**
+ * @brief Retrieves the callee in src parent type.
+ *
+ * @param callee The callee to retrieve in src parent type.
+ * @param methodName The method name to retrieve in src parent type.
+ * @param expectedOffset The expected offset of the callee in src parent type.
+ * @return The callee in src parent type.
+ */
+Function* GetCalleeInSrcParentType(
+    Function& callee, const std::string& methodName, std::optional<size_t> expectedOffset = std::nullopt);
+
+bool LambdaIsUnused(const Lambda& lambda);
 } // namespace Cangjie::CHIR
 #endif

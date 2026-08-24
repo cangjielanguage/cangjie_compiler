@@ -51,9 +51,9 @@ void DiagJavaMirrorChildMustBeAnnotated(DiagnosticEngine& diag, const ClassLikeD
 
     for (auto& parentType : decl.inheritedTypes) {
         auto pty = parentType->GetTy();
-        if (auto parent = DynamicCast<ClassTy>(pty)) {
+        if (auto parent = DynamicCast<ClassTy>(pty.Ty())) {
             parentDecl = parent->decl;
-        } else if (auto parentI = DynamicCast<InterfaceTy>(pty)) {
+        } else if (auto parentI = DynamicCast<InterfaceTy>(pty.Ty())) {
             parentDecl = parentI->decl;
         }
         if (parentDecl && parentDecl->IsJavaMirror()) {

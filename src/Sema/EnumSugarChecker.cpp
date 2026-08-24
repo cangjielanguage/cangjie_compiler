@@ -38,7 +38,7 @@ bool TypeChecker::EnumSugarChecker::CheckVarDeclTargets()
         for (auto& it : varDeclTargets) {
             diagBuilder.AddNote(*it, DiagKind::sema_found_candidate_decl);
         }
-        refExpr.SetTy(TypeManager::GetInvalidTy());
+        refExpr.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     return true;
@@ -63,8 +63,8 @@ void TypeChecker::EnumSugarChecker::CheckGenericEnumSugarWithTypeArgs(Ptr<EnumDe
         return;
     }
     for (size_t i = 0; i < refExpr.typeArguments.size(); ++i) {
-        typeMapping[StaticCast<GenericsTy*>(ed->generic->typeParameters[i]->GetTy())] =
-            refExpr.typeArguments[i]->GetTy();
+        typeMapping[StaticCast<GenericsTy*>(ed->generic->typeParameters[i]->DataTy())] =
+            refExpr.typeArguments[i]->DataTy();
     }
     refExpr.SetTy(typeChecker.typeManager.GetInstantiatedTy(refExpr.GetTy(), typeMapping));
 }
