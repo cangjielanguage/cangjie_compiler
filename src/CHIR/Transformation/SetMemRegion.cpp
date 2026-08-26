@@ -6,6 +6,7 @@
 
 #include "cangjie/CHIR/Transformation/SetMemRegion.h"
 
+#include "cangjie/CHIR/IR/Annotation.h"
 #include "cangjie/CHIR/IR/Expression/Terminator.h"
 #include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/Utils/Utils.h"
@@ -52,8 +53,7 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
     Visitor::Visit(*func.GetBody(), [&scopeNeedsRegion](Expression& expr) -> VisitResult {
         if (Is<Exclave>(expr)) {
             return VisitResult::SKIP;
-        }
-        if (Is<FuncCall>(expr)) {
+        } else if (Is<FuncCall>(expr)) {
             // 1. function call where the callee return type does not implement `Copyable` and has mode
             // `local!` or `local?`
             if (expr.GetResult()->GetType()->StripAllRefs()->IsLocalRegion()) {
@@ -107,13 +107,22 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
         }
         return VisitResult::CONTINUE;
     });
+    // A callee that returns `@local!` / `@local?` must allocate into the *caller's* active region.
+    // Wrapping this function body in StartRegion/EndRegion would end the region before the return
+    // value is consumed. Virtual wrappers may report Box<>& as GetReturnType(); use the raw method.
+    auto retTy = func.GetReturnType();
+    if (auto rawMethod = func.Get<WrappedRawMethod>()) {
+        retTy = rawMethod->GetReturnType();
+    }
+    if (retTy->StripAllRefs()->IsLocalRegion()) {
+        scopeNeedsRegion.erase(func.GetBody());
+    }
     return scopeNeedsRegion;
 }
 
 void SetMemRegion::RunOnFunc(const Function& func)
 {
-    auto bgsNeedRegion = CollectFunctionRegionBlockGroup(func);
-    SetRegions(bgsNeedRegion);
+    SetRegions(CollectFunctionRegionBlockGroup(func));
     FlattenExclave(*func.GetBody());
 }
 
@@ -134,13 +143,24 @@ void SetMemRegion::SetRegions(const std::unordered_set<BlockGroup*>& bgsNeedRegi
             // we will visit lambda's body later because `bgsNeedRegion` contains it
             if (Is<Lambda>(expr) || Is<Exclave>(expr)) {
                 return VisitResult::SKIP;
-            }
-            if (!Is<Exit>(expr) && !Is<RaiseException>(expr) && !Is<Exclave>(expr)) {
+            } else if (Is<Exit>(expr)) {
+                auto parentBlock = expr.GetParentBlock();
+                auto endRegion = builder.CreateExpression<EndRegion>(builder.GetUnitTy(), parentBlock);
+                endRegion->MoveBefore(&expr);
+                return VisitResult::CONTINUE;
+            } else if (auto raise = DynamicCast<RaiseException*>(&expr)) {
+                // Same-frame catch must keep the current local region alive (see catch.cj):
+                // EndRegion before RaiseException(..., catchBlock) would free the region, then
+                // post-catch `@local!` allocations fail with "without local object region".
+                // Only end the region when unwinding out of this frame (no exception successor).
+                if (raise->GetExceptionBlock() != nullptr) {
+                    return VisitResult::CONTINUE;
+                }
+                auto parentBlock = expr.GetParentBlock();
+                auto endRegion = builder.CreateExpression<EndRegion>(builder.GetUnitTy(), parentBlock);
+                endRegion->MoveBefore(&expr);
                 return VisitResult::CONTINUE;
             }
-            auto parentBlock = expr.GetParentBlock();
-            auto endRegion = builder.CreateExpression<EndRegion>(builder.GetUnitTy(), parentBlock);
-            endRegion->MoveBefore(&expr);
             return VisitResult::CONTINUE;
         });
     }
