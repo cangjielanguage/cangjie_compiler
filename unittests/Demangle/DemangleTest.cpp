@@ -38,7 +38,7 @@ TEST(DemangleTest, LocalParam)
     ASSERT_TRUE(di.IsValid());
     EXPECT_STREQ("stdx.encoding.json", di.GetPkgName().Str());
     EXPECT_STREQ("(stdx.encoding.json.JsonParserLocal @ local!)", di.GetArgTypesName().Str());
-    const char* expectedFull = "stdx.encoding.json.parseJson(stdx.encoding.json.JsonParserLocal @local!)";
+    const char* expectedFull = "stdx.encoding.json.parseJson(stdx.encoding.json.JsonParserLocal @ local!)";
     std::string full =
         std::string(di.GetPkgName().Str()) + "." + std::string(di.GetFullName(demangler.ScopeResolution()).Str());
     EXPECT_STREQ(expectedFull, full.c_str());

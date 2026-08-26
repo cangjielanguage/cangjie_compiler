@@ -2007,7 +2007,7 @@ main() {
     results = instance->GetGivenReferenceTarget(ctx, scopeName, *access05, false);
     ASSERT_FALSE(results.hasDecl);
     tys = results.tys;
-    ASSERT_EQ(tys.size(), 3);
+    ASSERT_EQ(tys.size(), 7);
     auto str = Ty::GetModalTypesToStableStr(std::set<ModalTy>(tys.begin(), tys.end()), " ");
     EXPECT_EQ(str, "Struct-Array<Struct-String> Struct-String Unit");
 
