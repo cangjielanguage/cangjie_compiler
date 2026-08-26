@@ -1316,10 +1316,11 @@ llvm::Instruction* IRBuilder2::CallIntrinsicGetVTableFunc(
 }
 
 // parameters = {i8 addrspace(1)* dst, i8 addrspace(1)* src, TypeInfo* ti}
-llvm::Instruction* IRBuilder2::CallIntrinsicAssignGeneric(const std::vector<llvm::Value*>& parameters)
+llvm::Instruction* IRBuilder2::CallIntrinsicAssignGeneric(const std::vector<llvm::Value*>& parameters, bool isLocal)
 {
     CJC_ASSERT(parameters.size() == 3U);
-    llvm::Function* func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_assign_generic);
+    auto intrinsic = isLocal ? llvm::Intrinsic::cj_assign_local_generic : llvm::Intrinsic::cj_assign_generic;
+    llvm::Function* func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), intrinsic);
     auto fixedParams = {parameters[0], parameters[1], CreateBitCast(parameters[2], getInt8PtrTy())};
     return CreateCall(func, fixedParams);
 }

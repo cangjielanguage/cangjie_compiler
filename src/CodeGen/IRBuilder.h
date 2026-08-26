@@ -447,7 +447,7 @@ public:
     llvm::Instruction* CallIntrinsicMethodOuterType(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallIntrinsicGetVTableFunc(
         llvm::Value* ti, llvm::Value* introTypeIdx, llvm::Value* funcOffset, llvm::Value* introTI);
-    llvm::Instruction* CallIntrinsicAssignGeneric(const std::vector<llvm::Value*>& parameters);
+    llvm::Instruction* CallIntrinsicAssignGeneric(const std::vector<llvm::Value*>& parameters, bool isLocal = false);
 
     llvm::Value* CreateTypeInfoIsReferenceCall(llvm::Value* ti);
     llvm::Value* CreateTypeInfoIsReferenceCall(const CHIR::Type& chirType);

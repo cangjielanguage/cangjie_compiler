@@ -422,7 +422,7 @@ llvm::Value* IRBuilder2::GetReturnValue(const CGFunctionType& calleeType, llvm::
                 // Opt: if we can return `ret` without the copy?
                 auto ti = CreateTypeInfo(*rstType);
                 auto tmp = CallIntrinsicAllocaGeneric({ti, GetLayoutSize_32(*rstType)}, rstType->IsLocalRegion());
-                CallIntrinsicAssignGeneric({tmp, ret, ti});
+                CallIntrinsicAssignGeneric({tmp, ret, ti}, rstType->IsLocalRegion());
                 ret = tmp;
             } else if (rstCGType->GetSize() && !rstCGType->IsReference()) {
                 auto elementType = rstCGType->GetLLVMType();
@@ -793,7 +793,7 @@ llvm::Instruction* EmitStoreDispatchedOnRefness(IRBuilder2& irBuilder, const Sto
 
     irBuilder.SetInsertPoint(handleNonRefBB);
     auto buffer = AcquireBufferForNonRefValue(irBuilder, store, destChirType, destTypeInfo, destAddr);
-    irBuilder.CallIntrinsicAssignGeneric({buffer, store.val, destTypeInfo});
+    irBuilder.CallIntrinsicAssignGeneric({buffer, store.val, destTypeInfo}, destChirType.IsLocalRegion());
     irBuilder.CreateBr(exitBB);
 
     irBuilder.SetInsertPoint(exitBB);
@@ -828,7 +828,9 @@ llvm::Instruction* EmitRefValueStoreIntoOpaqueDest(IRBuilder2& irBuilder, const 
         return irBuilder.CallGCWriteGenericPayload({store.destAddr, store.val, size});
     }
     auto storedTypeInfo = irBuilder.CreateTypeInfo(store.StoredChirTypeOr(*valType));
-    return irBuilder.CallIntrinsicAssignGeneric({store.destAddr, store.val, storedTypeInfo});
+    return irBuilder.CallIntrinsicAssignGeneric(
+        {store.destAddr, store.val, storedTypeInfo},
+        store.boxType != nullptr ? store.boxType->IsLocalRegion() : store.destDerefType->GetOriginal().IsLocalRegion());
 }
 
 // Emits both a reference barrier and a generic value copy for a field whose layout is only
@@ -1111,7 +1113,8 @@ llvm::Value* IRBuilder2::CreateLoad(llvm::Type* elementType, llvm::Value* addr, 
             } else {
                 auto i8PtrTy = getInt8PtrTy(1U);
                 CJC_ASSERT(addr->getType() == i8PtrTy->getPointerTo());
-                CallIntrinsicAssignGeneric({valueVal, LLVMIRBuilder2::CreateLoad(i8PtrTy, addr), ti});
+                CallIntrinsicAssignGeneric(
+                    {valueVal, LLVMIRBuilder2::CreateLoad(i8PtrTy, addr), ti}, elemCHIRType->IsLocalRegion());
             }
             CreateBr(exitBB);
             SetInsertPoint(exitBB);
@@ -1130,7 +1133,8 @@ llvm::Value* IRBuilder2::CreateLoad(llvm::Type* elementType, llvm::Value* addr, 
             } else {
                 auto i8PtrTy = getInt8PtrTy(1U);
                 CJC_ASSERT(addr->getType() == i8PtrTy->getPointerTo());
-                CallIntrinsicAssignGeneric({valueVal, LLVMIRBuilder2::CreateLoad(i8PtrTy, addr), tiOfElement});
+                CallIntrinsicAssignGeneric(
+                    {valueVal, LLVMIRBuilder2::CreateLoad(i8PtrTy, addr), tiOfElement}, elemCHIRType->IsLocalRegion());
             }
             return valueVal;
         }

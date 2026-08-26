@@ -155,7 +155,7 @@ llvm::Value* IRBuilder2::CreateLoad(const CGValue& cgVal, const llvm::Twine& nam
         auto addrSpace = cgVal.GetRawValue()->getType()->getPointerAddressSpace();
         if (basePtr == nullptr) {
             if (addrSpace == 1U) {
-                CallIntrinsicAssignGeneric({tmp, *cgVal, ti});
+                CallIntrinsicAssignGeneric({tmp, *cgVal, ti}, isLocalRegion);
             } else {
                 CallGCWriteGenericPayload({tmp, *cgVal, payloadSize});
             }
