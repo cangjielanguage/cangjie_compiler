@@ -18,6 +18,7 @@
 #include "cangjie/Sema/TypeManager.h"
 
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -793,8 +794,10 @@ private:
     }
 
     /// The following functions need mark needsRegion:
-    /// The function has in its body a func call that returns a non copy non @~local type (including constructor call
-    /// and enum constructor call)
+    /// 1. it has a call where return type is non copy local!/local? type
+    /// 2. it has a ctor call of non copy local!/local? type, to any type (struct, class, enum, literal, box, clsoure)
+    /// 3. it has a prop call where the prop type is non copy local!/local?
+    /// 4. it has a call which uses default value of a param, and the param's type is non copy local!/local? type
     /// specifically when the whole function body is an exclave, don't generate region; otherwise the new region will
     /// be immediately closed, so this is an optimization.
     void CheckNeedsRegion(const Node& body, bool& needsRegion)
@@ -810,22 +813,26 @@ private:
                 if (auto target = ref->GetTarget();
                     target && target->TestAttr(Attribute::ENUM_CONSTRUCTOR) && IsNonCopyLocalTy(ref->GetTy())) {
                     needsRegion = true;
-                    return VisitAction::SKIP_CHILDREN;
+                    return VisitAction::STOP_NOW;
                 }
             }
             if (auto call = DynamicCast<CallExpr>(node)) {
                 if (!call->baseFunc || !call->GetTy().IsCorrect()) {
                     return VisitAction::SKIP_CHILDREN;
                 }
-                if (call->GetTy()->IsNothing()) {
-                    // nothing call itself does not require a region, but exprs before the call may
-                    // require a region
-                    return VisitAction::WALK_CHILDREN;
+                // rule 4
+                if (!call->defaultArgs.empty()) {
+                    for (auto& arg : call->defaultArgs) {
+                        if (IsNonCopyLocalTy(arg->GetTy())) {
+                            needsRegion = true;
+                            return VisitAction::STOP_NOW;
+                        }
+                    }
                 }
                 ModalTy targetTy{};
                 if (call->callKind == CallKind::CALL_FUNCTION_PTR) {
                     // fp call, no target
-                    if (auto funcTy = DynamicCast<FuncTy*>(call->baseFunc->DataTy())) {
+                    if (auto funcTy = DynamicCast<FuncTy>(call->baseFunc->DataTy())) {
                         targetTy = funcTy->retTy;
                     } else {
                         targetTy = call->baseFunc->GetTy();
@@ -835,14 +842,14 @@ private:
                     call->callKind == CallKind::CALL_STRUCT_CREATION) {
                     targetTy = call->GetTy(); // do not use retTy because only targetTy has the correct
                         // modal type, retTy is of data type
-                    if (auto funcTy = DynamicCast<FuncTy*>(targetTy.Ty())) {
+                    if (auto funcTy = DynamicCast<FuncTy>(targetTy.Ty())) {
                         targetTy = funcTy->retTy;
                     }
                 } else {
                     targetTy = call->GetTy();
                 }
-                CJC_NULLPTR_CHECK(targetTy);
-                // non copy non @~local type, needs a region
+                // IsNonCopyLocalTy already returns false for an unset/null targetTy, so no null check
+                // is needed here.
                 if (IsNonCopyLocalTy(targetTy)) {
                     needsRegion = true;
                     return VisitAction::STOP_NOW;
@@ -1306,12 +1313,17 @@ private:
             if (call.baseFunc->GetTy()->kind == TypeKind::TYPE_CSTRING) {
                 return 1UL;
             }
+            if (auto base = DynamicCast<BuiltInDecl>(call.baseFunc->GetTarget());
+                base && base->type == BuiltInType::CFUNC) {
+                // cfunc construction takes 1 cfunc arg or 1 cpointer arg
+                return 1UL;
+            }
             // function pointer call, no need to check 'this' param
-            if (auto fty = DynamicCast<FuncTy*>(call.baseFunc->DataTy())) {
+            if (auto fty = DynamicCast<FuncTy>(call.baseFunc->DataTy())) {
                 return fty->paramTys.size();
             }
             // invalid
-            return -1UL;
+            return std::numeric_limits<size_t>::max();
         }
         if (IsNonStaticMemberFunction(*func)) {
             return func->funcBody->paramLists[0]->params.size() + 1;
@@ -1436,9 +1448,9 @@ private:
         return IsNonCopyLocalTy(fp->GetTy());
     }
 
-    void DiagBadExternalLocalArg(const FuncParamInfo& param, const Expr& arg)
+    void DiagBadExternalLocalArg(const Node& pos, std::string_view paramName)
     {
-        d.DiagnoseRefactor(DiagKindRefactor::sema_bad_external_local_arg, arg, std::string{param.name});
+        d.DiagnoseRefactor(DiagKindRefactor::sema_bad_external_local_arg, pos, std::string{paramName});
     }
 
     void DiagBadInternalLocalReturn(const Expr& expr)
@@ -1446,11 +1458,11 @@ private:
         d.DiagnoseRefactor(DiagKindRefactor::sema_bad_internal_local_return, expr);
     }
 
-    /// Check call expr args cannot be external @local! type if the param is @local! nor Copy
+    /// Check call expr args cannot be external @local! type if the param is non Copy @local!
     void CheckCallExpr(const ASTContext& ctx, const CallExpr& call)
     {
         size_t paramNum = GetParamNum(call);
-        if (paramNum == -1UL) {
+        if (paramNum == std::numeric_limits<size_t>::max()) {
             // invalid call node, skip
             return;
         }
@@ -1466,8 +1478,29 @@ private:
             auto param = GetFuncParam(call, i);
             if (param.modal.local == Mode::FULL && arg->TyMode().local == Mode::FULL &&
                 IsExternalLocal(ctx, *arg) && !type.ImplementsCopyInterface(arg->DataTy())) {
-                DiagBadExternalLocalArg(param, *arg);
+                DiagBadExternalLocalArg(*arg, param.name);
             }
+        }
+        auto fd = call.resolvedFunction;
+        if (!fd || fd->TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
+            return;
+        }
+        if (TypeManager::HasThisParam(*fd)) {
+            auto thisType = TypeManager::GetThisParamTy(*fd);
+            if (thisType.Mode().local != Mode::FULL || type.ImplementsCopyInterface(thisType.Ty())) {
+                return;
+            }
+            if (auto ref = DynamicCast<RefExpr>(&*call.baseFunc)) {
+                if (IsInExclaveExpr(ctx, *ref)) { // this is always external, only valid in exclave
+                    return;
+                }
+            } else {
+                auto& ma = StaticCast<MemberAccess>(*call.baseFunc);
+                if (!IsExternalLocal(ctx, ma)) {
+                    return;
+                }
+            }
+            DiagBadExternalLocalArg(call, "this");
         }
     }
 
