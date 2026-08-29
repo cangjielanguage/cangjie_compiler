@@ -519,7 +519,9 @@ bool TypeChecker::TypeCheckerImpl::ChkRefExpr(ASTContext& ctx, ModalTy target, N
             }
             continue;
         }
-        ++matched;
+        if (++matched > 1) {
+            continue;
+        }
         ReplaceTarget(&refNode, fd);
         matchedFd = fd;
         refNode.SetTy(fdTy);
@@ -552,7 +554,7 @@ bool TypeChecker::TypeCheckerImpl::ChkRefExpr(ASTContext& ctx, ModalTy target, N
         }
         InstantiateReferenceType(ctx, refNode, resultMapping);
     }
-    return !candidates.empty();
+    return matched != 0;
 }
 
 bool TypeChecker::TypeCheckerImpl::SynTargetOnUsed(ASTContext& ctx, const NameReferenceExpr& nre, Decl& target)

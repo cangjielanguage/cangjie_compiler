@@ -1239,6 +1239,15 @@ void ParserImpl::DiagExpectedGetOrSetInProp(const Position& pos)
     builder.AddHint(MakeRange(pos, "prop"));
 }
 
+void ParserImpl::DiagDuplicatedGetOrSet(const Node& node, const PropDecl& pd)
+{
+    auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_duplicated_get_or_set, lookahead, lookahead.Value());
+    builder.AddMainHintArguments(lookahead.Value());
+    builder.AddHint(node);
+
+    builder.AddHint(MakeRange(pd.begin, "prop"));
+}
+
 void ParserImpl::DiagUnknownPrimaryConstructor(const std::string& str)
 {
     auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_decl, lookahead, ConvertToken(lookahead));

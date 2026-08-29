@@ -900,6 +900,7 @@ private:
     void DiagExpectedInitializerForToplevelVar(const AST::Decl& vd);
     void DiagExpectedIdentifierOrPattern(bool isVar, const Position& pos, bool isConst = false);
     void DiagExpectedGetOrSetInProp(const Position& pos);
+    void DiagDuplicatedGetOrSet(const AST::Node& node, const AST::PropDecl& pd);
     void DiagUnknownPrimaryConstructor(const std::string& str);
     void DiagExpectedName(const std::string& str, const std::string& afterName);
     void DiagGetOrSetCannotBeGeneric(const std::string& str, const AST::Generic& ge);

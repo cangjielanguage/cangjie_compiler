@@ -513,7 +513,9 @@ private:
         WalkSubtree(ctx, te.finallyLambda.get());
     }
 
-    /// Functions that return internal @local! must return so via exclave. External @local! or Copy is ok.
+    /// Functions that return internal @local!/? must return so via exclave. External @local! and copy type are ok.
+    /// Note that there is no 'internal/external' @local? in spec, but since the check here are the same, so we use
+    /// the same check.
     void CheckReturnModalType(const ASTContext& ctx, Node& func)
     {
         auto body = TypeCheckUtil::GetFuncBody(func);
@@ -525,8 +527,7 @@ private:
         }
         auto r = CollectReturnedExpr(*body);
         for (auto& e : r) {
-            if (!IsExternalLocal(ctx, *e) && !type.ImplementsCopyInterface(e->DataTy()) && !IsInExclaveExpr(ctx, *e) &&
-                e->TyMode().local == Mode::FULL) {
+            if (!IsExternalLocal(ctx, *e) && IsNonCopyLocalTy(e->GetTy()) && !IsInExclaveExpr(ctx, *e)) {
                 DiagBadInternalLocalReturn(*e);
             }
         }
@@ -1455,7 +1456,7 @@ private:
 
     void DiagBadInternalLocalReturn(const Expr& expr)
     {
-        d.DiagnoseRefactor(DiagKindRefactor::sema_bad_internal_local_return, expr);
+        d.DiagnoseRefactor(DiagKindRefactor::sema_bad_internal_local_return, expr, expr.TyMode().ToString());
     }
 
     /// Check call expr args cannot be external @local! type if the param is non Copy @local!

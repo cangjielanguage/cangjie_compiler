@@ -373,6 +373,12 @@ void ParserImpl::ParsePropBody(const std::set<Modifier>& modifiers, PropDecl& pr
         std::set<Modifier> modis;
         ParseModifiers(modis);
         if (SeeingPropMember()) {
+            if (lookahead == "get" && getter) {
+                DiagDuplicatedGetOrSet(*getter, propDecl);
+            }
+            if (lookahead == "set" && setter) {
+                DiagDuplicatedGetOrSet(*setter, propDecl);
+            }
             if (lookahead == "get") {
                 auto res = ParsePropMemberDecl(modis);
                 CheckGetterAnnotations(annos, res);

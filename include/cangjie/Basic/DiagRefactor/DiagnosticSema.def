@@ -412,7 +412,7 @@ WARNING(sema_hide_must_at_end, APILEVEL_CHECK, "annotation '%s' must be placed b
 // modal type
 ERROR(sema_unpexected_modal_type, "expected data type, got '%s'")
 ERROR(sema_bad_external_local_arg, "cannot pass argument of external @local! to @local! parameter '%s'")
-ERROR(sema_bad_internal_local_return, "cannot return expression of internal @local! type")
+ERROR(sema_bad_internal_local_return, "cannot return expression of internal %s mode")
 ERROR(sema_exclave_outside_function, "exclave must be used in a function")
 ERROR(sema_exclave_invalid_func_signature,
     "exclave must be used in func with @local! non copy param or @local!/@local? non copy return type")

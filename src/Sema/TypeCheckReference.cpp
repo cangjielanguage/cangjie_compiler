@@ -583,9 +583,6 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::FilterAndGetTargetsOfObjAccess(
         if (decl->TestAttr(Attribute::STATIC)) {
             it = targets.erase(it);
         } else {
-            if (decl->astKind == ASTKind::FUNC_DECL || decl->astKind == ASTKind::PROP_DECL) {
-                ma.targets.push_back(decl);
-            }
             ++it;
         }
     }
@@ -603,7 +600,8 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::FilterAndGetTargetsOfObjAccess(
         if (!accessibleDecls.empty() && !FilterTargetsForFuncReference(ctx, ma, accessibleDecls)) {
             return nullptr;
         }
-        return accessibleDecls.empty() ? targets[0] : accessibleDecls[0];
+        ma.targets = std::move(accessibleDecls);
+        return ma.targets.empty() ? targets[0] : ma.targets[0];
     }
     auto target = GetAccessibleDecl(ctx, ma, targets);
     if (!target) {
@@ -613,6 +611,7 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::FilterAndGetTargetsOfObjAccess(
         target = targets[0];
     }
     hasTarget = hasTarget || ma.callOrPattern != nullptr;
+    ma.targets = targets;
     return target && CheckForQuestFuncRetType(diag, *target, ma, hasTarget) ? target : nullptr;
 }
 
