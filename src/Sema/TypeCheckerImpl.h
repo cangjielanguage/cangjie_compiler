@@ -1236,6 +1236,9 @@ private:
      */
     bool FilterTargetsForFuncReference(
         const ASTContext& ctx, const AST::NameReferenceExpr& expr, std::vector<Ptr<AST::Decl>>& targets);
+    /// Filter func ref by this mode.
+    void FilterFuncRefByThisMode(
+        const ASTContext& ctx, const AST::NameReferenceExpr& expr, std::vector<Ptr<AST::Decl>>& targets);
     bool IsLegalAccessFromStaticFunc(const ASTContext& ctx, const AST::RefExpr& re, const AST::Decl& decl);
     /** Filter targets of reference @p re . */
     void FilterCandidatesForRef(const ASTContext& ctx, const AST::RefExpr& re, std::vector<Ptr<AST::Decl>>& targets);

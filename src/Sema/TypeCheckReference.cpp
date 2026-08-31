@@ -452,13 +452,60 @@ bool TypeChecker::TypeCheckerImpl::FilterTargetsForFuncReference(
     if (!valid.empty() && targets.empty() && IsAllFuncDecl(valid)) {
         DiagLocalFullFunRefCapture(ctx, expr, valid[0]->identifier.Val());
     }
-    // If this reference needs to be inferred and has multiple function targets, the target cannot be distinguished.
+    // If this reference needs to be inferred and has multiple function targets, filter by this mode, and report error
+    // if still ambiguous.
+    if (targets.size() > 1 && IsAllFuncDecl(targets)) {
+        FilterFuncRefByThisMode(ctx, expr, targets);
+    }
     if (targets.size() > 1 && IsAllFuncDecl(targets)) {
         DiagAmbiguousUse(diag, expr, targets.front()->identifier, targets, importManager);
         targets.clear();
         return false;
     }
     return true;
+}
+
+void TypeChecker::TypeCheckerImpl::FilterFuncRefByThisMode(
+    const ASTContext& ctx, const NameReferenceExpr& expr, std::vector<Ptr<Decl>>& targets)
+{
+    auto receiver = GetReceiverTy(ctx, expr);
+    for (auto it = targets.begin(); it != targets.end();) {
+        auto target = *it;
+        if (TypeManager::HasThisParam(*target)) {
+            ++it;
+            continue;
+        }
+        auto mode = TypeManager::GetThisParamMode(*target);
+        // only skip this check when it is copy type method call
+        if (receiver.Mode().IsSubModal(mode) || typeManager.ImplementsCopyInterface(receiver.Ty())) {
+            ++it;
+        } else {
+            it = targets.erase(it);
+        }
+    }
+    if (targets.size() <= 1) {
+        return;
+    }
+
+    for (size_t i{0}; i + 1 < targets.size(); ++i) {
+        size_t j{i + 1};
+        while (j < targets.size()) {
+            if (!TypeManager::HasThisParam(*targets[j])) {
+                ++j;
+                continue;
+            }
+            auto imode = TypeManager::GetThisParamMode(*targets[i]);
+            auto jmode = TypeManager::GetThisParamMode(*targets[j]);
+            if (imode.IsSubModal(jmode)) {
+                targets.erase(targets.begin() + static_cast<ssize_t>(j));
+            } else if (jmode.IsSubModal(imode)) {
+                targets.erase(targets.begin() + static_cast<ssize_t>(i));
+                break;
+            } else {
+                ++j;
+            }
+        }
+    }
 }
 
 void TypeChecker::TypeCheckerImpl::RemoveTargetNotMeetExtendConstraint(ModalTy baseTy, std::vector<Ptr<Decl>>& targets)

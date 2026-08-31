@@ -12,6 +12,19 @@ struct Position {
   column: int32;
 }
 
+enum ASTMode : uint8 {
+  AST_MODE_NONE,
+  AST_MODE_NOT,
+  AST_MODE_HALF,
+  AST_MODE_FULL,
+}
+
+table ModalInfo {
+  at_pos: Position;
+  local_pos: Position;
+  local: ASTMode = AST_MODE_NONE;
+}
+
 union AnyExpr {
   BINARY_EXPR: BinaryExpr,
   UNARY_EXPR: UnaryExpr,
@@ -43,6 +56,7 @@ union AnyExpr {
   INC_OR_DEC_EXPR: IncOrDecExpr,
   SPAWN_EXPR: SpawnExpr,
   SYNCHRONIZED_EXPR: SynchronizedExpr,
+  EXCLAVE_EXPR: ExclaveExpr,
   LET_PATTERN_DESTRUCTOR: LetPatternDestructor,
   TOKEN_PART: TokenPart,
   QUOTE_EXPR: QuoteExpr,
@@ -227,6 +241,7 @@ table CallExpr {
   left_paren_pos: Position;
   args: [FuncArg];
   right_paren_pos: Position;
+  modal: ModalInfo;
 }
 
 table RefExpr {
@@ -383,6 +398,12 @@ table SynchronizedExpr {
   body: Block;
 }
 
+table ExclaveExpr {
+  base: NodeBase;
+  exclave_pos: Position;
+  body: Block;
+}
+
 table TrailingClosureExpr {
   base: NodeBase;
   left_lambda: Position;
@@ -397,6 +418,7 @@ table TypeConvExpr {
   left_paren_pos: Position;
   expr: Expr;
   right_paren_pos: Position;
+  modal: ModalInfo;
 }
 
 table ThrowExpr {
@@ -499,6 +521,7 @@ table FuncParamList {
   left_paren_pos: Position;
   params: [FuncParam];
   right_paren_pos: Position;
+  this_param: ThisParam;
 }
 
 union MacroParam {
@@ -517,6 +540,14 @@ table FuncParam {
   not_mark_pos: Position;
   has_let_or_var: bool;
   macroParam: MacroParam;
+}
+
+table ThisParam {
+  // explicit `this` parameter, e.g. `this: T @local!`
+  base: DeclBase;
+  this_pos: Position;
+  comma_pos: Position;
+  modal: ModalInfo;
 }
 
 table FuncBody {
@@ -544,6 +575,7 @@ table Expr {
 table PrimitiveTypeExpr {
     base: NodeBase;
     kind: uint16;
+    modal: ModalInfo;
 }
 
 union AnyType {
@@ -566,6 +598,7 @@ table TypeBase {
   colon_pos: Position;
   type_pos: Position;
   bit_and_pos: Position;
+  modal: ModalInfo;
 }
 
 table RefType {
@@ -680,6 +713,7 @@ table FuncDecl {
   is_getter: bool;
   op_kind: int32; // operator kind for operator function
   isEnumConstruct: bool;
+  modal: ModalInfo;
 }
 
 table MainDecl {
@@ -856,6 +890,7 @@ union AnyDecl {
   MACRO_DECL: MacroDecl,
   MACRO_EXPAND_DECL: MacroExpandDecl,
   FUNC_PARAM: FuncParam,
+  THIS_PARAM: ThisParam,
   MACRO_EXPAND_PARAM: MacroExpandParam
 }
 

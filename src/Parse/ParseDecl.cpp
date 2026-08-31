@@ -1978,7 +1978,7 @@ OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
     OwnedPtr<FuncDecl> ret = MakeOwned<FuncDecl>();
     ChainScope cs(*this, ret.get());
 
-    if (scopeKind == ScopeKind::FUNC_BODY && SeeingModalInfo()) {
+    if ((scopeKind == ScopeKind::FUNC_BODY || scopeKind == ScopeKind::UNKNOWN_SCOPE) && SeeingModalInfo()) {
         ret->modal = ParseModalInfo();
         ret->begin = ret->modal.AtBegin();
     }

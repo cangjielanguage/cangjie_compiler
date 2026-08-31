@@ -120,7 +120,9 @@ flatbuffers::Offset<NodeFormat::CallExpr> NodeWriter::SerializeCallExpr(const Ca
     auto rightParenPos = FlatPosCreateHelper(callExpr->rightParenPos);
     auto fbArgs =
         FlatVectorCreateHelper<NodeFormat::FuncArg, FuncArg, AstFuncArg>(callExpr->args, &NodeWriter::SerializeFuncArg);
-    return NodeFormat::CreateCallExpr(builder, fbNodeBase, fbBaseFunc, &leftParenPos, fbArgs, &rightParenPos);
+    auto modal = SerializeModalInfo(callExpr->modal);
+    return NodeFormat::CreateCallExpr(
+        builder, fbNodeBase, fbBaseFunc, &leftParenPos, fbArgs, &rightParenPos, modal);
 }
 
 flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeCallExpr(const Expr* expr)
@@ -397,6 +399,16 @@ flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeSynchronizedExpr(AstE
         builder, fbNodeBase, NodeFormat::AnyExpr_SYNCHRONIZED_EXPR, fbSynchronizedExpr.Union());
 }
 
+flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeExclaveExpr(AstExpr expr)
+{
+    auto exclaveExpr = RawStaticCast<const ExclaveExpr*>(expr);
+    auto fbNodeBase = SerializeNodeBase(exclaveExpr);
+    auto exclavePos = FlatPosCreateHelper(exclaveExpr->exclavePos);
+    auto fbBody = SerializeBlock(exclaveExpr->body.get());
+    auto fbExclaveExpr = NodeFormat::CreateExclaveExpr(builder, fbNodeBase, &exclavePos, fbBody);
+    return NodeFormat::CreateExpr(builder, fbNodeBase, NodeFormat::AnyExpr_EXCLAVE_EXPR, fbExclaveExpr.Union());
+}
+
 flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeTrailingClosureExpr(AstExpr expr)
 {
     auto type = NodeFormat::AnyExpr_TRAILING_CLOSURE_EXPR;
@@ -420,8 +432,9 @@ flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeTypeConvExpr(AstExpr 
     auto leftParenPos = FlatPosCreateHelper(typeConvExpr->leftParenPos);
     auto fbExpr = SerializeExpr(typeConvExpr->expr.get());
     auto rightParenPos = FlatPosCreateHelper(typeConvExpr->rightParenPos);
-    auto fbTypeConvExpr =
-        NodeFormat::CreateTypeConvExpr(builder, fbNodeBase, fbPrimitiveType, &leftParenPos, fbExpr, &rightParenPos);
+    auto modal = SerializeModalInfo(typeConvExpr->modal);
+    auto fbTypeConvExpr = NodeFormat::CreateTypeConvExpr(
+        builder, fbNodeBase, fbPrimitiveType, &leftParenPos, fbExpr, &rightParenPos, modal);
     return NodeFormat::CreateExpr(builder, fbNodeBase, type, fbTypeConvExpr.Union());
 }
 
@@ -497,7 +510,8 @@ flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializePrimitiveTypeExpr(Ast
     auto primitiveTypeExpr = RawStaticCast<const PrimitiveTypeExpr*>(expr);
     auto fbTypeBase = SerializeNodeBase(primitiveTypeExpr);
     auto typeKind = static_cast<uint16_t>(primitiveTypeExpr->typeKind);
-    auto fbPrimTypeExpr = NodeFormat::CreatePrimitiveTypeExpr(builder, fbTypeBase, typeKind);
+    auto modal = SerializeModalInfo(primitiveTypeExpr->modal);
+    auto fbPrimTypeExpr = NodeFormat::CreatePrimitiveTypeExpr(builder, fbTypeBase, typeKind, modal);
     return NodeFormat::CreateExpr(builder, fbTypeBase, NodeFormat::AnyExpr_PRIMITIVE_TYPE_EXPR, fbPrimTypeExpr.Union());
 }
 
@@ -674,6 +688,7 @@ flatbuffers::Offset<NodeFormat::Expr> NodeWriter::SerializeExpr(AstExpr expr)
             {ASTKind::SPAWN_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeSpawnExpr(expr); }},
             {ASTKind::SYNCHRONIZED_EXPR,
                 [](NodeWriter& nw, AstExpr expr) { return nw.SerializeSynchronizedExpr(expr); }},
+            {ASTKind::EXCLAVE_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeExclaveExpr(expr); }},
             {ASTKind::OPTIONAL_EXPR, [](NodeWriter& nw, AstExpr expr) { return nw.SerializeOptionalExpr(expr); }},
             {ASTKind::OPTIONAL_CHAIN_EXPR,
                 [](NodeWriter& nw, AstExpr expr) { return nw.SerializeOptionalChainExpr(expr); }},

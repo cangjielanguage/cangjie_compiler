@@ -742,8 +742,7 @@ Ptr<PropDecl> TypeChecker::TypeCheckerImpl::ResolvePropOverload(
     }
 
     // remove the props that are strictly worse than any other. The complexity is O(n).
-    // don't check callable when receiver is copy type because they always match.
-    if (!callable.empty() && !typeManager.ImplementsCopyInterface(receiver.Ty())) {
+    if (!callable.empty()) {
         for (size_t i{0}; i + 1 < callable.size(); ++i) {
             size_t j{i + 1};
             while (j < callable.size()) {
