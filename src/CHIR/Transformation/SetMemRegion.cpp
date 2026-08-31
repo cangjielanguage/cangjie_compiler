@@ -73,12 +73,8 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
                     }
                 }
             }
-        } else if (Is<Lambda>(expr)) {
+        } else if (auto lambda = DynamicCast<Lambda*>(&expr)) {
             // 3. lambda where the captured variables are not `Copyable` and have mode `local!` or `local?`
-            auto lambda = StaticCast<Lambda*>(&expr);
-            if (LambdaIsUnused(*lambda)) {
-                return VisitResult::SKIP;
-            }
             for (auto var : lambda->GetCapturedVariables()) {
                 if (var->GetType()->StripAllRefs()->IsLocalRegion()) {
                     auto varBody = var->GetFuncOrLambdaBody();
@@ -107,14 +103,7 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
         }
         return VisitResult::CONTINUE;
     });
-    // A callee that returns `@local!` / `@local?` must allocate into the *caller's* active region.
-    // Wrapping this function body in StartRegion/EndRegion would end the region before the return
-    // value is consumed. Virtual wrappers may report Box<>& as GetReturnType(); use the raw method.
-    auto retTy = func.GetReturnType();
-    if (auto rawMethod = func.Get<WrappedRawMethod>()) {
-        retTy = rawMethod->GetReturnType();
-    }
-    if (retTy->StripAllRefs()->IsLocalRegion()) {
+    if (func.TestAttr(Attribute::EXCLAVE)) {
         scopeNeedsRegion.erase(func.GetBody());
     }
     return scopeNeedsRegion;
