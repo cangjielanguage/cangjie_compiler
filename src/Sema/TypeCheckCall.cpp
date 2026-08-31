@@ -3704,7 +3704,7 @@ void TypeChecker::TypeCheckerImpl::SpreadInstantiationTy(Node& node, const Subst
             n->SetTy(typeManager.ApplySubstPack(n->GetTy(), typeMapping));
             if (auto ma = DynamicCast<MemberAccess>(n.get()); ma && ma->baseExpr && ma->baseExpr->GetTy().IsCorrect()) {
                 auto target = DynamicCast<VarDecl>(ma->GetTarget());
-                if (!target || !TypeCheckUtil::HasModifier(target->modifiers, TokenKind::DEMODE)) {
+                if (!target || !HasModifier(target->modifiers, TokenKind::DEMODE)) {
                     n->SetTy(n->GetTy().With(ma->baseExpr->TyMode()));
                 }
             }

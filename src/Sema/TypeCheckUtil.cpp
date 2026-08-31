@@ -749,11 +749,6 @@ bool HasDefaultImpl(const Decl& decl)
     return decl.TestAttr(Attribute::DEFAULT);
 }
 
-bool HasModifier(const std::set<Modifier>& modifiers, TokenKind kind)
-{
-    return std::any_of(modifiers.begin(), modifiers.end(), [kind](const auto& it) { return it.modifier == kind; });
-}
-
 void AddArrayLitConstructor(ArrayLit& al)
 {
     auto decl = Ty::GetDeclPtrOfTy(al.GetTy());

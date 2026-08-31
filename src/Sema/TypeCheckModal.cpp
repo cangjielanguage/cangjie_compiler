@@ -547,7 +547,7 @@ private:
                 DiagNestedExclave(expr, *outerExclave->node);
             }
         } else if (auto fd = DynamicCast<FuncDecl>(outFun->node)) {
-            if (TypeCheckUtil::HasModifier(fd->modifiers, TokenKind::EXCLAVE)) {
+            if (HasModifier(fd->modifiers, TokenKind::EXCLAVE)) {
                 DiagNestedExclave(expr, *fd);
             }
         }
@@ -771,7 +771,7 @@ private:
             init.TestAnyAttr(Attribute::STATIC, Attribute::IS_BROKEN, Attribute::HAS_BROKEN)) {
             return;
         }
-        if (TypeCheckUtil::HasModifier(init.modifiers, TokenKind::EXCLAVE)) {
+        if (HasModifier(init.modifiers, TokenKind::EXCLAVE)) {
             return;
         }
         auto& body = init.funcBody->body;
@@ -872,7 +872,7 @@ private:
 
     void CheckNeedsRegion(FuncDecl& func)
     {
-        if (TypeCheckUtil::HasModifier(func.modifiers, TokenKind::EXCLAVE)) {
+        if (HasModifier(func.modifiers, TokenKind::EXCLAVE)) {
             func.needsRegion = false;
             return;
         }
@@ -899,7 +899,7 @@ private:
         if (auto ref = DynamicCast<RefExpr>(left)) {
             auto target = ref->GetTarget();
             if (auto vd = DynamicCast<VarDecl>(target);
-                vd && TypeCheckUtil::HasModifier(vd->modifiers, TokenKind::DEMODE)) {
+                vd && HasModifier(vd->modifiers, TokenKind::DEMODE)) {
                 return Mode::NOT;
             }
             if (target && target->IsMemberDecl()) {
@@ -925,7 +925,7 @@ private:
         }
         if (auto ma = DynamicCast<MemberAccess>(left)) {
             if (auto vd = DynamicCast<VarDecl>(ma->GetTarget());
-                vd && TypeCheckUtil::HasModifier(vd->modifiers, TokenKind::DEMODE)) {
+                vd && HasModifier(vd->modifiers, TokenKind::DEMODE)) {
                 return Mode::NOT;
             }
             return ma->baseExpr->GetTy().IsLocalType() ? ma->baseExpr->TyMode().local : Mode::NOT;
@@ -1142,7 +1142,7 @@ private:
                     continue;
                 }
                 if (var->initializer && (!type.ImplementsCopyInterface(var->DataTy()) &&
-                    !TypeCheckUtil::HasModifier(var->modifiers, TokenKind::DEMODE))) {
+                    !HasModifier(var->modifiers, TokenKind::DEMODE))) {
                     DiagMemberVarInitalizerInMixedInit(*var, decl);
                 }
             }

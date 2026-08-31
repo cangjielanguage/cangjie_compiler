@@ -1897,11 +1897,6 @@ void ParserImpl::ParseModifiers(std::set<Modifier>& modifiers)
     }
 }
 
-bool ParserImpl::HasModifier(const std::set<Modifier>& modifiers, TokenKind tk)
-{
-    return Utils::In(modifiers, [&](const auto& mod) { return mod.modifier == tk; });
-}
-
 bool ParserImpl::HasAnnotation(const PtrVector<Annotation>& annos, AnnotationKind ak)
 {
     return Utils::In(annos, [&](const auto& anno) { return anno->kind == ak; });

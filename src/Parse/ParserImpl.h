@@ -592,7 +592,6 @@ private:
     bool IsLegFollowForGenArgInExprWithComma(ExprKind ek = ExprKind::ALL);
     std::vector<OwnedPtr<AST::GenericConstraint>> ParseGenericConstraints();
     bool ParseGenericUpperBound(const OwnedPtr<AST::GenericConstraint>& genericConstraint);
-    static bool HasModifier(const std::set<AST::Modifier>& modifiers, TokenKind tk);
     static bool HasAnnotation(const std::vector<OwnedPtr<AST::Annotation>>& annos, AST::AnnotationKind ak);
 
     bool IsLeftValueExpression(const OwnedPtr<AST::Expr>& expr, const Token& tok);

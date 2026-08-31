@@ -768,6 +768,14 @@ void InsertMirrorVarProp(ClassDecl& decl, Attribute attrToBeSet)
         }), members.end());
 }
 
+bool HasModifier(const std::set<Modifier>& modifiers, TokenKind kind)
+{
+    return std::any_of(modifiers.begin(), modifiers.end(), [kind](const auto& it) { return it.modifier == kind; });
+}
+bool HasModifier(const Decl& decl, TokenKind kind)
+{
+    return HasModifier(decl.modifiers, kind);
+}
 } // namespace Cangjie::AST
 
 namespace {

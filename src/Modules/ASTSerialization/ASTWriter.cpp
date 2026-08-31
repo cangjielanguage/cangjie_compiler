@@ -1316,17 +1316,13 @@ TDeclOffset ASTWriter::ASTWriterImpl::SavePropDecl(const PropDecl& propDecl, con
     return dbuilder.Finish();
 }
 
-namespace Cangjie::TypeCheckUtil {
-bool HasModifier(const std::set<AST::Modifier>& modifiers, TokenKind kind);
-}
-
 TDeclOffset ASTWriter::ASTWriterImpl::SaveVarDecl(const VarDecl& varDecl, const DeclInfo& declInfo)
 {
     bool exportSourceCode = config.exportContent && ShouldExportSource(varDecl);
     FormattedIndex initializer = exportSourceCode ? SaveExpr(*varDecl.initializer) : INVALID_FORMAT_INDEX;
     auto info =
         PackageFormat::CreateVarInfo(builder, varDecl.isVar, varDecl.isConst, varDecl.isMemberParam, initializer,
-        PackageFormat::ConstValue_NONE, 0, TypeCheckUtil::HasModifier(varDecl.modifiers, TokenKind::DEMODE));
+        PackageFormat::ConstValue_NONE, 0, HasModifier(varDecl.modifiers, TokenKind::DEMODE));
     PackageFormat::DeclBuilder dbuilder(builder);
     SaveDeclBasicInfo(declInfo, dbuilder);
     dbuilder.add_kind(PackageFormat::DeclKind_VarDecl);
@@ -1412,7 +1408,8 @@ TDeclOffset ASTWriter::ASTWriterImpl::SaveFuncDecl(const FuncDecl& funcDecl, con
     auto generic = SaveGeneric(funcDecl);
     auto genericDeclIndex = GetGenericDeclIndex(funcDecl);
     auto info = PackageFormat::CreateFuncInfo(builder, body, STRATEGY_MAP.at(funcDecl.overflowStrategy),
-        OP_KIND_MAP.at(funcDecl.op), 0, funcDecl.isConst, isInline, funcDecl.isFastNative);
+        OP_KIND_MAP.at(funcDecl.op), 0, funcDecl.isConst, isInline, funcDecl.isFastNative,
+        HasModifier(funcDecl.modifiers, TokenKind::EXCLAVE));
 
     PackageFormat::DeclBuilder dbuilder(builder);
     SaveDeclBasicInfo(declInfo, dbuilder);

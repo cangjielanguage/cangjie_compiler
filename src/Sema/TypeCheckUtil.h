@@ -264,8 +264,6 @@ bool HasDefaultImpl(const AST::Decl& decl);
  */
 ModalInfo GetCurThisModal(const ASTContext& ctx, const std::string& scopeName);
 
-bool HasModifier(const std::set<AST::Modifier>& modifiers, TokenKind kind);
-
 inline bool HasCFuncAttr(const AST::Decl& decl)
 {
     return decl.TestAnyAttr(AST::Attribute::C, AST::Attribute::FOREIGN);

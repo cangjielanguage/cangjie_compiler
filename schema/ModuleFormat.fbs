@@ -238,6 +238,7 @@ table FuncInfo {
   isConst:bool;
   isInline:bool;
   isFastNative:bool;
+  isExclave:bool;
 }
 table ParamInfo {
   isNamedParam:bool;

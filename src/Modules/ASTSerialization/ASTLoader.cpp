@@ -820,6 +820,9 @@ void ASTLoader::ASTLoaderImpl::LoadFuncDeclAdvancedInfo(const PackageFormat::Dec
     funcDecl.isFastNative = info->isFastNative();
     funcDecl.isConst = info->isConst();
     funcDecl.op = OP_KIND_RMAP.at(info->op()); // TokenKind op of operator overload function.
+    if (info->isExclave()) {
+        funcDecl.modifiers.emplace(TokenKind::EXCLAVE, DEFAULT_POSITION);
+    }
     auto& annos = funcDecl.annotations;
     funcDecl.isFrozen = Utils::In(annos, [](const auto& anno) { return anno->kind == AnnotationKind::FROZEN; });
     CJC_NULLPTR_CHECK(info->funcBody());
