@@ -1012,12 +1012,8 @@ Ptr<LocalVar> ClosureConversion::CreateAutoEnvImplObject(
     //       func foo2(a!: Int32 = 1) { foo2(); return 1}
     //       foo2()
     //   }
-    auto placeAllocate = [&parent](Expression& alloc, Type& autoEnvTy) {
-        if (!autoEnvTy.IsLocalRegion()) {
-            parent.InsertExprIntoHead(alloc);
-            return;
-        }
-        auto* entry = parent.GetParentBlockGroup()->GetEntryBlock();
+    auto placeAllocate = [&parent](Expression& alloc) {
+        auto entry = parent.GetParentBlockGroup()->GetEntryBlock();
         CJC_NULLPTR_CHECK(entry);
         for (auto e : entry->GetExpressions()) {
             if (Is<StartRegion>(e)) {
@@ -1025,8 +1021,9 @@ Ptr<LocalVar> ClosureConversion::CreateAutoEnvImplObject(
                 return;
             }
         }
+        parent.InsertExprIntoHead(alloc);
     };
-    placeAllocate(*expr, *instantiateClassTy);
+    placeAllocate(*expr);
     uint64_t index = 0;
     for (auto env : envs) {
         auto store = builder.CreateExpression<StoreElementRef>(

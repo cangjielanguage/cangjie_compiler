@@ -21,7 +21,6 @@
 #include "cangjie/Utils/CastingTemplate.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/CHIR/IR/Type/PrivateTypeConverter.h"
-#include "../../Sema/TypeCheckUtil.h"
 
 namespace Cangjie::CHIR {
 namespace {
@@ -532,7 +531,7 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
     if (astFunc.isConst) {
         chirFunc.EnableAttr(Attribute::CONST);
     }
-    if (TypeCheckUtil::HasModifier(astFunc.modifiers, TokenKind::EXCLAVE)) {
+    if (AST::HasModifier(astFunc.modifiers, TokenKind::EXCLAVE)) {
         chirFunc.EnableAttr(Attribute::EXCLAVE);
     }
     // in SEMA, if a local const func is declared in static member method, it will be set STATIC
