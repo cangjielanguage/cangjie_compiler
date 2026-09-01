@@ -621,12 +621,12 @@ T DemangleInfo<T>::GetArgTypesName(const uint32_t argsNum) const
 {
     if (args.IsEmpty()) {
         if (type == TypeKind::FUNCTION_DECL && IsFunctionLike() && !functionParameterTypes.IsEmpty()) {
-            return T{"("} + functionParameterTypes + ")";
+            return T{ LEFT_BRACKET } + functionParameterTypes + RIGHT_BRACKET;
         }
         return IsFunctionLike() ? "()" : T{};
     }
     if (IsFunctionLike()) {
-        return T{ "(" } + args + ")"; // Like (arg-type1, arg-type2, ...)
+        return T{ LEFT_BRACKET } + args + RIGHT_BRACKET; // Like (arg-type1, arg-type2, ...)
     }
     if (argsNum != 0) {
         T numStr;
@@ -1060,6 +1060,7 @@ T Demangler<T>::DemangleArgTypes(const T& delimiter, uint32_t size)
 template<typename T>
 DemangleInfo<T> Demangler<T>::DemangleNestedDecls(bool isClass, bool isParamInit)
 {
+    (void)isParamInit;
     auto delimiter = T{ scopeResolution };
     auto i = 0u;
     T result;
@@ -1131,11 +1132,13 @@ DemangleInfo<T> Demangler<T>::DemangleNestedDecls(bool isClass, bool isParamInit
             // <function-name>[<generic-modifier>]H[<this-mode>]<param-types>
             SkipChar(MANGLE_FUNCTION_PREFIX);
             typeKind = TypeKind::FUNCTION_DECL;
-            curDi.type = TypeKind::FUNCTION_DECL;
             // <this-mode> (W<payload>E right after H) is consumed inside
             // DemangleFunctionParameterTypes and folded into the leading "this ..." argument.
             auto funcTys = DemangleFunctionParameterTypes().args;
             curDi.functionParameterTypes = funcTys;
+            if (!funcTys.IsEmpty()) {
+                curDi.type = TypeKind::FUNCTION_DECL;
+            }
             SkipOptionalChar(END);
             AppendModeTypeIfExists(curDi);
         }
@@ -1148,12 +1151,7 @@ DemangleInfo<T> Demangler<T>::DemangleNestedDecls(bool isClass, bool isParamInit
             result.Truncate(result.Length() - delimiter.Length());
         }
         ++i;
-        if (isParamInit && IsNotEndOfMangledName() && curDi.functionParameterTypes.Length() > 0) {
-            argsArr[j] = curDi.GetFullName(scopeResolution) + LEFT_BRACKET + curDi.functionParameterTypes +
-                    RIGHT_BRACKET;
-        } else {
-            argsArr[j] = curDi.GetFullName(scopeResolution);
-        }
+        argsArr[j] = curDi.GetFullName(scopeResolution);
         lastElement = curDi;
     }
     uint32_t remainingLength = i == 0 ? 0 : ((i - 1) % MAX_ARGS_SIZE) + 1;

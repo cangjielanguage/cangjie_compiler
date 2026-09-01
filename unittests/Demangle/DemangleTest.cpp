@@ -76,3 +76,34 @@ TEST(DemangleTest, PrimitiveTypeModal)
     ASSERT_TRUE(di.IsValid());
     EXPECT_STREQ("Int64 @ local?", di.GetFullName(demangler.ScopeResolution()).Str());
 }
+
+TEST(DemangleTest, ParamInitNoDuplicatedParamList)
+{
+    // _CPI (default-param init): owner `global_test3(Int64, Int64, Int64)` + param-id `c`.
+    // Regression: the param list must appear exactly once — the duplicated form
+    // `global_test3(Int64, Int64, Int64)(Int64, Int64, Int64)::c(...)` is rejected by the
+    // obfuscation config parser (LLVM ERROR: Invalid Symbol).
+    const char* mangled = "_CPI9pkg1.pkg212global_test3HlllE1cHll";
+    Demangler<StdString> demangler(mangled, ".");
+    auto di = demangler.Demangle();
+    ASSERT_TRUE(di.IsValid());
+    const char* expectedFull = "pkg1.pkg2.global_test3(Int64, Int64, Int64).c(Int64, Int64)";
+    std::string full =
+        std::string(di.GetPkgName().Str()) + "." + std::string(di.GetFullName(demangler.ScopeResolution()).Str());
+    EXPECT_STREQ(expectedFull, full.c_str());
+}
+
+TEST(DemangleTest, GlobalVarInitNoParentheses)
+{
+    // _CGV (global-var init): the trailing `Hv` must NOT render an empty parameter list —
+    // the obfuscation cfg rule "pkg1.pkg2.global_a" (plain field) would otherwise miss the
+    // target `global_a()` (field with empty parameter list) and wrongly rename the global.
+    const char* mangled = "_CGV9pkg1.pkg28global_aHv";
+    Demangler<StdString> demangler(mangled, ".");
+    auto di = demangler.Demangle();
+    ASSERT_TRUE(di.IsValid());
+    const char* expectedFull = "pkg1.pkg2.global_a";
+    std::string full =
+        std::string(di.GetPkgName().Str()) + "." + std::string(di.GetFullName(demangler.ScopeResolution()).Str());
+    EXPECT_STREQ(expectedFull, full.c_str());
+}

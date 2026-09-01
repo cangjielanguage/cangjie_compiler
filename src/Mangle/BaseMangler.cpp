@@ -625,7 +625,6 @@ std::string BaseMangler::MangleFunctionDecl(const FuncDecl& funcDecl, const std:
         std::string mangledOwnerFunc = MangleDecl(funcDecl, newPrefix, genericsTypeStack, true, true);
         mangled += MANGLE_CANGJIE_PREFIX + MANGLE_FUNC_PARA_INIT_PREFIX +
             mangledOwnerFunc.substr(mangledPrefix.size(), mangledOwnerFunc.size() - mangledPrefix.size() - 1);
-        mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX;
     } else {
         mangled = MangleDecl(funcDecl, prefix, genericsTypeStack, true, false);
     }
