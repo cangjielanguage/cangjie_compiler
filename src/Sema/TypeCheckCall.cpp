@@ -668,7 +668,7 @@ bool CheckUseTrailingClosureWithFunctionType(
     return false;
 }
 
-/// For `let c = C()`: drop ctor overloads whose `this` is @local when an @~local ctor exists.
+/// For `let c = C()`: drop ctor overloads whose `this` is local when an ~local ctor exists.
 /// When it is not ctor call, or target exists, do not call this fun.
 void FilterBetterThisModeCtorCall(TypeManager& tm,
     const std::vector<OwnedPtr<FunctionMatchingUnit>>& candidates, std::vector<bool>& targetMark)
@@ -734,6 +734,63 @@ void FilterOverriden(
                 targetMark[j] = false;
                 break;
             }
+        }
+    }
+}
+
+/// for nested call, if inner call is ctor, does not have explicit ctor mode, and has @~local ctor,
+/// drop local ctor's for disambiguation such as.
+// class A {
+//     init() {}
+//     exclave init(this @local!) {}
+// }
+// class File {
+//     func read(_: A) {}
+//     func read(_: A @local!) {}
+// }
+// func foo(f: File) {
+//     f.read(A())
+// }
+// the read call can be resolved to both, but add this disambiguator to make only the non-local ctor work.
+void FilterNestedCtorCall(
+    const NodeStack& stack, const CallExpr& ce, std::vector<OwnedPtr<FunctionMatchingUnit>>& candidates)
+{
+    if (ce.modal.HasLocal()) {
+        return;
+    }
+    // Skip `ce` itself; the enclosing call is the next CallExpr on the checking stack.
+    auto outerCall = DynamicCast<CallExpr>(stack.FindFirstOf([&ce](Ptr<Node> n) {
+        return n != &ce && DynamicCast<CallExpr>(n);
+    }));
+    if (!outerCall) {
+        return;
+    }
+    bool isNestedCall = false;
+    if (outerCall->desugarArgs) {
+        for (auto arg : *outerCall->desugarArgs) {
+            if (arg->expr.get() == &ce) {
+                isNestedCall = true;
+            }
+        }
+    } else {
+        for (auto& arg : outerCall->args) {
+            if (arg->expr.get() == &ce) {
+                isNestedCall = true;
+            }
+        }
+    }
+    if (!isNestedCall) {
+        return;
+    }
+    for (size_t i = 0; i < candidates.size();) {
+        if (!TypeManager::HasThisParam(candidates[i]->fd)) {
+            ++i;
+            continue;
+        }
+        if (auto mode = TypeManager::GetThisParamMode(candidates[i]->fd); mode.local != Mode::NOT) {
+            candidates.erase(candidates.begin() + static_cast<int>(i));
+        } else {
+            ++i;
         }
     }
 }
@@ -986,11 +1043,12 @@ std::vector<size_t> TypeChecker::TypeCheckerImpl::ResolveOverload(const ASTConte
     auto targetNum = candidates.size();
     std::vector<bool> targetMark(targetNum, true); // When get false, the target is excluded.
     FilterOverriden(typeManager, candidates, targetMark);
-    auto isCtorCall = (ce.callKind == CallKind::CALL_OBJECT_CREATION || ce.callKind == CallKind::CALL_STRUCT_CREATION);
-    if (isCtorCall && !ce.modal.HasLocal() && !Ty::IsTyCorrect(target)) {
-        FilterBetterThisModeCtorCall(typeManager, candidates, targetMark);
-    }
-    if (!isCtorCall) {
+    auto isCtorCall = ce.callKind == CallKind::CALL_OBJECT_CREATION || ce.callKind == CallKind::CALL_STRUCT_CREATION;
+    if (isCtorCall) {
+        if (!ce.modal.HasLocal() && !Ty::IsTyCorrect(target)) {
+            FilterBetterThisModeCtorCall(typeManager, candidates, targetMark);
+        }
+    } else {
         FilterBetterThisModeNonCtorCall(ctx, ce, candidates, targetMark);
     }
 
@@ -2560,6 +2618,11 @@ std::vector<Ptr<FuncDecl>> TypeChecker::TypeCheckerImpl::CheckMatchResult(ASTCon
     if (legals.empty()) {
         CheckEmptyMatchResult(diag, ce, illegals);
         return {};
+    }
+    if (ce.callKind == CallKind::CALL_OBJECT_CREATION || ce.callKind == CallKind::CALL_STRUCT_CREATION ||
+        legals[0]->fd.TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
+        // cannot call this in ResolveOverload, because this can be used to exclude all candidates
+        FilterNestedCtorCall(nodeStack, ce, legals);
     }
     // Only one legal target.
     uint64_t id;

@@ -20,7 +20,6 @@
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Walker.h"
-#include "cangjie/Basic/Utils.h"
 #include "cangjie/Utils/CastingTemplate.h"
 #include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/Utils/FloatFormat.h"

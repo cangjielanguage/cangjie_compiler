@@ -1869,6 +1869,8 @@ private:
     Ptr<AST::Node> deprecatedContext = nullptr;
     // strict version of outermost @Deprecated declaration
     Ptr<AST::Node> strictDeprecatedContext = nullptr;
+    /** Node stack while Synthesize/Check (same NodeStack as Walker). */
+    AST::NodeStack nodeStack;
     // cjmp typechecker implementation class
     class MPTypeCheckerImpl* mpImpl;
     // checker impl of Modal type

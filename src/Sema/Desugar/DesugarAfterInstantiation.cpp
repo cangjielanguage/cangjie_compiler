@@ -10,23 +10,16 @@
  * This file implements the Desugar functions used after instantiation step.
  */
 
-#include "DesugarInTypeCheck.h"
-
-#include <atomic>
 #include <memory>
-#include <set>
 #include <utility>
 #include <vector>
-#include <fstream>
 
 #include "AutoBoxing.h"
-#include "ExtendBoxMarker.h"
 #include "TypeCheckUtil.h"
 #include "TypeCheckerImpl.h"
 
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Create.h"
-#include "cangjie/AST/Match.h"
 #include "cangjie/AST/Types.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
@@ -35,7 +28,6 @@
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Utils/CheckUtils.h"
-#include "cangjie/Utils/FileUtil.h"
 #include "cangjie/Utils/Utils.h"
 
 using namespace Cangjie;

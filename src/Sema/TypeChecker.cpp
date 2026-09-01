@@ -785,6 +785,14 @@ ModalTy TypeChecker::TypeCheckerImpl::Synthesize(const CheckerContext& ctx, Ptr<
     if (auto res = PerformBasicChecksForSynthesize(ctx.Ctx(), node)) {
         return *res;
     }
+    nodeStack.Push(node);
+    struct StackPop {
+        NodeStack& s;
+        ~StackPop()
+        {
+            s.Pop();
+        }
+    } pop{nodeStack};
     ctx.Ctx().typeCheckCache[node].lastKey = GetCacheKeyForSyn(ctx.Ctx(), node);
     ASTContext* curCtx = &ctx.Ctx();
     // If decl belongs to another package node, then switch to another AST context according to package node.
@@ -1108,6 +1116,14 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, ModalTy target, Ptr<No
     if (auto res = PerformBasicChecksForCheck(ctx, target, node)) {
         return *res;
     }
+    nodeStack.Push(node);
+    struct StackPop {
+        NodeStack& s;
+        ~StackPop()
+        {
+            s.Pop();
+        }
+    } pop{nodeStack};
     ctx.typeCheckCache[node].lastKey = GetCacheKeyForChk(ctx, node, target);
     ASTContext* curCtx = &ctx;
     // If decl belongs to another package node, then switch to another AST context according to package node.

@@ -937,6 +937,11 @@ private:
         if (SeeingIfAvailable()) {
             return false;
         }
+        // A modal prefix (e.g. @local!/@local?/@~local) introduces a func decl in
+        // FUNC_BODY, so route it through ParseDecl like ParseExpressionOrDeclarations.
+        if ((scopeKind == ScopeKind::UNKNOWN_SCOPE || scopeKind == ScopeKind::FUNC_BODY) && SeeingModalInfo()) {
+            return true;
+        }
         return SeeingDecl() || SeeingMacroCallDecl() || SeeingIllegalDeclInBlock() ||
             SeeingPrimaryCtorDecl(scopeKind) || SeeingEnumConstructor(scopeKind);
     }
