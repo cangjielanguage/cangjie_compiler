@@ -457,7 +457,6 @@ template <typename T> bool Demangler<T>::IsModeLeader() const
 
 template <typename T> bool Demangler<T>::IsThisMode() const
 {
-
     if (currentIndex >= mangledName.Length()) {
         return false;
     }
@@ -469,7 +468,6 @@ template <typename T> bool Demangler<T>::IsThisMode() const
 //   (uppercase letter = FULL/!, lowercase = HALF/?; fixed axis order local -> unique -> immutable)
 template <typename T> T Demangler<T>::DemangleModeSet()
 {
-
     T result;
     if (!IsModeLeader()) {
         return T{};
@@ -644,7 +642,8 @@ T DemangleInfo<T>::GetArgTypesName(const uint32_t argsNum) const
 template<typename T>
 bool DemangleInfo<T>::IsFunctionLike() const
 {
-    return type == TypeKind::FUNCTION_DECL || type == TypeKind::LAMBDA_FUNCTION || type == TypeKind::FUNCTION || type == TypeKind::WRAPPED_FUNCTION;
+    return type == TypeKind::FUNCTION_DECL || type == TypeKind::LAMBDA_FUNCTION ||
+        type == TypeKind::FUNCTION || type == TypeKind::WRAPPED_FUNCTION;
 }
 
 template<typename T>
@@ -772,7 +771,7 @@ DemangleInfo<T> Demangler<T>::Demangle(bool isType)
                                 TypeKind::NAME, isValid };
     }
     // Wrapped func like ""_CVN7default1S4testHv$N7default1SE$CN7default1IE""
-    if(IsWrappedFunction()) {
+    if (IsWrappedFunction()) {
         return DemangleWrappedFunction();
     }
     return DemangleDecl();
