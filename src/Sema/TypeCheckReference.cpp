@@ -471,7 +471,7 @@ void TypeChecker::TypeCheckerImpl::FilterFuncRefByThisMode(
     auto receiver = GetReceiverTy(ctx, expr);
     for (auto it = targets.begin(); it != targets.end();) {
         auto target = *it;
-        if (TypeManager::HasThisParam(*target)) {
+        if (!TypeManager::HasThisParam(*target)) {
             ++it;
             continue;
         }
@@ -496,6 +496,10 @@ void TypeChecker::TypeCheckerImpl::FilterFuncRefByThisMode(
             }
             auto imode = TypeManager::GetThisParamMode(*targets[i]);
             auto jmode = TypeManager::GetThisParamMode(*targets[j]);
+            if (imode == jmode) {
+                ++j;
+                continue;
+            }
             if (imode.IsSubModal(jmode)) {
                 targets.erase(targets.begin() + static_cast<ssize_t>(j));
             } else if (jmode.IsSubModal(imode)) {
