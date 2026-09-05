@@ -18,7 +18,6 @@
 #include "cangjie/Sema/TypeManager.h"
 
 #include <algorithm>
-#include <limits>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -1254,84 +1253,6 @@ private:
         return call.args[index]->expr.get();
     }
 
-    struct FuncParamInfo {
-        ModalTy ty;
-        ModalInfo modal;
-        std::string_view name;
-    };
-
-    FuncParamInfo GetFuncParam(const CallExpr& call, size_t index)
-    {
-        if (auto inner = DynamicCast<CallExpr>(call.desugarExpr.get())) {
-            return GetFuncParam(*inner, index);
-        }
-        if (auto array = DynamicCast<ArrayExpr>(call.desugarExpr.get())) {
-            return {array->args[index]->GetTy(), array->args[index]->TyMode(), ""};
-        }
-        auto func = call.resolvedFunction;
-        if (!func) {
-            // function pointer call, no need to check 'this' param, no arg name
-            return {call.args[index]->GetTy(), call.args[index]->TyMode(), ""};
-        }
-        if (call.baseFunc->GetTy()->IsPointer()) {
-            return {call.args[index]->GetTy(), call.args[index]->TyMode(), ""};
-        }
-        if (func->funcBody->paramLists[0]->thisParam) {
-            if (index == 0) {
-                return {func->funcBody->paramLists[0]->thisParam->GetTy(),
-                    func->funcBody->paramLists[0]->thisParam->modal, "this"};
-            }
-            return {func->funcBody->paramLists[0]->params[index - 1]->GetTy(),
-                func->funcBody->paramLists[0]->params[index - 1]->TyMode(),
-                func->funcBody->paramLists[0]->params[index - 1]->identifier.Val()};
-        }
-        if (IsNonStaticMemberFunction(*func)) {
-            if (index == 0) {
-                return {func->outerDecl->GetTy(), TypeCheckUtil::GetThisParamModal(*func), "this"};
-            }
-            return {func->funcBody->paramLists[0]->params[index - 1]->GetTy(),
-                func->funcBody->paramLists[0]->params[index - 1]->TyMode(),
-                func->funcBody->paramLists[0]->params[index - 1]->identifier.Val()};
-        }
-        return {func->funcBody->paramLists[0]->params[index]->GetTy(),
-            func->funcBody->paramLists[0]->params[index]->TyMode(),
-            func->funcBody->paramLists[0]->params[index]->identifier.Val()};
-    }
-
-    size_t GetParamNum(const CallExpr& call)
-    {
-        if (auto inner = DynamicCast<CallExpr>(call.desugarExpr.get())) {
-            return GetParamNum(*inner);
-        }
-        auto func = call.resolvedFunction;
-        if (!func) {
-            if (auto array = DynamicCast<ArrayExpr>(call.desugarExpr.get())) {
-                return array->args.size();
-            }
-            if (call.baseFunc->GetTy()->IsPointer()) {
-                return call.args.size();
-            }
-            if (call.baseFunc->GetTy()->kind == TypeKind::TYPE_CSTRING) {
-                return 1UL;
-            }
-            if (auto base = DynamicCast<BuiltInDecl>(call.baseFunc->GetTarget());
-                base && base->type == BuiltInType::CFUNC) {
-                // cfunc construction takes 1 cfunc arg or 1 cpointer arg
-                return 1UL;
-            }
-            // function pointer call, no need to check 'this' param
-            if (auto fty = DynamicCast<FuncTy>(call.baseFunc->DataTy())) {
-                return fty->paramTys.size();
-            }
-            // invalid
-            return std::numeric_limits<size_t>::max();
-        }
-        if (IsNonStaticMemberFunction(*func)) {
-            return func->funcBody->paramLists[0]->params.size() + 1;
-        }
-        return func->funcBody->paramLists[0]->params.size();
-    }
-
     std::unordered_map<FuncBody*, std::vector<const Expr*>> returnedExprMap;
     bool IsReturnedExpr(const ASTContext& ctx, const Expr& expr)
     {
@@ -1449,9 +1370,9 @@ private:
         return IsNonCopyLocalTy(fp->GetTy());
     }
 
-    void DiagBadExternalLocalArg(const Node& pos, std::string_view paramName)
+    void DiagBadExternalLocalArg(const Node& pos)
     {
-        d.DiagnoseRefactor(DiagKindRefactor::sema_bad_external_local_arg, pos, std::string{paramName});
+        d.DiagnoseRefactor(DiagKindRefactor::sema_bad_external_local_arg, pos);
     }
 
     void DiagBadInternalLocalReturn(const Expr& expr)
@@ -1462,24 +1383,30 @@ private:
     /// Check call expr args cannot be external @local! type if the param is non Copy @local!
     void CheckCallExpr(const ASTContext& ctx, const CallExpr& call)
     {
-        size_t paramNum = GetParamNum(call);
-        if (paramNum == std::numeric_limits<size_t>::max()) {
-            // invalid call node, skip
+        if (auto inner = DynamicCast<CallExpr>(call.desugarExpr.get())) {
+            CheckCallExpr(ctx, *inner);
+            return;
+        }
+        if (!call.GetTy().IsCorrect() || !call.desugarExpr) {
             return;
         }
         // ctor is always considered exclave call, so we don't check arg pass
         if (call.callKind == CallKind::CALL_OBJECT_CREATION || call.callKind == CallKind::CALL_STRUCT_CREATION) {
             return;
         }
-        for (size_t i = 0; i < paramNum; ++i) {
-            auto arg = GetFuncArg(call, i);
-            if (!arg) {
-                continue;
+        if (call.desugarArgs) {
+            for (auto& arg : *call.desugarArgs) {
+                if (arg->TyMode().local == Mode::FULL && IsExternalLocal(ctx, *arg->expr) &&
+                    !type.ImplementsCopyInterface(arg->expr->DataTy())) {
+                    DiagBadExternalLocalArg(*arg->expr);
+                }
             }
-            auto param = GetFuncParam(call, i);
-            if (param.modal.local == Mode::FULL && arg->TyMode().local == Mode::FULL &&
-                IsExternalLocal(ctx, *arg) && !type.ImplementsCopyInterface(arg->DataTy())) {
-                DiagBadExternalLocalArg(*arg, param.name);
+        } else {
+            for (auto& arg : call.args) {
+                if (arg->TyMode().local == Mode::FULL && IsExternalLocal(ctx, *arg->expr) &&
+                    !type.ImplementsCopyInterface(arg->expr->DataTy())) {
+                    DiagBadExternalLocalArg(*arg->expr);
+                }
             }
         }
         auto fd = call.resolvedFunction;
@@ -1501,7 +1428,7 @@ private:
                     return;
                 }
             }
-            DiagBadExternalLocalArg(call, "this");
+            DiagBadExternalLocalArg(call);
         }
     }
 
