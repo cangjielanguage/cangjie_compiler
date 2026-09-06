@@ -1186,7 +1186,7 @@ bool TypeManager::IsModalSubtype(ModalInfo leaf, ModalInfo root)
 // - Primitive types: Int*, Float*, Bool, Rune, Nothing, Invalid
 // - Tuple whose elements are all copy types; VArray whose element type is a copy type
 // - Generic type variable with a Copyable upper bound
-// - struct declared struct S <: Copyable
+// - struct inheriting or extending Copyable
 bool TypeManager::ImplementsCopyInterface(DataTy ty)
 {
     if (ty->IsMetCType()) {

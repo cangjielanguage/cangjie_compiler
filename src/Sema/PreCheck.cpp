@@ -2091,10 +2091,7 @@ void TypeChecker::TypeCheckerImpl::PreCheckUsage(ASTContext& ctx, const Package&
 
 void TypeChecker::TypeCheckerImpl::PreCheckInvalidInherit(const ASTContext& ctx, const AST::Package& pkg)
 {
-    if (pkg.TestAttr(Attribute::IMPORTED)) {
-        return;
-    }
-
+    bool imported = pkg.TestAttr(Attribute::IMPORTED);
     auto inheritableDecls = SearchSymbol::GetAllStructDecls(ctx);
     for (auto sym : inheritableDecls) {
         CJC_NULLPTR_CHECK(sym);
@@ -2105,6 +2102,17 @@ void TypeChecker::TypeCheckerImpl::PreCheckInvalidInherit(const ASTContext& ctx,
         }
         // For ExtendDecl, we check it in `CheckExtendInterfaces`, so we dont't check it here.
         if (id->astKind == ASTKind::EXTEND_DECL) {
+            continue;
+        }
+        if (imported) {
+            if (id->astKind == ASTKind::STRUCT_DECL) {
+                for (auto& it : id->inheritedTypes) {
+                    if (it && Ty::IsTyCorrect(it->GetTy()) && typeManager.IsCopyInterfaceTy(it->DataTy())) {
+                        StaticCast<StructDecl*>(id)->SetIsCopyType();
+                        break;
+                    }
+                }
+            }
             continue;
         }
         DiagKind kind = id->astKind == ASTKind::INTERFACE_DECL ? DiagKind::sema_interface_is_not_inheritable
@@ -2118,7 +2126,7 @@ void TypeChecker::TypeCheckerImpl::PreCheckInvalidInherit(const ASTContext& ctx,
             }
             if (typeManager.IsCopyInterfaceTy(it->DataTy())) {
                 if (id->astKind == ASTKind::STRUCT_DECL) {
-                    DynamicCast<StructDecl*>(id)->SetIsCopyType();
+                    StaticCast<StructDecl>(id)->SetIsCopyType();
                 } else {
                     diag.Diagnose(*it, kind, std::string{COPY_NAME});
                 }

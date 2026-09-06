@@ -161,11 +161,21 @@ void TypeChecker::TypeCheckerImpl::CheckExtendInterfaces(
             }
             auto interfaceTy = RawStaticCast<InterfaceTy*>(instantiateTy.Ty());
             extendInterfaces[interfaceTy].insert(interface.get());
-            if (interfaceTy->decl && Utils::In(interfaceTy->decl->identifier.Val(),
-                {std::string("Any"), CTYPE_NAME, std::string{COPY_NAME}}) &&
-                interfaceTy->decl->fullPackageName == CORE_PACKAGE_NAME) {
+            if (!interfaceTy->decl || interfaceTy->decl->fullPackageName != CORE_PACKAGE_NAME) {
+                continue;
+            }
+            auto name = interfaceTy->decl->identifier.Val();
+            // Any and CType cannot be extended. Copyable can be extended only when the extended type is a struct;
+            // field copyability is checked later in ModalTypeChecker.
+            if (name == "Any" || name == CTYPE_NAME) {
                 diag.DiagnoseRefactor(
                     DiagKindRefactor::sema_interface_is_not_extendable, *interface, interfaceTy->decl->identifier);
+            } else if (name == COPY_NAME) {
+                if (auto sd = DynamicCast<StructDecl>(Ty::GetDeclPtrOfTy(ty))) {
+                    sd->SetIsCopyType();
+                } else {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_illegal_copyable_type_usage, *interface);
+                }
             }
         }
     }

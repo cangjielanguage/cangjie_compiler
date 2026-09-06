@@ -418,8 +418,7 @@ ERROR(sema_exclave_invalid_func_signature,
     "exclave must be used in func with @local! non copy param or @local!/@local? non copy return type")
 ERROR(sema_nested_exclave, "exclave cannot be nested", {"outer exclave is here"})
 ERROR(sema_copy_struct_bad_field, "cannot declare field '%s' of non copy type '%s' in copy type '%s'")
-ERROR(sema_illegal_copyable_type_usage,
-    "'Copyable' can only be used as a struct supertype or a generic upper bound")
+ERROR(sema_illegal_copyable_type_usage, "'Copyable' can only be used as a struct supertype or a generic upper bound")
 ERROR(sema_bad_capture_local, "cannot capture %s variable '%s' in %s %s")
 ERROR(sema_bad_local_assignment, "cannot assign%s to expression of '%s' type")
 ERROR(sema_bad_local_half_ma, "cannot assign to member of @local? value of non copy type outside its constructor"

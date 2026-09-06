@@ -224,7 +224,8 @@ private:
 /// 3. Check call expr args cannot be external @local! type if the param is @local! nor Copy
 /// 4. Check validity of struct inheriting Copyable
 /// 5. Check local of captured variables
-/// 6. Check non-struct types cannot inherit Copyable (in PreCheckInvalidInherit)
+/// 6. Check non-struct types cannot inherit Copyable (in PreCheckInvalidInherit);
+///    extend of non-struct cannot inherit Copyable (in CheckExtendInterfaces)
 /// 7. Check assignment/member-assignment
 /// 8. Check exclave expr is inside a func-like body whose signature has a non-Copyable or
 /// non-data return/parameter/this type; not in param default values or global/static initializer
@@ -311,13 +312,17 @@ private:
             return VisitAction::SKIP_CHILDREN;
         }
         if (auto decl = DynamicCast<StructDecl>(node)) {
-            if (decl->IsCopyType()) {
+            // Direct `struct S <: Copyable`; extend-of-struct is checked via ExtendDecl below.
+            if (InheritsCopyable(*decl)) {
                 CheckCopyType(*decl);
             }
             CheckMemberVarModality(*decl);
             if (HasMixedLocalTypeInit(*decl)) {
                 CheckMemberVarInitalizer(*decl);
             }
+        }
+        if (auto ed = DynamicCast<ExtendDecl>(node)) {
+            CheckExtendCopyable(*ed);
         }
         if (auto decl = DynamicCast<ClassDecl>(node)) {
             if (HasMixedLocalTypeInit(*decl)) {
@@ -1387,7 +1392,7 @@ private:
             CheckCallExpr(ctx, *inner);
             return;
         }
-        if (!call.GetTy().IsCorrect() || !call.desugarExpr) {
+        if (!call.GetTy().IsCorrect()) {
             return;
         }
         // ctor is always considered exclave call, so we don't check arg pass
@@ -1447,7 +1452,17 @@ private:
         d.DiagnoseRefactor(DiagKindRefactor::sema_expected_data_type, node, typeStr);
     }
 
-    /// Check field types when struct inherits Copyable
+    bool InheritsCopyable(const InheritableDecl& id) const
+    {
+        for (auto& super : id.inheritedTypes) {
+            if (super && super->GetTy().IsCorrect() && type.IsCopyInterfaceTy(super->DataTy())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Check field types when struct inherits Copyable (directly or via extend).
     void CheckCopyType(StructDecl& decl)
     {
         for (auto member : decl.GetMemberDeclPtrs()) {
@@ -1458,6 +1473,22 @@ private:
                 DiagCopyStructBadField(decl, *var);
             }
         }
+    }
+
+    void CheckExtendCopyable(ExtendDecl& ed)
+    {
+        if (!InheritsCopyable(ed) || !ed.extendedType || !ed.extendedType->GetTy().IsCorrect()) {
+            return;
+        }
+        auto sd = DynamicCast<StructDecl>(Ty::GetDeclOfTy(ed.extendedType->GetTy()));
+        if (!sd) {
+            return;
+        }
+        // Avoid double-checking when the struct itself also declares `<: Copyable`.
+        if (InheritsCopyable(*sd)) {
+            return;
+        }
+        CheckCopyType(*sd);
     }
 
     void DiagCopyStructBadField(const StructDecl& decl, const VarDecl& var)
