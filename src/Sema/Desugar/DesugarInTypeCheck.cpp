@@ -640,6 +640,10 @@ void TypeChecker::TypeCheckerImpl::DesugarArrayCall(ASTContext& ctx, CallExpr& c
     arrayExpr->sourceExpr = &ce;
     arrayExpr->begin = ce.begin;
     arrayExpr->end = ce.end;
+    // Keep paren positions so diagnostics on the desugared ArrayExpr (e.g. VArray
+    // arg-number mismatch) carry a valid range instead of a zero position.
+    arrayExpr->leftParenPos = ce.leftParenPos;
+    arrayExpr->rightParenPos = ce.rightParenPos;
     ce.desugarExpr = std::move(arrayExpr);
     AddCurFile(ce, ce.curFile);
 }

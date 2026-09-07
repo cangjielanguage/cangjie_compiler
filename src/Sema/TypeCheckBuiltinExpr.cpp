@@ -371,8 +371,16 @@ bool TypeChecker::TypeCheckerImpl::ChkVArrayArg(ASTContext& ctx, ArrayExpr& ve)
 {
     // check arg.
     if (ve.args.size() != 1) {
+        // Align the range computation with DiagWrongNumberOfArgumentsCommon: fall back
+        // to the node range when paren positions are zero (e.g. a desugared ArrayExpr
+        // whose producer forgot to copy them), and extend the end to the last argument
+        // when it is a trailing lambda placed after ')'.
+        bool parenPosExist = !ve.leftParenPos.IsZero() && !ve.rightParenPos.IsZero();
+        auto beginPos = parenPosExist ? ve.leftParenPos : ve.begin;
+        bool lastArgAfterParen = !ve.args.empty() && ve.args.back() && ve.args.back()->end > ve.rightParenPos;
+        auto endPos = parenPosExist ? (lastArgAfterParen ? ve.args.back()->end : ve.rightParenPos + 1) : ve.end;
         diag.DiagnoseRefactor(
-            DiagKindRefactor::sema_varray_args_number_mismatch, ve, MakeRange(ve.leftParenPos, ve.rightParenPos + 1));
+            DiagKindRefactor::sema_varray_args_number_mismatch, ve, MakeRange(beginPos, endPos));
         return false;
     }
     bool ret = false;
