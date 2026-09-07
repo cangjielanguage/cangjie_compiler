@@ -24,7 +24,7 @@ Ptr<Value> Translator::Visit(const AST::ClassDecl& decl)
 void Translator::SetClassSuperClass(ClassDef& classDef, const AST::ClassLikeDecl& decl)
 {
     if (auto astTy = DynamicCast<AST::ClassTy*>(decl.DataTy()); astTy && astTy->GetSuperClassTy() != nullptr) {
-        auto type = TranslateType(astTy->GetSuperClassTy());
+        auto type = TranslateType(AST::ModalTy{astTy->GetSuperClassTy()});
         // The super class must be of the reference.
         CJC_ASSERT(type->IsRef());
         if (!classDef.HasSuperClass()) {
@@ -37,7 +37,7 @@ void Translator::SetClassSuperClass(ClassDef& classDef, const AST::ClassLikeDecl
 void Translator::SetClassImplementedInterface(ClassDef& classDef, const AST::ClassLikeDecl& decl)
 {
     for (auto& superInterfaceTy : decl.GetStableSuperInterfaceTys()) {
-        auto type = TranslateType(superInterfaceTy);
+        auto type = TranslateType(AST::ModalTy{superInterfaceTy});
         // The interface must be of the reference.
         CJC_ASSERT(type->IsRef());
         auto realType = StaticCast<ClassType*>(StaticCast<RefType*>(type)->GetBaseType());

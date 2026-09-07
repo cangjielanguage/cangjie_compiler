@@ -1331,7 +1331,7 @@ void ToCHIR::Canonicalization()
 bool ToCHIR::TranslateToCHIR(std::vector<const AST::Decl*>&& annoOnly)
 {
     Utils::ProfileRecorder recorder("CHIR", "AST to CHIR Translation");
-    std::unordered_map<AST::Ty*, Type*> typeMap;
+    std::unordered_map<AST::ModalTy, Type*> typeMap;
     CHIR::CHIRTypeCache chirTypeCache(typeMap);
     auto chirType = std::make_unique<CHIRType>(builder, chirTypeCache);
     auto ast2chirBuilder = AST2CHIR::AST2CHIRBuilder();

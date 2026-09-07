@@ -586,9 +586,6 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
 
 void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
 {
-    if (funcDecl.TestAttr(AST::Attribute::GENERIC)) {
-        TranslateFunctionGenericUpperBounds(chirType, funcDecl);
-    }
     if (kind == IncreKind::INCR && !funcDecl.toBeCompiled && !IsSrcCodeImportedGlobalDecl(funcDecl, opts)) {
         CreatePseudoImportedFuncSignatureAndSetGlobalCache(funcDecl);
         return;
@@ -727,10 +724,6 @@ void AST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl&
         const auto& loc = GetDeclLoc(builder.GetChirContext(), funcDecl);
         fn->SetDebugLocation(loc);
         return;
-    }
-    bool isGeneric = funcDecl.TestAttr(AST::Attribute::GENERIC);
-    if (isGeneric) {
-        TranslateFunctionGenericUpperBounds(chirType, funcDecl);
     }
     auto fnTy = StaticCast<FuncType*>(chirType.TranslateType(funcDecl.GetTy()));
     fnTy = AdjustFuncType(*fnTy, funcDecl, builder, chirType);
@@ -1145,15 +1138,11 @@ void AST2CHIR::TranslateAllCustomTypeTy()
         return false;
     };
 
-    std::unordered_set<Ptr<const AST::Decl>> translatedGenericDecls;
     for (auto decl : importedNominalDecls) {
         if (!translateNow(*decl)) {
             continue;
         }
         auto type = chirType.TranslateType(decl->GetTy());
-        if (decl->TestAttr(AST::Attribute::GENERIC)) {
-            translatedGenericDecls.insert(decl);
-        }
         if (decl->identifier == OBJECT_NAME && decl->fullPackageName == CORE_PACKAGE_NAME) {
             auto clsTy = StaticCast<ClassType*>(StaticCast<RefType*>(type)->GetBaseType());
             builder.SetObjectTy(clsTy);
@@ -1166,7 +1155,6 @@ void AST2CHIR::TranslateAllCustomTypeTy()
     for (auto decl : genericNominalDecls) {
         if (translateNow(*decl)) {
             chirType.TranslateType(decl->GetTy());
-            translatedGenericDecls.emplace(decl);
         }
     }
     for (auto decl : nominalDecls) {
@@ -1183,12 +1171,9 @@ void AST2CHIR::TranslateAllCustomTypeTy()
             builder.SetAnyTy(clsTy);
         }
     }
-    // Translate upper bounds after normal decls have been translated.
-    for (auto decl : translatedGenericDecls) {
-        for (auto ty : decl->GetTy()->TyArgs()) {
-            chirType.FillGenericArgType(*RawStaticCast<AST::GenericsTy*>(ty));
-        }
-    }
+    // Nominal types are translated above. Generic upper bounds (including local ModalTy
+    // variants created later when translating FuncTy) are filled by FillAllGenericTypeUpperBounds
+    // after CacheTopLevelDeclToGlobalSymbolTable.
     for (auto decl : importedGenericInstantiatedNominalDecls) {
         if (translateNow(*decl)) {
             chirType.TranslateType(decl->GetTy());

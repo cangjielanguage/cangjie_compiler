@@ -1174,7 +1174,7 @@ bool Translator::IsOverflowOpCall(const AST::FuncDecl& func)
     if (!Is<AST::InterfaceDecl>(func.outerDecl)) {
         return false;
     }
-    return IsOverflowOperator(func.identifier, *StaticCast<FuncType>(TranslateType(func.DataTy())));
+    return IsOverflowOperator(func.identifier, *StaticCast<FuncType>(TranslateType(func.GetTy())));
 }
 
 Value* Translator::CreateGetRTTIWrapper(Value* value, Block* bl, const DebugLocation& loc)
@@ -1318,12 +1318,12 @@ Ptr<Type> Translator::GetMemberFuncCallerInstType(const AST::CallExpr& expr, boo
     if (auto memAccess = DynamicCast<AST::MemberAccess*>(expr.baseFunc.get()); memAccess) {
         // xxx.memberFunc()
         if (!IsPackageMemberAccess(*memAccess)) {
-            callerType = TranslateType(memAccess->baseExpr->DataTy());
+            callerType = TranslateType(memAccess->baseExpr->GetTy());
         } else if (IsCallingConstructor(expr)) {
-            callerType = TranslateType(expr.DataTy());
+            callerType = TranslateType(expr.GetTy());
         }
     } else if (IsCallingConstructor(expr)) {
-        callerType = TranslateType(expr.DataTy());
+        callerType = TranslateType(expr.GetTy());
     } else if (expr.resolvedFunction != nullptr && expr.resolvedFunction->outerDecl != nullptr &&
         expr.resolvedFunction->outerDecl->IsNominalDecl()) {
         // call own member function in nominal decl, there are 3 cases:
@@ -1347,7 +1347,7 @@ Ptr<Type> Translator::GetMemberFuncCallerInstType(const AST::CallExpr& expr, boo
         } else {
             // 4. struct A { static let a = foo(); func foo() {} }
             //                              ^^^ call `foo` while initializing static member var, then return `A`
-            callerType = TranslateType(expr.resolvedFunction->outerDecl->DataTy());
+            callerType = TranslateType(expr.resolvedFunction->outerDecl->GetTy());
         }
     }
 
@@ -1392,7 +1392,7 @@ std::pair<std::vector<Type*>, Type*> Translator::GetMemberFuncParamAndRetInstTyp
         CJC_ASSERT(genericTy->upperBounds.size() == 1 && "not support multi-upperBounds for funcType in CHIR");
         funcType = StaticCast<FuncType*>(TranslateType(AST::ModalTy{*genericTy->upperBounds.begin()}));
     } else {
-        funcType = StaticCast<FuncType*>(TranslateType(expr.baseFunc->DataTy()));
+        funcType = StaticCast<FuncType*>(TranslateType(expr.baseFunc->GetTy()));
     }
     if (expr.resolvedFunction->TestAttr(AST::Attribute::CONSTRUCTOR) || expr.resolvedFunction->IsFinalizer()) {
         return std::pair<std::vector<Type*>, Type*>{funcType->GetParamTypes(), builder.GetUnitTy()};

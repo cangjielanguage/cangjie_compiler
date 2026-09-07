@@ -507,25 +507,38 @@ Ptr<Value> Translator::TranslateConstructorFuncInline(const AST::Decl& parent, c
     return initBlock;
 }
 
+std::vector<GenericType*> Translator::GetNestedFuncGenericParams(const AST::FuncDecl& func)
+{
+    std::vector<GenericType*> genericTys;
+    if (auto generic = func.funcBody->generic.get(); generic && func.TestAttr(AST::Attribute::GENERIC)) {
+        for (auto& type : generic->typeParameters) {
+            auto modalTy = type->GetTy();
+            auto genericType = StaticCast<GenericType*>(TranslateType(modalTy));
+            genericTys.emplace_back(genericType);
+            std::vector<Type*> upperBounds;
+            for (auto argTy : StaticCast<AST::GenericsTy*>(modalTy.Ty())->upperBounds) {
+                CJC_ASSERT(!argTy->IsGeneric());
+                // Keep upper-bound modals aligned with the generic itself (same as WithModal).
+                upperBounds.emplace_back(TranslateType(AST::ModalTy{argTy, modalTy.Mode()}));
+            }
+            genericType->SetUpperBounds(upperBounds);
+        }
+    }
+    return genericTys;
+}
+
 Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
 {
     CJC_ASSERT(func.funcBody && func.funcBody->body);
-    if (func.TestAttr(AST::Attribute::GENERIC)) {
-        TranslateFunctionGenericUpperBounds(chirTy, func);
-    }
     auto lambdaTrans = SetupContextForLambda(*func.funcBody->body);
+    // Fill nested func type params before translating FuncTy, so WithModal can copy
+    // upper bounds into any T@local! / T@local? that appear in the signature.
+    auto genericTys = GetNestedFuncGenericParams(func);
     auto funcTy = StaticCast<FuncType*>(TranslateType(func.GetTy()));
     // Create nested functions' body and parameters.
     CJC_NULLPTR_CHECK(currentBlock->GetTopLevelFunc());
     BlockGroup* body = builder.CreateBlockGroup(*currentBlock->GetTopLevelFunc());
     const auto& loc = TranslateLocation(func);
-    std::vector<GenericType*> genericTys;
-    // Only collect for generic function which has not been instantiated.
-    if (auto generic = func.funcBody->generic.get(); generic && func.TestAttr(AST::Attribute::GENERIC)) {
-        for (auto& type : generic->typeParameters) {
-            genericTys.emplace_back(StaticCast<GenericType*>(TranslateType(type->GetTy())));
-        }
-    }
     std::string lambdaMangleName = func.mangledName;
     Lambda* lambda = CreateAndAppendExpression<Lambda>(
         loc, funcTy, funcTy, currentBlock, true, lambdaMangleName, func.identifier, genericTys);

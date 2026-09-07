@@ -13,19 +13,21 @@
 #include "cangjie/CHIR/IR/Type/Type.h"
 
 #include <mutex>
+#include <unordered_map>
 
 namespace Cangjie::CHIR {
 
 class CHIRTypeCache {
 public:
-    std::unordered_map<AST::Ty*, Type*>& typeMap; // AST::Type -> CHIR::Type
+    // Key is ModalTy: bare `T` is ModalTy{T, Mode::NOT}; `@local!` / `@local?` use FULL / HALF.
+    std::unordered_map<AST::ModalTy, Type*>& typeMap;
     // cache custom type(interface decl, class decl, struct decl, enum decl), except for extend decl
     AST2CHIRNodeMap<CustomTypeDef> globalNominalCache;
-    explicit CHIRTypeCache(std::unordered_map<AST::Ty*, Type*>& typeMap) : typeMap(typeMap)
+    explicit CHIRTypeCache(std::unordered_map<AST::ModalTy, Type*>& typeMap) : typeMap(typeMap)
     {
     }
     explicit CHIRTypeCache(
-        std::unordered_map<AST::Ty*, Type*>& typeMap, const AST2CHIRNodeMap<CustomTypeDef>& globalNominalCache)
+        std::unordered_map<AST::ModalTy, Type*>& typeMap, const AST2CHIRNodeMap<CustomTypeDef>& globalNominalCache)
         : typeMap(typeMap), globalNominalCache(globalNominalCache)
     {
     }
@@ -39,20 +41,21 @@ public:
     ~CHIRType() = default;
 
     /**
-     * @brief Translates an AST type to a CHIR type.
+     * @brief Translates an AST ModalTy to a CHIR type.
      *
-     * @param ty The AST type to be translated.
+     * Bare `Ty*` is passed as ModalTy{ty} (Mode::NOT). Local forms use FULL / HALF.
+     *
+     * @param ty The AST type (with modal) to be translated.
      * @return The translated CHIR type.
      */
-    Type* TranslateType(AST::Ty& ty);
     Type* TranslateType(AST::ModalTy ty);
-    
+
     /**
-     * @brief Fills the generic argument types.
-     *
-     * @param ty The AST generics type to be processed.
+     * @brief Fill upper bounds for every GenericsTy ModalTy already present in typeMap
+     * (including @local! / @local? variants created while translating FuncTy).
      */
-    void FillGenericArgType(AST::GenericsTy& ty);
+    void FillAllGenericTypeUpperBounds();
+
     /* Notice that chirTypeCache.globalNominalCache is non-thread-safe, so SetGlobalNominalCache only be invoked
      * serially. Concurrent execution of SetGlobalNominalCache is not advisable.
      */
@@ -77,7 +80,7 @@ public:
     {
         return chirTypeCache.globalNominalCache.GetALL();
     }
-    std::unordered_map<AST::Ty*, Type*>& GetTypeMap() const
+    std::unordered_map<AST::ModalTy, Type*>& GetTypeMap() const
     {
         return chirTypeCache.typeMap;
     }
@@ -96,6 +99,9 @@ private:
     Type* TranslateArrayType(AST::ArrayTy& arrayTy);
     Type* TranslateVArrayType(AST::VArrayTy& varrayTy);
     Type* TranslateCPointerType(AST::PointerTy& pointerTy);
+    Type* TranslateDataType(AST::Ty& ty);
+    void FillGenericTypeUpperBounds(AST::ModalTy ty);
+
     CHIRBuilder& builder;
     CHIRTypeCache& chirTypeCache;
     // mutex for translateType. TranslateType is recursive, so we use the recursive mutex.

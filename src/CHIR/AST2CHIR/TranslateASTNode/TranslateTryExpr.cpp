@@ -247,7 +247,7 @@ std::vector<ClassType*> Translator::GetExceptionsForTry(const AST::TryExpr& tryE
     auto cmp = [](const Ptr<ClassType>& ty1, const Ptr<ClassType>& ty2) { return ty1->ToString() < ty2->ToString(); };
     std::set<ClassType*, decltype(cmp)> exceptions(cmp);
     for (auto ty : exceptionTys) {
-        auto classTypeRef = StaticCast<RefType*>(TranslateType(ty));
+        auto classTypeRef = StaticCast<RefType*>(TranslateType(AST::ModalTy{ty}));
         exceptions.emplace(StaticCast<ClassType*>(classTypeRef->GetBaseType()));
     }
     return std::vector<ClassType*>(exceptions.begin(), exceptions.end());

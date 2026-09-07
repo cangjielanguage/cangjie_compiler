@@ -320,6 +320,10 @@ void AST2CHIR::CacheSomeDeclsToGlobalSymbolTable()
     TranslateAllCustomTypeTy();
     // create all top-level func decl's shell and var decls, cache them to global symbol table.
     CacheTopLevelDeclToGlobalSymbolTable();
+    // Func signatures have translated FuncTy (incl. T@local? / T@local!), so typeMap now holds
+    // the GenericType ModalTy keys that need upper bounds. Fill once here — not at TranslateType
+    // time (cycles) and not scattered across Visits (easy to miss local variants).
+    chirType.FillAllGenericTypeUpperBounds();
 
     SetGenericDecls();
 }

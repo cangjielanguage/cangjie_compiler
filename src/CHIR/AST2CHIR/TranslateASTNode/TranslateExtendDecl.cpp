@@ -21,7 +21,7 @@ Ptr<Value> Translator::Visit(const AST::ExtendDecl& decl)
     CreateAnnotationInfo<ExtendDef>(decl, *extendDef, extendDef);
 
     // step 2: set extended type
-    auto extendedTy = chirTy.TranslateType(decl.extendedType->DataTy());
+    auto extendedTy = chirTy.TranslateType(decl.extendedType->GetTy());
     if (extendedTy->IsRef()) {
         extendedTy = StaticCast<RefType*>(extendedTy)->GetBaseType();
     }
@@ -91,18 +91,12 @@ Ptr<Value> Translator::Visit(const AST::ExtendDecl& decl)
 
     // step 4: set implemented interface
     for (auto& superType : decl.GetStableSuperInterfaceTys()) {
-        auto someTy = TranslateType(superType);
+        auto someTy = TranslateType(AST::ModalTy{superType});
         auto realType = StaticCast<RefType*>(someTy)->GetBaseType();
         extendDef->AddImplementedInterfaceTy(*StaticCast<ClassType*>(realType));
     }
 
-    // step 5: fill upper bounds
-    if (decl.TestAttr(AST::Attribute::GENERIC)) {
-        CJC_NULLPTR_CHECK(decl.generic);
-        auto genericDecl = decl.generic.get();
-        for (auto& genericTy : genericDecl->typeParameters) {
-            chirTy.FillGenericArgType(*StaticCast<AST::GenericsTy*>(genericTy->DataTy()));
-        }
-    }
+    // Upper bounds of extend type parameters (and their local ModalTy variants) are
+    // filled by CHIRType::FillAllGenericTypeUpperBounds after func signatures are created.
     return nullptr;
 }

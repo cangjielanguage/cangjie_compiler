@@ -64,7 +64,7 @@ Translator::LeftValueInfo Translator::TranslateEnumMemberVarRef(const AST::RefEx
 
     // polish here
     auto enumTy = StaticCast<EnumTy*>(refExpr.DataTy());
-    auto enumType = StaticCast<EnumType*>(chirTy.TranslateType(*enumTy));
+    auto enumType = StaticCast<EnumType*>(chirTy.TranslateType(AST::ModalTy{enumTy}));
     uint64_t enumId = GetEnumCtorId(*target);
     auto selectorTy = GetSelectorType(*enumTy);
     if (enumTy->decl->hasArguments) {

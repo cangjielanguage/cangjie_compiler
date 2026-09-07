@@ -18,14 +18,6 @@ namespace Cangjie {
 namespace CHIR {
 
 /**
- * @brief Translates the function's generic upper bounds.
- *
- * @param chirTy The CHIR type to be translated.
- * @param func The function declaration containing generic information.
- */
-void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& func);
-
-/**
  * @brief Adjusts the function type based on the function declaration.
  *
  * @param funcType The function type to be adjusted.

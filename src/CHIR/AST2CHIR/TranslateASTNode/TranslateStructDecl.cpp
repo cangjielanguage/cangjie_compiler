@@ -49,7 +49,7 @@ Ptr<Value> Translator::Visit(const AST::StructDecl& decl)
     }
     // set implemented interface
     for (auto& superInterfaceTy : decl.GetStableSuperInterfaceTys()) {
-        auto astType = TranslateType(superInterfaceTy);
+        auto astType = TranslateType(AST::ModalTy{superInterfaceTy});
         // The implemented interface type must be of reference type.
         CJC_ASSERT(astType->IsRef());
         auto realType = StaticCast<ClassType*>(StaticCast<RefType*>(astType)->GetBaseType());

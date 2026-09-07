@@ -66,11 +66,6 @@ Ptr<Value> Translator::GetSymbolTable(const AST::Node& node) const
     return localValSymbolTable.Get(node);
 }
 
-Ptr<Type> Translator::TranslateType(AST::DataTy ty)
-{
-    return chirTy.TranslateType(ty);
-}
-
 Ptr<Type> Translator::TranslateType(AST::ModalTy ty)
 {
     return chirTy.TranslateType(ty);

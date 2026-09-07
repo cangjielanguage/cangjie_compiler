@@ -31,21 +31,6 @@ inline std::map<Cangjie::AST::Attribute, Attribute> g_attrMap = {
     {Cangjie::AST::Attribute::HAS_INITED_FIELD, Attribute::HAS_INITED_FIELD},
     {Cangjie::AST::Attribute::UNSAFE, Attribute::UNSAFE}};
 
-void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& func)
-{
-    CJC_NULLPTR_CHECK(func.funcBody);
-    if (func.funcBody->generic) {
-        // We need to translate functions' generic type and fill their upperBounds during translation.
-        for (auto& type : func.funcBody->generic->typeParameters) {
-            chirTy.TranslateType(type->GetTy());
-        }
-        // Must fill upper bounds after translation all generics.
-        for (auto& type : func.funcBody->generic->typeParameters) {
-            chirTy.FillGenericArgType(StaticCast<AST::GenericsTy>(*type->GetTy()));
-        }
-    }
-}
-
 FuncType* AdjustVarInitType(
     const FuncType& funcType, const AST::Decl& outerDecl, CHIRBuilder& builder, CHIRType& chirType)
 {

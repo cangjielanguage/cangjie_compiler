@@ -139,15 +139,7 @@ public:
     static uint64_t GetEnumPatternID(const AST::EnumPattern& enumPattern);
 
     /**
-     * @brief Translates a type from AST to CHIR.
-     *
-     * @param ty The type in AST format.
-     * @return The translated type.
-     */
-    Ptr<Type> TranslateType(AST::DataTy ty);
-
-    /**
-     * @brief Translates a type from AST to CHIR, applying AST modal via SubstituteModal.
+     * @brief Translates a type from AST to CHIR, applying AST modal via typeMap key.
      */
     Ptr<Type> TranslateType(AST::ModalTy ty);
 
@@ -1143,8 +1135,6 @@ private:
     void TranslateFinallyNormalFlows(const AST::Block& finally, const FinallyControlVal& finallyControlInfo);
     void TranslateFinallyRethrowFlows(const AST::Block& finally);
     std::pair<Ptr<Block>, Ptr<Block>> TranslateExceptionPattern(const AST::Pattern& pattern, Ptr<Value> eVal);
-
-    GenericType* TranslateCompleteGenericType(AST::GenericsTy& ty);
     
     // Helper to intrinsic translate.
     void BlackBoxModifyArgTypeToRef(std::vector<Value*>& args);
@@ -1152,6 +1142,8 @@ private:
     void AddMemberMethodToCustomTypeDef(const AST::FuncDecl& decl, CustomTypeDef& def);
 
     Type* GetThisTypeWithModal(Type& thisType, const AST::FuncDecl& funcDecl);
+
+    std::vector<GenericType*> GetNestedFuncGenericParams(const AST::FuncDecl& func);
 };
 
 extern const std::unordered_map<Cangjie::TokenKind, BinaryExprKind> tokenKindToBinaryExprKind;

@@ -401,13 +401,6 @@ Ptr<Value> Translator::TransformThisType(Value& rawThis, Type& expectedTy, Lambd
     return expr->GetResult();
 }
 
-GenericType* Translator::TranslateCompleteGenericType(AST::GenericsTy& ty)
-{
-    auto gType = StaticCast<GenericType*>(TranslateType(&ty));
-    chirTy.FillGenericArgType(ty);
-    return gType;
-}
-
 Ptr<Value> Translator::TranslateVarMemberAccess(const AST::MemberAccess& member)
 {
     const auto& loc = TranslateLocation(member);
@@ -449,7 +442,7 @@ Ptr<Value> Translator::TranslateEnumMemberAccess(const AST::MemberAccess& member
     CJC_ASSERT(fieldIt != constructors.end());
     auto enumId = static_cast<uint64_t>(std::distance(constructors.begin(), fieldIt));
 
-    auto ty = chirTy.TranslateType(*enumTy);
+    auto ty = chirTy.TranslateType(AST::ModalTy{enumTy});
     const auto& loc = TranslateLocation(**fieldIt);
     auto selectorTy = GetSelectorType(*enumTy);
     if (!enumTy->decl->hasArguments) {
