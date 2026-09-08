@@ -67,6 +67,14 @@ void SetOptimizationLevelOptions(SetFuncType setOptionHandler, const DriverOptio
 void SetOptions(SetFuncType setOptionHandler, const DriverOptions& driverOptions);
 
 /**
+ * @brief Whether the program links std.reflect (i.e. uses reflection APIs).
+ *
+ * @param driverOptions The data structure is obtained through parsing the compilation options.
+ * @return true if std.reflect is among the direct/indirect built-in dependencies.
+ */
+bool LinksStdReflect(const DriverOptions& driverOptions);
+
+/**
  * @brief Set verify opt options.
  *
  * @param setOptionHandler The function to set 'only-verify-out' option.
