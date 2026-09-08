@@ -49,15 +49,20 @@ static const std::vector<AST::ASTKind> ignoredKind = {
 
 class CastASTTests : public testing::Test {
 protected:
+    // Clang still type-checks discarded `if constexpr` branches outside templates.
+    template <typename NodeT> static void EmplaceIfDefaultConstructible(AST::ASTKind kind)
+    {
+        if constexpr (IgnoredType<NodeT>()) {
+            auto nodePtr = MakeOwned<NodeT>();
+            astMap.emplace(kind, nodePtr.get());
+            astPool.emplace_back(std::move(nodePtr));
+        }
+    }
+
     static void SetUpTestCase()
     {
 #ifndef CANGJIE_ENABLE_GCOV
-#define ASTKIND(KIND, VALUE, TYPE, SIZE)                                                                               \
-    if constexpr (IgnoredType<AST::TYPE>()) {                                                                          \
-        auto nodePtr = MakeOwned<AST::TYPE>();                                                                         \
-        astMap.emplace(AST::ASTKind::KIND, nodePtr.get());                                                             \
-        astPool.emplace_back(std::move(nodePtr));                                                                      \
-    }
+#define ASTKIND(KIND, VALUE, TYPE, SIZE) EmplaceIfDefaultConstructible<AST::TYPE>(AST::ASTKind::KIND);
 #include "cangjie/AST/ASTKind.inc"
 #undef ASTKIND
 #endif
