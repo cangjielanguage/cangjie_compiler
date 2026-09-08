@@ -421,7 +421,11 @@ bool TypeChecker::TypeCheckerImpl::ChkVArrayExpr(ASTContext& ctx, Ty& target, Ar
     }
     // check T and size.
     if (!typeManager.IsSubtype(ve.type->GetTy(), targetTy)) {
-        DiagMismatchedTypesWithFoundTy(diag, ve, targetTy->String(), ve.type->GetTy()->String());
+        // When the desugared ArrayExpr has sourceExpr, ShouldDiagnose returns false
+        // and the mismatch diagnostic is silently skipped. Fall back to sourceExpr
+        // to ensure the error is reported on the original CallExpr.
+        const Node& diagNode = ve.sourceExpr ? *ve.sourceExpr : ve;
+        DiagMismatchedTypesWithFoundTy(diag, diagNode, targetTy->String(), ve.type->GetTy()->String());
         ve.SetTy(TypeManager::GetInvalidTy());
         return false;
     }
