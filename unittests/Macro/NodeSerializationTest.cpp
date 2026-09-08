@@ -113,19 +113,19 @@ TEST_F(NodeSerializationTest, BinaryExpr_Serialization)
     uint8_t* rawBuffer = binaryExprWriter.ExportNode();
     ASSERT_NE(rawBuffer, nullptr);
     uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
-    auto fbNode = NodeFormat::GetNode(buffer);
-    EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_EXPR);
+    auto fbNode = ASTFormat::GetNode(buffer);
+    EXPECT_EQ(fbNode->root_type(), ASTFormat::AnyNode_EXPR);
     auto fbExpr = fbNode->root_as_EXPR();
-    EXPECT_EQ(fbExpr->expr_type(), NodeFormat::AnyExpr_BINARY_EXPR);
+    EXPECT_EQ(fbExpr->expr_type(), ASTFormat::AnyExpr_BINARY_EXPR);
     auto fbBianryExpr = fbExpr->expr_as_BINARY_EXPR();
     auto leftExpr = fbBianryExpr->left_expr();
-    EXPECT_EQ(leftExpr->expr_type(), NodeFormat::AnyExpr_LIT_CONST_EXPR);
+    EXPECT_EQ(leftExpr->expr_type(), ASTFormat::AnyExpr_LIT_CONST_EXPR);
     auto leftExprStr = fbBianryExpr->left_expr()->expr_as_LIT_CONST_EXPR()->literal();
     EXPECT_EQ(leftExprStr->str(), "2");
     auto rightExpr = fbBianryExpr->right_expr();
-    EXPECT_EQ(rightExpr->expr_type(), NodeFormat::AnyExpr_PAREN_EXPR);
+    EXPECT_EQ(rightExpr->expr_type(), ASTFormat::AnyExpr_PAREN_EXPR);
     auto onlyExpr = rightExpr->expr_as_PAREN_EXPR();
-    EXPECT_EQ(onlyExpr->expr()->expr_type(), NodeFormat::AnyExpr_BINARY_EXPR);
+    EXPECT_EQ(onlyExpr->expr()->expr_type(), ASTFormat::AnyExpr_BINARY_EXPR);
     auto onlyExprAsBinary = onlyExpr->expr()->expr_as_BINARY_EXPR();
     auto parenLeftExprStr = onlyExprAsBinary->left_expr()->expr_as_LIT_CONST_EXPR()->literal();
     auto parenRightExprStr = onlyExprAsBinary->right_expr()->expr_as_LIT_CONST_EXPR()->literal();
@@ -147,9 +147,9 @@ TEST_F(NodeSerializationTest, UnaryExpr_Serialization)
     uint8_t* rawBuffer = unaryExprWriter.ExportNode();
     ASSERT_NE(rawBuffer, nullptr);
     uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
-    auto fbNode = NodeFormat::GetNode(buffer);
-    EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_EXPR);
-    EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), NodeFormat::AnyExpr_UNARY_EXPR);
+    auto fbNode = ASTFormat::GetNode(buffer);
+    EXPECT_EQ(fbNode->root_type(), ASTFormat::AnyNode_EXPR);
+    EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), ASTFormat::AnyExpr_UNARY_EXPR);
     auto fbUnaryExpr = fbNode->root_as_EXPR()->expr_as_UNARY_EXPR();
     auto onlyExpr = fbUnaryExpr->expr()->expr_as_LIT_CONST_EXPR()->literal();
     EXPECT_EQ(onlyExpr->str(), "2");
@@ -169,13 +169,13 @@ TEST_F(NodeSerializationTest, VarDecl_Serialization)
     uint8_t* rawBuffer = varDeclWriter.ExportNode();
     ASSERT_NE(rawBuffer, nullptr);
     uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
-    auto fbNode = NodeFormat::GetNode(buffer);
-    EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_DECL);
-    EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), NodeFormat::AnyDecl_VAR_DECL);
+    auto fbNode = ASTFormat::GetNode(buffer);
+    EXPECT_EQ(fbNode->root_type(), ASTFormat::AnyNode_DECL);
+    EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), ASTFormat::AnyDecl_VAR_DECL);
     auto fbVarDecl = fbNode->root_as_DECL()->decl_as_VAR_DECL();
     EXPECT_EQ(fbVarDecl->is_var(), true);
     EXPECT_EQ(fbVarDecl->base()->identifier()->str(), "a");
-    EXPECT_EQ(fbVarDecl->initializer()->expr_type(), NodeFormat::AnyExpr_BINARY_EXPR);
+    EXPECT_EQ(fbVarDecl->initializer()->expr_type(), ASTFormat::AnyExpr_BINARY_EXPR);
     free(rawBuffer);
 }
 
@@ -191,9 +191,9 @@ TEST_F(NodeSerializationTest, FuncDecl_Serialization)
     uint8_t* rawBuffer = funcDeclWriter.ExportNode();
     ASSERT_NE(rawBuffer, nullptr);
     uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
-    auto fbNode = NodeFormat::GetNode(buffer);
-    EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_DECL);
-    EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), NodeFormat::AnyDecl_FUNC_DECL);
+    auto fbNode = ASTFormat::GetNode(buffer);
+    EXPECT_EQ(fbNode->root_type(), ASTFormat::AnyNode_DECL);
+    EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), ASTFormat::AnyDecl_FUNC_DECL);
     auto fbFuncDecl = fbNode->root_as_DECL()->decl_as_FUNC_DECL();
     EXPECT_EQ(fbFuncDecl->base()->identifier()->str(), "MyComponent");
     auto fbFuncBody = fbFuncDecl->func_body();
@@ -208,10 +208,10 @@ TEST_F(NodeSerializationTest, FuncDecl_Serialization)
     }
     EXPECT_EQ(realIdVec, expectIdVec);
     auto fbFuncBlock = fbFuncBody->body()->body();
-    std::vector<NodeFormat::AnyNode> expectEnumVec{NodeFormat::AnyNode_DECL, NodeFormat::AnyNode_EXPR,
-        NodeFormat::AnyNode_DECL, NodeFormat::AnyNode_EXPR, NodeFormat::AnyNode_DECL, NodeFormat::AnyNode_EXPR,
-        NodeFormat::AnyNode_DECL, NodeFormat::AnyNode_DECL, NodeFormat::AnyNode_DECL, NodeFormat::AnyNode_EXPR};
-    std::vector<NodeFormat::AnyNode> realEnumVec;
+    std::vector<ASTFormat::AnyNode> expectEnumVec{ASTFormat::AnyNode_DECL, ASTFormat::AnyNode_EXPR,
+        ASTFormat::AnyNode_DECL, ASTFormat::AnyNode_EXPR, ASTFormat::AnyNode_DECL, ASTFormat::AnyNode_EXPR,
+        ASTFormat::AnyNode_DECL, ASTFormat::AnyNode_DECL, ASTFormat::AnyNode_DECL, ASTFormat::AnyNode_EXPR};
+    std::vector<ASTFormat::AnyNode> realEnumVec;
     for (size_t i = 0; i < fbFuncBlock->size(); ++i) {
         auto fbBlockNode = fbFuncBlock->Get(i);
         auto fbNodeType = fbBlockNode->root_type();
@@ -233,18 +233,18 @@ TEST_F(NodeSerializationTest, ClassDecl_Serialization)
     uint8_t* rawBuffer = classDeclWriter.ExportNode();
     ASSERT_NE(rawBuffer, nullptr);
     uint8_t* buffer = rawBuffer + 4; // point to the real pos of buffer
-    auto fbNode = NodeFormat::GetNode(buffer);
-    EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_DECL);
-    EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), NodeFormat::AnyDecl_CLASS_DECL);
+    auto fbNode = ASTFormat::GetNode(buffer);
+    EXPECT_EQ(fbNode->root_type(), ASTFormat::AnyNode_DECL);
+    EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), ASTFormat::AnyDecl_CLASS_DECL);
     // test class name
     auto fbClassDecl = fbNode->root_as_DECL()->decl_as_CLASS_DECL();
     EXPECT_EQ(fbClassDecl->base()->identifier()->str(), "Data");
     // test class body
     auto fbClassBody = fbClassDecl->body()->decls();
-    std::vector<NodeFormat::AnyDecl> expectDeclType{NodeFormat::AnyDecl_VAR_DECL, NodeFormat::AnyDecl_VAR_DECL,
-        NodeFormat::AnyDecl_VAR_DECL, NodeFormat::AnyDecl_FUNC_DECL, NodeFormat::AnyDecl_MACRO_EXPAND_DECL,
-        NodeFormat::AnyDecl_TYPE_ALIAS_DECL, NodeFormat::AnyDecl_FUNC_DECL};
-    std::vector<NodeFormat::AnyDecl> realDeclType;
+    std::vector<ASTFormat::AnyDecl> expectDeclType{ASTFormat::AnyDecl_VAR_DECL, ASTFormat::AnyDecl_VAR_DECL,
+        ASTFormat::AnyDecl_VAR_DECL, ASTFormat::AnyDecl_FUNC_DECL, ASTFormat::AnyDecl_MACRO_EXPAND_DECL,
+        ASTFormat::AnyDecl_TYPE_ALIAS_DECL, ASTFormat::AnyDecl_FUNC_DECL};
+    std::vector<ASTFormat::AnyDecl> realDeclType;
     std::vector<std::string> expectDeclId{"a", "b", "c", "get", "M", "", "f"};
     std::vector<std::string> realDeclId;
     for (size_t i = 0; i < fbClassBody->size(); i++) {
@@ -252,15 +252,15 @@ TEST_F(NodeSerializationTest, ClassDecl_Serialization)
         auto declType = fbDecl->decl_type();
         realDeclType.push_back(declType);
         std::string id;
-        if (declType == NodeFormat::AnyDecl_VAR_DECL) {
+        if (declType == ASTFormat::AnyDecl_VAR_DECL) {
             auto fbVarDecl = fbDecl->decl_as_VAR_DECL();
             id = fbVarDecl->base()->identifier()->str();
         }
-        if (declType == NodeFormat::AnyDecl_FUNC_DECL) {
+        if (declType == ASTFormat::AnyDecl_FUNC_DECL) {
             auto fbFuncDecl = fbDecl->decl_as_FUNC_DECL();
             id = fbFuncDecl->base()->identifier()->str();
         }
-        if (declType == NodeFormat::AnyDecl_MACRO_EXPAND_DECL) {
+        if (declType == ASTFormat::AnyDecl_MACRO_EXPAND_DECL) {
             auto fbFuncDecl = fbDecl->decl_as_MACRO_EXPAND_DECL();
             id = fbFuncDecl->base()->identifier()->str();
         }
@@ -270,7 +270,7 @@ TEST_F(NodeSerializationTest, ClassDecl_Serialization)
     EXPECT_EQ(realDeclId, expectDeclId);
     auto VarMemAcc = fbClassBody->Get(2)->decl_as_VAR_DECL();
     auto initExpr = VarMemAcc->initializer();
-    EXPECT_EQ(initExpr->expr_type(), NodeFormat::AnyExpr_MEMBER_ACCESS);
+    EXPECT_EQ(initExpr->expr_type(), ASTFormat::AnyExpr_MEMBER_ACCESS);
     auto memAccExpr = initExpr->expr_as_MEMBER_ACCESS();
     auto firstPart = memAccExpr->base_expr()->expr_as_REF_EXPR()->ref()->identifier()->str();
     auto secondPart = memAccExpr->field()->str();
@@ -293,9 +293,9 @@ TEST_F(NodeSerializationTest, InterfaceDecl_Serialization)
     uint8_t* rawBuffer = interfaceDeclWriter.ExportNode();
     ASSERT_NE(rawBuffer, nullptr);
     uint8_t* buffer = rawBuffer + 4; // point to the real pos of buffer
-    auto fbNode = NodeFormat::GetNode(buffer);
-    EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_DECL);
-    EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), NodeFormat::AnyDecl_INTERFACE_DECL);
+    auto fbNode = ASTFormat::GetNode(buffer);
+    EXPECT_EQ(fbNode->root_type(), ASTFormat::AnyNode_DECL);
+    EXPECT_EQ(fbNode->root_as_DECL()->decl_type(), ASTFormat::AnyDecl_INTERFACE_DECL);
     // test interface name
     auto fbInterfaceDecl = fbNode->root_as_DECL()->decl_as_INTERFACE_DECL();
     EXPECT_EQ(fbInterfaceDecl->base()->identifier()->str(), "MyInterface");
@@ -314,9 +314,9 @@ TEST_F(NodeSerializationTest, IfExpr_Serialization)
     uint8_t* rawBuffer = ifExprWriter.ExportNode();
     ASSERT_NE(rawBuffer, nullptr);
     uint8_t* buffer = rawBuffer + 4; // move the pointer to the real position of the flatbuffer
-    auto fbNode = NodeFormat::GetNode(buffer);
-    EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_EXPR);
-    EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), NodeFormat::AnyExpr_IF_EXPR);
+    auto fbNode = ASTFormat::GetNode(buffer);
+    EXPECT_EQ(fbNode->root_type(), ASTFormat::AnyNode_EXPR);
+    EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), ASTFormat::AnyExpr_IF_EXPR);
     free(rawBuffer);
 }
 
@@ -335,9 +335,9 @@ TEST_F(NodeSerializationTest, LambdaExpr_Serialization)
     uint8_t* rawBuffer = lambdaWriter.ExportNode();
     ASSERT_NE(rawBuffer, nullptr);
     uint8_t* buffer = rawBuffer + 4;
-    auto fbNode = NodeFormat::GetNode(buffer);
-    EXPECT_EQ(fbNode->root_type(), NodeFormat::AnyNode_EXPR);
-    EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), NodeFormat::AnyExpr_LAMBDA_EXPR);
+    auto fbNode = ASTFormat::GetNode(buffer);
+    EXPECT_EQ(fbNode->root_type(), ASTFormat::AnyNode_EXPR);
+    EXPECT_EQ(fbNode->root_as_EXPR()->expr_type(), ASTFormat::AnyExpr_LAMBDA_EXPR);
 
     // check parameter
     auto fbLambdaExpr = fbNode->root_as_EXPR()->expr_as_LAMBDA_EXPR();
@@ -361,8 +361,8 @@ TEST_F(NodeSerializationTest, LambdaExpr_Serialization)
 
     // check lambda body
     auto lbdBlock = fbLambdaBody->body()->body(); // flatbuffers::Vector<flatbuffers::Offset<Node>>
-    std::vector<NodeFormat::AnyNode> expectNodeType{NodeFormat::AnyNode_EXPR};
-    std::vector<NodeFormat::AnyNode> realNodeType{};
+    std::vector<ASTFormat::AnyNode> expectNodeType{ASTFormat::AnyNode_EXPR};
+    std::vector<ASTFormat::AnyNode> realNodeType{};
     for (size_t i = 0; i < lbdBlock->size(); i++) {
         auto fbNode = lbdBlock->Get(i);
         realNodeType.push_back(fbNode->root_type());

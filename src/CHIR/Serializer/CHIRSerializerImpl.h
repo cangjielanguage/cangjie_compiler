@@ -11,7 +11,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wfloat-equal"
 #endif
-#include <flatbuffers/PackageFormat_generated.h>
+#include <flatbuffers/StdxChirFormat_generated.h>
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -78,7 +78,7 @@ private:
     template <typename FBT, typename T> std::vector<flatbuffers::Offset<FBT>> SerializeVec(const std::vector<T>& vec);
     template <typename FBT, typename T>
     std::vector<flatbuffers::Offset<FBT>> SerializeSetToVec(const std::unordered_set<T>& set) const;
-    std::vector<flatbuffers::Offset<PackageFormat::VTableInType>> SerializeVTable(const VTableInDef& obj);
+    std::vector<flatbuffers::Offset<CHIRFormat::VTableInType>> SerializeVTable(const VTableInDef& obj);
     // Dispatchers
     template <typename T> flatbuffers::Offset<void> Dispatch(const T& obj);
 

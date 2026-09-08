@@ -30,8 +30,8 @@
 
 /integration_build/ @zichexuelan
 /schema/ @mini-tang
-/schema/ModuleFormat.fbs @Augus_Jan
-/schema/PackageFormat.fbs @Mr_Kang_Yi
+/schema/CjoFormat.fbs @Augus_Jan
+/schema/StdxChirFormat.fbs @Mr_Kang_Yi
 
 /src/AST/ @Augus_Jan
 /src/Basic/ @kkkkkkkbbbbbbb

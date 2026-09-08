@@ -7,7 +7,7 @@
 #include <iostream>
 #include <string>
 
-#include <flatbuffers/PackageFormat_generated.h>
+#include <flatbuffers/StdxChirFormat_generated.h>
 
 #include "gtest/gtest.h"
 
@@ -28,9 +28,9 @@ protected:
     }
 };
 
-PackageFormat::CHIRTypeKind Serialize(const Type::TypeKind& kind)
+CHIRFormat::CHIRTypeKind Serialize(const Type::TypeKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::Type;
     auto ret = CHIRTypeKind_INVALID;
     switch (kind) {
@@ -149,9 +149,9 @@ PackageFormat::CHIRTypeKind Serialize(const Type::TypeKind& kind)
     return ret;
 }
 
-PackageFormat::SourceExpr Serialize(const SourceExpr& kind)
+CHIRFormat::SourceExpr Serialize(const SourceExpr& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::SourceExpr;
     auto ret = SourceExpr_IF_EXPR;
     switch (kind) {
@@ -186,9 +186,9 @@ PackageFormat::SourceExpr Serialize(const SourceExpr& kind)
     return ret;
 }
 
-PackageFormat::Linkage Serialize(const Cangjie::Linkage& kind)
+CHIRFormat::Linkage Serialize(const Cangjie::Linkage& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::Linkage;
     auto ret = Linkage_WEAK_ODR;
     switch (kind) {
@@ -211,9 +211,9 @@ PackageFormat::Linkage Serialize(const Cangjie::Linkage& kind)
     return ret;
 }
 
-PackageFormat::SkipKind Serialize(const Cangjie::CHIR::SkipKind& kind)
+CHIRFormat::SkipKind Serialize(const Cangjie::CHIR::SkipKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::SkipKind;
     auto ret = SkipKind_NO_SKIP;
     switch (kind) {
@@ -233,9 +233,9 @@ PackageFormat::SkipKind Serialize(const Cangjie::CHIR::SkipKind& kind)
     return ret;
 }
 
-PackageFormat::OverflowStrategy Serialize(const Cangjie::OverflowStrategy& kind)
+CHIRFormat::OverflowStrategy Serialize(const Cangjie::OverflowStrategy& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::OverflowStrategy;
     auto ret = OverflowStrategy_NA;
     switch (kind) {
@@ -258,9 +258,9 @@ PackageFormat::OverflowStrategy Serialize(const Cangjie::OverflowStrategy& kind)
     return ret;
 }
 
-PackageFormat::ValueKind Serialize(const Value::ValueKind& kind)
+CHIRFormat::ValueKind Serialize(const Value::ValueKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::Value;
     auto ret = ValueKind_LITERAL;
     switch (kind) {
@@ -289,9 +289,9 @@ PackageFormat::ValueKind Serialize(const Value::ValueKind& kind)
     return ret;
 }
 
-PackageFormat::ConstantValueKind Serialize(const ConstantValueKind& kind)
+CHIRFormat::ConstantValueKind Serialize(const ConstantValueKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::ConstantValueKind;
     auto ret = ConstantValueKind_BOOL;
     switch (kind) {
@@ -323,9 +323,9 @@ PackageFormat::ConstantValueKind Serialize(const ConstantValueKind& kind)
     return ret;
 }
 
-PackageFormat::FuncKind Serialize(const FuncKind& kind)
+CHIRFormat::FuncKind Serialize(const FuncKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::FuncKind;
     auto ret = FuncKind_DEFAULT;
     switch (kind) {
@@ -381,9 +381,9 @@ PackageFormat::FuncKind Serialize(const FuncKind& kind)
     return ret;
 }
 
-PackageFormat::CustomDefKind Serialize(const CustomDefKind& kind)
+CHIRFormat::CustomDefKind Serialize(const CustomDefKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::CustomDefKind;
     auto ret = CustomDefKind_STRUCT;
     switch (kind) {
@@ -403,9 +403,9 @@ PackageFormat::CustomDefKind Serialize(const CustomDefKind& kind)
     return ret;
 }
 
-PackageFormat::CHIRExprKind Serialize(const ExprKind& kind)
+CHIRFormat::CHIRExprKind Serialize(const ExprKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     auto ret = CHIRExprKind_Invalid;
     switch (kind) {
         case ExprKind::INVALID:
@@ -665,9 +665,9 @@ PackageFormat::CHIRExprKind Serialize(const ExprKind& kind)
     return ret;
 }
 
-PackageFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
+CHIRFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     auto ret = IntrinsicKind_NOT_INTRINSIC;
     switch (kind) {
         case NOT_INTRINSIC:
@@ -1760,9 +1760,9 @@ PackageFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
     return ret;
 }
 
-PackageFormat::PackageAccessLevel Serialize(const Package::AccessLevel& kind)
+CHIRFormat::PackageAccessLevel Serialize(const Package::AccessLevel& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     auto ret = PackageAccessLevel_INVALID;
     switch (kind) {
         case Package::AccessLevel::INVALID:
@@ -1781,9 +1781,9 @@ PackageFormat::PackageAccessLevel Serialize(const Package::AccessLevel& kind)
     return ret;
 }
 
-PackageFormat::Phase Serialize(const Cangjie::CHIR::ToCHIR::Phase& kind)
+CHIRFormat::Phase Serialize(const Cangjie::CHIR::ToCHIR::Phase& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     auto ret = Phase_RAW;
     switch (kind) {
         case ToCHIR::Phase::RAW:
@@ -1803,7 +1803,7 @@ PackageFormat::Phase Serialize(const Cangjie::CHIR::ToCHIR::Phase& kind)
 }
 TEST_F(CHIRSerialzierTest, TypeKindEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::Type;
     auto enumBegin = Type::TypeKind::TYPE_INVALID;
     auto enumEnd = Type::TypeKind::TYPE_THIS; // make sure this is max one we defined exclude pseudo-value MAX_TYPE_KIND
@@ -1811,53 +1811,53 @@ TEST_F(CHIRSerialzierTest, TypeKindEnum)
     EXPECT_EQ(static_cast<size_t>(enumEnd) + 1, static_cast<size_t>(Cangjie::CHIR::Type::TypeKind::MAX_TYPE_KIND));
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
         EXPECT_EQ(
-            PackageFormat::CHIRTypeKind(static_cast<Type::TypeKind>(i)), Serialize(static_cast<Type::TypeKind>(i)))
+            CHIRFormat::CHIRTypeKind(static_cast<Type::TypeKind>(i)), Serialize(static_cast<Type::TypeKind>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRSerialzierTest, SourceExprEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::SourceExpr;
     SourceExpr enumBegin = SourceExpr::IF_EXPR;
     SourceExpr enumEnd = SourceExpr::OTHER; // make sure this is max one we defined
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::SourceExpr(static_cast<SourceExpr>(i)), Serialize(static_cast<SourceExpr>(i)))
+        EXPECT_EQ(CHIRFormat::SourceExpr(static_cast<SourceExpr>(i)), Serialize(static_cast<SourceExpr>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRSerialzierTest, LinkageEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::Linkage;
     Linkage enumBegin = Linkage::WEAK_ODR;
     Linkage enumEnd = Linkage::EXTERNAL_WEAK; // make sure this is max one we defined
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::Linkage(static_cast<Linkage>(i)), Serialize(static_cast<Linkage>(i)))
+        EXPECT_EQ(CHIRFormat::Linkage(static_cast<Linkage>(i)), Serialize(static_cast<Linkage>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRSerialzierTest, SkipKindEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::SkipKind;
     SkipKind enumBegin = SkipKind::NO_SKIP;
     SkipKind enumEnd = SkipKind::SKIP_VIC; // make sure this is max one we defined
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::SkipKind(static_cast<SkipKind>(i)), Serialize(static_cast<SkipKind>(i)))
+        EXPECT_EQ(CHIRFormat::SkipKind(static_cast<SkipKind>(i)), Serialize(static_cast<SkipKind>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRSerialzierTest, OverflowStrategyEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::OverflowStrategy;
     EXPECT_EQ(Serialize(OverflowStrategy::NA), OverflowStrategy_NA);
     EXPECT_EQ(Serialize(OverflowStrategy::WRAPPING), OverflowStrategy_WRAPPING);
@@ -1867,27 +1867,27 @@ TEST_F(CHIRSerialzierTest, OverflowStrategyEnum)
 
 TEST_F(CHIRSerialzierTest, ValueKindEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::Value;
     Value::ValueKind enumBegin = Value::ValueKind::KIND_LITERAL;
     Value::ValueKind enumEnd = Value::ValueKind::KIND_BLOCK_GROUP; // make sure this is max one we defined
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
         EXPECT_EQ(
-            PackageFormat::ValueKind(static_cast<Value::ValueKind>(i)), Serialize(static_cast<Value::ValueKind>(i)))
+            CHIRFormat::ValueKind(static_cast<Value::ValueKind>(i)), Serialize(static_cast<Value::ValueKind>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRSerialzierTest, ConstantValueKindEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::ConstantValueKind;
     ConstantValueKind enumBegin = ConstantValueKind::KIND_BOOL;
     ConstantValueKind enumEnd = ConstantValueKind::KIND_FUNC; // make sure this is max one we defined
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::ConstantValueKind(static_cast<ConstantValueKind>(i)),
+        EXPECT_EQ(CHIRFormat::ConstantValueKind(static_cast<ConstantValueKind>(i)),
             Serialize(static_cast<ConstantValueKind>(i)))
             << "cur i: " << i;
     }
@@ -1895,7 +1895,7 @@ TEST_F(CHIRSerialzierTest, ConstantValueKindEnum)
 
 TEST_F(CHIRSerialzierTest, FuncKindEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::FuncKind;
     FuncKind enumBegin = FuncKind::DEFAULT;
     FuncKind enumEnd =
@@ -1903,34 +1903,34 @@ TEST_F(CHIRSerialzierTest, FuncKindEnum)
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     EXPECT_EQ(static_cast<size_t>(enumEnd) + 1, static_cast<size_t>(FuncKind::FUNCKIND_END));
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::FuncKind(static_cast<FuncKind>(i)), Serialize(static_cast<FuncKind>(i)))
+        EXPECT_EQ(CHIRFormat::FuncKind(static_cast<FuncKind>(i)), Serialize(static_cast<FuncKind>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRSerialzierTest, CustomDefKindEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::CustomDefKind;
     CustomDefKind enumBegin = CustomDefKind::TYPE_STRUCT;
     CustomDefKind enumEnd = CustomDefKind::TYPE_EXTEND; // make sure this is max one we defined
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::CustomDefKind(static_cast<CustomDefKind>(i)), Serialize(static_cast<CustomDefKind>(i)))
+        EXPECT_EQ(CHIRFormat::CustomDefKind(static_cast<CustomDefKind>(i)), Serialize(static_cast<CustomDefKind>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRSerialzierTest, IntrinsicKindEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     Cangjie::CHIR::IntrinsicKind enumBegin = NOT_INTRINSIC;
     Cangjie::CHIR::IntrinsicKind enumEnd = EXCLUSIVE_SCOPE; // make sure this is max one we defined
 
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::IntrinsicKind(static_cast<Cangjie::CHIR::IntrinsicKind>(i)),
+        EXPECT_EQ(CHIRFormat::IntrinsicKind(static_cast<Cangjie::CHIR::IntrinsicKind>(i)),
             Serialize(static_cast<Cangjie::CHIR::IntrinsicKind>(i)))
             << "cur i: " << i;
     }
@@ -1938,13 +1938,13 @@ TEST_F(CHIRSerialzierTest, IntrinsicKindEnum)
 
 TEST_F(CHIRSerialzierTest, PackageAccessLevelEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     Package::AccessLevel enumBegin = Package::AccessLevel::INVALID;
     Package::AccessLevel enumEnd = Package::AccessLevel::PUBLIC; // make sure this is max one we defined
 
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::PackageAccessLevel(static_cast<Package::AccessLevel>(i)),
+        EXPECT_EQ(CHIRFormat::PackageAccessLevel(static_cast<Package::AccessLevel>(i)),
             Serialize(static_cast<Package::AccessLevel>(i)))
             << "cur i: " << i;
     }
@@ -1952,13 +1952,13 @@ TEST_F(CHIRSerialzierTest, PackageAccessLevelEnum)
 
 TEST_F(CHIRSerialzierTest, Phase)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     ToCHIR::Phase enumBegin = ToCHIR::Phase::PHASE_MIN;
     ToCHIR::Phase enumEnd = ToCHIR::Phase::PHASE_MAX; // make sure this is max one we defined
 
     EXPECT_EQ(static_cast<size_t>(enumBegin), 0);
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(PackageFormat::Phase(static_cast<ToCHIR::Phase>(i)), Serialize(static_cast<ToCHIR::Phase>(i)))
+        EXPECT_EQ(CHIRFormat::Phase(static_cast<ToCHIR::Phase>(i)), Serialize(static_cast<ToCHIR::Phase>(i)))
             << "cur i: " << i;
     }
 }

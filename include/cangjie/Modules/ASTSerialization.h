@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "cangjie/Option/Option.h"
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/Basic/DiagnosticEngine.h"

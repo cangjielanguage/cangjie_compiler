@@ -318,7 +318,7 @@ enum AnnoKind : uint16 {
 
 // Current annotation representation is a balance between needs of @Deprecated
 // and potential generalization for other annotations
-table Anno { // Short name "Anno" because of the clash with "Annotation" from "PackageFormat.fbs"
+table Anno { // Short name "Anno" because of the clash with "Annotation" from "StdxChirFormat.fbs"
   kind:AnnoKind;
   identifier:string;
   args:[AnnoArg];

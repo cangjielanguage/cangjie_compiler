@@ -19,7 +19,7 @@
 #include "cangjie/Basic/Position.h"
 #include "cangjie/Modules/ASTSerialization.h"
 #include "cangjie/Option/Option.h"
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 namespace Cangjie {
 

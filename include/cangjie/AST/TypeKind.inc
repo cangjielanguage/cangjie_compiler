@@ -7,7 +7,7 @@
 /**
  * Only list user writable types in this file.
  * The ORDER of tokens below is IMPORTANT. Once modified, the following must be modified as well.
- * 'enum TypeKind:int16' in ModuleFormat.fbs
+ * 'enum TypeKind:int16' in CjoFormat.fbs
  * 'external class TokenKindHelper' in TokenKind.cj std.ast
  * 'Patterns: Array<(TokenKind*UInt16*String*String)>' in TokenKind.cj
  * 'operator func ==(right: TokenKind)' in TokenKind.cj

@@ -7,7 +7,7 @@
 #include <iostream>
 #include <string>
 
-#include <flatbuffers/PackageFormat_generated.h>
+#include <flatbuffers/StdxChirFormat_generated.h>
 
 #include "gtest/gtest.h"
 
@@ -27,9 +27,9 @@ protected:
     }
 };
 
-Type::TypeKind DeSerialize(const PackageFormat::CHIRTypeKind& kind)
+Type::TypeKind DeSerialize(const CHIRFormat::CHIRTypeKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::Type;
     auto ret = Type::TypeKind::TYPE_INVALID;
     switch (kind) {
@@ -145,9 +145,9 @@ Type::TypeKind DeSerialize(const PackageFormat::CHIRTypeKind& kind)
     return ret;
 }
 
-SourceExpr DeSerialize(const PackageFormat::SourceExpr& kind)
+SourceExpr DeSerialize(const CHIRFormat::SourceExpr& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::SourceExpr;
     auto ret = SourceExpr::IF_EXPR;
     switch (kind) {
@@ -182,9 +182,9 @@ SourceExpr DeSerialize(const PackageFormat::SourceExpr& kind)
     return ret;
 }
 
-Cangjie::Linkage DeSerialize(const PackageFormat::Linkage& kind)
+Cangjie::Linkage DeSerialize(const CHIRFormat::Linkage& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::Linkage;
     auto ret = Cangjie::Linkage::WEAK_ODR;
     switch (kind) {
@@ -207,9 +207,9 @@ Cangjie::Linkage DeSerialize(const PackageFormat::Linkage& kind)
     return ret;
 }
 
-Cangjie::CHIR::SkipKind DeSerialize(const PackageFormat::SkipKind& kind)
+Cangjie::CHIR::SkipKind DeSerialize(const CHIRFormat::SkipKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::SkipKind;
     auto ret = SkipKind::NO_SKIP;
     switch (kind) {
@@ -229,9 +229,9 @@ Cangjie::CHIR::SkipKind DeSerialize(const PackageFormat::SkipKind& kind)
     return ret;
 }
 
-Cangjie::OverflowStrategy DeSerialize(const PackageFormat::OverflowStrategy& kind)
+Cangjie::OverflowStrategy DeSerialize(const CHIRFormat::OverflowStrategy& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::OverflowStrategy;
     auto ret = OverflowStrategy::NA;
     switch (kind) {
@@ -251,9 +251,9 @@ Cangjie::OverflowStrategy DeSerialize(const PackageFormat::OverflowStrategy& kin
     return ret;
 }
 
-Value::ValueKind DeSerialize(const PackageFormat::ValueKind& kind)
+Value::ValueKind DeSerialize(const CHIRFormat::ValueKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::Value;
     auto ret = Value::ValueKind::KIND_LITERAL;
     switch (kind) {
@@ -282,9 +282,9 @@ Value::ValueKind DeSerialize(const PackageFormat::ValueKind& kind)
     return ret;
 }
 
-ConstantValueKind DeSerialize(const PackageFormat::ConstantValueKind& kind)
+ConstantValueKind DeSerialize(const CHIRFormat::ConstantValueKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::ConstantValueKind;
     auto ret = ConstantValueKind::KIND_BOOL;
     switch (kind) {
@@ -316,9 +316,9 @@ ConstantValueKind DeSerialize(const PackageFormat::ConstantValueKind& kind)
     return ret;
 }
 
-FuncKind DeSerialize(const PackageFormat::FuncKind& kind)
+FuncKind DeSerialize(const CHIRFormat::FuncKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::FuncKind;
     auto ret = FuncKind::DEFAULT;
     switch (kind) {
@@ -371,9 +371,9 @@ FuncKind DeSerialize(const PackageFormat::FuncKind& kind)
     return ret;
 }
 
-CustomDefKind DeSerialize(const PackageFormat::CustomDefKind& kind)
+CustomDefKind DeSerialize(const CHIRFormat::CustomDefKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::CustomDefKind;
     auto ret = CustomDefKind::TYPE_STRUCT;
     switch (kind) {
@@ -393,9 +393,9 @@ CustomDefKind DeSerialize(const PackageFormat::CustomDefKind& kind)
     return ret;
 }
 
-ExprKind DeSerialize(const PackageFormat::CHIRExprKind& kind)
+ExprKind DeSerialize(const CHIRFormat::CHIRExprKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     auto ret = ExprKind::INVALID;
     switch (kind) {
         case CHIRExprKind_Invalid:
@@ -641,9 +641,9 @@ ExprKind DeSerialize(const PackageFormat::CHIRExprKind& kind)
     return ret;
 }
 
-IntrinsicKind DeSerialize(const PackageFormat::IntrinsicKind& kind)
+IntrinsicKind DeSerialize(const CHIRFormat::IntrinsicKind& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     auto ret = NOT_INTRINSIC;
     switch (kind) {
         case IntrinsicKind_NOT_INTRINSIC:
@@ -1756,9 +1756,9 @@ IntrinsicKind DeSerialize(const PackageFormat::IntrinsicKind& kind)
     return ret;
 }
 
-Package::AccessLevel DeSerialize(const PackageFormat::PackageAccessLevel& kind)
+Package::AccessLevel DeSerialize(const CHIRFormat::PackageAccessLevel& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     auto ret = Package::AccessLevel::INTERNAL;
     switch (kind) {
         case PackageAccessLevel_INVALID:
@@ -1777,9 +1777,9 @@ Package::AccessLevel DeSerialize(const PackageFormat::PackageAccessLevel& kind)
     return ret;
 }
 
-ToCHIR::Phase DeSerialize(const PackageFormat::Phase& kind)
+ToCHIR::Phase DeSerialize(const CHIRFormat::Phase& kind)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     auto ret = ToCHIR::Phase::RAW;
     switch (kind) {
         case Phase_RAW:
@@ -1801,54 +1801,54 @@ ToCHIR::Phase DeSerialize(const PackageFormat::Phase& kind)
 TEST_F(CHIRDeSerialzierTest, TypeKindEnum)
 {
     using Cangjie::CHIR::Type;
-    auto enumBegin = PackageFormat::CHIRTypeKind_MIN;
-    auto enumEnd = PackageFormat::CHIRTypeKind_MAX;
+    auto enumBegin = CHIRFormat::CHIRTypeKind_MIN;
+    auto enumEnd = CHIRFormat::CHIRTypeKind_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(Type::TypeKind(static_cast<PackageFormat::CHIRTypeKind>(i)),
-            DeSerialize(static_cast<PackageFormat::CHIRTypeKind>(i)));
+        EXPECT_EQ(Type::TypeKind(static_cast<CHIRFormat::CHIRTypeKind>(i)),
+            DeSerialize(static_cast<CHIRFormat::CHIRTypeKind>(i)));
     }
 }
 
 TEST_F(CHIRDeSerialzierTest, SourceExprEnum)
 {
     using Cangjie::CHIR::SourceExpr;
-    auto enumBegin = PackageFormat::SourceExpr_MIN;
-    auto enumEnd = PackageFormat::SourceExpr_MAX;
+    auto enumBegin = CHIRFormat::SourceExpr_MIN;
+    auto enumEnd = CHIRFormat::SourceExpr_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(SourceExpr(static_cast<PackageFormat::SourceExpr>(i)),
-            DeSerialize(static_cast<PackageFormat::SourceExpr>(i)));
+        EXPECT_EQ(SourceExpr(static_cast<CHIRFormat::SourceExpr>(i)),
+            DeSerialize(static_cast<CHIRFormat::SourceExpr>(i)));
     }
 }
 
 TEST_F(CHIRDeSerialzierTest, LinkageEnum)
 {
     using Cangjie::Linkage;
-    auto enumBegin = PackageFormat::Linkage_MIN;
-    auto enumEnd = PackageFormat::Linkage_MAX;
+    auto enumBegin = CHIRFormat::Linkage_MIN;
+    auto enumEnd = CHIRFormat::Linkage_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(Cangjie::Linkage(static_cast<PackageFormat::Linkage>(i)),
-            DeSerialize(static_cast<PackageFormat::Linkage>(i)));
+        EXPECT_EQ(Cangjie::Linkage(static_cast<CHIRFormat::Linkage>(i)),
+            DeSerialize(static_cast<CHIRFormat::Linkage>(i)));
     }
 }
 
 TEST_F(CHIRDeSerialzierTest, SkipKindEnum)
 {
     using Cangjie::CHIR::SkipKind;
-    auto enumBegin = PackageFormat::SkipKind_MIN;
-    auto enumEnd = PackageFormat::SkipKind_MAX;
+    auto enumBegin = CHIRFormat::SkipKind_MIN;
+    auto enumEnd = CHIRFormat::SkipKind_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
         EXPECT_EQ(
-            SkipKind(static_cast<PackageFormat::SkipKind>(i)), DeSerialize(static_cast<PackageFormat::SkipKind>(i)));
+            SkipKind(static_cast<CHIRFormat::SkipKind>(i)), DeSerialize(static_cast<CHIRFormat::SkipKind>(i)));
     }
 }
 
 TEST_F(CHIRDeSerialzierTest, OverflowStrategyEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::OverflowStrategy;
     EXPECT_EQ(DeSerialize(OverflowStrategy_NA), OverflowStrategy::NA);
     EXPECT_EQ(DeSerialize(OverflowStrategy_WRAPPING), OverflowStrategy::WRAPPING);
@@ -1859,12 +1859,12 @@ TEST_F(CHIRDeSerialzierTest, OverflowStrategyEnum)
 TEST_F(CHIRDeSerialzierTest, ValueKindEnum)
 {
     using Cangjie::CHIR::Value;
-    auto enumBegin = PackageFormat::ValueKind_MIN;
-    auto enumEnd = PackageFormat::ValueKind_MAX;
+    auto enumBegin = CHIRFormat::ValueKind_MIN;
+    auto enumEnd = CHIRFormat::ValueKind_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(Value::ValueKind(static_cast<PackageFormat::ValueKind>(i)),
-            DeSerialize(static_cast<PackageFormat::ValueKind>(i)))
+        EXPECT_EQ(Value::ValueKind(static_cast<CHIRFormat::ValueKind>(i)),
+            DeSerialize(static_cast<CHIRFormat::ValueKind>(i)))
             << "cur i: " << i;
     }
 }
@@ -1872,26 +1872,26 @@ TEST_F(CHIRDeSerialzierTest, ValueKindEnum)
 TEST_F(CHIRDeSerialzierTest, ConstantValueKindEnum)
 {
     using Cangjie::CHIR::ConstantValueKind;
-    auto enumBegin = PackageFormat::ConstantValueKind_MIN;
-    auto enumEnd = PackageFormat::ConstantValueKind_MAX;
+    auto enumBegin = CHIRFormat::ConstantValueKind_MIN;
+    auto enumEnd = CHIRFormat::ConstantValueKind_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(ConstantValueKind(static_cast<PackageFormat::ConstantValueKind>(i)),
-            DeSerialize(static_cast<PackageFormat::ConstantValueKind>(i)))
+        EXPECT_EQ(ConstantValueKind(static_cast<CHIRFormat::ConstantValueKind>(i)),
+            DeSerialize(static_cast<CHIRFormat::ConstantValueKind>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRDeSerialzierTest, FuncKindEnum)
 {
-    using namespace PackageFormat;
+    using namespace CHIRFormat;
     using Cangjie::CHIR::FuncKind;
     auto enumBegin = FuncKind_MIN;
     auto enumEnd = FuncKind_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
         EXPECT_EQ(
-            FuncKind(static_cast<PackageFormat::FuncKind>(i)), DeSerialize(static_cast<PackageFormat::FuncKind>(i)))
+            FuncKind(static_cast<CHIRFormat::FuncKind>(i)), DeSerialize(static_cast<CHIRFormat::FuncKind>(i)))
             << "cur i: " << i;
     }
 }
@@ -1899,51 +1899,51 @@ TEST_F(CHIRDeSerialzierTest, FuncKindEnum)
 TEST_F(CHIRDeSerialzierTest, CustomDefKindEnum)
 {
     using Cangjie::CHIR::CustomDefKind;
-    auto enumBegin = PackageFormat::CustomDefKind_MIN;
-    auto enumEnd = PackageFormat::CustomDefKind_MAX;
+    auto enumBegin = CHIRFormat::CustomDefKind_MIN;
+    auto enumEnd = CHIRFormat::CustomDefKind_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(CustomDefKind(static_cast<PackageFormat::CustomDefKind>(i)),
-            DeSerialize(static_cast<PackageFormat::CustomDefKind>(i)))
+        EXPECT_EQ(CustomDefKind(static_cast<CHIRFormat::CustomDefKind>(i)),
+            DeSerialize(static_cast<CHIRFormat::CustomDefKind>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRDeSerialzierTest, IntrinsicKindEnum)
 {
-    using namespace PackageFormat;
-    auto enumBegin = PackageFormat::IntrinsicKind_MIN;
-    auto enumEnd = PackageFormat::IntrinsicKind_MAX;
+    using namespace CHIRFormat;
+    auto enumBegin = CHIRFormat::IntrinsicKind_MIN;
+    auto enumEnd = CHIRFormat::IntrinsicKind_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(Cangjie::CHIR::IntrinsicKind(static_cast<PackageFormat::IntrinsicKind>(i)),
-            DeSerialize(static_cast<PackageFormat::IntrinsicKind>(i)))
+        EXPECT_EQ(Cangjie::CHIR::IntrinsicKind(static_cast<CHIRFormat::IntrinsicKind>(i)),
+            DeSerialize(static_cast<CHIRFormat::IntrinsicKind>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRDeSerialzierTest, PackageAccessLevelEnum)
 {
-    using namespace PackageFormat;
-    auto enumBegin = PackageFormat::PackageAccessLevel_MIN;
-    auto enumEnd = PackageFormat::PackageAccessLevel_MAX;
+    using namespace CHIRFormat;
+    auto enumBegin = CHIRFormat::PackageAccessLevel_MIN;
+    auto enumEnd = CHIRFormat::PackageAccessLevel_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
-        EXPECT_EQ(Package::AccessLevel(static_cast<PackageFormat::PackageAccessLevel>(i)),
-            DeSerialize(static_cast<PackageFormat::PackageAccessLevel>(i)))
+        EXPECT_EQ(Package::AccessLevel(static_cast<CHIRFormat::PackageAccessLevel>(i)),
+            DeSerialize(static_cast<CHIRFormat::PackageAccessLevel>(i)))
             << "cur i: " << i;
     }
 }
 
 TEST_F(CHIRDeSerialzierTest, Phase)
 {
-    using namespace PackageFormat;
-    auto enumBegin = PackageFormat::Phase_MIN;
-    auto enumEnd = PackageFormat::Phase_MAX;
+    using namespace CHIRFormat;
+    auto enumBegin = CHIRFormat::Phase_MIN;
+    auto enumEnd = CHIRFormat::Phase_MAX;
 
     for (size_t i = static_cast<size_t>(enumBegin); i <= static_cast<size_t>(enumEnd); i++) {
         EXPECT_EQ(
-            ToCHIR::Phase(static_cast<PackageFormat::Phase>(i)), DeSerialize(static_cast<PackageFormat::Phase>(i)))
+            ToCHIR::Phase(static_cast<CHIRFormat::Phase>(i)), DeSerialize(static_cast<CHIRFormat::Phase>(i)))
             << "cur i: " << i;
     }
 }

@@ -26,23 +26,23 @@
 #include "cangjie/Utils/ICEUtil.h"
 #include "cangjie/Basic/Version.h"
 #include "CHIRDeserializerImpl.h"
-#include "flatbuffers/PackageFormat_generated.h"
+#include "flatbuffers/StdxChirFormat_generated.h"
 #include "cangjie/CHIR/Serializer/CHIRDeserializer.h"
 
 using namespace Cangjie::CHIR;
 
 namespace {
-Cangjie::OverflowStrategy DeserializeOverflowStrategy(PackageFormat::OverflowStrategy strategy)
+Cangjie::OverflowStrategy DeserializeOverflowStrategy(CHIRFormat::OverflowStrategy strategy)
 {
     using Cangjie::OverflowStrategy;
     switch (strategy) {
-        case PackageFormat::OverflowStrategy_NA:
+        case CHIRFormat::OverflowStrategy_NA:
             return OverflowStrategy::NA;
-        case PackageFormat::OverflowStrategy_WRAPPING:
+        case CHIRFormat::OverflowStrategy_WRAPPING:
             return OverflowStrategy::WRAPPING;
-        case PackageFormat::OverflowStrategy_THROWING:
+        case CHIRFormat::OverflowStrategy_THROWING:
             return OverflowStrategy::THROWING;
-        case PackageFormat::OverflowStrategy_SATURATING:
+        case CHIRFormat::OverflowStrategy_SATURATING:
             return OverflowStrategy::SATURATING;
         default:
             CJC_ABORT();
@@ -52,10 +52,10 @@ Cangjie::OverflowStrategy DeserializeOverflowStrategy(PackageFormat::OverflowStr
 } // namespace
 
 // explicit specialization
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::EnumDef* buffer, EnumDef& obj);
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::StructDef* buffer, StructDef& obj);
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::ClassDef* buffer, ClassDef& obj);
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::ExtendDef* buffer, ExtendDef& obj);
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::EnumDef* buffer, EnumDef& obj);
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::StructDef* buffer, StructDef& obj);
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::ClassDef* buffer, ClassDef& obj);
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::ExtendDef* buffer, ExtendDef& obj);
 
 // =========================== Generic Deserializer ==============================
 
@@ -82,12 +82,12 @@ bool CHIRDeserializer::Deserialize(const std::string& fileName, Cangjie::CHIR::C
     options.max_depth = std::numeric_limits<::flatbuffers::uoffset_t>::max();
     options.max_tables = std::numeric_limits<::flatbuffers::uoffset_t>::max();
     flatbuffers::Verifier verifier(serializationInfo.data(), serializationInfo.size(), options);
-    if (!verifier.VerifyBuffer<PackageFormat::CHIRPackage>()) {
+    if (!verifier.VerifyBuffer<CHIRFormat::CHIRPackage>()) {
         Errorln("validation of '", fileName, "' failed, please confirm it was created by compiler whose version is '",
             CANGJIE_VERSION, "'.");
         return false;
     }
-    const PackageFormat::CHIRPackage* package = PackageFormat::GetCHIRPackage(serializationInfo.data());
+    const CHIRFormat::CHIRPackage* package = CHIRFormat::GetCHIRPackage(serializationInfo.data());
     deserializer.Run(package);
     phase = Cangjie::CHIR::ToCHIR::Phase(package->phase());
     return true;
@@ -104,11 +104,11 @@ bool CHIRDeserializer::Deserialize(uint8_t* data, int64_t size, CHIRBuilder& chi
         options.max_depth = std::numeric_limits<::flatbuffers::uoffset_t>::max();
         options.max_tables = std::numeric_limits<::flatbuffers::uoffset_t>::max();
         flatbuffers::Verifier verifier(data, static_cast<size_t>(size), options);
-        if (!verifier.VerifyBuffer<PackageFormat::CHIRPackage>()) {
+        if (!verifier.VerifyBuffer<CHIRFormat::CHIRPackage>()) {
             printf("validation of 'CHIRPackage' failed\n");
             return false;
         }
-        const PackageFormat::CHIRPackage* package = PackageFormat::GetCHIRPackage(data);
+        const CHIRFormat::CHIRPackage* package = CHIRFormat::GetCHIRPackage(data);
         CHIRDeserializerImpl deserializer(chirBuilder, false);
         deserializer.Run(package);
 #ifndef CANGJIE_ENABLE_GCOV
@@ -210,7 +210,7 @@ std::string GetMangleNameFromIdentifier(std::string& identifier)
     }
 }
 
-std::set<std::string> GetFeatures(const PackageFormat::GlobalValue* val)
+std::set<std::string> GetFeatures(const CHIRFormat::GlobalValue* val)
 {
     std::set<std::string> features = {};
     if (val->features() == nullptr) {
@@ -224,12 +224,12 @@ std::set<std::string> GetFeatures(const PackageFormat::GlobalValue* val)
 }
 } // namespace
 
-template <> Position CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::Pos* obj)
+template <> Position CHIRDeserializer::CHIRDeserializerImpl::Create(const CHIRFormat::Pos* obj)
 {
     return Position{static_cast<unsigned>(obj->line()), static_cast<unsigned>(obj->column())};
 }
 
-template <> DebugLocation CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::DebugLocation* obj)
+template <> DebugLocation CHIRDeserializer::CHIRDeserializerImpl::Create(const CHIRFormat::DebugLocation* obj)
 {
     auto filePath = obj->filePath()->str();
     auto fileId = obj->fileId();
@@ -244,7 +244,7 @@ template <> DebugLocation CHIRDeserializer::CHIRDeserializerImpl::Create(const P
     return DebugLocation(builder.GetChirContext().GetSourceFileName(fileId), fileId, beginPos, endPos, scope);
 }
 
-template <> AnnoInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::AnnoInfo* obj)
+template <> AnnoInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const CHIRFormat::AnnoInfo* obj)
 {
     CJC_NULLPTR_CHECK(obj);
     CJC_NULLPTR_CHECK(obj->mangledName());
@@ -270,7 +270,7 @@ template <> AnnoInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const Packag
     return AnnoInfo(mangledName, std::move(instances));
 }
 
-template <> MemberVarInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::MemberVarInfo* obj)
+template <> MemberVarInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const CHIRFormat::MemberVarInfo* obj)
 {
     auto name = obj->name()->str();
     auto rawMangledName = obj->rawMangledName()->str();
@@ -286,7 +286,7 @@ template <> MemberVarInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const P
     return MemberVarInfo{name, rawMangledName, type, attributeInfo, loc, annoInfo, initializerFunc, outerDef};
 }
 
-template <> EnumCtorInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::EnumCtorInfo* obj)
+template <> EnumCtorInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const CHIRFormat::EnumCtorInfo* obj)
 {
     auto name = obj->srcCodeName()->str();
     auto mangledName = obj->mangledName()->str();
@@ -295,7 +295,7 @@ template <> EnumCtorInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const Pa
 }
 
 template <>
-VirtualMethodInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFormat::VirtualMethodInfo* obj)
+VirtualMethodInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const CHIRFormat::VirtualMethodInfo* obj)
 {
     auto condition = FuncSigInfo {
         .funcName = obj->funcName()->str(),
@@ -312,7 +312,7 @@ VirtualMethodInfo CHIRDeserializer::CHIRDeserializerImpl::Create(const PackageFo
 
 template <>
 VTableInDef CHIRDeserializer::CHIRDeserializerImpl::Create(
-    const flatbuffers::Vector<flatbuffers::Offset<PackageFormat::VTableInType>>* obj)
+    const flatbuffers::Vector<flatbuffers::Offset<CHIRFormat::VTableInType>>* obj)
 {
     VTableInDef vtableInDef;
     if (obj == nullptr) {
@@ -328,7 +328,7 @@ VTableInDef CHIRDeserializer::CHIRDeserializerImpl::Create(
 
 // =========================== Custom Type Define Deserializer ==============================
 
-template <> EnumDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::EnumDef* obj)
+template <> EnumDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::EnumDef* obj)
 {
     auto identifier = obj->base()->identifier()->str();
     if (compilePlatform) {
@@ -349,7 +349,7 @@ template <> EnumDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const P
     return result;
 }
 
-template <> StructDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::StructDef* obj)
+template <> StructDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::StructDef* obj)
 {
     auto identifier = obj->base()->identifier()->str();
     if (compilePlatform) {
@@ -370,7 +370,7 @@ template <> StructDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const
     return result;
 }
 
-template <> ClassDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::ClassDef* obj)
+template <> ClassDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::ClassDef* obj)
 {
     auto identifier = obj->base()->identifier()->str();
     if (compilePlatform) {
@@ -392,7 +392,7 @@ template <> ClassDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const 
     return result;
 }
 
-template <> ExtendDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::ExtendDef* obj)
+template <> ExtendDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::ExtendDef* obj)
 {
     auto identifier = obj->base()->identifier()->str();
     if (compilePlatform) {
@@ -420,7 +420,7 @@ template <> ExtendDef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const
 
 // =========================== Type Deserializer ==============================
 
-template <> Type* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Type* obj)
+template <> Type* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Type* obj)
 {
     CJC_NULLPTR_CHECK(obj);
     auto kind = static_cast<Type::TypeKind>(obj->kind());
@@ -485,7 +485,7 @@ template <> Type* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pack
     }
 }
 
-template <> RawArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::RawArrayType* obj)
+template <> RawArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::RawArrayType* obj)
 {
     CJC_NULLPTR_CHECK(obj->base()->argTys());
     auto elemTy = GetType<Type>(obj->base()->argTys()->Get(0));
@@ -493,7 +493,7 @@ template <> RawArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(co
     return builder.GetType<RawArrayType>(elemTy, static_cast<unsigned>(dims));
 }
 
-template <> VArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::VArrayType* obj)
+template <> VArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::VArrayType* obj)
 {
     CJC_NULLPTR_CHECK(obj->base()->argTys());
     auto elemTy = GetType<Type>(obj->base()->argTys()->Get(0));
@@ -501,7 +501,7 @@ template <> VArrayType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     return builder.GetType<VArrayType>(elemTy, size);
 }
 
-template <> FuncType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::FuncType* obj)
+template <> FuncType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::FuncType* obj)
 {
     CJC_NULLPTR_CHECK(obj->base()->argTys());
     auto argTys = obj->base()->argTys();
@@ -516,7 +516,7 @@ template <> FuncType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const 
     return builder.GetType<FuncType>(paramTys, retTy, hasVarLenParam, isCFuncType);
 }
 
-template <> CustomType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::CustomType* obj)
+template <> CustomType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::CustomType* obj)
 {
     auto kind = Type::TypeKind(obj->base()->kind());
     auto def = GetCustomTypeDef<CustomTypeDef>(obj->customTypeDef());
@@ -533,7 +533,7 @@ template <> CustomType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     }
 }
 
-template <> GenericType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::GenericType* obj)
+template <> GenericType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::GenericType* obj)
 {
     auto identifier = obj->identifier()->str();
     auto srcCodeIndentifier = obj->srcCodeIdentifier()->str();
@@ -544,54 +544,54 @@ template <> GenericType* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(con
 
 // =========================== Value Deserializer ==============================
 
-template <> BoolLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::BoolLiteral* obj)
+template <> BoolLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::BoolLiteral* obj)
 {
     auto type = GetType<Type>(obj->base()->base()->type());
     auto val = obj->val();
     return builder.CreateLiteralValue<BoolLiteral>(type, val);
 }
 
-template <> RuneLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::RuneLiteral* obj)
+template <> RuneLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::RuneLiteral* obj)
 {
     auto type = GetType<Type>(obj->base()->base()->type());
     auto val = obj->val();
     return builder.CreateLiteralValue<RuneLiteral>(type, static_cast<char32_t>(val));
 }
 
-template <> StringLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::StringLiteral* obj)
+template <> StringLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::StringLiteral* obj)
 {
     auto type = GetType<Type>(obj->base()->base()->type());
     auto val = obj->val()->str();
     return builder.CreateLiteralValue<StringLiteral>(type, val);
 }
 
-template <> IntLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::IntLiteral* obj)
+template <> IntLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::IntLiteral* obj)
 {
     auto type = GetType<Type>(obj->base()->base()->type());
     auto val = obj->val();
     return builder.CreateLiteralValue<IntLiteral>(type, val);
 }
 
-template <> FloatLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::FloatLiteral* obj)
+template <> FloatLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::FloatLiteral* obj)
 {
     auto type = GetType<Type>(obj->base()->base()->type());
     auto val = obj->val();
     return builder.CreateLiteralValue<FloatLiteral>(type, val);
 }
 
-template <> UnitLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::UnitLiteral* obj)
+template <> UnitLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::UnitLiteral* obj)
 {
     auto type = GetType<Type>(obj->base()->base()->type());
     return builder.CreateLiteralValue<UnitLiteral>(type);
 }
 
-template <> NullLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::NullLiteral* obj)
+template <> NullLiteral* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::NullLiteral* obj)
 {
     auto type = GetType<Type>(obj->base()->base()->type());
     return builder.CreateLiteralValue<NullLiteral>(type);
 }
 
-template <> BlockGroup* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::BlockGroup* obj)
+template <> BlockGroup* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::BlockGroup* obj)
 {
     BlockGroup* blockGroup = nullptr;
     if (obj->ownedFunc() != 0) {
@@ -609,15 +609,15 @@ template <> BlockGroup* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     return blockGroup;
 }
 
-template <> Block* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Block* obj)
+template <> Block* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Block* obj)
 {
     auto parentGroup = GetValue<BlockGroup>(obj->parentGroup());
     return builder.CreateBlock(parentGroup);
 }
 
-template <> Parameter* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Parameter* obj)
+template <> Parameter* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Parameter* obj)
 {
-    CJC_ASSERT(obj->base()->kind() == PackageFormat::ValueKind_PARAMETER);
+    CJC_ASSERT(obj->base()->kind() == CHIRFormat::ValueKind_PARAMETER);
     auto type = GetType<Type>(obj->base()->type());
     Parameter* result = nullptr;
     if (auto ownedFunc = GetValue<Function>(obj->ownedFunc())) {
@@ -634,7 +634,7 @@ template <> Parameter* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const
     return result;
 }
 
-template <> LocalVar* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::LocalVar* obj)
+template <> LocalVar* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::LocalVar* obj)
 {
     auto associatedExpr = GetExpression<Expression>(obj->associatedExpr());
     CJC_NULLPTR_CHECK(associatedExpr);
@@ -647,7 +647,7 @@ template <> LocalVar* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const 
     return result;
 }
 
-template <> GlobalVar* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::GlobalVar* obj)
+template <> GlobalVar* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::GlobalVar* obj)
 {
     auto globalValue = obj->base();
     auto valueBase = globalValue->base();
@@ -671,7 +671,7 @@ template <> GlobalVar* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const
     return result;
 }
 
-template <> Function* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Function* obj)
+template <> Function* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Function* obj)
 {
     auto* globalValue = obj->base();
     auto* valueBase = globalValue->base();
@@ -700,9 +700,9 @@ template <> Function* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const 
 }
 // =========================== Expression Deserializer ==============================
 
-static std::pair<ExprKind, bool> CHIRExprKindToExprKind(PackageFormat::CHIRExprKind kind)
+static std::pair<ExprKind, bool> CHIRExprKindToExprKind(CHIRFormat::CHIRExprKind kind)
 {
-    using FK = PackageFormat::CHIRExprKind;
+    using FK = CHIRFormat::CHIRExprKind;
     switch (kind) {
         // terminators
         case FK::CHIRExprKind_Goto:               return {ExprKind::GOTO, false};
@@ -793,7 +793,7 @@ static std::pair<ExprKind, bool> CHIRExprKindToExprKind(PackageFormat::CHIRExprK
 }
 
 template <>
-Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::UnaryExpressionBase* obj)
+Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::UnaryExpressionBase* obj)
 {
     auto operand = GetValue<Value>(obj->base()->operands()->Get(0));
     auto parentBlock = GetValue<Block>(obj->base()->owner());
@@ -812,7 +812,7 @@ Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFor
 }
 
 template <>
-Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::BinaryExpressionBase* obj)
+Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::BinaryExpressionBase* obj)
 {
     auto lhs = GetValue<Value>(obj->base()->operands()->Get(0));
     auto rhs = GetValue<Value>(obj->base()->operands()->Get(1));
@@ -831,7 +831,7 @@ Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFor
     }
 }
 
-template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Expression* obj)
+template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Expression* obj)
 {
     auto operands = GetValue<Value>(obj->operands());
     auto owner = GetValue<Block>(obj->owner());
@@ -933,7 +933,7 @@ Constant* CHIRDeserializer::CHIRDeserializerImpl::DeserializeConstant(Type& resu
     return nullptr;
 }
 
-template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::AllocateBase* obj)
+template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::AllocateBase* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto targetType = GetType<Type>(obj->allocatedType());
@@ -950,7 +950,7 @@ template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     }
 }
 
-template <> GetElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::GetElementRef* obj)
+template <> GetElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::GetElementRef* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto location = GetValue<Value>(obj->base()->operands()->Get(0));
@@ -961,7 +961,7 @@ template <> GetElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(c
 }
 
 template <> GetElementByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(
-    const PackageFormat::GetElementByName* obj)
+    const CHIRFormat::GetElementByName* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto location = GetValue<Value>(obj->base()->operands()->Get(0));
@@ -975,7 +975,7 @@ template <> GetElementByName* CHIRDeserializer::CHIRDeserializerImpl::Deserializ
 }
 
 template <>
-StoreElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::StoreElementRef* obj)
+StoreElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::StoreElementRef* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto value = GetValue<Value>(obj->base()->operands()->Get(0));
@@ -987,7 +987,7 @@ StoreElementRef* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Packa
 }
 
 template <>
-StoreElementByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::StoreElementByName* obj)
+StoreElementByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::StoreElementByName* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto value = GetValue<Value>(obj->base()->operands()->Get(0));
@@ -1001,7 +1001,7 @@ StoreElementByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pa
     return builder.CreateExpression<StoreElementByName>(resultTy, value, location, names, parentBlock);
 }
 
-template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::ApplyBase* obj)
+template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::ApplyBase* obj)
 {
     auto funcCallBase = obj->base();
     auto objType = GetType<Type>(funcCallBase->objType());
@@ -1040,7 +1040,7 @@ template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     }
 }
 
-template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::InvokeBase* obj)
+template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::InvokeBase* obj)
 {
     auto funcCallBase = obj->base();
     auto base = funcCallBase->base();
@@ -1094,7 +1094,7 @@ template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
 }
 
 template <>
-GetInstantiateValue* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::GetInstantiateValue* obj)
+GetInstantiateValue* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::GetInstantiateValue* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto val = GetValue<Value>(obj->base()->operands()->Get(0));
@@ -1103,7 +1103,7 @@ GetInstantiateValue* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const P
     return builder.CreateExpression<GetInstantiateValue>(resultTy, val, insTypes, parentBlock);
 }
 
-template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::NumericCastBase* obj)
+template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::NumericCastBase* obj)
 {
     auto base = obj->base();
     auto owner = GetValue<Block>(base->owner());
@@ -1119,7 +1119,7 @@ template <> Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     }
 }
 
-template <> InstanceOf* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::InstanceOf* obj)
+template <> InstanceOf* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::InstanceOf* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto operand = GetValue<Value>(obj->base()->operands()->Get(0));
@@ -1128,7 +1128,7 @@ template <> InstanceOf* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(cons
     return builder.CreateExpression<InstanceOf>(resultTy, operand, targetType, parentBlock);
 }
 
-template <> Field* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Field* obj)
+template <> Field* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Field* obj)
 {
     auto val = GetValue<Value>(obj->base()->operands()->Get(0));
     CJC_NULLPTR_CHECK(obj->path());
@@ -1138,7 +1138,7 @@ template <> Field* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pac
     return builder.CreateExpression<Field>(resultTy, val, indexes, parentBlock);
 }
 
-template <> FieldByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::FieldByName* obj)
+template <> FieldByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::FieldByName* obj)
 {
     auto val = GetValue<Value>(obj->base()->operands()->Get(0));
     std::vector<std::string> names;
@@ -1151,7 +1151,7 @@ template <> FieldByName* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(con
     return builder.CreateExpression<FieldByName>(resultTy, val, names, parentBlock);
 }
 
-template <> Debug* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Debug* obj)
+template <> Debug* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Debug* obj)
 {
     CJC_ASSERT(obj->base()->operands()->size() == 1);
     auto local = GetValue<Value>(obj->base()->operands()->Get(0));
@@ -1162,7 +1162,7 @@ template <> Debug* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pac
     return result;
 }
 
-template <> Lambda* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Lambda* obj)
+template <> Lambda* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Lambda* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto funcTy = GetType<FuncType>(obj->funcTy());
@@ -1181,7 +1181,7 @@ template <> Lambda* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pa
 
 // =========================== Terminator Deserializer ==============================
 
-template <> Branch* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::Branch* obj)
+template <> Branch* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::Branch* obj)
 {
     auto parentBlock = GetValue<Block>(obj->base()->owner());
     auto cond = GetValue<Value>(obj->base()->operands()->Get(0));
@@ -1193,7 +1193,7 @@ template <> Branch* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const Pa
     return result;
 }
 
-template <> MultiBranch* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::MultiBranch* obj)
+template <> MultiBranch* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::MultiBranch* obj)
 {
     auto operands = GetValue<Value>(obj->base()->operands());
     auto cond = operands.front();
@@ -1210,7 +1210,7 @@ template <> MultiBranch* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(con
 }
 
 template <>
-Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::IntrinsicBase* obj)
+Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::IntrinsicBase* obj)
 {
     auto funcCallBase = obj->base();
     auto base = funcCallBase->base();
@@ -1241,7 +1241,7 @@ Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFor
 
 template <>
 Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(
-    const PackageFormat::RawArrayAllocateBase* obj)
+    const CHIRFormat::RawArrayAllocateBase* obj)
 {
     auto elementType = GetType<Type>(obj->elementType());
     auto operands = GetValue<Value>(obj->base()->operands());
@@ -1262,7 +1262,7 @@ Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(
 }
 
 template <>
-Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::SpawnBase* obj)
+Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::SpawnBase* obj)
 {
     auto operands = GetValue<Value>(obj->base()->operands());
     auto val = operands[0];
@@ -1299,7 +1299,7 @@ Expression* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFor
     }
 }
 
-template <> GetRTTIStatic* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const PackageFormat::GetRTTIStatic* obj)
+template <> GetRTTIStatic* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(const CHIRFormat::GetRTTIStatic* obj)
 {
     auto resultTy = GetType<Type>(obj->base()->resultTy());
     auto rttiType = GetType<Type>(obj->rttiType());
@@ -1309,7 +1309,7 @@ template <> GetRTTIStatic* CHIRDeserializer::CHIRDeserializerImpl::Deserialize(c
 
 // =========================== Configuration ==============================
 
-void CHIRDeserializer::CHIRDeserializerImpl::ConfigBase(const PackageFormat::Base* buffer, Base& obj)
+void CHIRDeserializer::CHIRDeserializerImpl::ConfigBase(const CHIRFormat::Base* buffer, Base& obj)
 {
     CJC_NULLPTR_CHECK(buffer);
     auto annos = buffer->annos();
@@ -1317,60 +1317,60 @@ void CHIRDeserializer::CHIRDeserializerImpl::ConfigBase(const PackageFormat::Bas
     for (unsigned i = 0; i < annos->size(); ++i) {
         auto anno = annos->Get(i);
         switch (annoTypes->Get(i)) {
-            case PackageFormat::Annotation::Annotation_needCheckArrayBound:
-                obj.Set<NeedCheckArrayBound>(static_cast<const PackageFormat::NeedCheckArrayBound*>(anno)->need());
+            case CHIRFormat::Annotation::Annotation_needCheckArrayBound:
+                obj.Set<NeedCheckArrayBound>(static_cast<const CHIRFormat::NeedCheckArrayBound*>(anno)->need());
                 break;
-            case PackageFormat::Annotation::Annotation_needCheckCast:
-                obj.Set<NeedCheckCast>(static_cast<const PackageFormat::NeedCheckCast*>(anno)->need());
+            case CHIRFormat::Annotation::Annotation_needCheckCast:
+                obj.Set<NeedCheckCast>(static_cast<const CHIRFormat::NeedCheckCast*>(anno)->need());
                 break;
-            case PackageFormat::Annotation::Annotation_debugLocationInfoForWarning:
+            case CHIRFormat::Annotation::Annotation_debugLocationInfoForWarning:
                 obj.Set<DebugLocationInfoForWarning>(
-                    Create<DebugLocation>(static_cast<const PackageFormat::DebugLocation*>(anno)));
+                    Create<DebugLocation>(static_cast<const CHIRFormat::DebugLocation*>(anno)));
                 break;
-            case PackageFormat::Annotation::Annotation_linkTypeInfo:
+            case CHIRFormat::Annotation::Annotation_linkTypeInfo:
                 obj.Set<CHIR::LinkTypeInfo>(
-                    Cangjie::Linkage(static_cast<const PackageFormat::LinkTypeInfo*>(anno)->linkage()));
+                    Cangjie::Linkage(static_cast<const CHIRFormat::LinkTypeInfo*>(anno)->linkage()));
                 break;
-            case PackageFormat::Annotation::Annotation_skipCheck:
+            case CHIRFormat::Annotation::Annotation_skipCheck:
                 obj.Set<CHIR::SkipCheck>(
-                    CHIR::SkipKind(static_cast<const PackageFormat::SkipCheck*>(anno)->skipKind()));
+                    CHIR::SkipKind(static_cast<const CHIRFormat::SkipCheck*>(anno)->skipKind()));
                 break;
-            case PackageFormat::Annotation::Annotation_neverOverflowInfo:
+            case CHIRFormat::Annotation::Annotation_neverOverflowInfo:
                 obj.Set<CHIR::NeverOverflowInfo>(
-                    static_cast<const PackageFormat::NeverOverflowInfo*>(anno)->neverOverflow());
+                    static_cast<const CHIRFormat::NeverOverflowInfo*>(anno)->neverOverflow());
                 break;
-            case PackageFormat::Annotation::Annotation_generatedFromForIn:
+            case CHIRFormat::Annotation::Annotation_generatedFromForIn:
                 obj.Set<CHIR::GeneratedFromForIn>(
-                    static_cast<const PackageFormat::GeneratedFromForIn*>(anno)->value());
+                    static_cast<const CHIRFormat::GeneratedFromForIn*>(anno)->value());
                 break;
-            case PackageFormat::Annotation::Annotation_isAutoEnvClass:
-                obj.Set<CHIR::IsAutoEnvClass>(static_cast<const PackageFormat::IsAutoEnvClass*>(anno)->value());
+            case CHIRFormat::Annotation::Annotation_isAutoEnvClass:
+                obj.Set<CHIR::IsAutoEnvClass>(static_cast<const CHIRFormat::IsAutoEnvClass*>(anno)->value());
                 break;
-            case PackageFormat::Annotation::Annotation_isCapturedClassInCC:
+            case CHIRFormat::Annotation::Annotation_isCapturedClassInCC:
                 obj.Set<CHIR::IsCapturedClassInCC>(
-                    static_cast<const PackageFormat::IsCapturedClassInCC*>(anno)->value());
+                    static_cast<const CHIRFormat::IsCapturedClassInCC*>(anno)->value());
                 break;
-            case PackageFormat::Annotation::Annotation_enumCaseIndex: {
-                int64_t index = static_cast<const PackageFormat::EnumCaseIndex*>(anno)->index();
+            case CHIRFormat::Annotation::Annotation_enumCaseIndex: {
+                int64_t index = static_cast<const CHIRFormat::EnumCaseIndex*>(anno)->index();
                 if (index != -1) {
                     obj.Set<CHIR::EnumCaseIndex>(static_cast<size_t>(index));
                 }
                 break;
             }
-            case PackageFormat::Annotation::Annotation_virMethodOffset: {
-                int64_t offset = static_cast<const PackageFormat::VirMethodOffset*>(anno)->offset();
+            case CHIRFormat::Annotation::Annotation_virMethodOffset: {
+                int64_t offset = static_cast<const CHIRFormat::VirMethodOffset*>(anno)->offset();
                 if (offset != -1) {
                     obj.Set<CHIR::VirMethodOffset>(static_cast<size_t>(offset));
                 }
                 break;
             }
-            case PackageFormat::Annotation::Annotation_wrappedRawMethod:
+            case CHIRFormat::Annotation::Annotation_wrappedRawMethod:
                 obj.Set<CHIR::WrappedRawMethod>(
-                    GetValue<Function>(static_cast<const PackageFormat::WrappedRawMethod*>(anno)->rawMethod()));
+                    GetValue<Function>(static_cast<const CHIRFormat::WrappedRawMethod*>(anno)->rawMethod()));
                 break;
-            case PackageFormat::Annotation::Annotation_overrideSrcFuncType:
+            case CHIRFormat::Annotation::Annotation_overrideSrcFuncType:
                 obj.Set<CHIR::OverrideSrcFuncType>(
-                    GetType<FuncType>(static_cast<const PackageFormat::OverrideSrcFuncType*>(anno)->type()));
+                    GetType<FuncType>(static_cast<const CHIRFormat::OverrideSrcFuncType*>(anno)->type()));
                 break;
             default:
                 continue;
@@ -1382,7 +1382,7 @@ void CHIRDeserializer::CHIRDeserializerImpl::ConfigBase(const PackageFormat::Bas
     obj.AppendAttributeInfo(CreateAttr(buffer->attributes()));
 }
 
-void CHIRDeserializer::CHIRDeserializerImpl::ConfigValue(const PackageFormat::Value* buffer, Value& obj)
+void CHIRDeserializer::CHIRDeserializerImpl::ConfigValue(const CHIRFormat::Value* buffer, Value& obj)
 {
     CJC_NULLPTR_CHECK(buffer);
     ConfigBase(buffer->base(), obj);
@@ -1392,7 +1392,7 @@ void CHIRDeserializer::CHIRDeserializerImpl::ConfigValue(const PackageFormat::Va
 }
 
 void CHIRDeserializer::CHIRDeserializerImpl::ConfigCustomTypeDef(
-    const PackageFormat::CustomTypeDef* buffer, CustomTypeDef& obj)
+    const CHIRFormat::CustomTypeDef* buffer, CustomTypeDef& obj)
 {
     CJC_NULLPTR_CHECK(buffer);
     ConfigBase(buffer->base(), obj);
@@ -1435,18 +1435,18 @@ void CHIRDeserializer::CHIRDeserializerImpl::ConfigCustomTypeDef(
     }
     obj.SetAnnoInfo(Create<AnnoInfo>(buffer->annoInfo()));
     auto vtable =
-        Create<VTableInDef, flatbuffers::Vector<flatbuffers::Offset<PackageFormat::VTableInType>>>(buffer->vtable());
+        Create<VTableInDef, flatbuffers::Vector<flatbuffers::Offset<CHIRFormat::VTableInType>>>(buffer->vtable());
     obj.SetVTable(std::move(vtable));
     obj.SetVarInitializationFunc(GetValue<Function>(buffer->instanceVarInitFunc()));
 }
 
-void CHIRDeserializer::CHIRDeserializerImpl::ConfigExpression(const PackageFormat::Expression* buffer, Expression& obj)
+void CHIRDeserializer::CHIRDeserializerImpl::ConfigExpression(const CHIRFormat::Expression* buffer, Expression& obj)
 {
     CJC_NULLPTR_CHECK(buffer);
     ConfigBase(buffer->base(), obj);
 }
 
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::Lambda* buffer, Lambda& obj)
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::Lambda* buffer, Lambda& obj)
 {
     CJC_NULLPTR_CHECK(buffer);
     ConfigExpression(buffer->base(), obj);
@@ -1457,7 +1457,7 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     }
 }
 
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::Function* buffer, Function& obj)
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::Function* buffer, Function& obj)
 {
     if (obj.TestAttr(Attribute::PREVIOUSLY_DESERIALIZED)) {
         return;
@@ -1519,14 +1519,14 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
 }
 
 template <>
-void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::BlockGroup* buffer, BlockGroup& obj)
+void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::BlockGroup* buffer, BlockGroup& obj)
 {
     ConfigValue(buffer->base(), obj);
     GetValue<Block>(buffer->blocks());
     obj.SetEntryBlock(GetValue<Block>(buffer->entryBlock()));
 }
 
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::Block* buffer, Block& obj)
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::Block* buffer, Block& obj)
 {
     ConfigValue(buffer->base(), obj);
     if (buffer->isLandingPadBlock()) {
@@ -1537,7 +1537,7 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     obj.predecessors = GetValue<Block>(buffer->predecessors());
 }
 
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::GlobalVar* buffer, GlobalVar& obj)
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::GlobalVar* buffer, GlobalVar& obj)
 {
     if (obj.TestAttr(Attribute::PREVIOUSLY_DESERIALIZED)) {
         return;
@@ -1556,7 +1556,7 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     }
 }
 
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::EnumDef* buffer, EnumDef& obj)
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::EnumDef* buffer, EnumDef& obj)
 {
     if (obj.TestAttr(Attribute::PREVIOUSLY_DESERIALIZED)) {
         return;
@@ -1567,7 +1567,7 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     }
 }
 
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::StructDef* buffer, StructDef& obj)
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::StructDef* buffer, StructDef& obj)
 {
     if (obj.TestAttr(Attribute::PREVIOUSLY_DESERIALIZED)) {
         return;
@@ -1576,7 +1576,7 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     obj.SetCStruct(buffer->isCStruct());
 }
 
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::ClassDef* buffer, ClassDef& obj)
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::ClassDef* buffer, ClassDef& obj)
 {
     if (obj.TestAttr(Attribute::PREVIOUSLY_DESERIALIZED)) {
         return;
@@ -1592,7 +1592,7 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
     }
 }
 
-template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFormat::ExtendDef* buffer, ExtendDef& obj)
+template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const CHIRFormat::ExtendDef* buffer, ExtendDef& obj)
 {
     if (obj.TestAttr(Attribute::PREVIOUSLY_DESERIALIZED)) {
         return;
@@ -1609,87 +1609,87 @@ template <> void CHIRDeserializer::CHIRDeserializerImpl::Config(const PackageFor
 Value* CHIRDeserializer::CHIRDeserializerImpl::GetValue(uint32_t id)
 {
     if (id2Value.count(id) == 0) {
-        switch (PackageFormat::ValueElem(pool->values_type()->Get(id - 1))) {
-            case PackageFormat::ValueElem_BoolLiteral:
+        switch (CHIRFormat::ValueElem(pool->values_type()->Get(id - 1))) {
+            case CHIRFormat::ValueElem_BoolLiteral:
                 id2Value[id] = Deserialize<BoolLiteral>(
-                    static_cast<const PackageFormat::BoolLiteral*>(pool->values()->Get(id - 1)));
-                ConfigValue(static_cast<const PackageFormat::BoolLiteral*>(pool->values()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::BoolLiteral*>(pool->values()->Get(id - 1)));
+                ConfigValue(static_cast<const CHIRFormat::BoolLiteral*>(pool->values()->Get(id - 1))->base()->base(),
                     *id2Value[id]);
                 break;
-            case PackageFormat::ValueElem_RuneLiteral:
+            case CHIRFormat::ValueElem_RuneLiteral:
                 id2Value[id] = Deserialize<RuneLiteral>(
-                    static_cast<const PackageFormat::RuneLiteral*>(pool->values()->Get(id - 1)));
-                ConfigValue(static_cast<const PackageFormat::RuneLiteral*>(pool->values()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::RuneLiteral*>(pool->values()->Get(id - 1)));
+                ConfigValue(static_cast<const CHIRFormat::RuneLiteral*>(pool->values()->Get(id - 1))->base()->base(),
                     *id2Value[id]);
                 break;
-            case PackageFormat::ValueElem_StringLiteral:
+            case CHIRFormat::ValueElem_StringLiteral:
                 id2Value[id] = Deserialize<StringLiteral>(
-                    static_cast<const PackageFormat::StringLiteral*>(pool->values()->Get(id - 1)));
+                    static_cast<const CHIRFormat::StringLiteral*>(pool->values()->Get(id - 1)));
                 ConfigValue(
-                    static_cast<const PackageFormat::StringLiteral*>(pool->values()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::StringLiteral*>(pool->values()->Get(id - 1))->base()->base(),
                     *id2Value[id]);
                 break;
-            case PackageFormat::ValueElem_IntLiteral:
+            case CHIRFormat::ValueElem_IntLiteral:
                 id2Value[id] =
-                    Deserialize<IntLiteral>(static_cast<const PackageFormat::IntLiteral*>(pool->values()->Get(id - 1)));
-                ConfigValue(static_cast<const PackageFormat::IntLiteral*>(pool->values()->Get(id - 1))->base()->base(),
+                    Deserialize<IntLiteral>(static_cast<const CHIRFormat::IntLiteral*>(pool->values()->Get(id - 1)));
+                ConfigValue(static_cast<const CHIRFormat::IntLiteral*>(pool->values()->Get(id - 1))->base()->base(),
                     *id2Value[id]);
                 break;
-            case PackageFormat::ValueElem_FloatLiteral:
+            case CHIRFormat::ValueElem_FloatLiteral:
                 id2Value[id] = Deserialize<FloatLiteral>(
-                    static_cast<const PackageFormat::FloatLiteral*>(pool->values()->Get(id - 1)));
+                    static_cast<const CHIRFormat::FloatLiteral*>(pool->values()->Get(id - 1)));
                 ConfigValue(
-                    static_cast<const PackageFormat::FloatLiteral*>(pool->values()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::FloatLiteral*>(pool->values()->Get(id - 1))->base()->base(),
                     *id2Value[id]);
                 break;
-            case PackageFormat::ValueElem_UnitLiteral:
+            case CHIRFormat::ValueElem_UnitLiteral:
                 id2Value[id] = Deserialize<UnitLiteral>(
-                    static_cast<const PackageFormat::UnitLiteral*>(pool->values()->Get(id - 1)));
-                ConfigValue(static_cast<const PackageFormat::UnitLiteral*>(pool->values()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::UnitLiteral*>(pool->values()->Get(id - 1)));
+                ConfigValue(static_cast<const CHIRFormat::UnitLiteral*>(pool->values()->Get(id - 1))->base()->base(),
                     *id2Value[id]);
                 break;
-            case PackageFormat::ValueElem_NullLiteral:
+            case CHIRFormat::ValueElem_NullLiteral:
                 id2Value[id] = Deserialize<NullLiteral>(
-                    static_cast<const PackageFormat::NullLiteral*>(pool->values()->Get(id - 1)));
-                ConfigValue(static_cast<const PackageFormat::NullLiteral*>(pool->values()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::NullLiteral*>(pool->values()->Get(id - 1)));
+                ConfigValue(static_cast<const CHIRFormat::NullLiteral*>(pool->values()->Get(id - 1))->base()->base(),
                     *id2Value[id]);
                 break;
-            case PackageFormat::ValueElem_Parameter:
+            case CHIRFormat::ValueElem_Parameter:
                 id2Value[id] =
-                    Deserialize<Parameter>(static_cast<const PackageFormat::Parameter*>(pool->values()->Get(id - 1)));
+                    Deserialize<Parameter>(static_cast<const CHIRFormat::Parameter*>(pool->values()->Get(id - 1)));
                 ConfigValue(
-                    static_cast<const PackageFormat::Parameter*>(pool->values()->Get(id - 1))->base(), *id2Value[id]);
+                    static_cast<const CHIRFormat::Parameter*>(pool->values()->Get(id - 1))->base(), *id2Value[id]);
                 break;
-            case PackageFormat::ValueElem_LocalVar:
+            case CHIRFormat::ValueElem_LocalVar:
                 id2Value[id] =
-                    Deserialize<LocalVar>(static_cast<const PackageFormat::LocalVar*>(pool->values()->Get(id - 1)));
+                    Deserialize<LocalVar>(static_cast<const CHIRFormat::LocalVar*>(pool->values()->Get(id - 1)));
                 ConfigValue(
-                    static_cast<const PackageFormat::LocalVar*>(pool->values()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::LocalVar*>(pool->values()->Get(id - 1))->base(),
                     *StaticCast<LocalVar*>(id2Value[id]));
                 break;
-            case PackageFormat::ValueElem_GlobalVar:
+            case CHIRFormat::ValueElem_GlobalVar:
                 id2Value[id] =
-                    Deserialize<GlobalVar>(static_cast<const PackageFormat::GlobalVar*>(pool->values()->Get(id - 1)));
+                    Deserialize<GlobalVar>(static_cast<const CHIRFormat::GlobalVar*>(pool->values()->Get(id - 1)));
                 break;
-            case PackageFormat::ValueElem_Function:
+            case CHIRFormat::ValueElem_Function:
                 id2Value[id] =
-                    Deserialize<Function>(static_cast<const PackageFormat::Function*>(pool->values()->Get(id - 1)));
+                    Deserialize<Function>(static_cast<const CHIRFormat::Function*>(pool->values()->Get(id - 1)));
                 break;
-            case PackageFormat::ValueElem_Block:
+            case CHIRFormat::ValueElem_Block:
                 id2Value[id] =
-                    Deserialize<Block>(static_cast<const PackageFormat::Block*>(pool->values()->Get(id - 1)));
+                    Deserialize<Block>(static_cast<const CHIRFormat::Block*>(pool->values()->Get(id - 1)));
                 ConfigValue(
-                    static_cast<const PackageFormat::Block*>(pool->values()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::Block*>(pool->values()->Get(id - 1))->base(),
                     *StaticCast<Block*>(id2Value[id]));
                 break;
-            case PackageFormat::ValueElem_BlockGroup:
+            case CHIRFormat::ValueElem_BlockGroup:
                 id2Value[id] =
-                    Deserialize<BlockGroup>(static_cast<const PackageFormat::BlockGroup*>(pool->values()->Get(id - 1)));
+                    Deserialize<BlockGroup>(static_cast<const CHIRFormat::BlockGroup*>(pool->values()->Get(id - 1)));
                 ConfigValue(
-                    static_cast<const PackageFormat::BlockGroup*>(pool->values()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::BlockGroup*>(pool->values()->Get(id - 1))->base(),
                     *StaticCast<BlockGroup*>(id2Value[id]));
                 break;
-            case PackageFormat::ValueElem_NONE:
+            case CHIRFormat::ValueElem_NONE:
                 InternalError("Unsupported value type.");
                 break;
             default:
@@ -1710,32 +1710,32 @@ template <typename T> T* CHIRDeserializer::CHIRDeserializerImpl::GetValue(uint32
 Type* CHIRDeserializer::CHIRDeserializerImpl::GetType(uint32_t id)
 {
     if (id2Type.count(id) == 0) {
-        switch (PackageFormat::TypeElem(pool->types_type()->Get(id - 1))) {
-            case PackageFormat::TypeElem_Type:
+        switch (CHIRFormat::TypeElem(pool->types_type()->Get(id - 1))) {
+            case CHIRFormat::TypeElem_Type:
                 id2Type[id] =
-                    Deserialize<Type>(static_cast<const PackageFormat::Type*>(pool->types()->Get(id - 1)));
+                    Deserialize<Type>(static_cast<const CHIRFormat::Type*>(pool->types()->Get(id - 1)));
                 break;
-            case PackageFormat::TypeElem_RawArrayType:
+            case CHIRFormat::TypeElem_RawArrayType:
                 id2Type[id] = Deserialize<RawArrayType>(
-                    static_cast<const PackageFormat::RawArrayType*>(pool->types()->Get(id - 1)));
+                    static_cast<const CHIRFormat::RawArrayType*>(pool->types()->Get(id - 1)));
                 break;
-            case PackageFormat::TypeElem_VArrayType:
+            case CHIRFormat::TypeElem_VArrayType:
                 id2Type[id] =
-                    Deserialize<VArrayType>(static_cast<const PackageFormat::VArrayType*>(pool->types()->Get(id - 1)));
+                    Deserialize<VArrayType>(static_cast<const CHIRFormat::VArrayType*>(pool->types()->Get(id - 1)));
                 break;
-            case PackageFormat::TypeElem_FuncType:
+            case CHIRFormat::TypeElem_FuncType:
                 id2Type[id] =
-                    Deserialize<FuncType>(static_cast<const PackageFormat::FuncType*>(pool->types()->Get(id - 1)));
+                    Deserialize<FuncType>(static_cast<const CHIRFormat::FuncType*>(pool->types()->Get(id - 1)));
                 break;
-            case PackageFormat::TypeElem_CustomType:
+            case CHIRFormat::TypeElem_CustomType:
                 id2Type[id] =
-                    Deserialize<CustomType>(static_cast<const PackageFormat::CustomType*>(pool->types()->Get(id - 1)));
+                    Deserialize<CustomType>(static_cast<const CHIRFormat::CustomType*>(pool->types()->Get(id - 1)));
                 break;
-            case PackageFormat::TypeElem_GenericType:
+            case CHIRFormat::TypeElem_GenericType:
                 id2Type[id] = Deserialize<GenericType>(
-                    static_cast<const PackageFormat::GenericType*>(pool->types()->Get(id - 1)));
+                    static_cast<const CHIRFormat::GenericType*>(pool->types()->Get(id - 1)));
                 break;
-            case PackageFormat::TypeElem_NONE:
+            case CHIRFormat::TypeElem_NONE:
                 id2Type[id] = nullptr;
                 break;
             default:
@@ -1756,164 +1756,164 @@ template <typename T> T* CHIRDeserializer::CHIRDeserializerImpl::GetType(uint32_
 Expression* CHIRDeserializer::CHIRDeserializerImpl::GetExpression(uint32_t id)
 {
     if (id2Expression.count(id) == 0) {
-        switch (PackageFormat::ExpressionElem(pool->exprs_type()->Get(id - 1))) {
-            case PackageFormat::ExpressionElem_AllocateBase:
+        switch (CHIRFormat::ExpressionElem(pool->exprs_type()->Get(id - 1))) {
+            case CHIRFormat::ExpressionElem_AllocateBase:
                 id2Expression[id] = Deserialize<Expression>(
-                    static_cast<const PackageFormat::AllocateBase*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::AllocateBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::AllocateBase*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::AllocateBase*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_ApplyBase:
+            case CHIRFormat::ExpressionElem_ApplyBase:
                 id2Expression[id] =
-                    Deserialize<Expression>(static_cast<const PackageFormat::ApplyBase*>(pool->exprs()->Get(id - 1)));
+                    Deserialize<Expression>(static_cast<const CHIRFormat::ApplyBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::ApplyBase*>(pool->exprs()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::ApplyBase*>(pool->exprs()->Get(id - 1))->base()->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_BinaryExpressionBase:
+            case CHIRFormat::ExpressionElem_BinaryExpressionBase:
                 id2Expression[id] = Deserialize<Expression>(
-                    static_cast<const PackageFormat::BinaryExpressionBase*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::BinaryExpressionBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::BinaryExpressionBase*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::BinaryExpressionBase*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_Branch:
+            case CHIRFormat::ExpressionElem_Branch:
                 id2Expression[id] =
-                    Deserialize<Branch>(static_cast<const PackageFormat::Branch*>(pool->exprs()->Get(id - 1)));
+                    Deserialize<Branch>(static_cast<const CHIRFormat::Branch*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::Branch*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::Branch*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_Debug:
+            case CHIRFormat::ExpressionElem_Debug:
                 id2Expression[id] =
-                    Deserialize<Debug>(static_cast<const PackageFormat::Debug*>(pool->exprs()->Get(id - 1)));
+                    Deserialize<Debug>(static_cast<const CHIRFormat::Debug*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::Debug*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::Debug*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_Expression:
+            case CHIRFormat::ExpressionElem_Expression:
                 id2Expression[id] = Deserialize<Expression>(
-                    static_cast<const PackageFormat::Expression*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::Expression*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::Expression*>(pool->exprs()->Get(id - 1)),
+                    static_cast<const CHIRFormat::Expression*>(pool->exprs()->Get(id - 1)),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_Field:
+            case CHIRFormat::ExpressionElem_Field:
                 id2Expression[id] =
-                    Deserialize<Field>(static_cast<const PackageFormat::Field*>(pool->exprs()->Get(id - 1)));
+                    Deserialize<Field>(static_cast<const CHIRFormat::Field*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::Field*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::Field*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_FieldByName:
+            case CHIRFormat::ExpressionElem_FieldByName:
                 id2Expression[id] = Deserialize<FieldByName>(
-                    static_cast<const PackageFormat::FieldByName*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::FieldByName*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::FieldByName*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::FieldByName*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_GetElementByName:
+            case CHIRFormat::ExpressionElem_GetElementByName:
                 id2Expression[id] = Deserialize<GetElementByName>(
-                    static_cast<const PackageFormat::GetElementByName*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::GetElementByName*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::GetElementByName*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::GetElementByName*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_GetElementRef:
+            case CHIRFormat::ExpressionElem_GetElementRef:
                 id2Expression[id] = Deserialize<GetElementRef>(
-                    static_cast<const PackageFormat::GetElementRef*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::GetElementRef*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::GetElementRef*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::GetElementRef*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_GetInstantiateValue:
+            case CHIRFormat::ExpressionElem_GetInstantiateValue:
                 id2Expression[id] = Deserialize<GetInstantiateValue>(
-                    static_cast<const PackageFormat::GetInstantiateValue*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::GetInstantiateValue*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::GetInstantiateValue*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::GetInstantiateValue*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_GetRTTIStatic: {
-                auto v = static_cast<const PackageFormat::GetRTTIStatic*>(pool->exprs()->Get(id - 1));
+            case CHIRFormat::ExpressionElem_GetRTTIStatic: {
+                auto v = static_cast<const CHIRFormat::GetRTTIStatic*>(pool->exprs()->Get(id - 1));
                 id2Expression[id] = Deserialize<GetRTTIStatic>(v);
                 ConfigExpression(v->base(), *id2Expression[id]);
                 break;
             }
-            case PackageFormat::ExpressionElem_InstanceOf:
+            case CHIRFormat::ExpressionElem_InstanceOf:
                 id2Expression[id] =
-                    Deserialize<InstanceOf>(static_cast<const PackageFormat::InstanceOf*>(pool->exprs()->Get(id - 1)));
+                    Deserialize<InstanceOf>(static_cast<const CHIRFormat::InstanceOf*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::InstanceOf*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::InstanceOf*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_IntrinsicBase:
+            case CHIRFormat::ExpressionElem_IntrinsicBase:
                 id2Expression[id] = Deserialize<Expression>(
-                    static_cast<const PackageFormat::IntrinsicBase*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::IntrinsicBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::IntrinsicBase*>(pool->exprs()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::IntrinsicBase*>(pool->exprs()->Get(id - 1))->base()->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_InvokeBase:
+            case CHIRFormat::ExpressionElem_InvokeBase:
                 id2Expression[id] =
-                    Deserialize<Expression>(static_cast<const PackageFormat::InvokeBase*>(pool->exprs()->Get(id - 1)));
+                    Deserialize<Expression>(static_cast<const CHIRFormat::InvokeBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::InvokeBase*>(pool->exprs()->Get(id - 1))->base()->base(),
+                    static_cast<const CHIRFormat::InvokeBase*>(pool->exprs()->Get(id - 1))->base()->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_Lambda:
+            case CHIRFormat::ExpressionElem_Lambda:
                 id2Expression[id] =
-                    Deserialize<Lambda>(static_cast<const PackageFormat::Lambda*>(pool->exprs()->Get(id - 1)));
+                    Deserialize<Lambda>(static_cast<const CHIRFormat::Lambda*>(pool->exprs()->Get(id - 1)));
                 Config(
-                    static_cast<const PackageFormat::Lambda*>(pool->exprs()->Get(id - 1)), *GetExpression<Lambda>(id));
+                    static_cast<const CHIRFormat::Lambda*>(pool->exprs()->Get(id - 1)), *GetExpression<Lambda>(id));
                 break;
-            case PackageFormat::ExpressionElem_MultiBranch:
+            case CHIRFormat::ExpressionElem_MultiBranch:
                 id2Expression[id] = Deserialize<MultiBranch>(
-                    static_cast<const PackageFormat::MultiBranch*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::MultiBranch*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::MultiBranch*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::MultiBranch*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_NumericCastBase:
+            case CHIRFormat::ExpressionElem_NumericCastBase:
                 id2Expression[id] = Deserialize<Expression>(
-                    static_cast<const PackageFormat::NumericCastBase*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::NumericCastBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::NumericCastBase*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::NumericCastBase*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_RawArrayAllocateBase:
+            case CHIRFormat::ExpressionElem_RawArrayAllocateBase:
                 id2Expression[id] = Deserialize<Expression>(
-                    static_cast<const PackageFormat::RawArrayAllocateBase*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::RawArrayAllocateBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::RawArrayAllocateBase*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::RawArrayAllocateBase*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_SpawnBase:
+            case CHIRFormat::ExpressionElem_SpawnBase:
                 id2Expression[id] = Deserialize<Expression>(
-                    static_cast<const PackageFormat::SpawnBase*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::SpawnBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::SpawnBase*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::SpawnBase*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_StoreElementByName:
+            case CHIRFormat::ExpressionElem_StoreElementByName:
                 id2Expression[id] = Deserialize<StoreElementByName>(
-                    static_cast<const PackageFormat::StoreElementByName*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::StoreElementByName*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::StoreElementByName*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::StoreElementByName*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_StoreElementRef:
+            case CHIRFormat::ExpressionElem_StoreElementRef:
                 id2Expression[id] = Deserialize<StoreElementRef>(
-                    static_cast<const PackageFormat::StoreElementRef*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::StoreElementRef*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::StoreElementRef*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::StoreElementRef*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
-            case PackageFormat::ExpressionElem_UnaryExpressionBase:
+            case CHIRFormat::ExpressionElem_UnaryExpressionBase:
                 id2Expression[id] = Deserialize<Expression>(
-                    static_cast<const PackageFormat::UnaryExpressionBase*>(pool->exprs()->Get(id - 1)));
+                    static_cast<const CHIRFormat::UnaryExpressionBase*>(pool->exprs()->Get(id - 1)));
                 ConfigExpression(
-                    static_cast<const PackageFormat::UnaryExpressionBase*>(pool->exprs()->Get(id - 1))->base(),
+                    static_cast<const CHIRFormat::UnaryExpressionBase*>(pool->exprs()->Get(id - 1))->base(),
                     *id2Expression[id]);
                 break;
             default:
@@ -1934,24 +1934,24 @@ template <typename T> T* CHIRDeserializer::CHIRDeserializerImpl::GetExpression(u
 CustomTypeDef* CHIRDeserializer::CHIRDeserializerImpl::GetCustomTypeDef(uint32_t id)
 {
     if (id2CustomTypeDef.count(id) == 0) {
-        switch (PackageFormat::CustomTypeDefElem(pool->defs_type()->Get(id - 1))) {
-            case PackageFormat::CustomTypeDefElem_EnumDef:
+        switch (CHIRFormat::CustomTypeDefElem(pool->defs_type()->Get(id - 1))) {
+            case CHIRFormat::CustomTypeDefElem_EnumDef:
                 id2CustomTypeDef[id] =
-                    Deserialize<EnumDef>(static_cast<const PackageFormat::EnumDef*>(pool->defs()->Get(id - 1)));
+                    Deserialize<EnumDef>(static_cast<const CHIRFormat::EnumDef*>(pool->defs()->Get(id - 1)));
                 break;
-            case PackageFormat::CustomTypeDefElem_StructDef:
+            case CHIRFormat::CustomTypeDefElem_StructDef:
                 id2CustomTypeDef[id] =
-                    Deserialize<StructDef>(static_cast<const PackageFormat::StructDef*>(pool->defs()->Get(id - 1)));
+                    Deserialize<StructDef>(static_cast<const CHIRFormat::StructDef*>(pool->defs()->Get(id - 1)));
                 break;
-            case PackageFormat::CustomTypeDefElem_ClassDef:
+            case CHIRFormat::CustomTypeDefElem_ClassDef:
                 id2CustomTypeDef[id] =
-                    Deserialize<ClassDef>(static_cast<const PackageFormat::ClassDef*>(pool->defs()->Get(id - 1)));
+                    Deserialize<ClassDef>(static_cast<const CHIRFormat::ClassDef*>(pool->defs()->Get(id - 1)));
                 break;
-            case PackageFormat::CustomTypeDefElem_ExtendDef:
+            case CHIRFormat::CustomTypeDefElem_ExtendDef:
                 id2CustomTypeDef[id] =
-                    Deserialize<ExtendDef>(static_cast<const PackageFormat::ExtendDef*>(pool->defs()->Get(id - 1)));
+                    Deserialize<ExtendDef>(static_cast<const CHIRFormat::ExtendDef*>(pool->defs()->Get(id - 1)));
                 break;
-            case PackageFormat::CustomTypeDefElem_NONE:
+            case CHIRFormat::CustomTypeDefElem_NONE:
                 CJC_ABORT();
                 id2CustomTypeDef[id] = nullptr;
                 break;
@@ -1973,7 +1973,7 @@ template <typename T> T* CHIRDeserializer::CHIRDeserializerImpl::GetCustomTypeDe
 }
 
 // =========================== Entry ==================================
-void CHIRDeserializer::CHIRDeserializerImpl::Run(const PackageFormat::CHIRPackage* package)
+void CHIRDeserializer::CHIRDeserializerImpl::Run(const CHIRFormat::CHIRPackage* package)
 {
     pool = package;
     if (!builder.GetCurPackage()) {
@@ -1988,8 +1988,8 @@ void CHIRDeserializer::CHIRDeserializerImpl::Run(const PackageFormat::CHIRPackag
 
     // 2. deserialize global function and global variable, only for order
     for (unsigned id = 1; id <= pool->values()->size(); ++id) {
-        auto kind = PackageFormat::ValueElem(pool->values_type()->Get(id - 1));
-        if (kind == PackageFormat::ValueElem_Function || kind == PackageFormat::ValueElem_GlobalVar) {
+        auto kind = CHIRFormat::ValueElem(pool->values_type()->Get(id - 1));
+        if (kind == CHIRFormat::ValueElem_Function || kind == CHIRFormat::ValueElem_GlobalVar) {
             GetValue<Value>(id);
         }
     }
@@ -1998,20 +1998,20 @@ void CHIRDeserializer::CHIRDeserializerImpl::Run(const PackageFormat::CHIRPackag
     //    this step must before filling in function, because CustomTypeDef's member var may be used in func body
     for (unsigned id = 1; id <= pool->defs()->size(); ++id) {
         switch (pool->defs_type()->Get(id - 1)) {
-            case PackageFormat::CustomTypeDefElem_EnumDef:
-                Config(static_cast<const PackageFormat::EnumDef*>(pool->defs()->Get(id - 1)),
+            case CHIRFormat::CustomTypeDefElem_EnumDef:
+                Config(static_cast<const CHIRFormat::EnumDef*>(pool->defs()->Get(id - 1)),
                     *GetCustomTypeDef<EnumDef>(id));
                 break;
-            case PackageFormat::CustomTypeDefElem_StructDef:
-                Config(static_cast<const PackageFormat::StructDef*>(pool->defs()->Get(id - 1)),
+            case CHIRFormat::CustomTypeDefElem_StructDef:
+                Config(static_cast<const CHIRFormat::StructDef*>(pool->defs()->Get(id - 1)),
                     *GetCustomTypeDef<StructDef>(id));
                 break;
-            case PackageFormat::CustomTypeDefElem_ClassDef:
-                Config(static_cast<const PackageFormat::ClassDef*>(pool->defs()->Get(id - 1)),
+            case CHIRFormat::CustomTypeDefElem_ClassDef:
+                Config(static_cast<const CHIRFormat::ClassDef*>(pool->defs()->Get(id - 1)),
                     *GetCustomTypeDef<ClassDef>(id));
                 break;
-            case PackageFormat::CustomTypeDefElem_ExtendDef:
-                Config(static_cast<const PackageFormat::ExtendDef*>(pool->defs()->Get(id - 1)),
+            case CHIRFormat::CustomTypeDefElem_ExtendDef:
+                Config(static_cast<const CHIRFormat::ExtendDef*>(pool->defs()->Get(id - 1)),
                     *GetCustomTypeDef<ExtendDef>(id));
                 break;
             default:
@@ -2026,19 +2026,19 @@ void CHIRDeserializer::CHIRDeserializerImpl::Run(const PackageFormat::CHIRPackag
     //    constructed from blocks and expressions
     for (unsigned id = 1; id <= pool->values()->size(); ++id) {
         switch (pool->values_type()->Get(id - 1)) {
-            case PackageFormat::ValueElem_GlobalVar:
-                Config(static_cast<const PackageFormat::GlobalVar*>(pool->values()->Get(id - 1)),
+            case CHIRFormat::ValueElem_GlobalVar:
+                Config(static_cast<const CHIRFormat::GlobalVar*>(pool->values()->Get(id - 1)),
                     *GetValue<GlobalVar>(id));
                 break;
-            case PackageFormat::ValueElem_Function:
-                Config(static_cast<const PackageFormat::Function*>(pool->values()->Get(id - 1)),
+            case CHIRFormat::ValueElem_Function:
+                Config(static_cast<const CHIRFormat::Function*>(pool->values()->Get(id - 1)),
                     *GetValue<Function>(id));
                 break;
-            case PackageFormat::ValueElem_Block:
-                Config(static_cast<const PackageFormat::Block*>(pool->values()->Get(id - 1)), *GetValue<Block>(id));
+            case CHIRFormat::ValueElem_Block:
+                Config(static_cast<const CHIRFormat::Block*>(pool->values()->Get(id - 1)), *GetValue<Block>(id));
                 break;
-            case PackageFormat::ValueElem_BlockGroup:
-                Config(static_cast<const PackageFormat::BlockGroup*>(pool->values()->Get(id - 1)),
+            case CHIRFormat::ValueElem_BlockGroup:
+                Config(static_cast<const CHIRFormat::BlockGroup*>(pool->values()->Get(id - 1)),
                     *GetValue<BlockGroup>(id));
                 break;
             default:
@@ -2051,11 +2051,11 @@ void CHIRDeserializer::CHIRDeserializerImpl::Run(const PackageFormat::CHIRPackag
     //    if local var is used in expression, its information has been updaetd while deserializing expression
     //    if local var isn't used in expression, its information need to be updated here
     for (unsigned id = 1; id <= pool->values()->size(); ++id) {
-        auto kind = PackageFormat::ValueElem(pool->values_type()->Get(id - 1));
-        if (kind == PackageFormat::ValueElem_LocalVar) {
+        auto kind = CHIRFormat::ValueElem(pool->values_type()->Get(id - 1));
+        if (kind == CHIRFormat::ValueElem_LocalVar) {
             GetValue<Value>(id);
-        } else if (kind == PackageFormat::ValueElem_Function) {
-            auto buffer = static_cast<const PackageFormat::Function*>(pool->values()->Get(id - 1));
+        } else if (kind == CHIRFormat::ValueElem_Function) {
+            auto buffer = static_cast<const CHIRFormat::Function*>(pool->values()->Get(id - 1));
             auto obj = GetValue<Function>(id);
             obj->SetLocalId(buffer->localId());
             obj->SetBlockId(buffer->blockId());

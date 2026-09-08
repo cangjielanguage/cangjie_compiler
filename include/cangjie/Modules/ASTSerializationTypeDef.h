@@ -10,7 +10,7 @@
 #include <flatbuffers/flatbuffers.h>
 
 #include "flatbuffers/CachedASTFormat_generated.h"
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 namespace Cangjie {
 using FormattedIndex = uint32_t;

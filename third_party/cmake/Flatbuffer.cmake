@@ -30,6 +30,9 @@ endif()
 ExternalProject_Add(
     flatbuffers
     ${FLATBUFFERS_DOWNLOAD_ARGS}
+    PATCH_COMMAND ${CMAKE_COMMAND}
+        -DFLATBUFFERS_SRC=<SOURCE_DIR>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ApplyCangjieIdlPackagePatch.cmake
     CMAKE_ARGS
         # no need to Build tests and install.
         -DFLATBUFFERS_BUILD_TESTS=OFF
@@ -40,3 +43,4 @@ ExternalProject_Add(
         ${FLATBUFFERS_COMPILE_OPTIONS})
 externalproject_get_property(flatbuffers SOURCE_DIR)
 set(FLATBUFFERS_SRC ${SOURCE_DIR})
+set(FLATBUFFERS_SOURCE_DIR ${SOURCE_DIR} PARENT_SCOPE)

@@ -4,7 +4,7 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-namespace PackageFormat;
+namespace CHIRFormat;
 
 file_identifier "CHIR";
 
