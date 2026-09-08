@@ -371,8 +371,16 @@ bool TypeChecker::TypeCheckerImpl::ChkVArrayArg(ASTContext& ctx, ArrayExpr& ve)
 {
     // check arg.
     if (ve.args.size() != 1) {
+        // Align the range computation with DiagWrongNumberOfArgumentsCommon: fall back
+        // to the node range when paren positions are zero (e.g. a desugared ArrayExpr
+        // whose producer forgot to copy them), and extend the end to the last argument
+        // when it is a trailing lambda placed after ')'.
+        bool parenPosExist = !ve.leftParenPos.IsZero() && !ve.rightParenPos.IsZero();
+        auto beginPos = parenPosExist ? ve.leftParenPos : ve.begin;
+        bool lastArgAfterParen = !ve.args.empty() && ve.args.back() && ve.args.back()->end > ve.rightParenPos;
+        auto endPos = parenPosExist ? (lastArgAfterParen ? ve.args.back()->end : ve.rightParenPos + 1) : ve.end;
         diag.DiagnoseRefactor(
-            DiagKindRefactor::sema_varray_args_number_mismatch, ve, MakeRange(ve.leftParenPos, ve.rightParenPos + 1));
+            DiagKindRefactor::sema_varray_args_number_mismatch, ve, MakeRange(beginPos, endPos));
         return false;
     }
     bool ret = false;
@@ -413,7 +421,11 @@ bool TypeChecker::TypeCheckerImpl::ChkVArrayExpr(ASTContext& ctx, Ty& target, Ar
     }
     // check T and size.
     if (!typeManager.IsSubtype(ve.type->GetTy(), targetTy)) {
-        DiagMismatchedTypesWithFoundTy(diag, ve, targetTy->String(), ve.type->GetTy()->String());
+        // When the desugared ArrayExpr has sourceExpr, ShouldDiagnose returns false
+        // and the mismatch diagnostic is silently skipped. Fall back to sourceExpr
+        // to ensure the error is reported on the original CallExpr.
+        const Node& diagNode = ve.sourceExpr ? *ve.sourceExpr : ve;
+        DiagMismatchedTypesWithFoundTy(diag, diagNode, targetTy->String(), ve.type->GetTy()->String());
         ve.SetTy(TypeManager::GetInvalidTy());
         return false;
     }
