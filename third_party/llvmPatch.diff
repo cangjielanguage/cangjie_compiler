@@ -33078,6 +33078,27 @@ index 756f1fb61..82bdb975c 100644
  /// Get an InlineCost object representing the cost of inlining this
  /// callsite.
  ///
+diff --git a/llvm/include/llvm/Analysis/LazyCallGraph.h b/llvm/include/llvm/Analysis/LazyCallGraph.h
+index 4cacf8951..284509d2c 100644
+--- a/llvm/include/llvm/Analysis/LazyCallGraph.h
++++ b/llvm/include/llvm/Analysis/LazyCallGraph.h
+@@ -34,6 +34,7 @@
+ #ifndef LLVM_ANALYSIS_LAZYCALLGRAPH_H
+ #define LLVM_ANALYSIS_LAZYCALLGRAPH_H
+ 
++#include "llvm/ADT/Any.h"
+ #include "llvm/ADT/ArrayRef.h"
+ #include "llvm/ADT/DenseMap.h"
+ #include "llvm/ADT/Optional.h"
+@@ -1295,6 +1296,8 @@ public:
+   PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+ };
+ 
++extern template struct Any::TypeId<const LazyCallGraph::SCC *>;
++
+ } // end namespace llvm
+ 
+ #endif // LLVM_ANALYSIS_LAZYCALLGRAPH_H
 diff --git a/llvm/include/llvm/Analysis/LoopAccessAnalysis.h b/llvm/include/llvm/Analysis/LoopAccessAnalysis.h
 index af8e8d222..71a90f476 100644
 --- a/llvm/include/llvm/Analysis/LoopAccessAnalysis.h
@@ -36076,6 +36097,24 @@ index 24da08d70..84dcf96d8 100644
    /// Look up the specified function in the module symbol table. If it does not
    /// exist, add a prototype for the function and return it. This function
    /// guarantees to return a constant of pointer to the specified function type
+diff --git a/llvm/include/llvm/IR/PassInstrumentation.h b/llvm/include/llvm/IR/PassInstrumentation.h
+index 27dd075bb..99da3b03d 100644
+--- a/llvm/include/llvm/IR/PassInstrumentation.h
++++ b/llvm/include/llvm/IR/PassInstrumentation.h
+@@ -60,6 +60,13 @@ namespace llvm {
+ 
+ class PreservedAnalyses;
+ class StringRef;
++class Module;
++class Loop;
++class Function;
++
++extern template struct Any::TypeId<const Module *>;
++extern template struct Any::TypeId<const Function *>;
++extern template struct Any::TypeId<const Loop *>;
+ 
+ /// This class manages callbacks registration, as well as provides a way for
+ /// PassInstrumentation to pass control to the registered callbacks.
 diff --git a/llvm/include/llvm/IR/SafepointIRVerifier.h b/llvm/include/llvm/IR/SafepointIRVerifier.h
 index 246d236ad..0f4f31af1 100644
 --- a/llvm/include/llvm/IR/SafepointIRVerifier.h
@@ -40494,7 +40533,7 @@ index 8192ed56c..cd9ff40f0 100644
      CallBase &Call, const InlineParams &Params, TargetTransformInfo &CalleeTTI,
      function_ref<AssumptionCache &(Function &)> GetAssumptionCache,
 diff --git a/llvm/lib/Analysis/LazyCallGraph.cpp b/llvm/lib/Analysis/LazyCallGraph.cpp
-index 20a905e04..6f4257364 100644
+index 20a905e04..6c6e3b2c2 100644
 --- a/llvm/lib/Analysis/LazyCallGraph.cpp
 +++ b/llvm/lib/Analysis/LazyCallGraph.cpp
 @@ -23,6 +23,7 @@
@@ -40505,10 +40544,12 @@ index 20a905e04..6f4257364 100644
  #include "llvm/Support/Compiler.h"
  #include "llvm/Support/Debug.h"
  #include "llvm/Support/GraphWriter.h"
-@@ -40,6 +41,10 @@
+@@ -40,6 +41,12 @@
  
  using namespace llvm;
  
++template struct Any::TypeId<const LazyCallGraph::SCC *>;
++
 +namespace llvm {
 +  extern cl::opt<bool> CJPipeline;
 +}
@@ -40516,7 +40557,7 @@ index 20a905e04..6f4257364 100644
  #define DEBUG_TYPE "lcg"
  
  void LazyCallGraph::EdgeSequence::insertEdgeInternal(Node &TargetN,
-@@ -1956,6 +1961,12 @@ void LazyCallGraph::visitReferences(SmallVectorImpl<Constant *> &Worklist,
+@@ -1956,6 +1963,12 @@ void LazyCallGraph::visitReferences(SmallVectorImpl<Constant *> &Worklist,
    while (!Worklist.empty()) {
      Constant *C = Worklist.pop_back_val();
  
@@ -51516,6 +51557,21 @@ index b51ea45f6..f74c68a4c 100644
  // getFunction - Look up the specified function in the module symbol table.
  // If it does not exist, return null.
  //
+diff --git a/llvm/lib/IR/PassInstrumentation.cpp b/llvm/lib/IR/PassInstrumentation.cpp
+index d85cefbbe..bd2a8d753 100644
+--- a/llvm/lib/IR/PassInstrumentation.cpp
++++ b/llvm/lib/IR/PassInstrumentation.cpp
+@@ -17,6 +17,10 @@
+ 
+ namespace llvm {
+ 
++template struct Any::TypeId<const Module *>;
++template struct Any::TypeId<const Function *>;
++template struct Any::TypeId<const Loop *>;
++
+ void PassInstrumentationCallbacks::addClassToPassName(StringRef ClassName,
+                                                       StringRef PassName) {
+   if (ClassToPassName[ClassName].empty())
 diff --git a/llvm/lib/IR/SafepointIRVerifier.cpp b/llvm/lib/IR/SafepointIRVerifier.cpp
 index 5d3fa28f7..e22cadf61 100644
 --- a/llvm/lib/IR/SafepointIRVerifier.cpp
