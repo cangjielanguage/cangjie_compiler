@@ -244,7 +244,10 @@ void Devirtualization::RewriteToApply(CHIRBuilder& builder, std::vector<RewriteI
         if (thisDerefType->IsClassOrArray() || realFunc->TestAttr(Attribute::MUT)) {
             instThisType = builder.GetType<RefType>(instThisType);
         }
-        if (rewriteInfo->thisType->IsBuiltinType()) {
+        // Wrapper of a builtin type (e.g. `extend Unit <: I`) takes `Any&` as `this`.
+        // After unwrapping to the raw method, keep the builtin value type instead of Any&.
+        auto rawThisTy = realFunc->GetFuncType()->GetParamTypes()[0]->StripAllRefs();
+        if (rewriteInfo->thisType->IsBuiltinType() && rawThisTy->IsAny()) {
             instThisType = builder.GetType<RefType>(builder.GetAnyTy());
         }
         auto instRetTy = invoke->GetResultType();
