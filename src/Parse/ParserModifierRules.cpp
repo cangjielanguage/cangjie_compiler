@@ -227,6 +227,7 @@ const ConflictRule ENUM_BODY_FUNCDECL_MODIFIERS[] = {
     CR(TokenKind::OPERATOR, TokenKind::STATIC),
     CR_ARR(TokenKind::COMMON, COMMON_SPECIFIC),
     CR_ARR(TokenKind::SPECIFIC, SPECIFIC_COMMON),
+    CR_EMPTY(TokenKind::EXCLAVE),
 };
 
 const ConflictRule FUNC_BODY_FUNCDECL_MODIFIERS[] = {

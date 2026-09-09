@@ -220,22 +220,6 @@ bool CheckThisTypeCompatibility(const FuncDecl& parentFunc, const FuncDecl& chil
     return !IsFuncReturnThisType(parentFunc) || IsFuncReturnThisType(childFunc);
 }
 
-bool HasMainDecl(Package& pkg)
-{
-    bool hasMain = false;
-    Walker(&pkg, [&hasMain](auto node) {
-        if (auto decl = DynamicCast<Decl*>(node); decl) {
-            if (decl->astKind == ASTKind::MAIN_DECL) {
-                hasMain = true;
-                return VisitAction::STOP_NOW;
-            }
-            return VisitAction::SKIP_CHILDREN;
-        }
-        return VisitAction::WALK_CHILDREN;
-    }).Walk();
-    return hasMain;
-}
-
 void MarkParamWithInitialValue(Node& root)
 {
     auto setFunc = [](Ptr<Node> node) -> VisitAction {
@@ -576,24 +560,6 @@ std::string DeclKindToString(const Decl& decl)
     return it->second;
 }
 
-std::string GetTypesStr(std::vector<Ptr<AST::Decl>>& decls)
-{
-    std::string res;
-    std::unordered_set<std::string> typeSetCache;
-    for (auto it : decls) {
-        if (it == nullptr) {
-            continue;
-        }
-        auto str = AST::ASTKIND_TO_STRING_MAP[it->astKind];
-        if (typeSetCache.find(str) != typeSetCache.end()) {
-            continue;
-        }
-        typeSetCache.emplace(str);
-        res += str + " ";
-    }
-    return res;
-}
-
 std::set<Ptr<ExtendDecl>> CollectAllRelatedExtends(TypeManager& tyMgr, InheritableDecl& boxedDecl)
 {
     if (boxedDecl.astKind != ASTKind::CLASS_DECL) {
@@ -632,15 +598,6 @@ ModalTy UnboxOptionType(ModalTy ty)
         optionUnboxTy = optionUnboxTy->typeArgs[0];
     }
     return optionUnboxTy;
-}
-
-std::string GetFullInheritedTy(ExtendDecl& extend)
-{
-    std::string fullType = PosSearchApi::PosToStr(extend.begin);
-    for (auto& interface : extend.inheritedTypes) {
-        fullType += interface->GetTy().String();
-    }
-    return fullType;
 }
 
 std::vector<Ptr<FuncDecl>> GetFuncTargets(const Node& node)

@@ -107,7 +107,6 @@ inline bool NeedSynOnUsed(const AST::Decl& target)
         (!target.GetTy().IsCorrect() || target.GetTy()->HasQuestTy());
 }
 
-std::string GetFullInheritedTy(AST::ExtendDecl& extend);
 void UpdateInstTysWithTypeArgs(AST::NameReferenceExpr& expr);
 void SetIsNotAlone(AST::Expr& baseExpr);
 void ModifyTargetOfRef(AST::RefExpr& re, Ptr<AST::Decl> decl, const std::vector<Ptr<AST::Decl>>& targets);
@@ -130,8 +129,6 @@ AST::ModalTy UnboxOptionType(AST::ModalTy ty);
  */
 bool CheckThisTypeCompatibility(const AST::FuncDecl& parentFunc, const AST::FuncDecl& childFunc);
 bool IsFuncReturnThisType(const AST::FuncDecl& fd);
-/** Return true if @p pkg has main_decl. */
-bool HasMainDecl(AST::Package& pkg);
 ComparisonRes CompareIntAndFloat(const AST::Ty& left, const AST::Ty& right);
 /**
  * Util functions for manipulating 'MultiTypeSubst'.
@@ -195,10 +192,6 @@ std::pair<bool, Ptr<AST::Decl>> GetRealMemberDecl(AST::Decl& decl);
  */
 Ptr<AST::Decl> GetUsedMemberDecl(AST::Decl& decl, bool isGetter);
 std::string DeclKindToString(const AST::Decl& decl);
-/**
- * Get string of given decls' ast type.
- */
-std::string GetTypesStr(std::vector<Ptr<AST::Decl>>& decls);
 std::pair<Ptr<AST::FuncDecl>, Ptr<AST::FuncDecl>> GetUsableGetterSetterForProperty(AST::PropDecl& pd);
 
 /// Get usable accessor for prop. when such accessor is not found in this prop, try to find in parent classes if any.

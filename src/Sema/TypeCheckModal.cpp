@@ -231,12 +231,13 @@ private:
 /// non-data return/parameter/this type; not in param default values or global/static initializer
 /// 9. Check exclave expr is not nested inside another exclave or exclave function
 /// 10. Check exclave expr is not in static init, finalizer, main, spawn, or try/catch/handle block
-/// 11. Check instance&static member var is of data type
-/// 12. Check instance member var does not have initializer when there are mixed local type init
-/// 13. Check the whole body of local?/local! constructor must be in exclave expr
-/// 14. Check finalizer this mode is supermode of all ctor this mode
-/// 15. Check type arguments of a type are data type (function type allowed); skip for function type and fun call
-/// 16. Check 'Copyable' is only used as a struct supertype or a generic upper bound
+/// 11. Check abstract func cannot be exclave
+/// 12. Check instance&static member var is of data type
+/// 13. Check instance member var does not have initializer when there are mixed local type init
+/// 14. Check the whole body of local?/local! constructor must be in exclave expr
+/// 15. Check finalizer this mode is supermode of all ctor this mode
+/// 16. Check type arguments of a type are data type (function type allowed); skip for function type and fun call
+/// 17. Check 'Copyable' is only used as a struct supertype or a generic upper bound
 struct ModalTypeChecker {
     ModalTypeChecker(DiagnosticEngine& diag, TypeManager& m) : d(diag), type{m}
     {
@@ -361,6 +362,7 @@ private:
         }
         if (auto func = DynamicCast<FuncDecl>(node)) {
             PushForbiddenFrame();
+            CheckAbstractExclaveFunc(*func);
             CheckNeedsRegion(*func);
             CheckWholeBodyIsExclave(*func);
             if (func->IsFinalizer()) {
@@ -555,6 +557,16 @@ private:
                 DiagNestedExclave(expr, *fd);
             }
         }
+    }
+
+    /// Abstract funcs (no body in abstract class / interface) cannot be `exclave`.
+    void CheckAbstractExclaveFunc(const FuncDecl& fd)
+    {
+        if (!fd.TestAttr(Attribute::ABSTRACT) || !HasModifier(fd.modifiers, TokenKind::EXCLAVE)) {
+            return;
+        }
+        d.DiagnoseRefactor(DiagKindRefactor::sema_abstract_exclave_func, fd, MakeRange(fd.identifier),
+            std::string{fd.identifier.Val()});
     }
 
     void DiagNestedExclave(const ExclaveExpr& expr, const Node& outerNode)
@@ -1218,46 +1230,6 @@ private:
         }
     }
 
-    static bool IsNonStaticMemberFunction(const FuncDecl& func)
-    {
-        if (func.ownerFunc || func.TestAnyAttr(Attribute::CONSTRUCTOR, Attribute::ENUM_CONSTRUCTOR)) {
-            return false;
-        }
-        if (func.propDecl) {
-            Is<InheritableDecl>(func.outerDecl) && !func.propDecl->TestAttr(Attribute::STATIC);
-        }
-        return Is<InheritableDecl>(func.outerDecl) && !func.TestAttr(Attribute::STATIC);
-    }
-
-    const Expr* GetFuncArg(const CallExpr& call, size_t index)
-    {
-        if (auto inner = DynamicCast<CallExpr>(call.desugarExpr.get())) {
-            return GetFuncArg(*inner, index);
-        }
-        if (auto array = DynamicCast<ArrayExpr>(call.desugarExpr.get())) {
-            return array->args[index]->expr.get();
-        }
-        auto func = call.resolvedFunction;
-        if (func && IsNonStaticMemberFunction(*func)) {
-            // non static member function call, the first arg is this
-            if (auto ma = DynamicCast<MemberAccess>(&*call.baseFunc)) {
-                if (index == 0) {
-                    return ma->baseExpr.get();
-                }
-                if (call.desugarArgs) {
-                    return call.desugarArgs->at(index - 1)->expr.get();
-                }
-                return call.args[index - 1]->expr.get();
-            }
-            // RefExpr, using implicit this, no need to check
-            return nullptr;
-        }
-        if (call.desugarArgs.has_value()) {
-            return call.desugarArgs.value()[index]->expr.get();
-        }
-        return call.args[index]->expr.get();
-    }
-
     std::unordered_map<FuncBody*, std::vector<const Expr*>> returnedExprMap;
     bool IsReturnedExpr(const ASTContext& ctx, const Expr& expr)
     {
@@ -1526,15 +1498,6 @@ bool TypeChecker::TypeCheckerImpl::IsExternalLocal(const ASTContext& ctx, const 
 void TypeChecker::TypeCheckerImpl::CheckModalType(const ASTContext& ctx, Package& pkg)
 {
     modalTypeChecker->Check(ctx, pkg);
-}
-
-void TypeChecker::TypeCheckerImpl::ExpectSubtypeOf(
-    Ptr<AST::Node> node, AST::ModalTy expect, AST::ModalTy actual, ModalMatchMode modal)
-{
-    if (!typeManager.IsSubtype(expect, actual, true, true, modal)) {
-        Sema::DiagMismatchedTypesWithFoundTy(diag, *node, expect, actual);
-        node->SetTy({TypeManager::GetInvalidTy()});
-    }
 }
 
 bool TypeChecker::TypeCheckerImpl::ChkExclaveExpr(ASTContext& ctx, ModalTy target, ExclaveExpr& expr)

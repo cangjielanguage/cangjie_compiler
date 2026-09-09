@@ -1031,11 +1031,6 @@ private:
      */
     bool CheckThisParamCompatible(
         ASTContext& ctx, const AST::FuncDecl& fd, const AST::CallExpr& ce, AST::ModalTy target);
-    /**
-     * Check if the this parameters of two functions are identical.
-     * Typically used to do overload check and overload resolution.
-     */
-    bool IsThisParamIdentical(const AST::FuncDecl& fd1, const AST::FuncDecl& fd2);
     void FilterTypeMappings(
         const AST::Expr& expr, AST::FuncDecl& fd, std::vector<MultiTypeSubst>& typeMappings);
     bool CheckCandidateConstrains(const AST::CallExpr& ce, const AST::FuncDecl& fd, const SubstPack& typeMapping);
@@ -1827,8 +1822,6 @@ private:
     void CheckModalType(const ASTContext& ctx, AST::Package& pkg);
     bool ChkExclaveExpr(ASTContext& ctx, AST::ModalTy target, AST::ExclaveExpr& expr);
     AST::ModalTy SynExclaveExpr(ASTContext& ctx, AST::ExclaveExpr& expr);
-    /// Report an error if \ref expect is not a subtype (possibly via modaling) to \ref actual.
-    void ExpectSubtypeOf(Ptr<AST::Node> node, AST::ModalTy expect, AST::ModalTy actual, ModalMatchMode modal);
     bool IsExternalLocal(const ASTContext& ctx, const AST::Expr& expr);
     struct ModalTypeChecker* NewModalTypeChecker();
     void DeleteModalTypeChecker();

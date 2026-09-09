@@ -417,6 +417,7 @@ ERROR(sema_exclave_outside_function, "exclave must be used in a function")
 ERROR(sema_exclave_invalid_func_signature,
     "exclave must be used in func with @local! non copy param or @local!/@local? non copy return type")
 ERROR(sema_nested_exclave, "exclave cannot be nested", {"outer exclave is here"})
+ERROR(sema_abstract_exclave_func, "abstract func '%s' cannot be exclave")
 ERROR(sema_copy_struct_bad_field, "cannot declare field '%s' of non copy type '%s' in copy type '%s'")
 ERROR(sema_illegal_copyable_type_usage, "'Copyable' can only be used as a struct supertype or a generic upper bound")
 ERROR(sema_bad_capture_local, "cannot capture %s variable '%s' in %s %s")

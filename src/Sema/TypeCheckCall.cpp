@@ -1329,25 +1329,6 @@ bool TypeChecker::TypeCheckerImpl::CheckThisParamCompatible(
     return true;
 }
 
-bool TypeChecker::TypeCheckerImpl::IsThisParamIdentical(const FuncDecl& fd1, const FuncDecl& fd2)
-{
-    bool hasThisParam1 = TypeManager::HasThisParam(fd1);
-    bool hasThisParam2 = TypeManager::HasThisParam(fd2);
-    if (hasThisParam1 != hasThisParam2) {
-        return false;
-    }
-    if (!hasThisParam1) {
-        return true;
-    }
-    auto thisParamTy1 = typeManager.GetThisParamTy(fd1);
-    auto thisParamTy2 = typeManager.GetThisParamTy(fd2);
-    if (typeManager.ImplementsCopyInterface(thisParamTy1.Ty()) &&
-        typeManager.ImplementsCopyInterface(thisParamTy2.Ty())) {
-        return true;
-    }
-    return thisParamTy1.Mode().IsSubModal(thisParamTy2.Mode()) && thisParamTy2.Mode().IsSubModal(thisParamTy1.Mode());
-}
-
 bool TypeChecker::TypeCheckerImpl::CheckGenericCallCompatible(
     ASTContext& ctx, FunctionCandidate& candidate, SubstPack& typeMapping, ModalTy targetRet)
 {
