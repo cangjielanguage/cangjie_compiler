@@ -42,7 +42,7 @@ protected:
     TempFileInfo GenerateLinkingTool(
         const std::vector<TempFileInfo>& objFiles, const std::string& darwinSDKVersion) override;
     void GenerateLinkOptions(Tool& tool) override;
-    virtual TempFileInfo GenerateLTOObjectFile(const std::vector<TempFileInfo>& objFiles);
+    virtual TempFileInfo GenerateStaticLibObjects(const std::vector<TempFileInfo>& objFiles);
 };
 } // namespace Cangjie
 #endif // CANGJIE_DRIVER_TOOLCHAIN_Darwin_CJNATIVE_H

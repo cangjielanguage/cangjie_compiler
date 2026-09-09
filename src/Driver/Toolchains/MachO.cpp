@@ -138,6 +138,43 @@ void MachO::HandleLLVMLinkOptions(const std::vector<TempFileInfo>& objFiles, Too
     GenerateLinkOptions(tool);
 }
 
+void MachO::AppendLTOBcInputs(const std::vector<TempFileInfo>& objFiles, Tool& tool)
+{
+    // For LTO staticlib production with -staticlib, only pass bitcode files so they
+    // participate in LTO cross-module optimization. Runtime .a/.dylib, section.o,
+    // cjstart.o, and -L paths are skipped — they belong to the final link step.
+    // Only invoked on the LTO path (GenerateStaticLibObjects with LTO enabled).
+    SortInputlibraryFileAndAppend(tool, objFiles);
+
+    // With --dy-std the std modules are deliberately left out of the LTO
+    // pipeline: their symbols stay undefined in the produced static library and
+    // are resolved by the final link against the dynamically linked std, so the
+    // std bitcode is not baked into this archive. direct/indirectBuiltinDependencies
+    // only ever hold std packages, so skipping both iteration passes filters them.
+    bool skipStd = driverOptions.linkStaticStd.has_value() && !driverOptions.linkStaticStd.value();
+    if (skipStd)
+        return;
+
+    // Append stdlib .bc files from built-in dependencies so they participate in LTO.
+    // The std packages come from the frontend's analyzed direct/indirect
+    // dependencies (stored as cjo paths), not from objFiles -- objFiles holds only
+    // user-code .bc (hash-named, e.g. a3f9b2c1.bc), which never matches the
+    // lib<pkg>.bc naming produced by ConvertFilenameToLtoLibCangjieFormat. So
+    // there is nothing in objFiles to dedup against; a std package may, however,
+    // appear in BOTH directBuiltinDependencies and indirectBuiltinDependencies
+    // (GetUsedSTDLibFiles returns a DepType::BOTH package from each call), so we
+    // still dedup across the two iteration passes via a single set.
+    std::unordered_set<std::string> seen;
+    const std::function<void(std::string)> appendBcToTool = [&tool, &seen](const std::string& cjoFileName) {
+        auto bcFile = FileUtil::ConvertFilenameToLtoLibCangjieFormat(cjoFileName);
+        if (seen.emplace(bcFile).second) {
+            tool.AppendArg(bcFile);
+        }
+    };
+    ForEachBuiltinDependencies(driverOptions.directBuiltinDependencies, appendBcToTool);
+    ForEachBuiltinDependencies(driverOptions.indirectBuiltinDependencies, appendBcToTool);
+}
+
 void MachO::HandleLibrarySearchPaths(Tool& tool, const std::string& cangjieLibPath)
 {
     // Append -L (those specified in command) as search paths

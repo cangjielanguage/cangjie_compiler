@@ -93,7 +93,7 @@ void Darwin_CJNATIVE::GenerateArchiveTool(const std::vector<TempFileInfo>& objFi
         MachO::GenerateArchiveTool(objFiles);
         return;
     }
-    auto ltoObject = GenerateLTOObjectFile(objFiles);
+    auto ltoObject = GenerateStaticLibObjects(objFiles);
     auto archiveTool = std::make_unique<Tool>(arPath, ToolType::BACKEND, driverOptions.environment.allVariables);
     archiveTool->AppendArg("cr");
     auto archiveOutput = CreateNewFileInfoWrapper(objFiles, TempFileKind::O_STATICLIB);
@@ -106,7 +106,7 @@ void Darwin_CJNATIVE::GenerateArchiveTool(const std::vector<TempFileInfo>& objFi
     backendCmds.emplace_back(MakeSingleToolBatch({std::move(archiveTool)}));
 }
 
-TempFileInfo Darwin_CJNATIVE::GenerateLTOObjectFile(const std::vector<TempFileInfo>& objFiles)
+TempFileInfo Darwin_CJNATIVE::GenerateStaticLibObjects(const std::vector<TempFileInfo>& objFiles)
 {
     std::optional<std::string> darwinSDKVersion = GetDarwinSDKVersion(driverOptions.sysroot);
     if (driverOptions.enableVerbose) {
@@ -121,8 +121,7 @@ TempFileInfo Darwin_CJNATIVE::GenerateLTOObjectFile(const std::vector<TempFileIn
     auto ltoObjectPath = FileUtil::JoinPath(ltoObjectDir, "0." + GetTargetArchString() + ".lto.o");
     GenerateLinkOptionsForLTO(*tool);
     tool->AppendArg("-object_path_lto", ltoObjectDir);
-    tool->AppendArg("-lto-emit-obj-only");
-    tool->AppendArg("-dylib");
+    tool->AppendArg("-staticlib");
     tool->AppendArg("-arch", GetTargetArchString());
 
     tool->AppendArg("-platform_version");
@@ -132,8 +131,7 @@ TempFileInfo Darwin_CJNATIVE::GenerateLTOObjectFile(const std::vector<TempFileIn
 
     tool->AppendArg("-syslibroot");
     tool->AppendArg(driverOptions.sysroot.empty() ? "/" : driverOptions.sysroot);
-    HandleLLVMLinkOptions(objFiles, *tool);
-    GenerateRuntimePath(*tool);
+    AppendLTOBcInputs(objFiles, *tool);
 
     backendCmds.emplace_back(MakeSingleToolBatch({std::move(tool)}));
     outputFileInfo.filePath = ltoObjectPath;
