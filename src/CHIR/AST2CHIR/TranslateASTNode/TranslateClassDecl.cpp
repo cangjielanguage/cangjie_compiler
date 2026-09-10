@@ -23,8 +23,8 @@ Ptr<Value> Translator::Visit(const AST::ClassDecl& decl)
 
 void Translator::SetClassSuperClass(ClassDef& classDef, const AST::ClassLikeDecl& decl)
 {
-    if (auto astTy = DynamicCast<AST::ClassTy*>(decl.GetTy()); astTy && astTy->GetSuperClassTy() != nullptr) {
-        auto type = TranslateType(*astTy->GetSuperClassTy());
+    if (auto astTy = DynamicCast<AST::ClassTy*>(decl.DataTy()); astTy && astTy->GetSuperClassTy() != nullptr) {
+        auto type = TranslateType(AST::ModalTy{astTy->GetSuperClassTy()});
         // The super class must be of the reference.
         CJC_ASSERT(type->IsRef());
         if (!classDef.HasSuperClass()) {
@@ -37,7 +37,7 @@ void Translator::SetClassSuperClass(ClassDef& classDef, const AST::ClassLikeDecl
 void Translator::SetClassImplementedInterface(ClassDef& classDef, const AST::ClassLikeDecl& decl)
 {
     for (auto& superInterfaceTy : decl.GetStableSuperInterfaceTys()) {
-        auto type = TranslateType(*superInterfaceTy);
+        auto type = TranslateType(AST::ModalTy{superInterfaceTy});
         // The interface must be of the reference.
         CJC_ASSERT(type->IsRef());
         auto realType = StaticCast<ClassType*>(StaticCast<RefType*>(type)->GetBaseType());
@@ -51,7 +51,7 @@ void Translator::TranslateClassLikeDecl(ClassDef& classDef, const AST::ClassLike
     CreateAnnotationInfo<ClassDef>(decl, classDef, &classDef);
 
     // set type
-    auto classTy = TranslateType(*decl.GetTy());
+    auto classTy = TranslateType(decl.GetTy());
     auto baseTy = StaticCast<ClassType*>(RawStaticCast<RefType*>(classTy)->GetBaseType());
     classDef.SetType(*baseTy);
     bool isImportedInstantiated =
@@ -104,7 +104,7 @@ void Translator::AddMemberVarDecl(CustomTypeDef& def, const AST::VarDecl& decl)
             CreateAnnotationInfo<GlobalVar>(decl, *staticVar, &def);
         }
     } else {
-        Ptr<Type> ty = TranslateType(*decl.GetTy());
+        Ptr<Type> ty = TranslateType(decl.GetTy());
         auto loc = TranslateLocation(decl);
         MemberVarInfo varInfo{
             .name = decl.identifier,
@@ -163,7 +163,7 @@ Function* Translator::ClearOrCreateVarInitFunc(const AST::Decl& decl)
         }
         CJC_ASSERT(returnTy);
 
-        auto returnType = (&decl == &outerDecl) ? builder.GetUnitTy() : TranslateType(*returnTy);
+        auto returnType = (&decl == &outerDecl) ? builder.GetUnitTy() : TranslateType(returnTy);
         auto funcType = builder.GetType<FuncType>(params, returnType);
         funcType = AdjustVarInitType(*funcType, outerDecl, builder, chirTy);
         auto loc = DebugLocation(TranslateLocationWithoutScope(builder.GetChirContext(), decl.begin, decl.end));

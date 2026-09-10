@@ -357,7 +357,7 @@ private:
         }
         auto& fun = StaticCast<FuncDecl>(cons);
         for (auto& p : fun.funcBody->paramLists[0]->params) {
-            if (!IsConst(p->GetTy())) {
+            if (!IsConst(p->DataTy())) {
                 return false;
             }
         }
@@ -562,7 +562,7 @@ private:
             return false;
         }
         if (auto var = DynamicCast<VarDecl>(&decl);
-            var && !var->isVar && !var->TestAttr(AST::Attribute::STATIC) && IsConstType(var->GetTy())) {
+            var && !var->isVar && !var->TestAttr(AST::Attribute::STATIC) && IsConstType(var->DataTy())) {
             if (var->outerDecl) {
                 return true;
             }

@@ -311,8 +311,7 @@ bool IncrementalCompilerInstance::PerformSema()
         // PropDecl's getter/setter will be counted separately and should not be cleared from propDecl.
     };
     for (auto& [_, decl] : mangledName2DeclMap) {
-        if (!decl->toBeCompiled && !IsInDeclWithAttribute(*decl, Attribute::GENERIC) &&
-            Ty::IsTyCorrect(decl->GetTy()) &&
+        if (!decl->toBeCompiled && !IsInDeclWithAttribute(*decl, Attribute::GENERIC) && decl->GetTy().IsCorrect() &&
             (decl->astKind != ASTKind::FUNC_DECL || !decl->TestAttr(Attribute::DEFAULT))) {
             // NOTE: for now, generic definitions and default implementations should be kept for code re-generation.
             visit(*decl);

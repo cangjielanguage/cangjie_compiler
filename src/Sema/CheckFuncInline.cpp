@@ -19,6 +19,7 @@
 #include "TypeCheckUtil.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Utils.h"
+#include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Utils/CheckUtils.h"
 
 using namespace Cangjie;
@@ -52,7 +53,8 @@ bool CanCountedRefExprOrMemberExpr(const Expr& expr)
         // NOTE: instance member variable can always be accessed from object no matter is public or private.
         if (target->TestAttr(Attribute::GLOBAL) && !target->IsExportedDecl()) {
             return false;
-        } else if (target->TestAttr(Attribute::STATIC) && target->outerDecl && target->outerDecl->IsNominalDecl() &&
+        } else if (target->TestAttr(Attribute::STATIC) && target->outerDecl &&
+            (target->outerDecl->IsNominalDecl() || target->outerDecl->IsBuiltIn()) &&
             (!target->outerDecl->IsExportedDecl() || !target->IsExportedDecl())) {
             return false;
         }
@@ -68,7 +70,7 @@ bool CanCountedRefExprOrMemberExpr(const Expr& expr)
     return true;
 }
 
-bool ContainsInternalType(const Ptr<Ty>& ty)
+bool ContainsInternalType(ModalTy ty)
 {
     if (!Ty::IsTyCorrect(ty)) {
         return true;

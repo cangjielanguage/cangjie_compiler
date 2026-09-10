@@ -12,7 +12,7 @@ using namespace Cangjie;
 Ptr<Value> Translator::Visit(const AST::TypeConvExpr& typeConvExpr)
 {
     const auto& loc = TranslateLocation(typeConvExpr);
-    auto chirType = TranslateType(*typeConvExpr.GetTy());
+    auto chirType = TranslateType(typeConvExpr.GetTy());
     auto operand = TranslateExprArg(*typeConvExpr.expr);
 
     auto srcTy = typeConvExpr.expr->GetTy();

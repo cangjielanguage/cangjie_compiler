@@ -277,7 +277,7 @@ Ptr<Value> Translator::GenerateForInRetValLocation(const DebugLocation& loc)
 ForIn* Translator::InitForInExprSkeleton(const AST::ForInExpr& forInExpr, Ptr<Value>& inductiveVar, Ptr<Value>& condVar)
 {
     auto forInloc = TranslateLocation(forInExpr);
-    auto forInType = TranslateType(*forInExpr.GetTy());
+    auto forInType = TranslateType(forInExpr.GetTy());
     Function* parentFunc = currentBlock->GetTopLevelFunc();
     CJC_NULLPTR_CHECK(parentFunc);
     BlockGroup* bodyBlockGrp = builder.CreateBlockGroup(*parentFunc);
@@ -560,7 +560,7 @@ void Translator::GenerateSignalCheckForThrow()
     currentBlock = returnBB; // contents of returnBB is filled on the caller side
 }
 
-Ptr<Value> Translator::TranslateForInIterCondition(Ptr<Value>& iterNextLocation, Ptr<AST::Ty> astTy)
+Ptr<Value> Translator::TranslateForInIterCondition(Ptr<Value>& iterNextLocation, AST::ModalTy astTy)
 {
     // Block #8: // preds: #6
     //   %51: Enum-_CNat6OptionIRNat6StringEE<Struct-Nat6StringE> = Load(%34)
@@ -849,7 +849,7 @@ Ptr<Value> Translator::TranslateForInIter(const AST::ForInExpr& forInExpr)
     // 2. Translate iterNext var
     // nodes[1] is match expr, it triggers iterator next operation
     AST::MatchExpr* matchExpr = StaticCast<AST::MatchExpr>(inExpression->body[1].get());
-    auto matchTy = TranslateType(*matchExpr->GetTy());
+    auto matchTy = TranslateType(matchExpr->GetTy());
     auto condLoc = TranslateLocation(*inExpression->body[1]);
     Ptr<Value> iterNextLocation = CreateAndAppendExpression<Allocate>(condLoc,
         builder.GetType<RefType>(matchTy), matchTy, currentBlock)->GetResult();
@@ -1060,7 +1060,7 @@ protected:
     {
         auto loc = tr.TranslateLocation(*forin);
         auto forInClosedRange = tr.CreateAndAppendExpression<ForInClosedRange>(
-            loc, tr.TranslateType(*forin->GetTy()), iterVar, condVar, tr.GetCurrentBlock());
+            loc, tr.TranslateType(forin->GetTy()), iterVar, condVar, tr.GetCurrentBlock());
         CJC_NULLPTR_CHECK(forInClosedRange);
         CJC_NULLPTR_CHECK(bgs.body);
         CJC_NULLPTR_CHECK(bgs.latch);

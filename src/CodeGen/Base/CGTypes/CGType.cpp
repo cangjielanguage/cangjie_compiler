@@ -228,6 +228,11 @@ llvm::GlobalVariable* CGType::GetOrCreateTypeInfo()
 {
     CJC_ASSERT_WITH_MSG(!chirType.IsThis(), "Should not get typeinfo of ThisType.");
     CJC_ASSERT_WITH_MSG(!chirType.IsRef(), "Should not get typeinfo of RefType.");
+    // Type info exists only for data types, never for modal types.
+    auto dataTy = chirType.GetDataType(cgMod.GetCGContext().GetCHIRBuilder());
+    if (dataTy != &chirType) {
+        return GetOrCreate(cgMod, dataTy)->GetOrCreateTypeInfo();
+    }
     if (typeInfo) {
         return typeInfo;
     }
@@ -980,7 +985,9 @@ std::string GetTypeQualifiedNameOfCustomTypeForReflect(
 std::string GetTypeQualifiedNameForReflect(CGModule& cgMod, const CHIR::Type& t, bool forNameFieldOfTi = false)
 {
     if (t.IsPrimitive()) {
-        return t.ToString();
+        // TI / qualified names are for data types only; omit modal suffixes like " @local?".
+        auto ite = CHIR::TYPEKIND_TO_STRING.find(t.GetTypeKind());
+        return ite == CHIR::TYPEKIND_TO_STRING.end() ? "UnknownType" : ite->second;
     }
     auto k = t.GetTypeKind();
     CJC_ASSERT(k != ChirTypeKind::TYPE_INVALID);

@@ -15,9 +15,9 @@
 
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Mangle/BaseMangler.h"
-#include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Sema/GenericInstantiationManager.h"
+#include "cangjie/Sema/TypeManager.h"
 
 namespace Cangjie {
 
@@ -40,8 +40,7 @@ enum class AccessorKind : uint8_t {
 
 class MockUtils {
 public:
-    explicit MockUtils(
-        ImportManager& importManager, TypeManager& typeManager, BaseMangler& mangler);
+    MockUtils(ImportManager& im, TypeManager& tm, DiagnosticEngine& d, BaseMangler& mang);
     static bool CanMock(AST::Node& node);
     static bool IsMockAccessor(const AST::Decl& decl);
     static std::vector<AST::Decl*> ListExistingMembers(Ptr<AST::Decl> decl);
@@ -51,17 +50,17 @@ public:
 
     void LoadStdDecls();
 
-    template <typename T> static OwnedPtr<T> CreateType(const Ptr<AST::Ty> ty)
+    template <typename T> static OwnedPtr<T> CreateType(AST::ModalTy ty)
     {
         auto type = MakeOwned<T>();
         type->SetTy(ty);
         return type;
     }
 
-    Ptr<Cangjie::AST::PointerTy> WrapTy2CPointer(const Ptr<AST::Ty> ty)
+    Ptr<Cangjie::AST::PointerTy> WrapTy2CPointer(AST::ModalTy ty)
     {
         CJC_NULLPTR_CHECK(ty);
-        auto pointerTy = typeManager.GetPointerTy(ty);
+        auto pointerTy = typeManager.GetPointerTy(ty.Ty());
         return pointerTy;
     }
 
@@ -125,10 +124,9 @@ public:
      *   case _ => [otherwiseBranch]
      * }
      */
-    static OwnedPtr<AST::Expr> CreateTypeCast(
-        OwnedPtr<AST::Expr> selector, Ptr<AST::Ty> castTy,
-        std::function<OwnedPtr<AST::Expr>(Ptr<AST::VarDecl>)> createMatchedBranch,
-        OwnedPtr<AST::Expr> otherwiseBranch, Ptr<AST::Ty> ty);
+    static OwnedPtr<AST::Expr> CreateTypeCast(OwnedPtr<AST::Expr> selector, AST::ModalTy castTy,
+        std::function<OwnedPtr<AST::Expr>(Ptr<AST::VarDecl>)> createMatchedBranch, OwnedPtr<AST::Expr> otherwiseBranch,
+        AST::ModalTy ty);
 
     /**
      * match ([selector]) {
@@ -137,7 +135,7 @@ public:
      * }
      */
     OwnedPtr<AST::Expr> CreateTypeCastOrThrow(
-        OwnedPtr<AST::Expr> selector, Ptr<AST::Ty> castTy, const std::string& message);
+        OwnedPtr<AST::Expr> selector, AST::DataTy castTy, const std::string& message);
 
     /**
      * match ([selector]) {
@@ -145,7 +143,7 @@ public:
      *   case _ => zerValue<[castTy]>()
      * }
      */
-    OwnedPtr<AST::Expr> CreateTypeCastOrZeroValue(OwnedPtr<AST::Expr> selector, Ptr<AST::Ty> castTy) const;
+    OwnedPtr<AST::Expr> CreateTypeCastOrZeroValue(OwnedPtr<AST::Expr> selector, AST::DataTy castTy) const;
 
     /**
      * Replaces all argument's types and return type with Any
@@ -158,10 +156,12 @@ public:
     std::string GetOriginalIdentifierOfAccessor(const AST::FuncDecl& decl) const;
     std::string GetOriginalIdentifierOfMockAccessor(const AST::Decl& decl) const;
 
-    bool MayContainInternalTypes(Ptr<AST::Ty> ty) const;
+    bool MayContainInternalTypes(AST::ModalTy ty) const;
+
 private:
     ImportManager& importManager;
     TypeManager& typeManager;
+    DiagnosticEngine& diag;
     BaseMangler& mangler;
 
     Ptr<AST::FuncDecl> getTypeForTypeParamDecl = nullptr;
@@ -175,7 +175,7 @@ private:
     Ptr<AST::ClassDecl> exceptionClassDecl = nullptr;
 
     static bool IsMockAccessorRequired(const AST::Decl& decl);
-    static AccessorKind ComputeAccessorKind(const AST::FuncDecl& accessorDecl);
+    AccessorKind ComputeAccessorKind(const AST::FuncDecl& accessorDecl);
     bool IsGetterForMutField(const AST::FuncDecl& accessorDecl);
 
     Ptr<AST::Decl> FindMockGlobalDecl(const AST::Decl& decl, const std::string& name);
@@ -195,20 +195,17 @@ private:
     Ptr<AST::FuncDecl> FindAccessor(Ptr<AST::MemberAccess> ma, Ptr<AST::Decl> target, AccessorKind kind);
     std::vector<Ptr<AST::Ty>> AddGenericIfNeeded(AST::Decl& originalDecl, AST::Decl& mockedDecl) const;
     OwnedPtr<AST::ArrayLit> WrapCallArgsIntoArray(const AST::FuncDecl& mockedFunc);
-    Ptr<AST::Ty> GetInstantiatedTy(const Ptr<AST::Ty> ty, std::vector<TypeSubst>& typeSubsts);
+    AST::ModalTy GetInstantiatedTy(AST::ModalTy ty, std::vector<TypeSubst>& typeSubsts);
     void SetGetTypeForTypeParamDecl(AST::Package& pkg);
     OwnedPtr<AST::Expr> CreateGetTypeForTypeParameterCall(const Ptr<AST::GenericParamDecl> genericParam);
     std::string Mangle(const AST::Decl& decl) const;
 
-    OwnedPtr<AST::RefExpr> CreateRefExprWithInstTys(
-        AST::Decl& target, const std::vector<Ptr<AST::Ty>>& instTys,
+    OwnedPtr<AST::RefExpr> CreateRefExprWithInstTys(AST::Decl& target, const std::vector<AST::DataTy>& instTys,
         const std::string& refName, AST::File& curFile) const;
-    OwnedPtr<AST::RefExpr> CreateDeclBasedReferenceExpr(
-        AST::Decl& target, const std::vector<Ptr<AST::Ty>>& instTys,
-        const std::string& refName, AST::File& curFile
-    ) const;
+    OwnedPtr<AST::RefExpr> CreateDeclBasedReferenceExpr(AST::Decl& target, const std::vector<AST::DataTy>& instTys,
+        const std::string& refName, AST::File& curFile) const;
 
-    OwnedPtr<AST::CallExpr> CreateZeroValue(Ptr<AST::Ty> ty, AST::File& curFile) const;
+    OwnedPtr<AST::CallExpr> CreateZeroValue(AST::DataTy ty, AST::File& curFile) const;
 
     template <typename T>
     Ptr<T> GetGenericDecl(Ptr<T> decl) const
@@ -228,7 +225,7 @@ private:
     Ptr<AST::Decl> GetExtendedTypeDecl(AST::FuncDecl& decl) const;
     void UpdateRefTypesTarget(
         Ptr<AST::Type> type, Ptr<AST::Generic> oldGeneric, Ptr<AST::Generic> newGeneric) const;
-    int GetIndexOfGenericTypeParam(Ptr<AST::Ty> ty, Ptr<AST::Generic> generic) const;
+    int GetIndexOfGenericTypeParam(AST::DataTy ty, Ptr<AST::Generic> generic) const;
 
     friend class TestManager;
     friend class MockManager;

@@ -12,14 +12,10 @@
 
 #include "cangjie/AST/Walker.h"
 
-#include <string>
-
 #include "cangjie/AST/Match.h"
-#include "cangjie/Basic/Match.h"
 
 using namespace Cangjie;
 using namespace Cangjie::AST;
-using namespace Meta;
 namespace Cangjie::AST {
 template <class NodeT> std::atomic_uint WalkerT<NodeT>::nextWalkerID = 1;
 template <class NodeT> unsigned WalkerT<NodeT>::GetNextWalkerID()
@@ -33,10 +29,10 @@ template <class NodeT> unsigned WalkerT<NodeT>::GetNextWalkerID()
 template class WalkerT<Node>;
 template class WalkerT<const Node>;
 } // namespace Cangjie::AST
-template VisitAction Walker::Walk(Ptr<Node> curNode) const;
-template VisitAction ConstWalker::Walk(Ptr<const Node> curNode) const;
+template VisitAction Walker::Walk(Ptr<Node> curNode);
+template VisitAction ConstWalker::Walk(Ptr<const Node> curNode);
 template <class NodeT>
-VisitAction WalkerT<NodeT>::Walk(Ptr<NodeT> curNode) const
+VisitAction WalkerT<NodeT>::Walk(Ptr<NodeT> curNode)
 {
     if (!curNode) {
         return VisitAction::WALK_CHILDREN;
@@ -47,6 +43,14 @@ VisitAction WalkerT<NodeT>::Walk(Ptr<NodeT> curNode) const
         return VisitAction::WALK_CHILDREN;
     }
     curNode->visitedByWalkerID = ID;
+    nodeStack.stack.push_back(curNode);
+    struct StackPop {
+        NodeStackT<NodeT>& s;
+        ~StackPop()
+        {
+            s.stack.pop_back();
+        }
+    } pop{nodeStack};
     VisitAction action = VisitAction::WALK_CHILDREN;
     if (VisitPre) {
         // If VisitPost function is given, call it first.
@@ -203,6 +207,9 @@ VisitAction WalkerT<NodeT>::Walk(Ptr<NodeT> curNode) const
                     if (Walk(param.get()) == VisitAction::STOP_NOW) {
                         return VisitAction::STOP_NOW;
                     }
+                }
+                if (Walk(fpl->thisParam.get()) == VisitAction::STOP_NOW) {
+                    return VisitAction::STOP_NOW;
                 }
                 action = VisitAction::WALK_CHILDREN;
                 break;
@@ -1163,6 +1170,11 @@ VisitAction WalkerT<NodeT>::Walk(Ptr<NodeT> curNode) const
                 if (Walk(bid->generic.get()) == VisitAction::STOP_NOW) {
                     return VisitAction::STOP_NOW;
                 }
+                for (auto& it : bid->members) {
+                    if (Walk(it.get()) == VisitAction::STOP_NOW) {
+                        return VisitAction::STOP_NOW;
+                    }
+                }
                 action = VisitAction::WALK_CHILDREN;
                 break;
             }
@@ -1193,6 +1205,18 @@ VisitAction WalkerT<NodeT>::Walk(Ptr<NodeT> curNode) const
             case ASTKind::OPTIONAL_EXPR: {
                 auto oe = StaticAs<ASTKind::OPTIONAL_EXPR>(curNode);
                 if (Walk(oe->baseExpr.get()) == VisitAction::STOP_NOW) {
+                    return VisitAction::STOP_NOW;
+                }
+                action = VisitAction::WALK_CHILDREN;
+                break;
+            }
+            case ASTKind::THIS_PARAM: {
+                action = VisitAction::WALK_CHILDREN;
+                break;
+            }
+            case ASTKind::EXCLAVE_EXPR: {
+                auto ee = StaticAs<ASTKind::EXCLAVE_EXPR>(curNode);
+                if (Walk(ee->body.get()) == VisitAction::STOP_NOW) {
                     return VisitAction::STOP_NOW;
                 }
                 action = VisitAction::WALK_CHILDREN;

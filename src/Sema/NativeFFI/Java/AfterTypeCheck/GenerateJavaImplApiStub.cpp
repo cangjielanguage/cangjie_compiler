@@ -37,10 +37,10 @@ OwnedPtr<AST::FuncDecl> GenerateJavaImplApiStub::CreateWrappingConstructorStub(
     // regId: RegistryId (Int64)
     auto& regIdParam = *params.emplace_back(jni.CreateRegistryIdParam());
 
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<ModalTy> paramTys;
     paramTys.push_back(entityParam.GetTy());
     paramTys.push_back(regIdParam.GetTy());
-    auto ctorTy = typeManager.GetFunctionTy(paramTys, refWrapper.GetTy());
+    ModalTy ctorTy{typeManager.GetFunctionTy(paramTys, refWrapper.GetTy())};
 
     ctor->funcBody->SetTy(ctorTy);
     ctor->SetTy(ctorTy);

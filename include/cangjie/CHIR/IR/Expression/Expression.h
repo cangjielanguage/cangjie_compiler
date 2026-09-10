@@ -225,6 +225,8 @@ public:
      */
     Function* GetTopLevelFunc() const;
 
+    bool IsInBlockGroupRecursively(const BlockGroup& target) const;
+
     // ===--------------------------------------------------------------------===//
     // Operand
     // ===--------------------------------------------------------------------===//
@@ -1074,7 +1076,7 @@ public:
      *
      * @return The offset, greater than or equal to zero.
      */
-    size_t GetVirtualMethodOffset(CHIRBuilder* builder = nullptr) const;
+    size_t GetVirtualMethodOffset() const;
 
     // ===--------------------------------------------------------------------===//
     // Instantiated Types
@@ -1103,9 +1105,6 @@ protected:
     ~DynamicDispatch() override = default;
 
     Cangjie::OverflowStrategy overflowStrategy{Cangjie::OverflowStrategy::NA};
-
-private:
-    std::vector<VTableSearchRes> GetVirtualMethodInfo(CHIRBuilder& builder) const;
 };
 
 /**
@@ -2348,6 +2347,32 @@ private:
     GetInstantiateValue* Clone(CHIRBuilder& builder, Block& parent) const override;
 
     std::vector<Type*> instantiateTys;
+};
+
+/**
+ * @brief Mark the start of a memory region.
+ */
+class StartRegion : public Expression {
+    friend class CHIRContext;
+    friend class CHIRBuilder;
+private:
+    explicit StartRegion(Block* parent);
+    ~StartRegion() override = default;
+
+    StartRegion* Clone(CHIRBuilder& builder, Block& parent) const override;
+};
+
+/**
+ * @brief Mark the end of a memory region.
+ */
+class EndRegion : public Expression {
+    friend class CHIRContext;
+    friend class CHIRBuilder;
+private:
+    explicit EndRegion(Block* parent);
+    ~EndRegion() override = default;
+
+    EndRegion* Clone(CHIRBuilder& builder, Block& parent) const override;
 };
 } // namespace Cangjie::CHIR
 #endif // CANGJIE_CHIR_EXPRESSION_H

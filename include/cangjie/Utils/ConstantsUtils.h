@@ -64,9 +64,10 @@ inline const std::string OBJECT_NAME = "Object";
 inline const std::string OCOBJECT_NAME = "NSObject";
 inline const std::string CTYPE_NAME = "CType";
 inline const std::string RAW_ARRAY_NAME = "RawArray";
-constexpr std::string_view CPOINTER_NAME{"CPointer"};
-constexpr std::string_view CSTRING_NAME{"CString"};
-constexpr std::string_view CFUNC_NAME{"CFunc"};
+constexpr std::string_view CPOINTER_NAME = "CPointer";
+constexpr std::string_view CSTRING_NAME = "CString";
+constexpr std::string_view COPY_NAME = "Copyable";
+constexpr std::string_view CFUNC_NAME = "CFunc";
 inline const std::string VARRAY_NAME = "VArray";
 inline const std::string TOSTRING_NAME = "ToString";
 

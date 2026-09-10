@@ -49,11 +49,11 @@ protected:
         float32Ty = builder.GetFloat32Ty();
         float64Ty = builder.GetFloat64Ty();
 
-        runeTy = builder.GetType<RuneType>();
-        boolTy = builder.GetType<BooleanType>();
-        unitTy = builder.GetType<UnitType>();
-        nothingTy = builder.GetType<NothingType>();
-        cstringTy = builder.GetType<CStringType>();
+        runeTy = builder.GetType<RuneType>(ModalInfo{});
+        boolTy = builder.GetType<BooleanType>(ModalInfo{});
+        unitTy = builder.GetType<UnitType>(ModalInfo{});
+        nothingTy = builder.GetType<NothingType>(ModalInfo{});
+        cstringTy = builder.GetType<CStringType>(ModalInfo{});
     }
 
     std::unordered_map<unsigned int, std::string> fileNameMap;

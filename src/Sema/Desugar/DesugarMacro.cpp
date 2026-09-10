@@ -27,6 +27,7 @@
 #include "cangjie/AST/Types.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Macro/TokenSerialization.h"
+#include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Utils/Utils.h"
 #include "cangjie/Basic/StringConvertor.h"
 
@@ -58,7 +59,7 @@ OwnedPtr<ArrayLit> DesugarTokensToArrayLiteral(std::vector<Token>& tokens)
     arrayLit->children.reserve(buffers.size());
 
     std::transform(buffers.begin(), buffers.end(), std::back_inserter(arrayLit->children), [](auto& byte) {
-        return CreateLitConstExpr(LitConstKind::INTEGER, std::to_string(byte), TypeManager::GetInvalidTy());
+        return CreateLitConstExpr(LitConstKind::INTEGER, std::to_string(byte), {TypeManager::GetInvalidTy()});
     });
 
     return arrayLit;
@@ -80,7 +81,7 @@ OwnedPtr<ForInExpr> CreateReadingForInExpr(const std::tuple<std::string, std::st
 {
     auto [declName, argPtr, argSize] = declArgs;
     auto varPattern = CreateVarPattern("i");
-    auto start = CreateLitConstExpr(LitConstKind::INTEGER, "0", TypeManager::GetInvalidTy());
+    auto start = CreateLitConstExpr(LitConstKind::INTEGER, "0", {TypeManager::GetInvalidTy()});
     auto end = CreateRefExpr(argSize);
     auto rangeExpr = MakeOwned<RangeExpr>();
     rangeExpr->startExpr = std::move(start);
@@ -131,10 +132,10 @@ OwnedPtr<VarDecl> CreateReadingVarDecl(
     std::string v = "Array";
     auto arrType = CreateRefType(v, {typeArgs.get()});
     arrType->EnableAttr(Attribute::IN_CORE);
-    auto baseF = CreateRefExpr({v, newPos, newPos, false}, nullptr, newPos, {typeArgs.get()});
+    auto baseF = CreateRefExpr({v, newPos, newPos, false}, {TypeManager::GetInvalidTy()}, newPos, {typeArgs.get()});
     baseF->EnableAttr(Attribute::IN_CORE);
     auto funcArg1 = CreateFuncArg(CreateRefExpr(argSize));
-    auto litConst = CreateLitConstExpr(LitConstKind::INTEGER, "0", TypeManager::GetInvalidTy());
+    auto litConst = CreateLitConstExpr(LitConstKind::INTEGER, "0", {TypeManager::GetInvalidTy()});
 
     std::vector<OwnedPtr<FuncArg>> funcVector;
     funcVector.emplace_back(std::move(funcArg1));
@@ -173,12 +174,12 @@ OwnedPtr<AssignExpr> CreateIllegalTokensDecl(const std::string argName, const Po
     std::vector<OwnedPtr<FuncArg>> tokensAttrArgs;
     tokensAttrArgs.emplace_back(std::move(tok));
 
-    auto fileID = CreateFuncArg(CreateLitConstExpr(
-        LitConstKind::INTEGER, std::to_string(pos.fileID), TypeManager::GetPrimitiveTy(TypeKind::TYPE_UINT32)));
+    auto fileID = CreateFuncArg(CreateLitConstExpr(LitConstKind::INTEGER, std::to_string(pos.fileID),
+        ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UINT32)}));
     auto line = CreateFuncArg(CreateLitConstExpr(
-        LitConstKind::INTEGER, std::to_string(pos.line), TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32)));
+        LitConstKind::INTEGER, std::to_string(pos.line), ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32)}));
     auto column = CreateFuncArg(CreateLitConstExpr(
-        LitConstKind::INTEGER, std::to_string(pos.column), TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32)));
+        LitConstKind::INTEGER, std::to_string(pos.column), ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32)}));
     auto refExpr = CreateRefExprInAST("Token");
     refExpr->begin = pos;
     refExpr->end = pos;
@@ -482,7 +483,7 @@ OwnedPtr<IfExpr> CreateWrapperIfExpr(
     // Create condition expr, like: paramSize > 0
     auto [argName, argBuf, argSize] = declArgs;
     auto argSizeExpr = CreateRefExpr(argSize);
-    auto litConst = CreateLitConstExpr(LitConstKind::INTEGER, "0", TypeManager::GetInvalidTy());
+    auto litConst = CreateLitConstExpr(LitConstKind::INTEGER, "0", {TypeManager::GetInvalidTy()});
     auto cond = CreateBinaryExpr(std::move(argSizeExpr), std::move(litConst), TokenKind::GT);
 
     // Create assign expr, like: params = Tokens(bufParam)
@@ -624,8 +625,8 @@ OwnedPtr<Expr> CreateToTokensMethod(const OwnedPtr<Expr>& expr)
         if (ce->baseFunc && ce->baseFunc->astKind == ASTKind::REF_EXPR) {
             auto re = StaticAs<ASTKind::REF_EXPR>(ce->baseFunc.get());
             if (re->ref.identifier == "Token") {
-                auto uint32Ty = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UINT32);
-                auto int32Ty = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32);
+                auto uint32Ty = ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UINT32)};
+                auto int32Ty = ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32)};
                 std::vector<OwnedPtr<FuncArg>> args;
                 args.emplace_back(CreateFuncArg(ASTCloner::Clone(Ptr(ce))));
                 args.emplace_back(CreateFuncArg(

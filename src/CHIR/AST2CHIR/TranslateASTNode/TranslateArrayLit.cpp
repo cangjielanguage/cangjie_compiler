@@ -5,6 +5,7 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
+#include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/CHIR/IR/Expression/Terminator.h"
 
 using namespace Cangjie::CHIR;
@@ -34,13 +35,15 @@ Ptr<Value> Translator::TranslateStructArray(const AST::ArrayLit& array)
     auto loc = TranslateLocation(array);
 
     std::vector<Value*> elements;
-    auto arrayTy = StaticCast<StructType*>(chirTy.TranslateType(*array.GetTy()));
-    CJC_ASSERT(arrayTy->IsStructArray());
-    auto eleTy = arrayTy->GetGenericArgs()[0];
+    auto arrayTy = chirTy.TranslateType(array.GetTy());
+    auto pureArrayTy = StaticCast<StructType*>(arrayTy->StripAllRefs());
+    CJC_ASSERT(pureArrayTy->IsStructArray());
+    auto eleTy = pureArrayTy->GetGenericArgs()[0];
     auto elementSize =
         CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, array.children.size())
             ->GetResult();
-    auto rawArrayType = builder.GetType<RefType>(builder.GetType<RawArrayType>(eleTy, 1u));
+    auto modal = ASTModal2CHIRModal(array.GetTy().Mode());
+    Type* rawArrayType = builder.GetType<RefType>(builder.GetType<RawArrayType>(eleTy, 1u, modal));
     auto rawArrayRef = TryCreate<RawArrayAllocate>(currentBlock, loc, rawArrayType, eleTy, elementSize)->GetResult();
     // in cjdb, if the arrayLit is nested,e.g. [[1,2]]
     // the outer RawArrayAllocate must be generated earlier than inner RawArrayAllocate,
@@ -77,7 +80,6 @@ Ptr<Value> Translator::TranslateStructArray(const AST::ArrayLit& array)
         CreateAndAppendExpression<Allocate>(builder.GetType<RefType>(arrayTy), arrayTy, currentBlock)->GetResult();
     auto intExpr = CreateAndAppendConstantExpression<IntLiteral>(builder.GetInt64Ty(), *currentBlock, 0UL);
     std::vector<Value*> args = {result, rawArrayRef, intExpr->GetResult(), elementSize};
-    // what are the initFn here all normal constructor or the arrayInitByFunc/arrayInitByCollection
     // check the thisType and instParentCustomDefTy
     std::vector<Type*> instParamTys;
     for (auto arg : args) {
@@ -97,9 +99,10 @@ Ptr<Value> Translator::TranslateVArray(const AST::ArrayLit& array)
 {
     auto loc = TranslateLocation(array);
     std::vector<Value*> elements;
-    auto arrayTy = chirTy.TranslateType(*array.GetTy());
-    CJC_ASSERT(arrayTy->IsVArray());
-    auto eleTy = StaticCast<VArrayType*>(arrayTy)->GetElementType();
+    auto arrayTy = chirTy.TranslateType(array.GetTy());
+    auto pureArrayTy = StaticCast<VArrayType*>(arrayTy->StripAllRefs());
+    CJC_ASSERT(pureArrayTy->IsVArray());
+    auto eleTy = pureArrayTy->GetElementType();
     for (auto& child : array.children) {
         elements.push_back(TranslateExprArg(*child, *eleTy));
     }

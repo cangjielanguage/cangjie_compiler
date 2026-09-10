@@ -21,9 +21,9 @@ Ptr<Value> Translator::Visit(const AST::SpawnExpr& spawnExpr)
     }
 
     if (spawnArg) {
-        TryCreate<Spawn>(currentBlock, loc, chirTy.TranslateType(*spawnExpr.GetTy()), futureObj, spawnArg);
+        TryCreate<Spawn>(currentBlock, loc, chirTy.TranslateType(spawnExpr.GetTy()), futureObj, spawnArg);
     } else {
-        TryCreate<Spawn>(currentBlock, loc, chirTy.TranslateType(*spawnExpr.GetTy()), futureObj);
+        TryCreate<Spawn>(currentBlock, loc, chirTy.TranslateType(spawnExpr.GetTy()), futureObj);
     }
     return futureObj;
 }

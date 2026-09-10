@@ -14,6 +14,8 @@
 
 #include "TypeCheckUtil.h"
 
+#include "cangjie/AST/Utils.h"
+
 using namespace Cangjie;
 using namespace Cangjie::AST;
 using namespace TypeCheckUtil;
@@ -109,21 +111,21 @@ AnnoCheckMap& GetAnnoCheckMap()
     return annoCheckMap;
 }
 
-bool IsZeroSizedTy(const Ty& ty)
+bool IsZeroSizedTy(DataTy ty)
 {
-    std::unordered_set<const Ty*> traversesCache;
-    std::function<bool(const Ty& ty)> isZeroSizedTy = [&isZeroSizedTy, &traversesCache](const Ty& ty) {
-        if (ty.IsUnitOrNothing()) {
+    std::unordered_set<DataTy> traversesCache;
+    std::function<bool(DataTy ty)> isZeroSizedTy = [&isZeroSizedTy, &traversesCache](DataTy ty) {
+        if (ty->IsUnitOrNothing()) {
             return true;
         }
-        if (!ty.IsStruct()) {
+        if (!ty->IsStruct()) {
             return false;
         }
-        if (traversesCache.find(&ty) != traversesCache.end()) {
+        if (traversesCache.find(ty) != traversesCache.end()) {
             return false;
         }
-        traversesCache.emplace(&ty);
-        auto decl = Ty::GetDeclPtrOfTy(&ty);
+        traversesCache.insert(ty);
+        auto decl = Ty::GetDeclPtrOfTy(ty);
         CJC_ASSERT(decl != nullptr && decl->astKind == ASTKind::STRUCT_DECL);
         auto sd = StaticCast<StructDecl*>(decl);
         auto& body = sd->body;
@@ -132,8 +134,8 @@ bool IsZeroSizedTy(const Ty& ty)
             if (member->astKind != ASTKind::VAR_DECL || member->TestAttr(Attribute::STATIC)) {
                 continue;
             }
-            CJC_ASSERT(Ty::IsTyCorrect(member->GetTy()));
-            if (!isZeroSizedTy(*member->GetTy())) {
+            CJC_ASSERT(member->GetTy().IsCorrect());
+            if (!isZeroSizedTy(member->DataTy())) {
                 return false;
             }
         }
@@ -210,7 +212,7 @@ bool TypeChecker::TypeCheckerImpl::IsInCFunc(const ASTContext& ctx, const AST::R
     Symbol* curFuncSym = ScopeManager::GetCurSymbolByKind(SymbolKind::FUNC_LIKE, ctx, re.scopeName);
     while (curFuncSym && curFuncSym->scopeName.length() > 0) {
         if (auto le = DynamicCast<LambdaExpr*>(curFuncSym->node);
-            le && Ty::IsTyCorrect(le->GetTy()) && le->GetTy()->IsCFunc()) {
+            le && le->GetTy().IsCorrect() && le->GetTy()->IsCFunc()) {
             return true;
         }
         curFuncSym = ScopeManager::GetCurSymbolByKind(SymbolKind::FUNC_LIKE, ctx, curFuncSym->scopeName);
@@ -220,18 +222,18 @@ bool TypeChecker::TypeCheckerImpl::IsInCFunc(const ASTContext& ctx, const AST::R
 
 void TypeChecker::TypeCheckerImpl::CheckCTypeMember(const Decl& decl)
 {
-    if (decl.astKind != ASTKind::VAR_DECL || Ty::IsInitialTy(decl.GetTy()) || decl.outerDecl == nullptr ||
-        !Ty::IsTyCorrect(decl.outerDecl->GetTy())) {
+    if (decl.astKind != ASTKind::VAR_DECL || Ty::IsInitialTy(decl.DataTy()) || decl.outerDecl == nullptr ||
+        !decl.outerDecl->GetTy().IsCorrect()) {
         return;
     }
-    if (Ty::IsCStructType(*decl.outerDecl->GetTy())) {
+    if (decl.outerDecl->GetTy()->IsCStructType()) {
         const auto& vd = StaticCast<const VarDecl&>(decl);
         if (vd.GetTy()->IsUnit()) {
             diag.Diagnose(vd.identifier.Begin(), vd.type ? vd.type->end : vd.identifier.End(),
                 DiagKind::sema_cstruct_cannot_have_unit_fields, vd.identifier.Val());
             return;
         }
-        if (Ty::IsMetCType(*vd.GetTy())) {
+        if (vd.GetTy()->IsMetCType()) {
             return;
         }
         diag.Diagnose(vd.identifier.Begin(), vd.type ? vd.type->end : vd.identifier.End(),
@@ -241,11 +243,10 @@ void TypeChecker::TypeCheckerImpl::CheckCTypeMember(const Decl& decl)
 
 void TypeChecker::TypeCheckerImpl::CheckUnsafeInvoke(const CallExpr& ce)
 {
-    if (ce.resolvedFunction == nullptr || !Ty::IsTyCorrect(ce.resolvedFunction->GetTy()) ||
-        !IsUnsafeBackend(backendType)) {
+    if (ce.resolvedFunction == nullptr || !ce.resolvedFunction->GetTy().IsCorrect() || !IsUnsafeBackend(backendType)) {
         return;
     }
-    auto funcTy = StaticCast<FuncTy*>(ce.resolvedFunction->GetTy());
+    auto funcTy = StaticCast<FuncTy*>(ce.resolvedFunction->DataTy());
     bool isUnsafe = ce.resolvedFunction->TestAttr(Attribute::UNSAFE) ||
         ce.resolvedFunction->TestAttr(Attribute::FOREIGN) || funcTy->isC;
     if (!isUnsafe) {
@@ -266,9 +267,9 @@ void TypeChecker::TypeCheckerImpl::CheckLegalityOfUnsafeAndInout(Node& root)
             const auto& fa = static_cast<const FuncArg&>(*node);
             // If the object modified by inout isn't a RefExpr or MemberAccess node or doesn't meet CType constraint,
             // it's wrong and will be diagnosed in the previous stage.
-            if (fa.withInout && Ty::IsTyCorrect(fa.expr->GetTy()) &&
+            if (fa.withInout && fa.expr->GetTy().IsCorrect() &&
                 Utils::In(fa.expr->astKind, {ASTKind::REF_EXPR, ASTKind::MEMBER_ACCESS}) &&
-                Ty::IsMetCType(*fa.expr->GetTy()) && IsZeroSizedTy(*fa.expr->GetTy())) {
+                fa.expr->GetTy()->IsMetCType() && IsZeroSizedTy(fa.expr->DataTy())) {
                 diag.DiagnoseRefactor(DiagKindRefactor::sema_inout_modify_cstring_or_zerosized, fa, "zero-sized type");
             }
         }
@@ -284,14 +285,14 @@ void TypeChecker::TypeCheckerImpl::UnsafeCheck(const FuncBody& fb)
             CheckCFuncParam(*arg);
         }
         CJC_NULLPTR_CHECK(fb.retType);
-        if (!Ty::IsTyCorrect(fb.retType->GetTy())) {
+        if (!fb.retType->GetTy().IsCorrect()) {
             return;
         }
-        if (!Ty::IsMetCType(*fb.retType->GetTy())) {
+        if (!fb.retType->GetTy()->IsMetCType()) {
             auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_invalid_cfunc_return_type, *fb.retType,
                 GetFuncBodyRange(fb, *fb.retType));
-            builder.AddNote("return type is " + fb.retType->GetTy()->String());
-        } else if (Is<VArrayTy>(fb.retType->GetTy())) {
+            builder.AddNote("return type is " + fb.retType->GetTy().String());
+        } else if (Is<VArrayTy>(fb.retType->DataTy())) {
             // VArray not allowed as CFunc return type.
             diag.DiagnoseRefactor(
                 DiagKindRefactor::sema_varray_in_cfunc, *fb.retType, GetFuncBodyRange(fb, *fb.retType));
@@ -301,7 +302,7 @@ void TypeChecker::TypeCheckerImpl::UnsafeCheck(const FuncBody& fb)
 
 void TypeChecker::TypeCheckerImpl::CheckCFuncParam(const AST::FuncParam& fp)
 {
-    if (!Ty::IsTyCorrect(fp.GetTy())) {
+    if (!fp.GetTy().IsCorrect()) {
         return;
     }
     if (fp.isNamedParam) {
@@ -309,7 +310,7 @@ void TypeChecker::TypeCheckerImpl::CheckCFuncParam(const AST::FuncParam& fp)
     }
     if (fp.GetTy()->IsUnit()) {
         diag.Diagnose(fp.identifier.Begin(), fp.type->end, DiagKind::sema_cfunc_cannot_have_unit_args);
-    } else if (!Ty::IsMetCType(*fp.GetTy())) {
+    } else if (!fp.GetTy()->IsMetCType()) {
         diag.Diagnose(fp.identifier.Begin(), fp.type->end, DiagKind::sema_invalid_cfunc_arg_type);
     }
 }
@@ -318,7 +319,7 @@ void TypeChecker::TypeCheckerImpl::CheckCFuncParamType(const AST::Type& type)
 {
     if (type.GetTy()->IsUnit()) {
         diag.Diagnose(type.begin, type.end, DiagKind::sema_cfunc_cannot_have_unit_args);
-    } else if (!Ty::IsMetCType(*type.GetTy())) {
+    } else if (!type.GetTy()->IsMetCType()) {
         diag.Diagnose(type.begin, type.end, DiagKind::sema_invalid_cfunc_arg_type);
     }
 }

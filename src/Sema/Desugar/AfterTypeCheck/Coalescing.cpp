@@ -61,11 +61,11 @@ OwnedPtr<MatchCase> GetValueMatchCase(
  * NOTE: this happens before generic instantiation.
  */
 OwnedPtr<Expr> TypeChecker::TypeCheckerImpl::ConstructOptionMatch(OwnedPtr<Expr> selector, OwnedPtr<Block> someExpr,
-    OwnedPtr<Block> otherExpr, RefExpr& someVar, Ptr<Ty> someTy) const
+    OwnedPtr<Block> otherExpr, RefExpr& someVar, ModalTy someTy) const
 {
     Ptr<FuncDecl> ctorDecl = nullptr;
     // Caller guarantees seletor is enum option type.
-    auto enumTy = StaticCast<EnumTy*>(selector->GetTy());
+    auto enumTy = StaticCast<EnumTy*>(selector->DataTy());
     for (auto& it : enumTy->declPtr->constructors) {
         if (it->identifier == OPTION_VALUE_CTOR) {
             ctorDecl = StaticCast<FuncDecl*>(it.get());
@@ -133,7 +133,7 @@ void TypeChecker::TypeCheckerImpl::DesugarForCoalescing(BinaryExpr& binaryExpr) 
 
     auto someTy = typeManager.GetFunctionTy({leftTy->typeArgs[0]}, leftTy);
     auto desugarExpr = ConstructOptionMatch(
-        std::move(binaryExpr.leftExpr), std::move(caseBody), std::move(wildBody), refExpr, someTy);
+        std::move(binaryExpr.leftExpr), std::move(caseBody), std::move(wildBody), refExpr, {someTy});
     if (desugarExpr != nullptr) {
         desugarExpr->SetTy(binaryExpr.GetTy());
         binaryExpr.desugarExpr = std::move(desugarExpr);

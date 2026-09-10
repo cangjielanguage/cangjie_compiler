@@ -252,7 +252,7 @@ void Devirtualization::RewriteToApply(CHIRBuilder& builder, std::vector<RewriteI
         auto thisDerefType = thisType->StripAllRefs();
         auto instThisType = GetInstParentType(
             *thisDerefType, *realFunc->GetFuncType()->GetParamTypes()[0]->StripAllRefs(), builder);
-        if (thisDerefType->IsClassOrArray() || realFunc->TestAttr(Attribute::MUT)) {
+        if (thisDerefType->IsReferenceType() || realFunc->TestAttr(Attribute::MUT)) {
             instThisType = builder.GetType<RefType>(instThisType);
         }
         if (rewriteInfo->thisType->IsBuiltinType()) {
@@ -394,7 +394,6 @@ Function* FindFunctionInVtable(const ClassType* parentTy, const std::vector<Virt
 {
     std::unordered_map<const GenericType*, Type*> parentReplaceTable;
     auto paramTypes = method.types;
-    paramTypes.erase(paramTypes.begin());
     if (!parentTy->GetTypeArgs().empty()) {
         auto instParentTypeArgs = parentTy->GetTypeArgs();
         auto genericParentTypeArgs = parentTy->GetCustomTypeDef()->GetGenericTypeParams();
@@ -518,9 +517,7 @@ std::pair<Function*, Type*> Devirtualization::FindRealCallee(
             if (!typeMatched) {
                 continue;
             }
-            auto paramTypes = method.types;
-            paramTypes.erase(paramTypes.begin());
-            auto funcType = builder.GetType<FuncType>(paramTypes, builder.GetUnitTy());
+            auto funcType = builder.GetType<FuncType>(method.types, builder.GetUnitTy());
             FuncCallType funcCallType{method.name, funcType, method.typeArgs};
             auto res = def->GetFuncIndexInVTable(funcCallType, replaceTable, builder);
             if (!res.empty() && !res[0].instance->IsPureAbstract()) {

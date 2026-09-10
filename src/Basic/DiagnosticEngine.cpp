@@ -18,6 +18,7 @@
 
 #include "cangjie/AST/Utils.h"
 #include "cangjie/Basic/DiagnosticEmitter.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Basic/DiagnosticJsonFormatter.h"
 #include "cangjie/Basic/Display.h"
 #include "cangjie/Basic/Print.h"
@@ -302,13 +303,14 @@ DiagnosticBuilder::DiagnosticBuilder(DiagnosticEngine& diag, Diagnostic diagnost
 {
 }
 
-DiagnosticBuilder::DiagnosticBuilder(
-    DiagnosticEngine& diag, Diagnostic diagObj, const MacroCallDiagInfo* info)
-    : diagnostic(std::move(diagObj)), diag(diag)
+DiagnosticBuilder::DiagnosticBuilder(DiagnosticBuilder&& p) = default;
+DiagnosticBuilder& DiagnosticBuilder::operator=(DiagnosticBuilder&& p)
 {
-    if (info && !info->IsCustomAnnotation()) {
-        diagnostic.macroDiagInfo = info;
+    if (this == &p) {
+        return *this;
     }
+    diagnostic = std::move(p.diagnostic);
+    return *this;
 }
 
 DiagnosticBuilder::~DiagnosticBuilder()

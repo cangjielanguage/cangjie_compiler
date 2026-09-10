@@ -26,6 +26,8 @@ public:
     bool IsCStruct() const;
     void SetCStruct(bool value);
 
+    bool IsCopyable() const;
+
 protected:
     std::string AddExtraComment() const override;
 

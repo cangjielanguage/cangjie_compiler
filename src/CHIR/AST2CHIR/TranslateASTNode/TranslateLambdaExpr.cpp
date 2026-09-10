@@ -18,7 +18,7 @@ Ptr<Value> Translator::Visit(const AST::LambdaExpr& lambdaExpr)
     CJC_ASSERT(lambdaExpr.funcBody && lambdaExpr.funcBody->body);
     CJC_ASSERT(!lambdaExpr.mangledName.empty());
     auto lambdaTrans = SetupContextForLambda(*lambdaExpr.funcBody->body);
-    auto funcTy = RawStaticCast<FuncType*>(TranslateType(*lambdaExpr.GetTy()));
+    auto funcTy = StaticCast<FuncType*>(TranslateType(lambdaExpr.GetTy()));
     // Create lambda body and parameters.
     CJC_ASSERT(currentBlock->GetTopLevelFunc());
     BlockGroup* body = builder.CreateBlockGroup(*currentBlock->GetTopLevelFunc());
@@ -55,8 +55,10 @@ Ptr<Value> Translator::Visit(const AST::LambdaExpr& lambdaExpr)
 
 Translator Translator::Copy() const
 {
-    return {builder, chirTy, opts, gim, globalSymbolTable, localConstVars, localConstFuncs, increKind,
+    auto trans = Translator{builder, chirTy, opts, gim, globalSymbolTable, localConstVars, localConstFuncs, increKind,
         deserializedVals, annoFactoryFuncs, maybeUnreachable, isComputingAnnos, initFuncsForAnnoFactory, typeManager};
+    trans.topLevelDecl = topLevelDecl;
+    return trans;
 }
 
 Translator Translator::SetupContextForLambda(const AST::Block& body)

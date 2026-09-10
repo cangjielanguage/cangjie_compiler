@@ -13,6 +13,7 @@
 #include "TypeCheckerImpl.h"
 
 #include "TypeCheckUtil.h"
+#include "cangjie/Frontend/CompilerInstance.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -33,8 +34,8 @@ bool IsLocalDeclOutOfFuncBody(const Decl& decl, const FuncBody& curFuncBody)
 void TypeChecker::TypeCheckerImpl::UpdateAnyTy()
 {
     auto anyDecl = importManager.GetCoreDecl<InterfaceDecl>("Any");
-    if (anyDecl && Ty::IsTyCorrect(anyDecl->GetTy())) {
-        typeManager.SetSemaAnyTy(anyDecl->GetTy());
+    if (anyDecl && anyDecl->GetTy().IsCorrect()) {
+        typeManager.SetSemaAnyTy(anyDecl->DataTy());
     }
 }
 
@@ -44,8 +45,8 @@ void TypeChecker::TypeCheckerImpl::UpdateCTypeTy()
         return;
     }
     auto ctypeDecl = importManager.GetCoreDecl<InterfaceDecl>(CTYPE_NAME);
-    if (ctypeDecl && Ty::IsTyCorrect(ctypeDecl->GetTy())) {
-        typeManager.SetSemaCTypeTy(ctypeDecl->GetTy());
+    if (ctypeDecl && ctypeDecl->GetTy().IsCorrect()) {
+        typeManager.SetSemaCTypeTy(ctypeDecl->DataTy());
     }
 }
 
@@ -66,7 +67,7 @@ bool TypeChecker::TypeCheckerImpl::IsLegalAccessFromStaticFunc(
     if (auto typeDecl = Ty::GetDeclPtrOfTy(symOfCurStruct->node->GetTy())) {
         decls = FieldLookup(ctx, typeDecl, decl.identifier, {.baseTy = typeDecl->GetTy(), .file = re.curFile});
     } else {
-        decls = ExtendFieldLookup(ctx, *re.curFile, symOfCurStruct->node->GetTy(), decl.identifier);
+        decls = ExtendFieldLookup(ctx, *re.curFile, symOfCurStruct->node->DataTy(), decl.identifier);
     }
     auto diagForInvalidAccess = [this](const RefExpr& re, const Decl& decl, const FuncBody& curFuncBody) {
         if (curFuncBody.funcDecl) {
@@ -101,7 +102,7 @@ void TypeChecker::TypeCheckerImpl::SetCaptureKind(
     auto decl = nre.GetTarget();
     CJC_NULLPTR_CHECK(decl);
     auto targetFB = GetCurFuncBody(ctx, decl->scopeName);
-    bool isLocal = !decl->TestAttr(Attribute::GLOBAL) && !decl->outerDecl; // Not gloabl and not member variable.
+    bool isLocal = !decl->TestAttr(Attribute::GLOBAL) && !decl->outerDecl; // Not global and not member variable.
     if (targetFB != nullptr || isLocal) { // Capture a decl in funcBody.
         if (targetFB == &curFuncBody) {
             return;
@@ -260,7 +261,7 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::GetRealTarget(Ptr<Expr> const node, Ptr<
 }
 
 void TypeChecker::TypeCheckerImpl::SubstituteTypeForTypeAliasTypeMapping(
-    const TypeAliasDecl& tad, const std::vector<Ptr<AST::Ty>>& typeArgs, TypeSubst& typeMapping) const
+    const TypeAliasDecl& tad, const std::vector<AST::DataTy>& typeArgs, TypeSubst& typeMapping) const
 {
     if (!tad.generic || tad.generic->typeParameters.size() != typeArgs.size()) {
         return;
@@ -269,15 +270,15 @@ void TypeChecker::TypeCheckerImpl::SubstituteTypeForTypeAliasTypeMapping(
     // First, create a mapping from type alias parameters to provided type arguments
     TypeSubst aliasParamMapping;
     for (size_t i = 0; i < argsNum; ++i) {
-        if (Ty::IsTyCorrect(tad.generic->typeParameters[i]->GetTy()) && Ty::IsTyCorrect(typeArgs[i])) {
-            if (auto declGenParam = DynamicCast<TyVar*>(tad.generic->typeParameters[i]->GetTy())) {
+        if (tad.generic->typeParameters[i]->GetTy().IsCorrect() && Ty::IsTyCorrect(typeArgs[i])) {
+            if (auto declGenParam = DynamicCast<TyVar>(tad.generic->typeParameters[i]->DataTy())) {
                 aliasParamMapping[declGenParam] = typeArgs[i];
             }
         }
     }
     // Then, substitute type alias parameters by the generated type mapping.
     for (auto& it : typeMapping) {
-        it.second = typeManager.SubstituteTypeAliasInTy(*it.second, true, aliasParamMapping);
+        it.second = typeManager.SubstituteTypeAliasInTy({it.second}, true, aliasParamMapping).Ty();
     }
 }
 
@@ -309,12 +310,12 @@ TypeSubst TypeChecker::TypeCheckerImpl::GenerateTypeMappingForTypeAliasDeclVisit
         visited.emplace(&tad);
     }
     auto target = tad.type->GetTarget();
-    if (!target || !Ty::IsTyCorrect(tad.type->GetTy())) {
+    if (!target || !tad.type->GetTy().IsCorrect()) {
         return typeMapping;
     }
     if (target->astKind != ASTKind::TYPE_ALIAS_DECL) {
         // For target which is not typealias decl, generate typeMapping from used genericTy to itself.
-        for (auto ty : tad.type->GetTy()->typeArgs) {
+        for (auto ty : tad.type->GetTy()->TyArgs()) {
             if (ty->IsGeneric()) {
                 typeMapping[StaticCast<GenericsTy*>(ty)] = ty;
             }
@@ -329,9 +330,9 @@ TypeSubst TypeChecker::TypeCheckerImpl::GenerateTypeMappingForTypeAliasDeclVisit
     //     current tad is B1, target is A1. We need to collect X here.
     //  or have 'type A2<T, K> = Type<Rune, T>' & 'type B2<X> = A2<Int64, X>'
     //     current tad is B2, target is A1. We need to collect 'Int64 & X' here.
-    std::vector<Ptr<AST::Ty>> typeArgs;
+    std::vector<AST::DataTy> typeArgs;
     for (auto& it : tad.type->GetTypeArgs()) {
-        typeArgs.push_back(it->GetTy());
+        typeArgs.push_back(it->DataTy());
     }
     SubstituteTypeForTypeAliasTypeMapping(*targetTad, typeArgs, typeMapping);
     return typeMapping;
@@ -387,22 +388,22 @@ void TypeChecker::TypeCheckerImpl::CheckWarningOfCaptureVariable(const ASTContex
     }
 }
 
-bool TypeChecker::TypeCheckerImpl::CheckOptionBox(Ty& target, Ty& ty)
+bool TypeChecker::TypeCheckerImpl::CheckOptionBox(ModalTy target, ModalTy ty)
 {
-    if (typeManager.IsSubtype(&ty, &target)) {
+    if (typeManager.IsSubtype(ty, target)) {
         return true;
     }
-    if (!Ty::IsTyCorrect(&target) || !target.IsCoreOptionType()) {
+    if (!Ty::IsTyCorrect(target) || !target->IsCoreOptionType()) {
         return false;
     }
-    if (typeManager.IsTyEqual(&ty, &target)) {
+    if (typeManager.IsTyEqual(ty, target)) {
         return true;
     }
-    auto curTarget = &target;
+    ModalTy curTarget = target;
     while (Ty::IsTyCorrect(curTarget) && curTarget->IsCoreOptionType()) {
         CJC_ASSERT(curTarget->typeArgs.size() == 1);
         curTarget = curTarget->typeArgs[0];
-        if (typeManager.IsTyEqual(&ty, curTarget)) {
+        if (typeManager.IsTyEqual(ty, curTarget)) {
             return true;
         }
     }

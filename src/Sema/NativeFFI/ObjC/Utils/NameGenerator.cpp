@@ -188,7 +188,7 @@ std::string NameGenerator::GetObjCDeclName(const Decl& target, const std::string
                 There exists Genericenum prop func get(): target->identifier = "$valueget",
                 but it actually needs to be named using "value_get" method.
             */
-            if (target.GetTy()->HasGeneric() && !target.identifierForLsp.empty()) {
+            if (target.DataTy()->HasGeneric() && !target.identifierForLsp.empty()) {
                 std::string actualEnumName = target.identifier;
                 actualEnumName.erase(std::remove(actualEnumName.begin(), actualEnumName.end(), '$'), actualEnumName.end());
                 size_t pos = actualEnumName.find(target.identifierForLsp);

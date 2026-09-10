@@ -26,7 +26,7 @@ Ptr<Value> Translator::Visit(const AST::TryExpr& tryExpr)
 {
     // Try must have at least one catch block or finally block.
     CJC_ASSERT(!tryExpr.catchBlocks.empty() || tryExpr.finallyBlock != nullptr);
-    auto tryTy = TranslateType(*tryExpr.GetTy());
+    auto tryTy = TranslateType(tryExpr.GetTy());
     auto loc = TranslateLocation(tryExpr.begin, tryExpr.end);
     auto retVal = tryTy->IsUnit() || tryTy->IsNothing() ? nullptr :
         CreateAndAppendExpression<Allocate>(loc, builder.GetType<RefType>(tryTy), tryTy, currentBlock)->GetResult();
@@ -216,8 +216,8 @@ std::vector<ClassType*> Translator::GetExceptionsForTry(const AST::TryExpr& tryE
             return {};
         }
     }
-    std::set<Ptr<AST::Ty>> exceptionTys;
-    auto collectTys = [&exceptionTys](auto ty) {
+    std::set<AST::DataTy> exceptionTys;
+    auto collectTys = [&exceptionTys](AST::DataTy ty) {
         auto gty = DynamicCast<AST::GenericsTy>(ty);
         if (!gty) {
             exceptionTys.emplace(ty);
@@ -234,12 +234,12 @@ std::vector<ClassType*> Translator::GetExceptionsForTry(const AST::TryExpr& tryE
         auto currentTry = *it;
         for (auto& pattern : currentTry->catchPatterns) {
             if (pattern->astKind == AST::ASTKind::WILDCARD_PATTERN) {
-                collectTys(pattern->GetTy());
+                collectTys(pattern->DataTy());
                 continue;
             }
             auto& exceptPattern = StaticCast<AST::ExceptTypePattern>(*pattern);
             for (auto& eType : exceptPattern.types) {
-                collectTys(eType->GetTy());
+                collectTys(eType->DataTy());
             }
         }
     }
@@ -247,7 +247,7 @@ std::vector<ClassType*> Translator::GetExceptionsForTry(const AST::TryExpr& tryE
     auto cmp = [](const Ptr<ClassType>& ty1, const Ptr<ClassType>& ty2) { return ty1->ToString() < ty2->ToString(); };
     std::set<ClassType*, decltype(cmp)> exceptions(cmp);
     for (auto ty : exceptionTys) {
-        auto classTypeRef = StaticCast<RefType*>(TranslateType(*ty));
+        auto classTypeRef = StaticCast<RefType*>(TranslateType(AST::ModalTy{ty}));
         exceptions.emplace(StaticCast<ClassType*>(classTypeRef->GetBaseType()));
     }
     return std::vector<ClassType*>(exceptions.begin(), exceptions.end());
@@ -297,7 +297,7 @@ std::pair<Ptr<Block>, Ptr<Block>> Translator::TranslateExceptionPattern(const AS
     auto trueBlock = CreateBlock();
     const auto& loc = TranslateLocation(pattern);
     if (pattern.astKind == AST::ASTKind::WILDCARD_PATTERN) {
-        auto typeTy = TranslateType(*pattern.GetTy());
+        auto typeTy = TranslateType(pattern.GetTy());
         auto falseBlock = CreateBlock();
         auto cond =
             CreateAndAppendExpression<InstanceOf>(loc, builder.GetBoolTy(), eVal, typeTy, currentBlock)->GetResult();
@@ -311,7 +311,7 @@ std::pair<Ptr<Block>, Ptr<Block>> Translator::TranslateExceptionPattern(const AS
     }
     for (auto& eType : exceptPattern.types) {
         auto falseBlock = CreateBlock();
-        auto ty = TranslateType(*eType->GetTy());
+        auto ty = TranslateType(eType->GetTy());
         auto cond =
             CreateAndAppendExpression<InstanceOf>(loc, builder.GetBoolTy(), eVal, ty, currentBlock)->GetResult();
         CreateAndAppendTerminator<Branch>(cond, trueBlock, falseBlock, currentBlock);

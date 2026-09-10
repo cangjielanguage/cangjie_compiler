@@ -72,11 +72,11 @@ void InsertUnitForFuncBody(FuncBody& fb, bool enableCoverage)
         return;
     }
 
-    auto ue = CreateUnitExpr(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    auto ue = CreateUnitExpr({TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
     ue->curFile = fb.curFile;
     auto re = CreateReturnExpr(std::move(ue));
     re->curFile = fb.curFile;
-    re->SetTy(TypeManager::GetNothingTy());
+    re->SetTy({TypeManager::GetNothingTy()});
     re->refFuncBody = &fb;
     bool notHaveRightCurlPos = fb.funcDecl && fb.body->rightCurlPos.IsZero();
     // If compiled with `--coverage`, the inserted `return ()` should contain the line no of funcDecl,
@@ -118,8 +118,8 @@ void MakeLastNodeReturn(FuncBody& funcBody)
         auto lastExpr = OwnedPtr<Expr>(StaticAs<ASTKind::EXPR>(lastNode->release()));
         auto re = CreateReturnExpr(std::move(lastExpr));
         CopyBasicInfo(e, re.get());
-        re->SetTy(TypeManager::GetNothingTy());
-        funcBody.body->SetTy(TypeManager::GetNothingTy());
+        re->SetTy({TypeManager::GetNothingTy()});
+        funcBody.body->SetTy({TypeManager::GetNothingTy()});
         re->refFuncBody = &funcBody;
         AddCurFile(*re, funcBody.curFile);
         *lastNode = std::move(re);
@@ -130,7 +130,7 @@ inline void AddReturnExprForFuncBody(FuncBody& fb, bool enableCoverage)
 {
     if (ShouldInsertReturnUnit(fb)) {
         InsertUnitForFuncBody(fb, enableCoverage);
-    } else if (Ty::IsTyCorrect(fb.GetTy())) {
+    } else if (fb.GetTy().IsCorrect()) {
         MakeLastNodeReturn(fb);
     }
 }
@@ -144,7 +144,7 @@ void InsertStaticInitCall(InheritableDecl& decl, FuncDecl& staticInit)
     // Create and insert static initializing as the static member "let $init = static_init()" into typedecl.
     auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
     std::vector<OwnedPtr<FuncArg>> args;
-    auto initializer = CreateCallExpr(CreateRefExpr(staticInit), std::move(args), &staticInit, unitTy);
+    auto initializer = CreateCallExpr(CreateRefExpr(staticInit), std::move(args), &staticInit, {unitTy});
     initializer->begin = decl.begin;
     auto initVar = CreateVarDecl(std::string(STATIC_INIT_VAR), std::move(initializer));
     initVar->fullPackageName = decl.fullPackageName;

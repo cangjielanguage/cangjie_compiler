@@ -141,9 +141,6 @@ Function* GenerateVTable::GetMutFuncWrapper(const Type& thisType, const std::vec
     for (auto arg : args) {
         paramTypes.emplace_back(arg->GetType());
     }
-    if (!callee.TestAttr(Attribute::STATIC)) {
-        paramTypes.erase(paramTypes.begin());
-    }
     auto funcCallType = FuncCallType {
         .funcName = callee.GetSrcCodeIdentifier(),
         .funcType = builder.GetType<FuncType>(paramTypes, &retType),
@@ -161,9 +158,26 @@ Function* GenerateVTable::GetMutFuncWrapper(const Type& thisType, const std::vec
 void GenerateVTable::UpdateFuncCall()
 {
     Utils::ProfileRecorder recorder(passName, "UpdateFuncCall");
-    auto preVisit = [this](Expression& e) {
+    auto preVisit1 = [](Expression& e) {
+        auto dyExpr = DynamicCast<DynamicDispatch*>(&e);
+        if (dyExpr == nullptr) {
+            return VisitResult::CONTINUE;
+        }
+        auto callee = dyExpr->GetCallee();
+        auto expectedCallee = GetCalleeInSrcParentType(
+            *callee, dyExpr->GetMethodName(), dyExpr->Get<VirMethodOffset>());
+        dyExpr->ReplaceOperand(callee, expectedCallee);
+        return VisitResult::CONTINUE;
+    };
+    for (auto func : package.GetGlobalFuncsWithBody()) {
+        if (func->TestAttr(Attribute::DESERIALIZED)) {
+            Visitor::Visit(*func, preVisit1);
+        }
+    }
+
+    auto preVisit2 = [this](Expression& e) {
         if (auto dyExpr = DynamicCast<DynamicDispatch*>(&e)) {
-            e.Set<VirMethodOffset>(dyExpr->GetVirtualMethodOffset(&builder));
+            e.Set<VirMethodOffset>(dyExpr->GetVirtualMethodOffset());
         } else if (auto apply = DynamicCast<ApplyBase*>(&e)) {
             auto callee = DynamicCast<Function*>(apply->GetCallee());
             if (CalleeIsMutFuncFromParent(apply->GetThisType(), callee, *e.GetTopLevelFunc())) {
@@ -175,6 +189,6 @@ void GenerateVTable::UpdateFuncCall()
         return VisitResult::CONTINUE;
     };
     for (auto func : package.GetGlobalFuncsWithBody()) {
-        Visitor::Visit(*func, preVisit);
+        Visitor::Visit(*func, preVisit2);
     }
 }

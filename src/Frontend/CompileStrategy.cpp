@@ -252,6 +252,71 @@ public:
         return taskResults;
     }
 
+    /**
+     * Parse files in the current thread and return results in order.
+     * This path must not use task queues or similar scheduling.
+     */
+    std::vector<ParseResult> ParseFilesSingleThread(std::queue<std::tuple<std::string, unsigned>>& fileInfoQueue) const
+    {
+        std::vector<ParseResult> results;
+        while (!fileInfoQueue.empty()) {
+            auto curFile = fileInfoQueue.front();
+            fileInfoQueue.pop();
+
+            auto parser = CreateParser(curFile);
+            parser->SetCompileOptions(s.ci->invocation.globalOptions);
+            auto file = parser->ParseTopLevel();
+#ifdef SIGNAL_TEST
+            // The interrupt signal triggers the function. In normal cases, this function does not take effect.
+            Cangjie::SignalTest::ExecuteSignalTestCallbackFunc(Cangjie::SignalTest::TriggerPointer::PARSER_POINTER);
+#endif
+            results.emplace_back(std::move(file), parser->GetCommentsMap(), parser->GetLineNum());
+        }
+        return results;
+    }
+
+    /**
+     * Add parsed files from results to an existing package.
+     * Returns total line count of added files.
+     */
+    size_t AddFilesToPackage(Package& package, std::vector<ParseResult>& results) const
+    {
+        size_t lineCountOfAddedFiles = 0;
+        for (auto& result : results) {
+            auto& [file, comments, lineCount] = result;
+            file->curPackage = &package;
+            file->indexOfPackage = package.files.size();
+            package.files.push_back(std::move(file));
+            s.ci->GetSourceManager().AddComments(comments);
+            lineCountOfAddedFiles += lineCount;
+        }
+        InitializePackageInfoFromFirstFile(package);
+        return lineCountOfAddedFiles;
+    }
+
+    OwnedPtr<Package> SingleThreadParseOnePackage(
+        std::queue<std::tuple<std::string, unsigned>>& fileInfoQueue, const std::string& defaultPackageName) const
+    {
+        auto package = MakeOwned<Package>(defaultPackageName);
+        auto results = ParseFilesSingleThread(fileInfoQueue);
+        size_t lineNumInOnePackage = AddFilesToPackage(*package, results);
+        Utils::ProfileRecorder::RecordCodeInfo("package line num", static_cast<int64_t>(lineNumInOnePackage));
+        CheckPackageConsistency(*package);
+        return package;
+    }
+
+    void SingleThreadParseOnePackage(
+        Package& package, std::queue<std::tuple<std::string, unsigned>>& fileInfoQueue) const
+    {
+        auto results = ParseFilesSingleThread(fileInfoQueue);
+        size_t lineCountOfAddedFiles = AddFilesToPackage(package, results);
+        for (auto& file : package.files) {
+            CJC_ASSERT_WITH_MSG(file->curPackage == &package, "curPackage should be set to package");
+        }
+        Utils::ProfileRecorder::RecordCodeInfo("added line num", static_cast<int64_t>(lineCountOfAddedFiles));
+        CheckPackageConsistency(package);
+    }
+
     OwnedPtr<Package> MultiThreadParseOnePackage(
         std::queue<std::tuple<std::string, unsigned>>& fileInfoQueue, const std::string& defaultPackageName) const
     {
@@ -344,7 +409,11 @@ public:
         BuildFileInfoQueueFromCache(package, fileInfoQueue);
 
         if (!fileInfoQueue.empty()) {
-            MultiThreadParseOnePackage(package, fileInfoQueue);
+            if (s.ci->invocation.globalOptions.GetJobs() == 1) {
+                SingleThreadParseOnePackage(package, fileInfoQueue);
+            } else {
+                MultiThreadParseOnePackage(package, fileInfoQueue);
+            }
             s.ci->diag.EmitCategoryGroup();
             std::sort(package.files.begin(), package.files.end(),
                 [](const OwnedPtr<File>& fileOne, const OwnedPtr<File>& fileTwo) {
@@ -399,7 +468,9 @@ public:
             });
         }
 
-        auto package = MultiThreadParseOnePackage(fileInfoQueue, defaultPackageName);
+        auto package = (s.ci->invocation.globalOptions.GetJobs() == 1)
+            ? SingleThreadParseOnePackage(fileInfoQueue, defaultPackageName)
+            : MultiThreadParseOnePackage(fileInfoQueue, defaultPackageName);
         s.ci->diag.EmitCategoryGroup();
         std::sort(package->files.begin(), package->files.end(),
             [](const OwnedPtr<File>& fileOne, const OwnedPtr<File>& fileTwo) {

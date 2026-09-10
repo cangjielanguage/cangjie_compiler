@@ -14,8 +14,8 @@
 
 #include "cangjie/CHIR/IR/CHIRContext.h"
 #include "cangjie/CHIR/IR/Type/ExtendDef.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/Utils/Utils.h"
-#include "cangjie/Utils/Casting.h"
 #include "cangjie/Modules/ModulesUtils.h"
 
 namespace Cangjie::CHIR {

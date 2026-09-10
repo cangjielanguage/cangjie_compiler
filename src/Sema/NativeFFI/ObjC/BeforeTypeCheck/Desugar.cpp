@@ -40,11 +40,11 @@ OwnedPtr<Decl> CreateNSStringFromStringCtorDecl(ClassDecl& target)
     std::vector<OwnedPtr<FuncParamList>> paramLists;
     paramLists.emplace_back(std::move(paramList));
 
-    auto block = CreateBlock({}, nullptr);
+    auto block = CreateBlock({}, {});
     block->EnableAttr(Attribute::IS_CHECK_VISITED);
 
     auto ctorBody = CreateFuncBody(std::move(paramLists), nullptr, std::move(block));
-    auto ctorDecl = CreateFuncDecl(std::string(INIT_IDENT), std::move(ctorBody), nullptr);
+    auto ctorDecl = CreateFuncDecl(std::string(INIT_IDENT), std::move(ctorBody), {});
     ctorDecl->EnableAttr(Attribute::PUBLIC, Attribute::CONSTRUCTOR);
 
     AddFuncDeclToClass(*ctorDecl, target);
@@ -60,11 +60,11 @@ OwnedPtr<Decl> CreateNSObjectToStringDecl(ClassDecl& target)
     std::vector<OwnedPtr<FuncParamList>> paramLists;
     paramLists.emplace_back(std::move(paramList));
 
-    auto block = CreateBlock({}, nullptr);
+    auto block = CreateBlock({}, {});
     block->EnableAttr(Attribute::IS_CHECK_VISITED);
 
     auto funcBody = CreateFuncBody(std::move(paramLists), CreateRefType(STD_LIB_STRING), std::move(block));
-    auto funcDecl = CreateFuncDecl(std::string(TOSTRING_METHOD_IDENT), std::move(funcBody), nullptr);
+    auto funcDecl = CreateFuncDecl(std::string(TOSTRING_METHOD_IDENT), std::move(funcBody), {});
     funcDecl->EnableAttr(Attribute::PUBLIC);
 
     AddFuncDeclToClass(*funcDecl, target);

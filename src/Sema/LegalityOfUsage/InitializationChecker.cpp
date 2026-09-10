@@ -288,14 +288,14 @@ void UpdateContextVariables(std::unordered_set<Ptr<const AST::VarDecl>>& context
 
 bool MayBeStructTy(const VarDecl& target)
 {
-    if (!Ty::IsTyCorrect(target.GetTy())) {
+    if (!target.GetTy().IsCorrect()) {
         return false;
     }
     if (target.GetTy()->IsStruct()) {
         return true;
     }
     if (target.GetTy()->IsGeneric()) {
-        auto gTy = RawStaticCast<GenericsTy*>(target.GetTy());
+        auto gTy = RawStaticCast<GenericsTy*>(target.DataTy());
         for (auto& ub : std::as_const(gTy->upperBounds)) {
             // The upper bounds of GenericsTy can only be Classes or Interfaces.
             CJC_ASSERT(ub->IsClassLike());
@@ -591,7 +591,7 @@ void InitializationChecker::CheckInitInClassDecl(const ClassDecl& cd)
 void InitializationChecker::CheckInitInExtendDecl(const ExtendDecl& ed)
 {
     CJC_NULLPTR_CHECK(ed.extendedType);
-    if (!Ty::IsTyCorrect(ed.extendedType->GetTy())) {
+    if (!ed.extendedType->GetTy().IsCorrect()) {
         return;
     }
     // Get the not declared-initialized member variables.
@@ -695,7 +695,7 @@ void InitializationChecker::CheckLetFlag(const Expr& ae, const Expr& expr)
             break;
         case ASTKind::SUBSCRIPT_EXPR: {
             auto& se = StaticCast<SubscriptExpr>(expr);
-            if (!se.baseExpr || !Is<VArrayTy>(se.baseExpr->GetTy())) {
+            if (!se.baseExpr || !Is<VArrayTy>(*se.baseExpr->DataTy())) {
                 return;
             }
             // Multi-level VArray nested assignment expressions cannot be modified. Because the return value of
@@ -1101,6 +1101,8 @@ bool InitializationChecker::CheckInitInExpr(Ptr<Node> node)
             return CheckInitInExpr(StaticCast<IsExpr>(node)->leftExpr.get());
         case ASTKind::AS_EXPR:
             return CheckInitInExpr(StaticCast<AsExpr>(node)->leftExpr.get());
+        case ASTKind::EXCLAVE_EXPR:
+            return CheckInitInExpr(StaticCast<ExclaveExpr>(node)->body.get());
         default:
             return true;
     }

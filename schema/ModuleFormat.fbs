@@ -31,6 +31,7 @@ enum DeclKind : uint16 {
   TypeAliasDecl,
   GenericParamDecl,
   BuiltInDecl,
+  ThisParam,
 }
 
 // Position member's max length same as 'struct Position''s definition.
@@ -64,6 +65,7 @@ table Generic{
 table FuncParamList {
   params:[uint32];
   desugars:[uint32];
+  thisParam:uint32;
 }
 
 table FuncBody {
@@ -72,6 +74,7 @@ table FuncBody {
   body:uint32; // index of body expr
   always:bool;
   captureKind:uint8;
+  retTyMode:Mode;
 }
 
 struct DeclHash {
@@ -163,6 +166,7 @@ table VarInfo {
   isMemberParam:bool;
   initializer:uint32; // Index of expression
   value:ConstValue;   // Has value if it is constant
+  demode:bool;
 }
 table VarWithPatternInfo {
   isVar:bool;
@@ -234,6 +238,7 @@ table FuncInfo {
   isConst:bool;
   isInline:bool;
   isFastNative:bool;
+  isExclave:bool;
 }
 table ParamInfo {
   isNamedParam:bool;
@@ -252,9 +257,11 @@ enum BuiltInType : uint8 {
   CPointer,
   CString,
   CFunc,
+  Copy,
 }
 table BuiltInInfo {
   builtInType:BuiltInType;
+  body:[uint32];
 }
 table AliasInfo {
   aliasedTy:uint32; // Index of semantic type
@@ -300,6 +307,8 @@ table Decl {
 
   // record dependencies result of common part for CJMP
   dependencies:[FullId];
+  // mode of type, only local func may has a non-default mode
+  tyMode:Mode;
 }
 
 enum AnnoKind : uint16 {
@@ -370,6 +379,7 @@ enum ExprKind : uint16 {
   IfAvailableExpr,
   PerformExpr,
   ResumeExpr,
+  ExclaveExpr,
 }
 
 enum CallKind : uint8 {
@@ -454,6 +464,7 @@ table ReferenceInfo {
   target:FullId;
   instTys:[uint32]; // Instantiated type index vectors.
   matchedParentTy:uint32; // For instantiation re-arrange.
+  matchedParentTyMode:Mode;
 }
 table LambdaInfo {
   funcBody:FuncBody (required); // LambdaExpr
@@ -510,6 +521,7 @@ table Expr {
   type:uint32;
   overflowPolicy:OverflowPolicy;
   info:ExprInfo;
+  tyMode:Mode;
 }
 
 enum PatternKind:int8 {
@@ -534,6 +546,7 @@ table Pattern {
   values:[ConstValue];
   matchBeforeRuntime:bool;
   needRuntimeTypeCheck:bool;
+  tyModes:[Mode];
 }
 
 // For compatibility any new type kind MUST only be added at last.
@@ -592,6 +605,8 @@ table FuncTyInfo {
   retType:uint32; // Func return type
   isC:bool;       // CFunc or @C func type.
   hasVariableLenArg:bool;
+  typeArgsMode:[Mode];
+  retTyMode:Mode;
 }
 table CompositeTyInfo {
   declPtr:FullId;
@@ -603,6 +618,16 @@ table GenericTyInfo {
 }
 table ArrayTyInfo {
   dimsOrSize:int64;
+}
+
+enum LocalMode: uint8 {
+  NOT,
+  FULL,
+  HALF,
+}
+
+table Mode {
+  local: LocalMode;
 }
 
 table SemaTy {

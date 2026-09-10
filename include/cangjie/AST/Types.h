@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -25,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "cangjie/AST/ModalInfo.h"
 #include "cangjie/Lex/Token.h"
 #include "cangjie/Utils/SafePointer.h"
 
@@ -38,6 +40,7 @@ struct InterfaceDecl;
 struct EnumDecl;
 struct TypeAliasDecl;
 struct GenericsTy;
+struct ModalTy;
 
 enum class TypeKind {
 /**
@@ -80,7 +83,8 @@ struct Ty {
      * W: Sema.
      * R: ImportManager, Sema, GenericInstantiator, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
-    std::vector<Ptr<Ty>> typeArgs{};
+    std::vector<ModalTy> typeArgs{};
+
     /** Destructor.
      * U: no.
      */
@@ -277,6 +281,14 @@ struct Ty {
      * U: Sema, GenericInstantiator.
      */
     bool HasIdealTy() const;
+    /** Return whether this ty or any of its type arguments carries a pending IDEAL modal
+     * (a literal's modal awaiting unification with the expected contextual modal, mirroring
+     * IDEAL_INT/IDEAL_FLOAT). IDEAL is transient (Sema-only) and must be resolved before Sema
+     * ends; this predicate is used by the Sema-end validator to guard against IDEAL leaking to
+     * the back end.
+     * U: Sema.
+     */
+    bool HasIdealModal() const;
     /** Return whether a ty has QuestTy.
      * U: Sema.
      */
@@ -309,6 +321,9 @@ struct Ty {
      * U: Sema, GenericInstantiator, AST2CHIR.
      */
     static bool IsTyCorrect(Ptr<const Ty> ty) noexcept;
+    static bool IsTyCorrect(Ptr<Ty> ty) noexcept;
+    static bool IsTyCorrect(const Ty* ty) noexcept;
+    static bool IsTyCorrect(ModalTy ty) noexcept;
     /** Return whether some tys are correct.
      * U: Sema.
      */
@@ -320,21 +335,21 @@ struct Ty {
     {
         return std::all_of(tys.begin(), tys.end(), [](auto& ty) { return Ty::IsTyCorrect(ty); });
     }
+    static bool AreTysCorrect(const std::vector<ModalTy>& tys);
+    static bool AreTysCorrect(const std::set<ModalTy>& tys);
     /** APIs to check given @p ty 's category. */
-    static bool IsMetCType(const AST::Ty& ty);
+    bool IsMetCType() const;
     // Check if ty is CType which is based Pointer, include CString, CPointer and CFunc.
-    static bool IsCTypeBasePointer(const AST::Ty& ty)
-    {
-        return ty.IsPointer() || ty.IsCString() || ty.IsCFunc();
-    }
-    static bool IsCTypeConstraint(const AST::Ty& ty);
-    static bool IsPrimitiveCType(const AST::Ty& ty);
-    static bool IsCStructType(const AST::Ty& ty);
+    bool IsCTypeBasePointer() const { return IsPointer() || IsCString() || IsCFunc(); }
+    bool IsCTypeConstraint() const;
+    bool IsPrimitiveCType() const;
+    bool IsCStructType() const;
 
     /** Return whether some tys has Generic.
      * U: GenericInstantiator.
      */
     static bool ExistGeneric(const std::vector<Ptr<Ty>>& tySet);
+    static bool ExistGeneric(const std::vector<ModalTy>& tySet);
     /** Return the unique name of a ty if not null, otherwise return "Invalid".
      * U: Sema.
      */
@@ -344,6 +359,9 @@ struct Ty {
      */
     template <typename Container>
     static std::string GetTypesToStableStr(const Container& tys, const std::string& delimiter);
+    /** Stable order for containers of ModalTy (CmpTyByName includes modal). */
+    template <typename Container>
+    static std::string GetModalTypesToStableStr(const Container& tys, const std::string& delimiter);
     template <typename Container> static std::string GetTypesToStr(const Container& tys, const std::string& delimiter)
     {
         std::string str;
@@ -356,28 +374,54 @@ struct Ty {
         }
         return str;
     }
+
+    template <typename Container>
+    static std::string GetModalTypesToStr(const Container& tys, const std::string& delimiter)
+    {
+        std::string str;
+        for (auto it = tys.begin(); it != tys.end(); it++) {
+            if (it == tys.begin()) {
+                str += it->String();
+            } else {
+                str += delimiter + it->String();
+            }
+        }
+        return str;
+    }
     /**
      * Get ty's corresponding declaration. The method will return instantiated decl if it exists.
      */
-    template <typename T = Decl> static Ptr<T> GetDeclOfTy(Ptr<const AST::Ty> ty);
+    template <typename T = Decl> static Ptr<T> GetDeclOfTy(Ptr<const Ty> ty);
+    template <typename T = Decl> static Ptr<T> GetDeclOfTy(Ptr<Ty> ty);
+    template <typename T = Decl> static Ptr<T> GetDeclOfTy(ModalTy ty);
+    template <typename T = Decl> static Ptr<T> GetDeclOfTy(const Ty* ty) { return GetDeclOfTy(Ptr<const Ty>(ty)); }
     /**
      * Get ty's corresponding declaration, which always be generic decl if it has generic.
      */
-    template <typename T = Decl> static Ptr<T> GetDeclPtrOfTy(Ptr<const AST::Ty> ty);
+    template <typename T = Decl> static Ptr<T> GetDeclPtrOfTy(Ptr<const Ty> ty);
+    template <typename T = Decl> static Ptr<T> GetDeclPtrOfTy(Ptr<Ty> ty)
+    {
+        return GetDeclPtrOfTy<T>(Ptr<const Ty>(ty));
+    }
+    template <typename T = Decl> static Ptr<T> GetDeclPtrOfTy(ModalTy ty);
+    template <typename T = Decl> static Ptr<T> GetDeclPtrOfTy(const Ty* ty)
+    {
+        return GetDeclPtrOfTy<T>(Ptr<const Ty>(ty));
+    }
     /**
      * Get instantiated ty's corresponding generic ty.
      */
-    static Ptr<AST::Ty> GetGenericTyOfInsTy(const AST::Ty& ty);
-    static Ptr<AST::Ty> GetInitialTy();
+    static Ptr<Ty> GetGenericTyOfInsTy(const Ty& ty);
+    static Ptr<Ty> GetInitialTy();
 
     template <typename TypeDeclT> static bool NominalTyEqualTo(const TypeDeclT& base, const Ty& other);
     /** Return whether this ty is an initial ty value. */
-    static bool IsInitialTy(Ptr<const AST::Ty> ty);
+    static bool IsInitialTy(Ptr<const Ty> ty);
     /** Return generic typeArgs (among the candidates) of a ty.
      * U: Sema.
      */
-    std::set<Ptr<Ty>> GetGenericTyArgs();
-    std::set<Ptr<AST::GenericsTy>> GetGenericTyArgs(const std::set<Ptr<AST::GenericsTy>>& candidates);
+    std::set<ModalTy> GetGenericTyArgs();
+    std::set<Ptr<GenericsTy>> GetGenericTyArgs(const std::set<Ptr<GenericsTy>>& candidates);
     /** Return whether the typeArgs of a ty is only one.
      * U: Sema.
      */
@@ -404,15 +448,61 @@ struct Ty {
         return this == &other;
     }
 
+    std::vector<Ptr<Ty>> TyArgs() const;
+    Ptr<Ty> TyArg(size_t i) const;
+
 protected:
     /** Constructor.
      * U: Sema.
      */
-    explicit Ty(TypeKind k) : kind(k)
-    {
-    }
+    explicit Ty(TypeKind k) : kind(k) {}
     bool invalid{false}; // Type is invalid if any of element is invalid.
     bool generic{false}; // Type is generic if any of element is generic.
+};
+
+/// DataTy is used in most places where a Ty is expected.
+using DataTy = Ptr<Ty>;
+/// ModalTy is a combination of DataTy and ModalInfo. It is used where spec says modal type is allowed.
+/// It is meant not to be allocated on heap.
+struct ModalTy {
+    ModalTy(DataTy ty, ModalInfo mode) : dataTy(ty), modal(mode) {}
+    ModalTy(DataTy ty) : ModalTy(ty, {}) {}
+    ModalTy() : dataTy{nullptr}, modal{} {}
+
+    ModalTy(const ModalTy& other) = default;
+    ModalTy(ModalTy&& other) = default;
+
+    ModalTy& operator=(const ModalTy& other) = default;
+    ModalTy& operator=(ModalTy&& other) = default;
+
+    DataTy Ty() const { return dataTy; }
+    TypeKind Kind() const { return dataTy->kind; }
+    ModalInfo Mode() const { return modal; }
+    ModalTy With(ModalInfo another) const { return {dataTy, another}; }
+
+    bool IsDataType() const { return modal == ModalInfo{}; }
+    bool IsLocalType() const;
+    /// Whether this modal is the pending IDEAL modal (mirrors IDEAL_INT/IDEAL_FLOAT).
+    bool IsIdealModal() const { return modal.local == Mode::IDEAL; }
+
+    explicit operator bool() const { return dataTy; }
+    bool operator!() const { return !dataTy; }
+    bool operator==(const ModalTy& other) const;
+    bool operator!=(const ModalTy& other) const;
+    bool operator==(std::nullptr_t) const { return dataTy == nullptr; }
+    bool operator!=(std::nullptr_t) const { return dataTy != nullptr; }
+    bool operator<(const ModalTy& other) const;
+
+    std::string String() const;
+    bool IsCorrect() const;
+
+    DataTy operator->() const { return dataTy; }
+    struct Ty& operator*() const { return *dataTy; }
+    struct Ty* get() const { return dataTy.get(); }
+
+private:
+    DataTy dataTy;
+    ModalInfo modal;
 };
 
 /**
@@ -440,10 +530,7 @@ struct InvalidTy : Ty {
     /** Constructor.
      * U: no.
      */
-    InvalidTy() noexcept : Ty(TypeKind::TYPE_INVALID)
-    {
-        invalid = true;
-    }
+    InvalidTy() noexcept : Ty(TypeKind::TYPE_INVALID) { invalid = true; }
     /** Return the unique name of a ty.
      * U: ImportManager, Sema, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
@@ -460,9 +547,7 @@ struct QuestTy : Ty {
     /** Constructor.
      * U: Sema.
      */
-    QuestTy() noexcept : Ty(TypeKind::TYPE_QUEST)
-    {
-    }
+    QuestTy() noexcept : Ty(TypeKind::TYPE_QUEST) {}
     /** Return the unique name of a ty.
      * U: ImportManager, Sema, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen. (But actually only can be called by Sema)
      */
@@ -490,9 +575,7 @@ struct PrimitiveTy : Ty {
     /** Constructor.
      * U: Sema.
      */
-    explicit PrimitiveTy(TypeKind k) noexcept : Ty(k)
-    {
-    }
+    explicit PrimitiveTy(TypeKind k) noexcept : Ty(k) {}
     /** Return the unique name of a ty.
      * U: ImportManager, Sema, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
@@ -509,9 +592,7 @@ struct NothingTy : PrimitiveTy {
     /** Constructor.
      * U: TypeManager.
      */
-    explicit NothingTy() noexcept : PrimitiveTy(TypeKind::TYPE_NOTHING)
-    {
-    }
+    explicit NothingTy() noexcept : PrimitiveTy(TypeKind::TYPE_NOTHING) {}
 };
 
 /**
@@ -521,9 +602,7 @@ struct AnyTy : Ty {
     /** Constructor.
      * U: no.
      */
-    explicit AnyTy() noexcept : Ty(TypeKind::TYPE_ANY)
-    {
-    }
+    explicit AnyTy() noexcept : Ty(TypeKind::TYPE_ANY) {}
     /** Return the unique name of a ty.
      * U: ImportManager, Sema, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
@@ -584,7 +663,7 @@ struct VArrayTy : public Ty {
      */
     std::string String() const override
     {
-        std::string ge = "<" + Ty::ToString(typeArgs[0]) + ", $" + std::to_string(size) + ">";
+        std::string ge = "<" + typeArgs[0].String() + ", $" + std::to_string(size) + ">";
         return name + ge;
     }
     size_t Hash() const override;
@@ -610,20 +689,14 @@ struct PointerTy : Ty {
      */
     std::string String() const override;
     size_t Hash() const override;
-    bool operator==(const Ty& other) const override
-    {
-        return kind == other.kind && typeArgs == other.typeArgs;
-    }
+    bool operator==(const Ty& other) const override;
 };
 
 struct CStringTy : Ty {
     /** Constructor.
      * U: Sema, Mangle
      */
-    CStringTy() noexcept : Ty(TypeKind::TYPE_CSTRING)
-    {
-        name = "CString";
-    }
+    CStringTy() noexcept : Ty(TypeKind::TYPE_CSTRING) { name = "CString"; }
     /** Return the unique name of a ty.
      * U: Sema, Mangle
      */
@@ -644,11 +717,13 @@ struct TupleTy : Ty {
     /** Constructor.
      * U: Sema.
      */
-    explicit TupleTy(std::vector<Ptr<Ty>> elemTys, bool isClosureTy = false)
+    explicit TupleTy(std::vector<DataTy> elemTys, bool isClosureTy = false)
         : Ty(TypeKind::TYPE_TUPLE), isClosureTy(isClosureTy)
     {
         name = "Tuple";
-        typeArgs = elemTys;
+        for (auto ty : elemTys) {
+            typeArgs.emplace_back(ty);
+        }
         invalid = !Ty::AreTysCorrect(typeArgs);
         generic = Ty::ExistGeneric(typeArgs);
     }
@@ -669,13 +744,13 @@ struct FuncTy : Ty {
      * W: Sema.
      * R: ImportManager, Sema, GenericInstantiator, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
-    const std::vector<Ptr<Ty>> paramTys{};
+    const std::vector<ModalTy> paramTys{};
     /**
      * Function return type.
      * W: no.
      * R: ImportManager, Sema, GenericInstantiator, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
-    Ptr<Ty> const retTy{nullptr};
+    ModalTy const retTy{nullptr};
     /**
      * Mark whether a function is C function.
      * W: no.
@@ -706,7 +781,7 @@ struct FuncTy : Ty {
         const bool hasVariableLenArg{false};
         const bool noCast{false};
     };
-    FuncTy(std::vector<Ptr<Ty>> paramVector, Ptr<Ty> rType, const Config cfg = {false, false, false, false})
+    FuncTy(std::vector<ModalTy> paramVector, ModalTy rType, const Config cfg = {false, false, false, false})
         : Ty(TypeKind::TYPE_FUNC),
           paramTys(std::move(paramVector)),
           retTy(rType),
@@ -717,7 +792,7 @@ struct FuncTy : Ty {
     {
         typeArgs = paramTys;
         // Currently, only CFunc has variable length parameters.
-        invalid = !Ty::AreTysCorrect(typeArgs) || !Ty::IsTyCorrect(rType) || (!isC && hasVariableLenArg);
+        invalid = !Ty::AreTysCorrect(typeArgs) || !rType.IsCorrect() || (!isC && hasVariableLenArg);
         generic = Ty::ExistGeneric(typeArgs) || (rType && rType->HasGeneric());
         typeArgs.emplace_back(retTy);
     }
@@ -752,10 +827,7 @@ struct UnionTy : Ty {
     /** Constructor.
      * U: Sema.
      */
-    UnionTy(std::set<Ptr<Ty>> tys) : Ty(TypeKind::TYPE_UNION)
-    {
-        this->tys = std::move(tys);
-    }
+    UnionTy(std::set<Ptr<Ty>> tys) : Ty(TypeKind::TYPE_UNION) { this->tys = std::move(tys); }
     /** Return the unique name of a ty.
      * U: ImportManager, Sema, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
@@ -780,10 +852,7 @@ struct IntersectionTy : Ty {
     /** Constructor.
      * U: Sema.
      */
-    IntersectionTy(std::set<Ptr<Ty>> tys) : Ty(TypeKind::TYPE_INTERSECTION)
-    {
-        this->tys = std::move(tys);
-    }
+    IntersectionTy(std::set<Ptr<Ty>> tys) : Ty(TypeKind::TYPE_INTERSECTION) { this->tys = std::move(tys); }
     /** Return the unique name of a ty.
      * U: ImportManager, Sema, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
@@ -832,9 +901,7 @@ protected:
     /** Constructor.
      * U: no.
      */
-    ClassLikeTy(TypeKind k, ClassLikeDecl& cld) : Ty(k), commonDecl(&cld)
-    {
-    }
+    ClassLikeTy(TypeKind k, ClassLikeDecl& cld) : Ty(k), commonDecl(&cld) {}
 };
 
 /**
@@ -923,16 +990,11 @@ struct ClassThisTy : ClassTy {
     /** Constructor.
      * U: Sema.
      */
-    ClassThisTy(std::string name, ClassDecl& cd, std::vector<Ptr<Ty>> typeArgs) : ClassTy(name, cd, typeArgs)
-    {
-    }
+    ClassThisTy(std::string name, ClassDecl& cd, std::vector<Ptr<Ty>> typeArgs) : ClassTy(name, cd, typeArgs) {}
     /** Return the unique name of a ty.
      * U: ImportManager, Sema, AST2CHIR, CHIR, HLIRCodeGen, LLVMCodeGen.
      */
-    std::string String() const override
-    {
-        return "This";
-    }
+    std::string String() const override { return "This"; }
     size_t Hash() const override;
     bool operator==(const Ty& other) const override;
 };
@@ -951,7 +1013,9 @@ struct TypeAliasTy : Ty {
         : Ty(TypeKind::TYPE), declPtr(&tad)
     {
         this->name = name;
-        this->typeArgs = typeArgs;
+        for (auto ty : typeArgs) {
+            this->typeArgs.emplace_back(ty);
+        }
         this->invalid = !Ty::AreTysCorrect(this->typeArgs);
         this->generic = Ty::ExistGeneric(this->typeArgs);
     }
@@ -1132,13 +1196,22 @@ struct StructTy : Ty {
 };
 
 bool CompTyByNames(Ptr<const Ty> ty1, Ptr<const Ty> ty2);
+bool CompTyByNamesModal(const ModalTy& ty1, const ModalTy& ty2);
 
+/// Provide a stable arbitrary ordering of Ty.
 struct CmpTyByName {
     bool operator()(Ptr<const Ty> ty1, Ptr<const Ty> ty2) const
     {
         return CompTyByNames(ty1, ty2);
     }
 };
+
+struct CmpTyByNameModal {
+    bool operator()(const ModalTy& ty1, const ModalTy& ty2) const;
+};
 } // namespace Cangjie::AST
 
+template <> struct std::hash<Cangjie::AST::ModalTy> {
+    size_t operator()(Cangjie::AST::ModalTy modalTy) const;
+};
 #endif // CANGJIE_AST_TYPES_H

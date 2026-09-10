@@ -16,6 +16,7 @@
 #include <memory>
 #include <unordered_set>
 
+#include "CJMP/MPTypeCheckerImpl.h"
 #include "Collector.h"
 #include "Desugar/DesugarInTypeCheck.h"
 #include "DiagSuppressor.h"
@@ -36,7 +37,6 @@
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
-#include "cangjie/Basic/Print.h"
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/Utils.h"
@@ -63,7 +63,8 @@ TypeChecker::TypeCheckerImpl::TypeCheckerImpl(CompilerInstance* ci)
       diag(ci->diag),
       importManager(*ci->importManager),
       backendType(ci->invocation.globalOptions.backend),
-      mpImpl(new MPTypeCheckerImpl(*ci))
+      mpImpl(new MPTypeCheckerImpl(*ci)),
+      modalTypeChecker(NewModalTypeChecker())
 {
 }
 
@@ -73,6 +74,7 @@ TypeChecker::TypeCheckerImpl::~TypeCheckerImpl()
         delete mpImpl;
         mpImpl = nullptr;
     }
+    DeleteModalTypeChecker();
 }
 
 bool TypeChecker::TypeCheckerImpl::CheckThisTypeOfFuncBody(const FuncBody& fb) const
@@ -104,7 +106,7 @@ bool TypeChecker::TypeCheckerImpl::CheckBodyRetType(ASTContext& ctx, FuncBody& f
     if (fb.body == nullptr) {
         // Quick fix for foreign functions. I did not add error messages currently since it is a quick fix.
         if (fb.retType->GetTy()->HasQuestTy()) {
-            fb.retType->SetTy(TypeManager::GetInvalidTy());
+            fb.retType->SetTy({TypeManager::GetInvalidTy()});
             return false;
         }
         return true;
@@ -115,15 +117,15 @@ bool TypeChecker::TypeCheckerImpl::CheckBodyRetType(ASTContext& ctx, FuncBody& f
         auto ret = Synthesize({ctx, SynPos::NONE}, fb.body.get());
         // In lambda, the return value type should be consistent with the body.
         // Otherwise, errors in the body that do not affect the return value type may fail to be reported.
-        if (fb.funcDecl == nullptr && !Ty::IsTyCorrect(ret)) {
-            fb.retType->SetTy(TypeManager::GetInvalidTy());
+        if (fb.funcDecl == nullptr && !ret.IsCorrect()) {
+            fb.retType->SetTy({TypeManager::GetInvalidTy()});
             return false;
         }
         fb.retType->SetTy(CalcFuncRetTyFromBody(fb));
-        bool isWellTyped = Ty::IsTyCorrect(fb.retType->GetTy());
+        bool isWellTyped = fb.retType->GetTy().IsCorrect();
         if (fb.retType->GetTy()->HasQuestTy()) {
             isWellTyped = false;
-            fb.retType->SetTy(TypeManager::GetInvalidTy());
+            fb.retType->SetTy({TypeManager::GetInvalidTy()});
             if (!CanSkipDiag(fb)) {
                 DiagUnableToInferReturnType(diag, fb);
             }
@@ -131,7 +133,7 @@ bool TypeChecker::TypeCheckerImpl::CheckBodyRetType(ASTContext& ctx, FuncBody& f
         if (isWellTyped) {
             if (CheckReturnThisInFuncBody(fb)) {
                 ReplaceFuncRetTyWithThis(fb, fb.retType->GetTy());
-            } else if (auto ctt = DynamicCast<ClassThisTy*>(fb.retType->GetTy())) {
+            } else if (auto ctt = DynamicCast<ClassThisTy>(fb.retType->DataTy())) {
                 // Replace ClassThisTy to ClassTy when the function cannot return 'This' anymore.
                 fb.retType->SetTy(ctt->declPtr->GetTy());
             }
@@ -142,13 +144,13 @@ bool TypeChecker::TypeCheckerImpl::CheckBodyRetType(ASTContext& ctx, FuncBody& f
         if (fb.retType->GetTy()->IsUnit()) {
             // The body eventually will be appended a 'return ()' expression, so we switch to the Synthesize mode.
             // Errors should be already reported during the synthesis.
-            isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::UNUSED}, fb.body.get()));
+            isWellTyped = Synthesize({ctx, SynPos::UNUSED}, fb.body.get()).IsCorrect();
         } else if (NeedCheckBodyReturn(fb)) {
             isWellTyped = Check(ctx, fb.retType->GetTy(), fb.body.get());
             if (!isWellTyped && fb.body->body.empty()) {
                 DiagMismatchedTypes(diag, *fb.body, *fb.retType, "return type");
             }
-            if (isWellTyped && Is<ClassThisTy>(fb.retType->GetTy())) {
+            if (isWellTyped && Is<ClassThisTy>(fb.retType->DataTy())) {
                 auto node = fb.body->body.back().get();
                 while (true) {
                     if (auto e = DynamicCast<Expr>(node); e && e->desugarExpr) {
@@ -171,14 +173,14 @@ bool TypeChecker::TypeCheckerImpl::CheckBodyRetType(ASTContext& ctx, FuncBody& f
     }
 }
 
-void TypeChecker::TypeCheckerImpl::ReplaceFuncRetTyWithThis(FuncBody& fb, Ptr<Ty> ty)
+void TypeChecker::TypeCheckerImpl::ReplaceFuncRetTyWithThis(FuncBody& fb, ModalTy ty)
 {
-    if (auto ct = DynamicCast<ClassTy*>(ty); ct) {
+    if (auto ct = DynamicCast<ClassTy*>(ty.Ty()); ct) {
         auto rt = MakeOwned<RefType>();
         rt->curFile = fb.curFile;
         rt->ref.target = ct->decl;
         rt->ref.identifier = "This";
-        rt->SetTy(typeManager.GetClassThisTy(*ct->declPtr, ct->typeArgs));
+        rt->SetTy({typeManager.GetClassThisTy(*ct->declPtr, ct->TyArgs()), ty.Mode()});
         rt->EnableAttr(Attribute::COMPILER_ADD);
         if (fb.retType) {
             CJC_ASSERT(fb.curFile);
@@ -208,7 +210,7 @@ bool TypeChecker::TypeCheckerImpl::CheckFuncBody(ASTContext& ctx, FuncBody& fb)
     if (!CheckThisTypeOfFuncBody(fb)) {
         diag.Diagnose(*fb.retType, DiagKind::sema_invalid_position_of_this_type);
     }
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<ModalTy> paramTys;
     if (!CheckNormalFuncBody(ctx, fb, paramTys)) {
         return false;
     }
@@ -223,12 +225,12 @@ void TypeChecker::TypeCheckerImpl::AddRetTypeNode(FuncBody& fb) const
         fb.retType = MakeOwned<RefType>();
     }
     fb.retType->EnableAttr(Attribute::COMPILER_ADD);
-    fb.retType->SetTy(TypeManager::GetQuestTy());
+    fb.retType->SetTy({TypeManager::GetQuestTy()});
     // Set compiler added retType as visited to avoid being checked by `CheckReferenceTypeLegality`.
     fb.retType->EnableAttr(Attribute::IS_CHECK_VISITED);
 }
 
-bool TypeChecker::TypeCheckerImpl::CheckNormalFuncBody(ASTContext& ctx, FuncBody& fb, std::vector<Ptr<Ty>>& paramTys)
+bool TypeChecker::TypeCheckerImpl::CheckNormalFuncBody(ASTContext& ctx, FuncBody& fb, std::vector<ModalTy>& paramTys)
 {
     if (fb.paramLists.empty()) {
         return false;
@@ -241,25 +243,25 @@ bool TypeChecker::TypeCheckerImpl::CheckNormalFuncBody(ASTContext& ctx, FuncBody
         fb.TestAttr(Attribute::C) || (fb.funcDecl && fb.funcDecl->TestAttr(Attribute::FOREIGN) && isCFFIBackend);
     bool hasVariableLenArg = (fb.funcDecl && fb.funcDecl->hasVariableLenArg) || fb.paramLists[0]->hasVariableLenArg;
     // Check and update return type for foreign functions.
-    if (!Ty::IsTyCorrect(fb.retType->GetTy())) {
+    if (!fb.retType->GetTy().IsCorrect()) {
         if (!fb.TestAttr(Attribute::IS_CHECK_VISITED)) {
             fb.EnableAttr(Attribute::IS_CHECK_VISITED); // Avoid re-enter funcDecl check, when function is invalid.
             Synthesize({ctx, SynPos::NONE}, fb.body.get()); // Synthesize for other decl/expr in function body.
         }
-        fb.SetTy(typeManager.GetFunctionTy(paramTys, fb.retType->GetTy(), {isCFunc, false, hasVariableLenArg}));
+        fb.SetTy({typeManager.GetFunctionTy(paramTys, fb.retType->GetTy(), {isCFunc, false, hasVariableLenArg})});
         return false;
     }
 
     // Set funcTy before Synthesize body, avoid recursively call typecheck loop.
     auto funcTy = typeManager.GetFunctionTy(paramTys, fb.retType->GetTy(), {isCFunc, false, hasVariableLenArg});
     if (fb.funcDecl) {
-        fb.funcDecl->SetTy(funcTy);
+        fb.funcDecl->SetTy({funcTy});
     }
-    fb.SetTy(funcTy);
+    fb.SetTy({funcTy});
 
     if (!CheckBodyRetType(ctx, fb)) {
         // Update 'fb.GetTy()' witch updated 'fb.retType->GetTy()'.
-        fb.SetTy(typeManager.GetFunctionTy(paramTys, fb.retType->GetTy(), {isCFunc, false, hasVariableLenArg}));
+        fb.SetTy({typeManager.GetFunctionTy(paramTys, fb.retType->GetTy(), {isCFunc, false, hasVariableLenArg})});
         return false;
     }
 
@@ -270,9 +272,9 @@ bool TypeChecker::TypeCheckerImpl::CheckNormalFuncBody(ASTContext& ctx, FuncBody
     funcTy = typeManager.GetFunctionTy(paramTys, fb.retType->GetTy(), {isCFunc, false, hasVariableLenArg});
     // Update funcDecl's type after body is checked.
     if (fb.funcDecl) {
-        fb.funcDecl->SetTy(funcTy);
+        fb.funcDecl->SetTy({funcTy});
     }
-    fb.SetTy(funcTy);
+    fb.SetTy({funcTy});
     return true;
 }
 
@@ -293,7 +295,7 @@ void AddUnitType(const AST::FuncDecl& fd)
         type->begin = fd.funcBody->paramLists[0]->end;
         type->end = fd.funcBody->paramLists[0]->end;
     }
-    type->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    type->SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
     fd.funcBody->retType = std::move(type);
     fd.funcBody->retType->EnableAttr(Attribute::COMPILER_ADD);
 }
@@ -444,10 +446,10 @@ void TypeChecker::TypeCheckerImpl::CheckCtorFuncBody(ASTContext& ctx, FuncBody& 
             fb.funcDecl->EnableAttr(attr.value());
         }
     }
-    Ptr<Ty> ctorTy = TypeManager::GetInvalidTy();
+    ModalTy ctorTy = {TypeManager::GetInvalidTy()};
     if (fb.funcDecl->TestAttr(Attribute::STATIC)) {
         // Static init always has type of 'Unit' as return type.
-        ctorTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
+        ctorTy = {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)};
     } else {
         if (fb.parentStruct) {
             ctorTy = fb.parentStruct->GetTy();
@@ -455,13 +457,16 @@ void TypeChecker::TypeCheckerImpl::CheckCtorFuncBody(ASTContext& ctx, FuncBody& 
         if (fb.parentClassLike) {
             ctorTy = fb.parentClassLike->GetTy();
         }
+        if (fb.paramLists[0]->thisParam) {
+            ctorTy = ctorTy.With(fb.paramLists[0]->thisParam->modal.ToModalInfo());
+        }
     }
-    if (!Ty::IsTyCorrect(ctorTy) || fb.paramLists.empty()) {
+    if (!ctorTy.IsCorrect() || fb.paramLists.empty()) {
         return;
     }
     CheckFuncParamList(ctx, *fb.paramLists[0].get());
     auto paramTys = GetFuncBodyParamTys(fb);
-    fb.SetTy(typeManager.GetFunctionTy(paramTys, ctorTy));
+    fb.SetTy({typeManager.GetFunctionTy(paramTys, ctorTy)});
     fb.funcDecl->SetTy(fb.GetTy());
     fb.retType->SetTy(ctorTy);
     Synthesize({ctx, SynPos::UNUSED}, fb.body.get());
@@ -470,19 +475,23 @@ void TypeChecker::TypeCheckerImpl::CheckCtorFuncBody(ASTContext& ctx, FuncBody& 
 void TypeChecker::TypeCheckerImpl::CheckFuncParamList(ASTContext& ctx, FuncParamList& fpl)
 {
     // We use the tupleType to handle the type of FuncParamList.
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<DataTy> paramTys;
+    // Synthesize thisParam first (before early return for empty params)
+    if (fpl.thisParam) {
+        Synthesize({ctx, SynPos::NONE}, fpl.thisParam.get());
+    }
     if (fpl.params.empty()) {
-        fpl.SetTy(typeManager.GetTupleTy(paramTys));
+        fpl.SetTy({typeManager.GetTupleTy(paramTys)});
         return;
     }
     for (auto& param : fpl.params) {
         CJC_NULLPTR_CHECK(param);
-        if (!Ty::IsTyCorrect(Synthesize({ctx, SynPos::NONE}, param.get()))) {
+        if (!Synthesize({ctx, SynPos::NONE}, param.get()).IsCorrect()) {
             paramTys.push_back(TypeManager::GetInvalidTy()); // Set type to get correct size of function type.
             continue;
         }
-        Ptr<Ty> paramTy = param->GetTy();
-        paramTys.push_back(paramTy);
+        ModalTy paramTy = param->GetTy();
+        paramTys.push_back(paramTy.Ty());
         // Infer param assignment's type by param's type.
         if (param->assignment) {
             auto curNode = param->assignment.get();
@@ -493,66 +502,67 @@ void TypeChecker::TypeCheckerImpl::CheckFuncParamList(ASTContext& ctx, FuncParam
                 expr = As<ASTKind::EXPR>(curNode);
             }
             (void)Check(ctx, paramTy, curNode); // Error is reported during checking, return value can be ignored.
-            if (Ty::IsTyCorrect(curNode->GetTy())) {
+            if (curNode->GetTy().IsCorrect()) {
                 param->assignment->SetTy(curNode->GetTy());
             }
         }
     }
-    fpl.SetTy(typeManager.GetTupleTy(paramTys));
+    fpl.SetTy({typeManager.GetTupleTy(paramTys)});
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkFuncArg(ASTContext& ctx, Ty& target, FuncArg& fa)
+bool TypeChecker::TypeCheckerImpl::ChkFuncArg(ASTContext& ctx, ModalTy target, FuncArg& fa)
 {
     if (!fa.expr) {
-        fa.SetTy(TypeManager::GetInvalidTy());
+        fa.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     if (fa.withInout) {
         return ChkFuncArgWithInout(ctx, target, fa);
     }
-    if (!Check(ctx, &target, fa.expr.get())) {
-        fa.SetTy(TypeManager::GetInvalidTy());
+    if (!Check(ctx, target, fa.expr.get())) {
+        fa.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     fa.SetTy(fa.expr->GetTy());
     return true;
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkFuncArgWithInout(ASTContext& ctx, Ty& target, FuncArg& fa)
+bool TypeChecker::TypeCheckerImpl::ChkFuncArgWithInout(ASTContext& ctx, ModalTy target, FuncArg& fa)
 {
-    auto realTarget = &target;
+    auto realTarget = target;
     auto exprTy = fa.expr->GetTy();
-    if (!Ty::IsTyCorrect(fa.expr->GetTy())) {
+    if (!fa.expr->GetTy().IsCorrect()) {
         // Trying to infer fa type without target.
         exprTy = Synthesize({ctx, SynPos::EXPR_ARG}, fa.expr.get());
     }
-    auto argTy = DynamicCast<VArrayTy*>(exprTy);
-    auto ptrParamTy = DynamicCast<PointerTy*>(&target);
-    auto varrParamTy = DynamicCast<VArrayTy*>(&target);
+    auto argTy = DynamicCast<VArrayTy*>(exprTy.get());
+    auto ptrParamTy = DynamicCast<PointerTy*>(target.get());
+    auto varrParamTy = DynamicCast<VArrayTy*>(target.get());
     // Case 1: 'argTy' is VArray<T...>, target is CPointer<R>. 'realTarget' trans to
     // VArray<R...>.
     // Case 2: 'argTy' is VArray<T...>, target is VArray<R...>. 'realTarget' is VArray<R...>.
     // Other case: 'argTy' is T, target is CPointer<T>. 'realTarget' trans to T.
     if (argTy && ptrParamTy) {
-        realTarget = typeManager.GetVArrayTy(*ptrParamTy->typeArgs[0], argTy->size);
+        realTarget = {typeManager.GetVArrayTy(*ptrParamTy->typeArgs[0], argTy->size), target.Mode()};
     } else if (argTy && varrParamTy) {
-        realTarget = &target;
+        realTarget = target;
     } else if (ptrParamTy) {
         realTarget = ptrParamTy->typeArgs[0];
     }
 
-    if (!Ty::IsTyCorrect(exprTy) || !typeManager.IsSubtype(exprTy, realTarget)) {
-        if (Ty::IsTyCorrect(exprTy)) {
-            DiagMismatchedTypes(diag, *fa.expr, *realTarget);
+    if (!exprTy.IsCorrect() || !typeManager.IsSubtype(exprTy, realTarget)) {
+        if (exprTy.IsCorrect()) {
+            DiagMismatchedTypes(diag, *fa.expr, realTarget);
         }
-        fa.SetTy(TypeManager::GetInvalidTy());
+        fa.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     if (!ChkInoutFuncArg(fa)) {
-        fa.SetTy(TypeManager::GetInvalidTy());
+        fa.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
-    fa.SetTy(typeManager.GetPointerTy(Is<VArrayTy>(realTarget) ? realTarget->typeArgs[0].get() : realTarget));
+    fa.SetTy({typeManager.GetPointerTy(Is<VArrayTy>(realTarget.Ty()) ? realTarget->TyArg(0) : realTarget.Ty()),
+        realTarget.Mode()});
     return true;
 }
 
@@ -641,7 +651,7 @@ bool TypeChecker::TypeCheckerImpl::ChkInoutMemberAccess(const MemberAccess& ma)
         meetContraints = false;
     }
     auto& be = ma.baseExpr;
-    if (Ty::IsTyCorrect(be->GetTy()) && be->GetTy()->IsClassLike()) {
+    if (be->GetTy().IsCorrect() && be->GetTy()->IsClassLike()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_inout_modify_heap_variable, *be);
         return false;
     }
@@ -660,29 +670,29 @@ bool TypeChecker::TypeCheckerImpl::ChkInoutMemberAccess(const MemberAccess& ma)
     return false;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynFuncArg(ASTContext& ctx, FuncArg& fa)
+ModalTy TypeChecker::TypeCheckerImpl::SynFuncArg(ASTContext& ctx, FuncArg& fa)
 {
     if (fa.expr) {
         Synthesize({ctx, SynPos::EXPR_ARG}, fa.expr.get());
         if (fa.withInout) {
             if (!Ty::IsTyCorrect(fa.expr->GetTy()) || !ChkInoutFuncArg(fa)) {
-                fa.SetTy(TypeManager::GetInvalidTy());
-            } else if (!Ty::IsMetCType(*fa.expr->GetTy())) {
+                fa.SetTy({TypeManager::GetInvalidTy()});
+            } else if (!fa.expr->GetTy()->IsMetCType()) {
                 diag.DiagnoseRefactor(DiagKindRefactor::sema_inout_modify_non_ctype, fa);
-                fa.SetTy(TypeManager::GetInvalidTy());
+                fa.SetTy({TypeManager::GetInvalidTy()});
             } else if (fa.expr->GetTy()->IsCString()) {
                 diag.DiagnoseRefactor(DiagKindRefactor::sema_inout_modify_cstring_or_zerosized, fa, "type 'CString'");
-                fa.SetTy(TypeManager::GetInvalidTy());
-            } else if (Is<VArrayTy>(fa.expr->GetTy())) {
-                fa.SetTy(typeManager.GetPointerTy(fa.expr->GetTy()->typeArgs[0]));
+                fa.SetTy({TypeManager::GetInvalidTy()});
+            } else if (Is<VArrayTy>(fa.expr->DataTy())) {
+                fa.SetTy({typeManager.GetPointerTy(fa.expr->GetTy()->typeArgs[0].Ty()), fa.expr->TyMode()});
             } else {
-                fa.SetTy(typeManager.GetPointerTy(fa.expr->GetTy()));
+                fa.SetTy({typeManager.GetPointerTy(fa.expr->DataTy()), fa.expr->TyMode()});
             }
         } else {
             fa.SetTy(fa.expr->GetTy());
         }
     } else {
-        fa.SetTy(TypeManager::GetInvalidTy());
+        fa.SetTy({TypeManager::GetInvalidTy()});
     }
     return fa.GetTy();
 }
@@ -713,12 +723,12 @@ bool IsNodeDesugared(Ptr<const Node> node)
 CacheKey GetCacheKeyForSyn(const ASTContext& ctx, Ptr<const Node> node)
 {
     auto it = ctx.targetTypeMap.find(node);
-    auto target = it != ctx.targetTypeMap.cend() ? it->second : nullptr;
+    auto target = it != ctx.targetTypeMap.cend() ? it->second : ModalTy{};
     return CacheKey{
         .target = target, .isDesugared = IsNodeDesugared(node), .diagKey = DiagnosticCache::ExtractKey(ctx.diag)};
 }
 
-CacheKey GetCacheKeyForChk(const ASTContext& ctx, Ptr<const Node> node, Ptr<Ty> target)
+CacheKey GetCacheKeyForChk(const ASTContext& ctx, Ptr<const Node> node, ModalTy target)
 {
     return CacheKey{
         .target = target, .isDesugared = IsNodeDesugared(node), .diagKey = DiagnosticCache::ExtractKey(ctx.diag)};
@@ -726,7 +736,7 @@ CacheKey GetCacheKeyForChk(const ASTContext& ctx, Ptr<const Node> node, Ptr<Ty> 
 
 void RestoreCached(ASTContext& ctx, Ptr<Node> node, CacheEntry& cache, bool recoverDiag = true)
 {
-    if (Ty::IsInitialTy(node->GetTy())) {
+    if (Ty::IsInitialTy(node->DataTy())) {
         // if node cleared before, mark it must be rechecked in post-check before restoring its ty
         ctx.typeCheckCache[node].lastKey = {};
     }
@@ -745,19 +755,19 @@ bool TypeChecker::TypeCheckerImpl::IsChecked(ASTContext& ctx, Node& node) const
     bool visitedDecl = decl && (decl->TestAttr(Attribute::IS_CHECK_VISITED) || decl->TestAttr(Attribute::IMPORTED));
     bool visitedExpr =
         !decl && !type && ctx.typeCheckCache[&node].lastKey.has_value() && typeManager.GetUnsolvedTyVars().empty();
-    return Ty::IsTyCorrect(node.GetTy()) && node.TyKind() != AST::TypeKind::TYPE_QUEST &&
+    return node.GetTy().IsCorrect() && node.TyKind() != AST::TypeKind::TYPE_QUEST &&
         (visitedExpr || visitedDecl || (type && type->TestAttr(Attribute::IS_CHECK_VISITED)));
 }
 
-std::optional<Ptr<Ty>> TypeChecker::TypeCheckerImpl::PerformBasicChecksForSynthesize(
+std::optional<ModalTy> TypeChecker::TypeCheckerImpl::PerformBasicChecksForSynthesize(
     ASTContext& ctx, Ptr<Node> node) const
 {
     if (!node) {
-        return {TypeManager::GetInvalidTy()};
+        return {{TypeManager::GetInvalidTy()}};
     }
     // IS_BROKEN indicates that the node may be illegal, and it may cause unknown errors if it continues.
     if (node->TestAttr(Attribute::IS_BROKEN)) {
-        node->SetTy(TypeManager::GetInvalidTy());
+        node->SetTy({TypeManager::GetInvalidTy()});
         return {node->GetTy()};
     }
     if (IsChecked(ctx, *node)) {
@@ -769,11 +779,19 @@ std::optional<Ptr<Ty>> TypeChecker::TypeCheckerImpl::PerformBasicChecksForSynthe
     return {};
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::Synthesize(const CheckerContext& ctx, Ptr<Node> node)
+ModalTy TypeChecker::TypeCheckerImpl::Synthesize(const CheckerContext& ctx, Ptr<Node> node)
 {
     if (auto res = PerformBasicChecksForSynthesize(ctx.Ctx(), node)) {
         return *res;
     }
+    nodeStack.Push(node);
+    struct StackPop {
+        NodeStack& s;
+        ~StackPop()
+        {
+            s.Pop();
+        }
+    } pop{nodeStack};
     ctx.Ctx().typeCheckCache[node].lastKey = GetCacheKeyForSyn(ctx.Ctx(), node);
     ASTContext* curCtx = &ctx.Ctx();
     // If decl belongs to another package node, then switch to another AST context according to package node.
@@ -815,6 +833,10 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::Synthesize(const CheckerContext& ctx, Ptr<
         }
         case ASTKind::FUNC_PARAM: {
             node->SetTy(SynFuncParam(*curCtx, *StaticAs<ASTKind::FUNC_PARAM>(node)));
+            break;
+        }
+        case ASTKind::THIS_PARAM: {
+            node->SetTy(SynThisParam(*curCtx, *StaticAs<ASTKind::THIS_PARAM>(node)));
             break;
         }
         case ASTKind::FUNC_ARG: {
@@ -884,7 +906,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::Synthesize(const CheckerContext& ctx, Ptr<
         }
         case ASTKind::PRIMITIVE_TYPE_EXPR: {
             auto te = StaticAs<ASTKind::PRIMITIVE_TYPE_EXPR>(node);
-            te->SetTy(TypeManager::GetPrimitiveTy(te->typeKind));
+            te->SetTy({TypeManager::GetPrimitiveTy(te->typeKind)});
             break;
         }
         case ASTKind::CALL_EXPR: {
@@ -913,7 +935,11 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::Synthesize(const CheckerContext& ctx, Ptr<
         }
         case ASTKind::ARRAY_EXPR: {
             auto ae = StaticAs<ASTKind::ARRAY_EXPR>(node);
-            node->SetTy(ae->isValueArray ? SynVArrayExpr(*curCtx, *ae) : SynArrayExpr(*curCtx, *ae));
+            if (ae->isValueArray) {
+                node->SetTy(SynVArrayExpr(*curCtx, *ae));
+            } else {
+                CJC_ABORT();
+            }
             break;
         }
         case ASTKind::POINTER_EXPR: {
@@ -1044,14 +1070,18 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::Synthesize(const CheckerContext& ctx, Ptr<
             break;
         }
         case ASTKind::INVALID_EXPR: {
-            node->SetTy(TypeManager::GetInvalidTy());
+            node->SetTy({TypeManager::GetInvalidTy()});
+            break;
+        }
+        case ASTKind::EXCLAVE_EXPR: {
+            node->SetTy(SynExclaveExpr(*curCtx, *StaticAs<ASTKind::EXCLAVE_EXPR>(node)));
             break;
         }
         default: {
             break;
         }
     }
-    CJC_ASSERT(!Ty::IsTyCorrect(node->GetTy()) || As<ASTKind::EXPR>(node) == nullptr ||
+    CJC_ASSERT(!node->GetTy().IsCorrect() || As<ASTKind::EXPR>(node) == nullptr ||
         StaticAs<ASTKind::EXPR>(node)->desugarExpr == nullptr ||
         node->GetTy() == StaticAs<ASTKind::EXPR>(node)->desugarExpr->GetTy());
     node->SetTy(typeManager.TryGreedySubst(node->GetTy()));
@@ -1059,19 +1089,19 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::Synthesize(const CheckerContext& ctx, Ptr<
 }
 
 std::optional<bool> TypeChecker::TypeCheckerImpl::PerformBasicChecksForCheck(
-    ASTContext& ctx, Ptr<Ty> target, Ptr<Node> node) const
+    ASTContext& ctx, ModalTy target, Ptr<Node> node) const
 {
     if (!node) {
         return {false};
     }
-    if (!Ty::IsTyCorrect(target)) {
-        node->SetTy(TypeManager::GetInvalidTy());
+    if (!target.IsCorrect()) {
+        node->SetTy({TypeManager::GetInvalidTy()});
         return {false};
     }
     ctx.targetTypeMap[node] = target;
     // IS_BROKEN indicates that the node may be illegal, and it may cause unknown errors if it continues.
     if (node->TestAttr(Attribute::IS_BROKEN)) {
-        node->SetTy(TypeManager::GetInvalidTy());
+        node->SetTy({TypeManager::GetInvalidTy()});
         return {false};
     }
     if (target->HasQuestTy() && !IsQuestableNode(*node)) {
@@ -1080,11 +1110,19 @@ std::optional<bool> TypeChecker::TypeCheckerImpl::PerformBasicChecksForCheck(
     return {};
 }
 
-bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<Node> node)
+bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, ModalTy target, Ptr<Node> node)
 {
     if (auto res = PerformBasicChecksForCheck(ctx, target, node)) {
         return *res;
     }
+    nodeStack.Push(node);
+    struct StackPop {
+        NodeStack& s;
+        ~StackPop()
+        {
+            s.Pop();
+        }
+    } pop{nodeStack};
     ctx.typeCheckCache[node].lastKey = GetCacheKeyForChk(ctx, node, target);
     ASTContext* curCtx = &ctx;
     // If decl belongs to another package node, then switch to another AST context according to package node.
@@ -1099,12 +1137,16 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
     bool chkRet = false;
     auto realTarget = typeManager.TryGreedySubst(target);
     if (realTarget->IsPlaceholder() && !AcceptPlaceholderTarget(*node)) {
-        auto& cst = typeManager.constraints[RawStaticCast<GenericsTy*>(realTarget)];
-        Ptr<Ty> lub = nullptr;
+        auto& cst = typeManager.constraints[RawStaticCast<GenericsTy*>(realTarget.get())];
+        ModalTy lub{};
         if (!cst.ubs.empty()) {
-            auto meetRes = JoinAndMeet(typeManager, cst.ubs.raw(), typeManager.GetUnsolvedTyVars()).MeetAsVisibleTy();
-            if (std::holds_alternative<Ptr<Ty>>(meetRes)) {
-                lub = std::get<Ptr<Ty>>(meetRes);
+            std::set<ModalTy> ubModals;
+            for (const auto& ub : cst.ubs.raw()) {
+                ubModals.insert(ModalTy{ub});
+            }
+            auto meetRes = JoinAndMeet(typeManager, ubModals, typeManager.GetUnsolvedTyVars()).MeetAsVisibleTy();
+            if (std::holds_alternative<ModalTy>(meetRes)) {
+                lub = std::get<ModalTy>(meetRes);
             }
         }
         if (lub) {
@@ -1117,81 +1159,84 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
     } else {
         switch (node->astKind) {
             case ASTKind::IF_EXPR: {
-                chkRet = ChkIfExpr(*curCtx, *realTarget, *StaticAs<ASTKind::IF_EXPR>(node));
+                chkRet = ChkIfExpr(*curCtx, realTarget, *StaticAs<ASTKind::IF_EXPR>(node));
                 break;
             }
             case ASTKind::ASSIGN_EXPR: {
-                chkRet = ChkAssignExpr(*curCtx, *realTarget, *StaticAs<ASTKind::ASSIGN_EXPR>(node));
+                chkRet = ChkAssignExpr(*curCtx, realTarget, *StaticAs<ASTKind::ASSIGN_EXPR>(node));
                 break;
             }
             case ASTKind::LIT_CONST_EXPR: {
                 auto lce = StaticAs<ASTKind::LIT_CONST_EXPR>(node);
-                chkRet = ChkLitConstExpr(*curCtx, *realTarget, *lce);
+                chkRet = ChkLitConstExpr(*curCtx, realTarget, *lce);
                 InitializeLitConstValue(*lce);
                 break;
             }
             case ASTKind::ARRAY_LIT: {
-                chkRet = ChkArrayLit(*curCtx, *realTarget, *StaticAs<ASTKind::ARRAY_LIT>(node));
+                chkRet = ChkArrayLit(*curCtx, realTarget, *StaticAs<ASTKind::ARRAY_LIT>(node));
                 break;
             }
             case ASTKind::ARRAY_EXPR: {
                 auto ae = StaticAs<ASTKind::ARRAY_EXPR>(node);
-                chkRet = ae->isValueArray ? ChkVArrayExpr(*curCtx, *realTarget, *ae)
-                                          : ChkArrayExpr(*curCtx, *realTarget, *ae);
+                if (ae->isValueArray) {
+                    chkRet = ChkVArrayExpr(*curCtx, realTarget, *ae);
+                } else {
+                    CJC_ABORT();
+                }
                 break;
             }
             case ASTKind::POINTER_EXPR: {
-                chkRet = ChkPointerExpr(*curCtx, *realTarget, *StaticAs<ASTKind::POINTER_EXPR>(node));
+                chkRet = ChkPointerExpr(*curCtx, realTarget, *StaticAs<ASTKind::POINTER_EXPR>(node));
                 break;
             }
             case ASTKind::TUPLE_LIT: {
-                chkRet = ChkTupleLit(*curCtx, *realTarget, *StaticAs<ASTKind::TUPLE_LIT>(node));
+                chkRet = ChkTupleLit(*curCtx, realTarget, *StaticAs<ASTKind::TUPLE_LIT>(node));
                 break;
             }
             case ASTKind::WHILE_EXPR: {
-                chkRet = ChkWhileExpr(*curCtx, *realTarget, *StaticAs<ASTKind::WHILE_EXPR>(node));
+                chkRet = ChkWhileExpr(*curCtx, realTarget, *StaticAs<ASTKind::WHILE_EXPR>(node));
                 break;
             }
             case ASTKind::DO_WHILE_EXPR: {
-                chkRet = ChkDoWhileExpr(*curCtx, *realTarget, *StaticAs<ASTKind::DO_WHILE_EXPR>(node));
+                chkRet = ChkDoWhileExpr(*curCtx, realTarget, *StaticAs<ASTKind::DO_WHILE_EXPR>(node));
                 break;
             }
             case ASTKind::FOR_IN_EXPR: {
-                chkRet = ChkForInExpr(*curCtx, *realTarget, *StaticAs<ASTKind::FOR_IN_EXPR>(node));
+                chkRet = ChkForInExpr(*curCtx, realTarget, *StaticAs<ASTKind::FOR_IN_EXPR>(node));
                 break;
             }
             case ASTKind::RANGE_EXPR: {
-                chkRet = ChkRangeExpr(*curCtx, *realTarget, *StaticAs<ASTKind::RANGE_EXPR>(node));
+                chkRet = ChkRangeExpr(*curCtx, realTarget, *StaticAs<ASTKind::RANGE_EXPR>(node));
                 break;
             }
             case ASTKind::PAREN_EXPR: {
-                chkRet = ChkParenExpr(*curCtx, *realTarget, *StaticAs<ASTKind::PAREN_EXPR>(node));
+                chkRet = ChkParenExpr(*curCtx, realTarget, *StaticAs<ASTKind::PAREN_EXPR>(node));
                 break;
             }
             case ASTKind::BINARY_EXPR: {
-                chkRet = ChkBinaryExpr(ctx, *realTarget, *StaticAs<ASTKind::BINARY_EXPR>(node));
+                chkRet = ChkBinaryExpr(ctx, realTarget, *StaticAs<ASTKind::BINARY_EXPR>(node));
                 break;
             }
             case ASTKind::INC_OR_DEC_EXPR: {
-                chkRet = ChkIncOrDecExpr(*curCtx, *realTarget, *StaticAs<ASTKind::INC_OR_DEC_EXPR>(node));
+                chkRet = ChkIncOrDecExpr(*curCtx, realTarget, *StaticAs<ASTKind::INC_OR_DEC_EXPR>(node));
                 break;
             }
             case ASTKind::UNARY_EXPR: {
-                chkRet = ChkUnaryExpr(*curCtx, *realTarget, *StaticAs<ASTKind::UNARY_EXPR>(node));
+                chkRet = ChkUnaryExpr(*curCtx, realTarget, *StaticAs<ASTKind::UNARY_EXPR>(node));
                 break;
             }
             case ASTKind::TYPE_CONV_EXPR: {
-                chkRet = ChkTypeConvExpr(*curCtx, *realTarget, *StaticAs<ASTKind::TYPE_CONV_EXPR>(node));
+                chkRet = ChkTypeConvExpr(*curCtx, realTarget, *StaticAs<ASTKind::TYPE_CONV_EXPR>(node));
                 break;
             }
             case ASTKind::IF_AVAILABLE_EXPR:
-                chkRet = ChkIfAvailableExpr(*curCtx, *realTarget, StaticCast<IfAvailableExpr>(*node));
+                chkRet = ChkIfAvailableExpr(*curCtx, realTarget, StaticCast<IfAvailableExpr>(*node));
                 break;
             case ASTKind::JUMP_EXPR:
                 chkRet = ChkLoopControlExpr(*curCtx, *StaticAs<ASTKind::JUMP_EXPR>(node));
                 break;
             case ASTKind::MATCH_EXPR: {
-                chkRet = ChkMatchExpr(*curCtx, *realTarget, *StaticAs<ASTKind::MATCH_EXPR>(node));
+                chkRet = ChkMatchExpr(*curCtx, realTarget, *StaticAs<ASTKind::MATCH_EXPR>(node));
                 break;
             }
                 // These patterns are supported, so do type infer framework.
@@ -1204,12 +1249,11 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
             case ASTKind::TUPLE_PATTERN:
             case ASTKind::ENUM_PATTERN:
             case ASTKind::VAR_OR_ENUM_PATTERN: {
-                // Use type check of local type infer framework.
-                chkRet = ChkPattern(*curCtx, *realTarget, *StaticAs<ASTKind::PATTERN>(node));
+                chkRet = ChkPattern(*curCtx, realTarget, *StaticAs<ASTKind::PATTERN>(node));
                 break;
             }
             case ASTKind::BLOCK: {
-                chkRet = ChkBlock(*curCtx, *realTarget, *StaticAs<ASTKind::BLOCK>(node));
+                chkRet = ChkBlock(*curCtx, realTarget, *StaticAs<ASTKind::BLOCK>(node));
                 break;
             }
             case ASTKind::SUBSCRIPT_EXPR: {
@@ -1218,7 +1262,7 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
             }
             case ASTKind::MEMBER_ACCESS: // Fall-through.
             case ASTKind::REF_EXPR: {
-                chkRet = ChkRefExpr(*curCtx, *realTarget, *RawStaticCast<NameReferenceExpr*>(node));
+                chkRet = ChkRefExpr(*curCtx, realTarget, *RawStaticCast<NameReferenceExpr*>(node));
                 break;
             }
             case ASTKind::CALL_EXPR: {
@@ -1226,11 +1270,11 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
                 break;
             }
             case ASTKind::TRAIL_CLOSURE_EXPR: {
-                chkRet = ChkTrailingClosureExpr(*curCtx, *realTarget, *StaticAs<ASTKind::TRAIL_CLOSURE_EXPR>(node));
+                chkRet = ChkTrailingClosureExpr(*curCtx, realTarget, *StaticAs<ASTKind::TRAIL_CLOSURE_EXPR>(node));
                 break;
             }
             case ASTKind::TRY_EXPR: {
-                chkRet = ChkTryExpr(*curCtx, *realTarget, *StaticAs<ASTKind::TRY_EXPR>(node));
+                chkRet = ChkTryExpr(*curCtx, realTarget, *StaticAs<ASTKind::TRY_EXPR>(node));
                 break;
             }
             case ASTKind::RETURN_EXPR: {
@@ -1238,23 +1282,28 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
                 break;
             }
             case ASTKind::LAMBDA_EXPR: {
-                chkRet = ChkLamExpr(*curCtx, *realTarget, *StaticAs<ASTKind::LAMBDA_EXPR>(node));
+                chkRet = ChkLamExpr(*curCtx, realTarget, *StaticAs<ASTKind::LAMBDA_EXPR>(node));
                 break;
             }
             case ASTKind::QUOTE_EXPR: {
-                chkRet = ChkQuoteExpr(*curCtx, *realTarget, *StaticAs<ASTKind::QUOTE_EXPR>(node));
+                chkRet = ChkQuoteExpr(*curCtx, realTarget, *StaticAs<ASTKind::QUOTE_EXPR>(node));
                 break;
             }
             case ASTKind::FUNC_PARAM: {
-                chkRet = ChkFuncParam(*curCtx, *realTarget, *StaticAs<ASTKind::FUNC_PARAM>(node));
+                chkRet = ChkFuncParam(*curCtx, realTarget, *StaticAs<ASTKind::FUNC_PARAM>(node));
+                break;
+            }
+            case ASTKind::THIS_PARAM: {
+                SynThisParam(*curCtx, *StaticAs<ASTKind::THIS_PARAM>(node));
+                chkRet = node->GetTy().IsCorrect();
                 break;
             }
             case ASTKind::FUNC_ARG: {
-                chkRet = ChkFuncArg(*curCtx, *realTarget, *StaticAs<ASTKind::FUNC_ARG>(node));
+                chkRet = ChkFuncArg(*curCtx, realTarget, *StaticAs<ASTKind::FUNC_ARG>(node));
                 break;
             }
             case ASTKind::SPAWN_EXPR: {
-                chkRet = ChkSpawnExpr(*curCtx, *realTarget, *StaticAs<ASTKind::SPAWN_EXPR>(node));
+                chkRet = ChkSpawnExpr(*curCtx, realTarget, *StaticAs<ASTKind::SPAWN_EXPR>(node));
                 break;
             }
             case ASTKind::SYNCHRONIZED_EXPR: {
@@ -1262,21 +1311,25 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
                 break;
             }
             case ASTKind::IS_EXPR: {
-                chkRet = ChkIsExpr(*curCtx, *realTarget, *StaticAs<ASTKind::IS_EXPR>(node));
+                chkRet = ChkIsExpr(*curCtx, realTarget, *StaticAs<ASTKind::IS_EXPR>(node));
                 break;
             }
             case ASTKind::AS_EXPR: {
-                chkRet = ChkAsExpr(*curCtx, *realTarget, *StaticAs<ASTKind::AS_EXPR>(node));
+                chkRet = ChkAsExpr(*curCtx, realTarget, *StaticAs<ASTKind::AS_EXPR>(node));
                 break;
             }
             case ASTKind::OPTIONAL_CHAIN_EXPR: {
-                chkRet = ChkOptionalChainExpr(*curCtx, *realTarget, *StaticAs<ASTKind::OPTIONAL_CHAIN_EXPR>(node));
+                chkRet = ChkOptionalChainExpr(*curCtx, realTarget, *StaticAs<ASTKind::OPTIONAL_CHAIN_EXPR>(node));
                 break;
             }
             case ASTKind::MACRO_EXPAND_EXPR: // Just for LSP, normal process does not have macros here.
             case ASTKind::MACRO_EXPAND_PARAM:
             case ASTKind::MACRO_EXPAND_DECL: {
                 CheckMacroCall(*curCtx, *node);
+                break;
+            }
+            case ASTKind::EXCLAVE_EXPR: {
+                chkRet = ChkExclaveExpr(*curCtx, realTarget, *StaticAs<ASTKind::EXCLAVE_EXPR>(node));
                 break;
             }
             default: {
@@ -1287,10 +1340,10 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, Ptr<Ty> target, Ptr<No
             }
         }
     }
-    CJC_ASSERT(!Ty::IsTyCorrect(node->GetTy()) || As<ASTKind::EXPR>(node) == nullptr ||
+    CJC_ASSERT(!node->GetTy().IsCorrect() || As<ASTKind::EXPR>(node) == nullptr ||
         StaticAs<ASTKind::EXPR>(node)->desugarExpr == nullptr ||
         node->GetTy() == StaticAs<ASTKind::EXPR>(node)->desugarExpr->GetTy());
-    ctx.targetTypeMap[node] = nullptr;
+    ctx.targetTypeMap[node] = ModalTy{};
     node->SetTy(typeManager.TryGreedySubst(node->GetTy()));
     return chkRet;
 }
@@ -1321,6 +1374,12 @@ void TypeChecker::TypeCheckerImpl::CheckConstructor(ASTContext& ctx, const Decl&
     Ptr<Node> firstExprOrDecl = fd.funcBody->body->body.front().get();
     if (firstExprOrDecl == nullptr) {
         return;
+    }
+    if (auto exclave = DynamicCast<ExclaveExpr>(firstExprOrDecl)) {
+        if (!exclave->body || exclave->body->body.empty()) {
+            return;
+        }
+        firstExprOrDecl = exclave->body->body.front().get();
     }
     bool needEraseSuper{false};
     if (auto ce = AST::As<ASTKind::CALL_EXPR>(firstExprOrDecl); ce) {
@@ -1380,7 +1439,7 @@ void TypeChecker::TypeCheckerImpl::CheckCallsInConstructor(
     }
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynthesizeWithCache(const CheckerContext& ctx, Ptr<Node> node)
+ModalTy TypeChecker::TypeCheckerImpl::SynthesizeWithCache(const CheckerContext& ctx, Ptr<Node> node)
 {
     CJC_NULLPTR_CHECK(node);
     if (!typeManager.GetUnsolvedTyVars().empty()) {
@@ -1396,7 +1455,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynthesizeWithCache(const CheckerContext& 
     }
 }
 
-bool TypeChecker::TypeCheckerImpl::CheckWithCache(ASTContext& ctx, Ptr<Ty> target, Ptr<Node> node)
+bool TypeChecker::TypeCheckerImpl::CheckWithCache(ASTContext& ctx, ModalTy target, Ptr<Node> node)
 {
     CJC_NULLPTR_CHECK(node);
     if (!typeManager.GetUnsolvedTyVars().empty()) {
@@ -1412,7 +1471,7 @@ bool TypeChecker::TypeCheckerImpl::CheckWithCache(ASTContext& ctx, Ptr<Ty> targe
     }
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynthesizeWithNegCache(const CheckerContext& ctx, Ptr<Node> node)
+ModalTy TypeChecker::TypeCheckerImpl::SynthesizeWithNegCache(const CheckerContext& ctx, Ptr<Node> node)
 {
     CJC_NULLPTR_CHECK(node);
     if (!typeManager.GetUnsolvedTyVars().empty()) {
@@ -1428,7 +1487,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynthesizeWithNegCache(const CheckerContex
     }
 }
 
-bool TypeChecker::TypeCheckerImpl::CheckWithNegCache(ASTContext& ctx, Ptr<Ty> target, Ptr<Node> node)
+bool TypeChecker::TypeCheckerImpl::CheckWithNegCache(ASTContext& ctx, ModalTy target, Ptr<Node> node)
 {
     CJC_NULLPTR_CHECK(node);
     if (!typeManager.GetUnsolvedTyVars().empty()) {
@@ -1445,13 +1504,13 @@ bool TypeChecker::TypeCheckerImpl::CheckWithNegCache(ASTContext& ctx, Ptr<Ty> ta
 }
 
 bool TypeChecker::TypeCheckerImpl::CheckWithEffectiveCache(
-    ASTContext& ctx, Ptr<Ty> target, Ptr<Node> node, bool recoverDiag)
+    ASTContext& ctx, ModalTy target, Ptr<Node> node, bool recoverDiag)
 {
     if (!typeManager.GetUnsolvedTyVars().empty() || !node) {
         return Check(ctx, target, node);
     }
     CacheKey key = GetCacheKeyForChk(ctx, node, target);
-    if (!Ty::IsInitialTy(node->GetTy())) {
+    if (!Ty::IsInitialTy(node->DataTy())) {
         if (ctx.typeCheckCache[node].lastKey && ctx.typeCheckCache[node].lastKey.value() == key) {
             if (ctx.typeCheckCache[node].chkCache.count(key) != 0) {
                 auto& cache = ctx.typeCheckCache[node].chkCache[key];
@@ -1466,13 +1525,14 @@ bool TypeChecker::TypeCheckerImpl::CheckWithEffectiveCache(
     return CheckAndCache(ctx, target, node, key);
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynthesizeWithEffectiveCache(const CheckerContext& ctx, Ptr<Node> node, bool recoverDiag)
+ModalTy TypeChecker::TypeCheckerImpl::SynthesizeWithEffectiveCache(
+    const CheckerContext& ctx, Ptr<Node> node, bool recoverDiag)
 {
     if (!typeManager.GetUnsolvedTyVars().empty() || !node) {
         return Synthesize(ctx, node);
     }
     CacheKey key = GetCacheKeyForSyn(ctx.Ctx(), node);
-    if (!Ty::IsInitialTy(node->GetTy())) {
+    if (!Ty::IsInitialTy(node->DataTy())) {
         if (ctx.Ctx().typeCheckCache[node].lastKey && ctx.Ctx().typeCheckCache[node].lastKey.value() == key) {
             if (ctx.Ctx().typeCheckCache[node].synCache.count(key) != 0) {
                 auto& cache = ctx.Ctx().typeCheckCache[node].synCache[key];
@@ -1486,21 +1546,21 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynthesizeWithEffectiveCache(const Checker
     return SynthesizeAndCache(ctx, node, key);
 }
 
-Ptr<AST::Ty> TypeChecker::TypeCheckerImpl::SynthesizeAndCache(
+AST::ModalTy TypeChecker::TypeCheckerImpl::SynthesizeAndCache(
     const CheckerContext& ctx, Ptr<AST::Node> node, const CacheKey& key)
 {
     DiagnosticCache dc;
     dc.ToExclude(ctx.Ctx().diag);
     auto ret = Synthesize(ctx, node);
     dc.BackUp(ctx.Ctx().diag);
-    ctx.Ctx().typeCheckCache[node].synCache[key] = {.successful = ret && Ty::IsTyCorrect(ret) && dc.NoError(),
+    ctx.Ctx().typeCheckCache[node].synCache[key] = {.successful = ret && ret.IsCorrect() && dc.NoError(),
         .result = ret,
         .diags = std::move(dc),
         .targets = CollectTargets(*node)};
     return ret;
 }
 
-bool TypeChecker::TypeCheckerImpl::CheckAndCache(ASTContext& ctx, Ptr<Ty> target, Ptr<Node> node, const CacheKey& key)
+bool TypeChecker::TypeCheckerImpl::CheckAndCache(ASTContext& ctx, ModalTy target, Ptr<Node> node, const CacheKey& key)
 {
     DiagnosticCache dc;
     dc.ToExclude(ctx.diag);
@@ -1513,7 +1573,7 @@ bool TypeChecker::TypeCheckerImpl::CheckAndCache(ASTContext& ctx, Ptr<Ty> target
 
 namespace {
 /**  Check if a class has a non-parameter constructor. */
-bool HasNonParamCtorForClass(const ClassDecl& classDecl)
+bool HasNonParamCtorForClass(const ClassDecl& classDecl, ModalInfo requiredModal)
 {
     for (auto& decl : classDecl.body->decls) {
         auto fd = DynamicCast<FuncDecl*>(decl.get());
@@ -1524,6 +1584,10 @@ bool HasNonParamCtorForClass(const ClassDecl& classDecl)
             return false;
         }
         auto& params = fd->funcBody->paramLists[0]->params;
+        auto thisParamTy = StaticCast<FuncTy>(fd->DataTy())->retTy;
+        if (thisParamTy.Mode() != requiredModal) {
+            continue;
+        }
         if (params.empty()) {
             if (fd->TestAttr(Attribute::PRIVATE)) {
                 return false;
@@ -1565,14 +1629,16 @@ void TypeChecker::TypeCheckerImpl::CheckConstructorSuper(
     auto cd = RawStaticCast<const ClassDecl*>(&decl);
     // remove compiler added super() when there is no non-parameter constructor in super class
     Ptr<ClassDecl> superCD = cd->GetSuperClassDecl();
-    needEraseSuper = superCD && !HasNonParamCtorForClass(*superCD);
+    auto requiredModal = GetThisParamModal(fd);
+    needEraseSuper = superCD && !HasNonParamCtorForClass(*superCD, requiredModal);
     if (!needEraseSuper) {
         return;
     }
     auto& fdName = fd.TestAttr(Attribute::PRIMARY_CONSTRUCTOR) ? fd.identifierForLsp : fd.identifier.Val();
     auto range =
         fd.TestAttr(Attribute::IMPLICIT_ADD) ? MakeRange(decl.identifier) : MakeRange(fd.identifier.Begin(), fdName);
-    (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_no_non_param_constructor_in_super_class, fd, range);
+    auto modeString = requiredModal == ModalInfo{} ? "" : " with " + requiredModal.LocalString() + " mode";
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_no_non_param_constructor_in_super_class, fd, range, modeString);
     fd.constructorCall = ConstructorCall::NONE;
 }
 
@@ -1676,7 +1742,7 @@ bool TypeChecker::TypeCheckerImpl::IsCapturedInCFuncLambda(const ASTContext& ctx
         return false;
     }
     // Fast path 2: RefExpr and target are not in the same function body and current function is a CFunc.
-    if (auto fty = DynamicCast<AST::FuncTy*>(fb->GetTy()); fty && fty->isC) {
+    if (auto fty = DynamicCast<AST::FuncTy>(fb->DataTy()); fty && fty->isC) {
         return true;
     }
     if (!Is<AST::VarDecl*>(re.ref.target) && !Is<AST::FuncDecl*>(re.ref.target)) {
@@ -1688,7 +1754,7 @@ bool TypeChecker::TypeCheckerImpl::IsCapturedInCFuncLambda(const ASTContext& ctx
         if (outerFb == targetFb) {
             return false;
         }
-        if (auto fty = DynamicCast<AST::FuncTy*>(outerFb->GetTy()); fty && fty->isC) {
+        if (auto fty = DynamicCast<AST::FuncTy>(outerFb->DataTy()); fty && fty->isC) {
             return true;
         }
         outerFb = GetCurFuncBody(ctx, ScopeManagerApi::GetParentScopeName(outerFb->scopeName));
@@ -1755,7 +1821,7 @@ void TypeChecker::TypeCheckerImpl::CheckLegalUseOfClosure(const ASTContext& ctx,
 
 bool TypeChecker::TypeCheckerImpl::IsCapturedCStructOfClosure(const VarDecl& decl) const
 {
-    return decl.TestAttr(Attribute::IS_CAPTURE) && decl.GetTy() && Ty::IsCTypeConstraint(*decl.GetTy());
+    return decl.TestAttr(Attribute::IS_CAPTURE) && decl.GetTy() && decl.GetTy()->IsCTypeConstraint();
 }
 
 void TypeChecker::TypeCheckerImpl::CheckCHIRClassDependencies()
@@ -1774,7 +1840,7 @@ void MarkOverflow(Node& node)
             case ASTKind::LIT_CONST_EXPR: {
                 auto lce = StaticAs<ASTKind::LIT_CONST_EXPR>(node);
                 if (lce->GetTy() && lce->GetTy()->IsInteger()) {
-                    auto primitiveTy = RawStaticCast<PrimitiveTy*>(lce->GetTy());
+                    auto primitiveTy = RawStaticCast<PrimitiveTy*>(lce->DataTy());
                     lce->constNumValue.asInt.SetOutOfRange(primitiveTy);
                 }
                 return VisitAction::WALK_CHILDREN;
@@ -1785,78 +1851,6 @@ void MarkOverflow(Node& node)
         }
     });
     checkOverflowWalker.Walk();
-}
-
-void AddBuiltInArrayDecl(Package& pkg)
-{
-    auto bid = MakeOwned<BuiltInDecl>(BuiltInType::ARRAY);
-    bid->identifier = RAW_ARRAY_NAME;
-    bid->generic = MakeOwned<Generic>();
-    auto gpd = MakeOwnedNode<GenericParamDecl>();
-    gpd->identifier = "T";
-    gpd->outerDecl = bid.get();
-    bid->generic->typeParameters.emplace_back(std::move(gpd));
-    bid->EnableAttr(Attribute::GLOBAL, Attribute::GENERIC);
-    CopyFileID(bid.get(), pkg.files[0].get());
-    pkg.files[0]->decls.emplace_back(std::move(bid)); // Caller guarantees file not empty.
-}
-
-void AddBuiltInPointerDecl(Package& pkg)
-{
-    auto bid = MakeOwned<BuiltInDecl>(BuiltInType::POINTER);
-    bid->identifier = CPOINTER_NAME;
-    bid->generic = MakeOwned<Generic>();
-    auto gpd = MakeOwnedNode<GenericParamDecl>();
-    gpd->identifier = "T";
-    gpd->outerDecl = bid.get();
-    bid->generic->typeParameters.emplace_back(std::move(gpd));
-    bid->generic->genericConstraints.emplace_back(CreateConstraintForFFI(CTYPE_NAME));
-
-    bid->EnableAttr(Attribute::PUBLIC, Attribute::GLOBAL, Attribute::GENERIC);
-    CopyFileID(bid.get(), pkg.files[0].get());
-    pkg.files[0]->decls.emplace_back(std::move(bid)); // Caller guarantees file not empty.
-}
-
-void AddBuiltInCStringDecl(Package& pkg)
-{
-    auto bid = MakeOwned<BuiltInDecl>(BuiltInType::CSTRING);
-    bid->identifier = CSTRING_NAME;
-    bid->generic = nullptr;
-    bid->EnableAttr(Attribute::PUBLIC, Attribute::GLOBAL);
-    CopyFileID(bid.get(), pkg.files[0].get());
-    pkg.files[0]->decls.emplace_back(std::move(bid)); // Caller guarantees file not empty.
-}
-
-void AddBuiltInVArrayDecl(Package& pkg)
-{
-    auto bid = MakeOwned<BuiltInDecl>(BuiltInType::VARRAY);
-    bid->identifier = VARRAY_NAME;
-    bid->generic = MakeOwned<Generic>();
-    auto gpd = MakeOwnedNode<GenericParamDecl>();
-    gpd->identifier = "T";
-    gpd->outerDecl = bid.get();
-    bid->generic->typeParameters.emplace_back(std::move(gpd));
-    bid->EnableAttr(Attribute::GLOBAL);
-    bid->EnableAttr(Attribute::PUBLIC);
-    bid->EnableAttr(Attribute::GENERIC);
-    CopyFileID(bid.get(), pkg.files[0].get());
-    pkg.files[0]->decls.emplace_back(std::move(bid)); // Caller guarantees file not empty.
-}
-
-void AddBuiltinCFuncDecl(Package& pkg)
-{
-    auto bid = MakeOwned<BuiltInDecl>(BuiltInType::CFUNC);
-    bid->identifier = CFUNC_NAME;
-    bid->generic = MakeOwned<Generic>();
-    auto gpd = MakeOwnedNode<GenericParamDecl>();
-    gpd->identifier = "T";
-    gpd->outerDecl = &*bid;
-    bid->generic->typeParameters.push_back(std::move(gpd));
-    bid->EnableAttr(Attribute::GLOBAL);
-    bid->EnableAttr(Attribute::PUBLIC);
-    bid->EnableAttr(Attribute::GENERIC);
-    CopyFileID(&*bid, &*pkg.files[0]);
-    pkg.files[0]->decls.push_back(std::move(bid));
 }
 
 void AddAttrForDefaultFuncParam(Package& pkg)
@@ -1904,10 +1898,10 @@ void MarkImplicitUsedFunctions(const Package& pkg)
 } // namespace
 
 Ptr<Decl> TypeChecker::TypeCheckerImpl::GetImplementedTargetIfExist(
-    const ASTContext& ctx, const Ty& interfaceTy, Decl& target, const MultiTypeSubst& typeMapping)
+    const ASTContext& ctx, ModalTy interfaceTy, Decl& target, const MultiTypeSubst& typeMapping)
 {
     auto targetInstanceTy = typeManager.GetBestInstantiatedTy(target.GetTy(), typeMapping);
-    auto id = Ty::GetDeclPtrOfTy<InheritableDecl>(&interfaceTy);
+    auto id = Ty::GetDeclPtrOfTy<InheritableDecl>(interfaceTy);
     auto members = FieldLookup(ctx, id, target.identifier);
     for (auto& member : members) {
         bool isSameSignature = false;
@@ -1920,8 +1914,8 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::GetImplementedTargetIfExist(
             // eg: interface I<T> { f(T) }; interface I1 <: I<A> & I<B> { f(A) }
             // I1<B>.f(b) should diag error.
             // f(A) is the overwritten version, but not the correct version of the final call.
-            auto memberFuncTy = DynamicCast<FuncTy*>(member->GetTy());
-            auto targetFuncTy = DynamicCast<FuncTy*>(targetInstanceTy);
+            auto memberFuncTy = DynamicCast<FuncTy*>(member->DataTy());
+            auto targetFuncTy = DynamicCast<FuncTy*>(targetInstanceTy.Ty());
             if (!Ty::IsTyCorrect(memberFuncTy) || !Ty::IsTyCorrect(targetFuncTy)) {
                 continue;
             }
@@ -1942,9 +1936,17 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::GetImplementedTargetIfExist(
             for (auto& it : targetParamTys) {
                 it = typeManager.GetBestInstantiatedTy(it, mts);
             }
-            isSameSignature = typeManager.IsFuncParameterTypesIdentical(memberParamTys, targetParamTys);
+            bool thisParamMatch{true};
+            if (typeManager.HasThisParam(*memberFuncDecl)) {
+                thisParamMatch =
+                    typeManager.CheckTypeCompatibility(typeManager.GetThisParamTy(*memberFuncDecl),
+                        typeManager.GetThisParamTy(*targetFuncDecl), false) == TypeCompatibility::IDENTICAL;
+            }
+            isSameSignature =
+                typeManager.IsFuncParameterTypesIdentical(memberParamTys, targetParamTys) && thisParamMatch;
         } else if (member->astKind == ASTKind::PROP_DECL && target.astKind == ASTKind::PROP_DECL) {
-            if (!IsOverrideOrShadow(typeManager, *RawStaticCast<PropDecl*>(member), static_cast<PropDecl&>(target))) {
+            if (!TypeCheckUtil::IsOverrideOrShadow(
+                typeManager, *RawStaticCast<PropDecl*>(member), static_cast<PropDecl&>(target))) {
                 continue;
             }
             isSameSignature = member->GetTy() == targetInstanceTy;
@@ -1957,7 +1959,7 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::GetImplementedTargetIfExist(
 }
 
 std::pair<bool, Ptr<RefExpr>> TypeChecker::TypeCheckerImpl::CheckInvokeTargetHasImpl(const ASTContext& ctx,
-    Ty& interfaceTy, Decl& decl, MultiTypeSubst& typeMapping, std::unordered_set<Ptr<AST::Decl>>& traversedDecls)
+    ModalTy interfaceTy, Decl& decl, MultiTypeSubst& typeMapping, std::unordered_set<Ptr<AST::Decl>>& traversedDecls)
 {
     std::pair<bool, Ptr<RefExpr>> ret{false, nullptr};
     auto preVisit = [this, &ret, &ctx, &interfaceTy, &typeMapping, &traversedDecls](Ptr<Node> node) -> VisitAction {
@@ -1978,7 +1980,8 @@ std::pair<bool, Ptr<RefExpr>> TypeChecker::TypeCheckerImpl::CheckInvokeTargetHas
             traversedDecls.emplace(target);
             // Update all generic derivation results to typeMapping.
             if (re->matchedParentTy && target->outerDecl->GetTy()) {
-                typeMapping.merge(promotion.GetPromoteTypeMapping(*re->matchedParentTy, *target->outerDecl->GetTy()));
+                typeMapping.merge(
+                    promotion.GetPromoteTypeMapping(re->matchedParentTy.Ty(), target->outerDecl->DataTy()));
             }
             // Check whether the current invoking is implemented in the 'interfaceTy'.
             auto newTarget = GetImplementedTargetIfExist(ctx, interfaceTy, *target, typeMapping);
@@ -2060,6 +2063,7 @@ void TypeChecker::TypeCheckerImpl::PostTypeCheck(std::vector<Ptr<ASTContext>>& c
         AddAttrForDefaultFuncParam(*ctx->curPackage);
         // Because of the cjlint checking policy, desugar of propDecl should be done in sema stage for now.
         DesugarForPropDecl(*ctx->curPackage);
+        CheckModalType(*ctx, *ctx->curPackage);
         CheckConstEvaluation(*ctx->curPackage);
         MarkImplicitUsedFunctions(*ctx->curPackage);
         // Collect program entry separately.
@@ -2096,11 +2100,7 @@ void TypeChecker::TypeCheckerImpl::PrepareTypeCheck(ASTContext& ctx, Package& pk
     AddDefaultFunction(pkg);
     // Add built-in decls to core package.
     if (pkg.fullPackageName == CORE_PACKAGE_NAME && !pkg.files.empty() && !pkg.TestAttr(Attribute::IMPORTED)) {
-        AddBuiltInArrayDecl(pkg);
-        AddBuiltInVArrayDecl(pkg);
-        AddBuiltInPointerDecl(pkg);
-        AddBuiltinCFuncDecl(pkg);
-        AddBuiltInCStringDecl(pkg);
+        CreateBuiltinDecls(pkg);
     }
     Utils::ProfileRecorder::Stop("PrepareTypeCheck", "AddDefaultFuncAndBuiltinDecl");
     // Phase: build symbol table.
@@ -2281,11 +2281,18 @@ void TypeChecker::TypeCheckerImpl::SetFuncDeclConstructorCall(FuncDecl& fd) cons
         return;
     }
     Ptr<RefExpr> refExpr = nullptr;
-    if (auto ce = DynamicCast<CallExpr*>(fd.funcBody->body->body.begin()->get()); ce) {
+    auto first = &*fd.funcBody->body->body.front();
+    if (auto exclave = DynamicCast<ExclaveExpr*>(first)) {
+        if (exclave->body && exclave->body->body.empty()) {
+            return;
+        }
+        first = &*exclave->body->body.front();
+    }
+    if (auto ce = DynamicCast<CallExpr>(first)) {
         if (auto re = DynamicCast<RefExpr*>(ce->baseFunc.get()); re) {
             refExpr = re;
         }
-    } else if (auto tce = DynamicCast<TrailingClosureExpr*>(fd.funcBody->body->body.begin()->get()); tce) {
+    } else if (auto tce = DynamicCast<TrailingClosureExpr>(first)) {
         if (auto callExpr = DynamicCast<CallExpr*>(tce->desugarExpr.get()); callExpr) {
             if (auto re = DynamicCast<RefExpr*>(callExpr->baseFunc.get()); re) {
                 refExpr = re;
@@ -2474,6 +2481,16 @@ OwnedPtr<FuncDecl> MakeDefaultParamFunction(
         params.emplace_back(CreateFuncParamForOptional(*param));
     }
     funcBody->paramLists[0]->params = std::move(params);
+    if (funcDecl.funcBody->paramLists[0]->thisParam) {
+        auto clonedThis = MakeOwnedNode<ThisParam>();
+        clonedThis->thisPos = funcDecl.funcBody->paramLists[0]->thisParam->thisPos;
+        clonedThis->modal = funcDecl.funcBody->paramLists[0]->thisParam->modal;
+        clonedThis->outerDecl = &*ret;
+        for (auto& anno : funcDecl.funcBody->paramLists[0]->thisParam->annotations) {
+            clonedThis->annotations.emplace_back(ASTCloner::Clone(anno.get(), SetIsClonedSourceCode));
+        }
+        funcBody->paramLists[0]->thisParam = std::move(clonedThis);
+    }
     ret->funcBody = std::move(funcBody);
     // Set return expr.
     auto returnExpr = MakeOwnedNode<ReturnExpr>();
@@ -2557,23 +2574,23 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
     }
 }
 
-Ptr<Decl> TypeChecker::TypeCheckerImpl::GetDupInterfaceRecursively(const Node& triggerNode, Ty& interfaceTy,
+Ptr<Decl> TypeChecker::TypeCheckerImpl::GetDupInterfaceRecursively(const Node& triggerNode, ModalTy interfaceTy,
     const TypeSubst& instantiateMap, std::unordered_set<Ptr<InterfaceTy>>& res,
     std::unordered_set<Ptr<ClassLikeDecl>>& passedClassLikeDecls)
 {
-    auto insTy = typeManager.GetInstantiatedTy(&interfaceTy, instantiateMap);
+    auto insTy = typeManager.GetInstantiatedTy(interfaceTy, instantiateMap);
     // When `ity` is invalid, it indicates that an inheritance cycle appeared.
     // In this case, we do not need to continue with the following steps.
-    if (!Ty::IsTyCorrect(insTy) || !insTy->IsInterface()) {
+    if (!insTy.IsCorrect() || !insTy->IsInterface()) {
         return nullptr;
     }
-    auto ity = RawStaticCast<InterfaceTy*>(insTy);
+    auto ity = RawStaticCast<InterfaceTy*>(insTy.Ty());
     auto insertRes = res.insert(ity);
     if (!insertRes.second) {
         return ity->declPtr;
     }
     CJC_NULLPTR_CHECK(ity->declPtr);
-    TypeSubst superInstantiateMap = GenerateTypeMapping(*ity->declPtr, ity->typeArgs);
+    TypeSubst superInstantiateMap = GenerateTypeMapping(*ity->declPtr, ity->TyArgs());
     if (superInstantiateMap.empty()) {
         return nullptr;
     }
@@ -2584,23 +2601,23 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::GetExtendDupSuperInterface(const Node& t
     const TypeSubst& instantiateMap, std::unordered_set<Ptr<InterfaceTy>>& res,
     std::unordered_set<Ptr<ClassLikeDecl>>& passedClassLikeDecls)
 {
-    if (!decl.TestAttr(Attribute::GENERIC) || !Ty::IsTyCorrect(decl.GetTy())) {
+    if (!decl.TestAttr(Attribute::GENERIC) || !decl.GetTy().IsCorrect()) {
         return nullptr;
     }
     auto extends = typeManager.GetDeclExtends(decl);
     for (auto& extend : extends) {
         // Generate typeMapping from extend decl's generic type to original decl type.
-        TypeSubst extendInstMap = GenerateTypeMapping(*extend, decl.GetTy()->typeArgs);
+        TypeSubst extendInstMap = GenerateTypeMapping(*extend, decl.GetTy()->TyArgs());
         if (extendInstMap.size() != instantiateMap.size()) {
             continue;
         }
         extendInstMap.insert(instantiateMap.begin(), instantiateMap.end());
         for (auto& interfaceType : extend->inheritedTypes) {
-            if (!Ty::IsTyCorrect(interfaceType->GetTy())) {
+            if (!interfaceType->GetTy().IsCorrect()) {
                 continue;
             }
             auto ret = GetDupInterfaceRecursively(
-                triggerNode, *interfaceType->GetTy(), extendInstMap, res, passedClassLikeDecls);
+                triggerNode, interfaceType->GetTy(), extendInstMap, res, passedClassLikeDecls);
             if (ret) {
                 return ret;
             }
@@ -2621,11 +2638,11 @@ Ptr<Decl> TypeChecker::TypeCheckerImpl::GetDupSuperInterface(const Node& trigger
     }
     std::unordered_set<Ptr<InterfaceTy>> instInterfaceTys;
     for (auto& interfaceType : decl.inheritedTypes) {
-        if (!Ty::IsTyCorrect(interfaceType->GetTy())) {
+        if (!interfaceType->GetTy().IsCorrect()) {
             continue;
         }
         auto ret = GetDupInterfaceRecursively(
-            triggerNode, *interfaceType->GetTy(), instantiateMap, instInterfaceTys, passedClassLikeDecls);
+            triggerNode, interfaceType->GetTy(), instantiateMap, instInterfaceTys, passedClassLikeDecls);
         if (ret) {
             return ret;
         }
@@ -2643,7 +2660,7 @@ void TypeChecker::TypeCheckerImpl::CheckInstDupSuperInterfaces(
     std::unordered_set<Ptr<ClassLikeDecl>> passedClassLikeDecls;
     auto interfaceDecl = GetDupSuperInterface(triggerNode, decl, instantiateMap, passedClassLikeDecls, checkExtend);
     auto baseDecl = Ty::GetDeclPtrOfTy(decl.GetTy());
-    std::string name = baseDecl ? baseDecl->identifier.Val() : Ty::ToString(decl.GetTy());
+    std::string name = baseDecl ? baseDecl->identifier.Val() : Ty::ToString(decl.DataTy());
     if (interfaceDecl) {
         diag.Diagnose(triggerNode, DiagKind::sema_inherit_duplicate_interface, DeclKindToString(decl), name,
             interfaceDecl->identifier.Val());
@@ -2652,14 +2669,14 @@ void TypeChecker::TypeCheckerImpl::CheckInstDupSuperInterfaces(
 
 VisitAction TypeChecker::TypeCheckerImpl::CheckInstDupSuperInterfaces(const Type& type)
 {
-    if (!Ty::IsTyCorrect(type.GetTy())) {
+    if (!type.GetTy().IsCorrect()) {
         return VisitAction::SKIP_CHILDREN;
     }
     auto typeTarget = TypeCheckUtil::GetRealTarget(type.GetTarget());
     if (!typeTarget || !typeTarget->IsNominalDecl()) {
         return VisitAction::WALK_CHILDREN;
     }
-    TypeSubst typeMapping = GenerateTypeMapping(*typeTarget, type.GetTy()->typeArgs);
+    TypeSubst typeMapping = GenerateTypeMapping(*typeTarget, type.GetTy()->TyArgs());
     if (typeMapping.empty()) {
         return VisitAction::SKIP_CHILDREN;
     }
@@ -2670,7 +2687,7 @@ VisitAction TypeChecker::TypeCheckerImpl::CheckInstDupSuperInterfaces(const Type
 
 VisitAction TypeChecker::TypeCheckerImpl::CheckInstDupSuperInterfaces(const Expr& expr)
 {
-    if (!Ty::IsTyCorrect(expr.GetTy())) {
+    if (!expr.GetTy().IsCorrect()) {
         return VisitAction::WALK_CHILDREN;
     }
     auto target = TypeCheckUtil::GetRealTarget(expr.GetTarget());
@@ -2729,7 +2746,7 @@ void TypeChecker::TypeCheckerImpl::CheckOverflow(Node& node)
         switch (node->astKind) {
             case ASTKind::LIT_CONST_EXPR: {
                 auto& lce = *StaticAs<ASTKind::LIT_CONST_EXPR>(node);
-                if (!lce.desugarExpr && Ty::IsTyCorrect(lce.GetTy())) {
+                if (!lce.desugarExpr && lce.GetTy().IsCorrect()) {
                     ChkLitConstExprRange(lce);
                 }
                 return VisitAction::WALK_CHILDREN;
@@ -2742,34 +2759,44 @@ void TypeChecker::TypeCheckerImpl::CheckOverflow(Node& node)
     walker.Walk();
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::CalcFuncRetTyFromBody(const FuncBody& fb)
+ModalTy TypeChecker::TypeCheckerImpl::CalcFuncRetTyFromBody(const FuncBody& fb)
 {
     if (!fb.body) {
-        return TypeManager::GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
 
     if (fb.body->body.empty()) {
-        return TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
+        return {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)};
     }
 
     auto& lastNode = fb.body->body.back();
-    Ptr<Ty> bodyTy = lastNode->IsDecl() ? TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT) : lastNode->GetTy();
-    Ptr<Ty> retTy = bodyTy;
-    std::set<Ptr<Ty>> retTys;
+    ModalTy bodyTy = lastNode->IsDecl() ? ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)} : lastNode->GetTy();
+    ModalTy retTy = bodyTy;
+    std::set<ModalTy> retTys;
     Walker(fb.body.get(), [&retTys](auto node) {
         CJC_ASSERT(node);
         if (node->astKind == ASTKind::FUNC_DECL || node->astKind == ASTKind::LAMBDA_EXPR) {
             return VisitAction::SKIP_CHILDREN;
         } else if (auto re = DynamicCast<ReturnExpr*>(node); re && re->expr) {
-            if (Ty::IsTyCorrect(re->expr->GetTy())) {
+            if (re->expr->GetTy().IsCorrect()) {
                 retTys.emplace(re->expr->GetTy());
+            }
+        } else if (auto exclave = DynamicCast<ExclaveExpr>(node)) {
+            if (exclave->body->GetTy().IsCorrect()) {
+                // An exclave block yields a local value. Its contribution to the inferred
+                // return type carries the body's modal as-is: when the body's last expression
+                // is a literal in a func-arg lambda's implicit-return position, that modal is
+                // IDEAL (pending) and will be unified with the expected contextual modal during
+                // generic type argument inference (then default to ~local if unresolved);
+                // otherwise the body keeps its concrete modal.
+                retTys.emplace(exclave->body->GetTy());
             }
         }
         return VisitAction::WALK_CHILDREN;
     }).Walk();
     CJC_NULLPTR_CHECK(fb.retType);
     // Only calculate return type with the function body ty when the given return type is not exist or is not unit.
-    bool returnUnit = Ty::IsTyCorrect(fb.retType->GetTy()) && fb.retType->GetTy()->IsUnit();
+    bool returnUnit = fb.retType->GetTy().IsCorrect() && fb.retType->GetTy()->IsUnit();
     if (returnUnit) {
         // It no return expression existed, return the user given unit type.
         if (retTys.empty()) {
@@ -2778,7 +2805,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::CalcFuncRetTyFromBody(const FuncBody& fb)
     } else {
         retTys.emplace(bodyTy);
     }
-    if (Ty::IsTyCorrect(bodyTy)) {
+    if (bodyTy.IsCorrect()) {
         auto joinAndMeet = JoinAndMeet(typeManager, retTys, {}, &importManager, fb.curFile);
         auto joinRes = joinAndMeet.JoinAsVisibleTy();
         auto [optErrs, joinedRet] = JoinAndMeet::SetJoinedType(retTy, joinRes);
@@ -2787,9 +2814,17 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::CalcFuncRetTyFromBody(const FuncBody& fb)
             auto builder = diag.Diagnose(*lastNode, DiagKind::sema_incompatible_func_body_and_return_type);
             builder.AddNote(*optErrs);
         }
+        // A function's inferred return type is a concrete type, not a func-arg lambda whose modal
+        // may stay pending for generic inference. Resolve any IDEAL (pending literal modal) here
+        // so it never reaches the back end; per spec an unresolved modal defaults to ~local (NOT).
+        // Only for named functions (funcDecl != nullptr): lambda bodies keep IDEAL pending for the
+        // enclosing generic call's type argument inference.
+        if (fb.funcDecl != nullptr) {
+            retTy = typeManager.ReplaceIdealTy(retTy);
+        }
         return retTy;
     } else {
-        return TypeManager::GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
 }
 } // namespace Cangjie

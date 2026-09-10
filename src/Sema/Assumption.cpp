@@ -21,36 +21,36 @@ using namespace AST;
 
 namespace {
 /** Add the subtype relation subTy <: upperBoundTy to the type constraint collection @p typeConstraintCollection. */
-void AddConstraint(TyVarEnv& typeConstraintCollection, Ty& subTy, Ty& upperBoundTy)
+void AddConstraint(TyVarEnv& typeConstraintCollection, DataTy subTy, DataTy upperBoundTy)
 {
-    if (!subTy.IsGeneric()) {
+    if (!subTy->IsGeneric()) {
         return;
     }
-    auto subGen = RawStaticCast<GenericsTy*>(&subTy);
-    subGen->upperBounds.insert(&upperBoundTy);
+    Ptr<TyVar> subGen = RawStaticCast<GenericsTy*>(subTy);
+    subGen->upperBounds.insert(upperBoundTy);
     auto found = typeConstraintCollection.find(subGen);
     if (found == typeConstraintCollection.end()) {
-        typeConstraintCollection.emplace(subGen, std::set<Ptr<Ty>>{&upperBoundTy});
+        typeConstraintCollection.emplace(subGen, std::set<ModalTy>{{upperBoundTy}});
     } else {
-        found->second.insert(&upperBoundTy);
+        found->second.insert({upperBoundTy});
     }
 }
 
 /** Check whether the type constraint collection @p typeConstraintCollection has subtype relashion: subTy <: baseTy. */
-bool LookUpConstraintCollection(Ty& subTy, Ty& baseTy, const TyVarEnv& typeConstraintCollection)
+bool LookUpConstraintCollection(DataTy subTy, DataTy baseTy, const TyVarEnv& typeConstraintCollection)
 {
-    if (&subTy == &baseTy) {
+    if (subTy == baseTy) {
         return true;
     }
-    if (!subTy.IsGeneric()) {
+    if (!subTy->IsGeneric()) {
         return false;
     }
-    auto found = typeConstraintCollection.find(StaticCast<TyVar*>(&subTy));
+    auto found = typeConstraintCollection.find(StaticCast<TyVar>(subTy));
     // If the subTy cannot be found in typeConstraintCollection, return false.
     if (found == typeConstraintCollection.end()) {
         return false;
     }
-    return found->second.find(&baseTy) != found->second.end();
+    return found->second.find({baseTy}) != found->second.end();
 }
 
 /**
@@ -59,7 +59,7 @@ bool LookUpConstraintCollection(Ty& subTy, Ty& baseTy, const TyVarEnv& typeConst
 bool IsUpperBoundsValid(const std::vector<OwnedPtr<Type>>& upperBounds)
 {
     for (auto& upper : upperBounds) {
-        if (!Ty::IsTyCorrect(upper->GetTy())) {
+        if (!upper->GetTy().IsCorrect()) {
             return false;
         }
     }
@@ -67,11 +67,11 @@ bool IsUpperBoundsValid(const std::vector<OwnedPtr<Type>>& upperBounds)
 }
 } // namespace
 
-void TypeChecker::TypeCheckerImpl::PerformAssumeReferenceTypeUpperBound(TyVarUB& typeConstraintCollection,
-    GCBlames& blames, const AST::Type& referenceTypeUpperBound, const TypeSubst& typeMapping)
+void TypeChecker::TypeCheckerImpl::PerformAssumeReferenceTypeUpperBound(TyVarEnv& typeConstraintCollection,
+    GCBlames& blames, const Type& referenceTypeUpperBound, const TypeSubst& typeMapping)
 {
-    auto upperBoundTy = referenceTypeUpperBound.GetTy();
-    Ptr<Decl> baseDecl = Ty::GetDeclPtrOfTy(upperBoundTy);
+    ModalTy upperBoundTy = referenceTypeUpperBound.GetTy();
+    Ptr<Decl> baseDecl = Ty::GetDeclPtrOfTy(upperBoundTy.Ty());
     // If the upperBound is a generic Type and has associate declaration, perform assumption recursively.
     if (baseDecl != nullptr && Ty::IsTyCorrect(upperBoundTy) && upperBoundTy->HasGeneric()) {
         // 1. Create substitute Map between generic tys of upperBound's decl and current uppBound's tys which
@@ -83,7 +83,7 @@ void TypeChecker::TypeCheckerImpl::PerformAssumeReferenceTypeUpperBound(TyVarUB&
 }
 
 void TypeChecker::TypeCheckerImpl::AssumeOneUpperBound(
-    TyVarUB& typeConstraintCollection, GCBlames& blames, const AST::Type& upperBound, const TypeSubst& typeMapping)
+    TyVarEnv& typeConstraintCollection, GCBlames& blames, const Type& upperBound, const TypeSubst& typeMapping)
 {
     switch (upperBound.astKind) {
         case ASTKind::REF_TYPE:
@@ -97,9 +97,9 @@ void TypeChecker::TypeCheckerImpl::AssumeOneUpperBound(
 }
 
 void TypeChecker::TypeCheckerImpl::PerformAssumptionForOneGenericConstraint(
-    TyVarUB& typeConstraintCollection, GCBlames& blames, const GenericConstraint& gc, const TypeSubst& typeMapping)
+    TyVarEnv& typeConstraintCollection, GCBlames& blames, const GenericConstraint& gc, const TypeSubst& typeMapping)
 {
-    auto subTypeTy = gc.type->GetTy();
+    auto subTypeTy = gc.type->DataTy();
     if (!Ty::IsTyCorrect(subTypeTy)) {
         return;
     }
@@ -108,24 +108,24 @@ void TypeChecker::TypeCheckerImpl::PerformAssumptionForOneGenericConstraint(
         if (!upperBound) {
             continue;
         }
-        auto upperBoundTy = upperBound->GetTy();
+        auto upperBoundTy = upperBound->DataTy();
         if (!Ty::IsTyCorrect(upperBoundTy)) {
             continue;
         }
         auto baseTy = typeManager.GetInstantiatedTy(upperBoundTy, typeMapping);
         // If the constraint is already exist in typeConstraintCollection, no need to do assumption recursively.
-        if (!subTy->IsGeneric() || LookUpConstraintCollection(*subTy, *baseTy, typeConstraintCollection)) {
+        if (!subTy->IsGeneric() || LookUpConstraintCollection(subTy, baseTy, typeConstraintCollection)) {
             continue;
         }
         // Add the constraint to the typeConstraintCollection.
-        AddConstraint(typeConstraintCollection, *subTy, *baseTy);
-        blames[subTy][baseTy].emplace(&gc);
+        AddConstraint(typeConstraintCollection, subTy, baseTy);
+        blames[ModalTy{subTy}][ModalTy{baseTy}].emplace(&gc);
         AssumeOneUpperBound(typeConstraintCollection, blames, *upperBound, typeMapping);
     }
 }
 
 void TypeChecker::TypeCheckerImpl::Assumption(
-    TyVarUB& typeConstraintCollection, GCBlames& blames, const AST::Decl& decl, const TypeSubst& typeMapping)
+    TyVarEnv& typeConstraintCollection, GCBlames& blames, const Decl& decl, const TypeSubst& typeMapping)
 {
     Ptr<Generic> generic = decl.GetGeneric();
     if (generic == nullptr) {

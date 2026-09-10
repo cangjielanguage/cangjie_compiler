@@ -531,6 +531,9 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
     if (astFunc.isConst) {
         chirFunc.EnableAttr(Attribute::CONST);
     }
+    if (AST::HasModifier(astFunc.modifiers, TokenKind::EXCLAVE)) {
+        chirFunc.EnableAttr(Attribute::EXCLAVE);
+    }
     // in SEMA, if a local const func is declared in static member method, it will be set STATIC
     // STATIC can be set for local func in SEMA, but not in CHIR, especially for const local func,
     // it can be lifted to global func, we need to disable STATIC, otherwise, a wrong Function will be generated in CHIR
@@ -583,9 +586,6 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
 
 void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
 {
-    if (funcDecl.TestAttr(AST::Attribute::GENERIC)) {
-        TranslateFunctionGenericUpperBounds(chirType, funcDecl);
-    }
     if (kind == IncreKind::INCR && !funcDecl.toBeCompiled && !IsSrcCodeImportedGlobalDecl(funcDecl, opts)) {
         CreatePseudoImportedFuncSignatureAndSetGlobalCache(funcDecl);
         return;
@@ -604,7 +604,7 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
         fn->SetFeatures(features);
         return;
     }
-    auto fnTy = chirType.TranslateType(*funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     // Create BlockGroup with argument
 
@@ -668,7 +668,7 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
 
 void AST2CHIR::CreatePseudoImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
 {
-    auto fnTy = chirType.TranslateType(*funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     FuncType* funcTy = StaticCast<FuncType*>(fnTy);
     auto genericParamTy = GetGenericParamType(funcDecl, chirType);
@@ -689,7 +689,7 @@ void AST2CHIR::CreatePseudoImportedFuncSignatureAndSetGlobalCache(const AST::Fun
         fn->AddParam(*chirParam);
     }
     for (auto& param : funcDecl.funcBody->paramLists[0]->params) {
-        auto pType = chirType.TranslateType(*param->GetTy());
+        auto pType = chirType.TranslateType(param->GetTy());
         auto loc = TranslateLocationWithoutScope(builder.GetChirContext(), param->begin, param->end);
         auto chirParam = builder.CreateParameter(pType, loc, *fn);
         chirParam->SetSrcCodeIdentifier(param->identifier.GetRawText());
@@ -702,7 +702,7 @@ namespace {
 void ConvertImportedFunctionType(
     Function& fn, const AST::FuncDecl& funcDecl, CHIRType& chirType, CHIRBuilder& builder)
 {
-    auto fnTy = chirType.TranslateType(*funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     if (fn.GetFuncType() == fnTy) {
         return;
@@ -725,11 +725,7 @@ void AST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl&
         fn->SetDebugLocation(loc);
         return;
     }
-    bool isGeneric = funcDecl.TestAttr(AST::Attribute::GENERIC);
-    if (isGeneric) {
-        TranslateFunctionGenericUpperBounds(chirType, funcDecl);
-    }
-    auto fnTy = StaticCast<FuncType*>(chirType.TranslateType(*funcDecl.GetTy()));
+    auto fnTy = StaticCast<FuncType*>(chirType.TranslateType(funcDecl.GetTy()));
     fnTy = AdjustFuncType(*fnTy, funcDecl, builder, chirType);
     auto genericParamTy = GetGenericParamType(funcDecl, chirType);
     fn = builder.CreateFunction(fnTy, funcDecl.mangledName, funcDecl.identifier,
@@ -747,7 +743,7 @@ void AST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl&
         chirParam->SetSrcCodeIdentifier("this");
     }
     for (auto& param : funcDecl.funcBody->paramLists[0]->params) {
-        auto pType = chirType.TranslateType(*param->GetTy());
+        auto pType = chirType.TranslateType(param->GetTy());
         auto pLoc = TranslateLocationWithoutScope(builder.GetChirContext(), param->begin, param->end);
         auto chirParam = builder.CreateParameter(pType, pLoc, *fn);
         chirParam->SetSrcCodeIdentifier(param->identifier.GetRawText());
@@ -762,7 +758,7 @@ void AST2CHIR::CreateImportedValueSignatureAndSetGlobalCache(const AST::VarDecl&
         globalCache.Set(varDecl, *var);
         return;
     }
-    auto varType = chirType.TranslateType(*varDecl.GetTy());
+    auto varType = chirType.TranslateType(varDecl.GetTy());
     auto refTy = builder.GetType<RefType>(varType);
     var = builder.CreateGlobalVar(
         refTy, varDecl.mangledName, varDecl.identifier, varDecl.rawMangleName, varDecl.fullPackageName);
@@ -794,7 +790,7 @@ GlobalVar* AST2CHIR::CreateAndCacheGlobalVar(const AST::VarDecl& decl, bool isLo
     auto srcCodeName = decl.identifier;
     auto rawMangledName = decl.rawMangleName;
     auto packageName = decl.fullPackageName;
-    auto ty = builder.GetType<RefType>(chirType.TranslateType(*decl.GetTy()));
+    auto ty = builder.GetType<RefType>(chirType.TranslateType(decl.GetTy()));
     auto warnPos = GetDeclLoc(builder.GetChirContext(), decl);
     GlobalVar* gv = nullptr;
     if (kind == IncreKind::INCR && !decl.toBeCompiled && !IsSrcCodeImportedGlobalDecl(decl, opts)) {
@@ -951,7 +947,7 @@ GlobalVar* AST2CHIR::CreateAnnotationTargetVar(const AST::ClassDecl& decl, const
 {
     auto varMangledName = decl.mangledName + ANNOTATION_VAR_POSTFIX + std::to_string(index);
     auto loc = TranslateLocationWithoutScope(builder.GetChirContext(), expr.begin, expr.end);
-    auto annotationTargetType = chirType.TranslateType(*expr.GetTy());
+    auto annotationTargetType = chirType.TranslateType(expr.GetTy());
     auto varType = builder.GetType<RefType>(annotationTargetType);
     auto srcCodeIdentifier = decl.identifier.Val() + ANNOTATION_VAR_POSTFIX + std::to_string(index);
     auto var = builder.CreateGlobalVar(
@@ -1059,20 +1055,20 @@ void AST2CHIR::CreateCustomTypeDef(const AST::Decl& decl, bool isImported)
                 customTypeDef = builder.CreateClass(
                     loc, identifier, mangledName, pkgName, decl.astKind == AST::ASTKind::CLASS_DECL, isImported);
             }
-            uniqueDecl = StaticCast<AST::ClassLikeTy*>(decl.GetTy())->commonDecl;
+            uniqueDecl = StaticCast<AST::ClassLikeTy*>(decl.DataTy())->commonDecl;
             break;
         case AST::ASTKind::STRUCT_DECL:
             if (customTypeDef == nullptr) {
                 customTypeDef = builder.CreateStruct(loc, identifier, mangledName, pkgName, isImported);
             }
-            uniqueDecl = StaticCast<AST::StructTy*>(decl.GetTy())->decl;
+            uniqueDecl = StaticCast<AST::StructTy*>(decl.DataTy())->decl;
             break;
         case AST::ASTKind::ENUM_DECL:
             if (customTypeDef == nullptr) {
                 customTypeDef = builder.CreateEnum(
                     loc, identifier, mangledName, pkgName, isImported, StaticCast<AST::EnumDecl>(decl).hasEllipsis);
             }
-            uniqueDecl = StaticCast<AST::EnumTy*>(decl.GetTy())->decl;
+            uniqueDecl = StaticCast<AST::EnumTy*>(decl.DataTy())->decl;
             break;
         case AST::ASTKind::EXTEND_DECL: {
             if (customTypeDef == nullptr) {
@@ -1142,15 +1138,11 @@ void AST2CHIR::TranslateAllCustomTypeTy()
         return false;
     };
 
-    std::unordered_set<Ptr<const AST::Decl>> translatedGenericDecls;
     for (auto decl : importedNominalDecls) {
         if (!translateNow(*decl)) {
             continue;
         }
-        auto type = chirType.TranslateType(*(decl->GetTy()));
-        if (decl->TestAttr(AST::Attribute::GENERIC)) {
-            translatedGenericDecls.insert(decl);
-        }
+        auto type = chirType.TranslateType(decl->GetTy());
         if (decl->identifier == OBJECT_NAME && decl->fullPackageName == CORE_PACKAGE_NAME) {
             auto clsTy = StaticCast<ClassType*>(StaticCast<RefType*>(type)->GetBaseType());
             builder.SetObjectTy(clsTy);
@@ -1162,15 +1154,14 @@ void AST2CHIR::TranslateAllCustomTypeTy()
     }
     for (auto decl : genericNominalDecls) {
         if (translateNow(*decl)) {
-            chirType.TranslateType(*(decl->GetTy()));
-            translatedGenericDecls.emplace(decl);
+            chirType.TranslateType(decl->GetTy());
         }
     }
     for (auto decl : nominalDecls) {
         if (!translateNow(*decl)) {
             continue;
         }
-        auto type = chirType.TranslateType(*(decl->GetTy()));
+        auto type = chirType.TranslateType(decl->GetTy());
         if (decl->identifier == OBJECT_NAME && decl->fullPackageName == CORE_PACKAGE_NAME) {
             auto clsTy = StaticCast<ClassType*>(StaticCast<RefType*>(type)->GetBaseType());
             builder.SetObjectTy(clsTy);
@@ -1180,15 +1171,12 @@ void AST2CHIR::TranslateAllCustomTypeTy()
             builder.SetAnyTy(clsTy);
         }
     }
-    // Translate upper bounds after normal decls have been translated.
-    for (auto decl : translatedGenericDecls) {
-        for (auto ty : decl->GetTy()->typeArgs) {
-            chirType.FillGenericArgType(*RawStaticCast<AST::GenericsTy*>(ty));
-        }
-    }
+    // Nominal types are translated above. Generic upper bounds (including local ModalTy
+    // variants created later when translating FuncTy) are filled by FillAllGenericTypeUpperBounds
+    // after CacheTopLevelDeclToGlobalSymbolTable.
     for (auto decl : importedGenericInstantiatedNominalDecls) {
         if (translateNow(*decl)) {
-            chirType.TranslateType(*(decl->GetTy()));
+            chirType.TranslateType(decl->GetTy());
         }
     }
 }
@@ -1444,8 +1432,8 @@ std::unordered_map<const GenericType*, Type*> BuildGenericTypeMapping(
                 auto cTypeArg = commonTypeParameters[i]->GetTy();
                 auto pTypeArg = specificTypeParameters[i]->GetTy();
                 if (cTypeArg->IsGeneric() && pTypeArg->IsGeneric()) {
-                    auto commonGenericTy = StaticCast<GenericType*>(chirType.TranslateType(*cTypeArg));
-                    auto specificGenericTy = chirType.TranslateType(*pTypeArg);
+                    auto commonGenericTy = StaticCast<GenericType*>(chirType.TranslateType(cTypeArg));
+                    auto specificGenericTy = chirType.TranslateType(pTypeArg);
                     commonGenericTy2specificGenericTy[commonGenericTy] = specificGenericTy;
                 }
             }

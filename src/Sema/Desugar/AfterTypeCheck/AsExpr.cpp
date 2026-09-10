@@ -25,10 +25,10 @@ OwnedPtr<CallExpr> CreateAsExprSomeCall(
     auto theAsTy = someCtorTy.paramTys[0];
     auto optionTy = someCtorTy.retTy;
     someRef->typeArguments.emplace_back(ASTCloner::Clone(Ptr(&theAsType)));
-    someRef->instTys.emplace_back(theAsTy);
+    someRef->instTys.emplace_back(theAsTy.Ty());
     someRef->ref.targets.emplace_back(&someDecl);
     someRef->isAlone = false;
-    someRef->SetTy(&someCtorTy);
+    someRef->SetTy({&someCtorTy});
     someRef->callOrPattern = some.get();
     auto newVarRef = CreateRefExpr(varDecl);
     newVarRef->SetTy(theAsTy);
@@ -57,7 +57,7 @@ namespace Cangjie::Sema::Desugar::AfterTypeCheck {
  * */
 void DesugarAsExpr(TypeManager& typeManager, AsExpr& ae)
 {
-    if (!Ty::IsTyCorrect(ae.GetTy()) || !ae.GetTy()->IsCoreOptionType() || ae.desugarExpr) {
+    if (!ae.GetTy().IsCorrect() || !ae.GetTy()->IsCoreOptionType() || ae.desugarExpr) {
         return;
     }
     CJC_NULLPTR_CHECK(ae.leftExpr);
@@ -68,7 +68,7 @@ void DesugarAsExpr(TypeManager& typeManager, AsExpr& ae)
     auto selectorTy = ae.leftExpr->GetTy();
     auto theAsType = ASTCloner::Clone(ae.asType.get());
     auto theAsTy = ae.asType->GetTy();
-    auto optionDecl = StaticCast<EnumTy*>(optionTy)->decl;
+    auto optionDecl = RawStaticCast<EnumTy*>(optionTy.Ty())->decl;
     CJC_NULLPTR_CHECK(optionDecl);
     auto someDecl = StaticCast<FuncDecl*>(LookupEnumMember(optionDecl, OPTION_VALUE_CTOR));
     CJC_NULLPTR_CHECK(someDecl);
@@ -89,7 +89,7 @@ void DesugarAsExpr(TypeManager& typeManager, AsExpr& ae)
     auto none = CreateRefExpr(*noneDecl);
     CopyBasicInfo(&ae, none.get());
     none->typeArguments.emplace_back(std::move(theAsType));
-    none->instTys.emplace_back(theAsTy);
+    none->instTys.emplace_back(theAsTy.Ty());
     none->SetTy(optionTy);
     matchCases.emplace_back(CreateMatchCase(std::move(wildcard), std::move(none)));
     ae.desugarExpr = CreateMatchExpr(std::move(ae.leftExpr), std::move(matchCases), optionTy, Expr::SugarKind::AS);

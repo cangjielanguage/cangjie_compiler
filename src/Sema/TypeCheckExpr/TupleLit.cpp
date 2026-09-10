@@ -7,40 +7,43 @@
 #include "TypeCheckerImpl.h"
 
 #include "Diags.h"
+#include "JoinAndMeet.h"
 #include "TypeCheckUtil.h"
 
 using namespace Cangjie;
 using namespace Sema;
 using namespace TypeCheckUtil;
 
-bool TypeChecker::TypeCheckerImpl::ChkTupleLit(ASTContext& ctx, Ty& target, TupleLit& tl)
+bool TypeChecker::TypeCheckerImpl::ChkTupleLit(ASTContext& ctx, ModalTy target, TupleLit& tl)
 {
-    if (target.IsAny()) {
+    if (target->IsAny()) {
         tl.SetTy(Synthesize({ctx, SynPos::EXPR_ARG}, &tl));
         ReplaceIdealTy(tl);
-        return Ty::IsTyCorrect(tl.GetTy());
+        return tl.GetTy().IsCorrect();
     }
-    Ptr<Ty> targetTy = UnboxOptionType(&target);
+    ModalTy targetTy = UnboxOptionType(target);
     if (!Ty::IsTyCorrect(targetTy) || !targetTy->IsTuple()) {
         DiagMismatchedTypesWithFoundTy(diag, tl, targetTy->String(), "Tuple");
         tl.SetTy(TypeManager::GetNonNullTy(tl.GetTy()));
         return false;
     }
-    auto tupleTy = StaticCast<TupleTy*>(targetTy);
+    auto tupleTy = StaticCast<TupleTy*>(targetTy.Ty());
     auto typeArgs = tupleTy->typeArgs;
     if (typeArgs.size() != tl.children.size()) {
         tl.SetTy(Synthesize({ctx, SynPos::EXPR_ARG}, &tl));
         ReplaceIdealTy(tl);
-        DiagMismatchedTypes(diag, tl, *targetTy);
+        DiagMismatchedTypes(diag, tl, targetTy);
         return false;
     }
     // If the size of target elemTys and elements are equal, check one by one.
-    std::vector<Ptr<Ty>> realElemTys;
+    std::vector<ModalTy> realElemTys;
     for (size_t i = 0; i < typeArgs.size(); ++i) {
         CJC_NULLPTR_CHECK(tl.children[i]);
-        if (!Check(ctx, typeArgs[i], tl.children[i].get())) {
-            if (Ty::IsTyCorrect(typeArgs[i]) && Ty::IsTyCorrect(tl.children[i]->GetTy())) {
-                DiagMismatchedTypes(diag, *tl.children[i], *typeArgs[i]);
+        // apply modal to each element type
+        auto itarget = typeArgs[i].With(target.Mode());
+        if (!Check(ctx, itarget, tl.children[i].get())) {
+            if (Ty::IsTyCorrect(itarget) && tl.children[i]->GetTy().IsCorrect()) {
+                DiagMismatchedTypes(diag, *tl.children[i], itarget);
             }
             tl.SetTy(Synthesize({ctx, SynPos::EXPR_ARG}, &tl));
             ReplaceIdealTy(tl);
@@ -56,21 +59,29 @@ bool TypeChecker::TypeCheckerImpl::ChkTupleLit(ASTContext& ctx, Ty& target, Tupl
     return true;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynTupleLit(ASTContext& ctx, TupleLit& tl)
+ModalTy TypeChecker::TypeCheckerImpl::SynTupleLit(ASTContext& ctx, TupleLit& tl)
 {
-    std::vector<Ptr<Ty>> elemTy;
+    std::vector<DataTy> elemTy;
+    ModalInfo modal{static_cast<Mode>(0)};
+    std::set<ModalTy> tys;
     // Synthesize the type of each element.
     for (auto& it : tl.children) {
         if (!it) {
-            tl.SetTy(TypeManager::GetInvalidTy());
+            tl.SetTy({TypeManager::GetInvalidTy()});
             return tl.GetTy();
         }
-        if (!Ty::IsTyCorrect(it->GetTy())) {
+        if (!it->GetTy().IsCorrect()) {
             Synthesize({ctx, SynPos::EXPR_ARG}, it.get());
         }
-        ReplaceIdealTy(*it);
-        elemTy.push_back(it->GetTy());
+        // Keep ideal literal types pending for tuple elements in the body of a generic-call lambda
+        // argument, so the tuple result stays (IDEAL, ...) and the generic type argument can be
+        // unified against the expected type (e.g. `TypeTest({ => (0, 0) })` expecting `() -> (Int32, Int32)`).
+        if (ctx.inFuncArgLambdaBody == 0) {
+            ReplaceIdealTy(*it);
+        }
+        tys.emplace(it->GetTy());
+        elemTy.push_back(it->DataTy());
     }
-    tl.SetTy(typeManager.GetTupleTy(elemTy));
+    tl.SetTy({typeManager.GetTupleTy(elemTy), JoinAndMeet::JoinMode(typeManager, tys)});
     return tl.GetTy();
 }

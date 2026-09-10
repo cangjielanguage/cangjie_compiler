@@ -182,6 +182,10 @@ void FlatForInExpr::RunOnBlockGroup(BlockGroup& blockGroup)
                 RunOnBlockGroup(*lambdaExpr->GetBody());
                 continue;
             }
+            if (auto exclaveExpr = DynamicCast<const Exclave>(expr); exclaveExpr) {
+                RunOnBlockGroup(*exclaveExpr->GetBody());
+                continue;
+            }
             if (!Is<ForIn>(expr)) {
                 continue;
             }

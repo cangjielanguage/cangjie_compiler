@@ -14,24 +14,34 @@
 #define CANGJIE_SEMA_TYPE_MANAGER_H
 
 #include <cassert>
+#include <mutex>
 #include <stack>
 #include <unordered_map>
 
-#include "cangjie/AST/Node.h"
 #include "cangjie/AST/Types.h"
 #include "cangjie/Sema/CommonTypeAlias.h"
 #include "cangjie/Utils/Utils.h"
 
 namespace Cangjie {
+namespace AST {
+struct Block;
+struct ExtendDecl;
+struct MemberAccess;
+struct RefType;
+} // namespace AST
+
 enum class TypeCompatibility { INCOMPATIBLE, SUBTYPE, IDENTICAL };
 const std::string FUTURE_TYPE_NAME = "Future";
-
 const size_t INT32_SIZE = 4;
 #define TYPE_PRIMITIVE_MIN AST::TypeKind::TYPE_UNIT
 #define TYPE_PRIMITIVE_MAX AST::TypeKind::TYPE_BOOLEAN
 
 class TyVarScope;
 class InstCtxScope;
+enum class ModalMatchMode {
+    SUBTYPE,
+    EXACT,
+};
 
 class TypeManager {
 public:
@@ -39,71 +49,54 @@ public:
     ~TypeManager();
 
     // Primitive types.
+
     static Ptr<AST::PrimitiveTy> GetPrimitiveTy(AST::TypeKind kind);
 
     static Ptr<AST::InvalidTy> GetInvalidTy()
     {
         return &theInvalidTy;
     }
-    static Ptr<AST::PrimitiveTy> GetNothingTy()
-    {
-        return GetPrimitiveTy(AST::TypeKind::TYPE_NOTHING);
-    }
-    static Ptr<AST::QuestTy> GetQuestTy()
-    {
-        return &theQuestTy;
-    }
-    static Ptr<AST::CStringTy> GetCStringTy()
-    {
-        return &theCStringTy;
-    }
-    static Ptr<AST::PrimitiveTy> GetBoolTy()
-    {
-        return GetPrimitiveTy(AST::TypeKind::TYPE_BOOLEAN);
-    }
+    static Ptr<AST::PrimitiveTy> GetNothingTy() { return GetPrimitiveTy(AST::TypeKind::TYPE_NOTHING); }
+    static Ptr<AST::QuestTy> GetQuestTy() { return &theQuestTy; }
+    static Ptr<AST::CStringTy> GetCStringTy() { return &theCStringTy; }
+    static Ptr<AST::PrimitiveTy> GetBoolTy() { return GetPrimitiveTy(AST::TypeKind::TYPE_BOOLEAN); }
+    AST::DataTy GetCopyTy() const;
+    bool IsCopyInterfaceTy(AST::DataTy ty) const;
     /**
      * Check if there are generic types in ty.
      */
-    static Ptr<AST::Ty> GetNonNullTy(Ptr<AST::Ty> ty);
+    static AST::ModalTy GetNonNullTy(AST::ModalTy ty);
     static bool IsCoreFutureType(const AST::Ty& ty);
 
     /** APIs to generate new type or get existed type from cache. */
     Ptr<AST::GenericsTy> GetGenericsTy(AST::GenericParamDecl& gpd);
-    Ptr<AST::EnumTy> GetEnumTy(AST::EnumDecl& ed, const std::vector<Ptr<AST::Ty>>& typeArgs = {});
-    Ptr<AST::RefEnumTy> GetRefEnumTy(AST::EnumDecl& ed, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::StructTy> GetStructTy(AST::StructDecl& sd, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::TupleTy> GetTupleTy(const std::vector<Ptr<AST::Ty>>& typeArgs, bool isClosureTy = false);
-    Ptr<AST::FuncTy> GetFunctionTy(const std::vector<Ptr<AST::Ty>>& paramTys, Ptr<AST::Ty> retTy,
+    Ptr<AST::EnumTy> GetEnumTy(AST::EnumDecl& ed, const std::vector<AST::DataTy>& typeArgs);
+    Ptr<AST::RefEnumTy> GetRefEnumTy(AST::EnumDecl& ed, const std::vector<AST::DataTy>& typeArgs);
+    Ptr<AST::StructTy> GetStructTy(AST::StructDecl& sd, const std::vector<AST::DataTy>& typeArgs);
+    Ptr<AST::TupleTy> GetTupleTy(const std::vector<AST::DataTy>& typeArgs, bool isClosureTy = false);
+    Ptr<AST::FuncTy> GetFunctionTy(const std::vector<AST::ModalTy>& paramTys, AST::ModalTy retTy,
         AST::FuncTy::Config cfg = {false, false, false, false});
 
-    Ptr<AST::ArrayTy> GetArrayTy(Ptr<AST::Ty> elemTy, unsigned int dims);
+    Ptr<AST::ArrayTy> GetArrayTy(AST::DataTy elemTy, unsigned int dims);
     Ptr<AST::VArrayTy> GetVArrayTy(AST::Ty& elemTy, int64_t size);
-    Ptr<AST::PointerTy> GetPointerTy(Ptr<AST::Ty> elemTy);
+    Ptr<AST::PointerTy> GetPointerTy(AST::DataTy elemTy);
     Ptr<AST::ArrayTy> GetArrayTy();
-    Ptr<AST::ClassTy> GetClassTy(AST::ClassDecl& cd, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::ClassThisTy> GetClassThisTy(AST::ClassDecl& cd, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::InterfaceTy> GetInterfaceTy(AST::InterfaceDecl& id, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::TypeAliasTy> GetTypeAliasTy(AST::TypeAliasDecl& tad, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::Ty> GetIntersectionTy(const std::set<Ptr<AST::Ty>>& tys);
-    Ptr<AST::Ty> GetUnionTy(const std::set<Ptr<AST::Ty>>& tys);
-    Ptr<AST::Ty> GetAnyTy()
-    {
-        return anyTy;
-    }
-    Ptr<AST::Ty> GetCTypeTy() const
+    Ptr<AST::ClassTy> GetClassTy(AST::ClassDecl& cd, const std::vector<AST::DataTy>& typeArgs);
+    Ptr<AST::ClassThisTy> GetClassThisTy(AST::ClassDecl& cd, const std::vector<AST::DataTy>& typeArgs);
+    Ptr<AST::InterfaceTy> GetInterfaceTy(AST::InterfaceDecl& id, const std::vector<AST::DataTy>& typeArgs);
+    Ptr<AST::TypeAliasTy> GetTypeAliasTy(AST::TypeAliasDecl& tad, const std::vector<AST::DataTy>& typeArgs);
+    AST::DataTy GetIntersectionTy(const std::set<AST::DataTy>& tys);
+    AST::DataTy GetUnionTy(const std::set<AST::DataTy>& tys);
+    // TODO: there should be anyTy to all modal
+    AST::DataTy GetAnyTy() { return anyTy; }
+    AST::DataTy GetCTypeTy() const
     {
         // `ctypeTy` is nullptr only when the core package of the standard library does not exist.
         // In this case, `anyTy` is used as a placeholder.
         return ctypeTy ? ctypeTy : anyTy;
     }
-    void SetSemaAnyTy(Ptr<AST::Ty> semAnyTy)
-    {
-        anyTy = semAnyTy;
-    }
-    void SetSemaCTypeTy(Ptr<AST::Ty> semCTypeTy)
-    {
-        ctypeTy = semCTypeTy;
-    }
+    void SetSemaAnyTy(AST::DataTy semAnyTy) { anyTy = semAnyTy; }
+    void SetSemaCTypeTy(AST::DataTy semCTypeTy) { ctypeTy = semCTypeTy; }
 
     /**
      * Instantiate the @p ty of a node, change the key in @p typeMapping, to the value in @p typeMapping.
@@ -111,23 +104,28 @@ public:
      * then this type is considered as fully qualified and cannot be substituted to other type.
      * @return the instantiated type.
      */
-    std::set<Ptr<AST::Ty>> GetInstantiatedTys(Ptr<AST::Ty> ty, const MultiTypeSubst& mts);
-    Ptr<AST::Ty> GetBestInstantiatedTy(Ptr<AST::Ty> ty, const MultiTypeSubst& mts);
-    Ptr<AST::Ty> GetInstantiatedTy(Ptr<AST::Ty> ty, const TypeSubst& typeMapping);
+    std::set<AST::ModalTy> GetInstantiatedTys(AST::ModalTy ty, const MultiTypeSubst& mts);
+    std::set<AST::DataTy> GetInstantiatedTys(AST::DataTy ty, const MultiTypeSubst& mts);
+
+    AST::ModalTy GetBestInstantiatedTy(AST::ModalTy ty, const MultiTypeSubst& mts);
+    AST::ModalTy GetInstantiatedTy(AST::ModalTy ty, const TypeSubst& typeMapping);
+    AST::DataTy GetInstantiatedTy(AST::DataTy ty, const TypeSubst& typeMapping);
+
     /**
      * Apply type substitution if typeMapping is not empty.
      * This is a helper function that combines PackMapping and ApplySubstPack.
      */
-    Ptr<AST::Ty> ApplyTypeSubstForTy(const TypeSubst& typeMapping, const Ptr<AST::Ty> ty);
-    std::set<Ptr<AST::Ty>> ApplyTypeSubstForTys(const TypeSubst& subst, const std::set<Ptr<TyVar>>& tys);
-    Ptr<AST::Ty> ApplySubstPack(const Ptr<AST::Ty> declaredTy, const SubstPack& maps, bool ignoreUnsolved = false);
-    std::set<Ptr<AST::Ty>> ApplySubstPackNonUniq(
-        const Ptr<AST::Ty> declaredTy, const SubstPack& maps, bool ignoreUnsolved = false);
+    AST::DataTy ApplyTypeSubstForTy(const TypeSubst& typeMapping, AST::DataTy ty);
+    std::set<AST::ModalTy> ApplyTypeSubstForTys(const TypeSubst& subst, const std::set<Ptr<TyVar>>& tys);
+    AST::ModalTy ApplySubstPack(AST::ModalTy declaredTy, const SubstPack& maps, bool ignoreUnsolved = false);
+    AST::DataTy ApplySubstPack(AST::DataTy declaredTy, const SubstPack& maps, bool ignoreUnsolved = false);
+    std::set<AST::ModalTy> ApplySubstPackNonUniq(
+        AST::ModalTy declaredTy, const SubstPack& maps, bool ignoreUnsolved = false);
 
     /** instantiate using the current InstCtxScope */
-    Ptr<AST::Ty> InstOf(Ptr<AST::Ty> ty);
+    AST::ModalTy InstOf(AST::ModalTy ty);
     /** recover instance ty vars back to universal ty vars for err reporting */
-    Ptr<AST::Ty> RecoverUnivTyVar(Ptr<AST::Ty> ty);
+    AST::ModalTy RecoverUnivTyVar(AST::ModalTy ty);
     SubstPack GetInstMapping();
     void PackMapping(SubstPack& maps, const MultiTypeSubst m);
     void PackMapping(SubstPack& maps, const TypeSubst m);
@@ -143,32 +141,41 @@ public:
     void MakeInstTyVar(SubstPack& maps, AST::GenericsTy& uTv);
     void MakeInstTyVar(SubstPack& maps, const AST::Decl& d);
 
-    std::vector<Ptr<AST::Ty>> GetTypeArgs(const AST::Ty& ty);
-    Ptr<AST::Ty> GetBlockRealTy(const AST::Block& block) const;
-    Ptr<AST::Ty> GetRealExtendedTy(AST::Ty& child, const AST::Ty& interfaceTy);
+    std::vector<AST::DataTy> GetTypeArgs(const AST::Ty& ty);
+    AST::DataTy GetBlockRealTy(const AST::Block& block) const;
+    AST::DataTy GetRealExtendedTy(AST::Ty& child, const AST::Ty& interfaceTy);
 
     /**
      * Get all super type of @p ty.
      */
-    std::unordered_set<Ptr<AST::Ty>> GetAllSuperTys(
+    std::unordered_set<AST::DataTy> GetAllSuperTys(
         AST::Ty& ty, const TypeSubst& typeMapping = {}, bool withExtended = true);
     /**
      * Use this instead of GetAllSuperTys whenever possible.
      */
     bool HasSuperTy(AST::Ty& ty, AST::Ty& superTy, const TypeSubst& typeMapping, bool withExtended = true);
-    std::unordered_set<Ptr<AST::Ty>> GetAllCommonSuperTys(const std::unordered_set<Ptr<AST::Ty>>& tys);
+    std::unordered_set<AST::DataTy> GetAllCommonSuperTys(const std::unordered_set<AST::DataTy>& tys);
     TypeSubst GetSubstituteMapping(const AST::Ty& nominalTy, const TypeSubst& typeMapping);
     std::vector<Ptr<AST::InterfaceTy>> GetAllSuperInterfaceTysBFS(const AST::InheritableDecl& decl);
 
     /** APIs to check type relations. */
-    bool IsSubtype(Ptr<AST::Ty> leaf, Ptr<AST::Ty> root, bool implicitBoxed = true, bool allowOptionBox = true);
+    bool IsSubtype(AST::ModalTy leaf, AST::ModalTy root, bool implicitBoxed = true, bool allowOptionBox = true,
+        ModalMatchMode modalMatchMode = ModalMatchMode::SUBTYPE);
+    bool IsSubtype(AST::DataTy leaf, AST::DataTy root, bool implicitBoxed = true, bool allowOptionBox = true);
     bool IsFuncSubtype(const AST::Ty& leaf, const AST::Ty& root);
     bool IsFuncParametersSubtype(const AST::FuncTy& leaf, const AST::FuncTy& root);
     bool IsTupleSubtype(const AST::Ty& leaf, const AST::Ty& root);
-    bool IsTyEqual(Ptr<AST::Ty> subTy, Ptr<AST::Ty> baseTy);
+    bool IsTyEqual(AST::DataTy subTy, AST::DataTy baseTy);
+    bool IsTyEqual(AST::ModalTy subTy, AST::ModalTy baseTy);
     bool IsPlaceholderEqual(AST::Ty& leaf, AST::Ty& root);
-    bool IsLitBoxableType(Ptr<AST::Ty> leaf, Ptr<AST::Ty> root);
+    bool IsLitBoxableType(AST::DataTy leaf, AST::DataTy root);
     bool HasExtensionRelation(AST::Ty& childTy, AST::Ty& interfaceTy);
+
+    bool IsModalSubtype(AST::ModalTy leaf, AST::ModalTy root);
+    bool IsModalSubtype(ModalInfo leaf, ModalInfo root);
+    /** Copy type for modal/locality checking; see `TypeManager::ImplementsCopyInterface` in TypeManager.cpp. */
+    bool ImplementsCopyInterface(AST::DataTy ty);
+    bool NeverImplementsCopyInterface(AST::DataTy ty);
 
     /**
      * Check if two function types have the same parameter type. This is used for checking function overloading and
@@ -179,11 +186,20 @@ public:
      * Check if two set of param types are same.
      * Firstly, substituting @p paramTys1 with the @p typeMapping and then checking with @p paramTys2 .
      */
-    bool IsFuncParameterTypesIdentical(const std::vector<Ptr<AST::Ty>>& paramTys1,
-        const std::vector<Ptr<AST::Ty>>& paramTys2, const TypeSubst& typeMapping = {});
+    bool IsFuncParameterTypesIdentical(const std::vector<AST::ModalTy>& paramTys1,
+        const std::vector<AST::ModalTy>& paramTys2, const TypeSubst& typeMapping = {});
+    static bool HasThisParam(const AST::FuncDecl& fd);
+    static bool HasThisParam(const AST::Decl& decl);
+    static AST::ModalTy GetThisParamTy(const AST::FuncDecl& fd);
+    static ModalInfo GetThisParamMode(const AST::Decl& decl);
+    /// Get modal of this param of prop accessor
+    ModalInfo GetAccessorThisModal(const AST::FuncDecl& fd);
+    /// Get modal of target (i.e. ret of getter, value type of settter) of prop acessor
+    AST::ModalTy GetAccessorTargetTy(const AST::FuncDecl& fd);
+
     TypeCompatibility CheckTypeCompatibility(
-        Ptr<AST::Ty> lvalue, Ptr<AST::Ty> rvalue, bool implicitBoxed = true, bool isGeneric = false);
-    bool CheckGenericDeclInstantiation(Ptr<const AST::Decl> d, const std::vector<Ptr<AST::Ty>>& typeArgs);
+        AST::ModalTy lvalue, AST::ModalTy rvalue, bool implicitBoxed = true, bool isGeneric = false);
+    bool CheckGenericDeclInstantiation(Ptr<const AST::Decl> d, const std::vector<AST::DataTy>& typeArgs);
     bool CheckExtendWithConstraint(const AST::Ty& ty, Ptr<AST::ExtendDecl> extend);
 
     /**
@@ -197,36 +213,34 @@ public:
     void GenerateGenericMapping(SubstPack& m, AST::Ty& baseType);
     TypeSubst GenerateGenericMappingFromGeneric(const AST::Decl& parentDecl, const AST::Decl& childDecl) const;
     MultiTypeSubst GenerateStructDeclTypeMapping(const AST::Decl& decl);
-    Ptr<AST::Ty> ReplaceIdealTy(Ptr<AST::Ty> ty);
+    AST::DataTy ReplaceIdealTy(AST::DataTy ty);
+    AST::ModalTy ReplaceIdealTy(AST::ModalTy ty);
     void RestoreJavaGenericsTy(AST::Decl& decl) const;
 
     /**
      * Get all extend interface types.
      */
-    std::unordered_set<Ptr<AST::Ty>> GetAllExtendInterfaceTy(AST::Ty& ty);
+    std::unordered_set<AST::DataTy> GetAllExtendInterfaceTy(AST::Ty& ty);
     bool HasExtendedInterfaceTy(AST::Ty& ty, AST::Ty& superTy, const TypeSubst& typeMapping);
     /** Get the ty used for getting related extends. */
-    Ptr<AST::Ty> GetTyForExtendMap(AST::Ty& ty);
+    AST::DataTy GetTyForExtendMap(AST::Ty& ty);
     /** Get builtin ty extends. For array ty & cpointer ty, will only return instantiated extends. */
     std::set<Ptr<AST::ExtendDecl>> GetBuiltinTyExtends(AST::Ty& ty);
-    std::optional<bool> GetOverrideCache(
-        const AST::FuncDecl* src, const AST::FuncDecl* target, AST::Ty* baseTy, AST::Ty* expectInstParent);
-    void AddOverrideCache(
-        const AST::FuncDecl& src, const AST::FuncDecl& target, AST::Ty* baseTy, AST::Ty* expectInstParent, bool val);
+    std::optional<bool> GetOverrideCache(const AST::FuncDecl* src, const AST::FuncDecl* target, AST::DataTy baseTy,
+        ModalInfo baseMode, AST::DataTy expectInstParent, ModalInfo parentMode);
+    void AddOverrideCache(const AST::FuncDecl& src, const AST::FuncDecl& target, AST::DataTy baseTy, ModalInfo baseMode,
+        AST::DataTy expectInstParent, ModalInfo parentMode, bool val);
     /** Get extends for given generic/instantiated @p decl */
     std::set<Ptr<AST::ExtendDecl>> GetDeclExtends(const AST::InheritableDecl& decl);
     /** Get origin extends for given builtin ty. For array ty & cpointer ty, will only return generic extends.*/
     std::set<Ptr<AST::ExtendDecl>> GetAllExtendsByTy(AST::Ty& ty);
     std::unordered_set<Ptr<const AST::InheritableDecl>> GetAllExtendedDecls();
-    std::unordered_set<Ptr<AST::Ty>> GetAllExtendedBuiltIn();
+    std::unordered_set<AST::DataTy> GetAllExtendedBuiltIn();
     void UpdateBuiltInTyExtendDecl(AST::Ty& builtinTy, AST::ExtendDecl& ed);
     void RecordUsedExtend(AST::Ty& child, AST::Ty& interfaceTy);
     void RecordUsedGenericExtend(AST::Ty& boxedTy, Ptr<AST::ExtendDecl> extend = nullptr);
     void RemoveExtendFromMap(AST::ExtendDecl& ed);
-    std::unordered_set<Ptr<AST::Ty>> GetAllBoxedTys() const
-    {
-        return boxedTys;
-    }
+    std::unordered_set<AST::DataTy> GetAllBoxedTys() const { return boxedTys; }
 
     void Clear();
 
@@ -254,7 +268,7 @@ public:
         return boxedNonGenericDecls;
     }
 
-    std::unordered_set<Ptr<AST::ExtendDecl>> GetTyUsedExtends(Ptr<AST::Ty> ty) const
+    std::unordered_set<Ptr<AST::ExtendDecl>> GetTyUsedExtends(AST::DataTy ty) const
     {
         auto found = tyUsedExtends.find(ty);
         return found != tyUsedExtends.end() ? found->second : std::unordered_set<Ptr<AST::ExtendDecl>>{};
@@ -277,7 +291,14 @@ public:
         AST::Decl& baseDecl, const AST::FuncDecl& funcDecl, bool withAbstractOverrides = false);
 
     void UpdateTopOverriddenFuncDeclMap(const AST::Decl* src, const AST::Decl* target);
-    Ptr<const AST::FuncDecl> GetTopOverriddenFuncDecl(const AST::FuncDecl* funcDecl) const;
+    /**
+     * Return the top-most function in the override chain of @p funcDecl.
+     * If @p funcDecl is already the top-most (does not override anything), return itself.
+     * Walks overrideMap first, then continues on the inheritance chain so a partial
+     * map (e.g. Expr.toTokens → Node.toTokens without Node → ToTokens) still reaches
+     * the true top.
+     */
+    Ptr<const AST::FuncDecl> GetTopOverriddenFuncDecl(const AST::FuncDecl* funcDecl);
     /**
      * whether the decl is override the funcDecl.
      */
@@ -294,8 +315,8 @@ public:
      */
     std::pair<bool, bool> IsExtendInheritRelation(const AST::ExtendDecl& r, const AST::ExtendDecl& l);
 
-    bool PairIsOverrideOrImpl(const AST::Decl& child, const AST::Decl& parent, const Ptr<AST::Ty> baseTy = nullptr,
-        const Ptr<AST::Ty> parentTy = nullptr);
+    bool PairIsOverrideOrImpl(const AST::Decl& child, const AST::Decl& parent, AST::DataTy baseTy = {},
+        ModalInfo baseMode = {}, AST::DataTy parentTy = {}, ModalInfo parentMode = {});
 
     // Try to constrain tv by tyCtor as an upperbound.
     // tyCtor's type args must be GenericsTy.
@@ -309,14 +330,14 @@ public:
     // 1. allocate new ty var U' and R'
     // 2. add U'->R' to T's upperbound
     // 3. return U'->R'
-    Ptr<AST::Ty> ConstrainByCtor(AST::GenericsTy& tv, AST::Ty& tyCtor);
+    AST::ModalTy ConstrainByCtor(AST::GenericsTy& tv, AST::Ty& tyCtor);
     // Similar to ConstrainByCtor, but the upperbound will be added to sum instead of ubs.
     // Also, in case some of the constructors are generic, the ty args between upperbounds
     // can be shared, in order to sync the constraints (in a best-effort manner).
-    Ptr<AST::Ty> AddSumByCtor(AST::GenericsTy& tv, AST::Ty& tyCtor, std::vector<Ptr<AST::GenericsTy>>& tyArgs);
-    bool OfSameCtor(Ptr<AST::Ty> ty, Ptr<AST::Ty> tyCtor);
+    AST::DataTy AddSumByCtor(AST::GenericsTy& tv, AST::Ty& tyCtor, std::vector<Ptr<AST::GenericsTy>>& tyArgs);
+    bool OfSameCtor(AST::DataTy ty, AST::DataTy tyCtor);
     // currently only for collecting map from member to decls
-    Ptr<AST::Decl> GetDummyBuiltInDecl(Ptr<AST::Ty> ty);
+    Ptr<AST::Decl> GetDummyBuiltInDecl(AST::DataTy ty);
     /** Get extend decls that extend @p baseTy with given @p interfaceTy */
     std::optional<Ptr<AST::ExtendDecl>> GetExtendDeclByInterface(AST::Ty& baseTy, AST::Ty& interfaceTy);
     /**
@@ -339,21 +360,21 @@ public:
     const std::set<Ptr<TyVar>>& GetUnsolvedTyVars();
     void MarkAsUnsolvedTyVar(AST::GenericsTy& tv);
     std::set<Ptr<TyVar>> GetInnermostUnsolvedTyVars();
-    Ptr<AST::Ty> TryGreedySubst(Ptr<AST::Ty> ty);
+    AST::ModalTy TryGreedySubst(AST::ModalTy ty);
     // constraints for placeholder type vars
     Constraint constraints;
 
     /// recursively replace This in type args
-    Ptr<AST::Ty> ReplaceThisTy(Ptr<AST::Ty> now);
+    AST::ModalTy ReplaceThisTy(AST::ModalTy now);
     /// get the class ty that This refers to if it is a This ty
-    Ptr<AST::Ty> GetThisRealTy(Ptr<AST::Ty> now);
+    AST::ModalTy GetThisRealTy(AST::ModalTy now);
 
     /**
      * @brief Obtains the alias type of node if node's ty have alias type reference.
      * @param node the node which map contain alias type reference.
      * @return the TypeAliasTy or Ty contain TypeAliasTy.
      */
-    Ptr<AST::Ty> ObtainsAliasType(Ptr<const AST::Node> node);
+    AST::ModalTy ObtainsAliasType(Ptr<const AST::Node> node);
 
     /**
      * @brief Substitute type alias in ty recursively.
@@ -362,8 +383,8 @@ public:
      * @param typeMapping the custom type mapping for substitution.
      * @return the substituted type.
      */
-    Ptr<AST::Ty> SubstituteTypeAliasInTy(
-        AST::Ty& ty, bool needSubstituteGeneric = false, const TypeSubst& typeMapping = {});
+    AST::ModalTy SubstituteTypeAliasInTy(
+        AST::ModalTy ty, bool needSubstituteGeneric = false, const TypeSubst& typeMapping = {});
 
 private:
     friend class TyVarScope;
@@ -375,39 +396,25 @@ private:
 
 public:
     /** The extend context maps. */
-    std::unordered_map<Ptr<AST::Ty>, std::set<Ptr<AST::ExtendDecl>>> builtinTyToExtendMap;
+    std::unordered_map<AST::DataTy, std::set<Ptr<AST::ExtendDecl>>> builtinTyToExtendMap;
     std::unordered_map<Ptr<const AST::InheritableDecl>, std::set<Ptr<AST::ExtendDecl>>> declToExtendMap;
 
 private:
     inline static AST::InvalidTy theInvalidTy = AST::InvalidTy();
     inline static AST::AnyTy theAnyTy = AST::AnyTy();
-    inline static AST::QuestTy theQuestTy = AST::QuestTy();
-    inline static AST::CStringTy theCStringTy = AST::CStringTy();
-    inline static std::vector<AST::PrimitiveTy> primitiveTys = []() {
-        std::vector<AST::PrimitiveTy> tys;
-        for (auto i = static_cast<int32_t>(TYPE_PRIMITIVE_MIN); i <= static_cast<int32_t>(TYPE_PRIMITIVE_MAX); i++) {
-            if (i == static_cast<int32_t>(AST::TypeKind::TYPE_NOTHING)) {
-                tys.emplace_back(AST::NothingTy());
-            } else {
-                tys.emplace_back(AST::PrimitiveTy(static_cast<AST::TypeKind>(i)));
-            }
-        }
-        return tys;
-    }();
+    static AST::QuestTy theQuestTy;
+    static AST::CStringTy theCStringTy;
+    static std::vector<AST::PrimitiveTy> primitiveTys;
+    AST::InterfaceDecl* copyInterfaceDecl = nullptr;
 
     struct TypePointer {
-        explicit TypePointer(Ptr<AST::Ty> ptr) : ptr(ptr)
-        {
-        }
+        explicit TypePointer(AST::DataTy ptr) : ptr(ptr) {}
         ~TypePointer() = default;
         Ptr<const AST::Ty> operator->() const
         {
             return ptr;
         }
-        Ptr<AST::Ty> Get() const
-        {
-            return ptr;
-        }
+        AST::DataTy Get() const { return ptr; }
         bool HasValue() const
         {
             return ptr != nullptr;
@@ -421,7 +428,7 @@ private:
         }
 
     private:
-        Ptr<AST::Ty> const ptr;
+        AST::DataTy const ptr;
     };
 
     struct TypeHash {
@@ -432,15 +439,15 @@ private:
     };
     // These unordered sets are hash tables to save types.
     std::unordered_set<TypePointer, TypeHash> allocatedTys;
-    std::unordered_set<std::pair<Ptr<AST::Ty>, Ptr<AST::Ty>>, HashPair> checkedTyExtendRelation;
-    std::unordered_set<Ptr<AST::Ty>> boxedTys;
+    std::unordered_set<std::pair<AST::DataTy, AST::DataTy>, HashPair> checkedTyExtendRelation;
+    std::unordered_set<AST::DataTy> boxedTys;
     std::unordered_set<Ptr<AST::ExtendDecl>> boxUsedExtends;
     std::unordered_set<Ptr<AST::InheritableDecl>> boxedNonGenericDecls;
     /** Used generic extends for each instantiated type. */
-    std::unordered_map<Ptr<AST::Ty>, std::unordered_set<Ptr<AST::ExtendDecl>>> tyUsedExtends;
-    std::unordered_map<Ptr<AST::Ty>, std::set<Ptr<AST::ExtendDecl>>> instantiateBuiltInTyToExtendMap;
+    std::unordered_map<AST::DataTy, std::unordered_set<Ptr<AST::ExtendDecl>>> tyUsedExtends;
+    std::unordered_map<AST::DataTy, std::set<Ptr<AST::ExtendDecl>>> instantiateBuiltInTyToExtendMap;
     /** TypeManager caches. */
-    std::unordered_map<Ptr<const AST::Ty>, std::unordered_set<Ptr<AST::Ty>>> tyExtendInterfaceTyMap;
+    std::unordered_map<Ptr<const AST::Ty>, std::unordered_set<AST::DataTy>> tyExtendInterfaceTyMap;
     struct TypeInfo {
         Ptr<const AST::Ty> ty;
         TypeSubst mapping;
@@ -452,8 +459,8 @@ private:
             size_t ret = 0;
             ret = hash_combine<Ptr<const AST::Ty>>(ret, info.ty);
             for (auto n : info.mapping) {
-                ret = hash_combine<Ptr<AST::Ty>>(ret, n.first);
-                ret = hash_combine<Ptr<AST::Ty>>(ret, n.second);
+                ret = hash_combine<AST::DataTy>(ret, n.first);
+                ret = hash_combine<AST::DataTy>(ret, n.second);
             }
             ret = hash_combine<bool>(ret, info.withExtended);
             return ret;
@@ -474,20 +481,22 @@ private:
             return true;
         }
     };
-    std::unordered_map<TypeInfo, std::unordered_set<Ptr<AST::Ty>>, TypeInfoHash, TypeInfoEqual> tyToSuperTysMap;
+    std::unordered_map<TypeInfo, std::unordered_set<AST::DataTy>, TypeInfoHash, TypeInfoEqual> tyToSuperTysMap;
     /** Store checked typeArgs instantiation result for generic decls. */
-    std::unordered_map<Ptr<const AST::Decl>, std::map<std::vector<Ptr<AST::Ty>>, bool>> declInstantiationStatus;
-    Ptr<AST::Ty> anyTy = &theAnyTy;
-    Ptr<AST::Ty> ctypeTy = nullptr;
+    std::unordered_map<Ptr<const AST::Decl>, std::map<std::vector<AST::DataTy>, bool>> declInstantiationStatus;
+    AST::DataTy anyTy = &theAnyTy;
+    AST::DataTy ctypeTy = nullptr;
 
     struct SubtypeCacheKey {
-        Ptr<AST::Ty> leaf{nullptr};
-        Ptr<AST::Ty> root{nullptr};
+        AST::ModalTy leaf{nullptr};
+        AST::ModalTy root{nullptr};
         bool implicitBoxed{false};
         bool allowOptionBox{false};
+        ModalMatchMode mode;
 
-        SubtypeCacheKey(Ptr<AST::Ty> leaf, Ptr<AST::Ty> root, bool implicitBoxed = true, bool allowOptionBox = true)
-            : leaf(leaf), root(root), implicitBoxed(implicitBoxed), allowOptionBox(allowOptionBox)
+        SubtypeCacheKey(AST::ModalTy leaf, AST::ModalTy root, bool implicitBoxed = true, bool allowOptionBox = true,
+            ModalMatchMode m = ModalMatchMode::SUBTYPE)
+            : leaf(leaf), root(root), implicitBoxed(implicitBoxed), allowOptionBox(allowOptionBox), mode{m}
         {
         }
     };
@@ -514,19 +523,22 @@ private:
     struct OverrideOrShadowKey {
         const AST::FuncDecl* src{nullptr};
         const AST::FuncDecl* target{nullptr};
-        const AST::Ty* baseTy{nullptr};
-        const AST::Ty* expectInstParent{nullptr};
+        const AST::DataTy baseTy{nullptr};
+        const AST::DataTy expectInstParent{nullptr};
+        ModalInfo baseMode;
+        ModalInfo parentMode;
 
-        OverrideOrShadowKey(const AST::FuncDecl* s, const AST::FuncDecl* t, const AST::Ty* b, const AST::Ty* e)
-            : src(s), target(t), baseTy(b), expectInstParent(e)
+        OverrideOrShadowKey(const AST::FuncDecl* s, const AST::FuncDecl* t, const AST::DataTy b, ModalInfo bm,
+            const AST::DataTy e, ModalInfo pm)
+            : src(s), target(t), baseTy(b), expectInstParent(e), baseMode{bm}, parentMode{pm}
         {
         }
     };
     struct OverrideOrShadowEqual {
         bool operator()(const OverrideOrShadowKey& lhs, const OverrideOrShadowKey& rhs) const
         {
-            return std::tie(lhs.src, lhs.target, lhs.baseTy, lhs.expectInstParent) ==
-                std::tie(rhs.src, rhs.target, rhs.baseTy, rhs.expectInstParent);
+            return std::tie(lhs.src, lhs.target, lhs.baseTy, lhs.baseMode, lhs.expectInstParent, lhs.parentMode) ==
+                std::tie(rhs.src, rhs.target, rhs.baseTy, rhs.baseMode, rhs.expectInstParent, rhs.parentMode);
         }
     };
     struct OverrideOrShadowHash {
@@ -555,7 +567,7 @@ private:
     std::unordered_set<TypePointer, TypeHash> tyVarPool;
     // dummy decls to be associated with tyvar
     std::vector<OwnedPtr<AST::GenericParamDecl>> dummyGenDecls;
-    std::map<Ptr<AST::Ty>, OwnedPtr<AST::Decl>> dummyBuiltInDecls;
+    std::map<AST::DataTy, OwnedPtr<AST::Decl>> dummyBuiltInDecls;
     // the level each tyvar is introduced, used when unifying 2 tyvars;
     // should be [high level |-> low level], NOT the opposite
     std::map<Ptr<const AST::GenericsTy>, size_t> tyVarScopeDepth;
@@ -568,7 +580,9 @@ private:
 private:
     template <typename TypeT, typename... Args> TypeT* GetTypeTy(Args&&... args);
     bool IsClassTyEqual(AST::Ty& leaf, AST::Ty& root);
-    Ptr<AST::Ty> GetExtendInterfaceSuperTy(AST::ClassTy& classTy, const AST::Ty& interfaceTy);
+    AST::DataTy GetExtendInterfaceSuperTy(AST::ClassTy& classTy, const AST::Ty& interfaceTy);
+
+    mutable std::mutex overrideResolverImplMutex;
 
     /**
      * The class is used to store typeMapping and ctxVars as context condition of the recursive instantiation.
@@ -581,27 +595,25 @@ private:
         }
         ~TyInstantiator() = default;
 
-        inline Ptr<AST::Ty> Instantiate(Ptr<AST::Ty> ty)
-        {
-            return AST::Ty::IsTyCorrect(ty) ? Instantiate(*ty) : ty;
-        }
-        Ptr<AST::Ty> Instantiate(AST::Ty& ty);
-        Ptr<AST::Ty> GetInstantiatedStructTy(AST::StructTy& structTy);
-        Ptr<AST::Ty> GetInstantiatedClassTy(AST::ClassTy& classTy);
-        Ptr<AST::Ty> GetInstantiatedInterfaceTy(AST::InterfaceTy& interfaceTy);
-        Ptr<AST::Ty> GetInstantiatedEnumTy(AST::EnumTy& enumTy);
-        Ptr<AST::Ty> GetInstantiatedArrayTy(AST::ArrayTy& arrayTy);
-        Ptr<AST::Ty> GetInstantiatedPointerTy(AST::PointerTy& cptrTy);
+        inline AST::ModalTy Instantiate(AST::ModalTy ty) { return {Instantiate(ty.Ty()), ty.Mode()}; }
+        inline AST::DataTy Instantiate(AST::DataTy ty) { return AST::Ty::IsTyCorrect(ty) ? Instantiate(*ty) : ty; }
+        AST::DataTy Instantiate(AST::Ty& ty);
+        AST::DataTy GetInstantiatedStructTy(AST::StructTy& structTy);
+        AST::DataTy GetInstantiatedClassTy(AST::ClassTy& classTy);
+        AST::DataTy GetInstantiatedInterfaceTy(AST::InterfaceTy& interfaceTy);
+        AST::DataTy GetInstantiatedEnumTy(AST::EnumTy& enumTy);
+        AST::DataTy GetInstantiatedArrayTy(AST::ArrayTy& arrayTy);
+        AST::DataTy GetInstantiatedPointerTy(AST::PointerTy& cptrTy);
         // Get instantiated ty of set type 'IntersectionTy' and 'UnionTy'.
-        template <typename SetTy> Ptr<AST::Ty> GetInstantiatedSetTy(SetTy& ty);
-        Ptr<AST::Ty> GetInstantiatedGenericTy(AST::GenericsTy& ty);
+        template <typename SetTy> AST::DataTy GetInstantiatedSetTy(SetTy& ty);
+        AST::DataTy GetInstantiatedGenericTy(AST::GenericsTy& ty);
 
         TypeManager& tyMgr;
         const TypeSubst& typeMapping;
     };
 
     void GetNominalSuperTy(
-        const AST::Ty& nominalTy, const TypeSubst& typeMapping, std::unordered_set<Ptr<AST::Ty>>& tyList);
+        const AST::Ty& nominalTy, const TypeSubst& typeMapping, std::unordered_set<AST::DataTy>& tyList);
     bool HasNominalSuperTy(AST::Ty& nominalTy, AST::Ty& superTy, const TypeSubst& typeMapping);
 
     bool IsPlaceholderSubtype(AST::Ty& leaf, AST::Ty& root);
@@ -614,35 +626,36 @@ private:
     bool IsPrimitiveSubtype(const AST::Ty& leaf, AST::Ty& root);
     bool IsTyExtendInterface(const AST::Ty& classTy, const AST::Ty& interfaceTy);
 
-    bool CheckGenericType(Ptr<AST::Ty> lvalue, Ptr<AST::Ty> rvalue, bool implicitBoxed = true);
+    bool CheckGenericType(AST::ModalTy lvalue, AST::ModalTy rvalue, bool implicitBoxed = true);
 
     void GenerateExtendGenericMappingVisit(
-        MultiTypeSubst& typeMapping, AST::Ty& baseType, std::unordered_set<Ptr<AST::Ty>>& visited);
+        MultiTypeSubst& typeMapping, AST::Ty& baseType, std::unordered_set<AST::DataTy>& visited);
     void GenerateStructDeclGenericMappingVisit(MultiTypeSubst& m, const AST::InheritableDecl& decl,
-        const AST::Ty& targetTy, std::unordered_set<Ptr<AST::Ty>>& visited);
-    void GenerateGenericMappingVisit(MultiTypeSubst& m, AST::Ty& baseType, std::unordered_set<Ptr<AST::Ty>>& visited);
+        const AST::Ty& targetTy, std::unordered_set<AST::DataTy>& visited);
+    void GenerateGenericMappingVisit(MultiTypeSubst& m, AST::Ty& baseType, std::unordered_set<AST::DataTy>& visited);
 
     /* Alternative version that generate SubstPack.
      * Should migrate to this version everywhere in the future. */
     void GenerateGenericMappingVisit(
-        SubstPack& m, AST::Ty& baseType, std::unordered_set<Ptr<AST::Ty>>& visited, bool contextual);
+        SubstPack& m, AST::Ty& baseType, std::unordered_set<AST::DataTy>& visited, bool contextual);
     void GenerateExtendGenericMappingVisit(
-        SubstPack& typeMapping, AST::Ty& baseType, std::unordered_set<Ptr<AST::Ty>>& visited, bool contextual);
+        SubstPack& typeMapping, AST::Ty& baseType, std::unordered_set<AST::DataTy>& visited, bool contextual);
     void GenerateStructDeclGenericMappingVisit(SubstPack& m, const AST::InheritableDecl& decl, const AST::Ty& targetTy,
-        std::unordered_set<Ptr<AST::Ty>>& visited, bool contextual);
+        std::unordered_set<AST::DataTy>& visited, bool contextual);
 
-    std::unordered_set<Ptr<AST::Ty>> GetAllExtendInterfaceTyHelper(
-        const std::set<Ptr<AST::ExtendDecl>>& extends, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    bool HasExtendInterfaceTyHelper(AST::Ty& superTy, const std::set<Ptr<AST::ExtendDecl>>& extends,
-        const std::vector<Ptr<AST::Ty>>& typeArgs);
+    std::unordered_set<AST::DataTy> GetAllExtendInterfaceTyHelper(
+        const std::set<Ptr<AST::ExtendDecl>>& extends, const std::vector<AST::DataTy>& typeArgs);
+    bool HasExtendInterfaceTyHelper(
+        AST::Ty& superTy, const std::set<Ptr<AST::ExtendDecl>>& extends, const std::vector<AST::DataTy>& typeArgs);
 
-    Ptr<AST::Ty> SubstituteTypeArgs(Ptr<AST::Ty> baseTy, std::vector<Ptr<AST::Ty>>& typeArgs);
-    std::vector<Ptr<AST::Ty>> RecursiveSubstituteTypeAliasInTy(
+    AST::ModalTy SubstituteTypeArgs(AST::ModalTy baseTy, std::vector<AST::ModalTy>& typeArgs);
+    AST::ModalTy SubstituteTypeArgs(AST::ModalTy baseTy, std::vector<AST::DataTy>& typeArgs);
+    std::vector<AST::ModalTy> RecursiveSubstituteTypeAliasInTy(
         Ptr<const AST::Ty> ty, bool needSubstituteGeneric, const TypeSubst& typeMapping = {});
-    Ptr<AST::Ty> GetUnaliasedTypeFromTypeAlias(const AST::TypeAliasTy& target,
-        const std::vector<Ptr<AST::Ty>>& typeArgs, bool needSubstituteGeneric, const TypeSubst& customMapping);
-    Ptr<AST::Ty> ObtainsAliasTypeOfRefType(Ptr<const AST::RefType> rt);
-    Ptr<AST::Ty> ObtainsAliasTypeOfFuncDecl(Ptr<const AST::FuncDecl> fd);
+    AST::DataTy GetUnaliasedTypeFromTypeAlias(const AST::TypeAliasTy& target, const std::vector<AST::DataTy>& typeArgs,
+        bool needSubstituteGeneric, const TypeSubst& customMapping);
+    AST::ModalTy ObtainsAliasTypeOfRefType(Ptr<const AST::RefType> rt);
+    AST::ModalTy ObtainsAliasTypeOfFuncDecl(Ptr<const AST::FuncDecl> fd);
 };
 } // namespace Cangjie
 

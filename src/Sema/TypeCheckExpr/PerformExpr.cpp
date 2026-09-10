@@ -12,18 +12,23 @@
 using namespace Cangjie;
 using namespace Sema;
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynPerformExpr(ASTContext& ctx, PerformExpr& pe)
+ModalTy TypeChecker::TypeCheckerImpl::SynPerformExpr(ASTContext& ctx, PerformExpr& pe)
 {
     CJC_NULLPTR_CHECK(pe.expr); // Parser guarantees.
     auto exprTy = Synthesize({ctx, SynPos::EXPR_ARG}, pe.expr.get());
     if (!Ty::IsTyCorrect(exprTy)) {
-        pe.SetTy(TypeManager::GetInvalidTy());
+        pe.SetTy({TypeManager::GetInvalidTy()});
         return pe.GetTy();
     }
-    if (auto commandTy = PromoteToCommandTy(*pe.expr, *exprTy); commandTy) {
+    if (pe.expr->GetTy().IsLocalType()) {
+        DiagExpectedDataType(*pe.expr);
+        pe.SetTy({TypeManager::GetInvalidTy()});
+        return pe.GetTy();
+    }
+    if (auto commandTy = PromoteToCommandTy(*pe.expr, exprTy); commandTy) {
         pe.SetTy((*commandTy)->typeArgs[0]);
     } else {
-        pe.SetTy(TypeManager::GetInvalidTy());
+        pe.SetTy({TypeManager::GetInvalidTy()});
     }
 
     return pe.GetTy();

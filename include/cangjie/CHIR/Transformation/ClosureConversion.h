@@ -102,7 +102,7 @@ private:
     std::unordered_map<const Lambda*, Function*> convertedCache;
     std::unordered_map<std::string, size_t> duplicateLambdaName;
 
-    ClassDef* GetOrCreateGenericAutoEnvBaseDef(size_t paramNum);
+    ClassDef* GetOrCreateGenericAutoEnvBaseDef(const FuncType& funcType);
     ClassDef* GetOrCreateAutoEnvBaseDef(const FuncType& funcType);
     ClassDef* CreateAutoEnvImplDef(const std::string& className, const std::vector<GenericType*>& genericTypes,
         const Value& srcFunc, ClassDef& superClassDef,

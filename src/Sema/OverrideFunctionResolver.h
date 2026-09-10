@@ -24,6 +24,7 @@ namespace Cangjie {
 
 using MemberFuncsWithInstTys = std::unordered_map<Ptr<AST::FuncDecl>, std::unordered_set<Ptr<AST::FuncTy>>>;
 using MemberFuncWithInstTys = std::pair<Ptr<AST::FuncDecl>, std::unordered_set<Ptr<AST::FuncTy>>>;
+using MemberFuncSet = std::unordered_set<Ptr<AST::FuncDecl>>;
 
 /**
  * A utility class to resolve and manage overridden member functions for a given type.
@@ -67,10 +68,14 @@ public:
      * @param identifier The name of the member functions to retrieve
      * @return The collection of retrieved member functions with their instantiation types
      */
-    MemberFuncsWithInstTys GetInstMemberFuncWithInstTy(AST::Ty& instBaseTy, const std::string& identifier);
+    MemberFuncsWithInstTys GetInstMemberFuncWithInstTy(AST::DataTy instBaseTy, const std::string& identifier);
 
     Ptr<AST::Ty> GetMatchedFuncInstTyByGivenTarget(
-        MemberFuncWithInstTys& candidates, const AST::FuncDecl& target, const Ptr<AST::Ty>& targetBaseTy);
+        MemberFuncWithInstTys& candidates, const AST::FuncDecl& target, AST::DataTy targetBaseTy);
+
+    bool IsImplementationFunc(const AST::FuncDecl& srcFunc, const AST::FuncDecl& superFunc);
+
+    MemberFuncSet GetTopOverriddenFuncs(AST::Ty& instBaseTy, const AST::FuncDecl& funcDecl);
 
     /**
      * Clear the global cache.
@@ -82,18 +87,20 @@ private:
      * Collect member functions from a declaration.
      */
     void CollectDeclMemberFunc(
-        AST::Decl& decl, AST::Ty& instBaseTy, MemberFuncsWithInstTys& funcs, const std::string& identifier);
+        AST::Decl& decl, AST::DataTy instBaseTy, MemberFuncsWithInstTys& funcs, const std::string& identifier);
 
     /**
      * Get instantiated members from super types (interfaces or classes).
      */
-    void GetInstMemberFromSuper(AST::Ty& instBaseTy, Ptr<AST::InheritableDecl> baseDecl, MemberFuncsWithInstTys& funcs,
+    void GetInstMemberFromSuper(
+        AST::DataTy instBaseTy, Ptr<AST::InheritableDecl> baseDecl, MemberFuncsWithInstTys& funcs,
         const std::string& identifier, bool isCheckingInterface);
 
     /**
      * Merge member functions from extend declarations, selecting the subclass version in case of conflicts.
      */
-    void MergeExtendSuperMember(AST::Ty& instBaseTy, MemberFuncsWithInstTys& funcs, MemberFuncsWithInstTys& newFuncs);
+    void MergeExtendSuperMember(
+        AST::DataTy instBaseTy, MemberFuncsWithInstTys& funcs, MemberFuncsWithInstTys& newFuncs);
 
     /**
      * Merge new functions into existing functions, avoiding duplicates.
@@ -125,8 +132,8 @@ private:
      * function in @p funcs along the subclass direction: i.e. some func implements it AND any leaf type of
      * that func's outer-decl promoted types is a subtype of any root type of @p newFuncOuterDeclInstTys.
      */
-    bool IsImplementedInSameDirection(AST::Ty& instBaseTy, const AST::FuncDecl& newFunc,
-        const Ptr<AST::FuncTy> newFuncInstTy, const std::set<Ptr<AST::Ty>>& newFuncOuterDeclInstTys,
+    bool IsImplementedInSameDirection(AST::DataTy instBaseTy, const AST::FuncDecl& newFunc,
+        const Ptr<AST::FuncTy> newFuncInstTy, const std::set<AST::DataTy>& newFuncOuterDeclInstTys,
         const MemberFuncsWithInstTys& funcs);
 
     /**
@@ -139,7 +146,7 @@ private:
     TypeManager* typeManager = nullptr;
 
     // Global cache to store results for faster lookup
-    static std::unordered_map<std::pair<Ptr<AST::Ty>, std::string>, MemberFuncsWithInstTys, HashPair>
+    static std::unordered_map<std::pair<AST::DataTy, std::string>, MemberFuncsWithInstTys, HashPair>
         instTy2MembersCache;
 };
 

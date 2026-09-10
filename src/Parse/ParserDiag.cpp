@@ -951,7 +951,7 @@ void ParserImpl::DiagIllegalFunc(const OwnedPtr<FuncDecl>& funcDecl)
     builder.AddHint(MakeRange(funcDecl->keywordPos, funcDecl->keywordPos + std::string("func").size()));
 }
 
-void ParserImpl::DiagParseExpectedParenthis(const OwnedPtr<Type>& postType)
+void ParserImpl::DiagParseExpectedParenthesis(const OwnedPtr<Type>& postType)
 {
     auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_expected_parentheses, lastToken);
     auto help = DiagHelp("should be surrounded by '(' and ')'");

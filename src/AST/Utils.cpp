@@ -18,8 +18,8 @@
 
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
+#include "cangjie/AST/Node.h"
 #include "cangjie/AST/Walker.h"
-#include "cangjie/Basic/Utils.h"
 #include "cangjie/Utils/CastingTemplate.h"
 #include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/Utils/FloatFormat.h"
@@ -195,7 +195,7 @@ FloatTypeInfo GetFloatTypeInfoByKind(AST::TypeKind kind)
 
 void InitializeLitConstValue(LitConstExpr& lce)
 {
-    if (!Ty::IsTyCorrect(lce.GetTy())) {
+    if (!lce.GetTy().IsCorrect()) {
         return;
     }
     // LitConstExpr is always a const expression.
@@ -532,13 +532,14 @@ void ExtractArgumentsOfDeprecatedAnno(
 
 bool IsValidCFuncConstructorCall(const CallExpr& ce)
 {
-    // ce.GetTy() is correct only when the whole CFunc constructor call is correct
-    if (Ty::IsTyCorrect(ce.GetTy()) && ce.baseFunc && Is<RefExpr>(ce.baseFunc)) {
-        // if this is a builtin CFunc constructor call, do not check the arguments
-        if (auto callee = DynamicCast<BuiltInDecl>(StaticCast<RefExpr>(ce.baseFunc.get())->ref.target);
-            callee && callee->type == BuiltInType::CFUNC) {
-            return true;
-        }
+    // ce.ty is correct only when the whole CFunc constructor call is correct
+    if (!ce.GetTy().IsCorrect() || !Is<NameReferenceExpr>(ce.baseFunc)) {
+        return false;
+    }
+    // if this is a builtin CFunc constructor call, do not check the arguments
+    if (auto callee = DynamicCast<BuiltInDecl>(ce.baseFunc->GetTarget());
+        callee && callee->type == BuiltInType::CFUNC) {
+        return true;
     }
     return false;
 }
@@ -766,6 +767,14 @@ void InsertMirrorVarProp(ClassDecl& decl, Attribute attrToBeSet)
         }), members.end());
 }
 
+bool HasModifier(const std::set<Modifier>& modifiers, TokenKind kind)
+{
+    return std::any_of(modifiers.begin(), modifiers.end(), [kind](const auto& it) { return it.modifier == kind; });
+}
+bool HasModifier(const Decl& decl, TokenKind kind)
+{
+    return HasModifier(decl.modifiers, kind);
+}
 } // namespace Cangjie::AST
 
 namespace {
@@ -827,7 +836,6 @@ bool IsObject(const Node& node)
 {
     return node.GetTy()->IsObject();
 }
-
 } // namespace Cangjie::Interop::Java
 
 namespace Cangjie::Interop::ObjC {

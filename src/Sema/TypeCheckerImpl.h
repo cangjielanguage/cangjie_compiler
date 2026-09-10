@@ -43,11 +43,11 @@ struct FunctionMatchingUnit {
 public:
     int64_t id = -1;                         /**< The index in targets.*/
     AST::FuncDecl& fd;                       /**< Current unit's function, one of the candidates. */
-    std::vector<Ptr<AST::Ty>> tysInArgOrder; /**< The parameters types in arguments order.*/
+    std::vector<AST::ModalTy> tysInArgOrder; /**< The parameters types in arguments order.*/
     SubstPack typeMapping;                   /**< For generic type comparison.*/
     std::pair<std::vector<Diagnostic>, MatchingStat> diags; /**< Stashed diag msg.*/
     CstVersionID ver; /**< ID to fetch constraints generated for this candidate.*/
-    FunctionMatchingUnit(AST::FuncDecl& f, const std::vector<Ptr<AST::Ty>>& tys, const SubstPack& map) : fd(f)
+    FunctionMatchingUnit(AST::FuncDecl& f, const std::vector<AST::ModalTy>& tys, const SubstPack& map) : fd(f)
     {
         tysInArgOrder = tys;
         typeMapping = map;
@@ -62,17 +62,17 @@ public:
 struct FunctionCandidate {
     AST::FuncDecl& fd; /**< The reference of candidate function declare. */
     AST::CallExpr& ce; /**< The reference of call expression. */
-    std::vector<std::vector<Ptr<AST::Ty>>>
+    std::vector<std::vector<AST::ModalTy>>
         argCombinations; /**< The combinations of call expression's arguments types. */
     MatchingStat stat;   /**< Checking status of current candidate */
 };
 
 struct ArgumentTypeUnit {
 public:
-    std::vector<Ptr<AST::Ty>> argTys;        /**< The arguments types in order.*/
-    std::vector<Ptr<AST::Ty>> tysInArgOrder; /**< The parameters types in arguments order.*/
+    std::vector<AST::ModalTy> argTys;        /**< The arguments types in order.*/
+    std::vector<AST::ModalTy> tysInArgOrder; /**< The parameters types in arguments order.*/
     AST::TyVarEnv assumptionCollection;      /**< For generic type comparison.*/
-    ArgumentTypeUnit(const std::vector<Ptr<AST::Ty>>& tys, const std::vector<Ptr<AST::Ty>>& paramTys,
+    ArgumentTypeUnit(const std::vector<AST::ModalTy>& tys, const std::vector<AST::ModalTy>& paramTys,
         const AST::TyVarEnv& assumption)
         : argTys(tys), tysInArgOrder(paramTys), assumptionCollection(assumption)
     {
@@ -80,7 +80,7 @@ public:
 };
 
 struct LookupInfo {
-    Ptr<AST::Ty> baseTy = nullptr;
+    AST::ModalTy baseTy = {};
     Ptr<const AST::File> file = nullptr;
     bool lookupInherit = true;
     bool lookupExtend = true;
@@ -161,21 +161,21 @@ public:
      * @return found candidate decls or types.
      */
     Candidate SynReferenceSeparately(ASTContext& ctx, const std::string& scopeName, AST::Expr& expr, bool hasLocalDecl);
-    void RemoveTargetNotMeetExtendConstraint(const Ptr<AST::Ty> baseTy, std::vector<Ptr<AST::Decl>>& targets);
+    void RemoveTargetNotMeetExtendConstraint(AST::ModalTy baseTy, std::vector<Ptr<AST::Decl>>& targets);
 
 private:
     /**
      * Main entry of the synthesis mode of the type checking.
      * Context is read from ctx.SynthesizePos(). Use ctx.WithSynthesizePos() before calling.
      */
-    Ptr<AST::Ty> Synthesize(const CheckerContext& ctx, Ptr<AST::Node> node);
+    AST::ModalTy Synthesize(const CheckerContext& ctx, Ptr<AST::Node> node);
     bool SynthesizeAndReplaceIdealTy(const CheckerContext& ctx, AST::Node& node);
     /**
      * Main entry of the check mode of the type checking.
      */
-    bool Check(ASTContext& ctx, Ptr<AST::Ty> target, Ptr<AST::Node> node);
+    bool Check(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node);
     bool IsChecked(ASTContext& ctx, AST::Node& node) const;
-    std::optional<bool> PerformBasicChecksForCheck(ASTContext& ctx, Ptr<AST::Ty> target, Ptr<AST::Node> node) const;
+    std::optional<bool> PerformBasicChecksForCheck(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node) const;
     /**
      * Cahched version of Synthesize and Check.
      *
@@ -189,26 +189,26 @@ private:
      * the affected entries must be cleared. Currently, this could happen when allocating
      * new nodes during DesugarInTypeCheck, and checking lambda with omitted param type.
      */
-    Ptr<AST::Ty> SynthesizeWithCache(const CheckerContext& ctx, Ptr<AST::Node> node);
-    bool CheckWithCache(ASTContext& ctx, Ptr<AST::Ty> target, Ptr<AST::Node> node);
+    AST::ModalTy SynthesizeWithCache(const CheckerContext& ctx, Ptr<AST::Node> node);
+    bool CheckWithCache(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node);
     /**
      * Cahched version of Synthesize and Check. But only cache failed results.
      * Only for resolving overloaded builtin operators,
      * because this procedure lacks a post-check phase and will stop on success,
      * thus the successful check will always need to fully execute.
      * */
-    Ptr<AST::Ty> SynthesizeWithNegCache(const CheckerContext& ctx, Ptr<AST::Node> node);
-    bool CheckWithNegCache(ASTContext& ctx, Ptr<AST::Ty> target, Ptr<AST::Node> node);
+    AST::ModalTy SynthesizeWithNegCache(const CheckerContext& ctx, Ptr<AST::Node> node);
+    bool CheckWithNegCache(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node);
     /*
      * Use cached version of Synthesize and Check only when the same key was used
      * the last time this AST was fully checked, and not cleared ever since.
      * Also, it will NOT recover diags.
      * For function call post-check and any execution path that won't reach post-check.
      */
-    Ptr<AST::Ty> SynthesizeWithEffectiveCache(const CheckerContext& ctx, Ptr<AST::Node> node, bool recoverDiag);
-    bool CheckWithEffectiveCache(ASTContext& ctx, Ptr<AST::Ty> target, Ptr<AST::Node> node, bool recoverDiag);
-    Ptr<AST::Ty> SynthesizeAndCache(const CheckerContext& ctx, Ptr<AST::Node> node, const AST::CacheKey& key);
-    bool CheckAndCache(ASTContext& ctx, Ptr<AST::Ty> target, Ptr<AST::Node> node, const AST::CacheKey& key);
+    AST::ModalTy SynthesizeWithEffectiveCache(const CheckerContext& ctx, Ptr<AST::Node> node, bool recoverDiag);
+    bool CheckWithEffectiveCache(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node, bool recoverDiag);
+    AST::ModalTy SynthesizeAndCache(const CheckerContext& ctx, Ptr<AST::Node> node, const AST::CacheKey& key);
+    bool CheckAndCache(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node, const AST::CacheKey& key);
     /** ======== PreCheck related functions implemented in src/Sema/PreCheck.cpp. ======== */
     /**
      * Declaration redefinition check.
@@ -240,22 +240,26 @@ private:
      * name resolution.
      * @return Sematic Ty.
      */
-    Ptr<AST::Ty> GetTyFromASTType(ASTContext& ctx, Ptr<AST::Node> type);
-    Ptr<AST::Ty> GetTyFromASTType(ASTContext& ctx, AST::RefType& rt);
-    Ptr<AST::Ty> GetTyFromASTType(ASTContext& ctx, AST::QualifiedType& qt);
-    Ptr<AST::Ty> GetTyFromASTCFuncType(ASTContext& ctx, AST::RefType& rt);
-    Ptr<AST::Ty> GetTyFromASTType(ASTContext& ctx, AST::VArrayType& varrayType);
-    Ptr<AST::Ty> GetTyFromASTType(ASTContext& ctx, AST::TupleType& tupleType);
-    Ptr<AST::Ty> GetTyFromASTType(ASTContext& ctx, AST::FuncType& funcType);
-    Ptr<AST::Ty> GetTyFromASTType(ASTContext& ctx, AST::OptionType& optionType);
-    std::vector<Ptr<AST::Ty>> GetTyFromASTType(ASTContext& ctx, std::vector<OwnedPtr<AST::Type>>& typeArguments);
-    Ptr<AST::Ty> GetTyFromASTType(AST::Decl& decl, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    std::vector<Ptr<AST::Ty>> GetTyFromASTType(const std::vector<OwnedPtr<AST::GenericParamDecl>>& typeParameters);
-    Ptr<AST::Ty> GetTyFromBuiltinDecl(const AST::BuiltInDecl& bid, const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::Ty> GetBuiltInArrayType(const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::Ty> GetBuiltInVArrayType(const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::Ty> GetBuiltinCFuncType(const std::vector<Ptr<AST::Ty>>& typeArgs);
-    Ptr<AST::Ty> GetBuiltInPointerType(const std::vector<Ptr<AST::Ty>>& typeArgs);
+    AST::ModalTy GetTyFromASTType(ASTContext& ctx, Ptr<AST::Node> type);
+    AST::ModalTy GetTyFromASTType(ASTContext& ctx, AST::RefType& rt);
+    AST::ModalTy GetTyFromASTType(ASTContext& ctx, AST::QualifiedType& qt);
+    AST::ModalTy GetTyFromASTCFuncType(ASTContext& ctx, AST::RefType& rt);
+    AST::ModalTy GetTyFromASTType(ASTContext& ctx, AST::VArrayType& varrayType);
+    AST::ModalTy GetTyFromASTType(ASTContext& ctx, AST::TupleType& tupleType);
+    AST::ModalTy GetTyFromASTType(ASTContext& ctx, AST::FuncType& funcType);
+    AST::ModalTy GetTyFromASTType(ASTContext& ctx, AST::OptionType& optionType);
+    std::vector<AST::DataTy> GetTyFromASTType(ASTContext& ctx, std::vector<OwnedPtr<AST::Type>>& typeArguments);
+    std::vector<AST::ModalTy> GetModalTysFromASTType(ASTContext& ctx, std::vector<OwnedPtr<AST::Type>>& typeArguments);
+    AST::ModalTy GetTyFromASTType(AST::Decl& decl, const std::vector<AST::ModalTy>& typeArgs, ModalInfo modal);
+    std::vector<AST::DataTy> GetTyFromASTType(const std::vector<OwnedPtr<AST::GenericParamDecl>>& typeParameters);
+    AST::ModalTy GetTyFromBuiltinDecl(
+        const AST::BuiltInDecl& bid, const std::vector<AST::DataTy>& typeArgs, ModalInfo modal);
+    AST::ModalTy GetTyFromBuiltinDecl(
+        const AST::BuiltInDecl& bid, const std::vector<AST::ModalTy>& typeArgs, ModalInfo modal);
+    AST::ModalTy GetBuiltInArrayType(const std::vector<AST::DataTy>& typeArgs, ModalInfo modal);
+    AST::ModalTy GetBuiltInVArrayType(const std::vector<AST::DataTy>& typeArgs, ModalInfo modal);
+    AST::ModalTy GetBuiltinCFuncType(const std::vector<AST::ModalTy>& typeArgs, ModalInfo modal);
+    AST::ModalTy GetBuiltInPointerType(const std::vector<AST::DataTy>& typeArgs, ModalInfo modal);
 
     /** Check legality of attributes for all decls. */
     void CheckAllDeclAttributes(const ASTContext& ctx);
@@ -274,6 +278,7 @@ private:
      * @param root the root node of AST.
      */
     void ResolveDecls(ASTContext& ctx);
+    void ResolveBuiltinDeclMembers(const std::vector<AST::Symbol*>& syms);
     void ResolveTypeAlias(const std::vector<Ptr<ASTContext>>& contexts);
     /**
      * 1.Set declaration's semantic types only by its ASTKind, name and type arguments.
@@ -301,6 +306,8 @@ private:
      * firstly, build symbol table for all packages and typecheck redefinition except functions.
      */
     void PrepareTypeCheck(ASTContext& ctx, AST::Package& pkg);
+    friend class BuiltinDeclCreater;
+    void CreateBuiltinDecls(AST::Package& pkg);
     /**
      * Collect mem2Decls map in ASTContext for quick lookup during type check
      */
@@ -373,7 +380,7 @@ private:
     /**
      * Check upper bound legality recursively.
      */
-    bool CheckUpperBoundsLegalityRecursively(const AST::Ty& upper);
+    bool CheckUpperBoundsLegalityRecursively(AST::DataTy upper);
     /**
      * Check assumption legality for a Decl @p decl including:
      * 1. Generic constraints check.
@@ -405,16 +412,16 @@ private:
      * Class irrelevant and classlike relevant types cannot exist at same time in the upper bound.
      */
     bool SanityCheckForVarietyTypesOfUpperBounds(AST::GenericsTy& genericTy,
-        const std::set<Ptr<AST::Ty>>& classIrrelevantUpperBounds, const std::set<Ptr<AST::Ty>>& classlikeUpperBounds);
+        const std::set<AST::DataTy>& classIrrelevantUpperBounds, const std::set<AST::DataTy>& classlikeUpperBounds);
     /**
      * Assumption sanity check Rule 4: If there are multiple classes, they must be in one inheritance chain.
      */
-    void SanityCheckForClassUpperBounds(AST::GenericsTy& genericTy, const std::set<Ptr<AST::Ty>>& classUpperBounds);
+    void SanityCheckForClassUpperBounds(AST::GenericsTy& genericTy, const std::set<AST::DataTy>& classUpperBounds);
     /**
      * Check and reduce upper bounds where there are upper bounds in same inheritance chain,
      * using their maximum common child type.
      */
-    bool CheckAndReduceUpperBounds(AST::GenericsTy& genericTy, const std::set<Ptr<AST::Ty>>& upperBounds);
+    bool CheckAndReduceUpperBounds(AST::GenericsTy& genericTy, const std::set<AST::DataTy>& upperBounds);
     /**
      * Add assumption for all type alias declarations.
      */
@@ -441,7 +448,7 @@ private:
      */
     void AddUpperBoundOnTypeParameters(ASTContext& ctx, const AST::Generic& generic, const AST::Decl& typeTarget,
         MultiTypeSubst& revTypeMapping, TyVarUB& allAssumptionMap, const TypeSubst& typeArgAppliedMap);
-    void GetAllAssumptions(AST::TyVarEnv& source, AST::TyVarEnv& newMap);
+    void GetAllAssumptions(TyVarUB& source, TyVarUB& newMap);
     /**
      * Add Object to all ClassDecls' inheritedTypes if there is no one.
      */
@@ -481,6 +488,11 @@ private:
      * 4. Same signature.
      */
     void PreCheckFuncRedefinition(const ASTContext& ctx);
+    /// Check property redefinition: props with the same name in the same scope must share
+    /// one data type, and (data type, modal) must be unique.
+    void PreCheckPropRedefinition(const ASTContext& ctx);
+    /// Check redefinition among a group of same-name, same-scope PropDecls. And check static prop overload.
+    void CheckPropRedefinition(std::vector<AST::PropDecl*>& props);
     /**
      * Check function redefinition at PreCheck stage for the functions in the Enum.
      */
@@ -505,7 +517,7 @@ private:
     void PreCheckAllExtendInterface();
     void CheckSpecializationExtend(const AST::InheritableDecl& extendedDecl, const AST::ExtendDecl& extendDecl,
         const std::set<Ptr<AST::ExtendDecl>, AST::CmpNodeByPos> otherExtendDecls);
-    void CheckSpecializationExtendDupImstantation(const AST::Ty& extendedDeclTy, const AST::ExtendDecl& compareExtend,
+    void CheckSpecializationExtendDupImstantation(AST::DataTy extendedDeclTy, const AST::ExtendDecl& compareExtend,
         const AST::InheritableDecl& beComparedDecl, const TypeSubst& instantMapping, const bool checkParent = false);
     void BuildImportedExtendMap();
     void MergeCJMPExtensions(ASTContext& ctx, const std::unordered_set<Ptr<AST::ExtendDecl>>& extends);
@@ -563,7 +575,6 @@ private:
     /**
      * Desugar APIs during sema check.
      */
-    void DesugarArrayCall(ASTContext& ctx, AST::CallExpr& ce);
     /**
      * Desugar static reference calls to member access expressions in CFunc lambda.
      * Ensure that no dynamic dispatch occurs in the CFunc.
@@ -583,12 +594,15 @@ private:
      *     }
      * }
      * */
-    void DesugarStaticRefCall2MemberAccessInCFuncLam(AST::LambdaExpr& le, Ptr<AST::Ty> curTopDeclTy);
+    void DesugarStaticRefCall2MemberAccessInCFuncLam(AST::LambdaExpr& le, AST::ModalTy curTopDeclTy);
+    void DesugarVArrayCall(ASTContext& ctx, AST::CallExpr& ce);
     void DesugarPointerCall(ASTContext& ctx, AST::CallExpr& ce);
     /** Desugar 'propDecl' after typecheck but still inside 'Sema' stage. Keep this order for cjLint usage. */
     void DesugarForPropDecl(AST::Node& pkg);
+    void DesugarSetForPropDecl(AST::Expr& expr);
+    void DesugarGetForPropDecl(AST::Expr& expr);
     /** Desugar for string interpolation expr. */
-    std::vector<Ptr<AST::Decl>> MatchToStringImpl(const ASTContext& ctx, const AST::File& file, AST::Ty& ty);
+    std::vector<Ptr<AST::Decl>> MatchToStringImpl(const ASTContext& ctx, const AST::File& file, AST::ModalTy ty);
     OwnedPtr<AST::CallExpr> DesugarStrPartExpr(
         const ASTContext& ctx, AST::Expr& expr, const std::vector<Ptr<AST::Decl>> appendDecls, AST::VarDecl& sbItem);
     void DesugarStrInterpolationExpr(ASTContext& ctx, AST::LitConstExpr& litConstExpr);
@@ -619,14 +633,14 @@ private:
     void DesugarTryWithResourcesExpr(ASTContext& ctx, AST::TryExpr& te);
 
     OwnedPtr<AST::Expr> ConstructOptionMatch(OwnedPtr<AST::Expr> selector, OwnedPtr<AST::Block> someExpr,
-        OwnedPtr<AST::Block> otherExpr, AST::RefExpr& someVar, Ptr<AST::Ty> someTy) const;
+        OwnedPtr<AST::Block> otherExpr, AST::RefExpr& someVar, AST::ModalTy someTy) const;
 
     void DesugarTryToFrame(ASTContext& ctx, AST::TryExpr& te);
     void DesugarPerform(ASTContext& ctx, AST::PerformExpr& pe);
     void DesugarResume(ASTContext& ctx, AST::ResumeExpr& re);
     void DesugarImmediateResume(ASTContext& ctx, AST::ResumeExpr& re);
     OwnedPtr<AST::Expr> GetHelperFrameMethod(
-        AST::Node& base, const std::string& methodName, std::vector<Ptr<AST::Ty>> typeArgs);
+        AST::Node& base, const std::string& methodName, std::vector<AST::ModalTy> typeArgs);
     void CreateResult(
         ASTContext& ctx, const AST::TryExpr& te, AST::VarDecl& frame, std::vector<OwnedPtr<AST::Node>>& block);
     void CreateSetHandler(
@@ -637,7 +651,7 @@ private:
     void EncloseTryLambda(ASTContext& ctx, OwnedPtr<AST::LambdaExpr>& tryLambda);
 
     /* Synthesize specialized for desugar after sema. Will not recover previous desugar results */
-    Ptr<AST::Ty> SynthesizeWithoutRecover(const CheckerContext& ctx, Ptr<AST::Node> node);
+    AST::ModalTy SynthesizeWithoutRecover(const CheckerContext& ctx, Ptr<AST::Node> node);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     OwnedPtr<AST::FuncDecl> CreateToAny(AST::Decl& outerDecl);
 #endif
@@ -651,7 +665,7 @@ private:
      * Get the target members for the extends of @param ty.
      */
     std::vector<Ptr<AST::Decl>> ExtendFieldLookup(
-        const ASTContext& ctx, const AST::File& file, Ptr<AST::Ty> ty, const std::string& fieldName);
+        const ASTContext& ctx, const AST::File& file, AST::DataTy ty, const std::string& fieldName);
     /**
      * Find the symbols from name and scope name.
      * @param ctx: the current ASTContext.
@@ -687,39 +701,40 @@ private:
 
     void CheckVarDecl(ASTContext& ctx, AST::VarDecl& vd);
     void CheckPropDecl(ASTContext& ctx, AST::PropDecl& pd);
+    bool CheckPropMethodTargetType(const AST::FuncDecl& fd);
     void UpdateMemberVariableTy(const AST::Decl& decl, const AST::EnumTy& eTy);
 
-    Ptr<AST::Ty> SynBlock(const CheckerContext& ctx, AST::Block& b);
-    bool ChkBlock(ASTContext& ctx, AST::Ty& target, AST::Block& b);
+    AST::ModalTy SynBlock(const CheckerContext& ctx, AST::Block& b);
+    bool ChkBlock(ASTContext& ctx, AST::ModalTy target, AST::Block& b);
     /**
      * Arithmetic operator { +, -, *, /, ** }
      */
-    std::optional<Ptr<AST::Ty>> SynArithmeticOrRelationalExpr(
+    std::optional<AST::ModalTy> SynArithmeticOrRelationalExpr(
         ASTContext& ctx, AST::BinaryExpr& be, bool isArithmetic = true);
-    Ptr<AST::Ty> SynLogicalExpr(ASTContext& ctx, AST::BinaryExpr& be);
-    Ptr<AST::Ty> SynShiftExpr(ASTContext& ctx, AST::BinaryExpr& be);
-    Ptr<AST::Ty> SynFlowExpr(ASTContext& ctx, AST::BinaryExpr& be);
-    Ptr<AST::Ty> SynCoalescingExpr(ASTContext& ctx, AST::BinaryExpr& be);
-    bool ChkArithmeticExpr(ASTContext& ctx, AST::Ty& target, AST::BinaryExpr& be);
+    AST::ModalTy SynLogicalExpr(ASTContext& ctx, AST::BinaryExpr& be);
+    AST::ModalTy SynShiftExpr(ASTContext& ctx, AST::BinaryExpr& be);
+    AST::ModalTy SynFlowExpr(ASTContext& ctx, AST::BinaryExpr& be);
+    AST::ModalTy SynCoalescingExpr(ASTContext& ctx, AST::BinaryExpr& be);
+    bool ChkArithmeticExpr(ASTContext& ctx, AST::ModalTy target, AST::BinaryExpr& be);
     // Check exponentiation expressions with target types.
-    bool ChkExpoExpr(ASTContext& ctx, AST::Ty& tgtTy, AST::BinaryExpr& be);
-    bool ChkExpoExprBase(ASTContext& ctx, const AST::BinaryExpr& be, AST::Ty& baseTy);
-    bool ChkExpoExprExponent(ASTContext& ctx, AST::Expr& exponent, std::vector<Ptr<AST::Ty>> exTys);
-    bool CheckExponentByBaseTy(ASTContext& ctx, AST::Ty& baseTy, const AST::Expr& base, AST::Expr& exponent);
-    Ptr<AST::Ty> SynExpoExpr(ASTContext& ctx, AST::BinaryExpr& be);
-    bool ChkLogicalExpr(ASTContext& ctx, AST::Ty& target, AST::BinaryExpr& be);
-    bool ChkRelationalExpr(ASTContext& ctx, AST::Ty& target, AST::BinaryExpr& be);
-    bool ChkShiftExpr(ASTContext& ctx, AST::Ty& target, AST::BinaryExpr& be);
-    bool ChkCoalescingExpr(ASTContext& ctx, Ptr<AST::Ty> tgtTy, AST::BinaryExpr& be);
-    bool IsCoalescingLeftTyValid(AST::Ty& ty) const;
+    bool ChkExpoExpr(ASTContext& ctx, AST::ModalTy tgtTy, AST::BinaryExpr& be);
+    bool ChkExpoExprBase(ASTContext& ctx, const AST::BinaryExpr& be, AST::ModalTy baseTy);
+    bool ChkExpoExprExponent(ASTContext& ctx, AST::Expr& exponent, std::vector<AST::ModalTy> exTys);
+    bool CheckExponentByBaseTy(ASTContext& ctx, AST::ModalTy baseTy, const AST::Expr& base, AST::Expr& exponent);
+    AST::ModalTy SynExpoExpr(ASTContext& ctx, AST::BinaryExpr& be);
+    bool ChkLogicalExpr(ASTContext& ctx, AST::ModalTy target, AST::BinaryExpr& be);
+    bool ChkRelationalExpr(ASTContext& ctx, AST::ModalTy target, AST::BinaryExpr& be);
+    bool ChkShiftExpr(ASTContext& ctx, AST::ModalTy target, AST::BinaryExpr& be);
+    bool ChkCoalescingExpr(ASTContext& ctx, AST::ModalTy tgtTy, AST::BinaryExpr& be);
+    bool IsCoalescingLeftTyValid(AST::ModalTy ty) const;
     /**
      * Try to find a unique Ty that can constrain the ty var.
      * The new constraint will be added only if the result is UNIQUE.
      */
-    MatchResult PickConstaintFromTys(TyVar& tv, std::set<Ptr<AST::Ty>> tys, bool isUB);
+    MatchResult PickConstaintFromTys(TyVar& tv, std::set<AST::ModalTy> tys, bool isUB);
     MatchResult PickConstaintFromTys(
-        AST::Ty& tv1, AST::Ty& tv2, std::set<std::pair<Ptr<AST::Ty>, Ptr<AST::Ty>>> tys, bool isUB);
-    std::optional<Ptr<AST::Ty>> PerformBasicChecksForSynthesize(ASTContext& ctx, Ptr<AST::Node> node) const;
+        AST::ModalTy tv1, AST::ModalTy tv2, std::set<std::pair<AST::ModalTy, AST::ModalTy>> tys, bool isUB);
+    std::optional<AST::ModalTy> PerformBasicChecksForSynthesize(ASTContext& ctx, Ptr<AST::Node> node) const;
 
     /**
      * Check if the compiler can add a built-in == (or !=) for these two tuple types.
@@ -727,36 +742,43 @@ private:
      * the compiler provides a built-in == (or !=) for these two tuple types.
      */
     bool CheckTupleCanEqual(ASTContext& ctx, AST::BinaryExpr& be);
-    bool ChkFlowExpr(ASTContext& ctx, Ptr<AST::Ty> target, AST::BinaryExpr& be);
+    bool ChkFlowExpr(ASTContext& ctx, AST::ModalTy target, AST::BinaryExpr& be);
     bool CheckFlowOperandsHaveNamedParam(const AST::CallExpr& ce);
     void DiagnoseForBinaryExpr(ASTContext& ctx, AST::BinaryExpr& be);
     void DiagnoseForUnaryExpr(ASTContext& ctx, AST::UnaryExpr& ue);
-    void DiagnoseForUnaryExprWithTarget(ASTContext& ctx, AST::UnaryExpr& ue, AST::Ty& target);
-    bool ChkBinaryExpr(ASTContext& ctx, AST::Ty& target, AST::BinaryExpr& be);
+    void DiagnoseForUnaryExprWithTarget(ASTContext& ctx, AST::UnaryExpr& ue, AST::ModalTy target);
+    bool ChkBinaryExpr(ASTContext& ctx, AST::ModalTy target, AST::BinaryExpr& be);
     bool ChkOperatorFuncIfTyCannotBeInferred(ASTContext& ctx, AST::BinaryExpr& be);
-    bool TryCheckOperatorOverload(ASTContext& ctx, AST::Ty* target, AST::BinaryExpr& be);
+    bool TryCheckOperatorOverload(ASTContext& ctx, AST::ModalTy target, AST::BinaryExpr& be);
     bool TrySynthesizeOperatorOverload(ASTContext& ctx, AST::BinaryExpr& be);
-    Ptr<AST::Ty> SynBinaryExpr(ASTContext& ctx, AST::BinaryExpr& be);
-    Ptr<AST::Ty> SynIncOrDecExpr(ASTContext& ctx, AST::IncOrDecExpr& ide);
-    bool ChkIncOrDecExpr(ASTContext& ctx, AST::Ty& target, AST::IncOrDecExpr& ide);
-    Ptr<AST::Ty> SynTypeConvExpr(ASTContext& ctx, AST::TypeConvExpr& tce);
-    Ptr<AST::Ty> SynNumTypeConvExpr(AST::TypeConvExpr& tce);
+    AST::ModalTy SynBinaryExpr(ASTContext& ctx, AST::BinaryExpr& be);
+    AST::ModalTy SynIncOrDecExpr(ASTContext& ctx, AST::IncOrDecExpr& ide);
+    bool ChkIncOrDecExpr(ASTContext& ctx, AST::ModalTy target, AST::IncOrDecExpr& ide);
+    AST::ModalTy SynTypeConvExpr(ASTContext& ctx, AST::TypeConvExpr& tce);
+    AST::ModalTy SynNumTypeConvExpr(AST::TypeConvExpr& tce);
     bool SynCFuncCall(ASTContext& ctx, AST::CallExpr& ce);
-    bool ChkTypeConvExpr(ASTContext& ctx, AST::Ty& targetTy, AST::TypeConvExpr& tce);
-    Ptr<AST::Ty> SynLoopControlExpr(const ASTContext& ctx, AST::JumpExpr& je) const;
+    bool ChkTypeConvExpr(ASTContext& ctx, AST::ModalTy targetTy, AST::TypeConvExpr& tce);
+    AST::ModalTy SynLoopControlExpr(const ASTContext& ctx, AST::JumpExpr& je) const;
     bool ChkLoopControlExpr(const ASTContext& ctx, AST::JumpExpr& je) const;
-    Ptr<AST::Ty> SynLamExpr(ASTContext& ctx, AST::LambdaExpr& le);
+    AST::ModalTy SynLamExpr(ASTContext& ctx, AST::LambdaExpr& le);
     bool SolveLamExprParamTys(ASTContext& ctx, AST::LambdaExpr& le);
     void ResetLambdaForReinfer(ASTContext& ctx, const AST::LambdaExpr& le);
     void TryInferFromSyntaxInfo(ASTContext& ctx, const AST::LambdaExpr& le);
-    bool ChkLamExpr(ASTContext& ctx, AST::Ty& target, AST::LambdaExpr& le);
-    bool ChkLamParamTys(ASTContext& ctx, AST::LambdaExpr& le, const std::vector<Ptr<AST::Ty>>& tgtParamTys,
-        std::vector<Ptr<AST::Ty>>& lamParamTys);
+    bool ChkLamExpr(ASTContext& ctx, AST::ModalTy target, AST::LambdaExpr& le);
+    bool ChkLamParamTys(ASTContext& ctx, AST::LambdaExpr& le, const std::vector<AST::ModalTy>& tgtParamTys,
+        std::vector<AST::ModalTy>& lamParamTys);
     bool ChkLamBody(ASTContext& ctx, AST::FuncBody& lamFb);
-    Ptr<AST::Ty> SynIfExpr(const CheckerContext& ctx, AST::IfExpr& ie);
-    bool ChkIfExpr(ASTContext& ctx, AST::Ty& tgtTy, AST::IfExpr& ie);
-    bool ChkIfExprNoElse(ASTContext& ctx, AST::Ty& target, AST::IfExpr& ie);
-    bool ChkIfExprTwoBranches(ASTContext& ctx, AST::Ty& target, AST::IfExpr& ie);
+    void DiagInvalidLocalFuncType(const AST::Node& le);
+    /// Check validity of one nre. Returns false when it is a local! capture.
+    bool CheckLocalCapture(const ASTContext& ctx, const AST::Node& func, const AST::RefExpr& expr) const;
+    /// Check validity of all @local captures in a lambda or local function.
+    void CheckLocalCaptures(const ASTContext& ctx, AST::Node& funcLike);
+    /// When a lambda has @local? capture, infer to @local? fun; otherwise @~local.
+    void InferLamExprModal(ASTContext& ctx, AST::LambdaExpr& le);
+    AST::ModalTy SynIfExpr(const CheckerContext& ctx, AST::IfExpr& ie);
+    bool ChkIfExpr(ASTContext& ctx, AST::ModalTy tgtTy, AST::IfExpr& ie);
+    bool ChkIfExprNoElse(ASTContext& ctx, AST::ModalTy target, AST::IfExpr& ie);
+    bool ChkIfExprTwoBranches(ASTContext& ctx, AST::ModalTy target, AST::IfExpr& ie);
     /// Check and diagnose conditions in if and while
     /// The target type is necessarily Bool and thus omitted.
     bool CheckCondition(ASTContext& ctx, AST::Expr& e, bool suppressIntroducingVariableError);
@@ -764,136 +786,126 @@ private:
 
     bool SynLetPatternDestructor(
         ASTContext& ctx, AST::LetPatternDestructor& lpd, bool suppressIntroducingVariableError);
-    std::optional<Ptr<AST::ClassTy>> PromoteToCommandTy(const AST::Node& cause, AST::Ty& cmdTy);
-    Ptr<AST::Ty> SynThrowExpr(ASTContext& ctx, AST::ThrowExpr& te);
-    Ptr<AST::Ty> SynPerformExpr(ASTContext& ctx, AST::PerformExpr& pe);
-    Ptr<AST::Ty> SynResumeExpr(ASTContext& ctx, AST::ResumeExpr& re);
-    Ptr<AST::Ty> SynTryExpr(ASTContext& ctx, AST::TryExpr& te);
-    Ptr<AST::Ty> SynTryWithResourcesExpr(ASTContext& ctx, AST::TryExpr& te);
-    std::optional<Ptr<AST::Ty>> SynTryExprCatchesAndHandles(ASTContext& ctx, AST::TryExpr& te);
-    bool SynHandler(ASTContext& ctx, AST::Handler& handler, Ptr<AST::Ty> tgtTy, AST::TryExpr& te);
-    bool ChkTryExpr(ASTContext& ctx, AST::Ty& tgtTy, AST::TryExpr& te);
-    bool ChkTryExprCatchesAndHandles(ASTContext& ctx, AST::Ty& tgtTy, AST::TryExpr& te);
+    std::optional<Ptr<AST::ClassTy>> PromoteToCommandTy(const AST::Node& cause, AST::ModalTy cmdTy);
+    AST::ModalTy SynThrowExpr(ASTContext& ctx, AST::ThrowExpr& te);
+    AST::ModalTy SynPerformExpr(ASTContext& ctx, AST::PerformExpr& pe);
+    AST::ModalTy SynResumeExpr(ASTContext& ctx, AST::ResumeExpr& re);
+    AST::ModalTy SynTryExpr(ASTContext& ctx, AST::TryExpr& te);
+    AST::ModalTy SynTryWithResourcesExpr(ASTContext& ctx, AST::TryExpr& te);
+    std::optional<AST::ModalTy> SynTryExprCatchesAndHandles(ASTContext& ctx, AST::TryExpr& te);
+    bool SynHandler(ASTContext& ctx, AST::Handler& handler, AST::ModalTy tgtTy, AST::TryExpr& te);
+    bool ChkTryExpr(ASTContext& ctx, AST::ModalTy tgtTy, AST::TryExpr& te);
+    bool ChkTryExprCatchesAndHandles(ASTContext& ctx, AST::ModalTy tgtTy, AST::TryExpr& te);
     bool ChkTryExprCatchPatterns(ASTContext& ctx, AST::TryExpr& te);
     bool ChkTryExprHandlePatterns(ASTContext& ctx, AST::TryExpr& te);
-    bool ChkHandler(ASTContext& ctx, AST::Handler& handler, AST::Ty& tgtTy);
+    bool ChkHandler(ASTContext& ctx, AST::Handler& handler, AST::ModalTy tgtTy);
     bool ValidateBlockInTryHandle(AST::Block& block);
     bool ValidateHandler(AST::Handler& h);
     bool ChkTryExprFinallyBlock(ASTContext& ctx, const AST::TryExpr& te);
-    bool ChkQuoteExpr(ASTContext& ctx, AST::Ty& target, AST::QuoteExpr& qe);
-    Ptr<AST::Ty> SynQuoteExpr(ASTContext& ctx, AST::QuoteExpr& qe);
-    Ptr<AST::Ty> SynUnaryExpr(ASTContext& ctx, AST::UnaryExpr& ue);
-    bool ChkUnaryExpr(ASTContext& ctx, AST::Ty& target, AST::UnaryExpr& ue);
-    Ptr<AST::Ty> SynBuiltinUnaryExpr(ASTContext& ctx, AST::UnaryExpr& ue);
-    Ptr<AST::Ty> SynParenExpr(const CheckerContext& ctx, AST::ParenExpr& pe);
-    bool ChkParenExpr(ASTContext& ctx, AST::Ty& target, AST::ParenExpr& pe);
-    Ptr<AST::Ty> SynAssignExpr(ASTContext& ctx, AST::AssignExpr& ae);
-    Ptr<AST::Ty> SynMultipleAssignExpr(ASTContext& ctx, AST::AssignExpr& ae);
-    bool ChkAssignExpr(ASTContext& ctx, AST::Ty& target, AST::AssignExpr& ae);
+    bool ChkQuoteExpr(ASTContext& ctx, AST::ModalTy target, AST::QuoteExpr& qe);
+    AST::ModalTy SynQuoteExpr(ASTContext& ctx, AST::QuoteExpr& qe);
+    AST::ModalTy SynUnaryExpr(ASTContext& ctx, AST::UnaryExpr& ue);
+    bool ChkUnaryExpr(ASTContext& ctx, AST::ModalTy target, AST::UnaryExpr& ue);
+    AST::ModalTy SynBuiltinUnaryExpr(ASTContext& ctx, AST::UnaryExpr& ue);
+    AST::ModalTy SynParenExpr(const CheckerContext& ctx, AST::ParenExpr& pe);
+    bool ChkParenExpr(ASTContext& ctx, AST::ModalTy target, AST::ParenExpr& pe);
+    AST::ModalTy SynAssignExpr(ASTContext& ctx, AST::AssignExpr& ae);
+    AST::ModalTy SynMultipleAssignExpr(ASTContext& ctx, AST::AssignExpr& ae);
+    bool ChkAssignExpr(ASTContext& ctx, AST::ModalTy target, AST::AssignExpr& ae);
     bool IsAssignable(AST::Expr& e, bool isCompound, const std::vector<Diagnostic>& diags) const;
     bool IsShiftAssignValid(const AST::AssignExpr& ae);
-    Ptr<AST::Ty> SynLitConstExpr(ASTContext& ctx, AST::LitConstExpr& lce);
-    Ptr<AST::Ty> SynLitConstStringExpr(ASTContext& ctx, AST::LitConstExpr& lce);
-    bool ChkLitConstExpr(ASTContext& ctx, AST::Ty& target, AST::LitConstExpr& lce);
-    bool ChkLitConstExprOfTypeBool(AST::Ty& target, AST::LitConstExpr& lce);
-    bool ChkLitConstExprOfTypeUnit(AST::Ty& target, AST::LitConstExpr& lce);
-    bool ChkLitConstExprOfTypeInteger(AST::Ty& target, AST::LitConstExpr& lce);
-    bool ChkLitConstExprOfTypeFloat(AST::Ty& targetTy, AST::LitConstExpr& lce);
-    bool ChkLitConstExprOfTypeChar(AST::Ty& targetTy, AST::LitConstExpr& lce);
-    bool ChkLitConstExprOfTypeString(ASTContext& ctx, AST::Ty& target, AST::LitConstExpr& lce);
-    Ptr<AST::Ty> SynWhileExpr(ASTContext& ctx, AST::WhileExpr& we);
-    bool ChkWhileExpr(ASTContext& ctx, AST::Ty& target, AST::WhileExpr& we);
-    Ptr<AST::Ty> SynDoWhileExpr(ASTContext& ctx, AST::DoWhileExpr& dwe);
-    bool ChkDoWhileExpr(ASTContext& ctx, AST::Ty& target, AST::DoWhileExpr& dwe);
-    Ptr<AST::Ty> SynTupleLit(ASTContext& ctx, AST::TupleLit& tl);
-    bool ChkTupleLit(ASTContext& ctx, AST::Ty& target, AST::TupleLit& tl);
-    Ptr<AST::Ty> SynReturnExpr(ASTContext& ctx, AST::ReturnExpr& re);
+    AST::ModalTy SynLitConstExpr(ASTContext& ctx, AST::LitConstExpr& lce);
+    AST::ModalTy SynLitConstStringExpr(ASTContext& ctx, AST::LitConstExpr& lce);
+    bool ChkLitConstExpr(ASTContext& ctx, AST::ModalTy target, AST::LitConstExpr& lce);
+    bool ChkLitConstExprOfTypeBool(AST::ModalTy target, AST::LitConstExpr& lce);
+    bool ChkLitConstExprOfTypeUnit(AST::ModalTy target, AST::LitConstExpr& lce);
+    bool ChkLitConstExprOfTypeInteger(AST::ModalTy target, AST::LitConstExpr& lce);
+    bool ChkLitConstExprOfTypeFloat(AST::ModalTy targetTy, AST::LitConstExpr& lce);
+    bool ChkLitConstExprOfTypeChar(AST::ModalTy targetTy, AST::LitConstExpr& lce);
+    bool ChkLitConstExprOfTypeString(ASTContext& ctx, AST::ModalTy target, AST::LitConstExpr& lce);
+    AST::ModalTy SynWhileExpr(ASTContext& ctx, AST::WhileExpr& we);
+    bool ChkWhileExpr(ASTContext& ctx, AST::ModalTy target, AST::WhileExpr& we);
+    AST::ModalTy SynDoWhileExpr(ASTContext& ctx, AST::DoWhileExpr& dwe);
+    bool ChkDoWhileExpr(ASTContext& ctx, AST::ModalTy target, AST::DoWhileExpr& dwe);
+    AST::ModalTy SynTupleLit(ASTContext& ctx, AST::TupleLit& tl);
+    bool ChkTupleLit(ASTContext& ctx, AST::ModalTy target, AST::TupleLit& tl);
+    AST::ModalTy SynReturnExpr(ASTContext& ctx, AST::ReturnExpr& re);
     bool ChkReturnExpr(ASTContext& ctx, AST::ReturnExpr& re);
     bool CheckReturnInConstructors(ASTContext& ctx, const AST::ReturnExpr& re);
-    Ptr<AST::Ty> SynFuncArg(ASTContext& ctx, AST::FuncArg& fa);
-    bool ChkFuncArg(ASTContext& ctx, AST::Ty& target, AST::FuncArg& fa);
-    bool ChkFuncArgWithInout(ASTContext& ctx, AST::Ty& target, AST::FuncArg& fa);
+    AST::ModalTy SynFuncArg(ASTContext& ctx, AST::FuncArg& fa);
+    bool ChkFuncArg(ASTContext& ctx, AST::ModalTy target, AST::FuncArg& fa);
+    bool ChkFuncArgWithInout(ASTContext& ctx, AST::ModalTy target, AST::FuncArg& fa);
     bool ChkInoutFuncArg(const AST::FuncArg& fa);
     bool ChkInoutRefExpr(AST::RefExpr& re, bool isBase = false);
     bool ChkInoutMemberAccess(const AST::MemberAccess& ma);
-    Ptr<AST::Ty> SynFuncParam(ASTContext& ctx, AST::FuncParam& fp);
-    bool ChkFuncParam(ASTContext& ctx, AST::Ty& target, AST::FuncParam& fp);
-    Ptr<AST::Ty> SynIsExpr(ASTContext& ctx, AST::IsExpr& ie);
-    bool ChkIsExpr(ASTContext& ctx, AST::Ty& target, AST::IsExpr& ie);
-    Ptr<AST::Ty> SynAsExpr(ASTContext& ctx, AST::AsExpr& ae);
-    bool ChkAsExpr(ASTContext& ctx, AST::Ty& target, AST::AsExpr& ae);
-    Ptr<AST::Ty> SynOptionalChainExpr(const CheckerContext& ctx, AST::OptionalChainExpr& oce);
-    bool ChkOptionalChainExpr(ASTContext& ctx, AST::Ty& target, AST::OptionalChainExpr& oce);
+    AST::ModalTy SynFuncParam(ASTContext& ctx, AST::FuncParam& fp);
+    AST::ModalTy SynThisParam(ASTContext& ctx, AST::ThisParam& tp);
+    bool ChkFuncParam(ASTContext& ctx, AST::ModalTy target, AST::FuncParam& fp);
+    AST::ModalTy SynIsExpr(ASTContext& ctx, AST::IsExpr& ie);
+    bool ChkIsExpr(ASTContext& ctx, AST::ModalTy target, AST::IsExpr& ie);
+    AST::ModalTy SynAsExpr(ASTContext& ctx, AST::AsExpr& ae);
+    bool ChkAsExpr(ASTContext& ctx, AST::ModalTy target, AST::AsExpr& ae);
+    AST::ModalTy SynOptionalChainExpr(const CheckerContext& ctx, AST::OptionalChainExpr& oce);
+    bool ChkOptionalChainExpr(ASTContext& ctx, AST::ModalTy target, AST::OptionalChainExpr& oce);
     /**
      * Checks whether @param target is an auto-boxed Option of @param ty
      */
-    bool CheckOptionBox(AST::Ty& target, AST::Ty& ty);
+    bool CheckOptionBox(AST::ModalTy target, AST::ModalTy ty);
 
-    bool ChkRangeExpr(ASTContext& ctx, AST::Ty& target, AST::RangeExpr& re);
-    Ptr<AST::Ty> SynRangeExpr(ASTContext& ctx, AST::RangeExpr& re);
-    Ptr<AST::Ty> SynRangeExprInferElemTy(const AST::RangeExpr& re, ASTContext& ctx);
-    bool CheckRangeElements(ASTContext& ctx, Ptr<AST::Ty> elemTy, const AST::RangeExpr& re);
+    bool ChkRangeExpr(ASTContext& ctx, AST::ModalTy target, AST::RangeExpr& re);
+    AST::ModalTy SynRangeExpr(ASTContext& ctx, AST::RangeExpr& re);
+    AST::ModalTy SynRangeExprInferElemTy(const AST::RangeExpr& re, ASTContext& ctx);
+    bool CheckRangeElements(ASTContext& ctx, AST::ModalTy elemTy, const AST::RangeExpr& re);
 
-    Ptr<AST::Ty> SynArrayLit(ASTContext& ctx, AST::ArrayLit& al);
-    bool ChkArrayLit(ASTContext& ctx, AST::Ty& target, AST::ArrayLit& al);
-    Ptr<AST::Ty> GetArrayTypeByInterface(AST::Ty& interfaceTy);
-    Ptr<AST::Ty> SynArrayExpr(ASTContext& ctx, AST::ArrayExpr& ae);
-    Ptr<AST::Ty> SynVArrayExpr(ASTContext& ctx, AST::ArrayExpr& ve);
-    bool ChkArrayExpr(ASTContext& ctx, AST::Ty& target, AST::ArrayExpr& ae);
-    bool ChkVArrayExpr(ASTContext& ctx, AST::Ty& target, AST::ArrayExpr& ve);
+    AST::ModalTy SynArrayLit(ASTContext& ctx, AST::ArrayLit& al);
+    bool IsCallOfBuiltInType(const AST::CallExpr& ce, const AST::TypeKind kind) const;
+    AST::ModalTy SynVArrayExpr(ASTContext& ctx, AST::ArrayExpr& ve);
+    bool ChkVArrayExpr(ASTContext& ctx, AST::ModalTy target, AST::ArrayExpr& ve);
     bool ChkVArrayArg(ASTContext& ctx, AST::ArrayExpr& ve);
-    bool ChkSizedArrayExpr(ASTContext& ctx, AST::Ty& target, AST::ArrayExpr& ae);
-    bool ChkSingeArgArrayExpr(ASTContext& ctx, AST::Ty& target, AST::ArrayExpr& ae);
-    bool ChkSingeArgArrayWithoutElemTy(ASTContext& ctx, AST::Ty& target, AST::ArrayExpr& ae);
-    bool ChkArrayArgs(AST::ArrayExpr& ae);
+    bool ChkArrayLit(ASTContext& ctx, AST::ModalTy target, AST::ArrayLit& al);
+    AST::ModalTy GetArrayTypeByInterface(AST::ModalTy interfaceTy);
     /**
      * Check whether the alias is a built-in type.
      * @param kind Check whether the alias is of the specified type. If it's TYPE_ANY, Check Array/CPointer/CString.
      */
-    bool IsBuiltinTypeAlias(const AST::Decl& decl, const AST::TypeKind kind = AST::TypeKind::TYPE_ANY) const;
-    bool ChkSizedArrayElement(ASTContext& ctx, AST::Ty& elemTargetTy, AST::ArrayExpr& ae);
-    bool ChkSizedArrayWithoutElemTy(ASTContext& ctx, AST::Ty& target, AST::ArrayExpr& ae);
-    bool IsCallOfBuiltInType(const AST::CallExpr& ce, const AST::TypeKind kind) const;
-    bool ChkArrayCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
-    bool ChkCFuncCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
-    bool ChkBuiltinCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
-    bool ChkPointerCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
-    bool ChkVArrayCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
-    bool ChkPointerExpr(ASTContext& ctx, AST::Ty& target, AST::PointerExpr& cpe);
-    /**
-     * Check whether the CString is invoked.
-     */
-    bool ChkCStringCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
-    Ptr<AST::Ty> SynPointerExpr(ASTContext& ctx, AST::PointerExpr& cptrExpr);
-    Ptr<AST::Ty> SynMatchExpr(ASTContext& ctx, AST::MatchExpr& me);
-    Ptr<AST::Ty> SynMatchExprHasSelector(ASTContext& ctx, AST::MatchExpr& me);
-    Ptr<AST::Ty> SynMatchExprNoSelector(ASTContext& ctx, AST::MatchExpr& me);
-    Ptr<AST::Ty> SynMatchCaseNoSelector(ASTContext& ctx, AST::MatchCaseOther& mco);
-    Ptr<AST::Ty> SynNormalMatchCaseBody(ASTContext& ctx, AST::MatchExpr& me);
-    Ptr<AST::Ty> SynQuestSugarMatchCaseBody(ASTContext& ctx, AST::MatchExpr& me);
-    bool ChkMatchExpr(ASTContext& ctx, AST::Ty& target, AST::MatchExpr& me);
-    bool ChkMatchExprHasSelector(ASTContext& ctx, AST::Ty& target, AST::MatchExpr& me);
-    bool ChkMatchExprNoSelector(ASTContext& ctx, AST::Ty& target, AST::MatchExpr& me);
+    bool IsBuiltinTypeAlias(const AST::Decl& decl, AST::TypeKind kind = AST::TypeKind::TYPE_ANY) const;
+    bool ChkCFuncCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    bool ChkBuiltinCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    bool ChkPointerCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    bool ChkVArrayCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    bool ChkPointerExpr(ASTContext& ctx, AST::ModalTy target, AST::PointerExpr& cpe);
+    AST::ModalTy SynPointerExpr(ASTContext& ctx, AST::PointerExpr& cptrExpr);
+    AST::ModalTy SynMatchExpr(ASTContext& ctx, AST::MatchExpr& me);
+    AST::ModalTy SynMatchExprHasSelector(ASTContext& ctx, AST::MatchExpr& me);
+    AST::ModalTy SynMatchExprNoSelector(ASTContext& ctx, AST::MatchExpr& me);
+    AST::ModalTy SynMatchCaseNoSelector(ASTContext& ctx, AST::MatchCaseOther& mco);
+    AST::ModalTy SynNormalMatchCaseBody(ASTContext& ctx, AST::MatchExpr& me);
+    AST::ModalTy SynQuestSugarMatchCaseBody(ASTContext& ctx, AST::MatchExpr& me);
+    bool ChkMatchExpr(ASTContext& ctx, AST::ModalTy target, AST::MatchExpr& me);
+    bool ChkMatchExprHasSelector(ASTContext& ctx, AST::ModalTy target, AST::MatchExpr& me);
+    bool ChkMatchExprNoSelector(ASTContext& ctx, AST::ModalTy target, AST::MatchExpr& me);
     bool ChkPatternsSameASTKind(const ASTContext& ctx, const std::vector<OwnedPtr<AST::Pattern>>& patterns);
     bool ChkNoVarPatternInOrPattern(const ASTContext& ctx, const std::vector<OwnedPtr<AST::Pattern>>& ps);
-    bool ChkMatchCasePatterns(ASTContext& ctx, Ptr<AST::Ty> target, AST::MatchCase& mc);
+    bool ChkMatchCasePatterns(ASTContext& ctx, AST::ModalTy target, AST::MatchCase& mc, Ptr<AST::Expr> selector);
     bool ChkMatchCasePatGuard(ASTContext& ctx, const AST::MatchCase& mc);
-    bool ChkMatchCaseActions(ASTContext& ctx, Ptr<AST::Ty> target, AST::MatchCase& mc);
-    bool ChkMatchCaseNoSelector(ASTContext& ctx, AST::Ty& target, AST::MatchCaseOther& mco);
-    bool ChkSubscriptExpr(ASTContext& ctx, Ptr<AST::Ty> target, AST::SubscriptExpr& se);
-    Ptr<AST::Ty> SynSubscriptExpr(ASTContext& ctx, AST::SubscriptExpr& se);
-    bool ChkTupleAccess(ASTContext& ctx, Ptr<AST::Ty> target, AST::SubscriptExpr& se, AST::TupleTy& tupleTy);
-    bool ChkVArrayAccess(ASTContext& ctx, Ptr<AST::Ty> target, AST::SubscriptExpr& se, AST::VArrayTy& varrTy);
-    Ptr<AST::Ty> SynCallExpr(ASTContext& ctx, AST::CallExpr& ce);
-    Ptr<AST::Ty> SynTrailingClosure(ASTContext& ctx, AST::TrailingClosureExpr& tc);
-    bool ChkTrailingClosureExpr(ASTContext& ctx, AST::Ty& target, AST::TrailingClosureExpr& tc);
+    bool ChkMatchCaseActions(ASTContext& ctx, AST::ModalTy target, AST::MatchCase& mc);
+    bool ChkMatchCaseNoSelector(ASTContext& ctx, AST::ModalTy target, AST::MatchCaseOther& mco);
+    bool ChkSubscriptExpr(ASTContext& ctx, AST::ModalTy target, AST::SubscriptExpr& se);
+    AST::ModalTy SynSubscriptExpr(ASTContext& ctx, AST::SubscriptExpr& se);
+    bool ChkTupleAccess(
+        ASTContext& ctx, AST::ModalTy target, AST::SubscriptExpr& se, AST::TupleTy& tupleTy, ModalInfo modal);
+    bool ChkVArrayAccess(
+        ASTContext& ctx, AST::ModalTy target, AST::SubscriptExpr& se, AST::VArrayTy& varrTy, ModalInfo modal);
+    AST::ModalTy SynCallExpr(ASTContext& ctx, AST::CallExpr& ce);
+    AST::ModalTy SynTrailingClosure(ASTContext& ctx, AST::TrailingClosureExpr& tc);
+    bool ChkTrailingClosureExpr(ASTContext& ctx, AST::ModalTy target, AST::TrailingClosureExpr& tc);
     void CheckMacroCall(ASTContext& ctx, AST::Node& macroNode);
 
     /**
      * Check call expressions' related APIs.
      */
-    bool ChkCallExpr(ASTContext& ctx, Ptr<AST::Ty> target, AST::CallExpr& ce);
-    bool ChkDesugarExprOfCallExpr(ASTContext& ctx, Ptr<AST::Ty> target, AST::CallExpr& ce);
+    bool ChkCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    bool ChkDesugarExprOfCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
     bool CheckCallKind(const AST::CallExpr& ce, Ptr<AST::Decl> decl, AST::CallKind& type);
     /**
      * Check call expression's base expression which is member access's or normal reference type.
@@ -904,17 +916,19 @@ private:
     bool CheckRefConstructor(const ASTContext& ctx, const AST::CallExpr& ce, const AST::RefExpr& re);
     /**
      * Check call expression's base expression. Get current target and function candidates.
+     * Force to return false on CFunc call to ensure CFunc undergoes builtin decl check not overload resolution.
      */
-    bool ChkCallBaseExpr(ASTContext& ctx, AST::CallExpr& ce, Ptr<AST::Decl>& targetDecl, Ptr<AST::Ty>& targetRet,
+    bool ChkCallBaseExpr(ASTContext& ctx, AST::CallExpr& ce, Ptr<AST::Decl>& targetDecl, AST::ModalTy targetRet,
         std::vector<Ptr<AST::FuncDecl>>& candidates);
     bool ChkCallBaseRefExpr(
         ASTContext& ctx, AST::CallExpr& ce, Ptr<AST::Decl>& target, std::vector<Ptr<AST::FuncDecl>>& candidates);
     bool ChkCallBaseMemberAccess(
         ASTContext& ctx, AST::CallExpr& ce, Ptr<AST::Decl>& target, std::vector<Ptr<AST::FuncDecl>>& candidates);
-    bool ChkCurryCallBase(ASTContext& ctx, AST::CallExpr& ce, Ptr<AST::Ty>& targetRet);
-    bool CheckNonNormalCall(ASTContext& ctx, Ptr<AST::Ty> target, AST::CallExpr& ce);
-    bool ChkFunctionCallExpr(ASTContext& ctx, Ptr<AST::Ty> target, AST::CallExpr& ce);
-    bool ChkVariadicCallExpr(ASTContext& ctx, Ptr<AST::Ty> target, AST::CallExpr& ce,
+    bool ChkCurryCallBase(ASTContext& ctx, AST::CallExpr& ce, AST::ModalTy targetRet);
+    bool ChkImmediateLamCallBase(ASTContext& ctx, AST::CallExpr& ce, AST::ModalTy targetRet);
+    bool CheckNonNormalCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    bool ChkFunctionCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    bool ChkVariadicCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce,
         const std::vector<Ptr<AST::FuncDecl>>& candidates, std::vector<Diagnostic>& diagnostics);
     bool SynArgsOfNothingBaseExpr(ASTContext& ctx, AST::CallExpr& ce);
     /**
@@ -951,7 +965,7 @@ private:
      * @return The matched target of callExpr, may be a nullptr.
      */
     std::vector<Ptr<AST::FuncDecl>> ReorderCallArgument(ASTContext& ctx, FunctionMatchingUnit& fmu, AST::CallExpr& ce);
-    AST::Ty* GetCallTy(ASTContext& ctx, const AST::CallExpr& ce, const AST::FuncDecl& target) const;
+    AST::ModalTy GetCallTy(ASTContext& ctx, const AST::CallExpr& ce, const AST::FuncDecl& target) const;
     /**
      * Check whether arguments match function declare. In this case target function is not overloaded.
      * @param fd Target function to be checked.
@@ -960,17 +974,17 @@ private:
      * @return Matched function decl.
      */
     std::vector<Ptr<AST::FuncDecl>> CheckFunctionMatch(
-        ASTContext& ctx, FunctionCandidate& candidate, Ptr<AST::Ty> target, SubstPack& typeMapping);
+        ASTContext& ctx, FunctionCandidate& candidate, AST::ModalTy target, SubstPack& typeMapping);
     std::vector<Ptr<AST::FuncDecl>> GetOrderedCandidates(const ASTContext& ctx, const AST::CallExpr& ce,
         std::vector<Ptr<AST::FuncDecl>>& candidates,
         std::unordered_map<Ptr<AST::FuncDecl>, int64_t>& fdScopeLevelMap) const;
     std::vector<Ptr<AST::FuncDecl>> MatchFunctionForCall(ASTContext& ctx, std::vector<Ptr<AST::FuncDecl>>& candidates,
-        AST::CallExpr& ce, Ptr<AST::Ty> target, SubstPack& typeMapping);
+        AST::CallExpr& ce, AST::ModalTy target, SubstPack& typeMapping);
     /**
      * Get valid function types for given candidates of @p expr
      * returns: genericIgnored, std::vector<function, function type, type mapping>.
      */
-    using FuncTyPair = std::pair<bool, std::vector<std::tuple<Ptr<AST::FuncDecl>, Ptr<AST::Ty>, TypeSubst>>>;
+    using FuncTyPair = std::pair<bool, std::vector<std::tuple<Ptr<AST::FuncDecl>, AST::ModalTy, TypeSubst>>>;
     FuncTyPair CollectValidFuncTys(
         ASTContext& ctx, std::vector<Ptr<AST::FuncDecl>>& funcs, AST::Expr& expr, Ptr<AST::FuncTy> targetTy = nullptr);
     /**
@@ -983,19 +997,40 @@ private:
      * the argument, return false. Otherwise, return true.
      */
     OwnedPtr<FunctionMatchingUnit> CheckCandidate(
-        ASTContext& ctx, FunctionCandidate& candidate, Ptr<AST::Ty> targetRet, SubstPack& typeMapping);
+        ASTContext& ctx, FunctionCandidate& candidate, AST::ModalTy targetRet, SubstPack& typeMapping);
     /**
      * Check whether the parameters type is compatible with arguments type.
      * The arguments can be parameters subtype.
      */
-    bool CheckCallCompatible(ASTContext& ctx, FunctionCandidate& candidate);
+    bool CheckCallCompatible(ASTContext& ctx, FunctionCandidate& candidate, AST::ModalTy target);
+    /**
+     * infer mode of enum ctor call
+     */
+    ModalInfo InferEnumCtorMode(const AST::CallExpr& ce, AST::ModalTy target) const;
+    /**
+     * Get the type of the this argument of call expression.
+     * If ce is a RefExpr call, return the type decl in current scope.
+     * DO NOT CALL this function for object creation without target type, it yields @~local modal, but any modal is ok.
+     */
+    AST::ModalTy GetThisArgTy(const ASTContext& ctx, const AST::CallExpr& ce);
+    /**
+     * Get the type of this in the given scope.
+     */
+    AST::ModalTy GetThisParamTyInScope(const ASTContext& ctx, const std::string& scopeName) const;
     /**
      * When the candidate is a generic function, or function is a member of generic class/interface/struct...,
      * we should use this function to do compatibility check. First we will build a unordered map to represent
      * the mapping of generic types. Then we check the compatibility. Pay attention to checking generic constraints.
      */
     bool CheckGenericCallCompatible(
-        ASTContext& ctx, FunctionCandidate& candidate, SubstPack& typeMapping, Ptr<AST::Ty> targetRet);
+        ASTContext& ctx, FunctionCandidate& candidate, SubstPack& typeMapping, AST::ModalTy targetRet);
+    /**
+     * Check if the this parameter is compatible with the call expression. That is, the this param has the correct
+     * modal. Returns true if no this param, false if checking failed.
+     * @param target target type when it is a ctor call. Unused when it is normal func call.
+     */
+    bool CheckThisParamCompatible(
+        ASTContext& ctx, const AST::FuncDecl& fd, const AST::CallExpr& ce, AST::ModalTy target);
     void FilterTypeMappings(
         const AST::Expr& expr, AST::FuncDecl& fd, std::vector<MultiTypeSubst>& typeMappings);
     bool CheckCandidateConstrains(const AST::CallExpr& ce, const AST::FuncDecl& fd, const SubstPack& typeMapping);
@@ -1004,8 +1039,8 @@ private:
     /**
      * Get combinations of all possible function types for every argument of function call.
      */
-    std::vector<std::set<Ptr<AST::Ty>>> GetArgTyPossibilities(ASTContext& ctx, AST::CallExpr& ce);
-    std::vector<std::vector<Ptr<AST::Ty>>> GetArgsCombination(ASTContext& ctx, AST::CallExpr& ce);
+    std::vector<std::set<AST::ModalTy>> GetArgTyPossibilities(ASTContext& ctx, AST::CallExpr& ce);
+    std::vector<std::vector<AST::ModalTy>> GetArgsCombination(ASTContext& ctx, AST::CallExpr& ce);
     // check if any level of baseExpr(case it's MemberAccess) is of placeholder ty
     // will Synthesize the expr if it doesn't have a ty yet
     bool HasBaseOfPlaceholderTy(ASTContext& ctx, Ptr<AST::Node> n);
@@ -1016,7 +1051,7 @@ private:
     bool NeedSynthesis(const AST::CallExpr& ce, const AST::FuncDecl& fd, Ptr<const AST::Generic> generic,
         const std::vector<Ptr<AST::Type>>& typeArgs) const;
     std::vector<SubstPack> GenerateTypeMappingForCall(
-        ASTContext& ctx, FunctionCandidate& candidate, Ptr<AST::Ty> retTarget);
+        ASTContext& ctx, FunctionCandidate& candidate, AST::ModalTy retTarget);
     bool GenerateExtendGenericTypeMapping(
         const ASTContext& ctx, FunctionCandidate& candidate, MultiTypeSubst& typeMapping);
     SubstPack GenerateGenericTypeMapping(const ASTContext& ctx, const AST::Expr& expr);
@@ -1034,16 +1069,16 @@ private:
     TypeSubst GenerateTypeMappingByTyArgs(
         const std::vector<Ptr<AST::Type>>& typeArgs, const AST::Generic& generic) const;
     std::vector<SubstPack> GenerateTypeMappingByInference(
-        ASTContext& ctx, const FunctionCandidate& candidate, Ptr<AST::Ty> retTarget);
-    ErrOrSubst PrepareTyArgsSynthesis(ASTContext& ctx, const FunctionCandidate& candidate, Ptr<AST::Ty> const retTyUB);
+        ASTContext& ctx, const FunctionCandidate& candidate, AST::ModalTy retTarget);
+    ErrOrSubst PrepareTyArgsSynthesis(ASTContext& ctx, const FunctionCandidate& candidate, AST::ModalTy const retTyUB);
     std::optional<TypeSubst> PropagatePlaceholderAndSolve(ASTContext& ctx, AST::CallExpr& ce,
-        const std::vector<Ptr<AST::Ty>>& paramTys, const Ptr<AST::Ty> retTy, Ptr<AST::Ty> const retTyUB);
+        const std::vector<AST::ModalTy>& paramTys, AST::ModalTy retTy, AST::ModalTy const retTyUB);
     // static and deterministic version of unify, never result in branched versions of constraint
     // don't consider error reporting, for now
     // returns whether the unification is possible
     // on success, the cst parameter will be updated
     // on failure, the cst parameter will not change
-    bool Unify(Constraint& cst, AST::Ty& argTy, AST::Ty& paramTy);
+    bool Unify(Constraint& cst, AST::ModalTy argTy, AST::ModalTy paramTy);
     // static version of solving, only need to handle one possible version of constraint
     std::optional<TypeSubst> SolveConstraints(const Constraint& cst);
     /**
@@ -1063,8 +1098,10 @@ private:
      * @param ce The callExpr need to be resolved.
      * @return The most matching functions index.
      */
-    std::vector<size_t> ResolveOverload(
-        std::vector<OwnedPtr<FunctionMatchingUnit>>& candidates, const AST::CallExpr& ce);
+    std::vector<size_t> ResolveOverload(const ASTContext& ctx,
+        std::vector<OwnedPtr<FunctionMatchingUnit>>& candidates, const AST::CallExpr& ce, AST::ModalTy target);
+    void FilterBetterThisModeNonCtorCall(const ASTContext& ctx, const AST::CallExpr& ce,
+        const std::vector<OwnedPtr<FunctionMatchingUnit>>& candidates, std::vector<bool>& targetMark) const;
     FunctionMatchingUnit* FindFuncWithMaxChildRetTy(
         const AST::CallExpr& ce, std::vector<std::unique_ptr<FunctionMatchingUnit>>& candidates);
     /**
@@ -1076,9 +1113,11 @@ private:
      * @return The vector of matched function decls.
      */
     std::vector<Ptr<AST::FuncDecl>> CheckMatchResult(ASTContext& ctx, AST::CallExpr& ce,
-        std::vector<OwnedPtr<FunctionMatchingUnit>>& legals, std::vector<FunctionMatchingUnit>& illegals);
-    void ReInferCallArgs(ASTContext& ctx, const AST::CallExpr& ce, const FunctionMatchingUnit& legal);
-    void RecoverCallArgs(ASTContext& ctx, const AST::CallExpr& ce, const std::vector<Ptr<AST::Ty>>& argsTys);
+        std::vector<OwnedPtr<FunctionMatchingUnit>>& legals, std::vector<FunctionMatchingUnit>& illegals,
+        AST::ModalTy target);
+    void ReInferCallArgs(
+        ASTContext& ctx, const AST::CallExpr& ce, const FunctionMatchingUnit& legal, AST::ModalTy target);
+    void RecoverCallArgs(ASTContext& ctx, const AST::CallExpr& ce, const std::vector<AST::ModalTy>& argsTys);
     void FillEnumTypeArgumentsTy(const AST::Decl& ctorDecl, const SubstPack& typeMapping, AST::MemberAccess& ma);
     void FillTypeArgumentsTy(const AST::FuncDecl& fd, const AST::CallExpr& ce, SubstPack& typeMapping);
     /**
@@ -1088,18 +1127,20 @@ private:
     /**
      * Compare arguments and parameters. Choose the most consistent one.
      * Each parameter of the result must be the best match.
-     * @return Returns the comparison result of column i and column j in vectors of argMapping.
+     * @return Returns true if i is better than j.
      */
-    bool CompareFuncCandidates(FunctionMatchingUnit& i, FunctionMatchingUnit& j, const AST::CallExpr& ce);
+    bool CompareFuncCandidates(
+        FunctionMatchingUnit& i, FunctionMatchingUnit& j, const AST::CallExpr& ce, AST::ModalTy target);
+    bool IsInterfaceFuncWithSameSignature(const FunctionMatchingUnit& i, const FunctionMatchingUnit& j);
     /**
      * Check non-static calling in static method.
      * @return If callExpr is in static method and target is non-static, returns false. Else returns true.
      */
     bool CheckStaticCallNonStatic(const ASTContext& ctx, const AST::CallExpr& ce, const AST::FuncDecl& result);
     Ptr<AST::Decl> GetDeclOfThisType(const AST::Expr& expr) const;
-    std::optional<Ptr<AST::Ty>> DynamicBindingThisType(
+    std::optional<AST::ModalTy> DynamicBindingThisType(
         AST::Expr& baseExpr, const AST::FuncDecl& fd, const SubstPack& typeMapping = {});
-    bool CheckFuncPtrCall(ASTContext& ctx, Ptr<AST::Ty> target, AST::CallExpr& ce, AST::FuncTy& funcTy);
+    bool CheckFuncPtrCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce, AST::FuncTy& funcTy);
     bool IsGenericCall(const ASTContext& ctx, const AST::CallExpr& ce, const AST::FuncDecl& fd) const;
     bool CheckArgsWithParamName(const AST::CallExpr& ce, const AST::FuncDecl& fd);
     bool PostCheckCallExpr(const ASTContext& ctx, AST::CallExpr& ce, AST::FuncDecl& func, const SubstPack& typeMapping);
@@ -1112,35 +1153,35 @@ private:
         const std::vector<Ptr<AST::FuncDecl>>& candidatesAfterCheck, AST::CallExpr& ce, const AST::Decl& decl);
 
     /** Check Pattern's related APIs. */
-    bool ChkPattern(ASTContext& ctx, AST::Ty& target, AST::Pattern& p, bool isPatternInMatch = true);
-    bool ChkWildcardPattern(AST::Ty& target, AST::WildcardPattern& p) const;
-    bool ChkConstPattern(ASTContext& ctx, AST::Ty& target, AST::ConstPattern& p);
-    bool ChkOpOverloadForConstPattern(ASTContext& ctx, AST::Ty& target, AST::ConstPattern& p);
-    bool ChkTypePattern(ASTContext& ctx, AST::Ty& target, AST::TypePattern& p);
-    bool ChkVarPattern(const ASTContext& ctx, AST::Ty& target, AST::VarPattern& p);
-    bool ChkTuplePattern(ASTContext& ctx, AST::Ty& target, AST::TuplePattern& p, bool isPatternInMatch = true);
-    bool ChkEnumPattern(ASTContext& ctx, AST::Ty& target, AST::EnumPattern& p);
-    bool ChkVarOrEnumPattern(ASTContext& ctx, AST::Ty& target, AST::VarOrEnumPattern& p);
-    bool ChkExceptTypePattern(ASTContext& ctx, AST::ExceptTypePattern& etp, std::vector<Ptr<AST::Ty>>& included);
-    bool ChkHandlePatterns(ASTContext& ctx, AST::Handler& h,
-        std::vector<Ptr<AST::Ty>>& included);
-    std::optional<Ptr<AST::Ty>> ChkCommandTypePattern(
-        ASTContext& ctx, AST::CommandTypePattern& ctp, std::vector<Ptr<AST::Ty>>& included);
-    bool ChkTryWildcardPattern(Ptr<AST::Ty> target, AST::WildcardPattern& p, std::vector<Ptr<AST::Ty>>& included);
+    bool ChkPattern(ASTContext& ctx, AST::ModalTy target, AST::Pattern& p, bool isPatternInExpr = true,
+        Ptr<AST::Expr> selector = nullptr);
+    bool ChkWildcardPattern(AST::ModalTy target, AST::WildcardPattern& p) const;
+    bool ChkConstPattern(ASTContext& ctx, AST::ModalTy target, AST::ConstPattern& p);
+    bool ChkOpOverloadForConstPattern(ASTContext& ctx, AST::ModalTy target, AST::ConstPattern& p);
+    bool ChkTypePattern(ASTContext& ctx, AST::ModalTy target, AST::TypePattern& p);
+    bool ChkVarPattern(const ASTContext& ctx, AST::ModalTy target, AST::VarPattern& p);
+    bool ChkTuplePattern(ASTContext& ctx, AST::ModalTy target, AST::TuplePattern& p, bool isPatternInExpr = true);
+    bool ChkEnumPattern(ASTContext& ctx, AST::ModalTy target, AST::EnumPattern& p);
+    bool ChkVarOrEnumPattern(ASTContext& ctx, AST::ModalTy target, AST::VarOrEnumPattern& p);
+    bool ChkExceptTypePattern(ASTContext& ctx, AST::ExceptTypePattern& etp, std::vector<AST::ModalTy>& included);
+    bool ChkHandlePatterns(ASTContext& ctx, AST::Handler& h, std::vector<AST::ModalTy>& included);
+    std::optional<AST::ModalTy> ChkCommandTypePattern(
+        ASTContext& ctx, AST::CommandTypePattern& ctp, std::vector<AST::ModalTy>& included);
+    bool ChkTryWildcardPattern(AST::ModalTy target, AST::WildcardPattern& p, std::vector<AST::ModalTy>& included);
     void FindEnumPatternTarget(ASTContext& ctx, Ptr<AST::EnumDecl> ed, AST::EnumPattern& ep);
     std::vector<Ptr<AST::Decl>> FindEnumPatternTargets(ASTContext& ctx, Ptr<AST::EnumDecl> ed, AST::EnumPattern& ep);
 
     void UpdateAnyTy();
     void UpdateCTypeTy();
     bool IsIrrefutablePattern(const AST::Pattern& pattern);
-    Ptr<AST::Ty> SynForInExpr(ASTContext& ctx, AST::ForInExpr& fie);
-    bool ChkForInExpr(ASTContext& ctx, AST::Ty& target, AST::ForInExpr& fie);
-    Ptr<AST::Ty> SynSpawnExpr(ASTContext& ctx, AST::SpawnExpr& se);
-    bool ChkSpawnExpr(ASTContext& ctx, AST::Ty& tgtTy, AST::SpawnExpr& se);
-    bool ChkSpawnExprSimple(ASTContext& ctx, AST::Ty& tgtTy, AST::SpawnExpr& se);
+    AST::ModalTy SynForInExpr(ASTContext& ctx, AST::ForInExpr& fie);
+    bool ChkForInExpr(ASTContext& ctx, AST::ModalTy target, AST::ForInExpr& fie);
+    AST::ModalTy SynSpawnExpr(ASTContext& ctx, AST::SpawnExpr& se);
+    bool ChkSpawnExpr(ASTContext& ctx, AST::ModalTy tgtTy, AST::SpawnExpr& se);
+    bool ChkSpawnExprSimple(ASTContext& ctx, AST::ModalTy tgtTy, AST::SpawnExpr& se);
     bool CheckSpawnArgValid(const ASTContext& ctx, const AST::Expr& arg);
-    Ptr<AST::Ty> SynSyncExpr(ASTContext& ctx, AST::SynchronizedExpr& se);
-    bool ChkSyncExpr(ASTContext& ctx, Ptr<AST::Ty> tgtTy, AST::SynchronizedExpr& se);
+    AST::ModalTy SynSyncExpr(ASTContext& ctx, AST::SynchronizedExpr& se);
+    bool ChkSyncExpr(ASTContext& ctx, AST::ModalTy tgtTy, AST::SynchronizedExpr& se);
 
     /**
      * Resolve referenced objects. When referencing declaration like var, class,
@@ -1149,13 +1190,25 @@ private:
      * in targets.
      */
     void InferRefExpr(ASTContext& ctx, AST::RefExpr& re);
-    void InferCFuncExpr(ASTContext& ctx, AST::RefExpr& re);
+    void InferCFuncExpr(ASTContext& ctx, AST::NameReferenceExpr& nre);
+    void CheckAssignToImmutProp(AST::NameReferenceExpr& re);
+    /// Resolves prop overload.
+    /// @return The chosen prop if overload succeeds; nullptr otherwise.
+    /// @effects Sets re's target to the chosen prop if overload succeeds, or report errors otherwise.
+    Ptr<AST::PropDecl> ResolvePropOverload(
+        const ASTContext& ctx, AST::NameReferenceExpr& re, const std::vector<Ptr<AST::Decl>>& targets);
+    /// Collect all same-name PropDecl siblings along the enclosing class chain of @p pd into @p outTargets.
+    /// Used by ResolvePropOverload for MemberAccess when the lookup target list is unavailable.
+    void CollectSameNamePropDecls(AST::PropDecl& pd, std::vector<Ptr<AST::Decl>>& outTargets);
+    /// For ma, return baseExpr's ty; for re, if it is implicit this access, return current this ty;
+    /// otherwise return invalid ty. Used by ResolvePropOverload to decide prop candidate set by modal.
+    AST::ModalTy GetReceiverTy(const ASTContext& ctx, const AST::NameReferenceExpr& re) const;
     bool SynTargetOnUsed(ASTContext& ctx, const AST::NameReferenceExpr& nre, AST::Decl& target);
     void CheckThisOrSuper(const ASTContext& ctx, AST::RefExpr& re);
-    Ptr<AST::Ty> InferTypeOfThis(AST::RefExpr& re, AST::InheritableDecl& objDecl);
-    Ptr<AST::Ty> InferTypeOfSuper(AST::RefExpr& re, const AST::InheritableDecl& objDecl);
-    Ptr<AST::Ty> ReplaceWithGenericTyInInheritableDecl(
-        Ptr<AST::Ty> ty, const AST::Decl& outerDecl, const AST::InheritableDecl& id);
+    AST::ModalTy InferTypeOfThis(const ASTContext& ctx, AST::RefExpr& re, AST::InheritableDecl& objDecl);
+    AST::ModalTy InferTypeOfSuper(const ASTContext& ctx, AST::RefExpr& re, const AST::InheritableDecl& objDecl);
+    AST::ModalTy ReplaceWithGenericTyInInheritableDecl(
+        AST::ModalTy ty, const AST::Decl& outerDecl, const AST::InheritableDecl& id);
     void CheckUsageOfThis(const ASTContext& ctx, const AST::RefExpr& re) const;
     void CheckUsageOfSuper(const ASTContext& ctx, const AST::RefExpr& re) const;
     void CheckThisOrSuperInInitializer(const AST::Node& node, const AST::RefExpr& re) const;
@@ -1176,7 +1229,11 @@ private:
      * @param expr [in] reference expression which target type is not given.
      * @param targets [in/out]
      */
-    bool FilterTargetsForFuncReference(const AST::Expr& expr, std::vector<Ptr<AST::Decl>>& targets);
+    bool FilterTargetsForFuncReference(
+        const ASTContext& ctx, const AST::NameReferenceExpr& expr, std::vector<Ptr<AST::Decl>>& targets);
+    /// Filter func ref by this mode.
+    void FilterFuncRefByThisMode(
+        const ASTContext& ctx, const AST::NameReferenceExpr& expr, std::vector<Ptr<AST::Decl>>& targets);
     bool IsLegalAccessFromStaticFunc(const ASTContext& ctx, const AST::RefExpr& re, const AST::Decl& decl);
     /** Filter targets of reference @p re . */
     void FilterCandidatesForRef(const ASTContext& ctx, const AST::RefExpr& re, std::vector<Ptr<AST::Decl>>& targets);
@@ -1197,9 +1254,19 @@ private:
         const Position& pos, const AST::Node& srcNode, const AST::Decl& destNode, bool isLeftStructValue) const;
     void CheckForbiddenFuncReferenceAccess(const Position& pos, const AST::FuncDecl& fd, const AST::Decl& decl) const;
     /**
+     * During non-call function-reference overload resolution, reject a candidate whose `this` modal is
+     * incompatible with the receiver
+     */
+    bool CheckThisTypeForFunRef(const ASTContext& ctx, const AST::FuncDecl& fd, const AST::NameReferenceExpr& refNode);
+    /** True when a standalone function reference captures a @local! receiver. */
+    bool IsCapturingLocalFullInFunRef(
+        const ASTContext& ctx, const AST::NameReferenceExpr& nre, const AST::FuncDecl& fd);
+    void DiagLocalFullFunRefCapture(
+        const ASTContext& ctx, const AST::NameReferenceExpr& nre, const std::string& capturedName) const;
+    /**
      * Check whether given node can match target type. refNode can be RefExpr or MemberAccess.
      */
-    bool ChkRefExpr(ASTContext& ctx, AST::Ty& target, AST::NameReferenceExpr& refNode);
+    bool ChkRefExpr(ASTContext& ctx, AST::ModalTy target, AST::NameReferenceExpr& refNode);
     /**
      * Report a warning when capture a variable in outer scope, but has a same name decl in inter scope.
      * example:let x = 4
@@ -1210,12 +1277,15 @@ private:
      *             let x = 2
      *         }
      */
+    void ResolveFunRefOverload(const ASTContext& ctx, AST::NameReferenceExpr& refNode,
+        std::vector<std::tuple<Ptr<AST::FuncDecl>, AST::ModalTy, TypeSubst>>& candidates);
     void CheckWarningOfCaptureVariable(const ASTContext& ctx, const AST::RefExpr& re) const;
 
     /**
      * MemberAccess's semaType depends on its target. The base can be ClassDecl,
      * InterfaceDecl, EnumDecl, PackageDecl or class object(including super,
      * this and builtin data structures object).
+     * The following infer funs set the target, but leave the type Invalid.
      */
     void InferMemberAccess(ASTContext& ctx, AST::MemberAccess& ma);
     void InferArrayStaticAccess(const ASTContext& ctx, AST::MemberAccess& ma);
@@ -1225,13 +1295,13 @@ private:
     void CheckExtendField(const ASTContext& ctx, AST::MemberAccess& ma);
     /** Filter targets that @p ma 's instantiated types does not satisfied with extend's generic constraints. */
     bool FilterTargetsInExtend(
-        const AST::NameReferenceExpr& nre, Ptr<AST::Ty> baseTy, std::vector<Ptr<AST::Decl>>& targets);
+        const AST::NameReferenceExpr& nre, AST::ModalTy baseTy, std::vector<Ptr<AST::Decl>>& targets);
     Ptr<AST::Decl> GetBaseDeclInMemberAccess(ASTContext& ctx, const AST::MemberAccess& ma);
     /** Get the target of @p MemberAccess whose baseExpr's ty is @p baseExprTy. */
-    Ptr<AST::Decl> GetObjMemberAccessTarget(const ASTContext& ctx, AST::MemberAccess& ma, AST::Ty& baseExprTy);
+    Ptr<AST::Decl> GetObjMemberAccessTarget(const ASTContext& ctx, AST::MemberAccess& ma, AST::ModalTy baseExprTy);
     /** Get target function from extend function like 1.add(). */
     Ptr<AST::Decl> GetIdealTypeFuncTargetFromExtend(
-        const ASTContext& ctx, AST::MemberAccess& ma, const AST::Ty& baseExprTy);
+        const ASTContext& ctx, AST::MemberAccess& ma, AST::ModalTy baseExprTy);
     /**
      * Get the target of @p MemberAccess whose baseExpr's ty is @p baseExprTy.
      * For example: func Foo2<U>(a:U) where U <: Bar2<U> {
@@ -1247,16 +1317,22 @@ private:
      * be collected.
      */
     std::vector<Ptr<AST::Decl>> GetUpperBoundTargets(
-        const ASTContext& ctx, const AST::MemberAccess& ma, AST::Ty& baseExprTy, const bool isStaticAccess);
+        const ASTContext& ctx, const AST::MemberAccess& ma, AST::ModalTy baseExprTy, const bool isStaticAccess);
     Ptr<AST::Decl> CheckUpperBoundTargetsCaseFuncCall(const ASTContext& ctx, AST::MemberAccess& ma,
-        const std::unordered_map<Ptr<AST::Ty>, std::vector<Ptr<AST::Decl>>>& allTargets);
+        const std::unordered_map<AST::ModalTy, std::vector<Ptr<AST::Decl>>>& allTargets);
+    /// Like CheckUpperBoundTargetsCaseFuncCall but for PropDecl targets. Collects surviving prop candidates
+    /// across upper bounds (deduping same-data-type decls via IsCloserToImpl), refills ma.targets with
+    /// PropDecl candidates (Ptr<Decl>, NOT cast to FuncDecl), and sets ma.matchedParentTy. Modal subset
+    /// filtering and accessor selection are left to the downstream InferStaticAccess generic branch.
+    Ptr<AST::Decl> CheckUpperBoundTargetsCaseProp(const ASTContext& ctx, AST::MemberAccess& ma,
+        const std::unordered_map<AST::ModalTy, std::vector<Ptr<AST::Decl>>>& allTargets);
     Ptr<AST::Decl> CheckUpperBoundTargetsCaseOthers(const ASTContext& ctx, AST::MemberAccess& ma,
-        const std::unordered_map<Ptr<AST::Ty>, std::vector<Ptr<AST::Decl>>>& allTargets);
+        const std::unordered_map<AST::ModalTy, std::vector<Ptr<AST::Decl>>>& allTargets);
     void TryInitializeBaseSum(ASTContext& ctx, AST::MemberAccess& ma);
     bool FilterSumUpperbound(AST::MemberAccess& ma, AST::GenericsTy& tv, const AST::Decl& d);
     void FilterSumUpperbound(const ASTContext& ctx, AST::MemberAccess& ma, AST::GenericsTy& tv,
         std::vector<Ptr<AST::Decl>>& targets,
-        const std::unordered_map<Ptr<AST::Ty>, std::vector<Ptr<AST::Decl>>>& allTargets);
+        const std::unordered_map<AST::ModalTy, std::vector<Ptr<AST::Decl>>>& allTargets);
     /**
      * Check type legality recursively.
      */
@@ -1267,7 +1343,8 @@ private:
     void CheckFuncType(ASTContext& ctx, AST::FuncType& ft);
     void CheckOptionType(ASTContext& ctx, const AST::OptionType& ot);
     void CheckVArrayType(ASTContext& ctx, const AST::VArrayType& vt);
-    std::tuple<bool, std::string> CheckVArrayWithRefType(AST::Ty& ty, std::unordered_set<Ptr<AST::Ty>>& traversedTy);
+    std::tuple<bool, std::string> CheckVArrayWithRefType(
+        AST::ModalTy ty, std::unordered_set<AST::ModalTy>& traversedTy);
     void CheckQualifiedType(const ASTContext& ctx, AST::QualifiedType& qt);
     bool IsGenericTypeWithTypeArgs(AST::Type& type) const;
     // Returns true if further checks can be omitted.
@@ -1278,14 +1355,14 @@ private:
     bool CheckTypeParametersForAliasRef(AST::RefType& rt, const AST::TypeAliasDecl& aliasDecl);
 
     void GetRevTypeMapping(
-        std::vector<Ptr<AST::Ty>>& params, std::vector<Ptr<AST::Ty>>& args, MultiTypeSubst& revTyMap);
-    TypeSubst GetGenericTysToInstTysMapping(AST::Ty& genericTy, AST::Ty& instTy) const;
+        std::vector<AST::ModalTy>& params, std::vector<AST::ModalTy>& args, MultiTypeSubst& revTyMap);
+    TypeSubst GetGenericTysToInstTysMapping(AST::ModalTy genericTy, AST::ModalTy instTy) const;
     /**
      * Check TypeAlias entry.
      */
     void CheckTypeAlias(ASTContext& ctx, AST::TypeAliasDecl& tad);
     void CheckTypeAliasAccess(const AST::TypeAliasDecl& tad);
-    std::vector<Ptr<AST::Ty>> GetUnusedTysInTypeAlias(const AST::TypeAliasDecl& tad) const;
+    std::vector<AST::ModalTy> GetUnusedTysInTypeAlias(const AST::TypeAliasDecl& tad) const;
     /**
      * Get RefType or QualifiedType type arguments application map
      */
@@ -1300,13 +1377,13 @@ private:
      * Check program entry specifically, whose return type must be `Int64`
      */
     void CheckEntryFunc(AST::FuncDecl& fd);
-    bool CheckNormalFuncBody(ASTContext& ctx, AST::FuncBody& fb, std::vector<Ptr<AST::Ty>>& paramTys);
+    bool CheckNormalFuncBody(ASTContext& ctx, AST::FuncBody& fb, std::vector<AST::ModalTy>& paramTys);
     bool CheckFuncBody(ASTContext& ctx, AST::FuncBody& fb);
     void AddRetTypeNode(AST::FuncBody& fb) const;
     bool CheckBodyRetType(ASTContext& ctx, AST::FuncBody& fb);
     void CheckFuncParamList(ASTContext& ctx, AST::FuncParamList& fpl);
-    Ptr<AST::Ty> CalcFuncRetTyFromBody(const AST::FuncBody& fb);
-    void ReplaceFuncRetTyWithThis(AST::FuncBody& fb, Ptr<AST::Ty> ty);
+    AST::ModalTy CalcFuncRetTyFromBody(const AST::FuncBody& fb);
+    void ReplaceFuncRetTyWithThis(AST::FuncBody& fb, AST::ModalTy ty);
     void CheckCtorFuncBody(ASTContext& ctx, AST::FuncBody& fb);
     bool CheckReturnThisInFuncBody(const AST::FuncBody& fb) const;
     /**
@@ -1325,7 +1402,6 @@ private:
     void CheckAnnotationDecl(ASTContext& ctx, AST::Annotation& ann);
     void CheckJavaHasDefaultAnnotation(AST::Annotation& ann, const AST::Decl& decl) const;
     OwnedPtr<AST::CallExpr> CheckCustomAnnotation(ASTContext& ctx, const AST::Decl& decl, AST::Annotation& ann);
-    bool HasModifier(const std::set<AST::Modifier>& modifiers, TokenKind kind) const;
 
     void CheckLegalityOfUsage(ASTContext &ctx, AST::Package &pkg);
     void CheckClosures(const ASTContext &ctx, AST::Node &node) const;
@@ -1386,7 +1462,7 @@ private:
 
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     void CheckStaticMembersWithGeneric(const AST::Package& pkg);
-    void CheckStaticMemberWithGeneric(AST::Decl& member, const std::vector<Ptr<AST::Ty>>& outerGenericTys);
+    void CheckStaticMemberWithGeneric(AST::Decl& member, const std::vector<AST::ModalTy>& outerGenericTys);
 #endif
 
     /**
@@ -1402,7 +1478,7 @@ private:
     /**
      * Get the type of generic declaration.
      */
-    Ptr<AST::Ty> GetGenericType(AST::Decl& d, const std::vector<Ptr<AST::Type>>& typeArgs);
+    AST::ModalTy GetGenericType(AST::Decl& d, const std::vector<Ptr<AST::Type>>& typeArgs);
     /**
      * Check generic Expr: check if the expr's typeArguments fulfil requirements of the target function's
      * typeParameters, then instantiate the typeParameters of target function.
@@ -1424,7 +1500,7 @@ private:
      * @param checkNode the ast node which using the instantiate type of given decl.
      */
     bool CheckGenericDeclInstantiation(Ptr<const AST::Decl> d,
-        const std::variant<std::vector<Ptr<AST::Type>>, std::vector<Ptr<AST::Ty>>>& arguments,
+        const std::variant<std::vector<Ptr<AST::Type>>, std::vector<AST::ModalTy>>& arguments,
         const AST::Node& checkNode);
     /**
      * Check whether the @p pkg exists value type recursive.
@@ -1442,7 +1518,7 @@ private:
      * @param typeMapping the instantiation substitute map.
      */
     void Assumption(AST::TyVarEnv& typeConstraintCollection, GCBlames& blames, const AST::Decl& decl,
-        const TypeSubst& typeMapping = std::map<Ptr<TyVar>, Ptr<AST::Ty>>());
+        const TypeSubst& typeMapping = {});
     /**
      * Collect type constraints recursively if the upper bounds of @p gc have generic constraints with
      * instantiation substitute map @p typeMapping .
@@ -1498,7 +1574,7 @@ private:
      * Otherwise, return declaration of the 'ty' with `false`.
      * @param passedClassLikeDecls a set of checked nodes to avoid duplicate check.
      */
-    Ptr<AST::Decl> GetDupInterfaceRecursively(const AST::Node& triggerNode, AST::Ty& interfaceTy,
+    Ptr<AST::Decl> GetDupInterfaceRecursively(const AST::Node& triggerNode, AST::ModalTy interfaceTy,
         const TypeSubst& instantiateMap, std::unordered_set<Ptr<AST::InterfaceTy>>& res,
         std::unordered_set<Ptr<AST::ClassLikeDecl>>& passedClassLikeDecls);
     /**
@@ -1520,14 +1596,14 @@ private:
      * Check if a type implements duplicate interfaces,
      * remove duplicate interfaces and invalid interfaces in extendDecl->interfaces.
      */
-    void CheckExtendInterfaces(AST::Ty& ty, const std::set<Ptr<AST::ExtendDecl>, AST::CmpNodeByPos>& extendDecls);
+    void CheckExtendInterfaces(AST::ModalTy ty, const std::set<Ptr<AST::ExtendDecl>, AST::CmpNodeByPos>& extendDecls);
     void CheckDefImplWithoutOutsideGeneric(AST::Decl& inhertDecl, const AST::ExtendDecl& extend);
     void CheckExtendDupDefImplByDiffTypArgs(
         const std::set<Ptr<AST::ExtendDecl>, AST::CmpNodeByPos>& extendDecls, const AST::ExtendDecl& extend);
     void CheckExtendGenerics(const AST::ExtendDecl& ed);
     void CheckExtendedTypeValidity(const AST::Type& extendedType);
     bool IsImplementation(
-        AST::Ty& baseTy, AST::InterfaceTy& iTy, const AST::Decl& interfaceMember, const AST::Decl& childMember);
+        AST::ModalTy baseTy, AST::InterfaceTy& iTy, const AST::Decl& interfaceMember, const AST::Decl& childMember);
     bool HasOverrideDefaultImplement(
         const AST::InheritableDecl& decl, const AST::Decl& defaultImplement, AST::InterfaceTy& superTy);
     OwnedPtr<AST::Decl> GetCloneDecl(AST::Decl& decl, AST::InheritableDecl& inheritableDecl, AST::InterfaceTy& superTy);
@@ -1538,7 +1614,7 @@ private:
         const AST::Package& pkg);
     void HandleDefaultImplement(const AST::Package& pkg);
     void SubstituteTypeForTypeAliasTypeMapping(
-        const AST::TypeAliasDecl& tad, const std::vector<Ptr<AST::Ty>>& typeArgs, TypeSubst& typeMapping) const;
+        const AST::TypeAliasDecl& tad, const std::vector<AST::DataTy>& typeArgs, TypeSubst& typeMapping) const;
     TypeSubst GenerateTypeMappingForTypeAliasDecl(const AST::TypeAliasDecl& tad) const;
     TypeSubst GenerateTypeMappingForTypeAliasDeclVisit(
         const AST::TypeAliasDecl& tad, std::unordered_set<Ptr<const AST::TypeAliasDecl>>& visited) const;
@@ -1551,9 +1627,9 @@ private:
         if (!tad.type) {
             return typeMapping;
         }
-        std::vector<Ptr<AST::Ty>> typeArgs;
+        std::vector<AST::DataTy> typeArgs;
         for (auto& it : usage.GetTypeArgs()) {
-            typeArgs.push_back(it->GetTy());
+            typeArgs.push_back(it->DataTy());
         }
         auto target = tad.type->GetTarget();
         if (!target || target->astKind != AST::ASTKind::TYPE_ALIAS_DECL) {
@@ -1606,7 +1682,7 @@ private:
     bool CheckMatchExprNoSelectorExhaustiveness(AST::MatchExpr& me, bool hasDefault);
     void SetFuncDeclConstructorCall(AST::FuncDecl& fd) const;
     bool IsFuncTyEnumPatternMatched(
-        ASTContext& ctx, AST::Ty& target, const AST::FuncTy& funcTy, const AST::EnumPattern& p);
+        ASTContext& ctx, AST::ModalTy target, const AST::FuncTy& funcTy, const AST::EnumPattern& p);
 
     /**
      * Post legality checks after sema typecheck finished.
@@ -1682,23 +1758,23 @@ private:
     bool CheckIfUseInout(const AST::FuncDecl& decl);
     void CheckConstEvaluation(AST::Package& pkg);
 
-    std::optional<Ptr<AST::Ty>> SynLiteralInBinaryExprFromRight(ASTContext& ctx, AST::BinaryExpr& be);
-    Ptr<AST::Ty> SynLiteralInBinaryExprFromLeft(ASTContext& ctx, AST::BinaryExpr& be);
+    std::optional<AST::ModalTy> SynLiteralInBinaryExprFromRight(ASTContext& ctx, AST::BinaryExpr& be);
+    AST::ModalTy SynLiteralInBinaryExprFromLeft(ASTContext& ctx, AST::BinaryExpr& be);
     void DiagnoseForSubscriptAssignExpr(ASTContext& ctx, const AST::AssignExpr& ae, std::vector<Diagnostic>& diags);
-    std::optional<Ptr<AST::Ty>> InferAssignExprCheckCaseOverloading(
+    std::optional<AST::ModalTy> InferAssignExprCheckCaseOverloading(
         ASTContext& ctx, AST::AssignExpr& ae, std::vector<Diagnostic>& diags);
     bool PreCheckCompoundAssign(
-        ASTContext& ctx, const AST::AssignExpr& ae, const AST::Ty& lTy, const std::vector<Diagnostic>& diags);
-    std::optional<Ptr<AST::Ty>> InferBinaryExprCaseBuiltIn(
-        ASTContext& ctx, AST::BinaryExpr& be, Ptr<AST::Ty>& inferRet);
-    std::optional<bool> CheckBinaryExprCaseBuiltIn(ASTContext& ctx, AST::BinaryExpr& be, Ptr<AST::Ty> target);
-    Ptr<AST::Ty> SynLiteralInBinaryExpr(ASTContext& ctx, AST::BinaryExpr& be);
+        ASTContext& ctx, const AST::AssignExpr& ae, AST::ModalTy lTy, const std::vector<Diagnostic>& diags);
+    std::optional<AST::ModalTy> InferBinaryExprCaseBuiltIn(
+        ASTContext& ctx, AST::BinaryExpr& be, AST::ModalTy& inferRet);
+    std::optional<bool> CheckBinaryExprCaseBuiltIn(ASTContext& ctx, AST::BinaryExpr& be, AST::ModalTy target);
+    AST::ModalTy SynLiteralInBinaryExpr(ASTContext& ctx, AST::BinaryExpr& be);
     void SynBinaryLeafs(ASTContext& ctx, AST::BinaryExpr& be);
     void HandleAlias(Ptr<AST::Expr> expr, std::vector<Ptr<AST::Decl>>& targets);
     template <class T>
     void SubstituteTypeArguments(std::vector<OwnedPtr<AST::Type>>& typeArguments, T& type, const TypeSubst& typeMapping)
     {
-        std::vector<Ptr<AST::Ty>> typeArgs;
+        std::vector<AST::ModalTy> typeArgs;
         for (auto& it : typeArguments) {
             typeArgs.push_back(it->GetTy());
         }
@@ -1710,9 +1786,9 @@ private:
         for (auto& it : type.typeArguments) {
             auto newTypeArg = AST::ASTCloner::Clone(it.get());
             newTypeArg->SetTy(newTypeArg->GetTy()
-                    ? typeManager.SubstituteTypeAliasInTy(*newTypeArg->GetTy(), true, typeMapping)
-                    : TypeManager::GetInvalidTy());
-            if (auto ity = DynamicCast<AST::IntersectionTy*>(newTypeArg->GetTy()); ity && ity->tys.empty()) {
+                    ? typeManager.SubstituteTypeAliasInTy(newTypeArg->GetTy(), true, typeMapping)
+                    : AST::ModalTy{TypeManager::GetInvalidTy()});
+            if (auto ity = DynamicCast<AST::IntersectionTy>(newTypeArg->DataTy()); ity && ity->tys.empty()) {
                 continue;
             }
             newTypeArg->EnableAttr(AST::Attribute::COMPILER_ADD);
@@ -1732,16 +1808,26 @@ private:
      */
     void CheckAllInvocationHasImpl(const ASTContext& ctx, AST::Node& node);
     void CheckSubscriptLegality(AST::Node& node);
-    std::pair<bool, Ptr<AST::RefExpr>> CheckInvokeTargetHasImpl(const ASTContext& ctx, AST::Ty& interfaceTy,
+    std::pair<bool, Ptr<AST::RefExpr>> CheckInvokeTargetHasImpl(const ASTContext& ctx, AST::ModalTy interfaceTy,
         AST::Decl& decl, MultiTypeSubst& typeMapping, std::unordered_set<Ptr<AST::Decl>>& traversedDecls);
     Ptr<AST::Decl> GetImplementedTargetIfExist(
-        const ASTContext& ctx, const AST::Ty& interfaceTy, AST::Decl& target, const MultiTypeSubst& typeMapping);
+        const ASTContext& ctx, AST::ModalTy interfaceTy, AST::Decl& target, const MultiTypeSubst& typeMapping);
     friend class Synthesizer;
     friend class TypeChecker;
     friend class EnumSugarChecker;
     friend class InstCtxScope;
-    bool ChkIfAvailableExpr(ASTContext& ctx, AST::Ty& ty, AST::IfAvailableExpr& ie);
-    Ptr<AST::Ty> SynIfAvailableExpr(ASTContext& ctx, AST::IfAvailableExpr& iae);
+    bool ChkIfAvailableExpr(ASTContext& ctx, AST::ModalTy ty, AST::IfAvailableExpr& ie);
+    AST::ModalTy SynIfAvailableExpr(ASTContext& ctx, AST::IfAvailableExpr& iae);
+
+    void CheckModalType(const ASTContext& ctx, AST::Package& pkg);
+    bool ChkExclaveExpr(ASTContext& ctx, AST::ModalTy target, AST::ExclaveExpr& expr);
+    AST::ModalTy SynExclaveExpr(ASTContext& ctx, AST::ExclaveExpr& expr);
+    bool IsExternalLocal(const ASTContext& ctx, const AST::Expr& expr);
+    struct ModalTypeChecker* NewModalTypeChecker();
+    void DeleteModalTypeChecker();
+    void DiagExpectedDataType(const AST::Node& node);
+    bool CheckTyArgsLocal(AST::RefType& rt);
+    void SetThisParamType(AST::FuncDecl& fd);
 
     /**
      * @brief mark imported declarations depended by the current package as used.
@@ -1776,8 +1862,12 @@ private:
     Ptr<AST::Node> deprecatedContext = nullptr;
     // strict version of outermost @Deprecated declaration
     Ptr<AST::Node> strictDeprecatedContext = nullptr;
+    /** Node stack while Synthesize/Check (same NodeStack as Walker). */
+    AST::NodeStack nodeStack;
     // cjmp typechecker implementation class
     class MPTypeCheckerImpl* mpImpl;
+    // checker impl of Modal type
+    struct ModalTypeChecker* modalTypeChecker;
     /**
      * Will be passed as a reference in TypeChecker::TypeCheckerImpl::PerformDesugarAfterTypeCheck
      * at Perform desugar after typecheck before generic instantiation stage.

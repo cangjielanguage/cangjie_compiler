@@ -16,13 +16,12 @@
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Types.h"
+#include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Utils/CheckUtils.h"
 
 using namespace Cangjie;
 using namespace AST;
 using namespace TypeCheckUtil;
-using ErrMsg = std::stack<std::string>;
-using ErrOrTy = std::variant<ErrMsg, Ptr<AST::Ty>>;
 
 namespace {
 enum class Uniformity {
@@ -31,13 +30,13 @@ enum class Uniformity {
     ALL_IRRELEVANT
 };
 
-Uniformity CheckFuncUniformity(const std::set<Ptr<Ty>>& tys)
+Uniformity CheckFuncUniformity(const std::set<DataTy>& tys)
 {
     size_t paramCnt = 0;
     bool anyFuncTy = false;
     bool anyNonFuncTy = false;
     for (auto& ty : tys) {
-        if (auto funcTy = DynamicCast<FuncTy>(ty)) {
+        if (auto funcTy = DynamicCast<FuncTy*>(ty)) {
             size_t curCnt = funcTy->paramTys.size();
             if (!anyFuncTy) {
                 paramCnt = curCnt;
@@ -58,13 +57,13 @@ Uniformity CheckFuncUniformity(const std::set<Ptr<Ty>>& tys)
     return Uniformity::UNIFORMED;
 }
 
-Uniformity CheckTupleUniformity(const std::set<Ptr<Ty>>& tys)
+Uniformity CheckTupleUniformity(const std::set<DataTy>& tys)
 {
     size_t argCnt = 0;
     bool anyTupleTy = false;
     bool anyNonTupleTy = false;
     for (auto& ty : tys) {
-        if (auto tupleTy = DynamicCast<TupleTy>(ty)) {
+        if (auto tupleTy = DynamicCast<TupleTy*>(ty)) {
             size_t curCnt = tupleTy->typeArgs.size();
             if (!anyTupleTy) {
                 argCnt = curCnt;
@@ -86,11 +85,11 @@ Uniformity CheckTupleUniformity(const std::set<Ptr<Ty>>& tys)
 }
 } // namespace
 
-ErrOrTy JoinAndMeet::Join(bool sprsErr)
+JoinAndMeet::ErrOrTy JoinAndMeet::Join(bool sprsErr)
 {
     // Hot fix.
     if (!IsInputValid()) {
-        return {TypeManager::GetInvalidTy()};
+        return {ModalTy{TypeManager::GetInvalidTy()}};
     }
     auto jTy = BatchJoin(tySet);
     if (sprsErr || errMsg.empty()) {
@@ -100,16 +99,16 @@ ErrOrTy JoinAndMeet::Join(bool sprsErr)
     }
 }
 
-ErrOrTy JoinAndMeet::JoinAsVisibleTy()
+JoinAndMeet::ErrOrTy JoinAndMeet::JoinAsVisibleTy()
 {
     // Hot fix.
     if (!IsInputValid()) {
-        return {TypeManager::GetInvalidTy()};
+        return {ModalTy{TypeManager::GetInvalidTy()}};
     }
     auto jTy = BatchJoin(tySet);
     this->isForcedToUserVisible = true;
     jTy = ToUserVisibleTy(jTy);
-    AddFinalErrMsgs(*jTy, true);
+    AddFinalErrMsgs(jTy, true);
     if (errMsg.empty()) {
         return {jTy};
     } else {
@@ -117,22 +116,99 @@ ErrOrTy JoinAndMeet::JoinAsVisibleTy()
     }
 }
 
-Ptr<AST::Ty> JoinAndMeet::BatchJoin(const std::set<Ptr<Ty>>& tys)
+ModalInfo JoinAndMeet::JoinMode(TypeManager& tyMgr, const std::set<ModalTy>& tyms)
 {
-    auto isSubtype = [this](Ptr<Ty> ty1, Ptr<Ty> ty2) { return tyMgr.IsSubtype(ty1, ty2); };
-    auto isSupertype = [this](Ptr<Ty> ty1, Ptr<Ty> ty2) { return tyMgr.IsSubtype(ty2, ty1); };
-    auto doBatchJoin = [this](const std::set<Ptr<AST::Ty>>& tys) {return BatchJoin(tys);};
-    auto doBatchMeet = [this](const std::set<Ptr<AST::Ty>>& tys) {return BatchMeet(tys);};
+    // Join the modals of all non-Copy types. IDEAL (a literal's pending modal awaiting
+    // unification with the expected contextual modal) is transparent in a join: it does not
+    // contribute its own (meaningless) mode, so a concrete modal from any sibling determines
+    // the result. If every contributing modal is IDEAL (no concrete modal among non-Copy tys),
+    // the result stays IDEAL (still pending) so it can be unified with the expected contextual
+    // modal downstream; if there are no non-Copy contributors at all (empty or all-Copy), the
+    // result defaults to ~local (NOT).
+    bool hasConcrete = false;
+    bool hasIdeal = false;
+    ModalInfo m{};
+    for (auto ty : tyms) {
+        if (tyMgr.ImplementsCopyInterface(ty.Ty())) {
+            continue;
+        }
+        if (ty.Mode().local == Mode::IDEAL) {
+            hasIdeal = true;
+            continue;
+        }
+        if (!hasConcrete) {
+            m = ty.Mode();
+            hasConcrete = true;
+        } else {
+            m = m | ty.Mode();
+        }
+    }
+    if (hasConcrete) {
+        return m;
+    }
+    return hasIdeal ? ModalInfo{Mode::IDEAL} : ModalInfo{};
+}
+
+ModalTy JoinAndMeet::BatchJoin(const std::set<ModalTy>& tyms)
+{
+    std::set<DataTy> tys;
+    for (auto ty : tyms) {
+        tys.insert(ty.Ty());
+    }
+    auto res = BatchJoin(tys);
+    return {res, JoinMode(tyMgr, tyms)};
+}
+
+ModalTy JoinAndMeet::BatchMeet(const std::set<ModalTy>& tyms)
+{
+    std::set<DataTy> tys;
+    for (auto ty : tyms) {
+        tys.insert(ty.Ty());
+    }
+    auto res = BatchMeet(tys);
+    // Meet the modals of all non-Copy types. IDEAL (a literal's pending modal) is transparent
+    // in a meet: it does not constrain, so it does not cause a (false) meet failure. The meet
+    // bound starts at HALF (the widest local modal) and is narrowed by each concrete modal.
+    bool hasConcrete = false;
+    ModalInfo m{Mode::HALF};
+    if (tyms.size() > 0) {
+        for (auto ty : tyms) {
+            if (tyMgr.ImplementsCopyInterface(ty.Ty())) {
+                continue;
+            }
+            if (ty.Mode().local == Mode::IDEAL) {
+                continue;
+            }
+            hasConcrete = true;
+            m = m & ty.Mode();
+        }
+    }
+    if (hasConcrete && m.local == Mode::IDEAL) {
+        // A concrete meet collapsed to IDEAL (only possible if 0 was produced, i.e. the empty
+        // bit-set); @local! and @~local do not have a common submode, meet fails.
+        return {TypeManager::GetInvalidTy()};
+    }
+    // If no concrete modal contributed (all Copy or all IDEAL), keep the HALF bound without
+    // introducing an IDEAL result, so no IDEAL modal leaks out of join/meet.
+    return {res, m};
+}
+
+DataTy JoinAndMeet::BatchJoin(const std::set<DataTy>& tys)
+{
+    auto isSubtype = [this](DataTy ty1, DataTy ty2) { return tyMgr.IsSubtype(ty1, ty2); };
+    auto isSupertype = [this](DataTy ty1, DataTy ty2) { return tyMgr.IsSubtype(ty2, ty1); };
     DualMode joinMode = {.bound = tyMgr.GetAnyTy(),
-        .coFunc = doBatchJoin,
-        .contraFunc = doBatchMeet,
+        .coFunc = static_cast<DataTy (JoinAndMeet::*)(const std::set<DataTy>&)>(&JoinAndMeet::BatchJoin),
+        .coModal = static_cast<ModalTy (JoinAndMeet::*)(const std::set<ModalTy>&)>(&JoinAndMeet::BatchJoin),
+        .contraFunc = static_cast<DataTy (JoinAndMeet::*)(const std::set<DataTy>&)>(&JoinAndMeet::BatchMeet),
+        .contraModal = static_cast<ModalTy (JoinAndMeet::*)(const std::set<ModalTy>&)>(&JoinAndMeet::BatchMeet),
         .coSubtyFunc = isSubtype};
-    std::set<Ptr<Ty>> realTys;
-    std::function<void(Ptr<Ty>)> insertRealTy = [this, &realTys, &insertRealTy](Ptr<Ty> ty) {
+    std::set<DataTy> realTys;
+    std::function<void(DataTy)> insertRealTy = [this, &realTys, &insertRealTy](DataTy ty) {
         if (auto tyVar = DynamicCast<TyVar*>(ty); (tyVar && Utils::In(tyVar, ignoredTyVars)) || ty->IsNothing()) {
             return;
         }
-        if (auto unionTy = DynamicCast<UnionTy>(ty)) {
+        if (auto unionTy = DynamicCast<UnionTy*>(ty)) {
             for (auto uty : unionTy->tys) {
                 insertRealTy(uty);
             }
@@ -156,14 +232,14 @@ Ptr<AST::Ty> JoinAndMeet::BatchJoin(const std::set<Ptr<Ty>>& tys)
         return tupleTyJoin;
     }
     PData::Reset(tyMgr.constraints);
-    auto common = tyMgr.GetAllCommonSuperTys(std::unordered_set<Ptr<Ty>>(realTys.begin(), realTys.end()));
+    auto common = tyMgr.GetAllCommonSuperTys(std::unordered_set<DataTy>(realTys.begin(), realTys.end()));
     if (curFile) {
-        Utils::EraseIf(common, [this](Ptr<Ty> ty) { return !impMgr->IsTyAccessible(*curFile, *ty); });
+        Utils::EraseIf(common, [this](ModalTy ty) { return !impMgr->IsTyAccessible(*curFile, *ty); });
     }
     if (common.empty()) {
         return tyMgr.GetAnyTy();
     }
-    auto ret = FindSmallestTy(std::set<Ptr<Ty>>(common.begin(), common.end()), isSubtype);
+    auto ret = FindSmallestTy(std::set<DataTy>(common.begin(), common.end()), isSubtype);
     // reset unnecessary constaints from finding possible supertypes (e.g. those claimed by conditional extensions),
     // and re-enforce necessary constraints by judging the common supertype again
     PData::Reset(tyMgr.constraints);
@@ -179,7 +255,7 @@ Ptr<AST::Ty> JoinAndMeet::BatchJoin(const std::set<Ptr<Ty>>& tys)
  *      - AnyTy/Nothing if there exists any FuncTy but the LUB/GLB doesn't exist
  *      - nullptr if there is no FuncTy in tys
  */
-Ptr<AST::Ty> JoinAndMeet::JoinOrMeetFuncTy(const DualMode& mode, const std::set<Ptr<Ty>>& tys)
+DataTy JoinAndMeet::JoinOrMeetFuncTy(const DualMode& mode, const std::set<DataTy>& tys)
 {
     auto uniformity = CheckFuncUniformity(tys);
     switch (uniformity) {
@@ -191,19 +267,19 @@ Ptr<AST::Ty> JoinAndMeet::JoinOrMeetFuncTy(const DualMode& mode, const std::set<
             break;
     }
     size_t paramCnt = RawStaticCast<FuncTy*>(*tys.begin())->paramTys.size();
-    std::vector<Ptr<Ty>> paramTys(paramCnt);
+    std::vector<ModalTy> paramTys(paramCnt);
     for (size_t i = 0; i < paramCnt; i++) {
-        std::set<Ptr<Ty>> operandParamTys;
+        std::set<ModalTy> operandParamTys;
         for (auto ty : tys) {
             operandParamTys.insert(RawStaticCast<FuncTy*>(ty)->paramTys[i]);
         }
-        paramTys[i] = mode.contraFunc(operandParamTys);
+        paramTys[i] = (this->*mode.contraModal)(operandParamTys);
     }
-    std::set<Ptr<Ty>> operandRetTys;
+    std::set<ModalTy> operandRetTys;
     for (auto ty : tys) {
         operandRetTys.insert(RawStaticCast<FuncTy*>(ty)->retTy);
     }
-    auto retTy = mode.coFunc(operandRetTys);
+    auto retTy = (this->*mode.coModal)(operandRetTys);
     if (Ty::AreTysCorrect(paramTys) && Ty::IsTyCorrect(retTy)) {
         auto resultTy = tyMgr.GetFunctionTy(paramTys, retTy);
         CJC_NULLPTR_CHECK(resultTy);
@@ -223,25 +299,25 @@ Ptr<AST::Ty> JoinAndMeet::JoinOrMeetFuncTy(const DualMode& mode, const std::set<
  *      - AnyTy/Nothing if there exists any TupleTy but the LUB/GLB doesn't exist
  *      - nullptr if there is no TupleTy in tys
  */
-Ptr<AST::Ty> JoinAndMeet::JoinOrMeetTupleTy(const DualMode& mode, const std::set<Ptr<Ty>>& tys)
+DataTy JoinAndMeet::JoinOrMeetTupleTy(const DualMode& mode, const std::set<DataTy>& tys)
 {
     auto uniformity = CheckTupleUniformity(tys);
     switch (uniformity) {
         case Uniformity::ALL_IRRELEVANT:
-            return nullptr;
+            return {};
         case Uniformity::MIXED:
             return mode.bound;
         default:
             break;
     }
-    size_t argCnt = RawStaticCast<TupleTy*>(*tys.begin())->typeArgs.size();
-    std::vector<Ptr<Ty>> typeArgs(argCnt);
+    size_t argCnt = RawStaticCast<TupleTy*>(tys.begin()->get())->typeArgs.size();
+    std::vector<DataTy> typeArgs(argCnt);
     for (size_t i = 0; i < argCnt; i++) {
-        std::set<Ptr<Ty>> operandTyArgs;
+        std::set<DataTy> operandTyArgs;
         for (auto& ty : tys) {
-            operandTyArgs.insert(RawStaticCast<TupleTy*>(ty)->typeArgs[i]);
+            operandTyArgs.insert(RawStaticCast<TupleTy*>(ty.get())->TyArg(i));
         }
-        typeArgs[i] = mode.coFunc(operandTyArgs);
+        typeArgs[i] = (this->*(mode.coFunc))(operandTyArgs);
     }
     if (Ty::AreTysCorrect(typeArgs)) {
         auto resultTy = tyMgr.GetTupleTy(typeArgs);
@@ -255,30 +331,30 @@ Ptr<AST::Ty> JoinAndMeet::JoinOrMeetTupleTy(const DualMode& mode, const std::set
     return mode.bound;
 }
 
-ErrOrTy JoinAndMeet::Meet(bool sprsErr)
+JoinAndMeet::ErrOrTy JoinAndMeet::Meet(bool sprsErr)
 {
     // Hot fix.
     if (!IsInputValid()) {
-        return {TypeManager::GetInvalidTy()};
+        return {ModalTy{TypeManager::GetInvalidTy()}};
     }
     auto mTy = BatchMeet(tySet);
     if (sprsErr || errMsg.empty()) {
-        return {mTy};
+        return {mTy.Ty()};
     } else {
         return {errMsg};
     }
 }
 
-ErrOrTy JoinAndMeet::MeetAsVisibleTy()
+JoinAndMeet::ErrOrTy JoinAndMeet::MeetAsVisibleTy()
 {
     // Hot fix.
     if (!IsInputValid()) {
-        return {TypeManager::GetInvalidTy()};
+        return {ModalTy{TypeManager::GetInvalidTy()}};
     }
     auto mTy = BatchMeet(tySet);
     this->isForcedToUserVisible = true;
     mTy = ToUserVisibleTy(mTy);
-    AddFinalErrMsgs(*mTy, false);
+    AddFinalErrMsgs(mTy, false);
     if (errMsg.empty()) {
         return {mTy};
     } else {
@@ -286,25 +362,28 @@ ErrOrTy JoinAndMeet::MeetAsVisibleTy()
     }
 }
 
-Ptr<AST::Ty> JoinAndMeet::BatchMeet(const std::set<Ptr<Ty>>& tys)
+DataTy JoinAndMeet::BatchMeet(const std::set<DataTy>& tys)
 {
-    auto isSubtype = [this](Ptr<Ty> ty1, Ptr<Ty> ty2) { return tyMgr.IsSubtype(ty1, ty2); };
-    auto isSupertype = [this](Ptr<Ty> ty1, Ptr<Ty> ty2) { return tyMgr.IsSubtype(ty2, ty1); };
-    auto doBatchJoin = [this](const std::set<Ptr<AST::Ty>>& tys) {return BatchJoin(tys);};
-    auto doBatchMeet = [this](const std::set<Ptr<AST::Ty>>& tys) {return BatchMeet(tys);};
+    auto isSubtype = [this](ModalTy ty1, ModalTy ty2) { return tyMgr.IsSubtype(ty1, ty2); };
+    auto isSupertype = [this](ModalTy ty1, ModalTy ty2) { return tyMgr.IsSubtype(ty2, ty1); };
     DualMode meetMode = {.bound = TypeManager::GetInvalidTy(),
-        .coFunc = doBatchMeet,
-        .contraFunc = doBatchJoin,
+        .coFunc = static_cast<DataTy (JoinAndMeet::*)(const std::set<DataTy>&)>(&JoinAndMeet::BatchMeet),
+        .coModal = static_cast<ModalTy (JoinAndMeet::*)(const std::set<ModalTy>&)>(&JoinAndMeet::BatchMeet),
+        .contraFunc = static_cast<DataTy (JoinAndMeet::*)(const std::set<DataTy>&)>(&JoinAndMeet::BatchJoin),
+        .contraModal = static_cast<ModalTy (JoinAndMeet::*)(const std::set<ModalTy>&)>(&JoinAndMeet::BatchJoin),
         .coSubtyFunc = isSupertype};
-    std::set<Ptr<Ty>> realTys;
-    std::function<void(Ptr<Ty>)> insertRealTy = [this, &realTys, &insertRealTy](Ptr<Ty> ty) {
-        if (auto tyVar = DynamicCast<TyVar*>(ty); tyVar && Utils::In(tyVar, ignoredTyVars)) {
+    std::set<DataTy> realTys;
+    std::function<void(DataTy)> insertRealTy = [this, &realTys, &insertRealTy](DataTy ty) {
+        if (auto tyVar = DynamicCast<TyVar>(ty); tyVar && Utils::In(tyVar, ignoredTyVars)) {
             return;
         }
         if (auto unionTy = DynamicCast<UnionTy>(ty)) {
-            insertRealTy(BatchJoin(unionTy->tys));
-        }
-        if (auto itsTy = DynamicCast<IntersectionTy>(ty)) {
+            std::set<DataTy> ums;
+            for (auto p : unionTy->tys) {
+                ums.insert(p);
+            }
+            insertRealTy(BatchJoin(ums));
+        } else if (auto itsTy = DynamicCast<IntersectionTy*>(ty)) {
             for (auto ity : itsTy->tys) {
                 insertRealTy(ity);
             }
@@ -328,7 +407,7 @@ Ptr<AST::Ty> JoinAndMeet::BatchMeet(const std::set<Ptr<Ty>>& tys)
         return tupleTyJoin;
     }
     PData::Reset(tyMgr.constraints);
-    return TypeManager::GetInvalidTy();
+    return {TypeManager::GetInvalidTy()};
 }
 
 std::string JoinAndMeet::CombineErrMsg(ErrMsg& msgs)
@@ -343,67 +422,78 @@ std::string JoinAndMeet::CombineErrMsg(ErrMsg& msgs)
     return res;
 }
 
-Ptr<Ty> JoinAndMeet::ToUserVisibleTy(Ptr<Ty> ty)
+ModalTy JoinAndMeet::ToUserVisibleTy(ModalTy ty)
 {
     CJC_NULLPTR_CHECK(ty);
     if (ty->IsIntersection()) {
-        auto iSecTy = RawStaticCast<IntersectionTy*>(ty);
-        auto isSubtype = [this](Ptr<Ty> ty1, Ptr<Ty> ty2) { return tyMgr.IsSubtype(ty1, ty2); };
-        Ptr<Ty> res = ToUserVisibleTy(FindSmallestTy(iSecTy->tys, isSubtype));
+        auto iSecTy = RawStaticCast<IntersectionTy*>(ty.Ty());
+        auto isSubtype = [this](ModalTy ty1, ModalTy ty2) { return tyMgr.IsSubtype(ty1, ty2); };
+        std::set<DataTy> iMembers;
+        for (auto p : iSecTy->tys) {
+            iMembers.insert(p);
+        }
+        ModalTy res = ToUserVisibleTy({FindSmallestTy(iMembers, isSubtype), ty.Mode()});
         // Given C1 <: I1 & I2 and C2 <: I1 & I2, then Join(C1, C2) gives I1 & I2.
         // Meet(I1, I2) gives Nothing but the result for the original Join.
-        return res->IsNothing() ? tyMgr.GetAnyTy() : res;
-    } else if (auto unionTy = DynamicCast<UnionTy>(ty)) {
-        std::set<Ptr<Ty>> uTys;
+        return res->IsNothing() ? ModalTy{tyMgr.GetAnyTy(), res.Mode()} : res;
+    } else if (auto unionTy = DynamicCast<UnionTy>(ty.Ty())) {
+        std::set<ModalTy> uTys;
         for (auto& t : unionTy->tys) {
-            uTys.insert(ToUserVisibleTy(t));
+            uTys.insert(ToUserVisibleTy(ModalTy{t}));
         }
         auto res = BatchJoin(uTys);
         // Dual of the above comments.
-        return res->IsAny() ? TypeManager::GetNothingTy() : res;
+        return res->IsAny() ? ModalTy{TypeManager::GetNothingTy(), res.Mode()} : res;
     } else if (ty->IsFunc()) {
-        auto funcTy = RawStaticCast<FuncTy*>(ty);
+        auto funcTy = RawStaticCast<FuncTy*>(ty.Ty());
         auto retTy = ToUserVisibleTy(funcTy->retTy);
         auto paramTys = funcTy->paramTys;
         std::transform(funcTy->paramTys.begin(), funcTy->paramTys.end(), paramTys.begin(),
-            [this](Ptr<Ty> typ) { return ToUserVisibleTy(typ); });
+            [this](ModalTy typ) { return ToUserVisibleTy(typ); });
         if (Ty::AreTysCorrect(paramTys) && Ty::IsTyCorrect(retTy)) {
-            return tyMgr.GetFunctionTy(paramTys, retTy, {funcTy->isC, funcTy->isClosureTy, funcTy->hasVariableLenArg});
+            return {
+                tyMgr.GetFunctionTy(paramTys, retTy, {funcTy->isC, funcTy->isClosureTy, funcTy->hasVariableLenArg}),
+                ty.Mode()};
         } else {
-            return TypeManager::GetInvalidTy();
+            return {TypeManager::GetInvalidTy()};
         }
     } else if (ty->IsTuple()) {
-        auto tupleTy = RawStaticCast<TupleTy*>(ty);
+        auto tupleTy = RawStaticCast<TupleTy*>(ty.Ty());
         auto elemTys = tupleTy->typeArgs;
         std::transform(tupleTy->typeArgs.begin(), tupleTy->typeArgs.end(), elemTys.begin(),
-            [this](Ptr<Ty> typ) { return ToUserVisibleTy(typ); });
+            [this](ModalTy typ) { return ToUserVisibleTy(typ); });
         if (Ty::AreTysCorrect(elemTys)) {
-            return tyMgr.GetTupleTy(elemTys);
+            std::vector<DataTy> dataElems;
+            dataElems.reserve(elemTys.size());
+            for (const auto& m : elemTys) {
+                dataElems.push_back(m.Ty());
+            }
+            return {tyMgr.GetTupleTy(dataElems), ty.Mode()};
         } else {
-            return TypeManager::GetInvalidTy();
+            return {TypeManager::GetInvalidTy()};
         }
     } else {
         return ty;
     }
 }
 
-void JoinAndMeet::AddFinalErrMsgs(const Ty& ty, bool isJoin)
+void JoinAndMeet::AddFinalErrMsgs(ModalTy ty, bool isJoin)
 {
     auto getTysStr = [this]() {
-        auto tyVec = Utils::SetToVec<Ptr<Ty>>(tySet);
-        std::sort(tyVec.begin(), tyVec.end(), CompTyByNames);
+        auto tyVec = Utils::SetToVec<ModalTy>(tySet);
+        std::sort(tyVec.begin(), tyVec.end(), CompTyByNamesModal);
         std::string tysStr;
         for (auto it = tyVec.begin(); it != std::prev(tyVec.end()); ++it) {
-            tysStr += (it == tyVec.begin() ? std::string() : ", ") + "'" + Ty::ToString(*it) + "'";
+            tysStr += (it == tyVec.begin() ? std::string() : ", ") + "'" + it->String() + "'";
         }
         if (tyVec.size() > 1) {
             CJC_NULLPTR_CHECK(tyVec.back());
-            tysStr += " and '" + tyVec.back()->String() + "'";
+            tysStr += " and '" + tyVec.back().String() + "'";
         }
         return tysStr;
     };
 
-    if (ty.IsInvalid()) {
+    if (ty->IsInvalid()) {
         CJC_ASSERT(!tySet.empty());
         std::string newErrMsg = "The types " + getTysStr() + " do not have ";
         newErrMsg += isJoin ? "the smallest common supertype" : "the greatest common subtype";
@@ -412,20 +502,20 @@ void JoinAndMeet::AddFinalErrMsgs(const Ty& ty, bool isJoin)
     }
 }
 
-std::pair<std::optional<std::string>, Ptr<Ty>> JoinAndMeet::SetJoinedType(
-    Ptr<Ty> ty, std::variant<std::stack<std::string>, Ptr<Ty>>& joinRes)
+std::pair<std::optional<std::string>, ModalTy> JoinAndMeet::SetJoinedType(
+    ModalTy ty, std::variant<std::stack<std::string>, ModalTy>& joinRes)
 {
-    if (std::get_if<Ptr<Ty>>(&joinRes)) {
-        ty = std::get<Ptr<Ty>>(joinRes);
+    if (std::get_if<ModalTy>(&joinRes)) {
+        ty = std::get<ModalTy>(joinRes);
         return {{}, ty};
     }
-    ty = TypeManager::GetInvalidTy();
+    ty = {TypeManager::GetInvalidTy()};
     auto errMsgs = std::get<std::stack<std::string>>(joinRes);
     return {JoinAndMeet::CombineErrMsg(errMsgs), ty};
 }
 
-std::pair<std::optional<std::string>, Ptr<Ty>> JoinAndMeet::SetMetType(
-    Ptr<Ty> ty, std::variant<std::stack<std::string>, Ptr<Ty>>& metRes)
+std::pair<std::optional<std::string>, ModalTy> JoinAndMeet::SetMetType(
+    ModalTy ty, std::variant<std::stack<std::string>, ModalTy>& metRes)
 {
     return SetJoinedType(ty, metRes);
 }

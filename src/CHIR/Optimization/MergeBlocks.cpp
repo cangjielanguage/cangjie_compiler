@@ -193,6 +193,8 @@ void MergeBlocks::RunOnFunc(const BlockGroup& body, CHIRBuilder& builder, const 
             for (auto expr : block->GetExpressions()) {
                 if (expr->GetExprKind() == ExprKind::LAMBDA) {
                     RunOnFunc(*StaticCast<const Lambda*>(expr)->GetBody(), builder, opts);
+                } else if (expr->GetExprKind() == ExprKind::EXCLAVE) {
+                    RunOnFunc(*StaticCast<const Exclave*>(expr)->GetBody(), builder, opts);
                 }
             }
             if (block->Get<GeneratedFromForIn>()) {

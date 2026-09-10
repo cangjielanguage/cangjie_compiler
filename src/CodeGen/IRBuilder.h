@@ -11,6 +11,7 @@
 
 #include "Base/CHIRExprWrapper.h"
 #include "CGModule.h"
+#include "Utils/ModalWrite.h"
 #include "cangjie/Utils/CheckUtils.h"
 
 namespace Cangjie {
@@ -101,7 +102,12 @@ public:
     llvm::Instruction* CreateStore(
         llvm::Value* val, llvm::Value* ptr, const Cangjie::CHIR::Type* type, bool isVolatile = false);
 
-    llvm::Instruction* CreateStore(const CGValue& cgVal, const CGValue& cgDestAddr, CHIR::Type* boxType = nullptr);
+    /// \p modalWrite selects the write barrier for a store into an instance member variable
+    /// whose owning object may live in a local region, so that the runtime can register a local
+    /// GC root when the store creates a `region -> heap` edge. It is computed at CodeGen time by
+    /// ClassifyModalWrite (see ModalWrite.h).
+    llvm::Instruction* CreateStore(const CGValue& cgVal, const CGValue& cgDestAddr, CHIR::Type* boxType = nullptr,
+        ModalWriteKind modalWrite = ModalWriteKind::NONE);
 
     CGValue CreateGEP(const CGValue& cgVal, const std::vector<uint64_t>& idxList, const llvm::Twine& name = "");
     llvm::Value* CreateGEP(
@@ -204,6 +210,8 @@ public:
     llvm::Instruction* CallGCReadStaticRef(const std::vector<llvm::Value*>& args);
     llvm::Instruction* CallGCReadStaticAgg(llvm::StructType* type, std::vector<llvm::Value*> args);
     llvm::Instruction* CallGCWrite(std::vector<llvm::Value*> args);
+    llvm::Instruction* CallMaybeLocalWrite(std::vector<llvm::Value*> args);
+    llvm::Instruction* CallDemodeWrite(std::vector<llvm::Value*> args);
     llvm::Instruction* CallGCWriteAgg(llvm::StructType* structType, std::vector<llvm::Value*> args);
     llvm::Instruction* CallGCWriteStaticRef(const std::vector<llvm::Value*>& args);
     llvm::Instruction* CallGCWriteStaticAgg(llvm::StructType* type, std::vector<llvm::Value*> args);
@@ -259,6 +267,7 @@ public:
 
     llvm::Value* CallIntrinsicRef2Null(llvm::Value* value);
     llvm::Value* CreateStringLiteral(const std::string& str);
+    llvm::Value* CreateLocalStringLiteral(const std::string& str);
 
     void CallArrayInit(
         llvm::Value* arrPtr, llvm::Value* arrayLen, llvm::Value* elemValue, const CHIR::RawArrayType& arrTy);
@@ -382,7 +391,7 @@ public:
     ///*----------------- Class related --------------------//
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     llvm::Value* CallClassIntrinsicAlloc(const CHIR::Type& type);
-    llvm::Instruction* CallClassIntrinsicAlloc(const std::vector<llvm::Value*>& parameters);
+    llvm::Instruction* CallClassIntrinsicAlloc(const std::vector<llvm::Value*>& parameters, bool isLocal);
 #endif
     llvm::Value* CallClassIntrinsicInstanceOf(llvm::Value* instance, const CHIR::Type* targetTy);
     llvm::Value* CallArrayIntrinsicAllocWithConstantContent(llvm::Value* array, const std::vector<CGValue*>& args,
@@ -390,8 +399,8 @@ public:
     llvm::Value* CreateEnumGEP(const CHIR::Field& field);
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     llvm::Value* AllocateArray(const CHIR::RawArrayType& rawArrayType, llvm::Value* length);
-    llvm::Function* GetArrayNonGenericElemMalloc() const;
-    llvm::Function* GetArrayGenericElemMalloc() const;
+    llvm::Function* GetArrayNonGenericElemMalloc(bool isLocal) const;
+    llvm::Function* GetArrayGenericElemMalloc(bool isLocal) const;
     llvm::Value* InitArrayFilledWithConstant(llvm::Value* array, const CHIR::RawArrayType& arrTy,
         const std::vector<llvm::Constant*>& arrayConstantElems, const std::string& serialized);
     void CreateCopyTo(ArrayCopyToInfo arrayCopyToInfo);
@@ -429,15 +438,16 @@ public:
     llvm::Instruction* CallIntrinsicIsSubtype(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallIntrinsicIsTupleTypeOf(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallIntrinsicIsTypeEqualTo(const std::vector<llvm::Value*>& parameters);
-    llvm::Instruction* CallIntrinsicAllocaGeneric(const std::vector<llvm::Value*>& parameters);
+    llvm::Instruction* CallIntrinsicAllocaGeneric(const std::vector<llvm::Value*>& parameters, bool isLocal);
     llvm::Instruction* CallIntrinsicGCWriteGeneric(const std::vector<llvm::Value*>& parameters);
+    llvm::Instruction* CallIntrinsicMaybeLocalWriteGeneric(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallGCWriteGenericPayload(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallGCReadGeneric(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallIntrinsicMTable(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallIntrinsicMethodOuterType(const std::vector<llvm::Value*>& parameters);
     llvm::Instruction* CallIntrinsicGetVTableFunc(
         llvm::Value* ti, llvm::Value* introTypeIdx, llvm::Value* funcOffset, llvm::Value* introTI);
-    llvm::Instruction* CallIntrinsicAssignGeneric(const std::vector<llvm::Value*>& parameters);
+    llvm::Instruction* CallIntrinsicAssignGeneric(const std::vector<llvm::Value*>& parameters, bool isLocal = false);
 
     llvm::Value* CreateTypeInfoIsReferenceCall(llvm::Value* ti);
     llvm::Value* CreateTypeInfoIsReferenceCall(const CHIR::Type& chirType);

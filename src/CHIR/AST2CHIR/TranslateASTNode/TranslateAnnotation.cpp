@@ -41,7 +41,7 @@ GlobalVar* Translator::TranslateCustomAnnoInstanceSig(const Expr& expr, const Fu
     name += MangleUtils::DecimalToManglingNumber(std::to_string(i));
     auto varName = name + MANGLE_SUFFIX;
     auto gv = builder.CreateGlobalVar(
-        builder.GetType<RefType>(TranslateType(*expr.GetTy())), varName, varName, "", func.GetPackageName());
+        builder.GetType<RefType>(TranslateType(expr.GetTy())), varName, varName, "", func.GetPackageName());
     gv->EnableAttr(Attribute::COMPILER_ADD);
     gv->EnableAttr(Attribute::CONST);
     gv->Set<LinkTypeInfo>(Linkage::INTERNAL);
@@ -179,7 +179,7 @@ AnnoInfo Translator::CreateAnnoFactoryFuncSig(const AST::Decl& decl, CustomTypeD
     if (found != annotationFuncMap.end()) {
         return found->second; // Property's getters and setters share the same annotation function.
     }
-    Type* returnTy = TranslateType(*annosArray->GetTy());
+    Type* returnTy = TranslateType(annosArray->GetTy());
     auto funcType = builder.GetType<FuncType>(std::vector<Type*>{}, returnTy);
     const auto& loc = TranslateLocation(*decl.annotationsArray->children[0]);
     std::string mangledName = CHIRMangling::GenerateAnnotationFuncMangleName(decl.mangledName);

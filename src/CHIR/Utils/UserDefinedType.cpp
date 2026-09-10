@@ -83,40 +83,8 @@ Type* VirtualMethodInfo::GetInstParentType() const
     return parentType;
 }
 
-bool VirtualMethodInfo::FuncSigIsMatched(const FuncSigInfo& other, CHIRBuilder& builder) const
-{
-    // func name not matched
-    if (condition.funcName != other.funcName) {
-        return false;
-    }
-    auto paramTysInMethod = other.funcType->GetParamTypes();
-    auto paramTysInVtable = condition.funcType->GetParamTypes();
-    // param size not matched
-    if (paramTysInVtable.size() != paramTysInMethod.size()) {
-        return false;
-    }
-    // generic type param size not matched
-    if (other.genericTypeParams.size() != condition.genericTypeParams.size()) {
-        return false;
-    }
-    std::unordered_map<const GenericType*, Type*> replaceTable;
-    for (size_t i = 0; i < condition.genericTypeParams.size(); ++i) {
-        replaceTable[other.genericTypeParams[i]] = condition.genericTypeParams[i];
-    }
-    bool typeMatch = true;
-    // check param types
-    for (size_t i = 0; i < paramTysInMethod.size(); ++i) {
-        auto paramTyInMethod = ReplaceRawGenericArgType(*paramTysInMethod[i], replaceTable, builder);
-        if (!ParamTypeIsEquivalent(*paramTyInMethod, *paramTysInVtable[i])) {
-            typeMatch = false;
-            break;
-        }
-    }
-    return typeMatch;
-}
-
-bool VirtualMethodInfo::FuncSigIsMatched(const FuncCallType& other,
-    std::unordered_map<const GenericType*, Type*> replaceTable, CHIRBuilder& builder) const
+bool VirtualMethodInfo::FuncSigIsMatchedImpl(const FuncCallType& other,
+    bool isStatic, std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder) const
 {
     if (condition.funcName != other.funcName) {
         return false;
@@ -134,15 +102,40 @@ bool VirtualMethodInfo::FuncSigIsMatched(const FuncCallType& other,
     for (size_t j = 0; j < genericTypeParams.size(); ++j) {
         replaceTable.emplace(genericTypeParams[j], funcInstTypeArgs[j]);
     }
-    bool matched = true;
     for (size_t j = 0; j < genericParamTys.size(); ++j) {
         auto declaredInstType = ReplaceRawGenericArgType(*genericParamTys[j], replaceTable, builder);
-        if (!ParamTypeIsEquivalent(*declaredInstType, *instArgTys[j])) {
-            matched = false;
-            break;
+        if (!isStatic && j == 0) {
+            // for the 1st param, the modal must be the same, and their data type should have parent-child relationship
+            // we don't need to check parent-child relationship, because if there isn't parent-child relationship,
+            // chir checker will report error later.
+            // for other params, their types should be equivalent, including the modal must be the same.
+            auto modalInVtable = instArgTys[j]->StripAllRefs()->GetModalInfo();
+            auto modalInMethod = declaredInstType->StripAllRefs()->GetModalInfo();
+            if (modalInVtable != modalInMethod) {
+                return false;
+            }
+        } else if (!ParamTypeIsEquivalent(*declaredInstType, *instArgTys[j])) {
+            return false;
         }
     }
-    return matched;
+    return true;
+}
+
+bool VirtualMethodInfo::FuncSigIsMatched(const FuncSigInfo& other, bool isStatic, CHIRBuilder& builder) const
+{
+    std::unordered_map<const GenericType*, Type*> replaceTable;
+    auto funcInfo = FuncCallType{
+        .funcName = other.funcName,
+        .funcType = other.funcType,
+        .genericTypeArgs = std::vector<Type*>(other.genericTypeParams.begin(), other.genericTypeParams.end())
+    };
+    return FuncSigIsMatchedImpl(funcInfo, isStatic, replaceTable, builder);
+}
+
+bool VirtualMethodInfo::FuncSigIsMatched(const FuncCallType& other,
+    bool isStatic, std::unordered_map<const GenericType*, Type*> replaceTable, CHIRBuilder& builder) const
+{
+    return FuncSigIsMatchedImpl(other, isStatic, replaceTable, builder);
 }
 
 void VirtualMethodInfo::UpdateMethodInfo(const VirtualMethodInfo& newInfo)

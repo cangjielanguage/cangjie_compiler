@@ -78,17 +78,17 @@ void BlockGroupCopyHelper::CollectValueMap(Block& oldBlk, Block& newBlk,
         auto oldExpr = oldExprs[i];
         auto newExpr = newExprs[i];
         CJC_ASSERT(oldExpr->GetExprKind() == newExpr->GetExprKind());
-        if (oldExpr->GetResult() == nullptr) {
-            CJC_ASSERT(newExpr->GetResult() == nullptr);
-            continue;
+        if (oldExpr->GetResult() != nullptr) {
+            CJC_ASSERT(newExpr->GetResult() != nullptr);
+            valueMap.emplace(oldExpr->GetResult(), newExpr->GetResult());
         }
-        CJC_ASSERT(newExpr->GetResult() != nullptr);
-        valueMap.emplace(oldExpr->GetResult(), newExpr->GetResult());
         if (oldExpr->GetExprKind() == ExprKind::DEBUGEXPR) {
             newDebugs.emplace(newExpr);
-        }
-        if (oldExpr->GetExprKind() == ExprKind::LAMBDA) {
+        } else if (oldExpr->GetExprKind() == ExprKind::LAMBDA) {
             CollectValueMap(*StaticCast<Lambda*>(oldExpr), *StaticCast<Lambda*>(newExpr), valueMap, newDebugs);
+        } else if (oldExpr->GetExprKind() == ExprKind::EXCLAVE) {
+            auto newBlocks = StaticCast<Exclave*>(newExpr)->GetBody()->GetBlocks();
+            CollectValueMap(*StaticCast<Exclave*>(oldExpr)->GetBody(), newBlocks, valueMap, newDebugs);
         }
     }
 }

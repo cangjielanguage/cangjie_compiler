@@ -42,6 +42,11 @@ public:
         return context.GetType<TType>(args...);
     }
 
+    Type* WithModal(Type* ty, ModalInfo modal)
+    {
+        return context.WithModal(ty, modal);
+    }
+
     StructType* GetStructType(
         const std::string& package, const std::string& name, const std::vector<std::string>& genericType = {}) const
     {

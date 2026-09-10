@@ -12,12 +12,12 @@ using namespace Cangjie;
 Ptr<Value> Translator::Visit(const AST::TupleLit& tuple)
 {
     std::vector<Value*> argVals;
-    auto tupleType = StaticCast<AST::TupleTy*>(tuple.GetTy());
+    auto tupleType = StaticCast<AST::TupleTy*>(tuple.DataTy());
     for (size_t i = 0; i < tuple.children.size(); i++) {
-        auto arg = TranslateExprArg(*tuple.children[i], *TranslateType(*tupleType->typeArgs[i]));
+        auto arg = TranslateExprArg(*tuple.children[i], *TranslateType(tupleType->typeArgs[i]));
         argVals.push_back(arg);
     }
-    auto ty = TranslateType(*tuple.GetTy());
+    auto ty = TranslateType(tuple.GetTy());
     return CreateAndAppendExpression<Tuple>(TranslateLocation(tuple), ty, argVals, currentBlock)
         ->GetResult();
 }

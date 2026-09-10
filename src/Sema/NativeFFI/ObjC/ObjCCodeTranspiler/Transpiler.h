@@ -36,7 +36,7 @@ private:
     bool CheckFunction(OwnedPtr<AST::Decl>& arg) const;
     bool CheckCtor(OwnedPtr<AST::Decl>& arg) const;
     bool CheckProp(OwnedPtr<AST::Decl>& arg) const;
-    void CollectDependencies(Ptr<AST::Ty> ty);
+    void CollectDependencies(AST::ModalTy ty);
 
     std::stringstream sourceBody;
     std::stringstream headerBody;

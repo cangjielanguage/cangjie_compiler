@@ -18,6 +18,7 @@
 #include "cangjie/AST/Node.h"
 
 namespace Cangjie {
+class TypeManager;
 using TTypeOffset = flatbuffers::Offset<PackageFormat::SemaTy>;
 using TDeclOffset = flatbuffers::Offset<PackageFormat::Decl>;
 using TExprOffset = flatbuffers::Offset<PackageFormat::Expr>;
@@ -32,6 +33,7 @@ using TFeatureIdOffset = flatbuffers::Offset<PackageFormat::FeatureId>;
 using TFeaturesSetOffset = flatbuffers::Offset<PackageFormat::FeaturesSet>;
 using TFeaturesDirectiveOffset = flatbuffers::Offset<PackageFormat::FeaturesDirective>;
 using TFuncBodyOffset = flatbuffers::Offset<PackageFormat::FuncBody>;
+using TModeOffset = flatbuffers::Offset<PackageFormat::Mode>;
 template <typename T> using TVectorOffset = flatbuffers::Offset<flatbuffers::Vector<T>>;
 using TPosition = PackageFormat::Position;
 using TFeaturesSet = PackageFormat::FeaturesSet;
@@ -89,6 +91,21 @@ inline bool IsExportedMemberFunc(const AST::FuncDecl& fd)
 {
     return fd.linkage != Linkage::INTERNAL;
 }
+
+TModeOffset SaveModal(flatbuffers::FlatBufferBuilder& fbb, ModalInfo modal);
+ModalInfo ReadModal(const PackageFormat::Mode* mode);
+
+/// Omits the vector when \p modes is empty or every element is 0.
+TVectorOffset<TModeOffset> CreateTyModesVector(
+    flatbuffers::FlatBufferBuilder& fbb, const std::vector<TModeOffset>& modes);
+
+/// When every modal is default (@~local), returns 0; otherwise saves each Mode (including NOT) and
+/// returns a tyModes vector via CreateTyModesVector.
+TVectorOffset<TModeOffset> SaveModalVector(
+    flatbuffers::FlatBufferBuilder& fbb, const std::vector<ModalInfo>& modals);
+
+/// Combines shape-only \p ty (from SemaTy / LoadType cache) with optional serialized \p mode.
+AST::ModalTy ApplyLoadedModal(AST::DataTy ty, const PackageFormat::Mode* mode);
 } // namespace Cangjie
 
 #endif

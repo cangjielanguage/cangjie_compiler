@@ -22,13 +22,13 @@ using TargetCache = std::pair<Ptr<AST::Decl>, Ptr<AST::Decl>>;
 
 struct CacheEntry {
     bool successful = false;
-    Ptr<AST::Ty> result = nullptr;
+    AST::ModalTy result = {};
     DiagnosticCache diags;
     TargetCache targets;
 };
 
 struct CacheKey {
-    Ptr<AST::Ty> target;
+    AST::ModalTy target;
     bool isDesugared;
     DiagnosticCache::DiagCacheKey diagKey;
     bool operator==(const CacheKey& b) const;
@@ -37,7 +37,7 @@ struct CacheKey {
 struct CacheKeyHash {
     size_t operator()(const CacheKey& key) const
     {
-        auto v = std::hash<Ptr<AST::Ty>>()(key.target);
+        auto v = std::hash<AST::ModalTy>()(key.target);
         v = hash_combine(v, key.isDesugared);
         v = hash_combine(v, key.diagKey);
         return v;

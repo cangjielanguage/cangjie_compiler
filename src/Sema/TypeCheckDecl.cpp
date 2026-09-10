@@ -69,6 +69,11 @@ void TypeChecker::TypeCheckerImpl::CheckFuncDecl(ASTContext& ctx, FuncDecl& fd)
         return;
     }
     fd.EnableAttr(Attribute::IS_CHECK_VISITED);
+    if (!IsGlobalOrMember(fd) && fd.modal.Local() == ASTMode::FULL) {
+        DiagInvalidLocalFuncType(fd);
+        fd.SetTy({TypeManager::GetInvalidTy()});
+        return;
+    }
     // NOTE: Property decl's getter/setter function should be ignored from 'redef' checking.
     auto redefModifier = TypeCheckUtil::FindModifier(fd, TokenKind::REDEF);
     auto staticModifier = TypeCheckUtil::FindModifier(fd, TokenKind::STATIC);
@@ -78,12 +83,24 @@ void TypeChecker::TypeCheckerImpl::CheckFuncDecl(ASTContext& ctx, FuncDecl& fd)
 
     fd.funcBody->funcDecl = &fd;
     (void)CheckFuncBody(ctx, *fd.funcBody);
-    if (Ty::IsTyCorrect(fd.GetTy()) && fd.GetTy()->HasQuestTy()) {
+    if (fd.GetTy().IsCorrect() && fd.GetTy()->HasQuestTy()) {
         CJC_ASSERT(fd.GetTy()->IsFunc());
         // NOTE: Error's for synthesized quest ty must be reported in 'CheckBodyRetType',
         // otherwise it means funcBody contains broken nodes.
         // Update return type to invalid, keep 'fd''s type in funcTy format.
-        fd.SetTy(typeManager.GetFunctionTy(RawStaticCast<FuncTy*>(fd.GetTy())->paramTys, TypeManager::GetInvalidTy()));
+        fd.SetTy({
+            typeManager.GetFunctionTy(DynamicCast<FuncTy*>(fd.DataTy())->paramTys, {TypeManager::GetInvalidTy()})});
+    }
+    if (fd.GetTy().IsCorrect()) {
+        if (fd.modal.HasLocal()) {
+            fd.SetTy(fd.GetTy().With(fd.modal.ToModalInfo()));
+        }
+        if (!IsGlobalOrMember(fd) && !fd.TestAttr(Attribute::COMPILER_ADD)) {
+            CheckLocalCaptures(ctx, fd);
+        }
+    }
+    if (fd.propDecl) {
+        CheckPropMethodTargetType(fd);
     }
     // NOTE: 'fd''s type should only be updated inside 'CheckFuncBody' not here.
     if (fd.TestAttr(AST::Attribute::MAIN_ENTRY)) {
@@ -164,15 +181,15 @@ void TypeChecker::TypeCheckerImpl::CheckEntryFunc(FuncDecl& fd)
 
 void TypeChecker::TypeCheckerImpl::CheckOperatorOverloadFunc(const FuncDecl& fd)
 {
-    auto funcTy = DynamicCast<FuncTy*>(fd.GetTy());
-    if (!Ty::IsTyCorrect(funcTy) || fd.op == TokenKind::ILLEGAL || fd.op == TokenKind::LPAREN) {
+    Ptr<FuncTy> funcTy = DynamicCast<FuncTy*>(fd.DataTy());
+    if (!Ty::IsTyCorrect(Ptr<Ty>(funcTy)) || fd.op == TokenKind::ILLEGAL || fd.op == TokenKind::LPAREN) {
         return;
     }
-    Ptr<Ty> baseTy = (fd.outerDecl != nullptr) ? fd.outerDecl->GetTy() : nullptr;
+    ModalTy baseTy = (fd.outerDecl != nullptr) ? fd.outerDecl->GetTy() : ModalTy{};
     if (fd.op == TokenKind::LSQUARE) {
         return HandIndexOperatorOverload(fd, *funcTy);
     }
-    const std::vector<Ptr<Ty>>& paramTys = funcTy->paramTys;
+    const std::vector<ModalTy>& paramTys = funcTy->paramTys;
     switch (paramTys.size()) {
         case 0: { // If the size of paramsTy is 0.
             // Unary operators.
@@ -236,7 +253,7 @@ void TypeChecker::TypeCheckerImpl::HandIndexOperatorOverload(const FuncDecl& fd,
             DiagKindRefactor::sema_invalid_subscript_assign_parameter_num, fd, MakeRange(fd.identifier));
         return;
     }
-    if (invalidNamedParams.empty() && funcTy.retTy != TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)) {
+    if (invalidNamedParams.empty() && !funcTy.retTy->IsUnit()) {
         auto range = MakeRange(fd.identifier);
         if (fd.funcBody && fd.funcBody->retType && !fd.funcBody->retType->begin.IsZero()) {
             range = MakeRange(fd.funcBody->retType->begin, fd.funcBody->retType->end);
@@ -249,9 +266,9 @@ void TypeChecker::TypeCheckerImpl::CheckVarDecl(ASTContext& ctx, VarDecl& vd)
 {
     if (vd.TestAttr(Attribute::IS_CHECK_VISITED)) {
         // Unable to infer mutually recursive variables.
-        if (IsGlobalOrMember(vd) && Ty::IsInitialTy(vd.GetTy())) {
+        if (IsGlobalOrMember(vd) && Ty::IsInitialTy(vd.DataTy())) {
             DiagUnableToInferDecl(diag, vd);
-            vd.SetTy(TypeManager::GetInvalidTy());
+            vd.SetTy({TypeManager::GetInvalidTy()});
         }
         return;
     }
@@ -259,7 +276,7 @@ void TypeChecker::TypeCheckerImpl::CheckVarDecl(ASTContext& ctx, VarDecl& vd)
     vd.EnableAttr(Attribute::IS_CHECK_VISITED);
 
     SynchronizeTypeAndInitializer({ctx, SynPos::NONE}, vd);
-    if (vd.initializer != nullptr && Ty::IsInitialTy(vd.initializer->GetTy())) {
+    if (vd.initializer != nullptr && Ty::IsInitialTy(vd.initializer->DataTy())) {
         // Already generate diagnostics before, quit here.
         return;
     }
@@ -270,20 +287,21 @@ void TypeChecker::TypeCheckerImpl::CheckVarWithPatternDecl(ASTContext& ctx, VarW
 {
     if (vpd.TestAttr(Attribute::IS_CHECK_VISITED)) {
         // Unable to infer mutually recursive top level variables.
-        if (vpd.TestAttr(Attribute::GLOBAL) && Ty::IsInitialTy(vpd.GetTy())) {
+        if (vpd.TestAttr(Attribute::GLOBAL) && Ty::IsInitialTy(vpd.DataTy())) {
             DiagUnableToInferDecl(diag, vpd);
-            vpd.SetTy(TypeManager::GetInvalidTy());
+            vpd.SetTy({TypeManager::GetInvalidTy()});
         }
         return;
     }
     // Mark the current declaration checked.
     vpd.EnableAttr(Attribute::IS_CHECK_VISITED);
     SynchronizeTypeAndInitializer({ctx, SynPos::NONE}, vpd);
-    if ((vpd.initializer != nullptr && !Ty::IsTyCorrect(vpd.initializer->GetTy())) || !vpd.irrefutablePattern) {
+    if ((vpd.initializer != nullptr && !vpd.initializer->GetTy().IsCorrect()) || !vpd.irrefutablePattern) {
         // Already generate diagnostics before, quit here.
         return;
     }
-    if (Ty::IsTyCorrect(vpd.GetTy()) && !ChkPattern(ctx, *vpd.GetTy(), *vpd.irrefutablePattern, false)) {
+    if (vpd.GetTy().IsCorrect() &&
+        !ChkPattern(ctx, vpd.GetTy(), *vpd.irrefutablePattern, false, vpd.initializer.get())) {
         diag.Diagnose(*vpd.irrefutablePattern, DiagKind::sema_mismatched_type_for_pattern_in_vardecl);
     }
     if (!IsIrrefutablePattern(*vpd.irrefutablePattern)) {
@@ -313,7 +331,7 @@ void TypeChecker::TypeCheckerImpl::SynchronizeTypeAndInitializer(const CheckerCo
     } else if (vd.type != nullptr && vd.initializer != nullptr) {
         // Always set vd.GetTy() to the one the user gives.
         Synthesize(ctx, vd.type.get());
-        if (AST::Ty::IsTyCorrect(vd.type->GetTy())) {
+        if (vd.type->GetTy().IsCorrect()) {
             // User has defined vardecl's type. Should not be set to invalid even if initializer is incompatible.
             vd.SetTy(vd.type->GetTy());
             if (vd.type->GetTy()->IsRune() && IsSingleRuneStringLiteral(*vd.initializer)) {
@@ -330,7 +348,7 @@ void TypeChecker::TypeCheckerImpl::SynchronizeTypeAndInitializer(const CheckerCo
             }
         } else {
             // VarDecl's user defined type is invalid, should not update 'vd.GetTy()' with initializer's type.
-            vd.SetTy(TypeManager::GetInvalidTy());
+            vd.SetTy({TypeManager::GetInvalidTy()});
             Synthesize(ctx.With(SynPos::EXPR_ARG), vd.initializer.get());
         }
         // Should not report here. Any error should be reported during 'Check' or 'Synthesize' step.
@@ -343,17 +361,21 @@ void TypeChecker::TypeCheckerImpl::SynchronizeTypeAndInitializer(const CheckerCo
         // Set VarDecl's type by its initializer's type.
         // when the initializer is 'this', the vd's ty will be inferred to the corresponding ClassTy (NOT
         // ClassThisTy)
-        if (auto ctt = DynamicCast<AST::ClassThisTy*>(vd.initializer->GetTy()); ctt && ctt->decl) {
-            vd.SetTy(typeManager.GetClassTy(*ctt->decl, ctt->typeArgs));
-        } else if (auto fty = DynamicCast<AST::FuncTy*>(vd.initializer->GetTy());
+        if (auto ctt = DynamicCast<AST::ClassThisTy>(vd.initializer->DataTy()); ctt && ctt->decl) {
+            vd.SetTy({typeManager.GetClassTy(*ctt->decl, ctt->TyArgs()), vd.initializer->TyMode()});
+        } else if (auto fty = DynamicCast<AST::FuncTy>(vd.initializer->DataTy());
             fty && fty->isC && fty->hasVariableLenArg) {
-            vd.SetTy(TypeManager::GetInvalidTy());
+            vd.SetTy({TypeManager::GetInvalidTy()});
             bool shouldDiag = vd.ShouldDiagnose() && !CanSkipDiag(*vd.initializer);
             if (shouldDiag) {
                 diag.Diagnose(*vd.initializer, DiagKind::sema_cfunc_var_cannot_have_var_param);
             }
         } else {
             vd.SetTy(vd.initializer->GetTy());
+        }
+        // global var cannot have local type, but for copy type we can infer it to not local to pass the check.
+        if (IsGlobalOrMember(vd) && vd.GetTy().IsCorrect() && typeManager.ImplementsCopyInterface(vd.DataTy())) {
+            vd.SetTy(vd.GetTy().With(Mode::NOT));
         }
     }
 }
@@ -369,11 +391,12 @@ void TypeChecker::TypeCheckerImpl::CheckPropDecl(ASTContext& ctx, PropDecl& pd)
     auto staticModifier = TypeCheckUtil::FindModifier(pd, TokenKind::STATIC);
     if (redefModifier && staticModifier == nullptr) {
         (void)diag.Diagnose(*redefModifier, DiagKind::sema_redef_modify_static_func, "property");
-        pd.SetTy(TypeManager::GetInvalidTy());
+        pd.SetTy({TypeManager::GetInvalidTy()});
     }
     CJC_NULLPTR_CHECK(pd.type);
     Synthesize({ctx, SynPos::NONE}, pd.type.get());
     pd.SetTy(pd.type->GetTy());
+
     for (auto& pmd : pd.getters) {
         if (pmd->funcBody && !pmd->funcBody->paramLists.empty()) {
             if (!pmd->funcBody->paramLists[0]->params.empty()) {
@@ -387,10 +410,36 @@ void TypeChecker::TypeCheckerImpl::CheckPropDecl(ASTContext& ctx, PropDecl& pd)
     }
     for (auto& pmd : pd.setters) {
         if (pmd->funcBody && pmd->funcBody->paramLists.size() > 1) {
-            (void)diag.Diagnose(*pmd, DiagKind::sema_cannot_currying, "setter");
+            diag.Diagnose(*pmd, DiagKind::sema_cannot_currying, "setter");
         }
         Synthesize({ctx, SynPos::NONE}, pmd.get());
     }
+}
+
+bool TypeChecker::TypeCheckerImpl::CheckPropMethodTargetType(const FuncDecl& fd)
+{
+    auto prop = fd.propDecl;
+    if (fd.isSetter) {
+        auto& params = fd.funcBody->paramLists[0];
+        if (params->params.empty() || !params->params[0]->GetTy().IsCorrect()) {
+            return true;
+        }
+        if (params->params[0]->DataTy() != prop->DataTy()) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_prop_method_target_type_mismatch, fd, prop->GetTy().String(),
+                params->params[0]->GetTy().String());
+            return false;
+        }
+        return true;
+    }
+    if (!fd.funcBody->retType || !fd.funcBody->retType->GetTy().IsCorrect()) {
+        return true;
+    }
+    if (fd.funcBody->retType->DataTy() != prop->DataTy()) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_prop_method_target_type_mismatch, fd, prop->GetTy().String(),
+            fd.funcBody->retType->GetTy().String());
+        return false;
+    }
+    return true;
 }
 
 void TypeChecker::TypeCheckerImpl::BuildImportedEnumConstructorMap(ASTContext& ctx)
@@ -436,7 +485,7 @@ void TypeChecker::TypeCheckerImpl::CheckEnumDecl(ASTContext& ctx, EnumDecl& ed)
             (void)id->subDecls.insert(&ed);
         } else {
             // Can only implement interface. Set type to invalid (avoid invalid reference).
-            interfaceType->SetTy(TypeManager::GetInvalidTy());
+            interfaceType->SetTy({TypeManager::GetInvalidTy()});
             (void)diag.Diagnose(ed, DiagKind::sema_type_implement_non_interface, "enum", ed.identifier.Val());
         }
     }
@@ -464,7 +513,8 @@ void TypeChecker::TypeCheckerImpl::CheckEnumDecl(ASTContext& ctx, EnumDecl& ed)
                 auto mutDecl = TypeCheckUtil::FindModifier(*pd, TokenKind::MUT);
                 CJC_ASSERT(mutDecl);
                 if (mutDecl) {
-                    (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_immutable_type_illegal_property, *mutDecl);
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_immutable_type_illegal_property, *mutDecl);
+                    pd->EnableAttr(Attribute::HAS_BROKEN);
                 }
             }
         }
@@ -474,7 +524,7 @@ void TypeChecker::TypeCheckerImpl::CheckEnumDecl(ASTContext& ctx, EnumDecl& ed)
 void TypeChecker::TypeCheckerImpl::SetEnumEleTy(Decl& constructor)
 {
     // Imported enum decl's constructor may have valid type.
-    if (!constructor.TestAttr(Attribute::ENUM_CONSTRUCTOR) || Ty::IsTyCorrect(constructor.GetTy())) {
+    if (!constructor.TestAttr(Attribute::ENUM_CONSTRUCTOR) || constructor.GetTy().IsCorrect()) {
         return;
     }
     if (constructor.astKind == ASTKind::VAR_DECL) {
@@ -485,7 +535,7 @@ void TypeChecker::TypeCheckerImpl::SetEnumEleTy(Decl& constructor)
         SetEnumEleTyHandleFuncDecl(*StaticAs<ASTKind::FUNC_DECL>(&constructor));
     } else {
         (void)diag.Diagnose(constructor, DiagKind::sema_invalid_constructor_in_enum);
-        constructor.SetTy(TypeManager::GetInvalidTy());
+        constructor.SetTy({TypeManager::GetInvalidTy()});
     }
 }
 
@@ -497,8 +547,8 @@ void TypeChecker::TypeCheckerImpl::CheckEnumFuncDeclIsCStructParam(const FuncDec
     }
     for (auto& it : funcDecl.funcBody->paramLists[0]->params) {
         // String type is special, we should solve this after.
-        if (it->GetTy() && Ty::IsCStructType(*it->GetTy())) {
-            auto structTy = RawStaticCast<StructTy*>(it->GetTy());
+        if (it->DataTy() && it->DataTy()->IsCStructType()) {
+            auto structTy = DynamicCast<StructTy*>(it->DataTy());
             CJC_ASSERT(structTy && structTy->declPtr);
             if (structTy->declPtr->identifier != "String" && funcDecl.outerDecl) {
                 (void)diag.Diagnose(funcDecl, DiagKind::sema_enum_pattern_func_param_cty_error,
@@ -512,12 +562,12 @@ void TypeChecker::TypeCheckerImpl::SetEnumEleTyHandleFuncDecl(FuncDecl& funcDecl
 {
     bool invalid = !funcDecl.outerDecl || !funcDecl.funcBody || funcDecl.funcBody->paramLists.empty();
     if (invalid) {
-        funcDecl.SetTy(TypeManager::GetInvalidTy());
+        funcDecl.SetTy({TypeManager::GetInvalidTy()});
         return;
     }
     // EnumDecl's func constructor must be 'CtorName(Type1, Type2...)'.
     // The target and type of parameters should be checked in 'ResolveName' stage.
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<ModalTy> paramTys;
     for (auto& param : funcDecl.funcBody->paramLists[0]->params) {
         if (!param->type) {
             continue;
@@ -527,8 +577,8 @@ void TypeChecker::TypeCheckerImpl::SetEnumEleTyHandleFuncDecl(FuncDecl& funcDecl
         paramTys.emplace_back(ty);
     }
     auto ctorTy = typeManager.GetFunctionTy(paramTys, funcDecl.outerDecl->GetTy());
-    funcDecl.funcBody->SetTy(ctorTy);
-    funcDecl.SetTy(ctorTy);
+    funcDecl.funcBody->SetTy({ctorTy});
+    funcDecl.SetTy({ctorTy});
     funcDecl.funcBody->retType = MakeOwned<RefType>();
     funcDecl.funcBody->retType->SetTy(ctorTy->retTy);
     funcDecl.funcBody->retType->begin = funcDecl.begin;
@@ -558,11 +608,11 @@ void TypeChecker::TypeCheckerImpl::CheckStructDecl(ASTContext& ctx, StructDecl& 
             (void)id->subDecls.insert(&sd);
         } else {
             // Can only implement interface. Set type to invalid (avoid invalid reference).
-            interfaceType->SetTy(TypeManager::GetInvalidTy());
+            interfaceType->SetTy({TypeManager::GetInvalidTy()});
             (void)diag.Diagnose(sd, DiagKind::sema_type_implement_non_interface, "struct", sd.identifier.Val());
         }
     }
-    if (sd.GetTy() && Ty::IsCStructType(*sd.GetTy())) {
+    if (sd.GetTy() && sd.GetTy()->IsCStructType()) {
         if (sd.generic) {
             (void)diag.Diagnose(
                 *sd.generic, sd.generic->leftAnglePos, DiagKind::sema_cffi_cannot_have_type_param, "struct with @C");
@@ -577,30 +627,30 @@ void TypeChecker::TypeCheckerImpl::CheckStructDecl(ASTContext& ctx, StructDecl& 
 }
 
 void TypeChecker::TypeCheckerImpl::GetRevTypeMapping(
-    std::vector<Ptr<Ty>>& params, std::vector<Ptr<Ty>>& args, MultiTypeSubst& revTyMap)
+    std::vector<ModalTy>& params, std::vector<ModalTy>& args, MultiTypeSubst& revTyMap)
 {
     if (args.size() != params.size()) {
         return;
     }
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == nullptr) {
+        if (!args[i]) {
             continue;
-        } else if (args[i]->kind == TypeKind::TYPE_GENERICS) {
-            revTyMap[RawStaticCast<GenericsTy*>(args[i])].emplace(params[i]);
-        } else if (auto decl = Ty::GetDeclPtrOfTy(args[i]); decl && Ty::IsTyCorrect(decl->GetTy())) {
-            GetRevTypeMapping(decl->GetTy()->typeArgs, args[i]->typeArgs, revTyMap);
+        } else if (args[i].Kind() == TypeKind::TYPE_GENERICS) {
+            revTyMap[StaticCast<GenericsTy*>(args[i].Ty())].emplace(params[i].Ty());
+        } else if (auto decl = Ty::GetDeclPtrOfTy(args[i].Ty()); decl && decl->GetTy().IsCorrect()) {
+            GetRevTypeMapping(decl->DataTy()->typeArgs, args[i]->typeArgs, revTyMap);
         }
     }
 }
 
-TypeSubst TypeChecker::TypeCheckerImpl::GetGenericTysToInstTysMapping(Ty& genericTy, Ty& instTy) const
+TypeSubst TypeChecker::TypeCheckerImpl::GetGenericTysToInstTysMapping(ModalTy genericTy, ModalTy instTy) const
 {
     TypeSubst map;
-    if (genericTy.typeArgs.size() > instTy.typeArgs.size()) {
+    if (genericTy->typeArgs.size() > instTy->typeArgs.size()) {
         return map;
     }
-    for (size_t i = 0; i < genericTy.typeArgs.size(); ++i) {
-        map.emplace(StaticCast<GenericsTy*>(genericTy.typeArgs[i]), instTy.typeArgs[i]);
+    for (size_t i = 0; i < genericTy->typeArgs.size(); ++i) {
+        map.emplace(StaticCast<GenericsTy*>(genericTy->typeArgs[i].Ty()), instTy->typeArgs[i].Ty());
     }
     return map;
 }
@@ -655,31 +705,31 @@ void TypeChecker::TypeCheckerImpl::CheckTypeAliasAccess(const TypeAliasDecl& tad
 }
 
 namespace {
-std::unordered_set<Ptr<Ty>> GetTyArgsRecursive(Ty& ty)
+std::unordered_set<ModalTy> GetTyArgsRecursive(ModalTy ty)
 {
-    std::unordered_set<Ptr<Ty>> tyArgSet;
-    if (!Ty::IsTyCorrect(&ty)) {
+    std::unordered_set<ModalTy> tyArgSet;
+    if (!ty.IsCorrect()) {
         return tyArgSet;
     }
-    for (auto& arg : ty.typeArgs) {
+    for (auto& arg : ty->typeArgs) {
         tyArgSet.insert(arg);
-        tyArgSet.merge(GetTyArgsRecursive(*arg));
+        tyArgSet.merge(GetTyArgsRecursive(arg));
     }
     return tyArgSet;
 }
 } // namespace
 
-std::vector<Ptr<Ty>> TypeChecker::TypeCheckerImpl::GetUnusedTysInTypeAlias(const TypeAliasDecl& tad) const
+std::vector<ModalTy> TypeChecker::TypeCheckerImpl::GetUnusedTysInTypeAlias(const TypeAliasDecl& tad) const
 {
-    std::vector<Ptr<Ty>> diffs;
-    if (!tad.generic || !tad.type || Ty::IsInitialTy(tad.type->GetTy())) {
+    std::vector<ModalTy> diffs;
+    if (!tad.generic || !tad.type || Ty::IsInitialTy(tad.type->DataTy())) {
         return diffs;
     }
-    std::vector<Ptr<Ty>> declTys; // Use vector to keep defined order.
+    std::vector<ModalTy> declTys; // Use vector to keep defined order.
     for (auto& param : tad.generic->typeParameters) {
         declTys.emplace_back(param->GetTy());
     }
-    auto usedTys = GetTyArgsRecursive(*tad.type->GetTy());
+    auto usedTys = GetTyArgsRecursive(tad.type->GetTy());
     for (auto ty : declTys) {
         if (usedTys.find(ty) == usedTys.end()) {
             diffs.emplace_back(ty);
@@ -695,15 +745,15 @@ void TypeChecker::TypeCheckerImpl::CheckTypeAlias(ASTContext& ctx, TypeAliasDecl
     }
     // Mark the current declaration is checked.
     tad.EnableAttr(Attribute::IS_CHECK_VISITED);
-    if (!tad.type || !Ty::IsTyCorrect(tad.type->GetTy())) {
+    if (!tad.type || !tad.type->GetTy().IsCorrect()) {
         return;
     }
     CheckTypeAliasAccess(tad);
     // Check type parameters which are not used
     if (tad.generic) {
-        std::vector<Ptr<Ty>> diffs = GetUnusedTysInTypeAlias(tad);
+        std::vector<ModalTy> diffs = GetUnusedTysInTypeAlias(tad);
         if (!diffs.empty()) {
-            diag.Diagnose(tad, DiagKind::typealias_unused_type_parameters, Ty::GetTypesToStr(diffs, ","));
+            diag.Diagnose(tad, DiagKind::typealias_unused_type_parameters, Ty::GetModalTypesToStr(diffs, ","));
         }
     }
     // NOTE: for incremental compile, the type may be marked as 'IS_CHECK_VISITED'.
@@ -712,41 +762,77 @@ void TypeChecker::TypeCheckerImpl::CheckTypeAlias(ASTContext& ctx, TypeAliasDecl
     }
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynFuncParam(ASTContext& ctx, FuncParam& fp)
+ModalTy TypeChecker::TypeCheckerImpl::SynFuncParam(ASTContext& ctx, FuncParam& fp)
 {
-    if (!fp.type && !Ty::IsTyCorrect(fp.GetTy())) {
-        return TypeManager::GetInvalidTy();
+    if (!fp.type && !fp.GetTy().IsCorrect()) {
+        return {TypeManager::GetInvalidTy()};
     }
     if (fp.type) {
         Synthesize({ctx, SynPos::NONE}, fp.type.get());
-        if (!Ty::IsTyCorrect(fp.type->GetTy())) {
+        if (!fp.type->GetTy().IsCorrect()) {
             Synthesize({ctx, SynPos::EXPR_ARG}, fp.assignment.get()); // If fp has assignment, synthesize to report error.
-            return TypeManager::GetInvalidTy();
+            return {TypeManager::GetInvalidTy()};
         }
         fp.SetTy(fp.type->GetTy());
     }
     if (fp.assignment) {
         if (!Check(ctx, fp.GetTy(), fp.assignment.get())) {
-            return TypeManager::GetInvalidTy();
+            return {TypeManager::GetInvalidTy()};
         }
         Synthesize({ctx, SynPos::EXPR_ARG}, fp.desugarDecl.get());
     }
     return fp.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkFuncParam(ASTContext& ctx, Ty& target, FuncParam& fp)
+ModalTy TypeChecker::TypeCheckerImpl::SynThisParam(ASTContext& ctx, ThisParam& tp)
 {
-    if (fp.GetTy() && fp.GetTy() == &target) {
+    auto cl = ScopeManager::GetCurSymbolByKind(SymbolKind::STRUCT, ctx, tp.scopeName);
+    if (!cl || !cl->node->GetTy()) {
+        tp.SetTy({TypeManager::GetInvalidTy()});
+        return tp.GetTy();
+    }
+    auto modalInfo = tp.modal.ToModalInfo();
+    ModalTy ty = cl->node->GetTy();
+    switch (ty->kind) {
+        case TypeKind::TYPE_CLASS: {
+            auto classTy = StaticCast<ClassTy>(ty.Ty());
+            tp.SetTy({typeManager.GetClassThisTy(*classTy->decl, classTy->TyArgs()), modalInfo});
+            return tp.GetTy();
+        }
+        case TypeKind::TYPE_STRUCT: {
+            auto structTy = StaticCast<StructTy>(ty.Ty());
+            tp.SetTy({typeManager.GetStructTy(*structTy->declPtr, structTy->TyArgs()), modalInfo});
+            return tp.GetTy();
+        }
+        case TypeKind::TYPE_ENUM: {
+            auto enumTy = StaticCast<EnumTy>(ty.Ty());
+            tp.SetTy({typeManager.GetEnumTy(*enumTy->declPtr, enumTy->TyArgs()), modalInfo});
+            return tp.GetTy();
+        }
+        case TypeKind::TYPE_INTERFACE: {
+            auto interfTy = StaticCast<InterfaceTy>(ty.Ty());
+            tp.SetTy({typeManager.GetInterfaceTy(*interfTy->declPtr, interfTy->TyArgs()), modalInfo});
+            return tp.GetTy();
+        }
+        default:
+            tp.SetTy(ty.With(modalInfo));
+            return tp.GetTy();
+    }
+}
+
+bool TypeChecker::TypeCheckerImpl::ChkFuncParam(ASTContext& ctx, ModalTy target, FuncParam& fp)
+{
+    if (fp.GetTy() && fp.GetTy() == target) {
         return true;
     }
     if (fp.type) {
         Synthesize({ctx, SynPos::NONE}, fp.type.get());
-        if (!Ty::IsTyCorrect(fp.type->GetTy())) {
+        if (!fp.type->GetTy().IsCorrect()) {
             return false;
         }
         fp.SetTy(fp.type->GetTy());
         // Check type compatibility.
-        if (!typeManager.IsSubtype(&target, fp.type->GetTy())) {
+        if (!typeManager.IsSubtype(target, fp.type->GetTy())) {
             DiagMismatchedTypes(diag, fp, target);
             return false;
         }
@@ -757,7 +843,7 @@ bool TypeChecker::TypeCheckerImpl::ChkFuncParam(ASTContext& ctx, Ty& target, Fun
             Synthesize({ctx, SynPos::NONE}, fp.desugarDecl.get());
         }
     } else {
-        fp.SetTy(&target);
+        fp.SetTy(target);
     }
     return true;
 }

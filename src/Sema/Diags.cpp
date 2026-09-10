@@ -33,7 +33,7 @@ using namespace AST;
 using namespace TypeCheckUtil;
 
 namespace {
-std::string GetParamsType(const std::vector<Ptr<Ty>>& typeList)
+std::string GetParamsType(const std::vector<ModalTy>& typeList)
 {
     std::string result = "(";
     for (auto& ty : typeList) {
@@ -48,7 +48,7 @@ std::string GetParamsType(const std::vector<Ptr<Ty>>& typeList)
 }
 
 void DiagWrongNumberOfArgumentsCommon(
-    DiagnosticEngine& diag, const CallExpr& ce, const std::vector<Ptr<Ty>>& paramTys, Ptr<const FuncDecl> fd)
+    DiagnosticEngine& diag, const CallExpr& ce, const std::vector<ModalTy>& paramTys, Ptr<const FuncDecl> fd)
 {
     auto expectedNum = paramTys.size();
     auto foundNum = ce.args.size();
@@ -71,7 +71,15 @@ void DiagWrongNumberOfArgumentsCommon(
         DiagKindRefactor::sema_wrong_number_of_arguments, ce, MakeRange(beginPos, endPos), symptom, lst);
     builder.AddMainHintArguments(expected, std::to_string(foundNum));
     if (fd != nullptr && fd->ShouldDiagnose()) {
-        builder.AddNote(*fd, MakeRange(fd->identifier), "found candidate");
+        if (fd->outerDecl != nullptr && fd->outerDecl->IsBuiltIn()) {
+            if (beginPos.IsZero()) {
+                builder.AddNote(std::string("found candidate: ") + fd->GetTy().String());
+            } else {
+                builder.AddNote(beginPos, std::string("found candidate: ") + fd->GetTy().String());
+            }
+        } else {
+            builder.AddNote(*fd, MakeRange(fd->identifier), "found candidate");
+        }
     } else if (fd == nullptr) {
         Ptr<const Decl> target = ce.baseFunc->GetTarget();
         if (target == nullptr) {
@@ -234,6 +242,14 @@ void DiagOverloadConflict(DiagnosticEngine& diag, const std::vector<Ptr<FuncDecl
     }
 }
 
+DiagnosticBuilder DiagSemaMismatchedTypes(
+    DiagnosticEngine& diag, const Node& node, const std::string& expected, const std::string& found)
+{
+    auto db = diag.DiagnoseRefactor(DiagKindRefactor::sema_mismatched_types, node);
+    db.AddMainHintArguments(expected, found);
+    return db;
+}
+
 void DiagMismatchedTypesWithFoundTy(DiagnosticEngine& diag, const Node& node, const std::string& expected,
     const std::string& found, const std::string& note)
 {
@@ -241,36 +257,39 @@ void DiagMismatchedTypesWithFoundTy(DiagnosticEngine& diag, const Node& node, co
         return;
     }
     CJC_ASSERT(expected != found);
-    auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_mismatched_types, node);
-    builder.AddMainHintArguments(expected, found);
+    auto builder = DiagSemaMismatchedTypes(diag, node, expected, found);
     if (!note.empty()) {
         builder.AddNote(note);
     }
 }
 
 void DiagMismatchedTypesWithFoundTy(
-    DiagnosticEngine& diag, const Node& node, const Ty& expected, const Ty& found, const std::string& note)
+    DiagnosticEngine& diag, const Node& node, ModalTy expected, ModalTy found, const std::string& note)
 {
     if (!node.ShouldDiagnose(true)) {
         return;
     }
-    CJC_ASSERT(Ty::IsTyCorrect(&expected));
-    CJC_ASSERT(Ty::IsTyCorrect(&found));
+    CJC_ASSERT(&expected != &found);
+    CJC_ASSERT(expected.IsCorrect());
+    CJC_ASSERT(found.IsCorrect());
     std::string expectedStr = expected.String();
     std::string foundStr = found.String();
     if (expectedStr == foundStr) {
-        auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_mismatched_types, node);
-        Ptr<Decl> expectedDecl = Ty::GetDeclPtrOfTy(&expected);
+        Ptr<Decl> expectedDecl = Ty::GetDeclPtrOfTy(expected);
         if (expectedDecl) {
             expectedStr += "' in '" + expectedDecl->fullPackageName;
-            builder.AddNote(*expectedDecl, MakeRangeForDeclIdentifier(*expectedDecl), "'" + expectedStr + "'");
         }
-        Ptr<Decl> foundDecl = Ty::GetDeclPtrOfTy(&found);
+        Ptr<Decl> foundDecl = Ty::GetDeclPtrOfTy(found);
         if (foundDecl) {
             foundStr += "' in '" + foundDecl->fullPackageName;
+        }
+        auto builder = DiagSemaMismatchedTypes(diag, node, expectedStr, foundStr);
+        if (expectedDecl) {
+            builder.AddNote(*expectedDecl, MakeRangeForDeclIdentifier(*expectedDecl), "'" + expectedStr + "'");
+        }
+        if (foundDecl) {
             builder.AddNote(*foundDecl, MakeRangeForDeclIdentifier(*foundDecl), "'" + foundStr + "'");
         }
-        builder.AddMainHintArguments(expectedStr, foundStr);
         if (!note.empty()) {
             builder.AddNote(note);
         }
@@ -279,43 +298,44 @@ void DiagMismatchedTypesWithFoundTy(
     }
 }
 
-void DiagMismatchedTypes(DiagnosticEngine& diag, const Node& node, const Ty& type, const std::string& note)
+void DiagMismatchedTypes(DiagnosticEngine& diag, const Node& node, ModalTy type, const std::string& note)
 {
-    if (!Ty::IsTyCorrect(node.GetTy())) {
+    if (!node.GetTy().IsCorrect()) {
         return; // Should have been diagnosed before.
     }
-    DiagMismatchedTypesWithFoundTy(diag, node, type, *node.GetTy(), note);
+    DiagMismatchedTypesWithFoundTy(diag, node, type, node.GetTy(), note);
 }
 
 void DiagMismatchedTypes(DiagnosticEngine& diag, const Node& node, const Node& type, const std::string& because)
 {
-    if (!Ty::IsTyCorrect(node.GetTy())) {
+    if (!node.GetTy().IsCorrect()) {
         return; // Should have been diagnosed before.
     }
-    CJC_ASSERT(Ty::IsTyCorrect(type.GetTy()));
+    CJC_ASSERT(type.GetTy().IsCorrect());
     if (type.ShouldDiagnose() && !because.empty()) {
         auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_mismatched_types_because, node);
-        auto tyStr = node.GetTy()->String();
-        if (auto thisTy = DynamicCast<ClassThisTy*>(node.GetTy()); thisTy) {
-            tyStr = ClassTy(thisTy->name, *thisTy->declPtr, thisTy->typeArgs).String();
+        auto tyStr = node.GetTy().String();
+        if (auto thisTy = DynamicCast<ClassThisTy*>(node.DataTy()); thisTy) {
+            ClassTy r(thisTy->name, *thisTy->declPtr, thisTy->TyArgs());
+            tyStr = ModalTy{&r, node.TyMode()}.String();
         }
-        builder.AddMainHintArguments(type.GetTy()->String(), tyStr);
-        builder.AddHint(type, type.GetTy()->String(), because);
+        builder.AddMainHintArguments(type.GetTy().String(), tyStr);
+        builder.AddHint(type, type.GetTy().String(), because);
     } else {
-        DiagMismatchedTypesWithFoundTy(diag, node, *type.GetTy(), *node.GetTy());
+        DiagMismatchedTypesWithFoundTy(diag, node, type.GetTy(), node.GetTy());
     }
 }
 
 void DiagUnableToInferReturnType(DiagnosticEngine& diag, const FuncDecl& fd)
 {
-    if (Ty::IsTyCorrect(fd.GetTy())) {
+    if (fd.GetTy().IsCorrect()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_unable_to_infer_return_type, fd, MakeRange(fd.identifier));
     }
 }
 
 void DiagUnableToInferReturnType(DiagnosticEngine& diag, const FuncDecl& fd, const Expr& expr)
 {
-    if (Ty::IsTyCorrect(fd.GetTy())) {
+    if (fd.GetTy().IsCorrect()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_unable_to_infer_return_type, fd, MakeRange(fd.identifier))
             .AddNote(expr, MakeRange(expr.begin, expr.end), "with recursive usage from");
     }
@@ -330,7 +350,7 @@ void DiagUnableToInferReturnType(DiagnosticEngine& diag, const FuncBody& fb)
     }
 }
 
-void DiagWrongNumberOfArguments(DiagnosticEngine& diag, const CallExpr& ce, const std::vector<Ptr<Ty>>& paramTys)
+void DiagWrongNumberOfArguments(DiagnosticEngine& diag, const CallExpr& ce, const std::vector<ModalTy>& paramTys)
 {
     if (!ce.ShouldDiagnose(true)) {
         return;
@@ -347,7 +367,7 @@ void DiagWrongNumberOfArguments(DiagnosticEngine& diag, const CallExpr& ce, cons
     CJC_ASSERT(!fd.funcBody->paramLists.empty());
     CJC_NULLPTR_CHECK(fd.funcBody->paramLists.front());
     auto& params = fd.funcBody->paramLists.front()->params;
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<ModalTy> paramTys;
     std::transform(params.cbegin(), params.cend(), std::back_inserter(paramTys),
         [](auto& param) { return param->type == nullptr ? param->GetTy() : param->type->GetTy(); });
     DiagWrongNumberOfArgumentsCommon(diag, ce, paramTys, &fd);
@@ -400,8 +420,13 @@ void DiagImmutableAccessMutableFunc(DiagnosticEngine& diag, const MemberAccess& 
 // `ae` can be `AssignExpr` or `IncOrDecExpr`.
 void DiagCannotAssignToImmutable(DiagnosticEngine& diag, const Expr& ae, const Expr& perpetrator)
 {
-    auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_cannot_assign_to_immutable, ae);
     auto target = perpetrator.GetTarget();
+    // fix later: immut prop set would diag twice
+    // if disable immut prop set here, set of immut prop call result would not diag
+    // if disable immut prop set at the other place, the results would be strange because that place is in TypeCheck,
+    // but it is PostCheck here. old logic assume prop is always mutable and check later here, but with modal type
+    // prop undergoes overload resolution and must be done in TypeCheck.
+    auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_cannot_assign_to_immutable, ae);
     if (target != nullptr && !target->identifier.ZeroPos()) {
         builder.AddNote(*target, MakeRange(target->identifier),
             DeclKindToString(*target) + " '" + target->identifier + "' is immutable");
@@ -410,6 +435,7 @@ void DiagCannotAssignToImmutable(DiagnosticEngine& diag, const Expr& ae, const E
             perpetrator, MakeRange(perpetrator.begin, perpetrator.end), "function call returns immutable value");
     }
 }
+
 // Common 'let' feild can not be assigned in constructor in common CLASS or STRUCT
 void DiagCJMPCannotAssignToImmutableCommonInCtor(DiagnosticEngine& diag, const Expr& ae, const Expr& perpetrator)
 {
@@ -518,7 +544,7 @@ std::string GetNoteMessageForMemberDecl(const Decl& target)
     if (target.outerDecl->astKind == ASTKind::EXTEND_DECL) {
         ret += "extended ";
     }
-    ret += DeclKindToString(target) + " member of '" + target.outerDecl->GetTy()->String() + "'";
+    ret += DeclKindToString(target) + " member of '" + target.outerDecl->GetTy().String() + "'";
     return ret;
 }
 } // namespace
@@ -575,16 +601,16 @@ void DiagLowerAccessLevelTypesUse(DiagnosticEngine& diag, const Decl& outDecl,
         : GetAccessLevelStr(limitedDecls.empty() ? *hintDecls.front().get() : limitedDecls.front().second, "'");
     auto builder = diag.DiagnoseRefactor(kind, outDecl, range, GetAccessLevelStr(outDecl), lowerLevelStr);
 
-    if (!noHint && Ty::IsTyCorrect(outDecl.GetTy())) {
+    if (!noHint && outDecl.GetTy().IsCorrect()) {
         builder.AddMainHintArguments("inferred type",
-            outDecl.GetTy()->IsFunc() ? Ty::ToString(StaticCast<FuncTy*>(outDecl.GetTy())->retTy)
-                                      : Ty::ToString(outDecl.GetTy()),
+            outDecl.GetTy()->IsFunc() ? StaticCast<FuncTy*>(outDecl.DataTy())->retTy.String()
+                                      : outDecl.GetTy().String(),
             lowerLevelStr);
         for (const auto& hintDecl : hintDecls) {
             CJC_ASSERT(hintDecl);
             auto inDeclRange = MakeRangeForDeclIdentifier(*hintDecl);
             builder.AddNote(*hintDecl, inDeclRange,
-                "the " + GetAccessLevelStr(*hintDecl, "'") + " type is '" + Ty::ToString(hintDecl->GetTy()) + "'");
+                "the " + GetAccessLevelStr(*hintDecl, "'") + " type is '" + hintDecl->GetTy().String() + "'");
         }
     }
     for (const auto& [node, decl] : limitedDecls) {
@@ -592,10 +618,10 @@ void DiagLowerAccessLevelTypesUse(DiagnosticEngine& diag, const Decl& outDecl,
         if (!node.begin.IsZero() && !node.end.IsZero()) {
             auto typeRange = MakeRange(node.begin, node.end);
             builder.AddNote(
-                node, typeRange, "type '" + Ty::ToString(node.GetTy()) + "' contains " + usedVisibility + " type");
+                node, typeRange, "type '" + node.GetTy().String() + "' contains " + usedVisibility + " type");
         }
         auto inDeclRange = MakeRangeForDeclIdentifier(decl);
-        builder.AddNote(decl, inDeclRange, "the " + usedVisibility + " type is '" + Ty::ToString(decl.GetTy()) + "'");
+        builder.AddNote(decl, inDeclRange, "the " + usedVisibility + " type is '" + decl.GetTy().String() + "'");
     }
 }
 
@@ -609,10 +635,9 @@ void DiagPatternInternalTypesUse(DiagnosticEngine& diag, const std::vector<std::
             auto range = MakeRange(node.begin, node.end);
             auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_accessibility_with_main_hint, node, range,
                 GetAccessLevelStr(node), usedVisibility);
-            builder.AddMainHintArguments("inferred type", Ty::ToString(node.GetTy()), usedVisibility);
+            builder.AddMainHintArguments("inferred type", node.GetTy().String(), usedVisibility);
             auto inDeclRange = MakeRangeForDeclIdentifier(used);
-            builder.AddNote(
-                used, inDeclRange, "the " + usedVisibility + " type is '" + Ty::ToString(used.GetTy()) + "'");
+            builder.AddNote(used, inDeclRange, "the " + usedVisibility + " type is '" + used.GetTy().String() + "'");
         }
     }
 }
@@ -690,7 +715,7 @@ void DiagNeedNamedArgument(
     diag.DiagnoseRefactor(DiagKindRefactor::sema_need_named_argument, *ce.args[argPos], expectedPrefix);
 }
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-void DiagForStaticVariableDependsGeneric(DiagnosticEngine& diag, const Node& node, const std::set<Ptr<Ty>>& targetTys)
+void DiagForStaticVariableDependsGeneric(DiagnosticEngine& diag, const Node& node, const std::set<DataTy>& targetTys)
 {
     if (targetTys.empty()) {
         return;
@@ -710,7 +735,7 @@ void DiagForStaticVariableDependsGeneric(DiagnosticEngine& diag, const Node& nod
 void RecommendImportForMemberAccess(TypeManager& typeManager, const ImportManager& importManager,
     const MemberAccess& ma, const Ptr<DiagnosticBuilder> builder)
 {
-    if (ma.baseExpr == nullptr || !Ty::IsTyCorrect(ma.baseExpr->GetTy())) {
+    if (ma.baseExpr == nullptr || !ma.baseExpr->GetTy().IsCorrect()) {
         return;
     }
 

@@ -462,7 +462,7 @@ llvm::Value* CPointerRead(IRBuilder2& irBuilder, const CHIR::IntrinsicBase& intr
     if (retTy->IsGeneric()) {
         auto tiOfResult = irBuilder.CreateTypeInfo(retTy);
         auto retTySize = irBuilder.GetLayoutSize_32(*retTy);
-        ret = irBuilder.CallIntrinsicAllocaGeneric({tiOfResult, retTySize});
+        ret = irBuilder.CallIntrinsicAllocaGeneric({tiOfResult, retTySize}, retTy->IsLocalRegion());
         auto destPayloadPtr = irBuilder.GetPayloadFromObject(ret);
         auto fixedTypeSize = irBuilder.CreateZExtOrTrunc(retTySize, llvm::Type::getInt64Ty(cgMod.GetLLVMContext()));
         auto offset = irBuilder.CreateMul(fixedTypeSize, pointerIndex);

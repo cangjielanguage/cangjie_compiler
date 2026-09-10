@@ -552,7 +552,8 @@ void ReplaceFunction(CGModule& cgMod)
         auto thisParamTypeInfo = irBuilder.CreateTypeInfo(thisCHIRType);
         auto size32 = irBuilder.GetLayoutSize_32(*thisCHIRType);
         auto size64 = irBuilder.CreateSExt(size32, irBuilder.getInt64Ty());
-        auto thisParamWithTI = irBuilder.CallIntrinsicAllocaGeneric({thisParamTypeInfo, size32});
+        auto thisParamWithTI =
+            irBuilder.CallIntrinsicAllocaGeneric({thisParamTypeInfo, size32}, thisCHIRType->IsLocalRegion());
         argsVal[thisParamOffset] = thisParamWithTI;
         /// step3: store `this` without TypeInfo to the memory allocated by step2
         auto payloadPtr = irBuilder.GetPayloadFromObject(thisParamWithTI);

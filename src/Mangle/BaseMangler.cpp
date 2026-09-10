@@ -171,6 +171,68 @@ std::string DecimalToManglingNumber(const std::string& decimal)
     }
     return base62 + MANGLE_WILDCARD_PREFIX;
 }
+
+std::string MangleModePayload(ModalInfo modal)
+{
+    // Fixed axis order: local -> unique -> immutable. Only the local axis is implemented.
+    // axis-degree: uppercase letter = FULL (!), lowercase = HALF (?); NOT emits nothing.
+    std::string payload;
+    switch (modal.local) {
+        case Mode::NOT:
+            break;
+        case Mode::HALF:
+            payload += "l";
+            break;
+        case Mode::FULL:
+            payload += "L";
+            break;
+        default:
+            CJC_ABORT();
+    }
+    return payload;
+}
+
+std::string MangleTypeMode(ModalInfo modal)
+{
+    std::string payload = MangleModePayload(modal);
+    if (payload.empty()) {
+        return "";
+    }
+    return MANGLE_TYPE_MODE_PREFIX + payload + MANGLE_SUFFIX;
+}
+
+std::string MangleTypeMode(CHIR::ModalInfo modal)
+{
+    // Fixed axis order: local -> unique -> immutable. Only the local axis is implemented.
+    // axis-degree: uppercase letter = MUST (!), lowercase = MAYBE (?); NONE emits nothing.
+    std::string payload;
+    switch (modal.Local()) {
+        case CHIR::Mode::NONE:
+            break;
+        case CHIR::Mode::MAYBE:
+            payload += "l";
+            break;
+        case CHIR::Mode::MUST:
+            payload += "L";
+            break;
+        default:
+            CJC_ASSERT(false && "unexpected modal to be mangled");
+            return "";
+    }
+    if (payload.empty()) {
+        return "";
+    }
+    return MANGLE_TYPE_MODE_PREFIX + payload + MANGLE_SUFFIX;
+}
+
+std::string MangleThisMode(ModalInfo modal)
+{
+    std::string payload = MangleModePayload(modal);
+    if (payload.empty()) {
+        return "";
+    }
+    return MANGLE_THIS_MODE_PREFIX + payload + MANGLE_SUFFIX;
+}
 } // namespace MangleUtils
 
 std::string BaseMangler::MangleFullPackageName(const std::string& packageName) const
@@ -198,7 +260,7 @@ std::string BaseMangler::MangleFullPackageName(const AST::Decl& decl) const
     return MangleFullPackageName(decl.GetFullPackageName());
 }
 
-std::string BaseMangler::GetPrefixOfType(const AST::Ty& ty) const
+std::string BaseMangler::GetPrefixOfType(const Ty& ty) const
 {
     switch (ty.kind) {
         case TypeKind::TYPE_ENUM: {
@@ -218,16 +280,16 @@ std::string BaseMangler::GetPrefixOfType(const AST::Ty& ty) const
     }
 }
 
-std::string BaseMangler::MangleUserDefinedType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack,
-    bool declare, bool isCollectGTy) const
+std::string BaseMangler::MangleUserDefinedType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
 {
     static const std::set<TypeKind> SUPPORT_TYS = {
         TypeKind::TYPE_ENUM, TypeKind::TYPE_STRUCT, TypeKind::TYPE_CLASS, TypeKind::TYPE_INTERFACE};
-    if (SUPPORT_TYS.find(ty.kind) == SUPPORT_TYS.end()) {
+    if (SUPPORT_TYS.find(ty.Kind()) == SUPPORT_TYS.end()) {
         CJC_ASSERT(false && "unexpected type to be mangled");
         return "";
     }
-    auto decl = Ty::GetDeclOfTy(&ty);
+    auto decl = Ty::GetDeclOfTy(ty.Ty());
     CJC_NULLPTR_CHECK(decl);
     if (MangleUtils::IsAutoBoxedBaseDecl(*decl)) {
         return decl->mangledName;
@@ -235,7 +297,7 @@ std::string BaseMangler::MangleUserDefinedType(const AST::Ty& ty, std::vector<st
     // Re-mangle a ty is to make different versions of instantiation have the same type. Therefore, remove the package
     // name where the generic is instantiated, and ignore the package where extend behavior occurs rather than use its
     // decl's `mangledName`.
-    auto mangledName = GetPrefixOfType(ty) + MANGLE_NESTED_PREFIX;
+    auto mangledName = GetPrefixOfType(*ty) + MANGLE_NESTED_PREFIX;
     std::string genericPkgName = ManglePackageNameForGeneric(*decl);
     mangledName += genericPkgName.empty() ? MangleFullPackageName(*decl) : genericPkgName;
     if (decl->TestAttr(Attribute::PRIVATE) && decl->linkage == Linkage::INTERNAL) {
@@ -248,49 +310,54 @@ std::string BaseMangler::MangleUserDefinedType(const AST::Ty& ty, std::vector<st
     if (decl->GetGeneric()) {
         mangledName += MANGLE_GENERIC_PREFIX;
     }
-    for (auto arg : ty.typeArgs) {
-        mangledName += MangleType(*arg, genericsTypeStack, declare, isCollectGTy);
+    for (auto arg : ty->typeArgs) {
+        mangledName += MangleType(arg, genericsTypeStack, declare, isCollectGTy);
     }
     mangledName += MANGLE_SUFFIX;
-    return mangledName;
+    return MangleUtils::WithModal(mangledName, ty.Mode());
 }
 
-std::string BaseMangler::MangleType(const AST::Ty& ty) const
+std::string BaseMangler::MangleType(ModalTy ty) const
 {
     std::vector<std::string> genericsTypeStack;
     return MangleType(ty, genericsTypeStack, true);
 }
 
-std::string BaseMangler::MangleType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack,
-    bool declare, bool isCollectGTy) const
+std::string BaseMangler::MangleType(const Ty& ty) const
 {
-    if (MangleUtils::PRIMITIVE_TYPE_MANGLE.count(ty.kind) != 0) {
-        return MangleUtils::PRIMITIVE_TYPE_MANGLE.at(ty.kind);
+    return MangleType(ModalTy{DataTy(const_cast<Ty*>(&ty))});
+}
+
+std::string BaseMangler::MangleType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
+{
+    if (MangleUtils::PRIMITIVE_TYPE_MANGLE.count(ty.Kind()) != 0) {
+        return MangleUtils::WithModal(MangleUtils::PRIMITIVE_TYPE_MANGLE.at(ty.Kind()), ty.Mode());
     }
 
-    if (ty.kind == TypeKind::TYPE_GENERICS) {
+    if (ty.Kind() == TypeKind::TYPE_GENERICS) {
         if (declare || isCollectGTy) {
             return MangleGenericType(ty, genericsTypeStack, declare);
         } else {
             return MangleGenericType(ty);
         }
-    } else if (ty.kind == TypeKind::TYPE_POINTER) {
+    } else if (ty.Kind() == TypeKind::TYPE_POINTER) {
         return MangleCPointerType(ty, genericsTypeStack, declare, isCollectGTy);
-    } else if (ty.kind == TypeKind::TYPE_ENUM) {
+    } else if (ty.Kind() == TypeKind::TYPE_ENUM) {
         return MangleEnumType(ty, genericsTypeStack, declare, isCollectGTy);
-    } else if (ty.kind == TypeKind::TYPE_ARRAY) {
+    } else if (ty.Kind() == TypeKind::TYPE_ARRAY) {
         return MangleRawArrayType(ty, genericsTypeStack, declare, isCollectGTy);
-    } else if (ty.kind == TypeKind::TYPE_VARRAY) {
+    } else if (ty.Kind() == TypeKind::TYPE_VARRAY) {
         return MangleVArrayType(ty, genericsTypeStack, declare, isCollectGTy);
-    } else if (ty.kind == TypeKind::TYPE_TUPLE) {
+    } else if (ty.Kind() == TypeKind::TYPE_TUPLE) {
         return MangleTupleType(ty, genericsTypeStack, declare, isCollectGTy);
-    } else if (ty.kind == TypeKind::TYPE_FUNC) {
+    } else if (ty.Kind() == TypeKind::TYPE_FUNC) {
         return MangleFuncType(ty, genericsTypeStack, declare, isCollectGTy);
-    } else if (ty.kind == TypeKind::TYPE_STRUCT || ty.kind == TypeKind::TYPE_INTERFACE ||
-        ty.kind == TypeKind::TYPE_CLASS) {
+    } else if (ty.Kind() == TypeKind::TYPE_STRUCT || ty.Kind() == TypeKind::TYPE_INTERFACE ||
+        ty.Kind() == TypeKind::TYPE_CLASS) {
         return MangleUserDefinedType(ty, genericsTypeStack, declare, isCollectGTy);
-    } else if (ty.kind == TypeKind::TYPE_CSTRING) {
-        return MangleCStringType();
+    } else if (ty.Kind() == TypeKind::TYPE_CSTRING) {
+        return MangleCStringType(ty);
     }
     return "";
 }
@@ -299,7 +366,7 @@ std::string BaseMangler::MangleGenericArgumentsHelper(const Decl& decl, std::vec
     bool declare, bool isCollectGTy) const
 {
     std::string mangled;
-    std::vector<Ptr<Ty>> args;
+    std::vector<ModalTy> args;
 
     if (decl.GetTy() && !decl.GetTy()->IsFunc()) {
         args = decl.GetTy()->typeArgs;
@@ -316,7 +383,7 @@ std::string BaseMangler::MangleGenericArgumentsHelper(const Decl& decl, std::vec
     }
     mangled += MANGLE_GENERIC_PREFIX;
     for (auto it : args) {
-        mangled += MangleType(*it, genericsTypeStack, declare, isCollectGTy);
+        mangled += MangleType(it, genericsTypeStack, declare, isCollectGTy);
     }
     return mangled;
 }
@@ -558,10 +625,25 @@ std::string BaseMangler::MangleFunctionDecl(const FuncDecl& funcDecl, const std:
         std::string mangledOwnerFunc = MangleDecl(funcDecl, newPrefix, genericsTypeStack, true, true);
         mangled += MANGLE_CANGJIE_PREFIX + MANGLE_FUNC_PARA_INIT_PREFIX +
             mangledOwnerFunc.substr(mangledPrefix.size(), mangledOwnerFunc.size() - mangledPrefix.size() - 1);
-        mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX;
     } else {
         mangled = MangleDecl(funcDecl, prefix, genericsTypeStack, true, false);
-        mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX;
+    }
+    mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX;
+    // Add local modal mangling for instance member functions with local thisParam.
+    // Check if it's an instance member function (has thisParam and not static).
+    // <this-mode> (W<payload>E) is emitted right after `H`, before the explicit params.
+    if (!funcDecl.TestAttr(Attribute::STATIC) && funcDecl.funcBody) {
+        auto& paramList = funcDecl.funcBody->paramLists[0];
+        if (paramList->thisParam) {
+            auto modalInfo = paramList->thisParam->modal.ToModalInfo();
+            mangled += MangleUtils::MangleThisMode(modalInfo);
+        } else if (funcDecl.propDecl != nullptr) {
+            // Accessor (getter/setter) no longer carries an explicit thisParam; its this-modal
+            // is the modal of the owning property's type.
+            auto propTy = funcDecl.propDecl->type ? funcDecl.propDecl->type->GetTy()
+                : funcDecl.propDecl->GetTy();
+            mangled += MangleUtils::MangleThisMode(propTy.Mode());
+        }
     }
 
     // Mangle function parameters.
@@ -614,7 +696,8 @@ std::string BaseMangler::MangleDecl(const Decl& decl, const std::vector<Ptr<Node
             if (decl.astKind == ASTKind::GENERIC_PARAM_DECL && decl.outerDecl &&
                 decl.outerDecl->TestAnyAttr(Attribute::COMMON, Attribute::SPECIFIC) &&
                 decl.outerDecl->TestAttr(Attribute::GENERIC)) {
-                auto genericsTy = StaticCast<const GenericsTy*>(decl.GetTy());
+                // safe here because a generic param decl itself cannot have modal type
+                auto genericsTy = StaticCast<const GenericsTy*>(decl.DataTy());
                 auto result = std::find_if(genericsTypeStack.rbegin(), genericsTypeStack.rend(),
                     [&genericsTy](const std::string& name) { return name == genericsTy->name; });
                 auto index = static_cast<size_t>(std::distance(result, genericsTypeStack.rend())) - MANGLE_CHAR_LEN;
@@ -647,7 +730,7 @@ std::string BaseMangler::MangleExtendEntity(const AST::ExtendDecl& extendDecl,
     CJC_NULLPTR_CHECK(extendDecl.extendedType);
     CJC_NULLPTR_CHECK(extendDecl.extendedType->GetTy());
     std::string mangled;
-    mangled += MANGLE_EXTEND_PREFIX + MangleType(*extendDecl.extendedType->GetTy(), genericsTypeStack, declare);
+    mangled += MANGLE_EXTEND_PREFIX + MangleType(extendDecl.extendedType->GetTy(), genericsTypeStack, declare);
     auto ctx = manglerCtxTable.find(ManglerContext::ReduceUnitTestPackageName(extendDecl.fullPackageName));
     CJC_ASSERT(ctx != manglerCtxTable.end());
     std::string fileName = extendDecl.curFile->fileName;
@@ -704,7 +787,7 @@ std::string BaseMangler::ManglePrefix(const Node& node, const std::vector<Ptr<No
                 if (isExtend) {
                     mangled += MangleExtendEntity(decl, genericsTypeStack, declare);
                 } else {
-                    mangled += MANGLE_EXTEND_PREFIX + MangleType(*decl.extendedType->GetTy(), genericsTypeStack, true);
+                    mangled += MANGLE_EXTEND_PREFIX + MangleType(decl.extendedType->GetTy(), genericsTypeStack, true);
                 }
                 break;
             }
@@ -973,7 +1056,7 @@ void BaseMangler::MangleExportId(Package& pkg)
     exportIdMode = true;
     Walker(&pkg, [this](auto node) {
         if (auto decl = DynamicCast<Decl*>(node);
-            decl && Ty::IsTyCorrect(decl->GetTy()) && decl->TestAttr(Attribute::GLOBAL)) {
+            decl && decl->GetTy().IsCorrect() && decl->TestAttr(Attribute::GLOBAL)) {
             // Only global decl and member decls that may be referenced from other package need exportId!
             // NOTE: For cjo's compatibility of different version, the exportId must be decl's signature.
             //       ExtendDecl itself does not need exportId, but it's member needs.
@@ -1002,7 +1085,11 @@ std::string BaseMangler::MangleExportId(Decl& decl) const
             auto mangleExport = [this](auto& it) { it->exportId = Mangle(*it); };
             std::for_each(propDecl.getters.begin(), propDecl.getters.end(), mangleExport);
             std::for_each(propDecl.setters.begin(), propDecl.setters.end(), mangleExport);
-            return Mangle(propDecl);
+            // For modal-overloaded properties (multiple same-name PropDecl with different modal
+            // on the prop type), include the modal so the PropDecl-level exportId stays unique.
+            // <prop-decl-export-id> ::= <path><prop-name>[<mode-set>] (type-mode, leader Q).
+            auto propTy = propDecl.type ? propDecl.type->GetTy() : propDecl.GetTy();
+            return Mangle(propDecl) + MangleUtils::MangleTypeMode(propTy.Mode());
         },
         [](const PrimaryCtorDecl& /* primaryCtorDecl */) { return std::string(); },
         [&decl, this]() {
@@ -1026,7 +1113,7 @@ void BaseMangler::MangleExportIdForGenericParamDecl(const Decl& decl) const
             CJC_NULLPTR_CHECK(gpd->outerDecl);
             std::vector<std::string> genericsTypeStack;
             gpd->exportId = gpd->outerDecl->exportId + MANGLE_WILDCARD_PREFIX + gpd->identifier +
-                MangleType(*gpd->GetTy(), genericsTypeStack, false, false);
+                MangleType(gpd->GetTy(), genericsTypeStack, false, false);
         }
     }
 }
@@ -1040,81 +1127,82 @@ Ptr<const Decl> BaseMangler::GetOuterDecl(const Decl& decl) const
     return GetParentDecl(StaticCast<const FuncDecl&>(decl));
 }
 
-std::string BaseMangler::MangleEnumType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack, bool declare,
-    bool isCollectGTy) const
+std::string BaseMangler::MangleEnumType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
 {
-    CJC_ASSERT(ty.kind == TypeKind::TYPE_ENUM);
-    auto enumTy = StaticCast<const EnumTy&>(ty);
-    return MangleUserDefinedType(enumTy, genericsTypeStack, declare, isCollectGTy);
+    CJC_ASSERT(ty.Kind() == TypeKind::TYPE_ENUM);
+    return MangleUserDefinedType(ty, genericsTypeStack, declare, isCollectGTy);
 }
 
-std::string BaseMangler::MangleRawArrayType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack,
-    bool declare, bool isCollectGTy) const
+std::string BaseMangler::MangleRawArrayType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
 {
-    CJC_ASSERT(ty.kind == TypeKind::TYPE_ARRAY);
-    auto arrayTy = StaticCast<const ArrayTy&>(ty);
-    return MANGLE_TYPE_ARRAY_PREFIX + MangleUtils::DecimalToManglingNumber(std::to_string(arrayTy.dims)) +
-        MangleType(*arrayTy.typeArgs[0], genericsTypeStack, declare, isCollectGTy);
+    CJC_ASSERT(ty.Kind() == TypeKind::TYPE_ARRAY);
+    auto arrayTy = StaticCast<const ArrayTy&>(*ty.Ty());
+    return MangleUtils::WithModal(
+        MANGLE_TYPE_ARRAY_PREFIX + MangleUtils::DecimalToManglingNumber(std::to_string(arrayTy.dims)) +
+            MangleType(arrayTy.typeArgs[0], genericsTypeStack, declare, isCollectGTy),
+        ty.Mode());
 }
 
-std::string BaseMangler::MangleVArrayType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack,
-    bool declare, bool isCollectGTy) const
+std::string BaseMangler::MangleVArrayType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
 {
-    CJC_ASSERT(ty.kind == TypeKind::TYPE_VARRAY);
-    auto varrayTy = StaticCast<const VArrayTy&>(ty);
+    CJC_ASSERT(ty.Kind() == TypeKind::TYPE_VARRAY);
+    auto varrayTy = StaticCast<const VArrayTy&>(*ty.Ty());
     // V<N>_<type>
     std::string mangled = MANGLE_VARRAY_PREFIX + MangleUtils::DecimalToManglingNumber(std::to_string(varrayTy.size));
     for (const auto it : varrayTy.typeArgs) {
-        mangled += MangleType(*it, genericsTypeStack, declare, isCollectGTy);
+        mangled += MangleType(it, genericsTypeStack, declare, isCollectGTy);
     }
-    return mangled;
+    return MangleUtils::WithModal(mangled, ty.Mode());
 }
 
-std::string BaseMangler::MangleTupleType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack, bool declare,
-    bool isCollectGTy) const
+std::string BaseMangler::MangleTupleType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
 {
-    CJC_ASSERT(ty.kind == TypeKind::TYPE_TUPLE);
-    auto tupleTy = StaticCast<const TupleTy&>(ty);
+    CJC_ASSERT(ty.Kind() == TypeKind::TYPE_TUPLE);
+    auto tupleTy = StaticCast<const TupleTy&>(*ty.Ty());
     std::string mangled = MANGLE_TUPLE_PREFIX +
         MangleUtils::DecimalToManglingNumber(std::to_string(tupleTy.typeArgs.size()));
     for (const auto it : tupleTy.typeArgs) {
-        mangled += MangleType(*it, genericsTypeStack, declare, isCollectGTy);
+        mangled += MangleType(it, genericsTypeStack, declare, isCollectGTy);
     }
     mangled += MANGLE_SUFFIX;
-    return mangled;
+    return MangleUtils::WithModal(mangled, ty.Mode());
 }
 
-std::string BaseMangler::MangleFuncType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack, bool declare,
-    bool isCollectGTy) const
+std::string BaseMangler::MangleFuncType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
 {
-    CJC_ASSERT(ty.kind == TypeKind::TYPE_FUNC);
-    auto funcTy = StaticCast<const FuncTy&>(ty);
+    CJC_ASSERT(ty.Kind() == TypeKind::TYPE_FUNC);
+    auto funcTy = StaticCast<const FuncTy&>(*ty.Ty());
     std::string mangled = funcTy.IsCFunc() ? MANGLE_CFUNC_PREFIX : MANGLE_GENERAL_FUNC_PREFIX;
-    std::string retTy = MangleType(*funcTy.retTy, genericsTypeStack, declare, isCollectGTy);
+    std::string retTy = MangleType(funcTy.retTy, genericsTypeStack, declare, isCollectGTy);
     if (retTy.empty()) {
         retTy = MANGLE_VOID_TY_SUFFIX;
     }
     std::string params = "";
     for (auto it : funcTy.paramTys) {
-        params += MangleType(*it, genericsTypeStack, declare, isCollectGTy);
+        params += MangleType(it, genericsTypeStack, declare, isCollectGTy);
     }
     mangled += retTy + params + MANGLE_SUFFIX;
-    return mangled;
+    return MangleUtils::WithModal(mangled, ty.Mode());
 }
 
-std::string BaseMangler::MangleGenericType(const AST::Ty& ty) const
+std::string BaseMangler::MangleGenericType(ModalTy ty) const
 {
-    CJC_ASSERT(ty.kind == TypeKind::TYPE_GENERICS);
-    auto genericsTy = StaticCast<const GenericsTy&>(ty);
+    CJC_ASSERT(ty.Kind() == TypeKind::TYPE_GENERICS);
+    auto genericsTy = StaticCast<const GenericsTy&>(*ty.Ty());
     std::string mangled = MANGLE_GENERIC_TYPE_PREFIX + MangleUtils::MangleName(genericsTy.name);
-    return mangled;
+    return MangleUtils::WithModal(mangled, ty.Mode());
 }
 
-std::string BaseMangler::MangleGenericType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack,
-    bool declare) const
+std::string BaseMangler::MangleGenericType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare) const
 {
-    CJC_ASSERT(ty.kind == TypeKind::TYPE_GENERICS);
-    auto genericsTy = StaticCast<const GenericsTy&>(ty);
+    CJC_ASSERT(ty.Kind() == TypeKind::TYPE_GENERICS);
+    auto genericsTy = StaticCast<const GenericsTy&>(*ty.Ty());
     size_t index = 0;
     if (declare) {
         index = genericsTypeStack.size();
@@ -1126,35 +1214,46 @@ std::string BaseMangler::MangleGenericType(const AST::Ty& ty, std::vector<std::s
         CJC_ASSERT(result != genericsTypeStack.rend() && "Using undeclared generic type!");
     }
     auto number = MangleUtils::DecimalToManglingNumber(std::to_string(index));
-    return MANGLE_GENERIC_TYPE_PREFIX + number;
+    return MangleUtils::WithModal(MANGLE_GENERIC_TYPE_PREFIX + number, ty.Mode());
 }
 
 std::string BaseMangler::MangleFuncParams(const AST::FuncDecl& funcDecl, std::vector<std::string>& genericsTypeStack,
     bool declare, bool isCollectGTy) const
 {
-    if (!funcDecl.funcBody || funcDecl.funcBody->paramLists.empty() ||
-        funcDecl.funcBody->paramLists[0]->params.empty()) {
+    if (!funcDecl.funcBody || funcDecl.funcBody->paramLists.empty()) {
         return MANGLE_VOID_TY_SUFFIX;
     }
     std::string mangled = "";
+    if (funcDecl.funcBody->paramLists[0]->params.empty()) {
+        return mangled + MANGLE_VOID_TY_SUFFIX;
+    }
     for (auto& param : funcDecl.funcBody->paramLists[0]->params) {
         CJC_NULLPTR_CHECK(param->GetTy());
-        if (Ty::IsInitialTy(param->GetTy())) {
+        if (Ty::IsInitialTy(param->DataTy())) {
             continue;
         }
-        mangled += MangleType(*param->GetTy(), genericsTypeStack, declare, isCollectGTy);
+        mangled += MangleType(param->GetTy(), genericsTypeStack, declare, isCollectGTy);
     }
     return mangled;
 }
 
-std::string BaseMangler::MangleCPointerType(const AST::Ty& ty, std::vector<std::string>& genericsTypeStack,
-    bool declare, bool isCollectGTy) const
+std::string BaseMangler::MangleCPointerType(
+    ModalTy ty, std::vector<std::string>& genericsTypeStack, bool declare, bool isCollectGTy) const
 {
-    CJC_ASSERT(ty.kind == TypeKind::TYPE_POINTER);
-    auto pointerTy = StaticCast<const PointerTy&>(ty);
+    CJC_ASSERT(ty.Kind() == TypeKind::TYPE_POINTER);
+    auto pointerTy = StaticCast<const PointerTy&>(*ty.Ty());
     CJC_ASSERT(!pointerTy.typeArgs.empty() && pointerTy.typeArgs[0]);
-    return !pointerTy.typeArgs.empty() && pointerTy.typeArgs[0] ? MANGLE_POINTER_PREFIX +
-        MangleType(*pointerTy.typeArgs[0], genericsTypeStack, declare, isCollectGTy) : "";
+    if (!pointerTy.typeArgs.empty() && pointerTy.typeArgs[0]) {
+        return MangleUtils::WithModal(
+            MANGLE_POINTER_PREFIX + MangleType(pointerTy.typeArgs[0], genericsTypeStack, declare, isCollectGTy),
+            ty.Mode());
+    }
+    return "";
+}
+
+std::string BaseMangler::MangleCStringType(ModalTy ty) const
+{
+    return MangleUtils::WithModal("k", ty.Mode());
 }
 
 std::string BaseMangler::ManglePackageNameForGeneric(const AST::Decl& decl) const
@@ -1204,7 +1303,8 @@ bool BaseMangler::IsLocalVariable(const AST::Decl& decl) const
 
 bool BaseMangler::IsLocalFunc(const AST::FuncDecl& funcDecl) const
 {
-    return !funcDecl.TestAttr(AST::Attribute::GLOBAL) && funcDecl.outerDecl && !funcDecl.outerDecl->IsNominalDecl();
+    return !funcDecl.TestAttr(Attribute::GLOBAL) && funcDecl.outerDecl && !funcDecl.outerDecl->IsNominalDecl() &&
+        !funcDecl.outerDecl->IsBuiltIn();
 }
 
 std::string BaseMangler::HashToBase62(const std::string& input)
@@ -1328,26 +1428,26 @@ void ManglerContext::SaveFunc2CurDecl(const Ptr<Node> node)
     }).Walk();
 }
 
-void ManglerContext::SaveLocalWildcardVar2Decl(const Ptr<AST::Node> node)	
-{	
-    Ptr<Node> key = nullptr;	
-    if (auto lambda = DynamicCast<LambdaExpr>(node)) {	
-        key = lambda->funcBody.get();	
-    } else if (auto function = DynamicCast<FuncDecl>(node)) {	
-        key = function->funcBody.get();	
-    } else if (auto pcd = DynamicCast<PrimaryCtorDecl>(node)) {	
-        key = pcd->funcBody.get();	
-    } else if (auto vda = DynamicCast<VarDeclAbstract>(node); vda && vda->TestAttr(Attribute::GLOBAL)) {	
-        key = vda;	
-    }	
-    if (!key) {	
-        return;	
-    }	
+void ManglerContext::SaveLocalWildcardVar2Decl(const Ptr<Node> node)
+{
+    Ptr<Node> key = nullptr;
+    if (auto lambda = DynamicCast<LambdaExpr>(node)) {
+        key = lambda->funcBody.get();
+    } else if (auto function = DynamicCast<FuncDecl>(node)) {
+        key = function->funcBody.get();
+    } else if (auto pcd = DynamicCast<PrimaryCtorDecl>(node)) {
+        key = pcd->funcBody.get();
+    } else if (auto vda = DynamicCast<VarDeclAbstract>(node); vda && vda->TestAttr(Attribute::GLOBAL)) {
+        key = vda;
+    }
+    if (!key) {
+        return;
+    }
 
-    Walker(key, [this, &key](const Ptr<Node>& node) {	
-        if (auto vda = DynamicCast<VarWithPatternDecl>(node); vda && node != key) {	
-            node2LocalWildcardVar[key].emplace_back(vda);	
-        } else if (Is<FuncBody>(node) && node != key) {	
+    Walker(key, [this, &key](const Ptr<Node>& node) {
+        if (auto vda = DynamicCast<VarWithPatternDecl>(node); vda && node != key) {
+            node2LocalWildcardVar[key].emplace_back(vda);
+        } else if (Is<FuncBody>(node) && node != key) {
             return VisitAction::SKIP_CHILDREN;
         }
         return VisitAction::WALK_CHILDREN;
@@ -1418,7 +1518,7 @@ void ManglerContext::SaveLambda2CurDecl(const Ptr<Node> node)
 
 void ManglerContext::SaveExtend2CurFile(const Ptr<const AST::File> file, const Ptr<AST::ExtendDecl> node)
 {
-    file2ExtendDecl[file][node->extendedType->GetTy()->String()].emplace_back(node);
+    file2ExtendDecl[file][node->extendedType->GetTy().String()].emplace_back(node);
 }
 
 std::optional<size_t> ManglerContext::GetIndexOfGlobalWildcardVar(
@@ -1446,7 +1546,7 @@ std::optional<size_t> ManglerContext::GetIndexOfExtend(
     }
     auto fileMap = file2ExtendDecl.find(file);
     CJC_ASSERT(fileMap != file2ExtendDecl.end());
-    auto elementsVector = fileMap->second.find(target->extendedType->GetTy()->String());
+    auto elementsVector = fileMap->second.find(target->extendedType->GetTy().String());
     CJC_ASSERT(elementsVector != fileMap->second.end());
     auto found = std::find(elementsVector->second.begin(), elementsVector->second.end(), target);
     if (found != elementsVector->second.end()) {

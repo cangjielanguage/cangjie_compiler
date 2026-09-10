@@ -43,6 +43,7 @@
 #include "cangjie/CHIR/Transformation/NoSideEffectMarker.h"
 #include "cangjie/CHIR/Transformation/ReplaceSrcCodeImportedVal.h"
 #include "cangjie/CHIR/Transformation/SanitizerCoverage.h"
+#include "cangjie/CHIR/Transformation/SetMemRegion.h"
 #include "cangjie/CHIR/Transformation/UpdateMemberVarPath.h"
 #include "cangjie/CHIR/Utils/CHIRPrinter.h"
 #include "cangjie/CHIR/Utils/Utils.h"
@@ -647,6 +648,14 @@ void ToCHIR::RunOptimizationPass()
     RunArrayLambdaOpt();
     RunRedundantFutureOpt();
     RunGetRefToArrayElemOpt();
+}
+
+void ToCHIR::SetMemoryRegion()
+{
+    Utils::ProfileRecorder recorder("CHIR", "SetMemoryRegion");
+    auto setMemRegion = SetMemRegion(builder);
+    setMemRegion.RunOnPackage(*chirPkg);
+    DumpCHIRToFile("SetMemoryRegion");
 }
 
 bool ToCHIR::RunConstantEvaluation()
@@ -1313,13 +1322,16 @@ void ToCHIR::Canonicalization()
     // 7. create box type for recursion value type
     BoxRecursionValueType(*chirPkg, builder).Run();
 
+    // 8. set memory region
+    SetMemoryRegion();
+
     DumpCHIRToFile("Canonicalization");
 }
 
 bool ToCHIR::TranslateToCHIR(std::vector<const AST::Decl*>&& annoOnly)
 {
     Utils::ProfileRecorder recorder("CHIR", "AST to CHIR Translation");
-    std::unordered_map<AST::Ty*, Type*> typeMap;
+    std::unordered_map<AST::ModalTy, Type*> typeMap;
     CHIR::CHIRTypeCache chirTypeCache(typeMap);
     auto chirType = std::make_unique<CHIRType>(builder, chirTypeCache);
     auto ast2chirBuilder = AST2CHIR::AST2CHIRBuilder();

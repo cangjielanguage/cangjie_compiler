@@ -278,6 +278,10 @@ OwnedPtr<AST::FuncParamList> ParserImpl::ParseMacroParameterList()
             }
         }
     }
+    if (paramList->thisParam) {
+        DiagThisParamNotAllowed(*paramList->thisParam);
+        chainedAST.back()->EnableAttr(Attribute::IS_BROKEN);
+    }
     return paramList;
 }
 

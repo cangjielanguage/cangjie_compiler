@@ -8,7 +8,7 @@
 
 #include <sstream>
 #include "cangjie/CHIR/Utils/CHIRCasting.h"
-#include "cangjie/CHIR/Utils/ToStringUtils.h"
+#include "cangjie/CHIR/Utils/Utils.h"
 
 using namespace Cangjie::CHIR;
 
@@ -36,4 +36,14 @@ StructType* StructDef::GetType() const
 std::string StructDef::AddExtraComment() const
 {
     return isC ? "isCStruct" : "";
+}
+
+bool StructDef::IsCopyable() const
+{
+    for (auto def : GetImplementedInterfaceDefs()) {
+        if (IsExpectedCustomType(*def->GetType(), CORE_PACKAGE_NAME, std::string(COPY_NAME))) {
+            return true;
+        }
+    }
+    return false;
 }

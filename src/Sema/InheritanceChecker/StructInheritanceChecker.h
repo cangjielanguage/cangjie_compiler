@@ -13,12 +13,13 @@
 #ifndef CANGJIE_SEMA_INHERITANCE_CHECKER_H
 #define CANGJIE_SEMA_INHERITANCE_CHECKER_H
 
+#include "MemberSignature.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
-#include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Modules/ImportManager.h"
-#include "MemberSignature.h"
+#include "cangjie/Sema/TypeManager.h"
+#include <stack>
 
 namespace Cangjie {
 using namespace AST;
@@ -44,7 +45,7 @@ private:
     void CheckMembersWithInheritedDecls(const InheritableDecl& decl);
     MemberMap GetAndCheckInheritedInterfaces(const InheritableDecl& decl);
     MemberMap GetInheritedSuperMembers(
-        const InheritableDecl& decl, Ty& baseTy, const AST::File& curFile, bool ignoreExtends = false);
+        const InheritableDecl& decl, ModalTy baseTy, const AST::File& curFile, bool ignoreExtends = false);
     MemberMap GetAndCheckInheritedMembers(const InheritableDecl& decl);
     void CollectExtendByInterfaceInherit(const std::set<Ptr<ExtendDecl>>& otherExtends, const ExtendDecl& curDecl,
         std::set<Ptr<ExtendDecl>, CmpNodeByPos>& ordered);
@@ -54,15 +55,17 @@ private:
     void CheckExtendExportDependence(
         const InheritableDecl& curExtend, const MemberSignature& interface, const MemberMap& implDecl);
     void UpdateOverriddenFuncDeclCache(Ptr<Decl> child, Ptr<Decl> parent);
+    void ComputeInconsistentPropTypes(const MemberSignature& child, const MemberSignature& parent,
+        std::vector<ModalTy>& inconsistentTypes) const;
     MemberSignature UpdateInheritedMemberIfNeeded(
         MemberMap& inheritedMembers, const MemberSignature& child, bool inheritedInterfaces = false);
     bool ComputeInconsistentTypes(const MemberSignature& child, const MemberSignature& parent, MemberSignature& updated,
-        const std::pair<bool, bool>& status, std::vector<Ptr<const Ty>>& inconsistentTypes) const;
+        const std::pair<bool, bool>& status, std::vector<AST::ModalTy>& inconsistentTypes) const;
     void MergeInheritedMembers(
-        MemberMap& members, const MemberMap& otherMembers, Ty& structTy, bool inheritedInterfaces = false);
+        MemberMap& members, const MemberMap& otherMembers, DataTy structTy, bool inheritedInterfaces = false);
     void DiagnoseForOverriddenMember(const MemberSignature& child) const;
-    void DiagnoseForInheritedMember(const MemberSignature& parent, const MemberSignature& child) const;
-    void DiagnoseForInheritedInterfaces(const MemberSignature& interface, const MemberMap& implDecls) const;
+    void CheckInheritedMember(const MemberSignature& parent, const MemberSignature& child) const;
+    void CheckInheritedInterfaces(const MemberSignature& interface, const MemberMap& implDecls) const;
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
     void CheckIncompleteOverrideOrImplOfExtend(const MemberSignature& interface, const MemberSignature& child) const;
 #endif
@@ -71,23 +74,24 @@ private:
     void DiagnoseInheritedInsconsistType(const MemberSignature& member, const Node& node) const;
     void CheckSameNameInheritanceInfo(const MemberSignature& parent, const Decl& child) const;
     void CheckInheritanceAttributes(const MemberSignature& parent, const Decl& child) const;
-    void CheckPropertyInheritance(const MemberSignature& parent, const Decl& child) const;
+    void CheckPropertyInheritance(const MemberSignature& parent, Decl& child) const;
+    void CheckInheritedPropOverload(const MemberSignature& parent, const MemberSignature& child) const;
     void CheckGenericTypeArgInfo(const Decl& parent, const Decl& child);
     void CheckGenericTypeArgInfo(const MemberSignature& parent, const MemberSignature& child) const;
     void CheckInheritanceForInterface(const MemberSignature& interface, const MemberSignature& child) const;
-    bool CheckImplementationRelation(const MemberSignature& parent, const MemberSignature& child) const;
+    bool CheckPropImplRelation(const MemberSignature& parent, const MemberSignature& child) const;
+    bool CheckFuncImplRelation(const MemberSignature& parent, const MemberSignature& child) const;
     void CheckMutModifierCompatible(const MemberSignature& parent, const Decl& child) const;
     void CheckAccessVisibility(const Decl& parent, const Decl& child, const Decl& diagNode) const;
     bool IsExtendedDefaultImpl(const MemberSignature& parent, const Decl& child) const;
     bool CheckExtendMemberValid(const MemberSignature& parent, const Decl& child) const;
     bool IsBuiltInOperatorFuncInExtend(const MemberSignature& member, const Decl& structDecl) const;
     bool CheckReturnOverrideByGeneric(const FuncTy& parentTy, const FuncTy& childTy) const;
-    bool AreReturnTypesCompatible(const FuncTy& parentTy, const FuncTy& childTy,
-        const std::unordered_set<Ptr<const Ty>> inconsistentTypes = {}) const
+    bool AreReturnTypesCompatible(
+        const FuncTy& parentTy, const FuncTy& childTy, const std::unordered_set<ModalTy> inconsistentTypes = {}) const
     {
-        bool isSubOfAll = std::all_of(inconsistentTypes.begin(), inconsistentTypes.end(), [&childTy, this](auto ty) {
-            return typeManager.IsSubtype(childTy.retTy, const_cast<Ty*>(ty.get()), false);
-        });
+        bool isSubOfAll = std::all_of(inconsistentTypes.begin(), inconsistentTypes.end(),
+            [&childTy, this](auto ty) { return typeManager.IsSubtype(childTy.retTy, ty, false); });
         if (!CheckReturnOverrideByGeneric(parentTy, childTy)) {
             return false;
         }
@@ -109,32 +113,32 @@ private:
      * Generates the built-in operator function and adds to ed.members.
      * e.g. operator func +(right: Int64): Int64 { return this + right }
      */
-    void CreateBuiltInBinaryOperatorFunc(TokenKind op, Ptr<Ty> rightTy, ExtendDecl& ed, TypeKind returnTyKind) const;
+    void CreateBuiltInBinaryOperatorFunc(TokenKind op, ModalTy rightTy, ExtendDecl& ed, TypeKind returnTyKind) const;
     /**
      * Walk source package and checking inside instantiated decls to find whether
      * there conflict members existing in instantiated nominal decls.
      */
     void CheckInstDupFuncsInNominalDecls();
     VisitAction CheckInstDupFuncsRecursively(Node& node);
-    void CheckInstMemberSignatures(const InheritableDecl& decl, const std::vector<Ptr<Ty>>& instTys);
-    void CheckInstantiatedDecl(Decl& decl, const std::vector<Ptr<Ty>>& instTys);
+    void CheckInstMemberSignatures(const InheritableDecl& decl, const std::vector<DataTy>& instTys);
+    void CheckInstantiatedDecl(Decl& decl, const std::vector<DataTy>& instTys);
     /**
      * Get visible extend decls in stable order for given @p decl with @p instTys .
      */
     std::set<Ptr<ExtendDecl>, CmpNodeByPos> GetVisibleExtendsForInstantiation(
-        const Decl& decl, const std::vector<Ptr<Ty>>& instTys);
+        const Decl& decl, const std::vector<DataTy>& instTys);
     /**
      * Check whether the given decl instantiation info may cause infinite instantiation.
      */
-    bool WillCauseInfiniteInstantiation(const Node& triggerNode, const Decl& decl, const std::vector<Ptr<Ty>>& instTys);
+    bool WillCauseInfiniteInstantiation(const Node& triggerNode, const Decl& decl, const std::vector<DataTy>& instTys);
     void DiagnoseForInstantiatedMember(const MemberSignature& parent, const MemberSignature& child) const;
 
     /** CStruct checking methods. */
     void CheckInstWithCStructTypeArg(const Node& node);
-    void CheckCStruct(const Ty& ty, const Type& typeArg);
-    void CheckCStructArguments(const Node& node, const AST::Ty& ty, const Position& leftAnglePos,
+    void CheckCStruct(ModalTy ty, const Type& typeArg);
+    void CheckCStructArguments(const Node& node, AST::ModalTy ty, const Position& leftAnglePos,
         const std::vector<Ptr<Cangjie::AST::Type>>& typeArgs);
-    void CheckCStructArgument(const Ty& ty, const Type& typeArg);
+    void CheckCStructArgument(ModalTy ty, const Type& typeArg);
 
     bool IsExtendVisibleInCurpkg(const ExtendDecl& ed)
     {
@@ -153,16 +157,17 @@ private:
     std::unordered_map<Ptr<const InheritableDecl>, MemberMap> structInheritedMembers;
     std::vector<Ptr<const Decl>> checkingDecls;
     /** Following members are used to cache instantiation checking status. */
-    std::set<std::pair<Ptr<const Decl>, const std::vector<Ptr<Ty>>>> instantiatedDecls;
-    std::map<std::pair<Ptr<const Decl>, const std::vector<Ptr<Ty>>>, std::unordered_map<Ptr<Ty>, Ptr<Ty>>>
+    std::set<std::pair<Ptr<const Decl>, const std::vector<DataTy>>> instantiatedDecls;
+    std::map<std::pair<Ptr<const Decl>, const std::vector<DataTy>>, std::unordered_map<DataTy, DataTy>>
         instantiatedTyCache;
     /**
      * Used to cache instantiation checking status which need to report diagnoses.
      * key: generic decl with instantiated type, value: pair of member signatures to report diagnose.
      */
-    std::map<std::pair<Ptr<const Decl>, const std::vector<Ptr<Ty>>>,
-        std::vector<std::pair<MemberSignature, MemberSignature>>> genericMembersForInstantiatedDecl;
-    std::vector<std::tuple<Ptr<const Node>, Ptr<const Decl>, const std::vector<Ptr<Ty>>>> instTriggerInfos;
+    std::map<std::pair<Ptr<const Decl>, const std::vector<DataTy>>,
+        std::vector<std::pair<MemberSignature, MemberSignature>>>
+        genericMembersForInstantiatedDecl;
+    std::vector<std::tuple<Ptr<const Node>, Ptr<const Decl>, const std::vector<DataTy>>> instTriggerInfos;
     std::stack<TypeSubst> institutionMaps;
     bool infiniteInstantiationOccured{false};
 
@@ -172,7 +177,7 @@ private:
     class InstantiatedContext {
     public:
         InstantiatedContext(StructInheritanceChecker& checker, Ptr<AST::Node> node, Ptr<const Decl> target,
-            const std::vector<Ptr<Ty>>& instTys, bool updateTrigger)
+            const std::vector<DataTy>& instTys, bool updateTrigger)
             : checker(checker), needUpdate(updateTrigger)
         {
             if (needUpdate) {
@@ -192,10 +197,10 @@ private:
     };
 };
 
-std::vector<std::unordered_set<Ptr<Ty>>> GetAllGenericUpperBounds(TypeManager& tyMgr, const Decl& decl);
+std::vector<std::unordered_set<DataTy>> GetAllGenericUpperBounds(TypeManager& tyMgr, const Decl& decl);
 
 void CheckGenericTypeBoundsMapped(const Decl& parent, const Decl& child,
-    std::vector<std::unordered_set<Ptr<Ty>>> parentBounds, std::vector<std::unordered_set<Ptr<Ty>>> childBounds,
+    std::vector<std::unordered_set<DataTy>> parentBounds, std::vector<std::unordered_set<DataTy>> childBounds,
     DiagnosticEngine& diag, TypeManager& typeManager);
 
 } // namespace Cangjie

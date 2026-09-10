@@ -211,6 +211,8 @@ protected:
         return "libclang_rt-profile.a";
     }
 
+    void AppendClangRTProfileLibraryIfNeeded(Tool& tool) const;
+
 private:
     // cRuntimeLibraryPaths is used to search for C runtime object files, such as crt1.o, crti.o, crtn.o.
     std::vector<std::string> cRuntimeLibraryPaths;

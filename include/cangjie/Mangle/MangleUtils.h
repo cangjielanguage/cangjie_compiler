@@ -52,6 +52,8 @@ inline const std::string MANGLE_VARRAY_PREFIX = "V";
 inline const std::string MANGLE_TUPLE_PREFIX = "T";
 inline const std::string MANGLE_GENERIC_TYPE_PREFIX = "G";
 inline const std::string MANGLE_AT_PREFIX = "@";
+inline const std::string MANGLE_TYPE_MODE_PREFIX = "Q";  // <type-mode>: modal of a data type
+inline const std::string MANGLE_THIS_MODE_PREFIX = "W";  // <this-mode>: modal of `this`
 inline const std::unordered_set<char> PRIMITIVE_PREFIX_SET = {
     'n', 'u', 'c', 'b', 'f', 'd', 'a', 's', 'i', 'l', 'q', 'h', 't', 'j', 'm', 'r', 'D', 'v' };
 

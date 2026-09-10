@@ -84,7 +84,7 @@ void OCFFIParserImpl::CheckMirrorSignature(FuncDecl& decl, const PtrVector<Annot
         decl.EnableAttr(Attribute::IS_BROKEN);
     }
 
-    if (decl.isConst || p.HasModifier(decl.modifiers, TokenKind::CONST)) {
+    if (decl.isConst || HasModifier(decl.modifiers, TokenKind::CONST)) {
         DiagObjCMirrorFuncCannotBeConst(decl);
         decl.EnableAttr(Attribute::IS_BROKEN);
     }

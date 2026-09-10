@@ -101,7 +101,7 @@ void DesugarJArray::TransformConstructorCallsToPassJNIParam(File& file) const
         auto newCallExpr = ASTCloner::Clone(callExpr);
         newCallExpr->resolvedFunction = jniTypeConstr;
 
-        Ptr<Ty> jarrayElementType;
+        ModalTy jarrayElementType;
         { // update newCallExpr->baseFunc
             // constructor call of java.lang.JArray expected to be RefExpr
             CJC_ASSERT(newCallExpr->baseFunc->astKind == ASTKind::REF_EXPR);
@@ -114,7 +114,7 @@ void DesugarJArray::TransformConstructorCallsToPassJNIParam(File& file) const
 
         CJC_ASSERT_WITH_MSG(newCallExpr->args.size() == 1, "expected to be init(length: Int32)");
         { // add jniType param in new constructor call
-            auto jniType = ilib.SelectJSigByTypeKind(jarrayElementType->kind, jarrayElementType);
+            auto jniType = ilib.SelectJSigByTypeKind(jarrayElementType->kind, jarrayElementType.Ty());
             auto fa = CreateFuncArg(std::move(jniType));
             newCallExpr->args.emplace_back(std::move(fa));
         }
@@ -141,17 +141,17 @@ void DesugarJArray::InsertJniTypeParamIntoConstructor(FuncDecl& constr) const
     auto strTy = GetStringDecl(importManager).GetTy();
 
     { // add new func param
-        auto jniTypeParam = CreateFuncParam("$jniType", CreateType(strTy), nullptr, strTy);
+        auto jniTypeParam = CreateFuncParam("$jniType", CreateType(strTy.Ty()), nullptr, strTy);
         constr.funcBody->paramLists[0]->params.emplace_back(std::move(jniTypeParam));
     }
 
     { // add new param ty in constr.ty->paramTys
-        std::vector<Ptr<Ty>> ctorFuncParamTys;
+        std::vector<ModalTy> ctorFuncParamTys;
         CJC_ASSERT(constr.GetTy()->kind == TypeKind::TYPE_FUNC);
-        auto fty = StaticCast<FuncTy*>(constr.GetTy());
+        auto fty = StaticCast<FuncTy>(constr.DataTy());
         ctorFuncParamTys = std::move(fty->paramTys);
         ctorFuncParamTys.push_back(strTy);
-        constr.SetTy(typeManager.GetFunctionTy(std::move(ctorFuncParamTys), constr.outerDecl->GetTy()));
+        constr.SetTy(ModalTy{typeManager.GetFunctionTy(std::move(ctorFuncParamTys), constr.outerDecl->GetTy())});
     }
 }
 
@@ -178,7 +178,7 @@ void DesugarJArray::InsertConstructorBody(FuncDecl& constr) const
     auto jarray = StaticAs<ASTKind::CLASS_LIKE_DECL>(constr.outerDecl);
     static auto generatedJavaRefInitConstr = GetJavaMirrorWrappingConstructor(*jarray);
     auto thisCall = CreateThisCall(
-        *constr.outerDecl, *generatedJavaRefInitConstr, generatedJavaRefInitConstr->GetTy(), constr.curFile);
+        *constr.outerDecl, *generatedJavaRefInitConstr, generatedJavaRefInitConstr->DataTy(), constr.curFile);
     thisCall->args.push_back(CreateFuncArg(WrapReturningLambdaCall(typeManager, std::move(lambdaNodes))));
     constr.funcBody->body->body.clear();
     constr.funcBody->body->body.push_back(std::move(thisCall));
@@ -241,7 +241,7 @@ void DesugarJArray::ReplaceCallsWithArrayJavaEntityGet(File& file) const
         base->target = arrayJavaEntityGetDecl;
         base->SetTy(arrayJavaEntityGetDecl->GetTy());
         callExpr->desugarExpr = ilib.UnwrapJavaEntity(
-            std::move(newCallExpr), arrayElementType, *As<ASTKind::CLASS_LIKE_DECL>(funcDecl->outerDecl));
+            std::move(newCallExpr), arrayElementType.Ty(), *As<ASTKind::CLASS_LIKE_DECL>(funcDecl->outerDecl));
         callExpr->desugarArgs = std::nullopt;
 
         return VisitAction::WALK_CHILDREN;

@@ -66,7 +66,7 @@ Ptr<Value> Translator::GetSymbolTable(const AST::Node& node) const
     return localValSymbolTable.Get(node);
 }
 
-Ptr<Type> Translator::TranslateType(AST::Ty& ty)
+Ptr<Type> Translator::TranslateType(AST::ModalTy ty)
 {
     return chirTy.TranslateType(ty);
 }
@@ -75,7 +75,7 @@ Ptr<FuncType> Translator::CreateVirtualFuncType(const AST::FuncDecl& decl)
 {
     std::vector<Type*> args;
     for (size_t i = 0; i < decl.funcBody->paramLists[0]->params.size(); i++) {
-        args.emplace_back(TranslateType(*decl.funcBody->paramLists[0]->params[i]->GetTy()));
+        args.emplace_back(TranslateType(decl.funcBody->paramLists[0]->params[i]->GetTy()));
     }
     return builder.GetType<FuncType>(args, builder.GetUnitTy());
 }
@@ -129,7 +129,7 @@ Ptr<Value> Translator::GetDerefedValue(Ptr<Value> val, const DebugLocation& loc)
     if (valType->IsRef()) {
         valType = StaticCast<RefType*>(valType)->GetBaseType();
         // For now, raw class type should not exist. Why, spec indicate that class is reference type.
-        if (valType->IsClassOrArray()) {
+        if (valType->IsReferenceType()) {
             return val;
         }
         auto expr = (loc.IsInvalidPos() ? CreateAndAppendExpression<Load>(valType, val, currentBlock)
@@ -220,7 +220,11 @@ Value* Translator::TranslateExprArg(const AST::Node& node, Type& targetTy, bool 
     if (targetTy.IsUnit()) {
         return CreateAndAppendConstantExpression<UnitLiteral>(builder.GetUnitTy(), *GetCurrentBlock())->GetResult();
     }
-    if (node.GetTy()->IsNothing() || targetTy.IsNothing()) {
+    auto nodeTy = node.GetTy();
+    if (auto exclave = DynamicCast<AST::ExclaveExpr>(&node)) {
+        nodeTy = exclave->body->GetTy();
+    }
+    if (nodeTy->IsNothing() || targetTy.IsNothing()) {
         return CreateAndAppendConstantExpression<NullLiteral>(builder.GetNothingType(),
             *GetCurrentBlock())->GetResult();
     }

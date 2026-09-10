@@ -29,7 +29,7 @@ using namespace Cangjie;
 using namespace AST;
 
 namespace {
-std::vector<size_t> GetOrderedCheckingIndexes(const std::vector<Ptr<AST::Ty>>& tys)
+std::vector<size_t> GetOrderedCheckingIndexes(const std::vector<ModalTy>& tys)
 {
     // Ordering index of types to make index of non-ideal types precedes the index of ideal types.
     // Synthesis non-ideal types first to restrict possible range of ideal type.
@@ -52,7 +52,7 @@ std::vector<size_t> GetOrderedCheckingIndexes(const std::vector<Ptr<AST::Ty>>& t
         }
     }
     std::stable_sort(options.begin(), options.end(), [&tys](auto l, auto r) {
-        return TypeCheckUtil::CountOptionNestedLevel(*tys[l]) > TypeCheckUtil::CountOptionNestedLevel(*tys[r]);
+        return TypeCheckUtil::CountOptionNestedLevel(tys[l].Ty()) > TypeCheckUtil::CountOptionNestedLevel(tys[r].Ty());
     });
     options.insert(options.end(), others.begin(), others.end());
     options.insert(options.end(), ideals.begin(), ideals.end());
@@ -82,14 +82,13 @@ std::optional<TypeSubst> LocalTypeArgumentSynthesis::SynthesizeTypeArguments(boo
             return {};
         }
         if (needDiagMsg && errMsg.style == SolvingErrStyle::DEFAULT) {
-            auto [tmpCms, tmpMsg] = Unify(
-                cms, {*argPack.argTys[i], {argPack.argBlames[i]}}, {*argPack.paramTys[i], {argPack.argBlames[i]}});
+            auto [tmpCms, tmpMsg] =
+                Unify(cms, {argPack.argTys[i], {argPack.argBlames[i]}}, {argPack.paramTys[i], {argPack.argBlames[i]}});
             cms = tmpCms;
             errMsg = tmpMsg;
         } else {
-            cms =
-                Unify(cms, {*argPack.argTys[i], {argPack.argBlames[i]}}, {*argPack.paramTys[i], {argPack.argBlames[i]}})
-                    .first;
+            cms = Unify(cms, {argPack.argTys[i], {argPack.argBlames[i]}}, {argPack.paramTys[i], {argPack.argBlames[i]}})
+                      .first;
         }
         if (cms.empty()) {
             MaybeSetErrMsg(MakeMsgMismatchedArg(argPack.argBlames[i]));
@@ -102,11 +101,11 @@ std::optional<TypeSubst> LocalTypeArgumentSynthesis::SynthesizeTypeArguments(boo
         // Add a constraint that the function's return type should be smaller than the type required by the context.
         if (needDiagMsg && errMsg.style == SolvingErrStyle::DEFAULT) {
             auto [tmpCms, tmpMsg] =
-                Unify(cms, {*argPack.funcRetTy, {argPack.retBlame}}, {*argPack.retTyUB, {argPack.retBlame}});
+                Unify(cms, {argPack.funcRetTy, {argPack.retBlame}}, {argPack.retTyUB, {argPack.retBlame}});
             cms = tmpCms;
             errMsg = tmpMsg;
         } else {
-            cms = Unify(cms, {*argPack.funcRetTy, {argPack.retBlame}}, {*argPack.retTyUB, {argPack.retBlame}}).first;
+            cms = Unify(cms, {argPack.funcRetTy, {argPack.retBlame}}, {argPack.retTyUB, {argPack.retBlame}}).first;
         }
     }
     if (cms.empty()) {
@@ -136,9 +135,11 @@ void LocalTypeArgumentSynthesis::CopyUpperbound()
         }
         for (auto upper : univ->upperBounds) {
             CJC_NULLPTR_CHECK(upper);
-            instTv->upperBounds.emplace(tyMgr.InstOf(upper));
-            if (gcBlames.count(univ) > 0 && gcBlames.at(univ).count(upper) > 0) {
-                gcBlamesInst[instTv][tyMgr.InstOf(upper)] = gcBlames.at(univ).at(upper);
+            ModalTy upperM{upper};
+            ModalTy univK{univ};
+            instTv->upperBounds.emplace(tyMgr.InstOf(upperM).Ty());
+            if (gcBlames.count(univK) > 0 && gcBlames.at(univK).count(upperM) > 0) {
+                gcBlamesInst[ModalTy{instTv}][tyMgr.InstOf(upperM)] = gcBlames.at(univK).at(upperM);
             }
         }
     }
@@ -157,9 +158,10 @@ Constraint LocalTypeArgumentSynthesis::InitConstraints(const TyVars& tyVarsToSol
             auto ubs = RawStaticCast<GenericsTy*>(tyVar)->upperBounds;
             TyVarBounds bounds;
             for (auto ub : ubs) {
-                bounds.ubs.insert(ub);
-                for (auto node : gcBlamesInst[tyVar][ub]) {
-                    bounds.ub2Blames[ub].insert({.src = node, .style = BlameStyle::CONSTRAINT});
+                ModalTy ubM{ub};
+                bounds.ubs.insert(ubM);
+                for (auto node : gcBlamesInst[ModalTy{tyVar}][ubM]) {
+                    bounds.ub2Blames[ubM].insert(Blame{node, {}, {}, BlameStyle::CONSTRAINT});
                 }
             }
             InsertConstraint(res, *tyVar, bounds);
@@ -189,10 +191,10 @@ void LocalTypeArgumentSynthesis::InsertConstraint(Constraint& c, TyVar& tyVar, T
 }
 
 std::pair<LocalTypeArgumentSynthesis::ConstraintWithMemos, SolvingErrInfo> LocalTypeArgumentSynthesis::Unify(
-    const ConstraintWithMemos& newCMS, const Tracked<Ty>& argTTy, const Tracked<Ty>& paramTTy)
+    const ConstraintWithMemos& newCMS, const Tracked<ModalTy>& argTTy, const Tracked<ModalTy>& paramTTy)
 {
     LocTyArgSynArgPack dummyArgPack = {
-        argPack.tyVarsToSolve, {}, {}, {}, TypeManager::GetInvalidTy(), TypeManager::GetInvalidTy(), Blame()};
+        argPack.tyVarsToSolve, {}, {}, {}, {TypeManager::GetInvalidTy()}, {TypeManager::GetInvalidTy()}, Blame()};
     ConstraintWithMemos res;
     SolvingErrInfo msg;
     std::for_each(newCMS.cbegin(), newCMS.cend(), [this, &msg, &res, &argTTy, &paramTTy, &dummyArgPack](auto& cm) {
@@ -211,7 +213,7 @@ std::pair<LocalTypeArgumentSynthesis::ConstraintWithMemos, SolvingErrInfo> Local
 }
 
 bool LocalTypeArgumentSynthesis::UnifyAndTrim(
-    const ConstraintWithMemos& curCMS, const Tracked<Ty>& argTTy, const Tracked<Ty>& paramTTy)
+    const ConstraintWithMemos& curCMS, const Tracked<ModalTy>& argTTy, const Tracked<ModalTy>& paramTTy)
 {
     auto [newCMS, msg] = Unify(curCMS, argTTy, paramTTy);
     MaybeSetErrMsg(msg);
@@ -229,10 +231,18 @@ bool LocalTypeArgumentSynthesis::VerifyAndSetCMS(const LocalTypeArgumentSynthesi
     }
 }
 
-bool LocalTypeArgumentSynthesis::UnifyOne(const Tracked<Ty>& argTTy, const Tracked<Ty>& paramTTy)
+bool LocalTypeArgumentSynthesis::UnifyOne(const Tracked<ModalTy>& argTTy, const Tracked<ModalTy>& paramTTy)
 {
-    auto& argTy = argTTy.ty;
-    auto& paramTy = paramTTy.ty;
+    auto& argTy = *argTTy.ty;
+    auto& paramTy = *paramTTy.ty;
+    if (argTy.IsQuest() || paramTy.IsQuest()) {
+        return true;
+    }
+    // the mode of placeholder is meaningless
+    if (!argTTy.ty.Mode().IsSubModal(paramTTy.ty.Mode()) && !tyMgr.ImplementsCopyInterface(argTTy.ty.Ty()) &&
+        !paramTTy.ty->IsPlaceholder()) {
+        return false;
+    }
     // Handle the base case.
     if (cms.size() != 1) {
         return false;
@@ -240,22 +250,20 @@ bool LocalTypeArgumentSynthesis::UnifyOne(const Tracked<Ty>& argTTy, const Track
     if (&argTy == &paramTy) {
         return true;
     }
-    if (argTy.IsQuest() || paramTy.IsQuest()) {
-        return true;
-    }
 
     if (paramTy.IsIntersection()) {
-        return UnifyParamIntersectionTy(argTTy, {static_cast<IntersectionTy&>(paramTy), paramTTy.blames});
+        return UnifyParamIntersectionTy(
+            {argTy, argTTy.blames}, {static_cast<IntersectionTy&>(paramTy), paramTTy.blames});
     } else if (argTy.IsIntersection()) {
-        return UnifyArgIntersectionTy({static_cast<IntersectionTy&>(argTy), argTTy.blames}, paramTTy);
+        return UnifyArgIntersectionTy({static_cast<IntersectionTy&>(argTy), argTTy.blames}, {paramTy, paramTTy.blames});
     } else if (argTy.IsUnion()) {
-        return UnifyArgUnionTy({static_cast<UnionTy&>(argTy), argTTy.blames}, paramTTy);
+        return UnifyArgUnionTy({static_cast<UnionTy&>(argTy), argTTy.blames}, {paramTy, paramTTy.blames});
     } else if (paramTy.IsUnion()) {
-        return UnifyParamUnionTy(argTTy, {static_cast<UnionTy&>(paramTy), paramTTy.blames});
+        return UnifyParamUnionTy({argTy, argTTy.blames}, {static_cast<UnionTy&>(paramTy), paramTTy.blames});
     }
 
     MemoForUnifiedTys& memo = cms.front().memo;
-    auto inProcessing = std::pair<Ptr<Ty>, Ptr<Ty>>(&argTy, &paramTy);
+    auto inProcessing = std::pair<ModalTy, ModalTy>{{&argTy}, {&paramTy}};
     if (Utils::In(inProcessing, memo)) {
         return true;
     }
@@ -263,34 +271,34 @@ bool LocalTypeArgumentSynthesis::UnifyOne(const Tracked<Ty>& argTTy, const Track
     if ((paramTy.IsGeneric() && StaticCast<TyVar*>(&paramTy)->isPlaceholder) ||
         (argTy.IsGeneric() && StaticCast<TyVar*>(&argTy)->isPlaceholder)) {
         memo.insert(inProcessing);
-        return UnifyTyVar(argTTy, paramTTy);
+        return UnifyTyVar({{&argTy}, argTTy.blames}, {{&paramTy}, paramTTy.blames});
     }
 
     // When the 'paramTy' has more option nesting level than the 'argTy':
     // If both the 'argTy' and the 'paramTy' are Option type, unify their typeArgs.
     // Otherwise If the 'paramTy' is Option type, unify the 'paramTy''s type argument with the 'argTy'.
-    if (TypeCheckUtil::CountOptionNestedLevel(paramTy) > TypeCheckUtil::CountOptionNestedLevel(argTy)) {
+    if (TypeCheckUtil::CountOptionNestedLevel(&paramTy) > TypeCheckUtil::CountOptionNestedLevel(&argTy)) {
         CJC_ASSERT(paramTy.typeArgs.size() == 1 && paramTy.typeArgs.front() != nullptr);
         if (argTy.IsCoreOptionType() && paramTy.IsCoreOptionType()) {
             memo.insert(inProcessing);
             CJC_ASSERT(argTy.typeArgs.size() == 1 && argTy.typeArgs.front() != nullptr);
-            return UnifyOne({*argTy.typeArgs[0], argTTy.blames}, {*paramTy.typeArgs[0], paramTTy.blames});
+            return UnifyOne({argTy.typeArgs[0], argTTy.blames}, {paramTy.typeArgs[0], paramTTy.blames});
         }
         memo.insert(inProcessing);
-        return UnifyOne(argTTy, {*paramTy.typeArgs[0], paramTTy.blames});
+        return UnifyOne(argTTy, {paramTy.typeArgs[0], paramTTy.blames});
     }
 
     // Context type variables are first promoted
     if (argTy.IsGeneric() || paramTy.IsGeneric()) {
-        return UnifyContextTyVar(argTTy, paramTTy);
+        return UnifyContextTyVar({argTy, argTTy.blames}, {paramTy, paramTTy.blames});
     } else if (paramTy.IsNominal() && argTy.IsNominal()) {
-        return UnifyNominal(argTTy, paramTTy);
+        return UnifyNominal({argTy, argTTy.blames}, {paramTy, paramTTy.blames});
     } else if (argTy.IsBuiltin() && paramTy.IsInterface()) {
-        return UnifyBuiltInExtension(argTTy, {static_cast<InterfaceTy&>(paramTy), paramTTy.blames});
+        return UnifyBuiltInExtension({argTy, argTTy.blames}, {static_cast<InterfaceTy&>(paramTy), paramTTy.blames});
     } else if (paramTy.IsPrimitive() && argTy.IsPrimitive()) {
         return UnifyPrimitiveTy(static_cast<PrimitiveTy&>(argTy), static_cast<PrimitiveTy&>(paramTy));
     } else if ((argTy.IsArray() && paramTy.IsArray()) || (argTy.IsPointer() && paramTy.IsPointer())) {
-        return UnifyBuiltInTy(argTTy, paramTTy);
+        return UnifyBuiltInTy({argTy, argTTy.blames}, {paramTy, paramTTy.blames});
     } else if (argTy.IsFunc() && paramTy.IsFunc()) {
         return UnifyFuncTy(
             {static_cast<FuncTy&>(argTy), argTTy.blames}, {static_cast<FuncTy&>(paramTy), paramTTy.blames});
@@ -302,44 +310,44 @@ bool LocalTypeArgumentSynthesis::UnifyOne(const Tracked<Ty>& argTTy, const Track
     }
 }
 
-bool LocalTypeArgumentSynthesis::UnifyTyVar(const Tracked<Ty>& argTTy, const Tracked<Ty>& paramTTy)
+bool LocalTypeArgumentSynthesis::UnifyTyVar(const Tracked<ModalTy>& argTTy, const Tracked<ModalTy>& paramTTy)
 {
     CJC_ASSERT(cms.size() == 1);
     auto& argTy = argTTy.ty;
     auto& paramTy = paramTTy.ty;
     // If paramTy is the generic parameter to be solved.
     Ptr<TyVar> tyVar = nullptr;
-    Ptr<Ty> lb = TypeManager::GetInvalidTy();
-    Ptr<Ty> ub = TypeManager::GetInvalidTy();
+    ModalTy lb = {TypeManager::GetInvalidTy()};
+    ModalTy ub = {TypeManager::GetInvalidTy()};
     std::set<Blame> lbBlames;
     std::set<Blame> ubBlames;
 
-    auto unifyBound = [&tyVar, this](Ptr<Ty>& one, Ptr<Ty>& other, const Tracked<Ty>& bound, bool isUb) {
-        one = &bound.ty;
+    auto unifyBound = [&tyVar, this](ModalTy& one, ModalTy& other, const Tracked<ModalTy>& bound, bool isUb) {
+        one = bound.ty;
 
         if (one->IsNothing()) {
             cms.front().hasNothingTy = true;
         } else if (one->IsAny()) {
             cms.front().hasAnyTy = true;
-        } else if (auto ctt = DynamicCast<ClassThisTy*>(one)) {
+        } else if (auto ctt = DynamicCast<ClassThisTy*>(one.Ty())) {
             // For inferred type, the class this type should be substituted as original class type.
-            one = tyMgr.GetClassTy(*ctt->declPtr, ctt->typeArgs);
+            one = {tyMgr.GetClassTy(*ctt->declPtr, ctt->TyArgs()), one.Mode()};
         }
 
-        if (deterministic && IsGreedySolution(*tyVar, *one, isUb)) {
+        if (deterministic && IsGreedySolution(*tyVar, {one}, isUb)) {
             other = one;
             auto& eq = cms.front().constraint[tyVar].eq;
             if (eq.empty()) {
-                eq.insert(one);
+                eq.insert({one});
             }
         }
     };
 
-    if (auto genParam = DynamicCast<TyVar*>(&paramTy); genParam && genParam->isPlaceholder) { // case T = X.
+    if (auto genParam = DynamicCast<TyVar*>(paramTy.Ty()); genParam && genParam->isPlaceholder) { // case T = X.
         tyVar = genParam;
         lbBlames = argTTy.blames;
         unifyBound(lb, ub, argTTy, false);
-    } else if (auto genArg = DynamicCast<TyVar*>(&argTy); genArg && genArg->isPlaceholder) { // case X = T.
+    } else if (auto genArg = DynamicCast<TyVar*>(argTy.Ty()); genArg && genArg->isPlaceholder) { // case X = T.
         tyVar = genArg;
         ubBlames = paramTTy.blames;
         unifyBound(ub, lb, paramTTy, true);
@@ -349,11 +357,11 @@ bool LocalTypeArgumentSynthesis::UnifyTyVar(const Tracked<Ty>& argTTy, const Tra
     this->curTyVar = tyVar;
 
     // Recursively constrain existing bounds with the newly added one.
-    return UnifyTyVarCollectConstraints(*tyVar, {*lb, lbBlames}, {*ub, ubBlames});
+    return UnifyTyVarCollectConstraints(*tyVar, {lb, lbBlames}, {ub, ubBlames});
 }
 
 bool LocalTypeArgumentSynthesis::UnifyTyVarCollectConstraints(
-    TyVar& tyVar, const Tracked<Ty>& lbTTy, const Tracked<Ty>& ubTTy)
+    TyVar& tyVar, const Tracked<ModalTy>& lbTTy, const Tracked<ModalTy>& ubTTy)
 {
     if (cms.size() != 1) {
         return false;
@@ -361,62 +369,63 @@ bool LocalTypeArgumentSynthesis::UnifyTyVarCollectConstraints(
     auto& lb = lbTTy.ty;
     auto& ub = ubTTy.ty;
     Constraint& c = cms.front().constraint;
-    if (Ty::IsTyCorrect(&lb)) {
+    if (lb.IsCorrect()) {
         TyVarBounds bounds;
-        bounds.lbs.insert(&lb);
-        bounds.lb2Blames[&lb] = lbTTy.blames;
+        bounds.lbs.insert(lb);
+        bounds.lb2Blames[lb] = lbTTy.blames;
         InsertConstraint(c, tyVar, bounds);
     }
-    if (Ty::IsTyCorrect(&ub)) {
+    if (ub.IsCorrect()) {
         TyVarBounds bounds;
-        bounds.ubs.insert(&ub);
-        bounds.ub2Blames[&ub] = ubTTy.blames;
+        bounds.ubs.insert(ub);
+        bounds.ub2Blames[ub] = ubTTy.blames;
         InsertConstraint(c, tyVar, bounds);
     }
 
-    if (Ty::IsTyCorrect(&lb)) {
+    if (lb.IsCorrect()) {
         // the reference to `c` may be invalidated in the following loop; must copy here
         auto ubs = c[&tyVar].ubs;
         auto ub2Blames = c[&tyVar].ub2Blames;
         // lb and ub are initialized to INVALID_TY and thus are not null.
         // Elements in ubs are tested to be not null in UnifyTyVarCollectNewConstraints.
         // The join adds option box to lb if option-boxed lb already exists in the type var's lbs.
-        Ptr<Ty> lbTy{};
+        ModalTy lbTy{};
         if (deterministic) {
-            lbTy = &lb;
+            lbTy = lb;
         } else {
             auto joinRes = JoinAndMeet(tyMgr, c[&tyVar].lbs, argPack.tyVarsToSolve).JoinAsVisibleTy();
             auto [joinErr, joinedLb] = JoinAndMeet::SetJoinedType(lbTy, joinRes);
             lbTy = joinedLb;
             if (joinErr.has_value() || lbTy->IsAny()) {
-                lbTy = &lb;
+                lbTy = lb;
             }
         }
         std::optional<StableTys> st;
         auto [tyL, tyR] = GetMaybeStableIters(ubs, st);
         for (auto ub0 = tyL; ub0 != tyR; ++ub0) {
-            if (!UnifyAndTrim(cms, {*lbTy, lbTTy.blames}, {**ub0, ub2Blames[*ub0]})) {
-                MaybeSetErrMsg(MakeMsgConflictingConstraints(tyVar, {lbTTy}, {{**ub0, ub2Blames[*ub0]}}));
+            if (!UnifyAndTrim(cms, {lbTy, lbTTy.blames}, {*ub0, ub2Blames[*ub0]})) {
+                MaybeSetErrMsg(MakeMsgConflictingConstraints(tyVar, {lbTTy}, {{*ub0, ub2Blames[*ub0]}}));
                 return false;
             }
         }
         // with known sum, but the sum doesn't include lb
         if (deterministic && !tyMgr.TyVarHasNoSum(tyVar)) {
             auto& sum = c[&tyVar].sum;
-            if (!lb.IsNothing() && sum.count(&lb) == 0) {
+            if (!lb->IsNothing() && sum.count(lb) == 0) {
                 return false;
             }
         }
     }
-    if (Ty::IsTyCorrect(&ub)) {
+    if (ub.IsCorrect()) {
         // the reference to `c` may be invalidated in the following loop; must copy here
         auto lbs = c[&tyVar].lbs;
         auto lb2Blames = c[&tyVar].lb2Blames;
         std::optional<StableTys> st;
         auto [tyL, tyR] = GetMaybeStableIters(lbs, st);
         for (auto lb0 = tyL; lb0 != tyR; ++lb0) {
-            if (!UnifyAndTrim(cms, {**lb0, lb2Blames[*lb0]}, ubTTy)) {
-                MaybeSetErrMsg(MakeMsgConflictingConstraints(tyVar, {{**lb0, lb2Blames[*lb0]}}, {ubTTy}));
+            if (!UnifyAndTrim(cms, {*lb0, lb2Blames[*lb0]}, {ubTTy.ty, ubTTy.blames})) {
+                MaybeSetErrMsg(
+                    MakeMsgConflictingConstraints(tyVar, {{*lb0, lb2Blames[*lb0]}}, {{ubTTy.ty, ubTTy.blames}}));
                 return false;
             }
         }
@@ -425,7 +434,7 @@ bool LocalTypeArgumentSynthesis::UnifyTyVarCollectConstraints(
     if (deterministic && !tyMgr.TyVarHasNoSum(tyVar)) {
         auto& sum = c[&tyVar].sum;
         auto& eq = c[&tyVar].eq;
-        if (!eq.empty() && !(*eq.begin())->IsNothing() && sum.count(*eq.begin()) == 0) {
+        if (!eq.empty() && !eq.begin()->Ty()->IsNothing() && sum.count(*eq.begin()) == 0) {
             return false;
         }
     }
@@ -446,10 +455,15 @@ bool LocalTypeArgumentSynthesis::UnifyContextTyVar(const Tracked<Ty>& argTTy, co
         // Unify empty intersection ty as argument is same with unify with type of 'Any'.
         auto& ubs = gTy->upperBounds;
         if (ubs.empty()) {
-            return UnifyOne({*tyMgr.GetAnyTy(), {}}, paramTTy);
+            return UnifyOne({{tyMgr.GetAnyTy()}, {}}, {{&paramTy}, paramTTy.blames});
         }
-        auto ubTy = ubs.size() == 1 ? *ubs.begin() : tyMgr.GetIntersectionTy(ubs);
-        return UnifyOne({*ubTy, argTTy.blames}, paramTTy);
+        DataTy ubTy;
+        if (ubs.size() == 1) {
+            ubTy = *ubs.begin();
+        } else {
+            ubTy = tyMgr.GetIntersectionTy({ubs.begin(), ubs.end()});
+        }
+        return UnifyOne({{ubTy}, argTTy.blames}, {{&paramTy}, paramTTy.blames});
     }
 
     if (paramTy.IsGeneric() && !StaticCast<TyVar*>(&paramTy)->isPlaceholder) {
@@ -470,14 +484,14 @@ bool LocalTypeArgumentSynthesis::UnifyFuncTy(const Tracked<FuncTy>& argTTy, cons
         if (!paramTy.paramTys[i] || !argTy.paramTys[i]) {
             return false;
         }
-        if (!UnifyAndTrim(cms, {*paramTy.paramTys[i], paramTTy.blames}, {*argTy.paramTys[i], argTTy.blames})) {
+        if (!UnifyAndTrim(cms, {paramTy.paramTys[i], paramTTy.blames}, {argTy.paramTys[i], argTTy.blames})) {
             return false;
         }
     }
     if (!argTy.retTy || !paramTy.retTy) {
         return false;
     }
-    if (!UnifyAndTrim(cms, {*argTy.retTy, argTTy.blames}, {*paramTy.retTy, paramTTy.blames})) {
+    if (!UnifyAndTrim(cms, {argTy.retTy, argTTy.blames}, {paramTy.retTy, paramTTy.blames})) {
         return false;
     }
     return true;
@@ -494,7 +508,7 @@ bool LocalTypeArgumentSynthesis::UnifyTupleTy(const Tracked<TupleTy>& argTTy, co
         if (!argTy.typeArgs[i] || !paramTy.typeArgs[i]) {
             return false;
         }
-        if (!UnifyOne({*argTy.typeArgs[i], argTTy.blames}, {*paramTy.typeArgs[i], paramTTy.blames})) {
+        if (!UnifyOne({argTy.typeArgs[i], argTTy.blames}, {paramTy.typeArgs[i], paramTTy.blames})) {
             return false;
         }
     }
@@ -505,7 +519,7 @@ bool LocalTypeArgumentSynthesis::UnifyNominal(const Tracked<Ty>& argTTy, const T
 {
     auto& argTy = argTTy.ty;
     auto& paramTy = paramTTy.ty;
-    auto prTys = std::make_unique<Promotion>(tyMgr)->Promote(argTy, paramTy);
+    auto prTys = std::make_unique<Promotion>(tyMgr)->Promote(ModalTy{&argTy}, ModalTy{&paramTy});
     if (prTys.empty()) {
         return false;
     }
@@ -529,19 +543,17 @@ bool LocalTypeArgumentSynthesis::UnifyNominal(const Tracked<Ty>& argTTy, const T
             // For nominal types, I1<A> <: I2<B> iff A <: B and B <: A.
             if (needDiagMsg && errMsg.style == SolvingErrStyle::DEFAULT) {
                 auto [tmpCms, tmpMsg] =
-                    Unify(currentCms, {*prTy->typeArgs[i], argTTy.blames}, {*paramTy.typeArgs[i], paramTTy.blames});
+                    Unify(currentCms, {prTy->typeArgs[i], argTTy.blames}, {paramTy.typeArgs[i], paramTTy.blames});
                 errMsg = tmpMsg;
                 auto [tmpCms2, tmpMsg2] =
-                    Unify(tmpCms, {*paramTy.typeArgs[i], paramTTy.blames}, {*prTy->typeArgs[i], argTTy.blames});
+                    Unify(tmpCms, {paramTy.typeArgs[i], paramTTy.blames}, {prTy->typeArgs[i], argTTy.blames});
                 currentCms = tmpCms2;
                 MaybeSetErrMsg(tmpMsg2);
             } else {
                 currentCms =
-                    Unify(currentCms, {*prTy->typeArgs[i], argTTy.blames}, {*paramTy.typeArgs[i], paramTTy.blames})
-                        .first;
+                    Unify(currentCms, {prTy->typeArgs[i], argTTy.blames}, {paramTy.typeArgs[i], paramTTy.blames}).first;
                 currentCms =
-                    Unify(currentCms, {*paramTy.typeArgs[i], paramTTy.blames}, {*prTy->typeArgs[i], argTTy.blames})
-                        .first;
+                    Unify(currentCms, {paramTy.typeArgs[i], paramTTy.blames}, {prTy->typeArgs[i], argTTy.blames}).first;
             }
         }
         res.insert(res.end(), currentCms.begin(), currentCms.end());
@@ -580,30 +592,30 @@ void LocalTypeArgumentSynthesis::UpdateIdealTysInConstraints(PrimitiveTy& tgtTy)
         return;
     }
     Constraint& c = cms.front().constraint;
-    if (!Ty::IsTyCorrect(this->curTyVar)) {
+    if (!this->curTyVar || !Ty::IsTyCorrect(DataTy{this->curTyVar})) {
         return;
     }
 
-    Ptr<Ty> idealInt = TypeManager::GetPrimitiveTy(TypeKind::TYPE_IDEAL_INT);
-    Ptr<Ty> idealFloat = TypeManager::GetPrimitiveTy(TypeKind::TYPE_IDEAL_FLOAT);
+    ModalTy idealInt{TypeManager::GetPrimitiveTy(TypeKind::TYPE_IDEAL_INT)};
+    ModalTy idealFloat{TypeManager::GetPrimitiveTy(TypeKind::TYPE_IDEAL_FLOAT)};
     auto& lbs = c[this->curTyVar].lbs;
     // Actually only one of the contains is true otherwise errors will be reported beforehand when checking
     // argTy <: paramTy and the program will not run up to here.
     if (Utils::In(idealInt, lbs)) {
         lbs.erase(idealInt);
-        lbs.insert(&tgtTy);
+        lbs.insert(ModalTy{&tgtTy});
     } else if (Utils::In(idealFloat, lbs)) {
         lbs.erase(idealFloat);
-        lbs.insert(&tgtTy);
+        lbs.insert(ModalTy{&tgtTy});
     }
 
     auto& ubs = c[this->curTyVar].ubs;
     if (Utils::In(idealInt, ubs)) {
         ubs.erase(idealInt);
-        ubs.insert(&tgtTy);
+        ubs.insert(ModalTy{&tgtTy});
     } else if (Utils::In(idealFloat, ubs)) {
         ubs.erase(idealFloat);
-        ubs.insert(&tgtTy);
+        ubs.insert(ModalTy{&tgtTy});
     }
 }
 
@@ -612,8 +624,8 @@ bool LocalTypeArgumentSynthesis::UnifyBuiltInTy(const Tracked<Ty>& argTTy, const
     // Array/CPointer type must have exactly one type argument by definition.
     // TypeArgument of these built-in type are invariant.
     if (argTTy.ty.IsTyArgsSingleton() && paramTTy.ty.IsTyArgsSingleton()) {
-        return UnifyOne({*argTTy.ty.typeArgs[0], argTTy.blames}, {*paramTTy.ty.typeArgs[0], paramTTy.blames}) &&
-            UnifyOne({*paramTTy.ty.typeArgs[0], paramTTy.blames}, {*argTTy.ty.typeArgs[0], argTTy.blames});
+        return UnifyOne({argTTy.ty.typeArgs[0], argTTy.blames}, {paramTTy.ty.typeArgs[0], paramTTy.blames}) &&
+            UnifyOne({paramTTy.ty.typeArgs[0], paramTTy.blames}, {argTTy.ty.typeArgs[0], argTTy.blames});
     } else {
         return false;
     }
@@ -622,11 +634,15 @@ bool LocalTypeArgumentSynthesis::UnifyBuiltInTy(const Tracked<Ty>& argTTy, const
 bool LocalTypeArgumentSynthesis::UnifyParamIntersectionTy(
     const Tracked<Ty>& argTTy, const Tracked<IntersectionTy>& paramTTy)
 {
+    std::set<ModalTy> paramModals;
+    for (auto pty : paramTTy.ty.tys) {
+        paramModals.insert(ModalTy{pty});
+    }
     std::optional<StableTys> st;
-    auto [tyL, tyR] = GetMaybeStableIters(paramTTy.ty.tys, st);
+    auto [tyL, tyR] = GetMaybeStableIters(paramModals, st);
     // A <: B & C holds if A <: B AND A <: C holds
     for (auto ty = tyL; ty != tyR; ++ty) {
-        if (!UnifyAndTrim(cms, argTTy, {**ty, paramTTy.blames})) {
+        if (!UnifyAndTrim(cms, {ModalTy{&argTTy.ty}, argTTy.blames}, {*ty, paramTTy.blames})) {
             return false;
         }
     }
@@ -638,17 +654,15 @@ bool LocalTypeArgumentSynthesis::UnifyArgIntersectionTy(
 {
     auto& argTy = argTTy.ty;
     if (argTy.tys.empty()) {
-        return UnifyOne({*tyMgr.GetAnyTy(), {}}, paramTTy);
+        return UnifyOne({ModalTy{tyMgr.GetAnyTy()}, {}}, {ModalTy{&paramTTy.ty}, paramTTy.blames});
     } else if (argTy.tys.size() == 1) {
-        return UnifyOne({**argTy.tys.begin(), argTTy.blames}, paramTTy);
+        return UnifyOne({ModalTy{*argTy.tys.begin()}, argTTy.blames}, {ModalTy{&paramTTy.ty}, paramTTy.blames});
     } // else: see below
 
     // A & B <: C holds if either A <: C OR B <: C.
     ConstraintWithMemos res;
-    std::optional<StableTys> st;
-    auto [tyL, tyR] = GetMaybeStableIters(argTy.tys, st);
-    for (auto ty = tyL; ty != tyR; ++ty) {
-        auto [newCMS, msg] = Unify(cms, {**ty, argTTy.blames}, paramTTy);
+    for (auto pty : argTy.tys) {
+        auto [newCMS, msg] = Unify(cms, {ModalTy{pty}, argTTy.blames}, {ModalTy{&paramTTy.ty}, paramTTy.blames});
         MaybeSetErrMsg(msg);
         res.insert(res.end(), newCMS.begin(), newCMS.end());
         if (deterministic && !res.empty()) {
@@ -666,14 +680,12 @@ bool LocalTypeArgumentSynthesis::UnifyParamUnionTy(const Tracked<Ty>& argTTy, co
     if (paramTy.tys.empty()) {
         return argTy.IsNothing();
     } else if (paramTy.tys.size() == 1) {
-        return UnifyOne(argTTy, {**paramTy.tys.begin(), paramTTy.blames});
+        return UnifyOne({ModalTy{&argTTy.ty}, argTTy.blames}, {ModalTy{*paramTy.tys.begin()}, paramTTy.blames});
     } // else: see below
 
     ConstraintWithMemos res;
-    std::optional<StableTys> st;
-    auto [tyL, tyR] = GetMaybeStableIters(paramTy.tys, st);
-    for (auto ty = tyL; ty != tyR; ++ty) {
-        auto [newCMS, msg] = Unify(cms, argTTy, {**ty, paramTTy.blames});
+    for (auto pty : paramTy.tys) {
+        auto [newCMS, msg] = Unify(cms, {ModalTy{&argTTy.ty}, argTTy.blames}, {ModalTy{pty}, paramTTy.blames});
         MaybeSetErrMsg(msg);
         res.insert(res.end(), newCMS.begin(), newCMS.end());
         if (deterministic && !res.empty()) {
@@ -686,11 +698,9 @@ bool LocalTypeArgumentSynthesis::UnifyParamUnionTy(const Tracked<Ty>& argTTy, co
 
 bool LocalTypeArgumentSynthesis::UnifyArgUnionTy(const Tracked<UnionTy>& argTTy, const Tracked<Ty>& paramTTy)
 {
-    std::optional<StableTys> st;
-    auto [tyL, tyR] = GetMaybeStableIters(argTTy.ty.tys, st);
     // A V B <: C holds if A <: C AND B <: C holds
-    for (auto ty = tyL; ty != tyR; ++ty) {
-        if (!UnifyAndTrim(cms, {**ty, argTTy.blames}, paramTTy)) {
+    for (auto pty : argTTy.ty.tys) {
+        if (!UnifyAndTrim(cms, {ModalTy{pty}, argTTy.blames}, {ModalTy{&paramTTy.ty}, paramTTy.blames})) {
             return false;
         }
     }
@@ -732,16 +742,16 @@ std::optional<TypeSubst> LocalTypeArgumentSynthesis::SolveConstraints(bool allow
 }
 
 namespace {
-Ptr<Ty> MeetUpperBounds(TypeManager& tyMgr, Ptr<TyVar> tyVar, const UpperBounds& ubs, const TyVars& ignoredTyVars)
+ModalTy MeetUpperBounds(TypeManager& tyMgr, Ptr<TyVar> tyVar, const UpperBounds& ubs, const TyVars& ignoredTyVars)
 {
     // Classify the upperbound into tys which is a generic type with 'tyVar' in its typeArgs and other tys.
     // eg: T <: Interface<T>
     // First calculate meet result with ty without tyVars. If there exists valid result 'tyM',
     // than instantiating 'tysWithTyVar' with the mapping "tyVar -> tyM", and calculate final meet result
     // using substituted tys and 'tyM'.
-    Ptr<Ty> tyM = nullptr; // Must set by 'SetMetType'.
-    std::set<Ptr<Ty>> tysWithoutTyVar;
-    std::set<Ptr<Ty>> tysWithTyVar;
+    ModalTy tyM{}; // Must set by 'SetMetType'.
+    std::set<ModalTy> tysWithoutTyVar;
+    std::set<ModalTy> tysWithTyVar;
     // Step 1, classify tys.
     std::for_each(ubs.begin(), ubs.end(),
         [&](auto ty) { ty->Contains(tyVar) ? tysWithTyVar.emplace(ty) : tysWithoutTyVar.emplace(ty); });
@@ -751,7 +761,7 @@ Ptr<Ty> MeetUpperBounds(TypeManager& tyMgr, Ptr<TyVar> tyVar, const UpperBounds&
         tysWithoutTyVar.clear();
         // Step 2, substitute tys with the 'tyVar'.
         for (auto& it : tysWithTyVar) {
-            tysWithoutTyVar.emplace(tyMgr.GetInstantiatedTy(it, {std::make_pair(tyVar, tyM)}));
+            tysWithoutTyVar.emplace(tyMgr.GetInstantiatedTy(it, {std::make_pair(tyVar, tyM.Ty())}));
         }
         tysWithoutTyVar.emplace(tyM);
         // Step 3, meet the final result.
@@ -783,40 +793,40 @@ std::optional<TypeSubst> LocalTypeArgumentSynthesis::FindSolution(
             }
 
             auto joinRes = JoinAndMeet(tyMgr, thisM[tyVar].lbs, tyVarsOfThisM).JoinAsVisibleTy();
-            Ptr<Ty> tyJ{};
+            ModalTy tyJ{};
             tyJ = JoinAndMeet::SetJoinedType(tyJ, joinRes).second;
-            Ptr<Ty> tyM = MeetUpperBounds(tyMgr, tyVar, thisM[tyVar].ubs, tyVarsOfThisM);
-            bool validAnyTy = hasAnyTy || (deterministic && thisM[tyVar].ubs.count(tyMgr.GetAnyTy()) > 0);
+            ModalTy tyM = MeetUpperBounds(tyMgr, tyVar, thisM[tyVar].ubs, tyVarsOfThisM);
+            bool validAnyTy = hasAnyTy || (deterministic && thisM[tyVar].ubs.count(ModalTy{tyMgr.GetAnyTy()}) > 0);
             bool validNothingTy =
-                hasNothingTy || (deterministic && thisM[tyVar].lbs.count(TypeManager::GetNothingTy()) > 0);
-            if (IsValidSolution(*tyJ, validNothingTy, validAnyTy)) {
-                thisSubst.emplace(std::make_pair(tyVar, tyJ));
+                hasNothingTy || (deterministic && thisM[tyVar].lbs.count(ModalTy{TypeManager::GetNothingTy()}) > 0);
+            if (IsValidSolution(tyJ, validNothingTy, validAnyTy)) {
+                thisSubst.emplace(std::make_pair(tyVar, tyJ.Ty()));
                 newInfo = true;
                 thisM.erase(tyVar);
             } else if (tyJ->HasIdealTy() && !tyM->IsNumeric()) {
-                tyJ = tyMgr.ReplaceIdealTy(std::move(tyJ));
-                thisSubst.emplace(std::make_pair(tyVar, tyJ));
+                tyJ = tyMgr.ReplaceIdealTy(tyJ);
+                thisSubst.emplace(std::make_pair(tyVar, tyJ.Ty()));
                 newInfo = true;
                 thisM.erase(tyVar);
-            } else if (IsValidSolution(*tyM, validNothingTy, validAnyTy)) {
-                thisSubst.emplace(std::make_pair(tyVar, tyM));
+            } else if (IsValidSolution(tyM, validNothingTy, validAnyTy)) {
+                thisSubst.emplace(std::make_pair(tyVar, tyM.Ty()));
                 newInfo = true;
                 thisM.erase(tyVar);
             } else if (tyM->HasIdealTy()) {
-                tyM = tyMgr.ReplaceIdealTy(std::move(tyM));
-                thisSubst.emplace(std::make_pair(tyVar, tyM));
+                tyM = tyMgr.ReplaceIdealTy(tyM);
+                thisSubst.emplace(std::make_pair(tyVar, tyM.Ty()));
                 newInfo = true;
                 thisM.erase(tyVar);
             } else if (needDiagMsg) {
                 StableTys lbSt(thisM[tyVar].lbs.begin(), thisM[tyVar].lbs.end());
                 StableTys ubSt(thisM[tyVar].ubs.begin(), thisM[tyVar].ubs.end());
-                std::vector<Tracked<Ty>> lbs;
+                std::vector<Tracked<ModalTy>> lbs;
                 for (auto lb : lbSt) {
-                    lbs.push_back({*lb, thisM[tyVar].lb2Blames[lb]});
+                    lbs.push_back({lb, thisM[tyVar].lb2Blames[lb]});
                 }
-                std::vector<Tracked<Ty>> ubs;
+                std::vector<Tracked<ModalTy>> ubs;
                 for (auto ub : ubSt) {
-                    ubs.push_back({*ub, thisM[tyVar].ub2Blames[ub]});
+                    ubs.push_back({ub, thisM[tyVar].ub2Blames[ub]});
                 }
                 msg = MakeMsgConflictingConstraints(*tyVar, lbs, ubs);
             }
@@ -830,11 +840,12 @@ std::optional<TypeSubst> LocalTypeArgumentSynthesis::FindSolution(
     return {thisSubst};
 }
 
-bool LocalTypeArgumentSynthesis::IsValidSolution(const Ty& ty, const bool hasNothingTy, const bool hasAnyTy) const
+bool LocalTypeArgumentSynthesis::IsValidSolution(ModalTy ty, const bool hasNothingTy, const bool hasAnyTy) const
 {
-    bool solution = !ty.HasInvalidTy() && !ty.IsNothing() && !ty.IsAny() && !ty.HasIdealTy() && !ty.IsCType();
-    solution = solution || (hasNothingTy && ty.IsNothing());
-    solution = solution || (hasAnyTy && ty.IsAny());
+    bool solution =
+        ty && !ty->HasInvalidTy() && !ty->IsNothing() && !ty->IsAny() && !ty->HasIdealTy() && !ty->IsCType();
+    solution = solution || (hasNothingTy && ty->IsNothing());
+    solution = solution || (hasAnyTy && ty->IsAny());
     return solution;
 }
 
@@ -909,8 +920,8 @@ std::optional<TypeSubst> LocalTypeArgumentSynthesis::GetBestSolution(const TypeS
 void LocalTypeArgumentSynthesis::CompareCandidates(
     Ptr<TyVar> tyVar, const std::vector<TypeSubst>& candidates, std::vector<bool>& maximals)
 {
-    auto checkForNumeric = [&maximals](auto& tyI, auto& tyJ, size_t i, size_t j) {
-        auto res = TypeCheckUtil::CompareIntAndFloat(tyI, tyJ);
+    auto checkForNumeric = [&maximals](ModalTy tyI, ModalTy tyJ, size_t i, size_t j) {
+        auto res = TypeCheckUtil::CompareIntAndFloat(*tyI, *tyJ);
         if (res == TypeCheckUtil::ComparisonRes::GT) {
             maximals[i] = false;
         } else if (res == TypeCheckUtil::ComparisonRes::LT) {
@@ -921,17 +932,17 @@ void LocalTypeArgumentSynthesis::CompareCandidates(
         if (!maximals[i]) {
             continue;
         }
-        auto tyI = tyMgr.GetInstantiatedTy(tyVar, candidates[i]);
+        auto tyI = tyMgr.GetInstantiatedTy(ModalTy{tyVar}, candidates[i]);
         CJC_NULLPTR_CHECK(tyI);
         for (size_t j = i + 1; j < candidates.size(); ++j) {
             if (!maximals[j]) {
                 continue;
             }
-            auto tyJ = tyMgr.GetInstantiatedTy(tyVar, candidates[j]);
+            auto tyJ = tyMgr.GetInstantiatedTy(ModalTy{tyVar}, candidates[j]);
             CJC_NULLPTR_CHECK(tyJ);
             if (tyI->IsNumeric() && tyJ->IsNumeric()) {
                 // If candidates are numberic types, comparing them with built-in comparator.
-                checkForNumeric(*tyI, *tyJ, i, j);
+                checkForNumeric(tyI, tyJ, i, j);
             } else if (!tyMgr.IsSubtype(tyI, tyJ)) {
                 maximals[i] = false;
             } else if (!tyMgr.IsSubtype(tyJ, tyI)) {
@@ -1066,8 +1077,7 @@ TypeSubst LocalTypeArgumentSynthesis::ResetIdealTypesInSubst(TypeSubst& m)
     TypeSubst res;
     for (const auto& pair : std::as_const(m)) {
         Ptr<TyVar> tyVar = pair.first;
-        Ptr<Ty> instTy = pair.second;
-        instTy = tyMgr.ReplaceIdealTy(std::move(instTy));
+        auto instTy = tyMgr.ReplaceIdealTy(pair.second);
         res.emplace(tyVar, instTy);
     }
     return res;
@@ -1102,19 +1112,19 @@ SolvingErrInfo LocalTypeArgumentSynthesis::GetErrInfo()
 {
     /* Recover names as context ty vars. */
     if (errMsg.tyVar) {
-        errMsg.tyVar = StaticCast<TyVar*>(tyMgr.RecoverUnivTyVar(errMsg.tyVar));
+        errMsg.tyVar = StaticCast<TyVar*>(tyMgr.RecoverUnivTyVar({errMsg.tyVar}).Ty());
     }
-    for (auto& ty: errMsg.lbs) {
+    for (auto& ty : errMsg.lbs) {
         ty = tyMgr.RecoverUnivTyVar(ty);
     }
-    for (auto& ty: errMsg.ubs) {
+    for (auto& ty : errMsg.ubs) {
         ty = tyMgr.RecoverUnivTyVar(ty);
     }
     return errMsg;
 }
 
-std::pair<std::set<Ptr<Ty>>::iterator, std::set<Ptr<Ty>>::iterator> LocalTypeArgumentSynthesis::GetMaybeStableIters(
-    const std::set<Ptr<Ty>>& s, std::optional<StableTys>& ss) const
+std::pair<std::set<ModalTy>::iterator, std::set<ModalTy>::iterator> LocalTypeArgumentSynthesis::GetMaybeStableIters(
+    const std::set<ModalTy>& s, std::optional<StableTys>& ss) const
 {
     auto tyL = s.cbegin();
     auto tyR = s.cend();
@@ -1140,15 +1150,15 @@ std::pair<TyVars::iterator, TyVars::iterator> LocalTypeArgumentSynthesis::GetMay
 }
 
 SolvingErrInfo LocalTypeArgumentSynthesis::MakeMsgConflictingConstraints(
-    TyVar& v, const std::vector<Tracked<AST::Ty>>& lbTTys, const std::vector<Tracked<AST::Ty>>& ubTTys) const
+    TyVar& v, const std::vector<Tracked<ModalTy>>& lbTTys, const std::vector<Tracked<ModalTy>>& ubTTys) const
 {
     auto ret = SolvingErrInfo{.style = SolvingErrStyle::CONFLICTING_CONSTRAINTS, .tyVar = &v};
     for (auto tty : lbTTys) {
-        ret.lbs.emplace_back(&tty.ty);
+        ret.lbs.emplace_back(tty.ty);
         ret.blames.push_back(tty.blames);
     }
     for (auto tty : ubTTys) {
-        ret.ubs.emplace_back(&tty.ty);
+        ret.ubs.emplace_back(tty.ty);
         ret.blames.push_back(tty.blames);
     }
     return ret;
@@ -1164,18 +1174,18 @@ SolvingErrInfo LocalTypeArgumentSynthesis::MakeMsgNoConstraint(TyVar& v) const
 
 SolvingErrInfo LocalTypeArgumentSynthesis::MakeMsgMismatchedArg(const Blame& blame) const
 {
-    return {
-        .style = SolvingErrStyle::ARG_MISMATCH,
-        .blames = {{blame}}
-    };
+    SolvingErrInfo r;
+    r.style = SolvingErrStyle::ARG_MISMATCH;
+    r.blames.push_back(std::set<Blame>{blame});
+    return r;
 }
 
 SolvingErrInfo LocalTypeArgumentSynthesis::MakeMsgMismatchedRet(const Blame& blame) const
 {
-    return {
-        .style = SolvingErrStyle::RET_MISMATCH,
-        .blames = {{blame}}
-    };
+    SolvingErrInfo r;
+    r.style = SolvingErrStyle::RET_MISMATCH;
+    r.blames.push_back(std::set<Blame>{blame});
+    return r;
 }
 
 void LocalTypeArgumentSynthesis::MaybeSetErrMsg(const SolvingErrInfo& s)
@@ -1185,7 +1195,7 @@ void LocalTypeArgumentSynthesis::MaybeSetErrMsg(const SolvingErrInfo& s)
     }
 }
 
-bool TypeChecker::TypeCheckerImpl::Unify(Constraint& cst, AST::Ty& argTy, AST::Ty& paramTy)
+bool TypeChecker::TypeCheckerImpl::Unify(Constraint& cst, ModalTy argTy, ModalTy paramTy)
 {
     return LocalTypeArgumentSynthesis::Unify(typeManager, cst, argTy, paramTy);
 }
@@ -1195,11 +1205,10 @@ std::optional<TypeSubst> TypeChecker::TypeCheckerImpl::SolveConstraints(const Co
     return LocalTypeArgumentSynthesis::SolveConstraints(typeManager, cst);
 }
 
-bool LocalTypeArgumentSynthesis::Unify(
-    TypeManager& tyMgr, Constraint& cst, AST::Ty& argTy, AST::Ty& paramTy)
+bool LocalTypeArgumentSynthesis::Unify(TypeManager& tyMgr, Constraint& cst, ModalTy argTy, ModalTy paramTy)
 {
     LocTyArgSynArgPack dummyArgPack = {
-        {}, {}, {}, {}, TypeManager::GetInvalidTy(), TypeManager::GetInvalidTy(), Blame()};
+        {}, {}, {}, {}, ModalTy{TypeManager::GetInvalidTy()}, {TypeManager::GetInvalidTy()}, Blame()};
     auto synIns = LocalTypeArgumentSynthesis(tyMgr, dummyArgPack, {}, false);
     synIns.cms = {{cst}};
     synIns.deterministic = true;
@@ -1213,26 +1222,26 @@ bool LocalTypeArgumentSynthesis::Unify(
 
 std::optional<TypeSubst> LocalTypeArgumentSynthesis::SolveConstraints(TypeManager& tyMgr, const Constraint& cst)
 {
-    LocTyArgSynArgPack dummyArgPack = {
-        tyMgr.GetUnsolvedTyVars(), {}, {}, {}, TypeManager::GetInvalidTy(), TypeManager::GetInvalidTy(), Blame()};
+    LocTyArgSynArgPack dummyArgPack = {tyMgr.GetUnsolvedTyVars(), {}, {}, {}, ModalTy{TypeManager::GetInvalidTy()},
+        {TypeManager::GetInvalidTy()}, Blame()};
     auto synIns = LocalTypeArgumentSynthesis(tyMgr, dummyArgPack, {}, false);
     synIns.cms = {{cst}};
     synIns.deterministic = true;
     return synIns.SolveConstraints(true);
 }
 
-bool LocalTypeArgumentSynthesis::IsGreedySolution(const TyVar& tv, const Ty& bound, bool isUpperbound)
+bool LocalTypeArgumentSynthesis::IsGreedySolution(const TyVar& tv, ModalTy bound, bool isUpperbound)
 {
     // the bound is universal ty var
-    bool tyParam = bound.IsGeneric() && !bound.IsPlaceholder();
+    bool tyParam = bound->IsGeneric() && !bound->IsPlaceholder();
     // the bound is placeholder ty var, and depth is no deeper than this one
     // NOTE: if the bound's ty var is introduced in a deeper scope, it will leak out of its scope if used as a solution
     bool outerTyVar =
-        bound.IsPlaceholder() && (tyMgr.ScopeDepthOfTyVar(StaticCast<TyVar&>(bound)) <= tyMgr.ScopeDepthOfTyVar(tv));
+        bound->IsPlaceholder() && (tyMgr.ScopeDepthOfTyVar(StaticCast<TyVar&>(*bound)) <= tyMgr.ScopeDepthOfTyVar(tv));
     // the bound doesn't have inheritance
-    bool finalType = (isUpperbound && bound.IsClass() && !IsInheritableClass(*StaticCast<ClassTy&>(bound).decl)) ||
-        (!bound.IsGeneric() && !bound.IsClassLike() && !bound.IsAny() && !bound.IsNothing());
+    bool finalType = (isUpperbound && bound->IsClass() && !IsInheritableClass(*StaticCast<ClassTy&>(*bound).decl)) ||
+        (!bound->IsGeneric() && !bound->IsClassLike() && !bound->IsAny() && !bound->IsNothing());
     // the solution must be Any/Nothing
-    bool anyOrNothing = (bound.IsAny() && !isUpperbound) || (bound.IsNothing() && isUpperbound);
+    bool anyOrNothing = (bound->IsAny() && !isUpperbound) || (bound->IsNothing() && isUpperbound);
     return tyParam || outerTyVar || finalType || anyOrNothing;
 }

@@ -79,6 +79,7 @@ private:
     void CollectVarDecl(ASTContext& ctx, AST::VarDecl& vd, bool buildTrie);
     void CollectTypeAliasDecl(ASTContext& ctx, AST::TypeAliasDecl& tad, bool buildTrie);
     void CollectIfExpr(ASTContext& ctx, AST::IfExpr& ie, bool buildTrie);
+    void CollectExclaveExpr(ASTContext& ctx, AST::ExclaveExpr& ee, bool buildTrie);
     void CollectCondition(ASTContext& ctx, AST::Expr& e, bool buildTrie);
     void CollectWhileExpr(ASTContext& ctx, AST::WhileExpr& we, bool buildTrie);
     void CollectLitConstExpr(ASTContext& ctx, AST::LitConstExpr& lce, bool buildTrie);

@@ -9,17 +9,17 @@
 using namespace Cangjie;
 using namespace AST;
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynThrowExpr(ASTContext& ctx, ThrowExpr& te)
+ModalTy TypeChecker::TypeCheckerImpl::SynThrowExpr(ASTContext& ctx, ThrowExpr& te)
 {
     CJC_NULLPTR_CHECK(te.expr); // Parser guarantees.
     Synthesize({ctx, SynPos::EXPR_ARG}, te.expr.get());
-    te.SetTy(TypeManager::GetNothingTy());
-    if (!Ty::IsTyCorrect(te.expr->GetTy())) {
-        return TypeManager::GetInvalidTy();
+    te.SetTy({TypeManager::GetNothingTy()});
+    if (!te.expr->GetTy().IsCorrect()) {
+        return {TypeManager::GetInvalidTy()};
     }
     if (te.expr->GetTy()->IsEnum()) {
         if (auto refExpr = DynamicCast<RefExpr*>(te.expr.get()); refExpr && refExpr->ref.identifier == RESOURCE_NAME) {
-            return TypeManager::GetNothingTy();
+            return {TypeManager::GetNothingTy()};
         }
     } else if (te.expr->GetTy()->IsClass() || te.expr->GetTy()->IsGeneric()) {
         // Check if the type of expression thrown is derived from `core.Exception` class
@@ -30,9 +30,9 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynThrowExpr(ASTContext& ctx, ThrowExpr& t
         if (foundClass &&
             (typeManager.IsSubtype(te.expr->GetTy(), exception->GetTy()) ||
                 typeManager.IsSubtype(te.expr->GetTy(), error->GetTy()))) {
-            return TypeManager::GetNothingTy();
+            return {TypeManager::GetNothingTy()};
         }
     }
     diag.Diagnose(te, DiagKind::sema_throw_expr_with_wrong_type);
-    return TypeManager::GetInvalidTy();
+    return {TypeManager::GetInvalidTy()};
 }

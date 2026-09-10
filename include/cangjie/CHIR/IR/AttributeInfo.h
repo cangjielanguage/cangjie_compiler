@@ -9,7 +9,7 @@
 
 #include <bitset>
 #include <cstdint>
-#include <unordered_map>
+#include <string>
 
 namespace Cangjie::CHIR {
 
@@ -67,27 +67,11 @@ enum class Attribute {
     HAS_INITED_FIELD, ///< Mark whether a node is a special flag, which marks the class instance as initialized.
     JAVA_HAS_DEFAULT, ///< Mark whether JAVA_MIRROR interface has default method.
     PREVIOUSLY_DESERIALIZED, /// Mark that deserialization occurs not in the newly created node, but in an existing one.
+    DEMODE, ///< Mark instance member field as @Demode (@~local regardless of receiver modal).
+    EXCLAVE, ///< Mark a function whether it's exclave
 
     ATTR_END
 };
-
-const std::unordered_map<Attribute, std::string> ATTR_TO_STRING{{Attribute::STATIC, "static"},
-    {Attribute::PUBLIC, "public"}, {Attribute::PRIVATE, "private"}, {Attribute::PROTECTED, "protected"},
-    {Attribute::ABSTRACT, "abstract"}, {Attribute::VIRTUAL, "virtual"}, {Attribute::OVERRIDE, "override"},
-    {Attribute::REDEF, "redef"}, {Attribute::SEALED, "sealed"}, {Attribute::FOREIGN, "foreign"},
-    {Attribute::MUT, "mut"}, {Attribute::OPERATOR, "operator"}, {Attribute::CONST, "compileTimeVal"},
-    {Attribute::READONLY, "readOnly"}, {Attribute::IMPORTED, "imported"}, {Attribute::NON_RECOMPILE, "nonRecompile"},
-    {Attribute::GENERIC_INSTANTIATED, "generic_instantiated"}, {Attribute::INTERNAL, "internal"},
-    {Attribute::COMPILER_ADD, "compilerAdd"}, {Attribute::GENERIC, "generic"},
-    {Attribute::NO_REFLECT_INFO, "noReflectInfo"}, {Attribute::NO_INLINE, "noInline"},
-    {Attribute::NO_DEBUG_INFO, "noDebugInfo"}, {Attribute::UNREACHABLE, "unreachable"},
-    {Attribute::NO_SIDE_EFFECT, "noSideEffect"}, {Attribute::FINAL, "final"},
-    {Attribute::COMMON, "common"}, {Attribute::SPECIFIC, "specific"},
-    {Attribute::SKIP_ANALYSIS, "skip_analysis"}, {Attribute::DESERIALIZED, "deserialized"},
-    {Attribute::INITIALIZER, "initializer"},
-    {Attribute::UNSAFE, "unsafe"}, {Attribute::JAVA_MIRROR, "javaMirror"}, {Attribute::JAVA_IMPL, "javaImpl"},
-    {Attribute::OBJ_C_MIRROR, "objCMirror"}, {Attribute::HAS_INITED_FIELD, "hasInitedField"},
-    {Attribute::JAVA_HAS_DEFAULT, "javaHasDefault"}, {Attribute::PREVIOUSLY_DESERIALIZED, "previouslyDeserialized"}};
 
 constexpr uint64_t ATTR_SIZE = 64;
 

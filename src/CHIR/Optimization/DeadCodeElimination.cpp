@@ -779,6 +779,8 @@ void DeadCodeElimination::UnreachableBlockEliminationForFunc(const BlockGroup& b
         for (auto expr : block->GetExpressions()) {
             if (expr->GetExprKind() == ExprKind::LAMBDA) {
                 UnreachableBlockEliminationForFunc(*StaticCast<const Lambda*>(expr)->GetBody(), isDebug);
+            } else if (expr->GetExprKind() == ExprKind::EXCLAVE) {
+                UnreachableBlockEliminationForFunc(*StaticCast<const Exclave*>(expr)->GetBody(), isDebug);
             }
         }
 

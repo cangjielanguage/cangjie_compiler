@@ -33,8 +33,8 @@ struct GenericInfoHash {
         size_t ret = 0;
         ret = hash_combine<Ptr<const AST::Decl>>(ret, info.decl);
         for (auto n : info.gTyToTyMap) {
-            ret = hash_combine<Ptr<AST::Ty>>(ret, n.first);
-            ret = hash_combine<Ptr<AST::Ty>>(ret, n.second);
+            ret = hash_combine<AST::DataTy>(ret, n.first);
+            ret = hash_combine<AST::DataTy>(ret, n.second);
         }
         return ret;
     }
@@ -145,9 +145,9 @@ private:
     };
     std::vector<Ptr<AST::Decl>> structContext;
     /** Key: sema type; Value: whether contains intersection ty. */
-    std::unordered_map<Ptr<AST::Ty>, bool> intersectionTyStatus;
+    std::unordered_map<AST::ModalTy, bool> intersectionTyStatus;
     /** Mark whether current type has instantiated related extends for package in gim. */
-    std::unordered_set<std::pair<Ptr<AST::Ty>, std::string>, HashPair> extendGenerated;
+    std::unordered_set<std::pair<AST::ModalTy, std::string>, HashPair> extendGenerated;
     /** Store the source imported decls which are checked with instantiation status. */
     std::unordered_set<Ptr<const AST::Decl>> usedSrcImportedDecls;
     /** Used for incremental compilation, decide whether new created instantiation need to be compiled. */
@@ -179,7 +179,8 @@ private:
      */
     Ptr<AST::Decl> FindInCache(const GenericInfo& info);
     /** Construct GenericInfo. */
-    GenericInfo ConstructGenericInfo(AST::Decl& decl, const std::vector<Ptr<AST::Ty>>& instTys) const;
+    GenericInfo ConstructGenericInfo(AST::Decl& decl, const std::vector<AST::DataTy>& instTys) const;
+    GenericInfo ConstructGenericInfo(AST::Decl& decl, const std::vector<AST::ModalTy>& instTys) const;
     void AppendGenericMemberMap(const AST::Decl& genericDecl,
         const std::unordered_set<Ptr<AST::Decl>>& insNominalDecls, Generic2InsMap& result) const;
     /**
@@ -193,7 +194,8 @@ private:
     /**
      * Instantiate a generic decl @p genericDecl with type arguments @p instTys.
      */
-    void InstantiateGenericDeclWithInstTys(AST::Decl& decl, const std::vector<Ptr<AST::Ty>>& instTys);
+    void InstantiateGenericDeclWithInstTys(AST::Decl& decl, const std::vector<AST::DataTy>& instTys);
+    void InstantiateGenericDeclWithInstTys(AST::Decl& decl, const std::vector<AST::ModalTy>& instTys);
     /**
      * Walk inherited types which are used by non-generic be boxed extend decls.
      * Used to guarantee all related generic types are instantiated.
@@ -204,9 +206,9 @@ private:
         const AST::Node& genericNode, AST::Node& clonedNode, const GenericInfo& info, const TypeSubst& g2gTyMap);
     void PerformUpdateAttrDuringClone(AST::Node& genericNode, AST::Node& clonedNode) const;
     /** Find implemented version function of abstract function @p interfaceFunc in the decl of Ty @p ty. */
-    Ptr<AST::FuncDecl> FindImplFuncForAbstractFunc(AST::Ty& ty, AST::FuncDecl& fd, AST::Ty& targetBaseTy);
+    Ptr<AST::FuncDecl> FindImplFuncForAbstractFunc(AST::ModalTy ty, AST::FuncDecl& fd, AST::ModalTy targetBaseTy);
     /** Whether the abstract-function resolution can be skipped for @p fd under @p ty. */
-    bool ShouldSkipAbstractFuncResolution(AST::Ty& ty, const AST::FuncDecl& fd) const;
+    bool ShouldSkipAbstractFuncResolution(AST::DataTy ty, const AST::FuncDecl& fd) const;
     /**
      * Resolve the concrete instantiated FuncDecl among the instantiated decls of @p implFunc's outer decl
      * (and its generic instantiations) whose type matches @p matchedInstTy, falling back to @p implFunc.
@@ -230,8 +232,8 @@ private:
     /** Instantiate generic ArrayList @p al which has Struct-Array type. */
     void GenericArrayLitInstantiate(AST::ArrayLit& al);
     /** Instantiate extend of generic sema type @p ty 's extends. */
-    void GenericTyExtendInstantiate(AST::Ty& ty);
-    void InstantiateGenericTysForMemoryLayout(const AST::Ty& ty);
+    void GenericTyExtendInstantiate(AST::ModalTy ty);
+    void InstantiateGenericTysForMemoryLayout(AST::ModalTy ty);
     /** Instantiate imported partial instantiated member decl. */
     Ptr<AST::Decl> ReinstantiatedPartialMemberDecl(
         const GenericInfo& genericInfo, AST::Decl& structDecl, AST::Decl& genericMember, size_t memberIndex);
@@ -246,8 +248,10 @@ private:
     void RearrangeFuncBodyReference(AST::FuncBody& fb);
     void UpdateTypePatternMatchResult(AST::Pattern& pattern);
     Ptr<AST::Decl> GetInstantiatedTarget(
-        AST::Ty& baseTy, AST::Decl& target, const std::vector<Ptr<AST::Ty>>& instTys, Ptr<AST::Ty> upperTy = nullptr);
-    Ptr<AST::Decl> GetInstantiatedMemberTarget(AST::Ty& baseTy, AST::Decl& target, bool inRearrange = false);
+        AST::ModalTy baseTy, AST::Decl& target, const std::vector<AST::DataTy>& instTys, AST::ModalTy upperTy = {});
+    Ptr<AST::Decl> GetInstantiatedTarget(
+        AST::ModalTy baseTy, AST::Decl& target, const std::vector<AST::ModalTy>& instTys, AST::ModalTy upperTy = {});
+    Ptr<AST::Decl> GetInstantiatedMemberTarget(AST::ModalTy baseTy, AST::Decl& target, bool inRearrange = false);
 
     /** Build interface function to implemented function map for all type decls */
     void BuildAbstractFuncMap();
@@ -272,23 +276,23 @@ private:
         return decl;
     }
 
-    bool HasIntersectionTy(AST::Ty& ty)
+    bool HasIntersectionTy(AST::ModalTy ty)
     {
-        auto found = intersectionTyStatus.find(&ty);
+        auto found = intersectionTyStatus.find(ty);
         if (found != intersectionTyStatus.end()) {
             return found->second;
         }
-        if (ty.IsIntersection()) {
-            intersectionTyStatus.emplace(&ty, true);
+        if (ty->IsIntersection()) {
+            intersectionTyStatus.emplace(ty, true);
             return true;
         }
-        for (auto typeArg : ty.typeArgs) {
-            if (typeArg && HasIntersectionTy(*typeArg)) {
-                intersectionTyStatus.emplace(&ty, true);
+        for (auto typeArg : ty->typeArgs) {
+            if (typeArg && HasIntersectionTy(typeArg)) {
+                intersectionTyStatus.emplace(ty, true);
                 return true;
             }
         }
-        intersectionTyStatus.emplace(&ty, false);
+        intersectionTyStatus.emplace(ty, false);
         return false;
     }
     size_t CountSkippedMembersBefore(const AST::Decl& decl, size_t offset);

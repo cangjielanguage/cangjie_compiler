@@ -14,8 +14,9 @@
 #ifndef CANGJIE_SEMA_MOCK_MANAGER_H
 #define CANGJIE_SEMA_MOCK_MANAGER_H
 
-#include "cangjie/Sema/TypeManager.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Modules/ImportManager.h"
+#include "cangjie/Sema/TypeManager.h"
 
 #include "MockUtils.h"
 
@@ -25,7 +26,7 @@ enum class MockKind : uint8_t;
 
 class MockManager {
 public:
-    explicit MockManager(ImportManager& importManager, TypeManager& typeManager, const Ptr<MockUtils> mockUtils);
+    explicit MockManager(ImportManager& importManager, TypeManager& typeManager, Ptr<MockUtils> mockUtils);
     void LoadMockLibDecls();
 
     struct GeneratedClassResult {
@@ -39,10 +40,9 @@ public:
 
     static OwnedPtr<AST::ThrowExpr> CreateIllegalMockCallException(
         AST::File& curFile, TypeManager& typeMgr, ImportManager& importMgr);
-    static OwnedPtr<AST::CallExpr> CreateInitCallOfMockClass(
-        AST::ClassDecl& mockClass, std::vector<OwnedPtr<AST::FuncArg>>& mockCallArgs,
-        TypeManager& typeManager, const std::vector<Ptr<AST::Ty>> instTys,
-        const std::vector<Ptr<AST::Ty>> valueParamTys);
+    static OwnedPtr<AST::CallExpr> CreateInitCallOfMockClass(AST::ClassDecl& mockClass,
+        std::vector<OwnedPtr<AST::FuncArg>>& mockCallArgs, TypeManager& typeManager,
+        const std::vector<AST::ModalTy> instTys, const std::vector<AST::ModalTy> valueParamTys);
     static bool IsMockCall(const AST::CallExpr& ce);
     static bool IsMockClass(const AST::Decl& decl);
     static MockKind GetMockKind(const AST::CallExpr& ce);
@@ -50,8 +50,7 @@ public:
 
 private:
     static OwnedPtr<AST::VarDecl> CreateFieldDecl(
-        AST::ClassLikeDecl& decl, const std::string& identifier, const Ptr<AST::Ty> ty, const AST::Package& curPkg
-    );
+        AST::ClassLikeDecl& decl, const std::string& identifier, AST::ModalTy ty, const AST::Package& curPkg);
 
     TypeManager& typeManager;
     ImportManager& importManager;
@@ -87,23 +86,21 @@ private:
     void AddMockedInterface(AST::ClassDecl& mockedDecl, AST::VarDecl& handlerFieldDecl);
 
     OwnedPtr<AST::MatchExpr> CreateTypeCastForOnCallReturnValue(
-        OwnedPtr<AST::Expr> exprToCast, const Ptr<AST::Ty> castTy
-    ) const;
+        OwnedPtr<AST::Expr> exprToCast, AST::ModalTy castTy) const;
     OwnedPtr<AST::AssignExpr> CreateMemberAssignment(
-        AST::VarDecl& member, OwnedPtr<AST::Expr> rhsExpr
-    ) const;
+        AST::VarDecl& member, OwnedPtr<AST::Expr> rhsExpr) const;
 
     OwnedPtr<AST::MatchCase> CreateOnCallReturnZeroMatchCase(
-        const AST::FuncDecl& originalFunc, const Ptr<AST::Ty> zeroValueTy, AST::Decl& enumConstructor) const;
+        const AST::FuncDecl& originalFunc, AST::ModalTy zeroValueTy, AST::Decl& enumConstructor) const;
     OwnedPtr<AST::MatchCase> CreateOnCallReturnMatchCase(
-        const AST::FuncDecl& originalFunc, const Ptr<AST::Ty> retTy, AST::Decl& enumConstructor) const;
+        const AST::FuncDecl& originalFunc, AST::ModalTy retTy, AST::Decl& enumConstructor) const;
     OwnedPtr<AST::MatchCase> CreateOnCallThrowMatchCase(
         const AST::FuncDecl& originalFunc, AST::Decl& enumConstructor) const;
     OwnedPtr<AST::MatchCase> CreateOnCallCallBaseMatchCase(
         AST::FuncDecl& originalFunc, const AST::FuncDecl& mockedFunc, AST::Decl& enumConstructor) const;
     OwnedPtr<AST::MatchCase> CreateOnCallReturnDefaultMatchCase(
-        const AST::FuncDecl& originalFunc, const Ptr<AST::Ty> retTy, AST::Decl& enumConstructor);
-    Ptr<AST::FuncDecl> FindDefaultValueForStubMethod(const Ptr<AST::Ty> retTy) const;
+        const AST::FuncDecl& originalFunc, AST::ModalTy retTy, AST::Decl& enumConstructor);
+    Ptr<AST::FuncDecl> FindDefaultValueForStubMethod(AST::ModalTy retTy) const;
     OwnedPtr<AST::MatchCase> CreateOnCallResultMatchCase(
         AST::FuncDecl& originalFunc, const Ptr<AST::FuncDecl> mockedFunc, AST::Decl& enumConstructor);
     OwnedPtr<AST::FuncDecl> CreateEmptyConstructorDecl(

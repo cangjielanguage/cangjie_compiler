@@ -15,7 +15,7 @@
 #include "ImplUtils.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/Basic/Match.h"
-#include "cangjie/Utils/Casting.h"
+#include "cangjie/AST/ASTCasting.h"
 
 namespace Cangjie {
 using namespace Cangjie::AST;
@@ -197,6 +197,17 @@ OwnedPtr<VarDecl> PartialInstantiation::InstantiateFuncParam(const FuncParam& fp
     return ret;
 }
 
+OwnedPtr<VarDecl> PartialInstantiation::InstantiateThisParam(
+    const ThisParam& tp, [[maybe_unused]] const VisitFunc& visitor)
+{
+    auto ret = MakeOwned<ThisParam>();
+    ret->thisPos = tp.thisPos;
+    ret->modal = tp.modal;
+    ret->commaPos = tp.commaPos;
+    ret->EnableAttr(Attribute::COMPILER_ADD);
+    return OwnedPtr<VarDecl>(ret.release());
+}
+
 OwnedPtr<Decl> PartialInstantiation::InstantiateVarWithPatternDecl(
     const VarWithPatternDecl& vwpd, const VisitFunc& visitor)
 {
@@ -214,6 +225,7 @@ OwnedPtr<Decl> PartialInstantiation::InstantiateVarWithPatternDecl(
 OwnedPtr<Decl> PartialInstantiation::InstantiateVarDecl(const VarDecl& vd, const VisitFunc& visitor)
 {
     auto ret = match(vd)([&visitor](const FuncParam& e) { return InstantiateFuncParam(e, visitor); },
+        [&visitor](const ThisParam& e) { return InstantiateThisParam(e, visitor); },
         []() { return MakeOwned<VarDecl>(); });
     // Instantiate field in VarDecl.
     ret->type = InstantiateType(vd.type.get(), visitor);
@@ -443,6 +455,7 @@ OwnedPtr<QualifiedType> PartialInstantiation::InstantiateQualifiedType(
     for (auto& it : node.typeArguments) {
         ret->typeArguments.push_back(InstantiateType(it.get(), visitor));
     }
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -452,6 +465,7 @@ OwnedPtr<ParenType> PartialInstantiation::InstantiateParenType(const ParenType& 
     ret->type = InstantiateType(node.type.get(), visitor);
     ret->leftParenPos = node.leftParenPos;
     ret->rightParenPos = node.rightParenPos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -464,6 +478,7 @@ OwnedPtr<OptionType> PartialInstantiation::InstantiateOptionType(const OptionTyp
     if (node.desugarType != nullptr) {
         ret->desugarType = Instantiate(node.desugarType.get(), visitor);
     }
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -478,6 +493,7 @@ OwnedPtr<FuncType> PartialInstantiation::InstantiateFuncType(const FuncType& nod
     ret->leftParenPos = node.leftParenPos;
     ret->rightParenPos = node.rightParenPos;
     ret->arrowPos = node.arrowPos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -508,6 +524,7 @@ OwnedPtr<VArrayType> PartialInstantiation::InstantiateVArrayType(const VArrayTyp
     ret->typeArgument = InstantiateType(node.typeArgument.get(), visitor);
     ret->constantType = InstantiateType(node.constantType.get(), visitor);
     ret->rightAnglePos = node.rightAnglePos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -593,6 +610,13 @@ OwnedPtr<IfExpr> PartialInstantiation::InstantiateIfExpr(const IfExpr& ie, const
     expr->isElseIf = ie.isElseIf;
     expr->elsePos = ie.elsePos;
     expr->elseBody = InstantiateExpr(ie.elseBody.get(), visitor);
+    return expr;
+}
+
+OwnedPtr<PrimitiveTypeExpr> PartialInstantiation::InstantiatePrimitiveTypeExpr(const PrimitiveTypeExpr& pte)
+{
+    auto expr = MakeOwned<PrimitiveTypeExpr>(pte.typeKind);
+    expr->modal = pte.modal;
     return expr;
 }
 
@@ -991,6 +1015,14 @@ OwnedPtr<SynchronizedExpr> PartialInstantiation::InstantiateSynchronizedExpr(
     return expr;
 }
 
+OwnedPtr<ExclaveExpr> PartialInstantiation::InstantiateExclaveExpr(const ExclaveExpr& ee, const VisitFunc& visitor)
+{
+    auto expr = MakeOwned<ExclaveExpr>();
+    expr->exclavePos = ee.exclavePos;
+    expr->body = InstantiateExpr(ee.body.get(), visitor);
+    return expr;
+}
+
 OwnedPtr<InvalidExpr> PartialInstantiation::InstantiateInvalidExpr(const InvalidExpr& ie)
 {
     auto expr = MakeOwned<InvalidExpr>(ie.begin);
@@ -1072,7 +1104,7 @@ OwnedPtr<ExprT> PartialInstantiation::InstantiateExpr(Ptr<ExprT> expr, const Vis
     auto clonedExpr = match(*expr)(
         // PrimitiveExpr, AdjointExpr are ignored.
         [&visitor](const IfExpr& ie) { return OwnedPtr<Expr>(InstantiateIfExpr(ie, visitor)); },
-        [](const PrimitiveTypeExpr& pte) { return OwnedPtr<Expr>(MakeOwned<PrimitiveTypeExpr>(pte.typeKind)); },
+        [](const PrimitiveTypeExpr& pte) { return OwnedPtr<Expr>(InstantiatePrimitiveTypeExpr(pte)); },
         [&visitor](const MacroExpandExpr& mee) { return OwnedPtr<Expr>(InstantiateMacroExpandExpr(mee, visitor)); },
         [&visitor](const TokenPart& tp) { return OwnedPtr<Expr>(InstantiateTokenPart(tp, visitor)); },
         [&visitor](const QuoteExpr& qe) { return OwnedPtr<Expr>(InstantiateQuoteExpr(qe, visitor)); },
@@ -1117,6 +1149,7 @@ OwnedPtr<ExprT> PartialInstantiation::InstantiateExpr(Ptr<ExprT> expr, const Vis
         [](const WildcardExpr& /* we */) { return OwnedPtr<Expr>(MakeOwned<WildcardExpr>()); },
         [&visitor](
             const LetPatternDestructor& ld) { return OwnedPtr<Expr>(InstantiateLetPatternDestructor(ld, visitor)); },
+        [&visitor](const ExclaveExpr& ee) { return OwnedPtr<Expr>(InstantiateExclaveExpr(ee, visitor)); },
         [&expr]() {
             // Invalid and ignored cases.
             auto invalidExpr = MakeOwned<InvalidExpr>(expr->begin);
@@ -1445,6 +1478,9 @@ OwnedPtr<FuncParamList> PartialInstantiation::InstantiateFuncParamList(
     CopyNodeField(ret.get(), fpl);
     // Instantiate field in FuncParamList.
     ret->leftParenPos = fpl.leftParenPos;
+    if (fpl.thisParam) {
+        ret->thisParam = OwnedPtr(StaticCast<ThisParam>(InstantiateDecl(fpl.thisParam, visitor).release()));
+    }
     for (auto& it : fpl.params) {
         auto funcParam = MakeOwned<FuncParam>();
         auto d = InstantiateDecl(it.get(), visitor);
@@ -1502,8 +1538,8 @@ OwnedPtr<ImportSpec> PartialInstantiation::InstantiateImportSpec(const ImportSpe
         CopyNodeField(ret->modifier.get(), *is.modifier);
         ret->modifier->isExplicit = is.modifier->isExplicit;
     }
-    std::function<void(const ImportContent&, ImportContent&)> cloneContent
-        = [&cloneContent](const ImportContent& src, ImportContent& dst) {
+    std::function<void(const ImportContent&, ImportContent&)> cloneContent = [&cloneContent](const ImportContent& src,
+                                                                                 ImportContent& dst) {
         CopyNodeField(&dst, src);
         dst.kind = src.kind;
         dst.prefixPaths = src.prefixPaths;
@@ -1763,82 +1799,90 @@ OwnedPtr<Node> PartialInstantiation::InstantiateWithRearrange(Ptr<Node> node, co
     return targetNode;
 }
 
-Ptr<Ty> TyGeneralizer::Generalize(Ty& ty)
+DataTy TyGeneralizer::Generalize(DataTy ty)
 {
+    if (!Ty::IsTyCorrect(ty)) {
+        return ty;
+    }
     if (typeMapping.empty()) {
-        return &ty;
+        return ty;
     }
-    if (auto found = typeMapping.find(&ty); found != typeMapping.end()) {
-        return found->second;
+    if (auto found = typeMapping.find(ty); found != typeMapping.end()) {
+        return {found->second};
     }
-    switch (ty.kind) {
+    Ty& rawTy = *ty;
+    switch (rawTy.kind) {
         case TypeKind::TYPE_FUNC: {
-            std::vector<Ptr<Ty>> paramTys;
-            auto& funcTy = static_cast<FuncTy&>(ty);
+            auto& funcTy = static_cast<FuncTy&>(rawTy);
+            std::vector<ModalTy> paramTys;
             for (auto& it : funcTy.paramTys) {
-                paramTys.push_back(Generalize(it));
+                paramTys.emplace_back(Generalize(it.Ty()), it.Mode());
             }
-            auto retType = Generalize(funcTy.retTy);
-            Ptr<Ty> ret = tyMgr.GetFunctionTy(
+            ModalTy retType = {Generalize(funcTy.retTy.Ty()), funcTy.retTy.Mode()};
+            Ptr<FuncTy> fnTy = tyMgr.GetFunctionTy(
                 paramTys, retType, {funcTy.IsCFunc(), funcTy.isClosureTy, funcTy.hasVariableLenArg});
-            return ret;
+            return {fnTy};
         }
         case TypeKind::TYPE_TUPLE: {
-            std::vector<Ptr<Ty>> typeArgs;
-            std::transform(ty.typeArgs.begin(), ty.typeArgs.end(), std::back_inserter(typeArgs),
-                [this](auto it) { return Generalize(it); });
-            return tyMgr.GetTupleTy(typeArgs, static_cast<TupleTy&>(ty).isClosureTy);
+            auto& tupleTy = static_cast<TupleTy&>(rawTy);
+            std::vector<DataTy> typeArgs;
+            typeArgs.reserve(tupleTy.typeArgs.size());
+            for (auto& it : tupleTy.typeArgs) {
+                typeArgs.push_back(Generalize(it.Ty()));
+            }
+            return {tyMgr.GetTupleTy(typeArgs, tupleTy.isClosureTy)};
         }
         case TypeKind::TYPE_ARRAY:
-            return GetGeneralizedArrayTy(static_cast<ArrayTy&>(ty));
+            return GetGeneralizedArrayTy(static_cast<ArrayTy&>(rawTy));
         case TypeKind::TYPE_POINTER:
-            return GetGeneralizedPointerTy(static_cast<PointerTy&>(ty));
+            return GetGeneralizedPointerTy(static_cast<PointerTy&>(rawTy));
         case TypeKind::TYPE_STRUCT:
-            return GetGeneralizedStructTy(static_cast<StructTy&>(ty));
+            return GetGeneralizedStructTy(static_cast<StructTy&>(rawTy));
         case TypeKind::TYPE_CLASS:
-            return GetGeneralizedClassTy(static_cast<ClassTy&>(ty));
+            return GetGeneralizedClassTy(static_cast<ClassTy&>(rawTy));
         case TypeKind::TYPE_INTERFACE:
-            return GetGeneralizedInterfaceTy(static_cast<InterfaceTy&>(ty));
+            return GetGeneralizedInterfaceTy(static_cast<InterfaceTy&>(rawTy));
         case TypeKind::TYPE_ENUM:
-            return GetGeneralizedEnumTy(static_cast<EnumTy&>(ty));
+            return GetGeneralizedEnumTy(static_cast<EnumTy&>(rawTy));
         case TypeKind::TYPE: {
-            std::vector<Ptr<Ty>> typeArgs;
-            for (auto& it : ty.typeArgs) {
-                typeArgs.push_back(Generalize(it));
+            auto& taTy = static_cast<TypeAliasTy&>(rawTy);
+            std::vector<DataTy> typeArgs;
+            for (auto& it : rawTy.typeArgs) {
+                typeArgs.push_back(Generalize(it.Ty()));
             }
-            return tyMgr.GetTypeAliasTy(*static_cast<TypeAliasTy&>(ty).declPtr, typeArgs);
+            return {tyMgr.GetTypeAliasTy(*taTy.declPtr, typeArgs)};
         }
         case TypeKind::TYPE_INTERSECTION:
-            return GetGeneralizedSetTy(static_cast<IntersectionTy&>(ty));
+            return GetGeneralizedSetTy(static_cast<IntersectionTy&>(rawTy));
         case TypeKind::TYPE_UNION:
-            return GetGeneralizedSetTy(static_cast<UnionTy&>(ty));
+            return GetGeneralizedSetTy(static_cast<UnionTy&>(rawTy));
         default:;
     }
-    return &ty;
+    return ty;
 }
 
-Ptr<Ty> TyGeneralizer::GetGeneralizedStructTy(StructTy& structTy)
+DataTy TyGeneralizer::GetGeneralizedStructTy(StructTy& structTy)
 {
     // If is a struct without generic parameter, no need do instantiation.
     if (!structTy.declPtr || !structTy.declPtr->generic) {
         return &structTy;
     }
-    std::vector<Ptr<Ty>> typeArgs;
+    std::vector<DataTy> typeArgs;
     // Build type arguments.
-    for (auto& it : structTy.typeArgs) {
+    for (auto& it : structTy.TyArgs()) {
         typeArgs.push_back(Generalize(it));
     }
     auto recTy = tyMgr.GetStructTy(*structTy.declPtr, typeArgs);
     return recTy;
 }
 
-Ptr<Ty> TyGeneralizer::GetGeneralizedClassTy(ClassTy& classTy)
+DataTy TyGeneralizer::GetGeneralizedClassTy(ClassTy& classTy)
 {
     if (!classTy.declPtr || !classTy.declPtr->generic) {
         return &classTy;
     }
-    std::vector<Ptr<Ty>> typeArgs;
-    for (auto& it : classTy.typeArgs) {
+    std::vector<DataTy> typeArgs;
+    for (auto& it : classTy.TyArgs()) {
         typeArgs.push_back(Generalize(it));
     }
     Ptr<ClassTy> insTy = nullptr;
@@ -1850,28 +1894,28 @@ Ptr<Ty> TyGeneralizer::GetGeneralizedClassTy(ClassTy& classTy)
     return insTy;
 }
 
-Ptr<Ty> TyGeneralizer::GetGeneralizedInterfaceTy(InterfaceTy& interfaceTy)
+DataTy TyGeneralizer::GetGeneralizedInterfaceTy(InterfaceTy& interfaceTy)
 {
     if (!interfaceTy.declPtr || !interfaceTy.declPtr->generic) {
         return &interfaceTy;
     }
-    std::vector<Ptr<Ty>> typeArgs;
-    for (auto& it : interfaceTy.typeArgs) {
+    std::vector<DataTy> typeArgs;
+    for (auto& it : interfaceTy.TyArgs()) {
         typeArgs.push_back(Generalize(it));
     }
     auto insTy = tyMgr.GetInterfaceTy(*interfaceTy.declPtr, typeArgs);
     return insTy;
 }
 
-Ptr<Ty> TyGeneralizer::GetGeneralizedEnumTy(EnumTy& enumTy)
+DataTy TyGeneralizer::GetGeneralizedEnumTy(EnumTy& enumTy)
 {
     // If is an enum without generic parameter, no need to do instantiation.
     if (!enumTy.declPtr || !enumTy.declPtr->generic) {
         return &enumTy;
     }
-    std::vector<Ptr<Ty>> typeArgs;
+    std::vector<DataTy> typeArgs;
     // Build type arguments.
-    for (auto& it : enumTy.typeArgs) {
+    for (auto& it : enumTy.TyArgs()) {
         typeArgs.push_back(Generalize(it));
     }
     if (Is<RefEnumTy>(enumTy)) {
@@ -1882,29 +1926,29 @@ Ptr<Ty> TyGeneralizer::GetGeneralizedEnumTy(EnumTy& enumTy)
     return tmp;
 }
 
-Ptr<Ty> TyGeneralizer::GetGeneralizedArrayTy(ArrayTy& arrayTy)
+DataTy TyGeneralizer::GetGeneralizedArrayTy(ArrayTy& arrayTy)
 {
     if (arrayTy.typeArgs.empty()) {
         return &arrayTy;
     }
-    auto elemTy = Generalize(arrayTy.typeArgs[0]);
+    auto elemTy = Generalize(arrayTy.TyArg(0));
     auto dims = arrayTy.dims;
     return tyMgr.GetArrayTy(elemTy, dims);
 }
 
-Ptr<Ty> TyGeneralizer::GetGeneralizedPointerTy(PointerTy& cptrTy)
+DataTy TyGeneralizer::GetGeneralizedPointerTy(PointerTy& cptrTy)
 {
     if (cptrTy.typeArgs.empty()) {
         return &cptrTy;
     }
-    auto elemTy = Generalize(cptrTy.typeArgs[0]);
+    auto elemTy = Generalize(cptrTy.TyArg(0));
     return tyMgr.GetPointerTy(elemTy);
 }
 
 // Get instantiated ty of set type 'IntersectionTy' and 'UnionTy'.
-template <typename SetTy> Ptr<Ty> TyGeneralizer::GetGeneralizedSetTy(SetTy& ty)
+template <typename SetTy> DataTy TyGeneralizer::GetGeneralizedSetTy(SetTy& ty)
 {
-    std::set<Ptr<Ty>> tys;
+    std::set<DataTy> tys;
     for (auto it : ty.tys) {
         tys.emplace(Generalize(it));
     }

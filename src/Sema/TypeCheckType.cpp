@@ -58,10 +58,10 @@ void TypeChecker::TypeCheckerImpl::CheckReferenceTypeLegality(ASTContext& ctx, T
             break;
     }
     // Check all related type's sema ty, udpate current node's ty to invalid, if any of them invalid.
-    bool hasInvalidTy = !Ty::IsTyCorrect(t.GetTy()) ||
-        std::any_of(typeArgs.begin(), typeArgs.end(), [](auto& it) { return !Ty::IsTyCorrect(it->GetTy()); });
+    bool hasInvalidTy = !t.GetTy().IsCorrect() ||
+        std::any_of(typeArgs.begin(), typeArgs.end(), [](auto& it) { return !it->GetTy().IsCorrect(); });
     if (hasInvalidTy) {
-        t.SetTy(TypeManager::GetInvalidTy());
+        t.SetTy({TypeManager::GetInvalidTy()});
     }
 }
 
@@ -73,31 +73,31 @@ void TypeChecker::TypeCheckerImpl::CheckOptionType(ASTContext& ctx, const Option
 }
 
 std::tuple<bool, std::string> TypeChecker::TypeCheckerImpl::CheckVArrayWithRefType(
-    Ty& ty, std::unordered_set<Ptr<Ty>>& traversedTy)
+    ModalTy ty, std::unordered_set<ModalTy>& traversedTy)
 {
-    if (ty.IsStructArray() || ty.IsClassLike() || ty.IsArray() || ty.IsEnum() || ty.IsGeneric() ||
-        (ty.IsFunc() && !ty.IsCFunc())) {
-        return {true, Ty::ToString(&ty)};
+    if (ty->IsStructArray() || ty->IsClassLike() || ty->IsArray() || ty->IsEnum() || ty->IsGeneric() ||
+        (ty->IsFunc() && !ty->IsCFunc())) {
+        return {true, ty.String()};
     }
-    if (std::find(traversedTy.begin(), traversedTy.end(), Ptr(&ty)) != traversedTy.end()) {
+    if (traversedTy.count(ty) != 0) {
         return {false, ""};
     }
-    (void)traversedTy.emplace(&ty);
-    if (auto sd = DynamicCast<StructDecl*>(Ty::GetDeclPtrOfTy(&ty))) {
-        auto typeMapping = promotion.GetPromoteTypeMapping(ty, *sd->GetTy());
+    (void)traversedTy.insert(ty);
+    if (auto sd = DynamicCast<StructDecl*>(Ty::GetDeclPtrOfTy(ty))) {
+        auto typeMapping = promotion.GetPromoteTypeMapping(ty.Ty(), sd->DataTy());
         for (auto& decl : sd->GetMemberDecls()) {
             if (decl->TestAttr(Attribute::STATIC) || decl->astKind != ASTKind::VAR_DECL) {
                 continue;
             }
             auto memberTy = typeManager.GetBestInstantiatedTy(decl->GetTy(), typeMapping);
-            auto [needReport, reportType] = CheckVArrayWithRefType(*memberTy, traversedTy);
+            auto [needReport, reportType] = CheckVArrayWithRefType(memberTy, traversedTy);
             if (needReport) {
                 return {needReport, reportType};
             }
         }
-    } else if (ty.IsTuple()) {
-        for (auto typeArg : ty.typeArgs) {
-            auto [needReport, reportType] = CheckVArrayWithRefType(*typeArg, traversedTy);
+    } else if (ty->IsTuple()) {
+        for (const auto& typeArg : ty->typeArgs) {
+            auto [needReport, reportType] = CheckVArrayWithRefType(typeArg, traversedTy);
             if (needReport) {
                 return {needReport, reportType};
             }
@@ -116,14 +116,14 @@ void TypeChecker::TypeCheckerImpl::CheckVArrayType(ASTContext& ctx, const VArray
     // The runtime gc cannot manage data of type llvm::array, so it cannot use a reference type as its element type,
     // which is temporarily prohibited by semantics.
     auto typeArgTy = vt.typeArgument->GetTy();
-    if (!Ty::IsTyCorrect(typeArgTy)) {
+    if (!typeArgTy.IsCorrect()) {
         return;
     }
-    std::unordered_set<Ptr<Ty>> traversedTy = {};
-    auto [isReferenceType, type] = CheckVArrayWithRefType(*typeArgTy, traversedTy);
+    std::unordered_set<ModalTy> traversedTy = {};
+    auto [isReferenceType, type] = CheckVArrayWithRefType(typeArgTy, traversedTy);
     if (isReferenceType) {
-        auto builder = diag.DiagnoseRefactor(
-            DiagKindRefactor::sema_varray_arg_type_with_reftype, *vt.typeArgument, Ty::ToString(typeArgTy));
+        auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_varray_arg_type_with_reftype,
+            *vt.typeArgument, typeArgTy.String());
         builder.AddMainHintArguments(type);
     }
 }
@@ -210,13 +210,13 @@ void TypeChecker::TypeCheckerImpl::CheckRefTypeWithRealTarget(RefType& rt)
         return;
     }
     if (auto aliasTarget = DynamicCast<TypeAliasDecl*>(target)) {
-        std::vector<Ptr<Ty>> diffs = GetUnusedTysInTypeAlias(*aliasTarget);
+        std::vector<ModalTy> diffs = GetUnusedTysInTypeAlias(*aliasTarget);
         Utils::EraseIf(typeArgs, [&diffs](auto type) { return Utils::In(type->GetTy(), diffs); });
     }
     if (!CheckGenericDeclInstantiation(realTarget, typeArgs, rt)) {
         // Do not clear type target when constraints mismatched.
         // Guarantees constraint error can be thrown when re-checking.
-        rt.SetTy(TypeManager::GetInvalidTy());
+        rt.SetTy({TypeManager::GetInvalidTy()});
     }
     RestoreTypes(rt.typeArguments, backup);
 }
@@ -240,7 +240,7 @@ void TypeChecker::TypeCheckerImpl::CheckRefType(ASTContext& ctx, RefType& rt)
     if (!IsGenericTypeWithTypeArgs(rt)) {
         diag.Diagnose(rt, DiagKind::sema_generic_type_without_type_argument);
         // Unbind target-user relationship when setting type to invalid.
-        rt.SetTy(TypeManager::GetInvalidTy());
+        rt.SetTy({TypeManager::GetInvalidTy()});
         return;
     }
     // Returns true if further checks can be omitted.
@@ -265,7 +265,7 @@ void TypeChecker::TypeCheckerImpl::CheckCFuncType(ASTContext& ctx, const RefType
     for (auto& it : arg->paramTypes) {
         CheckCFuncParamType(*it);
     }
-    if (!Ty::IsTyCorrect(arg->retType->GetTy())) {
+    if (!arg->retType->GetTy().IsCorrect()) {
         return;
     }
     CheckCFuncReturnType(*arg->retType);
@@ -306,7 +306,7 @@ bool TypeChecker::TypeCheckerImpl::CheckRefTypeCheckAccessLegality(
         diag.Diagnose(rt, DiagKind::sema_invalid_access_control, target.identifier.Val());
         // Unbind target-user relationship when error happens.
         ReplaceTarget(&rt, nullptr);
-        rt.SetTy(TypeManager::GetInvalidTy());
+        rt.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }
     return true;
@@ -317,7 +317,7 @@ void TypeChecker::TypeCheckerImpl::CheckTupleType(ASTContext& ctx, TupleType& tt
     for (auto& it : tt.fieldTypes) {
         CJC_NULLPTR_CHECK(it);
         Synthesize({ctx, SynPos::NONE}, it.get());
-        if (it->GetTy() && Ty::IsCTypeConstraint(*it->GetTy())) {
+        if (it->DataTy() && it->GetTy()->IsCTypeConstraint()) {
             diag.Diagnose(*it, DiagKind::sema_invalid_tuple_field_ctype);
             return;
         }
@@ -337,7 +337,7 @@ void TypeChecker::TypeCheckerImpl::CheckFuncType(ASTContext& ctx, FuncType& ft)
     for (auto& it : ft.paramTypes) {
         CheckCFuncParamType(*it);
     }
-    if (!Ty::IsTyCorrect(ft.retType->GetTy())) {
+    if (!ft.retType->GetTy().IsCorrect()) {
         return;
     }
     CheckCFuncReturnType(*ft.retType);
@@ -345,10 +345,10 @@ void TypeChecker::TypeCheckerImpl::CheckFuncType(ASTContext& ctx, FuncType& ft)
 
 void TypeChecker::TypeCheckerImpl::CheckCFuncReturnType(const Type& type)
 {
-    if (!Ty::IsMetCType(*type.GetTy())) {
+    if (!type.GetTy()->IsMetCType()) {
         auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_invalid_cfunc_return_type, type);
-        builder.AddNote("return type is " + type.GetTy()->String());
-    } else if (Is<VArrayTy>(type.GetTy())) {
+        builder.AddNote("return type is " + type.GetTy().String());
+    } else if (Is<VArrayTy>(type.DataTy())) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_varray_in_cfunc, type);
     }
 }
@@ -372,15 +372,15 @@ void TypeChecker::TypeCheckerImpl::CheckQualifiedType(const ASTContext& ctx, Qua
         diag.Diagnose(qt, DiagKind::sema_generic_type_without_type_argument);
         // Unbind target-user relationship when setting type to invalid.
         ReplaceTarget(&qt, nullptr);
-        qt.SetTy(TypeManager::GetInvalidTy());
+        qt.SetTy({TypeManager::GetInvalidTy()});
         return;
     }
-    if (!Ty::IsTyCorrect(qt.GetTy()) || qt.typeArguments.empty()) {
+    if (!qt.GetTy().IsCorrect() || qt.typeArguments.empty()) {
         return;
     }
     if (!CheckGenericDeclInstantiation(target, qt.GetTypeArgs(), qt)) {
         // Do not clear type target when constraints mismatched.
         // Guarantees constraint error can be thrown when re-checking.
-        qt.SetTy(TypeManager::GetInvalidTy());
+        qt.SetTy({TypeManager::GetInvalidTy()});
     }
 }

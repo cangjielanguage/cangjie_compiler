@@ -167,6 +167,7 @@ private:
     void ClearASTResources();
     bool ExecuteCppPlugins();
     bool ExecuteCjPlugins();
+    void SetMemoryRegion();
 
     template <typename T>
     std::pair<Value*, Apply*> DoCFFIFuncWrapper(T& curFunc, bool isForeign, bool isExternal = true);

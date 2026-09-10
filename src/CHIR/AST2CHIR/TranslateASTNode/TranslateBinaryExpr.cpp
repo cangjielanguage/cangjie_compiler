@@ -43,7 +43,7 @@ Ptr<Value> Translator::Visit(const AST::BinaryExpr& binaryExpr)
 
 Ptr<Value> Translator::ProcessBinaryExpr(const AST::BinaryExpr& binaryExpr)
 {
-    const auto chirType = TranslateType(*binaryExpr.GetTy());
+    const auto chirType = TranslateType(binaryExpr.GetTy());
     const auto& loc = TranslateLocation(binaryExpr);
     auto it = tokenKindToBinaryExprKind.find(binaryExpr.op);
     CJC_ASSERT(it != tokenKindToBinaryExprKind.end());

@@ -38,17 +38,17 @@ public:
     Utils(ImportManager& importManager, TypeManager& typeManager);
 
     // Ty of `Option<ty>`
-    Ptr<Ty> GetOptionTy(Ptr<Ty> ty);
+    ModalTy GetOptionTy(ModalTy ty);
     Ptr<EnumDecl> GetOptionDecl();
 
     // `Option<ty>.None`
-    OwnedPtr<Expr> CreateOptionNoneRef(Ptr<Ty> ty);
+    OwnedPtr<Expr> CreateOptionNoneRef(ModalTy ty);
 
     // `Option<ty>.Some(expr)`
-    OwnedPtr<Expr> CreateOptionSomeCall(OwnedPtr<Expr> expr, Ptr<Ty> ty);
+    OwnedPtr<Expr> CreateOptionSomeCall(OwnedPtr<Expr> expr, ModalTy ty);
 
     // `Option<ty>.Some`
-    OwnedPtr<Expr> CreateOptionSomeRef(Ptr<Ty> ty);
+    OwnedPtr<Expr> CreateOptionSomeRef(ModalTy ty);
 
     // Decl of `java.lang.JObject`
     Ptr<ClassLikeDecl> GetJObjectDecl();
@@ -61,14 +61,11 @@ public:
 
     std::string GetJavaClassNormalizeSignature(const Ty& cjtype) const;
     std::string GetJavaTypeSignature(const Ty& cjtype);
-    std::string GetJavaTypeSignature(Ty& retTy, const std::vector<Ptr<Ty>>& args);
+    std::string GetJavaTypeSignature(Ty& retTy, const std::vector<ModalTy>& args);
     std::string GetJavaObjectTypeName(const Ty& ty);
 
-    OwnedPtr<Expr> CreateOptionMatch(
-        OwnedPtr<Expr> selector,
-        std::function<OwnedPtr<Expr>(VarDecl&)> someBranch,
-        std::function<OwnedPtr<Expr>()> noneBranch,
-        Ptr<Ty> ty);
+    OwnedPtr<Expr> CreateOptionMatch(OwnedPtr<Expr> selector, std::function<OwnedPtr<Expr>(VarDecl&)> someBranch,
+        std::function<OwnedPtr<Expr>()> noneBranch, ModalTy ty);
 
     /**
      * Creates native @C func
@@ -262,7 +259,7 @@ OwnedPtr<CallExpr> CreateCall(Ptr<FuncDecl> fd, Ptr<File> curFile, OwnedPtr<Args
 
     (Details::WrapArg(&funcArgs, std::forward<OwnedPtr<Args>>(args)), ...);
 
-    auto funcTy = StaticCast<FuncTy*>(fd->GetTy());
+    auto funcTy = RawStaticCast<FuncTy*>(fd->DataTy());
 
     return CreateCallExpr(WithinFile(CreateRefExpr(*fd), curFile), std::move(funcArgs), fd, funcTy->retTy,
                           CallKind::CALL_DECLARED_FUNCTION);

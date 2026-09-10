@@ -13,6 +13,7 @@
 
 #include "ParserImpl.h"
 
+#include "cangjie/AST/AttributePack.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Utils/Utils.h"
@@ -49,6 +50,19 @@ bool ParserImpl::SeeingExprOperator()
         return true;
     }
     return IsCompoundAssign(token.kind) || token.kind == TokenKind::ASSIGN;
+}
+
+bool ParserImpl::SeeingTrailingClosure(OwnedPtr<AST::Expr>& baseExpr)
+{
+    if (Seeing(TokenKind::LCURL)) {
+        return true;
+    }
+    if (baseExpr->astKind != AST::ASTKind::CALL_EXPR && baseExpr->astKind != AST::ASTKind::REF_EXPR &&
+        baseExpr->astKind != AST::ASTKind::ARRAY_EXPR) {
+        return false;
+    }
+    // SeeingAnnotationTrailClosure.
+    return SeeingAnnotationLambdaExpr() || SeeingAnnotationTrailingClosure({TokenKind::LSQUARE});
 }
 
 bool ParserImpl::TypeArgsMaybeConfusedWithExprWithComma(const std::vector<OwnedPtr<AST::Type>>& typeArgs) const
@@ -111,6 +125,9 @@ bool ParserImpl::IsLegFollowForGenArgInExprWithComma(ExprKind ek)
     }
     auto token = Peek();
     if (Precedence(token.kind) != INVALID_PRECEDENCE) {
+        return true;
+    }
+    if (SeeingModalInfo()) {
         return true;
     }
     return false;
@@ -504,6 +521,10 @@ OwnedPtr<Expr> ParserImpl::ParseExpr(const Token& preT, OwnedPtr<Expr> expr, Exp
     } else {
         base = ParseBaseExpr(std::move(expr), ek);
     }
+    // Do not attach following operators to an already broken atom.
+    if (base->TestAttr(Attribute::IS_BROKEN)) {
+        return base;
+    }
 
     if (!SeeingExprOperator()) {
         return base;
@@ -585,7 +606,15 @@ void ParserImpl::ParseExprWithRightExprOrType(OwnedPtr<Expr>& base, const Token&
                                           : StaticAs<ASTKind::AS_EXPR>(base.get())->asType = std::move(type);
     } else {
         auto rExpr = ParseExpr(tok, nullptr, ek);
-
+        if (rExpr->TestAttr(Attribute::IS_BROKEN)) {
+            // The right operand is broken; skip its tail but leave outer delimiters to the enclosing parser.
+            auto isRecoverEnd = [this]() {
+                return SeeingAny({TokenKind::NL, TokenKind::SEMI, TokenKind::COMMA, TokenKind::RPAREN,
+                    TokenKind::RSQUARE, TokenKind::RCURL, TokenKind::CASE, TokenKind::END, TokenKind::DOUBLE_ARROW}) ||
+                    SeeingCombinator(combinedDoubleArrow);
+            };
+            ConsumeUntilAny(isRecoverEnd, false);
+        }
         auto res = CheckMacroExprRules(tok, Token{TokenKind::DOT}, *rExpr);
         if (!res || rExpr->TestAttr(Attribute::HAS_BROKEN) || rExpr->TestAttr(Attribute::IS_BROKEN)) {
             base->EnableAttr(Attribute::HAS_BROKEN);
@@ -935,7 +964,16 @@ OwnedPtr<Expr> ParserImpl::ParseCallExpr(OwnedPtr<Expr> baseExpr)
         DiagExpectedRightDelimiter("(", ret->leftParenPos);
     }
     ret->rightParenPos = lastToken.Begin();
-    ret->end = lastToken.End();
+    if (!newlineSkipped) {
+        if (auto modal = ParseModalInfo()) {
+            ret->modal = std::move(modal);
+            ret->end = ret->modal.End();
+        } else {
+            ret->end = lastToken.End();
+        }
+    } else {
+        ret->end = lastToken.End();
+    }
     return ret;
 }
 
@@ -1012,4 +1050,15 @@ void ParserImpl::ParseBaseExprPostfix(OwnedPtr<AST::Expr>& baseExpr, ExprKind ek
     if (hasQuestSuffix) {
         baseExpr->hasQuestSuffix = true;
     }
+}
+
+OwnedPtr<Expr> ParserImpl::ParseExclaveExpr()
+{
+    OwnedPtr<ExclaveExpr> ret = MakeOwned<ExclaveExpr>();
+    ChainScope cs(*this, ret.get());
+    ret->begin = lastToken.Begin();
+    ret->exclavePos = lastToken.Begin();
+    ret->body = ParseBlock(ScopeKind::FUNC_BODY);
+    ret->end = lastToken.End();
+    return ret;
 }

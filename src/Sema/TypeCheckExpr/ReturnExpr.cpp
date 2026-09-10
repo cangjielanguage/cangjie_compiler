@@ -15,16 +15,16 @@ bool TypeChecker::TypeCheckerImpl::ChkReturnExpr(ASTContext& ctx, ReturnExpr& re
     return Ty::IsTyCorrect(SynReturnExpr(ctx, re));
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynReturnExpr(ASTContext& ctx, ReturnExpr& re)
+ModalTy TypeChecker::TypeCheckerImpl::SynReturnExpr(ASTContext& ctx, ReturnExpr& re)
 {
     if (!re.refFuncBody || !re.refFuncBody->retType) {
-        re.SetTy(TypeManager::GetInvalidTy());
+        re.SetTy({TypeManager::GetInvalidTy()});
         return re.GetTy();
     }
 
     CJC_ASSERT(re.expr);
     bool isWellTyped = true;
-    re.SetTy(TypeManager::GetInvalidTy());
+    re.SetTy({TypeManager::GetInvalidTy()});
 
     // Analyse re.expr.
     auto retTy = re.refFuncBody->retType->GetTy();
@@ -39,21 +39,28 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynReturnExpr(ASTContext& ctx, ReturnExpr&
             ctx.targetTypeMap[re.expr.get()] = re.expr->GetTy();
         }
     } else {
-        isWellTyped = Synthesize({ctx, SynPos::EXPR_ARG}, re.expr.get()) && ReplaceIdealTy(*re.expr);
+        isWellTyped = Synthesize({ctx, SynPos::EXPR_ARG}, re.expr.get()) ? true : false;
+        // Keep ideal literal types pending for the return expression of a lambda that is a direct
+        // argument of a generic call, so generic type argument inference can unify it against the
+        // expected contextual type (e.g. `functest({ => return 0 }, 2)` where the expected type is
+        // `() -> Int32`). Mirrors the implicit-return handling in `SynthesizeAndReplaceIdealTy`.
+        if (ctx.inFuncArgLambdaBody == 0) {
+            isWellTyped = isWellTyped && ReplaceIdealTy(*re.expr);
+        }
     }
 
     // Replace ClassThisTy to ClassTy when the function's outer declaration is not Class or Extend which extends class.
     if (!Is<ClassDecl>(re.refFuncBody->parentClassLike)) {
-        if (auto ctt = DynamicCast<ClassThisTy*>(re.expr->GetTy()); ctt && ctt->decl) {
+        if (auto ctt = DynamicCast<ClassThisTy>(re.expr->DataTy()); ctt && ctt->decl) {
             re.expr->SetTy(ctt->decl->GetTy());
         }
     }
 
     // Generic decls imported from foreign code and created by auto-sdk have no body, no need to check return.
     if (!isWellTyped && NeedCheckBodyReturn(*re.refFuncBody)) {
-        re.SetTy(TypeManager::GetInvalidTy());
+        re.SetTy({TypeManager::GetInvalidTy()});
     } else {
-        re.SetTy(TypeManager::GetNothingTy());
+        re.SetTy({TypeManager::GetNothingTy()});
     }
 
     return re.GetTy();
@@ -62,7 +69,7 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynReturnExpr(ASTContext& ctx, ReturnExpr&
 bool TypeChecker::TypeCheckerImpl::CheckReturnInConstructors(ASTContext& ctx, const ReturnExpr& re)
 {
     CJC_NULLPTR_CHECK(re.expr);
-    return Check(ctx, TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT), re.expr.get());
+    return Check(ctx, ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)}, re.expr.get());
 }
 
 bool TypeChecker::TypeCheckerImpl::NeedCheckBodyReturn(const FuncBody& fb) const

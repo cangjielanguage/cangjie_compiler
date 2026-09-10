@@ -56,3 +56,14 @@ target_link_libraries(
     GTest::gtest_main
     TestCompilerInstanceObject)
 add_test(NAME APILevelVersionTest COMMAND APILevelVersionTest)
+
+add_executable(GetTopOverriddenFuncDeclTest GetTopOverriddenFuncDeclTest.cpp)
+target_link_libraries(
+    GetTopOverriddenFuncDeclTest
+    cangjie-lsp
+    ${LINK_LIBS}
+    boundscheck-static
+    GTest::gtest
+    GTest::gtest_main
+    TestCompilerInstanceObject)
+add_test(NAME GetTopOverriddenFuncDeclTest COMMAND GetTopOverriddenFuncDeclTest)

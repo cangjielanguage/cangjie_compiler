@@ -132,6 +132,33 @@ private:
 };
 
 /**
+ * @brief A nested local memory scope carried as a terminator on its parent block.
+ *
+ * The body is a separate BlockGroup. During FlattenExclave the sub-blocks are inlined into the
+ * parent control flow (the Exclave is replaced by a GoTo into its entry block) and a
+ * StartRegion/EndRegion pair is inserted to mark the scope at runtime. It does not exit the
+ * surrounding function.
+ */
+class Exclave : public Expression {
+    friend class CHIRContext;
+    friend class CHIRBuilder;
+public:
+    // ===--------------------------------------------------------------------===//
+    // Base Information
+    // ===--------------------------------------------------------------------===//
+    /** @brief Get the body of this Exclave Expression */
+    BlockGroup* GetBody() const;
+
+    void InitBody(BlockGroup& newBody);
+
+private:
+    explicit Exclave(Block* parent);
+    ~Exclave() override = default;
+
+    Exclave* Clone(CHIRBuilder& builder, Block& parent) const override;
+};
+
+/**
  * @brief Exit current function.
  */
 class Exit : public Expression {

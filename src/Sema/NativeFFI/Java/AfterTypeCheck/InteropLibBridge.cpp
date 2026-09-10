@@ -411,7 +411,7 @@ Ptr<Ty> InteropLibBridge::GetJNIEnvPtrTy()
     if (!decl) {
         return nullptr;
     }
-    return decl->type->GetTy();
+    return decl->type->DataTy();
 }
 
 Ptr<Ty> InteropLibBridge::GetJavaEntityTy()
@@ -421,7 +421,7 @@ Ptr<Ty> InteropLibBridge::GetJavaEntityTy()
         return nullptr;
     }
 
-    return decl->GetTy();
+    return decl->DataTy();
 }
 
 Ty& InteropLibBridge::GetJniJobjectTy() const
@@ -435,7 +435,7 @@ OwnedPtr<PointerExpr> InteropLibBridge::CreateJobjectNull()
 {
     auto pointerExpr = MakeOwnedNode<PointerExpr>();
     pointerExpr->type = MakeOwnedNode<Type>();
-    pointerExpr->type->SetTy(&GetJniJobjectTy());
+    pointerExpr->type->SetTy({&GetJniJobjectTy()});
     pointerExpr->SetTy(pointerExpr->type->GetTy());
     return pointerExpr;
 }
@@ -519,8 +519,8 @@ OwnedPtr<Expr> InteropLibBridge::CreateJavaEntityFromOptionMirror(OwnedPtr<Expr>
 {
     auto curFile = option->curFile;
     CJC_NULLPTR_CHECK(curFile);
-    CJC_ASSERT_WITH_MSG(!option->GetTy()->typeArgs.empty(), "Option type must be generic");
-    auto mirrorTy = option->GetTy()->typeArgs[0];
+    CJC_ASSERT_WITH_MSG(!option->DataTy()->TyArgs().empty(), "Option type must be generic");
+    ModalTy mirrorTy{option->DataTy()->TyArg(0)};
     // `case Some(argv) => argv.javaref`
     auto vp = CreateVarPattern(V_COMPILER, mirrorTy);
     vp->curFile = curFile;
@@ -528,15 +528,15 @@ OwnedPtr<Expr> InteropLibBridge::CreateJavaEntityFromOptionMirror(OwnedPtr<Expr>
     auto javarefAccess = CreateJavaRefCall(WithinFile(CreateRefExpr(*vp->varDecl), curFile), mirror);
 
     auto somePattern = MakeOwnedNode<EnumPattern>();
-    somePattern->SetTy(utils.GetOptionTy(mirrorTy));
-    somePattern->constructor = utils.CreateOptionSomeRef(mirrorTy);
+    somePattern->SetTy(utils.GetOptionTy(mirrorTy.Ty()));
+    somePattern->constructor = utils.CreateOptionSomeRef(mirrorTy.Ty());
     somePattern->patterns.emplace_back(std::move(vp));
     somePattern->curFile = curFile;
     auto caseSome = CreateMatchCase(std::move(somePattern), std::move(javarefAccess));
 
     // `case None => Java_CFFI_JavaEntityJobjectNull()`
     auto nonePattern = MakeOwnedNode<EnumPattern>();
-    nonePattern->constructor = utils.CreateOptionNoneRef(mirrorTy);
+    nonePattern->constructor = utils.CreateOptionNoneRef(mirrorTy.Ty());
     nonePattern->SetTy(nonePattern->constructor->GetTy());
     nonePattern->curFile = curFile;
     auto caseNone = CreateMatchCase(std::move(nonePattern), CreateJavaEntityNullCall(curFile));
@@ -545,7 +545,7 @@ OwnedPtr<Expr> InteropLibBridge::CreateJavaEntityFromOptionMirror(OwnedPtr<Expr>
     std::vector<OwnedPtr<MatchCase>> matchCases;
     matchCases.emplace_back(std::move(caseSome));
     matchCases.emplace_back(std::move(caseNone));
-    return WithinFile(CreateMatchExpr(std::move(option), std::move(matchCases), GetJavaEntityTy()), curFile);
+    return WithinFile(CreateMatchExpr(std::move(option), std::move(matchCases), {GetJavaEntityTy()}), curFile);
 }
 
 OwnedPtr<Expr> InteropLibBridge::CreateJavaEntityCall(OwnedPtr<Expr> arg)
@@ -555,13 +555,13 @@ OwnedPtr<Expr> InteropLibBridge::CreateJavaEntityCall(OwnedPtr<Expr> arg)
         return nullptr;
     }
 
-    if (auto classLTy = DynamicCast<ClassLikeTy*>(arg->GetTy())) {
+    if (auto classLTy = DynamicCast<ClassLikeTy*>(arg->DataTy())) {
         if (auto decl = classLTy->commonDecl; decl && (decl->IsJavaMirror() || decl->IsJavaImpl())) {
             return CreateJavaRefCall(std::move(arg));
         }
     } else if (arg->GetTy()->IsCoreOptionType()) {
         CJC_ASSERT_WITH_MSG(!arg->GetTy()->typeArgs.empty(), "Option type must be generic");
-        if (auto classALTy = DynamicCast<ClassLikeTy*>(arg->GetTy()->typeArgs[0])) {
+        if (auto classALTy = DynamicCast<ClassLikeTy*>(arg->DataTy()->TyArg(0))) {
             if (auto decl = classALTy->commonDecl; decl && (decl->IsJavaMirror() || decl->IsJavaImpl())) {
                 return CreateJavaEntityFromOptionMirror(std::move(arg), *decl);
             }
@@ -583,7 +583,7 @@ OwnedPtr<Expr> InteropLibBridge::CreateJavaEntityCall(OwnedPtr<Expr> arg)
 
     if (!suitableCtor) {
         diag.DiagnoseRefactor(
-            DiagKindRefactor::sema_java_interop_not_supported, arg->begin, "Type " + arg->GetTy()->name);
+            DiagKindRefactor::sema_java_interop_not_supported, arg->begin, "Type " + arg->DataTy()->name);
         return nullptr;
     }
 
@@ -605,7 +605,7 @@ OwnedPtr<Expr> InteropLibBridge::CreateJavaEntityCall(OwnedPtr<Expr> arg)
         return CreateJavaEntityCall(cjExpr->curFile);
     }
 
-    if (IsOptionOfString(cjExpr->GetTy())) {
+    if (IsOptionOfString(cjExpr->DataTy())) {
         auto curFile = cjExpr->curFile;
         auto match = utils.CreateOptionMatch(std::move(cjExpr),
             [&](VarDecl& v) -> OwnedPtr<Expr> {
@@ -652,7 +652,7 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateJNINewObjectCall(Ptr<Expr> env, Owned
     if (argsExpr) {
         callArgs.emplace_back(PrepareJNIArgsVArray(std::move(argsExpr)));
     }
-    auto funcTy = StaticCast<FuncTy*>(newObjectVar->GetTy());
+    auto funcTy = StaticCast<FuncTy*>(newObjectVar->DataTy());
     auto callExpr = CreateCallExpr(std::move(newObjectAccess), std::move(callArgs), nullptr,
         funcTy->retTy, CallKind::CALL_FUNCTION_PTR);
     callExpr->EnableAttr(Attribute::UNSAFE);
@@ -677,7 +677,7 @@ OwnedPtr<Block> InteropLibBridge::CreateJavaConstructorBlock(Ptr<Ty> classTy, Fu
         }
         if (!isMirror) {
             args.push_back(CreateJavaEntityNullCall(curFile));
-            paramTys.push_back(typeManager.GetClassTy(*markerClassDecl, {}));
+            paramTys.push_back({typeManager.GetClassTy(*markerClassDecl, {})});
         }
         argsVar = CreateJNIArgsVar(std::move(args), *curFile);
         argsRef = WithinFile(CreateRefExpr(*argsVar), curFile);
@@ -832,7 +832,7 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateNewGlobalRefCall(OwnedPtr<Expr> env, 
     auto curFile = obj->curFile;
     auto isWeakBoolValue = CreateBoolLit(isWeak);
     isWeakBoolValue->curFile = curFile;
-    isWeakBoolValue->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+    isWeakBoolValue->SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
 
     return CreateCall(GetNewGlobalRefDecl(), curFile, std::move(env), std::move(obj), std::move(isWeakBoolValue));
 }
@@ -846,11 +846,11 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateDeleteGlobalRefCall(OwnedPtr<Expr> en
 OwnedPtr<FuncArg> InteropLibBridge::PrepareJNIArgsVArray(OwnedPtr<Expr> expr)
 {
     auto arg = CreateFuncArg(std::move(expr));
-    auto* varrayTy = DynamicCast<VArrayTy>(arg->GetTy());
+    auto* varrayTy = DynamicCast<VArrayTy>(arg->DataTy());
     CJC_ASSERT_WITH_MSG(varrayTy, "Expected VArray for JNI arguments");
     CJC_ASSERT_WITH_MSG(varrayTy->typeArgs.size() == 1, "Unexpected VArray type");
     arg->withInout = true;
-    arg->SetTy(typeManager.GetPointerTy(varrayTy->typeArgs[0]));
+    arg->SetTy({typeManager.GetPointerTy(varrayTy->TyArg(0))});
     return arg;
 }
 
@@ -863,7 +863,7 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateJNICall(Ptr<Expr> env, Ptr<VarDecl> j
     envCJ->curFile = curFile;
     auto functionAccess = WithinFile(CreateMemberAccess(std::move(envCJ), *jniFunction), curFile);
     functionAccess->EnableAttr(Attribute::UNSAFE);
-    auto funcTy = StaticCast<FuncTy*>(jniFunction->GetTy());
+    auto funcTy = StaticCast<FuncTy*>(jniFunction->DataTy());
     auto callExpr = CreateCallExpr(std::move(functionAccess), std::move(callArgs), nullptr,
         funcTy->retTy, CallKind::CALL_FUNCTION_PTR);
     callExpr->EnableAttr(Attribute::UNSAFE);
@@ -877,7 +877,7 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateJNIMethodId(Ptr<Expr> env, OwnedPtr<E
     static auto getStaticMethodIdFuncDecl = GetGetStaticMethodIdDecl();
     auto getMethodIdFuncDecl = isStatic ? getStaticMethodIdFuncDecl : getInstanceMethodIdFuncDecl;
     CJC_NULLPTR_CHECK(getMethodIdFuncDecl);
-    auto strTy = utils.GetStringDecl().GetTy();
+    auto strTy = utils.GetStringDecl().DataTy();
     auto methodName = CreateLitConstExpr(LitConstKind::STRING, name, strTy);
     auto signatureStr = CreateLitConstExpr(LitConstKind::STRING, signature, strTy);
     return CreateCall(getMethodIdFuncDecl, env->curFile, ASTCloner::Clone(env),
@@ -892,7 +892,7 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateAsJObjectCall(OwnedPtr<Expr> javaEnti
     CJC_NULLPTR_CHECK(asJObjectDecl);
     auto memberAccess = WithinFile(CreateMemberAccess(std::move(javaEntity), *asJObjectDecl),
         curFile);
-    auto retTy = StaticCast<FuncTy*>(asJObjectDecl->GetTy())->retTy;
+    auto retTy = StaticCast<FuncTy*>(asJObjectDecl->DataTy())->retTy.Ty();
     auto callExpr = CreateCallExpr(std::move(memberAccess), {}, asJObjectDecl,
         retTy, CallKind::CALL_DECLARED_FUNCTION);
     callExpr->curFile = curFile;
@@ -926,7 +926,7 @@ OwnedPtr<Block> InteropLibBridge::CreateJavaSuperMethodCallBlock(ClassDecl& impl
         WithinFile(CreateRefExpr(*clazzVar), curFile), signature.name,
         signature.signature, false);
     CJC_NULLPTR_CHECK(methodId);
-    auto retTy = call.GetTy();
+    auto retTy = call.DataTy();
     auto jniFunction = GetJNINativeInterfaceField(SelectJNIInstanceMethodName(retTy->kind, false, hasArgs));
     CJC_NULLPTR_CHECK(jniFunction);
     auto javaRef = CreateJavaRefCall(impl, curFile);
@@ -1029,15 +1029,15 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateJNIEnvReadCall(Ptr<Expr> env)
     static auto readPointerDecl = importManager.GetCoreDecl<FuncDecl>("readPointer");
     CJC_NULLPTR_CHECK(readPointerDecl);
     // env : CPointer<CPointer<JNINativeInterface_>>
-    auto envTy = env->GetTy();
+    auto envTy = env->DataTy();
     CJC_ASSERT(envTy && envTy->typeArgs.size() == 1);
 
     // CPointer<JNINativeInterface_>
-    auto ptrTy = envTy->typeArgs[0];
+    auto ptrTy = envTy->TyArg(0);
     CJC_ASSERT(ptrTy && ptrTy->typeArgs.size() == 1);
 
     // JNINativeInterface_
-    auto interfaceTy = ptrTy->typeArgs[0];
+    auto interfaceTy = ptrTy->TyArg(0);
 
     // readPointer<CPointer<JNINativeInterface_>>(env,0)
     auto ref1 = CreateRefExpr(*readPointerDecl);
@@ -1046,7 +1046,7 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateJNIEnvReadCall(Ptr<Expr> env)
     ref1->SetTy(typeManager.GetInstantiatedTy(readPointerDecl->GetTy(),
         GenerateTypeMapping(*readPointerDecl, ref1->instTys)));
     auto int64Ty = typeManager.GetPrimitiveTy(TypeKind::TYPE_INT64);
-    auto zero = CreateLitConstExpr(LitConstKind::INTEGER, "0", int64Ty);
+    auto zero = CreateLitConstExpr(LitConstKind::INTEGER, "0", {int64Ty});
     std::vector<OwnedPtr<FuncArg>> args1;
     args1.emplace_back(CreateFuncArg(ASTCloner::Clone(env)));
     args1.emplace_back(CreateFuncArg(ASTCloner::Clone(zero.get())));
@@ -1102,7 +1102,7 @@ OwnedPtr<MatchExpr> InteropLibBridge::CreateMatchWithTypeCast(OwnedPtr<Expr> exp
         CreateThrowException(*exceptionDecl, std::move(exceptionCallArgs), *exprToCast->curFile, typeManager)));
     matchCases[1]->curFile = curFile;
 
-    return WithinFile(CreateMatchExpr(std::move(exprToCast), std::move(matchCases), castTy), curFile);
+    return WithinFile(CreateMatchExpr(std::move(exprToCast), std::move(matchCases), {castTy}), curFile);
 }
 
 OwnedPtr<Expr> InteropLibBridge::CreateCFFICallArrayMethodCall(OwnedPtr<Expr> jniEnv, OwnedPtr<Expr> obj,
@@ -1131,7 +1131,7 @@ OwnedPtr<Expr> InteropLibBridge::CreateCFFICallArrayMethodCall(OwnedPtr<Expr> jn
     auto paramRef = WithinFile(CreateRefExpr(*valueArg), curFile);
 
     OwnedPtr<Expr> valueEntity;
-    if (valueArg->GetTy()->name == INTEROPLIB_CFFI_JAVA_ENTITY) {
+    if (valueArg->DataTy()->name == INTEROPLIB_CFFI_JAVA_ENTITY) {
         // for generated function - value argument was replaced with java entity
         valueEntity = std::move(paramRef);
     } else {
@@ -1140,7 +1140,7 @@ OwnedPtr<Expr> InteropLibBridge::CreateCFFICallArrayMethodCall(OwnedPtr<Expr> jn
                 return SelectEntityWrapperByTypeKind(kind, ty, valueArg, curFile);
             }),
             GetJavaEntityDecl()->GetTy(),
-            CreateMemberAccess(CreateMatchWithTypeCast(std::move(paramRef), jObject->GetTy()), *javaRef));
+            CreateMemberAccess(CreateMatchWithTypeCast(std::move(paramRef), jObject->DataTy()), *javaRef));
     }
 
     return CreateCall(funcDecl, curFile, std::move(jniEnv), std::move(matchWithJPrimitive), std::move(obj),
@@ -1356,7 +1356,7 @@ OwnedPtr<VarDecl> InteropLibBridge::CreateJNIArgsVar(std::vector<OwnedPtr<Expr>>
     auto jvalueTy = GetJValueTy();
     CJC_NULLPTR_CHECK(jvalueTy);
     auto varrayTy = typeManager.GetVArrayTy(*jvalueTy, static_cast<int64_t>(args.size()));
-    auto argsArray = CreateArrayLit(std::move(args), varrayTy);
+    auto argsArray = CreateArrayLit(std::move(args), {varrayTy});
     auto argsVar = CreateVarDecl("$argsPtr", std::move(argsArray), nullptr);
     argsVar->isVar = true;
     argsVar->SetTy(argsVar->initializer->GetTy());
@@ -1386,7 +1386,7 @@ OwnedPtr<Expr> InteropLibBridge::ConvertJavaResultToCJ(OwnedPtr<Expr> result, Pt
     if (resultTy->kind == TypeKind::TYPE_BOOLEAN) {
         auto zero = CreateLitConstExpr(LitConstKind::INTEGER, "0", result->GetTy());
         auto cmp = CreateBinaryExpr(std::move(result), std::move(zero), TokenKind::NOTEQ);
-        cmp->SetTy(typeManager.GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        cmp->SetTy({typeManager.GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
         return cmp;
     }
     return result;
@@ -1435,7 +1435,7 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateGetFromRegistryByEntityCall(
     fdRef->instTys.push_back(ty);
     fdRef->SetTy(typeManager.GetInstantiatedTy(funcDecl->GetTy(), GenerateTypeMapping(*funcDecl, fdRef->instTys)));
     auto retTy = retAsOption ? utils.GetOptionTy(ty) : ty;
-    return CreateCallExpr(std::move(fdRef), std::move(callArgs), funcDecl, retTy, CallKind::CALL_DECLARED_FUNCTION);
+    return CreateCallExpr(std::move(fdRef), std::move(callArgs), funcDecl, {retTy}, CallKind::CALL_DECLARED_FUNCTION);
 }
 
 OwnedPtr<CallExpr> InteropLibBridge::CreateCangjieStringToJavaCall(OwnedPtr<Expr> env, OwnedPtr<Expr> string)
@@ -1476,7 +1476,7 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateGetFromRegistryCall(OwnedPtr<Expr> en
     auto fdRef = WithinFile(CreateRefExpr(*funcDecl), curFile);
     fdRef->instTys.push_back(ty);
     fdRef->SetTy(typeManager.GetInstantiatedTy(funcDecl->GetTy(), GenerateTypeMapping(*funcDecl, fdRef->instTys)));
-    return CreateCallExpr(std::move(fdRef), std::move(callArgs), funcDecl, ty, CallKind::CALL_DECLARED_FUNCTION);
+    return CreateCallExpr(std::move(fdRef), std::move(callArgs), funcDecl, {ty}, CallKind::CALL_DECLARED_FUNCTION);
 }
 
 OwnedPtr<CallExpr> InteropLibBridge::CreateGetFromRegistryOptionCall(OwnedPtr<Expr> regId, Ptr<Ty> ty)
@@ -1492,10 +1492,10 @@ OwnedPtr<CallExpr> InteropLibBridge::CreateGetFromRegistryOptionCall(OwnedPtr<Ex
     callArgs.push_back(CreateFuncArg(std::move(regId)));
 
     auto fdRef = WithinFile(CreateRefExpr(*funcDecl), curFile);
-    CJC_ASSERT_WITH_MSG(!ty->typeArgs.empty(), "Option type expected to be generic");
-    fdRef->instTys.push_back(ty->typeArgs[0]);
+    CJC_ASSERT_WITH_MSG(!ty->TyArgs().empty(), "Option type expected to be generic");
+    fdRef->instTys.push_back(ty->TyArg(0));
     fdRef->SetTy(typeManager.GetInstantiatedTy(funcDecl->GetTy(), GenerateTypeMapping(*funcDecl, fdRef->instTys)));
-    return CreateCallExpr(std::move(fdRef), std::move(callArgs), funcDecl, ty, CallKind::CALL_DECLARED_FUNCTION);
+    return CreateCallExpr(std::move(fdRef), std::move(callArgs), funcDecl, {ty}, CallKind::CALL_DECLARED_FUNCTION);
 }
 
 OwnedPtr<CallExpr> InteropLibBridge::CreateGetFieldCall(Ptr<Expr> env, OwnedPtr<Expr> obj,
@@ -1636,7 +1636,7 @@ OwnedPtr<Expr> InteropLibBridge::WrapExceptionHandling(OwnedPtr<Expr> env, Owned
     auto retTy = action->funcBody->GetTy();
     auto fd = GetWithExceptionHandlingDecl();
     auto fdRef = WithinFile(CreateRefExpr(*fd), curFile);
-    fdRef->instTys.push_back(retTy);
+    fdRef->instTys.push_back(retTy.Ty());
     fdRef->SetTy(typeManager.GetInstantiatedTy(fd->GetTy(), GenerateTypeMapping(*fd, fdRef->instTys)));
 
     std::vector<OwnedPtr<FuncArg>> args;
@@ -1748,7 +1748,7 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaMirrorOption(
     auto curFile = entity->curFile;
     CJC_NULLPTR_CHECK(curFile);
     CJC_ASSERT_WITH_MSG(!ty->typeArgs.empty(), "Option type must be generic");
-    auto declTy = ty->typeArgs[0];
+    auto declTy = ty->TyArg(0);
     auto decl = Ty::GetDeclOfTy(declTy);
     CJC_ASSERT(decl->IsJavaMirror() || declTy->IsString() || (toRaw && decl->IsJavaImpl()));
 
@@ -1760,7 +1760,7 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaMirrorOption(
             auto unwrapped = UnwrapJavaEntity(WithinFile(CreateRefExpr(e), curFile), declTy, mirror, toRaw);
             return unwrapped;
         },
-        [this, ty, toRaw]() { return toRaw ? CreateJobjectNull() : utils.CreateOptionNoneRef(ty->typeArgs[0]); },
+        [this, ty, toRaw]() { return toRaw ? CreateJobjectNull() : utils.CreateOptionNoneRef(ty->TyArg(0)); },
         actualTy);
 }
 
@@ -1768,7 +1768,7 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaImplOption(
     OwnedPtr<Expr> env, OwnedPtr<Expr> entityOption, Ptr<Ty> ty, const ClassLikeDecl& mirror, bool toRaw)
 {
     CJC_ASSERT_WITH_MSG(!ty->typeArgs.empty(), "Option type must be generic");
-    auto implTy = ty->typeArgs[0];
+    auto implTy = ty->typeArgs[0].Ty();
     CJC_ASSERT(implTy->IsClass());
     auto actualTy = toRaw ? Ptr(&GetJniJobjectTy()) : ty;
     auto curFile = entityOption->curFile;
@@ -1784,7 +1784,7 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaImplOption(
             // as impl reference wrapper
             return UnwrapJavaImpl(std::move(env), WithinFile(CreateRefExpr(e), curFile), implTy);
         },
-        [this, ty, toRaw]() { return toRaw ? CreateJobjectNull() : utils.CreateOptionNoneRef(ty->typeArgs[0]); },
+        [this, ty, toRaw]() { return toRaw ? CreateJobjectNull() : utils.CreateOptionNoneRef(ty->TyArg(0)); },
         actualTy);
 }
 
@@ -1830,7 +1830,7 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaArrayEntity(OwnedPtr<Expr> entity, Pt
 
     auto castType = MakeOwned<Type>();
     castType->SetTy(ty);
-    auto varPattern = CreateVarPattern(V_COMPILER, ty);
+    auto varPattern = CreateVarPattern(V_COMPILER, {ty});
     auto curFile = entity->curFile;
     CJC_NULLPTR_CHECK(curFile);
     varPattern->curFile = curFile;
@@ -1844,7 +1844,7 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaArrayEntity(OwnedPtr<Expr> entity, Pt
         GenerateTypeMappingWithSelector([this, &entityPtr, &mirror](TypeKind kind, Ptr<Ty> ty) {
             return SelectEntityUnwrapperByTypeKind(kind, ty, entityPtr, mirror);
         }),
-        ty, CreateMatchWithTypeCast(std::move(entity), ty));
+        {ty}, CreateMatchWithTypeCast(std::move(entity), ty));
 }
 
 OwnedPtr<Expr> InteropLibBridge::UnwrapJavaPrimitiveEntity(OwnedPtr<Expr> entity, Ptr<Ty> ty)
@@ -1863,7 +1863,7 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaPrimitiveEntity(OwnedPtr<Expr> entity
     fdRef->instTys.push_back(actualEntityTy);
     fdRef->SetTy(typeManager.GetInstantiatedTy(funcDecl->GetTy(), GenerateTypeMapping(*funcDecl, fdRef->instTys)));
     auto callExpr = CreateCallExpr(
-        std::move(fdRef), std::move(callArgs), funcDecl, actualEntityTy, CallKind::CALL_DECLARED_FUNCTION);
+        std::move(fdRef), std::move(callArgs), funcDecl, {actualEntityTy}, CallKind::CALL_DECLARED_FUNCTION);
     callExpr->curFile = curFile;
     return std::move(callExpr);
 }
@@ -1898,8 +1898,8 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaEntity(OwnedPtr<Expr> entity, Ptr<Ty>
     if (ty->IsCoreOptionType()) {
         auto classLikeDecl = DynamicCast<const ClassLikeDecl*>(&outerDecl);
         CJC_NULLPTR_CHECK(classLikeDecl);
-        CJC_ASSERT_WITH_MSG(!ty->typeArgs.empty(), "Option type must be generic");
-        auto actualTy = ty->typeArgs[0];
+        CJC_ASSERT_WITH_MSG(!ty->TyArgs().empty(), "Option type must be generic");
+        ModalTy actualTy{ty->TyArg(0)};
         auto actualDecl = Ty::GetDeclOfTy(actualTy);
         if (actualDecl->IsJavaMirror() || actualTy->IsString()) {
             return UnwrapJavaMirrorOption(std::move(entity), ty, *classLikeDecl, toRaw);
@@ -1937,11 +1937,11 @@ OwnedPtr<FuncDecl> InteropLibBridge::CreateDeletingGlobalRefFinalizer(ClassDecl&
 {
     static auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
     auto curFile = decl.curFile;
-    auto fbody = CreateFuncBody({}, nullptr, CreateBlock({}, unitTy), unitTy);
+    auto fbody = CreateFuncBody({}, nullptr, CreateBlock({}, {unitTy}), {unitTy});
     fbody->paramLists.emplace_back(MakeOwned<FuncParamList>());
     auto delCall = CreateDeleteGlobalRefCall(CreateGetJniEnvCall(curFile), CreateJavaRefCall(decl, curFile));
     fbody->body->body.emplace_back(std::move(delCall));
-    auto fd = CreateFuncDecl("~init", std::move(fbody), typeManager.GetFunctionTy({}, unitTy));
+    auto fd = CreateFuncDecl("~init", std::move(fbody), {typeManager.GetFunctionTy({}, {unitTy})});
     fd->EnableAttr(Attribute::PRIVATE, Attribute::FINALIZER, Attribute::IN_CLASSLIKE);
     fd->linkage = Linkage::EXTERNAL;
     fd->funcBody->funcDecl = fd.get();

@@ -23,7 +23,7 @@ void CheckImplInheritMirror::HandleImpl(TypeCheckContext& ctx)
     }
 
     // TODO: remove the whole if when hierarchy root @ObjCImpl is supported
-    if (auto classTy = DynamicCast<ClassTy*>(ctx.target.GetTy()); classTy) {
+    if (auto classTy = DynamicCast<ClassTy*>(ctx.target.DataTy()); classTy) {
         auto hasOnlyMirrorSuperInterfaces = classTy->GetSuperInterfaceTys().size() > 0;
         for (auto superInterfaceTy : classTy->GetSuperInterfaceTys()) {
             if (!ctx.typeMapper.IsValidObjCMirror(*superInterfaceTy)) {

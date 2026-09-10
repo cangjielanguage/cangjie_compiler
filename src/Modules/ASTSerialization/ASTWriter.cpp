@@ -156,7 +156,7 @@ inline bool SaveInlineLabel(const FuncDecl& funcDecl)
 
 inline bool IsExternalNorminalDecl(const Decl& decl)
 {
-    return decl.IsNominalDecl() && decl.linkage != Linkage::INTERNAL;
+    return (decl.IsNominalDecl() || decl.IsBuiltIn()) && decl.linkage != Linkage::INTERNAL;
 }
 
 inline bool ShouldAlwaysExport(const Decl& decl, bool serializingCommon)
@@ -213,7 +213,7 @@ bool IsGenericInCommonSerialization(bool serializingCommon, const Decl& decl)
 void CollectFullExportParamDecl(
     std::vector<Ptr<Decl>>& decls, FuncDecl& fd, std::queue<Ptr<Decl>>& queue, bool serializingCommon)
 {
-    if (!Ty::IsTyCorrect(fd.GetTy())) {
+    if (!fd.GetTy().IsCorrect()) {
         return;
     }
     // When 'fd''s type is correct, following conditions must fit.
@@ -237,7 +237,7 @@ void CollectFullExportParamDecl(
     }
 }
 
-void CollectInstantiatedTys(Ty* ty, std::unordered_set<Ty*>& tys)
+void CollectInstantiatedTys(ModalTy ty, std::unordered_set<ModalTy>& tys)
 {
     if (!Ty::IsTyCorrect(ty) || ty->typeArgs.empty()) {
         return;
@@ -251,12 +251,12 @@ void CollectInstantiatedTys(Ty* ty, std::unordered_set<Ty*>& tys)
 }
 
 // Collect instantiated types used by type declarations' members.
-std::unordered_set<Ty*> CollectInstantiations(const Decl& decl)
+std::unordered_set<ModalTy> CollectInstantiations(const Decl& decl)
 {
     if (decl.TestAttr(Attribute::GENERIC)) {
         return {};
     }
-    std::unordered_set<Ty*> instTys;
+    std::unordered_set<ModalTy> instTys;
     if (auto id = DynamicCast<const InheritableDecl*>(&decl)) {
         for (auto& it : id->inheritedTypes) {
             CollectInstantiatedTys(it->GetTy(), instTys);
@@ -272,10 +272,10 @@ std::unordered_set<Ty*> CollectInstantiations(const Decl& decl)
     return instTys;
 }
 
-void CollectInstantiationRecursively(std::unordered_set<Ty*>& instTys)
+void CollectInstantiationRecursively(std::unordered_set<ModalTy>& instTys)
 {
-    std::unordered_set<Ty*> visited;
-    std::queue<Ty*> q;
+    std::unordered_set<ModalTy> visited;
+    std::queue<ModalTy> q;
     for (auto it : instTys) {
         q.push(it);
     }
@@ -287,7 +287,7 @@ void CollectInstantiationRecursively(std::unordered_set<Ty*>& instTys)
         }
         auto id = Ty::GetDeclOfTy<InheritableDecl>(ty);
         CJC_NULLPTR_CHECK(id);
-        std::unordered_set<Ty*> newTys;
+        std::unordered_set<ModalTy> newTys;
         for (auto& it : id->inheritedTypes) {
             CollectInstantiatedTys(it->GetTy(), newTys);
         }
@@ -310,7 +310,7 @@ inline Ptr<Decl> GetCallee(const CallExpr& ce)
 
 bool ShouldExportSource(const VarDecl& varDecl)
 {
-    if (!Ty::IsTyCorrect(varDecl.GetTy()) || !varDecl.initializer || varDecl.TestAttr(Attribute::IMPORTED)) {
+    if (!varDecl.GetTy().IsCorrect() || !varDecl.initializer || varDecl.TestAttr(Attribute::IMPORTED)) {
         return false;
     }
     if (varDecl.IsCommonMatchedWithSpecific()) {
@@ -358,6 +358,9 @@ void SaveDeclBasicInfo(const DeclInfo& declInfo, PackageFormat::DeclBuilder& dbu
     dbuilder.add_identifierPos(&declInfo.identifierPos);
     dbuilder.add_attributes(declInfo.attributes);
     dbuilder.add_type(declInfo.ty);
+    if (declInfo.tyMode.o != 0) {
+        dbuilder.add_tyMode(declInfo.tyMode);
+    }
     dbuilder.add_isTopLevel(declInfo.isTopLevel);
     // For incremental compilation.
     dbuilder.add_mangledBeforeSema(declInfo.mangledBeforeSema);
@@ -373,7 +376,7 @@ void SaveDeclBasicInfo(const DeclInfo& declInfo, PackageFormat::DeclBuilder& dbu
 inline bool CanSkip4CJMP(const Decl& decl, bool serializingCommon)
 {
     // Export global func or var, maybe used by global var initializer.
-    if (serializingCommon && !decl.IsNominalDecl() && decl.TestAttr(Attribute::GLOBAL)) {
+    if (serializingCommon && !decl.IsNominalDecl() && !decl.IsBuiltIn() && decl.TestAttr(Attribute::GLOBAL)) {
         return false;
     }
     return true;
@@ -647,9 +650,8 @@ inline bool ASTWriter::ASTWriterImpl::NeedToExportDecl(Ptr<const Decl> decl)
 // all dependent file declarations goes before declaration of file that depend.
 // NOTE: File dependency defined in specification.
 void ASTWriter::ASTWriterImpl::DFSCollectFilesDeclarations(Ptr<File> file,
-    std::unordered_set<File*>& alreadyVisitedFiles,
-    std::vector<Ptr<const Decl>>& topLevelDeclsOrdered,
-    std::unordered_set<Ty*>& usedTys)
+    std::unordered_set<File*>& alreadyVisitedFiles, std::vector<Ptr<const Decl>>& topLevelDeclsOrdered,
+    std::unordered_set<ModalTy>& usedTys)
 {
     if (alreadyVisitedFiles.find(file) != alreadyVisitedFiles.end()) {
         // File was visited as dependency of another file
@@ -727,7 +729,7 @@ void ASTWriter::ASTWriterImpl::ExportAST(const PackageDecl& package)
     // 2. Obtain all topLevelDecl
     std::vector<Ptr<const Decl>> topLevelDeclsOrdered;
     std::unordered_set<File*> alreadyVisitedFiles;
-    std::unordered_set<Ty*> usedTys;
+    std::unordered_set<ModalTy> usedTys;
     for (auto& file : package.srcPackage->files) {
         CJC_NULLPTR_CHECK(file.get());
         DFSCollectFilesDeclarations(file.get(), alreadyVisitedFiles, topLevelDeclsOrdered, usedTys);
@@ -965,8 +967,8 @@ template <typename T>
 std::optional<Ptr<const Ty>> TryGetSpecificImplementationTy(const Ptr<const Ty>& pType)
 {
     auto ty = StaticCast<T*>(pType);
-    if (ty->decl && ty == ty->decl->GetTy() && ty->decl->specificImplementation) {
-        return ty->decl->specificImplementation->GetTy();
+    if (ty->decl && Ptr<const Ty>(ty) == ty->decl->DataTy() && ty->decl->specificImplementation) {
+        return Ptr<const Ty>(ty->decl->specificImplementation->DataTy());
     }
 
     return std::nullopt;
@@ -1032,7 +1034,7 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveType(Ptr<const Ty> pType)
         case TypeKind::TYPE_STRUCT:
         case TypeKind::TYPE_CLASS:
         case TypeKind::TYPE_INTERFACE:
-            typeObject = SaveNominalTy(*pType);
+            typeObject = SaveNominalTy(ModalTy{Ptr(const_cast<Ty*>(pType.get()))});
             break;
         case TypeKind::TYPE_POINTER:
             typeObject = SavePointerTy(*StaticCast<const PointerTy*>(pType));
@@ -1064,20 +1066,20 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveType(Ptr<const Ty> pType)
     return typeIndex;
 }
 
-TTypeOffset ASTWriter::ASTWriterImpl::SaveNominalTy(const Ty& type)
+TTypeOffset ASTWriter::ASTWriterImpl::SaveNominalTy(ModalTy type)
 {
-    auto declPtr = Ty::GetDeclPtrOfTy(&type);
+    auto declPtr = Ty::GetDeclPtrOfTy(type);
     CJC_NULLPTR_CHECK(declPtr);
     auto fullIdDeclPtr = GetFullDeclIndex(declPtr);
     std::vector<FormattedIndex> typeArgs;
-    for (auto& it : type.typeArgs) {
-        typeArgs.push_back(SaveType(it));
+    for (auto& it : type->typeArgs) {
+        typeArgs.push_back(SaveType(it.Ty()));
     }
     auto vtypeArgs = builder.CreateVector<FormattedIndex>(typeArgs);
-    auto info = PackageFormat::CreateCompositeTyInfo(builder, fullIdDeclPtr, Is<ClassThisTy, Ty>(type));
+    auto info = PackageFormat::CreateCompositeTyInfo(builder, fullIdDeclPtr, Is<ClassThisTy, Ty>(*type.Ty()));
 
     PackageFormat::SemaTyBuilder tbuilder(builder);
-    tbuilder.add_kind(GetFormatTypeKind(type.kind));
+    tbuilder.add_kind(GetFormatTypeKind(type.Kind()));
     tbuilder.add_typeArgs(vtypeArgs);
     tbuilder.add_info_type(PackageFormat::SemaTyInfo_CompositeTyInfo);
     tbuilder.add_info(info.Union());
@@ -1106,13 +1108,21 @@ TTypeOffset ASTWriter::ASTWriterImpl::SaveFuncTy(const FuncTy& type)
 {
     std::vector<FormattedIndex> paramTypes;
     for (auto& it : type.paramTys) {
-        paramTypes.push_back(SaveType(it));
+        paramTypes.push_back(SaveType(it.Ty()));
     }
     auto vParamTypes = builder.CreateVector<FormattedIndex>(paramTypes);
     // SaveType has side effect (it allocates an offset for the type)
     // DO NOT put it in another expression
-    FormattedIndex retType = SaveType(type.retTy);
-    auto info = PackageFormat::CreateFuncTyInfo(builder, retType, type.isC, type.hasVariableLenArg);
+    FormattedIndex retType = SaveType(type.retTy.Ty());
+    std::vector<ModalInfo> paramModals;
+    paramModals.reserve(type.paramTys.size());
+    for (const auto& p : type.paramTys) {
+        paramModals.push_back(p.Mode());
+    }
+    auto vTypeArgsMode = SaveModalVector(builder, paramModals);
+    auto retTyMode = SaveModal(builder, type.retTy.Mode());
+    auto info =
+        PackageFormat::CreateFuncTyInfo(builder, retType, type.isC, type.hasVariableLenArg, vTypeArgsMode, retTyMode);
     PackageFormat::SemaTyBuilder tbuilder(builder);
     tbuilder.add_kind(GetFormatTypeKind(type.kind));
     tbuilder.add_typeArgs(vParamTypes);
@@ -1126,7 +1136,7 @@ TTypeOffset ASTWriter::ASTWriterImpl::SaveTupleTy(const TupleTy& type)
 {
     std::vector<FormattedIndex> paramTypes;
     for (auto& it : type.typeArgs) {
-        paramTypes.push_back(SaveType(it));
+        paramTypes.push_back(SaveType(Ptr<const Ty>(it.Ty())));
     }
     auto vTypeArgs = builder.CreateVector<FormattedIndex>(paramTypes);
     PackageFormat::SemaTyBuilder tbuilder(builder);
@@ -1139,7 +1149,7 @@ TTypeOffset ASTWriter::ASTWriterImpl::SaveTupleTy(const TupleTy& type)
 TTypeOffset ASTWriter::ASTWriterImpl::SaveArrayTy(const ArrayTy& type)
 {
     CJC_ASSERT(!type.typeArgs.empty());
-    FormattedIndex elemTy = SaveType(type.typeArgs[0]);
+    FormattedIndex elemTy = SaveType(Ptr<const Ty>(type.typeArgs[0].Ty()));
     auto vTypeArgs = builder.CreateVector({elemTy});
     auto info = PackageFormat::CreateArrayTyInfo(builder, type.dims);
     PackageFormat::SemaTyBuilder tbuilder(builder);
@@ -1153,7 +1163,7 @@ TTypeOffset ASTWriter::ASTWriterImpl::SaveArrayTy(const ArrayTy& type)
 TTypeOffset ASTWriter::ASTWriterImpl::SaveVArrayTy(const VArrayTy& type)
 {
     CJC_ASSERT(!type.typeArgs.empty());
-    FormattedIndex elemTy = SaveType(type.typeArgs[0]);
+    FormattedIndex elemTy = SaveType(Ptr<const Ty>(type.typeArgs[0].Ty()));
     auto vTypeArgs = builder.CreateVector({elemTy});
     auto info = PackageFormat::CreateArrayTyInfo(builder, type.size);
     PackageFormat::SemaTyBuilder tbuilder(builder);
@@ -1167,7 +1177,7 @@ TTypeOffset ASTWriter::ASTWriterImpl::SaveVArrayTy(const VArrayTy& type)
 TTypeOffset ASTWriter::ASTWriterImpl::SavePointerTy(const PointerTy& type)
 {
     CJC_ASSERT(!type.typeArgs.empty());
-    FormattedIndex elemTy = SaveType(type.typeArgs[0]);
+    FormattedIndex elemTy = SaveType(Ptr<const Ty>(type.typeArgs[0].Ty()));
     auto vTypeArgs = builder.CreateVector({elemTy});
     PackageFormat::SemaTyBuilder tbuilder(builder);
     tbuilder.add_kind(GetFormatTypeKind(type.kind));
@@ -1185,11 +1195,29 @@ flatbuffers::Offset<PackageFormat::FuncParamList> ASTWriter::ASTWriterImpl::Save
         params.push_back(GetDeclIndex(it.get()));
         desugars.push_back(GetDeclIndex(it->desugarDecl.get()));
     }
+    // Do not save thisParam for @~local
+    FormattedIndex thisParam = INVALID_FORMAT_INDEX;
+    if (paramList.thisParam && !paramList.thisParam->GetTy().IsDataType()) {
+        thisParam = GetDeclIndex(paramList.thisParam.get());
+    }
     auto vParamList = builder.CreateVector<FormattedIndex>(params);
     auto vDesugarList = builder.CreateVector<FormattedIndex>(desugars);
     PackageFormat::FuncParamListBuilder dbuilder(builder);
     dbuilder.add_params(vParamList);
     dbuilder.add_desugars(vDesugarList);
+    if (thisParam != INVALID_FORMAT_INDEX) {
+        dbuilder.add_thisParam(thisParam);
+    }
+    return dbuilder.Finish();
+}
+
+TDeclOffset ASTWriter::ASTWriterImpl::SaveThisParam(const ThisParam& tp, const DeclInfo& declInfo)
+{
+    CJC_ASSERT(!tp.GetTy().IsDataType());
+    (void)tp;
+    PackageFormat::DeclBuilder dbuilder(builder);
+    SaveDeclBasicInfo(declInfo, dbuilder);
+    dbuilder.add_kind(PackageFormat::DeclKind_ThisParam);
     return dbuilder.Finish();
 }
 
@@ -1208,7 +1236,7 @@ flatbuffers::Offset<PackageFormat::Generic> ASTWriter::ASTWriterImpl::SaveGeneri
     std::vector<FormattedIndex> typeParameters;
     std::vector<flatbuffers::Offset<PackageFormat::Constraint>> constraints;
     for (auto& gpd : generic->typeParameters) {
-        auto gty = DynamicCast<GenericsTy*>(gpd->GetTy());
+        auto gty = DynamicCast<GenericsTy>(gpd->DataTy());
         // When 'gty' is valid, and its parent decl is a local function, using generic type decl,
         // otherwise keep 'gpd' itself.
         CJC_NULLPTR_CHECK(gpd->outerDecl);
@@ -1219,7 +1247,7 @@ flatbuffers::Offset<PackageFormat::Generic> ASTWriter::ASTWriterImpl::SaveGeneri
         std::vector<FormattedIndex> uppers;
         for (auto& upper : constraint->upperBounds) {
             CJC_NULLPTR_CHECK(upper);
-            uppers.emplace_back(SaveType(typeManager.ObtainsAliasType(upper)));
+            uppers.emplace_back(SaveType(Ptr<const Ty>(typeManager.ObtainsAliasType(upper).Ty())));
         }
         constraint->SetTy(constraint->type->GetTy()); // Sync ty to re-use 'PackNodeInfo'.
         auto info = PackNodeInfo(*constraint);
@@ -1293,7 +1321,8 @@ TDeclOffset ASTWriter::ASTWriterImpl::SaveVarDecl(const VarDecl& varDecl, const 
     bool exportSourceCode = config.exportContent && ShouldExportSource(varDecl);
     FormattedIndex initializer = exportSourceCode ? SaveExpr(*varDecl.initializer) : INVALID_FORMAT_INDEX;
     auto info =
-        PackageFormat::CreateVarInfo(builder, varDecl.isVar, varDecl.isConst, varDecl.isMemberParam, initializer);
+        PackageFormat::CreateVarInfo(builder, varDecl.isVar, varDecl.isConst, varDecl.isMemberParam, initializer,
+        PackageFormat::ConstValue_NONE, 0, HasModifier(varDecl.modifiers, TokenKind::DEMODE));
     PackageFormat::DeclBuilder dbuilder(builder);
     SaveDeclBasicInfo(declInfo, dbuilder);
     dbuilder.add_kind(PackageFormat::DeclKind_VarDecl);
@@ -1334,11 +1363,14 @@ TFuncBodyOffset ASTWriter::ASTWriterImpl::SaveFuncBody(const FuncBody& funcBody)
     if (fd && fd->TestAttr(Attribute::GENERIC_INSTANTIATED, Attribute::GENERIC)) {
         std::vector<flatbuffers::Offset<PackageFormat::FuncParamList>> paramLists;
         auto dummyList = builder.CreateVector<flatbuffers::Offset<PackageFormat::FuncParamList>>(paramLists);
-        return PackageFormat::CreateFuncBody(builder, dummyList, INVALID_FORMAT_INDEX, INVALID_FORMAT_INDEX, false, 0);
+        auto dummyRetTyMode = SaveModal(builder, {});
+        return PackageFormat::CreateFuncBody(
+            builder, dummyList, INVALID_FORMAT_INDEX, INVALID_FORMAT_INDEX, false, 0, dummyRetTyMode);
     }
     auto vparamLists = GetVirtualParamLists(funcBody);
-    FormattedIndex retType =
-        funcBody.retType ? SaveType(typeManager.ObtainsAliasType(funcBody.retType)) : INVALID_FORMAT_INDEX;
+    FormattedIndex retType = funcBody.retType
+        ? SaveType(typeManager.ObtainsAliasType(funcBody.retType).Ty())
+        : INVALID_FORMAT_INDEX;
     // The frozen attribute is passed to a nested function.
     if (fd && fd->outerDecl && fd->outerDecl->astKind == ASTKind::FUNC_DECL) {
         auto outerFunc = StaticCast<FuncDecl>(fd->outerDecl);
@@ -1356,11 +1388,16 @@ TFuncBodyOffset ASTWriter::ASTWriterImpl::SaveFuncBody(const FuncBody& funcBody)
     bool isGenericCJMP = fd && IsGenericInCommonSerialization(serializingCommon, *fd);
     bool shouldExportBody = config.exportContent && exportFuncBody &&
         (!fd || CanBeSrcExported(*fd) || isGenericCJMP);
-    bool validBody = shouldExportBody && Ty::IsTyCorrect(funcBody.GetTy()) && funcBody.body;
+    bool validBody = shouldExportBody && funcBody.GetTy().IsCorrect() && funcBody.body;
     auto bodyIdx = validBody ? SaveExpr(*funcBody.body) : INVALID_FORMAT_INDEX;
     // CaptureKind is need if the 'funcBody' is exported.
     uint8_t kind = validBody ? static_cast<uint8_t>(funcBody.captureKind) : 0;
-    return PackageFormat::CreateFuncBody(builder, vparamLists, retType, bodyIdx, false, kind);
+    ModalInfo retMi{};
+    if (funcBody.retType) {
+        retMi = funcBody.retType->TyMode();
+    }
+    auto retTyMode = SaveModal(builder, retMi);
+    return PackageFormat::CreateFuncBody(builder, vparamLists, retType, bodyIdx, false, kind, retTyMode);
 }
 
 TDeclOffset ASTWriter::ASTWriterImpl::SaveFuncDecl(const FuncDecl& funcDecl, const DeclInfo& declInfo)
@@ -1371,7 +1408,8 @@ TDeclOffset ASTWriter::ASTWriterImpl::SaveFuncDecl(const FuncDecl& funcDecl, con
     auto generic = SaveGeneric(funcDecl);
     auto genericDeclIndex = GetGenericDeclIndex(funcDecl);
     auto info = PackageFormat::CreateFuncInfo(builder, body, STRATEGY_MAP.at(funcDecl.overflowStrategy),
-        OP_KIND_MAP.at(funcDecl.op), 0, funcDecl.isConst, isInline, funcDecl.isFastNative);
+        OP_KIND_MAP.at(funcDecl.op), 0, funcDecl.isConst, isInline, funcDecl.isFastNative,
+        HasModifier(funcDecl.modifiers, TokenKind::EXCLAVE));
 
     PackageFormat::DeclBuilder dbuilder(builder);
     SaveDeclBasicInfo(declInfo, dbuilder);
@@ -1519,7 +1557,7 @@ TDeclOffset ASTWriter::ASTWriterImpl::SaveExtendDecl(const ExtendDecl& extendDec
 
 TDeclOffset ASTWriter::ASTWriterImpl::SaveTypeAliasDecl(const TypeAliasDecl& typeAliasDecl, const DeclInfo& declInfo)
 {
-    FormattedIndex aliasedTy = SaveType(typeManager.ObtainsAliasType(typeAliasDecl.type));
+    FormattedIndex aliasedTy = SaveType(Ptr<const Ty>(typeManager.ObtainsAliasType(typeAliasDecl.type).Ty()));
     auto generic = SaveGeneric(typeAliasDecl);
     auto info = PackageFormat::CreateAliasInfo(builder, aliasedTy);
     PackageFormat::DeclBuilder dbuilder(builder);
@@ -1536,7 +1574,8 @@ TDeclOffset ASTWriter::ASTWriterImpl::SaveTypeAliasDecl(const TypeAliasDecl& typ
 TDeclOffset ASTWriter::ASTWriterImpl::SaveBuiltInDecl(const BuiltInDecl& builtInDecl, const DeclInfo& declInfo)
 {
     auto generic = SaveGeneric(builtInDecl);
-    auto info = PackageFormat::CreateBuiltInInfo(builder, BUILTIN_TYPE_MAP.at(builtInDecl.type));
+    auto builtInBody = GetBody(builtInDecl);
+    auto info = PackageFormat::CreateBuiltInInfo(builder, BUILTIN_TYPE_MAP.at(builtInDecl.type), builtInBody);
     PackageFormat::DeclBuilder dbuilder(builder);
     SaveDeclBasicInfo(declInfo, dbuilder);
     dbuilder.add_kind(PackageFormat::DeclKind_BuiltInDecl);
@@ -1675,8 +1714,9 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveDecl(const Decl& decl, bool isTopLe
             attrs.SetAttr(Attribute::SPECIFIC, false);
         }
     }
-    auto type =
-        attrs.TestAttr(Attribute::UNREACHABLE) ? INVALID_FORMAT_INDEX : SaveType(typeManager.ObtainsAliasType(&decl));
+    auto type = attrs.TestAttr(Attribute::UNREACHABLE)
+        ? INVALID_FORMAT_INDEX
+        : SaveType(typeManager.ObtainsAliasType(&decl).Ty());
     auto begin = decl.GetBegin();
     auto end = decl.GetEnd();
     auto [pkgIndex, fileIndex] = GetFileIndex(begin.fileID);
@@ -1704,8 +1744,9 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveDecl(const Decl& decl, bool isTopLe
     if (serializingCommon) {
         dependencies = builder.CreateVector<TFullIdOffset>(CollectInitializationDependencies(decl, {}));
     }
+    auto declTyMode = SaveModal(builder, decl.TyMode());
     DeclInfo declInfo{name, exportId, mangledName, rawMangleName, declHash, fullPackageName, posBegin, posEnd,
-        identifierPos, attributes, isConst, type, isTopLevel, annotations, dependencies};
+        identifierPos, attributes, isConst, type, isTopLevel, annotations, dependencies, declTyMode};
     TDeclOffset offset;
     auto foundWriter = declWriterMap.find(decl.astKind);
     if (foundWriter != declWriterMap.end()) {

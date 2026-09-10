@@ -63,7 +63,8 @@ Ptr<Value> Translator::TranslateTupleAccess(const AST::SubscriptExpr& subscriptE
         base = CreateAndAppendExpression<Load>(
             loc, StaticCast<RefType*>(base->GetType())->GetBaseType(), base, currentBlock)->GetResult();
     }
-    auto res = CreateAndAppendExpression<Field>(loc, chirTy.TranslateType(*subscriptExpr.GetTy()), base,
+    auto elementTy = chirTy.TranslateType(subscriptExpr.GetTy());
+    auto res = CreateAndAppendExpression<Field>(loc, elementTy, base,
         std::vector<uint64_t>(indexs.cbegin(), indexs.cend()), currentBlock);
     /*
         If the SubscriptExpr is added by compiler, DCE will skip it.
@@ -71,7 +72,6 @@ Ptr<Value> Translator::TranslateTupleAccess(const AST::SubscriptExpr& subscriptE
         let a:Int64
         let b:Int64
         (a, b, _) = (1, 2, 3)   -------->      var tmp = (1, 2, 3); a = tmp[0]; b =tmp[1]; _= tmp[2]
-
      */
     if (subscriptExpr.TestAttr(AST::Attribute::IMPLICIT_ADD)) {
         res->Set<SkipCheck>(SkipKind::SKIP_DCE_WARNING);
@@ -112,7 +112,6 @@ Ptr<Value> Translator::TranslateVArrayAccess(const AST::SubscriptExpr& subscript
         .kind = IntrinsicKind::VARRAY_GET,
         .args = indexs
     };
-    return CreateAndAppendExpression<Intrinsic>(
-        loc, chirTy.TranslateType(*subscriptExpr.GetTy()), callContext, currentBlock)
-        ->GetResult();
+    auto elementTy = chirTy.TranslateType(subscriptExpr.GetTy());
+    return CreateAndAppendExpression<Intrinsic>(loc, elementTy, callContext, currentBlock)->GetResult();
 }

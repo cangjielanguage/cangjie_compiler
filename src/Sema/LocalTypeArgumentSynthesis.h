@@ -21,15 +21,15 @@
 namespace Cangjie {
 struct LocTyArgSynArgPack {
     TyVars tyVarsToSolve;
-    std::vector<Ptr<AST::Ty>> argTys;
-    std::vector<Ptr<AST::Ty>> paramTys;
+    std::vector<AST::ModalTy> argTys;
+    std::vector<AST::ModalTy> paramTys;
     std::vector<Blame> argBlames;
-    Ptr<AST::Ty> funcRetTy = nullptr; // Nullable
-    Ptr<AST::Ty> retTyUB = nullptr; // Nullable
+    AST::ModalTy funcRetTy = {};   // Nullable
+    AST::ModalTy retTyUB = {}; // Nullable
     Blame retBlame;
 };
 
-using MemoForUnifiedTys = std::set<std::pair<Ptr<AST::Ty>, Ptr<AST::Ty>>>;
+using MemoForUnifiedTys = std::set<std::pair<AST::ModalTy, AST::ModalTy>>;
 
 class LocalTypeArgumentSynthesis {
     struct ConstraintWithMemo {
@@ -67,7 +67,7 @@ public:
     SolvingErrInfo GetErrInfo();
 
     // there's also a wrapper in TypeCheckerImpl. that one is recommended
-    static bool Unify(TypeManager& tyMgr, Constraint& cst, AST::Ty& argTy, AST::Ty& paramTy);
+    static bool Unify(TypeManager& tyMgr, Constraint& cst, AST::ModalTy argTy, AST::ModalTy paramTy);
     static std::optional<TypeSubst> SolveConstraints(TypeManager& tyMgr, const Constraint& cst);
 
 private:
@@ -91,11 +91,11 @@ private:
     // from the same state (i.e., cms) and only preserves valid ones.
     // The string part in return value is potential error message.
     std::pair<ConstraintWithMemos, SolvingErrInfo> Unify(
-        const ConstraintWithMemos& newCMS, const Tracked<AST::Ty>& argTTy, const Tracked<AST::Ty>& paramTTy);
+        const ConstraintWithMemos& newCMS, const Tracked<AST::ModalTy>& argTTy, const Tracked<AST::ModalTy>& paramTTy);
     // Directly merge result of sub-Unify with cms & errMsg of parent instance. Used in cases where failure of
     // a sub-Unify also indicates the failure of the parent Unify.
     bool UnifyAndTrim(
-        const ConstraintWithMemos& curCMS, const Tracked<AST::Ty>& argTTy, const Tracked<AST::Ty>& paramTTy);
+        const ConstraintWithMemos& curCMS, const Tracked<AST::ModalTy>& argTTy, const Tracked<AST::ModalTy>& paramTTy);
 
     // Return the **best** type substitution regarding the subtyping relation if it exists.
     std::optional<TypeSubst> SolveConstraints(bool allowPartial = false);
@@ -105,9 +105,10 @@ private:
     // UnifiedTys memo: memoization of already unified types,
     // Ty argTy and Ty paramTy: two types to be unified.
     // The series of functions return false if obvious errors are detected.
-    bool UnifyOne(const Tracked<AST::Ty>& argTTy, const Tracked<AST::Ty>& paramTTy);
-    bool UnifyTyVar(const Tracked<AST::Ty>& argTTy, const Tracked<AST::Ty>& paramTTy);
-    bool UnifyTyVarCollectConstraints(TyVar& tyVar, const Tracked<AST::Ty>& lbTTy, const Tracked<AST::Ty>& ubTTy);
+    bool UnifyOne(const Tracked<AST::ModalTy>& argTTy, const Tracked<AST::ModalTy>& paramTTy);
+    bool UnifyTyVar(const Tracked<AST::ModalTy>& argTTy, const Tracked<AST::ModalTy>& paramTTy);
+    bool UnifyTyVarCollectConstraints(
+        TyVar& tyVar, const Tracked<AST::ModalTy>& lbTTy, const Tracked<AST::ModalTy>& ubTTy);
     bool UnifyContextTyVar(const Tracked<AST::Ty>& argTTy, const Tracked<AST::Ty>& paramTTy);
     bool UnifyBuiltInTy(const Tracked<AST::Ty>& argTTy, const Tracked<AST::Ty>& paramTTy);
     // Nominal types are types that have names, defined by class, interface, enum, and struct.
@@ -124,30 +125,36 @@ private:
     void UpdateIdealTysInConstraints(AST::PrimitiveTy& tgtTy);
 
     std::optional<TypeSubst> FindSolution(Constraint& thisM, const bool hasNothingTy, const bool hasAnyTy);
-    bool IsValidSolution(const AST::Ty& ty, const bool hasNothingTy, const bool hasAnyTy) const;
+    bool IsValidSolution(AST::ModalTy ty, const bool hasNothingTy, const bool hasAnyTy) const;
     bool DoesCSCoverAllTyVars(const Constraint& m);
     TypeSubst ResetIdealTypesInSubst(TypeSubst& m);
     Constraint ApplyTypeSubstForCS(const TypeSubst& subst, const Constraint& cs);
     std::optional<TypeSubst> GetBestSolution(const TypeSubsts& substs, bool allowPartial = false);
     std::optional<size_t> GetBestIndex(const std::vector<bool>& maximals) const;
     void CompareCandidates(Ptr<TyVar> tyVar, const std::vector<TypeSubst>& candidates, std::vector<bool>& maximals);
-    std::pair<std::set<Ptr<AST::Ty>>::iterator, std::set<Ptr<AST::Ty>>::iterator> GetMaybeStableIters(
-        const std::set<Ptr<AST::Ty>>& s, std::optional<StableTys>& ss) const;
+    std::pair<std::set<AST::ModalTy>::iterator, std::set<AST::ModalTy>::iterator> GetMaybeStableIters(
+        const std::set<AST::ModalTy>& s, std::optional<StableTys>& ss) const;
     std::pair<TyVars::iterator, TyVars::iterator> GetMaybeStableIters(
         const TyVars& s, std::optional<StableTyVars>& ss) const;
 
     SolvingErrInfo MakeMsgNoConstraint(TyVar& v) const;
-    SolvingErrInfo MakeMsgConflictingConstraints(
-        TyVar& v, const std::vector<Tracked<AST::Ty>>& lbTTys, const std::vector<Tracked<AST::Ty>>& ubTTys) const;
+    SolvingErrInfo MakeMsgConflictingConstraints(TyVar& v,
+        const std::vector<Tracked<AST::ModalTy>>& lbTTys, const std::vector<Tracked<AST::ModalTy>>& ubTTys) const;
     SolvingErrInfo MakeMsgMismatchedArg(const Blame& blame) const;
     SolvingErrInfo MakeMsgMismatchedRet(const Blame& blame) const;
     void MaybeSetErrMsg(const SolvingErrInfo& s);
 
     void CopyUpperbound();
 
-    bool IsGreedySolution(const TyVar& tv, const AST::Ty& bound, bool isUpperbound);
+    bool IsGreedySolution(const TyVar& tv, AST::ModalTy bound, bool isUpperbound);
 
     bool VerifyAndSetCMS(const ConstraintWithMemos& newCMS);
 };
+
+template <> struct LocalTypeArgumentSynthesis::Tracked<AST::ModalTy> {
+    AST::ModalTy ty;
+    std::set<Blame> blames;
+};
+
 } // namespace Cangjie
 #endif // CANGJIE_SEMA_LOCALTYPEARGUMENTSYNTHESIS_H

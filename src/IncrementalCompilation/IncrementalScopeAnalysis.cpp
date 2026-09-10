@@ -336,8 +336,8 @@ struct ImportPackageWalker {
         // macro return type is always tokens; primary ctor always returns nothing;
         // main decl is never imported, so only func and var decl are covered here
         if (Utils::NotIn(decl.astKind, {AST::ASTKind::FUNC_DECL, AST::ASTKind::VAR_DECL}) ||
-            decl.TestAnyAttr(AST::Attribute::CONSTRUCTOR, AST::Attribute::MACRO_FUNC) ||
-            !AST::Ty::IsTyCorrect(decl.GetTy()) || decl.rawMangleName == TO_ANY) {
+            decl.TestAnyAttr(AST::Attribute::CONSTRUCTOR, AST::Attribute::MACRO_FUNC) || !decl.GetTy().IsCorrect() ||
+            decl.rawMangleName == TO_ANY) {
             // 1. Ignore VarWithPatternDecl because there is no VarWithPatternDecl in cjo.
             // 2. Constructor's return type will not be changed.
             return;
@@ -348,11 +348,11 @@ struct ImportPackageWalker {
         const static auto DELIMITER_LENGTH = std::string("$$").size();
         (void)mangledName.erase(pos + DELIMITER_LENGTH);
         if (decl.astKind == AST::ASTKind::FUNC_DECL) {
-            auto funcTy = StaticCast<AST::FuncTy*>(decl.GetTy());
+            auto funcTy = StaticCast<AST::FuncTy*>(decl.DataTy());
             CJC_ASSERT(funcTy && funcTy->retTy);
-            mangledName += funcTy->retTy->String();
+            mangledName += funcTy->retTy.String();
         } else {
-            mangledName += decl.GetTy()->String();
+            mangledName += decl.GetTy().String();
         }
     }
 

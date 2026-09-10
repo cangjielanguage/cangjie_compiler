@@ -66,7 +66,7 @@ private:
     static AST::VisitAction MarkBoxPointHandleArrayExpr(AST::ArrayExpr& ae);
     static AST::VisitAction MarkBoxPointHandleTupleLit(AST::TupleLit& tl);
     static bool IsTypePatternNeedBox(Ptr<AST::Pattern> pattern, AST::Ty& selectorTy);
-    static bool NeedAutoBox(Ptr<AST::Ty> child, Ptr<AST::Ty> interface, bool isUpcast = true);
+    static bool NeedAutoBox(AST::DataTy child, AST::DataTy interface, bool isUpcast = true);
     static void CheckBlockNeedBox(const AST::Block& block, AST::Ty& ty, AST::Node& nodeToCheck);
 
     static TypeManager* typeManager;

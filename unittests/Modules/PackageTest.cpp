@@ -459,7 +459,7 @@ TEST_F(PackageTest, LSPCompileWithConstraint)
             count++;
             for (auto& constraint : extend->generic->genericConstraints) {
                 ASSERT_TRUE(constraint != nullptr && constraint->type != nullptr);
-                auto gTy = RawStaticCast<GenericsTy*>(constraint->type->GetTy());
+                auto gTy = RawStaticCast<GenericsTy*>(constraint->type->DataTy());
                 EXPECT_TRUE(gTy && !gTy->upperBounds.empty());
                 EXPECT_FALSE(constraint->upperBounds.empty());
             }
@@ -1132,7 +1132,6 @@ TEST_F(PackageTest, UsageOfOnTheLeftOfPipeline)
     bool ret = instance->Compile(CompileStage::DESUGAR_AFTER_SEMA);
     auto pkg = instance->GetSourcePackages()[0];
     ASSERT_TRUE(pkg != nullptr);
-    ret = ret && instance->PerformDesugarAfterSema();
     ASSERT_TRUE(ret);
     EXPECT_EQ(diag.GetErrorCount(), 0);
     bool checked = false;
@@ -1233,7 +1232,7 @@ TEST_F(PackageTest, LoadPackageFromCjo)
         for (auto& file : std::as_const(pkg->files)) {
             if (file->decls.size() > 0) {
                 for (auto& decl : std::as_const(file->decls)) {
-                    EXPECT_TRUE(Ty::IsTyCorrect(decl->GetTy()));
+                    EXPECT_TRUE(decl->GetTy().IsCorrect());
                 }
             }
         }

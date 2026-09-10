@@ -25,8 +25,8 @@ enum class BlameStyle {
 
 struct Blame {
     Ptr<const AST::Node> src;
-    Ptr<const AST::Ty> lb;
-    Ptr<const AST::Ty> ub;
+    AST::ModalTy lb;
+    AST::ModalTy ub;
     BlameStyle style{BlameStyle::ARGUMENT};
     bool operator<(const Blame& rhs) const
     {
@@ -44,10 +44,10 @@ struct Blame {
 
 using AST::TyVar;
 using TyVars = std::set<Ptr<TyVar>>;
-using TyVarUB = std::map<Ptr<TyVar>, std::set<Ptr<AST::Ty>>>;
+using TyVarUB = std::map<Ptr<TyVar>, std::set<AST::ModalTy>>;
 
-using LowerBounds = PSet<Ptr<AST::Ty>>;
-using UpperBounds = PSet<Ptr<AST::Ty>>;
+using LowerBounds = PSet<AST::ModalTy>;
+using UpperBounds = PSet<AST::ModalTy>;
 
 template <typename C>
 inline TyVars StaticToTyVars(C tys)
@@ -67,11 +67,11 @@ struct TyVarBounds {
     UpperBounds sum{};
     // may greedily decide a ty var's solution, should have only 0 or 1 element : the solution
     // PSet here only to reuse its backtracking
-    PSet<Ptr<AST::Ty>> eq{};
+    PSet<AST::ModalTy> eq{};
     // currently don't track source for non-local ty var solving failure,
     // therefore don't need backtrackable data structure for blames
-    std::map<Ptr<AST::Ty>, std::set<Blame>> lb2Blames;
-    std::map<Ptr<AST::Ty>, std::set<Blame>> ub2Blames;
+    std::map<AST::ModalTy, std::set<Blame>> lb2Blames;
+    std::map<AST::ModalTy, std::set<Blame>> ub2Blames;
     std::string ToString() const;
 };
 
@@ -79,12 +79,12 @@ using Constraint = std::map<Ptr<TyVar>, TyVarBounds>;
 using Constraints = std::vector<Constraint>;
 
 // Substitution from type variables to types.
-using TypeSubst = std::map<Ptr<TyVar>, Ptr<AST::Ty>>;
+using TypeSubst = std::map<Ptr<TyVar>, AST::DataTy>;
 using TypeSubsts = std::set<TypeSubst>;
 
 // Substitution from type variables to their multiple instantiated types.
 // Eg: Given interface I3<Ti> and class C<T, V> <: I3<T> & I3<V>,  then [Ti |-> [T, V]]
-using MultiTypeSubst = std::map<Ptr<TyVar>, std::set<Ptr<AST::Ty>>>;
+using MultiTypeSubst = std::map<Ptr<TyVar>, std::set<AST::DataTy>>;
 
 std::string ToStringC(const Constraint& c);
 std::string ToStringS(const TypeSubst& m);
@@ -156,8 +156,9 @@ struct StableTyCmp {
     {
         return AST::CompTyByNames(ty1, ty2);
     }
+    bool operator()(AST::ModalTy m1, AST::ModalTy m2) const { return AST::CompTyByNamesModal(m1, m2); }
 };
-using StableTys = std::set<Ptr<AST::Ty>, StableTyCmp>;
+using StableTys = std::set<AST::ModalTy, StableTyCmp>;
 using StableTyVars = std::set<Ptr<TyVar>, StableTyCmp>;
 
 enum class SolvingErrStyle {
@@ -171,8 +172,8 @@ enum class SolvingErrStyle {
 struct SolvingErrInfo {
     SolvingErrStyle style = SolvingErrStyle::DEFAULT;
     Ptr<TyVar> tyVar;
-    std::vector<Ptr<AST::Ty>> lbs;
-    std::vector<Ptr<AST::Ty>> ubs;
+    std::vector<AST::ModalTy> lbs;
+    std::vector<AST::ModalTy> ubs;
     // in case of conflicting constraints, first blames for lbs, then blames for ubs
     std::vector<std::set<Blame>> blames;
 };

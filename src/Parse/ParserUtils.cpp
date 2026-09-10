@@ -167,12 +167,13 @@ bool ParserImpl::SeeingExpr()
         TokenKind::UNSAFE,
         TokenKind::WILDCARD,
         TokenKind::VARRAY,
+        TokenKind::EXCLAVE,
     };
     if (SeeingAny(exprFirstToken)) {
         return true;
     }
-    return SeeingLiteral() || SeeingPrimitiveTypeAndLParen() || SeeingPrimitiveTypeAndDot() || SeeingMacroCall() ||
-        SeeingBuiltinAnnotation() || SeeingSoftKeyword();
+    return SeeingLiteral() || SeeingPrimitiveType() || SeeingMacroCall() || SeeingBuiltinAnnotation() ||
+        SeeingSoftKeyword();
 }
 
 bool ParserImpl::SeeingCombinator(const std::vector<TokenKind>& kinds)

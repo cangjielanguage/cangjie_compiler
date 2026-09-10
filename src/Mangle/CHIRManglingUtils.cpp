@@ -128,12 +128,30 @@ std::string GenerateAnnotationFuncMangleName(const std::string& name)
 }
 
 namespace ClosureConversion {
-std::string GenerateGenericBaseClassMangleName(size_t paramNum)
+std::string GenerateGenericBaseClassMangleName(const FuncType& funcType)
 {
+    // axis-degree letters (uppercase = MUST/!, lowercase = MAYBE/?)
+    static const std::map<CHIR::Mode, std::string> LOCAL_MODAL_TO_STRING = {
+        {CHIR::Mode::MAYBE, "l"},
+        {CHIR::Mode::MUST, "L"},
+    };
     std::stringstream ss;
     // `$C` is a special prefix for closure conversion class declarations. `g` stands for generic.
     // `$Cg` is followed by a number with an underscore suffix.
-    ss << MANGLE_CLOSURE_GENERIC_PREFIX << paramNum << MANGLE_WILDCARD_PREFIX;
+    auto paramTypes = funcType.GetParamTypes();
+    ss << MANGLE_CLOSURE_GENERIC_PREFIX << paramTypes.size() << MANGLE_WILDCARD_PREFIX;
+    std::string modalStr;
+    for (size_t i = 0; i < paramTypes.size(); ++i) {
+        auto paramTy = paramTypes[i]->StripAllRefs();
+        if (paramTy->IsModal()) {
+            ss << std::to_string(i) << LOCAL_MODAL_TO_STRING.at(paramTy->GetModalInfo().Local())
+                << MANGLE_WILDCARD_PREFIX;
+        }
+    }
+    auto returnTy = funcType.GetReturnType()->StripAllRefs();
+    if (returnTy->IsModal()) {
+        ss << "r" << LOCAL_MODAL_TO_STRING.at(returnTy->GetModalInfo().Local()) << MANGLE_WILDCARD_PREFIX;
+    }
     return ss.str();
 }
 
