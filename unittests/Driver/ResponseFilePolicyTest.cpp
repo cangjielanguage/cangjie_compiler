@@ -5,12 +5,16 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include <cctype>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
 
 #include "cangjie/Driver/ResponseFilePolicy.h"
+#include "cangjie/Driver/TempFileManager.h"
+#include "cangjie/Option/Option.h"
+#include "cangjie/Utils/FileUtil.h"
 
 using namespace Cangjie;
 
@@ -286,3 +290,51 @@ TEST(ResponseFilePolicyTest, CommandLineLengthMatchesWindowsQuoting)
     EXPECT_EQ(ComputeCommandLineLength(args), BuildWindowsCommandLine(args).size());
 }
 #endif
+
+TEST(ResponseFilePolicyTest, OversizedCommandLineWritesRspFile)
+{
+    // Make the decision independent of the ambient environment.
+#ifdef _WIN32
+    _putenv_s("CJC_FORCE_RSP", "");
+#else
+    unsetenv("CJC_FORCE_RSP");
+#endif
+
+    // Trigger boundary: a command line exactly at the threshold falls back,
+    // one byte below does not.
+    const ResponseFilePolicy windowsPolicy{true, 32000};
+    EXPECT_FALSE(ShouldUseRsp(windowsPolicy, size_t{31999}));
+    EXPECT_TRUE(ShouldUseRsp(windowsPolicy, size_t{32000}));
+
+    // An argv whose measured length exceeds the Windows CreateProcessA limit
+    // under BOTH formulas: lpCommandLine bytes (BuildWindowsCommandLine) and
+    // POSIX argv bytes (ComputeCommandLineLength), so the oversized case is
+    // meaningful on every host.
+    std::vector<std::string> args{"C:\\bin\\ld.lld.exe", "-o", "out.exe"};
+    for (int i = 0; i < 50; ++i) {
+        args.push_back("C:\\a\\" + std::string(700, 'a') + "\\" + std::to_string(i) + ".o");
+    }
+    ASSERT_GT(BuildWindowsCommandLine(args).size(), size_t{32000});
+    ASSERT_GT(ComputeCommandLineLength(args), size_t{32000});
+    EXPECT_TRUE(ShouldUseRsp(windowsPolicy, ComputeCommandLineLength(args)));
+
+    // Unregistered tools never fall back, even when oversized.
+    EXPECT_FALSE(ShouldUseRsp(ResponseFilePolicy{}, ComputeCommandLineLength(args)));
+
+    // End to end: the rsp file is really written to disk and its content
+    // round-trips through the CRT tokenizer that Windows-hosted ld.lld
+    // applies to response files.
+    GlobalOptions options;
+    ASSERT_TRUE(TempFileManager::Instance().Init(options, false));
+    const std::string content = WindowsStyleRspSerialize(args);
+    const std::string rspPath = TempFileManager::Instance().CreateRspFile(content);
+    ASSERT_FALSE(rspPath.empty());
+
+    std::string failedReason;
+    const auto written = FileUtil::ReadFileContent(rspPath, failedReason);
+    ASSERT_TRUE(written.has_value()) << failedReason;
+    EXPECT_EQ(*written, content);
+
+    const std::vector<std::string> expected(args.begin() + 1, args.end());
+    EXPECT_EQ(WindowsStyleRspParse(*written), expected);
+}

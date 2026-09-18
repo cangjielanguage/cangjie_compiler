@@ -247,12 +247,7 @@ std::unique_ptr<ToolFuture> Tool::Execute(bool verbose) const
     if (policy.supported) {
         std::vector<std::string> fullArgs = execArgs;
         fullArgs.insert(fullArgs.end(), expandedArgs.begin(), expandedArgs.end());
-        const size_t cmdLen = ComputeCommandLineLength(fullArgs);
-        const char* forceEnv = std::getenv("CJC_FORCE_RSP");
-        const bool forced = (forceEnv != nullptr && forceEnv[0] != '\0' && std::string(forceEnv) != "0");
-        if (cmdLen >= policy.threshold || forced) {
-            useRsp = true;
-        }
+        useRsp = ShouldUseRsp(policy, ComputeCommandLineLength(fullArgs));
     }
 
     if (useRsp) {

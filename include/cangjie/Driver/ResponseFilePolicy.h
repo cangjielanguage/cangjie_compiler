@@ -97,6 +97,16 @@ std::string WindowsStyleRspSerialize(const std::vector<std::string>& args);
 std::string SerializeRspForHost(const std::vector<std::string>& args);
 
 /**
+ * @brief Decide whether a tool invocation should fall back to an rsp file.
+ *
+ * True when `cmdLength` reaches the tool's registered threshold, or when the
+ * environment variable `CJC_FORCE_RSP` is set to a non-empty value other than
+ * "0" (a testing escape hatch for hosts where the real threshold is rarely
+ * reached). Always false for tools without a registered policy.
+ */
+bool ShouldUseRsp(const ResponseFilePolicy& policy, size_t cmdLength);
+
+/**
  * @brief Compute the platform-specific command length for `args`.
  *
  * On Windows this is the byte length of the `lpCommandLine` string that

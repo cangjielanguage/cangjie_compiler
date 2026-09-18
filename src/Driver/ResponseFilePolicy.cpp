@@ -150,6 +150,16 @@ std::string SerializeRspForHost(const std::vector<std::string>& args)
 #endif
 }
 
+bool ShouldUseRsp(const ResponseFilePolicy& policy, size_t cmdLength)
+{
+    if (!policy.supported) {
+        return false;
+    }
+    const char* forceEnv = std::getenv("CJC_FORCE_RSP");
+    const bool forced = (forceEnv != nullptr && forceEnv[0] != '\0' && std::string(forceEnv) != "0");
+    return cmdLength >= policy.threshold || forced;
+}
+
 std::string BuildWindowsCommandLine(const std::vector<std::string>& args)
 {
     // CRT (CommandLineToArgvW) quoting per arg — every arg wrapped in "...",
