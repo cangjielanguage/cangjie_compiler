@@ -4,7 +4,7 @@
 #
 # See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-add_executable(DriverTest DriverTest.cpp ToolchainTest.cpp TempFileManagerTest.cpp ${CANGJIE_SRC_OBJECTS})
+add_executable(DriverTest DriverTest.cpp ToolchainTest.cpp TempFileManagerTest.cpp ResponseFilePolicyTest.cpp ${CANGJIE_SRC_OBJECTS})
 target_link_libraries(
     DriverTest
     GTest::gtest

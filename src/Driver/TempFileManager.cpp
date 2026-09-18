@@ -131,6 +131,18 @@ std::string CreateTempDirName(const std::string& tempDir)
     return Cangjie::FileUtil::JoinPath(tempDir, ss.str());
 }
 
+std::string CreateRspFileName(const std::string& tempDir)
+{
+    // Reuse the same timestamp + random hex scheme as CreateTempDirName so
+    // rsp file names are unique across concurrent tool executions.
+    std::stringstream ss;
+    ss << "cjc-rsp-";
+    ss << SetNowTimeEncodedString();
+    ss << "-" << Cangjie::Utils::GenerateRandomHexString();
+    ss << ".rsp";
+    return Cangjie::FileUtil::JoinPath(tempDir, ss.str());
+}
+
 std::optional<std::string> MakeTempDir(const std::string& tempDir, bool fromEnvSetting)
 {
     int8_t loopSize = 10; // Loop 10 times to try creating a temporary directory.
@@ -306,6 +318,22 @@ bool TempFileManager::InitTempDir()
 std::string TempFileManager::GetTempFolder()
 {
     return tempDir;
+}
+
+std::string TempFileManager::CreateRspFile(const std::string& content)
+{
+    std::string rspPath = CreateRspFileName(tempDir);
+    if (!FileUtil::WriteToFile(rspPath, content)) {
+        Errorln("Failed to write response file: ", rspPath);
+        return "";
+    }
+    if (!opts.saveTemps) {
+        // The spawned child (CreateProcessA/posix_spawn) returns immediately
+        // and may not have opened the rsp file yet, so we cannot delete it
+        // here. Register it for end-of-process cleanup via DeleteTempFiles().
+        deletedFiles.push_back(rspPath);
+    }
+    return rspPath;
 }
 
 TempFileInfo TempFileManager::CreateNewFileInfo(const TempFileInfo& info, TempFileKind kind)

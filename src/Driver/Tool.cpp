@@ -14,13 +14,13 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <iomanip>
 #else
 #include <spawn.h>
 #include <cstring>
 #include <sys/wait.h>
 #endif
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <type_traits>
@@ -29,6 +29,7 @@
 #include "cangjie/Utils/Semaphore.h"
 #include "cangjie/Driver/TempFileManager.h"
 #include "cangjie/Driver/Utils.h"
+#include "cangjie/Driver/ResponseFilePolicy.h"
 #ifdef _WIN32
 #include "cangjie/Basic/StringConvertor.h"
 #endif
@@ -174,6 +175,39 @@ std::string Tool::GenerateCommand() const
 #endif
 }
 
+std::string Tool::GenerateCommandFromExecArgs(const std::vector<std::string>& execArgs) const
+{
+    // Like GenerateCommand(), but formats the already-resolved execArgs (with
+    // the program name at index 0, possibly a single `@<rsp>` entry) so the
+    // verbose output reflects what is actually spawned.
+    std::string tempCommand;
+    std::string argStr;
+    for (size_t i = 1; i < execArgs.size(); ++i) {
+#ifdef _WIN32
+        argStr = argStr + FileUtil::GetQuoted(execArgs[i]) + " ";
+#else
+        argStr = argStr + GetSingleQuoted(execArgs[i]) + " ";
+#endif
+    }
+#ifndef _WIN32
+    if (!GetLdLibraryPath().empty()) {
+        tempCommand = "LD_LIBRARY_PATH=" + GetSingleQuoted(GetLdLibraryPath()) + ":$" + LD_LIBRARY_PATH + " ";
+    }
+#endif
+    const std::string& progName = execArgs.empty() ? name : execArgs[0];
+#ifdef _WIN32
+    tempCommand += FileUtil::GetQuoted(progName);
+#else
+    tempCommand += GetSingleQuoted(progName);
+#endif
+    tempCommand += " " + argStr;
+#ifdef _WIN32
+    return "\"" + tempCommand + "\"";
+#else
+    return tempCommand;
+#endif
+}
+
 bool Tool::InternalImplementedCommandExec() const
 {
     bool res = false;
@@ -201,18 +235,59 @@ bool Tool::InternalImplementedCommandExec() const
 
 std::unique_ptr<ToolFuture> Tool::Execute(bool verbose) const
 {
+    // Resolve the final exec args: name + expanded args, or name + @rsp when
+    // the policy says the command line is too long (or CJC_FORCE_RSP=1
+    // forces it for testing on platforms where the real threshold is high).
+    std::vector<std::string> execArgs;
+    execArgs.push_back(name);
+    std::vector<std::string> expandedArgs = ExpandArgs();
+
+    const ResponseFilePolicy policy = LookupResponseFilePolicy(name);
+    bool useRsp = false;
+    if (policy.supported) {
+        std::vector<std::string> fullArgs = execArgs;
+        fullArgs.insert(fullArgs.end(), expandedArgs.begin(), expandedArgs.end());
+        const size_t cmdLen = ComputeCommandLineLength(fullArgs);
+        const char* forceEnv = std::getenv("CJC_FORCE_RSP");
+        const bool forced = (forceEnv != nullptr && forceEnv[0] != '\0' && std::string(forceEnv) != "0");
+        if (cmdLen >= policy.threshold || forced) {
+            useRsp = true;
+        }
+    }
+
+    if (useRsp) {
+        // Build the full args vector (with name at index 0) and let the
+        // serializer skip argv[0]. Style follows the host OS: Windows-hosted
+        // ld.lld reads rsp with CRT rules, the rest with GNU rules.
+        std::vector<std::string> fullArgs = execArgs;
+        fullArgs.insert(fullArgs.end(), expandedArgs.begin(), expandedArgs.end());
+        std::string content = SerializeRspForHost(fullArgs);
+        std::string rspPath = TempFileManager::Instance().CreateRspFile(content);
+        if (rspPath.empty()) {
+            // Write failed; fall back to original args so the tool still runs
+            // (and reports its own failure mode if the command is genuinely
+            // too long).
+            useRsp = false;
+        } else {
+            execArgs.push_back("@" + rspPath);
+        }
+    }
+    if (!useRsp) {
+        execArgs.insert(execArgs.end(), expandedArgs.begin(), expandedArgs.end());
+    }
+
     if (verbose) {
-        Println(FileUtil::Normalize(GetCommandString()));
+        Println(FileUtil::Normalize(GenerateCommandFromExecArgs(execArgs)));
     }
     // If the file is deleted, the subsequent commands are not executed.
     if (TempFileManager::Instance().IsDeleted()) {
         return nullptr;
     }
-    return Run();
+    return Run(execArgs);
 }
 
 #ifdef _WIN32
-std::unique_ptr<ToolFuture> Tool::Run() const
+std::unique_ptr<ToolFuture> Tool::Run(const std::vector<std::string>& execArgs) const
 {
     if (type == ToolType::INTERNAL_IMPLEMENTED) {
         Utils::Semaphore::Get().Acquire();
@@ -220,19 +295,12 @@ std::unique_ptr<ToolFuture> Tool::Run() const
     }
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
-    auto& arguments = GetFullArgs();
-    std::ostringstream oss;
-    for (size_t i = 0; i < arguments.size(); ++i) {
-        if (i != 0) {
-            oss << " ";
-        }
-        if (arguments[i].empty() || arguments[i].find_first_of("\t \"&\'()*<>\\`^|\n") != std::string::npos) {
-            oss << std::quoted(arguments[i]);
-        } else {
-            oss << arguments[i];
-        }
-    }
-    std::string commandLine = oss.str();
+    // Use the rsp-aware execArgs passed by Execute() (which already contains
+    // the program name at index 0). This replaces the historical
+    // `GetFullArgs()` + ostringstream+std::quoted block; the same quoting is
+    // now shared via BuildWindowsCommandLine so the measured length equals
+    // the actual string passed to CreateProcessA.
+    std::string commandLine = BuildWindowsCommandLine(execArgs);
 
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
@@ -247,21 +315,19 @@ std::unique_ptr<ToolFuture> Tool::Run() const
     return std::make_unique<WindowsProcessFuture>(pi);
 }
 #else
-std::unique_ptr<ToolFuture> Tool::Run() const
+std::unique_ptr<ToolFuture> Tool::Run(const std::vector<std::string>& execArgs) const
 {
     if (type == ToolType::INTERNAL_IMPLEMENTED) {
         Utils::Semaphore::Get().Acquire();
         return std::make_unique<ThreadFuture>(std::async(&Tool::InternalImplementedCommandExec, this));
     }
-    auto arguments = ExpandArgs();
-    arguments.insert(arguments.begin(), name);
-
-    // Convert arguments to char * array for argv argument.
+    // execArgs already contains the program name at index 0; either the
+    // original expanded args or {name, "@<rsp>"} when rsp fallback was used.
     std::vector<char*> rawArgumentArray = {};
-    rawArgumentArray.resize(arguments.size() + 1);
+    rawArgumentArray.resize(execArgs.size() + 1);
     size_t index = 0;
-    while (index < arguments.size()) {
-        rawArgumentArray[index] = const_cast<char*>(arguments[index].c_str());
+    while (index < execArgs.size()) {
+        rawArgumentArray[index] = const_cast<char*>(execArgs[index].c_str());
         index++;
     }
     rawArgumentArray[index] = nullptr;

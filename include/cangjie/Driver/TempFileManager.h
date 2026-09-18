@@ -72,6 +72,22 @@ public:
     std::string GetTempFolder();
 
     /**
+     * @brief Write a tool-side response file (rsp) under the temp folder.
+     *
+     * The returned path is unique to support concurrent tool execution. The
+     * file is registered for deletion by `DeleteTempFiles()` unless
+     * `--save-temps` is in effect, so callers must NOT delete it themselves
+     * (the spawned child may not have finished reading it when this call
+     * returns).
+     *
+     * @param content The rsp file content (GNU-style serialized args).
+     * @return std::string The absolute path of the written rsp file. Empty
+     *                     string on write failure (an error is reported via
+     *                     `Errorln`).
+     */
+    std::string CreateRspFile(const std::string& content);
+
+    /**
      * @brief Delete all temporary files.
      */
     void DeleteTempFiles();
