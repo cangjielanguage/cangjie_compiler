@@ -133,8 +133,7 @@ std::string CreateTempDirName(const std::string& tempDir)
 
 std::string CreateRspFileName(const std::string& tempDir)
 {
-    // Reuse the same timestamp + random hex scheme as CreateTempDirName so
-    // rsp file names are unique across concurrent tool executions.
+    // Same naming scheme as CreateTempDirName; unique across concurrent runs.
     std::stringstream ss;
     ss << "cjc-rsp-";
     ss << SetNowTimeEncodedString();
@@ -328,9 +327,7 @@ std::string TempFileManager::CreateRspFile(const std::string& content)
         return "";
     }
     if (!opts.saveTemps) {
-        // The spawned child (CreateProcessA/posix_spawn) returns immediately
-        // and may not have opened the rsp file yet, so we cannot delete it
-        // here. Register it for end-of-process cleanup via DeleteTempFiles().
+        // Child may not have read the file yet; delete at end of process.
         deletedFiles.push_back(rspPath);
     }
     return rspPath;

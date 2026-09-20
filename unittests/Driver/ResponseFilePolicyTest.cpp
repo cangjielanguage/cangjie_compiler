@@ -19,10 +19,8 @@
 using namespace Cangjie;
 
 namespace {
-// A minimal GNU-style rsp parser (the same syntax lld/Common/Args.cpp and GNU
-// ld implement) used to verify that GnuStyleRspSerialize is its inverse:
-// whitespace separated tokens, '\''/'"' quoting, '\' escaping everywhere and
-// '#' line comments at token start.
+// A minimal GNU-style rsp parser mirroring the real readers (lld @file
+// expansion, GNU ld expandargv); '#' is an ordinary character, not a comment.
 std::vector<std::string> GnuStyleRspParse(const std::string& content)
 {
     std::vector<std::string> tokens;
@@ -57,10 +55,6 @@ std::vector<std::string> GnuStyleRspParse(const std::string& content)
         } else if (c == '\'') {
             inSingle = true;
             inToken = true;
-        } else if (c == '#') {
-            while (i < content.size() && content[i] != '\n') {
-                ++i;
-            }
         } else if (std::isspace(static_cast<unsigned char>(c)) != 0) {
             if (inToken) {
                 tokens.push_back(current);
@@ -93,29 +87,38 @@ TEST(ResponseFilePolicyTest, SerializeSkipsProgramName)
 
 TEST(ResponseFilePolicyTest, SerializeWindowsPathsQuotingAndEscaping)
 {
-    const std::string content = GnuStyleRspSerialize({"ld.lld.exe", "-o", "C:\\Build\\My App\\out.exe",
-        "C:\\Program Files\\cangjie\\main.o", "-L\"C:\\Program Files\\lib\"", "-lfoo"});
+    const std::string content = GnuStyleRspSerialize({"ld.lld.exe", "-o", R"(C:\Build\My App\out.exe)",
+        R"(C:\Program Files\cangjie\main.o)", R"(-L"C:\Program Files\lib")", "-lfoo"});
     EXPECT_EQ(content,
-        "-o\n"
-        "\"C:\\\\Build\\\\My App\\\\out.exe\"\n"
-        "\"C:\\\\Program Files\\\\cangjie\\\\main.o\"\n"
-        "\"-L\\\"C:\\\\Program Files\\\\lib\\\"\"\n"
-        "-lfoo\n");
+        R"(-o
+"C:\\Build\\My App\\out.exe"
+"C:\\Program Files\\cangjie\\main.o"
+"-L\"C:\\Program Files\\lib\""
+-lfoo
+)");
 }
 
 TEST(ResponseFilePolicyTest, SerializeHashCharQuoted)
 {
-    EXPECT_EQ(GnuStyleRspSerialize({"ld", "-DVERSION=1.0#dev"}), "\"-DVERSION=1.0#dev\"\n");
+    EXPECT_EQ(GnuStyleRspSerialize({"ld", "-DVERSION=1.0#dev"}), R"("-DVERSION=1.0#dev"
+)");
 }
 
 TEST(ResponseFilePolicyTest, SerializeEmptyArgQuoted)
 {
-    EXPECT_EQ(GnuStyleRspSerialize({"ld.lld.exe", "", "-o", "app"}), "\"\"\n-o\napp\n");
+    EXPECT_EQ(GnuStyleRspSerialize({"ld.lld.exe", "", "-o", "app"}),
+        R"("
+-o
+app
+)");
 }
 
 TEST(ResponseFilePolicyTest, SerializeSingleQuoteArgQuoted)
 {
-    EXPECT_EQ(GnuStyleRspSerialize({"ld.lld.exe", "-DNAME='foo'", "main.o"}), "\"-DNAME='foo'\"\nmain.o\n");
+    EXPECT_EQ(GnuStyleRspSerialize({"ld.lld.exe", "-DNAME='foo'", "main.o"}),
+        R"("-DNAME='foo'")
+main.o
+)");
 }
 
 TEST(ResponseFilePolicyTest, RoundTripThroughGnuStyleParser)
@@ -123,24 +126,48 @@ TEST(ResponseFilePolicyTest, RoundTripThroughGnuStyleParser)
     const std::vector<std::string> args = {
         "ld.lld",
         "-o",
-        "C:\\Build\\My App\\out.exe",
-        "C:\\Program Files\\cangjie\\main.o",
-        "-L\"C:\\Program Files\\lib\"",
-        "-DVERSION=1.0#dev",
-        "-DNAME='foo'",
+        R"(C:\Build\My App\out.exe)",
+        R"(C:\Program Files\cangjie\main.o)",
+        R"(-L"C:\Program Files\lib")",
+        R"(-DVERSION=1.0#dev)",
+        R"(-DNAME='foo')",
         "a b\tc",
-        "back\\slash",
-        "'single'",
-        "\"double\"",
+        R"(back\slash)",
+        R"('single')",
+        R"("double")",
         "",
-        "mixed'\"both",
-        "中文路径.o",
+        R"(mixed'"both)",
+        R"(中文路径.o)",
         "-lfoo",
     };
     const std::string content = GnuStyleRspSerialize(args);
     const std::vector<std::string> parsed = GnuStyleRspParse(content);
     const std::vector<std::string> expected(args.begin() + 1, args.end());
     EXPECT_EQ(parsed, expected);
+}
+
+TEST(ResponseFilePolicyTest, SerializeRspForHostMatchesHostStyle)
+{
+    // The entry Tool::Execute calls; style dispatches on the host OS.
+    const std::vector<std::string> args = {"ld.lld", "-o", "C:\\Build\\My App\\out.exe", "-DNAME='foo'", "a b"};
+#ifdef _WIN32
+    EXPECT_EQ(SerializeRspForHost(args), WindowsStyleRspSerialize(args));
+#else
+    EXPECT_EQ(SerializeRspForHost(args), GnuStyleRspSerialize(args));
+#endif
+}
+
+TEST(ResponseFilePolicyTest, GnuStyleRspParserHandlesRawShellSyntax)
+{
+    // Raw inputs the serializer never emits, covering every tokenizer branch.
+    EXPECT_EQ(GnuStyleRspParse(R"(-o
+'single quote'
+)"), std::vector<std::string>({"-o", "single quote"}));
+    EXPECT_EQ(GnuStyleRspParse(R"('it\'s'
+)"), std::vector<std::string>({"it's"}));
+    EXPECT_EQ(GnuStyleRspParse(R"(a\ b)"), std::vector<std::string>({"a b"}));
+    // Trailing backslashes hit the "i + 1 < size" false arms.
+    EXPECT_EQ(GnuStyleRspParse(R"('a\)"), std::vector<std::string>({"a\\"}));    EXPECT_EQ(GnuStyleRspParse("a\\"), std::vector<std::string>({"a\\"}));
 }
 
 TEST(ResponseFilePolicyTest, UnknownToolsKeepOriginalPath)
@@ -197,24 +224,26 @@ TEST(ResponseFilePolicyTest, CommandLineLengthCountsArgvBytes)
 
 TEST(ResponseFilePolicyTest, WindowsStyleRspSerializeCrtEscaping)
 {
-    // Every arg is unconditionally wrapped in "..."; mid-string backslashes
-    // stay single (literal to the CRT tokenizer).
-    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", "-LC:\\lib\\sub"}),
-        "\"-LC:\\lib\\sub\"\n");
-    // Trailing backslash run is doubled before the closing quote (CRT 2n rule).
-    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", "-LC:\\lib\\"}), "\"-LC:\\lib\\\\\"\n");
+    // Mid-string backslashes stay literal to the CRT tokenizer.
+    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", R"(-LC:\lib\sub)"}),
+        R"("-LC:\lib\sub"
+)");
+    // Trailing run doubled (CRT 2n rule).
+    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", R"(-LC:\lib\)"}), R"("-LC:\lib\\"
+)");
     // Three trailing backslashes are written as six and read back as three.
-    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", "trail\\\\\\"}), "\"trail\\\\\\\\\\\\\"\n");
-    // Inner quote is escaped (\" with the preceding run doubled: 2*0+1 = 1).
-    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", "-L\"C:\\lib\""}), "\"-L\\\"C:\\lib\\\"\"\n");
-    // The empty string survives as "" (an empty line would be dropped).
-    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", ""}), "\"\"\n");
+    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", R"(trail\\\)"}), R"("trail\\\\\\"
+)");
+    // Inner quote escaped; preceding run doubled.
+    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", R"(-L"C:\lib")"}), R"("-L\"C:\lib\""
+)");
+    // Empty string must survive quoted.
+    EXPECT_EQ(WindowsStyleRspSerialize({"ld.lld.exe", ""}), R"(""
+)");
 }
 
-// A minimal MSVC CRT command-line/rsp tokenizer (the syntax Windows-hosted
-// ld.lld applies) used to verify that WindowsStyleRspSerialize is its
-// inverse: 2n backslashes + quote -> n backslashes + quote toggle, 2n+1
-// backslashes + quote -> n backslashes + literal quote; one arg per line.
+// A minimal MSVC CRT tokenizer mirroring Windows-hosted ld.lld; the inverse
+// check for WindowsStyleRspSerialize.
 std::vector<std::string> WindowsStyleRspParse(const std::string& content)
 {
     std::vector<std::string> tokens;
@@ -251,13 +280,13 @@ TEST(ResponseFilePolicyTest, RoundTripThroughWindowsStyleParser)
     const std::vector<std::string> args = {
         "ld.lld.exe",
         "-o",
-        "C:\\Build\\My App\\out.exe",
-        "-LC:\\hlt\\cangjie\\third_party\\mingw\\lib\\",
-        "C:\\Program Files\\cangjie\\main.o",
-        "-L\"C:\\Program Files\\lib\"",
-        "trail\\\\\\",
+        R"(C:\Build\My App\out.exe)",
+        R"(-LC:\hlt\cangjie\third_party\mingw\lib\)",
+        R"(C:\Program Files\cangjie\main.o)",
+        R"(-L"C:\Program Files\lib")",
+        R"(trail\\\)",
         "a b\tc",
-        "'single'",
+        R"('single')",
         "",
         "-lfoo",
     };
@@ -270,60 +299,54 @@ TEST(ResponseFilePolicyTest, RoundTripThroughWindowsStyleParser)
 TEST(ResponseFilePolicyTest, WindowsCommandLineQuoting)
 {
     EXPECT_EQ(BuildWindowsCommandLine({}), "");
-    EXPECT_EQ(BuildWindowsCommandLine({"prog"}), "\"prog\"");
-    EXPECT_EQ(BuildWindowsCommandLine({"prog", "-o", "out"}), "\"prog\" \"-o\" \"out\"");
-    EXPECT_EQ(BuildWindowsCommandLine({"prog", ""}), "\"prog\" \"\"");
-    EXPECT_EQ(BuildWindowsCommandLine({"prog", "a b"}), "\"prog\" \"a b\"");
-    // CRT rules: backslashes not adjacent to a quote are literal, so plain
-    // paths need no doubling.
-    EXPECT_EQ(BuildWindowsCommandLine({"C:\\bin\\ld.lld.exe", "@C:\\tmp\\a.rsp"}),
-        "\"C:\\bin\\ld.lld.exe\" \"@C:\\tmp\\a.rsp\"");
-    // Trailing backslash adjacent to the closing quote is doubled.
-    EXPECT_EQ(BuildWindowsCommandLine({"prog", "-LC:\\lib dir\\"}), "\"prog\" \"-LC:\\lib dir\\\\\"");
-    EXPECT_EQ(BuildWindowsCommandLine({"prog", "-L\"C:\\lib\""}), "\"prog\" \"-L\\\"C:\\lib\\\"\"");
+    EXPECT_EQ(BuildWindowsCommandLine({"prog"}), R"("prog")");
+    EXPECT_EQ(BuildWindowsCommandLine({"prog", "-o", "out"}), R"("prog" "-o" "out")");
+    EXPECT_EQ(BuildWindowsCommandLine({"prog", ""}), R"("prog" "")");
+    EXPECT_EQ(BuildWindowsCommandLine({"prog", "a b"}), R"("prog" "a b")");
+    // Backslashes not adjacent to a quote are literal.
+    EXPECT_EQ(BuildWindowsCommandLine({R"(C:\bin\ld.lld.exe)", R"(@C:\tmp\a.rsp)"}),
+        R"("C:\bin\ld.lld.exe" "@C:\tmp\a.rsp")");
+    // Trailing backslash doubled before the closing quote.
+    EXPECT_EQ(BuildWindowsCommandLine({"prog", R"(-LC:\lib dir\)"}), R"("prog" "-LC:\lib dir\\")");
+    EXPECT_EQ(BuildWindowsCommandLine({"prog", R"(-L"C:\lib")"}), R"("prog" "-L\"C:\lib\"")");
 }
 
 #ifdef _WIN32
 TEST(ResponseFilePolicyTest, CommandLineLengthMatchesWindowsQuoting)
 {
-    const std::vector<std::string> args = {"C:\\bin\\ld.lld.exe", "-o", "C:\\out dir\\a.exe"};
+    const std::vector<std::string> args = {R"(C:\bin\ld.lld.exe)", "-o", R"(C:\out dir\a.exe)"};
     EXPECT_EQ(ComputeCommandLineLength(args), BuildWindowsCommandLine(args).size());
 }
 #endif
 
 TEST(ResponseFilePolicyTest, OversizedCommandLineWritesRspFile)
 {
-    // Make the decision independent of the ambient environment.
+    // Isolate from the ambient environment.
 #ifdef _WIN32
     _putenv_s("CJC_FORCE_RSP", "");
 #else
     unsetenv("CJC_FORCE_RSP");
 #endif
 
-    // Trigger boundary: a command line exactly at the threshold falls back,
-    // one byte below does not.
+    // Threshold boundary: at-threshold falls back, one byte below does not.
     const ResponseFilePolicy windowsPolicy{true, 32000};
     EXPECT_FALSE(ShouldUseRsp(windowsPolicy, size_t{31999}));
     EXPECT_TRUE(ShouldUseRsp(windowsPolicy, size_t{32000}));
 
-    // An argv whose measured length exceeds the Windows CreateProcessA limit
-    // under BOTH formulas: lpCommandLine bytes (BuildWindowsCommandLine) and
-    // POSIX argv bytes (ComputeCommandLineLength), so the oversized case is
-    // meaningful on every host.
-    std::vector<std::string> args{"C:\\bin\\ld.lld.exe", "-o", "out.exe"};
+    // Oversized under both length formulas (Windows lpCommandLine and POSIX
+    // argv bytes), so the case is meaningful on every host.
+    std::vector<std::string> args{R"(C:\bin\ld.lld.exe)", "-o", "out.exe"};
     for (int i = 0; i < 50; ++i) {
-        args.push_back("C:\\a\\" + std::string(700, 'a') + "\\" + std::to_string(i) + ".o");
+        args.push_back(R"(C:\a\)" + std::string(700, 'a') + R"(\)" + std::to_string(i) + ".o");
     }
     ASSERT_GT(BuildWindowsCommandLine(args).size(), size_t{32000});
     ASSERT_GT(ComputeCommandLineLength(args), size_t{32000});
     EXPECT_TRUE(ShouldUseRsp(windowsPolicy, ComputeCommandLineLength(args)));
 
-    // Unregistered tools never fall back, even when oversized.
+    // Unregistered tools never fall back.
     EXPECT_FALSE(ShouldUseRsp(ResponseFilePolicy{}, ComputeCommandLineLength(args)));
 
-    // End to end: the rsp file is really written to disk and its content
-    // round-trips through the CRT tokenizer that Windows-hosted ld.lld
-    // applies to response files.
+    // End to end: rsp file written and round-trips the CRT tokenizer.
     GlobalOptions options;
     ASSERT_TRUE(TempFileManager::Instance().Init(options, false));
     const std::string content = WindowsStyleRspSerialize(args);
@@ -337,4 +360,34 @@ TEST(ResponseFilePolicyTest, OversizedCommandLineWritesRspFile)
 
     const std::vector<std::string> expected(args.begin() + 1, args.end());
     EXPECT_EQ(WindowsStyleRspParse(*written), expected);
+}
+
+TEST(ResponseFilePolicyTest, ShouldUseRspForcedByEnv)
+{
+    // CJC_FORCE_RSP: "1" forces, "0" and "" count as unset; unset at the end.
+    const ResponseFilePolicy policy{true, 32000};
+#ifdef _WIN32
+    _putenv_s("CJC_FORCE_RSP", "1");
+#else
+    setenv("CJC_FORCE_RSP", "1", 1);
+#endif
+    EXPECT_TRUE(ShouldUseRsp(policy, size_t{5}));
+#ifdef _WIN32
+    _putenv_s("CJC_FORCE_RSP", "0");
+#else
+    setenv("CJC_FORCE_RSP", "0", 1);
+#endif
+    EXPECT_FALSE(ShouldUseRsp(policy, size_t{5}));
+    EXPECT_TRUE(ShouldUseRsp(policy, size_t{32000}));
+#ifdef _WIN32
+    _putenv_s("CJC_FORCE_RSP", "");
+#else
+    setenv("CJC_FORCE_RSP", "", 1);
+#endif
+    EXPECT_FALSE(ShouldUseRsp(policy, size_t{5}));
+#ifdef _WIN32
+    _putenv_s("CJC_FORCE_RSP", "");
+#else
+    unsetenv("CJC_FORCE_RSP");
+#endif
 }

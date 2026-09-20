@@ -177,9 +177,7 @@ std::string Tool::GenerateCommand() const
 
 std::string Tool::GenerateCommandFromExecArgs(const std::vector<std::string>& execArgs) const
 {
-    // Like GenerateCommand(), but formats the already-resolved execArgs (with
-    // the program name at index 0, possibly a single `@<rsp>` entry) so the
-    // verbose output reflects what is actually spawned.
+    // Format the already-resolved execArgs (argv[0] first, then args or @rsp).
     std::string tempCommand;
     std::string argStr;
     for (size_t i = 1; i < execArgs.size(); ++i) {
@@ -235,9 +233,7 @@ bool Tool::InternalImplementedCommandExec() const
 
 std::unique_ptr<ToolFuture> Tool::Execute(bool verbose) const
 {
-    // Resolve the final exec args: name + expanded args, or name + @rsp when
-    // the policy says the command line is too long (or CJC_FORCE_RSP=1
-    // forces it for testing on platforms where the real threshold is high).
+    // Resolve exec args: full args, or name + @rsp when oversized or forced.
     std::vector<std::string> execArgs;
     execArgs.push_back(name);
     std::vector<std::string> expandedArgs = ExpandArgs();
@@ -251,17 +247,13 @@ std::unique_ptr<ToolFuture> Tool::Execute(bool verbose) const
     }
 
     if (useRsp) {
-        // Build the full args vector (with name at index 0) and let the
-        // serializer skip argv[0]. Style follows the host OS: Windows-hosted
-        // ld.lld reads rsp with CRT rules, the rest with GNU rules.
+        // Serialize with argv[0] skipped; style follows the host OS.
         std::vector<std::string> fullArgs = execArgs;
         fullArgs.insert(fullArgs.end(), expandedArgs.begin(), expandedArgs.end());
         std::string content = SerializeRspForHost(fullArgs);
         std::string rspPath = TempFileManager::Instance().CreateRspFile(content);
         if (rspPath.empty()) {
-            // Write failed; fall back to original args so the tool still runs
-            // (and reports its own failure mode if the command is genuinely
-            // too long).
+            // Write failed; fall back to the original args.
             useRsp = false;
         } else {
             execArgs.push_back("@" + rspPath);
@@ -290,11 +282,8 @@ std::unique_ptr<ToolFuture> Tool::Run(const std::vector<std::string>& execArgs) 
     }
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
-    // Use the rsp-aware execArgs passed by Execute() (which already contains
-    // the program name at index 0). This replaces the historical
-    // `GetFullArgs()` + ostringstream+std::quoted block; the same quoting is
-    // now shared via BuildWindowsCommandLine so the measured length equals
-    // the actual string passed to CreateProcessA.
+    // execArgs already has argv[0] at index 0; quoting matches what
+    // CreateProcessA receives.
     std::string commandLine = BuildWindowsCommandLine(execArgs);
 
     ZeroMemory(&si, sizeof(si));
