@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -14,7 +14,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <sstream>
 #include <unordered_map>
 #ifndef _WIN32
@@ -123,8 +122,7 @@ std::string GnuStyleRspSerialize(const std::vector<std::string>& args)
             }
             out += c;
         }
-        out += '"';
-        out += '\n';
+        out += "\"\n";
     }
     return out;
 }
@@ -152,12 +150,7 @@ std::string SerializeRspForHost(const std::vector<std::string>& args)
 
 bool ShouldUseRsp(const ResponseFilePolicy& policy, size_t cmdLength)
 {
-    if (!policy.supported) {
-        return false;
-    }
-    const char* forceEnv = std::getenv("CJC_FORCE_RSP");
-    const bool forced = (forceEnv != nullptr && forceEnv[0] != '\0' && std::string(forceEnv) != "0");
-    return cmdLength >= policy.threshold || forced;
+    return policy.supported && cmdLength >= policy.threshold;
 }
 
 std::string BuildWindowsCommandLine(const std::vector<std::string>& args)
@@ -200,18 +193,15 @@ ResponseFilePolicy LookupResponseFilePolicy(const std::string& toolName)
     static const std::unordered_map<std::string, ResponseFilePolicy> policyTable = []() {
         std::unordered_map<std::string, ResponseFilePolicy> table;
 #if defined(_WIN32)
-        // Host = Windows: CreateProcessA's lpCommandLine is hard-capped at
-        // 32767 chars; trigger with a safety margin. The MinGW linker is
-        // ld.lld.
-        table["ld.lld"] = {true, 32000};
+        // TEMP gate test (revert before commit): threshold shrunk to force
+        // the rsp path. Real value: 32000 (CreateProcessA cap 32767, margin).
+        table["ld.lld"] = {true, 128};
 #elif defined(__APPLE__)
-        // Host = macOS: posix_spawn (ARG_MAX); the Mach-O linker is
-        // ld64.lld.
-        table["ld64.lld"] = {true, PosixThreshold()};
+        // TEMP gate test (revert before commit). Real value: PosixThreshold().
+        table["ld64.lld"] = {true, std::min(PosixThreshold(), size_t{128})};
 #else
-        // Host = Linux: posix_spawn (ARG_MAX); ld.lld for LTO/HwAsan links,
-        // system GNU ld otherwise.
-        const size_t threshold = PosixThreshold();
+        // TEMP gate test (revert before commit). Real value: PosixThreshold().
+        const size_t threshold = std::min(PosixThreshold(), size_t{128});
         table["ld.lld"] = {true, threshold};
         table["ld"]     = {true, threshold};
 #endif

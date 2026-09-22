@@ -233,7 +233,8 @@ bool Tool::InternalImplementedCommandExec() const
 
 std::unique_ptr<ToolFuture> Tool::Execute(bool verbose) const
 {
-    // Resolve exec args: full args, or name + @rsp when oversized or forced.
+    // Resolve exec args: full args, or name + @rsp when the command line is
+    // oversized.
     std::vector<std::string> execArgs;
     execArgs.push_back(name);
     std::vector<std::string> expandedArgs = ExpandArgs();

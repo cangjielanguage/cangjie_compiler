@@ -10,9 +10,7 @@
 #include "cangjie/Option/Option.h"
 #include "cangjie/Utils/FileUtil.h"
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
+#include <cstdio>
 
 using namespace Cangjie;
 
@@ -53,7 +51,6 @@ TEST_F(TempFileManagerTest, LinuxOutputSuffixTest)
     ASSERT_EQ(FileUtil::GetFileName(newInfo.filePath), "libtest.a");
 }
 
-#ifndef _WIN32
 TEST_F(TempFileManagerTest, CreateRspFileReturnsEmptyWhenWriteFails)
 {
     GlobalOptions options;
@@ -61,13 +58,16 @@ TEST_F(TempFileManagerTest, CreateRspFileReturnsEmptyWhenWriteFails)
     // A first successful call reveals the per-run temp directory.
     const std::string okPath = TempFileManager::Instance().CreateRspFile("-o\nok.o\n");
     ASSERT_FALSE(okPath.empty());
-    const auto sep = okPath.find_last_of('/');
+    const auto sep = okPath.find_last_of("/\\");
     ASSERT_NE(sep, std::string::npos);
     const std::string tempDir = okPath.substr(0, sep);
-    // Strip write permission; CreateRspFile must return "" on failure.
-    ASSERT_EQ(chmod(tempDir.c_str(), S_IRUSR | S_IXUSR), 0) << tempDir;
+    // Replace the temp directory with a regular file: opening anything under
+    // it fails with ENOTDIR — a filesystem semantic even root cannot bypass
+    // (unlike permission bits). CreateRspFile must return "" instead of a
+    // half-written path.
+    ASSERT_TRUE(FileUtil::RemoveDirectoryRecursively(tempDir));
+    ASSERT_TRUE(FileUtil::WriteToFile(tempDir, "x"));
     const std::string failedPath = TempFileManager::Instance().CreateRspFile("-o\nbad.o\n");
-    ASSERT_EQ(chmod(tempDir.c_str(), S_IRWXU), 0) << tempDir;
     EXPECT_EQ(failedPath, "");
+    ::remove(tempDir.c_str()); // remove the placeholder file
 }
-#endif
