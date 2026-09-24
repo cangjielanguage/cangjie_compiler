@@ -34,7 +34,9 @@ ModalTy TypeChecker::TypeCheckerImpl::SynIncOrDecExpr(ASTContext& ctx, IncOrDecE
         return {TypeManager::GetInvalidTy()};
     }
     auto& ae = *StaticCast<AssignExpr*>(ide.desugarExpr.get());
-    auto leftTy = Synthesize({ctx, SynPos::LEFT_VALUE}, ae.leftValue.get());
+    // A dynamic member access or index access of a value of type Extern<T> has type Extern<T>.
+    auto leftTy = SynExternUpdate(ctx, ae) ? ae.leftValue->GetTy()
+                                           : Synthesize({ctx, SynPos::LEFT_VALUE}, ae.leftValue.get());
     if (!Ty::IsTyCorrect(leftTy)) {
         ide.SetTy({TypeManager::GetInvalidTy()});
     } else if (!leftTy->IsInteger()) {

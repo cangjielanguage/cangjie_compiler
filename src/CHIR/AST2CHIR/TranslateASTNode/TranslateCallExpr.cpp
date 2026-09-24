@@ -672,6 +672,16 @@ Value* Translator::TranslateTrivialArgWithNoSugar(const AST::FuncArg& arg, const
         argVal = TranslateExprArg(*arg.expr, *expectedTy);
     } else {
         argVal = TranslateExprArg(*arg.expr);
+        // `lhs op= v` is desugared into `lhs = lhs'.op(v)`, where `lhs'` is mapped to `lhs`. For a member access, the
+        // mapped value is a reference to the field. If `lhs` has type Extern<T>, `lhs'.op(v)` becomes
+        // T.functionCall(T.memberAccess(lhs', "op"), [v]), where `lhs'` is an argument and needs the field value.
+        // Other mapped arguments, e.g. indices, are values, for which GetDerefedValue does nothing.
+        CJC_ASSERT(GetMapExpr(*arg.expr) == nullptr || !argVal->GetType()->IsRef() ||
+            StaticCast<RefType*>(argVal->GetType())->GetBaseType()->IsClassOrArray() ||
+            arg.expr->GetTy()->IsCoreExternType());
+        if (GetMapExpr(*arg.expr) != nullptr) {
+            argVal = GetDerefedValue(argVal, loc);
+        }
     }
     if (expectedTy != nullptr) {
         argVal = TypeCastOrBoxIfNeeded(*argVal, *expectedTy, loc);
@@ -1542,6 +1552,19 @@ void Translator::ProcessMapExpr(AST::Node& originExpr, bool isSubScript)
                 StaticCast<AST::RefExpr*>(&originExpr)->isSuper)) {
             auto chirNode = TranslateExprArg(originExpr);
             exprValueTable.Set(originExpr, *chirNode);
+        }
+    } else {
+        // The value may be shared before an implicit conversion of originExpr, e.g. i in c[T.toExtern(i)] op= v. A
+        // converted block remains a block holding the conversion.
+        auto desugared = GetDesugaredExpr(originExpr);
+        if (auto block = DynamicCast<const AST::Block*>(desugared); block && block->body.size() == 1) {
+            desugared = block->body[0].get();
+        }
+        auto ce = DynamicCast<const AST::CallExpr*>(desugared);
+        auto shared = ce && ce->args.size() == 1 ? DynamicCast<const AST::Expr*>(GetDesugaredExpr(*ce->args[0]->expr))
+                                                 : nullptr;
+        if (shared && shared->mapExpr == shared) {
+            exprValueTable.Set(*shared, *TranslateExprArg(*ce->args[0]->expr));
         }
     }
 }

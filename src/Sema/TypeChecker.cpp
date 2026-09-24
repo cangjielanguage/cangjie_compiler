@@ -1097,6 +1097,42 @@ std::optional<bool> TypeChecker::TypeCheckerImpl::PerformBasicChecksForCheck(
     return {};
 }
 
+bool TypeChecker::TypeCheckerImpl::NeedTryExternConversion(const Ty& target, const Node& node) const
+{
+    return target.IsCoreExternType() && Is<Expr>(&node);
+}
+
+/**
+ * Any well-typed expression is accepted wherever Extern<T> is expected. Its own type U is synthesized and kept as the
+ * type of the node, so that DesugarExtern can later rewrite it into T.toExtern<U>(e) when U is not
+ * Extern<T>.
+ */
+bool TypeChecker::TypeCheckerImpl::ChkWithExternConversion(ASTContext& ctx, Ty& target, Node& node)
+{
+    ctx.targetTypeMap[&node] = {};
+    auto synTy = Synthesize({ctx, SynPos::EXPR_ARG}, &node);
+    bool isWellTyped = Ty::IsTyCorrect(synTy) && ReplaceIdealTy(node);
+    // Ideal types nested in the expression, e.g. in the body of a lambda argument of a generic call, are only replaced
+    // by checking it against its own type.
+    if (isWellTyped && synTy->HasIdealTy()) {
+        isWellTyped = Check(ctx, node.GetTy(), &node);
+    }
+    node.SetTy(typeManager.TryGreedySubst(node.GetTy()));
+    if (!isWellTyped || !Ty::IsTyCorrect(node.GetTy()) || node.GetTy()->HasPlaceholder()) {
+        return false;
+    }
+    // A known Extern<T> accepts any value.
+    if (!target.HasPlaceholder()) {
+        return true;
+    }
+    // Extern<R>, where R is to be inferred, accepts values of other types without constraining R.
+    if (!node.GetTy()->IsCoreExternType()) {
+        return true;
+    }
+    // A value of type Extern<T> is not converted and determines R in the target Extern<R>.
+    return typeManager.IsSubtype(node.DataTy(), &target);
+}
+
 bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, ModalTy target, Ptr<Node> node)
 {
     if (auto res = PerformBasicChecksForCheck(ctx, target, node)) {
@@ -1135,6 +1171,8 @@ bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, ModalTy target, Ptr<No
             ReplaceIdealTy(*node);
             chkRet = typeManager.IsSubtype(node->GetTy(), realTarget);
         }
+    } else if (NeedTryExternConversion(*realTarget, *node)) {
+        chkRet = ChkWithExternConversion(*curCtx, *realTarget, *node);
     } else {
         switch (node->astKind) {
             case ASTKind::IF_EXPR: {

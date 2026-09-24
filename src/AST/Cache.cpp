@@ -41,7 +41,7 @@ void RestoreTargets(Node& node, const TargetCache& targets)
     }
     node.SetTarget(targets.first);
     if (auto ma = DynamicCast<const MemberAccess*>(&node);
-           ma && ma->baseExpr && ma->baseExpr->IsReferenceExpr()) {
+           targets.first && ma && ma->baseExpr && ma->baseExpr->IsReferenceExpr()) {
         ma->baseExpr->SetTarget(targets.second);
     }
 }

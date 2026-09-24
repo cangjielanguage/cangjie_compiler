@@ -176,6 +176,9 @@ ERROR(sema_expect_const, "expected 'const' %s", "%s")
 ERROR(sema_cannot_define_var_in_const_funciton, "cannot define 'var' variable in 'const' function")
 ERROR(sema_no_const_init, "cannot define 'const' member function without 'const' constructor")
 ERROR(sema_class_const_init_with_var, "cannot define 'const' constructor with 'var' members in class")
+ERROR(sema_extern_operation_in_const, "dynamic operation on 'Extern' is not allowed in 'const' code")
+ERROR(sema_extern_conversion_in_const, "implicit conversion to 'Extern' is not allowed in 'const' code",
+    "conversion from '%s' to '%s'")
 
 // Annotation
 ERROR(sema_annotation_no_const_init, "class with '@Annotation' should have 'const' constructor")

@@ -46,6 +46,9 @@ bool TypeChecker::TypeCheckerImpl::ChkSubscriptExpr(ASTContext& ctx, ModalTy tar
     if (auto varrTy = DynamicCast<VArrayTy>(baseTy.Ty()); varrTy) {
         return ChkVArrayAccess(ctx, target, se, *varrTy, baseTy.Mode());
     }
+    if (IsDynamicExternSubscript(se)) {
+        return ChkExternSubscript(target, se, *baseTy);
+    }
     auto ds = DiagSuppressor(diag);
     DesugarOperatorOverloadExpr(ctx, se); // Desugar to callExpr.
     // The type of baseExpr should not be inferred here!
@@ -175,6 +178,23 @@ bool TypeChecker::TypeCheckerImpl::ChkVArrayAccess(
         return false;
     }
     se.SetTy(elemTy);
+    return true;
+}
+
+bool TypeChecker::TypeCheckerImpl::ChkExternSubscript(ModalTy target, SubscriptExpr& se, Ty& externTy)
+{
+    // The indices are passed to the foreign runtime as Any, so they may have any type.
+    for (auto& index : se.indexExprs) {
+        if (!ReplaceIdealTy(*index)) {
+            return false;
+        }
+    }
+    ModalTy resTy{&externTy};
+    if (target && !typeManager.IsSubtype(resTy, target)) {
+        DiagMismatchedTypesWithFoundTy(diag, se, target, resTy);
+        return false;
+    }
+    se.SetTy(resTy);
     return true;
 }
 

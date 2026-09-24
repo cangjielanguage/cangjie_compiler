@@ -874,6 +874,8 @@ void TypeChecker::TypeCheckerImpl::InferMemberAccess(ASTContext& ctx, MemberAcce
     } else if (isPartialPackagePath) {
         auto range = ma.field.ZeroPos() ? MakeRange(ma.begin, ma.end) : MakeRange(ma.field);
         (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_undeclared_identifier, ma, range, ma.field);
+    } else if (IsDynamicExternMemberAccess(ma)) {
+        ma.SetTy(baseExpr->GetTy());
     } else {
         InferInstanceAccess(ctx, ma);
     }

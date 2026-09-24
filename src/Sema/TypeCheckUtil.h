@@ -225,6 +225,34 @@ inline Ptr<AST::InheritableDecl> GetCurInheritableDecl(const ASTContext& ctx, co
     return sym ? DynamicCast<AST::InheritableDecl*>(sym->node) : nullptr;
 }
 
+/** Whether @p expr is a value of type std.core.Extern<T>, as opposed to a reference to the type itself. */
+bool IsExternValue(const AST::Expr& expr);
+/** Whether an expression of type @p from needs T.toExtern to become @p to. */
+bool NeedExternConversion(TypeManager& typeManager, AST::Ty& from, AST::Ty& to);
+/**
+ * Whether @p ma is a dynamic member access e.f, i.e. an access to any member f of a value e of type Extern<T>.
+ * Left values are excluded, they are handled by IsDynamicExternUpdate.
+ */
+bool IsDynamicExternMemberAccess(const AST::MemberAccess& ma);
+/**
+ * Whether @p se is a dynamic index access e[i1, ..., in], i.e. an access with indices of any type to a value e of type
+ * Extern<T>. It stands for e[i1]...[in]. Left values are excluded, they are handled by IsDynamicExternUpdate.
+ */
+bool IsDynamicExternSubscript(const AST::SubscriptExpr& se);
+/**
+ * Whether @p ae is a dynamic update e.f = v or e[i1, ..., in] = v, or a dynamic compound assignment e.f op= v or
+ * e[i1, ..., in] op= v, i.e. an assignment to a member or to indices of a value e of type Extern<T>. The base of the
+ * left value must have been type checked.
+ */
+bool IsDynamicExternUpdate(const AST::AssignExpr& ae);
+/**
+ * Whether @p ce is a dynamic call e(a1, ..., an), i.e. a call with arguments of any type to a value e of type
+ * Extern<T>. This includes e.f(a1, ..., an), whose callee e.f is a dynamic member access.
+ */
+bool IsDynamicExternCall(const AST::CallExpr& ce);
+/** Whether @p expr is a dynamic operation on Extern<T> that is not desugared yet. */
+bool IsDynamicExternOperation(const AST::Expr& expr);
+
 /* Utils for TypeCheckCall and TypeArgumentInference */
 bool IsCStringConstructor(const AST::FuncDecl& fd);
 bool IsEnumCtorWithoutTypeArgs(const AST::Expr& expr, Ptr<const AST::Decl> target);

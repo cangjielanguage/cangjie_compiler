@@ -51,10 +51,11 @@ void TypeChecker::TypeCheckerImpl::CheckExtendGenerics(const ExtendDecl& ed)
 
 void TypeChecker::TypeCheckerImpl::CheckExtendedTypeValidity(const Type& extendedType)
 {
-    if (!extendedType.GetTy().IsCorrect() || extendedType.GetTy()->IsExtendable()) {
+    if (!extendedType.GetTy().IsCorrect() ||
+        (extendedType.GetTy()->IsExtendable() && !extendedType.GetTy()->IsCoreExternType())) {
         return;
     }
-    // All other types are not allowed to be extended.
+    // All other types, and 'std.core.Extern', are not allowed to be extended.
     diag.DiagnoseRefactor(DiagKindRefactor::sema_illegal_extended_type, extendedType, extendedType.GetTy().String());
 }
 
