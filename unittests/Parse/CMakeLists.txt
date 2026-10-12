@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 # This source file is part of the Cangjie project, licensed under Apache-2.0
 # with Runtime Library Exception.
 #
@@ -72,3 +72,7 @@ target_link_libraries(
     GTest::gtest_main
     TestCompilerInstanceObject)
 add_test(NAME ParseOuterInterfaceTest COMMAND ParseOuterInterfaceTest)
+
+add_executable(ArkTSAnnotationTest ArkTSAnnotationTest.cpp)
+target_link_libraries(ArkTSAnnotationTest cangjie-lsp GTest::gtest GTest::gtest_main)
+add_test(NAME ArkTSAnnotationTest COMMAND ArkTSAnnotationTest)

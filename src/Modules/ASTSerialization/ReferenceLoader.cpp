@@ -605,10 +605,25 @@ void ASTLoader::ASTLoaderImpl::LoadDeclRefs(const PackageFormat::Decl& declObj, 
         return; // Skip following steps if ty is not correct during loading cache.
     }
     LoadGenericConstraintsRef(declObj.generic(), decl.GetGeneric());
-    for (uoffset_t i = 0; i < declObj.annotations()->size(); i++) {
-        CJC_NULLPTR_CHECK(declObj.annotations()->Get(i));
-        CJC_NULLPTR_CHECK(decl.annotations[i]);
-        LoadAnnotationBaseExpr(*declObj.annotations()->Get(i), *decl.annotations[i]);
+    // Only custom annotations carry constructor references. Match their serialized
+    // order to the visible custom nodes; marker records and source-only annotations
+    // have no corresponding reference to restore.
+    auto annotation = decl.annotations.begin();
+    for (auto rawAnno : *declObj.annotations()) {
+        CJC_NULLPTR_CHECK(rawAnno);
+        if (rawAnno->kind() != PackageFormat::AnnoKind_Custom) {
+            continue;
+        }
+        while (annotation != decl.annotations.end() &&
+            ((*annotation)->kind != AnnotationKind::CUSTOM ||
+                (!(*annotation)->isCompileTimeVisible && !decl.TestAnyAttr(Attribute::COMMON, Attribute::SPECIFIC)))) {
+            ++annotation;
+        }
+        CJC_ASSERT(annotation != decl.annotations.end());
+        CJC_NULLPTR_CHECK(rawAnno->identifier());
+        CJC_ASSERT((*annotation)->identifier == rawAnno->identifier()->str());
+        LoadAnnotationBaseExpr(*rawAnno, **annotation);
+        ++annotation;
     }
     switch (declObj.kind()) {
         case PackageFormat::DeclKind_FuncDecl: {

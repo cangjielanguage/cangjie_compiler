@@ -873,9 +873,14 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
         astDecl.genericDecl = GetDeclFromIndex(fullId);
     }
 
+    astDecl.DisableAttr(Attribute::ARKTS);
     uoffset_t length = static_cast<uoffset_t>(decl.annotations()->size());
     for (uoffset_t i = 0; i < length; i++) {
         auto rawAnno = decl.annotations()->Get(i);
+        if (rawAnno->kind() == PackageFormat::AnnoKind_ArkTS) {
+            astDecl.EnableAttr(Attribute::ARKTS);
+            continue;
+        }
         auto anno = LoadAnnotation(*rawAnno);
         if (rawAnno->kind() == PackageFormat::AnnoKind_Annotation) {
             if (auto info = decl.info_as_ClassInfo()) {

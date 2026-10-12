@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -25,6 +25,7 @@
 #include "JoinAndMeet.h"
 #include "NativeFFI/Java/AfterTypeCheck/InteropLibBridge.h"
 #include "NativeFFI/Java/BeforeTypeCheck/PreTypeCheck.h"
+#include "NativeFFI/ArkTS/ArkTSInterop.h"
 #include "NativeFFI/ObjC/BeforeTypeCheck/Desugar.h"
 #include "NativeFFI/ObjC/Utils/InteropLibBridge.h"
 #include "Plugin/PluginCustomAnnoChecker.h"
@@ -2132,6 +2133,7 @@ void TypeChecker::TypeCheckerImpl::PrepareTypeCheck(ASTContext& ctx, Package& pk
     Utils::ProfileRecorder::Start("PrepareTypeCheck", "InteropPrepare");
     Cangjie::Native::FFI::Java::PrepareTypeCheck(pkg, importManager, typeManager);
     Interop::ObjC::PrepareTypeCheck(pkg, importManager, typeManager);
+    Native::FFI::ArkTS::PrepareTypeCheck(pkg, diag, ci->GetSourceManager());
     Utils::ProfileRecorder::Stop("PrepareTypeCheck", "InteropPrepare");
 #endif
 

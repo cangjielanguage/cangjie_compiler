@@ -840,6 +840,8 @@ struct ASTHasherImpl {
             case AnnotationKind::ANNOTATION:
             case AnnotationKind::CUSTOM:
             case AnnotationKind::FROZEN:
+            case AnnotationKind::ARKTS:
+                // Entry registration changes generated bodies, not the original Cangjie signature.
                 return false;
             default:
                 CJC_ASSERT(false);
@@ -857,6 +859,7 @@ struct ASTHasherImpl {
             case AnnotationKind::CUSTOM:
             case AnnotationKind::DEPRECATED:
             case AnnotationKind::FROZEN:
+            case AnnotationKind::ARKTS:
                 return true;
             case AnnotationKind::C:
             case AnnotationKind::CALLING_CONV:

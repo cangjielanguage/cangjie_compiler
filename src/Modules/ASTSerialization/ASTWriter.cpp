@@ -1740,6 +1740,8 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveDecl(const Decl& decl, bool isTopLe
     TPosition posEnd(fileIndex, pkgIndex, end.line, end.column, end.GetStatus() == PositionStatus::IGNORE);
     TPosition identifierPos(fileIndex, pkgIndex, decl.GetIdentifierPos().line, decl.GetIdentifierPos().column, false);
     TDeclHash declHash(decl.hash.instVar, decl.hash.virt, decl.hash.sig, decl.hash.srcUse, decl.hash.bodyHash);
+    // Persist this marker only as an Anno record, not in the general attribute vector.
+    attrs.SetAttr(Attribute::ARKTS, false);
     auto attributes = SaveAttributes(attrs);
     auto isConst = decl.IsConst();
     auto annotations = builder.CreateVector<TAnnoOffset>(SaveAnnotations(decl));
@@ -1890,6 +1892,14 @@ std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& d
             default:
                 break;
         }
+    }
+    if (decl.TestAttr(Attribute::ARKTS)) {
+        // Pseudocode: append one parameterless marker record after the ordinary
+        // annotation records, even when the AST has no source annotation node.
+        // Save no annotation definition or constructor target for this marker.
+        auto marker = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_ArkTS,
+            builder.CreateString("ArkTS"), builder.CreateVector<TAnnoArgOffset>({}));
+        annotations.emplace_back(marker);
     }
     return annotations;
 }
