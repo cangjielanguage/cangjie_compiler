@@ -2060,6 +2060,15 @@ std::vector<Ptr<ASTContext>> TypeChecker::TypeCheckerImpl::PreTypeCheck(const st
         }
     });
     Utils::ProfileRecorder::Start("Pre TypeCheck", "PrepareTypeCheck");
+    // The ArkTS lowering tables key on AST nodes with the same reuse/lifetime as
+    // this checker, so a stale entry whose key is an address-reused node would
+    // surface an already-freed ctor/member pointer. They are populated by the
+    // PrepareTypeCheck loop below, which runs before PreCheck, so they are
+    // cleared here, once per pass, ahead of that population. They cannot be
+    // cleared next to arktsSupportRefs (inside PreCheck, near
+    // LowerArkTSFunctions/LowerArkTSVariables): that runs after PrepareTypeCheck
+    // has already filled them and would wipe the fresh tables this pass needs.
+    Native::FFI::ArkTS::ResetState();
     for (auto& ctx : contexts) {
         PrepareTypeCheck(*ctx, *ctx->curPackage);
     }
@@ -2122,6 +2131,7 @@ void TypeChecker::TypeCheckerImpl::PostTypeCheck(std::vector<Ptr<ASTContext>>& c
 
 void TypeChecker::TypeCheckerImpl::PrepareTypeCheck(ASTContext& ctx, Package& pkg)
 {
+    Native::FFI::ArkTS::PrepareVariablesAndEnums(pkg, diag);
     // Reset search's cache.
     ctx.searcher->InvalidateCache();
 

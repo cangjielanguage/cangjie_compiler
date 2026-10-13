@@ -365,6 +365,44 @@ void ParserImpl::CheckDeprecatedAnnotation(const Annotation& anno)
     }
 }
 
+void ParserImpl::CheckObjCMirrorAnnotation(Annotation& anno) const
+{
+    static const std::string OBJ_C_MIRROR_NAME = "@ObjCMirror";
+    static const std::string OBJ_C_IMPL_NAME = "@ObjCImpl";
+
+    const auto& annotationName =
+        anno.kind == AnnotationKind::OBJ_C_MIRROR ? OBJ_C_MIRROR_NAME : OBJ_C_IMPL_NAME;
+    ffiParser->CheckZeroOrSingleStringLitArgAnnotation(anno, annotationName);
+}
+
+void ParserImpl::CheckRawValueAnnotation(const Annotation& anno)
+{
+    // @RawValue accepts exactly one unnamed argument: an integer, string or
+    // boolean literal. The argument-count gate lives here so @RawValue[] or
+    // @RawValue[1, 2] cannot fall through to the Sema auto-increment branch
+    // (args.size() != 1) and be silently ignored.
+    if (anno.args.size() != 1) {
+        DiagAnnotationExpectsOneArgument(anno, "@RawValue");
+        return;
+    }
+    auto& arg = anno.args[0];
+    CJC_NULLPTR_CHECK(arg);
+    if (!arg->name.Empty()) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_raw_value_not_literal, *arg);
+        return;
+    }
+    auto lce = (arg->expr != nullptr && arg->expr->astKind == ASTKind::LIT_CONST_EXPR)
+                   ? DynamicCast<LitConstExpr*>(arg->expr.get())
+                   : nullptr;
+    // Only integer, string or boolean literals are accepted; FLOAT (e.g. @RawValue[1.5])
+    // is not a legal enum value spelling and is rejected here.
+    if (lce == nullptr ||
+        (lce->kind != LitConstKind::INTEGER && lce->kind != LitConstKind::STRING &&
+            lce->kind != LitConstKind::BOOL)) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_raw_value_not_literal, *arg);
+    }
+}
+
 OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
 {
     if (this->enableCustomAnno && SeeingMacroCallDecl()) {
@@ -416,6 +454,11 @@ OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
         case AnnotationKind::OBJ_C_IMPL:
         case AnnotationKind::OBJ_C: {
             ParseAnnotationArguments(*annotation);
+            break;
+        }
+        case AnnotationKind::RAW_VALUE: {
+            ParseAnnotationArguments(*annotation);
+            CheckRawValueAnnotation(*annotation);
             break;
         }
         default: {

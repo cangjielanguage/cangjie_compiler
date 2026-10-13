@@ -770,6 +770,9 @@ enum class Attribute {
     // W: Sema interface preparation.
     // R: type classification, lowering, from-JS construction, CJO writer/loader.
     ARKTS_INTERFACE_WRAPPER,
+
+    // ArkTS foreign functions and variables lowered to ordinary CJ bodies; never C ABI.
+    ARKTS_LOWERED,
     AST_ATTR_END,
 };
 

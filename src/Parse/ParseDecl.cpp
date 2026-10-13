@@ -318,6 +318,9 @@ void ParserImpl::CheckVarDeclModifiers(
                 (!diag.ignoreScopeCheck && (!HasModifier(modifiers, TokenKind::COMMON) && varDecl->type != nullptr)))) {
             DiagExpectedInitializerForToplevelVar(*varDecl);
         }
+    } else if (HasModifier(modifiers, TokenKind::FOREIGN) && varDecl->initializer != nullptr &&
+        scopeKind == ScopeKind::TOPLEVEL) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_foreign_var_with_initializer, *varDecl->initializer);
     }
 }
 
@@ -1282,7 +1285,8 @@ OwnedPtr<Decl> ParserImpl::ParseEnumConstructor(
         DiagExpectNoModifier(firstMod);
     }
     for (auto& anno : annos) {
-        if (!(anno->kind == AnnotationKind::WHEN || anno->kind == AnnotationKind::DEPRECATED)) {
+        if (!(anno->kind == AnnotationKind::WHEN || anno->kind == AnnotationKind::DEPRECATED ||
+            anno->kind == AnnotationKind::RAW_VALUE)) {
             DiagUnexpectedAnnoOn(*annos[0], caseIdentPos, annos[0]->identifier, caseIdent);
         }
     }
@@ -1614,7 +1618,11 @@ OwnedPtr<EnumDecl> ParserImpl::ParseEnumDecl(
     ret->begin = lookahead.Begin();
     ret->keywordPos = lookahead.Begin();
     CheckDeclarationInScope(scopeKind, DefKind::ENUM);
-    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::ENUM);
+    // Match class/interface: an @ArkTS-annotated enum declaration also needs the
+    // access x FOREIGN conflict waived, so the preset `@ArkTS public foreign enum`
+    // spelling parses. `annos` has already been moved into ret->annotations, so
+    // read it from there.
+    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::ENUM, HasArkTSAnnotation(ret->annotations));
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }

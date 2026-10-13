@@ -227,13 +227,13 @@ void DesugarSimpleSetForPropDecl(TypeManager& tyMgr, AssignExpr& expr, PropDecl&
 
 void UpdatePosForMacroExpandedNodes(const std::vector<Ptr<AST::Package>>& pkgs)
 {
-    auto visit = [](Ptr<AST::Node> curNode) -> AST::VisitAction {
+    auto visit = [](Ptr<Node> curNode) -> VisitAction {
         if (!curNode->curMacroCall) {
-            return AST::VisitAction::WALK_CHILDREN;
+            return VisitAction::WALK_CHILDREN;
         }
         curNode->begin = curNode->GetDebugPos(curNode->begin);
         curNode->end = curNode->GetDebugPos(curNode->end);
-        return AST::VisitAction::WALK_CHILDREN;
+        return VisitAction::WALK_CHILDREN;
     };
     for (auto pkg : pkgs) {
         AST::Walker walker(pkg, visit);

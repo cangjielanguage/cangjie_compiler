@@ -100,10 +100,11 @@ public func run(): Unit {
     EXPECT_EQ(AnnotationKindToString(AnnotationKind::ARKTS), "ArkTS");
     // The ArkTS-only annotation kinds sit directly after ARKTS and UNKNOWN
     // stays the trailing sentinel, so the old "ARKTS + 1 == UNKNOWN" invariant
-    // now reads as the three adjacent steps below.
+    // now reads as the adjacent steps below.
     EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS) + 1, static_cast<int>(AnnotationKind::REST_PARAM));
     EXPECT_EQ(static_cast<int>(AnnotationKind::REST_PARAM) + 1, static_cast<int>(AnnotationKind::WRITE_ONLY));
-    EXPECT_EQ(static_cast<int>(AnnotationKind::WRITE_ONLY) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::WRITE_ONLY) + 1, static_cast<int>(AnnotationKind::RAW_VALUE));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::RAW_VALUE) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
 }
 
 TEST_F(ArkTSEntryTest, RegistrationRestoresContextInFinally)

@@ -29,6 +29,7 @@
 #include "cangjie/Frontend/CompileStrategy.h"
 #include "cangjie/IncrementalCompilation/ASTCacheCalculator.h"
 #include "cangjie/IncrementalCompilation/IncrementalCompilationLogger.h"
+#include "cangjie/Lex/Lexer.h"
 #include "cangjie/Macro/MacroExpansion.h"
 #include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Modules/ImportManager.h"

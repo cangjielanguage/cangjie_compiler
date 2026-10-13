@@ -119,13 +119,17 @@ bool CallsSourceEntry(const FuncDecl& wrapper, const FuncDecl& entry)
     auto restoreName = restored ? CalleeName(restored->baseFunc.get()) : nullptr;
     auto restoredValue = restored && restored->args.size() == 1 ?
         DynamicCast<const RefExpr*>(restored->args.front()->expr.get()) : nullptr;
-    return enterName && *enterName == "__cj_arkts_enter" && context &&
+    // The scope guard may be imported under the aliased spellings
+    // __cj_arkts_enter_scope / __cj_arkts_restore_scope instead of the bare
+    // SDK names, so accept both when recognising a reusable wrapper pair.
+    return enterName && (*enterName == "__cj_arkts_enter" || *enterName == "__cj_arkts_enter_scope") && context &&
         context->ref.identifier == contextParam->identifier &&
         (!context->ref.target || context->ref.target == contextParam) &&
         ref && (!ref->ref.target || ref->ref.target == &entry) && ref->ref.identifier == entry.identifier &&
         ref->ref.identifier.Begin() == entry.identifier.Begin() && ref->ref.identifier.End() == entry.identifier.End() &&
         guarded->tryBlock->body.back()->astKind == ASTKind::RETURN_EXPR &&
-        restoreName && *restoreName == "__cj_arkts_restore" && restoredValue &&
+        restoreName && (*restoreName == "__cj_arkts_restore" || *restoreName == "__cj_arkts_restore_scope") &&
+        restoredValue &&
         restoredValue->ref.identifier == previous->identifier &&
         (!restoredValue->ref.target || restoredValue->ref.target == previous);
 }

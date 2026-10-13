@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../../Utils.h"
+#include "../ArkTSInterop.h"
 #include "../FunctionSource.h"
 #include "../Utils/ASTFactory.h"
 #include "Collector.h"
@@ -187,7 +188,13 @@ ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(ASTContext& ct
         return ArkTSTypeDesc{};
     }
     SetTypeTy(ctx, *type);
-    return ArkTSClassifyType(type->GetTy(), ci->importManager);
+    auto desc = ArkTSClassifyType(type->GetTy(), ci->importManager);
+    // Attach the prepared member value table to every enum leaf, so the wrapper
+    // generator can spell the value mapping without reaching into the checker.
+    // A prepared enum whose declaration was refused (payload, generic, ...) has
+    // no table entry and stays non-generatable through the empty member list.
+    Native::FFI::ArkTS::AttachEnumMembers(desc);
+    return desc;
 }
 
 // Shared state of one prepared ArkTS class or interface lowering step: the

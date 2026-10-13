@@ -27,6 +27,20 @@ void PrepareClasses(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& so
 void PrepareInterfaces(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
     ImportManager* imports);
 
+// Sema check for the @RawValue annotation. It lives in the ArkTS namespace
+// (not the C FFI annotation table) because it validates an ArkTS-only annotation
+// on a lowered `foreign enum` constructor: a valid constructor keeps the value,
+// a duplicate is reported, and any other position is misplaced.
+void CheckAnnoRawValue(AST::Decl& decl, const AST::Annotation& anno, DiagnosticEngine& diag);
+
+// Entry points for the ArkTS prepare/lower state. The state itself (the
+// foreign-enum value table) is private to the ArkTS lowering translation unit:
+// the checker drives it only through these functions and never holds it as a
+// member, so no ArkTS-specific field leaks into TypeCheckerImpl.
+void ResetState();
+void PrepareVariablesAndEnums(AST::Package& pkg, DiagnosticEngine& diag);
+void AttachEnumMembers(ArkTSTypeDesc& desc);
+
 std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix = ARKTS_GENERATED_PREFIX);
 } // namespace Native::FFI::ArkTS
 } // namespace Cangjie

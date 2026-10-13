@@ -35,6 +35,24 @@ namespace Cangjie::Native::FFI::ArkTS {
 // Example: Option<Array<Int32>> -> OPTIONAL{ARRAY_COPY{SCALAR "Int32"}};
 //          ArkTSArray<Int32> or a nested Option -> UNSUPPORTED with no
 //          elements - no wrapper is generated for such positions.
+// Value kind of one ArkTS enum member, shared by the classification side and
+// the lowering side so their spellings cannot drift: a numeric member is mapped
+// through Float64, a string member through ctx.string, a boolean member through
+// ctx.boolean.
+enum class ArkTSEnumValueKind { NUMBER, STRING, BOOLEAN };
+
+// One mapped value of an ArkTS foreign enum. `name` is the lowering-side
+// constructor identifier (the member name spelled after the enum's own name
+// in a constructor reference); `kind` selects the number / string / boolean
+// mapping, and `value` is the decimal text of a numeric member, the
+// (unescaped) string value of a string member, or "true" / "false" of a
+// boolean member.
+struct ArkTSEnumMember {
+    std::string name;
+    ArkTSEnumValueKind kind{ArkTSEnumValueKind::NUMBER};
+    std::string value;
+};
+
 struct ArkTSTypeDesc {
     enum class Kind {
         UNSUPPORTED,  // not usable in an ArkTS interop signature
@@ -43,6 +61,7 @@ struct ArkTSTypeDesc {
         ARRAY_COPY,   // Array<T'>: copy semantics, no shared memory
         TUPLE,        // (T1', ..., Tn') with n >= 2
         REFERENCE,    // @ArkTS foreign class instance: reference to an ArkTS object
+        ENUM,         // @ArkTS foreign enum: value mapped through @RawValue
     };
     Kind kind{Kind::UNSUPPORTED};
     // Checked scalar name for SCALAR nodes (for example "Int8"); empty for
@@ -55,12 +74,17 @@ struct ArkTSTypeDesc {
     // the container is copied and each reference keeps the same ArkTS object.
     std::vector<ArkTSTypeDesc> elements;
     // Declaration carried by REFERENCE nodes: the prepared foreign class, or
-    // the prepared foreign interface. Every other kind keeps it null.
+    // the prepared foreign interface; by ENUM nodes the enum declaration.
+    // Every other kind keeps it null.
     Ptr<AST::Decl> reference;
     // Implementation class of a foreign-interface reference, used to build the
     // from-JS wrapping call. Null for classes and for interfaces whose
     // implementation class cannot be resolved in this compilation.
     Ptr<AST::Decl> referenceImpl;
+    // Value mapping carried by ENUM nodes in declaration order; every other
+    // kind keeps it empty. Populated by lowering from the prepared enum
+    // mapping, never by classification alone.
+    std::vector<ArkTSEnumMember> enumMembers;
 };
 
 // Checked scalar names (the checked scalar table): the number candidates
@@ -124,5 +148,12 @@ bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc);
 // interface references out of Array and tuple positions; a prepared foreign
 // class reference stays legal there under the AR-04 container contract.
 bool ArkTSTypeDescContainsInterfaceReference(const ArkTSTypeDesc& desc);
+
+// The identifier of a prepared enum leaf whose declaration is imported from
+// another package (cross-cjo), or empty when the description carries none.
+// Such a leaf has no value table - the table is only built for the declaring
+// package - so its position is refused with a dedicated diagnostic instead of
+// the generic unsupported-type message.
+std::string ArkTSTypeDescImportedEnumName(const ArkTSTypeDesc& desc);
 } // namespace Cangjie::Native::FFI::ArkTS
 #endif

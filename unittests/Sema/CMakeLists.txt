@@ -90,3 +90,15 @@ target_link_libraries(
     TestCompilerInstanceObject)
 target_include_directories(ArkTSForeignDiagTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
 add_test(NAME ArkTSForeignDiagTest COMMAND ArkTSForeignDiagTest)
+
+add_executable(ArkTSEnumVarTest ArkTSEnumVarTest.cpp)
+target_link_libraries(
+    ArkTSEnumVarTest
+    cangjie-lsp
+    ${LINK_LIBS}
+    boundscheck-static
+    GTest::gtest
+    GTest::gtest_main
+    TestCompilerInstanceObject)
+target_include_directories(ArkTSEnumVarTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
+add_test(NAME ArkTSEnumVarTest COMMAND ArkTSEnumVarTest)

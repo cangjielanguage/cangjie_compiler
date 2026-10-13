@@ -14,6 +14,7 @@
 
 #include "NativeFFI/ArkTS/ArkTSInterop.h"
 #include "TypeCheckUtil.h"
+#include "NativeFFI/ArkTS/ArkTSInterop.h"
 
 #include "cangjie/AST/Utils.h"
 
@@ -108,6 +109,7 @@ AnnoCheckMap& GetAnnoCheckMap()
         {AnnotationKind::CALLING_CONV, CheckAnnoCallingConv},
         {AnnotationKind::FASTNATIVE, CheckAnnoFastNative},
         {AnnotationKind::FROZEN, CheckAnnoFrozen},
+        {AnnotationKind::RAW_VALUE, Native::FFI::ArkTS::CheckAnnoRawValue},
     };
     return annoCheckMap;
 }
@@ -371,6 +373,9 @@ void TypeChecker::TypeCheckerImpl::PreCheckAnnoForCFFI(Decl& decl)
         }
         if (decl.astKind == ASTKind::INTERFACE_DECL) {
             diag.Diagnose(*modifier, DiagKind::sema_unexpected_wrapper, "interface declaration");
+        }
+        if (decl.astKind == ASTKind::ENUM_DECL) {
+            diag.Diagnose(*modifier, DiagKind::sema_unexpected_wrapper, "enum declaration");
         }
         // Will be merged with sema_unexpected_wrapper.
         if (decl.astKind == ASTKind::VAR_DECL) {

@@ -1773,6 +1773,14 @@ private:
     // later than the class/interface checks, so PreCheckExtend calls this.
     void RejectArkTSForeignInterfaceExtend(AST::ExtendDecl& ed);
     void PreCheckAnnoForFFI(AST::Node& root);
+    void LowerArkTSVariables(ASTContext& ctx);
+    // Parse glue text produced by lowering and splice its statements into the
+    // (still empty) body of \p fd, collecting the new locals like PreCheck does
+    // so that references inside the generated code resolve. \p params are the
+    // function parameters bound to the synthesized `__argument_N` names.
+    bool SpliceArkTSGeneratedBody(ASTContext& ctx, AST::FuncDecl& fd, const std::string& code,
+        const std::unordered_map<std::string, std::string>& literals,
+        const std::vector<Ptr<AST::FuncParam>>& params);
     /**
      * Set the ABI information to Foreign Modifier. By default Foreign Modifier has Attribute::C.
      */

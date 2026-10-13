@@ -145,6 +145,12 @@ Ptr<AST::ClassDecl> ArkTSInterfaceImpl(const AST::Decl& iface, ImportManager* im
 //          @ArkTS[module: "a", module: "a"] -> DUPLICATE.
 ArkTSOptionStatus CheckArkTSOptionLayer(const AST::Annotation& annotation);
 
+// Whether a declaration carries the @ArkTS option globalVar: true. A foreign
+// func with this option maps an ArkTS global variable and is lowered to a
+// getter that performs a module-property read instead of the callMethod
+// wrapper; on any other declaration the option is reported as misplaced.
+bool IsGlobalVar(const AST::Decl& decl);
+
 // A namespace value is legal when it is empty or has no empty leading,
 // trailing or inner segment; "a.b" and "a" are legal, ".a", "a." and "a..b"
 // are not. The value is only read.

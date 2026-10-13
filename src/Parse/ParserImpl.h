@@ -1065,6 +1065,10 @@ private:
     bool SeeingModalInfo();
     bool IsTokenAdjacent(const Token& first, const Token& second) const;
     bool SeeingPrimitiveType();
+
+    // Cangjie Native & Java/ObjC FFI
+    void CheckObjCMirrorAnnotation(AST::Annotation& anno) const;
+    void CheckRawValueAnnotation(const AST::Annotation& anno);
     // Check whether member decl can be abstract
     bool CanBeAbstract(const AST::Decl& decl, ScopeKind scopeKind) const;
     void CheckConstructorBody(AST::FuncDecl& ctor, ScopeKind scopeKind, bool inMacro = false);

@@ -2312,9 +2312,13 @@ void TypeChecker::TypeCheckerImpl::PreCheck(const std::vector<Ptr<ASTContext>>& 
     // types, generated glue Blocks, rebound references and collected locals.
     // ResolveTypeAlias must precede this step so an alias selects its scalar
     // conversion; ordinary body type checking consumes the resulting AST.
+    // LowerArkTSVariables lives here too: it installs the foreign-let getter
+    // bodies, so it belongs with the other lowering passes, not the annotation
+    // check below.
     for (auto& ctx : contexts) {
         LowerArkTSClasses(*ctx);
         LowerArkTSFunctions(*ctx);
+        LowerArkTSVariables(*ctx);
     }
 
     // Clear extend related data before iteration of all packages.

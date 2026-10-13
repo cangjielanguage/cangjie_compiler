@@ -12,11 +12,14 @@ using namespace Cangjie::AST;
 namespace Cangjie::Native::FFI::ArkTS {
 // Before: a FuncDecl carrying semantic attributes. After result: true for a
 // source ArkTS entry, excluding imported, foreign and already-lowered wrappers.
-// This only selects callback generation; the declaration/body are unchanged.
+// ARKTS_LOWERED functions are lowered by the handwritten-function pipeline and
+// must not receive an entry callback either. This only selects callback
+// generation; the declaration/body are unchanged.
 bool IsArkTSEntry(const FuncDecl& fd)
 {
     return fd.TestAttr(Attribute::ARKTS) && !fd.TestAnyAttr(
-        Attribute::IMPORTED, Attribute::FOREIGN, Attribute::ARKTS_FUNCTION_WRAPPER);
+        Attribute::IMPORTED, Attribute::FOREIGN, Attribute::ARKTS_FUNCTION_WRAPPER,
+        Attribute::ARKTS_LOWERED);
 }
 
 // Before: a source FuncDecl with annotations and attributes. After result: true

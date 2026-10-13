@@ -15,6 +15,7 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
+#include "cangjie/Basic/StringConvertor.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Utils/CheckUtils.h"
 
@@ -76,13 +77,16 @@ ArkTSOptionStatus CheckArkTSOptionLayer(const Annotation& annotation)
     for (auto& arg : annotation.args) {
         const auto name = arg->name.Val();
         auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
-        if (!literal || literal->kind != LitConstKind::STRING) {
+        const bool isGlobalVar = name == "globalVar";
+        // module / namespace / foreignName take a string literal; globalVar
+        // takes a boolean literal.
+        if (!literal || (isGlobalVar ? literal->kind != LitConstKind::BOOL : literal->kind != LitConstKind::STRING)) {
             status.problem = ArkTSOptionProblem::NON_LITERAL;
             status.option = name;
             status.at = arg->expr.get();
             return status;
         }
-        if (name != "module" && name != "namespace" && name != "foreignName") {
+        if (!isGlobalVar && name != "module" && name != "namespace" && name != "foreignName") {
             status.problem = ArkTSOptionProblem::UNKNOWN_NAME;
             status.option = name;
             status.at = arg->expr.get();
@@ -96,6 +100,22 @@ ArkTSOptionStatus CheckArkTSOptionLayer(const Annotation& annotation)
         }
     }
     return status;
+}
+
+bool IsGlobalVar(const AST::Decl& decl)
+{
+    for (auto& anno : decl.annotations) {
+        if (anno->kind != AnnotationKind::ARKTS) {
+            continue;
+        }
+        for (auto& arg : anno->args) {
+            if (arg->name.Val() == "globalVar") {
+                auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
+                return literal != nullptr && literal->stringValue == "true";
+            }
+        }
+    }
+    return false;
 }
 
 bool ArkTSNamespaceValid(const std::string& ns)
@@ -851,6 +871,35 @@ struct ArkTSValueEmitter {
             emitted.expr = "(" + source + ")." + ARKTS_CLASS_REF_ACCESSOR + "().toJSValue()";
             return emitted;
         }
+        if (desc.kind == ArkTSTypeDesc::Kind::ENUM) {
+            // A plain enum maps each constructor to its @RawValue spelling:
+            // a numeric member becomes ctx.number(Float64(<value>)), a string
+            // member ctx.string("<value>"), a boolean member ctx.boolean(true/false).
+            // The enum itself is recorded by placeholder so the lowering walker
+            // binds the constructor reference without splicing the enum's own
+            // name; the member name resolves through that member access, the
+            // same way Option.Some resolves through the pinned Option.
+            if (desc.reference == nullptr || classRefs == nullptr || desc.enumMembers.empty()) {
+                return emitted;
+            }
+            auto slot = Fresh("enum");
+            (*classRefs)[slot] = desc.reference;
+            std::string body = "match (" + source + ") {\n";
+            for (const auto& member : desc.enumMembers) {
+                std::string converted;
+                if (member.kind == ArkTSEnumValueKind::STRING) {
+                    converted = ctx + ".string(\"" + StringConvertor::Recover(member.value) + "\").toJSValue()";
+                } else if (member.kind == ArkTSEnumValueKind::BOOLEAN) {
+                    converted = ctx + ".boolean(" + member.value + ").toJSValue()";
+                } else {
+                    converted = ctx + ".number(Float64(" + member.value + ")).toJSValue()";
+                }
+                body += indent + "    case " + slot + "." + member.name + " => " + converted + "\n";
+            }
+            body += indent + "}";
+            emitted.expr = body;
+            return emitted;
+        }
         if (desc.kind == ArkTSTypeDesc::Kind::ARRAY_COPY) {
             auto elements = Fresh("elems");
             auto index = Fresh("index");
@@ -971,6 +1020,139 @@ struct ArkTSValueEmitter {
             }
             emitted.pre += KindGuard(value, "isObject", "an object", ArkTSTypeDescName(desc), indent);
             emitted.expr = slot + "(" + value + ".asObject(), ())";
+            return emitted;
+        }
+        if (desc.kind == ArkTSTypeDesc::Kind::ENUM) {
+            // From-JS enum conversion: a numeric member matches the JS number
+            // exactly against Float64(value), a string member matches the JS
+            // string exactly against the value. The first member whose value
+            // matches wins, so a duplicate value maps to the earliest
+            // constructor; an unmatched value throws the mismatch exception
+            // named with the enum.
+            if (desc.reference == nullptr || classRefs == nullptr || desc.enumMembers.empty()) {
+                return emitted;
+            }
+            auto slot = Fresh("enum");
+            (*classRefs)[slot] = desc.reference;
+            const auto name = ArkTSTypeDescName(desc);
+            if (!nullablePosition) {
+                emitted.pre += NullGuard(value, name, indent);
+            }
+            auto throwInline = [](const std::string& reason) {
+                return std::string("throw ") + ARKTS_CONVERSION_EXCEPTION + "(\"" + reason + "\")";
+            };
+            auto ctorRef = [&](const std::string& memberName) { return slot + "." + memberName; };
+            auto numberChain = [&](const std::string& numberVar) {
+                std::string chain = "(";
+                bool first = true;
+                for (const auto& member : desc.enumMembers) {
+                    if (member.kind != ArkTSEnumValueKind::NUMBER) {
+                        continue;
+                    }
+                    chain += (first ? "if (" : " else if (") + numberVar + " == Float64(" + member.value +
+                        ")) { " + ctorRef(member.name) + " }";
+                    first = false;
+                }
+                chain += " else { " + throwInline(std::string(ARKTS_MISMATCH) + "unknown value for " + name) + " })";
+                return chain;
+            };
+            auto stringChain = [&](const std::string& stringVar) {
+                std::string chain = "(";
+                bool first = true;
+                for (const auto& member : desc.enumMembers) {
+                    if (member.kind != ArkTSEnumValueKind::STRING) {
+                        continue;
+                    }
+                    chain += (first ? "if (" : " else if (") + stringVar + " == \"" +
+                        StringConvertor::Recover(member.value) + "\") { " + ctorRef(member.name) + " }";
+                    first = false;
+                }
+                chain += " else { " + throwInline(std::string(ARKTS_MISMATCH) + "unknown value for " + name) + " })";
+                return chain;
+            };
+            auto booleanChain = [&](const std::string& booleanVar) {
+                std::string chain = "(";
+                bool first = true;
+                for (const auto& member : desc.enumMembers) {
+                    if (member.kind != ArkTSEnumValueKind::BOOLEAN) {
+                        continue;
+                    }
+                    chain += (first ? "if (" : " else if (") + booleanVar + " == " + member.value +
+                        ") { " + ctorRef(member.name) + " }";
+                    first = false;
+                }
+                chain += " else { " + throwInline(std::string(ARKTS_MISMATCH) + "unknown value for " + name) + " })";
+                return chain;
+            };
+            bool hasNumber = false;
+            bool hasString = false;
+            bool hasBoolean = false;
+            for (const auto& member : desc.enumMembers) {
+                hasNumber = hasNumber || member.kind == ArkTSEnumValueKind::NUMBER;
+                hasString = hasString || member.kind == ArkTSEnumValueKind::STRING;
+                hasBoolean = hasBoolean || member.kind == ArkTSEnumValueKind::BOOLEAN;
+            }
+            int kindCount = (hasNumber ? 1 : 0) + (hasString ? 1 : 0) + (hasBoolean ? 1 : 0);
+            if (kindCount == 1) {
+                if (hasNumber) {
+                    auto number = Fresh("num");
+                    emitted.pre += KindGuard(value, "isNumber", "a number", name, indent);
+                    emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
+                    emitted.expr = numberChain(number);
+                } else if (hasString) {
+                    auto string = Fresh("str");
+                    emitted.pre += KindGuard(value, "isString", "a string", name, indent);
+                    emitted.pre += indent + "let " + string + " = " + value + ".asString().toString()\n";
+                    emitted.expr = stringChain(string);
+                } else {
+                    auto boolean = Fresh("boo");
+                    emitted.pre += KindGuard(value, "isBoolean", "a boolean", name, indent);
+                    emitted.pre += indent + "let " + boolean + " = " + value + ".toBoolean()\n";
+                    emitted.expr = booleanChain(boolean);
+                }
+                return emitted;
+            }
+            // A mixed enum accepts two or three kinds; hoist every conversion
+            // once (like the pure branches) so the per-member chains do not
+            // re-evaluate them, then dispatch through a kind-guard chain.
+            auto number = Fresh("num");
+            auto string = Fresh("str");
+            auto boolean = Fresh("boo");
+            if (hasNumber) {
+                emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
+            }
+            if (hasString) {
+                emitted.pre += indent + "let " + string + " = " + value + ".asString().toString()\n";
+            }
+            if (hasBoolean) {
+                emitted.pre += indent + "let " + boolean + " = " + value + ".toBoolean()\n";
+            }
+            std::string dispatch = "(";
+            bool firstGuard = true;
+            std::vector<std::string> kinds;
+            auto guardBranch = [&](bool present, const std::string& guard, const std::string& chain,
+                                   const std::string& kindName) {
+                if (!present) {
+                    return;
+                }
+                dispatch += (firstGuard ? "if (" : " else if (") + value + "." + guard + "()) {\n" + indent + "    " +
+                    chain + "\n" + indent + "}";
+                firstGuard = false;
+                kinds.emplace_back(kindName);
+            };
+            guardBranch(hasNumber, "isNumber", numberChain(number), "number");
+            guardBranch(hasString, "isString", stringChain(string), "string");
+            guardBranch(hasBoolean, "isBoolean", booleanChain(boolean), "boolean");
+            std::string kindList;
+            for (size_t i = 0; i < kinds.size(); ++i) {
+                if (i != 0) {
+                    kindList += (i == kinds.size() - 1 ? " or " : ", ");
+                }
+                kindList += kinds[i];
+            }
+            dispatch += " else {\n" + indent + "    " +
+                throwInline(std::string(ARKTS_MISMATCH) + "not a " + kindList + " for " + name) + "\n" + indent + "})";
+            emitted.expr = dispatch;
             return emitted;
         }
         if (desc.kind == ArkTSTypeDesc::Kind::ARRAY_COPY) {

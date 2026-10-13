@@ -71,6 +71,7 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpe
             return "(" + ArkTSJoin(names, ", ") + ")";
         }
         case ArkTSTypeDesc::Kind::REFERENCE:
+        case ArkTSTypeDesc::Kind::ENUM:
             if (reference) {
                 return reference(desc);
             }
@@ -144,6 +145,17 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
         if (IsArkTSPreparedInterface(*decl)) {
             desc.referenceImpl = ArkTSInterfaceImpl(*decl, imports);
         }
+        return desc;
+    }
+    // An @ArkTS foreign enum that went through enum preparation carries
+    // ARKTS_LOWERED; the classification records the declaration, and lowering
+    // attaches the member value table afterwards (the table lives on the
+    // checker, not in classification). The reference field is reused for the
+    // enum declaration, mirroring the REFERENCE leaf.
+    if (auto decl = Ty::GetDeclPtrOfTy(ty);
+        decl && decl->astKind == ASTKind::ENUM_DECL && decl->TestAttr(Attribute::ARKTS_LOWERED)) {
+        desc.kind = ArkTSTypeDesc::Kind::ENUM;
+        desc.reference = decl;
         return desc;
     }
     // ArkTS tuple types carry a fixed arity and Cangjie's TupleTy is
@@ -230,6 +242,13 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
                 return desc.referenceImpl != nullptr;
             }
             return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
+        case ArkTSTypeDesc::Kind::ENUM:
+            // The enum declaration must have gone through preparation and
+            // lowering must have attached a non-empty value table; a prepared
+            // enum whose declaration was refused (payload, generic, ...) never
+            // reaches the table and stays non-generatable.
+            return desc.reference != nullptr && desc.reference->TestAttr(Attribute::ARKTS_LOWERED) &&
+                !desc.enumMembers.empty();
         case ArkTSTypeDesc::Kind::TUPLE:
             if (desc.elements.size() < 2) {
                 return false;
@@ -263,17 +282,18 @@ bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc)
     return false;
 }
 
-// A reference leaf is emitted by placeholder, never by class name, and the
-// placeholder is registered in the map supplied to the wrapper generator; the
-// generator therefore refuses a description containing one when no map is
-// supplied. Scalars and unsupported positions carry no reference,
+// A reference or enum leaf is emitted by placeholder, never by its own name,
+// and the placeholder is registered in the map supplied to the wrapper
+// generator; the generator therefore refuses a description containing one when
+// no map is supplied. Scalars and unsupported positions carry no reference,
 // OPTIONAL/ARRAY_COPY recurse into their single element, TUPLE into every
 // element:
-//   REFERENCE(Point) -> true; OPTIONAL(REFERENCE(Point)) -> true;
+//   REFERENCE(Point) -> true; ENUM(Color) -> true;
+//   OPTIONAL(REFERENCE(Point)) -> true;
 //   TUPLE(SCALAR(Int32), REFERENCE(Point)) -> true; SCALAR(Int32) -> false
 bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc)
 {
-    if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
+    if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE || desc.kind == ArkTSTypeDesc::Kind::ENUM) {
         return true;
     }
     for (auto& element : desc.elements) {
@@ -298,5 +318,25 @@ bool ArkTSTypeDescContainsInterfaceReference(const ArkTSTypeDesc& desc)
         }
     }
     return false;
+}
+
+// A prepared enum leaf whose declaration is imported carries no value table:
+// PrepareEnums skips imported packages, so classification finds no prepared
+// value-table entry and the leaf stays non-generatable. The declaration still
+// carries ARKTS_LOWERED (the attribute survives the cjo round trip), so it is
+// told apart from a same-package refused enum (payload/generic) by IMPORTED.
+std::string ArkTSTypeDescImportedEnumName(const ArkTSTypeDesc& desc)
+{
+    if (desc.kind == ArkTSTypeDesc::Kind::ENUM && desc.enumMembers.empty() && desc.reference &&
+        desc.reference->TestAttr(Attribute::IMPORTED)) {
+        return desc.reference->identifier.Val();
+    }
+    for (auto& element : desc.elements) {
+        auto name = ArkTSTypeDescImportedEnumName(element);
+        if (!name.empty()) {
+            return name;
+        }
+    }
+    return {};
 }
 } // namespace Cangjie::Native::FFI::ArkTS
