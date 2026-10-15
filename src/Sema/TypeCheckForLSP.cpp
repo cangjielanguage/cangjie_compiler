@@ -587,7 +587,8 @@ protected:
         if (auto fd = DynamicCast<FuncDecl>(&decl)) {
             CJC_ASSERT(fd->funcBody && !fd->funcBody->paramLists.empty());
             Ptr<Decl> lastTrivialParam = nullptr;
-            // Only function whose last unnamed parameter has a function type can be used for trailing closure.
+            // Only function whose last unnamed parameter has a function or optional function type can be used
+            // for trailing closure.
             for (auto& param : fd->funcBody->paramLists[0]->params) {
                 if (param->isNamedParam) {
                     break;
@@ -595,16 +596,18 @@ protected:
                 lastTrivialParam = param.get();
                 CJC_NULLPTR_CHECK(lastTrivialParam->GetTy());
             }
-            return lastTrivialParam && lastTrivialParam->GetTy()->IsFunc();
+            return lastTrivialParam && TypeCheckUtil::IsFuncOrOptionOfFunc(lastTrivialParam->DataTy());
         }
         return IsViableTypeForTrailingClosure(funcTy);
     }
 
     static bool IsViableTypeForTrailingClosure(const FuncTy& funcTy)
     {
-        // To be used in trailing closure, there must exist a function type of paramTy.
+        // To be used in trailing closure, there must exist a function or optional function type of paramTy.
         // NOTE: Fuzzy checking, do not restrict the funcTy be last param type.
-        return !funcTy.paramTys.empty() && Utils::In(funcTy.paramTys, [](const ModalTy& it) { return it->IsFunc(); });
+        return !funcTy.paramTys.empty() && Utils::In(funcTy.paramTys, [](ModalTy it) {
+            return TypeCheckUtil::IsFuncOrOptionOfFunc(it.Ty());
+        });
     }
 
     SynResult Visit(TrailingClosureExpr& tce) override

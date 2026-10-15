@@ -507,14 +507,6 @@ bool IsPossibleVariadicFunction(const FuncTy& funcTy, const CallExpr& ce)
     return Ty::IsTyCorrect(funcTy.paramTys.back()) && funcTy.paramTys.back()->IsStructArray();
 }
 
-inline ModalTy GetRealNonOptionTy(ModalTy ty)
-{
-    if (ty->IsCoreOptionType()) {
-        return GetRealNonOptionTy(ty->typeArgs[0]);
-    }
-    return ty;
-}
-
 std::vector<Ptr<FuncDecl>> SyntaxFilterCandidates(const CallExpr& ce, const std::vector<Ptr<FuncDecl>>& candidates)
 {
     std::vector<Ptr<FuncDecl>> definitelyMismatched;
@@ -532,7 +524,7 @@ std::vector<Ptr<FuncDecl>> SyntaxFilterCandidates(const CallExpr& ce, const std:
             } else if (ce.args[i]->TestAttr(Attribute::IMPLICIT_ADD)) {
                 // For trailing closure, checking the argument with last parameter type,
                 // ignore the mismatched size of arguments.
-                definitelyMismatch = paramTys.empty() || !paramTys.back()->IsFunc();
+                definitelyMismatch = paramTys.empty() || !IsFuncOrOptionOfFunc(paramTys.back().Ty());
                 break;
             } else if (ce.args[i]->name.Empty() && paramTys.size() <= i) {
                 definitelyMismatch = true;
@@ -540,9 +532,9 @@ std::vector<Ptr<FuncDecl>> SyntaxFilterCandidates(const CallExpr& ce, const std:
             }
             ModalTy paramTy{};
             if (ce.args[i]->name.Empty()) {
-                paramTy = GetRealNonOptionTy(paramTys[i]);
+                paramTy = UnboxOptionType(paramTys[i]);
             } else if (auto res = GetParamTyAccordingToArgName(*fd, ce.args[i]->name)) {
-                paramTy = GetRealNonOptionTy(res.value().first);
+                paramTy = UnboxOptionType(res.value().first);
             }
             // Do not use size of lambda's parameters as filter condition, since it may be better matched than others.
             if (!paramTy ||
@@ -640,27 +632,17 @@ void RemoveNonAnnotationCandidates(std::vector<Ptr<FuncDecl>>& candidates)
     }
 }
 
-inline bool IsFunctionalType(ModalTy ty)
-{
-    if (auto genericTy = DynamicCast<GenericsTy*>(ty.Ty())) {
-        return std::any_of(
-            genericTy->upperBounds.cbegin(), genericTy->upperBounds.cend(), [](auto ub) { return ub->IsFunc(); });
-    }
-    return ty->IsFunc();
-}
-
 bool CheckUseTrailingClosureWithFunctionType(
     DiagnosticEngine& diag, FuncArg& arg, ModalTy originalTy, const FuncDecl& candidate)
 {
     // Implicit added func argument is added by trailing closure.
-    if (!arg.TestAttr(Attribute::IMPLICIT_ADD) || IsFunctionalType(originalTy)) {
+    if (!arg.TestAttr(Attribute::IMPLICIT_ADD) || IsFuncOrOptionOfFunc(originalTy.Ty())) {
         return true;
     }
     arg.SetTy({TypeManager::GetInvalidTy()});
     CJC_NULLPTR_CHECK(arg.expr);
     arg.expr->SetTy({TypeManager::GetInvalidTy()});
-    std::string message =
-        originalTy->IsGeneric() ? "generic type without upper bound of function type" : "non-function type";
+    std::string message = "non function nor option of function type";
     auto diagBuilder = diag.DiagnoseRefactor(
         DiagKindRefactor::sema_trailing_lambda_cannot_used_for_non_function, arg, message);
     diagBuilder.AddMainHintArguments(originalTy.String());
