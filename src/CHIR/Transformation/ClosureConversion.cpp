@@ -64,35 +64,6 @@ bool IsCalleeOfApply(const Expression& user, const Value& op)
     return false;
 }
 
-bool IsExclusiveScopeIntrinsic(const Expression& expr)
-{
-    if (auto intrinsic = DynamicCast<const IntrinsicBase*>(&expr)) {
-        return intrinsic->GetIntrinsicKind() == IntrinsicKind::EXCLUSIVE_SCOPE;
-    }
-    return false;
-}
-
-// exclusiveScopeImpl takes catchResult<T> as an argument, so
-// the user of the function is a GetInstantiateValue.
-// The call to catchResult<T> on the slow path does not need an AutoEnv.
-bool IsExclusiveScopeWrapperUse(const Expression& user)
-{
-    auto giv = DynamicCast<const GetInstantiateValue*>(&user);
-    if (giv == nullptr) {
-        return false;
-    }
-    auto resultUsers = giv->GetResult()->GetUsers();
-    if (resultUsers.empty()) {
-        return false;
-    }
-    for (auto resultUser : resultUsers) {
-        if (!IsExclusiveScopeIntrinsic(*resultUser)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool IsMutableVarType(const Value& value)
 {
     if (value.IsParameter()) {
@@ -2288,7 +2259,7 @@ void ClosureConversion::ConvertGlobalFunctions()
         auto users = func->GetUsers();
         bool convertFlag{false};
         for (auto user : users) {
-            if (IsCalleeOfApply(*user, *func) || IsExclusiveScopeWrapperUse(*user)) {
+            if (IsCalleeOfApply(*user, *func)) {
                 continue;
             }
             auto autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(*func->GetFuncType());

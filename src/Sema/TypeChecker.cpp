@@ -1860,7 +1860,8 @@ void MarkImplicitUsedFunctions(const Package& pkg)
     static const std::unordered_map<std::string, std::unordered_set<std::string>> SPECIAL_EXPORTED_FUNCS{
         {CORE_PACKAGE_NAME,
             {"arrayInitByCollection", "arrayInitByFunction", "composition", "handleException",
-                "createOverflowExceptionMsg", "createArithmeticExceptionMsg", "getCommandLineArgs"}},
+                "createOverflowExceptionMsg", "createArithmeticExceptionMsg", "getCommandLineArgs",
+                "catchResult"}},
         {AST_PACKAGE_NAME,
             {MACRO_OBJECT_NAME, "refreshTokensPosition", "refreshPos", "unsafePointerCastFromUint8Array", "transformTokens"}}};
     auto found = SPECIAL_EXPORTED_FUNCS.find(pkg.fullPackageName);

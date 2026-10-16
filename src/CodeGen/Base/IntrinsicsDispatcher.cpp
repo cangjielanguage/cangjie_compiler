@@ -114,11 +114,11 @@ public:
 private:
     CGFunction* ResolveCatchResult() const
     {
-        CJC_ASSERT(intrinsic.GetArgs().size() == 2);
-        auto* wrapperOp = intrinsic.GetOperand(0);
-        CJC_NULLPTR_CHECK(wrapperOp);
-        auto* chirFunc = DynamicCast<CHIR::Function*>(wrapperOp);
-        CJC_ASSERT(chirFunc != nullptr && chirFunc->GetGenericTypeParams().size() == 1);
+        const std::string catchResultFuncName = "_CNat11catchResultIG_HF0G_E";
+        auto* chirVal = cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(catchResultFuncName);
+        auto* chirFunc = DynamicCast<CHIR::Function*>(chirVal);
+        CJC_NULLPTR_CHECK(chirFunc);
+        CJC_ASSERT(chirFunc->GetGenericTypeParams().size() == 1);
         auto* cgFunc = cgMod.GetOrInsertCGFunction(chirFunc);
         CJC_NULLPTR_CHECK(cgFunc);
         return cgFunc;
@@ -126,22 +126,18 @@ private:
 
     llvm::Value* ResolveValueType() const
     {
-        auto* fnOp = intrinsic.GetOperand(1);
-        CJC_NULLPTR_CHECK(fnOp);
-        auto* fnTy = DeRef(*fnOp->GetType());
-        CJC_ASSERT(fnTy != nullptr && fnTy->IsAutoEnvGenericBase());
-        auto* clsTy = StaticCast<const CHIR::ClassType*>(fnTy);
-        auto [paramTypes, retType] = CHIR::GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(*clsTy);
-        CJC_ASSERT(paramTypes.empty());
-        CJC_NULLPTR_CHECK(retType);
-        CJC_ASSERT(retType->IsGeneric());
-        auto* typeInfo = irBuilder.CreateTypeInfo(*retType);
+        auto& instArgs = intrinsic.GetInstantiatedTypeArgs();
+        CJC_ASSERT(instArgs.size() == 1);
+        CJC_NULLPTR_CHECK(instArgs[0]);
+        auto* typeInfo = irBuilder.CreateTypeInfo(*instArgs[0]);
         CJC_NULLPTR_CHECK(typeInfo);
         return typeInfo;
     }
 
     void Prepare()
     {
+        CJC_ASSERT(intrinsic.GetArgs().size() == 1);
+
         auto* resultVal = intrinsic.GetResult();
         CJC_NULLPTR_CHECK(resultVal);
         auto* resultTy = resultVal->GetType();
@@ -159,7 +155,7 @@ private:
         catchResultLLVMTy = catchResultCGType->GetLLVMFunctionType();
         CJC_ASSERT(catchResultLLVMTy != nullptr && catchResultLLVMTy->getNumParams() == 3U);
 
-        auto fnCGVal = cgMod | intrinsic.GetOperand(1);
+        auto fnCGVal = cgMod | intrinsic.GetOperand(0);
         CJC_NULLPTR_CHECK(fnCGVal);
         fnVal = **fnCGVal;
         CJC_ASSERT(fnVal != nullptr && fnVal->getType()->isPointerTy());
@@ -168,7 +164,6 @@ private:
 
         // Sized struct (payload: Any, ok: Bool). The callee copies it into this buffer.
         sret = irBuilder.CreateEntryAlloca(*resultCGType, "exclusive.sret");
-        cgMod.GetCGContext().AddLLVMUsedVars(catchResultFn->getName().str());
     }
 
     // Allocate ExclusiveScopeState, call Enter, load destSp / needMCC.
@@ -995,7 +990,7 @@ llvm::Value* GenerateInout(IRBuilder2& irBuilder, const CHIR::IntrinsicBase& int
 
 llvm::Value* GenerateExclusiveScope(IRBuilder2& irBuilder, const CHIR::IntrinsicBase& intrinsic)
 {
-    // Codegen for exclusiveScopeImpl<T>(catchResult<T>, fn): ExclusiveScopeResult
+    // Codegen for exclusiveScopeImpl<T>(fn): ExclusiveScopeResult
     return ExclusiveScopeCodeGen(irBuilder, intrinsic).Emit();
 }
 
