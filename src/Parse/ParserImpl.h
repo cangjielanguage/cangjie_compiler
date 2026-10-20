@@ -268,6 +268,7 @@ private:
     friend class FFIParserImpl;
     friend class JFFIParserImpl;
     friend class OCFFIParserImpl;
+    friend class ArkTSParserImpl;
     class FFIParserImpl* ffiParser;
 
     /// Common initializer shared among constructors.
@@ -516,6 +517,8 @@ private:
     bool IsExpectedTokenAfterFeaturesOrPackage(bool allowPackageKeyword);
     void ParseTopLevelDecls(AST::File& file, std::vector<OwnedPtr<AST::Annotation>>& annos);
     void ParseTopLevelDecl(AST::File& file, std::vector<OwnedPtr<AST::Annotation>>& annos);
+    void ParseInheritedAnnotations(
+        const PtrVector<AST::Annotation>& inherited, PtrVector<AST::Annotation>& annotations);
     void ParseAnnotations(PtrVector<AST::Annotation>& annos);
     void SetBeginToAnnotationsBegin(Node& node, const PtrVector<Annotation>& annos);
     OwnedPtr<AST::Annotation> ParseCustomAnnotation();

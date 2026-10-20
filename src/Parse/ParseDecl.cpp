@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -1995,6 +1995,11 @@ OwnedPtr<MainDecl> ParserImpl::ParseMainDecl(
     return ret;
 }
 
+// ArkTS foreign path, before -> after: tokens/annotations for `foreign func f`
+// become a FuncDecl with FOREIGN/source modifiers, original signature and null
+// FuncBody.body. A checking-only modifier copy bypasses C-foreign restrictions;
+// it does not erase the source FOREIGN modifier. PrepareTypeCheck later turns
+// this declaration into a CJ wrapper and LowerArkTSFunctions fills its body.
 OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
     ScopeKind scopeKind, const std::set<Modifier>& modifiers, PtrVector<Annotation> annos)
 {
@@ -2024,7 +2029,8 @@ OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
         // For import: funcdecl with Mut modifier only allow in interface.
         scopeKind = ScopeKind::INTERFACE_BODY;
     }
-    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::FUNC);
+    auto attrs = CheckDeclModifiers(ffiParser->ArkTS().PrepareForeignFunctionModifiers(scopeKind, modifiers, annos, *ret),
+        scopeKind, DefKind::FUNC);
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }

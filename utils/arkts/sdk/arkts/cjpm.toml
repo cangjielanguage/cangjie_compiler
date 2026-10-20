@@ -1,0 +1,9 @@
+[package]
+cjc-version = "1.2.0"
+name = "arkts"
+version = "1.0.0"
+description = "Explicit ArkTS language SDK imports"
+output-type = "dynamic"
+
+[dependencies]
+cj_arkts_context_v1 = { path = "../context" }

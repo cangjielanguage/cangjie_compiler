@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -1711,6 +1711,7 @@ private:
 
     void MarkOutermostBinaryExpressions(AST::Package& pkg) const;
     // FFI Sema Prepare Check.
+    void LowerArkTSFunctions(ASTContext& ctx);
     void PreCheckAnnoForFFI(AST::Node& root);
     /**
      * Set the ABI information to Foreign Modifier. By default Foreign Modifier has Attribute::C.

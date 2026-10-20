@@ -6,6 +6,10 @@
 
 #ifndef CANGJIE_PRIVATE_NATIVE_FFI_ARKTS_AST_FACTORY_H
 #define CANGJIE_PRIVATE_NATIVE_FFI_ARKTS_AST_FACTORY_H
+
+#include <string>
+#include <vector>
+
 #include "cangjie/AST/Node.h"
 namespace Cangjie {
 class DiagnosticEngine;
@@ -16,6 +20,7 @@ public:
     ASTFactory(DiagnosticEngine& diagnostics, SourceManager& sources) : diag(diagnostics), sourceManager(sources) {}
     std::vector<OwnedPtr<AST::Decl>> CreateEntry(AST::FuncDecl& entry, const std::string& suffix,
         const std::string& prefix) const;
+    OwnedPtr<AST::Block> CreateForeignBody(AST::FuncDecl& function, const std::string& code) const;
 private:
     DiagnosticEngine& diag;
     SourceManager& sourceManager;

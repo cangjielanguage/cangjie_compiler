@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -2285,6 +2285,14 @@ void TypeChecker::TypeCheckerImpl::PreCheck(const std::vector<Ptr<ASTContext>>& 
     Utils::ProfileRecorder::Stop("PreCheck", "ResolveDecls");
     // Resolve type alias separately after all user-defined type resolved.
     ResolveTypeAlias(contexts);
+    // Before -> after ArkTS lowering: prepared, bodyless wrapper FuncDecls with
+    // resolved alias declarations -> the same signatures with resolved scalar
+    // types, generated glue Blocks, rebound references and collected locals.
+    // ResolveTypeAlias must precede this step so an alias selects its scalar
+    // conversion; ordinary body type checking consumes the resulting AST.
+    for (auto& ctx : contexts) {
+        LowerArkTSFunctions(*ctx);
+    }
 
     // Clear extend related data before iteration of all packages.
     typeManager.ClearMapCache();

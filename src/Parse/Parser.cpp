@@ -346,6 +346,12 @@ OwnedPtr<PackageSpec> ParserImpl::ParsePackageHeader(std::set<Modifier>&& modifi
     return packageHeader;
 }
 
+// ArkTS block AST, before -> after:
+//   @ArkTS[module:"a"] foreign { @ArkTS[module:"b"] func echo(): Unit }
+//     -> [FuncDecl(echo, FOREIGN, annotations=[default("a"), override("b")])].
+// Each member owns cloned defaults plus its parsed options. The block is a
+// parsing construct, not a shared AST parent; a single declaration is parsed
+// directly. Wrapper bodies are generated later, not during block expansion.
 std::vector<OwnedPtr<Decl>> ParserImpl::ParseForeignDecls(
     const std::set<Modifier>& modifiers, PtrVector<Annotation>& annos)
 {
@@ -371,10 +377,7 @@ std::vector<OwnedPtr<Decl>> ParserImpl::ParseForeignDecls(
         auto clonedMods = modifiers;
         // Copy annos here, because ParseDecl(xxx) will move annos.
         PtrVector<Annotation> clonedAnnos;
-        for (auto& it : annos) {
-            (void)clonedAnnos.emplace_back(ASTCloner::Clone(it.get()));
-        }
-        ParseAnnotations(clonedAnnos);
+        ParseInheritedAnnotations(annos, clonedAnnos);
         auto decl = ParseDecl(ScopeKind::TOPLEVEL, clonedMods, std::move(clonedAnnos));
 
         ret.emplace_back(std::move(decl));

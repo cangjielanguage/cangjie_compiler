@@ -10,12 +10,13 @@
  * This file contains logics related to Cangjie Native interoperation with Java, Objective-C
  */
 
+#include "FFIParserImpl.h"
+
 #include "../ParserImpl.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Utils.h"
 
-#include "FFIParserImpl.h"
 #include "cangjie/Lex/Token.h"
 
 namespace Cangjie {
@@ -52,6 +53,14 @@ void DiagConflictingAnnos(DiagnosticEngine &diag, Annotation &first, Annotation 
         first.identifier, second.identifier, onStr);
 }
 
+// Before: an inherited annotation kind. After result: only ARKTS may remain
+// a separate default layer beside member options. This predicate changes no AST
+// and does not permit repeated explicit @ArkTS annotations on one declaration.
+bool FFIParserImpl::AllowsInheritedAnnotationOptions(AnnotationKind kind) const
+{
+    return kind == AnnotationKind::ARKTS;
+}
+
 void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos) const
 {
     std::vector<Ptr<Annotation>> candidates;
@@ -77,11 +86,18 @@ void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos)
     }
 }
 
+// ArkTS branch, before -> after: keep parsed annotation/argument nodes intact
+// and diagnose duplicate option names via CheckAnnotation. Inherited and member
+// layers are composed separately by ParseInheritedAnnotations, not by this check.
 void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const
 {
     for (auto& it : annos) {
         auto& anno = *it;
         switch (it->kind) {
+            case AnnotationKind::ARKTS: {
+                arkTS.CheckAnnotation(anno);
+                break;
+            }
             case AnnotationKind::JAVA_MIRROR:
             case AnnotationKind::JAVA_IMPL: {
                 jp.CheckAnnotation(anno);
@@ -200,6 +216,11 @@ JFFIParserImpl FFIParserImpl::Java() const
 OCFFIParserImpl FFIParserImpl::ObjC() const
 {
     return op;
+}
+
+ArkTSParserImpl FFIParserImpl::ArkTS() const
+{
+    return arkTS;
 }
 
 void FFIParserImpl::CheckZeroOrSingleStringLitArgAnnotation(AST::Annotation &anno,

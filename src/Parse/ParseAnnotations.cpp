@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -6,6 +6,9 @@
 
 #include "ParserImpl.h"
 
+#include <iterator>
+
+#include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/Basic/Print.h"
@@ -243,6 +246,32 @@ bool ParserImpl::SeeingMacroCallDecl()
         return false;
     }
     return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value());
+}
+
+// Before: a block default @ArkTS[module:"a", namespace:"n"] and a member
+// @ArkTS[module:"b"]. After: that member owns two independent Annotation nodes
+// ordered [cloned block default, parsed member override]. ArkTSFunctionOptions
+// later folds them to {module:"b", namespace:"n"}; no shared block node changes.
+// The default layer is withheld during member duplicate checks, so a block
+// default plus one member annotation is valid, but two explicit member @ArkTS
+// annotations still fail. Other annotation kinds retain the normal duplicate check.
+void ParserImpl::ParseInheritedAnnotations(const PtrVector<Annotation>& inherited, PtrVector<Annotation>& annotations)
+{
+    // Inherited option annotations provide defaults, so parse member options
+    // before prepending them. All other inherited annotations participate in
+    // the normal duplicate check while member annotations are parsed.
+    PtrVector<Annotation> defaults;
+    for (const auto& annotation : inherited) {
+        auto cloned = ASTCloner::Clone(annotation.get());
+        if (ffiParser->AllowsInheritedAnnotationOptions(annotation->kind)) {
+            defaults.emplace_back(std::move(cloned));
+        } else {
+            annotations.emplace_back(std::move(cloned));
+        }
+    }
+    ParseAnnotations(annotations);
+    annotations.insert(
+        annotations.begin(), std::make_move_iterator(defaults.begin()), std::make_move_iterator(defaults.end()));
 }
 
 void ParserImpl::ParseAnnotations(PtrVector<Annotation>& annos)

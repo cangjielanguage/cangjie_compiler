@@ -13,5 +13,6 @@
 // deliberately outside include/: no installed SDK or external-module API.
 namespace Cangjie::Native::FFI::ArkTS {
 bool IsArkTSEntry(const AST::FuncDecl& fd);
+bool IsArkTSForeignFunction(const AST::FuncDecl& fd);
 } // namespace Cangjie::Native::FFI::ArkTS
 #endif

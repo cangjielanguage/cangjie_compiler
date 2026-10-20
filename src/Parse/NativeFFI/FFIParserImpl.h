@@ -15,6 +15,7 @@
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/Parse/Parser.h"
+#include "ArkTS/ArkTSParserImpl.h"
 #include "Java/JFFIParserImpl.h"
 #include "ObjC/OCFFIParserImpl.h"
 
@@ -23,11 +24,12 @@ using namespace AST;
 
 class FFIParserImpl final {
 public:
-    explicit FFIParserImpl(ParserImpl& parserImpl): p(parserImpl), jp(parserImpl), op(parserImpl)
+    explicit FFIParserImpl(ParserImpl& parserImpl): p(parserImpl), jp(parserImpl), op(parserImpl), arkTS(parserImpl)
     {
     }
     ~FFIParserImpl() = default;
 
+    bool AllowsInheritedAnnotationOptions(AnnotationKind kind) const;
     void CheckAnnotationsConflict(const PtrVector<Annotation>& annos) const;
     void CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const;
     void CheckForeignNameAnnotation(Decl& decl) const;
@@ -39,6 +41,7 @@ public:
 
     JFFIParserImpl Java() const;
     OCFFIParserImpl ObjC() const;
+    ArkTSParserImpl ArkTS() const;
 
 private:
     // friend JFFIParserImpl;
@@ -53,6 +56,7 @@ private:
     ParserImpl& p;
     JFFIParserImpl jp;
     OCFFIParserImpl op;
+    ArkTSParserImpl arkTS;
 };
 
 void DiagConflictingAnnos(DiagnosticEngine& diag, Annotation& first, Annotation& second);
@@ -60,7 +64,7 @@ void DiagConflictingAnnos(DiagnosticEngine& diag, Annotation& first, Annotation&
 const std::unordered_set<AnnotationKind> CONFLICTED_FFI_ANNOS {
     AnnotationKind::JAVA_MIRROR, AnnotationKind::JAVA_IMPL,
     AnnotationKind::OBJ_C_IMPL, AnnotationKind::OBJ_C_MIRROR,
-    AnnotationKind::C, AnnotationKind::JAVA, AnnotationKind::OBJ_C
+    AnnotationKind::C, AnnotationKind::JAVA, AnnotationKind::OBJ_C, AnnotationKind::ARKTS
 };
 
 namespace Native::FFI {

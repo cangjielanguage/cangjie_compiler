@@ -843,6 +843,13 @@ OwnedPtr<Generic> ASTLoader::ASTLoaderImpl::LoadGeneric(Decl& decl, const Packag
     return genericNode;
 }
 
+// ArkTS metadata, before -> after:
+//   Anno(ArkTS, args=[]) -> Decl.ARKTS only, no Annotation node;
+//   ordered Anno(ArkTS, args=[...]) records -> Decl.ARKTS plus ordered builtin
+//   Annotation(ARKTS, named literal arguments) nodes for lossless re-export.
+// The declaration's generic attribute bits are not the authority for this marker;
+// it is cleared then rebuilt from Anno records. No annotation definition or
+// constructor symbol is loaded, and no wrapper body is generated on import.
 void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl, Decl& astDecl)
 {
     astDecl.identifier = decl.identifier()->str();
@@ -877,9 +884,13 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
     uoffset_t length = static_cast<uoffset_t>(decl.annotations()->size());
     for (uoffset_t i = 0; i < length; i++) {
         auto rawAnno = decl.annotations()->Get(i);
+        // Parameterless records need only a marker. Restore option-bearing metadata
+        // as builtin nodes without resolving an annotation declaration or constructor.
         if (rawAnno->kind() == PackageFormat::AnnoKind_ArkTS) {
             astDecl.EnableAttr(Attribute::ARKTS);
-            continue;
+            if (rawAnno->args() == nullptr || rawAnno->args()->size() == 0) {
+                continue;
+            }
         }
         auto anno = LoadAnnotation(*rawAnno);
         if (rawAnno->kind() == PackageFormat::AnnoKind_Annotation) {
@@ -891,11 +902,20 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
     }
 }
 
+// ArkTS option record -> builtin AST node, e.g.
+// Anno(ArkTS, "ArkTS", [module=StringLiteral("a")])
+//   -> Annotation(kind=ARKTS, identifier="ArkTS", args=[module:"a"]).
+// LoadAnnotationArgs restores named literal expressions in record order. The
+// caller attaches this node only for option-bearing ArkTS metadata; this is
+// declaration binding metadata, not an annotation definition/constructor call.
 OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageFormat::Anno& rawAnno)
 {
     auto annotation = MakeOwned<Annotation>();
 
     switch (rawAnno.kind()) {
+        case PackageFormat::AnnoKind_ArkTS:
+            annotation->kind = AnnotationKind::ARKTS;
+            break;
         case PackageFormat::AnnoKind_Deprecated:
             annotation->kind = AnnotationKind::DEPRECATED;
             break;
