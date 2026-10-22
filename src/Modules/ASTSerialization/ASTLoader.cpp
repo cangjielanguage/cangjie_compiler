@@ -682,6 +682,13 @@ Position ASTLoader::ASTLoaderImpl::LoadPos(const PackageFormat::Position* posObj
         // NOTE: other package's 'pkgIndex' is vector offset plus 1.
         CJC_ASSERT(pkgIndex - 1 < importedFullPackageNames.size());
         std::string fullPackageName = importedFullPackageNames.at(pkgIndex - 1);
+        // Macro-expanded declarations can refer to their own package by name (see SaveDecl in ASTWriter).
+        // During common-part loading, that name resolves to the specific package, which has different files.
+        if (deserializingCommon && fullPackageName == package->fullPkgName()->str()) {
+            CJC_ASSERT(fileIndex < allFileIds.size());
+            fileId = allFileIds.at(static_cast<unsigned long>(fileIndex));
+            return {fileId, static_cast<int>(line), static_cast<int>(column)};
+        }
         if (auto pd = cjoManager.GetPackageDecl(fullPackageName)) {
             CJC_ASSERT(fileIndex < pd->srcPackage->files.size());
             fileId = pd->srcPackage->files[fileIndex]->begin.fileID;
