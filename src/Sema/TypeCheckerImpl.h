@@ -567,6 +567,7 @@ private:
      * Desugar APIs during sema check.
      */
     void DesugarArrayCall(ASTContext& ctx, AST::CallExpr& ce);
+    void DesugarNumericTypeAliasCall(ASTContext& ctx, AST::CallExpr& ce);
     /**
      * Desugar static reference calls to member access expressions in CFunc lambda.
      * Ensure that no dynamic dispatch occurs in the CFunc.
@@ -859,6 +860,7 @@ private:
     bool IsCallOfBuiltInType(const AST::CallExpr& ce, const AST::TypeKind kind) const;
     bool ChkArrayCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
     bool ChkCFuncCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
+    bool ChkNumericTypeAliasCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
     bool ChkBuiltinCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
     bool ChkPointerCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);
     bool ChkVArrayCall(ASTContext& ctx, AST::Ty& target, AST::CallExpr& ce);

@@ -2316,7 +2316,10 @@ bool TypeChecker::TypeCheckerImpl::GetCallBaseCandidates(
         target = target->specificImplementation;
     }
     CJC_NULLPTR_CHECK(target);
-    if (IsBuiltinTypeAlias(*target) || target->IsBuiltIn()) {
+    auto exprTy = expr.GetTy();
+    bool isNumericTypeAliasCall = ce.args.size() == 1 && target->astKind == ASTKind::TYPE_ALIAS_DECL && exprTy &&
+        (exprTy->IsNumeric() || exprTy->IsRune());
+    if (isNumericTypeAliasCall || IsBuiltinTypeAlias(*target) || target->IsBuiltIn()) {
         return false;
     }
     bool isFunctionCall = true;
