@@ -14,11 +14,9 @@
 
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/Match.h"
-#include "cangjie/Basic/Print.h"
 #include "cangjie/Lex/Lexer.h"
 #include "cangjie/Macro/InvokeUtil.h"
 #include "cangjie/Macro/TokenSerialization.h"
-#include "cangjie/Modules/PackageManager.h"
 #include "cangjie/Parse/Parser.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 #include "cangjie/Utils/Utils.h"
@@ -355,7 +353,7 @@ void RefreshMacroCallArgs(MacroCall& macCall, DiagnosticEngine& diag)
     macCall.status = MacroEvalStatus::READY;
 }
 
-void CheckMacroCallArgs(MacroCall& macCall, DiagnosticEngine& diag, bool compileCjd)
+void CheckMacroCallArgs(MacroCall& macCall, DiagnosticEngine& diag, const GlobalOptions& opts)
 {
     if (macCall.status != MacroEvalStatus::READY) {
         return;
@@ -369,7 +367,7 @@ void CheckMacroCallArgs(MacroCall& macCall, DiagnosticEngine& diag, bool compile
         std::vector<Token> newTokens = pInvocation->args;
         RefreshTokensPos(newTokens, pos, diag.GetSourceManager());
         auto errCnt = diag.GetErrorCount();
-        Parser parser{newTokens, diag, diag.GetSourceManager(), false, compileCjd};
+        Parser parser{newTokens, diag, diag.GetSourceManager(), false, &opts};
         parser.SetPrimaryDecl(primaryName).SetCurFile(macCall.GetNode()->curFile);
         parser.ParseDecl(scopeKind);
         if (diag.GetErrorCount() > errCnt) {
@@ -424,7 +422,7 @@ bool HandleBeforeMacroCallEval(MacroCall& macCall, DiagnosticEngine& diag)
     return false;
 }
 
-bool IsMacroCallReadyForEval(MacroCall& macCall, DiagnosticEngine& diag, bool compileCjd)
+bool IsMacroCallReadyForEval(MacroCall& macCall, DiagnosticEngine& diag, const GlobalOptions& opts)
 {
     if (HandleBeforeMacroCallEval(macCall, diag)) {
         return false;
@@ -446,7 +444,7 @@ bool IsMacroCallReadyForEval(MacroCall& macCall, DiagnosticEngine& diag, bool co
             RefreshMacroCallArgs(macCall, diag);
         }
     }
-    CheckMacroCallArgs(macCall, diag, compileCjd);
+    CheckMacroCallArgs(macCall, diag, opts);
     if (macCall.status == MacroEvalStatus::READY) {
         macCall.status = MacroEvalStatus::EVAL;
         return true;
@@ -668,10 +666,8 @@ void MacroEvaluation::CreateChildMacroCall(
     if (reEval) {
         refreshNewTokensPosition(originPos, tokensToParse);
     }
-    Parser parser{tokensToParse, diag, ci->diag.GetSourceManager(), false,
-        ci->invocation.globalOptions.compileCjd};
+    Parser parser{tokensToParse, diag, ci->diag.GetSourceManager(), false, &ci->invocation.globalOptions};
     parser.SetPrimaryDecl(primaryName).SetCurFile(macCall.GetNode()->curFile);
-    parser.SetCompileOptions(ci->invocation.globalOptions);
     auto decl = parser.ParseDecl(ScopeKind(scopeKind));
     if (!decl->IsMacroCallNode()) {
         // Filter decls such as builtin annotations.
@@ -998,7 +994,7 @@ void MacroEvaluation::EvalMacroCallsOnMultiThread()
             if (macCall->status == MacroEvalStatus::FAIL) {
                 continue;
             }
-            if (!IsMacroCallReadyForEval(*macCall, ci->diag, ci->invocation.globalOptions.compileCjd)) {
+            if (!IsMacroCallReadyForEval(*macCall, ci->diag, ci->invocation.globalOptions)) {
                 if (macCall->status == MacroEvalStatus::FAIL) {
                     needEvalMacCalls--;
                 }
@@ -1030,7 +1026,7 @@ void MacroEvaluation::EvalMacroCallsOnMultiThread()
 void MacroEvaluation::EvalMacroCallsOnSingleThread()
 {
     for (auto& macCall : std::as_const(pMacroCalls)) {
-        if (!IsMacroCallReadyForEval(*macCall, ci->diag, ci->invocation.globalOptions.compileCjd)) {
+        if (!IsMacroCallReadyForEval(*macCall, ci->diag, ci->invocation.globalOptions)) {
             continue;
         }
         auto name = macCall->GetIdentifier() + macCall->GetBeginPos().ToString();

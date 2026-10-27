@@ -53,10 +53,9 @@ OwnedPtr<Decl> ParseDeclFromSrcExperimental(const std::string& src)
     static SourceManager sm;
     sm.AddSource("./", src);
     diag.SetSourceManager(&sm);
-    Parser parser(src, diag, diag.GetSourceManager(), {});
     GlobalOptions opts;
     opts.enableEH = true;
-    parser.SetCompileOptions(opts);
+    Parser parser(src, diag, diag.GetSourceManager(), {}, false, &opts);
     return parser.ParseDecl(ScopeKind::TOPLEVEL);
 }
 

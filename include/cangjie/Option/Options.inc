@@ -346,6 +346,9 @@ OPTION("--enable-eh", ENABLE_EFFECTS, FLAG, { BACKEND(CJNATIVE) },
     { GROUP(GLOBAL) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Enables experimental support for effect handlers")
 #endif
+OPTION("--enable-local-mode", ENABLE_LOCAL_MODE, FLAG, { BACKEND(CJNATIVE) },
+    { GROUP(GLOBAL) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Enables experimental support for local mode")
 OPTION("--dump-ast", DUMP_AST, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Dump human readable AST when compiling for debug")

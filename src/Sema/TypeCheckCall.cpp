@@ -3228,6 +3228,27 @@ void TypeChecker::TypeCheckerImpl::DiagnoseForCall(const std::vector<Ptr<FuncDec
     if (invalid) {
         return;
     }
+    // when local mode disabled, report it instead of normal sema errors.
+    bool hasNonLocalCandidate = std::any_of(candidatesBeforeCheck.begin(), candidatesBeforeCheck.end(),
+        [](const auto& fd) { return fd && !IsDisabledLocalAPI(*fd); });
+    if (!ci->invocation.globalOptions.enableLocalMode && !hasNonLocalCandidate) {
+        Ptr<Decl> api;
+        for (auto& target : ce.baseFunc->GetTargets()) {
+            if (target && IsDisabledLocalAPI(*target)) {
+                api = target;
+                break;
+            }
+        }
+        if (api == nullptr && ce.baseFunc->GetTarget() && IsDisabledLocalAPI(*ce.baseFunc->GetTarget())) {
+            api = ce.baseFunc->GetTarget();
+        }
+        if (api != nullptr) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_local_api_disabled, *ce.baseFunc,
+                std::string(ToSignatureString(*api, api->DataTy(), GetThisParamModal(*api))));
+            ce.callKind = CallKind::CALL_INVALID;
+            return;
+        }
+    }
     bool isSuperCreation = ce.callKind == CallKind::CALL_SUPER_FUNCTION && decl.astKind != ASTKind::FUNC_DECL;
     std::string identifier = isSuperCreation ? "super" : decl.identifier.Val();
     Position identifierPos{ce.begin};
@@ -3386,6 +3407,16 @@ void CheckCallPostfixModal(DiagnosticEngine& diag, const CallExpr& ce, Ptr<const
 bool TypeChecker::TypeCheckerImpl::PostCheckCallExpr(
     const ASTContext& ctx, CallExpr& ce, FuncDecl& func, const SubstPack& typeMapping)
 {
+    // Local-only APIs are unusable while local mode is disabled.
+    if (!ci->invocation.globalOptions.enableLocalMode && IsDisabledLocalAPI(func)) {
+        // An accessor is reported with its property's signature.
+        const Decl& api = func.propDecl ? static_cast<const Decl&>(*func.propDecl) : func;
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_local_api_disabled, *ce.baseFunc,
+            std::string(ToSignatureString(api, api.DataTy(), GetThisParamModal(api))));
+        ce.SetTy({TypeManager::GetInvalidTy()});
+        ce.callKind = CallKind::CALL_INVALID;
+        return false;
+    }
     CheckCallPostfixModal(diag, ce, &func);
     if (!func.TestAttr(Attribute::CONSTRUCTOR) && !CheckStaticCallNonStatic(ctx, ce, func)) {
         // Reset status for re-enter callCheck.

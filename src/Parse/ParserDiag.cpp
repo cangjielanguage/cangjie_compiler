@@ -1061,7 +1061,7 @@ void ParserImpl::DiagMatchCase(DiagnosticBuilder& builder)
 
 void ParserImpl::DiagExpectedCatchOrHandleOrFinallyAfterTry(const TryExpr& te)
 {
-    auto diagKind = this->enableEH ? DiagKindRefactor::parse_expected_catch_or_handle_or_finally_in_try
+    auto diagKind = IsEHEnabled() ? DiagKindRefactor::parse_expected_catch_or_handle_or_finally_in_try
                                         : DiagKindRefactor::parse_expected_catch_or_finally_in_try;
     auto builder = ParseDiagnoseRefactor(diagKind, lookahead, ConvertToken(lookahead));
     builder.AddHint(MakeRange(te.begin, te.tryBlock->end));
@@ -1176,7 +1176,7 @@ void ParserImpl::DiagUnExpectedModifierOnDeclaration(const Decl& vd)
 
 void ParserImpl::DiagConstVariableExpectedInitializer(Decl& vd)
 {
-    if (parseDeclFile) {
+    if (IsParsingDeclFile()) {
         return;
     }
     auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_const_expected_initializer, vd.end);
@@ -1203,7 +1203,7 @@ void ParserImpl::DiagExpectedTypeOrInitializerInPattern(const Decl& vd)
 
 void ParserImpl::DiagExpectedInitializerForToplevelVar(const Decl& vd)
 {
-    if (parseDeclFile) {
+    if (IsParsingDeclFile()) {
         return;
     }
     auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_var_must_be_initialized, vd.end);
@@ -1308,7 +1308,7 @@ void ParserImpl::DiagDuplicatedIntrinsicFunc(const Decl& decl, const Decl& prev)
 
 void ParserImpl::DiagMissingBody(const std::string& str, const std::string& name, const Position& pos)
 {
-    if (parseDeclFile) {
+    if (IsParsingDeclFile()) {
         return;
     }
     auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_missing_body, pos,
@@ -1327,9 +1327,10 @@ void ParserImpl::DiagDeclCannotInheritTheirSelf(const InheritableDecl& decl, con
 void ParserImpl::DiagUnsafeWillBeIgnored(const Modifier& mod)
 {
     auto builder =
-        ParseDiagnoseRefactor(DiagKindRefactor::parse_unsafe_will_be_ignored, mod, Triple::BackendToString(backend));
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_unsafe_will_be_ignored, mod,
+            Triple::BackendToString(GetBackend()));
 
-    builder.AddMainHintArguments(Triple::BackendToString(backend));
+    builder.AddMainHintArguments(Triple::BackendToString(GetBackend()));
 }
 
 void ParserImpl::DiagDuplicatedModifier(const Modifier& mod, const Modifier& pre)

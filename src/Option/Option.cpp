@@ -1669,6 +1669,7 @@ std::vector<std::string> GlobalOptions::ToSerialized() const
     result.emplace_back(BoolToSerializedString(enableCoverage));
     result.emplace_back(SanitizerTypeToSerializedString());
     result.emplace_back(BoolToSerializedString(experimentalMode));
+    result.emplace_back(BoolToSerializedString(enableLocalMode));
     result.emplace_back(OverflowStrategyToSerializedString());
     (void)result.emplace_back(BoolToSerializedString(interpreter));
     (void)result.emplace_back(VectorStrToSerializedString(interpreterSearchPaths, ":"));

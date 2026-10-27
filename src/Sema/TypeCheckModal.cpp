@@ -253,6 +253,7 @@ struct ForbiddenContextEntry {
 /// 16. Check type arguments of a type are data type (function type allowed); skip for function type and fun call
 /// 17. Check 'Copyable' is only used as a struct supertype or a generic upper bound
 /// 18. Check spawn does not refer to a non-copy local variable declared outside it
+/// 19. Check declaration-time initialization of a local var follows the assignment rule
 struct ModalTypeChecker {
     ModalTypeChecker(DiagnosticEngine& diag, TypeManager& m) : d(diag), type{m}
     {
@@ -274,12 +275,71 @@ struct ModalTypeChecker {
     /// 4. tuple, varray index of external local! is external
     /// 5. reference to param of `T` local! is external local!
     /// 6. reference to global/static var is external
-    /// 7. all other cases are internal
+    /// 7. if/match/try expr is external if any of its result branches (finally block excluded) is external
+    /// 8. array literal/tuple is external if any of its elements is external
+    /// 9. all other cases are internal
     bool IsExternalLocal(const ASTContext& ctx, const Expr& expr)
     {
         if (IsInExclaveExpr(ctx, expr)) {
             // rule 2
             return IsReturnedExpr(ctx, expr);
+        }
+        if (auto block = DynamicCast<Block>(&expr)) {
+            auto last = DynamicCast<Expr>(block->GetLastExprOrDecl());
+            return last && IsExternalLocal(ctx, *last);
+        }
+        if (auto ie = DynamicCast<IfExpr>(&expr)) {
+            // rule 8
+            return IsExternalLocal(ctx, *ie->thenBody) || (ie->elseBody && IsExternalLocal(ctx, *ie->elseBody));
+        }
+        if (auto me = DynamicCast<MatchExpr>(&expr)) {
+            // rule 8
+            for (auto& mc : me->matchCases) {
+                if (mc->exprOrDecls && IsExternalLocal(ctx, *mc->exprOrDecls)) {
+                    return true;
+                }
+            }
+            for (auto& mco : me->matchCaseOthers) {
+                if (mco->exprOrDecls && IsExternalLocal(ctx, *mco->exprOrDecls)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (auto te = DynamicCast<TryExpr>(&expr)) {
+            // rule 8, finally block does not contribute to the value of try expr
+            if (te->tryBlock && IsExternalLocal(ctx, *te->tryBlock)) {
+                return true;
+            }
+            for (auto& catchBlock : te->catchBlocks) {
+                if (catchBlock && IsExternalLocal(ctx, *catchBlock)) {
+                    return true;
+                }
+            }
+            for (auto& handler : te->handlers) {
+                if (handler.block && IsExternalLocal(ctx, *handler.block)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (auto al = DynamicCast<ArrayLit>(&expr)) {
+            // rule 9
+            for (auto& child : al->children) {
+                if (child && IsExternalLocal(ctx, *child)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (auto tl = DynamicCast<TupleLit>(&expr)) {
+            // rule 9
+            for (auto& child : tl->children) {
+                if (child && IsExternalLocal(ctx, *child)) {
+                    return true;
+                }
+            }
+            return false;
         }
         if (expr.desugarExpr) {
             return IsExternalLocal(ctx, *expr.desugarExpr);
@@ -290,6 +350,9 @@ struct ModalTypeChecker {
         if (auto ref = DynamicCast<RefExpr>(&expr)) {
             if (ref->isThis || ref->isSuper) {
                 return true;
+            }
+            if (ref->GetTarget()->TestAttr(Attribute::ENUM_CONSTRUCTOR)) { // enum creation, always local
+                return false;
             }
             if (auto param = DynamicCast<FuncParam>(ref->GetTarget())) {
                 auto body = TypeCheckUtil::GetCurFuncBody(ctx, expr.scopeName);
@@ -315,9 +378,14 @@ struct ModalTypeChecker {
             }
         }
         if (auto ma = DynamicCast<MemberAccess>(&expr)) {
-            if (auto maTarget = ma->GetTarget(); maTarget && IsGlobalOrStaticVar(*maTarget)) {
+            if (auto maTarget = ma->GetTarget()) {
                 // rule 5
-                return true;
+                if (IsGlobalOrStaticVar(*maTarget)) {
+                    return true;
+                }
+                if (maTarget->TestAttr(Attribute::ENUM_CONSTRUCTOR)) { // enum creation, always local
+                    return false;
+                }
             }
             // rule 3
             return IsExternalLocal(ctx, *ma->baseExpr);
@@ -353,11 +421,14 @@ private:
             }
             CheckMemberVarModality(*decl);
         }
-        if (auto var = DynamicCast<VarDecl>(node)) {
+        if (auto var = DynamicCast<VarDeclAbstract>(node)) {
             if (!var->GetTy().IsCorrect()) {
                 return VisitAction::SKIP_CHILDREN;
             }
             CheckGlobalVarModalType(*var);
+            if (!var->IsStaticOrGlobal()) {
+                CheckVarDeclInitializer(ctx, *var);
+            }
         }
         if (auto call = DynamicCast<CallExpr>(node)) {
             if (!call->GetTy().IsCorrect()) {
@@ -606,7 +677,8 @@ private:
         for (auto& e : r) {
             // per spec we should check e->ty is non local copy type, but we check retTy because there can be Some box,
             // and it is boxed after Sema.
-            if (IsInExclaveExpr(ctx, *e) || IsExternalLocal(ctx, *e) || retTy.IsDataType() || e->GetTy()->IsNothing()) {
+            if (IsInExclaveExpr(ctx, *e) || IsExternalLocal(ctx, *e) || retTy.IsDataType() || e->GetTy()->IsNothing() ||
+                !e->GetTy().IsCorrect()) {
                 continue;
             }
             if (type.IsCopyType(retTy.Ty()) && !Is<InterfaceTy>(retTy.Ty())) {
@@ -1266,7 +1338,7 @@ private:
     }
 
     /// Check global var cannot have local type
-    void CheckGlobalVarModalType(const VarDecl& var)
+    void CheckGlobalVarModalType(const VarDeclAbstract& var)
     {
         // PropDecl allows modal on its type; skip the local-type ban.
         if (var.astKind == ASTKind::PROP_DECL) {
@@ -1276,6 +1348,28 @@ private:
             if (var.GetTy().IsCorrect() && var.GetTy().IsLocalType()) {
                 DiagGlobalVarLocalModalType(var);
             }
+        }
+    }
+
+    /// Declaration-time initialization follows the same rule as assignment, but the initializer is
+    /// evaluated in place, so a value it creates is fresh and never external.
+    void CheckVarDeclInitializer(const ASTContext& ctx, const VarDeclAbstract& var)
+    {
+        // Member/global/static vars have their own rules for local types.
+        if (var.initializer == nullptr || var.IsMemberDecl() ||
+            var.TestAnyAttr(Attribute::GLOBAL, Attribute::STATIC)) {
+            return;
+        }
+        if (var.TyMode().local != Mode::FULL || type.IsCopyType(var.DataTy())) {
+            return;
+        }
+        auto& init = *var.initializer;
+        if (!init.GetTy().IsCorrect() || init.TyMode().local != Mode::FULL) {
+            return;
+        }
+        if (IsExternalLocal(ctx, init)) {
+            // A local var is always internal, so this is an external-to-internal initialization.
+            DiagBadAssignment(var, var.GetTy(), init.GetTy(), false, true);
         }
     }
 
@@ -1418,7 +1512,7 @@ private:
         }
     }
 
-    void DiagGlobalVarLocalModalType(const VarDecl& var)
+    void DiagGlobalVarLocalModalType(const VarDeclAbstract& var)
     {
         // Use written type's position if available, otherwise use variable location
         if (var.type) {
@@ -1444,11 +1538,11 @@ private:
     }
 
     /// Check field types when struct inherits Copyable (directly or via extend).
-    void CheckCopyType(StructDecl& decl)
+    void CheckCopyType(StructDecl& decl, const TypeSubst& subst = {})
     {
         for (auto member : decl.GetMemberDeclPtrs()) {
             if (auto var = DynamicCast<VarDecl>(member)) {
-                if (type.IsCopyType(var->DataTy())) {
+                if (type.IsCopyType(type.GetInstantiatedTy(var->DataTy(), subst))) {
                     continue;
                 }
                 DiagCopyStructBadField(decl, *var);
@@ -1469,7 +1563,8 @@ private:
         if (InheritsCopyable(*sd)) {
             return;
         }
-        CheckCopyType(*sd);
+        auto subst = TypeCheckUtil::GenerateTypeMapping(*sd, ed.extendedType->GetTy()->TyArgs());
+        CheckCopyType(*sd, subst);
     }
 
     void DiagCopyStructBadField(const StructDecl& decl, const VarDecl& var)
@@ -1503,6 +1598,10 @@ bool TypeChecker::TypeCheckerImpl::IsExternalLocal(const ASTContext& ctx, const 
 
 void TypeChecker::TypeCheckerImpl::CheckModalType(const ASTContext& ctx, Package& pkg)
 {
+    // All local mode checks are meaningless when the feature is disabled, skip for performance.
+    if (!ci->invocation.globalOptions.enableLocalMode) {
+        return;
+    }
     modalTypeChecker->Check(ctx, pkg);
 }
 

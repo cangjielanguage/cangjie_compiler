@@ -537,7 +537,7 @@ void ParserImpl::CheckInitCtorDeclBody(FuncDecl& ctor)
     auto& fb = ctor.funcBody;
     if (!fb || !fb->body) {
         DiagMissingBody("constructor", "", ctor.end);
-        if (!parseDeclFile) {
+        if (!IsParsingDeclFile()) {
             ctor.EnableAttr(Attribute::HAS_BROKEN);
         }
     }
@@ -961,7 +961,7 @@ OwnedPtr<FuncDecl> ParserImpl::ParseFinalizer(
     ParseFuncDeclAnnos(annos, *funcDecl);
     if (!funcDecl->funcBody || !funcDecl->funcBody->body) {
         DiagMissingBody("finalizer", "", funcDecl->end);
-        if (!parseDeclFile) {
+        if (!IsParsingDeclFile()) {
             funcDecl->EnableAttr(Attribute::HAS_BROKEN);
         }
     }
@@ -1744,7 +1744,7 @@ void ParserImpl::SetUnsafe(Ptr<Node> node, const std::set<Modifier>& modifiers)
     auto iter = std::find_if(modifiers.begin(), modifiers.end(), [](auto& mod) {
         return mod.modifier == TokenKind::UNSAFE;
     });
-    if (!IsUnsafeBackend(backend) && iter != modifiers.end()) {
+    if (!IsUnsafeBackend(GetBackend()) && iter != modifiers.end()) {
         DiagUnsafeWillBeIgnored(*iter);
         return;
     }
@@ -2070,7 +2070,7 @@ void ParserImpl::CheckFuncBody(ScopeKind scopeKind, FuncDecl& decl)
         Check here if a function could be abstract,
         and when the outerDecl will be known - clarify it for mirrors / common declarations
      */
-    if (fb && !fb->body && !parseDeclFile && scopeKind != ScopeKind::UNKNOWN_SCOPE
+    if (fb && !fb->body && !IsParsingDeclFile() && scopeKind != ScopeKind::UNKNOWN_SCOPE
         && !decl.TestAnyAttr(Attribute::FOREIGN, Attribute::INTRINSIC, Attribute::OBJ_C_MIRROR)) {
         if (CanBeAbstract(decl, scopeKind)) {
             decl.EnableAttr(Attribute::ABSTRACT);

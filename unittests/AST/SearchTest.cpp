@@ -71,6 +71,7 @@ protected:
 #else
         invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::AARCH64;
 #endif
+        invocation.globalOptions.enableLocalMode = true;
 #ifdef _WIN32
         invocation.globalOptions.target.os = Cangjie::Triple::OSType::WINDOWS;
         invocation.globalOptions.executablePath = projectPath + "\\output\\bin\\";

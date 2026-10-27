@@ -2867,7 +2867,8 @@ ModalTy TypeManager::ObtainsAliasType(Ptr<const Node> node)
         case ASTKind::FUNC_PARAM:
         case ASTKind::VAR_WITH_PATTERN_DECL: {
             auto vda = StaticCast<VarDeclAbstract>(node);
-            ret = vda->type ? ObtainsAliasType(vda->type) : node->GetTy();
+            // Decl modal is authoritative; the type node may lose it (e.g. parenthesized func type).
+            ret = vda->type ? ObtainsAliasType(vda->type).With(node->TyMode()) : node->GetTy();
             break;
         }
         case ASTKind::FUNC_DECL: {

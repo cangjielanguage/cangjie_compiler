@@ -380,6 +380,8 @@ WARNING(parse_diag_warning, PARSER, "%s", "%s")
 // modal type
 ERROR(parse_unexpected_modal_type, "unexpected modal type here")
 ERROR(parse_unexpected_this_param, "unexpected this param on non member function or static function")
+ERROR(parse_local_mode_disabled, "local mode is disabled",
+    "compile with the '--experimental --enable-local-mode' option to enable it")
 
 // Don't add any diag after this kind.
 ERROR(parse_diag_end, "")

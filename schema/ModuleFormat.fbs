@@ -307,7 +307,6 @@ table Decl {
 
   // record dependencies result of common part for CJMP
   dependencies:[FullId];
-  // mode of type, only local func may has a non-default mode
   tyMode:Mode;
 }
 

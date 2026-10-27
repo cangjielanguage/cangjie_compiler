@@ -357,6 +357,9 @@ ASTModalInfo ParserImpl::ParseModalInfo()
     if (!ParseModeSpecifier(modalInfo)) {
         return {};
     }
+    if (!IsLocalModeEnabled()) {
+        DiagLocalModeDisabled(MakeRange(modalInfo.AtBegin(), modalInfo.End()));
+    }
     return modalInfo;
 }
 

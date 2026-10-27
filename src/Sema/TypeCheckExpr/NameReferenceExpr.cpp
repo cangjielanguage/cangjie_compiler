@@ -12,7 +12,6 @@
 #include "EnumSugarChecker.h"
 #include "EnumSugarTargetsFinder.h"
 #include "ExtraScopes.h"
-#include "LocalTypeArgumentSynthesis.h"
 #include "TypeCheckUtil.h"
 
 #include "cangjie/AST/Create.h"
@@ -21,7 +20,6 @@
 #include "cangjie/Basic/Match.h"
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Macro/TestEntryConstructor.h"
-#include "cangjie/Modules/ModulesUtils.h"
 
 using namespace Cangjie;
 using namespace Sema;
@@ -745,6 +743,15 @@ Ptr<PropDecl> TypeChecker::TypeCheckerImpl::ResolvePropOverload(
     }
 
     if (callable.empty()) {
+        if (!ci->invocation.globalOptions.enableLocalMode) {
+            auto it = std::find_if(props.begin(), props.end(),
+                [](const PropDecl* pd) { return IsDisabledLocalAPI(*pd); });
+            if (it != props.end()) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_local_api_disabled, re,
+                    std::string(ToSignatureString(**it, (*it)->DataTy(), GetThisParamModal(**it))));
+                return nullptr;
+            }
+        }
         auto db = diag.Diagnose(re, DiagKind::sema_no_match_prop_accessor_for_call, props.front()->identifier.Val());
         for (auto pd : props) {
             db.AddNote(*pd, DiagKind::sema_found_candidate_decl);

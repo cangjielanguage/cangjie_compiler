@@ -151,6 +151,7 @@ private:
     const char* pResetCurrent{nullptr};
     int32_t currentChar{-1}; // currently processing character
     bool ehEnabled{false};   // EH keywords enabled flag (replaces dynamic tokenMap modification)
+    bool localModeEnabled{false}; // local mode enabled flag
     unsigned lineResetOffsetsFromBase{0};
     TokenKind tokenKind{TokenKind::ILLEGAL};
     Position pos;

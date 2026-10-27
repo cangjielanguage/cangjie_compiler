@@ -62,11 +62,11 @@ const std::vector<TokenKind>& GetTypeFirst();
 class ParserImpl final {
 public:
     ParserImpl(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
-        bool attachComment, bool parsingDeclFiles);
+        bool attachComment, const GlobalOptions* opts);
     ParserImpl(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos,
-        bool attachComment, bool parsingDeclFiles);
+        bool attachComment, const GlobalOptions* opts);
     ParserImpl(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm, bool attachComment,
-        bool parsingDeclFiles);
+        const GlobalOptions* opts);
     ~ParserImpl();
 
     size_t GetLineNum() const;
@@ -89,8 +89,6 @@ public:
     void SetPrimaryDecl(const std::string& decl, bool isRawId = false);
     Parser& SetForImport(const bool isForImport);
     Parser& SetCurFile(Ptr<AST::File> curFile);
-
-    void SetCompileOptions(const GlobalOptions& opts);
 
     DiagnosticEngine& GetDiagnosticEngine() const;
 
@@ -225,13 +223,38 @@ private:
     std::string curPrimaryDeclIdent;
     bool curPrimaryDeclIdentIsRaw{false};
     std::vector<TokenKind> bracketsStack; /* A stack to help match brackets. */
-    bool scanDepPkg{false};
     bool enableAttachComment{false};
-    bool parseDeclFile{false};
+    // compile options owned by the caller(CompilerInstance or MacroCall), all parser behaviors are read from it
+    const GlobalOptions* opts{nullptr};
 
-    bool enableEH{false};
-    Triple::BackendType backend{Triple::BackendType::CJNATIVE};
-    bool calculateLineNum{false};
+    // apply the options that affect parsing and lexing
+    void ApplyCompileOptions();
+
+    bool IsParsingDeclFile() const
+    {
+        return opts && opts->compileCjd;
+    }
+    bool IsEHEnabled() const
+    {
+        return opts && opts->enableEH;
+    }
+    // without compile options, keep local mode enabled so that more cases can be parsed
+    bool IsLocalModeEnabled() const
+    {
+        return !opts || opts->enableLocalMode;
+    }
+    bool IsScanDepPkg() const
+    {
+        return opts && opts->scanDepPkg;
+    }
+    bool NeedCalculateLineNum() const
+    {
+        return opts && (opts->enableTimer || opts->enableMemoryCollect);
+    }
+    Triple::BackendType GetBackend() const
+    {
+        return Triple::BackendType::CJNATIVE;
+    }
     // we store line number info from all tokens
     // pair<line num of the begin, line num of the end>
     std::list<std::pair<unsigned, unsigned>> allTokensInOneFile;
@@ -838,6 +861,7 @@ private:
     void DiagExpectedTypeNameAfterAs(const Token& tok);
     void DiagExpectedTypeName();
     DiagnosticBuilder DiagUnexpectedModal(const Range& range);
+    DiagnosticBuilder DiagLocalModeDisabled(const Range& range);
     void DiagInvalidLeftHandExpr(const AST::Expr& expr, const Token& tok);
     void DiagNoneAssociativeOp(const Token& preT, const Token& tok);
     void DiagInvalidInheritType(const AST::Type& type);

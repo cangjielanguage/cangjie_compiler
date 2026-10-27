@@ -52,20 +52,20 @@ const std::unordered_map<AST::AnnotationKind, std::string> ANNO_KIND_TO_NAME = [
 }
 
 Parser::Parser(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
-    bool attachComment, bool parseDeclFile)
-    : impl{new ParserImpl{fileID, input, diag, sm, attachComment, parseDeclFile}}
+    bool attachComment, const GlobalOptions* opts)
+    : impl{new ParserImpl{fileID, input, diag, sm, attachComment, opts}}
 {
 }
 
 Parser::Parser(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos,
-    bool attachComment, bool parseDeclFile)
-    : impl{new ParserImpl{input, diag, sm, pos, attachComment, parseDeclFile}}
+    bool attachComment, const GlobalOptions* opts)
+    : impl{new ParserImpl{input, diag, sm, pos, attachComment, opts}}
 {
 }
 
 Parser::Parser(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm, bool attachComment,
-    bool parseDeclFile)
-    : impl{new ParserImpl{inputTokens, diag, sm, attachComment, parseDeclFile}}
+    const GlobalOptions* opts)
+    : impl{new ParserImpl{inputTokens, diag, sm, attachComment, opts}}
 {
 }
 
@@ -199,7 +199,7 @@ OwnedPtr<File> ParserImpl::ParseTopLevel()
     }
     // Parse importSpec in TopLevel.
     ParseImportSpecInTop(ret->imports, annos);
-    if (!scanDepPkg) {
+    if (!IsScanDepPkg()) {
         ParseTopLevelDecls(*ret, annos);
     }
     ret->end = lookahead.End();
@@ -511,7 +511,7 @@ void ParserImpl::CheckClassLikePropAbstractness(AST::PropDecl& prop)
 
 void ParserImpl::DiagMissingPropertyBody(AST::PropDecl& prop)
 {
-    if (parseDeclFile) {
+    if (IsParsingDeclFile()) {
         return;
     }
     auto builder =

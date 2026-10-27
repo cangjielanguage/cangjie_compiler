@@ -66,16 +66,16 @@ template <typename T> using PtrVector = std::vector<OwnedPtr<T>>;
 class Parser {
 public:
     /// Create Parser with \ref fileID and string \ref input.
-    /// \param parseDeclFile true if this parser is used to parse .cj.d file. When parsing these files, do not report
-    /// an error if the func is missing its body.
+    /// \param opts compile options the parser reads from. The pointer must outlive the parser, and nullptr means all
+    /// options take their default values except that local mode is enabled.
     Parser(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
-        bool attachComment = false, bool parseDeclFile = false);
+        bool attachComment = false, const GlobalOptions* opts = nullptr);
     /// Create Parser with string \ref input and the position of the first token. Only used in macro reparse.
     Parser(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos = {0, 1, 1},
-        bool attachComment = false, bool parseDeclFile = false);
+        bool attachComment = false, const GlobalOptions* opts = nullptr);
     /// Create Parser with tokens \ref inputTokens returned by macro func. Only used in macro reparse.
     Parser(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm, bool attachComment = false,
-        bool parseDeclFile = false);
+        const GlobalOptions* opts = nullptr);
     ~Parser();
 
     size_t GetLineNum() const;
@@ -103,15 +103,10 @@ public:
     std::size_t GetProcessedTokens() const;
     std::string GetPrimaryDeclIdentRawValue() const;
 
-    Parser& SetEHEnabled(bool enabled);
-    bool IsEHEnabled() const;
-
     Parser& SetModuleName(const std::string& name);
     Parser& SetPrimaryDecl(const std::string& decl);
     Parser& SetForImport(bool isForImport);
     Parser& SetCurFile(Ptr<AST::File> curFile);
-
-    void SetCompileOptions(const GlobalOptions& opts);
 
     DiagnosticEngine& GetDiagnosticEngine() const;
     TokenVecMap GetCommentsMap() const;

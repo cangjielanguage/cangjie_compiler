@@ -23,6 +23,19 @@ using namespace Cangjie;
 using namespace AST;
 using namespace Meta;
 
+namespace {
+// options used to parse cjd-like source, where declarations without bodies are allowed
+const GlobalOptions& GetDeclFileOptions()
+{
+    static const GlobalOptions declFileOptions = [] {
+        GlobalOptions options;
+        options.compileCjd = true;
+        return options;
+    }();
+    return declFileOptions;
+}
+} // namespace
+
 class ParserTest : public testing::Test {
 protected:
     void SetUp() override
@@ -3156,7 +3169,7 @@ public class HilogChannel {
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     EXPECT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<MacroExpandDecl>(*file->decls[0]);
@@ -3221,7 +3234,7 @@ class C {})";
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     EXPECT_EQ(diag.GetErrorCount(), 0);
     auto& c = *StaticCast<ClassDecl>(*file->decls[0]).annotations[0];
@@ -3243,7 +3256,7 @@ TEST(PositionTest, QuoteEscape)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     EXPECT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<VarDecl>(*file->decls[0]);
@@ -3262,7 +3275,7 @@ TEST(PositionTest, SubscriptExpr)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     EXPECT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<MainDecl>(*file->decls[0]);
@@ -3277,7 +3290,7 @@ TEST(PositionTest, GenericConstraintBegin)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     EXPECT_EQ(diag.GetErrorCount(), 0);
     auto& foo = StaticCast<FuncDecl>(*file->decls[0]);
@@ -3295,7 +3308,7 @@ TEST(ParserTest2, Zerox1foo)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser{code, diag, sm, Position{0, 1, 1}, true, true};
+    Parser parser{code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions()};
     ASSERT_EQ(diag.GetErrorCount(), 0);
 }
 
@@ -3306,7 +3319,7 @@ TEST(ParserTest2, QuoteTokens1_Hash)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     ASSERT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<VarDecl>(*file->decls[0]);
@@ -3324,7 +3337,7 @@ TEST(ParserTest2, QuoteTokens2_HashAndString)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     ASSERT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<VarDecl>(*file->decls[0]);
@@ -3344,7 +3357,7 @@ TEST(ParserTest2, QuoteTokens3_RawStringAnd2Hash)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     ASSERT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<VarDecl>(*file->decls[0]);
@@ -3364,7 +3377,7 @@ TEST(ParserTest2, QuoteTokens4_HashAndMultilineRawString)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     ASSERT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<VarDecl>(*file->decls[0]);
@@ -3382,7 +3395,7 @@ TEST(ParserTest2, QuoteTokens5_MultilineRawString)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     ASSERT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<VarDecl>(*file->decls[0]);
@@ -3399,7 +3412,7 @@ TEST(ParserTest2, QuoteTokens6_MultilineRawStringAndHash)
     SourceManager sm;
     DiagnosticEngine diag;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     ASSERT_EQ(diag.GetErrorCount(), 0);
     auto& d = StaticCast<VarDecl>(*file->decls[0]);
@@ -3418,7 +3431,7 @@ TEST(ParserTest2, UnicodeOver255Test)
     DiagnosticEngine diag{};
     SourceManager sm;
     diag.SetSourceManager(&sm);
-    Parser parser(code, diag, sm, Position{0, 1, 1}, true, true);
+    Parser parser(code, diag, sm, Position{0, 1, 1}, true, &GetDeclFileOptions());
     auto file = parser.ParseTopLevel();
     ASSERT_GT(diag.GetErrorCount(), 0); // assert no core dumped here
 }
