@@ -900,7 +900,8 @@ void StructInheritanceChecker::CheckIncompleteOverrideOrImplOfExtend(
                                                         : checkingDecls[0]->GetTy().String());
             auto builder =
                 diag.Diagnose(*checkingDecls[0], DiagKind::sema_interface_member_must_be_implemented_in_struct,
-                    funcOrProp, child.decl->identifier.Val(), classNameOverride);
+                    funcOrProp, ToSignatureString(*child.decl, child.ty, child.thisMode),
+                    classNameOverride);
             builder.AddNote(MakeRange(child.decl->identifier),
                 "member " + memberStr + " may not be visible to '" + classNameOverride + "'");
         }
@@ -1027,8 +1028,8 @@ void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMa
             unImplementedDecl.emplace(member.decl, &member);
             unImplementedMembers.emplace_back(&member);
         } else if (member.shouldBeImplemented) {
-            diag.Diagnose(
-                structDecl, DiagKind::sema_interface_member_must_be_implemented, type, identifier, structName);
+            diag.Diagnose(structDecl, DiagKind::sema_interface_member_must_be_implemented, type,
+                ToSignatureString(*member.decl, member.ty, member.thisMode), structName);
         } else if (member.decl->outerDecl != &structDecl) {
             if (isStaticAbsMember && isAbstractClass) {
                 auto structNameRange = MakeRange(structDecl.identifier);

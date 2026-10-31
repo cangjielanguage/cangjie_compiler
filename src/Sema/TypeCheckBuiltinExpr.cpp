@@ -301,7 +301,6 @@ ModalTy TypeChecker::TypeCheckerImpl::GetArrayTypeByInterface(ModalTy interfaceT
     if (!arrayStruct) {
         return invalid;
     }
-    // Infer the array under the same modal as the expected interface.
     auto arrTys = promotion.Downgrade(arrayStruct->GetTy().With(interfaceTy.Mode()), interfaceTy);
     if (arrTys.empty()) {
         return invalid;

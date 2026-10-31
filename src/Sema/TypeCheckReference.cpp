@@ -12,7 +12,6 @@
 
 #include "TypeCheckerImpl.h"
 
-#include "Desugar/DesugarInTypeCheck.h"
 #include "Diags.h"
 #include "ScopeManager.h"
 #include "TypeCheckUtil.h"
@@ -872,6 +871,12 @@ AST::VisitAction TypeChecker::TypeCheckerImpl::CheckLegalityOfReferenceForNameRe
 {
     if (!nameRef->instTys.empty()) {
         CheckInstTypeCompleteness(ctx, *nameRef);
+    }
+    if (!ci->invocation.globalOptions.enableLocalMode && nameRef->callOrPattern == nullptr) {
+        if (auto target = nameRef->GetTarget(); target && IsDisabledLocalAPI(*target)) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_local_api_disabled, *nameRef,
+                std::string(ToSignatureString(*target, target->DataTy(), GetThisParamModal(*target))));
+        }
     }
     if (auto re = DynamicCast<RefExpr*>(nameRef)) {
         if (re->isThis) {

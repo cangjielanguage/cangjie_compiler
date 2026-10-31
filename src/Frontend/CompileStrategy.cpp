@@ -236,7 +236,6 @@ public:
 #endif
 #endif
                     auto parser = CreateParser(curFile);
-                    parser->SetCompileOptions(s.ci->invocation.globalOptions);
                     auto file = parser->ParseTopLevel();
 #ifdef SIGNAL_TEST
                     // The interrupt signal triggers the function. In normal cases, this function does not take effect.
@@ -264,7 +263,6 @@ public:
             fileInfoQueue.pop();
 
             auto parser = CreateParser(curFile);
-            parser->SetCompileOptions(s.ci->invocation.globalOptions);
             auto file = parser->ParseTopLevel();
 #ifdef SIGNAL_TEST
             // The interrupt signal triggers the function. In normal cases, this function does not take effect.
@@ -348,7 +346,7 @@ public:
     OwnedPtr<Parser> CreateParser(const std::tuple<std::string, unsigned>& curFile) const
     {
         return MakeOwned<Parser>(std::get<1>(curFile), std::get<0>(curFile), s.ci->diag, s.ci->GetSourceManager(),
-            s.ci->invocation.globalOptions.enableAddCommentToAst, s.ci->invocation.globalOptions.compileCjd);
+            s.ci->invocation.globalOptions.enableAddCommentToAst, &s.ci->invocation.globalOptions);
     }
 
     void DeleteFileInPackage(Package& pkg, const std::string& filePath)
@@ -553,8 +551,11 @@ void ParseAndMergeCjd(Ptr<CompilerInstance> ci, std::pair<const std::string, std
             !ci->invocation.globalOptions.commonPartCjos.empty();
         fileId = sm.AddSource(cjoPath, sourceCode.value(), cjdInfo.first, isCjmpFile);
     }
+    // the source here is always a .cjd file, so force compileCjd to tolerate declarations without bodies
+    auto cjdOptions = ci->invocation.globalOptions;
+    cjdOptions.compileCjd = true;
     auto fileAst =
-        Parser(fileId, sourceCode.value(), ci->diag, ci->diag.GetSourceManager(), false, true).ParseTopLevel();
+        Parser(fileId, sourceCode.value(), ci->diag, ci->diag.GetSourceManager(), false, &cjdOptions).ParseTopLevel();
     auto pkg = MakeOwned<Package>(cjdInfo.first);
     fileAst->curPackage = pkg.get();
     pkg->files.emplace_back(std::move(fileAst));

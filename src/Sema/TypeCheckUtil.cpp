@@ -572,6 +572,45 @@ std::string DeclKindToString(const Decl& decl)
     return it->second;
 }
 
+namespace {
+std::string TypeToString(const AST::Type& type)
+{
+    return type.ToString() + static_cast<ModalInfo>(type.modal).AsTypeSuffixString();
+}
+} // namespace
+
+std::string ToSignatureString(const Decl& decl, DataTy ty, ModalInfo thisMode)
+{
+    auto funcDecl = DynamicCast<FuncDecl>(&decl);
+    if (!funcDecl || !funcDecl->funcBody || funcDecl->funcBody->paramLists.empty()) {
+        // A property: its modal is part of the declared type.
+        auto propDecl = DynamicCast<PropDecl>(&decl);
+        Ptr<AST::Type> propType = propDecl && propDecl->type ? propDecl->type.get() : nullptr;
+        if (!propType && propDecl && !propDecl->getters.empty() && propDecl->getters[0]->funcBody) {
+            propType = propDecl->getters[0]->funcBody->retType.get();
+        }
+        if (propType) {
+            return decl.identifier.Val() + ": " + TypeToString(*propType);
+        }
+        return decl.identifier.Val() + ": " + ty->String();
+    }
+    std::string params;
+    auto thisSuffix = thisMode.AsTypeSuffixString();
+    if (!thisSuffix.empty()) {
+        params = "this" + thisSuffix;
+    }
+    for (auto& param : funcDecl->funcBody->paramLists[0]->params) {
+        if (!params.empty()) {
+            params += ", ";
+        }
+        params += param->identifier.Val() + (param->isNamedParam ? "!" : "") + ": ";
+        params += param->type ? TypeToString(*param->type) : param->GetTy()->String();
+    }
+    auto& retType = funcDecl->funcBody->retType;
+    auto ret = retType ? TypeToString(*retType) : "Unit";
+    return funcDecl->identifier.Val() + "(" + params + "): " + ret;
+}
+
 std::set<Ptr<ExtendDecl>> CollectAllRelatedExtends(TypeManager& tyMgr, InheritableDecl& boxedDecl)
 {
     if (boxedDecl.astKind != ASTKind::CLASS_DECL) {
@@ -680,6 +719,31 @@ ModalInfo GetThisParamModal(const Decl& decl)
         return pd->TyMode();
     }
     return {};
+}
+
+bool IsDisabledLocalAPI(const Decl& decl)
+{
+    // Only a property of type 'local!' is unusable; 'local?' is allowed.
+    if (auto pd = DynamicCast<PropDecl>(&decl)) {
+        return pd->TyMode().local == Mode::FULL;
+    }
+    auto fd = DynamicCast<FuncDecl>(&decl);
+    if (fd == nullptr || fd->funcBody == nullptr || fd->funcBody->paramLists.empty()) {
+        return false;
+    }
+    if (GetThisParamModal(*fd).local == Mode::FULL) {
+        return true;
+    }
+    auto ft = DynamicCast<FuncTy>(fd->DataTy());
+    if (ft == nullptr) {
+        return false;
+    }
+    // Since 'this' is not local here, 'retTy' only carries the declared return modal.
+    if (ft->retTy.IsLocalType()) {
+        return true;
+    }
+    return std::any_of(ft->paramTys.begin(), ft->paramTys.end(),
+        [](const ModalTy& paramTy) { return paramTy.IsLocalType(); });
 }
 
 ModalInfo GetCurThisModal(const ASTContext& ctx, const std::string& scopeName)

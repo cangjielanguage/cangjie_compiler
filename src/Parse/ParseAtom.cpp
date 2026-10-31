@@ -333,8 +333,11 @@ OwnedPtr<Expr> ParserImpl::ParseInterpolationExpr(const std::string& value, cons
     auto hasSkipNewline = newlineSkipped;
     std::unique_ptr<Lexer> curlexer = std::move(lexer);
     lexer = std::make_unique<Lexer>(wrapInBracket, diag, diag.GetSourceManager(), basePos);
-    if (enableEH) {
+    if (IsEHEnabled()) {
         lexer->SetEHEnabled(true);
+    }
+    if (IsLocalModeEnabled()) {
+        lexer->SetLocalModeEnabled(true);
     }
     ret->block = ParseBlock(ScopeKind::FUNC_BODY);
     if (!ret->block || ret->block->body.empty() || Peek().kind != TokenKind::END) {
@@ -1378,6 +1381,11 @@ OwnedPtr<Expr> ParserImpl::ParseWildcardExpr()
 DiagnosticBuilder ParserImpl::DiagUnexpectedModal(const Range& range)
 {
     return ParseDiagnoseRefactor(DiagKindRefactor::parse_unexpected_modal_type, range);
+}
+
+DiagnosticBuilder ParserImpl::DiagLocalModeDisabled(const Range& range)
+{
+    return ParseDiagnoseRefactor(DiagKindRefactor::parse_local_mode_disabled, range);
 }
 
 OwnedPtr<RefExpr> ParserImpl::ParseRefExpr(ExprKind ek)

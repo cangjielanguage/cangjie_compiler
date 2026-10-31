@@ -321,6 +321,9 @@ TokenKind LexerImpl::LookupKeyword(const std::string& literal)
             kind == TokenKind::HANDLE)) {
         return TokenKind::IDENTIFIER;
     }
+    if (!localModeEnabled && (kind == TokenKind::EXCLAVE || kind == TokenKind::DEMODE)) {
+        return TokenKind::IDENTIFIER;
+    }
     return kind;
 }
 

@@ -377,7 +377,11 @@ std::string FuncType::ToString() const
     }
     ss << ")";
     ss << " -> " << GetReturnType()->ToString();
-    return FormatWithModal(isCFunc ? "CFunc<" + ss.str() + ">" : ss.str());
+    auto str = isCFunc ? "CFunc<" + ss.str() + ">" : ss.str();
+    if (!isCFunc && IsModal()) {
+        str = "(" + str + ")";
+    }
+    return FormatWithModal(str);
 }
 
 std::string FuncType::ToSrcCodeString() const
@@ -396,7 +400,11 @@ std::string FuncType::ToSrcCodeString() const
     }
     ss << ")";
     ss << " -> " << GetReturnType()->ToSrcCodeString();
-    return FormatWithModal(isCFunc ? "CFunc<" + ss.str() + ">" : ss.str());
+    auto str = isCFunc ? "CFunc<" + ss.str() + ">" : ss.str();
+    if (!isCFunc && IsModal()) {
+        str = "(" + str + ")";
+    }
+    return FormatWithModal(str);
 }
 
 size_t FuncType::Hash() const

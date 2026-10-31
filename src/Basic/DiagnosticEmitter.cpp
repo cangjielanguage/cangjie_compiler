@@ -93,12 +93,10 @@ void DiagnosticEmitterImpl::CollectInformation(std::vector<CollectedInfo>& vec, 
 
 void DiagnosticEmitterImpl::SortAndCheck(std::vector<CollectedInfo>& errorInfo) const
 {
-    std::sort(errorInfo.begin(), errorInfo.end(), [this](auto& a, auto& b) -> bool {
-        if (enableRangeCheckICE) {
-            CJC_ASSERT(a.range.begin != b.range.begin);
-        }
-        return a.range.begin < b.range.begin;
-    });
+    // Hints of one diagnostic may share the same begin position, e.g. two multi-line hints
+    // ending at the same place, so duplicate positions are allowed here.
+    std::sort(errorInfo.begin(), errorInfo.end(),
+        [](const auto& a, const auto& b) -> bool { return a.range.begin < b.range.begin; });
 }
 
 std::string DiagnosticEmitterImpl::GetSourceCode(std::vector<CollectedInfo>& errorInfo) const

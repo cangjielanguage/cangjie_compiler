@@ -98,34 +98,9 @@ Parser& Parser::EnableCustomAnno()
     return *this;
 }
 
-Parser& Parser::SetEHEnabled(bool enabled)
-{
-    impl->enableEH = enabled;
-    impl->lexer->SetEHEnabled(enabled);
-    return *this;
-}
-
-bool Parser::IsEHEnabled() const
-{
-    return impl->enableEH;
-}
-
 TokenVecMap Parser::GetCommentsMap() const
 {
     return impl->commentsMap;
-}
-
-void Parser::SetCompileOptions(const GlobalOptions& opts)
-{
-    impl->backend = opts.backend;
-    impl->scanDepPkg = opts.scanDepPkg;
-    impl->calculateLineNum = opts.enableTimer || opts.enableMemoryCollect;
-    // set compile options for cjmp implementation
-    impl->mpImpl->SetCompileOptions(opts);
-    // Effect handlers break backwards compatibility by introducing new
-    // keywords, so we disable them from the parser unless the user
-    // explicitly asks to compile with effect handler support
-    SetEHEnabled(opts.enableEH);
 }
 
 bool Parser::Skip(TokenKind kind)
@@ -199,35 +174,53 @@ Parser::~Parser()
 
 // implementation of ParserImpl
 ParserImpl::ParserImpl(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
-    bool attachComment, bool parsingDeclFiles)
+    bool attachComment, const GlobalOptions* globalOptions)
     : diag(diag), sourceManager(sm),
       lexer{std::make_unique<Lexer>(fileID, input, diag, sm, attachComment)},
-      enableAttachComment(attachComment), parseDeclFile{parsingDeclFiles}, mpImpl{new MPParserImpl(*this)},
+      enableAttachComment(attachComment), opts{globalOptions}, mpImpl{new MPParserImpl(*this)},
       ffiParser{new FFIParserImpl(*this)}
 {
+    ApplyCompileOptions();
     // do not call EnterXXXMod here because that would then call enter that mod in lexer, but lexer would initialize
     // itself
     ctx.push_back(ParserContext::NORMAL);
 }
 
 ParserImpl::ParserImpl(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos,
-    bool attachComment, bool parsingDeclFiles)
+    bool attachComment, const GlobalOptions* globalOptions)
     : diag(diag), sourceManager(sm),
       lexer{std::make_unique<Lexer>(input, diag, sm, pos, attachComment)},
-      enableAttachComment{attachComment}, parseDeclFile{parsingDeclFiles}, mpImpl{new MPParserImpl(*this)},
+      enableAttachComment{attachComment}, opts{globalOptions}, mpImpl{new MPParserImpl(*this)},
       ffiParser{new FFIParserImpl(*this)}
 {
+    ApplyCompileOptions();
     ctx.push_back(ParserContext::NORMAL);
 }
 
 ParserImpl::ParserImpl(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm,
-    bool attachComment, bool parsingDeclFiles)
+    bool attachComment, const GlobalOptions* globalOptions)
     : diag(diag), sourceManager(sm),
       lexer{std::make_unique<Lexer>(inputTokens, diag, sm, attachComment)},
-      enableAttachComment{attachComment}, parseDeclFile{parsingDeclFiles}, mpImpl{new MPParserImpl(*this)},
+      enableAttachComment{attachComment}, opts{globalOptions}, mpImpl{new MPParserImpl(*this)},
       ffiParser{new FFIParserImpl(*this)}
 {
+    ApplyCompileOptions();
     ctx.push_back(ParserContext::NORMAL);
+}
+
+void ParserImpl::ApplyCompileOptions()
+{
+    // without compile options, keep local mode enabled so that more cases can be parsed
+    lexer->SetLocalModeEnabled(IsLocalModeEnabled());
+    if (!opts) {
+        return;
+    }
+    // Effect handlers break backwards compatibility by introducing new
+    // keywords, so we disable them from the parser unless the user
+    // explicitly asks to compile with effect handler support
+    lexer->SetEHEnabled(opts->enableEH);
+    // set compile options for cjmp implementation
+    mpImpl->SetCompileOptions(*opts);
 }
 
 ParserImpl::~ParserImpl()

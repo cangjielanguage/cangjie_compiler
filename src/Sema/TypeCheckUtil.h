@@ -198,6 +198,8 @@ std::pair<bool, Ptr<AST::Decl>> GetRealMemberDecl(AST::Decl& decl);
  */
 Ptr<AST::Decl> GetUsedMemberDecl(AST::Decl& decl, bool isGetter);
 std::string DeclKindToString(const AST::Decl& decl);
+/// Signature form of a member, e.g. "hashCode(this @local?): Int64"; a property yields "x: Int64".
+std::string ToSignatureString(const AST::Decl& decl, AST::DataTy ty, ModalInfo thisMode);
 std::pair<Ptr<AST::FuncDecl>, Ptr<AST::FuncDecl>> GetUsableGetterSetterForProperty(AST::PropDecl& pd);
 
 /// Get usable accessor for prop. when such accessor is not found in this prop, try to find in parent classes if any.
@@ -254,6 +256,11 @@ Ptr<AST::Annotation> FindFirstAnnotation(const AST::Decl& decl, AST::AnnotationK
 
 ModalInfo GetThisParamModal(const AST::FuncDecl& fd);
 ModalInfo GetThisParamModal(const AST::Decl& decl);
+
+/** Whether the decl must not be used when local mode is disabled: a function is disabled by a local modal on 'this',
+ * a param or the return type; a property only by a 'local!' type. Copy type is NOT excluded here.
+ */
+bool IsDisabledLocalAPI(const AST::Decl& decl);
 
 bool HasDefaultImpl(const AST::Decl& decl);
 

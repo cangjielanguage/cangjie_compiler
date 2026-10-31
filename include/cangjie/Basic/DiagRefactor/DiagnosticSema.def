@@ -429,7 +429,7 @@ ERROR(sema_member_var_initalizer_in_mixed_init, "member variable '%s' of non cop
     "%s with initializers that have different this locality")
 ERROR(sema_init_modal_must_be_in_exclave, "whole body of %s constructor must be in exclave")
 ERROR(sema_finalizer_this_mode_mismatch,
-    "finalizer this mode '%s' must be a supertype of all initializer this mode '%s'")
+    "finalizer this mode '%s' must be a supertype of the least upperbound of all initializer this mode '%s'")
 ERROR(sema_mode_on_non_constructor_call, "cannot specify mode for non constructor call")
 ERROR(sema_prop_redefinition, "overloaded instance property must be of the same data type")
 ERROR(sema_prop_method_target_type_mismatch, "expect the same data type '%s' as the property, got '%s'")
@@ -437,6 +437,8 @@ ERROR(sema_invalid_local_func_type, "cannot define a %s with @local! function ty
 ERROR(sema_static_prop_overload, "static property cannot be overloaded")
 ERROR(sema_cannot_access_local_var_outside_exclave,
     "cannot access local variable %s of '%s' type defined outside %s")
+ERROR(sema_local_api_disabled, "cannot use local API '%s' when local mode is disabled",
+    "compile with '--experimental --enable-local-mode' to enable it")
 
 WARNING(sema_unused_import, UNUSED, "unused import '%s'", "unused import")
 

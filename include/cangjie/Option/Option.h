@@ -593,6 +593,8 @@ public:
 
     bool enableEH = false; /** Whether support for effect handlers is enabled */
 
+    bool enableLocalMode = false; /** Whether support for local mode is enabled */
+
     MockMode mock = MockMode::DEFAULT; /**< Whether enable mocking. */
 
     DiagFormat diagFormat = DiagFormat::DEFAULT; /** Whether output diagnostic with color*/
