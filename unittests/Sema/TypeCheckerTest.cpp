@@ -220,6 +220,171 @@ main() {
     EXPECT_EQ(diag.GetErrorCount(), 0);
 }
 
+TEST_F(TypeCheckerTest, NumericTypeAliasCanBeUsedForTypeConversion)
+{
+    std::string code = R"(
+type word = UInt16
+type sameWord = word
+type ratio = Float32
+type codepoint = Rune
+
+main() {
+    let a: word = word(20)
+    let b: sameWord = sameWord(a)
+    let c: ratio = ratio(1.5)
+    let d: codepoint = codepoint(97)
+    let e: word = word(20.05)
+    let floatValue: Float32 = 20.05
+    let f: word = word(floatValue)
+    let intValue: Int64 = 20
+    let g: ratio = ratio(intValue)
+    let runeValue: Int16 = 97
+    let h: codepoint = codepoint(runeValue)
+}
+    )";
+
+    instance->code = code;
+    instance->Compile(CompileStage::SEMA);
+
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+
+    size_t conversions = 0;
+    Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&conversions](Ptr<Node> node) {
+        if (auto call = DynamicCast<CallExpr*>(node);
+            call && call->desugarExpr && call->desugarExpr->astKind == ASTKind::TYPE_CONV_EXPR) {
+            ++conversions;
+            EXPECT_TRUE(call->args.empty());
+            EXPECT_FALSE(call->desugarExpr->sourceExpr);
+            EXPECT_EQ(call->GetTy(), call->desugarExpr->GetTy());
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    EXPECT_EQ(conversions, 8);
+}
+
+TEST_F(TypeCheckerTest, NumericTypeAliasTargetMismatchPreservesCall)
+{
+    instance->code = R"(
+type word = UInt16
+main() {
+    var a: Int64 = word(20)
+    var b: Int64 = UInt16(20)
+}
+    )";
+    instance->Compile(CompileStage::SEMA);
+
+    EXPECT_EQ(diag.GetErrorCount(), 2);
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::SEMA);
+    ASSERT_EQ(diagnostics.size(), 2);
+    for (auto& diagnostic : diagnostics) {
+        EXPECT_EQ(diagnostic.rKind, DiagKindRefactor::sema_mismatched_types);
+    }
+
+    Ptr<CallExpr> aliasCall{nullptr};
+    Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&aliasCall](Ptr<Node> node) {
+        if (auto call = DynamicCast<CallExpr*>(node)) {
+            aliasCall = call;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    ASSERT_TRUE(aliasCall);
+    EXPECT_FALSE(aliasCall->desugarExpr);
+    EXPECT_FALSE(Ty::IsTyCorrect(aliasCall->GetTy()));
+    ASSERT_EQ(aliasCall->args.size(), 1);
+    ASSERT_TRUE(aliasCall->args[0]->expr);
+    EXPECT_EQ(aliasCall->args[0]->expr->astKind, ASTKind::LIT_CONST_EXPR);
+}
+
+TEST_F(TypeCheckerTest, NumericTypeAliasInvalidOperandPreservesCall)
+{
+    instance->code = R"(
+type word = UInt16
+main() {
+    let a = word(true)
+}
+    )";
+    instance->Compile(CompileStage::SEMA);
+
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::SEMA);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].kind, DiagKind::sema_numeric_convert_must_be_numeric);
+
+    Ptr<CallExpr> aliasCall{nullptr};
+    Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&aliasCall](Ptr<Node> node) {
+        if (auto call = DynamicCast<CallExpr*>(node)) {
+            aliasCall = call;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    ASSERT_TRUE(aliasCall);
+    EXPECT_FALSE(aliasCall->desugarExpr);
+    EXPECT_FALSE(Ty::IsTyCorrect(aliasCall->GetTy()));
+    ASSERT_EQ(aliasCall->args.size(), 1);
+    ASSERT_TRUE(aliasCall->args[0]->expr);
+    EXPECT_EQ(aliasCall->args[0]->expr->astKind, ASTKind::LIT_CONST_EXPR);
+}
+
+TEST_F(TypeCheckerTest, NumericTypeAliasRejectsNamedArguments)
+{
+    instance->code = R"(
+type word = UInt16
+type integer = Int64
+type ratio = Float32
+type codepoint = Rune
+type sameWord = word
+main() {
+    let a = word(x: 20)
+    let b = integer(x: 20)
+    let c = ratio(x: 20.05)
+    let d = codepoint(x: 97)
+    let e = sameWord(x: 20)
+}
+    )";
+    instance->Compile(CompileStage::SEMA);
+
+    EXPECT_EQ(diag.GetErrorCount(), 5);
+    auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::SEMA);
+    ASSERT_EQ(diagnostics.size(), 5);
+    for (auto& diagnostic : diagnostics) {
+        EXPECT_EQ(diagnostic.kind, DiagKind::sema_unknown_named_argument);
+    }
+
+    size_t namedCalls = 0;
+    Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&namedCalls](Ptr<Node> node) {
+        if (auto call = DynamicCast<CallExpr*>(node)) {
+            ++namedCalls;
+            EXPECT_FALSE(call->desugarExpr);
+            EXPECT_EQ(call->args.size(), 1);
+            if (call->args.size() == 1) {
+                EXPECT_EQ(call->args[0]->name, "x");
+                EXPECT_TRUE(call->args[0]->expr);
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    EXPECT_EQ(namedCalls, 5);
+}
+
+TEST_F(TypeCheckerTest, NumericTypeAliasConversionWorksWithOverloads)
+{
+    instance->code = R"(
+type word = UInt16
+func accept(value: Int64): Unit {}
+func accept(value: UInt16): Unit {}
+main() {
+    accept(word(20))
+}
+    )";
+    instance->Compile(CompileStage::SEMA);
+
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+}
+
 TEST_F(TypeCheckerTest, InvalidVariadicFunctionIsNotCallTarget)
 {
     CheckInvalidVariadicOverload(R"(

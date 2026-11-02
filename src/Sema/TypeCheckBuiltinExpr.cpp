@@ -586,6 +586,7 @@ bool TypeChecker::TypeCheckerImpl::SynCFuncCall(ASTContext& ctx, CallExpr& ce)
 bool TypeChecker::TypeCheckerImpl::ChkBuiltinCall(ASTContext& ctx, Ty& target, CallExpr& ce)
 {
     static bool (TypeCheckerImpl::*const(CHK_FUNCS[]))(ASTContext&, AST::Ty&, AST::CallExpr&) = {
+        &TypeCheckerImpl::ChkNumericTypeAliasCall,
         &TypeCheckerImpl::ChkPointerCall,
         &TypeCheckerImpl::ChkCStringCall,
         &TypeCheckerImpl::ChkArrayCall,
@@ -598,6 +599,38 @@ bool TypeChecker::TypeCheckerImpl::ChkBuiltinCall(ASTContext& ctx, Ty& target, C
         }
     }
     return false;
+}
+
+bool TypeChecker::TypeCheckerImpl::ChkNumericTypeAliasCall(ASTContext& ctx, Ty& target, CallExpr& ce)
+{
+    if (!ce.baseFunc || ce.args.size() != 1) {
+        return false;
+    }
+    auto baseTarget = ce.baseFunc->GetTarget();
+    auto baseTy = ce.baseFunc->GetTy() ? typeManager.SubstituteTypeAliasInTy(*ce.baseFunc->GetTy()) : nullptr;
+    if (!baseTarget || baseTarget->astKind != ASTKind::TYPE_ALIAS_DECL || !baseTy ||
+        (!baseTy->IsNumeric() && !baseTy->IsRune())) {
+        return false;
+    }
+    if (!ce.args[0]->name.Empty()) {
+        diag.Diagnose(ce.args[0]->name.Begin(), ce.args[0]->name.End(), DiagKind::sema_unknown_named_argument,
+            ce.args[0]->name.Val());
+        ce.SetTy(TypeManager::GetInvalidTy());
+        return false;
+    }
+
+    DesugarNumericTypeAliasCall(ctx, ce);
+    auto typeConv = StaticAs<ASTKind::TYPE_CONV_EXPR>(ce.desugarExpr.get());
+    bool ret =
+        target.IsInvalid() ? Ty::IsTyCorrect(SynTypeConvExpr(ctx, *typeConv)) : ChkTypeConvExpr(ctx, target, *typeConv);
+    ce.SetTy(typeConv->GetTy());
+    if (!ret) {
+        ce.args[0]->expr = std::move(typeConv->expr);
+        ce.desugarExpr = nullptr;
+    } else {
+        ce.args.clear();
+    }
+    return ret;
 }
 
 bool TypeChecker::TypeCheckerImpl::IsCallOfBuiltInType(const CallExpr& ce, const AST::TypeKind kind) const
