@@ -73,12 +73,12 @@ OwnedPtr<FuncDecl> GenerateJavaMirrorApiStub::CreateWrappingConstructorStub(Clas
         auto rhs = WithinFile(CreateRefExpr(*param), curFile);
 
         auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-        auto refAssignment = CreateAssignExpr(std::move(lhsRef), std::move(rhs), unitTy);
+        auto refAssignment = CreateAssignExpr(std::move(lhsRef), std::move(rhs), {unitTy});
         ctorNodes.push_back(ilib.CreateEnsureNotNullCall(WithinFile(CreateRefExpr(*param), curFile)));
         ctorNodes.push_back(std::move(refAssignment));
     }
 
-    std::vector<Ptr<Ty>> ctorFuncParamTys;
+    std::vector<ModalTy> ctorFuncParamTys;
     ctorFuncParamTys.push_back(param->GetTy());
     auto ctorFuncTy = typeManager.GetFunctionTy(std::move(ctorFuncParamTys), mirror.GetTy());
 
@@ -93,7 +93,7 @@ OwnedPtr<FuncDecl> GenerateJavaMirrorApiStub::CreateWrappingConstructorStub(Clas
     auto ctorFuncBody = CreateFuncBody(std::move(paramLists),
         CreateRefType(mirror), CreateBlock(std::move(ctorNodes), mirror.GetTy()), mirror.GetTy());
 
-    auto fd = CreateFuncDecl("init", std::move(ctorFuncBody), ctorFuncTy);
+    auto fd = CreateFuncDecl("init", std::move(ctorFuncBody), {ctorFuncTy});
     fd->funcBody->funcDecl = fd.get();
     fd->constructorCall = ConstructorCall::SUPER;
     fd->EnableAttr(Attribute::PUBLIC, Attribute::IN_CLASSLIKE, Attribute::CONSTRUCTOR);
@@ -122,7 +122,7 @@ OwnedPtr<FuncDecl> GenerateJavaMirrorApiStub::CreateJStringOfStringConstructorSt
     auto ctorFuncBody = CreateFuncBody(std::move(paramLists),
         CreateRefType(jstring), CreateBlock({}, jstring.GetTy()), jstring.GetTy());
 
-    auto fd = CreateFuncDecl("init", std::move(ctorFuncBody), ctorFuncTy);
+    auto fd = CreateFuncDecl("init", std::move(ctorFuncBody), {ctorFuncTy});
     fd->funcBody->funcDecl = fd.get();
     fd->constructorCall = ConstructorCall::SUPER;
     fd->EnableAttr(Attribute::PUBLIC, Attribute::CONSTRUCTOR, Attribute::IN_CLASSLIKE);
@@ -137,15 +137,12 @@ OwnedPtr<FuncDecl> GenerateJavaMirrorApiStub::CreateAbstractJavaReferenceGetterS
     std::vector<OwnedPtr<FuncParamList>> paramLists;
     paramLists.emplace_back(CreateFuncParamList(std::move(callParams)));
 
-    auto funcBody = CreateFuncBody(
-        std::move(paramLists),
-        CreateRefType(javaEntityDecl),
-        nullptr,
-        TypeManager::GetNothingTy());
+    auto funcBody =
+        CreateFuncBody(std::move(paramLists), CreateRefType(javaEntityDecl), nullptr, {TypeManager::GetNothingTy()});
 
     static Ptr<FuncTy> funcTy = typeManager.GetFunctionTy({}, javaEntityDecl.GetTy());
 
-    auto fd = CreateFuncDecl(JAVA_REF_GETTER_FUNC_NAME, std::move(funcBody), funcTy);
+    auto fd = CreateFuncDecl(JAVA_REF_GETTER_FUNC_NAME, std::move(funcBody), {funcTy});
     fd->EnableAttr(Attribute::PUBLIC, Attribute::IN_CLASSLIKE, Attribute::ABSTRACT);
     fd->funcBody->funcDecl = fd.get();
 

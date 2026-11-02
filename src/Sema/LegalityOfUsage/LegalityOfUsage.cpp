@@ -97,7 +97,7 @@ void TypeChecker::TypeCheckerImpl::CheckLegalityOfUsage(ASTContext& ctx, AST::Pa
 }
 
 void TypeChecker::TypeCheckerImpl::CheckStaticMemberWithGeneric(
-    Decl& member, const std::vector<Ptr<Ty>>& outerGenericTys)
+    Decl& member, const std::vector<ModalTy>& outerGenericTys)
 {
     // Static member variables, properties and init func can't depend on generic parameters of outer type.
     if (!member.TestAttr(Attribute::STATIC) || outerGenericTys.empty()) {
@@ -113,10 +113,10 @@ void TypeChecker::TypeCheckerImpl::CheckStaticMemberWithGeneric(
         // Because static member var and prop cannot themselves declare generic parameters, static member var and
         // prop cannot contain any outside generic types.
         if (node->GetTy() && node->GetTy()->HasGeneric() && !node->begin.IsZero()) {
-            std::set<Ptr<Ty>> targetTys;
+            std::set<DataTy> targetTys;
             for (auto& usedTy : node->GetTy()->GetGenericTyArgs()) {
                 if (usedTy && Utils::In(usedTy, outerGenericTys)) {
-                    targetTys.emplace(usedTy);
+                    targetTys.emplace(usedTy.Ty());
                     break;
                 }
             }
@@ -133,7 +133,11 @@ void TypeChecker::TypeCheckerImpl::CheckStaticMemberWithGeneric(
             ref.target->TestAttr(Attribute::STATIC) && ref.target->outerDecl && ref.target->outerDecl->GetTy() &&
             ref.target->outerDecl->GetTy()->HasGeneric();
         if (needDiag) {
-            Sema::DiagForStaticVariableDependsGeneric(diag, *node, ref.target->outerDecl->GetTy()->GetGenericTyArgs());
+            std::set<DataTy> rs;
+            for (auto ty : ref.target->outerDecl->GetTy()->GetGenericTyArgs()) {
+                rs.insert(ty.Ty());
+            }
+            Sema::DiagForStaticVariableDependsGeneric(diag, *node, rs);
             return VisitAction::SKIP_CHILDREN;
         }
         return VisitAction::WALK_CHILDREN;
@@ -148,9 +152,9 @@ void TypeChecker::TypeCheckerImpl::CheckStaticMembersWithGeneric(const Package& 
             return;
         }
         for (auto& member : decl->GetMemberDecls()) {
-            std::vector<Ptr<Ty>> outersideGenericParamTys;
+            std::vector<ModalTy> outersideGenericParamTys;
             for (auto& tp : decl->generic->typeParameters) {
-                CJC_ASSERT(tp && Ty::IsTyCorrect(tp->GetTy()));
+                CJC_ASSERT(tp && tp->GetTy().IsCorrect());
                 outersideGenericParamTys.emplace_back(tp->GetTy());
             }
             CheckStaticMemberWithGeneric(*member, outersideGenericParamTys);
@@ -238,10 +242,10 @@ void TypeChecker::TypeCheckerImpl::CheckSubscriptLegality(Node& node)
         }
         auto se = StaticCast<SubscriptExpr*>(node);
         // Checking the Validity of VArray Subscript Access
-        if (!se->baseExpr || !Ty::IsTyCorrect(se->baseExpr->GetTy()) || !Is<VArrayTy>(se->baseExpr->GetTy())) {
+        if (!se->baseExpr || !se->baseExpr->GetTy().IsCorrect() || !Is<VArrayTy>(se->baseExpr->DataTy())) {
             return VisitAction::WALK_CHILDREN;
         }
-        auto varrTy = StaticCast<VArrayTy*>(se->baseExpr->GetTy());
+        auto varrTy = StaticCast<VArrayTy*>(se->baseExpr->DataTy());
         CJC_ASSERT(!se->indexExprs.empty());
         if (se->indexExprs[0]->isConst) {
             auto index = se->indexExprs[0]->constNumValue.asInt;
@@ -284,15 +288,15 @@ void TypeChecker::TypeCheckerImpl::CheckAllInvocationHasImpl(const ASTContext& c
             std::unordered_set<Ptr<AST::Decl>> traversedDecls = {};
             MultiTypeSubst typeMapping;
             if (ma.matchedParentTy && target->outerDecl->GetTy()) {
-                typeMapping = promotion.GetPromoteTypeMapping(*ma.matchedParentTy, *target->outerDecl->GetTy());
+                typeMapping = promotion.GetPromoteTypeMapping(ma.matchedParentTy.Ty(), target->outerDecl->DataTy());
             }
             auto baseDecl = Ty::GetDeclPtrOfTy(ma.baseExpr->GetTy());
             MultiTypeSubst typeMapping1;
             if (baseDecl->GetTy()) {
-                typeMapping1 = promotion.GetPromoteTypeMapping(*ma.baseExpr->GetTy(), *baseDecl->GetTy());
+                typeMapping1 = promotion.GetPromoteTypeMapping(ma.baseExpr->DataTy(), baseDecl->DataTy());
             }
             typeMapping.merge(typeMapping1);
-            auto ret = CheckInvokeTargetHasImpl(ctx, *ma.baseExpr->GetTy(), *target, typeMapping, traversedDecls);
+            auto ret = CheckInvokeTargetHasImpl(ctx, ma.baseExpr->GetTy(), *target, typeMapping, traversedDecls);
             if (ret.first && ret.second) {
                 auto retTarget = ret.second->GetTarget();
                 std::string strType = retTarget->IsFunc() ? "function" : "property";

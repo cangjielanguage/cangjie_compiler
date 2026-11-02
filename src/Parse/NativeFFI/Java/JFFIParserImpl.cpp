@@ -89,7 +89,7 @@ void JFFIParserImpl::CheckJavaAnnoArgs(Annotation& anno) const
 void JFFIParserImpl::CheckMirrorSignature(AST::ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const
 {
     CJC_ASSERT(p.HasAnnotation(annos, AnnotationKind::JAVA_MIRROR) ||
-        (p.HasAnnotation(annos, AnnotationKind::JAVA) && p.HasModifier(decl.modifiers, TokenKind::FOREIGN)));
+        (p.HasAnnotation(annos, AnnotationKind::JAVA) && HasModifier(decl, TokenKind::FOREIGN)));
     decl.MarkAsJavaForeign();
     decl.EnableAttr(Attribute::NO_REFLECT_INFO);
     
@@ -113,7 +113,7 @@ void JFFIParserImpl::CheckMirrorSignature(AST::ClassLikeDecl& decl, const PtrVec
 void JFFIParserImpl::CheckImplSignature(AST::ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const
 {
     CJC_ASSERT(p.HasAnnotation(annos, AnnotationKind::JAVA_IMPL) ||
-        (p.HasAnnotation(annos, AnnotationKind::JAVA) && !p.HasModifier(decl.modifiers, TokenKind::FOREIGN)));
+        (p.HasAnnotation(annos, AnnotationKind::JAVA) && !HasModifier(decl, TokenKind::FOREIGN)));
     decl.MarkAsJavaExport();
     decl.EnableAttr(Attribute::NO_REFLECT_INFO);
 
@@ -164,9 +164,9 @@ void JFFIParserImpl::CheckJavaHasDefaultAnnoArgs(Annotation& anno) const
 
 bool JFFIParserImpl::IsAbstractFunction(const FuncDecl& fd, const Decl& outerDecl) const
 {
-    auto hasAbstractModifier = p.HasModifier(fd.modifiers, TokenKind::ABSTRACT);
-    auto hasStaticModifier = p.HasModifier(fd.modifiers, TokenKind::STATIC);
-    auto hasOuterDeclAbstractModifier = p.HasModifier(outerDecl.modifiers, TokenKind::ABSTRACT);
+    auto hasAbstractModifier = HasModifier(fd.modifiers, TokenKind::ABSTRACT);
+    auto hasStaticModifier = HasModifier(fd.modifiers, TokenKind::STATIC);
+    auto hasOuterDeclAbstractModifier = HasModifier(outerDecl.modifiers, TokenKind::ABSTRACT);
     auto isOuterDeclInterface = outerDecl.astKind == ASTKind::INTERFACE_DECL;
     auto isOuterDeclClass = outerDecl.astKind == ASTKind::CLASS_DECL;
     auto isOuterDeclJavaImpl = Interop::Java::IsImpl(outerDecl);

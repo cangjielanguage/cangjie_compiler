@@ -27,8 +27,8 @@ OwnedPtr<RefExpr> CreateRefValue(FuncTy& funcTy)
     CJC_NULLPTR_CHECK(decl);
     auto refExpr = CreateRefExpr(*decl);
     (void)refExpr->ref.targets.emplace_back(decl); // for `GetFuncTargets`
-    refExpr->SetTy(&funcTy);
-    refExpr->instTys = enumTy.typeArgs;
+    refExpr->SetTy({&funcTy});
+    refExpr->instTys = enumTy.TyArgs();
     return refExpr;
 }
 
@@ -42,8 +42,8 @@ OwnedPtr<RefExpr> CreateRefExc(FuncTy& funcTy)
     CJC_NULLPTR_CHECK(decl);
     auto refExpr = CreateRefExpr(*decl);
     (void)refExpr->ref.targets.emplace_back(decl); // for `GetFuncTargets`
-    refExpr->SetTy(&funcTy);
-    refExpr->instTys = enumTy.typeArgs;
+    refExpr->SetTy({&funcTy});
+    refExpr->instTys = enumTy.TyArgs();
     return refExpr;
 }
 
@@ -57,8 +57,8 @@ OwnedPtr<RefExpr> CreateRefErr(FuncTy& funcTy)
     CJC_NULLPTR_CHECK(decl);
     auto refExpr = CreateRefExpr(*decl);
     (void)refExpr->ref.targets.emplace_back(decl); // for `GetFuncTargets`
-    refExpr->SetTy(&funcTy);
-    refExpr->instTys = enumTy.typeArgs;
+    refExpr->SetTy({&funcTy});
+    refExpr->instTys = enumTy.TyArgs();
     return refExpr;
 }
 
@@ -149,7 +149,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
 
     {
         // (v: ImmediateFrameExceptionWrapper)
-        auto vp = CreateVarPattern(V_COMPILER, exceptionWrapperTy);
+        auto vp = CreateVarPattern(V_COMPILER, {exceptionWrapperTy});
         AST::CopyNodeScopeInfo(vp->varDecl, tryExpr);
 
         // v.frame
@@ -167,7 +167,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
 
         // `(HandlerFrame.getActiveFrame() == v.frame)
         auto binExpr = CreateBinaryExpr(std::move(parentAccess), std::move(frameAccess), TokenKind::EQUAL);
-        binExpr->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        binExpr->SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
         CopyBasicInfo(tryExpr, binExpr);
 
         // v.exception
@@ -178,7 +178,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         // throw v.exception
         auto throwExcExpr = MakeOwned<ThrowExpr>();
         throwExcExpr->expr = std::move(excAccess);
-        throwExcExpr->SetTy(TypeManager::GetNothingTy());
+        throwExcExpr->SetTy({TypeManager::GetNothingTy()});
 
         // v
         auto vRef = CreateRefExpr(*vp->varDecl);
@@ -187,7 +187,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         // throw v
         auto throwExpr = MakeOwned<ThrowExpr>();
         throwExpr->expr = std::move(vRef);
-        throwExpr->SetTy(TypeManager::GetNothingTy());
+        throwExpr->SetTy({TypeManager::GetNothingTy()});
 
         // `if (HandlerFrame.getActiveFrame() == v.frame) {
         // `     throw v.exception
@@ -197,12 +197,12 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         std::vector<OwnedPtr<Node>> thenBlockNodes;
         (void)thenBlockNodes.emplace_back(std::move(throwExcExpr));
         auto thenBlock = CreateBlock(std::move(thenBlockNodes));
-        thenBlock->SetTy(TypeManager::GetNothingTy());
+        thenBlock->SetTy({TypeManager::GetNothingTy()});
 
         std::vector<OwnedPtr<Node>> elseBlockNodes;
         (void)elseBlockNodes.emplace_back(std::move(throwExpr));
         auto elseBlock = CreateBlock(std::move(elseBlockNodes));
-        elseBlock->SetTy(TypeManager::GetNothingTy());
+        elseBlock->SetTy({TypeManager::GetNothingTy()});
 
         auto ifExpr = CreateIfExpr(std::move(binExpr), std::move(thenBlock), std::move(elseBlock));
 
@@ -213,7 +213,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         AST::CopyNodeScopeInfo(excWrapperRefTy, tryExpr);
         excWrapperRefTy->EnableAttr(Attribute::TOOL_ADD);
         (void)exceptTypePattern->types.emplace_back(std::move(excWrapperRefTy));
-        exceptTypePattern->SetTy(exceptionWrapperTy);
+        exceptTypePattern->SetTy({exceptionWrapperTy});
 
         // `catch (v: ImmediateFrameExceptionWrapper) {
         // `    if (HandlerFrame.getActiveFrame() == v.frame) {
@@ -225,7 +225,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         std::vector<OwnedPtr<Node>> catchBlockNodes;
         (void)catchBlockNodes.emplace_back(std::move(ifExpr));
         auto catchBlock = CreateBlock(std::move(catchBlockNodes));
-        catchBlock->SetTy(TypeManager::GetNothingTy());
+        catchBlock->SetTy({TypeManager::GetNothingTy()});
 
         // Added to the tryExpr
         (void)tryExpr->catchPatterns.emplace_back(std::move(exceptTypePattern));
@@ -234,7 +234,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
 
     {
         // (v: ImmediateFrameErrorWrapper)
-        auto vp = CreateVarPattern(V_COMPILER, errorWrapperTy);
+        auto vp = CreateVarPattern(V_COMPILER, {errorWrapperTy});
         AST::CopyNodeScopeInfo(vp->varDecl, tryExpr);
 
         // v.frame
@@ -252,7 +252,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
 
         // `(HandlerFrame.getActiveFrame() == v.frame)
         auto binExpr = CreateBinaryExpr(std::move(parentAccess), std::move(frameAccess), TokenKind::EQUAL);
-        binExpr->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        binExpr->SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
         CopyBasicInfo(tryExpr, binExpr);
 
         // v.error
@@ -263,7 +263,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         // throw v.error
         auto throwExcExpr = MakeOwned<ThrowExpr>();
         throwExcExpr->expr = std::move(excAccess);
-        throwExcExpr->SetTy(TypeManager::GetNothingTy());
+        throwExcExpr->SetTy({TypeManager::GetNothingTy()});
 
         // v
         auto vRef = CreateRefExpr(*vp->varDecl);
@@ -272,7 +272,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         // throw v
         auto throwExpr = MakeOwned<ThrowExpr>();
         throwExpr->expr = std::move(vRef);
-        throwExpr->SetTy(TypeManager::GetNothingTy());
+        throwExpr->SetTy({TypeManager::GetNothingTy()});
 
         // `if (HandlerFrame.getActiveFrame() == v.frame) {
         // `     throw v.error
@@ -282,12 +282,12 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         std::vector<OwnedPtr<Node>> thenBlockNodes;
         (void)thenBlockNodes.emplace_back(std::move(throwExcExpr));
         auto thenBlock = CreateBlock(std::move(thenBlockNodes));
-        thenBlock->SetTy(TypeManager::GetNothingTy());
+        thenBlock->SetTy({TypeManager::GetNothingTy()});
 
         std::vector<OwnedPtr<Node>> elseBlockNodes;
         (void)elseBlockNodes.emplace_back(std::move(throwExpr));
         auto elseBlock = CreateBlock(std::move(elseBlockNodes));
-        elseBlock->SetTy(TypeManager::GetNothingTy());
+        elseBlock->SetTy({TypeManager::GetNothingTy()});
 
         auto ifExpr = CreateIfExpr(std::move(binExpr), std::move(thenBlock), std::move(elseBlock));
 
@@ -298,7 +298,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         AST::CopyNodeScopeInfo(excWrapperRefTy, tryExpr);
         excWrapperRefTy->EnableAttr(Attribute::TOOL_ADD);
         (void)exceptTypePattern->types.emplace_back(std::move(excWrapperRefTy));
-        exceptTypePattern->SetTy(errorWrapperTy);
+        exceptTypePattern->SetTy({errorWrapperTy});
 
         // `catch (v: ImmediateFrameExceptionWrapper) {
         // `    if (HandlerFrame.getActiveFrame() == v.frame) {
@@ -310,7 +310,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         std::vector<OwnedPtr<Node>> catchBlockNodes;
         (void)catchBlockNodes.emplace_back(std::move(ifExpr));
         auto catchBlock = CreateBlock(std::move(catchBlockNodes));
-        catchBlock->SetTy(TypeManager::GetNothingTy());
+        catchBlock->SetTy({TypeManager::GetNothingTy()});
 
         // Added to the tryExpr
         (void)tryExpr->catchPatterns.emplace_back(std::move(exceptTypePattern));
@@ -321,7 +321,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         std::vector<OwnedPtr<MatchCase>> matchCases;
 
         // (v: ImmediateEarlyReturn)
-        auto vp = CreateVarPattern(V_COMPILER, earlyReturnTy);
+        auto vp = CreateVarPattern(V_COMPILER, {earlyReturnTy});
         AST::CopyNodeScopeInfo(vp->varDecl, tryExpr);
 
         // v.frame
@@ -339,7 +339,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
 
         // `(HandlerFrame.getActiveFrame() == v.frame)
         auto binExpr = CreateBinaryExpr(std::move(parentAccess), std::move(frameAccess), TokenKind::EQUAL);
-        binExpr->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        binExpr->SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
         CopyBasicInfo(tryExpr, binExpr);
 
         // v.result
@@ -358,7 +358,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         auto returnExpr = MakeOwnedNode<ReturnExpr>();
         returnExpr->expr = std::move(vpRef2);
         returnExpr->refFuncBody = tryLambda->funcBody;
-        returnExpr->SetTy(TypeManager::GetNothingTy());
+        returnExpr->SetTy({TypeManager::GetNothingTy()});
         CopyNodeScopeInfo(returnExpr, tryExpr);
 
         // case newVar: T => return newVar
@@ -382,13 +382,13 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         re23->SetTy(excInitDecl->GetTy());
 
         auto earlyCreation =
-            AST::CreateCallExpr(std::move(re23), {}, excInitDecl, exceptionType, CallKind::CALL_OBJECT_CREATION);
+            AST::CreateCallExpr(std::move(re23), {}, excInitDecl, {exceptionType}, CallKind::CALL_OBJECT_CREATION);
         CopyBasicInfo(innerBlock, earlyCreation);
 
         // throw Exception()
         auto throwExpr = MakeOwned<ThrowExpr>();
         throwExpr->expr = std::move(earlyCreation);
-        throwExpr->SetTy(TypeManager::GetNothingTy());
+        throwExpr->SetTy({TypeManager::GetNothingTy()});
 
         // case _ => throw Exception()
         matchCases.emplace_back(CreateMatchCase(std::move(wildcard), std::move(throwExpr)));
@@ -398,8 +398,8 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         //      case _ => throw Exception()
         // }
         auto matchExpr = CreateMatchExpr(
-            std::move(excAccess), std::move(matchCases), TypeManager::GetInvalidTy(), Expr::SugarKind::AS);
-        matchExpr->SetTy(TypeManager::GetNothingTy());
+            std::move(excAccess), std::move(matchCases), {TypeManager::GetInvalidTy()}, Expr::SugarKind::AS);
+        matchExpr->SetTy({TypeManager::GetNothingTy()});
 
         // v
         auto vRef = CreateRefExpr(*vp->varDecl);
@@ -408,7 +408,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         // throw v
         auto reThrowExpr = MakeOwned<ThrowExpr>();
         reThrowExpr->expr = std::move(vRef);
-        reThrowExpr->SetTy(TypeManager::GetNothingTy());
+        reThrowExpr->SetTy({TypeManager::GetNothingTy()});
 
         // `if (HandlerFrame.getActiveFrame() == v.frame) {
         // `     match (e.result) {
@@ -421,12 +421,12 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         std::vector<OwnedPtr<Node>> thenBlockNodes;
         (void)thenBlockNodes.emplace_back(std::move(matchExpr));
         auto thenBlock = CreateBlock(std::move(thenBlockNodes));
-        thenBlock->SetTy(TypeManager::GetNothingTy());
+        thenBlock->SetTy({TypeManager::GetNothingTy()});
 
         std::vector<OwnedPtr<Node>> elseBlockNodes;
         (void)elseBlockNodes.emplace_back(std::move(reThrowExpr));
         auto elseBlock = CreateBlock(std::move(elseBlockNodes));
-        elseBlock->SetTy(TypeManager::GetNothingTy());
+        elseBlock->SetTy({TypeManager::GetNothingTy()});
 
         auto ifExpr = CreateIfExpr(std::move(binExpr), std::move(thenBlock), std::move(elseBlock));
 
@@ -437,7 +437,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         AST::CopyNodeScopeInfo(excWrapperRefTy, tryExpr);
         excWrapperRefTy->EnableAttr(Attribute::TOOL_ADD);
         (void)exceptTypePattern->types.emplace_back(std::move(excWrapperRefTy));
-        exceptTypePattern->SetTy(earlyReturnTy);
+        exceptTypePattern->SetTy({earlyReturnTy});
 
         // `catch (e: ImmediateEarlyReturn) {
         // `    match (e.result) {
@@ -448,7 +448,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
         std::vector<OwnedPtr<Node>> catchBlockNodes;
         (void)catchBlockNodes.emplace_back(std::move(ifExpr));
         auto catchBlock = CreateBlock(std::move(catchBlockNodes));
-        catchBlock->SetTy(TypeManager::GetNothingTy());
+        catchBlock->SetTy({TypeManager::GetNothingTy()});
 
         // Added to the tryExpr
         (void)tryExpr->catchPatterns.emplace_back(std::move(exceptTypePattern));
@@ -465,7 +465,7 @@ void TypeChecker::TypeCheckerImpl::EncloseTryLambda(ASTContext& ctx, OwnedPtr<AS
     std::vector<OwnedPtr<Cangjie::AST::Node>> nodes;
     nodes.emplace_back(std::move(returnExpr));
     auto resultBlock = CreateBlock(std::move(nodes));
-    resultBlock->SetTy(TypeManager::GetNothingTy());
+    resultBlock->SetTy({TypeManager::GetNothingTy()});
 
     tryLambda->funcBody->body = std::move(resultBlock);
 }
@@ -485,7 +485,7 @@ VarDecl& TypeChecker::TypeCheckerImpl::CreateFrame(ASTContext& ctx, TryExpr& te,
 {
     auto frameClassName = CLASS_IMMEDIATE_FRAME;
     // To: Frame({=> try{...} catch{...}})
-    auto lambdaTy = DynamicCast<FuncTy*>(te.tryLambda->GetTy());
+    auto lambdaTy = DynamicCast<FuncTy>(te.tryLambda->DataTy());
     CJC_NULLPTR_CHECK(lambdaTy);
     // create Frame's reference
     auto re = CreateRefExpr(frameClassName);
@@ -497,9 +497,9 @@ VarDecl& TypeChecker::TypeCheckerImpl::CreateFrame(ASTContext& ctx, TryExpr& te,
     re->SetTarget(frameDecl);
 
     auto tryExprTy = lambdaTy->retTy;
-    auto frameClassTy = typeManager.GetClassTy(*frameDecl, {tryExprTy});
-    re->SetTy(frameClassTy);
-    re->instTys.push_back(tryExprTy);
+    auto frameClassTy = typeManager.GetClassTy(*frameDecl, {tryExprTy.Ty()});
+    re->SetTy({frameClassTy});
+    re->instTys.push_back(tryExprTy.Ty());
 
     EncloseTryLambda(ctx, te.tryLambda);
 
@@ -518,12 +518,12 @@ VarDecl& TypeChecker::TypeCheckerImpl::CreateFrame(ASTContext& ctx, TryExpr& te,
     std::vector<OwnedPtr<FuncArg>> args;
     args.emplace_back(CreateFuncArg(std::move(lambdaVar)));
     auto frameCreation = AST::CreateCallExpr(
-        std::move(frameInit), std::move(args), nullptr, frameClassTy, CallKind::CALL_OBJECT_CREATION);
+        std::move(frameInit), std::move(args), nullptr, {frameClassTy}, CallKind::CALL_OBJECT_CREATION);
     frameCreation->desugarArgs = {};
-    auto typecheckOk = ChkCallExpr(ctx, frameClassTy, *frameCreation);
+    auto typecheckOk = ChkCallExpr(ctx, {frameClassTy}, *frameCreation);
     CJC_ASSERT(typecheckOk);
     OwnedPtr<VarDecl> frame = CreateVarDecl("frame", std::move(frameCreation));
-    frame->SetTy(frameClassTy);
+    frame->SetTy({frameClassTy});
     auto& frameRef = *frame;
 
     block.emplace_back(std::move(lambdaVarDecl));
@@ -544,7 +544,7 @@ void TypeChecker::TypeCheckerImpl::CreateSetFinally(
     std::vector<OwnedPtr<FuncArg>> args;
     args.emplace_back(CreateFuncArg(std::move(te.finallyLambda)));
     auto setFinallyCall = CreateCallExpr(std::move(setFinally), std::move(args));
-    setFinallyCall->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    setFinallyCall->SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
     setFinallyCall->callKind = AST::CallKind::CALL_DECLARED_FUNCTION;
     block.emplace_back(std::move(setFinallyCall));
 }
@@ -573,20 +573,20 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
             // so we need to assign `targets` by calling `ChkCallExpr` later
             OwnedPtr<Type> effectTypeArgument = ASTCloner::Clone(commandPattern->types[j].get());
             ma->typeArguments.emplace_back(std::move(effectTypeArgument));
-            ma->instTys.emplace_back(commandPattern->types[j]->GetTy());
+            ma->instTys.emplace_back(commandPattern->types[j]->DataTy());
 
             OwnedPtr<Type> resumptionTypeArgument = MakeOwned<Type>();
             CJC_ASSERT(handler.commandResultTy);
             resumptionTypeArgument->SetTy(handler.commandResultTy);
             ma->typeArguments.emplace_back(std::move(resumptionTypeArgument));
-            ma->instTys.emplace_back(handler.commandResultTy);
+            ma->instTys.emplace_back(handler.commandResultTy.Ty());
 
             // setImmediateHandler lives in HandlerFrame, which is not parameterized
             // by return type, so it takes the return type as an extra type parameter
             OwnedPtr<Type> resultTypeArgument = MakeOwned<Type>();
             resultTypeArgument->SetTy(te.GetTy());
             ma->typeArguments.emplace_back(std::move(resultTypeArgument));
-            ma->instTys.emplace_back(te.GetTy());
+            ma->instTys.emplace_back(te.DataTy());
 
             // We need to set the targets by hand, because the call to ChkCallExpr
             // below expects targets to be nonempty
@@ -627,7 +627,7 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
                 CJC_NULLPTR_CHECK(returnExpr);
                 innerBlock->body.back() = std::move(returnExpr->expr);
             }
-            innerBlock->SetTy(Ty::GetInitialTy());
+            innerBlock->SetTy({Ty::GetInitialTy()});
 
             // Get all declarations and types needed
             // std.core.Exception
@@ -674,7 +674,7 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
                 CJC_ASSERT(inits.size() == 1);
                 auto initDecl = inits.front();
 
-                CJC_ASSERT(Ty::IsTyCorrect(initDecl->GetTy()) && initDecl->GetTy()->IsFunc());
+                CJC_ASSERT(initDecl->GetTy().IsCorrect() && initDecl->GetTy()->IsFunc());
 
                 OwnedPtr<RefExpr> re2 = CreateRefExpr(CLASS_FRAME_EXCEPTION_WRAPPER);
                 re2->isAlone = false;
@@ -697,14 +697,14 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
                 args.emplace_back(CreateFuncArg(std::move(getActiveFrameCall)));
                 args.emplace_back(CreateFuncArg(std::move(vpRef)));
                 auto wrapperCreation = AST::CreateCallExpr(
-                    std::move(re2), std::move(args), initDecl, exceptionWrapperTy, CallKind::CALL_OBJECT_CREATION);
+                    std::move(re2), std::move(args), initDecl, {exceptionWrapperTy}, CallKind::CALL_OBJECT_CREATION);
                 CopyBasicInfo(innerBlock, wrapperCreation);
                 wrapperCreation->desugarArgs = {};
 
                 // throw ImmediateFrameExceptionWrapper(...)
                 auto throwExpr = MakeOwned<ThrowExpr>();
                 throwExpr->expr = std::move(wrapperCreation);
-                throwExpr->SetTy(TypeManager::GetNothingTy());
+                throwExpr->SetTy({TypeManager::GetNothingTy()});
 
                 // {
                 //      throw ImmediateFrameExceptionWrapper(...)
@@ -742,7 +742,7 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
                 CJC_ASSERT(inits.size() == 1);
                 auto initDecl = inits.front();
 
-                CJC_ASSERT(Ty::IsTyCorrect(initDecl->GetTy()) && initDecl->GetTy()->IsFunc());
+                CJC_ASSERT(initDecl->GetTy().IsCorrect() && initDecl->GetTy()->IsFunc());
 
                 OwnedPtr<RefExpr> re2 = CreateRefExpr(CLASS_FRAME_ERROR_WRAPPER);
                 re2->isAlone = false;
@@ -765,14 +765,14 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
                 args.emplace_back(CreateFuncArg(std::move(getActiveFrameCall)));
                 args.emplace_back(CreateFuncArg(std::move(vpRef)));
                 auto wrapperCreation = AST::CreateCallExpr(
-                    std::move(re2), std::move(args), initDecl, errorWrapperTy, CallKind::CALL_OBJECT_CREATION);
+                    std::move(re2), std::move(args), initDecl, {errorWrapperTy}, CallKind::CALL_OBJECT_CREATION);
                 CopyBasicInfo(innerBlock, wrapperCreation);
                 wrapperCreation->desugarArgs = {};
 
                 // throw ImmediateFrameErrorWrapper(...)
                 auto throwExpr = MakeOwned<ThrowExpr>();
                 throwExpr->expr = std::move(wrapperCreation);
-                throwExpr->SetTy(TypeManager::GetNothingTy());
+                throwExpr->SetTy({TypeManager::GetNothingTy()});
 
                 // {
                 //      throw ImmediateFrameErrorWrapper(...)
@@ -818,7 +818,7 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
                 }
                 CJC_ASSERT(inits.size() == 1);
                 auto initDecl = inits.front();
-                CJC_ASSERT(Ty::IsTyCorrect(initDecl->GetTy()) && initDecl->GetTy()->IsFunc());
+                CJC_ASSERT(initDecl->GetTy().IsCorrect() && initDecl->GetTy()->IsFunc());
 
                 // HandlerFrame.getActiveFrame()
                 auto getActiveFrame = GetHelperFrameMethod(*tryResult, "getActiveFrame", {});
@@ -837,14 +837,14 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
                 args2.emplace_back(CreateFuncArg(std::move(getActiveFrameCall)));
                 args2.emplace_back(CreateFuncArg(std::move(resRef)));
                 auto earlyCreation = AST::CreateCallExpr(
-                    std::move(re2), std::move(args2), initDecl, earlyReturnTy, CallKind::CALL_OBJECT_CREATION);
+                    std::move(re2), std::move(args2), initDecl, {earlyReturnTy}, CallKind::CALL_OBJECT_CREATION);
                 CopyBasicInfo(tryResult, earlyCreation);
                 earlyCreation->desugarArgs = {};
 
                 // throw ImmediateEarlyReturn(...)
                 auto throwExpr2 = MakeOwned<ThrowExpr>();
                 throwExpr2->expr = std::move(earlyCreation);
-                throwExpr2->SetTy(TypeManager::GetNothingTy());
+                throwExpr2->SetTy({TypeManager::GetNothingTy()});
 
                 nodes.emplace_back(std::move(tryResult));
                 nodes.emplace_back(std::move(throwExpr2));
@@ -867,12 +867,12 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
             auto resultDecl =
                 importManager.GetImportedDecl<EnumDecl>(EFFECT_INTERNALS_PACKAGE_NAME, "ImmediateHandlerReturn");
             CJC_NULLPTR_CHECK(resultDecl);
-            auto resultDeclTy = typeManager.GetEnumTy(*resultDecl, {handler.commandResultTy});
+            auto resultDeclTy = typeManager.GetEnumTy(*resultDecl, {handler.commandResultTy.Ty()});
 
             handlerLambda->SetTy(
-                typeManager.GetFunctionTy(DynamicCast<FuncTy*>(handlerLambda->GetTy())->paramTys, resultDeclTy));
+                {typeManager.GetFunctionTy(DynamicCast<FuncTy>(handlerLambda->DataTy())->paramTys, {resultDeclTy})});
             handlerLambda->funcBody->SetTy(
-                typeManager.GetFunctionTy(DynamicCast<FuncTy*>(handlerLambda->GetTy())->paramTys, resultDeclTy));
+                {typeManager.GetFunctionTy(DynamicCast<FuncTy>(handlerLambda->DataTy())->paramTys, {resultDeclTy})});
             handlerLambda->funcBody->retType = CreateRefType(*resultDeclTy->decl);
 
             // Like in createFrame, we can't just pass the lambda to `setHandler`
@@ -886,7 +886,7 @@ void TypeChecker::TypeCheckerImpl::CreateSetHandler(
             auto setHandlerCall = AST::CreateCallExpr(std::move(ma), std::move(args));
             setHandlerCall->callKind = CallKind::CALL_DECLARED_FUNCTION;
 
-            ChkCallExpr(ctx, unitTy, *setHandlerCall);
+            ChkCallExpr(ctx, {unitTy}, *setHandlerCall);
 
             block.emplace_back(std::move(handlerLambdaVarDecl));
             block.emplace_back(std::move(setHandlerCall));
@@ -961,7 +961,7 @@ void TypeChecker::TypeCheckerImpl::CreateResult(
 */
 void TypeChecker::TypeCheckerImpl::DesugarTryToFrame(ASTContext& ctx, TryExpr& te)
 {
-    if (te.handlers.empty() || !Ty::IsTyCorrect(te.GetTy())) {
+    if (te.handlers.empty() || !te.GetTy().IsCorrect()) {
         return;
     }
     std::vector<OwnedPtr<Node>> nodes;
@@ -980,7 +980,7 @@ void TypeChecker::TypeCheckerImpl::DesugarTryToFrame(ASTContext& ctx, TryExpr& t
 }
 
 OwnedPtr<Expr> TypeChecker::TypeCheckerImpl::GetHelperFrameMethod(
-    AST::Node& base, const std::string& methodName, std::vector<Ptr<Ty>> typeArgs)
+    AST::Node& base, const std::string& methodName, std::vector<ModalTy> typeArgs)
 {
     auto frameDecl = importManager.GetImportedDecl<ClassDecl>(EFFECT_INTERNALS_PACKAGE_NAME, CLASS_HANDLER_FRAME);
     CJC_NULLPTR_CHECK(frameDecl);
@@ -988,10 +988,13 @@ OwnedPtr<Expr> TypeChecker::TypeCheckerImpl::GetHelperFrameMethod(
     auto re = CreateRefExpr(CLASS_HANDLER_FRAME);
     re->ref.target = frameDecl;
     AST::CopyNodeScopeInfo(re, &base);
-    re->SetTy(frameClassTy);
+    re->SetTy({frameClassTy});
 
     auto memberFunc = CreateMemberAccess(std::move(re), methodName);
-    memberFunc->instTys = std::move(typeArgs);
+    memberFunc->instTys.clear();
+    for (const auto& ta : typeArgs) {
+        memberFunc->instTys.push_back(ta.Ty());
+    }
     CJC_ASSERT(memberFunc->target);
     memberFunc->targets.emplace_back(StaticCast<FuncDecl*>(memberFunc->target));
 
@@ -1004,7 +1007,7 @@ OwnedPtr<Expr> TypeChecker::TypeCheckerImpl::GetHelperFrameMethod(
 */
 void TypeChecker::TypeCheckerImpl::DesugarPerform(ASTContext& ctx, AST::PerformExpr& pe)
 {
-    if (!Ty::IsTyCorrect(pe.GetTy())) {
+    if (!pe.GetTy().IsCorrect()) {
         // Sometimes the Desugar function is called on "junk" code that has not been
         // through the typechecker. For example, code in primary constructors gets
         // desugared early on; the pre-desugaring code is never typechecked but for
@@ -1030,7 +1033,7 @@ void TypeChecker::TypeCheckerImpl::DesugarPerform(ASTContext& ctx, AST::PerformE
 
 void TypeChecker::TypeCheckerImpl::DesugarResume(ASTContext& ctx, AST::ResumeExpr& re)
 {
-    if (!Ty::IsTyCorrect(re.GetTy())) {
+    if (!re.GetTy().IsCorrect()) {
         // Sometimes the Desugar function is called on "junk" code that has not been
         // through the typechecker. For example, code in primary constructors gets
         // desugared early on; the pre-desugaring code is never typechecked but for
@@ -1056,7 +1059,7 @@ void TypeChecker::TypeCheckerImpl::DesugarImmediateResume(ASTContext& ctx, AST::
     auto resultDecl = importManager.GetImportedDecl<EnumDecl>(EFFECT_INTERNALS_PACKAGE_NAME, "ImmediateHandlerReturn");
     CJC_NULLPTR_CHECK(resultDecl);
     CJC_ASSERT(re.enclosing.has_value());
-    auto resultDeclTy = typeManager.GetEnumTy(*resultDecl, {re.enclosing.value()->commandResultTy});
+    auto resultDeclTy = typeManager.GetEnumTy(*resultDecl, {re.enclosing.value()->commandResultTy.Ty()});
     CJC_NULLPTR_CHECK(resultDeclTy);
 
     if (re.throwingExpr) {
@@ -1067,10 +1070,10 @@ void TypeChecker::TypeCheckerImpl::DesugarImmediateResume(ASTContext& ctx, AST::
 
         OwnedPtr<RefExpr> wrapperFnRef;
         if (typeManager.IsSubtype(re.throwingExpr->GetTy(), exceptionDecl->GetTy())) {
-            auto excTy = typeManager.GetFunctionTy({exceptionDecl->GetTy()}, resultDeclTy);
+            auto excTy = typeManager.GetFunctionTy({exceptionDecl->GetTy()}, {resultDeclTy});
             wrapperFnRef = CreateRefExc(*excTy);
         } else if (typeManager.IsSubtype(re.throwingExpr->GetTy(), errorDecl->GetTy())) {
-            auto excTy = typeManager.GetFunctionTy({errorDecl->GetTy()}, resultDeclTy);
+            auto excTy = typeManager.GetFunctionTy({errorDecl->GetTy()}, {resultDeclTy});
             wrapperFnRef = CreateRefErr(*excTy);
         }
         CJC_NULLPTR_CHECK(wrapperFnRef);
@@ -1079,25 +1082,25 @@ void TypeChecker::TypeCheckerImpl::DesugarImmediateResume(ASTContext& ctx, AST::
         (void)args.emplace_back(CreateFuncArg(std::move(re.throwingExpr)));
         auto wrappedExc = CreateCallExpr(std::move(wrapperFnRef), std::move(args));
 
-        ChkCallExpr(ctx, resultDeclTy, *wrappedExc);
+        ChkCallExpr(ctx, {resultDeclTy}, *wrappedExc);
         // Checking for a call expr may get rid of some desugarings
         DesugarForPropDecl(*wrappedExc);
         auto returnExpr = MakeOwnedNode<ReturnExpr>();
         returnExpr->expr = std::move(wrappedExc);
         desugared = std::move(returnExpr);
     } else {
-        auto valTy = typeManager.GetFunctionTy({re.enclosing.value()->commandResultTy}, resultDeclTy);
+        auto valTy = typeManager.GetFunctionTy({re.enclosing.value()->commandResultTy}, {resultDeclTy});
 
         std::vector<OwnedPtr<FuncArg>> args;
         if (re.withExpr) {
             (void)args.emplace_back(CreateFuncArg(std::move(re.withExpr)));
         } else {
             (void)args.emplace_back(
-                CreateFuncArg(AST::CreateUnitExpr(typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT))));
+                CreateFuncArg(AST::CreateUnitExpr({TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)})));
         }
 
         auto wrappedValue = CreateCallExpr(CreateRefValue(*valTy), std::move(args));
-        ChkCallExpr(ctx, resultDeclTy, *wrappedValue);
+        ChkCallExpr(ctx, {resultDeclTy}, *wrappedValue);
         // Checking for a call expr may get rid of some desugarings
         DesugarForPropDecl(*wrappedValue);
 
@@ -1105,6 +1108,6 @@ void TypeChecker::TypeCheckerImpl::DesugarImmediateResume(ASTContext& ctx, AST::
         returnExpr->expr = std::move(wrappedValue);
         desugared = std::move(returnExpr);
     }
-    desugared->SetTy(TypeManager::GetNothingTy());
+    desugared->SetTy({TypeManager::GetNothingTy()});
     re.desugarExpr = std::move(desugared);
 }

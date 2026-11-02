@@ -42,11 +42,11 @@ TEST_F(MangleTypeTest, CustomTypes)
 {
     // construct a ClassType a.Alpha
     auto classDef = builder.CreateClass(defaultLoc, "Alpha", "_CN1a5AlphaE", "a", true, true);
-    auto classTy = builder.GetType<ClassType>(classDef);
+    auto classTy = builder.GetType<ClassType>(classDef, std::vector<Type*>{}, ModalInfo{});
     EXPECT_EQ(MangleType(*classTy), "CN1a5AlphaE");
     // construct the StructType: a.SomeStruct
     auto structDef = builder.CreateStruct(defaultLoc, "Some", "_CN1a10SomeStructE", "a", true);
-    auto structTy = builder.GetType<StructType>(structDef);
+    auto structTy = builder.GetType<StructType>(structDef, std::vector<Type*>{}, ModalInfo{});
     EXPECT_EQ(MangleType(*structTy), "RN1a10SomeStructE");
 }
 #endif
@@ -61,10 +61,10 @@ TEST_F(MangleTypeTest, FuncTypes)
 TEST_F(MangleTypeTest, TupleTypes)
 {
     // construct a tupleType (Int8, Int16, Int32)
-    auto tupleTy = builder.GetType<TupleType>(std::vector<Type*>{int8Ty, int16Ty, int32Ty});
+    auto tupleTy = builder.GetType<TupleType>(std::vector<Type*>{int8Ty, int16Ty, int32Ty}, ModalInfo{});
     EXPECT_EQ(MangleType(*tupleTy), "T2_asiE");
     // construct a tupleType ((Int8, Int16, Int32), Int64)
-    auto nestedTupleTy = builder.GetType<TupleType>(std::vector<Type*>{tupleTy, int64Ty});
+    auto nestedTupleTy = builder.GetType<TupleType>(std::vector<Type*>{tupleTy, int64Ty}, ModalInfo{});
     EXPECT_EQ(MangleType(*nestedTupleTy), "T1_T2_asiElE");
 }
 

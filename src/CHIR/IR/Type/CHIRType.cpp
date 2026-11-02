@@ -9,6 +9,7 @@
 #include "cangjie/CHIR/IR/Type/ClassDef.h"
 #include "cangjie/CHIR/IR/Type/EnumDef.h"
 #include "cangjie/CHIR/IR/Type/StructDef.h"
+#include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/CHIR/Utils/Utils.h"
 
 namespace Cangjie::CHIR {
@@ -24,17 +25,17 @@ Type* CHIRType::TranslateTupleType(AST::TupleTy& tupleTy)
 {
     std::vector<Type*> argTys;
     for (auto argTy : tupleTy.typeArgs) {
-        argTys.emplace_back(TranslateType(*argTy));
+        argTys.emplace_back(TranslateType(argTy));
     }
     return builder.GetType<TupleType>(argTys);
 }
 
 Type* CHIRType::TranslateFuncType(const AST::FuncTy& fnTy)
 {
-    Type* retTy = TranslateType(*fnTy.retTy);
+    Type* retTy = TranslateType(fnTy.retTy);
     std::vector<Type*> paramTys;
     for (auto paramTy : fnTy.paramTys) {
-        auto pType = TranslateType(*paramTy);
+        auto pType = TranslateType(paramTy);
         if (fnTy.IsCFunc() && pType->IsVArray()) {
             pType = builder.GetType<RefType>(pType);
         }
@@ -48,11 +49,12 @@ Type* CHIRType::TranslateStructType(AST::StructTy& structTy)
 {
     std::vector<Type*> typeArgs;
     for (auto arg : structTy.typeArgs) {
-        typeArgs.emplace_back(TranslateType(*arg));
+        typeArgs.emplace_back(TranslateType(arg));
     }
     auto def = chirTypeCache.globalNominalCache.Get(*structTy.declPtr);
     auto type = builder.GetType<StructType>(StaticCast<StructDef*>(def), typeArgs);
-    chirTypeCache.typeMap[&structTy] = type;
+    // Early cache breaks recursive TranslateType on the same nominal type (Mode::NOT).
+    chirTypeCache.typeMap[AST::ModalTy{&structTy}] = type;
 
     return type;
 }
@@ -61,11 +63,11 @@ Type* CHIRType::TranslateClassType(AST::ClassTy& classTy)
 {
     std::vector<Type*> typeArgs;
     for (auto arg : classTy.typeArgs) {
-        typeArgs.emplace_back(TranslateType(*arg));
+        typeArgs.emplace_back(TranslateType(arg));
     }
     auto def = chirTypeCache.globalNominalCache.Get(*classTy.declPtr);
     auto type = builder.GetType<ClassType>(StaticCast<ClassDef*>(def), typeArgs);
-    chirTypeCache.typeMap[&classTy] = type;
+    chirTypeCache.typeMap[AST::ModalTy{&classTy}] = type;
 
     return type;
 }
@@ -74,11 +76,11 @@ Type* CHIRType::TranslateInterfaceType(AST::InterfaceTy& interfaceTy)
 {
     std::vector<Type*> typeArgs;
     for (auto arg : interfaceTy.typeArgs) {
-        typeArgs.emplace_back(TranslateType(*arg));
+        typeArgs.emplace_back(TranslateType(arg));
     }
     auto def = chirTypeCache.globalNominalCache.Get(*interfaceTy.declPtr);
     auto type = builder.GetType<ClassType>(StaticCast<ClassDef*>(def), typeArgs);
-    chirTypeCache.typeMap[&interfaceTy] = type;
+    chirTypeCache.typeMap[AST::ModalTy{&interfaceTy}] = type;
 
     return type;
 }
@@ -87,55 +89,64 @@ Type* CHIRType::TranslateEnumType(AST::EnumTy& enumTy)
 {
     std::vector<Type*> typeArgs;
     for (auto arg : enumTy.typeArgs) {
-        typeArgs.emplace_back(TranslateType(*arg));
+        typeArgs.emplace_back(TranslateType(arg));
     }
     auto def = chirTypeCache.globalNominalCache.Get(*enumTy.declPtr);
     auto type = builder.GetType<EnumType>(StaticCast<EnumDef*>(def), typeArgs);
-    chirTypeCache.typeMap[&enumTy] = type;
+    chirTypeCache.typeMap[AST::ModalTy{&enumTy}] = type;
     return type;
 }
 
 Type* CHIRType::TranslateArrayType(AST::ArrayTy& arrayTy)
 {
     // RawArrayType [elementTy, dims]
-    auto elementTy = TranslateType(*arrayTy.typeArgs[0]);
+    auto elementTy = TranslateType(arrayTy.typeArgs[0]);
     return builder.GetType<RawArrayType>(elementTy, arrayTy.dims);
 }
 
 Type* CHIRType::TranslateVArrayType(AST::VArrayTy& varrayTy)
 {
     // VArrayType size, [elementTy]
-    auto elementTy = TranslateType(*varrayTy.typeArgs[0]);
+    auto elementTy = TranslateType(varrayTy.typeArgs[0]);
     return builder.GetType<VArrayType>(elementTy, varrayTy.size);
 }
 
 Type* CHIRType::TranslateCPointerType(AST::PointerTy& pointerTy)
 {
-    auto elementTy = TranslateType(*pointerTy.typeArgs[0]);
+    auto elementTy = TranslateType(pointerTy.typeArgs[0]);
     return builder.GetType<CPointerType>(elementTy);
 }
 
-void CHIRType::FillGenericArgType(AST::GenericsTy& ty)
+void CHIRType::FillGenericTypeUpperBounds(AST::ModalTy ty)
 {
-    auto it = chirTypeCache.typeMap.find(&ty);
+    auto it = chirTypeCache.typeMap.find(ty);
     CJC_ASSERT(it != chirTypeCache.typeMap.end());
-    CJC_ASSERT(it->second->GetTypeKind() == Type::TypeKind::TYPE_GENERIC);
-
     std::vector<Type*> chirTy;
-    for (auto argTy : ty.upperBounds) {
+    for (auto argTy : StaticCast<AST::GenericsTy*>(ty.Ty())->upperBounds) {
         CJC_ASSERT(!argTy->IsGeneric());
-        chirTy.emplace_back(TranslateType(*argTy));
+        // Keep upper-bound modals aligned with the generic itself (same as WithModal).
+        chirTy.emplace_back(TranslateType(AST::ModalTy{argTy, ty.Mode()}));
     }
     StaticCast<GenericType*>(it->second)->SetUpperBounds(chirTy);
 }
 
-Type* CHIRType::TranslateType(AST::Ty& ty)
+void CHIRType::FillAllGenericTypeUpperBounds()
+{
+    // Snapshot keys first: FillGenericTypeUpperBounds may insert non-generic types into typeMap.
+    std::vector<AST::ModalTy> keys;
+    for (const auto& [modalTy, _] : chirTypeCache.typeMap) {
+        if (Is<AST::GenericsTy>(modalTy.Ty())) {
+            keys.emplace_back(modalTy);
+        }
+    }
+    for (const auto& key : keys) {
+        FillGenericTypeUpperBounds(key);
+    }
+}
+
+Type* CHIRType::TranslateDataType(AST::Ty& ty)
 {
     Type* type = nullptr;
-    std::lock_guard<std::recursive_mutex> lock(chirTypeMtx);
-    if (auto it = chirTypeCache.typeMap.find(&ty); it != chirTypeCache.typeMap.end()) {
-        return it->second;
-    }
     switch (ty.kind) {
         case AST::TypeKind::TYPE_UNIT: {
             type = builder.GetUnitTy();
@@ -254,12 +265,34 @@ Type* CHIRType::TranslateType(AST::Ty& ty)
             CJC_ABORT();
         }
     }
+    return type;
+}
 
-    if (type->IsClassOrArray() || type->IsBox()) {
+Type* CHIRType::TranslateType(AST::ModalTy ty)
+{
+    CJC_ASSERT(ty && ty.Ty());
+    std::lock_guard<std::recursive_mutex> lock(chirTypeMtx);
+    if (auto it = chirTypeCache.typeMap.find(ty); it != chirTypeCache.typeMap.end()) {
+        return it->second;
+    }
+
+    Type* type = nullptr;
+    auto chirModal = ASTModal2CHIRModal(ty.Mode());
+    if (chirModal == Mode::NONE) {
+        // Mode::NOT: translate the underlying data type and cache under ModalTy{ty, NOT}.
+        // Nominal helpers may temporarily cache an unwrapped ClassType for recursion;
+        // always overwrite with the final type (Ref-wrapped when needed), matching the
+        // pre-ModalTy typeMap behavior.
+        type = TranslateDataType(*ty.Ty());
+    } else {
+        // Local modal: derive from the Mode::NOT entry (created on demand), then cache.
+        auto base = TranslateType(AST::ModalTy{ty.Ty()});
+        type = builder.WithModal(base, chirModal);
+    }
+    if (type->IsReferenceType()) {
         type = builder.GetType<RefType>(type);
     }
-    chirTypeCache.typeMap[&ty] = type;
-
+    chirTypeCache.typeMap[ty] = type;
     return type;
 }
 

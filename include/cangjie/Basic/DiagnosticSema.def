@@ -15,7 +15,7 @@ ERROR(sema_ambiguous_expo_right_operand_type,
     "both 'Int64' and 'Float64' is compatible with the right operand's type of this exponentiation (assignment) "
     "expression; please give an explicit one")
 ERROR(sema_not_a_type, "'%s' is not a type")
-ERROR(sema_incompatible_func_body_and_return_type, "the return type of this function cannot be calculated from the function body and all the return expressions")
+ERROR(sema_incompatible_func_body_and_return_type, "the return type of this function cannot be calculated from the function body and all the return and exclave expressions")
 ERROR(sema_type_must_toplevel, "%s type must be toplevel")
 ERROR(sema_undeclared_type_name, "undeclared type name '%s'")
 ERROR(sema_undeclared_identifier, "undeclared identifier '%s'")
@@ -63,15 +63,6 @@ ERROR(sema_empty_arrayLit_type_undefined, "array literal type cannot be inferred
 ERROR(sema_inconsistency_elemType, "inconsistent element type for %s literal")
 ERROR(sema_tuple_pattern_not_match, "%s isn't a tuple to match tuple pattern")
 ERROR(sema_unsupport_operator, "not supported operator: '%s'")
-ERROR(sema_array_size_type_error, "array size must be of type Int64")
-ERROR(sema_array_expression_param_type_error, "array init expression parameter's type must be type Int64")
-ERROR(sema_array_expression_type_error, "array init expression must has type (Int64)->T")
-ERROR(sema_array_single_element_type_error, "array init with single element must be subtype of 'List' or 'Collection'")
-ERROR(sema_array_element_type_error, "array initialize element type error")
-ERROR(sema_array_too_much_argument, "too much arguments given for array constructor, only accept 0~2 arguments")
-ERROR(sema_array_first_arg_cannot_be_named, "array's first argument cannot be named argument")
-ERROR(sema_array_second_arg_cannot_be_named, "array's second argument cannot be named argument when type is (Int64)->T")
-ERROR(sema_array_second_wrong_named_arg, "array's second argument must have named prefix 'repeat:' when type is T")
 ERROR(sema_pointer_too_much_argument, "too much arguments given for CPointer constructor, only accept 0~1 arguments")
 ERROR(sema_cfunc_too_many_arguments, "too many arguments given to CFunc constructor, only accept 1 argument")
 ERROR(
@@ -277,6 +268,7 @@ ERROR(sema_invalid_position_of_this_type, "'This' type is not allowed here")
 
 // Property
 ERROR(sema_property_override_implement_type_diff, "The type of the override/implement property must be the same")
+ERROR(sema_no_match_prop_accessor_for_call, "no matching prop accessor for call '%s'")
 //
 WARNING(typealias_unused_type_parameters, UNUSED, "type arg(s) %s are not used")
 WARNING(

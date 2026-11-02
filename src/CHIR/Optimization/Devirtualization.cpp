@@ -378,14 +378,12 @@ void Devirtualization::RewriteToApply(std::vector<RewriteInfo>& infos)
         // 2. get a correct type for args[0]
         auto parent = invoke->GetParentBlock();
         if (Is<InvokeBase>(invoke)) {
-            auto instParentCustomTy = GetInstParentCustomTyOfCallee(*realFunc, context.args, context.thisType, builder);
-            // realFunc is instantiated to a new function, the new function is global, not a member method
-            if (instParentCustomTy == nullptr) {
-                instParentCustomTy = realFunc->GetFuncType()->GetParamType(0);
-            }
-            instParentCustomTy = AddRefIfNeeded(*instParentCustomTy, *realFunc);
+            // The declaring type has no modal; use the instantiated receiver parameter to preserve
+            // the callee's modal and reference layers, including for instantiated global functions.
+            auto instFuncType = GetInstFuncTypeFromContext(*realFunc, context, builder);
+            auto instThisType = instFuncType->GetParamType(0);
             auto [typecastRes, newExprs] =
-                TypeCastOrBoxIfNeeded(*context.args[0], *instParentCustomTy, builder, *parent);
+                TypeCastOrBoxIfNeeded(*context.args[0], *instThisType, builder, *parent);
             if (typecastRes != context.args[0]) {
                 for (auto newExpr : newExprs) {
                     newExpr->MoveBefore(invoke);

@@ -15,8 +15,8 @@
 
 #include <functional>
 
-#include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/AST/Node.h"
+#include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/Utils/CastingTemplate.h"
 
 namespace Cangjie::AST {
@@ -232,6 +232,9 @@ void InsertPropGetterSignature(PropDecl& prop, Attribute attrToBeSet);
 void InsertPropSetterSignature(PropDecl& prop, Attribute attrToBeSet);
 
 void InsertMirrorVarProp(ClassDecl& decl, Attribute attrToBeSet);
+
+bool HasModifier(const std::set<Modifier>& modifiers, TokenKind kind);
+bool HasModifier(const Decl& decl, TokenKind kind);
 } // namespace Cangjie::AST
 
 namespace Cangjie::Interop::Java {

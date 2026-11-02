@@ -16,6 +16,51 @@ using namespace Cangjie;
 using namespace AST;
 using namespace NodeSerialization;
 
+TEST(ModalNodeSerialization, ReceiverModalAndSourcePositionsAreSerialized)
+{
+    ThisParam receiver;
+    receiver.identifier = "this";
+    receiver.thisPos = {1, 2, 10};
+    receiver.commaPos = {1, 2, 22};
+    receiver.modal.SetAt({1, 2, 15});
+    receiver.modal.SetLocal(ASTMode::FULL, {1, 2, 16});
+    NodeWriter writer(&receiver);
+    auto rawBuffer = writer.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    auto node = ASTFormat::GetNode(rawBuffer + 4);
+    ASSERT_EQ(node->root_type(), ASTFormat::AnyNode_DECL);
+    auto serialized = node->root_as_DECL()->decl_as_THIS_PARAM();
+    ASSERT_NE(serialized, nullptr);
+    ASSERT_NE(serialized->modal(), nullptr);
+    EXPECT_EQ(static_cast<int>(serialized->modal()->local()), static_cast<int>(ASTMode::FULL));
+    EXPECT_EQ(serialized->this_pos()->line(), 2);
+    EXPECT_EQ(serialized->this_pos()->column(), 10);
+    EXPECT_EQ(serialized->comma_pos()->column(), 22);
+    EXPECT_EQ(serialized->modal()->at_pos()->column(), 15);
+    EXPECT_EQ(serialized->modal()->local_pos()->column(), 16);
+    free(rawBuffer);
+}
+
+TEST(ModalNodeSerialization, ExclaveExpressionKeepsItsBodyAndPosition)
+{
+    ExclaveExpr expression;
+    expression.exclavePos = {1, 3, 5};
+    expression.body = MakeOwned<Block>();
+    expression.body->body.push_back(MakeOwned<LitConstExpr>(LitConstKind::INTEGER, "42"));
+    NodeWriter writer(&expression);
+    auto rawBuffer = writer.ExportNode();
+    ASSERT_NE(rawBuffer, nullptr);
+    auto node = ASTFormat::GetNode(rawBuffer + 4);
+    ASSERT_EQ(node->root_type(), ASTFormat::AnyNode_EXPR);
+    auto serialized = node->root_as_EXPR()->expr_as_EXCLAVE_EXPR();
+    ASSERT_NE(serialized, nullptr);
+    EXPECT_EQ(serialized->exclave_pos()->line(), 3);
+    EXPECT_EQ(serialized->exclave_pos()->column(), 5);
+    ASSERT_NE(serialized->body(), nullptr);
+    EXPECT_EQ(serialized->body()->body()->size(), 1u);
+    free(rawBuffer);
+}
+
 class NodeSerializationTest : public testing::Test {
 protected:
     void SetUp() override

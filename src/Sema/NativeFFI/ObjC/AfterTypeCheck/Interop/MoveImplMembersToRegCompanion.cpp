@@ -312,7 +312,7 @@ void ResolveToImportedMovedMember(const InteropContext& ctx, CallExpr& call)
     if (StaticAs<ASTKind::FUNC_DECL>(proxy.get())->isSetter) {
         CJC_ASSERT_WITH_MSG(!call.args.empty(), "expected the value a property setter is called with");
         access = CreateAssignExpr(
-            std::move(access), std::move(call.args[0]->expr), TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+            std::move(access), std::move(call.args[0]->expr), {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
         access->curFile = call.curFile;
     }
 

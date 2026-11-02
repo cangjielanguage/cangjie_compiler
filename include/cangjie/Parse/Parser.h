@@ -47,23 +47,7 @@ enum class ExprKind : uint8_t;
 std::string ConvertToken(const Token& t);
 
 /// Record the correspondence between AnnotationKinds and identifiers.
-const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_KIND = {
-    {"JavaMirror", AST::AnnotationKind::JAVA_MIRROR}, {"JavaImpl", AST::AnnotationKind::JAVA_IMPL},
-    {"Java", AST::AnnotationKind::JAVA}, {"ObjC", AST::AnnotationKind::OBJ_C},
-    {"JavaHasDefault", AST::AnnotationKind::JAVA_HAS_DEFAULT},
-    {"ObjCMirror", AST::AnnotationKind::OBJ_C_MIRROR}, {"ObjCImpl", AST::AnnotationKind::OBJ_C_IMPL},
-    {"ForeignGetterName", AST::AnnotationKind::FOREIGN_GETTER_NAME}, {"ForeignSetterName", AST::AnnotationKind::FOREIGN_SETTER_NAME},
-    {"ObjCInit", AST::AnnotationKind::OBJ_C_INIT}, {"ObjCOptional", AST::AnnotationKind::OBJ_C_OPTIONAL},
-    {"ForeignName", AST::AnnotationKind::FOREIGN_NAME},
-    {"CallingConv", AST::AnnotationKind::CALLING_CONV}, {"C", AST::AnnotationKind::C},
-    {"Attribute", AST::AnnotationKind::ATTRIBUTE}, {"Intrinsic", AST::AnnotationKind::INTRINSIC},
-    {"OverflowThrowing", AST::AnnotationKind::NUMERIC_OVERFLOW},
-    {"OverflowWrapping", AST::AnnotationKind::NUMERIC_OVERFLOW},
-    {"OverflowSaturating", AST::AnnotationKind::NUMERIC_OVERFLOW}, {"When", AST::AnnotationKind::WHEN},
-    {"FastNative", AST::AnnotationKind::FASTNATIVE}, {"Annotation", AST::AnnotationKind::ANNOTATION},
-    {"ConstSafe", AST::AnnotationKind::CONSTSAFE}, {"Deprecated", AST::AnnotationKind::DEPRECATED},
-    {"Frozen", AST::AnnotationKind::FROZEN}, {"EnsurePreparedToMock", AST::AnnotationKind::ENSURE_PREPARED_TO_MOCK},
-    {"NonProduct", AST::AnnotationKind::NON_PRODUCT}};
+extern const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_KIND;
 
 extern const std::unordered_map<AST::AnnotationKind, std::string> ANNO_KIND_TO_NAME;
 
@@ -82,16 +66,16 @@ template <typename T> using PtrVector = std::vector<OwnedPtr<T>>;
 class Parser {
 public:
     /// Create Parser with \ref fileID and string \ref input.
-    /// \param parseDeclFile true if this parser is used to parse .cj.d file. When parsing these files, do not report
-    /// an error if the func is missing its body.
+    /// \param opts compile options the parser reads from. The pointer must outlive the parser, and nullptr means all
+    /// options take their default values except that local mode is enabled.
     Parser(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
-        bool attachComment = false, bool parseDeclFile = false);
+        bool attachComment = false, const GlobalOptions* opts = nullptr);
     /// Create Parser with string \ref input and the position of the first token. Only used in macro reparse.
     Parser(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos = {0, 1, 1},
-        bool attachComment = false, bool parseDeclFile = false);
+        bool attachComment = false, const GlobalOptions* opts = nullptr);
     /// Create Parser with tokens \ref inputTokens returned by macro func. Only used in macro reparse.
     Parser(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm, bool attachComment = false,
-        bool parseDeclFile = false);
+        const GlobalOptions* opts = nullptr);
     ~Parser();
 
     size_t GetLineNum() const;
@@ -119,17 +103,12 @@ public:
     std::size_t GetProcessedTokens() const;
     std::string GetPrimaryDeclIdentRawValue() const;
 
-    Parser& SetEHEnabled(bool enabled);
-    bool IsEHEnabled() const;
-
     Parser& SetModuleName(const std::string& name);
     Parser& SetPrimaryDecl(const std::string& decl);
     Parser& SetForImport(bool isForImport);
     Parser& SetCurFile(Ptr<AST::File> curFile);
     /// Preserve the enclosing foreign block when reparsing macro input declarations.
     Parser& SetForeignBlockModifiers(const std::set<AST::Modifier>& modifiers);
-
-    void SetCompileOptions(const GlobalOptions& opts);
 
     DiagnosticEngine& GetDiagnosticEngine() const;
     TokenVecMap GetCommentsMap() const;

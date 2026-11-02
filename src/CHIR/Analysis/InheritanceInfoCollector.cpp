@@ -7,8 +7,8 @@
 #include "cangjie/CHIR/Analysis/InheritanceInfoCollector.h"
 
 #include "cangjie/CHIR/IR/Type/ExtendDef.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/Utils/Utils.h"
-#include "cangjie/Utils/Casting.h"
 
 namespace Cangjie::CHIR {
 

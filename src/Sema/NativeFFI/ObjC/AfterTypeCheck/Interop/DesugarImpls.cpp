@@ -90,7 +90,7 @@ void DesugarSuperCtorCall(InteropContext& ctx, ClassDecl& impl, FuncDecl& ctor)
         args.insert(args.end(), std::make_move_iterator(ce->args.begin()), std::make_move_iterator(ce->args.end()));
 
         auto realTarget = GetObjCImplRegDataCtor(*superClass, *targetFd);
-        auto realTargetTy = StaticCast<FuncTy>(realTarget->GetTy());
+        auto realTargetTy = StaticCast<FuncTy>(realTarget->DataTy());
         auto superCall = CreateSuperCall(*realTarget->outerDecl, *realTarget, realTargetTy);
         superCall->args = std::move(args);
         superCall->sourceExpr = ce;
@@ -98,7 +98,7 @@ void DesugarSuperCtorCall(InteropContext& ctx, ClassDecl& impl, FuncDecl& ctor)
     } else {
         CJC_ASSERT_WITH_MSG(superClass->IsObjCForeign(), "expected @ObjCMirror decl");
         auto objCSelf = CreateTupleAccess(
-            ASTCloner::Clone(regDataParamRef.get()), 0, TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64));
+            ASTCloner::Clone(regDataParamRef.get()), 0, {TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64)});
         objCSelf->curFile = curFile;
         auto withObjCSuper = WithinFile(
             ctx.factory.CreateWithObjCSuperScope(std::move(objCSelf), impl, impl.GetTy(),
@@ -120,7 +120,7 @@ void DesugarSuperCtorCall(InteropContext& ctx, ClassDecl& impl, FuncDecl& ctor)
         auto withObjCSuperRetained =
             ctx.factory.CreateObjCRetainAutoreleasedReturnValueCall(std::move(withObjCSuper));
         auto baseCtor = GetObjCMirrorBaseCtor(*superClass);
-        auto baseCtorCall = WithinFile(CreateSuperCall(*superClass, *baseCtor, baseCtor->GetTy()), curFile);
+        auto baseCtorCall = WithinFile(CreateSuperCall(*superClass, *baseCtor, baseCtor->DataTy()), curFile);
         baseCtorCall->args.push_back(CreateFuncArg(std::move(withObjCSuperRetained)));
         ctx.factory.AppendNativeObjCIdMarkerIfNeeded(*baseCtorCall, curFile);
         baseCtorCall->sourceExpr = ce;
@@ -130,10 +130,10 @@ void DesugarSuperCtorCall(InteropContext& ctx, ClassDecl& impl, FuncDecl& ctor)
     // set $reg field just after the super(...) expr
     auto lhs = CreateRefExpr(*GetObjCImplRegCompanionField(impl));
     auto rhs = WithinFile(
-        CreateTupleAccess(std::move(regDataParamRef), 1, ctx.typeManager.GetPrimitiveTy(TypeKind::TYPE_INT64)),
+        CreateTupleAccess(std::move(regDataParamRef), 1, {ctx.typeManager.GetPrimitiveTy(TypeKind::TYPE_INT64)}),
         curFile);
     static auto unitTy = ctx.typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT);
-    auto setRegCompField = CreateAssignExpr(std::move(lhs), std::move(rhs), unitTy);
+    auto setRegCompField = CreateAssignExpr(std::move(lhs), std::move(rhs), {unitTy});
     ctorBody.insert(std::next(ctorBody.begin()), std::move(setRegCompField));
 }
 
@@ -170,7 +170,7 @@ void DesugarThisCtorCall(ClassDecl& impl, FuncDecl& ctor)
 
     auto realTarget = GetObjCImplRegDataCtor(impl, *targetFd);
     CJC_ASSERT_WITH_MSG(realTarget, "expected a reg data ctor generated from the delegated user ctor");
-    auto realTargetTy = StaticCast<FuncTy>(realTarget->GetTy());
+    auto realTargetTy = StaticCast<FuncTy>(realTarget->DataTy());
     ce->desugarExpr = CreateThisCall(impl, *realTarget, realTargetTy, curFile, std::move(args));
 }
 } // namespace
@@ -233,7 +233,7 @@ void DesugarImpls::DesugarCallExpr(InteropContext& ctx, ClassDecl& impl, CallExp
         return;
     }
 
-    auto targetFdTy = StaticCast<FuncTy>(targetFd->GetTy());
+    auto targetFdTy = StaticCast<FuncTy>(targetFd->DataTy());
     auto curFile = ce.curFile;
 
     // method/prop branch
@@ -249,7 +249,7 @@ void DesugarImpls::DesugarCallExpr(InteropContext& ctx, ClassDecl& impl, CallExp
 
     auto nativeHandle = ctx.factory.CreateNativeHandleExpr(impl, false, ce.curFile);
     auto withObjCSuperCall = ctx.factory.CreateWithObjCSuperScope(
-        std::move(nativeHandle), impl, targetFdTy->retTy, [&](auto&& receiver, auto&& objCSuper) {
+        std::move(nativeHandle), impl, targetFdTy->retTy.Ty(), [&](auto&& receiver, auto&& objCSuper) {
             OwnedPtr<Expr> msgSendSuperCall;
             if (targetFd->propDecl) {
                 if (!msgSendSuperArgs.empty()) {

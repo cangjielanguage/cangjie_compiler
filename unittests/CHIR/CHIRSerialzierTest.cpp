@@ -426,6 +426,9 @@ CHIRFormat::CHIRExprKind Serialize(const ExprKind& kind)
         case ExprKind::EXIT:
             ret = CHIRExprKind_Exit;
             break;
+        case ExprKind::EXCLAVE:
+            ret = CHIRExprKind_Exclave;
+            break;
         case ExprKind::TRY_APPLY:
             ret = CHIRExprKind_TryApply;
             break;
@@ -659,6 +662,12 @@ CHIRFormat::CHIRExprKind Serialize(const ExprKind& kind)
             break;
         case ExprKind::GET_RTTI_STATIC:
             ret = CHIRExprKind_GetRttiStatic;
+            break;
+        case ExprKind::START_REGION:
+            ret = CHIRExprKind_StartRegion;
+            break;
+        case ExprKind::END_REGION:
+            ret = CHIRExprKind_EndRegion;
             break;
         case ExprKind::MAX_EXPR_KINDS:
             CJC_ABORT();
@@ -1758,6 +1767,7 @@ CHIRFormat::IntrinsicKind Serialize(const IntrinsicKind& kind)
             break;
         case GET_JSLAMBDA_ADDR:
             ret = IntrinsicKind_GET_JSLAMBDA_ADDR;
+            break;
             // no defalut here, due to we need use compiler to check all value be handled.
     }
     return ret;

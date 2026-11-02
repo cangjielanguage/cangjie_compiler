@@ -11,10 +11,10 @@
 #include "Diags.h"
 #include "TypeCheckUtil.h"
 
+#include "DiagSuppressor.h"
 #include "cangjie/AST/RecoverDesugar.h"
 #include "cangjie/Sema/TypeManager.h"
 #include "cangjie/Utils/CheckUtils.h"
-#include "DiagSuppressor.h"
 
 using namespace Cangjie;
 using namespace Sema;
@@ -56,11 +56,11 @@ UnaryExpr& GetLeafUnaryExpr(UnaryExpr& ue)
 }
 } // namespace
 
-void TypeChecker::TypeCheckerImpl::DiagnoseForUnaryExprWithTarget(ASTContext& ctx, UnaryExpr& ue, Ty& target)
+void TypeChecker::TypeCheckerImpl::DiagnoseForUnaryExprWithTarget(ASTContext& ctx, UnaryExpr& ue, ModalTy target)
 {
     // `leaf` is responsible for the invalid type.
     UnaryExpr& leaf = GetLeafUnaryExpr(ue);
-    if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, leaf.expr.get())) && ReplaceIdealTy(*leaf.expr)) {
+    if (Synthesize({ctx, SynPos::EXPR_ARG}, leaf.expr.get()).IsCorrect() && ReplaceIdealTy(*leaf.expr)) {
         DiagInvalidUnaryExprWithTarget(diag, leaf, target);
     }
 }
@@ -69,80 +69,84 @@ void TypeChecker::TypeCheckerImpl::DiagnoseForUnaryExpr(ASTContext& ctx, UnaryEx
 {
     // `leaf` is responsible for the invalid type.
     UnaryExpr& leaf = GetLeafUnaryExpr(ue);
-    if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, leaf.expr.get())) && ReplaceIdealTy(*leaf.expr)) {
+    if (Synthesize({ctx, SynPos::EXPR_ARG}, leaf.expr.get()).IsCorrect() && ReplaceIdealTy(*leaf.expr)) {
         DiagInvalidUnaryExpr(diag, leaf);
     }
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynUnaryExpr(ASTContext& ctx, UnaryExpr& ue)
+ModalTy TypeChecker::TypeCheckerImpl::SynUnaryExpr(ASTContext& ctx, UnaryExpr& ue)
 {
     if (ue.desugarExpr) {
         return ue.desugarExpr->GetTy();
     }
-    if (!Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ue.expr.get()))) {
-        ue.SetTy(TypeManager::GetInvalidTy());
+    if (!Synthesize({ctx, SynPos::EXPR_ARG}, ue.expr.get()).IsCorrect()) {
+        ue.SetTy({TypeManager::GetInvalidTy()});
         return ue.GetTy();
     }
-    if (Ty::IsTyCorrect(SynBuiltinUnaryExpr(ctx, ue))) {
+    if (SynBuiltinUnaryExpr(ctx, ue).IsCorrect()) {
         ReplaceIdealTy(*ue.expr);
         ue.SetTy(ue.expr->GetTy());
         return ue.GetTy();
     }
 
     DesugarOperatorOverloadExpr(ctx, ue);
-    if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ue.desugarExpr.get()))) {
+    if (Synthesize({ctx, SynPos::EXPR_ARG}, ue.desugarExpr.get()).IsCorrect()) {
         ue.SetTy(ue.desugarExpr->GetTy());
         ReplaceTarget(&ue, StaticCast<CallExpr*>(ue.desugarExpr.get())->resolvedFunction);
     } else {
         RecoverToUnaryExpr(ue);
         DiagnoseForUnaryExpr(ctx, ue);
-        ue.SetTy(TypeManager::GetInvalidTy());
+        ue.SetTy({TypeManager::GetInvalidTy()});
     }
     return ue.GetTy();
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynBuiltinUnaryExpr(ASTContext& ctx, UnaryExpr& ue)
+ModalTy TypeChecker::TypeCheckerImpl::SynBuiltinUnaryExpr(ASTContext& ctx, UnaryExpr& ue)
 {
     auto ty = Synthesize({ctx, SynPos::EXPR_ARG}, ue.expr.get());
     if (!Ty::IsTyCorrect(ty)) {
-        return TypeManager::GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
     // Check if type is available for the given operator.
     if (!IsUnaryOperator(ue.op)) {
-        return TypeManager::GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
     const auto& typeCandidate = GetUnaryOpTypeCandidates(ue.op);
-    if (auto tv = DynamicCast<TyVar*>(ty); tv && tv->isPlaceholder) {
-        switch (PickConstaintFromTys(*tv, TypeMapToTys(typeCandidate, true), true)) {
+    if (auto tv = DynamicCast<TyVar*>(ty.Ty()); tv && tv->isPlaceholder) {
+        std::set<ModalTy> modalCandidates;
+        for (const auto& dt : TypeMapToTys(typeCandidate, true)) {
+            modalCandidates.insert(ModalTy{dt});
+        }
+        switch (PickConstaintFromTys(*tv, modalCandidates, true)) {
             case MatchResult::UNIQUE:
-                ue.SetTy(typeManager.TryGreedySubst(tv));
+                ue.SetTy(typeManager.TryGreedySubst(ModalTy{Ptr<Ty>(tv)}));
                 return ue.GetTy();
             case MatchResult::AMBIGUOUS:
             case MatchResult::NONE:
-                return TypeManager::GetInvalidTy();
+                return {TypeManager::GetInvalidTy()};
             default:
                 CJC_ABORT();
         }
     }
     for (auto& type : typeCandidate) {
         auto primitiveTy = TypeManager::GetPrimitiveTy(type.second);
-        if (typeManager.IsSubtype(ty, primitiveTy)) {
+        if (typeManager.IsSubtype(ty, {primitiveTy})) {
             ue.SetTy(ty);
             return ty;
         }
     }
-    return TypeManager::GetInvalidTy();
+    return {TypeManager::GetInvalidTy()};
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkUnaryExpr(ASTContext& ctx, Ty& target, UnaryExpr& ue)
+bool TypeChecker::TypeCheckerImpl::ChkUnaryExpr(ASTContext& ctx, ModalTy target, UnaryExpr& ue)
 {
     if (ue.desugarExpr) {
-        return typeManager.IsSubtype(ue.desugarExpr->GetTy(), &target);
+        return typeManager.IsSubtype(ue.desugarExpr->GetTy(), target);
     }
     bool isWellTyped = true;
     // If the 'target' is correct type, 'unboxedTy' must also be correct;
-    auto unboxedTy = TypeCheckUtil::UnboxOptionType(&target);
-    Ptr<Ty> retTy = nullptr;
+    auto unboxedTy = TypeCheckUtil::UnboxOptionType(target);
+    ModalTy retTy{};
     // If 'unboxedTy' is builtin type, we need to use this type checking with expression for ideal literal,
     // otherwise only only check type relation here for possible type boxing relation.
     if (unboxedTy->IsBuiltin()) {
@@ -150,10 +154,10 @@ bool TypeChecker::TypeCheckerImpl::ChkUnaryExpr(ASTContext& ctx, Ty& target, Una
         isWellTyped = Check(ctx, unboxedTy, ue.expr.get());
         ue.expr->SetTy(typeManager.TryGreedySubst(ue.expr->GetTy()));
         retTy = SynBuiltinUnaryExpr(ctx, ue);
-        isWellTyped = isWellTyped && Ty::IsTyCorrect(retTy) && Ty::IsTyCorrect(&target);
+        isWellTyped = isWellTyped && Ty::IsTyCorrect(retTy) && Ty::IsTyCorrect(target);
     } else {
         retTy = SynBuiltinUnaryExpr(ctx, ue);
-        isWellTyped = Ty::IsTyCorrect(retTy) && Ty::IsTyCorrect(&target) && typeManager.IsSubtype(retTy, &target);
+        isWellTyped = Ty::IsTyCorrect(retTy) && Ty::IsTyCorrect(target) && typeManager.IsSubtype(retTy, target);
     }
 
     if (isWellTyped) { // If this is a built-in unary expr.
@@ -163,7 +167,7 @@ bool TypeChecker::TypeCheckerImpl::ChkUnaryExpr(ASTContext& ctx, Ty& target, Una
     }
     // Try operator overload.
     DesugarOperatorOverloadExpr(ctx, ue);
-    if (Check(ctx, &target, ue.desugarExpr.get())) {
+    if (Check(ctx, target, ue.desugarExpr.get())) {
         ue.SetTy(ue.desugarExpr->GetTy());
         ReplaceTarget(&ue, StaticCast<CallExpr*>(ue.desugarExpr.get())->resolvedFunction);
         return true;
@@ -173,14 +177,14 @@ bool TypeChecker::TypeCheckerImpl::ChkUnaryExpr(ASTContext& ctx, Ty& target, Una
     ctx.DeleteDesugarExpr(ue.desugarExpr);
     // Report errors.
     retTy = typeManager.ReplaceIdealTy(std::move(retTy));
-    bool retTyMismatch = isWellTyped || (Ty::IsTyCorrect(&target) && Ty::IsTyCorrect(synTy));
+    bool retTyMismatch = isWellTyped || (Ty::IsTyCorrect(target) && Ty::IsTyCorrect(synTy));
     if (retTyMismatch) {
-        DiagMismatchedTypesWithFoundTy(diag, ue, target, isWellTyped ? *retTy : *synTy);
-    } else if (Ty::IsTyCorrect(&target)) {
+        DiagMismatchedTypesWithFoundTy(diag, ue, target, isWellTyped ? retTy : synTy);
+    } else if (Ty::IsTyCorrect(target)) {
         DiagnoseForUnaryExprWithTarget(ctx, ue, target);
     } else {
         DiagnoseForUnaryExpr(ctx, ue);
     }
-    ue.SetTy(TypeManager::GetInvalidTy());
+    ue.SetTy({TypeManager::GetInvalidTy()});
     return false;
 }

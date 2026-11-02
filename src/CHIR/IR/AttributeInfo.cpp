@@ -7,8 +7,32 @@
 #include "cangjie/CHIR/IR/AttributeInfo.h"
 #include <iostream>
 #include <sstream>
+#include <unordered_map>
 
 using namespace Cangjie::CHIR;
+
+namespace {
+const std::unordered_map<Attribute, std::string> ATTR_TO_STRING{{Attribute::STATIC, "static"},
+    {Attribute::PUBLIC, "public"}, {Attribute::PRIVATE, "private"}, {Attribute::PROTECTED, "protected"},
+    {Attribute::ABSTRACT, "abstract"}, {Attribute::VIRTUAL, "virtual"}, {Attribute::OVERRIDE, "override"},
+    {Attribute::REDEF, "redef"}, {Attribute::SEALED, "sealed"}, {Attribute::FOREIGN, "foreign"},
+    {Attribute::MUT, "mut"}, {Attribute::OPERATOR, "operator"}, {Attribute::CONST, "compileTimeVal"},
+    {Attribute::READONLY, "readOnly"}, {Attribute::IMPORTED, "imported"}, {Attribute::NON_RECOMPILE, "nonRecompile"},
+    {Attribute::GENERIC_INSTANTIATED, "generic_instantiated"}, {Attribute::INTERNAL, "internal"},
+    {Attribute::COMPILER_ADD, "compilerAdd"}, {Attribute::GENERIC, "generic"},
+    {Attribute::NO_REFLECT_INFO, "noReflectInfo"}, {Attribute::NO_INLINE, "noInline"},
+    {Attribute::NO_DEBUG_INFO, "noDebugInfo"}, {Attribute::UNREACHABLE, "unreachable"},
+    {Attribute::NO_SIDE_EFFECT, "noSideEffect"}, {Attribute::FINAL, "final"},
+    {Attribute::COMMON, "common"}, {Attribute::SPECIFIC, "specific"},
+    {Attribute::SKIP_ANALYSIS, "skip_analysis"}, {Attribute::DESERIALIZED, "deserialized"},
+    {Attribute::INITIALIZER, "initializer"},
+    {Attribute::UNSAFE, "unsafe"}, {Attribute::JAVA_FOREIGN, "javaForeign"}, {Attribute::JAVA_EXPORT, "javaExport"},
+    {Attribute::OBJ_C_FOREIGN, "objCForeign"},
+    {Attribute::JAVA_HAS_DEFAULT, "javaHasDefault"}, {Attribute::PREVIOUSLY_DESERIALIZED, "previouslyDeserialized"},
+    {Attribute::DOES_NOT_THROW, "doesNotThrow"}, {Attribute::OBJ_C_EXPORT, "objCExport"},
+    {Attribute::MATCH_PATTERN, "matchPattern"},
+    {Attribute::PLUGIN_ADDED, "pluginAdded"}, {Attribute::DEMODE, "demode"}, {Attribute::EXCLAVE, "exclave"}};
+} // namespace
 
 std::string AttributeInfo::ToString() const
 {

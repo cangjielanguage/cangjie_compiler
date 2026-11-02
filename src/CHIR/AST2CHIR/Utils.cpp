@@ -32,28 +32,13 @@ inline std::map<Cangjie::AST::Attribute, Attribute> g_attrMap = {
     {Cangjie::AST::Attribute::DOES_NOT_THROW, Attribute::DOES_NOT_THROW},
     {Cangjie::AST::Attribute::OBJ_C_EXPORT, Attribute::OBJ_C_EXPORT}};
 
-void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& func)
-{
-    CJC_NULLPTR_CHECK(func.funcBody);
-    if (func.funcBody->generic) {
-        // We need to translate functions' generic type and fill their upperBounds during translation.
-        for (auto& type : func.funcBody->generic->typeParameters) {
-            chirTy.TranslateType(*type->GetTy());
-        }
-        // Must fill upper bounds after translation all generics.
-        for (auto& type : func.funcBody->generic->typeParameters) {
-            chirTy.FillGenericArgType(StaticCast<AST::GenericsTy>(*type->GetTy()));
-        }
-    }
-}
-
 FuncType* AdjustVarInitType(
     const FuncType& funcType, const AST::Decl& outerDecl, CHIRBuilder& builder, CHIRType& chirType)
 {
     auto params = funcType.GetParamTypes();
     std::vector<Type*> paramsTy;
     paramsTy.reserve(params.size() + 1); // additional 1 means the type of this.
-    auto thisTy = chirType.TranslateType(*outerDecl.GetTy());
+    auto thisTy = chirType.TranslateType(outerDecl.GetTy());
     // ClassLike decl has already been added ref type by `TranslateType`, so we just needs add ref type to
     // constructor and mut function of non-classLike type.
     if (outerDecl.astKind == AST::ASTKind::STRUCT_DECL) {
@@ -73,7 +58,15 @@ FuncType* AdjustFuncType(FuncType& funcType, const AST::FuncDecl& funcDecl, CHIR
     if (IsInstanceMember(funcDecl)) {
         std::vector<Type*> paramsTy;
         paramsTy.reserve(params.size() + 1); // additional 1 means the type of this.
-        auto thisTy = chirType.TranslateType(*funcDecl.outerDecl->GetTy());
+        Type* thisTy = nullptr;
+        auto& paramList = funcDecl.funcBody->paramLists[0];
+        if (paramList->thisParam) {
+            thisTy = chirType.TranslateType(paramList->thisParam->GetTy());
+        } else if (funcDecl.propDecl != nullptr) {
+            thisTy = chirType.TranslateType(TypeManager::GetThisParamTy(funcDecl));
+        } else {
+            thisTy = chirType.TranslateType(funcDecl.outerDecl->GetTy());
+        }
         paramsTy.emplace_back(AddRefIfFuncIsMutOrClass(*thisTy, funcDecl, builder));
         paramsTy.insert(paramsTy.end(), params.begin(), params.end());
 
@@ -84,6 +77,19 @@ FuncType* AdjustFuncType(FuncType& funcType, const AST::FuncDecl& funcDecl, CHIR
         }
     }
     return &funcType;
+}
+
+Value* TypeCastCopyableTypeIfNeeded(
+    Value& value, ModalInfo modal, CHIRBuilder& builder, Block& parentBlock, const DebugLocation& loc)
+{
+    auto valueType = value.GetType();
+    if (!valueType->IsCopyable()) {
+        return &value;
+    }
+    auto targetType = builder.WithModal(valueType, modal);
+    auto [res, newExprs] = TypeCastOrBoxIfNeeded(value, *targetType, builder, parentBlock, loc);
+    parentBlock.AppendExpressions(newExprs);
+    return res;
 }
 
 DebugLocation GetDeclLoc(const CHIRContext& cctx, const AST::Decl& decl)
@@ -114,7 +120,7 @@ std::vector<GenericType*> GetGenericParamType(const AST::Decl& decl, CHIRType& c
     }
     CJC_NULLPTR_CHECK(generic);
     for (auto& genericTy : generic->typeParameters) {
-        ts.emplace_back(StaticCast<GenericType*>(chirType.TranslateType(*(genericTy->GetTy()))));
+        ts.emplace_back(StaticCast<GenericType*>(chirType.TranslateType(genericTy->GetTy())));
     }
     return ts;
 }
@@ -149,6 +155,11 @@ AttributeInfo BuildVarDeclAttr(const AST::VarDecl& decl)
     }
     if (decl.isConst) {
         attrInfo.SetAttr(Attribute::CONST, true);
+    }
+    bool isDemode = std::any_of(decl.modifiers.begin(), decl.modifiers.end(),
+        [](const AST::Modifier& m) { return m.modifier == TokenKind::DEMODE; });
+    if (isDemode) {
+        attrInfo.SetAttr(Attribute::DEMODE, true);
     }
     return attrInfo;
 }
@@ -293,22 +304,61 @@ void SetCompileTimeValueFlagRecursively(Function& initFunc)
     Visitor::Visit(initFunc, preVisit);
 }
 
-MemberVarInfo GetMemberVarByName(const CustomTypeDef& def, const std::string& varName)
-{
-    auto vars = def.GetAllInstanceVars();
-    for (auto it = vars.crbegin(); it != vars.crend(); ++it) {
-        if (it->name == varName) {
-            return *it;
-        }
-    }
-    CJC_ABORT();
-    return MemberVarInfo{.attributeInfo = AttributeInfo{}};
-}
-
 Type* GetInstMemberTypeByName(const CustomType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder)
 {
     return GetInstMemberTypeByNameCheckingReadOnly(rootType, names, builder).first;
 }
+
+namespace {
+std::vector<uint64_t> GetMemberPathByNames(
+    const CustomType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder)
+{
+    std::vector<uint64_t> path;
+    const CustomType* baseType = &rootType;
+    for (const auto& name : names) {
+        auto allMemberVars = baseType->GetCustomTypeDef()->GetAllInstanceVars();
+        uint64_t index = allMemberVars.size();
+        Type* memberVarInstType = nullptr;
+        for (auto it = allMemberVars.crbegin(); it != allMemberVars.crend(); ++it) {
+            --index;
+            if (it->name == name) {
+                std::unordered_map<const GenericType*, Type*> instMap;
+                baseType->GetInstMap(instMap, builder);
+                memberVarInstType = ReplaceRawGenericArgType(*it->type, instMap, builder);
+                break;
+            }
+        }
+        CJC_NULLPTR_CHECK(memberVarInstType);
+        path.emplace_back(index);
+        if (path.size() < names.size()) {
+            auto pureMemberTy = memberVarInstType->StripAllRefs();
+            if (pureMemberTy->IsNominal()) {
+                baseType = StaticCast<CustomType*>(pureMemberTy);
+            } else if (pureMemberTy->IsGeneric()) {
+                Type* concreteType = nullptr;
+                for (auto upperBound : StaticCast<GenericType*>(pureMemberTy)->GetUpperBounds()) {
+                    auto upperBoundCustomType = StaticCast<CustomType*>(upperBound->StripAllRefs());
+                    if (upperBoundCustomType->GetCustomTypeDef()->IsClassLike()) {
+                        if (concreteType == nullptr) {
+                            concreteType = upperBound;
+                        } else if (upperBoundCustomType->IsEqualOrSubTypeOf(*concreteType, builder)) {
+                            concreteType = upperBound;
+                        }
+                    }
+                }
+                CJC_NULLPTR_CHECK(concreteType);
+                if (pureMemberTy->IsModal()) {
+                    concreteType = builder.WithModal(concreteType->StripAllRefs(), pureMemberTy->GetModalInfo());
+                }
+                baseType = StaticCast<CustomType*>(concreteType->StripAllRefs());
+            } else {
+                CJC_ABORT();
+            }
+        }
+    }
+    return path;
+}
+} // namespace
 
 std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
     const CustomType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder)
@@ -320,33 +370,7 @@ std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
         CJC_ABORT();
 #endif
     }
-    auto customTypeDef = rootType.GetCustomTypeDef();
-    std::unordered_map<const GenericType*, Type*> instMap;
-    rootType.GetInstMap(instMap, builder);
-    auto currentName = names.front();
-    auto member = GetMemberVarByName(*customTypeDef, currentName);
-    // if one member is readonly in path, the result is readonly
-    bool isReadOnly = member.TestAttr(Attribute::READONLY);
-    auto memberTy = ReplaceRawGenericArgType(*member.type, instMap, builder);
-    if (names.size() > 1) {
-        auto pureMemberTy = memberTy->StripAllRefs();
-        if (pureMemberTy->IsNominal()) {
-            auto subNames = names;
-            subNames.erase(subNames.begin());
-            auto [memberType, isMemberReadOnly] =
-                GetInstMemberTypeByNameCheckingReadOnly(*StaticCast<CustomType*>(pureMemberTy), subNames, builder);
-            return {memberType, isReadOnly || isMemberReadOnly};
-        } else if (pureMemberTy->IsGeneric()) {
-            auto subNames = names;
-            subNames.erase(subNames.begin());
-            auto [memberType, isMemberReadOnly] =
-                GetInstMemberTypeByNameCheckingReadOnly(*StaticCast<GenericType*>(pureMemberTy), subNames, builder);
-            return {memberType, isReadOnly || isMemberReadOnly};
-        } else {
-            CJC_ABORT();
-        }
-    }
-    return {memberTy, isReadOnly};
+    return rootType.GetInstMemberTypeByPathCheckingReadOnly(GetMemberPathByNames(rootType, names, builder), builder);
 }
 
 std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
@@ -367,8 +391,10 @@ std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
         }
     }
     CJC_NULLPTR_CHECK(concreteType);
-    return GetInstMemberTypeByNameCheckingReadOnly(
-        *StaticCast<CustomType*>(concreteType->StripAllRefs()), names, builder);
+    if (rootType.IsModal()) {
+        concreteType = builder.WithModal(concreteType->StripAllRefs(), rootType.GetModalInfo());
+    }
+    return GetInstMemberTypeByNameCheckingReadOnly(*StaticCast<CustomType*>(concreteType), names, builder);
 }
 
 Type* AddRefIfFuncIsMutOrClass(Type& thisType, const AST::FuncDecl& funcDecl, CHIRBuilder& builder)
@@ -376,10 +402,25 @@ Type* AddRefIfFuncIsMutOrClass(Type& thisType, const AST::FuncDecl& funcDecl, CH
     if (thisType.IsRef()) {
         return &thisType;
     }
-    if (thisType.IsClassOrArray() || funcDecl.TestAnyAttr(AST::Attribute::MUT, AST::Attribute::CONSTRUCTOR)) {
+    if (thisType.IsReferenceType() || funcDecl.TestAnyAttr(AST::Attribute::MUT, AST::Attribute::CONSTRUCTOR)) {
         return builder.GetType<RefType>(&thisType);
     } else {
         return &thisType;
+    }
+}
+
+ModalInfo ASTModal2CHIRModal(const Cangjie::ModalInfo& astModal)
+{
+    switch (astModal.local) {
+        case Cangjie::Mode::NOT:
+            return ModalInfo(Mode::NONE);
+        case Cangjie::Mode::HALF:
+            return ModalInfo(Mode::MAYBE);
+        case Cangjie::Mode::FULL:
+            return ModalInfo(Mode::MUST);
+        default:
+            CJC_ABORT();
+            return ModalInfo(Mode::NONE);
     }
 }
 } // namespace CHIR

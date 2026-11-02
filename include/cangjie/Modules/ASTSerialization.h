@@ -124,7 +124,7 @@ public:
     bool PreloadCommonPartOfPackage(AST::Package& pkg) const;
     std::vector<std::string> ReadFileNames() const;
 
-    Ptr<AST::Ty> LoadType(FormattedIndex type) const;
+    AST::DataTy LoadType(FormattedIndex type) const;
     // Record the file path the cjo was read from, so diagnostics can name the offending file
     // when the loader was constructed without a package name (the dep-info path).
     void SetCjoPath(std::string path);

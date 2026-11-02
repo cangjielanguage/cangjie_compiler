@@ -14,11 +14,9 @@
 
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/Match.h"
-#include "cangjie/Basic/Print.h"
 #include "cangjie/Lex/Lexer.h"
 #include "cangjie/Macro/InvokeUtil.h"
 #include "cangjie/Macro/TokenSerialization.h"
-#include "cangjie/Modules/PackageManager.h"
 #include "cangjie/Parse/Parser.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 #include "cangjie/Utils/Utils.h"
@@ -142,6 +140,10 @@ bool HasMacroCallToEval(const std::string& moduleName, const TokenVector& inputT
     if (IsBuiltinAnnotation(moduleName, inputTokens[curIndex + 1].Value())) {
         return false;
     }
+    // @local! / @local? / @~local are modal type/this-mode, not macro calls.
+    if (IsModalAfterAt(inputTokens, curIndex)) {
+        return false;
+    }
     if (!IsIdentifierOrContextualKeyword(inputTokens[curIndex + 1].kind)) {
         return false;
     }
@@ -168,7 +170,7 @@ static bool HasMacroCallInTokens(const TokenVector& tokens, const std::string& m
                                  const std::string& currentIdentifier)
 {
     for (size_t i = 0; i + 1 < tokens.size(); i++) {
-        if (tokens[i].Value() == "@" &&
+        if (tokens[i].Value() == "@" && !IsModalAfterAt(tokens, i) &&
             IsIdentifierOrContextualKeyword(tokens[i + 1].kind) &&
             !IsBuiltinAnnotation(moduleName, tokens[i + 1].Value()) &&
             tokens[i + 1].Value() != currentIdentifier) {
@@ -351,7 +353,7 @@ void RefreshMacroCallArgs(MacroCall& macCall, DiagnosticEngine& diag)
     macCall.status = MacroEvalStatus::READY;
 }
 
-void CheckMacroCallArgs(MacroCall& macCall, DiagnosticEngine& diag, bool compileCjd)
+void CheckMacroCallArgs(MacroCall& macCall, DiagnosticEngine& diag, const GlobalOptions& opts)
 {
     if (macCall.status != MacroEvalStatus::READY) {
         return;
@@ -365,7 +367,7 @@ void CheckMacroCallArgs(MacroCall& macCall, DiagnosticEngine& diag, bool compile
         std::vector<Token> newTokens = pInvocation->args;
         RefreshTokensPos(newTokens, pos, diag.GetSourceManager());
         auto errCnt = diag.GetErrorCount();
-        Parser parser{newTokens, diag, diag.GetSourceManager(), false, compileCjd};
+        Parser parser{newTokens, diag, diag.GetSourceManager(), false, &opts};
         parser.SetPrimaryDecl(primaryName).SetCurFile(macCall.GetNode()->curFile);
         parser.SetForeignBlockModifiers(macCall.GetModifiers());
         parser.ParseDecl(scopeKind);
@@ -421,7 +423,7 @@ bool HandleBeforeMacroCallEval(MacroCall& macCall, DiagnosticEngine& diag)
     return false;
 }
 
-bool IsMacroCallReadyForEval(MacroCall& macCall, DiagnosticEngine& diag, bool compileCjd)
+bool IsMacroCallReadyForEval(MacroCall& macCall, DiagnosticEngine& diag, const GlobalOptions& opts)
 {
     if (HandleBeforeMacroCallEval(macCall, diag)) {
         return false;
@@ -443,7 +445,7 @@ bool IsMacroCallReadyForEval(MacroCall& macCall, DiagnosticEngine& diag, bool co
             RefreshMacroCallArgs(macCall, diag);
         }
     }
-    CheckMacroCallArgs(macCall, diag, compileCjd);
+    CheckMacroCallArgs(macCall, diag, opts);
     if (macCall.status == MacroEvalStatus::READY) {
         macCall.status = MacroEvalStatus::EVAL;
         return true;
@@ -665,11 +667,9 @@ void MacroEvaluation::CreateChildMacroCall(
     if (reEval) {
         refreshNewTokensPosition(originPos, tokensToParse);
     }
-    Parser parser{tokensToParse, diag, ci->diag.GetSourceManager(), false,
-        ci->invocation.globalOptions.compileCjd};
+    Parser parser{tokensToParse, diag, ci->diag.GetSourceManager(), false, &ci->invocation.globalOptions};
     parser.SetPrimaryDecl(primaryName).SetCurFile(macCall.GetNode()->curFile);
     parser.SetForeignBlockModifiers(macCall.GetModifiers());
-    parser.SetCompileOptions(ci->invocation.globalOptions);
     auto decl = parser.ParseDecl(ScopeKind(scopeKind));
     if (!decl->IsMacroCallNode()) {
         // Filter decls such as builtin annotations.
@@ -851,9 +851,11 @@ void MacroEvaluation::CreateMacroCallTree(MacroCall& macCall, bool reEval)
     auto tokenSize = inputTokens.size();
     while (curIndex < tokenSize) {
         auto posTmp = inputTokens[curIndex].Begin();
-        // if current Token is not escaped @ or not macrocall like @MacroIdentidier, should be error
+        // Bare `@` that is neither an escaped quote-`@`, a macro call `@Name`, nor a modal
+        // `@local!` / `@local?` / `@~local` is illegal in macro input/output.
         if (inputTokens[curIndex].kind == TokenKind::AT &&
             std::find(escapePosVec.begin(), escapePosVec.end(), posTmp) == escapePosVec.end() &&
+            !IsModalAfterAt(inputTokens, curIndex) &&
             (curIndex == tokenSize - 1 || !IsIdentifierOrContextualKeyword(inputTokens[curIndex + 1].kind))) {
             (void)ci->diag.Diagnose(posTmp, DiagKind::macro_expand_invalid_input_tokens);
         }
@@ -994,7 +996,7 @@ void MacroEvaluation::EvalMacroCallsOnMultiThread()
             if (macCall->status == MacroEvalStatus::FAIL) {
                 continue;
             }
-            if (!IsMacroCallReadyForEval(*macCall, ci->diag, ci->invocation.globalOptions.compileCjd)) {
+            if (!IsMacroCallReadyForEval(*macCall, ci->diag, ci->invocation.globalOptions)) {
                 if (macCall->status == MacroEvalStatus::FAIL) {
                     needEvalMacCalls--;
                 }
@@ -1026,7 +1028,7 @@ void MacroEvaluation::EvalMacroCallsOnMultiThread()
 void MacroEvaluation::EvalMacroCallsOnSingleThread()
 {
     for (auto& macCall : std::as_const(pMacroCalls)) {
-        if (!IsMacroCallReadyForEval(*macCall, ci->diag, ci->invocation.globalOptions.compileCjd)) {
+        if (!IsMacroCallReadyForEval(*macCall, ci->diag, ci->invocation.globalOptions)) {
             continue;
         }
         auto name = macCall->GetIdentifier() + macCall->GetBeginPos().ToString();

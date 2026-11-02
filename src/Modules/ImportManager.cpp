@@ -13,7 +13,6 @@
 #include "cangjie/Modules/ImportManager.h"
 
 #include <algorithm>
-#include <fstream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -28,6 +27,7 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/SourceManager.h"
+#include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Modules/ASTSerialization.h"
 #include "cangjie/Modules/ModulesUtils.h"
@@ -1342,8 +1342,8 @@ Ptr<Decl> ImportManager::GetImportedDecl(const std::string& fullPackageName, con
 {
     auto& decls = cjoManager->GetPackageMembersByName(fullPackageName, name);
     if (decls.empty()) {
-        auto decl = cjoManager->GetImplicitPackageMembersByName(fullPackageName, name);
-        return decl;
+        auto& implicits = cjoManager->GetImplicitPackageMembersByName(fullPackageName, name);
+        return implicits.empty() ? nullptr : *implicits.begin();
     }
     return *decls.begin();
 }
@@ -1466,7 +1466,7 @@ bool ImportManager::IsExtendAllUpperBoundsImported(
             CJC_NULLPTR_CHECK(ub);
             if (!IsTypeAccessible(file, *ub)) {
                 areAllUpperBoundsImported = false;
-                upperboundsNotImported.emplace(ub->GetTy()->String());
+                upperboundsNotImported.emplace(ub->GetTy().String());
                 break;
             }
         }
@@ -1520,7 +1520,7 @@ bool ImportManager::IsExtendAccessible(
     // For direct extension, all upperbound (if any) need to be imported.
     // For interface extension, all upperbound (if any) and at lest one interface need to be imported.
     if (!isExtendedTypeAccessible) {
-        AddNoteForExtendExportDiag(builder, MakeRange(ed.begin, ed.end), ed.extendedType->GetTy()->String());
+        AddNoteForExtendExportDiag(builder, MakeRange(ed.begin, ed.end), ed.extendedType->GetTy().String());
     }
     bool isExtendImported = areAllUpperBoundsImported && hasAnyInterfacesImported && isExtendedTypeAccessible;
     return ed.IsExportedDecl() && isExtendImported;
@@ -1557,7 +1557,7 @@ bool ImportManager::IsExtendMemberImported(
         extendedDecl ? extend->fullPackageName == extendedDecl->fullPackageName : extend->fullPackageName == "std.core";
     if (isInSamePkg) {
         if (!IsTypeAccessible(file, *extend->extendedType)) {
-            AddNoteForExtendExportDiag(builder, MakeRange(extend->begin, extend->end), extend->GetTy()->String());
+            AddNoteForExtendExportDiag(builder, MakeRange(extend->begin, extend->end), extend->GetTy().String());
             return false;
         }
         return true;
@@ -1567,7 +1567,7 @@ bool ImportManager::IsExtendMemberImported(
         if (auto implInterface = FindImplmentInterface(file, member, super)) {
             if (!IsTypeAccessible(file, *implInterface)) {
                 AddNoteForExtendExportDiag(
-                    builder, MakeRange(extend->begin, extend->end), implInterface->GetTy()->String());
+                    builder, MakeRange(extend->begin, extend->end), implInterface->GetTy().String());
                 return false;
             }
             return true;
@@ -1607,6 +1607,15 @@ bool ImportManager::IsExtendMemberAccessible(
     }
 
     return IsExtendMemberImported(extend, file, member, builder);
+}
+
+ImportManager::ImportManager(DiagnosticEngine& d, TypeManager& typeManager, const GlobalOptions& opts)
+    : diag(d), opts(opts), typeManager(typeManager)
+{
+    cjoManager = MakeOwned<CjoManager>(CjoManager::Config{diag, typeManager, opts, importSrcCode});
+    CJC_NULLPTR_CHECK(cjoManager);
+    dependencyGraph = MakeOwned<DependencyGraph>(*cjoManager);
+    CJC_NULLPTR_CHECK(dependencyGraph);
 }
 
 ImportManager::~ImportManager()

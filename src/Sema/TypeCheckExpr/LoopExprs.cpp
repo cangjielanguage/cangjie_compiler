@@ -14,110 +14,110 @@ using namespace Sema;
 using namespace TypeCheckUtil;
 
 namespace {
-Ptr<Ty> GetIterableTy(TypeManager& tyMgr, ImportManager& importManager, Promotion& promotion, Ty& ty)
+ModalTy GetIterableTy(TypeManager& tyMgr, ImportManager& importManager, Promotion& promotion, ModalTy ty)
 {
     // Promote implemented iterable type except nothing type.
-    if (ty.IsNothing()) {
-        return TypeManager::GetInvalidTy();
+    if (ty->IsNothing()) {
+        return {TypeManager::GetInvalidTy()};
     }
     auto iterableInterface = importManager.GetCoreDecl("Iterable");
-    if (auto genTy = DynamicCast<GenericsTy*>(&ty); genTy && genTy->isPlaceholder) {
+    if (auto genTy = DynamicCast<GenericsTy*>(ty.get()); genTy && genTy->isPlaceholder) {
         if (auto placeholderItTy = tyMgr.ConstrainByCtor(*genTy, *iterableInterface->GetTy())) {
             return placeholderItTy;
         } else {
-            return TypeManager::GetInvalidTy();
+            return {TypeManager::GetInvalidTy()};
         }
     }
     if (iterableInterface) {
-        auto prTys = promotion.Promote(ty, *iterableInterface->GetTy());
+        auto prTys = promotion.Promote(ty, iterableInterface->GetTy());
         CJC_ASSERT(prTys.size() <= 1);
-        return prTys.empty() ? TypeManager::GetInvalidTy() : *prTys.begin();
+        return prTys.empty() ? ModalTy{TypeManager::GetInvalidTy()} : *prTys.begin();
     }
-    return TypeManager::GetInvalidTy();
+    return {TypeManager::GetInvalidTy()};
 }
 } // namespace
 
-bool TypeChecker::TypeCheckerImpl::ChkWhileExpr(ASTContext& ctx, Ty& target, WhileExpr& we)
+bool TypeChecker::TypeCheckerImpl::ChkWhileExpr(ASTContext& ctx, ModalTy target, WhileExpr& we)
 {
-    Ptr<Ty> unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-    bool isWellTyped = typeManager.IsSubtype(unitTy, &target);
+    ModalTy unitTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)};
+    bool isWellTyped = typeManager.IsSubtype(unitTy, target);
     if (!isWellTyped) {
-        DiagMismatchedTypesWithFoundTy(diag, we, target, *unitTy);
+        DiagMismatchedTypesWithFoundTy(diag, we, target, unitTy);
     }
-    isWellTyped = Ty::IsTyCorrect(SynWhileExpr(ctx, we)) && isWellTyped;
+    isWellTyped = SynWhileExpr(ctx, we).IsCorrect() && isWellTyped;
     return isWellTyped;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynWhileExpr(ASTContext& ctx, WhileExpr& we)
+ModalTy TypeChecker::TypeCheckerImpl::SynWhileExpr(ASTContext& ctx, WhileExpr& we)
 {
     bool isWellTyped = CheckCondition(ctx, *we.condExpr, false);
-    isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::UNUSED}, we.body.get())) && isWellTyped;
+    isWellTyped = Synthesize({ctx, SynPos::UNUSED}, we.body.get()).IsCorrect() && isWellTyped;
     we.SetTy(
-        isWellTyped ? StaticCast<Ty*>(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)) : TypeManager::GetInvalidTy());
+        isWellTyped ? ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)} : ModalTy{TypeManager::GetInvalidTy()});
     return we.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkDoWhileExpr(ASTContext& ctx, Ty& target, DoWhileExpr& dwe)
+bool TypeChecker::TypeCheckerImpl::ChkDoWhileExpr(ASTContext& ctx, ModalTy target, DoWhileExpr& dwe)
 {
-    Ptr<Ty> unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-    bool isWellTyped = typeManager.IsSubtype(unitTy, &target);
+    ModalTy unitTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)};
+    bool isWellTyped = typeManager.IsSubtype(unitTy, target);
     if (!isWellTyped) {
-        DiagMismatchedTypesWithFoundTy(diag, dwe, target, *unitTy);
+        DiagMismatchedTypesWithFoundTy(diag, dwe, target, unitTy);
     }
-    isWellTyped = Ty::IsTyCorrect(SynDoWhileExpr(ctx, dwe)) && isWellTyped;
+    isWellTyped = SynDoWhileExpr(ctx, dwe).IsCorrect() && isWellTyped;
     return isWellTyped;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynDoWhileExpr(ASTContext& ctx, DoWhileExpr& dwe)
+ModalTy TypeChecker::TypeCheckerImpl::SynDoWhileExpr(ASTContext& ctx, DoWhileExpr& dwe)
 {
-    bool isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::UNUSED}, dwe.body.get()));
+    bool isWellTyped = Synthesize({ctx, SynPos::UNUSED}, dwe.body.get()).IsCorrect();
     isWellTyped = CheckCondition(ctx, *dwe.condExpr, false) && isWellTyped;
     dwe.SetTy(
-        isWellTyped ? StaticCast<Ty*>(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)) : TypeManager::GetInvalidTy());
+        isWellTyped ? ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)} : ModalTy{TypeManager::GetInvalidTy()});
     return dwe.GetTy();
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkForInExpr(ASTContext& ctx, Ty& target, ForInExpr& fie)
+bool TypeChecker::TypeCheckerImpl::ChkForInExpr(ASTContext& ctx, ModalTy target, ForInExpr& fie)
 {
-    Ptr<Ty> unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-    bool isWellTyped = typeManager.IsSubtype(unitTy, &target);
+    ModalTy unitTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)};
+    bool isWellTyped = typeManager.IsSubtype(unitTy, target);
     if (!isWellTyped) {
-        DiagMismatchedTypesWithFoundTy(diag, fie, target, *unitTy);
+        DiagMismatchedTypesWithFoundTy(diag, fie, target, unitTy);
     }
-    isWellTyped = Ty::IsTyCorrect(SynForInExpr(ctx, fie)) && isWellTyped;
+    isWellTyped = SynForInExpr(ctx, fie).IsCorrect() && isWellTyped;
     if (!isWellTyped) {
-        fie.SetTy(TypeManager::GetInvalidTy());
+        fie.SetTy({TypeManager::GetInvalidTy()});
     }
     return isWellTyped;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynForInExpr(ASTContext& ctx, ForInExpr& fie)
+ModalTy TypeChecker::TypeCheckerImpl::SynForInExpr(ASTContext& ctx, ForInExpr& fie)
 {
     CJC_NULLPTR_CHECK(fie.inExpression);
     CJC_NULLPTR_CHECK(fie.pattern);
 
     bool isWellTyped =
-        Synthesize({ctx, SynPos::EXPR_ARG}, fie.inExpression.get()) && ReplaceIdealTy(*fie.inExpression);
+        Synthesize({ctx, SynPos::EXPR_ARG}, fie.inExpression.get()).IsCorrect() && ReplaceIdealTy(*fie.inExpression);
 
     // Implemented iterable in stdlib.
     CJC_NULLPTR_CHECK(fie.inExpression->GetTy());
-    Ptr<Ty> iterableTy = GetIterableTy(typeManager, importManager, promotion, *fie.inExpression->GetTy());
-    Ptr<Ty> inPatternTy = TypeManager::GetInvalidTy();
+    ModalTy iterableTy = GetIterableTy(typeManager, importManager, promotion, fie.inExpression->GetTy());
+    ModalTy inPatternTy{TypeManager::GetInvalidTy()};
     if (Ty::IsTyCorrect(iterableTy)) {
         CJC_ASSERT(!iterableTy->typeArgs.empty());
-        inPatternTy = iterableTy->typeArgs[0];
+        inPatternTy = {iterableTy->typeArgs[0].Ty(), iterableTy.Mode()};
     } else {
         isWellTyped = false;
         if (!CanSkipDiag(*fie.inExpression)) {
             diag.Diagnose(*fie.inExpression, DiagKind::sema_expr_in_forin_must_has_iterator,
-                Ty::ToString(fie.inExpression->GetTy()));
+                fie.inExpression->GetTy().String());
         }
     }
 
     isWellTyped = Check(ctx, inPatternTy, fie.pattern.get()) && isWellTyped;
     if (fie.patternGuard) {
         // PatternGuard's ty should be boolean.
-        if (!Check(ctx, TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN), fie.patternGuard.get())) {
+        if (!Check(ctx, ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)}, fie.patternGuard.get())) {
             isWellTyped = false;
             if (!CanSkipDiag(*fie.patternGuard)) {
                 diag.Diagnose(*fie.patternGuard, DiagKind::sema_wrong_forin_guard);
@@ -125,13 +125,13 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynForInExpr(ASTContext& ctx, ForInExpr& f
         }
     }
 
-    isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::UNUSED}, fie.body.get())) && isWellTyped;
+    isWellTyped = Synthesize({ctx, SynPos::UNUSED}, fie.body.get()).IsCorrect() && isWellTyped;
     if (!IsIrrefutablePattern(*fie.pattern)) {
         isWellTyped = false;
         diag.Diagnose(fie, DiagKind::sema_forin_pattern_must_be_irrefutable);
     }
 
     fie.SetTy(
-        isWellTyped ? StaticCast<Ty*>(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)) : TypeManager::GetInvalidTy());
+        isWellTyped ? ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)} : ModalTy{TypeManager::GetInvalidTy()});
     return fie.GetTy();
 }

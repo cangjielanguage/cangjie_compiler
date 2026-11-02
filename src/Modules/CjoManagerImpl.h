@@ -26,7 +26,7 @@ public:
         OwnedPtr<AST::PackageDecl> pkgDecl;
         std::unordered_map<std::string, Ptr<AST::Decl>> exportIDDeclMap;
         std::map<std::string, AST::OrderedDeclSet> declMap;
-        std::map<std::string, Ptr<AST::Decl>> implicitDeclMap;
+        std::map<std::string, AST::OrderedDeclSet> implicitDeclMap;
         std::string cjoPath;
         bool onlyUsedByMacro{false};
     };
@@ -229,7 +229,7 @@ private:
     // Flag to track if BuildIndex has been called
     bool hasBuildIndex{false};
     // Cache for substituted type alias to real type.
-    std::unordered_map<Ptr<AST::Ty>, Ptr<AST::Ty>> typeAliasCache;
+    std::unordered_map<AST::ModalTy, AST::ModalTy> typeAliasCache;
 };
 } // namespace Cangjie
 #endif

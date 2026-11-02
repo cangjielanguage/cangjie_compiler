@@ -163,6 +163,11 @@ endif()
 set(CANGJIE_CJ_SANCOV_USE_8BIT OFF)
 set(CANGJIE_BUILD_STDLIB_WITH_CJ_SANCOV OFF)
 
+option(CANGJIE_BUILD_STDLIB_WITH_COVERAGE "Whether bundled stdlib was built with gcov coverage instrumentation" OFF)
+if(CANGJIE_BUILD_STDLIB_WITH_COVERAGE)
+    add_compile_definitions(CANGJIE_BUILD_STDLIB_WITH_COVERAGE)
+endif()
+
 if(CANGJIE_BUILD_STDLIB_WITH_CJ_SANCOV)
     if((OHOS OR CMAKE_CROSSCOMPILING) OR WIN32)
         message(FATAL_ERROR "Cangjie with Sanitizer Coverage support only supports on Linux platform")

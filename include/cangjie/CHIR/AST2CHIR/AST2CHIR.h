@@ -259,6 +259,7 @@ private:
 
     void CollectDeclToList(AST::Decl& decl, std::vector<Ptr<const AST::Decl>>& astNodes);
     void CollectFuncDeclToList(AST::FuncDecl& func, std::vector<Ptr<const AST::Decl>>& list);
+    void CollectDesugarParamFuncs(AST::FuncDecl& func, std::vector<Ptr<const AST::Decl>>& list);
     void CollectDesugarDecl(AST::Decl& decl);
 
     void CollectInstantiatedDecls(const AST::Decl& decl);

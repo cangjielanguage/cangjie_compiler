@@ -79,9 +79,9 @@ struct JavaInteropTypeChecker {
      */
     bool IsSupported(const Ty& ty, Position pos)
     {
-        auto areJavaMirrorTypes = [this](const std::vector<Ptr<Ty>>& typeArgs, Position pos) {
+        auto areJavaMirrorTypes = [this](const std::vector<ModalTy>& typeArgs, Position pos) {
             return std::all_of(
-                typeArgs.begin(), typeArgs.end(), [this, pos](const auto& argTy) { return IsSupported(*argTy, pos); });
+                typeArgs.begin(), typeArgs.end(), [this, pos](ModalTy argTy) { return IsSupported(*argTy, pos); });
         };
 
         switch (ty.kind) {
@@ -97,7 +97,7 @@ struct JavaInteropTypeChecker {
             case TypeKind::TYPE_FLOAT64:
                 return true;
             case TypeKind::TYPE_ENUM:
-                if (!ty.IsCoreOptionType() || ty.typeArgs[0]->IsCoreOptionType()) {
+                if (!ty.IsCoreOptionType() || ty.TyArg(0)->IsCoreOptionType()) {
                     return false;
                 };
                 return !ty.typeArgs[0]->IsPrimitive() && areJavaMirrorTypes(ty.typeArgs, pos);
@@ -136,8 +136,8 @@ struct JavaInteropTypeChecker {
             return true;
         }
 
-        if (ty.IsCoreOptionType() && !ty.typeArgs[0]->IsCoreOptionType() && !ty.typeArgs[0]->IsPrimitive()) {
-            return IsJavaCompatible(*ty.typeArgs[0], pos);
+        if (ty.IsCoreOptionType() && !ty.TyArg(0)->IsCoreOptionType() && !ty.TyArg(0)->IsPrimitive()) {
+            return IsJavaCompatible(*ty.TyArg(0), pos);
         }
 
         if (auto classLikeTy = DynamicCast<ClassLikeTy*>(&ty)) {
@@ -156,8 +156,8 @@ struct JavaInteropTypeChecker {
             for (auto& param : paramList->params) {
                 if (!IsJavaCompatible(*param->GetTy(), Position::IN) && !isJavaArray) {
                     auto builder = diag.DiagnoseRefactor(errkind, *param, GetJavaClassKind());
-                    builder.AddMainHintArguments(Ty::ToString(param->GetTy()));
- 
+                    builder.AddMainHintArguments(Ty::ToString(param->DataTy()));
+
                     fdecl.EnableAttr(Attribute::IS_BROKEN);
                     fdecl.outerDecl->EnableAttr(Attribute::HAS_BROKEN);
                     fdecl.outerDecl->EnableAttr(Attribute::IS_BROKEN);
@@ -169,7 +169,7 @@ struct JavaInteropTypeChecker {
     void CheckJavaMirrorMethodTypes(FuncDecl& fd)
     {
         if (fd.funcBody && fd.funcBody->retType && !IsJavaCompatible(*fd.funcBody->retType->GetTy(), Position::OUT) &&
-            (!IsJArray(*fd.outerDecl) || !fd.funcBody->retType->GetTy()->IsGeneric())) {
+            (!IsJArray(*fd.outerDecl) || !fd.funcBody->retType->DataTy()->IsGeneric())) {
             Ptr<Node> node;
             if (!fd.funcBody->retType->begin.IsZero()) {
                 node = fd.funcBody->retType;
@@ -179,7 +179,7 @@ struct JavaInteropTypeChecker {
             }
             auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_java_mirror_method_ret_unsupported, *node,
                 GetJavaClassKind());
-            builder.AddMainHintArguments(Ty::ToString(fd.funcBody->retType->GetTy()));
+            builder.AddMainHintArguments(fd.funcBody->retType->GetTy().String());
             fd.EnableAttr(Attribute::IS_BROKEN);
         }
 
@@ -198,7 +198,7 @@ struct JavaInteropTypeChecker {
                 ? DiagKindRefactor::sema_java_impl_prop_must_be_java_compatible
                 : DiagKindRefactor::sema_java_mirror_prop_must_be_java_mirror;
             auto builder = diag.DiagnoseRefactor(kind, *prop.type);
-            builder.AddMainHintArguments(Ty::ToString(prop.GetTy()));
+            builder.AddMainHintArguments(prop.GetTy().String());
             prop.EnableAttr(Attribute::IS_BROKEN);
         }
     }

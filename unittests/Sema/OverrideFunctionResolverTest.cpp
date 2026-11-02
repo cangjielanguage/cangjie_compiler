@@ -268,7 +268,7 @@ main(): Int64 { return 0 }
     ASSERT_TRUE(cls->GetTy()->IsClass());
 
     OverrideFunctionResolver resolver(*instance->typeManager);
-    Ptr<Ty> baseTy = cls->GetTy();
+    auto baseTy = cls->DataTy();
     const std::string id = "foo";
 
     // NOTE: Compile(GENERIC_INSTANTIATION) itself calls GetInstMemberFuncWithInstTy during
@@ -278,14 +278,14 @@ main(): Int64 { return 0 }
     ASSERT_TRUE(OverrideFunctionResolver::instTy2MembersCache.empty());
 
     // Case 1: first query is a cache miss -> computed and written into the cache.
-    MemberFuncsWithInstTys first = resolver.GetInstMemberFuncWithInstTy(*baseTy, id);
+    MemberFuncsWithInstTys first = resolver.GetInstMemberFuncWithInstTy(baseTy, id);
     ASSERT_FALSE(first.empty());
     auto key = std::make_pair(baseTy, id);
     EXPECT_NE(OverrideFunctionResolver::instTy2MembersCache.find(key),
         OverrideFunctionResolver::instTy2MembersCache.end());
 
     // Case 2: second query is a cache hit -> identical contents, no recomputation.
-    MemberFuncsWithInstTys second = resolver.GetInstMemberFuncWithInstTy(*baseTy, id);
+    MemberFuncsWithInstTys second = resolver.GetInstMemberFuncWithInstTy(baseTy, id);
     ASSERT_EQ(first.size(), second.size());
     for (auto& entry : first) {
         auto it = second.find(entry.first);
@@ -297,7 +297,7 @@ main(): Int64 { return 0 }
     // i.e. no stale hit serving a wrong entry.
     OverrideFunctionResolver::ClearCache();
     EXPECT_TRUE(OverrideFunctionResolver::instTy2MembersCache.empty());
-    MemberFuncsWithInstTys third = resolver.GetInstMemberFuncWithInstTy(*baseTy, id);
+    MemberFuncsWithInstTys third = resolver.GetInstMemberFuncWithInstTy(baseTy, id);
     EXPECT_FALSE(OverrideFunctionResolver::instTy2MembersCache.empty());
     ASSERT_EQ(first.size(), third.size());
     for (auto& entry : first) {
@@ -337,7 +337,7 @@ main(): Int64 { return 0 }
     // ClearCache first: GI has already queried foo on A during compilation, so the cache holds a
     // result. We want to observe a fresh computation to exercise the dedup path deterministically.
     OverrideFunctionResolver::ClearCache();
-    MemberFuncsWithInstTys funcs = resolver.GetInstMemberFuncWithInstTy(*cls->GetTy(), "foo");
+    MemberFuncsWithInstTys funcs = resolver.GetInstMemberFuncWithInstTy(cls->DataTy(), "foo");
     ASSERT_FALSE(funcs.empty());
 
     // Invariant 1: each FuncDecl key maps to a non-empty instTy set (no empty candidate entries).
@@ -349,7 +349,7 @@ main(): Int64 { return 0 }
     // recomputation. Querying again (cache hit) must yield a result whose per-entry instTy-set
     // sizes are identical to the first query. A buggy MergeIntoFuncs/RemoveImplementedSupers
     // that left duplicate instTys or failed to prune a covered super would diverge here.
-    MemberFuncsWithInstTys second = resolver.GetInstMemberFuncWithInstTy(*cls->GetTy(), "foo");
+    MemberFuncsWithInstTys second = resolver.GetInstMemberFuncWithInstTy(cls->DataTy(), "foo");
     ASSERT_EQ(funcs.size(), second.size());
     for (auto& entry : funcs) {
         auto it = second.find(entry.first);
@@ -389,7 +389,7 @@ main(): Int64 { return 0 }
     ASSERT_TRUE(target);
 
     OverrideFunctionResolver resolver(*instance->typeManager);
-    MemberFuncsWithInstTys funcs = resolver.GetInstMemberFuncWithInstTy(*cls->GetTy(), "f");
+    MemberFuncsWithInstTys funcs = resolver.GetInstMemberFuncWithInstTy(cls->DataTy(), "f");
     ASSERT_FALSE(funcs.empty());
 
     // Pick the candidate entry whose decl is C's concrete (non-abstract) impl of f.
@@ -405,9 +405,9 @@ main(): Int64 { return 0 }
     ASSERT_TRUE(candidate.first);
 
     // targetBaseTy is C's type (the instantiated base), matching production call sites which
-    // pass ma.baseExpr->GetTy(). The generic substitution T->Int64 must yield a valid FuncTy.
-    auto& targetBaseTy = *cls->GetTy();
-    Ptr<Ty> matchedTy = resolver.GetMatchedFuncInstTyByGivenTarget(candidate, *target, &targetBaseTy);
+    // pass ma.baseExpr->DataTy(). The generic substitution T->Int64 must yield a valid FuncTy.
+    auto targetBaseTy = cls->DataTy();
+    Ptr<Ty> matchedTy = resolver.GetMatchedFuncInstTyByGivenTarget(candidate, *target, targetBaseTy);
     EXPECT_TRUE(Ty::IsTyCorrect(matchedTy));
     if (Ty::IsTyCorrect(matchedTy)) {
         EXPECT_TRUE(matchedTy->IsFunc());

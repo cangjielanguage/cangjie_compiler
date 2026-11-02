@@ -29,15 +29,14 @@ constexpr std::string_view GET_POINTER_ADDRESS_INTRINSIC = "getPointerAddress";
 
 using namespace AST;
 
-
-OwnedPtr<RefExpr> CreateThisRef(Ptr<Decl> target, Ptr<Ty> ty, Ptr<File> curFile);
+OwnedPtr<RefExpr> CreateThisRef(Ptr<Decl> target, ModalTy ty, Ptr<File> curFile);
 
 OwnedPtr<CallExpr> CreateThisCall(
     Decl& target, FuncDecl& baseTarget, Ptr<Ty> funcTy, Ptr<File> curFile, std::vector<OwnedPtr<FuncArg>> args = {});
 
 OwnedPtr<PrimitiveType> CreateUnitType(Ptr<File> curFile);
 
-std::vector<Ptr<Ty>> GetParamTys(FuncParamList& params);
+std::vector<ModalTy> GetParamTys(FuncParamList& params);
 
 OwnedPtr<RefExpr> CreateSuperRef(Ptr<Decl> target, Ptr<Ty> ty);
 
@@ -90,8 +89,7 @@ template <typename... Args> OwnedPtr<CallExpr> CreateCall(Ptr<FuncDecl> fd, Ptr<
 
     (Details::WrapArg(&funcArgs, std::forward<OwnedPtr<Args>>(args)), ...);
 
-    auto funcTy = StaticCast<FuncTy*>(fd->GetTy());
-
+    auto funcTy = StaticCast<FuncTy*>(fd->DataTy());
     return CreateCallExpr(WithinFile(CreateRefExpr(*fd), curFile), std::move(funcArgs), fd, funcTy->retTy,
         CallKind::CALL_DECLARED_FUNCTION);
 }
@@ -105,7 +103,7 @@ OwnedPtr<CallExpr> CreateMemberCall(OwnedPtr<Expr> receiver, Ptr<FuncDecl> fd, O
 
     (Details::WrapArg(&funcArgs, std::forward<OwnedPtr<Args>>(args)), ...);
 
-    auto funcTy = StaticCast<FuncTy*>(fd->GetTy());
+    auto funcTy = StaticCast<FuncTy*>(fd->DataTy());
     auto ma = CreateMemberAccess(std::move(receiver), *fd);
     CopyBasicInfo(ma->baseExpr, ma);
     return CreateCallExpr(std::move(ma), std::move(funcArgs), fd, funcTy->retTy, CallKind::CALL_DECLARED_FUNCTION);
@@ -121,7 +119,7 @@ OwnedPtr<CallExpr> CreateMemberCall(
 
     (Details::WrapArg(&funcArgs, std::forward<OwnedPtr<Args>>(args)), ...);
 
-    auto funcTy = StaticCast<FuncTy*>(vd.GetTy());
+    auto funcTy = StaticCast<FuncTy>(vd.DataTy());
 
     // Ensure formal parameters count is the same as passed arguments.
     CJC_ASSERT(funcTy->paramTys.size() == funcArgs.size());
@@ -147,11 +145,11 @@ OwnedPtr<CallExpr> CreateMemberCall(
         return ca;
 }
 
-OwnedPtr<Type> CreateType(Ptr<Ty> ty);
+OwnedPtr<Type> CreateType(ModalTy ty);
 OwnedPtr<Type> CreateFuncType(Ptr<FuncTy> ty);
 
 OwnedPtr<Expr> CreateBoolMatch(
-    OwnedPtr<Expr> selector, OwnedPtr<Expr> trueBranch, OwnedPtr<Expr> falseBranch, Ptr<Ty> ty);
+    OwnedPtr<Expr> selector, OwnedPtr<Expr> trueBranch, OwnedPtr<Expr> falseBranch, ModalTy ty);
 
 StructDecl& GetStringDecl(const ImportManager& importManager);
 FuncDecl& GetReadPointerIntrinsicDecl(const ImportManager& importManager);
@@ -243,14 +241,14 @@ Ptr<Decl> GetOptionSomeDecl(const ImportManager& importManager);
 Ptr<Decl> GetOptionNoneDecl(const ImportManager& importManager);
 
 // `Option<ty>.None`
-OwnedPtr<Expr> CreateOptionNoneRef(const ImportManager& importManager, TypeManager& typeManager, Ptr<Ty> ty);
+OwnedPtr<Expr> CreateOptionNoneRef(const ImportManager& importManager, TypeManager& typeManager, ModalTy ty);
 
 // `Option<ty>.Some(expr)`
 OwnedPtr<Expr> CreateOptionSomeCall(
-    const ImportManager& importManager, TypeManager& typeManager, OwnedPtr<Expr> expr, Ptr<Ty> ty);
+    const ImportManager& importManager, TypeManager& typeManager, OwnedPtr<Expr> expr, ModalTy ty);
 
 // `Option<ty>.Some`
-OwnedPtr<Expr> CreateOptionSomeRef(const ImportManager& importManager, TypeManager& typeManager, Ptr<Ty> ty);
+OwnedPtr<Expr> CreateOptionSomeRef(const ImportManager& importManager, TypeManager& typeManager, ModalTy ty);
 
 /**
  * Returns string value of objective-c decl whether it is foreign or exported.

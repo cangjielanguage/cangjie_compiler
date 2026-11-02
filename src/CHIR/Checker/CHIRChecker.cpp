@@ -8,6 +8,7 @@
 #include "cangjie/CHIR/Utils/ToStringUtils.h"
 #include "cangjie/Mangle/CHIRManglingUtils.h"
 #include <sstream>
+#include <unordered_map>
 
 using namespace Cangjie::CHIR;
 
@@ -147,22 +148,6 @@ std::string ValueSymbolToString(const Value& value)
     } else {
         return value.ToString(0);
     }
-}
-
-/**
- * @brief generic type includes `T` and `class-A<U>`, we want to know `T` and `U` if is in container
- */
-bool GenericTypeIsInContainer(const Type& type, const std::vector<GenericType*>& container)
-{
-    if (type.IsGeneric()) {
-        return std::find(container.begin(), container.end(), &type) != container.end();
-    }
-    for (auto ty : type.GetTypeArgs()) {
-        if (!GenericTypeIsInContainer(*ty, container)) {
-            return false;
-        }
-    }
-    return true;
 }
 
 bool IsUnreachableApply(const Type* thisType)
@@ -631,6 +616,23 @@ void CHIRChecker::ShouldNotHaveResult(const Expression& expr, const Function& to
     }
 }
 
+/**
+ * @brief generic type includes `T` and `class-A<U>`, we want to know `T` and `U` if is in container
+ */
+bool CHIRChecker::GenericTypeIsInContainer(const Type& type, const std::vector<GenericType*>& container)
+{
+    if (type.IsGeneric()) {
+        auto dataType = type.GetDataType(builder);
+        return std::find(container.begin(), container.end(), dataType) != container.end();
+    }
+    for (auto ty : type.GetTypeArgs()) {
+        if (!GenericTypeIsInContainer(*ty, container)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool CHIRChecker::TypeIsExpected(const Type& srcType, const Type& dstType)
 {
     if (&srcType == &dstType) {
@@ -1020,7 +1022,7 @@ bool CHIRChecker::CheckParamTypes(
         (parentType->IsReferenceType() || topLevelFunc.TestAttr(Attribute::MUT) || funcIsInit());
     bool typeMatched = true;
     for (size_t i = 0; i < paramTypes.size(); ++i) {
-        auto pType = paramTypes[i];
+        auto pType = paramTypes[i]->GetDataType(builder);
         if (i == 0 && firstParamIsThis) {
             // a hack way, we need to replace Any& to correct type
             auto anyTyRef = builder.GetType<RefType>(builder.GetAnyTy());
@@ -1456,7 +1458,7 @@ void CHIRChecker::CheckUnreachableOpAndGenericTyInBG(const BlockGroup& blockGrou
             reachableValues.emplace_back(params[i]);
             // 1. generic type in lambda parameter must be reachable
             if (!GenericTypeIsInContainer(*params[i]->GetType(), reachableGenericTypes)) {
-                auto errMsg = "generic type " + params[i]->ToString(0) + "is unreachable, the type is " +
+                auto errMsg = "generic type " + params[i]->ToString(0) + " is unreachable, the type is " +
                     std::to_string(i) + "-th parameter in lambda " + lambda->GetIdentifier() + ".";
                 ErrorInFunc(*blockGroup.GetTopLevelFunc(), errMsg);
             }
@@ -1475,7 +1477,7 @@ void CHIRChecker::CheckUnreachableOpAndGenericTyInBG(const BlockGroup& blockGrou
             reachableValues.emplace_back(params[i]);
             // 2. generic type in global func parameter must be reachable
             if (!GenericTypeIsInContainer(*params[i]->GetType(), reachableGenericTypes)) {
-                auto errMsg = "generic type " + params[i]->ToString(0) + "is unreachable, the type is " +
+                auto errMsg = "generic type " + params[i]->ToString(0) + " is unreachable, the type is " +
                     std::to_string(i) + "-th parameter in function " + func->GetIdentifier() + ".";
                 ErrorInFunc(*func, errMsg);
             }
@@ -1578,7 +1580,7 @@ void CHIRChecker::CheckUnreachableGenericTypeInExpr(
         const auto& instantiatedTypeArgs = funcCall->GetInstantiatedTypeArgs();
         for (size_t i = 0; i < instantiatedTypeArgs.size(); ++i) {
             if (!GenericTypeIsInContainer(*instantiatedTypeArgs[i], reachableGenericTypes)) {
-                auto errMsg = "generic type " + instantiatedTypeArgs[i]->ToString() + "is unreachable, the type is " +
+                auto errMsg = "generic type " + instantiatedTypeArgs[i]->ToString() + " is unreachable, the type is " +
                     std::to_string(i) + "-th instantiated type args in expression " + expr.ToString(0) + ".";
                 ErrorInFunc(*expr.GetTopLevelFunc(), errMsg);
             }
@@ -1630,12 +1632,7 @@ void CHIRChecker::CheckBlockGroup(const BlockGroup& blockGroup, const Function& 
     // 2. block group's top-level function must be correct
     CheckTopLevelFunc(blockGroup.GetTopLevelFunc(), topLevelFunc, "block group", blockGroup.GetIdentifier());
 
-    // 3. there must be entry block in block group
-    if (blockGroup.GetEntryBlock() == nullptr) {
-        ErrorInFunc(topLevelFunc, "there is no entry block in block group " + blockGroup.GetIdentifier() + ".");
-    }
-
-    // 4. owner func and owner expression, there can only be one
+    // 3. owner func and owner expression, there can only be one
     auto ownerFunc = blockGroup.GetOwnerFunc();
     auto ownerExpr = blockGroup.GetOwnerExpression();
     if (ownerFunc == nullptr && ownerExpr == nullptr) {
@@ -1646,13 +1643,14 @@ void CHIRChecker::CheckBlockGroup(const BlockGroup& blockGroup, const Function& 
             blockGroup.GetIdentifier() + ".");
     }
 
-    // 5. there must be blocks in block group
+    // 4. there must be blocks in block group
     auto blocks = blockGroup.GetBlocks();
     if (blocks.empty()) {
         ErrorInFunc(topLevelFunc, "there is no block in block group " + blockGroup.GetIdentifier() + ".");
+        return;
     }
 
-    // 6. block's id can not be empty and not be same
+    // 5. block's id can not be empty and not be same
     std::unordered_set<std::string> ids;
     for (size_t i = 0; i < blocks.size(); ++i) {
         auto id = blocks[i]->GetIdentifier();
@@ -1666,9 +1664,137 @@ void CHIRChecker::CheckBlockGroup(const BlockGroup& blockGroup, const Function& 
         }
     }
 
-    // 7. check every block
+    // 6. check every block
     for (auto block : blocks) {
         CheckBlock(*block, topLevelFunc);
+    }
+
+    // 7. there must be entry block in block group
+    if (blockGroup.GetEntryBlock() == nullptr) {
+        ErrorInFunc(topLevelFunc, "there is no entry block in block group " + blockGroup.GetIdentifier() + ".");
+        return;
+    }
+
+    // 8. pair StartRegion and EndRegion along this block group's CFG. EndRegion closes only the
+    //    innermost StartRegion. A cycle must enter each block at the same nesting depth, so the
+    //    loop itself must not open or close a region. Nested block groups are checked on their own.
+    CheckStartEndRegion(blockGroup, topLevelFunc);
+}
+
+void CHIRChecker::CheckShouldNotHaveRegionExpr(const BlockGroup& blockGroup, const Function& topLevelFunc)
+{
+    // An exclave function body and an Exclave expression body are one block group each. They must
+    // not contain StartRegion or EndRegion. A lambda nested inside them is another block group and
+    // is not part of this check.
+    auto rejectRegion = [this, &blockGroup, &topLevelFunc](const std::string& where) {
+        for (auto block : blockGroup.GetBlocks()) {
+            for (auto node : block->GetExpressions()) {
+                if (!Is<StartRegion>(node) && !Is<EndRegion>(node)) {
+                    continue;
+                }
+                ErrorInExpr(topLevelFunc, *node, node->GetExprKindName() + " is not allowed in " + where + ".");
+            }
+        }
+    };
+    if (auto ownerFunc = blockGroup.GetOwnerFunc(); ownerFunc != nullptr &&
+        ownerFunc->TestAttr(Attribute::EXCLAVE)) {
+        rejectRegion("an exclave function body");
+    } else if (auto ownerExpr = blockGroup.GetOwnerExpression(); ownerExpr != nullptr &&
+        Is<Exclave>(ownerExpr)) {
+        rejectRegion("an exclave expression body");
+    }
+}
+
+std::pair<std::vector<Block*>, size_t> CHIRChecker::CheckStartEndRegionInBlock(
+    const Block& block, size_t depth, const BlockGroup& blockGroup, const Function& topLevelFunc)
+{
+    std::vector<Block*> successors;
+    for (auto node : block.GetExpressions()) {
+        if (Is<StartRegion>(node)) {
+            ++depth;
+            continue;
+        }
+        if (Is<EndRegion>(node)) {
+            if (depth == 0) {
+                ErrorInExpr(topLevelFunc, *node,
+                    "EndRegion does not match a StartRegion in this block group.");
+                break;
+            }
+            --depth;
+            continue;
+        }
+        if (!node->IsTerminator()) {
+            continue;
+        }
+        if (Is<Exit>(node) || Is<Exclave>(node)) {
+            if (depth != 0) {
+                ErrorInExpr(topLevelFunc, *node,
+                    "missing EndRegion before leaving the frame. StartRegion and EndRegion must be paired "
+                    "in the same block group.");
+            }
+            break;
+        }
+        for (auto succ : node->GetSuccessors()) {
+            CJC_NULLPTR_CHECK(succ);
+            if (succ->GetParentBlockGroup() != &blockGroup) {
+                if (depth != 0) {
+                    ErrorInExpr(topLevelFunc, *node,
+                        "control flow leaves this block group while StartRegion is still open. EndRegion in "
+                        "another block group, including a nested one, does not close it.");
+                }
+                continue;
+            }
+            successors.push_back(succ);
+        }
+    }
+    return {std::move(successors), depth};
+}
+
+void CHIRChecker::CheckStartEndRegion(const BlockGroup& blockGroup, const Function& topLevelFunc)
+{
+    CheckShouldNotHaveRegionExpr(blockGroup, topLevelFunc);
+
+    // One pass over this block group's CFG. StartRegion pushes and EndRegion pops only the
+    // innermost frame. Paths that meet again, including a cycle back to an earlier block, must
+    // carry the same depth; a different depth means the loop itself opened or closed a region.
+    // Exit require depth 0. Nested block groups are separate CFGs and are not entered.
+    auto entry = blockGroup.GetEntryBlock();
+    struct Cursor {
+        Block* block;
+        size_t depth;
+    };
+    std::vector<Cursor> worklist{{entry, 0}};
+    std::unordered_map<Block*, size_t> depthAtEntry;
+
+    while (!worklist.empty()) {
+        auto cur = worklist.back();
+        worklist.pop_back();
+        auto block = cur.block;
+        CJC_NULLPTR_CHECK(block);
+        if (block->GetParentBlockGroup() != &blockGroup) {
+            continue;
+        }
+        // A later edge into this block is a join or a cycle (a back edge to an earlier block).
+        // The depth must match the first entry. A loop that runs StartRegion without EndRegion,
+        // or EndRegion without StartRegion, changes the depth on the back edge and is rejected.
+        // The same depth means the region stack is unchanged around the cycle, so walking this
+        // block again would not find a new pairing.
+        if (auto it = depthAtEntry.find(block); it != depthAtEntry.end()) {
+            if (it->second != cur.depth) {
+                ErrorInFunc(topLevelFunc, "block " + block->GetIdentifier() +
+                    " is reached again with StartRegion depth " + std::to_string(cur.depth) +
+                    ", but it was first entered with depth " + std::to_string(it->second) +
+                    ". A join or a cycle between blocks must not open or close a region: EndRegion "
+                    "closes only the innermost StartRegion, so every path into a block must pair "
+                    "them the same way.");
+            }
+            continue;
+        }
+        depthAtEntry.emplace(block, cur.depth);
+        auto [blocks, depth] = CheckStartEndRegionInBlock(*block, cur.depth, blockGroup, topLevelFunc);
+        for (auto b : blocks) {
+            worklist.push_back({b, depth});
+        }
     }
 }
 
@@ -1833,6 +1959,8 @@ void CHIRChecker::CheckTerminator(const Expression& expr, const Function& topLev
             CheckTryAllocate(StaticCast<const TryAllocate&>(expr), topLevelFunc); }},
         {ExprKind::TRY_RAW_ARRAY_ALLOCATE, [this, &expr, &topLevelFunc]() {
             CheckTryRawArrayAllocate(StaticCast<const TryRawArrayAllocate&>(expr), topLevelFunc); }},
+        {ExprKind::EXCLAVE, [this, &expr, &topLevelFunc]() {
+            CheckExclave(StaticCast<const Exclave&>(expr), topLevelFunc); }},
     };
     if (auto it = actionMap.find(expr.GetExprKind()); it != actionMap.end()) {
         it->second();
@@ -2783,7 +2911,7 @@ void CHIRChecker::CheckUnaryExprBase(const UnaryExpressionBase& expr, const Func
 {
     // 1. skip checking if operand type is Nothing
     auto operand = expr.GetOperand();
-    auto operandType = operand->GetType();
+    auto operandType = operand->GetType()->GetDataType(builder);
     if (operandType->IsNothing()) {
         return;
     }
@@ -2802,7 +2930,7 @@ void CHIRChecker::CheckUnaryExprBase(const UnaryExpressionBase& expr, const Func
 
     // 3. result type must equal to operand type
     auto result = expr.GetResult();
-    auto resultType = result->GetType();
+    auto resultType = result->GetType()->GetDataType(builder);
     if (operandType != resultType) {
         TypeCheckError(expr, *result, operandType->ToString(), topLevelFunc);
     }
@@ -2851,8 +2979,8 @@ void CHIRChecker::CheckCalculExpression(const BinaryExpressionBase& expr, const 
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     auto result = expr.GetResult();
     // 1. check operand type
     if (expr.GetOpKind() == BinaryExprKind::MOD) {
@@ -2877,7 +3005,7 @@ void CHIRChecker::CheckCalculExpression(const BinaryExpressionBase& expr, const 
     if (leftOpType != rightOpType) {
         auto errMsg = "left operand and right operand don't have same type in " + result->ToString(0) + ".";
         ErrorInFunc(topLevelFunc, errMsg);
-    } else if (result->GetType() != leftOpType) {
+    } else if (result->GetType()->GetDataType(builder) != leftOpType) {
         auto errMsg = "the result value and operand don't have same type in " + result->ToString(0) + ".";
         ErrorInFunc(topLevelFunc, errMsg);
     }
@@ -2890,15 +3018,15 @@ void CHIRChecker::CheckExponentiationExpression(const BinaryExpressionBase& expr
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     // 1. left operand's type must be Int64 or Float64
     if (leftOpType->GetTypeKind() != Type::TypeKind::TYPE_INT64 &&
         leftOpType->GetTypeKind() != Type::TypeKind::TYPE_FLOAT64) {
         TypeCheckError(expr, *leftOperand, "Int64 or Float64", topLevelFunc);
     }
     auto result = expr.GetResult();
-    auto resultType = result->GetType();
+    auto resultType = result->GetType()->GetDataType(builder);
     if (leftOpType->GetTypeKind() == Type::TypeKind::TYPE_INT64) {
         // 2. if left operand's type is Int64, right operand's type must be UInt64, and result type must be Int64
         if (rightOpType->GetTypeKind() != Type::TypeKind::TYPE_UINT64) {
@@ -2927,8 +3055,8 @@ void CHIRChecker::CheckBitExpression(const BinaryExpressionBase& expr, const Fun
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     // 1. operands' type must be Int
     if (!leftOpType->IsInteger()) {
         TypeCheckError(expr, *leftOperand, "Int", topLevelFunc);
@@ -2947,8 +3075,8 @@ void CHIRChecker::CheckCompareExpression(const BinaryExpressionBase& expr, const
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     auto result = expr.GetResult();
     // 1. operands' type must be same
     if (leftOpType != rightOpType) {
@@ -2957,7 +3085,7 @@ void CHIRChecker::CheckCompareExpression(const BinaryExpressionBase& expr, const
     }
 
     // 2. result type must be Bool
-    if (!result->GetType()->IsBoolean()) {
+    if (!result->GetType()->GetDataType(builder)->IsBoolean()) {
         TypeCheckError(expr, *result, "Bool", topLevelFunc);
     }
 }
@@ -2966,8 +3094,8 @@ void CHIRChecker::CheckLogicExpression(const BinaryExpressionBase& expr, const F
 {
     auto leftOperand = expr.GetLHSOperand();
     auto rightOperand = expr.GetRHSOperand();
-    auto leftOpType = leftOperand->GetType();
-    auto rightOpType = rightOperand->GetType();
+    auto leftOpType = leftOperand->GetType()->GetDataType(builder);
+    auto rightOpType = rightOperand->GetType()->GetDataType(builder);
     // 1. operands' type must be Bool
     if (!leftOpType->IsBoolean()) {
         TypeCheckError(expr, *leftOperand, "Bool", topLevelFunc);
@@ -3277,6 +3405,20 @@ void CHIRChecker::CheckTryRawArrayAllocate(const TryRawArrayAllocate& expr, cons
     CheckRawArrayAllocateBase(expr, topLevelFunc);
 }
 
+void CHIRChecker::CheckExclave(const Exclave& expr, const Function& topLevelFunc)
+{
+    // 1. shouldn't have result
+    ShouldNotHaveResult(expr, topLevelFunc);
+
+    // 2. shouldn't have operands
+    if (!OperandNumIsEqual(0, expr, topLevelFunc)) {
+        return;
+    }
+
+    // 3. body must be valid
+    CheckBlockGroup(*expr.GetBody(), topLevelFunc);
+}
+
 void CHIRChecker::CheckRawArrayAllocateBase(const RawArrayAllocateBase& expr, const Function& topLevelFunc)
 {
     // 1. result type must be RawArray&
@@ -3428,6 +3570,10 @@ void CHIRChecker::CheckOtherExpression(const Expression& expr, const Function& t
             CheckGetRTTI(StaticCast<const GetRTTI&>(expr), topLevelFunc); }},
         {ExprKind::GET_RTTI_STATIC, [this, &expr, &topLevelFunc]() {
             CheckGetRTTIStatic(StaticCast<const GetRTTIStatic&>(expr), topLevelFunc); }},
+        {ExprKind::START_REGION, [this, &expr, &topLevelFunc]() {
+            CheckStartRegion(StaticCast<const StartRegion&>(expr), topLevelFunc); }},
+        {ExprKind::END_REGION, [this, &expr, &topLevelFunc]() {
+            CheckEndRegion(StaticCast<const EndRegion&>(expr), topLevelFunc); }},
     };
     if (auto it = actionMap.find(expr.GetExprKind()); it != actionMap.end()) {
         it->second();
@@ -3465,7 +3611,7 @@ void CHIRChecker::CheckConstant(const Constant& expr, const Function& topLevelFu
 
     // 4. result type must equal to operand type
     auto result = expr.GetResult();
-    if (result->GetType() != valueType) {
+    if (result->GetType() != valueType && result->GetType()->GetDataType(builder) != valueType) {
         TypeCheckError(expr, *result, valueType->ToString(), topLevelFunc);
     }
 }
@@ -3589,7 +3735,7 @@ void CHIRChecker::CheckEnumTuple(const Tuple& expr, const Function& topLevelFunc
         return;
     }
     for (size_t i = 1; i < operands.size(); ++i) {
-        if (!TypeIsExpected(*operands[i]->GetType(), *paramTypes[i - 1])) {
+        if (!TypeIsExpected(*operands[i]->GetType()->GetDataType(builder), *paramTypes[i - 1])) {
             auto errMsg = "type mismatched, the " + std::to_string(i - 1) + "-th parameter type is " +
                 paramTypes[i - 1]->ToString() + ", but " + operands[i]->GetIdentifier() + "'s type is " +
                 operands[i]->GetType()->ToString() + " in `" + result->ToString(0) + "`.";
@@ -3643,11 +3789,13 @@ void CHIRChecker::CheckNormalTuple(const Tuple& expr, const Function& topLevelFu
         return;
     }
 
-    // 2. operand's type must equal to element type
+    // 2. operand's type must equal to element type (modal inherited via GetFieldOfType)
     for (size_t i = 0; i < elementTypes.size(); ++i) {
-        if (!TypeIsExpected(*operands[i]->GetType(), *elementTypes[i])) {
+        auto expectedTy = GetFieldOfType(*resultTy, static_cast<uint64_t>(i), builder);
+        CJC_NULLPTR_CHECK(expectedTy);
+        if (!TypeIsExpected(*operands[i]->GetType(), *expectedTy)) {
             auto errMsg = "type mismatched, the " + std::to_string(i) + "-th element type in tuple type `" +
-                resultTy->ToString() + "` is " + elementTypes[i]->ToString() + ", but " +
+                resultTy->ToString() + "` is " + expectedTy->ToString() + ", but " +
                 operands[i]->GetIdentifier() + "'s type is " + operands[i]->GetType()->ToString() +
                 " in `" + result->ToString(0) + "`.";
             ErrorInFunc(topLevelFunc, errMsg);
@@ -3748,8 +3896,19 @@ void CHIRChecker::CheckInstanceOf(const InstanceOf& expr, const Function& topLev
         ErrorInFunc(topLevelFunc, errMsg);
     }
 }
-void CHIRChecker::CheckTypeCast([[maybe_unused]] const TypeCast& expr, [[maybe_unused]] const Function& topLevelFunc)
+void CHIRChecker::CheckTypeCast(const TypeCast& expr, const Function& topLevelFunc)
 {
+    if (!Is<ClassStaticCast>(expr)) {
+        return;
+    }
+    auto* srcTy = expr.GetSourceType()->StripAllRefs();
+    auto* dstTy = expr.GetTargetType()->StripAllRefs();
+    if (srcTy->IsCopyable() || srcTy->GetModalInfo().IsEqualOrSubModal(dstTy->GetModalInfo())) {
+        return;
+    }
+    auto errMsg = "ClassStaticCast must not change modal of non-copyable type, source is " + srcTy->ToString() +
+        ", target is " + dstTy->ToString() + ".";
+    ErrorInExpr(topLevelFunc, expr, errMsg);
 }
 
 void CHIRChecker::CheckGetException(const GetException& expr, const Function& topLevelFunc)
@@ -3805,14 +3964,22 @@ void CHIRChecker::CheckRawArrayLiteralInit(const RawArrayLiteralInit& expr, cons
 
     // 2. the 1st operand must be RawArray&
     auto rawArray = expr.GetRawArray();
-    if (!rawArray->GetType()->IsRef() || !rawArray->GetType()->StripAllRefs()->IsRawArray()) {
+    auto rawArrayTy = rawArray->GetType();
+    if (!rawArrayTy->IsRef() || !rawArrayTy->StripAllRefs()->IsRawArray()) {
         TypeCheckError(expr, *rawArray, "RawArray&", topLevelFunc);
+        return;
     }
 
-    // 3. all elements' type must be equal to RawArray's element type
-    auto rawArrayEleTy = StaticCast<RawArrayType*>(rawArray->GetType()->StripAllRefs())->GetElementType();
+    // 3. each element's data type must match RawArray's element type; modal belongs on RawArray
+    // (e.g. RawArray<Rune> @local!), so Rune @local! is accepted when it is equal or a sub-modal of the array.
+    auto rawArrayRawTy = StaticCast<RawArrayType*>(rawArrayTy->StripAllRefs());
+    auto rawArrayEleTy = rawArrayRawTy->GetElementType();
+    auto rawArrayModal = rawArrayRawTy->GetModalInfo();
     for (auto e : expr.GetElementValues()) {
-        if (!e->GetType()->IsEqualOrSubTypeOf(*rawArrayEleTy, builder)) {
+        auto elemTy = e->GetType();
+        auto elemModal = elemTy->StripAllRefs()->GetModalInfo();
+        if (!elemTy->GetDataType(builder)->IsEqualOrSubTypeOf(*rawArrayEleTy, builder) ||
+            !elemModal.IsEqualOrSubModal(rawArrayModal)) {
             TypeCheckError(expr, *e, rawArrayEleTy->ToString(), topLevelFunc);
         }
     }
@@ -3833,11 +4000,15 @@ void CHIRChecker::CheckRawArrayInitByValue(const RawArrayInitByValue& expr, cons
         TypeCheckError(expr, *size, "Int64", topLevelFunc);
     }
     auto rawArray = expr.GetRawArray();
-    if (!rawArray->GetType()->IsRef() || !rawArray->GetType()->StripAllRefs()->IsRawArray()) {
+    auto rawArrayTy = rawArray->GetType();
+    if (!rawArrayTy->IsRef() || !rawArrayTy->StripAllRefs()->IsRawArray()) {
         TypeCheckError(expr, *rawArray, "RawArray&", topLevelFunc);
     } else {
         auto rawArrayEleTy = StaticCast<RawArrayType*>(rawArray->GetType()->StripAllRefs())->GetElementType();
-        if (rawArrayEleTy != expr.GetInitValue()->GetType()) {
+        auto initValueTy = expr.GetInitValue()->GetType();
+        auto initValueModal = initValueTy->StripAllRefs()->GetModalInfo();
+        auto rawArrayModal = rawArrayTy->StripAllRefs()->GetModalInfo();
+        if (rawArrayEleTy != initValueTy->GetDataType(builder) || !initValueModal.IsEqualOrSubModal(rawArrayModal)) {
             TypeCheckError(expr, *expr.GetInitValue(), rawArrayEleTy->ToString(), topLevelFunc);
         }
     }
@@ -3850,8 +4021,8 @@ void CHIRChecker::CheckVArray(const VArray& expr, const Function& topLevelFunc)
         TypeCheckError(expr, *result, "VArray", topLevelFunc);
         return;
     }
-    // elements type check
-    auto elemType = StaticCast<VArrayType*>(result->GetType())->GetElementType();
+    auto varrayTy = StaticCast<VArrayType>(result->GetType());
+    auto elemType = builder.WithModal(varrayTy->GetElementType(), varrayTy->GetModalInfo());
     // only use VArray to be parameter type in CFunc, its element type shouldn't be normal struct,
     // must be marked with @C
     if (!IsCTypeInVArray(*elemType)) {
@@ -4122,6 +4293,16 @@ void CHIRChecker::CheckGetRTTIStatic(const GetRTTIStatic& expr, const Function& 
         ErrorInExpr(topLevelFunc, expr,
             "RTTI type should be `This` or Generic type, but now it's " + expr.GetRTTIType()->ToString() + ".");
     }
+}
+
+void CHIRChecker::CheckStartRegion([[maybe_unused]] const StartRegion& expr,
+    [[maybe_unused]] const Function& topLevelFunc)
+{
+}
+
+void CHIRChecker::CheckEndRegion([[maybe_unused]] const EndRegion& expr,
+    [[maybe_unused]] const Function& topLevelFunc)
+{
 }
 
 void CHIRChecker::CheckMemoryExpression(const Expression& expr, const Function& topLevelFunc)

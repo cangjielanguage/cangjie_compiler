@@ -51,7 +51,7 @@ void SetIncOrDecOverflowExpr(Node& node)
         return;
     }
     // Not Integer, no need to set overflow flag.
-    if (ide->expr == nullptr || Ty::IsInitialTy(ide->expr->GetTy()) || !ide->expr->GetTy()->IsInteger()) {
+    if (ide->expr == nullptr || Ty::IsInitialTy(ide->expr->DataTy()) || !ide->expr->GetTy()->IsInteger()) {
         return;
     }
     // Implement overflow in codegen.
@@ -68,7 +68,7 @@ void SetAssignOverflowExpr(Node& node)
         return;
     }
     // Not Integer, no need to set overflow flag.
-    if (ae->leftValue == nullptr || Ty::IsInitialTy(ae->leftValue->GetTy()) || !ae->leftValue->GetTy()->IsInteger()) {
+    if (ae->leftValue == nullptr || Ty::IsInitialTy(ae->leftValue->DataTy()) || !ae->leftValue->GetTy()->IsInteger()) {
         return;
     }
     // Implement overflow in codegen.
@@ -83,7 +83,7 @@ void SetUnaryOverflowExpr(Node& node)
         return;
     }
     // Not Integer, no need to set overflow flag.
-    if (ue->expr == nullptr || Ty::IsInitialTy(ue->expr->GetTy()) || !ue->expr->GetTy()->IsInteger()) {
+    if (ue->expr == nullptr || Ty::IsInitialTy(ue->expr->DataTy()) || !ue->expr->GetTy()->IsInteger()) {
         return;
     }
     // Implement overflow in codegen.
@@ -98,8 +98,8 @@ void SetBinaryOverflowExpr(Node& node)
         return;
     }
     // Not Integer or not Same no need to set overflow flag.
-    if (be->leftExpr == nullptr || Ty::IsInitialTy(be->leftExpr->GetTy()) || !be->leftExpr->GetTy()->IsInteger() ||
-        be->rightExpr == nullptr || Ty::IsInitialTy(be->rightExpr->GetTy()) || !be->rightExpr->GetTy()->IsInteger()) {
+    if (be->leftExpr == nullptr || Ty::IsInitialTy(be->leftExpr->DataTy()) || !be->leftExpr->GetTy()->IsInteger() ||
+        be->rightExpr == nullptr || Ty::IsInitialTy(be->rightExpr->DataTy()) || !be->rightExpr->GetTy()->IsInteger()) {
         return;
     }
     // Implement overflow in codegen.
@@ -118,7 +118,7 @@ void SetOverflowFlag(Node& node)
         SetAssignOverflowExpr(node);
         return;
     }
-    if (Ty::IsInitialTy(node.GetTy()) || !node.GetTy()->IsInteger()) {
+    if (Ty::IsInitialTy(node.DataTy()) || !node.GetTy()->IsInteger()) {
         return;
     }
     if (node.astKind == ASTKind::UNARY_EXPR) {

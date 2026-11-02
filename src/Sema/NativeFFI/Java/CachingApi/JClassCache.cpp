@@ -49,19 +49,17 @@ OwnedPtr<AST::Expr> JClassCache::CreateJClassAccess(
     std::vector<OwnedPtr<Node>> ifNull;
     std::vector<OwnedPtr<Node>> ifNotNull;
 
-    ifNull.push_back(
-        CreateAssignExpr(WithinFile(CreateRefExpr(classVar), &curFile),
-            ilib.CreateSwapLocalWithGlobalRefCall(ASTCloner::Clone(envPtr), createGetClassCall(javaClass)),
-            TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)));
+    ifNull.push_back(CreateAssignExpr(WithinFile(CreateRefExpr(classVar), &curFile),
+        ilib.CreateSwapLocalWithGlobalRefCall(ASTCloner::Clone(envPtr), createGetClassCall(javaClass)),
+        {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)}));
     ifNull.push_back(WithinFile(CreateRefExpr(classVar), &curFile));
 
     ifNotNull.push_back(WithinFile(CreateRefExpr(classVar), &curFile));
 
     return CreateIfExpr(
         CreateIsPtrNullCheckCall(importManager, typeManager, WithinFile(CreateRefExpr(classVar), &curFile)),
-        CreateBlock(std::move(ifNull), &ilib.GetJniJClassTy()),
-        CreateBlock(std::move(ifNotNull), &ilib.GetJniJClassTy()),
-        &ilib.GetJniJClassTy());
+        CreateBlock(std::move(ifNull), {&ilib.GetJniJClassTy()}),
+        CreateBlock(std::move(ifNotNull), {&ilib.GetJniJClassTy()}), {&ilib.GetJniJClassTy()});
 }
 
 VarDecl& JClassCache::GetOrPut(AfterTypeCheckContext& ctx, JavaClassSignature javaClass, File& curFile)
@@ -74,7 +72,7 @@ VarDecl& JClassCache::GetOrPut(AfterTypeCheckContext& ctx, JavaClassSignature ja
     auto& jclassTy = ilib.GetJniJClassTy();
 
     auto null = MakeOwned<PointerExpr>();
-    null->SetTy(&jclassTy);
+    null->SetTy({&jclassTy});
     auto varDecl = CreateVarDecl(GetNewAccessorName(javaClass), std::move(null), nullptr);
     varDecl->EnableAttr(Attribute::INTERNAL, Attribute::GLOBAL, Attribute::INITIALIZED, Attribute::NO_REFLECT_INFO);
     varDecl->isVar = true;

@@ -141,26 +141,27 @@ void ChkSyscapArgument(DiagnosticEngine& diag, const ImportManager& importManage
 }
 } // namespace
 
-bool TypeChecker::TypeCheckerImpl::ChkIfAvailableExpr(ASTContext& ctx, Ty& ty, IfAvailableExpr& ie)
+bool TypeChecker::TypeCheckerImpl::ChkIfAvailableExpr(ASTContext& ctx, ModalTy ty, IfAvailableExpr& ie)
 {
     auto exprTy = SynIfAvailableExpr(ctx, ie);
-    if (!Ty::IsTyCorrect(exprTy)) {
+    if (!exprTy.IsCorrect()) {
         return false;
     }
-    if (!typeManager.IsSubtype(exprTy, &ty)) {
+    if (!typeManager.IsSubtype(exprTy, ty)) {
         Sema::DiagMismatchedTypes(diag, ie, ty);
         return false;
     }
     return true;
 }
 
-Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIfAvailableExpr(ASTContext& ctx, IfAvailableExpr& iae)
+ModalTy TypeChecker::TypeCheckerImpl::SynIfAvailableExpr(ASTContext& ctx, IfAvailableExpr& iae)
 {
     // Desugar before type checker.
     auto ie = DynamicCast<IfExpr>(iae.desugarExpr.get());
     if (!ie) {
-        return typeManager.GetInvalidTy();
+        return {TypeManager::GetInvalidTy()};
     }
+    bool res{true};
     IfAvailableCheckState state;
     auto argName = iae.GetArg()->name;
     if (argName.Empty()) {
@@ -178,11 +179,11 @@ Ptr<Ty> TypeChecker::TypeCheckerImpl::SynIfAvailableExpr(ASTContext& ctx, IfAvai
         state.res = false;
         state.hasHardError = true;
     }
-    auto targetTy = typeManager.GetFunctionTy({}, typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT));
-    state.res = Check(ctx, targetTy, iae.GetLambda1()) && state.res;
-    state.res = Check(ctx, targetTy, iae.GetLambda2()) && state.res;
-    if (!state.res) {
-        iae.SetTy(typeManager.GetInvalidTy());
+    ModalTy lambdaFnTy{typeManager.GetFunctionTy({}, ModalTy{typeManager.GetPrimitiveTy(TypeKind::TYPE_UNIT)})};
+    res = Check(ctx, lambdaFnTy, iae.GetLambda1()) && res;
+    res = Check(ctx, lambdaFnTy, iae.GetLambda2()) && res;
+    if (!res) {
+        iae.SetTy({typeManager.GetInvalidTy()});
         return iae.GetTy();
     }
     iae.SetTy(Synthesize({ctx, SynPos::EXPR_ARG}, iae.desugarExpr));

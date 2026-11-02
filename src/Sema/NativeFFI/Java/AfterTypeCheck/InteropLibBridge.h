@@ -428,9 +428,8 @@ public:
      */
     OwnedPtr<Expr> UnwrapJavaEntity(OwnedPtr<Expr> entity, Ptr<Ty> ty, Ptr<const Decl> scope, bool toRaw = false);
 
-    OwnedPtr<AST::MatchExpr> CreateMatchByTypeArgument(
-        const Ptr<AST::GenericParamDecl> genericParam,
-        std::map<std::string, OwnedPtr<Expr>> typeToCaseMap, Ptr<Ty> retTy, OwnedPtr<Expr> defaultCase);
+    OwnedPtr<AST::MatchExpr> CreateMatchByTypeArgument(const Ptr<AST::GenericParamDecl> genericParam,
+        std::map<std::string, OwnedPtr<Expr>> typeToCaseMap, ModalTy retTy, OwnedPtr<Expr> defaultCase);
     OwnedPtr<AST::MatchExpr> CreateMatchWithTypeCast(OwnedPtr<Expr> exprToCast, Ptr<Ty> castTy);
     OwnedPtr<Expr> CreateGetTypeForTypeParameterCall(const Ptr<GenericParamDecl> genericParam) const;
 

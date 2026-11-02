@@ -9,7 +9,6 @@
  *
  * This file implements how to merge inherited parent member to child member.
  */
-#include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Types.h"
 #include "cangjie/AST/Utils.h"
@@ -24,14 +23,14 @@ using namespace TypeCheckUtil;
 
 namespace {
 void UpdateInconsistentTypes(
-    MemberSignature& member, const MemberSignature& parent, const std::vector<Ptr<const Ty>>& inconsistentTypes)
+    MemberSignature& member, const MemberSignature& parent, const std::vector<ModalTy>& inconsistentTypes)
 {
     member.inconsistentTypes.insert(parent.inconsistentTypes.begin(), parent.inconsistentTypes.end());
     member.inconsistentTypes.insert(inconsistentTypes.begin(), inconsistentTypes.end());
 }
 
-std::vector<std::unordered_set<Ptr<Ty>>> UpdateUpperBoundsSet(
-    TypeManager& tyMgr, const std::vector<std::unordered_set<Ptr<Ty>>>& upperBounds, const TypeSubst& typeMapping)
+std::vector<std::unordered_set<DataTy>> UpdateUpperBoundsSet(
+    TypeManager& tyMgr, const std::vector<std::unordered_set<DataTy>>& upperBounds, const TypeSubst& typeMapping)
 {
     if (typeMapping.empty() ||
         std::all_of(upperBounds.begin(), upperBounds.end(), [](auto it) { return it.empty(); })) {
@@ -39,9 +38,9 @@ std::vector<std::unordered_set<Ptr<Ty>>> UpdateUpperBoundsSet(
         // All elements in 'upperBounds' are empty, quick quit.
         return upperBounds;
     }
-    std::vector<std::unordered_set<Ptr<Ty>>> allUpperBounds;
+    std::vector<std::unordered_set<DataTy>> allUpperBounds;
     for (const auto& uppers : std::as_const(upperBounds)) {
-        std::unordered_set<Ptr<Ty>> newUppers;
+        std::unordered_set<DataTy> newUppers;
         for (auto it : uppers) {
             newUppers.emplace(tyMgr.GetInstantiatedTy(it, typeMapping));
         }
@@ -68,14 +67,13 @@ void MergeUpperBounds(TypeManager& tyMgr, MemberSignature& src, const MemberSign
 }
 
 void SetPossibleInconsistentType(
-    const MemberSignature& target, const MemberSignature& src, std::vector<Ptr<const Ty>>& inconsistentTypes)
+    const MemberSignature& target, const MemberSignature& src, std::vector<ModalTy>& inconsistentTypes)
 {
-    auto getTy = [](auto member) {
-        if (auto ty = DynamicCast<FuncTy*>(member.ty)) {
+    auto getTy = [](const MemberSignature& member) -> ModalTy {
+        if (auto ty = DynamicCast<FuncTy>(member.ty)) {
             return ty->retTy;
-        } else {
-            return member.ty;
         }
+        return member.ty;
     };
     inconsistentTypes.emplace_back(getTy(target));
     inconsistentTypes.emplace_back(getTy(src));
@@ -89,10 +87,10 @@ void SetPossibleInconsistentType(
  * @p status means {parent and child have same signature, parent and child are both from inherited interfaces}.
  */
 bool StructInheritanceChecker::ComputeInconsistentTypes(const MemberSignature& child, const MemberSignature& parent,
-    MemberSignature& updated, const std::pair<bool, bool>& status, std::vector<Ptr<const Ty>>& inconsistentTypes) const
+    MemberSignature& updated, const std::pair<bool, bool>& status, std::vector<ModalTy>& inconsistentTypes) const
 {
-    auto parentTy = DynamicCast<FuncTy*>(parent.ty);
-    auto childTy = DynamicCast<FuncTy*>(child.ty);
+    auto parentTy = DynamicCast<FuncTy>(parent.ty);
+    auto childTy = DynamicCast<FuncTy>(child.ty);
     if (!Ty::IsTyCorrect(parentTy) || !Ty::IsTyCorrect(childTy)) {
         return true;
     }
@@ -119,6 +117,23 @@ bool StructInheritanceChecker::ComputeInconsistentTypes(const MemberSignature& c
     return hasConsistentReturnTy;
 }
 
+void StructInheritanceChecker::ComputeInconsistentPropTypes(const MemberSignature& child, const MemberSignature& parent,
+    std::vector<ModalTy>& inconsistentTypes) const
+{
+    if (parent.thisMode != child.thisMode) {
+        return;
+    }
+    auto parentTy = parent.ty;
+    auto childTy = child.ty;
+    if (!Ty::IsTyCorrect(parentTy) || !Ty::IsTyCorrect(childTy)) {
+        return;
+    }
+    if (!typeManager.IsTyEqual(parentTy, childTy)) {
+        inconsistentTypes.emplace_back(parent.ty, parent.thisMode);
+        inconsistentTypes.emplace_back(child.ty, child.thisMode);
+    }
+}
+
 /**
  * Update @p child value into the @p members
  * NOTE: Do not report error here.
@@ -131,29 +146,36 @@ MemberSignature StructInheritanceChecker::UpdateInheritedMemberIfNeeded(
     MemberSignature updated = child;
     bool needImplement = child.decl->outerDecl->astKind == ASTKind::INTERFACE_DECL || inheritedInterfaces;
     auto foundMembers = inheritedMembers.equal_range(child.decl->identifier);
-    std::vector<Ptr<const Ty>> inconsistentTypes;
+    std::vector<ModalTy> inconsistentTypes;
     for (auto it = foundMembers.first; it != foundMembers.second; ++it) {
         auto parent = it->second;
         if (parent.decl->astKind != child.decl->astKind) {
             continue;
         }
         bool shouldUpdate = true;
-        bool inconsistentType = needImplement && parent.ty != child.ty;
+        bool inconsistentType = needImplement && (parent.ty != child.ty || parent.thisMode != child.thisMode);
         if (parent.decl->IsFunc()) {
             if (child.decl->TestAttr(Attribute::GENERIC) && parent.decl->TestAttr(Attribute::GENERIC)) {
                 TypeSubst typeMapping = typeManager.GenerateGenericMappingFromGeneric(
                     *RawStaticCast<FuncDecl*>(parent.decl), *RawStaticCast<FuncDecl*>(child.decl));
                 parent.ty = typeManager.GetInstantiatedTy(parent.ty, typeMapping);
             }
-            auto parentFuncTy = DynamicCast<FuncTy*>(parent.ty);
-            auto childFuncTy = DynamicCast<FuncTy*>(child.ty);
+            auto parentFuncTy = DynamicCast<FuncTy>(parent.ty);
+            auto childFuncTy = DynamicCast<FuncTy>(child.ty);
             bool sameStatus = parent.decl->TestAttr(Attribute::STATIC) == child.decl->TestAttr(Attribute::STATIC) &&
                 child.decl->TestAttr(Attribute::GENERIC) == parent.decl->TestAttr(Attribute::GENERIC);
             shouldUpdate = sameStatus && parentFuncTy && childFuncTy &&
-                typeManager.IsFuncParameterTypesIdentical(*parentFuncTy, *childFuncTy);
+                typeManager.IsFuncParameterTypesIdentical(*parentFuncTy, *childFuncTy) &&
+                parent.thisMode == child.thisMode;
             auto consistent = ComputeInconsistentTypes(
                 child, parent, updated, {shouldUpdate, inheritedInterfaces}, inconsistentTypes);
             inconsistentType = inconsistentType && !consistent;
+        } else if (parent.decl->astKind == ASTKind::PROP_DECL) {
+            ComputeInconsistentPropTypes(child, parent, inconsistentTypes);
+            shouldUpdate = parent.ty == child.ty && parent.thisMode == child.thisMode;
+            if (!inconsistentTypes.empty()) {
+                UpdateInconsistentTypes(it->second, parent, inconsistentTypes);
+            }
         } else if (inconsistentType) {
             SetPossibleInconsistentType(parent, child, inconsistentTypes);
         }
@@ -203,10 +225,10 @@ MemberSignature StructInheritanceChecker::UpdateInheritedMemberIfNeeded(
  * NOTE: Do not report error here.
  */
 void StructInheritanceChecker::MergeInheritedMembers(
-    MemberMap& members, const MemberMap& otherMembers, Ty& structTy, bool inheritedInterfaces)
+    MemberMap& members, const MemberMap& otherMembers, DataTy structTy, bool inheritedInterfaces)
 {
     MultiTypeSubst mts;
-    typeManager.GenerateGenericMapping(mts, structTy);
+    typeManager.GenerateGenericMapping(mts, *structTy);
     auto typeMapping = MultiTypeSubstToTypeSubst(mts);
     for (auto& member : otherMembers) {
         auto memberSig = member.second;

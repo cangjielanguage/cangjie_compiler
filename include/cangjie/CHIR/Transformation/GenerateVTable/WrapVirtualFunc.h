@@ -42,8 +42,8 @@ private:
         const ClassType& parentTy, const std::string& funcIdentifier, const VirtualMethodInfo& parentFuncInfo);
     FuncType* RemoveThisArg(FuncType* funcTy);
     void HandleVirtualFuncWrapperForIncrCompilation(const Function* wrapper, const Function& curFunc);
-    FuncType* GetWrapperFuncType(FuncType& parentFuncTyWithoutThisArg,
-        Type& selfTy, const std::unordered_map<const GenericType*, Type*>& replaceTable, bool isStatic);
+    FuncType* GetWrapperFuncType(FuncType& parentFuncTyWithoutThisArg, Type& selfTy,
+        const std::unordered_map<const GenericType*, Type*>& replaceTable, bool isStatic, ModalInfo& modal);
 
 private:
     CHIRBuilder& builder;

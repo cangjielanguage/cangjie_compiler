@@ -76,8 +76,7 @@ bool TestCompilerInstance::ParseCode()
     auto package = MakeOwned<Package>();
     auto fileID = GetSourceManager().AddSource("", code);
     Parser parser(fileID, code, diag, GetSourceManager(), invocation.globalOptions.enableAddCommentToAst,
-        invocation.globalOptions.compileCjd);
-    parser.SetCompileOptions(invocation.globalOptions);
+        &invocation.globalOptions);
     auto file = parser.ParseTopLevel();
     GetSourceManager().AddComments(parser.GetCommentsMap());
     if (!file->package) {

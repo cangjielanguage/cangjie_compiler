@@ -28,7 +28,7 @@ namespace Cangjie::Native::FFI::Java {
     *     }
     */
     OwnedPtr<Expr> WrapWithExclusiveScope(AfterTypeCheckContext& ctx,
-        OwnedPtr<Block> body, Ptr<Ty> retTy);
+        OwnedPtr<Block> body, ModalTy retTy);
 
 }
 

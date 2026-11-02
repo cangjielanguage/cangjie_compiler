@@ -136,7 +136,7 @@ public:
      */
     void AppendNativeObjCIdMarkerIfNeeded(AST::CallExpr& call, Ptr<AST::File> curFile);
     OwnedPtr<AST::CallExpr> CreateObjCMsgSendCall(OwnedPtr<AST::Expr> nativeHandle, const std::string& selector,
-        Ptr<AST::Ty> retTy, std::vector<OwnedPtr<AST::Expr>> args);
+        AST::DataTy retTy, std::vector<OwnedPtr<AST::Expr>> args);
     OwnedPtr<AST::CallExpr> CreateObjCMsgSendCall(
         Ptr<AST::FuncTy> ty, OwnedPtr<AST::FuncType> funcType, std::vector<OwnedPtr<AST::Expr>> funcArgs);
     OwnedPtr<AST::CallExpr> CreateGetInstanceVariableCall(const AST::PropDecl& field, OwnedPtr<AST::Expr> nativeHandle);
@@ -171,27 +171,24 @@ public:
     );
 
     OwnedPtr<AST::Expr> CreateFuncCallViaOpaquePointer(
-        OwnedPtr<AST::Expr> ptr,
-        Ptr<AST::Ty> retTy,
-        std::vector<OwnedPtr<AST::Expr>> args
-    );
+        OwnedPtr<AST::Expr> ptr, AST::DataTy retTy, std::vector<OwnedPtr<AST::Expr>> args);
 
-    OwnedPtr<AST::Expr> CreateAutoreleasePoolScope(Ptr<AST::Ty> ty, std::vector<OwnedPtr<AST::Node>> actions);
+    OwnedPtr<AST::Expr> CreateAutoreleasePoolScope(AST::DataTy ty, std::vector<OwnedPtr<AST::Node>> actions);
     OwnedPtr<AST::FuncDecl> CreateFinalizer(AST::ClassDecl& target);
 
-    OwnedPtr<AST::Expr> CreateUnsafePointerCast(OwnedPtr<AST::Expr> expr, Ptr<AST::Ty> elementType);
+    OwnedPtr<AST::Expr> CreateUnsafePointerCast(OwnedPtr<AST::Expr> expr, AST::DataTy elementType);
 
     void SetDesugarExpr(Ptr<AST::Expr> original, OwnedPtr<AST::Expr> desugared);
     OwnedPtr<AST::Expr> WrapObjCMirrorOption(const Ptr<AST::Expr> entity, Ptr<AST::ClassLikeDecl> mirror,
         const Ptr<AST::File> curFile, Retain withRetain = Retain::UNRETAINED);
     OwnedPtr<AST::Expr> CreateObjCobjectNull();
-    Ptr<AST::Ty> GetObjCTy();
+    AST::DataTy GetObjCTy();
     OwnedPtr<AST::Expr> CreateGetObjcEntityOrNullCall(AST::VarDecl& entity, Ptr<AST::File> file);
     OwnedPtr<AST::Expr> CreateOptionCast(Ptr<AST::VarDecl> jObjectVar, AST::ClassLikeDecl castDecl);
-    OwnedPtr<AST::Expr> UnwrapObjCMirrorOption(OwnedPtr<AST::Expr> entity, Ptr<AST::Ty> ty);
+    OwnedPtr<AST::Expr> UnwrapObjCMirrorOption(OwnedPtr<AST::Expr> entity, AST::DataTy ty);
     OwnedPtr<AST::Expr> CreateOptionMatch(OwnedPtr<AST::Expr> selector,
         std::function<OwnedPtr<AST::Expr>(AST::VarDecl&)> someBranch, std::function<OwnedPtr<AST::Expr>()> noneBranch,
-        Ptr<AST::Ty> ty);
+        AST::ModalTy ty);
 
     OwnedPtr<AST::FuncDecl> CreateNativeHandleGetterDecl(AST::ClassLikeDecl& target);
     OwnedPtr<AST::Expr> CreateNativeHandleFieldExpr(AST::ClassDecl& target);
@@ -204,7 +201,7 @@ public:
     OwnedPtr<AST::Expr> CreateObjCConformsToProtocolCall(OwnedPtr<AST::Expr> id, OwnedPtr<AST::Expr> cls,
         Ptr<AST::File> file);
     OwnedPtr<AST::Expr> CreateWithObjCSuperScope(OwnedPtr<AST::Expr> nativeHandle, AST::ClassDecl& outerDecl,
-        Ptr<AST::Ty> retTy,
+        AST::ModalTy retTy,
         std::function<std::vector<OwnedPtr<AST::Node>>(OwnedPtr<AST::Expr>, OwnedPtr<AST::Expr>)> bodyFactory);
 
     OwnedPtr<AST::Expr> CreateMethodCallViaMsgSendSuper(AST::FuncDecl& fd, OwnedPtr<AST::Expr> receiver,
@@ -233,7 +230,7 @@ public:
     static std::vector<OwnedPtr<AST::FuncParamList>> CreateParamLists(std::vector<OwnedPtr<AST::FuncParam>>&& params);
     static std::vector<OwnedPtr<AST::FuncParam>>& GetParams(const AST::FuncDecl& fn);
     static OwnedPtr<AST::VarDecl> CreateVar(
-        const std::string& name, Ptr<AST::Ty> ty, bool isVar, OwnedPtr<AST::Expr> initializer = nullptr);
+        const std::string& name, AST::ModalTy ty, bool isVar, OwnedPtr<AST::Expr> initializer = nullptr);
     static OwnedPtr<AST::FuncDecl> CreateFunc(const std::string& name, Ptr<AST::FuncTy> fnTy,
         std::vector<OwnedPtr<AST::FuncParam>>&& params, std::vector<OwnedPtr<AST::Node>>&& nodes);
     static OwnedPtr<AST::ParenExpr> CreateParenExpr(OwnedPtr<AST::Expr> expr);
@@ -279,7 +276,7 @@ private:
      */
     OwnedPtr<AST::CallExpr> CreateRemoveFromRegistryCall(OwnedPtr<AST::Expr> registryId);
     OwnedPtr<AST::CallExpr> CreateObjCMsgSendSuperCall(OwnedPtr<AST::Expr> receiver, OwnedPtr<AST::Expr> objCSuper,
-        const std::string& selector, Ptr<AST::Ty> retTy, std::vector<OwnedPtr<AST::Expr>> rawArgs);
+        const std::string& selector, AST::DataTy retTy, std::vector<OwnedPtr<AST::Expr>> rawArgs);
     OwnedPtr<AST::CallExpr> CreateObjCMsgSendSuperCall(OwnedPtr<AST::Expr> objCSuper, OwnedPtr<AST::Expr> sel,
         Ptr<AST::FuncTy> ty, OwnedPtr<AST::FuncType> funcType, std::vector<OwnedPtr<AST::Expr>> funcArgs);
 

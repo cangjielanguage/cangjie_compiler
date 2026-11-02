@@ -190,7 +190,7 @@ void ASTContext::RemoveTypeCheckCache(const AST::Node& node)
 void ASTContext::SkipSynForCorrectTyRec(const AST::Node& root)
 {
     AST::ConstWalker enabler(&root, [this](Ptr<const Node> node) {
-        if (Ty::IsTyCorrect(node->GetTy())) {
+        if (node->GetTy().IsCorrect()) {
             SkipSynForCorrectTy(*node);
         }
         return VisitAction::WALK_CHILDREN;

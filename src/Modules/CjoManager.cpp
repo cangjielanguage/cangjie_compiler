@@ -234,14 +234,16 @@ const OrderedDeclSet& CjoManager::GetPackageMembersByName(
     return EMPTY_DECLS;
 }
 
-Ptr<Decl> CjoManager::GetImplicitPackageMembersByName(const std::string& fullPackageName, const std::string& name) const
+const OrderedDeclSet& CjoManager::GetImplicitPackageMembersByName(
+    const std::string& fullPackageName, const std::string& name) const
 {
+    const static OrderedDeclSet EMPTY_DECLS;
     auto info = impl->GetPackageInfo(fullPackageName);
     if (!info) {
-        return nullptr;
+        return EMPTY_DECLS;
     }
     auto found = info->implicitDeclMap.find(name);
-    return found == info->implicitDeclMap.end() ? nullptr : found->second;
+    return found == info->implicitDeclMap.end() ? EMPTY_DECLS : found->second;
 }
 
 bool CjoManager::LoadPackageHeader(const std::string& fullPackageName, const std::string& cjoPath) const
@@ -410,15 +412,15 @@ void CjoManagerImpl::ReplaceTypeAliasInNode(Ptr<Node> node)
         if (node->astKind == ASTKind::TYPE_ALIAS_DECL) {
             return VisitAction::WALK_CHILDREN;
         }
-        if (!Ty::IsTyCorrect(node->GetTy()) || !node->GetTy()->HasAliasTy()) {
+        if (!node->GetTy().IsCorrect() || !node->GetTy()->HasAliasTy()) {
             return VisitAction::WALK_CHILDREN;
         }
-        Ptr<Ty> key = node->GetTy();
+        ModalTy key = node->GetTy();
         auto cacheIt = typeAliasCache.find(key);
         if (cacheIt != typeAliasCache.end()) {
             node->SetTy(cacheIt->second);
         } else {
-            node->SetTy(typeManager.SubstituteTypeAliasInTy(*key));
+            node->SetTy(typeManager.SubstituteTypeAliasInTy(key));
             typeAliasCache.emplace(key, node->GetTy());
         }
         return VisitAction::WALK_CHILDREN;
@@ -559,7 +561,7 @@ void CjoManager::AddPackageDeclMap(const std::string& fullPackageName, const std
         }
         for (auto& decl : file->exportedInternalDecls) {
             if (decl->TestAttr(Attribute::IMPLICIT_USED)) {
-                pkgInfo->implicitDeclMap.emplace(decl->identifier, decl.get());
+                pkgInfo->implicitDeclMap[decl->identifier].emplace(decl.get());
             }
         }
     }

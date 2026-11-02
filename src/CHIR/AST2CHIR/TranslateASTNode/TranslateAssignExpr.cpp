@@ -28,6 +28,26 @@ bool Translator::OverloadableExprMayThrowException(const AST::OverloadableExpr& 
     return (mayOverflow || mayDivZero || mayOverShift) && !noException;
 }
 
+static const std::unordered_map<Cangjie::TokenKind, CHIR::ExprKind> op2ExprKind = {
+    {Cangjie::TokenKind::ADD, CHIR::ExprKind::ADD},
+    {Cangjie::TokenKind::SUB, CHIR::ExprKind::SUB},
+    {Cangjie::TokenKind::MUL, CHIR::ExprKind::MUL},
+    {Cangjie::TokenKind::DIV, CHIR::ExprKind::DIV},
+    {Cangjie::TokenKind::MOD, CHIR::ExprKind::MOD},
+    {Cangjie::TokenKind::EXP, CHIR::ExprKind::EXP},
+    {Cangjie::TokenKind::BITAND, CHIR::ExprKind::BITAND},
+    {Cangjie::TokenKind::BITOR, CHIR::ExprKind::BITOR},
+    {Cangjie::TokenKind::BITXOR, CHIR::ExprKind::BITXOR},
+    {Cangjie::TokenKind::LSHIFT, CHIR::ExprKind::LSHIFT},
+    {Cangjie::TokenKind::RSHIFT, CHIR::ExprKind::RSHIFT},
+    {Cangjie::TokenKind::LT, CHIR::ExprKind::LT},
+    {Cangjie::TokenKind::GT, CHIR::ExprKind::GT},
+    {Cangjie::TokenKind::LE, CHIR::ExprKind::LE},
+    {Cangjie::TokenKind::GE, CHIR::ExprKind::GE},
+    {Cangjie::TokenKind::NOTEQ, CHIR::ExprKind::NOTEQUAL},
+    {Cangjie::TokenKind::EQUAL, CHIR::ExprKind::EQUAL},
+};
+
 Value* Translator::TranslateVArrayAssign(const AssignExpr& assign)
 {
     // note:
@@ -43,7 +63,7 @@ Value* Translator::TranslateVArrayAssign(const AssignExpr& assign)
     CJC_ASSERT(se->IsVArrayAccess());
 
     const auto& loc = TranslateLocation(assign);
-    auto lhsType = chirTy.TranslateType(*se->GetTy());
+    auto lhsType = chirTy.TranslateType(se->GetTy());
 
     CJC_ASSERT(se->indexExprs.size() == 1);
     auto indexLoc = TranslateLocation(*se->indexExprs[0]);
@@ -93,6 +113,8 @@ Value* Translator::TranslateVArrayAssign(const AssignExpr& assign)
     } else {
         // normal compound assign, e.g a[0] += b
         auto rhsValue = TranslateExprArg(*assign.rightExpr);
+        rhsValue = TypeCastCopyableTypeIfNeeded(
+            *rhsValue, lhs->GetType()->GetModalInfo(), builder, *currentBlock, TranslateLocation(*assign.rightExpr));
         bool mayHaveException = OverloadableExprMayThrowException(assign, *lhs->GetType());
         auto kind = tokenKindToBinaryExprKind.at(COMPOUND_ASSIGN_EXPR_MAP.at(assign.op));
         auto binaryOpResult = TryCreateWithOV<BinaryExpression>(
@@ -196,6 +218,8 @@ Value* Translator::TranslateCompoundAssign(const AssignExpr& assign)
     } else {
         // Translate the RHS part "Y"
         Value* rhs = TranslateExprArg(*assign.rightExpr);
+        rhs = TypeCastCopyableTypeIfNeeded(
+            *rhs, lhsRightValue->GetType()->GetModalInfo(), builder, *currentBlock, rightValLoc);
         auto kind = tokenKindToBinaryExprKind.at(COMPOUND_ASSIGN_EXPR_MAP.at(assign.op));
         auto binOp = TryCreateWithOV<BinaryExpression>(currentBlock,
             mayHaveException, assign.overflowStrategy, loc, lhsRightValue->GetType(), kind, lhsRightValue, rhs);

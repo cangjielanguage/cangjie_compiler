@@ -53,10 +53,9 @@ OwnedPtr<Decl> ParseDeclFromSrcExperimental(const std::string& src)
     static SourceManager sm;
     sm.AddSource("./", src);
     diag.SetSourceManager(&sm);
-    Parser parser(src, diag, diag.GetSourceManager(), {});
     GlobalOptions opts;
     opts.enableEH = true;
-    parser.SetCompileOptions(opts);
+    Parser parser(src, diag, diag.GetSourceManager(), {}, false, &opts);
     return parser.ParseDecl(ScopeKind::TOPLEVEL);
 }
 
@@ -2212,8 +2211,8 @@ TEST(ToStringTest, ConstructedPointerExprPointeeBranch)
     auto pe = MakeOwned<PointerExpr>();
     auto ty = MakeOwned<PrimitiveTy>(TypeKind::TYPE_INT64);
     auto pointee = MakeOwned<PrimitiveTy>(TypeKind::TYPE_FLOAT64);
-    ty->typeArgs.push_back(pointee.get());
-    pe->SetTy(ty.get());
+    ty->typeArgs.push_back(DataTy{pointee});
+    pe->SetTy(DataTy{ty});
     auto out = pe->ToString();
     EXPECT_NE(out.find("CPointer"), std::string::npos);
 }
@@ -2660,7 +2659,7 @@ TEST(ToStringTest, ConstructedExtendDeclSamePkgDirectExtension)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "my.pkg"; // same package -> isInSamePkg true.
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     EXPECT_TRUE(ed->IsExportedDecl());
 }
 
@@ -2676,7 +2675,7 @@ TEST(ToStringTest, ConstructedExtendDeclSamePkgDirectExtensionWithGeneric)
     cd->fullPackageName = "my.pkg";
     ed->generic = MakeOwned<Generic>(); // generic non-null, constraints empty.
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     EXPECT_TRUE(ed->IsExportedDecl());
 }
 
@@ -2690,7 +2689,7 @@ TEST(ToStringTest, ConstructedExtendDeclInterfaceExtensionSamePkg)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "my.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     ed->inheritedTypes.push_back(MakeOwned<RefType>()); // non-empty -> interface ext.
     EXPECT_TRUE(ed->IsExportedDecl());
 }
@@ -2705,7 +2704,7 @@ TEST(ToStringTest, ConstructedExtendDeclInterfaceExtensionDiffPkgNoExported)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "other.pkg"; // different package.
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     // inheritedType with no resolved target -> loop skips it -> false.
     ed->inheritedTypes.push_back(MakeOwned<RefType>());
     EXPECT_FALSE(ed->IsExportedDecl());
@@ -2722,7 +2721,7 @@ TEST(ToStringTest, ConstructedPropDeclIsExportedDeclWithExtendOuter)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "other.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     pd->outerDecl = ed.get();
     EXPECT_FALSE(pd->IsExportedDecl());
 }
@@ -2738,7 +2737,7 @@ TEST(ToStringTest, ConstructedPropDeclIsExportedDeclWithExtendOuterSamePkg)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "my.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     pd->outerDecl = ed.get();
     pd->EnableAttr(Attribute::PUBLIC);
     EXPECT_TRUE(pd->IsExportedDecl());
@@ -2756,7 +2755,7 @@ TEST(ToStringTest, ConstructedFuncDeclIsExportedDeclWithExtendOuter)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "other.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     fd->outerDecl = ed.get();
     EXPECT_FALSE(fd->IsExportedDecl());
 }
@@ -2774,7 +2773,7 @@ TEST(ToStringTest, ConstructedInheritableDeclGetSuperInterfaceTys)
     id->identifier = "I";
     auto ity = MakeOwned<InterfaceTy>("I", *id, std::vector<Ptr<Ty>>{});
     auto refType = MakeOwned<RefType>();
-    refType->SetTy(ity.get());
+    refType->SetTy(DataTy{ity});
     cd->inheritedTypes.push_back(std::move(refType));
     auto supers = cd->GetSuperInterfaceTys();
     ASSERT_EQ(1u, supers.size());
@@ -2791,7 +2790,7 @@ TEST(ToStringTest, ConstructedInheritableDeclGetStableSuperInterfaceTys)
     id->identifier = "I";
     auto ity = MakeOwned<InterfaceTy>("I", *id, std::vector<Ptr<Ty>>{});
     auto refType = MakeOwned<RefType>();
-    refType->SetTy(ity.get());
+    refType->SetTy(DataTy{ity});
     cd->inheritedTypes.push_back(std::move(refType));
     auto supers = cd->GetStableSuperInterfaceTys();
     ASSERT_EQ(1u, supers.size());
@@ -2808,7 +2807,7 @@ TEST(ToStringTest, ConstructedInheritableDeclGetAllSuperDecls)
     superCd->identifier = "Super";
     auto cty = MakeOwned<ClassTy>("Super", *superCd, std::vector<Ptr<Ty>>{});
     auto refType = MakeOwned<RefType>();
-    refType->SetTy(cty.get());
+    refType->SetTy(DataTy{cty});
     cd->inheritedTypes.push_back(std::move(refType));
     auto supers = cd->GetAllSuperDecls();
     // Result should contain at least the start ClassDecl and the super ClassDecl.
@@ -2826,7 +2825,7 @@ TEST(ToStringTest, ConstructedInheritableDeclGetAllSuperDeclsInterface)
     id->identifier = "I";
     auto ity = MakeOwned<InterfaceTy>("I", *id, std::vector<Ptr<Ty>>{});
     auto refType = MakeOwned<RefType>();
-    refType->SetTy(ity.get());
+    refType->SetTy(DataTy{ity});
     cd->inheritedTypes.push_back(std::move(refType));
     auto supers = cd->GetAllSuperDecls();
     ASSERT_GE(supers.size(), 2u);
@@ -2897,7 +2896,7 @@ TEST(ToStringTest, ConstructedExtendDeclSamePkgGenericUpperBound)
     gc->upperBounds.push_back(std::move(ub));
     ed->generic->genericConstraints.push_back(std::move(gc));
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     // extendedDecl exported (no modifier) and upperBound has null target (skipped).
     EXPECT_TRUE(ed->IsExportedDecl());
 }
@@ -2921,7 +2920,7 @@ TEST(ToStringTest, ConstructedExtendDeclSamePkgGenericUpperBoundExported)
     gc->upperBounds.push_back(std::move(ub));
     ed->generic->genericConstraints.push_back(std::move(gc));
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     EXPECT_TRUE(ed->IsExportedDecl());
 }
 
@@ -2935,7 +2934,7 @@ TEST(ToStringTest, ConstructedExtendDeclInterfaceExtDiffPkgExportedTarget)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "other.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     // An inherited RefType whose ref.target is an exported decl.
     auto inh = MakeOwned<RefType>();
     auto exp = MakeOwned<VarDecl>();
@@ -2955,7 +2954,7 @@ TEST(ToStringTest, ConstructedExtendDeclInterfaceExtDiffPkgWithGeneric)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "other.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     ed->generic = MakeOwned<Generic>(); // empty constraints -> lambda returns true.
     auto inh = MakeOwned<RefType>();
     auto exp = MakeOwned<VarDecl>();
@@ -2978,7 +2977,7 @@ TEST(ToStringTest, ConstructedPropDeclIsExportedDeclInterfaceImpl)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "other.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     ed->inheritedTypes.push_back(MakeOwned<RefType>()); // non-empty -> not direct ext.
     pd->outerDecl = ed.get();
     EXPECT_TRUE(pd->IsExportedDecl());
@@ -2996,7 +2995,7 @@ TEST(ToStringTest, ConstructedFuncDeclIsExportedDeclSamePkgWithExtend)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "my.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     fd->outerDecl = ed.get();
     EXPECT_TRUE(fd->IsExportedDecl());
 }
@@ -3015,7 +3014,7 @@ TEST(ToStringTest, ConstructedFuncDeclIsExportedDeclInterfaceImpl)
     ed->fullPackageName = "my.pkg";
     cd->fullPackageName = "other.pkg";
     auto cty = MakeOwned<ClassTy>("Foo", *cd, std::vector<Ptr<Ty>>{});
-    ed->SetTy(cty.get());
+    ed->SetTy(DataTy{cty});
     ed->inheritedTypes.push_back(MakeOwned<RefType>()); // non-empty.
     fd->outerDecl = ed.get();
     EXPECT_TRUE(fd->IsExportedDecl());
@@ -3095,9 +3094,9 @@ TEST(ToStringTest, ConstructedGetStableSuperInterfaceTysComparator)
     auto ity1 = MakeOwned<InterfaceTy>("I", *id1, std::vector<Ptr<Ty>>{});
     auto ity2 = MakeOwned<InterfaceTy>("J", *id2, std::vector<Ptr<Ty>>{});
     auto ref1 = MakeOwned<RefType>();
-    ref1->SetTy(ity1.get());
+    ref1->SetTy(DataTy{ity1});
     auto ref2 = MakeOwned<RefType>();
-    ref2->SetTy(ity2.get());
+    ref2->SetTy(DataTy{ity2});
     cd->inheritedTypes.push_back(std::move(ref1));
     cd->inheritedTypes.push_back(std::move(ref2));
     auto supers = cd->GetStableSuperInterfaceTys();

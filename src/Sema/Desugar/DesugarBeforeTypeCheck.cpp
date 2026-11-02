@@ -390,6 +390,7 @@ void DesugarOptionType(OptionType& optionType)
         refType->typeArguments = std::move(tempTypeArgs);
     }
     CopyBasicInfo(&optionType, refType.get());
+    refType->modal = optionType.modal;
     // Set the desugarType of the optionType
     optionType.desugarType = std::move(refType);
 }
@@ -424,10 +425,12 @@ OwnedPtr<Expr> DesugarTrailClosureAsCall(TrailingClosureExpr& trailingClosure)
 {
     // Desugar trailing closure by move.
     std::vector<OwnedPtr<FuncArg>> parameters;
+    auto end = trailingClosure.lambda->end;
     parameters.emplace_back(CreateFuncArg(std::move(trailingClosure.lambda)));
     parameters[0]->EnableAttr(Attribute::IMPLICIT_ADD);
     auto callExpr = CreateCallExpr(std::move(trailingClosure.expr), std::move(parameters));
     CopyBasicInfo(&trailingClosure, callExpr.get());
+    callExpr->end = end;
     return callExpr;
 }
 
@@ -448,13 +451,16 @@ void DesugarTrailingClosureExpr(TrailingClosureExpr& trailingClosure)
     }
     if (auto ae = AST::As<ASTKind::ARRAY_EXPR>(trailingClosure.expr.get()); ae) {
         // If baseExpr of trailing closure is arrayExpr, move lambda as last argument of arrayExpr.
+        auto end = trailingClosure.lambda->end;
         (void)ae->args.emplace_back(CreateFuncArg(std::move(trailingClosure.lambda)));
         trailingClosure.desugarExpr = std::move(trailingClosure.expr);
+        trailingClosure.desugarExpr->end = end;
     } else if (auto ce = AST::As<ASTKind::CALL_EXPR>(trailingClosure.expr.get()); ce) {
         // If baseExpr of trailing closure is call, the closure is passed as base call expression's last argument.
         ce->args.emplace_back(CreateFuncArg(std::move(trailingClosure.lambda)));
         ce->args.back()->EnableAttr(Attribute::IMPLICIT_ADD);
         trailingClosure.desugarExpr = std::move(trailingClosure.expr);
+        trailingClosure.desugarExpr->end = ce->args.back()->end;
     } else {
         trailingClosure.desugarExpr = DesugarTrailClosureAsCall(trailingClosure);
     }

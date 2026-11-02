@@ -95,7 +95,7 @@ bool Transpiler::CheckProp(OwnedPtr<Decl>& arg) const
     return true;
 }
 
-void Transpiler::CollectDependencies(Ptr<Ty> ty)
+void Transpiler::CollectDependencies(ModalTy ty)
 {
     if (IsObjCObjectType(*ty)) {
         // ObjCId is `id` representative which is builtin type for Objective-C
@@ -406,7 +406,7 @@ struct EmittableObjCFuncMetainfo Transpiler::GetObjCFuncMetainfo(FuncDecl& funcD
     eofm.selectorComponents  = ctx.nameGenerator.GetObjCDeclSelectorComponents(funcDecl);
     eofm.mangledIdentifier   = mangled ? funcDecl.identifier : ctx.nameGenerator.GenerateMethodWrapperName(funcDecl);
     eofm.identifier          = eofm.selectorComponents[0];
-    auto& retTy              = *StaticCast<const FuncTy*>(funcDecl.GetTy())->retTy;
+    auto& retTy              = *StaticCast<const FuncTy*>(funcDecl.DataTy())->retTy;
     eofm.retType             = ObjCParamMapper::MapCJTypeToObjCType(typedefs, retTy);
     eofm.paramsDecl          = ObjCParamMapper::GenerateFuncParamLists(typedefs, funcDecl.funcBody->paramLists,
         eofm.selectorComponents, FunctionListFormat::DECLARATION,

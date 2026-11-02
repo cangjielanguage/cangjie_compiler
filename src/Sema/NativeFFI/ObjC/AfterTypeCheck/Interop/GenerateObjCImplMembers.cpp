@@ -53,8 +53,7 @@ void GenerateObjCImplMembers::HandleImpl(InteropContext& ctx)
             ctx.astInserter.InsertInto(*impl, std::move(regDataCtor));
 
             ctx.astTransformer.TransformToObjCImplUserCtorBody(*origin->funcBody, *regDataCtorPtr, *impl, *regComp,
-                ctx.factory.CreateGetCachedClassAccess(
-                    *StaticCast<ClassLikeTy>(impl->GetTy()), impl->curFile));
+                ctx.factory.CreateGetCachedClassAccess(*StaticCast<ClassLikeTy>(impl->DataTy()), impl->curFile));
         }
     }
 }

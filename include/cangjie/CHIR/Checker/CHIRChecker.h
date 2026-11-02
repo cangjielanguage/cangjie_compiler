@@ -106,6 +106,10 @@ private:
         const LocalVar* retVal, const Type& retType, const Lambda* lambda, const Function& topLevelFunc);
     void CheckRetureTypeIfIsVoid(const Function& topLevelFunc, const FuncType& funcType, bool needBeVoid);
     void CheckBlockGroup(const BlockGroup& blockGroup, const Function& topLevelFunc);
+    void CheckStartEndRegion(const BlockGroup& blockGroup, const Function& topLevelFunc);
+    void CheckShouldNotHaveRegionExpr(const BlockGroup& blockGroup, const Function& topLevelFunc);
+    std::pair<std::vector<Block*>, size_t> CheckStartEndRegionInBlock(
+        const Block& block, size_t depth, const BlockGroup& blockGroup, const Function& topLevelFunc);
     void CheckBlock(const Block& block, const Function& topLevelFunc);
     /**
      * @brief the successor of current block's predecessor must be current block
@@ -169,6 +173,7 @@ private:
     void CheckAllocateBase(const AllocateBase& expr, const Function& topLevelFunc);
     void CheckTryRawArrayAllocate(const TryRawArrayAllocate& expr, const Function& topLevelFunc);
     void CheckRawArrayAllocateBase(const RawArrayAllocateBase& expr, const Function& topLevelFunc);
+    void CheckExclave(const Exclave& expr, const Function& topLevelFunc);
     // ===--------------------------------------------------------------------===//
     // Check Unary Expression
     // ===--------------------------------------------------------------------===//
@@ -263,6 +268,8 @@ private:
     void CheckUnBoxToRef(const UnBoxToRef& expr, const Function& topLevelFunc);
     void CheckGetRTTI(const GetRTTI& expr, const Function& topLevelFunc);
     void CheckGetRTTIStatic(const GetRTTIStatic& expr, const Function& topLevelFunc);
+    void CheckStartRegion(const StartRegion& expr, const Function& topLevelFunc);
+    void CheckEndRegion(const EndRegion& expr, const Function& topLevelFunc);
     bool CheckThisTypeIsEqualOrSubTypeOfFuncParentType(
         Type& thisType, const Function& func, const Expression& expr, const Function& topLevelFunc);
     void CheckInout(const IntrinsicBase& expr, const Function& topLevelFunc);
@@ -292,6 +299,7 @@ private:
     bool SuccessorNumAtLeast(size_t expectedNum, const Expression& expr, const Function& topLevelFunc);
     void ShouldNotHaveResult(const Expression& expr, const Function& topLevelFunc);
     bool CheckHaveResult(const Expression& expr, const Function& topLevelFunc);
+    bool GenericTypeIsInContainer(const Type& type, const std::vector<GenericType*>& container);
 
 private:
     const Package& package;

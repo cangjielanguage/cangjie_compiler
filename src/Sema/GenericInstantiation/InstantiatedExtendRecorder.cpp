@@ -84,7 +84,7 @@ VisitAction GenericInstantiationManager::InstantiatedExtendRecorder::RecordUsedE
  */
 void GenericInstantiationManager::InstantiatedExtendRecorder::RecordExtendForRefExpr(const RefExpr& re)
 {
-    bool ignored = !Ty::IsTyCorrect(re.GetTy()) || !re.ref.target || re.ref.target->IsBuiltIn() ||
+    bool ignored = !re.GetTy().IsCorrect() || !re.ref.target || re.ref.target->IsBuiltIn() ||
         !re.ref.target->TestAttr(Attribute::IN_EXTEND);
     if (ignored || gim.structContext.empty()) {
         return;
@@ -94,11 +94,11 @@ void GenericInstantiationManager::InstantiatedExtendRecorder::RecordExtendForRef
     auto structDecl = gim.GetStructDeclByContext();
     CJC_ASSERT(structDecl);
     auto baseTy = GetDeclTy(*structDecl);
-    bool invalid = !Ty::IsTyCorrect(baseTy) || !Ty::IsTyCorrect(extend->GetTy()) || baseTy->HasGeneric();
+    bool invalid = !Ty::IsTyCorrect(baseTy) || !extend->GetTy().IsCorrect() || baseTy->HasGeneric();
     if (invalid) {
         return;
     }
-    auto promoteRes = promotion.Promote(*baseTy, *extend->GetTy());
+    auto promoteRes = promotion.Promote(baseTy, extend->GetTy());
     if (promoteRes.empty()) {
         InternalError("generic instantiation failed");
         return;
@@ -116,16 +116,16 @@ void GenericInstantiationManager::InstantiatedExtendRecorder::RecordExtendForRef
  */
 void GenericInstantiationManager::InstantiatedExtendRecorder::RecordExtendForMemberAccess(const MemberAccess& ma)
 {
-    auto ignored = !ma.target || !ma.baseExpr || !Ty::IsTyCorrect(ma.baseExpr->GetTy()) ||
+    auto ignored = !ma.target || !ma.baseExpr || !ma.baseExpr->GetTy().IsCorrect() ||
         ma.baseExpr->GetTy()->HasGeneric() || !ma.target->outerDecl;
     if (ignored) {
         return;
     }
     auto outerDecl = ma.target->outerDecl;
     if (auto fd = DynamicCast<FuncDecl*>(ma.target); fd && outerDecl->astKind == ASTKind::INTERFACE_DECL) {
-        RecordImplExtendDecl(*ma.baseExpr->GetTy(), *fd, ma.matchedParentTy);
+        RecordImplExtendDecl(ma.baseExpr->GetTy(), *fd, ma.matchedParentTy);
     } else if (outerDecl->astKind == ASTKind::EXTEND_DECL) {
-        auto promoteRes = promotion.Promote(*ma.baseExpr->GetTy(), *outerDecl->GetTy());
+        auto promoteRes = promotion.Promote(ma.baseExpr->GetTy(), outerDecl->GetTy());
         if (promoteRes.empty()) {
             InternalError("generic instantiation failed");
             return;
@@ -136,15 +136,15 @@ void GenericInstantiationManager::InstantiatedExtendRecorder::RecordExtendForMem
 }
 
 void GenericInstantiationManager::InstantiatedExtendRecorder::RecordImplExtendDecl(
-    Ty& ty, FuncDecl& fd, Ptr<Ty> upperTy)
+    ModalTy ty, FuncDecl& fd, ModalTy upperTy)
 {
     OverrideFunctionResolver resolver(typeManager);
-    MemberFuncsWithInstTys funcs = resolver.GetInstMemberFuncWithInstTy(ty, fd.identifier);
+    MemberFuncsWithInstTys funcs = resolver.GetInstMemberFuncWithInstTy(ty.Ty(), fd.identifier);
     Ptr<Decl> extend = nullptr;
     // All candidates have satisfied functions, choose most matched decl.
-    auto baseTy = Ty::IsTyCorrect(upperTy) ? upperTy : Ptr(&ty);
+    auto baseTy = Ty::IsTyCorrect(upperTy) ? upperTy : ty;
     for (MemberFuncWithInstTys func : funcs) {
-        auto matchedInstTy = resolver.GetMatchedFuncInstTyByGivenTarget(func, fd, baseTy);
+        auto matchedInstTy = resolver.GetMatchedFuncInstTyByGivenTarget(func, fd, baseTy.Ty());
         if (!Ty::IsTyCorrect(matchedInstTy)) {
             continue;
         }
@@ -167,6 +167,6 @@ void GenericInstantiationManager::InstantiatedExtendRecorder::RecordImplExtendDe
         extend = baseDecl;
     }
     if (extend) {
-        typeManager.RecordUsedGenericExtend(ty, RawStaticCast<ExtendDecl*>(extend));
+        typeManager.RecordUsedGenericExtend(*ty, RawStaticCast<ExtendDecl*>(extend));
     }
 }

@@ -140,6 +140,13 @@ public:
     */
     void SetEHEnabled(bool enabled) const;
 
+    /**
+     * @brief Enable lexing of local mode keywords ('exclave'/'demode')
+     *
+     * @param enabled Whether to enable or disable local mode tokens lexing
+    */
+    void SetLocalModeEnabled(bool enabled) const;
+
     // Parse/Macro.
     const std::vector<StringPart>& GetStrParts(const Token& t);
     /// Read all tokens until the END token, excluded. After this, the Lexer cannot yield any more token.
@@ -148,6 +155,8 @@ public:
     bool StartCollectTokens();
     void StopCollectTokens(bool bStart);
     std::size_t GetCurrentToken() const;
+    /// True when Lexer was constructed from a Token vector (macro reparse / libast).
+    bool HasTokens() const;
 
 private:
     class LexerImpl* impl;

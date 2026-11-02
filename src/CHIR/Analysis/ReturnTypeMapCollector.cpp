@@ -7,7 +7,7 @@
 #include "cangjie/CHIR/Analysis/ReturnTypeMapCollector.h"
 
 #include "cangjie/CHIR/IR/CHIRContext.h"
-#include "cangjie/Utils/Casting.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 
 namespace Cangjie::CHIR {
 namespace {

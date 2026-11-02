@@ -12,12 +12,16 @@ using namespace Cangjie;
 Ptr<Value> Translator::Visit(const AST::TupleLit& tuple)
 {
     std::vector<Value*> argVals;
-    auto tupleType = StaticCast<AST::TupleTy*>(tuple.GetTy());
+    // Expected element types must follow GetFieldOfType (inherit the tuple's modal).
+    // Using bare TranslateType(typeArgs[i]) forces ClassStaticCast that drops @local!/@local?
+    // on non-copyable payloads (e.g. Array / RawArray&), which CHIRChecker rejects.
+    auto ty = TranslateType(tuple.GetTy());
     for (size_t i = 0; i < tuple.children.size(); i++) {
-        auto arg = TranslateExprArg(*tuple.children[i], *TranslateType(*tupleType->typeArgs[i]));
+        auto elemTy = GetFieldOfType(*ty, static_cast<uint64_t>(i), builder);
+        CJC_NULLPTR_CHECK(elemTy);
+        auto arg = TranslateExprArg(*tuple.children[i], *elemTy);
         argVals.push_back(arg);
     }
-    auto ty = TranslateType(*tuple.GetTy());
     return CreateAndAppendExpression<Tuple>(TranslateLocation(tuple), ty, argVals, currentBlock)
         ->GetResult();
 }

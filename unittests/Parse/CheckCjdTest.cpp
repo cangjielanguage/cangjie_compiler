@@ -46,7 +46,9 @@ std::vector<Diagnostic> CheckCjd(const std::string& cjdFilePath)
     auto content = FileUtil::ReadFileContent(cjdFilePath, failedReason);
     CJC_ASSERT(content);
     auto fileID = sm.AddSource(cjdFilePath, *content);
-    Parser parser{fileID, *content, diag, sm, false, true};
+    GlobalOptions opts;
+    opts.compileCjd = true;
+    Parser parser{fileID, *content, diag, sm, false, &opts};
     parser.ParseTopLevel();
     return FormatCjdCheckResult(diag);
 }

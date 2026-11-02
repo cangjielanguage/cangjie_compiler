@@ -36,7 +36,7 @@ protected:
         tyPool.emplace_back(MakeOwned<VArrayTy>(tyMap[TypeKind::TYPE_INT8], 1));
         tyMap.emplace(TypeKind::TYPE_VARRAY, tyPool.back().get());
 
-        tyPool.emplace_back(MakeOwned<PointerTy>(tyMap[TypeKind::TYPE_INT8]));
+        tyPool.emplace_back(MakeOwned<PointerTy>(tyMap[TypeKind::TYPE_INT8], {Mode::NOT}));
         tyMap.emplace(TypeKind::TYPE_POINTER, tyPool.back().get());
 
         std::vector<Ptr<Ty>> elemTys{tyMap[TypeKind::TYPE_INT8], tyMap[TypeKind::TYPE_INT16]};
@@ -46,34 +46,34 @@ protected:
         tyPool.emplace_back(MakeOwned<FuncTy>(elemTys, tyMap[TypeKind::TYPE_INT8]));
         tyMap.emplace(TypeKind::TYPE_FUNC, tyPool.back().get());
 
-        tyPool.emplace_back(MakeOwned<UnionTy>(Utils::VecToSet(elemTys)));
+        tyPool.emplace_back(MakeOwned<UnionTy>(Utils::VecToSet(elemTys), {Mode::NOT}));
         tyMap.emplace(TypeKind::TYPE_UNION, tyPool.back().get());
 
-        tyPool.emplace_back(MakeOwned<IntersectionTy>(Utils::VecToSet(elemTys)));
+        tyPool.emplace_back(MakeOwned<IntersectionTy>(Utils::VecToSet(elemTys), {Mode::NOT}));
         tyMap.emplace(TypeKind::TYPE_INTERSECTION, tyPool.back().get());
 
         auto id = MakeOwned<InterfaceDecl>();
-        tyPool.emplace_back(MakeOwned<InterfaceTy>("interface", *id, elemTys));
+        tyPool.emplace_back(MakeOwned<InterfaceTy>("interface", *id, elemTys, {Mode::NOT}));
         tyMap.emplace(TypeKind::TYPE_INTERFACE, tyPool.back().get());
         astPool.emplace_back(std::move(id));
 
         auto cd = MakeOwned<ClassDecl>();
-        tyPool.emplace_back(MakeOwned<ClassTy>("class", *cd, elemTys));
+        tyPool.emplace_back(MakeOwned<ClassTy>("class", *cd, elemTys, {Mode::NOT}));
         tyMap.emplace(TypeKind::TYPE_CLASS, tyPool.back().get());
         astPool.emplace_back(std::move(cd));
 
         auto ed = MakeOwned<EnumDecl>();
-        tyPool.emplace_back(MakeOwned<EnumTy>("enum", *ed, elemTys));
+        tyPool.emplace_back(MakeOwned<EnumTy>("enum", *ed, elemTys, {Mode::NOT}));
         tyMap.emplace(TypeKind::TYPE_ENUM, tyPool.back().get());
         astPool.emplace_back(std::move(ed));
 
         auto sd = MakeOwned<StructDecl>();
-        tyPool.emplace_back(MakeOwned<StructTy>("struct", *sd, elemTys));
+        tyPool.emplace_back(MakeOwned<StructTy>("struct", *sd, elemTys, {Mode::NOT}));
         tyMap.emplace(TypeKind::TYPE_STRUCT, tyPool.back().get());
         astPool.emplace_back(std::move(sd));
 
         auto tad = MakeOwned<TypeAliasDecl>();
-        tyPool.emplace_back(MakeOwned<TypeAliasTy>("typealias", *tad, elemTys));
+        tyPool.emplace_back(MakeOwned<TypeAliasTy>("typealias", *tad, elemTys, {Mode::NOT}));
         tyMap.emplace(TypeKind::TYPE, tyPool.back().get());
         astPool.emplace_back(std::move(tad));
 
@@ -83,12 +83,12 @@ protected:
         astPool.emplace_back(std::move(gpd));
     }
 
-    static std::map<AST::TypeKind, Ptr<AST::Ty>> tyMap;
+    static std::map<AST::TypeKind, AST::ModalTy> tyMap;
     static std::vector<OwnedPtr<AST::Ty>> tyPool;
     static std::vector<OwnedPtr<AST::Node>> astPool;
 };
 
-std::map<AST::TypeKind, Ptr<AST::Ty>> CastTyTests::tyMap = {};
+std::map<AST::TypeKind, AST::ModalTy> CastTyTests::tyMap = {};
 std::vector<OwnedPtr<AST::Ty>> CastTyTests::tyPool = {};
 std::vector<OwnedPtr<AST::Node>> CastTyTests::astPool = {};
 

@@ -59,7 +59,7 @@ void CheckMemberTypes::CheckPropTypes(PropDecl& pd, TypeCheckContext& ctx)
             : DiagKindRefactor::sema_objc_interop_prop_must_be_objc_compatible;
 
     auto builder = ctx.diag.DiagnoseRefactor(kind, *pd.type, GetObjCDeclKindInfo(*pd.outerDecl));
-    builder.AddMainHintArguments(Ty::ToString(pd.GetTy()));
+    builder.AddMainHintArguments(pd.GetTy().String());
     pd.EnableAttr(Attribute::IS_BROKEN);
     pd.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
 }
@@ -72,7 +72,7 @@ void CheckMemberTypes::CheckVarTypes(VarDecl& vd, TypeCheckContext& ctx)
 
     auto builder = ctx.diag.DiagnoseRefactor(DiagKindRefactor::sema_objc_interop_field_must_be_objc_compatible,
         *vd.type, GetObjCDeclKindInfo(*vd.outerDecl));
-    builder.AddMainHintArguments(Ty::ToString(vd.GetTy()));
+    builder.AddMainHintArguments(vd.GetTy().String());
     vd.EnableAttr(Attribute::IS_BROKEN);
     vd.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
 }
@@ -118,7 +118,7 @@ void CheckMemberTypes::CheckFuncParamTypes(FuncDecl& fd, TypeCheckContext& ctx)
             fd.outerDecl->EnableAttr(Attribute::HAS_BROKEN, Attribute::IS_BROKEN);
 
             auto builder = ctx.diag.DiagnoseRefactor(errKind, *param, GetObjCDeclKindInfo(*fd.outerDecl));
-            builder.AddMainHintArguments(Ty::ToString(param->GetTy()));
+            builder.AddMainHintArguments(param->GetTy().String());
         }
     }
 }

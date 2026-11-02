@@ -63,9 +63,8 @@ bool IsJavaRefGetter(const AST::Decl& fd);
  * NOTE: fully-qualified names are wrapped with 'L'-prefix and ';'-suffix.
  */
 std::string GetJniTypeSignature(const AST::Ty& javaCompatibleTy);
-std::string GetJniTypeSignature(const AST::Ty& javaCompatibleRetTy,
-    const std::vector<Ptr<AST::Ty>> paramTys,
-    bool withMarker = false);
+std::string GetJniTypeSignature(
+    const AST::Ty& javaCompatibleRetTy, const std::vector<AST::ModalTy>& paramTys, bool withMarker = false);
 
 /**
  * Returns fully-qualified name of the decl or fq-name specified in @JavaMirror/@JavaImpl as attribute,

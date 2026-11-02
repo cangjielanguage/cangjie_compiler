@@ -26,9 +26,9 @@ using namespace Cangjie::AST;
 using namespace Cangjie::Native::FFI;
 
 namespace {
-Ptr<Ty> FuncTyOf(TypeManager& typeManager, const std::vector<OwnedPtr<FuncParam>>& params, Ptr<Ty> retTy)
+Ptr<Ty> FuncTyOf(TypeManager& typeManager, const std::vector<OwnedPtr<FuncParam>>& params, ModalTy retTy)
 {
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<ModalTy> paramTys;
     paramTys.reserve(params.size());
     std::transform(
         params.begin(), params.end(), std::back_inserter(paramTys), [](auto&& param) { return param->GetTy(); });
@@ -71,7 +71,7 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplStaticProxyFunc(
     auto regCompanionRef = CreateRefExpr(regCompanion);
     auto originMemberAccess = CreateMemberAccess(std::move(regCompanionRef), origin);
     auto originCall = CreateCallExpr(std::move(originMemberAccess), std::move(originCallArgs), Ptr(&origin),
-        StaticCast<FuncTy>(origin.GetTy())->retTy, CallKind::CALL_DECLARED_FUNCTION);
+        StaticCast<FuncTy>(origin.DataTy())->retTy, CallKind::CALL_DECLARED_FUNCTION);
 
     std::vector<OwnedPtr<Node>> proxyBodyNodes;
     proxyBodyNodes.push_back(std::move(originCall));
@@ -129,8 +129,8 @@ void AfterTypeCheckASTTransformer::TransformToProxyPropGetter(
 
     getter.identifier = "$" + pd.identifier + "get";
     auto getterTy = typeManager.GetFunctionTy({}, pd.GetTy());
-    getter.SetTy(getterTy);
-    getter.funcBody->SetTy(getterTy);
+    getter.SetTy({getterTy});
+    getter.funcBody->SetTy({getterTy});
 
     getter.CloneAttrs(pd);
     getter.DisableAttr(Attribute::MUT);
@@ -149,13 +149,13 @@ void AfterTypeCheckASTTransformer::TransformToProxyPropSetter(
     setterParams.push_back(std::move(setterParam));
 
     static auto unitTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-    auto setterTy = FuncTyOf(typeManager, setterParams, unitTy);
+    auto setterTy = FuncTyOf(typeManager, setterParams, {unitTy});
 
     auto lhs = CreateMemberAccess(CreateRefExpr(receiver), origin);
-    auto assignment = CreateAssignExpr(std::move(lhs), std::move(setterParamRef), unitTy);
+    auto assignment = CreateAssignExpr(std::move(lhs), std::move(setterParamRef), {unitTy});
     setter.funcBody->body->body.clear();
     setter.funcBody->body->body.push_back(std::move(assignment));
-    setter.funcBody->body->SetTy(unitTy);
+    setter.funcBody->body->SetTy({unitTy});
 
     setter.identifier = "$" + pd.identifier + "set";
     setter.SetTy(setterTy);
@@ -218,7 +218,7 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplBaseCtorBody(
     if (superClass->IsObjCExport()) {
         auto superCtor = GetObjCImplBaseCtor(*superClass);
         CJC_ASSERT_WITH_MSG(superCtor, "expected base ctor in the exported '@ObjC' class");
-        auto superCtorCall = CreateSuperCall(*superClass, *superCtor, superCtor->GetTy());
+        auto superCtorCall = CreateSuperCall(*superClass, *superCtor, superCtor->DataTy());
         superCtorCall->args.push_back(CreateFuncArg(std::move(handleParamRef)));
         superCtorCall->args.push_back(CreateFuncArg(ASTCloner::Clone(regIdParamRef.get())));
         superCtorCall->curFile = curFile;
@@ -228,7 +228,7 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplBaseCtorBody(
         CJC_ASSERT_WITH_MSG(superClass->IsObjCForeign(), "expected super class to be @ObjCMirror");
         auto superCtor = GetObjCMirrorBaseCtor(*superClass);
         CJC_ASSERT_WITH_MSG(superCtor, "expected base ctor in the @ObjCMirror decl");
-        auto superCtorCall = CreateSuperCall(*superClass, *superCtor, superCtor->GetTy());
+        auto superCtorCall = CreateSuperCall(*superClass, *superCtor, superCtor->DataTy());
         superCtorCall->args.push_back(CreateFuncArg(std::move(handleParamRef)));
         superCtorCall->curFile = curFile;
         AppendNativeObjCIdMarkerIfNeeded(*superCtorCall, curFile);
@@ -241,7 +241,7 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplBaseCtorBody(
     std::vector<OwnedPtr<FuncArg>> getFromRegistryByIdArgs;
     getFromRegistryByIdArgs.emplace_back(CreateFuncArg(std::move(regIdParamRef)));
 
-    getFromRegistryByIdExpr->instTys.emplace_back(regComp.GetTy());
+    getFromRegistryByIdExpr->instTys.emplace_back(regComp.DataTy());
     getFromRegistryByIdExpr->SetTy(typeManager.GetInstantiatedTy(getFromRegistryByIdDecl->GetTy(),
         TypeCheckUtil::GenerateTypeMapping(*getFromRegistryByIdDecl, getFromRegistryByIdExpr->instTys)));
     getFromRegistryByIdExpr->typeArguments.push_back(CreateRefType(regComp));
@@ -251,7 +251,7 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplBaseCtorBody(
     auto regCompField = GetObjCImplRegCompanionField(impl);
     auto lhs = CreateMemberAccess(CreateThisRef(&impl, impl.GetTy(), impl.curFile), *regCompField);
     static auto unitTy = typeManager.GetPrimitiveTy(AST::TypeKind::TYPE_UNIT);
-    auto assignment = CreateAssignExpr(std::move(lhs), std::move(getFromRegistryIdCall), unitTy);
+    auto assignment = CreateAssignExpr(std::move(lhs), std::move(getFromRegistryIdCall), {unitTy});
 
     ctorBody.body->body.push_back(std::move(assignment));
 }
@@ -267,7 +267,7 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplRegCompBaseCtorBody(
     if (auto superClass = GetObjCImplRegistryCompanionSuperClass(regComp)) {
         auto superCtor = GetObjCImplRegCompanionBaseCtor(*superClass);
         CJC_ASSERT_WITH_MSG(superCtor, "expected base ctor in the @ObjCImpl registry companion class");
-        auto superCtorCall = CreateSuperCall(*superClass, *superCtor, superCtor->GetTy());
+        auto superCtorCall = CreateSuperCall(*superClass, *superCtor, superCtor->DataTy());
         superCtorCall->args.push_back(CreateFuncArg(std::move(handleParamRef)));
         superCtorCall->curFile = curFile;
         ctorBody.body->body.push_back(std::move(superCtorCall));
@@ -288,8 +288,8 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplRegDataCtorDecl(
     FuncDecl& ctor, ClassDecl& impl, ClassDecl& regComp) const noexcept
 {
     auto nativeObjCIdTy = objCLib.GetNativeObjCIdTy();
-    auto tupleTy = typeManager.GetTupleTy({nativeObjCIdTy, regComp.GetTy()});
-    auto regDataParam = CreateFuncParam(std::string(REGISTRY_DATA_PARAM_IDENT), nullptr, nullptr, tupleTy);
+    auto tupleTy = typeManager.GetTupleTy({nativeObjCIdTy, regComp.DataTy()});
+    auto regDataParam = CreateFuncParam(std::string(REGISTRY_DATA_PARAM_IDENT), nullptr, nullptr, {tupleTy});
 
     CJC_ASSERT_WITH_MSG(!ctor.funcBody->paramLists.empty(), "expected at least one param list");
     auto& params = ctor.funcBody->paramLists[0]->params;
@@ -313,12 +313,12 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplUserCtorBody(FuncBody& cto
     auto regCompCtor = GetObjCImplRegCompanionBaseCtor(regComp);
     CJC_ASSERT_WITH_MSG(regCompCtor, "expected a base ctor in the registry companion class");
     auto regCompCtorCall = CreateCall(regCompCtor, curFile, ASTCloner::Clone(handleParamRef.get()));
-    auto tupleTy = typeManager.GetTupleTy({objCLib.GetNativeObjCIdTy(), regComp.GetTy()});
+    auto tupleTy = typeManager.GetTupleTy({objCLib.GetNativeObjCIdTy(), regComp.DataTy()});
 
     std::vector<OwnedPtr<Expr>> tupleElements;
     tupleElements.push_back(std::move(handleParamRef));
     tupleElements.push_back(std::move(regCompCtorCall));
-    auto tupleLit = CreateTupleLit(std::move(tupleElements), tupleTy);
+    auto tupleLit = CreateTupleLit(std::move(tupleElements), {tupleTy});
 
     std::vector<OwnedPtr<FuncParam>> lambdaParams;
     lambdaParams.push_back(std::move(handleParam));
@@ -332,7 +332,7 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplUserCtorBody(FuncBody& cto
     auto allocCall = CreateAllocCall(objCLib, WithinFile(std::move(objCClassRef), curFile));
     std::vector<OwnedPtr<FuncArg>> lambdaCallArgs;
     lambdaCallArgs.push_back(CreateFuncArg(std::move(allocCall)));
-    auto lambdaCall = CreateCallExpr(std::move(lambdaExpr), std::move(lambdaCallArgs), nullptr, tupleTy);
+    auto lambdaCall = CreateCallExpr(std::move(lambdaExpr), std::move(lambdaCallArgs), nullptr, {tupleTy});
 
     CJC_ASSERT_WITH_MSG(!ctorBody.paramLists.empty(), "expected at least one param list");
     auto& userParams = ctorBody.paramLists[0]->params;
@@ -344,7 +344,7 @@ void AfterTypeCheckASTTransformer::TransformToObjCImplUserCtorBody(FuncBody& cto
         thisCallArgs.push_back(CreateFuncArg(WithinFile(CreateRefExpr(*param), curFile)));
     }
 
-    auto thisCall = CreateThisCall(impl, regDataCtor, regDataCtor.GetTy(), curFile, std::move(thisCallArgs));
+    auto thisCall = CreateThisCall(impl, regDataCtor, regDataCtor.DataTy(), curFile, std::move(thisCallArgs));
     ctorBody.body->body.clear();
     ctorBody.body->body.push_back(std::move(thisCall));
 }

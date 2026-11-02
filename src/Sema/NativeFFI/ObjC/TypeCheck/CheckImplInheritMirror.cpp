@@ -23,7 +23,7 @@ void CheckImplInheritMirror::HandleImpl(TypeCheckContext& ctx)
         return;
     }
 
-    if (auto classTy = DynamicCast<ClassTy*>(ctx.target.GetTy()); classTy) {
+    if (auto classTy = DynamicCast<ClassTy>(ctx.target.DataTy())) {
         auto hasOnlyMirrorSuperInterfaces = classTy->GetSuperInterfaceTys().size() > 0;
         for (auto superInterfaceTy : classTy->GetSuperInterfaceTys()) {
             if (!IsObjCForeign(*superInterfaceTy)) {

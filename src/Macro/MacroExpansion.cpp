@@ -9,7 +9,6 @@
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
-#include "cangjie/Basic/Print.h"
 #include "cangjie/ConditionalCompilation/ConditionalCompilation.h"
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Macro/MacroEvaluation.h"
@@ -17,7 +16,6 @@
 #include "cangjie/Parse/Parser.h"
 
 #include <cstdio>
-#include <fstream>
 
 #include "MacroUpdateInfo.h"
 
@@ -141,8 +139,7 @@ void MacroExpansion::ReplaceEachFileNode(const File& file)
     }
     auto& newBuffer = ci->GetSourceManager().GetSource(*debugFileID).buffer;
     Parser newParser(*debugFileID, newBuffer, ci->diag, ci->diag.GetSourceManager(),
-        ci->invocation.globalOptions.enableAddCommentToAst);
-    newParser.SetCompileOptions(ci->invocation.globalOptions);
+        ci->invocation.globalOptions.enableAddCommentToAst, &ci->invocation.globalOptions);
     auto names = Utils::SplitQualifiedName(file.curPackage->fullPackageName);
     std::string moduleName = names.size() > 1 ? names[0] : ""; // Only used for 'std' package case.
     (void)newParser.SetModuleName(moduleName).EnableCustomAnno();
@@ -351,8 +348,7 @@ void MacroExpansion::ReplaceEachMacro(MacroCall& macCall)
         return;
     }
     Parser parser{pInvocation->newTokens, ci->diag, ci->diag.GetSourceManager(),
-        ci->invocation.globalOptions.enableAddCommentToAst, ci->invocation.globalOptions.compileCjd};
-    parser.SetCompileOptions(ci->invocation.globalOptions);
+        ci->invocation.globalOptions.enableAddCommentToAst, &ci->invocation.globalOptions};
     (void)parser.SetPrimaryDecl(pInvocation->outerDeclIdent).EnableCustomAnno();
     // Reparsing newTokens to get macro-generate ASTs.
     auto nodes = parser.ParseNodes(

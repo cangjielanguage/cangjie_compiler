@@ -74,7 +74,8 @@ public:
         const std::string& fullPackageName) const;
     const AST::OrderedDeclSet& GetPackageMembersByName(
         const std::string& fullPackageName, const std::string& name) const;
-    Ptr<AST::Decl> GetImplicitPackageMembersByName(const std::string& fullPackageName, const std::string& name) const;
+    const AST::OrderedDeclSet& GetImplicitPackageMembersByName(
+        const std::string& fullPackageName, const std::string& name) const;
 
     std::string GetPackageCjoPath(const std::string& fullPackageName) const;
     /** return {fullPackageName, cjoPath} */

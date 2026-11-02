@@ -70,7 +70,7 @@ std::vector<Ptr<TypePattern>> CollectTypePatternsWithJavaClass(const std::vector
     return res;
 }
 
-OwnedPtr<VarPattern> CreateTmpVarPattern(Ptr<Ty> ty)
+OwnedPtr<VarPattern> CreateTmpVarPattern(ModalTy ty)
 {
     auto var = CreateTmpVarDecl();
     auto varPat = MakeOwned<VarPattern>();
@@ -82,8 +82,8 @@ OwnedPtr<VarPattern> CreateTmpVarPattern(Ptr<Ty> ty)
 }
 }
 
-OwnedPtr<Expr> DesugarTypeCheckingAndCasting::CreateIsInstanceCall(Ptr<VarDecl> jObjectVar,
-    Ptr<Ty> classTy, Ptr<File> curFile) const
+OwnedPtr<Expr> DesugarTypeCheckingAndCasting::CreateIsInstanceCall(
+    Ptr<VarDecl> jObjectVar, DataTy classTy, Ptr<File> curFile) const
 {
     auto isInstanceOfDecl = ilib.GetIsInstanceOf();
 
@@ -131,7 +131,7 @@ OwnedPtr<Expr> DesugarTypeCheckingAndCasting::CreateJObjectCast(Ptr<VarDecl> jOb
 }
 
 OwnedPtr<Block> DesugarTypeCheckingAndCasting::CastAndSubstituteVars(
-    Expr& expr, const std::vector<std::tuple<Ptr<VarDecl>, Ptr<Ty>>>& patternVars) const
+    Expr& expr, const std::vector<std::tuple<Ptr<VarDecl>, ModalTy>>& patternVars) const
 {
     auto curFile = expr.curFile;
     auto varsBlock = WithinFile(MakeOwned<Block>(), curFile);
@@ -145,7 +145,7 @@ OwnedPtr<Block> DesugarTypeCheckingAndCasting::CastAndSubstituteVars(
         // blackBox(jObjectVar)
         auto newJavarefExpr = CreateNewGlobalJavaRef(std::move(javarefExpr), curFile);
 
-        OwnedPtr<Expr> initializer = ilib.UnwrapJavaEntity(std::move(newJavarefExpr), castTy, castDecl);
+        OwnedPtr<Expr> initializer = ilib.UnwrapJavaEntity(std::move(newJavarefExpr), castTy.Ty(), castDecl);
         auto castedVar = WithinFile(CreateTmpVarDecl(CreateType(castDecl->GetTy()), std::move(initializer)), curFile);
         varsMapping[varDecl] = castedVar;
         varsBlock->body.emplace_back(std::move(castedVar));
@@ -172,11 +172,11 @@ void DesugarTypeCheckingAndCasting::DesugarIsExpression(IsExpr& ie) const
 {
     auto curFile = ie.curFile;
     CJC_NULLPTR_CHECK(curFile);
-    static const auto BOOL_TY = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
+    static const ModalTy BOOL_TY{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)};
 
     CJC_ASSERT(!ie.desugarExpr);
 
-    auto castTy = ie.isType->GetTy();
+    auto castTy = ie.isType->DataTy();
     auto jObjectDecl = utils.GetJObjectDecl();
     CJC_ASSERT(jObjectDecl);
 
@@ -206,7 +206,7 @@ void DesugarTypeCheckingAndCasting::DesugarAsExpression(AsExpr& ae) const
     CJC_NULLPTR_CHECK(curFile);
     CJC_ASSERT(!ae.desugarExpr);
 
-    auto castTy = ae.asType->GetTy();
+    auto castTy = ae.asType->DataTy();
     auto castDecl = DynamicCast<ClassLikeDecl>(Ty::GetDeclOfTy(castTy));
     auto jObjectDecl = utils.GetJObjectDecl();
 
@@ -226,7 +226,7 @@ void DesugarTypeCheckingAndCasting::DesugarAsExpression(AsExpr& ae) const
     typeMatchCases.emplace_back(CreateMatchCase(std::move(typePattern), std::move(isInstanceMatch)));
 
     // case _ => None
-    auto noneRef = utils.CreateOptionNoneRef(castTy);
+    auto noneRef = utils.CreateOptionNoneRef({castTy});
     typeMatchCases.emplace_back(CreateMatchCase(MakeOwned<WildcardPattern>(), std::move(noneRef)));
     ae.desugarExpr =
         WithinFile(CreateMatchExpr(std::move(ae.leftExpr), std::move(typeMatchCases), castResultTy), curFile);
@@ -243,7 +243,7 @@ void DesugarTypeCheckingAndCasting::DesugarMatchCase(MatchCase& matchCase) const
     static auto jObjectDecl = utils.GetJObjectDecl();
 
     std::vector<OwnedPtr<Expr>> isInstanceGuards;
-    std::vector<std::tuple<Ptr<VarDecl>, Ptr<Ty>>> patternVars;
+    std::vector<std::tuple<Ptr<VarDecl>, ModalTy>> patternVars;
     for (auto pat : typePatterns) {
         if (DynamicCast<WildcardPattern>(pat->pattern.get())) {
             pat->pattern = CreateTmpVarPattern(pat->type->GetTy());
@@ -253,7 +253,7 @@ void DesugarTypeCheckingAndCasting::DesugarMatchCase(MatchCase& matchCase) const
         auto varPat = DynamicCast<VarPattern>(pat->pattern.get());
         // Pattern under type pattern is always either wildcard or var
         CJC_ASSERT(varPat);
-        auto originalTy = varPat->GetTy();
+        auto originalTy = varPat->DataTy();
         CJC_NULLPTR_CHECK(originalTy);
 
         pat->type = CreateType(jObjectDecl->GetTy());

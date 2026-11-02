@@ -389,3 +389,20 @@ std::string ToolChain::FindUserToolPath(const std::string& toolName) const
     }
     return toolPath;
 }
+
+void ToolChain::AppendClangRTProfileLibraryIfNeeded(Tool& tool) const
+{
+    bool needProfile = driverOptions.enablePgoInstrGen || driverOptions.enableCoverage;
+#ifdef CANGJIE_BUILD_STDLIB_WITH_COVERAGE
+    if (driverOptions.outputMode == GlobalOptions::OutputMode::EXECUTABLE ||
+        driverOptions.outputMode == GlobalOptions::OutputMode::SHARED_LIB) {
+        needProfile = true;
+    }
+#endif
+    if (!needProfile) {
+        return;
+    }
+    auto cangjieLibPath =
+        FileUtil::JoinPath(FileUtil::JoinPath(driver.cangjieHome, "lib"), driverOptions.GetCangjieLibTargetPathName());
+    tool.AppendArg(FileUtil::JoinPath(cangjieLibPath, GetClangRTProfileLibraryName()));
+}

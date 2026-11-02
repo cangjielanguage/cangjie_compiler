@@ -89,6 +89,35 @@ static bool IsMemberFuncOfExtend(const AST::Decl* decl)
     return decl->outerDecl->astKind == AST::ASTKind::EXTEND_DECL;
 }
 
+// True when `func` is a desugared default-value function whose param is a non copy type not
+// @~local; the body is translated as if wrapped in `exclave {}`.
+static bool IsImplicitExclaveDefaultParamFunc(const AST::FuncDecl& func,
+    const Cangjie::TypeManager& typeManager)
+{
+    if (!func.ownerFunc || !func.TestAttr(AST::Attribute::HAS_INITIAL)) {
+        return false;
+    }
+    if (func.funcBody == nullptr || func.funcBody->paramLists.empty()) {
+        return false;
+    }
+    // Desugared name is `<paramName>.<paramIndex>`; match by name prefix.
+    for (auto& fp : func.funcBody->paramLists[0]->params) {
+        if (!fp) {
+            continue;
+        }
+        const auto& ident = func.identifier.Val();
+        const auto& name = fp->identifier.Val();
+        if (ident == name || ident.rfind(name + ".", 0) == 0) {
+            auto ty = fp->GetTy();
+            if (!Ty::IsTyCorrect(ty)) {
+                return false;
+            }
+            return !const_cast<Cangjie::TypeManager&>(typeManager).IsCopyType(ty.Ty()) && ty.IsLocalType();
+        }
+    }
+    return false;
+}
+
 void Translator::SetRawMangledNameForIncrementalCompile(const AST::FuncDecl& astFunc, Function& chirFunc) const
 {
     AST::Decl* decl = nullptr;
@@ -219,9 +248,24 @@ Ptr<Value> Translator::Visit(const AST::FuncDecl& func)
                 ->GetResult();
         curFunc->SetReturnValue(*retVal);
     }
-    // Translate body.
-    auto block = Visit(*func.funcBody.get());
-    CreateAndAppendTerminator<GoTo>(StaticCast<Block*>(block.get()), entry);
+    // For desugared default-value functions whose param is a non copy not @~local type, the spec
+    // requires the body be translated as if wrapped in exclave
+    if (IsImplicitExclaveDefaultParamFunc(func, typeManager)) {
+        auto subGroup = builder.CreateBlockGroup(*currentBlock->GetTopLevelFunc());
+        auto exclave = CreateAndAppendTerminator<Exclave>(currentBlock);
+        exclave->InitBody(*subGroup);
+        exclave->SetDebugLocation(TranslateLocation(func));
+        blockGroupStack.emplace_back(subGroup);
+        auto subEntry = builder.CreateBlock(subGroup);
+        subGroup->SetEntryBlock(subEntry);
+        auto block = Visit(*func.funcBody);
+        CreateAndAppendTerminator<GoTo>(StaticCast<Block>(block.get()), subEntry);
+        blockGroupStack.pop_back();
+    } else {
+        // Translate body.
+        auto block = Visit(*func.funcBody);
+        CreateAndAppendTerminator<GoTo>(StaticCast<Block>(block.get()), entry);
+    }
     blockGroupStack.pop_back();
     return curFunc;
 }
@@ -440,6 +484,10 @@ Ptr<Value> Translator::TranslateConstructorFuncInline(const AST::Decl& parent, c
                 CJC_ASSERT(!pureCurObjType->IsRef() && pureCurObjType->IsNominal());
                 auto pureCurObjCustomType = StaticCast<CustomType*>(pureCurObjType);
                 auto memberType = pureCurObjCustomType->GetInstMemberTypeByPath(path, builder);
+                if (auto newType = builder.WithModal(value->GetType(), memberType->GetModalInfo());
+                    newType != value->GetType()) {
+                    value->SetType(*newType);
+                }
                 if (value->GetType() == memberType) {
                     CreateAndAppendExpression<StoreElementRef>(
                         loc, builder.GetUnitTy(), value, thisVar, path, currentBlock);
@@ -459,25 +507,38 @@ Ptr<Value> Translator::TranslateConstructorFuncInline(const AST::Decl& parent, c
     return initBlock;
 }
 
+std::vector<GenericType*> Translator::GetNestedFuncGenericParams(const AST::FuncDecl& func)
+{
+    std::vector<GenericType*> genericTys;
+    if (auto generic = func.funcBody->generic.get(); generic && func.TestAttr(AST::Attribute::GENERIC)) {
+        for (auto& type : generic->typeParameters) {
+            auto modalTy = type->GetTy();
+            auto genericType = StaticCast<GenericType*>(TranslateType(modalTy));
+            genericTys.emplace_back(genericType);
+            std::vector<Type*> upperBounds;
+            for (auto argTy : StaticCast<AST::GenericsTy*>(modalTy.Ty())->upperBounds) {
+                CJC_ASSERT(!argTy->IsGeneric());
+                // Keep upper-bound modals aligned with the generic itself (same as WithModal).
+                upperBounds.emplace_back(TranslateType(AST::ModalTy{argTy, modalTy.Mode()}));
+            }
+            genericType->SetUpperBounds(upperBounds);
+        }
+    }
+    return genericTys;
+}
+
 Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
 {
     CJC_ASSERT(func.funcBody && func.funcBody->body);
-    if (func.TestAttr(AST::Attribute::GENERIC)) {
-        TranslateFunctionGenericUpperBounds(chirTy, func);
-    }
     auto lambdaTrans = SetupContextForLambda(*func.funcBody->body);
-    auto funcTy = RawStaticCast<FuncType*>(TranslateType(*func.GetTy()));
-    // Create nested functions' body and parameters.
+    // Fill nested func type params before translating FuncTy, so WithModal can copy
+    // upper bounds into any T@local! / T@local? that appear in the signature.
+    auto genericTys = GetNestedFuncGenericParams(func);
+    auto funcTy = StaticCast<FuncType*>(TranslateType(func.GetTy()));
     CJC_NULLPTR_CHECK(currentBlock->GetTopLevelFunc());
+    // Host Lambda and its parameters go into the block before any default-value desugar.
     BlockGroup* body = builder.CreateBlockGroup(*currentBlock->GetTopLevelFunc());
     const auto& loc = TranslateLocation(func);
-    std::vector<GenericType*> genericTys;
-    // Only collect for generic function which has not been instantiated.
-    if (auto generic = func.funcBody->generic.get(); generic && func.TestAttr(AST::Attribute::GENERIC)) {
-        for (auto& type : generic->typeParameters) {
-            genericTys.emplace_back(RawStaticCast<GenericType*>(TranslateType(*type->GetTy())));
-        }
-    }
     std::string lambdaMangleName = func.mangledName;
     Lambda* lambda = CreateAndAppendExpression<Lambda>(
         loc, funcTy, funcTy, currentBlock, true, lambdaMangleName, func.identifier, genericTys);
@@ -489,7 +550,8 @@ Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
 
     std::vector<DebugLocation> paramLoc;
     std::vector<std::string> paramSrcCodeIdentifiers;
-    for (auto& astParam : func.funcBody->paramLists[0]->params) {
+    auto& astParams = func.funcBody->paramLists[0]->params;
+    for (auto& astParam : astParams) {
         paramLoc.emplace_back(TranslateLocationWithoutScope(builder.GetChirContext(), astParam->begin, astParam->end));
         paramSrcCodeIdentifiers.emplace_back(astParam->identifier.GetRawText());
     }
@@ -501,20 +563,41 @@ Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
         param->SetSrcCodeIdentifier(paramSrcCodeIdentifiers[i]);
     }
 
+    /*
+        main() {
+            func f(k!: Int64 = 0, g!: () -> Int64 = { => f(k: 1, g: { => 2 }) }): Int64 {
+                if (k == 0) { g() } else { k }
+            }
+            println(f())
+        }
+        Register host symbol before translating default-value desugars, so a default value can
+        reference the host; host body is translated last.
+    */
     SetSymbolTable(func, *lambda->GetResult());
-    for (auto& param : func.funcBody->paramLists[0]->params) {
-        if (param->desugarDecl) {
-            // recursively translate default parameter function of a lambda (possibly a local func)
-            auto defaultArgFunc = TranslateNestedFunc(*param->desugarDecl);
-            StaticCast<Lambda*>(StaticCast<LocalVar*>(defaultArgFunc)->GetExpr())->SetParamDftValHostFunc(*lambda);
+    lambdaTrans.SetSymbolTable(func, *lambda->GetResult());
 
-            // set such functions as local symbols in the current scope but not in the lambda translation context
-            // as a default parameter function can only be called outside the function
-            lambdaTrans.SetSymbolTable(*param->desugarDecl, *defaultArgFunc);
+    // Instantiated nested funcs are translated before the generic one in the same block.
+    // When translating the generic Lambda, point each instantiated Lambda back to it.
+    if (func.TestAttr(AST::Attribute::GENERIC) && gim != nullptr) {
+        for (auto instDecl : gim->GetInstantiatedDecls(func)) {
+            auto instVal = StaticCast<LocalVar*>(GetSymbolTable(*instDecl));
+            StaticCast<Lambda*>(instVal->GetExpr())->SetGenericDecl(lambda);
         }
     }
-    // Local function allows to call itself inside funcBody.
-    lambdaTrans.SetSymbolTable(func, *lambda->GetResult());
+
+    auto& chirParams = lambda->GetParams();
+    CJC_ASSERT(chirParams.size() == astParams.size());
+    for (size_t i = 0; i < astParams.size(); ++i) {
+        if (astParams[i]->desugarDecl == nullptr) {
+            continue;
+        }
+        auto defaultArgFunc = TranslateNestedFunc(*astParams[i]->desugarDecl);
+        auto defaultLambda = StaticCast<Lambda*>(StaticCast<LocalVar*>(defaultArgFunc)->GetExpr());
+        defaultLambda->SetParamDftValHostParam(*chirParams[i]);
+        // Default-value funcs are invoked at the call site, which is outside the host body.
+        // The host translator still records them so a use inside the body can resolve.
+        lambdaTrans.SetSymbolTable(*astParams[i]->desugarDecl, *defaultArgFunc);
+    }
     return lambdaTrans.TranslateLambdaBody(
         lambda, *func.funcBody, {.hasInitial = func.TestAttr(AST::Attribute::HAS_INITIAL)});
 }

@@ -64,7 +64,7 @@ void RewriteObjCBlockConstruction::HandleImpl(InteropContext& ctx)
                 return VisitAction::WALK_CHILDREN;
             }
             auto&& arg = callExpr->args[0];
-            if (!arg->GetTy()->IsFunc()) {
+            if (!arg->DataTy()->IsFunc()) {
                 return VisitAction::WALK_CHILDREN;
             }
 

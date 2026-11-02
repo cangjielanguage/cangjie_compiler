@@ -49,7 +49,7 @@ bool IsObjCCompatible(const Ty& ty, TypePosition pos) noexcept
                 CJC_ASSERT(ty.typeArgs.size() == 1);
                 return IsObjCCompatible(*ty.typeArgs[0]);
             }
-            if (Ty::IsCStructType(ty)) {
+            if (ty.IsCStructType()) {
                 return true;
             }
             if (IsObjCFunc(ty)) {
@@ -612,9 +612,9 @@ bool IsObjCExportRegDataCtor(const FuncDecl& fd) noexcept
 
     // `$regData: (NativeObjCId, <impl>$reg)`. The registry companion class cannot be named from source, which
     // is what keeps the signature unwritable by a user and so tells this ctor apart from the one it clones.
-    auto regDataTy = DynamicCast<TupleTy*>(params->front()->GetTy());
+    auto regDataTy = DynamicCast<TupleTy*>(params->front()->DataTy());
     return regDataTy && regDataTy->typeArgs.size() == regDataElemCount &&
-        IsObjCExportRegistryCompanion(*regDataTy->typeArgs[1]);
+        IsObjCExportRegistryCompanion(*regDataTy->TyArg(1));
 }
 
 Ptr<FuncDecl> GetObjCImplRegDataCtor(const ClassDecl& impl, const FuncDecl& origin) noexcept

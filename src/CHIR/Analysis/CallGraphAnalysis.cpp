@@ -25,8 +25,8 @@
 #include <set>
 
 #include "cangjie/CHIR/IR/Expression/Terminator.h"
+#include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/Utils/Visitor/Visitor.h"
-#include "cangjie/Utils/Casting.h"
 #include "cangjie/Utils/Utils.h"
 
 namespace Cangjie::CHIR {

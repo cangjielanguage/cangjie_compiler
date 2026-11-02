@@ -16,7 +16,7 @@
 #include "cangjie/AST/PrintNode.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
-#include "cangjie/Utils/Casting.h"
+#include "cangjie/AST/ASTCasting.h"
 #include "cangjie/Utils/ICEUtil.h"
 #include "cangjie/Utils/SafePointer.h"
 
@@ -60,18 +60,18 @@ void ExpandToAPILevel(MacroInvocation& invocation)
     expandedDecl->annotations.emplace_back(std::move(apilevelAnno));
 }
 
-bool IsSameType(Ptr<Type> lt, Ptr<Ty> rty);
+bool IsSameType(Ptr<Type> lt, ModalTy rty);
 // Only extend's extendedType or class/struct/enum/interface/extend's inheritedType can be in.
 bool IsSameType(Ptr<Type> lt, Ptr<Type> rt)
 {
-    CJC_ASSERT(Ty::IsTyCorrect(rt->GetTy()));
+    CJC_ASSERT(rt->GetTy().IsCorrect());
     switch (lt->astKind) {
         case ASTKind::REF_TYPE: {
             auto lrt = StaticCast<RefType>(lt);
             if (rt->astKind != ASTKind::REF_TYPE) {
                 return false;
             }
-            auto rrtName = rt->GetTy()->IsPrimitive() ? rt->GetTy()->String() : rt->GetTy()->name;
+            auto rrtName = rt->GetTy()->IsPrimitive() ? rt->GetTy().String() : rt->GetTy()->name;
             if (lrt->ref.identifier.Val() != rrtName) {
                 return false;
             }
@@ -108,7 +108,7 @@ bool IsSameType(Ptr<Type> lt, Ptr<Type> rt)
         case ASTKind::PRIMITIVE_TYPE: {
             auto lpt = StaticCast<PrimitiveType>(lt);
             auto lptName = lpt->str;
-            auto rtyName = rt->GetTy()->IsPrimitive() ? rt->GetTy()->String() : rt->GetTy()->name;
+            auto rtyName = rt->GetTy()->IsPrimitive() ? rt->GetTy().String() : rt->GetTy()->name;
             lptName = lptName == "Rune" ? "UInt8" : lptName;
             rtyName = rtyName == "Rune" ? "UInt8" : rtyName;
             if (lptName != rtyName) {
@@ -125,8 +125,11 @@ bool IsSameType(Ptr<Type> lt, Ptr<Type> rt)
     return true;
 }
 
-bool IsSameType(Ptr<Type> lt, Ptr<Ty> rty)
+bool IsSameType(Ptr<Type> lt, ModalTy rty)
 {
+    if (lt->modal.ToModalInfo() != rty.Mode()) {
+        return false;
+    }
     switch (lt->astKind) {
         case ASTKind::REF_TYPE: {
             auto lrt = StaticCast<RefType>(lt);
@@ -157,7 +160,7 @@ bool IsSameType(Ptr<Type> lt, Ptr<Ty> rty)
                 return false;
             }
             auto lft = StaticCast<FuncType>(lt);
-            auto rfty = StaticCast<FuncTy>(rty);
+            auto rfty = StaticCast<FuncTy>(rty.Ty());
             if (lft->paramTypes.size() != rfty->paramTys.size()) {
                 return false;
             }
@@ -176,7 +179,7 @@ bool IsSameType(Ptr<Type> lt, Ptr<Ty> rty)
                 return false;
             }
             auto ltt = StaticCast<TupleType>(lt);
-            auto rtty = StaticCast<TupleTy>(rty);
+            auto rtty = StaticCast<TupleTy>(rty.Ty());
             if (ltt->fieldTypes.size() != rtty->typeArgs.size()) {
                 return false;
             }
@@ -192,7 +195,7 @@ bool IsSameType(Ptr<Type> lt, Ptr<Ty> rty)
                 return false;
             }
             auto lot = StaticCast<OptionType>(lt);
-            auto roty = StaticCast<EnumTy>(rty);
+            auto roty = StaticCast<EnumTy>(rty.Ty());
             if (!IsSameType(lot->componentType.get(), roty->typeArgs[0])) {
                 return false;
             }
@@ -203,7 +206,7 @@ bool IsSameType(Ptr<Type> lt, Ptr<Ty> rty)
                 return false;
             }
             auto lat = StaticCast<VArrayType>(lt);
-            auto rat = StaticCast<VArrayTy>(rty);
+            auto rat = StaticCast<VArrayTy>(rty.Ty());
             if (!IsSameType(lat->typeArgument.get(), rat->typeArgs[0])) {
                 return false;
             }
@@ -221,7 +224,7 @@ bool IsSameType(Ptr<Type> lt, Ptr<Ty> rty)
                 return false;
             }
             auto lpt = StaticCast<PrimitiveType>(lt);
-            auto rpty = StaticCast<PrimitiveTy>(rty);
+            auto rpty = StaticCast<PrimitiveTy>(rty.Ty());
             if (lpt->str != rpty->String()) {
                 return false;
             }
@@ -294,7 +297,7 @@ bool IsSameFuncByIdentifier(Ptr<FuncBody> lb, Ptr<FuncBody> rb)
             return false;
         }
         CJC_ASSERT(rb->GetTy()->IsFunc());
-        auto lFuncTy = StaticCast<FuncTy>(rb->GetTy());
+        auto lFuncTy = StaticCast<FuncTy>(rb->DataTy());
         if (lb->retType && !IsSameType(lb->retType.get(), lFuncTy->retTy)) {
             return false;
         }

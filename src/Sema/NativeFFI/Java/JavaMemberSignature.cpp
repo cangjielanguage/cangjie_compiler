@@ -46,7 +46,7 @@ JavaMemberSignature JavaMemberSignature::FromConstructor(const FuncDecl& ctor, b
     CJC_ASSERT(outerDecl.IsJavaForeign() || outerDecl.IsJavaExport());
 
     static auto& voidTy = *TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-    std::vector<Ptr<Ty>> paramTys = Native::FFI::GetParamTys(*ctor.funcBody->paramLists[0]);
+    std::vector<ModalTy> paramTys = Native::FFI::GetParamTys(*ctor.funcBody->paramLists[0]);
 
     JavaMemberSignature signature(
         /* .classSignature = */ JavaClassSignature::FromDecl(outerDecl),

@@ -635,7 +635,9 @@ public:
     Diagnostic diagnostic;
     DiagnosticEngine& diag;
     DiagnosticBuilder(const DiagnosticBuilder& p) = delete;
+    DiagnosticBuilder(DiagnosticBuilder&& p);
     DiagnosticBuilder& operator=(const DiagnosticBuilder& p) = delete;
+    DiagnosticBuilder& operator=(DiagnosticBuilder&& p);
 
     /// @brief Use for old diagnostic to add note.
     template <typename... Args> void AddNote(const Position& pos, DiagKind kind, Args... args)

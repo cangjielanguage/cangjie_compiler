@@ -47,19 +47,17 @@ OwnedPtr<Expr> JFieldIdCache::CreateJFieldIdAccess(AfterTypeCheckContext& ctx,
     std::vector<OwnedPtr<Node>> ifNull;
     std::vector<OwnedPtr<Node>> ifNotNull;
 
-    ifNull.push_back(
-        CreateAssignExpr(WithinFile(CreateRefExpr(jmethodVar), &curFile),
-            ilib.CreateGetFieldIdCall(envPtr, ASTCloner::Clone(jclass), field),
-            TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)));
+    ifNull.push_back(CreateAssignExpr(WithinFile(CreateRefExpr(jmethodVar), &curFile),
+        ilib.CreateGetFieldIdCall(envPtr, ASTCloner::Clone(jclass), field),
+        {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)}));
     ifNull.push_back(WithinFile(CreateRefExpr(jmethodVar), &curFile));
 
     ifNotNull.push_back(WithinFile(CreateRefExpr(jmethodVar), &curFile));
 
     return CreateIfExpr(
         CreateIsPtrNullCheckCall(importManager, typeManager, WithinFile(CreateRefExpr(jmethodVar), &curFile)),
-        CreateBlock(std::move(ifNull), &ilib.GetJniJClassTy()),
-        CreateBlock(std::move(ifNotNull), &ilib.GetJniJClassTy()),
-        &ilib.GetJniJClassTy());
+        CreateBlock(std::move(ifNull), {&ilib.GetJniJClassTy()}),
+        CreateBlock(std::move(ifNotNull), {&ilib.GetJniJClassTy()}), {&ilib.GetJniJClassTy()});
 }
 
 VarDecl& JFieldIdCache::GetOrPut(AfterTypeCheckContext& ctx, JavaMemberSignature method, File& curFile)
@@ -71,7 +69,7 @@ VarDecl& JFieldIdCache::GetOrPut(AfterTypeCheckContext& ctx, JavaMemberSignature
     auto& jmethodIdTy = ilib.GetJniJfieldIdTy();
 
     auto null = MakeOwned<PointerExpr>();
-    null->SetTy(&jmethodIdTy);
+    null->SetTy({&jmethodIdTy});
     auto varDecl = CreateVarDecl(GetNewAccessorName(method), std::move(null), nullptr);
     varDecl->EnableAttr(Attribute::INTERNAL, Attribute::GLOBAL, Attribute::INITIALIZED, Attribute::NO_REFLECT_INFO);
     varDecl->isVar = true;

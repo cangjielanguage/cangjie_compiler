@@ -15,7 +15,7 @@
 #include "ImplUtils.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/Basic/Match.h"
-#include "cangjie/Utils/Casting.h"
+#include "cangjie/AST/ASTCasting.h"
 
 namespace Cangjie {
 using namespace Cangjie::AST;
@@ -172,6 +172,17 @@ OwnedPtr<VarDecl> PartialInstantiation::InstantiateFuncParam(const FuncParam& fp
     return ret;
 }
 
+OwnedPtr<VarDecl> PartialInstantiation::InstantiateThisParam(
+    const ThisParam& tp, [[maybe_unused]] const VisitFunc& visitor)
+{
+    auto ret = MakeOwned<ThisParam>();
+    ret->thisPos = tp.thisPos;
+    ret->modal = tp.modal;
+    ret->commaPos = tp.commaPos;
+    ret->EnableAttr(Attribute::COMPILER_ADD);
+    return OwnedPtr<VarDecl>(ret.release());
+}
+
 OwnedPtr<Decl> PartialInstantiation::InstantiateVarWithPatternDecl(
     const VarWithPatternDecl& vwpd, const VisitFunc& visitor)
 {
@@ -189,6 +200,7 @@ OwnedPtr<Decl> PartialInstantiation::InstantiateVarWithPatternDecl(
 OwnedPtr<Decl> PartialInstantiation::InstantiateVarDecl(const VarDecl& vd, const VisitFunc& visitor)
 {
     auto ret = match(vd)([&visitor](const FuncParam& e) { return InstantiateFuncParam(e, visitor); },
+        [&visitor](const ThisParam& e) { return InstantiateThisParam(e, visitor); },
         []() { return MakeOwned<VarDecl>(); });
     // Instantiate field in VarDecl.
     ret->type = InstantiateType(vd.type.get(), visitor);
@@ -398,6 +410,7 @@ OwnedPtr<QualifiedType> PartialInstantiation::InstantiateQualifiedType(
     for (auto& it : node.typeArguments) {
         ret->typeArguments.push_back(InstantiateType(it.get(), visitor));
     }
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -407,6 +420,7 @@ OwnedPtr<ParenType> PartialInstantiation::InstantiateParenType(const ParenType& 
     ret->type = InstantiateType(node.type.get(), visitor);
     ret->leftParenPos = node.leftParenPos;
     ret->rightParenPos = node.rightParenPos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -419,6 +433,7 @@ OwnedPtr<OptionType> PartialInstantiation::InstantiateOptionType(const OptionTyp
     if (node.desugarType != nullptr) {
         ret->desugarType = Instantiate(node.desugarType.get(), visitor);
     }
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -433,6 +448,7 @@ OwnedPtr<FuncType> PartialInstantiation::InstantiateFuncType(const FuncType& nod
     ret->leftParenPos = node.leftParenPos;
     ret->rightParenPos = node.rightParenPos;
     ret->arrowPos = node.arrowPos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -463,6 +479,7 @@ OwnedPtr<VArrayType> PartialInstantiation::InstantiateVArrayType(const VArrayTyp
     ret->typeArgument = InstantiateType(node.typeArgument.get(), visitor);
     ret->constantType = InstantiateType(node.constantType.get(), visitor);
     ret->rightAnglePos = node.rightAnglePos;
+    ret->modal = node.modal;
     return ret;
 }
 
@@ -535,6 +552,13 @@ OwnedPtr<IfExpr> PartialInstantiation::InstantiateIfExpr(const IfExpr& ie, const
     expr->isElseIf = ie.isElseIf;
     expr->elsePos = ie.elsePos;
     expr->elseBody = InstantiateExpr(ie.elseBody.get(), visitor);
+    return expr;
+}
+
+OwnedPtr<PrimitiveTypeExpr> PartialInstantiation::InstantiatePrimitiveTypeExpr(const PrimitiveTypeExpr& pte)
+{
+    auto expr = MakeOwned<PrimitiveTypeExpr>(pte.typeKind);
+    expr->modal = pte.modal;
     return expr;
 }
 
@@ -934,6 +958,14 @@ OwnedPtr<SynchronizedExpr> PartialInstantiation::InstantiateSynchronizedExpr(
     return expr;
 }
 
+OwnedPtr<ExclaveExpr> PartialInstantiation::InstantiateExclaveExpr(const ExclaveExpr& ee, const VisitFunc& visitor)
+{
+    auto expr = MakeOwned<ExclaveExpr>();
+    expr->exclavePos = ee.exclavePos;
+    expr->body = InstantiateExpr(ee.body.get(), visitor);
+    return expr;
+}
+
 OwnedPtr<InvalidExpr> PartialInstantiation::InstantiateInvalidExpr(const InvalidExpr& ie)
 {
     auto expr = MakeOwned<InvalidExpr>(ie.begin);
@@ -1050,6 +1082,7 @@ OwnedPtr<ExprT> PartialInstantiation::InstantiateExpr(Ptr<ExprT> expr, const Vis
         [](const WildcardExpr& /* we */) { return OwnedPtr<Expr>(MakeOwned<WildcardExpr>()); },
         [&visitor](
             const LetPatternDestructor& ld) { return OwnedPtr<Expr>(InstantiateLetPatternDestructor(ld, visitor)); },
+        [&visitor](const ExclaveExpr& ee) { return OwnedPtr<Expr>(InstantiateExclaveExpr(ee, visitor)); },
         [&expr]() {
             // Invalid and ignored cases.
             auto invalidExpr = MakeOwned<InvalidExpr>(expr->begin);
@@ -1376,6 +1409,9 @@ OwnedPtr<FuncParamList> PartialInstantiation::InstantiateFuncParamList(
     CopyNodeField(ret.get(), fpl);
     // Instantiate field in FuncParamList.
     ret->leftParenPos = fpl.leftParenPos;
+    if (fpl.thisParam) {
+        ret->thisParam = OwnedPtr(StaticCast<ThisParam>(InstantiateDecl(fpl.thisParam, visitor).release()));
+    }
     for (auto& it : fpl.params) {
         auto funcParam = MakeOwned<FuncParam>();
         auto d = InstantiateDecl(it.get(), visitor);

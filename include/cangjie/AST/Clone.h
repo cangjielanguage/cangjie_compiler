@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 
+#include "cangjie/AST/Node.h"
 #include "cangjie/AST/NodeX.h"
 
 namespace Cangjie::AST {
@@ -158,6 +159,9 @@ private:
     static OwnedPtr<Decl> CloneInterfaceDecl(const InterfaceDecl& id, const VisitFunc& visitor);
     static OwnedPtr<Decl> CloneEnumDecl(const EnumDecl& ed, const VisitFunc& visitor);
     static OwnedPtr<Decl> CloneTypeAliasDecl(const TypeAliasDecl& tad, const VisitFunc& visitor);
+    static OwnedPtr<ExclaveExpr> CloneExclaveExpr(const ExclaveExpr& ee, const VisitFunc& visitor);
+    static OwnedPtr<ThisParam> CloneThisParam(const ThisParam& tp, const VisitFunc& visitor);
+    static OwnedPtr<PrimitiveTypeExpr> ClonePrimitiveTypeExpr(const PrimitiveTypeExpr& pt);
 };
 } // namespace Cangjie::AST
 #endif // CANGJIE_AST_CLONE_H

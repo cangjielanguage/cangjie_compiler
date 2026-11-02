@@ -46,23 +46,18 @@ OwnedPtr<Expr> JMethodIdCache::CreateJMethodIdAccess(AfterTypeCheckContext& ctx,
     std::vector<OwnedPtr<Node>> ifNull;
     std::vector<OwnedPtr<Node>> ifNotNull;
 
-    ifNull.push_back(
-        CreateAssignExpr(WithinFile(CreateRefExpr(jmethodVar), &curFile),
-            ilib.CreateGetMethodIdCall(envPtr,
-                ASTCloner::Clone(jclass),
-                method.GetName(),
-                method.GetSignature(),
-                method.IsStatic()),
-            TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)));
+    ifNull.push_back(CreateAssignExpr(WithinFile(CreateRefExpr(jmethodVar), &curFile),
+        ilib.CreateGetMethodIdCall(
+            envPtr, ASTCloner::Clone(jclass), method.GetName(), method.GetSignature(), method.IsStatic()),
+        {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)}));
     ifNull.push_back(WithinFile(CreateRefExpr(jmethodVar), &curFile));
 
     ifNotNull.push_back(WithinFile(CreateRefExpr(jmethodVar), &curFile));
 
     return CreateIfExpr(
         CreateIsPtrNullCheckCall(importManager, typeManager, WithinFile(CreateRefExpr(jmethodVar), &curFile)),
-        CreateBlock(std::move(ifNull), &ilib.GetJniJClassTy()),
-        CreateBlock(std::move(ifNotNull), &ilib.GetJniJClassTy()),
-        &ilib.GetJniJClassTy());
+        CreateBlock(std::move(ifNull), {&ilib.GetJniJClassTy()}),
+        CreateBlock(std::move(ifNotNull), {&ilib.GetJniJClassTy()}), {&ilib.GetJniJClassTy()});
 }
 
 VarDecl& JMethodIdCache::GetOrPut(AfterTypeCheckContext& ctx, JavaMemberSignature method, File& curFile)
@@ -74,7 +69,7 @@ VarDecl& JMethodIdCache::GetOrPut(AfterTypeCheckContext& ctx, JavaMemberSignatur
     auto& jmethodIdTy = ilib.GetJniJmethodIdTy();
 
     auto null = MakeOwned<PointerExpr>();
-    null->SetTy(&jmethodIdTy);
+    null->SetTy({&jmethodIdTy});
     auto varDecl = CreateVarDecl(GetNewAccessorName(method), std::move(null), nullptr);
     varDecl->EnableAttr(Attribute::INTERNAL, Attribute::GLOBAL, Attribute::INITIALIZED, Attribute::NO_REFLECT_INFO);
     varDecl->isVar = true;

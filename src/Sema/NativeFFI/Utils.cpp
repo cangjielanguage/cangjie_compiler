@@ -26,11 +26,11 @@ namespace Cangjie::Native::FFI {
 
 using namespace TypeCheckUtil;
 
-OwnedPtr<RefExpr> CreateThisRef(Ptr<Decl> target, Ptr<Ty> ty, Ptr<File> curFile)
+OwnedPtr<RefExpr> CreateThisRef(Ptr<Decl> target, ModalTy ty, Ptr<File> curFile)
 {
     auto thisRef = MakeOwned<RefExpr>();
     thisRef->isThis = true;
-    thisRef->SetTy(ty);
+    thisRef->SetTy({ty});
     thisRef->ref.identifier = SrcIdentifier("this");
     thisRef->ref.target = target;
     thisRef->curFile = curFile;
@@ -53,15 +53,15 @@ OwnedPtr<PrimitiveType> CreateUnitType(Ptr<File> curFile)
     auto ret = MakeOwned<PrimitiveType>();
     ret->str = "Unit";
     ret->kind = TypeKind::TYPE_UNIT;
-    ret->SetTy(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    ret->SetTy({TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
     ret->curFile = curFile;
 
     return ret;
 }
 
-std::vector<Ptr<Ty>> GetParamTys(FuncParamList& params)
+std::vector<ModalTy> GetParamTys(FuncParamList& params)
 {
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<ModalTy> paramTys;
 
     for (auto& param : params.params) {
         paramTys.push_back(param->GetTy());
@@ -73,7 +73,7 @@ OwnedPtr<RefExpr> CreateSuperRef(Ptr<Decl> target, Ptr<Ty> ty)
 {
     auto superRef = MakeOwned<RefExpr>();
     superRef->isSuper = true;
-    superRef->SetTy(ty);
+    superRef->SetTy({ty});
     superRef->ref.identifier = SrcIdentifier("super");
     superRef->ref.target = target;
     return superRef;
@@ -89,37 +89,37 @@ OwnedPtr<CallExpr> CreateSuperCall(Decl& target, FuncDecl& baseTarget, Ptr<Ty> f
     return call;
 }
 
-OwnedPtr<Type> CreateType(Ptr<Ty> ty)
+OwnedPtr<Type> CreateType(ModalTy ty)
 {
     auto res = MakeOwned<Type>();
-    res->SetTy(ty);
+    res->SetTy({ty});
     return res;
 }
 
 OwnedPtr<Type> CreateFuncType(Ptr<FuncTy> ty)
 {
     auto res = MakeOwned<FuncType>();
-    res->SetTy(ty);
+    res->SetTy({ty});
 
     for (auto param : ty->paramTys) {
-        res->paramTypes.push_back(CreateType(param));
+        res->paramTypes.push_back(CreateType(param.Ty()));
     }
 
     return res;
 }
 
 OwnedPtr<Expr> CreateBoolMatch(
-    OwnedPtr<Expr> selector, OwnedPtr<Expr> trueBranch, OwnedPtr<Expr> falseBranch, Ptr<Ty> ty)
+    OwnedPtr<Expr> selector, OwnedPtr<Expr> trueBranch, OwnedPtr<Expr> falseBranch, ModalTy ty)
 {
     static const auto BOOL_TY = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
 
     OwnedPtr<ConstPattern> truePattern = MakeOwned<ConstPattern>();
-    truePattern->literal = CreateLitConstExpr(LitConstKind::BOOL, "true", BOOL_TY);
-    truePattern->SetTy(BOOL_TY);
+    truePattern->literal = CreateLitConstExpr(LitConstKind::BOOL, "true", {BOOL_TY});
+    truePattern->SetTy({BOOL_TY});
 
     OwnedPtr<ConstPattern> falsePattern = MakeOwned<ConstPattern>();
-    falsePattern->literal = CreateLitConstExpr(LitConstKind::BOOL, "false", BOOL_TY);
-    falsePattern->SetTy(BOOL_TY);
+    falsePattern->literal = CreateLitConstExpr(LitConstKind::BOOL, "false", {BOOL_TY});
+    falsePattern->SetTy({BOOL_TY});
 
     auto caseTrue = CreateMatchCase(std::move(truePattern), std::move(trueBranch));
     auto caseFalse = CreateMatchCase(std::move(falsePattern), std::move(falseBranch));
@@ -128,7 +128,7 @@ OwnedPtr<Expr> CreateBoolMatch(
     matchCases.emplace_back(std::move(caseTrue));
     matchCases.emplace_back(std::move(caseFalse));
     auto curFile = selector->curFile;
-    return WithinFile(CreateMatchExpr(std::move(selector), std::move(matchCases), ty), curFile);
+    return WithinFile(CreateMatchExpr(std::move(selector), std::move(matchCases), {ty}), curFile);
 }
 
 StructDecl& GetStringDecl(const ImportManager& importManager)
@@ -158,10 +158,10 @@ OwnedPtr<Expr> CreateReadPointerCall(const ImportManager& importManager, TypeMan
     auto& fd = GetReadPointerIntrinsicDecl(importManager);
 
     auto fdref = WithinFile(CreateRefExpr(fd), ptr->curFile);
-    fdref->instTys.push_back(ptr->GetTy());
+    fdref->instTys.push_back(ptr->DataTy());
     fdref->SetTy(typeManager.GetInstantiatedTy(fd.GetTy(), GenerateTypeMapping(fd, fdref->instTys)));
     static auto int64Ty = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64);
-    auto zero = WithinFile(CreateLitConstExpr(LitConstKind::INTEGER, "0", int64Ty), ptr->curFile);
+    auto zero = WithinFile(CreateLitConstExpr(LitConstKind::INTEGER, "0", {int64Ty}), ptr->curFile);
 
     auto readCall = CreateCallExpr(std::move(fdref), {}, &fd, ptr->GetTy()->typeArgs[0],
         CallKind::CALL_INTRINSIC_FUNCTION);
@@ -179,12 +179,12 @@ OwnedPtr<Expr> CreateGetPointerAddressCall(const ImportManager& importManager, T
     auto& fd = GetGetPointerAddressIntrinsicDecl(importManager);
 
     auto fdref = WithinFile(CreateRefExpr(fd), ptr->curFile);
-    fdref->instTys.push_back(ptr->GetTy()->typeArgs.front());
+    fdref->instTys.push_back(ptr->GetTy()->typeArgs.front().Ty());
 
     static auto uintNativeTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UINT_NATIVE);
-    fdref->SetTy(typeManager.GetFunctionTy(std::vector{ptr->GetTy()}, uintNativeTy));
+    fdref->SetTy({typeManager.GetFunctionTy(std::vector{ptr->GetTy()}, {uintNativeTy})});
 
-    auto getAddrCall = CreateCallExpr(std::move(fdref), {}, &fd, uintNativeTy, CallKind::CALL_INTRINSIC_FUNCTION);
+    auto getAddrCall = CreateCallExpr(std::move(fdref), {}, &fd, {uintNativeTy}, CallKind::CALL_INTRINSIC_FUNCTION);
     auto& args = getAddrCall->args;
     args.push_back(CreateFuncArg(ASTCloner::Clone(ptr)));
 
@@ -197,9 +197,9 @@ OwnedPtr<Expr> CreateIsPtrNullCheckCall(const ImportManager& importManager, Type
     static auto uintNativeTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UINT_NATIVE);
 
     auto getAddrCall = CreateGetPointerAddressCall(importManager, typeManager, ptr);
-    auto zero = WithinFile(CreateLitConstExpr(LitConstKind::INTEGER, "0", uintNativeTy), ptr->curFile);
+    auto zero = WithinFile(CreateLitConstExpr(LitConstKind::INTEGER, "0", {uintNativeTy}), ptr->curFile);
     auto addrCmpExpr = CreateBinaryExpr(std::move(getAddrCall), std::move(zero), TokenKind::EQUAL);
-    addrCmpExpr->SetTy(TypeManager::GetBoolTy());
+    addrCmpExpr->SetTy({TypeManager::GetBoolTy()});
     return addrCmpExpr;
 }
 
@@ -221,7 +221,7 @@ OwnedPtr<CallExpr> WrapReturningLambdaCall(TypeManager& typeManager, std::vector
 OwnedPtr<LambdaExpr> WrapUnitLambdaExpr(
     TypeManager& typeManager, std::vector<OwnedPtr<Node>> nodes, std::vector<OwnedPtr<FuncParam>> lambdaParams)
 {
-    auto unitLiteral = CreateUnitExpr(TypeManager::GetPrimitiveTy(AST::TypeKind::TYPE_UNIT));
+    auto unitLiteral = CreateUnitExpr({TypeManager::GetPrimitiveTy(AST::TypeKind::TYPE_UNIT)});
     nodes.push_back(std::move(unitLiteral));
 
     return WrapReturningLambdaExpr(typeManager, std::move(nodes), std::move(lambdaParams));
@@ -232,7 +232,7 @@ OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(
 {
     CJC_ASSERT(!nodes.empty());
     auto curFile = nodes[0]->curFile;
-    std::vector<Ptr<Ty>> lambdaParamTys;
+    std::vector<ModalTy> lambdaParamTys;
     std::transform(lambdaParams.begin(), lambdaParams.end(), std::back_inserter(lambdaParamTys),
         [](auto& p) { return p->GetTy(); });
     auto paramLists = Nodes<FuncParamList>(CreateFuncParamList(std::move(lambdaParams)));
@@ -240,14 +240,14 @@ OwnedPtr<LambdaExpr> WrapReturningLambdaExpr(
     auto unsafeBlock = CreateBlock(Nodes(ASTCloner::Clone(Ptr(As<ASTKind::EXPR>(nodes.back().get())))), retTy);
     unsafeBlock->EnableAttr(Attribute::UNSAFE);
     auto retExpr = CreateReturnExpr(std::move(unsafeBlock));
-    retExpr->SetTy(TypeManager::GetNothingTy());
+    retExpr->SetTy({TypeManager::GetNothingTy()});
     nodes.pop_back();
     auto lambda =
         CreateLambdaExpr(CreateFuncBody(std::move(paramLists), nullptr, CreateBlock(std::move(nodes), retTy), retTy));
     retExpr->refFuncBody = lambda->funcBody.get();
     lambda->funcBody->body->body.push_back(std::move(retExpr));
     lambda->curFile = curFile;
-    lambda->SetTy(typeManager.GetFunctionTy(std::move(lambdaParamTys), retTy));
+    lambda->SetTy({typeManager.GetFunctionTy(std::move(lambdaParamTys), retTy)});
     return lambda;
 }
 
@@ -337,7 +337,7 @@ OwnedPtr<PrimitiveType> GetPrimitiveType(std::string typeName, AST::TypeKind typ
     OwnedPtr<PrimitiveType> type = MakeOwned<PrimitiveType>();
     type->str = typeName;
     type->kind = typekind;
-    type->SetTy(TypeManager::GetPrimitiveTy(typekind));
+    type->SetTy({TypeManager::GetPrimitiveTy(typekind)});
     return type;
 }
 
@@ -414,8 +414,8 @@ Ptr<Ty> GetInstantyForGenericTy(
     Decl& decl, const std::unordered_map<std::string, Ptr<Ty>>& actualTyArgMap, TypeManager& typeManager)
 {
     std::vector<Ptr<Ty>> actualTypeArgs;
-    for (const auto& typeArg : decl.GetTy()->typeArgs) {
-        std::string typeArgName = typeArg->name;
+    for (const auto& typeArgDty : decl.DataTy()->TyArgs()) {
+        std::string typeArgName = typeArgDty->name;
 
         auto it = actualTyArgMap.find(typeArgName);
         if (it != actualTyArgMap.end()) {
@@ -506,7 +506,7 @@ OwnedPtr<Expr> CreateZeroValue(const ImportManager& importManager, TypeManager& 
     fdRef->SetTy(refTy);
 
     zeroValueCall->baseFunc = std::move(fdRef);
-    zeroValueCall->SetTy(&ty);
+    zeroValueCall->SetTy({&ty});
     zeroValueCall->callKind = CallKind::CALL_INTRINSIC_FUNCTION;
     zeroValueCall->resolvedFunction = zeroValueDecl;
     return zeroValueCall;
@@ -537,30 +537,30 @@ Ptr<Decl> GetOptionNoneDecl(const ImportManager& importManager)
     return noneDecl;
 }
 
-OwnedPtr<Expr> CreateOptionSomeRef(const ImportManager& importManager, TypeManager& typeManager, Ptr<Ty> ty)
+OwnedPtr<Expr> CreateOptionSomeRef(const ImportManager& importManager, TypeManager& typeManager, ModalTy ty)
 {
     auto someDeclRef = CreateRefExpr(*GetOptionSomeDecl(importManager));
-    auto optionActualTy = GetOptionTy(importManager, typeManager, ty);
-    someDeclRef->SetTy(typeManager.GetFunctionTy({ty}, optionActualTy));
+    ModalTy optionActualTy{GetOptionTy(importManager, typeManager, ty.Ty()), ty.Mode()};
+    someDeclRef->SetTy({typeManager.GetFunctionTy({ty}, optionActualTy)});
     return someDeclRef;
 }
 
-OwnedPtr<Expr> CreateOptionNoneRef(const ImportManager& importManager, TypeManager& typeManager, Ptr<Ty> ty)
+OwnedPtr<Expr> CreateOptionNoneRef(const ImportManager& importManager, TypeManager& typeManager, ModalTy ty)
 {
     auto noneDeclRef = CreateRefExpr(*GetOptionNoneDecl(importManager));
-    auto optionActualTy = GetOptionTy(importManager, typeManager, ty);
+    ModalTy optionActualTy{GetOptionTy(importManager, typeManager, ty.Ty()), ty.Mode()};
     noneDeclRef->SetTy(optionActualTy);
     return noneDeclRef;
 }
 
 OwnedPtr<Expr> CreateOptionSomeCall(
-    const ImportManager& importManager, TypeManager& typeManager, OwnedPtr<Expr> expr, Ptr<Ty> ty)
+    const ImportManager& importManager, TypeManager& typeManager, OwnedPtr<Expr> expr, ModalTy ty)
 {
     std::vector<OwnedPtr<FuncArg>> someDeclCallArgs{};
     someDeclCallArgs.emplace_back(CreateFuncArg(std::move(expr)));
     auto someDeclCall =
         CreateCallExpr(CreateOptionSomeRef(importManager, typeManager, ty), std::move(someDeclCallArgs));
-    someDeclCall->SetTy(GetOptionTy(importManager, typeManager, ty));
+    someDeclCall->SetTy({GetOptionTy(importManager, typeManager, ty.Ty()), ty.Mode()});
     someDeclCall->resolvedFunction = As<ASTKind::FUNC_DECL>(GetOptionSomeDecl(importManager));
     someDeclCall->callKind = CallKind::CALL_DECLARED_FUNCTION;
     return someDeclCall;

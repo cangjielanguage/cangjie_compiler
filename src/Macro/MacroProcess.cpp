@@ -32,6 +32,11 @@ bool IsSpecialToken(TokenKind prevTokenKind, TokenKind curTokenKind)
         tkSet1.find(std::pair<TokenKind, TokenKind>(prevTokenKind, curTokenKind)) != tkSet1.end();
 }
 
+size_t GetTokenLenth(const Token& token)
+{
+    return GetTokenLength(token.Value().size(), token.kind, token.delimiterNum);
+}
+
 void ReportMappingFailedDiag(
     std::vector<Token>& oldTokens, std::vector<Token>& newTokens, const Position mcPos, CompilerInstance& ci)
 {
@@ -55,11 +60,6 @@ void ReportMappingFailedDiag(
         }
     }
     return;
-}
-
-size_t GetTokenLenth(const Token& token)
-{
-    return GetTokenLength(token.Value().size(), token.kind, token.delimiterNum);
 }
 
 void CollectMacroDebugPosition(MacroInvocation& invocation, const Token& token, unsigned int lastColumn)
@@ -157,7 +157,8 @@ void RefreshNewTokensPos(Node& node, SourceManager& sm, const CompilerInstance& 
     auto mcPos = node.begin;
     pMacroInvocation->origin2newPosMap[mcPos.Hash64()] = mcPos;
     auto lastColumn = static_cast<unsigned int>(sm.GetLineEnd(mcPos) + 1);
-    auto prevTokenKind = TokenKind::END;
+    Token prevOrig{TokenKind::END};
+    Token beforePrevOrig{TokenKind::END};
     pMacroInvocation->macroAtPosition.emplace_back(mcPos);
     size_t threadNum = std::thread::hardware_concurrency();
     Cangjie::Utils::TaskQueue taskQueue(threadNum);
@@ -178,8 +179,9 @@ void RefreshNewTokensPos(Node& node, SourceManager& sm, const CompilerInstance& 
     }
     taskQueue.RunAndWaitForAllTasksCompleted();
     for (auto& token : pMacroInvocation->newTokens) {
-        // For case: A() A[] A<> A?? >> >=.
-        if (!IsSpecialToken(prevTokenKind, token.kind)) {
+        // No column gap for A() A[] A<> A?? >> >= ~init, or @local! / @local? / @~local that must stay adjacent.
+        TokenVector localModeTokens{beforePrevOrig, prevOrig, token};
+        if (!IsSpecialToken(prevOrig.kind, token.kind) && !IsModalAfterAt(localModeTokens, 0, true)) {
             lastColumn += 1;
         }
         if (ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo) {
@@ -197,6 +199,8 @@ void RefreshNewTokensPos(Node& node, SourceManager& sm, const CompilerInstance& 
             pMacroInvocation->macroCallDiagInfo.new2originPosMap[keyPos.Hash32()] = token.Begin();
         }
         auto key = token.Begin().Hash64();
+        // Snapshot original positions before SetValuePos; adjacency checks need the pre-refresh Begin/End.
+        Token tokenOrig = token;
         Position begin = token.Begin();
         begin.fileID = mcPos.fileID;
         begin.line = mcPos.line;
@@ -213,7 +217,8 @@ void RefreshNewTokensPos(Node& node, SourceManager& sm, const CompilerInstance& 
             pMacroInvocation->origin2newPosMap.find(key) == pMacroInvocation->origin2newPosMap.end()) {
             pMacroInvocation->origin2newPosMap[key] = token.Begin();
         }
-        prevTokenKind = token.kind;
+        beforePrevOrig = prevOrig;
+        prevOrig = std::move(tokenOrig);
     }
     if (ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo) {
         pMacroInvocation->macroDebugMap[lastColumn] = node.end;

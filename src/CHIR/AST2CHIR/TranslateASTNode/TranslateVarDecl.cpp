@@ -47,7 +47,7 @@ Ptr<Value> Translator::TranslateLeftValueOfVarDecl(const AST::VarDecl& decl, boo
 {
     Ptr<Value> leftValue = nullptr;
     auto varPos = TranslateLocation(decl);
-    auto leftType = TranslateType(*(decl.GetTy()));
+    auto leftType = TranslateType(decl.GetTy());
     if (isLocalVar) {
         // need to create allocate node:
         // 1. mutable variable: `var a = 1`
@@ -77,7 +77,7 @@ Ptr<Value> Translator::TranslateLeftValueOfVarDecl(const AST::VarDecl& decl, boo
 
 void Translator::StoreRValueToLValue(const AST::VarDecl& decl, Value& rval, Ptr<Value>& lval)
 {
-    auto leftType = TranslateType(*(decl.GetTy()));
+    auto leftType = TranslateType(decl.GetTy());
     auto varPos = TranslateLocation(decl);
     if (lval != nullptr) {
         CreateAndAppendWrappedStore(rval, *lval, varPos);
