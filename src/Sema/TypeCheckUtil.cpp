@@ -723,6 +723,10 @@ ModalInfo GetThisParamModal(const Decl& decl)
 
 bool IsDisabledLocalAPI(const Decl& decl)
 {
+#ifdef __ohos__
+    (void)decl;
+    return false;
+#else
     // Only a property of type 'local!' is unusable; 'local?' is allowed.
     if (auto pd = DynamicCast<PropDecl>(&decl)) {
         return pd->TyMode().local == Mode::FULL;
@@ -744,6 +748,7 @@ bool IsDisabledLocalAPI(const Decl& decl)
     }
     return std::any_of(ft->paramTys.begin(), ft->paramTys.end(),
         [](const ModalTy& paramTy) { return paramTy.IsLocalType(); });
+#endif
 }
 
 ModalInfo GetCurThisModal(const ASTContext& ctx, const std::string& scopeName)

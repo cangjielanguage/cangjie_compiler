@@ -439,6 +439,10 @@ bool ParserImpl::ParseModeSpecifier(ASTModalInfo& out)
 // Seeing a ModalInfo advance, without consuming any token.
 bool ParserImpl::SeeingModalInfo()
 {
+#ifdef __ohos__
+    // local mode is not supported in OHOS builds, so '@local!' is not a modal
+    return false;
+#else
     constexpr size_t MODAL_LOOKAHEAD = 2;
     if (!Seeing(TokenKind::AT)) {
         return false;
@@ -467,6 +471,7 @@ bool ParserImpl::SeeingModalInfo()
         return IsTokenAdjacent(first, second);
     }
     return false;
+#endif
 }
 
 OwnedPtr<AST::RefType> ParserImpl::ParseRefType(bool onlyRef)
