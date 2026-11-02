@@ -871,7 +871,8 @@ flatbuffers::Offset<PackageFormat::Imports> ASTWriter::ASTWriterImpl::SaveFileIm
             builder.CreateVectorOfStrings(importSpec->content.prefixPaths),
             builder.CreateString(importSpec->content.identifier.Val()),
             builder.CreateString(importSpec->content.aliasName.Val()), reExport, importSpec->content.isDecl,
-            importSpec->content.hasDoubleColon, importSpec->withImplicitExport));
+            importSpec->content.hasDoubleColon, importSpec->withImplicitExport,
+            importSpec->TestAttr(Attribute::IMPLICIT_ADD)));
         if (importSpec->IsReExport()) {
             // If the import package is reExported, it should be stored as used.
             SavePackageName(cjoManager.GetPackageNameByImport(*importSpec));
