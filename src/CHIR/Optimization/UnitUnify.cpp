@@ -5,7 +5,6 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/CHIR/Optimization/UnitUnify.h"
-#include "cangjie/CHIR/Analysis/Utils.h"
 #include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/Utils/Visitor/Visitor.h"
 
@@ -36,17 +35,17 @@ UnitUnify::UnitUnify(CHIRBuilder& builder) : builder(builder)
 {
 }
 
-void UnitUnify::RunOnPackage(const Ptr<const Package>& package, bool isDebug)
+void UnitUnify::RunOnPackage(const Ptr<const Package>& package)
 {
     for (auto func : package->GetGlobalFuncsWithBody()) {
-        RunOnFunc(func, isDebug);
+        RunOnFunc(func);
     }
 }
 
-void UnitUnify::RunOnFunc(const Ptr<Function>& func, bool isDebug)
+void UnitUnify::RunOnFunc(const Ptr<Function>& func)
 {
     Ptr<Constant> optUnit;
-    auto preAcation = [this, isDebug, &optUnit](Expression& expr) {
+    auto preAcation = [this, &optUnit](Expression& expr) {
         // skip lambda to avoid create many Constant expression to effect function inline
         // maybe we can discuss later
         if (Is<Lambda>(expr)) {
@@ -58,9 +57,6 @@ void UnitUnify::RunOnFunc(const Ptr<Function>& func, bool isDebug)
         if (NeedUnify(expr)) {
             LoadOrCreateUnit(optUnit, expr.GetParentBlockGroup());
             expr.GetResult()->ReplaceWith(*optUnit->GetResult(), expr.GetParentBlockGroup());
-            if (isDebug) {
-                std::cout << "[UnitUnify] unit unify" << ToPosInfo(expr.GetDebugLocation()) << ".\n";
-            }
         }
         return VisitResult::CONTINUE;
     };
@@ -74,5 +70,5 @@ void UnitUnify::LoadOrCreateUnit(Ptr<Constant>& constant, const Ptr<BlockGroup>&
     }
     auto entryBlock = group->GetEntryBlock();
     constant = builder.CreateConstantExpression<UnitLiteral>(builder.GetUnitTy(), entryBlock);
-    constant->MoveBefore(entryBlock->GetExpressions()[0]);
+    entryBlock->InsertExprIntoHead(*constant);
 }

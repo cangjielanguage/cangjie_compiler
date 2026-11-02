@@ -38,12 +38,11 @@ public:
     /**
      * @brief Main process to unify all used units to one in a function.
      * @param package package to do optimization.
-     * @param isDebug flag whether print debug log.
      */
-    void RunOnPackage(const Ptr<const Package>& package, bool isDebug);
+    void RunOnPackage(const Ptr<const Package>& package);
 
 private:
-    void RunOnFunc(const Ptr<Function>& func, bool isDebug);
+    void RunOnFunc(const Ptr<Function>& func);
 
     void LoadOrCreateUnit(Ptr<Constant>& constant, const Ptr<BlockGroup>& group);
 

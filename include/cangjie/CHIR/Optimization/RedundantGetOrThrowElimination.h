@@ -12,24 +12,26 @@
 
 namespace Cangjie::CHIR {
 /**
- * CHIR Opt Pass: replace GetOrThrow function with value directly.
+ * CHIR Opt Pass: reuse successful GetOrThrow results and remove redundant calls.
  */
 class RedundantGetOrThrowElimination {
 public:
     /**
      * @brief constructor for GetOrThrow function elimination.
+     * @param builder CHIR builder used to replace redundant try-apply terminators.
      */
-    explicit RedundantGetOrThrowElimination();
+    explicit RedundantGetOrThrowElimination(CHIRBuilder& builder);
 
     /**
      * @brief Main process to do GetOrThrow elimination.
      * @param package package to do optimization.
-     * @param isDebug flag whether print debug log.
      */
-    void RunOnPackage(const Ptr<const Package>& package, bool isDebug) const;
+    void RunOnPackage(const Ptr<const Package>& package) const;
 
 private:
-    void RunOnFunc(const Ptr<const Function>& func, bool isDebug) const;
+    void RunOnFunc(const Ptr<const Function>& func) const;
+
+    CHIRBuilder& builder;
 };
 } // namespace Cangjie::CHIR
 

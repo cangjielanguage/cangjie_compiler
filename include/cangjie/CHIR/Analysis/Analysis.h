@@ -143,6 +143,15 @@ public:
         return std::nullopt;
     }
 
+    /// Propagate state along one control-flow edge and join it into the successor's entry state.
+    virtual bool JoinSuccessorState(
+        Domain& successorState, const Domain& state, const Expression* terminator, const Block* successor)
+    {
+        (void)terminator;
+        (void)successor;
+        return successorState.Join(state);
+    }
+
     /// abstract function
     static bool Filter(const Function& method)
     {

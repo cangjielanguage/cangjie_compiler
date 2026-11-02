@@ -31,20 +31,19 @@ public:
      * @brief Main process to insert sanitizer coverage code.
      * @param package package to do optimization.
      * @param diag reporter to print error or warning info.
-     * @param isDebug flag whether print debug log.
      * @return flag whether error happens in package.
      */
-    bool RunOnPackage(const Ptr<const Package>& package, DiagnosticEngine& diag, bool isDebug);
+    bool RunOnPackage(const Ptr<const Package>& package, DiagnosticEngine& diag);
 
 private:
-    void RunOnFunc(const Ptr<Function>& func, bool isDebug);
+    void RunOnFunc(const Ptr<Function>& func);
     bool CheckSancovOption(DiagnosticEngine& diag) const;
 
     // entry for different sanitizer coverage option
-    void InjectTraceForCmp(BinaryExpression& binary, bool isDebug);
-    void InjectTraceForSwitch(MultiBranch& mb, bool isDebug);
-    void InsertCoverageAheadBlock(Block& block, bool isDebug);
-    void InjectTraceMemCmp(Expression& expr, bool isDebug);
+    void InjectTraceForCmp(BinaryExpression& binary);
+    void InjectTraceForSwitch(MultiBranch& mb);
+    void InsertCoverageAheadBlock(Block& block);
+    void InjectTraceMemCmp(Expression& expr);
     // for switch trace
     RawArrayAllocate* CreateArrayForSwitchCaseList(MultiBranch& multiBranch);
     Intrinsic* CreateRawDataAcquire(const Expression& dataList, Type& elementType) const;
@@ -61,11 +60,11 @@ private:
         const DebugLocation& loc, Block* parent);
 
     // create coverage call for different option
-    std::vector<Expression*> GenerateCoverageCallByOption(const DebugLocation& loc, bool isDebug, Block* parent);
-    std::vector<Expression*> GeneratePCGuardExpr(const DebugLocation& loc, bool isDebug, Block* parent);
-    std::vector<Expression*> GenerateInline8bitExpr(const DebugLocation& loc, bool isDebug, Block* parent);
-    std::vector<Expression*> GenerateInlineBoolExpr(const DebugLocation& loc, bool isDebug, Block* parent);
-    std::vector<Expression*> GenerateStackDepthExpr(const DebugLocation& loc, bool isDebug, Block* parent);
+    std::vector<Expression*> GenerateCoverageCallByOption(const DebugLocation& loc, Block* parent);
+    std::vector<Expression*> GeneratePCGuardExpr(const DebugLocation& loc, Block* parent);
+    std::vector<Expression*> GenerateInline8bitExpr(const DebugLocation& loc, Block* parent);
+    std::vector<Expression*> GenerateInlineBoolExpr(const DebugLocation& loc, Block* parent);
+    std::vector<Expression*> GenerateStackDepthExpr(const DebugLocation& loc, Block* parent);
 
     // create imported function or global var
     GlobalVar* GenerateGlobalVar(const std::string& globalVarName, const DebugLocation& loc, Type& globalType);
@@ -76,7 +75,7 @@ private:
     Function* CreateInitFunc(const std::string& name, FuncType& funcType, const DebugLocation& loc);
 
     // create init func
-    void GenerateInitFunc(const Function& globalInitFunc, bool isDebug);
+    void GenerateInitFunc(const Function& globalInitFunc);
     void CreateTopLevelInitFunc(const std::vector<Function*>& initFuncs, const Function& globalInitFunc);
     Function* CreateArrayInitFunc(const std::string& initItemName, Type& initType);
     Function* CreatePCTableInitFunc();

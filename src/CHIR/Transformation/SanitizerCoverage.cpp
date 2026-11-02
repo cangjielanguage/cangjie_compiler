@@ -196,7 +196,7 @@ void SanitizerCoverage::InitFuncBag(const Package& package)
     }
 }
 
-bool SanitizerCoverage::RunOnPackage(const Ptr<const Package>& package, DiagnosticEngine& diag, bool isDebug)
+bool SanitizerCoverage::RunOnPackage(const Ptr<const Package>& package, DiagnosticEngine& diag)
 {
     if (!CheckSancovOption(diag)) {
         return false;
@@ -215,31 +215,31 @@ bool SanitizerCoverage::RunOnPackage(const Ptr<const Package>& package, Diagnost
         if (func->GetIdentifier().find(targetSuffix) == func->GetIdentifier().size() - targetSuffix.size()) {
             continue;
         }
-        RunOnFunc(func, isDebug);
+        RunOnFunc(func);
     }
-    GenerateInitFunc(*package->GetPackageInitFunc(), isDebug);
+    GenerateInitFunc(*package->GetPackageInitFunc());
     return true;
 }
 
-void SanitizerCoverage::RunOnFunc(const Ptr<Function>& func, bool isDebug)
+void SanitizerCoverage::RunOnFunc(const Ptr<Function>& func)
 {
     if (sanCovOption.traceCmp) {
-        auto visitAction = [this, isDebug](Expression& expr) {
+        auto visitAction = [this](Expression& expr) {
             if (expr.GetExprKind() == ExprKind::MULTIBRANCH) {
                 // only support switch int and char
                 auto mb = StaticCast<MultiBranch*>(&expr);
-                InjectTraceForSwitch(*mb, isDebug);
+                InjectTraceForSwitch(*mb);
             }
             if (auto binary = DynamicCast<BinaryExpression*>(&expr)) {
-                InjectTraceForCmp(*binary, isDebug);
+                InjectTraceForCmp(*binary);
             }
             return VisitResult::CONTINUE;
         };
         Visitor::Visit(*func, visitAction);
     }
     if (sanCovOption.traceMemCmp) {
-        auto visitAction = [this, isDebug](Expression& expr) {
-            InjectTraceMemCmp(expr, isDebug);
+        auto visitAction = [this](Expression& expr) {
+            InjectTraceMemCmp(expr);
             return VisitResult::CONTINUE;
         };
         Visitor::Visit(*func, visitAction);
@@ -259,7 +259,7 @@ void SanitizerCoverage::RunOnFunc(const Ptr<Function>& func, bool isDebug)
                 2. insert to entry blocks when function level is used by users
                 3. stack depth only insert to entry block
             */
-            InsertCoverageAheadBlock(*block, isDebug);
+            InsertCoverageAheadBlock(*block);
         }
     }
 }
@@ -287,7 +287,7 @@ bool SanitizerCoverage::CheckSancovOption(DiagnosticEngine& diag) const
     return true;
 }
 
-void SanitizerCoverage::InjectTraceForCmp(BinaryExpression& binary, bool isDebug)
+void SanitizerCoverage::InjectTraceForCmp(BinaryExpression& binary)
 {
     // We need to inject the trace info for all the comparison operations.
     if (!binary.IsComparisonOperator()) {
@@ -336,13 +336,9 @@ void SanitizerCoverage::InjectTraceForCmp(BinaryExpression& binary, bool isDebug
         builder.GetUnitTy(), callee, std::vector<Value*>{lhs, rhs}, parent, builder, binary.GetDebugLocation());
 
     syscall->MoveBefore(&binary);
-
-    if (isDebug) {
-        std::cout << "[SanitizerCoverage] Add trace compares" << ToPosInfo(binary.GetDebugLocation()) << ".\n";
-    }
 }
 
-void SanitizerCoverage::InjectTraceForSwitch(MultiBranch& mb, bool isDebug)
+void SanitizerCoverage::InjectTraceForSwitch(MultiBranch& mb)
 {
     /*
         Inject trace for switch
@@ -393,10 +389,6 @@ void SanitizerCoverage::InjectTraceForSwitch(MultiBranch& mb, bool isDebug)
         std::vector<Value*>{switchVal, rawDataAcquire->GetResult()}, parent, builder, mb.GetDebugLocation());
 
     syscall->MoveBefore(&mb);
-
-    if (isDebug) {
-        std::cout << "[SanitizerCoverage] Add trace switch" << ToPosInfo(mb.GetDebugLocation()) << ".\n";
-    }
 }
 
 std::vector<Value*> SanitizerCoverage::GenerateCStringMemCmp(
@@ -738,7 +730,7 @@ std::pair<std::string, std::vector<Value*>> SanitizerCoverage::GetMemFuncSymbols
     return std::make_pair(intrinsicName.value(), params);
 }
 
-void SanitizerCoverage::InjectTraceMemCmp(Expression& expr, bool isDebug)
+void SanitizerCoverage::InjectTraceMemCmp(Expression& expr)
 {
     if (expr.GetExprKind() != ExprKind::APPLY) {
         return;
@@ -764,13 +756,9 @@ void SanitizerCoverage::InjectTraceMemCmp(Expression& expr, bool isDebug)
         syscall = CreateMemCmpFunc(intrinsicName, *charPointerType, params, expr.GetDebugLocation(), parent);
     }
     syscall->MoveBefore(&expr);
-
-    if (isDebug) {
-        std::cout << "[SanitizerCoverage] Add trace Memory Compare" << ToPosInfo(expr.GetDebugLocation()) << ".\n";
-    }
 }
 
-void SanitizerCoverage::InsertCoverageAheadBlock(Block& block, bool isDebug)
+void SanitizerCoverage::InsertCoverageAheadBlock(Block& block)
 {
     if (sanCovOption.pcTable) {
         CJC_ASSERT(block.GetTopLevelFunc());
@@ -784,9 +772,9 @@ void SanitizerCoverage::InsertCoverageAheadBlock(Block& block, bool isDebug)
         pcArray.emplace_back(std::make_pair(block.GetTopLevelFunc()->GetSrcCodeIdentifier(), blockLocation));
     }
     CJC_ASSERT(block.GetExpressions().size() > 0);
-    auto callList = GenerateCoverageCallByOption(INVALID_LOCATION, isDebug, &block);
+    auto callList = GenerateCoverageCallByOption(INVALID_LOCATION, &block);
     if (sanCovOption.stackDepth && block.IsEntry()) {
-        auto stackDepth = GenerateStackDepthExpr(INVALID_LOCATION, isDebug, &block);
+        auto stackDepth = GenerateStackDepthExpr(INVALID_LOCATION, &block);
         callList.insert(callList.end(), stackDepth.begin(), stackDepth.end());
     }
     auto firstExpr = block.GetExpressions()[0];
@@ -851,25 +839,25 @@ Intrinsic* SanitizerCoverage::CreateRawDataAcquire(const Expression& dataList, T
 }
 
 std::vector<Expression*> SanitizerCoverage::GenerateCoverageCallByOption(
-    const DebugLocation& loc, bool isDebug, Block* parent)
+    const DebugLocation& loc, Block* parent)
 {
     std::vector<Expression*> callList;
     if (sanCovOption.tracePCGuard) {
-        auto guardList = GeneratePCGuardExpr(loc, isDebug, parent);
+        auto guardList = GeneratePCGuardExpr(loc, parent);
         callList.insert(callList.end(), guardList.begin(), guardList.end());
     }
     if (sanCovOption.inline8bitCounters) {
-        auto inline8bitList = GenerateInline8bitExpr(loc, isDebug, parent);
+        auto inline8bitList = GenerateInline8bitExpr(loc, parent);
         callList.insert(callList.end(), inline8bitList.begin(), inline8bitList.end());
     }
     if (sanCovOption.inlineBoolFlag) {
-        auto inlineBoolFlag = GenerateInlineBoolExpr(loc, isDebug, parent);
+        auto inlineBoolFlag = GenerateInlineBoolExpr(loc, parent);
         callList.insert(callList.end(), inlineBoolFlag.begin(), inlineBoolFlag.end());
     }
     return callList;
 }
 
-std::vector<Expression*> SanitizerCoverage::GeneratePCGuardExpr(const DebugLocation& loc, bool isDebug, Block* parent)
+std::vector<Expression*> SanitizerCoverage::GeneratePCGuardExpr(const DebugLocation& loc, Block* parent)
 {
     auto& callName = SAN_COV_PC_GUARD;
     auto& initItem = SanCovUInt32ArrayInitName;
@@ -901,14 +889,11 @@ std::vector<Expression*> SanitizerCoverage::GeneratePCGuardExpr(const DebugLocat
     auto addPoint = builder.CreateExpression<Intrinsic>(loc, cPointTy, callContext, parent);
     auto syscall = CreateNonMemberApply(
         builder.GetUnitTy(), pcGuardFunc, std::vector<Value*>{addPoint->GetResult()}, parent, builder, loc);
-    if (isDebug) {
-        std::cout << "[SanitizerCoverage] Add trace pc guard" << ToPosInfo(loc) << ".\n";
-    }
     return std::vector<Expression*>{arrayTestLoad, offset, addPoint, syscall};
 }
 
 std::vector<Expression*> SanitizerCoverage::GenerateInline8bitExpr(
-    const DebugLocation& loc, bool isDebug, Block* parent)
+    const DebugLocation& loc, Block* parent)
 {
     // generate global var
     auto& initItem = SanCovCharArrayInitName;
@@ -943,14 +928,11 @@ std::vector<Expression*> SanitizerCoverage::GenerateInline8bitExpr(
         .instTypeArgs = std::vector<Type*>{builder.GetUInt8Ty()}
     };
     auto writePoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUnitTy(), callContext2, parent);
-    if (isDebug) {
-        std::cout << "[SanitizerCoverage] Add trace inline 8 bit" << ToPosInfo(loc) << ".\n";
-    }
     return std::vector<Expression*>{loadGlobal, offset, readPoint, one, addRes, writePoint};
 }
 
 std::vector<Expression*> SanitizerCoverage::GenerateInlineBoolExpr(
-    const DebugLocation& loc, bool isDebug, Block* parent)
+    const DebugLocation& loc, Block* parent)
 {
     // generate global var
     auto& initItem = SanCovBoolFlagInitName;
@@ -975,23 +957,17 @@ std::vector<Expression*> SanitizerCoverage::GenerateInlineBoolExpr(
         .instTypeArgs = std::vector<Type*>{builder.GetBoolTy()}
     };
     auto writePoint = builder.CreateExpression<Intrinsic>(loc, builder.GetUnitTy(), callContext, parent);
-    if (isDebug) {
-        std::cout << "[SanitizerCoverage] Add trace inline bool" << ToPosInfo(loc) << ".\n";
-    }
     return std::vector<Expression*>{loadGlobal, offset, boolTrue, writePoint};
 }
 
 std::vector<Expression*> SanitizerCoverage::GenerateStackDepthExpr(
-    const DebugLocation& loc, bool isDebug, Block* parent)
+    const DebugLocation& loc, Block* parent)
 {
     auto& callName = SanCovUpdateStackDepth;
     auto funcTy = builder.GetType<FuncType>(std::vector<Type*>{}, builder.GetUnitTy(), false, true);
     auto callee = GenerateForeignFunc(callName, loc, *funcTy, packageName);
     auto syscall = CreateNonMemberApply(builder.GetUnitTy(), callee, std::vector<Value*>{}, parent, builder, loc);
 
-    if (isDebug) {
-        std::cout << "[SanitizerCoverage] Add trace stage depth" << ToPosInfo(loc) << ".\n";
-    }
     return std::vector<Expression*>{syscall};
 }
 
@@ -1197,7 +1173,7 @@ void SanitizerCoverage::CreateTopLevelInitFunc(const std::vector<Function*>& ini
     AddExpressionsToGlobalInitFunc(globalInitFunc, std::vector<Expression*>{initExpr});
 }
 
-void SanitizerCoverage::GenerateInitFunc(const Function& globalInitFunc, bool isDebug)
+void SanitizerCoverage::GenerateInitFunc(const Function& globalInitFunc)
 {
     // Note: insert array init func at the first of package.
     // FuncSize and basic block size are evaluated  at compile stage, firstly set 0 as placeHolder and then updated to
@@ -1223,9 +1199,6 @@ void SanitizerCoverage::GenerateInitFunc(const Function& globalInitFunc, bool is
     }
     if (sanCovOption.pcTable && !pcArray.empty()) {
         initFuncs.emplace_back(CreatePCTableInitFunc());
-        if (isDebug) {
-            std::cout << "[SanitizerCoverage] Add trace pc table" << ToPosInfo(INVALID_LOCATION) << ".\n";
-        }
     }
     CreateTopLevelInitFunc(initFuncs, globalInitFunc);
 }
