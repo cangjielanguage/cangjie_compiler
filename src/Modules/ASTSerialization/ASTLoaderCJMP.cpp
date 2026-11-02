@@ -127,9 +127,8 @@ std::string OptimizationLevelToString(GlobalOptions::OptimizationLevel level)
 OwnedPtr<AST::File> ASTLoader::ASTLoaderImpl::PreloadCommonFile(uoffset_t indexOfFile)
 {
     CJC_NULLPTR_CHECK(package->allFileImports());
-    uoffset_t i = indexOfFile;
-    auto&& importSpecs = LoadImportSpecs(package->allFileImports()->Get(i));
     CJC_NULLPTR_CHECK(package->allFileInfo());
+    uoffset_t i = indexOfFile;
 
     auto fileInfo = package->allFileInfo()->Get(i);
     auto tmpFilePath = package->allFiles()->Get(i)->str();
@@ -137,6 +136,13 @@ OwnedPtr<AST::File> ASTLoader::ASTLoaderImpl::PreloadCommonFile(uoffset_t indexO
     auto tmpFileId = sourceManager.AddSource(tmpFilePath, "", package->fullPkgName()->str(), isCJMPFile);
     CJC_ASSERT(tmpFileId == fileInfo->fileID());
     allFileIds[i] = tmpFileId;
+
+    // Load imports after the file id is recorded, so their positions resolve to the
+    // real file id instead of the zero-initialized 'allFileIds' entry. Otherwise all
+    // common-part import positions collapse to {fileID:0,line:0,column:0}, and the
+    // pkgDepInfo order (std::set with CmpNodeByPos) falls back to comparing heap
+    // addresses, which is not reproducible.
+    auto&& importSpecs = LoadImportSpecs(package->allFileImports()->Get(i));
 
     auto file = CreateFileNode(*curPackage, fileInfo->fileID(), std::move(importSpecs));
     if (fileInfo->feature()) {
