@@ -4,7 +4,6 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-#include <cctype>
 #include <string>
 #include <vector>
 
@@ -16,158 +15,6 @@
 #include "cangjie/Utils/FileUtil.h"
 
 using namespace Cangjie;
-
-namespace {
-// A minimal GNU-style rsp parser mirroring the real readers (lld @file
-// expansion, GNU ld expandargv); '#' is an ordinary character, not a comment.
-std::vector<std::string> GnuStyleRspParse(const std::string& content)
-{
-    std::vector<std::string> tokens;
-    std::string current;
-    bool inToken = false;
-    bool inSingle = false;
-    bool inDouble = false;
-    for (size_t i = 0; i < content.size(); ++i) {
-        const char c = content[i];
-        if (inDouble) {
-            if (c == '\\' && i + 1 < content.size()) {
-                current += content[++i];
-            } else if (c == '"') {
-                inDouble = false;
-            } else {
-                current += c;
-            }
-        } else if (inSingle) {
-            if (c == '\\' && i + 1 < content.size()) {
-                current += content[++i];
-            } else if (c == '\'') {
-                inSingle = false;
-            } else {
-                current += c;
-            }
-        } else if (c == '\\' && i + 1 < content.size()) {
-            current += content[++i];
-            inToken = true;
-        } else if (c == '"') {
-            inDouble = true;
-            inToken = true;
-        } else if (c == '\'') {
-            inSingle = true;
-            inToken = true;
-        } else if (std::isspace(static_cast<unsigned char>(c)) != 0) {
-            if (inToken) {
-                tokens.push_back(current);
-                current.clear();
-                inToken = false;
-            }
-        } else {
-            current += c;
-            inToken = true;
-        }
-    }
-    if (inToken) {
-        tokens.push_back(current);
-    }
-    return tokens;
-}
-} // namespace
-
-TEST(ResponseFilePolicyTest, SerializePlainArgsOnePerLine)
-{
-    const std::string content = GnuStyleRspSerialize({"ld", "-o", "/tmp/main", "main.o"});
-    EXPECT_EQ(content, "-o\n/tmp/main\nmain.o\n");
-}
-
-TEST(ResponseFilePolicyTest, SerializeSkipsProgramName)
-{
-    EXPECT_EQ(GnuStyleRspSerialize({}), "");
-    EXPECT_EQ(GnuStyleRspSerialize({"only-prog"}), "");
-}
-
-TEST(ResponseFilePolicyTest, SerializeWindowsPathsQuotingAndEscaping)
-{
-    const std::string content = GnuStyleRspSerialize({"ld.lld.exe", "-o", R"(C:\Build\My App\out.exe)",
-        R"(C:\Program Files\cangjie\main.o)", R"(-L"C:\Program Files\lib")", "-lfoo"});
-    EXPECT_EQ(content,
-        R"(-o
-"C:\\Build\\My App\\out.exe"
-"C:\\Program Files\\cangjie\\main.o"
-"-L\"C:\\Program Files\\lib\""
--lfoo
-)");
-}
-
-TEST(ResponseFilePolicyTest, SerializeHashCharQuoted)
-{
-    EXPECT_EQ(GnuStyleRspSerialize({"ld", "-DVERSION=1.0#dev"}), R"("-DVERSION=1.0#dev"
-)");
-}
-
-TEST(ResponseFilePolicyTest, SerializeEmptyArgQuoted)
-{
-    EXPECT_EQ(GnuStyleRspSerialize({"ld.lld.exe", "", "-o", "app"}),
-        R"(""
--o
-app
-)");
-}
-
-TEST(ResponseFilePolicyTest, SerializeSingleQuoteArgQuoted)
-{
-    EXPECT_EQ(GnuStyleRspSerialize({"ld.lld.exe", "-DNAME='foo'", "main.o"}),
-        R"("-DNAME='foo'"
-main.o
-)");
-}
-
-TEST(ResponseFilePolicyTest, RoundTripThroughGnuStyleParser)
-{
-    const std::vector<std::string> args = {
-        "ld.lld",
-        "-o",
-        R"(C:\Build\My App\out.exe)",
-        R"(C:\Program Files\cangjie\main.o)",
-        R"(-L"C:\Program Files\lib")",
-        R"(-DVERSION=1.0#dev)",
-        R"(-DNAME='foo')",
-        "a b\tc",
-        R"(back\slash)",
-        R"('single')",
-        R"("double")",
-        "",
-        R"(mixed'"both)",
-        R"(中文路径.o)",
-        "-lfoo",
-    };
-    const std::string content = GnuStyleRspSerialize(args);
-    const std::vector<std::string> parsed = GnuStyleRspParse(content);
-    const std::vector<std::string> expected(args.begin() + 1, args.end());
-    EXPECT_EQ(parsed, expected);
-}
-
-TEST(ResponseFilePolicyTest, SerializeRspForHostMatchesHostStyle)
-{
-    // The entry Tool::Execute calls; style dispatches on the host OS.
-    const std::vector<std::string> args = {"ld.lld", "-o", "C:\\Build\\My App\\out.exe", "-DNAME='foo'", "a b"};
-#ifdef _WIN32
-    EXPECT_EQ(SerializeRspForHost(args), WindowsStyleRspSerialize(args));
-#else
-    EXPECT_EQ(SerializeRspForHost(args), GnuStyleRspSerialize(args));
-#endif
-}
-
-TEST(ResponseFilePolicyTest, GnuStyleRspParserHandlesRawShellSyntax)
-{
-    // Raw inputs the serializer never emits, covering every tokenizer branch.
-    EXPECT_EQ(GnuStyleRspParse(R"(-o
-'single quote'
-)"), std::vector<std::string>({"-o", "single quote"}));
-    EXPECT_EQ(GnuStyleRspParse(R"('it\'s'
-)"), std::vector<std::string>({"it's"}));
-    EXPECT_EQ(GnuStyleRspParse(R"(a\ b)"), std::vector<std::string>({"a b"}));
-    // Trailing backslashes hit the "i + 1 < size" false arms.
-    EXPECT_EQ(GnuStyleRspParse(R"('a\)"), std::vector<std::string>({"a\\"}));    EXPECT_EQ(GnuStyleRspParse("a\\"), std::vector<std::string>({"a\\"}));
-}
 
 TEST(ResponseFilePolicyTest, UnknownToolsKeepOriginalPath)
 {
@@ -181,12 +28,10 @@ TEST(ResponseFilePolicyTest, UnknownToolsKeepOriginalPath)
 #if defined(_WIN32)
 TEST(ResponseFilePolicyTest, RegisteredLinkersMatchHostToolchain)
 {
-    // Host = Windows: MinGW linker ld.lld.
-    // TEMP gate test (revert before commit): threshold shrunk to 128; real
-    // value is 32000 (CreateProcessA cap 32767, margin).
+    // Host = Windows: MinGW linker ld.lld, CreateProcessA cap 32767.
     const ResponseFilePolicy policy = LookupResponseFilePolicy("C:\\cangjie\\bin\\ld.lld.exe");
     ASSERT_TRUE(policy.supported);
-    EXPECT_EQ(policy.threshold, size_t{128});
+    EXPECT_EQ(policy.threshold, size_t{32000});
     EXPECT_TRUE(LookupResponseFilePolicy("C:\\Bin\\LD.LLD.EXE").supported);
     EXPECT_FALSE(LookupResponseFilePolicy("C:\\bin\\ld.exe").supported);
     EXPECT_FALSE(LookupResponseFilePolicy("C:\\bin\\ld64.lld.exe").supported);
@@ -194,25 +39,17 @@ TEST(ResponseFilePolicyTest, RegisteredLinkersMatchHostToolchain)
 #elif defined(__APPLE__)
 TEST(ResponseFilePolicyTest, RegisteredLinkersMatchHostToolchain)
 {
-    // Host = macOS: Mach-O linker ld64.lld, posix_spawn (ARG_MAX).
-    const ResponseFilePolicy policy = LookupResponseFilePolicy("/usr/bin/ld64.lld");
-    ASSERT_TRUE(policy.supported);
-    EXPECT_GT(policy.threshold, size_t{0});
-    EXPECT_LE(policy.threshold, size_t{128 * 1024});
+    // Host = macOS: no linker registered yet; keep the original spawn path.
+    EXPECT_FALSE(LookupResponseFilePolicy("/usr/bin/ld64.lld").supported);
     EXPECT_FALSE(LookupResponseFilePolicy("/usr/bin/ld.lld").supported);
-    EXPECT_FALSE(LookupResponseFilePolicy("/usr/bin/ld").supported);
 }
 #else
 TEST(ResponseFilePolicyTest, RegisteredLinkersMatchHostToolchain)
 {
-    // Host = Linux: ld.lld (LTO/HwAsan) + system ld, posix_spawn (ARG_MAX).
-    const ResponseFilePolicy policy = LookupResponseFilePolicy("/usr/bin/ld.lld");
-    ASSERT_TRUE(policy.supported);
-    EXPECT_GT(policy.threshold, size_t{0});
-    EXPECT_LE(policy.threshold, size_t{128 * 1024});
-    EXPECT_TRUE(LookupResponseFilePolicy("/usr/bin/ld").supported);
+    // Host = Linux: no linker registered yet; keep the original spawn path.
+    EXPECT_FALSE(LookupResponseFilePolicy("/usr/bin/ld.lld").supported);
+    EXPECT_FALSE(LookupResponseFilePolicy("/usr/bin/ld").supported);
     EXPECT_FALSE(LookupResponseFilePolicy("/usr/bin/ld64.lld").supported);
-    // Cross-compilation prefixed ld is not matched (design doc §4.6, plan A).
     EXPECT_FALSE(LookupResponseFilePolicy("/usr/bin/x86_64-linux-gnu-ld").supported);
 }
 
@@ -278,6 +115,10 @@ std::vector<std::string> WindowsStyleRspParse(const std::string& content)
 
 TEST(ResponseFilePolicyTest, RoundTripThroughWindowsStyleParser)
 {
+    // argv[0] (program name) is supplied by CreateProcessA and never written.
+    EXPECT_EQ(WindowsStyleRspSerialize({}), "");
+    EXPECT_EQ(WindowsStyleRspSerialize({"only-prog"}), "");
+
     const std::vector<std::string> args = {
         "ld.lld.exe",
         "-o",
@@ -295,6 +136,21 @@ TEST(ResponseFilePolicyTest, RoundTripThroughWindowsStyleParser)
     const std::vector<std::string> parsed = WindowsStyleRspParse(content);
     const std::vector<std::string> expected(args.begin() + 1, args.end());
     EXPECT_EQ(parsed, expected);
+}
+
+TEST(ResponseFilePolicyTest, SerializeRspForHostMatchesHostStyle)
+{
+    // The entry Tool::Execute calls; the host dispatch lives inside
+    // SerializeRspForHost. To support a new host, register its policy in
+    // LookupResponseFilePolicy and dispatch its serializer there.
+    const std::vector<std::string> args = {"ld.lld.exe", "-o", "C:\\Build\\My App\\out.exe", "a b"};
+#ifdef _WIN32
+    EXPECT_EQ(SerializeRspForHost(args), WindowsStyleRspSerialize(args));
+#else
+    // No POSIX host registered yet: sentinel content, the caller falls back
+    // to the original args.
+    EXPECT_EQ(SerializeRspForHost(args), "");
+#endif
 }
 
 TEST(ResponseFilePolicyTest, WindowsCommandLineQuoting)

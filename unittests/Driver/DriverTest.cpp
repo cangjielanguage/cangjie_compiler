@@ -8,10 +8,17 @@
 #include "cangjie/Driver/Driver.h"
 
 #include <algorithm>
+#include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include "cangjie/Driver/Tool.h"
+#include "cangjie/Driver/ToolFuture.h"
+#include "cangjie/Driver/TempFileManager.h"
 #include "cangjie/Driver/Utils.h"
+#include "cangjie/Option/Option.h"
+#include "cangjie/Utils/Semaphore.h"
 
 using namespace Cangjie;
 
@@ -68,3 +75,28 @@ TEST_F(DriverTest, GetDarwinSDKVersion)
     EXPECT_TRUE(sdkVersion.has_value());
     EXPECT_EQ(sdkVersion.value(), "14.5");
 }
+
+#if !defined(_WIN32)
+TEST_F(DriverTest, ToolExecuteSpawnsChildAndPrintsCommand)
+{
+    GlobalOptions options;
+    ASSERT_TRUE(TempFileManager::Instance().Init(options, false));
+
+    // Execute resolves execArgs, prints the verbose command via
+    // GenerateCommandFromExecArgs, and spawns the child through Run.
+    Tool tool("/bin/true", ToolType::BACKEND, {});
+    tool.AppendArg("--version");
+    auto future = tool.Execute(true);
+    ASSERT_NE(future, nullptr);
+    EXPECT_TRUE(future->spawnErrorMessage.empty());
+
+    ToolFuture::State state = future->GetState();
+    for (int i = 0; i < 1000 && state == ToolFuture::State::RUNNING; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        state = future->GetState();
+    }
+    EXPECT_EQ(state, ToolFuture::State::SUCCESS);
+    // Run acquires one semaphore slot; release it like Job::Execute does.
+    Utils::Semaphore::Get().Release();
+}
+#endif

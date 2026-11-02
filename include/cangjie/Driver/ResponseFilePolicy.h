@@ -10,8 +10,9 @@
  * Tool-side Response File (rsp) fallback: when the command line cjc would
  * pass to a downstream tool exceeds the platform limit, the arguments are
  * serialized into an rsp file and the tool is invoked with `@<rsp>`. The
- * serializer style matches the reader on the same host: GNU rules on POSIX,
- * CRT rules on Windows.
+ * serializer matches the reader of the host toolchain: CRT rules on Windows
+ * for now; POSIX hosts keep the original spawn path until their linkers are
+ * registered.
  */
 
 #ifndef CANGJIE_DRIVER_RESPONSE_FILE_POLICY_H
@@ -34,23 +35,12 @@ struct ResponseFilePolicy {
  * @brief Look up the rsp policy for a tool by its (possibly absolute) name.
  *
  * The name is normalized (basename -> lower-case -> strip `.exe`). Unknown
- * tools get `supported == false`. Registered tools are host-based: Windows
- * `ld.lld` with threshold 32000 (CreateProcessA cap 32767); Linux/macOS
- * linkers with `min(ARG_MAX/2, 128KB)`.
+ * tools get `supported == false`. Policies are host-based; only Windows hosts
+ * register one for now (`ld.lld`, threshold 32000, CreateProcessA cap 32767).
+ * POSIX hosts keep the original spawn path until their linkers are
+ * registered.
  */
 ResponseFilePolicy LookupResponseFilePolicy(const std::string& toolName);
-
-/**
- * @brief Serialize args (argv[0] included) as GNU-style rsp.
- *
- * argv[0] is not written; each remaining arg occupies one line; args
- * containing space/tab/`\r`/`\n`/`"`/`'`/`\`/`#`, or empty, are wrapped in
- * `"..."` with `\` -> `\\` and `"` -> `\"`.
- *
- * @param args Full argument vector, args[0] is the program name.
- * @return std::string The rsp file content.
- */
-std::string GnuStyleRspSerialize(const std::vector<std::string>& args);
 
 /**
  * @brief Serialize args (argv[0] included) as Windows-CRT-style rsp.
@@ -61,8 +51,11 @@ std::string GnuStyleRspSerialize(const std::vector<std::string>& args);
  */
 std::string WindowsStyleRspSerialize(const std::vector<std::string>& args);
 
-/// Serialize an rsp with the style matching the host OS: Windows host uses
-/// CRT rules, other hosts GNU rules (the rsp reader runs on the same host).
+/// Serialize an rsp with the style matching the rsp reader of the host
+/// toolchain. This is the single extension point for new hosts: register the
+/// host's policy in `LookupResponseFilePolicy`, then dispatch its serializer
+/// here. Only the Windows host (CRT rules) is registered for now; unregistered
+/// hosts return an empty string so the caller falls back to the original args.
 std::string SerializeRspForHost(const std::vector<std::string>& args);
 
 /**
