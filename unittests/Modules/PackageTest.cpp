@@ -1896,3 +1896,45 @@ TEST_F(PackageTest, TypeAliasRefExport)
         return VisitAction::WALK_CHILDREN;
     }).Walk();
 }
+
+// The imports of one dependency are held in a std::set ordered by (fileID, begin),
+// and CmpNodeByPos only breaks remaining ties by heap address. Serializing that set
+// therefore produced bytes that depended on the allocator. The pkgDepInfo import
+// list must instead follow a canonical order derived from the rendered content, so
+// this test checks that the emitted order does not follow the fileID order.
+TEST_F(PackageTest, DeterministicPkgDepInfoImportOrder)
+{
+    diag.ClearError();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+
+    auto pkg = MakeOwned<Package>();
+    pkg->fullPackageName = "test_pkg";
+
+    // Both files import the same package, so their imports share one
+    // DependencyInfoItem. The larger file name is given the smaller fileID: the old
+    // (fileID-ordered) set emits "z.cj" before "a.cj" while the canonical order
+    // emits "a.cj" first.
+    auto addFile = [&](const std::string& name, unsigned int fileID) {
+        auto file = MakeOwned<File>();
+        file->fileName = name;
+        file->filePath = name;
+        auto import = MakeOwned<ImportSpec>();
+        import->content.kind = ImportKind::IMPORT_SINGLE;
+        import->content.prefixPaths = {"foo"};
+        import->content.identifier = "bar";
+        import->begin = Position(fileID, 1, 0);
+        import->end = Position(fileID, 1, 5);
+        import->curFile = file.get();
+        file->imports.emplace_back(std::move(import));
+        pkg->files.emplace_back(std::move(file));
+    };
+    addFile("z.cj", 1);
+    addFile("a.cj", 2);
+
+    auto json = instance->importManager->GeneratePkgDepInfo(*pkg, true);
+    auto posA = json.find("\"a.cj\"");
+    auto posZ = json.find("\"z.cj\"");
+    ASSERT_NE(posA, std::string::npos);
+    ASSERT_NE(posZ, std::string::npos);
+    EXPECT_LT(posA, posZ);
+}
