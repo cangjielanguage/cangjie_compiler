@@ -22,13 +22,16 @@
 #include "cangjie/AST/ASTCasting.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
-#include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/Modules/CjoManager.h"
 #include "cangjie/Utils/CheckUtils.h"
 
 #include "CjoManager.h"
 
 namespace Cangjie {
+namespace CHIR::Interpreter {
+class Bchir;
+} // namespace CHIR::Interpreter
+
 class DefaultCompilerInstance;
 class TypeManager;
 class ASTLoader;
@@ -53,14 +56,7 @@ enum class DepType { DIRECT, INDIRECT, BOTH };
  */
 class ImportManager {
 public:
-    explicit ImportManager(DiagnosticEngine& d, TypeManager& typeManager, const GlobalOptions& opts)
-        : diag(d), opts(opts), typeManager(typeManager)
-    {
-        cjoManager = MakeOwned<CjoManager>(CjoManager::Config{diag, typeManager, opts, importSrcCode});
-        CJC_NULLPTR_CHECK(cjoManager);
-        dependencyGraph = MakeOwned<DependencyGraph>(*cjoManager);
-        CJC_NULLPTR_CHECK(dependencyGraph);
-    }
+    explicit ImportManager(DiagnosticEngine& d, TypeManager& typeManager, const GlobalOptions& opts);
 
     ~ImportManager();
 
@@ -338,7 +334,7 @@ public:
      */
     bool implicitPrelude{false};
 
-    std::unordered_map<std::string, Cangjie::CHIR::Interpreter::Bchir> importedBchirs;
+    std::unordered_map<std::string, std::unique_ptr<CHIR::Interpreter::Bchir>> importedBchirs;
 
     const std::vector<std::string>& GetSearchPath() const
     {

@@ -241,7 +241,11 @@ private:
     // without compile options, keep local mode enabled so that more cases can be parsed
     bool IsLocalModeEnabled() const
     {
+#ifdef __ohos__
+        return false;
+#else
         return !opts || opts->enableLocalMode;
+#endif
     }
     bool IsScanDepPkg() const
     {
