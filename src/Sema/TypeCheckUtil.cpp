@@ -705,7 +705,7 @@ ModalInfo GetThisParamModal(const FuncDecl& fd)
     if (fd.propDecl) {
         return fd.propDecl->TyMode();
     }
-    if (fd.funcBody->paramLists[0]->thisParam) {
+    if (fd.funcBody && !fd.funcBody->paramLists.empty() && fd.funcBody->paramLists[0]->thisParam) {
         return fd.funcBody->paramLists[0]->thisParam->modal;
     }
     return {};
@@ -721,6 +721,32 @@ ModalInfo GetThisParamModal(const Decl& decl)
     return {};
 }
 
+namespace {
+bool HasLocalType(const Ty& ty);
+
+// Check the modals of a function type, then look for nested function types.
+bool HasLocalType(const Ty& ty)
+{
+    if (auto ft = DynamicCast<FuncTy>(&ty)) {
+        if (ft->retTy.IsLocalType() ||
+            std::any_of(ft->paramTys.begin(), ft->paramTys.end(),
+                [](const ModalTy& paramTy) { return paramTy.IsLocalType(); })) {
+            return true;
+        }
+        if (ft->retTy.Ty() != nullptr && HasLocalType(*ft->retTy.Ty())) {
+            return true;
+        }
+        if (std::any_of(ft->paramTys.begin(), ft->paramTys.end(), [](const ModalTy& paramTy) {
+                return paramTy.Ty() != nullptr && HasLocalType(*paramTy.Ty());
+            })) {
+            return true;
+        }
+    }
+    return std::any_of(ty.typeArgs.begin(), ty.typeArgs.end(),
+        [](const ModalTy& arg) { return arg.Ty() != nullptr && HasLocalType(*arg.Ty()); });
+}
+} // namespace
+
 bool IsDisabledLocalAPI(const Decl& decl)
 {
 #ifdef __ohos__
@@ -729,25 +755,20 @@ bool IsDisabledLocalAPI(const Decl& decl)
 #else
     // Only a property of type 'local!' is unusable; 'local?' is allowed.
     if (auto pd = DynamicCast<PropDecl>(&decl)) {
-        return pd->TyMode().local == Mode::FULL;
+        return pd->TyMode().local == Mode::FULL || (pd->DataTy() != nullptr && HasLocalType(*pd->DataTy()));
+    }
+    if (DynamicCast<VarDecl>(&decl)) {
+        return decl.TyMode().local == Mode::FULL || (decl.DataTy() != nullptr && HasLocalType(*decl.DataTy()));
     }
     auto fd = DynamicCast<FuncDecl>(&decl);
-    if (fd == nullptr || fd->funcBody == nullptr || fd->funcBody->paramLists.empty()) {
+    if (fd == nullptr) {
         return false;
     }
+    // Since 'this' is not local here, it is checked separately from the function type.
     if (GetThisParamModal(*fd).local == Mode::FULL) {
         return true;
     }
-    auto ft = DynamicCast<FuncTy>(fd->DataTy());
-    if (ft == nullptr) {
-        return false;
-    }
-    // Since 'this' is not local here, 'retTy' only carries the declared return modal.
-    if (ft->retTy.IsLocalType()) {
-        return true;
-    }
-    return std::any_of(ft->paramTys.begin(), ft->paramTys.end(),
-        [](const ModalTy& paramTy) { return paramTy.IsLocalType(); });
+    return fd->DataTy() != nullptr && HasLocalType(*fd->DataTy());
 #endif
 }
 

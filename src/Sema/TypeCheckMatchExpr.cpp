@@ -255,7 +255,13 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchExprHasSelector(ASTContext& ctx, AST:
         }
     }
 
-    me.SetTy(isMatchCorrect ? me.GetTy() : ModalTy{TypeManager::GetInvalidTy()});
+    // A result case that may be an external @local! makes the whole match an @local? value.
+    ModalTy ty = isMatchCorrect ? me.GetTy() : ModalTy{TypeManager::GetInvalidTy()};
+    if (isMatchCorrect && ci->invocation.globalOptions.enableLocalMode && ty.Mode().local == Mode::FULL &&
+        !typeManager.IsCopyType(ty.Ty()) && HasExternalLocalBranch(ctx, me)) {
+        ty = ty.With(ModalInfo{Mode::HALF});
+    }
+    me.SetTy(ty);
     return isMatchCorrect;
 }
 
@@ -278,7 +284,13 @@ bool TypeChecker::TypeCheckerImpl::ChkMatchExprNoSelector(ASTContext& ctx, AST::
             isWellTyped = false;
         }
     }
-    me.SetTy(isWellTyped ? me.GetTy() : ModalTy{TypeManager::GetInvalidTy()});
+    // A result case that may be an external @local! makes the whole match an @local? value.
+    ModalTy ty = isWellTyped ? me.GetTy() : ModalTy{TypeManager::GetInvalidTy()};
+    if (isWellTyped && ci->invocation.globalOptions.enableLocalMode && ty.Mode().local == Mode::FULL &&
+        !typeManager.IsCopyType(ty.Ty()) && HasExternalLocalBranch(ctx, me)) {
+        ty = ty.With(ModalInfo{Mode::HALF});
+    }
+    me.SetTy(ty);
     return isWellTyped;
 }
 
