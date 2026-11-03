@@ -136,47 +136,6 @@ const std::map<std::string, std::vector<std::string>> CONDITION_VALUES = {
 };
 } // namespace
 
-namespace {
-constexpr uint32_t VERSION_NUM_MIN = 0;
-constexpr uint32_t VERSION_NUM_MAX = 99;
-constexpr size_t REGEX_MAJOR_IDX = 1;
-constexpr size_t REGEX_MINOR_IDX = 2;
-constexpr size_t REGEX_PATCH_IDX = 3;
-}
-
-bool ConditionalCompilationImpl::IsValidVersionNumber(uint32_t num)
-{
-    return num >= VERSION_NUM_MIN && num <= VERSION_NUM_MAX;
-}
-
-/**
- * @brief Parse version string into VersionInfo structure.
- * @param version Version string in format: x.y.z (only first three parts are matched)
- * @return VersionInfo structure with parsed values, isValid is false if parsing fails.
- */
-VersionInfo ConditionalCompilationImpl::ParseVersion(const std::string& version)
-{
-    VersionInfo info;
-    std::regex pattern("([0-9]+)[.]([0-9]+)[.]([0-9]+)");
-
-    std::smatch match;
-    if (!std::regex_search(version, match, pattern)) {
-        return info;
-    }
-
-    info.major = static_cast<uint32_t>(std::stoul(match[REGEX_MAJOR_IDX].str()));
-    info.minor = static_cast<uint32_t>(std::stoul(match[REGEX_MINOR_IDX].str()));
-    info.patch = static_cast<uint32_t>(std::stoul(match[REGEX_PATCH_IDX].str()));
-
-    if (!IsValidVersionNumber(info.major) || !IsValidVersionNumber(info.minor) ||
-        !IsValidVersionNumber(info.patch)) {
-        return info;
-    }
-
-    info.isValid = true;
-    return info;
-}
-
 /**
  * @brief Compare two version information.
  * @param left Left version to compare.
@@ -428,7 +387,8 @@ bool ConditionalCompilationImpl::EvalJudgeBinaryExpr(const BinaryExpr& be)
     }
     // Use version comparison for cjc_version
     if (conditionStr == CJC_VERSION_STR) {
-        VersionInfo rightVersion = ParseVersion(right->stringValue);
+        // The literal has been validated by ConditionCheck as exactly "major.minor.patch".
+        VersionInfo rightVersion = ParseVersion(right->stringValue, true, false);
         if (!rightVersion.isValid) {
             (void)ci->diag.DiagnoseRefactor(
                 DiagKindRefactor::conditional_compilation_not_support_cjc_version_format, be.begin);

@@ -130,6 +130,8 @@ PREDEFVALUE(warn_group, {
     VALUE("semantics", "", { BACKEND(ALL) }, { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
     VALUE("interpreter", "", { BACKEND(ALL) }, { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
     VALUE("apilevel-check", "", { BACKEND(ALL) }, { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) })});
+PREDEFVALUE(compat_version_value, {
+    VALUE("1.3", "", { BACKEND(ALL) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) });
 PREDEFVALUE(diagnostic_value, {
     VALUE("json", "", { BACKEND(ALL) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
     VALUE("noColor", "", { BACKEND(ALL) }, { GROUP(STABLE) COMMA GROUP(VISIBLE) }) COMMA
@@ -252,6 +254,9 @@ OPTION("--diagnostic-format", DIAG_FORMAT, SEPARATED, { BACKEND(ALL) },
 OPTION("--backend", BACKEND_MODE, SEPARATED, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) }, nullptr, backend_value, SINGLE_OCCURRENCE,
     "Specify backend toolchain")
+OPTION("--compat-version", COMPAT_VERSION, SEPARATED, { BACKEND(ALL) },
+    { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, compat_version_value, MULTIPLE_OCCURRENCE,
+    "Compile with compatibility behavior for the specified SDK version. Candidate versions: ")
 OPTION("--scan-dependency", DUMP_DEPENDENT_PACKAGE, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
     "Get the package(s) which the current package depends on")

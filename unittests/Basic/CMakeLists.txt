@@ -72,6 +72,15 @@ target_link_libraries(
     GTest::gtest_main)
 add_test(NAME DiagnosticEmitterTest COMMAND DiagnosticEmitterTest)
 
+add_executable(VersionTest VersionTest.cpp)
+target_link_libraries(
+    VersionTest
+    ${CMAKE_DL_LIBS}
+    ${BASE_UTIL_SRC}
+    GTest::gtest
+    GTest::gtest_main)
+add_test(NAME VersionTest COMMAND VersionTest)
+
 if(WIN32)
     add_executable(StringConvertorTest StringConvertorTest.cpp StringConvertorTest.cpp)
     target_link_libraries(

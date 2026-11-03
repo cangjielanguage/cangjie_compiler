@@ -69,6 +69,15 @@ struct OptionValue {
     std::vector<Options::Backend> backends{0};
     std::vector<Options::Group> groups{0};
 };
+
+/**
+ * @brief Get the pre-defined value list declared for the option @p id in Options.inc
+ *        (the FLAGS slot of its OPTION entry).
+ *
+ * @param id The option ID.
+ * @return The pre-defined value list, or an empty list if the option declares none.
+ */
+const std::vector<OptionValue>& GetPredefinedValues(ID id);
 } // namespace options
 
 /**
