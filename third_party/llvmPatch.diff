@@ -6658,7 +6658,7 @@ index c437624d1..b1ceae050 100644
  
    SymbolContextScope *GetSymbolContextScope() const { return m_owner_scope; }
 diff --git a/lldb/include/lldb/Target/Process.h b/lldb/include/lldb/Target/Process.h
-index 505e211e0..38507aae3 100644
+index 505e211e0..822d7d4d7 100644
 --- a/lldb/include/lldb/Target/Process.h
 +++ b/lldb/include/lldb/Target/Process.h
 @@ -382,6 +382,21 @@ public:
@@ -6683,7 +6683,28 @@ index 505e211e0..38507aae3 100644
  /// A notification structure that can be used by clients to listen
  /// for changes in a process's lifetime.
  ///
-@@ -3034,6 +3049,7 @@ private:
+@@ -2497,6 +2512,20 @@ void PruneThreadPlans();
+   lldb::StructuredDataPluginSP
+   GetStructuredDataPlugin(ConstString type_name) const;
+ 
++  // Get information about the launch state of the process, if possible.
++  //
++  // On Darwin systems, libdyld can report on process state, most importantly
++  // the startup stages where the system library is not yet initialized.
++  virtual lldb_private::StructuredData::ObjectSP
++  GetDynamicLoaderProcessState() {
++    return {};
++  }
++  /// Some targets might use bits in a code address to indicate a mode switch,
++  /// ARM uses bit zero to signify a code address is thumb, so any ARM ABI
++  /// plug-ins would strip those bits.
++  /// Or use the high bits to authenticate a pointer value.
++  lldb::addr_t FixCodeAddress(lldb::addr_t pc);
++
+ protected:
+   friend class Trace;
+   ///  Get the processor tracing type supported for this process.
+@@ -3034,6 +3063,7 @@ private:
  
    Process(const Process &) = delete;
    const Process &operator=(const Process &) = delete;
@@ -8701,6 +8722,19 @@ index a8390c5d7..a815c514b 100644
    default:
      return {lang_type};
    }
+diff --git a/lldb/source/DataFormatters/StringPrinter.cpp b/lldb/source/DataFormatters/StringPrinter.cpp
+index 0dd5d518f..e42153fbd 100644
+--- a/lldb/source/DataFormatters/StringPrinter.cpp
++++ b/lldb/source/DataFormatters/StringPrinter.cpp
+@@ -468,7 +468,7 @@ static bool ReadEncodedBufferAndDumpToStream(
+     target_sp->ReadStringFromMemory(options.GetLocation(), buffer,
+                                      bufferSPSize, error, type_width);
+   else
+-    target_sp->ReadMemory(options.GetLocation(), buffer, bufferSPSize, error);
++    target_sp->ReadMemory(options.GetLocation(), buffer, bufferSPSize, error, true);
+   if (error.Fail()) {
+     options.GetStream()->Printf("unable to read data");
+     return true;
 diff --git a/lldb/source/DataFormatters/ValueObjectPrinter.cpp b/lldb/source/DataFormatters/ValueObjectPrinter.cpp
 index 6fd6308de..75e2a2bdb 100644
 --- a/lldb/source/DataFormatters/ValueObjectPrinter.cpp
@@ -8976,6 +9010,358 @@ index 20a521b8e..cd0a4533a 100644
    summary.Clear();
    summary_string.Clear();
  }
+diff --git a/lldb/source/Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.cpp b/lldb/source/Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.cpp
+index 63b0b96e8..834f76208 100644
+--- a/lldb/source/Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.cpp
++++ b/lldb/source/Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.cpp
+@@ -79,7 +79,8 @@ DynamicLoaderMacOS::DynamicLoaderMacOS(Process *process)
+     : DynamicLoaderDarwin(process), m_image_infos_stop_id(UINT32_MAX),
+       m_break_id(LLDB_INVALID_BREAK_ID),
+       m_dyld_handover_break_id(LLDB_INVALID_BREAK_ID), m_mutex(),
+-      m_maybe_image_infos_address(LLDB_INVALID_ADDRESS) {}
++      m_maybe_image_infos_address(LLDB_INVALID_ADDRESS),
++      m_libsystem_fully_initalized(false) {}
+ 
+ // Destructor
+ DynamicLoaderMacOS::~DynamicLoaderMacOS() {
+@@ -129,6 +130,7 @@ bool DynamicLoaderMacOS::ProcessDidExec() {
+   if (did_exec) {
+     m_libpthread_module_wp.reset();
+     m_pthread_getspecific_addr.Clear();
++    m_libsystem_fully_initalized = false;
+   }
+   return did_exec;
+ }
+@@ -144,6 +146,33 @@ void DynamicLoaderMacOS::DoClear() {
+ 
+   m_break_id = LLDB_INVALID_BREAK_ID;
+   m_dyld_handover_break_id = LLDB_INVALID_BREAK_ID;
++  m_libsystem_fully_initalized = false;
++}
++
++bool DynamicLoaderMacOS::IsFullyInitialized() {
++  if (m_libsystem_fully_initalized)
++    return true;
++
++  StructuredData::ObjectSP process_state_sp(
++      m_process->GetDynamicLoaderProcessState());
++  if (!process_state_sp)
++    return true;
++  if (process_state_sp->GetAsDictionary()->HasKey("error"))
++    return true;
++  if (!process_state_sp->GetAsDictionary()->HasKey("process_state string"))
++    return true;
++  std::string proc_state = process_state_sp->GetAsDictionary()
++                               ->GetValueForKey("process_state string")
++                               ->GetAsString()
++                               ->GetValue()
++                               .str();
++  if (proc_state == "dyld_process_state_not_started" ||
++      proc_state == "dyld_process_state_dyld_initialized" ||
++      proc_state == "dyld_process_state_terminated_before_inits") {
++    return false;
++  }
++  m_libsystem_fully_initalized = true;
++  return true;
+ }
+ 
+ // Check if we have found DYLD yet
+@@ -204,12 +233,13 @@ bool DynamicLoaderMacOS::NotifyBreakpointHit(void *baton,
+                                              StoppointCallbackContext *context,
+                                              lldb::user_id_t break_id,
+                                              lldb::user_id_t break_loc_id) {
+-  // Let the event know that the images have changed
+-  // DYLD passes three arguments to the notification breakpoint.
+-  // Arg1: enum dyld_notify_mode mode - 0 = adding, 1 = removing, 2 = remove
+-  // all Arg2: unsigned long icount        - Number of shared libraries
+-  // added/removed Arg3: uint64_t mach_headers[]     - Array of load addresses
+-  // of binaries added/removed
++  //
++  // Our breakpoint on
++  //
++  // void lldb_image_notifier(enum dyld_image_mode mode, uint32_t infoCount,
++  // const dyld_image_info info[])
++  //
++  // has been hit.  We need to read the arguments.
+ 
+   DynamicLoaderMacOS *dyld_instance = (DynamicLoaderMacOS *)baton;
+ 
+@@ -231,37 +261,33 @@ bool DynamicLoaderMacOS::NotifyBreakpointHit(void *baton,
+     // Build up the value array to store the three arguments given above, then
+     // get the values from the ABI:
+ 
+-    TypeSystemClang *clang_ast_context =
++    TypeSystemClang *scratch_ts_sp =
+         ScratchTypeSystemClang::GetForTarget(process->GetTarget());
+-    if (!clang_ast_context)
++    if (!scratch_ts_sp)
+       return false;
+ 
+     ValueList argument_values;
+ 
+     Value mode_value;    // enum dyld_notify_mode { dyld_notify_adding=0,
+-                         // dyld_notify_removing=1, dyld_notify_remove_all=2 };
+-    Value count_value;   // unsigned long count
+-    Value headers_value; // uint64_t machHeaders[] (aka void*)
++                         // dyld_notify_removing=1, dyld_notify_remove_all=2,
++                         // dyld_notify_dyld_moved=3 };
++    Value count_value;   // uint32_t
++    Value headers_value; // struct dyld_image_info machHeaders[]
+ 
+     CompilerType clang_void_ptr_type =
+-        clang_ast_context->GetBasicType(eBasicTypeVoid).GetPointerType();
++        scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+     CompilerType clang_uint32_type =
+-        clang_ast_context->GetBuiltinTypeForEncodingAndBitSize(
+-            lldb::eEncodingUint, 32);
++        scratch_ts_sp->GetBuiltinTypeForEncodingAndBitSize(lldb::eEncodingUint,
++                                                           32);
+     CompilerType clang_uint64_type =
+-        clang_ast_context->GetBuiltinTypeForEncodingAndBitSize(
+-            lldb::eEncodingUint, 32);
++        scratch_ts_sp->GetBuiltinTypeForEncodingAndBitSize(lldb::eEncodingUint,
++                                                           32);
+ 
+     mode_value.SetValueType(Value::ValueType::Scalar);
+     mode_value.SetCompilerType(clang_uint32_type);
+ 
+-    if (process->GetTarget().GetArchitecture().GetAddressByteSize() == 4) {
+-      count_value.SetValueType(Value::ValueType::Scalar);
+-      count_value.SetCompilerType(clang_uint32_type);
+-    } else {
+-      count_value.SetValueType(Value::ValueType::Scalar);
+-      count_value.SetCompilerType(clang_uint64_type);
+-    }
++    count_value.SetValueType(Value::ValueType::Scalar);
++    count_value.SetCompilerType(clang_uint32_type);
+ 
+     headers_value.SetValueType(Value::ValueType::Scalar);
+     headers_value.SetCompilerType(clang_void_ptr_type);
+@@ -283,12 +309,30 @@ bool DynamicLoaderMacOS::NotifyBreakpointHit(void *baton,
+               argument_values.GetValueAtIndex(2)->GetScalar().ULongLong(-1);
+           if (header_array != static_cast<uint64_t>(-1)) {
+             std::vector<addr_t> image_load_addresses;
++            // header_array points to an array of image_infos_count elements,
++            // each is
++            // struct dyld_image_info {
++            //   const struct mach_header* imageLoadAddress;
++            //   const char*               imageFilePath;
++            //   uintptr_t                 imageFileModDate;
++            // };
++            //
++            // and we only need the imageLoadAddress fields.
++
++            const int addrsize =
++                process->GetTarget().GetArchitecture().GetAddressByteSize();
+             for (uint64_t i = 0; i < image_infos_count; i++) {
+               Status error;
+-              addr_t addr = process->ReadUnsignedIntegerFromMemory(
+-                  header_array + (8 * i), 8, LLDB_INVALID_ADDRESS, error);
+-              if (addr != LLDB_INVALID_ADDRESS) {
++              addr_t dyld_image_info = header_array + (addrsize * 3 * i);
++              addr_t addr =
++                  process->ReadPointerFromMemory(dyld_image_info, error);
++              if (error.Success()) {
+                 image_load_addresses.push_back(addr);
++              } else {
++                Debugger::ReportWarning(
++                    "DynamicLoaderMacOS::NotifyBreakpointHit unable "
++                    "to read binary mach-o load address at 0x%" PRIx64,
++                    addr);
+               }
+             }
+             if (dyld_mode == 0) {
+@@ -333,10 +377,16 @@ bool DynamicLoaderMacOS::NotifyBreakpointHit(void *baton,
+               Status error;
+               addr_t notification_addr =
+                   process->ReadPointerFromMemory(notification_location, error);
+-              if (ABISP abi_sp = process->GetABI())
+-                notification_addr = abi_sp->FixCodeAddress(notification_addr);
+-
+-              dyld_instance->SetDYLDHandoverBreakpoint(notification_addr);
++              if (!error.Success()) {
++                Debugger::ReportWarning(
++                    "DynamicLoaderMacOS::NotifyBreakpointHit unable "
++                    "to read address of dyld-handover notification function at "
++                    "0x%" PRIx64,
++                    notification_location);
++              } else {
++                notification_addr = process->FixCodeAddress(notification_addr);
++                dyld_instance->SetDYLDHandoverBreakpoint(notification_addr);
++              }
+             }
+           }
+         }
+@@ -388,7 +438,80 @@ void DynamicLoaderMacOS::PutToLog(Log *log) const {
+     return;
+ }
+ 
++// Look in dyld's dyld_all_image_infos structure for the address
++// of the notification function.
++// We can find the address of dyld_all_image_infos by a system
++// call, even if we don't have a dyld binary registered in lldb's
++// image list.
++// At process launch time - before dyld has executed any instructions -
++// the address of the notification function is not a resolved vm address
++// yet.  dyld_all_image_infos also has a field with its own address
++// in it, and this will also be unresolved when we're at this state.
++// So we can compare the address of the object with this field and if
++// they differ, dyld hasn't started executing yet and we can't get the
++// notification address this way.
++addr_t DynamicLoaderMacOS::GetNotificationFuncAddrFromImageInfos() {
++  addr_t notification_addr = LLDB_INVALID_ADDRESS;
++  if (!m_process)
++    return notification_addr;
++
++  addr_t all_image_infos_addr = m_process->GetImageInfoAddress();
++  if (all_image_infos_addr == LLDB_INVALID_ADDRESS)
++    return notification_addr;
++
++  const uint32_t addr_size =
++      m_process->GetTarget().GetArchitecture().GetAddressByteSize();
++  offset_t registered_infos_addr_offset =
++      sizeof(uint32_t) + // version
++      sizeof(uint32_t) + // infoArrayCount
++      addr_size +        // infoArray
++      addr_size +        // notification
++      addr_size +        // processDetachedFromSharedRegion +
++                         // libSystemInitialized + pad
++      addr_size +        // dyldImageLoadAddress
++      addr_size +        // jitInfo
++      addr_size +        // dyldVersion
++      addr_size +        // errorMessage
++      addr_size +        // terminationFlags
++      addr_size +        // coreSymbolicationShmPage
++      addr_size +        // systemOrderFlag
++      addr_size +        // uuidArrayCount
++      addr_size;         // uuidArray
++                         // dyldAllImageInfosAddress
++
++  // If the dyldAllImageInfosAddress does not match
++  // the actual address of this struct, dyld has not started
++  // executing yet.  The 'notification' field can't be used by
++  // lldb until it's resolved to an actual address.
++  Status error;
++  addr_t registered_infos_addr = m_process->ReadPointerFromMemory(
++      all_image_infos_addr + registered_infos_addr_offset, error);
++  if (!error.Success())
++    return notification_addr;
++  if (registered_infos_addr != all_image_infos_addr)
++    return notification_addr;
++
++  offset_t notification_fptr_offset = sizeof(uint32_t) + // version
++                                      sizeof(uint32_t) + // infoArrayCount
++                                      addr_size;         // infoArray
++
++  addr_t notification_fptr = m_process->ReadPointerFromMemory(
++      all_image_infos_addr + notification_fptr_offset, error);
++  if (error.Success())
++    notification_addr = m_process->FixCodeAddress(notification_fptr);
++  return notification_addr;
++}
++
++// We want to put a breakpoint on dyld's lldb_image_notifier()
++// but we may have attached to the process during the
++// transition from on-disk-dyld to shared-cache-dyld, so there's
++// officially no dyld binary loaded in the process (libdyld will
++// report none when asked), but the kernel can find the dyld_all_image_infos
++// struct and the function pointer for lldb_image_notifier is in
++// that struct.
+ bool DynamicLoaderMacOS::SetNotificationBreakpoint() {
++
++  // First try to find the notification breakpoint function by name
+   if (m_break_id == LLDB_INVALID_BREAK_ID) {
+     ModuleSP dyld_sp(GetDYLDModule());
+     if (dyld_sp) {
+@@ -402,14 +525,56 @@ bool DynamicLoaderMacOS::SetNotificationBreakpoint() {
+       Breakpoint *breakpoint =
+           m_process->GetTarget()
+               .CreateBreakpoint(&dyld_filelist, source_files,
+-                                "_dyld_debugger_notification",
+-                                eFunctionNameTypeFull, eLanguageTypeC, 0,
+-                                skip_prologue, internal, hardware)
++                                "lldb_image_notifier", eFunctionNameTypeFull,
++                                eLanguageTypeUnknown, 0, skip_prologue,
++                                internal, hardware)
+               .get();
+       breakpoint->SetCallback(DynamicLoaderMacOS::NotifyBreakpointHit, this,
+                               true);
+       breakpoint->SetBreakpointKind("shared-library-event");
+-      m_break_id = breakpoint->GetID();
++      if (breakpoint->HasResolvedLocations())
++        m_break_id = breakpoint->GetID();
++      else
++        m_process->GetTarget().RemoveBreakpointByID(breakpoint->GetID());
++
++      if (m_break_id == LLDB_INVALID_BREAK_ID) {
++        Breakpoint *breakpoint =
++            m_process->GetTarget()
++                .CreateBreakpoint(&dyld_filelist, source_files,
++                                  "gdb_image_notifier", eFunctionNameTypeFull,
++                                  eLanguageTypeUnknown, 0, skip_prologue,
++                                  internal, hardware)
++                .get();
++        breakpoint->SetCallback(DynamicLoaderMacOS::NotifyBreakpointHit, this,
++                                true);
++        breakpoint->SetBreakpointKind("shared-library-event");
++        if (breakpoint->HasResolvedLocations())
++          m_break_id = breakpoint->GetID();
++        else
++          m_process->GetTarget().RemoveBreakpointByID(breakpoint->GetID());
++      }
++    }
++  }
++
++  // Failing that, find dyld_all_image_infos struct in memory,
++  // read the notification function pointer at the offset.
++  if (m_break_id == LLDB_INVALID_BREAK_ID) {
++    addr_t notification_addr = GetNotificationFuncAddrFromImageInfos();
++    if (notification_addr != LLDB_INVALID_ADDRESS) {
++      Address so_addr;
++      // We may not have a dyld binary mapped to this address yet;
++      // don't try to express the Address object as section+offset,
++      // only as a raw load address.
++      so_addr.SetRawAddress(notification_addr);
++      Breakpoint *dyld_break =
++          m_process->GetTarget().CreateBreakpoint(so_addr, true, false).get();
++      dyld_break->SetCallback(DynamicLoaderMacOS::NotifyBreakpointHit, this,
++                              true);
++      dyld_break->SetBreakpointKind("shared-library-event");
++      if (dyld_break->HasResolvedLocations())
++        m_break_id = dyld_break->GetID();
++      else
++        m_process->GetTarget().RemoveBreakpointByID(dyld_break->GetID());
+     }
+   }
+   return m_break_id != LLDB_INVALID_BREAK_ID;
+diff --git a/lldb/source/Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.h b/lldb/source/Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.h
+index b6e4ce8e5..bd2c2e0ba 100644
+--- a/lldb/source/Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.h
++++ b/lldb/source/Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.h
+@@ -79,11 +79,15 @@ protected:
+ 
+   void DoClear() override;
+ 
++  bool IsFullyInitialized() override;
++
+   static bool
+   NotifyBreakpointHit(void *baton,
+                       lldb_private::StoppointCallbackContext *context,
+                       lldb::user_id_t break_id, lldb::user_id_t break_loc_id);
+ 
++  lldb::addr_t GetNotificationFuncAddrFromImageInfos();
++
+   bool SetNotificationBreakpoint() override;
+ 
+   void ClearNotificationBreakpoint() override;
+@@ -106,6 +110,7 @@ protected:
+                                             // exec's when talking to
+                                             // debugservers that don't support
+                                             // the "reason:exec" annotation.
++  bool m_libsystem_fully_initalized;
+ };
+ 
+ #endif // LLDB_SOURCE_PLUGINS_DYNAMICLOADER_MACOSX_DYLD_DYNAMICLOADERMACOS_H
 diff --git a/lldb/source/Plugins/DynamicLoader/POSIX-DYLD/DynamicLoaderPOSIXDYLD.cpp b/lldb/source/Plugins/DynamicLoader/POSIX-DYLD/DynamicLoaderPOSIXDYLD.cpp
 index 8a708c1f9..70910fd70 100644
 --- a/lldb/source/Plugins/DynamicLoader/POSIX-DYLD/DynamicLoaderPOSIXDYLD.cpp
@@ -22374,6 +22760,49 @@ index 20f5969bd..5fb1bec8c 100644
      LLDB_LOG(log, "single stepping thread {0}", stop_thread->GetID());
      stop_info = StopInfo::CreateStopReasonToTrace(*stop_thread);
      stop_thread->SetStopInfo(stop_info);
+diff --git a/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationClient.cpp b/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationClient.cpp
+index 580cdde57..91b80a3c6 100644
+--- a/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationClient.cpp
++++ b/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationClient.cpp
+@@ -4283,3 +4283,16 @@ llvm::Expected<int> GDBRemoteCommunicationClient::KillProcess(lldb::pid_t pid) {
+                                  "unexpected response to k packet: %s",
+                                  response.GetStringRef().str().c_str());
+ }
++
++bool GDBRemoteCommunicationClient::GetDynamicLoaderProcessStateSupported() {
++  if (m_supports_jGetDyldProcessState == eLazyBoolCalculate) {
++    StringExtractorGDBRemote response;
++    m_supports_jGetDyldProcessState = eLazyBoolNo;
++    if (SendPacketAndWaitForResponse("jGetDyldProcessState", response) ==
++        PacketResult::Success) {
++      if (!response.IsUnsupportedResponse())
++        m_supports_jGetDyldProcessState = eLazyBoolYes;
++    }
++  }
++  return m_supports_jGetDyldProcessState;
++}
+\ No newline at end of file
+diff --git a/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationClient.h b/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationClient.h
+index 3d838d6d8..c805df4f4 100644
+--- a/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationClient.h
++++ b/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationClient.h
+@@ -523,6 +523,8 @@ public:
+ 
+   llvm::Expected<int> KillProcess(lldb::pid_t pid);
+ 
++  bool GetDynamicLoaderProcessStateSupported();
++
+ protected:
+   LazyBool m_supports_not_sending_acks = eLazyBoolCalculate;
+   LazyBool m_supports_thread_suffix = eLazyBoolCalculate;
+@@ -564,6 +566,7 @@ protected:
+   LazyBool m_supports_memory_tagging = eLazyBoolCalculate;
+   LazyBool m_supports_qSaveCore = eLazyBoolCalculate;
+   LazyBool m_uses_native_signals = eLazyBoolCalculate;
++  LazyBool m_supports_jGetDyldProcessState = eLazyBoolCalculate;
+ 
+   bool m_supports_qProcessInfoPID : 1, m_supports_qfProcessInfo : 1,
+       m_supports_qUserName : 1, m_supports_qGroupName : 1,
 diff --git a/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationServerLLGS.cpp b/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationServerLLGS.cpp
 index 5804c13fe..ed28e2969 100644
 --- a/lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationServerLLGS.cpp
@@ -22387,6 +22816,50 @@ index 5804c13fe..ed28e2969 100644
  }
  
  GDBRemoteCommunication::PacketResult
+diff --git a/lldb/source/Plugins/Process/gdb-remote/ProcessGDBRemote.cpp b/lldb/source/Plugins/Process/gdb-remote/ProcessGDBRemote.cpp
+index 3e1a6fb66..6f93efa7f 100644
+--- a/lldb/source/Plugins/Process/gdb-remote/ProcessGDBRemote.cpp
++++ b/lldb/source/Plugins/Process/gdb-remote/ProcessGDBRemote.cpp
+@@ -5367,3 +5367,25 @@ void ProcessGDBRemote::DidExec() {
+     m_vfork_in_progress = false;
+   Process::DidExec();
+ }
++
++StructuredData::ObjectSP ProcessGDBRemote::GetDynamicLoaderProcessState() {
++  StructuredData::ObjectSP object_sp;
++  StructuredData::ObjectSP args_dict(new StructuredData::Dictionary());
++
++  if (m_gdb_comm.GetDynamicLoaderProcessStateSupported()) {
++    StringExtractorGDBRemote response;
++    response.SetResponseValidatorToJSON();
++    if (m_gdb_comm.SendPacketAndWaitForResponse("jGetDyldProcessState",
++                                                response) ==
++        GDBRemoteCommunication::PacketResult::Success) {
++      StringExtractorGDBRemote::ResponseType response_type =
++          response.GetResponseType();
++      if (response_type == StringExtractorGDBRemote::eResponse) {
++        if (!response.Empty()) {
++          object_sp = StructuredData::ParseJSON(response.GetStringRef().data());
++        }
++      }
++    }
++  }
++  return object_sp;
++}
+\ No newline at end of file
+diff --git a/lldb/source/Plugins/Process/gdb-remote/ProcessGDBRemote.h b/lldb/source/Plugins/Process/gdb-remote/ProcessGDBRemote.h
+index 50cef8e49..0e2ce65e3 100644
+--- a/lldb/source/Plugins/Process/gdb-remote/ProcessGDBRemote.h
++++ b/lldb/source/Plugins/Process/gdb-remote/ProcessGDBRemote.h
+@@ -227,6 +227,8 @@ public:
+   std::string HarmonizeThreadIdsForProfileData(
+       StringExtractorGDBRemote &inputStringExtractor);
+ 
++  StructuredData::ObjectSP GetDynamicLoaderProcessState() override;
++
+   void DidFork(lldb::pid_t child_pid, lldb::tid_t child_tid) override;
+   void DidVFork(lldb::pid_t child_pid, lldb::tid_t child_tid) override;
+   void DidVForkDone() override;
 diff --git a/lldb/source/Plugins/SymbolFile/DWARF/DWARFASTParserClang.cpp b/lldb/source/Plugins/SymbolFile/DWARF/DWARFASTParserClang.cpp
 index 10dc8d1fb..3c4e0f1bf 100644
 --- a/lldb/source/Plugins/SymbolFile/DWARF/DWARFASTParserClang.cpp
@@ -22677,7 +23150,7 @@ index 29bd2b239..794f783f8 100644
        FileSpec(sysroot_module_path_spec.GetDirectory().AsCString()));
    if (error.Fail())
 diff --git a/lldb/source/Target/Process.cpp b/lldb/source/Target/Process.cpp
-index b2f1318ca..99ad0427a 100644
+index b2f1318ca..b420b2f66 100644
 --- a/lldb/source/Target/Process.cpp
 +++ b/lldb/source/Target/Process.cpp
 @@ -1542,6 +1542,10 @@ bool Process::IsPossibleDynamicValue(ValueObject &in_value) {
@@ -22691,6 +23164,16 @@ index b2f1318ca..99ad0427a 100644
    if (known_type != eLanguageTypeUnknown && known_type != eLanguageTypeC) {
      LanguageRuntime *runtime = GetLanguageRuntime(known_type);
      return runtime ? runtime->CouldHaveDynamicValue(in_value) : false;
+@@ -6137,3 +6141,9 @@ Status Process::WriteMemoryTags(lldb::addr_t addr, size_t len,
+   return DoWriteMemoryTags(addr, len, tag_manager->GetAllocationTagType(),
+                            *packed_tags);
+ }
++
++addr_t Process::FixCodeAddress(addr_t addr) {
++  if (ABISP abi_sp = GetABI())
++    addr = abi_sp->FixCodeAddress(addr);
++  return addr;
++}
 diff --git a/lldb/source/Target/RegisterContextUnwind.cpp b/lldb/source/Target/RegisterContextUnwind.cpp
 index 2da40ba2b..9b9073ac7 100644
 --- a/lldb/source/Target/RegisterContextUnwind.cpp
@@ -23227,10 +23710,21 @@ index e72f8d8f5..6c8f452b9 100644
  }
  
 diff --git a/lldb/source/Target/ThreadPlanStepThrough.cpp b/lldb/source/Target/ThreadPlanStepThrough.cpp
-index e15635e40..e83dee947 100644
+index e15635e40..502ad6bb7 100644
 --- a/lldb/source/Target/ThreadPlanStepThrough.cpp
 +++ b/lldb/source/Target/ThreadPlanStepThrough.cpp
-@@ -199,6 +199,9 @@ bool ThreadPlanStepThrough::ShouldStop(Event *event_ptr) {
+@@ -34,7 +34,9 @@ ThreadPlanStepThrough::ThreadPlanStepThrough(Thread &thread,
+       m_backstop_addr(LLDB_INVALID_ADDRESS), m_return_stack_id(m_stack_id),
+       m_stop_others(stop_others) {
+   LookForPlanToStepThroughFromCurrentPC();
+-
++  if (!m_sub_plan_sp) {
++      m_sub_plan_sp = CFFILookForPlanToStepThroughFromCurrentPC();
++  }
+   // If we don't get a valid step through plan, don't bother to set up a
+   // backstop.
+   if (m_sub_plan_sp) {
+@@ -199,6 +201,9 @@ bool ThreadPlanStepThrough::ShouldStop(Event *event_ptr) {
    // might chain, for instance stepping through a dylib trampoline to the objc
    // dispatch function...)
    LookForPlanToStepThroughFromCurrentPC();
@@ -24073,6 +24567,27 @@ index 000000000..54f7715af
 +
 +#endif
 \ No newline at end of file
+diff --git a/llvm/include/llvm/Analysis/LazyCallGraph.h b/llvm/include/llvm/Analysis/LazyCallGraph.h
+index 4cacf8951..284509d2c 100644
+--- a/llvm/include/llvm/Analysis/LazyCallGraph.h
++++ b/llvm/include/llvm/Analysis/LazyCallGraph.h
+@@ -34,6 +34,7 @@
+ #ifndef LLVM_ANALYSIS_LAZYCALLGRAPH_H
+ #define LLVM_ANALYSIS_LAZYCALLGRAPH_H
+ 
++#include "llvm/ADT/Any.h"
+ #include "llvm/ADT/ArrayRef.h"
+ #include "llvm/ADT/DenseMap.h"
+ #include "llvm/ADT/Optional.h"
+@@ -1295,6 +1296,8 @@ public:
+   PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+ };
+ 
++extern template struct Any::TypeId<const LazyCallGraph::SCC *>;
++
+ } // end namespace llvm
+ 
+ #endif // LLVM_ANALYSIS_LAZYCALLGRAPH_H
 diff --git a/llvm/include/llvm/Analysis/LoopAccessAnalysis.h b/llvm/include/llvm/Analysis/LoopAccessAnalysis.h
 index af8e8d222..71a90f476 100644
 --- a/llvm/include/llvm/Analysis/LoopAccessAnalysis.h
@@ -24379,7 +24894,7 @@ index 04235f0fd..0bec7fbdb 100644
    // Attributes:
    kw_attributes,
 diff --git a/llvm/include/llvm/BinaryFormat/MachO.h b/llvm/include/llvm/BinaryFormat/MachO.h
-index c05e79333..86021af70 100644
+index c05e79333..fca58fe6e 100644
 --- a/llvm/include/llvm/BinaryFormat/MachO.h
 +++ b/llvm/include/llvm/BinaryFormat/MachO.h
 @@ -106,6 +106,7 @@ enum : uint32_t {
@@ -24390,6 +24905,14 @@ index c05e79333..86021af70 100644
  
    // Constant masks for the "flags" field in llvm::MachO::section and
    // llvm::MachO::section_64
+@@ -1520,6 +1521,7 @@ enum CPUSubTypeARM64 {
+   CPU_SUBTYPE_ARM64_ALL = 0,
+   CPU_SUBTYPE_ARM64_V8 = 1,
+   CPU_SUBTYPE_ARM64E = 2,
++  CPU_SUBTYPE_ARM64E_X1 = 12,
+ };
+ 
+ enum CPUSubTypeARM64_32 { CPU_SUBTYPE_ARM64_32_V8 = 1 };
 diff --git a/llvm/include/llvm/Bitcode/LLVMBitCodes.h b/llvm/include/llvm/Bitcode/LLVMBitCodes.h
 index eee4c50cc..d3dc49a5a 100644
 --- a/llvm/include/llvm/Bitcode/LLVMBitCodes.h
@@ -27033,6 +27556,24 @@ index 24da08d70..84dcf96d8 100644
    /// Look up the specified function in the module symbol table. If it does not
    /// exist, add a prototype for the function and return it. This function
    /// guarantees to return a constant of pointer to the specified function type
+diff --git a/llvm/include/llvm/IR/PassInstrumentation.h b/llvm/include/llvm/IR/PassInstrumentation.h
+index 27dd075bb..99da3b03d 100644
+--- a/llvm/include/llvm/IR/PassInstrumentation.h
++++ b/llvm/include/llvm/IR/PassInstrumentation.h
+@@ -60,6 +60,13 @@ namespace llvm {
+ 
+ class PreservedAnalyses;
+ class StringRef;
++class Module;
++class Loop;
++class Function;
++
++extern template struct Any::TypeId<const Module *>;
++extern template struct Any::TypeId<const Function *>;
++extern template struct Any::TypeId<const Loop *>;
+ 
+ /// This class manages callbacks registration, as well as provides a way for
+ /// PassInstrumentation to pass control to the registered callbacks.
 diff --git a/llvm/include/llvm/IR/SafepointIRVerifier.h b/llvm/include/llvm/IR/SafepointIRVerifier.h
 index 246d236ad..0f4f31af1 100644
 --- a/llvm/include/llvm/IR/SafepointIRVerifier.h
@@ -27485,6 +28026,18 @@ index 61e400fe9..e3dbb6f1d 100644
    static SectionKind getReadOnlyWithRel() { return get(ReadOnlyWithRel); }
  };
  
+diff --git a/llvm/include/llvm/TextAPI/Architecture.def b/llvm/include/llvm/TextAPI/Architecture.def
+index 58ef31b25..80c9868cc 100644
+--- a/llvm/include/llvm/TextAPI/Architecture.def
++++ b/llvm/include/llvm/TextAPI/Architecture.def
+@@ -37,6 +37,7 @@ ARCHINFO(armv7em, MachO::CPU_TYPE_ARM, MachO::CPU_SUBTYPE_ARM_V7EM, 32)
+ ///
+ ARCHINFO(arm64, MachO::CPU_TYPE_ARM64, MachO::CPU_SUBTYPE_ARM64_ALL, 64)
+ ARCHINFO(arm64e, MachO::CPU_TYPE_ARM64, MachO::CPU_SUBTYPE_ARM64E, 64)
++ARCHINFO(arm64e_x1, MachO::CPU_TYPE_ARM64, MachO::CPU_SUBTYPE_ARM64E_X1, 64)
+ 
+ 
+ ///
 diff --git a/llvm/include/llvm/Transforms/CJCFI/PtrAuthBackwardCFI.h b/llvm/include/llvm/Transforms/CJCFI/PtrAuthBackwardCFI.h
 new file mode 100644
 index 000000000..fd732c210
@@ -30807,7 +31360,7 @@ index 8192ed56c..fa50603bd 100644
      onBlockAnalyzed(BB);
    }
 diff --git a/llvm/lib/Analysis/LazyCallGraph.cpp b/llvm/lib/Analysis/LazyCallGraph.cpp
-index 20a905e04..6f4257364 100644
+index 20a905e04..6c6e3b2c2 100644
 --- a/llvm/lib/Analysis/LazyCallGraph.cpp
 +++ b/llvm/lib/Analysis/LazyCallGraph.cpp
 @@ -23,6 +23,7 @@
@@ -30818,10 +31371,12 @@ index 20a905e04..6f4257364 100644
  #include "llvm/Support/Compiler.h"
  #include "llvm/Support/Debug.h"
  #include "llvm/Support/GraphWriter.h"
-@@ -40,6 +41,10 @@
+@@ -40,6 +41,12 @@
  
  using namespace llvm;
  
++template struct Any::TypeId<const LazyCallGraph::SCC *>;
++
 +namespace llvm {
 +  extern cl::opt<bool> CJPipeline;
 +}
@@ -30829,7 +31384,7 @@ index 20a905e04..6f4257364 100644
  #define DEBUG_TYPE "lcg"
  
  void LazyCallGraph::EdgeSequence::insertEdgeInternal(Node &TargetN,
-@@ -1956,6 +1961,12 @@ void LazyCallGraph::visitReferences(SmallVectorImpl<Constant *> &Worklist,
+@@ -1956,6 +1963,12 @@ void LazyCallGraph::visitReferences(SmallVectorImpl<Constant *> &Worklist,
    while (!Worklist.empty()) {
      Constant *C = Worklist.pop_back_val();
  
@@ -41433,6 +41988,21 @@ index b51ea45f6..f74c68a4c 100644
  // getFunction - Look up the specified function in the module symbol table.
  // If it does not exist, return null.
  //
+diff --git a/llvm/lib/IR/PassInstrumentation.cpp b/llvm/lib/IR/PassInstrumentation.cpp
+index d85cefbbe..bd2a8d753 100644
+--- a/llvm/lib/IR/PassInstrumentation.cpp
++++ b/llvm/lib/IR/PassInstrumentation.cpp
+@@ -17,6 +17,10 @@
+ 
+ namespace llvm {
+ 
++template struct Any::TypeId<const Module *>;
++template struct Any::TypeId<const Function *>;
++template struct Any::TypeId<const Loop *>;
++
+ void PassInstrumentationCallbacks::addClassToPassName(StringRef ClassName,
+                                                       StringRef PassName) {
+   if (ClassToPassName[ClassName].empty())
 diff --git a/llvm/lib/IR/SafepointIRVerifier.cpp b/llvm/lib/IR/SafepointIRVerifier.cpp
 index 5d3fa28f7..e22cadf61 100644
 --- a/llvm/lib/IR/SafepointIRVerifier.cpp
@@ -47750,6 +48320,24 @@ index 6f4fb405d..93f82a6fd 100644
    bool getRegAllocationHints(Register VirtReg, ArrayRef<MCPhysReg> Order,
                               SmallVectorImpl<MCPhysReg> &Hints,
                               const MachineFunction &MF, const VirtRegMap *VRM,
+diff --git a/llvm/lib/TextAPI/Architecture.cpp b/llvm/lib/TextAPI/Architecture.cpp
+index bb349b217..82094fb00 100644
+--- a/llvm/lib/TextAPI/Architecture.cpp
++++ b/llvm/lib/TextAPI/Architecture.cpp
+@@ -36,10 +36,13 @@ Architecture getArchitectureFromName(StringRef Name) {
+ #define ARCHINFO(Arch, Type, Subtype, NumBits) .Case(#Arch, AK_##Arch)
+ #include "llvm/TextAPI/Architecture.def"
+ #undef ARCHINFO
++      .Case("arm64e.x1", AK_arm64e_x1)
+       .Default(AK_unknown);
+ }
+ 
+ StringRef getArchitectureName(Architecture Arch) {
++  if (Arch == AK_arm64e_x1)
++    return "arm64e.x1";
+   switch (Arch) {
+ #define ARCHINFO(Arch, Type, Subtype, NumBits)                                 \
+   case AK_##Arch:                                                              \
 diff --git a/llvm/lib/Transforms/CFGuard/CFGuard.cpp b/llvm/lib/Transforms/CFGuard/CFGuard.cpp
 index 5fc529596..ab08c3595 100644
 --- a/llvm/lib/Transforms/CFGuard/CFGuard.cpp
@@ -47876,10 +48464,10 @@ index 8c77b6937..4e65ed2e2 100644
        F->addParamAttr(ArgNo, Attribute::NoAlias);
 diff --git a/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp b/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp
 new file mode 100644
-index 000000000..13bd96433
+index 000000000..d19f10246
 --- /dev/null
 +++ b/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp
-@@ -0,0 +1,3353 @@
+@@ -0,0 +1,3359 @@
 +//===- CJPartialEscapeAnalysis.cpp - escape analysis for Cangjie ----------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -47899,6 +48487,7 @@ index 000000000..13bd96433
 +
 +#include "queue"
 +#include "llvm/ADT/DenseMap.h"
++#include "llvm/ADT/DenseSet.h"
 +#include "llvm/ADT/SmallSet.h"
 +#include "llvm/Analysis/CGSCCPassManager.h"
 +#include "llvm/Analysis/CallGraph.h"
@@ -50694,9 +51283,14 @@ index 000000000..13bd96433
 +      return MemPtr::create(BaseV, VPOffset, *this, LI);
 +    }
 +    GCPtr *CurP = nullptr;
++    SmallDenseSet<GCPtr *> Visited;
 +    while (!Def[CurBB][BaseV][VPOffset].empty()) {
 +      CurP = *Def[CurBB][BaseV][VPOffset].begin();
 +      if (CurP->isPtr())
++        return CurP;
++      // Stop at a repeated node instead of walking a cyclic definition chain
++      // forever.
++      if (!Visited.insert(CurP).second)
 +        return CurP;
 +      MemPtr *MP = reinterpret_cast<MemPtr *>(CurP);
 +      VPOffset = MP->Offset;
@@ -51754,7 +52348,7 @@ index 4d32266eb..552e571d7 100644
          continue;
        }
 diff --git a/llvm/lib/Transforms/IPO/MergeFunctions.cpp b/llvm/lib/Transforms/IPO/MergeFunctions.cpp
-index b850591b4..f5754d089 100644
+index b850591b4..c5d85e6ae 100644
 --- a/llvm/lib/Transforms/IPO/MergeFunctions.cpp
 +++ b/llvm/lib/Transforms/IPO/MergeFunctions.cpp
 @@ -119,6 +119,7 @@
@@ -51773,10 +52367,15 @@ index b850591b4..f5754d089 100644
  
  private:
    // The function comparison operator is provided here so that FunctionNodes do
-@@ -408,9 +410,118 @@ static bool isEligibleForMerging(Function &F) {
-   return !F.isDeclaration() && !F.hasAvailableExternallyLinkage();
- }
+@@ -405,12 +407,122 @@ bool MergeFunctions::doFunctionalCheck(std::vector<WeakTrackingVH> &Worklist) {
  
+ /// Check whether \p F is eligible for function merging.
+ static bool isEligibleForMerging(Function &F) {
+-  return !F.isDeclaration() && !F.hasAvailableExternallyLinkage();
++  return !F.isDeclaration() && !F.hasAvailableExternallyLinkage() &&
++         !F.hasFnAttribute(llvm::Attribute::NoMerge);
++}
++
 +static bool isBBEligibleForOutline(llvm::BasicBlock *BB) {
 +  if (!BB)
 +    return false;
@@ -51884,8 +52483,8 @@ index b850591b4..f5754d089 100644
 +  for (auto &pair : ExceptionBBs) {
 +    generateFunc(pair.first, pair.second);
 +  }
-+}
-+
+ }
+ 
  bool MergeFunctions::runOnModule(Module &M) {
    bool Changed = false;
 -
@@ -51893,7 +52492,7 @@ index b850591b4..f5754d089 100644
    SmallVector<GlobalValue *, 4> UsedV;
    collectUsedGlobalVariables(M, UsedV, /*CompilerUsed=*/false);
    collectUsedGlobalVariables(M, UsedV, /*CompilerUsed=*/true);
-@@ -661,6 +772,27 @@ static bool canCreateThunkFor(Function *F) {
+@@ -661,6 +773,27 @@ static bool canCreateThunkFor(Function *F) {
    // Don't merge tiny functions using a thunk, since it can just end up
    // making the function larger.
    if (F->size() == 1) {
@@ -57414,10 +58013,10 @@ index 000000000..921dd0092
 +                "Cangjie Barriers Split", false, false)
 diff --git a/llvm/lib/Transforms/Scalar/CJDevirtualOpt.cpp b/llvm/lib/Transforms/Scalar/CJDevirtualOpt.cpp
 new file mode 100644
-index 000000000..ec520a138
+index 000000000..437128378
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJDevirtualOpt.cpp
-@@ -0,0 +1,471 @@
+@@ -0,0 +1,482 @@
 +//===- CJDevirtualOpt.cpp - -------------------------------------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -57633,7 +58232,12 @@ index 000000000..ec520a138
 +      return false;
 +
 +    for (unsigned i = ReturnTypeIdx + 1; i < TypeArgNum; ++i) {
-+      if (!isSubType(K1.getTypeArg(i), K0.getTypeArg(i))) {
++      GlobalVariable *Arg1 = K1.getTypeArg(i);
++      GlobalVariable *Arg0 = K0.getTypeArg(i);
++      if (!Arg1->hasInitializer() || !Arg0->hasInitializer()) {
++        return false;
++      }
++      if (!isSubType(Arg1, Arg0)) {
 +        return false;
 +      }
 +    }
@@ -57722,8 +58326,14 @@ index 000000000..ec520a138
 +    if (K0.isInterface() || K1.isInterface()) {
 +      // If it find the extensionDef of klass, the subType is true.
 +      // Otherwise, the subtype is unknown.
-+      if (getExtensionDef(Klass0, Klass1) == nullptr)
++      // Only fold when the interface type is concrete and has no where-cond.
++      GlobalVariable *EDGV = getExtensionDef(Klass0, Klass1);
++      if (EDGV == nullptr || !EDGV->hasInitializer())
 +        continue;
++      ExtensionDefData ED(EDGV);
++      if (ED.WhereCondFn != nullptr) {
++        continue;
++      }
 +    } else if (K1.isFunction()) {
 +      Result = isFunctionSubType(K0, K1);
 +    } else {
@@ -71188,10 +71798,10 @@ index 328615011..98d07b460 100644
      auto PrintConstrainedLoopInfo = [L]() {
 diff --git a/llvm/lib/Transforms/Scalar/InsertCJTBAA.cpp b/llvm/lib/Transforms/Scalar/InsertCJTBAA.cpp
 new file mode 100644
-index 000000000..d001fa575
+index 000000000..9e65a947c
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/InsertCJTBAA.cpp
-@@ -0,0 +1,937 @@
+@@ -0,0 +1,948 @@
 +//===- InsertCJTBAA.cpp - Insert Cangjie TBAA Metadata ----------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -71775,13 +72385,24 @@ index 000000000..d001fa575
 +  if (!CheckGEPGEP())
 +    return false;
 +
++  auto *OuterIdx = cast<ConstantInt>(GEP->getOperand(1));
++  if (OuterIdx->isZero())
++    return prepareCJTBAA(TBAAUnit.DL, TBAAUnit.I, GEPGEP, TBAAUnit.DstTy,
++                         false, 0);
++
++  // If a scalar-typed pointer is advanced again, the final access may land in
++  // the middle of a scalar or in struct padding. We cannot reconstruct a
++  // verifier-safe scalar TBAA path from the parent struct in that case, so
++  // conservatively omit TBAA.
++  if (GEP->getSourceElementType()->isSingleValueType())
++    return false;
++
 +  // %1 = gep %"ArrayLayout.xxx" addrspace(1)* %0, 0, 1, %x, 1
 +  // %2 = gep i64 addrspace(1)* %1, i64 1
 +  // load %2
 +  uint64_t Size =
 +      TBAAUnit.DL.getTypeSizeInBits(GEP->getSourceElementType()) / 8;
-+  uint64_t OriginOff =
-+      cast<ConstantInt>(GEP->getOperand(1))->getZExtValue() * Size;
++  uint64_t OriginOff = OuterIdx->getZExtValue() * Size;
 +  return prepareCJTBAA(TBAAUnit.DL, TBAAUnit.I, GEPGEP, TBAAUnit.DstTy, false,
 +                       OriginOff);
 +}
@@ -92617,6 +93238,41 @@ index 000000000..bdc9d0bc4
 +
 +attributes #0 = { argmemonly nounwind }
 +attributes #1 = { argmemonly nocallback nofree nounwind willreturn writeonly }
+diff --git a/llvm/test/Transforms/CJPartialEscapeAnalysis/pea-cyclic-def.ll b/llvm/test/Transforms/CJPartialEscapeAnalysis/pea-cyclic-def.ll
+new file mode 100644
+index 000000000..6749705e6
+--- /dev/null
++++ b/llvm/test/Transforms/CJPartialEscapeAnalysis/pea-cyclic-def.ll
+@@ -0,0 +1,29 @@
++; RUN: opt < %s '-passes=cj-pea' -S | FileCheck %s
++
++%TypeInfo = type { i8 }
++%ObjLayout.Box = type { [16 x i8] } ; 16: two eight-byte reference slots.
++
++@Box.ti = global %TypeInfo zeroinitializer, !RelatedType !0
++
++declare i8 addrspace(1)* @CJ_MCC_NewObject(i8*, i32)
++declare void @escape(i8 addrspace(1)*)
++declare void @llvm.memcpy.p0i8.p1i8.i64(i8*, i8 addrspace(1)*, i64, i1 immarg)
++declare void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)*, i8*, i64, i1 immarg)
++
++; CHECK-LABEL: define void @cyclic_def(
++define void @cyclic_def() gc "cangjie" {
++entry:
++  %a = alloca [16 x i8]
++  %tmp = alloca [16 x i8]
++  %a.i8 = bitcast [16 x i8]* %a to i8*
++  %tmp.i8 = bitcast [16 x i8]* %tmp to i8*
++  %h = call i8 addrspace(1)* @CJ_MCC_NewObject(i8* bitcast (%TypeInfo* @Box.ti to i8*), i32 24) ; 24: header plus payload.
++  %h.field = getelementptr i8, i8 addrspace(1)* %h, i64 40 ; 40: source and destination offsets differ.
++  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* %h.field, i8* %a.i8, i64 16, i1 false) ; 16: copy the payload.
++  call void @llvm.memcpy.p0i8.p1i8.i64(i8* %a.i8, i8 addrspace(1)* %h.field, i64 16, i1 false) ; 16: copy the payload.
++  call void @llvm.memcpy.p0i8.p1i8.i64(i8* %tmp.i8, i8 addrspace(1)* %h.field, i64 16, i1 false) ; 16: copy the payload.
++  call void @escape(i8 addrspace(1)* %h)
++  ret void
++}
++
++!0 = !{!"ObjLayout.Box"}
 diff --git a/llvm/test/Transforms/CJPartialEscapeAnalysis/pea-escape-depth-spread.ll b/llvm/test/Transforms/CJPartialEscapeAnalysis/pea-escape-depth-spread.ll
 new file mode 100644
 index 000000000..25dd3fa71
