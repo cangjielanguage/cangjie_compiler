@@ -32182,7 +32182,7 @@ index 19e00e111..324854824 100644
      if (llvm::Expected<APFloat::opStatus> op =
              f.convertFromString(value_str, APFloat::rmNearestTiesToEven)) {
 diff --git a/lldb/source/Version/Version.cpp b/lldb/source/Version/Version.cpp
-index b391fe1ea..640548237 100644
+index b391fe1ea..22ad0a030 100644
 --- a/lldb/source/Version/Version.cpp
 +++ b/lldb/source/Version/Version.cpp
 @@ -4,6 +4,12 @@
@@ -32238,7 +32238,7 @@ index b391fe1ea..640548237 100644
        g_version_str += "\n  llvm revision ";
        g_version_str += llvm_rev;
      }
-+    g_version_str += "\n  cangjie 1.2.0";
++    g_version_str += "\n  cangjie 1.2.1";
    }
  
    return g_version_str.c_str();
@@ -33405,7 +33405,7 @@ index 04235f0fd..0bec7fbdb 100644
    // Attributes:
    kw_attributes,
 diff --git a/llvm/include/llvm/BinaryFormat/MachO.h b/llvm/include/llvm/BinaryFormat/MachO.h
-index c05e79333..86021af70 100644
+index c05e79333..fca58fe6e 100644
 --- a/llvm/include/llvm/BinaryFormat/MachO.h
 +++ b/llvm/include/llvm/BinaryFormat/MachO.h
 @@ -106,6 +106,7 @@ enum : uint32_t {
@@ -33416,6 +33416,14 @@ index c05e79333..86021af70 100644
  
    // Constant masks for the "flags" field in llvm::MachO::section and
    // llvm::MachO::section_64
+@@ -1520,6 +1521,7 @@ enum CPUSubTypeARM64 {
+   CPU_SUBTYPE_ARM64_ALL = 0,
+   CPU_SUBTYPE_ARM64_V8 = 1,
+   CPU_SUBTYPE_ARM64E = 2,
++  CPU_SUBTYPE_ARM64E_X1 = 12,
+ };
+ 
+ enum CPUSubTypeARM64_32 { CPU_SUBTYPE_ARM64_32_V8 = 1 };
 diff --git a/llvm/include/llvm/Bitcode/LLVMBitCodes.h b/llvm/include/llvm/Bitcode/LLVMBitCodes.h
 index eee4c50cc..d3dc49a5a 100644
 --- a/llvm/include/llvm/Bitcode/LLVMBitCodes.h
@@ -36575,6 +36583,18 @@ index 61e400fe9..b67537510 100644
    static SectionKind getReadOnlyWithRel() { return get(ReadOnlyWithRel); }
  };
  
+diff --git a/llvm/include/llvm/TextAPI/Architecture.def b/llvm/include/llvm/TextAPI/Architecture.def
+index 58ef31b25..80c9868cc 100644
+--- a/llvm/include/llvm/TextAPI/Architecture.def
++++ b/llvm/include/llvm/TextAPI/Architecture.def
+@@ -37,6 +37,7 @@ ARCHINFO(armv7em, MachO::CPU_TYPE_ARM, MachO::CPU_SUBTYPE_ARM_V7EM, 32)
+ ///
+ ARCHINFO(arm64, MachO::CPU_TYPE_ARM64, MachO::CPU_SUBTYPE_ARM64_ALL, 64)
+ ARCHINFO(arm64e, MachO::CPU_TYPE_ARM64, MachO::CPU_SUBTYPE_ARM64E, 64)
++ARCHINFO(arm64e_x1, MachO::CPU_TYPE_ARM64, MachO::CPU_SUBTYPE_ARM64E_X1, 64)
+ 
+ 
+ ///
 diff --git a/llvm/include/llvm/Transforms/CJCFI/PtrAuthBackwardCFI.h b/llvm/include/llvm/Transforms/CJCFI/PtrAuthBackwardCFI.h
 new file mode 100644
 index 000000000..fd732c210
@@ -56544,7 +56564,7 @@ index a167225e2..7a9a87501 100644
    const GlobalValue *GV = dyn_cast<GlobalValue>(Callee);
    if (!GV || Subtarget->genLongCalls()) UseReg = true;
 diff --git a/llvm/lib/Target/ARM/ARMFrameLowering.cpp b/llvm/lib/Target/ARM/ARMFrameLowering.cpp
-index 48b4d266b..682f8f6f6 100644
+index 48b4d266b..cc6743379 100644
 --- a/llvm/lib/Target/ARM/ARMFrameLowering.cpp
 +++ b/llvm/lib/Target/ARM/ARMFrameLowering.cpp
 @@ -169,6 +169,10 @@ static cl::opt<bool>
@@ -56666,12 +56686,16 @@ index 48b4d266b..682f8f6f6 100644
      } else if (Regs.size() == 1) {
        BuildMI(MBB, MI, DL, TII.get(StrOpc), ARM::SP)
            .addReg(Regs[0].first, getKillRegState(Regs[0].second))
-@@ -1646,8 +1691,31 @@ void ARMFrameLowering::emitPopInst(MachineBasicBlock &MBB,
+@@ -1646,15 +1691,54 @@ void ARMFrameLowering::emitPopInst(MachineBasicBlock &MBB,
                                      .addReg(ARM::SP)
                                      .add(predOps(ARMCC::AL))
                                      .setMIFlags(MachineInstr::FrameDestroy);
 -      for (unsigned i = 0, e = Regs.size(); i < e; ++i)
 -        MIB.addReg(Regs[i], getDefRegState(true));
+-      if (DeleteRet) {
+-        if (MI != MBB.end()) {
+-          MIB.copyImplicitOps(*MI);
+-          MI->eraseFromParent();
 +      // The last reg may be PC or LR.
 +      if (MBB.getParent()->getFunction().hasCangjieGC() &&
 +          (LastReg == ARM::PC || LastReg == ARM::LR)) {
@@ -56679,28 +56703,52 @@ index 48b4d266b..682f8f6f6 100644
 +        // 4: size of pc
 +        emitSPUpdate(!AFI->isThumbFunction(), MBB, MI, DL, *STI.getInstrInfo(),
 +                     4, MachineInstr::FrameDestroy);
++        // MIB2 holds LR or PC, so it is MIB2 that performs the return once the
++        // return instruction is folded into the pop.
 +        auto MIB2 = BuildMI(MBB, MI, DL, TII.get(LdmOpc), ARM::SP)
 +                        .addReg(ARM::SP)
 +                        .add(predOps(ARMCC::AL))
 +                        .setMIFlags(MachineInstr::FrameDestroy);
++        bool AnyLowReg = false;
 +        for (unsigned i = 0, e = Regs.size(); i < e; ++i)
 +          if (TRI.getEncodingValue(Regs[i]) <
-+              TRI.getEncodingValue(TRI.getFrameRegister(*MF)))
-+            // r11, lr
++              TRI.getEncodingValue(TRI.getFrameRegister(*MF))) {
++            // Below the frame register: the low half.
 +            MIB.addReg(Regs[i], getDefRegState(true));
-+          else
++            AnyLowReg = true;
++          } else {
++            // The frame register and everything above it: the high half.
 +            MIB2.addReg(Regs[i], getDefRegState(true));
-+        // Empty csr operands
-+        if (MIB->getDesc().getNumOperands() > MIB->getNumOperands())
++          }
++        // A low half without registers would be a registerless pop.
++        if (!AnyLowReg)
 +          MIB->eraseFromParent();
++        // The folded return is MIB2, so the implicit operands of the old return
++        // instruction (the return value registers) belong there. MIB may have
++        // been erased above and is not the returning instruction anyway.
++        if (DeleteRet) {
++          if (MI != MBB.end()) {
++            MIB2.copyImplicitOps(*MI);
++            MI->eraseFromParent();
++          }
++        }
++        MI = MIB2;
 +      } else {
 +        for (unsigned i = 0, e = Regs.size(); i < e; ++i)
 +          MIB.addReg(Regs[i], getDefRegState(true));
-+      }
-       if (DeleteRet) {
-         if (MI != MBB.end()) {
-           MIB.copyImplicitOps(*MI);
-@@ -2076,6 +2144,8 @@ static unsigned estimateRSStackSizeLimit(MachineFunction &MF,
++        if (DeleteRet) {
++          if (MI != MBB.end()) {
++            MIB.copyImplicitOps(*MI);
++            MI->eraseFromParent();
++          }
+         }
++        MI = MIB;
+       }
+-      MI = MIB;
+     } else if (Regs.size() == 1) {
+       // If we adjusted the reg to PC from LR above, switch it back here. We
+       // only do that for LDM.
+@@ -2076,6 +2160,8 @@ static unsigned estimateRSStackSizeLimit(MachineFunction &MF,
        for (unsigned i = 0, e = MI.getNumOperands(); i != e; ++i) {
          if (!MI.getOperand(i).isFI())
            continue;
@@ -58994,6 +59042,24 @@ index 6f4fb405d..93f82a6fd 100644
    bool getRegAllocationHints(Register VirtReg, ArrayRef<MCPhysReg> Order,
                               SmallVectorImpl<MCPhysReg> &Hints,
                               const MachineFunction &MF, const VirtRegMap *VRM,
+diff --git a/llvm/lib/TextAPI/Architecture.cpp b/llvm/lib/TextAPI/Architecture.cpp
+index bb349b217..82094fb00 100644
+--- a/llvm/lib/TextAPI/Architecture.cpp
++++ b/llvm/lib/TextAPI/Architecture.cpp
+@@ -36,10 +36,13 @@ Architecture getArchitectureFromName(StringRef Name) {
+ #define ARCHINFO(Arch, Type, Subtype, NumBits) .Case(#Arch, AK_##Arch)
+ #include "llvm/TextAPI/Architecture.def"
+ #undef ARCHINFO
++      .Case("arm64e.x1", AK_arm64e_x1)
+       .Default(AK_unknown);
+ }
+ 
+ StringRef getArchitectureName(Architecture Arch) {
++  if (Arch == AK_arm64e_x1)
++    return "arm64e.x1";
+   switch (Arch) {
+ #define ARCHINFO(Arch, Type, Subtype, NumBits)                                 \
+   case AK_##Arch:                                                              \
 diff --git a/llvm/lib/Transforms/CFGuard/CFGuard.cpp b/llvm/lib/Transforms/CFGuard/CFGuard.cpp
 index 5fc529596..ab08c3595 100644
 --- a/llvm/lib/Transforms/CFGuard/CFGuard.cpp
@@ -71897,10 +71963,10 @@ index 000000000..8983672b8
 +}
 diff --git a/llvm/lib/Transforms/Scalar/CJGCInstrRestore.cpp b/llvm/lib/Transforms/Scalar/CJGCInstrRestore.cpp
 new file mode 100644
-index 000000000..80e8be1e5
+index 000000000..331d379b7
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJGCInstrRestore.cpp
-@@ -0,0 +1,301 @@
+@@ -0,0 +1,303 @@
 +//===- CJGCInstrRestore.cpp - -----------------------------------------*- C++
 +//-*-===//
 +//
@@ -72153,6 +72219,7 @@ index 000000000..80e8be1e5
 +      }
 +      LI->replaceAllUsesWith(ReplacerValue);
 +      LI->eraseFromParent();
++      ValueToBasePointer.erase(LI);
 +    }
 +  }
 +  return Changed;
@@ -72180,6 +72247,7 @@ index 000000000..80e8be1e5
 +  }
 +  for (auto *I : ToBeErased) {
 +    I->eraseFromParent();
++    ValueToBasePointer.erase(I);
 +  }
 +  return Changed;
 +}
@@ -77981,10 +78049,10 @@ index 000000000..cdc7e67f9
 +}
 diff --git a/llvm/lib/Transforms/Scalar/CJRewriteStatepoint.cpp b/llvm/lib/Transforms/Scalar/CJRewriteStatepoint.cpp
 new file mode 100644
-index 000000000..bedd16770
+index 000000000..4aa0d3151
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJRewriteStatepoint.cpp
-@@ -0,0 +1,3070 @@
+@@ -0,0 +1,3071 @@
 +//===- CJRewriteStatepoint.cpp - Make Cangjie GC relocations explicit -----===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -79380,8 +79448,9 @@ index 000000000..bedd16770
 +  // invalid after lowering are stripped in stripNonValidDataFromBody.
 +  for (unsigned I : llvm::seq<unsigned>(0, Call->arg_size())) {
 +    AttributeSet AS = OrigAL.getParamAttrs(I);
-+    if (AS.hasAttribute(Attribute::ByVal) ||
-+        AS.hasAttribute(Attribute::StructRet)) {
++    if (AS.hasAttribute(Attribute::ByVal) || AS.hasAttribute(Attribute::StructRet) ||
++        AS.hasAttribute(Attribute::SExt) || AS.hasAttribute(Attribute::ZExt) ||
++        AS.hasAttribute(Attribute::NoUndef)) {
 +      StatepointAL = StatepointAL.addParamAttributes(
 +          Ctx, GCStatepointInst::CallArgsBeginPos + I, AttrBuilder(Ctx, AS));
 +    }
