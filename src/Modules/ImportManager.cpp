@@ -12,6 +12,7 @@
 
 #include "cangjie/Modules/ImportManager.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -141,17 +142,26 @@ std::string Jsonfy(const ImportSpec& import, bool exportCJO)
 
 std::string Jsonfy(const std::set<Ptr<ImportSpec>, CmpNodeByPos>& imports, bool exportCJO)
 {
-    if (imports.empty()) {
-        return "[]";
+    // The imports are held in a set ordered by (fileID, begin), and CmpNodeByPos
+    // only breaks remaining ties by comparing heap addresses. Emitting the set in
+    // that order therefore writes bytes that depend on the allocator whenever two
+    // positions tie, which is not reproducible. Serialize a canonical order derived
+    // from the rendered fragments instead. A sorted vector (not a set) preserves
+    // duplicates, which a set would silently drop.
+    std::vector<std::string> fragments;
+    fragments.reserve(imports.size());
+    for (const auto& import : imports) {
+        fragments.emplace_back(Jsonfy(*import, exportCJO));
     }
+    std::sort(fragments.begin(), fragments.end());
+
     std::ostringstream out;
     out << "[";
-    auto iter = imports.cbegin();
-    out << Jsonfy(**iter, exportCJO);
-    ++iter;
-    while (iter != imports.cend()) {
-        out << "," << Jsonfy(**iter, exportCJO);
-        ++iter;
+    for (size_t i = 0; i < fragments.size(); ++i) {
+        if (i != 0) {
+            out << ",";
+        }
+        out << fragments[i];
     }
     out << "]";
     return out.str();

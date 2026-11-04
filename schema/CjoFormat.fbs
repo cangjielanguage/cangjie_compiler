@@ -635,6 +635,9 @@ table ImportSpec {
   isDecl:bool=false;
   hasDoubleColon:bool;
   withImplicitExport:bool=true;
+  // Whether this import was added implicitly by the compiler (Attribute::IMPLICIT_ADD),
+  // e.g. the prelude `import std.core.*`. Persisted so the attribute survives CJO round-trips.
+  isImplicitAdd:bool=false;
 }
 
 table Imports {

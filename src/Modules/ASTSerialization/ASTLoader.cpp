@@ -513,6 +513,11 @@ std::vector<OwnedPtr<ImportSpec>> ASTLoader::ASTLoaderImpl::LoadImportSpecs(cons
         if (compilerAdded) {
             importSpec->EnableAttr(Attribute::COMPILER_ADD);
         }
+        // Restore the implicit-import marker persisted since CJO patch version 1.
+        // Older CJOs have no such field and default to false.
+        if (rawImportSpec->isImplicitAdd()) {
+            importSpec->EnableAttr(Attribute::IMPLICIT_ADD);
+        }
         auto [modifierKind, attr] = ACCESS_MODIFIER_RMAP.at(rawImportSpec->reExport());
         importSpec->modifier = MakeOwned<Modifier>(modifierKind, DEFAULT_POSITION);
         importSpec->EnableAttr(attr);
