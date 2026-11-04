@@ -103,6 +103,11 @@ void Ohos_CJNATIVE::GenerateLinkOptions(Tool& tool)
     tool.AppendArg("-lclang_rt.builtins");
     // Remind runtime to remove dependency of unwind_s in hm
     tool.AppendArg("-lunwind");
+    // The ohos toolchain only ships the static libunwind.a, no libunwind.so, so -lunwind always
+    // pulls the unwind implementation into the output library. Hide the symbols taken from that
+    // archive: otherwise they stay in the dynamic symbol table of every cangjie shared library
+    // that references _Unwind_*, and can interpose on the unwind calls of other libraries.
+    tool.AppendArg("--exclude-libs=libunwind.a");
 }
 
 void Ohos_CJNATIVE::HandleSanitizerDependencies(Tool& tool)
