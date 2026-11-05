@@ -232,7 +232,23 @@ bool TypeChecker::TypeCheckerImpl::ChkTryExpr(ASTContext& ctx, ModalTy tgtTy, Tr
     }
     isWellTyped = ChkTryExprCatchesAndHandles(ctx, tgtTy, te) && isWellTyped;
     isWellTyped = ChkTryExprFinallyBlock(ctx, te) && isWellTyped;
-    te.SetTy(isWellTyped ? tgtTy : ModalTy{TypeManager::GetInvalidTy()});
+    // All value branches return, so the try itself has no value.
+    bool allBranchesReturn = isWellTyped && te.handlers.empty() && te.tryBlock->GetTy().IsCorrect() &&
+        te.tryBlock->GetTy()->IsNothing();
+    for (auto& cb : te.catchBlocks) {
+        allBranchesReturn = allBranchesReturn && cb && cb->GetTy().IsCorrect() && cb->GetTy()->IsNothing();
+    }
+    if (allBranchesReturn) {
+        te.SetTy({TypeManager::GetNothingTy()});
+        return true;
+    }
+    // A result branch that may be an external @local! makes the whole try an @local? value.
+    ModalTy ty = isWellTyped ? tgtTy : ModalTy{TypeManager::GetInvalidTy()};
+    if (isWellTyped && ci->invocation.globalOptions.enableLocalMode && ty.Mode().local == Mode::FULL &&
+        !typeManager.IsCopyType(ty.Ty()) && HasExternalLocalBranch(ctx, te)) {
+        ty = ty.With(ModalInfo{Mode::HALF});
+    }
+    te.SetTy(ty);
     return isWellTyped;
 }
 

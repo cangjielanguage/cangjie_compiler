@@ -390,6 +390,7 @@ void DesugarOptionType(OptionType& optionType)
         refType->typeArguments = std::move(tempTypeArgs);
     }
     CopyBasicInfo(&optionType, refType.get());
+    refType->modal = optionType.modal;
     // Set the desugarType of the optionType
     optionType.desugarType = std::move(refType);
 }

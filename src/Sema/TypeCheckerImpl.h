@@ -1838,6 +1838,8 @@ private:
     bool ChkExclaveExpr(ASTContext& ctx, AST::ModalTy target, AST::ExclaveExpr& expr);
     AST::ModalTy SynExclaveExpr(ASTContext& ctx, AST::ExclaveExpr& expr);
     bool IsExternalLocal(const ASTContext& ctx, const AST::Expr& expr);
+    /// True if a result branch of the if/match/try may hold an external @local! value.
+    bool HasExternalLocalBranch(const ASTContext& ctx, const AST::Expr& expr);
     struct ModalTypeChecker* NewModalTypeChecker();
     void DeleteModalTypeChecker();
     void DiagExpectedDataType(const AST::Node& node);

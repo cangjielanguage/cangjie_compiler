@@ -2710,6 +2710,11 @@ bool TypeChecker::TypeCheckerImpl::CheckFuncPtrCall(ASTContext& ctx, ModalTy tar
     }
     CJC_NULLPTR_CHECK(ce.baseFunc);
     auto baseTarget = ce.baseFunc->GetTarget();
+    if (!ci->invocation.globalOptions.enableLocalMode && baseTarget && IsDisabledLocalAPI(*baseTarget)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_local_api_disabled, *ce.baseFunc,
+            std::string(ToSignatureString(*baseTarget, baseTarget->DataTy(), GetThisParamModal(*baseTarget))));
+        return false;
+    }
     if (baseTarget && baseTarget->astKind == ASTKind::TYPE_ALIAS_DECL) {
         auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_invalid_called_object, *ce.baseFunc);
         builder.AddNote("cannot call a type alias for a function type");

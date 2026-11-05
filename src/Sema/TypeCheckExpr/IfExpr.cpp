@@ -262,6 +262,17 @@ bool TypeChecker::TypeCheckerImpl::ChkIfExprTwoBranches(ASTContext& ctx, ModalTy
     if (!ie.thenBody->GetTy().IsCorrect() || !ie.elseBody->GetTy().IsCorrect()) {
         return false;
     }
-    ie.SetTy(target);
+    // Both branches return, so the if itself has no value.
+    if (ie.thenBody->GetTy()->IsNothing() && ie.elseBody->GetTy()->IsNothing()) {
+        ie.SetTy({TypeManager::GetNothingTy()});
+        return true;
+    }
+    // A result branch that may be an external @local! makes the whole if an @local? value.
+    ModalTy ty = target;
+    if (ci->invocation.globalOptions.enableLocalMode && ty.Mode().local == Mode::FULL &&
+        !typeManager.IsCopyType(ty.Ty()) && HasExternalLocalBranch(ctx, ie)) {
+        ty = ty.With(ModalInfo{Mode::HALF});
+    }
+    ie.SetTy(ty);
     return true;
 }
