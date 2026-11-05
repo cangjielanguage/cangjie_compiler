@@ -955,7 +955,7 @@ TEST(ActiveStatePoolExtraTest, JoinCopyMoveAndDuplicateInsert)
     EXPECT_NE(pool.Begin(), pool.End());
     EXPECT_FALSE(pool.At(&v0).IsTop());
 
-    // Join: existing key change + new non-ref insert; ref keys forced top
+    // Join existing keys; values missing from either pool remain unknown.
     ActiveStatePool<ValueDomain<FakeAbs>> lhs;
     ActiveStatePool<ValueDomain<FakeAbs>> rhs;
     PoolTestValue a("a");
@@ -970,7 +970,7 @@ TEST(ActiveStatePoolExtraTest, JoinCopyMoveAndDuplicateInsert)
     bool changed = lhs.Join(rhs);
     EXPECT_TRUE(changed);
     EXPECT_TRUE(lhs.At(&b).IsRef());
-    EXPECT_NE(lhs.Find(&c), lhs.End());
+    EXPECT_TRUE(lhs.At(&c).IsTop());
 
     // copy / move assign
     ActiveStatePool<ValueDomain<FakeAbs>> copied;
@@ -979,6 +979,35 @@ TEST(ActiveStatePoolExtraTest, JoinCopyMoveAndDuplicateInsert)
     ActiveStatePool<ValueDomain<FakeAbs>> moved;
     moved = std::move(copied);
     EXPECT_NE(moved.Find(&a), moved.End());
+}
+
+TEST(ActiveStatePoolExtraTest, JoinForgetsMissingConstant)
+{
+    ActiveStatePool<ValueDomain<FakeAbs>> lhs;
+    ActiveStatePool<ValueDomain<FakeAbs>> rhs;
+    PoolTestValue d("d");
+    lhs.Insert(&d, ValueDomain<FakeAbs>(std::make_unique<FakeAbs>("D")));
+
+    EXPECT_TRUE(lhs.Join(rhs));
+    EXPECT_TRUE(lhs.At(&d).IsTop());
+    EXPECT_FALSE(lhs.Join(rhs));
+}
+
+TEST(ActiveStatePoolExtraTest, JoinPreservesMissingAbstractObjectReference)
+{
+    ActiveStatePool<ValueDomain<FakeAbs>> lhs;
+    ActiveStatePool<ValueDomain<FakeAbs>> rhs;
+    AbstractObject field("field");
+    Ref ref("field_ref", false);
+    ASSERT_EQ(field.GetType(), nullptr);
+    lhs.Insert(&field, ValueDomain<FakeAbs>(&ref));
+
+    EXPECT_TRUE(lhs.Join(rhs));
+    const auto& value = lhs.At(&field);
+    ASSERT_TRUE(value.IsRef());
+    ASSERT_NE(value.GetRef(), nullptr);
+    EXPECT_TRUE(value.GetRef()->IsTopRefInstance());
+    EXPECT_FALSE(lhs.Join(rhs));
 }
 
 TEST(AbstractDomainDefaultsTest, BaseVirtuals)

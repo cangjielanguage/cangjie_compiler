@@ -386,43 +386,21 @@ public:
     /**
      * @brief Join another ActiveStatePool into this one.
      *
-     * Existing keys are joined using ValueDomain::Join; newly inserted keys do
-     * not mark the result as changed.
+     * Missing entries represent TOP because they may have been evicted. Only
+     * entries present in both pools can retain a precise value after the join.
      *
      * @param other pool to join from
-     * @return true if any existing domain changed
+     * @return true if any domain changed
      */
     bool Join(const ActiveStatePool<ValueDomain>& other)
     {
         bool changed = false;
-        for (const auto& [k, v] : data) {
-            if (v.IsRef()) {
-                /* state will despair in long blocks, state of an ref is not trusted
-                    block #1
-                        %a: Allocate
-                        ...
-                        %b: Store (%x, %a)  // state of a changed to %x
-                        %c: Equal(...)      // a non const condition
-                        branch(%b, #2, #3)
-                    block #2
-                        store (%x2, %a)     // state of a change to %x2, but discards in long block.
-                        ...  long block
-                        GoTo(#3)
-                    block #3              // state of a should be top, can be %x or %x2,
-                        ...               // but state %2 discards in block #2, state %x is non-trusted.
-                */
-                data.at(k) = TOP_REF_STATE;
-            }
-        }
-        for (const auto& [k2, v2] : other.data) {
-            if (auto it = data.find(k2); it != data.end()) {
-                auto& v1 = it->second;
-                changed |= v1.Join(v2);
+        for (auto& [key, value] : data) {
+            if (auto it = other.data.find(key); it != other.data.end()) {
+                changed |= value.Join(it->second);
             } else {
-                if (!v2.IsRef()) {
-                    // non-trusted states discard.
-                    Insert(k2, v2);
-                }
+                // AbstractObject keys have no type; preserve the domain's REF kind.
+                changed |= value.Join(value.IsRef() ? TOP_REF_STATE : TOP_STATE);
             }
         }
         return changed;
