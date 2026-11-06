@@ -119,10 +119,10 @@ bool IsGetOrThrowFunction(const Expression& expr)
 {
     static const FuncInfo GETORTHROWFUNCINFO{"getOrThrow", NOT_CARE, {NOT_CARE}, NOT_CARE, "std.core"};
 
-    if (expr.GetExprKind() != ExprKind::APPLY) {
+    if (!Is<ApplyBase>(&expr)) {
         return false;
     }
-    auto apply = StaticCast<const Apply*>(&expr);
+    auto apply = StaticCast<const ApplyBase*>(&expr);
     auto callee = apply->GetCallee();
     if (!callee->IsFunc()) {
         return false;

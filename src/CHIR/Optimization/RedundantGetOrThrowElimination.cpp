@@ -12,44 +12,58 @@
 
 using namespace Cangjie::CHIR;
 
-RedundantGetOrThrowElimination::RedundantGetOrThrowElimination()
+RedundantGetOrThrowElimination::RedundantGetOrThrowElimination(CHIRBuilder& builder) : builder(builder)
 {
 }
 
-void RedundantGetOrThrowElimination::RunOnPackage(const Ptr<const Package>& package, bool isDebug) const
+void RedundantGetOrThrowElimination::RunOnPackage(const Ptr<const Package>& package) const
 {
     for (auto func : package->GetGlobalFuncsWithBody()) {
-        RunOnFunc(func, isDebug);
+        RunOnFunc(func);
     }
 }
 
-void RedundantGetOrThrowElimination::RunOnFunc(const Ptr<const Function>& func, bool isDebug) const
+void RedundantGetOrThrowElimination::RunOnFunc(const Ptr<const Function>& func) const
 {
-    auto analysis = std::make_unique<GetOrThrowResultAnalysis>(func, isDebug);
+    auto analysis = std::make_unique<GetOrThrowResultAnalysis>(func);
     auto engine = Engine<GetOrThrowResultDomain>(func, std::move(analysis));
     auto result = engine.IterateToFixpoint();
     CJC_NULLPTR_CHECK(result);
 
-    const auto actionBeforeVisitExpr = [func, isDebug](const GetOrThrowResultDomain& state, Expression* expr, size_t) {
+    std::vector<ApplyBase*> redundantCalls;
+    const auto replaceResult = [func, &redundantCalls](const GetOrThrowResultDomain& state, Expression* expr) {
         if (!IsGetOrThrowFunction(*expr)) {
             return;
         }
-        auto apply = StaticCast<Apply*>(expr);
+        auto apply = StaticCast<ApplyBase*>(expr);
         auto arg = apply->GetArgs()[0];
         if (auto result = state.CheckGetOrThrowResult(arg); result) {
             apply->GetResult()->ReplaceWith(*result->GetResult(), func->GetBody());
-            if (isDebug) {
-                std::string message = "[RGetOtThrowE] The usages of the result of getOrThrow" +
-                    ToPosInfo(apply->GetDebugLocation()) + " have been replaced by the value" +
-                    ToPosInfo(result->GetDebugLocation()) + "\n";
-                std::cout << message;
-            }
+            redundantCalls.emplace_back(apply);
         }
+    };
+
+    const auto actionBeforeVisitExpr = [&replaceResult](const GetOrThrowResultDomain& state, Expression* expr, size_t) {
+        replaceResult(state, expr);
     };
 
     const auto actionAfterVisitExpr = [](const GetOrThrowResultDomain&, Expression*, size_t) {};
 
-    const auto actionOnTerminator = [](const GetOrThrowResultDomain&, Expression*, std::optional<Block*>) {};
+    const auto actionOnTerminator = [&replaceResult](
+        const GetOrThrowResultDomain& state, Expression* expr, std::optional<Block*>) { replaceResult(state, expr); };
 
     result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
+
+    // Keep the analysed CFG intact until all expressions have been visited.
+    for (auto apply : redundantCalls) {
+        if (auto tryApply = DynamicCast<TryApply*>(apply)) {
+            auto parent = tryApply->GetParentBlock();
+            auto success = tryApply->GetSuccessBlock();
+            auto loc = tryApply->GetDebugLocation();
+            tryApply->RemoveSelfFromBlock();
+            parent->AppendExpression(builder.CreateTerminator<GoTo>(loc, success, parent));
+        } else {
+            apply->RemoveSelfFromBlock();
+        }
+    }
 }

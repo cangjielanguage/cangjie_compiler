@@ -13,7 +13,7 @@ using namespace Cangjie::CHIR;
 
 GetOrThrowResultDomain::GetOrThrowResultDomain(std::unordered_map<const Value*, size_t>* ArgIdxMap)
     : AbstractDomain(),
-      GetOrThrowResults(std::vector<FlatSet<const Apply*>>(ArgIdxMap->size(), FlatSet<const Apply*>(false))),
+      GetOrThrowResults(std::vector<FlatSet<const ApplyBase*>>(ArgIdxMap->size(), FlatSet<const ApplyBase*>(false))),
       ArgIdxMap(ArgIdxMap)
 {
 }
@@ -39,7 +39,7 @@ std::string GetOrThrowResultDomain::ToString() const
     }
 }
 
-const Apply* GetOrThrowResultDomain::CheckGetOrThrowResult(const Value* location) const
+const ApplyBase* GetOrThrowResultDomain::CheckGetOrThrowResult(const Value* location) const
 {
     if (auto it = ArgIdxMap->find(location); it != ArgIdxMap->end()) {
         return GetOrThrowResults[it->second].GetElem().value_or(nullptr);
@@ -51,13 +51,13 @@ const Apply* GetOrThrowResultDomain::CheckGetOrThrowResult(const Value* location
 template <> const std::string Analysis<GetOrThrowResultDomain>::name = "getOrThrow-result";
 template <> const std::optional<unsigned> Analysis<GetOrThrowResultDomain>::blockLimit = std::nullopt;
 
-GetOrThrowResultAnalysis::GetOrThrowResultAnalysis(const Function* func, bool isDebug) : Analysis(func, isDebug)
+GetOrThrowResultAnalysis::GetOrThrowResultAnalysis(const Function* func) : Analysis(func)
 {
     size_t argIdx = 0;
     for (auto bb : func->GetBody()->GetBlocks()) {
         for (auto expr : bb->GetExpressions()) {
             if (IsGetOrThrowFunction(*expr)) {
-                auto apply = StaticCast<const Apply*>(expr);
+                auto apply = StaticCast<const ApplyBase*>(expr);
                 CJC_ASSERT(apply->GetArgs().size() > 0);
                 auto arg = apply->GetArgs()[0];
                 if (auto it = ArgIdxMap.find(arg); it == ArgIdxMap.end()) {
@@ -88,7 +88,7 @@ void GetOrThrowResultAnalysis::InitializeFuncEntryState(GetOrThrowResultDomain& 
 void GetOrThrowResultAnalysis::PropagateExpressionEffect(GetOrThrowResultDomain& state, const Expression* expression)
 {
     if (IsGetOrThrowFunction(*expression)) {
-        auto apply = StaticCast<const Apply*>(expression);
+        auto apply = StaticCast<const ApplyBase*>(expression);
         CJC_ASSERT(apply->GetArgs().size() > 0);
         auto arg = apply->GetArgs()[0];
         if (auto it = ArgIdxMap.find(arg); it != ArgIdxMap.end()) {
@@ -101,10 +101,14 @@ void GetOrThrowResultAnalysis::PropagateExpressionEffect(GetOrThrowResultDomain&
     }
 }
 
-std::optional<Block*> GetOrThrowResultAnalysis::PropagateTerminatorEffect(
-    GetOrThrowResultDomain& state, const Expression* terminator)
+bool GetOrThrowResultAnalysis::JoinSuccessorState(GetOrThrowResultDomain& successorState,
+    const GetOrThrowResultDomain& state, const Expression* terminator, const Block* successor)
 {
-    (void)state;
-    (void)terminator;
-    return std::nullopt;
+    if (IsGetOrThrowFunction(*terminator) &&
+        StaticCast<const TryApply*>(terminator)->GetSuccessBlock() == successor) {
+        auto successState = state;
+        PropagateExpressionEffect(successState, terminator);
+        return successorState.Join(successState);
+    }
+    return successorState.Join(state);
 }

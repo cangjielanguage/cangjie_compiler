@@ -38,13 +38,13 @@ public:
     /**
      * @brief check location's domain result.
      * @param location location value to check its domain.
-     * @return return apply if location has its domain.
+     * @return return apply or try-apply if location has its domain.
      */
-    const Apply* CheckGetOrThrowResult(const Value* location) const;
+    const ApplyBase* CheckGetOrThrowResult(const Value* location) const;
 
 private:
     /// results of get or throw analysis
-    std::vector<FlatSet<const Apply*>> GetOrThrowResults;
+    std::vector<FlatSet<const ApplyBase*>> GetOrThrowResults;
     /// from location to index
     std::unordered_map<const Value*, size_t>* ArgIdxMap;
 };
@@ -57,9 +57,8 @@ public:
     /**
      * @brief constructor of get or throw analysis.
      * @param func function to analyse.
-     * @param isDebug flag whether print debug log.
      */
-    GetOrThrowResultAnalysis(const Function* func, bool isDebug);
+    explicit GetOrThrowResultAnalysis(const Function* func);
     ~GetOrThrowResultAnalysis()
     {
     }
@@ -80,14 +79,9 @@ public:
      */
     void PropagateExpressionEffect(GetOrThrowResultDomain& state, const Expression* expression) override;
 
-    /**
-     * @brief propagate state to next terminator.
-     * @param state current state of this function.
-     * @param terminator next terminator to analyse.
-     * @return blocks return after analysis.
-     */
-    std::optional<Block*> PropagateTerminatorEffect(
-        GetOrThrowResultDomain& state, const Expression* terminator) override;
+    /// A try-apply result is available only on its success edge.
+    bool JoinSuccessorState(GetOrThrowResultDomain& successorState, const GetOrThrowResultDomain& state,
+        const Expression* terminator, const Block* successor) override;
 
 private:
     /// from location to index

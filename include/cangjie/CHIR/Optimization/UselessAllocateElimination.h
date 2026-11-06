@@ -11,6 +11,8 @@
 #include "cangjie/CHIR/IR/Value/Value.h"
 
 namespace Cangjie::CHIR {
+class CHIRBuilder;
+
 /**
  * CHIR Opt Pass: delete all useless allocation in CHIR IR.
  */
@@ -19,11 +21,11 @@ public:
     /**
      * @brief Main process to do useless allocate elimination.
      * @param package package to do optimization.
-     * @param isDebug flag whether print debug log.
+     * @param builder CHIR builder used to replace try-allocate terminators.
      */
-    static void RunOnPackage(const Package& package, bool isDebug);
+    static void RunOnPackage(const Package& package, CHIRBuilder& builder);
 private:
-    static void RunOnFunc(const Function& func, bool isDebug);
+    static void RunOnFunc(const Function& func, CHIRBuilder& builder);
 };
 } // namespace Cangjie::CHIR
 

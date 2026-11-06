@@ -249,7 +249,7 @@ public:
                 std::cout << succ->GetIdentifier() << ":\n" << entryStates->at(succ).ToString() << std::endl;
                 std::cout << bb->GetIdentifier() << ":\n" << state.ToString() << std::endl;
 #endif
-                auto hasChanged = entryStates->at(succ).Join(state);
+                auto hasChanged = analysis->JoinSuccessorState(entryStates->at(succ), state, terminator, succ);
                 if (hasChanged && worklistSet.find(succ) == worklistSet.end()) {
                     worklist.push_back(succ);
                     worklistSet.insert(succ);

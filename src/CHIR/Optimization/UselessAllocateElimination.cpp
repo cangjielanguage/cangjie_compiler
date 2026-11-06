@@ -6,27 +6,28 @@
 
 #include "cangjie/CHIR/Optimization/UselessAllocateElimination.h"
 
-#include "cangjie/CHIR/Analysis/Utils.h"
+#include "cangjie/CHIR/IR/CHIRBuilder.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
 #include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/IR/Expression/Terminator.h"
 
 using namespace Cangjie::CHIR;
 
-void UselessAllocateElimination::RunOnPackage(const Package& package, bool isDebug)
+void UselessAllocateElimination::RunOnPackage(const Package& package, CHIRBuilder& builder)
 {
     for (auto func : package.GetGlobalFuncsWithBody()) {
-        RunOnFunc(*func, isDebug);
+        RunOnFunc(*func, builder);
     }
 }
 
-void UselessAllocateElimination::RunOnFunc(const Function& func, bool isDebug)
+void UselessAllocateElimination::RunOnFunc(const Function& func, CHIRBuilder& builder)
 {
     for (auto block : func.GetBody()->GetBlocks()) {
         for (auto expr : block->GetExpressions()) {
-            if (expr->GetExprKind() != ExprKind::ALLOCATE) {
+            if (!Is<AllocateBase>(expr)) {
                 continue;
             }
-            auto allocate = StaticCast<Allocate*>(expr);
+            auto allocate = StaticCast<AllocateBase*>(expr);
             if (auto allocatedTy = allocate->GetType();
                 allocatedTy->IsClass() && StaticCast<ClassType*>(allocatedTy)->GetClassDef()->GetFinalizer()) {
                 continue;
@@ -43,14 +44,16 @@ void UselessAllocateElimination::RunOnFunc(const Function& func, bool isDebug)
                     e->GetExprKind() == ExprKind::DEBUGEXPR;
             });
             if (onlyBeenWritten) {
-                allocate->RemoveSelfFromBlock();
+                if (auto tryAllocate = DynamicCast<TryAllocate*>(allocate)) {
+                    auto success = tryAllocate->GetSuccessBlock();
+                    auto loc = tryAllocate->GetDebugLocation();
+                    tryAllocate->RemoveSelfFromBlock();
+                    block->AppendExpression(builder.CreateTerminator<GoTo>(loc, success, block));
+                } else {
+                    allocate->RemoveSelfFromBlock();
+                }
                 for (auto user : users) {
                     user->RemoveSelfFromBlock();
-                }
-                if (isDebug && !allocate->GetDebugLocation().GetBeginPos().IsZero()) {
-                    std::string message = "[UselessAllocateElimination] Allocate" +
-                        ToPosInfo(allocate->GetDebugLocation()) + " and its users have been deleted\n";
-                    std::cout << message;
                 }
             }
         }
