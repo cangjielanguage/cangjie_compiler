@@ -1446,11 +1446,35 @@ std::optional<size_t> ManglerContext::GetIndexOfExtend(
     }
     auto fileMap = file2ExtendDecl.find(file);
     CJC_ASSERT(fileMap != file2ExtendDecl.end());
-    auto elementsVector = fileMap->second.find(target->extendedType->GetTy()->String());
+    auto extendedTy = target->extendedType->GetTy()->String();
+    auto elementsVector = fileMap->second.find(extendedTy);
     CJC_ASSERT(elementsVector != fileMap->second.end());
     auto found = std::find(elementsVector->second.begin(), elementsVector->second.end(), target);
     if (found != elementsVector->second.end()) {
-        return found - elementsVector->second.begin();
+        size_t index = static_cast<size_t>(found - elementsVector->second.begin());
+        // Extend names contain the file name without its path. Files with the same name must share indexes.
+        // Common files follow specific files, so count later files first to preserve names from the common CHIR.
+        if (file->curPackage) {
+            bool afterFile = false;
+            for (const auto& other : file->curPackage->files) {
+                if (other.get() == file) {
+                    afterFile = true;
+                    continue;
+                }
+                if (!afterFile || other->fileName != file->fileName) {
+                    continue;
+                }
+                auto otherFile = file2ExtendDecl.find(other.get());
+                if (otherFile == file2ExtendDecl.end()) {
+                    continue;
+                }
+                auto otherExtends = otherFile->second.find(extendedTy);
+                if (otherExtends != otherFile->second.end()) {
+                    index += otherExtends->second.size();
+                }
+            }
+        }
+        return index;
     }
     return {};
 }
