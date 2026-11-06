@@ -310,29 +310,23 @@ void GenerateInJavaImplReferenceWrapper::Process(ClassDecl& refWrapper, AfterTyp
 {
     CJC_ASSERT(IsImplReferenceWrapper(refWrapper));
 
-    auto registryCompanionName = GetImplRegistryCompanionClassName(refWrapper);
-    auto registryCompanion = importManager.GetImportedDecl(refWrapper.fullPackageName, registryCompanionName);
-    CJC_NULLPTR_CHECK(registryCompanion);
-    CJC_ASSERT(registryCompanion->astKind == ASTKind::CLASS_DECL);
-
-    auto& registryCompanionClass = *StaticAs<ASTKind::CLASS_DECL>(registryCompanion);
+    auto& registryCompanion = ctx.GetJavaImplRegistryCompanion(refWrapper);
 
     auto& regCompanionRefField = ctx.GetJavaImplRegistryCompanionReferenceField(refWrapper);
 
     auto& wrappingCtor = ctx.GetJavaImplWrappingConstructor(refWrapper);
-    GenerateWrappingConstructorBody(wrappingCtor, regCompanionRefField, registryCompanionClass);
+    GenerateWrappingConstructorBody(wrappingCtor, regCompanionRefField, registryCompanion);
 
     for (auto userDefinedCtor : ctx.GetJavaImplUserDefinedConstructors(refWrapper)) {
-        InsertJavaSideConstructor(*userDefinedCtor, regCompanionRefField, registryCompanionClass, ctx);
+        InsertJavaSideConstructor(*userDefinedCtor, regCompanionRefField, registryCompanion, ctx);
     }
 
-    RewriteUserDefinedConstructorsInitialization(ctx, refWrapper, regCompanionRefField, registryCompanionClass);
+    RewriteUserDefinedConstructorsInitialization(ctx, refWrapper, regCompanionRefField, registryCompanion);
     InsertFinalizer(refWrapper);
 }
 
 GenerateInJavaImplReferenceWrapper::GenerateInJavaImplReferenceWrapper(TypeManager& typeManager,
-    const ImportManager& importManager, InteropLibBridge& ilib, ASTFactory& factory)
-    : typeManager(typeManager), importManager(importManager), ilib(ilib), factory(factory)
+    InteropLibBridge& ilib, ASTFactory& factory) : typeManager(typeManager), ilib(ilib), factory(factory)
 {
 }
 
