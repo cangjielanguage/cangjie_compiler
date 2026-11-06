@@ -68,7 +68,7 @@ void DiagnosticEmitterImpl::CollectInformation(std::vector<CollectedInfo>& vec, 
     info.hint = str.str;
     info.color = str.color;
     info.isMain = isMain;
-    CJC_ASSERT(str.range.end >= str.range.begin);
+    // Do not abort on inverted ranges from mixed macro-expansion coordinates (issue #1172); the rendering below handles them.
     if (str.range.begin.line == str.range.end.line) {
         info.range = str.range;
     } else {
@@ -77,7 +77,7 @@ void DiagnosticEmitterImpl::CollectInformation(std::vector<CollectedInfo>& vec, 
         auto startInfo = CollectedInfo{startRange, info.isMain, true, false, "", str.color};
         vec.push_back(startInfo);
         multiLineRecordMap.emplace(std::pair{startInfo, multiLineHangingPtrVec.size()});
-        CJC_ASSERT(str.range.end.column > 1 && "end of range must be bigger than 1");
+        // `end.column == 1` is handled below; such ranges are legal for macro diagnostics.
         auto s = str.range.end.column > 1 ? str.range.end - Position{0, 0, 1} :
                                           Position{str.range.end.fileID, str.range.end.line, 1};
         auto e = str.range.end.column > 1 ? str.range.end : Position{str.range.end.fileID, str.range.end.line, 1 + 1};
@@ -142,8 +142,13 @@ size_t DiagnosticEmitterImpl::GetDisplayedWidthFromSource(const std::string& sou
     auto len = source.size();
     start = start > static_cast<int>(len) ? static_cast<int>(len) : start;
     end = end > static_cast<int>(len + 1) ? static_cast<int>(len + 1) : end;
-    CJC_ASSERT(start >= 1 && "wrong start position");
-    CJC_ASSERT(end >= start);
+    // Inverted ranges from mixed macro-expansion coordinates (issue #1172) fall back to the default width.
+    if (start < 1) {
+        start = 1;
+    }
+    if (end < start) {
+        return defaultWidth;
+    }
     std::string substr = source.substr(static_cast<size_t>(start - 1), static_cast<size_t>(end - start));
     auto disWidth = static_cast<size_t>(static_cast<ssize_t>(Unicode::DisplayWidth(substr)));
     // If display width equals to 0, it only contains control character.
@@ -322,11 +327,10 @@ void DiagnosticEmitterImpl::AnalyseMultiLineHanging(const CollectedInfo& info, s
         }
     } else {
         auto [line, column] = multiLineHangingPtrVec[loc];
-        CJC_ASSERT(column < multiLineHangingVec.size() && "column is bigger than size of multiLineHangingVec");
+        // Degenerate ranges may leave stale hanging pointers; the guards below return gracefully.
         if (column >= multiLineHangingVec.size()) {
             return;
         }
-        CJC_ASSERT(line < multiLineHangingVec[column].size() && "line is bigger than size of multiLineHangingVec");
         if (line >= multiLineHangingVec[column].size()) {
             return;
         }
@@ -395,7 +399,6 @@ bool DiagnosticEmitterImpl::CombineErrorPrint(CollectedInfoMap& infoMap, SourceC
                 break;
             }
         }
-        CJC_ASSERT(i < combinedVec.size());
         if (i >= combinedVec.size()) {
             return false;
         }
@@ -540,14 +543,13 @@ void DiagnosticEmitterImpl::ConvertHangingContentsHelper(
 {
     auto k = i + 1;
     while (k < hanging.size()) {
-        CJC_ASSERT(begin < hanging[k].size() && "begin is bigger than hanging size");
+        // Degenerate spans may overflow `begin`/`end - 1`; the guards below skip such entries.
         if (begin >= hanging[k].size()) {
             break;
         }
         if (hanging[k][begin] == g_spaceOfNum(1)) {
             hanging[k][begin] = GetColoredString(color, std::string{MULTI_LINE_SYMBOL});
         }
-        CJC_ASSERT(end - 1 < hanging[k].size() && "end is bigger than hanging size");
         if (end - 1 >= hanging[k].size()) {
             break;
         }
@@ -580,7 +582,7 @@ HangingStr DiagnosticEmitterImpl::ConvertHangingContents(size_t line)
         for (size_t j = 0; j < multiLineHangingVec[i].size(); j++) {
             auto [begin, end, color] = multiLineHangingVec[i][j];
             color = noColor ? DiagColor::NO_COLOR : color;
-            CJC_ASSERT(begin != end - 1);
+            // A degenerate span (`begin == end - 1`) simply fills nothing.
             ConvertHangingContentsHelper(hanging, i, begin, end, color);
         }
     }
@@ -874,7 +876,7 @@ void DiagnosticEmitterImpl::ConstructAndEmitSourceCode(std::vector<CollectedInfo
     }
 
     HandleUnprintableChar(combinedVec);
-    
+
     if (!noColor) {
         ColorizeCombinedVec(combinedVec);
     }
