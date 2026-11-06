@@ -28,8 +28,7 @@ using namespace Interop::Java;
  */
 class GenerateInJavaImplReferenceWrapper : public AfterTypeCheckStage {
 public:
-    explicit GenerateInJavaImplReferenceWrapper(TypeManager& typeManager,
-        const ImportManager& importManager, InteropLibBridge& ilib, ASTFactory& factory);
+    explicit GenerateInJavaImplReferenceWrapper(TypeManager& typeManager, InteropLibBridge& ilib, ASTFactory& factory);
 protected:
     void Process(AfterTypeCheckContext& ctx) override;
 private:
@@ -121,7 +120,6 @@ private:
     void InsertFinalizer(AST::ClassDecl& refWrapper) const;
 
     TypeManager& typeManager;
-    const ImportManager& importManager;
     InteropLibBridge& ilib;
     ASTFactory& factory;
 };
