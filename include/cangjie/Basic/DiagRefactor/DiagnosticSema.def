@@ -313,6 +313,18 @@ ERROR(sema_java_impl_cannot_be_extended_with_interface, "exported '@Java' class 
 ERROR(sema_java_impl_redefinition, "redefinition of java declaration '%s'")
 ERROR(sema_java_mirror_interoplib_must_be_imported, "'java.lang' must be imported to use java interoperability")
 ERROR(sema_arkts_foreign_wrapper_unavailable, "cannot generate wrapper for '@ArkTS foreign' function: %s")
+// The generator refusing a signature must never silently drop the binding.
+// The message is user-facing and carries no internal reason: every precisely
+// diagnosable refusal was already reported with its own diagnostic above.
+ERROR(sema_arkts_foreign_unsupported_signature,
+    "@ArkTS foreign function '%s' has a signature that ArkTS interop does not support")
+// The interop declarations a generated binding needs (the interop package and
+// its context ABI) are not visible. The user action is on the project's
+// dependencies, not on an internal generated symbol, so no internal package or
+// declaration name appears in the message.
+ERROR(sema_arkts_foreign_support_unavailable,
+    "@ArkTS foreign function '%s' requires ArkTS interop declarations that are not available; "
+    "check the project's ArkTS interop dependencies")
 ERROR(sema_java_interop_not_supported, "Java interoperability feature '%s' is not yet supported")
 ERROR(sema_generic_parameter_of_java_type, "'@Java %s' type cannot be used on generic declaration '%s'")
 WARNING(sema_java_interoplib_version_too_old, UNGROUPED,
@@ -420,5 +432,70 @@ ERROR(sema_local_api_disabled, "cannot use local API '%s' when local mode is dis
     "compile with '--experimental --enable-local-mode' to enable it")
 
 WARNING(sema_unused_import, UNUSED, "unused import '%s'", "unused import")
+
+// ArkTS interop
+ERROR(sema_arkts_foreign_param_type_unsupported,
+    "parameter '%s' of @ArkTS foreign function '%s' has unsupported type '%s'")
+ERROR(sema_arkts_foreign_ret_type_unsupported,
+    "return type '%s' of @ArkTS foreign function '%s' is not supported")
+ERROR(sema_arkts_foreign_option_invalid,
+    "options of @ArkTS foreign function '%s' must be string literals among 'module', 'namespace' and 'foreignName'")
+// A repeated key is a different mistake from a non-literal or unknown one:
+// the key and its value are both legal, only the repetition is not.
+ERROR(sema_arkts_foreign_option_duplicated,
+    "duplicated option '%s' in @ArkTS foreign function '%s'")
+// The same option shape rule on every other declaration that carries @ArkTS
+// (class, interface, variable, parameter, or a function the wrapper fold does
+// not lower). It carries no declaration kind or name, because the annotated
+// node is the diagnostic range and the shape rule is the same everywhere.
+ERROR(sema_arkts_option_invalid,
+    "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName'")
+ERROR(sema_arkts_option_duplicated,
+    "duplicated option '%s' in '@ArkTS'")
+ERROR(sema_arkts_foreign_module_empty,
+    "'module' option of @ArkTS foreign function '%s' must not be an empty string")
+ERROR(sema_arkts_foreign_name_empty,
+    "'foreignName' option of @ArkTS foreign function '%s' must not be an empty string")
+ERROR(sema_arkts_foreign_namespace_empty,
+    "'namespace' option of @ArkTS foreign function '%s' must not be an empty string")
+// The namespace value itself is anchored: a leading/trailing dot or an empty
+// inner segment is a value-shape mistake, not an unknown option.
+ERROR(sema_arkts_foreign_namespace_invalid,
+    "'namespace' option '%s' of @ArkTS foreign function '%s' must be a dot-separated identifier path "
+    "with no empty segments")
+// The same explicit-empty-value rule on every other @ArkTS-carrying
+// declaration. The option name is part of the message because the annotated
+// node is the diagnostic range for every declaration kind.
+ERROR(sema_arkts_option_empty,
+    "'%s' option of '@ArkTS' must not be an empty string")
+// The same ill-formed-namespace rule on every other @ArkTS-carrying
+// declaration; the namespace literal is the anchored node.
+ERROR(sema_arkts_namespace_invalid,
+    "'namespace' option '%s' of '@ArkTS' must be a dot-separated identifier path with no empty segments")
+ERROR(sema_arkts_foreign_rest_type_unsupported,
+    "rest parameter '%s' of @ArkTS foreign function '%s' must have type 'Array<T>', not '%s'")
+// Every named parameter ('x!:') of an @ArkTS foreign declaration must carry a
+// default value (user rule, 2026-11-05). The generated wrapper cannot tell an
+// omitted named argument from an explicitly passed value, so `x!: Option<T>`
+// without `= None` (and any other named parameter without a default) is
+// rejected before a wrapper is generated. The rule covers both top-level
+// wrapper functions and bodyless members of an @ArkTS foreign class/interface;
+// ordinary Cangjie named parameters are never checked here.
+ERROR(sema_arkts_foreign_named_param_without_default,
+    "named parameter '%s' of @ArkTS foreign declaration '%s' must have a default value")
+ERROR(sema_arkts_foreign_module_path_invalid,
+    "'module' option '%s' of @ArkTS foreign function '%s' must be an ArkTS module specifier - a module name "
+    "such as '@ohos.util' or 'utils', or a project ETS source path such as 'entry/src/main/ets/Foo' - not a "
+    "'./' or '../' relative path (including '.\\' and '..\\'), an OS-absolute, drive-absolute or UNC path")
+// Routing-only diagnostic for every position spelled with an external ArkTS
+// preset type (std.interop.arkts ArkTSArray<T>, ArkTSString, ArkTSType) whose
+// mapping is not part of this version: classification itself is untouched and
+// stays UNSUPPORTED, and the message names the deferred external type instead
+// of reporting the generic unsupported-type error. The deferral is about the
+// reference semantics only, so no copy-mapping advice is given. Recognition is
+// pinned to the declaring package, so a same-named declaration in any other
+// package keeps the generic message.
+ERROR(sema_arkts_foreign_external_type_deferred,
+    "the reference semantics of the external ArkTS type '%s' is not available in this version")
 
 ERROR(sema_diag_end, "")

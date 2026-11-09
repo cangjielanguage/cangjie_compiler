@@ -1914,6 +1914,16 @@ private:
     ScopeManager scopeManager;
     std::unordered_map<Ptr<AST::File>, std::unordered_set<Ptr<AST::Decl>>> mainFunctionMap;
     std::unordered_map<Ptr<const AST::FuncDecl>, bool> inoutCache;
+    /**
+     * SDK support references of generated ArkTS foreign wrapper bodies
+     * (BigInt, JSContext, __cj_arkts_*, Exception), pre-bound to their
+     * declarations before body type checking. Speculative overload checking
+     * clears a whole subtree through Node::Clear(), which drops RefExpr and
+     * RefType targets and would let a same-named user declaration capture the
+     * generated reference. This map survives the clear so the compiler binding
+     * is restored instead of resolved by name.
+     */
+    std::unordered_map<Ptr<const AST::Node>, Ptr<AST::Decl>> arktsSupportRefs;
     Triple::BackendType backendType;
     // outermost @Derpecated declaration
     Ptr<AST::Node> deprecatedContext = nullptr;

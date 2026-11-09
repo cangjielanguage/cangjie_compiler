@@ -17,6 +17,25 @@
 
 using namespace Cangjie;
 
+namespace {
+// The access-modifier (public/private/internal/protected) x 'foreign'
+// conflict pair. On @ArkTS-annotated declarations exactly this pair is
+// skipped, so the stdlib can spell the preset declarations verbatim, e.g.
+// '@ArkTS[foreignName: "Array"] public foreign class ArkTSArray<T>'.
+// Every other conflict pair keeps firing, with or without @ArkTS:
+// 'public foreign class C {}' -> "'foreign' and 'public' modifiers
+// conflict on class declaration"; the @ArkTS spelling above parses.
+bool IsAccessForeignConflict(TokenKind lhs, TokenKind rhs)
+{
+    auto isAccessModifier = [](TokenKind kind) {
+        return kind == TokenKind::PUBLIC || kind == TokenKind::PRIVATE || kind == TokenKind::INTERNAL ||
+            kind == TokenKind::PROTECTED;
+    };
+    return (lhs == TokenKind::FOREIGN && isAccessModifier(rhs)) ||
+        (isAccessModifier(lhs) && rhs == TokenKind::FOREIGN);
+}
+} // namespace
+
 bool ParserImpl::SeeingModifier()
 {
     return (Peek().kind >= TokenKind::STATIC && Peek().kind <= TokenKind::OPERATOR) ||
@@ -49,7 +68,7 @@ void ParserImpl::SetDeclBeginPos(AST::Decl& decl) const
 
 // Make sure there is no repeat modifier in modifiers.
 std::set<AST::Attribute> ParserImpl::CheckDeclModifiers(const std::set<AST::Modifier>& modifiers, ScopeKind scopeKind,
-    DefKind defKind)
+    DefKind defKind, bool arktsAnnotated)
 {
     // For libast, ignore all scope info.
     if (scopeKind == ScopeKind::UNKNOWN_SCOPE) {
@@ -80,11 +99,11 @@ std::set<AST::Attribute> ParserImpl::CheckDeclModifiers(const std::set<AST::Modi
     if (!mpImpl->CheckCJMPModifiers(modifiers)) {
         return {};
     }
-    return GetModifierAttrs(defKind, scopeKind, modifiersVec);
+    return GetModifierAttrs(defKind, scopeKind, modifiersVec, arktsAnnotated);
 }
 
-std::set<AST::Attribute> ParserImpl::GetModifierAttrs(
-    DefKind defKind, ScopeKind scopeKind, const std::vector<Ptr<const AST::Modifier>>& modifiersVec)
+std::set<AST::Attribute> ParserImpl::GetModifierAttrs(DefKind defKind, ScopeKind scopeKind,
+    const std::vector<Ptr<const AST::Modifier>>& modifiersVec, bool arktsAnnotated)
 {
     // Store the modifiers TokenKind that has been traversed.
     std::vector<Ptr<const AST::Modifier>> traversedModifiers;
@@ -114,6 +133,12 @@ std::set<AST::Attribute> ParserImpl::GetModifierAttrs(
             auto iter = std::find_if(traversedModifiers.begin(), traversedModifiers.end(),
                 [&cm](auto& preMod) { return preMod->modifier == cm; });
             if (iter == traversedModifiers.end()) {
+                continue;
+            }
+            // On @ArkTS-annotated declarations the access-modifier x FOREIGN
+            // pair is skipped - only this pair, so every other conflict
+            // (SEALED x access, CONST/UNSAFE x FOREIGN, ...) still fires.
+            if (arktsAnnotated && IsAccessForeignConflict(it->modifier, cm)) {
                 continue;
             }
             DiagConflictedModifier(**iter, *it);

@@ -78,3 +78,15 @@ target_link_libraries(
     GTest::gtest_main
     TestCompilerInstanceObject)
 add_test(NAME OverrideFunctionResolverTest COMMAND OverrideFunctionResolverTest)
+
+add_executable(ArkTSForeignDiagTest ArkTSForeignDiagTest.cpp)
+target_link_libraries(
+    ArkTSForeignDiagTest
+    cangjie-lsp
+    ${LINK_LIBS}
+    boundscheck-static
+    GTest::gtest
+    GTest::gtest_main
+    TestCompilerInstanceObject)
+target_include_directories(ArkTSForeignDiagTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
+add_test(NAME ArkTSForeignDiagTest COMMAND ArkTSForeignDiagTest)

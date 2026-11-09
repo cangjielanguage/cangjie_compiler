@@ -279,7 +279,20 @@ void TypeChecker::TypeCheckerImpl::CheckLegalityOfUnsafeAndInout(Node& root)
 
 void TypeChecker::TypeCheckerImpl::UnsafeCheck(const FuncBody& fb)
 {
-    if (fb.funcDecl && (fb.funcDecl->TestAttr(Attribute::FOREIGN) || fb.funcDecl->TestAttr(Attribute::C))) {
+    // ArkTS declarations use the C-foreign spelling but not the C ABI: their
+    // parameter types are ArkTS-mapped types (Option/ArkTSArray/...), not C
+    // types. The exemption therefore requires the C-foreign spelling on the
+    // function itself (FOREIGN) and one of the two ArkTS shapes: its own
+    // @ArkTS annotation (an @ArkTS foreign declaration) or an enclosing
+    // @ArkTS foreign class/interface (the Sema equivalent of
+    // IsArkTSForeignClassMember). An @ArkTS class that is not FOREIGN must
+    // not exempt its foreign members from the C ABI checks.
+    bool arktsDecl = fb.funcDecl && fb.funcDecl->TestAttr(Attribute::FOREIGN) &&
+        (fb.funcDecl->HasAnno(AnnotationKind::ARKTS) ||
+            (fb.funcDecl->outerDecl && fb.funcDecl->outerDecl->HasAnno(AnnotationKind::ARKTS) &&
+                fb.funcDecl->outerDecl->TestAttr(Attribute::FOREIGN)));
+    if (fb.funcDecl && !arktsDecl &&
+        (fb.funcDecl->TestAttr(Attribute::FOREIGN) || fb.funcDecl->TestAttr(Attribute::C))) {
         CJC_ASSERT(!fb.paramLists.empty() && "function body's param list cannot be empty!");
         for (auto& arg : fb.paramLists[0]->params) {
             CheckCFuncParam(*arg);
@@ -345,7 +358,8 @@ void TypeChecker::TypeCheckerImpl::CheckCFuncParamType(const AST::Type& type)
 
 void TypeChecker::TypeCheckerImpl::PreCheckAnnoForCFFI(Decl& decl)
 {
-    if (HasModifier(decl.modifiers, TokenKind::FOREIGN) && !decl.HasAnno(AnnotationKind::C)) {
+    if (HasModifier(decl.modifiers, TokenKind::FOREIGN) && !decl.HasAnno(AnnotationKind::C) &&
+        !decl.HasAnno(AnnotationKind::ARKTS)) {
         // Check node.
         auto modifier = decl.modifiers.crbegin();
         if (decl.astKind == ASTKind::CLASS_DECL) {

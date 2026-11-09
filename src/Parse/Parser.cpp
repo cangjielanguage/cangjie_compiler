@@ -28,7 +28,8 @@ namespace Cangjie {
 const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_KIND = {
     {"JavaMirror", AST::AnnotationKind::JAVA_MIRROR}, {"JavaImpl", AST::AnnotationKind::JAVA_IMPL},
     {"Java", AST::AnnotationKind::JAVA}, {"ObjC", AST::AnnotationKind::OBJ_C},
-    {"JavaHasDefault", AST::AnnotationKind::JAVA_HAS_DEFAULT}, {"ArkTS", AST::AnnotationKind::ARKTS}, {"ObjCMirror", AST::AnnotationKind::OBJ_C_MIRROR},
+    {"JavaHasDefault", AST::AnnotationKind::JAVA_HAS_DEFAULT}, {"ArkTS", AST::AnnotationKind::ARKTS},
+    {"RestParam", AST::AnnotationKind::REST_PARAM}, {"ObjCMirror", AST::AnnotationKind::OBJ_C_MIRROR},
     {"ObjCImpl", AST::AnnotationKind::OBJ_C_IMPL}, {"ForeignGetterName", AST::AnnotationKind::FOREIGN_GETTER_NAME},
     {"ForeignSetterName", AST::AnnotationKind::FOREIGN_SETTER_NAME}, {"ObjCInit", AST::AnnotationKind::OBJ_C_INIT},
     {"ObjCOptional", AST::AnnotationKind::OBJ_C_OPTIONAL}, {"ForeignName", AST::AnnotationKind::FOREIGN_NAME},
@@ -374,6 +375,8 @@ std::vector<OwnedPtr<Decl>> ParserImpl::ParseForeignDecls(
             DiagExpectedRightDelimiter("{", leftCurlyBracePos);
             break;
         }
+        // Cloning keeps standalone member semantics, including the
+        // @RestParam placement check and the access-modifier gate.
         auto clonedMods = modifiers;
         // Copy annos here, because ParseDecl(xxx) will move annos.
         PtrVector<Annotation> clonedAnnos;

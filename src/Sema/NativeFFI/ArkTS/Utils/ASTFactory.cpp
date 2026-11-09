@@ -15,45 +15,52 @@ using namespace Cangjie;
 using namespace Cangjie::AST;
 namespace Cangjie::Native::FFI::ArkTS {
 // Before: @ArkTS public func run(): Unit { ... } is an ordinary source entry.
-// After: a callback source template saves/restores the JSContext around a call
-// to that entry, plus a variable registering the callback with JSModule.
+// After: a callback source template saves/restores the ark_interop.JSContext
+// around a call to that entry, plus a variable registering the callback with
+// ark_interop.JSModule.
+// The interop types are written as package-qualified names, so the file needs
+// the compiler-injected `import ohos.ark_interop` (bound as `ark_interop`) and
+// `import cj_arkts_context_v1`; no user import of the interop surface is
+// required and no short name can be captured by a same-named user declaration.
 // This function returns text only; CreateEntry binds the original declaration
 // and exported name after parsing. The source entry itself remains unchanged.
 // Source example:
-//   import arkts.lang.*
 //   @ArkTS public func run(): Unit { println(42) }
-// Generated declarations (SDK names are supplied by the source imports):
-//   func __cj_arkts_entry_0(__cj_arkts_ctx: JSContext,
-//       _: JSCallInfo): JSValue {
-//       let previous = __cj_arkts_enter(__cj_arkts_ctx)
+// Generated declarations:
+//   func __cj_arkts_entry_0(__cj_arkts_ctx: ark_interop.JSContext,
+//       _: ark_interop.JSCallInfo): ark_interop.JSValue {
+//       let previous = cj_arkts_context_v1.__cj_arkts_enter(__cj_arkts_ctx)
 //       try { run(); return __cj_arkts_ctx.undefined().toJSValue() }
-//       finally { __cj_arkts_restore(previous) }
+//       finally { cj_arkts_context_v1.__cj_arkts_restore(previous) }
 //   }
-//   let __cj_arkts_registration_0 = JSModule.registerFunc(
+//   let __cj_arkts_registration_0 = ark_interop.JSModule.registerFunc(
 //       "run", __cj_arkts_entry_0)
 // Generated CJ pseudocode (prefix/suffix are compiler-owned names):
-//   func entry(ctx: JSContext, _: JSCallInfo): JSValue {
-//       previous = enter(ctx)
+//   func entry(ctx: ark_interop.JSContext,
+//       _: ark_interop.JSCallInfo): ark_interop.JSValue {
+//       previous = cj_arkts_context_v1.__cj_arkts_enter(ctx)
 //       try { original(); return ctx.undefined().toJSValue() }
-//       finally { restore(previous) }
+//       finally { cj_arkts_context_v1.__cj_arkts_restore(previous) }
 //   }
-//   let registration = JSModule.registerFunc("<actual entry name>", entry)
+//   let registration = ark_interop.JSModule.registerFunc("<actual entry name>", entry)
 // Parse the skeleton first; rebind original's RefExpr and the registration
 // string literal to the source declaration. User text never becomes CJ syntax.
 std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix)
 {
     return "func " + prefix + "entry_" + suffix + "(\n    " + prefix +
-        "ctx: JSContext,\n    _: JSCallInfo\n): JSValue {\n    let " + prefix + "previous = __cj_arkts_enter(" +
-        prefix + "ctx)\n    try {\n        " + prefix + "original()\n        return " + prefix +
-        "ctx.undefined().toJSValue()\n    } finally {\n        " + "__cj_arkts_restore(" + prefix +
+        "ctx: ark_interop.JSContext,\n    _: ark_interop.JSCallInfo\n): ark_interop.JSValue {\n    let " + prefix +
+        "previous = cj_arkts_context_v1.__cj_arkts_enter(" + prefix +
+        "ctx)\n    try {\n        " + prefix + "original()\n        return " + prefix +
+        "ctx.undefined().toJSValue()\n    } finally {\n        " +
+        "cj_arkts_context_v1.__cj_arkts_restore(" + prefix +
         "previous)\n    }\n}\n\nlet " + prefix + "registration_" + suffix +
-        " = JSModule.registerFunc(\"__entry_name__\", " + prefix + "entry_" + suffix + ")\n";
+        " = ark_interop.JSModule.registerFunc(\"__entry_name__\", " + prefix + "entry_" + suffix + ")\n";
 }
 } // namespace Cangjie::Native::FFI::ArkTS
 
 // Before AST: File.decls = [FuncDecl(run, original body), ...].
 // After result: [FuncDecl(callback, context guard + call(run)),
-//                VarDecl(registration, JSModule.registerFunc("run", callback))].
+//                VarDecl(registration, ark_interop.JSModule.registerFunc("run", callback))].
 // The returned nodes are not yet appended to File.decls. Their curFile/ranges
 // refer to run's source file, call(run).ref.target is run, and both roots carry
 // COMPILER_ADD. PrepareTypeCheck attaches and mangles them; run is not rewritten.

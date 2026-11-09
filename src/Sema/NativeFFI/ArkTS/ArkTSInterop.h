@@ -7,15 +7,23 @@
 #ifndef CANGJIE_PRIVATE_NATIVE_FFI_ARKTS_INTEROP_H
 #define CANGJIE_PRIVATE_NATIVE_FFI_ARKTS_INTEROP_H
 
+#include "FunctionSource.h"
 #include "cangjie/AST/Node.h"
 
 namespace Cangjie {
 class DiagnosticEngine;
 class SourceManager;
+class ImportManager;
 namespace Native::FFI::ArkTS {
-void PrepareTypeCheck(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager);
+// The real compiler path passes the import manager so an @ArkTS entry whose
+// interop packages are not visible is refused once, before the generated
+// callback signature can surface undeclared-type noise. Unit tests that call
+// this entry point without an import manager (nullptr) keep the unconditional
+// generation behaviour they exercise.
+void PrepareTypeCheck(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
+    ImportManager* importManager = nullptr);
 
-std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix = "__cj_arkts_");
+std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix = ARKTS_GENERATED_PREFIX);
 } // namespace Native::FFI::ArkTS
 } // namespace Cangjie
 #endif

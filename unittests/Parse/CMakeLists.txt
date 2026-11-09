@@ -74,5 +74,10 @@ target_link_libraries(
 add_test(NAME ParseOuterInterfaceTest COMMAND ParseOuterInterfaceTest)
 
 add_executable(ArkTSAnnotationTest ArkTSAnnotationTest.cpp)
-target_link_libraries(ArkTSAnnotationTest cangjie-lsp GTest::gtest GTest::gtest_main)
+target_link_libraries(ArkTSAnnotationTest cangjie-lsp ${CMAKE_DL_LIBS} boundscheck-static GTest::gtest GTest::gtest_main)
+target_include_directories(ArkTSAnnotationTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
 add_test(NAME ArkTSAnnotationTest COMMAND ArkTSAnnotationTest)
+
+add_executable(ArkTSTypeMappingTest ArkTSTypeMappingTest.cpp)
+target_link_libraries(ArkTSTypeMappingTest cangjie-lsp ${CMAKE_DL_LIBS} boundscheck-static GTest::gtest GTest::gtest_main)
+add_test(NAME ArkTSTypeMappingTest COMMAND ArkTSTypeMappingTest)

@@ -383,6 +383,13 @@ ERROR(parse_unexpected_modal_type, "unexpected modal type here")
 ERROR(parse_unexpected_this_param, "unexpected this param on non member function or static function")
 ERROR(parse_local_mode_disabled, "local mode is disabled",
     "compile with the '--experimental --enable-local-mode' option to enable it")
+// A function that carries @RestParam must not declare named parameters at
+// all - a different error from a misplaced rest annotation, so it keeps its
+// own message instead of the generic unexpected-annotation form.
+ERROR(parse_rest_param_function_has_named_params, "a function with a rest parameter must not declare named parameters",
+    "rest parameter declared here", {
+    "a named parameter is declared here"
+})
 
 // Don't add any diag after this kind.
 ERROR(parse_diag_end, "")

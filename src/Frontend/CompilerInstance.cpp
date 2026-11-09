@@ -1137,6 +1137,12 @@ bool CompilerInstance::ImportPackages()
 
     if (invocation.globalOptions.scanDepPkg) {
         importManager->UpdateSearchPath(cangjieModules);
+        // The scan-dependency path reports the dependencies of the source
+        // files without building the import index. A file that uses the
+        // @ArkTS capability still needs the compiler-injected interop package
+        // imports recorded here; the injection is idempotent and the normal
+        // path performs it inside BuildIndex.
+        importManager->AddArkTSInteropImports(pkgs, &GetSourceManager());
         if (!invocation.globalOptions.inputCjoFile.empty()) {
             depPackageInfo = importManager->GeneratePkgDepInfoByCjo(invocation.globalOptions.inputCjoFile);
         } else {

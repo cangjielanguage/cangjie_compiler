@@ -8,6 +8,9 @@
 
 #include <algorithm>
 #include <iterator>
+#include <set>
+#include <tuple>
+#include <unordered_map>
 
 #include "../FunctionSource.h"
 #include "../Utils/ASTFactory.h"
@@ -19,29 +22,124 @@ using namespace Cangjie::AST;
 using namespace Cangjie::Native::FFI::ArkTS;
 
 namespace {
-// Before: generated RefExpr/RefType("__cj_arkts_current"/"JSContext"/...) has
-// no declaration target; a same-named business declaration may be in scope.
-// After: target, candidate targets and Ty identify the expected declaration in
-// this file's visible import closure. Already-bound source references stay intact.
-// Missing/invalid support reports an error and returns false; no import is added.
-// Resolve support names only from this file's normal visible imports. Binding
-// both identity and type prevents a same-named source declaration from replacing
-// the generated call. Missing dependencies remain compilation errors.
-bool BindSupportReferences(Decl& owner, Node& root, ImportManager& imports, DiagnosticEngine& diag)
+// Whether a 'module' option value is a relative or OS-absolute file path
+// spelling the compiler refuses. A module specifier is otherwise accepted
+// verbatim: a system module ("@ohos.util", "@scope/name"), a project module
+// ("utils"), a project ETS source path ("entry/src/main/ets/EntryFixture")
+// and the tolerated separator shapes "a/", "a//b", "a\b" all pass; resolving
+// them is the runtime module loader's job. Only these shapes are rejected,
+// with both separators treated alike on every host because the ArkTS project
+// may be built on Windows:
+//   "/x", "\\server\share"        OS-absolute (POSIX root / UNC)
+//   "C:\x", "C:/x"                drive-absolute
+//   "./x", ".\x", "../x", "..\x"  dot-relative
+// A drive-relative spelling ("C:x", no separator after the colon) is not
+// matched: there is no directory separator, so it stays a plain specifier
+// and its resolution failure is left to the runtime like any unknown module.
+bool ArkTSModulePathLike(const std::string& module)
 {
-    static const std::unordered_map<std::string, std::string> packages{
-        {"__cj_arkts_enter", "cj_arkts_context_v1"}, {"__cj_arkts_current", "cj_arkts_context_v1"},
-        {"__cj_arkts_restore", "cj_arkts_context_v1"}, {"BigInt", "std.math.numeric"},
-        {"JSContext", "ohos.ark_interop"}, {"JSModule", "ohos.ark_interop"}, {"Exception", "std.core"}};
+    auto isSeparator = [](char c) { return c == '/' || c == '\\'; };
+    if (module.empty()) {
+        return false;
+    }
+    if (isSeparator(module.front())) {
+        return true;
+    }
+    const bool drive = module.size() > 2 && module[1] == ':' && isSeparator(module[2]) &&
+        ((module[0] >= 'A' && module[0] <= 'Z') || (module[0] >= 'a' && module[0] <= 'z'));
+    if (drive) {
+        return true;
+    }
+    if (module.front() != '.') {
+        return false;
+    }
+    if (module.size() > 1 && isSeparator(module[1])) {
+        return true;
+    }
+    return module.size() > 2 && module[1] == '.' && isSeparator(module[2]);
+}
+
+// Resolve the generated context/BigInt/Exception/Option references to the
+// declarations visible through this file's imports. A same-named business
+// declaration must not capture them, and a missing import stays a compilation
+// error instead of an unresolved reference inside generated code.
+// The interop surface itself is never written as a short name: generated code
+// spells it as ark_interop.JSContext / cj_arkts_context_v1.__cj_arkts_current,
+// so only the package-qualified base references are pinned here, to the
+// PackageDecl bound by the compiler-injected package imports. The remaining
+// short names are the packages the application imports itself (arkts.lang and
+// std.core); Option is pinned to std.core because its constructors are enum
+// members, so generated code spells them as Option.Some/Option.None and only
+// the enum name is resolved here.
+// generatedSupport is true for a COMPILER_ADD entry callback/registration: the
+// owner is an internal symbol, so the diagnostic names the user entry (the
+// generated declarations carry its source range) and stays on that range.
+// @p reportedRanges deduplicates the pair's two declarations so one missing
+// package yields exactly one diagnostic for the user entry.
+bool BindSupportReferences(Decl& owner, Node& root, ImportManager& imports, DiagnosticEngine& diag,
+    std::unordered_map<Ptr<const Node>, Ptr<Decl>>& supportRefs, bool generatedSupport,
+    const std::string& diagnosticName, std::set<std::tuple<Ptr<File>, Position, Position>>* reportedRanges)
+{
+    static const std::unordered_map<std::string, std::string> packages{{"BigInt", "std.math.numeric"},
+        {"Exception", "std.core"}, {"Option", "std.core"}, {"ExternConversionException", "arkts.lang"}};
+    // Base references of the package-qualified generated names; the value is
+    // the full package name the injected import must bind.
+    static const std::unordered_map<std::string, std::string> supportPackages{
+        {ARKTS_INTEROP_PACKAGE, "ohos.ark_interop"},
+        {ARKTS_CONTEXT_ABI_PACKAGE, "cj_arkts_context_v1"}};
     bool valid = true;
+    auto reportMissing = [&]() {
+        if (!valid) {
+            return;
+        }
+        if (generatedSupport && reportedRanges != nullptr &&
+            !reportedRanges->emplace(owner.curFile, owner.begin, owner.end).second) {
+            return; // The entry's other generated declaration already reported it.
+        }
+        const auto name = diagnosticName.empty() ? owner.identifier.Val() : diagnosticName;
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_support_unavailable, owner, name);
+    };
+    // Only committed once every support reference is bound, so a rejected
+    // wrapper (whose generated body is dropped) leaves no stale node keys.
+    std::vector<std::pair<Ptr<Node>, Ptr<Decl>>> bound;
     Walker(&root, [&](Ptr<Node> node) {
         auto expr = DynamicCast<RefExpr*>(node);
         auto type = DynamicCast<RefType*>(node);
         auto ref = expr ? &expr->ref : type ? &type->ref : nullptr;
+        // A reference that already carries a target keeps it: this walker only
+        // supplies declarations for the names the generator left unresolved.
+        // Two kinds of generated references are already bound before this walk:
+        // the wrapper's parameter placeholders (rebound to their FUNC_PARAM in
+        // LowerArkTSFunctions) and the entry callback's call to the source entry
+        // (bound to the user FuncDecl by ASTFactory::CreateEntry). Either may be
+        // named like a support item, so re-resolving by name here would replace
+        // a deliberate binding (an entry named BigInt would be captured by
+        // std.math.numeric.BigInt and the callback's call would break).
         if (!ref || ref->target) {
             return VisitAction::WALK_CHILDREN;
         }
-        auto found = packages.find(ref->identifier.Val());
+        const auto name = ref->identifier.Val();
+        if (auto package = supportPackages.find(name); package != supportPackages.end()) {
+            const auto visible = imports.GetImportedDeclsByName(*owner.curFile, name);
+            auto target = std::find_if(visible.begin(), visible.end(), [&](auto decl) {
+                return decl->astKind == ASTKind::PACKAGE_DECL && decl->fullPackageName == package->second;
+            });
+            if (target == visible.end()) {
+                reportMissing();
+                valid = false;
+            } else {
+                ref->target = *target;
+                ref->targets = {*target};
+                // A package qualifier has no value type; the qualified node
+                // resolves its member through the PackageDecl. Do not set a Ty
+                // here or the restoring re-check would treat the qualifier as a
+                // type name.
+                node->SetTy(TypeManager::GetInvalidTy());
+                bound.emplace_back(node, *target);
+            }
+            return VisitAction::WALK_CHILDREN;
+        }
+        auto found = packages.find(name);
         if (found == packages.end()) {
             return VisitAction::WALK_CHILDREN;
         }
@@ -50,127 +148,419 @@ bool BindSupportReferences(Decl& owner, Node& root, ImportManager& imports, Diag
             return decl->fullPackageName == found->second && decl->identifier == found->first;
         });
         if (target == visible.end() || !Ty::IsTyCorrect((*target)->GetTy())) {
-            if (valid) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_wrapper_unavailable,
-                    owner, "missing imported support declaration '" + found->second + "." + found->first + "'");
-            }
+            reportMissing();
             valid = false;
         } else {
             ref->target = *target;
             ref->targets = {*target};
-            node->SetTy((*target)->GetTy());
+            // A generic type reference keeps its type arguments: presetting the
+            // declaration's own generic type (e.g. Option<T>) would drop the
+            // instantiation and make the generated annotation uninferable.
+            // Only a reference without type arguments takes the declaration
+            // type here; a parameterized one is instantiated by body checking
+            // from the now-bound target.
+            if (!type || type->typeArguments.empty()) {
+                node->SetTy((*target)->GetTy());
+            }
+            bound.emplace_back(node, *target);
         }
         return VisitAction::WALK_CHILDREN;
     }).Walk();
+    if (valid) {
+        for (auto& [node, target] : bound) {
+            supportRefs[node] = target;
+        }
+    }
     return valid;
 }
 } // namespace
 
-// Before AST (after preparation): FuncDecl(echo, ARKTS_FUNCTION_WRAPPER,
-// params=[x: Int32], ret=Int32, FuncBody.body=nullptr), with @ArkTS options.
-// After AST: the same declaration/signature owns a Block equivalent to:
-//   let ctx: JSContext = __cj_arkts_current()
-//   let receiver = ctx.requireArkModule("<effective module>").asObject()
-//   let arg0 = ctx.number(Float64(x)).toJSValue()
-//   let result = receiver.callMethod("<effective foreign name>", [arg0])
-//   return Int32(result.toNumber())
-// Namespace traversal and other scalar conversions follow FunctionSource.cpp.
-// Literal placeholders become AST string values; argument references target the
-// original FuncParam; ReturnExpr.refFuncBody targets the original FuncBody.
-// Support references are bound only to visible imports and generated locals are
-// collected in the parameter scope. No SDK import or source signature is added.
-// Imported packages and already-populated bodies are not lowered again.
-// Lowering/AST rebinding pseudocode:
-//   skip imported packages and declarations not marked for ArkTS lowering
-//   resolve declared aliases to semantic scalar types for body generation
-//   reject unsupported signatures/options before a bodyless wrapper reaches later phases
-//   read literal annotation options; explicit module wins over the declaration package name
-//   split namespace into ordered literal placeholders; choose parameter-disjoint locals
-//   parse the foreign-body skeleton (see FunctionSource.cpp pseudocode)
-//   move its body to the original FuncBody and replace all temporary File refs
-//   bind module/name/namespace LitConstExpr values, and typed parameter RefExpr targets
-//   bind support references to the explicit import closure, preserving source-name hygiene
-//   let normal checking consume the explicit arkts.lang import and
-//   its public re-exports through the ordinary package dependency closure
-//   rebind ReturnExpr to the original FuncBody, collect generated local symbols
-//   in the parameter scope, then restore the collector's previous scope state
+// Lowers every marked top-level @ArkTS foreign FuncDecl (class-like members
+// are deferred): diagnose refusals, generate the wrapper body, parse it back
+// into the FuncBody and rebind placeholders as AST values:
+//   an unsupported/Nothing-carrying position, illegal option or module form,
+//   or a named parameter without a default value is diagnosed, marks the
+//   declaration IS_BROKEN, no wrapper (a Nothing result keeps the never
+//   contract; an external preset type gets the dedicated deferral
+//   diagnostic)
+//   module = the explicit option, else the package name; arkts.lang
+//   without an option takes the GLOBAL receiver (ctx.global); then bind
+//   module/name/namespace literals and parameter references as AST values
+// Before the wrapper loop, the same option-shape rule is applied to every
+// other @ArkTS-carrying declaration in the package (ArkTSDeclOptionsDiagnose),
+// so a class, interface, variable, parameter or entry cannot silently carry an
+// illegal option; wrappers stay owned by the fold below.
+
 void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
 {
     auto& pkg = *ctx.curPackage;
     if (pkg.TestAttr(Attribute::IMPORTED)) {
         return;
     }
+    // The option fold below covers the lowered wrappers; every other
+    // @ArkTS-carrying declaration (class, interface, variable, parameter,
+    // entry) is validated here so an illegal option shape is never silently
+    // accepted just because the declaration has no wrapper.
+    ArkTSDeclOptionsDiagnose(pkg, diag);
     for (auto& file : pkg.files) {
+        // One entry callback/registration pair is one user entry: both carry
+        // its source range, so a missing package is reported once for the pair.
+        std::set<std::tuple<Ptr<File>, Position, Position>> reportedSupportRanges;
         for (auto& decl : file->decls) {
+            // Support entry declarations carry generated bodies, so they are
+            // bound before the wrapper filter skips body-carrying declarations.
             if (decl->TestAttr(Attribute::COMPILER_ADD) &&
-                decl->identifier.Val().rfind("__cj_arkts_", 0) == 0) {
-                BindSupportReferences(*decl, *decl, *ci->importManager, diag);
+                decl->identifier.Val().rfind(ARKTS_GENERATED_PREFIX, 0) == 0) {
+                // The generated declarations share the source entry's range;
+                // resolve the user-facing name from it so a diagnostic never
+                // names the internal symbol.
+                std::string entryName;
+                for (auto& source : file->decls) {
+                    if (source != nullptr && !source->TestAttr(Attribute::COMPILER_ADD) &&
+                        source->begin == decl->begin && source->end == decl->end) {
+                        entryName = source->identifier.Val();
+                        break;
+                    }
+                }
+                if (!BindSupportReferences(*decl, *decl, *ci->importManager, diag, arktsSupportRefs, true, entryName,
+                        &reportedSupportRanges)) {
+                    // The callback cannot compile without its interop packages;
+                    // mark it broken so body checking does not restate the same
+                    // missing declarations as undeclared identifiers.
+                    decl->EnableAttr(Attribute::IS_BROKEN);
+                }
             }
             auto fd = DynamicCast<FuncDecl*>(decl.get());
             if (!fd || !fd->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER) || !fd->funcBody || fd->funcBody->body) {
                 continue;
             }
             auto& fb = *fd->funcBody;
-            auto scalar = [&](Ptr<Type> type) {
+            auto classify = [&](Ptr<Type> type) {
                 if (!type) {
-                    return std::string{};
+                    return ArkTSTypeDesc{};
                 }
                 SetTypeTy(ctx, *type);
-                return ArkTSScalarName(type->GetTy());
+                return ArkTSClassifyType(type->GetTy());
             };
-            auto resultType = scalar(fb.retType.get());
-            std::vector<std::string> types;
+            auto resultType = classify(fb.retType.get());
+            std::vector<ArkTSTypeDesc> types;
             std::vector<Ptr<FuncParam>> params;
-            bool supported = !resultType.empty();
+            // Diagnose unsupported positions here and mark the declaration
+            // broken for every later gate instead of silently skipping the
+            // wrapper. The generatability/Nothing predicates come from
+            // FunctionSource.h, so lowering and the generator can never
+            // drift apart. A Nothing result is the never contract (the
+            // wrapper throws), so only generatability is checked there.
+            if (!ArkTSTypeDescGeneratable(resultType)) {
+                // A return position spelled with an external ArkTS preset
+                // type (std.interop.arkts ArkTSArray<T>, ArkTSString,
+                // ArkTSType) is not a spelling mistake - its mapping is
+                // deferred - so it reports the dedicated deferral diagnostic
+                // instead of the generic unsupported-type error. The routing
+                // helper takes no part in classification: the position still
+                // classifies UNSUPPORTED, the declaration still ends up
+                // broken and no wrapper is generated.
+                auto deferredName = fb.retType ? ArkTSDeferredExternalTypeName(fb.retType->GetTy()) : std::string{};
+                if (!deferredName.empty()) {
+                    auto& deferredAt = fb.retType->begin.IsZero() ? static_cast<Node&>(*fd)
+                                                                  : static_cast<Node&>(*fb.retType);
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred, deferredAt,
+                        deferredName);
+                    fd->EnableAttr(Attribute::IS_BROKEN);
+                    continue;
+                }
+                // Report on the written return type when it carries a
+                // position, else on the whole declaration (the Java
+                // interop fallback); a missing type node only arises from
+                // defensive classification.
+                if (fb.retType && !fb.retType->begin.IsZero()) {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *fb.retType,
+                        Ty::ToString(fb.retType->GetTy()), fd->identifier.Val());
+                } else {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *fd,
+                        std::string(), fd->identifier.Val());
+                }
+                fd->EnableAttr(Attribute::IS_BROKEN);
+                continue;
+            }
+            bool supported = true;
+            // A function with a rest parameter cannot declare named
+            // parameters; the parser has already reported that mix through
+            // parse_rest_param_function_has_named_params, so the named-default
+            // rule below stays silent for this signature. The declaration is
+            // still refused (no wrapper), because the parser rejected it.
+            const bool restParam = ArkTSFuncBodyHasRestParam(fb);
             for (auto& list : fb.paramLists) {
                 for (auto& param : list->params) {
-                    auto type = scalar(param->type.get());
-                    supported = supported && !type.empty() && type != "Nothing";
-                    types.emplace_back(type);
+                    // Every named parameter ('x!:') of an @ArkTS foreign
+                    // declaration must carry a default value (user rule,
+                    // 2026-11-05). The wrapper cannot tell an omitted named
+                    // argument from an explicitly passed value, so
+                    // `x!: Option<T>` without `= None` - and any other named
+                    // parameter without a default - is rejected here. This
+                    // walker only visits declarations the ArkTS lowering
+                    // owns, so ordinary Cangjie named parameters are
+                    // unaffected. A malformed parameter, or one belonging to
+                    // the already-rejected rest+named shape, is not reported
+                    // by this rule a second time.
+                    if (param->isNamedParam && param->assignment == nullptr) {
+                        if (!restParam && !ArkTSParamIsBroken(*param)) {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_named_param_without_default,
+                                *param, param->identifier.Val(), fd->identifier.Val());
+                        }
+                        supported = false;
+                    }
+                    auto desc = classify(param->type.get());
+                    if (!ArkTSTypeDescGeneratable(desc) || ArkTSTypeDescContainsNothing(desc)) {
+                        auto& position = param->type ? static_cast<Node&>(*param->type) : static_cast<Node&>(*param);
+                        // A parameter spelled with an external ArkTS
+                        // preset type (std.interop.arkts ArkTSArray<T>,
+                        // ArkTSString, ArkTSType) reports the dedicated
+                        // deferral diagnostic; the routing helper takes no
+                        // part in classification (the position still
+                        // classifies UNSUPPORTED). Every other unsupported
+                        // or Nothing-carrying parameter keeps the generic
+                        // message below.
+                        auto deferredName =
+                            param->type ? ArkTSDeferredExternalTypeName(param->type->GetTy()) : std::string{};
+                        if (!deferredName.empty()) {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred,
+                                position, deferredName);
+                        } else {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_param_type_unsupported,
+                                position, param->identifier.Val(), fd->identifier.Val(),
+                                param->type ? Ty::ToString(param->type->GetTy()) : std::string());
+                        }
+                        supported = false;
+                    }
+                    types.emplace_back(std::move(desc));
                     params.emplace_back(param.get());
                 }
             }
-            std::unordered_map<std::string, std::string> options;
             if (!supported) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_wrapper_unavailable,
-                    *fd, "unsupported parameter or return type");
+                fd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }
-            if (!ArkTSFunctionOptions(*fd, options)) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_wrapper_unavailable,
-                    *fd, "invalid annotation options");
+            std::unordered_map<std::string, std::string> options;
+            // Every illegal option shape - a non-literal value, an unknown
+            // name, a name repeated inside one @ArkTS layer, an empty
+            // namespace segment - is reported here, once per declaration;
+            // the option fold itself is the single source of that rule. A
+            // repeated key gets its own message: the key and value are legal,
+            // only the repetition is not. An ill-formed namespace also has its
+            // own message and points at the namespace literal.
+            ArkTSOptionStatus optionStatus;
+            if (!ArkTSFunctionOptions(*fd, options, &optionStatus)) {
+                if (optionStatus.problem == ArkTSOptionProblem::DUPLICATE) {
+                    auto& at = optionStatus.at ? *optionStatus.at : static_cast<Node&>(*fd);
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_option_duplicated, at,
+                        optionStatus.option, fd->identifier.Val());
+                } else if (optionStatus.problem == ArkTSOptionProblem::ILL_FORMED_NAMESPACE) {
+                    auto& at = optionStatus.at ? *optionStatus.at : static_cast<Node&>(*fd);
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_namespace_invalid, at,
+                        options.count("namespace") ? options.at("namespace") : std::string(), fd->identifier.Val());
+                } else {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_option_invalid, *fd,
+                        fd->identifier.Val());
+                }
+                fd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }
-            const auto module =
-                options.count("module") ? options.at("module") : ArkTSDefaultModule(pkg.fullPackageName);
+            // The explicit-module path check reports on the module option's
+            // own literal when it is attached to this declaration, else on
+            // the whole declaration (the fallback for a merged option).
+            Ptr<Node> moduleNode = fd;
+            if (options.count("module") != 0) {
+                for (auto& annotation : fd->annotations) {
+                    if (annotation->kind != AnnotationKind::ARKTS) {
+                        continue;
+                    }
+                    for (auto& arg : annotation->args) {
+                        if (arg->name.Val() == "module") {
+                            moduleNode = arg->expr.get();
+                        }
+                    }
+                }
+            }
+            // An explicitly written empty value (only whitespace counts as
+            // empty) would flow into requireArkModule(""), callMethod("") or
+            // an empty namespace segment and only fail at run time; reject it
+            // at compile time. The scan covers every layer attached to this
+            // declaration, including inherited block defaults, and reports at
+            // the option's own literal. A non-literal or unknown option was
+            // already rejected by the fold above, so every argument here is a
+            // known string key. The legal-specifier whitelist lives in the
+            // interop library and changes with its versions, so only the
+            // empty spelling is rejected.
+            Ptr<Node> emptyAt = nullptr;
+            DiagKindRefactor emptyKind = DiagKindRefactor::sema_arkts_foreign_module_empty;
+            for (auto& annotation : fd->annotations) {
+                if (annotation->kind != AnnotationKind::ARKTS) {
+                    continue;
+                }
+                for (auto& arg : annotation->args) {
+                    auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
+                    if (!literal || literal->kind != LitConstKind::STRING ||
+                        !ArkTSOptionValueEmpty(literal->stringValue)) {
+                        continue;
+                    }
+                    emptyAt = arg->expr.get();
+                    if (arg->name.Val() == "foreignName") {
+                        emptyKind = DiagKindRefactor::sema_arkts_foreign_name_empty;
+                    } else if (arg->name.Val() == "namespace") {
+                        emptyKind = DiagKindRefactor::sema_arkts_foreign_namespace_empty;
+                    }
+                    break;
+                }
+                if (emptyAt) {
+                    break;
+                }
+            }
+            if (emptyAt) {
+                diag.DiagnoseRefactor(emptyKind, *emptyAt, fd->identifier.Val());
+                fd->EnableAttr(Attribute::IS_BROKEN);
+                continue;
+            }
+            // An explicit module is a module specifier: a system module name
+            // ("@..."), a project module name, or a project ETS source path
+            // such as "entry/src/main/ets/Foo". Any separator shape that is
+            // not a leading relative or absolute spelling ("a/", "a//b",
+            // "a\b") passes. Only "./"/"../" starts, OS-absolute paths,
+            // drive-absolute paths and UNC paths are rejected. Both
+            // separators are checked on every host, because the ArkTS project
+            // may be built on Windows. Existence checking would need the
+            // ArkTS project root, which is not a compiler input, so only the
+            // format is rejected here; existence and named-module
+            // resolvability stay with the runtime module loading.
+            if (options.count("module") != 0) {
+                const std::string& moduleValue = options.at("module");
+                if (ArkTSModulePathLike(moduleValue)) {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_module_path_invalid, *moduleNode,
+                        moduleValue, fd->identifier.Val());
+                    fd->EnableAttr(Attribute::IS_BROKEN);
+                    continue;
+                }
+            }
+            // The module name is the explicit option, or - when omitted -
+            // the Cangjie package name verbatim (ArkTSDefaultModule). The
+            // one receiver exception: the package arkts.lang is the TS
+            // preset (its declarations are TypeScript builtins, not
+            // exports of a real ArkTS runtime module), so a declaration
+            // there without an explicit module option takes ctx.global
+            // as the receiver instead of requireArkModule("arkts.lang");
+            // an explicit option always selects the module form.
+            std::string module;
+            if (options.count("module")) {
+                module = options.at("module");
+            } else {
+                module = ArkTSDefaultModule(pkg.fullPackageName);
+            }
+            // The only way to an empty module name now is an empty package
+            // name (a degenerate compilation unit; an explicitly empty
+            // module option was already rejected above): there is no module
+            // to require, so the wrapper is refused through the generic
+            // unsupported-signature diagnostic.
             if (module.empty()) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_wrapper_unavailable,
-                    *fd, "empty module name");
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor::sema_arkts_foreign_unsupported_signature, *fd, fd->identifier.Val());
+                fd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }
-            std::unordered_map<std::string, std::string> literals{{"__module__", module},
-                {"__name__", options.count("foreignName") ? options.at("foreignName") : fd->identifier.Val()}};
+            ArkTSReceiverKind receiver = ArkTSReceiverKind::MODULE;
+            if (options.count("module") == 0 && (module == "arkts.lang" || module.rfind("arkts.lang.", 0) == 0)) {
+                receiver = ArkTSReceiverKind::GLOBAL;
+            }
+            std::unordered_map<std::string, std::string> literals{{ARKTS_PLACEHOLDER_NAME,
+                options.count("foreignName") ? options.at("foreignName") : fd->identifier.Val()},
+                {ARKTS_PLACEHOLDER_MODULE, module}};
             auto ns = options.count("namespace") ? options.at("namespace") : "";
             size_t depth = 0;
             size_t start = 0;
             while (start < ns.size()) {
                 auto end = ns.find('.', start);
-                literals["__namespace_" + std::to_string(depth++) + "__"] =
+                literals[ARKTS_PLACEHOLDER_NAMESPACE + std::to_string(depth++) + "__"] =
                     ns.substr(start, end == std::string::npos ? end : end - start);
                 if (end == std::string::npos) {
                     break;
                 }
                 start = end + 1;
             }
-            auto code = ArkTSForeignWrapperSource(types, resultType, depth, ArkTSForeignLocalPrefix(params));
-            Native::FFI::ArkTS::ASTFactory factory(diag, ci->GetSourceManager());
-            const auto errorsBefore = diag.GetErrorCount();
-            fb.body = factory.CreateForeignBody(*fd, code);
-            if (!fb.body) {
-                if (diag.GetErrorCount() == errorsBefore) {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_wrapper_unavailable,
-                        *fd, "failed to construct wrapper body");
+            // @RestParam is a parse-time rule on the first parameter list only
+            // (ArkTSParserImpl::CheckRestParamPlacementImpl). Cangjie itself
+            // accepts multiple parameter lists, but the ArkTS proposal only
+            // gives rest parameters a meaning in the first list, so lowering
+            // scans only that list; its positions are the prefix of the
+            // flattened 'params' vector. A rest annotation written on a later
+            // list is outside the proposal's contract and stays an ordinary
+            // parameter: the generator's behaviour is unchanged and no new
+            // user-visible rejection is introduced here.
+            size_t restIndex = ARKTS_NO_REST;
+            if (!fb.paramLists.empty()) {
+                const auto& firstList = fb.paramLists.front()->params;
+                for (size_t i = 0; i < firstList.size(); ++i) {
+                    for (auto& annotation : firstList[i]->annotations) {
+                        if (annotation->kind == AnnotationKind::REST_PARAM && !firstList[i]->isNamedParam) {
+                            restIndex = i;
+                        }
+                    }
                 }
+            }
+            // The @RestParam position itself must carry Array<T'> (its
+            // element was already validated by the parameter loop above).
+            // An ArkTSArray<T'> rest position never reaches this check:
+            // the parameter loop above classifies it UNSUPPORTED and
+            // already reported the dedicated deferral diagnostic there.
+            if (restIndex != ARKTS_NO_REST &&
+                types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_rest_type_unsupported,
+                    *params[restIndex]->type, params[restIndex]->identifier.Val(), fd->identifier.Val(),
+                    Ty::ToString(params[restIndex]->type->GetTy()));
+                fd->EnableAttr(Attribute::IS_BROKEN);
+                continue;
+            }
+            // ArkTS optional parameters are the trailing named parameters
+            // that carry a default value (`x!: Option<T> = None`, design
+            // §4.1.2): only such a parameter may be omitted by the caller.
+            // The named-default rule above already rejected every named
+            // parameter without a default, so the assignment test here only
+            // keeps the gate tied to the written spelling; a positional
+            // Option (the required nullable argument of the with-rest/open
+            // form) is still always forwarded, forwarding None as
+            // ctx.undefined().
+            size_t optionalStart = params.size();
+            while (optionalStart > 0 && params[optionalStart - 1]->isNamedParam &&
+                params[optionalStart - 1]->assignment != nullptr &&
+                types[optionalStart - 1].kind == ArkTSTypeDesc::Kind::OPTIONAL) {
+                --optionalStart;
+            }
+            auto code = restIndex == ARKTS_NO_REST
+                            ? ArkTSForeignWrapperSource(types, resultType, depth, ArkTSForeignLocalPrefix(params),
+                                receiver, optionalStart)
+                            : ArkTSForeignWrapperSource(types, resultType, depth, ArkTSForeignLocalPrefix(params),
+                                restIndex, receiver, optionalStart);
+            // A generator refusal must never silently drop the wrapper.
+            // The remaining refusals are rest placements the parse checks
+            // already reject (kept here as defense in depth in case a
+            // broken parse ever slips such a signature through) and
+            // hand-built descriptions; every case with a precise message
+            // was already rejected above, so the message here stays generic
+            // and carries no internal reason. The declaration is marked
+            // broken like every other rejected signature and no wrapper is
+            // produced.
+            if (code.empty()) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor::sema_arkts_foreign_unsupported_signature, *fd, fd->identifier.Val());
+                fd->EnableAttr(Attribute::IS_BROKEN);
+                continue;
+            }
+            Native::FFI::ArkTS::ASTFactory factory(diag, ci->GetSourceManager());
+            fb.body = factory.CreateForeignBody(*fd, code);
+            // An empty body here means the generated skeleton itself failed
+            // to parse: an internal error in the wrapper emitter, not a
+            // user-signature problem (every user-reachable refusal was
+            // already diagnosed above), and the skeleton parser has already
+            // reported its own diagnostics, so nothing is added here.
+            if (!fb.body) {
                 continue;
             }
             Walker(fb.body.get(), [&](Ptr<Node> node) {
@@ -183,7 +573,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 if (auto ref = DynamicCast<RefExpr*>(node)) {
                     bool argument = false;
                     for (size_t i = 0; i < params.size(); ++i) {
-                        if (ref->ref.identifier == "__argument_" + std::to_string(i)) {
+                        if (ref->ref.identifier == ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(i)) {
                             ref->ref.identifier = params[i]->identifier;
                             ref->ref.target = params[i];
                             ref->SetTy(params[i]->type->GetTy());
@@ -201,7 +591,8 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 }
                 return VisitAction::WALK_CHILDREN;
             }).Walk();
-            if (!BindSupportReferences(*fd, *fb.body, *ci->importManager, diag)) {
+            if (!BindSupportReferences(*fd, *fb.body, *ci->importManager, diag, arktsSupportRefs, false,
+                    fd->identifier.Val(), nullptr)) {
                 fb.body.reset();
                 fd->EnableAttr(Attribute::IS_BROKEN);
                 fb.EnableAttr(Attribute::IS_BROKEN);

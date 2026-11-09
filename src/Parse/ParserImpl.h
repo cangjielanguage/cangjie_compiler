@@ -831,8 +831,13 @@ private:
         std::vector<OwnedPtr<AST::Annotation>>& annos, ScopeKind scopeKind = ScopeKind::UNKNOWN_SCOPE);
     void CheckAnnotationAnno(PtrVector<AST::Annotation>& annos, std::set<AST::Modifier> modifiers);
     void CheckAnnotationAnno(PtrVector<AST::Annotation>& annos, const OwnedPtr<AST::Decl>& decl);
-    std::set<AST::Attribute> CheckDeclModifiers(
-        const std::set<AST::Modifier>& modifiers, ScopeKind scopeKind, DefKind defKind);
+    // The trailing flag restricts the @ArkTS relaxation: it is true only for
+    // declarations carrying the @ArkTS annotation (computed by the
+    // class/interface handlers), and makes GetModifierAttrs skip exactly the
+    // access-modifier x FOREIGN conflict pair. The default keeps every other
+    // caller unchanged.
+    std::set<AST::Attribute> CheckDeclModifiers(const std::set<AST::Modifier>& modifiers, ScopeKind scopeKind,
+        DefKind defKind, bool arktsAnnotated = false);
     AST::Attribute GetModifierAttr(const OwnedPtr<AST::Modifier>& modifier, AST::ASTKind kind) const;
     void SetDeclBeginPos(AST::Decl& decl) const;
     void CheckFuncBody(ScopeKind scopeKind, AST::FuncDecl& decl);
@@ -859,6 +864,11 @@ private:
         const AST::Annotation& anno, const Position& onPos, const std::string& annoStr, const std::string& onStr);
     void DiagUnexpectedAnnoOnKind(
         const AST::Annotation& anno, const Position& onPos, const std::string& annoStr, AST::ASTKind kind);
+    // A function carrying @RestParam must not declare named parameters; the
+    // dedicated parse diagnostic reports the rest annotation as the primary
+    // range and marks the offending named parameter as the note. Defined in
+    // NativeFFI/ArkTS/ParserDiag.cpp with the ArkTS rest rules it serves.
+    void DiagRestParamFunctionHasNamedParams(const AST::Annotation& anno, const AST::FuncParam& namedParam);
     void DiagUnexpectedWhenON(PtrVector<AST::Annotation>& annos);
     void DiagUnexpectedDeclInScope(ScopeKind sk);
     void DiagExpectedMoreFieldInTuplePattern();
@@ -1009,8 +1019,9 @@ private:
         std::vector<OwnedPtr<AST::Annotation>> annos = {});
     OwnedPtr<AST::FuncArg> ParseFuncArg();
     OwnedPtr<AST::FuncArg> ParseAnnotationArgument();
-    std::set<AST::Attribute> GetModifierAttrs(
-        DefKind defKind, ScopeKind scopeKind, const std::vector<Ptr<const AST::Modifier>>& modifiersVec);
+    // See CheckDeclModifiers for the meaning of the trailing @ArkTS gate flag.
+    std::set<AST::Attribute> GetModifierAttrs(DefKind defKind, ScopeKind scopeKind,
+        const std::vector<Ptr<const AST::Modifier>>& modifiersVec, bool arktsAnnotated = false);
     void ReportModifierWarning(
         DefKind defKind, ScopeKind scopeKind, const std::vector<Ptr<const AST::Modifier>>& modifiers);
     void ParseTypeAndExpr(Ptr<AST::VarDeclAbstract> const ret);

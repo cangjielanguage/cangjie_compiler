@@ -12,6 +12,8 @@
 
 #include "FFIParserImpl.h"
 
+#include <iterator>
+
 #include "../ParserImpl.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
@@ -86,18 +88,14 @@ void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos)
     }
 }
 
-// ArkTS branch, before -> after: keep parsed annotation/argument nodes intact
-// and diagnose duplicate option names via CheckAnnotation. Inherited and member
-// layers are composed separately by ParseInheritedAnnotations, not by this check.
 void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const
 {
+    // @ArkTS option rules (unknown name, non-literal value, a name repeated
+    // inside one layer, namespace shape) are diagnosed once by the Sema option
+    // fold, so the parser adds no check for that kind.
     for (auto& it : annos) {
         auto& anno = *it;
         switch (it->kind) {
-            case AnnotationKind::ARKTS: {
-                arkTS.CheckAnnotation(anno);
-                break;
-            }
             case AnnotationKind::JAVA_MIRROR:
             case AnnotationKind::JAVA_IMPL: {
                 jp.CheckAnnotation(anno);
@@ -141,7 +139,12 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
                 op.CheckAnnotation(anno, scopeKind);
                 break;
             }
-            default: continue;
+            case AnnotationKind::REST_PARAM: {
+                arkTS.CheckAnnotation(anno);
+                break;
+            }
+            default:
+                continue;
         }
     }
 
@@ -283,15 +286,26 @@ void FFIParserImpl::CheckClassLikeSignature(AST::ClassLikeDecl& decl, const PtrV
     }
 }
 
-void FFIParserImpl::CheckFuncSignature(AST::FuncDecl& decl, const PtrVector<Annotation>& annos) const
+void FFIParserImpl::CheckFuncSignature(
+    AST::FuncDecl& decl, const PtrVector<Annotation>& annos, ScopeKind scopeKind) const
 {
+    // Signature-level checks stay in the per-language implementations; the
+    // shared entry only routes to them.
+    // The @RestParam rules are ArkTS-specific, so the call is gated on the
+    // annotation being present: a signature without it keeps its own
+    // language's handling, and one that carries it is accepted or rejected by
+    // the ArkTS implementation.
+    if (arkTS.CarriesRestParam(decl.funcBody.get())) {
+        arkTS.CheckRestParamPlacement(decl, annos, scopeKind);
+    }
     for (auto& anno : annos) {
         switch (anno->kind) {
             case AnnotationKind::OBJ_C_MIRROR:
             case AnnotationKind::OBJ_C:
                 op.CheckMirrorSignature(decl, annos);
                 break;
-            default: break;
+            default:
+                break;
         }
     }
 }

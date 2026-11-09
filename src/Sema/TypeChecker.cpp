@@ -2133,7 +2133,7 @@ void TypeChecker::TypeCheckerImpl::PrepareTypeCheck(ASTContext& ctx, Package& pk
     Utils::ProfileRecorder::Start("PrepareTypeCheck", "InteropPrepare");
     Cangjie::Native::FFI::Java::PrepareTypeCheck(pkg, importManager, typeManager);
     Interop::ObjC::PrepareTypeCheck(pkg, importManager, typeManager);
-    Native::FFI::ArkTS::PrepareTypeCheck(pkg, diag, ci->GetSourceManager());
+    Native::FFI::ArkTS::PrepareTypeCheck(pkg, diag, ci->GetSourceManager(), &importManager);
     Utils::ProfileRecorder::Stop("PrepareTypeCheck", "InteropPrepare");
 #endif
 
@@ -2639,10 +2639,22 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
     };
     for (auto& fp : fd->funcBody->paramLists[0]->params) {
         if (fp && fp->assignment && !fp->TestAttr(Attribute::HAS_INITIAL)) {
-            if (fd->op != TokenKind::ILLEGAL || fd->TestAttr(Attribute::OPEN) || fd->TestAttr(Attribute::ABSTRACT) ||
+            // Members of an @ArkTS foreign class/interface have no body by design and still carry
+            // the ArkTS optional-parameter spelling (`x!: Option<T> = None`). The default is
+            // mapping metadata for those declarations, not an abstract-function default.
+            bool arktsForeignBodylessMember = fd->funcBody && !fd->funcBody->body && fd->outerDecl != nullptr &&
+                fd->outerDecl->HasAnno(AnnotationKind::ARKTS) && fd->outerDecl->TestAttr(Attribute::FOREIGN);
+            if (fd->op != TokenKind::ILLEGAL || fd->TestAttr(Attribute::OPEN) ||
+                (fd->TestAttr(Attribute::ABSTRACT) && !arktsForeignBodylessMember) ||
                 fd->TestAttr(Attribute::DEFAULT)) {
                 DiagCannotHaveDefaultParam(diag, *fd, *fp);
                 return;
+            }
+            if (arktsForeignBodylessMember) {
+                // The default on a bodyless @ArkTS foreign member is mapping metadata only;
+                // it has no Cangjie body to call, so no default-parameter function is built.
+                funcParams.push_back(fp.get());
+                continue;
             }
             fp->desugarDecl = MakeDefaultParamFunction(*fp, *fd, funcParams);
             // There may be nested functions inside default value function.

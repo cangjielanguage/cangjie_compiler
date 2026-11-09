@@ -1919,7 +1919,21 @@ void TypeChecker::TypeCheckerImpl::CheckReturnAndJump(const ASTContext& ctx)
                 re->SetTy({TypeManager::GetInvalidTy()});
                 (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_invalid_return_in_static_init, *sym->node);
             } else {
-                re->refFuncBody = refFuncBody;
+                // A default-value desugar function of an @ArkTS foreign wrapper owns its return
+                // expression: the value is checked against the parameter type, never the
+                // wrapper's return type. The wrapper body is generated after the symbol table
+                // was built, so its desugar function shares the wrapper's scope gate and
+                // resolving the owner from the scope name would walk out to the wrapper. Every
+                // other declaration, in every language, keeps the rebinding below.
+                // ARKTS_FUNCTION_WRAPPER is the attribute PrepareTypeCheck sets on the wrapper
+                // declaration whose body LowerArkTSFunctions generates.
+                bool arktsWrapperDesugarReturn = re->refFuncBody && re->refFuncBody->funcDecl &&
+                    re->refFuncBody->funcDecl->TestAttr(Attribute::HAS_INITIAL) &&
+                    re->refFuncBody->funcDecl->ownerFunc &&
+                    re->refFuncBody->funcDecl->ownerFunc->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
+                if (!arktsWrapperDesugarReturn) {
+                    re->refFuncBody = refFuncBody;
+                }
             }
         } else {
             re->SetTy({TypeManager::GetInvalidTy()});
@@ -2269,6 +2283,9 @@ void TypeChecker::TypeCheckerImpl::CollectDeclsWithMember(Ptr<Package> pkg, ASTC
 void TypeChecker::TypeCheckerImpl::PreCheck(const std::vector<Ptr<ASTContext>>& contexts)
 {
     Utils::ProfileRecorder recorder("Pre TypeCheck", "PreCheck");
+    // Support bindings from a previous compilation (incremental/LSP reuse of this checker)
+    // refer to released AST nodes; clear them before any stage touches the new trees.
+    arktsSupportRefs.clear();
     // NOTE: PreCheck should not contains any 'Synthesize' call.
     Utils::ProfileRecorder::Start("PreCheck", "CheckRedefinition");
     for (auto& ctx : contexts) {

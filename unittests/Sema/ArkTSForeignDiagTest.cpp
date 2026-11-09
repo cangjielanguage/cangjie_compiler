@@ -1,0 +1,1758 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// This source file is part of the Cangjie project, licensed under Apache-2.0
+// with Runtime Library Exception.
+//
+// See https://cangjie-lang.cn/pages/LICENSE for license information.
+
+/**
+ * @file
+ *
+ * Sema diagnostics for @ArkTS foreign declarations: unsupported parameter,
+ * return or rest types, invalid options, an empty or path-like module, and
+ * generator refusals break the declaration and skip the wrapper. An omitted
+ * module takes the package name; external preset types report the dedicated
+ * deferral diagnostic.
+ */
+
+#include <cstdlib>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "gtest/gtest.h"
+#include "TestCompilerInstance.h"
+#include "cangjie/AST/Walker.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#define CJ_ENVIRON _environ
+#elif defined(__APPLE__)
+#include <crt_externs.h>
+#define CJ_ENVIRON (*_NSGetEnviron())
+#else
+#include <unistd.h>
+#define CJ_ENVIRON environ
+#endif
+
+using namespace Cangjie;
+using namespace AST;
+
+namespace {
+std::unordered_map<std::string, std::string> GetEnvironmentVars()
+{
+    std::unordered_map<std::string, std::string> envVars;
+    char **env = CJ_ENVIRON;
+    while (env && *env) {
+        std::string entry(*env);
+        size_t pos = entry.find('=');
+        if (pos != std::string::npos) {
+            envVars[entry.substr(0, pos)] = entry.substr(pos + 1);
+        }
+        ++env;
+    }
+    return envVars;
+}
+
+// Records every error message while keeping the default compiler handler
+// behavior (old-to-refactor conversion, deduplication, category gating and
+// error counting) fully intact.
+class RecordingDiagnosticHandler : public CompilerDiagnosticHandler {
+public:
+    struct RecordedError {
+        std::string message;
+        Range range;
+        // Rendered ":line:column:" of the diagnostic anchor. Refactor
+        // diagnostics keep d.start/d.end zero and store the real range only in
+        // mainHint.range, so the position must be taken from there.
+        std::string hint;
+    };
+
+    explicit RecordingDiagnosticHandler(DiagnosticEngine& diag) : CompilerDiagnosticHandler(diag)
+    {
+    }
+
+    void HandleDiagnose(Diagnostic& d) override
+    {
+        CompilerDiagnosticHandler::HandleDiagnose(d);
+        if (d.diagSeverity == DiagSeverity::DS_ERROR) {
+            messages.push_back(d.errorMessage);
+            const auto& mainBegin = d.mainHint.range.begin;
+            const auto& begin = mainBegin.IsZero() ? d.start : mainBegin;
+            errors.push_back({d.errorMessage, MakeRange(d.start, d.end),
+                ":" + std::to_string(begin.line) + ":" + std::to_string(begin.column) + ":"});
+        } else if (d.diagSeverity == DiagSeverity::DS_WARNING) {
+            warnings.push_back(d.errorMessage);
+        }
+    }
+
+    const RecordedError* FindErrorContaining(const std::string& needle) const
+    {
+        for (const auto& error : errors) {
+            if (error.message.find(needle) != std::string::npos) {
+                return &error;
+            }
+        }
+        return nullptr;
+    }
+
+    std::vector<std::string> messages;
+    std::vector<RecordedError> errors;
+    std::vector<std::string> warnings;
+};
+} // namespace
+
+class ArkTSForeignDiagTest : public testing::Test {
+protected:
+    void SetUp() override
+    {
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+#ifdef PROJECT_SOURCE_DIR
+        // Gets the absolute path of the project from the compile parameter.
+        projectPath = PROJECT_SOURCE_DIR;
+#else
+        // Just in case, give it a default value.
+        // Assume the initial is in the build directory.
+        projectPath = "..";
+#endif
+#ifdef __x86_64__
+        instance->invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::X86_64;
+#else
+        instance->invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::AARCH64;
+#endif
+#ifdef _WIN32
+        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::WINDOWS;
+        invocation.globalOptions.executablePath = projectPath + "\\output\\bin\\";
+#elif defined(__APPLE__)
+        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::DARWIN;
+        invocation.globalOptions.executablePath = projectPath + "/output/bin/";
+#elif defined(__unix__)
+        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::LINUX;
+        invocation.globalOptions.executablePath = projectPath + "/output/bin/";
+#endif
+        std::string cangjieHome = projectPath + "/output";
+        std::string cangjiePath = cangjieHome + "/modules/" + invocation.globalOptions.GetCangjieLibTargetPathName();
+#ifdef _WIN32
+        char* oldHome = getenv("CANGJIE_HOME");
+        char* oldPath = getenv("CANGJIE_PATH");
+        if (oldHome) savedCangjieHome = oldHome;
+        if (oldPath) savedCangjiePath = oldPath;
+        _putenv_s("CANGJIE_HOME", cangjieHome.c_str());
+        _putenv_s("CANGJIE_PATH", cangjiePath.c_str());
+#else
+        char* oldHome = getenv("CANGJIE_HOME");
+        char* oldPath = getenv("CANGJIE_PATH");
+        if (oldHome) savedCangjieHome = oldHome;
+        if (oldPath) savedCangjiePath = oldPath;
+        setenv("CANGJIE_HOME", cangjieHome.c_str(), 1);
+        setenv("CANGJIE_PATH", cangjiePath.c_str(), 1);
+#endif
+        invocation.globalOptions.ReadPathsFromEnvironmentVars(GetEnvironmentVars());
+        Cangjie::MacroProcMsger::GetInstance().CloseMacroSrv();
+        // Swap the default handler for a recording subclass once the
+        // instance is fully constructed; the engine owns the handler.
+        auto recording = std::make_unique<RecordingDiagnosticHandler>(diag);
+        handler = recording.get();
+        diag.RegisterHandler(std::move(recording));
+    }
+
+    void TearDown() override
+    {
+#ifdef _WIN32
+        if (savedCangjieHome.empty()) {
+            _putenv_s("CANGJIE_HOME", "");
+        } else {
+            _putenv_s("CANGJIE_HOME", savedCangjieHome.c_str());
+        }
+        if (savedCangjiePath.empty()) {
+            _putenv_s("CANGJIE_PATH", "");
+        } else {
+            _putenv_s("CANGJIE_PATH", savedCangjiePath.c_str());
+        }
+#else
+        if (savedCangjieHome.empty()) {
+            unsetenv("CANGJIE_HOME");
+        } else {
+            setenv("CANGJIE_HOME", savedCangjieHome.c_str(), 1);
+        }
+        if (savedCangjiePath.empty()) {
+            unsetenv("CANGJIE_PATH");
+        } else {
+            setenv("CANGJIE_PATH", savedCangjiePath.c_str(), 1);
+        }
+#endif
+    }
+
+    // Compiles @p code through the full frontend up to Sema. Library output
+    // mode keeps the missing-entry diagnostic out of the picture.
+    void CompileSema(const std::string& code)
+    {
+        instance->code = code;
+        instance->invocation.globalOptions.implicitPrelude = true;
+        instance->invocation.globalOptions.outputMode = GlobalOptions::OutputMode::SHARED_LIB;
+        instance->Compile(CompileStage::SEMA);
+    }
+
+    // Compiles the support package @p code and returns its serialized AST, so
+    // a following compilation can import it without a prebuilt SDK module.
+    // @p caches injects already exported dependencies into the support build.
+    std::vector<uint8_t> ExportSupportPackage(
+        const std::string& code, const std::vector<std::pair<std::string, std::vector<uint8_t>>>& caches = {})
+    {
+        diag.ClearError();
+        TestCompilerInstance support(invocation, diag);
+        for (auto& [name, data] : caches) {
+            support.importManager->SetPackageCjoCache(name, data);
+        }
+        support.code = code;
+        support.invocation.globalOptions.implicitPrelude = true;
+        support.invocation.globalOptions.outputMode = GlobalOptions::OutputMode::SHARED_LIB;
+        support.Compile(CompileStage::SEMA);
+        EXPECT_EQ(diag.GetErrorCount(), 0);
+        std::vector<uint8_t> cjoData;
+        support.importManager->ExportAST(false, cjoData, *support.GetSourcePackages()[0]);
+        return cjoData;
+    }
+
+    bool HasErrorContaining(const std::string& needle) const
+    {
+        for (const auto& message : handler->messages) {
+            if (message.find(needle) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Finds the top-level function declaration named @p name.
+    Ptr<FuncDecl> FindFunction(const std::string& name) const
+    {
+        Ptr<FuncDecl> found{nullptr};
+        Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&found, &name](Ptr<Node> node) {
+            auto candidate = DynamicCast<FuncDecl*>(node);
+            if (candidate && candidate->identifier.Val() == name && candidate->funcBody) {
+                found = candidate;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return found;
+    }
+
+    std::string projectPath;
+    std::string savedCangjieHome;
+    std::string savedCangjiePath;
+    DiagnosticEngine diag;
+    CompilerInvocation invocation;
+    std::unique_ptr<TestCompilerInstance> instance;
+    RecordingDiagnosticHandler* handler{nullptr};
+};
+
+// An unsupported parameter type is a Sema error naming the parameter,
+// the function and the type; the declaration is marked broken, no wrapper is
+// generated and no secondary diagnostics flood the output.
+TEST_F(ArkTSForeignDiagTest, UnsupportedParameterTypeIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign func unsupported(x: IntNative): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("unsupported type"));
+    EXPECT_TRUE(HasErrorContaining("'IntNative'"));
+    EXPECT_TRUE(HasErrorContaining("'unsupported'"));
+    auto fd = FindFunction("unsupported");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// A Nothing parameter can never cross the boundary as an argument, so
+// it is reported with the same parameter diagnostic.
+TEST_F(ArkTSForeignDiagTest, NothingParameterIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign func neverArg(x: Nothing): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("unsupported type"));
+    EXPECT_TRUE(HasErrorContaining("'Nothing'"));
+}
+
+// An unsupported return type is a Sema error on the return position.
+TEST_F(ArkTSForeignDiagTest, UnsupportedReturnTypeIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign func badReturn(x: Int32): IntNative
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("return type"));
+    EXPECT_TRUE(HasErrorContaining("is not supported"));
+    EXPECT_TRUE(HasErrorContaining("'IntNative'"));
+    auto fd = FindFunction("badReturn");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// Options must be string literals among 'module', 'namespace' and
+// 'foreignName'; anything else (here an unknown name) is rejected.
+TEST_F(ArkTSForeignDiagTest, UnknownOptionNameIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[bogus: "x"]
+foreign func badOption(): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("must be string literals among 'module', 'namespace' and 'foreignName'"));
+    auto fd = FindFunction("badOption");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// An explicitly empty module option must not flow into
+// requireArkModule("") and fail only at run time.
+TEST_F(ArkTSForeignDiagTest, ExplicitEmptyModuleIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: ""]
+foreign func emptyModule(x: Int32): Int32
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("empty string"));
+    EXPECT_TRUE(HasErrorContaining("'emptyModule'"));
+    auto fd = FindFunction("emptyModule");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// The same explicit-empty rule covers foreignName: an empty name would reach
+// callMethod("") and fail only at run time.
+TEST_F(ArkTSForeignDiagTest, ExplicitEmptyForeignNameIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[foreignName: ""]
+foreign func emptyName(x: Int32): Int32
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("'foreignName' option"));
+    EXPECT_TRUE(HasErrorContaining("empty string"));
+    EXPECT_TRUE(HasErrorContaining("'emptyName'"));
+    auto fd = FindFunction("emptyName");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+    EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The empty check trims: a whitespace-only value is as unusable as an empty
+// one for both options that had no empty-value rule before.
+TEST_F(ArkTSForeignDiagTest, WhitespaceOnlyOptionsAreRejectedAsEmpty)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "   "]
+foreign func blankModule(x: Int32): Int32
+
+@ArkTS[namespace: "\t"]
+foreign func blankNamespace(x: Int32): Int32
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 2);
+    EXPECT_TRUE(HasErrorContaining("'module' option of @ArkTS foreign function 'blankModule' must not be an empty string"));
+    EXPECT_TRUE(
+        HasErrorContaining("'namespace' option of @ArkTS foreign function 'blankNamespace' must not be an empty string"));
+    for (const auto& name : {"blankModule", "blankNamespace"}) {
+        auto fd = FindFunction(name);
+        ASSERT_NE(fd, nullptr) << name;
+        EXPECT_EQ(fd->funcBody->body, nullptr) << name;
+        EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN)) << name;
+    }
+}
+
+// Declarations the function fold never lowers carry the same explicit-empty
+// rule; the message names the option on the '@ArkTS' form.
+TEST_F(ArkTSForeignDiagTest, DeclarationEmptyOptionValuesAreDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "  "]
+public class BlankModuleClass {}
+
+@ArkTS[foreignName: ""]
+public class EmptyNameClass {}
+
+@ArkTS[namespace: ""]
+public interface EmptyNamespaceInterface {}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 3);
+    EXPECT_TRUE(HasErrorContaining("'module' option of '@ArkTS' must not be an empty string"));
+    EXPECT_TRUE(HasErrorContaining("'foreignName' option of '@ArkTS' must not be an empty string"));
+    EXPECT_TRUE(HasErrorContaining("'namespace' option of '@ArkTS' must not be an empty string"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among"));
+}
+
+// An option can only be given once per @ArkTS layer: a repeated name is an
+// illegal option set even when both values are equal. The Sema option fold
+// reports it once (the parser adds no second report for the same mistake) and
+// the declaration is broken without a wrapper.
+TEST_F(ArkTSForeignDiagTest, RepeatedOptionIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual", module: "actual"]
+foreign func repeated(): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("duplicated option 'module' in @ArkTS foreign function 'repeated'"));
+    // One mistake yields one diagnostic: the declaration-level rule does not
+    // add a second report for the same annotation, and the key/value shape
+    // message does not fire for a fully legal repeated key.
+    EXPECT_FALSE(HasErrorContaining("options of '@ArkTS' must be string literals"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among"));
+    auto fd = FindFunction("repeated");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+    EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The duplicate message names the repeated key, not only the declaration, so
+// the user can locate the offending option in a multi-option layer.
+TEST_F(ArkTSForeignDiagTest, RepeatedForeignNameOptionIsNamedInTheDiagnostic)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[foreignName: "a", foreignName: "b"]
+foreign func repeatedName(): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("duplicated option 'foreignName' in @ArkTS foreign function 'repeatedName'"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among"));
+    auto fd = FindFunction("repeatedName");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+    EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The option shape rule is not function-specific. The same layer contract
+// applies to an @ArkTS on a class, and the declaration-level check reports an
+// unknown option name instead of silently accepting the annotation. The
+// declaration is not marked broken: class binding options do not take part in
+// lowering in this version, so the diagnostic alone states the refusal.
+TEST_F(ArkTSForeignDiagTest, ClassUnknownOptionIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[bogus: "x"]
+public class BadClassOption {}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining(
+        "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName'"));
+    EXPECT_FALSE(HasErrorContaining("options of @ArkTS foreign function"));
+}
+
+// A class option must also be a string literal, not any expression that
+// happens to evaluate to a string.
+TEST_F(ArkTSForeignDiagTest, ClassNonLiteralOptionIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+let optionValue = "utils"
+
+@ArkTS[module: optionValue]
+public class BadNonLiteralOption {}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining(
+        "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName'"));
+}
+
+// A name repeated inside one layer is illegal on a class too, and the
+// declaration yields exactly one diagnostic.
+TEST_F(ArkTSForeignDiagTest, ClassRepeatedOptionIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "a", module: "b"]
+public class BadRepeatedOption {}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("duplicated option 'module' in '@ArkTS'"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among"));
+}
+
+// An interface option set is checked by the same rule; an empty namespace
+// segment is rejected even though the rest of the layer is well formed.
+TEST_F(ArkTSForeignDiagTest, InterfaceIllFormedNamespaceIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[namespace: "a..b"]
+public interface BadNamespaceOption {}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining(
+        "'namespace' option 'a..b' of '@ArkTS' must be a dot-separated identifier path with no empty segments"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among"));
+}
+
+// A global variable carries the annotation on the same terms.
+TEST_F(ArkTSForeignDiagTest, GlobalVariableUnknownOptionIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[foreignName: 1]
+public let badGlobal: Int32 = 1
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining(
+        "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName'"));
+}
+
+// A parameter-level @ArkTS is validated by the same declaration walk, with
+// the enclosing declaration free of any other refusal so exactly one
+// diagnostic is produced.
+TEST_F(ArkTSForeignDiagTest, ParameterUnknownOptionIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+func plain(@ArkTS[bogus: "x"] p: Int32): Unit {}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining(
+        "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName'"));
+}
+
+// The option diagnostic stays reserved for illegal annotation options: an
+// unmappable Option<T> element is a type problem and reports the parameter
+// diagnostic, never the option message.
+TEST_F(ArkTSForeignDiagTest, UnmappableOptionReportsTheTypeDiagnostic)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign func optional(x: Option<IntNative>): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("parameter 'x' of @ArkTS foreign function 'optional' has unsupported type"));
+    EXPECT_TRUE(HasErrorContaining("Option<IntNative>"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among 'module', 'namespace' and 'foreignName'"));
+    auto fd = FindFunction("optional");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// The converse pairing: a non-string option value is an illegal option and
+// reports the option diagnostic on the declaration, not a type diagnostic.
+TEST_F(ArkTSForeignDiagTest, NonStringOptionValueReportsTheOptionDiagnostic)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: 1]
+foreign func badValue(): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("must be string literals among 'module', 'namespace' and 'foreignName'"));
+    EXPECT_FALSE(HasErrorContaining("has unsupported type"));
+    auto fd = FindFunction("badValue");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// A "./"-prefixed module is a same-directory relative path; a module
+// specifier never starts with a dot-relative spelling, so the value is
+// rejected up front with the illegal value and function named.
+TEST_F(ArkTSForeignDiagTest, DotSlashModuleIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "./x"]
+foreign func relModule(x: Int32): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("'module' option './x'"));
+    EXPECT_TRUE(HasErrorContaining("'relModule'"));
+    EXPECT_TRUE(HasErrorContaining("must be an ArkTS module specifier"));
+    // Both separators are rejected on every host, so the message names the
+    // backslash spellings too (a Windows-built ArkTS project may use them).
+    EXPECT_TRUE(HasErrorContaining("'.\\' and '..\\'"));
+    auto fd = FindFunction("relModule");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// A "../"-prefixed module names a parent-relative path and is rejected with
+// the same diagnostic.
+TEST_F(ArkTSForeignDiagTest, DotDotSlashModuleIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "../x"]
+foreign func parentModule(x: Int32): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("'module' option '../x'"));
+    EXPECT_TRUE(HasErrorContaining("'parentModule'"));
+    auto fd = FindFunction("parentModule");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// A "/"-prefixed module is an OS-absolute path and is rejected with the same
+// diagnostic; the three path shapes are the complete format check.
+TEST_F(ArkTSForeignDiagTest, ModuleAbsolutePathIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "/x"]
+foreign func absoluteModule(x: Int32): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("'module' option '/x'"));
+    EXPECT_TRUE(HasErrorContaining("'absoluteModule'"));
+    EXPECT_TRUE(HasErrorContaining("must be an ArkTS module specifier"));
+    auto fd = FindFunction("absoluteModule");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// A system module name ("@...") and a single-segment project module name pass
+// the format check with zero format errors. The support declarations are not
+// imported in this fixture, so lowering then refuses the wrapper; only those
+// support-binding errors are expected.
+TEST_F(ArkTSForeignDiagTest, LegalModuleFormatsPassTheFormatCheck)
+{
+    CompileSema(R"(package entry
+
+class JSValue {
+    func toJSValue(): JSValue { return this }
+    func isNull(): Bool { return false }
+    func isNumber(): Bool { return true }
+    func toNumber(): Float64 { return 0.0 }
+    func asObject(): JSObject { return JSObject() }
+}
+
+class JSObject {
+    func callMethod(name: String, args: Array<JSValue>): JSValue { return JSValue() }
+}
+
+class JSContext {
+    func requireArkModule(name: String): JSValue { return JSValue() }
+    func string(value: String): JSValue { return JSValue() }
+}
+
+func __cj_arkts_current(): JSContext { return JSContext() }
+
+class ExternConversionException <: Exception {
+    public init(message: String) { super(message) }
+}
+
+@ArkTS[module: "@ohos.util"]
+foreign func namedModule(text: String): Float64
+
+@ArkTS[module: "entry"]
+foreign func projectModule(text: String): Float64
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 2);
+    EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
+    EXPECT_FALSE(HasErrorContaining("'module' option"));
+    EXPECT_EQ(FindFunction("namedModule")->funcBody->body, nullptr);
+    EXPECT_EQ(FindFunction("projectModule")->funcBody->body, nullptr);
+}
+
+// A rest parameter position must carry Array<T'> (copy semantics); an
+// ArkTSArray<T'> rest position is rejected by the parameter loop with the
+// dedicated deferral diagnostic before this check can run. Parse only checks
+// the placement, Sema checks the type.
+TEST_F(ArkTSForeignDiagTest, NonArrayRestParameterIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign func badRest(@RestParam xs: Int32): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("rest parameter"));
+    EXPECT_TRUE(HasErrorContaining("'xs'"));
+    EXPECT_TRUE(HasErrorContaining("'Int32'"));
+    auto fd = FindFunction("badRest");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+    // Pins the LowerArkTSFunctions After-side claim: the "rest parameter"
+    // diagnostic marks the declaration broken.
+    EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN));
+}
+
+// An omitted module takes the package name; the format check rejects only an
+// empty name, so the sole error here is the missing support import.
+TEST_F(ArkTSForeignDiagTest, OmittedModulePassesTheModuleCheck)
+{
+    CompileSema(R"(package entry
+
+class JSValue {
+    func toJSValue(): JSValue { return this }
+    func isNull(): Bool { return false }
+    func isNumber(): Bool { return true }
+    func toNumber(): Float64 { return 0.0 }
+    func asObject(): JSObject { return JSObject() }
+}
+
+class JSObject {
+    func callMethod(name: String, args: Array<JSValue>): JSValue { return JSValue() }
+}
+
+class JSContext {
+    func requireArkModule(name: String): JSValue { return JSValue() }
+    func string(value: String): JSValue { return JSValue() }
+}
+
+func __cj_arkts_current(): JSContext { return JSContext() }
+
+class ExternConversionException <: Exception {
+    public init(message: String) { super(message) }
+}
+
+@ArkTS foreign func parseInt(text: String): Float64
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
+    EXPECT_FALSE(HasErrorContaining("'module' option"));
+    auto fd = FindFunction("parseInt");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// A position spelled with one of the external ArkTS preset types is rejected
+// with the dedicated deferral diagnostic instead of the generic
+// unsupported-type error, so a user following the authoritative spelling learns
+// that the mapping is deferred rather than mistyped. Recognition is pinned to
+// the declaring package (std.interop.arkts, like BigInt in std.math.numeric),
+// so the preset declarations are spelled in place here: the 1.2.0 toolchain
+// ships no std.interop.arkts module, and only the declaring package - not the
+// type name - selects the deferral message.
+TEST_F(ArkTSForeignDiagTest, PresetExternalTypesGetDeferralDiagnostic)
+{
+    CompileSema(R"(package std.interop.arkts
+
+class ArkTSArray<T> {}
+
+class ArkTSString {}
+
+interface ArkTSType {}
+
+@ArkTS[module: "actual"]
+foreign func echoParam(values: ArkTSArray<Int32>): Unit
+
+@ArkTS[module: "actual"]
+foreign func source(): ArkTSArray<Int32>
+
+@ArkTS[module: "actual"]
+foreign func wrap(text: ArkTSString): Unit
+
+@ArkTS[module: "actual"]
+foreign func dynamic(value: ArkTSType): Unit
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 4);
+    // The deferral message names the type and the deferral only: the reference
+    // semantics of that external type are unavailable in this version. The
+    // position (parameter/return) is carried by the diagnostic range, not the
+    // text.
+    EXPECT_TRUE(
+        HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSArray' is not available"));
+    EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSString' is not available"));
+    EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSType' is not available"));
+    EXPECT_TRUE(HasErrorContaining("is not available in this version"));
+    EXPECT_FALSE(HasErrorContaining("copy mapping"));
+    for (const auto& name : {"echoParam", "source", "wrap", "dynamic"}) {
+        auto fd = FindFunction(name);
+        ASSERT_NE(fd, nullptr) << name;
+        EXPECT_EQ(fd->funcBody->body, nullptr) << name;
+        // The deferral diagnostic marks the declaration broken while
+        // classification keeps returning UNSUPPORTED for the position.
+        EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN)) << name;
+    }
+}
+
+// A class that merely shares a preset type's name is not an external ArkTS
+// type: recognition is pinned to the declaring package, so a same-named user
+// class keeps the generic unsupported-type diagnostics and never receives the
+// deferral message.
+TEST_F(ArkTSForeignDiagTest, SameNameUserTypeKeepsTheGenericDiagnostic)
+{
+    CompileSema(R"(package entry
+
+class ArkTSArray<T> {}
+
+class ArkTSString {}
+
+@ArkTS[module: "actual"]
+foreign func echoParam(values: ArkTSArray<Int32>): Unit
+
+@ArkTS[module: "actual"]
+foreign func source(): ArkTSArray<Int32>
+
+@ArkTS[module: "actual"]
+foreign func wrap(text: ArkTSString): Unit
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 3);
+    EXPECT_TRUE(HasErrorContaining("parameter 'values' of @ArkTS foreign function 'echoParam' has unsupported type"));
+    EXPECT_TRUE(HasErrorContaining("of @ArkTS foreign function 'source' is not supported"));
+    EXPECT_TRUE(HasErrorContaining("parameter 'text' of @ArkTS foreign function 'wrap' has unsupported type"));
+    EXPECT_FALSE(HasErrorContaining("reference semantics of the external ArkTS type"));
+    for (const auto& name : {"echoParam", "source", "wrap"}) {
+        auto fd = FindFunction(name);
+        ASSERT_NE(fd, nullptr) << name;
+        EXPECT_EQ(fd->funcBody->body, nullptr) << name;
+        EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN)) << name;
+    }
+}
+
+// A nested preset type reaches the same deferral diagnostic: the routing helper
+// searches the type arguments recursively, so Array<ArkTSArray<T>> and
+// Option<ArkTSString> are not demoted to the generic message.
+TEST_F(ArkTSForeignDiagTest, NestedPresetExternalTypeGetsDeferralDiagnostic)
+{
+    CompileSema(R"(package std.interop.arkts
+
+class ArkTSArray<T> {}
+
+class ArkTSString {}
+
+@ArkTS[module: "actual"]
+foreign func nestedArrays(values: Array<ArkTSArray<Int32>>): Unit
+
+@ArkTS[module: "actual"]
+foreign func nestedOption(text: Option<ArkTSString>): Unit
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 2);
+    EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSArray' is not available"));
+    EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSString' is not available"));
+    EXPECT_FALSE(HasErrorContaining("has unsupported type"));
+}
+
+// A rest parameter mixed with a named parameter is rejected by the parse
+// rule before lowering, with the dedicated diagnostic; no wrapper body is
+// produced and the declaration never reaches the generator.
+TEST_F(ArkTSForeignDiagTest, MixedRestAndNamedParameterIsRejectedBeforeLowering)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign func mixedRest(@RestParam xs: Array<Int32>, last!: Int32): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("a function with a rest parameter must not declare named parameters"));
+    auto fd = FindFunction("mixedRest");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+}
+
+// Members of an @ArkTS foreign class have no body by design, yet the ArkTS
+// optional-parameter spelling carries a default value. The default is mapping
+// metadata, not an abstract-function default, so it must not be rejected.
+TEST_F(ArkTSForeignDiagTest, BodylessForeignClassMemberKeepsOptionalParameterSpelling)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[foreignName: "String"]
+public foreign class ArkTSString {
+    public init(value!: Option<String> = None)
+    public func slice(start!: Option<Float64> = None, end!: Option<Float64> = None): ArkTSString
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+}
+
+// The named-parameter default rule covers bodyless members of an @ArkTS
+// foreign class/interface too. Such a member has no wrapper of its own, so
+// Sema reports the parameter and marks the member broken; the defaulted
+// parameter of the test above stays accepted.
+TEST_F(ArkTSForeignDiagTest, BodylessForeignClassMemberNamedParameterWithoutDefaultIsRejected)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[foreignName: "String"]
+public foreign class ArkTSString {
+    public init(value!: Option<String> = None)
+    public func slice(start!: Option<Float64>, end!: Option<Float64> = None): ArkTSString
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("must have a default value"));
+    EXPECT_TRUE(HasErrorContaining("'start'"));
+    EXPECT_TRUE(HasErrorContaining("'slice'"));
+    auto slice = FindFunction("slice");
+    ASSERT_NE(slice, nullptr);
+    // The member path marks only the declaration broken; the offending
+    // parameter keeps its spelling and is not marked itself.
+    EXPECT_TRUE(slice->TestAttr(Attribute::IS_BROKEN));
+    ASSERT_FALSE(slice->funcBody->paramLists.empty());
+    ASSERT_FALSE(slice->funcBody->paramLists[0]->params.empty());
+    EXPECT_FALSE(slice->funcBody->paramLists[0]->params[0]->TestAttr(Attribute::IS_BROKEN));
+}
+
+namespace {
+// Minimal ohos.ark_interop surface used by the generated wrappers: module
+// loading, call invocation, entry registration and JSValue/JSBigInt
+// conversions.
+const char* ARKTS_INTEROP_SUPPORT = R"(package ohos.ark_interop
+
+import std.math.numeric.BigInt
+
+public class JSValue {
+    public func isNull(): Bool { return false }
+    public func isUndefined(): Bool { return false }
+    public func isNumber(): Bool { return false }
+    public func isString(): Bool { return false }
+    public func isBoolean(): Bool { return false }
+    public func isArray(): Bool { return false }
+    public func isBigInt(): Bool { return false }
+    public func toNumber(): Float64 { return 0.0 }
+    public func toBoolean(): Bool { return false }
+    public func asString(): JSString { return JSString() }
+    public func asBigInt(): JSBigInt { return JSBigInt() }
+    public func asArray(): JSArray { return JSArray() }
+    public func asObject(): JSObject { return JSObject() }
+    public func getElement(index: Int64): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return this }
+}
+
+public class JSString {
+    public func toString(): String { return "" }
+}
+
+public class JSBigInt {
+    public func toBigInt(): BigInt { return BigInt(0) }
+    public func toInt64(): Int64 { return 0 }
+    public func toUInt64(): UInt64 { return 0 }
+}
+
+public class JSArray {
+    public prop size: Int64 {
+        get() { return 0 }
+    }
+    public func getElement(index: Int64): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return JSValue() }
+}
+
+public class JSObject {
+    public func asObject(): JSObject { return this }
+    public func getProperty(key: String): JSValue { return JSValue() }
+    public func callMethod(key: String, args: Array<JSValue>): JSValue { return JSValue() }
+}
+
+public class JSCallInfo {}
+
+public type JSLambda = (JSContext, JSCallInfo) -> JSValue
+
+public class JSModule {
+    public func asObject(): JSObject { return JSObject() }
+    public static func registerFunc(name: String, lambda: JSLambda): Unit {}
+}
+
+public class JSContext {
+    public prop global: JSObject {
+        get() { return JSObject() }
+    }
+    public func requireArkModule(name: String): JSModule { return JSModule() }
+    public func array(arr: Array<JSValue>): JSArray { return JSArray() }
+    public func number(value: Float64): JSValue { return JSValue() }
+    public func string(value: String): JSValue { return JSValue() }
+    public func boolean(value: Bool): JSValue { return JSValue() }
+    public func bigint(value: BigInt): JSValue { return JSValue() }
+    public func undefined(): JSValue { return JSValue() }
+}
+)";
+
+// Context ABI v1 entries the wrapper calls.
+const char* ARKTS_CONTEXT_SUPPORT = R"(package cj_arkts_context_v1
+
+import ohos.ark_interop.JSContext
+
+public func __cj_arkts_current(): JSContext { return JSContext() }
+public func __cj_arkts_enter(ctx: JSContext): ?JSContext { return None }
+public func __cj_arkts_restore(previous: ?JSContext): Unit {}
+)";
+
+// The arkts.lang facade the generated support names are pinned to: it
+// re-exports the interop API, the context ABI entries and BigInt and declares
+// the conversion exception, mirroring utils/arkts/sdk/arkts/src/lang/lang.cj.
+const char* ARKTS_LANG_SUPPORT = R"(package arkts.lang
+
+public import ohos.ark_interop.*
+public import cj_arkts_context_v1.*
+public import std.math.numeric.BigInt
+
+public class ExternConversionException <: Exception {
+    public init(message: String) {
+        super(message)
+    }
+}
+)";
+} // namespace
+
+// A user function that shares the name of a generated SDK support reference
+// must not capture it. The wrapper body is pre-bound to the imported
+// std.math.numeric.BigInt, but speculative overload checking clears and
+// re-resolves the enclosing subtree; the binding must survive that clear.
+// The support names reach this file through arkts.lang, the package an
+// application already imports; the same-named local class/function stay
+// uncaptured.
+TEST_F(ArkTSForeignDiagTest, UserBigIntDoesNotCaptureGeneratedWrapperReference)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+class ExternConversionException <: Exception {
+    public init(message: String) { super(message) }
+}
+
+func BigInt(value: UInt64): Int32 {
+    return Int32(value)
+}
+
+@ArkTS[module: "actual", foreignName: "echo"]
+public foreign func echo(value: UInt64): UInt64
+
+public func forward(value: UInt64): UInt64 {
+    return echo(value)
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fd = FindFunction("echo");
+    ASSERT_NE(fd, nullptr);
+    ASSERT_NE(fd->funcBody->body, nullptr);
+    // Every generated BigInt conversion keeps the SDK declaration, not the
+    // package's own func BigInt, and every conversion failure keeps the
+    // arkts.lang exception, not the package's own class of that name.
+    size_t generated = 0;
+    size_t exceptions = 0;
+    Walker(fd->funcBody->body.get(), [&generated, &exceptions](Ptr<Node> node) {
+        auto re = DynamicCast<RefExpr*>(node);
+        if (!re) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        if (re->ref.identifier.Val() == "BigInt") {
+            ++generated;
+            EXPECT_NE(re->ref.target, nullptr);
+            if (re->ref.target) {
+                EXPECT_EQ(re->ref.target->fullPackageName, "std.math.numeric");
+            }
+        } else if (re->ref.identifier.Val() == "ExternConversionException") {
+            ++exceptions;
+            EXPECT_NE(re->ref.target, nullptr);
+            if (re->ref.target) {
+                EXPECT_EQ(re->ref.target->fullPackageName, "arkts.lang");
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_GT(generated, 0);
+    EXPECT_GT(exceptions, 0);
+}
+
+// The same-name capture rule covers every support name a wrapper writes: the
+// conversion exception (pinned to arkts.lang) and Option (pinned to std.core,
+// with Some/None reached through the member access). Interference declarations
+// of all three names exist in the package, so a name-based lookup would bind
+// the generated code to them.
+TEST_F(ArkTSForeignDiagTest, SameNamedDeclarationsDoNotCaptureGeneratedSupportReferences)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+class ExternConversionException <: Exception {
+    public init(message: String) { super(message) }
+}
+
+func Some(value: Int32): Int32 {
+    return value
+}
+
+func None(): Int32 {
+    return 0
+}
+
+@ArkTS[module: "actual", foreignName: "echo"]
+public foreign func echo(value: Int32): Int32
+
+@ArkTS[module: "actual", foreignName: "optional"]
+public foreign func optional(value: Option<Int32>): Option<Int32>
+
+@ArkTS[module: "actual", foreignName: "tuple"]
+public foreign func tuple(value: (Int32, Option<Int32>)): (Int32, Option<Int32>)
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    // The Int32 wrapper has conversion guards (hence the exception) but no
+    // Option position; the Option and tuple wrappers have both, and the tuple
+    // one also spells Option<Int32> as a generated local's type annotation.
+    struct Expectation {
+        const char* name;
+        bool option;
+    };
+    for (const auto& expectation :
+        {Expectation{"echo", false}, Expectation{"optional", true}, Expectation{"tuple", true}}) {
+        auto fd = FindFunction(expectation.name);
+        ASSERT_NE(fd, nullptr) << expectation.name;
+        ASSERT_NE(fd->funcBody->body, nullptr) << expectation.name;
+        size_t exceptions = 0;
+        size_t options = 0;
+        Walker(fd->funcBody->body.get(), [&](Ptr<Node> node) {
+            auto re = DynamicCast<RefExpr*>(node);
+            if (!re) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            const auto& name = re->ref.identifier.Val();
+            // Some/None are enum constructors, never package members: the
+            // generated text spells them as Option.Some/Option.None, so they
+            // must not appear as bare references at all.
+            EXPECT_NE(name, "Some") << expectation.name;
+            EXPECT_NE(name, "None") << expectation.name;
+            if (name == "ExternConversionException") {
+                ++exceptions;
+                EXPECT_NE(re->ref.target, nullptr) << expectation.name;
+                if (re->ref.target) {
+                    EXPECT_EQ(re->ref.target->fullPackageName, "arkts.lang") << expectation.name;
+                }
+            } else if (name == "Option") {
+                ++options;
+                EXPECT_NE(re->ref.target, nullptr) << expectation.name;
+                if (re->ref.target) {
+                    EXPECT_EQ(re->ref.target->fullPackageName, "std.core") << expectation.name;
+                }
+            }
+            return VisitAction::WALK_CHILDREN;
+        }).Walk();
+        EXPECT_GT(exceptions, 0) << expectation.name;
+        if (expectation.option) {
+            EXPECT_GT(options, 0) << expectation.name;
+            // The bare member names are members, not references, so the
+            // generated Option conversions resolve through Option's declaration.
+            size_t someMembers = 0;
+            size_t noneMembers = 0;
+            Walker(fd->funcBody->body.get(), [&](Ptr<Node> node) {
+                auto access = DynamicCast<MemberAccess*>(node);
+                if (access && access->field == "Some") {
+                    ++someMembers;
+                } else if (access && access->field == "None") {
+                    ++noneMembers;
+                }
+                return VisitAction::WALK_CHILDREN;
+            }).Walk();
+            EXPECT_GT(someMembers, 0) << expectation.name;
+            EXPECT_GT(noneMembers, 0) << expectation.name;
+        } else {
+            EXPECT_EQ(options, 0) << expectation.name;
+        }
+    }
+    // The tuple wrapper spells Option<Int32> in a generated local's type
+    // annotation. That reference must still carry the instantiated type:
+    // pinning only the declaration's generic type would leave the annotation
+    // uninferable.
+    auto tuple = FindFunction("tuple");
+    ASSERT_NE(tuple, nullptr);
+    ASSERT_NE(tuple->funcBody->body, nullptr);
+    size_t partLets = 0;
+    Walker(tuple->funcBody->body.get(), [&partLets](Ptr<Node> node) {
+        auto decl = DynamicCast<VarDecl*>(node);
+        if (!decl || decl->identifier.Val().rfind("__cj_arkts_part_", 0) != 0 || !decl->type) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        ++partLets;
+        EXPECT_TRUE(Ty::IsTyCorrect(decl->GetTy()));
+        if (Ty::IsTyCorrect(decl->GetTy())) {
+            EXPECT_EQ(decl->GetTy()->String(), "Enum-Option<Int32>");
+        }
+        EXPECT_TRUE(Ty::IsTyCorrect(decl->type->GetTy()));
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_GT(partLets, 0);
+}
+
+// An entry whose name is also a support name keeps its own declaration as the
+// callback target: ASTFactory::CreateEntry pre-binds the call, and the support
+// binding walk must not replace it with the SDK declaration imported through
+// arkts.lang. The callback's call would otherwise resolve BigInt(...) against
+// std.math.numeric and fail (or silently call the wrong function).
+TEST_F(ArkTSForeignDiagTest, EntryNamedLikeSupportItemKeepsItsCallbackTarget)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public func BigInt(): Unit {}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto entry = FindFunction("BigInt");
+    ASSERT_NE(entry, nullptr);
+    auto callback = FindFunction("__cj_arkts_entry_0");
+    ASSERT_NE(callback, nullptr);
+    ASSERT_NE(callback->funcBody->body, nullptr);
+    size_t calls = 0;
+    Walker(callback->funcBody->body.get(), [&](Ptr<Node> node) {
+        auto re = DynamicCast<RefExpr*>(node);
+        if (re && re->ref.identifier.Val() == "BigInt") {
+            ++calls;
+            EXPECT_EQ(re->ref.target, entry);
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_EQ(calls, 1);
+}
+
+// Windows path spellings are refused at compile time too: the module option
+// must name an ArkTS module, and the ArkTS project may be built on Windows.
+// Both separators are treated alike, so drive-absolute, UNC and backslash
+// relative forms are rejected by the same diagnostic.
+TEST_F(ArkTSForeignDiagTest, WindowsPathModulesAreDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "C:\\x"]
+foreign func winDriveBackslash(x: Int32): Unit
+
+@ArkTS[module: "C:/x"]
+foreign func winDriveSlash(x: Int32): Unit
+
+@ArkTS[module: "\\\\srv\\share"]
+foreign func winUnc(x: Int32): Unit
+
+@ArkTS[module: "..\\x"]
+foreign func winParent(x: Int32): Unit
+
+@ArkTS[module: ".\\x"]
+foreign func winCurrent(x: Int32): Unit
+
+@ArkTS[module: "\\x"]
+foreign func winRoot(x: Int32): Unit
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 6);
+    for (const auto& name : {"winDriveBackslash", "winDriveSlash", "winUnc", "winParent", "winCurrent", "winRoot"}) {
+        EXPECT_TRUE(HasErrorContaining(std::string("'") + name + "'")) << name;
+        auto fd = FindFunction(name);
+        ASSERT_NE(fd, nullptr) << name;
+        EXPECT_EQ(fd->funcBody->body, nullptr) << name;
+        EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN)) << name;
+    }
+    EXPECT_TRUE(HasErrorContaining("must be an ArkTS module specifier"));
+}
+
+// A drive-relative spelling ("C:x", no separator after the colon) is not a
+// path prefix and stays a module name; its resolution failure belongs to the
+// runtime, like any unknown module. Pinning it here keeps the character rule
+// honest: only separator-carrying shapes are rejected.
+TEST_F(ArkTSForeignDiagTest, DriveRelativeModuleIsNotAPath)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "C:x"]
+foreign func driveRelative(x: Int32): Int32
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_FALSE(HasErrorContaining("'module' option"));
+    auto fd = FindFunction("driveRelative");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_NE(fd->funcBody->body, nullptr);
+}
+
+// A module specifier may be a project ETS source path or any separator shape
+// the runtime loader resolves. Only a leading "./"/"../", an OS-absolute
+// path, a drive-absolute path and a UNC path are rejected, so these five
+// spellings must pass both the format check and wrapper generation.
+TEST_F(ArkTSForeignDiagTest, ProjectPathAndToleratedModuleFormatsPass)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "entry/src/main/ets/EntryFixture"]
+foreign func etsPath(x: Int32): Int32
+
+@ArkTS[module: "a/"]
+foreign func trailingSeparator(x: Int32): Int32
+
+@ArkTS[module: "a//b"]
+foreign func doubleSeparator(x: Int32): Int32
+
+@ArkTS[module: "a\\b"]
+foreign func backslashSeparator(x: Int32): Int32
+
+@ArkTS[module: "@a/b"]
+foreign func scopedModule(x: Int32): Int32
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_FALSE(HasErrorContaining("'module' option"));
+    for (const auto& name : {"etsPath", "trailingSeparator", "doubleSeparator", "backslashSeparator", "scopedModule"}) {
+        auto fd = FindFunction(name);
+        ASSERT_NE(fd, nullptr) << name;
+        EXPECT_NE(fd->funcBody->body, nullptr) << name;
+    }
+}
+
+// A missing interop dependency for the entry callback/registration pair yields
+// exactly one user-facing diagnostic, anchored on the user entry and naming
+// the entry: the callback and the registration carry the same source range, so
+// the pair is deduplicated. The wording must not leak internal symbols or
+// implementation terms.
+TEST_F(ArkTSForeignDiagTest, GeneratedEntrySupportUnavailableIsOneUserFacingDiagnostic)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public func run(): Unit {}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
+    EXPECT_TRUE(HasErrorContaining("check the project's ArkTS interop dependencies"));
+    EXPECT_TRUE(HasErrorContaining("'run'"));
+    for (const auto& forbidden : {"__cj_arkts_", "cj_arkts_context_v1", "wrapper", "generated", "glue",
+             "support declaration"}) {
+        EXPECT_FALSE(HasErrorContaining(forbidden)) << forbidden;
+    }
+}
+
+// The C ABI exemption is reserved for actual @ArkTS foreign declarations: the
+// function must carry FOREIGN and either its own @ArkTS annotation or an
+// enclosing @ArkTS foreign class/interface. An @ArkTS class that is not
+// FOREIGN must not hide its foreign member from the C ABI checks, so the
+// non-C parameter type is rejected.
+TEST_F(ArkTSForeignDiagTest, ForeignMemberOfPlainArkTSClassIsNotCABIExempt)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+public class Host {
+    public foreign func bad(value: String): Unit
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("arguments type of CFunc must be instantiated with CType"));
+}
+
+// A named optional parameter wrapper selects the forwarded arguments at run
+// time through Option.isSome(); the generated body must survive full Sema,
+// including the member call on the rebound parameter reference.
+TEST_F(ArkTSForeignDiagTest, NamedOptionalParameterWrapperTypeChecks)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign func greet(other: Int32, prefix!: Option<String> = None): String
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fd = FindFunction("greet");
+    ASSERT_NE(fd, nullptr);
+    ASSERT_NE(fd->funcBody->body, nullptr);
+    bool gate = false;
+    Walker(fd->funcBody->body.get(), [&gate](Ptr<Node> node) {
+        auto access = DynamicCast<MemberAccess*>(node);
+        if (access && access->field == "isSome") {
+            gate = true;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_TRUE(gate);
+}
+
+// Every named parameter of an @ArkTS foreign declaration must have a default
+// value (user rule, 2026-11-05): the generated wrapper cannot tell an omitted
+// named argument from an explicitly passed value. A named Option<T> without
+// `= None` is therefore rejected at compile time, and no wrapper is generated
+// for the declaration.
+TEST_F(ArkTSForeignDiagTest, RequiredNamedOptionParameterWithoutDefaultIsRejected)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign func required(other: Int32, prefix!: Option<String>): String
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("must have a default value"));
+    EXPECT_TRUE(HasErrorContaining("'prefix'"));
+    EXPECT_TRUE(HasErrorContaining("'required'"));
+    auto fd = FindFunction("required");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+    EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN));
+}
+
+// Class- and interface-level @ArkTS options must survive CJO export: the
+// serializer keys its ArkTS annotation records on Decl.ARKTS, so the parser has
+// to raise that marker on class-likes too (functions get it in
+// ParseFuncDeclAnnos). AR-05/06 read the imported preset class members and need
+// the binding metadata, so a dropped class-level @ArkTS is a real loss even
+// though AR-03 never reads it. This suite is where the write/read cycle already
+// has a compiler instance.
+TEST_F(ArkTSForeignDiagTest, ClassLevelArkTSOptionSurvivesCjoRoundTrip)
+{
+    diag.ClearError();
+    auto presetCjo = ExportSupportPackage(R"(package presets
+
+@ArkTS[module: "arkts.lang", foreignName: "String"]
+public foreign class ArkTSString {
+    public init(value!: Option<String> = None)
+    public func slice(start!: Option<Float64> = None): ArkTSString
+}
+
+@ArkTS[module: "arkts.lang", foreignName: "Object"]
+public foreign interface ArkTSType {
+    func toString(): String
+}
+)");
+    ASSERT_FALSE(presetCjo.empty());
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("presets", presetCjo);
+    CompileSema(R"(package entry
+
+import presets.*
+
+public func describe(value: ArkTSType): ArkTSType {
+    return value
+}
+
+public let presetValue: Option<ArkTSString> = None
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto importedClass = instance->importManager->GetImportedDecl<ClassDecl>("presets", "ArkTSString");
+    ASSERT_NE(importedClass, nullptr);
+    EXPECT_TRUE(importedClass->TestAttr(Attribute::ARKTS));
+    ASSERT_TRUE(importedClass->HasAnno(AnnotationKind::ARKTS));
+    // The option-bearing record survives as an AST annotation, so a re-export
+    // keeps the class's binding metadata instead of only its name.
+    bool classModule = false;
+    for (const auto& annotation : importedClass->annotations) {
+        if (annotation->kind != AnnotationKind::ARKTS) {
+            continue;
+        }
+        for (const auto& arg : annotation->args) {
+            auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
+            if (arg->name.Val() == "module" && literal) {
+                classModule = literal->stringValue == "arkts.lang";
+            }
+        }
+    }
+    EXPECT_TRUE(classModule);
+    auto importedInterface = instance->importManager->GetImportedDecl<InterfaceDecl>("presets", "ArkTSType");
+    ASSERT_NE(importedInterface, nullptr);
+    EXPECT_TRUE(importedInterface->TestAttr(Attribute::ARKTS));
+    EXPECT_TRUE(importedInterface->HasAnno(AnnotationKind::ARKTS));
+}
+
+// The compiler recognizes a file that uses the @ArkTS capability and injects
+// the interop package imports itself: `import ohos.ark_interop` (bound as
+// `ark_interop`) and `import cj_arkts_context_v1`. Generated wrapper code spells
+// the interop surface through those package names, so no user import of the
+// interop surface is required and a `*` import is never needed.
+TEST_F(ArkTSForeignDiagTest, ArkTSFileGetsInjectedInteropImports)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+@ArkTS
+public func run(): Unit {}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto file = instance->GetSourcePackages().front()->files.front().get();
+    auto findImport = [&file](const std::string& packageName) -> Ptr<ImportSpec> {
+        for (auto& import : file->imports) {
+            if (import->content.GetImportedPackageName() == packageName) {
+                return import.get();
+            }
+        }
+        return nullptr;
+    };
+    auto interop = findImport("ohos.ark_interop");
+    auto context = findImport("cj_arkts_context_v1");
+    auto exception = findImport("arkts.lang.ExternConversionException");
+    ASSERT_NE(interop, nullptr);
+    ASSERT_NE(context, nullptr);
+    ASSERT_NE(exception, nullptr);
+    for (auto import : {interop, context, exception}) {
+        EXPECT_EQ(import->content.kind, ImportKind::IMPORT_SINGLE);
+        EXPECT_TRUE(import->TestAttr(Attribute::COMPILER_ADD));
+        EXPECT_TRUE(import->TestAttr(Attribute::PRIVATE));
+        // Implicit: the user never sees the glue import in unused-import
+        // warnings. The dependency json re-admits the two interop packages.
+        EXPECT_TRUE(import->TestAttr(Attribute::IMPLICIT_ADD));
+        // A non-implicit import needs a real source range and file ownership.
+        EXPECT_FALSE(import->begin.IsZero());
+        EXPECT_FALSE(import->end.IsZero());
+        EXPECT_FALSE(import->content.identifier.Begin().IsZero());
+        EXPECT_NE(import->curFile, nullptr);
+    }
+    EXPECT_EQ(interop->content.identifier.Val(), "ark_interop");
+    EXPECT_EQ(interop->content.prefixPaths, (std::vector<std::string>{"ohos"}));
+    EXPECT_EQ(context->content.identifier.Val(), "cj_arkts_context_v1");
+    EXPECT_TRUE(context->content.prefixPaths.empty());
+    EXPECT_EQ(exception->content.identifier.Val(), "ExternConversionException");
+    EXPECT_EQ(exception->content.prefixPaths, (std::vector<std::string>{"arkts", "lang"}));
+
+    // Idempotent, including the incremental/LSP rebuild path.
+    instance->importManager->AddArkTSInteropImports(instance->GetSourcePackages());
+    size_t interopImports = 0;
+    size_t contextImports = 0;
+    size_t exceptionImports = 0;
+    for (auto& import : file->imports) {
+        const auto name = import->content.GetImportedPackageName();
+        interopImports += name == "ohos.ark_interop" ? 1 : 0;
+        contextImports += name == "cj_arkts_context_v1" ? 1 : 0;
+        exceptionImports += name == "arkts.lang.ExternConversionException" ? 1 : 0;
+    }
+    EXPECT_EQ(interopImports, 1);
+    EXPECT_EQ(contextImports, 1);
+    EXPECT_EQ(exceptionImports, 1);
+
+    // The imports are implicit, so dependency generation re-admits exactly
+    // these runtime packages: they stay visible in dependencies.json even
+    // though the imports are hidden from the user.
+    auto depInfo = instance->importManager->GeneratePkgDepInfo(instance->GetSourcePackages());
+    ASSERT_EQ(depInfo.size(), 1);
+    EXPECT_NE(depInfo.front().find("\"package\":\"ohos.ark_interop\""), std::string::npos) << depInfo.front();
+    EXPECT_NE(depInfo.front().find("\"package\":\"cj_arkts_context_v1\""), std::string::npos) << depInfo.front();
+    EXPECT_NE(depInfo.front().find("\"package\":\"arkts.lang\""), std::string::npos) << depInfo.front();
+}
+
+// A file without any @ArkTS annotation is not an ArkTS interop user: no
+// interop package import is injected.
+TEST_F(ArkTSForeignDiagTest, FileWithoutArkTSAnnotationGetsNoInjectedImports)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    CompileSema(R"(package entry
+
+public func plain(): Unit {}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto file = instance->GetSourcePackages().front()->files.front().get();
+    for (auto& import : file->imports) {
+        const auto name = import->content.GetImportedPackageName();
+        EXPECT_NE(name, "ohos.ark_interop");
+        EXPECT_NE(name, "cj_arkts_context_v1");
+    }
+}
+
+// An @ArkTS-carrying declaration that generates no wrapper must not surface
+// the compiler-injected imports as unused-import warnings: the imports are
+// implicit, so user-facing import checks skip them. A class annotation is the
+// smallest such case.
+TEST_F(ArkTSForeignDiagTest, ArkTSClassDoesNotWarnAboutInjectedImports)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    handler->warnings.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    const auto warningsBefore = diag.GetWarningCount();
+    CompileSema(R"(package entry
+
+@ArkTS
+public class Annotated {}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_EQ(diag.GetWarningCount(), warningsBefore);
+    for (const auto& warning : handler->warnings) {
+        EXPECT_EQ(warning.find("unused import"), std::string::npos) << warning;
+    }
+    auto file = instance->GetSourcePackages().front()->files.front().get();
+    size_t injected = 0;
+    for (auto& import : file->imports) {
+        injected += import->content.GetImportedPackageName() == "ohos.ark_interop" ? 1 : 0;
+        injected += import->content.GetImportedPackageName() == "cj_arkts_context_v1" ? 1 : 0;
+    }
+    EXPECT_EQ(injected, 2);
+}
+
+// The --scan-dependency path reports dependencies without building the import
+// index (it does not call BuildIndex), so ImportPackages() must run the
+// injection itself. The scan still reports both interop packages even though
+// no package was loaded.
+TEST_F(ArkTSForeignDiagTest, ScanDependencyReportsInjectedInteropPackages)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->code = R"(package entry
+
+@ArkTS
+public func run(): Unit {}
+)";
+    instance->invocation.globalOptions.scanDepPkg = true;
+    // Call the scan path directly: TestCompilerInstance::Compile runs
+    // ModularizeCompilation(), which clears the file declarations that the
+    // annotation scan needs, while the real `cjc --scan-dependency` does not.
+    ASSERT_TRUE(instance->PerformParse());
+    ASSERT_TRUE(instance->PerformConditionCompile());
+    ASSERT_TRUE(instance->PerformImportPackage());
+    const auto& depInfo = instance->GetDepPkgInfo();
+    ASSERT_EQ(depInfo.size(), 1);
+    EXPECT_NE(depInfo.front().find("\"package\":\"ohos.ark_interop\""), std::string::npos) << depInfo.front();
+    EXPECT_NE(depInfo.front().find("\"package\":\"cj_arkts_context_v1\""), std::string::npos) << depInfo.front();
+}
+
+// Without a resolvable cjo (no ArkTS add-on) the imports are not injected, so
+// a negative testcase does not gain a package-not-found diagnostic. The
+// existing support-unavailable refusal is still reported exactly once.
+TEST_F(ArkTSForeignDiagTest, UnresolvableInteropPackagesAreNotInjected)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public func run(): Unit {}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
+    EXPECT_FALSE(HasErrorContaining("can not find package"));
+    auto file = instance->GetSourcePackages().front()->files.front().get();
+    for (auto& import : file->imports) {
+        const auto name = import->content.GetImportedPackageName();
+        EXPECT_NE(name, "ohos.ark_interop");
+        EXPECT_NE(name, "cj_arkts_context_v1");
+    }
+}
+
+// An ill-formed namespace value on an @ArkTS foreign function has its own
+// message (not the generic option-shape one) anchored on the namespace
+// literal the user must fix.
+TEST_F(ArkTSForeignDiagTest, ForeignIllFormedNamespaceIsDiagnosedAtTheLiteral)
+{
+    const std::string code = R"(package entry
+
+@ArkTS[namespace: "a..b"]
+foreign func badNamespace(): Unit
+)";
+    CompileSema(code);
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("'namespace' option 'a..b' of @ArkTS foreign function 'badNamespace' must be a "
+                                   "dot-separated identifier path with no empty segments"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among"));
+    const auto* error = handler->FindErrorContaining("'namespace' option 'a..b'");
+    ASSERT_NE(error, nullptr);
+    // The namespace literal sits on line 3, column 19 in the source below.
+    EXPECT_NE(error->hint.find(":3:19:"), std::string::npos) << error->hint;
+}

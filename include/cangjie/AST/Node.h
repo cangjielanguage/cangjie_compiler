@@ -579,6 +579,7 @@ enum class AnnotationKind {
     ENSURE_PREPARED_TO_MOCK,
     NON_PRODUCT,
     ARKTS,
+    REST_PARAM, // ArkTS rest parameter; only valid on the last positional parameter of an ArkTS foreign function.
     UNKNOWN
 };
 
