@@ -179,6 +179,20 @@ bool MatchNominativeDecl(DiagnosticEngine &diag, Decl &commonDecl, Decl& specifi
         return false;
     }
 
+    // Validate the parameter count before merging members or mapping their types.
+    auto commonGenericsCount = commonDecl.GetGenericsCount();
+    auto specificGenericsCount = specificDecl.GetGenericsCount();
+    if (commonGenericsCount != specificGenericsCount) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_generic_member_type_argument_different,
+            specificDecl, MakeRange(specificDecl.identifier), "'specific' " + DeclKindToString(specificDecl),
+            specificDecl.identifier.GetRawText(), std::to_string(specificGenericsCount),
+            "its 'common' declaration", std::to_string(commonGenericsCount))
+            .AddNote(commonDecl, MakeRange(commonDecl.identifier), "'common' declaration is here");
+        commonDecl.EnableAttr(Attribute::IS_BROKEN);
+        specificDecl.EnableAttr(Attribute::IS_BROKEN);
+        return false;
+    }
+
     if (auto commonEnumDecl = DynamicCast<EnumDecl *>(&commonDecl)) {
         auto specificEnumDecl = DynamicCast<EnumDecl *>(&specificDecl);
         CJC_NULLPTR_CHECK(specificEnumDecl);
@@ -317,10 +331,7 @@ void MPTypeCheckerImpl::MergeCJMPNominalsExceptExtension(Package& pkg)
         if (decl->IsNominalDecl() && decl->astKind != ASTKind::EXTEND_DECL) {
             if (auto it = matchedDecls.find(decl->identifier); it != matchedDecls.end()) {
                 auto matchedDecl = it->second;
-                bool hasGenericMismatch =
-                    (decl->generic && !matchedDecl->generic) || (!decl->generic && matchedDecl->generic);
-                if (hasGenericMismatch) {
-                } else if (decl->TestAttr(Attribute::SPECIFIC) && matchedDecl->TestAttr(Attribute::COMMON)) {
+                if (decl->TestAttr(Attribute::SPECIFIC) && matchedDecl->TestAttr(Attribute::COMMON)) {
                     MergeCommonIntoSpecific(diag, *matchedDecl, *decl);
                 } else if (decl->TestAttr(Attribute::COMMON) && matchedDecl->TestAttr(Attribute::SPECIFIC)) {
                     MergeCommonIntoSpecific(diag, *decl, *matchedDecl);
@@ -788,6 +799,9 @@ void CollectDecl(
 void CollectCJMPDecls(Package& pkg, std::vector<Ptr<Decl>>& commonDecls, std::vector<Ptr<Decl>>& specificDecls)
 {
     std::function<VisitAction(Ptr<Node>)> visitor = [&commonDecls, &specificDecls](const Ptr<Node> &node) {
+        if (node->IsDecl() && node->TestAttr(Attribute::IS_BROKEN)) {
+            return VisitAction::SKIP_CHILDREN;
+        }
         if (node->IsDecl() && node->astKind != ASTKind::PRIMARY_CTOR_DECL) {
             CollectDecl(StaticAs<ASTKind::DECL>(node), commonDecls, specificDecls);
         }
@@ -1382,24 +1396,28 @@ void MPTypeCheckerImpl::MatchSpecificWithCommon(Package& pkg)
 void MPTypeCheckerImpl::MapCJMPGenericTypeArgs(
     TypeSubst& genericTyMap, const AST::Decl& commonDecl, const AST::Decl& specificDecl)
 {
-    if (!(commonDecl.TestAttr(Attribute::GENERIC) && specificDecl.TestAttr(Attribute::GENERIC))) {
+    if (commonDecl.GetGenericsCount() != specificDecl.GetGenericsCount() ||
+        !(commonDecl.TestAttr(Attribute::GENERIC) && specificDecl.TestAttr(Attribute::GENERIC))) {
         return;
     }
     // 1. Handle nominalDecl type parameters
-    if (commonDecl.IsNominalDecl() && commonDecl.GetTy() && !commonDecl.GetTy()->typeArgs.empty()) {
-        for (size_t i = 0; i < commonDecl.GetTy()->typeArgs.size(); i++) {
-            auto commonType = commonDecl.GetTy()->typeArgs[i];
+    if (commonDecl.IsNominalDecl()) {
+        auto commonTy = commonDecl.GetTy();
+        auto specificTy = specificDecl.GetTy();
+        if (!Ty::IsTyCorrect(commonTy) || !Ty::IsTyCorrect(specificTy) ||
+            commonTy->typeArgs.size() != specificTy->typeArgs.size()) {
+            return;
+        }
+        for (size_t i = 0; i < commonTy->typeArgs.size(); i++) {
+            auto commonType = commonTy->typeArgs[i];
             if (commonType->IsGeneric()) {
                 Ptr<TyVar> commonGeneric = RawStaticCast<TyVar*>(commonType.Ty());
-                genericTyMap[commonGeneric] = specificDecl.GetTy()->typeArgs[i].Ty();
+                genericTyMap[commonGeneric] = specificTy->typeArgs[i].Ty();
             }
         }
     }
 
     CheckCommonSpecificGenericMatch(specificDecl, commonDecl);
-    if (commonDecl.GetGenericsCount() != specificDecl.GetGenericsCount()) {
-        return;
-    }
     auto mapping = typeManager.GenerateGenericMappingFromGeneric(commonDecl, specificDecl);
     genericTyMap.insert(mapping.begin(), mapping.end());
 }

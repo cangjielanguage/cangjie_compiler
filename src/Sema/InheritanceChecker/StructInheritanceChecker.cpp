@@ -230,6 +230,27 @@ bool CompMemberSignatureByPosAndTy(Ptr<const MemberSignature> m1, Ptr<const Memb
     return CompTyByNames(m1->ty, m2->ty);
 }
 
+bool AreChildBoundsLooser(const std::unordered_set<DataTy>& parentUppers,
+    const std::unordered_set<DataTy>& childUppers, TypeManager& typeManager)
+{
+    for (auto upper : childUppers) {
+        // At least one parent upperBounds is the subtype of child upperBound.
+        if (!std::any_of(parentUppers.begin(), parentUppers.end(),
+            [&typeManager, &upper](auto it) { return typeManager.IsSubtype(it, upper); })) {
+            return false;
+        }
+    }
+    for (auto upper : parentUppers) {
+        // Cannot exist any child upperBound that is the subtype of parent upperBound.
+        if (std::any_of(childUppers.begin(), childUppers.end(), [&typeManager, &upper](auto it) {
+            return !typeManager.IsTyEqual(it, upper) && typeManager.IsSubtype(it, upper);
+        })) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 namespace Cangjie {
@@ -1261,7 +1282,11 @@ void CheckGenericTypeBoundsMapped(const Decl& parent, const Decl& child,
     DiagnosticEngine& diag, TypeManager& typeManager)
 {
     if (parent.GetGenericsCount() != child.GetGenericsCount()) {
-        diag.Diagnose(child, DiagKind::sema_generic_member_type_argument_different, child.identifier.Val());
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_generic_member_type_argument_different,
+            child, MakeRange(child.identifier), DeclKindToString(child), child.identifier.GetRawText(),
+            std::to_string(child.GetGenericsCount()), "its inherited declaration",
+            std::to_string(parent.GetGenericsCount()))
+            .AddNote(parent, MakeRange(parent.identifier), "inherited declaration is here");
         return;
     }
     auto childGeneric = child.GetGeneric();
@@ -1284,27 +1309,9 @@ void CheckGenericTypeBoundsMapped(const Decl& parent, const Decl& child,
         for (auto it : parentUppers) {
             instUppers.emplace(typeManager.GetInstantiatedTy(it, typeMapping));
         }
-        bool childLooser = true;
-        for (auto upper : childUppers) {
-            // At least one parent upperBounds is the subtype of child upperBound.
-            childLooser = std::any_of(instUppers.begin(), instUppers.end(),
-                [&typeManager, &upper](auto it) { return typeManager.IsSubtype(it, upper); });
-            if (!childLooser) {
-                break;
-            }
-        }
-        for (auto upper : instUppers) {
-            if (!childLooser) {
-                break;
-            }
-            // Cannot exist any child upperBound that is the subtype of parent upperBound.
-            childLooser = !std::any_of(childUppers.begin(), childUppers.end(), [&typeManager, &upper](auto it) {
-                return !typeManager.IsTyEqual(it, upper) && typeManager.IsSubtype(it, upper);
-            });
-        }
-        if (!childLooser) {
-            auto parentConstraints = instUppers.empty() ? std::string("empty")
-                : "'" + Ty::GetTypesToStableStr(instUppers, "', '") + "'";
+        if (!AreChildBoundsLooser(instUppers, childUppers, typeManager)) {
+            auto parentConstraints =
+                instUppers.empty() ? std::string("empty") : "'" + Ty::GetTypesToStableStr(instUppers, "', '") + "'";
             auto gc = GetConstraintNodeByIndex(i, *childGeneric);
             auto builder = diag.DiagnoseRefactor(DiagKindRefactor::sema_generic_constraint_not_looser, *gc);
             builder.AddNote("parent constraint is " + parentConstraints);
@@ -1319,7 +1326,11 @@ void StructInheritanceChecker::CheckGenericTypeArgInfo(const Decl& parent, const
     auto childGeneric = child.GetGeneric();
 
     if (parentGeneric->typeParameters.size() != childGeneric->typeParameters.size()) {
-        diag.Diagnose(child, DiagKind::sema_generic_member_type_argument_different, child.identifier.Val());
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_generic_member_type_argument_different,
+            child, MakeRange(child.identifier), DeclKindToString(child), child.identifier.GetRawText(),
+            std::to_string(child.GetGenericsCount()), "its inherited declaration",
+            std::to_string(parent.GetGenericsCount()))
+            .AddNote(parent, MakeRange(parent.identifier), "inherited declaration is here");
         return;
     }
 

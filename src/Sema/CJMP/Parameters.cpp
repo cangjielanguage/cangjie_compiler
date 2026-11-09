@@ -128,13 +128,11 @@ bool MPTypeCheckerImpl::MatchCJMPFunctionParameters(AST::FuncDecl& specificFunc,
     CJC_ASSERT_WITH_MSG(specificFunc.funcBody, "specific function must have a body");
 
     auto commonGenericsCount = commonFunc.GetGenericsCount();
-    auto specificGenericsCount = specificFunc.GetGenericsCount();
+    CJC_ASSERT_WITH_MSG(
+        commonGenericsCount == specificFunc.GetGenericsCount(),
+        "Function matching requires equal type parameter counts");
 
-    if (commonGenericsCount != specificGenericsCount) {
-        diag.Diagnose(
-            specificFunc, DiagKind::sema_generic_member_type_argument_different, specificFunc.identifier.Val());
-        return false;
-    } else if (commonGenericsCount > 0) {
+    if (commonGenericsCount > 0) {
         if (!MatchCJMPFunctionGenerics(specificFunc, commonFunc)) {
             return false;
         }
