@@ -31,7 +31,7 @@ constexpr auto OBJCPOINTER_WRITE_METHOD = "write";
 
 OwnedPtr<Expr> CreateZero(Ptr<Ty> ty)
 {
-    return CreateLitConstExpr(LitConstKind::INTEGER, "0", ty);
+    return CreateLitConstExpr(LitConstKind::INTEGER, "0", {ty});
 }
 
 /**
@@ -58,7 +58,7 @@ void HandleObjCPointerRead(InteropContext& ctx, CallExpr& callExpr)
     CJC_NULLPTR_CHECK(ma);
     auto receiver = ASTCloner::Clone<Expr>(ma->baseExpr);
     CJC_NULLPTR_CHECK(receiver);
-    auto elementType = receiver->GetTy()->typeArgs[0];
+    auto elementType = receiver->DataTy()->TyArg(0);
     auto rawCType = ctx.typeMapper.Cj2CType(elementType);
     auto ptrFieldDecl = ctx.bridge.GetObjCPointerPointerField();
     CJC_ASSERT(ptrFieldDecl);
@@ -97,8 +97,8 @@ void HandleObjCPointerWrite(InteropContext& ctx, CallExpr& callExpr)
     auto receiver = ASTCloner::Clone<Expr>(ma->baseExpr);
     CJC_ASSERT(callExpr.args.size() == 1);
     auto valueArg = ASTCloner::Clone<Expr>(callExpr.args[0]->expr);
-    CJC_ASSERT_WITH_MSG(!receiver->GetTy()->typeArgs.empty(), "ObjCPointer typeArgs is empty");
-    auto elementType = receiver->GetTy()->typeArgs[0];
+    CJC_ASSERT_WITH_MSG(!receiver->DataTy()->typeArgs.empty(), "ObjCPointer typeArgs is empty");
+    auto elementType = receiver->DataTy()->TyArg(0);
     auto rawCType = ctx.typeMapper.Cj2CType(elementType);
     Ptr<Ty> pointerType = ctx.typeManager.GetPointerTy(rawCType);
     auto ptrFieldDecl = ctx.bridge.GetObjCPointerPointerField();
@@ -110,7 +110,8 @@ void HandleObjCPointerWrite(InteropContext& ctx, CallExpr& callExpr)
     CJC_NULLPTR_CHECK(writePointerFunc);
     auto writePointerRef = CreateRefExpr(*writePointerFunc, callExpr);
     writePointerRef->instTys.push_back(rawCType);
-    writePointerRef->SetTy(ctx.typeManager.GetFunctionTy({pointerType, int64Type, rawCType}, unitType));
+    writePointerRef->SetTy(
+        {ctx.typeManager.GetFunctionTy(std::vector<ModalTy>{{pointerType}, {int64Type}, {rawCType}}, {unitType})});
 
     auto ptrExpr =
         ctx.factory.CreateUnsafePointerCast(CreateMemberAccess(std::move(receiver), *ptrFieldDecl), rawCType);

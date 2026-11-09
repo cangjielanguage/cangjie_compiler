@@ -62,11 +62,11 @@ const std::vector<TokenKind>& GetTypeFirst();
 class ParserImpl final {
 public:
     ParserImpl(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
-        bool attachComment, bool parsingDeclFiles);
+        bool attachComment, const GlobalOptions* opts);
     ParserImpl(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos,
-        bool attachComment, bool parsingDeclFiles);
+        bool attachComment, const GlobalOptions* opts);
     ParserImpl(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm, bool attachComment,
-        bool parsingDeclFiles);
+        const GlobalOptions* opts);
     ~ParserImpl();
 
     size_t GetLineNum() const;
@@ -89,8 +89,6 @@ public:
     void SetPrimaryDecl(const std::string& decl, bool isRawId = false);
     Parser& SetForImport(const bool isForImport);
     Parser& SetCurFile(Ptr<AST::File> curFile);
-
-    void SetCompileOptions(const GlobalOptions& opts);
 
     DiagnosticEngine& GetDiagnosticEngine() const;
 
@@ -151,18 +149,7 @@ private:
     bool forImport{false};
     std::string moduleName;
 
-    inline bool SeeingTrailingClosure(OwnedPtr<AST::Expr>& baseExpr)
-    {
-        if (Seeing(TokenKind::LCURL)) {
-            return true;
-        }
-        if (baseExpr->astKind != AST::ASTKind::CALL_EXPR && baseExpr->astKind != AST::ASTKind::REF_EXPR &&
-            baseExpr->astKind != AST::ASTKind::ARRAY_EXPR) {
-            return false;
-        }
-        // SeeingAnnotationTrailClosure.
-        return SeeingAnnotationLambdaExpr() || SeeingAnnotationTrailingClosure({TokenKind::LSQUARE});
-    }
+    bool SeeingTrailingClosure(OwnedPtr<AST::Expr>& baseExpr);
 
     bool SkipAmbiguousToken();
 
@@ -236,13 +223,42 @@ private:
     std::string curPrimaryDeclIdent;
     bool curPrimaryDeclIdentIsRaw{false};
     std::vector<TokenKind> bracketsStack; /* A stack to help match brackets. */
-    bool scanDepPkg{false};
     bool enableAttachComment{false};
-    bool parseDeclFile{false};
+    // compile options owned by the caller(CompilerInstance or MacroCall), all parser behaviors are read from it
+    const GlobalOptions* opts{nullptr};
 
-    bool enableEH{false};
-    Triple::BackendType backend{Triple::BackendType::CJNATIVE};
-    bool calculateLineNum{false};
+    // apply the options that affect parsing and lexing
+    void ApplyCompileOptions();
+
+    bool IsParsingDeclFile() const
+    {
+        return opts && opts->compileCjd;
+    }
+    bool IsEHEnabled() const
+    {
+        return opts && opts->enableEH;
+    }
+    // without compile options, keep local mode enabled so that more cases can be parsed
+    bool IsLocalModeEnabled() const
+    {
+#ifdef __ohos__
+        return false;
+#else
+        return !opts || opts->enableLocalMode;
+#endif
+    }
+    bool IsScanDepPkg() const
+    {
+        return opts && opts->scanDepPkg;
+    }
+    bool NeedCalculateLineNum() const
+    {
+        return opts && (opts->enableTimer || opts->enableMemoryCollect);
+    }
+    Triple::BackendType GetBackend() const
+    {
+        return Triple::BackendType::CJNATIVE;
+    }
     // we store line number info from all tokens
     // pair<line num of the begin, line num of the end>
     std::list<std::pair<unsigned, unsigned>> allTokensInOneFile;
@@ -392,7 +408,8 @@ private:
         if (SeeingIfAvailable()) {
             return false;
         }
-        return (SeeingModifier() && !Seeing({TokenKind::UNSAFE, TokenKind::LCURL})) ||
+        return (SeeingModifier() && !Seeing({TokenKind::UNSAFE, TokenKind::LCURL}) &&
+                   !Seeing({TokenKind::EXCLAVE, TokenKind::LCURL})) ||
             SeeingAny(
                 {TokenKind::FUNC, TokenKind::MACRO, TokenKind::LET, TokenKind::VAR, TokenKind::ENUM, TokenKind::TYPE,
                     TokenKind::STRUCT, TokenKind::CLASS, TokenKind::INTERFACE, TokenKind::MAIN, TokenKind::EXTEND}) ||
@@ -530,6 +547,7 @@ private:
     void ParseFuncGenericConstraints(const AST::FuncBody& fb);
     void ParsePropMemberBody(const ScopeKind& scopeKind, AST::FuncBody& fb);
     void ParseFuncParameters(const ScopeKind& scopeKind, AST::FuncBody& fb);
+    void DiagThisParamNotAllowed(const AST::ThisParam& thisParam);
     OwnedPtr<AST::MacroDecl> ParseMacroDecl(ScopeKind scopeKind, const std::set<AST::Modifier>& modifiers,
         std::vector<OwnedPtr<AST::Annotation>> annos = {});
     bool ParseMacroCallTokens(TokenKind left, std::vector<Token>& tokens);
@@ -558,14 +576,15 @@ private:
     void ParseParameter(ScopeKind scopeKind, AST::FuncParam& fp);
     void ParseAssignInParam(AST::FuncParam& fp);
     OwnedPtr<AST::FuncParamList> ParseParameterList(ScopeKind scopeKind = ScopeKind::UNKNOWN_SCOPE);
+    OwnedPtr<AST::ThisParam> ParseThisParam();
     void CheckSetterAnnotations(std::vector<OwnedPtr<AST::Annotation>>& annos, const Ptr<AST::Node> setter);
     void CheckGetterAnnotations(std::vector<OwnedPtr<AST::Annotation>>& annos, const Ptr<AST::Node> getter);
     void CheckModifierInParamList(
         const ScopeKind& scopeKind, const std::set<AST::Modifier>& modifiers, bool isMember, AST::FuncParam& fp);
     void ParseLetOrVarInParamList(const ScopeKind& scopeKind, AST::FuncParam& fp, Position& memberStartPos);
     template <typename T> void CheckIntrinsicFunc(T& fd);
-    OwnedPtr<AST::FuncParam> ParseParamInParamList(
-        const ScopeKind& scopeKind, Ptr<AST::FuncParam>& meetNamedParameter, Ptr<AST::FuncParam>& meetMemberParams);
+    OwnedPtr<AST::FuncParam> ParseParamInParamList(const ScopeKind& scopeKind, Ptr<AST::FuncParam>& meetNamedParameter,
+        Ptr<AST::FuncParam>& meetMemberParams);
     void ParseInterfaceDeclOrClassDeclGeneric(AST::InheritableDecl& ret);
     void SetDefaultFunc(ScopeKind scopeKind, AST::Decl& decl) const;
     void ParseCaseBody(AST::EnumDecl& enumDecl);
@@ -583,8 +602,8 @@ private:
     // Processes paren-related types, such as ParentType, TupleType, FuncType, and CFuncType.
     OwnedPtr<AST::Type> ParseTypeWithParen();
     OwnedPtr<AST::Type> ParseTupleType(
-        std::vector<OwnedPtr<AST::Type>> types, const Position lParenPos, const Position rParenPos) const;
-    OwnedPtr<AST::ParenType> ParseParenType(
+        std::vector<OwnedPtr<AST::Type>> types, const Position& lParenPos, const Position& rParenPos);
+    OwnedPtr<AST::Type> ParseParenType(
         const Position& lParenPos, const Position& rParenPos, OwnedPtr<AST::Type> type);
     OwnedPtr<AST::FuncType> ParseFuncType(
         std::vector<OwnedPtr<AST::Type>> types, const Position& lParenPos, const Position& rParenPos);
@@ -602,7 +621,6 @@ private:
     bool IsLegFollowForGenArgInExprWithComma(ExprKind ek = ExprKind::ALL);
     std::vector<OwnedPtr<AST::GenericConstraint>> ParseGenericConstraints();
     bool ParseGenericUpperBound(const OwnedPtr<AST::GenericConstraint>& genericConstraint);
-    static bool HasModifier(const std::set<AST::Modifier>& modifiers, TokenKind tk);
     static bool HasAnnotation(const std::vector<OwnedPtr<AST::Annotation>>& annos, AST::AnnotationKind ak);
 
     bool IsLeftValueExpression(const OwnedPtr<AST::Expr>& expr, const Token& tok);
@@ -650,9 +668,11 @@ private:
      */
     OwnedPtr<AST::Expr> ParseArrayLitExpr();
     OwnedPtr<AST::Expr> ParseTypeConvExpr();
+    OwnedPtr<AST::Expr> ParseTypeConvExprWith(Token&& tok);
     OwnedPtr<AST::Expr> ParseBreakJumpExpr();
     OwnedPtr<AST::Expr> ParseContinueJumpExpr();
     OwnedPtr<AST::Expr> ParseLitConst();
+    OwnedPtr<AST::Expr> ParsePrimitiveTypeExpr();
     OwnedPtr<AST::Expr> ParseNegativeLiteral();
     OwnedPtr<AST::Expr> ParseInterpolationExpr(const std::string& value, const Position& pos);
     OwnedPtr<AST::LitConstExpr> GetLitConstExprFromStr(
@@ -733,6 +753,7 @@ private:
     OwnedPtr<AST::ForInExpr> ParseForInExpr();
     OwnedPtr<AST::RefExpr> ParseRefExpr(ExprKind ek = ExprKind::ALL);
     OwnedPtr<AST::Expr> ParseWildcardExpr();
+    OwnedPtr<AST::Expr> ParseExclaveExpr();
     OwnedPtr<AST::WhileExpr> ParseWhileExpr();
     OwnedPtr<AST::DoWhileExpr> ParseDoWhileExpr();
     OwnedPtr<AST::Node> ParseExprOrDecl(ScopeKind sk);
@@ -845,6 +866,8 @@ private:
     void DiagExpectedMoreFieldInTuplePattern();
     void DiagExpectedTypeNameAfterAs(const Token& tok);
     void DiagExpectedTypeName();
+    DiagnosticBuilder DiagUnexpectedModal(const Range& range);
+    DiagnosticBuilder DiagLocalModeDisabled(const Range& range);
     void DiagInvalidLeftHandExpr(const AST::Expr& expr, const Token& tok);
     void DiagNoneAssociativeOp(const Token& preT, const Token& tok);
     void DiagInvalidInheritType(const AST::Type& type);
@@ -866,7 +889,7 @@ private:
     void DiagOrPattern();
     void DiagDeclarationInMacroPackage(const OwnedPtr<AST::Decl>& decl);
     void DiagIllegalFunc(const OwnedPtr<AST::FuncDecl>& funcDecl);
-    void DiagParseExpectedParenthis(const OwnedPtr<AST::Type>& postType);
+    void DiagParseExpectedParenthesis(const OwnedPtr<AST::Type>& postType);
     void DiagParseIllegalDeclarationPattern(const OwnedPtr<AST::VarWithPatternDecl>& decl, ScopeKind scopeKind);
     void DiagThisTypeNotAllow();
     void DiagInvalidUnicodeScalar(const Position& startPos, const std::string& str);
@@ -943,6 +966,11 @@ private:
     {
         if (SeeingIfAvailable()) {
             return false;
+        }
+        // A modal prefix (e.g. @local!/@local?/@~local) introduces a func decl in
+        // FUNC_BODY, so route it through ParseDecl like ParseExpressionOrDeclarations.
+        if ((scopeKind == ScopeKind::UNKNOWN_SCOPE || scopeKind == ScopeKind::FUNC_BODY) && SeeingModalInfo()) {
+            return true;
         }
         return SeeingDecl() || SeeingMacroCallDecl() || SeeingIllegalDeclInBlock() ||
             SeeingPrimaryCtorDecl(scopeKind) || SeeingEnumConstructor(scopeKind);
@@ -1024,6 +1052,11 @@ private:
     void DiagAnnotationMoreThanOneArgs(const AST::Annotation& node, const std::string& annotationName,
         const std::string& argInfo);
     void DiagAnnotationShouldNotHaveArgs(const Annotation& node, const std::string& annotationName);
+    AST::ASTModalInfo ParseModalInfo();
+    bool ParseModeSpecifier(AST::ASTModalInfo& out);
+    bool SeeingModalInfo();
+    bool IsTokenAdjacent(const Token& first, const Token& second) const;
+    bool SeeingPrimitiveType();
     // Check whether member decl can be abstract
     bool CanBeAbstract(const AST::Decl& decl, ScopeKind scopeKind) const;
     void CheckConstructorBody(AST::FuncDecl& ctor, ScopeKind scopeKind, bool inMacro = false);

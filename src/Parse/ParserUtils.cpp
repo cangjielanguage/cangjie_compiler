@@ -67,7 +67,7 @@ const Token& ParserImpl::Peek()
     // as part of this, also keep `bracketsStack` up-to-date
     do {
         lookahead = lexer->Next();
-        if (calculateLineNum) {
+        if (NeedCalculateLineNum()) {
             allTokensInOneFile.emplace_back(lookahead.Begin().line, lookahead.End().line);
         }
         if (lookahead.kind == TokenKind::LCURL || lookahead.kind == TokenKind::LPAREN ||
@@ -167,12 +167,13 @@ bool ParserImpl::SeeingExpr()
         TokenKind::UNSAFE,
         TokenKind::WILDCARD,
         TokenKind::VARRAY,
+        TokenKind::EXCLAVE,
     };
     if (SeeingAny(exprFirstToken)) {
         return true;
     }
-    return SeeingLiteral() || SeeingPrimitiveTypeAndLParen() || SeeingPrimitiveTypeAndDot() || SeeingMacroCall() ||
-        SeeingBuiltinAnnotation() || SeeingSoftKeyword();
+    return SeeingLiteral() || SeeingPrimitiveType() || SeeingMacroCall() || SeeingBuiltinAnnotation() ||
+        SeeingSoftKeyword();
 }
 
 bool ParserImpl::SeeingCombinator(const std::vector<TokenKind>& kinds)

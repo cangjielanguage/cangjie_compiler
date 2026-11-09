@@ -116,6 +116,7 @@ private:
     void TranslateValue(Context& ctx, const Value& value);
     void TranslateLiteralValue(Context& ctx, const LiteralValue& value);
     void TranslateBlock(Context& ctx, const Block& bb);
+    void TranslateBlockGroup(Context& ctx, const BlockGroup& bbGroup);
 
     void TranslateExpression(Context& ctx, const Expression& expr);
     void TranslateIntValue(Context& ctx, const IntLiteral& value);

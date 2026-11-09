@@ -19,18 +19,19 @@ namespace Cangjie {
 
 struct MemberSignature {
     Ptr<AST::Decl> decl = nullptr;
-    Ptr<AST::Ty> ty = nullptr;
-    Ptr<AST::Ty> structTy = nullptr;
+    AST::DataTy ty = nullptr;
+    AST::DataTy structTy = nullptr;
+    ModalInfo thisMode;
     /*
      * If the member is a member of another visible extension, it points to the extension declaration.
      * Otherwise, it is null.
      */
     Ptr<AST::ExtendDecl> extendDecl = nullptr;
-    std::vector<std::unordered_set<Ptr<AST::Ty>>> upperBounds;
+    std::vector<std::unordered_set<AST::DataTy>> upperBounds;
     /*
      * List of the corresponding types came from super-types which are inconsistent.
      */
-    std::unordered_set<Ptr<const AST::Ty>> inconsistentTypes;
+    std::unordered_set<AST::ModalTy> inconsistentTypes;
     /*
      * True: if this member has multiple default implementation.
      */

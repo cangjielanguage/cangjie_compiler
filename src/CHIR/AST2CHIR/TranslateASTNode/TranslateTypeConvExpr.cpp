@@ -12,17 +12,16 @@ using namespace Cangjie;
 Ptr<Value> Translator::Visit(const AST::TypeConvExpr& typeConvExpr)
 {
     const auto& loc = TranslateLocation(typeConvExpr);
-    auto chirType = TranslateType(*typeConvExpr.GetTy());
     auto operand = TranslateExprArg(*typeConvExpr.expr);
+    auto chirType = TranslateType(typeConvExpr.GetTy());
 
     auto srcTy = typeConvExpr.expr->GetTy();
-    auto targetTy = typeConvExpr.GetTy().get();
+    auto targetTy = typeConvExpr.DataTy();
     if (srcTy->IsFunc() || srcTy->IsTuple()) {
         return CreateWrappedTypeCast(loc, chirType, operand, currentBlock)->GetResult();
     }
     auto ofs = typeConvExpr.overflowStrategy;
     auto noException = targetTy->IsInteger() && ofs != OverflowStrategy::THROWING;
-    auto opLoc = TranslateLocation(*typeConvExpr.expr);
     auto newNode = TryCreateCastWithOV(currentBlock, !noException, ofs, loc, chirType, operand);
     return newNode->GetResult();
 }

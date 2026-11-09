@@ -59,6 +59,13 @@ bool MacroExpandFailed(const std::vector<Token>& retTokens);
 bool CheckAddSpace(Token curToken, Token nextToken);
 
 /**
+ * True when tokens at `atIndex` are a local-mode pattern: @local! / @local? / @~local.
+ * When `requireAdjacent` is true, also require the mode pair (~local or local!/?) to have no
+ * source column gap (used by RefreshNewTokensPos to keep those tokens glued).
+ */
+bool IsModalAfterAt(const TokenVector& tokens, size_t atIndex, bool requireAdjacent = false);
+
+/**
  * Helper class to convert Tokens to string.
  */
 class MacroFormatter {

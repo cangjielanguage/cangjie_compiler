@@ -367,8 +367,8 @@ std::string GetJniTypeSignature(const AST::Ty& javaCompatibleTy)
     return "";
 }
 
-std::string GetJniTypeSignature(const AST::Ty& javaCompatibleRetTy, const std::vector<Ptr<AST::Ty>> paramTys,
-    bool withMarker)
+std::string GetJniTypeSignature(
+    const AST::Ty& javaCompatibleRetTy, const std::vector<ModalTy>& paramTys, bool withMarker)
 {
     std::string signature = "(";
     for (auto paramTy : paramTys) {

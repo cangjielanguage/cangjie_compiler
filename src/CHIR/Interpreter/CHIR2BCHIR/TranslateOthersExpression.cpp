@@ -116,6 +116,10 @@ void CHIR2BCHIR::TranslateOthersExpression(Context& ctx, const Expression& expr)
             PushOpCodeWithAnnotations(ctx, OpCode::ABORT, expr);
             break;
         }
+        case ExprKind::START_REGION:
+        case ExprKind::END_REGION:
+            // do nothing for memory expression, they only affect runtime performance
+            break;
         default: {
             // unreachable
             CJC_ASSERT(false);

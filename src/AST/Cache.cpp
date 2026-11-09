@@ -11,7 +11,7 @@
  */
 
 #include "cangjie/AST/Cache.h"
-#include "cangjie/Utils/Casting.h"
+#include "cangjie/AST/ASTCasting.h"
 
 using namespace Cangjie;
 using namespace AST;

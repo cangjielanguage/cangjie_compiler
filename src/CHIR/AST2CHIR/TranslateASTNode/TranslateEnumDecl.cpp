@@ -42,7 +42,7 @@ Ptr<Value> Translator::Visit(const AST::EnumDecl& decl)
     CreateAnnotationInfo<EnumDef>(decl, *enumDef, enumDef);
 
     // step 2: set type
-    auto chirType = StaticCast<EnumType*>(TranslateType(*decl.GetTy()));
+    auto chirType = StaticCast<EnumType*>(TranslateType(decl.GetTy()));
     enumDef->SetType(*chirType);
     enumDef->Set<LinkTypeInfo>(decl.TestAttr(AST::Attribute::GENERIC_INSTANTIATED) ? Linkage::INTERNAL : decl.linkage);
 
@@ -73,7 +73,7 @@ Ptr<Value> Translator::Visit(const AST::EnumDecl& decl)
                     if (ctor->GetTy()->typeArgs[i] == decl.GetTy()) {
                         paramTypes.emplace_back(chirType);
                     } else {
-                        paramTypes.emplace_back(TranslateType(*ctor->GetTy()->typeArgs[i]));
+                        paramTypes.emplace_back(TranslateType(ctor->GetTy()->typeArgs[i]));
                     }
                 }
                 enumDef->AddCtor({
@@ -108,7 +108,7 @@ Ptr<Value> Translator::Visit(const AST::EnumDecl& decl)
 
     // step 5: set implemented interface
     for (auto& superInterfaceTy : decl.GetStableSuperInterfaceTys()) {
-        auto astType = TranslateType(*superInterfaceTy);
+        auto astType = TranslateType(AST::ModalTy{superInterfaceTy});
         // The implemented interface type must be of reference type.
         CJC_ASSERT(astType->IsRef());
         auto realType = StaticCast<ClassType*>(StaticCast<RefType*>(astType)->GetBaseType());

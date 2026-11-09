@@ -22,10 +22,20 @@ namespace {
 constexpr OverflowStrategy OVF_STRATEGIES[]{
     OverflowStrategy::WRAPPING, OverflowStrategy::THROWING, OverflowStrategy::SATURATING};
 
+std::vector<Type*> GetParamTypesWithoutThisArg(const VirtualMethodInfo& info)
+{
+    auto paramTypes = info.GetMethodSigType()->GetParamTypes();
+    if (info.GetVirtualMethod()->TestAttr(Attribute::STATIC)) {
+        return paramTypes;
+    }
+    paramTypes.erase(paramTypes.begin());
+    return paramTypes;
+}
+
 bool IsPossiblyOverflowOperator(const VirtualMethodInfo& info)
 {
     auto name = info.GetMethodName();
-    auto paramTypes = info.GetMethodSigType()->GetParamTypes();
+    auto paramTypes = GetParamTypesWithoutThisArg(info);
     if (paramTypes.size() == 1 && IsOverflowOperator(name)) {
         return CanBeIntegerType(*paramTypes[0]) && CanBeIntegerType(*info.GetMethodInstRetType());
     }
@@ -43,7 +53,7 @@ bool IsBuiltinOverflowOperator(const CustomTypeDef& def, const VirtualMethodInfo
         return false;
     }
     auto name = info.GetMethodName();
-    auto paramTypes = info.GetMethodSigType()->GetParamTypes();
+    auto paramTypes = GetParamTypesWithoutThisArg(info);
     if (paramTypes.size() == 1 && paramTypes[0] == defType && paramTypes[0]->IsInteger() &&
         paramTypes[0] == info.GetMethodInstRetType()) {
         return IsOverflowOperator(name);
@@ -179,13 +189,12 @@ void UpdateOperatorVTable::RewriteOneVtableEntry(
         for (size_t j{0}; j < SPLIT_OPERATOR_NAME_PREFIX.size(); ++j) {
             auto name = SPLIT_OPERATOR_NAME_PREFIX[j] + methodInfo.GetMethodName();
             auto ovfFunc = GenerateBuiltinOverflowOperatorFunc(methodInfo.GetMethodName(), OVF_STRATEGIES[j], extDef,
-                methodInfo.GetMethodSigType()->GetNumOfParams() == 1);
+                GetParamTypesWithoutThisArg(methodInfo).size() == 1);
             extDef.AddMethod(ovfFunc);
             if (j == SPLIT_OPERATOR_NAME_PREFIX.size() - 1) {
                 // check again to prevent incorrect rewrite
                 const auto& vt = user.GetDefVTable().GetExpectedTypeVTable(infType).GetVirtualMethods()[index];
                 CJC_ASSERT(vt.GetMethodName() == methodInfo.GetMethodName());
-                CJC_ASSERT(vt.GetMethodSigType() == methodInfo.GetMethodSigType());
                 // reuse the vtable entry to keep the vector index
                 user.UpdateVtableItem(infType, index, ovfFunc, extDef.GetExtendedType(), std::move(name));
             } else {
@@ -205,7 +214,6 @@ void UpdateOperatorVTable::RewriteOneVtableEntry(
                 // check again to prevent incorrect rewrite
                 const auto& vt = user.GetDefVTable().GetExpectedTypeVTable(infType).GetVirtualMethods()[index];
                 CJC_ASSERT(vt.GetMethodName() == methodInfo.GetMethodName());
-                CJC_ASSERT(vt.GetMethodSigType() == methodInfo.GetMethodSigType());
                 user.UpdateVtableItem(infType, index, methodInfo.GetVirtualMethod(), nullptr, std::move(name));
             } else {
                 auto newMethodInfo = methodInfo;

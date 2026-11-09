@@ -6,12 +6,14 @@
 
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 
+#include "cangjie/CHIR/AST2CHIR/Utils.h"
+
 using namespace Cangjie::CHIR;
 using namespace Cangjie;
 
 Ptr<Value> Translator::Visit(const AST::UnaryExpr& unaryExpr)
 {
-    auto chirType = TranslateType(*unaryExpr.GetTy());
+    auto chirType = TranslateType(unaryExpr.GetTy());
     UnaryExprKind kd = UnaryExprKind::NEG;
     if (unaryExpr.op == Cangjie::TokenKind::NOT) {
         kd = unaryExpr.GetTy()->IsBoolean() ? UnaryExprKind::NOT : UnaryExprKind::BITNOT;
@@ -21,6 +23,8 @@ Ptr<Value> Translator::Visit(const AST::UnaryExpr& unaryExpr)
         CJC_ASSERT(false && "Visit UnaryExpr: invalid unary operation!");
     }
     auto chirExpr = TranslateExprArg(*unaryExpr.expr);
+    chirExpr = TypeCastCopyableTypeIfNeeded(
+        *chirExpr, chirType->GetModalInfo(), builder, *currentBlock, TranslateLocation(*unaryExpr.expr));
     const auto& loc = TranslateLocation(unaryExpr.begin, unaryExpr.end);
 
     auto ofs = unaryExpr.overflowStrategy;

@@ -18,14 +18,6 @@ namespace Cangjie {
 namespace CHIR {
 
 /**
- * @brief Translates the function's generic upper bounds.
- *
- * @param chirTy The CHIR type to be translated.
- * @param func The function declaration containing generic information.
- */
-void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& func);
-
-/**
  * @brief Adjusts the function type based on the function declaration.
  *
  * @param funcType The function type to be adjusted.
@@ -35,6 +27,21 @@ void TranslateFunctionGenericUpperBounds(CHIRType& chirTy, const AST::FuncDecl& 
  * @return Adjusted function type.
  */
 FuncType* AdjustFuncType(FuncType& funcType, const AST::FuncDecl& funcDecl, CHIRBuilder& builder, CHIRType& chirType);
+
+/**
+ * @brief Converts a value to the requested modal only if its type is Copyable,
+ * preserving its data type.
+ *
+ * @param value The input value.
+ * @param modal The target modal.
+ * @param builder The CHIR builder.
+ * @param parentBlock The block in which to append the conversion.
+ * @param loc The debug location of the conversion.
+ * @return Converted value, or the original value if its type is not Copyable
+ * or no conversion is needed.
+ */
+Value* TypeCastCopyableTypeIfNeeded(
+    Value& value, ModalInfo modal, CHIRBuilder& builder, Block& parentBlock, const DebugLocation& loc);
 
 /**
  * @brief Retrieves the debug location of an AST declaration.
@@ -221,6 +228,8 @@ std::pair<Type*, bool> GetInstMemberTypeByNameCheckingReadOnly(
     const GenericType& rootType, const std::vector<std::string>& names, CHIRBuilder& builder);
 
 Type* AddRefIfFuncIsMutOrClass(Type& thisType, const AST::FuncDecl& funcDecl, CHIRBuilder& builder);
+
+ModalInfo ASTModal2CHIRModal(const Cangjie::ModalInfo& astModal);
 } // namespace CHIR
 } // namespace Cangjie
 

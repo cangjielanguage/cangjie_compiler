@@ -45,10 +45,9 @@ OwnedPtr<AssignExpr> CreateRegistryCompanionRefFieldAssignment(ClassDecl& compan
 {
     auto curFile = refWrapper.curFile;
     // `$reg = <companion>(this.$obj)`
-    return CreateAssignExpr(
-        WithinFile(CreateRefExpr(companionRefField), curFile),
+    return CreateAssignExpr(WithinFile(CreateRefExpr(companionRefField), curFile),
         CreateRegistryCompanionConstructorCall(companion, *GetJavaRefField(refWrapper)),
-        TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+        {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
 }
 
 /**
@@ -133,20 +132,17 @@ void GenerateInJavaImplReferenceWrapper::GenerateWrappingConstructorBody(FuncDec
     CJC_ASSERT(parentCtor);
     CJC_ASSERT(parentCtor->funcBody->paramLists[0]->params.size() == 1); // Java_CFFI_JavaEntity
 
-    auto superCall = CreateSuperCall(refWrapper, *parentCtor, parentCtor->GetTy());
+    auto superCall = CreateSuperCall(refWrapper, *parentCtor, parentCtor->DataTy());
     superCall->args.push_back(CreateFuncArg(WithinFile(CreateRefExpr(entityParam), curFile)));
 
     auto& block = wrappingCtor.funcBody->body;
     block->SetTy(refWrapper.GetTy());
 
     // this.$reg = getFromRegistryById<companion.ty>(regId)
-    auto regCompanionAssignment = CreateAssignExpr(
-        WithinFile(CreateRefExpr(companionRefField), curFile),
+    auto regCompanionAssignment = CreateAssignExpr(WithinFile(CreateRefExpr(companionRefField), curFile),
         ilib.CreateGetFromRegistryCall(
-            ilib.CreateGetJniEnvCall(curFile),
-            WithinFile(CreateRefExpr(regIdParam), curFile),
-            companion.GetTy()),
-        TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+            ilib.CreateGetJniEnvCall(curFile), WithinFile(CreateRefExpr(regIdParam), curFile), companion.DataTy()),
+        {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
 
     block->body.insert(block->body.begin(), std::move(regCompanionAssignment));
     block->body.insert(block->body.begin(), std::move(superCall));
@@ -180,7 +176,7 @@ OwnedPtr<FuncDecl> GenerateInJavaImplReferenceWrapper::GenerateJavaSideConstruct
     CJC_ASSERT(parentCtor);
     CJC_ASSERT(parentCtor->funcBody->paramLists[0]->params.size() == 1); // Java_CFFI_JavaEntity
 
-    std::vector<Ptr<Ty>> paramTys;
+    std::vector<ModalTy> paramTys;
     paramTys.push_back(javaEntityDecl->GetTy());
     paramTys.push_back(companion.GetTy());
     for (auto paramTy : StaticCast<FuncTy*>(userCtor.GetTy().get())->paramTys) {
@@ -188,7 +184,7 @@ OwnedPtr<FuncDecl> GenerateInJavaImplReferenceWrapper::GenerateJavaSideConstruct
     }
     auto ctorTy = typeManager.GetFunctionTy(paramTys, StaticCast<FuncTy*>(userCtor.GetTy().get())->retTy);
 
-    auto superCall = CreateSuperCall(refWrapper, *parentCtor, parentCtor->GetTy());
+    auto superCall = CreateSuperCall(refWrapper, *parentCtor, parentCtor->DataTy());
     superCall->args.push_back(CreateFuncArg(WithinFile(CreateRefExpr(entityParam), curFile)));
 
     auto& block = ctor->funcBody->body;
@@ -202,16 +198,14 @@ OwnedPtr<FuncDecl> GenerateInJavaImplReferenceWrapper::GenerateJavaSideConstruct
         }),
         block->body.end());
 
-    auto regCompanionAssignment = CreateAssignExpr(
-        WithinFile(CreateRefExpr(companionRefField), curFile),
-        WithinFile(CreateRefExpr(regCompanionParam), curFile),
-        TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    auto regCompanionAssignment = CreateAssignExpr(WithinFile(CreateRefExpr(companionRefField), curFile),
+        WithinFile(CreateRefExpr(regCompanionParam), curFile), {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
 
     block->body.insert(block->body.begin(), std::move(regCompanionAssignment));
     block->body.insert(block->body.begin(), std::move(superCall));
 
-    ctor->funcBody->SetTy(ctorTy);
-    ctor->SetTy(ctorTy);
+    ctor->funcBody->SetTy({ctorTy});
+    ctor->SetTy({ctorTy});
     ctor->funcBody->funcDecl = ctor.get();
     ctor->constructorCall = ConstructorCall::SUPER;
     ctor->DisableAttr(Attribute::PRIMARY_CONSTRUCTOR);
@@ -281,7 +275,7 @@ void GenerateInJavaImplReferenceWrapper::RewriteUserDefinedConstructorInitializa
         return;
     }
 
-    auto superCall = CreateSuperCall(*ctor.outerDecl, parentCtor, parentCtor.GetTy());
+    auto superCall = CreateSuperCall(*ctor.outerDecl, parentCtor, parentCtor.DataTy());
     superCall->args.insert(superCall->args.begin(), CreateFuncArg(std::move(javaCtorExpr)));
 
      // Inserts assignment of registry companion into an instance.

@@ -94,10 +94,10 @@ namespace ClosureConversion {
 /**
  * @brief Generate mangled name for generic base class.
  *
- * @param paramNum The function param type size.
+ * @param funcType The closure conversion function type.
  * @return std::string The mangled signature.
  */
-std::string GenerateGenericBaseClassMangleName(size_t paramNum);
+std::string GenerateGenericBaseClassMangleName(const Cangjie::CHIR::FuncType& funcType);
 /**
  * @brief Generate mangled name for instantiated base class.
  *

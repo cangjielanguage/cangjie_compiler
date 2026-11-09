@@ -225,6 +225,8 @@ public:
      */
     Function* GetTopLevelFunc() const;
 
+    bool IsInBlockGroupRecursively(const BlockGroup& target) const;
+
     // ===--------------------------------------------------------------------===//
     // Operand
     // ===--------------------------------------------------------------------===//
@@ -2059,19 +2061,36 @@ public:
     std::string GetSrcCodeIdentifier() const;
 
     /**
-     * @brief Sets the host function for parameter default values.
+     * @brief Sets the host Parameter whose default value is computed by this (desugared) lambda.
      *
-     * @param hostFunc The host function to set.
+     * @param hostParam The host Parameter to set.
      */
-    void SetParamDftValHostFunc(Lambda& hostFunc);
+    void SetParamDftValHostParam(Parameter& hostParam);
 
     /**
-     * @brief Retrieves the host function for parameter default values.
+     * @brief Retrieves the host Parameter whose default value is computed by this lambda.
      *
-     * @return The host function for parameter default values.
+     * @return The host Parameter, or nullptr if this is not a default-value desugar lambda.
+     */
+    Parameter* GetParamDftValHostParam() const;
+
+    /**
+     * @brief Convenience: owner Lambda of GetParamDftValHostParam(), or nullptr.
      */
     Lambda* GetParamDftValHostFunc() const;
-    
+
+    /**
+     * @brief Clears the link to the host Parameter for default values.
+     */
+    void ClearParamDftValHostParam();
+
+    /**
+     * @brief Instantiated nested func's generic Lambda, or nullptr.
+     *        Pass nullptr to clear the link.
+     */
+    Lambda* GetGenericDecl() const;
+    void SetGenericDecl(Lambda* decl);
+
     // ===--------------------------------------------------------------------===//
     // Lambda Body
     // ===--------------------------------------------------------------------===//
@@ -2203,7 +2222,8 @@ private:
     FuncType* funcTy;
     bool isLocalFunc{false};
     std::vector<GenericType*> genericTypeParams;
-    Lambda* paramDftValHostFunc = nullptr;
+    Parameter* paramDftValHostParam = nullptr;
+    Lambda* genericDecl{nullptr};
     bool isCompileTimeValue = false;
 };
 
@@ -2357,6 +2377,32 @@ private:
     GetInstantiateValue* Clone(CHIRBuilder& builder, Block& parent) const override;
 
     std::vector<Type*> instantiateTys;
+};
+
+/**
+ * @brief Mark the start of a memory region.
+ */
+class StartRegion : public Expression {
+    friend class CHIRContext;
+    friend class CHIRBuilder;
+private:
+    explicit StartRegion(Block* parent);
+    ~StartRegion() override = default;
+
+    StartRegion* Clone(CHIRBuilder& builder, Block& parent) const override;
+};
+
+/**
+ * @brief Mark the end of a memory region.
+ */
+class EndRegion : public Expression {
+    friend class CHIRContext;
+    friend class CHIRBuilder;
+private:
+    explicit EndRegion(Block* parent);
+    ~EndRegion() override = default;
+
+    EndRegion* Clone(CHIRBuilder& builder, Block& parent) const override;
 };
 } // namespace Cangjie::CHIR
 #endif // CANGJIE_CHIR_EXPRESSION_H

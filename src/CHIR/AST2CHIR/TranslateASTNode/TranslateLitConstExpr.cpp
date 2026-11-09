@@ -4,15 +4,16 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "cangjie/AST/Types.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 
 using namespace Cangjie::CHIR;
 using namespace Cangjie;
 
-Ptr<LiteralValue> Translator::TranslateLitConstant(const AST::LitConstExpr& expr, AST::Ty& realTy)
+Ptr<LiteralValue> Translator::TranslateLitConstant(const AST::LitConstExpr& expr, AST::ModalTy realTy)
 {
     auto chirTyToTrans = TranslateType(realTy);
-    switch (realTy.kind) {
+    switch (realTy.Kind()) {
         case AST::TypeKind::TYPE_FLOAT16:
         case AST::TypeKind::TYPE_FLOAT64:
         case AST::TypeKind::TYPE_IDEAL_FLOAT: {
@@ -60,11 +61,11 @@ Ptr<LiteralValue> Translator::TranslateLitConstant(const AST::LitConstExpr& expr
     }
 }
 
-Ptr<Constant> Translator::TranslateLitConstant(const AST::LitConstExpr& expr, AST::Ty& realTy, Ptr<Block> block)
+Ptr<Constant> Translator::TranslateLitConstant(const AST::LitConstExpr& expr, AST::ModalTy realTy, Ptr<Block> block)
 {
     auto loc = TranslateLocation(expr);
     auto chirTyToTrans = TranslateType(realTy);
-    switch (realTy.kind) {
+    switch (realTy.Kind()) {
         case AST::TypeKind::TYPE_UNIT: {
             return nullptr;
         }
@@ -120,7 +121,7 @@ Ptr<Constant> Translator::TranslateLitConstant(const AST::LitConstExpr& expr, AS
 
 Ptr<Value> Translator::Visit(const AST::LitConstExpr& expr)
 {
-    Constant* c = TranslateLitConstant(expr, *expr.GetTy(), currentBlock);
+    Constant* c = TranslateLitConstant(expr, expr.GetTy(), currentBlock);
     if (!c) {
         return nullptr;
     }

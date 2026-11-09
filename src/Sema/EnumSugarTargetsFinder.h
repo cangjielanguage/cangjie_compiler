@@ -28,8 +28,8 @@ public:
     {
     }
     std::vector<Ptr<AST::Decl>> FindEnumSugarTargets();
-    static std::optional<Ptr<AST::Ty>> RefineTargetTy(
-        TypeManager& typeManager, Ptr<AST::Ty> targetTy, Ptr<const AST::Decl> target);
+    static std::optional<AST::ModalTy> RefineTargetTy(
+        TypeManager& typeManager, AST::ModalTy targetTy, Ptr<const AST::Decl> target);
 
 private:
     void RefineTargets();

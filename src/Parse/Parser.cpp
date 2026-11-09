@@ -13,7 +13,6 @@
 #include "ParserImpl.h"
 
 #include "cangjie/AST/Clone.h"
-#include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Utils.h"
@@ -26,6 +25,23 @@ using namespace Cangjie;
 using namespace Cangjie::AST;
 
 namespace Cangjie {
+const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_KIND = {
+    {"JavaMirror", AST::AnnotationKind::JAVA_MIRROR}, {"JavaImpl", AST::AnnotationKind::JAVA_IMPL},
+    {"Java", AST::AnnotationKind::JAVA}, {"ObjC", AST::AnnotationKind::OBJ_C},
+    {"JavaHasDefault", AST::AnnotationKind::JAVA_HAS_DEFAULT}, {"ObjCMirror", AST::AnnotationKind::OBJ_C_MIRROR},
+    {"ObjCImpl", AST::AnnotationKind::OBJ_C_IMPL}, {"ForeignGetterName", AST::AnnotationKind::FOREIGN_GETTER_NAME},
+    {"ForeignSetterName", AST::AnnotationKind::FOREIGN_SETTER_NAME}, {"ObjCInit", AST::AnnotationKind::OBJ_C_INIT},
+    {"ObjCOptional", AST::AnnotationKind::OBJ_C_OPTIONAL}, {"ForeignName", AST::AnnotationKind::FOREIGN_NAME},
+    {"CallingConv", AST::AnnotationKind::CALLING_CONV}, {"C", AST::AnnotationKind::C},
+    {"Attribute", AST::AnnotationKind::ATTRIBUTE}, {"Intrinsic", AST::AnnotationKind::INTRINSIC},
+    {"OverflowThrowing", AST::AnnotationKind::NUMERIC_OVERFLOW},
+    {"OverflowWrapping", AST::AnnotationKind::NUMERIC_OVERFLOW},
+    {"OverflowSaturating", AST::AnnotationKind::NUMERIC_OVERFLOW}, {"When", AST::AnnotationKind::WHEN},
+    {"FastNative", AST::AnnotationKind::FASTNATIVE}, {"Annotation", AST::AnnotationKind::ANNOTATION},
+    {"ConstSafe", AST::AnnotationKind::CONSTSAFE}, {"Deprecated", AST::AnnotationKind::DEPRECATED},
+    {"Frozen", AST::AnnotationKind::FROZEN}, {"EnsurePreparedToMock", AST::AnnotationKind::ENSURE_PREPARED_TO_MOCK},
+    {"NonProduct", AST::AnnotationKind::NON_PRODUCT}};
+
 const std::unordered_map<AST::AnnotationKind, std::string> ANNO_KIND_TO_NAME = [] {
     std::unordered_map<AST::AnnotationKind, std::string> result;
     for (const auto& [name, kind] : NAME_TO_ANNO_KIND) {
@@ -36,20 +52,20 @@ const std::unordered_map<AST::AnnotationKind, std::string> ANNO_KIND_TO_NAME = [
 }
 
 Parser::Parser(unsigned int fileID, const std::string& input, DiagnosticEngine& diag, SourceManager& sm,
-    bool attachComment, bool parseDeclFile)
-    : impl{new ParserImpl{fileID, input, diag, sm, attachComment, parseDeclFile}}
+    bool attachComment, const GlobalOptions* opts)
+    : impl{new ParserImpl{fileID, input, diag, sm, attachComment, opts}}
 {
 }
 
 Parser::Parser(const std::string& input, DiagnosticEngine& diag, SourceManager& sm, const Position& pos,
-    bool attachComment, bool parseDeclFile)
-    : impl{new ParserImpl{input, diag, sm, pos, attachComment, parseDeclFile}}
+    bool attachComment, const GlobalOptions* opts)
+    : impl{new ParserImpl{input, diag, sm, pos, attachComment, opts}}
 {
 }
 
 Parser::Parser(const std::vector<Token>& inputTokens, DiagnosticEngine& diag, SourceManager& sm, bool attachComment,
-    bool parseDeclFile)
-    : impl{new ParserImpl{inputTokens, diag, sm, attachComment, parseDeclFile}}
+    const GlobalOptions* opts)
+    : impl{new ParserImpl{inputTokens, diag, sm, attachComment, opts}}
 {
 }
 
@@ -183,7 +199,7 @@ OwnedPtr<File> ParserImpl::ParseTopLevel()
     }
     // Parse importSpec in TopLevel.
     ParseImportSpecInTop(ret->imports, annos);
-    if (!scanDepPkg) {
+    if (!IsScanDepPkg()) {
         ParseTopLevelDecls(*ret, annos);
     }
     ret->end = lookahead.End();
@@ -495,7 +511,7 @@ void ParserImpl::CheckClassLikePropAbstractness(AST::PropDecl& prop)
 
 void ParserImpl::DiagMissingPropertyBody(AST::PropDecl& prop)
 {
-    if (parseDeclFile) {
+    if (IsParsingDeclFile()) {
         return;
     }
     auto builder =
@@ -512,6 +528,11 @@ void ParserImpl::ParseExtendedType(ExtendDecl& extendDecl)
         extendDecl.generic = ParseGeneric();
     }
     extendDecl.extendedType = ParseType();
+    if (extendDecl.extendedType->modal.HasLocal()) {
+        DiagUnexpectedModal(
+            MakeRange(extendDecl.extendedType->modal.LocalBegin(), extendDecl.extendedType->modal.LocalEnd()));
+        extendDecl.EnableAttr(Attribute::HAS_BROKEN);
+    }
     if (extendDecl.extendedType->astKind == ASTKind::PAREN_TYPE) {
         DiagUnexpectedTypeIn(*extendDecl.extendedType.get(), extendDecl.keywordPos, "extend",
             "Extend declaration cannot extend paren type");
@@ -568,7 +589,7 @@ OwnedPtr<Node> ParserImpl::ParseExprOrDecl(ScopeKind sk)
         return ParseExpr(Token{TokenKind::DOT}, std::move(expr));
     } else if (SeeingMacroCallDecl()) {
         return ParseMacroCall<MacroExpandDecl>(sk);
-    } else if (SeeingDecl()) {
+    } else if (SeeingDecl() || SeeingModalInfo()) {
         return ParseDecl(sk);
     } else if (SeeingExpr()) {
         return ParseExpr();
@@ -614,7 +635,7 @@ OwnedPtr<Block> ParserImpl::ParseExpressionOrDeclarations(ScopeKind sk)
             ConsumeUntilDeclOrNL(TokenKind::RCURL);
             SkipBlank(TokenKind::NL);
         }
-        if (SeeingMacroCallDecl() || SeeingDecl() || SeeingExpr()) {
+        if (SeeingMacroCallDecl() || SeeingDecl() || SeeingExpr() || SeeingModalInfo()) {
             auto node = ParseExprOrDecl(sk);
             result->body.emplace_back(std::move(node));
         } else {

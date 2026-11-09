@@ -153,7 +153,7 @@ void JavaSourceCodeGenerator::AddHeaderWithPackageName(std::string& curPackageNa
 }
 
 std::string JavaSourceCodeGenerator::MapCJTypeToJavaType(
-    const Ptr<Ty> ty, std::set<std::string>* javaImports, const std::string* curPackageName, bool isNativeMethod)
+    ModalTy ty, std::set<std::string>* javaImports, const std::string* curPackageName, bool isNativeMethod)
 {
     if (ty->IsCoreOptionType()) {
         return MapCJTypeToJavaType(ty->typeArgs[0], javaImports, curPackageName, isNativeMethod);
@@ -195,7 +195,7 @@ std::string JavaSourceCodeGenerator::MapCJTypeToJavaType(
             if (IsJArray(*declTy)) {
                 return MapCJTypeToJavaType(ty->typeArgs[0], javaImports, curPackageName) + "[]";
             }
-            javaType = AddImport(ty, javaImports, curPackageName);
+            javaType = AddImport(ty.Ty(), javaImports, curPackageName);
             break;
         case TypeKind::TYPE_STRUCT:
         case TypeKind::TYPE_ENUM:
@@ -244,7 +244,7 @@ void JavaSourceCodeGenerator::AddClassDeclaration()
 
         if (isClassInheritedFromClass) {
             res += " extends ";
-            res += MapCJTypeToJavaType(superClassPtr->GetTy(), &imports, &classDecl->fullPackageName);
+            res += MapCJTypeToJavaType(superClassPtr->DataTy(), &imports, &classDecl->fullPackageName);
         }
 
         if (implementedInterfacesCnt > 0) {
@@ -252,7 +252,7 @@ void JavaSourceCodeGenerator::AddClassDeclaration()
             std::set<std::string>* imp = &imports;
             const std::string* package = &classDecl->fullPackageName;
             const std::function<std::string(Ptr<InterfaceTy>)>& transformer = [this, imp, package](Ptr<InterfaceTy> p) {
-                return MapCJTypeToJavaType(p, imp, package);
+                return MapCJTypeToJavaType({p}, imp, package);
             };
             res += Join(implementedInterfacesPtrs, ", ", transformer);
         }
@@ -480,7 +480,7 @@ std::pair<std::string, std::string> JavaSourceCodeGenerator::GenNativeSuperArgCa
     std::vector<std::string> parts = Cangjie::Utils::SplitString(id.substr(keyword.length()), sep);
     std::vector<std::string> args;
     std::vector<std::string> nativeParams;
-    auto mpTy = [this](const Ptr<Ty> ty) { return MapCJTypeToJavaType(ty, &imports, &decl->fullPackageName); };
+    auto mpTy = [this](ModalTy ty) { return MapCJTypeToJavaType(ty, &imports, &decl->fullPackageName); };
     // Skip first part.
     for (size_t i = 1; i < parts.size(); i++) {
         auto pid = Cangjie::Stoi(parts[i]);
@@ -488,7 +488,7 @@ std::pair<std::string, std::string> JavaSourceCodeGenerator::GenNativeSuperArgCa
         auto index = pid.value();
         auto& pname = params[static_cast<size_t>(index)]->identifier.Val();
         args.push_back(pname);
-        nativeParams.push_back(mpTy(params[static_cast<size_t>(index)]->GetTy()) + " " + pname);
+        nativeParams.push_back(mpTy(params[static_cast<size_t>(index)]->DataTy()) + " " + pname);
     }
     std::string superCall = id + "(" + Cangjie::Utils::JoinStrings(args, ", ") + ")";
     std::string nativeFnDecl = "private static final native " + mpTy(arg.GetTy()) + " " + id + "(" +

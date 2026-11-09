@@ -64,7 +64,7 @@ void StructInheritanceChecker::CheckUpperBoundsConfliction(const Generic& generi
 {
     for (auto& gc : generic.genericConstraints) {
         CJC_ASSERT(gc && gc->type);
-        auto gTy = DynamicCast<GenericsTy*>(gc->type->GetTy());
+        auto gTy = DynamicCast<GenericsTy>(gc->type->DataTy());
         if (gTy == nullptr || gTy->decl->TestAttr(Attribute::IN_REFERENCE_CYCLE)) {
             continue; // Ignore invalid generic types.
         }
@@ -81,14 +81,14 @@ void StructInheritanceChecker::CheckUpperBoundsConfliction(const Generic& generi
         for (auto iTy : uppers) {
             auto interfaceDecl = Ty::GetDeclPtrOfTy<InheritableDecl>(iTy);
             if (auto found = structInheritedMembers.find(interfaceDecl); found != structInheritedMembers.end()) {
-                MergeInheritedMembers(inheritedMembers, found->second, *iTy, true);
+                MergeInheritedMembers(inheritedMembers, found->second, iTy, true);
             }
         }
         // 3. Update member if valid class upperBound existed.
         if (auto cd = Ty::GetDeclPtrOfTy<InheritableDecl>(classTy)) {
-            auto members = GetInheritedSuperMembers(*cd, *classTy, *generic.curFile);
+            auto members = GetInheritedSuperMembers(*cd, {classTy}, *generic.curFile);
             // Since tys are upperbounds of generic, treat them as same inherited types to update 'inconstent' types.
-            MergeInheritedMembers(inheritedMembers, members, *classTy, true);
+            MergeInheritedMembers(inheritedMembers, members, classTy, true);
         }
         // 4. Report for members which have conflict upperbounds.
         for (auto& [_, member] : std::as_const(inheritedMembers)) {

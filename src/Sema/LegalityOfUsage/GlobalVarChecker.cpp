@@ -84,7 +84,7 @@ Ptr<Decl> GetTargetIfShouldCollect(const Expr& expr)
     // Get real used target. eg: if target is property, get real used getter or setter which is decided by expr.
     target = GetUsedMemberDecl(*target, !expr.TestAttr(Attribute::LEFT_VALUE));
     // The target only need be collected when it is funcDecl.
-    return target->astKind == ASTKind::FUNC_DECL ? target : nullptr;
+    return target && target->astKind == ASTKind::FUNC_DECL ? target : nullptr;
 }
 
 inline bool CanBeIgnored(const Decl& decl)

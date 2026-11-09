@@ -23,6 +23,58 @@ using namespace Cangjie;
 using namespace AST;
 using namespace Meta;
 
+TEST(ParseModalType, OptionalTypeCarriesItsOwnLocality)
+{
+    for (const auto& entry : std::vector<std::pair<std::string, ASTMode>>{
+             {"?C@local!", ASTMode::FULL}, {"?Int64@~local", ASTMode::NOT}}) {
+        const auto& code = entry.first;
+        SCOPED_TRACE(code);
+        SourceManager sm;
+        DiagnosticEngine diag;
+        diag.SetSourceManager(&sm);
+        Parser parser(code, diag, sm);
+        auto type = parser.ParseType();
+        ASSERT_NE(type, nullptr);
+        EXPECT_EQ(diag.GetErrorCount(), 0u);
+        ASSERT_TRUE(Is<OptionType>(type.get()));
+        EXPECT_EQ(type->modal.Local(), entry.second);
+        auto option = StaticCast<OptionType>(type.get());
+        ASSERT_NE(option->componentType, nullptr);
+        EXPECT_FALSE(option->componentType->modal.HasLocal());
+    }
+}
+
+TEST(ParseModalType, NonAdjacentOrIncompleteSpecifierDoesNotBecomeAModal)
+{
+    for (const std::string code : {"C@local !", "C@local ?", "C@~ local", "C@local", "C@~other", "C@"}) {
+        SCOPED_TRACE(code);
+        SourceManager sm;
+        DiagnosticEngine diag;
+        diag.SetSourceManager(&sm);
+        Parser parser(code, diag, sm);
+        auto type = parser.ParseType();
+        ASSERT_NE(type, nullptr);
+        EXPECT_FALSE(type->modal.HasLocal());
+    }
+}
+
+TEST(ParseModalType, AdjacentInitializerKeepsItsAssignmentToken)
+{
+    SourceManager sm;
+    DiagnosticEngine diag;
+    diag.SetSourceManager(&sm);
+    const std::string code = "let value: C@local!=C()";
+    Parser parser(code, diag, sm);
+    auto decl = parser.ParseDecl(ScopeKind::TOPLEVEL);
+    ASSERT_EQ(diag.GetErrorCount(), 0u);
+    ASSERT_TRUE(Is<VarDecl>(decl.get()));
+    auto var = StaticCast<VarDecl>(decl.get());
+    ASSERT_NE(var->type, nullptr);
+    EXPECT_EQ(var->type->modal.Local(), ASTMode::FULL);
+    ASSERT_NE(var->initializer, nullptr);
+    EXPECT_TRUE(Is<CallExpr>(var->initializer.get()));
+}
+
 TEST(ParseType, ParseTypePosition)
 {
     std::string code = R"(

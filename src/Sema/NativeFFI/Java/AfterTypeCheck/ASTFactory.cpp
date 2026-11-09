@@ -29,10 +29,10 @@ OwnedPtr<FuncArg> CreateInoutVArrayArg(OwnedPtr<Expr> expr, TypeManager& typeMan
     CJC_ASSERT(expr->TyKind() == TypeKind::TYPE_VARRAY);
 
     auto arg = CreateFuncArg(std::move(expr));
-    auto* varrayTy = StaticCast<VArrayTy>(arg->GetTy());
+    auto* varrayTy = StaticCast<VArrayTy>(arg->DataTy());
     CJC_ASSERT_WITH_MSG(!varrayTy->typeArgs.empty(), "VArray must be generic");
     arg->withInout = true;
-    arg->SetTy(typeManager.GetPointerTy(varrayTy->typeArgs[0]));
+    arg->SetTy({typeManager.GetPointerTy(varrayTy->TyArg(0))});
     return arg;
 }
 } // namespace
@@ -165,7 +165,7 @@ OwnedPtr<Block> ASTFactory::CreateJavaMethodCall(AfterTypeCheckContext& ctx, Ptr
     CJC_ASSERT(method.IsMethod());
     CJC_ASSERT(method.IsStatic() || jobjectInstance); // instance cannot be null if method is non-static.
 
-    auto block = CreateBlock({}, &retTy);
+    auto block = CreateBlock({}, {&retTy});
     block->curFile = curFile;
 
     static auto convertJniValueToJavaCompatible = [this](OwnedPtr<Expr> jniValue,
@@ -271,7 +271,7 @@ OwnedPtr<AST::Block> ASTFactory::CreateJavaFieldGetCall(AfterTypeCheckContext& c
     auto curFile = jniEnvPtr->curFile;
     CJC_ASSERT(field.IsField());
     CJC_ASSERT(field.IsStatic() || jobjectInstance); // instance cannot be null if field is non-static.
-    auto block = CreateBlock({}, &ty);
+    auto block = CreateBlock({}, {&ty});
     block->curFile = curFile;
 
     static auto convertJniValueToJavaCompatible = [this](OwnedPtr<Expr> jniValue,
@@ -331,7 +331,7 @@ OwnedPtr<AST::Block> ASTFactory::CreateJavaFieldSetCall(AfterTypeCheckContext& c
     CJC_ASSERT(field.IsField());
     CJC_ASSERT(field.IsStatic() || jobjectInstance); // instance cannot be null if field is non-static.
     auto curFile = jniEnvPtr->curFile;
-    auto block = CreateBlock({}, TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT));
+    auto block = CreateBlock({}, {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
     block->curFile = curFile;
 
     auto jclass = jclassCache.CreateJClassAccess(ctx, field.GetClassSignature(), jniEnvPtr);
@@ -370,7 +370,7 @@ OwnedPtr<VarDecl> ASTFactory::CreateTmpVArrayVarDecl(std::vector<OwnedPtr<Expr>>
     auto jvalueTy = ilib.GetJValueTy();
     CJC_NULLPTR_CHECK(jvalueTy);
     auto varrayTy = typeManager.GetVArrayTy(*jvalueTy, static_cast<int64_t>(args.size()));
-    auto argsArray = CreateArrayLit(std::move(args), varrayTy);
+    auto argsArray = CreateArrayLit(std::move(args), {varrayTy});
     auto argsVar = CreateTmpVarDecl(nullptr, std::move(argsArray));
     argsVar->isVar = true;
     argsVar->SetTy(argsVar->initializer->GetTy());

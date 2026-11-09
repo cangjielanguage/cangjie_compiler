@@ -523,17 +523,21 @@ size_t DeCompression<T>::ForwardName(T& mangled, size_t idx)
         numberLen++;
     }
     uint32_t number{};
+#ifndef CANGJIE_ENABLE_GCOV
     try {
+#endif
         std::string numberStr = mangled.SubStr(idx, numberLen);
         long long num = std::stoll(numberStr);
         if (num > std::numeric_limits<uint32_t>::max() || num < 0) {
             return idx;
         }
         number = static_cast<uint32_t>(num);
+#ifndef CANGJIE_ENABLE_GCOV
     } catch (const std::exception& ex) {
         // Failed to convert to int
         return idx;
     }
+#endif
     if (idx + numberLen + number > mangled.Length()) {
         return idx;
     }

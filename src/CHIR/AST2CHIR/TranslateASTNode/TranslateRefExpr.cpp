@@ -22,7 +22,7 @@ Translator::LeftValueInfo Translator::TranslateThisOrSuperRefAsLeftValue(const A
     CJC_ASSERT(curFunc);
     auto thisParam = GetImplicitThisParam();
     if (refExpr.isSuper) {
-        auto superTy = TranslateType(*refExpr.GetTy());
+        auto superTy = TranslateType(refExpr.GetTy());
         auto loc = TranslateLocation(refExpr);
         thisParam = TypeCastOrBoxIfNeeded(*thisParam, *superTy, loc);
     }
@@ -63,9 +63,9 @@ Translator::LeftValueInfo Translator::TranslateEnumMemberVarRef(const AST::RefEx
     auto loc = TranslateLocation(refExpr);
 
     // polish here
-    auto enumTy = StaticCast<EnumTy*>(refExpr.GetTy());
-    auto enumType = StaticCast<EnumType*>(chirTy.TranslateType(*enumTy));
+    auto enumType = StaticCast<EnumType*>(chirTy.TranslateType(refExpr.GetTy()));
     uint64_t enumId = GetEnumCtorId(*target);
+    auto enumTy = StaticCast<EnumTy*>(refExpr.DataTy());
     auto selectorTy = GetSelectorType(*enumTy);
     if (enumTy->decl->hasArguments) {
         std::vector<Value*> args;
@@ -373,7 +373,7 @@ Value* Translator::TranslateGlobalOrLocalFuncRef(const AST::RefExpr& refExpr, Va
     }
     // emplace back `Bool`
     for (auto ty : refExpr.instTys) {
-        instArgs.emplace_back(TranslateType(*ty));
+        instArgs.emplace_back(TranslateType(ty));
     }
 
     if (instArgs.empty()) {
@@ -381,7 +381,7 @@ Value* Translator::TranslateGlobalOrLocalFuncRef(const AST::RefExpr& refExpr, Va
     }
 
     // 3. create GetInstantiateValue
-    auto resTy = TranslateType(*refExpr.GetTy());
+    auto resTy = TranslateType(refExpr.GetTy());
     auto loc = TranslateLocation(refExpr);
     return CreateAndAppendExpression<GetInstantiateValue>(loc, resTy, &originalFunc, instArgs, currentBlock)
         ->GetResult();

@@ -10,6 +10,7 @@
  * This file implements checks of @ObjCInit annotated method.
  */
 
+#include "Diags.h"
 #include "Handlers.h"
 #include "NativeFFI/ObjC/Utils/ASTQuery.h"
 #include "cangjie/AST/Match.h"
@@ -28,7 +29,7 @@ void CheckInitMethod::HandleImpl(TypeCheckContext& ctx)
         if (!method || !IsObjCInitMethod(*method)) {
             continue;
         }
-        auto fTy = DynamicCast<FuncTy*>(method->GetTy());
+        auto fTy = DynamicCast<FuncTy>(method->DataTy());
         if (!fTy || !method->funcBody->retType) {
             continue;
         }
@@ -39,7 +40,7 @@ void CheckInitMethod::HandleImpl(TypeCheckContext& ctx)
         }
 
         ctx.diag.DiagnoseRefactor(DiagKindRefactor::sema_mismatched_types, *method->funcBody->retType)
-            .AddMainHintArguments(Ty::ToString(mirrorTy), Ty::ToString(retTy));
+            .AddMainHintArguments(mirrorTy.String(), retTy.String());
         ctx.target.EnableAttr(Attribute::IS_BROKEN);
     }
 }

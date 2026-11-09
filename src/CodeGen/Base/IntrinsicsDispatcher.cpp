@@ -120,7 +120,8 @@ llvm::Value* GenerateArrayIndex(IRBuilder2& irBuilder, const CHIR::IntrinsicBase
         if (intrinsic.GetArgs().size() >= 3) { // An argument length of at least 3 is required
             // set the value at an index in an array using arr[index] = value
             auto value = cgMod | intrinsic.GetOperand(2);
-            irBuilder.CallArrayIntrinsicSet(*arrTy, **arrayValue, **indexValue, *value, isChecked);
+            auto writeKind = arrTy->IsLocalRegion() ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE;
+            irBuilder.CallArrayIntrinsicSet(*arrTy, **arrayValue, **indexValue, *value, isChecked, writeKind);
             return nullptr;
         } else {
             // get the value at an index in an array using arr[index]
@@ -468,7 +469,7 @@ llvm::Value* CPointerRead(IRBuilder2& irBuilder, const CHIR::IntrinsicBase& intr
     if (retTy->IsGeneric()) {
         auto tiOfResult = irBuilder.CreateTypeInfo(retTy);
         auto retTySize = irBuilder.GetLayoutSize_32(*retTy);
-        ret = irBuilder.CallIntrinsicAllocaGeneric({tiOfResult, retTySize});
+        ret = irBuilder.CallIntrinsicAllocaGeneric({tiOfResult, retTySize}, retTy->IsLocalRegion());
         auto destPayloadPtr = irBuilder.GetPayloadFromObject(ret);
         auto fixedTypeSize = irBuilder.CreateZExtOrTrunc(retTySize, llvm::Type::getInt64Ty(cgMod.GetLLVMContext()));
         auto offset = irBuilder.CreateMul(fixedTypeSize, pointerIndex);

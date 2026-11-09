@@ -103,6 +103,17 @@ enum SourceExpr: uint8 {
 table Type {
   kind: CHIRTypeKind;
   argTys: [uint32]; // use types id
+  modal: ModalInfo;
+}
+
+enum Mode: int16 {
+  NONE,
+  MAYBE,
+  MUST,
+}
+
+table ModalInfo {
+  local: Mode;
 }
 
 table RawArrayType {
@@ -316,6 +327,7 @@ table Parameter {
   ownedLambda: uint32;  // use exprs id
   srcCodeIdentifier: string(shared);
   annoInfo: AnnoInfo;
+  paramDftValFunc: uint32; // use values id, desugared default-value Function
 }
 
 table LocalVar {
@@ -373,7 +385,7 @@ table Function {
   isCFFIWrapper: bool;
   originalLambdaInfo: FuncSigInfo;
   genericTypeParams: [uint32]; // use types id
-  paramDftValHostFunc: uint32; // use values id
+  paramDftValHostParam: uint32; // use values id, host Parameter of default-value desugar func
   body: uint32; // use values id, 0 for imported func
   params: [uint32]; // use values id (signature params for imported func, body params for func with body)
   retVal: uint32; // use values id
@@ -591,7 +603,10 @@ enum CHIRExprKind: uint8 {
   Invoke,
   Intrinsic,
   GetRtti,
-  GetRttiStatic
+  GetRttiStatic,
+  Exclave,
+  StartRegion,
+  EndRegion,
 }
 
 enum IntrinsicKind: uint16 {
@@ -1157,6 +1172,8 @@ table Lambda {
   body: uint32; // use values id
   retVal: uint32; // use values id
   isCompileTimeValue: bool = false;
+  paramDftValHostParam: uint32; // use values id, host Parameter of default-value desugar lambda
+  genericDecl: uint32; // use exprs id, generic Lambda of an instantiated nested func
 }
 
 table GetInstantiateValue {

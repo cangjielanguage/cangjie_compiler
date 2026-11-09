@@ -61,7 +61,7 @@ static void CollectMethods(const CustomTypeDef& chirClass, Bchir::SClassInfo& cl
             if (funcInfo.GetMethodSigType() == nullptr) {
                 continue;
             }
-            auto methodName = MangleMethodName(funcInfo.GetMethodName(), *funcInfo.GetMethodSigType());
+            auto methodName = MangleMethodName<true>(funcInfo.GetMethodName(), *funcInfo.GetMethodSigType());
             if (!funcInfo.GetVirtualMethod()->IsPureAbstract()) {
                 classInfo.vtable.emplace(methodName, funcInfo.GetVirtualMethod()->GetIdentifierWithoutPrefix());
             } // else, this class/interface does not implement the method
@@ -365,6 +365,19 @@ template <bool ForConstEval> CHIR2BCHIR::Context CHIR2BCHIR::TranslateGlobalVar(
     return ctx;
 }
 
+void CHIR2BCHIR::TranslateBlockGroup(Context& ctx, const BlockGroup& bbGroup)
+{
+    CJC_ASSERT(bbGroup.GetEntryBlock());
+    TranslateBlock(ctx, *bbGroup.GetEntryBlock());
+    // translate all other blocks
+    for (auto bb : bbGroup.GetBlocks()) {
+        if (bb == bbGroup.GetEntryBlock()) {
+            continue;
+        }
+        TranslateBlock(ctx, *bb);
+    }
+}
+
 void CHIR2BCHIR::TranslateFuncDef(Context& ctx, const Function& func)
 {
     auto args = func.GetParams();
@@ -379,15 +392,8 @@ void CHIR2BCHIR::TranslateFuncDef(Context& ctx, const Function& func)
     ctx.def.Push(OpCode::DROP);
     // start translating the entry block
     auto bbGroup = func.GetBody();
-    CJC_ASSERT(bbGroup->GetEntryBlock());
-    TranslateBlock(ctx, *bbGroup->GetEntryBlock());
-    // translate all other blocks
-    for (auto bb : bbGroup->GetBlocks()) {
-        if (bb == bbGroup->GetEntryBlock()) {
-            continue;
-        }
-        TranslateBlock(ctx, *bb);
-    }
+    CJC_NULLPTR_CHECK(bbGroup);
+    TranslateBlockGroup(ctx, *bbGroup);
     // we use this number to pop from argStack
     ctx.def.SetNumArgs(static_cast<unsigned>(func.GetNumOfParams()));
     // we use this number to reserve space for a env(stack) frame

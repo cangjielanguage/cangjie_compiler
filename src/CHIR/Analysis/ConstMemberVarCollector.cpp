@@ -14,7 +14,6 @@
 
 #include "cangjie/CHIR/Utils/Utils.h"
 #include "cangjie/CHIR/Utils/Visitor/Visitor.h"
-#include "cangjie/Utils/Casting.h"
 
 namespace Cangjie::CHIR {
 

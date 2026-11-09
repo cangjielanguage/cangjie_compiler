@@ -141,9 +141,6 @@ Function* GenerateVTable::GetMutFuncWrapper(const Type& thisType, const std::vec
     for (auto arg : args) {
         paramTypes.emplace_back(arg->GetType());
     }
-    if (!callee.TestAttr(Attribute::STATIC)) {
-        paramTypes.erase(paramTypes.begin());
-    }
     auto funcCallType = FuncCallType {
         .funcName = callee.GetSrcCodeIdentifier(),
         .funcType = builder.GetType<FuncType>(paramTypes, &retType),

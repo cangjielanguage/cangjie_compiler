@@ -860,5 +860,7 @@ Function* GetCalleeInSrcParentType(
     Function& callee, const std::string& methodName, std::optional<size_t> expectedOffset = std::nullopt);
 
 void AddTypeCastForReturnVal(Expression& expr, Type& expectedTy, CHIRBuilder& builder);
+
+bool LambdaIsUnused(const Lambda& lambda);
 } // namespace Cangjie::CHIR
 #endif

@@ -11,8 +11,9 @@
  */
 
 #include "ExtraScopes.h"
-#include "TypeCheckUtil.h"
 #include "Promotion.h"
+#include "TypeCheckUtil.h"
+#include "cangjie/AST/Match.h"
 #include <algorithm>
 
 namespace Cangjie {
@@ -87,18 +88,19 @@ InstCtxScope::~InstCtxScope()
     tyMgr.instCtxScopes.pop_back();
 }
 
-void InstCtxScope::SetRefDecl(const AST::Decl& decl, Ptr<AST::Ty> instTy)
+void InstCtxScope::SetRefDecl(const AST::Decl& decl, AST::ModalTy instTy)
 {
     if (!decl.generic) {
         return;
     }
     auto& genParams = decl.generic->typeParameters;
-    CJC_ASSERT(genParams.size() == instTy->typeArgs.size());
+    auto typeArgs = instTy->TyArgs();
+    CJC_ASSERT(genParams.size() == typeArgs.size());
     refMaps = {};
-    for (size_t i = 0; i < instTy->typeArgs.size(); i++) {
+    for (size_t i = 0; i < typeArgs.size(); i++) {
         auto itv = tyMgr.AllocTyVar();
-        refMaps.u2i[StaticCast<GenericsTy*>(genParams[i]->GetTy())] = itv;
-        refMaps.inst[itv].insert(instTy->typeArgs[i]);
+        refMaps.u2i[StaticCast<GenericsTy*>(genParams[i]->DataTy())] = itv;
+        refMaps.inst[itv].insert(typeArgs[i]);
     }
     maps = curMaps;
     MergeSubstPack(maps, refMaps);
@@ -109,7 +111,7 @@ bool InstCtxScope::GenerateTypeMappingByCallContext(
 {
     CJC_NULLPTR_CHECK(ce.baseFunc);
     CJC_ASSERT(ce.baseFunc->astKind == ASTKind::REF_EXPR);
-    bool invalid = !fd.outerDecl || !Ty::IsTyCorrect(fd.outerDecl->GetTy());
+    bool invalid = !fd.outerDecl || !fd.outerDecl->GetTy().IsCorrect();
     if (invalid) {
         return false;
     }
@@ -121,7 +123,7 @@ bool InstCtxScope::GenerateTypeMappingByCallContext(
     if (!sym || !sym->node || !sym->node->GetTy()) {
         return false;
     }
-    auto prRes = Promotion(tyMgr).Promote(*sym->node->GetTy(), *structDecl->GetTy());
+    auto prRes = Promotion(tyMgr).Promote(sym->node->GetTy(), structDecl->GetTy());
     bool generated = false;
     for (auto promoteTy : prRes) {
         if (!Ty::IsTyCorrect(promoteTy)) {
@@ -131,13 +133,13 @@ bool InstCtxScope::GenerateTypeMappingByCallContext(
         // just check the constraint of generic structure without diagnose (using function in typeManger)
         // otherwise check the constraint and report error.
         bool isConstraintFit = IsCurrentGeneric(fd, ce)
-            ? tyMgr.CheckGenericDeclInstantiation(structDecl, promoteTy->typeArgs)
+            ? tyMgr.CheckGenericDeclInstantiation(structDecl, promoteTy->TyArgs())
             : typeChecker.CheckGenericDeclInstantiation(structDecl, promoteTy->typeArgs, ce);
         bool invalidArgSize = structDecl->GetTy()->typeArgs.size() != promoteTy->typeArgs.size();
         if (!isConstraintFit || invalidArgSize) {
             continue;
         }
-        GenerateTypeMapping(tyMgr, typeMapping, *structDecl, promoteTy->typeArgs);
+        GenerateTypeMapping(tyMgr, typeMapping, *structDecl, promoteTy->TyArgs());
         generated = true;
     }
     return generated;
@@ -148,7 +150,7 @@ bool InstCtxScope::GenerateExtendGenericTypeMapping(
     const ASTContext& ctx, const FuncDecl& fd, const CallExpr& ce, SubstPack& typeMapping)
 {
     auto extend = RawStaticCast<ExtendDecl*>(fd.outerDecl);
-    if (!extend->extendedType || !Ty::IsTyCorrect(extend->extendedType->GetTy())) {
+    if (!extend->extendedType || !extend->extendedType->GetTy().IsCorrect()) {
         return false;
     }
     if (!IsCurrentGeneric(fd, ce) && extend->TestAttr(Attribute::GENERIC) &&
@@ -167,7 +169,7 @@ bool InstCtxScope::GenerateExtendGenericTypeMapping(
     }
 
     auto ma = StaticAs<ASTKind::MEMBER_ACCESS>(ce.baseFunc.get());
-    if (!ma->baseExpr || !Ty::IsTyCorrect(ma->baseExpr->GetTy())) {
+    if (!ma->baseExpr || !ma->baseExpr->GetTy().IsCorrect()) {
         return false;
     }
 
@@ -176,7 +178,7 @@ bool InstCtxScope::GenerateExtendGenericTypeMapping(
         // But the placeholders are only for extend's generic args.
         // The baseExpr's ty args will be inferred in FillTypeArgumentsTy.
         for (auto& extGenParam : extend->generic->typeParameters) {
-            tyMgr.MakeInstTyVar(typeMapping, *StaticCast<GenericsTy*>(extGenParam->GetTy()));
+            tyMgr.MakeInstTyVar(typeMapping, *StaticCast<GenericsTy*>(extGenParam->DataTy()));
         }
     }
     if (IsBaseTypeOmittedTypeArgs(*ma)) {
@@ -186,14 +188,19 @@ bool InstCtxScope::GenerateExtendGenericTypeMapping(
     // member access's type should be able to promote a valid type with extended type,
     // and the extended type must have same number of type arguments with the promoted type.
     auto prTys = Promotion(tyMgr).Promote(
-        *ma->baseExpr->GetTy(), *tyMgr.GetInstantiatedTy(extend->extendedType->GetTy(), typeMapping.u2i));
-    auto promotedTy = prTys.empty() ? TypeManager::GetInvalidTy() : *prTys.begin();
+        ma->baseExpr->GetTy(), tyMgr.GetInstantiatedTy(extend->extendedType->GetTy(), typeMapping.u2i));
+    ModalTy promotedTy = prTys.empty() ? ModalTy{TypeManager::GetInvalidTy()} : *prTys.begin();
     if (!Ty::IsTyCorrect(promotedTy)) {
         return false;
     }
     auto baseArgs = tyMgr.GetTypeArgs(*promotedTy);
+    std::vector<ModalTy> baseArgsModal;
+    baseArgsModal.reserve(baseArgs.size());
+    for (auto dt : baseArgs) {
+        baseArgsModal.emplace_back(dt);
+    }
     if (extend->TestAttr(Attribute::GENERIC) &&
-        !typeChecker.CheckGenericDeclInstantiation(fd.outerDecl, baseArgs, ce)) {
+        !typeChecker.CheckGenericDeclInstantiation(fd.outerDecl, baseArgsModal, ce)) {
         return false;
     }
     GenerateTypeMapping(tyMgr, typeMapping, *extend, baseArgs);
@@ -215,7 +222,7 @@ void InstCtxScope::GenerateSubstPackByTyArgs(
         if (!generic.typeParameters[i]) {
             continue;
         }
-        auto uTy = generic.typeParameters[i]->GetTy();
+        auto uTy = generic.typeParameters[i]->DataTy();
         if (Ty::IsTyCorrect(uTy)) {
             auto uGenTy = StaticCast<GenericsTy*>(uTy);
             if (tmaps.u2i.count(uGenTy) == 0) {
@@ -225,8 +232,8 @@ void InstCtxScope::GenerateSubstPackByTyArgs(
             if (i >= typeArgs.size()) {
                 continue;
             }
-            if (typeArgs[i] && Ty::IsTyCorrect(typeArgs[i]->GetTy()) && !typeArgs[i]->GetTy()->HasIntersectionTy()) {
-                tmaps.inst[StaticCast<GenericsTy*>(tmaps.u2i[uGenTy])] = {typeArgs[i]->GetTy()};
+            if (typeArgs[i] && typeArgs[i]->GetTy().IsCorrect() && !typeArgs[i]->GetTy()->HasIntersectionTy()) {
+                tmaps.inst[StaticCast<GenericsTy*>(tmaps.u2i[uGenTy])] = {typeArgs[i]->DataTy()};
             }
         }
     }
@@ -240,7 +247,7 @@ void TypeChecker::TypeCheckerImpl::GenerateTypeMappingForBaseExpr(const Expr& ba
         return;
     }
     auto& ma = static_cast<const MemberAccess&>(baseExpr);
-    if (!Ty::IsTyCorrect(ma.baseExpr->GetTy())) {
+    if (!ma.baseExpr->GetTy().IsCorrect()) {
         return;
     }
     CJC_ASSERT(!ma.baseExpr->GetTy()->HasIntersectionTy());
@@ -265,22 +272,22 @@ void TypeChecker::TypeCheckerImpl::GenerateTypeMappingForBaseExpr(const Expr& ba
     if (typeDeclMemberAccess) {
         CJC_NULLPTR_CHECK(maTarget->outerDecl->GetTy());
         auto instBaseTy = typeManager.GetInstantiatedTy(ma.baseExpr->GetTy(), directMapping.u2i);
-        auto promoteMapping = promotion.GetPromoteTypeMapping(*instBaseTy, *maTarget->outerDecl->GetTy());
+        auto promoteMapping = promotion.GetPromoteTypeMapping(instBaseTy.Ty(), maTarget->outerDecl->DataTy());
         if (realBase->GetTy() != instBaseTy) {
-            typeManager.PackMapping(typeMapping, GenerateTypeMapping(*realBase, instBaseTy->typeArgs));
+            typeManager.PackMapping(typeMapping, GenerateTypeMapping(*realBase, instBaseTy->TyArgs()));
         }
         auto baseTypeArgs = ma.baseExpr->GetTypeArgs();
-        std::unordered_set<Ptr<Ty>> baseTyArgs;
+        std::unordered_set<DataTy> baseTyArgs;
         std::for_each(
-            baseTypeArgs.begin(), baseTypeArgs.end(), [&baseTyArgs](auto type) { baseTyArgs.emplace(type->GetTy()); });
-        auto genericTys = GetAllGenericTys(realBase->GetTy());
+            baseTypeArgs.begin(), baseTypeArgs.end(), [&baseTyArgs](auto type) { baseTyArgs.emplace(type->DataTy()); });
+        auto genericTys = GetAllGenericTys(realBase->DataTy());
         for (auto it = promoteMapping.begin(); it != promoteMapping.end(); ++it) {
             // If mapped 'ty' exists in 'realBase' generic types
             // and is not found in user defined type args, remove it from mapping.
             Utils::EraseIf(it->second,
                 [&genericTys, &baseTyArgs](auto ty) { return genericTys.count(ty) != 0 && baseTyArgs.count(ty) == 0; });
         }
-        auto genericTysInst = GetAllGenericTys(ma.baseExpr->GetTy());
+        auto genericTysInst = GetAllGenericTys(ma.baseExpr->DataTy());
         /* in case the used type is alias, the ty vars to be solved are type parameters of the alias decl
          * but in case the type args are already given by users, they don't need to be solved */
         Utils::EraseIf(directMapping.u2i, [&genericTysInst](auto it) { return genericTysInst.count(it.first) == 0; });

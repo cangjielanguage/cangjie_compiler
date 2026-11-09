@@ -142,7 +142,7 @@ public:
      *  @param builder CHIR builder
      *  @return true if signatures match, false otherwise
      */
-    bool FuncSigIsMatched(const FuncSigInfo& other, CHIRBuilder& builder) const;
+    bool FuncSigIsMatched(const FuncSigInfo& other, bool isStatic, CHIRBuilder& builder) const;
 
     /** @brief Check if function signature matches (compare with FuncCallType, supports generic substitution)
      *         `replaceTable` is a copy, we don't want generic type defined in func decl to be emplaced in
@@ -151,7 +151,7 @@ public:
      *  @param builder CHIR builder
      *  @return true if signatures match, false otherwise
      */
-    bool FuncSigIsMatched(const FuncCallType& other,
+    bool FuncSigIsMatched(const FuncCallType& other, bool isStatic,
         std::unordered_map<const GenericType*, Type*> replaceTable, CHIRBuilder& builder) const;
 
     /** @brief Test if the method has the specified attribute
@@ -161,6 +161,9 @@ public:
     bool TestAttr(Attribute a) const;
 
 private:
+    bool FuncSigIsMatchedImpl(const FuncCallType& other, bool isStatic,
+        std::unordered_map<const GenericType*, Type*>& replaceTable, CHIRBuilder& builder) const;
+
     // condition
     FuncSigInfo condition;
     // result

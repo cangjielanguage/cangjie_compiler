@@ -25,7 +25,7 @@ llvm::Function* GenTypeInfoFns(llvm::FunctionType* fieldFnType, CGModule& cgMod,
     if (cgType->IsConcrete() || cgType->IsStaticGI()) {
         ti = irBuilder.CreateTypeInfo(memberType, genericParamsMap);
     } else if (memberType.IsGeneric()) {
-        auto gt = static_cast<const CHIR::GenericType*>(&memberType);
+        auto gt = static_cast<const CHIR::GenericType*>(memberType.GetDataType(cgMod.GetCGContext().GetCHIRBuilder()));
         std::string varName = "ti." + gt->GetSrcCodeIdentifier();
         ti = irBuilder.GetTypeInfoFromTiArray(getTiFn->getArg(1), outerGTIdxMap.at(gt), varName);
     } else {

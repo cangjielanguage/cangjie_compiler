@@ -13,6 +13,7 @@
 #include "cangjie/CHIR/IR/CHIRContext.h"
 
 #include <thread>
+#include <unordered_map>
 #include "cangjie/Basic/Print.h"
 #include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/IR/Package.h"
@@ -34,6 +35,99 @@ const int ALLOCATED_CLASSES_START_IDX = 4;
 const int ALLOCATED_CLASSES_END_IDX = 5;
 const int ALLOCATED_ENUMS_START_IDX = 6;
 const int ALLOCATED_ENUMS_END_IDX = 7;
+
+Type* WithModalImpl(CHIRContext& ctx, Type* ty, ModalInfo modal,
+    std::unordered_map<const GenericType*, GenericType*>& genericMemo)
+{
+    if (ty == nullptr) {
+        return nullptr;
+    }
+    if (auto refTy = Cangjie::DynamicCast<RefType*>(ty)) {
+        return ctx.GetType<RefType>(WithModalImpl(ctx, refTy->GetBaseType(), modal, genericMemo));
+    } else if (auto boxTy = Cangjie::DynamicCast<BoxType*>(ty)) {
+        return ctx.GetType<BoxType>(WithModalImpl(ctx, boxTy->GetBaseType(), modal, genericMemo));
+    }
+    if (modal == ty->GetModalInfo()) {
+        return ty;
+    }
+    switch (ty->GetTypeKind()) {
+        case Type::TYPE_INT8:
+        case Type::TYPE_INT16:
+        case Type::TYPE_INT32:
+        case Type::TYPE_INT64:
+        case Type::TYPE_INT_NATIVE:
+        case Type::TYPE_UINT8:
+        case Type::TYPE_UINT16:
+        case Type::TYPE_UINT32:
+        case Type::TYPE_UINT64:
+        case Type::TYPE_UINT_NATIVE:
+            return ctx.GetType<IntType>(ty->GetTypeKind(), modal);
+        case Type::TYPE_FLOAT16:
+        case Type::TYPE_FLOAT32:
+        case Type::TYPE_FLOAT64:
+            return ctx.GetType<FloatType>(ty->GetTypeKind(), modal);
+        case Type::TYPE_RUNE:
+            return ctx.GetType<RuneType>(modal);
+        case Type::TYPE_BOOLEAN:
+            return ctx.GetType<BooleanType>(modal);
+        case Type::TYPE_UNIT:
+            return ctx.GetType<UnitType>(modal);
+        case Type::TYPE_NOTHING:
+            return ctx.GetType<NothingType>(modal);
+        case Type::TYPE_VOID:
+            return ctx.GetType<VoidType>(modal);
+        case Type::TYPE_CSTRING:
+            return ctx.GetType<CStringType>(modal);
+        case Type::TYPE_TUPLE:
+            return ctx.GetType<TupleType>(Cangjie::StaticCast<TupleType*>(ty)->GetElementTypes(), modal);
+        case Type::TYPE_FUNC: {
+            auto funcTy = Cangjie::StaticCast<FuncType*>(ty);
+            return ctx.GetType<FuncType>(
+                funcTy->GetParamTypes(), funcTy->GetReturnType(), funcTy->HasVarArg(), funcTy->IsCFunc(), modal);
+        }
+        case Type::TYPE_STRUCT:
+            return ctx.GetType<StructType>(
+                Cangjie::StaticCast<StructType*>(ty)->GetStructDef(), ty->GetTypeArgs(), modal);
+        case Type::TYPE_ENUM:
+            return ctx.GetType<EnumType>(
+                Cangjie::StaticCast<EnumType*>(ty)->GetEnumDef(), ty->GetTypeArgs(), modal);
+        case Type::TYPE_CLASS:
+            return ctx.GetType<ClassType>(
+                Cangjie::StaticCast<ClassType*>(ty)->GetClassDef(), ty->GetTypeArgs(), modal);
+        case Type::TYPE_RAWARRAY:
+            return ctx.GetType<RawArrayType>(Cangjie::StaticCast<RawArrayType*>(ty)->GetElementType(),
+                Cangjie::StaticCast<RawArrayType*>(ty)->GetDims(), modal);
+        case Type::TYPE_VARRAY:
+            return ctx.GetType<VArrayType>(Cangjie::StaticCast<VArrayType*>(ty)->GetElementType(),
+                Cangjie::StaticCast<VArrayType*>(ty)->GetSize(), modal);
+        case Type::TYPE_CPOINTER:
+            return ctx.GetType<CPointerType>(Cangjie::StaticCast<CPointerType*>(ty)->GetElementType(), modal);
+        case Type::TYPE_GENERIC: {
+            auto genericTy = Cangjie::StaticCast<GenericType*>(ty);
+            if (auto it = genericMemo.find(genericTy); it != genericMemo.end()) {
+                return it->second;
+            }
+            auto newGenericTy =
+                ctx.GetType<GenericType>(genericTy->GetIdentifier(), genericTy->GetSrcCodeIdentifier(), modal);
+            genericMemo.emplace(genericTy, newGenericTy);
+            std::vector<Type*> newUpperBounds;
+            for (auto upperBound : genericTy->GetUpperBounds()) {
+                newUpperBounds.emplace_back(WithModalImpl(ctx, upperBound, modal, genericMemo));
+            }
+            newGenericTy->SetUpperBounds(newUpperBounds);
+            return newGenericTy;
+        }
+        case Type::TYPE_THIS:
+            return ctx.GetType<ThisType>(modal);
+        case Type::TYPE_REFTYPE:
+        case Type::TYPE_BOXTYPE:
+        case Type::TYPE_INVALID:
+        case Type::MAX_TYPE_KIND:
+        default:
+            CJC_ABORT();
+            return ty;
+    }
+}
 }
 
 std::mutex CHIRContext::dynamicAllocatedTysMtx;
@@ -254,6 +348,12 @@ void CHIRContext::MergeTypes()
 StructType* CHIRContext::GetStringTy() const
 {
     return GetStructType("std.core", "String");
+}
+
+Type* CHIRContext::WithModal(Type* ty, ModalInfo modal)
+{
+    std::unordered_map<const GenericType*, GenericType*> genericMemo;
+    return WithModalImpl(*this, ty, modal, genericMemo);
 }
 
 Type* CHIRContext::ToSelectorType(Type::TypeKind kind) const

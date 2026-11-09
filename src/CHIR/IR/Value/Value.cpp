@@ -191,6 +191,34 @@ void Value::ClearUsersOnly()
     users.clear();
 }
 
+BlockGroup* Value::GetFuncOrLambdaBody() const
+{
+    if (IsParameter()) {
+        auto param = StaticCast<const Parameter*>(this);
+        if (auto func = param->GetOwnerFunc()) {
+            return func->GetBody();
+        } else if (auto lambda = param->GetOwnerLambda()) {
+            return lambda->GetBody();
+        } else {
+            CJC_ABORT();
+        }
+    } else if (IsLocalVar()) {
+        return StaticCast<const LocalVar*>(this)->GetExpr()->GetParentBlock()->GetFuncOrLambdaBody();
+    } else if (IsBlock()) {
+        return StaticCast<const Block*>(this)->GetParentBlockGroup()->GetFuncOrLambdaBody();
+    } else if (IsBlockGroup()) {
+        auto bg = StaticCast<const BlockGroup*>(this);
+        if (auto func = bg->GetOwnerFunc()) {
+            return func->GetBody();
+        }
+        CJC_ASSERT(users.size() == 1);
+        return users[0]->GetFuncOrLambdaBody();
+    } else if (IsFunc()) {
+        return StaticCast<const Function*>(this)->GetBody();
+    }
+    return nullptr;
+}
+
 Parameter::Parameter(Type* ty, const std::string& id, Function* ownerFunc)
     : Value(ty, id, ValueKind::KIND_PARAMETER), ownerFunc(ownerFunc)
 {
@@ -266,6 +294,21 @@ void Parameter::SetAnnoInfo(AnnoInfo&& info)
     annoInfo = std::move(info);
 }
 
+Value* Parameter::GetParamDftValFunc() const
+{
+    return paramDftValFunc;
+}
+
+void Parameter::SetParamDftValFunc(Value& func)
+{
+    paramDftValFunc = &func;
+}
+
+void Parameter::ClearParamDftValFunc()
+{
+    paramDftValFunc = nullptr;
+}
+
 std::string Parameter::ToString(size_t indent) const
 {
     /** @CustomAnnotation
@@ -279,7 +322,14 @@ std::string Parameter::ToString(size_t indent) const
         ss << "[" << srcCodeIdentifier << "]";
     }
     ss << ": " << ty->ToString();
-    ss << CommentToString(BaseCommentToString());
+    std::vector<std::string> comments;
+    if (auto baseComment = BaseCommentToString(); !baseComment.empty()) {
+        comments.emplace_back(baseComment);
+    }
+    if (paramDftValFunc != nullptr) {
+        comments.emplace_back("paramDftValFunc: " + paramDftValFunc->GetIdentifier());
+    }
+    ss << CommentToString(comments);
     return ss.str();
 }
 
@@ -772,24 +822,16 @@ void BlockGroup::SetEntryBlock(Block* block)
 
 void BlockGroup::SetOwnerExpression(Expression& expr)
 {
-#ifndef NDEBUG
-    // we can't move func or lambdas' body to other expression, vice versa
-    if (Is<Lambda>(expr)) {
-        CJC_ASSERT(ownerExpression == nullptr || Is<Lambda>(ownerExpression));
-    } else {
-        CJC_ASSERT(ownerFunc == nullptr && (ownerExpression == nullptr || !Is<Lambda>(ownerExpression)));
-    }
-#endif
-    if (Is<Lambda*>(&expr)) {
-        if (ownerFunc) {
-            ownerFunc->RemoveBody();
-            ownerFunc = nullptr;
-        } else if (auto lambdaExpr = DynamicCast<Lambda*>(ownerExpression)) {
-            lambdaExpr->RemoveBody();
-        }
+    if (ownerFunc) {
+        ownerFunc->RemoveBody();
+        ownerFunc = nullptr;
     }
     if (ownerExpression) {
         RemoveUserOnly(ownerExpression);
+        auto& subGroups = ownerExpression->blockGroups;
+        subGroups.erase(
+            std::remove(subGroups.begin(), subGroups.end(), this), subGroups.end());
+        ownerExpression = nullptr;
     }
     ownerExpression = &expr;
     AddUserOnly(&expr);
@@ -889,16 +931,17 @@ BlockGroup* BlockGroup::Clone(CHIRBuilder& builder, Function& newFunc) const
     return newGroup;
 }
 
-BlockGroup* BlockGroup::Clone(CHIRBuilder& builder, Lambda& newLambda) const
+BlockGroup* BlockGroup::Clone(CHIRBuilder& builder, Expression& newExpression) const
 {
-    auto parentFunc = newLambda.GetTopLevelFunc();
-    CJC_NULLPTR_CHECK(parentFunc);
-    auto newGroup = builder.CreateBlockGroup(*parentFunc);
-    if (newLambda.GetBody() == nullptr) {
-        newLambda.InitBody(*newGroup);
-    }
+    auto newGroup = builder.CreateBlockGroup(*newExpression.GetTopLevelFunc());
     newGroup->AppendAttributeInfo(GetAttributeInfo());
-
+    if (auto lambda = DynamicCast<Lambda*>(&newExpression)) {
+        lambda->InitBody(*newGroup);
+    } else if (auto exclave = DynamicCast<Exclave*>(&newExpression)) {
+        exclave->InitBody(*newGroup);
+    } else {
+        CJC_ABORT();
+    }
     CloneBlocks(builder, *newGroup);
     return newGroup;
 }
@@ -988,6 +1031,9 @@ Type* Function::GetReturnType() const
 
 void Function::DestroySelf()
 {
+    // Drop desugar↔host Parameter link first so a removed DEFAULT_PARAMETER_FUNC
+    // does not leave a dangling paramDftValFunc on the host Parameter.
+    ClearParamDftValHostParam();
     if (declaredParent) {
         Utils::RemoveFromVec(declaredParent->methods, this);
         declaredParent = nullptr;
@@ -1114,19 +1160,28 @@ const std::vector<GenericType*>& Function::GetGenericTypeParams() const
     return genericTypeParams;
 }
 
-void Function::SetParamDftValHostFunc(Function& hostFunc)
+void Function::SetParamDftValHostParam(Parameter& hostParam)
 {
-    paramDftValHostFunc = &hostFunc;
+    paramDftValHostParam = &hostParam;
+    hostParam.SetParamDftValFunc(*this);
+}
+
+Parameter* Function::GetParamDftValHostParam() const
+{
+    return paramDftValHostParam;
 }
 
 Function* Function::GetParamDftValHostFunc() const
 {
-    return paramDftValHostFunc;
+    return paramDftValHostParam == nullptr ? nullptr : paramDftValHostParam->GetOwnerFunc();
 }
 
-void Function::ClearParamDftValHostFunc()
+void Function::ClearParamDftValHostParam()
 {
-    paramDftValHostFunc = nullptr;
+    if (paramDftValHostParam != nullptr && paramDftValHostParam->GetParamDftValFunc() == this) {
+        paramDftValHostParam->ClearParamDftValFunc();
+    }
+    paramDftValHostParam = nullptr;
 }
 
 // Function
@@ -1339,8 +1394,11 @@ std::string Function::ToString(size_t indent) const
     if (genericDecl != nullptr) {
         comments.emplace_back("genericDecl: " + genericDecl->GetIdentifier());
     }
-    if (paramDftValHostFunc != nullptr) {
-        comments.emplace_back("paramDftValHostFunc: " + paramDftValHostFunc->GetIdentifier());
+    if (paramDftValHostParam != nullptr) {
+        auto owner = paramDftValHostParam->GetOwnerFunc();
+        CJC_NULLPTR_CHECK(owner);
+        comments.emplace_back("paramDftValHostParam: " + owner->GetIdentifier() +
+            "[" + paramDftValHostParam->GetIdentifier() + "]");
     }
     if (funcKind == FuncKind::LAMBDA) {
         comments.emplace_back("originalLambdaInfo: " + originalLambdaInfo.ToString());

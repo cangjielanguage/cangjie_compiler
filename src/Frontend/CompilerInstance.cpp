@@ -15,6 +15,7 @@
 #include <fstream>
 
 #include "PrintSymbolTable.h"
+#include "cangjie/AST/PrintNode.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Basic/Match.h"
 #include "cangjie/Basic/Print.h"
@@ -797,14 +798,14 @@ void DoNewMangling(
                     desugar.mangledName = baseMangler.Mangle(desugar);
                     return VisitAction::WALK_CHILDREN;
                 }
-                if (!Ty::IsTyCorrect(decl.GetTy())) {
+                if (!decl.GetTy().IsCorrect()) {
                     return VisitAction::SKIP_CHILDREN;
                 }
                 decl.mangledName = baseMangler.Mangle(decl, filteredPrefix);
                 return VisitAction::WALK_CHILDREN;
             },
             [&baseMangler, &filteredPrefix](LambdaExpr& lambda) {
-                if (lambda.TestAttr(Attribute::GENERIC) || !Ty::IsTyCorrect(lambda.GetTy())) {
+                if (lambda.TestAttr(Attribute::GENERIC) || !lambda.GetTy().IsCorrect()) {
                     return VisitAction::SKIP_CHILDREN;
                 }
                 lambda.mangledName = baseMangler.MangleLambda(lambda,
@@ -1162,13 +1163,13 @@ void CompilerInstance::MergePackages()
 }
 
 std::set<Ptr<ExtendDecl>> CompilerInstance::GetExtendDecls(
-    const std::variant<Ptr<Ty>, Ptr<InheritableDecl>>& type) const
+    const std::variant<ModalTy, Ptr<InheritableDecl>>& type) const
 {
     if (!typeManager) {
         return {};
     }
     if (type.index() == 0) {
-        if (auto ty = std::get<Ptr<Ty>>(type)) {
+        if (auto ty = std::get<ModalTy>(type)) {
             return typeManager->GetAllExtendsByTy(*ty);
         }
     } else if (type.index() == 1) {
@@ -1180,13 +1181,13 @@ std::set<Ptr<ExtendDecl>> CompilerInstance::GetExtendDecls(
 }
 
 std::vector<Ptr<Decl>> CompilerInstance::GetAllVisibleExtendMembers(
-    const std::variant<Ptr<Ty>, Ptr<InheritableDecl>>& type, const File& curFile) const
+    const std::variant<ModalTy, Ptr<InheritableDecl>>& type, const File& curFile) const
 {
     std::set<Ptr<ExtendDecl>> extends = GetExtendDecls(type);
     std::vector<Ptr<Decl>> members;
-    Ptr<Ty> exprTy = nullptr;
+    ModalTy exprTy{};
     if (type.index() == 0) {
-        exprTy = std::get<Ptr<Ty>>(type);
+        exprTy = std::get<ModalTy>(type);
     } else if (type.index() == 1) {
         exprTy = std::get<Ptr<InheritableDecl>>(type)->GetTy();
     }

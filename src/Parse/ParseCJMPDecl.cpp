@@ -107,7 +107,7 @@ void MPParserImpl::SetCompileOptions(const GlobalOptions& globalOpts)
 bool MPParserImpl::CheckCJMPModifiers(const std::set<AST::Modifier>& modifiers) const
 {
     auto currentFile = ref->currentFile;
-    if (ref->HasModifier(modifiers, TokenKind::SPECIFIC)) {
+    if (HasModifier(modifiers, TokenKind::SPECIFIC)) {
         if (!CompilePlatform() && !CompileCommon()) {
             ref->diag.DiagnoseRefactor(DiagKindRefactor::parse_unexpected_cjmp_decl, *currentFile);
             return false;
@@ -117,7 +117,7 @@ bool MPParserImpl::CheckCJMPModifiers(const std::set<AST::Modifier>& modifiers) 
         }
         currentFile->isSpecific = true;
     }
-    if (ref->HasModifier(modifiers, TokenKind::COMMON)) {
+    if (HasModifier(modifiers, TokenKind::COMMON)) {
         if (!CompilePlatform() && !CompileCommon()) {
             ref->diag.DiagnoseRefactor(DiagKindRefactor::parse_unexpected_cjmp_decl, *currentFile);
             return false;

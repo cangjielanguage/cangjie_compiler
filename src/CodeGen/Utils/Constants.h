@@ -58,6 +58,7 @@ const std::string FUNC_USED_BY_CLOSURE = "UsedByClosure";
 const std::string ENUM_TYPE_PREFIX = "enum.";
 const std::string CJSTRING_LITERAL_PREFIX = "$const_cjstring.";
 const std::string CJSTRING_DATA_PREFIX = "$const_cjstring_data.";
+const std::string LOCAL_CJSTRING_DATA_PREFIX = "$local_cjstring_data.";
 const std::string CJSTRING_LITERAL_ATTR = "cjstring_literal";
 const std::string CJSTRING_DATA_ATTR = "cjstring_data";
 // Marks per-string buffers emitted by the deferred-pooling CodeGen; the

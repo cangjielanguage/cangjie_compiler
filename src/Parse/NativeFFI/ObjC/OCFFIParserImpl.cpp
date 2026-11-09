@@ -55,7 +55,7 @@ void OCFFIParserImpl::CheckAnnotation(Annotation& anno, ScopeKind scopeKind) con
 void OCFFIParserImpl::CheckMirrorSignature(ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const
 {
     CJC_ASSERT(p.HasAnnotation(annos, AnnotationKind::OBJ_C_MIRROR) ||
-        (p.HasAnnotation(annos, AnnotationKind::OBJ_C) && p.HasModifier(decl.modifiers, TokenKind::FOREIGN)));
+        (p.HasAnnotation(annos, AnnotationKind::OBJ_C) && HasModifier(decl, TokenKind::FOREIGN)));
     decl.EnableAttr(Attribute::OBJ_C_FOREIGN);
     decl.EnableAttr(Attribute::NO_REFLECT_INFO);
     
@@ -108,7 +108,7 @@ void OCFFIParserImpl::CheckMirrorSignature(FuncDecl& decl, const PtrVector<Annot
         decl.EnableAttr(Attribute::IS_BROKEN);
     }
 
-    if (decl.isConst || p.HasModifier(decl.modifiers, TokenKind::CONST)) {
+    if (decl.isConst || HasModifier(decl.modifiers, TokenKind::CONST)) {
         DiagObjCMirrorFuncCannotBeConst(decl);
         decl.EnableAttr(Attribute::IS_BROKEN);
     }
@@ -127,7 +127,7 @@ void OCFFIParserImpl::CheckMirrorSignature(FuncDecl& decl, const PtrVector<Annot
 void OCFFIParserImpl::CheckImplSignature(ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const
 {
     CJC_ASSERT(p.HasAnnotation(annos, AnnotationKind::OBJ_C_IMPL) ||
-        (p.HasAnnotation(annos, AnnotationKind::OBJ_C) && !p.HasModifier(decl.modifiers, TokenKind::FOREIGN)));
+        (p.HasAnnotation(annos, AnnotationKind::OBJ_C) && !HasModifier(decl, TokenKind::FOREIGN)));
     decl.EnableAttr(Attribute::OBJ_C_EXPORT);
     decl.EnableAttr(Attribute::NO_REFLECT_INFO);
 

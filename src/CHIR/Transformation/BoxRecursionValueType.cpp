@@ -78,6 +78,16 @@ bool LeftIsBoxTypeOfRight(const Type& left, const Type& right)
             if (leftType == rightType) {
                 return true;
             }
+            if (leftType->IsModal()) {
+                if (!rightType->IsModal()) {
+                    return false;
+                }
+                auto leftModalInfo = leftType->GetModalInfo();
+                auto rightModalInfo = rightType->GetModalInfo();
+                if (leftModalInfo != rightModalInfo) {
+                    return false;
+                }
+            }
             if (leftType->IsGeneric()) {
                 return true;
             }
@@ -203,14 +213,17 @@ void InsertUnBoxAfterField(Field& field, CHIRBuilder& builder)
 void CastEnumTypeToTupleWithBoxArg(TypeCast& typecast, const std::vector<size_t>& path, CHIRBuilder& builder)
 {
     auto typecastRes = typecast.GetResult();
-    auto targetType = StaticCast<TupleType*>(typecastRes->GetType());
+    auto targetType = StaticCast<TupleType*>(typecastRes->GetType()->StripAllRefs());
     auto eleTypes = targetType->GetElementTypes();
     for (auto i : path) {
         auto boxType = builder.GetType<RefType>(builder.GetType<BoxType>(eleTypes[i]));
         CJC_ASSERT(i < eleTypes.size());
         eleTypes[i] = boxType;
     }
-    auto newTargetType = builder.GetType<TupleType>(eleTypes);
+    Type* newTargetType = builder.GetType<TupleType>(eleTypes);
+    if (typecastRes->GetType()->StripAllRefs()->IsModal()) {
+        newTargetType = builder.WithModal(newTargetType, typecastRes->GetType()->StripAllRefs()->GetModalInfo());
+    }
     typecastRes->SetType(*newTargetType);
 }
 

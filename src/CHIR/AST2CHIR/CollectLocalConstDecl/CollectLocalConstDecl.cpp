@@ -123,7 +123,6 @@ void CollectLocalConstDecl::Collect(const std::vector<Ptr<const AST::Decl>>& dec
             if (auto var = DynamicCast<const AST::VarDecl*>(n); var && var->IsConst()) {
                 localConstVarDecls.emplace_back(var);
             } else if (auto func = DynamicCast<const AST::FuncDecl*>(n); func && func->IsConst()) {
-                localConstFuncDecls.emplace_back(func);
                 CJC_ASSERT(func->funcBody);
                 /** usually, param's desugar decl can be collected by visiting func body or `globalAndMemberFuncs`,
                  *  but for instantiated func decl, it doesn't work
@@ -137,12 +136,17 @@ void CollectLocalConstDecl::Collect(const std::vector<Ptr<const AST::Decl>>& dec
                  *  `param->desugarDecl` to collect this kind of function
                  *  ps: decl in `genericInstantiatedDecls` is unique_ptr, and `param->desugarDecl` is also unique_ptr
                  *      so `param->desugarDecl` can't be moved to `genericInstantiatedDecls`
+                 *
+                 *  MUST collect param default-value desugar funcs before the host func.
+                 *  localConstFuncs is later translated in this order (CreateFuncSignature): desugar first,
+                 *  then host; TranslateFuncParams of the host looks up desugar decls from globalCache.
                  */
                 for (auto& param : std::as_const(func->funcBody->paramLists[0]->params)) {
                     if (param->desugarDecl) {
                         localConstFuncDecls.emplace_back(param->desugarDecl.get());
                     }
                 }
+                localConstFuncDecls.emplace_back(func);
             }
         }
         if (Is<AST::LambdaExpr>(n) || Is<AST::MacroDecl>(n) || Is<AST::FuncDecl>(n)) {

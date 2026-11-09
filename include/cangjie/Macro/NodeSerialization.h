@@ -94,6 +94,7 @@ private:
     std::vector<flatbuffers::Offset<ASTFormat::Token>> TokensVectorCreateHelper(
         std::vector<Cangjie::Token> tokenVector);
     flatbuffers::Offset<ASTFormat::NodeBase> SerializeNodeBase(AstNode node);
+    flatbuffers::Offset<ASTFormat::ModalInfo> SerializeModalInfo(const Cangjie::AST::ASTModalInfo& modal);
 
     flatbuffers::Offset<ASTFormat::Pattern> SerializePattern(AstPattern pattern);
     flatbuffers::Offset<ASTFormat::Pattern> SerializeConstPattern(AstPattern pattern);
@@ -145,6 +146,7 @@ private:
     flatbuffers::Offset<ASTFormat::Expr> SerializePrimitiveTypeExpr(AstExpr expr);
     flatbuffers::Offset<ASTFormat::Expr> SerializeSpawnExpr(AstExpr expr);
     flatbuffers::Offset<ASTFormat::Expr> SerializeSynchronizedExpr(AstExpr expr);
+    flatbuffers::Offset<ASTFormat::Expr> SerializeExclaveExpr(AstExpr expr);
     flatbuffers::Offset<ASTFormat::Expr> SerializeArrayLit(AstExpr expr);
     flatbuffers::Offset<ASTFormat::Expr> SerializeTupleLit(AstExpr expr);
     flatbuffers::Offset<ASTFormat::Expr> SerializeSubscriptExpr(AstExpr expr);
@@ -201,6 +203,8 @@ private:
         const AST::MacroExpandDecl* macroExpandDecl);
     flatbuffers::Offset<ASTFormat::Decl> SerializeDeclOfFuncParam(const AST::Decl* decl);
     flatbuffers::Offset<ASTFormat::Decl> SerializeDeclOfMacroExpandParam(const AST::Decl* decl);
+    flatbuffers::Offset<ASTFormat::ThisParam> SerializeThisParam(const AST::ThisParam* thisParam);
+    flatbuffers::Offset<ASTFormat::Decl> SerializeDeclOfThisParam(const AST::Decl* decl);
     flatbuffers::Offset<ASTFormat::FuncBody> SerializeFuncBody(AstFuncBody funcBody);
     flatbuffers::Offset<ASTFormat::FuncParam> SerializeFuncParam(AstFuncParam funcParam);
     flatbuffers::Offset<ASTFormat::FuncParam> SerializeMacroExpandParam(AstMacroExpandParam mep);

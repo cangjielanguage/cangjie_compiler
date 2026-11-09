@@ -238,7 +238,7 @@ void FFIParserImpl::CheckClassLikeSignature(AST::ClassLikeDecl& decl, const PtrV
                 jp.CheckImplSignature(decl, annos);
                 break;
             case AnnotationKind::JAVA:
-                if (p.HasModifier(decl.modifiers, TokenKind::FOREIGN)) {
+                if (HasModifier(decl, TokenKind::FOREIGN)) {
                     jp.CheckMirrorSignature(decl, annos);
                 } else {
                     jp.CheckImplSignature(decl, annos);
@@ -251,7 +251,7 @@ void FFIParserImpl::CheckClassLikeSignature(AST::ClassLikeDecl& decl, const PtrV
                 op.CheckImplSignature(decl, annos);
                 break;
             case AnnotationKind::OBJ_C:
-                if (p.HasModifier(decl.modifiers, TokenKind::FOREIGN)) {
+                if (HasModifier(decl, TokenKind::FOREIGN)) {
                     op.CheckMirrorSignature(decl, annos);
                 } else {
                     op.CheckImplSignature(decl, annos);

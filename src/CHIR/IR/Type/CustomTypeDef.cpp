@@ -57,6 +57,8 @@ std::vector<VTableSearchRes> GetWellMatchingResults(const std::vector<VTableSear
             }
             auto iToJ = candidateTypes[i]->IsEqualOrInstantiatedTypeOf(*candidateTypes[j], builder);
             auto jToI = candidateTypes[j]->IsEqualOrInstantiatedTypeOf(*candidateTypes[i], builder);
+            iToJ &= candidateTypes[i]->IsEqualOrSubTypeOf(*candidateTypes[j], builder);
+            jToI &= candidateTypes[j]->IsEqualOrSubTypeOf(*candidateTypes[i], builder);
             // according to spec, the more specific type is expected
             // but if iToJ and jToI are both true, that means i and j have same func signature, we need to store both,
             // if iToJ and jToI are both false, that means there is genric param in i and j, generic params can't
@@ -263,10 +265,6 @@ Function* CustomTypeDef::GetExpectedFunc(
     // you shouldn't search a function without name
     CJC_ASSERT(!funcName.empty());
     auto instParamTys = funcType.GetParamTypes();
-    if (!isStatic) {
-        CJC_ASSERT(!instParamTys.empty());
-        instParamTys.erase(instParamTys.begin());
-    }
     Function* foundFunc = nullptr;
     for (auto method : methods) {
         if (isStatic != method->TestAttr(Attribute::STATIC)) {
@@ -280,10 +278,6 @@ Function* CustomTypeDef::GetExpectedFunc(
             continue;
         }
         auto originalFuncParamTys = method->GetFuncType()->GetParamTypes();
-        if (!method->TestAttr(Attribute::STATIC)) {
-            CJC_ASSERT(!originalFuncParamTys.empty());
-            originalFuncParamTys.erase(originalFuncParamTys.begin());
-        }
         if (originalFuncParamTys.size() != instParamTys.size()) {
             continue;
         }
@@ -297,7 +291,16 @@ Function* CustomTypeDef::GetExpectedFunc(
         bool matched = true;
         for (size_t i = 0; i < originalFuncParamTys.size(); ++i) {
             auto instType = ReplaceRawGenericArgType(*originalFuncParamTys[i], replaceTable, builder);
-            if (!instParamTys[i]->IsGeneric() && instType != instParamTys[i]) {
+            if (!isStatic && i == 0) {
+                // `this` data type may be a subtype of the declared parent; only require modal equality
+                // so modal overloads (e.g. hashCode vs hashCode(this @local?)) are distinguished.
+                auto modalInCall = instParamTys[i]->StripAllRefs()->GetModalInfo();
+                auto modalInMethod = instType->StripAllRefs()->GetModalInfo();
+                if (modalInCall != modalInMethod) {
+                    matched = false;
+                    break;
+                }
+            } else if (!instParamTys[i]->IsGeneric() && instType != instParamTys[i]) {
                 matched = false;
                 break;
             }
@@ -328,7 +331,8 @@ std::vector<VTableSearchRes> CustomTypeDef::GetFuncIndexInVTable(const FuncCallT
     for (const auto& vtableIt : vtable.GetTypeVTables()) {
         for (size_t i = 0; i < vtableIt.GetMethodNum(); ++i) {
             const auto& funcInfo = vtableIt.GetVirtualMethods()[i];
-            if (funcInfo.FuncSigIsMatched(funcCallType, replaceTable, builder)) {
+            if (funcInfo.FuncSigIsMatched(
+                funcCallType, funcInfo.GetAttributeInfo().TestAttr(Attribute::STATIC), replaceTable, builder)) {
                 auto originalParentType = vtableIt.GetSrcParentType();
                 auto instSrcParentTy = ReplaceRawGenericArgType(*originalParentType, replaceTable, builder);
                 res.emplace_back(VTableSearchRes {

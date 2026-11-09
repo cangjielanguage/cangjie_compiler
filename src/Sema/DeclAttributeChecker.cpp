@@ -18,6 +18,8 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Basic/Match.h"
+#include "cangjie/Frontend/CompilerInstance.h"
+#include "cangjie/Frontend/CompilerInvocation.h"
 #include "cangjie/Utils/CheckUtils.h"
 
 using namespace Cangjie;
@@ -44,7 +46,7 @@ private:
     void CheckEnumAttribute(EnumDecl& ed) const;
     void CheckStructAttribute(StructDecl& sd) const;
     void CheckExtendAttribute(ExtendDecl& ed) const;
-    void CheckPropDeclAttributes(const PropDecl& pd) const;
+    void CheckPropDeclAttributes(PropDecl& pd) const;
     void CheckGenericFuncDeclAttributes(const FuncDecl& fd) const;
     void CheckAttributesForPropAndFuncDeclInClass(const ClassDecl& cd, Decl& member) const;
     void CheckCJMPAttributesForPropAndFuncDeclInClass(const ClassDecl& cd, Decl& member) const;
@@ -249,7 +251,7 @@ void DeclAttributeChecker::CheckExtendAttribute(ExtendDecl& ed) const
                     DiagKindRefactor::sema_invalid_mut_modifier_extend_of_struct, *mutDecl, extendedDecl->identifier);
             } else if (ed.GetTy()->IsPrimitive()) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor::sema_invalid_mut_modifier_extend_of_struct, *mutDecl, ed.GetTy()->String());
+                    DiagKindRefactor::sema_invalid_mut_modifier_extend_of_struct, *mutDecl, ed.GetTy().String());
             }
         }
         if (auto pd = DynamicCast<PropDecl*>(member.get()); pd) {
@@ -377,7 +379,7 @@ void DeclAttributeChecker::CheckAttributesForPropAndFuncDeclInClass(const ClassD
     }
 }
 
-void DeclAttributeChecker::CheckPropDeclAttributes(const PropDecl& pd) const
+void DeclAttributeChecker::CheckPropDeclAttributes(PropDecl& pd) const
 {
     if (pd.outerDecl && pd.outerDecl->TestAttr(Attribute::OBJ_C_FOREIGN)) {
         return;
@@ -398,13 +400,16 @@ void DeclAttributeChecker::CheckPropDeclAttributes(const PropDecl& pd) const
             (pd.setters.empty() || pd.getters.empty())) ||
             (!pd.TestAttr(Attribute::ABSTRACT) && pd.setters.empty() && pd.getters.empty())) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_property_must_have_accessors, pd);
+            pd.EnableAttr(Attribute::HAS_BROKEN);
         }
     } else {
         if (!pd.setters.empty()) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_immutable_property_with_setter, pd);
+            pd.EnableAttr(Attribute::HAS_BROKEN);
         }
         if (pd.getters.empty()) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_property_must_have_accessors, pd);
+            pd.EnableAttr(Attribute::HAS_BROKEN);
         }
     }
 }
@@ -433,7 +438,7 @@ void DeclAttributeChecker::Check() const
     match(decl_)([this](ClassDecl& cd) { CheckClassAttribute(cd); },
         [this](InterfaceDecl& id) { CheckInterfaceAttribute(id); }, [this](EnumDecl& ed) { CheckEnumAttribute(ed); },
         [this](StructDecl& sd) { CheckStructAttribute(sd); }, [this](ExtendDecl& ed) { CheckExtendAttribute(ed); },
-        [this](const PropDecl& pd) { CheckPropDeclAttributes(pd); },
+        [this](PropDecl& pd) { CheckPropDeclAttributes(pd); },
         [this](const FuncDecl& fd) { CheckGenericFuncDeclAttributes(fd); }, []() {});
     if (decl_.TestAttr(Attribute::GLOBAL)) {
         SetDeclInternal(decl_);

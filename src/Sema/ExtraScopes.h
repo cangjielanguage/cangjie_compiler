@@ -47,7 +47,7 @@ public:
      * referenced decl is FuncA.
      */
     // generate mapping between decl and its instantiated ty
-    void SetRefDecl(const AST::Decl& decl, Ptr<AST::Ty> instTy);
+    void SetRefDecl(const AST::Decl& decl, AST::ModalTy instTy);
     // generate all needed mappings with all available info for a CallExpr,
     // ty vars remaining to be solved are not mapped in inst map
     bool SetRefDecl(ASTContext& ctx, AST::FuncDecl& fd, AST::CallExpr& ce);

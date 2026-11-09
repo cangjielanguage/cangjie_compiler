@@ -87,6 +87,10 @@ OwnedPtr<Pattern> ParserImpl::ParseTypePatternOrVarOrEnumPattern(
         typePattern->colonPos = lastToken.Begin();
         typePattern->pattern = MakeOwned<VarPattern>(identifier, begin);
         typePattern->type = ParseType();
+        if (typePattern->type->modal.Local() != ASTMode::NONE) {
+            DiagUnexpectedModal(MakeRange(typePattern->type->modal.LocalBegin(), typePattern->type->modal.LocalEnd()));
+            typePattern->EnableAttr(Attribute::HAS_BROKEN);
+        }
         typePattern->begin = begin;
         typePattern->end = typePattern->type->end;
         return typePattern;
@@ -113,6 +117,10 @@ OwnedPtr<TypePattern> ParserImpl::ParseTypePattern(const Position& begin)
     typePattern->pattern = MakeOwned<WildcardPattern>(begin);
 
     typePattern->type = ParseType();
+    if (typePattern->type->modal.Local() != ASTMode::NONE) {
+        DiagUnexpectedModal(MakeRange(typePattern->type->modal.LocalBegin(), typePattern->type->modal.LocalEnd()));
+        typePattern->EnableAttr(Attribute::HAS_BROKEN);
+    }
     typePattern->begin = begin;
     typePattern->end = typePattern->type->end;
     return typePattern;

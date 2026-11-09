@@ -190,6 +190,9 @@ bool ParserImpl::SeeingBuiltinAnnotation()
     if (!Seeing(TokenKind::AT)) {
         return false;
     }
+    if (SeeingModalInfo()) {
+        return false;
+    }
     // Get annotation identifier.
     auto tokens = lexer->LookAheadSkipNL(1);
     if (tokens.begin()->kind != TokenKind::IDENTIFIER) {
@@ -213,6 +216,9 @@ bool ParserImpl::SeeingMacroCall()
     if (!Seeing(TokenKind::AT)) {
         return false;
     }
+    if (SeeingModalInfo()) {
+        return false;
+    }
     // Get annotation identifier.
     auto tokens = lexer->LookAheadSkipNL(1);
     if (tokens.begin()->kind != TokenKind::IDENTIFIER &&
@@ -227,6 +233,9 @@ bool ParserImpl::SeeingMacroCallDecl()
     if (!SeeingAny({TokenKind::AT, TokenKind::AT_EXCL})) {
         return false;
     }
+    if (SeeingModalInfo()) {
+        return false;
+    }
     // Get annotation identifier.
     auto tokens = lexer->LookAheadSkipNL(1);
     if (tokens.begin()->kind != TokenKind::IDENTIFIER &&
@@ -238,7 +247,7 @@ bool ParserImpl::SeeingMacroCallDecl()
 
 void ParserImpl::ParseAnnotations(PtrVector<Annotation>& annos)
 {
-    while (SeeingBuiltinAnnotation() || (this->enableCustomAnno && SeeingMacroCallDecl())) {
+    while ((SeeingBuiltinAnnotation() || (this->enableCustomAnno && SeeingMacroCallDecl())) && !SeeingModalInfo()) {
         auto annotation = ParseAnnotation();
         auto anno = std::find_if(annos.begin(), annos.end(), [&annotation](const auto& anno) {
             return anno->kind != AnnotationKind::CUSTOM && anno->identifier == annotation->identifier;

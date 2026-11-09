@@ -182,9 +182,6 @@ VirtualMethodInfo VTableGenerator::CreateVirtualFuncInfo(
 {
     auto originalFuncType = method.GetFuncType();
     auto originalParamTypes = originalFuncType->GetParamTypes();
-    if (!method.TestAttr(Attribute::STATIC)) {
-        originalParamTypes.erase(originalParamTypes.begin());
-    }
     std::vector<Type*> instParamTypes;
     for (auto type : originalParamTypes) {
         instParamTypes.emplace_back(ReplaceRawGenericArgType(*type, replaceTable, builder));
@@ -210,7 +207,8 @@ bool VTableGenerator::IsSigTypeMatched(const VirtualMethodInfo& curFuncInfo, con
         return false;
     }
 
-    return funcInfoInVtable.FuncSigIsMatched(curFuncInfo.GetCondition(), builder);
+    return funcInfoInVtable.FuncSigIsMatched(
+        curFuncInfo.GetCondition(), curFuncInfo.GetAttributeInfo().TestAttr(Attribute::STATIC), builder);
 }
 
 bool VTableGenerator::VirtualFuncShouldAddToVTableInItsOwnParent(ClassType& ownParent, ClassType& alreadyIn)

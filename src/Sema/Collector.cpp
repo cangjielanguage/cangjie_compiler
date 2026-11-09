@@ -466,6 +466,15 @@ void Collector::CollectIfExpr(ASTContext& ctx, IfExpr& ie, bool buildTrie)
     }
 }
 
+void Collector::CollectExclaveExpr(ASTContext& ctx, ExclaveExpr& ee, bool buildTrie)
+{
+    auto nodeInfo = NodeInfo(ee, "", ctx.currentScopeLevel, scopeManager.CalcScopeGateName(ctx));
+    AddSymbol(ctx, nodeInfo, buildTrie);
+    scopeManager.InitializeScope(ctx);
+    BuildSymbolTable(ctx, ee.body.get(), buildTrie);
+    scopeManager.FinalizeScope(ctx);
+}
+
 void Collector::CollectCondition(ASTContext& ctx, AST::Expr& e, bool buildTrie)
 {
     if (auto letPattern = DynamicCast<LetPatternDestructor>(&e)) {
@@ -660,8 +669,8 @@ void Collector::BuildSymbolTable(ASTContext& ctx, Ptr<Node> node, bool buildTrie
         decl->fullPackageName = ctx.fullPackageName;
     }
     // For-In expr and Synchronized expr need to be collected in new scope, and will be processed later.
-    if (auto expr = DynamicCast<Expr*>(node);
-        expr && expr->astKind != ASTKind::FOR_IN_EXPR && expr->astKind != ASTKind::SYNCHRONIZED_EXPR) {
+    if (auto expr = DynamicCast<Expr*>(node); expr && expr->desugarExpr &&
+        expr->astKind != ASTKind::FOR_IN_EXPR && expr->astKind != ASTKind::SYNCHRONIZED_EXPR) {
         BuildSymbolTable(ctx, expr->desugarExpr.get(), buildTrie);
     }
     switch (node->astKind) {
@@ -710,6 +719,9 @@ void Collector::BuildSymbolTable(ASTContext& ctx, Ptr<Node> node, bool buildTrie
                 scopeManager.InitializeScope(ctx);
                 CollectGeneric(ctx, *bid, *bid->generic, buildTrie);
                 scopeManager.FinalizeScope(ctx);
+            }
+            for (auto& m : bid->GetMemberDecls()) {
+                BuildSymbolTable(ctx, m.get(), buildTrie);
             }
             break;
         }
@@ -777,6 +789,7 @@ void Collector::BuildSymbolTable(ASTContext& ctx, Ptr<Node> node, bool buildTrie
         }
         case ASTKind::FUNC_PARAM_LIST: {
             auto fpl = StaticAs<ASTKind::FUNC_PARAM_LIST>(node);
+            BuildSymbolTable(ctx, fpl->thisParam.get(), buildTrie);
             for (auto& param : fpl->params) {
                 BuildSymbolTable(ctx, param.get(), buildTrie);
             }
@@ -793,6 +806,12 @@ void Collector::BuildSymbolTable(ASTContext& ctx, Ptr<Node> node, bool buildTrie
             BuildSymbolTable(ctx, fp->type.get(), buildTrie);
             BuildSymbolTable(ctx, fp->assignment.get(), buildTrie);
             BuildSymbolTable(ctx, fp->desugarDecl.get(), buildTrie);
+            break;
+        }
+        case ASTKind::THIS_PARAM: {
+            auto tp = StaticAs<ASTKind::THIS_PARAM>(node);
+            AddSymbol(ctx, {*tp, "", ctx.currentScopeLevel, ctx.currentScopeName}, buildTrie);
+            CollectAnnotations(ctx, tp->annotations, buildTrie);
             break;
         }
         case ASTKind::MACRO_EXPAND_PARAM: {
@@ -975,6 +994,11 @@ void Collector::BuildSymbolTable(ASTContext& ctx, Ptr<Node> node, bool buildTrie
         case ASTKind::IF_EXPR: {
             auto ie = StaticAs<ASTKind::IF_EXPR>(node);
             CollectIfExpr(ctx, *ie, buildTrie);
+            break;
+        }
+        case ASTKind::EXCLAVE_EXPR: {
+            auto ee = StaticAs<ASTKind::EXCLAVE_EXPR>(node);
+            CollectExclaveExpr(ctx, *ee, buildTrie);
             break;
         }
         case ASTKind::PAREN_EXPR: {

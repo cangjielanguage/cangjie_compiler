@@ -37,6 +37,21 @@ int64_t Translator::CalculateDelayExitLevelForThrow()
     return CalculateDelayExitLevelForReturn() + 1;
 }
 
+Value* Translator::GetReturnValueFromBlockGroup(const BlockGroup& blockGroup)
+{
+    if (auto func = blockGroup.GetOwnerFunc()) {
+        return func->GetReturnValue();
+    } else {
+        auto ownerExpr = blockGroup.GetOwnerExpression();
+        CJC_NULLPTR_CHECK(ownerExpr);
+        if (auto lambda = DynamicCast<Lambda*>(ownerExpr)) {
+            return lambda->GetReturnValue();
+        } else {
+            return GetReturnValueFromBlockGroup(*ownerExpr->GetParentBlockGroup());
+        }
+    }
+}
+
 Ptr<Value> Translator::GetOuterBlockGroupReturnValLocation()
 {
     for (auto reverseBegin = blockGroupStack.crbegin(), reverseEnd = blockGroupStack.crend();
@@ -50,13 +65,7 @@ Ptr<Value> Translator::GetOuterBlockGroupReturnValLocation()
     if (blockGroupStack.empty()) {
         return nullptr;
     }
-    auto curBlockGroup = blockGroupStack.back();
-    if (auto func = curBlockGroup->GetOwnerFunc()) {
-        return func->GetReturnValue();
-    } else if (auto lambda = DynamicCast<Lambda*>(curBlockGroup->GetOwnerExpression())) {
-        return lambda->GetReturnValue();
-    }
-    return nullptr;
+    return GetReturnValueFromBlockGroup(*blockGroupStack.back());
 }
 
 Ptr<Value> Translator::Visit(const AST::ReturnExpr& expr)

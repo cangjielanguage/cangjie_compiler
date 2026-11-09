@@ -15,7 +15,6 @@
 #include "cangjie/AST/ASTContext.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Walker.h"
-#include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Modules/ImportManager.h"
 
 namespace Cangjie {
@@ -30,8 +29,8 @@ public:
 
 private:
     /** Boxing functions for option box. */
-    void TryOptionBox(AST::EnumTy& target, AST::Expr& expr);
-    bool NeedBoxOption(AST::Ty& child, AST::Ty& target);
+    void TryOptionBox(AST::ModalTy target, AST::Expr& expr);
+    bool NeedBoxOption(AST::ModalTy child, AST::ModalTy target);
     AST::VisitAction AddOptionBoxHandleReturnExpr(const AST::ReturnExpr& re);
     AST::VisitAction AddOptionBoxHandleVarDecl(const AST::VarDecl& vd);
     AST::VisitAction AddOptionBoxHandleAssignExpr(const AST::AssignExpr& ae);
@@ -42,7 +41,7 @@ private:
     AST::VisitAction AddOptionBoxHandleMatchExpr(AST::MatchExpr& me);
     AST::VisitAction AddOptionBoxHandleArrayExpr(AST::ArrayExpr& ae);
     AST::VisitAction AddOptionBoxHandleTupleList(const AST::TupleLit& tl);
-    void AddOptionBoxHandleBlock(AST::Block& block, AST::Ty& ty);
+    void AddOptionBoxHandleBlock(AST::Block& block, AST::ModalTy ty);
 
     TypeManager& typeManager;
 };

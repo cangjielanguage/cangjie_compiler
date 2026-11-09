@@ -13,21 +13,21 @@
 #ifndef CANGJIE_AST_WALKER_H
 #define CANGJIE_AST_WALKER_H
 
-#include <functional>
-#include <string>
-#include <utility>
 #include <atomic>
+#include <functional>
+#include <utility>
 
 #include "cangjie/AST/Node.h"
 
 namespace Cangjie::AST {
 /**
- * Enum class for visit action in the Walker.
+ * Actions returned by Walker callbacks. These are ordinary enum values, not bit flags;
+ * there is no VisitAction operator| for combining them.
  *
- * The values have been specially designed to make `STOP_NOW` has the highest priority when several values are combined
- * with `OR` operator.
- *
- * @see operator|(VisitAction, VisitAction)
+ * The pre-visit action controls whether children are visited. STOP_NOW immediately
+ * terminates traversal and propagates through ancestor nodes. After visiting children,
+ * KEEP_DECISION from the post-visit callback preserves the current action; any other
+ * post-visit action replaces it. KEEP_DECISION is intended for post-visit cleanup.
  */
 enum class VisitAction : uint8_t {
     WALK_CHILDREN, /**< Continue to walk into child items. */

@@ -36,7 +36,7 @@ TYPE_KIND(TYPE_NOTHING, NothingTy, "Nothing")          /**< The Nothing type. */
 TYPE_KIND(TYPE_BOOLEAN, PrimitiveTy, "Bool")           /**< Bool. */
 TYPE_KIND(TYPE_TUPLE, TupleTy, "Tuple")                /**< Tuple. */
 TYPE_KIND(TYPE_ENUM, EnumTy, "Enum")                   /**< Enum. */
-TYPE_KIND(TYPE_FUNC, FuncTy, "Function")               /**< Function type) like (float32) -> Int32 */
+TYPE_KIND(TYPE_FUNC, FuncTy, "Function")               /**< Function type like (float32) -> Int32 */
 TYPE_KIND(TYPE_STRUCT, StructTy, "Struct")             /**< Struct. */
 TYPE_KIND(TYPE_ARRAY, ArrayTy, "RawArray")             /**< Array. */
 TYPE_KIND(TYPE_VARRAY, VArrayTy, "VArray")             /**< VArray. */

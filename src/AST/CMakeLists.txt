@@ -8,6 +8,7 @@ set(LIBAST_FFI_AST
     Node.cpp
     RecoverDesugar.cpp
     Types.cpp
+    ModalInfo.cpp
     IntLiteral.cpp
     Walker.cpp
     Clone.cpp

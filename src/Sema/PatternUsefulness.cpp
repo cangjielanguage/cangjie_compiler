@@ -70,18 +70,18 @@ namespace Cangjie {
 using namespace AST;
 
 namespace {
-bool IsValidTy(Ty& ty)
+bool IsValidTy(ModalTy ty)
 {
-    if (!Ty::IsTyCorrect(&ty)) {
+    if (!Ty::IsTyCorrect(ty)) {
         return false;
     }
-    if (ty.IsEnum()) {
-        auto& enumTy = static_cast<EnumTy&>(ty);
+    if (ty->IsEnum()) {
+        auto& enumTy = static_cast<EnumTy&>(*ty);
         if (!enumTy.decl) {
             return false;
         }
         for (auto& ctor : enumTy.decl->constructors) {
-            if (!ctor || !Ty::IsTyCorrect(ctor->GetTy())) {
+            if (!ctor || !ctor->GetTy().IsCorrect()) {
                 return false;
             }
         }
@@ -89,9 +89,9 @@ bool IsValidTy(Ty& ty)
     return true;
 }
 
-inline bool IsSuperTypeForFFI(const Ty& ty)
+inline bool IsSuperTypeForFFI(Ptr<const Ty> ty)
 {
-    return ty.IsCType();
+    return ty->IsCType();
 }
 
 template <typename T> bool IsSealedLikeCommon(const T& ty)
@@ -113,15 +113,15 @@ bool HasVisibleInit(const ClassDecl& cd)
     });
 }
 
-bool IsSealedLike(const Ty& ty)
+bool IsSealedLike(ModalTy ty)
 {
-    if (ty.IsClass()) {
-        auto& classTy = StaticCast<const ClassTy&>(ty);
+    if (ty->IsClass()) {
+        auto& classTy = StaticCast<ClassTy>(*ty.Ty());
         CJC_NULLPTR_CHECK(classTy.declPtr);
         return IsSealedLikeCommon(classTy) || !HasVisibleInit(*classTy.declPtr);
     }
-    if (ty.IsInterface()) {
-        return IsSealedLikeCommon(StaticCast<const InterfaceTy&>(ty));
+    if (ty->IsInterface()) {
+        return IsSealedLikeCommon(StaticCast<InterfaceTy>(*ty.Ty()));
     }
     // Other types cannot be inherited, they are all sealed-like.
     return true;
@@ -154,7 +154,7 @@ bool IsClosedSealedHierarchy(const ClassLikeTy& ty, const Package& currentPackag
 {
     // Closure is valid only for declarations fully owned by this package. Generic, FFI, and common/specific
     // declarations are excluded because their complete subtype set may not be visible here.
-    if (!ty.commonDecl || !ty.typeArgs.empty() || IsSuperTypeForFFI(ty)) {
+    if (!ty.commonDecl || !ty.typeArgs.empty() || IsSuperTypeForFFI(&ty)) {
         return false;
     }
     const ClassLikeDecl& decl = *ty.commonDecl;
@@ -214,10 +214,10 @@ enum class ConstructorKind {
     UNIT,
     BOOLEAN,                // (bool)
     NON_EXHAUSTIVE_LITERAL, // (const LitConstExpr&), i.e., String, Rune, Float, ...
-    ENUM,                   // (const std::string&, const Ty&), the constructor of enum
+    ENUM,                   // (const std::string&, ModalTy), the constructor of enum
     NON_EXHAUSTIVE_ENUM,
     TUPLE,
-    TYPE, // (Ty&)
+    TYPE, // (ModalTy)
     WILDCARD,
     MISSING, // A special wildcard to cover non-exhaustive and type patterns
     OR,      // patterns separated by vertical bars
@@ -226,15 +226,13 @@ enum class ConstructorKind {
 
 struct EnumConstructor {
     const std::string& identifier;
-    const Ty& ty;
+    ModalTy ty;
 
-    EnumConstructor(const std::string& identifier, const Ty& ty) : identifier(identifier), ty(ty)
-    {
-    }
+    EnumConstructor(const std::string& identifier, ModalTy ty) : identifier(identifier), ty(ty) {}
 };
 
 using ConstructorUnion = std::variant<bool, std::reference_wrapper<const LitConstExpr>,
-    std::reference_wrapper<const RefExpr>, std::reference_wrapper<Ty>, EnumConstructor>;
+    std::reference_wrapper<const RefExpr>, ModalTy, EnumConstructor>;
 
 class Constructor {
 public:
@@ -258,9 +256,9 @@ public:
     {
         return Constructor(ConstructorKind::TUPLE, numArgs);
     }
-    static Constructor Enum(const Decl& decl, const Ty& ty)
+    static Constructor Enum(const Decl& decl, ModalTy ty)
     {
-        if (!Ty::IsTyCorrect(&ty)) {
+        if (!Ty::IsTyCorrect(ty)) {
             return Invalid();
         }
         size_t numArgs = 0;
@@ -269,10 +267,7 @@ public:
         }
         return Constructor(ConstructorKind::ENUM, numArgs, EnumConstructor(decl.identifier, ty));
     }
-    static Constructor Type(Ty& ty)
-    {
-        return Constructor(ConstructorKind::TYPE, 0, ty);
-    }
+    static Constructor Type(ModalTy ty) { return Constructor(ConstructorKind::TYPE, 0, ty); }
     static Constructor Wildcard()
     {
         return Constructor(ConstructorKind::WILDCARD, 0);
@@ -321,7 +316,7 @@ public:
             case ConstructorKind::NON_EXHAUSTIVE_ENUM:
                 return "_";
             case ConstructorKind::TYPE: {
-                return std::get<std::reference_wrapper<Ty>>(ctor).get().String();
+                return std::get<ModalTy>(ctor).String();
             }
             default: {
                 return "invalid";
@@ -357,17 +352,17 @@ public:
                 // The type checker guarantees their types must be the same enum.
                 return other.kind == ConstructorKind::ENUM &&
                     std::get<EnumConstructor>(ctor).identifier == std::get<EnumConstructor>(other.ctor).identifier &&
-                    std::get<EnumConstructor>(ctor).ty.IsEnum() == std::get<EnumConstructor>(other.ctor).ty.IsEnum() &&
-                    std::get<EnumConstructor>(ctor).ty.typeArgs.size() ==
-                    std::get<EnumConstructor>(other.ctor).ty.typeArgs.size();
+                    std::get<EnumConstructor>(ctor).ty->IsEnum() ==
+                    std::get<EnumConstructor>(other.ctor).ty->IsEnum() &&
+                    std::get<EnumConstructor>(ctor).ty->typeArgs.size() ==
+                    std::get<EnumConstructor>(other.ctor).ty->typeArgs.size();
             }
             case ConstructorKind::TUPLE: {
                 return other.kind == ConstructorKind::TUPLE;
             }
             case ConstructorKind::TYPE: {
                 return other.kind == ConstructorKind::TYPE &&
-                    typeManager.IsSubtype(&std::get<std::reference_wrapper<Ty>>(ctor).get(),
-                        &std::get<std::reference_wrapper<Ty>>(other.ctor).get(), true, false);
+                    typeManager.IsSubtype(std::get<ModalTy>(ctor), std::get<ModalTy>(other.ctor), true, false);
             }
             default: {
                 return false;
@@ -420,52 +415,52 @@ private:
 
 class DestructedPattern {
 public:
-    static DestructedPattern FromPattern(TypeManager& typeManager, Ty& goalTy, Pattern& pattern)
+    static DestructedPattern FromPattern(TypeManager& typeManager, ModalTy goalTy, Pattern& pattern)
     {
-        if (!Ty::IsTyCorrect(pattern.GetTy()) || !IsValidTy(*pattern.GetTy())) {
-            return {Constructor::Invalid(), {}, *TypeManager::GetInvalidTy(), &pattern};
+        if (!pattern.GetTy().IsCorrect() || !IsValidTy(pattern.GetTy())) {
+            return {Constructor::Invalid(), {}, {TypeManager::GetInvalidTy()}, &pattern};
         }
-        auto goal = typeManager.ReplaceThisTy(&goalTy);
-        // Now we are 100% sure that `pattern.GetTy()` contains a type.
+        auto goal = typeManager.ReplaceThisTy(goalTy);
+        // Now we are 100% sure that `pattern.ty` contains a type.
         switch (pattern.astKind) {
             case ASTKind::CONST_PATTERN: {
                 return FromConstPattern(static_cast<ConstPattern&>(pattern));
             }
             case ASTKind::TUPLE_PATTERN: {
-                return FromTuplePattern(typeManager, static_cast<TuplePattern&>(pattern));
+                return FromTuplePattern(typeManager, static_cast<TuplePattern&>(pattern), goal.Mode());
             }
             case ASTKind::ENUM_PATTERN: {
-                return FromEnumPattern(typeManager, static_cast<EnumPattern&>(pattern));
+                return FromEnumPattern(typeManager, static_cast<EnumPattern&>(pattern), goal.Mode());
             }
             case ASTKind::TYPE_PATTERN: {
-                return FromTypePattern(typeManager, *goal, static_cast<TypePattern&>(pattern));
+                return FromTypePattern(typeManager, goal, static_cast<TypePattern&>(pattern));
             }
             // Variable pattern behaves the same as a wildcard in the usefulness checking problem.
             // And we don't care about the name for binding.
             case ASTKind::WILDCARD_PATTERN:
             case ASTKind::VAR_PATTERN: {
-                return {Constructor::Wildcard(), {}, *goal, &pattern};
+                return {Constructor::Wildcard(), {}, goal, &pattern};
             }
             case ASTKind::VAR_OR_ENUM_PATTERN: {
-                return FromPattern(typeManager, *goal, *static_cast<VarOrEnumPattern&>(pattern).pattern);
+                return FromPattern(typeManager, goal, *static_cast<VarOrEnumPattern&>(pattern).pattern);
             }
             default: {
                 CJC_ABORT(); // unreachable
-                return {Constructor::Invalid(), {}, *TypeManager::GetInvalidTy(), &pattern};
+                return {Constructor::Invalid(), {}, {TypeManager::GetInvalidTy()}, &pattern};
             }
         }
     }
 
     static DestructedPattern FromPatterns(
-        TypeManager& typeManager, Ty& goalTy, std::vector<OwnedPtr<Pattern>>& patterns)
+        TypeManager& typeManager, ModalTy goalTy, std::vector<OwnedPtr<Pattern>>& patterns)
     {
         CJC_ASSERT(!patterns.empty());
         OwnedPtr<Pattern>& firstPattern = patterns.front();
         if (std::any_of(patterns.cbegin(), patterns.cend(), [](auto& pattern) {
                 CJC_NULLPTR_CHECK(pattern);
-                return !Ty::IsTyCorrect(pattern->GetTy()) || !IsValidTy(*pattern->GetTy());
+                return !pattern->GetTy().IsCorrect() || !IsValidTy(pattern->GetTy());
             })) {
-            return {Constructor::Invalid(), {}, *TypeManager::GetInvalidTy(), firstPattern.get()};
+            return {Constructor::Invalid(), {}, {TypeManager::GetInvalidTy()}, firstPattern.get()};
         }
         if (patterns.size() == 1) {
             return FromPattern(typeManager, goalTy, *firstPattern);
@@ -480,7 +475,8 @@ public:
         }
     }
 
-    DestructedPattern(Constructor ctor, std::vector<DestructedPattern> subPatterns, Ty& goalTy, Ptr<Pattern> pattern)
+    DestructedPattern(
+        Constructor ctor, std::vector<DestructedPattern> subPatterns, ModalTy goalTy, Ptr<Pattern> pattern)
         : ctor_(std::move(ctor)), subPatterns_(std::move(subPatterns)), goalTy_(goalTy), pattern_(pattern)
     {
     }
@@ -506,9 +502,9 @@ public:
         if (ctor_.Kind() != ConstructorKind::TYPE) {
             return false;
         }
-        AST::Ty& patternTy = std::get<std::reference_wrapper<AST::Ty>>(ctor_.Ctor()).get();
+        AST::ModalTy patternTy = std::get<AST::ModalTy>(ctor_.Ctor());
         // Nothing type is always unreachable.
-        if (patternTy.IsNothing()) {
+        if (patternTy->IsNothing()) {
             return true;
         }
         // Usually, a type pattern is unreachable,
@@ -537,11 +533,12 @@ public:
         //                case _: I => ...
         //            }
         //        }
-        if (goalTy_.HasGeneric() || patternTy.HasGeneric() || !IsSealedLike(goalTy_) || !IsSealedLike(patternTy)) {
+        if (goalTy_->HasGeneric() || patternTy->HasGeneric() || !IsSealedLike(goalTy_) || !IsSealedLike(patternTy)) {
             return false;
         }
-        bool goalIsSubtype = typeManager.IsSubtype(&goalTy_, &patternTy, true, false);
-        bool patternIsSubtype = typeManager.IsSubtype(&patternTy, &goalTy_, true, false);
+        bool goalIsSubtype = typeManager.IsSubtype(goalTy_, patternTy, true, false);
+        bool patternIsSubtype = typeManager.IsSubtype(patternTy, goalTy_, true, false);
+
         return !goalIsSubtype && !patternIsSubtype;
     }
 
@@ -590,10 +587,7 @@ public:
         return subPatterns_;
     }
 
-    AST::Ty& GoalTy()
-    {
-        return goalTy_;
-    }
+    AST::ModalTy GoalTy() { return goalTy_; }
 
     Ptr<AST::Pattern> Node()
     {
@@ -603,63 +597,69 @@ public:
 private:
     static DestructedPattern FromConstPattern(ConstPattern& constPattern)
     {
-        CJC_ASSERT(Ty::IsTyCorrect(constPattern.GetTy()));
-        return {Constructor::FromLiteral(*constPattern.literal), {}, *constPattern.GetTy(), &constPattern};
+        CJC_ASSERT(constPattern.GetTy().IsCorrect());
+        return {Constructor::FromLiteral(*constPattern.literal), {}, constPattern.GetTy(), &constPattern};
     }
 
     static std::vector<DestructedPattern> SubPatternsFromPatterns(TypeManager& typeManager,
-        const std::vector<Ptr<AST::Ty>>& goalTys, const std::vector<OwnedPtr<Pattern>>& patterns)
+        const std::vector<AST::ModalTy>& goalTys, const std::vector<OwnedPtr<Pattern>>& patterns)
     {
         std::vector<DestructedPattern> subPatterns;
         CJC_ASSERT(goalTys.size() == patterns.size());
         for (size_t i = 0; i < goalTys.size(); i++) {
             CJC_ASSERT(Ty::IsTyCorrect(goalTys[i]));
             CJC_NULLPTR_CHECK(patterns[i]);
-            (void)subPatterns.emplace_back(DestructedPattern::FromPattern(typeManager, *goalTys[i], *patterns[i]));
+            (void)subPatterns.emplace_back(DestructedPattern::FromPattern(typeManager, goalTys[i], *patterns[i]));
         }
         return subPatterns;
     }
 
-    static DestructedPattern FromTuplePattern(TypeManager& typeManager, TuplePattern& tuplePattern)
+    static DestructedPattern FromTuplePattern(TypeManager& typeManager, TuplePattern& tuplePattern,
+        ModalInfo targetMode)
     {
-        CJC_ASSERT(Ty::IsTyCorrect(tuplePattern.GetTy()) && tuplePattern.GetTy()->IsTuple());
-        const TupleTy& tupleTy = StaticCast<const TupleTy&>(*tuplePattern.GetTy());
+        CJC_ASSERT(tuplePattern.GetTy().IsCorrect() && tuplePattern.GetTy()->IsTuple());
+        const TupleTy& tupleTy = StaticCast<TupleTy>(*tuplePattern.GetTy());
+        auto tyArgs = tupleTy.typeArgs;
+        for (size_t i{0}; i < tyArgs.size(); ++i) {
+            tyArgs[i] = tyArgs[i].With(targetMode);
+        }
         std::vector<DestructedPattern> subPatterns =
             SubPatternsFromPatterns(typeManager, tupleTy.typeArgs, tuplePattern.patterns);
-        return {Constructor::Tuple(subPatterns.size()), subPatterns, *tuplePattern.GetTy(), &tuplePattern};
+        return {
+            Constructor::Tuple(subPatterns.size()), subPatterns, tuplePattern.GetTy().With(targetMode), &tuplePattern};
     }
 
-    static DestructedPattern FromEnumPattern(TypeManager& typeManager, EnumPattern& enumPattern)
+    static DestructedPattern FromEnumPattern(TypeManager& typeManager, EnumPattern& enumPattern, ModalInfo targetMode)
     {
         CJC_NULLPTR_CHECK(enumPattern.constructor);
         Ptr<const Decl> target = enumPattern.constructor->GetTarget();
-        if (!target || !Ty::IsTyCorrect(enumPattern.GetTy())) {
-            return {Constructor::Invalid(), {}, *TypeManager::GetInvalidTy(), &enumPattern};
+        if (!target || !enumPattern.GetTy().IsCorrect()) {
+            return {Constructor::Invalid(), {}, {TypeManager::GetInvalidTy()}, &enumPattern};
         }
         MultiTypeSubst m;
         typeManager.GenerateGenericMapping(m, *enumPattern.GetTy());
-        Ptr<AST::Ty> instTy = typeManager.GetBestInstantiatedTy(target->GetTy(), m);
+        ModalTy instTy = typeManager.GetBestInstantiatedTy({target->DataTy(), targetMode}, m);
         CJC_ASSERT(Ty::IsTyCorrect(instTy));
-        Constructor ctor = Constructor::Enum(*target, *instTy);
+        Constructor ctor = Constructor::Enum(*target, instTy);
         if (instTy->IsFunc()) {
             const FuncTy& funcTy = StaticCast<const FuncTy&>(*instTy);
             return {ctor, SubPatternsFromPatterns(typeManager, funcTy.paramTys, enumPattern.patterns),
-                *enumPattern.GetTy(), &enumPattern};
+                enumPattern.GetTy().With(targetMode), &enumPattern};
         }
-        return {ctor, {}, *enumPattern.GetTy(), &enumPattern};
+        return {ctor, {}, enumPattern.GetTy(), &enumPattern};
     }
 
-    static DestructedPattern FromTypePattern(TypeManager& typeManager, AST::Ty& goalTy, TypePattern& typePattern)
+    static DestructedPattern FromTypePattern(TypeManager& typeManager, AST::ModalTy goalTy, TypePattern& typePattern)
     {
-        CJC_ASSERT(Ty::IsTyCorrect(typePattern.GetTy()));
+        CJC_ASSERT(typePattern.GetTy().IsCorrect());
         // If `goalTy <: typePattern.GetTy()`, the type pattern can always be matched.
         // For example: In `match (x) { case _: ToString => ... }`, where `x: Int64`,
         // the type pattern is equivalent to a wildcard.
         // An exception is that `Nothing` is always unreachable, it will be handled by `IsUnreachableTypePattern`.
-        if (!typePattern.GetTy()->IsNothing() && typeManager.IsSubtype(&goalTy, typePattern.GetTy(), true, false)) {
+        if (!typePattern.GetTy()->IsNothing() && typeManager.IsSubtype(goalTy.Ty(), typePattern.GetTy(), true, false)) {
             return {Constructor::Wildcard(), {}, goalTy, &typePattern};
         }
-        return {Constructor::Type(*typePattern.GetTy()), {}, goalTy, &typePattern};
+        return {Constructor::Type(typePattern.GetTy().With(goalTy.Mode())), {}, goalTy, &typePattern};
     }
 
     static std::string SubPatternsToString(const std::vector<DestructedPattern>& subPatterns)
@@ -677,35 +677,35 @@ private:
         return result + ")";
     }
 
-    static std::vector<DestructedPattern> SpecializeWildcard(AST::Ty& ty, const Constructor& ctor)
+    static std::vector<DestructedPattern> SpecializeWildcard(AST::ModalTy ty, const Constructor& ctor)
     {
         std::vector<DestructedPattern> subPatterns;
         if (ctor.Kind() == ConstructorKind::TUPLE) {
             // Expand the wildcard, i.e., _ => (_, _, ..., _)
-            CJC_ASSERT(AST::Ty::IsTyCorrect(&ty));
-            CJC_ASSERT(ty.IsTuple());
-            CJC_ASSERT(ctor.Arity() == ty.typeArgs.size());
+            CJC_ASSERT(AST::Ty::IsTyCorrect(ty));
+            CJC_ASSERT(ty->IsTuple());
+            CJC_ASSERT(ctor.Arity() == ty->typeArgs.size());
             for (size_t i = 0; i < ctor.Arity(); i++) {
-                Ptr<AST::Ty> argTy = ty.typeArgs[i];
+                auto argTy = ty->TyArg(i);
                 CJC_ASSERT(Ty::IsTyCorrect(argTy));
-                subPatterns.emplace_back(DestructedPattern(Constructor::Wildcard(), {}, *argTy, nullptr));
+                subPatterns.push_back({Constructor::Wildcard(), {}, {argTy, ty.Mode()}, nullptr});
             }
             return subPatterns;
         }
         if (ctor.Kind() == ConstructorKind::ENUM) {
-            const AST::Ty& ctorTy = std::get<EnumConstructor>(ctor.Ctor()).ty;
-            if (ctorTy.IsEnum()) {
+            AST::ModalTy ctorTy = std::get<EnumConstructor>(ctor.Ctor()).ty;
+            if (ctorTy->IsEnum()) {
                 // `ctor` doesn't have fields, e.g., `None`. The transform will not happen.
                 // An empty `subPatterns` will be returned as we need.
                 return subPatterns;
             }
             // Otherwise, `ctor` is a enum constructor with fields.
-            CJC_ASSERT(ctorTy.IsFunc());
-            const AST::FuncTy& ctorFuncTy = static_cast<const AST::FuncTy&>(ctorTy);
+            CJC_ASSERT(ctorTy->IsFunc());
+            const AST::FuncTy& ctorFuncTy = StaticCast<FuncTy>(*ctorTy);
             std::transform(ctorFuncTy.paramTys.cbegin(), ctorFuncTy.paramTys.cend(), std::back_inserter(subPatterns),
-                [](auto paramTy) {
+                [ty](auto paramTy) {
                     CJC_ASSERT(Ty::IsTyCorrect(paramTy));
-                    return DestructedPattern(Constructor::Wildcard(), {}, *paramTy, nullptr);
+                    return DestructedPattern(Constructor::Wildcard(), {}, paramTy.With(ty.Mode()), nullptr);
                 });
             return subPatterns;
         }
@@ -714,7 +714,7 @@ private:
 
     Constructor ctor_;
     std::vector<DestructedPattern> subPatterns_;
-    Ty& goalTy_;
+    ModalTy goalTy_;
     Ptr<Pattern> pattern_;
 };
 
@@ -775,7 +775,7 @@ public:
      * This function is designed to recover the original patterns. For example, after applying the enum constructor
      * `A(Int64, Int64)` on a PatternStack `[1, 2, 3]`, we get a new PatternStack `[A(1, 2), 3]`.
      */
-    PatternStack Apply(const Constructor& ctor, Ty& ty) const
+    PatternStack Apply(const Constructor& ctor, ModalTy ty) const
     {
         std::vector<DestructedPattern> subPatterns;
         CJC_ASSERT(Size() >= ctor.Arity());
@@ -929,11 +929,10 @@ public:
 private:
     static std::vector<Constructor> SplitWildcardForClosedSealed(ClassLikeTy& sealedTy)
     {
-        std::set<Ptr<Ty>, CmpTyByName> directSubtypes(
-            sealedTy.directSubtypes.cbegin(), sealedTy.directSubtypes.cend());
+        std::set<DataTy, CmpTyByName> directSubtypes(sealedTy.directSubtypes.cbegin(), sealedTy.directSubtypes.cend());
         std::vector<Constructor> ctors;
-        for (Ptr<Ty> subTy : directSubtypes) {
-            ctors.emplace_back(Constructor::Type(*subTy));
+        for (DataTy subTy : directSubtypes) {
+            ctors.emplace_back(Constructor::Type({subTy}));
         }
         return ctors;
     }
@@ -947,38 +946,38 @@ private:
      * The missing cases are `Some(true)` and `Some(false)`, but `Some(_)` is preferred.
      */
     static std::vector<Constructor> SplitWildcard(
-        TypeManager& typeManager, Ty& ty, Matrix& matrix, const Package* currentPackage)
+        TypeManager& typeManager, ModalTy ty, Matrix& matrix, const Package* currentPackage)
     {
         if (matrix.MissingAll()) {
             return {Constructor::Wildcard()};
         }
-        if (ty.IsClassLike() && currentPackage &&
-            IsClosedSealedHierarchy(StaticCast<ClassLikeTy&>(ty), *currentPackage, true)) {
-            return SplitWildcardForClosedSealed(StaticCast<ClassLikeTy&>(ty));
+        if (ty->IsClassLike() && currentPackage &&
+            IsClosedSealedHierarchy(StaticCast<ClassLikeTy&>(*ty), *currentPackage, true)) {
+            return SplitWildcardForClosedSealed(StaticCast<ClassLikeTy&>(*ty));
         }
-        if (!Ty::IsTyCorrect(&ty)) {
+        if (!Ty::IsTyCorrect(ty)) {
             return {Constructor::Missing()};
         }
-        if (ty.IsUnit()) {
+        if (ty->IsUnit()) {
             return {Constructor::Unit()};
         }
-        if (ty.IsBoolean()) {
+        if (ty->IsBoolean()) {
             return {Constructor::Boolean(false), Constructor::Boolean(true)};
         }
-        if (ty.IsTuple()) {
-            return {Constructor::Tuple(ty.typeArgs.size())};
+        if (ty->IsTuple()) {
+            return {Constructor::Tuple(ty->typeArgs.size())};
         }
-        if (ty.IsEnum()) {
+        if (ty->IsEnum()) {
             MultiTypeSubst m;
-            typeManager.GenerateGenericMapping(m, ty);
+            typeManager.GenerateGenericMapping(m, *ty);
             std::vector<Constructor> ctors;
-            auto& enumTy = StaticCast<EnumTy>(ty);
+            auto& enumTy = StaticCast<EnumTy>(*ty);
             for (const auto& decl : enumTy.declPtr->constructors) {
                 if (auto varDecl = DynamicCast<const VarDecl*>(decl.get()); varDecl) {
                     ctors.emplace_back(Constructor::Enum(*varDecl, ty));
                 } else if (auto funcDecl = DynamicCast<const FuncDecl*>(decl.get()); funcDecl) {
                     ctors.emplace_back(
-                        Constructor::Enum(*funcDecl, *typeManager.GetBestInstantiatedTy(funcDecl->GetTy(), m)));
+                        Constructor::Enum(*funcDecl, typeManager.GetBestInstantiatedTy(funcDecl->GetTy(), m)));
                 }
             }
             if (enumTy.IsNonExhaustive()) {
@@ -997,11 +996,11 @@ private:
             // Avoid inspecting the sub-patterns if the matrix' heads are all wildcards.
             return FindWitnessesBySpecialization(vec, head.Ctor());
         }
-        Ty& goalTy = head.GoalTy();
-        if (goalTy.IsTuple()) {
+        ModalTy goalTy = head.GoalTy();
+        if (goalTy->IsTuple()) {
             // Expand the wildcard into a tuple of wildcards, i.e., _ => (_, _, ..., _), then call FindWitnesses for
             // the rewritted wildcards.
-            Constructor tuple = Constructor::Tuple(goalTy.typeArgs.size());
+            Constructor tuple = Constructor::Tuple(goalTy->typeArgs.size());
             auto stack = vec.Specialize(tuple).Apply(tuple, goalTy);
             return FindWitnesses(stack);
         }
@@ -1069,7 +1068,7 @@ namespace PatternUsefulness {
 bool CheckMatchExprHasSelectorExhaustivenessAndReachability(
     DiagnosticEngine& diag, TypeManager& typeManager, const MatchExpr& me)
 {
-    if (!me.selector || !me.selector->GetTy() || !IsValidTy(*me.selector->GetTy())) {
+    if (!me.selector || !me.selector->GetTy() || !IsValidTy(me.selector->GetTy())) {
         // Avoid exhaustive & reachable checking if fatal errors appeared.
         return true;
     }
@@ -1082,10 +1081,10 @@ bool CheckMatchExprHasSelectorExhaustivenessAndReachability(
             continue;
         }
         for (auto& pattern : mc->patterns) {
-            CJC_ASSERT(!Ty::IsInitialTy(pattern->GetTy()));
+            CJC_ASSERT(!Ty::IsInitialTy(pattern->DataTy()));
         }
         // The PatternStack vec contains only one item in the beginning.
-        PatternStack vec(DestructedPattern::FromPatterns(typeManager, *selectorTy, mc->patterns));
+        PatternStack vec(DestructedPattern::FromPatterns(typeManager, selectorTy, mc->patterns));
         std::vector<PatternStack> witnesses = checker.FindWitnesses(vec);
         if (!witnesses.empty()) {
             // Add the witnesses to the matrix only if the match case doesn't have guard.
@@ -1099,13 +1098,13 @@ bool CheckMatchExprHasSelectorExhaustivenessAndReachability(
                 MakeRange(mc->patterns.front()->begin, mc->patterns.back()->end));
         }
     }
-    auto stack = PatternStack(DestructedPattern(Constructor::Wildcard(), {}, *selectorTy, nullptr));
+    auto stack = PatternStack(DestructedPattern(Constructor::Wildcard(), {}, selectorTy, nullptr));
     std::vector<PatternStack> witnesses = checker.FindWitnesses(stack);
     if (witnesses.empty()) {
         return true;
     }
     DiagnosticBuilder diagBuilder = diag.DiagnoseRefactor(DiagKindRefactor::sema_nonexhuastive_patterns, *me.selector);
-    diagBuilder.AddMainHintArguments(me.selector->GetTy()->String());
+    diagBuilder.AddMainHintArguments(me.selector->GetTy().String());
     for (PatternStack& witness : witnesses) {
         // Every witness has only one item in the final result of FindWitnesses()
         CJC_ASSERT(witness.Size() == 1);

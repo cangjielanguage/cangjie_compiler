@@ -192,19 +192,21 @@ std::string MetadataInfo::GetTiName(const CHIR::Type& ty) const
         auto refTy = StaticCast<const CHIR::RefType&>(ty).GetBaseType();
         return GetTiName(*refTy);
     }
-    auto cgType = CGType::GetOrCreate(module, &ty);
-    if (ty.IsGenericRelated()) {
+    // Type info exists only for data types, never for modal types.
+    auto& dataTy = *ty.GetDataType(module.GetCGContext().GetCHIRBuilder());
+    auto cgType = CGType::GetOrCreate(module, &dataTy);
+    if (dataTy.IsGenericRelated()) {
         auto ti = cgType->GetOrCreateTypeInfo();
         return ti->getName().str();
     }
-    if (ty.IsAutoEnvBase()) {
-        if (ty.IsAutoEnvInstBase()) {
-            auto superClassTy = const_cast<CHIR::ClassType&>(static_cast<const CHIR::ClassType&>(ty))
+    if (dataTy.IsAutoEnvBase()) {
+        if (dataTy.IsAutoEnvInstBase()) {
+            auto superClassTy = const_cast<CHIR::ClassType&>(static_cast<const CHIR::ClassType&>(dataTy))
                                     .GetSuperClassTy(&module.GetCGContext().GetCHIRBuilder());
             return GetTiName(static_cast<const CHIR::Type&>(*superClassTy));
         }
     }
-    auto tiName = CGType::GetNameOfTypeInfoGV(ty);
+    auto tiName = CGType::GetNameOfTypeInfoGV(dataTy);
     if (!module.GetLLVMModule()->getNamedGlobal(tiName)) {
         auto ti = cgType->GetOrCreateTypeInfo();
         if (cgType->IsStaticGI()) {

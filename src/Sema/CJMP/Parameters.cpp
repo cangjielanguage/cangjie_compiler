@@ -178,8 +178,8 @@ bool MPTypeCheckerImpl::MatchCJMPFunctionGenerics(AST::FuncDecl& specificFunc, A
     MapCJMPGenericTypeArgs(genericTyMap, commonFunc, specificFunc);
     if (!genericTyMap.empty()) {
         isGenericFuncMatch = false;
-        auto newCommonFuncTy = StaticCast<FuncTy*>(typeManager.GetInstantiatedTy(commonFunc.GetTy(), genericTyMap));
-        auto specificFuncTy = StaticCast<FuncTy*>(specificFunc.GetTy());
+        auto newCommonFuncTy = StaticCast<FuncTy>(typeManager.GetInstantiatedTy(commonFunc.GetTy(), genericTyMap).Ty());
+        auto specificFuncTy = StaticCast<FuncTy>(specificFunc.DataTy());
         if (typeManager.IsFuncTySubType(*specificFuncTy, *newCommonFuncTy)) {
             isGenericFuncMatch = true;
         }

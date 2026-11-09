@@ -23,7 +23,6 @@
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
-#include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Utils/Utils.h"
 
 using namespace Cangjie;
@@ -296,10 +295,10 @@ protected:
         auto instTys = checker.GetTyFromASTType(ctx, re.typeArguments);
         if (ctxExprs.empty()) {
             checker.InferRefExpr(ctx, re);
-            if (Ty::IsTyCorrect(re.GetTy()) &&
+            if (re.GetTy().IsCorrect() &&
                 (re.isThis || re.isSuper ||
                     !(Ty::GetDeclPtrOfTy(re.GetTy()) && Ty::GetDeclPtrOfTy(re.GetTy())->IsNominalDecl()))) {
-                std::unordered_set<Ptr<Ty>> tys{re.GetTy()};
+                std::unordered_set<ModalTy> tys{re.GetTy()};
                 return SynResult(tys);
             }
         } else {
@@ -311,7 +310,7 @@ protected:
             }
             checker.InferRefExpr(ctx, re);
             if (!instTys.empty() && !re.ref.targets.empty()) {
-                std::unordered_set<Ptr<Ty>> tys;
+                std::unordered_set<ModalTy> tys;
                 for (auto decl : re.ref.targets) {
                     auto typeMapping = TypeCheckUtil::GenerateTypeMapping(*decl, instTys);
                     tys.emplace(checker.typeManager.GetInstantiatedTy(decl->GetTy(), typeMapping));
@@ -325,28 +324,28 @@ protected:
     }
 
     // Convert decls to tys with type instantiation.
-    std::unordered_set<Ptr<Ty>> GetCandidateTysForMemberAccess(
-        Ty& baseTy, const std::vector<Ptr<AST::Ty>>& typeArgs, const std::vector<Ptr<Decl>>& candidates)
+    std::unordered_set<ModalTy> GetCandidateTysForMemberAccess(
+        ModalTy baseTy, const std::vector<DataTy>& typeArgs, const std::vector<Ptr<Decl>>& candidates)
     {
         MultiTypeSubst mts;
-        checker.typeManager.GenerateGenericMapping(mts, baseTy);
+        checker.typeManager.GenerateGenericMapping(mts, *baseTy);
         auto baseMapping = TypeCheckUtil::MultiTypeSubstToTypeSubst(mts);
-        std::unordered_set<Ptr<Ty>> tys;
+        std::unordered_set<ModalTy> tys;
         for (auto decl : candidates) {
             auto typeMapping = TypeCheckUtil::GenerateTypeMapping(*decl, typeArgs);
             typeMapping.insert(baseMapping.begin(), baseMapping.end());
-            auto instTy = checker.typeManager.GetInstantiatedTy(decl->GetTy(), typeMapping);
-            if (auto fTy = DynamicCast<FuncTy>(instTy); fTy && Is<ClassThisTy>(fTy->retTy)) {
-                instTy = checker.typeManager.GetFunctionTy(fTy->paramTys, &baseTy);
+            auto instTy = checker.typeManager.GetInstantiatedTy(decl->DataTy(), typeMapping);
+            if (auto fTy = DynamicCast<FuncTy>(instTy); fTy && Is<ClassThisTy>(fTy->retTy.Ty())) {
+                instTy = checker.typeManager.GetFunctionTy(fTy->paramTys, baseTy);
             }
-            tys.emplace(instTy);
+            tys.emplace(instTy, baseTy.Mode());
         }
         return tys;
     }
 
-    Candidate GetCandidateMembers(const std::unordered_set<Ptr<Ty>>& tys, const std::string& field, Ptr<File> curFile)
+    Candidate GetCandidateMembers(const std::unordered_set<ModalTy>& tys, const std::string& field, Ptr<File> curFile)
     {
-        std::unordered_set<Ptr<Ty>> resultTys;
+        std::unordered_set<ModalTy> resultTys;
         auto ma = CreateMemberAccess(CreateRefExpr("$dummy"), field);
         // Avoid diagnostic engine to throw internal error.
         ma->begin = DEFAULT_POSITION;
@@ -358,11 +357,11 @@ protected:
             ma->targets.clear();
             // Set dummy target type to skip inference checking.
             ctx.targetTypeMap[ma.get()] = ty;
-            auto target = checker.GetObjMemberAccessTarget(ctx, *ma, *ty);
+            auto target = checker.GetObjMemberAccessTarget(ctx, *ma, ty);
             target && ma->targets.empty() ? curTargets.insert(curTargets.end(), target)
                                           : curTargets.insert(curTargets.end(), ma->targets.begin(), ma->targets.end());
             // Convert decls to tys for further non-reference synthesizing.
-            auto foundTys = GetCandidateTysForMemberAccess(*ty, {}, curTargets);
+            auto foundTys = GetCandidateTysForMemberAccess(ty, {}, curTargets);
             resultTys.merge(foundTys);
         }
         return Candidate(resultTys);
@@ -379,7 +378,7 @@ protected:
         SynCtx synCtx(this, &ma);
         auto base = VisitNode(ma.baseExpr.get());
         // Set type of 'typeArguments' if existed.
-        std::vector<Ptr<AST::Ty>> instTys = checker.GetTyFromASTType(ctx, ma.typeArguments);
+        auto instTys = checker.GetTyFromASTType(ctx, ma.typeArguments);
         // If baseExpr is combined with pure references, decide whether syn current ma with parentExpr state.
         // a.b  or  a().b
         if (wasPureReference) {
@@ -396,16 +395,16 @@ protected:
             if (parentExpr != nullptr && !candidates.empty() && ma.baseExpr->GetTy()) {
                 // Update current decl status for parent expr when return type result.
                 wasTypeCall = ma.callOrPattern && ma.target && ma.target->IsTypeDecl();
-                auto tys = GetCandidateTysForMemberAccess(*ma.baseExpr->GetTy(), instTys, candidates);
+                auto tys = GetCandidateTysForMemberAccess(ma.baseExpr->GetTy(), instTys, candidates);
                 return SynResult(tys);
             }
             return SynResult(candidates);
         }
-        std::unordered_set<Ptr<Ty>> tys;
+        std::unordered_set<ModalTy> tys;
         if (base.value.hasDecl) {
             // Field accessing like 'call().a.b'
             for (auto it : base.value.decls) {
-                if (Ty::IsTyCorrect(it->GetTy())) {
+                if (it->GetTy().IsCorrect()) {
                     tys.emplace(it->GetTy());
                 }
             }
@@ -421,7 +420,7 @@ protected:
     {
         // Another kind of reference, only valid for base of MemberAccess.
         // If ctx is empty, return primitive type, otherwise nothing to do here.
-        std::unordered_set<Ptr<Ty>> tys;
+        std::unordered_set<ModalTy> tys;
         if (ctxExprs.empty()) {
             tys.emplace(TypeManager::GetPrimitiveTy(pte.typeKind));
         }
@@ -430,7 +429,7 @@ protected:
 
     SynResult Visit(LitConstExpr& lce) override
     {
-        Ptr<Ty> ty = TypeManager::GetInvalidTy();
+        ModalTy ty = ModalTy{TypeManager::GetInvalidTy()};
         if (lce.siExpr || lce.kind == LitConstKind::STRING) {
             auto stringDecl = checker.importManager.GetCoreDecl<InheritableDecl>(STD_LIB_STRING);
             if (stringDecl) {
@@ -439,21 +438,21 @@ protected:
         } else {
             ty = checker.SynLitConstExpr(ctx, lce);
         }
-        std::unordered_set<Ptr<Ty>> tys;
-        if (Ty::IsTyCorrect(ty)) {
+        std::unordered_set<ModalTy> tys;
+        if (ty.IsCorrect()) {
             tys.emplace(ty);
         }
         return SynResult(tys);
     }
 
-    std::unordered_set<Ptr<Ty>> GetCandidateCallResults(const std::unordered_set<Ptr<Ty>>& tys,
+    std::unordered_set<ModalTy> GetCandidateCallResults(const std::unordered_set<ModalTy>& tys,
         const std::string& field, Ptr<File> curFile, bool isInTrailingClosure = false)
     {
-        std::unordered_set<Ptr<Ty>> results;
+        std::unordered_set<ModalTy> results;
         auto candidates = GetCandidateMembers(tys, field, curFile);
         CJC_ASSERT(!candidates.hasDecl);
         for (auto ty : candidates.tys) {
-            if (auto fTy = DynamicCast<FuncTy*>(ty);
+            if (auto fTy = DynamicCast<FuncTy*>(ty.Ty());
                 fTy && (!isInTrailingClosure || IsViableTypeForTrailingClosure(*fTy))) {
                 results.emplace(fTy->retTy);
             }
@@ -464,20 +463,20 @@ protected:
     SynResult Visit(CallExpr& ce) override
     {
         bool isInTrailingClosure = !ctxExprs.empty() && ctxExprs.top()->astKind == ASTKind::TRAIL_CLOSURE_EXPR;
-        std::unordered_set<Ptr<Ty>> tys;
+        std::unordered_set<ModalTy> tys;
         SynCtx synCtx(this, &ce);
         auto base = VisitNode(ce.baseFunc.get());
         // NOTE: will not filter candidate by arguments, since the user may not given correct arguments.
         if (base.value.hasDecl) {
-            std::unordered_set<Ptr<Ty>> varTys;
+            std::unordered_set<ModalTy> varTys;
             for (auto decl : base.value.decls) {
-                if (!decl || !Ty::IsTyCorrect(decl->GetTy())) {
+                if (!decl || !decl->GetTy().IsCorrect()) {
                     continue;
                 }
                 if (decl->IsTypeDecl()) {
                     // Handle case of constructor call.
                     tys.emplace(decl->GetTy());
-                } else if (auto fTy = DynamicCast<FuncTy*>(decl->GetTy())) {
+                } else if (auto fTy = DynamicCast<FuncTy>(decl->DataTy())) {
                     if (!isInTrailingClosure || IsViableDeclForTrailingClosure(*decl, *fTy)) {
                         tys.emplace(fTy->retTy);
                     }
@@ -493,13 +492,13 @@ protected:
                 return SynResult(base.value.tys);
             }
             // eg: funcCall()(), calling returned value of another function call.
-            std::unordered_set<Ptr<Ty>> varTys;
+            std::unordered_set<ModalTy> varTys;
             for (auto ty : base.value.tys) {
                 if (wasTypeCall) {
                     // Handle case of constructor call.
                     tys.emplace(ty);
                     wasTypeCall = false;
-                } else if (auto fTy = DynamicCast<FuncTy*>(ty)) {
+                } else if (auto fTy = DynamicCast<FuncTy*>(ty.Ty())) {
                     if (!isInTrailingClosure || IsViableTypeForTrailingClosure(*fTy)) {
                         tys.emplace(fTy->retTy);
                     }
@@ -513,10 +512,10 @@ protected:
         return SynResult(tys);
     }
 
-    std::unordered_set<Ptr<Ty>> GetTupleAccessTys(const std::unordered_set<Ptr<Ty>>& tupleTys, Expr& index)
+    std::unordered_set<ModalTy> GetTupleAccessTys(const std::unordered_set<ModalTy>& tupleTys, Expr& index)
     {
         // Tuple can only accessed by numeric literal.
-        std::unordered_set<Ptr<Ty>> tys;
+        std::unordered_set<ModalTy> tys;
         if (auto lce = DynamicCast<LitConstExpr*>(&index); lce && lce->kind == LitConstKind::INTEGER) {
             auto indexTy = checker.SynLitConstExpr(ctx, *lce);
             if (!indexTy->IsInteger() || lce->constNumValue.asInt.IsOutOfRange() ||
@@ -537,12 +536,12 @@ protected:
     {
         SynCtx synCtx(this, &se);
         auto base = VisitNode(se.baseExpr.get());
-        std::unordered_set<Ptr<Ty>> baseTys;
-        std::unordered_set<Ptr<Ty>> tupleTys;
+        std::unordered_set<ModalTy> baseTys;
+        std::unordered_set<ModalTy> tupleTys;
         if (base.value.hasDecl) {
             // eg: a[0] -- only can be tuple or user defined type vardecl.
             for (auto decl : base.value.decls) {
-                if (decl && Ty::IsTyCorrect(decl->GetTy())) {
+                if (decl && decl->GetTy().IsCorrect()) {
                     decl->GetTy()->IsTuple() ? tupleTys.emplace(decl->GetTy()) : baseTys.emplace(decl->GetTy());
                 }
             }
@@ -561,12 +560,12 @@ protected:
 
     SynResult Visit(OptionalExpr& oe) override
     {
-        std::unordered_set<Ptr<Ty>> tys;
+        std::unordered_set<ModalTy> tys;
         SynCtx synCtx(this, &oe);
         auto base = VisitNode(oe.baseExpr.get());
         if (base.value.hasDecl) {
             for (auto decl : base.value.decls) {
-                if (decl && Ty::IsTyCorrect(decl->GetTy())) {
+                if (decl && decl->GetTy().IsCorrect()) {
                     tys.emplace(decl->GetTy());
                 }
             }
@@ -574,7 +573,7 @@ protected:
             tys = base.value.tys;
         }
         // Unpack option type.
-        std::unordered_set<Ptr<Ty>> results;
+        std::unordered_set<ModalTy> results;
         for (auto ty : tys) {
             if (ty->IsCoreOptionType()) {
                 results.emplace(ty->typeArgs[0]);
@@ -605,7 +604,7 @@ protected:
     {
         // To be used in trailing closure, there must exist a function type of paramTy.
         // NOTE: Fuzzy checking, do not restrict the funcTy be last param type.
-        return !funcTy.paramTys.empty() && Utils::In(funcTy.paramTys, [](auto& it) { return it->IsFunc(); });
+        return !funcTy.paramTys.empty() && Utils::In(funcTy.paramTys, [](const ModalTy& it) { return it->IsFunc(); });
     }
 
     SynResult Visit(TrailingClosureExpr& tce) override
@@ -621,29 +620,29 @@ protected:
 
     SynResult Visit(ArrayLit& al) override
     {
-        std::unordered_set<Ptr<Ty>> tys;
-        std::set<Ptr<Ty>> arrayElemTys;
+        std::unordered_set<ModalTy> tys;
+        std::set<ModalTy> arrayElemTys;
         for (auto& child : al.children) {
             auto childResult = VisitNode(child.get()).value;
-            Ptr<Ty> childTy = TypeManager::GetInvalidTy();
+            ModalTy childTy = ModalTy{TypeManager::GetInvalidTy()};
             if (childResult.hasDecl || !childResult.tys.empty()) {
                 childTy = childResult.hasDecl ? childResult.decls[0]->GetTy() : *childResult.tys.begin();
             }
-            if (!Ty::IsTyCorrect(childTy)) {
-                tys.emplace(TypeManager::GetInvalidTy());
+            if (!childTy.IsCorrect()) {
+                tys.emplace(ModalTy{TypeManager::GetInvalidTy()});
                 return SynResult(tys);
             }
             arrayElemTys.insert(childTy);
         }
         auto arrayStruct = checker.importManager.GetCoreDecl<StructDecl>("Array");
         if (arrayElemTys.empty() || arrayStruct == nullptr) {
-            tys.emplace(TypeManager::GetInvalidTy());
+            tys.emplace(ModalTy{TypeManager::GetInvalidTy()});
             return SynResult(tys);
         }
         auto joinRes =
             JoinAndMeet(checker.typeManager, arrayElemTys, {}, &checker.importManager, al.curFile).JoinAsVisibleTy();
-        if (auto ty = std::get_if<Ptr<Ty>>(&joinRes)) {
-            al.SetTy(checker.typeManager.GetStructTy(*arrayStruct, {*ty}));
+        if (auto ty = std::get_if<ModalTy>(&joinRes)) {
+            al.SetTy(ModalTy{checker.typeManager.GetStructTy(*arrayStruct, {ty->Ty()})}.With(ty->Mode()));
         } else {
             tys.emplace(TypeManager::GetInvalidTy());
             return SynResult(tys);
@@ -749,7 +748,7 @@ Candidate TypeChecker::SynReferenceSeparately(
     return impl->SynReferenceSeparately(ctx, scopeName, expr, hasLocalDecl);
 }
 
-void TypeChecker::RemoveTargetNotMeetExtendConstraint(const Ptr<AST::Ty> baseTy, std::vector<Ptr<AST::Decl>>& targets)
+void TypeChecker::RemoveTargetNotMeetExtendConstraint(ModalTy baseTy, std::vector<Ptr<Decl>>& targets)
 {
     return impl->RemoveTargetNotMeetExtendConstraint(baseTy, targets);
 }

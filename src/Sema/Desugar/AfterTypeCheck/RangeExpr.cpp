@@ -40,18 +40,18 @@ std::vector<OwnedPtr<FuncArg>> CreateRangeExprArgs(const RangeExpr& re)
     } else {
         // If stepExpr does not exist, set LitConst "1" as default value.
         auto stepExpr =
-            CreateLitConstExpr(LitConstKind::INTEGER, "1", TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64));
+            CreateLitConstExpr(LitConstKind::INTEGER, "1", {TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT64)});
         args.push_back(CreateFuncArg(std::move(stepExpr)));
     }
     std::string hasStart = re.startExpr ? "true" : "false";
     std::string hasStop = re.stopExpr ? "true" : "false";
     std::string isClosed = re.isClosed ? "true" : "false";
     auto hasStartExpr =
-        CreateLitConstExpr(LitConstKind::BOOL, hasStart, TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        CreateLitConstExpr(LitConstKind::BOOL, hasStart, {TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
     auto hasStopExpr =
-        CreateLitConstExpr(LitConstKind::BOOL, hasStop, TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        CreateLitConstExpr(LitConstKind::BOOL, hasStop, {TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
     auto isClosedExpr =
-        CreateLitConstExpr(LitConstKind::BOOL, isClosed, TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN));
+        CreateLitConstExpr(LitConstKind::BOOL, isClosed, {TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)});
     args.push_back(CreateFuncArg(std::move(hasStartExpr)));
     args.push_back(CreateFuncArg(std::move(hasStopExpr)));
     args.push_back(CreateFuncArg(std::move(isClosedExpr)));
@@ -73,14 +73,15 @@ void DesugarRangeExpr(TypeManager& typeManager, RangeExpr& re)
         return;
     }
     if (re.GetTy()->typeArgs.empty() || re.GetTy()->typeArgs.size() != re.decl->generic->typeParameters.size() ||
-        !Ty::IsTyCorrect(re.decl->generic->typeParameters[0]->GetTy())) {
+        !re.decl->generic->typeParameters[0]->GetTy().IsCorrect()) {
         return;
     }
     auto rangeFunc = CreateRefExpr(re.decl->identifier);
     CopyBasicInfo(&re, rangeFunc.get());
-    (void)rangeFunc->instTys.emplace_back(re.GetTy()->typeArgs[0]);
+    (void)rangeFunc->instTys.emplace_back(re.GetTy()->typeArgs[0].Ty());
     TypeSubst typeMapping;
-    typeMapping.emplace(StaticCast<GenericsTy*>(re.decl->generic->typeParameters[0]->GetTy()), re.GetTy()->typeArgs[0]);
+    typeMapping.emplace(
+        StaticCast<GenericsTy*>(re.decl->generic->typeParameters[0]->DataTy()), re.GetTy()->typeArgs[0].Ty());
 
     std::vector<OwnedPtr<FuncArg>> args = CreateRangeExprArgs(re);
     auto ce = CreateCallExpr(std::move(rangeFunc), std::move(args));

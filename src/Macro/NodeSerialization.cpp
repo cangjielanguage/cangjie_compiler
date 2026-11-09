@@ -40,6 +40,17 @@ flatbuffers::Offset<flatbuffers::Vector<const ASTFormat::Position*>> NodeWriter:
     return builder.CreateVectorOfStructs(positions.size(), filler);
 }
 
+flatbuffers::Offset<ASTFormat::ModalInfo> NodeWriter::SerializeModalInfo(const AST::ASTModalInfo& modal)
+{
+    if (modal.Empty()) {
+        return flatbuffers::Offset<ASTFormat::ModalInfo>();
+    }
+    auto atPos = FlatPosCreateHelper(modal.AtBegin());
+    auto localPos = FlatPosCreateHelper(modal.LocalBegin());
+    auto local = static_cast<ASTFormat::ASTMode>(static_cast<uint8_t>(modal.Local()));
+    return ASTFormat::CreateModalInfo(builder, &atPos, &localPos, local);
+}
+
 flatbuffers::Offset<ASTFormat::FeaturesDirective> NodeWriter::SerializeFeaturesDirective(
     AstFeaturesDirective ftrDirective)
 {
@@ -399,7 +410,27 @@ flatbuffers::Offset<ASTFormat::Decl> NodeWriter::SerializeDeclOfMacroExpandParam
     return ASTFormat::CreateDecl(
         builder, SerializeDeclBase(mep), ASTFormat::AnyDecl_MACRO_EXPAND_PARAM, mepNode.Union());
 }
- 
+
+flatbuffers::Offset<ASTFormat::ThisParam> NodeWriter::SerializeThisParam(const AST::ThisParam* thisParam)
+{
+    if (thisParam == nullptr) {
+        return flatbuffers::Offset<ASTFormat::ThisParam>();
+    }
+    auto fbDeclBase = SerializeDeclBase(thisParam);
+    auto thisPos = FlatPosCreateHelper(thisParam->thisPos);
+    auto commaPos = FlatPosCreateHelper(thisParam->commaPos);
+    auto modal = SerializeModalInfo(thisParam->modal);
+    return ASTFormat::CreateThisParam(builder, fbDeclBase, &thisPos, &commaPos, modal);
+}
+
+flatbuffers::Offset<ASTFormat::Decl> NodeWriter::SerializeDeclOfThisParam(const AST::Decl* decl)
+{
+    auto thisParam = RawStaticCast<const AST::ThisParam*>(decl);
+    auto fbThisParam = SerializeThisParam(thisParam);
+    return ASTFormat::CreateDecl(
+        builder, SerializeDeclBase(thisParam), ASTFormat::AnyDecl_THIS_PARAM, fbThisParam.Union());
+}
+
 flatbuffers::Offset<ASTFormat::Block> NodeWriter::SerializeBlock(AstBlock block)
 {
     if (block == nullptr) {
@@ -448,8 +479,9 @@ flatbuffers::Offset<ASTFormat::FuncBody> NodeWriter::SerializeFuncBody(AstFuncBo
         match (*nPtr)([&, this](const MacroExpandParam& mep) { vecNode.push_back(SerializeMacroExpandParam(&mep)); },
             [&, this]() { vecNode.push_back(SerializeFuncParam(param)); });
     }
-    auto fbParamList = ASTFormat::CreateFuncParamList(
-        builder, fbNodeBasePaList, &leftParenPos, builder.CreateVector(vecNode), &rightParenPos);
+    auto fbThisParam = paramList->thisParam ? SerializeThisParam(paramList->thisParam.get()) : 0;
+    auto fbParamList = ASTFormat::CreateFuncParamList(builder, fbNodeBasePaList, &leftParenPos,
+        builder.CreateVector(vecNode), &rightParenPos, fbThisParam);
     // Serialize FuncBlock
     auto bodyPtr = (funcBody->body).get();
     auto arrowPos = FlatPosCreateHelper(funcBody->doubleArrowPos);
@@ -498,7 +530,9 @@ flatbuffers::Offset<ASTFormat::TypeBase> NodeWriter::SerializeTypeBase(AstType t
     auto typeParameterName = builder.CreateString(type->GetTypeParameterNameRawText());
     auto colonPos = FlatPosCreateHelper(type->colonPos);
     auto typePos = FlatPosCreateHelper(type->typePos);
-    return ASTFormat::CreateTypeBase(builder, fbBase, &commaPos, typeParameterName, &colonPos, &typePos, &bitAndPos);
+    auto modal = SerializeModalInfo(type->modal);
+    return ASTFormat::CreateTypeBase(
+        builder, fbBase, &commaPos, typeParameterName, &colonPos, &typePos, &bitAndPos, modal);
 }
 
 flatbuffers::Offset<ASTFormat::RefType> NodeWriter::SerializeRefType(const RefType* refType)
@@ -716,8 +750,9 @@ flatbuffers::Offset<ASTFormat::FuncDecl> NodeWriter::SerializeFuncDecl(const Fun
     auto rightParenPos = FlatPosCreateHelper(funcDecl->rightParenPos);
     auto fbFuncBody = SerializeFuncBody(funcDecl->funcBody.get());
     auto isEnumConstruct = funcDecl->TestAttr(Attribute::ENUM_CONSTRUCTOR);
+    auto modal = SerializeModalInfo(funcDecl->modal);
     return ASTFormat::CreateFuncDecl(builder, fbDeclBase, &leftParenPos, &rightParenPos, fbFuncBody,
-        funcDecl->isSetter, funcDecl->isGetter, static_cast<int>(funcDecl->op), isEnumConstruct);
+        funcDecl->isSetter, funcDecl->isGetter, static_cast<int>(funcDecl->op), isEnumConstruct, modal);
 }
 
 flatbuffers::Offset<ASTFormat::Decl> NodeWriter::SerializeFuncDecl(const Decl* decl)
@@ -898,6 +933,7 @@ flatbuffers::Offset<ASTFormat::Decl> NodeWriter::SerializeDecl(AstDecl decl)
                 [](NodeWriter& nw, AstDecl decl) { return nw.SerializeMacroExpandDecl(decl); }},
             {ASTKind::FUNC_PARAM, [](NodeWriter& nw, AstDecl decl) { return nw.SerializeDeclOfFuncParam(decl); }},
             {ASTKind::MACRO_EXPAND_PARAM, [](NodeWriter& nw, AstDecl decl) { return nw.SerializeDeclOfMacroExpandParam(decl); }},
+            {ASTKind::THIS_PARAM, [](NodeWriter& nw, AstDecl decl) { return nw.SerializeDeclOfThisParam(decl); }},
             {ASTKind::VAR_WITH_PATTERN_DECL,
                 [](NodeWriter& nw, AstDecl decl) { return nw.SerializeVarWithPatternDecl(decl); }},
         };

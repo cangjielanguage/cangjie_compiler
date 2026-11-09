@@ -4,6 +4,8 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include <unordered_map>
+
 #include "cangjie/CHIR/Optimization/UnitUnify.h"
 #include "cangjie/CHIR/Utils/CHIRCasting.h"
 #include "cangjie/CHIR/Utils/Visitor/Visitor.h"
@@ -44,8 +46,8 @@ void UnitUnify::RunOnPackage(const Ptr<const Package>& package)
 
 void UnitUnify::RunOnFunc(const Ptr<Function>& func)
 {
-    Ptr<Constant> optUnit;
-    auto preAcation = [this, &optUnit](Expression& expr) {
+    std::unordered_map<Mode, Constant*> localUnit;
+    auto preAcation = [this, &localUnit](Expression& expr) {
         // skip lambda to avoid create many Constant expression to effect function inline
         // maybe we can discuss later
         if (Is<Lambda>(expr)) {
@@ -55,20 +57,21 @@ void UnitUnify::RunOnFunc(const Ptr<Function>& func)
             return VisitResult::CONTINUE;
         }
         if (NeedUnify(expr)) {
-            LoadOrCreateUnit(optUnit, expr.GetParentBlockGroup());
-            expr.GetResult()->ReplaceWith(*optUnit->GetResult(), expr.GetParentBlockGroup());
+            auto localInfo = expr.GetResult()->GetType()->GetModalInfo().Local();
+            auto it = localUnit.find(localInfo);
+            Constant* constant = nullptr;
+            if (it != localUnit.end()) {
+                constant = it->second;
+            } else {
+                auto entryBlock = expr.GetParentBlockGroup()->GetEntryBlock();
+                auto unitTy = builder.WithModal(builder.GetUnitTy(), localInfo);
+                constant = builder.CreateConstantExpression<UnitLiteral>(unitTy, entryBlock);
+                entryBlock->InsertExprIntoHead(*constant);
+                localUnit[localInfo] = constant;
+            }
+            expr.GetResult()->ReplaceWith(*constant->GetResult(), expr.GetParentBlockGroup());
         }
         return VisitResult::CONTINUE;
     };
     Visitor::Visit(*func, preAcation);
-}
-
-void UnitUnify::LoadOrCreateUnit(Ptr<Constant>& constant, const Ptr<BlockGroup>& group)
-{
-    if (constant != nullptr) {
-        return;
-    }
-    auto entryBlock = group->GetEntryBlock();
-    constant = builder.CreateConstantExpression<UnitLiteral>(builder.GetUnitTy(), entryBlock);
-    entryBlock->InsertExprIntoHead(*constant);
 }

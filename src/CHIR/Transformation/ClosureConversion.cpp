@@ -74,7 +74,7 @@ bool IsMutableVarType(const Value& value)
         return false;
     }
     // type is ref, but not ref a class or array, that means this type is a mutable var's type
-    return !ref->GetBaseType()->IsClassOrArray();
+    return !ref->GetBaseType()->IsReferenceType();
 }
 
 void CollectNestedLambdaExpr(
@@ -132,6 +132,21 @@ void SetLiftedLambdaAttr(Function& func, Lambda& lambda)
     if (auto body = lambda.GetBody(); body && body->TestAttr(Attribute::NO_INLINE)) {
         func.EnableAttr(Attribute::NO_INLINE);
     }
+}
+
+// After lifting a default-value desugar Lambda to a global Function:
+// 1) forward: new Function needs paramDftValHostParam (Lambda's field is not shared);
+// 2) reverse: SetParamDftValHostParam also does hostParam.SetParamDftValFunc(liftedDesugar),
+//    replacing the old Lambda LocalVar so the host Parameter points at the lifted Function.
+// Reuse that Parameter object. AddParam/SetOwnerFunc may already have moved it onto the
+// lifted host Function; the link does not depend on which of host and desugar is converted first.
+void SetLiftedParamDftValHostParam(Function& liftedDesugar, const Lambda& nestedFunc)
+{
+    auto hostParam = nestedFunc.GetParamDftValHostParam();
+    if (hostParam == nullptr) {
+        return;
+    }
+    liftedDesugar.SetParamDftValHostParam(*hostParam);
 }
 
 void SetMemberMethodAttr(Function& func, bool isConst)
@@ -293,9 +308,13 @@ FuncType* GetFuncTypeWithoutThisPtrFromAutoEnvType(ClassType& autoEnvType, CHIRB
     CJC_ASSERT(autoEnvType.IsAutoEnv());
     if (autoEnvType.IsAutoEnvBase()) {
         auto [paramTypes, retType] = GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(autoEnvType);
-        return builder.GetType<FuncType>(paramTypes, retType);
+        auto funcTy = builder.GetType<FuncType>(paramTypes, retType);
+        return StaticCast<FuncType*>(builder.WithModal(funcTy, autoEnvType.GetModalInfo()));
     } else {
-        return GetFuncTypeWithoutThisPtrFromAutoEnvType(*autoEnvType.GetSuperClassTy(&builder), builder);
+        auto superTy = autoEnvType.GetSuperClassTy(&builder);
+        CJC_NULLPTR_CHECK(superTy);
+        superTy = StaticCast<ClassType*>(builder.WithModal(superTy, autoEnvType.GetModalInfo()));
+        return GetFuncTypeWithoutThisPtrFromAutoEnvType(*superTy, builder);
     }
 }
 
@@ -317,7 +336,9 @@ ClassType* InstantiateAutoEnvBaseType(ClassDef& autoEnvBaseDef, const FuncType& 
 {
     std::vector<Type*> typeArgs;
     if (autoEnvBaseDef.TestAttr(Attribute::GENERIC)) {
-        typeArgs = funcType.GetTypeArgs();
+        for (auto ty : funcType.GetTypeArgs()) {
+            typeArgs.emplace_back(ty->GetDataType(builder));
+        }
     }
     return builder.GetType<ClassType>(&autoEnvBaseDef, typeArgs);
 }
@@ -775,8 +796,10 @@ void AddTypeCastForOperand(const std::pair<Expression*, std::vector<size_t>>& e,
     auto parentBlock = expr->GetParentBlock();
     for (auto idx : e.second) {
         auto op = expr->GetOperand(idx);
-        auto expectedType = builder.GetType<RefType>(
-            StaticCast<ClassType*>(op->GetType()->StripAllRefs())->GetClassDef()->GetSuperClassTy());
+        auto sourceType = StaticCast<ClassType*>(op->GetType()->StripAllRefs());
+        // Upcasting a closure changes its class, not its allocation region.
+        auto superType = builder.WithModal(sourceType->GetClassDef()->GetSuperClassTy(), sourceType->GetModalInfo());
+        auto expectedType = builder.GetType<RefType>(superType);
         auto typecast = builder.CreateExpression<ClassStaticCast>(expectedType, op, parentBlock);
         typecast->MoveBefore(expr);
         expr->ReplaceOperand(idx, typecast->GetResult());
@@ -792,6 +815,16 @@ void ReplaceOperandWithAutoEnvWrapperClass(
         }
         user->ReplaceOperand(&op, &autoEnvWrapperClass);
     }
+}
+
+/// Propagate the wrapped AutoEnv's modal onto the `$Cw` ClassType (and a RefType of it).
+/// ClassDef stays modal-free; modal lives only on the ClassType instance used by Allocate.
+std::pair<ClassType*, RefType*> GetModalAwareAutoEnvWrapperTypes(
+    CHIRBuilder& builder, ClassDef& wrapperDef, const Type& srcAutoEnvType)
+{
+    auto modal = srcAutoEnvType.StripAllRefs()->GetModalInfo();
+    auto wrapperTy = StaticCast<ClassType*>(builder.WithModal(wrapperDef.GetType(), modal));
+    return {wrapperTy, builder.GetType<RefType>(wrapperTy)};
 }
 
 ClassType* GetAutoEnvGenericBase(ClassType& closureType, CHIRBuilder& builder)
@@ -896,6 +929,18 @@ ClassType* InstantiateAutoEnvGenericBaseType(ClassType& closureType, const Expre
     }
     return StaticCast<ClassType*>(ReplaceRawGenericArgType(closureType, replaceTable, builder));
 }
+
+std::vector<Type*> GetInstFuncTypeArgsOfAutoEnvWrapper(ClassDef& autoEnvWrapperDef, CHIRBuilder& builder)
+{
+    auto autoEnvGenericBaseType = autoEnvWrapperDef.GetSuperClassTy()->GetSuperClassTy(&builder);
+    std::unordered_map<const GenericType*, Type*> instMap;
+    autoEnvGenericBaseType->GetInstMap(instMap, builder);
+    auto genericFuncType = autoEnvGenericBaseType->GetClassDef()->GetMethods().front()->GetFuncType();
+    auto instFuncType = ReplaceRawGenericArgType(*genericFuncType, instMap, builder);
+    auto instFuncTypeArgs = instFuncType->GetTypeArgs();
+    instFuncTypeArgs.erase(instFuncTypeArgs.begin());
+    return instFuncTypeArgs;
+}
 } // namespace
 
 ClosureConversion::ClosureConversion(Package& package, CHIRBuilder& builder, const GlobalOptions& opts,
@@ -968,9 +1013,34 @@ Ptr<LocalVar> ClosureConversion::CreateAutoEnvImplObject(
     Block& parent, ClassType& autoEnvImplType, const std::vector<Value*>& envs, Expression& user, Value& srcFunc)
 {
     auto instantiateClassTy = GenerateInstantiatedClassType(autoEnvImplType, user, srcFunc);
+    // Propagate source FuncType modal (e.g. `@local? func h()`) onto the concrete AutoEnv
+    // ClassType so Allocate lowers to cj_malloc_local_object instead of heap malloc.
+    // ClassDef names stay modal-free; modal lives only on the ClassType instance.
+    auto srcModal = srcFunc.GetType()->StripAllRefs()->GetModalInfo();
+    instantiateClassTy = StaticCast<ClassType*>(builder.WithModal(instantiateClassTy, srcModal));
     auto refType = builder.GetType<RefType>(instantiateClassTy);
     Expression* expr = builder.CreateExpression<Allocate>(refType, instantiateClassTy, &parent);
     auto obj = expr->GetResult();
+    // Place Allocate as early as possible for recursive-lambda / default-arg visibility.
+    // Local AutoEnv must stay after StartRegion (inserted by SetMemRegion); heap AutoEnv can
+    // sit at the block head.
+    // Example that needs early placement:
+    //   func foo1() {
+    //       func foo2(a!: Int32 = 1) { foo2(); return 1}
+    //       foo2()
+    //   }
+    auto placeAllocate = [&parent](Expression& alloc) {
+        auto entry = parent.GetParentBlockGroup()->GetEntryBlock();
+        CJC_NULLPTR_CHECK(entry);
+        for (auto e : entry->GetExpressions()) {
+            if (Is<StartRegion>(e)) {
+                alloc.MoveAfter(e);
+                return;
+            }
+        }
+        parent.InsertExprIntoHead(alloc);
+    };
+    placeAllocate(*expr);
     uint64_t index = 0;
     for (auto env : envs) {
         auto store = builder.CreateExpression<StoreElementRef>(
@@ -978,12 +1048,6 @@ Ptr<LocalVar> ClosureConversion::CreateAutoEnvImplObject(
         store->MoveBefore(&user);
         index++;
     }
-    // if not move to head, in some cases which call lambda recursively, we will get unreachable expression
-    // func foo1() {
-    //     func foo2(a!: Int32 = 1) { foo2(); return 1}
-    //     foo2()
-    // }
-    parent.InsertExprIntoHead(*expr);
 
     return expr->GetResult();
 }
@@ -1248,9 +1312,12 @@ void ClosureConversion::DoFunctionInlineForLambda()
 
 ClassDef* ClosureConversion::GetOrCreateAutoEnvBaseDef(const FuncType& funcType)
 {
-    auto autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(funcType.GetParamTypes().size());
-    if (!funcType.IsGenericRelated()) {
-        autoEnvBaseDef = GetOrCreateInstAutoEnvBaseDef(funcType, *autoEnvBaseDef);
+    // Strip FuncType-level modal so Instantiated AutoEnv class names stay modal-free
+    // (`$Ci...` not `$Ci...!`); callers apply modal on the resulting ClassType via WithModal.
+    auto& dataFuncType = *StaticCast<FuncType*>(funcType.GetDataType(builder));
+    auto autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(dataFuncType);
+    if (!dataFuncType.IsGenericRelated()) {
+        autoEnvBaseDef = GetOrCreateInstAutoEnvBaseDef(dataFuncType, *autoEnvBaseDef);
     }
     return autoEnvBaseDef;
 }
@@ -1301,44 +1368,53 @@ std::vector<Type*> ClosureConversion::ConvertArgsType(const std::vector<Type*>& 
 
 Type* ClosureConversion::ConvertTupleType(const TupleType& type)
 {
-    return builder.GetType<TupleType>(ConvertArgsType(type.GetElementTypes()));
+    return builder.GetType<TupleType>(ConvertArgsType(type.GetElementTypes()), type.GetModalInfo());
 }
 
 Type* ClosureConversion::ConvertFuncType(const FuncType& type)
 {
-    auto autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(type.GetParamTypes().size());
-    auto convertedFuncType = ConvertFuncArgsAndRetType(type);
-    return builder.GetType<RefType>(InstantiateAutoEnvBaseType(*autoEnvBaseDef, *convertedFuncType, builder));
+    // AutoEnv ClassDef must not depend on the FuncType's own modal (e.g. @local!); otherwise
+    // mangling creates a distinct `$Ci...!` class that cannot subtype `$Cg @local!`.
+    auto& dataFuncType = *StaticCast<FuncType*>(type.GetDataType(builder));
+    auto autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(dataFuncType);
+    auto convertedFuncType = ConvertFuncArgsAndRetType(dataFuncType);
+    auto autoEnvTy = InstantiateAutoEnvBaseType(*autoEnvBaseDef, *convertedFuncType, builder);
+    autoEnvTy = StaticCast<ClassType*>(builder.WithModal(autoEnvTy, type.GetModalInfo()));
+    return builder.GetType<RefType>(autoEnvTy);
 }
 
 Type* ClosureConversion::ConvertEnumType(const EnumType& type)
 {
-    return builder.GetType<EnumType>(type.GetEnumDef(), ConvertArgsType(type.GetGenericArgs()));
+    return builder.GetType<EnumType>(type.GetEnumDef(), ConvertArgsType(type.GetGenericArgs()), type.GetModalInfo());
 }
 
 Type* ClosureConversion::ConvertStructType(const StructType& type)
 {
-    return builder.GetType<StructType>(type.GetStructDef(), ConvertArgsType(type.GetGenericArgs()));
+    return builder.GetType<StructType>(
+        type.GetStructDef(), ConvertArgsType(type.GetGenericArgs()), type.GetModalInfo());
 }
 
 Type* ClosureConversion::ConvertClassType(const ClassType& type)
 {
-    return builder.GetType<ClassType>(type.GetClassDef(), ConvertArgsType(type.GetGenericArgs()));
+    return builder.GetType<ClassType>(
+        type.GetClassDef(), ConvertArgsType(type.GetGenericArgs()), type.GetModalInfo());
 }
 
 Type* ClosureConversion::ConvertRawArrayType(const RawArrayType& type)
 {
-    return builder.GetType<RawArrayType>(ConvertTypeToClosureType(*type.GetElementType()), type.GetDims());
+    return builder.GetType<RawArrayType>(
+        ConvertTypeToClosureType(*type.GetElementType()), type.GetDims(), type.GetModalInfo());
 }
 
 Type* ClosureConversion::ConvertVArrayType(const VArrayType& type)
 {
-    return builder.GetType<VArrayType>(ConvertTypeToClosureType(*type.GetElementType()), type.GetSize());
+    return builder.GetType<VArrayType>(
+        ConvertTypeToClosureType(*type.GetElementType()), type.GetSize(), type.GetModalInfo());
 }
 
 Type* ClosureConversion::ConvertCPointerType(const CPointerType& type)
 {
-    return builder.GetType<CPointerType>(ConvertTypeToClosureType(*type.GetElementType()));
+    return builder.GetType<CPointerType>(ConvertTypeToClosureType(*type.GetElementType()), type.GetModalInfo());
 }
 
 Type* ClosureConversion::ConvertRefType(const RefType& type)
@@ -1450,11 +1526,15 @@ void ClosureConversion::LiftType()
     };
     ConvertTypeFunc convertTypeToInstBase = [this, &convertTypeToClosure, &convertTypeToInstBase](Type& type) {
         auto& funcType = StaticCast<FuncType&>(type);
-        auto autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcType);
+        auto modal = funcType.GetModalInfo();
+        auto& dataFuncType = *StaticCast<FuncType*>(funcType.GetDataType(builder));
+        auto autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(dataFuncType);
         TypeConverterForCC converter(convertTypeToClosure, convertTypeToInstBase, builder);
         LiftCustomDefType(*autoEnvBaseDef, converter);
-        auto convertedFuncType = ConvertFuncArgsAndRetType(funcType);
-        return builder.GetType<RefType>(InstantiateAutoEnvBaseType(*autoEnvBaseDef, *convertedFuncType, builder));
+        auto convertedFuncType = ConvertFuncArgsAndRetType(dataFuncType);
+        auto autoEnvTy = InstantiateAutoEnvBaseType(*autoEnvBaseDef, *convertedFuncType, builder);
+        autoEnvTy = StaticCast<ClassType*>(builder.WithModal(autoEnvTy, modal));
+        return builder.GetType<RefType>(autoEnvTy);
     };
     TypeConverterForCC converter(convertTypeToClosure, convertTypeToInstBase, builder);
     auto preVisit = [&converter](Expression& e) {
@@ -1484,9 +1564,9 @@ void ClosureConversion::LiftType()
     }
 }
 
-ClassDef* ClosureConversion::GetOrCreateGenericAutoEnvBaseDef(size_t paramNum)
+ClassDef* ClosureConversion::GetOrCreateGenericAutoEnvBaseDef(const FuncType& funcType)
 {
-    auto className = CHIRMangling::ClosureConversion::GenerateGenericBaseClassMangleName(paramNum);
+    auto className = CHIRMangling::ClosureConversion::GenerateGenericBaseClassMangleName(funcType);
     auto it = genericAutoEnvBaseDefs.find(className);
     if (it != genericAutoEnvBaseDefs.end()) {
         return it->second;
@@ -1499,6 +1579,7 @@ ClassDef* ClosureConversion::GetOrCreateGenericAutoEnvBaseDef(size_t paramNum)
     */
     // create generic type params
     std::vector<Type*> genericTypeParams;
+    auto paramNum = funcType.GetParamTypes().size();
     auto paramTypePrefix = "ccbase_p" + std::to_string(paramNum) + "_";
     for (size_t i = 0; i < paramNum; ++i) {
         auto paramTypeName = paramTypePrefix + std::to_string(i);
@@ -1517,6 +1598,12 @@ ClassDef* ClosureConversion::GetOrCreateGenericAutoEnvBaseDef(size_t paramNum)
     classDef->EnableAttr(Attribute::GENERIC);
 
     // add abstract method
+    auto paramTypes = funcType.GetParamTypes();
+    for (size_t i = 0; i < paramNum; ++i) {
+        genericTypeParams[i] = builder.WithModal(genericTypeParams[i], paramTypes[i]->StripAllRefs()->GetModalInfo());
+    }
+    genericTypeParams.back() =
+        builder.WithModal(genericTypeParams.back(), funcType.GetReturnType()->StripAllRefs()->GetModalInfo());
     CreateVirtualFuncInAutoEnvBaseDef(*classDef, GENERIC_VIRTUAL_FUNC, genericTypeParams, builder);
 
     // cache class def
@@ -1832,10 +1919,12 @@ ClassDef* ClosureConversion::CreateAutoEnvImplDef(const std::string& className,
     auto memberFuncType = StaticCast<FuncType*>(srcFunc.GetType());
     if (memberFuncType->IsGenericRelated()) {
         for (auto paramTy : memberFuncType->GetParamTypes()) {
-            superClassGenericArgs.emplace_back(ReplaceRawGenericArgType(*paramTy, originalTypeToNewType, builder));
+            superClassGenericArgs.emplace_back(
+                ReplaceRawGenericArgType(*paramTy->GetDataType(builder), originalTypeToNewType, builder));
         }
         auto retType = memberFuncType->GetReturnType();
-        superClassGenericArgs.emplace_back(ReplaceRawGenericArgType(*retType, originalTypeToNewType, builder));
+        superClassGenericArgs.emplace_back(
+            ReplaceRawGenericArgType(*retType->GetDataType(builder), originalTypeToNewType, builder));
     }
     /**
      * if func type is generic related, the class `AutoEnvImpl` inherits `AutoEnvGenericBase<...>`,
@@ -1969,13 +2058,8 @@ Function* ClosureConversion::LiftLambdaToGlobalFunc(
     // 1) convert all the usage of captured variable to fields in env
     ReplaceEnvVarWithMemberVar(capturedValues, envParamDebug, *globalFunc, *thisPtr, builder);
 
-    // 2) keep relations between default's param's desugar func and the func where the param is belonged.
-    // logic below depends on the desugar func is CCed after the func where the param is belonged.
-    if (nestedFunc.GetParamDftValHostFunc()) {
-        if (auto it = convertedCache.find(nestedFunc.GetParamDftValHostFunc()); it != convertedCache.cend()) {
-            globalFunc->SetParamDftValHostFunc(*it->second);
-        }
-    }
+    // 2) keep relations between default's param's desugar func and the Parameter it belongs to.
+    SetLiftedParamDftValHostParam(*globalFunc, nestedFunc);
 
     // 3) Traverse and instantiate the original generics with the new generics of lifted func
     auto thisTyReplacement = nestedFunc.GetTopLevelFunc()->GetParentCustomTypeOrExtendedType();
@@ -2065,9 +2149,11 @@ void ClosureConversion::ReplaceUserPoint(Function& srcFunc, Expression& user, Cl
     std::vector<Value*> emptyEnvs;
     auto autoEnvObj = CreateAutoEnvImplObject(*curBlock, *autoEnvImplType, emptyEnvs, user, srcFunc);
 
-    // typecast to base type
+    // typecast to base type; keep AutoEnv modal on the parent ClassType as well
     auto curClassTy = StaticCast<ClassType*>(StaticCast<RefType*>(autoEnvObj->GetType())->GetBaseType());
     auto superClassTy = curClassTy->GetSuperClassTy(&builder);
+    CJC_NULLPTR_CHECK(superClassTy);
+    superClassTy = StaticCast<ClassType*>(builder.WithModal(superClassTy, curClassTy->GetModalInfo()));
     auto superClassRefTy = builder.GetType<RefType>(superClassTy);
     auto castToBaseType = builder.CreateExpression<ClassStaticCast>(superClassRefTy, autoEnvObj, user.GetParentBlock());
     castToBaseType->MoveBefore(&user);
@@ -2139,7 +2225,11 @@ ClassDef* ClosureConversion::GetOrCreateInstAutoEnvBaseDef(const FuncType& funcT
     classDef->SetType(*classTy);
 
     // set super class type
-    auto superClassTy = builder.GetType<ClassType>(&superClass, funcType.GetTypeArgs());
+    std::vector<Type*> typeArgs;
+    for (auto& ty : funcType.GetTypeArgs()) {
+        typeArgs.emplace_back(ty->GetDataType(builder));
+    }
+    auto superClassTy = builder.GetType<ClassType>(&superClass, typeArgs);
     classDef->SetSuperClassTy(*superClassTy);
 
     // set attribute
@@ -2190,10 +2280,13 @@ void ClosureConversion::ConvertApplyToInvoke(ApplyBase& apply)
     ClassDef* autoEnvBaseDef = nullptr;
     ClassType* instParentType = nullptr;
     if (auto funcType = DynamicCast<FuncType*>(callee->GetType())) {
-        // callee is still func type
-        autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(*funcType);
-        instParentType = InstantiateAutoEnvBaseType(*autoEnvBaseDef, *funcType, builder);
+        // callee is still func type; keep FuncType modal on AutoEnv ClassType, not in ClassDef name
+        auto modal = funcType->GetModalInfo();
+        auto& dataFuncType = *StaticCast<FuncType*>(funcType->GetDataType(builder));
+        autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(dataFuncType);
+        instParentType = InstantiateAutoEnvBaseType(*autoEnvBaseDef, dataFuncType, builder);
         instParentType = InstantiateAutoEnvGenericBaseType(*instParentType, apply, builder);
+        instParentType = StaticCast<ClassType*>(builder.WithModal(instParentType, modal));
     } else {
         // callee has been replaced in closure conversion, then apply must be converted to invoke
         instParentType = StaticCast<ClassType*>(StaticCast<RefType*>(callee->GetType())->GetBaseType());
@@ -2316,12 +2409,10 @@ void ClosureConversion::CreateMemberVarInAutoEnvWrapper(ClassDef& autoEnvWrapper
 Function* ClosureConversion::CreateGenericMethodInAutoEnvWrapper(ClassDef& autoEnvWrapperDef)
 {
     // 1. create function type
-    auto memberVars = autoEnvWrapperDef.GetDirectInstanceVars();
-    CJC_ASSERT(memberVars.size() == 1);
-    auto memberVarType = StaticCast<ClassType*>(memberVars[0].type->StripAllRefs());
+    auto instFuncTypeArgs = GetInstFuncTypeArgsOfAutoEnvWrapper(autoEnvWrapperDef, builder);
     std::unordered_map<const GenericType*, Type*> emptyTable;
     auto [paramTypes, retType] = CreateFuncTypeWithBoxType(
-        autoEnvWrapperDef, memberVarType->GetGenericArgs(), emptyTable, builder);
+        autoEnvWrapperDef, instFuncTypeArgs, emptyTable, builder);
     auto autoEnvWrapperRefType = builder.GetType<RefType>(autoEnvWrapperDef.GetType());
     paramTypes.insert(paramTypes.begin(), autoEnvWrapperRefType);
     auto funcType = builder.GetType<FuncType>(paramTypes, retType);
@@ -2352,9 +2443,10 @@ Function* ClosureConversion::CreateGenericMethodInAutoEnvWrapper(ClassDef& autoE
     func->SetReturnValue(*retVal->GetResult());
 
     // 7. create invoke
+    auto memberVars = autoEnvWrapperDef.GetDirectInstanceVars();
+    CJC_ASSERT(memberVars.size() == 1);
+    auto memberVarType = StaticCast<ClassType*>(memberVars[0].type->StripAllRefs());
     auto instCustomType = memberVarType;
-    auto instParamTypesAndRetType = instCustomType->GetGenericArgs();
-    auto instParamTypes = std::vector<Type*>(instParamTypesAndRetType.begin(), instParamTypesAndRetType.end() - 1);
     auto [methodName, originalFuncType] = GetFuncTypeFromAutoEnvBaseDef(*instCustomType->GetClassDef());
     auto methods = instCustomType->GetClassDef()->GetMethods();
     CJC_ASSERT(methods.size() == 1);
@@ -2546,10 +2638,12 @@ void ClosureConversion::WrapApplyRetVal(ApplyBase& apply)
     auto applyRetVal = apply.GetResult();
     auto applyRetType = applyRetVal->GetType();
     auto applyRetTypeNoRef = StaticCast<ClassType*>(applyRetType->StripAllRefs());
+    auto srcModal = applyRetTypeNoRef->GetModalInfo();
     auto autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(*applyRetTypeNoRef);
 
-    // 2. convert return type
-    auto newApplyRetType = builder.GetType<RefType>(autoEnvWrapperDef->GetSuperClassDef()->GetSuperClassTy());
+    // 2. convert return type (keep the source AutoEnv modal on the GenericBase view)
+    auto newApplyRetType = builder.WithModal(
+        builder.GetType<RefType>(autoEnvWrapperDef->GetSuperClassDef()->GetSuperClassTy()), srcModal);
     ConvertTypeFunc convertRetType = [&applyRetType, &newApplyRetType](const Type& type) {
         CJC_ASSERT(&type == applyRetType);
         return newApplyRetType;
@@ -2557,8 +2651,11 @@ void ClosureConversion::WrapApplyRetVal(ApplyBase& apply)
     PrivateTypeConverter converter(convertRetType, builder);
     converter.VisitValue(*applyRetVal);
 
-    auto autoEnvWrapperType = autoEnvWrapperDef->GetType();
-    auto autoEnvWrapperRefType = builder.GetType<RefType>(autoEnvWrapperType);
+    auto wrapperTys = GetModalAwareAutoEnvWrapperTypes(builder, *autoEnvWrapperDef, *applyRetTypeNoRef);
+    auto* autoEnvWrapperType = wrapperTys.first;
+    auto* autoEnvWrapperRefType = wrapperTys.second;
+    // ClassStaticCast target must also carry the same modal as the allocated wrapper.
+    applyRetType = builder.WithModal(applyRetType, srcModal);
     if (apply.IsTerminator()) {
         // TryApply is a terminator, insert wrapper before each user
         for (auto user : applyRetVal->GetUsers()) {
@@ -2654,11 +2751,13 @@ void ClosureConversion::WrapInvokeRetVal(DynamicDispatch& e)
     auto invokeRetVal = e.GetResult();
     auto invokeRetType = invokeRetVal->GetType();
     auto invokeRetTypeNoRef = StaticCast<ClassType*>(invokeRetType->StripAllRefs());
+    auto srcModal = invokeRetTypeNoRef->GetModalInfo();
     auto autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(*invokeRetTypeNoRef);
 
     // 2. convert return type
     CJC_NULLPTR_CHECK(autoEnvWrapperDef->GetSuperClassDef());
-    auto newInvokeRetType = builder.GetType<RefType>(autoEnvWrapperDef->GetSuperClassDef()->GetSuperClassTy());
+    auto newInvokeRetType = builder.WithModal(
+        builder.GetType<RefType>(autoEnvWrapperDef->GetSuperClassDef()->GetSuperClassTy()), srcModal);
     ConvertTypeFunc convertRetType = [&invokeRetType, &newInvokeRetType](const Type& type) {
         CJC_ASSERT(&type == invokeRetType);
         return newInvokeRetType;
@@ -2666,8 +2765,10 @@ void ClosureConversion::WrapInvokeRetVal(DynamicDispatch& e)
     PrivateTypeConverter converter(convertRetType, builder);
     converter.VisitValue(*invokeRetVal);
 
-    auto autoEnvWrapperType = autoEnvWrapperDef->GetType();
-    auto autoEnvWrapperRefType = builder.GetType<RefType>(autoEnvWrapperType);
+    auto wrapperTys = GetModalAwareAutoEnvWrapperTypes(builder, *autoEnvWrapperDef, *invokeRetTypeNoRef);
+    auto* autoEnvWrapperType = wrapperTys.first;
+    auto* autoEnvWrapperRefType = wrapperTys.second;
+    invokeRetType = builder.WithModal(invokeRetType, srcModal);
     if (e.IsTerminator()) {
         // TryInvoke is a terminator, insert wrapper before each user
         for (auto user : invokeRetVal->GetUsers()) {
@@ -2762,11 +2863,13 @@ void ClosureConversion::WrapGetElementRefRetVal(GetElementRef& getEleRef)
     const size_t refDim = 2;
     CJC_ASSERT(getEleRefRetType->IsReferenceTypeWithRefDims(refDim));
     auto getEleRefRetTypeNoRef = StaticCast<ClassType*>(getEleRefRetType->StripAllRefs());
+    auto srcModal = getEleRefRetTypeNoRef->GetModalInfo();
     auto autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(*getEleRefRetTypeNoRef);
 
     // 2. convert return type
-    auto newGetEleRefRetType =
-        builder.GetType<RefType>(builder.GetType<RefType>(autoEnvWrapperDef->GetSuperClassDef()->GetSuperClassTy()));
+    auto newGetEleRefRetType = builder.WithModal(
+        builder.GetType<RefType>(builder.GetType<RefType>(autoEnvWrapperDef->GetSuperClassDef()->GetSuperClassTy())),
+        srcModal);
     ConvertTypeFunc convertRetType = [&getEleRefRetType, &newGetEleRefRetType](const Type& type) {
         CJC_ASSERT(&type == getEleRefRetType);
         return newGetEleRefRetType;
@@ -2776,8 +2879,9 @@ void ClosureConversion::WrapGetElementRefRetVal(GetElementRef& getEleRef)
 
     // 3. create $Auto_Env_wrapper object
     auto parentBlock = getEleRef.GetParentBlock();
-    auto autoEnvWrapperType = autoEnvWrapperDef->GetType();
-    auto autoEnvWrapperRefType = builder.GetType<RefType>(autoEnvWrapperType);
+    auto wrapperTys = GetModalAwareAutoEnvWrapperTypes(builder, *autoEnvWrapperDef, *getEleRefRetTypeNoRef);
+    auto* autoEnvWrapperType = wrapperTys.first;
+    auto* autoEnvWrapperRefType = wrapperTys.second;
     auto allocate1 = builder.CreateExpression<Allocate>(autoEnvWrapperRefType, autoEnvWrapperType, parentBlock);
     allocate1->MoveAfter(&getEleRef);
 
@@ -2791,7 +2895,8 @@ void ClosureConversion::WrapGetElementRefRetVal(GetElementRef& getEleRef)
     storeMemberVar->MoveAfter(load);
 
     // typecast from $Auto_Env_xxx_wrapper to $Auto_Env_InstBase
-    auto expectedType = StaticCast<RefType*>(getEleRefRetType)->GetBaseType();
+    // getEleRefRetType is still the pre-convert InstBase&&; cast target is InstBase& with modal.
+    auto expectedType = builder.WithModal(StaticCast<RefType*>(getEleRefRetType)->GetBaseType(), srcModal);
     auto typecast = builder.CreateExpression<ClassStaticCast>(expectedType, allocate1->GetResult(), parentBlock);
     typecast->MoveAfter(storeMemberVar);
 
@@ -2826,10 +2931,12 @@ void ClosureConversion::WrapFieldRetVal(Field& field)
     auto fieldRetType = fieldRetVal->GetType();
     CJC_ASSERT(fieldRetType->IsReferenceTypeWithRefDims(1));
     auto fieldRetTypeNoRef = StaticCast<ClassType*>(fieldRetType->StripAllRefs());
+    auto srcModal = fieldRetTypeNoRef->GetModalInfo();
     auto autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(*fieldRetTypeNoRef);
 
     // 2. convert return type
-    auto newfieldRetType = builder.GetType<RefType>(autoEnvWrapperDef->GetSuperClassDef()->GetSuperClassTy());
+    auto newfieldRetType = builder.WithModal(
+        builder.GetType<RefType>(autoEnvWrapperDef->GetSuperClassDef()->GetSuperClassTy()), srcModal);
     ConvertTypeFunc convertRetType = [&fieldRetType, &newfieldRetType](const Type& type) {
         CJC_ASSERT(&type == fieldRetType);
         return newfieldRetType;
@@ -2839,8 +2946,9 @@ void ClosureConversion::WrapFieldRetVal(Field& field)
 
     // 3. create $Auto_Env_wrapper object
     auto parentBlock = field.GetParentBlock();
-    auto autoEnvWrapperType = autoEnvWrapperDef->GetType();
-    auto autoEnvWrapperRefType = builder.GetType<RefType>(autoEnvWrapperType);
+    auto wrapperTys = GetModalAwareAutoEnvWrapperTypes(builder, *autoEnvWrapperDef, *fieldRetTypeNoRef);
+    auto* autoEnvWrapperType = wrapperTys.first;
+    auto* autoEnvWrapperRefType = wrapperTys.second;
     auto allocate = builder.CreateExpression<Allocate>(autoEnvWrapperRefType, autoEnvWrapperType, parentBlock);
     allocate->MoveAfter(&field);
     
@@ -2850,6 +2958,7 @@ void ClosureConversion::WrapFieldRetVal(Field& field)
     storeMemberVar->MoveAfter(allocate);
 
     // typecast from $Auto_Env_xxx_wrapper to $Auto_Env_InstBase
+    fieldRetType = builder.WithModal(fieldRetType, srcModal);
     auto typecast = builder.CreateExpression<ClassStaticCast>(fieldRetType, allocate->GetResult(), parentBlock);
     typecast->MoveAfter(storeMemberVar);
 
@@ -2907,8 +3016,9 @@ void ClosureConversion::WrapTypeCastSrcVal(ClassStaticCast& typecast)
 
     // 2. create $Auto_Env_wrapper object
     auto parentBlock = typecast.GetParentBlock();
-    auto autoEnvWrapperType = autoEnvWrapperDef->GetType();
-    auto autoEnvWrapperRefType = builder.GetType<RefType>(autoEnvWrapperType);
+    auto wrapperTys = GetModalAwareAutoEnvWrapperTypes(builder, *autoEnvWrapperDef, *typecast.GetSourceType());
+    auto* autoEnvWrapperType = wrapperTys.first;
+    auto* autoEnvWrapperRefType = wrapperTys.second;
     auto allocate = builder.CreateExpression<Allocate>(autoEnvWrapperRefType, autoEnvWrapperType, parentBlock);
     allocate->MoveBefore(&typecast);
     

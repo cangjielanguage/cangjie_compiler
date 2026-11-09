@@ -337,7 +337,7 @@ TEST(EngineTest, OldDiagKindDefGuard)
     const std::vector<size_t> endNumber = {
         15,  // 0
         57,  // 1
-        287, // 2
+        279, // 2
     };
     bool oldDiagKindBeModified = false;
     for (size_t i = 0; i < endNumber.size(); ++i) {
