@@ -321,7 +321,29 @@ TEST(DemangleTest, ModalFunctionTypeKeepsMode)
     Demangler<StdString> demangler("F0ilEQlE", ".");
     auto di = demangler.Demangle(true);
     ASSERT_TRUE(di.IsValid());
-    EXPECT_STREQ("(Int64) -> Int32 @ local?", di.GetFullName(demangler.ScopeResolution()).Str());
+    EXPECT_STREQ("((Int64) -> Int32) @ local?", di.GetFullName(demangler.ScopeResolution()).Str());
+}
+
+TEST(DemangleTest, ModalVArrayOfFunctionType)
+{
+    // The container-owned mode-set does not alter the element text: `V3_F0ilE` renders
+    // `VArray<(Int64) -> Int32,$4>`, and `V3_F0ilEQlE` appends the mode-set to the VArray.
+    Demangler<StdString> demanglerNonModal("V3_F0ilE", ".");
+    auto di = demanglerNonModal.Demangle(true);
+    ASSERT_TRUE(di.IsValid());
+    EXPECT_STREQ("VArray<(Int64) -> Int32,$4>", di.GetFullName(demanglerNonModal.ScopeResolution()).Str());
+    Demangler<StdString> demanglerModal("V3_F0ilEQlE", ".");
+    di = demanglerModal.Demangle(true);
+    ASSERT_TRUE(di.IsValid());
+    EXPECT_STREQ("VArray<(Int64) -> Int32,$4> @ local?", di.GetFullName(demanglerModal.ScopeResolution()).Str());
+}
+
+TEST(DemangleTest, ModalCPointerOfFunctionType)
+{
+    Demangler<StdString> demangler("PF0ilEQlE", ".");
+    auto di = demangler.Demangle(true);
+    ASSERT_TRUE(di.IsValid());
+    EXPECT_STREQ("CPointer<(Int64) -> Int32> @ local?", di.GetFullName(demangler.ScopeResolution()).Str());
 }
 
 TEST(DemangleTest, InvalidModalPayloadRejected)

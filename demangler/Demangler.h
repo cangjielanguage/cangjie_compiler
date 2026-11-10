@@ -264,8 +264,8 @@ private:
     DemangleInfo<T> DemangleGenericType();
     DemangleInfo<T> DemangleDefaultParamFunction();
     DemangleInfo<T> DemangleInnerFunction();
-    DemangleInfo<T> DemangleType();
-    DemangleInfo<T> DemangleGenericTypes();
+    DemangleInfo<T> DemangleType(bool relocateTrailingModal = false);
+    DemangleInfo<T> DemangleGenericTypes(bool relocateTrailingModal = false);
     DemangleInfo<T> DemangleFunctionParameterTypes();
     DemangleInfo<T> DemangleGlobalInit();
     DemangleInfo<T> DemangleParamInit();
