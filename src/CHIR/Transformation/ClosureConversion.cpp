@@ -1130,8 +1130,13 @@ ClassDef* ClosureConversion::CreateBoxClassDef(Type& type)
 
 LocalVar* ClosureConversion::CreateBoxClassObj(const LocalVar& env, const ClassDef& classDef)
 {
+    // The box must live in the same region as the variable it holds, or the runtime write barrier
+    // rejects it ("heap object must not reference local object"). Gate on IsLocalRegion() to match
+    // SetMemRegion, which opens no region for a modal but `Copyable` capture (`Int64 @local?`).
     auto& loc = env.GetExpr()->GetDebugLocation();
-    auto classTy = classDef.GetType();
+    auto capturedTy = env.GetType()->StripAllRefs();
+    auto boxModal = capturedTy->IsLocalRegion() ? capturedTy->GetModalInfo() : ModalInfo{};
+    auto classTy = builder.WithModal(classDef.GetType(), boxModal);
     auto retTy = builder.GetType<RefType>(classTy);
     auto obj = builder.CreateExpression<Allocate>(loc, retTy, classTy, env.GetExpr()->GetParentBlock());
     obj->MoveBefore(env.GetExpr());
