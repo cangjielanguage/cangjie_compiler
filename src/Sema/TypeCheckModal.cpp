@@ -259,6 +259,17 @@ struct ModalTypeChecker {
     {
     }
 
+    /// `this`/`super` may be parenthesized, e.g. `(this).member`. Being a class member, it hides
+    /// `AST::IsThisOrSuper` and suppresses ADL, so the same name causes no ambiguity.
+    static bool IsThisOrSuper(const Expr& expr)
+    {
+        const Expr* e = &expr;
+        while (e && e->astKind == ASTKind::PAREN_EXPR) {
+            e = StaticCast<ParenExpr>(e)->expr.get();
+        }
+        return e && AST::IsThisOrSuper(*e);
+    }
+
     void Check(const ASTContext& ctx, Package& pkg)
     {
         CopyableTyChecker copyableTyChecker{d, type};
