@@ -342,6 +342,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND) # i.e. "--compile-backend" option
                 LIST_SEPARATOR |
                 CMAKE_ARGS ${LLVM_CMAKE_ARGS}
                 USES_TERMINAL_BUILD ON
+                USES_TERMINAL_DOWNLOAD ON
                 DEPENDS cangjie-demangler boundscheck boundscheck-static)
         endif()
         ExternalProject_Get_Property(cjnative SOURCE_DIR)
