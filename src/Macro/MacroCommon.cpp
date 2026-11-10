@@ -152,7 +152,13 @@ bool CheckAddSpace(Token curToken, Token nextToken)
         std::pair<TokenKind, TokenKind>(TokenKind::LSQUARE, TokenKind::RSQUARE),
         std::pair<TokenKind, TokenKind>(TokenKind::IDENTIFIER, TokenKind::NOT),
         std::pair<TokenKind, TokenKind>(TokenKind::BITNOT, TokenKind::INIT)};
-    return tkSet.find(std::pair<TokenKind, TokenKind>(curToken.kind, nextToken.kind)) == tkSet.end();
+    if (tkSet.find(std::pair<TokenKind, TokenKind>(curToken.kind, nextToken.kind)) != tkSet.end()) {
+        return false;
+    }
+    // Keep local-mode modal pairs glued ('@~local' / '@local!' / '@local?'; NOTEQ is the
+    // lexer-merged form of '@local!' immediately followed by '='), otherwise the regenerated
+    // source loses the adjacency the parser requires.
+    return !IsModalSpecifierPair(curToken, nextToken);
 }
 } // namespace Cangjie
 
@@ -328,7 +334,7 @@ size_t TokenSpanLength(const Token& token)
     return GetTokenLength(token.Value().size(), token.kind, token.delimiterNum);
 }
 
-Position EffectiveTokenEnd(const Token& tok)
+[[maybe_unused]] Position EffectiveTokenEnd(const Token& tok)
 {
     if (tok.End() != tok.Begin()) {
         return tok.End();
@@ -337,7 +343,7 @@ Position EffectiveTokenEnd(const Token& tok)
     return tok.Begin() + TokenSpanLength(tok);
 }
 
-bool HasSourceColumnGap(const Token& prev, const Token& cur)
+[[maybe_unused]] bool HasSourceColumnGap(const Token& prev, const Token& cur)
 {
     return cur.Begin() > EffectiveTokenEnd(prev);
 }
@@ -345,25 +351,35 @@ bool HasSourceColumnGap(const Token& prev, const Token& cur)
 
 bool IsModalAfterAt(const TokenVector& tokens, size_t atIndex, bool requireAdjacent)
 {
-    // Local mode is three tokens: @ ~ local or @ local !/?
-    constexpr size_t localModeLastOffset = 2;
-    constexpr std::string_view localMode{"local"};
-    if (atIndex + localModeLastOffset >= tokens.size() || tokens[atIndex].Value() != "@") {
+    if (atIndex >= tokens.size() || tokens[atIndex].Value() != "@") {
         return false;
     }
-    const Token& t1 = tokens[atIndex + 1];
-    const Token& t2 = tokens[atIndex + localModeLastOffset];
-    bool isModal = false;
-    if (t1.kind == TokenKind::BITNOT) {
-        isModal = t2.kind == TokenKind::IDENTIFIER && t2.Value() == localMode;
-    } else if (t1.kind == TokenKind::IDENTIFIER && t1.Value() == localMode) {
-        // include NOTEQ so @local!= is treated as mode specifier
-        isModal = t2.kind == TokenKind::NOT || t2.kind == TokenKind::QUEST || t2.kind == TokenKind::NOTEQ;
+    // The parser accepts NL (and comments) between '@' and the mode pair — SeeingModalInfo
+    // looks ahead with LookAheadSkipNL. Macro token streams keep NL, so skip them here too;
+    // adjacency is required only inside the pair ('~' 'local' / 'local' '!'|'?'|NOTEQ).
+    auto skippable = [](const Token& t) { return t.kind == TokenKind::NL || t.kind == TokenKind::COMMENT; };
+    size_t pairBegin = atIndex + 1;
+    while (pairBegin < tokens.size() && skippable(tokens[pairBegin])) {
+        ++pairBegin;
     }
-    if (!isModal) {
+    if (pairBegin + 1 >= tokens.size()) {
         return false;
     }
-    // Macro-emitted tokens may share a column until RefreshNewTokensPos; that is not a gap, so still glue.
-    return !requireAdjacent || !HasSourceColumnGap(t1, t2);
+    if (!IsModalSpecifierPair(tokens[pairBegin], tokens[pairBegin + 1])) {
+        return false;
+    }
+#ifdef __ohos__
+    // local mode is not supported in OHOS builds, so '@local!' is not a modal.
+    // Keep in sync with ParserImpl::SeeingModalInfo.
+    return false;
+#else
+    if (!requireAdjacent) {
+        // Macro-emitted tokens may share a column until RefreshNewTokensPos, so their
+        // positions can neither prove nor disprove adjacency: the shape match glues them.
+        return true;
+    }
+    // Source tokens carry trustworthy positions: require no gap, same as the parser's IsTokenAdjacent.
+    return !HasSourceColumnGap(tokens[pairBegin], tokens[pairBegin + 1]);
+#endif
 }
 }

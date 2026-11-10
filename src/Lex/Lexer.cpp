@@ -2103,6 +2103,12 @@ std::list<Token> LexerImpl::LookAheadSkipNL(size_t num)
 {
     std::list<Token> ret;
     for (const Token& token : lookAheadCache) {
+        if (token.kind == TokenKind::COMMENT) {
+            // Skip comments, consistent with the scan path below, so that
+            // both paths observe the same token stream even if a COMMENT
+            // ever gets reserved into the cache via ReserveToken.
+            continue;
+        }
         if (token.kind != TokenKind::NL) {
             ret.push_back(token);
         }

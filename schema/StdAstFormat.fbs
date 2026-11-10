@@ -542,7 +542,7 @@ table FuncParam {
 }
 
 table ThisParam {
-  // explicit `this` parameter, e.g. `this: T @local!`
+  // explicit `this` parameter, e.g. `this @local!`
   base: DeclBase;
   this_pos: Position;
   comma_pos: Position;

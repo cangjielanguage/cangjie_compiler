@@ -16,6 +16,9 @@ set(LEX_UT_SRC
 )
 
 add_executable(LexerTest LexerTest.cpp)
+# LexerImpl.h (src/Lex) is included by LexerTest.cpp for white-box coverage
+# of LexerImpl::LookAheadSkipNL / ReserveToken.
+target_include_directories(LexerTest PRIVATE ${CMAKE_SOURCE_DIR}/src/Lex)
 target_link_libraries(
     LexerTest
     ${CMAKE_DL_LIBS}
