@@ -118,7 +118,8 @@ void CHIR2BCHIR::TranslateOthersExpression(Context& ctx, const Expression& expr)
         }
         case ExprKind::START_REGION:
         case ExprKind::END_REGION:
-            // do nothing for memory expression, they only affect runtime performance
+            // No effect during interpretation.
+            PushOpCodeWithAnnotations(ctx, OpCode::UNIT, expr);
             break;
         default: {
             // unreachable

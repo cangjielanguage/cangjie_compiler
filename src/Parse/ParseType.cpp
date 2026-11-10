@@ -12,7 +12,6 @@
 #include "ParserImpl.h"
 
 #include "cangjie/AST/Match.h"
-#include "cangjie/Basic/StringConvertor.h"
 #include "cangjie/Utils/Utils.h"
 
 using namespace Cangjie;
@@ -403,6 +402,10 @@ bool ParserImpl::ParseModeSpecifier(ASTModalInfo& out)
         localBegin = Peek().Begin();
     }
     Next();
+    if (hasTilde) {
+        out.SetLocal(ASTMode::NOT, localBegin);
+        return true;
+    }
     if (Seeing(TokenKind::NOT)) {
         if (!IsTokenAdjacent(lastToken, Peek())) {
             scope.ResetParserScope();
@@ -412,7 +415,7 @@ bool ParserImpl::ParseModeSpecifier(ASTModalInfo& out)
         out.SetLocal(ASTMode::FULL, localBegin);
         return true;
     }
-    // Split the merged '!=' of '@local!=' into the modal '!' and an '='.
+    // Split the adjacent '!=' of '@local!=' into the modal '!' and an '='.
     if (Seeing(TokenKind::NOTEQ) && IsTokenAdjacent(lastToken, Peek())) {
         Token notEq = Peek();
         lookahead = Token(TokenKind::NOT, "!", notEq.Begin(), notEq.Begin() + 1);
@@ -428,10 +431,6 @@ bool ParserImpl::ParseModeSpecifier(ASTModalInfo& out)
         }
         Next();
         out.SetLocal(ASTMode::HALF, localBegin);
-        return true;
-    }
-    if (hasTilde) {
-        out.SetLocal(ASTMode::NOT, localBegin);
         return true;
     }
     scope.ResetParserScope();

@@ -713,7 +713,7 @@ private:
             // per spec we should check e->ty is non local copy type, but we check retTy because there can be Some box,
             // and it is boxed after Sema.
             if (IsInExclaveExpr(ctx, *e) || !eTy.IsCorrect() || eTy->IsNothing() ||
-                (eTy.IsDataType() && retTy.IsDataType())) {
+                (eTy.IsDataType() && retTy.Mode().local == Mode::HALF) || retTy.IsDataType()) {
                 continue;
             }
             // The return slot is external, so the value must be external as well. A non copy value
@@ -777,6 +777,13 @@ private:
             }
         }
         Walker walker(&assignment, [this, &ctx, &ownerParams](Ptr<Node> node) -> VisitAction {
+            // Explicit `this.member`: flag if `this` is `@local!` non copy type.
+            if (auto ma = DynamicCast<MemberAccess>(node)) {
+                if (ma->baseExpr && IsThisOrSuper(*ma->baseExpr) && IsInNonCopyFullLocalThis(ctx, *ma)) {
+                    DiagBadCaptureInDefaultParam(*ma, "this");
+                }
+                return VisitAction::WALK_CHILDREN;
+            }
             auto ref = DynamicCast<RefExpr>(node);
             if (!ref) {
                 return VisitAction::WALK_CHILDREN;
@@ -1550,9 +1557,9 @@ private:
         return false;
     }
 
-    void DiagBadLocalArg(const Node& pos, const std::string& argMode)
+    void DiagBadLocalArg(const Node& pos, const std::string& argMode, const std::string& paramKind = "parameter")
     {
-        d.DiagnoseRefactor(DiagKindRefactor::sema_external_local_arg, pos, argMode);
+        d.DiagnoseRefactor(DiagKindRefactor::sema_external_local_arg, pos, argMode, paramKind);
     }
 
     void DiagBadInternalLocalReturn(const Expr& expr)
@@ -1570,9 +1577,13 @@ private:
         if (!call.GetTy().IsCorrect()) {
             return;
         }
-        // ctor is always considered exclave call, so we don't check arg pass
+        // Only a this @local?/local! ctor makes its body an exclave, where external local! args become internal.
         if (call.callKind == CallKind::CALL_OBJECT_CREATION || call.callKind == CallKind::CALL_STRUCT_CREATION) {
-            return;
+            auto ctor = call.resolvedFunction;
+            if (ctor && TypeManager::HasThisParam(*ctor) &&
+                TypeManager::GetThisParamMode(*ctor).local != Mode::NOT) {
+                return;
+            }
         }
         auto checkArg = [&ctx, this](const FuncArg& arg) {
             if (!arg.expr || arg.TyMode().local != Mode::FULL) {
@@ -1601,17 +1612,18 @@ private:
             if (thisType.Mode().local != Mode::FULL || type.IsCopyType(thisType.Ty())) {
                 return;
             }
+            // The receiver is the implicit this arg; diagnose it instead of the whole call.
             if (auto ref = DynamicCast<RefExpr>(&*call.baseFunc)) {
                 if (IsInExclaveExpr(ctx, *ref)) { // this is always external, only valid in exclave
                     return;
                 }
-            } else {
-                auto& ma = StaticCast<MemberAccess>(*call.baseFunc);
-                if (!IsExternalLocal(ctx, ma)) {
-                    return;
-                }
+                DiagBadLocalArg(*ref, "@local!", "this parameter");
+                return;
             }
-            DiagBadLocalArg(call, "@local!");
+            auto& ma = StaticCast<MemberAccess>(*call.baseFunc);
+            if (IsExternalLocal(ctx, ma)) {
+                DiagBadLocalArg(*ma.baseExpr, "@local!", "this parameter");
+            }
         }
     }
 
