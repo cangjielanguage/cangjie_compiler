@@ -1299,13 +1299,6 @@ void ParserImpl::DiagUnexpectedWhere(const Token& token)
     builder.AddHint(hintRange);
 }
 
-void ParserImpl::DiagDuplicatedIntrinsicFunc(const Decl& decl, const Decl& prev)
-{
-    auto builder = ParseDiagnoseRefactor(DiagKindRefactor::parse_duplicated_intrinsic_function, decl, decl.identifier);
-
-    builder.AddHint(prev);
-}
-
 void ParserImpl::DiagMissingBody(const std::string& str, const std::string& name, const Position& pos)
 {
     if (IsParsingDeclFile()) {

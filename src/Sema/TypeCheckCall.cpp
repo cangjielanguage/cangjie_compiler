@@ -906,6 +906,49 @@ bool TypeChecker::TypeCheckerImpl::IsInterfaceFuncWithSameSignature(
     return false;
 }
 
+namespace {
+// this is used for arrayGet intrinsic
+// 1) func arrayGet<T>(arr: RawArray<T> @local!, index: Int64) -> T @local!
+// 2) func arrayGet<T>(arr: RawArray<T> @local?, index: Int64) -> T @local? where T <: Copyable
+// when T is copyable, both are good, and convertible to each other. In overload resolution on this param, it follows
+// the following precedence:
+// 1. exact mode match
+// 2. submode
+// 3. copy type cast
+// but on normal parameters, such rules do not apply, so the overloads are ambiguous.
+// Only break a tie from normal overload comparison for RawArray intrinsics with Copyable elements.
+// RawArray itself is not Copyable, so its parameter modes can only be compared by submode.
+std::optional<bool> CompareRawArrayIntrinsicModes(
+    TypeManager& typeManager, const FunctionMatchingUnit& i, const FunctionMatchingUnit& j)
+{
+    if (!i.fd.TestAttr(Attribute::INTRINSIC) || !j.fd.TestAttr(Attribute::INTRINSIC) ||
+        i.tysInArgOrder.size() != j.tysInArgOrder.size()) {
+        return std::nullopt;
+    }
+    if (i.tysInArgOrder.empty()) {
+        return std::nullopt;
+    }
+    auto iArray = typeManager.ApplySubstPack(i.tysInArgOrder.front(), i.typeMapping);
+    auto jArray = typeManager.ApplySubstPack(j.tysInArgOrder.front(), j.typeMapping);
+    if (!iArray->IsArray() || iArray.Ty() != jArray.Ty() ||
+        !typeManager.IsCopyType(iArray->TyArg(0)) || iArray.Mode() == jArray.Mode()) {
+        return std::nullopt;
+    }
+    for (size_t t = 1; t < i.tysInArgOrder.size(); ++t) {
+        auto iTy = typeManager.ApplySubstPack(i.tysInArgOrder[t], i.typeMapping);
+        auto jTy = typeManager.ApplySubstPack(j.tysInArgOrder[t], j.typeMapping);
+        if (iTy.Ty() != jTy.Ty() ||
+            (iTy.Mode() != jTy.Mode() && !typeManager.IsCopyType(iTy.Ty()))) {
+            return std::nullopt;
+        }
+    }
+    if (iArray.Mode().IsSubModal(jArray.Mode())) {
+        return true;
+    }
+    return jArray.Mode().IsSubModal(iArray.Mode()) ? std::optional<bool>{false} : std::nullopt;
+}
+}
+
 bool TypeChecker::TypeCheckerImpl::CompareFuncCandidates(
     FunctionMatchingUnit& i, FunctionMatchingUnit& j, const CallExpr& ce, ModalTy target)
 {
@@ -1097,6 +1140,12 @@ std::vector<size_t> TypeChecker::TypeCheckerImpl::ResolveOverload(const ASTConte
             }
             auto iToJ = CompareFuncCandidates(*candidates[i], *candidates[j], ce, target);
             auto jToI = CompareFuncCandidates(*candidates[j], *candidates[i], ce, target);
+            if (!iToJ && !jToI) {
+                if (auto modalComparison = CompareRawArrayIntrinsicModes(typeManager, *candidates[i], *candidates[j])) {
+                    iToJ = *modalComparison;
+                    jToI = !*modalComparison;
+                }
+            }
             if (iToJ && !jToI) {
                 targetMark[j] = false;
             } else if (!iToJ && jToI) {
