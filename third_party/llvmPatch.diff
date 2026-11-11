@@ -1,16 +1,16 @@
 diff --git a/.gitcode/CODEOWNERS b/.gitcode/CODEOWNERS
 new file mode 100644
-index 000000000..97b025790
+index 000000000..45c2b264b
 --- /dev/null
 +++ b/.gitcode/CODEOWNERS
 @@ -0,0 +1,28 @@
-+/.gitcode/ @neilliuistaken
++/.gitcode/ @xuanjz
 +
 +* @neilliuistaken
 +
 +/compiler-rt/ @duo-duo @wangyang594
 +/llvm/ @duo-duo @wangyang594
-+/lldb/ @zxudong
++/lldb/ @jyf219
 +/lld/ @duo-duo @wangyang594
 +
 +/bolt/ @neilliuistaken
@@ -14729,7 +14729,7 @@ index 2ca432ac1..9633b41e2 100644
    def UseExternalEditor: Property<"use-external-editor", "Boolean">,
      Global,
 diff --git a/lldb/source/Core/FormatEntity.cpp b/lldb/source/Core/FormatEntity.cpp
-index 6e7f44e46..d5bc2ca3a 100644
+index 6e7f44e46..8c051e37c 100644
 --- a/lldb/source/Core/FormatEntity.cpp
 +++ b/lldb/source/Core/FormatEntity.cpp
 @@ -59,6 +59,8 @@
@@ -14759,7 +14759,18 @@ index 6e7f44e46..d5bc2ca3a 100644
      ENUM_TO_CSTR(ScriptThread);
      ENUM_TO_CSTR(ThreadInfo);
      ENUM_TO_CSTR(TargetArch);
-@@ -1319,6 +1325,46 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
+@@ -1038,10 +1044,6 @@ static bool FormatThreadExtendedInfoRecurse(
+   return false;
+ }
+ 
+-static inline bool IsToken(const char *var_name_begin, const char *var) {
+-  return (::strncmp(var_name_begin, var, strlen(var)) == 0);
+-}
+-
+ bool FormatEntity::FormatStringRef(const llvm::StringRef &format_str, Stream &s,
+                                    const SymbolContext *sc,
+                                    const ExecutionContext *exe_ctx,
+@@ -1319,6 +1321,46 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
      }
      return false;
  
@@ -14806,7 +14817,7 @@ index 6e7f44e46..d5bc2ca3a 100644
    case Entry::Type::ScriptThread:
      if (exe_ctx) {
        Thread *thread = exe_ctx->GetThreadPtr();
-@@ -1534,7 +1580,7 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
+@@ -1534,7 +1576,7 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
      } else {
        const char *name = nullptr;
        if (sc->function)
@@ -14815,7 +14826,7 @@ index 6e7f44e46..d5bc2ca3a 100644
        else if (sc->symbol)
          name = sc->symbol->GetName().AsCString(nullptr);
  
-@@ -1581,7 +1627,7 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
+@@ -1581,7 +1623,7 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
      } else {
        ConstString name;
        if (sc->function)
@@ -14824,7 +14835,7 @@ index 6e7f44e46..d5bc2ca3a 100644
        else if (sc->symbol)
          name = sc->symbol->GetNameNoArguments();
        if (name) {
-@@ -1616,7 +1662,7 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
+@@ -1616,7 +1658,7 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
        if (sc->function) {
          ExecutionContextScope *exe_scope =
              exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr;
@@ -14833,6 +14844,65 @@ index 6e7f44e46..d5bc2ca3a 100644
          if (cstr) {
            const InlineFunctionInfo *inline_info = nullptr;
            VariableListSP variable_list_sp;
+@@ -1648,35 +1690,31 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
+             variable_list_sp->AppendVariablesWithScope(
+                 eValueTypeVariableArgument, args);
+           if (args.GetSize() > 0) {
+-            const char *open_paren = strchr(cstr, '(');
+-            const char *close_paren = nullptr;
+-            const char *generic = strchr(cstr, '<');
+-            // if before the arguments list begins there is a template sign
+-            // then scan to the end of the generic args before you try to find
+-            // the arguments list
+-            if (generic && open_paren && generic < open_paren) {
+-              int generic_depth = 1;
+-              ++generic;
+-              for (; *generic && generic_depth > 0; generic++) {
+-                if (*generic == '<')
+-                  generic_depth++;
+-                if (*generic == '>')
+-                  generic_depth--;
++            // The runtime argument values belong to the innermost function, whose
++            // parameter list is the LAST parenthesized group of the demangled name.
++            // Locate it by scanning backwards from the last ')' to its matching '(';
++            // the balanced scan keeps parentheses that belong to argument types (e.g.
++            // a function type like "(Int64) -> Int64") on the correct side of the
++            // split, and text after the group is preserved.
++            llvm::StringRef demangled_name(cstr);
++            const size_t close_pos = demangled_name.rfind(')');
++            size_t open_pos = llvm::StringRef::npos;
++            if (close_pos != llvm::StringRef::npos) {
++              unsigned depth = 1;
++              for (size_t pos = close_pos; pos > 0;) {
++                const char ch = demangled_name[--pos];
++                if (ch == ')')
++                  ++depth;
++                else if (ch == '(' && --depth == 0) {
++                  open_pos = pos;
++                  break;
++                }
+               }
+-              if (*generic)
+-                open_paren = strchr(generic, '(');
+-              else
+-                open_paren = nullptr;
+-            }
+-            if (open_paren) {
+-              if (IsToken(open_paren, "(anonymous namespace)")) {
+-                open_paren =
+-                    strchr(open_paren + strlen("(anonymous namespace)"), '(');
+-                if (open_paren)
+-                  close_paren = strchr(open_paren, ')');
+-              } else
+-                close_paren = strchr(open_paren, ')');
+             }
++            auto open_paren = open_pos == llvm::StringRef::npos
++                                  ? nullptr
++                                  : cstr + open_pos;
++            auto close_paren = open_paren ? cstr + close_pos : nullptr;
+ 
+             if (open_paren)
+               s.Write(cstr, open_paren - cstr + 1);
 diff --git a/lldb/source/Core/Mangled.cpp b/lldb/source/Core/Mangled.cpp
 index 0c4d9f78c..81b0f2afc 100644
 --- a/lldb/source/Core/Mangled.cpp
@@ -17332,10 +17402,10 @@ index 000000000..a4eb8ad8c
 +#endif
 diff --git a/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieCompilerInstance.cpp b/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieCompilerInstance.cpp
 new file mode 100644
-index 000000000..bc81a6ed6
+index 000000000..60406782c
 --- /dev/null
 +++ b/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieCompilerInstance.cpp
-@@ -0,0 +1,1266 @@
+@@ -0,0 +1,1267 @@
 +//===-- CangjieCompilerInstance.cpp ---------------------------------------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -17401,10 +17471,10 @@ index 000000000..bc81a6ed6
 +      decl = importManager->GetImportedDecl(COLLECTION_PACKAGE_NAME, rt.ref.identifier);
 +    }
 +  }
-+  std::vector<Ptr<Ty>> typeArgs;
++  std::vector<DataTy> typeArgs;
 +  for (auto& arg : rt.typeArguments) {
 +    CheckTypeAndAddTy(arg);
-+    typeArgs.push_back(arg->GetTy());
++    typeArgs.push_back(arg->DataTy());
 +  }
 +  if (!decl) {
 +    decl = rt.ref.target;
@@ -17431,20 +17501,21 @@ index 000000000..bc81a6ed6
 +  if (AST::Ty::IsTyCorrect(type->GetTy()) && !isGenericType) {
 +    return;
 +  }
++  auto mode = type->modal.ToModalInfo();
 +  if (type->astKind == AST::ASTKind::PRIMITIVE_TYPE) {
 +    auto pt = RawStaticCast<AST::PrimitiveType *>(type.get());
-+    pt->SetTy(typeManager->GetPrimitiveTy(pt->kind));
++    pt->SetTy({typeManager->GetPrimitiveTy(pt->kind), mode});
 +  } else if (type->astKind == AST::ASTKind::REF_TYPE) {
 +    auto rt = RawStaticCast<AST::RefType *>(type.get());
 +    AddTyOfRefType(*rt);
 +  } else if (type->astKind == AST::ASTKind::TUPLE_TYPE) {
 +    auto tt = RawStaticCast<AST::TupleType *>(type.get());
-+    std::vector<Ptr<Ty>> subTys;
++    std::vector<DataTy> subTys;
 +    for (auto& subType : tt->fieldTypes) {
 +      CheckTypeAndAddTy(subType);
-+      subTys.push_back(subType->GetTy());
++      subTys.push_back(subType->DataTy());
 +    }
-+    tt->SetTy(typeManager->GetTupleTy(subTys));
++    tt->SetTy({typeManager->GetTupleTy(subTys), mode});
 +  } else if (type->astKind == AST::ASTKind::VARRAY_TYPE) {
 +    auto vaType = RawStaticCast<AST::VArrayType *>(type.get());
 +    auto constType = RawStaticCast<AST::ConstantType *>(vaType->constantType.get());
@@ -17456,23 +17527,23 @@ index 000000000..bc81a6ed6
 +    }
 +    CheckTypeAndAddTy(vaType->typeArgument);
 +    if (vaType->typeArgument) {
-+      vaType->SetTy(typeManager->GetVArrayTy(*vaType->typeArgument->GetTy(), vaSize));
++      vaType->SetTy({typeManager->GetVArrayTy(*vaType->typeArgument->GetTy(), vaSize), mode});
 +    }
 +  } else if (type->astKind == AST::ASTKind::FUNC_TYPE) {
 +    auto func_type = RawStaticCast<AST::FuncType *>(type.get());
-+    std::vector<Ptr<Cangjie::AST::Ty>> params;
++    std::vector<ModalTy> params;
 +    for (auto &param : func_type->paramTypes) {
 +      CheckTypeAndAddTy(param);
 +      params.emplace_back(param->GetTy());
 +    }
 +    CheckTypeAndAddTy(func_type->retType);
 +    if (func_type->retType) {
-+      type->SetTy(typeManager->GetFunctionTy(params, func_type->retType->GetTy()));
++      type->SetTy({typeManager->GetFunctionTy(params, func_type->retType->GetTy()), mode});
 +    }
 +  }
 +}
 +
-+Ptr<AST::Ty> CangjieCompilerInstance::GetInstantiatedTy(AST::ClassTy& cTy, Ptr<AST::Ty> paramTy) {
++DataTy CangjieCompilerInstance::GetInstantiatedTy(AST::ClassTy& cTy, DataTy paramTy) {
 +  if (!paramTy->IsGeneric()) {
 +    return paramTy;
 +  }
@@ -17480,7 +17551,7 @@ index 000000000..bc81a6ed6
 +  CJC_ASSERT(typeParams.size() == cTy.typeArgs.size());
 +  for (size_t i = 0; i < typeParams.size(); i++) {
 +    if (typeParams[i]->identifier.Val() == paramTy->name) {
-+      return cTy.typeArgs[i];
++      return cTy.TyArg(i);
 +    }
 +  }
 +  return paramTy;
@@ -17495,7 +17566,7 @@ index 000000000..bc81a6ed6
 +  if (!superType) {
 +    return nullptr;
 +  }
-+  auto cTy = StaticCast<AST::ClassTy *>(superType->GetTy());
++  auto cTy = StaticCast<AST::ClassTy *>(superType->DataTy());
 +  auto superExpr = CreateRefExpr("super");
 +  superExpr->isSuper = true;
 +  std::vector<OwnedPtr<FuncArg>> args;
@@ -17504,11 +17575,11 @@ index 000000000..bc81a6ed6
 +      superExpr->ref.target = fd;
 +      superExpr->SetTy(fd->GetTy());
 +      for (auto& param : fd->funcBody->paramLists[0]->params) {
-+        if (!param || !param->GetTy() || param->GetTy()->IsInvalid()) {
++        if (!param || !param->DataTy() || param->GetTy()->IsInvalid()) {
 +          continue;
 +        }
 +        // Parent's init func may have generic param.
-+        auto argTy = GetInstantiatedTy(*cTy, param->GetTy());
++        auto argTy = GetInstantiatedTy(*cTy, param->DataTy());
 +        auto initializer = CreateInitializer(argTy);
 +        if (!initializer) {
 +          return nullptr;
@@ -17536,10 +17607,10 @@ index 000000000..bc81a6ed6
 +  auto funcParamList = MakeOwned<Cangjie::AST::FuncParamList>();
 +  funcBody->paramLists.push_back(std::move(funcParamList));
 +  funcBody->body = MakeOwned<Cangjie::AST::Block>();
-+  funcBody->SetTy(funcTy);
++  funcBody->SetTy({funcTy});
 +
 +  auto initFunc = MakeOwned<Cangjie::AST::FuncDecl>();
-+  initFunc->SetTy(funcTy);
++  initFunc->SetTy({funcTy});
 +  initFunc->funcBody = std::move(funcBody);
 +  initFunc->funcBody->funcDecl = initFunc.get();
 +  initFunc->identifier = "init";
@@ -17594,7 +17665,7 @@ index 000000000..bc81a6ed6
 +  for (auto& it : generic->typeParameters) {
 +    auto gpd = RawStaticCast<AST::GenericParamDecl *>(it.get());
 +    CreateTyAndDefaultCtor(*gpd, {});
-+    typeArgs.push_back(gpd->GetTy());
++    typeArgs.push_back(gpd->DataTy());
 +  }
 +  for (auto& it : generic->genericConstraints) {
 +    auto gc = RawStaticCast<AST::GenericConstraint *>(it.get());
@@ -17650,7 +17721,7 @@ index 000000000..bc81a6ed6
 +      return typeManager->GetGenericsTy(*gpd);
 +    }
 +    default:
-+      return decl.GetTy();
++      return decl.DataTy();
 +  }
 +}
 +
@@ -17712,7 +17783,7 @@ index 000000000..bc81a6ed6
 +    return;
 +  }
 +  auto retTy = fd.funcBody->retType->GetTy();
-+  std::vector<Ptr<Cangjie::AST::Ty>> params;
++  std::vector<ModalTy> params;
 +  for (auto& param : fd.funcBody->paramLists[0]->params) {
 +    if (!param->type) {
 +      continue;
@@ -17722,7 +17793,7 @@ index 000000000..bc81a6ed6
 +    params.emplace_back(param->GetTy());
 +  }
 +  UpdateDeclTyByGeneric(&fd);
-+  fd.SetTy(typeManager->GetFunctionTy(params, retTy));
++  fd.SetTy({typeManager->GetFunctionTy(params, retTy)});
 +  fd.funcBody->SetTy(fd.GetTy());
 +}
 +
@@ -17741,14 +17812,14 @@ index 000000000..bc81a6ed6
 +          CreateTyAndDefaultCtor(*rt->ref.target, {});
 +        }
 +      }
-+      decl.SetTy(typeManager->GetClassTy(*cd, typeArgs));
++      decl.SetTy({typeManager->GetClassTy(*cd, typeArgs)});
 +      UpdateDeclTyByGeneric(&decl);
 +      CreateDefaultCtor(decl);
 +      break;
 +    }
 +    case ASTKind::INTERFACE_DECL: {
 +      auto id = As<ASTKind::INTERFACE_DECL>(&decl);
-+      decl.SetTy(typeManager->GetInterfaceTy(*id, typeArgs));
++      decl.SetTy({typeManager->GetInterfaceTy(*id, typeArgs)});
 +      UpdateDeclTyByGeneric(&decl);
 +      break;
 +    }
@@ -17763,14 +17834,14 @@ index 000000000..bc81a6ed6
 +          CreateTyAndDefaultCtor(*rt->ref.target, {});
 +        }
 +      }
-+      decl.SetTy(typeManager->GetStructTy(*sd, typeArgs));
++      decl.SetTy({typeManager->GetStructTy(*sd, typeArgs)});
 +      UpdateDeclTyByGeneric(&decl);
 +      CreateDefaultCtor(decl);
 +      break;
 +    }
 +    case ASTKind::ENUM_DECL: {
 +      auto ed = As<ASTKind::ENUM_DECL>(&decl);
-+      decl.SetTy(typeManager->GetEnumTy(*ed, typeArgs));
++      decl.SetTy({typeManager->GetEnumTy(*ed, typeArgs)});
 +      UpdateDeclTyByGeneric(&decl);
 +      for (size_t i = 0; i < ed->constructors.size(); i++) {
 +        auto tempDecl = RawStaticCast<AST::Decl *>(ed->constructors[i].get());
@@ -17780,12 +17851,12 @@ index 000000000..bc81a6ed6
 +    }
 +    case ASTKind::TYPE_ALIAS_DECL: {
 +      auto tad = As<ASTKind::TYPE_ALIAS_DECL>(&decl);
-+      decl.SetTy(typeManager->GetTypeAliasTy(*tad, typeArgs));
++      decl.SetTy({typeManager->GetTypeAliasTy(*tad, typeArgs)});
 +      break;
 +    }
 +    case ASTKind::GENERIC_PARAM_DECL: {
 +      auto gpd = As<ASTKind::GENERIC_PARAM_DECL>(&decl);
-+      decl.SetTy(typeManager->GetGenericsTy(*gpd));
++      decl.SetTy({typeManager->GetGenericsTy(*gpd)});
 +      break;
 +    }
 +    case ASTKind::FUNC_DECL: {
@@ -18281,7 +18352,7 @@ index 000000000..bc81a6ed6
 +  }
 +}
 +
-+OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreatePrimitiveInitializer(Ptr<Cangjie::AST::Ty> ty)
++OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreatePrimitiveInitializer(ModalTy ty)
 +{
 +  switch (ty->kind) {
 +    case Cangjie::AST::TypeKind::TYPE_INT8:
@@ -18310,9 +18381,9 @@ index 000000000..bc81a6ed6
 +  }
 +}
 +
-+OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateEnumInitializer(Ptr<AST::Ty> ty)
++OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateEnumInitializer(ModalTy ty)
 +{
-+  auto enumTy = RawStaticCast<AST::EnumTy *>(ty);
++  auto enumTy = RawStaticCast<AST::EnumTy *>(ty.Ty());
 +  if (!enumTy) {
 +    return nullptr;
 +  }
@@ -18343,7 +18414,7 @@ index 000000000..bc81a6ed6
 +}
 +
 +Ptr<AST::FuncDecl> CangjieCompilerInstance::GetInitFuncFromClassOrStruct(
-+    std::vector<OwnedPtr<Decl>>& decls, std::vector<Ptr<Cangjie::AST::Ty>>& params)
++    std::vector<OwnedPtr<Decl>>& decls, std::vector<ModalTy>& params)
 +{
 +  for (auto& decl : decls) {
 +    if (decl->TestAttr(Attribute::CONSTRUCTOR)) {
@@ -18362,14 +18433,14 @@ index 000000000..bc81a6ed6
 +  return nullptr;
 +}
 +
-+OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateClassInitializer(Ptr<AST::Ty> ty)
++OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateClassInitializer(ModalTy ty)
 +{
-+  auto classTy = RawStaticCast<AST::ClassTy *>(ty);
++  auto classTy = RawStaticCast<AST::ClassTy *>(ty.Ty());
 +  if (!classTy || !classTy->decl) {
 +    return nullptr;
 +  }
 +  auto cd = classTy->decl;
-+  std::vector<Ptr<Cangjie::AST::Ty>> params;
++  std::vector<ModalTy> params;
 +  auto initFunc = GetInitFuncFromClassOrStruct(cd->body->decls, params);
 +  if (!initFunc) {
 +    return nullptr;
@@ -18380,20 +18451,20 @@ index 000000000..bc81a6ed6
 +  }
 +  auto refExpr = CreateRefExpr(*initFunc);
 +  refExpr->ref.identifier = cd->identifier;
-+  refExpr->SetTy(typeManager->GetFunctionTy(params, classTy));
-+  auto call = AST::CreateCallExpr(std::move(refExpr), std::move(args), initFunc, classTy);
++  refExpr->SetTy({typeManager->GetFunctionTy(params, ty)});
++  auto call = AST::CreateCallExpr(std::move(refExpr), std::move(args), initFunc, ty);
 +  call->callKind = CallKind::CALL_OBJECT_CREATION;
 +  return call;
 +}
 +
-+OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateStructInitializer(Ptr<AST::Ty> ty)
++OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateStructInitializer(ModalTy ty)
 +{
-+  auto structTy = RawStaticCast<AST::StructTy *>(ty);
++  auto structTy = RawStaticCast<AST::StructTy *>(ty.Ty());
 +  if (!structTy || !structTy->decl) {
 +    return nullptr;
 +  }
 +  auto sd = structTy->decl;
-+  std::vector<Ptr<Cangjie::AST::Ty>> sparams;
++  std::vector<ModalTy> sparams;
 +  auto initFunc = GetInitFuncFromClassOrStruct(sd->body->decls, sparams);
 +  if (!initFunc) {
 +    return nullptr;
@@ -18404,16 +18475,16 @@ index 000000000..bc81a6ed6
 +  }
 +  auto refExpr = CreateRefExpr(*initFunc);
 +  refExpr->ref.identifier = sd->identifier;
-+  refExpr->SetTy(typeManager->GetFunctionTy(sparams, structTy));
-+  auto call = AST::CreateCallExpr(std::move(refExpr), std::move(args), initFunc, structTy);
++  refExpr->SetTy({typeManager->GetFunctionTy(sparams, ty)});
++  auto call = AST::CreateCallExpr(std::move(refExpr), std::move(args), initFunc, ty);
 +  call->callKind = CallKind::CALL_STRUCT_CREATION;
 +  return call;
 +}
 +
-+OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateFunctionInitializer(Ptr<AST::Ty> ty)
++OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateFunctionInitializer(ModalTy ty)
 +{
 +  // var result: (Int8) -> Int8 = {a: Int8 => 0 }
-+  auto functy = RawStaticCast<AST::FuncTy*>(ty);
++  auto functy = RawStaticCast<AST::FuncTy*>(ty.Ty());
 +  if (!functy) {
 +    return nullptr;
 +  }
@@ -18434,7 +18505,7 @@ index 000000000..bc81a6ed6
 +  return AST::CreateLambdaExpr(std::move(funcBody));
 +}
 +
-+OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateRangeInitializer(Ptr<AST::Ty> ty)
++OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateRangeInitializer(ModalTy ty)
 +{
 +  if (ty->typeArgs.empty()) {
 +    return nullptr;
@@ -18443,13 +18514,13 @@ index 000000000..bc81a6ed6
 +  rangeExpr->startExpr = CreateInitializer(ty->typeArgs[0]);
 +  rangeExpr->stopExpr = CreateInitializer(ty->typeArgs[0]);
 +  auto int64ty = typeManager->GetPrimitiveTy(AST::TypeKind::TYPE_INT64);
-+  rangeExpr->stepExpr = AST::CreateLitConstExpr(Cangjie::AST::LitConstKind::INTEGER, "1", int64ty);
++  rangeExpr->stepExpr = AST::CreateLitConstExpr(Cangjie::AST::LitConstKind::INTEGER, "1", {int64ty});
 +  rangeExpr->SetTy(ty);
 +  rangeExpr->decl = importManager->GetCoreDecl<Cangjie::AST::StructDecl>(RANGE_NAME);
 +  return rangeExpr;
 +}
 +
-+OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateInitializer(Ptr<Cangjie::AST::Ty> ty)
++OwnedPtr<Cangjie::AST::Expr> CangjieCompilerInstance::CreateInitializer(ModalTy ty)
 +{
 +  if (!ty) {
 +    return nullptr;
@@ -18483,7 +18554,7 @@ index 000000000..bc81a6ed6
 +  }
 +  if (ty->kind == Cangjie::AST::TypeKind::TYPE_VARRAY) {
 +    auto ret = MakeOwned<ArrayLit>();
-+    auto varrayTy = RawStaticCast<Cangjie::AST::VArrayTy *>(ty);
++    auto varrayTy = RawStaticCast<Cangjie::AST::VArrayTy *>(ty.Ty());
 +    // Max size of varray: 65536
 +    int64_t safe_size = (varrayTy->size > 0 && varrayTy->size <= 65536) ? varrayTy->size : 0;
 +    for (int64_t i = 0; i < safe_size; i++) {
@@ -18501,10 +18572,10 @@ index 000000000..bc81a6ed6
 +  return nullptr;
 +}
 +
-+Ptr<AST::Ty> CangjieCompilerInstance::AddObjectToFunctionTy(Ptr<AST::Ty> fTy, Ptr<AST::Ty> objectTy)
++DataTy CangjieCompilerInstance::AddObjectToFunctionTy(DataTy fTy, ModalTy objectTy)
 +{
-+    auto funcTy = RawStaticCast<FuncTy*>(fTy);
-+    std::vector<Ptr<Cangjie::AST::Ty>> ptys{objectTy};
++    auto funcTy = StaticCast<FuncTy>(fTy);
++    std::vector<ModalTy> ptys{objectTy};
 +    for (auto &pty : funcTy->paramTys) {
 +      ptys.emplace_back(pty);
 +    }
@@ -18538,8 +18609,8 @@ index 000000000..bc81a6ed6
 +            refExpr->ref.target = vd;
 +            refExpr->SetTy(vd->GetTy());
 +            param->SetTy(vd->GetTy());
-+            fd->SetTy(AddObjectToFunctionTy(fd->GetTy(), vd->GetTy()));
-+            re->SetTy(AddObjectToFunctionTy(re->GetTy(), vd->GetTy()));
++            fd->SetTy({AddObjectToFunctionTy(fd->DataTy(), vd->GetTy())});
++            re->SetTy({AddObjectToFunctionTy(re->DataTy(), vd->GetTy()), re->TyMode()});
 +            break;
 +          }
 +        }
@@ -18604,7 +18675,7 @@ index 000000000..bc81a6ed6
 +}
 diff --git a/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieCompilerInstance.h b/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieCompilerInstance.h
 new file mode 100644
-index 000000000..225577a05
+index 000000000..1af299414
 --- /dev/null
 +++ b/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieCompilerInstance.h
 @@ -0,0 +1,75 @@
@@ -18653,14 +18724,14 @@ index 000000000..225577a05
 +
 +  void AddImportNodeFromFakePkg(OwnedPtr<Cangjie::AST::File>& file, OwnedPtr<AST::Package>& fPkg);
 +  void AddImportSpecToLLDBExprPackage();
-+  Ptr<AST::Ty> AddObjectToFunctionTy(Ptr<AST::Ty> fTy, Ptr<AST::Ty> objectTy);
++  DataTy AddObjectToFunctionTy(DataTy fTy, ModalTy objectTy);
 +  void AddCapturedvarsToCallExprOfLocalFunc();
 +  std::vector<OwnedPtr<FuncArg>> CreateFuncArgsFromCapturedVars(std::string ident);
 +  void AddCapturedVarsToTryExpr(std::vector<OwnedPtr<Decl>>& localDecls, AST::TryExpr& tryExpr);
 +  void AddLocalsToExprResult(std::vector<OwnedPtr<Decl>>& localDecls);
 +  void AddTyOfRefType(AST::RefType& rt);
 +  void CheckTypeAndAddTy(OwnedPtr<AST::Type>& type);
-+  Ptr<AST::Ty> GetInstantiatedTy(AST::ClassTy& cTy, Ptr<AST::Ty> paramTy);
++  DataTy GetInstantiatedTy(AST::ClassTy& cTy, DataTy paramTy);
 +  OwnedPtr<AST::CallExpr> CreateSuperCall(AST::ClassDecl& cd);
 +  void CreateInitFunc(AST::Decl& decl);
 +  void CreateDefaultCtor(AST::Decl& decl);
@@ -18670,14 +18741,14 @@ index 000000000..225577a05
 +  void CreateTyAndDefaultCtor(AST::Decl& decl, const std::vector<Ptr<AST::Ty>>& typeArgs);
 +
 +  Ptr<AST::FuncDecl> GetInitFuncFromClassOrStruct(
-+    std::vector<OwnedPtr<Decl>>& decls, std::vector<Ptr<Cangjie::AST::Ty>>& params);
-+  OwnedPtr<Cangjie::AST::Expr> CreatePrimitiveInitializer(Ptr<Cangjie::AST::Ty> ty);
-+  OwnedPtr<Cangjie::AST::Expr> CreateFunctionInitializer(Ptr<Cangjie::AST::Ty> ty);
-+  OwnedPtr<Cangjie::AST::Expr> CreateStructInitializer(Ptr<Cangjie::AST::Ty> ty);
-+  OwnedPtr<Cangjie::AST::Expr> CreateClassInitializer(Ptr<Cangjie::AST::Ty> ty);
-+  OwnedPtr<Cangjie::AST::Expr> CreateEnumInitializer(Ptr<Cangjie::AST::Ty> ty);
-+  OwnedPtr<Cangjie::AST::Expr> CreateRangeInitializer(Ptr<Cangjie::AST::Ty> ty);
-+  OwnedPtr<Cangjie::AST::Expr> CreateInitializer(Ptr<Cangjie::AST::Ty> ty);
++    std::vector<OwnedPtr<Decl>>& decls, std::vector<ModalTy>& params);
++  OwnedPtr<Cangjie::AST::Expr> CreatePrimitiveInitializer(ModalTy ty);
++  OwnedPtr<Cangjie::AST::Expr> CreateFunctionInitializer(ModalTy ty);
++  OwnedPtr<Cangjie::AST::Expr> CreateStructInitializer(ModalTy ty);
++  OwnedPtr<Cangjie::AST::Expr> CreateClassInitializer(ModalTy ty);
++  OwnedPtr<Cangjie::AST::Expr> CreateEnumInitializer(ModalTy ty);
++  OwnedPtr<Cangjie::AST::Expr> CreateRangeInitializer(ModalTy ty);
++  OwnedPtr<Cangjie::AST::Expr> CreateInitializer(ModalTy ty);
 +};
 +
 +} // namespace CangjieExpr
@@ -18685,10 +18756,10 @@ index 000000000..225577a05
 +#endif // LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CANGJIE_CANGJIECOMPILERINSTANCE_H
 diff --git a/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieDeclMap.cpp b/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieDeclMap.cpp
 new file mode 100644
-index 000000000..8f666d26d
+index 000000000..62ced6b3a
 --- /dev/null
 +++ b/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieDeclMap.cpp
-@@ -0,0 +1,2290 @@
+@@ -0,0 +1,2292 @@
 +//===-- CangjieDeclMap.cpp ------------------------------------------------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -20595,7 +20666,7 @@ index 000000000..8f666d26d
 +      // Case generic type.
 +      auto index = GetSubGenericTyIndex(decl, subTy->name);
 +      std::string subTypeName = instantiatedNames[index];
-+      subTy = ty->typeArgs[index];
++      subTy = ty->TyArg(index);
 +      auto tempGenericType = this->GetGenericTypeByPartName(subTy->name);
 +      field_type = GetDynamicTypeFromTy(subTy, subTypeName, tempGenericType);
 +    } else if (compilerTypeName.find(GENERIC_TYPE_PREFIX_NAME) != std::string::npos) {
@@ -20633,10 +20704,10 @@ index 000000000..8f666d26d
 +      continue;
 +    }
 +    if (memberDecls[i]->identifier.Val() == memberName) {
-+      return memberDecls[i]->GetTy();
++      return memberDecls[i]->DataTy();
 +    }
 +  }
-+  return decl->GetTy();
++  return decl->DataTy();
 +}
 +
 +CompilerType CangjieDeclMap::GetEnumType(Ptr<AST::Ty> ty, std::string enum_name, CompilerType& genericType) {
@@ -20685,14 +20756,14 @@ index 000000000..8f666d26d
 +    std::string member_name;
 +    std::vector<std::string> instantiatedNames = builder.SplitCollectionName(enum_name);
 +    for (size_t j = 0; j < paramSize; j++) {
-+      auto subTy = ctorDecl->funcBody->paramLists[0]->params[j].get()->GetTy();
++      auto subTy = ctorDecl->funcBody->paramLists[0]->params[j].get()->DataTy();
 +      CompilerType ctor_para_type = ctorFuncType.GetFieldAtIndex(j + 1, member_name, nullptr, nullptr, nullptr);
 +      auto tempGenericType = ctor_para_type;
 +      if (subTy->IsGeneric()) {
 +        // case generic type.
 +        auto index = GetSubGenericTyIndex(decl, subTy->name);
 +        std::string subTypeName = instantiatedNames[index];
-+        subTy = ty->typeArgs[index];
++        subTy = ty->TyArg(index);
 +        // Find generic type by name.
 +        ctor_para_type = GetDynamicTypeFromTy(subTy, subTypeName, tempGenericType);
 +      }
@@ -20737,7 +20808,7 @@ index 000000000..8f666d26d
 +  if (enumKind == EnumLayout::E2OptionLike) {
 +    ast->AddFieldToRecordType(dynamic_type, "constructor", enum_type, lldb::eAccessPublic, 0);
 +    auto args = builder.GetInstantiatedParamDeclName(typeName);
-+    auto valType = GetDynamicTypeFromTy(ty->typeArgs[0], args[0], genericType);
++    auto valType = GetDynamicTypeFromTy(ty->TyArg(0), args[0], genericType);
 +    ast->AddFieldToRecordType(dynamic_type, "val", valType, lldb::eAccessPublic, 0);
 +  } else {
 +      // add typeinfo*.
@@ -20834,7 +20905,7 @@ index 000000000..8f666d26d
 +  std::vector<std::string> instantiatedNames = builder.SplitTupleName(typeName);
 +  CJC_ASSERT(instantiatedNames.size() == tupleTy->typeArgs.size());
 +  for (size_t i = 0; i < tupleTy->typeArgs.size(); i++) {
-+    auto field_type = GetDynamicTypeFromTy(tupleTy->typeArgs[i], instantiatedNames[i], genericType);
++    auto field_type = GetDynamicTypeFromTy(tupleTy->TyArg(i), instantiatedNames[i], genericType);
 +    std::string field_name = "_" + std::to_string(i);
 +    this->GetTypeSystem()->AddFieldToRecordType(instancedType, field_name.c_str(), field_type, lldb::eAccessPublic, 0);
 +  }
@@ -20899,7 +20970,8 @@ index 000000000..8f666d26d
 +  // }
 +  // Add elements to array member.
 +  std::vector<std::string> instantiatedNames = builder.SplitCollectionName(typeName);
-+  auto field_type = GetDynamicRawArrayType(arrayTy->typeArgs[0], instantiatedNames[0], genericType).GetPointerType();
++  auto field_type = GetDynamicRawArrayType(
++    arrayTy->TyArg(0), instantiatedNames[0], genericType).GetPointerType();
 +  this->GetTypeSystem()->AddFieldToRecordType(type, "rawptr", field_type, lldb::eAccessPublic, 0);
 +
 +  CompilerType basic_type = this->GetTypeSystem()->GetBasicType(lldb::eBasicTypeLongLong).CreateTypedef(
@@ -20938,7 +21010,8 @@ index 000000000..8f666d26d
 +
 +  if (!valType.IsValid()) {
 +    if (m_generic_types.find(ConstString(valTypeName[0])) != m_generic_types.end()) {
-+      valType = GetDynamicTypeFromTy(ty->typeArgs[0], valTypeName[0], m_generic_types[ConstString(valTypeName[0])]);
++      valType = GetDynamicTypeFromTy(
++        ty->TyArg(0), valTypeName[0], m_generic_types[ConstString(valTypeName[0])]);
 +    }
 +  }
 +
@@ -21192,7 +21265,7 @@ index 000000000..49bf8362c
 +#endif // LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CANGJIE_DECL_MAP_H
 diff --git a/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieExpressionParser.cpp b/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieExpressionParser.cpp
 new file mode 100644
-index 000000000..469d03d9f
+index 000000000..d0736fd76
 --- /dev/null
 +++ b/lldb/source/Plugins/ExpressionParser/Cangjie/CangjieExpressionParser.cpp
 @@ -0,0 +1,296 @@
@@ -21408,7 +21481,7 @@ index 000000000..469d03d9f
 +  m_result_type_name = instance->m_result_type_name;
 +  std::string demangled_name = lldb_private::Mangled::GetDemangledTypeName(m_result_type_name);
 +  if (!m_expr_result_type.IsValid() && demangled_name.find("std.core::Option<") == 0) {
-+    m_expr_result_type = m_expr_decl_map_up->CreateOptionReturnType(instance->m_expr_result->GetTy(), demangled_name);
++    m_expr_result_type = m_expr_decl_map_up->CreateOptionReturnType(instance->m_expr_result->DataTy(), demangled_name);
 +    return true;
 +  }
 +  if (!instance->m_expr_result->GetTy()->typeArgs.empty()) {
@@ -21421,7 +21494,7 @@ index 000000000..469d03d9f
 +      m_expr_result_type = retType;
 +    } else {
 +      m_expr_result_type = m_expr_decl_map_up->GetDynamicTypeFromGenericTypeInfo(
-+          instance->m_expr_result->GetTy(), demangled_name);
++          instance->m_expr_result->DataTy(), demangled_name);
 +    }
 +  }
 +  return true;
@@ -36216,10 +36289,10 @@ index ea4bf8020..f468e0c42 100644
  def AllocSize : IntAttr<"allocsize", [FnAttr]>;
 diff --git a/llvm/include/llvm/IR/CJIntrinsics.h b/llvm/include/llvm/IR/CJIntrinsics.h
 new file mode 100644
-index 000000000..afc6ac1ac
+index 000000000..d2479a3d6
 --- /dev/null
 +++ b/llvm/include/llvm/IR/CJIntrinsics.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,102 @@
 +//===- llvm/IR/CJIntrinsics.h - Cangjie Intrinsic Wrappers ------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -36285,6 +36358,10 @@ index 000000000..afc6ac1ac
 +};
 +
 +struct AssignGeneric {
++  enum { DstPtr, SrcPtr, TypeInfo };
++};
++
++struct AssignLocalGeneric {
 +  enum { DstPtr, SrcPtr, TypeInfo };
 +};
 +
@@ -36417,6 +36494,27 @@ index fd2854246..40bddd170 100644
      /// The highest possible calling convention ID. Must be some 2^k - 1.
      MaxID = 1023
    };
+diff --git a/llvm/include/llvm/IR/DebugInfoMetadata.h b/llvm/include/llvm/IR/DebugInfoMetadata.h
+index db1d031a0..2937f0ba7 100644
+--- a/llvm/include/llvm/IR/DebugInfoMetadata.h
++++ b/llvm/include/llvm/IR/DebugInfoMetadata.h
+@@ -1237,11 +1237,11 @@ public:
+   /// of its movement if necessary.
+   /// @{
+   void replaceElements(DINodeArray Elements) {
+-#ifndef NDEBUG
+-    for (DINode *Op : getElements())
+-      assert(is_contained(Elements->operands(), Op) &&
+-             "Lost a member during member list replacement");
+-#endif
++// #ifndef NDEBUG
++//     for (DINode *Op : getElements())
++//       assert(is_contained(Elements->operands(), Op) &&
++//              "Lost a member during member list replacement");
++// #endif
+     replaceOperandWith(4, Elements.get());
+   }
+ 
 diff --git a/llvm/include/llvm/IR/DerivedTypes.h b/llvm/include/llvm/IR/DerivedTypes.h
 index f505fd3f3..d548c3849 100644
 --- a/llvm/include/llvm/IR/DerivedTypes.h
@@ -36891,7 +36989,7 @@ index 4ff48c366..fd01aa3bd 100644
  class AssumeInst : public IntrinsicInst {
  public:
 diff --git a/llvm/include/llvm/IR/Intrinsics.td b/llvm/include/llvm/IR/Intrinsics.td
-index d46fa4fbf..fc65752fc 100644
+index d46fa4fbf..0b92e7d44 100644
 --- a/llvm/include/llvm/IR/Intrinsics.td
 +++ b/llvm/include/llvm/IR/Intrinsics.td
 @@ -180,6 +180,9 @@ class LLVMQualPointerType<LLVMType elty, int addrspace>
@@ -36963,7 +37061,7 @@ index d46fa4fbf..fc65752fc 100644
  
  def llvm_x86mmx_ty     : LLVMType<x86mmx>;
  def llvm_ptrx86mmx_ty  : LLVMPointerType<llvm_x86mmx_ty>;         // <1 x i64>*
-@@ -417,6 +432,211 @@ def int_gcwrite : Intrinsic<[],
+@@ -417,6 +432,241 @@ def int_gcwrite : Intrinsic<[],
                              [IntrArgMemOnly, NoCapture<ArgIndex<1>>,
                               NoCapture<ArgIndex<2>>]>;
  
@@ -37007,6 +37105,18 @@ index d46fa4fbf..fc65752fc 100644
 +                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptr_ty, llvm_anyint_ty]>;
 +def int_cj_copy_struct_field        : Intrinsic<[],
 +                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptr_ty, llvm_anyint_ty]>;
++def int_cj_maybe_local_write_ref    : Intrinsic<[],
++                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptrgcptr_ty],
++                                                [IntrArgMemOnly, NoCapture<ArgIndex<1>>, NoCapture<ArgIndex<2>>]>;
++def int_cj_maybe_local_write_generic : Intrinsic<[],
++                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptr_ty, llvm_i32_ty],
++                                                [IntrArgMemOnly, IntrWillReturn,
++                                                 NoCapture<ArgIndex<0>>,
++                                                 NoCapture<ArgIndex<1>>, WriteOnly<ArgIndex<1>>,
++                                                 NoCapture<ArgIndex<2>>, NoAlias<ArgIndex<2>>, ReadOnly<ArgIndex<2>>]>;
++def int_cj_demode_write_ref         : Intrinsic<[],
++                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptrgcptr_ty],
++                                                [IntrArgMemOnly, NoCapture<ArgIndex<1>>, NoCapture<ArgIndex<2>>]>;
 +def int_cj_cross_access_barrier    : Intrinsic<[], [llvm_i64_ty]>;
 +def int_cj_get_exported_ref        : Intrinsic<[llvm_gcptr_ty],
 +                                                [llvm_i64_ty]>;
@@ -37164,6 +37274,12 @@ index d46fa4fbf..fc65752fc 100644
 +                                                 NoCapture<ArgIndex<0>>, NoAlias<ArgIndex<0>>,
 +                                                 NoCapture<ArgIndex<1>>, NoAlias<ArgIndex<1>>, ReadOnly<ArgIndex<1>>,
 +                                                 NoCapture<ArgIndex<2>>, NoAlias<ArgIndex<2>>, ReadOnly<ArgIndex<2>>]>;
++def int_cj_assign_local_generic     : Intrinsic<[],
++                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_ptr_ty],
++                                                [IntrArgMemOnly, IntrWillReturn,
++                                                 NoCapture<ArgIndex<0>>, NoAlias<ArgIndex<0>>,
++                                                 NoCapture<ArgIndex<1>>, NoAlias<ArgIndex<1>>, ReadOnly<ArgIndex<1>>,
++                                                 NoCapture<ArgIndex<2>>, NoAlias<ArgIndex<2>>, ReadOnly<ArgIndex<2>>]>;
 +def int_cj_malloc_array_generic     : Intrinsic<[llvm_gcptr_ty],
 +                                                [llvm_ptr_ty, llvm_i64_ty],
 +                                                [Throws]>;
@@ -37171,11 +37287,23 @@ index d46fa4fbf..fc65752fc 100644
 +                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptr_ty, llvm_anyint_ty]>;
 +def int_cj_gcwrite_generic_payload  : Intrinsic<[],
 +                                                [llvm_gcptr_ty, llvm_ptr_ty, llvm_i32_ty]>;
++def int_cj_malloc_local_object      : Intrinsic<[llvm_gcptr_ty],
++                                                [llvm_ptr_ty, llvm_i32_ty],
++                                                [Throws]>;
++def int_cj_malloc_local_array       : Intrinsic<[llvm_gcptr_ty],
++                                                [llvm_ptr_ty, llvm_i64_ty, llvm_i64_ty],
++                                                [Throws]>;
++def int_cj_malloc_local_array_generic     : Intrinsic<[llvm_gcptr_ty],
++                                                [llvm_ptr_ty, llvm_i64_ty],
++                                                [Throws]>;
++def int_cj_alloca_local_generic     : Intrinsic<[llvm_gcptr_ty],
++                                                [llvm_ptr_ty, llvm_i32_ty],
++                                                [Throws]>;
 +
  //===------------------- ObjC ARC runtime Intrinsics --------------------===//
  //
  // Note these are to support the Objective-C ARC optimizer which wants to
-@@ -1257,6 +1477,25 @@ def int_experimental_gc_get_pointer_offset : Intrinsic<[llvm_i64_ty],
+@@ -1257,6 +1507,25 @@ def int_experimental_gc_get_pointer_offset : Intrinsic<[llvm_i64_ty],
                   [llvm_anyptr_ty], [IntrNoMem, IntrWillReturn,
                   ReadNone<ArgIndex<0>>, NoCapture<ArgIndex<0>>]>;
  
@@ -37545,10 +37673,10 @@ index 559840a33..2c8419b9e 100644
  
  #endif // LLVM_IR_STATEPOINT_H
 diff --git a/llvm/include/llvm/InitializePasses.h b/llvm/include/llvm/InitializePasses.h
-index 8cf31c08d..b6df3bdc7 100644
+index 8cf31c08d..59e33519b 100644
 --- a/llvm/include/llvm/InitializePasses.h
 +++ b/llvm/include/llvm/InitializePasses.h
-@@ -88,7 +88,14 @@ void initializeBranchProbabilityInfoWrapperPassPass(PassRegistry&);
+@@ -88,7 +88,15 @@ void initializeBranchProbabilityInfoWrapperPassPass(PassRegistry&);
  void initializeBranchRelaxationPass(PassRegistry&);
  void initializeBreakCriticalEdgesPass(PassRegistry&);
  void initializeBreakFalseDepsPass(PassRegistry&);
@@ -37558,12 +37686,13 @@ index 8cf31c08d..b6df3bdc7 100644
 +void initializeCJBarrierSplitLegacyPassPass(PassRegistry &);
 +void initializeCJRuntimeLoweringLegacyPassPass(PassRegistry &);
 +void initializeCJGenericIntrinsicOptLegacyPassPass(PassRegistry &);
++void initializeCJInsertRemoveLocalFinalizerLegacyPassPass(PassRegistry &);
 +void initializeCJIRVerifierLegacyPassPass(PassRegistry &);
 +void initializeCJLoopFloatOptLegacyPassPass(PassRegistry &);
  void initializeCFGOnlyPrinterLegacyPassPass(PassRegistry&);
  void initializeCFGOnlyViewerLegacyPassPass(PassRegistry&);
  void initializeCFGPrinterLegacyPassPass(PassRegistry&);
-@@ -96,6 +103,11 @@ void initializeCFGSimplifyPassPass(PassRegistry&);
+@@ -96,6 +104,11 @@ void initializeCFGSimplifyPassPass(PassRegistry&);
  void initializeCFGuardPass(PassRegistry&);
  void initializeCFGuardLongjmpPass(PassRegistry&);
  void initializeCFGViewerLegacyPassPass(PassRegistry&);
@@ -37575,7 +37704,7 @@ index 8cf31c08d..b6df3bdc7 100644
  void initializeCFIFixupPass(PassRegistry&);
  void initializeCFIInstrInserterPass(PassRegistry&);
  void initializeCFLAndersAAWrapperPassPass(PassRegistry&);
-@@ -145,6 +157,7 @@ void initializeEarlyTailDuplicatePass(PassRegistry&);
+@@ -145,6 +158,7 @@ void initializeEarlyTailDuplicatePass(PassRegistry&);
  void initializeEdgeBundlesPass(PassRegistry&);
  void initializeEHContGuardCatchretPass(PassRegistry &);
  void initializeEliminateAvailableExternallyLegacyPassPass(PassRegistry&);
@@ -37583,7 +37712,7 @@ index 8cf31c08d..b6df3bdc7 100644
  void initializeExpandMemCmpPassPass(PassRegistry&);
  void initializeExpandPostRAPass(PassRegistry&);
  void initializeExpandReductionsPass(PassRegistry&);
-@@ -152,6 +165,7 @@ void initializeExpandVectorPredicationPass(PassRegistry &);
+@@ -152,6 +166,7 @@ void initializeExpandVectorPredicationPass(PassRegistry &);
  void initializeMakeGuardsExplicitLegacyPassPass(PassRegistry&);
  void initializeExternalAAWrapperPassPass(PassRegistry&);
  void initializeFEntryInserterPass(PassRegistry&);
@@ -37591,7 +37720,7 @@ index 8cf31c08d..b6df3bdc7 100644
  void initializeFinalizeISelPass(PassRegistry&);
  void initializeFinalizeMachineBundlesPass(PassRegistry&);
  void initializeFixIrreduciblePass(PassRegistry &);
-@@ -164,6 +178,7 @@ void initializeFuncletLayoutPass(PassRegistry&);
+@@ -164,6 +179,7 @@ void initializeFuncletLayoutPass(PassRegistry&);
  void initializeFunctionSpecializationLegacyPassPass(PassRegistry &);
  void initializeGCMachineCodeAnalysisPass(PassRegistry&);
  void initializeGCModuleInfoPass(PassRegistry&);
@@ -37599,7 +37728,7 @@ index 8cf31c08d..b6df3bdc7 100644
  void initializeGVNHoistLegacyPassPass(PassRegistry&);
  void initializeGVNLegacyPassPass(PassRegistry&);
  void initializeGVNSinkLegacyPassPass(PassRegistry&);
-@@ -192,6 +207,9 @@ void initializeInferAddressSpacesPass(PassRegistry&);
+@@ -192,6 +208,9 @@ void initializeInferAddressSpacesPass(PassRegistry&);
  void initializeInferFunctionAttrsLegacyPassPass(PassRegistry&);
  void initializeInjectTLIMappingsLegacyPass(PassRegistry &);
  void initializeInlineCostAnalysisPass(PassRegistry&);
@@ -37609,7 +37738,7 @@ index 8cf31c08d..b6df3bdc7 100644
  void initializeInstCountLegacyPassPass(PassRegistry &);
  void initializeInstNamerPass(PassRegistry&);
  void initializeInstSimplifyLegacyPassPass(PassRegistry &);
-@@ -332,7 +350,7 @@ void initializePeepholeOptimizerPass(PassRegistry&);
+@@ -332,7 +351,7 @@ void initializePeepholeOptimizerPass(PassRegistry&);
  void initializePhiValuesWrapperPassPass(PassRegistry&);
  void initializePhysicalRegisterUsageInfoPass(PassRegistry&);
  void initializePlaceBackedgeSafepointsImplPass(PassRegistry&);
@@ -37618,7 +37747,7 @@ index 8cf31c08d..b6df3bdc7 100644
  void initializePostDomOnlyPrinterWrapperPassPass(PassRegistry &);
  void initializePostDomOnlyViewerWrapperPassPass(PassRegistry &);
  void initializePostDomPrinterWrapperPassPass(PassRegistry &);
-@@ -421,6 +439,8 @@ void initializeTailDuplicatePass(PassRegistry&);
+@@ -421,6 +440,8 @@ void initializeTailDuplicatePass(PassRegistry&);
  void initializeTargetLibraryInfoWrapperPassPass(PassRegistry&);
  void initializeTargetPassConfigPass(PassRegistry&);
  void initializeTargetTransformInfoWrapperPassPass(PassRegistry&);
@@ -38434,7 +38563,7 @@ index 000000000..5a3740955
 +
 +#endif
 diff --git a/llvm/include/llvm/Transforms/Scalar.h b/llvm/include/llvm/Transforms/Scalar.h
-index 5f852963c..856f2d63f 100644
+index 5f852963c..773c05373 100644
 --- a/llvm/include/llvm/Transforms/Scalar.h
 +++ b/llvm/include/llvm/Transforms/Scalar.h
 @@ -470,7 +470,7 @@ FunctionPass *createStraightLineStrengthReducePass();
@@ -38446,7 +38575,7 @@ index 5f852963c..856f2d63f 100644
  
  //===----------------------------------------------------------------------===//
  //
-@@ -549,13 +549,75 @@ Pass *createWarnMissedTransformationsPass();
+@@ -549,13 +549,82 @@ Pass *createWarnMissedTransformationsPass();
  //
  FunctionPass *createInstSimplifyLegacyPass();
  
@@ -38515,6 +38644,13 @@ index 5f852963c..856f2d63f 100644
 +// CJGenericIntrinsicOpt - optimizes cangjie generic intrinsics
 +//
 +FunctionPass *createCJGenericIntrinsicOptLegacyPass();
++
++//===----------------------------------------------------------------------===//
++//
++// CJInsertRemoveLocalFinalizer - Pair every CJ_MCC_AddLocalFinalizer with a
++// CJ_MCC_RemoveLocalFinalizer at the end of the object's live range.
++//
++FunctionPass *createCJInsertRemoveLocalFinalizerLegacyPass();
 +
 +//===----------------------------------------------------------------------===//
 +//
@@ -39152,7 +39288,7 @@ index 000000000..71aef9476
 \ No newline at end of file
 diff --git a/llvm/include/llvm/Transforms/Scalar/CJGCLiveAnalysis.h b/llvm/include/llvm/Transforms/Scalar/CJGCLiveAnalysis.h
 new file mode 100644
-index 000000000..a0f3bb93a
+index 000000000..0a5eaa654
 --- /dev/null
 +++ b/llvm/include/llvm/Transforms/Scalar/CJGCLiveAnalysis.h
 @@ -0,0 +1,372 @@
@@ -39288,7 +39424,7 @@ index 000000000..a0f3bb93a
 +  }
 +};
 +
-+enum MemoryAccess {
++enum MemoryAccessKind {
 +  MemoryNone = 0,
 +  DefineMemory = 0b01,
 +  UseMemory = 0b10,
@@ -39439,7 +39575,7 @@ index 000000000..a0f3bb93a
 +  void visitMemorySelect(SelectInst *SI, SetVector<FieldInfo *> &AllocaDefs,
 +                         SetVector<FieldInfo *> &AllocaUses);
 +
-+  MemoryAccess hasMemoryDefineOrUseValue(Instruction *I,
++  MemoryAccessKind hasMemoryDefineOrUseValue(Instruction *I,
 +                                         SetVector<FieldInfo *> &AllocaDefs,
 +                                         SetVector<FieldInfo *> &AllocaUses);
 +
@@ -39602,6 +39738,55 @@ index 000000000..21f5e5b4c
 +
 +#endif // LLVM_TRANSFORMS_SCALAR_CJ_IR_VERIFIER_H
 \ No newline at end of file
+diff --git a/llvm/include/llvm/Transforms/Scalar/CJInsertRemoveLocalFinalizer.h b/llvm/include/llvm/Transforms/Scalar/CJInsertRemoveLocalFinalizer.h
+new file mode 100644
+index 000000000..550f97073
+--- /dev/null
++++ b/llvm/include/llvm/Transforms/Scalar/CJInsertRemoveLocalFinalizer.h
+@@ -0,0 +1,43 @@
++//===- CJInsertRemoveLocalFinalizer.h - -------------------------*- C++ -*-===//
++//
++// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
++// This source file is part of the Cangjie project, licensed under Apache-2.0
++// with Runtime Library Exception.
++//
++// See https://cangjie-lang.cn/pages/LICENSE for license information.
++//
++//===----------------------------------------------------------------------===//
++//
++// This file provides interface to the "Cangjie Insert Remove Local Finalizer"
++// pass.
++//
++// CJRuntimeLowering registers every LocalMode finalizer object with
++// CJ_MCC_AddLocalFinalizer. This pass pairs each such registration with a
++// CJ_MCC_RemoveLocalFinalizer call at the end of the object's live range, on
++// every control-flow path, exactly once.
++//
++// It must run before CJRewriteStatepoint: the Remove call is a potential
++// safepoint, so the statepoint rewriter has to see it in order to relocate the
++// object pointer it takes.
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef LLVM_TRANSFORMS_SCALAR_CJ_INSERT_REMOVE_LOCAL_FINALIZER_H
++#define LLVM_TRANSFORMS_SCALAR_CJ_INSERT_REMOVE_LOCAL_FINALIZER_H
++
++#include "llvm/IR/PassManager.h"
++
++namespace llvm {
++
++class Function;
++
++class CJInsertRemoveLocalFinalizer
++    : public PassInfoMixin<CJInsertRemoveLocalFinalizer> {
++public:
++  CJInsertRemoveLocalFinalizer() = default;
++  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
++};
++
++} // end namespace llvm
++
++#endif // LLVM_TRANSFORMS_SCALAR_CJ_INSERT_REMOVE_LOCAL_FINALIZER_H
 diff --git a/llvm/include/llvm/Transforms/Scalar/CJLoopFloatOpt.h b/llvm/include/llvm/Transforms/Scalar/CJLoopFloatOpt.h
 new file mode 100644
 index 000000000..bb8887869
@@ -41211,10 +41396,10 @@ index f8eba1a00..f6356240b 100644
  /// or unreachable). These paths are hidden if the corresponding cl::opts
 diff --git a/llvm/lib/Analysis/CJAliasAnalysis.cpp b/llvm/lib/Analysis/CJAliasAnalysis.cpp
 new file mode 100644
-index 000000000..ba63d66e1
+index 000000000..17ec2fbf4
 --- /dev/null
 +++ b/llvm/lib/Analysis/CJAliasAnalysis.cpp
-@@ -0,0 +1,325 @@
+@@ -0,0 +1,327 @@
 +//===- CJAliasAnalysis.cpp --------------------------------------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -41409,6 +41594,7 @@ index 000000000..ba63d66e1
 +    Base = MemoryLocation::getAfter(getBaseObj(II));
 +    break;
 +  case Intrinsic::cj_assign_generic:
++  case Intrinsic::cj_assign_local_generic:
 +    Src = MemoryLocation::getAfter(getSource(II));
 +    Dst = MemoryLocation::getAfter(getDest(II));
 +    break;
@@ -41475,7 +41661,8 @@ index 000000000..ba63d66e1
 +  case Intrinsic::cj_gcwrite_struct:
 +  case Intrinsic::cj_gcwrite_generic:
 +  case Intrinsic::cj_gcread_generic:
-+  case Intrinsic::cj_assign_generic: {
++  case Intrinsic::cj_assign_generic:
++  case Intrinsic::cj_assign_local_generic: {
 +    auto [LocS, LocD, LocB] =
 +        getLocInfoForCJIntrinsics(cast<IntrinsicInst>(Call), TLI);
 +    if (!LocS || !LocD)
@@ -44481,10 +44668,10 @@ index c3ca9c92b..81e8a7c55 100644
  
 diff --git a/llvm/lib/CodeGen/CJBarrierLowering.cpp b/llvm/lib/CodeGen/CJBarrierLowering.cpp
 new file mode 100644
-index 000000000..fa881f44d
+index 000000000..9c878ab33
 --- /dev/null
 +++ b/llvm/lib/CodeGen/CJBarrierLowering.cpp
-@@ -0,0 +1,1215 @@
+@@ -0,0 +1,1224 @@
 +//===-- GCBarrierLowering.cpp - Cangjie Barrier Lowering ------------------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -44567,6 +44754,7 @@ index 000000000..fa881f44d
 +    {Intrinsic::cj_atomic_swap, "CJ_MCC_AtomicSwapReference"},
 +    {Intrinsic::cj_atomic_compare_swap, "CJ_MCC_AtomicCompareAndSwapReference"},
 +    {Intrinsic::cj_assign_generic, "CJ_MCC_AssignGeneric"},
++    {Intrinsic::cj_assign_local_generic, "CJ_MCC_AssignLocalGeneric"},
 +    {Intrinsic::cj_gcwrite_generic, "CJ_MCC_WriteGeneric"},
 +    {Intrinsic::cj_gcread_generic, "CJ_MCC_ReadGeneric"},
 +    {Intrinsic::cj_array_copy_generic, "CJ_MCC_ArrayCopyGeneric"},
@@ -45561,6 +45749,7 @@ index 000000000..fa881f44d
 +  case Intrinsic::cj_array_copy_struct:
 +  case Intrinsic::cj_array_copy_generic:
 +  case Intrinsic::cj_assign_generic:
++  case Intrinsic::cj_assign_local_generic:
 +  case Intrinsic::cj_gcwrite_generic:
 +  case Intrinsic::cj_gcread_generic:
 +  case Intrinsic::cj_gcwrite_generic_payload:
@@ -45589,12 +45778,19 @@ index 000000000..fa881f44d
 +static bool doNewFastPath(Function &F, SetVector<GCStatepointInst *> &NewObjs) {
 +  if (CangjieJIT)
 +    return false;
++
 +  for (GCStatepointInst *CI : NewObjs) {
 +    Function *Callee = CI->getActualCalledFunction();
-+    if (Callee->getName().equals("CJ_MCC_NewObject")) {
++    if (Callee == nullptr)
++      continue;
++
++    StringRef CalleeName = Callee->getName();
++    if (CalleeName.equals("CJ_MCC_NewObject")) {
 +      replaceFastFunc(F, CI, NewObjFastStr);
-+    } else {
++    } else if (CalleeName.equals("CJ_MCC_NewFinalizer")) {
 +      replaceFastFunc(F, CI, NewObjFinalizerFastStr);
++    } else {
++      assert(false && "the unknown allocation function does not support fast path");
 +    }
 +  }
 +  return true;
@@ -46592,7 +46788,7 @@ index 000000000..3a18e4572
 +} // namespace llvm
 diff --git a/llvm/lib/CodeGen/CJStackPointerInserter.cpp b/llvm/lib/CodeGen/CJStackPointerInserter.cpp
 new file mode 100644
-index 000000000..4c4c305bf
+index 000000000..ac7580cbc
 --- /dev/null
 +++ b/llvm/lib/CodeGen/CJStackPointerInserter.cpp
 @@ -0,0 +1,963 @@
@@ -47164,8 +47360,8 @@ index 000000000..4c4c305bf
 +          insertLiveSet(LiveTmp, FI, Imm);
 +          continue;
 +        }
-+        assert(MFI.isStatepointSpillSlotObjectIndex(FI) &&
-+               "Unknown stack type");
++        // assert(MFI.isStatepointSpillSlotObjectIndex(FI) &&
++        //        "Unknown stack type");
 +        continue;
 +      }
 +
@@ -51850,7 +52046,7 @@ index 2badbe34a..a625ed651 100644
    // really emitted with the magic .comm directive, which creates a symbol table
    // entry but not a section.
 diff --git a/llvm/lib/CodeGen/TargetPassConfig.cpp b/llvm/lib/CodeGen/TargetPassConfig.cpp
-index 0bd229f4f..ec46d90f1 100644
+index 0bd229f4f..c8fee0c00 100644
 --- a/llvm/lib/CodeGen/TargetPassConfig.cpp
 +++ b/llvm/lib/CodeGen/TargetPassConfig.cpp
 @@ -53,6 +53,12 @@
@@ -51887,7 +52083,7 @@ index 0bd229f4f..ec46d90f1 100644
  /// Allow standard passes to be disabled by command line options. This supports
  /// simple binary flags that either suppress the pass or do nothing.
  /// i.e. -disable-mypass=false has no effect.
-@@ -1113,6 +1124,21 @@ bool TargetPassConfig::addISelPasses() {
+@@ -1113,6 +1124,24 @@ bool TargetPassConfig::addISelPasses() {
  
    addPass(createPreISelIntrinsicLoweringPass());
    PM->add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
@@ -51897,6 +52093,9 @@ index 0bd229f4f..ec46d90f1 100644
 +      addPass(createCJFillMetadataLegacyPass());
 +      addPass(createCJRuntimeLoweringLegacyPass());
 +      addPass(createCangjieSpecificOptLegacyPass(0));
++      // Must precede CJRewriteStatepoint: the Remove call is a potential
++      // safepoint, so the object pointer it takes has to be relocated.
++      addPass(createCJInsertRemoveLocalFinalizerLegacyPass());
 +      addPass(createPlaceSafepointsLegacyPass());
 +      addPass(createCJRewriteStatepointLegacyPass(0));
 +    }
@@ -51909,7 +52108,7 @@ index 0bd229f4f..ec46d90f1 100644
    addIRPasses();
    addCodeGenPrepare();
    addPassesToHandleExceptions();
-@@ -1191,6 +1217,9 @@ void TargetPassConfig::addMachinePasses() {
+@@ -1191,6 +1220,9 @@ void TargetPassConfig::addMachinePasses() {
    // Run post-ra passes.
    addPostRegAlloc();
  
@@ -52513,10 +52712,10 @@ index e9ef034c4..00225982c 100644
  void llvm::linkAllBuiltinGCs() {}
 diff --git a/llvm/lib/IR/CJIntrinsics.cpp b/llvm/lib/IR/CJIntrinsics.cpp
 new file mode 100644
-index 000000000..be12ae6d3
+index 000000000..ab8917dd5
 --- /dev/null
 +++ b/llvm/lib/IR/CJIntrinsics.cpp
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,160 @@
 +//===- CJIntrinsics.cpp - Cangjie Intrinsic Wrappers ------------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -52604,6 +52803,7 @@ index 000000000..be12ae6d3
 +  case Intrinsic::cj_gcread_generic:
 +    return CI->getArgOperand(GCReadGeneric::DstPtr);
 +  case Intrinsic::cj_assign_generic:
++  case Intrinsic::cj_assign_local_generic:
 +    return CI->getArgOperand(AssignGeneric::DstPtr);
 +  case Intrinsic::cj_array_copy_ref:
 +  case Intrinsic::cj_array_copy_struct:
@@ -52630,6 +52830,7 @@ index 000000000..be12ae6d3
 +  case Intrinsic::cj_gcread_generic:
 +    return CI->getArgOperand(GCReadGeneric::SrcPtr);
 +  case Intrinsic::cj_assign_generic:
++  case Intrinsic::cj_assign_local_generic:
 +    return CI->getArgOperand(AssignGeneric::SrcPtr);
 +  case Intrinsic::cj_array_copy_ref:
 +  case Intrinsic::cj_array_copy_struct:
@@ -55136,7 +55337,7 @@ index 703969f8b..c2992aa79 100644
    Coroutines
    IPO
 diff --git a/llvm/lib/Passes/PassBuilder.cpp b/llvm/lib/Passes/PassBuilder.cpp
-index 42fde3752..b32462b4d 100644
+index 42fde3752..383668e6e 100644
 --- a/llvm/lib/Passes/PassBuilder.cpp
 +++ b/llvm/lib/Passes/PassBuilder.cpp
 @@ -26,6 +26,7 @@
@@ -55179,7 +55380,7 @@ index 42fde3752..b32462b4d 100644
  #include "llvm/Transforms/IPO/ConstantMerge.h"
  #include "llvm/Transforms/IPO/CrossDSOCFI.h"
  #include "llvm/Transforms/IPO/DeadArgumentElimination.h"
-@@ -140,12 +145,35 @@
+@@ -140,12 +145,36 @@
  #include "llvm/Transforms/Instrumentation/PoisonChecking.h"
  #include "llvm/Transforms/Instrumentation/SanitizerCoverage.h"
  #include "llvm/Transforms/Instrumentation/ThreadSanitizer.h"
@@ -55204,6 +55405,7 @@ index 42fde3752..b32462b4d 100644
 +#include "llvm/Transforms/Scalar/CJLoopFloatOpt.h"
 +#include "llvm/Transforms/Scalar/CJRSSCE.h"
 +#include "llvm/Transforms/Scalar/CJExceptionTailOutline.h"
++#include "llvm/Transforms/Scalar/CJInsertRemoveLocalFinalizer.h"
 +#include "llvm/Transforms/Scalar/CJRuntimeLowering.h"
 +#include "llvm/Transforms/Scalar/CJRewriteStatepoint.h"
 +#include "llvm/Transforms/Scalar/CJSimpleRangeAnalysis.h"
@@ -55215,7 +55417,7 @@ index 42fde3752..b32462b4d 100644
  #include "llvm/Transforms/Scalar/ConstantHoisting.h"
  #include "llvm/Transforms/Scalar/ConstraintElimination.h"
  #include "llvm/Transforms/Scalar/CorrelatedValuePropagation.h"
-@@ -162,6 +190,7 @@
+@@ -162,6 +191,7 @@
  #include "llvm/Transforms/Scalar/IndVarSimplify.h"
  #include "llvm/Transforms/Scalar/InductiveRangeCheckElimination.h"
  #include "llvm/Transforms/Scalar/InferAddressSpaces.h"
@@ -55223,7 +55425,7 @@ index 42fde3752..b32462b4d 100644
  #include "llvm/Transforms/Scalar/InstSimplifyPass.h"
  #include "llvm/Transforms/Scalar/JumpThreading.h"
  #include "llvm/Transforms/Scalar/LICM.h"
-@@ -199,6 +228,7 @@
+@@ -199,6 +229,7 @@
  #include "llvm/Transforms/Scalar/NaryReassociate.h"
  #include "llvm/Transforms/Scalar/NewGVN.h"
  #include "llvm/Transforms/Scalar/PartiallyInlineLibCalls.h"
@@ -55231,7 +55433,7 @@ index 42fde3752..b32462b4d 100644
  #include "llvm/Transforms/Scalar/Reassociate.h"
  #include "llvm/Transforms/Scalar/Reg2Mem.h"
  #include "llvm/Transforms/Scalar/RewriteStatepointsForGC.h"
-@@ -251,14 +281,70 @@
+@@ -251,14 +282,70 @@
  
  using namespace llvm;
  
@@ -55302,7 +55504,7 @@ index 42fde3752..b32462b4d 100644
  } // namespace llvm
  
  namespace {
-@@ -1136,10 +1222,87 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
+@@ -1136,10 +1223,91 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
                                .Case("O3", OptimizationLevel::O3)
                                .Case("Os", OptimizationLevel::Os)
                                .Case("Oz", OptimizationLevel::Oz);
@@ -55370,6 +55572,10 @@ index 42fde3752..b32462b4d 100644
 +      if (CJPipeline && !CangjieLTOPreOpt) {
 +        MPM.addPass(CJSpecificOpt(L.getSpeedupLevel()));
 +        MPM.addPass(CJAnnotationOutline());
++        // Must precede CJRewriteStatepoint: the Remove call is a potential
++        // safepoint, so the object pointer it takes has to be relocated.
++        MPM.addPass(
++            createModuleToFunctionPassAdaptor(CJInsertRemoveLocalFinalizer()));
 +        MPM.addPass(PlaceSafepoints());
 +        MPM.addPass(CJBarrierOpt());
 +        MPM.addPass(CJRewriteStatepoint(L.getSpeedupLevel()));
@@ -55390,7 +55596,7 @@ index 42fde3752..b32462b4d 100644
        return Error::success();
      }
  
-@@ -1152,7 +1315,7 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
+@@ -1152,7 +1320,7 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
          L.getSpeedupLevel() > 1 && L != OptimizationLevel::Oz;
  
      if (Matches[1] == "default") {
@@ -55399,7 +55605,7 @@ index 42fde3752..b32462b4d 100644
      } else if (Matches[1] == "thinlto-pre-link") {
        MPM.addPass(buildThinLTOPreLinkDefaultPipeline(L));
      } else if (Matches[1] == "thinlto") {
-@@ -1163,6 +1326,7 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
+@@ -1163,6 +1331,7 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
        assert(Matches[1] == "lto" && "Not one of the matched options!");
        MPM.addPass(buildLTODefaultPipeline(L, nullptr));
      }
@@ -56058,7 +56264,7 @@ index 945ef5123..e4e9e9009 100644
    // Because the `AAManager` is a function analysis and `GlobalsAA` is a module
    // analysis, all that the `AAManager` can do is query for any *cached*
 diff --git a/llvm/lib/Passes/PassRegistry.def b/llvm/lib/Passes/PassRegistry.def
-index 7c29bffbc..3c8501750 100644
+index 7c29bffbc..deb161ee7 100644
 --- a/llvm/lib/Passes/PassRegistry.def
 +++ b/llvm/lib/Passes/PassRegistry.def
 @@ -28,6 +28,7 @@ MODULE_ANALYSIS("verify", VerifierAnalysis())
@@ -56133,7 +56339,7 @@ index 7c29bffbc..3c8501750 100644
  FUNCTION_PASS("dot-dom", DomPrinter())
  FUNCTION_PASS("dot-dom-only", DomOnlyPrinter())
  FUNCTION_PASS("dot-post-dom", PostDomPrinter())
-@@ -378,10 +401,21 @@ FUNCTION_PASS("verify<safepoint-ir>", SafepointIRVerifierPass())
+@@ -378,10 +401,22 @@ FUNCTION_PASS("verify<safepoint-ir>", SafepointIRVerifierPass())
  FUNCTION_PASS("verify<scalar-evolution>", ScalarEvolutionVerifierPass())
  FUNCTION_PASS("view-cfg", CFGViewerPass())
  FUNCTION_PASS("view-cfg-only", CFGOnlyViewerPass())
@@ -56143,6 +56349,7 @@ index 7c29bffbc..3c8501750 100644
  FUNCTION_PASS("tsan", ThreadSanitizerPass())
  FUNCTION_PASS("memprof", MemProfilerPass())
 +FUNCTION_PASS("cj-generic-intrinsic-opt", CJGenericIntrinsicOpt())
++FUNCTION_PASS("cj-insert-remove-local-finalizer", CJInsertRemoveLocalFinalizer())
 +FUNCTION_PASS("insert-cj-tbaa", InsertCJTBAA())
 +FUNCTION_PASS("cj-gcinstr-replace", CJGCInstrReplace())
 +FUNCTION_PASS("cj-gcinstr-restore", CJGCInstrRestore())
@@ -61515,10 +61722,10 @@ index 8c77b6937..4e65ed2e2 100644
        F->addParamAttr(ArgNo, Attribute::NoAlias);
 diff --git a/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp b/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp
 new file mode 100644
-index 000000000..5f13501d2
+index 000000000..56a3c3201
 --- /dev/null
 +++ b/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp
-@@ -0,0 +1,4311 @@
+@@ -0,0 +1,4312 @@
 +//===- CJPartialEscapeAnalysis.cpp - escape analysis for Cangjie ----------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -63805,6 +64012,7 @@ index 000000000..5f13501d2
 +        return true;
 +      case Intrinsic::cj_gcwrite_static_struct:
 +      case Intrinsic::cj_assign_generic:
++      case Intrinsic::cj_assign_local_generic:
 +      case Intrinsic::cj_copy_struct_field:
 +        handleGCWriteAgg(II, true);
 +        return true;
@@ -67135,7 +67343,7 @@ index b850591b4..da4c027b7 100644
        LLVM_DEBUG(dbgs() << "canCreateThunkFor: " << F->getName()
                          << " is too small to bother creating a thunk for\n");
 diff --git a/llvm/lib/Transforms/IPO/PassManagerBuilder.cpp b/llvm/lib/Transforms/IPO/PassManagerBuilder.cpp
-index f1b6f2bb7..eb6a58c34 100644
+index f1b6f2bb7..8be05d1d3 100644
 --- a/llvm/lib/Transforms/IPO/PassManagerBuilder.cpp
 +++ b/llvm/lib/Transforms/IPO/PassManagerBuilder.cpp
 @@ -17,6 +17,7 @@
@@ -67246,7 +67454,7 @@ index f1b6f2bb7..eb6a58c34 100644
    // We resume loop passes creating a second loop pipeline here.
    if (EnableLoopFlatten) {
      MPM.add(createLoopFlattenPass()); // Flatten loops
-@@ -575,6 +601,33 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
+@@ -575,6 +601,36 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
  
  void PassManagerBuilder::populateModulePassManager(
      legacy::PassManagerBase &MPM) {
@@ -67273,6 +67481,9 @@ index f1b6f2bb7..eb6a58c34 100644
 +  auto addCangjiePasses = [&]() {
 +    if (CJPipeline) {
 +      MPM.add(createCangjieSpecificOptLegacyPass(OptLevel));
++      // Must precede CJRewriteStatepoint: the Remove call is a potential
++      // safepoint, so the object pointer it takes has to be relocated.
++      MPM.add(createCJInsertRemoveLocalFinalizerLegacyPass());
 +      MPM.add(createPlaceSafepointsLegacyPass());
 +      MPM.add(createCJRewriteStatepointLegacyPass(OptLevel));
 +    }
@@ -67280,7 +67491,7 @@ index f1b6f2bb7..eb6a58c34 100644
    MPM.add(createAnnotation2MetadataLegacyPass());
  
    // Allow forcing function attributes as a debugging and tuning aid.
-@@ -601,6 +654,7 @@ void PassManagerBuilder::populateModulePassManager(
+@@ -601,6 +657,7 @@ void PassManagerBuilder::populateModulePassManager(
      addExtensionsToPM(EP_EnabledOnOptLevel0, MPM);
  
      MPM.add(createAnnotationRemarksLegacyPass());
@@ -67288,7 +67499,7 @@ index f1b6f2bb7..eb6a58c34 100644
      return;
    }
  
-@@ -655,6 +709,11 @@ void PassManagerBuilder::populateModulePassManager(
+@@ -655,6 +712,11 @@ void PassManagerBuilder::populateModulePassManager(
      RunInliner = true;
    }
  
@@ -67300,7 +67511,7 @@ index f1b6f2bb7..eb6a58c34 100644
    // Infer attributes on declarations, call sites, arguments, etc. for an SCC.
    if (AttributorRun & AttributorRunOption::CGSCC)
      MPM.add(createAttributorCGSCCLegacyPass());
-@@ -798,6 +857,7 @@ void PassManagerBuilder::populateModulePassManager(
+@@ -798,6 +860,7 @@ void PassManagerBuilder::populateModulePassManager(
    addExtensionsToPM(EP_OptimizerLast, MPM);
  
    MPM.add(createAnnotationRemarksLegacyPass());
@@ -67583,7 +67794,7 @@ index 90a796a09..3a74a600a 100644
  
    for (unsigned ID : KnownIDs)
 diff --git a/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp b/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp
-index 71c763de4..a6150137f 100644
+index 71c763de4..56fa4217d 100644
 --- a/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp
 +++ b/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp
 @@ -167,6 +167,10 @@ MaxArraySize("instcombine-maxarray-size", cl::init(1024),
@@ -67615,7 +67826,7 @@ index 71c763de4..a6150137f 100644
              Users.emplace_back(I);
              continue;
            case Intrinsic::launder_invariant_group:
-@@ -2793,6 +2799,28 @@ static bool isAllocSiteRemovable(Instruction *AI,
+@@ -2793,6 +2799,29 @@ static bool isAllocSiteRemovable(Instruction *AI,
              Users.emplace_back(I);
              Worklist.push_back(I);
              continue;
@@ -67637,6 +67848,7 @@ index 71c763de4..a6150137f 100644
 +            Users.emplace_back(I);
 +            continue;
 +          case Intrinsic::cj_assign_generic:
++          case Intrinsic::cj_assign_local_generic:
 +            if (II->getArgOperand(1) == PI)
 +              return false;
 +            Users.emplace_back(I);
@@ -67644,7 +67856,7 @@ index 71c763de4..a6150137f 100644
            }
          }
  
-@@ -3403,9 +3431,6 @@ static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
+@@ -3403,9 +3432,6 @@ static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
    case EHPersonality::GNU_C:
    case EHPersonality::GNU_C_SjLj:
    case EHPersonality::Rust:
@@ -67654,7 +67866,7 @@ index 71c763de4..a6150137f 100644
    case EHPersonality::Unknown:
      return false;
    case EHPersonality::GNU_Ada:
-@@ -3886,7 +3911,7 @@ bool InstCombinerImpl::freezeOtherUses(FreezeInst &FI) {
+@@ -3886,7 +3912,7 @@ bool InstCombinerImpl::freezeOtherUses(FreezeInst &FI) {
      while (isa<AllocaInst>(MoveBefore))
        MoveBefore = MoveBefore->getNextNode();
    } else if (auto *PN = dyn_cast<PHINode>(Op)) {
@@ -67663,7 +67875,7 @@ index 71c763de4..a6150137f 100644
    } else if (auto *II = dyn_cast<InvokeInst>(Op)) {
      MoveBefore = II->getNormalDest()->getFirstNonPHI();
    } else if (auto *CB = dyn_cast<CallBrInst>(Op)) {
-@@ -4389,6 +4414,16 @@ public:
+@@ -4389,6 +4415,16 @@ public:
    }
  };
  
@@ -67680,7 +67892,7 @@ index 71c763de4..a6150137f 100644
  /// Populate the IC worklist from a function, by walking it in depth-first
  /// order and adding all reachable code to the worklist.
  ///
-@@ -4421,6 +4456,15 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
+@@ -4421,6 +4457,15 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
        if (!Inst.use_empty() &&
            (Inst.getNumOperands() == 0 || isa<Constant>(Inst.getOperand(0))))
          if (Constant *C = ConstantFoldInstruction(&Inst, DL, TLI)) {
@@ -73617,10 +73829,10 @@ index 000000000..f55d9b667
 +                "Cangjie Barriers Split", false, false)
 diff --git a/llvm/lib/Transforms/Scalar/CJDevirtualOpt.cpp b/llvm/lib/Transforms/Scalar/CJDevirtualOpt.cpp
 new file mode 100644
-index 000000000..9b2a99555
+index 000000000..7345f9a51
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJDevirtualOpt.cpp
-@@ -0,0 +1,497 @@
+@@ -0,0 +1,526 @@
 +//===- CJDevirtualOpt.cpp - -------------------------------------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -73788,122 +74000,145 @@ index 000000000..9b2a99555
 +  return M->getGlobalVariable(ExtensionDefName, true);
 +}
 +
-+static bool isSubType(GlobalVariable *Klass0, GlobalVariable *Klass1) {
++// Result of the subtype inference that is done at compile time. `Unknown` means
++// that the relation can not be decided from the type info metadata that is
++// visible in this module, e.g. when a type info is declared in another module.
++// `Unknown` must never be folded, otherwise the runtime subtype check would be
++// replaced by a wrong answer, while `NotSubType` is a definitive answer.
++enum class SubTypeResult { SubType, NotSubType, Unknown };
++
++static SubTypeResult isSubType(GlobalVariable *Klass0, GlobalVariable *Klass1) {
 +  if (Klass0 == nullptr)
-+    return false;
++    return SubTypeResult::NotSubType;
 +
 +  if (Klass0 == Klass1)
-+    return true;
++    return SubTypeResult::SubType;
++
++  // The type info is declared in another module, its kind, fields, type args
++  // and super class are not available here.
++  if (!Klass0->hasInitializer() || !Klass1->hasInitializer())
++    return SubTypeResult::Unknown;
 +
 +  TypeInfo K0(Klass0);
 +  TypeInfo K1(Klass1);
++
++  // An interface involved in a nested comparison (function parameter/return
++  // type, tuple field, ...) can not be decided here: it depends on the
++  // extension data of the source type, which is only consulted by
++  // `tryInferSubType` for the subtype check itself. Returning `Unknown` keeps
++  // the runtime check instead of aborting or folding a wrong answer.
++  if (K0.isInterface() || K1.isInterface())
++    return SubTypeResult::Unknown;
++
 +  switch (K0.Kind) {
 +  case TK_NOTHING:
-+    return true;
++    return SubTypeResult::SubType;
 +  case TK_TUPLE: {
 +    if (!K1.isTuple())
-+      return false;
++      return SubTypeResult::NotSubType;
 +
 +    unsigned K0FieldNum = K0.getFieldNum();
 +    unsigned K1FieldNum = K1.getFieldNum();
 +    if (K0FieldNum != K1FieldNum)
-+      return false;
++      return SubTypeResult::NotSubType;
 +
 +    for (unsigned i = 0; i < K0FieldNum; ++i) {
-+      if (!K0.getField(i)->hasInitializer() ||
-+          !K1.getField(i)->hasInitializer()) {
-+        return false;
-+      }
-+      if (!isSubType(K0.getField(i), K1.getField(i))) {
-+        return false;
-+      }
++      SubTypeResult Result = isSubType(K0.getField(i), K1.getField(i));
++      if (Result != SubTypeResult::SubType)
++        return Result;
 +    }
-+    return true;
++    return SubTypeResult::SubType;
 +  }
 +  case TK_FUNC: {
 +    report_fatal_error("Should not reach here.");
-+    return false;
++    return SubTypeResult::NotSubType;
 +  }
 +  case TK_CFUNC: {
 +    if (K1.Kind != TK_CFUNC)
-+      return false;
++      return SubTypeResult::NotSubType;
 +
 +    unsigned TypeArgNum = K0.getTypeArgNum();
 +    if (TypeArgNum != K1.getTypeArgNum())
-+      return false;
++      return SubTypeResult::NotSubType;
 +
 +    assert(TypeArgNum > 0 &&
 +           "The number of the function type arg should be more than 0.");
 +
 +    // Note: the first of TypeArgs is the return type.
 +    constexpr unsigned ReturnTypeIdx = 0;
-+    if (!isSubType(K0.getTypeArg(ReturnTypeIdx), K1.getTypeArg(ReturnTypeIdx)))
-+      return false;
++    SubTypeResult Result =
++        isSubType(K0.getTypeArg(ReturnTypeIdx), K1.getTypeArg(ReturnTypeIdx));
++    if (Result != SubTypeResult::SubType)
++      return Result;
 +
++    // Note: the parameter type of a function is contra-variant.
 +    for (unsigned i = ReturnTypeIdx + 1; i < TypeArgNum; ++i) {
-+      GlobalVariable *Arg1 = K1.getTypeArg(i);
-+      GlobalVariable *Arg0 = K0.getTypeArg(i);
-+      if (!Arg1->hasInitializer() || !Arg0->hasInitializer()) {
-+        return false;
-+      }
-+      if (!isSubType(Arg1, Arg0)) {
-+        return false;
-+      }
++      Result = isSubType(K1.getTypeArg(i), K0.getTypeArg(i));
++      if (Result != SubTypeResult::SubType)
++        return Result;
 +    }
-+    return true;
++    return SubTypeResult::SubType;
 +  }
 +  case TK_RAWARRAY:
 +    // The array type has no subtype relationship.
-+    return false;
++    return SubTypeResult::NotSubType;
 +  case TK_CLASS:
 +  case TK_TEMP_ENUM: {
 +    if (!K1.isClass())
-+      return false;
++      return SubTypeResult::NotSubType;
 +
 +    GlobalVariable *SuperKlass = K0.getSuperOrComponent();
 +    while (SuperKlass != nullptr) {
 +      if (SuperKlass == Klass1)
-+        return true;
++        return SubTypeResult::SubType;
 +
 +      if (!SuperKlass->hasInitializer())
-+        return false;
++        return SubTypeResult::Unknown;
 +
 +      TypeInfo Super(SuperKlass);
 +      SuperKlass = Super.getSuperOrComponent();
 +    }
-+    return false;
++    return SubTypeResult::NotSubType;
 +  }
 +  default:
 +    if (K0.isInterface() || K1.isInterface())
 +      report_fatal_error("The interface type is processed in subtype.!");
 +
-+    return false;
++    return SubTypeResult::NotSubType;
 +  }
-+  return false;
++  return SubTypeResult::NotSubType;
 +}
 +
-+// Reture true if K0 is subtype of K1, otherwise, return false.
-+static bool isFunctionSubType(TypeInfo &K0, TypeInfo &K1) {
++// Return Yes if K0 is a subtype of K1, No if it is not, and Unknown if the
++// relation can not be decided from the metadata visible here.
++static SubTypeResult isFunctionSubType(TypeInfo &K0, TypeInfo &K1) {
 +  // The function type information is stored in the `SuperClass`
 +  // of the closure instance. Therefore, having SuperClass and
 +  // SuperClass->IsFunc are prerequisites for the instance to be
 +  // of the function type.
 +  auto Super = K0.getSuperOrComponent();
 +  if (!Super)
-+    return false;
++    return SubTypeResult::NotSubType;
++
++  // The super class can be declared in another module, then its content is
++  // unknown here.
++  if (!Super->hasInitializer())
++    return SubTypeResult::Unknown;
 +
 +  TypeInfo SuperTI(Super);
 +  if (!SuperTI.isFunction())
-+    return false;
++    return SubTypeResult::NotSubType;
 +
 +  // Now, `SuperTI` and `K1` both are Closure type.
 +  // Get function type from Closure type, i.e., typeArgs[0]:
-+  K0.resetTypeInfo(SuperTI.getTypeArg(0));
-+  K1.resetTypeInfo(K1.getTypeArg(0));
++  GlobalVariable *K0FuncTI = SuperTI.getTypeArg(0);
++  GlobalVariable *K1FuncTI = K1.getTypeArg(0);
++  K0.resetTypeInfo(K0FuncTI);
++  K1.resetTypeInfo(K1FuncTI);
 +  // In addition, it is necessary to have the same number of TypeArgNum.
 +  unsigned TypeArgNum = K0.getTypeArgNum();
 +  if (TypeArgNum != K1.getTypeArgNum())
-+    return false;
++    return SubTypeResult::NotSubType;
 +
 +  return isSubType(K0.GV, K1.GV);
 +}
@@ -73931,7 +74166,7 @@ index 000000000..9b2a99555
 +
 +    TypeInfo K0(Klass0);
 +    TypeInfo K1(Klass1);
-+    bool Result = true;
++    SubTypeResult Result = SubTypeResult::SubType;
 +    if (K0.isInterface() || K1.isInterface()) {
 +      // If it find the extensionDef of klass, the subType is true.
 +      // Otherwise, the subtype is unknown.
@@ -73949,7 +74184,13 @@ index 000000000..9b2a99555
 +      Result = isSubType(Klass0, Klass1);
 +    }
 +
-+    replaceIsSubType(CI, Result);
++    // A relation that could not be decided from the metadata must keep the
++    // runtime subtype check, otherwise -O2 would replace it with a wrong
++    // answer.
++    if (Result == SubTypeResult::Unknown)
++      continue;
++
++    replaceIsSubType(CI, Result == SubTypeResult::SubType);
 +    Changed = true;
 +  }
 +  return Changed;
@@ -76955,7 +77196,7 @@ index 000000000..331d379b7
 \ No newline at end of file
 diff --git a/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp b/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp
 new file mode 100644
-index 000000000..06c897416
+index 000000000..a02db68c3
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp
 @@ -0,0 +1,1487 @@
@@ -77766,7 +78007,7 @@ index 000000000..06c897416
 +    SetVector<FieldInfo *> MemDefSet;
 +    SetVector<FieldInfo *> MemUseSet;
 +
-+    MemoryAccess Status = hasMemoryDefineOrUseValue(&I, MemDefSet, MemUseSet);
++    MemoryAccessKind Status = hasMemoryDefineOrUseValue(&I, MemDefSet, MemUseSet);
 +    if (Status & DefineMemory) {
 +      KillSet.set_union(MemDefSet);
 +    }
@@ -78242,7 +78483,7 @@ index 000000000..06c897416
 +
 +// If it is an instruction that contains the memory parameter, then handles
 +// use and define values according to the instruction type.
-+MemoryAccess StructLiveAnalysis::hasMemoryDefineOrUseValue(
++MemoryAccessKind StructLiveAnalysis::hasMemoryDefineOrUseValue(
 +    Instruction *I, SetVector<FieldInfo *> &AllocaDefs,
 +    SetVector<FieldInfo *> &AllocaUses) {
 +  // For each memory instruction, identifies and processes use and define,
@@ -78273,7 +78514,7 @@ index 000000000..06c897416
 +    Status |= static_cast<int>(DefineMemory);
 +  if (!AllocaUses.empty())
 +    Status |= static_cast<int>(UseMemory);
-+  return static_cast<MemoryAccess>(Status);
++  return static_cast<MemoryAccessKind>(Status);
 +}
 +
 +void StructLiveAnalysis::combineStructGCField(StructLiveSetTy &FieldInfos,
@@ -79361,10 +79602,10 @@ index 000000000..0f54f788e
 +                "Cangjie Generic Intrinsics Optimize", false, false)
 diff --git a/llvm/lib/Transforms/Scalar/CJIRVerifier.cpp b/llvm/lib/Transforms/Scalar/CJIRVerifier.cpp
 new file mode 100644
-index 000000000..e45592c18
+index 000000000..89d1bab14
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJIRVerifier.cpp
-@@ -0,0 +1,824 @@
+@@ -0,0 +1,826 @@
 +//===- CJIRVerifier.cpp - Cangjie IR Verifier --------------*- C++ -*------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -79652,6 +79893,7 @@ index 000000000..e45592c18
 +        break;
 +      case Intrinsic::cj_gc_statepoint:
 +      case Intrinsic::cj_malloc_object:
++      case Intrinsic::cj_malloc_local_object:
 +      case Intrinsic::cj_malloc_array:
 +      case Intrinsic::cj_malloc_array_generic:
 +      case Intrinsic::cj_division_check_sdiv:
@@ -79660,6 +79902,7 @@ index 000000000..e45592c18
 +      case Intrinsic::cj_division_check_urem:
 +      case Intrinsic::cj_throw_exception:
 +      case Intrinsic::cj_alloca_generic:
++      case Intrinsic::cj_alloca_local_generic:
 +        break;
 +      }
 +    }
@@ -80189,6 +80432,523 @@ index 000000000..e45592c18
 +  }
 +  return PreservedAnalyses::all();
 +}
+diff --git a/llvm/lib/Transforms/Scalar/CJInsertRemoveLocalFinalizer.cpp b/llvm/lib/Transforms/Scalar/CJInsertRemoveLocalFinalizer.cpp
+new file mode 100644
+index 000000000..004cf71c8
+--- /dev/null
++++ b/llvm/lib/Transforms/Scalar/CJInsertRemoveLocalFinalizer.cpp
+@@ -0,0 +1,511 @@
++//===- CJInsertRemoveLocalFinalizer.cpp - ---------------------------------===//
++//
++// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
++// This source file is part of the Cangjie project, licensed under Apache-2.0
++// with Runtime Library Exception.
++//
++// See https://cangjie-lang.cn/pages/LICENSE for license information.
++//
++//===----------------------------------------------------------------------===//
++//
++// Pair every CJ_MCC_AddLocalFinalizer with a CJ_MCC_RemoveLocalFinalizer at the
++// end of the object's live range, on every control-flow path, exactly once.
++//
++// "Right after the last use" is not that point: a path that never uses the
++// object (the other arm of a branch, a landing pad, a loop exit) has no last
++// use at all, and a use reached from several paths would be unregistered
++// several times.
++//
++// The point we want is the dead-out frontier of the object's live range.
++// Liveness is closed under predecessors -- if a value is live at p it is live
++// at every point from which p is reachable -- so the live range is left exactly
++// once on every path, and inserting at the frontier gives exactly one Remove
++// per path:
++//
++//   * block-internal death: no representative is live out of B
++//       -> insert after the last point in B that defines or uses one;
++//   * edge death: some representative is live out of B, but none is live on the
++//     edge B -> S
++//       -> insert on that edge, splitting it when it is critical.
++//
++// A "representative" is any SSA value that keeps the object alive: the object
++// itself, everything derived from it by bitcast / addrspacecast / GEP / select
++// / phi, and -- to bridge the store->load round trip through a local variable
++// -- the address of every stack slot it is stored into plus every value loaded
++// from such a slot. Including the slot address is what keeps the live range
++// connected across memory: without it the object would look dead right after
++// the store.
++//
++// If the object reaches memory we cannot see through (a heap field, a slot
++// whose address escapes), no Remove is emitted for it at all. Leaking a
++// registration is far less harmful than unregistering an object that is still
++// reachable.
++//
++// The pass keys off the CJ_MCC_AddLocalFinalizer calls rather than off the
++// allocation: after CJRuntimeLowering both heap and local finalizer objects are
++// produced by CJ_MCC_NewFinalizer, so the Add call is the only thing that still
++// tells the two apart.
++//
++//===----------------------------------------------------------------------===//
++
++#include "llvm/Transforms/Scalar/CJInsertRemoveLocalFinalizer.h"
++
++#include "llvm/ADT/MapVector.h"
++#include "llvm/ADT/STLExtras.h"
++#include "llvm/ADT/SetVector.h"
++#include "llvm/ADT/SmallPtrSet.h"
++#include "llvm/ADT/SmallVector.h"
++#include "llvm/Analysis/ValueTracking.h"
++#include "llvm/IR/BasicBlock.h"
++#include "llvm/IR/CFG.h"
++#include "llvm/IR/Dominators.h"
++#include "llvm/IR/Function.h"
++#include "llvm/IR/IRBuilder.h"
++#include "llvm/IR/InstIterator.h"
++#include "llvm/IR/IntrinsicInst.h"
++#include "llvm/IR/Module.h"
++#include "llvm/InitializePasses.h"
++#include "llvm/Pass.h"
++#include "llvm/Support/Debug.h"
++#include "llvm/Transforms/Scalar.h"
++#include "llvm/Transforms/Utils/BasicBlockUtils.h"
++
++#define DEBUG_TYPE "cj-insert-remove-local-finalizer"
++
++using namespace llvm;
++
++namespace {
++
++const char AddLocalFinalizerName[] = "CJ_MCC_AddLocalFinalizer";
++const char RemoveLocalFinalizerName[] = "CJ_MCC_RemoveLocalFinalizer";
++
++using RepSet = SmallPtrSet<Value *, 8>;
++using BlockSets = DenseMap<const BasicBlock *, RepSet>;
++using Edge = std::pair<BasicBlock *, BasicBlock *>;
++
++// Walk the address chain of \p AI. Returns false if the slot is used in any way
++// other than loading/storing through it, which would let its contents flow
++// somewhere we cannot follow. On success \p Addrs receives the alloca and every
++// cast/GEP of it, so that touching the slot counts as keeping the object alive.
++bool collectSlotAddresses(AllocaInst *AI, SmallPtrSetImpl<Value *> &Addrs) {
++  SmallVector<Value *> Worklist{AI};
++  Addrs.insert(AI);
++  while (!Worklist.empty()) {
++    Value *V = Worklist.pop_back_val();
++    for (User *U : V->users()) {
++      if (auto *LI = dyn_cast<LoadInst>(U)) {
++        if (LI->getPointerOperand() != V)
++          return false;
++      } else if (auto *SI = dyn_cast<StoreInst>(U)) {
++        // Storing through the slot is fine; storing the slot's own address
++        // somewhere else is not.
++        if (SI->getPointerOperand() != V)
++          return false;
++      } else if (isa<BitCastInst>(U) || isa<AddrSpaceCastInst>(U) ||
++                 isa<GetElementPtrInst>(U)) {
++        if (Addrs.insert(U).second)
++          Worklist.push_back(U);
++      } else if (auto *II = dyn_cast<IntrinsicInst>(U)) {
++        Intrinsic::ID ID = II->getIntrinsicID();
++        if (ID != Intrinsic::lifetime_start && ID != Intrinsic::lifetime_end &&
++            !isa<DbgInfoIntrinsic>(II))
++          return false;
++      } else {
++        return false;
++      }
++    }
++  }
++  return true;
++}
++
++// Collect every value that keeps \p Obj alive into \p Reps. Returns false if the
++// object escapes into memory that cannot be tracked, in which case no Remove may
++// be emitted for it.
++bool collectRepresentatives(Value *Obj, ArrayRef<LoadInst *> AllLoads,
++                            RepSet &Reps) {
++  SmallVector<Value *> Worklist;
++  SmallPtrSet<AllocaInst *, 4> Slots;
++  auto AddRep = [&](Value *V) {
++    if (Reps.insert(V).second)
++      Worklist.push_back(V);
++  };
++  AddRep(Obj);
++  while (!Worklist.empty()) {
++    Value *V = Worklist.pop_back_val();
++    for (User *U : V->users()) {
++      if (auto *SI = dyn_cast<StoreInst>(U)) {
++        if (SI->getValueOperand() != V)
++          continue; // V is only the destination, that is a plain use
++        auto *AI =
++            dyn_cast<AllocaInst>(getUnderlyingObject(SI->getPointerOperand()));
++        if (AI == nullptr)
++          return false; // stored into memory we do not own
++        if (!Slots.insert(AI).second)
++          continue;
++        SmallPtrSet<Value *, 8> Addrs;
++        if (!collectSlotAddresses(AI, Addrs))
++          return false; // the slot's contents can escape
++        for (Value *Addr : Addrs)
++          Reps.insert(Addr);
++        // Anything ever loaded from this slot may be the object.
++        for (LoadInst *LI : AllLoads)
++          if (Addrs.count(LI->getPointerOperand()))
++            AddRep(LI);
++        continue;
++      }
++      if (isa<BitCastInst>(U) || isa<AddrSpaceCastInst>(U) ||
++          isa<GetElementPtrInst>(U) || isa<SelectInst>(U) || isa<PHINode>(U))
++        AddRep(U);
++    }
++  }
++  return true;
++}
++
++// Backward liveness dataflow restricted to \p Reps. A value used by a phi is
++// live on the incoming edge rather than in the phi's own block, so those uses
++// seed the predecessor's live-out set instead of the block's use set.
++//
++// A representative phi additionally seeds *every* incoming edge, not just the
++// ones whose incoming value is itself a representative. Such a phi defines a
++// representative in the middle of the live range, which would otherwise be a
++// second entry into it: a path entering through the phi's other operand would
++// leave the range twice and unregister the object twice. Extending the range
++// back over all incoming edges keeps it single-entry, so it is still left
++// exactly once on every path.
++void computeRepLiveness(Function &F, const RepSet &Reps, BlockSets &Defs,
++                        BlockSets &LiveIn, BlockSets &LiveOut) {
++  BlockSets UpExposed;
++  for (BasicBlock &BB : F) {
++    RepSet &Def = Defs[&BB];
++    RepSet &Up = UpExposed[&BB];
++    for (Instruction &I : reverse(BB)) {
++      if (Reps.count(&I)) {
++        Def.insert(&I);
++        Up.erase(&I);
++      }
++      if (isa<PHINode>(I))
++        continue;
++      for (Value *Op : I.operands())
++        if (Reps.count(Op))
++          Up.insert(Op);
++    }
++    RepSet &Out = LiveOut[&BB];
++    for (BasicBlock *Succ : successors(&BB))
++      for (PHINode &PN : Succ->phis()) {
++        if (Reps.count(&PN))
++          Out.insert(&PN);
++        Value *V = PN.getIncomingValueForBlock(&BB);
++        if (Reps.count(V))
++          Out.insert(V);
++      }
++    LiveIn[&BB] = Up;
++  }
++
++  SmallSetVector<BasicBlock *, 32> Worklist;
++  for (BasicBlock &BB : F)
++    Worklist.insert(&BB);
++  while (!Worklist.empty()) {
++    BasicBlock *BB = Worklist.pop_back_val();
++    RepSet &Out = LiveOut[BB];
++    for (BasicBlock *Succ : successors(BB))
++      Out.insert(LiveIn[Succ].begin(), LiveIn[Succ].end());
++    RepSet &In = LiveIn[BB];
++    const size_t OldSize = In.size();
++    for (Value *V : Out)
++      if (!Defs[BB].count(V))
++        In.insert(V);
++    if (In.size() != OldSize)
++      for (BasicBlock *Pred : predecessors(BB))
++        Worklist.insert(Pred);
++  }
++}
++
++class LocalFinalizerRemover {
++public:
++  LocalFinalizerRemover(Function &F, DominatorTree &DT)
++      : F(F), DT(DT), Bdr(F.getContext()) {}
++
++  bool run();
++
++private:
++  void process(Instruction *Obj);
++  void emitRemove(Value *Obj, const DebugLoc &DL);
++  void emitRemoveAfter(Value *Obj, Instruction *After);
++  void emitRemoveOnEdges(Value *Obj, ArrayRef<Edge> DeadEdges);
++
++  Function &F;
++  DominatorTree &DT;
++  IRBuilder<> Bdr;
++  Function *RemoveFunc = nullptr;
++  SmallVector<LoadInst *> AllLoads;
++};
++
++void LocalFinalizerRemover::emitRemove(Value *Obj, const DebugLoc &DL) {
++  Value *Arg = Bdr.CreatePointerBitCastOrAddrSpaceCast(
++      Obj, RemoveFunc->getFunctionType()->getParamType(0));
++  Bdr.CreateCall(RemoveFunc, {Arg})->setDebugLoc(DL);
++}
++
++// Insert the Remove call directly after \p After. A run of phi nodes must stay
++// contiguous at the top of its block, so a phi is not inserted after but
++// skipped past.
++void LocalFinalizerRemover::emitRemoveAfter(Value *Obj, Instruction *After) {
++  BasicBlock *BB = After->getParent();
++  BasicBlock::iterator IP = isa<PHINode>(After)
++                                ? BB->getFirstInsertionPt()
++                                : std::next(After->getIterator());
++  Bdr.SetInsertPoint(BB, IP);
++  emitRemove(Obj, After->getDebugLoc());
++}
++
++// Insert one Remove call on each of \p DeadEdges. Placing the call on the edge
++// rather than at the top of the successor is what keeps a shared successor (a
++// landing pad reached from several invokes, a merge block) from getting one
++// call per incoming edge, and what keeps the object's definition dominating the
++// call.
++void LocalFinalizerRemover::emitRemoveOnEdges(Value *Obj,
++                                              ArrayRef<Edge> DeadEdges) {
++  const DebugLoc DL = cast<Instruction>(Obj)->getDebugLoc();
++
++  MapVector<BasicBlock *, SmallSetVector<BasicBlock *, 2>> BySucc;
++  for (const Edge &E : DeadEdges)
++    BySucc[E.second].insert(E.first);
++
++  for (auto &KV : BySucc) {
++    BasicBlock *Succ = KV.first;
++    // When every edge into Succ is dead the call belongs in Succ itself: no
++    // path reaches Succ with the object still live, and no edge needs a split.
++    // This is the common shape for a landing pad shared by invokes that all
++    // consume the object.
++    SmallPtrSet<BasicBlock *, 4> AllPreds(pred_begin(Succ), pred_end(Succ));
++    if (KV.second.size() == AllPreds.size()) {
++      Bdr.SetInsertPoint(Succ, Succ->getFirstInsertionPt());
++      emitRemove(Obj, DL);
++      continue;
++    }
++    for (BasicBlock *Pred : KV.second) {
++      Instruction *TI = Pred->getTerminator();
++      if (TI->getNumSuccessors() == 1) {
++        // Not a critical edge, and a single-successor terminator cannot be
++        // consuming the object itself.
++        Bdr.SetInsertPoint(TI);
++        emitRemove(Obj, DL);
++        continue;
++      }
++      BasicBlock *NewBB = nullptr;
++      if (Succ->isEHPad()) {
++        // SplitEdge/ehAwareSplitEdge build funclet pads, which do not fit the
++        // landing-pad EH the Cangjie runtime uses.
++        if (!isa<LandingPadInst>(Succ->getFirstNonPHI())) {
++          LLVM_DEBUG(dbgs() << DEBUG_TYPE ": cannot split edge into "
++                            << Succ->getName() << ", no "
++                            << RemoveLocalFinalizerName << " there\n");
++          continue;
++        }
++        SmallVector<BasicBlock *> NewBBs;
++        SplitLandingPadPredecessors(Succ, {Pred}, ".fin", ".fin.lp", NewBBs,
++                                    &DT);
++        NewBB = NewBBs[0];
++      } else {
++        NewBB = SplitEdge(Pred, Succ, &DT);
++      }
++      if (NewBB == nullptr)
++        continue;
++      Bdr.SetInsertPoint(NewBB->getTerminator());
++      emitRemove(Obj, DL);
++    }
++  }
++}
++
++void LocalFinalizerRemover::process(Instruction *ObjDef) {
++  Value *Obj = ObjDef;
++  RepSet Reps;
++  if (!collectRepresentatives(Obj, AllLoads, Reps)) {
++    LLVM_DEBUG(dbgs() << DEBUG_TYPE ": local finalizer escapes, no "
++                      << RemoveLocalFinalizerName << " emitted for " << *Obj
++                      << "\n");
++    return;
++  }
++
++  BlockSets Defs, LiveIn, LiveOut;
++  computeRepLiveness(F, Reps, Defs, LiveIn, LiveOut);
++
++  // Is any representative live on the edge BB -> Succ? A phi operand is live on
++  // its incoming edge even though the phi is defined in Succ, so it has to be
++  // checked separately from Succ's live-in set.
++  auto liveOnEdge = [&](BasicBlock *BB, BasicBlock *Succ) {
++    if (!LiveIn[Succ].empty())
++      return true;
++    // Mirrors the live-out seeding in computeRepLiveness.
++    for (PHINode &PN : Succ->phis())
++      if (Reps.count(&PN) || Reps.count(PN.getIncomingValueForBlock(BB)))
++        return true;
++    return false;
++  };
++
++  // In valid SSA liveness implies the definition dominates, with one exception:
++  // on the unwind edge of the invoke that produces the object there is no
++  // object, and CJ_MCC_AddLocalFinalizer was never reached either.
++  auto defAvailableOnEdge = [&](BasicBlock *BB, BasicBlock *Succ) {
++    if (auto *II = dyn_cast<InvokeInst>(ObjDef))
++      if (II->getParent() == BB && Succ == II->getUnwindDest())
++        return false;
++    return DT.dominates(ObjDef->getParent(), BB);
++  };
++
++  SmallVector<Instruction *> AfterPoints;
++  SmallVector<Edge> DeadEdges;
++
++  for (BasicBlock &BB : F) {
++    if (LiveOut[&BB].empty()) {
++      // Nothing survives BB: the object dies here, if it lived here at all.
++      Instruction *Last = nullptr;
++      for (Instruction &I : BB) {
++        if (Reps.count(&I)) {
++          Last = &I;
++          continue;
++        }
++        if (isa<PHINode>(I))
++          continue; // a phi's operands are used on the incoming edge
++        for (Value *Op : I.operands())
++          if (Reps.count(Op)) {
++            Last = &I;
++            break;
++          }
++      }
++      if (Last == nullptr)
++        continue; // no representative activity in this block
++      if (!Last->isTerminator()) {
++        // A representative loaded from a reused slot can appear on paths the
++        // object itself never reached; require the definition to be available.
++        if (Last != ObjDef && !DT.dominates(Obj, Last))
++          continue;
++        AfterPoints.push_back(Last);
++        continue;
++      }
++      // The terminator itself consumes the object (it is passed to an invoke):
++      // it is dead on every outgoing edge. A terminator without successors
++      // (`ret obj`) hands the object to the caller, so there is nothing to
++      // unregister here.
++      for (BasicBlock *Succ : successors(&BB))
++        if (defAvailableOnEdge(&BB, Succ))
++          DeadEdges.emplace_back(&BB, Succ);
++      continue;
++    }
++    for (BasicBlock *Succ : successors(&BB))
++      if (!liveOnEdge(&BB, Succ) && defAvailableOnEdge(&BB, Succ))
++        DeadEdges.emplace_back(&BB, Succ);
++  }
++
++  for (Instruction *At : AfterPoints)
++    emitRemoveAfter(Obj, At);
++  if (!DeadEdges.empty())
++    emitRemoveOnEdges(Obj, DeadEdges);
++}
++
++bool LocalFinalizerRemover::run() {
++  Module &M = *F.getParent();
++  Function *AddFunc = M.getFunction(AddLocalFinalizerName);
++  if (AddFunc == nullptr || AddFunc->use_empty())
++    return false;
++
++  // Collect the registered objects in program order, and every load in one
++  // sweep. Inserting Remove calls adds no loads, so AllLoads stays complete.
++  SmallVector<Instruction *> Objs;
++  SmallPtrSet<Value *, 8> Seen;
++  for (Instruction &I : instructions(F)) {
++    if (auto *LI = dyn_cast<LoadInst>(&I)) {
++      AllLoads.push_back(LI);
++      continue;
++    }
++    auto *CB = dyn_cast<CallBase>(&I);
++    if (CB == nullptr || CB->getCalledFunction() != AddFunc ||
++        CB->arg_size() < 1)
++      continue;
++    auto *Obj = dyn_cast<Instruction>(CB->getArgOperand(0));
++    if (Obj == nullptr) {
++      LLVM_DEBUG(dbgs() << DEBUG_TYPE ": registered value is not an "
++                           "instruction, skipping "
++                        << *CB << "\n");
++      continue;
++    }
++    if (Seen.insert(Obj).second)
++      Objs.push_back(Obj);
++  }
++  if (Objs.empty())
++    return false;
++
++  // Already paired up, e.g. because the pass ran twice over this function.
++  Function *Existing = M.getFunction(RemoveLocalFinalizerName);
++  if (Existing != nullptr) {
++    llvm::erase_if(Objs, [&](Instruction *Obj) {
++      return llvm::any_of(Obj->users(), [&](User *U) {
++        auto *CB = dyn_cast<CallBase>(U);
++        return CB != nullptr && CB->getCalledFunction() == Existing;
++      });
++    });
++    if (Objs.empty())
++      return false;
++  }
++
++  RemoveFunc = Existing;
++  if (RemoveFunc == nullptr) {
++    IRBuilder<> Decl(F.getContext());
++    FunctionType *FT =
++        FunctionType::get(Decl.getVoidTy(), {Decl.getInt8PtrTy(1)}, false);
++    RemoveFunc = M.declareCJRuntimeFunc(RemoveLocalFinalizerName, FT, false);
++  }
++
++  for (Instruction *Obj : Objs)
++    process(Obj);
++  return true;
++}
++
++class CJInsertRemoveLocalFinalizerLegacyPass : public FunctionPass {
++public:
++  static char ID;
++
++  explicit CJInsertRemoveLocalFinalizerLegacyPass() : FunctionPass(ID) {
++    initializeCJInsertRemoveLocalFinalizerLegacyPassPass(
++        *PassRegistry::getPassRegistry());
++  }
++  ~CJInsertRemoveLocalFinalizerLegacyPass() = default;
++
++  bool runOnFunction(Function &F) override {
++    if (F.isDeclaration())
++      return false;
++    auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
++    return LocalFinalizerRemover(F, DT).run();
++  }
++
++  void getAnalysisUsage(AnalysisUsage &AU) const override {
++    AU.addRequired<DominatorTreeWrapperPass>();
++  }
++};
++
++} // namespace
++
++PreservedAnalyses
++CJInsertRemoveLocalFinalizer::run(Function &F, FunctionAnalysisManager &AM) {
++  if (F.isDeclaration())
++    return PreservedAnalyses::all();
++  auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
++  if (!LocalFinalizerRemover(F, DT).run())
++    return PreservedAnalyses::all();
++  // Splitting critical edges changes the CFG.
++  return PreservedAnalyses::none();
++}
++
++char CJInsertRemoveLocalFinalizerLegacyPass::ID = 0;
++
++FunctionPass *llvm::createCJInsertRemoveLocalFinalizerLegacyPass() {
++  return new CJInsertRemoveLocalFinalizerLegacyPass();
++}
++
++INITIALIZE_PASS_BEGIN(CJInsertRemoveLocalFinalizerLegacyPass,
++                      "cj-insert-remove-local-finalizer",
++                      "Cangjie Insert Remove Local Finalizer", false, false)
++INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
++INITIALIZE_PASS_END(CJInsertRemoveLocalFinalizerLegacyPass,
++                    "cj-insert-remove-local-finalizer",
++                    "Cangjie Insert Remove Local Finalizer", false, false)
 diff --git a/llvm/lib/Transforms/Scalar/CJLoopFloatOpt.cpp b/llvm/lib/Transforms/Scalar/CJLoopFloatOpt.cpp
 new file mode 100644
 index 000000000..14b0d3f87
@@ -85861,10 +86621,10 @@ index 000000000..4aa0d3151
 +}
 diff --git a/llvm/lib/Transforms/Scalar/CJRuntimeLowering.cpp b/llvm/lib/Transforms/Scalar/CJRuntimeLowering.cpp
 new file mode 100644
-index 000000000..5318a18d3
+index 000000000..937421208
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJRuntimeLowering.cpp
-@@ -0,0 +1,1182 @@
+@@ -0,0 +1,1330 @@
 +//===- CJRuntimeLowering.cpp - CJ Runtime Lowering --------------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -85973,7 +86733,16 @@ index 000000000..5318a18d3
 +    {Intrinsic::cj_remove_exported_ref, "CJ_MCC_RemoveExportedRef"},
 +    {Intrinsic::cj_create_export_handle, "CJ_MCC_CreateExportHandle"},
 +    {Intrinsic::cj_blackhole, "CJ_LLVM_BlackHole"},
-+    {Intrinsic::cj_get_lambda_addr, "CJ_MCC_GetJSLambdaAddr"}};
++    {Intrinsic::cj_get_lambda_addr, "CJ_MCC_GetJSLambdaAddr"},
++    {Intrinsic::cj_malloc_local_object, "CJ_MCC_NewLocalObject"},
++    {Intrinsic::cj_alloca_local_generic, "CJ_MCC_NewLocalObject"},
++    {Intrinsic::cj_malloc_local_array, "CJ_MCC_NewLocalArray"},
++    {Intrinsic::cj_malloc_local_array_generic, "CJ_MCC_NewLocalGenericArray"},
++    {Intrinsic::cj_maybe_local_write_ref, "CJ_MCC_MaybeLocalWriteRef"},
++    {Intrinsic::cj_maybe_local_write_generic,
++     "CJ_MCC_MaybeLocalWriteGeneric"},
++    {Intrinsic::cj_demode_write_ref, "CJ_MCC_DemodeWriteRef"},
++  };
 +
 +struct LowerGetFieldOffset {
 +  CallBase *CI;
@@ -86256,6 +87025,30 @@ index 000000000..5318a18d3
 +    CI->setCalledFunction(Func);
 +  }
 +
++  void replaceNewLocalFinalizerFunc(CallBase *CI) {
++    replaceWithRuntimeFunc(CI, false, true);
++
++    IRBuilder<> Bdr(CI->getContext());
++    // CJ_MCC_NewFinalizer returns the newly created finalizer object; pass it
++    // to CJ_MCC_AddLocalFinalizer to register it.
++    Function *AddFunc = M.getFunction("CJ_MCC_AddLocalFinalizer");
++    if (AddFunc == nullptr) {
++      FunctionType *FT = FunctionType::get(Bdr.getVoidTy(), {Bdr.getInt8PtrTy(1)}, false);
++      AddFunc = M.declareCJRuntimeFunc("CJ_MCC_AddLocalFinalizer", FT, false);
++    }
++    if (auto *II = dyn_cast<InvokeInst>(CI)) {
++      // For an InvokeInst the result is only valid on the normal path, so
++      // insert the call at the start of the normal destination.
++      BasicBlock *NormalDest = II->getNormalDest();
++      Bdr.SetInsertPoint(NormalDest, NormalDest->getFirstInsertionPt());
++    } else {
++      // Insert the Add call right after the NewFinalizer call.
++      Bdr.SetInsertPoint(CI->getParent(), std::next(CI->getIterator()));
++    }
++    auto *AddCall = Bdr.CreateCall(AddFunc, {CI});
++    AddCall->setDebugLoc(CI->getDebugLoc());
++  }
++
 +  void replaceNewWeakRefFunc(CallBase *CI) {
 +    IRBuilder<> Bdr(CI);
 +    Function *Func = M.getFunction("CJ_MCC_NewWeakRefObject");
@@ -86266,11 +87059,28 @@ index 000000000..5318a18d3
 +    CI->setCalledFunction(Func);
 +  }
 +
++  void replaceNewLocalWeakRefFunc(CallBase *CI) {
++    IRBuilder<> Bdr(CI);
++    Function *Func = M.getFunction("CJ_MCC_NewLocalWeakRefObject");
++    if (Func == nullptr) {
++      Func = M.declareCJRuntimeFunc("CJ_MCC_NewLocalWeakRefObject",
++                                    CI->getFunctionType(), false);
++    }
++    CI->setCalledFunction(Func);
++  }
++
 +  // llvm.cj.alloca.generic(TypeInfo* ti, i64 size)
 +  void replaceAllocaGeneric(CallBase *CI, EscapeScope &ES) {
 +    if (replaceWithAlloca(CI, ES)) {
 +      return;
 +    }
++    replaceWithRuntimeFunc(CI, false, true);
++    CI->addRetAttr(Attribute::NoAlias);
++    setMetadata(CI, "new_gen");
++  }
++
++  // llvm.cj.alloca.generic(TypeInfo* ti, i64 size)
++  void replaceAllocaLocalGeneric(CallBase *CI, EscapeScope &ES) {
 +    replaceWithRuntimeFunc(CI, false, true);
 +    CI->addRetAttr(Attribute::NoAlias);
 +    setMetadata(CI, "new_gen");
@@ -86305,9 +87115,18 @@ index 000000000..5318a18d3
 +  }
 +
 +  // llvm.cj.gcmalloc.array(TypeInfo* @Klass.ti, i64 length, i64 elem.size)
-+  void replaceNewArray(CallBase *CI) {
++  // IsLocalArray must be true for cj_malloc_local_array: the "fast_new_array"
++  // marker makes the backend inline the NewArrayFast path, which bumps the
++  // *normal* heap AllocBuffer (the one shared with CJ_MCC_NewObjectFast).
++  // A local-mode array allocated there lives in GC-heap memory that the
++  // collector recycles and reuses on the normal schedule, while the
++  // local-object root registries keep referencing it across GCs; concurrent
++  // marking then dereferences the overwritten memory and crashes. Local
++  // arrays therefore always take the slow path into the local-object
++  // allocator (CJ_MCC_NewLocalArray8 -> HeapManager::AllocateLocal).
++  void replaceNewArray(CallBase *CI, bool IsLocalArray = false) {
 +    uint64_t Size = 0; // 0 is slowpath, others is fastpath.
-+    if (EnableCJNewArrayFast && !CangjieJIT) {
++    if (EnableCJNewArrayFast && !IsLocalArray && !CangjieJIT) {
 +      auto *LengthOp = dyn_cast<ConstantInt>(CI->getArgOperand(1));
 +      auto *ElemSizeOp = dyn_cast<ConstantInt>(CI->getArgOperand(2));
 +      if (LengthOp && ElemSizeOp) {
@@ -86618,6 +87437,30 @@ index 000000000..5318a18d3
 +    CI->addRetAttr(Attribute::NoAlias);
 +  }
 +
++  void loweringMallocLocalObject(CallBase *&CI) {
++    const MDNode *MD = CI->getMetadata("MallocType");
++    if (MD == nullptr) {
++      setHeapMallocSizeAlign(CI);
++      replaceWithRuntimeFunc(CI, false, true);
++    } else {
++      StringRef Ty = dyn_cast<MDString>(MD->getOperand(0).get())->getString();
++      if (Ty.equals("HasFinalizer")) {
++        setHeapMallocSizeAlign(CI);
++        replaceNewLocalFinalizerFunc(CI);
++      } else if (Ty.equals("Future") || Ty.equals("Mutex") ||
++                 Ty.equals("Monitor") || Ty.equals("WaitQueue")) {
++        replaceFixedNewObject(CI);
++      } else if (Ty.equals("WeakRef")) {
++        setHeapMallocSizeAlign(CI);
++        replaceNewLocalWeakRefFunc(CI);
++      } else {
++        setHeapMallocSizeAlign(CI);
++        replaceWithRuntimeFunc(CI, false, true);
++      }
++    }
++    CI->addRetAttr(Attribute::NoAlias);
++  }
++
 +private:
 +  Module &M;
 +  LLVMContext &C;
@@ -86630,6 +87473,8 @@ index 000000000..5318a18d3
 +    Intrinsic::ID IID = CI->getIntrinsicID();
 +    if (IID == Intrinsic::cj_malloc_array) {
 +      return getMallocArrayFuncName(CI);
++    } else if (IID == Intrinsic::cj_malloc_local_array) {
++      return getMallocLocalArrayFuncName(CI);
 +    } else {
 +      auto Itr = RuntimeMap.find(IID);
 +      assert(Itr != RuntimeMap.end() && "Runtime function don`t exist.");
@@ -86661,6 +87506,38 @@ index 000000000..5318a18d3
 +        return "CJ_MCC_NewArray32";
 +      case 8:
 +        return "CJ_MCC_NewArray64";
++      default:
++        break;
++      }
++    }
++    report_fatal_error("Unsupported element klass type for gc.malloc.array!");
++    return "";
++  }
++
++  StringRef getMallocLocalArrayFuncName(CallBase *CI) const {
++    Value *Arg0 = CI->getOperand(0);
++    // gc.malloc.array(i64, bitcast arg1 to i8*)
++    auto *CastExpr = dyn_cast<ConstantExpr>(Arg0);
++    auto *KlassGV = dyn_cast<GlobalVariable>(CastExpr->getOperand(0));
++    TypeInfo ArrayKlass(KlassGV);
++
++    Type *ET = ArrayKlass.getArrayElementType();
++    if (ET->isPointerTy()) {
++      return "CJ_MCC_NewLocalObjArray";
++    } else if (ET->isStructTy() || ET->isArrayTy()) {
++      return "CJ_MCC_NewLocalArray";
++    } else {
++      unsigned Size =
++          static_cast<unsigned>(DL.getTypeAllocSize(ET).getFixedSize());
++      switch (Size) {
++      case 1:
++        return "CJ_MCC_NewLocalArray8";
++      case 2:
++        return "CJ_MCC_NewLocalArray16";
++      case 4:
++        return "CJ_MCC_NewLocalArray32";
++      case 8:
++        return "CJ_MCC_NewLocalArray64";
 +      default:
 +        break;
 +      }
@@ -86945,8 +87822,39 @@ index 000000000..5318a18d3
 +      CI->addRetAttr(Attribute::NoAlias);
 +      Changed = true;
 +      break;
++    case Intrinsic::cj_malloc_local_object: {
++      Lowering.loweringMallocLocalObject(CI);
++      Changed = true;
++      break;
++    }
++    case Intrinsic::cj_alloca_local_generic:
++      Lowering.setHeapMallocSizeAlign(CI);
++      Lowering.replaceAllocaLocalGeneric(CI, ES);
++      Changed = true;
++      break;
++    case Intrinsic::cj_malloc_local_array:
++      // Local arrays must never take the NewArrayFast inline fast path: it
++      // allocates from the normal heap TLR and bypasses the local-object
++      // allocator (see the comment above replaceNewArray).
++      Lowering.replaceNewArray(CI, /*IsLocalArray=*/true);
++      CI->addRetAttr(Attribute::NoAlias);
++      Changed = true;
++      break;
++    case Intrinsic::cj_malloc_local_array_generic:
++      Lowering.replaceWithRuntimeFunc(CI, false, true);
++      CI->addRetAttr(Attribute::NoAlias);
++      Changed = true;
++      break;
 +    case Intrinsic::cj_invoke_gc:
 +      Lowering.replaceWithRuntimeFunc(CI, false, false);
++      Changed = true;
++      break;
++    case Intrinsic::cj_maybe_local_write_ref:
++    case Intrinsic::cj_maybe_local_write_generic:
++    case Intrinsic::cj_demode_write_ref:
++      // GC leaf: the local-aware writes are exported as plain aliases without a
++      // callee-saved-register stub, so they cannot act as safepoints.
++      Lowering.replaceWithRuntimeFunc(CI, true, false);
 +      Changed = true;
 +      break;
 +    case Intrinsic::cj_division_check_sdiv:
@@ -86987,7 +87895,7 @@ index 000000000..5318a18d3
 +      Changed = true;
 +    }
 +
-+    if (!CJLTOOpt) {
++    if (!CJLTOOpt && !F.isDeclaration()) {
 +      Changed |= runtimeLoweringFunc(F, CJLowering);
 +    }
 +  }
@@ -87026,7 +87934,7 @@ index 000000000..5318a18d3
 +        Changed = true;
 +      }
 +
-+      if (!CJLTOOpt) {
++      if (!CJLTOOpt && !F.isDeclaration()) {
 +        Changed |= runtimeLoweringFunc(F, CJLowering);
 +      }
 +    }
@@ -89637,7 +90545,7 @@ index 000000000..dcd6bd12e
 +  return PreservedAnalyses::none();
 +}
 diff --git a/llvm/lib/Transforms/Scalar/CMakeLists.txt b/llvm/lib/Transforms/Scalar/CMakeLists.txt
-index eb008c159..b2324c943 100644
+index eb008c159..653a23d74 100644
 --- a/llvm/lib/Transforms/Scalar/CMakeLists.txt
 +++ b/llvm/lib/Transforms/Scalar/CMakeLists.txt
 @@ -3,6 +3,13 @@ add_llvm_component_library(LLVMScalarOpts
@@ -89654,7 +90562,7 @@ index eb008c159..b2324c943 100644
    CallSiteSplitting.cpp
    ConstantHoisting.cpp
    ConstraintElimination.cpp
-@@ -12,6 +19,20 @@ add_llvm_component_library(LLVMScalarOpts
+@@ -12,6 +19,21 @@ add_llvm_component_library(LLVMScalarOpts
    DFAJumpThreading.cpp
    DivRemPairs.cpp
    EarlyCSE.cpp
@@ -89663,6 +90571,7 @@ index eb008c159..b2324c943 100644
 +  CJGCInstrRestore.cpp
 +  CJSimpleOpt.cpp
 +  CJGenericIntrinsicOpt.cpp
++  CJInsertRemoveLocalFinalizer.cpp
 +  CJSimpleRangeAnalysis.cpp
 +  CJRSSCE.cpp
 +  CJLoopFloatOpt.cpp
@@ -89675,7 +90584,7 @@ index eb008c159..b2324c943 100644
    FlattenCFGPass.cpp
    Float2Int.cpp
    GuardWidening.cpp
-@@ -22,6 +43,7 @@ add_llvm_component_library(LLVMScalarOpts
+@@ -22,6 +44,7 @@ add_llvm_component_library(LLVMScalarOpts
    InductiveRangeCheckElimination.cpp
    IndVarSimplify.cpp
    InferAddressSpaces.cpp
@@ -89683,7 +90592,7 @@ index eb008c159..b2324c943 100644
    InstSimplifyPass.cpp
    JumpThreading.cpp
    LICM.cpp
-@@ -96,4 +118,7 @@ add_llvm_component_library(LLVMScalarOpts
+@@ -96,4 +119,7 @@ add_llvm_component_library(LLVMScalarOpts
    InstCombine
    Support
    TransformUtils
@@ -89692,7 +90601,7 @@ index eb008c159..b2324c943 100644
 +
 +include_directories(${CANGJIE_DEMANGLE_DIR})
 diff --git a/llvm/lib/Transforms/Scalar/DeadStoreElimination.cpp b/llvm/lib/Transforms/Scalar/DeadStoreElimination.cpp
-index 3f0dad7ee..c7b52d4ef 100644
+index 3f0dad7ee..770af3028 100644
 --- a/llvm/lib/Transforms/Scalar/DeadStoreElimination.cpp
 +++ b/llvm/lib/Transforms/Scalar/DeadStoreElimination.cpp
 @@ -64,9 +64,11 @@
@@ -89736,7 +90645,7 @@ index 3f0dad7ee..c7b52d4ef 100644
    }
  
    /// Return 'OW_Complete' if a store to the 'KillingLoc' location (by \p
-@@ -994,6 +1011,19 @@ struct DSEState {
+@@ -994,6 +1011,20 @@ struct DSEState {
      if (!I->mayWriteToMemory())
        return None;
  
@@ -89747,7 +90656,8 @@ index 3f0dad7ee..c7b52d4ef 100644
 +      if (ID == Intrinsic::cj_gcwrite_ref)
 +        return MemoryLocation::get(II);
 +      if (ID == Intrinsic::cj_gcread_generic ||
-+          ID == Intrinsic::cj_assign_generic)
++          ID == Intrinsic::cj_assign_generic ||
++          ID == Intrinsic::cj_assign_local_generic)
 +        return MemoryLocation::getAfter(II->getArgOperand(0));
 +      if (ID == Intrinsic::cj_gcwrite_generic)
 +        return MemoryLocation::getAfter(II->getArgOperand(1));
@@ -89756,7 +90666,7 @@ index 3f0dad7ee..c7b52d4ef 100644
      if (auto *CB = dyn_cast<CallBase>(I))
        return MemoryLocation::getForDest(CB, TLI);
  
-@@ -1234,6 +1264,7 @@ struct DSEState {
+@@ -1234,6 +1265,7 @@ struct DSEState {
      bool CanOptimize = OptimizeMemorySSA &&
                         KillingDef->getDefiningAccess() == StartAccess &&
                         !KillingI->mayReadFromMemory();
@@ -89764,7 +90674,7 @@ index 3f0dad7ee..c7b52d4ef 100644
  
      // Find the next clobbering Mod access for DefLoc, starting at StartAccess.
      Optional<MemoryLocation> CurrentLoc;
-@@ -1278,6 +1309,20 @@ struct DSEState {
+@@ -1278,6 +1310,20 @@ struct DSEState {
        MemoryDef *CurrentDef = cast<MemoryDef>(Current);
        Instruction *CurrentI = CurrentDef->getMemoryInst();
  
@@ -89785,7 +90695,7 @@ index 3f0dad7ee..c7b52d4ef 100644
        if (canSkipDef(CurrentDef, !isInvisibleToCallerOnUnwind(KillingUndObj))) {
          CanOptimize = false;
          continue;
-@@ -1702,7 +1747,8 @@ struct DSEState {
+@@ -1702,7 +1748,8 @@ struct DSEState {
          const Value *UO = getUnderlyingObject(DefLoc->Ptr);
          if (!isInvisibleToCallerAfterRet(UO))
            continue;
@@ -89795,7 +90705,7 @@ index 3f0dad7ee..c7b52d4ef 100644
          if (isWriteAtEndOfFunction(Def)) {
            // See through pointer-to-pointer bitcasts
            LLVM_DEBUG(dbgs() << "   ... MemoryDef is not accessed until the end "
-@@ -2191,7 +2237,6 @@ public:
+@@ -2191,7 +2238,6 @@ public:
        for (auto &I : instructions(F))
          NumRemainingStores += isa<StoreInst>(&I);
  #endif
@@ -93271,10 +94181,10 @@ index 644c5c82e..d1be7f14e 100644
    }
  
 diff --git a/llvm/lib/Transforms/Scalar/Scalar.cpp b/llvm/lib/Transforms/Scalar/Scalar.cpp
-index 5ab9e2557..c426dac8c 100644
+index 5ab9e2557..63d644d50 100644
 --- a/llvm/lib/Transforms/Scalar/Scalar.cpp
 +++ b/llvm/lib/Transforms/Scalar/Scalar.cpp
-@@ -105,12 +105,22 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
+@@ -105,12 +105,23 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
    initializeSpeculativeExecutionLegacyPassPass(Registry);
    initializeStraightLineStrengthReduceLegacyPassPass(Registry);
    initializePlaceBackedgeSafepointsImplPass(Registry);
@@ -93291,6 +94201,7 @@ index 5ab9e2557..c426dac8c 100644
 +  initializeCJBarrierSplitLegacyPassPass(Registry);
 +  initializeCJLoopFloatOptLegacyPassPass(Registry);
 +  initializeCJRuntimeLoweringLegacyPassPass(Registry);
++  initializeCJInsertRemoveLocalFinalizerLegacyPassPass(Registry);
 +  initializeCangjieSpecificOptLegacyPassPass(Registry);
 +  initializeInsertCJTBAALegacyPassPass(Registry);
 +  initializeCJSimpleRangeAnalysisPass(Registry);
@@ -93400,7 +94311,7 @@ index fb2d812a1..bbdd58dd7 100644
            (DT && DT->verify(DominatorTree::VerificationLevel::Full))) &&
           "Original domtree is invalid?");
 diff --git a/llvm/lib/Transforms/Scalar/TailRecursionElimination.cpp b/llvm/lib/Transforms/Scalar/TailRecursionElimination.cpp
-index 27c04177e..9cfafefcc 100644
+index 27c04177e..9c795503a 100644
 --- a/llvm/lib/Transforms/Scalar/TailRecursionElimination.cpp
 +++ b/llvm/lib/Transforms/Scalar/TailRecursionElimination.cpp
 @@ -87,6 +87,10 @@ STATISTIC(NumEliminated, "Number of tail calls removed");
@@ -93418,7 +94329,7 @@ index 27c04177e..9cfafefcc 100644
          Escaped = ESCAPED;
  
        CallInst *CI = dyn_cast<CallInst>(&I);
-+      if (CI && CJPipeline) {
++      if (CI && CJPipeline && !CI->isNoTailCall()) {
 +        CI->setTailCall(false);
 +      }
        // A PseudoProbeInst has the IntrInaccessibleMemOnly tag hence it is
@@ -104651,6 +105562,172 @@ index ddd39369f..092be9bb4 100644
  ; Check a statepoint wrapping a *void* returning vararg function works
  entry:
    %safepoint_token = tail call token (i64, i32, void (i32, ...)*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidi32varargf(i64 0, i32 0, void (i32, ...)* elementtype(void (i32, ...)) @varargf, i32 2, i32 0, i32 42, i32 43, i32 0, i32 0)
+diff --git a/llvm/test/CodeGen/AArch64/statepoint-tail-call-target-regclass.mir b/llvm/test/CodeGen/AArch64/statepoint-tail-call-target-regclass.mir
+new file mode 100644
+index 000000000..cdce88c28
+--- /dev/null
++++ b/llvm/test/CodeGen/AArch64/statepoint-tail-call-target-regclass.mir
+@@ -0,0 +1,65 @@
++# RUN: llc -mtriple=arm64-apple-macosx11.0.0 -run-pass=finalize-isel -o - %s | FileCheck %s
++
++# Unit test for the target register of STATEPOINT_TAIL_CALL on AArch64.
++#
++# The STATEPOINT_TAIL_CALL pseudo is expanded by
++# AArch64TargetLowering::EmitInstrWithCustomInserter, which runs in the
++# finalize-isel pass, right after instruction selection and before register
++# allocation. The expansion must constrain the call-target register to
++# tcGPR64 (x0-x18): PEI later inserts the callee-saved restores right before
++# the tail jump, so a callee-saved target register would be clobbered by the
++# epilogue before the jump.
++#
++# The MIR below feeds a call-target virtual register of class gpr64 (the
++# unconstrained default) into STATEPOINT_TAIL_CALL. The finalize-isel pass
++# must re-classify it as tcgpr64 and add the early-clobber implicit def of
++# $lr.
++#
++# The second function has the "branch-target-enforcement" attribute: the
++# target must be re-classified to rtcgpr64 (x16/x17 only), because an
++# indirect branch under BTI may only land on a "bti c" landing pad through
++# x16 or x17.
++
++# CHECK-LABEL: name: test_statepoint_tail_target
++# CHECK: registers:
++# CHECK-NEXT: - { id: 0, class: tcgpr64, preferred-register: '' }
++# CHECK: STATEPOINT_TAIL_CALL 0, 0, 0, %0:tcgpr64,
++# CHECK: implicit-def dead early-clobber $lr
++
++# CHECK-LABEL: name: test_bti_statepoint_tail_target
++# CHECK: registers:
++# CHECK-NEXT: - { id: 0, class: rtcgpr64, preferred-register: '' }
++# CHECK: STATEPOINT_TAIL_CALL 0, 0, 0, %0:rtcgpr64,
++# CHECK: implicit-def dead early-clobber $lr
++
++--- |
++  target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
++  target triple = "arm64-apple-macosx11.0.0"
++
++  define void @test_statepoint_tail_target() {
++    ret void
++  }
++
++  define void @test_bti_statepoint_tail_target() "branch-target-enforcement"="true" {
++    ret void
++  }
++
++...
++---
++name:            test_statepoint_tail_target
++registers:
++  - { id: 0, class: gpr64 }
++body:             |
++  bb.0:
++    STATEPOINT_TAIL_CALL 0, 0, 0, %0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, csr_darwin_aarch64_aapcs
++
++...
++---
++name:            test_bti_statepoint_tail_target
++registers:
++  - { id: 0, class: gpr64 }
++body:             |
++  bb.0:
++    STATEPOINT_TAIL_CALL 0, 0, 0, %0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, csr_darwin_aarch64_aapcs
++
++...
+diff --git a/llvm/test/CodeGen/AArch64/statepoint-tail-call-tcgpr64.ll b/llvm/test/CodeGen/AArch64/statepoint-tail-call-tcgpr64.ll
+new file mode 100644
+index 000000000..94ed20736
+--- /dev/null
++++ b/llvm/test/CodeGen/AArch64/statepoint-tail-call-tcgpr64.ll
+@@ -0,0 +1,89 @@
++; RUN: llc -mtriple=arm64-apple-macosx11.0.0 -verify-machineinstrs -stop-after=prologepilog < %s | FileCheck %s --check-prefixes=MIR,MIR-SMALL
++; RUN: llc -mtriple=arm64-apple-ios14.0.0 -verify-machineinstrs -stop-after=prologepilog < %s | FileCheck %s --check-prefixes=MIR,MIR-SMALL
++; RUN: llc -mtriple=arm64-apple-ios14.0.0 -code-model=large -verify-machineinstrs -stop-after=prologepilog < %s | FileCheck %s --check-prefixes=MIR,MIR-LARGE
++; RUN: llc -mtriple=arm64-apple-macosx11.0.0 -verify-machineinstrs < %s | FileCheck %s --check-prefixes=ASM,ASM-SMALL
++; RUN: llc -mtriple=arm64-apple-ios14.0.0 -verify-machineinstrs < %s | FileCheck %s --check-prefixes=ASM,ASM-SMALL
++; RUN: llc -mtriple=arm64-apple-ios14.0.0 -code-model=large -verify-machineinstrs < %s | FileCheck %s --check-prefixes=ASM,ASM-LARGE
++
++; STATEPOINT_TAIL_CALL lowers an indirect call target to a register jump, and
++; PEI inserts the callee-saved restores (x19-x28, fp, lr) right before the
++; statepoint. If the tail-jump target lived in a callee-saved register, the
++; epilogue would restore it to the caller's value before the jump. The target
++; operand must therefore be constrained to tcGPR64 (x0-x18; x18 is reserved
++; on Darwin), or to rtcGPR64 (x16/x17 only) under branch target enforcement.
++;
++; The {{\$x(1[0-7]|[0-9])}} patterns below accept only tcGPR64 registers at
++; the target positions: the trailing ", " or end-of-line anchors make the
++; alternation reject two-digit callee-saved registers such as $x19.
++
++target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
++target triple = "arm64-apple-macosx11.0.0"
++
++declare void @intervening()
++declare void @ext_callee()
++
++declare token @llvm.experimental.gc.statepoint.p0f_isVoidf(i64, i32, void ()*, i32, i32, ...)
++
++; Indirect tail statepoint: the callee pointer is live across an intervening
++; call, so an unconstrained register allocator would keep it in a callee-saved
++; register. With the tcGPR64 constraint the callee pointer is spilled across
++; the call and reloaded into a tcGPR64 register just before the tail jump,
++; after the epilogue has restored the callee-saved registers.
++define void @test_indirect_tail_statepoint(void ()* %fp) gc "statepoint-example" {
++entry:
++; MIR-LABEL: name: test_indirect_tail_statepoint
++; MIR: STRXui $x0, $sp
++; MIR: renamable {{\$x(1[0-7]|[0-9])}} = LDRXui $sp
++; MIR: frame-destroy LDPX
++; MIR: STATEPOINT_TAIL_CALL 0, 0, 0, killed renamable {{\$x(1[0-7]|[0-9])}},
++; ASM-LABEL: test_indirect_tail_statepoint:
++; ASM: str x0, [sp
++; ASM: ldp x29, x30, [sp, #16]
++; ASM: ldr {{x(1[0-7]|[0-9])}}, [sp
++; ASM: br {{x(1[0-7]|[0-9])$}}
++  call void @intervening()
++  tail call token (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* elementtype(void ()) %fp, i32 0, i32 0, i32 0, i32 0)
++  ret void
++}
++
++; Direct (symbol) tail statepoints use a pc-relative branch under the small
++; code model and need no target register.
++;
++; Under -code-model=large, MachO references to external functions are loaded
++; from the GOT into a register, so even a direct callee lowers to br xN. The
++; GOT load result must also land in a tcGPR64 register, and the callee-saved
++; restores must happen before the tail jump.
++define void @test_direct_tail_statepoint() gc "statepoint-example" {
++entry:
++; MIR-LABEL: name: test_direct_tail_statepoint
++; MIR-SMALL: STATEPOINT_TAIL_CALL 0, 0, 0, @ext_callee,
++; MIR-LARGE: renamable {{\$x(1[0-7]|[0-9])}} = LOADgot target-flags(aarch64-got) @ext_callee
++; MIR-LARGE: frame-destroy LDPXpost
++; MIR-LARGE: STATEPOINT_TAIL_CALL 0, 0, 0, killed renamable {{\$x(1[0-7]|[0-9])}},
++; ASM-LABEL: test_direct_tail_statepoint:
++; ASM-SMALL: stp x29, x30, [sp, #-16]!
++; ASM-SMALL: ldp x29, x30, [sp], #16
++; ASM-SMALL: b _ext_callee
++; ASM-LARGE: adrp {{x(1[0-7]|[0-9])}}, _ext_callee@GOTPAGE
++; ASM-LARGE: ldr {{x(1[0-7]|[0-9])}}, [{{x(1[0-7]|[0-9])}}, _ext_callee@GOTPAGEOFF]
++; ASM-LARGE: ldp x29, x30, [sp], #16
++; ASM-LARGE: br {{x(1[0-7]|[0-9])$}}
++  tail call token (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* elementtype(void ()) @ext_callee, i32 0, i32 0, i32 0, i32 0)
++  ret void
++}
++
++; Under branch target enforcement an indirect branch may only land on a
++; "bti c" landing pad through x16 or x17, so the tail-jump target must be
++; constrained to rtcGPR64 instead of tcGPR64.
++define void @test_bti_indirect_tail_statepoint(void ()* %fp) "branch-target-enforcement"="true" gc "statepoint-example" {
++entry:
++; MIR-LABEL: name: test_bti_indirect_tail_statepoint
++; MIR: STATEPOINT_TAIL_CALL 0, 0, 0, killed renamable {{\$x1[67]}},
++; ASM-LABEL: test_bti_indirect_tail_statepoint:
++; ASM: hint #34
++; ASM: ldr {{x1[67]}}, [sp
++; ASM: br {{x1[67]$}}
++  call void @intervening()
++  tail call token (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* elementtype(void ()) %fp, i32 0, i32 0, i32 0, i32 0)
++  ret void
++}
 diff --git a/llvm/test/CodeGen/AArch64/vec-libcalls.ll b/llvm/test/CodeGen/AArch64/vec-libcalls.ll
 index 9ce9e96e9..b850bbe09 100644
 --- a/llvm/test/CodeGen/AArch64/vec-libcalls.ll
@@ -110762,6 +111839,148 @@ index 000000000..8a544ea75
 +
 +!0 = !{!"default:A"}
 +!1 = !{!"default:A.ti"}
+diff --git a/llvm/test/Transforms/CJDevirtualOpt/subtype_external_super_chain.ll b/llvm/test/Transforms/CJDevirtualOpt/subtype_external_super_chain.ll
+new file mode 100644
+index 000000000..59dff0473
+--- /dev/null
++++ b/llvm/test/Transforms/CJDevirtualOpt/subtype_external_super_chain.ll
+@@ -0,0 +1,21 @@
++; RUN: opt '-passes=cj-devirtual-opt' --cangjie-pipeline -S < %s | FileCheck %s
++;
++; `a is B` where `a` is an `A` instance: walking the super class chain of `A`
++; reaches `std.core:Object`, which is declared in another module and has no
++; initializer here, so `A <: B` can not be decided from the metadata visible in
++; this module. The runtime call must be preserved instead of being folded.
++
++%TypeInfo = type { i8*, i8, i8, i16, i32, i8*, i32, i8, i8, i16, i32*, i8*, i8*, i8*, %TypeInfo*, i8**, i8*, i8* }
++
++@"std.core:Object.ti" = external global %TypeInfo
++@"default:A.ti" = internal global %TypeInfo { i8* null, i8 -128, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* @"std.core:Object.ti", i8** null, i8* null, i8* null }
++@"default:B.ti" = internal global %TypeInfo { i8* null, i8 -128, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* @"std.core:Object.ti", i8** null, i8* null, i8* null }
++
++; CHECK-LABEL: define i1 @test(
++; CHECK: call i1 @CJ_MCC_IsSubType
++define i1 @test() {
++  %r = call i1 @CJ_MCC_IsSubType(i8* bitcast (%TypeInfo* @"default:A.ti" to i8*), i8* bitcast (%TypeInfo* @"default:B.ti" to i8*))
++  ret i1 %r
++}
++
++declare i1 @CJ_MCC_IsSubType(i8*, i8*)
+diff --git a/llvm/test/Transforms/CJDevirtualOpt/subtype_external_super_class.ll b/llvm/test/Transforms/CJDevirtualOpt/subtype_external_super_class.ll
+new file mode 100644
+index 000000000..533416373
+--- /dev/null
++++ b/llvm/test/Transforms/CJDevirtualOpt/subtype_external_super_class.ll
+@@ -0,0 +1,27 @@
++; RUN: opt '-passes=cj-devirtual-opt' --cangjie-pipeline -S < %s | FileCheck %s
++;
++; `c is (Rune) -> Unit` where `c` is a `C` instance whose super class
++; (`std.core:Object`) is declared in another module. The super class must not
++; be read as if it had an initializer here (that used to crash the pass), and
++; the check must be kept because the closure relation can not be decided.
++
++%TypeInfo = type { i8*, i8, i8, i16, i32, i8*, i32, i8, i8, i16, i32*, i8*, i8*, i8*, %TypeInfo*, i8**, i8*, i8* }
++
++@"std.core:Object.ti" = external global %TypeInfo
++@"default:C.ti" = internal global %TypeInfo { i8* null, i8 -128, i8 0, i16 0, i32 8, i8* null, i32 0, i8 1, i8 0, i16 1, i32* null, i8* null, i8* null, i8* null, %TypeInfo* @"std.core:Object.ti", i8** null, i8* null, i8* null }
++
++@"Closure<(Rune)->Unit>.ti" = linkonce_odr global %TypeInfo { i8* null, i8 -125, i8 0, i16 2, i32 16, i8* null, i32 0, i8 8, i8 1, i16 -32768, i32* null, i8* null, i8* bitcast ([1 x %TypeInfo*]* @"Closure<(Rune)->Unit>.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"Closure<(Rune)->Unit>.ti.typeArgs" = private unnamed_addr constant [1 x %TypeInfo*] [%TypeInfo* @"(Rune)->Unit.ti"]
++@"(Rune)->Unit.ti" = linkonce_odr global %TypeInfo { i8* null, i8 19, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 2, i16 -32768, i32* null, i8* null, i8* bitcast ([2 x %TypeInfo*]* @"(Rune)->Unit.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"(Rune)->Unit.ti.typeArgs" = private unnamed_addr constant [2 x %TypeInfo*] [%TypeInfo* @Unit.ti, %TypeInfo* @Rune.ti]
++@Unit.ti = external global %TypeInfo
++@Rune.ti = external global %TypeInfo
++
++; CHECK-LABEL: define i1 @test(
++; CHECK: call i1 @CJ_MCC_IsSubType
++define i1 @test() {
++  %r = call i1 @CJ_MCC_IsSubType(i8* bitcast (%TypeInfo* @"default:C.ti" to i8*), i8* bitcast (%TypeInfo* @"Closure<(Rune)->Unit>.ti" to i8*))
++  ret i1 %r
++}
++
++declare i1 @CJ_MCC_IsSubType(i8*, i8*)
+diff --git a/llvm/test/Transforms/CJDevirtualOpt/subtype_nested_interface.ll b/llvm/test/Transforms/CJDevirtualOpt/subtype_nested_interface.ll
+new file mode 100644
+index 000000000..2134557d1
+--- /dev/null
++++ b/llvm/test/Transforms/CJDevirtualOpt/subtype_nested_interface.ll
+@@ -0,0 +1,35 @@
++; RUN: opt '-passes=cj-devirtual-opt' --cangjie-pipeline -S < %s | FileCheck %s
++;
++; `Box(foo1)` where `foo1: (A) -> Unit` is checked at runtime against
++; `(I) -> Unit`, `I` being an interface defined in this module. The nested
++; comparison `I <: A` depends on the extension data of `A` and can not be
++; decided here, so the runtime call must be preserved. This used to hit
++; `report_fatal_error("The interface type is processed in subtype.!")` and
++; abort opt.
++
++%TypeInfo = type { i8*, i8, i8, i16, i32, i8*, i32, i8, i8, i16, i32*, i8*, i8*, i8*, %TypeInfo*, i8**, i8*, i8* }
++
++@Unit.ti = external global %TypeInfo
++
++@"I.ti" = linkonce_odr global %TypeInfo { i8* null, i8 -127, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 0, i16 0, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"A.ti" = linkonce_odr global %TypeInfo { i8* null, i8 -128, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 0, i16 0, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++
++@"(A)->Unit.ti" = linkonce_odr global %TypeInfo { i8* null, i8 19, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 2, i16 -32768, i32* null, i8* null, i8* bitcast ([2 x %TypeInfo*]* @"(A)->Unit.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"(A)->Unit.ti.typeArgs" = private unnamed_addr constant [2 x %TypeInfo*] [%TypeInfo* @Unit.ti, %TypeInfo* @"A.ti"]
++@"(I)->Unit.ti" = linkonce_odr global %TypeInfo { i8* null, i8 19, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 2, i16 -32768, i32* null, i8* null, i8* bitcast ([2 x %TypeInfo*]* @"(I)->Unit.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"(I)->Unit.ti.typeArgs" = private unnamed_addr constant [2 x %TypeInfo*] [%TypeInfo* @Unit.ti, %TypeInfo* @"I.ti"]
++
++@"default:$CN7default4foo1H1AE.ti" = internal global %TypeInfo { i8* null, i8 -128, i8 0, i16 2, i32 16, i8* null, i32 0, i8 8, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* @"Closure<(A)->Unit>.ti", i8** null, i8* null, i8* null }
++@"Closure<(A)->Unit>.ti" = linkonce_odr global %TypeInfo { i8* null, i8 -125, i8 0, i16 2, i32 16, i8* null, i32 0, i8 8, i8 1, i16 -32768, i32* null, i8* null, i8* bitcast ([1 x %TypeInfo*]* @"Closure<(A)->Unit>.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"Closure<(A)->Unit>.ti.typeArgs" = private unnamed_addr constant [1 x %TypeInfo*] [%TypeInfo* @"(A)->Unit.ti"]
++@"Closure<(I)->Unit>.ti" = linkonce_odr global %TypeInfo { i8* null, i8 -125, i8 0, i16 2, i32 16, i8* null, i32 0, i8 8, i8 1, i16 -32768, i32* null, i8* null, i8* bitcast ([1 x %TypeInfo*]* @"Closure<(I)->Unit>.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"Closure<(I)->Unit>.ti.typeArgs" = private unnamed_addr constant [1 x %TypeInfo*] [%TypeInfo* @"(I)->Unit.ti"]
++
++; CHECK-LABEL: define i1 @test(
++; CHECK: call i1 @CJ_MCC_IsSubType
++define i1 @test() {
++  %r = call i1 @CJ_MCC_IsSubType(i8* bitcast (%TypeInfo* @"default:$CN7default4foo1H1AE.ti" to i8*), i8* bitcast (%TypeInfo* @"Closure<(I)->Unit>.ti" to i8*))
++  ret i1 %r
++}
++
++declare i1 @CJ_MCC_IsSubType(i8*, i8*)
+diff --git a/llvm/test/Transforms/CJDevirtualOpt/subtype_unknown_external_ti.ll b/llvm/test/Transforms/CJDevirtualOpt/subtype_unknown_external_ti.ll
+new file mode 100644
+index 000000000..bb9aaa84d
+--- /dev/null
++++ b/llvm/test/Transforms/CJDevirtualOpt/subtype_unknown_external_ti.ll
+@@ -0,0 +1,35 @@
++; RUN: opt '-passes=cj-devirtual-opt' --cangjie-pipeline -S < %s | FileCheck %s
++;
++; `Box(foo2)` where `foo2: (Any) -> Unit` is checked at runtime against
++; `(Rune) -> Unit`. The check involves `Rune`/`Any` type infos which are
++; declared in `std.core` and therefore have no initializer in this module, so
++; the subtype relation can not be decided here and the runtime call must be
++; preserved. Folding it to `false` used to make -O2 return 1 while -O0 returns
++; 0 (the function parameter is contra-variant, so the runtime answers `true`).
++
++%TypeInfo = type { i8*, i8, i8, i16, i32, i8*, i32, i8, i8, i16, i32*, i8*, i8*, i8*, %TypeInfo*, i8**, i8*, i8* }
++
++@Unit.ti = external global %TypeInfo
++@Rune.ti = external global %TypeInfo
++@"std.core:Any.ti" = external global %TypeInfo
++
++@"(Rune)->Unit.ti" = linkonce_odr global %TypeInfo { i8* null, i8 19, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 2, i16 -32768, i32* null, i8* null, i8* bitcast ([2 x %TypeInfo*]* @"(Rune)->Unit.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"(Rune)->Unit.ti.typeArgs" = private unnamed_addr constant [2 x %TypeInfo*] [%TypeInfo* @Unit.ti, %TypeInfo* @Rune.ti]
++@"(std.core:Any)->Unit.ti" = linkonce_odr global %TypeInfo { i8* null, i8 19, i8 0, i16 0, i32 8, i8* null, i32 0, i8 8, i8 2, i16 -32768, i32* null, i8* null, i8* bitcast ([2 x %TypeInfo*]* @"(std.core:Any)->Unit.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"(std.core:Any)->Unit.ti.typeArgs" = private unnamed_addr constant [2 x %TypeInfo*] [%TypeInfo* @Unit.ti, %TypeInfo* @"std.core:Any.ti"]
++
++@"Closure<(Rune)->Unit>.ti" = linkonce_odr global %TypeInfo { i8* null, i8 -125, i8 0, i16 2, i32 16, i8* null, i32 0, i8 8, i8 1, i16 -32768, i32* null, i8* null, i8* bitcast ([1 x %TypeInfo*]* @"Closure<(Rune)->Unit>.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"Closure<(Rune)->Unit>.ti.typeArgs" = private unnamed_addr constant [1 x %TypeInfo*] [%TypeInfo* @"(Rune)->Unit.ti"]
++@"Closure<(std.core:Any)->Unit>.ti" = linkonce_odr global %TypeInfo { i8* null, i8 -125, i8 0, i16 2, i32 16, i8* null, i32 0, i8 8, i8 1, i16 -32768, i32* null, i8* null, i8* bitcast ([1 x %TypeInfo*]* @"Closure<(std.core:Any)->Unit>.ti.typeArgs" to i8*), i8* null, %TypeInfo* null, i8** null, i8* null, i8* null }
++@"Closure<(std.core:Any)->Unit>.ti.typeArgs" = private unnamed_addr constant [1 x %TypeInfo*] [%TypeInfo* @"(std.core:Any)->Unit.ti"]
++
++@"default:$CfN7default4foo2HCNat3AnyE.ti" = internal global %TypeInfo { i8* null, i8 -128, i8 0, i16 2, i32 16, i8* null, i32 0, i8 8, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* @"Closure<(std.core:Any)->Unit>.ti", i8** null, i8* null, i8* null }
++
++; CHECK-LABEL: define i1 @test(
++; CHECK: call i1 @CJ_MCC_IsSubType
++define i1 @test() {
++  %r = call i1 @CJ_MCC_IsSubType(i8* bitcast (%TypeInfo* @"default:$CfN7default4foo2HCNat3AnyE.ti" to i8*), i8* bitcast (%TypeInfo* @"Closure<(Rune)->Unit>.ti" to i8*))
++  ret i1 %r
++}
++
++declare i1 @CJ_MCC_IsSubType(i8*, i8*)
 diff --git a/llvm/test/Transforms/CJExceptionTailOutline/outline-factory-tail.ll b/llvm/test/Transforms/CJExceptionTailOutline/outline-factory-tail.ll
 new file mode 100644
 index 000000000..b4b9b011b
@@ -112419,6 +113638,506 @@ index 000000000..2a4daa3cb
 +  call void %3(%Unit.Type* noalias sret(%Unit.Type) %1, i8 addrspace(1)* %a)
 +  ret void
 +}
+diff --git a/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/control_flow.ll b/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/control_flow.ll
+new file mode 100644
+index 000000000..73b0c5ed0
+--- /dev/null
++++ b/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/control_flow.ll
+@@ -0,0 +1,287 @@
++; RUN: opt < %s -passes=cj-insert-remove-local-finalizer -S | FileCheck %s
++
++; Every CJ_MCC_AddLocalFinalizer must be paired with a
++; CJ_MCC_RemoveLocalFinalizer at the end of the object's live range -- on every
++; path, exactly once. These tests pin down the placement for ordinary control
++; flow; the exception-handling shapes live in exceptions.ll.
++
++%Cls = type { i8*, i64 }
++
++declare i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8*, i32)
++declare void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)*)
++declare void @use(i8 addrspace(1)*)
++declare void @use_cls(%Cls addrspace(1)*)
++declare i1 @cond()
++
++
++; A heap finalizer is never registered as a local one, so it must be left alone.
++
++define void @heap_finalizer_untouched(i8* %ti) {
++; CHECK-LABEL: @heap_finalizer_untouched(
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:         ret void
++;
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @use(i8 addrspace(1)* %obj)
++  ret void
++}
++
++
++; The registration itself is the only use: the object is dead as soon as it is
++; registered, so the Remove follows immediately.
++
++define void @dead_on_arrival(i8* %ti) {
++; CHECK-LABEL: @dead_on_arrival(
++; CHECK:         call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    ret void
++;
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  ret void
++}
++
++
++; The object is only used on one arm of the branch. The other arm never touches
++; it, but it is just as dead there, so it needs its own Remove.
++
++define void @diamond(i8* %ti, i1 %c) {
++; CHECK-LABEL: @diamond(
++; CHECK:         call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:       then:
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK:       else:
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK:       exit:
++; CHECK-NEXT:    ret void
++;
++entry:
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  br i1 %c, label %then, label %else
++then:
++  call void @use(i8 addrspace(1)* %obj)
++  br label %exit
++else:
++  br label %exit
++exit:
++  ret void
++}
++
++
++; The object flows into phi nodes. It stays alive until the last use of the
++; phis, and %merge is also reached from a path where the phis are *not* the
++; object -- inserting on that incoming edge as well would remove it twice.
++
++define void @phi_merge(i8* %ti, i1 %c, i8 addrspace(1)* %other) {
++; CHECK-LABEL: @phi_merge(
++; CHECK:       then:
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:       else:
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:       merge:
++; CHECK:         call void @use(i8 addrspace(1)* %p)
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %q)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    ret void
++;
++entry:
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  br i1 %c, label %then, label %else
++then:
++  br label %merge
++else:
++  br label %merge
++merge:
++  %p = phi i8 addrspace(1)* [ %obj, %then ], [ %other, %else ]
++  %q = phi i8 addrspace(1)* [ %obj, %then ], [ %other, %else ]
++  call void @use(i8 addrspace(1)* %p)
++  call void @use(i8 addrspace(1)* %q)
++  ret void
++}
++
++
++; Same, but the last phi of the block is not the one carrying the object. The
++; call must not land between the phi nodes -- that is invalid IR.
++
++define i32 @phi_not_last(i8* %ti, i1 %c, i8 addrspace(1)* %other, i32 %x) {
++; CHECK-LABEL: @phi_not_last(
++; CHECK:       merge:
++; CHECK-NEXT:    %p = phi i8 addrspace(1)*
++; CHECK-NEXT:    %n = phi i32
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %p)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    ret i32 %n
++;
++entry:
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  br i1 %c, label %then, label %else
++then:
++  br label %merge
++else:
++  br label %merge
++merge:
++  %p = phi i8 addrspace(1)* [ %obj, %then ], [ %other, %else ]
++  %n = phi i32 [ %x, %then ], [ 0, %else ]
++  call void @use(i8 addrspace(1)* %p)
++  ret i32 %n
++}
++
++
++; A select may yield the object, so the object is live until the select's
++; result is dead.
++
++define void @select_derived(i8* %ti, i1 %c, i8 addrspace(1)* %other) {
++; CHECK-LABEL: @select_derived(
++; CHECK:         %p = select i1 %c, i8 addrspace(1)* %obj, i8 addrspace(1)* %other
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %p)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++;
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  %p = select i1 %c, i8 addrspace(1)* %obj, i8 addrspace(1)* %other
++  call void @use(i8 addrspace(1)* %p)
++  ret void
++}
++
++
++; The object is normally cast to its class type before being used, so a use of
++; the bitcast keeps the object alive.
++
++define void @bitcast_derived(i8* %ti) {
++; CHECK-LABEL: @bitcast_derived(
++; CHECK:         %bc = bitcast i8 addrspace(1)* %obj to %Cls addrspace(1)*
++; CHECK-NEXT:    call void @use_cls(%Cls addrspace(1)* %bc)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++;
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  %bc = bitcast i8 addrspace(1)* %obj to %Cls addrspace(1)*
++  call void @use_cls(%Cls addrspace(1)* %bc)
++  ret void
++}
++
++
++; Created before the loop and used inside it: the back edge keeps it live
++; through the whole body, so the Remove belongs on the exit edge.
++
++define void @loop_use(i8* %ti) {
++; CHECK-LABEL: @loop_use(
++; CHECK:       head:
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %obj)
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:       exit:
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    ret void
++;
++entry:
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  br label %head
++head:
++  call void @use(i8 addrspace(1)* %obj)
++  %c = call i1 @cond()
++  br i1 %c, label %head, label %exit
++exit:
++  ret void
++}
++
++
++; Created *inside* the loop: a fresh object per iteration, each registered and
++; unregistered within its own iteration.
++
++define void @loop_new(i8* %ti) {
++; CHECK-LABEL: @loop_new(
++; CHECK:       head:
++; CHECK:         call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK:       exit:
++; CHECK-NEXT:    ret void
++;
++entry:
++  br label %head
++head:
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  call void @use(i8 addrspace(1)* %obj)
++  %c = call i1 @cond()
++  br i1 %c, label %head, label %exit
++exit:
++  ret void
++}
++
++
++; Stored into a local variable and read back: the object is still alive after
++; the store, so the Remove goes after the use of the loaded value.
++
++define void @slot_roundtrip(i8* %ti) {
++; CHECK-LABEL: @slot_roundtrip(
++; CHECK:         store i8 addrspace(1)* %obj, i8 addrspace(1)** %slot
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:         %l = load i8 addrspace(1)*, i8 addrspace(1)** %slot
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %l)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++;
++  %slot = alloca i8 addrspace(1)*
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  store i8 addrspace(1)* %obj, i8 addrspace(1)** %slot
++  %l = load i8 addrspace(1)*, i8 addrspace(1)** %slot
++  call void @use(i8 addrspace(1)* %l)
++  ret void
++}
++
++
++; The load is fed by a store from either arm, so no single store defines it.
++; Tracking the slot rather than an individual store keeps the object alive.
++
++define void @slot_memory_phi(i8* %ti, i1 %c) {
++; CHECK-LABEL: @slot_memory_phi(
++; CHECK:       a:
++; CHECK-NEXT:    store i8 addrspace(1)* %obj, i8 addrspace(1)** %slot
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:       b:
++; CHECK-NEXT:    store i8 addrspace(1)* %obj, i8 addrspace(1)** %slot
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:       m:
++; CHECK-NEXT:    %l = load i8 addrspace(1)*, i8 addrspace(1)** %slot
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %l)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++;
++entry:
++  %slot = alloca i8 addrspace(1)*
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  br i1 %c, label %a, label %b
++a:
++  store i8 addrspace(1)* %obj, i8 addrspace(1)** %slot
++  br label %m
++b:
++  store i8 addrspace(1)* %obj, i8 addrspace(1)** %slot
++  br label %m
++m:
++  %l = load i8 addrspace(1)*, i8 addrspace(1)** %slot
++  call void @use(i8 addrspace(1)* %l)
++  ret void
++}
++
++
++; Stored into a heap field: the object outlives this function through memory we
++; cannot follow, so it is left registered rather than unregistered too early.
++
++define void @escape_to_heap(i8* %ti, i8 addrspace(1)* addrspace(1)* %field) {
++; CHECK-LABEL: @escape_to_heap(
++; CHECK:         call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:         ret void
++;
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  store i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field
++  ret void
++}
+diff --git a/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/exceptions.ll b/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/exceptions.ll
+new file mode 100644
+index 000000000..09a29b8bc
+--- /dev/null
++++ b/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/exceptions.ll
+@@ -0,0 +1,121 @@
++; RUN: opt < %s -passes=cj-insert-remove-local-finalizer -S | FileCheck %s
++
++; Unwinding out of a local finalizer's live range is just another way for it to
++; die, and a landing pad shared by several invokes must still be unregistered
++; only once.
++;
++; The landing pads here are `landingpad token`, which is what the Cangjie
++; frontend emits and what CJRewriteStatepoint requires -- it uses the landing
++; pad as the token operand of the exceptional gc.relocates it generates.
++
++declare i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8*, i32)
++declare void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)*)
++declare void @use(i8 addrspace(1)*)
++declare void @mayThrow()
++declare void @cleanupAction()
++declare i32 @personality_function()
++
++
++; The object survives the invoke on the normal path but is dead on the unwind
++; path, which never mentions it. Without a Remove in the landing pad the
++; registration would leak whenever the call throws.
++
++define void @live_across_invoke(i8* %ti) gc "cangjie" personality i32 ()* @personality_function {
++; CHECK-LABEL: @live_across_invoke(
++; CHECK:         invoke void @mayThrow()
++; CHECK:       cont:
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    ret void
++; CHECK:       lpad:
++; CHECK-NEXT:    landingpad token
++; CHECK-NEXT:      cleanup
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @cleanupAction()
++;
++entry:
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  invoke void @mayThrow() to label %cont unwind label %lpad
++cont:
++  call void @use(i8 addrspace(1)* %obj)
++  ret void
++lpad:
++  %l = landingpad token cleanup
++  call void @cleanupAction()
++  ret void
++}
++
++
++; Two invokes consume the object and share both successors. Every edge into
++; each successor is dead, so a single Remove per successor is enough -- one per
++; incoming edge would unregister the object twice.
++
++define void @shared_landing_pad(i8* %ti, i1 %c) gc "cangjie" personality i32 ()* @personality_function {
++; CHECK-LABEL: @shared_landing_pad(
++; CHECK:       exit:
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    ret void
++; CHECK:       lpad:
++; CHECK-NEXT:    landingpad token
++; CHECK-NEXT:      cleanup
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @cleanupAction()
++;
++entry:
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  br i1 %c, label %b1, label %b2
++b1:
++  invoke void @use(i8 addrspace(1)* %obj) to label %exit unwind label %lpad
++b2:
++  invoke void @use(i8 addrspace(1)* %obj) to label %exit unwind label %lpad
++exit:
++  ret void
++lpad:
++  %l = landingpad token cleanup
++  call void @cleanupAction()
++  ret void
++}
++
++
++; Here the object only exists on the %b1 path, while both successors are also
++; reached from %b2. The Remove cannot go into a shared successor -- %obj does
++; not dominate it -- so both critical edges out of %b1 are split, the unwind one
++; by cloning the landing pad.
++
++define void @split_critical_edges(i8* %ti, i1 %c) gc "cangjie" personality i32 ()* @personality_function {
++; CHECK-LABEL: @split_critical_edges(
++; CHECK:       b1:
++; CHECK:         call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    invoke void @use(i8 addrspace(1)* %obj)
++; CHECK-NEXT:      to label %[[NORMAL:.*]] unwind label %[[UNWIND:.*]]
++; CHECK:       [[NORMAL]]:
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    br label %exit
++; CHECK:       b2:
++; CHECK-NEXT:    invoke void @mayThrow()
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:       exit:
++; CHECK-NEXT:    ret void
++; CHECK:       [[UNWIND]]:
++; CHECK-NEXT:    landingpad token
++; CHECK-NEXT:      cleanup
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NOT:     call void @CJ_MCC_RemoveLocalFinalizer
++;
++entry:
++  br i1 %c, label %b1, label %b2
++b1:
++  %obj = call i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 32)
++  call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++  invoke void @use(i8 addrspace(1)* %obj) to label %exit unwind label %lpad
++b2:
++  invoke void @mayThrow() to label %exit unwind label %lpad
++exit:
++  ret void
++lpad:
++  %l = landingpad token cleanup
++  call void @cleanupAction()
++  ret void
++}
+diff --git a/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/pipeline.ll b/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/pipeline.ll
+new file mode 100644
+index 000000000..abb2b6da2
+--- /dev/null
++++ b/llvm/test/Transforms/CJInsertRemoveLocalFinalizer/pipeline.ll
+@@ -0,0 +1,74 @@
++; Mirrors the real pass ordering: CJRuntimeLowering emits the registration, the
++; optimizer runs, and only then does this pass pair it up. The point is that
++; CJ_MCC_AddLocalFinalizer survives optimization and is still pairable, and that
++; the pass copes with the optimized shapes (promoted slots, threaded branches)
++; rather than the raw frontend ones.
++;
++; RUN: opt < %s -S \
++; RUN:   -passes='cj-runtime-lowering,function(sroa,instcombine,simplifycfg),function(cj-insert-remove-local-finalizer)' \
++; RUN:   | FileCheck %s
++
++%TypeInfo = type { i8*, i8, i8, i16, i32, i8*, i32, i8, i8, i32*, i8*, i8*, i8*, i8*, i8*, i8* }
++
++declare i8 addrspace(1)* @llvm.cj.malloc.local.object(i8*, i32)
++declare void @use(i8 addrspace(1)*)
++declare void @mayThrow()
++declare void @cleanupAction()
++declare i32 @personality_function()
++
++
++; The local variable slot is promoted by SROA, so by the time this pass runs the
++; object is plain SSA and the whole diamond has collapsed: one registration, one
++; unregistration.
++
++define void @slot_promoted_away(i8* %ti, i1 %c) gc "cangjie" {
++; CHECK-LABEL: @slot_promoted_away(
++; CHECK:         call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @use(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    ret void
++;
++entry:
++  %slot = alloca i8 addrspace(1)*
++  %obj = call noalias i8 addrspace(1)* @llvm.cj.malloc.local.object(i8* %ti, i32 32), !MallocType !0
++  store i8 addrspace(1)* %obj, i8 addrspace(1)** %slot
++  br i1 %c, label %a, label %b
++a:
++  br label %m
++b:
++  br label %m
++m:
++  %l = load i8 addrspace(1)*, i8 addrspace(1)** %slot
++  call void @use(i8 addrspace(1)* %l)
++  ret void
++}
++
++
++; Optimization does not disturb the exception edges: the object is still
++; unregistered on both the normal and the unwind path, once each.
++
++define void @eh_survives_opt(i8* %ti) gc "cangjie" personality i32 ()* @personality_function {
++; CHECK-LABEL: @eh_survives_opt(
++; CHECK:         call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK:         invoke void @mayThrow()
++; CHECK:         call void @use(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK:         landingpad token
++; CHECK-NEXT:      cleanup
++; CHECK-NEXT:    call void @CJ_MCC_RemoveLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    call void @cleanupAction()
++; CHECK-NOT:     call void @CJ_MCC_RemoveLocalFinalizer
++;
++entry:
++  %obj = call noalias i8 addrspace(1)* @llvm.cj.malloc.local.object(i8* %ti, i32 32), !MallocType !0
++  invoke void @mayThrow() to label %cont unwind label %lpad
++cont:
++  call void @use(i8 addrspace(1)* %obj)
++  ret void
++lpad:
++  %l = landingpad token cleanup
++  call void @cleanupAction()
++  ret void
++}
++
++!0 = !{!"HasFinalizer"}
 diff --git a/llvm/test/Transforms/CJLoopFloatOpt/loop-float-opt1.ll b/llvm/test/Transforms/CJLoopFloatOpt/loop-float-opt1.ll
 new file mode 100644
 index 000000000..51856992d
@@ -126277,27 +127996,224 @@ index 000000000..0c09292f4
 +attributes #0 = { "CFileKlass" "NotModifiableClass" }
 +
 +!0 = !{!"Int64.Type"}
+diff --git a/llvm/test/Transforms/CJRuntimeLowering/demode_write_ref.ll b/llvm/test/Transforms/CJRuntimeLowering/demode_write_ref.ll
+new file mode 100644
+index 000000000..466775fbb
+--- /dev/null
++++ b/llvm/test/Transforms/CJRuntimeLowering/demode_write_ref.ll
+@@ -0,0 +1,55 @@
++; RUN: opt < %s -passes=cj-runtime-lowering -S | FileCheck %s
++
++; llvm.cj.demode.write.ref is emitted for a store into a `demode` instance field. A demoded
++; field always has mode `~local`, so the stored value is statically known to be on the heap,
++; while the owning object may still live in a local region -- i.e. this explicitly creates a
++; region -> heap edge. It must be lowered to a plain call to CJ_MCC_DemodeWriteRef.
++;
++; Same two properties as maybe_local_write_ref.ll:
++;  1. The argument order (obj, field, value) must be preserved -- it matches the runtime ABI
++;     and differs from llvm.cj.gcwrite.ref, which is (value, obj, field).
++;  2. The lowering must happen in this pass rather than in CJBarrierLowering, whose fast path
++;     would replace the barrier with a plain store when the GC phase is idle, silently dropping
++;     the local-GC-root registration.
++;
++; It is kept separate from llvm.cj.maybe.local.write.ref so the runtime does not have to
++; re-check whether the stored value is region-allocated.
++
++declare void @llvm.cj.demode.write.ref(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)* addrspace(1)*)
++declare void @llvm.cj.maybe.local.write.ref(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)* addrspace(1)*)
++declare void @llvm.cj.gcwrite.ref(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)* addrspace(1)*)
++
++define void @demode_write(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field) gc "cangjie" {
++; CHECK-LABEL: define void @demode_write
++; CHECK: call void @CJ_MCC_DemodeWriteRef(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++; CHECK-NOT: llvm.cj.demode.write.ref
++entry:
++  call void @llvm.cj.demode.write.ref(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++  ret void
++}
++
++; The two modal barriers must stay distinct runtime calls.
++define void @both_modal_barriers(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field) gc "cangjie" {
++; CHECK-LABEL: define void @both_modal_barriers
++; CHECK: call void @CJ_MCC_MaybeLocalWriteRef
++; CHECK: call void @CJ_MCC_DemodeWriteRef
++entry:
++  call void @llvm.cj.maybe.local.write.ref(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++  call void @llvm.cj.demode.write.ref(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++  ret void
++}
++
++; An ordinary reference write barrier is left untouched by this pass; it is lowered later, by
++; CJBarrierLowering.
++define void @ordinary_write(i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field, i8 addrspace(1)* %value) gc "cangjie" {
++; CHECK-LABEL: define void @ordinary_write
++; CHECK: call void @llvm.cj.gcwrite.ref(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++entry:
++  call void @llvm.cj.gcwrite.ref(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++  ret void
++}
++
++; The runtime function must be declared as a GC leaf: CJ_MCC_DemodeWriteRef is exported as a
++; plain alias without a callee-saved-register stub, so it cannot act as a safepoint.
++; CHECK: declare void @CJ_MCC_DemodeWriteRef(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)* addrspace(1)*) #[[ATTR:[0-9]+]]
++; CHECK: attributes #[[ATTR]] = {{{.*}}"gc-leaf-function"{{.*}}}
+diff --git a/llvm/test/Transforms/CJRuntimeLowering/local_array_no_fastpath.ll b/llvm/test/Transforms/CJRuntimeLowering/local_array_no_fastpath.ll
+new file mode 100644
+index 000000000..01e985646
+--- /dev/null
++++ b/llvm/test/Transforms/CJRuntimeLowering/local_array_no_fastpath.ll
+@@ -0,0 +1,35 @@
++; RUN: opt -passes=cj-runtime-lowering -S < %s | FileCheck %s
++
++; A local-mode array must never take the NewArrayFast inline fast path: the fast path
++; allocates from the normal heap TLR AllocBuffer while the local-object root registry
++; keeps referencing the memory, so a later GC cycle recycles it underneath the local
++; roots and concurrent marking then dereferences overwritten memory. The lowering of
++; llvm.cj.malloc.local.array therefore must always take the slow path into the
++; local-object allocator (CJ_MCC_NewLocalObjArray), keeping the size operand poisoned
++; and never attaching the !fast_new_array marker -- even when length and element size
++; are compile-time constants, which is exactly the shape that would enable the fast
++; path for a heap array.
++
++%BitMap = type { i32, [0 x i8] }
++%TypeTemplate = type { i8*, i8, i8, i16, i16, i8*, i8*, i8*, i8* }
++%TypeInfo = type { i8*, i8, i8, i16, i32, %BitMap*, i32, i8, i8, i32*, i8*, i8*, i8*, %TypeInfo*, i8*, i8* }
++%ArrayLayout.refArray = type { %ArrayBase, [0 x i8 addrspace(1)*] }
++%ArrayBase = type { i64 }
++
++@"RawArray<default:D>.ti" = internal global %TypeInfo { i8* getelementptr inbounds ([20 x i8], [20 x i8]* @"RawArray<default:D>.name", i32 0, i32 0), i8 -126, i8 0, i16 0, i32 8, %BitMap* null, i32 0, i8 8, i8 0, i32* null, i8* bitcast (%TypeTemplate* @RawArray.tt to i8*), i8* null, i8* null, %TypeInfo* @"std.core:Object.ti", i8* null, i8* null }, !RelatedType !0
++@"RawArray<default:D>.name" = internal global [20 x i8] c"RawArray<default:D>\00", align 1
++@RawArray.tt = external global %TypeTemplate
++@"std.core:Object.ti" = external global %TypeInfo
++
++declare i8 addrspace(1)* @llvm.cj.malloc.local.array(i8*, i64, i64)
++
++define i8 addrspace(1)* @local_array_const_length() gc "cangjie" {
++; CHECK-LABEL: define i8 addrspace(1)* @local_array_const_length
++; CHECK: call noalias i8 addrspace(1)* @CJ_MCC_NewLocalObjArray(i8* bitcast (%TypeInfo* @"RawArray<default:D>.ti" to i8*), i64 100, i64 poison)
++; CHECK-NOT: !fast_new_array
++entry:
++  %r = call noalias i8 addrspace(1)* @llvm.cj.malloc.local.array(i8* bitcast (%TypeInfo* @"RawArray<default:D>.ti" to i8*), i64 100, i64 8)
++  ret i8 addrspace(1)* %r
++}
++
++!0 = !{!"ArrayLayout.refArray"}
+diff --git a/llvm/test/Transforms/CJRuntimeLowering/maybe_local_write_generic.ll b/llvm/test/Transforms/CJRuntimeLowering/maybe_local_write_generic.ll
+new file mode 100644
+index 000000000..e248513c4
+--- /dev/null
++++ b/llvm/test/Transforms/CJRuntimeLowering/maybe_local_write_generic.ll
+@@ -0,0 +1,21 @@
++; RUN: opt < %s -passes=cj-runtime-lowering -S | FileCheck %s
++
++; llvm.cj.maybe.local.write.generic is emitted for a generic (unspecified-layout) value
++; written into an object that may live in a local region. It must be lowered to a plain
++; call to CJ_MCC_MaybeLocalWriteGeneric with the argument order (value, obj, field, size)
++; preserved, and the runtime function must be declared as a GC leaf (no safepoint stub),
++; mirroring the ref-typed sibling CJ_MCC_MaybeLocalWriteRef.
++
++declare void @llvm.cj.maybe.local.write.generic(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)*, i32)
++
++define void @maybe_local_write_generic(i8 addrspace(1)* %obj, i8 addrspace(1)* %field, i8 addrspace(1)* %value, i32 %size) gc "cangjie" {
++; CHECK-LABEL: define void @maybe_local_write_generic
++; CHECK: call void @CJ_MCC_MaybeLocalWriteGeneric(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* %field, i32 %size)
++; CHECK-NOT: llvm.cj.maybe.local.write.generic
++entry:
++  call void @llvm.cj.maybe.local.write.generic(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* %field, i32 %size)
++  ret void
++}
++
++; CHECK: declare void @CJ_MCC_MaybeLocalWriteGeneric(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)*, i32) #[[ATTR:[0-9]+]]
++; CHECK: attributes #[[ATTR]] = {{{.*}}"gc-leaf-function"{{.*}}}
+diff --git a/llvm/test/Transforms/CJRuntimeLowering/maybe_local_write_ref.ll b/llvm/test/Transforms/CJRuntimeLowering/maybe_local_write_ref.ll
+new file mode 100644
+index 000000000..07bb270f3
+--- /dev/null
++++ b/llvm/test/Transforms/CJRuntimeLowering/maybe_local_write_ref.ll
+@@ -0,0 +1,40 @@
++; RUN: opt < %s -passes=cj-runtime-lowering -S | FileCheck %s
++
++; llvm.cj.maybe.local.write.ref is emitted for a store into an instance field whose owning
++; object may live in a local region (`this` inside `init(this @local?)`). It must be lowered
++; to a plain call to CJ_MCC_MaybeLocalWriteRef.
++;
++; Two properties matter here:
++;  1. The argument order (obj, field, value) must be preserved. It deliberately differs from
++;     llvm.cj.gcwrite.ref, which is (value, obj, field), because it matches the runtime ABI.
++;  2. The lowering must happen in this pass rather than in CJBarrierLowering. Although this is
++;     a write barrier, it must additionally register the owning local object as a GC root
++;     unconditionally, and CJBarrierLowering's fast path would replace the barrier with a plain
++;     store whenever the GC phase is idle, silently dropping that registration.
++
++declare void @llvm.cj.maybe.local.write.ref(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)* addrspace(1)*)
++declare void @llvm.cj.gcwrite.ref(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)* addrspace(1)*)
++
++define void @maybe_local_write(i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field, i8 addrspace(1)* %value) gc "cangjie" {
++; CHECK-LABEL: define void @maybe_local_write
++; CHECK: call void @CJ_MCC_MaybeLocalWriteRef(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++; CHECK-NOT: llvm.cj.maybe.local.write.ref
++entry:
++  call void @llvm.cj.maybe.local.write.ref(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++  ret void
++}
++
++; An ordinary reference write barrier is left untouched by this pass; it is lowered later, by
++; CJBarrierLowering.
++define void @ordinary_write(i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field, i8 addrspace(1)* %value) gc "cangjie" {
++; CHECK-LABEL: define void @ordinary_write
++; CHECK: call void @llvm.cj.gcwrite.ref(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++entry:
++  call void @llvm.cj.gcwrite.ref(i8 addrspace(1)* %value, i8 addrspace(1)* %obj, i8 addrspace(1)* addrspace(1)* %field)
++  ret void
++}
++
++; The runtime function must be declared as a GC leaf: CJ_MCC_MaybeLocalWriteRef is exported as
++; a plain alias without a callee-saved-register stub, so it cannot act as a safepoint.
++; CHECK: declare void @CJ_MCC_MaybeLocalWriteRef(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)* addrspace(1)*) #[[ATTR:[0-9]+]]
++; CHECK: attributes #[[ATTR]] = {{{.*}}"gc-leaf-function"{{.*}}}
 diff --git a/llvm/test/Transforms/CJRuntimeLowering/new_finalier.ll b/llvm/test/Transforms/CJRuntimeLowering/new_finalier.ll
 new file mode 100644
-index 000000000..2b5883163
+index 000000000..631aed667
 --- /dev/null
 +++ b/llvm/test/Transforms/CJRuntimeLowering/new_finalier.ll
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,39 @@
 +; RUN: opt < %s -passes=cj-runtime-lowering -S | FileCheck %s
 +%TypeInfo = type { i8*, i8, i8, i16, i32, i8*, i32, i8, i8, i32*, i8*, i8*, i8*, i8*, i8*, i8* }
 +
 +declare i8 addrspace(1)* @llvm.cj.malloc.object(i8*, i32)
++declare i8 addrspace(1)* @llvm.cj.malloc.local.object(i8*, i32)
 +
 +; NewFinalier cannot add "cj-malloc" attribute, because it may call a finalier method when destructor performing.
 +
++; A heap finalizer is owned by the GC, so it is neither registered nor
++; unregistered as a local one.
 +define void @lower_new_finalier(i8* %ti, i8** %s) {
 +; CHECK-LABEL: @lower_new_finalier(
-+; CHECK:    declare i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8*, i32) #1
-+; CHECK:    attributes #1 = { "cj-runtime" }
++; CHECK:         %obj = call noalias i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8* %ti, i32 %{{[0-9]+}})
++; CHECK-NOT:     @CJ_MCC_AddLocalFinalizer
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++; CHECK:         ret void
 +;
 +  %obj = call noalias i8 addrspace(1)* @llvm.cj.malloc.object(i8* %ti, i32 32), !MallocType !0
 +  ret void
 +}
++
++; A LocalMode finalizer object is registered right after it is created. The
++; matching CJ_MCC_RemoveLocalFinalizer is inserted later in the pipeline by
++; cj-insert-remove-local-finalizer, so it is not expected here.
++define void @lower_new_local_finalier(i8* %ti) {
++; CHECK-LABEL: @lower_new_local_finalier(
++; CHECK:         %obj = call noalias i8 addrspace(1)* @CJ_MCC_NewLocalObject(i8* %ti, i32 %{{[0-9]+}})
++; CHECK-NEXT:    call void @CJ_MCC_AddLocalFinalizer(i8 addrspace(1)* %obj)
++; CHECK-NEXT:    ret void
++; CHECK-NOT:     @CJ_MCC_RemoveLocalFinalizer
++;
++  %obj = call noalias i8 addrspace(1)* @llvm.cj.malloc.local.object(i8* %ti, i32 32), !MallocType !0
++  ret void
++}
++
++; CHECK:       declare i8 addrspace(1)* @CJ_MCC_NewFinalizer(i8*, i32) #[[RT:[0-9]+]]
++; CHECK:       attributes #[[RT]] = { "cj-runtime" }
 +
 +!0 = !{!"HasFinalizer"}
 diff --git a/llvm/test/Transforms/CJRuntimeLowering/runtime_func_attribute.ll b/llvm/test/Transforms/CJRuntimeLowering/runtime_func_attribute.ll
@@ -128623,6 +130539,37 @@ index 2a1892828..0b100a2f0 100644
    call void @foo()
    br label %loop
  }
+diff --git a/llvm/test/Transforms/TailCallElim/notail.ll b/llvm/test/Transforms/TailCallElim/notail.ll
+index 7b1584822..42addf614 100644
+--- a/llvm/test/Transforms/TailCallElim/notail.ll
++++ b/llvm/test/Transforms/TailCallElim/notail.ll
+@@ -1,7 +1,10 @@
+ ; RUN: opt < %s -passes=tailcallelim -verify-dom-info -S | FileCheck %s
++; RUN: opt < %s -passes=tailcallelim -verify-dom-info --cangjie-pipeline -S | FileCheck %s
+ 
+ ; CHECK: tail call void @callee0()
+ ; CHECK: notail call void @callee1()
++; CHECK: notail call void @callee2()
++; CHECK-NEXT: ret void
+ 
+ define void @foo1(i32 %a) {
+ entry:
+@@ -20,5 +23,15 @@ if.end:
+   ret void
+ }
+ 
++; A notail call immediately followed by ret is still a tail-call candidate
++; shape for TCE (e.g. the CJ_MCC_EndLocalRegion emitted before a function
++; return); TCE must keep the notail attribute and must not mark it as tail.
++define void @foo2() {
++entry:
++  notail call void @callee2()
++  ret void
++}
++
+ declare void @callee0()
+ declare void @callee1()
++declare void @callee2()
 diff --git a/llvm/test/Verifier/invalid-statepoint.ll b/llvm/test/Verifier/invalid-statepoint.ll
 index 4e8f9815a..8ef18e4a8 100644
 --- a/llvm/test/Verifier/invalid-statepoint.ll
