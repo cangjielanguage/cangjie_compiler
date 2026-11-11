@@ -33,6 +33,10 @@ using MemSigSet = std::unordered_set<AST::MemSig, AST::MemSigHash>;
 // If left == right, return EQ.
 enum class ComparisonRes { LT, GT, EQ };
 
+/// Return the underlying value expression without changing its type, scope or source AST.
+AST::Expr& UnwrapParenExpr(AST::Expr& expr);
+const AST::Expr& UnwrapParenExpr(const AST::Expr& expr);
+
 /*
  * Questable nodes need to allow QuestTy in target type and
  * use synthesized type instead of target type as its own ty.

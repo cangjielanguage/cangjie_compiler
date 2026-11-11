@@ -391,8 +391,8 @@ void WalkFuncLikeLocalCaptureRefs(const ASTContext& ctx, const Node& funcLike, B
                 visit(*re);
                 return VisitAction::SKIP_CHILDREN;
             }
-            if (auto target = DynamicCast<VarDecl>(re->GetTarget());
-                target && !target->TestAnyAttr(Attribute::STATIC, Attribute::GLOBAL)) {
+            if (auto target = re->GetTarget(); target && (Is<VarDecl>(target) || Is<FuncDecl>(target)) &&
+                !target->TestAnyAttr(Attribute::STATIC, Attribute::GLOBAL) && !target->IsMemberDecl()) {
                 auto targetDefSite = ScopeManager::GetCurSymbolByKind(SymbolKind::FUNC_LIKE, ctx, target->scopeName);
                 if (!targetDefSite || !targetDefSite->node || targetDefSite->node == &funcLike) {
                     return VisitAction::WALK_CHILDREN;
@@ -683,7 +683,8 @@ void TypeChecker::TypeCheckerImpl::InferLamExprModal(ASTContext& ctx, LambdaExpr
     bool capturesLocalHalf = false;
     WalkFuncLikeLocalCaptureRefs(
         ctx, le, le.funcBody->body.get(), [this, &ctx, &capturesLocalHalf](const RefExpr& re) {
-            if (GetReceiverTy(ctx, re).Mode().local == Mode::HALF) {
+            auto receiver = GetReceiverTy(ctx, re);
+            if (receiver.Mode().local == Mode::HALF && !typeManager.IsCopyType(receiver.Ty())) {
                 capturesLocalHalf = true;
             }
         });

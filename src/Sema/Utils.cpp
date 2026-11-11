@@ -439,7 +439,13 @@ void TypeChecker::TypeCheckerImpl::AddDefaultSuperCall(const FuncBody& funcBody)
     if (funcBody.body) {
         // Check if init has this @local! or this @local? and whole body is exclave
         bool shouldInsertIntoExclave = false;
-        if (!funcBody.body->body.empty() && funcBody.body->body[0]->astKind == ASTKind::EXCLAVE_EXPR) {
+        Ptr<ExclaveExpr> exclave = nullptr;
+        if (!funcBody.body->body.empty()) {
+            if (auto expr = DynamicCast<Expr>(funcBody.body->body[0].get())) {
+                exclave = DynamicCast<ExclaveExpr>(&UnwrapParenExpr(*expr));
+            }
+        }
+        if (exclave) {
             // cannot use thisParam ty, Ty has not been deduced yet
             auto& thisParam = funcBody.paramLists[0]->thisParam;
             if (thisParam && thisParam->modal.ToModalInfo() != Mode::NOT) {
@@ -448,12 +454,7 @@ void TypeChecker::TypeCheckerImpl::AddDefaultSuperCall(const FuncBody& funcBody)
         }
 
         if (shouldInsertIntoExclave) {
-            // skip invalid init body
-            if (!Is<ExclaveExpr>(funcBody.body->body[0])) {
-                return;
-            }
             // Insert into the first line of the exclave body
-            auto exclave = StaticCast<ExclaveExpr*>(funcBody.body->body[0].get());
             if (exclave->body) {
                 superCall->begin = exclave->body->leftCurlPos;
                 superCall->end = exclave->body->rightCurlPos;

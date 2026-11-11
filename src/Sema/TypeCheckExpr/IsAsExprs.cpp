@@ -46,7 +46,11 @@ ModalTy TypeChecker::TypeCheckerImpl::SynAsExpr(ASTContext& ctx, AsExpr& ae)
     if (Synthesize({ctx, SynPos::EXPR_ARG}, ae.leftExpr.get()).IsCorrect() &&
         Synthesize({ctx, SynPos::NONE}, ae.asType.get()).IsCorrect() && ReplaceIdealTy(*ae.leftExpr)) {
         if (auto optionDecl = DynamicCast<EnumDecl>(importManager.GetCoreDecl("Option"))) {
-            ae.SetTy({typeManager.GetEnumTy(*optionDecl, {ae.asType->DataTy()}), ae.leftExpr->TyMode()});
+            auto mode = ae.leftExpr->TyMode();
+            if (mode.local == Mode::FULL && IsExternalLocal(ctx, *ae.leftExpr)) {
+                mode.local = Mode::HALF;
+            }
+            ae.SetTy({typeManager.GetEnumTy(*optionDecl, {ae.asType->DataTy()}), mode});
         } else {
             diag.Diagnose(ae, DiagKind::sema_no_core_object);
             ae.SetTy({TypeManager::GetInvalidTy()});

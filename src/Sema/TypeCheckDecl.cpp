@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 
 #include "BuiltInOperatorUtil.h"
 #include "Diags.h"
@@ -87,6 +88,29 @@ private:
     ASTContext* ctx;
     size_t saved;
 };
+
+/// Infer the initializer's mode from uniform instance constructors without changing the field's data type.
+std::optional<ModalInfo> GetFieldInitializerMode(const VarDeclAbstract& vd)
+{
+    auto owner = DynamicCast<InheritableDecl>(vd.outerDecl);
+    if (!owner || !(Is<ClassDecl>(owner) || Is<StructDecl>(owner)) || !vd.IsMemberDecl() ||
+        vd.TestAttr(Attribute::STATIC) || HasModifier(vd.modifiers, TokenKind::DEMODE)) {
+        return std::nullopt;
+    }
+    std::optional<ModalInfo> mode;
+    for (auto member : owner->GetMemberDeclPtrs()) {
+        auto ctor = DynamicCast<FuncDecl>(member);
+        if (!ctor || !ctor->TestAttr(Attribute::CONSTRUCTOR) || ctor->TestAttr(Attribute::STATIC)) {
+            continue;
+        }
+        auto ctorMode = GetThisParamModal(*ctor);
+        if (mode && *mode != ctorMode) {
+            return std::nullopt;
+        }
+        mode = ctorMode;
+    }
+    return mode;
+}
 } // namespace
 
 void TypeChecker::TypeCheckerImpl::CheckFuncDecl(ASTContext& ctx, FuncDecl& fd)
@@ -353,6 +377,7 @@ void TypeChecker::TypeCheckerImpl::CheckVarWithPatternDecl(ASTContext& ctx, VarW
 template <typename T>
 void TypeChecker::TypeCheckerImpl::SynchronizeTypeAndInitializer(const CheckerContext& ctx, T& vd)
 {
+    auto fieldMode = ci->invocation.globalOptions.enableLocalMode ? GetFieldInitializerMode(vd) : std::nullopt;
     if (vd.type != nullptr && vd.initializer == nullptr) {
         Synthesize(ctx, vd.type.get());
         vd.SetTy(vd.type->GetTy());
@@ -362,13 +387,14 @@ void TypeChecker::TypeCheckerImpl::SynchronizeTypeAndInitializer(const CheckerCo
         if (vd.type->GetTy().IsCorrect()) {
             // User has defined vardecl's type. Should not be set to invalid even if initializer is incompatible.
             vd.SetTy(vd.type->GetTy());
+            auto target = fieldMode ? vd.type->GetTy().With(*fieldMode) : vd.type->GetTy();
             if (vd.type->GetTy()->IsRune() && IsSingleRuneStringLiteral(*vd.initializer)) {
-                vd.initializer->SetTy(vd.type->GetTy());
+                vd.initializer->SetTy(target);
             } else if (vd.type->TyKind() == TypeKind::TYPE_UINT8 && IsSingleByteStringLiteral(*vd.initializer)) {
-                vd.initializer->SetTy(vd.type->GetTy());
+                vd.initializer->SetTy(target);
                 ChkLitConstExprRange(StaticCast<LitConstExpr&>(*vd.initializer));
             } else {
-                bool isWellTyped = Check(ctx.Ctx(), vd.type->GetTy(), vd.initializer.get());
+                bool isWellTyped = Check(ctx.Ctx(), target, vd.initializer.get());
                 // Unset 'checked' attribute for local variables when there exists any error.
                 if (!isWellTyped && !IsGlobalOrMember(vd)) {
                     vd.DisableAttr(Attribute::IS_CHECK_VISITED);
@@ -400,6 +426,11 @@ void TypeChecker::TypeCheckerImpl::SynchronizeTypeAndInitializer(const CheckerCo
             }
         } else {
             vd.SetTy(vd.initializer->GetTy());
+        }
+        if (fieldMode && vd.GetTy().IsCorrect()) {
+            auto target = vd.GetTy().With(*fieldMode);
+            Check(ctx.Ctx(), target, vd.initializer.get());
+            vd.SetTy(vd.GetTy().With(Mode::NOT));
         }
         // global var cannot have local type, but for copy type we can infer it to not local to pass the check.
         if (IsGlobalOrMember(vd) && vd.GetTy().IsCorrect() && typeManager.IsCopyType(vd.DataTy())) {

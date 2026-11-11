@@ -725,19 +725,24 @@ Ptr<PropDecl> TypeChecker::TypeCheckerImpl::ResolvePropOverload(
         }
     }
 
-    // remove the props that are strictly worse than any other. The complexity is O(n).
+    // Remove worse candidates, rechecking the current index when its candidate is erased.
     if (!callable.empty()) {
-        for (size_t i{0}; i + 1 < callable.size(); ++i) {
+        for (size_t i{0}; i + 1 < callable.size();) {
+            bool erasedCurrent{false};
             size_t j{i + 1};
             while (j < callable.size()) {
                 if (callable[i]->TyMode().IsSubModal(callable[j]->TyMode())) {
                     callable.erase(callable.begin() + static_cast<ssize_t>(j));
                 } else if (callable[j]->TyMode().IsSubModal(callable[i]->TyMode())) {
                     callable.erase(callable.begin() + static_cast<ssize_t>(i));
-                    break; // j is always i + 1, so no need to increment i again
+                    erasedCurrent = true;
+                    break;
                 } else {
                     ++j;
                 }
+            }
+            if (!erasedCurrent) {
+                ++i;
             }
         }
     }

@@ -42,7 +42,29 @@ bool operator<(const std::optional<ModalInfo>& lhs, const std::optional<ModalInf
     }
     return ToIndex(*lhs) < ToIndex(*rhs);
 }
+
+template <typename T> T& UnwrapParenExprImpl(T& expr)
+{
+    auto value = &expr;
+    while (auto paren = DynamicCast<ParenExpr>(value)) {
+        if (!paren->expr) {
+            break;
+        }
+        value = paren->expr.get();
+    }
+    return *value;
+}
 } // namespace
+
+Expr& UnwrapParenExpr(Expr& expr)
+{
+    return UnwrapParenExprImpl(expr);
+}
+
+const Expr& UnwrapParenExpr(const Expr& expr)
+{
+    return UnwrapParenExprImpl(expr);
+}
 
 bool FuncSigCmp::operator()(const FuncSig& lhs, const FuncSig& rhs) const
 {
