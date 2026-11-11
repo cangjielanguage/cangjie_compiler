@@ -187,7 +187,7 @@ std::string MangleModePayload(ModalInfo modal)
             payload += "L";
             break;
         default:
-            CJC_ABORT();
+            CJC_ASSERT_WITH_MSG(false, "unexpected modal to be mangled");
     }
     return payload;
 }
@@ -216,7 +216,7 @@ std::string MangleTypeMode(CHIR::ModalInfo modal)
             payload += "L";
             break;
         default:
-            CJC_ASSERT(false && "unexpected modal to be mangled");
+            CJC_ASSERT_WITH_MSG(false, "unexpected modal to be mangled");
             return "";
     }
     if (payload.empty()) {
