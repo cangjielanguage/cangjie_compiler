@@ -744,6 +744,24 @@ void GlobalOptions::RefactJobs()
 
 void GlobalOptions::RefactAggressiveParallelCompileOption()
 {
+    // A named output file via `-o` (except a directory) requests a single output: APC must be
+    // disabled, otherwise the frontend writes several LLVM modules into the same output file
+    // concurrently, which corrupts the result. This also covers case variants ('xxx.BC') or
+    // trailing blanks/dots ('xxx.bc ', 'xxx.bc.'), and non-bitcode names ('xxx.bin').
+    if (frontendMode && !output.empty() && !FileUtil::IsDir(output)) {
+        bool requestsParallel =
+            (aggressiveParallelCompile.has_value() && aggressiveParallelCompile.value() > 1) ||
+            aggressiveParallelCompileWithoutArg;
+        if (requestsParallel) {
+            DiagnosticEngine diag;
+            diag.RegisterHandler(diagFormat);
+            (void)diag.DiagnoseRefactor(
+                DiagKindRefactor::driver_apc_conflicts_with_single_bc_output, DEFAULT_POSITION, output);
+        }
+        aggressiveParallelCompile = 1;
+        return;
+    }
+
     if (target.os == Triple::OSType::WINDOWS || target.os == Triple::OSType::DARWIN ||
         target.os == Triple::OSType::IOS) {
         // When the user's input compile options contain `--apc` and the os is windows or mac,
