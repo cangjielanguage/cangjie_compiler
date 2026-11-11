@@ -143,6 +143,12 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
                 arkTS.CheckAnnotation(anno);
                 break;
             }
+            case AnnotationKind::WRITE_ONLY: {
+                // The design annotation takes no arguments; placement rules
+                // belong to the AR-09 negative matrix.
+                CheckNoArgAnnotation(anno, "@" + anno.identifier.Val());
+                break;
+            }
             default:
                 continue;
         }

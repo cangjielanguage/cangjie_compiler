@@ -14,6 +14,7 @@
 #include "../Utils/ASTFactory.h"
 #include "Collector.h"
 #include "PlaceholderBinding.h"
+#include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/AST/Utils.h"
 
@@ -237,10 +238,34 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
             // side and a shared construction path; a wrapper only references
             // the object of its own class, so a wrapper parent is refused.
             for (auto& inherited : cd->inheritedTypes) {
+                // A compiler-added superclass (Object) is not user-written.
+                if (inherited->TestAttr(Attribute::COMPILER_ADD)) {
+                    continue;
+                }
                 auto parent = Ty::GetDeclPtrOfTy(inherited->GetTy());
                 if (parent && parent->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *cd,
                         cd->identifier.Val(), "inheriting another @ArkTS foreign class is not supported");
+                    cd->EnableAttr(Attribute::IS_BROKEN);
+                    break;
+                }
+            }
+            if (cd->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+            // The authority design requires every parent to carry @ArkTS; an
+            // unannotated parent would make the wrapper reference a class the
+            // ArkTS side does not have.
+            for (auto& inherited : cd->inheritedTypes) {
+                if (inherited->TestAttr(Attribute::COMPILER_ADD)) {
+                    continue;
+                }
+                auto parent = Ty::GetDeclPtrOfTy(inherited->GetTy());
+                if (parent && !parent->HasAnno(AnnotationKind::ARKTS) &&
+                    !parent->TestAttr(Attribute::ARKTS)) {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *cd,
+                        cd->identifier.Val(),
+                        "parent type '" + parent->identifier.Val() + "' must be an @ArkTS class or interface");
                     cd->EnableAttr(Attribute::IS_BROKEN);
                     break;
                 }
@@ -394,23 +419,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                     continue;
                 }
                 auto& fb = *fd->funcBody;
-                // Optional (defaulted) parameters need a desugared default
-                // function whose body is created before member bodies exist;
-                // the wrapper path does not provide one, so refuse the shape
-                // instead of emitting a wrapper that cannot be called.
-                bool hasOptional = false;
-                for (auto& list : fb.paramLists) {
-                    for (auto& param : list->params) {
-                        hasOptional = hasOptional || param->assignment != nullptr;
-                    }
-                }
-                if (hasOptional) {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *fd,
-                        cd->identifier.Val(), "optional parameters on foreign class members are not supported");
-                    fd->EnableAttr(Attribute::IS_BROKEN);
-                    cd->EnableAttr(Attribute::IS_BROKEN);
-                    continue;
-                }
                 bool constructor = fd->TestAttr(Attribute::CONSTRUCTOR);
                 auto resultType = classify(fb.retType.get());
                 std::vector<ArkTSTypeDesc> types;
@@ -547,6 +555,145 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                     }
                     installBody(classCtx, *setter, *file, code,
                         {setter->funcBody->paramLists.front()->params.front().get()}, name, classRefs);
+                }
+            }
+        }
+    }
+    // Member bodies now exist, so a member with a defaulted parameter is no
+    // longer treated as bodyless by the generic default-function pass. Build
+    // and type-check its default-argument functions against the final types.
+    for (auto& file : pkg.files) {
+        for (auto& decl : file->decls) {
+            auto cd = DynamicCast<ClassDecl*>(decl.get());
+            if (!cd || !IsArkTSClassWrapper(*cd) || cd->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+            for (auto& member : cd->GetMemberDecls()) {
+                auto fd = DynamicCast<FuncDecl*>(member.get());
+                if (!fd || !fd->funcBody) {
+                    continue;
+                }
+                bool hasDefault = false;
+                for (auto& list : fd->funcBody->paramLists) {
+                    for (auto& param : list->params) {
+                        hasDefault = hasDefault || param->assignment != nullptr;
+                    }
+                }
+                if (!hasDefault) {
+                    continue;
+                }
+                // A mapping-only spelling can leave HAS_INITIAL set without a
+                // desugar declaration; clear it so the pass rebuilds one.
+                for (auto& list : fd->funcBody->paramLists) {
+                    for (auto& param : list->params) {
+                        if (param->assignment && !param->desugarDecl && param->TestAttr(Attribute::HAS_INITIAL)) {
+                            param->DisableAttr(Attribute::HAS_INITIAL);
+                        }
+                    }
+                }
+                // The default-argument function clones the preceding
+                // parameters and copies their own Ty, so the manual pass must
+                // publish the resolved parameter types first. Otherwise the
+                // second and later defaults carry an UnknownType parameter.
+                for (auto& list : fd->funcBody->paramLists) {
+                    for (auto& param : list->params) {
+                        if (param->type && Ty::IsTyCorrect(param->type->GetTy())) {
+                            param->SetTy(param->type->GetTy());
+                        }
+                    }
+                }
+                // The shared default-parameter pass rejects optional parameters
+                // on open/default members. Do not rebuild the mapping-only
+                // default function here, otherwise the same rule is reported
+                // twice for one parameter list.
+                if (fd->TestAttr(Attribute::OPEN) || fd->TestAttr(Attribute::DEFAULT)) {
+                    fd->EnableAttr(Attribute::IS_BROKEN);
+                    continue;
+                }
+                GetSingleParamFunc(*fd);
+                for (auto& list : fd->funcBody->paramLists) {
+                    for (auto& param : list->params) {
+                        if (!param->desugarDecl || !param->desugarDecl->funcBody) {
+                            continue;
+                        }
+                        auto& fb = *param->desugarDecl->funcBody;
+                        if (fb.retType) {
+                            SetTypeTy(ctx, *fb.retType);
+                        }
+                        // Only the canonical ArkTS optional spelling is
+                        // supported: a default of None. Build that expression
+                        // with the resolved Option type instead of relying on
+                        // a late scope lookup.
+                        Ptr<Ty> paramTy = param->type ? param->type->GetTy() : nullptr;
+                        auto original = DynamicCast<RefExpr*>(param->assignment.get());
+                        bool noneDefault = param->assignment && original && original->ref.identifier.Val() == "None" &&
+                            Ty::IsTyCorrect(paramTy) && paramTy->IsCoreOptionType() && !paramTy->typeArgs.empty();
+                        if (!noneDefault) {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *fd,
+                                cd->identifier.Val(), "optional member parameters must default to None");
+                            fd->EnableAttr(Attribute::IS_BROKEN);
+                            cd->EnableAttr(Attribute::IS_BROKEN);
+                            continue;
+                        }
+                        for (auto& statement : fb.body->body) {
+                            auto returned = DynamicCast<ReturnExpr*>(statement.get());
+                            if (!returned) {
+                                continue;
+                            }
+                            returned->expr =
+                                CreateOptionNoneRef(*ci->importManager, typeManager, paramTy->typeArgs.front());
+                            CopyNodeScopeInfo(returned->expr.get(), param->assignment.get());
+                            Walker(returned->expr.get(), [&](Ptr<Node> node) {
+                                node->curFile = fd->curFile;
+                                return VisitAction::WALK_CHILDREN;
+                            }).Walk();
+                            returned->refFuncBody = &fb;
+                            break;
+                        }
+                        // The default function is created after the symbol
+                        // table, so bind its single return expression and
+                        // types directly instead of re-entering body checking.
+                        for (auto& statement : fb.body->body) {
+                            if (auto returned = DynamicCast<ReturnExpr*>(statement.get()); returned) {
+                                returned->SetTy(paramTy);
+                                if (returned->expr) {
+                                    returned->expr->SetTy(paramTy);
+                                }
+                            }
+                        }
+                        if (fb.retType) {
+                            fb.retType->SetTy(paramTy);
+                        }
+                        fb.body->SetTy(paramTy);
+                        // The desugar function takes every preceding
+                        // parameter, so the function type must use that list;
+                        // a fixed empty list breaks the second and later
+                        // defaulted parameters.
+                        std::vector<Ptr<Ty>> paramTys;
+                        for (auto& previous : fb.paramLists.front()->params) {
+                            // The clone is created by the generic default
+                            // pass after the earlier type walk, so its type
+                            // node still needs resolving here.
+                            if (previous->type) {
+                                SetTypeTy(ctx, *previous->type);
+                            }
+                            if (previous->type && Ty::IsTyCorrect(previous->type->GetTy())) {
+                                previous->SetTy(previous->type->GetTy());
+                                paramTys.emplace_back(previous->type->GetTy());
+                            }
+                        }
+                        auto funcTy = typeManager.GetFunctionTy(paramTys, paramTy);
+                        fb.SetTy(funcTy);
+                        param->desugarDecl->SetTy(funcTy);
+                        param->desugarDecl->EnableAttr(Attribute::IS_CHECK_VISITED);
+                        fb.EnableAttr(Attribute::IS_CHECK_VISITED);
+                        if (!fb.body || !Ty::IsTyCorrect(fb.body->GetTy())) {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *fd,
+                                cd->identifier.Val(), "cannot lower the member's default argument");
+                            fd->EnableAttr(Attribute::IS_BROKEN);
+                            cd->EnableAttr(Attribute::IS_BROKEN);
+                        }
+                    }
                 }
             }
         }

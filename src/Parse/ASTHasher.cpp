@@ -842,8 +842,9 @@ struct ASTHasherImpl {
             case AnnotationKind::FROZEN:
             case AnnotationKind::ARKTS:
             case AnnotationKind::REST_PARAM:
-                // Entry registration and rest-parameter placement change generated bodies, not the original Cangjie
-                // signature.
+            case AnnotationKind::WRITE_ONLY:
+                // Entry registration, rest-parameter placement and the write-only contract change generated bodies,
+                // not the original Cangjie signature.
                 return false;
             default:
                 CJC_ASSERT(false);
@@ -863,6 +864,7 @@ struct ASTHasherImpl {
             case AnnotationKind::FROZEN:
             case AnnotationKind::ARKTS:
             case AnnotationKind::REST_PARAM:
+            case AnnotationKind::WRITE_ONLY:
                 return true;
             case AnnotationKind::C:
             case AnnotationKind::CALLING_CONV:

@@ -143,6 +143,7 @@ const std::unordered_map<AST::Attribute, std::string> ATTR2STR{
     {AST::Attribute::ARKTS, "ARKTS"},
     {AST::Attribute::ARKTS_FUNCTION_WRAPPER, "ARKTS_FUNCTION_WRAPPER"},
     {AST::Attribute::ARKTS_CLASS_WRAPPER, "ARKTS_CLASS_WRAPPER"},
+    {AST::Attribute::ARKTS_WRITE_ONLY_PROP, "ARKTS_WRITE_ONLY_PROP"},
     {AST::Attribute::AST_ATTR_END, "AST_ATTR_END"},
 };
 UNSUPPRESS_WARNING()

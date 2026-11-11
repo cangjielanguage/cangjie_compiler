@@ -503,5 +503,8 @@ ERROR(sema_arkts_foreign_external_type_deferred,
 // It has no numeric runtime error code; consumers match the diagnostic kind.
 ERROR(sema_arkts_foreign_class_invalid,
     "invalid @ArkTS foreign class '%s': %s")
+// A @WriteOnly property may only be the target of an assignment.
+ERROR(sema_arkts_write_only_read,
+    "property '%s' is write-only and cannot be read")
 
 ERROR(sema_diag_end, "")

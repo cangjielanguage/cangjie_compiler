@@ -14,6 +14,7 @@
 
 #include "Diags.h"
 #include "ScopeManager.h"
+#include "NativeFFI/ArkTS/FunctionSource.h"
 #include "TypeCheckUtil.h"
 
 #include "cangjie/AST/ASTContext.h"
@@ -1495,6 +1496,9 @@ void TypeChecker::TypeCheckerImpl::CheckUsageOfDeprecated(
             return VisitAction::WALK_CHILDREN;
         }
 
+        // The ArkTS write-only rule is owned by the NativeFFI stage; this
+        // shared pass only routes each source usage to it.
+        Native::FFI::ArkTS::CheckArkTSWriteOnlyRead(*usage, diag);
         if (usage->astKind == ASTKind::CALL_EXPR) {
             CheckUsageOfDeprecatedParameters(usage);
         } else if (usage->astKind == ASTKind::ASSIGN_EXPR) {

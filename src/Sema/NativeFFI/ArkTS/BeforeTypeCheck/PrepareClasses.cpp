@@ -135,6 +135,10 @@ void PrepareClass(ClassDecl& cd, DiagnosticEngine& diag, SourceManager& sourceMa
             cd.EnableAttr(Attribute::IS_BROKEN);
             return;
         }
+        // A user-written property accessor is refused by the accessor-body
+        // rule below, which the merged AR-04 base owns; that rule sees every
+        // valid source accessor (the parser requires an accessor body), so a
+        // second declaration-level check here would only duplicate it.
         auto fd = DynamicCast<FuncDecl*>(member.get());
         // A property accessor is not in GetMemberDecls() (only the PropDecl
         // is), so the FuncDecl body rule below never sees a user-written
@@ -200,7 +204,29 @@ void PrepareClass(ClassDecl& cd, DiagnosticEngine& diag, SourceManager& sourceMa
         if (!prop || prop->TestAttr(Attribute::COMPILER_ADD)) {
             continue;
         }
-        if (prop->getters.empty()) {
+        if (ArkTSWriteOnlyProp(*prop)) {
+            // Persist the write-only contract for importing packages: the
+            // WRITE_ONLY annotation itself has no CJO record.
+            prop->EnableAttr(Attribute::ARKTS_WRITE_ONLY_PROP);
+            if (!prop->isVar) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
+                    "@WriteOnly requires a mutable property");
+                cd.EnableAttr(Attribute::IS_BROKEN);
+                return;
+            }
+            // Keep a getter declaration for the property contract. The read
+            // rejection itself comes from the ArkTS write-only reference
+            // check, not from access control (the reference resolves to the
+            // property declaration, so the getter visibility does not gate
+            // the source read).
+            if (prop->getters.empty()) {
+                InsertPropGetterSignature(*prop, Attribute::ARKTS_CLASS_WRAPPER);
+            }
+            for (auto& getter : prop->getters) {
+                getter->DisableAttr(Attribute::PUBLIC);
+                getter->EnableAttr(Attribute::PRIVATE);
+            }
+        } else if (prop->getters.empty()) {
             InsertPropGetterSignature(*prop, Attribute::ARKTS_CLASS_WRAPPER);
         }
         if (prop->isVar && prop->setters.empty()) {

@@ -221,6 +221,22 @@ protected:
         return cjoData;
     }
 
+    // Recreate the compiler instance with the three ArkTS support packages
+    // visible; a test then compiles one snippet without repeating the export.
+    void ResetWithArkTSSupport()
+    {
+        auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+        auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+        auto langCjo = ExportSupportPackage(
+            ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+        diag.ClearError();
+        handler->messages.clear();
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+        instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+        instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+        instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    }
+
     bool HasErrorContaining(const std::string& needle) const
     {
         for (const auto& message : handler->messages) {
@@ -1341,6 +1357,248 @@ public foreign class ArkTSString<T> {
     ASSERT_FALSE(slice->funcBody->paramLists.empty());
     ASSERT_FALSE(slice->funcBody->paramLists[0]->params.empty());
     EXPECT_FALSE(slice->funcBody->paramLists[0]->params[0]->TestAttr(Attribute::IS_BROKEN));
+}
+
+// Most declaration-shape rules from the authority design refuse the class
+// with the one class diagnostic; the open-function optional-parameter case
+// reuses the language diagnostic instead. One class per rule keeps each
+// refusal attributable even though one class reports only its first error.
+TEST_F(ArkTSForeignDiagTest, ForeignClassShapeRulesAreDiagnosed)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class PrivateMember {
+    public init()
+    private func hidden(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign class MemberVariable {
+    public init()
+    public var field: Int32
+}
+
+@ArkTS[module: "actual"]
+public foreign class Finalized {
+    public init()
+    ~init() {}
+}
+
+@ArkTS[module: "actual"]
+public foreign class WithBody {
+    public init()
+    public func run(): Unit {}
+}
+
+@ArkTS[module: "actual"]
+public foreign class WithAccessor {
+    public init()
+    public prop value: Float64 {
+        get() { 1.0 }
+    }
+}
+
+@ArkTS[module: "actual"]
+public foreign open class OpenOptional {
+    public init()
+    public open func greet(prefix!: Option<String> = None): String
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("'PrivateMember': member 'hidden' must not be private"));
+    EXPECT_TRUE(HasErrorContaining("'MemberVariable': member variables and primary constructors are not supported"));
+    EXPECT_TRUE(HasErrorContaining("'Finalized': a finalizer is not supported"));
+    EXPECT_TRUE(HasErrorContaining("'WithBody': member 'run' must not have a body"));
+    // The merged AR-04 base owns the accessor-body refusal, so an accessor
+    // with a body reports the shared member-body reason instead of a
+    // declaration-level accessor message.
+    EXPECT_TRUE(HasErrorContaining("'WithAccessor': member 'value' must not have a body"));
+    EXPECT_TRUE(HasErrorContaining("optional parameter cannot be used in 'open' function"));
+}
+
+// The wrapper stores a JSObject, so the imported declaration is required; a
+// missing import refuses the class instead of generating unresolved code.
+TEST_F(ArkTSForeignDiagTest, ForeignClassWithoutJSObjectImportIsDiagnosed)
+{
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+public foreign class NoObject {
+    public init()
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("the wrapper needs the imported declaration 'ohos.ark_interop.JSObject'"));
+    EXPECT_TRUE(HasErrorContaining("'NoObject'"));
+}
+
+// The authority design requires every parent to be an @ArkTS class or
+// interface; a plain Cangjie parent has no ArkTS counterpart to reference.
+TEST_F(ArkTSForeignDiagTest, ForeignClassParentMustBeArkTS)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public open class Plain {
+    public init() {}
+}
+
+@ArkTS[module: "actual"]
+public foreign class Child <: Plain {
+    public init()
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("'Child': parent type 'Plain' must be an @ArkTS class or interface"));
+}
+
+// Every defaulted parameter gets its own desugar function; the second one
+// clones the preceding parameter, so its type must still be resolved before
+// the default function is typed. A call omitting both defaults exercises the
+// call site.
+TEST_F(ArkTSForeignDiagTest, ForeignClassMultipleOptionalParametersCompile)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Point {
+    public init(x: Float64, y!: Option<Float64> = None)
+    public func label(prefix!: Option<String> = None, suffix!: Option<String> = None): String
+}
+
+public func use(): String {
+    let point = Point(1.0)
+    return point.label()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+}
+
+// The write-only read diagnostic belongs to a prepared wrapper property; a
+// plain Cangjie class with the misplaced annotation is left to AR-09 instead
+// of being reported as a wrapper read.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyAnnotationOnPlainClassIsNotAWrappedRead)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public class Plain {
+    @WriteOnly
+    public mut prop value: Int32 {
+        get() { 0 }
+        set(v) {}
+    }
+}
+
+public func read(plain: Plain): Int32 {
+    return plain.value
+}
+)");
+    EXPECT_FALSE(HasErrorContaining("is write-only and cannot be read"));
+}
+
+// BR-13 restricts @WriteOnly to a mutable property; an immutable property is
+// refused by the class shape rule instead of silently losing the setter.
+TEST_F(ArkTSForeignDiagTest, ForeignClassWriteOnlyRequiresMutableProperty)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Counter {
+    public init()
+    @WriteOnly public prop value: Int32
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("@WriteOnly requires a mutable property"));
+}
+
+// The design annotation takes no arguments (design §5.1.3). The parser owns
+// the rule, as it does for @RestParam; placement stays with AR-09.
+TEST_F(ArkTSForeignDiagTest, ForeignClassWriteOnlyRejectsArguments)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Counter {
+    public init()
+    @WriteOnly[reason: "x"] public mut prop value: Int32
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("accepts no arguments"));
+}
+
+// An optional parameter on an open member is refused by the shared default
+// pass. Lowering must not rebuild the mapping-only default function for the
+// same member, otherwise one parameter list is reported twice.
+TEST_F(ArkTSForeignDiagTest, OpenForeignClassMemberOptionalParameterIsRejectedOnce)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign open class Person {
+    public init()
+    public open func greet(prefix!: Option<String> = None): String
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("optional parameter cannot be used in 'open' function"));
+}
+
+// The WRITE_ONLY annotation has no CJO annotation record, so class preparation
+// carries the contract in an attribute; an importing package must still get
+// the write-only read diagnostic instead of a silent read.
+TEST_F(ArkTSForeignDiagTest, ForeignClassWriteOnlySurvivesCjoRoundTrip)
+{
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto declarationCjo = ExportSupportPackage(R"(package decls
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Vault {
+    public init()
+    @WriteOnly
+    public mut prop secret: String
+}
+)",
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+    ASSERT_FALSE(declarationCjo.empty());
+
+    ResetWithArkTSSupport();
+    instance->importManager->SetPackageCjoCache("decls", declarationCjo);
+    CompileSema(R"(package entry
+
+import decls.*
+
+public func read(vault: Vault): String {
+    return vault.secret
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("property 'secret' is write-only and cannot be read"));
 }
 
 namespace {

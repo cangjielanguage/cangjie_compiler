@@ -254,6 +254,43 @@ bool IsArkTSClassWrapper(const Decl& decl)
     return decl.TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
 }
 
+bool ArkTSWriteOnlyProp(const Decl& decl)
+{
+    // The annotation identifies a source declaration; the attribute carries
+    // the same contract through the CJO round trip, because the annotation
+    // kinds serialized by ASTWriter do not include WRITE_ONLY.
+    if (decl.TestAttr(Attribute::ARKTS_WRITE_ONLY_PROP)) {
+        return true;
+    }
+    for (auto& annotation : decl.annotations) {
+        if (annotation->kind == AnnotationKind::WRITE_ONLY) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void CheckArkTSWriteOnlyRead(Node& usage, DiagnosticEngine& diag)
+{
+    if ((usage.astKind != ASTKind::MEMBER_ACCESS && usage.astKind != ASTKind::REF_EXPR) ||
+        usage.TestAttr(Attribute::LEFT_VALUE) || usage.TestAttr(Attribute::COMPILER_ADD)) {
+        return;
+    }
+    auto target = usage.GetTarget();
+    Ptr<PropDecl> prop = DynamicCast<PropDecl*>(target);
+    if (!prop) {
+        if (auto fd = DynamicCast<FuncDecl*>(target); fd && fd->propDecl) {
+            prop = fd->propDecl;
+        }
+    }
+    // Only a property of a prepared wrapper class carries the generated
+    // accessor contract; a misplaced annotation belongs to the AR-09 negative
+    // matrix and is not diagnosed here.
+    if (prop && ArkTSWriteOnlyProp(*prop) && prop->outerDecl && prop->outerDecl->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_write_only_read, usage, prop->identifier.Val());
+    }
+}
+
 // Walk the package and validate the declaration rules the function fold does
 // not own. A lowered wrapper carries ARKTS_FUNCTION_WRAPPER and is validated
 // by ArkTSDeclOptions in LowerArkTSFunctions, so it is skipped here.

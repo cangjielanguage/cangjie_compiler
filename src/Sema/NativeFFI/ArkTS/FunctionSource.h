@@ -76,6 +76,12 @@ bool IsArkTSForeignClass(const AST::ClassDecl& cd);
 // Prepared wrapper class; also true for an imported wrapper, whose attribute
 // survives the CJO round trip.
 bool IsArkTSClassWrapper(const AST::Decl& decl);
+// Whether the declaration carries the @WriteOnly annotation.
+bool ArkTSWriteOnlyProp(const AST::Decl& decl);
+// Reject a source read of a write-only property of a prepared wrapper class.
+// The shared reference-check pass only routes the usage here; the ArkTS rule
+// (target resolution, wrapper-owner check, diagnostic) lives in this stage.
+void CheckArkTSWriteOnlyRead(AST::Node& usage, DiagnosticEngine& diag);
 
 // One @ArkTS annotation is one option layer. A layer is valid when every
 // argument is a string literal named 'module', 'namespace' or 'foreignName'

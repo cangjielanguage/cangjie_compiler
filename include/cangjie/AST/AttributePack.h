@@ -749,6 +749,13 @@ enum class Attribute {
     // R: type classification, lowering, CJO writer/loader. Appending the value
     // keeps existing serialized attribute indices stable.
     ARKTS_CLASS_WRAPPER,
+    // A @WriteOnly property of a prepared ArkTS wrapper class. The annotation
+    // itself is not part of the CJO annotation records, so the attribute
+    // carries the write-only contract to importing packages.
+    // W: Sema class preparation.
+    // R: the write-only read diagnostic. Appending keeps existing serialized
+    // attribute indices stable.
+    ARKTS_WRITE_ONLY_PROP,
 
     AST_ATTR_END,
 };

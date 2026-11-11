@@ -97,11 +97,12 @@ public func run(): Unit {
     EXPECT_TRUE(fd.TestAttr(Attribute::ARKTS));
     EXPECT_EQ(fd.annotations[0]->kind, AnnotationKind::ARKTS);
     EXPECT_EQ(AnnotationKindToString(AnnotationKind::ARKTS), "ArkTS");
-    // The REST_PARAM annotation kind sits directly after ARKTS and UNKNOWN
-    // stays the trailing sentinel, so the old "ARKTS + 1 == UNKNOWN"
-    // invariant now reads as the two adjacent steps below.
+    // The ArkTS-only annotation kinds sit directly after ARKTS and UNKNOWN
+    // stays the trailing sentinel, so the old "ARKTS + 1 == UNKNOWN" invariant
+    // now reads as the three adjacent steps below.
     EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS) + 1, static_cast<int>(AnnotationKind::REST_PARAM));
-    EXPECT_EQ(static_cast<int>(AnnotationKind::REST_PARAM) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::REST_PARAM) + 1, static_cast<int>(AnnotationKind::WRITE_ONLY));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::WRITE_ONLY) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
 }
 
 TEST_F(ArkTSEntryTest, RegistrationRestoresContextInFinally)

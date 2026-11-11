@@ -2587,9 +2587,17 @@ OwnedPtr<FuncDecl> MakeDefaultParamFunction(
     ret->funcBody->funcDecl = ret.get();
     ret->EnableAttr(Attribute::HAS_INITIAL, Attribute::IMPLICIT_ADD, Attribute::NO_REFLECT_INFO);
     ret->toBeCompiled = funcDecl.toBeCompiled; // For incremental compilation.
+    // A bodyless foreign declaration has no code to call; its
+    // default-parameter function exists only to resolve omitted arguments in
+    // Cangjie code, so keep it out of codegen. A lowered class member has a
+    // wrapper body by now and is therefore compiled.
+    if (funcDecl.TestAttr(Attribute::FOREIGN) && funcDecl.funcBody && !funcDecl.funcBody->body) {
+        ret->toBeCompiled = false;
+    }
     ret->ownerFunc = &funcDecl;
     ret->fullPackageName = funcDecl.fullPackageName;
     ret->outerDecl = funcDecl.outerDecl;
+    ret->curFile = funcDecl.curFile;
     if (funcDecl.TestAttr(Attribute::CONSTRUCTOR)) {
         // Desugared default param function should be considered as a static function.
         // NOTE: used to avoid unexpected 'this' insertion during AST2CHIR.
