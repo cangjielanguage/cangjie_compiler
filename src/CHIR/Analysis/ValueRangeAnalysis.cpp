@@ -60,15 +60,39 @@ SIntRange::SIntRange(SIntDomain domain) : ValueRange(RangeKind::SINT), domain(st
 {
 }
 
+namespace {
+// SIntDomain::IsSame compares numeric bounds only. Symbolic relations have to be compared separately,
+// otherwise a join treats two different relations as identical.
+bool SameSymbolicBounds(const SIntDomain& a, const SIntDomain& b)
+{
+    auto ia = a.SymbolicBounds().Begin();
+    auto ib = b.SymbolicBounds().Begin();
+    const auto enda = a.SymbolicBounds().End();
+    const auto endb = b.SymbolicBounds().End();
+    for (; ia != enda && ib != endb; ++ia, ++ib) {
+        if (ia->first.get() != ib->first.get() || !(ia->second == ib->second)) {
+            return false;
+        }
+    }
+    return ia == enda && ib == endb;
+}
+} // namespace
+
 std::optional<std::unique_ptr<ValueRange>> SIntRange::Join(const ValueRange& rhs) const
 {
     CJC_ASSERT(rhs.GetRangeKind() == RangeKind::SINT);
     auto rhsRange = StaticCast<const SIntRange&>(rhs);
-    if (!domain.IsSame(rhsRange.domain) ||
-        (domain.NumericBound().IsFullSet() && !domain.SymbolicBounds().Empty())) {
-        return std::make_unique<SIntRange>(SIntRange{SIntDomain::Unions(domain, rhsRange.domain)});
-        }
-    return std::nullopt;
+    if (domain.IsSame(rhsRange.domain) && SameSymbolicBounds(domain, rhsRange.domain)) {
+        return std::nullopt;
+    }
+    // Union is the upper bound. If this domain is already that bound (the other side only added
+    // constraints), report no change. Otherwise a full numeric range that still carries a symbolic
+    // relation would look "changed" on every join and the analysis would give the block up.
+    auto joined = SIntDomain::Unions(domain, rhsRange.domain);
+    if (domain.IsSame(joined) && SameSymbolicBounds(domain, joined)) {
+        return std::nullopt;
+    }
+    return std::make_unique<SIntRange>(SIntRange{std::move(joined)});
 }
 
 std::string SIntRange::ToString() const
@@ -107,8 +131,8 @@ template <> RangeValueDomain HandleNonNullLiteralValue<RangeValueDomain>(const L
     }
 }
 
-RangeAnalysis::RangeAnalysis(const Function* func, CHIRBuilder& builder, bool isDebug, DiagnosticEngine& diag)
-    : ValueAnalysis(func, builder, isDebug), diag(diag)
+RangeAnalysis::RangeAnalysis(const Function* func, CHIRBuilder& builder, bool, DiagnosticEngine& diag)
+    : ValueAnalysis(func, builder), diag(diag)
 {
 }
 
@@ -215,24 +239,6 @@ void RangeAnalysis::HandleNormalExpressionEffect(RangeDomain& state, const Expre
 #endif
         }
     }
-    if (expression->GetExprMajorKind() != ExprMajorKind::UNARY_EXPR &&
-        expression->GetExprMajorKind() != ExprMajorKind::BINARY_EXPR &&
-        expression->GetExprKind() != ExprKind::NUMERIC_CAST) {
-        return;
-    }
-    if (isDebug && !expression->GetResult()->GetType()->IsRef()) {
-        if (expression->GetResult()->GetType()->IsBoolean()) {
-            auto domain = GetBoolDomainFromState(state, expression->GetResult());
-            if (!domain.IsTop()) {
-                PrintDebugMessage<BoolDomain>(expression, domain);
-            }
-        } else if (expression->GetResult()->GetType()->IsInteger()) {
-            auto domain = GetSIntDomainFromState(state, expression->GetResult());
-            if (!domain.IsTop()) {
-                PrintDebugMessage<SIntDomain>(expression, domain);
-            }
-        }
-    }
 }
 
 BoolDomain RangeAnalysis::GenerateBoolRangeFromBinaryOp(
@@ -306,20 +312,22 @@ void RaiseArithmeticOverflowError(
 }
 
 template <typename T>
-bool CheckDivZero(BinaryExprKind kind, const Ptr<const BinaryExpressionBase>& binary, T rVal, DiagnosticEngine& diag)
+bool CheckDivZero(BinaryExprKind kind, const Ptr<const BinaryExpressionBase>& binary, T rVal, DiagnosticEngine* diag)
 {
     if (rVal == 0 && (kind == BinaryExprKind::DIV || kind == BinaryExprKind::MOD)) {
-        auto& loc = binary->GetDebugLocation();
-        auto prompt = kind == BinaryExprKind::DIV ? "divide" : "modulo";
-        auto builder = diag.DiagnoseRefactor(DiagKindRefactor::chir_divisor_is_zero, ToRange(loc), prompt);
-        builder.AddMainHintArguments(prompt);
+        if (diag != nullptr) {
+            auto& loc = binary->GetDebugLocation();
+            auto prompt = kind == BinaryExprKind::DIV ? "divide" : "modulo";
+            auto builder = diag->DiagnoseRefactor(DiagKindRefactor::chir_divisor_is_zero, ToRange(loc), prompt);
+            builder.AddMainHintArguments(prompt);
+        }
         return true;
     }
     return false;
 }
 
 SIntDomain CheckSingleValueOverflow(
-    const CHIRArithmeticBinopArgs& args, const Ptr<const BinaryExpressionBase>& expr, DiagnosticEngine& diag)
+    const CHIRArithmeticBinopArgs& args, const Ptr<const BinaryExpressionBase>& expr, DiagnosticEngine* diag)
 {
     auto exprKind = ExprKindMgr::ToExprKind(args.op);
     bool isOv = false;
@@ -332,7 +340,9 @@ SIntDomain CheckSingleValueOverflow(
         }
         isOv = OverflowChecker::IsUIntOverflow(args.l->GetType()->GetTypeKind(), exprKind, a, b, args.ov, &res);
         if (isOv && args.ov == OverflowStrategy::THROWING) {
-            RaiseArithmeticOverflowError(expr.get(), expr->GetOpKind(), a, b, diag);
+            if (diag != nullptr) {
+                RaiseArithmeticOverflowError(expr.get(), expr->GetOpKind(), a, b, *diag);
+            }
             return SIntDomain::Top(args.ld.Width(), true);
         }
         return {ConstantRange{{args.ld.Width(), res}}, true};
@@ -345,7 +355,9 @@ SIntDomain CheckSingleValueOverflow(
         }
         isOv = OverflowChecker::IsIntOverflow(args.l->GetType()->GetTypeKind(), exprKind, a, b, args.ov, &res);
         if (isOv && args.ov == OverflowStrategy::THROWING) {
-            RaiseArithmeticOverflowError(expr.get(), expr->GetOpKind(), a, b, diag);
+            if (diag != nullptr) {
+                RaiseArithmeticOverflowError(expr.get(), expr->GetOpKind(), a, b, *diag);
+            }
             return SIntDomain::Top(args.ld.Width(), false);
         }
         return {ConstantRange{{args.ld.Width(), static_cast<uint64_t>(res)}}, false};
@@ -370,8 +382,11 @@ void RangeAnalysis::HandleBinaryExpr(RangeDomain& state, const BinaryExpressionB
         auto ov = binaryExpr->GetOverflowStrategy();
         auto isUnsigned = IsUnsignedArithmetic(*binaryExpr);
         if (lRange.IsSingleValue() && rRange.IsSingleValue()) {
+            // Loop iterations can invalidate singleton operands. Only diagnose when replaying
+            // the stable analysis results, while still computing conservative ranges here.
             auto domain = CheckSingleValueOverflow(
-                CHIRArithmeticBinopArgs{lRange, rRange, lhs, rhs, opKind, ov, isUnsigned}, binaryExpr, diag);
+                CHIRArithmeticBinopArgs{lRange, rRange, lhs, rhs, opKind, ov, isUnsigned}, binaryExpr,
+                isStable ? &diag : nullptr);
             state.Update(dest, std::make_unique<SIntRange>(domain));
             return;
         }
@@ -396,9 +411,9 @@ SIntDomain RangeAnalysis::ComputeTypeCast(RangeDomain& state, PtrSymbol oldSymbo
     auto numericRange{ComputeTypeCastNumericBound(v, dstSize, dstUnsigned, ov)};
     if (dstSize < v.Width() || v.IsUnsigned() || !dstUnsigned || ov == OverflowStrategy::SATURATING ||
         numericRange.SMinValue().Slt({dstSize, 0u})) {
-        return {numericRange, v.IsUnsigned()};
+        return {numericRange, dstUnsigned};
     }
-    // unsigned to signed, same width or larger width
+    // signed to unsigned, same width or larger width
     // in this special case, if we have a symbolic range a<b and we know definitely b>=0 && a>=0,
     // this range can be preserved
     SIntDomain::SymbolicBoundsMap mp{};
@@ -415,7 +430,7 @@ SIntDomain RangeAnalysis::ComputeTypeCast(RangeDomain& state, PtrSymbol oldSymbo
         }
     }
     mp.emplace(oldSymbol, ConstantRange{{dstSize, 0u}});
-    return SIntDomain{numericRange, std::move(mp), v.IsUnsigned()};
+    return SIntDomain{numericRange, std::move(mp), dstUnsigned};
 }
 
 void RangeAnalysis::HandleOthersExpr(RangeDomain& state, const Expression* expression)
@@ -478,22 +493,12 @@ std::optional<Block*> RangeAnalysis::HandleTerminatorEffect(RangeDomain& state, 
     return std::nullopt;
 }
 
-void RangeAnalysis::PrintBranchOptMessage(const Ptr<const Expression>& expr, bool isTrueBlockRemained) const
-{
-    std::string message = "[RangeAnalysis] The If Block" + ToPosInfo(expr->GetDebugLocation()) +
-        " has been replace to the " + (isTrueBlockRemained ? "True Block" : "False Block") + "\n";
-    std::cout << message;
-}
-
 std::optional<Block*> RangeAnalysis::HandleBranchTerminator(const RangeDomain& state, const Branch* branch) const
 {
     auto cond = branch->GetCondition();
     const auto& condVal = GetBoolDomainFromState(state, cond);
     if (!condVal.IsSingleValue()) {
         return std::nullopt;
-    }
-    if (isDebug) {
-        PrintBranchOptMessage(branch, condVal.IsTrue());
     }
     return condVal.IsTrue() ? branch->GetTrueBlock() : branch->GetFalseBlock();
 }

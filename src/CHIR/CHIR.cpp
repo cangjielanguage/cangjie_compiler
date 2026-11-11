@@ -537,16 +537,15 @@ void ToCHIR::RunRangePropagation()
     }
     Utils::ProfileRecorder::Start("CHIR Opt", "Range Propagation");
     AnalysisWrapper<RangeAnalysis, RangeDomain> vra(builder);
-    vra.RunOnPackage(chirPkg, opts.chirDebugOptimizer, opts.GetJobs(), diag);
+    vra.RunOnPackage(chirPkg, false, opts.GetJobs(), diag);
     size_t threadNum = opts.GetJobs();
     DeadCodeElimination dce(builder, diag, *chirPkg);
     if (threadNum == 1) {
         auto cp = CHIR::RangePropagation(builder, &vra, diag, opts.enIncrementalCompilation);
-        cp.RunOnPackage(chirPkg, opts.chirDebugOptimizer);
+        cp.RunOnPackage(chirPkg);
         MergeEffectMap(cp.GetEffectMap(), effectMap);
         dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(), opts.chirDebugOptimizer);
     } else {
-        bool isDebug = opts.chirDebugOptimizer;
         std::vector<Function*> globalFuncs = chirPkg->GetGlobalFuncsWithBody();
         size_t funcNum = globalFuncs.size();
         std::vector<std::unique_ptr<CHIR::CHIRBuilder>> builderList =
@@ -558,7 +557,7 @@ void ToCHIR::RunRangePropagation()
             auto cp = std::make_unique<CHIR::RangePropagation>(
                 *builderList[idx], &vra, diag, opts.enIncrementalCompilation);
             taskQueue.AddTask<void>(
-                [rangePropagation = cp.get(), func, isDebug]() { return rangePropagation->RunOnFunc(func, isDebug); });
+                [rangePropagation = cp.get(), func]() { return rangePropagation->RunOnFunc(func); });
             cpList.emplace_back(std::move(cp));
         }
         taskQueue.RunAndWaitForAllTasksCompleted();

@@ -124,10 +124,9 @@ public:
      * @brief range analysis constructor.
      * @param func function to analyse
      * @param builder CHIR builder for generating IR.
-     * @param isDebug flag whether print debug log.
      * @param diag reporter to report warning or error.
      */
-    RangeAnalysis(const Function* func, CHIRBuilder& builder, bool isDebug, DiagnosticEngine& diag);
+    RangeAnalysis(const Function* func, CHIRBuilder& builder, bool, DiagnosticEngine& diag);
 
     ~RangeAnalysis() override;
 
@@ -156,19 +155,6 @@ public:
     bool CheckInQueueTimes(const Block* block, RangeDomain& curState) override;
 
 private:
-    template <class Domain,
-        typename = typename std::enable_if<std::is_same_v<Domain, SIntDomain> || std::is_same_v<Domain, BoolDomain>>>
-    void PrintDebugMessage(const Ptr<const Expression>& expr, const Domain& domain) const
-    {
-        std::stringstream ss;
-        ss << "[RangeAnalysis] The value of " +
-                ExprKindMgr::Instance()->GetKindName(static_cast<size_t>(expr->GetExprKind())) +
-                ToPosInfo(expr->GetDebugLocation()) + " has been set to " << domain << "\n";
-        std::cout << ss.str();
-    }
-
-    void PrintBranchOptMessage(const Ptr<const Expression>& expr, bool isTrueBlockRemained) const;
-
     // ======== Transfer functions for normal expressions based on ExprMajorKind ======== //
 
     void HandleNormalExpressionEffect(RangeDomain& state, const Expression* expression) override;

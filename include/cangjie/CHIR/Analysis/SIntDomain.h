@@ -123,14 +123,14 @@ public:
     static Mem<SIntDomain> FromNumeric(RelationalOperation rel, const SInt& value, bool isUnsigned);
 
     /**
-     * @brief static constructor from symbol and relation.
+     * @brief static constructor from symbol and relation. The resulting symbolic bound records the
+     * difference `value - symbol` as a signed range, so it must only be built from signed relations.
      * @param rel compare operator.
      * @param symbol symbol to indicate range.
      * @param width SInt width.
-     * @param isUnsigned whether range is unsigned.
      * @return pointer of SIntDomain.
      */
-    static Mem<SIntDomain> FromSymbolic(RelationalOperation rel, PtrSymbol symbol, IntWidth width, bool isUnsigned);
+    static Mem<SIntDomain> FromSymbolic(RelationalOperation rel, PtrSymbol symbol, IntWidth width);
 
     /**
      * @brief static constructor of top domain

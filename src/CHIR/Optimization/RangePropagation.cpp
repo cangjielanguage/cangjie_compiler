@@ -5,7 +5,6 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/CHIR/Optimization/RangePropagation.h"
-#include "cangjie/CHIR/Analysis/ConstAnalysis.h"
 #include "cangjie/CHIR/Analysis/Engine.h"
 #include "cangjie/CHIR/Utils/CHIRCasting.h"
 
@@ -51,14 +50,14 @@ const std::vector<const Function*>& RangePropagation::GetFuncsNeedRemoveBlocks()
     return funcsNeedRemoveBlocks;
 }
 
-void RangePropagation::RunOnPackage(const Ptr<const Package>& package, bool isDebug)
+void RangePropagation::RunOnPackage(const Ptr<const Package>& package)
 {
     for (auto func : package->GetGlobalFuncsWithBody()) {
-        RunOnFunc(func, isDebug);
+        RunOnFunc(func);
     }
 }
 
-void RangePropagation::RunOnFunc(const Ptr<const Function>& func, bool isDebug)
+void RangePropagation::RunOnFunc(const Ptr<const Function>& func)
 {
     auto result = analysisWrapper->CheckFuncResult(func);
     if (!result) {
@@ -92,14 +91,22 @@ void RangePropagation::RunOnFunc(const Ptr<const Function>& func, bool isDebug)
         }
     };
     bool doBlockElimination = false;
-    const auto actionOnTerminator = [this, isDebug, &doBlockElimination](const RangeDomain&, Expression* terminator,
+    const auto actionOnTerminator = [this, &doBlockElimination](const RangeDomain& state, Expression* terminator,
                                         std::optional<Block*> targetSucc) {
         switch (terminator->GetExprKind()) {
+            case ExprKind::TRY_INTRINSIC: {
+                auto intrinsic = StaticCast<TryIntrinsic*>(terminator);
+                if (intrinsic->GetIntrinsicKind() == CHIR::IntrinsicKind::VARRAY_SET ||
+                    intrinsic->GetIntrinsicKind() == CHIR::IntrinsicKind::VARRAY_GET) {
+                    CheckVarrayIndex(intrinsic, state);
+                }
+                break;
+            }
             case ExprKind::BRANCH:
             case ExprKind::MULTIBRANCH:
                 if (targetSucc.has_value()) {
                     doBlockElimination = true;
-                    return RewriteBranchTerminator(terminator, targetSucc.value(), isDebug);
+                    return RewriteBranchTerminator(terminator, targetSucc.value());
                 }
                 break;
             default:
@@ -108,7 +115,7 @@ void RangePropagation::RunOnFunc(const Ptr<const Function>& func, bool isDebug)
     };
     result->VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator);
     for (auto& rewriteInfo : toBeRewrited) {
-        RewriteToConstExpr(rewriteInfo, isDebug);
+        RewriteToConstExpr(rewriteInfo);
     }
     if (doBlockElimination) {
         funcsNeedRemoveBlocks.push_back(func.get());
@@ -134,7 +141,7 @@ Ptr<LiteralValue> RangePropagation::GenerateConstExpr(const Ptr<Type>& type, con
     return nullptr;
 }
 
-void RangePropagation::RewriteToConstExpr(const RewriteInfo& rewriteInfo, bool isDebug) const
+void RangePropagation::RewriteToConstExpr(const RewriteInfo& rewriteInfo) const
 {
     if (!rewriteInfo.literalVal) {
         return;
@@ -146,28 +153,14 @@ void RangePropagation::RewriteToConstExpr(const RewriteInfo& rewriteInfo, bool i
     newExpr->SetDebugLocation(oldExpr->GetDebugLocation());
 
     oldExprParent->GetExpressionByIdx(rewriteInfo.index)->ReplaceWith(*newExpr);
-
-    if (isDebug) {
-        std::string message = "[RangePropagation] The " +
-            ExprKindMgr::Instance()->GetKindName(static_cast<size_t>(oldExpr->GetExprKind())) +
-            ToPosInfo(oldExpr->GetDebugLocation()) + " has been rewrited to a constant\n";
-        std::cout << message;
-    }
 }
 
-void RangePropagation::RewriteBranchTerminator(
-    const Ptr<Expression>& branch, const Ptr<Block>& targetSucc, bool isDebug)
+void RangePropagation::RewriteBranchTerminator(const Ptr<Expression>& branch, const Ptr<Block>& targetSucc)
 {
     auto parentBlock = branch->GetParentBlock();
     branch->RemoveSelfFromBlock();
     auto newTerminator = builder.CreateTerminator<GoTo>(targetSucc, parentBlock);
     parentBlock->AppendExpression(newTerminator);
-    if (isDebug) {
-        std::string message = "[RangePropagation] The terminator " +
-            ExprKindMgr::Instance()->GetKindName(static_cast<size_t>(branch->GetExprKind())) +
-            ToPosInfo(branch->GetDebugLocation()) + " has been optimised\n";
-        std::cout << message;
-    }
 }
 
 GlobalVar* RecordLoadEffectMap(const Ptr<const Load>& load)
@@ -244,7 +237,7 @@ std::vector<size_t> GetVArraySizeList(const Ptr<Type>& type)
     return size;
 }
 
-void RangePropagation::CheckVarrayIndex(const Ptr<Intrinsic>& intrin, const RangeDomain& state) const
+void RangePropagation::CheckVarrayIndex(const Ptr<IntrinsicBase>& intrin, const RangeDomain& state) const
 {
     CJC_ASSERT(intrin->GetIntrinsicKind() == CHIR::IntrinsicKind::VARRAY_GET ||
         intrin->GetIntrinsicKind() == CHIR::IntrinsicKind::VARRAY_SET);
