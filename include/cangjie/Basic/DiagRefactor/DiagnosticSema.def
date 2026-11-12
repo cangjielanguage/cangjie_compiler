@@ -378,7 +378,7 @@ ERROR(sema_hide_diff_param, "the parameter 'isChecked' of '@!Hide' is %s")
 WARNING(sema_hide_must_at_end, APILEVEL_CHECK, "annotation '%s' must be placed below all macros and annotations")
 
 // modal type
-ERROR(sema_external_local_arg, "cannot pass argument of external %s to @local! parameter")
+ERROR(sema_external_local_arg, "cannot pass argument of external %s to @local! %s")
 ERROR(sema_internal_local_return, "cannot return expression of internal %s mode")
 ERROR(sema_exclave_outside_function, "exclave must be used in a function")
 ERROR(sema_exclave_invalid_func_signature,

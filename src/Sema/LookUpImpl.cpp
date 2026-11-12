@@ -134,21 +134,22 @@ inline Ptr<T> GetSpecificDecl(Ptr<Decl> decl)
     CJC_ASSERT(decl);
     return StaticCast<T*>(decl->specificImplementation == nullptr ? decl : decl->specificImplementation);
 }
+
+// An abstract prop has no accessor body by design, it must still participate in lookup.
+inline bool PropHasNoUsableAccessor(const PropDecl& pd, bool isSetter)
+{
+    if (pd.TestAttr(Attribute::ABSTRACT)) {
+        return false;
+    }
+    return isSetter ? (pd.isVar && pd.setters.empty()) : pd.getters.empty();
+}
 } // namespace
 
 void LookUpImpl::AddMemberIfValidForLookup(std::vector<Ptr<Decl>>& results, DataTy baseTy, bool isSetter, Decl& decl)
 {
     bool covered{false};
-    if (auto pd = DynamicCast<PropDecl*>(&decl); pd) {
-        if (!isSetter) {
-            if (pd->getters.empty()) {
-                return;
-            }
-        } else {
-            if (pd->isVar && pd->setters.empty()) {
-                return;
-            }
-        }
+    if (auto pd = DynamicCast<PropDecl*>(&decl); pd && PropHasNoUsableAccessor(*pd, isSetter)) {
+        return;
     }
     if (decl.astKind != ASTKind::FUNC_DECL) {
         if (auto prop = DynamicCast<PropDecl>(&decl)) {
@@ -224,10 +225,16 @@ void LookUpImpl::FieldLookupExtend(
 
 void LookUpImpl::ResolveOverrideOrShadow(std::vector<Ptr<Decl>>& results, Decl& decl, Ptr<InterfaceTy> parentTy)
 {
-    if (decl.astKind == ASTKind::PROP_DECL) {
-        if (!decl.TestAttr(Attribute::ABSTRACT)) {
-            Utils::EraseIf(results, [](auto it) { return it->TestAttr(Attribute::ABSTRACT); });
-        }
+    if (decl.astKind == ASTKind::PROP_DECL && !decl.TestAttr(Attribute::ABSTRACT)) {
+        // Only a same-modal prop replaces an abstract candidate; props with different modals are overloads.
+        auto declMode = TypeManager::GetThisParamMode(decl);
+        Utils::EraseIf(results, [&declMode](auto it) {
+            if (!it->TestAttr(Attribute::ABSTRACT)) {
+                return false;
+            }
+            auto pd = DynamicCast<PropDecl*>(it);
+            return !pd || TypeManager::GetThisParamMode(*pd) == declMode;
+        });
     }
     for (size_t i = 0; i < results.size(); ++i) {
         // Caller guarantees 'decl' must be func or prop.
@@ -607,8 +614,7 @@ bool LookUpImpl::FindRealResult(const Node& node, bool isSetter, std::vector<Ptr
         }
         if (targetDecl->astKind == ASTKind::PROP_DECL) {
             auto pd = RawStaticCast<PropDecl*>(targetDecl);
-            auto needContinue = (isSetter && pd->isVar && pd->setters.empty()) || (!isSetter && pd->getters.empty());
-            if (needContinue) {
+            if (PropHasNoUsableAccessor(*pd, isSetter)) {
                 continue;
             }
             // Props support modal overloading: collect all same-name candidates and let

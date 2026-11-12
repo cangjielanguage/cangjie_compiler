@@ -459,7 +459,7 @@ Ptr<FuncDecl> GetObjCBlockConstructorByABIName(InteropLibBridge& bridge, const s
                 || funcDecl->funcBody->paramLists[0]->params.size() != 1) {
                 continue;
             }
-            Ptr<Ty> paramTy = funcDecl->funcBody->paramLists[0]->params[0]->type->DataTy();
+            Ptr<Ty> paramTy = funcDecl->funcBody->paramLists[0]->params[0]->DataTy();
             if (!paramTy->IsPointer()) {
                 continue;
             }
