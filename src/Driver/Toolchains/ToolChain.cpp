@@ -44,12 +44,10 @@ using namespace Cangjie;
 
 void ToolChain::GenerateLinkOptionsOfBuiltinLibs(Tool& tool) const
 {
-    bool notOutputDylib = driverOptions.outputMode != GlobalOptions::OutputMode::SHARED_LIB;
     // When user compiling to a shared library, standard library must be dynamic linked or there might be multiple
     // versions of standard library exists in different dynamic libraries. A user could still specify --static-std
-    // to reproduct the problem. Here we only ensure the default behavior of cjc is correct.
-    bool isStaticLink = driverOptions.linkStaticStd.value_or(notOutputDylib);
-    if (isStaticLink) {
+    // to reproduce the problem. Here we only ensure the default behavior of cjc is correct.
+    if (driverOptions.IsStaticStdLink()) {
         return GenerateLinkOptionsOfBuiltinLibsForStaticLink(tool);
     } else {
         return GenerateLinkOptionsOfBuiltinLibsForDyLink(tool);
@@ -163,8 +161,10 @@ void ToolChain::CheckOtherDependeniesOfStaticLib(
         // Here we have to also link against `libdl` instead of `libdl.so` for compatibility.
         dynamicLibraries.emplace("-ldl");
     } else if (libName == "libcangjie-std-ast.a") {
-        if (driverOptions.target.os == Triple::OSType::DARWIN) {
+        if (driverOptions.target.os == Triple::OSType::DARWIN ||
+            driverOptions.target.os == Triple::OSType::IOS) {
             otherLibs.emplace("-lcangjie-std-astFFI");
+            dynamicLibraries.emplace("-lc++");
         } else {
             otherLibs.emplace("-l:libcangjie-std-astFFI.a");
         }
