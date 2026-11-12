@@ -87,26 +87,42 @@ int64_t GetIntMaxOrMin(IRBuilder2& irBuilder, const CHIR::IntType& ty, bool isMa
 
 std::vector<llvm::Metadata*> UnwindGenericRelateType(llvm::LLVMContext& llvmCtx, const CHIR::Type& ty)
 {
+    auto& derefedTy = *DeRef(ty);
     std::vector<llvm::Metadata*> tyArgMeta{};
-    if (ty.IsGeneric()) {
+    if (derefedTy.IsGeneric()) {
+        // Uninstantiated generic type parameter (e.g. the T in `interface I<T>` while
+        // emitting a call site `fn<T>(v: I<T>)`). Emit a sentinel so the VFE decoder
+        // can mark this dimension as "does not participate in discrimination".
+        tyArgMeta.emplace_back(llvm::MDString::get(llvmCtx, "$g"));
         return tyArgMeta;
     }
 
-    if (ty.GetTypeArgs().size() > 0) {
-        std::string ttName = CGType::GetNameOfTypeTemplateGV(ty);
+    if (CGType::GetCGGenericKind(derefedTy) == CGType::CGGenericKind::CONCRETE) {
+        tyArgMeta.emplace_back(llvm::MDString::get(llvmCtx, CGType::GetNameOfTypeInfoGV(derefedTy)));
+        return tyArgMeta;
+    } else {
+        CJC_ASSERT_WITH_MSG(!derefedTy.GetTypeArgs().empty(), "typeArgs is empty for type: " + derefedTy.ToString());
+        std::string ttName = CGType::GetNameOfTypeTemplateGV(derefedTy);
         tyArgMeta.emplace_back(llvm::MDString::get(llvmCtx, ttName));
-        auto tyArg = ty.GetTypeArgs()[0];
-        if (CGType::GetCGGenericKind(*tyArg) == CGType::CGGenericKind::CONCRETE) {
-            std::string tiName = CGType::GetNameOfTypeInfoGV(*tyArg);
-            tyArgMeta.emplace_back(llvm::MDString::get(llvmCtx, tiName));
-        } else {
-            auto ti = UnwindGenericRelateType(llvmCtx, *DeRef(*tyArg));
-            if (!ti.empty()) {
+        // Each argument is itself either a concrete leaf (MDString ".ti") or a
+        // nested instantiation (recursively flattened MDNode). The backend decoder
+        // (CangjieDCE::resolveVFEMeta) DFS-flattens this into the trie Path.
+        for (auto tyArg : derefedTy.GetTypeArgs()) {
+            auto& derefedArg = *DeRef(*tyArg);
+            if (CGType::GetCGGenericKind(derefedArg) == CGType::CGGenericKind::CONCRETE) {
+                std::string tiName = CGType::GetNameOfTypeInfoGV(derefedArg);
+                tyArgMeta.emplace_back(llvm::MDString::get(llvmCtx, tiName));
+            } else {
+                auto ti = UnwindGenericRelateType(llvmCtx, derefedArg);
+                // Wrap unconditionally. ti is never empty on reachable paths: a
+                // generic type parameter hits the IsGeneric() branch above and
+                // returns ["$g"]; a nested instantiation returns [ttName, ...].
+                CJC_ASSERT_WITH_MSG(!ti.empty(), "ti is empty for type: " + derefedArg.ToString());
                 tyArgMeta.emplace_back(llvm::MDTuple::get(llvmCtx, ti));
             }
         }
+        return tyArgMeta;
     }
-    return tyArgMeta;
 }
 
 uint64_t GetUIntMax(IRBuilder2& irBuilder, const CHIR::IntType& ty)

@@ -24,20 +24,6 @@ using namespace CodeGen;
 using namespace CHIR;
 
 namespace {
-llvm::MDTuple* GenObjTyMetaForVirtualCall(IRBuilder2& irBuilder, const CHIR::Type& ty)
-{
-    CJC_ASSERT(ty.GetTypeArgs().size() <= 1);
-    llvm::LLVMContext& llvmCtx = irBuilder.GetCGContext().GetLLVMContext();
-    std::vector<llvm::Metadata*> objTyMeta{};
-    if (ty.GetTypeArgs().size() == 1) {
-        objTyMeta = UnwindGenericRelateType(llvmCtx, ty);
-    } else {
-        std::string tiName = CGType::GetNameOfTypeInfoGV(ty);
-        objTyMeta.emplace_back(llvm::MDString::get(llvmCtx, tiName));
-    }
-    return llvm::MDTuple::get(llvmCtx, objTyMeta);
-}
-
 inline bool VirtualCallCanBeHoisted(IRBuilder2& irBuilder, const CHIRCallExpr& callExprWrapper)
 {
     if (irBuilder.GetCGContext().GetCompileOptions().optimizationLevel < GlobalOptions::OptimizationLevel::O2) {
@@ -49,6 +35,7 @@ inline bool VirtualCallCanBeHoisted(IRBuilder2& irBuilder, const CHIRCallExpr& c
 llvm::Value* GenerateFuncPtrForNonAutoEnv(IRBuilder2& irBuilder, llvm::Value* thisTI, CHIRInvokeExpr& invokeExpr)
 {
     auto& cgCtx = irBuilder.GetCGContext();
+    auto& llvmCtx = cgCtx.GetLLVMContext();
     if (VirtualCallCanBeHoisted(irBuilder, invokeExpr)) {
         auto [prepForVirtualCallBB] =
             Vec2Tuple<1>(irBuilder.CreateAndInsertBasicBlocks({GenNameForBB("prepForVirtualCall.bb")}));
@@ -69,14 +56,11 @@ llvm::Value* GenerateFuncPtrForNonAutoEnv(IRBuilder2& irBuilder, llvm::Value* th
         CJC_ASSERT(vtableSizeOfIntroType > 0);
         auto idxOfIntroType = irBuilder.getInt64(vtableSizeOfIntroType - 1U);
         funcPtr = irBuilder.CallIntrinsicGetVTableFunc(thisTI, idxOfIntroType, idxOfVFunc, introTi);
-        auto& llvmCtx = cgCtx.GetLLVMContext();
         auto meta = llvm::MDTuple::get(llvmCtx, llvm::MDString::get(llvmCtx, GetTypeQualifiedName(*introType)));
         llvm::cast<llvm::Instruction>(funcPtr)->setMetadata("IntroType", meta);
     }
-    if (introType->GetTypeArgs().size() <= 1) {
-        auto objTyMeta = GenObjTyMetaForVirtualCall(irBuilder, *introType);
-        llvm::cast<llvm::Instruction>(funcPtr)->setMetadata("objType", objTyMeta);
-    }
+    auto objTyMeta = llvm::MDTuple::get(llvmCtx, UnwindGenericRelateType(llvmCtx, *introType));
+    llvm::cast<llvm::Instruction>(funcPtr)->setMetadata("objType", objTyMeta);
 
     auto prepForVirtualCallBB = invokeExpr.GetPrepForVirtualCallBB();
     if (prepForVirtualCallBB) {

@@ -204,10 +204,6 @@ CGType::CGGenericKind CGType::GetCGGenericKind(const CHIR::Type& chirType)
     if (hasGenericTypeArg) {
         return CGGenericKind::DYNAMIC_GI;
     } else if (chirType.GetTypeArgs().empty()) {
-        if (auto ct = dynamic_cast<const CHIR::CustomType*>(&chirType); ct && !ct->GetGenericArgs().empty()) {
-            CJC_ASSERT(ct->GetCustomTypeDef()->TestAttr(CHIR::Attribute::GENERIC_INSTANTIATED));
-            return CGGenericKind::STATIC_GI;
-        }
         return CGGenericKind::CONCRETE;
     } else {
         return CGGenericKind::STATIC_GI;

@@ -476,14 +476,8 @@ bool CGExtensionDef::CreateExtensionDefForType(CGModule& cgMod, const std::strin
     extensionDef->setLinkage(llvm::GlobalValue::PrivateLinkage);
     extensionDef->setInitializer(llvm::ConstantStruct::get(extensionDefType, content));
     extensionDef->addAttribute(GC_MTABLE_ATTR);
-    if (inheritedType.GetTypeArgs().size() == 1) {
-        auto inheritedTypeMeta = UnwindGenericRelateType(llvmCtx, inheritedType);
-        extensionDef->setMetadata("inheritedType", llvm::MDTuple::get(llvmCtx, inheritedTypeMeta));
-    } else if (inheritedType.GetTypeArgs().empty()) {
-        auto inheritedTypeMeta = CGType::GetNameOfTypeInfoGV(inheritedType);
-        extensionDef->setMetadata(
-            "inheritedType", llvm::MDTuple::get(llvmCtx, llvm::MDString::get(llvmCtx, inheritedTypeMeta)));
-    }
+    extensionDef->setMetadata("inheritedType",
+        llvm::MDTuple::get(llvmCtx, UnwindGenericRelateType(llvmCtx, inheritedType)));
     if (isForExternalType) {
         cgMod.AddExternalExtensionDef(extensionDef);
     } else {
