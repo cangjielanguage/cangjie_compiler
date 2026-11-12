@@ -77,11 +77,13 @@ public:
     ~ASTContext() = default;
 
     /**
-     * Delete desugar expr do two things:
-     * 1. Recursively delete inverted indexes of the sub symbols of the symbol.
-     * 2. Reset the desugar expr.
+     * Delete desugar expr do three things:
+     * 1. Recursively clear the type check cache entries of the sub-tree.
+     * 2. Recursively delete inverted indexes of the sub symbols of the symbol.
+     * 3. Reset the desugar expr.
      *
      * @see DeleteInvertedIndexes
+     * @see ClearTypeCheckCache
      */
     void DeleteDesugarExpr(OwnedPtr<AST::Expr>& desugar);
     void DeleteInvertedIndexes(Ptr<AST::Node> root);

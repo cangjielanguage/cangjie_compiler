@@ -28,6 +28,9 @@ ASTContext::ASTContext(DiagnosticEngine& diag, AST::Package& pkg)
 
 void ASTContext::DeleteDesugarExpr(OwnedPtr<Expr>& desugar)
 {
+    if (!desugar) {
+        return;
+    }
     DeleteInvertedIndexes(desugar.get());
     desugar = OwnedPtr<Expr>();
 }
@@ -37,6 +40,9 @@ void ASTContext::DeleteInvertedIndexes(Ptr<Node> root)
     if (!root) {
         return;
     }
+    // The sub-tree is about to be dropped; clear its type check cache entries so a later node
+    // reusing the same address cannot observe them.
+    ClearTypeCheckCache(*root);
     auto deleteInvertedIndexes = [this](Ptr<Node> node) {
         if (node && node->symbol) {
             invertedIndex.Delete(node->symbol);

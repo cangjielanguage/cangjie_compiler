@@ -940,7 +940,7 @@ void TypeChecker::TypeCheckerImpl::CheckLegalityOfReference(unsigned id, ASTCont
         if (auto le = DynamicCast<LambdaExpr>(node); le && le->GetTy()->IsCFunc()) {
             auto outerDecl = GetCurInheritableDecl(ctx, le->scopeName);
             if (outerDecl) {
-                DesugarStaticRefCall2MemberAccessInCFuncLam(*le, outerDecl->GetTy());
+                DesugarStaticRefCall2MemberAccessInCFuncLam(ctx, *le, outerDecl->GetTy());
             }
         }
         if (auto expr = DynamicCast<Expr*>(node); expr) {

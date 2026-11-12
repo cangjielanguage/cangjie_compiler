@@ -516,6 +516,7 @@ bool TypeChecker::TypeCheckerImpl::ChkPointerCall(ASTContext& ctx, ModalTy targe
             if (pointerExpr->arg) {
                 (void)ce.args.emplace_back(std::move(pointerExpr->arg));
             }
+            ctx.ClearTypeCheckCache(*ce.desugarExpr);
             ce.desugarExpr = nullptr;
         }
         ce.SetTy(resultTy);
@@ -660,6 +661,7 @@ bool TypeChecker::TypeCheckerImpl::ChkNumericTypeAliasCall(ASTContext& ctx, Moda
     ce.SetTy(typeConv->GetTy());
     if (!ret) {
         ce.args[0]->expr = std::move(typeConv->expr);
+        ctx.ClearTypeCheckCache(*ce.desugarExpr);
         ce.desugarExpr = nullptr;
     } else {
         ce.args.clear();
