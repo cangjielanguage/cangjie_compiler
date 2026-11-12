@@ -6,6 +6,7 @@
 
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -67,6 +68,14 @@ protected:
     static ArkTSTypeDesc TupleDesc(std::vector<ArkTSTypeDesc> elements)
     {
         return {ArkTSTypeDesc::Kind::TUPLE, {}, std::move(elements)};
+    }
+
+    // A prepared foreign class used as the reference leaf of a description.
+    static void InitWrappedPoint(ClassDecl& point)
+    {
+        point.identifier = "Point";
+        point.fullPackageName = "pkg";
+        point.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
     }
 };
 
@@ -925,4 +934,272 @@ TEST_F(ArkTSTypeMappingTest, WrapperSourceUsesQualifiedInteropNames)
     auto file = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
     ExpectSingleCall(file.get(), "qualified interop names");
+}
+
+TEST_F(ArkTSTypeMappingTest, ClassifyForeignClassAsObjectReference)
+{
+    // A prepared foreign class is a reference position; the same declaration
+    // without the wrapper attribute stays unsupported (generic presets keep
+    // their external form).
+    ClassDecl point;
+    point.identifier = "Point";
+    point.fullPackageName = "pkg";
+    ClassTy pointTy("Point", point, {});
+    point.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
+    auto desc = ArkTSClassifyType(&pointTy);
+    ASSERT_EQ(desc.kind, ArkTSTypeDesc::Kind::REFERENCE);
+    EXPECT_EQ(desc.reference, Ptr<Decl>(&point));
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(desc));
+    point.DisableAttr(Attribute::ARKTS_CLASS_WRAPPER);
+    EXPECT_EQ(ArkTSClassifyType(&pointTy).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
+}
+
+TEST_F(ArkTSTypeMappingTest, ReferenceElementsAreSupportedInContainers)
+{
+    // A prepared class is one reference leaf: usable directly, inside
+    // Option, inside Array and as a tuple element.
+    ClassDecl point;
+    InitWrappedPoint(point);
+    ClassTy pointTy("Point", point, {});
+    EnumDecl optionDecl;
+    optionDecl.identifier = "Option";
+    optionDecl.fullPackageName = "std.core";
+    EnumTy optionalPoint("Option", optionDecl, {&pointTy});
+    auto optional = ArkTSClassifyType(&optionalPoint);
+    ASSERT_EQ(optional.kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    ASSERT_EQ(optional.elements.size(), 1);
+    EXPECT_EQ(optional.elements.front().kind, ArkTSTypeDesc::Kind::REFERENCE);
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(optional));
+    // Array<T'> copies the container; an object element keeps its reference.
+    StructDecl arrayDecl;
+    arrayDecl.identifier = "Array";
+    arrayDecl.fullPackageName = "std.core";
+    StructTy pointArray("Array", arrayDecl, {&pointTy});
+    auto array = ArkTSClassifyType(&pointArray);
+    ASSERT_EQ(array.kind, ArkTSTypeDesc::Kind::ARRAY_COPY);
+    ASSERT_EQ(array.elements.size(), 1);
+    EXPECT_EQ(array.elements.front().kind, ArkTSTypeDesc::Kind::REFERENCE);
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(array));
+    // A nested Option stays refused, including when its leaf is a reference.
+    EnumTy nestedOptional("Option", optionDecl, {&optionalPoint});
+    EXPECT_EQ(ArkTSClassifyType(&nestedOptional).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
+    StructTy arrayOfNestedOptional("Array", arrayDecl, {&nestedOptional});
+    EXPECT_EQ(ArkTSClassifyType(&arrayOfNestedOptional).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
+    // Containers nest recursively under the same descriptions.
+    StructTy nestedPointArray("Array", arrayDecl, {&pointArray});
+    auto nested = ArkTSClassifyType(&nestedPointArray);
+    ASSERT_EQ(nested.kind, ArkTSTypeDesc::Kind::ARRAY_COPY);
+    ASSERT_EQ(nested.elements.size(), 1);
+    EXPECT_EQ(nested.elements.front().kind, ArkTSTypeDesc::Kind::ARRAY_COPY);
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(nested));
+    StructTy optionalPointArray("Array", arrayDecl, {&optionalPoint});
+    auto maybeArray = ArkTSClassifyType(&optionalPointArray);
+    ASSERT_EQ(maybeArray.kind, ArkTSTypeDesc::Kind::ARRAY_COPY);
+    ASSERT_EQ(maybeArray.elements.size(), 1);
+    EXPECT_EQ(maybeArray.elements.front().kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    ASSERT_EQ(maybeArray.elements.front().elements.size(), 1);
+    EXPECT_EQ(maybeArray.elements.front().elements.front().kind, ArkTSTypeDesc::Kind::REFERENCE);
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(maybeArray));
+    // Option wraps an array whose element is a reference.
+    EnumTy optionalArrayTy("Option", optionDecl, {&pointArray});
+    auto optionalArray = ArkTSClassifyType(&optionalArrayTy);
+    ASSERT_EQ(optionalArray.kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    ASSERT_EQ(optionalArray.elements.size(), 1);
+    EXPECT_EQ(optionalArray.elements.front().kind, ArkTSTypeDesc::Kind::ARRAY_COPY);
+    ASSERT_EQ(optionalArray.elements.front().elements.size(), 1);
+    EXPECT_EQ(optionalArray.elements.front().elements.front().kind, ArkTSTypeDesc::Kind::REFERENCE);
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(optionalArray));
+    // Tuple elements are converted the same way.
+    auto float64 = TypeManager::GetPrimitiveTy(TypeKind::TYPE_FLOAT64);
+    TupleTy pair({&pointTy, float64});
+    auto tuple = ArkTSClassifyType(&pair);
+    ASSERT_EQ(tuple.kind, ArkTSTypeDesc::Kind::TUPLE);
+    ASSERT_EQ(tuple.elements.size(), 2);
+    EXPECT_EQ(tuple.elements.front().kind, ArkTSTypeDesc::Kind::REFERENCE);
+    EXPECT_EQ(tuple.elements.back().kind, ArkTSTypeDesc::Kind::SCALAR);
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(tuple));
+}
+
+TEST_F(ArkTSTypeMappingTest, ContainerElementsConvertObjectReferences)
+{
+    // Array and tuple elements leave through the stored reference and come
+    // back through the object guard and wrapping constructor.
+    ClassDecl point;
+    InitWrappedPoint(point);
+    ArkTSTypeDesc reference{ArkTSTypeDesc::Kind::REFERENCE, "", {}, Ptr<Decl>(&point)};
+    ArkTSTypeDesc maybeReference{ArkTSTypeDesc::Kind::OPTIONAL, "", {reference}};
+    ArkTSTypeDesc array{ArkTSTypeDesc::Kind::ARRAY_COPY, "", {reference}};
+    ArkTSTypeDesc tuple{ArkTSTypeDesc::Kind::TUPLE, "", {maybeReference, ScalarDesc("Float64")}};
+    // To-JS through a tuple parameter; from-JS through an array result.
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto toCode = ArkTSForeignWrapperSource({tuple}, array, 0, "__locals_", ARKTS_NO_REST,
+        ArkTSReceiverKind::MODULE, ARKTS_DERIVE_OPTIONAL, &classRefs);
+    ASSERT_FALSE(toCode.empty());
+    EXPECT_NE(toCode.find("__cj_arkts_ref_value().toJSValue()"), std::string::npos);
+    EXPECT_NE(toCode.find("let __locals_copy_0 = Array<__locals_type_0>(__locals_length_0"),
+        std::string::npos);
+    EXPECT_EQ(toCode.find("Array<Point>("), std::string::npos);
+    EXPECT_NE(toCode.find("if (!__locals_item_"), std::string::npos);
+    EXPECT_NE(toCode.find("isObject()"), std::string::npos);
+    EXPECT_NE(toCode.find(".asObject(), ())"), std::string::npos);
+    ASSERT_EQ(classRefs.size(), 2);
+    for (auto& entry : classRefs) {
+        EXPECT_EQ(entry.second, Ptr<Decl>(&point));
+    }
+    auto toFile = Parse(toCode);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+    // From-JS through a tuple result: the nullable reference part carries a
+    // placeholder type instead of a spliced class name, and the arity check
+    // stays in place.
+    classRefs.clear();
+    auto fromCode = ArkTSForeignWrapperSource({array}, tuple, 0, "__locals_", ARKTS_NO_REST,
+        ArkTSReceiverKind::MODULE, ARKTS_DERIVE_OPTIONAL, &classRefs);
+    ASSERT_FALSE(fromCode.empty());
+    EXPECT_NE(fromCode.find("Option<__locals_type_"), std::string::npos);
+    EXPECT_NE(fromCode.find("not a 2-element array"), std::string::npos);
+    EXPECT_NE(fromCode.find("isUndefined()"), std::string::npos);
+    EXPECT_NE(fromCode.find("Option<__locals_type_0>"), std::string::npos);
+    EXPECT_NE(fromCode.find("__locals_class_0("), std::string::npos);
+    ASSERT_EQ(classRefs.size(), 2);
+    for (auto& entry : classRefs) {
+        EXPECT_EQ(entry.second, Ptr<Decl>(&point));
+    }
+    auto fromFile = Parse(fromCode);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+    // Recursive containers: Option<Array<T'>> leaves through the per-element
+    // conversion, Array<Array<T'>> binds one type placeholder per level.
+    ArkTSTypeDesc nestedArray{ArkTSTypeDesc::Kind::ARRAY_COPY, "", {array}};
+    ArkTSTypeDesc optionalArray{ArkTSTypeDesc::Kind::OPTIONAL, "", {array}};
+    classRefs.clear();
+    auto nestedCode = ArkTSForeignWrapperSource({optionalArray}, nestedArray, 0, "__locals_", ARKTS_NO_REST,
+        ArkTSReceiverKind::MODULE, ARKTS_DERIVE_OPTIONAL, &classRefs);
+    ASSERT_FALSE(nestedCode.empty());
+    EXPECT_NE(nestedCode.find("Array<ark_interop.JSValue>("), std::string::npos);
+    EXPECT_NE(nestedCode.find("Array<Array<__locals_type_"), std::string::npos);
+    EXPECT_EQ(nestedCode.find("Array<Point>("), std::string::npos);
+    EXPECT_NE(nestedCode.find(".asObject(), ())"), std::string::npos);
+    ASSERT_EQ(classRefs.size(), 3);
+    for (auto& entry : classRefs) {
+        EXPECT_EQ(entry.second, Ptr<Decl>(&point));
+    }
+    auto nestedFile = Parse(nestedCode);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+}
+
+TEST_F(ArkTSTypeMappingTest, ReferencePositionsRequireTheClassRefsMap)
+{
+    // A reference position is emitted by placeholder and can only be bound
+    // through the classRefs map. Without the map the wrapper fails closed
+    // instead of emitting malformed syntax (empty expression or type argument);
+    // every container that reaches a reference leaf behaves the same in both
+    // parameter and result position.
+    ClassDecl point;
+    InitWrappedPoint(point);
+    ArkTSTypeDesc reference{ArkTSTypeDesc::Kind::REFERENCE, "", {}, Ptr<Decl>(&point)};
+    ArkTSTypeDesc array{ArkTSTypeDesc::Kind::ARRAY_COPY, "", {reference}};
+    ArkTSTypeDesc optional{ArkTSTypeDesc::Kind::OPTIONAL, "", {reference}};
+    ArkTSTypeDesc tuple{ArkTSTypeDesc::Kind::TUPLE, "", {reference, ScalarDesc("Int32")}};
+    for (const auto& position : {reference, array, optional, tuple}) {
+        EXPECT_TRUE(ArkTSForeignWrapperSource({position}, ScalarDesc("Unit"), 0, "__locals_").empty());
+        EXPECT_TRUE(ArkTSForeignWrapperSource({}, position, 0, "__locals_").empty());
+    }
+    // Negative control: a reference-free signature still generates without the
+    // map, so the guard keys on the reference leaf rather than on the pointer.
+    EXPECT_FALSE(ArkTSForeignWrapperSource({ScalarDesc("Int32")}, ScalarDesc("Unit"), 0, "__locals_").empty());
+    // Positive control: a result reference needs the map, and with it the same
+    // call generates and records the class for the lowering walker.
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto code = ArkTSForeignWrapperSource({}, reference, 0, "__locals_",
+        ArkTSReceiverKind::MODULE, ARKTS_DERIVE_OPTIONAL, &classRefs);
+    ASSERT_FALSE(code.empty());
+    ASSERT_EQ(classRefs.size(), 1);
+    EXPECT_EQ(classRefs.begin()->second, Ptr<Decl>(&point));
+}
+
+TEST_F(ArkTSTypeMappingTest, RestPositionAcceptsReferenceElements)
+{
+    // The rest position stays an Array<T'>; a reference element converts
+    // each item into its own argument.
+    ClassDecl point;
+    InitWrappedPoint(point);
+    ArkTSTypeDesc reference{ArkTSTypeDesc::Kind::REFERENCE, "", {}, Ptr<Decl>(&point)};
+    ArkTSTypeDesc array{ArkTSTypeDesc::Kind::ARRAY_COPY, "", {reference}};
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto code = ArkTSForeignWrapperSource({array}, ScalarDesc("Unit"), 0, "__locals_", 0,
+        ArkTSReceiverKind::MODULE, ARKTS_DERIVE_OPTIONAL, &classRefs);
+    ASSERT_FALSE(code.empty());
+    EXPECT_NE(code.find("__cj_arkts_ref_value().toJSValue()"), std::string::npos);
+    EXPECT_NE(code.find("Array<ark_interop.JSValue>("), std::string::npos);
+    auto file = Parse(code);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+}
+
+TEST_F(ArkTSTypeMappingTest, ClassMemberSourceConvertsObjectReferences)
+{
+    // Instance receiver: arguments leave through the stored reference and
+    // incoming objects are guarded and wrapped. No class name is spliced into
+    // the generated syntax; the class is recorded by placeholder.
+    ClassDecl point;
+    point.identifier = "Point";
+    point.fullPackageName = "pkg";
+    point.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
+    ArkTSTypeDesc reference{ArkTSTypeDesc::Kind::REFERENCE, "", {}, Ptr<Decl>(&point)};
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto code = ArkTSClassMethodSource({reference}, reference, 0, "__locals_", ARKTS_NO_REST,
+        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, classRefs);
+    ASSERT_FALSE(code.empty());
+    EXPECT_NE(code.find("__cj_arkts_ref_value"), std::string::npos);
+    EXPECT_NE(code.find("toJSValue"), std::string::npos);
+    EXPECT_NE(code.find("isObject"), std::string::npos);
+    EXPECT_NE(code.find("asObject()"), std::string::npos);
+    ASSERT_EQ(classRefs.size(), 1);
+    EXPECT_EQ(classRefs.begin()->second, Ptr<Decl>(&point));
+    auto file = Parse(code);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+    // Class member container positions use the same conversion and record a
+    // type placeholder for the reference element.
+    ArkTSTypeDesc array{ArkTSTypeDesc::Kind::ARRAY_COPY, "", {reference}};
+    ArkTSTypeDesc optional{ArkTSTypeDesc::Kind::OPTIONAL, "", {reference}};
+    classRefs.clear();
+    auto containerCode = ArkTSClassMethodSource({optional}, array, 0, "__locals_", ARKTS_NO_REST,
+        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, classRefs);
+    ASSERT_FALSE(containerCode.empty());
+    EXPECT_NE(containerCode.find("Array<__locals_type_"), std::string::npos);
+    EXPECT_EQ(containerCode.find("Array<Point>("), std::string::npos);
+    EXPECT_NE(containerCode.find("getElement"), std::string::npos);
+    EXPECT_NE(containerCode.find("isObject"), std::string::npos);
+    ASSERT_EQ(classRefs.size(), 2);
+    for (auto& entry : classRefs) {
+        EXPECT_EQ(entry.second, Ptr<Decl>(&point));
+    }
+    auto containerFile = Parse(containerCode);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+    classRefs.clear();
+    auto propertyCode = ArkTSClassPropertySource(array, false, ArkTSMemberReceiver::INSTANCE, 0, "__locals_",
+        ArkTSReceiverKind::MODULE, classRefs);
+    ASSERT_FALSE(propertyCode.empty());
+    EXPECT_NE(propertyCode.find("Array<__locals_type_"), std::string::npos);
+    ASSERT_EQ(classRefs.size(), 2);
+    auto propertyFile = Parse(propertyCode);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+}
+
+TEST_F(ArkTSTypeMappingTest, ClassConstructorSourceUsesTheResolvedClass)
+{
+    // Constructor: the class value resolves through the module, is converted
+    // to a class and constructed with the converted arguments.
+    ClassDecl point;
+    point.identifier = "Point";
+    point.fullPackageName = "pkg";
+    point.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto code = ArkTSClassConstructorSource({ScalarDesc("Float64")}, 0, "__locals_", ARKTS_NO_REST,
+        ArkTSReceiverKind::MODULE, classRefs);
+    ASSERT_FALSE(code.empty());
+    EXPECT_NE(code.find("asClass()"), std::string::npos);
+    EXPECT_NE(code.find(".new("), std::string::npos);
+    EXPECT_NE(code.find("__cj_arkts_ref = "), std::string::npos);
+    EXPECT_NE(code.find("asObject()"), std::string::npos);
+    auto file = Parse(code);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
 }

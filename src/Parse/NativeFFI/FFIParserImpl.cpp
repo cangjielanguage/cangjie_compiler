@@ -201,9 +201,15 @@ void FFIParserImpl::CheckForeignNameAnnotation(Decl& decl) const
         if (it->kind != AnnotationKind::FOREIGN_NAME) {
             continue;
         }
+        // Members of an @ArkTS foreign class are FFI declarations even though
+        // FOREIGN reaches the member only later, in Sema: the enclosing
+        // class-like is the marker the parser can check here.
+        const bool isArkTSForeignMember = decl.outerDecl != nullptr &&
+            decl.outerDecl->HasAnno(AnnotationKind::ARKTS) && decl.outerDecl->TestAttr(Attribute::FOREIGN);
         if (!decl.outerDecl ||
             (!decl.outerDecl->IsJavaForeign() && !decl.outerDecl->IsJavaExport() &&
-                !decl.outerDecl->TestAnyAttr(Attribute::OBJ_C_FOREIGN, Attribute::OBJ_C_EXPORT))) {
+                !decl.outerDecl->TestAnyAttr(Attribute::OBJ_C_FOREIGN, Attribute::OBJ_C_EXPORT) &&
+                !isArkTSForeignMember)) {
             p.diag.DiagnoseRefactor(DiagKindRefactor::parse_foreign_name_on_ffi_decl_member, decl);
             decl.EnableAttr(Attribute::IS_BROKEN);
             return;

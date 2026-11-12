@@ -769,7 +769,7 @@ public func member(): Unit {}
         EXPECT_TRUE(restored->HasAnno(AnnotationKind::ARKTS));
         ASSERT_EQ(restored->annotations.size(), 2);
         std::unordered_map<std::string, std::string> merged;
-        ASSERT_TRUE(ArkTSFunctionOptions(*restored, merged));
+        ASSERT_TRUE(ArkTSDeclOptions(*restored, merged));
         EXPECT_EQ(merged.at("module"), "actual");
         EXPECT_EQ(merged.at("namespace"), "outer");
         EXPECT_EQ(merged.at("foreignName"), "echo");
@@ -833,7 +833,7 @@ foreign {
     EXPECT_TRUE(IsArkTSForeignFunction(function));
     EXPECT_TRUE(function.TestAttr(Attribute::PUBLIC));
     std::unordered_map<std::string, std::string> options;
-    ASSERT_TRUE(ArkTSFunctionOptions(function, options));
+    ASSERT_TRUE(ArkTSDeclOptions(function, options));
     EXPECT_EQ(options.at("module"), "actual");
     EXPECT_EQ(options.at("namespace"), "outer.inner");
     EXPECT_EQ(options.at("foreignName"), "echo");
@@ -870,7 +870,7 @@ foreign {
         {"second", "inner", "echo"}, {"first", "outer", "another"}, {"first", "outer", "original"}};
     for (size_t i = 0; i < file->decls.size(); ++i) {
         std::unordered_map<std::string, std::string> options;
-        ASSERT_TRUE(ArkTSFunctionOptions(StaticCast<FuncDecl&>(*file->decls[i]), options));
+        ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls[i]), options));
         EXPECT_EQ(options.at("module"), expected[i][0]);
         EXPECT_EQ(options.at("namespace"), expected[i][1]);
         EXPECT_EQ(options.at("foreignName"), expected[i][2]);
@@ -897,7 +897,7 @@ TEST_F(ArkTSEntryTest, RepeatedOptionAtOneLevelIsRejectedEvenForEqualValues)
             diagnostics.EmitCategoryDiagnostics(DiagCategory::PARSE);
             EXPECT_EQ(diagnostics.GetErrorCount(), 0);
             std::unordered_map<std::string, std::string> options;
-            EXPECT_FALSE(ArkTSFunctionOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
+            EXPECT_FALSE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
         }
     }
 }
@@ -1033,7 +1033,7 @@ foreign func echo(): String
 )");
     ASSERT_EQ(diag.GetErrorCount(), 0);
     std::unordered_map<std::string, std::string> options;
-    ASSERT_TRUE(ArkTSFunctionOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
+    ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
     EXPECT_EQ(options.at("foreignName"), "quote\"name");
     auto generated = ArkTSForeignWrapperSource({}, ArkTSScalarDesc("String"), 0, "__locals_");
     EXPECT_EQ(generated.find("quote"), std::string::npos);
@@ -1243,7 +1243,7 @@ TEST_F(ArkTSEntryTest, ForeignNamespaceRejectsEmptySegments)
         auto file = Parse(std::string("@ArkTS[namespace: \"") + ns + "\"] foreign func echo(): Unit");
         ASSERT_EQ(diag.GetErrorCount(), 0);
         std::unordered_map<std::string, std::string> options;
-        EXPECT_FALSE(ArkTSFunctionOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
+        EXPECT_FALSE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
     }
     auto file = Parse(R"(@ArkTS[namespace: "bad..default"]
 foreign {
@@ -1253,7 +1253,7 @@ foreign {
 )");
     ASSERT_EQ(diag.GetErrorCount(), 0);
     std::unordered_map<std::string, std::string> options;
-    EXPECT_TRUE(ArkTSFunctionOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
+    EXPECT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
     EXPECT_EQ(options.at("namespace"), "api.nested");
 }
 
@@ -1536,7 +1536,7 @@ foreign func echo(): String
 )");
     ASSERT_EQ(diag.GetErrorCount(), 0);
     std::unordered_map<std::string, std::string> options;
-    ASSERT_TRUE(ArkTSFunctionOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
+    ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
     EXPECT_EQ(options.at("module"), "actual");
     auto code = ArkTSForeignWrapperSource({}, ArkTSScalarDesc("String"), 0, "__locals_");
     EXPECT_NE(code.find("requireArkModule(\"__module__\")"), std::string::npos);
@@ -1562,7 +1562,7 @@ foreign func parseInt(text: String): Float64
     ASSERT_EQ(diag.GetErrorCount(), 0);
     ASSERT_EQ(file->decls.size(), 1);
     std::unordered_map<std::string, std::string> options;
-    ASSERT_TRUE(ArkTSFunctionOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
+    ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
     EXPECT_EQ(options.count("module"), 0u);
     EXPECT_EQ(ArkTSDefaultModule("entry"), "entry");
     auto code = ArkTSForeignWrapperSource({}, ArkTSScalarDesc("Float64"), 0, "__locals_");

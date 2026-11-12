@@ -743,6 +743,12 @@ enum class Attribute {
     ARKTS,
     // Ordinary CJ wrapper generated from an ArkTS foreign function.
     ARKTS_FUNCTION_WRAPPER,
+    // Ordinary CJ class generated from an ArkTS foreign class. Its members are
+    // lowered into wrappers over the ArkTS object it references.
+    // W: Sema class preparation.
+    // R: type classification, lowering, CJO writer/loader. Appending the value
+    // keeps existing serialized attribute indices stable.
+    ARKTS_CLASS_WRAPPER,
 
     AST_ATTR_END,
 };

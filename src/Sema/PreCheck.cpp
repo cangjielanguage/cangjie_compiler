@@ -2308,6 +2308,7 @@ void TypeChecker::TypeCheckerImpl::PreCheck(const std::vector<Ptr<ASTContext>>& 
     // ResolveTypeAlias must precede this step so an alias selects its scalar
     // conversion; ordinary body type checking consumes the resulting AST.
     for (auto& ctx : contexts) {
+        LowerArkTSClasses(*ctx);
         LowerArkTSFunctions(*ctx);
     }
 

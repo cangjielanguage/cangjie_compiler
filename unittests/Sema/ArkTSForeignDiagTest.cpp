@@ -39,6 +39,13 @@ using namespace Cangjie;
 using namespace AST;
 
 namespace {
+// Support packages defined below the diagnostic tests that inject them.
+extern const char* ARKTS_INTEROP_SUPPORT;
+extern const char* ARKTS_CONTEXT_SUPPORT;
+extern const char* ARKTS_LANG_SUPPORT;
+} // namespace
+
+namespace {
 std::unordered_map<std::string, std::string> GetEnvironmentVars()
 {
     std::unordered_map<std::string, std::string> envVars;
@@ -231,6 +238,21 @@ protected:
         Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&found, &name](Ptr<Node> node) {
             auto candidate = DynamicCast<FuncDecl*>(node);
             if (candidate && candidate->identifier.Val() == name && candidate->funcBody) {
+                found = candidate;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return found;
+    }
+
+    // Finds the top-level class declaration named @p name.
+    Ptr<ClassDecl> FindClass(const std::string& name) const
+    {
+        Ptr<ClassDecl> found{nullptr};
+        Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&found, &name](Ptr<Node> node) {
+            auto candidate = DynamicCast<ClassDecl*>(node);
+            if (candidate && candidate->identifier.Val() == name) {
                 found = candidate;
             }
             return VisitAction::WALK_CHILDREN;
@@ -852,34 +874,459 @@ foreign func mixedRest(@RestParam xs: Array<Int32>, last!: Int32): Unit
     EXPECT_EQ(fd->funcBody->body, nullptr);
 }
 
-// Members of an @ArkTS foreign class have no body by design, yet the ArkTS
-// optional-parameter spelling carries a default value. The default is mapping
-// metadata, not an abstract-function default, so it must not be rejected.
+// A generic foreign class keeps its external declaration form, so its bodyless
+// members may keep the ArkTS optional-parameter spelling as mapping metadata.
 TEST_F(ArkTSForeignDiagTest, BodylessForeignClassMemberKeepsOptionalParameterSpelling)
 {
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
     CompileSema(R"(package entry
 
-@ArkTS[foreignName: "String"]
-public foreign class ArkTSString {
+import arkts.lang.*
+
+@ArkTS[foreignName: "Array"]
+public foreign class ArkTSArray<T> {
     public init(value!: Option<String> = None)
-    public func slice(start!: Option<Float64> = None, end!: Option<Float64> = None): ArkTSString
+    public func slice(start!: Option<Float64> = None, end!: Option<Float64> = None): ArkTSArray<T>
 }
 )");
-    EXPECT_EQ(diag.GetErrorCount(), 0);
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+}
+
+// A member spelling a compiler-owned name would collide with the generated
+// reference field/accessor, so the class is refused as a whole.
+TEST_F(ArkTSForeignDiagTest, ForeignClassReservedMemberIsDiagnosed)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Bad {
+    public init()
+    public func __cj_arkts_ref(): Unit
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("reserved for generated code"));
+    EXPECT_TRUE(HasErrorContaining("'Bad'"));
+}
+
+// An operator member has no method-name spelling the wrapper could call:
+// lowering it would emit callMethod("[]")-style code whose semantics do not
+// match the ArkTS operator contract. The member is refused with the class
+// reason diagnostic before any signature classification, marked broken and
+// keeps no generated body, while the ordinary member of the same class still
+// gets its wrapper.
+TEST_F(ArkTSForeignDiagTest, ForeignClassOperatorMemberIsRejected)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Indexed {
+    public func plain(value: Int32): Int32
+    public operator func [](index: Int32): Int32
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("operator members on foreign class are not supported"));
+    EXPECT_TRUE(HasErrorContaining("'Indexed'"));
+    // The refused member is broken and gets no wrapper body.
+    auto member = FindFunction("[]");
+    ASSERT_NE(member, nullptr);
+    EXPECT_TRUE(member->TestAttr(Attribute::IS_BROKEN));
+    ASSERT_NE(member->funcBody, nullptr);
+    EXPECT_EQ(member->funcBody->body, nullptr);
+    // Like every neighboring member refusal, the gate marks the class too;
+    // the class may still lower its remaining members.
+    Ptr<ClassDecl> indexed = nullptr;
+    Walker(instance->GetSourcePackages()[0]->files[0].get(), [&indexed](Ptr<Node> node) {
+        auto candidate = DynamicCast<ClassDecl*>(node);
+        if (candidate && candidate->identifier.Val() == "Indexed") {
+            indexed = candidate;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    ASSERT_NE(indexed, nullptr);
+    EXPECT_TRUE(indexed->TestAttr(Attribute::IS_BROKEN));
+    auto plain = FindFunction("plain");
+    ASSERT_NE(plain, nullptr);
+    ASSERT_NE(plain->funcBody, nullptr);
+    EXPECT_NE(plain->funcBody->body, nullptr);
+}
+
+// The explicit-empty-value rule covers prepared foreign classes too: the
+// wrapper path owns its own option fold (ArkTSDeclOptionsDiagnose skips
+// ARKTS_CLASS_WRAPPER declarations), so an empty foreignName, an empty or
+// whitespace-only namespace or a whitespace-only module is rejected with the
+// same '@ArkTS' message as every other declaration instead of generating
+// getProperty(""), an empty namespace segment or requireArkModule("").
+TEST_F(ArkTSForeignDiagTest, ForeignClassEmptyOptionValuesAreDiagnosed)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual", foreignName: ""]
+public foreign class EmptyForeignName {
+    public func byName(): Int32
+}
+
+@ArkTS[module: "actual", namespace: "  "]
+public foreign class BlankNamespace {
+    public func bySegment(): Int32
+}
+
+@ArkTS[module: "  "]
+public foreign class BlankModule {
+    public func byModule(): Int32
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("'foreignName' option of '@ArkTS' must not be an empty string"));
+    EXPECT_TRUE(HasErrorContaining("'namespace' option of '@ArkTS' must not be an empty string"));
+    EXPECT_TRUE(HasErrorContaining("'module' option of '@ArkTS' must not be an empty string"));
+    // Each refused class lowers none of its members: the wrapper body that
+    // would carry the empty value is never generated.
+    for (const auto& name : {"byName", "bySegment", "byModule"}) {
+        auto fd = FindFunction(name);
+        ASSERT_NE(fd, nullptr) << name;
+        ASSERT_NE(fd->funcBody, nullptr) << name;
+        EXPECT_EQ(fd->funcBody->body, nullptr) << name;
+    }
+}
+
+// The class wrapper path applies the same module-specifier rule as the
+// function path: a relative or absolute path spelling is refused at compile
+// time instead of reaching requireArkModule.
+TEST_F(ArkTSForeignDiagTest, ForeignClassModulePathIsRejected)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "./actual"]
+public foreign class Pathy {
+    public func plain(value: Int32): Int32
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("module option must be an ArkTS module specifier"));
+    EXPECT_TRUE(HasErrorContaining("'Pathy'"));
+    Ptr<ClassDecl> pathy = nullptr;
+    Walker(instance->GetSourcePackages()[0]->files[0].get(), [&pathy](Ptr<Node> node) {
+        auto candidate = DynamicCast<ClassDecl*>(node);
+        if (candidate && candidate->identifier.Val() == "Pathy") {
+            pathy = candidate;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    ASSERT_NE(pathy, nullptr);
+    EXPECT_TRUE(pathy->TestAttr(Attribute::IS_BROKEN));
+    auto plain = FindFunction("plain");
+    ASSERT_NE(plain, nullptr);
+    ASSERT_NE(plain->funcBody, nullptr);
+    EXPECT_EQ(plain->funcBody->body, nullptr);
+}
+
+// A prepared @ArkTS foreign class owns its own option fold (the declaration
+// walk skips ARKTS_CLASS_WRAPPER), so a name repeated inside one @ArkTS layer
+// keeps the dedicated duplicated-option message instead of degrading to the
+// generic option-shape refusal.
+TEST_F(ArkTSForeignDiagTest, ForeignClassRepeatedOptionIsDiagnosed)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "a", module: "b"]
+public foreign class RepeatedOption {
+    public func plain(): Int32
+}
+)");
+    // Only the option message is asserted; the exact error count is not
+    // asserted because refusing a prepared class can produce further
+    // diagnostics outside this rule.
+    EXPECT_TRUE(HasErrorContaining("duplicated option 'module' in '@ArkTS'"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among"));
+    auto repeated = FindClass("RepeatedOption");
+    ASSERT_NE(repeated, nullptr);
+    EXPECT_TRUE(repeated->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The same prepared-class fold keeps the namespace-specific message for an
+// ill-formed namespace value, anchored on the namespace literal.
+TEST_F(ArkTSForeignDiagTest, ForeignClassIllFormedNamespaceIsDiagnosed)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual", namespace: "a..b"]
+public foreign class IllFormedNamespace {
+    public func plain(): Int32
+}
+)");
+    // Only the namespace message and its anchor are asserted; the exact
+    // error count is not asserted because refusing a prepared class can
+    // produce further diagnostics outside this rule.
+    EXPECT_TRUE(HasErrorContaining(
+        "'namespace' option 'a..b' of '@ArkTS' must be a dot-separated identifier path with no empty segments"));
+    EXPECT_FALSE(HasErrorContaining("must be string literals among"));
+    const auto* error = handler->FindErrorContaining("'namespace' option 'a..b'");
+    ASSERT_NE(error, nullptr);
+    // The namespace literal sits on line 5, column 37 (the opening quote),
+    // not on the class declaration on line 6.
+    EXPECT_NE(error->hint.find(":5:37:"), std::string::npos) << error->hint;
+    EXPECT_EQ(error->hint.find(":6:"), std::string::npos) << error->hint;
+    auto illFormed = FindClass("IllFormedNamespace");
+    ASSERT_NE(illFormed, nullptr);
+    EXPECT_TRUE(illFormed->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The duplicate-option anchor is the offending value, not the first
+// annotation: @Deprecated sits before @ArkTS here, so anchoring on
+// annotations.front() would point at the wrong annotation.
+TEST_F(ArkTSForeignDiagTest, ForeignClassOptionAnchorsAtArkTSAnnotation)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@Deprecated["legacy"]
+@ArkTS[module: "a", module: "b"]
+public foreign class AnchoredOption {
+    public func plain(): Int32
+}
+)");
+    // Only the duplicate-option anchor is asserted; the exact error count is
+    // not asserted because refusing a prepared class can produce further
+    // diagnostics outside this rule.
+    const auto* error = handler->FindErrorContaining("duplicated option 'module'");
+    ASSERT_NE(error, nullptr);
+    // The second 'module' literal sits on line 6, column 29; line 5 carries
+    // the unrelated @Deprecated annotation.
+    EXPECT_NE(error->hint.find(":6:29:"), std::string::npos) << error->hint;
+    EXPECT_EQ(error->hint.find(":5:"), std::string::npos) << error->hint;
+}
+
+// A user-written getter body on a property is not in GetMemberDecls() as a
+// FuncDecl, so the class shape rule must inspect the PropDecl accessors too:
+// lowering supplies every accessor body and a user body is refused.
+TEST_F(ArkTSForeignDiagTest, ForeignClassPropertyBodyIsRejected)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class GetterBody {
+    public prop x: Int32 {
+        get() {
+            return 1
+        }
+    }
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("member 'x' must not have a body"));
+    auto getterBody = FindClass("GetterBody");
+    ASSERT_NE(getterBody, nullptr);
+    EXPECT_TRUE(getterBody->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The same rule covers the getter of a 'mut prop' that writes no setter body:
+// the accessor set on the PropDecl is what matters, not whether a setter
+// exists.
+TEST_F(ArkTSForeignDiagTest, ForeignClassMutPropertyGetterBodyIsRejected)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class MutGetterBody {
+    public mut prop y: Int32 {
+        get() {
+            return 2
+        }
+    }
+}
+)");
+    // A mut prop without a setter trips an independent accessor-shape rule;
+    // the user-written getter body is what this test asserts.
+    EXPECT_TRUE(HasErrorContaining("member 'y' must not have a body"));
+    auto mutGetterBody = FindClass("MutGetterBody");
+    ASSERT_NE(mutGetterBody, nullptr);
+    EXPECT_TRUE(mutGetterBody->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The setter body is covered by the same rule: a 'mut prop' that writes both
+// accessors is refused with the property name, not the accessor spelling.
+// This shape carries a setter, so the independent "property must have
+// accessors" rule does not fire and the class yields exactly one diagnostic.
+TEST_F(ArkTSForeignDiagTest, ForeignClassMutPropertySetterBodyIsRejected)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class MutSetterBody {
+    public mut prop z: Int32 {
+        get() {
+            return 0
+        }
+        set(v) {
+        }
+    }
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("member 'z' must not have a body"));
+    auto mutSetterBody = FindClass("MutSetterBody");
+    ASSERT_NE(mutSetterBody, nullptr);
+    EXPECT_TRUE(mutSetterBody->TestAttr(Attribute::IS_BROKEN));
 }
 
 // The named-parameter default rule covers bodyless members of an @ArkTS
 // foreign class/interface too. Such a member has no wrapper of its own, so
 // Sema reports the parameter and marks the member broken; the defaulted
-// parameter of the test above stays accepted.
+// parameter of the test above stays accepted. The fixture stays generic so
+// the class keeps its external declaration form: a prepared (non-generic)
+// class would first be refused for its missing JSObject import and its
+// members would get generated bodies before this rule runs.
 TEST_F(ArkTSForeignDiagTest, BodylessForeignClassMemberNamedParameterWithoutDefaultIsRejected)
 {
     CompileSema(R"(package entry
 
 @ArkTS[foreignName: "String"]
-public foreign class ArkTSString {
+public foreign class ArkTSString<T> {
     public init(value!: Option<String> = None)
-    public func slice(start!: Option<Float64>, end!: Option<Float64> = None): ArkTSString
+    public func slice(start!: Option<Float64>, end!: Option<Float64> = None): ArkTSString<T>
 }
 )");
     EXPECT_EQ(diag.GetErrorCount(), 1);
@@ -912,12 +1359,17 @@ public class JSValue {
     public func isBoolean(): Bool { return false }
     public func isArray(): Bool { return false }
     public func isBigInt(): Bool { return false }
+    public func isObject(): Bool { return false }
+    public func isFunction(): Bool { return false }
     public func toNumber(): Float64 { return 0.0 }
     public func toBoolean(): Bool { return false }
     public func asString(): JSString { return JSString() }
     public func asBigInt(): JSBigInt { return JSBigInt() }
     public func asArray(): JSArray { return JSArray() }
     public func asObject(): JSObject { return JSObject() }
+    public func asClass(): JSClass { return JSClass() }
+    public func getProperty(key: String): JSValue { return JSValue() }
+    public func setProperty(key: String, value: JSValue): Unit {}
     public func getElement(index: Int64): JSValue { return JSValue() }
     public func toJSValue(): JSValue { return this }
 }
@@ -943,7 +1395,16 @@ public class JSArray {
 public class JSObject {
     public func asObject(): JSObject { return this }
     public func getProperty(key: String): JSValue { return JSValue() }
+    public func setProperty(key: String, value: JSValue): Unit {}
     public func callMethod(key: String, args: Array<JSValue>): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return JSValue() }
+}
+
+public class JSClass {
+    public func new(): JSValue { return JSValue() }
+    public func new(arg: JSValue): JSValue { return JSValue() }
+    public func new(args: Array<JSValue>): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return JSValue() }
 }
 
 public class JSCallInfo {}
@@ -956,6 +1417,9 @@ public class JSModule {
 }
 
 public class JSContext {
+    public prop env: Int64 {
+        get() { return 0 }
+    }
     public prop global: JSObject {
         get() { return JSObject() }
     }
@@ -1475,19 +1939,26 @@ foreign func required(other: Int32, prefix!: Option<String>): String
 TEST_F(ArkTSForeignDiagTest, ClassLevelArkTSOptionSurvivesCjoRoundTrip)
 {
     diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
     auto presetCjo = ExportSupportPackage(R"(package presets
+
+import arkts.lang.*
 
 @ArkTS[module: "arkts.lang", foreignName: "String"]
 public foreign class ArkTSString {
-    public init(value!: Option<String> = None)
-    public func slice(start!: Option<Float64> = None): ArkTSString
+    public init(value: Option<String>)
+    public func slice(start: Option<Float64>): ArkTSString
 }
 
 @ArkTS[module: "arkts.lang", foreignName: "Object"]
 public foreign interface ArkTSType {
     func toString(): String
 }
-)");
+)",
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
     ASSERT_FALSE(presetCjo.empty());
 
     diag.ClearError();
@@ -1495,6 +1966,9 @@ public foreign interface ArkTSType {
     handler->errors.clear();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->importManager->SetPackageCjoCache("presets", presetCjo);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
     CompileSema(R"(package entry
 
 import presets.*

@@ -18,6 +18,7 @@
 
 namespace Cangjie {
 class DiagnosticEngine;
+class ImportManager;
 } // namespace Cangjie
 
 // Private Sema implementation surface, also used by compiler unit tests.
@@ -28,11 +29,24 @@ namespace Cangjie::Native::FFI::ArkTS {
 // of the rule.
 // Example: package "entry" (no module option) -> requireArkModule("entry").
 std::string ArkTSDefaultModule(const std::string& package);
+
+// Resolve the compiler-owned support names of one generated root (the
+// package-qualified interop surface, BigInt, Exception, Option and the
+// conversion exception) to declarations visible through the owner file's
+// imports. A same-named user declaration never captures them; a missing import
+// is diagnosed and the root is refused. Accepts an already-bound reference.
+// @p diagnosticName, when given, is the user-facing name the missing-support
+// diagnostic names instead of the owner identifier: a generated class member
+// carries an internal spelling (the wrapping constructor or the 'get'/'set'
+// accessor), so the caller passes the class or property name the user wrote.
+bool BindArkTSSupportReferences(AST::Decl& owner, AST::Node& root, ImportManager& imports, DiagnosticEngine& diag,
+    std::unordered_map<Ptr<const AST::Node>, Ptr<AST::Decl>>& supportRefs,
+    const std::string& diagnosticName = {});
 std::string ArkTSScalarName(Ptr<AST::Ty> ty);
 
 // Why an option set is refused. The kinds are kept apart so every caller can
-// pick the matching message: a non-string value, an unknown option name and a
-// name repeated inside one layer are different user mistakes (a repeated key
+// pick the matching message: a non-string value, an unknown option name and
+// a name repeated inside one layer are different user mistakes (a repeated key
 // is fully spelled and legal on its own).
 enum class ArkTSOptionProblem {
     NONE,
@@ -49,6 +63,20 @@ struct ArkTSOptionStatus {
     Ptr<AST::Node> at{nullptr};
 };
 
+// Option fold for any declaration; classes carry the one option layer that
+// its members inherit. On refusal, when @p status is not null it receives the
+// problem kind and the offending option name/node.
+bool ArkTSDeclOptions(const AST::Decl& decl, std::unordered_map<std::string, std::string>& options,
+    ArkTSOptionStatus* status = nullptr);
+
+// A source @ArkTS foreign class that has not been prepared yet: annotated,
+// still FOREIGN, and not generic. Generic declarations keep their external
+// form (the stdlib presets) and are never lowered into wrappers.
+bool IsArkTSForeignClass(const AST::ClassDecl& cd);
+// Prepared wrapper class; also true for an imported wrapper, whose attribute
+// survives the CJO round trip.
+bool IsArkTSClassWrapper(const AST::Decl& decl);
+
 // One @ArkTS annotation is one option layer. A layer is valid when every
 // argument is a string literal named 'module', 'namespace' or 'foreignName'
 // and no name repeats inside the layer (repetition is rejected even for equal
@@ -58,16 +86,15 @@ struct ArkTSOptionStatus {
 //          @ArkTS[module: "a", module: "a"] -> DUPLICATE.
 ArkTSOptionStatus CheckArkTSOptionLayer(const AST::Annotation& annotation);
 
-// Folds every @ArkTS layer of @p fd into @p options (later layers override
-// earlier inherited defaults) and validates the layer shape plus the effective
-// namespace. On refusal, when @p status is not null it receives the problem
-// kind and the offending option name/node.
-bool ArkTSFunctionOptions(const AST::FuncDecl& fd, std::unordered_map<std::string, std::string>& options,
-    ArkTSOptionStatus* status = nullptr);
 // A namespace value is legal when it is empty or has no empty leading,
 // trailing or inner segment; "a.b" and "a" are legal, ".a", "a." and "a..b"
 // are not. The value is only read.
 bool ArkTSNamespaceValid(const std::string& ns);
+// Segments of a validated namespace value, split on '.'; an empty value
+// yields no segments. Lowering builds one namespace placeholder per segment
+// and the generator walks the same count, so the function and class member
+// paths share this single split spelling.
+std::vector<std::string> ArkTSNamespaceSegments(const std::string& ns);
 // An explicitly written option value is empty when it contains no non-space
 // character. 'module', 'namespace' and 'foreignName' reject such a value:
 // an empty module reaches requireArkModule(""), an empty foreignName reaches
@@ -83,24 +110,34 @@ bool ArkTSOptionValueEmpty(const std::string& value);
 // IS_BROKEN -> true; a well-formed parameter -> false.
 bool ArkTSParamIsBroken(const AST::FuncParam& param);
 
-// Whether any parameter list of @p body carries @RestParam. A function with a
-// rest parameter cannot declare named parameters; the ArkTS parser reports
+// Whether any parameter list of @p body carries @RestParam. A function with
+// a rest parameter cannot declare named parameters; the ArkTS parser reports
 // that mix once through parse_rest_param_function_has_named_params, so the
 // named-parameter default rule skips such a signature instead of restating the
 // same mistake. The scan covers every list, matching the rule's wording, not
 // only the first list the parser inspects for placement.
 bool ArkTSFuncBodyHasRestParam(const AST::FuncBody& body);
 
+// The @RestParam position among the first @p scanned entries of @p params
+// (the caller fixes which parameter lists are in scope: a lowered function
+// scans its first list only, because the parse-time rest rule lives there,
+// while a class member scans every flattened position). A named parameter
+// never counts, matching the parser's rest contract. ARKTS_NO_REST when no
+// scanned position is annotated.
+size_t ArkTSRestPosition(const std::vector<Ptr<AST::FuncParam>>& params, size_t scanned);
+
 // Whether @p member hangs off an @ArkTS foreign class-like. A member carries
-// neither marker on itself: FOREIGN is propagated by Sema and the @ArkTS
-// annotation stays on the enclosing declaration, so the owner is consulted.
+// neither marker on itself: FOREIGN is propagated to members by Sema and the
+// @ArkTS annotation stays on the enclosing declaration, so the owner is
+// consulted. Preparation can clear FOREIGN and mark the class
+// ARKTS_CLASS_WRAPPER before this runs, so both forms identify the owner.
 // Sema-side spelling of the parser's IsArkTSForeignClassLikeMember rule
 // (Parse/ParseDecl.cpp), which is private to that translation unit.
 bool ArkTSForeignClassLikeMember(const AST::Decl& member);
 
 // Every declaration that carries @ArkTS contributes the same option shape
 // contract, but only an @ArkTS foreign function is folded into a binding
-// (ArkTSFunctionOptions). Validate the declarations the fold never reaches -
+// (ArkTSDeclOptions). Validate the declarations the fold never reaches -
 // classes, interfaces, variables, parameters, and any function that is not a
 // lowered wrapper - so an unknown name, a non-literal value, a name repeated
 // inside one layer or an ill-formed namespace is reported instead of silently
@@ -111,6 +148,11 @@ bool ArkTSForeignClassLikeMember(const AST::Decl& member);
 // can distinguish an omitted named argument from an explicit value. Ordinary
 // declaration options leave the AST unmarked.
 void ArkTSDeclOptionsDiagnose(AST::Package& pkg, DiagnosticEngine& diag);
+
+// Whether a 'module' option value is a relative or OS-absolute file path
+// spelling; shared by the function and class wrapper paths so both reject the
+// same shapes.
+bool ArkTSModulePathLike(const std::string& module);
 
 std::string ArkTSForeignLocalPrefix(const std::vector<Ptr<AST::FuncParam>>& params);
 
@@ -124,6 +166,12 @@ std::string ArkTSForeignLocalPrefix(const std::vector<Ptr<AST::FuncParam>>& para
 // package name, and must not be extended to other packages (arkts.ohos
 // included); an explicit module option always selects MODULE.
 enum class ArkTSReceiverKind { MODULE, GLOBAL };
+
+// The receiver of one declaration under the rule above: MODULE unless the
+// module option is omitted and the resolved module is arkts.lang (or a
+// subpackage of it). Shared by the function and class member lowering paths,
+// so the one receiver exception cannot drift between them.
+ArkTSReceiverKind ArkTSReceiverFor(bool explicitModule, const std::string& module);
 
 // ---- Placeholder and generated-name contract (single-sourced) ----
 // Every string below is shared between the wrapper generator
@@ -145,6 +193,8 @@ constexpr const char* ARKTS_PLACEHOLDER_NAME = "__name__";
 constexpr const char* ARKTS_PLACEHOLDER_MODULE = "__module__";
 constexpr const char* ARKTS_PLACEHOLDER_NAMESPACE = "__namespace_";
 constexpr const char* ARKTS_PLACEHOLDER_ARGUMENT = "__argument_";
+constexpr const char* ARKTS_PLACEHOLDER_CLASS = "__class_name__";
+constexpr const char* ARKTS_PLACEHOLDER_MEMBER = "__member_name__";
 constexpr const char* ARKTS_WRAPPER_ENTRY = "__generated";
 constexpr const char* ARKTS_CONTEXT_CURRENT = "__cj_arkts_current";
 // Package short names bound by the imports the compiler injects into every
@@ -202,9 +252,16 @@ constexpr size_t ARKTS_DERIVE_OPTIONAL = SIZE_MAX;
 // parameters (`x!: Option<T> = None`), or types.size() when there is none;
 // ARKTS_DERIVE_OPTIONAL derives it from the trailing OPTIONAL descriptions
 // (the generator-only entry point used by unit tests).
+// classRefs receives every foreign class declaration a reference position
+// mentions: the generator emits a placeholder spelling and records the
+// declaration here for the lowering walker to bind. A signature containing a
+// REFERENCE position requires a non-null map; without it the generator refuses
+// the whole wrapper instead of emitting an unbound placeholder, so the map may
+// be null only for reference-free signatures (the generator-only test entry).
 std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, ArkTSReceiverKind receiver = ArkTSReceiverKind::MODULE,
-    size_t optionalStart = ARKTS_DERIVE_OPTIONAL);
+    size_t optionalStart = ARKTS_DERIVE_OPTIONAL,
+    std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs = nullptr);
 // Rest-parameter form: restIndex is the position of the @RestParam
 // parameter inside types; it must be the last entry and carry ARRAY_COPY
 // (Array<T'>), every element becoming one individual callMethod argument,
@@ -217,6 +274,55 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
 // After:  rest buffer "Array<ark_interop.JSValue>(__argument_1.size)", call array sized "1 + __argument_1.size".
 std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, size_t restIndex,
-    ArkTSReceiverKind receiver = ArkTSReceiverKind::MODULE, size_t optionalStart = ARKTS_DERIVE_OPTIONAL);
+    ArkTSReceiverKind receiver = ArkTSReceiverKind::MODULE, size_t optionalStart = ARKTS_DERIVE_OPTIONAL,
+    std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs = nullptr);
+
+// ---- Foreign class member generation ----
+// Compiler-owned member names of a lowered foreign class. A class owns one
+// stored reference, one accessor and one public wrapping constructor that
+// recovers a Cangjie wrapper from an ArkTS value. `__cj_arkts_self` is the
+// placeholder the lowering walker rebinds to `this`; class names never enter
+// generated code positions - a reference value position emits
+// `__cj_arkts_class_<n>`, a reference type position emits
+// `__cj_arkts_type_<n>`, and both record their declaration in classRefs for
+// the lowering walker to bind. Diagnostic message strings may still spell the
+// class identifier through ArkTSTypeDescName.
+constexpr const char* ARKTS_SELF = "__cj_arkts_self";
+constexpr const char* ARKTS_CLASS_REF_FIELD = "__cj_arkts_ref";
+constexpr const char* ARKTS_CLASS_REF_ACCESSOR = "__cj_arkts_ref_value";
+constexpr const char* ARKTS_CLASS_CTOR_PARAM = "__cj_arkts_ref";
+
+enum class ArkTSMemberReceiver { INSTANCE, STATIC };
+
+// Instance/static member function body. Instance calls run on the stored
+// object reference; static calls resolve the class object through the module
+// receiver. Returns "" for an unsupported position.
+// Body pseudocode:
+//   ctx = current(); recv = this.ref() or module/namespace getProperty(class)
+//   arg_i = toJS(argument_i); result = recv.callMethod(name, [arg_i...])
+//            (static: recv.getProperty(name).asFunction().call([...], thisArg: recv))
+//   return fromJS(result)   // a Nothing result throws instead
+std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
+    size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSMemberReceiver memberReceiver,
+    ArkTSReceiverKind receiver, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+
+// Constructor body: resolves the ArkTS class, constructs it with the converted
+// arguments and stores the resulting object reference on the receiver.
+// Body pseudocode:
+//   ctx = current(); clazz = module/namespace getProperty(class).asClass()
+//   object = clazz.new([toJS(argument_i)...]); this.ref() = object.asObject()
+std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types, size_t namespaceDepth,
+    const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver,
+    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+
+// Property accessor body. The getter returns the converted property value;
+// the setter writes the converted value back. Both work on the stored object
+// reference (instance) or the resolved class object (static).
+// Getter pseudocode:  return fromJS(recv.getProperty(name))
+// Setter pseudocode:  recv.setProperty(name, toJS(argument_0))
+// where recv is this.ref() (instance) or the resolved class value (static).
+std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter,
+    ArkTSMemberReceiver memberReceiver, size_t namespaceDepth, const std::string& prefix, ArkTSReceiverKind receiver,
+    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
 } // namespace Cangjie::Native::FFI::ArkTS
 #endif

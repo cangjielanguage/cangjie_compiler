@@ -17,6 +17,7 @@
 
 #include "CJMP/MPTypeCheckerImpl.h"
 #include "InheritanceChecker/MemberSignature.h"
+#include "NativeFFI/ArkTS/Utils/TypeMapper.h"
 #include "Promotion.h"
 #include "ScopeManager.h"
 #include "TypeCheckUtil.h"
@@ -1712,6 +1713,14 @@ private:
     void MarkOutermostBinaryExpressions(AST::Package& pkg) const;
     // FFI Sema Prepare Check.
     void LowerArkTSFunctions(ASTContext& ctx);
+    void LowerArkTSClasses(ASTContext& ctx);
+    // One signature position as an ArkTS type description: the written type
+    // is resolved through the checker's alias substitution before
+    // classification, so a type alias position lowers by its target. A null
+    // type node classifies as the empty (unsupported) description. Shared by
+    // the two ArkTS lowering passes, so a position can never mean two things
+    // across them.
+    Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyPosition(ASTContext& ctx, Ptr<AST::Type> type);
     void PreCheckAnnoForFFI(AST::Node& root);
     /**
      * Set the ABI information to Foreign Modifier. By default Foreign Modifier has Attribute::C.

@@ -101,6 +101,35 @@ bool ArkTSNamespaceValid(const std::string& ns)
     return ns.empty() || (ns.front() != '.' && ns.back() != '.' && ns.find("..") == std::string::npos);
 }
 
+// Single split spelling shared by the function and class member lowering
+// paths: every segment becomes one __namespace_<i>__ placeholder, so both
+// paths must agree on the segment list a value produces.
+std::vector<std::string> ArkTSNamespaceSegments(const std::string& ns)
+{
+    std::vector<std::string> segments;
+    size_t start = 0;
+    while (start < ns.size()) {
+        auto end = ns.find('.', start);
+        segments.emplace_back(ns.substr(start, end == std::string::npos ? end : end - start));
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    return segments;
+}
+
+// The receiver rule beside ArkTSReceiverKind: the only GLOBAL case is a
+// declaration of arkts.lang (or a subpackage) whose module option is
+// omitted; every other spelling - explicit option included - resolves the
+// module object.
+ArkTSReceiverKind ArkTSReceiverFor(bool explicitModule, const std::string& module)
+{
+    return !explicitModule && (module == "arkts.lang" || module.rfind("arkts.lang.", 0) == 0)
+               ? ArkTSReceiverKind::GLOBAL
+               : ArkTSReceiverKind::MODULE;
+}
+
 bool ArkTSOptionValueEmpty(const std::string& value)
 {
     return std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isspace(c) != 0; });
@@ -133,11 +162,34 @@ bool ArkTSFuncBodyHasRestParam(const FuncBody& body)
 
 bool ArkTSForeignClassLikeMember(const Decl& member)
 {
+    // Preparation rewrites a non-generic @ArkTS foreign class in place: it
+    // clears FOREIGN and marks the declaration ARKTS_CLASS_WRAPPER before
+    // PreCheck reaches the option fold. Both spellings are the same
+    // class-like owner, so the member rule accepts either; a generic class
+    // keeps the external declaration form and stays FOREIGN.
     return member.outerDecl != nullptr && member.outerDecl->IsClassLikeDecl() &&
-        member.outerDecl->TestAttr(Attribute::FOREIGN) && member.outerDecl->HasAnno(AnnotationKind::ARKTS);
+        member.outerDecl->HasAnno(AnnotationKind::ARKTS) &&
+        (member.outerDecl->TestAttr(Attribute::FOREIGN) ||
+            member.outerDecl->TestAttr(Attribute::ARKTS_CLASS_WRAPPER));
 }
 
-bool ArkTSFunctionOptions(const FuncDecl& fd, std::unordered_map<std::string, std::string>& options,
+// Scan core shared by the two lowering paths; see the declaration for the
+// caller-fixed scope. The last annotated position wins, matching the
+// parser's final-parameter rest contract.
+size_t ArkTSRestPosition(const std::vector<Ptr<FuncParam>>& params, size_t scanned)
+{
+    auto restIndex = ARKTS_NO_REST;
+    for (size_t i = 0; i < scanned; ++i) {
+        for (auto& annotation : params[i]->annotations) {
+            if (annotation->kind == AnnotationKind::REST_PARAM && !params[i]->isNamedParam) {
+                restIndex = i;
+            }
+        }
+    }
+    return restIndex;
+}
+
+bool ArkTSDeclOptions(const Decl& decl, std::unordered_map<std::string, std::string>& options,
     ArkTSOptionStatus* status)
 {
     if (status != nullptr) {
@@ -146,7 +198,7 @@ bool ArkTSFunctionOptions(const FuncDecl& fd, std::unordered_map<std::string, st
     // The namespace literal is the anchor of the ill-formed-namespace
     // diagnostic: it is the value the user must fix, not the whole annotation.
     Ptr<Node> namespaceAt = nullptr;
-    for (auto& annotation : fd.annotations) {
+    for (auto& annotation : decl.annotations) {
         if (annotation->kind != AnnotationKind::ARKTS) {
             continue;
         }
@@ -181,9 +233,30 @@ bool ArkTSFunctionOptions(const FuncDecl& fd, std::unordered_map<std::string, st
     return true;
 }
 
+// A class with type parameters keeps the generic external declaration form;
+// its members cannot be lowered to fixed conversions without per-instantiation
+// code, so it is left untouched (the stdlib presets live here).
+bool IsArkTSForeignClass(const ClassDecl& cd)
+{
+    // The stdlib presets keep their external declaration form: their reference
+    // semantics and member surface are delivered with the preset requirements,
+    // and their signature spellings (optional constructor parameters) are not
+    // part of the wrapper path.
+    if (cd.fullPackageName == "std.interop.arkts") {
+        return false;
+    }
+    return cd.HasAnno(AnnotationKind::ARKTS) && cd.TestAttr(Attribute::FOREIGN) &&
+        !cd.TestAttr(Attribute::ARKTS_CLASS_WRAPPER) && (!cd.generic || cd.generic->typeParameters.empty());
+}
+
+bool IsArkTSClassWrapper(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
+}
+
 // Walk the package and validate the declaration rules the function fold does
 // not own. A lowered wrapper carries ARKTS_FUNCTION_WRAPPER and is validated
-// by ArkTSFunctionOptions in LowerArkTSFunctions, so it is skipped here.
+// by ArkTSDeclOptions in LowerArkTSFunctions, so it is skipped here.
 // Every other declaration with an @ArkTS annotation - a class, an interface,
 // a variable, a parameter, an entry - is checked layer by layer, and one
 // declaration yields at most one option diagnostic at its first illegal
@@ -198,11 +271,48 @@ bool ArkTSFunctionOptions(const FuncDecl& fd, std::unordered_map<std::string, st
 // one sema_arkts_namespace_invalid on the namespace literal;
 // '@ArkTS[module: "a"]' -> none; an @ArkTS foreign class bodyless
 // 'func f(x!: Int32)' -> one sema_arkts_foreign_named_param_without_default on x.
+// Whether a 'module' option value is a relative or OS-absolute file path
+// spelling the compiler refuses. A module specifier is otherwise accepted
+// verbatim: a system module ("@ohos.util", "@scope/name"), a project module
+// ("utils"), a project ETS source path ("entry/src/main/ets/EntryFixture")
+// and the tolerated separator shapes "a/", "a//b", "a\b" all pass; resolving
+// them is the runtime module loader's job. Only these shapes are rejected,
+// with both separators treated alike on every host because the ArkTS project
+// may be built on Windows:
+//   "/x", "\\server\share"        OS-absolute (POSIX root / UNC)
+//   "C:\x", "C:/x"                drive-absolute
+//   "./x", ".\x", "../x", "..\x"  dot-relative
+// A drive-relative spelling ("C:x", no separator after the colon) is not
+// matched: there is no directory separator, so it stays a plain specifier
+// and its resolution failure is left to the runtime like any unknown module.
+bool ArkTSModulePathLike(const std::string& module)
+{
+    auto isSeparator = [](char c) { return c == '/' || c == '\\'; };
+    if (module.empty()) {
+        return false;
+    }
+    if (isSeparator(module.front())) {
+        return true;
+    }
+    const bool drive = module.size() > 2 && module[1] == ':' && isSeparator(module[2]) &&
+        ((module[0] >= 'A' && module[0] <= 'Z') || (module[0] >= 'a' && module[0] <= 'z'));
+    if (drive) {
+        return true;
+    }
+    if (module.front() != '.') {
+        return false;
+    }
+    if (module.size() > 1 && isSeparator(module[1])) {
+        return true;
+    }
+    return module.size() > 2 && module[1] == '.' && isSeparator(module[2]);
+}
+
 void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
 {
     Walker(&pkg, [&diag](Ptr<Node> node) {
         auto decl = DynamicCast<Decl*>(node);
-        if (decl == nullptr || decl->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER)) {
+        if (decl == nullptr || decl->TestAnyAttr(Attribute::ARKTS_FUNCTION_WRAPPER, Attribute::ARKTS_CLASS_WRAPPER)) {
             return VisitAction::WALK_CHILDREN;
         }
         for (const auto& annotation : decl->annotations) {
@@ -462,10 +572,31 @@ struct ArkTSEmitted {
 struct ArkTSValueEmitter {
     std::string prefix;
     std::unordered_map<std::string, size_t> nextLocal{};
+    // Reference conversion target: placeholder identifier -> class declaration.
+    // The lowering walker rebinds each recorded placeholder to the class as an
+    // AST value, so no user identifier enters generated syntax.
+    std::unordered_map<std::string, Ptr<Decl>>* classRefs{nullptr};
 
     std::string Fresh(const std::string& role)
     {
         return prefix + role + "_" + std::to_string(nextLocal[role]++);
+    }
+
+    // Type spelling for generated locals: the composite recursion is shared
+    // with ArkTSTypeDescName, and a reference leaf is recorded as a
+    // placeholder for the lowering walker to bind. Without the placeholder map
+    // the source is refused (empty type argument) instead of splicing a user
+    // class identifier.
+    std::string TypeName(const ArkTSTypeDesc& desc)
+    {
+        return ArkTSTypeDescName(desc, [this](const ArkTSTypeDesc& reference) {
+            if (reference.reference == nullptr || classRefs == nullptr) {
+                return std::string{};
+            }
+            auto slot = Fresh("type");
+            (*classRefs)[slot] = reference.reference;
+            return slot;
+        });
     }
 
     // To-JS conversion per kind (an ArkTSArray<T'> position never reaches
@@ -501,6 +632,12 @@ struct ArkTSValueEmitter {
             emitted.expr = "match (" + source + ") {\n" + indent + "    case " + ARKTS_OPTION + ".Some(" + bound +
                 ") =>\n" + inner.pre + indent + "        " + inner.expr + "\n" + indent + "    case " + ARKTS_OPTION +
                 ".None => " + ctx + ".undefined().toJSValue()\n" + indent + "}";
+            return emitted;
+        }
+        if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
+            // The stored reference is a global handle; toJSValue() gives the
+            // ArkTS side a local view of the same object, preserving identity.
+            emitted.expr = "(" + source + ")." + ARKTS_CLASS_REF_ACCESSOR + "().toJSValue()";
             return emitted;
         }
         if (desc.kind == ArkTSTypeDesc::Kind::ARRAY_COPY) {
@@ -587,6 +724,23 @@ struct ArkTSValueEmitter {
                 ".Some(" + inner.expr + ")\n" + indent + "})";
             return emitted;
         }
+        if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
+            // An ArkTS object reference: null and undefined are not instances,
+            // and the value must be an object before the wrapping constructor
+            // is called. The class is recorded by placeholder so the lowering
+            // walker can bind it without spelling its name here.
+            if (!desc.reference || classRefs == nullptr) {
+                return emitted;
+            }
+            auto slot = Fresh("class");
+            (*classRefs)[slot] = desc.reference;
+            if (!nullablePosition) {
+                emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
+            }
+            emitted.pre += KindGuard(value, "isObject", "an object", ArkTSTypeDescName(desc), indent);
+            emitted.expr = slot + "(" + value + ".asObject(), ())";
+            return emitted;
+        }
         if (desc.kind == ArkTSTypeDesc::Kind::ARRAY_COPY) {
             auto length = Fresh("length");
             auto copy = Fresh("copy");
@@ -598,10 +752,14 @@ struct ArkTSValueEmitter {
             }
             emitted.pre += KindGuard(value, "isArray", "an array", ArkTSTypeDescName(desc), indent);
             emitted.pre += indent + "let " + length + " = " + value + ".asArray().size\n";
-            emitted.pre += indent + "let " + copy + " = Array<" + ArkTSTypeDescName(desc.elements.front()) +
-                ">(" + length + ", { " + index + " =>\n" + indent + "    let " + item + " = " + value +
-                ".getElement(" + index + ")\n" + inner.pre + indent + "    " + inner.expr + "\n" + indent +
-                "})\n";
+            // Reference elements keep an explicit type argument so the
+            // initializer lambda stays inferable, but the argument is a
+            // placeholder bound by the lowering walker: no class name is
+            // spliced into generated syntax.
+            auto elementType = "<" + TypeName(desc.elements.front()) + ">";
+            emitted.pre += indent + "let " + copy + " = Array" + elementType + "(" + length + ", { " + index +
+                " =>\n" + indent + "    let " + item + " = " + value + ".getElement(" + index + ")\n" + inner.pre +
+                indent + "    " + inner.expr + "\n" + indent + "})\n";
             emitted.expr = copy;
             return emitted;
         }
@@ -623,6 +781,8 @@ struct ArkTSValueEmitter {
                 // part local of an Option element is annotated: its if
                 // expression ends in Option.None, whose type argument cannot
                 // be inferred in a plain let binding without the annotation.
+                // Reference types in that annotation are placeholders bound by
+                // the lowering walker.
                 auto item = Fresh("item");
                 emitted.pre += indent + "let " + item + " = " + value + ".getElement(" +
                     std::to_string(i) + ")\n";
@@ -631,7 +791,7 @@ struct ArkTSValueEmitter {
                 emitted.pre += inner.pre;
                 emitted.pre += indent + "let " + part +
                     (desc.elements[i].kind == ArkTSTypeDesc::Kind::OPTIONAL
-                            ? ": " + ArkTSTypeDescName(desc.elements[i])
+                            ? ": " + TypeName(desc.elements[i])
                             : "") +
                     " = " + inner.expr + "\n";
                 converted.emplace_back(std::move(part));
@@ -840,7 +1000,7 @@ std::string ArkTSForeignLocalPrefix(const std::vector<Ptr<FuncParam>>& params)
 
 std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver,
-    size_t optionalStart)
+    size_t optionalStart, std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs)
 {
     const bool rest = restIndex != ARKTS_NO_REST;
     if (rest && (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
@@ -853,6 +1013,21 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     }
     if (!ArkTSTypeDescGeneratable(resultType)) {
         return {};
+    }
+    // A REFERENCE position is emitted as a placeholder that the lowering
+    // walker binds through classRefs. Without the map the emitter cannot
+    // produce a complete value and would leave malformed syntax behind (for
+    // example a bare `return ;`, `Array<>` or `let x = `), so refuse the whole
+    // wrapper; the empty string routes to the existing unsupported-signature
+    // diagnostic instead.
+    if (classRefs == nullptr) {
+        bool needsClassBinding = ArkTSTypeDescContainsReference(resultType);
+        for (const auto& type : types) {
+            needsClassBinding = needsClassBinding || ArkTSTypeDescContainsReference(type);
+        }
+        if (needsClassBinding) {
+            return {};
+        }
     }
     auto ctx = prefix + "context";
     auto recv = prefix + std::string("module");
@@ -877,6 +1052,7 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
         recv = next;
     }
     ArkTSValueEmitter emitter{prefix};
+    emitter.classRefs = classRefs;
     std::vector<std::string> args;
     size_t fixed = rest ? restIndex : types.size();
     for (size_t i = 0; i < fixed; ++i) {
@@ -1009,9 +1185,223 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
 
 // Plain form: forwards to the overload above with ARKTS_NO_REST.
 std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
-    size_t namespaceDepth, const std::string& prefix, ArkTSReceiverKind receiver, size_t optionalStart)
+    size_t namespaceDepth, const std::string& prefix, ArkTSReceiverKind receiver, size_t optionalStart,
+    std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs)
 {
-    return ArkTSForeignWrapperSource(types, resultType, namespaceDepth, prefix, ARKTS_NO_REST, receiver, optionalStart);
+    return ArkTSForeignWrapperSource(
+        types, resultType, namespaceDepth, prefix, ARKTS_NO_REST, receiver, optionalStart, classRefs);
+}
+
+namespace {
+// Close a generated body. The call context is always established; a body that
+// needs no conversion still reads ctx.env for the lifecycle/thread check.
+std::string ArkTSFinishBody(const std::string& prefix, const std::string& code)
+{
+    const auto ctx = prefix + "context";
+    // Every generated member runs under the ambient call scope, so a missing
+    // entry context fails here even when no conversion needs the value.
+    auto header = "func " + std::string(ARKTS_WRAPPER_ENTRY) + "() {\n    let " + ctx + ": " + ARKTS_JS_CONTEXT +
+        " = " + ARKTS_CONTEXT_ABI_PACKAGE + "." + ARKTS_CONTEXT_CURRENT + "()\n";
+    // Reading env performs the shared lifecycle/thread check, so a body that
+    // needs no conversion still fails outside an entry scope.
+    auto discard = code.find(ctx) == std::string::npos ? "    let _ = " + ctx + ".env\n" : "";
+    return header + discard + code + "}\n";
+}
+
+// Resolve the class value of a static member or constructor as a JSValue.
+// Static members use it as the receiver; a constructor converts it with
+// asClass() before calling new().
+std::string ArkTSClassValuePreamble(const std::string& prefix, size_t namespaceDepth, ArkTSReceiverKind receiver,
+    std::string& classValue)
+{
+    auto ctx = prefix + "context";
+    auto recv = prefix + "module";
+    std::string code = "    let " + recv + " = ";
+    if (receiver == ArkTSReceiverKind::GLOBAL) {
+        code += ctx + ".global\n";
+    } else {
+        code += ctx + ".requireArkModule(\"" + ARKTS_PLACEHOLDER_MODULE + "\").asObject()\n";
+    }
+    for (size_t i = 0; i < namespaceDepth; ++i) {
+        auto next = prefix + "namespace_" + std::to_string(i);
+        code += "    let " + next + " = " + recv + ".getProperty(\"" + ARKTS_PLACEHOLDER_NAMESPACE +
+            std::to_string(i) + "__\").asObject()\n";
+        recv = next;
+    }
+    classValue = prefix + "classvalue";
+    code += "    let " + classValue + " = " + recv + ".getProperty(\"" + ARKTS_PLACEHOLDER_CLASS + "\")\n";
+    return code;
+}
+
+// Converted argument locals for one call. Returns the variable names and
+// appends their pre-statements to the body.
+std::vector<std::string> ArkTSArgumentSource(ArkTSValueEmitter& emitter, const std::vector<ArkTSTypeDesc>& types,
+    size_t count, std::string& code)
+{
+    std::vector<std::string> args;
+    for (size_t i = 0; i < count; ++i) {
+        auto emitted = emitter.ToJS(types[i], ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(i), emitter.prefix + "context",
+            "    ");
+        auto local = emitter.Fresh("arg");
+        code += emitted.pre;
+        code += "    let " + local + " = " + emitted.expr + "\n";
+        args.emplace_back(std::move(local));
+    }
+    return args;
+}
+
+// Rest call-array assembly shared by methods and constructors: convert each
+// spread element into a rest buffer, then build the call array from the fixed
+// arguments followed by the rest items. Private to this translation unit.
+std::string ArkTSRestCallArray(ArkTSValueEmitter& emitter, const ArkTSTypeDesc& element, size_t restIndex,
+    const std::vector<std::string>& fixed, const std::string& prefix, std::string& code)
+{
+    auto items = emitter.Fresh("rest");
+    auto index = emitter.Fresh("index");
+    auto item = emitter.Fresh("elem");
+    auto inner = emitter.ToJS(element, item, prefix + "context", "        ");
+    auto restLength = std::string(ARKTS_PLACEHOLDER_ARGUMENT) + std::to_string(restIndex) + ".size";
+    code += "    let " + items + " = Array<" + ARKTS_JS_VALUE + ">(" + restLength + ", { " + index + " =>\n        let " + item +
+        " = " + ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(restIndex) + "[" + index + "]\n" + inner.pre +
+        "        " + inner.expr + "\n    })\n";
+    if (fixed.empty()) {
+        return items;
+    }
+    auto callIndex = emitter.Fresh("index");
+    auto callArgs = emitter.Fresh("args");
+    code += "    let " + callArgs + " = Array<" + ARKTS_JS_VALUE + ">(" + std::to_string(fixed.size()) + " + " + restLength +
+        ", { " + callIndex + " =>\n        match (" + callIndex + ") {\n";
+    for (size_t i = 0; i < fixed.size(); ++i) {
+        code += "            case " + std::to_string(i) + " => " + fixed[i] + "\n";
+    }
+    code += "            case _ => " + items + "[" + callIndex + " - " + std::to_string(fixed.size()) +
+        "]\n        }\n    })\n";
+    return callArgs;
+}
+
+} // namespace
+
+std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
+    size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSMemberReceiver memberReceiver,
+    ArkTSReceiverKind receiver, std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+{
+    if (restIndex != ARKTS_NO_REST &&
+        (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
+        return {};
+    }
+    for (auto& type : types) {
+        if (!ArkTSTypeDescGeneratable(type) || ArkTSTypeDescContainsNothing(type)) {
+            return {};
+        }
+    }
+    if (!ArkTSTypeDescGeneratable(resultType)) {
+        return {};
+    }
+    ArkTSValueEmitter emitter{prefix};
+    emitter.classRefs = &classRefs;
+    std::string code;
+    std::string receiverObject;
+    if (memberReceiver == ArkTSMemberReceiver::INSTANCE) {
+        receiverObject = std::string(ARKTS_SELF) + "." + ARKTS_CLASS_REF_ACCESSOR + "()";
+    } else {
+        std::string classValue;
+        code += ArkTSClassValuePreamble(prefix, namespaceDepth, receiver, classValue);
+        receiverObject = classValue;
+    }
+    auto args = ArkTSArgumentSource(emitter, types, restIndex == ARKTS_NO_REST ? types.size() : restIndex, code);
+    auto result = prefix + "result";
+    const bool staticMember = memberReceiver == ArkTSMemberReceiver::STATIC;
+    // Static members have no object reference: the class value itself is the
+    // `this` argument. Instance members call the method on the stored object.
+    auto emitCall = [&](const std::string& argArray) {
+        if (staticMember) {
+            code += "    let " + result + " = " + receiverObject + ".getProperty(\"" + ARKTS_PLACEHOLDER_MEMBER +
+                "\").asFunction().call(" + argArray + ", thisArg: " + receiverObject + ")\n";
+        } else {
+            code += "    let " + result + " = " + receiverObject + ".callMethod(\"" + ARKTS_PLACEHOLDER_MEMBER +
+                "\", " + argArray + ")\n";
+        }
+    };
+    if (restIndex != ARKTS_NO_REST) {
+        // Rest members spread the trailing array item by item.
+        emitCall(ArkTSRestCallArray(emitter, types[restIndex].elements.front(), restIndex, args, prefix, code));
+    } else {
+        emitCall(args.empty() ? "[]" : "[" + ArkTSJoin(args, ", ") + "]");
+    }
+    if (resultType.kind == ArkTSTypeDesc::Kind::SCALAR && resultType.scalar == "Nothing") {
+        return ArkTSFinishBody(prefix,
+            code + "    throw " + std::string(ARKTS_NEVER_EXCEPTION) + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n");
+    }
+    auto emitted = emitter.FromJS(resultType, result, "    ");
+    return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
+}
+
+std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types, size_t namespaceDepth,
+    const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver,
+    std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+{
+    if (restIndex != ARKTS_NO_REST &&
+        (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
+        return {};
+    }
+    for (auto& type : types) {
+        if (!ArkTSTypeDescGeneratable(type) || ArkTSTypeDescContainsNothing(type)) {
+            return {};
+        }
+    }
+    ArkTSValueEmitter emitter{prefix};
+    emitter.classRefs = &classRefs;
+    std::string classValue;
+    std::string code;
+    code += ArkTSClassValuePreamble(prefix, namespaceDepth, receiver, classValue);
+    auto clazz = prefix + "class";
+    code += "    let " + clazz + " = " + classValue + ".asClass()\n";
+    auto args = ArkTSArgumentSource(emitter, types, restIndex == ARKTS_NO_REST ? types.size() : restIndex, code);
+    auto object = prefix + "object";
+    if (restIndex != ARKTS_NO_REST) {
+        // Rest constructor arguments: the trailing array is spread into
+        // individual construction arguments.
+        auto callArgs =
+            ArkTSRestCallArray(emitter, types[restIndex].elements.front(), restIndex, args, prefix, code);
+        code += "    let " + object + " = " + clazz + ".new(" + callArgs + ")\n";
+    } else if (args.empty()) {
+        code += "    let " + object + " = " + clazz + ".new()\n";
+    } else {
+        code += "    let " + object + " = " + clazz + ".new(" +
+            (args.size() == 1 ? args.front() : "[" + ArkTSJoin(args, ", ") + "]") + ")\n";
+    }
+    return ArkTSFinishBody(prefix,
+        code + "    " + ARKTS_SELF + "." + ARKTS_CLASS_REF_FIELD + " = " + object + ".asObject()\n");
+}
+
+std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter,
+    ArkTSMemberReceiver memberReceiver, size_t namespaceDepth, const std::string& prefix, ArkTSReceiverKind receiver,
+    std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+{
+    if (!ArkTSTypeDescGeneratable(valueType) || ArkTSTypeDescContainsNothing(valueType)) {
+        return {};
+    }
+    ArkTSValueEmitter emitter{prefix};
+    emitter.classRefs = &classRefs;
+    std::string code;
+    std::string object;
+    if (memberReceiver == ArkTSMemberReceiver::STATIC) {
+        std::string classValue;
+        code += ArkTSClassValuePreamble(prefix, namespaceDepth, receiver, classValue);
+        object = classValue;
+    } else {
+        object = std::string(ARKTS_SELF) + "." + ARKTS_CLASS_REF_ACCESSOR + "()";
+    }
+    if (setter) {
+        auto value = emitter.ToJS(valueType, std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "0", prefix + "context", "    ");
+        code += value.pre;
+        return ArkTSFinishBody(prefix,
+            code + "    " + object + ".setProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\", " + value.expr + ")\n");
+    }
+    auto result = prefix + "result";
+    code += "    let " + result + " = " + object + ".getProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\")\n";
+    auto emitted = emitter.FromJS(valueType, result, "    ");
+    return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
 }
 
 } // namespace Cangjie::Native::FFI::ArkTS

@@ -22,6 +22,8 @@ namespace Native::FFI::ArkTS {
 // generation behaviour they exercise.
 void PrepareTypeCheck(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
     ImportManager* importManager = nullptr);
+void PrepareClasses(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
+    ImportManager* imports);
 
 std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix = ARKTS_GENERATED_PREFIX);
 } // namespace Native::FFI::ArkTS

@@ -48,26 +48,33 @@ std::string ArkTSJoin(const std::vector<std::string>& parts, const std::string& 
     return joined;
 }
 
-// Desc -> Cangjie spelling used in generated locals/messages.
+// Desc -> Cangjie spelling used in diagnostic and mismatch messages.
+// Generated type positions use ArkTSValueEmitter::TypeName, which supplies a
+// placeholder spelling for the reference leaf instead of the class identifier.
 // ARRAY_COPY(SCALAR(String)) -> "Array<String>"
 // TUPLE(SCALAR(UInt16), OPTIONAL(SCALAR(Bool))) -> "(UInt16, Option<Bool>)"
-std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc)
+std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpelling& reference)
 {
     switch (desc.kind) {
         case ArkTSTypeDesc::Kind::SCALAR:
             return desc.scalar;
         case ArkTSTypeDesc::Kind::OPTIONAL:
-            return "Option<" + ArkTSTypeDescName(desc.elements.front()) + ">";
+            return "Option<" + ArkTSTypeDescName(desc.elements.front(), reference) + ">";
         case ArkTSTypeDesc::Kind::ARRAY_COPY:
-            return "Array<" + ArkTSTypeDescName(desc.elements.front()) + ">";
+            return "Array<" + ArkTSTypeDescName(desc.elements.front(), reference) + ">";
         case ArkTSTypeDesc::Kind::TUPLE: {
             std::vector<std::string> names;
             names.reserve(desc.elements.size());
             for (auto& element : desc.elements) {
-                names.emplace_back(ArkTSTypeDescName(element));
+                names.emplace_back(ArkTSTypeDescName(element, reference));
             }
             return "(" + ArkTSJoin(names, ", ") + ")";
         }
+        case ArkTSTypeDesc::Kind::REFERENCE:
+            if (reference) {
+                return reference(desc);
+            }
+            return desc.reference ? desc.reference->identifier.Val() : std::string{};
         case ArkTSTypeDesc::Kind::UNSUPPORTED:
             break;
     }
@@ -76,8 +83,10 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc)
 
 // Classification: scalars resolve through the checked whitelist
 // (ArkTSScalarName); std.core Option<T> -> OPTIONAL, std.core Array<T> ->
-// ARRAY_COPY (copy semantics), a nested Option or an unsupported element
-// refusing the whole position; tuples need >= 2 supported elements; every
+// ARRAY_COPY (copy semantics), an Option directly nested in another Option
+// or an unsupported element refusing the whole position; array and tuple
+// elements may be REFERENCE nodes, also under an OPTIONAL element; tuples
+// need >= 2 supported elements; every
 // ArkTSArray-named class (the stdlib preset included) is unsupported -
 // its reference semantics is deferred; so is everything else (IntNative,
 // Map/Set/TypedArray and friends, function types, same-name user decls).
@@ -122,6 +131,15 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty)
             desc.kind = ArkTSTypeDesc::Kind::ARRAY_COPY;
             desc.elements.emplace_back(std::move(inner));
         }
+        return desc;
+    }
+    // An ArkTS class instance is a reference to the ArkTS object. Only a
+    // class that went through class preparation carries the wrapper
+    // attribute; generic presets keep their external declaration shape and
+    // stay unsupported here.
+    if (auto decl = Ty::GetDeclPtrOfTy(ty); decl && decl->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
+        desc.kind = ArkTSTypeDesc::Kind::REFERENCE;
+        desc.reference = decl;
         return desc;
     }
     // ArkTS tuple types carry a fixed arity and Cangjie's TupleTy is
@@ -197,6 +215,8 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
                 ArkTSTypeDescGeneratable(desc.elements.front());
         case ArkTSTypeDesc::Kind::ARRAY_COPY:
             return desc.elements.size() == 1 && ArkTSTypeDescGeneratable(desc.elements.front());
+        case ArkTSTypeDesc::Kind::REFERENCE:
+            return desc.reference != nullptr && desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
         case ArkTSTypeDesc::Kind::TUPLE:
             if (desc.elements.size() < 2) {
                 return false;
@@ -224,6 +244,27 @@ bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc)
     }
     for (auto& element : desc.elements) {
         if (ArkTSTypeDescContainsNothing(element)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A reference leaf is emitted by placeholder, never by class name, and the
+// placeholder is registered in the map supplied to the wrapper generator; the
+// generator therefore refuses a description containing one when no map is
+// supplied. Scalars and unsupported positions carry no reference,
+// OPTIONAL/ARRAY_COPY recurse into their single element, TUPLE into every
+// element:
+//   REFERENCE(Point) -> true; OPTIONAL(REFERENCE(Point)) -> true;
+//   TUPLE(SCALAR(Int32), REFERENCE(Point)) -> true; SCALAR(Int32) -> false
+bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc)
+{
+    if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
+        return true;
+    }
+    for (auto& element : desc.elements) {
+        if (ArkTSTypeDescContainsReference(element)) {
             return true;
         }
     }

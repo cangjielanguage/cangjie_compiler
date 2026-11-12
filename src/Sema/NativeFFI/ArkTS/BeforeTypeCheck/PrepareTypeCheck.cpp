@@ -194,6 +194,10 @@ bool HasGeneratedEntry(const GeneratedDeclarations& declarations, const FuncDecl
 void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
     ImportManager* importManager)
 {
+    // Foreign classes are classified before any function work: they become
+    // ordinary classes owning a reference to an ArkTS object, so the symbol
+    // table and the C ABI checks below see the generated member declarations.
+    PrepareClasses(pkg, diag, sourceManager, importManager);
     // Classify foreign declarations before the symbol table sees their ABI;
     // their bodies are generated after semantic alias types are resolved.
     for (auto& file : pkg.files) {

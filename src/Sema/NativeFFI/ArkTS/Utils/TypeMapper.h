@@ -16,6 +16,7 @@
 #ifndef CANGJIE_PRIVATE_SEMA_ARKTS_UTILS_TYPE_MAPPER_H
 #define CANGJIE_PRIVATE_SEMA_ARKTS_UTILS_TYPE_MAPPER_H
 
+#include <functional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -38,6 +39,7 @@ struct ArkTSTypeDesc {
         OPTIONAL,     // Option<T'>: nullable union on the ArkTS side
         ARRAY_COPY,   // Array<T'>: copy semantics, no shared memory
         TUPLE,        // (T1', ..., Tn') with n >= 2
+        REFERENCE,    // @ArkTS foreign class instance: reference to an ArkTS object
     };
     Kind kind{Kind::UNSUPPORTED};
     // Checked scalar name for SCALAR nodes (for example "Int8"); empty for
@@ -45,8 +47,13 @@ struct ArkTSTypeDesc {
     std::string scalar;
     // OPTIONAL and ARRAY_COPY carry exactly one element; TUPLE carries at
     // least two; UNSUPPORTED carries none. A supported composite never
-    // contains an UNSUPPORTED or nested OPTIONAL element.
+    // contains an UNSUPPORTED or nested OPTIONAL element. ARRAY_COPY and
+    // TUPLE elements may be REFERENCE nodes, also under an OPTIONAL element:
+    // the container is copied and each reference keeps the same ArkTS object.
     std::vector<ArkTSTypeDesc> elements;
+    // Class declaration carried by REFERENCE nodes; every other kind keeps
+    // it null.
+    Ptr<AST::Decl> reference;
 };
 
 // Checked scalar names (the checked scalar table): the number candidates
@@ -83,9 +90,14 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<AST::Ty> ty);
 // declaration in any other package keeps the generic rejection.
 std::string ArkTSDeferredExternalTypeName(Ptr<AST::Ty> ty);
 
-// Cangjie-side spelling of a description, used for generated array locals and
-// for mismatch messages; only checked names enter this text.
-std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc);
+// Spelling for one REFERENCE leaf. Unset means the class identifier, which is
+// suitable for diagnostic text; generated type positions pass a placeholder
+// spelling instead and never splice a user class identifier into code.
+using ArkTSReferenceSpelling = std::function<std::string(const ArkTSTypeDesc&)>;
+
+// Cangjie-side spelling of a description. A reference leaf is rendered by
+// `reference` when supplied, otherwise by its class identifier.
+std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpelling& reference = {});
 
 // Generatability and Nothing-argument predicates over a description,
 // shared by lowering and the generator: lowering diagnoses before any code
@@ -95,5 +107,11 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc);
 // rejected (a Nothing result stays legal: it is the never contract).
 bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc);
 bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc);
+// True when any position in the description is a REFERENCE leaf, including
+// under OPTIONAL, ARRAY_COPY and TUPLE. The generator refuses such a
+// description when no class-binding map (classRefs) is supplied, because a
+// reference leaf is emitted by placeholder and the placeholder must be bound
+// through that map. A generatable REFERENCE always carries its declaration.
+bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc);
 } // namespace Cangjie::Native::FFI::ArkTS
 #endif

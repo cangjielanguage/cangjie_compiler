@@ -250,7 +250,7 @@ bool ParserImpl::SeeingMacroCallDecl()
 
 // Before: a block default @ArkTS[module:"a", namespace:"n"] and a member
 // @ArkTS[module:"b"]. After: that member owns two independent Annotation nodes
-// ordered [cloned block default, parsed member override]. ArkTSFunctionOptions
+// ordered [cloned block default, parsed member override]. ArkTSDeclOptions
 // later folds them to {module:"b", namespace:"n"}; no shared block node changes.
 // The default layer is withheld during member duplicate checks, so a block
 // default plus one member annotation is valid, but two explicit member @ArkTS

@@ -2639,18 +2639,26 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
     };
     for (auto& fp : fd->funcBody->paramLists[0]->params) {
         if (fp && fp->assignment && !fp->TestAttr(Attribute::HAS_INITIAL)) {
-            // Members of an @ArkTS foreign class/interface have no body by design and still carry
-            // the ArkTS optional-parameter spelling (`x!: Option<T> = None`). The default is
-            // mapping metadata for those declarations, not an abstract-function default.
-            bool arktsForeignBodylessMember = fd->funcBody && !fd->funcBody->body && fd->outerDecl != nullptr &&
-                fd->outerDecl->HasAnno(AnnotationKind::ARKTS) && fd->outerDecl->TestAttr(Attribute::FOREIGN);
+            // At this stage a member of an @ArkTS foreign class/interface is
+            // still bodyless and may carry the ArkTS optional-parameter
+            // spelling (`x!: Option<T> = None`). The default is mapping
+            // metadata for those declarations, not an abstract-function
+            // default. A lowered class member is refused when it keeps one.
+            // The flag only relaxes the ABSTRACT diagnostic and selects the
+            // metadata-only skip below; every other declaration keeps the
+            // existing default-parameter checks, and an accepted parameter is
+            // appended after this block. The shared member rule
+            // accepts both the FOREIGN spelling and the prepared
+            // ARKTS_CLASS_WRAPPER spelling.
+            const bool isArkTSForeignBodylessMember =
+                Native::FFI::ArkTS::ArkTSForeignClassLikeMember(*fd) && fd->funcBody && !fd->funcBody->body;
             if (fd->op != TokenKind::ILLEGAL || fd->TestAttr(Attribute::OPEN) ||
-                (fd->TestAttr(Attribute::ABSTRACT) && !arktsForeignBodylessMember) ||
+                (fd->TestAttr(Attribute::ABSTRACT) && !isArkTSForeignBodylessMember) ||
                 fd->TestAttr(Attribute::DEFAULT)) {
                 DiagCannotHaveDefaultParam(diag, *fd, *fp);
                 return;
             }
-            if (arktsForeignBodylessMember) {
+            if (isArkTSForeignBodylessMember) {
                 // The default on a bodyless @ArkTS foreign member is mapping metadata only;
                 // it has no Cangjie body to call, so no default-parameter function is built.
                 funcParams.push_back(fp.get());

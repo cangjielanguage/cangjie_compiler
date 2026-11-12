@@ -15,6 +15,7 @@
 #include "../FunctionSource.h"
 #include "../Utils/ASTFactory.h"
 #include "Collector.h"
+#include "PlaceholderBinding.h"
 #include "cangjie/AST/Utils.h"
 
 using namespace Cangjie;
@@ -22,43 +23,6 @@ using namespace Cangjie::AST;
 using namespace Cangjie::Native::FFI::ArkTS;
 
 namespace {
-// Whether a 'module' option value is a relative or OS-absolute file path
-// spelling the compiler refuses. A module specifier is otherwise accepted
-// verbatim: a system module ("@ohos.util", "@scope/name"), a project module
-// ("utils"), a project ETS source path ("entry/src/main/ets/EntryFixture")
-// and the tolerated separator shapes "a/", "a//b", "a\b" all pass; resolving
-// them is the runtime module loader's job. Only these shapes are rejected,
-// with both separators treated alike on every host because the ArkTS project
-// may be built on Windows:
-//   "/x", "\\server\share"        OS-absolute (POSIX root / UNC)
-//   "C:\x", "C:/x"                drive-absolute
-//   "./x", ".\x", "../x", "..\x"  dot-relative
-// A drive-relative spelling ("C:x", no separator after the colon) is not
-// matched: there is no directory separator, so it stays a plain specifier
-// and its resolution failure is left to the runtime like any unknown module.
-bool ArkTSModulePathLike(const std::string& module)
-{
-    auto isSeparator = [](char c) { return c == '/' || c == '\\'; };
-    if (module.empty()) {
-        return false;
-    }
-    if (isSeparator(module.front())) {
-        return true;
-    }
-    const bool drive = module.size() > 2 && module[1] == ':' && isSeparator(module[2]) &&
-        ((module[0] >= 'A' && module[0] <= 'Z') || (module[0] >= 'a' && module[0] <= 'z'));
-    if (drive) {
-        return true;
-    }
-    if (module.front() != '.') {
-        return false;
-    }
-    if (module.size() > 1 && isSeparator(module[1])) {
-        return true;
-    }
-    return module.size() > 2 && module[1] == '.' && isSeparator(module[2]);
-}
-
 // Resolve the generated context/BigInt/Exception/Option references to the
 // declarations visible through this file's imports. A same-named business
 // declaration must not capture them, and a missing import stays a compilation
@@ -175,6 +139,16 @@ bool BindSupportReferences(Decl& owner, Node& root, ImportManager& imports, Diag
 }
 } // namespace
 
+// Class member bodies bind their support names through the same pins as
+// function wrappers: a member is the diagnostic owner of its own generated
+// body, so the entry-pair deduplication is not needed here.
+bool Cangjie::Native::FFI::ArkTS::BindArkTSSupportReferences(Decl& owner, Node& root, ImportManager& imports,
+    DiagnosticEngine& diag, std::unordered_map<Ptr<const Node>, Ptr<Decl>>& supportRefs,
+    const std::string& diagnosticName)
+{
+    return BindSupportReferences(owner, root, imports, diag, supportRefs, false, diagnosticName, nullptr);
+}
+
 // Lowers every marked top-level @ArkTS foreign FuncDecl (class-like members
 // are deferred): diagnose refusals, generate the wrapper body, parse it back
 // into the FuncBody and rebind placeholders as AST values:
@@ -199,9 +173,9 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
     }
     // The option fold below covers the lowered wrappers; every other
     // @ArkTS-carrying declaration (class, interface, variable, parameter,
-    // entry) is validated here so an illegal option shape is never silently
-    // accepted just because the declaration has no wrapper.
-    ArkTSDeclOptionsDiagnose(pkg, diag);
+    // entry) is validated once per package by LowerArkTSClasses, which runs
+    // first on the PreCheck path, because its named-default rule must mark a
+    // member broken before any class body is generated.
     for (auto& file : pkg.files) {
         // One entry callback/registration pair is one user entry: both carry
         // its source range, so a missing package is reported once for the pair.
@@ -235,13 +209,11 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 continue;
             }
             auto& fb = *fd->funcBody;
-            auto classify = [&](Ptr<Type> type) {
-                if (!type) {
-                    return ArkTSTypeDesc{};
-                }
-                SetTypeTy(ctx, *type);
-                return ArkTSClassifyType(type->GetTy());
-            };
+            // Type description of one signature position, after alias
+            // resolution; the spelling is shared with the class member path,
+            // so a position cannot mean two things across the two lowering
+            // paths.
+            auto classify = [&](Ptr<Type> type) { return ArkTSClassifyPosition(ctx, type); };
             auto resultType = classify(fb.retType.get());
             std::vector<ArkTSTypeDesc> types;
             std::vector<Ptr<FuncParam>> params;
@@ -350,7 +322,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
             // only the repetition is not. An ill-formed namespace also has its
             // own message and points at the namespace literal.
             ArkTSOptionStatus optionStatus;
-            if (!ArkTSFunctionOptions(*fd, options, &optionStatus)) {
+            if (!ArkTSDeclOptions(*fd, options, &optionStatus)) {
                 if (optionStatus.problem == ArkTSOptionProblem::DUPLICATE) {
                     auto& at = optionStatus.at ? *optionStatus.at : static_cast<Node&>(*fd);
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_option_duplicated, at,
@@ -448,7 +420,9 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
             // exports of a real ArkTS runtime module), so a declaration
             // there without an explicit module option takes ctx.global
             // as the receiver instead of requireArkModule("arkts.lang");
-            // an explicit option always selects the module form.
+            // an explicit option always selects the module form. The
+            // receiver rule is the shared ArkTSReceiverFor spelling, so
+            // the class member path can never drift from it.
             std::string module;
             if (options.count("module")) {
                 module = options.at("module");
@@ -466,45 +440,29 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 fd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }
-            ArkTSReceiverKind receiver = ArkTSReceiverKind::MODULE;
-            if (options.count("module") == 0 && (module == "arkts.lang" || module.rfind("arkts.lang.", 0) == 0)) {
-                receiver = ArkTSReceiverKind::GLOBAL;
-            }
+            ArkTSReceiverKind receiver = ArkTSReceiverFor(options.count("module") != 0, module);
             std::unordered_map<std::string, std::string> literals{{ARKTS_PLACEHOLDER_NAME,
                 options.count("foreignName") ? options.at("foreignName") : fd->identifier.Val()},
                 {ARKTS_PLACEHOLDER_MODULE, module}};
-            auto ns = options.count("namespace") ? options.at("namespace") : "";
+            // Namespace segments follow the shared split spelling, so the
+            // placeholder count and the generator's namespace depth agree.
+            auto segments = ArkTSNamespaceSegments(options.count("namespace") ? options.at("namespace") : "");
             size_t depth = 0;
-            size_t start = 0;
-            while (start < ns.size()) {
-                auto end = ns.find('.', start);
-                literals[ARKTS_PLACEHOLDER_NAMESPACE + std::to_string(depth++) + "__"] =
-                    ns.substr(start, end == std::string::npos ? end : end - start);
-                if (end == std::string::npos) {
-                    break;
-                }
-                start = end + 1;
+            for (const auto& segment : segments) {
+                literals[ARKTS_PLACEHOLDER_NAMESPACE + std::to_string(depth++) + "__"] = segment;
             }
             // @RestParam is a parse-time rule on the first parameter list only
             // (ArkTSParserImpl::CheckRestParamPlacementImpl). Cangjie itself
             // accepts multiple parameter lists, but the ArkTS proposal only
             // gives rest parameters a meaning in the first list, so lowering
-            // scans only that list; its positions are the prefix of the
-            // flattened 'params' vector. A rest annotation written on a later
-            // list is outside the proposal's contract and stays an ordinary
-            // parameter: the generator's behaviour is unchanged and no new
-            // user-visible rejection is introduced here.
-            size_t restIndex = ARKTS_NO_REST;
-            if (!fb.paramLists.empty()) {
-                const auto& firstList = fb.paramLists.front()->params;
-                for (size_t i = 0; i < firstList.size(); ++i) {
-                    for (auto& annotation : firstList[i]->annotations) {
-                        if (annotation->kind == AnnotationKind::REST_PARAM && !firstList[i]->isNamedParam) {
-                            restIndex = i;
-                        }
-                    }
-                }
-            }
+            // scans only that list: its positions are the prefix of the
+            // flattened 'params' vector, and the scan bound passed to the
+            // shared ArkTSRestPosition is that list's size. A rest annotation
+            // written on a later list is outside the proposal's contract and
+            // stays an ordinary parameter: the generator's behaviour is
+            // unchanged and no new user-visible rejection is introduced here.
+            size_t restIndex =
+                ArkTSRestPosition(params, fb.paramLists.empty() ? 0 : fb.paramLists.front()->params.size());
             // The @RestParam position itself must carry Array<T'> (its
             // element was already validated by the parameter loop above).
             // An ArkTSArray<T'> rest position never reaches this check:
@@ -533,11 +491,14 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 types[optionalStart - 1].kind == ArkTSTypeDesc::Kind::OPTIONAL) {
                 --optionalStart;
             }
+            // Reference positions record their class declarations by
+            // placeholder; the walker below binds them as AST values.
+            std::unordered_map<std::string, Ptr<Decl>> classRefs;
             auto code = restIndex == ARKTS_NO_REST
                             ? ArkTSForeignWrapperSource(types, resultType, depth, ArkTSForeignLocalPrefix(params),
-                                receiver, optionalStart)
+                                receiver, optionalStart, &classRefs)
                             : ArkTSForeignWrapperSource(types, resultType, depth, ArkTSForeignLocalPrefix(params),
-                                restIndex, receiver, optionalStart);
+                                restIndex, receiver, optionalStart, &classRefs);
             // A generator refusal must never silently drop the wrapper.
             // The remaining refusals are rest placements the parse checks
             // already reject (kept here as defense in depth in case a
@@ -563,12 +524,23 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
             if (!fb.body) {
                 continue;
             }
+            // Type placeholders are merged into the long-lived support map
+            // only after the body passes BindArkTSSupportReferences.
+            std::unordered_map<Ptr<const Node>, Ptr<Decl>> pendingRefs;
             Walker(fb.body.get(), [&](Ptr<Node> node) {
                 node->curFile = file.get();
                 node->begin = fd->begin;
                 node->end = fd->end;
                 if (auto literal = DynamicCast<LitConstExpr*>(node); literal && literals.count(literal->stringValue)) {
                     literal->stringValue = literals.at(literal->stringValue);
+                }
+                // Type placeholders carry a reference element in generated
+                // annotations (Array<T>, Option<T>): bind the reference type
+                // and register it like a support declaration, so name
+                // resolution and speculative re-checks keep the class.
+                if (auto refType = DynamicCast<RefType*>(node)) {
+                    BindArkTSRefTypePlaceholder(*refType, classRefs, pendingRefs);
+                    return VisitAction::WALK_CHILDREN;
                 }
                 if (auto ref = DynamicCast<RefExpr*>(node)) {
                     bool argument = false;
@@ -585,18 +557,27 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                     if (argument) {
                         return VisitAction::WALK_CHILDREN;
                     }
+                    if (auto found = classRefs.find(ref->ref.identifier.Val()); found != classRefs.end()) {
+                        ref->ref.identifier = found->second->identifier;
+                        ref->ref.target = found->second;
+                        ref->ref.targets = {found->second};
+                        ref->SetTy(found->second->GetTy());
+                    }
                 }
                 if (auto returned = DynamicCast<ReturnExpr*>(node)) {
                     returned->refFuncBody = &fb;
                 }
                 return VisitAction::WALK_CHILDREN;
             }).Walk();
-            if (!BindSupportReferences(*fd, *fb.body, *ci->importManager, diag, arktsSupportRefs, false,
+            if (!BindSupportReferences(*fd, *fb.body, *ci->importManager, diag, pendingRefs, false,
                     fd->identifier.Val(), nullptr)) {
                 fb.body.reset();
                 fd->EnableAttr(Attribute::IS_BROKEN);
                 fb.EnableAttr(Attribute::IS_BROKEN);
                 continue;
+            }
+            for (auto& [node, target] : pendingRefs) {
+                arktsSupportRefs[node] = target;
             }
             // Match Collector::CollectFuncBody: locals share parameter scope.
             auto oldScope = ctx.currentScopeName;

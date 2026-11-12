@@ -497,5 +497,11 @@ ERROR(sema_arkts_foreign_module_path_invalid,
 // package keeps the generic message.
 ERROR(sema_arkts_foreign_external_type_deferred,
     "the reference semantics of the external ArkTS type '%s' is not available in this version")
+// Declaration-shape refusals of an @ArkTS foreign class: a reserved generated
+// member name, an unsupported member kind, inheritance of a foreign class, or
+// a member whose signature has no wrapper form. The reason carries the rule.
+// It has no numeric runtime error code; consumers match the diagnostic kind.
+ERROR(sema_arkts_foreign_class_invalid,
+    "invalid @ArkTS foreign class '%s': %s")
 
 ERROR(sema_diag_end, "")
