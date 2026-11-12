@@ -179,9 +179,7 @@ void ExternDesugaring::Run(Node& root)
             [this](ArrayExpr& ae) { HandleArrayExpr(ae); },
             [this](ArrayLit& al) { HandleArrayLit(al); },
             [this](TupleLit& tl) { HandleTupleLit(tl); },
-            [this](IfExpr& ie) { HandleIfExpr(ie); },
             [this](MatchExpr& me) { HandleMatchExpr(me); },
-            [this](TryExpr& te) { HandleTryExpr(te); },
             []() {});
         return VisitAction::WALK_CHILDREN;
     };
@@ -359,46 +357,32 @@ void ExternDesugaring::HandleTupleLit(TupleLit& tl)
     }
 }
 
-void ExternDesugaring::HandleIfExpr(IfExpr& ie)
-{
-    auto ty = ie.GetTy();
-    if (ie.desugarExpr || !Ty::IsTyCorrect(ty)) {
-        return;
-    }
-    TryConvertBlock(*ie.thenBody, *ty);
-    if (auto elseBlock = DynamicCast<Block*>(ie.elseBody.get())) {
-        TryConvertBlock(*elseBlock, *ty);
-    } else if (ie.elseBody) {
-        TryConvert(*ie.elseBody, *ty);
-    }
-}
-
+/**
+ * A match of type Extern<T> can have a case of another type only if it is the desugaring of o ?? v, where v is checked
+ * against Extern<T>. Other expressions made of blocks of code are converted as a whole.
+ */
 void ExternDesugaring::HandleMatchExpr(MatchExpr& me)
 {
     auto ty = me.GetTy();
-    if (me.desugarExpr || !Ty::IsTyCorrect(ty)) {
+    if (me.desugarExpr || !Ty::IsTyCorrect(ty) || !ty->IsCoreExternType()) {
         return;
     }
-    for (auto& mc : me.matchCases) {
-        TryConvertBlock(*mc->exprOrDecls, *ty);
-        mc->SetTy(mc->exprOrDecls->GetTy());
-    }
-    for (auto& mco : me.matchCaseOthers) {
-        TryConvertBlock(*mco->exprOrDecls, *ty);
-        mco->SetTy(mco->exprOrDecls->GetTy());
-    }
-}
-
-void ExternDesugaring::HandleTryExpr(TryExpr& te)
-{
-    auto ty = te.GetTy();
-    if (te.desugarExpr || !Ty::IsTyCorrect(ty)) {
+    auto needsConversion = [this, ty](const auto& mc) {
+        auto caseTy = mc->exprOrDecls->GetTy();
+        return Ty::IsTyCorrect(caseTy) && NeedExternConversion(typeManager, *caseTy, *ty);
+    };
+    // Only the match desugared from o ?? v has a case to convert, other matches are converted as a whole.
+    if (me.sugarKind != Expr::SugarKind::QUEST) {
+        CJC_ASSERT(std::none_of(me.matchCases.begin(), me.matchCases.end(), needsConversion));
+        CJC_ASSERT(std::none_of(me.matchCaseOthers.begin(), me.matchCaseOthers.end(), needsConversion));
         return;
     }
-    TryConvertBlock(*te.tryBlock, *ty);
-    for (auto& catchBlock : te.catchBlocks) {
-        TryConvertBlock(*catchBlock, *ty);
-    }
+    // match (o) { case Some(x) => x case _ => v }, where x has the payload type Extern<T>.
+    constexpr size_t caseCount = 2;
+    CJC_ASSERT(me.matchCases.size() == caseCount && me.matchCaseOthers.empty() && !needsConversion(me.matchCases[0]));
+    auto& wildCase = *me.matchCases.back();
+    TryConvertBlock(*wildCase.exprOrDecls, *ty);
+    wildCase.SetTy(wildCase.exprOrDecls->GetTy());
 }
 
 void ExternDesugaring::DesugarOperation(Expr& expr)

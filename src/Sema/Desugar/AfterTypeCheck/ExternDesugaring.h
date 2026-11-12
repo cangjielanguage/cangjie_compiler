@@ -62,9 +62,7 @@ private:
     void HandleArrayExpr(AST::ArrayExpr& ae);
     void HandleArrayLit(AST::ArrayLit& al);
     void HandleTupleLit(AST::TupleLit& tl);
-    void HandleIfExpr(AST::IfExpr& ie);
     void HandleMatchExpr(AST::MatchExpr& me);
-    void HandleTryExpr(AST::TryExpr& te);
 
     // Dynamic operations on Extern<T>.
     void DesugarOperation(AST::Expr& expr);
