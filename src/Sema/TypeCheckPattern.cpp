@@ -290,14 +290,10 @@ bool TypeChecker::TypeCheckerImpl::ChkOpOverloadForConstPattern(ASTContext& ctx,
 {
     ModalTy boolTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN)};
     auto callExpr = MakeOwnedNode<CallExpr>();
-    ctx.RemoveTypeCheckCache(*callExpr);
     auto callBase = MakeOwnedNode<MemberAccess>();
-    ctx.RemoveTypeCheckCache(*callBase);
     callBase->scopeName = p.scopeName;
     callBase->baseExpr = MakeOwnedNode<RefExpr>();
     callBase->baseExpr->SetTy(target);
-    // ensure synthesize skip the dummy node
-    ctx.SkipSynForCorrectTy(*callBase->baseExpr);
     callBase->field = "==";
     callExpr->baseFunc = std::move(callBase);
     CJC_NULLPTR_CHECK(p.literal);
@@ -305,6 +301,11 @@ bool TypeChecker::TypeCheckerImpl::ChkOpOverloadForConstPattern(ASTContext& ctx,
     funcArg->scopeName = p.scopeName;
     callExpr->args.push_back(std::move(funcArg));
     AddCurFile(*callExpr, p.curFile);
+    // The temporary tree is freshly allocated, so its nodes may reuse the addresses of destroyed nodes.
+    // Clear the stale cache entries of the whole tree before checking it.
+    ctx.ClearTypeCheckCache(*callExpr);
+    // ensure synthesize skip the dummy node
+    ctx.SkipSynForCorrectTy(*StaticAs<ASTKind::MEMBER_ACCESS>(callExpr->baseFunc.get())->baseExpr);
     { // Create a scope for DiagSuppressor.
         auto ds = DiagSuppressor(diag);
         if (Check(ctx, boolTy, callExpr.get())) {
