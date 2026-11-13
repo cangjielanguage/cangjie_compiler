@@ -580,7 +580,7 @@ enum class AnnotationKind {
     NON_PRODUCT,
     ARKTS,
     REST_PARAM, // ArkTS rest parameter; only valid on the last positional parameter of an ArkTS foreign function.
-    WRITE_ONLY, // ArkTS write-only property; only valid on a mutable property of an @ArkTS foreign class/interface.
+    WRITE_ONLY, // ArkTS write-only property; implemented on a mutable property of a prepared @ArkTS foreign class wrapper (placement is deferred to the later placement matrix).
     UNKNOWN
 };
 

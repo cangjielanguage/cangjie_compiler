@@ -145,7 +145,7 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
             }
             case AnnotationKind::WRITE_ONLY: {
                 // The design annotation takes no arguments; placement rules
-                // belong to the AR-09 negative matrix.
+                // belong to the placement matrix owned by a later requirement.
                 CheckNoArgAnnotation(anno, "@" + anno.identifier.Val());
                 break;
             }

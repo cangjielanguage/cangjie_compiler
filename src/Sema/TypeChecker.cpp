@@ -2587,11 +2587,15 @@ OwnedPtr<FuncDecl> MakeDefaultParamFunction(
     ret->funcBody->funcDecl = ret.get();
     ret->EnableAttr(Attribute::HAS_INITIAL, Attribute::IMPLICIT_ADD, Attribute::NO_REFLECT_INFO);
     ret->toBeCompiled = funcDecl.toBeCompiled; // For incremental compilation.
-    // A bodyless foreign declaration has no code to call; its
+    // A bodyless ArkTS foreign declaration has no code to call; its
     // default-parameter function exists only to resolve omitted arguments in
     // Cangjie code, so keep it out of codegen. A lowered class member has a
-    // wrapper body by now and is therefore compiled.
-    if (funcDecl.TestAttr(Attribute::FOREIGN) && funcDecl.funcBody && !funcDecl.funcBody->body) {
+    // wrapper body by now and is therefore compiled. The ArkTS marker keeps
+    // Java/ObjC mirror declarations - which are also bodyless FOREIGN - on the
+    // shared path unchanged.
+    const bool arktsDeclaration =
+        funcDecl.TestAttr(Attribute::ARKTS) || Native::FFI::ArkTS::ArkTSForeignClassLikeMember(funcDecl);
+    if (arktsDeclaration && funcDecl.TestAttr(Attribute::FOREIGN) && funcDecl.funcBody && !funcDecl.funcBody->body) {
         ret->toBeCompiled = false;
     }
     ret->ownerFunc = &funcDecl;
@@ -2655,11 +2659,19 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
             // The flag only relaxes the ABSTRACT diagnostic and selects the
             // metadata-only skip below; every other declaration keeps the
             // existing default-parameter checks, and an accepted parameter is
-            // appended after this block. The shared member rule
-            // accepts both the FOREIGN spelling and the prepared
-            // ARKTS_CLASS_WRAPPER spelling.
-            const bool isArkTSForeignBodylessMember =
-                Native::FFI::ArkTS::ArkTSForeignClassLikeMember(*fd) && fd->funcBody && !fd->funcBody->body;
+            // appended after this block.
+            // This predicate is deliberately narrower than the shared
+            // ArkTSForeignClassLikeMember rule: it accepts only the FOREIGN
+            // spelling, not a prepared ARKTS_CLASS_WRAPPER member. A prepared
+            // member must get its default-parameter function here, before the
+            // wrapper body is lowered; creating it after lowering (as the
+            // class post-pass would) makes the constructor's generated return
+            // expression perturb the initialization checker. The shared rule
+            // stays authoritative for ArkTSDeclOptionsDiagnose, which sees the
+            // same members before their bodies exist.
+            const bool isArkTSForeignBodylessMember = fd->outerDecl != nullptr &&
+                fd->outerDecl->HasAnno(AnnotationKind::ARKTS) && fd->outerDecl->TestAttr(Attribute::FOREIGN) &&
+                fd->funcBody && !fd->funcBody->body;
             if (fd->op != TokenKind::ILLEGAL || fd->TestAttr(Attribute::OPEN) ||
                 (fd->TestAttr(Attribute::ABSTRACT) && !isArkTSForeignBodylessMember) ||
                 fd->TestAttr(Attribute::DEFAULT)) {

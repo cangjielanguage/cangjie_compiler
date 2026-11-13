@@ -47,6 +47,24 @@ std::string GetArkTSMemberName(const Decl& decl)
     return name ? *name : decl.identifier.Val();
 }
 
+// The user-written parent declarations of a class, in source order. A
+// compiler-added superclass (Object) is not user-written and never takes part
+// in the wrapper parent rules; a parent without a resolved declaration is
+// skipped the same way.
+std::vector<Ptr<Decl>> UserParentDecls(const ClassDecl& cd)
+{
+    std::vector<Ptr<Decl>> parents;
+    for (auto& inherited : cd.inheritedTypes) {
+        if (inherited->TestAttr(Attribute::COMPILER_ADD)) {
+            continue;
+        }
+        if (auto parent = Ty::GetDeclPtrOfTy(inherited->GetTy())) {
+            parents.emplace_back(parent);
+        }
+    }
+    return parents;
+}
+
 // One class-wide lowering context shared by every member.
 struct ClassContext {
     ClassDecl& owner;
@@ -110,7 +128,9 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
         if (!fb.body) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, member,
                 classCtx.owner.identifier.Val(), "cannot generate the wrapper body");
-            classCtx.owner.EnableAttr(Attribute::IS_BROKEN);
+            // A generated-body failure belongs to this member only; the other
+            // members of the class still lower.
+            member.EnableAttr(Attribute::IS_BROKEN);
             return;
         }
         std::unordered_map<std::string, std::string> literals{
@@ -188,9 +208,10 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
         if (!BindArkTSSupportReferences(
                 member, *fb.body, *ci->importManager, diag, pendingRefs, diagnosticName)) {
             fb.body.reset();
+            // The missing support belongs to this member's body, so only the
+            // member is refused and the class keeps lowering the rest.
             member.EnableAttr(Attribute::IS_BROKEN);
             fb.EnableAttr(Attribute::IS_BROKEN);
-            classCtx.owner.EnableAttr(Attribute::IS_BROKEN);
             return;
         }
         for (auto& [node, target] : pendingRefs) {
@@ -237,13 +258,9 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
             // Cross-language inheritance needs an ArkTS subclass on the other
             // side and a shared construction path; a wrapper only references
             // the object of its own class, so a wrapper parent is refused.
-            for (auto& inherited : cd->inheritedTypes) {
-                // A compiler-added superclass (Object) is not user-written.
-                if (inherited->TestAttr(Attribute::COMPILER_ADD)) {
-                    continue;
-                }
-                auto parent = Ty::GetDeclPtrOfTy(inherited->GetTy());
-                if (parent && parent->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
+            auto parents = UserParentDecls(*cd);
+            for (auto& parent : parents) {
+                if (parent->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *cd,
                         cd->identifier.Val(), "inheriting another @ArkTS foreign class is not supported");
                     cd->EnableAttr(Attribute::IS_BROKEN);
@@ -256,12 +273,8 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
             // The authority design requires every parent to carry @ArkTS; an
             // unannotated parent would make the wrapper reference a class the
             // ArkTS side does not have.
-            for (auto& inherited : cd->inheritedTypes) {
-                if (inherited->TestAttr(Attribute::COMPILER_ADD)) {
-                    continue;
-                }
-                auto parent = Ty::GetDeclPtrOfTy(inherited->GetTy());
-                if (parent && !parent->HasAnno(AnnotationKind::ARKTS) &&
+            for (auto& parent : parents) {
+                if (!parent->HasAnno(AnnotationKind::ARKTS) &&
                     !parent->TestAttr(Attribute::ARKTS)) {
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *cd,
                         cd->identifier.Val(),
@@ -415,7 +428,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *fd,
                         cd->identifier.Val(), "operator members on foreign class are not supported");
                     fd->EnableAttr(Attribute::IS_BROKEN);
-                    cd->EnableAttr(Attribute::IS_BROKEN);
                     continue;
                 }
                 auto& fb = *fd->funcBody;
@@ -458,7 +470,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                 }
                 if (!supported) {
                     fd->EnableAttr(Attribute::IS_BROKEN);
-                    cd->EnableAttr(Attribute::IS_BROKEN);
                     continue;
                 }
                 // The rest scan covers every flattened position of a class
@@ -471,25 +482,35 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *fd,
                         cd->identifier.Val(), "unsupported rest parameter");
                     fd->EnableAttr(Attribute::IS_BROKEN);
-                    cd->EnableAttr(Attribute::IS_BROKEN);
                     continue;
+                }
+                // ArkTS optional parameters are the trailing named parameters
+                // that carry a default value (`x!: Option<T> = None`), the
+                // same written-spelling gate the function path uses: only such
+                // a parameter may be omitted by the caller, and a positional
+                // Option (the required nullable argument of the with-rest/open
+                // form) is still always forwarded.
+                size_t optionalStart = params.size();
+                while (optionalStart > 0 && params[optionalStart - 1]->isNamedParam &&
+                    params[optionalStart - 1]->assignment != nullptr &&
+                    types[optionalStart - 1].kind == ArkTSTypeDesc::Kind::OPTIONAL) {
+                    --optionalStart;
                 }
                 auto prefix = ArkTSForeignLocalPrefix(params);
                 std::unordered_map<std::string, Ptr<Decl>> classRefs;
                 std::string code;
                 if (constructor) {
                     code = ArkTSClassConstructorSource(types, classCtx.namespaces.size(), prefix, restIndex,
-                        classCtx.receiver, classRefs);
+                        classCtx.receiver, optionalStart, classRefs);
                 } else {
                     code = ArkTSClassMethodSource(types, resultType, classCtx.namespaces.size(), prefix, restIndex,
                         fd->TestAttr(Attribute::STATIC) ? ArkTSMemberReceiver::STATIC : ArkTSMemberReceiver::INSTANCE,
-                        classCtx.receiver, classRefs);
+                        classCtx.receiver, optionalStart, classRefs);
                 }
                 if (code.empty()) {
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *fd,
                         cd->identifier.Val(), "unsupported member signature");
                     fd->EnableAttr(Attribute::IS_BROKEN);
-                    cd->EnableAttr(Attribute::IS_BROKEN);
                     continue;
                 }
                 installBody(classCtx, *fd, *file, code, params, GetArkTSMemberName(*fd), classRefs);
@@ -518,12 +539,16 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                         }
                     }
                     pd->EnableAttr(Attribute::IS_BROKEN);
-                    cd->EnableAttr(Attribute::IS_BROKEN);
                     continue;
                 }
                 auto receiver = pd->TestAttr(Attribute::STATIC) ? ArkTSMemberReceiver::STATIC
                                                                : ArkTSMemberReceiver::INSTANCE;
                 std::string name = GetArkTSMemberName(*pd);
+                // A @WriteOnly property keeps its (private) getter body: the
+                // accessor remains part of the lowered property contract and a
+                // non-abstract member must not stay bodyless. Reads are
+                // rejected by the write-only reference rule, not by dropping
+                // the body.
                 for (auto& getter : pd->getters) {
                     if (!getter->funcBody) {
                         continue;
@@ -534,7 +559,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                         classRefs);
                     if (code.empty()) {
                         getter->EnableAttr(Attribute::IS_BROKEN);
-                        cd->EnableAttr(Attribute::IS_BROKEN);
                         continue;
                     }
                     installBody(classCtx, *getter, *file, code, {}, name, classRefs);
@@ -550,7 +574,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                         classRefs);
                     if (code.empty()) {
                         setter->EnableAttr(Attribute::IS_BROKEN);
-                        cd->EnableAttr(Attribute::IS_BROKEN);
                         continue;
                     }
                     installBody(classCtx, *setter, *file, code,
@@ -562,6 +585,11 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
     // Member bodies now exist, so a member with a defaulted parameter is no
     // longer treated as bodyless by the generic default-function pass. Build
     // and type-check its default-argument functions against the final types.
+    // A broken class is a class-level refusal (its members were never lowered
+    // and its default functions, if any, were built by the generic pass), so
+    // the post-pass leaves it alone. Member-level refusals no longer mark the
+    // class: a broken member is skipped individually below, so one refused
+    // member never suppresses the default functions of its siblings.
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto cd = DynamicCast<ClassDecl*>(decl.get());
@@ -570,7 +598,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
             }
             for (auto& member : cd->GetMemberDecls()) {
                 auto fd = DynamicCast<FuncDecl*>(member.get());
-                if (!fd || !fd->funcBody) {
+                if (!fd || !fd->funcBody || fd->TestAttr(Attribute::IS_BROKEN)) {
                     continue;
                 }
                 bool hasDefault = false;
@@ -632,7 +660,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *fd,
                                 cd->identifier.Val(), "optional member parameters must default to None");
                             fd->EnableAttr(Attribute::IS_BROKEN);
-                            cd->EnableAttr(Attribute::IS_BROKEN);
                             continue;
                         }
                         for (auto& statement : fb.body->body) {
@@ -691,7 +718,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *fd,
                                 cd->identifier.Val(), "cannot lower the member's default argument");
                             fd->EnableAttr(Attribute::IS_BROKEN);
-                            cd->EnableAttr(Attribute::IS_BROKEN);
                         }
                     }
                 }

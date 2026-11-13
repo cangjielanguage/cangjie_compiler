@@ -136,9 +136,9 @@ void PrepareClass(ClassDecl& cd, DiagnosticEngine& diag, SourceManager& sourceMa
             return;
         }
         // A user-written property accessor is refused by the accessor-body
-        // rule below, which the merged AR-04 base owns; that rule sees every
-        // valid source accessor (the parser requires an accessor body), so a
-        // second declaration-level check here would only duplicate it.
+        // rule in the PropDecl block below; the parser requires an accessor
+        // body, so every valid source accessor carries one and a second
+        // declaration-level check here would only duplicate that rule.
         auto fd = DynamicCast<FuncDecl*>(member.get());
         // A property accessor is not in GetMemberDecls() (only the PropDecl
         // is), so the FuncDecl body rule below never sees a user-written

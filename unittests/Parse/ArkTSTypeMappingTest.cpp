@@ -1146,7 +1146,7 @@ TEST_F(ArkTSTypeMappingTest, ClassMemberSourceConvertsObjectReferences)
     ArkTSTypeDesc reference{ArkTSTypeDesc::Kind::REFERENCE, "", {}, Ptr<Decl>(&point)};
     std::unordered_map<std::string, Ptr<Decl>> classRefs;
     auto code = ArkTSClassMethodSource({reference}, reference, 0, "__locals_", ARKTS_NO_REST,
-        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, classRefs);
+        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, 1, classRefs);
     ASSERT_FALSE(code.empty());
     EXPECT_NE(code.find("__cj_arkts_ref_value"), std::string::npos);
     EXPECT_NE(code.find("toJSValue"), std::string::npos);
@@ -1162,7 +1162,7 @@ TEST_F(ArkTSTypeMappingTest, ClassMemberSourceConvertsObjectReferences)
     ArkTSTypeDesc optional{ArkTSTypeDesc::Kind::OPTIONAL, "", {reference}};
     classRefs.clear();
     auto containerCode = ArkTSClassMethodSource({optional}, array, 0, "__locals_", ARKTS_NO_REST,
-        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, classRefs);
+        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, 1, classRefs);
     ASSERT_FALSE(containerCode.empty());
     EXPECT_NE(containerCode.find("Array<__locals_type_"), std::string::npos);
     EXPECT_EQ(containerCode.find("Array<Point>("), std::string::npos);
@@ -1194,12 +1194,80 @@ TEST_F(ArkTSTypeMappingTest, ClassConstructorSourceUsesTheResolvedClass)
     point.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
     std::unordered_map<std::string, Ptr<Decl>> classRefs;
     auto code = ArkTSClassConstructorSource({ScalarDesc("Float64")}, 0, "__locals_", ARKTS_NO_REST,
-        ArkTSReceiverKind::MODULE, classRefs);
+        ArkTSReceiverKind::MODULE, 1, classRefs);
     ASSERT_FALSE(code.empty());
     EXPECT_NE(code.find("asClass()"), std::string::npos);
     EXPECT_NE(code.find(".new("), std::string::npos);
     EXPECT_NE(code.find("__cj_arkts_ref = "), std::string::npos);
     EXPECT_NE(code.find("asObject()"), std::string::npos);
+    auto file = Parse(code);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+}
+
+TEST_F(ArkTSTypeMappingTest, ClassOptionalMembersForwardUpToTheLastSome)
+{
+    // Class members and constructors use the same trailing-optional rule as
+    // the function path: an optional position up to the last Some is
+    // forwarded (a None before it as ctx.undefined()), and every optional
+    // after the last Some is omitted. These expectations pin the shared
+    // block-lambda array and the omitted tail; the generated locals use the
+    // same role names as the function path.
+    auto optional = [](const std::string& name) {
+        return WrappedDesc(ArkTSTypeDesc::Kind::OPTIONAL, ScalarDesc(name));
+    };
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    const std::vector<ArkTSTypeDesc> types{ScalarDesc("Int32"), optional("Int32"), optional("String")};
+    auto method = ArkTSClassMethodSource(types, ScalarDesc("Unit"), 0, "__locals_", ARKTS_NO_REST,
+        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, 1, classRefs);
+    ASSERT_FALSE(method.empty());
+    EXPECT_NE(method.find("let __locals_last_0 = if (__argument_2.isSome()) {\n        2\n    } else if "
+                          "(__argument_1.isSome()) {\n        1\n    } else {\n        0\n    }"),
+        std::string::npos);
+    EXPECT_NE(method.find("Array<ark_interop.JSValue>(__locals_last_0 + 1, { __locals_index_0 =>"), std::string::npos);
+    EXPECT_NE(method.find("case 0 => __locals_arg_0"), std::string::npos);
+    EXPECT_NE(method.find("case 1 => __locals_arg_1"), std::string::npos);
+    EXPECT_NE(method.find("case 2 => __locals_arg_2"), std::string::npos);
+    EXPECT_NE(method.find("case _ => __locals_context.undefined().toJSValue()"), std::string::npos);
+    EXPECT_NE(method.find("callMethod(\"__member_name__\", __locals_args_0)"), std::string::npos);
+    auto methodFile = Parse(method);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+
+    classRefs.clear();
+    auto ctor = ArkTSClassConstructorSource(types, 0, "__locals_", ARKTS_NO_REST, ArkTSReceiverKind::MODULE, 1,
+        classRefs);
+    ASSERT_FALSE(ctor.empty());
+    EXPECT_NE(ctor.find("let __locals_last_0 = if (__argument_2.isSome()) {"), std::string::npos);
+    EXPECT_NE(ctor.find("let __locals_args_0 = Array<ark_interop.JSValue>(__locals_last_0 + 1,"), std::string::npos);
+    EXPECT_NE(ctor.find(".new(__locals_args_0)"), std::string::npos);
+    auto ctorFile = Parse(ctor);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+
+    // An empty optional run (optionalStart == types.size()) keeps the plain
+    // fixed argument array; no gate or block-lambda is emitted.
+    classRefs.clear();
+    auto plain = ArkTSClassMethodSource(types, ScalarDesc("Unit"), 0, "__locals_", ARKTS_NO_REST,
+        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, types.size(), classRefs);
+    ASSERT_FALSE(plain.empty());
+    EXPECT_EQ(plain.find("isSome"), std::string::npos);
+    EXPECT_NE(plain.find("callMethod(\"__member_name__\", [__locals_arg_0, __locals_arg_1, __locals_arg_2])"),
+        std::string::npos);
+    auto plainFile = Parse(plain);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+}
+
+TEST_F(ArkTSTypeMappingTest, ClassStaticMemberCallsWithThisArg)
+{
+    // A static member has no stored object reference: it resolves the class
+    // value and calls the method function with the class value as `this`.
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto code = ArkTSClassMethodSource({ScalarDesc("Float64")}, ScalarDesc("Unit"), 0, "__locals_", ARKTS_NO_REST,
+        ArkTSMemberReceiver::STATIC, ArkTSReceiverKind::MODULE, 1, classRefs);
+    ASSERT_FALSE(code.empty());
+    EXPECT_NE(code.find("asFunction().call("), std::string::npos);
+    EXPECT_NE(code.find("thisArg:"), std::string::npos);
+    EXPECT_NE(code.find("getProperty(\"__class_name__\")"), std::string::npos);
+    // The static path never reads the instance reference accessor.
+    EXPECT_EQ(code.find("__cj_arkts_ref_value"), std::string::npos);
     auto file = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
 }

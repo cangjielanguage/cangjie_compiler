@@ -984,8 +984,8 @@ public foreign class Indexed {
     EXPECT_TRUE(member->TestAttr(Attribute::IS_BROKEN));
     ASSERT_NE(member->funcBody, nullptr);
     EXPECT_EQ(member->funcBody->body, nullptr);
-    // Like every neighboring member refusal, the gate marks the class too;
-    // the class may still lower its remaining members.
+    // A member refusal marks only the member; the class keeps lowering its
+    // remaining members and its default-argument pass.
     Ptr<ClassDecl> indexed = nullptr;
     Walker(instance->GetSourcePackages()[0]->files[0].get(), [&indexed](Ptr<Node> node) {
         auto candidate = DynamicCast<ClassDecl*>(node);
@@ -995,7 +995,7 @@ public foreign class Indexed {
         return VisitAction::WALK_CHILDREN;
     }).Walk();
     ASSERT_NE(indexed, nullptr);
-    EXPECT_TRUE(indexed->TestAttr(Attribute::IS_BROKEN));
+    EXPECT_FALSE(indexed->TestAttr(Attribute::IS_BROKEN));
     auto plain = FindFunction("plain");
     ASSERT_NE(plain, nullptr);
     ASSERT_NE(plain->funcBody, nullptr);
@@ -1412,9 +1412,9 @@ public foreign open class OpenOptional {
     EXPECT_TRUE(HasErrorContaining("'MemberVariable': member variables and primary constructors are not supported"));
     EXPECT_TRUE(HasErrorContaining("'Finalized': a finalizer is not supported"));
     EXPECT_TRUE(HasErrorContaining("'WithBody': member 'run' must not have a body"));
-    // The merged AR-04 base owns the accessor-body refusal, so an accessor
-    // with a body reports the shared member-body reason instead of a
-    // declaration-level accessor message.
+    // The accessor-body rule reports the shared member-body reason, so an
+    // accessor with a body is refused with the same message as any other
+    // user-written member body, not a declaration-level accessor message.
     EXPECT_TRUE(HasErrorContaining("'WithAccessor': member 'value' must not have a body"));
     EXPECT_TRUE(HasErrorContaining("optional parameter cannot be used in 'open' function"));
 }
@@ -1484,8 +1484,8 @@ public func use(): String {
 }
 
 // The write-only read diagnostic belongs to a prepared wrapper property; a
-// plain Cangjie class with the misplaced annotation is left to AR-09 instead
-// of being reported as a wrapper read.
+// plain Cangjie class with the misplaced annotation is outside this
+// requirement and is not reported as a wrapper read.
 TEST_F(ArkTSForeignDiagTest, WriteOnlyAnnotationOnPlainClassIsNotAWrappedRead)
 {
     ResetWithArkTSSupport();
@@ -1527,7 +1527,8 @@ public foreign class Counter {
 }
 
 // The design annotation takes no arguments (design §5.1.3). The parser owns
-// the rule, as it does for @RestParam; placement stays with AR-09.
+// the rule, as it does for @RestParam; placement stays with the later
+// requirement that owns the placement matrix.
 TEST_F(ArkTSForeignDiagTest, ForeignClassWriteOnlyRejectsArguments)
 {
     ResetWithArkTSSupport();

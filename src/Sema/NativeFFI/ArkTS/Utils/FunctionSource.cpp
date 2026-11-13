@@ -270,11 +270,11 @@ bool ArkTSWriteOnlyProp(const Decl& decl)
     return false;
 }
 
-void CheckArkTSWriteOnlyRead(Node& usage, DiagnosticEngine& diag)
+Ptr<PropDecl> ArkTSWriteOnlyTargetProp(const Node& usage)
 {
     if ((usage.astKind != ASTKind::MEMBER_ACCESS && usage.astKind != ASTKind::REF_EXPR) ||
         usage.TestAttr(Attribute::LEFT_VALUE) || usage.TestAttr(Attribute::COMPILER_ADD)) {
-        return;
+        return nullptr;
     }
     auto target = usage.GetTarget();
     Ptr<PropDecl> prop = DynamicCast<PropDecl*>(target);
@@ -284,9 +284,18 @@ void CheckArkTSWriteOnlyRead(Node& usage, DiagnosticEngine& diag)
         }
     }
     // Only a property of a prepared wrapper class carries the generated
-    // accessor contract; a misplaced annotation belongs to the AR-09 negative
-    // matrix and is not diagnosed here.
-    if (prop && ArkTSWriteOnlyProp(*prop) && prop->outerDecl && prop->outerDecl->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
+    // accessor contract; every other placement is outside this requirement and
+    // is not diagnosed here.
+    if (prop && prop->outerDecl && prop->outerDecl->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
+        return prop;
+    }
+    return nullptr;
+}
+
+void CheckArkTSWriteOnlyRead(Node& usage, DiagnosticEngine& diag)
+{
+    auto prop = ArkTSWriteOnlyTargetProp(usage);
+    if (prop && ArkTSWriteOnlyProp(*prop)) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_write_only_read, usage, prop->identifier.Val());
     }
 }
@@ -1023,6 +1032,54 @@ std::string ArkTSForeignLocalPrefix(const std::vector<Ptr<FuncParam>>& params)
     return prefix;
 }
 
+namespace {
+// Call-array assembly shared by the function wrapper and both class member
+// generators. optionalStart is the first position of the trailing ArkTS
+// optional run; every position up to the last Some is forwarded (a None in
+// that range is the ctx.undefined() produced by its own conversion) and every
+// optional position after the last Some is omitted. `args` holds the converted
+// locals of every forwarded fixed position, so its index matches the type
+// position. Returns the name of the generated array local.
+// Pseudocode (optionalStart = k):
+//   last = index of the last Some among the optionals, else k - 1
+//   args = Array<ark_interop.JSValue>(last + 1, { index => ... })  // block-lambda
+// The call array is a block-lambda constructor, never a trailing closure: the
+// generated body is parsed after the trailing-closure desugar pass, so
+// `Array<ark_interop.JSValue>(n) { ... }` would stay an untyped
+// TRAIL_CLOSE_EXPR.
+// Example: optionals [Some(a), None, None] -> last = k,     args = [.., a]
+// Example: optionals [None, Some(b), None] -> last = k + 1, args = [.., undefined, b]
+// Example: optionals [None, None]          -> last = k - 1, no optional forwarded
+std::string ArkTSOptionalCallArray(ArkTSValueEmitter& emitter, const std::vector<ArkTSTypeDesc>& types,
+    size_t optionalStart, const std::vector<std::string>& args, const std::string& ctx, std::string& code)
+{
+    auto last = emitter.Fresh("last");
+    auto callIndex = emitter.Fresh("index");
+    auto callArgs = emitter.Fresh("args");
+    code += "    let " + last + " = ";
+    bool firstCondition = true;
+    for (size_t i = types.size(); i > optionalStart; --i) {
+        const size_t position = i - 1;
+        code += firstCondition ? "if (" : "else if (";
+        code += std::string(ARKTS_PLACEHOLDER_ARGUMENT) + std::to_string(position) + ".isSome()) {\n        " +
+            std::to_string(position) + "\n    } ";
+        firstCondition = false;
+    }
+    code += "else {\n        " + std::to_string(static_cast<long long>(optionalStart) - 1) + "\n    }\n";
+    code += "    let " + callArgs + " = Array<" + ARKTS_JS_VALUE + ">(" + last + " + 1, { " + callIndex + " =>\n";
+    code += "        match (" + callIndex + ") {\n";
+    for (size_t i = 0; i < args.size(); ++i) {
+        code += "            case " + std::to_string(i) + " => " + args[i] + "\n";
+    }
+    // Unreachable fallback: the array length is last + 1 and every position up
+    // to last has a case above. It keeps the match exhaustive without an
+    // lvalue that could be mistaken for a forwarded value.
+    code += "            case _ => " + ctx + ".undefined().toJSValue()\n";
+    code += "        }\n    })\n";
+    return callArgs;
+}
+} // namespace
+
 // Emits the wrapper body of a checked synchronous foreign declaration; the
 // lowering walker rebinds placeholders and parameter references as AST
 // values; any unsupported position returns "". Pseudocode:
@@ -1123,44 +1180,13 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     }
     auto result = prefix + "result";
     if (!rest && optionalStart < types.size()) {
-        // Pseudocode (optionalStart = k; optional positions k..n-1):
-        //   last = index of the last Some among the optionals, else k - 1
-        //   args = Array<ark_interop.JSValue>(last + 1, { index => ... })  // block-lambda
-        //   call(receiver, name, args)
-        // The call array is a block-lambda constructor, never a trailing
-        // closure: the generated body is parsed after the trailing-closure
-        // desugar pass, so `Array<ark_interop.JSValue>(n) { ... }` would stay an untyped
-        // TRAIL_CLOSE_EXPR.
-        // Example: optionals [Some(a), None, None] -> last = k,     args = [.., a]
-        // Example: optionals [None, Some(b), None] -> last = k + 1, args = [.., undefined, b]
-        // Example: optionals [None, None]          -> last = k - 1, no optional forwarded
         // The last Some is forwarded as its own converted value; a None
         // before it is forwarded as the ctx.undefined() produced by its
         // conversion; every position after the last Some is not passed at
-        // all (the ".." prefix stands for the required positions).
-        auto last = emitter.Fresh("last");
-        auto callIndex = emitter.Fresh("index");
-        auto callArgs = emitter.Fresh("args");
-        code += "    let " + last + " = ";
-        bool firstCondition = true;
-        for (size_t i = types.size(); i > optionalStart; --i) {
-            const size_t position = i - 1;
-            code += firstCondition ? "if (" : "else if (";
-            code += std::string(ARKTS_PLACEHOLDER_ARGUMENT) + std::to_string(position) + ".isSome()) {\n        " +
-                std::to_string(position) + "\n    } ";
-            firstCondition = false;
-        }
-        code += "else {\n        " + std::to_string(static_cast<long long>(optionalStart) - 1) + "\n    }\n";
-        code += "    let " + callArgs + " = Array<" + ARKTS_JS_VALUE + ">(" + last + " + 1, { " + callIndex + " =>\n";
-        code += "        match (" + callIndex + ") {\n";
-        for (size_t i = 0; i < args.size(); ++i) {
-            code += "            case " + std::to_string(i) + " => " + args[i] + "\n";
-        }
-        // Unreachable fallback: the array length is last + 1 and every
-        // position up to last has a case above. It keeps the match exhaustive
-        // without an lvalue that could be mistaken for a forwarded value.
-        code += "            case _ => " + ctx + ".undefined().toJSValue()\n";
-        code += "        }\n    })\n";
+        // all (the ".." prefix stands for the required positions). The shared
+        // helper assembles the block-lambda array for both this wrapper and
+        // the class member generators.
+        auto callArgs = ArkTSOptionalCallArray(emitter, types, optionalStart, args, ctx, code);
         code += "    let " + result + " = " + recv + ".callMethod(\"" + ARKTS_PLACEHOLDER_NAME + "\", " + callArgs +
             ")\n";
     } else if (!rest) {
@@ -1320,7 +1346,7 @@ std::string ArkTSRestCallArray(ArkTSValueEmitter& emitter, const ArkTSTypeDesc& 
 
 std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSMemberReceiver memberReceiver,
-    ArkTSReceiverKind receiver, std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+    ArkTSReceiverKind receiver, size_t optionalStart, std::unordered_map<std::string, Ptr<Decl>>& classRefs)
 {
     if (restIndex != ARKTS_NO_REST &&
         (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
@@ -1348,6 +1374,10 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
     auto args = ArkTSArgumentSource(emitter, types, restIndex == ARKTS_NO_REST ? types.size() : restIndex, code);
     auto result = prefix + "result";
     const bool staticMember = memberReceiver == ArkTSMemberReceiver::STATIC;
+    // A trailing ArkTS optional run is forwarded exactly like the function
+    // path: up to the last Some, with a None before it as ctx.undefined().
+    // The rest form keeps its existing spread behavior and never truncates.
+    const bool optionals = restIndex == ARKTS_NO_REST && optionalStart < args.size();
     // Static members have no object reference: the class value itself is the
     // `this` argument. Instance members call the method on the stored object.
     auto emitCall = [&](const std::string& argArray) {
@@ -1362,6 +1392,8 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
     if (restIndex != ARKTS_NO_REST) {
         // Rest members spread the trailing array item by item.
         emitCall(ArkTSRestCallArray(emitter, types[restIndex].elements.front(), restIndex, args, prefix, code));
+    } else if (optionals) {
+        emitCall(ArkTSOptionalCallArray(emitter, types, optionalStart, args, prefix + "context", code));
     } else {
         emitCall(args.empty() ? "[]" : "[" + ArkTSJoin(args, ", ") + "]");
     }
@@ -1374,7 +1406,7 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
 }
 
 std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types, size_t namespaceDepth,
-    const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver,
+    const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver, size_t optionalStart,
     std::unordered_map<std::string, Ptr<Decl>>& classRefs)
 {
     if (restIndex != ARKTS_NO_REST &&
@@ -1395,11 +1427,17 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
     code += "    let " + clazz + " = " + classValue + ".asClass()\n";
     auto args = ArkTSArgumentSource(emitter, types, restIndex == ARKTS_NO_REST ? types.size() : restIndex, code);
     auto object = prefix + "object";
+    // A trailing ArkTS optional run is forwarded exactly like a member call.
+    // The rest form keeps its existing spread behavior and never truncates.
+    const bool optionals = restIndex == ARKTS_NO_REST && optionalStart < args.size();
     if (restIndex != ARKTS_NO_REST) {
         // Rest constructor arguments: the trailing array is spread into
         // individual construction arguments.
         auto callArgs =
             ArkTSRestCallArray(emitter, types[restIndex].elements.front(), restIndex, args, prefix, code);
+        code += "    let " + object + " = " + clazz + ".new(" + callArgs + ")\n";
+    } else if (optionals) {
+        auto callArgs = ArkTSOptionalCallArray(emitter, types, optionalStart, args, prefix + "context", code);
         code += "    let " + object + " = " + clazz + ".new(" + callArgs + ")\n";
     } else if (args.empty()) {
         code += "    let " + object + " = " + clazz + ".new()\n";

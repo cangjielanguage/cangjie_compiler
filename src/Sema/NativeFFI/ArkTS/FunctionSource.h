@@ -78,9 +78,16 @@ bool IsArkTSForeignClass(const AST::ClassDecl& cd);
 bool IsArkTSClassWrapper(const AST::Decl& decl);
 // Whether the declaration carries the @WriteOnly annotation.
 bool ArkTSWriteOnlyProp(const AST::Decl& decl);
+// The property @p usage resolves to when it is a member of a prepared wrapper
+// class, else nullptr. This is the cheap gate the shared reference-check pass
+// applies before routing a usage to CheckArkTSWriteOnlyRead: it resolves the
+// target and tests the wrapper-owner attribute only, so declarations of other
+// languages never reach the annotation scan.
+Ptr<AST::PropDecl> ArkTSWriteOnlyTargetProp(const AST::Node& usage);
 // Reject a source read of a write-only property of a prepared wrapper class.
-// The shared reference-check pass only routes the usage here; the ArkTS rule
-// (target resolution, wrapper-owner check, diagnostic) lives in this stage.
+// The shared reference-check pass routes the usage here only after
+// ArkTSWriteOnlyTargetProp matched; the ArkTS rule (annotation scan and
+// diagnostic) lives in this stage.
 void CheckArkTSWriteOnlyRead(AST::Node& usage, DiagnosticEngine& diag);
 
 // One @ArkTS annotation is one option layer. A layer is valid when every
@@ -303,6 +310,11 @@ enum class ArkTSMemberReceiver { INSTANCE, STATIC };
 // Instance/static member function body. Instance calls run on the stored
 // object reference; static calls resolve the class object through the module
 // receiver. Returns "" for an unsupported position.
+// optionalStart is the first parameter of the trailing run of ArkTS optional
+// parameters (`x!: Option<T> = None`), or types.size() when there is none; the
+// caller computes it from the written spelling exactly as the function path
+// does. Every position up to the last Some is forwarded (a None in that range
+// becomes ctx.undefined()) and every optional after the last Some is omitted.
 // Body pseudocode:
 //   ctx = current(); recv = this.ref() or module/namespace getProperty(class)
 //   arg_i = toJS(argument_i); result = recv.callMethod(name, [arg_i...])
@@ -310,15 +322,18 @@ enum class ArkTSMemberReceiver { INSTANCE, STATIC };
 //   return fromJS(result)   // a Nothing result throws instead
 std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSMemberReceiver memberReceiver,
-    ArkTSReceiverKind receiver, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+    ArkTSReceiverKind receiver, size_t optionalStart,
+    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
 
 // Constructor body: resolves the ArkTS class, constructs it with the converted
 // arguments and stores the resulting object reference on the receiver.
+// optionalStart has the same meaning as in ArkTSClassMethodSource: the
+// constructor forwards the trailing optional run exactly like a member call.
 // Body pseudocode:
 //   ctx = current(); clazz = module/namespace getProperty(class).asClass()
 //   object = clazz.new([toJS(argument_i)...]); this.ref() = object.asObject()
 std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types, size_t namespaceDepth,
-    const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver,
+    const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver, size_t optionalStart,
     std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
 
 // Property accessor body. The getter returns the converted property value;
