@@ -32,6 +32,11 @@ public:
     bool AllowsInheritedAnnotationOptions(AnnotationKind kind) const;
     void CheckAnnotationsConflict(const PtrVector<Annotation>& annos) const;
     void CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const;
+    // A foreign block is a parser-only construct; its @ArkTS options are
+    // cloned into every member. foreignName names one declaration's ArkTS
+    // member and has no block-wide meaning, so it is rejected here and
+    // removed from the block layer before cloning.
+    void CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) const;
     void CheckForeignNameAnnotation(Decl& decl) const;
     void CheckZeroOrSingleStringLitArgAnnotation(AST::Annotation &anno, const std::string &annotationName) const;
     void CheckNoArgAnnotation(AST::Annotation &anno, const std::string &annotationName) const;

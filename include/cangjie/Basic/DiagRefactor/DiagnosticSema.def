@@ -452,6 +452,10 @@ ERROR(sema_arkts_option_invalid,
     "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName'")
 ERROR(sema_arkts_option_duplicated,
     "duplicated option '%s' in '@ArkTS'")
+// A block option is cloned into every member, so a name that identifies one
+// declaration cannot be expressed at block level.
+ERROR(sema_arkts_foreign_block_foreign_name,
+    "'foreignName' option cannot be used on an '@ArkTS' foreign block; declare it on the member")
 ERROR(sema_arkts_foreign_module_empty,
     "'module' option of @ArkTS foreign function '%s' must not be an empty string")
 ERROR(sema_arkts_foreign_name_empty,
@@ -486,7 +490,7 @@ ERROR(sema_arkts_foreign_named_param_without_default,
 ERROR(sema_arkts_foreign_module_path_invalid,
     "'module' option '%s' of @ArkTS foreign function '%s' must be an ArkTS module specifier - a module name "
     "such as '@ohos.util' or 'utils', or a project ETS source path such as 'entry/src/main/ets/Foo' - not a "
-    "'./' or '../' relative path (including '.\\' and '..\\'), an OS-absolute, drive-absolute or UNC path")
+    "'./' or '../' relative path, a backslash spelling, an OS-absolute, drive-absolute or UNC path")
 // Routing-only diagnostic for every position spelled with an external ArkTS
 // preset type (std.interop.arkts ArkTSArray<T>, ArkTSString, ArkTSType) whose
 // mapping is not part of this version: classification itself is untouched and

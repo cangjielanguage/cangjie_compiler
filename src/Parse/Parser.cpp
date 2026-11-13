@@ -364,6 +364,7 @@ std::vector<OwnedPtr<Decl>> ParserImpl::ParseForeignDecls(
         return ret;
     }
     CheckNoDeprecatedAnno(annos, "foreign block");
+    ffiParser->CheckForeignBlockAnnotations(annos);
     Position leftCurlyBracePos = lastToken.Begin();
     SkipBlank(TokenKind::SEMI);
     std::set<Modifier>(modifiers).swap(foreignBlockModifiers);

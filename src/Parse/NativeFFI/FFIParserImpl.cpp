@@ -12,6 +12,7 @@
 
 #include "FFIParserImpl.h"
 
+#include <algorithm>
 #include <iterator>
 
 #include "../ParserImpl.h"
@@ -85,6 +86,24 @@ void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos)
         }
         auto& lah = p.lookahead;
         DiagConflictingAnnos(p.diag, *first, **conflicted, lah.Value());
+    }
+}
+
+void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) const
+{
+    for (auto& annotation : annos) {
+        if (annotation->kind != AnnotationKind::ARKTS) {
+            continue;
+        }
+        auto& args = annotation->args;
+        for (auto& arg : args) {
+            if (arg->name.Val() == "foreignName") {
+                p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_block_foreign_name, *arg);
+            }
+        }
+        args.erase(std::remove_if(args.begin(), args.end(),
+                       [](const OwnedPtr<FuncArg>& arg) { return arg->name.Val() == "foreignName"; }),
+            args.end());
     }
 }
 

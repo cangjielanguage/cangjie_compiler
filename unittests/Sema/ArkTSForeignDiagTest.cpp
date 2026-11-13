@@ -616,9 +616,8 @@ foreign func relModule(x: Int32): Unit
     EXPECT_TRUE(HasErrorContaining("'module' option './x'"));
     EXPECT_TRUE(HasErrorContaining("'relModule'"));
     EXPECT_TRUE(HasErrorContaining("must be an ArkTS module specifier"));
-    // Both separators are rejected on every host, so the message names the
-    // backslash spellings too (a Windows-built ArkTS project may use them).
-    EXPECT_TRUE(HasErrorContaining("'.\\' and '..\\'"));
+    // The message names the backslash rule too, not only the dot-relative prefix.
+    EXPECT_TRUE(HasErrorContaining("backslash spelling"));
     auto fd = FindFunction("relModule");
     ASSERT_NE(fd, nullptr);
     EXPECT_EQ(fd->funcBody->body, nullptr);
@@ -1457,11 +1456,6 @@ public foreign class Child <: Plain {
 )");
     EXPECT_TRUE(HasErrorContaining("'Child': parent type 'Plain' must be an @ArkTS class or interface"));
 }
-
-// Every defaulted parameter gets its own desugar function; the second one
-// clones the preceding parameter, so its type must still be resolved before
-// the default function is typed. A call omitting both defaults exercises the
-// call site.
 TEST_F(ArkTSForeignDiagTest, ForeignClassMultipleOptionalParametersCompile)
 {
     ResetWithArkTSSupport();
@@ -2040,10 +2034,11 @@ foreign func driveRelative(x: Int32): Int32
     EXPECT_NE(fd->funcBody->body, nullptr);
 }
 
-// A module specifier may be a project ETS source path or any separator shape
-// the runtime loader resolves. Only a leading "./"/"../", an OS-absolute
-// path, a drive-absolute path and a UNC path are rejected, so these five
-// spellings must pass both the format check and wrapper generation.
+// A module specifier may be a project ETS source path or a forward-slash
+// shape the runtime loader resolves. The design §2.1.1 legal range rejects a
+// leading "./"/"../", an OS-absolute path, a drive-absolute path and any
+// backslash, so these four spellings must pass both the format check and
+// wrapper generation.
 TEST_F(ArkTSForeignDiagTest, ProjectPathAndToleratedModuleFormatsPass)
 {
     diag.ClearError();
@@ -2072,19 +2067,31 @@ foreign func trailingSeparator(x: Int32): Int32
 @ArkTS[module: "a//b"]
 foreign func doubleSeparator(x: Int32): Int32
 
-@ArkTS[module: "a\\b"]
-foreign func backslashSeparator(x: Int32): Int32
-
 @ArkTS[module: "@a/b"]
 foreign func scopedModule(x: Int32): Int32
 )");
     ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
     EXPECT_FALSE(HasErrorContaining("'module' option"));
-    for (const auto& name : {"etsPath", "trailingSeparator", "doubleSeparator", "backslashSeparator", "scopedModule"}) {
+    for (const auto& name : {"etsPath", "trailingSeparator", "doubleSeparator", "scopedModule"}) {
         auto fd = FindFunction(name);
         ASSERT_NE(fd, nullptr) << name;
         EXPECT_NE(fd->funcBody->body, nullptr) << name;
     }
+}
+
+// The design §2.1.1 legal range forbids a backslash anywhere in the module
+// value, including a Windows-style separator spelling that earlier accepted.
+TEST_F(ArkTSForeignDiagTest, BackslashModuleIsRejected)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "a\\b"]
+foreign func backslashModule(x: Int32): Int32
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("'module' option"));
+    EXPECT_TRUE(HasErrorContaining("must be an ArkTS module specifier"));
+    EXPECT_TRUE(HasErrorContaining("backslash spelling"));
 }
 
 // A missing interop dependency for the entry callback/registration pair yields

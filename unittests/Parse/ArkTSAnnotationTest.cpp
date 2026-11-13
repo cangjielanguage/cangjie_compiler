@@ -854,7 +854,10 @@ foreign {
 
 TEST_F(ArkTSEntryTest, DeclarationOptionsOverrideOnlyTheirBlockDefaults)
 {
-    auto file = Parse(R"(@ArkTS[module: "first", namespace: "outer", foreignName: "original"]
+    // foreignName is declaration-only and is rejected on the block (see
+    // ForeignNameOnForeignBlockIsRejected), so the block carries module and
+    // namespace defaults only.
+    auto file = Parse(R"(@ArkTS[module: "first", namespace: "outer"]
 foreign {
     @ArkTS[module: "second", namespace: "inner", foreignName: "echo"]
     func renamed(): Unit
@@ -868,20 +871,42 @@ foreign {
     ASSERT_EQ(diag.GetErrorCount(), 0);
     ASSERT_EQ(file->decls.size(), 3);
     const std::vector<std::vector<std::string>> expected{
-        {"second", "inner", "echo"}, {"first", "outer", "another"}, {"first", "outer", "original"}};
+        {"second", "inner", "echo"}, {"first", "outer", "another"}, {"first", "outer", ""}};
     for (size_t i = 0; i < file->decls.size(); ++i) {
         std::unordered_map<std::string, std::string> options;
         ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls[i]), options));
         EXPECT_EQ(options.at("module"), expected[i][0]);
         EXPECT_EQ(options.at("namespace"), expected[i][1]);
-        EXPECT_EQ(options.at("foreignName"), expected[i][2]);
+        if (expected[i][2].empty()) {
+            EXPECT_EQ(options.count("foreignName"), 0U);
+        } else {
+            EXPECT_EQ(options.at("foreignName"), expected[i][2]);
+        }
     }
 }
 
-// A name repeated inside one @ArkTS layer is rejected by the option fold even
-// when both values are equal. The parser adds no diagnostic for it: the fold is
-// the single owner of every option rule, so one mistake is reported once (by
-// the Sema diagnostic that consumes this false result).
+// A foreign block is a parser-only construct whose @ArkTS options are cloned
+// into every member. foreignName names one declaration's ArkTS member and has
+// no block-wide meaning, so it is rejected on the block and removed before
+// cloning.
+TEST_F(ArkTSEntryTest, ForeignNameOnForeignBlockIsRejected)
+{
+    auto file = Parse(R"(@ArkTS[module: "actual", foreignName: "blockName"]
+foreign {
+    func echo(): Unit
+}
+)");
+    // The block option is reported and removed before it is cloned into the
+    // member; the member keeps the block's module default only.
+    EXPECT_GT(diag.GetErrorPrintCount(), 0U);
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(file->decls.size(), 1);
+    std::unordered_map<std::string, std::string> options;
+    ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
+    EXPECT_EQ(options.at("module"), "actual");
+    EXPECT_EQ(options.count("foreignName"), 0U);
+}
+
 TEST_F(ArkTSEntryTest, RepeatedOptionAtOneLevelIsRejectedEvenForEqualValues)
 {
     for (const auto& name : {"module", "namespace", "foreignName"}) {
