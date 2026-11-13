@@ -6,6 +6,7 @@
 
 #include "../ArkTSInterop.h"
 
+#include <cstddef>
 #include <functional>
 #include <set>
 #include <string>
@@ -127,9 +128,12 @@ bool InsertReferenceMembers(
 }
 
 // The qualification path a parent entry is written with: `Base` (RefType) is
-// the one-segment path Base; `dep.Base`, `d.Base` and `a.b.Base`
-// (QualifiedType, whose field is the last segment) keep every qualifier
-// segment, base first. Names cannot be resolved through the checker yet
+// the one-segment path Base; `b.Base` and `ab.Base` (QualifiedType, whose
+// field is the last segment) keep the qualifier segment, base first. A
+// package import is registered under its last segment only (`import a.b`
+// binds `b`, `import a.b as ab` binds `ab`), so a longer spelling such as
+// `a.b.Base` names no imported package and is not a supported parent
+// spelling. Names cannot be resolved through the checker yet
 // (preparation runs before decl resolution), so the wrapper-parent tests
 // below resolve this spelling against the package's own declarations and the
 // file's imports; a qualified spelling never falls back to a bare-name match,
@@ -415,8 +419,8 @@ bool InstallWrapperMembers(
 // Preparation runs in two phases over the package:
 // - the check phase (file order) runs every refusal check and the
 //   user-member preparation of each foreign class, so each class's fate is
-//   known before any wrapper member is inserted and the diagnostics keep the
-//   order a single-pass walk produced;
+//   known before any wrapper member is inserted. Its diagnostics come first,
+//   in file order;
 // - the install phase inserts the wrapper members with each class's
 //   root/child shape decided from the declarations its parents spell: a
 //   same-package wrapper parent is installed first (a class may be declared
@@ -426,6 +430,12 @@ bool InstallWrapperMembers(
 //   the checker cannot use as their target and crash the diagnostic
 //   printer. The parent refusal has already diagnosed itself, so the child
 //   breaks silently.
+// The split moves one diagnostic relative to a single walk: a wrapper member
+// declaration that fails ('cannot declare the wrapper reference members') is
+// only detected during install, so it is reported after the checks of every
+// class instead of at its own position. That path is reachable only when the
+// compiler-owned holder source fails to parse, so it is an internal-error
+// shape, not a user-facing ordering contract.
 void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager* imports)
 {
     if (imports == nullptr) {
@@ -444,7 +454,13 @@ void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceM
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto cd = DynamicCast<ClassDecl*>(decl.get());
-            if (!cd || !IsArkTSForeignClass(*cd)) {
+            // A class already marked broken keeps its refusal diagnostic and
+            // its FOREIGN marker (only an installed wrapper drops it), so a
+            // repeated preparation over the same AST must skip the check
+            // rather than report the same refusal again. The install phase
+            // below returns at the IS_BROKEN check as well, so the whole
+            // repeated pass is a no-op.
+            if (!cd || !IsArkTSForeignClass(*cd) || cd->TestAttr(Attribute::IS_BROKEN)) {
                 continue;
             }
             if (CheckForeignClassShape(*cd, diag, *imports)) {
@@ -478,25 +494,40 @@ void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceM
             return InstallResult::CYCLIC;
         }
         bool wrapperParent = false;
-        bool brokenByParent = false;
-        for (auto inherited = cd->inheritedTypes.begin(); inherited != cd->inheritedTypes.end();) {
-            auto path = ParentSpellingPath(**inherited);
+        // A child shape against this parent would resolve the generated
+        // super(...) delegations against a class that never became a wrapper;
+        // the parent refusal has already spoken, so the child breaks silently
+        // and declares no wrapper member at all. The parent entry is removed
+        // with it: it names a broken declaration, and resolving it would only
+        // report 'undeclared type name' once per subclass for a cause the
+        // parent's own diagnostic already states.
+        //
+        // Removing a source-written inheritance entry is a destructive AST
+        // edit, safe here because the edit cannot outlive this compilation:
+        // - the package carries an error, so it produces no CJO and nothing
+        //   serializes the shortened inherited list;
+        // - the front end parses each source package for every compilation
+        //   (LSP included), so a later pass starts from source, not from this
+        //   tree;
+        // - PrepareTypeCheck runs once per source package per compilation, and
+        //   a repeated in-process pass returns at the IS_BROKEN check above
+        //   before it reaches this list.
+        //
+        // The removal itself is idempotent: the walk below only reads the
+        // inherited list and records the positions to drop, and the erase
+        // happens afterwards, so no iterator is held across the recursive
+        // install() and no erased entry is revisited. Once the entries are
+        // gone, a later pass resolving the same broken parents finds nothing
+        // to drop and erases nothing.
+        std::vector<size_t> brokenParents;
+        for (size_t i = 0; i < cd->inheritedTypes.size(); ++i) {
+            auto path = ParentSpellingPath(*cd->inheritedTypes[i]);
             switch (ResolveParentKind(path, *cd, *imports, pkg.fullPackageName, packageDecls)) {
                 case ParentKind::PACKAGE_CANDIDATE: {
                     auto parent = DynamicCast<ClassDecl*>(packageDecls.at(path.front()));
                     auto parentResult = install(parent);
                     if (parentResult == InstallResult::BROKEN) {
-                        // A child shape against this parent would resolve the
-                        // generated super(...) delegations against a class
-                        // that never became a wrapper; the parent refusal has
-                        // already spoken, so the child breaks silently and
-                        // declares no wrapper member at all. The parent entry
-                        // is removed with it: it names a broken declaration,
-                        // and resolving it would only report 'undeclared type
-                        // name' once per subclass for a cause the parent's
-                        // own diagnostic already states.
-                        inherited = cd->inheritedTypes.erase(inherited);
-                        brokenByParent = true;
+                        brokenParents.push_back(i);
                         continue;
                     }
                     if (parentResult == InstallResult::WRAPPER) {
@@ -516,9 +547,11 @@ void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceM
                 default:
                     break;
             }
-            ++inherited;
         }
-        if (brokenByParent) {
+        if (!brokenParents.empty()) {
+            for (auto i = brokenParents.rbegin(); i != brokenParents.rend(); ++i) {
+                cd->inheritedTypes.erase(cd->inheritedTypes.begin() + static_cast<std::ptrdiff_t>(*i));
+            }
             cd->EnableAttr(Attribute::IS_BROKEN);
             installing.erase(cd);
             return InstallResult::BROKEN;

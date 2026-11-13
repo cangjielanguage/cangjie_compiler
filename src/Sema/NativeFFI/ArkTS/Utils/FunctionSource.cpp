@@ -321,14 +321,16 @@ void CheckArkTSWriteOnlyRead(Node& usage, DiagnosticEngine& diag)
 // spelling the compiler refuses. A module specifier is otherwise accepted
 // verbatim: a system module ("@ohos.util", "@scope/name"), a project module
 // ("utils"), a project ETS source path ("entry/src/main/ets/EntryFixture")
-// and the tolerated separator shapes "a/", "a//b", "a\b" all pass; resolving
-// them is the runtime module loader's job. The authority design §2.1.1
-// defines the legal value range: a non-empty string that does not start with
-// "./" or "../" and contains no backslash. These shapes are rejected:
-//   any "\"                       backslash (design §2.1.1)
-//   "/x"                          OS-absolute (POSIX root)
-//   "C:/x"                        drive-absolute
-//   "./x", "../x"                 dot-relative prefix
+// and the separator shapes "a/" and "a//b" all pass; resolving them is the
+// runtime module loader's job. The authority design §2.1.1 defines the legal
+// value range: a non-empty string that does not start with "./" or "../" and
+// contains no backslash. The OS-absolute shapes below are refused by the
+// AR-04 base ruling that owns this predicate rather than derived from §2.1.1.
+// These shapes are rejected:
+//   any "\"                       backslash (design §2.1.1, tightened by R-D1)
+//   "/x"                          OS-absolute (POSIX root; base ruling)
+//   "C:/x"                        drive-absolute (base ruling)
+//   "./x", "../x"                 dot-relative prefix (design §2.1.1)
 // A drive-relative spelling ("C:x", no separator after the colon) is not
 // matched: there is no directory separator, so it stays a plain specifier
 // and its resolution failure is left to the runtime like any unknown module.

@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../../src/Sema/NativeFFI/ArkTS/ArkTSInterop.h"
 #include "../../src/Sema/NativeFFI/ArkTS/FunctionSource.h"
 #include "gtest/gtest.h"
 #include "TestCompilerInstance.h"
@@ -1745,6 +1746,92 @@ public foreign class Leaf <: Mid {
     // No class below the broken parent became a wrapper, so none of them
     // carries a compiler-added member: no field, no accessor, no wrapping
     // constructor, no super delegation anywhere.
+    for (auto cd : {child, mid, leaf}) {
+        EXPECT_FALSE(IsArkTSClassWrapper(*cd));
+        size_t generated = 0;
+        for (auto& member : cd->GetMemberDecls()) {
+            if (member->TestAttr(Attribute::COMPILER_ADD)) {
+                ++generated;
+            }
+        }
+        EXPECT_EQ(generated, 0);
+    }
+}
+
+// R-D3 quality follow-up: preparation is idempotent over the same AST. The
+// broken-parent cascade removes the child's inherited-type entry, a
+// destructive edit that a repeated pass must neither repeat nor turn into a
+// crash, a duplicate refusal or a second set of generated members. The
+// fixture's CompileSema already ran one preparation; this test runs the pass
+// twice more on the same tree.
+TEST_F(ArkTSForeignDiagTest, ForeignClassBrokenParentPreparationIsIdempotent)
+{
+    using namespace Cangjie::Native::FFI::ArkTS;
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign open class Base {
+    public init()
+    private func f(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign class Child <: Base {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+public foreign class Mid <: Base {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+public foreign class Leaf <: Mid {
+    public init()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 1);
+    auto pkg = instance->GetSourcePackages().front();
+    auto base = FindClass("Base");
+    auto child = FindClass("Child");
+    auto mid = FindClass("Mid");
+    auto leaf = FindClass("Leaf");
+    ASSERT_NE(base, nullptr);
+    ASSERT_NE(child, nullptr);
+    ASSERT_NE(mid, nullptr);
+    ASSERT_NE(leaf, nullptr);
+    // The first pass removed the entry that named a broken parent. Once the
+    // explicit parent is gone the generic checker gives the class the
+    // implicit Object parent, so the list is not empty - it just no longer
+    // names Base or Mid anywhere.
+    auto inheritedNames = [](ClassDecl& cd) {
+        std::vector<std::string> names;
+        for (auto& type : cd.inheritedTypes) {
+            auto ref = DynamicCast<RefType*>(type.get());
+            names.emplace_back(ref ? ref->ref.identifier.Val() : std::string("<other>"));
+        }
+        return names;
+    };
+    const std::vector<std::string> objectOnly{"Object"};
+    for (auto cd : {base, child, mid, leaf}) {
+        EXPECT_EQ(inheritedNames(*cd), objectOnly);
+    }
+    const auto declsBefore = pkg->files.front()->decls.size();
+    const auto messagesBefore = handler->messages.size();
+    const auto errorsBefore = diag.GetErrorCount();
+    PrepareTypeCheck(*pkg, diag, instance->GetSourceManager(), instance->importManager);
+    PrepareTypeCheck(*pkg, diag, instance->GetSourceManager(), instance->importManager);
+    // Stable result: no new refusal record, no second error, no second set of
+    // generated members, and no further erase of the inheritance lists.
+    EXPECT_EQ(diag.GetErrorCount(), errorsBefore);
+    EXPECT_EQ(handler->messages.size(), messagesBefore);
+    EXPECT_EQ(pkg->files.front()->decls.size(), declsBefore);
+    for (auto cd : {child, mid, leaf}) {
+        EXPECT_EQ(inheritedNames(*cd), objectOnly);
+    }
     for (auto cd : {child, mid, leaf}) {
         EXPECT_FALSE(IsArkTSClassWrapper(*cd));
         size_t generated = 0;

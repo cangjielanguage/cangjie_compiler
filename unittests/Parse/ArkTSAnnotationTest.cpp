@@ -891,14 +891,22 @@ foreign {
 // cloning.
 TEST_F(ArkTSEntryTest, ForeignNameOnForeignBlockIsRejected)
 {
-    auto file = Parse(R"(@ArkTS[module: "actual", foreignName: "blockName"]
+    auto file = ParseKeepingDiagnostics(R"(@ArkTS[module: "actual", foreignName: "blockName"]
 foreign {
     func echo(): Unit
 }
 )");
     // The block option is reported and removed before it is cloned into the
-    // member; the member keeps the block's module default only.
-    EXPECT_GT(diag.GetErrorPrintCount(), 0U);
+    // member; the member keeps the block's module default only. Pin the
+    // dedicated diagnostic instead of accepting any error: a different parse
+    // failure would leave the block option behind and still pass a mere
+    // error-count check.
+    const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::SEMA);
+    EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
+                  [](const auto& diagnostic) {
+                      return diagnostic.rKind == DiagKindRefactor::sema_arkts_foreign_block_foreign_name;
+                  }),
+        1);
     ASSERT_NE(file, nullptr);
     ASSERT_EQ(file->decls.size(), 1);
     std::unordered_map<std::string, std::string> options;

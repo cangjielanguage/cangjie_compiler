@@ -15,7 +15,6 @@
 #include "../Utils/ASTFactory.h"
 #include "Collector.h"
 #include "PlaceholderBinding.h"
-#include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/AST/Utils.h"
 
