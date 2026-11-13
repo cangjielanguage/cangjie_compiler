@@ -7,8 +7,6 @@
 # 仓颉社区统一提交校验：Conventional Commits + DCO
 # 使用说明：https://gitcode.com/Cangjie/cangjie_build/blob/main/docs/pre-commit.md
 default_install_hook_types: [commit-msg]
-# 说明：Linux/macOS 上 PATH 中已有 node/npm 时 pre-commit 自动复用系统 node；
-# 未检测到则用 nodeenv 下载；Windows 一律走 nodeenv（-n system 不被支持）。
 
 repos:
   - repo: https://gitcode.com/Cangjie/cangjie_build
