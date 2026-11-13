@@ -1750,4 +1750,14 @@ Ptr<Decl> FindCorrespondingCommonDecl(const Decl& specificDecl)
 
     return nullptr;
 }
+
+bool IsFuncOrOptionOfFunc(DataTy ty)
+{
+    DataTy realTy = ty;
+    if (realTy->IsCoreOptionType()) {
+        realTy = UnboxOptionType({realTy}).Ty();
+    }
+    // no need to check generic type, because generic upperbound cannot be function type
+    return realTy->IsFunc();
+}
 } // namespace Cangjie::TypeCheckUtil

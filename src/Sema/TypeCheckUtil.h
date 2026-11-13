@@ -233,6 +233,11 @@ Ptr<AST::Generic> GetCurrentGeneric(const AST::FuncDecl& fd, const AST::CallExpr
 std::string GetArgName(const AST::FuncDecl& fd, const AST::FuncArg& arg);
 std::optional<std::pair<AST::ModalTy, size_t>> GetParamTyAccordingToArgName(
     const AST::FuncDecl& fd, const std::string argName);
+
+// Returns true if the given type is a function type, or an Option-wrapped (possibly nested) function type or
+// generic type whose upper bounds include a function type. A generic type without Option wrapper returns false.
+bool IsFuncOrOptionOfFunc(AST::DataTy ty);
+
 inline bool IsTypeObjectCreation(const AST::FuncDecl& fd, const AST::CallExpr& ce)
 {
     // Get type variables from the outer (class, struct, enum) declaration of a constructor function
