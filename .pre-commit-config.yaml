@@ -1,0 +1,14 @@
+# 仓颉社区统一提交校验：Conventional Commits + DCO
+# 使用说明：https://gitcode.com/Cangjie/cangjie_build/blob/main/docs/pre-commit.md
+default_install_hook_types: [commit-msg]
+# 关键：复用系统 node，跳过 nodeenv 从 nodejs.org 下载 Node 二进制
+# 注意：Windows 上 nodeenv 不支持 -n system，需改用其他方式
+default_language_version:
+  node: system
+
+repos:
+  - repo: https://gitcode.com/Cangjie/cangjie_build
+    rev: b69cd3fb78345d7c85dd3b198a88b37df8ec0453
+    hooks:
+      - id: cangjie-commitlint
+      - id: cangjie-dco
