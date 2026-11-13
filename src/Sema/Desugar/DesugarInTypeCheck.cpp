@@ -723,9 +723,10 @@ void DesugarPrimaryCtor(Decl& decl, PrimaryCtorDecl& fd)
 }
 
 OwnedPtr<MemberAccess> DesugarRef2MemberAccess(
-    TypeManager& typeManager, Ptr<Decl> target, Ptr<RefExpr> field, ModalTy curTopDeclTy)
+    ASTContext& ctx, TypeManager& typeManager, Ptr<Decl> target, Ptr<RefExpr> field, ModalTy curTopDeclTy)
 {
     auto baseExpr = MakeOwned<RefExpr>();
+    ctx.RemoveTypeCheckCache(*baseExpr);
     baseExpr->ref.identifier = target->outerDecl->identifier;
     // Get inst decl ty where the target static function in.
     auto targetOuterDeclTy = Promotion(typeManager).Promote(curTopDeclTy, target->outerDecl->DataTy());
@@ -742,6 +743,7 @@ OwnedPtr<MemberAccess> DesugarRef2MemberAccess(
     CopyBasicInfo(field, baseExpr);
 
     auto baseFunc = MakeOwned<MemberAccess>();
+    ctx.RemoveTypeCheckCache(*baseFunc);
     baseFunc->baseExpr = std::move(baseExpr);
     baseFunc->field = field->ref.identifier;
     baseFunc->SetTy(field->GetTy());
@@ -760,12 +762,13 @@ OwnedPtr<MemberAccess> DesugarRef2MemberAccess(
     return baseFunc;
 }
 
-void TypeChecker::TypeCheckerImpl::DesugarStaticRefCall2MemberAccessInCFuncLam(LambdaExpr& le, ModalTy curTopDeclTy)
+void TypeChecker::TypeCheckerImpl::DesugarStaticRefCall2MemberAccessInCFuncLam(
+    ASTContext& ctx, LambdaExpr& le, ModalTy curTopDeclTy)
 {
     if (!le.GetTy()->IsCFunc()) {
         return;
     }
-    auto preVisit = [this, &curTopDeclTy](Ptr<Node> node) -> VisitAction {
+    auto preVisit = [this, &ctx, &curTopDeclTy](Ptr<Node> node) -> VisitAction {
         if (auto ce = DynamicCast<CallExpr*>(node);
             ce && ce->baseFunc->astKind == ASTKind::REF_EXPR && !ce->desugarExpr) {
             auto target = ce->baseFunc->GetTarget();
@@ -776,7 +779,10 @@ void TypeChecker::TypeCheckerImpl::DesugarStaticRefCall2MemberAccessInCFuncLam(L
             }
             auto baseFunc = StaticCast<RefExpr>(ce->baseFunc.get());
             auto callExpr = ASTCloner::Clone(Ptr(ce));
-            callExpr->baseFunc = DesugarRef2MemberAccess(typeManager, target, baseFunc, curTopDeclTy);
+            // Clear the cloned tree before replacing its baseFunc, so type arguments moved from the
+            // original call are not touched.
+            ctx.ClearTypeCheckCache(*callExpr);
+            callExpr->baseFunc = DesugarRef2MemberAccess(ctx, typeManager, target, baseFunc, curTopDeclTy);
             if (callExpr->baseFunc) {
                 ce->desugarExpr = std::move(callExpr);
             }
@@ -788,7 +794,7 @@ void TypeChecker::TypeCheckerImpl::DesugarStaticRefCall2MemberAccessInCFuncLam(L
             if (!targetIsStaticPropInOpenDecl) {
                 return VisitAction::WALK_CHILDREN;
             }
-            re->desugarExpr = DesugarRef2MemberAccess(typeManager, target, re, curTopDeclTy);
+            re->desugarExpr = DesugarRef2MemberAccess(ctx, typeManager, target, re, curTopDeclTy);
         }
         return VisitAction::WALK_CHILDREN;
     };

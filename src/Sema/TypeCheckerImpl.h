@@ -597,7 +597,8 @@ private:
      *     }
      * }
      * */
-    void DesugarStaticRefCall2MemberAccessInCFuncLam(AST::LambdaExpr& le, AST::ModalTy curTopDeclTy);
+    void DesugarStaticRefCall2MemberAccessInCFuncLam(
+        ASTContext& ctx, AST::LambdaExpr& le, AST::ModalTy curTopDeclTy);
     void DesugarVArrayCall(ASTContext& ctx, AST::CallExpr& ce);
     void DesugarPointerCall(ASTContext& ctx, AST::CallExpr& ce);
     /** Desugar 'propDecl' after typecheck but still inside 'Sema' stage. Keep this order for cjLint usage. */

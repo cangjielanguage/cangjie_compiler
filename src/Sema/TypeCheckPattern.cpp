@@ -314,6 +314,9 @@ bool TypeChecker::TypeCheckerImpl::ChkOpOverloadForConstPattern(ASTContext& ctx,
             return true;
         }
     }
+    // The temporary tree is destroyed on failure; drop its cache entries so a later node
+    // reusing the same address cannot observe them.
+    ctx.ClearTypeCheckCache(*callExpr);
     p.SetTy(TypeManager::GetNonNullTy(p.GetTy()));
     diag.Diagnose(p, DiagKind::sema_not_overload_in_match);
     return false;

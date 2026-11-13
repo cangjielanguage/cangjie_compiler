@@ -807,6 +807,8 @@ void TypeChecker::TypeCheckerImpl::DesugarForInString(ASTContext& ctx, AST::ForI
         auto ceTy = SynthesizeWithoutRecover({ctx, SynPos::EXPR_ARG}, ce.get());
         CJC_ASSERT(ceTy && ceTy->kind != TypeKind::TYPE_INVALID);
         auto letValue = std::move(vp->varDecl);
+        // The pattern is destroyed below; drop its cache entries to avoid stale hits on a reused address.
+        ctx.ClearTypeCheckCache(*forInExpr.pattern);
         forInExpr.pattern.reset();
         letValue->initializer = std::move(ce);
         // Put let value declaration between.
