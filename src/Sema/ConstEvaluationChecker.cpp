@@ -169,13 +169,13 @@ bool IsConstSafe(Decl& decl)
 }
 
 // The type of the values returned by @p fb. A constructor returns no value.
-Ptr<Ty> GetReturnTy(const FuncBody& fb)
+ModalTy GetReturnTy(const FuncBody& fb)
 {
     if (!Ty::IsTyCorrect(fb.GetTy()) || !fb.GetTy()->IsFunc() ||
         (fb.funcDecl && fb.funcDecl->TestAttr(Attribute::CONSTRUCTOR))) {
-        return nullptr;
+        return {};
     }
-    return RawStaticCast<FuncTy*>(fb.DataTy())->retTy.Ty();
+    return StaticCast<FuncTy>(fb.DataTy())->retTy;
 }
 }; // namespace
 
@@ -266,7 +266,7 @@ private:
         return true;
     }
 
-    bool ChkNoExternConversion(const Expr& value, Ptr<Ty> expected)
+    bool ChkNoExternConversion(const Expr& value, ModalTy expected)
     {
         if (!expected || !value.GetTy() ||
             !TypeCheckUtil::NeedExternConversion(typeManager, *value.GetTy(), *expected)) {
@@ -277,7 +277,7 @@ private:
     }
 
     // The value of an empty block or of a block ending with a declaration is the unit value.
-    bool ChkNoExternConversion(const Block& block, Ptr<Ty> expected)
+    bool ChkNoExternConversion(const Block& block, ModalTy expected)
     {
         if (auto last = DynamicCast<const Expr*>(block.GetLastExprOrDecl())) {
             return ChkNoExternConversion(*last, expected);
@@ -694,7 +694,7 @@ private:
             return res;
         }
         for (size_t i = 0; i < tl.children.size() && i < ty->typeArgs.size(); ++i) {
-            res = ChkNoExternConversion(*tl.children[i], ty->typeArgs[i].Ty()) && res;
+            res = ChkNoExternConversion(*tl.children[i], ty->typeArgs[i]) && res;
         }
         return res;
     }
@@ -772,12 +772,12 @@ private:
         if (!Ty::IsTyCorrect(ce.baseFunc->GetTy()) || !ce.baseFunc->GetTy()->IsFunc()) {
             return true;
         }
-        auto& paramTys = RawStaticCast<FuncTy*>(ce.baseFunc->DataTy())->paramTys;
+        auto& paramTys = StaticCast<FuncTy>(ce.baseFunc->DataTy())->paramTys;
         bool res = true;
         auto chkArgs = [this, &paramTys, &res](const auto& args) {
             for (size_t i = 0; i < args.size() && i < paramTys.size(); ++i) {
                 if (args[i]->expr) {
-                    res = ChkNoExternConversion(*args[i]->expr, paramTys[i].Ty()) && res;
+                    res = ChkNoExternConversion(*args[i]->expr, paramTys[i]) && res;
                 }
             }
         };

@@ -79,13 +79,13 @@ OwnedPtr<LitConstExpr> CreateFieldName(const std::string& field, Ty& stringTy, c
 
 /** The type of the values returned by @p fb. A constructor of Extern<T> has type (...) -> Extern<T> but returns no
  * value, its body is Unit. */
-Ptr<Ty> GetReturnTy(const FuncBody& fb)
+ModalTy GetReturnTy(const FuncBody& fb)
 {
     if (!Ty::IsTyCorrect(fb.GetTy()) || !fb.GetTy()->IsFunc() ||
         (fb.funcDecl && fb.funcDecl->TestAttr(Attribute::CONSTRUCTOR))) {
-        return nullptr;
+        return {};
     }
-    return RawStaticCast<FuncTy*>(fb.DataTy())->retTy.Ty();
+    return StaticCast<FuncTy>(fb.DataTy())->retTy;
 }
 
 OwnedPtr<RefExpr> CreateTmpRef(VarDecl& tmp, const Expr& expr)
@@ -282,7 +282,7 @@ void ExternDesugaring::HandleCallExpr(CallExpr& ce)
     if (!ce.baseFunc || !Ty::IsTyCorrect(ce.baseFunc->GetTy()) || !ce.baseFunc->GetTy()->IsFunc()) {
         return;
     }
-    auto funcTy = RawStaticCast<FuncTy*>(ce.baseFunc->DataTy());
+    auto funcTy = StaticCast<FuncTy>(ce.baseFunc->DataTy());
     auto convertArgs = [this, funcTy](auto begin, auto end) {
         size_t index = 0;
         for (auto it = begin; it != end && index < funcTy->paramTys.size(); ++it, ++index) {
