@@ -2523,6 +2523,18 @@ OwnedPtr<FuncParamList> ParserImpl::ParseParameterList(ScopeKind scopeKind)
     ParseZeroOrMoreSepTrailing([&ret](const Position& pos) { ret->params.back()->commaPos = pos; },
         [&ret, this, scopeKind, &namedParameter, &memberParam]() {
             ret->params.push_back(ParseParamInParamList(scopeKind, namedParameter, memberParam));
+            if (!ret->params.back()->TestAttr(Attribute::IS_BROKEN)) {
+                return;
+            }
+            // A broken parameter (e.g. the name of 'func f(x: Int64, Int64)' is missing) may leave
+            // tokens unconsumed before the next ',' or ')'. Consume them until the separator or the
+            // end of the parameter list, otherwise a well-formed ')' would be misreported as an
+            // unclosed delimiter.
+            while (!Seeing(TokenKind::COMMA) && !Seeing(TokenKind::RPAREN) && !Seeing(TokenKind::LCURL) &&
+                !Seeing(TokenKind::END)) {
+                SkipPairedBrackets();
+                Next();
+            }
         },
         TokenKind::RPAREN);
     if (!Skip(TokenKind::RPAREN)) {
