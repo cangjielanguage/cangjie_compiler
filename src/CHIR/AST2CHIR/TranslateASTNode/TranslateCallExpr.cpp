@@ -17,27 +17,15 @@ static const std::unordered_map<std::string, IntrinsicKind> coreIntrinsicMap = {
     {SIZE_OF_NAME, SIZE_OF},
     {ALIGN_OF_NAME, ALIGN_OF},
     {ARRAY_ACQUIRE_RAW_DATA_NAME, ARRAY_ACQUIRE_RAW_DATA},
-    {"acquireRawData2", ARRAY_ACQUIRE_RAW_DATA},
-    {"acquireRawData3", ARRAY_ACQUIRE_RAW_DATA},
     {ARRAY_RELEASE_RAW_DATA_NAME, ARRAY_RELEASE_RAW_DATA},
-    {"releaseRawData2", ARRAY_RELEASE_RAW_DATA},
-    {"releaseRawData3", ARRAY_RELEASE_RAW_DATA},
     {ARRAY_BUILT_IN_COPY_TO_NAME, ARRAY_BUILT_IN_COPY_TO},
-    {ARRAY_BUILT_IN_COPY_TO2_NAME, ARRAY_BUILT_IN_COPY_TO},
-    {ARRAY_BUILT_IN_COPY_TO3_NAME, ARRAY_BUILT_IN_COPY_TO},
     {ARRAY_GET_NAME, ARRAY_GET},
     {ARRAY_SET_NAME, ARRAY_SET},
-    {ARRAY_SET2_NAME, ARRAY_SET},
-    {ARRAY_SET3_NAME, ARRAY_SET},
     {ARRAY_GET_UNCHECKED_NAME, ARRAY_GET_UNCHECKED},
-    {ARRAY_GET_UNCHECKED2_NAME, ARRAY_GET_UNCHECKED},
-    {ARRAY_GET_UNCHECKED3_NAME, ARRAY_GET_UNCHECKED},
 
     {ARRAY_GET_REF_UNCHECKED_NAME, ARRAY_GET_REF_UNCHECKED},
 
     {ARRAY_SET_UNCHECKED_NAME, ARRAY_SET_UNCHECKED},
-    {ARRAY_SET_UNCHECKED2_NAME, ARRAY_SET_UNCHECKED},
-    {ARRAY_SET_UNCHECKED3_NAME, ARRAY_SET_UNCHECKED},
     {ARRAY_SIZE_NAME, ARRAY_SIZE},
     {ARRAY_CLONE_NAME, ARRAY_CLONE},
     {ARRAY_SLICE_INIT_NAME, ARRAY_SLICE_INIT},
@@ -854,8 +842,7 @@ Ptr<Value> Translator::TranslateIntrinsicCall(const AST::CallExpr& expr)
             identifier == "rawArrayAllocate3") {
             return TranslateRawArrayAllocate(expr);
         }
-        if (identifier == "rawArrayInitByValue" || identifier == "rawArrayInitByValue2" ||
-            identifier == "rawArrayInitByValue3") {
+        if (identifier == "rawArrayInitByValue") {
             return TranslateRawArrayInitByValue(expr);
         }
     }

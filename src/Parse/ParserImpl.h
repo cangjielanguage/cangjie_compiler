@@ -279,7 +279,6 @@ private:
 
     // This is parsing chain currently, only used for diagnostic.
     std::vector<Ptr<AST::Node>> chainedAST;
-    std::unordered_set<Ptr<AST::Decl>> intrinsics{}; /* A set to record intrinsic function. */
     /**
      * Attach comment group to the ast nodes in File
      */
@@ -582,7 +581,6 @@ private:
     void CheckModifierInParamList(
         const ScopeKind& scopeKind, const std::set<AST::Modifier>& modifiers, bool isMember, AST::FuncParam& fp);
     void ParseLetOrVarInParamList(const ScopeKind& scopeKind, AST::FuncParam& fp, Position& memberStartPos);
-    template <typename T> void CheckIntrinsicFunc(T& fd);
     OwnedPtr<AST::FuncParam> ParseParamInParamList(const ScopeKind& scopeKind, Ptr<AST::FuncParam>& meetNamedParameter,
         Ptr<AST::FuncParam>& meetMemberParams);
     void ParseInterfaceDeclOrClassDeclGeneric(AST::InheritableDecl& ret);
@@ -934,7 +932,6 @@ private:
     void DiagExpectedName(const std::string& str, const std::string& afterName);
     void DiagGetOrSetCannotBeGeneric(const std::string& str, const AST::Generic& ge);
     void DiagUnexpectedWhere(const Token& token);
-    void DiagDuplicatedIntrinsicFunc(const AST::Decl& decl, const AST::Decl& prev);
     void DiagMissingBody(const std::string& str, const std::string& name, const Position& pos);
     void DiagDeclCannotInheritTheirSelf(const AST::InheritableDecl& decl, const AST::RefType& rt);
     void DiagUnsafeWillBeIgnored(const AST::Modifier& mod);

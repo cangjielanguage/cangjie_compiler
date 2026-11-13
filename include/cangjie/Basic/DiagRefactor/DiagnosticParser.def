@@ -145,9 +145,6 @@ ERROR(parse_unexpected_where, "unexpected 'where' in non-generic declaration", "
     {"because this declaration is non-generic"})
 ERROR(parse_setter_must_contain_one_parameter, "setter must contain 1 parameter", "expected 1 parameter inside")
 ERROR(parse_setter_can_only_accept_one_parameter, "setter can only accept 1 parameter", "can only accept 1 parameter")
-ERROR(parse_duplicated_intrinsic_function, "duplicated intrinsic function '%s'", "duplicated intrinsic function", {
-    "the previous one is here"
-})
 ERROR(parse_missing_body, "body of %s is missing", "missing %s body here")
 ERROR(parse_invalid_super_declaration, "cannot inherit from type: '%s'", "this type cannot be inherited")
 ERROR(parse_static_init_can_not_accept_any_parameter, "static initializer cannot have any parameter")

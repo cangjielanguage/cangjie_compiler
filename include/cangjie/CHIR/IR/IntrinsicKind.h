@@ -36,21 +36,13 @@ static const std::string ALIGN_OF_NAME = "alignOfType";
 static const std::string ARRAY_ACQUIRE_RAW_DATA_NAME = "acquireRawData";
 static const std::string ARRAY_RELEASE_RAW_DATA_NAME = "releaseRawData";
 static const std::string ARRAY_BUILT_IN_COPY_TO_NAME = "intrinsicBuiltInCopyTo";
-static const std::string ARRAY_BUILT_IN_COPY_TO2_NAME = "intrinsicBuiltInCopyTo2";
-static const std::string ARRAY_BUILT_IN_COPY_TO3_NAME = "intrinsicBuiltInCopyTo3";
 static const std::string ARRAY_GET_NAME = "arrayGet";
 static const std::string ARRAY_SET_NAME = "arraySet";
-static const std::string ARRAY_SET2_NAME = "arraySet2";
-static const std::string ARRAY_SET3_NAME = "arraySet3";
 static const std::string ARRAY_GET_UNCHECKED_NAME = "arrayGetUnchecked";
-static const std::string ARRAY_GET_UNCHECKED2_NAME = "arrayGetUnchecked2";
-static const std::string ARRAY_GET_UNCHECKED3_NAME = "arrayGetUnchecked3";
 
 static const std::string ARRAY_GET_REF_UNCHECKED_NAME = "arrayGetRefUnchecked"; // cjnative only
 
 static const std::string ARRAY_SET_UNCHECKED_NAME = "arraySetUnchecked";
-static const std::string ARRAY_SET_UNCHECKED2_NAME = "arraySetUnchecked2";
-static const std::string ARRAY_SET_UNCHECKED3_NAME = "arraySetUnchecked3";
 static const std::string ARRAY_SIZE_NAME = "arraySize";
 static const std::string ARRAY_CLONE_NAME = "arrayClone";
 static const std::string ARRAY_SLICE_INIT_NAME = "arraySliceInit";

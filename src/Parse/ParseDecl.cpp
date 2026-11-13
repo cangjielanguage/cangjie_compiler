@@ -854,7 +854,6 @@ void ParserImpl::ParseFuncDeclAnnos(std::vector<OwnedPtr<AST::Annotation>>& anno
     funcDecl.annotations = std::move(annos);
     for (auto& it : funcDecl.annotations) {
         if (it->kind == AnnotationKind::INTRINSIC) {
-            CheckIntrinsicFunc(funcDecl);
             funcDecl.EnableAttr(Attribute::INTRINSIC);
         }
         if (it->kind == AnnotationKind::NUMERIC_OVERFLOW) {
@@ -2625,15 +2624,5 @@ void ParserImpl::CheckModifierInParamList(
                 fp.EnableAttr(it);
             }
         }
-    }
-}
-template <typename T> void ParserImpl::CheckIntrinsicFunc(T& fd)
-{
-    auto iter = std::find_if(
-        intrinsics.begin(), intrinsics.end(), [&fd](auto fd1) { return fd1 && fd.identifier == fd1->identifier; });
-    if (iter != intrinsics.end()) {
-        DiagDuplicatedIntrinsicFunc(fd, **iter);
-    } else {
-        intrinsics.emplace(&fd);
     }
 }
