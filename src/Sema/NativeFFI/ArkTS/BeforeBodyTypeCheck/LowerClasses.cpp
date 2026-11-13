@@ -6,6 +6,7 @@
 
 #include "TypeCheckerImpl.h"
 
+#include <algorithm>
 #include <unordered_map>
 #include <vector>
 
@@ -24,15 +25,37 @@ using namespace Cangjie::Native::FFI;
 using namespace Cangjie::Native::FFI::ArkTS;
 
 namespace {
-// The generated wrapping constructor, parsed from the compiler-owned holder
-// shape and marked COMPILER_ADD. Its first parameter is the JSObject to store:
-//   public init(__cj_arkts_ref: JSObject, _: Unit)
-//       { this.__cj_arkts_ref = __cj_arkts_ref }
+// The generated wrapping constructors, parsed from the compiler-owned holder
+// shape and marked COMPILER_ADD. A root wrapper declares two overloads and a
+// child wrapper redeclares both as delegations; either way the first parameter
+// is the value the wrapper recovers, spelled by the shared parameter name:
+//   public init(__cj_arkts_ref: JSObject, _: Unit) { ... }
+//   public init(__cj_arkts_ref: () -> JSObject, _: Unit) { ... }
 bool IsWrappingConstructor(const FuncDecl& fd)
 {
     return fd.TestAttr(Attribute::COMPILER_ADD) && fd.funcBody && fd.funcBody->paramLists.size() == 1 &&
         !fd.funcBody->paramLists.front()->params.empty() &&
         fd.funcBody->paramLists.front()->params.front()->identifier.Val() == ARKTS_CLASS_CTOR_PARAM;
+}
+
+// Whether this wrapper class declares the reference field itself (a root
+// wrapper): preparation inserts the field only on a class without a wrapper
+// parent, so the generated constructor body must match the members the class
+// actually owns - the root assigns its field directly, a child forwards the
+// new object through super(...) to the root wrapper that stores it. This only
+// mirrors preparation's root/child decision; it cannot detect a preparation
+// misjudgment by itself, so the wrapper-parent invariant in LowerArkTSClasses
+// refuses a child-shaped class whose resolved parents include no wrapper
+// before any super(...) body is generated.
+bool OwnsReferenceField(ClassDecl& cd)
+{
+    for (auto& member : cd.GetMemberDecls()) {
+        if (member->astKind == ASTKind::VAR_DECL && member->TestAttr(Attribute::COMPILER_ADD) &&
+            member->identifier.Val() == ARKTS_CLASS_REF_FIELD) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool IsReferenceAccessor(const FuncDecl& fd)
@@ -255,21 +278,14 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
             if (!cd || !IsArkTSClassWrapper(*cd) || cd->TestAttr(Attribute::IS_BROKEN)) {
                 continue;
             }
-            // Cross-language inheritance needs an ArkTS subclass on the other
-            // side and a shared construction path; a wrapper only references
-            // the object of its own class, so a wrapper parent is refused.
+            // A wrapper parent is the R-D3 supported shape: the child keeps
+            // only the ArkTS object its own constructor builds and forwards it
+            // to the root wrapper's storage through super(...), so no wrapper
+            // parent is refused here anymore. The remaining parent rules below
+            // still apply, and Cangjie's own inheritance checks (the parent
+            // must be open, first-position superclass and the like) run in the
+            // generic class checking.
             auto parents = UserParentDecls(*cd);
-            for (auto& parent : parents) {
-                if (parent->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *cd,
-                        cd->identifier.Val(), "inheriting another @ArkTS foreign class is not supported");
-                    cd->EnableAttr(Attribute::IS_BROKEN);
-                    break;
-                }
-            }
-            if (cd->TestAttr(Attribute::IS_BROKEN)) {
-                continue;
-            }
             // The authority design requires every parent to carry @ArkTS; an
             // unannotated parent would make the wrapper reference a class the
             // ArkTS side does not have.
@@ -284,6 +300,23 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                 }
             }
             if (cd->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+            // A child wrapper owns no reference field: every constructor body
+            // generated for it reaches the root wrapper's storage through
+            // super(...). Preparation guarantees such a class a wrapper
+            // parent; a class whose parents resolved here to no wrapper at
+            // all means the preparation spelling match was wrong, and the
+            // super(...) delegations would resolve against a parent
+            // constructor that does not exist. Refuse the class instead of
+            // generating that body - preparation's own refusals above (a
+            // broken parent breaks the child there) make this unreachable
+            // for every shape preparation can still judge.
+            if (!OwnsReferenceField(*cd) &&
+                std::none_of(parents.begin(), parents.end(), [](Ptr<Decl> parent) { return IsArkTSClassWrapper(*parent); })) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, *cd,
+                    cd->identifier.Val(), "a wrapper class without its own reference field must have an @ArkTS wrapper parent");
+                cd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }
             std::unordered_map<std::string, std::string> options;
@@ -500,8 +533,13 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
                 std::unordered_map<std::string, Ptr<Decl>> classRefs;
                 std::string code;
                 if (constructor) {
+                    // A child wrapper (no field of its own) moves the whole
+                    // construction into the super(...) thunk; a root wrapper
+                    // keeps the direct field assignment.
+                    auto form = OwnsReferenceField(*cd) ? ArkTSConstructorForm::DIRECT
+                                                        : ArkTSConstructorForm::SUPER_THUNK;
                     code = ArkTSClassConstructorSource(types, classCtx.namespaces.size(), prefix, restIndex,
-                        classCtx.receiver, optionalStart, classRefs);
+                        classCtx.receiver, optionalStart, classRefs, form);
                 } else {
                     code = ArkTSClassMethodSource(types, resultType, classCtx.namespaces.size(), prefix, restIndex,
                         fd->TestAttr(Attribute::STATIC) ? ArkTSMemberReceiver::STATIC : ArkTSMemberReceiver::INSTANCE,

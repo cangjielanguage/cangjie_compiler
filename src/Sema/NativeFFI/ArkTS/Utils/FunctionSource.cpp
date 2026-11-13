@@ -1259,19 +1259,38 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
 }
 
 namespace {
-// Close a generated body. The call context is always established; a body that
-// needs no conversion still reads ctx.env for the lifecycle/thread check.
-std::string ArkTSFinishBody(const std::string& prefix, const std::string& code)
+// The context-establishment prologue every generated body opens with: the call
+// context is always established, and a body that needs no conversion still
+// reads ctx.env for the lifecycle/thread check.
+std::string ArkTSBodyPrologue(const std::string& prefix, const std::string& code)
 {
     const auto ctx = prefix + "context";
     // Every generated member runs under the ambient call scope, so a missing
     // entry context fails here even when no conversion needs the value.
-    auto header = "func " + std::string(ARKTS_WRAPPER_ENTRY) + "() {\n    let " + ctx + ": " + ARKTS_JS_CONTEXT +
-        " = " + ARKTS_CONTEXT_ABI_PACKAGE + "." + ARKTS_CONTEXT_CURRENT + "()\n";
+    auto header = "    let " + ctx + ": " + ARKTS_JS_CONTEXT + " = " + ARKTS_CONTEXT_ABI_PACKAGE + "." +
+        ARKTS_CONTEXT_CURRENT + "()\n";
     // Reading env performs the shared lifecycle/thread check, so a body that
     // needs no conversion still fails outside an entry scope.
     auto discard = code.find(ctx) == std::string::npos ? "    let _ = " + ctx + ".env\n" : "";
-    return header + discard + code + "}\n";
+    return header + discard;
+}
+
+// Close a generated body around the prologue above.
+std::string ArkTSFinishBody(const std::string& prefix, const std::string& code)
+{
+    return "func " + std::string(ARKTS_WRAPPER_ENTRY) + "() {\n" + ArkTSBodyPrologue(prefix, code) + code + "}\n";
+}
+
+// Close a super-delegating generated constructor body: the construction
+// statements move inside a thunk literal so the super constructor call stays
+// the constructor's single first expression, and the thunk's value is the new
+// object reference the parent's thunk-taking wrapping constructor stores. The
+// prologue (context establishment and the env check) runs inside the thunk,
+// where the construction statements execute.
+std::string ArkTSFinishSuperBody(const std::string& prefix, const std::string& code)
+{
+    return "func " + std::string(ARKTS_WRAPPER_ENTRY) + "() {\n    super({ =>\n" + ArkTSBodyPrologue(prefix, code) +
+        code + "    }, ())\n}\n";
 }
 
 // Resolve the class value of a static member or constructor as a JSValue.
@@ -1410,7 +1429,7 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
 
 std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types, size_t namespaceDepth,
     const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver, size_t optionalStart,
-    std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+    std::unordered_map<std::string, Ptr<Decl>>& classRefs, ArkTSConstructorForm form)
 {
     if (restIndex != ARKTS_NO_REST &&
         (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
@@ -1447,6 +1466,12 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
     } else {
         code += "    let " + object + " = " + clazz + ".new(" +
             (args.size() == 1 ? args.front() : "[" + ArkTSJoin(args, ", ") + "]") + ")\n";
+    }
+    if (form == ArkTSConstructorForm::SUPER_THUNK) {
+        // A child wrapper stores nothing itself: the thunk's value is the new
+        // object reference, and the parent's thunk-taking wrapping constructor
+        // assigns it to the root wrapper's field.
+        return ArkTSFinishSuperBody(prefix, code + "    " + object + ".asObject()\n");
     }
     return ArkTSFinishBody(prefix,
         code + "    " + ARKTS_SELF + "." + ARKTS_CLASS_REF_FIELD + " = " + object + ".asObject()\n");

@@ -1204,6 +1204,49 @@ TEST_F(ArkTSTypeMappingTest, ClassConstructorSourceUsesTheResolvedClass)
     ASSERT_EQ(diag.GetErrorCount(), 0);
 }
 
+TEST_F(ArkTSTypeMappingTest, SuperThunkConstructorKeepsSuperFirst)
+{
+    // The child wrapper form (a class whose parent is a prepared wrapper):
+    // the construction statements move inside one thunk literal passed to
+    // super(..., ()) - the parent's thunk-taking wrapping constructor stores
+    // the value - because Cangjie requires super(...) to be the constructor's
+    // first expression. The context establishment runs inside the thunk with
+    // the construction, and no reference-field assignment is emitted.
+    ClassDecl point;
+    point.identifier = "Point";
+    point.fullPackageName = "pkg";
+    point.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto code = ArkTSClassConstructorSource({ScalarDesc("Float64")}, 0, "__locals_", ARKTS_NO_REST,
+        ArkTSReceiverKind::MODULE, 1, classRefs, ArkTSConstructorForm::SUPER_THUNK);
+    ASSERT_FALSE(code.empty());
+    EXPECT_NE(code.find("super({ =>"), std::string::npos);
+    EXPECT_NE(code.find("}, ())"), std::string::npos);
+    EXPECT_NE(code.find("asClass()"), std::string::npos);
+    EXPECT_NE(code.find(".new("), std::string::npos);
+    // The thunk's value is the new object reference and nothing is assigned
+    // to a field the child does not declare.
+    EXPECT_NE(code.find("__locals_object.asObject()"), std::string::npos);
+    EXPECT_EQ(code.find(ARKTS_SELF), std::string::npos);
+    auto file = Parse(code);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+    // The same form composes with the trailing-optional forwarding: the
+    // block-lambda call array is built inside the thunk.
+    auto optional = [](const std::string& name) {
+        return WrappedDesc(ArkTSTypeDesc::Kind::OPTIONAL, ScalarDesc(name));
+    };
+    classRefs.clear();
+    const std::vector<ArkTSTypeDesc> types{ScalarDesc("Int32"), optional("String")};
+    auto optionalCode = ArkTSClassConstructorSource(types, 0, "__locals_", ARKTS_NO_REST, ArkTSReceiverKind::MODULE,
+        1, classRefs, ArkTSConstructorForm::SUPER_THUNK);
+    ASSERT_FALSE(optionalCode.empty());
+    EXPECT_NE(optionalCode.find("super({ =>"), std::string::npos);
+    EXPECT_NE(optionalCode.find("Array<ark_interop.JSValue>(__locals_last_0 + 1,"), std::string::npos);
+    EXPECT_NE(optionalCode.find(".new(__locals_args_0)"), std::string::npos);
+    auto optionalFile = Parse(optionalCode);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+}
+
 TEST_F(ArkTSTypeMappingTest, ClassOptionalMembersForwardUpToTheLastSome)
 {
     // Class members and constructors use the same trailing-optional rule as

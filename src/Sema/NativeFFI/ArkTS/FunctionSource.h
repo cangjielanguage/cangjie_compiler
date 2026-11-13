@@ -307,6 +307,18 @@ constexpr const char* ARKTS_CLASS_CTOR_PARAM = "__cj_arkts_ref";
 
 enum class ArkTSMemberReceiver { INSTANCE, STATIC };
 
+// The body shape of a generated constructor. DIRECT is the root wrapper form:
+// the construction statements run in the constructor and the new object
+// reference is assigned to the class's own reference field. SUPER_THUNK is the
+// child wrapper form (the class has a prepared wrapper parent): the same
+// statements move inside a thunk literal passed to `super(..., ())`, whose
+// value the parent's thunk-taking wrapping constructor stores, because Cangjie
+// requires super(...) to be the constructor's first expression, so a
+// multi-statement construction can only reach it as one thunk value. Either
+// way the ArkTS object is constructed exactly once, by the class's own
+// constructor; the parent side never constructs again.
+enum class ArkTSConstructorForm { DIRECT, SUPER_THUNK };
+
 // Instance/static member function body. Instance calls run on the stored
 // object reference; static calls resolve the class object through the module
 // receiver. Returns "" for an unsupported position.
@@ -329,12 +341,20 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
 // arguments and stores the resulting object reference on the receiver.
 // optionalStart has the same meaning as in ArkTSClassMethodSource: the
 // constructor forwards the trailing optional run exactly like a member call.
+// The form selects the wrapper shape per ArkTSConstructorForm: DIRECT closes
+// with `__cj_arkts_self.__cj_arkts_ref = object.asObject()`; SUPER_THUNK wraps
+// the whole body in `super({ => ... object.asObject() }, ())` for a class
+// whose parent is a prepared wrapper (the reference field lives on the root
+// wrapper, so a child constructor forwards the new object through the parent's
+// thunk-taking wrapping constructor instead of assigning a field it does not
+// declare).
 // Body pseudocode:
 //   ctx = current(); clazz = module/namespace getProperty(class).asClass()
 //   object = clazz.new([toJS(argument_i)...]); this.ref() = object.asObject()
 std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types, size_t namespaceDepth,
     const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver, size_t optionalStart,
-    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs,
+    ArkTSConstructorForm form = ArkTSConstructorForm::DIRECT);
 
 // Property accessor body. The getter returns the converted property value;
 // the setter writes the converted value back. Both work on the stored object

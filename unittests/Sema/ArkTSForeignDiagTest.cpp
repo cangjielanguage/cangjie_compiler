@@ -19,8 +19,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../../src/Sema/NativeFFI/ArkTS/FunctionSource.h"
 #include "gtest/gtest.h"
 #include "TestCompilerInstance.h"
+#include "cangjie/AST/Types.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 
@@ -1477,6 +1479,284 @@ public func use(): String {
     ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
 }
 
+// R-D3: a foreign class may inherit another foreign class. The child wrapper
+// inherits the root's reference storage, so it declares no field and no
+// accessor of its own, redeclares both wrapping constructors as super
+// delegations (constructors are not inherited) and moves its whole
+// construction into the super(...) thunk; the root keeps the direct body and
+// owns the field, the accessor and the two wrapping-constructor overloads.
+TEST_F(ArkTSForeignDiagTest, ForeignClassInheritsForeignClass)
+{
+    using namespace Cangjie::Native::FFI::ArkTS;
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign open class Base {
+    public init(name: String)
+    public func ping(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign class Child <: Base {
+    public init(name: String)
+    public func shout(): Unit
+}
+
+public func use(): Unit {
+    let child = Child("name")
+    child.ping()
+    child.shout()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto base = FindClass("Base");
+    auto child = FindClass("Child");
+    ASSERT_NE(base, nullptr);
+    ASSERT_NE(child, nullptr);
+    // One shared shape scan: own field/accessor declarations, wrapping
+    // constructors (by the shared first-parameter name) and, per constructor,
+    // whether the body reaches the parent through super and carries a thunk.
+    auto describe = [](ClassDecl& cd) {
+        struct Shape {
+            size_t fields = 0;
+            size_t accessors = 0;
+            size_t wrappingCtors = 0;
+            size_t thunkWrappingCtors = 0;
+            std::vector<std::pair<size_t, size_t>> userCtors; // <superCalls, lambdas>
+        } shape;
+        for (auto& member : cd.GetMemberDecls()) {
+            if (member->astKind == ASTKind::VAR_DECL && member->identifier.Val() == ARKTS_CLASS_REF_FIELD) {
+                ++shape.fields;
+            } else if (member->identifier.Val() == ARKTS_CLASS_REF_ACCESSOR) {
+                ++shape.accessors;
+            }
+            auto fd = DynamicCast<FuncDecl*>(member.get());
+            if (!fd || !fd->funcBody || !fd->TestAttr(Attribute::CONSTRUCTOR)) {
+                continue;
+            }
+            const auto& params = fd->funcBody->paramLists.front()->params;
+            if (fd->TestAttr(Attribute::COMPILER_ADD) && !params.empty() &&
+                params.front()->identifier.Val() == ARKTS_CLASS_CTOR_PARAM) {
+                ++shape.wrappingCtors;
+                if (params.front()->type && params.front()->type->astKind == ASTKind::FUNC_TYPE) {
+                    ++shape.thunkWrappingCtors;
+                }
+                continue;
+            }
+            size_t superCalls = 0;
+            size_t lambdas = 0;
+            Walker(fd->funcBody->body.get(), [&superCalls, &lambdas](Ptr<Node> node) {
+                if (auto call = DynamicCast<CallExpr*>(node); call) {
+                    auto ref = DynamicCast<RefExpr*>(call->baseFunc.get());
+                    if (ref && ref->isSuper) {
+                        ++superCalls;
+                    }
+                }
+                if (node->astKind == ASTKind::LAMBDA_EXPR) {
+                    ++lambdas;
+                }
+                return VisitAction::WALK_CHILDREN;
+            }).Walk();
+            shape.userCtors.emplace_back(superCalls, lambdas);
+        }
+        return shape;
+    };
+    auto baseShape = describe(*base);
+    EXPECT_EQ(baseShape.fields, 1);
+    EXPECT_EQ(baseShape.accessors, 1);
+    EXPECT_EQ(baseShape.wrappingCtors, 2);
+    EXPECT_EQ(baseShape.thunkWrappingCtors, 1);
+    ASSERT_EQ(baseShape.userCtors.size(), 1);
+    EXPECT_EQ(baseShape.userCtors.front().first, 0); // the root assigns its own field
+    auto childShape = describe(*child);
+    EXPECT_EQ(childShape.fields, 0); // storage is inherited from the root
+    EXPECT_EQ(childShape.accessors, 0);
+    EXPECT_EQ(childShape.wrappingCtors, 2);
+    EXPECT_EQ(childShape.thunkWrappingCtors, 1);
+    ASSERT_EQ(childShape.userCtors.size(), 1);
+    // The child construction reaches the parent as one super(...) thunk.
+    EXPECT_EQ(childShape.userCtors.front().first, 1);
+    EXPECT_GE(childShape.userCtors.front().second, 1);
+}
+
+// R-D3 follow-up: a multi-level chain C <: B <: A. Every level below the root
+// redeclares the two wrapping constructors as super delegations, so the chain
+// stays recoverable from an ArkTS value at every level, and each level's user
+// constructor forwards its own single construction to its direct parent
+// (C's super target is B, B's is A; the root A stores the value).
+TEST_F(ArkTSForeignDiagTest, ForeignClassMultiLevelWrapperChain)
+{
+    using namespace Cangjie::Native::FFI::ArkTS;
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign open class A {
+    public init(name: String)
+    public func ping(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign open class B <: A {
+    public init(name: String)
+    public func mid(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign class C <: B {
+    public init(name: String)
+    public func shout(): Unit
+}
+
+public func use(c: C): Unit {
+    let made = C("name")
+    made.ping()
+    made.mid()
+    made.shout()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto a = FindClass("A");
+    auto b = FindClass("B");
+    auto c = FindClass("C");
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_NE(c, nullptr);
+    // The resolved super targets: B's parent is A, C's parent is B - the
+    // child constructor's super(...) reaches its own direct parent's
+    // thunk-taking wrapping constructor, never a grandparent's.
+    ASSERT_FALSE(b->inheritedTypes.empty());
+    ASSERT_FALSE(c->inheritedTypes.empty());
+    EXPECT_EQ(Ty::GetDeclPtrOfTy(b->inheritedTypes.front()->GetTy()), (Ptr<Decl>)a);
+    EXPECT_EQ(Ty::GetDeclPtrOfTy(c->inheritedTypes.front()->GetTy()), (Ptr<Decl>)b);
+    // Storage: only the root owns the field and the accessor; every level
+    // below redeclares the two wrapping constructors and keeps exactly one
+    // super-thunk user constructor.
+    auto owns = [](ClassDecl& cd) {
+        size_t fields = 0;
+        size_t accessors = 0;
+        size_t wrappingCtors = 0;
+        size_t userCtorSuperCalls = 0;
+        size_t userCtors = 0;
+        for (auto& member : cd.GetMemberDecls()) {
+            if (member->astKind == ASTKind::VAR_DECL && member->identifier.Val() == ARKTS_CLASS_REF_FIELD) {
+                ++fields;
+            } else if (member->identifier.Val() == ARKTS_CLASS_REF_ACCESSOR) {
+                ++accessors;
+            }
+            auto fd = DynamicCast<FuncDecl*>(member.get());
+            if (!fd || !fd->funcBody || !fd->TestAttr(Attribute::CONSTRUCTOR)) {
+                continue;
+            }
+            const auto& params = fd->funcBody->paramLists.front()->params;
+            if (fd->TestAttr(Attribute::COMPILER_ADD) && !params.empty() &&
+                params.front()->identifier.Val() == ARKTS_CLASS_CTOR_PARAM) {
+                ++wrappingCtors;
+                continue;
+            }
+            ++userCtors;
+            Walker(fd->funcBody->body.get(), [&userCtorSuperCalls](Ptr<Node> node) {
+                if (auto call = DynamicCast<CallExpr*>(node); call) {
+                    auto ref = DynamicCast<RefExpr*>(call->baseFunc.get());
+                    if (ref && ref->isSuper) {
+                        ++userCtorSuperCalls;
+                    }
+                }
+                return VisitAction::WALK_CHILDREN;
+            }).Walk();
+        }
+        return std::make_tuple(fields, accessors, wrappingCtors, userCtors, userCtorSuperCalls);
+    };
+    auto [aFields, aAccessors, aCtors, aUserCtors, aSuper] = owns(*a);
+    EXPECT_EQ(aFields, 1);
+    EXPECT_EQ(aAccessors, 1);
+    EXPECT_EQ(aCtors, 2);
+    ASSERT_EQ(aUserCtors, 1);
+    EXPECT_EQ(aSuper, 0); // the root assigns its own field
+    auto [bFields, bAccessors, bCtors, bUserCtors, bSuper] = owns(*b);
+    EXPECT_EQ(bFields, 0);
+    EXPECT_EQ(bAccessors, 0);
+    EXPECT_EQ(bCtors, 2);
+    ASSERT_EQ(bUserCtors, 1);
+    EXPECT_EQ(bSuper, 1); // B forwards to A through one super(...) thunk
+    auto [cFields, cAccessors, cCtors, cUserCtors, cSuper] = owns(*c);
+    EXPECT_EQ(cFields, 0);
+    EXPECT_EQ(cAccessors, 0);
+    EXPECT_EQ(cCtors, 2);
+    ASSERT_EQ(cUserCtors, 1);
+    EXPECT_EQ(cSuper, 1); // C forwards to B, not straight to A
+}
+
+// R-D3 review follow-up: a wrapper parent whose own preparation failed (here:
+// a private member) breaks the child directly, and the child declares no
+// wrapper member at all - its child shape would resolve the generated
+// super(...) delegations against a class that never became a wrapper. Only
+// the parent's own refusal diagnostic is reported: a direct child of the
+// broken class and every class below it break silently.
+TEST_F(ArkTSForeignDiagTest, ForeignClassBrokenParentBreaksChild)
+{
+    using namespace Cangjie::Native::FFI::ArkTS;
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign open class Base {
+    public init()
+    private func f(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign class Child <: Base {
+    public init()
+    public func shout(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign class Mid <: Base {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+public foreign class Leaf <: Mid {
+    public init()
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("'Base': member 'f' must not be private"));
+    auto base = FindClass("Base");
+    auto child = FindClass("Child");
+    auto mid = FindClass("Mid");
+    auto leaf = FindClass("Leaf");
+    ASSERT_NE(base, nullptr);
+    ASSERT_NE(child, nullptr);
+    ASSERT_NE(mid, nullptr);
+    ASSERT_NE(leaf, nullptr);
+    EXPECT_TRUE(base->TestAttr(Attribute::IS_BROKEN));
+    EXPECT_TRUE(child->TestAttr(Attribute::IS_BROKEN));
+    EXPECT_TRUE(mid->TestAttr(Attribute::IS_BROKEN));
+    EXPECT_TRUE(leaf->TestAttr(Attribute::IS_BROKEN));
+    // No class below the broken parent became a wrapper, so none of them
+    // carries a compiler-added member: no field, no accessor, no wrapping
+    // constructor, no super delegation anywhere.
+    for (auto cd : {child, mid, leaf}) {
+        EXPECT_FALSE(IsArkTSClassWrapper(*cd));
+        size_t generated = 0;
+        for (auto& member : cd->GetMemberDecls()) {
+            if (member->TestAttr(Attribute::COMPILER_ADD)) {
+                ++generated;
+            }
+        }
+        EXPECT_EQ(generated, 0);
+    }
+}
+
 // The write-only read diagnostic belongs to a prepared wrapper property; a
 // plain Cangjie class with the misplaced annotation is outside this
 // requirement and is not reported as a wrapper read.
@@ -1594,6 +1874,249 @@ public func read(vault: Vault): String {
 }
 )");
     EXPECT_TRUE(HasErrorContaining("property 'secret' is write-only and cannot be read"));
+}
+
+// The same round trip for a subclassing consumer: the imported wrapper parent
+// is recognized through its ARKTS_CLASS_WRAPPER attribute (the CJO carries it),
+// so the local foreign child lowers with the child shape - delegating wrapping
+// constructors and the super-thunk user constructor - and references the
+// declaring package's members instead of regenerating storage.
+TEST_F(ArkTSForeignDiagTest, ForeignClassSubclassesImportedWrapperParent)
+{
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto declarationCjo = ExportSupportPackage(R"(package decls
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign open class Vault {
+    public init()
+    public func ping(): Unit
+}
+)",
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+    ASSERT_FALSE(declarationCjo.empty());
+
+    ResetWithArkTSSupport();
+    instance->importManager->SetPackageCjoCache("decls", declarationCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+import decls.*
+
+@ArkTS[module: "actual"]
+public foreign class Safe <: Vault {
+    public init()
+    public func shout(): Unit
+}
+
+public func use(safe: Safe): Unit {
+    let made = Safe()
+    made.ping()
+    made.shout()
+    safe.ping()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    // The child owns no storage: its constructor forwards through super and
+    // its methods call the declaring package's accessor.
+    auto safe = FindClass("Safe");
+    ASSERT_NE(safe, nullptr);
+    size_t superCalls = 0;
+    size_t fields = 0;
+    for (auto& member : safe->GetMemberDecls()) {
+        if (member->astKind == ASTKind::VAR_DECL && member->identifier.Val() == "__cj_arkts_ref") {
+            ++fields;
+        }
+        auto fd = DynamicCast<FuncDecl*>(member.get());
+        if (!fd || !fd->funcBody || !fd->funcBody->body || !fd->TestAttr(Attribute::CONSTRUCTOR) ||
+            fd->TestAttr(Attribute::COMPILER_ADD)) {
+            continue;
+        }
+        Walker(fd->funcBody->body.get(), [&superCalls](Ptr<Node> node) {
+            if (auto call = DynamicCast<CallExpr*>(node); call) {
+                auto ref = DynamicCast<RefExpr*>(call->baseFunc.get());
+                if (ref && ref->isSuper) {
+                    ++superCalls;
+                }
+            }
+            return VisitAction::WALK_CHILDREN;
+        }).Walk();
+    }
+    EXPECT_EQ(fields, 0);
+    EXPECT_EQ(superCalls, 1);
+}
+
+// R-D3 review follow-up: a package-qualified or aliased parent spelling
+// (`decls.Vault`, `d.Vault`) names the imported wrapper through its qualifier:
+// preparation resolves the qualifier to the imported package (an alias
+// included) and consults that package's own member, instead of matching the
+// bare field name against the importing package and its imports. Both
+// spellings lower with the child shape.
+TEST_F(ArkTSForeignDiagTest, ForeignClassSubclassesQualifiedImportedWrapper)
+{
+    using namespace Cangjie::Native::FFI::ArkTS;
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto declarationCjo = ExportSupportPackage(R"(package decls
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign open class Vault {
+    public init()
+    public func ping(): Unit
+}
+)",
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+    ASSERT_FALSE(declarationCjo.empty());
+
+    ResetWithArkTSSupport();
+    instance->importManager->SetPackageCjoCache("decls", declarationCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+import decls
+import decls as d
+
+@ArkTS[module: "actual"]
+public foreign class Safe <: decls.Vault {
+    public init()
+    public func shout(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign class Crate <: d.Vault {
+    public init()
+    public func knock(): Unit
+}
+
+public func use(safe: Safe, crate: Crate): Unit {
+    let made = Safe()
+    made.ping()
+    made.shout()
+    let boxed = Crate()
+    boxed.ping()
+    boxed.knock()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    // Both children own no storage and reach their parent through exactly one
+    // super(...) call: the qualified and the aliased spelling resolved to the
+    // same imported wrapper.
+    for (auto name : {"Safe", "Crate"}) {
+        auto wrapper = FindClass(name);
+        ASSERT_NE(wrapper, nullptr);
+        size_t superCalls = 0;
+        size_t fields = 0;
+        for (auto& member : wrapper->GetMemberDecls()) {
+            if (member->astKind == ASTKind::VAR_DECL && member->identifier.Val() == "__cj_arkts_ref") {
+                ++fields;
+            }
+            auto fd = DynamicCast<FuncDecl*>(member.get());
+            if (!fd || !fd->funcBody || !fd->funcBody->body || !fd->TestAttr(Attribute::CONSTRUCTOR) ||
+                fd->TestAttr(Attribute::COMPILER_ADD)) {
+                continue;
+            }
+            Walker(fd->funcBody->body.get(), [&superCalls](Ptr<Node> node) {
+                if (auto call = DynamicCast<CallExpr*>(node); call) {
+                    auto ref = DynamicCast<RefExpr*>(call->baseFunc.get());
+                    if (ref && ref->isSuper) {
+                        ++superCalls;
+                    }
+                }
+                return VisitAction::WALK_CHILDREN;
+            }).Walk();
+        }
+        EXPECT_EQ(fields, 0) << name;
+        EXPECT_EQ(superCalls, 1) << name;
+    }
+}
+
+// R-D3 review follow-up: a qualified parent spelling resolves through its
+// qualifier, never through a same-package namesake. `plain.Plain` names the
+// plain @ArkTS class exported by package `plain`, so the local foreign class
+// named Plain does not capture the spelling: the child keeps the root shape
+// (its own field, accessor and wrapping constructors) and compiles, instead of
+// being misjudged as a wrapper child against the local namesake and lowering
+// super(...) delegations into a plain class.
+TEST_F(ArkTSForeignDiagTest, ForeignClassQualifiedPlainParentIgnoresLocalNamesake)
+{
+    using namespace Cangjie::Native::FFI::ArkTS;
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto plainCjo = ExportSupportPackage(R"(package plain
+
+import arkts.lang.*
+
+@ArkTS
+public open class Plain {
+    public init() {}
+    public func ping(): Unit {}
+}
+)",
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+    ASSERT_FALSE(plainCjo.empty());
+
+    ResetWithArkTSSupport();
+    instance->importManager->SetPackageCjoCache("plain", plainCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+import plain
+
+@ArkTS[module: "actual"]
+public foreign class Plain {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+public foreign class Child <: plain.Plain {
+    public init()
+}
+
+public func use(child: Child): Unit {
+    let made = Child()
+    made.ping()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto child = FindClass("Child");
+    ASSERT_NE(child, nullptr);
+    // The qualified parent picked the exported plain class, so the child is a
+    // root wrapper: it owns the storage and no super delegation is generated
+    // (the wrapping constructors' implicit super() to the plain parent is the
+    // base compiler's desugar, not a wrapper-parent shape).
+    size_t superCalls = 0;
+    size_t fields = 0;
+    for (auto& member : child->GetMemberDecls()) {
+        if (member->astKind == ASTKind::VAR_DECL && member->identifier.Val() == "__cj_arkts_ref") {
+            ++fields;
+        }
+        auto fd = DynamicCast<FuncDecl*>(member.get());
+        if (!fd || !fd->funcBody || !fd->funcBody->body || !fd->TestAttr(Attribute::CONSTRUCTOR) ||
+            fd->TestAttr(Attribute::COMPILER_ADD)) {
+            continue;
+        }
+        Walker(fd->funcBody->body.get(), [&superCalls](Ptr<Node> node) {
+            if (auto call = DynamicCast<CallExpr*>(node); call) {
+                auto ref = DynamicCast<RefExpr*>(call->baseFunc.get());
+                if (ref && ref->isSuper) {
+                    ++superCalls;
+                }
+            }
+            return VisitAction::WALK_CHILDREN;
+        }).Walk();
+    }
+    EXPECT_EQ(fields, 1);
+    EXPECT_EQ(superCalls, 0);
 }
 
 namespace {
