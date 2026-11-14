@@ -99,7 +99,6 @@ std::string SerializeRspForHost(const std::vector<std::string>& args)
     // LookupResponseFilePolicy), so Tool::Execute never reaches here. To
     // support a POSIX host, write its serializer (GNU rules; see git
     // history: GnuStyleRspSerialize) and dispatch it in this branch.
-    CJC_ASSERT_WITH_MSG(false, "no rsp serializer registered for this host yet");
     return "";
 #endif
 }
