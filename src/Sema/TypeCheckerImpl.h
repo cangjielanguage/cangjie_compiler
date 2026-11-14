@@ -1714,6 +1714,52 @@ private:
     // FFI Sema Prepare Check.
     void LowerArkTSFunctions(ASTContext& ctx);
     void LowerArkTSClasses(ASTContext& ctx);
+    // Shared state of one prepared ArkTS class or interface lowering step.
+    // Defined in LowerClasses.cpp: no other translation unit can name it.
+    struct ArkTSDeclLoweringContext;
+    // Steps of LowerArkTSClasses, in call order. The orchestrator definition
+    // carries the numbered sequence; each helper owns one phase or one
+    // declaration so the pass stays readable.
+    void RejectArkTSForeignInterfaceImplementers(AST::Package& pkg);
+    void LowerArkTSClassBodies(ASTContext& ctx, AST::Package& pkg);
+    void LowerArkTSClass(ASTContext& ctx, AST::ClassDecl& cd, AST::File& file, AST::Package& pkg);
+    bool CheckArkTSClassParents(AST::ClassDecl& cd);
+    void LowerArkTSClassFuncMembers(
+        ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, AST::ClassDecl& cd, AST::File& file);
+    void LowerArkTSClassFunc(
+        ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, AST::ClassDecl& cd, AST::File& file, AST::FuncDecl& fd);
+    bool AnalyzeArkTSClassFuncSignature(ASTContext& ctx, AST::FuncDecl& fd,
+        std::vector<Native::FFI::ArkTS::ArkTSTypeDesc>& types, std::vector<Ptr<AST::FuncParam>>& params,
+        Native::FFI::ArkTS::ArkTSTypeDesc& resultType);
+    void LowerArkTSClassPropMembers(
+        ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, AST::ClassDecl& cd, AST::File& file);
+    void LowerArkTSClassProp(
+        ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, AST::File& file, AST::PropDecl& pd);
+    void PropagateBrokenArkTSInterfaceParents(AST::Package& pkg);
+    void LowerArkTSInterfaceBodies(ASTContext& ctx, AST::Package& pkg);
+    void LowerArkTSInterface(ASTContext& ctx, AST::InterfaceDecl& id, AST::File& file, AST::Package& pkg);
+    bool CheckArkTSInterfaceParents(AST::InterfaceDecl& id);
+    void LowerArkTSInterfaceFuncMembers(
+        ASTContext& ctx, ArkTSDeclLoweringContext& declCtx, AST::InterfaceDecl& id, AST::File& file);
+    void LowerArkTSInterfaceFunc(
+        ASTContext& ctx, ArkTSDeclLoweringContext& declCtx, AST::InterfaceDecl& id, AST::File& file, AST::FuncDecl& fd);
+    bool AnalyzeArkTSInterfaceSignature(ASTContext& ctx, AST::FuncDecl& fd, const std::string& ownerName,
+        DiagKindRefactor invalidKind, const char* optionalReason,
+        std::vector<Native::FFI::ArkTS::ArkTSTypeDesc>& types, std::vector<Ptr<AST::FuncParam>>& params,
+        Native::FFI::ArkTS::ArkTSTypeDesc& resultType, size_t& restIndex);
+    void LowerArkTSInterfacePropMembers(
+        ASTContext& ctx, ArkTSDeclLoweringContext& declCtx, AST::InterfaceDecl& id, AST::File& file);
+    void LowerArkTSInterfaceProp(
+        ASTContext& ctx, ArkTSDeclLoweringContext& declCtx, AST::InterfaceDecl& id, AST::File& file, AST::PropDecl& pd);
+    void LowerArkTSClassDefaultArguments(ASTContext& ctx, AST::Package& pkg);
+    void LowerArkTSClassMemberDefaultArguments(ASTContext& ctx, AST::ClassDecl& cd, AST::FuncDecl& fd);
+    void InstallArkTSMemberBody(ASTContext& ctx, ArkTSDeclLoweringContext& lowering, AST::FuncDecl& member,
+        AST::File& file, const std::string& code, const std::vector<Ptr<AST::FuncParam>>& params,
+        const std::string& memberName, const std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+    bool ClassifyArkTSFuncParameters(ASTContext& ctx, AST::FuncDecl& fd,
+        std::vector<Native::FFI::ArkTS::ArkTSTypeDesc>& types, std::vector<Ptr<AST::FuncParam>>& params);
+    bool ClassifyArkTSPropertyType(
+        ASTContext& ctx, AST::PropDecl& pd, Native::FFI::ArkTS::ArkTSTypeDesc& desc);
     // One signature position as an ArkTS type description: the written type
     // is resolved through the checker's alias substitution before
     // classification, so a type alias position lowers by its target. A null

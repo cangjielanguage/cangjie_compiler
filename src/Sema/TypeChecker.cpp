@@ -2663,7 +2663,14 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
             // This predicate is deliberately narrower than the shared
             // ArkTSForeignClassLikeMember rule: it accepts the FOREIGN spelling
             // and a prepared @ArkTS foreign interface, not a prepared
-            // ARKTS_CLASS_WRAPPER member. A prepared
+            // ARKTS_CLASS_WRAPPER member. The two attribute tests are disjoint
+            // lifecycle states, not redundant spellings: interface preparation
+            // clears FOREIGN before it sets ARKTS_FOREIGN_INTERFACE
+            // (PrepareInterfaces.cpp), so FOREIGN still marks a declaration
+            // preparation did not rewrite - a generic or preset declaration, or
+            // one refused before preparation clears FOREIGN - while
+            // ARKTS_FOREIGN_INTERFACE marks a prepared interface. Neither test
+            // covers the other's state. A prepared
             // member must get its default-parameter function here, before the
             // wrapper body is lowered; creating it after lowering (as the
             // class post-pass would) makes the constructor's generated return
