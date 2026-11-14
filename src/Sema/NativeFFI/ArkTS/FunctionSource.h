@@ -19,6 +19,10 @@
 namespace Cangjie {
 class DiagnosticEngine;
 class ImportManager;
+enum class DiagKindRefactor : unsigned;
+namespace AST {
+struct Package;
+}
 } // namespace Cangjie
 
 // Private Sema implementation surface, also used by compiler unit tests.
@@ -68,6 +72,20 @@ struct ArkTSOptionStatus {
 // problem kind and the offending option name/node.
 bool ArkTSDeclOptions(const AST::Decl& decl, std::unordered_map<std::string, std::string>& options,
     ArkTSOptionStatus* status = nullptr);
+// Report one option-fold failure with the problem kind the fold assigned and
+// the offending argument as the anchor (falling back to the declaration's
+// @ArkTS layer). Shared by the class and interface lowering paths so a
+// repeated key and an ill-formed namespace keep their dedicated messages and
+// positions in both.
+void DiagnoseArkTSOptionProblem(DiagnosticEngine& diag, AST::Decl& decl,
+    const std::unordered_map<std::string, std::string>& options, const ArkTSOptionStatus& status);
+// Resolve and validate the module option of a prepared @ArkTS declaration.
+// One rule for classes and interfaces: an explicitly empty string option, a
+// relative or absolute path spelling, and an empty resolved module name are
+// refused before any code is generated. The caller marks the declaration
+// broken because the diagnostic kind differs per declaration kind.
+bool ResolveArkTSModule(AST::Decl& decl, const std::unordered_map<std::string, std::string>& options,
+    const AST::Package& pkg, DiagnosticEngine& diag, DiagKindRefactor invalidKind, std::string& module);
 
 // A source @ArkTS foreign class that has not been prepared yet: annotated,
 // still FOREIGN, and not generic. Generic declarations keep their external
@@ -89,7 +107,22 @@ Ptr<AST::PropDecl> ArkTSWriteOnlyTargetProp(const AST::Node& usage);
 // ArkTSWriteOnlyTargetProp matched; the ArkTS rule (annotation scan and
 // diagnostic) lives in this stage.
 void CheckArkTSWriteOnlyRead(AST::Node& usage, DiagnosticEngine& diag);
-
+// A declaration usable as an ArkTS object reference: a prepared foreign class
+// or a prepared foreign interface.
+bool IsArkTSReferenceDecl(const AST::Decl& decl);
+// A source @ArkTS foreign interface that has not been prepared yet: annotated,
+// still FOREIGN, an interface declaration, and not generic.
+bool IsArkTSForeignInterface(const AST::InterfaceDecl& id);
+// Compiler-generated implementation class of one prepared foreign interface.
+bool IsArkTSInterfaceImpl(const AST::Decl& decl);
+// Deterministic generated name of the implementation class. The suffix is
+// unspellable in source identifiers, so a user declaration cannot collide.
+// Example: interface IPerson -> "IPerson$arkts_impl".
+std::string ArkTSInterfaceImplName(const AST::Decl& iface);
+// Resolve the implementation class of a prepared foreign interface. The
+// current package is searched in its AST; an imported interface is resolved
+// through the package CJO by the deterministic name.
+Ptr<AST::ClassDecl> ArkTSInterfaceImpl(const AST::Decl& iface, ImportManager* imports);
 // One @ArkTS annotation is one option layer. A layer is valid when every
 // argument is a string literal named 'module', 'namespace' or 'foreignName'
 // and no name repeats inside the layer (repetition is rejected even for equal
@@ -365,5 +398,20 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
 std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter,
     ArkTSMemberReceiver memberReceiver, size_t namespaceDepth, const std::string& prefix, ArkTSReceiverKind receiver,
     std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+
+// ---- Foreign interface member generation ----
+// Call-signature default implementation:
+//   self = this.__cj_arkts_ref_value(); self.toJSValue().asFunction()
+//       .call([toJS(argument_i)...], thisArg: self.toJSValue())
+std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
+    const std::string& prefix, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+
+// Index-signature default implementation. keyType is String or Float64 (a
+// finite integer converted to its property-key spelling). The getter returns
+// Option<T>; the setter writes through setProperty.
+//   get: value = self.getProperty(key); return None or Some(fromJS(value))
+//   set: self.setProperty(key, toJS(argument_1))
+std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTSTypeDesc& valueType, bool setter,
+    const std::string& prefix, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
 } // namespace Cangjie::Native::FFI::ArkTS
 #endif

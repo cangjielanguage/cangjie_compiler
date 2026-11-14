@@ -13,120 +13,18 @@
 #include <unordered_map>
 #include <vector>
 
-#include "../../ObjC/Utils/ASTInserter.h"
 #include "../FunctionSource.h"
+#include "../Utils/ReferenceMembers.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Utils.h"
-#include "cangjie/AST/Walker.h"
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Modules/ModulesUtils.h"
-#include "cangjie/Parse/Parser.h"
 
 using namespace Cangjie;
 using namespace Cangjie::AST;
-using namespace Cangjie::Interop::ObjC;
 
 namespace Cangjie::Native::FFI::ArkTS {
 namespace {
-constexpr const char* ARKTS_SUPPORT_HOLDER = "__cj_arkts_support";
-constexpr const char* ARKTS_RESERVED_PREFIX = "__cj_arkts_";
-constexpr const char* ARKTS_JS_OBJECT = "JSObject";
-// The full package name the JSObject import must come from. FunctionSource.h
-// uses ARKTS_INTEROP_PACKAGE for the short package alias ("ark_interop") the
-// generated code spells; this constant is the full name the injected imports
-// bind, so the two spellings stay apart.
-constexpr const char* ARKTS_INTEROP_FULL_PACKAGE = "ohos.ark_interop";
-
-Ptr<Decl> FindImportedJSObject(ImportManager& imports, const File& file)
-{
-    for (auto decl : imports.GetImportedDeclsByName(file, ARKTS_JS_OBJECT)) {
-        if (decl->fullPackageName == ARKTS_INTEROP_FULL_PACKAGE) {
-            return decl;
-        }
-    }
-    return nullptr;
-}
-
-// Before: the class body carries no generated storage. After result: the
-// compiler-owned wrapper members parsed from a holder shape and reparented
-// onto the user class. Source positions and the permanent file are the
-// class's; the holder itself is discarded.
-// A root wrapper (no wrapper parent) owns the storage:
-//   class C { ... }
-//     -> class C { ...; private var __cj_arkts_ref: JSObject
-//                  public init(__cj_arkts_ref: JSObject, _: Unit) { ... }
-//                  public init(__cj_arkts_ref: () -> JSObject, _: Unit) { ... }
-//                  public func __cj_arkts_ref_value(): JSObject { ... } }
-// The thunk-taking constructor lets a subclass constructor forward a freshly
-// built ArkTS object through super(...) (Cangjie requires super(...) to be the
-// constructor's first expression, so the multi-statement construction reaches
-// it as one thunk value).
-// A child wrapper (wrapper parent) inherits the root's field and accessor and
-// only redeclares the two wrapping constructors as delegations, because
-// constructors are not inherited and the missing declarations would otherwise
-// make the class unconstructible from an ArkTS value at every level below the
-// root:
-//   class C <: WrapperParent { ... }
-//     -> class C <: WrapperParent { ...;
-//                  public init(__cj_arkts_ref: JSObject, _: Unit) { super(__cj_arkts_ref, ()) }
-//                  public init(__cj_arkts_ref: () -> JSObject, _: Unit) { super(__cj_arkts_ref, ()) } }
-bool InsertReferenceMembers(
-    ClassDecl& cd, bool wrapperParent, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports)
-{
-    std::string code = std::string("class ") + ARKTS_SUPPORT_HOLDER + " {\n";
-    if (!wrapperParent) {
-        code += "    private var " + std::string(ARKTS_CLASS_REF_FIELD) + ": " + ARKTS_JS_OBJECT + "\n";
-    }
-    code += "    public init(" + std::string(ARKTS_CLASS_CTOR_PARAM) + ": " + ARKTS_JS_OBJECT + ", _: Unit) {\n";
-    code += wrapperParent ? std::string("        super(") + ARKTS_CLASS_CTOR_PARAM + ", ())\n"
-                          : std::string("        this.") + ARKTS_CLASS_REF_FIELD + " = " + ARKTS_CLASS_CTOR_PARAM +
-            "\n";
-    code += "    }\n";
-    code += "    public init(" + std::string(ARKTS_CLASS_CTOR_PARAM) + ": () -> " + ARKTS_JS_OBJECT + ", _: Unit) {\n";
-    code += wrapperParent ? std::string("        super(") + ARKTS_CLASS_CTOR_PARAM + ", ())\n"
-                          : std::string("        this.") + ARKTS_CLASS_REF_FIELD + " = " + ARKTS_CLASS_CTOR_PARAM +
-            "()\n";
-    code += "    }\n";
-    if (!wrapperParent) {
-        code += "    public func " + std::string(ARKTS_CLASS_REF_ACCESSOR) + "(): " + ARKTS_JS_OBJECT +
-            " {\n        return this." + ARKTS_CLASS_REF_FIELD + "\n    }\n";
-    }
-    code += "}\n";
-    const auto errorsBefore = diag.GetErrorCount();
-    Parser parser(code, diag, sourceManager, cd.begin);
-    parser.SetCurFile(cd.curFile);
-    auto holder = parser.ParseTopLevel();
-    if (!holder || diag.GetErrorCount() != errorsBefore || holder->decls.empty()) {
-        return false;
-    }
-    auto holderClass = DynamicCast<ClassDecl*>(holder->decls.front().get());
-    if (!holderClass || !holderClass->body) {
-        return false;
-    }
-    auto jsObject = FindImportedJSObject(imports, *cd.curFile);
-    if (jsObject == nullptr) {
-        return false;
-    }
-    std::vector<OwnedPtr<Decl>> members;
-    for (auto& member : holderClass->body->decls) {
-        member->EnableAttr(Attribute::COMPILER_ADD);
-        members.emplace_back(std::move(member));
-    }
-    ASTInserter inserter;
-    for (auto& member : members) {
-        Walker(member.get(), [&](Ptr<Node> node) {
-            auto type = DynamicCast<RefType*>(node);
-            if (type && type->ref.identifier == ARKTS_JS_OBJECT && !type->ref.target) {
-                type->ref.target = jsObject;
-                type->SetTy(jsObject->GetTy());
-            }
-            return VisitAction::WALK_CHILDREN;
-        }).Walk();
-        inserter.InsertInto(cd, std::move(member), InsertMode::RECURSIVE);
-    }
-    return true;
-}
-
 // The qualification path a parent entry is written with: `Base` (RefType) is
 // the one-segment path Base; `b.Base` and `ab.Base` (QualifiedType, whose
 // field is the last segment) keep the qualifier segment, base first. A
@@ -327,7 +225,7 @@ bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager
             return false;
         }
     }
-    auto jsObject = FindImportedJSObject(imports, *cd.curFile);
+    auto jsObject = FindArkTSJSObject(imports, *cd.curFile);
     if (jsObject == nullptr) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
             "the wrapper needs the imported declaration 'ohos.ark_interop." + std::string(ARKTS_JS_OBJECT) + "'");
@@ -400,7 +298,7 @@ bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager
 bool InstallWrapperMembers(
     ClassDecl& cd, bool wrapperParent, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports)
 {
-    if (!InsertReferenceMembers(cd, wrapperParent, diag, sourceManager, imports)) {
+    if (!InsertArkTSReferenceMembers(cd, wrapperParent, diag, sourceManager, imports)) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
             "cannot declare the wrapper reference members");
         cd.EnableAttr(Attribute::IS_BROKEN);

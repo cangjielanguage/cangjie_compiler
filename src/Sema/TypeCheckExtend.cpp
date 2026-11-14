@@ -346,6 +346,9 @@ void TypeChecker::TypeCheckerImpl::PreCheckExtend(ASTContext& ctx, ExtendDecl& e
         }
     }
     SetExtendExternalAttr(ctx, ed);
+    // An extend cannot be the user-side implementation of a prepared foreign
+    // interface; only the generated implementation class may implement it.
+    RejectArkTSForeignInterfaceExtend(ed);
     CheckExtendedTypeValidity(*ed.extendedType);
 }
 

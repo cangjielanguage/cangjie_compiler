@@ -1721,6 +1721,11 @@ private:
     // the two ArkTS lowering passes, so a position can never mean two things
     // across them.
     Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyPosition(ASTContext& ctx, Ptr<AST::Type> type);
+
+    // Refuse an extend declaration that adds a prepared @ArkTS foreign
+    // interface to another type. Its implemented-interface types are resolved
+    // later than the class/interface checks, so PreCheckExtend calls this.
+    void RejectArkTSForeignInterfaceExtend(AST::ExtendDecl& ed);
     void PreCheckAnnoForFFI(AST::Node& root);
     /**
      * Set the ABI information to Foreign Modifier. By default Foreign Modifier has Attribute::C.

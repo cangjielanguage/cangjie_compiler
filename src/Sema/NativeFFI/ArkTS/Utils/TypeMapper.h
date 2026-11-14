@@ -24,6 +24,9 @@
 #include "cangjie/AST/Node.h"
 
 // Private Sema implementation surface, also used by compiler unit tests.
+namespace Cangjie {
+class ImportManager;
+}
 namespace Cangjie::Native::FFI::ArkTS {
 // Recursive description of one ArkTS-compatible type position: either
 // unsupported, a checked scalar leaf, or a composite node whose parts are
@@ -51,9 +54,13 @@ struct ArkTSTypeDesc {
     // TUPLE elements may be REFERENCE nodes, also under an OPTIONAL element:
     // the container is copied and each reference keeps the same ArkTS object.
     std::vector<ArkTSTypeDesc> elements;
-    // Class declaration carried by REFERENCE nodes; every other kind keeps
-    // it null.
+    // Declaration carried by REFERENCE nodes: the prepared foreign class, or
+    // the prepared foreign interface. Every other kind keeps it null.
     Ptr<AST::Decl> reference;
+    // Implementation class of a foreign-interface reference, used to build the
+    // from-JS wrapping call. Null for classes and for interfaces whose
+    // implementation class cannot be resolved in this compilation.
+    Ptr<AST::Decl> referenceImpl;
 };
 
 // Checked scalar names (the checked scalar table): the number candidates
@@ -76,7 +83,7 @@ std::string ArkTSJoin(const std::vector<std::string>& parts, const std::string& 
 // because its reference semantics is deferred and such signatures are
 // rejected - nested Option, tuples with fewer than two elements, Map/Set/
 // TypedArray and the remaining composite kinds.
-ArkTSTypeDesc ArkTSClassifyType(Ptr<AST::Ty> ty);
+ArkTSTypeDesc ArkTSClassifyType(Ptr<AST::Ty> ty, ImportManager* imports = nullptr);
 
 // Recognition of the external ArkTS preset types whose mapping is deferred -
 // std.interop.arkts ArkTSArray<T>, ArkTSString and ArkTSType (the ArkTS
@@ -113,5 +120,9 @@ bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc);
 // reference leaf is emitted by placeholder and the placeholder must be bound
 // through that map. A generatable REFERENCE always carries its declaration.
 bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc);
+// True when any leaf is a prepared foreign-interface reference. AR-06 keeps
+// interface references out of Array and tuple positions; a prepared foreign
+// class reference stays legal there under the AR-04 container contract.
+bool ArkTSTypeDescContainsInterfaceReference(const ArkTSTypeDesc& desc);
 } // namespace Cangjie::Native::FFI::ArkTS
 #endif

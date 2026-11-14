@@ -510,5 +510,17 @@ ERROR(sema_arkts_foreign_class_invalid,
 // A @WriteOnly property may only be the target of an assignment.
 ERROR(sema_arkts_write_only_read,
     "property '%s' is write-only and cannot be read")
+// Declaration-shape refusals of an @ArkTS foreign interface: a sealed
+// declaration, an unsupported member kind, a non-foreign parent, a
+// reserved generated member name, or a member whose signature has no default
+// implementation form. The reason carries the rule. It has no numeric runtime
+// error code; consumers match the diagnostic kind.
+ERROR(sema_arkts_foreign_interface_invalid,
+    "invalid @ArkTS foreign interface '%s': %s")
+// A Cangjie declaration has no shared ArkTS object; only the
+// compiler-generated implementation class may implement a prepared foreign
+// interface.
+ERROR(sema_arkts_foreign_interface_impl_invalid,
+    "Cangjie type '%s' cannot implement @ArkTS foreign interface '%s'")
 
 ERROR(sema_diag_end, "")

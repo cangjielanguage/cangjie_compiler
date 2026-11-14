@@ -2661,8 +2661,9 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
             // existing default-parameter checks, and an accepted parameter is
             // appended after this block.
             // This predicate is deliberately narrower than the shared
-            // ArkTSForeignClassLikeMember rule: it accepts only the FOREIGN
-            // spelling, not a prepared ARKTS_CLASS_WRAPPER member. A prepared
+            // ArkTSForeignClassLikeMember rule: it accepts the FOREIGN spelling
+            // and a prepared @ArkTS foreign interface, not a prepared
+            // ARKTS_CLASS_WRAPPER member. A prepared
             // member must get its default-parameter function here, before the
             // wrapper body is lowered; creating it after lowering (as the
             // class post-pass would) makes the constructor's generated return
@@ -2670,7 +2671,9 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
             // stays authoritative for ArkTSDeclOptionsDiagnose, which sees the
             // same members before their bodies exist.
             const bool isArkTSForeignBodylessMember = fd->outerDecl != nullptr &&
-                fd->outerDecl->HasAnno(AnnotationKind::ARKTS) && fd->outerDecl->TestAttr(Attribute::FOREIGN) &&
+                fd->outerDecl->HasAnno(AnnotationKind::ARKTS) &&
+                (fd->outerDecl->TestAttr(Attribute::FOREIGN) ||
+                    fd->outerDecl->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) &&
                 fd->funcBody && !fd->funcBody->body;
             if (fd->op != TokenKind::ILLEGAL || fd->TestAttr(Attribute::OPEN) ||
                 (fd->TestAttr(Attribute::ABSTRACT) && !isArkTSForeignBodylessMember) ||

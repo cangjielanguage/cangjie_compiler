@@ -756,7 +756,16 @@ enum class Attribute {
     // R: the write-only read diagnostic. Appending keeps existing serialized
     // attribute indices stable.
     ARKTS_WRITE_ONLY_PROP,
-
+    // Prepared @ArkTS foreign interface. Members become interface default
+    // implementations dispatching through the generated accessor.
+    // W: Sema interface preparation.
+    // R: type classification, lowering, CJO writer/loader.
+    ARKTS_FOREIGN_INTERFACE,
+    // Compiler-generated implementation class of one prepared foreign
+    // interface. It stores the JSObject reference and implements the accessor.
+    // W: Sema interface preparation.
+    // R: type classification, from-JS construction, CJO writer/loader.
+    ARKTS_INTERFACE_IMPL,
     AST_ATTR_END,
 };
 

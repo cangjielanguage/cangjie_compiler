@@ -964,8 +964,11 @@ void StructInheritanceChecker::CheckInheritedInterfaces(
  * This method identifies members that should be implemented but are not, according to inheritance rules.
  *
  * CHECK EXCLUSIONS (skips checking for):
- * 1. Foreign structs (marked with FOREIGN attribute)
- * 2. Mirror structs (marked with OBJ_C_MIRROR attribute)
+ * 1. Broken declarations (marked with IS_BROKEN or HAS_BROKEN)
+ * 2. Foreign structs (marked with FOREIGN attribute)
+ * 3. Mirror structs (marked with OBJ_C_MIRROR attribute)
+ * 4. Wrapper classes generated for Java/ObjC interop, whose members are
+ *    generated after typecheck
  *
  * MEMBER EXCLUSIONS (members that are skipped):
  * 1. Non-inheritable members (non-properties, non-functions)
@@ -988,12 +991,15 @@ void StructInheritanceChecker::CheckInheritedInterfaces(
 void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMap& members, const Decl& structDecl)
 {
     // Do not check unimplemented function for:
-    // 1. Foreign struct.
-    // 2. Mirror struct.
-    // 3. Wrapper classes generated for java interop (corresponding members are generated after typecheck).
-    // 4. Handle wrapper classes generated for objc interop (corresponding members are generated after
+    // 1. Broken declarations (IS_BROKEN/HAS_BROKEN): their own diagnostic is the only actionable one,
+    //    and their members may be intentionally left for a later lowering step.
+    // 2. Foreign struct.
+    // 3. Mirror struct.
+    // 4. Wrapper classes generated for java interop (corresponding members are generated after typecheck).
+    // 5. Handle wrapper classes generated for objc interop (corresponding members are generated after
     // typecheck).
-    if (structDecl.TestAttr(Attribute::FOREIGN) ||
+    if (structDecl.TestAnyAttr(Attribute::IS_BROKEN, Attribute::HAS_BROKEN) ||
+        structDecl.TestAttr(Attribute::FOREIGN) ||
         structDecl.TestAnyAttr(Attribute::OBJ_C_FOREIGN, Attribute::OBJ_C_FOREIGN_INTERFACE_HANDLE_WRAPPER) ||
         structDecl.TestAttr(Attribute::JAVA_FOREIGN_SYNTHETIC_WRAPPER)) {
         return;

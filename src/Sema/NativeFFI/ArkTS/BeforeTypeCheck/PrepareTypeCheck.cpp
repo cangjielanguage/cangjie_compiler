@@ -198,6 +198,10 @@ void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourc
     // ordinary classes owning a reference to an ArkTS object, so the symbol
     // table and the C ABI checks below see the generated member declarations.
     PrepareClasses(pkg, diag, sourceManager, importManager);
+    // Interfaces follow the class pass: a generated implementation class may
+    // reference a prepared foreign class in member signatures, and both must be
+    // visible to the symbol table below.
+    PrepareInterfaces(pkg, diag, sourceManager, importManager);
     // Classify foreign declarations before the symbol table sees their ABI;
     // their bodies are generated after semantic alias types are resolved.
     for (auto& file : pkg.files) {

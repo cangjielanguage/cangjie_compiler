@@ -24,6 +24,8 @@ void PrepareTypeCheck(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& 
     ImportManager* importManager = nullptr);
 void PrepareClasses(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
     ImportManager* imports);
+void PrepareInterfaces(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
+    ImportManager* imports);
 
 std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix = ARKTS_GENERATED_PREFIX);
 } // namespace Native::FFI::ArkTS

@@ -94,7 +94,7 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpe
 // no declaration name is matched here; the package-pinned recognition for
 // diagnostics lives in ArkTSDeferredExternalTypeName below.
 // Example: Option<Array<Int32>> -> OPTIONAL(ARRAY_COPY(SCALAR(Int32))).
-ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty)
+ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
 {
     ArkTSTypeDesc desc;
     if (!Ty::IsTyCorrect(ty)) {
@@ -114,7 +114,7 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty)
     // package and reports the deferral message, every other same-named
     // declaration keeps the generic unsupported-type diagnostics.
     if (ty->IsCoreOptionType()) {
-        auto inner = ArkTSClassifyType(ty->typeArgs.front());
+        auto inner = ArkTSClassifyType(ty->typeArgs.front(), imports);
         if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED && inner.kind != ArkTSTypeDesc::Kind::OPTIONAL) {
             desc.kind = ArkTSTypeDesc::Kind::OPTIONAL;
             desc.elements.emplace_back(std::move(inner));
@@ -126,8 +126,9 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty)
     // single-element requirement stays explicit (a zero- or many-argument
     // Array remains unsupported).
     if (ty->IsStructArray() && ty->typeArgs.size() == 1) {
-        auto inner = ArkTSClassifyType(ty->typeArgs.front());
-        if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED) {
+        auto inner = ArkTSClassifyType(ty->typeArgs.front(), imports);
+        if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED &&
+            !ArkTSTypeDescContainsInterfaceReference(inner)) {
             desc.kind = ArkTSTypeDesc::Kind::ARRAY_COPY;
             desc.elements.emplace_back(std::move(inner));
         }
@@ -137,9 +138,12 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty)
     // class that went through class preparation carries the wrapper
     // attribute; generic presets keep their external declaration shape and
     // stay unsupported here.
-    if (auto decl = Ty::GetDeclPtrOfTy(ty); decl && decl->TestAttr(Attribute::ARKTS_CLASS_WRAPPER)) {
+    if (auto decl = Ty::GetDeclPtrOfTy(ty); decl && IsArkTSReferenceDecl(*decl)) {
         desc.kind = ArkTSTypeDesc::Kind::REFERENCE;
         desc.reference = decl;
+        if (decl->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+            desc.referenceImpl = ArkTSInterfaceImpl(*decl, imports);
+        }
         return desc;
     }
     // ArkTS tuple types carry a fixed arity and Cangjie's TupleTy is
@@ -150,8 +154,9 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty)
     if (ty->IsTuple() && ty->typeArgs.size() >= 2) {
         desc.kind = ArkTSTypeDesc::Kind::TUPLE;
         for (auto& element : ty->typeArgs) {
-            auto inner = ArkTSClassifyType(element);
-            if (inner.kind == ArkTSTypeDesc::Kind::UNSUPPORTED) {
+            auto inner = ArkTSClassifyType(element, imports);
+            if (inner.kind == ArkTSTypeDesc::Kind::UNSUPPORTED ||
+                ArkTSTypeDescContainsInterfaceReference(inner)) {
                 return ArkTSTypeDesc{};
             }
             desc.elements.emplace_back(std::move(inner));
@@ -216,7 +221,15 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
         case ArkTSTypeDesc::Kind::ARRAY_COPY:
             return desc.elements.size() == 1 && ArkTSTypeDescGeneratable(desc.elements.front());
         case ArkTSTypeDesc::Kind::REFERENCE:
-            return desc.reference != nullptr && desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
+            if (desc.reference == nullptr) {
+                return false;
+            }
+            // A foreign interface reference also needs its generated
+            // implementation class: every from-JS position constructs it.
+            if (desc.reference->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+                return desc.referenceImpl != nullptr;
+            }
+            return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
         case ArkTSTypeDesc::Kind::TUPLE:
             if (desc.elements.size() < 2) {
                 return false;
@@ -265,6 +278,22 @@ bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc)
     }
     for (auto& element : desc.elements) {
         if (ArkTSTypeDescContainsReference(element)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Whether any leaf is a prepared foreign-interface reference. Used to keep
+// interface references out of Array and tuple positions (AR-06 BR-11); class
+// references remain legal there per the AR-04 container contract.
+bool ArkTSTypeDescContainsInterfaceReference(const ArkTSTypeDesc& desc)
+{
+    if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
+        return desc.reference != nullptr && desc.reference->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE);
+    }
+    for (auto& element : desc.elements) {
+        if (ArkTSTypeDescContainsInterfaceReference(element)) {
             return true;
         }
     }

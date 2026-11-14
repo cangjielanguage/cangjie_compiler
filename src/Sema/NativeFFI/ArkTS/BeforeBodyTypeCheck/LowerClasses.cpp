@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "../../Utils.h"
@@ -87,13 +88,78 @@ std::vector<Ptr<Decl>> UserParentDecls(const ClassDecl& cd)
     return parents;
 }
 
+// Resolve a type alias in an inherited-type position to its target
+// declaration. A non-alias declaration is returned unchanged; a broken or
+// cyclic alias chain yields null.
+Ptr<Decl> ResolveArkTSAliasTarget(Ptr<Decl> decl)
+{
+    std::unordered_set<const Decl*> seen;
+    while (decl && seen.insert(decl).second) {
+        auto alias = DynamicCast<TypeAliasDecl*>(decl);
+        if (!alias) {
+            return decl;
+        }
+        decl = alias->type ? Ty::GetDeclPtrOfTy(alias->type->GetTy()) : nullptr;
+    }
+    return nullptr;
+}
+
+// The first prepared foreign interface reachable through the inheritance
+// graph, or null. An extend declaration contributes its own inherited types,
+// so the same walk covers classes, structs, enums and extends. A type alias
+// in an inherited-type position is followed to its target.
+Ptr<Decl> FindArkTSForeignInterfaceAncestor(const InheritableDecl& decl)
+{
+    std::vector<Ptr<Decl>> pending;
+    auto addParents = [&pending](const InheritableDecl& inheritable) {
+        for (auto& inherited : inheritable.inheritedTypes) {
+            auto target = inherited ? ResolveArkTSAliasTarget(Ty::GetDeclPtrOfTy(inherited->GetTy())) : nullptr;
+            if (target) {
+                pending.emplace_back(target);
+            }
+        }
+    };
+    addParents(decl);
+    std::unordered_set<const Decl*> seen;
+    while (!pending.empty()) {
+        auto current = pending.back();
+        pending.pop_back();
+        if (!current || !seen.insert(current).second) {
+            continue;
+        }
+        if (current->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+            return current;
+        }
+        if (auto inheritable = DynamicCast<InheritableDecl*>(current)) {
+            addParents(*inheritable);
+        }
+    }
+    return nullptr;
+}
+
+// Mark the generated implementation class and its members as cascade-broken:
+// the interface's own diagnostic is the actionable one, so inheritance and
+// initialization checks must not restate it for the generated class.
+void MarkBrokenInterfaceImpl(Decl& impl)
+{
+    impl.EnableAttr(Attribute::IS_BROKEN, Attribute::HAS_BROKEN);
+    if (auto cd = DynamicCast<ClassDecl*>(&impl)) {
+        for (auto& member : cd->GetMemberDecls()) {
+            member->EnableAttr(Attribute::HAS_BROKEN);
+        }
+    }
+}
+
 // One class-wide lowering context shared by every member.
 struct ClassContext {
-    ClassDecl& owner;
+    // Classes and interfaces share the member-installation path; the owner is
+    // the prepared class or the prepared interface.
+    Decl& owner;
     ArkTSReceiverKind receiver;
     std::string module;
     std::string className;
     std::vector<std::string> namespaces;
+    DiagKindRefactor invalidKind{DiagKindRefactor::sema_arkts_foreign_class_invalid};
 };
 } // namespace
 
@@ -109,7 +175,7 @@ ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(ASTContext& ct
         return ArkTSTypeDesc{};
     }
     SetTypeTy(ctx, *type);
-    return ArkTSClassifyType(type->GetTy());
+    return ArkTSClassifyType(type->GetTy(), ci->importManager);
 }
 
 // Lower every prepared @ArkTS foreign class: generate the wrapping
@@ -130,6 +196,36 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
     // no longer repeats this call.
     ArkTSDeclOptionsDiagnose(pkg, diag);
     ASTFactory factory(diag, ci->GetSourceManager());
+    // Only the generated implementation class may implement a prepared
+    // foreign interface: the interface dispatches through an ArkTS object,
+    // while a Cangjie declaration has no shared reference. Refuse every other
+    // concrete implementer, including one that reaches the interface through
+    // a local interface or an extend declaration. A foreign interface itself
+    // is abstract and may inherit another prepared interface, so it is not an
+    // implementer for this rule.
+    for (auto& file : pkg.files) {
+        for (auto& decl : file->decls) {
+            // Extend declarations reach this rule from PreCheckExtend, after
+            // their implemented-interface types are resolved.
+            if (decl->TestAttr(Attribute::IS_BROKEN) || decl->TestAttr(Attribute::ARKTS_INTERFACE_IMPL) ||
+                decl->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) || decl->astKind == ASTKind::INTERFACE_DECL ||
+                decl->astKind == ASTKind::EXTEND_DECL) {
+                continue;
+            }
+            auto inheritable = DynamicCast<InheritableDecl*>(decl.get());
+            if (!inheritable) {
+                continue;
+            }
+            auto foreignInterface = FindArkTSForeignInterfaceAncestor(*inheritable);
+            if (!foreignInterface) {
+                continue;
+            }
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_impl_invalid, *decl,
+                decl->identifier.Val(), foreignInterface->identifier.Val());
+            decl->EnableAttr(Attribute::IS_BROKEN);
+        }
+    }
+
 
     // Install one generated member body and rebind its placeholders. `member`
     // owns the body; `params` are the references the argument placeholders
@@ -148,11 +244,15 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
         }
         fb.body = factory.CreateForeignBody(member, code);
         if (!fb.body) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, member,
-                classCtx.owner.identifier.Val(), "cannot generate the wrapper body");
+            diag.DiagnoseRefactor(classCtx.invalidKind, member, classCtx.owner.identifier.Val(),
+                "cannot generate the wrapper body");
             // A generated-body failure belongs to this member only; the other
-            // members of the class still lower.
+            // class members still lower. An interface default implementation
+            // owns the member contract, so the interface itself is broken too.
             member.EnableAttr(Attribute::IS_BROKEN);
+            if (classCtx.invalidKind == DiagKindRefactor::sema_arkts_foreign_interface_invalid) {
+                classCtx.owner.EnableAttr(Attribute::IS_BROKEN);
+            }
             return;
         }
         std::unordered_map<std::string, std::string> literals{
@@ -270,6 +370,68 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
     // the spelling is shared with the function path, so a position cannot
     // mean two things across the two lowering paths.
     auto classify = [&](Ptr<Type> type) { return ArkTSClassifyPosition(ctx, type); };
+    auto analyzeInterfaceSignature = [&](FuncDecl& fd, const std::string& ownerName,
+                                         DiagKindRefactor invalidKind, const char* optionalReason,
+                                         std::vector<ArkTSTypeDesc>& types, std::vector<Ptr<FuncParam>>& params,
+                                         ArkTSTypeDesc& resultType, size_t& restIndex) {
+        auto& fb = *fd.funcBody;
+        bool hasOptional = false;
+        for (auto& list : fb.paramLists) {
+            for (auto& param : list->params) {
+                hasOptional = hasOptional || param->assignment != nullptr;
+            }
+        }
+        if (hasOptional) {
+            diag.DiagnoseRefactor(invalidKind, fd, ownerName, optionalReason);
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return false;
+        }
+        bool supported = true;
+        for (auto& list : fb.paramLists) {
+            for (auto& param : list->params) {
+                auto desc = classify(param->type.get());
+                if (!ArkTSTypeDescGeneratable(desc) || ArkTSTypeDescContainsNothing(desc)) {
+                    auto& position = param->type ? static_cast<Node&>(*param->type) : static_cast<Node&>(*param);
+                    auto deferredName =
+                        param->type ? ArkTSDeferredExternalTypeName(param->type->GetTy()) : std::string{};
+                    if (!deferredName.empty()) {
+                        diag.DiagnoseRefactor(
+                            DiagKindRefactor::sema_arkts_foreign_external_type_deferred, position, deferredName);
+                    } else {
+                        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_param_type_unsupported, position,
+                            param->identifier.Val(), fd.identifier.Val(),
+                            param->type ? Ty::ToString(param->type->GetTy()) : std::string());
+                    }
+                    supported = false;
+                }
+                types.emplace_back(std::move(desc));
+                params.emplace_back(param.get());
+            }
+        }
+        resultType = classify(fb.retType.get());
+        if (!ArkTSTypeDescGeneratable(resultType)) {
+            if (fb.retType && !fb.retType->begin.IsZero()) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *fb.retType,
+                    Ty::ToString(fb.retType->GetTy()), fd.identifier.Val());
+            } else {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, fd, "", fd.identifier.Val());
+            }
+            supported = false;
+        }
+        if (!supported) {
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return false;
+        }
+        restIndex = ArkTSRestPosition(params, params.size());
+        if (restIndex != ARKTS_NO_REST &&
+            (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
+            diag.DiagnoseRefactor(invalidKind, fd, ownerName, "unsupported rest parameter");
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return false;
+        }
+        return true;
+    };
 
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
@@ -321,109 +483,13 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
             std::unordered_map<std::string, std::string> options;
             ArkTSOptionStatus optionStatus;
             if (!ArkTSDeclOptions(*cd, options, &optionStatus)) {
-                // A prepared wrapper is skipped by ArkTSDeclOptionsDiagnose
-                // (its option fold is owned here), so this is the only place
-                // the declaration's own option problem is reported. Keep the
-                // problem kinds apart like the function path: a repeated key
-                // and an ill-formed namespace have their own messages, and
-                // the anchor is the offending argument when the fold has one,
-                // else the @ArkTS layer - never annotations.front(), which may
-                // be an unrelated annotation.
-                auto annotationAt = [&cd]() -> Node& {
-                    for (auto& annotation : cd->annotations) {
-                        if (annotation->kind == AnnotationKind::ARKTS) {
-                            return *annotation;
-                        }
-                    }
-                    return *cd;
-                };
-                auto& at = optionStatus.at ? *optionStatus.at : annotationAt();
-                if (optionStatus.problem == ArkTSOptionProblem::DUPLICATE) {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, at, optionStatus.option);
-                } else if (optionStatus.problem == ArkTSOptionProblem::ILL_FORMED_NAMESPACE) {
-                    // The fold assigns the namespace value into `options`
-                    // before validating it, so the offending literal is
-                    // already available here; fall back to the anchored
-                    // literal if that ever changes, never to an empty value.
-                    std::string namespaceValue =
-                        options.count("namespace") ? options.at("namespace") : std::string();
-                    if (namespaceValue.empty() && optionStatus.at != nullptr) {
-                        if (auto literal = DynamicCast<LitConstExpr*>(optionStatus.at.get());
-                            literal && literal->kind == LitConstKind::STRING) {
-                            namespaceValue = literal->stringValue;
-                        }
-                    }
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_namespace_invalid, at, namespaceValue);
-                } else {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_invalid, at);
-                }
+                DiagnoseArkTSOptionProblem(diag, *cd, options, optionStatus);
                 cd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }
-            // An explicitly written empty value (only whitespace counts as
-            // empty) would flow into requireArkModule(""), getProperty("") or
-            // an empty namespace placeholder and only fail at run time, the
-            // same mistake the function path rejects. A prepared wrapper
-            // class is skipped by ArkTSDeclOptionsDiagnose (its option fold is
-            // owned here), so this class path applies the rule itself. The
-            // fold above already guarantees every argument is a known string
-            // literal; the scan reports on the @ArkTS layer carrying the
-            // value, like the declaration-level walk.
-            Ptr<Annotation> emptyLayer = nullptr;
-            std::string emptyName;
-            for (auto& annotation : cd->annotations) {
-                if (annotation->kind != AnnotationKind::ARKTS) {
-                    continue;
-                }
-                for (auto& arg : annotation->args) {
-                    auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
-                    if (!literal || literal->kind != LitConstKind::STRING ||
-                        !ArkTSOptionValueEmpty(literal->stringValue)) {
-                        continue;
-                    }
-                    emptyLayer = annotation.get();
-                    emptyName = arg->name.Val();
-                    break;
-                }
-                if (emptyLayer != nullptr) {
-                    break;
-                }
-            }
-            if (emptyLayer != nullptr) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty, *emptyLayer, emptyName);
-                cd->EnableAttr(Attribute::IS_BROKEN);
-                continue;
-            }
-            std::string module = options.count("module") ? options.at("module") : ArkTSDefaultModule(pkg.fullPackageName);
-            // The function path refuses relative/absolute path spellings before
-            // emitting requireArkModule; a prepared class owns its own option
-            // fold and must apply the same rule. Existence and named-module
-            // resolution stay with the runtime loader.
-            if (options.count("module") != 0 && ArkTSModulePathLike(module)) {
-                Ptr<Node> moduleNode = nullptr;
-                for (auto& annotation : cd->annotations) {
-                    if (annotation->kind != AnnotationKind::ARKTS) {
-                        continue;
-                    }
-                    for (auto& arg : annotation->args) {
-                        if (arg->name.Val() == "module") {
-                            moduleNode = arg->expr.get();
-                            break;
-                        }
-                    }
-                    if (moduleNode != nullptr) {
-                        break;
-                    }
-                }
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid,
-                    moduleNode ? *moduleNode : static_cast<Node&>(*cd), cd->identifier.Val(),
-                    "module option must be an ArkTS module specifier, not a path");
-                cd->EnableAttr(Attribute::IS_BROKEN);
-                continue;
-            }
-            if (module.empty()) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor::sema_arkts_foreign_class_invalid, *cd, cd->identifier.Val(), "empty module name");
+            std::string module;
+            if (!ResolveArkTSModule(*cd, options, pkg, diag, DiagKindRefactor::sema_arkts_foreign_class_invalid,
+                    module)) {
                 cd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }
@@ -619,6 +685,288 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
             }
         }
     }
+    // A prepared interface that fails (preparation or lowering) can be the
+    // parent of another interface. Propagate the broken mark before and after
+    // the interface loop, so a child declared earlier or in another file does
+    // not escape the check when its parent fails later in the same pass, and
+    // mark each child's generated implementation class broken too.
+    auto propagateBrokenInterfaceParents = [&]() {
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (auto& file : pkg.files) {
+                for (auto& decl : file->decls) {
+                    auto id = DynamicCast<InterfaceDecl*>(decl.get());
+                    if (!id || !id->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) ||
+                        id->TestAttr(Attribute::IS_BROKEN)) {
+                        continue;
+                    }
+                    for (auto& inherited : id->inheritedTypes) {
+                        auto parent = ResolveArkTSAliasTarget(Ty::GetDeclPtrOfTy(inherited->GetTy()));
+                        const bool brokenForeignParent = parent && parent->TestAttr(Attribute::IS_BROKEN) &&
+                            (parent->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) ||
+                                (parent->TestAttr(Attribute::FOREIGN) &&
+                                    parent->astKind == ASTKind::INTERFACE_DECL));
+                        if (!brokenForeignParent) {
+                            continue;
+                        }
+                        id->EnableAttr(Attribute::IS_BROKEN);
+                        if (auto implDecl = ArkTSInterfaceImpl(*id, ci->importManager)) {
+                            MarkBrokenInterfaceImpl(*implDecl);
+                        }
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+    };
+    propagateBrokenInterfaceParents();
+
+    // Prepared foreign interfaces: every member becomes a default
+    // implementation over this.ref(). The generated implementation class is a
+    // plain class with an already complete body and needs no further lowering.
+    for (auto& file : pkg.files) {
+        for (auto& decl : file->decls) {
+            auto id = DynamicCast<InterfaceDecl*>(decl.get());
+            if (!id || !id->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) || id->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+            std::unordered_map<std::string, std::string> options;
+            ArkTSOptionStatus optionStatus;
+            if (!ArkTSDeclOptions(*id, options, &optionStatus)) {
+                DiagnoseArkTSOptionProblem(diag, *id, options, optionStatus);
+                id->EnableAttr(Attribute::IS_BROKEN);
+                continue;
+            }
+            std::string module;
+            if (!ResolveArkTSModule(*id, options, pkg, diag, DiagKindRefactor::sema_arkts_foreign_interface_invalid,
+                    module)) {
+                id->EnableAttr(Attribute::IS_BROKEN);
+                if (auto implDecl = ArkTSInterfaceImpl(*id, ci->importManager)) {
+                    MarkBrokenInterfaceImpl(*implDecl);
+                }
+                continue;
+            }
+            ClassContext declCtx{*id, ArkTSReceiverFor(options.count("module") != 0, module), module,
+                options.count("foreignName") ? options.at("foreignName") : id->identifier.Val(),
+                ArkTSNamespaceSegments(options.count("namespace") ? options.at("namespace") : std::string())};
+            declCtx.invalidKind = DiagKindRefactor::sema_arkts_foreign_interface_invalid;
+            // Only another prepared foreign interface may be a parent: its
+            // members already dispatch through the same accessor shape.
+            for (auto& inherited : id->inheritedTypes) {
+                auto parent = ResolveArkTSAliasTarget(Ty::GetDeclPtrOfTy(inherited->GetTy()));
+                // A foreign parent that already failed reported its own
+                // diagnostic; do not restate the relation as a second error.
+                // A broken local interface is not a foreign parent and keeps
+                // the ordinary relation refusal.
+                const bool brokenForeignParent = parent && parent->TestAttr(Attribute::IS_BROKEN) &&
+                    (parent->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) ||
+                        (parent->TestAttr(Attribute::FOREIGN) && parent->astKind == ASTKind::INTERFACE_DECL));
+                if (brokenForeignParent) {
+                    id->EnableAttr(Attribute::IS_BROKEN);
+                    break;
+                }
+                if (!parent || !parent->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *id,
+                        id->identifier.Val(), "a foreign interface may only inherit another foreign interface");
+                    id->EnableAttr(Attribute::IS_BROKEN);
+                    break;
+                }
+            }
+            if (id->TestAttr(Attribute::IS_BROKEN)) {
+                // The implementation class exists before this refusal, so it
+                // must be marked broken here as well; otherwise later
+                // inheritance/initialization checks report it as a second,
+                // unrelated diagnostic.
+                if (auto implDecl = ArkTSInterfaceImpl(*id, ci->importManager)) {
+                    MarkBrokenInterfaceImpl(*implDecl);
+                }
+                continue;
+            }
+            for (auto& member : id->GetMemberDecls()) {
+                auto fd = DynamicCast<FuncDecl*>(member.get());
+                if (!fd || !fd->funcBody || fd->identifier.Val() == ARKTS_CLASS_REF_ACCESSOR) {
+                    continue;
+                }
+                const bool indexOperator = fd->TestAttr(Attribute::OPERATOR) && fd->identifier.Val() == "[]";
+                const bool callOperator = fd->TestAttr(Attribute::OPERATOR) && fd->identifier.Val() == "()";
+                std::vector<ArkTSTypeDesc> types;
+                std::vector<Ptr<FuncParam>> params;
+                ArkTSTypeDesc resultType;
+                size_t restIndex = ARKTS_NO_REST;
+                if (!analyzeInterfaceSignature(*fd, id->identifier.Val(),
+                        DiagKindRefactor::sema_arkts_foreign_interface_invalid,
+                        "optional parameters on foreign interface members are not supported", types, params, resultType,
+                        restIndex)) {
+                    id->EnableAttr(Attribute::IS_BROKEN);
+                    continue;
+                }
+                const auto prefix = ArkTSForeignLocalPrefix(params);
+                std::unordered_map<std::string, Ptr<Decl>> classRefs;
+                std::string code;
+                if (indexOperator) {
+                    if (restIndex != ARKTS_NO_REST) {
+                        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *fd,
+                            id->identifier.Val(), "an index signature must not use a rest parameter");
+                        fd->EnableAttr(Attribute::IS_BROKEN);
+                        id->EnableAttr(Attribute::IS_BROKEN);
+                        continue;
+                    }
+                    const ArkTSTypeDesc* valueType = nullptr;
+                    bool setter = false;
+                    if (types.size() == 1) {
+                        if (resultType.kind != ArkTSTypeDesc::Kind::OPTIONAL ||
+                            resultType.elements.size() != 1) {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *fd,
+                                id->identifier.Val(), "an index getter must return Option<T>");
+                            fd->EnableAttr(Attribute::IS_BROKEN);
+                            id->EnableAttr(Attribute::IS_BROKEN);
+                            continue;
+                        }
+                        valueType = &resultType.elements.front();
+                    } else if (types.size() == 2) {
+                        if (!params[1]->isNamedParam) {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *fd,
+                                id->identifier.Val(), "an index setter's value parameter must be named");
+                            fd->EnableAttr(Attribute::IS_BROKEN);
+                            id->EnableAttr(Attribute::IS_BROKEN);
+                            continue;
+                        }
+                        if (resultType.kind != ArkTSTypeDesc::Kind::SCALAR || resultType.scalar != "Unit") {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *fd,
+                                id->identifier.Val(), "an index setter must return Unit");
+                            fd->EnableAttr(Attribute::IS_BROKEN);
+                            id->EnableAttr(Attribute::IS_BROKEN);
+                            continue;
+                        }
+                        valueType = &types[1];
+                        setter = true;
+                    } else {
+                        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *fd,
+                            id->identifier.Val(), "an index signature takes one key or a key and a named value");
+                        fd->EnableAttr(Attribute::IS_BROKEN);
+                        id->EnableAttr(Attribute::IS_BROKEN);
+                        continue;
+                    }
+                    code = ArkTSInterfaceIndexSource(types[0], *valueType, setter, prefix, classRefs);
+                } else if (callOperator) {
+                    if (restIndex != ARKTS_NO_REST) {
+                        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *fd,
+                            id->identifier.Val(), "a call signature must not use a rest parameter");
+                        fd->EnableAttr(Attribute::IS_BROKEN);
+                        id->EnableAttr(Attribute::IS_BROKEN);
+                        continue;
+                    }
+                    code = ArkTSInterfaceCallSource(types, resultType, prefix, classRefs);
+                } else {
+                    // Interface members reject optional parameters, so the
+                    // trailing optional run is empty.
+                    code = ArkTSClassMethodSource(types, resultType, 0, prefix, restIndex,
+                        ArkTSMemberReceiver::INSTANCE, declCtx.receiver, params.size(), classRefs);
+                }
+                if (code.empty()) {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *fd,
+                        id->identifier.Val(), "unsupported member signature");
+                    fd->EnableAttr(Attribute::IS_BROKEN);
+                    id->EnableAttr(Attribute::IS_BROKEN);
+                    continue;
+                }
+                installBody(declCtx, *fd, *file, code, params, GetArkTSMemberName(*fd), classRefs);
+                if (fd->funcBody->body && !fd->TestAttr(Attribute::IS_BROKEN)) {
+                    fd->DisableAttr(Attribute::ABSTRACT);
+                    fd->EnableAttr(Attribute::DEFAULT, Attribute::INTERFACE_IMPL);
+                }
+            }
+            for (auto& member : id->GetMemberDecls()) {
+                auto pd = DynamicCast<PropDecl*>(member.get());
+                if (!pd) {
+                    continue;
+                }
+                auto desc = classify(pd->type.get());
+                if (!ArkTSTypeDescGeneratable(desc) || ArkTSTypeDescContainsNothing(desc)) {
+                    if (pd->type) {
+                        auto deferredName = ArkTSDeferredExternalTypeName(pd->type->GetTy());
+                        if (!deferredName.empty()) {
+                            diag.DiagnoseRefactor(
+                                DiagKindRefactor::sema_arkts_foreign_external_type_deferred, *pd->type, deferredName);
+                        } else if (pd->isVar) {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_param_type_unsupported,
+                                *pd->type, pd->identifier.Val(), pd->identifier.Val(),
+                                Ty::ToString(pd->type->GetTy()));
+                        } else {
+                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported,
+                                *pd->type, Ty::ToString(pd->type->GetTy()), pd->identifier.Val());
+                        }
+                    }
+                    pd->EnableAttr(Attribute::IS_BROKEN);
+                    id->EnableAttr(Attribute::IS_BROKEN);
+                    continue;
+                }
+                std::string name = GetArkTSMemberName(*pd);
+                for (auto& getter : pd->getters) {
+                    if (!getter->funcBody) {
+                        continue;
+                    }
+                    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+                    auto code = ArkTSClassPropertySource(desc, false, ArkTSMemberReceiver::INSTANCE, 0,
+                        ArkTSForeignLocalPrefix({}), declCtx.receiver, classRefs);
+                    if (code.empty()) {
+                        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *pd,
+                            id->identifier.Val(), "unsupported property signature");
+                        getter->EnableAttr(Attribute::IS_BROKEN);
+                        pd->EnableAttr(Attribute::IS_BROKEN);
+                        id->EnableAttr(Attribute::IS_BROKEN);
+                        continue;
+                    }
+                    installBody(declCtx, *getter, *file, code, {}, name, classRefs);
+                    if (getter->TestAttr(Attribute::IS_BROKEN)) {
+                        pd->EnableAttr(Attribute::IS_BROKEN);
+                    }
+                    if (getter->funcBody->body && !getter->TestAttr(Attribute::IS_BROKEN)) {
+                        getter->DisableAttr(Attribute::ABSTRACT);
+                        getter->EnableAttr(Attribute::DEFAULT, Attribute::INTERFACE_IMPL);
+                    }
+                }
+                for (auto& setter : pd->setters) {
+                    if (!setter->funcBody || setter->funcBody->paramLists.empty() ||
+                        setter->funcBody->paramLists.front()->params.empty()) {
+                        continue;
+                    }
+                    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+                    auto code = ArkTSClassPropertySource(desc, true, ArkTSMemberReceiver::INSTANCE, 0,
+                        ArkTSForeignLocalPrefix({}), declCtx.receiver, classRefs);
+                    if (code.empty()) {
+                        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, *pd,
+                            id->identifier.Val(), "unsupported property signature");
+                        setter->EnableAttr(Attribute::IS_BROKEN);
+                        pd->EnableAttr(Attribute::IS_BROKEN);
+                        id->EnableAttr(Attribute::IS_BROKEN);
+                        continue;
+                    }
+                    installBody(declCtx, *setter, *file, code,
+                        {setter->funcBody->paramLists.front()->params.front().get()}, name, classRefs);
+                    if (setter->TestAttr(Attribute::IS_BROKEN)) {
+                        pd->EnableAttr(Attribute::IS_BROKEN);
+                    }
+                    if (setter->funcBody->body && !setter->TestAttr(Attribute::IS_BROKEN)) {
+                        setter->DisableAttr(Attribute::ABSTRACT);
+                        setter->EnableAttr(Attribute::DEFAULT, Attribute::INTERFACE_IMPL);
+                    }
+                }
+                if (!pd->TestAttr(Attribute::IS_BROKEN)) {
+                    pd->DisableAttr(Attribute::ABSTRACT);
+                    pd->EnableAttr(Attribute::DEFAULT, Attribute::INTERFACE_IMPL);
+                }
+            }
+            if (id->TestAttr(Attribute::IS_BROKEN)) {
+                if (auto implDecl = ArkTSInterfaceImpl(*id, ci->importManager)) {
+                    MarkBrokenInterfaceImpl(*implDecl);
+                }
+            }
+        }
+    }
+    propagateBrokenInterfaceParents();
+
     // Member bodies now exist, so a member with a defaulted parameter is no
     // longer treated as bodyless by the generic default-function pass. Build
     // and type-check its default-argument functions against the final types.
@@ -761,4 +1109,27 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
             }
         }
     }
+}
+
+void TypeChecker::TypeCheckerImpl::RejectArkTSForeignInterfaceExtend(ExtendDecl& ed)
+{
+    if (ed.TestAttr(Attribute::IS_BROKEN)) {
+        return;
+    }
+    auto foreignInterface = FindArkTSForeignInterfaceAncestor(ed);
+    if (!foreignInterface) {
+        return;
+    }
+    auto ty = ed.extendedType ? ed.extendedType->GetTy() : nullptr;
+    auto extendedDecl = ty ? Ty::GetDeclPtrOfTy(ty) : nullptr;
+    // The extended type itself may already have been refused; do not report
+    // the same relation twice.
+    if (extendedDecl && extendedDecl->TestAttr(Attribute::IS_BROKEN)) {
+        return;
+    }
+    auto implName = extendedDecl ? extendedDecl->identifier.Val()
+                                 : (ty && Ty::IsTyCorrect(ty) ? Ty::ToString(ty) : std::string("<extend>"));
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_impl_invalid, ed, implName,
+        foreignInterface->identifier.Val());
+    ed.EnableAttr(Attribute::IS_BROKEN);
 }

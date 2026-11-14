@@ -250,6 +250,35 @@ protected:
         return false;
     }
 
+    // True when a declaration with @p name carries the refusal mark.
+    bool IsDeclBroken(const std::string& name) const
+    {
+        bool broken = false;
+        Walker walker(instance->GetSourcePackages()[0].get(), [&broken, &name](Ptr<Node> node) {
+            auto decl = DynamicCast<Decl*>(node);
+            if (decl && decl->identifier.Val() == name && decl->TestAttr(Attribute::IS_BROKEN)) {
+                broken = true;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return broken;
+    }
+
+    // True when at least one extend declaration carries the refusal mark.
+    bool HasBrokenExtend() const
+    {
+        bool broken = false;
+        Walker walker(instance->GetSourcePackages()[0].get(), [&broken](Ptr<Node> node) {
+            if (auto ed = DynamicCast<ExtendDecl*>(node); ed && ed->TestAttr(Attribute::IS_BROKEN)) {
+                broken = true;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return broken;
+    }
+
     // Finds the top-level function declaration named @p name.
     Ptr<FuncDecl> FindFunction(const std::string& name) const
     {
@@ -278,6 +307,23 @@ protected:
         });
         walker.Walk();
         return found;
+    }
+
+    // Export the three support packages and install them on a fresh
+    // compiler instance. Interface and class wrapper tests share this setup.
+    void PrepareArkTSSupport()
+    {
+        diag.ClearError();
+        auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+        auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+        auto langCjo = ExportSupportPackage(
+            ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+        diag.ClearError();
+        handler->messages.clear();
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+        instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+        instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+        instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
     }
 
     std::string projectPath;
@@ -896,17 +942,7 @@ foreign func mixedRest(@RestParam xs: Array<Int32>, last!: Int32): Unit
 // members may keep the ArkTS optional-parameter spelling as mapping metadata.
 TEST_F(ArkTSForeignDiagTest, BodylessForeignClassMemberKeepsOptionalParameterSpelling)
 {
-    diag.ClearError();
-    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
-    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
-    auto langCjo = ExportSupportPackage(
-        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
-    diag.ClearError();
-    handler->messages.clear();
-    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
-    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
-    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
-    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    PrepareArkTSSupport();
     CompileSema(R"(package entry
 
 import arkts.lang.*
@@ -924,17 +960,7 @@ public foreign class ArkTSArray<T> {
 // reference field/accessor, so the class is refused as a whole.
 TEST_F(ArkTSForeignDiagTest, ForeignClassReservedMemberIsDiagnosed)
 {
-    diag.ClearError();
-    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
-    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
-    auto langCjo = ExportSupportPackage(
-        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
-    diag.ClearError();
-    handler->messages.clear();
-    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
-    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
-    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
-    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    PrepareArkTSSupport();
     CompileSema(R"(package entry
 
 import arkts.lang.*
@@ -2231,6 +2257,7 @@ public class JSValue {
     public func asArray(): JSArray { return JSArray() }
     public func asObject(): JSObject { return JSObject() }
     public func asClass(): JSClass { return JSClass() }
+    public func asFunction(): JSFunction { return JSFunction() }
     public func getProperty(key: String): JSValue { return JSValue() }
     public func setProperty(key: String, value: JSValue): Unit {}
     public func getElement(index: Int64): JSValue { return JSValue() }
@@ -2252,6 +2279,11 @@ public class JSArray {
         get() { return 0 }
     }
     public func getElement(index: Int64): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return JSValue() }
+}
+
+public class JSFunction {
+    public func call(args: Array<JSValue>, thisArg!: JSValue): JSValue { return JSValue() }
     public func toJSValue(): JSValue { return JSValue() }
 }
 
@@ -3105,4 +3137,679 @@ foreign func badNamespace(): Unit
     ASSERT_NE(error, nullptr);
     // The namespace literal sits on line 3, column 19 in the source below.
     EXPECT_NE(error->hint.find(":3:19:"), std::string::npos) << error->hint;
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceMemberDispatchIsGenerated)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IPerson {
+    mut prop name: String
+    prop age: Float64
+    func sayHi(): String
+}
+
+@ArkTS[module: "actual"]
+public foreign func makePerson(): IPerson
+
+public func use(): String {
+    let person = makePerson()
+    person.name = "Bob"
+    return person.sayHi() + person.age.toString()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    size_t callMethod = 0;
+    size_t getProperty = 0;
+    size_t setProperty = 0;
+    size_t accessor = 0;
+    size_t impl = 0;
+    Walker(instance->GetSourcePackages()[0].get(), [&](Ptr<Node> node) {
+        if (auto access = DynamicCast<MemberAccess*>(node)) {
+            callMethod += access->field == "callMethod" ? 1 : 0;
+            getProperty += access->field == "getProperty" ? 1 : 0;
+            setProperty += access->field == "setProperty" ? 1 : 0;
+        }
+        if (auto access = DynamicCast<MemberAccess*>(node); access && access->field == "__cj_arkts_ref_value") {
+            ++accessor;
+        }
+        if (auto cd = DynamicCast<ClassDecl*>(node); cd && cd->identifier.Val() == "IPerson$arkts_impl") {
+            ++impl;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_GE(callMethod, 1);
+    EXPECT_GE(getProperty, 1);
+    EXPECT_GE(setProperty, 1);
+    EXPECT_GE(accessor, 1);
+    EXPECT_EQ(impl, 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceCallAndIndexAreGenerated)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IComparator {
+    operator func()(a: Float64, b: Float64): Float64
+}
+
+@ArkTS[module: "actual"]
+public foreign interface IStringMap {
+    operator func[](k: String): Option<String>
+    operator func[](k: String, value!: String): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign interface INumberMap {
+    operator func[](k: Float64): Option<Float64>
+}
+
+@ArkTS[module: "actual"]
+public foreign func makeComparator(): IComparator
+
+@ArkTS[module: "actual"]
+public foreign func makeStringMap(): IStringMap
+
+@ArkTS[module: "actual"]
+public foreign func makeNumberMap(): INumberMap
+
+public func use(): Float64 {
+    let map = makeStringMap()
+    map["alpha"] = "A"
+    let _ = map["alpha"]
+    let numbers = makeNumberMap()
+    let _ = numbers[2.0]
+    return makeComparator()(3.0, 1.0)
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    size_t asFunction = 0;
+    size_t getProperty = 0;
+    size_t setProperty = 0;
+    size_t integerKey = 0;
+    Walker(instance->GetSourcePackages()[0].get(), [&](Ptr<Node> node) {
+        if (auto access = DynamicCast<MemberAccess*>(node)) {
+            asFunction += access->field == "asFunction" ? 1 : 0;
+            getProperty += access->field == "getProperty" ? 1 : 0;
+            setProperty += access->field == "setProperty" ? 1 : 0;
+        }
+        if (auto access = DynamicCast<MemberAccess*>(node); access && access->field == "toString") {
+            ++integerKey;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_GE(asFunction, 1);
+    EXPECT_GE(getProperty, 1);
+    EXPECT_GE(setProperty, 1);
+    EXPECT_GE(integerKey, 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceShapeIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    static func make(): Int64
+    func ok(): Int64
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS foreign interface"));
+    EXPECT_TRUE(HasErrorContaining("static member"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceMemberBodyIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    func ok(): Int64 {
+        return 1
+    }
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("must not have a body"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceReservedMemberIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    func __cj_arkts_value(): Int64
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("reserved for generated code"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceNonForeignParentIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public interface Parent {
+    func name(): String
+}
+
+@ArkTS[module: "actual"]
+public foreign interface Child <: Parent {
+    func age(): Float64
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("may only inherit another foreign interface"));
+}
+
+TEST_F(ArkTSForeignDiagTest, UserClassImplementingForeignInterfaceIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IPerson {
+    func name(): String
+}
+
+public class Person <: IPerson {
+    public func name(): String {
+        return "x"
+    }
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("cannot implement @ArkTS foreign interface"));
+}
+
+TEST_F(ArkTSForeignDiagTest, GenericForeignInterfaceKeepsExternalForm)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Box<T> {
+    func value(): T
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    bool lowered = false;
+    Walker(instance->GetSourcePackages()[0].get(), [&lowered](Ptr<Node> node) {
+        if (auto cd = DynamicCast<ClassDecl*>(node); cd && cd->identifier.Val() == "Box$arkts_impl") {
+            lowered = true;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_FALSE(lowered);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceOptionsAndForeignNameAreAccepted)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual", namespace: "Inner.Sub", foreignName: "IPerson"]
+public foreign interface PersonLike {
+    @ForeignName["full-name"]
+    mut prop name: String
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceIndexGetterShapeIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    operator func[](k: String): String
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("an index getter must return Option<T>"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(IsDeclBroken("Bad"));
+    EXPECT_TRUE(IsDeclBroken("Bad$arkts_impl"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceIndexSetterParameterIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    operator func[](k: String, value: String): Unit
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("an index setter's value parameter must be named"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceIndexSetterReturnIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    operator func[](k: String, value!: String): Int64
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("an index setter must return Unit"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceIndexArityIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    operator func[](k: String, value!: String, extra!: String): Unit
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("an index signature takes one key or a key and a named value"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceIndexRestIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    operator func[](@RestParam k: Array<String>): Option<String>
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("an index signature must not use a rest parameter"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceCallRestIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    operator func()(@RestParam xs: Array<Float64>): Float64
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("a call signature must not use a rest parameter"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceModulePathIsRejected)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "./actual"]
+public foreign interface Pathy {
+    func plain(value: Int32): Int32
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("module option must be an ArkTS module specifier"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(IsDeclBroken("Pathy"));
+    // The option is refused during preparation, before the implementation
+    // class is generated.
+    EXPECT_EQ(FindClass("Pathy$arkts_impl"), nullptr);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceEmptyModuleIsSingleDiagnostic)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: ""]
+public foreign interface EmptyModule {
+    func plain(value: Int32): Int32
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("'module' option of '@ArkTS' must not be an empty string"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceIndexGetterUnsupportedResultIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    operator func[](k: String): Option<Array<Bad>>
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("is not supported"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceDefaultModuleIsAccepted)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public foreign interface Defaulted {
+    func name(): String
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_FALSE(IsDeclBroken("Defaulted"));
+    EXPECT_FALSE(IsDeclBroken("Defaulted$arkts_impl"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceDuplicateOptionIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual", module: "other"]
+public foreign interface Dup {
+    func name(): String
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("duplicated option 'module'"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceWriteOnlyPropertyIsRejected)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface WriteOnly {
+    @WriteOnly
+    mut prop name: String
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("@WriteOnly properties are not supported on a foreign interface"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(IsDeclBroken("WriteOnly"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceBrokenParentDoesNotCascade)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface BrokenParent {
+    operator func[](k: String): String
+}
+
+@ArkTS[module: "actual"]
+public foreign interface Child <: BrokenParent {
+    func childName(): String
+}
+)");
+    // The parent's index-getter refusal is the only actionable diagnostic; the
+    // child must not restate the broken parent relation.
+    EXPECT_TRUE(HasErrorContaining("an index getter must return Option<T>"));
+    EXPECT_EQ(diag.GetErrorCount(), 1) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_TRUE(IsDeclBroken("BrokenParent"));
+    EXPECT_TRUE(IsDeclBroken("Child"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceBrokenParentIsOrderIndependent)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Child <: BrokenParent {
+    func childName(): String
+}
+
+@ArkTS[module: "actual"]
+public foreign interface BrokenParent {
+    operator func[](k: String): String
+}
+)");
+    // The child is declared before the parent; the broken mark must still
+    // propagate so the only diagnostic is the parent's index-getter refusal.
+    EXPECT_TRUE(HasErrorContaining("an index getter must return Option<T>"));
+    EXPECT_EQ(diag.GetErrorCount(), 1) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_TRUE(IsDeclBroken("BrokenParent"));
+    EXPECT_TRUE(IsDeclBroken("Child"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ForeignInterfaceBrokenPreparationIsIdempotent)
+{
+    using namespace Cangjie::Native::FFI::ArkTS;
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Bad {
+    @WriteOnly
+    mut prop name: String
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 1);
+    auto pkg = instance->GetSourcePackages().front();
+    const auto declsBefore = pkg->files.front()->decls.size();
+    const auto messagesBefore = handler->messages.size();
+    const auto errorsBefore = diag.GetErrorCount();
+    PrepareTypeCheck(*pkg, diag, instance->GetSourceManager(), instance->importManager);
+    PrepareTypeCheck(*pkg, diag, instance->GetSourceManager(), instance->importManager);
+    EXPECT_EQ(diag.GetErrorCount(), errorsBefore);
+    EXPECT_EQ(handler->messages.size(), messagesBefore);
+    EXPECT_EQ(pkg->files.front()->decls.size(), declsBefore);
+    EXPECT_TRUE(IsDeclBroken("Bad"));
+}
+
+TEST_F(ArkTSForeignDiagTest, StructImplementingForeignInterfaceIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IPerson {
+    func name(): String
+}
+
+public struct Person <: IPerson {
+    public func name(): String {
+        return "x"
+    }
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("Cangjie type 'Person' cannot implement @ArkTS foreign interface 'IPerson'"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(IsDeclBroken("Person"));
+}
+
+TEST_F(ArkTSForeignDiagTest, IndirectClassImplementingForeignInterfaceIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IPerson {
+    func name(): String
+}
+
+public interface LocalPerson <: IPerson {}
+
+public class Person <: LocalPerson {
+    public func name(): String {
+        return "x"
+    }
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("Cangjie type 'Person' cannot implement @ArkTS foreign interface 'IPerson'"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(IsDeclBroken("Person"));
+}
+
+TEST_F(ArkTSForeignDiagTest, ExtendImplementingForeignInterfaceIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IPerson {
+    func name(): String
+}
+
+public struct Person {}
+
+extend Person <: IPerson {
+    public func name(): String {
+        return "x"
+    }
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("Cangjie type 'Person' cannot implement @ArkTS foreign interface 'IPerson'"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasBrokenExtend());
+}
+
+
+TEST_F(ArkTSForeignDiagTest, AliasClassImplementingForeignInterfaceIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IPerson {
+    func name(): String
+}
+
+type PersonAlias = PersonAliasInner
+type PersonAliasInner = IPerson
+
+public class Person <: PersonAlias {
+    public func name(): String {
+        return "x"
+    }
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("Cangjie type 'Person' cannot implement @ArkTS foreign interface 'IPerson'"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(IsDeclBroken("Person"));
+}
+
+TEST_F(ArkTSForeignDiagTest, EnumImplementingForeignInterfaceIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IPerson {
+    func name(): String
+}
+
+public enum Person <: IPerson {
+    | A | B
+    public func name(): String {
+        return "x"
+    }
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("Cangjie type 'Person' cannot implement @ArkTS foreign interface 'IPerson'"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(IsDeclBroken("Person"));
+}
+
+
+TEST_F(ArkTSForeignDiagTest, AliasParentForeignInterfaceIsAccepted)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface IParent {
+    func parentName(): String
+}
+
+type ParentAlias = ParentAliasInner
+type ParentAliasInner = IParent
+
+@ArkTS[module: "actual"]
+public foreign interface IChild <: ParentAlias {
+    func childName(): String
+}
+
+@ArkTS[module: "actual"]
+public foreign func makeChild(): IChild
+
+public func use(): String {
+    return makeChild().parentName() + makeChild().childName()
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_FALSE(IsDeclBroken("IChild"));
 }

@@ -14,6 +14,7 @@
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
+#include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Utils/CheckUtils.h"
 
 namespace Cangjie::Native::FFI::ArkTS {
@@ -233,6 +234,80 @@ bool ArkTSDeclOptions(const Decl& decl, std::unordered_map<std::string, std::str
     return true;
 }
 
+void DiagnoseArkTSOptionProblem(DiagnosticEngine& diag, Decl& decl,
+    const std::unordered_map<std::string, std::string>& options, const ArkTSOptionStatus& status)
+{
+    auto annotationAt = [&decl]() -> Node& {
+        for (auto& annotation : decl.annotations) {
+            if (annotation->kind == AnnotationKind::ARKTS) {
+                return *annotation;
+            }
+        }
+        return decl;
+    };
+    auto& at = status.at ? *status.at : annotationAt();
+    if (status.problem == ArkTSOptionProblem::DUPLICATE) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, at, status.option);
+    } else if (status.problem == ArkTSOptionProblem::ILL_FORMED_NAMESPACE) {
+        // The fold assigns the namespace value into `options` before
+        // validating it, so the offending literal is already available here;
+        // fall back to the anchored literal if that ever changes.
+        std::string namespaceValue = options.count("namespace") ? options.at("namespace") : std::string();
+        if (namespaceValue.empty() && status.at != nullptr) {
+            if (auto literal = DynamicCast<LitConstExpr*>(status.at.get());
+                literal && literal->kind == LitConstKind::STRING) {
+                namespaceValue = literal->stringValue;
+            }
+        }
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_namespace_invalid, at, namespaceValue);
+    } else {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_invalid, at);
+    }
+}
+
+bool ResolveArkTSModule(Decl& decl, const std::unordered_map<std::string, std::string>& options, const Package& pkg,
+    DiagnosticEngine& diag, DiagKindRefactor invalidKind, std::string& module)
+{
+    Ptr<Annotation> emptyLayer = nullptr;
+    std::string emptyName;
+    Ptr<Node> moduleNode = nullptr;
+    for (auto& annotation : decl.annotations) {
+        if (annotation->kind != AnnotationKind::ARKTS) {
+            continue;
+        }
+        for (auto& arg : annotation->args) {
+            if (arg->name.Val() == "module") {
+                moduleNode = arg->expr.get();
+            }
+            auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
+            if (!literal || literal->kind != LitConstKind::STRING || !ArkTSOptionValueEmpty(literal->stringValue)) {
+                continue;
+            }
+            emptyLayer = annotation.get();
+            emptyName = arg->name.Val();
+            break;
+        }
+        if (emptyLayer != nullptr) {
+            break;
+        }
+    }
+    if (emptyLayer != nullptr) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty, *emptyLayer, emptyName);
+        return false;
+    }
+    module = options.count("module") ? options.at("module") : ArkTSDefaultModule(pkg.fullPackageName);
+    if (options.count("module") != 0 && ArkTSModulePathLike(module)) {
+        diag.DiagnoseRefactor(invalidKind, moduleNode ? *moduleNode : static_cast<Node&>(decl),
+            decl.identifier.Val(), "module option must be an ArkTS module specifier, not a path");
+        return false;
+    }
+    if (module.empty()) {
+        diag.DiagnoseRefactor(invalidKind, decl, decl.identifier.Val(), "empty module name");
+        return false;
+    }
+    return true;
+}
+
 // A class with type parameters keeps the generic external declaration form;
 // its members cannot be lowered to fixed conversions without per-instantiation
 // code, so it is left untouched (the stdlib presets live here).
@@ -300,6 +375,66 @@ void CheckArkTSWriteOnlyRead(Node& usage, DiagnosticEngine& diag)
     }
 }
 
+bool IsArkTSReferenceDecl(const Decl& decl)
+{
+    return decl.TestAnyAttr(Attribute::ARKTS_CLASS_WRAPPER, Attribute::ARKTS_FOREIGN_INTERFACE);
+}
+
+namespace {
+constexpr const char* ARKTS_PRESET_PACKAGE = "std.interop.arkts";
+} // namespace
+
+bool IsArkTSForeignInterface(const InterfaceDecl& id)
+{
+    // The stdlib presets keep their external declaration form, matching the
+    // class path: their implementation is delivered with the preset
+    // requirements, not by this preparation pass. The package check reads the
+    // declaration or its file package because the Collector may not have
+    // filled the declaration field yet during preparation.
+    const auto& packageName =
+        id.curFile && id.curFile->curPackage ? id.curFile->curPackage->fullPackageName : id.fullPackageName;
+    if (packageName == ARKTS_PRESET_PACKAGE) {
+        return false;
+    }
+    return id.HasAnno(AnnotationKind::ARKTS) && id.TestAttr(Attribute::FOREIGN) &&
+        !id.TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) && (!id.generic || id.generic->typeParameters.empty());
+}
+
+bool IsArkTSInterfaceImpl(const Decl& decl)
+{
+    return decl.TestAttr(Attribute::ARKTS_INTERFACE_IMPL);
+}
+
+std::string ArkTSInterfaceImplName(const Decl& iface)
+{
+    return iface.identifier.Val() + "$arkts_impl";
+}
+
+// Resolve the generated implementation class. The current package is searched
+// in its own AST; an imported interface is resolved through the package CJO by
+// the same deterministic name. A null result is a compilation-local resolution
+// failure and makes the caller refuse a generated reference construction.
+Ptr<ClassDecl> ArkTSInterfaceImpl(const Decl& iface, ImportManager* imports)
+{
+    if (!iface.TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+        return nullptr;
+    }
+    const auto name = ArkTSInterfaceImplName(iface);
+    if (auto decl = imports ? imports->GetImportedDecl<ClassDecl>(iface.fullPackageName, name) : nullptr) {
+        return decl;
+    }
+    if (iface.curFile && iface.curFile->curPackage) {
+        for (auto& file : iface.curFile->curPackage->files) {
+            for (auto& decl : file->decls) {
+                if (decl->identifier.Val() == name && IsArkTSInterfaceImpl(*decl)) {
+                    return DynamicCast<ClassDecl*>(decl.get());
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
 // Walk the package and validate the declaration rules the function fold does
 // not own. A lowered wrapper carries ARKTS_FUNCTION_WRAPPER and is validated
 // by ArkTSDeclOptions in LowerArkTSFunctions, so it is skipped here.
@@ -363,7 +498,9 @@ void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
 {
     Walker(&pkg, [&diag](Ptr<Node> node) {
         auto decl = DynamicCast<Decl*>(node);
-        if (decl == nullptr || decl->TestAnyAttr(Attribute::ARKTS_FUNCTION_WRAPPER, Attribute::ARKTS_CLASS_WRAPPER)) {
+        if (decl == nullptr ||
+            decl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::ARKTS_FUNCTION_WRAPPER,
+                Attribute::ARKTS_CLASS_WRAPPER, Attribute::ARKTS_FOREIGN_INTERFACE, Attribute::ARKTS_INTERFACE_IMPL)) {
             return VisitAction::WALK_CHILDREN;
         }
         for (const auto& annotation : decl->annotations) {
@@ -729,6 +866,17 @@ struct ArkTSValueEmitter {
             "}\n";
     }
 
+    // (value, typeName) -> 'if (value.isUndefined()) { throw
+    // ExternConversionException("ArkTS type mismatch: undefined for <typeName>")
+    // }': a non-optional reference position rejects JS undefined explicitly;
+    // the later isObject guard stays as the general kind check.
+    std::string UndefinedGuard(const std::string& value, const std::string& typeName, const std::string& indent)
+    {
+        return indent + "if (" + value + ".isUndefined()) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_MISMATCH) + "undefined for " + typeName, indent + "    ") +
+            indent + "}\n";
+    }
+
     // (value, predicate, kind, typeName) -> 'if (!value.<predicate>()) {
     // throw ExternConversionException("ArkTS type mismatch: not <kind> for
     // <typeName>") }': a wrong-kind value is a type mismatch, so every
@@ -779,14 +927,24 @@ struct ArkTSValueEmitter {
             // An ArkTS object reference: null and undefined are not instances,
             // and the value must be an object before the wrapping constructor
             // is called. The class is recorded by placeholder so the lowering
-            // walker can bind it without spelling its name here.
+            // walker can bind it without spelling its name here. An interface
+            // reference is constructed through its generated implementation
+            // class; a class reference through its wrapper constructor.
             if (!desc.reference || classRefs == nullptr) {
                 return emitted;
             }
+            Ptr<Decl> constructor = desc.reference;
+            if (desc.reference->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+                if (!desc.referenceImpl) {
+                    return emitted;
+                }
+                constructor = desc.referenceImpl;
+            }
             auto slot = Fresh("class");
-            (*classRefs)[slot] = desc.reference;
+            (*classRefs)[slot] = constructor;
             if (!nullablePosition) {
                 emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
+                emitted.pre += UndefinedGuard(value, ArkTSTypeDescName(desc), indent);
             }
             emitted.pre += KindGuard(value, "isObject", "an object", ArkTSTypeDescName(desc), indent);
             emitted.expr = slot + "(" + value + ".asObject(), ())";
@@ -1196,7 +1354,8 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
             ")\n";
     } else if (!rest) {
         if (args.empty()) {
-            code += "    let " + result + " = " + recv + ".callMethod(\"" + ARKTS_PLACEHOLDER_NAME + "\", [])\n";
+            code += "    let " + result + " = " + recv + ".callMethod(\"" + ARKTS_PLACEHOLDER_NAME +
+                "\", Array<JSValue>())\n";
         } else if (args.size() == 1) {
             code += "    let " + result + " = " + recv + ".callMethod(\n        \"" + ARKTS_PLACEHOLDER_NAME +
                 "\",\n        [" + args[0] + "]\n    )\n";
@@ -1419,7 +1578,7 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
     } else if (optionals) {
         emitCall(ArkTSOptionalCallArray(emitter, types, optionalStart, args, prefix + "context", code));
     } else {
-        emitCall(args.empty() ? "[]" : "[" + ArkTSJoin(args, ", ") + "]");
+        emitCall(args.empty() ? "Array<JSValue>()" : "[" + ArkTSJoin(args, ", ") + "]");
     }
     if (resultType.kind == ArkTSTypeDesc::Kind::SCALAR && resultType.scalar == "Nothing") {
         return ArkTSFinishBody(prefix,
@@ -1507,6 +1666,89 @@ std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter
     code += "    let " + result + " = " + object + ".getProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\")\n";
     auto emitted = emitter.FromJS(valueType, result, "    ");
     return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
+}
+
+std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
+    const std::string& prefix, std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+{
+    for (auto& type : types) {
+        if (!ArkTSTypeDescGeneratable(type) || ArkTSTypeDescContainsNothing(type)) {
+            return {};
+        }
+    }
+    if (!ArkTSTypeDescGeneratable(resultType)) {
+        return {};
+    }
+    ArkTSValueEmitter emitter{prefix};
+    emitter.classRefs = &classRefs;
+    auto self = emitter.Fresh("self");
+    auto selfValue = emitter.Fresh("selfvalue");
+    auto function = emitter.Fresh("function");
+    std::string code = "    let " + self + " = " + ARKTS_SELF + "." + ARKTS_CLASS_REF_ACCESSOR + "()\n";
+    code += "    let " + selfValue + " = " + self + ".toJSValue()\n";
+    code += "    let " + function + " = " + selfValue + ".asFunction()\n";
+    auto args = ArkTSArgumentSource(emitter, types, types.size(), code);
+    auto result = emitter.Fresh("result");
+    code += "    let " + result + " = " + function + ".call(" +
+        (args.empty() ? std::string("Array<JSValue>()") : "[" + ArkTSJoin(args, ", ") + "]") +
+        ", thisArg: " + selfValue + ")\n";
+    if (resultType.kind == ArkTSTypeDesc::Kind::SCALAR && resultType.scalar == "Nothing") {
+        return ArkTSFinishBody(prefix,
+            code + "    throw " + std::string(ARKTS_NEVER_EXCEPTION) + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n");
+    }
+    auto emitted = emitter.FromJS(resultType, result, "    ");
+    return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
+}
+
+std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTSTypeDesc& valueType, bool setter,
+    const std::string& prefix, std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+{
+    if (!ArkTSTypeDescGeneratable(keyType) || ArkTSTypeDescContainsNothing(keyType) ||
+        !ArkTSTypeDescGeneratable(valueType) || ArkTSTypeDescContainsNothing(valueType)) {
+        return {};
+    }
+    const bool stringKey = keyType.kind == ArkTSTypeDesc::Kind::SCALAR && keyType.scalar == "String";
+    const bool numberKey = keyType.kind == ArkTSTypeDesc::Kind::SCALAR && keyType.scalar == "Float64";
+    if (!stringKey && !numberKey) {
+        return {};
+    }
+    ArkTSValueEmitter emitter{prefix};
+    emitter.classRefs = &classRefs;
+    std::string key = std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "0";
+    std::string code;
+    if (numberKey) {
+        // JS property keys are strings. Accept only finite integers that fit
+        // Int64 and use their canonical decimal spelling, so obj[2] and
+        // obj["2"] address the same property.
+        auto number = emitter.Fresh("keynum");
+        auto canonical = emitter.Fresh("key");
+        code += "    let " + number + " = " + key + "\n";
+        code += "    if (" + number + " - " + number + " != 0.0) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a finite number for an index key", "        ") +
+            "    }\n";
+        code += "    if (" + number + " < -9.223372036854776e18 || " + number + " >= 9.223372036854776e18) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "index key out of Int64 range", "        ") + "    }\n";
+        code += "    if (" + number + " != Float64(Int64(" + number + "))) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not an integer index key", "        ") + "    }\n";
+        code += "    let " + canonical + " = Int64(" + number + ").toString()\n";
+        key = canonical;
+    }
+    auto self = emitter.Fresh("self");
+    code = "    let " + self + " = " + ARKTS_SELF + "." + ARKTS_CLASS_REF_ACCESSOR + "()\n" + code;
+    if (setter) {
+        auto value =
+            emitter.ToJS(valueType, std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "1", prefix + "context", "    ");
+        code += value.pre;
+        code += "    " + self + ".setProperty(" + key + ", " + value.expr + ")\n";
+        return ArkTSFinishBody(prefix, code);
+    }
+    auto result = emitter.Fresh("result");
+    code += "    let " + result + " = " + self + ".getProperty(" + key + ")\n";
+    auto inner = emitter.FromJS(valueType, result, "    ");
+    const std::string option = "(if (" + result + ".isNull() || " + result + ".isUndefined()) {\n" + "    " +
+        ARKTS_OPTION + ".None\n" + "} else {\n" + inner.pre + "    " + ARKTS_OPTION + ".Some(" + inner.expr + ")\n" +
+        "})";
+    return ArkTSFinishBody(prefix, code + "    return " + option + "\n");
 }
 
 } // namespace Cangjie::Native::FFI::ArkTS

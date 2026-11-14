@@ -1314,3 +1314,106 @@ TEST_F(ArkTSTypeMappingTest, ClassStaticMemberCallsWithThisArg)
     auto file = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
 }
+
+TEST_F(ArkTSTypeMappingTest, ClassifyForeignInterfaceAsObjectReference)
+{
+    // A prepared foreign interface is a reference to an ArkTS object, the
+    // same shape as a prepared foreign class. The implementation class is
+    // resolved separately by the caller's ImportManager.
+    InterfaceDecl person;
+    person.identifier = "IPerson";
+    person.fullPackageName = "pkg";
+    person.EnableAttr(Attribute::ARKTS_FOREIGN_INTERFACE);
+    InterfaceTy personTy("IPerson", person, {});
+    auto reference = ArkTSClassifyType(&personTy);
+    ASSERT_EQ(reference.kind, ArkTSTypeDesc::Kind::REFERENCE);
+    EXPECT_EQ(reference.reference, Ptr<Decl>(&person));
+    EXPECT_EQ(reference.referenceImpl, nullptr);
+    // Without the generated implementation class the reference cannot be
+    // constructed from a JS value, so the position is not generatable.
+    EXPECT_FALSE(ArkTSTypeDescGeneratable(reference));
+    EXPECT_EQ(ArkTSTypeDescName(reference), "IPerson");
+
+    EnumDecl optionDecl;
+    optionDecl.identifier = "Option";
+    optionDecl.fullPackageName = "std.core";
+    EnumTy optional("Option", optionDecl, {&personTy});
+    auto optionalDesc = ArkTSClassifyType(&optional);
+    ASSERT_EQ(optionalDesc.kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    ASSERT_EQ(optionalDesc.elements.size(), 1);
+    EXPECT_EQ(optionalDesc.elements.front().kind, ArkTSTypeDesc::Kind::REFERENCE);
+
+    StructDecl arrayDecl;
+    arrayDecl.identifier = "Array";
+    arrayDecl.fullPackageName = "std.core";
+    StructTy array("Array", arrayDecl, {&personTy});
+    // Interface references stay out of Array positions (AR-06 BR-11); only a
+    // prepared foreign class reference may ride the AR-04 container copy.
+    EXPECT_EQ(ArkTSClassifyType(&array).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
+    ClassDecl wrapper;
+    wrapper.identifier = "IPersonClass";
+    wrapper.fullPackageName = "pkg";
+    wrapper.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
+    ClassTy wrapperTy("IPersonClass", wrapper, {});
+    StructTy classArray("Array", arrayDecl, {&wrapperTy});
+    EXPECT_EQ(ArkTSClassifyType(&classArray).kind, ArkTSTypeDesc::Kind::ARRAY_COPY);
+}
+
+TEST_F(ArkTSTypeMappingTest, InterfaceReferenceConversionUsesTheImplementationClass)
+{
+    // to-JS reads the interface accessor; from-JS constructs the generated
+    // implementation class recorded by placeholder.
+    InterfaceDecl person;
+    person.identifier = "IPerson";
+    person.fullPackageName = "pkg";
+    person.EnableAttr(Attribute::ARKTS_FOREIGN_INTERFACE);
+    ClassDecl impl;
+    impl.identifier = ArkTSInterfaceImplName(person);
+    impl.fullPackageName = "pkg";
+    impl.EnableAttr(Attribute::ARKTS_INTERFACE_IMPL);
+    EXPECT_EQ(impl.identifier.Val(), "IPerson$arkts_impl");
+    ArkTSTypeDesc reference{ArkTSTypeDesc::Kind::REFERENCE, "", {}, Ptr<Decl>(&person), Ptr<Decl>(&impl)};
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(reference));
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto code = ArkTSClassMethodSource({reference}, reference, 0, "__locals_", ARKTS_NO_REST,
+        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, 1, classRefs);
+    ASSERT_FALSE(code.empty());
+    EXPECT_NE(code.find("__cj_arkts_ref_value"), std::string::npos);
+    EXPECT_NE(code.find("toJSValue"), std::string::npos);
+    EXPECT_NE(code.find("isObject"), std::string::npos);
+    ASSERT_EQ(classRefs.size(), 1);
+    EXPECT_EQ(classRefs.begin()->second, Ptr<Decl>(&impl));
+    auto file = Parse(code);
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+}
+
+TEST_F(ArkTSTypeMappingTest, InterfaceCallAndIndexSourcesUseTheStoredObject)
+{
+    std::unordered_map<std::string, Ptr<Decl>> callRefs;
+    auto call = ArkTSInterfaceCallSource(
+        {ScalarDesc("Float64"), ScalarDesc("Float64")}, ScalarDesc("Float64"), "__locals_", callRefs);
+    ASSERT_FALSE(call.empty());
+    EXPECT_NE(call.find("__cj_arkts_ref_value"), std::string::npos);
+    EXPECT_NE(call.find("asFunction"), std::string::npos);
+    EXPECT_NE(call.find("thisArg"), std::string::npos);
+
+    auto getter = ArkTSInterfaceIndexSource(ScalarDesc("String"), ScalarDesc("String"), false, "__locals_", callRefs);
+    ASSERT_FALSE(getter.empty());
+    EXPECT_NE(getter.find("getProperty"), std::string::npos);
+    EXPECT_NE(getter.find("Option.None"), std::string::npos);
+    EXPECT_NE(getter.find("Option.Some"), std::string::npos);
+
+    auto setter =
+        ArkTSInterfaceIndexSource(ScalarDesc("String"), ScalarDesc("String"), true, "__locals_", callRefs);
+    ASSERT_FALSE(setter.empty());
+    EXPECT_NE(setter.find("setProperty"), std::string::npos);
+
+    auto numeric =
+        ArkTSInterfaceIndexSource(ScalarDesc("Float64"), ScalarDesc("Float64"), false, "__locals_", callRefs);
+    ASSERT_FALSE(numeric.empty());
+    EXPECT_NE(numeric.find("Int64("), std::string::npos);
+    EXPECT_NE(numeric.find("toString()"), std::string::npos);
+
+    EXPECT_TRUE(
+        ArkTSInterfaceIndexSource(ScalarDesc("Int32"), ScalarDesc("String"), false, "__locals_", callRefs).empty());
+}
