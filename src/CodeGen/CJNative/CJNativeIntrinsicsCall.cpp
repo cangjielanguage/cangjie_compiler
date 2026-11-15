@@ -909,6 +909,15 @@ llvm::Value* IRBuilder2::CallSyncIntrinsics(
     if (IsAtomicIntrinsic(intrinsic.GetIntrinsicKind())) {
         return CallAtomicIntrinsics(intrinsic, parameters);
     }
+    // --cj-pct: std.sync blocking is covered by the import remap; std.core's
+    // sleep cannot be (its implicit import), so when its body inlines at -O2
+    // the SLEEP intrinsic lands here and is rerouted to pctSleep — a bracket
+    // could not stop the intrinsic from really sleeping; the virtual clock must.
+    if (GetCGContext().GetCompileOptions().enableCjPct &&
+        intrinsic.GetIntrinsicKind() == CHIR::IntrinsicKind::SLEEP) {
+        CJC_ASSERT(parameters.size() == 1 && "SLEEP intrinsic takes exactly one argument.");
+        return EmitPCTSleep(parameters[0]->GetRawValue());
+    }
     return CallIntrinsic(intrinsic, parameters);
 }
 
@@ -973,6 +982,56 @@ llvm::Value* IRBuilder2::CallAtomicIntrinsics(const CHIR::IntrinsicBase& intrins
     }
 
     return res;
+}
+
+llvm::Value* IRBuilder2::EmitPCTSleep(llvm::Value* nanosVal)
+{
+    // --cj-pct: pctSleep takes the saturated i64 nanoseconds the inlined sleep
+    // body already computed for CJ_MRT_Sleep: an actor's sleep arms a virtual
+    // timer and parks on the coordinator gate; unmanaged threads really sleep
+    // inside it. Same plain-Cangjie-call discipline as EmitPCTDispatcherCall
+    // (hidden Unit sret slot), so the declared type is (Unit.Type*, i64).
+    auto& llvmCtx = GetLLVMContext();
+    auto unitTy = CGType::GetUnitType(llvmCtx);
+    auto unitPtrTy = llvm::PointerType::get(unitTy, 0);
+    llvm::FunctionType* sleepTy = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(llvmCtx), {unitPtrTy, llvm::Type::getInt64Ty(llvmCtx)}, false);
+    auto callee = GetLLVMModule()->getOrInsertFunction(GetPCTDispatcherSymbol("8pctSleepHl"), sleepTy).getCallee();
+    llvm::Value* nanosArg = nanosVal;
+    if (nanosArg->getType() != llvm::Type::getInt64Ty(llvmCtx)) {
+        nanosArg = CreateIntCast(nanosArg, llvm::Type::getInt64Ty(llvmCtx), true);
+    }
+    return CreateCall(sleepTy, callee, {CreateEntryAlloca(unitTy), nanosArg});
+}
+
+void IRBuilder2::EmitPCTMarkInstrumented()
+{
+    // --cj-pct: mark the binary instrumented before any user code runs, so
+    // stdx.unittest.concurrent can reject uninstrumented binaries with a
+    // clear error. See EmitPCTDispatcherCall.
+    EmitPCTDispatcherCall("19pctMarkInstrumentedHv");
+}
+
+void IRBuilder2::EmitPCTDispatcherCall(const std::string& nameAndSignature)
+{
+    // --cj-pct: plain Cangjie calls (no runtime trampoline) so the whole chain
+    // stays in managed frames for stack growth and GC stack parsing; the
+    // dispatchers absorb when no scenario is running. Flag-compiled binaries
+    // must link stdx.unittest.concurrent. See GetPCTDispatcherSymbol for the
+    // symbol composition.
+    if (!GetCGContext().GetCompileOptions().enableCjPct) {
+        return;
+    }
+    // Unit-returning Cangjie functions take a hidden sret slot as their first
+    // parameter: declared type (Unit.Type*), called with an entry-alloca'd Unit slot.
+    auto& llvmCtx = GetLLVMContext();
+    auto unitTy = CGType::GetUnitType(llvmCtx);
+    auto unitPtrTy = llvm::PointerType::get(unitTy, 0);
+    llvm::FunctionType* pctPointTy =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvmCtx), {unitPtrTy}, false);
+    auto symbol = GetPCTDispatcherSymbol(nameAndSignature);
+    auto callee = GetLLVMModule()->getOrInsertFunction(symbol, pctPointTy).getCallee();
+    CreateCall(pctPointTy, callee, {CreateEntryAlloca(unitTy)});
 }
 
 llvm::Value* IRBuilder2::CallAtomicPrimitiveIntrinsics(

@@ -3016,6 +3016,15 @@ struct ImportSpec : Node {
     std::vector<OwnedPtr<Annotation>> annotations; /**< Annotation set of the ImportSpec. */
     /**< Implicitly export all imported decls, initialized with true to  ensure compatibility. */
     bool withImplicitExport{true};
+    /**
+     * --cj-pct: set by RemapPctSyncImports on the std.sync imports it rewrites
+     * to the stdx.unittest.sync mirror. Purely intra-compilation state (never
+     * serialized into cjos — the rewritten import text itself is what a cjo
+     * records): CheckImports exempts flagged imports from the mirror's
+     * INTERNAL gate, because the compiler rewrite is the mirror's only
+     * approved entry path.
+     */
+    bool isPctSyncRemapped{false};
     ImportSpec() : Node(ASTKind::IMPORT_SPEC)
     {
     }

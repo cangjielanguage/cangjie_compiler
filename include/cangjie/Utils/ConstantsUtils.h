@@ -97,6 +97,12 @@ inline constexpr const char REFLECT_PACKAGE_NAME[] = "std.reflect";
 inline constexpr const char REF_PACKAGE_NAME[] = "std.ref";
 inline constexpr const char EFFECT_INTERNALS_PACKAGE_NAME[] = "stdx.effect";
 inline constexpr const char EFFECT_PACKAGE_NAME[] = "stdx.effect";
+// --cj-pct PCT framework packages, outside the std builtin registry: their cjo
+// must resolve via --import-path and their library be linked explicitly
+// (-lstdx.unittest.concurrent).
+inline constexpr const char PCT_CONCURRENT_PACKAGE_NAME[] = "stdx.unittest.concurrent";
+// --cj-pct import-remap target: the PCT-instrumented mirror of std.sync.
+inline constexpr const char PCT_SYNC_PACKAGE_NAME[] = "stdx.unittest.sync";
 
 // Standard library class name
 inline const std::string STD_LIB_ARRAY = "Array";
