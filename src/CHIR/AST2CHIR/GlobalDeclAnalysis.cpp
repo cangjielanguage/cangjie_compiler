@@ -194,7 +194,7 @@ void GlobalDeclAnalysis::AnalysisDepOf(const AST::Decl& rootDecl, std::vector<Pt
 bool GlobalDeclAnalysis::SkipDependencyTo(const AST::Decl& decl)
 {
     // 1) the target decls are only declarations which don't have body
-    if (decl.TestAttr(AST::Attribute::FOREIGN) || decl.TestAttr(AST::Attribute::INTRINSIC) ||
+    if (AST::IsExternalForeign(decl) || decl.TestAttr(AST::Attribute::INTRINSIC) ||
         decl.TestAttr(AST::Attribute::ENUM_CONSTRUCTOR)) {
         return true;
     }

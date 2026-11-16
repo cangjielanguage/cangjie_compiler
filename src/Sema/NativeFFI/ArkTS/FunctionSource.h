@@ -87,9 +87,10 @@ void DiagnoseArkTSOptionProblem(DiagnosticEngine& diag, AST::Decl& decl,
 bool ResolveArkTSModule(AST::Decl& decl, const std::unordered_map<std::string, std::string>& options,
     const AST::Package& pkg, DiagnosticEngine& diag, DiagKindRefactor invalidKind, std::string& module);
 
-// A source @ArkTS foreign class that has not been prepared yet: annotated,
-// still FOREIGN, and not generic. Generic declarations keep their external
-// form (the stdlib presets) and are never lowered into wrappers.
+// A source @ArkTS foreign class that has not been prepared yet: annotated, not
+// generic, and without the wrapper marker. FOREIGN alone no longer separates
+// the states, because preparation keeps it. Generic declarations keep their
+// external form (the stdlib presets) and are never lowered into wrappers.
 bool IsArkTSForeignClass(const AST::ClassDecl& cd);
 // Prepared wrapper class; also true for an imported wrapper, whose attribute
 // survives the CJO round trip.
@@ -121,7 +122,7 @@ bool IsArkTSReferenceDecl(const AST::Decl& decl);
 // checks the declaration kind) in front of any interface-specific rule.
 bool IsArkTSPreparedInterface(const AST::Decl& decl);
 // A source @ArkTS foreign interface that has not been prepared yet: annotated,
-// still FOREIGN, an interface declaration, and not generic.
+// an interface declaration, not generic, and without the wrapper marker.
 bool IsArkTSForeignInterface(const AST::InterfaceDecl& id);
 // Compiler-generated implementation class of one prepared foreign interface.
 // The interface and its implementation class share the wrapper attribute; the
@@ -185,12 +186,12 @@ bool ArkTSFuncBodyHasRestParam(const AST::FuncBody& body);
 size_t ArkTSRestPosition(const std::vector<Ptr<AST::FuncParam>>& params, size_t scanned);
 
 // Whether @p member hangs off an @ArkTS foreign class-like. A member carries
-// neither marker on itself: FOREIGN is propagated to members by Sema and the
-// @ArkTS annotation stays on the enclosing declaration, so the owner is
-// consulted. Preparation can clear FOREIGN and mark the class
-// ARKTS_CLASS_WRAPPER before this runs, so both forms identify the owner.
-// Sema-side spelling of the parser's IsArkTSForeignClassLikeMember rule
-// (Parse/ParseDecl.cpp), which is private to that translation unit.
+// neither marker on itself: the @ArkTS annotation stays on the enclosing
+// declaration, so the owner is consulted. Preparation marks the class
+// ARKTS_CLASS_WRAPPER without removing FOREIGN, so both the external and the
+// prepared form identify the owner. Sema-side spelling of the parser's
+// IsArkTSForeignClassLikeMember rule (Parse/ParseDecl.cpp), which is private to
+// that translation unit.
 bool ArkTSForeignClassLikeMember(const AST::Decl& member);
 
 // Every declaration that carries @ArkTS contributes the same option shape

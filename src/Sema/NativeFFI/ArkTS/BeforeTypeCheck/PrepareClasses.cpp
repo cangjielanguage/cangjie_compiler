@@ -289,8 +289,9 @@ bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager
 
 // Before: a foreign class whose shape checks passed. After result: the class
 // is an ordinary Cangjie class marked ARKTS_CLASS_WRAPPER with its reference
-// members declared; FOREIGN is removed so member bodies can be attached by
-// lowering. @p wrapperParent tells InsertReferenceMembers whether a prepared
+// members declared; FOREIGN stays as the source identity while the marker
+// carries the prepared state, so member bodies can be attached by lowering.
+// @p wrapperParent tells InsertReferenceMembers whether a prepared
 // wrapper parent supplies the storage (delegating wrapping constructors only)
 // or the class is a root wrapper (field, accessor and both wrapping
 // constructors). Returns true when the class became a wrapper; a failed
@@ -304,7 +305,6 @@ bool InstallWrapperMembers(
         cd.EnableAttr(Attribute::IS_BROKEN);
         return false;
     }
-    cd.DisableAttr(Attribute::FOREIGN);
     Utils::EraseIf(cd.modifiers, [](auto& mod) { return mod.modifier == TokenKind::FOREIGN; });
     cd.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
     return true;
@@ -353,11 +353,11 @@ void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceM
         for (auto& decl : file->decls) {
             auto cd = DynamicCast<ClassDecl*>(decl.get());
             // A class already marked broken keeps its refusal diagnostic and
-            // its FOREIGN marker (only an installed wrapper drops it), so a
-            // repeated preparation over the same AST must skip the check
-            // rather than report the same refusal again. The install phase
-            // below returns at the IS_BROKEN check as well, so the whole
-            // repeated pass is a no-op.
+            // its FOREIGN source identity (an installed wrapper also carries
+            // ARKTS_CLASS_WRAPPER), so a repeated preparation over the same AST
+            // must skip the check rather than report the same refusal again.
+            // The install phase below returns at the IS_BROKEN check as well,
+            // so the whole repeated pass is a no-op.
             if (!cd || !IsArkTSForeignClass(*cd) || cd->TestAttr(Attribute::IS_BROKEN)) {
                 continue;
             }

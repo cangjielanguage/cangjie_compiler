@@ -12,6 +12,7 @@
 #include <unordered_set>
 
 #include "cangjie/AST/Match.h"
+#include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Modules/ImportManager.h"
@@ -164,13 +165,21 @@ bool ArkTSFuncBodyHasRestParam(const FuncBody& body)
 bool ArkTSForeignClassLikeMember(const Decl& member)
 {
     // Preparation rewrites a non-generic @ArkTS foreign class in place: it
-    // clears FOREIGN and marks the declaration ARKTS_CLASS_WRAPPER before
+    // keeps FOREIGN and marks the declaration ARKTS_CLASS_WRAPPER before
     // PreCheck reaches the option fold. Both spellings are the same
     // class-like owner, so the member rule accepts either; a generic class
-    // keeps the external declaration form and stays FOREIGN.
+    // keeps the external declaration form and has no marker.
+    //
+    // A prepared interface is excluded. Its members are lowered into generated
+    // bodies that carry their own parameter binding, so the member rules this
+    // predicate gates - the named-parameter default requirement in particular -
+    // do not apply; an index setter spells its value parameter as a named
+    // parameter without a default. Before FOREIGN survived preparation the
+    // predicate excluded prepared interfaces by the absent FOREIGN; the marker
+    // now has to say so explicitly.
     return member.outerDecl != nullptr && member.outerDecl->IsClassLikeDecl() &&
         member.outerDecl->HasAnno(AnnotationKind::ARKTS) &&
-        (member.outerDecl->TestAttr(Attribute::FOREIGN) ||
+        (IsExternalForeign(*member.outerDecl) ||
             member.outerDecl->TestAttr(Attribute::ARKTS_CLASS_WRAPPER));
 }
 
@@ -566,14 +575,14 @@ void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
                 break;
             }
         }
-        // Bodyless members of an @ArkTS foreign class-like carry no marker of
-        // their own: FOREIGN is propagated by Sema and the @ArkTS annotation
-        // stays on the enclosing declaration, so the owner is consulted (the
-        // same shape the parser uses to accept a bodyless init). Their named
-        // parameters must have a default value for the same reason as a
-        // top-level wrapper: the generated binding cannot tell an omitted
-        // named argument from an explicitly passed value. A member has no
-        // wrapper of its own, so the declaration is only marked broken.
+        // Bodyless members of an external @ArkTS foreign class-like carry no
+        // marker of their own: Sema propagates FOREIGN to them and the @ArkTS
+        // annotation stays on the enclosing declaration, so the owner is
+        // consulted (the same shape the parser uses to accept a bodyless
+        // init). Their named parameters must have a default value for the same
+        // reason as a top-level wrapper: the generated binding cannot tell an
+        // omitted named argument from an explicitly passed value. A member has
+        // no wrapper of its own, so the declaration is only marked broken.
         FuncBody* memberBody = nullptr;
         if (auto fd = DynamicCast<FuncDecl*>(decl)) {
             memberBody = fd->funcBody.get();

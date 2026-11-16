@@ -45,7 +45,7 @@ void CheckAnnoCallingConv(Decl& decl, const Annotation& anno, DiagnosticEngine& 
         diag.DiagnoseRefactor(DiagKindRefactor::sema_illegal_scope_use_of_annotation, anno, "@CallingConv");
         return;
     }
-    if (decl.astKind != ASTKind::FUNC_DECL || (!decl.TestAttr(Attribute::FOREIGN) && !decl.TestAttr(Attribute::C))) {
+    if (decl.astKind != ASTKind::FUNC_DECL || (!IsExternalForeign(decl) && !decl.TestAttr(Attribute::C))) {
         // Will be replaced with anno->identifier.
         diag.DiagnoseRefactor(DiagKindRefactor::sema_only_cfunc_can_use_annotation, anno, "@CallingConv");
         return;
@@ -73,7 +73,7 @@ void CheckAnnoFastNative(const Decl& decl, const Annotation& anno, DiagnosticEng
     if (!anno.args.empty()) {
         diag.Diagnose(*anno.args[0], DiagKind::sema_annotation_error_arg_num, "@FastNative", "no");
     }
-    if (decl.astKind != ASTKind::FUNC_DECL || !decl.TestAttr(Attribute::FOREIGN)) {
+    if (decl.astKind != ASTKind::FUNC_DECL || !IsExternalForeign(decl)) {
         // Will be merged with sema_illegal_scope_use_of_annotation.
         std::string prefix = decl.astKind == ASTKind::FUNC_DECL ? "non-foreign " : "";
         diag.Diagnose(anno, DiagKind::sema_illegal_use_of_annotation, prefix + DeclKindToString(decl), "@FastNative");
@@ -247,9 +247,12 @@ void TypeChecker::TypeCheckerImpl::CheckUnsafeInvoke(const CallExpr& ce)
     if (ce.resolvedFunction == nullptr || !ce.resolvedFunction->GetTy().IsCorrect() || !IsUnsafeBackend(backendType)) {
         return;
     }
-    auto funcTy = StaticCast<FuncTy*>(ce.resolvedFunction->DataTy());
+    auto funcTy = StaticCast<FuncTy*>(ce.resolvedFunction->GetTy());
+    // A prepared @ArkTS wrapper keeps FOREIGN as its source identity but is an
+    // ordinary Cangjie function: its calls do not need 'unsafe'. Generic and
+    // preset declarations are still external and keep the requirement.
     bool isUnsafe = ce.resolvedFunction->TestAttr(Attribute::UNSAFE) ||
-        ce.resolvedFunction->TestAttr(Attribute::FOREIGN) || funcTy->isC;
+        IsExternalForeign(*ce.resolvedFunction) || funcTy->isC;
     if (!isUnsafe) {
         return;
     }

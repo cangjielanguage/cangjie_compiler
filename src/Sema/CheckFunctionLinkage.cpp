@@ -27,7 +27,7 @@ using namespace AST;
 namespace {
 bool IsSpecialFunction(const FuncDecl& fd)
 {
-    if (fd.TestAnyAttr(Attribute::IMPORTED, Attribute::FOREIGN)) {
+    if (fd.TestAttr(Attribute::IMPORTED) || IsExternalForeign(fd)) {
         return true;
     }
     auto isGetCommandLineArgsFunc = fd.fullPackageName == CORE_PACKAGE_NAME && fd.identifier == GET_COMMAND_LINE_ARGS;
@@ -316,7 +316,7 @@ inline bool IsMemberInMemLayout(const Decl& member)
 void ExternalLinkageAnalyzer::PerformPublicType(const OwnedPtr<Decl>& decl)
 {
     if (decl->linkage == Linkage::INTERNAL ||
-        (decl->astKind == ASTKind::FUNC_DECL && decl->TestAttr(Attribute::FOREIGN))) {
+        (decl->astKind == ASTKind::FUNC_DECL && IsExternalForeign(*decl))) {
         return;
     }
     if (auto vd = DynamicCast<VarDecl>(decl.get()); vd && vd->isConst) {

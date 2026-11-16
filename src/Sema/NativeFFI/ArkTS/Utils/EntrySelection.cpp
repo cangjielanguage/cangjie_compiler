@@ -6,6 +6,8 @@
 
 #include "EntrySelection.h"
 
+#include "cangjie/AST/Utils.h"
+
 using namespace Cangjie::AST;
 namespace Cangjie::Native::FFI::ArkTS {
 // Before: a FuncDecl carrying semantic attributes. After result: true for a
@@ -18,11 +20,13 @@ bool IsArkTSEntry(const FuncDecl& fd)
 }
 
 // Before: a source FuncDecl with annotations and attributes. After result: true
-// for an @ArkTS + FOREIGN declaration, before PrepareTypeCheck replaces foreign
-// ABI flags with ARKTS_FUNCTION_WRAPPER. This predicate itself changes no AST.
+// for an @ArkTS + FOREIGN declaration that PrepareTypeCheck has not rewritten
+// yet. FOREIGN survives preparation as the source identity, so the wrapper
+// marker is what keeps a prepared function out of a repeated pass. This
+// predicate itself changes no AST.
 bool IsArkTSForeignFunction(const FuncDecl& fd)
 {
-    return fd.HasAnno(AnnotationKind::ARKTS) && fd.TestAttr(Attribute::FOREIGN);
+    return fd.HasAnno(AnnotationKind::ARKTS) && AST::IsExternalForeign(fd);
 }
 
 } // namespace Cangjie::Native::FFI::ArkTS

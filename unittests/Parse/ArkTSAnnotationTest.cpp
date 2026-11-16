@@ -9,6 +9,7 @@
 #include "../../src/Sema/NativeFFI/ArkTS/Utils/EntrySelection.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Match.h"
+#include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Mangle/ASTMangler.h"
 #include "cangjie/Modules/ASTSerialization.h"
@@ -1089,7 +1090,15 @@ foreign func echo(value: String): String
     EXPECT_FALSE(IsArkTSEntry(function));
     PrepareTypeCheck(package, diag, sm);
     EXPECT_TRUE(function.TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER));
-    EXPECT_FALSE(function.TestAnyAttr(Attribute::FOREIGN, Attribute::C, Attribute::NO_MANGLE));
+    // FOREIGN is the declaration's source identity; the wrapper marker is the
+    // prepared state, so both hold and neither C ABI flag is applied.
+    EXPECT_TRUE(function.TestAttr(Attribute::FOREIGN));
+    EXPECT_FALSE(function.TestAnyAttr(Attribute::C, Attribute::NO_MANGLE));
+    EXPECT_TRUE(IsArkTSPrepared(function));
+    EXPECT_FALSE(IsExternalForeign(function));
+    // The source 'foreign' modifier is still erased during preparation.
+    EXPECT_TRUE(std::none_of(function.modifiers.begin(), function.modifiers.end(),
+        [](const Modifier& modifier) { return modifier.modifier == TokenKind::FOREIGN; }));
     EXPECT_FALSE(IsArkTSEntry(function));
     EXPECT_EQ(file->decls.size(), 1);
 }

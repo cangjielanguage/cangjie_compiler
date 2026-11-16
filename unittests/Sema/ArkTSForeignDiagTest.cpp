@@ -24,6 +24,7 @@
 #include "gtest/gtest.h"
 #include "TestCompilerInstance.h"
 #include "cangjie/AST/Types.h"
+#include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 
@@ -3401,6 +3402,99 @@ public foreign interface Box<T> {
         return VisitAction::WALK_CHILDREN;
     }).Walk();
     EXPECT_FALSE(lowered);
+}
+
+// Preparation keeps FOREIGN as the declaration's source identity and records
+// the rewritten state in the kind-specific marker; the members of a prepared
+// owner are ordinary declarations and carry no FOREIGN.
+TEST_F(ArkTSForeignDiagTest, PreparedForeignDeclarationsKeepForeign)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign func echo(value: String): String
+
+@ArkTS[module: "actual"]
+public foreign class Box {
+    public init()
+    public func put(value: String): String
+}
+
+@ArkTS[module: "actual"]
+public foreign interface Person {
+    func name(): String
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+
+    auto echo = FindFunction("echo");
+    ASSERT_NE(echo, nullptr);
+    EXPECT_TRUE(echo->TestAttr(Attribute::FOREIGN));
+    EXPECT_TRUE(echo->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER));
+    EXPECT_TRUE(IsArkTSPrepared(*echo));
+    EXPECT_FALSE(IsExternalForeign(*echo));
+
+    auto box = FindClass("Box");
+    ASSERT_NE(box, nullptr);
+    EXPECT_TRUE(box->TestAttr(Attribute::FOREIGN));
+    EXPECT_TRUE(box->TestAttr(Attribute::ARKTS_CLASS_WRAPPER));
+    EXPECT_TRUE(IsArkTSPrepared(*box));
+    EXPECT_FALSE(IsExternalForeign(*box));
+    for (auto& member : box->GetMemberDecls()) {
+        EXPECT_FALSE(member->TestAttr(Attribute::FOREIGN)) << member->identifier.Val();
+    }
+
+    Ptr<InterfaceDecl> person = nullptr;
+    Walker(instance->GetSourcePackages()[0].get(), [&person](Ptr<Node> node) {
+        if (auto id = DynamicCast<InterfaceDecl*>(node); id && id->identifier.Val() == "Person") {
+            person = id;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    ASSERT_NE(person, nullptr);
+    EXPECT_TRUE(person->TestAttr(Attribute::FOREIGN));
+    EXPECT_TRUE(person->TestAttr(Attribute::ARKTS_INTERFACE_WRAPPER));
+    EXPECT_TRUE(IsArkTSPrepared(*person));
+    EXPECT_FALSE(IsExternalForeign(*person));
+    for (auto& member : person->GetMemberDecls()) {
+        EXPECT_FALSE(member->TestAttr(Attribute::FOREIGN)) << member->identifier.Val();
+    }
+}
+
+// A generic @ArkTS foreign interface is never prepared: FOREIGN stays and no
+// marker is installed, so its member keeps the external declaration rules and
+// a call from an ordinary function requires an 'unsafe' context.
+TEST_F(ArkTSForeignDiagTest, GenericForeignInterfaceKeepsExternalForeign)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Box<T> {
+    func value(): T
+}
+
+public func read(box: Box<Int64>): Int64 {
+    return box.value()
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("unsafe function or native function should be invoked in unsafe context"));
+    Ptr<InterfaceDecl> box = nullptr;
+    Walker(instance->GetSourcePackages()[0].get(), [&box](Ptr<Node> node) {
+        if (auto id = DynamicCast<InterfaceDecl*>(node); id && id->identifier.Val() == "Box") {
+            box = id;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    ASSERT_NE(box, nullptr);
+    EXPECT_TRUE(box->TestAttr(Attribute::FOREIGN));
+    EXPECT_FALSE(IsArkTSPrepared(*box));
+    EXPECT_TRUE(IsExternalForeign(*box));
 }
 
 TEST_F(ArkTSForeignDiagTest, ForeignInterfaceOptionsAndForeignNameAreAccepted)

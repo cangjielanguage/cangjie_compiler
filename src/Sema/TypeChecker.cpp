@@ -241,7 +241,7 @@ bool TypeChecker::TypeCheckerImpl::CheckNormalFuncBody(ASTContext& ctx, FuncBody
 
     bool isCFFIBackend = IsUnsafeBackend(backendType);
     bool isCFunc =
-        fb.TestAttr(Attribute::C) || (fb.funcDecl && fb.funcDecl->TestAttr(Attribute::FOREIGN) && isCFFIBackend);
+        fb.TestAttr(Attribute::C) || (fb.funcDecl && IsExternalForeign(*fb.funcDecl) && isCFFIBackend);
     bool hasVariableLenArg = (fb.funcDecl && fb.funcDecl->hasVariableLenArg) || fb.paramLists[0]->hasVariableLenArg;
     // Check and update return type for foreign functions.
     if (!fb.retType->GetTy().IsCorrect()) {
@@ -2595,7 +2595,7 @@ OwnedPtr<FuncDecl> MakeDefaultParamFunction(
     // shared path unchanged.
     const bool arktsDeclaration =
         funcDecl.TestAttr(Attribute::ARKTS) || Native::FFI::ArkTS::ArkTSForeignClassLikeMember(funcDecl);
-    if (arktsDeclaration && funcDecl.TestAttr(Attribute::FOREIGN) && funcDecl.funcBody && !funcDecl.funcBody->body) {
+    if (arktsDeclaration && IsExternalForeign(funcDecl) && funcDecl.funcBody && !funcDecl.funcBody->body) {
         ret->toBeCompiled = false;
     }
     ret->ownerFunc = &funcDecl;
@@ -2661,18 +2661,17 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
             // existing default-parameter checks, and an accepted parameter is
             // appended after this block.
             // This predicate is deliberately narrower than the shared
-            // ArkTSForeignClassLikeMember rule: it accepts the FOREIGN spelling
-            // and a prepared @ArkTS foreign interface, not a prepared
-            // ARKTS_CLASS_WRAPPER member. The two tests are disjoint lifecycle
-            // states, not redundant spellings: interface preparation clears
-            // FOREIGN before it sets ARKTS_INTERFACE_WRAPPER
-            // (PrepareInterfaces.cpp), so FOREIGN still marks a declaration
-            // preparation did not rewrite - a generic or preset declaration, or
-            // one refused before preparation clears FOREIGN - while
-            // ARKTS_INTERFACE_WRAPPER marks a prepared interface (its generated
-            // implementation class carries the same attribute, so the interface
-            // declaration kind distinguishes the two). Neither test covers the
-            // other's state. A prepared
+            // ArkTSForeignClassLikeMember rule: it accepts the external FOREIGN
+            // spelling and a prepared @ArkTS foreign interface, not a prepared
+            // ARKTS_CLASS_WRAPPER member. The two tests cover different states,
+            // not different spellings: FOREIGN survives preparation as the
+            // source identity, so IsExternalForeign selects only the
+            // declarations preparation did not rewrite - a generic or preset
+            // declaration, or one refused before preparation installed a
+            // marker - while ARKTS_INTERFACE_WRAPPER selects a prepared
+            // interface (its generated implementation class carries the same
+            // attribute, so the interface declaration kind distinguishes the
+            // two). Neither test covers the other's state. A prepared
             // member must get its default-parameter function here, before the
             // wrapper body is lowered; creating it after lowering (as the
             // class post-pass would) makes the constructor's generated return
@@ -2681,7 +2680,7 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
             // same members before their bodies exist.
             const bool isArkTSForeignBodylessMember = fd->outerDecl != nullptr &&
                 fd->outerDecl->HasAnno(AnnotationKind::ARKTS) &&
-                (fd->outerDecl->TestAttr(Attribute::FOREIGN) ||
+                (IsExternalForeign(*fd->outerDecl) ||
                     Native::FFI::ArkTS::IsArkTSPreparedInterface(*fd->outerDecl)) &&
                 fd->funcBody && !fd->funcBody->body;
             if (fd->op != TokenKind::ILLEGAL || fd->TestAttr(Attribute::OPEN) ||

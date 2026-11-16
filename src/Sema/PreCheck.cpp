@@ -2087,7 +2087,7 @@ void TypeChecker::TypeCheckerImpl::PreSetDeclType(const ASTContext& ctx)
             retTy = ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)};
         }
         bool isCFunc =
-            fd->funcBody->TestAttr(Attribute::C) || (fd->TestAttr(Attribute::FOREIGN) && IsUnsafeBackend(backendType));
+            fd->funcBody->TestAttr(Attribute::C) || (IsExternalForeign(*fd) && IsUnsafeBackend(backendType));
         bool hasVariableLenArg = fd->hasVariableLenArg ||
             (!fd->funcBody->paramLists.empty() && fd->funcBody->paramLists[0]->hasVariableLenArg);
         fd->SetTy({typeManager.GetFunctionTy(paramTys, retTy, {isCFunc, false, hasVariableLenArg})});

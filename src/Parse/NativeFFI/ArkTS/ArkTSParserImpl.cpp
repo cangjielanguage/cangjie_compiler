@@ -25,9 +25,10 @@ bool HasArkTSAnnotation(const PtrVector<Annotation>& annotations)
 }
 
 // A member of an @ArkTS foreign class-like carries neither marker on itself
-// at parse time: FOREIGN is only propagated to members by Sema
-// (DeclAttributeChecker::SetCommonAttributes) and the @ArkTS annotation
-// stays on the enclosing declaration, so the class-like is resolved
+// at parse time: FOREIGN reaches members only through Sema's owner
+// propagation (DeclAttributeChecker::SetCommonAttributes, which a prepared
+// owner skips) and the @ArkTS annotation stays on the enclosing declaration,
+// so the class-like is resolved
 // through the parser chain. The body scope kinds are produced only while
 // the enclosing ChainScope is active, FOREIGN enabled and @ArkTS attached,
 // so a function nested in a member body never resolves to the outer

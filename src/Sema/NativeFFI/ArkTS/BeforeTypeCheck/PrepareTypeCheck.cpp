@@ -171,9 +171,12 @@ bool HasGeneratedEntry(const GeneratedDeclarations& declarations, const FuncDecl
 
 // Before -> after, for each source declaration:
 //   @ArkTS foreign func echo(...): T, with FOREIGN and an empty body slot
-//     -> same FuncDecl marked ARKTS_FUNCTION_WRAPPER; FOREIGN and any C/NO_MANGLE
-//        flags and the FOREIGN modifier are removed (also C on FuncBody); body stays empty
-//        until LowerArkTSFunctions resolves its semantic parameter/return types.
+//     -> same FuncDecl marked ARKTS_FUNCTION_WRAPPER; the C/NO_MANGLE flags and
+//        the FOREIGN modifier are removed (also C on FuncBody) while FOREIGN
+//        itself stays as the declaration's source identity. Every check that
+//        used FOREIGN to mean "external" reads IsExternalForeign instead. Body
+//        stays empty until LowerArkTSFunctions resolves its semantic
+//        parameter/return types.
 //   @ArkTS public func run(): Unit { ... }
 //     -> unchanged run plus a generated callback and registration VarDecl in
 //        its File.decls (CreateEntry documents their complete source/AST shape).
@@ -211,7 +214,7 @@ void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourc
                 continue;
             }
             fd->EnableAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
-            fd->DisableAttr(Attribute::FOREIGN, Attribute::C, Attribute::NO_MANGLE);
+            fd->DisableAttr(Attribute::C, Attribute::NO_MANGLE);
             fd->funcBody->DisableAttr(Attribute::C);
             Utils::EraseIf(fd->modifiers, [](auto& mod) { return mod.modifier == TokenKind::FOREIGN; });
         }

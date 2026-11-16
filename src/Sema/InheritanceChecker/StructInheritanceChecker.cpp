@@ -999,7 +999,7 @@ void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMa
     // 5. Handle wrapper classes generated for objc interop (corresponding members are generated after
     // typecheck).
     if (structDecl.TestAnyAttr(Attribute::IS_BROKEN, Attribute::HAS_BROKEN) ||
-        structDecl.TestAttr(Attribute::FOREIGN) ||
+        IsExternalForeign(structDecl) ||
         structDecl.TestAnyAttr(Attribute::OBJ_C_FOREIGN, Attribute::OBJ_C_FOREIGN_INTERFACE_HANDLE_WRAPPER) ||
         structDecl.TestAttr(Attribute::JAVA_FOREIGN_SYNTHETIC_WRAPPER)) {
         return;
@@ -1029,7 +1029,7 @@ void StructInheritanceChecker::DiagnoseForUnimplementedInterfaces(const MemberMa
         // 1. decl is defined in foreign struct;
         // 2. abstract decl in abstract class && current is extend decl.
         // 3. abstract decl in interface inherited by extended type decl.
-        bool inForeignType = member.decl->outerDecl->TestAttr(Attribute::FOREIGN);
+        bool inForeignType = IsExternalForeign(*member.decl->outerDecl);
         bool extendInheritedAbstract = member.decl->outerDecl->TestAttr(Attribute::ABSTRACT) &&
             member.decl->TestAttr(Attribute::ABSTRACT) && structDecl.astKind == ASTKind::EXTEND_DECL;
         bool extendAbsInheritedInterface = structDecl.astKind == ASTKind::EXTEND_DECL &&

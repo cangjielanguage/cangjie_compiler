@@ -202,13 +202,14 @@ void PrepareInterface(
         DiagnoseInterface(diag, id, "cannot declare the wrapper reference accessor");
         return;
     }
-    // FOREIGN is removed before the symbol table and the FFI overload check:
-    // a foreign declaration cannot carry the index get/set overload pair.
-    id.DisableAttr(Attribute::FOREIGN);
+    // FOREIGN stays as the declaration's source identity; the marker records
+    // the prepared state. The FFI overload rule exempts @ArkTS declarations by
+    // annotation rather than by an absent FOREIGN, so the index get/set pair
+    // remains legal. Members never carry FOREIGN: preparation never stamps
+    // them and DeclAttributeChecker skips the owner->member propagation for a
+    // prepared owner.
     Utils::EraseIf(id.modifiers, [](auto& mod) { return mod.modifier == TokenKind::FOREIGN; });
     for (auto& member : id.GetMemberDecls()) {
-        member->DisableAttr(Attribute::FOREIGN);
-        Utils::EraseIf(member->modifiers, [](auto& mod) { return mod.modifier == TokenKind::FOREIGN; });
         if (auto fd = DynamicCast<FuncDecl*>(member.get()); fd && !fd->TestAttr(Attribute::CONSTRUCTOR)) {
             fd->EnableAttr(Attribute::ABSTRACT);
             continue;
@@ -263,7 +264,8 @@ void PrepareInterface(
 
 // Prepare every unprepared non-generic foreign interface. The declaration is
 // validated, gains the compiler-owned accessor and a generated implementation
-// class, and stops being a foreign declaration before symbol-table building.
+// class, and carries ARKTS_INTERFACE_WRAPPER as its prepared state before
+// symbol-table building. FOREIGN stays on it as the source identity.
 void PrepareInterfaces(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager* imports)
 {
     if (imports == nullptr) {
@@ -273,9 +275,9 @@ void PrepareInterfaces(Package& pkg, DiagnosticEngine& diag, SourceManager& sour
         std::vector<InterfaceDecl*> prepared;
         for (auto& decl : file->decls) {
             auto id = DynamicCast<InterfaceDecl*>(decl.get());
-            // A refused interface keeps FOREIGN (the marker that makes it a
-            // source declaration) but has no ARKTS_INTERFACE_WRAPPER, so the
-            // broken mark is the idempotency guard for a repeated pass.
+            // A refused interface has no ARKTS_INTERFACE_WRAPPER, so the broken
+            // mark and the wrapper marker are the idempotency guards for a
+            // repeated pass. FOREIGN alone no longer separates the states.
             if (!id || IsArkTSPreparedInterface(*id) || id->TestAttr(Attribute::IS_BROKEN) ||
                 !IsArkTSForeignInterface(*id)) {
                 continue;

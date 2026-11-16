@@ -819,7 +819,7 @@ void TypeChecker::TypeCheckerImpl::IsNamespaceMemberAccessLegal(
             diag.Diagnose(ma, DiagKind::sema_package_internal_decl_obtain_illegal, GetAccessLevelStr(target),
                 ma.field.Val(), targetPackage);
         }
-    } else if (realTarget->IsNominalDecl() && !realTarget->TestAttr(Attribute::FOREIGN) &&
+    } else if (realTarget->IsNominalDecl() && !IsExternalForeign(*realTarget) &&
         target.TestAttr(Attribute::ABSTRACT)) {
         auto fieldRange = MakeRange(ma.field);
         std::string strType = target.astKind == ASTKind::FUNC_DECL ? "function" : "property";

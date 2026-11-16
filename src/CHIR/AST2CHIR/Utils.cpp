@@ -147,6 +147,16 @@ AttributeInfo BuildAttr(const AST::AttributePack& attr)
     return attrInfo;
 }
 
+AttributeInfo BuildAttr(const AST::Decl& decl)
+{
+    auto attrInfo = BuildAttr(decl.GetAttrs());
+    // CHIR Attribute::FOREIGN means external, so a prepared wrapper must not carry it.
+    if (AST::IsArkTSPrepared(decl)) {
+        attrInfo.SetAttr(Attribute::FOREIGN, false);
+    }
+    return attrInfo;
+}
+
 AttributeInfo BuildVarDeclAttr(const AST::VarDecl& decl)
 {
     auto attrInfo = BuildAttr(decl.GetAttrs());

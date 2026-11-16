@@ -206,7 +206,7 @@ void MockSupportManager::PrepareDecls(DeclsToPrepare&& decls)
     }
 
     for (auto decl : decls.functions) {
-        if (decl->TestAttr(Attribute::FOREIGN) &&
+        if (IsExternalForeign(*decl) &&
             usedInternalDecls.find(decl) != usedInternalDecls.end() &&
             !decl->funcBody->paramLists[0]->hasVariableLenArg // vararg C functions are not supported yet
         ) {
@@ -1033,7 +1033,7 @@ OwnedPtr<FuncDecl> MockSupportManager::CreateFieldAccessorDecl(
 
 OwnedPtr<FuncDecl> MockSupportManager::CreateForeignFunctionAccessorDecl(FuncDecl& funcDecl) const
 {
-    CJC_ASSERT(funcDecl.TestAttr(Attribute::FOREIGN));
+    CJC_ASSERT(IsExternalForeign(funcDecl));
     const auto& funcBody = funcDecl.funcBody;
 
     CJC_ASSERT(funcDecl.TyKind() == TypeKind::TYPE_FUNC);

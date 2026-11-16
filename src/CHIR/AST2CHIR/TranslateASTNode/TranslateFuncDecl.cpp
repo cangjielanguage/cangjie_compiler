@@ -197,8 +197,8 @@ bool NeedCreateDebugForFirstParam(const Function& func)
 Ptr<Value> Translator::Visit(const AST::FuncDecl& func)
 {
     CJC_NULLPTR_CHECK(func.funcBody);
-    // Abstract function do not need func body. 'intrinsic' and 'foreign' function was ignored from toplevel.
-    if (func.TestAnyAttr(AST::Attribute::INTRINSIC, AST::Attribute::ABSTRACT, AST::Attribute::FOREIGN)) {
+    // Abstract function do not need func body. 'intrinsic' and external 'foreign' function was ignored from toplevel.
+    if (func.TestAnyAttr(AST::Attribute::INTRINSIC, AST::Attribute::ABSTRACT) || AST::IsExternalForeign(func)) {
         return nullptr;
     }
     if (IsCommonWithoutDefault(func)) {

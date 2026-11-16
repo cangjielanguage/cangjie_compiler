@@ -159,7 +159,7 @@ bool IsClosedSealedHierarchy(const ClassLikeTy& ty, const Package& currentPackag
     }
     const ClassLikeDecl& decl = *ty.commonDecl;
     if (decl.TestAnyAttr(Attribute::COMMON, Attribute::SPECIFIC, Attribute::FROM_COMMON_PART) ||
-        !IsCurrentPackageDecl(decl, currentPackage) || decl.TestAttr(Attribute::FOREIGN) ||
+        !IsCurrentPackageDecl(decl, currentPackage) || IsExternalForeign(decl) ||
         (isRoot ? !IsClosedSealedRoot(ty, decl) : !IsClosedSealedLeaf(ty, decl))) {
         return false;
     }

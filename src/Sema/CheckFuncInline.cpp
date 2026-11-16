@@ -63,7 +63,7 @@ bool CanCountedRefExprOrMemberExpr(const Expr& expr)
         if (funcDecl->TestAttr(Attribute::INTRINSIC)) {
             return true;
         }
-        if (funcDecl->TestAnyAttr(Attribute::FOREIGN, Attribute::C) || !CanExportForInline(*funcDecl)) {
+        if (IsExternalForeign(*funcDecl) || funcDecl->TestAttr(Attribute::C) || !CanExportForInline(*funcDecl)) {
             return false;
         }
     }
@@ -143,7 +143,7 @@ bool IsInlineFunction(const FuncDecl& fd)
     if (fd.ownerFunc && fd.ownerFunc->TestAttr(Attribute::CONSTRUCTOR)) {
         return false;
     }
-    if (fd.TestAnyAttr(Attribute::C, Attribute::FOREIGN)) {
+    if (fd.TestAttr(Attribute::C) || IsExternalForeign(fd)) {
         return false;
     }
     if (fd.TestAttr(Attribute::OPEN)) {

@@ -42,9 +42,9 @@ bool HasArkTSAnnotation(const std::vector<OwnedPtr<AST::Annotation>>& annos)
 // Bodyless 'init' member of an @ArkTS foreign class-like (the stdlib
 // ArkTSArray/ArkTSString constructors are declared without bodies). The
 // enclosing declaration is tested because the member itself carries neither
-// marker at parse time: FOREIGN is only propagated to members by Sema
-// (DeclAttributeChecker::SetCommonAttributes) and the @ArkTS annotation
-// stays on the class-like. outerDecl is already set when this runs:
+// marker at parse time: FOREIGN reaches members only through Sema's owner
+// propagation (DeclAttributeChecker::SetCommonAttributes), and the @ArkTS
+// annotation stays on the class-like. outerDecl is already set when this runs:
 // SetMemberParentInheritableDecl precedes CheckInitCtorDeclBody in
 // ParseClassBody, and the class-like enables FOREIGN before parsing its body.
 bool IsArkTSForeignClassLikeMember(const Decl& member)

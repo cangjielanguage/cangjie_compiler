@@ -531,7 +531,7 @@ void TestManager::ReplaceCallsToForeignFunctions(Package& pkg)
 
         auto target = refNode->ref.target;
         Ptr<FuncDecl> funcDecl = As<ASTKind::FUNC_DECL>(target);
-        if (!funcDecl || !funcDecl->TestAttr(Attribute::FOREIGN)) {
+        if (!funcDecl || !IsExternalForeign(*funcDecl)) {
             return VisitAction::SKIP_CHILDREN;
         }
 
@@ -712,7 +712,7 @@ void TestManager::HandleDeclsToExportForTest(std::vector<Ptr<Package>> pkgs) con
             if (auto d = As<ASTKind::DECL>(node); d &&
                 !d->TestAttr(Attribute::PRIVATE) &&
                 (d->IsFuncOrProp() || Is<FuncParam>(d) || Is<ExtendDecl>(d)) &&
-                (isInExtend || d->TestAttr(Attribute::FOREIGN))
+                (isInExtend || IsExternalForeign(*d))
             ) {
                 d->mangledName = mangler.Mangle(*d);
             }

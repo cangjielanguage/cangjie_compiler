@@ -1657,7 +1657,7 @@ bool TypeChecker::TypeCheckerImpl::CheckCallCompatible(ASTContext& ctx, Function
             return false;
         }
         candidate.stat.matchedArgs++;
-        if (fd.TestAttr(Attribute::FOREIGN) && fd.hasVariableLenArg && i >= fd.funcBody->paramLists[0]->params.size()) {
+        if (IsExternalForeign(fd) && fd.hasVariableLenArg && i >= fd.funcBody->paramLists[0]->params.size()) {
             continue;
         }
         if (auto st = DynamicCast<StructTy>(ce.args[i]->DataTy());
@@ -3482,7 +3482,7 @@ bool TypeChecker::TypeCheckerImpl::PostCheckCallExpr(
     ce.baseFunc->SetTarget(&func);
     UpdateCallTargetsForLSP(ce, func);
     DynamicBindingThisType(*ce.baseFunc, func, typeMapping);
-    if (!func.TestAttr(Attribute::FOREIGN) && !func.TestAttr(Attribute::C)) {
+    if (!IsExternalForeign(func) && !func.TestAttr(Attribute::C)) {
         bool valid = true;
         for (auto& fa : ce.args) {
             if (fa->withInout) {

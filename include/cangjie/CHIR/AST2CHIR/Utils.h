@@ -89,6 +89,17 @@ std::string GetNameOfDefinedPackage(const AST::FuncDecl& funcDecl);
 AttributeInfo BuildAttr(const AST::AttributePack& attr);
 
 /**
+ * @brief Builds attribute information from a declaration.
+ *
+ * A prepared @ArkTS wrapper keeps Attribute::FOREIGN in AST, but CHIR's FOREIGN means external, so this
+ * overload clears it for prepared declarations.
+ *
+ * @param decl The declaration.
+ * @return Attribute information.
+ */
+AttributeInfo BuildAttr(const AST::Decl& decl);
+
+/**
  * @brief Builds attribute information for a variable declaration.
  *
  * @param decl The variable declaration.

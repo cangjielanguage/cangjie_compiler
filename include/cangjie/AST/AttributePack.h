@@ -187,9 +187,15 @@ enum class Attribute {
     OPERATOR,
 
     /**
-     * Mark whether a declaration is a foreign one.
-     * W: PreCheck.
-     * R: AST2CHIR, CodeGenHLIR, CodeGenJs, WellFormednessChecker, Parser, TypeChecker, PreCheck.
+     * Mark whether a declaration was written with the 'foreign' modifier. The
+     * bit survives @ArkTS wrapper preparation as the declaration's source
+     * identity, so it does NOT mean "external" any more: a prepared wrapper
+     * carries this bit and behaves as an ordinary Cangjie declaration.
+     * Use AST::IsExternalForeign for "external: bodyless, C ABI, imported,
+     * needs unsafe" and AST::IsArkTSPrepared for the prepared state.
+     * W: Parser, PreCheck.
+     * R: Parser, PreCheck, TypeChecker, AST2CHIR, CodeGenHLIR, CodeGenJs,
+     *    WellFormednessChecker.
      */
     FOREIGN,
 

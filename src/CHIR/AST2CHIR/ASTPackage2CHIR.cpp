@@ -162,7 +162,7 @@ void AST2CHIR::CollectFuncDecl(AST::FuncDecl& funcDecl)
         return;
     }
 
-    if (funcDecl.TestAttr(AST::Attribute::FOREIGN)) {
+    if (AST::IsExternalForeign(funcDecl)) {
         CollectDeclToList(funcDecl, foreignFuncs);
         return;
     }
@@ -515,7 +515,7 @@ void AST2CHIR::CollectDeclsInCurPkg(AST::Package& node)
 void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Function& chirFunc)
 {
     // 1. ----------------------- Attribute -----------------------
-    chirFunc.AppendAttributeInfo(BuildAttr(astFunc.GetAttrs()));
+    chirFunc.AppendAttributeInfo(BuildAttr(astFunc));
     if (astFunc.isConst) {
         chirFunc.EnableAttr(Attribute::CONST);
     }
@@ -557,7 +557,7 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
     }
 
     // foreign function must be imported
-    if (astFunc.TestAttr(AST::Attribute::FOREIGN)) {
+    if (AST::IsExternalForeign(astFunc)) {
         chirFunc.EnableAttr(Attribute::IMPORTED);
     }
 
@@ -889,7 +889,7 @@ void AST2CHIR::CreateAnnoOnlyDeclSig(const AST::Decl& decl)
 
 static void SetCustomTypeDefAttr(CustomTypeDef& def, const AST::Decl& decl)
 {
-    def.AppendAttributeInfo(BuildAttr(decl.GetAttrs()));
+    def.AppendAttributeInfo(BuildAttr(decl));
     if (auto structDef = DynamicCast<StructDef*>(&def)) {
         if (decl.TestAttr(AST::Attribute::C)) {
             structDef->SetCStruct(true);
