@@ -229,6 +229,11 @@ OwnedPtr<MacroDecl> ParserImpl::ParseMacroDecl(
 
 void ParserImpl::CheckMacroParamType(AST::Type& type, bool isReturnTy)
 {
+    if (type.modal.ToModalInfo().local != Mode::NOT) {
+        DiagUnexpectedModal(MakeRange(type.modal.LocalBegin(), type.modal.LocalEnd()));
+        chainedAST.back()->EnableAttr(Attribute::HAS_BROKEN);
+        return;
+    }
     if (auto ref = AST::As<ASTKind::REF_TYPE>(&type); ref && ref->ref.identifier == "Tokens") {
         return;
     }

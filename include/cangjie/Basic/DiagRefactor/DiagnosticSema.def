@@ -383,6 +383,7 @@ ERROR(sema_internal_local_return, "cannot return expression of internal %s mode"
 ERROR(sema_exclave_outside_function, "exclave must be used in a function")
 ERROR(sema_exclave_invalid_func_signature,
     "exclave must be used in function with @local! non copy param or @local!/@local? non copy return type")
+ERROR(sema_jump_out_of_exclave, "cannot jump out of an exclave expression")
 ERROR(sema_nested_exclave, "exclave cannot be nested", {"outer exclave is here"})
 ERROR(sema_abstract_exclave_func, "abstract function '%s' cannot be exclave")
 ERROR(sema_copy_struct_bad_field, "cannot declare field '%s' of non copy type '%s' in copy type '%s'")

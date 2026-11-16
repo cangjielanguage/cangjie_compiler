@@ -228,6 +228,11 @@ void TypeChecker::TypeCheckerImpl::CheckEntryFunc(FuncDecl& fd)
     if (invalidParamTy || fd.funcBody->paramLists[0]->params.size() > 1) {
         (void)diag.Diagnose(fd, DiagKind::sema_unexpected_param_for_entry);
     }
+    for (auto& param : fd.funcBody->paramLists[0]->params) {
+        if (param->GetTy().IsLocalType()) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_expected_data_type, *param->type, param->GetTy().String());
+        }
+    }
     (void)mainFunctionMap[fd.curFile].emplace(&fd);
 }
 
