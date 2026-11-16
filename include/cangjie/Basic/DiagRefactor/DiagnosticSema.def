@@ -180,6 +180,9 @@ ERROR(sema_extern_operation_in_const, "dynamic operation on 'Extern' is not allo
 ERROR(sema_extern_conversion_in_const, "implicit conversion to 'Extern' is not allowed in 'const' code",
     "conversion from '%s' to '%s'")
 
+// Extern
+ERROR(sema_extern_member_type_arguments, "type arguments are not allowed on a dynamic member access of 'Extern'")
+
 // Annotation
 ERROR(sema_annotation_no_const_init, "class with '@Annotation' should have 'const' constructor")
 ERROR(sema_annotation_arg_target, "'@Annotation' can only have one named argument 'target'")

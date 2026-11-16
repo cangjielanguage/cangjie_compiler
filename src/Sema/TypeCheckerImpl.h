@@ -965,6 +965,8 @@ private:
     bool SynArgsOfNothingBaseExpr(ASTContext& ctx, AST::CallExpr& ce);
     /** Check the dynamic call @p ce, whose callee is a value of type Extern<T>. */
     bool ChkExternCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    /** Check that the dynamic member access @p ma has no type arguments, which the foreign runtime cannot receive. */
+    bool ChkExternMemberTypeArguments(const AST::MemberAccess& ma);
     /**
      * One call expression may have multiple function candidates.
      * Filter them with parameters' conditions before legality check.

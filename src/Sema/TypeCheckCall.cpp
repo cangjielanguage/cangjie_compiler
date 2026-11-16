@@ -3774,6 +3774,16 @@ bool TypeChecker::TypeCheckerImpl::ChkExternCall(ASTContext& ctx, ModalTy target
     return true;
 }
 
+bool TypeChecker::TypeCheckerImpl::ChkExternMemberTypeArguments(const MemberAccess& ma)
+{
+    if (ma.typeArguments.empty()) {
+        return true;
+    }
+    (void)diag.DiagnoseRefactor(
+        DiagKindRefactor::sema_extern_member_type_arguments, ma, MakeRange(ma.leftAnglePos, ma.rightAnglePos + 1));
+    return false;
+}
+
 bool TypeChecker::TypeCheckerImpl::ChkFunctionCallExpr(ASTContext& ctx, ModalTy target, CallExpr& ce)
 {
     DesugarCallExpr(ctx, ce);
