@@ -239,17 +239,10 @@ void Devirtualization::RewriteToApply(CHIRBuilder& builder, std::vector<RewriteI
         }
         auto args = invoke->GetOperands();
         auto thisDerefType = thisType->StripAllRefs();
+        // Preserve the callee's receiver type: a value type can inherit a default
+        // interface method whose `this` parameter is still a reference.
         auto instThisType = GetInstParentType(
-            *thisDerefType, *realFunc->GetFuncType()->GetParamTypes()[0]->StripAllRefs(), builder);
-        if (thisDerefType->IsClassOrArray() || realFunc->TestAttr(Attribute::MUT)) {
-            instThisType = builder.GetType<RefType>(instThisType);
-        }
-        // Wrapper of a builtin type (e.g. `extend Unit <: I`) takes `Any&` as `this`.
-        // After unwrapping to the raw method, keep the builtin value type instead of Any&.
-        auto rawThisTy = realFunc->GetFuncType()->GetParamTypes()[0]->StripAllRefs();
-        if (rewriteInfo->thisType->IsBuiltinType() && rawThisTy->IsAny()) {
-            instThisType = builder.GetType<RefType>(builder.GetAnyTy());
-        }
+            *thisDerefType, *realFunc->GetFuncType()->GetParamTypes()[0], builder);
         auto instRetTy = invoke->GetResultType();
         auto typecastRes = TypeCastOrBoxIfNeeded(*args[0], *instThisType, builder, *parent, INVALID_LOCATION);
         if (typecastRes != args[0]) {
