@@ -375,9 +375,23 @@ void CheckArkTSWriteOnlyRead(Node& usage, DiagnosticEngine& diag)
     }
 }
 
+bool IsArkTSDecl(const Decl& decl)
+{
+    if (decl.HasAnno(AnnotationKind::ARKTS) || decl.TestAttr(Attribute::ARKTS)) {
+        return true;
+    }
+    return decl.outerDecl != nullptr &&
+        (decl.outerDecl->HasAnno(AnnotationKind::ARKTS) || decl.outerDecl->TestAttr(Attribute::ARKTS));
+}
+
 bool IsArkTSReferenceDecl(const Decl& decl)
 {
-    return decl.TestAnyAttr(Attribute::ARKTS_CLASS_WRAPPER, Attribute::ARKTS_FOREIGN_INTERFACE);
+    return decl.TestAttr(Attribute::ARKTS_CLASS_WRAPPER) || IsArkTSPreparedInterface(decl);
+}
+
+bool IsArkTSPreparedInterface(const Decl& decl)
+{
+    return decl.astKind == ASTKind::INTERFACE_DECL && decl.TestAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
 }
 
 namespace {
@@ -397,12 +411,12 @@ bool IsArkTSForeignInterface(const InterfaceDecl& id)
         return false;
     }
     return id.HasAnno(AnnotationKind::ARKTS) && id.TestAttr(Attribute::FOREIGN) &&
-        !id.TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) && (!id.generic || id.generic->typeParameters.empty());
+        !IsArkTSPreparedInterface(id) && (!id.generic || id.generic->typeParameters.empty());
 }
 
 bool IsArkTSInterfaceImpl(const Decl& decl)
 {
-    return decl.TestAttr(Attribute::ARKTS_INTERFACE_IMPL);
+    return decl.astKind == ASTKind::CLASS_DECL && decl.TestAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
 }
 
 std::string ArkTSInterfaceImplName(const Decl& iface)
@@ -416,7 +430,7 @@ std::string ArkTSInterfaceImplName(const Decl& iface)
 // failure and makes the caller refuse a generated reference construction.
 Ptr<ClassDecl> ArkTSInterfaceImpl(const Decl& iface, ImportManager* imports)
 {
-    if (!iface.TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+    if (!IsArkTSPreparedInterface(iface)) {
         return nullptr;
     }
     const auto name = ArkTSInterfaceImplName(iface);
@@ -500,7 +514,7 @@ void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
         auto decl = DynamicCast<Decl*>(node);
         if (decl == nullptr ||
             decl->TestAnyAttr(Attribute::IS_BROKEN, Attribute::ARKTS_FUNCTION_WRAPPER,
-                Attribute::ARKTS_CLASS_WRAPPER, Attribute::ARKTS_FOREIGN_INTERFACE, Attribute::ARKTS_INTERFACE_IMPL)) {
+                Attribute::ARKTS_CLASS_WRAPPER, Attribute::ARKTS_INTERFACE_WRAPPER)) {
             return VisitAction::WALK_CHILDREN;
         }
         for (const auto& annotation : decl->annotations) {
@@ -934,7 +948,7 @@ struct ArkTSValueEmitter {
                 return emitted;
             }
             Ptr<Decl> constructor = desc.reference;
-            if (desc.reference->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+            if (IsArkTSPreparedInterface(*desc.reference)) {
                 if (!desc.referenceImpl) {
                     return emitted;
                 }

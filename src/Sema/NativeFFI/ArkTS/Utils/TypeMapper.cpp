@@ -141,7 +141,7 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
     if (auto decl = Ty::GetDeclPtrOfTy(ty); decl && IsArkTSReferenceDecl(*decl)) {
         desc.kind = ArkTSTypeDesc::Kind::REFERENCE;
         desc.reference = decl;
-        if (decl->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+        if (IsArkTSPreparedInterface(*decl)) {
             desc.referenceImpl = ArkTSInterfaceImpl(*decl, imports);
         }
         return desc;
@@ -226,7 +226,7 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
             }
             // A foreign interface reference also needs its generated
             // implementation class: every from-JS position constructs it.
-            if (desc.reference->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+            if (IsArkTSPreparedInterface(*desc.reference)) {
                 return desc.referenceImpl != nullptr;
             }
             return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
@@ -290,7 +290,7 @@ bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc)
 bool ArkTSTypeDescContainsInterfaceReference(const ArkTSTypeDesc& desc)
 {
     if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
-        return desc.reference != nullptr && desc.reference->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE);
+        return desc.reference != nullptr && IsArkTSPreparedInterface(*desc.reference);
     }
     for (auto& element : desc.elements) {
         if (ArkTSTypeDescContainsInterfaceReference(element)) {

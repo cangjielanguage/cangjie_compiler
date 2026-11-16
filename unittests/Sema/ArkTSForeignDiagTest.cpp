@@ -3341,6 +3341,45 @@ public class Person <: IPerson {
     EXPECT_TRUE(HasErrorContaining("cannot implement @ArkTS foreign interface"));
 }
 
+TEST_F(ArkTSForeignDiagTest, GenericForeignInterfaceIsNotTreatedAsCFFI)
+{
+    // A generic foreign interface keeps FOREIGN (it is not prepared), but it
+    // is still an @ArkTS declaration and must not enter the C-FFI rules:
+    // overloads are legal, and no C ABI/NO_MANGLE/INTERNAL linkage is applied.
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Box<T> {
+    func value(): T
+    func value(prefix: String): T
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    Ptr<InterfaceDecl> box = nullptr;
+    std::vector<Ptr<FuncDecl>> members;
+    Walker(instance->GetSourcePackages()[0].get(), [&box, &members](Ptr<Node> node) {
+        if (auto id = DynamicCast<InterfaceDecl*>(node); id && id->identifier.Val() == "Box") {
+            box = id;
+        }
+        if (auto fd = DynamicCast<FuncDecl*>(node); fd && fd->identifier.Val() == "value") {
+            members.emplace_back(fd);
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    ASSERT_NE(box, nullptr);
+    EXPECT_FALSE(box->TestAttr(Attribute::C));
+    EXPECT_NE(box->linkage, Linkage::INTERNAL);
+    ASSERT_EQ(members.size(), 2U);
+    for (auto fd : members) {
+        EXPECT_FALSE(fd->TestAttr(Attribute::C));
+        EXPECT_FALSE(fd->TestAttr(Attribute::NO_MANGLE));
+        EXPECT_NE(fd->linkage, Linkage::INTERNAL);
+    }
+}
+
 TEST_F(ArkTSForeignDiagTest, GenericForeignInterfaceKeepsExternalForm)
 {
     PrepareArkTSSupport();

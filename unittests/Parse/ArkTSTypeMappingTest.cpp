@@ -1323,7 +1323,7 @@ TEST_F(ArkTSTypeMappingTest, ClassifyForeignInterfaceAsObjectReference)
     InterfaceDecl person;
     person.identifier = "IPerson";
     person.fullPackageName = "pkg";
-    person.EnableAttr(Attribute::ARKTS_FOREIGN_INTERFACE);
+    person.EnableAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
     InterfaceTy personTy("IPerson", person, {});
     auto reference = ArkTSClassifyType(&personTy);
     ASSERT_EQ(reference.kind, ArkTSTypeDesc::Kind::REFERENCE);
@@ -1366,11 +1366,11 @@ TEST_F(ArkTSTypeMappingTest, InterfaceReferenceConversionUsesTheImplementationCl
     InterfaceDecl person;
     person.identifier = "IPerson";
     person.fullPackageName = "pkg";
-    person.EnableAttr(Attribute::ARKTS_FOREIGN_INTERFACE);
+    person.EnableAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
     ClassDecl impl;
     impl.identifier = ArkTSInterfaceImplName(person);
     impl.fullPackageName = "pkg";
-    impl.EnableAttr(Attribute::ARKTS_INTERFACE_IMPL);
+    impl.EnableAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
     EXPECT_EQ(impl.identifier.Val(), "IPerson$arkts_impl");
     ArkTSTypeDesc reference{ArkTSTypeDesc::Kind::REFERENCE, "", {}, Ptr<Decl>(&person), Ptr<Decl>(&impl)};
     EXPECT_TRUE(ArkTSTypeDescGeneratable(reference));

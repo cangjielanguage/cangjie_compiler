@@ -107,13 +107,25 @@ Ptr<AST::PropDecl> ArkTSWriteOnlyTargetProp(const AST::Node& usage);
 // ArkTSWriteOnlyTargetProp matched; the ArkTS rule (annotation scan and
 // diagnostic) lives in this stage.
 void CheckArkTSWriteOnlyRead(AST::Node& usage, DiagnosticEngine& diag);
+// An @ArkTS declaration, or a member of one: the declaration itself or its
+// enclosing class/interface carries the annotation (or its AST attribute).
+// Such a declaration uses the foreign spelling but not the C ABI, so the
+// shared C-interop rules must not treat it as a C declaration.
+bool IsArkTSDecl(const AST::Decl& decl);
 // A declaration usable as an ArkTS object reference: a prepared foreign class
 // or a prepared foreign interface.
 bool IsArkTSReferenceDecl(const AST::Decl& decl);
+// A prepared foreign interface: an interface declaration carrying the wrapper
+// attribute set by interface preparation. The generated implementation class
+// carries the same attribute, so callers must keep this predicate (which also
+// checks the declaration kind) in front of any interface-specific rule.
+bool IsArkTSPreparedInterface(const AST::Decl& decl);
 // A source @ArkTS foreign interface that has not been prepared yet: annotated,
 // still FOREIGN, an interface declaration, and not generic.
 bool IsArkTSForeignInterface(const AST::InterfaceDecl& id);
 // Compiler-generated implementation class of one prepared foreign interface.
+// The interface and its implementation class share the wrapper attribute; the
+// class declaration kind distinguishes the implementation.
 bool IsArkTSInterfaceImpl(const AST::Decl& decl);
 // Deterministic generated name of the implementation class. The suffix is
 // unspellable in source identifiers, so a user declaration cannot collide.

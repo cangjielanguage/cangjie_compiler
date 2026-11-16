@@ -2663,14 +2663,16 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
             // This predicate is deliberately narrower than the shared
             // ArkTSForeignClassLikeMember rule: it accepts the FOREIGN spelling
             // and a prepared @ArkTS foreign interface, not a prepared
-            // ARKTS_CLASS_WRAPPER member. The two attribute tests are disjoint
-            // lifecycle states, not redundant spellings: interface preparation
-            // clears FOREIGN before it sets ARKTS_FOREIGN_INTERFACE
+            // ARKTS_CLASS_WRAPPER member. The two tests are disjoint lifecycle
+            // states, not redundant spellings: interface preparation clears
+            // FOREIGN before it sets ARKTS_INTERFACE_WRAPPER
             // (PrepareInterfaces.cpp), so FOREIGN still marks a declaration
             // preparation did not rewrite - a generic or preset declaration, or
             // one refused before preparation clears FOREIGN - while
-            // ARKTS_FOREIGN_INTERFACE marks a prepared interface. Neither test
-            // covers the other's state. A prepared
+            // ARKTS_INTERFACE_WRAPPER marks a prepared interface (its generated
+            // implementation class carries the same attribute, so the interface
+            // declaration kind distinguishes the two). Neither test covers the
+            // other's state. A prepared
             // member must get its default-parameter function here, before the
             // wrapper body is lowered; creating it after lowering (as the
             // class post-pass would) makes the constructor's generated return
@@ -2680,7 +2682,7 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
             const bool isArkTSForeignBodylessMember = fd->outerDecl != nullptr &&
                 fd->outerDecl->HasAnno(AnnotationKind::ARKTS) &&
                 (fd->outerDecl->TestAttr(Attribute::FOREIGN) ||
-                    fd->outerDecl->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) &&
+                    Native::FFI::ArkTS::IsArkTSPreparedInterface(*fd->outerDecl)) &&
                 fd->funcBody && !fd->funcBody->body;
             if (fd->op != TokenKind::ILLEGAL || fd->TestAttr(Attribute::OPEN) ||
                 (fd->TestAttr(Attribute::ABSTRACT) && !isArkTSForeignBodylessMember) ||

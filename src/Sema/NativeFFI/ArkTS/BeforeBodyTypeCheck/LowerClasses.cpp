@@ -110,7 +110,7 @@ Ptr<Decl> ResolveArkTSAliasTarget(Ptr<Decl> decl)
 bool IsBrokenForeignInterfaceParent(Ptr<Decl> parent)
 {
     return parent && parent->TestAttr(Attribute::IS_BROKEN) &&
-        (parent->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) ||
+        (IsArkTSPreparedInterface(*parent) ||
             (parent->TestAttr(Attribute::FOREIGN) && parent->astKind == ASTKind::INTERFACE_DECL));
 }
 
@@ -150,7 +150,7 @@ Ptr<Decl> FindArkTSForeignInterfaceAncestor(const InheritableDecl& decl)
         if (!current || !seen.insert(current).second) {
             continue;
         }
-        if (current->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+        if (IsArkTSPreparedInterface(*current)) {
             return current;
         }
         if (auto inheritable = DynamicCast<InheritableDecl*>(current)) {
@@ -262,8 +262,8 @@ void TypeChecker::TypeCheckerImpl::RejectArkTSForeignInterfaceImplementers(Packa
 {
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
-            if (decl->TestAttr(Attribute::IS_BROKEN) || decl->TestAttr(Attribute::ARKTS_INTERFACE_IMPL) ||
-                decl->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) || decl->astKind == ASTKind::INTERFACE_DECL ||
+            if (decl->TestAttr(Attribute::IS_BROKEN) || IsArkTSInterfaceImpl(*decl) ||
+                IsArkTSPreparedInterface(*decl) || decl->astKind == ASTKind::INTERFACE_DECL ||
                 decl->astKind == ASTKind::EXTEND_DECL) {
                 continue;
             }
@@ -548,8 +548,7 @@ void TypeChecker::TypeCheckerImpl::PropagateBrokenArkTSInterfaceParents(Package&
         for (auto& file : pkg.files) {
             for (auto& decl : file->decls) {
                 auto id = DynamicCast<InterfaceDecl*>(decl.get());
-                if (!id || !id->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) ||
-                    id->TestAttr(Attribute::IS_BROKEN)) {
+                if (!id || !IsArkTSPreparedInterface(*id) || id->TestAttr(Attribute::IS_BROKEN)) {
                     continue;
                 }
                 for (auto& inherited : id->inheritedTypes) {
@@ -576,7 +575,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSInterfaceBodies(ASTContext& ctx, Pa
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto id = DynamicCast<InterfaceDecl*>(decl.get());
-            if (!id || !id->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) || id->TestAttr(Attribute::IS_BROKEN)) {
+            if (!id || !IsArkTSPreparedInterface(*id) || id->TestAttr(Attribute::IS_BROKEN)) {
                 continue;
             }
             LowerArkTSInterface(ctx, *id, *file, pkg);
@@ -640,7 +639,7 @@ bool TypeChecker::TypeCheckerImpl::CheckArkTSInterfaceParents(InterfaceDecl& id)
             id.EnableAttr(Attribute::IS_BROKEN);
             return false;
         }
-        if (!parent || !parent->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE)) {
+        if (!parent || !IsArkTSPreparedInterface(*parent)) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, id, id.identifier.Val(),
                 "a foreign interface may only inherit another foreign interface");
             id.EnableAttr(Attribute::IS_BROKEN);

@@ -12,6 +12,7 @@
 
 #include "TypeCheckerImpl.h"
 
+#include "NativeFFI/ArkTS/ArkTSInterop.h"
 #include "TypeCheckUtil.h"
 
 #include "cangjie/AST/Utils.h"
@@ -171,7 +172,7 @@ void TypeChecker::TypeCheckerImpl::SetForeignABIAttr(Decl& decl)
 {
     // Will unify the judgment of foreign, foreign, C, and backend.
     // Update W/R in class Attribute.
-    if (HasModifier(decl.modifiers, TokenKind::FOREIGN)) {
+    if (HasModifier(decl.modifiers, TokenKind::FOREIGN) && !Native::FFI::ArkTS::IsArkTSDecl(decl)) {
         auto defaultABI = GetDefaultABI();
         for (auto& anno : decl.annotations) {
             if (anno->kind == AnnotationKind::C) {
@@ -389,7 +390,7 @@ void TypeChecker::TypeCheckerImpl::PreCheckAnnoForCFFI(Decl& decl)
         }
     }
 
-    if (decl.astKind == ASTKind::FUNC_DECL) {
+    if (decl.astKind == ASTKind::FUNC_DECL && !Native::FFI::ArkTS::IsArkTSDecl(decl)) {
         if (decl.TestAttr(AST::Attribute::FOREIGN)) {
             decl.EnableAttr(Attribute::NO_MANGLE);
         }

@@ -163,7 +163,7 @@ OwnedPtr<ClassDecl> CreateInterfaceImpl(InterfaceDecl& id)
     impl->fullPackageName = packageName;
     impl->moduleName = Cangjie::Utils::GetRootPackageName(packageName);
     CloneVisibilityAttribute(id, *impl);
-    impl->EnableAttr(Attribute::COMPILER_ADD, Attribute::ARKTS_INTERFACE_IMPL, Attribute::NO_REFLECT_INFO);
+    impl->EnableAttr(Attribute::COMPILER_ADD, Attribute::ARKTS_INTERFACE_WRAPPER, Attribute::NO_REFLECT_INFO);
     impl->body = WithinFile(MakeOwned<ClassBody>(), id.curFile);
     impl->body->begin = id.begin;
     impl->body->end = id.end;
@@ -222,10 +222,10 @@ void PrepareInterface(
             // A property declared without accessors gets default-implementation
             // signatures; lowering fills them. Interface accessors are public.
             if (pd->getters.empty()) {
-                InsertPropGetterSignature(*pd, Attribute::ARKTS_FOREIGN_INTERFACE);
+                InsertPropGetterSignature(*pd, Attribute::ARKTS_INTERFACE_WRAPPER);
             }
             if (pd->isVar && pd->setters.empty()) {
-                InsertPropSetterSignature(*pd, Attribute::ARKTS_FOREIGN_INTERFACE);
+                InsertPropSetterSignature(*pd, Attribute::ARKTS_INTERFACE_WRAPPER);
             }
             for (auto& getter : pd->getters) {
                 if (getter->funcBody && !getter->funcBody->retType && pd->type) {
@@ -257,7 +257,7 @@ void PrepareInterface(
     if (implPtr->IsExportedDecl()) {
         imports.GetCjoManager()->AddGeneratedDeclToDeclMap(*implPtr);
     }
-    id.EnableAttr(Attribute::ARKTS_FOREIGN_INTERFACE);
+    id.EnableAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
 }
 } // namespace
 
@@ -274,9 +274,9 @@ void PrepareInterfaces(Package& pkg, DiagnosticEngine& diag, SourceManager& sour
         for (auto& decl : file->decls) {
             auto id = DynamicCast<InterfaceDecl*>(decl.get());
             // A refused interface keeps FOREIGN (the marker that makes it a
-            // source declaration) but has no ARKTS_FOREIGN_INTERFACE, so the
+            // source declaration) but has no ARKTS_INTERFACE_WRAPPER, so the
             // broken mark is the idempotency guard for a repeated pass.
-            if (!id || id->TestAttr(Attribute::ARKTS_FOREIGN_INTERFACE) || id->TestAttr(Attribute::IS_BROKEN) ||
+            if (!id || IsArkTSPreparedInterface(*id) || id->TestAttr(Attribute::IS_BROKEN) ||
                 !IsArkTSForeignInterface(*id)) {
                 continue;
             }

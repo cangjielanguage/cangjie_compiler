@@ -17,6 +17,8 @@
 #include "TypeCheckUtil.h"
 #include "TypeCheckerImpl.h"
 
+#include "NativeFFI/ArkTS/ArkTSInterop.h"
+
 #include <unordered_map>
 #include <unordered_set>
 
@@ -1644,7 +1646,10 @@ void TypeChecker::TypeCheckerImpl::PreCheckFuncRedefinitionForFFI(const std::vec
 {
     std::vector<Ptr<FuncDecl>> nativeDuplicates;
     std::copy_if(funcs.begin(), funcs.end(), std::back_inserter(nativeDuplicates),
-        [](Ptr<const FuncDecl> fd) { return fd->TestAnyAttr(Attribute::FOREIGN, Attribute::C); });
+        [](Ptr<const FuncDecl> fd) {
+            return fd->TestAnyAttr(Attribute::FOREIGN, Attribute::C) &&
+                !Native::FFI::ArkTS::IsArkTSDecl(*fd);
+        });
     if (nativeDuplicates.size() <= 1) {
         return;
     }
