@@ -373,6 +373,7 @@ ModalTy TypeChecker::TypeCheckerImpl::GetTyFromASTType(ASTContext& ctx, Ptr<Node
         case ASTKind::PAREN_TYPE: {
             auto parenType = StaticAs<ASTKind::PAREN_TYPE>(type);
             auto innerTy = GetTyFromASTType(ctx, parenType->type.get());
+            // Parsing rejects modes inside parentheses; only the parenthesized type can carry a mode.
             parenType->SetTy({innerTy.Ty(), parenType->modal.ToModalInfo()});
             return parenType->GetTy();
         }
@@ -1945,7 +1946,7 @@ void TypeChecker::TypeCheckerImpl::CheckReturnAndJump(const ASTContext& ctx)
             diag.Diagnose(*sym->node, DiagKind::sema_invalid_loop_control);
             sym->node->SetTy({TypeManager::GetInvalidTy()});
         } else if (ScopeManager::GetCurSatisfiedSymbol(ctx, sym->scopeName,
-            [](Symbol& candidate) { return candidate.node->astKind == ASTKind::EXCLAVE_EXPR; },
+            [](Symbol& candidate) { return candidate.node && candidate.node->astKind == ASTKind::EXCLAVE_EXPR; },
             [loop](Symbol& candidate) { return candidate.node == loop->node; })) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_jump_out_of_exclave, *sym->node);
             sym->node->SetTy({TypeManager::GetInvalidTy()});
@@ -2124,7 +2125,9 @@ void TypeChecker::TypeCheckerImpl::PreCheckUsage(ASTContext& ctx, Package& pkg)
 
 void TypeChecker::TypeCheckerImpl::PreCheckInvalidInherit(const ASTContext& ctx, const AST::Package& pkg)
 {
-    bool imported = pkg.TestAttr(Attribute::IMPORTED);
+    if (pkg.TestAttr(Attribute::IMPORTED)) {
+        return;
+    }
     auto inheritableDecls = SearchSymbol::GetAllStructDecls(ctx);
     for (auto sym : inheritableDecls) {
         CJC_NULLPTR_CHECK(sym);
@@ -2135,17 +2138,6 @@ void TypeChecker::TypeCheckerImpl::PreCheckInvalidInherit(const ASTContext& ctx,
         }
         // For ExtendDecl, we check it in `CheckExtendInterfaces`, so we dont't check it here.
         if (id->astKind == ASTKind::EXTEND_DECL) {
-            continue;
-        }
-        if (imported) {
-            if (id->astKind == ASTKind::STRUCT_DECL) {
-                for (auto& it : id->inheritedTypes) {
-                    if (it && Ty::IsTyCorrect(it->GetTy()) && typeManager.IsCopyInterfaceTy(it->DataTy())) {
-                        StaticCast<StructDecl*>(id)->SetIsCopyType();
-                        break;
-                    }
-                }
-            }
             continue;
         }
         DiagKind kind = id->astKind == ASTKind::INTERFACE_DECL ? DiagKind::sema_interface_is_not_inheritable

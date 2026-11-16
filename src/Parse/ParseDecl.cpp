@@ -313,6 +313,10 @@ OwnedPtr<Decl> ParserImpl::ParseVarDecl(
     }
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     CheckVarDeclModifiers(modifiers, ret.get(), scopeKind, keyToken);
+    if ((scopeKind == ScopeKind::CLASS_BODY || scopeKind == ScopeKind::STRUCT_BODY) &&
+        !HasModifier(modifiers, TokenKind::STATIC) && ret->type && ret->type->modal.HasLocal()) {
+        DiagUnexpectedModal(MakeRange(ret->type->modal.LocalBegin(), ret->type->modal.LocalEnd()));
+    }
 
     return ret;
 }

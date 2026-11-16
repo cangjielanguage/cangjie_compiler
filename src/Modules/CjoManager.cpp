@@ -19,6 +19,7 @@
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Modules/ASTSerialization.h"
 #include "cangjie/Modules/ModulesUtils.h"
+#include "cangjie/Utils/CheckUtils.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 
 using namespace Cangjie;
@@ -340,6 +341,7 @@ void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packa
     }
 
     std::vector<Ptr<ASTLoader>> loaders;
+    std::vector<Ptr<Package>> loadedPackages;
     loaders.reserve(q.size());
     // Load common part cjo
     for (auto pkg : packages) {
@@ -348,6 +350,9 @@ void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packa
             for (Ptr<ASTLoader> commonLoader : GetCommonPartCjos(expectedPackageName)) {
                 commonLoader->LoadPackageDecls();
                 loaders.emplace_back(commonLoader);
+                if (!Utils::In(loadedPackages, [pkg](Ptr<Package> loaded) { return loaded == pkg; })) {
+                    loadedPackages.push_back(pkg);
+                }
             }
         }
     }
@@ -365,6 +370,7 @@ void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packa
         }
         loaders.emplace_back(cur->loader);
         cur->loader->LoadPackageDecls();
+        loadedPackages.push_back(cur->pkg.get());
         bool isCurMacro = cur->pkg->isMacroPackage;
         const auto& deps = cur->loader->GetDependentPackageNames();
         for (const auto& pkg : deps) {
@@ -387,14 +393,17 @@ void CjoManager::LoadPackageDeclsOnDemand(const std::vector<Ptr<Package>>& packa
         // It must be done after all type references are loaded.
         impl->SubstituteImportedTypeAliasTy(packages);
     }
+    impl->SetImportedCopyTypes(loadedPackages);
 }
 
 void CjoManager::LoadAllDeclsAndRefs() const
 {
+    std::vector<Ptr<Package>> packages;
     // 'packageNameMap' also contains source package, we only need to load for imported package.
     for (auto& p : impl->GetPackageNameMap()) {
         auto& pkgInfo = p.second;
         CJC_NULLPTR_CHECK(pkgInfo);
+        packages.push_back(pkgInfo->pkg.get());
         if (pkgInfo->loader) {
             pkgInfo->loader->LoadPackageDecls();
         }
@@ -402,6 +411,51 @@ void CjoManager::LoadAllDeclsAndRefs() const
     for (auto& p : impl->GetPackageNameMap()) {
         if (p.second->loader) {
             p.second->loader->LoadRefs();
+        }
+    }
+    impl->SetImportedCopyTypes(packages);
+}
+
+// Mark imported Copyable structs without changing AST traversal IDs used by clients such as cjcompat.
+void CjoManagerImpl::SetImportedCopyTypes(const std::vector<Ptr<Package>>& packages)
+{
+    auto markCopyType = [this](Ptr<Decl> node) {
+        auto decl = DynamicCast<InheritableDecl>(node);
+        auto structDecl = DynamicCast<StructDecl>(node);
+        if (auto extend = DynamicCast<ExtendDecl>(node); extend && extend->extendedType) {
+            auto extendedTy = typeManager.SubstituteTypeAliasInTy(extend->extendedType->GetTy());
+            if (extendedTy.IsCorrect()) {
+                structDecl = DynamicCast<StructDecl>(Ty::GetDeclOfTy(extendedTy.Ty()));
+            }
+        }
+        if (!structDecl) {
+            return;
+        }
+        for (auto& inherited : decl->inheritedTypes) {
+            auto superTy = typeManager.SubstituteTypeAliasInTy(inherited->GetTy());
+            if (superTy.IsCorrect() && typeManager.IsCopyInterfaceTy(superTy.Ty())) {
+                structDecl->SetIsCopyType();
+                break;
+            }
+        }
+    };
+    for (auto pkg : packages) {
+        bool isImported = pkg->TestAttr(Attribute::IMPORTED);
+        for (auto& file : pkg->files) {
+            if (!isImported && !file->TestAttr(Attribute::FROM_COMMON_PART)) {
+                continue;
+            }
+            for (auto& decl : file->decls) {
+                markCopyType(decl.get());
+            }
+            for (auto& decl : file->exportedInternalDecls) {
+                markCopyType(decl.get());
+            }
+        }
+        if (isImported) {
+            for (auto& decl : pkg->genericInstantiatedDecls) {
+                markCopyType(decl.get());
+            }
         }
     }
 }

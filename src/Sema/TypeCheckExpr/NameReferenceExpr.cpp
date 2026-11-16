@@ -757,10 +757,7 @@ Ptr<PropDecl> TypeChecker::TypeCheckerImpl::ResolvePropOverload(
                 return nullptr;
             }
         }
-        auto db = diag.Diagnose(re, DiagKind::sema_no_match_prop_accessor_for_call, props.front()->identifier.Val());
-        for (auto pd : props) {
-            db.AddNote(*pd, DiagKind::sema_found_candidate_decl);
-        }
+        diag.Diagnose(re, DiagKind::sema_no_match_prop_accessor_for_call, props.front()->identifier.Val());
         if (auto ma = DynamicCast<MemberAccess>(&re)) {
             ma->targets.clear();
         }
@@ -770,10 +767,7 @@ Ptr<PropDecl> TypeChecker::TypeCheckerImpl::ResolvePropOverload(
     re.SetTarget(callable[0]);
     // only when the receiver is copy type, we can have such diag.
     if (callable.size() > 1) {
-        auto db = diag.Diagnose(re, DiagKind::sema_ambiguous_match, callable.front()->identifier.Val());
-        for (auto pd : callable) {
-            db.AddNote(*pd, DiagKind::sema_found_candidate_decl);
-        }
+        diag.Diagnose(re, DiagKind::sema_ambiguous_match, callable.front()->identifier.Val());
         return nullptr;
     }
     CheckAssignToImmutProp(re);
