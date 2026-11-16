@@ -676,11 +676,7 @@ Value* Translator::TranslateTrivialArgWithNoSugar(const AST::FuncArg& arg, const
         // `lhs op= v` is desugared into `lhs = lhs'.op(v)`, where `lhs'` is mapped to `lhs`. For a member access, the
         // mapped value is a reference to the field. If `lhs` has type Extern<T>, `lhs'.op(v)` becomes
         // T.functionCall(T.memberAccess(lhs', "op"), [v]), where `lhs'` is an argument and needs the field value.
-        // Other mapped arguments, e.g. indices, are values, for which GetDerefedValue does nothing.
-        CJC_ASSERT(GetMapExpr(*arg.expr) == nullptr || !argVal->GetType()->IsRef() ||
-            StaticCast<RefType*>(argVal->GetType())->GetBaseType()->IsClassOrArray() ||
-            arg.expr->GetTy()->IsCoreExternType());
-        if (GetMapExpr(*arg.expr) != nullptr) {
+        if (GetMapExpr(*arg.expr) != nullptr && arg.expr->GetTy()->IsCoreExternType()) {
             argVal = GetDerefedValue(argVal, loc);
         }
     }
