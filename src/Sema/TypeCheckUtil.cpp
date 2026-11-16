@@ -1032,6 +1032,15 @@ bool NeedExternConversion(TypeManager& typeManager, Ty& from, Ty& to)
         !typeManager.IsSubtype(&from, &to);
 }
 
+ModalTy GetReturnTy(const FuncBody& fb)
+{
+    if (!Ty::IsTyCorrect(fb.GetTy()) || !fb.GetTy()->IsFunc() ||
+        (fb.funcDecl && fb.funcDecl->TestAttr(Attribute::CONSTRUCTOR))) {
+        return {};
+    }
+    return StaticCast<FuncTy>(fb.DataTy())->retTy;
+}
+
 bool IsDynamicExternMemberAccess(const MemberAccess& ma)
 {
     return !ma.target && ma.baseExpr && !ma.TestAttr(Attribute::LEFT_VALUE) && IsExternValue(*ma.baseExpr);

@@ -230,6 +230,11 @@ bool IsExternValue(const AST::Expr& expr);
 /** Whether an expression of type @p from needs T.toExtern to become @p to. */
 bool NeedExternConversion(TypeManager& typeManager, AST::Ty& from, AST::Ty& to);
 /**
+ * The type of the values returned by @p fb, or null if it is ill-typed. A constructor returns no value, so it has none
+ * even though its function type has the type of the constructed value as return type.
+ */
+AST::ModalTy GetReturnTy(const AST::FuncBody& fb);
+/**
  * Whether @p ma is a dynamic member access e.f, i.e. an access to any member f of a value e of type Extern<T>.
  * Left values are excluded, they are handled by IsDynamicExternUpdate.
  */

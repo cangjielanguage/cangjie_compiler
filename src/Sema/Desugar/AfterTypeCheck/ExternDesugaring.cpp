@@ -76,17 +76,6 @@ OwnedPtr<LitConstExpr> CreateFieldName(const std::string& field, Ty& stringTy, c
     return name;
 }
 
-/** The type of the values returned by @p fb. A constructor of Extern<T> has type (...) -> Extern<T> but returns no
- * value, its body is Unit. */
-ModalTy GetReturnTy(const FuncBody& fb)
-{
-    if (!Ty::IsTyCorrect(fb.GetTy()) || !fb.GetTy()->IsFunc() ||
-        (fb.funcDecl && fb.funcDecl->TestAttr(Attribute::CONSTRUCTOR))) {
-        return {};
-    }
-    return StaticCast<FuncTy>(fb.DataTy())->retTy;
-}
-
 OwnedPtr<RefExpr> CreateTmpRef(VarDecl& tmp, const Expr& expr)
 {
     auto ref = CreateRefExpr(tmp);

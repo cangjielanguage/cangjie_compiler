@@ -167,16 +167,6 @@ bool IsConstSafe(Decl& decl)
     auto& annos = decl.annotations;
     return std::find_if(annos.begin(), annos.end(), isConstSafe) != annos.end();
 }
-
-// The type of the values returned by @p fb. A constructor returns no value.
-ModalTy GetReturnTy(const FuncBody& fb)
-{
-    if (!Ty::IsTyCorrect(fb.GetTy()) || !fb.GetTy()->IsFunc() ||
-        (fb.funcDecl && fb.funcDecl->TestAttr(Attribute::CONSTRUCTOR))) {
-        return {};
-    }
-    return StaticCast<FuncTy>(fb.DataTy())->retTy;
-}
 }; // namespace
 
 class ConstEvaluationChecker {
@@ -394,7 +384,7 @@ private:
         // The correctness of the imported function was checked in the package that defines the function.
         if (fb.body) {
             res = ChkBlock(*fb.body, true) && res;
-            res = ChkNoExternConversion(*fb.body, GetReturnTy(fb)) && res;
+            res = ChkNoExternConversion(*fb.body, TypeCheckUtil::GetReturnTy(fb)) && res;
         }
         return res;
     }
@@ -681,7 +671,7 @@ private:
         }
         bool res = ChkInnerExpr(ret, isWeak);
         if (ret.refFuncBody) {
-            res = ChkNoExternConversion(*ret.expr, GetReturnTy(*ret.refFuncBody)) && res;
+            res = ChkNoExternConversion(*ret.expr, TypeCheckUtil::GetReturnTy(*ret.refFuncBody)) && res;
         }
         return res;
     }
