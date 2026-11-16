@@ -156,7 +156,6 @@ void ExternDesugaring::Run(Node& root)
             [this](CallExpr& ce) { HandleCallExpr(ce); },
             [this](const ReturnExpr& re) { HandleReturnExpr(re); },
             [this](const FuncBody& fb) { HandleFuncBody(fb); },
-            [this](ArrayExpr& ae) { HandleArrayExpr(ae); },
             [this](ArrayLit& al) { HandleArrayLit(al); },
             [this](TupleLit& tl) { HandleTupleLit(tl); },
             [this](MatchExpr& me) { HandleMatchExpr(me); },
@@ -296,22 +295,6 @@ void ExternDesugaring::HandleFuncBody(const FuncBody& fb)
     }
     if (auto retTy = GetReturnTy(fb); retTy && retTy->IsCoreExternType()) {
         TryConvertBlock(*fb.body, *retTy);
-    }
-}
-
-void ExternDesugaring::HandleArrayExpr(ArrayExpr& ae)
-{
-    if (!Ty::IsTyCorrect(ae.GetTy()) || ae.initFunc || ae.args.empty()) {
-        return;
-    }
-    auto typeArgs = typeManager.GetTypeArgs(*ae.GetTy());
-    if (typeArgs.empty() || !typeArgs[0]) {
-        return;
-    }
-    // VArray takes the element as its only argument, Array(size, item: T) as its second one.
-    Ptr<FuncArg> arg = ae.isValueArray ? ae.args[0].get() : (ae.args.size() > 1 ? ae.args[1].get() : nullptr);
-    if (arg && arg->expr && TryConvert(*arg->expr, *typeArgs[0])) {
-        arg->SetTy(arg->expr->GetTy());
     }
 }
 

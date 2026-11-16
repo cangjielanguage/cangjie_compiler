@@ -59,7 +59,6 @@ private:
     void HandleCallExpr(AST::CallExpr& ce);
     void HandleReturnExpr(const AST::ReturnExpr& re);
     void HandleFuncBody(const AST::FuncBody& fb);
-    void HandleArrayExpr(AST::ArrayExpr& ae);
     void HandleArrayLit(AST::ArrayLit& al);
     void HandleTupleLit(AST::TupleLit& tl);
     void HandleMatchExpr(AST::MatchExpr& me);
