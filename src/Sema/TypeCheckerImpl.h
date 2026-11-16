@@ -967,6 +967,8 @@ private:
     bool ChkExternCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
     /** Check that the dynamic member access @p ma has no type arguments, which the foreign runtime cannot receive. */
     bool ChkExternMemberTypeArguments(const AST::MemberAccess& ma);
+    /** Check that the dynamic subscript @p se has a single index, the foreign runtime receives one index at a time. */
+    bool ChkExternSubscriptIndexCount(const AST::SubscriptExpr& se);
     /**
      * One call expression may have multiple function candidates.
      * Filter them with parameters' conditions before legality check.

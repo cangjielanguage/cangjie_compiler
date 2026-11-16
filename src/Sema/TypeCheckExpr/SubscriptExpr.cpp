@@ -181,13 +181,26 @@ bool TypeChecker::TypeCheckerImpl::ChkVArrayAccess(
     return true;
 }
 
+bool TypeChecker::TypeCheckerImpl::ChkExternSubscriptIndexCount(const SubscriptExpr& se)
+{
+    if (se.indexExprs.size() <= 1) {
+        return true;
+    }
+    (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_extern_subscript_multiple_indices, se,
+        MakeRange(se.indexExprs[1]->begin, se.indexExprs.back()->end));
+    return false;
+}
+
 bool TypeChecker::TypeCheckerImpl::ChkExternSubscript(ModalTy target, SubscriptExpr& se, Ty& externTy)
 {
-    // The indices are passed to the foreign runtime as Any, so they may have any type.
+    // The index is passed to the foreign runtime as Any, so it may have any type.
     for (auto& index : se.indexExprs) {
         if (!ReplaceIdealTy(*index)) {
             return false;
         }
+    }
+    if (!ChkExternSubscriptIndexCount(se)) {
+        return false;
     }
     ModalTy resTy{&externTy};
     if (target && !typeManager.IsSubtype(resTy, target)) {

@@ -76,9 +76,6 @@ private:
         std::vector<OwnedPtr<AST::Node>>& nodes);
     OwnedPtr<AST::Expr> CreateCompoundOpCall(AST::AssignExpr& ae, OwnedPtr<AST::Expr> current, AST::Ty& externTy,
         std::vector<OwnedPtr<AST::Node>>& nodes);
-    /** The receiver e[i1]...[in-1] of the last index of e[i1, ..., in]. */
-    OwnedPtr<AST::Expr> BuildIndexedReceiver(AST::SubscriptExpr& se, AST::Ty& externTy);
-
     RuntimeFunc LookupRuntimeFunc(
         const std::string& name, AST::Ty& externTy, const std::vector<Ptr<AST::Ty>>& instTys, const AST::Expr& expr);
     OwnedPtr<AST::CallExpr> CreateRuntimeCall(const RuntimeFunc& func, std::vector<OwnedPtr<AST::Expr>> args,

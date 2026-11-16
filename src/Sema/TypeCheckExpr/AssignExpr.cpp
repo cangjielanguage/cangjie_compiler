@@ -325,7 +325,7 @@ std::optional<ModalTy> TypeChecker::TypeCheckerImpl::SynExternUpdate(ASTContext&
     if (!IsDynamicExternUpdate(ae)) {
         return {};
     }
-    // The indices and the value are passed to the foreign runtime as Any, so they may have any type.
+    // The index and the value are passed to the foreign runtime as Any, so they may have any type.
     bool isWellTyped = true;
     if (auto ma = DynamicCast<MemberAccess*>(ae.leftValue.get())) {
         isWellTyped = ChkExternMemberTypeArguments(*ma);
@@ -334,6 +334,7 @@ std::optional<ModalTy> TypeChecker::TypeCheckerImpl::SynExternUpdate(ASTContext&
             isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, index.get())) &&
                 ReplaceIdealTy(*index) && isWellTyped;
         }
+        isWellTyped = ChkExternSubscriptIndexCount(*se) && isWellTyped;
     }
     isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ae.rightExpr.get())) &&
         ReplaceIdealTy(*ae.rightExpr) && isWellTyped;

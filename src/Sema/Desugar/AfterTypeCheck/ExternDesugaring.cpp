@@ -372,24 +372,11 @@ OwnedPtr<Expr> ExternDesugaring::BuildMemberAccess(MemberAccess& ma, Ty& externT
     return CreateMemberAccessCall(ASTCloner::Clone(ma.baseExpr.get()), ma.field.Val(), externTy, ma);
 }
 
-OwnedPtr<Expr> ExternDesugaring::BuildIndexedReceiver(SubscriptExpr& se, Ty& externTy)
-{
-    // e[i1, ..., in] is desugared like e[i1]...[in].
-    OwnedPtr<Expr> receiver = ASTCloner::Clone(se.baseExpr.get());
-    for (size_t i = 0; i + 1 < se.indexExprs.size(); ++i) {
-        std::vector<OwnedPtr<Expr>> args;
-        args.emplace_back(std::move(receiver));
-        args.emplace_back(ASTCloner::Clone(se.indexExprs[i].get()));
-        receiver = CreateRuntimeCall(INDEXED_ACCESS_FUNC, std::move(args), externTy, se);
-    }
-    return receiver;
-}
-
 OwnedPtr<Expr> ExternDesugaring::BuildIndexedAccess(SubscriptExpr& se, Ty& externTy)
 {
     std::vector<OwnedPtr<Expr>> args;
-    args.emplace_back(BuildIndexedReceiver(se, externTy));
-    args.emplace_back(ASTCloner::Clone(se.indexExprs.back().get()));
+    args.emplace_back(ASTCloner::Clone(se.baseExpr.get()));
+    args.emplace_back(ASTCloner::Clone(se.indexExprs[0].get()));
     return CreateRuntimeCall(INDEXED_ACCESS_FUNC, std::move(args), externTy, se);
 }
 
@@ -416,8 +403,8 @@ OwnedPtr<Expr> ExternDesugaring::BuildUpdate(AssignExpr& ae, Ty& externTy)
         return CreateRuntimeCall(func, std::move(args), externTy, ae);
     }
     auto& se = StaticCast<SubscriptExpr&>(*ae.leftValue);
-    args.emplace_back(BuildIndexedReceiver(se, externTy));
-    args.emplace_back(ASTCloner::Clone(se.indexExprs.back().get()));
+    args.emplace_back(ASTCloner::Clone(se.baseExpr.get()));
+    args.emplace_back(ASTCloner::Clone(se.indexExprs[0].get()));
     args.emplace_back(ASTCloner::Clone(ae.rightExpr.get()));
     return CreateRuntimeCall(INDEXED_UPDATE_FUNC, std::move(args), externTy, ae);
 }
@@ -469,8 +456,8 @@ OwnedPtr<Expr> ExternDesugaring::BuildMemberCompoundUpdate(
 OwnedPtr<Expr> ExternDesugaring::BuildIndexedCompoundUpdate(
     AssignExpr& ae, SubscriptExpr& se, Ty& externTy, std::vector<OwnedPtr<Node>>& nodes)
 {
-    auto receiver = AddTmp(nodes, "$externReceiver", BuildIndexedReceiver(se, externTy), ae);
-    auto index = AddTmp(nodes, "$externIndex", ASTCloner::Clone(se.indexExprs.back().get()), ae);
+    auto receiver = AddTmp(nodes, "$externReceiver", ASTCloner::Clone(se.baseExpr.get()), ae);
+    auto index = AddTmp(nodes, "$externIndex", ASTCloner::Clone(se.indexExprs[0].get()), ae);
     if (!receiver || !index) {
         return nullptr;
     }

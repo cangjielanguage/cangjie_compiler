@@ -182,6 +182,7 @@ ERROR(sema_extern_conversion_in_const, "implicit conversion to 'Extern' is not a
 
 // Extern
 ERROR(sema_extern_member_type_arguments, "type arguments are not allowed on a dynamic member access of 'Extern'")
+ERROR(sema_extern_subscript_multiple_indices, "a dynamic subscript of 'Extern' takes a single index")
 
 // Annotation
 ERROR(sema_annotation_no_const_init, "class with '@Annotation' should have 'const' constructor")
