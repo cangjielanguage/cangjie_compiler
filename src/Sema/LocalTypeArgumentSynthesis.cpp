@@ -253,11 +253,9 @@ bool LocalTypeArgumentSynthesis::VerifyAndSetCMS(const LocalTypeArgumentSynthesi
 
 bool LocalTypeArgumentSynthesis::IsUnifiedWithoutConstraints(const Ty& argTy, const Ty& paramTy) const
 {
-    // The parameter and the argument may be matched in either order, e.g. by the invariant type arguments of nominal
-    // types.
-    return &argTy == &paramTy ||
-        (argPack.externConversion &&
-            (AcceptsExternConversion(paramTy, argTy) || AcceptsExternConversion(argTy, paramTy)));
+    // A conversion is only accepted where the type in the parameter position allows it, so it is rejected in the
+    // reversed half of invariant type arguments.
+    return &argTy == &paramTy || (argPack.externConversion && AcceptsExternConversion(paramTy, argTy));
 }
 
 bool LocalTypeArgumentSynthesis::UnifyOne(const Tracked<ModalTy>& argTTy, const Tracked<ModalTy>& paramTTy)
