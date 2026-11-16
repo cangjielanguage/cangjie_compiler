@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "cangjie/Utils/FileUtil.h"
+#include "cangjie/Driver/ResponseFilePolicy.h"
 #include "cangjie/Driver/ToolFuture.h"
 namespace Cangjie {
 
@@ -200,11 +201,17 @@ public:
     }
 
     /**
-     * @brief Execute the run method.
+     * @brief Execute the run method with a fully-resolved argument vector.
      *
+     * `execArgs` must contain the program name at index 0 followed by the
+     * final arguments (which may be a single `@<rsp-path>` entry when the
+     * caller decided to fall back to a response file). INTERNAL_IMPLEMENTED
+     * tools ignore `execArgs` and use their own `GetFullArgs()`.
+     *
+     * @param execArgs The full argument vector including the program name.
      * @return std::unique_ptr<ToolFuture> The pointer of ToolFuture.
      */
-    std::unique_ptr<ToolFuture> Run() const;
+    std::unique_ptr<ToolFuture> Run(const std::vector<std::string>& execArgs) const;
 
     /**
      * @brief Get name.
@@ -251,6 +258,7 @@ private:
     std::string ldLibraryPath{""};       /**< LD_LIBRARY_PATH */
 
     std::string GenerateCommand() const;
+    std::string GenerateCommandFromExecArgs(const std::vector<std::string>& execArgs) const;
     std::vector<std::string> ExpandArgs() const;
 
 #ifndef _WIN32

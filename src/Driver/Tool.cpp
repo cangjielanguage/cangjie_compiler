@@ -14,13 +14,13 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <iomanip>
 #else
 #include <spawn.h>
 #include <cstring>
 #include <sys/wait.h>
 #endif
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <type_traits>
@@ -29,6 +29,7 @@
 #include "cangjie/Utils/Semaphore.h"
 #include "cangjie/Driver/TempFileManager.h"
 #include "cangjie/Driver/Utils.h"
+#include "cangjie/Driver/ResponseFilePolicy.h"
 #ifdef _WIN32
 #include "cangjie/Basic/StringConvertor.h"
 #endif
@@ -174,6 +175,37 @@ std::string Tool::GenerateCommand() const
 #endif
 }
 
+std::string Tool::GenerateCommandFromExecArgs(const std::vector<std::string>& execArgs) const
+{
+    // Format the already-resolved execArgs (argv[0] first, then args or @rsp).
+    std::string tempCommand;
+    std::string argStr;
+    for (size_t i = 1; i < execArgs.size(); ++i) {
+#ifdef _WIN32
+        argStr += FileUtil::GetQuoted(execArgs[i]) + ' ';
+#else
+        argStr += GetSingleQuoted(execArgs[i]) + ' ';
+#endif
+    }
+#ifndef _WIN32
+    if (!GetLdLibraryPath().empty()) {
+        tempCommand = "LD_LIBRARY_PATH=" + GetSingleQuoted(GetLdLibraryPath()) + ":$" + LD_LIBRARY_PATH + " ";
+    }
+#endif
+    const std::string& progName = execArgs.empty() ? name : execArgs[0];
+#ifdef _WIN32
+    tempCommand += FileUtil::GetQuoted(progName);
+#else
+    tempCommand += GetSingleQuoted(progName);
+#endif
+    tempCommand += " " + argStr;
+#ifdef _WIN32
+    return "\"" + tempCommand + "\"";
+#else
+    return tempCommand;
+#endif
+}
+
 bool Tool::InternalImplementedCommandExec() const
 {
     bool res = false;
@@ -201,18 +233,53 @@ bool Tool::InternalImplementedCommandExec() const
 
 std::unique_ptr<ToolFuture> Tool::Execute(bool verbose) const
 {
+    // Resolve exec args: full args, or name + @rsp when the command line is
+    // oversized. Only Windows hosts register an rsp policy for now
+    std::vector<std::string> execArgs;
+    execArgs.push_back(name);
+    std::vector<std::string> expandedArgs = ExpandArgs();
+
+    bool useRsp = false;
+#ifdef _WIN32
+    const ResponseFilePolicy policy = LookupResponseFilePolicy(name);
+    if (policy.supported) {
+        std::vector<std::string> fullArgs = execArgs;
+        fullArgs.insert(fullArgs.end(), expandedArgs.begin(), expandedArgs.end());
+        useRsp = ShouldUseRsp(policy, ComputeCommandLineLength(fullArgs));
+    }
+
+    if (useRsp) {
+        // Serialize with argv[0] skipped; the style matches the rsp reader of
+        // the host toolchain (see SerializeRspForHost).
+        std::vector<std::string> fullArgs = execArgs;
+        fullArgs.insert(fullArgs.end(), expandedArgs.begin(), expandedArgs.end());
+        std::string content = SerializeRspForHost(fullArgs);
+        std::string rspPath = TempFileManager::Instance().CreateRspFile(content);
+        if (content.empty() || rspPath.empty()) {
+            // No serializer on this host, or write failed; fall back to the
+            // original args.
+            useRsp = false;
+        } else {
+            execArgs.push_back("@" + rspPath);
+        }
+    }
+#endif
+    if (!useRsp) {
+        execArgs.insert(execArgs.end(), expandedArgs.begin(), expandedArgs.end());
+    }
+
     if (verbose) {
-        Println(FileUtil::Normalize(GetCommandString()));
+        Println(FileUtil::Normalize(GenerateCommandFromExecArgs(execArgs)));
     }
     // If the file is deleted, the subsequent commands are not executed.
     if (TempFileManager::Instance().IsDeleted()) {
         return nullptr;
     }
-    return Run();
+    return Run(execArgs);
 }
 
 #ifdef _WIN32
-std::unique_ptr<ToolFuture> Tool::Run() const
+std::unique_ptr<ToolFuture> Tool::Run(const std::vector<std::string>& execArgs) const
 {
     if (type == ToolType::INTERNAL_IMPLEMENTED) {
         Utils::Semaphore::Get().Acquire();
@@ -220,19 +287,9 @@ std::unique_ptr<ToolFuture> Tool::Run() const
     }
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
-    auto& arguments = GetFullArgs();
-    std::ostringstream oss;
-    for (size_t i = 0; i < arguments.size(); ++i) {
-        if (i != 0) {
-            oss << " ";
-        }
-        if (arguments[i].empty() || arguments[i].find_first_of("\t \"&\'()*<>\\`^|\n") != std::string::npos) {
-            oss << std::quoted(arguments[i]);
-        } else {
-            oss << arguments[i];
-        }
-    }
-    std::string commandLine = oss.str();
+    // execArgs already has argv[0] at index 0; quoting matches what
+    // CreateProcessA receives.
+    std::string commandLine = BuildWindowsCommandLine(execArgs);
 
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
@@ -247,21 +304,19 @@ std::unique_ptr<ToolFuture> Tool::Run() const
     return std::make_unique<WindowsProcessFuture>(pi);
 }
 #else
-std::unique_ptr<ToolFuture> Tool::Run() const
+std::unique_ptr<ToolFuture> Tool::Run(const std::vector<std::string>& execArgs) const
 {
     if (type == ToolType::INTERNAL_IMPLEMENTED) {
         Utils::Semaphore::Get().Acquire();
         return std::make_unique<ThreadFuture>(std::async(&Tool::InternalImplementedCommandExec, this));
     }
-    auto arguments = ExpandArgs();
-    arguments.insert(arguments.begin(), name);
-
-    // Convert arguments to char * array for argv argument.
+    // execArgs already contains the program name at index 0; either the
+    // original expanded args or {name, "@<rsp>"} when rsp fallback was used.
     std::vector<char*> rawArgumentArray = {};
-    rawArgumentArray.resize(arguments.size() + 1);
+    rawArgumentArray.resize(execArgs.size() + 1);
     size_t index = 0;
-    while (index < arguments.size()) {
-        rawArgumentArray[index] = const_cast<char*>(arguments[index].c_str());
+    while (index < execArgs.size()) {
+        rawArgumentArray[index] = const_cast<char*>(execArgs[index].c_str());
         index++;
     }
     rawArgumentArray[index] = nullptr;
