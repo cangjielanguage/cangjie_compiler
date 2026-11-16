@@ -23,6 +23,7 @@
 
 namespace Cangjie {
 using namespace AST;
+using TypeCheckUtil::UnwrapParenExpr;
 
 /// Check 'Copyable' is only used as a struct supertype or a generic upper bound
 struct CopyableTyChecker {
@@ -53,6 +54,9 @@ private:
         }
         if (auto var = DynamicCast<VarDecl>(node)) {
             CheckVarDecl(*var);
+        }
+        if (auto var = DynamicCast<VarWithPatternDecl>(node)) {
+            CheckTypeNode(var->type.get());
         }
         if (auto pat = DynamicCast<Pattern>(node)) {
             CheckPattern(*pat);
@@ -294,6 +298,9 @@ struct ModalTypeChecker {
             // rule 2
             return IsReturnedExpr(ctx, expr);
         }
+        if (auto paren = DynamicCast<ParenExpr>(&expr)) {
+            return paren->expr && IsExternalLocal(ctx, *paren->expr);
+        }
         if (auto block = DynamicCast<Block>(&expr)) {
             auto last = DynamicCast<Expr>(block->GetLastExprOrDecl());
             return last && IsExternalLocal(ctx, *last);
@@ -391,6 +398,9 @@ struct ModalTypeChecker {
     {
         if (IsInExclaveExpr(ctx, expr)) {
             return false;
+        }
+        if (auto paren = DynamicCast<ParenExpr>(&expr)) {
+            return paren->expr && HasExternalLocalBranch(ctx, *paren->expr);
         }
         auto mayBeExternal = [this, &ctx](Ptr<Expr> e) {
             if (!e || !e->GetTy().IsCorrect() || e->GetTy()->IsNothing() || type.IsCopyType(e->DataTy())) {
@@ -519,7 +529,7 @@ private:
         }
         if (auto spawn = DynamicCast<SpawnExpr>(node)) {
             PushForbiddenContext(spawn);
-            CheckLocalVarRefOutsideSpawn(*spawn);
+            CheckLocalVarRefOutsideSpawn(ctx, *spawn);
         }
         if (auto exclave = DynamicCast<ExclaveExpr>(node)) {
             CheckNestedExclave(ctx, *exclave);
@@ -534,53 +544,71 @@ private:
     }
 
     /// A non-copy local variable declared outside a spawn cannot be referred to from inside that spawn.
-    void CheckLocalVarRefOutsideSpawn(const SpawnExpr& spawn)
+    void CheckLocalVarRefOutsideSpawn(const ASTContext& ctx, const SpawnExpr& spawn)
     {
         if (!spawn.task) {
             return;
         }
         // Nested spawn is checked by its own visit. Vars declared there are not in this spawn.
-        std::unordered_set<Ptr<VarDecl>> declared;
+        std::unordered_set<Ptr<Decl>> declared;
         Walker collect(spawn.task.get(), [&declared](Ptr<Node> node) {
             if (Is<SpawnExpr>(node)) { // skip nested spawn, but didn't skip nested funs
                 return VisitAction::SKIP_CHILDREN;
             }
-            if (auto var = DynamicCast<VarDecl>(node)) {
-                declared.insert(var);
+            if (Is<VarDecl>(node) || Is<FuncDecl>(node)) {
+                declared.insert(StaticCast<Decl>(node));
             }
             return VisitAction::WALK_CHILDREN;
         });
         collect.Walk();
-        Walker refs(spawn.task.get(), [this, &declared](Ptr<Node> node) {
+        Walker refs(spawn.task.get(), [this, &ctx, &declared](Ptr<Node> node) {
             if (Is<SpawnExpr>(node)) {
                 return VisitAction::SKIP_CHILDREN;
             }
             if (auto ref = DynamicCast<RefExpr>(node)) {
-                DiagLocalVarRefOutsideSpawn(*ref, declared);
+                DiagLocalVarRefOutsideSpawn(ctx, *ref, declared);
             }
             return VisitAction::WALK_CHILDREN;
         });
         refs.Walk();
     }
 
-    /// Referee must be a local `VarDecl` (not a param, member, global, `this`, or `super`) of non-copy
-    /// local type, and not declared in this spawn.
-    void DiagLocalVarRefOutsideSpawn(const RefExpr& ref, const std::unordered_set<Ptr<VarDecl>>& declared)
+    /// Check outer local? captures, including parameters, local functions and implicit/explicit this.
+    /// Non-copy local! captures are already rejected by CheckLocalCaptures during type checking.
+    void DiagLocalVarRefOutsideSpawn(
+        const ASTContext& ctx, const RefExpr& ref, const std::unordered_set<Ptr<Decl>>& declared)
     {
-        auto var = DynamicCast<VarDecl>(ref.GetTarget());
-        if (!var || var->astKind != ASTKind::VAR_DECL || IsThisOrSuper(ref) || var->IsMemberDecl() ||
-            IsGlobalOrStaticVar(*var)) {
+        auto captured = ref.GetTarget();
+        if (!captured) {
             return;
         }
-        auto varTy = var->GetTy();
-        // actually @local! reference in spawn is reported sema_bad_capture_local, which is checked in TypeCheck,
-        // and when that stage has error this will never be run. Only @local? reference will be reported here.
-        if (!IsNonCopyLocalTy(varTy) || declared.find(var) != declared.end()) {
+        auto capturedTy = ref.GetTy();
+        std::string name = captured->identifier.Val();
+        if (IsThisOrSuper(ref) || (captured->IsMemberDecl() &&
+            !captured->TestAnyAttr(Attribute::GLOBAL, Attribute::STATIC, Attribute::CONSTRUCTOR))) {
+            auto method = ScopeManager::GetCurSatisfiedSymbolUntilTopLevel(ctx, ref.scopeName, [](Symbol& sym) {
+                auto func = DynamicCast<FuncDecl>(sym.node);
+                return func && TypeManager::HasThisParam(*func);
+            });
+            if (!method) {
+                return;
+            }
+            captured = StaticCast<FuncDecl>(method->node);
+            capturedTy = type.GetThisParamTy(*StaticCast<FuncDecl>(captured));
+            name = "this";
+        } else if ((!Is<VarDecl>(captured) && !Is<FuncDecl>(captured)) ||
+            captured->TestAnyAttr(Attribute::GLOBAL, Attribute::STATIC, Attribute::CONSTRUCTOR)) {
+            return;
+        }
+        if (!capturedTy.IsCorrect() || capturedTy.Mode().local != Mode::HALF ||
+            type.IsCopyType(capturedTy.Ty()) || declared.count(captured) != 0) {
             return;
         }
         auto builder = d.DiagnoseRefactor(DiagKindRefactor::sema_cannot_access_local_var_outside_exclave, ref,
-            std::string{var->identifier.Val()}, varTy.String(), std::string{"spawn"});
-        builder.AddHint(MakeRange(var->begin, var->end), "variable declared here");
+            name, capturedTy.String(), std::string{"spawn"});
+        if (Is<VarDecl>(captured)) {
+            builder.AddHint(MakeRange(captured->begin, captured->end), "variable declared here");
+        }
     }
 
     /// A local variable of non-copy @local! or @local? type declared outside
@@ -1037,8 +1065,11 @@ private:
         if (!body || !Ty::IsTyCorrect(initTy) || initTy.IsDataType()) {
             return;
         }
-        if (body->body.size() == 1 && body->body[0]->astKind == ASTKind::EXCLAVE_EXPR) {
-            return;
+        if (body->body.size() == 1) {
+            auto expr = DynamicCast<Expr>(body->body[0].get());
+            if (expr && Is<ExclaveExpr>(UnwrapParenExpr(*expr))) {
+                return;
+            }
         }
         if (body->body.empty()) {
             DiagInitModalMustBeInExclave(*body, initTy);
@@ -1099,20 +1130,17 @@ private:
         return {};
     }
 
-    /// Whether the current walk is inside an @local? constructor or any finalizer (from forbiddenContext).
+    /// Only the current function's local? constructor or finalizer permits non-copy field assignment.
     bool IsInLocalQuestCtorOrAnyFinalizer() const
     {
         for (auto it = forbiddenContext.rbegin(); it != forbiddenContext.rend(); ++it) {
-            auto func = DynamicCast<FuncDecl>(it->node);
-            if (!func) {
+            if (!it->node->IsFuncLike()) {
                 continue;
             }
-            if (func->IsFinalizer()) {
-                return true;
-            }
-            if (func->TestAttr(Attribute::CONSTRUCTOR) && !func->TestAttr(Attribute::STATIC)) {
-                return type.HasThisParam(*func) && type.GetThisParamMode(*func).local == Mode::HALF;
-            }
+            auto func = DynamicCast<FuncDecl>(it->node);
+            return func && (func->IsFinalizer() || (func->TestAttr(Attribute::CONSTRUCTOR) &&
+                !func->TestAttr(Attribute::STATIC) && type.HasThisParam(*func) &&
+                type.GetThisParamMode(*func).local == Mode::HALF));
         }
         return false;
     }
@@ -1176,7 +1204,7 @@ private:
         }
         // @local?: member assignment is allowed only in @local? ctor or finalizer and the ref is this
         if (lLocal == Mode::HALF) {
-            if (IsThisOrSuper(*ma->baseExpr) && IsInLocalQuestCtorOrAnyFinalizer()) {
+            if (IsThisOrSuper(UnwrapParenExpr(*ma->baseExpr)) && IsInLocalQuestCtorOrAnyFinalizer()) {
                 return;
             }
             DiagBadAssigmentToLocalHalf(assign);
@@ -1230,6 +1258,12 @@ private:
     /// A @local! array/tuple literal is allocated in the current region, so its elements must be internal.
     void CheckLiteralElements(const ASTContext& ctx, const Node& position, const Expr& expr, ModalTy targetTy)
     {
+        if (auto paren = DynamicCast<ParenExpr>(&expr)) {
+            if (paren->expr) {
+                CheckLiteralElements(ctx, position, *paren->expr, targetTy);
+            }
+            return;
+        }
         if (expr.TyMode().local != Mode::FULL) {
             return;
         }
@@ -1291,7 +1325,7 @@ private:
             return;
         }
         auto rLocal = right->TyMode().local != Mode::NOT ? right->TyMode().local : Mode::NOT;
-        auto left = assign.leftValue.get();
+        auto left = &UnwrapParenExpr(*assign.leftValue);
         if (!left->GetTy().IsCorrect() || Is<WildcardExpr>(left)) {
             return;
         }
@@ -1310,7 +1344,7 @@ private:
 
     bool IsCapture(const ASTContext& ctx, const Expr& expr)
     {
-        auto ref = DynamicCast<RefExpr>(&expr);
+        auto ref = DynamicCast<RefExpr>(&UnwrapParenExpr(expr));
         if (!ref) {
             return false;
         }
@@ -1502,7 +1536,9 @@ private:
         auto cache = returnedExprMap.find(body);
         auto& rets =
             cache != returnedExprMap.end() ? cache->second : (returnedExprMap[body] = CollectReturnedExpr(*body));
-        return std::find(rets.begin(), rets.end(), &expr) != rets.end();
+        return std::any_of(rets.begin(), rets.end(), [&expr](const Expr* returned) {
+            return returned && &UnwrapParenExpr(*returned) == &UnwrapParenExpr(expr);
+        });
     }
 
     std::vector<const Expr*> CollectReturnedExpr(FuncBody& body)
@@ -1521,12 +1557,13 @@ private:
             }
             return VisitAction::WALK_CHILDREN;
         }).Walk();
-        auto lastExpr = DynamicCast<Expr>(body.body->body.back().get());
+        const Expr* lastExpr = DynamicCast<Expr>(body.body->body.back().get());
         if (!lastExpr) { // last node may be a decl
             return ret;
         }
-        while (lastExpr && lastExpr->desugarExpr) {
-            lastExpr = lastExpr->desugarExpr.get();
+        lastExpr = &UnwrapParenExpr(*lastExpr);
+        while (lastExpr->desugarExpr) {
+            lastExpr = &UnwrapParenExpr(*lastExpr->desugarExpr);
         }
         if (lastExpr->astKind == ASTKind::RETURN_EXPR) {
             return ret;
@@ -1537,9 +1574,10 @@ private:
             if (!lastExpr) {
                 return ret;
             }
-            while (lastExpr && lastExpr->desugarExpr) {
+            lastExpr = &UnwrapParenExpr(*lastExpr);
+            while (lastExpr->desugarExpr) {
                 // push last expr of exclave
-                lastExpr = lastExpr->desugarExpr.get();
+                lastExpr = &UnwrapParenExpr(*lastExpr->desugarExpr);
             }
         }
         if (auto funcTy = DynamicCast<FuncTy>(body.DataTy())) {
@@ -1555,8 +1593,10 @@ private:
 
     bool IsInExclaveExpr(const ASTContext& ctx, const Node& node)
     {
-        if (ScopeManager::GetCurSatisfiedSymbolUntilTopLevel(
-            ctx, node.scopeName, [](Symbol& sym) { return sym.node->astKind == ASTKind::EXCLAVE_EXPR; })) {
+        // An exclave belongs to its current function; nested functions and lambdas start a new region.
+        if (ScopeManager::GetCurSatisfiedSymbol(ctx, node.scopeName,
+            [](Symbol& sym) { return Is<ExclaveExpr>(sym.node); },
+            [](Symbol& sym) { return sym.node->IsFuncLike(); })) {
             return true;
         }
         if (auto fun = ScopeManager::GetCurSymbolByKind(SymbolKind::FUNC_LIKE, ctx, node.scopeName)) {
@@ -1624,14 +1664,15 @@ private:
                 return;
             }
             // The receiver is the implicit this arg; diagnose it instead of the whole call.
-            if (auto ref = DynamicCast<RefExpr>(&*call.baseFunc)) {
+            auto& base = UnwrapParenExpr(*call.baseFunc);
+            if (auto ref = DynamicCast<RefExpr>(&base)) {
                 if (IsInExclaveExpr(ctx, *ref)) { // this is always external, only valid in exclave
                     return;
                 }
                 DiagBadLocalArg(*ref, "@local!", "this parameter");
                 return;
             }
-            auto& ma = StaticCast<MemberAccess>(*call.baseFunc);
+            auto& ma = StaticCast<MemberAccess>(base);
             if (IsExternalLocal(ctx, ma)) {
                 DiagBadLocalArg(*ma.baseExpr, "@local!", "this parameter");
             }
@@ -1736,14 +1777,10 @@ void TypeChecker::TypeCheckerImpl::CheckModalType(const ASTContext& ctx, Package
     modalTypeChecker->Check(ctx, pkg);
 }
 
-bool TypeChecker::TypeCheckerImpl::ChkExclaveExpr(ASTContext& ctx, ModalTy target, ExclaveExpr& expr)
+// The exclave body is checked against the enclosing function's return type by SynExclaveExpr, like `return`.
+bool TypeChecker::TypeCheckerImpl::ChkExclaveExpr(ASTContext& ctx, ModalTy, ExclaveExpr& expr)
 {
-    if (!ChkBlock(ctx, target, *expr.body)) {
-        expr.SetTy({TypeManager::GetInvalidTy()});
-        return false;
-    }
-    expr.SetTy({TypeManager::GetNothingTy()});
-    return true;
+    return Ty::IsTyCorrect(SynExclaveExpr(ctx, expr));
 }
 
 void TypeChecker::TypeCheckerImpl::DiagExpectedDataType(const AST::Node& node)
@@ -1757,7 +1794,6 @@ ModalTy TypeChecker::TypeCheckerImpl::SynExclaveExpr(ASTContext& ctx, ExclaveExp
     auto fb = TypeCheckUtil::GetCurFuncBody(ctx, expr.scopeName);
     auto funcBodyTy = fb ? DynamicCast<FuncTy>(fb->DataTy()) : nullptr;
     if (!fb || !funcBodyTy) {
-        // No target: do not check exclave return type; any type inside body is correct
         SynBlock({ctx, SynPos::EXPR_ARG}, *expr.body);
         expr.SetTy(ModalTy{TypeManager::GetNothingTy()});
         return expr.GetTy();

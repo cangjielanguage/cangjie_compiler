@@ -1291,6 +1291,10 @@ void ParserImpl::ParseInheritedTypes(InheritableDecl& decl)
     decl.upperBoundPos = lastToken.Begin();
     while (true) {
         auto interfaceType = ParseType();
+        if (interfaceType->modal.HasLocal()) {
+            DiagUnexpectedModal(MakeRange(interfaceType->modal.LocalBegin(), interfaceType->modal.LocalEnd()));
+            decl.EnableAttr(Attribute::HAS_BROKEN);
+        }
         if (auto ref = AST::As<ASTKind::REF_TYPE>(interfaceType.get()); ref && ref->ref.identifier == decl.identifier) {
             DiagDeclCannotInheritTheirSelf(decl, *ref);
         } else if (Is<RefType>(interfaceType.get()) || Is<QualifiedType>(interfaceType.get())) {
@@ -1636,6 +1640,10 @@ void ParserImpl::ParseStructInheritedTypes(StructDecl& structDecl)
 {
     while (true) {
         auto interfaceType = ParseType();
+        if (interfaceType->modal.HasLocal()) {
+            DiagUnexpectedModal(MakeRange(interfaceType->modal.LocalBegin(), interfaceType->modal.LocalEnd()));
+            structDecl.EnableAttr(Attribute::HAS_BROKEN);
+        }
         if (Is<RefType>(interfaceType.get()) || Is<QualifiedType>(interfaceType.get())) {
             structDecl.inheritedTypes.emplace_back(std::move(interfaceType));
         } else {
@@ -1722,7 +1730,12 @@ OwnedPtr<ExtendDecl> ParserImpl::ParseExtendDecl(
             if (lastToken.kind == TokenKind::BITAND) {
                 ret->inheritedTypes.back()->bitAndPos = lastToken.Begin();
             }
-            ret->inheritedTypes.push_back(ParseType());
+            auto interfaceType = ParseType();
+            if (interfaceType->modal.HasLocal()) {
+                DiagUnexpectedModal(MakeRange(interfaceType->modal.LocalBegin(), interfaceType->modal.LocalEnd()));
+                ret->EnableAttr(Attribute::HAS_BROKEN);
+            }
+            ret->inheritedTypes.push_back(std::move(interfaceType));
         } while (Skip(TokenKind::BITAND));
     }
     if (Skip(TokenKind::WHERE)) { // Generic constraints.
@@ -1827,6 +1840,10 @@ bool ParserImpl::ParseGenericUpperBound(const OwnedPtr<GenericConstraint>& gener
             genericConstraint->bitAndPos.push_back(lastToken.Begin());
         }
         auto upperBound = ParseType();
+        if (upperBound->modal.HasLocal()) {
+            DiagUnexpectedModal(MakeRange(upperBound->modal.LocalBegin(), upperBound->modal.LocalEnd()));
+            genericConstraint->EnableAttr(Attribute::HAS_BROKEN);
+        }
         if (!upperBound->TestAttr(Attribute::IS_BROKEN) && upperBound->astKind != ASTKind::THIS_TYPE) {
             genericConstraint->upperBounds.push_back(std::move(upperBound));
         } else {

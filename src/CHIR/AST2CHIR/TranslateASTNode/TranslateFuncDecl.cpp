@@ -349,8 +349,18 @@ bool HasDelegatedThisCall(const AST::FuncBody& func)
     CJC_ASSERT(func.body);
     auto& body = func.body->body;
     CJC_ASSERT(!body.empty());
-    // first expression is callexpr to constructor
-    if (auto call = DynamicCast<AST::CallExpr>(body[0].get())) {
+    auto first = body[0].get();
+    while (first) {
+        if (auto paren = DynamicCast<AST::ParenExpr>(first)) {
+            first = paren->expr.get();
+        } else if (auto exclave = DynamicCast<AST::ExclaveExpr>(first)) {
+            first = exclave->body && !exclave->body->body.empty() ? exclave->body->body.front().get() : nullptr;
+        } else {
+            break;
+        }
+    }
+    // The delegated call may be wrapped in parentheses and a mandatory exclave.
+    if (auto call = DynamicCast<AST::CallExpr>(first)) {
         // the `resolvedFunction` of callExpr with call_function_ptr is null.
         if (call->callKind == AST::CallKind::CALL_FUNCTION_PTR) {
             return false;
@@ -460,6 +470,10 @@ Ptr<Value> Translator::TranslateConstructorFuncInline(const AST::Decl& parent, c
     // Binding the implicit `this` with the first param of the function.
     auto thisVar = curFunc->GetParam(0);
     CJC_NULLPTR_CHECK(thisVar);
+    // Field initializers of a local constructor run in the caller's region, like its mandatory exclave body.
+    if (thisVar->GetType()->StripAllRefs()->IsModal()) {
+        curFunc->EnableAttr(Attribute::EXCLAVE);
+    }
     SetSymbolTable(parent, *thisVar);
     // Create init blocks and initializers for constructor. NOTE: do not create 'GoTo' from entry to init here.
     // Return init block for callee to uniformly create 'GoTo' from entry in 'Visit FuncDecl'.
@@ -484,10 +498,6 @@ Ptr<Value> Translator::TranslateConstructorFuncInline(const AST::Decl& parent, c
                 CJC_ASSERT(!pureCurObjType->IsRef() && pureCurObjType->IsNominal());
                 auto pureCurObjCustomType = StaticCast<CustomType*>(pureCurObjType);
                 auto memberType = pureCurObjCustomType->GetInstMemberTypeByPath(path, builder);
-                if (auto newType = builder.WithModal(value->GetType(), memberType->GetModalInfo());
-                    newType != value->GetType()) {
-                    value->SetType(*newType);
-                }
                 if (value->GetType() == memberType) {
                     CreateAndAppendExpression<StoreElementRef>(
                         loc, builder.GetUnitTy(), value, thisVar, path, currentBlock);

@@ -1354,11 +1354,17 @@ void TypeChecker::TypeCheckerImpl::CheckConstructor(ASTContext& ctx, const Decl&
     if (firstExprOrDecl == nullptr) {
         return;
     }
+    if (auto expr = DynamicCast<Expr>(firstExprOrDecl)) {
+        firstExprOrDecl = &UnwrapParenExpr(*expr);
+    }
     if (auto exclave = DynamicCast<ExclaveExpr>(firstExprOrDecl)) {
         if (!exclave->body || exclave->body->body.empty()) {
             return;
         }
         firstExprOrDecl = exclave->body->body.front().get();
+        if (auto expr = DynamicCast<Expr>(firstExprOrDecl)) {
+            firstExprOrDecl = &UnwrapParenExpr(*expr);
+        }
     }
     bool needEraseSuper{false};
     if (auto ce = AST::As<ASTKind::CALL_EXPR>(firstExprOrDecl); ce) {
@@ -2259,12 +2265,18 @@ void TypeChecker::TypeCheckerImpl::SetFuncDeclConstructorCall(FuncDecl& fd) cons
         return;
     }
     Ptr<RefExpr> refExpr = nullptr;
-    auto first = &*fd.funcBody->body->body.front();
-    if (auto exclave = DynamicCast<ExclaveExpr*>(first)) {
-        if (exclave->body && exclave->body->body.empty()) {
+    auto first = fd.funcBody->body->body.front().get();
+    if (auto expr = DynamicCast<Expr>(first)) {
+        first = &UnwrapParenExpr(*expr);
+    }
+    if (auto exclave = DynamicCast<ExclaveExpr>(first)) {
+        if (!exclave->body || exclave->body->body.empty()) {
             return;
         }
-        first = &*exclave->body->body.front();
+        first = exclave->body->body.front().get();
+        if (auto expr = DynamicCast<Expr>(first)) {
+            first = &UnwrapParenExpr(*expr);
+        }
     }
     if (auto ce = DynamicCast<CallExpr>(first)) {
         if (auto re = DynamicCast<RefExpr*>(ce->baseFunc.get()); re) {

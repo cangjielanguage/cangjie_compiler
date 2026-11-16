@@ -118,18 +118,16 @@ JoinAndMeet::ErrOrTy JoinAndMeet::JoinAsVisibleTy()
 
 ModalInfo JoinAndMeet::JoinMode(TypeManager& tyMgr, const std::set<ModalTy>& tyms)
 {
-    // Join the modals of all non-Copy types. IDEAL (a literal's pending modal awaiting
-    // unification with the expected contextual modal) is transparent in a join: it does not
-    // contribute its own (meaningless) mode, so a concrete modal from any sibling determines
-    // the result. If every contributing modal is IDEAL (no concrete modal among non-Copy tys),
-    // the result stays IDEAL (still pending) so it can be unified with the expected contextual
-    // modal downstream; if there are no non-Copy contributors at all (empty or all-Copy), the
-    // result defaults to ~local (NOT).
+    // Ignore Nothing. Join non-Copy modes when present; otherwise join Copy modes.
+    // IDEAL yields to concrete modes; all-IDEAL stays IDEAL. With no contributors, default to ~local.
+    bool hasNonCopy = std::any_of(tyms.begin(), tyms.end(), [&tyMgr](auto ty) {
+        return !ty->IsNothing() && !tyMgr.IsCopyType(ty.Ty());
+    });
     bool hasConcrete = false;
     bool hasIdeal = false;
     ModalInfo m{};
     for (auto ty : tyms) {
-        if (tyMgr.IsCopyType(ty.Ty())) {
+        if (ty->IsNothing() || (hasNonCopy && tyMgr.IsCopyType(ty.Ty()))) {
             continue;
         }
         if (ty.Mode().local == Mode::IDEAL) {
