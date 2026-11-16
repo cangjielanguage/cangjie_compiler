@@ -820,12 +820,8 @@ private:
         CJC_NULLPTR_CHECK(ie.thenBody);
         bool res = ChkExpr(*ie.condExpr, isWeak);
         res = ChkBlock(*ie.thenBody, isWeak) && res;
-        res = ChkNoExternConversion(*ie.thenBody, ie.DataTy()) && res;
         if (ie.elseBody) {
             res = ChkExpr(*ie.elseBody, isWeak) && res;
-            auto elseBlock = DynamicCast<const Block*>(ie.elseBody.get());
-            res = (elseBlock ? ChkNoExternConversion(*elseBlock, ie.DataTy())
-                             : ChkNoExternConversion(*ie.elseBody, ie.DataTy())) && res;
         }
         return res;
     }
@@ -870,12 +866,10 @@ private:
         for (auto& mc : me.matchCases) {
             CJC_NULLPTR_CHECK(mc);
             res = ChkMatchCase(*mc, isWeak) && res;
-            res = ChkNoExternConversion(*mc->exprOrDecls, me.DataTy()) && res;
         }
         for (auto& mco : me.matchCaseOthers) {
             CJC_NULLPTR_CHECK(mco);
             res = ChkMatchCaseOther(*mco, isWeak) && res;
-            res = ChkNoExternConversion(*mco->exprOrDecls, me.DataTy()) && res;
         }
         return res;
     }
@@ -888,11 +882,9 @@ private:
         }
         CJC_NULLPTR_CHECK(te.tryBlock);
         bool res = ChkBlock(*te.tryBlock, isWeak);
-        res = ChkNoExternConversion(*te.tryBlock, te.DataTy()) && res;
         for (auto& cb : te.catchBlocks) {
             CJC_NULLPTR_CHECK(cb);
             res = ChkBlock(*cb, isWeak) && res;
-            res = ChkNoExternConversion(*cb, te.DataTy()) && res;
         }
         if (te.finallyBlock) {
             res = ChkBlock(*te.finallyBlock, isWeak) && res;
