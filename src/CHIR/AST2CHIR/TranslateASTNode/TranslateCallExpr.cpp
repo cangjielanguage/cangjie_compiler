@@ -5,6 +5,7 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/AST/AttributePack.h"
+#include "cangjie/AST/Utils.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/CHIR/Utils/ConstantUtils.h"
@@ -1554,15 +1555,10 @@ void Translator::ProcessMapExpr(AST::Node& originExpr, bool isSubScript)
             exprValueTable.Set(originExpr, *chirNode);
         }
     } else {
-        // The value may be shared before an implicit conversion of originExpr, e.g. i in c[T.toExtern(i)] op= v. A
-        // converted block remains a block holding the conversion.
-        auto desugared = GetDesugaredExpr(originExpr);
-        if (auto block = DynamicCast<const AST::Block*>(desugared); block && block->body.size() == 1) {
-            desugared = block->body[0].get();
-        }
-        auto ce = DynamicCast<const AST::CallExpr*>(desugared);
-        auto shared = ce && ce->args.size() == 1 ? DynamicCast<const AST::Expr*>(GetDesugaredExpr(*ce->args[0]->expr))
-                                                 : nullptr;
+        // The value may be shared before an implicit conversion of originExpr, e.g. i in c[T.toExtern(i)] op= v.
+        auto expr = DynamicCast<const AST::Expr*>(&originExpr);
+        auto ce = expr ? AST::GetImplicitToExternCall(*expr) : nullptr;
+        auto shared = ce ? DynamicCast<const AST::Expr*>(GetDesugaredExpr(*ce->args[0]->expr)) : nullptr;
         if (shared && shared->mapExpr == shared) {
             exprValueTable.Set(*shared, *TranslateExprArg(*ce->args[0]->expr));
         }

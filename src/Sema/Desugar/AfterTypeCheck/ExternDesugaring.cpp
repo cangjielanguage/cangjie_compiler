@@ -31,7 +31,6 @@ using namespace Meta;
 using namespace TypeCheckUtil;
 
 namespace {
-const std::string TO_EXTERN_FUNC = "toExtern";
 const std::string MEMBER_ACCESS_FUNC = "memberAccess";
 const std::string INDEXED_ACCESS_FUNC = "indexedAccess";
 const std::string MEMBER_UPDATE_FUNC = "memberUpdate";
@@ -121,16 +120,8 @@ Expr& GetInnermost(Expr& expr)
 /** The innermost desugared expression of e in T.toExtern(e), the conversion of @p expr, if @p expr was converted. */
 Ptr<Expr> GetConvertedOperand(const Expr& expr)
 {
-    auto desugared = expr.desugarExpr.get();
-    if (auto block = DynamicCast<Block*>(desugared); block && block->body.size() == 1) {
-        desugared = DynamicCast<Expr*>(block->body[0].get());
-    }
-    auto ce = DynamicCast<CallExpr*>(desugared);
-    if (!ce || !ce->TestAttr(Attribute::IMPLICIT_ADD) || !ce->resolvedFunction ||
-        ce->resolvedFunction->identifier != TO_EXTERN_FUNC || ce->args.size() != 1) {
-        return nullptr;
-    }
-    return &GetInnermost(*ce->args[0]->expr);
+    auto ce = GetImplicitToExternCall(expr);
+    return ce ? &GetInnermost(*ce->args[0]->expr) : nullptr;
 }
 
 /**
@@ -206,7 +197,7 @@ bool ExternDesugaring::TryConvert(Expr& expr, Ty& target)
         return false;
     }
     // Everything that can fail is checked before the operand is moved out of expr.desugarExpr.
-    auto func = LookupRuntimeFunc(TO_EXTERN_FUNC, target, {valueTy}, expr);
+    auto func = LookupRuntimeFunc(STD_LIB_TO_EXTERN, target, {valueTy}, expr);
     if (!func.decl) {
         return false;
     }

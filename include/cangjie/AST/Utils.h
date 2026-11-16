@@ -153,6 +153,8 @@ bool IsCondition(const Expr& e);
 bool DoesNotHaveEnumSubpattern(const LetPatternDestructor& let);
 
 bool IsValidCFuncConstructorCall(const CallExpr& ce);
+/** The implicit call T.toExtern(e) that @p expr is desugared into when its value is converted to Extern<T>. */
+Ptr<CallExpr> GetImplicitToExternCall(const Expr& expr);
 
 inline bool IsNestedFunc(const AST::FuncDecl& fd)
 {
