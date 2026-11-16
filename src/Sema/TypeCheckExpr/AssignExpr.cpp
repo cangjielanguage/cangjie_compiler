@@ -325,10 +325,14 @@ std::optional<ModalTy> TypeChecker::TypeCheckerImpl::SynExternUpdate(ASTContext&
     if (!IsDynamicExternUpdate(ae)) {
         return {};
     }
+    // && and || cannot be overloaded and evaluate their right operand only if needed, so &&= and ||= need a Bool.
+    bool isWellTyped = ae.op != TokenKind::AND_ASSIGN && ae.op != TokenKind::OR_ASSIGN;
+    if (!isWellTyped) {
+        (void)diag.Diagnose(ae, DiagKind::sema_type_incompatible, "compound assignment expression");
+    }
     // The index and the value are passed to the foreign runtime as Any, so they may have any type.
-    bool isWellTyped = true;
     if (auto ma = DynamicCast<MemberAccess*>(ae.leftValue.get())) {
-        isWellTyped = ChkExternMemberTypeArguments(*ma);
+        isWellTyped = ChkExternMemberTypeArguments(*ma) && isWellTyped;
     } else if (auto se = DynamicCast<SubscriptExpr*>(ae.leftValue.get())) {
         for (auto& index : se->indexExprs) {
             isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, index.get())) &&

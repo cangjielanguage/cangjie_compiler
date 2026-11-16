@@ -1043,6 +1043,11 @@ ModalTy GetReturnTy(const FuncBody& fb)
 
 bool IsDynamicExternMemberAccess(const MemberAccess& ma)
 {
+    // x &&= v is tried as x = x.&&(v), but && and || cannot be overloaded and evaluate their right operand only if
+    // needed, so they are not members.
+    if (ma.field == "&&" || ma.field == "||") {
+        return false;
+    }
     return !ma.target && ma.baseExpr && !ma.TestAttr(Attribute::LEFT_VALUE) && IsExternValue(*ma.baseExpr);
 }
 
