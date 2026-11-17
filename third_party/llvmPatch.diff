@@ -1330,6 +1330,27 @@ index 8f89db32a..000000000
 -        run: |
 -          version=`grep -o 'LLVM_VERSION_\(MAJOR\|MINOR\|PATCH\) [0-9]\+' llvm/CMakeLists.txt  | cut -d ' ' -f 2 | tr "\n" "." | sed 's/.$//g'`
 -          .github/workflows/version-check.py $version
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+new file mode 100644
+index 000000000..812c59f8b
+--- /dev/null
++++ b/.pre-commit-config.yaml
+@@ -0,0 +1,15 @@
++# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
++# Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++# See https://llvm.org/LICENSE.txt for license information.
++# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++
++# 仓颉社区统一提交校验：Conventional Commits + DCO
++# 使用说明：https://gitcode.com/Cangjie/cangjie_build/blob/main/docs/pre-commit.md
++default_install_hook_types: [commit-msg]
++
++repos:
++  - repo: https://gitcode.com/Cangjie/cangjie_build
++    rev: b69cd3fb78345d7c85dd3b198a88b37df8ec0453
++    hooks:
++      - id: cangjie-commitlint
++      - id: cangjie-dco
 diff --git a/LICENSE.TXT b/LICENSE.TXT
 new file mode 100644
 index 000000000..571517657
@@ -38185,12 +38206,14 @@ index 000000000..1420a390f
 +
 +#endif
 diff --git a/llvm/include/llvm/Transforms/IPO/GlobalDCE.h b/llvm/include/llvm/Transforms/IPO/GlobalDCE.h
-index a24196efb..2f12f4b59 100644
+index a24196efb..33a9a55f3 100644
 --- a/llvm/include/llvm/Transforms/IPO/GlobalDCE.h
 +++ b/llvm/include/llvm/Transforms/IPO/GlobalDCE.h
-@@ -18,9 +18,12 @@
+@@ -17,11 +17,17 @@
+ #ifndef LLVM_TRANSFORMS_IPO_GLOBALDCE_H
  #define LLVM_TRANSFORMS_IPO_GLOBALDCE_H
  
++#include "llvm/ADT/ArrayRef.h"
  #include "llvm/ADT/DenseMap.h"
 +#include "llvm/ADT/SmallPtrSet.h"
  #include "llvm/ADT/SmallSet.h"
@@ -38198,10 +38221,13 @@ index a24196efb..2f12f4b59 100644
  #include "llvm/IR/GlobalValue.h"
  #include "llvm/IR/PassManager.h"
 +#include "llvm/Transforms/Scalar/CJFillMetadata.h"
++#include <memory>
  #include <unordered_map>
++#include <vector>
  
  namespace llvm {
-@@ -70,6 +73,77 @@ private:
+ class Comdat;
+@@ -70,6 +76,97 @@ private:
    void ScanVTableLoad(Function *Caller, Metadata *TypeId, uint64_t CallOffset);
  
    void ComputeDependencies(Value *V, SmallPtrSetImpl<GlobalValue *> &U);
@@ -38210,29 +38236,47 @@ index a24196efb..2f12f4b59 100644
 +};
 +
 +struct CangjieDCE {
-+  struct GenericFuncInfo {
-+    bool IsValid = false;
-+    GenericFuncInfo *Prev = nullptr;
-+    // Save all func tables with current type.
-+    SmallPtrSet<GlobalVariable *, 4> FuncTables;
-+    DenseMap<GlobalVariable *, bool> HasCompilerInfo;
-+    DenseMap<GlobalVariable *, GenericFuncInfo *> Next;
++  // VFE dependency model.
++  //
++  // ExtensionDef defs and call sites are both decoded into a tree of
++  // instantiated types: an MDNode !{!"<label>", arg0, ..., argN-1} yields one
++  // node for the global named by <label> (a TypeTemplate ".tt" or a concrete
++  // TypeInfo ".ti") plus one child node per type argument. A label that
++  // cannot be resolved to a global in this module (the "$g" sentinel of an
++  // uninstantiated generic parameter, or a name in another package) yields a
++  // WILDCARD node (GV == null, no children).
++  //
++  // A def pattern P protects a call site C iff their trees unify:
++  //  - a wildcard node matches the ENTIRE subtree on the other side;
++  //  - otherwise the labels must be equal and the children unify pairwise
++  //    over their common prefix (trailing extras are ignored, covering
++  //    bitcode whose trailing arguments were omitted).
++  // Unification only over-approximates reachability: an unmatched def can
++  // only clear a kept entry, never keep a cleared one.
++  struct VFETypeNode {
++    GlobalVariable *GV = nullptr; // null = wildcard subtree ("$g"/external).
++    SmallVector<VFETypeNode *, 2> Children;
++  };
 +
-+#ifndef NDEBUG
-+    GlobalVariable *Ty = nullptr;
-+#endif
++  struct VFEPattern {
++    VFETypeNode *Tree = nullptr;          // Instantiated-type tree of the ED.
++    GlobalVariable *FT = nullptr;         // Function table of the ExtensionDef.
++    bool HasCompilerInfo = false;         // ET_FLAG != 0: FT carries pair slots.
 +  };
 +
 +  // These are used for eliminating the useless virtual func.
 +  GlobalDCEPass &DCE;
-+  GenericFuncInfo *Root;
++  // Interface root global -> patterns registered by that interface's defs.
++  DenseMap<GlobalVariable *, SmallVector<VFEPattern, 2>> Patterns;
++  // Arena owning every decoded VFETypeNode; lives as long as this CangjieDCE,
++  // i.e. exactly as long as the Patterns that reference the nodes.
++  std::vector<std::unique_ptr<VFETypeNode>> NodeArena;
 +
 +  // This is used for eliminating the useless typeinfo.
 +  DenseMap<Value *, SmallPtrSet<GlobalVariable *, 8>> ReverseDeps;
 +
 +  CangjieDCE() = delete;
-+  CangjieDCE(GlobalDCEPass &DCE) : DCE(DCE) { Root = new GenericFuncInfo; }
-+  ~CangjieDCE();
++  CangjieDCE(GlobalDCEPass &DCE) : DCE(DCE) {}
 +
 +  static bool isCangjieType(GlobalVariable *GV) {
 +    return GV->isCJTypeInfo() || GV->isCJTypeTemplate();
@@ -38251,24 +38295,26 @@ index a24196efb..2f12f4b59 100644
 +    return -1;
 +  }
 +
-+  GenericFuncInfo *insertInstance(const SmallVectorImpl<GlobalVariable *> &,
-+                                  GlobalVariable *FT);
++  // Decode VFE metadata into an instantiated-type tree (see VFETypeNode).
++  // Returns true on success; returns false when the root label names no
++  // global in this module, in which case the call site must be treated as
++  // fully unknown and every registered pattern marked.
++  bool resolveVFEMetaTree(Metadata *MD, Module &M, VFETypeNode *&Out);
 +
-+  GenericFuncInfo *
-+  findTargetInstance(const SmallVectorImpl<GlobalVariable *> &);
++  // Structural wildcard match between a def pattern tree P and a call-site
++  // tree C (see the CangjieDCE comment for the unification rules).
++  static bool matchVFETree(const VFETypeNode &P, const VFETypeNode &C);
 +
-+  // Parse metadata and return the corresponding GFI.
-+  GenericFuncInfo *resolveVFEMeta(Metadata *, Module &);
++  // Mark the function-table entry at Offset (and its compiler-info pair) of
++  // the pattern's FT as a dependency of Caller.
++  void markFuncTableEntry(Function *Caller, const VFEPattern &P,
++                          uint64_t Offset);
 +
 +  void addCangjieVirtualFunctionDependencies(Module &);
 +
 +  // Obtain the function table FT that achieves P from C, return {C, P, FT}.
 +  std::tuple<GlobalVariable *, GlobalVariable *, GlobalVariable *>
 +  scanVTable(GlobalVariable &);
-+
-+  // Add dependencies between caller and callee.
-+  void updateDependencies(Function *,
-+                          DenseMap<GenericFuncInfo *, SmallSet<uint64_t, 4>> &);
 +
 +  void initTIE(Module &);
 +  void updateLiveExtensions();
@@ -39288,10 +39334,10 @@ index 000000000..71aef9476
 \ No newline at end of file
 diff --git a/llvm/include/llvm/Transforms/Scalar/CJGCLiveAnalysis.h b/llvm/include/llvm/Transforms/Scalar/CJGCLiveAnalysis.h
 new file mode 100644
-index 000000000..0a5eaa654
+index 000000000..171771826
 --- /dev/null
 +++ b/llvm/include/llvm/Transforms/Scalar/CJGCLiveAnalysis.h
-@@ -0,0 +1,372 @@
+@@ -0,0 +1,434 @@
 +//===- CJGCLiveAnalysis.h - -------------------------------------*- C++ -*-===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -39308,9 +39354,12 @@ index 000000000..0a5eaa654
 +#define LLVM_TRANSFORMS_SCALAR_GCLIVEANALYSIS_H
 +
 +#include "llvm/ADT/ArrayRef.h"
++#include "llvm/ADT/DenseMap.h"
 +#include "llvm/ADT/MapVector.h"
 +#include "llvm/ADT/SetVector.h"
++#include "llvm/ADT/SmallPtrSet.h"
 +#include "llvm/ADT/SmallSet.h"
++#include "llvm/ADT/SmallVector.h"
 +#include "llvm/Analysis/PostDominators.h"
 +#include "llvm/IR/Dominators.h"
 +#include "llvm/IR/Function.h"
@@ -39516,6 +39565,10 @@ index 000000000..0a5eaa654
 +
 +  FieldInfo *getFieldInfoByValue(Value *Ptr);
 +
++  FieldInfo *getStackFieldInfo(Value *Ptr);
++
++  FieldInfo *getBarrierFieldInfo(Value *Ptr);
++
 +  bool containGCPtrByOffset(Value *Ptr, uint64_t Size);
 +
 +  bool isBaseContainGCPtr(Value *Ptr);
@@ -39531,7 +39584,7 @@ index 000000000..0a5eaa654
 +
 +  void moveInitializerAfterLifetime(Value *V, Instruction *I, CallInst *CI);
 +
-+  void insertMemsetForPhiStruct();
++  void insertMemsetForStackStructs();
 +
 +  void computeFieldLiveInValues(BasicBlock::reverse_iterator Begin,
 +                                BasicBlock::reverse_iterator End,
@@ -39563,7 +39616,8 @@ index 000000000..0a5eaa654
 +
 +  void visitMemoryLoad(LoadInst *LI, SetVector<FieldInfo *> &AllocaUses);
 +
-+  void visitMemoryStore(StoreInst *SI, SetVector<FieldInfo *> &AllocaDefs);
++  void visitMemoryStore(StoreInst *SI, SetVector<FieldInfo *> &AllocaDefs,
++                        SetVector<FieldInfo *> &AllocaUses);
 +
 +  void visitMemoryIntrinsic(IntrinsicInst *II,
 +                            SetVector<FieldInfo *> &AllocaDefs,
@@ -39578,6 +39632,49 @@ index 000000000..0a5eaa654
 +  MemoryAccessKind hasMemoryDefineOrUseValue(Instruction *I,
 +                                         SetVector<FieldInfo *> &AllocaDefs,
 +                                         SetVector<FieldInfo *> &AllocaUses);
++
++  using StackPointeeState = DenseMap<FieldInfo *, SetVector<Value *>>;
++
++  void computeStackPointeeStates();
++
++  void applyStackPointeeTransfer(Instruction *I, StackPointeeState &State);
++
++  bool mergeStackPointeeState(StackPointeeState &Dst,
++                              const StackPointeeState &Src);
++
++  void getGCFieldInfos(Value *Base, SmallVectorImpl<FieldInfo *> &Fields);
++
++  void getGCFieldInfosInRange(Value *Base, uint64_t Begin, uint64_t End,
++                              SmallVectorImpl<FieldInfo *> &Fields);
++
++  void collectStackObjectPointees(Value *V, SetVector<Value *> &Pointees);
++
++  void collectStackFieldPointees(Instruction *I, Value *V, uint64_t Size,
++                                 SetVector<Value *> &Pointees);
++
++  void setStackPointees(StackPointeeState &State, FieldInfo *Field,
++                        const SetVector<Value *> &Pointees);
++
++  void clearStackPointees(StackPointeeState &State, Value *Ptr, uint64_t Size);
++
++  void copyStackPointees(StackPointeeState &State, Value *Dst, Value *Src,
++                         uint64_t Size);
++
++  bool isFieldLive(FieldInfo *Field, const StructLiveSetTy &Live);
++
++  void addConditionalPublishUses(Instruction *I,
++                                 const StructLiveSetTy &LiveAfter,
++                                 SetVector<FieldInfo *> &Uses);
++
++  void addPointeeFields(Instruction *I, FieldInfo *Field,
++                        SetVector<FieldInfo *> &Set);
++
++  void addStoredPointeeFields(Value *V, SetVector<FieldInfo *> &Uses);
++
++  void addSourcePointeeFields(Instruction *I, Value *V, uint64_t Size,
++                              SetVector<FieldInfo *> &Uses);
++
++  void expandStackPointees(CallBase *Call, StructLiveSetTy &FieldInfos);
 +
 +  // Conservatively identifies any definitions which might be live at the
 +  // given instruction. The  analysis is performed immediately before the
@@ -39594,6 +39691,9 @@ index 000000000..0a5eaa654
 +
 +  void clear() {
 +    StackContainGCPtrMap.clear();
++    StackPointeeIn.clear();
++    StackPointeeOut.clear();
++    StackPointeeBefore.clear();
 +    for (auto *Field : AllFields) {
 +      delete Field;
 +    }
@@ -39603,6 +39703,7 @@ index 000000000..0a5eaa654
 +public:
 +  StructLiveData Data;
 +  SmallSet<Value *, 8> InsertedMemset;
++  SmallSet<Value *, 8> StackPointeeObjects;
 +
 +private:
 +  const DataLayout &DL;
@@ -39613,6 +39714,13 @@ index 000000000..0a5eaa654
 +  // Mapping whether a V is a stack pointer that contains gcptr, and clear it
 +  // after active variable analysis.
 +  MapVector<Value *, bool> StackContainGCPtrMap;
++  // Stack fields can contain the address of another stack object.  The
++  // runtime stops at that non-heap address, so the pointee's fields have to be
++  // reported separately.  These maps track which stack objects each field may
++  // contain at a program point.
++  DenseMap<BasicBlock *, StackPointeeState> StackPointeeIn;
++  DenseMap<BasicBlock *, StackPointeeState> StackPointeeOut;
++  DenseMap<Instruction *, StackPointeeState> StackPointeeBefore;
 +  // Avoid duplicate liveness analysis in the BB.
 +  MapVector<BasicBlock *, std::pair<Instruction *, StructLiveSetTy>>
 +      InstLiveSetCache;
@@ -66304,7 +66412,7 @@ index 50710eaa1..50250d7c2 100644
  
  /// Deduce returned attributes for the SCC.
 diff --git a/llvm/lib/Transforms/IPO/GlobalDCE.cpp b/llvm/lib/Transforms/IPO/GlobalDCE.cpp
-index f35827220..6e7c9553a 100644
+index f35827220..5eb9a1bea 100644
 --- a/llvm/lib/Transforms/IPO/GlobalDCE.cpp
 +++ b/llvm/lib/Transforms/IPO/GlobalDCE.cpp
 @@ -18,12 +18,14 @@
@@ -66461,70 +66569,104 @@ index f35827220..6e7c9553a 100644
    // Make sure that all memory is released
    AliveGlobals.clear();
    ConstantDependenciesCache.clear();
-@@ -458,3 +511,596 @@ PreservedAnalyses GlobalDCEPass::run(Module &M, ModuleAnalysisManager &MAM) {
+@@ -458,3 +511,583 @@ PreservedAnalyses GlobalDCEPass::run(Module &M, ModuleAnalysisManager &MAM) {
      return PreservedAnalyses::none();
    return PreservedAnalyses::all();
  }
 +
-+CangjieDCE::GenericFuncInfo *
-+CangjieDCE::insertInstance(const SmallVectorImpl<GlobalVariable *> &Path,
-+                           GlobalVariable *FT = nullptr) {
-+  GenericFuncInfo *CurRoot = this->Root;
-+  for (GlobalVariable *GV : Path) {
-+    auto It = CurRoot->Next.find(GV);
-+    if (It != CurRoot->Next.end()) {
-+      CurRoot = It->second;
-+      continue;
++bool CangjieDCE::resolveVFEMetaTree(Metadata *MD, Module &M, VFETypeNode *&Out) {
++  Out = nullptr;
++  auto *N = dyn_cast_or_null<MDNode>(MD);
++  if (!N || N->getNumOperands() == 0)
++    return false;
++  auto *RootStr = dyn_cast<MDString>(N->getOperand(0).get());
++  if (!RootStr)
++    return false;
++  GlobalVariable *Root = M.getNamedGlobal(RootStr->getString());
++  if (!Root)
++    return false;
++
++  // Decode the generic instantiation metadata into a tree.
++  //
++  // Each MDNode encodes one instantiated type:
++  //   !{!"T.tt", arg0, arg1, ..., argN-1}
++  // operand(0) is the label of this node (a TypeTemplate ".tt" or a concrete
++  // TypeInfo ".ti" global name); operand(1..N) are the type arguments, each of
++  // which is an MDString (concrete leaf), the "$g" wildcard sentinel, or a
++  // nested MDNode (another instantiation, decoded recursively as a child).
++  // A label that cannot be resolved to a global in this module ("$g", or a
++  // name in another package) yields a WILDCARD node (GV == null, no children).
++  // Arity-0 !{!"A.ti"} and arity-1 !{!"A.tt", arg0} nodes decode the same way.
++  std::function<VFETypeNode *(Metadata *)> Walk = [&](Metadata *Cur)
++      -> VFETypeNode * {
++    NodeArena.emplace_back(std::make_unique<VFETypeNode>());
++    VFETypeNode *Node = NodeArena.back().get();
++    auto *ArgN = dyn_cast_or_null<MDNode>(Cur);
++    if (ArgN && ArgN->getNumOperands() > 0) {
++      if (auto *S = dyn_cast<MDString>(ArgN->getOperand(0).get())) {
++        if (S->getString() != "$g")
++          Node->GV = M.getNamedGlobal(S->getString());
++      }
++      for (unsigned I = 1, E = ArgN->getNumOperands(); I != E; ++I)
++        Node->Children.push_back(Walk(ArgN->getOperand(I).get()));
++      return Node;
 +    }
-+    auto *GFI = new GenericFuncInfo;
-+#ifndef NDEBUG
-+    GFI->Ty = GV;
-+#endif
-+    GFI->Prev = CurRoot;
-+    CurRoot->Next[GV] = GFI;
-+    CurRoot = GFI;
-+  }
-+  CurRoot->IsValid = true;
-+  if (FT)
-+    CurRoot->FuncTables.insert(FT);
-+  return CurRoot;
++    // A bare MDString argument (a concrete leaf) or an unexpected node:
++    // resolve what is resolvable, everything else stays a wildcard.
++    if (auto *S = dyn_cast_or_null<MDString>(Cur))
++      if (S->getString() != "$g")
++        Node->GV = M.getNamedGlobal(S->getString());
++    return Node;
++  };
++
++  NodeArena.emplace_back(std::make_unique<VFETypeNode>());
++  VFETypeNode *RootNode = NodeArena.back().get();
++  RootNode->GV = Root;
++  for (unsigned I = 1, E = N->getNumOperands(); I != E; ++I)
++    RootNode->Children.push_back(Walk(N->getOperand(I).get()));
++  Out = RootNode;
++  return true;
 +}
 +
-+CangjieDCE::GenericFuncInfo *
-+CangjieDCE::findTargetInstance(const SmallVectorImpl<GlobalVariable *> &Path) {
-+  GenericFuncInfo *Root = this->Root;
-+  for (GlobalVariable *GV : Path) {
-+    auto It = Root->Next.find(GV);
-+    if (It == Root->Next.end())
-+      return nullptr;
-+    Root = It->second;
-+  }
-+  return Root->IsValid ? Root : nullptr;
++bool CangjieDCE::matchVFETree(const VFETypeNode &P, const VFETypeNode &C) {
++  // A wildcard on either side absorbs the other side's entire subtree.
++  if (!P.GV || !C.GV)
++    return true;
++  if (P.GV != C.GV)
++    return false;
++  // Children unify pairwise over their common prefix; trailing extras are
++  // ignored, which covers bitcode whose trailing arguments were omitted.
++  unsigned N = std::min(P.Children.size(), C.Children.size());
++  for (unsigned I = 0; I != N; ++I)
++    if (!matchVFETree(*P.Children[I], *C.Children[I]))
++      return false;
++  return true;
 +}
 +
-+CangjieDCE::GenericFuncInfo *CangjieDCE::resolveVFEMeta(Metadata *MD,
-+                                                        Module &M) {
-+  SmallVector<GlobalVariable *, 4> Path;
-+  MDNode *N;
-+  while ((N = dyn_cast_or_null<MDNode>(MD))) {
-+    auto *GV = M.getNamedGlobal(
-+        dyn_cast<MDString>(N->getOperand(0).get())->getString());
-+    // Some vcall may encounter situations where the target types does not appear
-+    // in the current module. In such cases, it can be ensured that the virtual
-+    // function being called is definitely not defined in the current module.
-+    if (!GV)
-+      return nullptr;
-+    Path.push_back(GV);
-+    // Layout of MD:
-+    //  {1.tt, [offset]}
-+    //  {1.tt, 2.ti, [offset]}
-+    //  {1.tt, !2, [offset]}, !2 = new MD
-+    MD = N->getNumOperands() >= 2 ? N->getOperand(1)
-+                                  : static_cast<Metadata *>(nullptr);
++void CangjieDCE::markFuncTableEntry(Function *Caller, const VFEPattern &P,
++                                    uint64_t Offset) {
++  Constant *C = P.FT->getInitializer();
++  unsigned N = C->getNumOperands();
++  if (P.HasCompilerInfo) {
++    assert(N % 2 == 0 && "front end generate error functable.");
++    N /= 2;
 +  }
-+  if (auto *MDS = dyn_cast_or_null<MDString>(MD))
-+    Path.push_back(M.getNamedGlobal(MDS->getString()));
-+  return insertInstance(Path);
++  if (N <= Offset)
++    return;
++  if (auto *Callee = dyn_cast_or_null<Function>(
++          C->getOperand(Offset)->stripPointerCasts()))
++    DCE.GVDependencies[Caller].insert(Callee);
++  if (!P.HasCompilerInfo)
++    return;
++  assert(C->getNumOperands() > Offset + N &&
++         "front end generate error functable.");
++  // The pair slot holds the GetOuterTiFn companion of the entry at Offset.
++  // Anchor it on the FuncTable rather than the caller: pinning it on the
++  // caller would let any wildcard call site resurrect the companion's whole
++  // type chain, while the FT anchor ties it to the chain's own reachability.
++  if (auto *Pair = dyn_cast_or_null<GlobalValue>(
++          C->getOperand(Offset + N)->stripPointerCasts()))
++    DCE.GVDependencies[P.FT].insert(Pair);
 +}
 +
 +// Obtain the function table FT that achieves P from C, return {C, P, FT}.
@@ -66538,66 +66680,14 @@ index f35827220..6e7c9553a 100644
 +      C->getOperand(ExtensionDefFieldType::ET_FUNC_TABLE)->stripPointerCasts());
 +  if (!FT)
 +    return {nullptr, nullptr, nullptr};
-+  GlobalVariable *TI =
++  GlobalVariable *TIC =
 +      cast<GlobalVariable>(C->getOperand(ExtensionDefFieldType::ET_TARGET_TYPE)
 +                               ->stripPointerCasts());
 +  assert(GV.hasMetadata("inheritedType"));
-+  GlobalVariable *IF = GV.getParent()->getNamedGlobal(
++  GlobalVariable *TIP = GV.getParent()->getNamedGlobal(
 +      dyn_cast<MDString>(GV.getMetadata("inheritedType")->getOperand(0))
 +          ->getString());
-+  return {TI, IF, FT};
-+}
-+
-+void CangjieDCE::updateDependencies(
-+    Function *Caller,
-+    DenseMap<GenericFuncInfo *, SmallSet<uint64_t, 4>> &Relation) {
-+  auto Mark = [Caller, this](SmallPtrSetImpl<GlobalVariable *> &FTs,
-+                             DenseMap<GlobalVariable *, bool> &HasCompilerInfo,
-+                             uint64_t Offset) {
-+    for (auto *FT : FTs) {
-+      auto *C = FT->getInitializer();
-+      unsigned N = C->getNumOperands();
-+      if (HasCompilerInfo[FT]) {
-+        assert(N % 2 == 0 && "front end generate error functable.");
-+        N /= 2;
-+      }
-+      if (N <= Offset)
-+        continue;
-+      Function *Callee = dyn_cast_or_null<Function>(
-+          C->getOperand(Offset)->stripPointerCasts());
-+      if (!Callee)
-+        continue;
-+      assert(Callee != nullptr);
-+      this->DCE.GVDependencies[Caller].insert(Callee);
-+      if (!HasCompilerInfo[FT])
-+        continue;
-+      assert(C->getNumOperands() > Offset + N &&
-+             "front end generate error functable.");
-+      if (auto *Pair = dyn_cast_or_null<GlobalVariable>(
-+              C->getOperand(Offset + N)->stripPointerCasts()))
-+        this->DCE.GVDependencies[Caller].insert(Pair);
-+    }
-+  };
-+  for (auto &[GFI, Offsets] : Relation) {
-+    for (auto I : Offsets) {
-+      auto *CurGFI = GFI;
-+      // 1. Mark all child nodes.
-+      SmallVector<GenericFuncInfo *, 8> Worklist = {CurGFI};
-+      while (!Worklist.empty()) {
-+        auto *Child = Worklist.pop_back_val();
-+        for (auto [_, N] : Child->Next) {
-+          Mark(N->FuncTables, N->HasCompilerInfo, I);
-+          Worklist.push_back(N);
-+        }
-+      }
-+      // 2. Recursively mark all parent nodes.
-+      while (CurGFI != Root) {
-+        auto &FTs = CurGFI->FuncTables;
-+        CurGFI = CurGFI->Prev;
-+        Mark(FTs, CurGFI->HasCompilerInfo, I);
-+      }
-+    }
-+  }
++  return {TIC, TIP, FT};
 +}
 +
 +void CangjieDCE::addCangjieVirtualFunctionDependencies(Module &M) {
@@ -66610,33 +66700,41 @@ index f35827220..6e7c9553a 100644
 +  // Therefore, for VFE, it is only necessary to be concerned with the
 +  // visibility of the implemented type. As long as I is internal, optimization
 +  // can be performed.
++  // Phase A: register every VFE-safe ExtensionDef as a pattern under its
++  // interface root global.
 +  for (auto &GV : M.globals()) {
-+    // If typeArgs >= 2, skip it.
++    // Only defs carrying VFE metadata participate.
 +    if (!GV.isCJMTable() || !GV.hasMetadata("inheritedType"))
 +      continue;
 +    if (!GV.hasInitializer())
 +      report_fatal_error("ExtensionDef must be initialized.");
-+    auto [TIC, TII, FT] = scanVTable(GV);
-+    if (!TIC || !TII || !FT)
++    auto [TIC, TIP, FT] = scanVTable(GV);
++    if (!TIC || !TIP || !FT)
 +      continue;
-+    if (GlobalValue::isLocalLinkage(TII->getLinkage())) {
-+      auto *GFI = resolveVFEMeta(GV.getMetadata("inheritedType"), M);
-+      assert(GFI);
-+      GFI->FuncTables.insert(FT);
-+      GFI->HasCompilerInfo[FT] =
-+          cast<ConstantInt>(
-+              GV.getInitializer()->getOperand(ExtensionDefFieldType::ET_FLAG))
-+              ->getZExtValue() != 0;
-+      DCE.VFESafeVTables.insert(FT);
-+    }
++    if (!GlobalValue::isLocalLinkage(TIP->getLinkage()))
++      continue;
++    VFETypeNode *Tree = nullptr;
++    bool Resolved = resolveVFEMetaTree(GV.getMetadata("inheritedType"), M, Tree);
++    (void)Resolved;
++    assert(Resolved && Tree && Tree->GV == TIP &&
++           "inheritedType root must match scanVTable's interface global.");
++    VFEPattern P;
++    P.Tree = Tree;
++    P.FT = FT;
++    P.HasCompilerInfo =
++        cast<ConstantInt>(
++            GV.getInitializer()->getOperand(ExtensionDefFieldType::ET_FLAG))
++            ->getZExtValue() != 0;
++    Patterns[TIP].push_back(std::move(P));
++    DCE.VFESafeVTables.insert(FT);
 +  }
 +
++  // Phase B: match every llvm.cj.vfe.info call site against the patterns
++  // registered under its interface root, and mark the reachable function
++  // table entries as dependencies of the calling function.
 +  for (Function &F : M) {
-+    // Value: offsets
-+    DenseMap<GenericFuncInfo *, SmallSet<uint64_t, 4>> RelatedGV;
 +    for (auto &I : instructions(F)) {
-+      // Look for @llvm.cj.vfe.info calls which carry VFE metadata as explicit
-+      // intrinsic arguments (objType as metadata arg, offset as i64 arg).
++      // llvm.cj.vfe.info: arg 1 = objType metadata, arg 2 = FuncTable offset.
 +      auto *CI = dyn_cast<CallInst>(&I);
 +      if (!CI)
 +        continue;
@@ -66648,32 +66746,29 @@ index f35827220..6e7c9553a 100644
 +      if (!MAV)
 +        report_fatal_error("objType is missing in llvm.cj.vfe.info");
 +      Metadata *TypeMD = MAV->getMetadata();
-+      // Arg 2: i64 FuncTable offset.
 +      auto *OffsetCI = dyn_cast<ConstantInt>(CI->getArgOperand(2));
 +      if (!OffsetCI)
 +        report_fatal_error("FuncTable offset is missing in llvm.cj.vfe.info");
 +
-+      auto *GFI = resolveVFEMeta(TypeMD, M);
-+      if (!GFI)
-+        continue;
 +      uint64_t Offset = OffsetCI->getZExtValue();
-+      RelatedGV[GFI].insert(Offset);
++      VFETypeNode *CallTree = nullptr;
++      if (!resolveVFEMetaTree(TypeMD, M, CallTree)) {
++        // The interface root names no global in this module (e.g. it is
++        // defined in another package): the interface dimension is undecidable
++        // here, so mark every registered pattern.
++        for (auto &RootEntry : Patterns)
++          for (const VFEPattern &P : RootEntry.second)
++            markFuncTableEntry(&F, P, Offset);
++        continue;
++      }
++      auto It = Patterns.find(CallTree->GV);
++      if (It == Patterns.end())
++        continue;
++      for (const VFEPattern &P : It->second)
++        if (matchVFETree(*P.Tree, *CallTree))
++          markFuncTableEntry(&F, P, Offset);
 +    }
-+    updateDependencies(&F, RelatedGV);
 +  }
-+}
-+
-+CangjieDCE::~CangjieDCE() {
-+  SmallVector<GenericFuncInfo *> Worklist = {Root};
-+  SmallVector<GenericFuncInfo *> Stack;
-+  while (!Worklist.empty()) {
-+    auto *GFI = Worklist.pop_back_val();
-+    Stack.push_back(GFI);
-+    for (auto [_, N] : GFI->Next)
-+      Worklist.push_back(N);
-+  }
-+  while (!Stack.empty())
-+    delete Stack.pop_back_val();
 +}
 +
 +bool CangjieDCE::maybeFakeLiveOfTypeMeta(GlobalVariable *GVU,
@@ -77196,10 +77291,10 @@ index 000000000..331d379b7
 \ No newline at end of file
 diff --git a/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp b/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp
 new file mode 100644
-index 000000000..a02db68c3
+index 000000000..f4426e732
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp
-@@ -0,0 +1,1487 @@
+@@ -0,0 +1,2130 @@
 +//===- CJGCLiveAnalysis.cpp - GC Live Analysis For Cangjie ------*- C++ -*-===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -77372,7 +77467,8 @@ index 000000000..a02db68c3
 +static void eliminateDeadMemset(StructLiveData &StructLives, Function &F,
 +                                PostDominatorTree &PostDT,
 +                                AllocaAnalysisData &AllocaData,
-+                                SmallSet<Value *, 8> &InsertedMemset) {
++                                SmallSet<Value *, 8> &InsertedMemset,
++                                SmallSet<Value *, 8> &StackPointeeObjects) {
 +  SetVector<Value *> &AllStructs = AllocaData.Structs;
 +  if (AllStructs.empty()) {
 +    return;
@@ -77397,6 +77493,12 @@ index 000000000..a02db68c3
 +
 +  for (auto &P : StructDefs) {
 +    Value *V = P.first;
++    // The zero initializer of a stack pointee is required for GC safety: the
++    // object is reported live at safepoints because another stack object
++    // references it, so a safepoint between the memset and a post-dominating
++    // redefinition would scan uninitialized memory.  Never delete it.
++    if (StackPointeeObjects.count(V))
++      continue;
 +    // If this AI does not have memset, or as the parameter of the call
 +    // instruction.do nothing.
 +    if (!StructToMemsetMap.count(V) || CallStructSet.count(V))
@@ -77707,6 +77809,41 @@ index 000000000..a02db68c3
 +  return getFieldInfo(PtrBase, Offsets.getZExtValue());
 +}
 +
++FieldInfo *StructLiveAnalysis::getStackFieldInfo(Value *Ptr) {
++  assert(isa<PointerType>(Ptr->getType()) && "Expected a pointer operand");
++  if (isa<PHINode>(Ptr) || isa<SelectInst>(Ptr))
++    return getFieldInfo(Ptr, -1);
++  Value *Base = findMemoryBasePointer(Ptr);
++  if (!isa<AllocaInst>(Base) && !isa<Argument>(Base))
++    return nullptr;
++  // A large struct is tracked as a single whole-object entry: a store to one
++  // of its fields must not kill the pointees recorded for the other fields.
++  if (AllocaData.LargeStructs.contains(Base))
++    return getFieldInfo(Base, -1);
++  APInt Offsets(DL.getIndexSizeInBits(0), 0);
++  Value *PtrBase = Ptr->stripPointerCasts()->stripAndAccumulateConstantOffsets(
++      DL, Offsets, false);
++  if (PtrBase != Base)
++    return getFieldInfo(Base, -1);
++  return getFieldInfo(Base, static_cast<int>(Offsets.getZExtValue()));
++}
++
++FieldInfo *StructLiveAnalysis::getBarrierFieldInfo(Value *Ptr) {
++  if (!isa<PointerType>(Ptr->getType()))
++    return nullptr;
++
++  // A barrier field pointer is an address-space-1 pointer to a GC field.  It
++  // can therefore look like a GC pointer itself, but it is really a stack
++  // field address.  Strip the pointer casts and resolve the underlying stack
++  // object instead of classifying the field pointer as a GC pointer.
++  for (Value *Candidate : {Ptr->stripPointerCasts(), Ptr}) {
++    FieldInfo *Field = getStackFieldInfo(Candidate);
++    if (Field && isMemoryContainsGCPtrType(Field->V->getType()))
++      return Field;
++  }
++  return nullptr;
++}
++
 +// Checks whether a range contains gcptr based on the struct type.
 +bool StructLiveAnalysis::containGCPtrByOffset(Value *Ptr, uint64_t Size) {
 +  APInt Offsets(DL.getIndexSizeInBits(0), 0);
@@ -77714,9 +77851,10 @@ index 000000000..a02db68c3
 +  if (isa<AllocaInst>(Base) && Size > 0) {
 +    uint64_t Begin = Offsets.getZExtValue();
 +    uint64_t End = Begin + Size;
-+    MapVector<uint64_t, bool> &OffsetMap =
-+        AllocaData.StructLayoutGCPtrMap[Base];
-+    for (auto &Pair : OffsetMap) {
++    auto It = AllocaData.StructLayoutGCPtrMap.find(Base);
++    if (It == AllocaData.StructLayoutGCPtrMap.end())
++      return false;
++    for (auto &Pair : It->second) {
 +      if (Pair.first >= Begin && Pair.first < End) {
 +        if (Pair.second) {
 +          return true;
@@ -77829,28 +77967,29 @@ index 000000000..a02db68c3
 +  }
 +}
 +
-+// For an alloca that contain gcptr to be used in phi, we need to insert an
-+// initializer in entry and lifetime.start.
-+void StructLiveAnalysis::insertMemsetForPhiStruct() {
++// For an alloca that contains a gcptr and is used by phi/select or referenced
++// from another stack object, we need to insert an initializer in entry and
++// lifetime.start.
++void StructLiveAnalysis::insertMemsetForStackStructs() {
 +  SetVector<Value *> AllocaStructs;
 +  SetVector<Value *> AllocaGCPtrs;
-+  MapVector<Value *, CallInst *> LifetimeStarts;
-+  MapVector<Value *, CallInst *> Memsets;
-+  MapVector<Value *, StoreInst *> StoreNulls;
++  MapVector<Value *, SmallVector<CallInst *, 2>> LifetimeStarts;
++  MapVector<Value *, SmallVector<CallInst *, 2>> Memsets;
++  MapVector<Value *, SmallVector<StoreInst *, 2>> StoreNulls;
 +  for (auto &I : instructions(F)) {
 +    if (CallInst *CI = dyn_cast<CallInst>(&I)) {
 +      if (CI->getIntrinsicID() == Intrinsic::lifetime_start) {
 +        Value *Base = CI->getArgOperand(1)->stripPointerCasts();
 +        if (isa<AllocaInst>(Base) &&
 +            isMemoryContainsGCPtrType(Base->getType())) {
-+          LifetimeStarts.insert({Base, CI});
++          LifetimeStarts[Base].push_back(CI);
 +        }
 +      } else if (CI->getIntrinsicID() == Intrinsic::memset) {
 +        Value *Base = CI->getArgOperand(0)->stripPointerCasts();
 +        if (isa<AllocaInst>(Base) &&
 +            isMemoryContainsGCPtrType(Base->getType()) &&
 +            isa<ConstantInt>(CI->getArgOperand(1))) {
-+          Memsets.insert({Base, CI});
++          Memsets[Base].push_back(CI);
 +        }
 +      }
 +      continue;
@@ -77861,7 +78000,7 @@ index 000000000..a02db68c3
 +      if (C && C->isNullValue() && isGCPointerType(C->getType())) {
 +        Value *Base = SI->getPointerOperand()->stripPointerCasts();
 +        if (isa<AllocaInst>(Base))
-+          StoreNulls.insert({Base, SI});
++          StoreNulls[Base].push_back(SI);
 +      }
 +      continue;
 +    }
@@ -77889,50 +78028,102 @@ index 000000000..a02db68c3
 +      AllocaStructs.insert(&I);
 +  }
 +
-+  for (auto P : LifetimeStarts) {
++  for (Value *V : StackPointeeObjects) {
++    auto *AI = dyn_cast<AllocaInst>(V);
++    if (!AI)
++      continue;
++    if (AI->getAllocatedType()->isStructTy())
++      AllocaStructs.insert(AI);
++    else if (AI->getAllocatedType()->isPointerTy() &&
++             isGCPointerType(AI->getAllocatedType()))
++      AllocaGCPtrs.insert(AI);
++  }
++
++  SmallPtrSet<Instruction *, 8> ConsumedInitializers;
++  for (auto &P : LifetimeStarts) {
 +    Value *V = P.first;
-+    CallInst *Lifetime = P.second;
 +    if (AllocaStructs.contains(V)) {
-+      if (Memsets.count(V)) {
-+        CallInst *MI = Memsets[V];
-+        // Do nothing if there is a memset in lifetime.start
-+        if (MI->getParent() == Lifetime->getParent()) {
++      for (CallInst *Lifetime : P.second) {
++        CallInst *MI = nullptr;
++        for (CallInst *Candidate : Memsets[V]) {
++          if (ConsumedInitializers.contains(Candidate))
++            continue;
++          if (Candidate->getParent() == Lifetime->getParent() &&
++              Candidate->comesBefore(Lifetime))
++            continue;
++          MI = Candidate;
++          if (Candidate->getParent() == Lifetime->getParent())
++            break;
++        }
++        // Do nothing if the lifetime region is already initialized.
++        if (MI && MI->getParent() == Lifetime->getParent()) {
++          ConsumedInitializers.insert(MI);
 +          continue;
 +        }
-+        if (MI->getParent()->isEntryBlock()) {
++        if (MI && MI->getParent()->isEntryBlock()) {
 +          insertInitializerAfterLifetime(V, Lifetime);
 +          continue;
 +        }
-+        // move it to lifetime
-+        moveInitializerAfterLifetime(V, MI, Lifetime);
-+      } else {
-+        // Create a memset for alloca struct.
-+        insertInitializerAfterLifetime(V, Lifetime);
++        if (MI) {
++          // Move the existing memset into this lifetime region.
++          moveInitializerAfterLifetime(V, MI, Lifetime);
++          ConsumedInitializers.insert(MI);
++        } else {
++          // Create a memset for alloca struct.
++          insertInitializerAfterLifetime(V, Lifetime);
++        }
 +      }
 +      continue;
 +    }
 +    if (AllocaGCPtrs.contains(V)) {
-+      if (StoreNulls.count(V)) {
-+        StoreInst *SI = StoreNulls[V];
-+        // Do nothing if there is a store null in lifetime.start
-+        if (SI->getParent() == Lifetime->getParent()) {
++      for (CallInst *Lifetime : P.second) {
++        StoreInst *SI = nullptr;
++        for (StoreInst *Candidate : StoreNulls[V]) {
++          if (ConsumedInitializers.contains(Candidate))
++            continue;
++          if (Candidate->getParent() == Lifetime->getParent() &&
++              Candidate->comesBefore(Lifetime))
++            continue;
++          SI = Candidate;
++          if (Candidate->getParent() == Lifetime->getParent())
++            break;
++        }
++        // Do nothing if the lifetime region is already initialized.
++        if (SI && SI->getParent() == Lifetime->getParent()) {
++          ConsumedInitializers.insert(SI);
 +          continue;
 +        }
-+        if (SI->getParent()->isEntryBlock()) {
++        if (SI && SI->getParent()->isEntryBlock()) {
 +          insertInitializerAfterLifetime(V, Lifetime);
 +          continue;
 +        }
-+        // move it to lifetime
-+        moveInitializerAfterLifetime(V, SI, Lifetime);
-+      } else {
-+        // Craete a store null for alloca gcptr.
-+        insertInitializerAfterLifetime(V, Lifetime);
++        if (SI) {
++          // Move the existing store null into this lifetime region.
++          moveInitializerAfterLifetime(V, SI, Lifetime);
++          ConsumedInitializers.insert(SI);
++        } else {
++          // Create a store null for alloca gcptr.
++          insertInitializerAfterLifetime(V, Lifetime);
++        }
 +      }
 +    }
 +  }
 +
-+  // Filter out the alloca that has been initialized in the entry.
++  // Filter out the alloca that has been initialized in the entry.  An
++  // initialization only counts if it precedes every safepoint in the entry
++  // block: a store that appears after a call cannot keep the GC from
++  // scanning uninitialized memory at that call.  Stop the scan at the first
++  // call that is not a lifetime marker or a memory-init intrinsic.
 +  for (auto &I : F.getEntryBlock()) {
++    if (auto *CB = dyn_cast<CallBase>(&I)) {
++      auto *II = dyn_cast<IntrinsicInst>(CB);
++      bool IsInitOrMarker =
++          II && (isa<MemIntrinsic>(II) ||
++                 II->getIntrinsicID() == Intrinsic::lifetime_start ||
++                 II->getIntrinsicID() == Intrinsic::lifetime_end);
++      if (!IsInitOrMarker)
++        break;
++    }
 +    if (auto *SI = dyn_cast<StoreInst>(&I)) {
 +      Value *Ptr = SI->getPointerOperand()->stripPointerCasts();
 +      if (AllocaStructs.contains(Ptr)) {
@@ -77965,10 +78156,15 @@ index 000000000..a02db68c3
 +  for (auto &I : make_range(Begin, End)) {
 +    SetVector<FieldInfo *> MemDefSet;
 +    SetVector<FieldInfo *> MemUseSet;
++    StructLiveSetTy LiveAfter = LiveTmp;
 +    if (hasMemoryDefineOrUseValue(&I, MemDefSet, MemUseSet) != MemoryNone) {
 +      LiveTmp.set_subtract(MemDefSet);
 +      LiveTmp.set_union(MemUseSet);
 +    }
++    SetVector<FieldInfo *> PublishUses;
++    addConditionalPublishUses(&I, LiveAfter, PublishUses);
++    if (!PublishUses.empty())
++      LiveTmp.set_union(PublishUses);
 +  }
 +}
 +
@@ -78296,6 +78492,538 @@ index 000000000..a02db68c3
 +  addGCFieldsByBase(Ptr, AllocaSet);
 +}
 +
++void StructLiveAnalysis::getGCFieldInfos(Value *Base,
++                                         SmallVectorImpl<FieldInfo *> &Fields) {
++  auto *AI = dyn_cast<AllocaInst>(Base);
++  if (!AI)
++    return;
++
++  if (AI->getAllocatedType()->isPointerTy()) {
++    Fields.push_back(getFieldInfo(Base, 0));
++    return;
++  }
++
++  // Keep precise field keys even for large structs.  A copy only affects the
++  // copied range, and whole-object liveness is expanded later at the GC point.
++  auto It = AllocaData.StructLayoutGCPtrMap.find(Base);
++  if (It == AllocaData.StructLayoutGCPtrMap.end())
++    return;
++  for (auto &Pair : It->second) {
++    if (Pair.second)
++      Fields.push_back(getFieldInfo(Base, static_cast<int>(Pair.first)));
++  }
++}
++
++void StructLiveAnalysis::getGCFieldInfosInRange(
++    Value *Base, uint64_t Begin, uint64_t End,
++    SmallVectorImpl<FieldInfo *> &Fields) {
++  auto *AI = dyn_cast<AllocaInst>(Base);
++  if (!AI)
++    return;
++
++  if (AI->getAllocatedType()->isPointerTy()) {
++    if (Begin == 0 && End > 0)
++      Fields.push_back(getFieldInfo(Base, 0));
++    return;
++  }
++
++  auto LayoutIt = AllocaData.StructLayoutGCPtrMap.find(Base);
++  if (LayoutIt == AllocaData.StructLayoutGCPtrMap.end())
++    return;
++  for (auto &Pair : LayoutIt->second) {
++    if (!Pair.second || Pair.first < Begin || Pair.first >= End)
++      continue;
++    Fields.push_back(getFieldInfo(Base, static_cast<int>(Pair.first)));
++  }
++}
++
++void StructLiveAnalysis::collectStackObjectPointees(
++    Value *V, SetVector<Value *> &Pointees) {
++  if (!V->getType()->isPointerTy())
++    return;
++
++  SetVector<Value *> Allocas;
++  if (!findAllocaInsts(V, Allocas))
++    return;
++  Pointees.insert(Allocas.begin(), Allocas.end());
++}
++
++void StructLiveAnalysis::collectStackFieldPointees(
++    Instruction *I, Value *V, uint64_t Size, SetVector<Value *> &Pointees) {
++  auto StateIt = StackPointeeBefore.find(I);
++  if (StateIt == StackPointeeBefore.end())
++    return;
++  const StackPointeeState &State = StateIt->second;
++
++  Value *Base = findMemoryBasePointer(V);
++  SmallVector<FieldInfo *, 16> Fields;
++  if (isa<AllocaInst>(Base) && Size > 0) {
++    APInt Offsets(DL.getIndexSizeInBits(0), 0);
++    if (V->stripAndAccumulateConstantOffsets(DL, Offsets, false) == Base) {
++      uint64_t Begin = Offsets.getZExtValue();
++      getGCFieldInfosInRange(Base, Begin, Begin + Size, Fields);
++    }
++  }
++  if (Fields.empty()) {
++    SmallVector<Value *, 4> Bases;
++    if (isa<AllocaInst>(Base))
++      Bases.push_back(Base);
++    else {
++      SetVector<Value *> Allocas;
++      findAllocaInsts(V, Allocas);
++      Bases.append(Allocas.begin(), Allocas.end());
++    }
++    for (auto &Entry : State) {
++      if (llvm::is_contained(Bases, Entry.first->V))
++        Fields.push_back(Entry.first);
++    }
++  }
++
++  for (FieldInfo *Field : Fields) {
++    auto It = State.find(Field);
++    if (It != State.end())
++      Pointees.set_union(It->second);
++  }
++  // A variable-index store is recorded against the whole base object.  It may
++  // overlap a fixed source range copied here, so include those pointees too.
++  auto WholeIt = State.find(getFieldInfo(Base, -1));
++  if (WholeIt != State.end())
++    Pointees.set_union(WholeIt->second);
++}
++
++void StructLiveAnalysis::setStackPointees(StackPointeeState &State,
++                                          FieldInfo *Field,
++                                          const SetVector<Value *> &Pointees) {
++  if (Pointees.empty()) {
++    if (Field->Offset != -1)
++      State.erase(Field);
++    return;
++  }
++
++  if (Field->Offset == -1) {
++    // A large struct is represented by a single whole-object entry.  A store
++    // to one field cannot invalidate the other fields, so keep the old
++    // pointees and add the new ones.
++    SetVector<Value *> &Current = State[Field];
++    Current.set_union(Pointees);
++    return;
++  }
++  State[Field] = Pointees;
++}
++
++void StructLiveAnalysis::clearStackPointees(StackPointeeState &State,
++                                            Value *Ptr, uint64_t Size) {
++  if (!isa<PointerType>(Ptr->getType()))
++    return;
++
++  Value *Base = findMemoryBasePointer(Ptr);
++  SmallVector<Value *, 4> Bases;
++  if (isa<AllocaInst>(Base)) {
++    Bases.push_back(Base);
++  } else {
++    SetVector<Value *> Allocas;
++    findAllocaInsts(Ptr, Allocas);
++    Bases.append(Allocas.begin(), Allocas.end());
++  }
++  if (Bases.empty())
++    return;
++
++  bool HasRange = Size > 0;
++  uint64_t Begin = 0;
++  uint64_t End = 0;
++  if (HasRange && isa<AllocaInst>(Base)) {
++    APInt Offsets(DL.getIndexSizeInBits(0), 0);
++    Value *PtrBase = Ptr->stripAndAccumulateConstantOffsets(DL, Offsets, false);
++    if (PtrBase == Base) {
++      Begin = Offsets.getZExtValue();
++      End = Begin + Size;
++    } else {
++      HasRange = false;
++    }
++  } else if (HasRange) {
++    HasRange = false;
++  }
++
++  SmallVector<FieldInfo *, 16> ToErase;
++  for (auto &Entry : State) {
++    FieldInfo *Field = Entry.first;
++    if (!llvm::is_contained(Bases, Field->V))
++      continue;
++    if (Field->Offset == -1) {
++      // A whole-object entry cannot represent a partial overwrite.  Keep it
++      // unless the entire object is being cleared.
++      if (HasRange)
++        continue;
++    } else if (HasRange && (Field->Offset < static_cast<int>(Begin) ||
++                            Field->Offset >= static_cast<int>(End))) {
++      continue;
++    }
++    ToErase.push_back(Field);
++  }
++  for (FieldInfo *Field : ToErase)
++    State.erase(Field);
++}
++
++void StructLiveAnalysis::copyStackPointees(StackPointeeState &State, Value *Dst,
++                                           Value *Src, uint64_t Size) {
++  if (!isa<PointerType>(Dst->getType()))
++    return;
++
++  Value *DstBase = findMemoryBasePointer(Dst);
++  Value *SrcBase = findMemoryBasePointer(Src);
++  if (!isa<AllocaInst>(DstBase)) {
++    clearStackPointees(State, Dst, Size);
++    return;
++  }
++
++  bool HasRange = Size > 0;
++  uint64_t DstBegin = 0;
++  uint64_t SrcBegin = 0;
++  if (HasRange) {
++    APInt DstOffsets(DL.getIndexSizeInBits(0), 0);
++    if (Dst->stripAndAccumulateConstantOffsets(DL, DstOffsets, false) !=
++        DstBase)
++      HasRange = false;
++    else
++      DstBegin = DstOffsets.getZExtValue();
++  }
++  if (HasRange) {
++    APInt SrcOffsets(DL.getIndexSizeInBits(0), 0);
++    if (!isa<AllocaInst>(SrcBase) || Src->stripAndAccumulateConstantOffsets(
++                                         DL, SrcOffsets, false) != SrcBase)
++      HasRange = false;
++    else
++      SrcBegin = SrcOffsets.getZExtValue();
++  }
++
++  if (!HasRange) {
++    // The copied range is unknown.  Conservatively attach every pointee that
++    // the source may hold to every destination GC field.
++    SetVector<Value *> Pointees;
++    SmallVector<Value *, 4> SrcBases;
++    if (isa<AllocaInst>(SrcBase))
++      SrcBases.push_back(SrcBase);
++    else {
++      SetVector<Value *> Allocas;
++      findAllocaInsts(Src, Allocas);
++      SrcBases.append(Allocas.begin(), Allocas.end());
++    }
++    for (auto &Entry : State) {
++      if (!llvm::is_contained(SrcBases, Entry.first->V))
++        continue;
++      Pointees.set_union(Entry.second);
++    }
++
++    clearStackPointees(State, Dst, 0);
++    SmallVector<FieldInfo *, 8> DstFields;
++    getGCFieldInfos(DstBase, DstFields);
++    for (FieldInfo *Field : DstFields)
++      setStackPointees(State, Field, Pointees);
++    return;
++  }
++
++  SmallVector<FieldInfo *, 8> DstFields;
++  getGCFieldInfosInRange(DstBase, DstBegin, DstBegin + Size, DstFields);
++
++  SmallVector<std::pair<FieldInfo *, SetVector<Value *>>, 8> NewValues;
++  for (FieldInfo *DstField : DstFields) {
++    if (DstField->Offset == -1)
++      continue;
++    int64_t SrcOffset = static_cast<int64_t>(SrcBegin) +
++                        (static_cast<int64_t>(DstField->Offset) -
++                         static_cast<int64_t>(DstBegin));
++    if (SrcOffset < 0)
++      continue;
++    FieldInfo *SrcField = getFieldInfo(SrcBase, static_cast<int>(SrcOffset));
++    SetVector<Value *> Pointees;
++    auto It = State.find(SrcField);
++    if (It != State.end())
++      Pointees = It->second;
++    // A variable-index store is recorded against the whole source object.  A
++    // later fixed-range copy may still copy that field, so include the
++    // unknown-offset pointees as well.
++    auto WholeIt = State.find(getFieldInfo(SrcBase, -1));
++    if (WholeIt != State.end())
++      Pointees.set_union(WholeIt->second);
++    NewValues.push_back({DstField, Pointees});
++  }
++
++  clearStackPointees(State, Dst, Size);
++  for (auto &Entry : NewValues) {
++    if (Entry.second.empty())
++      continue;
++    setStackPointees(State, Entry.first, Entry.second);
++  }
++}
++
++bool StructLiveAnalysis::isFieldLive(FieldInfo *Field,
++                                     const StructLiveSetTy &Live) {
++  if (Live.contains(Field))
++    return true;
++  for (FieldInfo *LiveField : Live) {
++    if (LiveField->V != Field->V)
++      continue;
++    if (LiveField->Offset == -1 || Field->Offset == -1)
++      return true;
++  }
++  return false;
++}
++
++void StructLiveAnalysis::addConditionalPublishUses(
++    Instruction *I, const StructLiveSetTy &LiveAfter,
++    SetVector<FieldInfo *> &Uses) {
++  auto AddForField = [&](Value *Ptr, Value *Published) {
++    FieldInfo *Field = getBarrierFieldInfo(Ptr);
++    if (!Field || !isFieldLive(Field, LiveAfter))
++      return;
++    if (Published->getType()->isPointerTy())
++      addStoredPointeeFields(Published, Uses);
++  };
++
++  if (auto *SI = dyn_cast<StoreInst>(I)) {
++    AddForField(SI->getPointerOperand(), SI->getValueOperand());
++    return;
++  }
++
++  auto *CB = dyn_cast<CallBase>(I);
++  if (!CB)
++    return;
++  auto *II = dyn_cast<IntrinsicInst>(CB);
++  if (!II)
++    return;
++
++  switch (II->getIntrinsicID()) {
++  default:
++    return;
++  case Intrinsic::cj_gcwrite_ref:
++    AddForField(getPointerArg(II), getValueArg(II));
++    return;
++  case Intrinsic::memcpy:
++  case Intrinsic::memmove: {
++    uint64_t Size = 0;
++    if (auto *C = dyn_cast<ConstantInt>(II->getArgOperand(2)))
++      Size = C->getZExtValue();
++    FieldInfo *Dst = getStackFieldInfo(II->getArgOperand(0));
++    if (!Dst || !isFieldLive(Dst, LiveAfter))
++      return;
++    addSourcePointeeFields(I, II->getArgOperand(1), Size, Uses);
++    return;
++  }
++  }
++}
++
++void StructLiveAnalysis::addPointeeFields(Instruction *I, FieldInfo *Field,
++                                          SetVector<FieldInfo *> &Set) {
++  auto StateIt = StackPointeeBefore.find(I);
++  if (StateIt == StackPointeeBefore.end())
++    return;
++  const StackPointeeState &State = StateIt->second;
++
++  auto Add = [&](FieldInfo *Key) {
++    auto It = State.find(Key);
++    if (It == State.end())
++      return;
++    for (Value *Pointee : It->second)
++      addGCFields(Pointee, Set);
++  };
++
++  Add(Field);
++  if (Field->Offset != -1)
++    Add(getFieldInfo(Field->V, -1));
++
++  // A store through a phi/select pointer records its pointees under the
++  // phi/select key, while the safepoint live set is expanded to the concrete
++  // alloca fields.  An exact lookup would miss those entries, so also union
++  // the pointees of every phi/select that may refer to this stack object.
++  for (auto &Entry : State) {
++    Value *KeyV = Entry.first->V;
++    if (!isa<PHINode>(KeyV) && !isa<SelectInst>(KeyV))
++      continue;
++    auto It = AllocaData.PhiToAllocasMap.find(KeyV);
++    if (It == AllocaData.PhiToAllocasMap.end() || !It->second.count(Field->V))
++      continue;
++    for (Value *Pointee : Entry.second)
++      addGCFields(Pointee, Set);
++  }
++
++  if (Field->Offset != -1)
++    return;
++
++  // A whole-object entry means every GC field of the object is live, so all
++  // stack objects recorded in its fields are reachable without following the
++  // runtime's stack-address boundary.
++  for (auto &Entry : State) {
++    if (Entry.first->V != Field->V)
++      continue;
++    for (Value *Pointee : Entry.second)
++      addGCFields(Pointee, Set);
++  }
++}
++
++void StructLiveAnalysis::addStoredPointeeFields(Value *V,
++                                                SetVector<FieldInfo *> &Uses) {
++  SetVector<Value *> Pointees;
++  collectStackObjectPointees(V, Pointees);
++  for (Value *Pointee : Pointees)
++    addGCFields(Pointee, Uses);
++}
++
++void StructLiveAnalysis::addSourcePointeeFields(Instruction *I, Value *V,
++                                                uint64_t Size,
++                                                SetVector<FieldInfo *> &Uses) {
++  if (!V->getType()->isPointerTy())
++    return;
++  SetVector<Value *> Pointees;
++  collectStackFieldPointees(I, V, Size, Pointees);
++  for (Value *Pointee : Pointees)
++    addGCFields(Pointee, Uses);
++}
++
++void StructLiveAnalysis::applyStackPointeeTransfer(Instruction *I,
++                                                   StackPointeeState &State) {
++  if (auto *SI = dyn_cast<StoreInst>(I)) {
++    Value *Ptr = SI->getPointerOperand();
++    if (!isStackContainGCPtr(Ptr))
++      return;
++
++    Type *ValType = SI->getValueOperand()->getType();
++    const Triple TT(SI->getModule()->getTargetTriple());
++    if (ValType->isPointerTy() || ValType->isIntegerTy(64) ||
++        (TT.isARM() && ValType->isIntegerTy(32))) {
++      FieldInfo *Field = getStackFieldInfo(Ptr);
++      if (!Field)
++        return;
++      State.erase(Field);
++      SetVector<Value *> Pointees;
++      if (ValType->isPointerTy())
++        collectStackObjectPointees(SI->getValueOperand(), Pointees);
++      setStackPointees(State, Field, Pointees);
++    } else {
++      clearStackPointees(State, Ptr, 0);
++    }
++    return;
++  }
++
++  auto *CB = dyn_cast<CallBase>(I);
++  if (!CB)
++    return;
++
++  auto *II = dyn_cast<IntrinsicInst>(CB);
++  if (!II)
++    return;
++
++  switch (II->getIntrinsicID()) {
++  default:
++    return;
++  case Intrinsic::cj_gcwrite_ref: {
++    Value *Ptr = getPointerArg(II);
++    FieldInfo *Field = getBarrierFieldInfo(Ptr);
++    if (!Field)
++      return;
++    State.erase(Field);
++    SetVector<Value *> Pointees;
++    collectStackObjectPointees(getValueArg(II), Pointees);
++    setStackPointees(State, Field, Pointees);
++    return;
++  }
++  case Intrinsic::memcpy:
++  case Intrinsic::memmove: {
++    uint64_t Size = 0;
++    if (auto *C = dyn_cast<ConstantInt>(II->getArgOperand(2)))
++      Size = C->getZExtValue();
++    copyStackPointees(State, II->getArgOperand(0), II->getArgOperand(1), Size);
++    return;
++  }
++  case Intrinsic::memset:
++  case Intrinsic::cj_memset: {
++    uint64_t Size = 0;
++    if (auto *C = dyn_cast<ConstantInt>(II->getArgOperand(2)))
++      Size = C->getZExtValue();
++    clearStackPointees(State, II->getArgOperand(0), Size);
++    return;
++  }
++  case Intrinsic::lifetime_start:
++    clearStackPointees(State, II->getArgOperand(1), 0);
++    return;
++  }
++}
++
++bool StructLiveAnalysis::mergeStackPointeeState(StackPointeeState &Dst,
++                                                const StackPointeeState &Src) {
++  bool Changed = false;
++  for (auto &Entry : Src) {
++    SetVector<Value *> &Current = Dst[Entry.first];
++    if (Current.set_union(Entry.second))
++      Changed = true;
++  }
++  return Changed;
++}
++
++void StructLiveAnalysis::computeStackPointeeStates() {
++  StackPointeeIn.clear();
++  StackPointeeOut.clear();
++  StackPointeeBefore.clear();
++
++  SmallSetVector<BasicBlock *, 32> Worklist;
++  for (BasicBlock &BB : F) {
++    StackPointeeIn[&BB] = StackPointeeState();
++    StackPointeeOut[&BB] = StackPointeeState();
++    Worklist.insert(&BB);
++  }
++
++  while (!Worklist.empty()) {
++    BasicBlock *BB = Worklist.pop_back_val();
++    StackPointeeState State = StackPointeeIn[BB];
++    for (Instruction &I : *BB)
++      applyStackPointeeTransfer(&I, State);
++
++    if (!mergeStackPointeeState(StackPointeeOut[BB], State))
++      continue;
++    for (BasicBlock *Succ : successors(BB)) {
++      if (mergeStackPointeeState(StackPointeeIn[Succ], StackPointeeOut[BB]))
++        Worklist.insert(Succ);
++    }
++  }
++
++  for (BasicBlock &BB : F) {
++    StackPointeeState State = StackPointeeIn[&BB];
++    for (Instruction &I : BB) {
++      if (isa<CallBase>(I))
++        StackPointeeBefore[&I] = State;
++      applyStackPointeeTransfer(&I, State);
++    }
++  }
++
++  for (auto &Entry : StackPointeeOut) {
++    for (auto &FieldEntry : Entry.second)
++      StackPointeeObjects.insert(FieldEntry.second.begin(),
++                                 FieldEntry.second.end());
++  }
++}
++
++void StructLiveAnalysis::expandStackPointees(CallBase *Call,
++                                             StructLiveSetTy &FieldInfos) {
++  if (FieldInfos.empty())
++    return;
++  auto StateIt = StackPointeeBefore.find(Call);
++  if (StateIt == StackPointeeBefore.end() || StateIt->second.empty())
++    return;
++
++  bool Changed = true;
++  while (Changed) {
++    Changed = false;
++    SmallVector<FieldInfo *, 16> Current(FieldInfos.begin(), FieldInfos.end());
++    for (FieldInfo *Field : Current) {
++      SetVector<FieldInfo *> PointeeFields;
++      addPointeeFields(Call, Field, PointeeFields);
++      for (FieldInfo *PointeeField : PointeeFields) {
++        if (FieldInfos.insert(PointeeField))
++          Changed = true;
++      }
++    }
++  }
++}
++
 +void StructLiveAnalysis::visitMemoryLoad(LoadInst *LI,
 +                                         SetVector<FieldInfo *> &AllocaUses) {
 +  Value *Ptr = LI->getPointerOperand()->stripPointerCasts();
@@ -78315,7 +79043,8 @@ index 000000000..a02db68c3
 +}
 +
 +void StructLiveAnalysis::visitMemoryStore(StoreInst *SI,
-+                                          SetVector<FieldInfo *> &AllocaDefs) {
++                                          SetVector<FieldInfo *> &AllocaDefs,
++                                          SetVector<FieldInfo *> &AllocaUses) {
 +  Value *Ptr = SI->getPointerOperand();
 +  if (!isStackContainGCPtr(Ptr)) {
 +    return;
@@ -78329,10 +79058,14 @@ index 000000000..a02db68c3
 +  const Triple TT(SI->getModule()->getTargetTriple());
 +  if (ValType->isPointerTy() || ValType->isIntegerTy(64) ||
 +      (TT.isARM() && ValType->isIntegerTy(32))) {
-+    FieldInfo *Field = getFieldInfoByValue(Ptr);
++    FieldInfo *Field = getStackFieldInfo(Ptr);
++    if (!Field)
++      return;
 +    Value *Base = Field->V;
 +    if (isa<AllocaInst>(Base) || isa<Argument>(Base))
 +      AllocaDefs.insert(Field);
++    if (ValType->isPointerTy())
++      addStoredPointeeFields(SI->getValueOperand(), AllocaUses);
 +  } else {
 +    Value *BasePtr = findMemoryBasePointer(Ptr);
 +    // Only if the PointerType and ValueType of Store Inst are equal,
@@ -78495,7 +79228,7 @@ index 000000000..a02db68c3
 +    visitMemoryLoad(cast<LoadInst>(I), AllocaUses);
 +    break;
 +  case Instruction::Store:
-+    visitMemoryStore(cast<StoreInst>(I), AllocaDefs);
++    visitMemoryStore(cast<StoreInst>(I), AllocaDefs, AllocaUses);
 +    break;
 +  case Instruction::Call:
 +  case Instruction::Invoke:
@@ -78645,10 +79378,11 @@ index 000000000..a02db68c3
 +    MutableArrayRef<SafepointRecord> Records) {
 +  StructLiveAnalysis StructLA(F, DT, AllocaData);
 +
-+  // In the case of phi struct, we need to record all structs. To ensure
-+  // that the struct is initialized, we insert memset. It is optimized
-+  // after Livenesss analysis. Only necessary memsets are retained.
-+  StructLA.insertMemsetForPhiStruct();
++  StructLA.computeStackPointeeStates();
++
++  // In the case of phi struct or a stack field publishing another stack
++  // object, we need to ensure the pointee is zero-initialized.
++  StructLA.insertMemsetForStackStructs();
 +
 +  StructLA.computeLiveness();
 +
@@ -78664,6 +79398,10 @@ index 000000000..a02db68c3
 +    // If phi and select exist, delete them and record their alloca SSAs.
 +    StructLA.legalizeMemoryValueSet(FieldLives);
 +
++    // The runtime stops at a stack address held in a stack field.  Explicitly
++    // report the fields of the stack object it points to.
++    StructLA.expandStackPointees(ToUpdate[i], FieldLives);
++
 +    // Generate the SSA value of `gep a + x` for each struct field.
 +    StructLA.insertGEPForField(ToUpdate[i], FieldLives, Records[i].FieldSet);
 +  }
@@ -78671,7 +79409,7 @@ index 000000000..a02db68c3
 +  // Eliminate dead cjmemset. Only works at O2, because cjdb needs it at O0.
 +  if (OptLevel == 2) {
 +    eliminateDeadMemset(StructLA.Data, F, PostDT, AllocaData,
-+                        StructLA.InsertedMemset);
++                        StructLA.InsertedMemset, StructLA.StackPointeeObjects);
 +  }
 +}
 +
@@ -129230,6 +129968,196 @@ index 000000000..5e1990f11
 +!2 = !{!"default:A.tt"}
 +!3 = !{i64 0}
 \ No newline at end of file
+diff --git a/llvm/test/Transforms/Cangjie/CangjieDCE/cangjie-vfe-arity2.ll b/llvm/test/Transforms/Cangjie/CangjieDCE/cangjie-vfe-arity2.ll
+new file mode 100644
+index 000000000..4c485fd80
+--- /dev/null
++++ b/llvm/test/Transforms/Cangjie/CangjieDCE/cangjie-vfe-arity2.ll
+@@ -0,0 +1,92 @@
++; RUN: opt < %s -passes='globaldce' --cangjie-pipeline -S | FileCheck %s
++
++; This test exercises the VFE metadata decoder with the new flat multi-operand
++; (arity >= 2) encoding:
++;   !{!"T.tt", arg0, arg1, ...}
++;
++; Scenario:
++;   interface J<A, B> {}            (TypeInfo "default:J.ti", internal -> VFE-safe)
++;   interface K {}                  (TypeInfo "default:K.ti", internal -> VFE-safe)
++;   class P  <: J<Int32, Int64> {}  (arity-2 instantiation; DEAD - no call site)
++;   class Q  <: K {}                (arity-0; LIVE - call site below reaches it)
++;
++; Metadata (NEW flat multi-operand encoding for the arity-2 ExtensionDef):
++;   !0 = !{!"default:J.ti", !"Int32.ti", !"Int64.ti"}   (P's inheritedType, arity-2)
++;   !1 = !{!"default:K.ti"}                             (Q's inheritedType, arity-0)
++;
++; The arity-2 P ExtensionDef's function table is never reached by any call site's
++; up/down closure (the only call site is on interface K), so it gets zeroed.
++
++%TypeTemplate = type { i8*, i8, i8, i16, i16, i8*, i8*, i8*, i8*, %ExtensionDef**, i16 }
++%ExtensionDef = type { i32, i8, i8, i16, i8*, i8*, i8*, i8* }
++%TypeInfo = type { i8*, i8, i8, i16, i32, i8*, i32, i8, i8, i16, i32*, i8*, i8*, i8*, %TypeInfo*, %ExtensionDef**, i8*, i8* }
++%Unit.Type = type {}
++
++@"default:J.ti" = internal global %TypeInfo { i8* null, i8 -127, i8 0, i16 0, i32 0, i8* null, i32 0, i8 1, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, %ExtensionDef** null, i8* null, i8* null } #1
++@"default:K.ti" = internal global %TypeInfo { i8* null, i8 -127, i8 0, i16 0, i32 0, i8* null, i32 0, i8 1, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, %ExtensionDef** null, i8* null, i8* null } #1
++@"Int32.ti" = external global %TypeInfo #3
++@"Int64.ti" = external global %TypeInfo #3
++
++; Target types (implementing classes' TypeTemplates). Only their existence as
++; GV labels matters for VFE; contents stubbed.
++@"default:P.tt" = private global %TypeTemplate { i8* null, i8 -127, i8 0, i16 0, i16 2, i8* null, i8* null, i8* null, i8* null, %ExtensionDef** getelementptr inbounds ([3 x %ExtensionDef*], [3 x %ExtensionDef*]* @NonExternalExtensionDefs, i32 0, i32 0), i16 -32768 } #2
++@"default:Q.tt" = private global %TypeTemplate { i8* null, i8 -127, i8 0, i16 0, i16 0, i8* null, i8* null, i8* null, i8* null, %ExtensionDef** getelementptr inbounds ([3 x %ExtensionDef*], [3 x %ExtensionDef*]* @NonExternalExtensionDefs, i32 0, i32 1), i16 -32768 } #2
++
++; arity-2 ExtensionDef: P implements J<Int32, Int64>.
++; inheritedType = !{!"J.ti", !"Int32.ti", !"Int64.ti"} (NEW flat multi-operand encoding).
++; DEAD: no call site's up/down closure reaches Path [J_TI, Int32_TI, Int64_TI].
++; CHECK: @"default:P_ed_default:J.ft" = private global [1 x i8*] zeroinitializer
++@"default:P_ed_default:J.ft" = private global [1 x i8*] [i8* bitcast (void (%Unit.Type*, i8 addrspace(1)*, %TypeInfo*)* @"_CN7default1PIJ2X_E7func_JHv" to i8*)]
++@"default:P_ed_default:J" = private global %ExtensionDef { i32 2, i8 1, i8 0, i16 0, i8* bitcast (%TypeTemplate* @"default:P.tt" to i8*), i8* bitcast (%TypeInfo* @"default:J.ti" to i8*), i8* null, i8* bitcast ([1 x i8*]* @"default:P_ed_default:J.ft" to i8*) }, !inheritedType !0 #0
++
++; arity-0 ExtensionDef: Q implements K.
++; inheritedType = !{!"K.ti"} (legacy single-operand encoding, must still work).
++; LIVE: the call site below has objType !1 = !{!"K.ti"} -> Path [K_TI], which
++; reaches Q exactly.
++; CHECK: @"default:Q_ed_default:K.ft" = private global [1 x i8*] [i8* bitcast (void (%Unit.Type*, i8 addrspace(1)*, %TypeInfo*)* @_CN7default1QK_E7func_KHv to i8*)]
++@"default:Q_ed_default:K.ft" = private global [1 x i8*] [i8* bitcast (void (%Unit.Type*, i8 addrspace(1)*, %TypeInfo*)* @"_CN7default1QK_E7func_KHv" to i8*)]
++@"default:Q_ed_default:K" = private global %ExtensionDef { i32 0, i8 1, i8 0, i16 0, i8* bitcast (%TypeTemplate* @"default:Q.tt" to i8*), i8* bitcast (%TypeInfo* @"default:K.ti" to i8*), i8* null, i8* bitcast ([1 x i8*]* @"default:Q_ed_default:K.ft" to i8*) }, !inheritedType !1 #0
++
++@NonExternalExtensionDefs = private global [3 x %ExtensionDef*] [%ExtensionDef* @"default:P_ed_default:J", %ExtensionDef* @"default:Q_ed_default:K", %ExtensionDef* null]
++@llvm.used = appending global [1 x i8*] [i8* bitcast ([3 x %ExtensionDef*]* @NonExternalExtensionDefs to i8*)]
++
++declare i8* @llvm.cj.vfe.info(i8*, metadata, i64)
++
++define internal void @"_CN7default1PIJ2X_E7func_JHv"(%Unit.Type* noalias sret(%Unit.Type) %0, i8 addrspace(1)* %this, %TypeInfo* %outerTI) gc "cangjie" {
++  ret void
++}
++
++define internal void @"_CN7default1QK_E7func_KHv"(%Unit.Type* noalias sret(%Unit.Type) %0, i8 addrspace(1)* %this, %TypeInfo* %outerTI) gc "cangjie" {
++  ret void
++}
++
++; Call site on interface K: objType !1 = !{!"K.ti"} -> Path [K_TI]. Reaches Q.
++define void @use_K(%Unit.Type* noalias sret(%Unit.Type) %0, i8 addrspace(1)* %v, %TypeInfo* %ti.T) gc "cangjie" {
++allocas:
++  %1 = alloca %Unit.Type, align 8
++  %2 = bitcast i8 addrspace(1)* %v to %TypeInfo* addrspace(1)*
++  %ti = load %TypeInfo*, %TypeInfo* addrspace(1)* %2, align 8
++  %3 = bitcast %TypeInfo* %ti to i8*
++  %4 = bitcast %TypeInfo* %ti.T to i8*
++  %5 = call i8* @CJ_MCC_GetMTable(i8* %3, i8* %4)
++  %6 = bitcast i8* %5 to i8**
++  %7 = load i8*, i8** %6, align 8
++  %8 = call i8* @llvm.cj.vfe.info(i8* %7, metadata !1, i64 0)
++  %9 = bitcast i8* %8 to void (%Unit.Type*, i8 addrspace(1)*, %TypeInfo*)*
++  call void %9(%Unit.Type* noalias sret(%Unit.Type) %1, i8 addrspace(1)* %v, %TypeInfo* %ti.T)
++  ret void
++}
++
++declare i8* @CJ_MCC_GetMTable(i8*, i8*)
++
++attributes #0 = { "CFileMTable" }
++attributes #1 = { "CFileKlass" }
++attributes #2 = { "cj_tt" }
++attributes #3 = { "CFileKlass" "NotModifiableClass" }
++
++; arity-2 flat multi-operand encoding: operand(0) = template/leaf label,
++; operand(1..] = type arguments (siblings). Decoder DFS-flattens to
++; Path [J_TI, Int32_TI, Int64_TI].
++!0 = !{!"default:J.ti", !"Int32.ti", !"Int64.ti"}
++; arity-0 legacy encoding: single-operand node -> Path [K_TI]. Must still work.
++!1 = !{!"default:K.ti"}
+diff --git a/llvm/test/Transforms/Cangjie/CangjieDCE/cangjie-vfe-arity3-wildcard.ll b/llvm/test/Transforms/Cangjie/CangjieDCE/cangjie-vfe-arity3-wildcard.ll
+new file mode 100644
+index 000000000..659d1b68b
+--- /dev/null
++++ b/llvm/test/Transforms/Cangjie/CangjieDCE/cangjie-vfe-arity3-wildcard.ll
+@@ -0,0 +1,86 @@
++; RUN: opt < %s -passes='globaldce' --cangjie-pipeline -S | FileCheck %s
++
++; This test extends the VFE arity coverage with:
++;   1. arity-3 flat encoding !{!"T.tt", a, b, c} (3 siblings)
++;   2. the "$g" sentinel for an uninstantiated generic type parameter, which
++;      must NOT crash the decoder and must resolve conservatively (no GV named
++;      "$g" exists, so that dimension contributes nothing to the Path; the call
++;      site resolves at the nearest enclosing instantiated type).
++;
++; Scenario:
++;   interface J<A, B, C>            (TypeInfo "default:J.ti", internal -> VFE-safe)
++;   class R  <: J<Int32, Int64, X>  (arity-3 instantiation; DEAD - no call site)
++;   interface I<T>                  (TypeInfo "default:I.ti", internal -> VFE-safe)
++;   class S  <: I<Wildcard>         (call site uses a "$g" sentinel -> Path [I_TT])
++;
++; Metadata:
++;   !0 = !{!"default:J.ti", !"X.ti", !"Y.ti", !"Z.ti"}   (R's inheritedType, arity-3)
++;   !1 = !{!"default:I.ti", !{!"$g"}}                  (call site objType with sentinel)
++;
++; Expectations:
++;   - arity-3 R's J.ft is DEAD (zeroed): no call site reaches [J_TI, X_TI, Y_TI, Z_TI].
++;   - The sentinel-bearing call site resolves to Path [I_TI] (sentinel dropped),
++;     and the downward closure must cover any I<...> ExtensionDef registered under
++;     that path. Here there is none, so nothing extra happens, but the decoder must
++;     not assert/crash on the "$g" sentinel.
++
++%TypeTemplate = type { i8*, i8, i8, i16, i16, i8*, i8*, i8*, i8*, %ExtensionDef**, i16 }
++%ExtensionDef = type { i32, i8, i8, i16, i8*, i8*, i8*, i8* }
++%TypeInfo = type { i8*, i8, i8, i16, i32, i8*, i32, i8, i8, i16, i32*, i8*, i8*, i8*, %TypeInfo*, %ExtensionDef**, i8*, i8* }
++%Unit.Type = type {}
++
++@"default:J.ti" = internal global %TypeInfo { i8* null, i8 -127, i8 0, i16 0, i32 0, i8* null, i32 0, i8 1, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, %ExtensionDef** null, i8* null, i8* null } #1
++@"default:I.ti" = internal global %TypeInfo { i8* null, i8 -127, i8 0, i16 0, i32 0, i8* null, i32 0, i8 1, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, %ExtensionDef** null, i8* null, i8* null } #1
++@"default:X.ti" = internal global %TypeInfo { i8* null, i8 -127, i8 0, i16 0, i32 0, i8* null, i32 0, i8 1, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, %ExtensionDef** null, i8* null, i8* null } #1
++@"default:Y.ti" = internal global %TypeInfo { i8* null, i8 -127, i8 0, i16 0, i32 0, i8* null, i32 0, i8 1, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, %ExtensionDef** null, i8* null, i8* null } #1
++@"default:Z.ti" = internal global %TypeInfo { i8* null, i8 -127, i8 0, i16 0, i32 0, i8* null, i32 0, i8 1, i8 0, i16 -32768, i32* null, i8* null, i8* null, i8* null, %TypeInfo* null, %ExtensionDef** null, i8* null, i8* null } #1
++
++@"default:R.tt" = private global %TypeTemplate { i8* null, i8 -127, i8 0, i16 0, i16 3, i8* null, i8* null, i8* null, i8* null, %ExtensionDef** getelementptr inbounds ([2 x %ExtensionDef*], [2 x %ExtensionDef*]* @NonExternalExtensionDefs, i32 0, i32 0), i16 -32768 } #2
++
++; arity-3 ExtensionDef: R implements J<X, Y, Z>.
++; inheritedType = !{!"J.ti", !"X.ti", !"Y.ti", !"Z.ti"} (NEW flat 4-operand node).
++; DEAD: no call site reaches Path [J_TI, X_TI, Y_TI, Z_TI].
++; CHECK: @"default:R_ed_default:J.ft" = private global [1 x i8*] zeroinitializer
++@"default:R_ed_default:J.ft" = private global [1 x i8*] [i8* bitcast (void (%Unit.Type*, i8 addrspace(1)*, %TypeInfo*)* @"_CN7default1RIJ3XYZ_E7func_JHv" to i8*)]
++@"default:R_ed_default:J" = private global %ExtensionDef { i32 3, i8 1, i8 0, i16 0, i8* bitcast (%TypeTemplate* @"default:R.tt" to i8*), i8* bitcast (%TypeInfo* @"default:J.ti" to i8*), i8* null, i8* bitcast ([1 x i8*]* @"default:R_ed_default:J.ft" to i8*) }, !inheritedType !0 #0
++
++@NonExternalExtensionDefs = private global [2 x %ExtensionDef*] [%ExtensionDef* @"default:R_ed_default:J", %ExtensionDef* null]
++@llvm.used = appending global [1 x i8*] [i8* bitcast ([2 x %ExtensionDef*]* @NonExternalExtensionDefs to i8*)]
++
++declare i8* @llvm.cj.vfe.info(i8*, metadata, i64)
++
++define internal void @"_CN7default1RIJ3XYZ_E7func_JHv"(%Unit.Type* noalias sret(%Unit.Type) %0, i8 addrspace(1)* %this, %TypeInfo* %outerTI) gc "cangjie" {
++  ret void
++}
++
++; Call site carrying a "$g" sentinel objType: !{!"I.ti", !{!"$g"}}.
++; The decoder must flatten this to Path [I_TI] (sentinel names no GV -> dropped).
++; No I<...> ExtensionDef exists in this module, so this resolves to nothing live,
++; but the pass must not crash on the sentinel.
++define void @use_I_wildcard(%Unit.Type* noalias sret(%Unit.Type) %0, i8 addrspace(1)* %v, %TypeInfo* %ti.T) gc "cangjie" {
++allocas:
++  %1 = alloca %Unit.Type, align 8
++  %2 = bitcast i8 addrspace(1)* %v to %TypeInfo* addrspace(1)*
++  %ti = load %TypeInfo*, %TypeInfo* addrspace(1)* %2, align 8
++  %3 = bitcast %TypeInfo* %ti to i8*
++  %4 = bitcast %TypeInfo* %ti.T to i8*
++  %5 = call i8* @CJ_MCC_GetMTable(i8* %3, i8* %4)
++  %6 = bitcast i8* %5 to i8**
++  %7 = load i8*, i8** %6, align 8
++  %8 = call i8* @llvm.cj.vfe.info(i8* %7, metadata !1, i64 0)
++  %9 = bitcast i8* %8 to void (%Unit.Type*, i8 addrspace(1)*, %TypeInfo*)*
++  call void %9(%Unit.Type* noalias sret(%Unit.Type) %1, i8 addrspace(1)* %v, %TypeInfo* %ti.T)
++  ret void
++}
++
++declare i8* @CJ_MCC_GetMTable(i8*, i8*)
++
++attributes #0 = { "CFileMTable" }
++attributes #1 = { "CFileKlass" }
++attributes #2 = { "cj_tt" }
++
++; arity-3 flat multi-operand encoding -> Path [J_TI, X_TI, Y_TI, Z_TI].
++!0 = !{!"default:J.ti", !"default:X.ti", !"default:Y.ti", !"default:Z.ti"}
++; objType with a "$g" sentinel for an uninstantiated generic type parameter.
++; Flattens to Path [I_TI] (the "$g" names no global, so it is dropped).
++!1 = !{!"default:I.ti", !{!"$g"}}
 diff --git a/llvm/test/Transforms/Cangjie/CangjieDCE/cangjie_metadata_elim_1.ll b/llvm/test/Transforms/Cangjie/CangjieDCE/cangjie_metadata_elim_1.ll
 new file mode 100644
 index 000000000..822581a17
@@ -129361,6 +130289,513 @@ index 000000000..3d297ab2a
 +  store i8 addrspace(1)* %p, i8 addrspace(1)** %ptr
 +  ret void
 +}
+diff --git a/llvm/test/Transforms/Cangjie/GCLiveAnalysis/stack_object_pointee.ll b/llvm/test/Transforms/Cangjie/GCLiveAnalysis/stack_object_pointee.ll
+new file mode 100644
+index 000000000..030a12499
+--- /dev/null
++++ b/llvm/test/Transforms/Cangjie/GCLiveAnalysis/stack_object_pointee.ll
+@@ -0,0 +1,461 @@
++; RUN: opt < %s -cj-rewrite-statepoint -S 2>&1 | FileCheck %s
++; RUN: opt < %s -passes=cj-rewrite-statepoint -S 2>&1 | FileCheck %s
++; RUN: opt -enable-new-pm=0 -O2 -cj-rewrite-statepoint -S < %s 2>&1 | FileCheck %s
++; RUN: opt < %s -cj-rewrite-statepoint -large-struct-size-threshold=1 -S 2>&1 | FileCheck %s
++
++%LocalBox = type { i8 addrspace(1)* }
++%Env = type { i8 addrspace(1)*, i64 }
++
++declare void @g() #0 gc "cangjie"
++declare void @use_env(i8*) #0
++declare void @use_copy_dst(%CopyDst*) #0
++declare void @use_ref(i8 addrspace(1)*) #0
++declare void @llvm.lifetime.start.p0i8(i64 immarg, i8* nocapture)
++declare void @llvm.cj.gcwrite.ref(i8 addrspace(1)*, i8 addrspace(1)*, i8 addrspace(1)* addrspace(1)*)
++declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1 immarg)
++declare void @llvm.cj.memset.p0i8(i8*, i8, i64, i1)
++
++%CopySrc = type { i8 addrspace(1)*, i8 addrspace(1)* }
++%CopyDst = type { i8 addrspace(1)*, i8 addrspace(1)* }
++
++; The LocalBox address is stored into a field of Env after the safepoint in
++; the loop body.  The store does not dominate the safepoint, but the stored
++; value reaches it on the next iteration.  The runtime cannot follow the
++; stack address held by Env, so LocalBox has to be struct-live as well.
++define void @loop_carried_stack_pointee(i8 addrspace(1)* %heap, i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  br label %loop
++
++loop:
++  call void @g()
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  br i1 %cond, label %loop, label %exit
++
++exit:
++  ret void
++}
++
++; CHECK-LABEL: define void @loop_carried_stack_pointee
++; CHECK: loop:
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++
++; Each lifetime region needs its own zero initialization.
++define void @multiple_lifetimes(i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %box.i8 = bitcast %LocalBox* %box to i8*
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.field, align 8
++  call void @llvm.lifetime.start.p0i8(i64 8, i8* %box.i8)
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  call void @llvm.lifetime.start.p0i8(i64 8, i8* %box.i8)
++  br label %loop
++
++loop:
++  call void @g()
++  call void @use_env(i8* %env.i8)
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %box.value, align 8
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  br i1 %cond, label %loop, label %exit
++
++exit:
++  ret void
++}
++
++; CHECK-LABEL: define void @multiple_lifetimes
++; CHECK: %[[BOXPTR2:.*]] = bitcast %LocalBox* %box to i8*
++; CHECK: call void @llvm.lifetime.start.p0i8(i64 8, i8* {{(nonnull )?}}%[[BOXPTR2]])
++; CHECK-NEXT: call void @llvm.memset.p0i8.i64(i8* align 8 %[[BOXPTR2]], i8 0, i64 8, i1 false)
++; CHECK: call void @llvm.lifetime.start.p0i8(i64 8, i8* {{(nonnull )?}}%[[BOXPTR2]])
++; CHECK-NEXT: call void @llvm.memset.p0i8.i64(i8* align 8 %[[BOXPTR2]], i8 0, i64 8, i1 false)
++
++; Cangjie normally lowers a reference store to llvm.cj.gcwrite.ref.  That form
++; must establish the same stack-field -> stack-object relationship as a plain
++; store.
++define void @gcwrite_stack_pointee(i8 addrspace(1)* %heap) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %env.as1 = addrspacecast %Env* %env to i8 addrspace(1)*
++  %env.field.as1 = getelementptr i8, i8 addrspace(1)* %env.as1, i64 0
++  %env.field = bitcast i8 addrspace(1)* %env.field.as1 to i8 addrspace(1)* addrspace(1)*
++  call void @llvm.cj.gcwrite.ref(i8 addrspace(1)* %box.as1, i8 addrspace(1)* %env.as1, i8 addrspace(1)* addrspace(1)* %env.field)
++  call void @g()
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  ret void
++}
++
++; CHECK-LABEL: define void @gcwrite_stack_pointee
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++
++; llvm.cj.memset is also a definition of the destination field and must kill
++; an earlier pointer stored there.
++define void @cj_memset_kills_stack_pointee(i8 addrspace(1)* %heap) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @llvm.cj.memset.p0i8(i8* %env.i8, i8 0, i64 8, i1 false)
++  call void @g()
++  call void @use_env(i8* %env.i8)
++  ret void
++}
++
++; CHECK-LABEL: define void @cj_memset_kills_stack_pointee
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK-NOT: %LocalBox* %box
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK-NOT: %LocalBox* %box
++
++attributes #0 = { "record_mut" }
++
++; A store on one branch does not dominate the safepoint at the join, but it
++; reaches it on that branch, so LocalBox is still live there.
++define void @branch_stack_pointee(i8 addrspace(1)* %heap, i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.field, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  br i1 %cond, label %capture, label %join
++
++capture:
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  br label %join
++
++join:
++  call void @g()
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  ret void
++}
++
++; CHECK-LABEL: define void @branch_stack_pointee
++; CHECK: join:
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++
++; A store in a block that cannot reach the safepoint must not make LocalBox
++; live there.
++define void @unreachable_stack_pointee(i8 addrspace(1)* %heap, i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.field, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  br i1 %cond, label %dead, label %live
++
++dead:
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  br label %exit
++
++live:
++  call void @g()
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  br label %exit
++
++exit:
++  ret void
++}
++
++; CHECK-LABEL: define void @unreachable_stack_pointee
++; CHECK: live:
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK-NOT: %LocalBox* %box
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK-NOT: %LocalBox* %box
++
++; A store killed by a later store to the same field does not keep LocalBox
++; live at the safepoint.
++define void @killed_stack_pointee(i8 addrspace(1)* %heap, i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.field, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  br i1 %cond, label %capture, label %join
++
++capture:
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.field, align 8
++  br label %join
++
++join:
++  call void @g()
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  ret void
++}
++
++; CHECK-LABEL: define void @killed_stack_pointee
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK-NOT: %LocalBox* %box
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK-NOT: %LocalBox* %box
++
++; A kill in a successor block also stops the store from reaching the
++; safepoint.
++define void @killed_in_successor_stack_pointee(i8 addrspace(1)* %heap, i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.field, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  br i1 %cond, label %capture, label %join
++
++capture:
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  br label %kill
++
++kill:
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.field, align 8
++  br label %join
++
++join:
++  call void @g()
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  ret void
++}
++
++; CHECK-LABEL: define void @killed_in_successor_stack_pointee
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK-NOT: %LocalBox* %box
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK-NOT: %LocalBox* %box
++
++; On the first loop iteration the pointee is scanned before the loop-carried
++; store executes.  It must therefore be zero-initialized.
++define void @loop_carried_uninit_stack_pointee(i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.field, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  br label %loop
++
++loop:
++  call void @g()
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %box.value, align 8
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  br i1 %cond, label %loop, label %exit
++
++exit:
++  ret void
++}
++
++; CHECK-LABEL: define void @loop_carried_uninit_stack_pointee
++; CHECK: entry:
++; CHECK: %box = alloca %LocalBox
++; CHECK: call void @llvm.memset.p0i8.i64({{.*}}i8 0, i64 8, i1 false)
++; CHECK: loop:
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++
++; The copied source range starts at field 1, not at the source object base.  The
++; destination field 0 maps to the source pointer's own offset 0, not to source
++; offset 8 again, so the LocalBox stored in source field 1 must stay live.
++define void @range_copy_nonzero_source_offset(i8 addrspace(1)* %heap) #0 gc "cangjie" {
++entry:
++  %src = alloca %CopySrc, align 8
++  %dst = alloca %CopyDst, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %src.f0 = getelementptr inbounds %CopySrc, %CopySrc* %src, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %src.f0, align 8
++  %src.f1 = getelementptr inbounds %CopySrc, %CopySrc* %src, i64 0, i32 1
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %src.f1, align 8
++  %dst.f0 = getelementptr inbounds %CopyDst, %CopyDst* %dst, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %dst.f0, align 8
++  %dst.f1 = getelementptr inbounds %CopyDst, %CopyDst* %dst, i64 0, i32 1
++  store i8 addrspace(1)* null, i8 addrspace(1)** %dst.f1, align 8
++  %src.i8 = bitcast %CopySrc* %src to i8*
++  %src.field1.i8 = getelementptr inbounds i8, i8* %src.i8, i64 8
++  %dst.i8 = bitcast %CopyDst* %dst to i8*
++  call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dst.i8, i8* %src.field1.i8, i64 8, i1 false)
++  call void @g()
++  call void @use_copy_dst(%CopyDst* %dst)
++  ret void
++}
++
++; CHECK-LABEL: define void @range_copy_nonzero_source_offset
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++
++; A partial copy into destination field 0 must not keep a stack object live
++; merely because a different destination field is live.
++define void @range_copy_uncovered_field(i8 addrspace(1)* %heap) #0 gc "cangjie" {
++entry:
++  %src = alloca %CopySrc, align 8
++  %dst = alloca %CopyDst, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %src.f0 = getelementptr inbounds %CopySrc, %CopySrc* %src, i64 0, i32 0
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %src.f0, align 8
++  %src.f1 = getelementptr inbounds %CopySrc, %CopySrc* %src, i64 0, i32 1
++  store i8 addrspace(1)* null, i8 addrspace(1)** %src.f1, align 8
++  %dst.f0 = getelementptr inbounds %CopyDst, %CopyDst* %dst, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %dst.f0, align 8
++  %dst.f1 = getelementptr inbounds %CopyDst, %CopyDst* %dst, i64 0, i32 1
++  store i8 addrspace(1)* null, i8 addrspace(1)** %dst.f1, align 8
++  %src.i8 = bitcast %CopySrc* %src to i8*
++  %dst.i8 = bitcast %CopyDst* %dst to i8*
++  call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dst.i8, i8* %src.i8, i64 8, i1 false)
++  %live = load i8 addrspace(1)*, i8 addrspace(1)** %dst.f1, align 8
++  call void @g()
++  call void @use_ref(i8 addrspace(1)* %live)
++  ret void
++}
++
++; CHECK-LABEL: define void @range_copy_uncovered_field
++; CHECK-NOT: "struct-live"({{.*}}%LocalBox* %box
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}
++
++; A whole-object liveness entry (-1) must still propagate a direct store to a
++; field of that object.  The extra run line lowers the large-struct threshold
++; to one so this small struct uses the whole-object representation.
++%Env2 = type { i8 addrspace(1)*, i8 addrspace(1)* }
++declare void @use_env2(%Env2*) #0
++
++define void @whole_object_liveness_direct_store(i8 addrspace(1)* %heap) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env2, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %env.f0 = getelementptr inbounds %Env2, %Env2* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.f0, align 8
++  %env.f1 = getelementptr inbounds %Env2, %Env2* %env, i64 0, i32 1
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.f1, align 8
++  call void @g()
++  call void @use_env2(%Env2* %env)
++  ret void
++}
++
++; CHECK-LABEL: define void @whole_object_liveness_direct_store
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++
++; A store through a phi of two stack field pointers records the pointee under
++; the phi key, while the safepoint live set contains the concrete alloca
++; fields.  The pointee must still be found through the phi's alloca set.
++define void @phi_publish_stack_pointee(i8 addrspace(1)* %heap, i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env2, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %env.f0 = getelementptr inbounds %Env2, %Env2* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.f0, align 8
++  %env.f1 = getelementptr inbounds %Env2, %Env2* %env, i64 0, i32 1
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.f1, align 8
++  br i1 %cond, label %a, label %b
++
++a:
++  br label %join
++
++b:
++  br label %join
++
++join:
++  %fld = phi i8 addrspace(1)** [ %env.f0, %a ], [ %env.f1, %b ]
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %fld, align 8
++  call void @g()
++  call void @use_env2(%Env2* %env)
++  ret void
++}
++
++; CHECK-LABEL: define void @phi_publish_stack_pointee
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++
++; Same as above, but the published field address comes from a select.
++define void @select_publish_stack_pointee(i8 addrspace(1)* %heap, i1 %cond) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env2, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %env.f0 = getelementptr inbounds %Env2, %Env2* %env, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.f0, align 8
++  %env.f1 = getelementptr inbounds %Env2, %Env2* %env, i64 0, i32 1
++  store i8 addrspace(1)* null, i8 addrspace(1)** %env.f1, align 8
++  %fld = select i1 %cond, i8 addrspace(1)** %env.f0, i8 addrspace(1)** %env.f1
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %fld, align 8
++  call void @g()
++  call void @use_env2(%Env2* %env)
++  ret void
++}
++
++; CHECK-LABEL: define void @select_publish_stack_pointee
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++
++; The inserted zero initializer of a stack pointee must survive even when the
++; object is fully overwritten later: a store in the entry block that appears
++; after the first safepoint is not an entry initialization, and the O2
++; dead-memset elimination skips stack pointees.  Otherwise the safepoint
++; scans uninitialized memory.
++define void @pointee_memset_survives_overwrite(i8 addrspace(1)* %heap) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  call void @g()
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* null, i8 addrspace(1)** %box.value, align 8
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  ret void
++}
++
++; CHECK-LABEL: define void @pointee_memset_survives_overwrite
++; CHECK: entry:
++; CHECK: %box = alloca %LocalBox, align 8
++; CHECK-NEXT: %[[BOXI8:.*]] = bitcast %LocalBox* %box to i8*
++; CHECK-NEXT: call void @llvm.memset.p0i8.i64(i8* align 8 %[[BOXI8]], i8 0, i64 8, i1 false)
+diff --git a/llvm/test/Transforms/Cangjie/GCLiveAnalysis/stack_object_pointee_liveness.ll b/llvm/test/Transforms/Cangjie/GCLiveAnalysis/stack_object_pointee_liveness.ll
+new file mode 100644
+index 000000000..0f8e189fe
+--- /dev/null
++++ b/llvm/test/Transforms/Cangjie/GCLiveAnalysis/stack_object_pointee_liveness.ll
+@@ -0,0 +1,34 @@
++; RUN: opt < %s -cj-rewrite-statepoint -S 2>&1 | FileCheck %s
++; RUN: opt < %s -passes=cj-rewrite-statepoint -S 2>&1 | FileCheck %s
++
++%LocalBox = type { i8 addrspace(1)* }
++%Env = type { i8 addrspace(1)*, i64 }
++
++declare void @g() #0 gc "cangjie"
++declare void @use_env(i8*) #0
++
++; LocalBox is captured only after the safepoint.  Its value field is already
++; live, so LocalBox must be struct-live at the earlier safepoint as well;
++; otherwise a GC there can move the heap object while LocalBox keeps a stale
++; reference.
++define void @safepoint_before_capture(i8 addrspace(1)* %heap) #0 gc "cangjie" {
++entry:
++  %env = alloca %Env, align 8
++  %box = alloca %LocalBox, align 8
++  %box.value = getelementptr inbounds %LocalBox, %LocalBox* %box, i64 0, i32 0
++  store i8 addrspace(1)* %heap, i8 addrspace(1)** %box.value, align 8
++  %box.as1 = addrspacecast %LocalBox* %box to i8 addrspace(1)*
++  call void @g()
++  %env.field = getelementptr inbounds %Env, %Env* %env, i64 0, i32 0
++  store i8 addrspace(1)* %box.as1, i8 addrspace(1)** %env.field, align 8
++  %env.i8 = bitcast %Env* %env to i8*
++  call void @use_env(i8* %env.i8)
++  ret void
++}
++
++; CHECK-LABEL: define void @safepoint_before_capture
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@g{{.*}}"struct-live"({{.*}}%LocalBox* %box{{.*}})
++; CHECK: call token (...) @llvm.cj.gc.statepoint({{.*}}@use_env{{.*}}"struct-live"({{.*}}%Env* %env
++; CHECK: %LocalBox* %box
++
++attributes #0 = { "record_mut" }
 diff --git a/llvm/test/Transforms/Cangjie/GVN/cj-finalizer.ll b/llvm/test/Transforms/Cangjie/GVN/cj-finalizer.ll
 new file mode 100644
 index 000000000..6533817d3
