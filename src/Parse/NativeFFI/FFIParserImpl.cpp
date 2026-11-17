@@ -133,9 +133,10 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
 
 void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const
 {
-    // @ArkTS option rules (unknown name, non-literal value, a name repeated
-    // inside one layer, namespace shape) are diagnosed once by the Sema option
-    // fold, so the parser adds no check for that kind.
+    // @ArkTS declaration-annotation option rules (unknown name, non-literal
+    // value, a name repeated inside one layer, namespace shape) are diagnosed
+    // once by the Sema option fold; block-level options are validated in
+    // CheckForeignBlockAnnotations.
     for (auto& it : annos) {
         auto& anno = *it;
         switch (it->kind) {

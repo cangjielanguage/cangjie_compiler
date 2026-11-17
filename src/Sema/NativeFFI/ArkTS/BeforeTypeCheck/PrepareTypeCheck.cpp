@@ -172,19 +172,6 @@ bool HasGeneratedEntry(const GeneratedDeclarations& declarations, const FuncDecl
         RegistersWrapper(*registration, *wrapper, entry);
 }
 
-// Every non-generated top-level declaration named @p name.
-std::vector<Ptr<Decl>> FindUserTopLevelDecls(const Package& pkg, const std::string& name)
-{
-    std::vector<Ptr<Decl>> found;
-    for (const auto& file : pkg.files) {
-        for (const auto& decl : file->decls) {
-            if (!decl->TestAttr(Attribute::COMPILER_ADD) && decl->identifier.Val() == name) {
-                found.emplace_back(decl.get());
-            }
-        }
-    }
-    return found;
-}
 } // namespace
 
 // Before -> after, for each source declaration:
@@ -254,23 +241,6 @@ void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourc
                     continue;
                 }
                 const auto suffix = std::to_string(index++);
-                // Exact-suffix backstop for the package-level reserved-name
-                // check. A user declaration occupying this entry's generated
-                // names would otherwise surface as a generic redefinition.
-                bool conflicting = false;
-                for (const auto& name : {prefix + "entry_" + suffix, prefix + "registration_" + suffix}) {
-                    for (auto userDecl : FindUserTopLevelDecls(pkg, name)) {
-                        auto builder = diag.DiagnoseRefactor(
-                            DiagKindRefactor::sema_arkts_entry_generated_name_conflict, *userDecl,
-                            userDecl->identifier.Val());
-                        builder.AddNote("generated entry declarations are reserved by the compiler");
-                        conflicting = true;
-                    }
-                }
-                if (conflicting) {
-                    fd->EnableAttr(Attribute::IS_BROKEN);
-                    continue;
-                }
                 // Generating the callback first and failing later in
                 // BindSupportReferences would leave PreCheck to report the
                 // generated signature's package-qualified types as undeclared

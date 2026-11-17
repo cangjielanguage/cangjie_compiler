@@ -936,17 +936,22 @@ foreign {
 foreign {
     func three(): Unit
 }
+
+@ArkTS[module: missingValue]
+foreign {
+    func four(): Unit
+}
 )");
     const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::SEMA);
     auto countKind = [&diagnostics](DiagKindRefactor kind) {
         return std::count_if(diagnostics.begin(), diagnostics.end(),
             [kind](const auto& diagnostic) { return diagnostic.rKind == kind; });
     };
-    EXPECT_EQ(countKind(DiagKindRefactor::sema_arkts_option_invalid), 1);
+    EXPECT_EQ(countKind(DiagKindRefactor::sema_arkts_option_invalid), 2);
     EXPECT_EQ(countKind(DiagKindRefactor::sema_arkts_option_duplicated), 1);
     EXPECT_EQ(countKind(DiagKindRefactor::sema_arkts_option_empty), 1);
     ASSERT_NE(file, nullptr);
-    ASSERT_EQ(file->decls.size(), 3);
+    ASSERT_EQ(file->decls.size(), 4);
     for (size_t i = 0; i < file->decls.size(); ++i) {
         std::unordered_map<std::string, std::string> options;
         ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls[i]), options));

@@ -4044,6 +4044,26 @@ public func run(): Unit {}
     EXPECT_EQ(brokenRuns, 1);
 }
 
+// An overload that fails the entry shape is reported by the shape rule. It
+// does not register a name, so the duplicate rule does not apply to it.
+TEST_F(ArkTSForeignDiagTest, OverloadedEntryIsRejectedByShapeRule)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public func run(): Unit {}
+
+@ArkTS
+public func run(value: Int32): Unit {}
+)");
+    EXPECT_EQ(CountErrorsContaining("invalid @ArkTS entry 'run': must not take parameters"), 1);
+    EXPECT_EQ(CountErrorsContaining("duplicate @ArkTS entry name"), 0);
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
 // A user declaration named like the compiler's generated entry/registration
 // names is reported directly; the entry is refused so no generic redefinition
 // appears instead. Every occupying declaration gets its own diagnostic.
@@ -4115,7 +4135,7 @@ public foreign func legalForeign(): Unit
 
 // @ArkTS is only valid on the top-level declaration kinds the design lists.
 // A struct, type alias, local function and class member are reported at their
-// annotation instead of being silently accepted.
+// annotation.
 TEST_F(ArkTSForeignDiagTest, ArkTSPlacementOnUnsupportedKindIsDiagnosed)
 {
     PrepareArkTSSupport();
@@ -4149,8 +4169,7 @@ public class Host {
 }
 
 // A non-foreign @ArkTS function with type parameters cannot be an entry: the
-// entry call cannot supply type arguments. The dedicated rule replaces the
-// derived type-argument diagnostic and no callback is generated.
+// entry call cannot supply type arguments. No callback is generated.
 TEST_F(ArkTSForeignDiagTest, GenericExportFunctionIsDiagnosed)
 {
     PrepareArkTSSupport();
