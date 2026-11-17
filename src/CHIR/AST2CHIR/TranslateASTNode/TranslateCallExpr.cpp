@@ -673,12 +673,6 @@ Value* Translator::TranslateTrivialArgWithNoSugar(const AST::FuncArg& arg, const
         argVal = TranslateExprArg(*arg.expr, *expectedTy);
     } else {
         argVal = TranslateExprArg(*arg.expr);
-        // `lhs op= v` is desugared into `lhs = lhs'.op(v)`, where `lhs'` is mapped to `lhs`. For a member access, the
-        // mapped value is a reference to the field. If `lhs` has type Extern<T>, `lhs'.op(v)` becomes
-        // T.functionCall(T.memberAccess(lhs', "op"), [v]), where `lhs'` is an argument and needs the field value.
-        if (GetMapExpr(*arg.expr) != nullptr && arg.expr->GetTy()->IsCoreExternType()) {
-            argVal = GetDerefedValue(argVal, loc);
-        }
     }
     if (expectedTy != nullptr) {
         argVal = TypeCastOrBoxIfNeeded(*argVal, *expectedTy, loc);
