@@ -13,7 +13,10 @@
 #include "FFIParserImpl.h"
 
 #include <algorithm>
+#include <cctype>
 #include <iterator>
+#include <unordered_set>
+#include <vector>
 
 #include "../ParserImpl.h"
 #include "cangjie/AST/Match.h"
@@ -95,15 +98,36 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
         if (annotation->kind != AnnotationKind::ARKTS) {
             continue;
         }
-        auto& args = annotation->args;
-        for (auto& arg : args) {
-            if (arg->name.Val() == "foreignName") {
+        // A block annotation is cloned into every member, so an invalid option
+        // must be reported once here and removed. The member clones then keep
+        // only the valid block defaults and cannot repeat the block error.
+        std::unordered_set<std::string> seen;
+        std::vector<OwnedPtr<FuncArg>> validArgs;
+        validArgs.reserve(annotation->args.size());
+        for (auto& arg : annotation->args) {
+            const auto name = arg->name.Val();
+            auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
+            if (name == "foreignName") {
                 p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_block_foreign_name, *arg);
+                continue;
             }
+            if (!literal || literal->kind != LitConstKind::STRING ||
+                (name != "module" && name != "namespace")) {
+                p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_invalid, *annotation);
+                continue;
+            }
+            if (!seen.emplace(name).second) {
+                p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, *annotation, name);
+                continue;
+            }
+            if (std::all_of(literal->stringValue.begin(), literal->stringValue.end(),
+                    [](unsigned char c) { return std::isspace(c) != 0; })) {
+                p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty, *annotation, name);
+                continue;
+            }
+            validArgs.emplace_back(std::move(arg));
         }
-        args.erase(std::remove_if(args.begin(), args.end(),
-                       [](const OwnedPtr<FuncArg>& arg) { return arg->name.Val() == "foreignName"; }),
-            args.end());
+        annotation->args = std::move(validArgs);
     }
 }
 

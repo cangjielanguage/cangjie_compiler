@@ -28,6 +28,10 @@ void PrepareClasses(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& so
     ImportManager* imports);
 void PrepareInterfaces(AST::Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
     ImportManager* imports);
+// Validate non-foreign @ArkTS declaration contracts before entry generation:
+// entry shape/name, annotation placement and the foreign-only 'module' option.
+// Rejected entries are marked IS_BROKEN so the entry loop skips them.
+void DiagnoseArkTSDeclarations(AST::Package& pkg, DiagnosticEngine& diag);
 
 // Sema check for the @RawValue annotation. It lives in the ArkTS namespace
 // (not the C FFI annotation table) because it validates an ArkTS-only annotation

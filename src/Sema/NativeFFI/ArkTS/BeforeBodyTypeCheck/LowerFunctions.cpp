@@ -298,6 +298,12 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                         }
                         supported = false;
                     }
+                    // This declaration rule runs before the semantic type of a
+                    // bodyless foreign parameter is available, so the written
+                    // spelling (`?T` or `Option<T>`) is the contract.
+                    if (DiagnoseArkTSDefaultedNamedParamNotOption(diag, *param, *fd)) {
+                        supported = false;
+                    }
                     auto desc = classify(param->type.get());
                     if (!ArkTSTypeDescGeneratable(desc) || ArkTSTypeDescContainsNothing(desc)) {
                         auto& position = param->type ? static_cast<Node&>(*param->type) : static_cast<Node&>(*param);

@@ -537,5 +537,27 @@ ERROR(sema_arkts_foreign_interface_invalid,
 // interface.
 ERROR(sema_arkts_foreign_interface_impl_invalid,
     "Cangjie type '%s' cannot implement @ArkTS foreign interface '%s'")
+// Non-foreign @ArkTS declaration rules.
+ERROR(sema_arkts_entry_invalid,
+    "invalid @ArkTS entry '%s': %s")
+ERROR(sema_arkts_entry_name_duplicated,
+    "duplicate @ArkTS entry name '%s' in package '%s'")
+ERROR(sema_arkts_entry_generated_name_conflict,
+    "declaration '%s' conflicts with a name reserved for generated ArkTS entry code")
+ERROR(sema_arkts_option_module_only_foreign,
+    "'module' option is only valid on @ArkTS foreign declarations, not on '%s'")
+ERROR(sema_arkts_annotation_placement_invalid,
+    "'@ArkTS' cannot be used on %s '%s'")
+// A defaulted named parameter must have an Option<T> type so the wrapper can
+// represent an omitted argument.
+ERROR(sema_arkts_foreign_named_param_not_option,
+    "named parameter '%s' of @ArkTS foreign declaration '%s' must have type 'Option<T>', not '%s'")
+ERROR(sema_arkts_foreign_function_generic,
+    "@ArkTS function '%s' must not be generic")
+// A foreign class/interface 'module' option that names a path.
+ERROR(sema_arkts_module_path_invalid,
+    "'module' option '%s' of @ArkTS %s '%s' must be an ArkTS module specifier - a module name "
+    "such as '@ohos.util' or 'utils', or a project ETS source path such as 'entry/src/main/ets/Foo' - not a "
+    "'./' or '../' relative path, a backslash spelling, an OS-absolute, drive-absolute or UNC path")
 
 ERROR(sema_diag_end, "")

@@ -917,6 +917,49 @@ foreign {
     EXPECT_EQ(options.count("foreignName"), 0U);
 }
 
+// A block annotation is cloned into every member, so invalid options are
+// reported once at the block and erased before cloning. Members keep only the
+// valid block defaults and do not repeat the block-level error.
+TEST_F(ArkTSEntryTest, BlockOptionIsReportedOnce)
+{
+    auto file = ParseKeepingDiagnostics(R"(@ArkTS[module: "first", module: "second"]
+foreign {
+    func one(): Unit
+}
+
+@ArkTS[bogus: "x"]
+foreign {
+    func two(): Unit
+}
+
+@ArkTS[namespace: "  "]
+foreign {
+    func three(): Unit
+}
+)");
+    const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::SEMA);
+    auto countKind = [&diagnostics](DiagKindRefactor kind) {
+        return std::count_if(diagnostics.begin(), diagnostics.end(),
+            [kind](const auto& diagnostic) { return diagnostic.rKind == kind; });
+    };
+    EXPECT_EQ(countKind(DiagKindRefactor::sema_arkts_option_invalid), 1);
+    EXPECT_EQ(countKind(DiagKindRefactor::sema_arkts_option_duplicated), 1);
+    EXPECT_EQ(countKind(DiagKindRefactor::sema_arkts_option_empty), 1);
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(file->decls.size(), 3);
+    for (size_t i = 0; i < file->decls.size(); ++i) {
+        std::unordered_map<std::string, std::string> options;
+        ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls[i]), options));
+        if (i == 0) {
+            EXPECT_EQ(options.at("module"), "first");
+        } else {
+            EXPECT_EQ(options.count("module"), 0U);
+        }
+        EXPECT_EQ(options.count("namespace"), 0U);
+        EXPECT_EQ(options.count("bogus"), 0U);
+    }
+}
+
 TEST_F(ArkTSEntryTest, RepeatedOptionAtOneLevelIsRejectedEvenForEqualValues)
 {
     for (const auto& name : {"module", "namespace", "foreignName"}) {

@@ -175,6 +175,22 @@ bool ArkTSOptionValueEmpty(const std::string& value);
 // IS_BROKEN -> true; a well-formed parameter -> false.
 bool ArkTSParamIsBroken(const AST::FuncParam& param);
 
+// Whether a parameter type is written as Option<T>: the '?T' spelling, an
+// 'Option' reference with one type argument, or its qualified spelling. The
+// source spelling is used because the semantic type of a bodyless foreign
+// member is not resolved when the declaration rules run.
+bool ArkTSTypeIsSourceOption(const AST::Type& type);
+
+// Whether a defaulted named parameter violates the Option<T> contract: the
+// wrapper cannot omit the argument unless its type is written as `?T` or
+// `Option<T>`. A parameter the parser already rejected is not restated.
+bool ArkTSDefaultedNamedParamIsNotOption(const AST::FuncParam& param);
+
+// Report sema_arkts_foreign_named_param_not_option for @p param when it
+// violates the contract above; return whether it reported.
+bool DiagnoseArkTSDefaultedNamedParamNotOption(
+    DiagnosticEngine& diag, const AST::FuncParam& param, const AST::Decl& decl);
+
 // Whether any parameter list of @p body carries @RestParam. A function with
 // a rest parameter cannot declare named parameters; the ArkTS parser reports
 // that mix once through parse_rest_param_function_has_named_params, so the

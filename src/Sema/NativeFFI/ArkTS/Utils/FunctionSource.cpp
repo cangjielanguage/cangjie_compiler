@@ -162,6 +162,36 @@ bool ArkTSParamIsBroken(const FuncParam& param)
     return param.TestAttr(Attribute::HAS_BROKEN) || param.TestAttr(Attribute::IS_BROKEN);
 }
 
+bool ArkTSTypeIsSourceOption(const Type& type)
+{
+    if (type.astKind == ASTKind::OPTION_TYPE) {
+        return true;
+    }
+    if (auto ref = DynamicCast<const RefType*>(&type)) {
+        return ref->ref.identifier == "Option" && ref->typeArguments.size() == 1;
+    }
+    if (auto qualified = DynamicCast<const QualifiedType*>(&type)) {
+        return qualified->field == "Option" && qualified->typeArguments.size() == 1;
+    }
+    return false;
+}
+
+bool ArkTSDefaultedNamedParamIsNotOption(const FuncParam& param)
+{
+    return param.isNamedParam && param.assignment != nullptr && param.type != nullptr &&
+        !ArkTSParamIsBroken(param) && !ArkTSTypeIsSourceOption(*param.type);
+}
+
+bool DiagnoseArkTSDefaultedNamedParamNotOption(DiagnosticEngine& diag, const FuncParam& param, const Decl& decl)
+{
+    if (!ArkTSDefaultedNamedParamIsNotOption(param)) {
+        return false;
+    }
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_named_param_not_option, param,
+        param.identifier.Val(), decl.identifier.Val(), param.type->ToString());
+    return true;
+}
+
 bool ArkTSFuncBodyHasRestParam(const FuncBody& body)
 {
     for (const auto& list : body.paramLists) {
@@ -326,8 +356,12 @@ bool ResolveArkTSModule(Decl& decl, const std::unordered_map<std::string, std::s
     }
     module = options.count("module") ? options.at("module") : ArkTSDefaultModule(pkg.fullPackageName);
     if (options.count("module") != 0 && ArkTSModulePathLike(module)) {
-        diag.DiagnoseRefactor(invalidKind, moduleNode ? *moduleNode : static_cast<Node&>(decl),
-            decl.identifier.Val(), "module option must be an ArkTS module specifier, not a path");
+        // The path rule names the declaration kind and anchors at the option
+        // literal.
+        const bool isClass = invalidKind == DiagKindRefactor::sema_arkts_foreign_class_invalid;
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_module_path_invalid,
+            moduleNode ? *moduleNode : static_cast<Node&>(decl), module,
+            isClass ? "foreign class" : "foreign interface", decl.identifier.Val());
         return false;
     }
     if (module.empty()) {
@@ -632,6 +666,9 @@ void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
                             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_named_param_without_default,
                                 *param, param->identifier.Val(), decl->identifier.Val());
                         }
+                        decl->EnableAttr(Attribute::IS_BROKEN);
+                    } else if (param != nullptr &&
+                        DiagnoseArkTSDefaultedNamedParamNotOption(diag, *param, *decl)) {
                         decl->EnableAttr(Attribute::IS_BROKEN);
                     }
                 }

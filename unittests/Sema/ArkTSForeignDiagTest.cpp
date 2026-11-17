@@ -14,6 +14,7 @@
  * deferral diagnostic.
  */
 
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
@@ -77,6 +78,7 @@ public:
         // diagnostics keep d.start/d.end zero and store the real range only in
         // mainHint.range, so the position must be taken from there.
         std::string hint;
+        std::vector<std::string> notes;
     };
 
     explicit RecordingDiagnosticHandler(DiagnosticEngine& diag) : CompilerDiagnosticHandler(diag)
@@ -88,10 +90,15 @@ public:
         CompilerDiagnosticHandler::HandleDiagnose(d);
         if (d.diagSeverity == DiagSeverity::DS_ERROR) {
             messages.push_back(d.errorMessage);
-            const auto& mainBegin = d.mainHint.range.begin;
-            const auto& begin = mainBegin.IsZero() ? d.start : mainBegin;
-            errors.push_back({d.errorMessage, MakeRange(d.start, d.end),
-                ":" + std::to_string(begin.line) + ":" + std::to_string(begin.column) + ":"});
+            const auto& mainRange = d.mainHint.range;
+            const auto& begin = mainRange.begin.IsZero() ? d.start : mainRange.begin;
+            const auto& end = mainRange.begin.IsZero() ? d.end : mainRange.end;
+            std::vector<std::string> notes;
+            for (const auto& note : d.subDiags) {
+                notes.push_back(note.subDiagMessage);
+            }
+            errors.push_back({d.errorMessage, MakeRange(begin, end),
+                ":" + std::to_string(begin.line) + ":" + std::to_string(begin.column) + ":", std::move(notes)});
         } else if (d.diagSeverity == DiagSeverity::DS_WARNING) {
             warnings.push_back(d.errorMessage);
         }
@@ -249,6 +256,12 @@ protected:
             }
         }
         return false;
+    }
+
+    size_t CountErrorsContaining(const std::string& needle) const
+    {
+        return static_cast<size_t>(std::count_if(handler->messages.begin(), handler->messages.end(),
+            [&needle](const auto& message) { return message.find(needle) != std::string::npos; }));
     }
 
     // True when a declaration with @p name carries the refusal mark.
@@ -1107,8 +1120,11 @@ public foreign class Pathy {
     public func plain(value: Int32): Int32
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("module option must be an ArkTS module specifier"));
-    EXPECT_TRUE(HasErrorContaining("'Pathy'"));
+    EXPECT_TRUE(HasErrorContaining(
+        "'module' option './actual' of @ArkTS foreign class 'Pathy' must be an ArkTS module specifier"));
+    auto modulePath = handler->FindErrorContaining("of @ArkTS foreign class 'Pathy'");
+    ASSERT_NE(modulePath, nullptr);
+    EXPECT_EQ(modulePath->hint, ":5:16:");
     Ptr<ClassDecl> pathy = nullptr;
     Walker(instance->GetSourcePackages()[0]->files[0].get(), [&pathy](Ptr<Node> node) {
         auto candidate = DynamicCast<ClassDecl*>(node);
@@ -2753,10 +2769,15 @@ public func run(): Unit {}
     EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
     EXPECT_TRUE(HasErrorContaining("check the project's ArkTS interop dependencies"));
     EXPECT_TRUE(HasErrorContaining("'run'"));
-    for (const auto& forbidden : {"__cj_arkts_", "cj_arkts_context_v1", "wrapper", "generated", "glue",
-             "support declaration"}) {
+    for (const auto& forbidden : {"__cj_arkts_", "wrapper", "generated", "glue", "support declaration"}) {
         EXPECT_FALSE(HasErrorContaining(forbidden)) << forbidden;
     }
+    auto supportError = handler->FindErrorContaining("requires ArkTS interop declarations");
+    ASSERT_NE(supportError, nullptr);
+    const std::string supportNote =
+        "the entry registration requires 'ohos.ark_interop' and 'cj_arkts_context_v1' imports";
+    EXPECT_NE(std::find(supportError->notes.begin(), supportError->notes.end(), supportNote),
+        supportError->notes.end());
 }
 
 // The C ABI exemption is reserved for actual @ArkTS foreign declarations: the
@@ -3623,7 +3644,11 @@ public foreign interface Pathy {
     func plain(value: Int32): Int32
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("module option must be an ArkTS module specifier"));
+    EXPECT_TRUE(HasErrorContaining(
+        "'module' option './actual' of @ArkTS foreign interface 'Pathy' must be an ArkTS module specifier"));
+    auto modulePath = handler->FindErrorContaining("of @ArkTS foreign interface 'Pathy'");
+    ASSERT_NE(modulePath, nullptr);
+    EXPECT_EQ(modulePath->hint, ":5:16:");
     EXPECT_EQ(diag.GetErrorCount(), 1);
     EXPECT_TRUE(IsDeclBroken("Pathy"));
     // The option is refused during preparation, before the implementation
@@ -3945,4 +3970,331 @@ public func use(): String {
 )");
     ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
     EXPECT_FALSE(IsDeclBroken("IChild"));
+}
+
+// A non-foreign @ArkTS top-level function is an entry only when it satisfies
+// the entry shape. Each violation is reported once with the first unmet rule
+// as its reason, the declaration is refused, and no derived missing-argument
+// or missing-type-argument error is produced.
+TEST_F(ArkTSForeignDiagTest, EntryShapeViolationsAreDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+func notPublic(): Unit {}
+
+@ArkTS
+public func withParameters(value: Int32): Unit {}
+
+@ArkTS
+public func omittedUnit() {}
+
+@ArkTS[namespace: "actual"]
+public func withOption(): Unit {}
+)");
+    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS entry 'notPublic': must be 'public'"));
+    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS entry 'withParameters': must not take parameters"));
+    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS entry 'omittedUnit': must declare an explicit 'Unit' return type"));
+    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS entry 'withOption': must not declare options"));
+    EXPECT_EQ(diag.GetErrorCount(), 4);
+    for (const auto& name : {"notPublic", "withParameters", "omittedUnit", "withOption"}) {
+        EXPECT_TRUE(IsDeclBroken(name)) << name;
+    }
+    EXPECT_EQ(FindFunction("__cj_arkts_entry_0"), nullptr);
+    auto entryError = handler->FindErrorContaining("invalid @ArkTS entry 'withParameters'");
+    ASSERT_NE(entryError, nullptr);
+    const std::string entryNote =
+        "an @ArkTS entry is a top-level public parameterless function with an explicit 'Unit' return type";
+    EXPECT_NE(std::find(entryError->notes.begin(), entryError->notes.end(), entryNote), entryError->notes.end());
+}
+
+// Entry names are package-wide registration keys. The first declaration keeps
+// the name; a later declaration with the same name is refused without a
+// second registration.
+TEST_F(ArkTSForeignDiagTest, DuplicateEntryNameIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public func run(): Unit {}
+
+@ArkTS
+public func run(): Unit {}
+)");
+    EXPECT_EQ(CountErrorsContaining("duplicate @ArkTS entry name 'run' in package 'entry'"), 1);
+    auto duplicate = handler->FindErrorContaining("duplicate @ArkTS entry name");
+    ASSERT_NE(duplicate, nullptr);
+    const std::string duplicateNote = "entry names are registered with JSModule.registerFunc";
+    EXPECT_NE(std::find(duplicate->notes.begin(), duplicate->notes.end(), duplicateNote), duplicate->notes.end());
+    size_t brokenRuns = 0;
+    Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&brokenRuns](Ptr<Node> node) {
+        auto fd = DynamicCast<FuncDecl*>(node);
+        if (fd && fd->identifier.Val() == "run" && fd->TestAttr(Attribute::IS_BROKEN)) {
+            ++brokenRuns;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    EXPECT_EQ(brokenRuns, 1);
+}
+
+// A user declaration named like the compiler's generated entry/registration
+// names is reported directly; the entry is refused so no generic redefinition
+// appears instead. Every occupying declaration gets its own diagnostic.
+TEST_F(ArkTSForeignDiagTest, GeneratedEntryNameConflictIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public func run(): Unit {}
+
+public func __cj_arkts_entry_0(): Unit {}
+public func __cj_arkts_registration_0(): Unit {}
+public func __cj_arkts_registration_9(): Unit {}
+)");
+    EXPECT_EQ(CountErrorsContaining("conflicts with a name reserved for generated ArkTS entry code"), 3);
+    EXPECT_TRUE(HasErrorContaining("declaration '__cj_arkts_entry_0' conflicts"));
+    EXPECT_TRUE(HasErrorContaining("declaration '__cj_arkts_registration_0' conflicts"));
+    EXPECT_TRUE(HasErrorContaining("declaration '__cj_arkts_registration_9' conflicts"));
+    auto conflict = handler->FindErrorContaining("declaration '__cj_arkts_entry_0'");
+    ASSERT_NE(conflict, nullptr);
+    const std::string conflictNote = "generated entry declarations are reserved by the compiler";
+    EXPECT_NE(std::find(conflict->notes.begin(), conflict->notes.end(), conflictNote), conflict->notes.end());
+    EXPECT_TRUE(IsDeclBroken("run"));
+    size_t generated = 0;
+    Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&generated](Ptr<Node> node) {
+        auto decl = DynamicCast<Decl*>(node);
+        if (decl && decl->TestAttr(Attribute::COMPILER_ADD)) {
+            ++generated;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    EXPECT_EQ(generated, 0);
+}
+
+// 'module' names an ArkTS module for a foreign declaration only. A
+// well-formed module option is refused at its literal on every top-level
+// non-foreign kind, including an entry; the entry-shape rule does not claim
+// the option a second time.
+TEST_F(ArkTSForeignDiagTest, ModuleOnNonForeignIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public func nonForeignFunction(): Unit {}
+
+@ArkTS[module: "actual"]
+public class NonForeignClass {}
+
+@ArkTS[module: "actual"]
+public let nonForeignVar: Int32 = 1
+
+@ArkTS[module: "actual"]
+public foreign func legalForeign(): Unit
+)");
+    EXPECT_EQ(CountErrorsContaining("'module' option is only valid on @ArkTS foreign declarations"), 3);
+    EXPECT_TRUE(HasErrorContaining("not on 'nonForeignFunction'"));
+    EXPECT_TRUE(HasErrorContaining("not on 'NonForeignClass'"));
+    EXPECT_TRUE(HasErrorContaining("not on 'nonForeignVar'"));
+    EXPECT_FALSE(HasErrorContaining("invalid @ArkTS entry"));
+    EXPECT_EQ(diag.GetErrorCount(), 3);
+}
+
+// @ArkTS is only valid on the top-level declaration kinds the design lists.
+// A struct, type alias, local function and class member are reported at their
+// annotation instead of being silently accepted.
+TEST_F(ArkTSForeignDiagTest, ArkTSPlacementOnUnsupportedKindIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public struct Point {}
+
+@ArkTS
+type Alias = Int32
+
+@ArkTS
+public func host(): Unit {
+    @ArkTS
+    func local(): Unit {}
+}
+
+@ArkTS
+public class Host {
+    @ArkTS
+    public func member(): Unit {}
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("'@ArkTS' cannot be used on a struct 'Point'"));
+    EXPECT_TRUE(HasErrorContaining("'@ArkTS' cannot be used on a type alias 'Alias'"));
+    EXPECT_TRUE(HasErrorContaining("'@ArkTS' cannot be used on a local function 'local'"));
+    EXPECT_TRUE(HasErrorContaining("'@ArkTS' cannot be used on a class member 'member'"));
+    EXPECT_EQ(diag.GetErrorCount(), 4);
+}
+
+// A non-foreign @ArkTS function with type parameters cannot be an entry: the
+// entry call cannot supply type arguments. The dedicated rule replaces the
+// derived type-argument diagnostic and no callback is generated.
+TEST_F(ArkTSForeignDiagTest, GenericExportFunctionIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public func generic<T>(): Unit {}
+)");
+    EXPECT_TRUE(HasErrorContaining("@ArkTS function 'generic' must not be generic"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(IsDeclBroken("generic"));
+    size_t generated = 0;
+    Walker walker(instance->GetSourcePackages()[0]->files[0].get(), [&generated](Ptr<Node> node) {
+        auto decl = DynamicCast<Decl*>(node);
+        if (decl && decl->TestAttr(Attribute::COMPILER_ADD)) {
+            ++generated;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    EXPECT_EQ(generated, 0);
+}
+
+// A defaulted named parameter can be omitted only when its type is Option<T>.
+// A concrete type is refused and no wrapper body is generated; the Option
+// spelling stays accepted.
+TEST_F(ArkTSForeignDiagTest, NamedParameterDefaultMustBeOption)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign func notOption(x!: Int32 = 1): Unit
+
+@ArkTS[module: "actual"]
+foreign func optional(x!: Option<Int32> = None): Unit
+
+@ArkTS[module: "actual"]
+foreign func optionalShort(x!: ?Int32 = None): Unit
+)");
+    EXPECT_TRUE(HasErrorContaining(
+        "named parameter 'x' of @ArkTS foreign declaration 'notOption' must have type 'Option<T>', not 'Int32'"));
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    auto refused = FindFunction("notOption");
+    ASSERT_NE(refused, nullptr);
+    EXPECT_EQ(refused->funcBody->body, nullptr);
+    for (const auto& name : {"optional", "optionalShort"}) {
+        auto accepted = FindFunction(name);
+        ASSERT_NE(accepted, nullptr) << name;
+        EXPECT_NE(accepted->funcBody->body, nullptr) << name;
+    }
+}
+
+// The named-parameter default rule also covers a bodyless member of an
+// @ArkTS foreign class. The refused member is marked broken and the Option
+// spelling stays accepted. The generic class keeps its external form, so the
+// member bodies are still absent when the declaration rule runs.
+TEST_F(ArkTSForeignDiagTest, ForeignClassMemberNamedParameterDefaultMustBeOption)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[foreignName: "String"]
+public foreign class NamedParamMembers<T> {
+    public init(value!: Option<String> = None)
+    public func bad(x!: Int32 = 1): Unit
+    public func good(x!: Option<Int32> = None): Unit
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("must have type 'Option<T>'"), 1);
+    EXPECT_TRUE(HasErrorContaining(
+        "named parameter 'x' of @ArkTS foreign declaration 'bad' must have type 'Option<T>', not 'Int32'"));
+    EXPECT_FALSE(HasErrorContaining("named parameter 'x' of @ArkTS foreign declaration 'good'"));
+}
+
+// An index setter spells its value parameter as a named parameter without a
+// default. The default-value type rule must not apply to that shape.
+TEST_F(ArkTSForeignDiagTest, IndexSetterNamedValueParameterStaysAccepted)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign interface Indexed {
+    operator func[](k: String): Option<String>
+    operator func[](k: String, value!: String): Unit
+}
+)");
+    EXPECT_FALSE(HasErrorContaining("must have type 'Option<T>'"));
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+}
+
+// Entry diagnostics anchor at the user entry and carry the registration note.
+// A valid entry's generated callback keeps the entry's source range instead of
+// an internal generated location.
+TEST_F(ArkTSForeignDiagTest, EntryDiagnosticsAnchorAtTheEntry)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public func bad(value: Int32): Unit {}
+
+@ArkTS
+public func good(): Unit {}
+)");
+    auto entryError = handler->FindErrorContaining("invalid @ArkTS entry 'bad'");
+    ASSERT_NE(entryError, nullptr);
+    const std::string entryNote =
+        "an @ArkTS entry is a top-level public parameterless function with an explicit 'Unit' return type";
+    EXPECT_NE(std::find(entryError->notes.begin(), entryError->notes.end(), entryNote), entryError->notes.end());
+    auto bad = FindFunction("bad");
+    ASSERT_NE(bad, nullptr);
+    EXPECT_EQ(entryError->range.begin.line, bad->begin.line);
+    EXPECT_EQ(entryError->range.begin.column, bad->begin.column);
+    EXPECT_EQ(entryError->range.end.line, bad->end.line);
+    EXPECT_EQ(entryError->range.end.column, bad->end.column);
+    auto good = FindFunction("good");
+    ASSERT_NE(good, nullptr);
+    auto callback = FindFunction("__cj_arkts_entry_0");
+    ASSERT_NE(callback, nullptr);
+    EXPECT_EQ(callback->begin.line, good->begin.line);
+    EXPECT_EQ(callback->begin.column, good->begin.column);
+    EXPECT_EQ(callback->end.line, good->end.line);
+    EXPECT_EQ(callback->end.column, good->end.column);
+    Ptr<VarDecl> registration = nullptr;
+    Walker registrationWalker(instance->GetSourcePackages()[0]->files[0].get(), [&registration](Ptr<Node> node) {
+        auto candidate = DynamicCast<VarDecl*>(node);
+        if (candidate && candidate->identifier.Val() == "__cj_arkts_registration_0") {
+            registration = candidate;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    registrationWalker.Walk();
+    ASSERT_NE(registration, nullptr);
+    EXPECT_EQ(registration->begin.line, good->begin.line);
+    EXPECT_EQ(registration->begin.column, good->begin.column);
+    EXPECT_EQ(registration->end.line, good->end.line);
+    EXPECT_EQ(registration->end.column, good->end.column);
 }
