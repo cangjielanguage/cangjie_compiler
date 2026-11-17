@@ -369,6 +369,7 @@ void Collector::CollectPropDecl(ASTContext& ctx, PropDecl& pd, bool buildTrie)
 
 void Collector::CollectVarWithPatternDecl(ASTContext& ctx, VarWithPatternDecl& vpd, bool buildTrie)
 {
+    CollectAnnotations(ctx, vpd.annotations, buildTrie);
     auto nodeInfo = NodeInfo(vpd, "", ctx.currentScopeLevel, ctx.currentScopeName);
     AddSymbol(ctx, nodeInfo, buildTrie);
     BuildSymbolTable(ctx, vpd.irrefutablePattern.get(), buildTrie);
