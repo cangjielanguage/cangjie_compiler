@@ -12,12 +12,19 @@
 
 #include "Base/IntrinsicsDispatcher.h"
 
+#include "Base/CGTypes/CGFunctionType.h"
+#include "Base/InvokeImpl.h"
+#include "IRAttribute.h"
 #include "Base/OverflowDispatcher.h"
 #include "Utils/CGUtils.h"
+#include "Utils/Constants.h"
 #include "cangjie/CHIR/IR/Expression/Terminator.h"
 #include "cangjie/CHIR/IR/IntrinsicKind.h"
+#include "cangjie/CHIR/IR/Type/ClassDef.h"
 #include "cangjie/CHIR/IR/Value/Value.h"
 #include "cangjie/CHIR/Utils/ToStringUtils.h"
+#include "cangjie/CHIR/Utils/Utils.h"
+#include "cangjie/Utils/ConstantsUtils.h"
 
 namespace Cangjie {
 namespace CodeGen {
@@ -83,6 +90,200 @@ CGIntrinsicKind GetCGIntrinsicKind(CHIR::IntrinsicKind intrinsicKind)
     }
     return CGIntrinsicKind::UNKNOWN;
 }
+
+class ExclusiveScopeCodeGen {
+public:
+    ExclusiveScopeCodeGen(IRBuilder2& irBuilder, const CHIR::IntrinsicBase& intrinsic)
+        : irBuilder(irBuilder),
+          cgMod(irBuilder.GetCGModule()),
+          llvmCtx(irBuilder.GetCGContext().GetLLVMContext()),
+          intrinsic(intrinsic)
+    {
+    }
+
+    llvm::Value* Emit()
+    {
+        Prepare();
+        EmitEnter();
+        CreateBasicBlocks();
+        EmitMainBody();
+        // Aggregate results are the sret alloca. Later field loads read the struct.
+        return sret;
+    }
+
+private:
+    CGFunction* ResolveCatchResult() const
+    {
+        const std::string catchResultFuncName = "_CNat11catchResultIG_HF0G_E";
+        auto* chirVal = cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(catchResultFuncName);
+        auto* chirFunc = DynamicCast<CHIR::Function*>(chirVal);
+        CJC_NULLPTR_CHECK(chirFunc);
+        CJC_ASSERT(chirFunc->GetGenericTypeParams().size() == 1);
+        auto* cgFunc = cgMod.GetOrInsertCGFunction(chirFunc);
+        CJC_NULLPTR_CHECK(cgFunc);
+        return cgFunc;
+    }
+
+    llvm::Value* ResolveValueType() const
+    {
+        auto& instArgs = intrinsic.GetInstantiatedTypeArgs();
+        CJC_ASSERT(instArgs.size() == 1);
+        CJC_NULLPTR_CHECK(instArgs[0]);
+        auto* typeInfo = irBuilder.CreateTypeInfo(*instArgs[0]);
+        CJC_NULLPTR_CHECK(typeInfo);
+        return typeInfo;
+    }
+
+    void Prepare()
+    {
+        CJC_ASSERT(intrinsic.GetArgs().size() == 1);
+
+        auto* resultVal = intrinsic.GetResult();
+        CJC_NULLPTR_CHECK(resultVal);
+        auto* resultTy = resultVal->GetType();
+        CJC_ASSERT(resultTy != nullptr && resultTy->IsStruct());
+        resultCGType = CGType::GetOrCreate(cgMod, resultTy);
+        CJC_NULLPTR_CHECK(resultCGType);
+        CJC_ASSERT(resultCGType->GetSize().has_value());
+
+        auto* cgFunc = ResolveCatchResult();
+        auto* catchResultCGType = cgFunc->GetCGFunctionType();
+        CJC_NULLPTR_CHECK(catchResultCGType);
+        CJC_ASSERT(catchResultCGType->HasSRet());
+        catchResultFn = cgFunc->GetRawFunction();
+        CJC_NULLPTR_CHECK(catchResultFn);
+        catchResultLLVMTy = catchResultCGType->GetLLVMFunctionType();
+        CJC_ASSERT(catchResultLLVMTy != nullptr && catchResultLLVMTy->getNumParams() == 3U);
+
+        auto fnCGVal = cgMod | intrinsic.GetOperand(0);
+        CJC_NULLPTR_CHECK(fnCGVal);
+        fnVal = **fnCGVal;
+        CJC_ASSERT(fnVal != nullptr && fnVal->getType()->isPointerTy());
+
+        ti = ResolveValueType();
+
+        // Sized struct (payload: Any, ok: Bool). The callee copies it into this buffer.
+        sret = irBuilder.CreateEntryAlloca(*resultCGType, "exclusive.sret");
+    }
+
+    // Allocate ExclusiveScopeState, call Enter, load destSp / needMCC.
+    void EmitEnter()
+    {
+        // Stack-allocated ExclusiveScopeState { destSp, cjthread* } — two pointer-wide fields.
+        auto* i8PtrTy = irBuilder.getInt8PtrTy();
+        auto* enterTy = llvm::StructType::getTypeByName(llvmCtx, "ExclusiveScopeState");
+        if (enterTy == nullptr) {
+            enterTy = llvm::StructType::create(llvmCtx, {i8PtrTy, i8PtrTy}, "ExclusiveScopeState");
+        }
+        auto* state = irBuilder.CreateEntryAlloca(enterTy, nullptr, "exclusiveScope.state");
+        statePtr = irBuilder.CreateBitCast(state, i8PtrTy);
+
+        auto* voidTy = irBuilder.getVoidTy();
+        auto* enterFnTy = llvm::FunctionType::get(voidTy, {i8PtrTy}, false);
+        auto* enterFn = cgMod.GetOrInsertFunction(PREFIX_OF_BACKEND_SYMS + "ExclusiveScopeEnter", enterFnTy);
+        (void)irBuilder.CreateCallOrInvoke(enterFn, {statePtr});
+
+        auto* destSpPtr = irBuilder.CreateStructGEP(enterTy, state, 0, "destSp.ptr");
+        destSp = irBuilder.LLVMIRBuilder2::CreateLoad(i8PtrTy, destSpPtr, "destSp");
+        needMCC = irBuilder.CreateICmpNE(destSp, llvm::ConstantPointerNull::get(i8PtrTy), "needMCC");
+    }
+
+    void CreateBasicBlocks()
+    {
+        auto* bb = irBuilder.GetInsertBlock();
+        auto create = [this, &bb](const std::string& name) {
+            auto* created = llvm::BasicBlock::Create(llvmCtx, GenNameForBB(name), bb->getParent());
+            created->moveAfter(bb);
+            bb = created;
+            return created;
+        };
+        mccBB = create("exclusive.mcc");
+        directBB = create("exclusive.direct");
+        contBB = create("exclusive.cont");
+    }
+
+    // Fast path: direct call to catchResult.
+    void EmitFastPath()
+    {
+        auto* typeInfoPtrTy = CGType::GetOrCreateTypeInfoPtrType(llvmCtx);
+        auto* call = irBuilder.CreateCallOrInvoke(catchResultLLVMTy, catchResultFn,
+            {irBuilder.CreateBitCast(sret, catchResultLLVMTy->getParamType(0)),
+                irBuilder.CreatePointerCast(fnVal, catchResultLLVMTy->getParamType(1)),
+                irBuilder.CreateBitCast(ti, typeInfoPtrTy)});
+        call->addAttributeAtIndex(llvm::AttributeList::FirstArgIndex, llvm::Attribute::NoAlias);
+        AddSRetAttribute(call);
+        call->addFnAttr(llvm::Attribute::AlwaysInline);
+    }
+
+    // Slow path: CJ_MCC_ExclusiveScope(sret, fn, ti, code, destSp).
+    void EmitSlowPath()
+    {
+        auto* i8PtrTy = irBuilder.getInt8PtrTy();
+        auto* i8PtrAS1 = irBuilder.getInt8PtrTy(1U);
+        auto* tiTy = CGType::GetOrCreateTypeInfoPtrType(llvmCtx);
+        auto* sretPtrTy = resultCGType->GetLLVMType()->getPointerTo();
+        auto* mccFnTy = llvm::FunctionType::get(
+            irBuilder.getVoidTy(), {sretPtrTy, i8PtrAS1, tiTy, i8PtrTy, i8PtrTy}, false);
+        auto* mccFn = cgMod.GetOrInsertFunction(PREFIX_OF_BACKEND_SYMS + "ExclusiveScope", mccFnTy);
+        mccFn->addParamAttr(0, llvm::Attribute::NoAlias);
+        AddSRetAttribute(mccFn->arg_begin());
+        auto* call = irBuilder.CreateCallOrInvoke(mccFnTy, mccFn,
+            {irBuilder.CreateBitCast(sret, sretPtrTy), irBuilder.CreatePointerCast(fnVal, i8PtrAS1),
+                irBuilder.CreateBitCast(ti, tiTy), irBuilder.CreateBitCast(catchResultFn, i8PtrTy), destSp});
+        call->addAttributeAtIndex(llvm::AttributeList::FirstArgIndex, llvm::Attribute::NoAlias);
+        AddSRetAttribute(call);
+    }
+
+    // Conditionally call catchResult directly or via the stack-switch stub.
+    void EmitInvokePaths()
+    {
+        // The likely path is the fast path, !needMCC.
+        auto* expectNeedMCC = irBuilder.CreateIntrinsic(llvm::Intrinsic::expect, {irBuilder.getInt1Ty()},
+            {needMCC, irBuilder.getFalse()});
+        (void)irBuilder.CreateCondBr(expectNeedMCC, mccBB, directBB);
+
+        irBuilder.SetInsertPoint(mccBB);
+        EmitSlowPath();
+        (void)irBuilder.CreateBr(contBB);
+
+        irBuilder.SetInsertPoint(directBB);
+        EmitFastPath();
+        (void)irBuilder.CreateBr(contBB);
+    }
+
+    void EmitMainBody()
+    {
+        auto* i8PtrTy = irBuilder.getInt8PtrTy();
+        auto* voidTy = irBuilder.getVoidTy();
+        auto* leaveFnTy = llvm::FunctionType::get(voidTy, {i8PtrTy}, false);
+        auto* leaveFn = cgMod.GetOrInsertFunction(PREFIX_OF_BACKEND_SYMS + "ExclusiveScopeLeave", leaveFnTy);
+
+        EmitInvokePaths();
+
+        irBuilder.SetInsertPoint(contBB);
+        (void)irBuilder.CreateCallOrInvoke(leaveFn, {statePtr});
+    }
+
+    IRBuilder2& irBuilder;
+    CGModule& cgMod;
+    llvm::LLVMContext& llvmCtx;
+    const CHIR::IntrinsicBase& intrinsic;
+
+    llvm::Value* sret = nullptr;
+    llvm::Value* fnVal = nullptr;
+    llvm::Value* ti = nullptr;
+    const CGType* resultCGType = nullptr;
+    llvm::Function* catchResultFn = nullptr;
+    llvm::FunctionType* catchResultLLVMTy = nullptr;
+
+    llvm::Value* statePtr = nullptr;
+    llvm::Value* destSp = nullptr;
+    llvm::Value* needMCC = nullptr;
+
+    llvm::BasicBlock* mccBB = nullptr;
+    llvm::BasicBlock* directBB = nullptr;
+    llvm::BasicBlock* contBB = nullptr;
+};
 } // namespace
 
 std::vector<CGValue*> HandleSyscallIntrinsicArguments(
@@ -789,12 +990,8 @@ llvm::Value* GenerateInout(IRBuilder2& irBuilder, const CHIR::IntrinsicBase& int
 
 llvm::Value* GenerateExclusiveScope(IRBuilder2& irBuilder, const CHIR::IntrinsicBase& intrinsic)
 {
-    auto& cgMod = irBuilder.GetCGModule();
-    auto exec = cgMod | intrinsic.GetOperand(0);
-    auto closure = cgMod | intrinsic.GetOperand(1);
-    auto ty = CGType::GetOrCreate(cgMod, intrinsic.GetResult()->GetType());
-    return irBuilder.CallIntrinsicFunction(
-        ty->GetLLVMType(), PREFIX_OF_BACKEND_SYMS + "ExclusiveScope", {exec, closure}, {});
+    // Codegen for exclusiveScopeImpl<T>(fn): ExclusiveScopeResult
+    return ExclusiveScopeCodeGen(irBuilder, intrinsic).Emit();
 }
 
 llvm::Value* GenerateIntrinsic(IRBuilder2& irBuilder, const CHIR::IntrinsicBase& intrinsic)
