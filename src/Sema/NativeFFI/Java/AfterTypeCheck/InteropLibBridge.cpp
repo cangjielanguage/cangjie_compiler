@@ -47,6 +47,7 @@ constexpr auto INTEROPLIB_CFFI_GET_STATIC_METHOD_ID = "Java_CFFI_getStaticMethod
 constexpr auto INTEROPLIB_CFFI_GET_INSTANCE_FIELD_ID = "Java_CFFI_getInstanceFieldId";
 constexpr auto INTEROPLIB_CFFI_GET_STATIC_FIELD_ID = "Java_CFFI_getStaticFieldId";
 constexpr auto INTEROPLIB_JNI_HANDLE_PENDING_EXCEPTION_DECL_ID = "handlePendingException";
+constexpr auto INTEROPLIB_JNI_CHECK_EXCEPTION_DECL_ID = "checkException";
 constexpr auto INTEROPLIB_CFFI_SWAP_LOCAL_WITH_GLOBAL_REF_ID = "Java_CFFI_swapLocalWithGlobalRef";
 constexpr auto INTEROPLIB_CFFI_NEW_GLOBAL_REF_ID = "Java_CFFI_newGlobalRef";
 constexpr auto INTEROPLIB_CFFI_DELETE_GLOBAL_REF_ID = "Java_CFFI_deleteGlobalRef";
@@ -224,6 +225,12 @@ Ptr<FuncDecl> InteropLibBridge::GetJNIHandlePendingExceptionDecl() const
 {
     return GetInteropLibDecl<ASTKind::FUNC_DECL>(
         INTEROPLIB_JNI_HANDLE_PENDING_EXCEPTION_DECL_ID);
+}
+
+Ptr<FuncDecl> InteropLibBridge::GetJNICheckExceptionDecl() const
+{
+    return GetInteropLibDecl<ASTKind::FUNC_DECL>(
+        INTEROPLIB_JNI_CHECK_EXCEPTION_DECL_ID);
 }
 
 Ptr<FuncDecl> InteropLibBridge::GetGetMethodIdDecl() const
@@ -833,6 +840,13 @@ OwnedPtr<Expr> InteropLibBridge::CreateJNIHandlePendingExceptionCall(Ptr<Expr> j
     return CreateCall(decl, curFile, ASTCloner::Clone(jniEnvPtr));
 }
 
+OwnedPtr<Expr> InteropLibBridge::CreateJNICheckExceptionCall(Ptr<Expr> jniEnvPtr)
+{
+    auto curFile = jniEnvPtr->curFile;
+    static auto decl = GetJNICheckExceptionDecl();
+    return CreateCall(decl, curFile, ASTCloner::Clone(jniEnvPtr));
+}
+
 OwnedPtr<CallExpr> InteropLibBridge::CreateBitCastExpr(OwnedPtr<Expr> expr,
     Ptr<Ty> resultTy, Ptr<Ty> valueTy, Ptr<File> curFile)
 {
@@ -1183,17 +1197,30 @@ OwnedPtr<Expr> InteropLibBridge::UnwrapJavaImpl(OwnedPtr<Expr> env, OwnedPtr<Exp
 
     auto& ctor = GetJavaImplWrappingConstructor(*classTy->decl);
 
+    auto entityTy = entity->GetTy();
+    auto entityVar = CreateTmpVarDecl(nullptr, nullptr);
+    entityVar->isVar = false;
+    entityVar->curFile = curFile;
+    entityVar->initializer = std::move(entity);
+    entityVar->SetTy(entityTy);
+
+    auto entityRef1 = WithinFile(CreateRefExpr(*entityVar), curFile);
+    auto entityRef2 = WithinFile(CreateRefExpr(*entityVar), curFile);
+
     std::vector<OwnedPtr<FuncArg>> refWrapperCtorArgs;
-    refWrapperCtorArgs.push_back(CreateFuncArg(ASTCloner::Clone(entity.get())));
+    refWrapperCtorArgs.push_back(CreateFuncArg(std::move(entityRef1)));
     refWrapperCtorArgs.push_back(CreateFuncArg(
-        CreateGetRegistryIdCall(std::move(env), std::move(entity))));
+        CreateGetRegistryIdCall(std::move(env), std::move(entityRef2))));
 
     auto refWrapperCtorCall = CreateCallExpr(
         WithinFile(CreateRefExpr(ctor), curFile),
         std::move(refWrapperCtorArgs),
         &ctor, ty, CallKind::CALL_OBJECT_CREATION);
 
-    return refWrapperCtorCall;
+    std::vector<OwnedPtr<Node>> nodes;
+    nodes.emplace_back(std::move(entityVar));
+    nodes.emplace_back(std::move(refWrapperCtorCall));
+    return WrapReturningLambdaCall(typeManager, std::move(nodes));
 }
 
 OwnedPtr<Expr> InteropLibBridge::CreateEnsureNotNullCall(OwnedPtr<Expr> entity)

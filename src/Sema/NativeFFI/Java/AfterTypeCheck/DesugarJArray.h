@@ -18,6 +18,7 @@
 #include "cangjie/Modules/ImportManager.h"
 #include "cangjie/Sema/TypeManager.h"
 #include "NativeFFI/Java/AfterTypeCheck/InteropLibBridge.h"
+#include "NativeFFI/Java/AfterTypeCheck/ASTFactory.h"
 
 namespace Cangjie::Native::FFI::Java {
 using namespace Interop::Java;
@@ -30,12 +31,12 @@ public:
     explicit DesugarJArray(
         TypeManager& typeManager,
         const ImportManager& importManager,
-        InteropLibBridge& ilib);
+        InteropLibBridge& ilib, ASTFactory& factory);
 protected:
     void Process(AfterTypeCheckContext& ctx) override;
 private:
-    void ReplaceCallsWithArrayJavaEntityGet(AST::File& file) const;
-    void ReplaceCallsWithArrayJavaEntitySet(AST::File& file) const;
+    void ReplaceCallsWithArrayJavaEntityGet(AfterTypeCheckContext& ctx, AST::File& file) const;
+    void ReplaceCallsWithArrayJavaEntitySet(AfterTypeCheckContext& ctx, AST::File& file) const;
 
     /**
      * Inserts a new constructor with a jniType parameter.
@@ -85,6 +86,7 @@ private:
     TypeManager& typeManager;
     const ImportManager& importManager;
     InteropLibBridge& ilib;
+    ASTFactory& factory;
 };
 
 } // namespace Cangjie::Native::FFI::Java

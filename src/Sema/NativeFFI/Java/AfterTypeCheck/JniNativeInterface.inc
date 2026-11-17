@@ -251,4 +251,50 @@ DEFINE_MEMBER(GetStaticDoubleField, VAR_DECL, 3)
 // void SetStaticDoubleField(JNIEnv *env, jclass clazz, jfieldID fieldID, jdouble value);
 DEFINE_MEMBER(SetStaticDoubleField, VAR_DECL, 4)
 
+// void GetBooleanArrayRegion(JNIEnv *env, jbooleanArray array, jsize start, jsize len, jboolean *buf);
+DEFINE_MEMBER(GetBooleanArrayRegion, VAR_DECL, 5)
+// void SetBooleanArrayRegion(JNIEnv *env, jbooleanArray array, jsize start, jsize len, const jboolean *buf);
+DEFINE_MEMBER(SetBooleanArrayRegion, VAR_DECL, 5)
+
+// void GetByteArrayRegion(JNIEnv *env, jbyteArray array, jsize start, jsize len, jbyte *buf);
+DEFINE_MEMBER(GetByteArrayRegion, VAR_DECL, 5)
+// void SetByteArrayRegion(JNIEnv *env, jbyteArray array, jsize start, jsize len, const jbyte *buf);
+DEFINE_MEMBER(SetByteArrayRegion, VAR_DECL, 5)
+
+// void GetCharArrayRegion(JNIEnv *env, jcharArray array, jsize start, jsize len, jchar *buf);
+DEFINE_MEMBER(GetCharArrayRegion, VAR_DECL, 5)
+// void SetCharArrayRegion(JNIEnv *env, jcharArray array, jsize start, jsize len, const jchar *buf);
+DEFINE_MEMBER(SetCharArrayRegion, VAR_DECL, 5)
+
+// void GetShortArrayRegion(JNIEnv *env, jshortArray array, jsize start, jsize len, jshort *buf);
+DEFINE_MEMBER(GetShortArrayRegion, VAR_DECL, 5)
+// void SetShortArrayRegion(JNIEnv *env, jshortArray array, jsize start, jsize len, const jshort *buf);
+DEFINE_MEMBER(SetShortArrayRegion, VAR_DECL, 5)
+
+// void GetIntArrayRegion(JNIEnv *env, jintArray array, jsize start, jsize len, jint *buf);
+DEFINE_MEMBER(GetIntArrayRegion, VAR_DECL, 5)
+// void SetIntArrayRegion(JNIEnv *env, jintArray array, jsize start, jsize len, const jint *buf);
+DEFINE_MEMBER(SetIntArrayRegion, VAR_DECL, 5)
+
+// void GetLongArrayRegion(JNIEnv *env, jlongArray array, jsize start, jsize len, jlong *buf);
+DEFINE_MEMBER(GetLongArrayRegion, VAR_DECL, 5)
+// void SetLongArrayRegion(JNIEnv *env, jlongArray array, jsize start, jsize len, const jlong *buf);
+DEFINE_MEMBER(SetLongArrayRegion, VAR_DECL, 5)
+
+// void GetFloatArrayRegion(JNIEnv *env, jfloatArray array, jsize start, jsize len, jfloat *buf);
+DEFINE_MEMBER(GetFloatArrayRegion, VAR_DECL, 5)
+// void SetFloatArrayRegion(JNIEnv *env, jfloatArray array, jsize start, jsize len, const jfloat *buf);
+DEFINE_MEMBER(SetFloatArrayRegion, VAR_DECL, 5)
+
+// void GetDoubleArrayRegion(JNIEnv *env, jdoubleArray array, jsize start, jsize len, jdouble *buf);
+DEFINE_MEMBER(GetDoubleArrayRegion, VAR_DECL, 5)
+// void SetDoubleArrayRegion(JNIEnv *env, jdoubleArray array, jsize start, jsize len, const jdouble *buf);
+DEFINE_MEMBER(SetDoubleArrayRegion, VAR_DECL, 5)
+
+// jobject GetObjectArrayElement(JNIEnv *env, jarray array, jsize index);
+DEFINE_MEMBER(GetObjectArrayElement, VAR_DECL, 3)
+
+// void SetObjectArrayElement(JNIEnv *env, jarray array, jsize index, jobject value);
+DEFINE_MEMBER(SetObjectArrayElement, VAR_DECL, 4)
+
 #endif // DEFINE_MEMBER

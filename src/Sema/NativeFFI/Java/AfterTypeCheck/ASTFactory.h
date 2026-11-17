@@ -85,6 +85,18 @@ public:
     OwnedPtr<AST::Block> CreateStaticJavaFieldSetCall(AfterTypeCheckContext& ctx, AST::File& curFile,
         JavaMemberSignature field, AST::Ty& ty, OwnedPtr<AST::Expr> value) const;
 
+    OwnedPtr<AST::Block> CreatePrimitiveArrayGetCall(const AST::Ty& elementTy, Ptr<AST::Expr> jniEnvPtr,
+        OwnedPtr<AST::Expr> javaArray, OwnedPtr<AST::Expr> index) const;
+
+    OwnedPtr<AST::Block> CreatePrimitiveArraySetCall(const AST::Ty& elementTy, Ptr<AST::Expr> jniEnvPtr,
+        OwnedPtr<AST::Expr> javaArray, OwnedPtr<AST::Expr> index, OwnedPtr<AST::Expr> value) const;
+
+    OwnedPtr<Expr> CreateObjectArrayGetCall(Ptr<Expr> jniEnvPtr, OwnedPtr<Expr> javaArray,
+        OwnedPtr<Expr> index) const;
+
+    OwnedPtr<Block> CreateObjectArraySetCall(Ptr<Expr> jniEnvPtr, OwnedPtr<Expr> javaArray,
+        OwnedPtr<Expr> index, OwnedPtr<Expr> value) const;
+
     /**
      * Creates usages as RefExpr over parameters in `paramList`.
      */
