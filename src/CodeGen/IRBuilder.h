@@ -12,7 +12,9 @@
 #include "Base/CHIRExprWrapper.h"
 #include "CGModule.h"
 #include "Utils/ModalWrite.h"
+#include "cangjie/Mangle/BaseMangler.h"
 #include "cangjie/Utils/CheckUtils.h"
+#include "cangjie/Utils/ConstantsUtils.h"
 
 namespace Cangjie {
 namespace CHIR {
@@ -26,6 +28,17 @@ class CGValue;
 class CGFunction;
 class CGType;
 using LLVMIRBuilder2 = llvm::IRBuilder<>;
+
+/**
+ * Compose the link-time symbol of a PCT dispatch entry point declared in
+ * stdx.unittest.concurrent. @param nameAndSignature is the ABI-contract
+ * suffix (<length><name> + parameter-type encoding) and must stay in sync
+ * with the entry point's declaration.
+ */
+inline std::string GetPCTDispatcherSymbol(const std::string& nameAndSignature)
+{
+    return "_CN" + MangleUtils::GetOptPkgName(PCT_CONCURRENT_PACKAGE_NAME) + nameAndSignature;
+}
 
 class IRBuilder2 : public LLVMIRBuilder2 {
 public:
@@ -367,6 +380,9 @@ public:
     llvm::Value* CallAtomicIntrinsics(const CHIR::IntrinsicBase& intrinsic, const std::vector<CGValue*>& args);
     llvm::Value* CallAtomicPrimitiveIntrinsics(
         const CHIR::IntrinsicBase& intrinsic, const std::vector<CGValue*>& args, llvm::Value* fieldPtr);
+    llvm::Value* EmitPCTSleep(llvm::Value* nanosVal);
+    void EmitPCTMarkInstrumented();
+    void EmitPCTDispatcherCall(const std::string& symbol);
 
     ///*----------------- Array related --------------------//
     void CallArrayIntrinsicIndexCheck(llvm::Value* array, llvm::Value* index);

@@ -635,6 +635,9 @@ OPTION("--compile-macro", COMPILE_MACRO, FLAG, { BACKEND(ALL) },
 OPTION("--coverage", ENABLE_COVERAGE, FLAG, { BACKEND(ALL) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
        "Enable coverage")
+OPTION("--cj-pct", CJ_PCT, FLAG, { BACKEND(CJNATIVE) },
+    { GROUP(GLOBAL) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
+    "Enable PCT model-check mode: remap std.sync imports to stdx.unittest.sync, reroute sleep to virtual time")
 OPTION("--experimental", EXPERIMENTAL, FLAG, { BACKEND(CJNATIVE) },
     { GROUP(GLOBAL) COMMA GROUP(STABLE) COMMA GROUP(VISIBLE) }, nullptr, {}, MULTIPLE_OCCURRENCE,
        "Enable experimental options")

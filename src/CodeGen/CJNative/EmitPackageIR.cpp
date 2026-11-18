@@ -216,6 +216,10 @@ llvm::Function* GenerateEntryFunction(CGModule& cgMod, llvm::Function& userMain)
     (void)irBuilder.CallIntrinsicFunction(
         irBuilder.getVoidTy(), PREFIX_OF_BACKEND_SYMS + "CheckThreadLocalDataOffset", {});
 
+    // --cj-pct: mark the binary as instrumented before any user code; no-op
+    // without the flag. See EmitPCTMarkInstrumented.
+    irBuilder.EmitPCTMarkInstrumented();
+
     auto createTryScopeInst = [&irBuilder, &userMain]() {
         auto& cgMod = irBuilder.GetCGModule();
         auto globalInitFunc = cgMod.GetOrInsertCGFunction(cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc());

@@ -337,8 +337,21 @@ llvm::Function* CGModule::DeclareLLVMFunction(const CHIR::Value& func, const CGF
     CJC_NULLPTR_CHECK(chirFuncTy);
     llvm::FunctionType* functionType =
         chirFuncTy->IsCFunc() ? cffi->GetCFuncType(*chirFuncTy) : cgFuncType.GetLLVMFunctionType();
+    auto symbolName = func.GetIdentifierWithoutPrefix();
+    // --cj-pct: reroute imports of std.core's sleep to the PCT sleep (same
+    // signature; actors sleep on the virtual clock) by swapping the mangled
+    // symbol at this single declaration chokepoint — an import-level redirect
+    // is impossible (the implicit std.core.* import merges with explicit
+    // same-name imports; mangled names cannot collide with user locals).
+    // Only imports are rerouted: a body means this IS std.core, compiled
+    // without the flag. Call sites where the body inlined at -O2 materialize
+    // the SLEEP intrinsic and are rerouted in CallSyncIntrinsics instead.
+    if (cgCtx->GetCompileOptions().enableCjPct && symbolName == "_CNat5sleepHRNat8DurationE" &&
+        !func.IsFuncWithBody()) {
+        symbolName = GetPCTDispatcherSymbol("11pctSleepDurHRNat8DurationE");
+    }
     auto function = llvm::cast<llvm::Function>(
-        module->getOrInsertFunction(func.GetIdentifierWithoutPrefix(), functionType).getCallee());
+        module->getOrInsertFunction(symbolName, functionType).getCallee());
     if (func.TestAttr(CHIR::Attribute::NO_INLINE)) {
         function->addFnAttr(llvm::Attribute::NoInline);
     }

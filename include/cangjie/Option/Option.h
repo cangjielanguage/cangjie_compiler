@@ -870,6 +870,8 @@ public:
 
     bool enableCoverage = false; /** < Whether instrument code to generate coverage info. */
 
+    bool enableCjPct = false; /**< Whether to enable PCT model-check mode (--cj-pct). */
+
     /// Whether to compile .cj.d files. Note that when true, .cj files are not processed.
     bool compileCjd{false};
 

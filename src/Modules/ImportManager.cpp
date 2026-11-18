@@ -31,6 +31,7 @@
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Modules/ASTSerialization.h"
 #include "cangjie/Modules/ModulesUtils.h"
+#include "cangjie/Utils/ConstantsUtils.h"
 #include "cangjie/Utils/ProfileRecorder.h"
 
 using namespace Cangjie;
@@ -66,6 +67,39 @@ void AddImplicitImportAll(File& file, const std::string& fullPackageName)
     file.imports.emplace_back(CreateImportSpec(fullPackageName, "*", "", fullPackageNameToPrefixPaths));
 }
 
+/**
+ * --cj-pct: implicitly import the PCT dispatch entry point from
+ * stdx.unittest.concurrent into every compiled file — single-symbol, not
+ * import-all, so the PCT vocabulary stays out of user scope and the flag
+ * compilation fails early if the cjo is not on --import-path. See
+ * ConstantsUtils.h for the link requirements.
+ */
+void AddImplicitPctImport(File& file)
+{
+    // Check whether the prefix paths are already cached.
+    static FullPackageNameToPrefixPaths fullPackageNameToPrefixPaths;
+    std::vector<std::string> curPrefixPaths{};
+    if (fullPackageNameToPrefixPaths.find(PCT_CONCURRENT_PACKAGE_NAME) != fullPackageNameToPrefixPaths.end()) {
+        curPrefixPaths = fullPackageNameToPrefixPaths.at(PCT_CONCURRENT_PACKAGE_NAME);
+    } else {
+        curPrefixPaths = Utils::SplitQualifiedName(PCT_CONCURRENT_PACKAGE_NAME);
+        fullPackageNameToPrefixPaths.insert({PCT_CONCURRENT_PACKAGE_NAME, curPrefixPaths});
+    }
+    // Check whether the import is already added.
+    for (auto it = file.imports.rbegin(); it != file.imports.rend(); ++it) {
+        auto& import = *it;
+        if (!import->TestAttr(Attribute::IMPLICIT_ADD)) {
+            continue;
+        }
+        if (import->content.prefixPaths == curPrefixPaths &&
+            import->content.identifier.Val() == "pctMarkInstrumented") {
+            return; // The import is already added not add again.
+        }
+    }
+    file.imports.emplace_back(
+        CreateImportSpec(PCT_CONCURRENT_PACKAGE_NAME, "pctMarkInstrumented", "", fullPackageNameToPrefixPaths));
+}
+
 void AddImplicitImports(Package& pkg, const GlobalOptions& opts)
 {
     for (auto& file : pkg.files) {
@@ -76,6 +110,9 @@ void AddImplicitImports(Package& pkg, const GlobalOptions& opts)
         if (opts.enableCompileTest) {
             AddImplicitImportAll(*file, "std.unittest");
             AddImplicitImportAll(*file, "std.unittest.testmacro");
+        }
+        if (opts.enableCjPct) {
+            AddImplicitPctImport(*file);
         }
         if (opts.compileTestsOnly && ImportManager::IsTestPackage(pkg.fullPackageName)) {
             AddImplicitImportAll(*file, ImportManager::GetMainPartPkgNameForTestPkg(pkg.fullPackageName));
@@ -622,6 +659,27 @@ void ImportManager::ResolveImports(const AST::Package& pkg)
     CheckRedefinition(pkg);
 }
 
+namespace {
+/**
+ * Returns true when the visibility check accepts the import. --cj-pct:
+ * flagged remapped imports are accepted (the compiler rewrite is the mirror's
+ * only approved entry path), re-exports never are — they would leak the
+ * internal mirror downstream without --cj-pct.
+ */
+bool IsPackageAccessible(const AST::Package& pkg, const AST::ImportSpec& import,
+    const std::string& fullPackageName, const AST::Package& package, Modules::PackageRelation relation)
+{
+    if (fullPackageName == PCT_SYNC_PACKAGE_NAME && import.isPctSyncRemapped && !import.IsReExport()) {
+        return true;
+    }
+    if (package.accessible == AccessLevel::PROTECTED && relation == PackageRelation::NONE) {
+        return false;
+    }
+    return !(package.accessible == AccessLevel::INTERNAL && relation != PackageRelation::CHILD &&
+        !IsSuperPackage(pkg.fullPackageName, fullPackageName));
+}
+} // namespace
+
 void ImportManager::CheckImports(const AST::Package& pkg)
 {
     for (auto& file : pkg.files) {
@@ -647,9 +705,7 @@ void ImportManager::CheckImports(const AST::Package& pkg)
                 continue;
             }
             auto relation = GetPackageRelation(pkg.fullPackageName, fullPackageName);
-            if ((package->accessible == AccessLevel::PROTECTED && relation == PackageRelation::NONE) ||
-                (package->accessible == AccessLevel::INTERNAL && relation != PackageRelation::CHILD &&
-                    !IsSuperPackage(pkg.fullPackageName, fullPackageName))) {
+            if (!IsPackageAccessible(pkg, *import, fullPackageName, *package, relation)) {
                 // Report error when the package is not accessible.
                 diag.DiagnoseRefactor(DiagKindRefactor::package_accessibility, range, fullPackageName,
                     GetAccessLevelStr(*package), RelationToString(relation), pkg.fullPackageName);
@@ -938,6 +994,65 @@ static void CheckPackageSpecsIdentical(DiagnosticEngine& diag, const Package& pk
         DiagForDifferentPackageNames(diag, packageNamePosMap);
     }
 }
+
+/**
+ * --cj-pct: redirect `std.sync` imports to `stdx.unittest.sync`, the
+ * PCT-instrumented mirror of std.sync, by rewriting the prefix paths on
+ * the source AST before import resolution — lookups and checks then see
+ * the target package naturally. Every dotted path rooted at std.sync is
+ * rewritten (members, import-all, package form, subpackages); org-style
+ * `std::sync` names are a different package and never match. Only this
+ * compilation's parsed files pass through: precompiled packages' imports
+ * are untouched. Rewritten specs are flagged isPctSyncRemapped — the rewrite
+ * is the internal mirror's only approved entry path (see CheckImports).
+ * Returns whether a rewrite happened.
+ */
+// The "std.sync" package root consists of two dotted path segments.
+constexpr size_t PCT_SYNC_ROOT_SEGMENTS = 2;
+
+bool RemapImportContentForPct(AST::ImportContent& content)
+{
+    if (content.prefixPaths.size() >= PCT_SYNC_ROOT_SEGMENTS && content.prefixPaths[0] == "std" &&
+        content.prefixPaths[1] == "sync" && !content.hasDoubleColon) {
+        // Members, import-all and deeper subpackage paths alike: a deeper
+        // import resolves in the mirror too — or fails loudly.
+        content.prefixPaths[0] = "stdx";
+        content.prefixPaths.insert(content.prefixPaths.begin() + 1, "unittest");
+        content.prefixPoses.insert(content.prefixPoses.begin() + 1,
+            content.prefixPoses.empty() ? DEFAULT_POSITION : content.prefixPoses.front());
+        content.prefixDotPoses.insert(content.prefixDotPoses.begin() + 1, DEFAULT_POSITION);
+        return true;
+    }
+    if (content.prefixPaths.size() == 1 && content.prefixPaths[0] == "std" &&
+        content.identifier.Val() == "sync" && !content.hasDoubleColon) {
+        // `import std.sync` (package import): keep the `sync` name segment.
+        content.prefixPaths[0] = "stdx";
+        content.prefixPaths.push_back("unittest");
+        content.prefixPoses.push_back(
+            content.prefixPoses.empty() ? DEFAULT_POSITION : content.prefixPoses.front());
+        content.prefixDotPoses.push_back(DEFAULT_POSITION);
+        return true;
+    }
+    return false;
+}
+
+void RemapPctSyncImports(AST::Package& pkg, const GlobalOptions& globalOptions)
+{
+    if (!globalOptions.enableCjPct) {
+        return;
+    }
+    for (auto& file : pkg.files) {
+        for (auto& import : file->imports) {
+            auto remapped = RemapImportContentForPct(import->content);
+            for (auto& item : import->content.items) {
+                remapped = RemapImportContentForPct(item) || remapped;
+            }
+            if (remapped) {
+                import->isPctSyncRemapped = true;
+            }
+        }
+    }
+}
 } // namespace
 
 bool ImportManager::BuildIndex(
@@ -961,6 +1076,7 @@ bool ImportManager::BuildIndex(
             pkg->fullPackageName = pkg->fullPackageName + SourceManager::testPkgSuffix;
         }
         AddImplicitImports(*pkg, globalOptions);
+        RemapPctSyncImports(*pkg, globalOptions);
         cjoManager->AddSourcePackage(*pkg);
     }
     Utils::ProfileRecorder::Stop("BuildIndex", "AddImplicitImports");
