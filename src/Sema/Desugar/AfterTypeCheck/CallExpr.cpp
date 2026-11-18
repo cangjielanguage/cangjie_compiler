@@ -74,11 +74,6 @@ void DesugarComparableIntrinsic(AST::CallExpr& expr, TokenKind op)
 void DesugarExternPayloadIntrinsic(AST::CallExpr& expr, bool isSet)
 {
     CJC_ASSERT(expr.desugarExpr == nullptr && expr.args.size() == (isSet ? 2U : 1U));
-    // A receiver of type Nothing terminates control flow, so neither the payload nor v is accessed.
-    if (expr.args[0]->expr->GetTy()->IsNothing()) {
-        expr.desugarExpr = std::move(expr.args[0]->expr);
-        return;
-    }
     auto payload = CreateMemberAccess(std::move(expr.args[0]->expr), STD_LIB_EXTERN_PAYLOAD);
     CJC_NULLPTR_CHECK(payload->target);
     CopyBasicInfo(&expr, payload);
