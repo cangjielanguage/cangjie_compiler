@@ -555,6 +555,9 @@ Ptr<Value> Translator::TranslateNestedFunc(const AST::FuncDecl& func)
         loc, funcTy, funcTy, currentBlock, true, lambdaMangleName, func.identifier, genericTys);
     CJC_ASSERT(lambda);
     lambda->InitBody(*body);
+    if (AST::HasModifier(func.modifiers, TokenKind::EXCLAVE)) {
+        lambda->EnableAttr(Attribute::EXCLAVE);
+    }
     if (func.isConst) {
         lambda->SetCompileTimeValue();
     }
