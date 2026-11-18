@@ -920,13 +920,19 @@ llvm::Value* IRBuilder2::CallSyncIntrinsics(
         return CallAtomicIntrinsics(intrinsic, parameters);
     }
     // --cj-pct: std.sync blocking is covered by the import remap; std.core's
-    // sleep cannot be (its implicit import), so when its body inlines at -O2
-    // the SLEEP intrinsic lands here and is rerouted to pctSleep — a bracket
-    // could not stop the intrinsic from really sleeping; the virtual clock must.
+    // sleep cannot be (its implicit import). This reroute has no current
+    // producer: the sleep wrapper never inlines into --cj-pct modules, so
+    // sleep calls take the stdx.unittest sleep dispatcher declaration swap
+    // instead. It stays as a defensive path — if a SLEEP intrinsic ever
+    // lands here, it must be rerouted, since a bracket could not stop the
+    // intrinsic from really sleeping; the virtual clock must.
     if (GetCGContext().GetCompileOptions().enableCjPct &&
         intrinsic.GetIntrinsicKind() == CHIR::IntrinsicKind::SLEEP) {
         CJC_ASSERT(parameters.size() == 1 && "SLEEP intrinsic takes exactly one argument.");
-        return EmitPCTSleep(parameters[0]->GetRawValue());
+        auto* nanos = parameters[0]->GetRawValue();
+        CJC_ASSERT(nanos->getType() == llvm::Type::getInt64Ty(GetLLVMContext()) &&
+            "SLEEP intrinsic passes Int64 nanoseconds");
+        return EmitPCTDispatcherCall("8pctSleepHl", {nanos});
     }
     return CallIntrinsic(intrinsic, parameters);
 }
@@ -994,54 +1000,42 @@ llvm::Value* IRBuilder2::CallAtomicIntrinsics(const CHIR::IntrinsicBase& intrins
     return res;
 }
 
-llvm::Value* IRBuilder2::EmitPCTSleep(llvm::Value* nanosVal)
-{
-    // --cj-pct: pctSleep takes the saturated i64 nanoseconds the inlined sleep
-    // body already computed for CJ_MRT_Sleep: an actor's sleep arms a virtual
-    // timer and parks on the coordinator gate; unmanaged threads really sleep
-    // inside it. Same plain-Cangjie-call discipline as EmitPCTDispatcherCall
-    // (hidden Unit sret slot), so the declared type is (Unit.Type*, i64).
-    auto& llvmCtx = GetLLVMContext();
-    auto unitTy = CGType::GetUnitType(llvmCtx);
-    auto unitPtrTy = llvm::PointerType::get(unitTy, 0);
-    llvm::FunctionType* sleepTy = llvm::FunctionType::get(
-        llvm::Type::getVoidTy(llvmCtx), {unitPtrTy, llvm::Type::getInt64Ty(llvmCtx)}, false);
-    auto callee = GetLLVMModule()->getOrInsertFunction(GetPCTDispatcherSymbol("8pctSleepHl"), sleepTy).getCallee();
-    llvm::Value* nanosArg = nanosVal;
-    if (nanosArg->getType() != llvm::Type::getInt64Ty(llvmCtx)) {
-        nanosArg = CreateIntCast(nanosArg, llvm::Type::getInt64Ty(llvmCtx), true);
-    }
-    return CreateCall(sleepTy, callee, {CreateEntryAlloca(unitTy), nanosArg});
-}
-
-void IRBuilder2::EmitPCTMarkInstrumented()
-{
-    // --cj-pct: mark the binary instrumented before any user code runs, so
-    // stdx.unittest.concurrent can reject uninstrumented binaries with a
-    // clear error. See EmitPCTDispatcherCall.
-    EmitPCTDispatcherCall("19pctMarkInstrumentedHv");
-}
-
-void IRBuilder2::EmitPCTDispatcherCall(const std::string& nameAndSignature)
+llvm::Value* IRBuilder2::EmitPCTDispatcherCall(
+    const std::string& nameAndSignature, llvm::ArrayRef<llvm::Value*> extraArgs)
 {
     // --cj-pct: plain Cangjie calls (no runtime trampoline) so the whole chain
     // stays in managed frames for stack growth and GC stack parsing; the
     // dispatchers absorb when no scenario is running. Flag-compiled binaries
-    // must link stdx.unittest.concurrent. See GetPCTDispatcherSymbol for the
-    // symbol composition.
+    // must link stdx.unittest.concurrent.
     if (!GetCGContext().GetCompileOptions().enableCjPct) {
-        return;
+        return nullptr;
     }
     // Unit-returning Cangjie functions take a hidden sret slot as their first
-    // parameter: declared type (Unit.Type*), called with an entry-alloca'd Unit slot.
+    // parameter, called with an entry-alloca'd Unit slot; any further
+    // dispatcher parameters are appended from the caller-provided values.
     auto& llvmCtx = GetLLVMContext();
     auto unitTy = CGType::GetUnitType(llvmCtx);
-    auto unitPtrTy = llvm::PointerType::get(unitTy, 0);
-    llvm::FunctionType* pctPointTy =
-        llvm::FunctionType::get(llvm::Type::getVoidTy(llvmCtx), {unitPtrTy}, false);
+    std::vector<llvm::Type*> paramTypes{llvm::PointerType::get(unitTy, 0)};
+    std::vector<llvm::Value*> args{CreateEntryAlloca(unitTy)};
+    for (auto* arg : extraArgs) {
+        paramTypes.push_back(arg->getType());
+        args.push_back(arg);
+    }
+    auto dispatchTy = llvm::FunctionType::get(llvm::Type::getVoidTy(llvmCtx), paramTypes, false);
     auto symbol = GetPCTDispatcherSymbol(nameAndSignature);
-    auto callee = GetLLVMModule()->getOrInsertFunction(symbol, pctPointTy).getCallee();
-    CreateCall(pctPointTy, callee, {CreateEntryAlloca(unitTy)});
+    auto callee = GetLLVMModule()->getOrInsertFunction(symbol, dispatchTy).getCallee();
+    auto call = CreateCallOrInvoke(dispatchTy, callee, args);
+    AddParamAttr(call, 0, llvm::Attribute::NoAlias);
+    AddSRetAttribute(call); // sret type derived from the Unit sret slot itself
+    return call;
+}
+
+void IRBuilder2::EmitPCTMarkInstrumented()
+{
+    // --cj-pct: mark the binary instrumented after the package init function
+    // has run and before user main, so stdx.unittest.concurrent can reject
+    // uninstrumented binaries with a clear error. See EmitPCTDispatcherCall.
+    EmitPCTDispatcherCall("19pctMarkInstrumentedHv");
 }
 
 llvm::Value* IRBuilder2::CallAtomicPrimitiveIntrinsics(

@@ -1001,9 +1001,13 @@ static void CheckPackageSpecsIdentical(DiagnosticEngine& diag, const Package& pk
  * the source AST before import resolution — lookups and checks then see
  * the target package naturally. Every dotted path rooted at std.sync is
  * rewritten (members, import-all, package form, subpackages); org-style
- * `std::sync` names are a different package and never match. Only this
- * compilation's parsed files pass through: precompiled packages' imports
- * are untouched. Rewritten specs are flagged isPctSyncRemapped — the rewrite
+ * `std::sync` names are a different package and never match. Multi-import
+ * specs have only their own prefix rewritten: their items are suffix
+ * paths, already desugared by the parser into full-path specs that pass
+ * through this rewrite themselves, so treating an item as a full package
+ * path would corrupt it. Only this compilation's parsed files pass
+ * through: precompiled packages' imports are untouched. Rewritten specs
+ * are flagged isPctSyncRemapped — the rewrite
  * is the internal mirror's only approved entry path (see CheckImports).
  * Returns whether a rewrite happened.
  */
@@ -1043,11 +1047,7 @@ void RemapPctSyncImports(AST::Package& pkg, const GlobalOptions& globalOptions)
     }
     for (auto& file : pkg.files) {
         for (auto& import : file->imports) {
-            auto remapped = RemapImportContentForPct(import->content);
-            for (auto& item : import->content.items) {
-                remapped = RemapImportContentForPct(item) || remapped;
-            }
-            if (remapped) {
+            if (RemapImportContentForPct(import->content)) {
                 import->isPctSyncRemapped = true;
             }
         }

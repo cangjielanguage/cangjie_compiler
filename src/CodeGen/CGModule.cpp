@@ -338,16 +338,14 @@ llvm::Function* CGModule::DeclareLLVMFunction(const CHIR::Value& func, const CGF
     llvm::FunctionType* functionType =
         chirFuncTy->IsCFunc() ? cffi->GetCFuncType(*chirFuncTy) : cgFuncType.GetLLVMFunctionType();
     auto symbolName = func.GetIdentifierWithoutPrefix();
-    // --cj-pct: reroute imports of std.core's sleep to the PCT sleep (same
-    // signature; actors sleep on the virtual clock) by swapping the mangled
-    // symbol at this single declaration chokepoint — an import-level redirect
-    // is impossible (the implicit std.core.* import merges with explicit
-    // same-name imports; mangled names cannot collide with user locals).
-    // Only imports are rerouted: a body means this IS std.core, compiled
-    // without the flag. Call sites where the body inlined at -O2 materialize
-    // the SLEEP intrinsic and are rerouted in CallSyncIntrinsics instead.
+    // --cj-pct: redirect std.core's sleep imports to the stdx.unittest sleep
+    // (same signature; sleep on the virtual clock) at this declaration
+    // chokepoint — an import-level redirect is impossible (the implicit
+    // std.core.* import merges with explicit same-name imports). Only
+    // imports are redirected, never definitions: renaming a definition would
+    // duplicate the mirror's symbol.
     if (cgCtx->GetCompileOptions().enableCjPct && symbolName == "_CNat5sleepHRNat8DurationE" &&
-        !func.IsFuncWithBody()) {
+        !func.IsFuncWithBody() && cgCtx->GetCurrentPkgName() != CORE_PACKAGE_NAME) {
         symbolName = GetPCTDispatcherSymbol("11pctSleepDurHRNat8DurationE");
     }
     auto function = llvm::cast<llvm::Function>(
