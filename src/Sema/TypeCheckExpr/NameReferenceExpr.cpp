@@ -875,7 +875,8 @@ void TypeChecker::TypeCheckerImpl::InferMemberAccess(ASTContext& ctx, MemberAcce
         auto range = ma.field.ZeroPos() ? MakeRange(ma.begin, ma.end) : MakeRange(ma.field);
         (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_undeclared_identifier, ma, range, ma.field);
     } else if (IsDynamicExternMemberAccess(ma)) {
-        ma.SetTy(ChkExternMemberTypeArguments(ma) ? baseExpr->GetTy() : ModalTy{TypeManager::GetInvalidTy()});
+        bool isDynamicAccess = ChkExternMemberTypeArguments(ma) && ChkExternRuntime(ma, *baseExpr->GetTy());
+        ma.SetTy(isDynamicAccess ? baseExpr->GetTy() : ModalTy{TypeManager::GetInvalidTy()});
     } else {
         InferInstanceAccess(ctx, ma);
     }

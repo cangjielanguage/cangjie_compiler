@@ -342,6 +342,7 @@ std::optional<ModalTy> TypeChecker::TypeCheckerImpl::SynExternUpdate(ASTContext&
     }
     isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ae.rightExpr.get())) &&
         ReplaceIdealTy(*ae.rightExpr) && isWellTyped;
+    isWellTyped = ChkExternRuntime(ae, *base->DataTy()) && isWellTyped;
     ae.leftValue->SetTy({base->DataTy()});
     ae.SetTy({isWellTyped ? Ptr<Ty>(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)) : TypeManager::GetInvalidTy()});
     return {ae.GetTy()};

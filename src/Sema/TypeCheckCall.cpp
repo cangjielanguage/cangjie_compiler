@@ -3761,7 +3761,7 @@ bool TypeChecker::TypeCheckerImpl::ChkExternCall(ASTContext& ctx, ModalTy target
             ReplaceIdealTy(*arg->expr) && ReplaceIdealTy(*arg);
         isWellTyped = argWellTyped && isWellTyped;
     }
-    if (!isWellTyped) {
+    if (!isWellTyped || !ChkExternRuntime(ce, *externTy)) {
         ce.SetTy({TypeManager::GetInvalidTy()});
         return false;
     }

@@ -199,7 +199,7 @@ bool TypeChecker::TypeCheckerImpl::ChkExternSubscript(ModalTy target, SubscriptE
             return false;
         }
     }
-    if (!ChkExternSubscriptIndexCount(se)) {
+    if (!ChkExternSubscriptIndexCount(se) || !ChkExternRuntime(se, externTy)) {
         return false;
     }
     ModalTy resTy{&externTy};

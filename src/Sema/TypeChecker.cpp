@@ -1123,7 +1123,7 @@ bool TypeChecker::TypeCheckerImpl::ChkWithExternConversion(ASTContext& ctx, Ty& 
     }
     // A known Extern<T> accepts any value.
     if (!target.HasPlaceholder()) {
-        return true;
+        return !NeedExternConversion(typeManager, *node.GetTy(), target) || ChkExternRuntime(node, target);
     }
     // Extern<R>, where R is to be inferred, accepts values of other types without constraining R.
     if (!node.GetTy()->IsCoreExternType()) {
@@ -1131,6 +1131,23 @@ bool TypeChecker::TypeCheckerImpl::ChkWithExternConversion(ASTContext& ctx, Ty& 
     }
     // A value of type Extern<T> is not converted and determines R in the target Extern<R>.
     return typeManager.IsSubtype(node.DataTy(), &target);
+}
+
+/**
+ * Like a generic type parameter with static members, the T of Extern<T> cannot be Nothing where its static functions
+ * are called, i.e. in the conversion to Extern<T> and in dynamic operations on Extern<T>.
+ */
+bool TypeChecker::TypeCheckerImpl::ChkExternRuntime(const Node& node, Ty& externTy)
+{
+    CJC_ASSERT(externTy.IsCoreExternType());
+    if (!externTy.typeArgs[0]->IsNothing()) {
+        return true;
+    }
+    auto& runtimeParam = *Ty::GetDeclOfTy(&externTy)->GetGeneric()->typeParameters[0];
+    auto builder = diag.Diagnose(
+        node, DiagKind::sema_cannot_instantiated_by_incomplete_type, runtimeParam.DataTy()->String(), "'Nothing'");
+    builder.AddNote("'Nothing' type has no members");
+    return false;
 }
 
 bool TypeChecker::TypeCheckerImpl::Check(ASTContext& ctx, ModalTy target, Ptr<Node> node)

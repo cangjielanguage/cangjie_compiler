@@ -187,6 +187,8 @@ private:
     /** Implicit conversion of an expression to an expected Extern<T>. */
     bool NeedTryExternConversion(const AST::Ty& target, const AST::Node& node) const;
     bool ChkWithExternConversion(ASTContext& ctx, AST::Ty& target, AST::Node& node);
+    /** Check that the foreign runtime T of @p externTy, whose static functions @p node calls, is not Nothing. */
+    bool ChkExternRuntime(const AST::Node& node, AST::Ty& externTy);
     bool IsChecked(ASTContext& ctx, AST::Node& node) const;
     std::optional<bool> PerformBasicChecksForCheck(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node) const;
     /**
