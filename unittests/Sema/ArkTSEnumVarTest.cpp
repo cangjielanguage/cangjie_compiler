@@ -241,6 +241,45 @@ protected:
         return found;
     }
 
+    static bool IsCallToField(Ptr<Node> node, const std::string& field)
+    {
+        auto call = DynamicCast<CallExpr*>(node);
+        if (!call || !call->baseFunc) {
+            return false;
+        }
+        auto member = DynamicCast<MemberAccess*>(call->baseFunc.get());
+        return member != nullptr && member->field == field;
+    }
+
+    // True when a conversion call appears inside the `if (<guard>())` branch of
+    // the generated enum conversion. A hoisted conversion sits outside the
+    // branch and does not satisfy this.
+    bool ConversionIsGuarded(const std::string& name, const std::string& guard, const std::string& conversion) const
+    {
+        auto fn = FindFunction(name);
+        if (!fn || !fn->funcBody || !fn->funcBody->body) {
+            return false;
+        }
+        bool found = false;
+        Walker walker(fn->funcBody->body.get(), [&](Ptr<Node> node) {
+            auto ifExpr = DynamicCast<IfExpr*>(node);
+            if (!ifExpr || !ifExpr->condExpr || !ifExpr->thenBody || !IsCallToField(ifExpr->condExpr.get(), guard)) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            Walker inner(ifExpr->thenBody.get(), [&](Ptr<Node> innerNode) {
+                if (IsCallToField(innerNode, conversion)) {
+                    found = true;
+                    return VisitAction::STOP_NOW;
+                }
+                return VisitAction::WALK_CHILDREN;
+            });
+            inner.Walk();
+            return found ? VisitAction::STOP_NOW : VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return found;
+    }
+
     std::string projectPath;
     std::string savedCangjieHome;
     std::string savedCangjiePath;
@@ -367,19 +406,19 @@ foreign enum E {
     EXPECT_TRUE(HasErrorContaining(": E"));
 }
 
-// A `foreign enum` constructor with an associated value is not supported in
-// phase 1.
-TEST_F(ArkTSEnumVarTest, ForeignEnumPayloadIsDiagnosed)
+// A constructor with an associated value maps a type member, so @RawValue has
+// no literal value to record.
+TEST_F(ArkTSEnumVarTest, RawValueOnPayloadConstructorIsDiagnosed)
 {
     CompileSema(R"(package entry
 
 @ArkTS[module: "actual"]
 foreign enum E {
-    A(Int32)
+    | @RawValue[1] number(Int32)
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("cannot have payload parameters"));
-    EXPECT_TRUE(HasErrorContaining(": A"));
+    EXPECT_TRUE(HasErrorContaining("cannot annotate a 'foreign enum' constructor with associated values"));
+    EXPECT_TRUE(HasErrorContaining(": number"));
 }
 
 // A string member disables the auto-increment counter, so an omitted value
@@ -517,7 +556,7 @@ foreign func count(): Int32
 }
 
 // A `@ArkTS[globalVar: true] foreign func` of a non-scalar type (a class) is
-// not supported in phase 1.
+// reported through the general foreign return-type diagnostic.
 TEST_F(ArkTSEnumVarTest, GlobalVarUnsupportedTypeIsDiagnosed)
 {
     diag.ClearError();
@@ -541,7 +580,8 @@ class Box {}
 @ArkTS[module: "actual", globalVar: true]
 foreign func box(): Box
 )");
-    EXPECT_TRUE(HasErrorContaining("variable type is not supported"));
+    EXPECT_TRUE(HasErrorContaining("return type 'Class-Box' of @ArkTS foreign function 'box' is not supported"));
+    EXPECT_FALSE(HasErrorContaining("variable type is not supported"));
 }
 
 // A well-formed `foreign enum` (implicit numbering, explicit numeric and string
@@ -600,6 +640,9 @@ foreign enum Color { | @RawValue["red"] R | @RawValue["green"] G }
 @ArkTS[module: "actual", foreignName: "Labeled"]
 foreign enum Labeled { | @RawValue[10] X | @RawValue["ten"] Y }
 
+@ArkTS[module: "actual", foreignName: "Mixed3"]
+foreign enum Mixed3 { | @RawValue[10] X | @RawValue["ten"] Y | @RawValue[true] Z }
+
 @ArkTS[module: "actual", foreignName: "enumNumber"]
 foreign func echoNumeric(value: Sequential): Sequential
 
@@ -608,6 +651,9 @@ foreign func echoString(value: Color): Color
 
 @ArkTS[module: "actual", foreignName: "enumMixed"]
 foreign func echoMixed(value: Labeled): Labeled
+
+@ArkTS[module: "actual", foreignName: "enumMixed3"]
+foreign func echoMixed3(value: Mixed3): Mixed3
 )");
     ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
     auto numericFn = FindFunction("echoNumeric");
@@ -619,6 +665,52 @@ foreign func echoMixed(value: Labeled): Labeled
     auto mixedFn = FindFunction("echoMixed");
     ASSERT_NE(mixedFn, nullptr);
     EXPECT_NE(mixedFn->funcBody->body, nullptr);
+    auto mixed3Fn = FindFunction("echoMixed3");
+    ASSERT_NE(mixed3Fn, nullptr);
+    EXPECT_NE(mixed3Fn->funcBody->body, nullptr);
+    // The conversion methods assert the runtime kind, so each one must be
+    // evaluated only inside its kind branch.
+    EXPECT_TRUE(ConversionIsGuarded("echoMixed3", "isNumber", "toNumber"));
+    EXPECT_TRUE(ConversionIsGuarded("echoMixed3", "isString", "asString"));
+    EXPECT_TRUE(ConversionIsGuarded("echoMixed3", "isBoolean", "toBoolean"));
+}
+
+// A union-mode `foreign enum` constructor carries one associated value and
+// lowers to a conversion wrapper.
+TEST_F(ArkTSEnumVarTest, ForeignEnumPayloadLowersCleanly)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign enum U {
+    | @RawValue["a"] A
+    | number(Float64)
+}
+
+@ArkTS[module: "actual"]
+foreign func echo(value: U): U
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto ed = FindEnum("U");
+    ASSERT_NE(ed, nullptr);
+    EXPECT_TRUE(ed->TestAttr(Attribute::ARKTS_LOWERED));
+    auto fn = FindFunction("echo");
+    ASSERT_NE(fn, nullptr);
+    EXPECT_NE(fn->funcBody->body, nullptr);
 }
 
 // AR-08: a string member whose value contains `${` must be re-escaped before it
@@ -750,8 +842,8 @@ foreign func echo(value: E): E
 }
 
 // AR-08: the Int64-minimum negative value (-2^63) is exactly representable and
-// must lower cleanly; a value below it is rejected by the ordinary Int64 range
-// check on the annotation, so this only pins the representable boundary.
+// must lower cleanly; a value below it is rejected by the integer literal range
+// check, so this only pins the representable boundary.
 TEST_F(ArkTSEnumVarTest, ForeignEnumNegativeBoundaryLowersCleanly)
 {
     diag.ClearError();
@@ -798,33 +890,41 @@ foreign enum E {
     EXPECT_TRUE(HasErrorContaining("unexpected enum declaration"));
 }
 
-// AR-08: a prepared enum imported from another package carries no value table
-// (lowering only builds it for the declaring package), so using it in a foreign
-// signature is refused with a dedicated diagnostic naming the enum instead of
-// the generic unsupported-type message.
-TEST_F(ArkTSEnumVarTest, ForeignEnumImportedFromAnotherPackageIsDiagnosed)
+// A foreign enum's value mapping crosses a package boundary through the
+// serialized @RawValue annotation; the importing package rebuilds the table.
+TEST_F(ArkTSEnumVarTest, ForeignEnumFromAnotherPackageLowersCleanly)
 {
     diag.ClearError();
     auto depCjo = ExportSupportPackage(R"(package dep
 
 @ArkTS[module: "actual"]
 public foreign enum E {
-    | A
-    | B
+    | @RawValue["a"] A
+    | @RawValue[7] B
 }
 )");
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
 
     diag.ClearError();
     handler->messages.clear();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     instance->importManager->SetPackageCjoCache("dep", depCjo);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
     CompileSema(R"(package entry
 
+import arkts.lang.*
 import dep.E
 
 @ArkTS[module: "actual"]
 foreign func f(value: E): E
 )");
-    EXPECT_TRUE(HasErrorContaining("is defined in another package"));
-    EXPECT_TRUE(HasErrorContaining("'E'"));
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fn = FindFunction("f");
+    ASSERT_NE(fn, nullptr);
+    EXPECT_NE(fn->funcBody->body, nullptr);
 }

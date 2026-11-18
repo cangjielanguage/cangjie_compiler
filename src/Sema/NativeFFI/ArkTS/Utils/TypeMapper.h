@@ -38,19 +38,24 @@ namespace Cangjie::Native::FFI::ArkTS {
 // Value kind of one ArkTS enum member, shared by the classification side and
 // the lowering side so their spellings cannot drift: a numeric member is mapped
 // through Float64, a string member through ctx.string, a boolean member through
-// ctx.boolean.
-enum class ArkTSEnumValueKind { NUMBER, STRING, BOOLEAN };
+// ctx.boolean, and a payload member maps its associated value by the recursive
+// descriptor.
+enum class ArkTSEnumValueKind { NUMBER, STRING, BOOLEAN, PAYLOAD };
+
+struct ArkTSTypeDesc;
 
 // One mapped value of an ArkTS foreign enum. `name` is the lowering-side
 // constructor identifier (the member name spelled after the enum's own name
-// in a constructor reference); `kind` selects the number / string / boolean
-// mapping, and `value` is the decimal text of a numeric member, the
+// in a constructor reference); `kind` selects the number / string / boolean /
+// payload mapping, `value` is the decimal text of a numeric member, the
 // (unescaped) string value of a string member, or "true" / "false" of a
-// boolean member.
+// boolean member, and `payload` carries the associated-value descriptor of a
+// payload member (empty for literal members).
 struct ArkTSEnumMember {
     std::string name;
     ArkTSEnumValueKind kind{ArkTSEnumValueKind::NUMBER};
     std::string value;
+    std::vector<ArkTSTypeDesc> payload;
 };
 
 struct ArkTSTypeDesc {

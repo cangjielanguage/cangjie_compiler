@@ -2050,3 +2050,9 @@ bool ImportManager::AnalyzeDepStdPkgsOfBC(const std::string& fullPackageName)
     }
     return true;
 }
+
+std::pair<uint8_t, uint8_t> ImportManager::GetPackageCjoVersion(const std::string& fullPackageName) const
+{
+    return cjoManager == nullptr ? std::pair<uint8_t, uint8_t>{0, 0}
+                                 : cjoManager->GetPackageCjoVersion(fullPackageName);
+}

@@ -242,16 +242,18 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                     fd->EnableAttr(Attribute::IS_BROKEN);
                     continue;
                 }
-                // A prepared enum imported from another package carries no
-                // value table (lowering only builds it for the declaring
-                // package), so it is refused here with a dedicated message
-                // naming the enum instead of the generic unsupported-type error.
+                // An imported enum without a value table comes from a package
+                // compiled with an older CJO format (its @RawValue values are
+                // absent). Report the general unsupported return type with a
+                // recompilation note.
                 auto importedEnum = ArkTSTypeDescImportedEnumName(resultType);
                 if (!importedEnum.empty()) {
                     auto& at = fb.retType && !fb.retType->begin.IsZero() ? static_cast<Node&>(*fb.retType)
                                                                         : static_cast<Node&>(*fd);
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_imported_enum_unsupported, at,
-                        importedEnum);
+                    auto builder = diag.DiagnoseRefactor(
+                        DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, at, importedEnum,
+                        fd->identifier.Val());
+                    builder.AddNote("recompile the enum's package with the current compiler");
                     fd->EnableAttr(Attribute::IS_BROKEN);
                     continue;
                 }
@@ -313,10 +315,11 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred,
                                 position, deferredName);
                         } else if (auto importedEnum = ArkTSTypeDescImportedEnumName(desc); !importedEnum.empty()) {
-                            // Same imported-enum rule as the return position:
-                            // name the enum instead of the generic message.
-                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_imported_enum_unsupported,
-                                position, importedEnum);
+                            // Same legacy-cjo rule as the return position.
+                            auto builder = diag.DiagnoseRefactor(
+                                DiagKindRefactor::sema_arkts_foreign_param_type_unsupported, position,
+                                param->identifier.Val(), fd->identifier.Val(), importedEnum);
+                            builder.AddNote("recompile the enum's package with the current compiler");
                         } else {
                             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_param_type_unsupported,
                                 position, param->identifier.Val(), fd->identifier.Val(),

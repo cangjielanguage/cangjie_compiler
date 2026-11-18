@@ -28,6 +28,22 @@ void CheckAnnoRawValue(Decl& decl, const Annotation& anno, DiagnosticEngine& dia
     auto owner = decl.outerDecl;
     if (decl.TestAttr(Attribute::ENUM_CONSTRUCTOR) && owner && owner->astKind == ASTKind::ENUM_DECL &&
         owner->TestAttr(Attribute::ARKTS_LOWERED)) {
+        // A constructor with an associated value maps a type member; its value
+        // is the payload, not a literal, so @RawValue cannot describe it.
+        if (decl.astKind == ASTKind::FUNC_DECL) {
+            auto& func = static_cast<FuncDecl&>(decl);
+            bool hasPayload = false;
+            if (func.funcBody != nullptr) {
+                for (auto& list : func.funcBody->paramLists) {
+                    hasPayload = hasPayload || !list->params.empty();
+                }
+            }
+            if (hasPayload) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_raw_value_payload_ctor, anno,
+                    decl.identifier.Val());
+                return;
+            }
+        }
         const Annotation* first = nullptr;
         for (auto& other : decl.annotations) {
             if (other->kind != AnnotationKind::RAW_VALUE) {

@@ -6,7 +6,9 @@
 #include "Collector.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Create.h"
+#include "cangjie/AST/IntLiteral.h"
 #include "cangjie/AST/Utils.h"
+#include "cangjie/Modules/CjoVersion.h"
 #include "cangjie/Parse/Parser.h"
 #include "Utils/TypeMapper.h"
 #include <algorithm>
@@ -30,23 +32,27 @@ constexpr auto ARKTS_LANGUAGE_PACKAGE = "arkts.lang";
 std::string FromJS(const std::string& type, const std::string& value,
     const std::string& number, const std::string& result)
 {
-    auto failure = [&](const std::string& reason) {
-        return "throw ExternConversionException(\"ArkTS conversion failed: " + reason + " for " + type + "\")\n";
+    auto mismatch = [&](const std::string& reason) {
+        return "throw ExternConversionException(\"ArkTS type mismatch: " + reason + " for " + type + "\")\n";
+    };
+    auto invalid = [&](const std::string& reason) {
+        return "throw ExternConversionException(\"ArkTS value invalid: " + reason + " for " + type + "\")\n";
     };
     if (type == "Nothing") {
         return "throw Exception(\"ArkTS never function returned\")\n";
     }
     if (type == "Unit") {
-        return "if (" + value + ".isNull()) { return }\n" + value + ".asUndefined()\nreturn\n";
+        return "if (" + value + ".isNull() || " + value + ".isUndefined()) { return }\n" +
+            mismatch("not null or undefined") + "return\n";
     }
     if (type == "String" || type == "Bool") {
         auto predicate = type == "String" ? "isString" : "isBoolean";
         auto conversion = type == "String" ? "asString().toString()" : "toBoolean()";
-        return "if (!" + value + "." + predicate + "()) { " + failure("TypeMismatch") +
+        return "if (!" + value + "." + predicate + "()) { " + mismatch("wrong kind") +
             "}\nreturn " + value + "." + conversion + "\n";
     }
     if (type == "BigInt" || type == "Int64" || type == "UInt64") {
-        std::string code = "if (!" + value + ".isBigInt()) { " + failure("TypeMismatch") +
+        std::string code = "if (!" + value + ".isBigInt()) { " + mismatch("wrong kind") +
             "}\nlet " + number + " = " + value + ".asBigInt().toBigInt()\n";
         if (type == "BigInt") {
             return code + "return " + number + "\n";
@@ -54,10 +60,10 @@ std::string FromJS(const std::string& type, const std::string& value,
         auto minimum = type == "Int64" ? "-9223372036854775808" : "0";
         auto maximum = type == "Int64" ? "9223372036854775807" : "18446744073709551615";
         code += "if (" + number + " < __cj_arkts_BigInt.parse(\"" + minimum + "\") || " +
-            number + " > __cj_arkts_BigInt.parse(\"" + maximum + "\")) { " + failure("OutOfRange") + "}\n";
+            number + " > __cj_arkts_BigInt.parse(\"" + maximum + "\")) { " + invalid("out of range") + "}\n";
         return code + "return " + type + ".parse(" + number + ".toString())\n";
     }
-    std::string code = "if (!" + value + ".isNumber()) { " + failure("TypeMismatch") +
+    std::string code = "if (!" + value + ".isNumber()) { " + mismatch("wrong kind") +
         "}\nlet " + number + " = " + value + ".toNumber()\n";
     if (type == "Float64") {
         return code + "return " + number + "\n";
@@ -74,11 +80,11 @@ std::string FromJS(const std::string& type, const std::string& value,
             upper = "3.4028234663852886e38";
         }
         return code + "if ((" + number + " - " + number + ") == 0.0 && (" + number + " < " + lower + " || " + number +
-            " > " + upper + ")) { " + failure("OutOfRange") + "}\nlet " + result + " = " + type + "(" + number +
+            " > " + upper + ")) { " + invalid("out of range") + "}\nlet " + result + " = " + type + "(" + number +
             ")\nreturn " + result + "\n";
     }
     code += "if (" + number + " != " + number + " || " + number + ".isInf()) { " +
-        failure("NonFinite") + "}\n";
+        invalid("non-finite value") + "}\n";
     static const std::unordered_map<std::string, std::pair<std::string, std::string>> bounds{
         {"Int8", {"-128.0", "127.0"}}, {"Int16", {"-32768.0", "32767.0"}},
         {"Int32", {"-2147483648.0", "2147483647.0"}}, {"UInt8", {"0.0", "255.0"}},
@@ -91,11 +97,11 @@ std::string FromJS(const std::string& type, const std::string& value,
     auto range = bounds.find(type);
     CJC_ASSERT_WITH_MSG(range != bounds.end(), "checked scalar missing bounds row");
     code += "if (" + number + " < " + range->second.first + " || " + number + " > " + range->second.second + ") { " +
-        failure(type == "Rune" ? "InvalidCodePoint" : "OutOfRange") + "}\n";
-    code += "if (" + number + " != Float64(Int64(" + number + "))) { " + failure("NotInteger") + "}\n";
+        invalid(type == "Rune" ? "invalid code point" : "out of range") + "}\n";
+    code += "if (" + number + " != Float64(Int64(" + number + "))) { " + invalid("not an integer") + "}\n";
     if (type == "Rune") {
         return code + "if (" + number + " >= 55296.0 && " + number + " <= 57343.0) { " +
-            failure("InvalidCodePoint") + "}\nreturn Rune(UInt32(" + number + "))\n";
+            invalid("invalid code point") + "}\nreturn Rune(UInt32(" + number + "))\n";
     }
     return code + "return " + type + "(" + number + ")\n";
 }
@@ -157,8 +163,8 @@ struct ArkTSEnumInteger {
     std::string DecimalSpelling() const
     {
         // A magnitude beyond INT64_MAX does not fit the unsuffixed Int64 literal
-        // type, so it is spelled as a float literal on either side of zero; -2^63
-        // itself is exactly representable and stays a plain negative integer.
+        // type, so it is spelled as a float literal on either side of zero; the
+        // spelling stays exact for the generated Float64 conversion.
         if (magnitude > static_cast<uint64_t>(INT64_MAX)) {
             return (negative ? "-" : "") + std::to_string(magnitude) + ".0";
         }
@@ -188,81 +194,34 @@ struct ArkTSEnumInteger {
     }
 };
 
-// Parse a Cangjie integer literal spelling (0b/0o/0x prefix or decimal, '_'
-// digit separators, optional leading sign) into an exact value. Returns false
-// when the spelling is not a legal integer literal or exceeds 64-bit magnitude.
+// Parse a Cangjie integer literal spelling into an exact value. The compiler's
+// canonical literal parser handles 0b/0o/0x prefixes, '_' separators, an
+// optional sign, a legal type suffix and the 64-bit range. A negative spelling
+// uses the signed literal type; a non-negative one may reach UINT64_MAX.
 bool ParseArkTSEnumInteger(const std::string& spelling, ArkTSEnumInteger& out)
 {
-    const char* p = spelling.c_str();
-    out.negative = false;
-    out.magnitude = 0;
-    if (*p == '-' || *p == '+') {
-        out.negative = (*p == '-');
-        ++p;
-    }
-    int base = 10;
-    if (p[0] == '0' && (p[1] == 'b' || p[1] == 'B')) {
-        base = 2;
-        p += 2;
-    } else if (p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) {
-        base = 8;
-        p += 2;
-    } else if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
-        base = 16;
-        p += 2;
-    }
-    uint64_t value = 0;
-    bool any = false;
-    while (*p != '\0' && *p != 'i' && *p != 'u') {
-        if (*p == '_') {
-            ++p;
-            continue;
-        }
-        int digit = -1;
-        if (*p >= '0' && *p <= '9') {
-            digit = *p - '0';
-        } else if (*p >= 'a' && *p <= 'f') {
-            digit = *p - 'a' + 10;
-        } else if (*p >= 'A' && *p <= 'F') {
-            digit = *p - 'A' + 10;
-        }
-        if (digit < 0 || digit >= base) {
-            return false;
-        }
-        if (value > (UINT64_MAX - static_cast<uint64_t>(digit)) / static_cast<uint64_t>(base)) {
-            return false;
-        }
-        value = value * static_cast<uint64_t>(base) + static_cast<uint64_t>(digit);
-        any = true;
-        ++p;
-    }
-    if (!any) {
+    IntLiteral literal;
+    const bool negative = !spelling.empty() && spelling.front() == '-';
+    literal.InitIntLiteral(spelling, negative ? TypeKind::TYPE_IDEAL_INT : TypeKind::TYPE_UINT64);
+    if (literal.IsOutOfRange()) {
         return false;
     }
-    // A trailing integer type suffix (i8/i16/i32/i64/u8/u16/u32/u64) is legal and
-    // does not change the value, so accept and ignore it instead of reporting an
-    // out-of-range-like refusal for a well-formed spelling.
-    if (*p == 'i' || *p == 'u') {
-        const char* s = p + 1;
-        if (!((s[0] == '8' && s[1] == '\0') || (s[0] == '1' && s[1] == '6' && s[2] == '\0') ||
-                (s[0] == '3' && s[1] == '2' && s[2] == '\0') || (s[0] == '6' && s[1] == '4' && s[2] == '\0'))) {
-            return false;
-        }
+    auto text = literal.GetValue();
+    out.negative = literal.IsNegativeNum();
+    if (out.negative) {
+        text.erase(0, 1);
     }
-    out.magnitude = value;
-    // "-0" parses to magnitude 0 with the negative flag; fold it to +0 so
-    // Increment never sees a negative zero (whose -1 step would underflow).
-    if (out.negative && out.magnitude == 0) {
-        out.negative = false;
-    }
+    out.magnitude = std::stoull(text);
     return true;
 }
 
 // Prepared @RawValue mapping for one constructor of a lowered foreign enum.
 struct ArkTSEnumMapping {
-    const VarDecl* ctor;
+    const Decl* ctor;
     Native::FFI::ArkTS::ArkTSEnumValueKind kind;
     std::string value;
+    // Associated-value type node of a PAYLOAD member; null for literal members.
+    Ptr<Type> payloadType;
 };
 
 // State shared across the ArkTS prepare/lower passes. Private to this file: the
@@ -438,6 +397,131 @@ void Native::FFI::ArkTS::PrepareEnums(AST::Package& pkg, DiagnosticEngine& diag)
     }
 }
 
+namespace Cangjie::Native::FFI::ArkTS {
+
+// Build the value table of a lowered foreign enum. `diag` is null when the enum
+// is imported: its declaration was validated in the declaring package, and only
+// the serialized value mapping is needed here.
+bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<ArkTSEnumMapping>& members)
+{
+    auto report = [&](DiagKindRefactor kind, Node& at, auto&&... args) {
+        if (diag != nullptr) {
+            diag->DiagnoseRefactor(kind, at, std::forward<decltype(args)>(args)...);
+        }
+    };
+    if (decl.GetGeneric()) {
+        report(DiagKindRefactor::sema_arkts_enum_generic, decl, decl.identifier.Val());
+        return false;
+    }
+    if (!decl.inheritedTypes.empty()) {
+        report(DiagKindRefactor::sema_arkts_enum_super, decl, decl.identifier.Val());
+        return false;
+    }
+    if (decl.hasEllipsis) {
+        report(DiagKindRefactor::sema_arkts_enum_non_exhaustive, decl, decl.identifier.Val());
+        return false;
+    }
+    if (!decl.members.empty()) {
+        report(DiagKindRefactor::sema_arkts_enum_member, decl, decl.identifier.Val());
+        return false;
+    }
+    bool valid = true;
+    // Auto numbering mirrors ArkTS: the first member defaults to 0 and an
+    // omitted value continues the previous numeric value + 1; a string member
+    // disables the counter, so a later omitted value is an error. The counter
+    // is exact (not double), so large or non-decimal spellings do not drift.
+    ArkTSEnumInteger counter{1, true}; // -1, so the first omitted member is 0.
+    bool counterValid = true;
+    auto findRawValue = [](const Decl& ctor) -> const Annotation* {
+        for (auto& anno : ctor.annotations) {
+            if (anno->kind == AnnotationKind::RAW_VALUE) {
+                return anno.get(); // Duplicates are rejected by the annotation check.
+            }
+        }
+        return nullptr;
+    };
+    for (auto& ctor : decl.constructors) {
+        auto varCtor = DynamicCast<VarDecl*>(ctor.get());
+        auto funcCtor = DynamicCast<FuncDecl*>(ctor.get());
+        if (funcCtor != nullptr) {
+            // A constructor with an associated value maps a type member of a
+            // union-mode enum. It carries its payload type, never a literal
+            // @RawValue value.
+            if (findRawValue(*funcCtor) != nullptr) {
+                valid = false; // The annotation check reports the misplaced value.
+                continue;
+            }
+            Ptr<Type> payloadType;
+            size_t arity = 0;
+            if (funcCtor->funcBody != nullptr) {
+                for (auto& list : funcCtor->funcBody->paramLists) {
+                    arity += list->params.size();
+                    if (payloadType == nullptr && !list->params.empty()) {
+                        payloadType = list->params.front()->type;
+                    }
+                }
+            }
+            if (arity != 1 || payloadType == nullptr) {
+                report(DiagKindRefactor::sema_arkts_enum_payload_arity, *funcCtor, funcCtor->identifier.Val());
+                valid = false;
+                continue;
+            }
+            members.push_back({funcCtor, ArkTSEnumValueKind::PAYLOAD, "", payloadType});
+            continue;
+        }
+        if (varCtor == nullptr) {
+            report(DiagKindRefactor::sema_arkts_enum_payload_arity, *ctor, ctor->identifier.Val());
+            valid = false;
+            continue;
+        }
+        const Annotation* value = findRawValue(*varCtor);
+        auto literal = (value != nullptr && value->args.size() == 1 && value->args[0]->expr != nullptr)
+                           ? DynamicCast<LitConstExpr*>(value->args[0]->expr.get())
+                           : nullptr;
+        if (literal && literal->kind == LitConstKind::STRING) {
+            counterValid = false;
+            members.push_back({varCtor, ArkTSEnumValueKind::STRING, literal->stringValue, nullptr});
+            continue;
+        }
+        if (literal && literal->kind == LitConstKind::BOOL) {
+            // A boolean member maps its literal spelling verbatim (true/false);
+            // like a string member it disables the numeric auto-increment.
+            counterValid = false;
+            members.push_back({varCtor, ArkTSEnumValueKind::BOOLEAN, literal->stringValue, nullptr});
+            continue;
+        }
+        if (literal && literal->kind == LitConstKind::INTEGER) {
+            // Normalize the spelling to canonical decimal text (folding 0b/0o/0x
+            // prefixes and '_' separators) so the auto-increment chain and the
+            // generated Float64(<value>) both see the same exact number; a value
+            // at or above 2^63 is spelled as a float literal so the unsuffixed
+            // Int64 range check does not reject it.
+            if (!ParseArkTSEnumInteger(literal->stringValue, counter)) {
+                report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Integer", "out of range");
+                valid = false;
+                continue;
+            }
+            counterValid = true;
+            members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr});
+            continue;
+        }
+        if (!counterValid) {
+            report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "String", "auto-increment");
+            valid = false;
+            continue;
+        }
+        if (!counter.Increment()) {
+            report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Integer", "out of range");
+            valid = false;
+            continue;
+        }
+        members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr});
+    }
+    return valid && !members.empty();
+}
+
+} // namespace Cangjie::Native::FFI::ArkTS
+
 void Native::FFI::ArkTS::PrepareEnum(AST::EnumDecl& decl, DiagnosticEngine& diag)
 {
     // Phase 1 keeps the Cangjie side a plain enum: its constructors stay normal
@@ -453,92 +537,11 @@ void Native::FFI::ArkTS::PrepareEnum(AST::EnumDecl& decl, DiagnosticEngine& diag
             ++it;
         }
     }
-    if (decl.GetGeneric()) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_generic, decl, decl.identifier.Val());
-        return;
-    }
-    if (!decl.inheritedTypes.empty()) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_super, decl, decl.identifier.Val());
-        return;
-    }
-    if (decl.hasEllipsis) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_non_exhaustive, decl, decl.identifier.Val());
-        return;
-    }
-    if (!decl.members.empty()) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_member, decl, decl.identifier.Val());
-        return;
-    }
     std::vector<ArkTSEnumMapping> members;
-    bool valid = true;
-    // Auto numbering mirrors ArkTS: the first member defaults to 0 and an
-    // omitted value continues the previous numeric value + 1; a string member
-    // disables the counter, so a later omitted value is an error. The counter
-    // is exact (not double), so large or non-decimal spellings do not drift.
-    ArkTSEnumInteger counter{1, true}; // -1, so the first omitted member is 0.
-    bool counterValid = true;
-    for (auto& ctor : decl.constructors) {
-        auto varCtor = DynamicCast<VarDecl*>(ctor.get());
-        if (!varCtor) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_payload, *ctor, ctor->identifier.Val());
-            valid = false;
-            continue;
-        }
-        const Annotation* value = nullptr;
-        for (auto& anno : varCtor->annotations) {
-            if (anno->kind == AnnotationKind::RAW_VALUE) {
-                value = anno.get(); // Duplicates are rejected by the annotation check.
-                break;
-            }
-        }
-        auto literal = (value != nullptr && value->args.size() == 1 && value->args[0]->expr != nullptr)
-                           ? DynamicCast<LitConstExpr*>(value->args[0]->expr.get())
-                           : nullptr;
-        if (literal && literal->kind == LitConstKind::STRING) {
-            counterValid = false;
-            members.push_back({varCtor, ArkTSEnumValueKind::STRING, literal->stringValue});
-            continue;
-        }
-        if (literal && literal->kind == LitConstKind::BOOL) {
-            // A boolean member maps its literal spelling verbatim (true/false);
-            // like a string member it disables the numeric auto-increment.
-            counterValid = false;
-            members.push_back({varCtor, ArkTSEnumValueKind::BOOLEAN, literal->stringValue});
-            continue;
-        }
-        if (literal && literal->kind == LitConstKind::INTEGER) {
-            // Normalize the spelling to canonical decimal text (folding 0b/0o/0x
-            // prefixes and '_' separators) so the auto-increment chain and the
-            // generated Float64(<value>) both see the same exact number; a value
-            // at or above 2^63 is spelled as a float literal so the unsuffixed
-            // Int64 range check does not reject it.
-            if (!ParseArkTSEnumInteger(literal->stringValue, counter)) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Integer",
-                    "out of range");
-                valid = false;
-                continue;
-            }
-            counterValid = true;
-            members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling()});
-            continue;
-        }
-        if (!counterValid) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "String",
-                "auto-increment");
-            valid = false;
-            continue;
-        }
-        if (!counter.Increment()) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Integer",
-                "out of range");
-            valid = false;
-            continue;
-        }
-        members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling()});
+    if (!BuildArkTSEnumMembers(decl, &diag, members)) {
+        return;
     }
-    if (valid && !members.empty()) {
-        g_arktsState.enums.emplace(&decl, std::move(members));
-    }
+    g_arktsState.enums.emplace(&decl, std::move(members));
 }
 
 void Native::FFI::ArkTS::PrepareVariablesAndEnums(AST::Package& pkg, DiagnosticEngine& diag)
@@ -571,8 +574,9 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
                 continue;
             }
             if (fd->funcBody->retType == nullptr) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_needs_return_type, *fd,
-                    fd->identifier.Val());
+                // The parser already rejects a foreign function without an
+                // explicit return type; keep the guard so the lowering below
+                // never dereferences a null type.
                 continue;
             }
             if (!importManager.GetImportedDecl(CONTEXT_PACKAGE, "__cj_arkts_current")) {
@@ -588,9 +592,13 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
             };
             auto ret = resolveScalar(fd->funcBody->retType.get());
             if (ret.empty()) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_var_unsupported_type, *fd,
-                    fd->funcBody->retType->GetTy() ? Ty::ToString(fd->funcBody->retType->GetTy())
-                                                  : fd->identifier.Val());
+                // A globalVar getter is a foreign function whose return type
+                // must be a supported scalar; report it through the general
+                // foreign return-type diagnostic.
+                auto& retType = *fd->funcBody->retType;
+                auto& at = retType.begin.IsZero() ? static_cast<Node&>(*fd) : static_cast<Node&>(retType);
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, at,
+                    retType.GetTy() ? Ty::ToString(retType.GetTy()) : std::string(), fd->identifier.Val());
                 continue;
             }
             std::unordered_set<std::string> allocatedNames;
@@ -639,22 +647,43 @@ void Native::FFI::ArkTS::ResetState()
     g_arktsState.Clear();
 }
 
-void Native::FFI::ArkTS::AttachEnumMembers(ArkTSTypeDesc& desc)
+void Native::FFI::ArkTS::AttachEnumMembers(
+    ArkTSTypeDesc& desc, const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify, ImportManager* imports)
 {
+    // The minor that appended AnnoKind.RawValue; an older cjo has no value
+    // mapping for an imported enum, so the leaf stays non-generatable.
+    constexpr uint8_t RAW_VALUE_CJO_MINOR = 3;
     if (desc.kind == ArkTSTypeDesc::Kind::ENUM) {
         auto decl = DynamicCast<EnumDecl*>(desc.reference.get());
         if (decl != nullptr) {
             auto found = g_arktsState.enums.find(decl);
+            if (found == g_arktsState.enums.end() && decl->TestAttr(Attribute::IMPORTED) && imports != nullptr) {
+                std::string packageName;
+                if (decl->curFile != nullptr && decl->curFile->curPackage != nullptr) {
+                    packageName = decl->curFile->curPackage->fullPackageName;
+                }
+                auto version = imports->GetPackageCjoVersion(packageName);
+                if (version.first == CJO_MAJOR_VERSION && version.second >= RAW_VALUE_CJO_MINOR) {
+                    std::vector<ArkTSEnumMapping> built;
+                    if (BuildArkTSEnumMembers(*decl, nullptr, built)) {
+                        found = g_arktsState.enums.emplace(decl, std::move(built)).first;
+                    }
+                }
+            }
             if (found != g_arktsState.enums.end()) {
                 desc.enumMembers.reserve(found->second.size());
                 for (const auto& member : found->second) {
-                    desc.enumMembers.push_back({member.ctor->identifier.Val(), member.kind, member.value});
+                    ArkTSEnumMember mapped{member.ctor->identifier.Val(), member.kind, member.value, {}};
+                    if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
+                        mapped.payload.push_back(classify(member.payloadType));
+                    }
+                    desc.enumMembers.push_back(std::move(mapped));
                 }
             }
         }
         return;
     }
     for (auto& element : desc.elements) {
-        AttachEnumMembers(element);
+        AttachEnumMembers(element, classify, imports);
     }
 }

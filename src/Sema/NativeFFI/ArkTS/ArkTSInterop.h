@@ -10,6 +10,8 @@
 #include "FunctionSource.h"
 #include "cangjie/AST/Node.h"
 
+#include <functional>
+
 namespace Cangjie {
 class DiagnosticEngine;
 class SourceManager;
@@ -39,7 +41,11 @@ void CheckAnnoRawValue(AST::Decl& decl, const AST::Annotation& anno, DiagnosticE
 // member, so no ArkTS-specific field leaks into TypeCheckerImpl.
 void ResetState();
 void PrepareVariablesAndEnums(AST::Package& pkg, DiagnosticEngine& diag);
-void AttachEnumMembers(ArkTSTypeDesc& desc);
+// Attach the prepared value table to every enum leaf. A payload member carries
+// its associated-value type node, resolved through the classifier supplied by
+// the checker (which owns alias resolution and imported-type classification).
+void AttachEnumMembers(ArkTSTypeDesc& desc,
+    const std::function<ArkTSTypeDesc(Ptr<AST::Type>)>& classify, ImportManager* imports);
 
 std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix = ARKTS_GENERATED_PREFIX);
 } // namespace Native::FFI::ArkTS

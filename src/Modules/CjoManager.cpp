@@ -82,6 +82,16 @@ CjoManagerImpl::CjoManagerImpl(const CjoManager::Config& config)
 {
 }
 
+std::pair<uint8_t, uint8_t> CjoManager::GetPackageCjoVersion(const std::string& fullPackageName) const
+{
+    auto info = impl->GetPackageInfo(fullPackageName);
+    if (info == nullptr || info->loader == nullptr) {
+        return {0, 0};
+    }
+    auto version = info->loader->GetCjoVersion();
+    return {version.major, version.minor};
+}
+
 Ptr<CjoManagerImpl::PackageInfo> CjoManagerImpl::GetPackageInfo(const std::string& fullPackageName) const
 {
     auto iter = packageNameMap.find(fullPackageName);

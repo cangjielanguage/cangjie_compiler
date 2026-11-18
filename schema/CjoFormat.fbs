@@ -328,7 +328,8 @@ enum AnnoKind : uint16 {
   Annotation,
   Java,
   ObjC,
-  ArkTS
+  ArkTS,
+  RawValue
 }
 
 // Current annotation representation is a balance between needs of @Deprecated

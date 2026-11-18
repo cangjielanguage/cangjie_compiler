@@ -886,6 +886,13 @@ struct ArkTSValueEmitter {
             (*classRefs)[slot] = desc.reference;
             std::string body = "match (" + source + ") {\n";
             for (const auto& member : desc.enumMembers) {
+                if (member.kind == ArkTSEnumValueKind::PAYLOAD && !member.payload.empty()) {
+                    auto bound = Fresh("payload");
+                    auto inner = ToJS(member.payload.front(), bound, ctx, indent + "        ");
+                    body += indent + "    case " + slot + "." + member.name + "(" + bound + ") =>\n" + inner.pre +
+                        indent + "        " + inner.expr + "\n";
+                    continue;
+                }
                 std::string converted;
                 if (member.kind == ArkTSEnumValueKind::STRING) {
                     converted = ctx + ".string(\"" + StringConvertor::Recover(member.value) + "\").toJSValue()";
@@ -1087,13 +1094,20 @@ struct ArkTSValueEmitter {
             bool hasNumber = false;
             bool hasString = false;
             bool hasBoolean = false;
+            std::vector<const ArkTSEnumMember*> payloads;
             for (const auto& member : desc.enumMembers) {
-                hasNumber = hasNumber || member.kind == ArkTSEnumValueKind::NUMBER;
-                hasString = hasString || member.kind == ArkTSEnumValueKind::STRING;
-                hasBoolean = hasBoolean || member.kind == ArkTSEnumValueKind::BOOLEAN;
+                if (member.kind == ArkTSEnumValueKind::NUMBER) {
+                    hasNumber = true;
+                } else if (member.kind == ArkTSEnumValueKind::STRING) {
+                    hasString = true;
+                } else if (member.kind == ArkTSEnumValueKind::BOOLEAN) {
+                    hasBoolean = true;
+                } else if (member.kind == ArkTSEnumValueKind::PAYLOAD && !member.payload.empty()) {
+                    payloads.push_back(&member);
+                }
             }
             int kindCount = (hasNumber ? 1 : 0) + (hasString ? 1 : 0) + (hasBoolean ? 1 : 0);
-            if (kindCount == 1) {
+            if (kindCount == 1 && payloads.empty()) {
                 if (hasNumber) {
                     auto number = Fresh("num");
                     emitted.pre += KindGuard(value, "isNumber", "a number", name, indent);
@@ -1112,37 +1126,76 @@ struct ArkTSValueEmitter {
                 }
                 return emitted;
             }
-            // A mixed enum accepts two or three kinds; hoist every conversion
-            // once (like the pure branches) so the per-member chains do not
-            // re-evaluate them, then dispatch through a kind-guard chain.
+            // Literal equality is checked first, then payload members in
+            // declaration order; a payload whose routing cannot be narrowed
+            // (nested enum or Option) is placed last. The conversion is
+            // evaluated only inside the branch that proved the kind.
+            auto payloadGuard = [&](const ArkTSTypeDesc& payload) -> std::string {
+                switch (payload.kind) {
+                    case ArkTSTypeDesc::Kind::SCALAR:
+                        if (payload.scalar == "String") {
+                            return value + ".isString()";
+                        }
+                        if (payload.scalar == "Bool") {
+                            return value + ".isBoolean()";
+                        }
+                        if (payload.scalar == "Int64" || payload.scalar == "UInt64" || payload.scalar == "BigInt") {
+                            return value + ".isBigInt()";
+                        }
+                        if (payload.scalar == "Unit") {
+                            return "(" + value + ".isNull() || " + value + ".isUndefined())";
+                        }
+                        if (payload.scalar == "Nothing") {
+                            return "false";
+                        }
+                        return value + ".isNumber()";
+                    case ArkTSTypeDesc::Kind::REFERENCE:
+                        return value + ".isObject()";
+                    case ArkTSTypeDesc::Kind::ARRAY_COPY:
+                    case ArkTSTypeDesc::Kind::TUPLE:
+                        return value + ".isArray()";
+                    default:
+                        return "true";
+                }
+            };
+            std::stable_sort(payloads.begin(), payloads.end(), [&](const auto* left, const auto* right) {
+                return payloadGuard(left->payload.front()) != "true" && payloadGuard(right->payload.front()) == "true";
+            });
             auto number = Fresh("num");
             auto string = Fresh("str");
             auto boolean = Fresh("boo");
-            if (hasNumber) {
-                emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
-            }
-            if (hasString) {
-                emitted.pre += indent + "let " + string + " = " + value + ".asString().toString()\n";
-            }
-            if (hasBoolean) {
-                emitted.pre += indent + "let " + boolean + " = " + value + ".toBoolean()\n";
-            }
             std::string dispatch = "(";
             bool firstGuard = true;
             std::vector<std::string> kinds;
-            auto guardBranch = [&](bool present, const std::string& guard, const std::string& chain,
-                                   const std::string& kindName) {
-                if (!present) {
-                    return;
-                }
-                dispatch += (firstGuard ? "if (" : " else if (") + value + "." + guard + "()) {\n" + indent + "    " +
-                    chain + "\n" + indent + "}";
+            auto addBranch = [&](const std::string& condition, const std::string& body) {
+                dispatch += (firstGuard ? "if (" : " else if (") + condition + ") {\n" + body + indent + "}";
                 firstGuard = false;
-                kinds.emplace_back(kindName);
             };
-            guardBranch(hasNumber, "isNumber", numberChain(number), "number");
-            guardBranch(hasString, "isString", stringChain(string), "string");
-            guardBranch(hasBoolean, "isBoolean", booleanChain(boolean), "boolean");
+            if (hasNumber) {
+                addBranch(value + ".isNumber()", indent + "    let " + number + " = " + value +
+                    ".toNumber()\n" + indent + "    " + numberChain(number) + "\n");
+                kinds.emplace_back("number");
+            }
+            if (hasString) {
+                addBranch(value + ".isString()", indent + "    let " + string + " = " + value +
+                    ".asString().toString()\n" + indent + "    " + stringChain(string) + "\n");
+                kinds.emplace_back("string");
+            }
+            if (hasBoolean) {
+                addBranch(value + ".isBoolean()", indent + "    let " + boolean + " = " + value +
+                    ".toBoolean()\n" + indent + "    " + booleanChain(boolean) + "\n");
+                kinds.emplace_back("boolean");
+            }
+            bool payloadKindListed = false;
+            for (const auto* member : payloads) {
+                auto inner = FromJS(member->payload.front(), value, indent + "    ");
+                addBranch(payloadGuard(member->payload.front()),
+                    inner.pre + indent + "    " + slot + "." + member->name + "(" + inner.expr + ")\n");
+                payloadKindListed = true;
+            }
+            if (payloadKindListed) {
+                kinds.emplace_back("payload");
+            }
             std::string kindList;
             for (size_t i = 0; i < kinds.size(); ++i) {
                 if (i != 0) {

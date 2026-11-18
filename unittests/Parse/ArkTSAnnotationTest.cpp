@@ -754,7 +754,7 @@ public func member(): Unit {}
         EXPECT_EQ(records->Get(1)->args()->size(), 2);
         EXPECT_EQ(records->Get(0)->target(), nullptr);
         EXPECT_EQ(records->Get(1)->target(), nullptr);
-        EXPECT_EQ(raw->cjoVersion()->minor_num(), 2);
+        EXPECT_EQ(raw->cjoVersion()->minor_num(), CJO_MINOR_VERSION);
         CjoManager importedPackages({diag, types, options, importSource});
         ASTLoader reader(std::move(buffer), source.fullPackageName, types, importedPackages, options);
         auto imported = reader.LoadPackageDependencies();
@@ -812,7 +812,7 @@ public func member(): Unit {}
         ASSERT_EQ(secondRecords->size(), 2);
         EXPECT_EQ(secondRecords->Get(0)->args()->size(), 3);
         EXPECT_EQ(secondRecords->Get(1)->args()->size(), 2);
-        EXPECT_EQ(secondRaw->cjoVersion()->minor_num(), 2);
+        EXPECT_EQ(secondRaw->cjoVersion()->minor_num(), CJO_MINOR_VERSION);
         EXPECT_EQ(diag.GetErrorCount(), 0);
     }
 }

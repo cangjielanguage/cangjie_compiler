@@ -242,13 +242,25 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
                 return desc.referenceImpl != nullptr;
             }
             return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
-        case ArkTSTypeDesc::Kind::ENUM:
+        case ArkTSTypeDesc::Kind::ENUM: {
             // The enum declaration must have gone through preparation and
             // lowering must have attached a non-empty value table; a prepared
-            // enum whose declaration was refused (payload, generic, ...) never
-            // reaches the table and stays non-generatable.
-            return desc.reference != nullptr && desc.reference->TestAttr(Attribute::ARKTS_LOWERED) &&
-                !desc.enumMembers.empty();
+            // enum whose declaration was refused (generic, ...) never reaches
+            // the table and stays non-generatable. A payload member's
+            // associated value must itself be a generatable position.
+            if (desc.reference == nullptr || !desc.reference->TestAttr(Attribute::ARKTS_LOWERED) ||
+                desc.enumMembers.empty()) {
+                return false;
+            }
+            for (const auto& member : desc.enumMembers) {
+                if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
+                    if (member.payload.size() != 1 || !ArkTSTypeDescGeneratable(member.payload.front())) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
         case ArkTSTypeDesc::Kind::TUPLE:
             if (desc.elements.size() < 2) {
                 return false;
@@ -279,6 +291,13 @@ bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc)
             return true;
         }
     }
+    for (const auto& member : desc.enumMembers) {
+        for (const auto& payload : member.payload) {
+            if (ArkTSTypeDescContainsNothing(payload)) {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -301,6 +320,13 @@ bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc)
             return true;
         }
     }
+    for (const auto& member : desc.enumMembers) {
+        for (const auto& payload : member.payload) {
+            if (ArkTSTypeDescContainsReference(payload)) {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -315,6 +341,13 @@ bool ArkTSTypeDescContainsInterfaceReference(const ArkTSTypeDesc& desc)
     for (auto& element : desc.elements) {
         if (ArkTSTypeDescContainsInterfaceReference(element)) {
             return true;
+        }
+    }
+    for (const auto& member : desc.enumMembers) {
+        for (const auto& payload : member.payload) {
+            if (ArkTSTypeDescContainsInterfaceReference(payload)) {
+                return true;
+            }
         }
     }
     return false;
@@ -335,6 +368,14 @@ std::string ArkTSTypeDescImportedEnumName(const ArkTSTypeDesc& desc)
         auto name = ArkTSTypeDescImportedEnumName(element);
         if (!name.empty()) {
             return name;
+        }
+    }
+    for (const auto& member : desc.enumMembers) {
+        for (const auto& payload : member.payload) {
+            auto name = ArkTSTypeDescImportedEnumName(payload);
+            if (!name.empty()) {
+                return name;
+            }
         }
     }
     return {};

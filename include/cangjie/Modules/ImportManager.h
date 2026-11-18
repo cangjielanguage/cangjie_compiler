@@ -281,6 +281,9 @@ public:
     {
         return cjoManager.get();
     }
+    // CJO format version of an imported package; {0, 0} when it is not loaded or
+    // its cjo carries no version.
+    std::pair<uint8_t, uint8_t> GetPackageCjoVersion(const std::string& fullPackageName) const;
 
     /** @brief Clear the cache for BCHIR packages. */
     void ClearPackageBCHIRCache()

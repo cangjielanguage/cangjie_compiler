@@ -956,6 +956,8 @@ OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageForma
             break;
         case PackageFormat::AnnoKind_ObjC:
             annotation->kind = AnnotationKind::OBJ_C;
+        case PackageFormat::AnnoKind_RawValue:
+            annotation->kind = AnnotationKind::RAW_VALUE;
             break;
         default:
             InternalError("Unhandled annotation kind.");

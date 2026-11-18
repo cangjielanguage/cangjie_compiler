@@ -9,16 +9,17 @@ ERROR(sema_diag_begin, "")
 // General
 ERROR(sema_arkts_bridge_pending, "ArkTS foreign declaration is not supported in this compiler build")
 ERROR(sema_arkts_foreign_var_unsupported, "ArkTS foreign variable is not supported; declare it as '@ArkTS[globalVar: true] foreign func': %s")
-ERROR(sema_arkts_foreign_var_unsupported_type, "ArkTS foreign variable type is not supported: %s")
 ERROR(sema_arkts_global_var_not_foreign_func, "@ArkTS[globalVar: true] can only annotate a 'foreign func': %s")
 ERROR(sema_arkts_global_var_has_params, "@ArkTS[globalVar: true] 'foreign func' must have no parameters: %s")
-ERROR(sema_arkts_global_var_needs_return_type, "@ArkTS[globalVar: true] 'foreign func' must have an explicit return type: %s")
 ERROR(sema_arkts_enum_member, "ArkTS foreign enum cannot have member functions: %s")
 ERROR(sema_arkts_enum_generic, "ArkTS foreign enum cannot be generic: %s")
 ERROR(sema_arkts_enum_super, "ArkTS foreign enum cannot have super interfaces: %s")
 ERROR(sema_arkts_enum_non_exhaustive, "ArkTS foreign enum must be exhaustive: %s")
-ERROR(sema_arkts_enum_payload, "ArkTS foreign enum constructors cannot have payload parameters: %s")
+ERROR(sema_arkts_enum_payload_arity,
+    "ArkTS foreign enum constructor '%s' must have exactly one associated value")
 ERROR(sema_arkts_raw_value_misplaced, "@RawValue can only annotate a constructor of a 'foreign enum': %s")
+ERROR(sema_arkts_raw_value_payload_ctor,
+    "@RawValue cannot annotate a 'foreign enum' constructor with associated values: %s")
 ERROR(sema_arkts_raw_value_duplicate, "duplicate @RawValue annotation on enum constructor '%s'")
 ERROR(sema_arkts_enum_value_type_mismatch, "ArkTS enum value type mismatch: expected %s, found %s")
 ERROR(sema_invalid_node_after_check, "semantic error")
@@ -452,9 +453,6 @@ ERROR(sema_arkts_foreign_param_type_unsupported,
     "parameter '%s' of @ArkTS foreign function '%s' has unsupported type '%s'")
 ERROR(sema_arkts_foreign_ret_type_unsupported,
     "return type '%s' of @ArkTS foreign function '%s' is not supported")
-ERROR(sema_arkts_foreign_imported_enum_unsupported,
-    "@ArkTS foreign enum '%s' is defined in another package and cannot cross the boundary; "
-    "declare the enum in the same package as the foreign function")
 ERROR(sema_arkts_foreign_option_invalid,
     "options of @ArkTS foreign function '%s' must be string literals among 'module', 'namespace' and 'foreignName'")
 // A repeated key is a different mistake from a non-literal or unknown one:

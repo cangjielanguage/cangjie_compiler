@@ -149,7 +149,9 @@
 
 namespace Cangjie {
 constexpr uint8_t CJO_MAJOR_VERSION = 0;
-constexpr uint8_t CJO_MINOR_VERSION = 2;
+// 0.3 appends AnnoKind.RawValue so a foreign enum's value mapping can cross a
+// package boundary.
+constexpr uint8_t CJO_MINOR_VERSION = 3;
 constexpr uint8_t CJO_PATCH_VERSION = 0;
 // Last modified: local-mode types, receiver modes, and BuiltInType::Copy added to CjoFormat.
 } // namespace Cangjie
