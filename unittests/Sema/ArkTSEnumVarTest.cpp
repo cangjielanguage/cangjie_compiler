@@ -713,6 +713,88 @@ foreign func echo(value: U): U
     EXPECT_NE(fn->funcBody->body, nullptr);
 }
 
+// A payload type that refers back to the enum is refused at the boundary
+// instead of rebuilding the value table recursively.
+TEST_F(ArkTSEnumVarTest, RecursivePayloadEnumIsRefusedAtTheBoundary)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign enum E {
+    | A(E)
+    | B
+}
+
+@ArkTS[module: "actual"]
+foreign func f(value: E): E
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("not supported"));
+}
+
+// A payload constructor carries exactly one associated value; a different
+// arity is rejected before conversion generation.
+TEST_F(ArkTSEnumVarTest, PayloadArityIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign enum E {
+    | A(Int32, Int32)
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("must have exactly one associated value"));
+    EXPECT_TRUE(HasErrorContaining("'A'"));
+}
+
+// A payload whose routing cannot be narrowed is the final catch-all; it must not
+// leave an unreachable branch in the generated conversion.
+TEST_F(ArkTSEnumVarTest, OptionPayloadEnumLowersWithoutUnreachableBranch)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign enum U {
+    | A(Option<String>)
+    | B
+}
+
+@ArkTS[module: "actual"]
+foreign func echo(value: U): U
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_TRUE(std::none_of(handler->messages.begin(), handler->messages.end(),
+        [](const std::string& message) { return message.find("unreachable") != std::string::npos; }));
+}
+
 // AR-08: a string member whose value contains `${` must be re-escaped before it
 // is spliced into generated code, otherwise the generated string triggers Cangjie
 // interpolation and the mapping value drifts (or the wrapper fails to parse).
@@ -901,6 +983,7 @@ TEST_F(ArkTSEnumVarTest, ForeignEnumFromAnotherPackageLowersCleanly)
 public foreign enum E {
     | @RawValue["a"] A
     | @RawValue[7] B
+    | number(Float64)
 }
 )");
     auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);

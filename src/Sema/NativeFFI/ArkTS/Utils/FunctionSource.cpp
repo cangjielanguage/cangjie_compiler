@@ -1224,24 +1224,43 @@ struct ArkTSValueEmitter {
                 kinds.emplace_back("boolean");
             }
             bool payloadKindListed = false;
-            for (const auto* member : payloads) {
+            bool hasCatchAll = false;
+            for (size_t i = 0; i < payloads.size(); ++i) {
+                const auto* member = payloads[i];
                 auto inner = FromJS(member->payload.front(), value, indent + "    ");
-                addBranch(payloadGuard(member->payload.front()),
-                    inner.pre + indent + "    " + slot + "." + member->name + "(" + inner.expr + ")\n");
+                std::string body =
+                    inner.pre + indent + "    " + slot + "." + member->name + "(" + inner.expr + ")\n";
+                const auto guard = payloadGuard(member->payload.front());
+                if (guard == "true" && i + 1 == payloads.size()) {
+                    // The unroutable payload catches every remaining value; an
+                    // `if (true)` followed by a throw would leave the throw
+                    // unreachable.
+                    if (firstGuard) {
+                        dispatch = "(" + body + ")";
+                    } else {
+                        dispatch += " else {\n" + body + indent + "})";
+                    }
+                    hasCatchAll = true;
+                    break;
+                }
+                addBranch(guard, body);
                 payloadKindListed = true;
             }
             if (payloadKindListed) {
                 kinds.emplace_back("payload");
             }
-            std::string kindList;
-            for (size_t i = 0; i < kinds.size(); ++i) {
-                if (i != 0) {
-                    kindList += (i == kinds.size() - 1 ? " or " : ", ");
+            if (!hasCatchAll) {
+                std::string kindList;
+                for (size_t i = 0; i < kinds.size(); ++i) {
+                    if (i != 0) {
+                        kindList += (i == kinds.size() - 1 ? " or " : ", ");
+                    }
+                    kindList += kinds[i];
                 }
-                kindList += kinds[i];
+                dispatch += " else {\n" + indent + "    " +
+                    throwInline(std::string(ARKTS_MISMATCH) + "not a " + kindList + " for " + name) + "\n" + indent +
+                    "})";
             }
-            dispatch += " else {\n" + indent + "    " +
-                throwInline(std::string(ARKTS_MISMATCH) + "not a " + kindList + " for " + name) + "\n" + indent + "})";
             emitted.expr = dispatch;
             return emitted;
         }

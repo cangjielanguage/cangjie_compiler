@@ -49,7 +49,8 @@ void PrepareVariablesAndEnums(AST::Package& pkg, DiagnosticEngine& diag);
 // its associated-value type node, resolved through the classifier supplied by
 // the checker (which owns alias resolution and imported-type classification).
 void AttachEnumMembers(ArkTSTypeDesc& desc,
-    const std::function<ArkTSTypeDesc(Ptr<AST::Type>)>& classify, ImportManager* imports);
+    const std::function<ArkTSTypeDesc(Ptr<AST::Type>)>& classify,
+    const std::function<ArkTSTypeDesc(Ptr<AST::Ty>)>& classifyTy, ImportManager* imports);
 
 std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix = ARKTS_GENERATED_PREFIX);
 } // namespace Native::FFI::ArkTS

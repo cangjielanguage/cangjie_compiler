@@ -193,9 +193,16 @@ ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(ASTContext& ct
     // generator can spell the value mapping without reaching into the checker.
     // A prepared enum whose declaration was refused (payload, generic, ...) has
     // no table entry and stays non-generatable through the empty member list.
-    Native::FFI::ArkTS::AttachEnumMembers(
-        desc, [this, &ctx](Ptr<Type> payloadType) { return ArkTSClassifyPosition(ctx, payloadType); },
-        ci->importManager);
+    std::function<ArkTSTypeDesc(Ptr<Type>)> classifyType = [this, &ctx](Ptr<Type> payloadType) {
+        return ArkTSClassifyPosition(ctx, payloadType);
+    };
+    std::function<ArkTSTypeDesc(Ptr<Ty>)> classifyTy = [this, &classifyType, &classifyTy](Ptr<Ty> payloadTy) {
+        auto payload = ArkTSClassifyType(payloadTy, ci->importManager);
+        Native::FFI::ArkTS::AttachEnumMembers(
+            payload, classifyType, classifyTy, ci->importManager);
+        return payload;
+    };
+    Native::FFI::ArkTS::AttachEnumMembers(desc, classifyType, classifyTy, ci->importManager);
     return desc;
 }
 

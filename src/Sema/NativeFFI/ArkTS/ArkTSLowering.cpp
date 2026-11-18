@@ -220,18 +220,25 @@ struct ArkTSEnumMapping {
     const Decl* ctor;
     Native::FFI::ArkTS::ArkTSEnumValueKind kind;
     std::string value;
-    // Associated-value type node of a PAYLOAD member; null for literal members.
+    // Associated-value position of a PAYLOAD member; a source type node in the
+    // declaring package, or the resolved type of an imported constructor.
+    // Both are null for literal members.
     Ptr<Type> payloadType;
+    Ptr<Ty> payloadTy;
 };
 
 // State shared across the ArkTS prepare/lower passes. Private to this file: the
 // checker reaches it only through the entry points declared in ArkTSInterop.h.
 struct ArkTSLoweringState {
     std::unordered_map<const EnumDecl*, std::vector<ArkTSEnumMapping>> enums;
+    // Enums whose member tables are being attached; a recursive payload leaf
+    // stops here instead of rebuilding the same table forever.
+    std::unordered_set<const EnumDecl*> attaching;
 
     void Clear()
     {
         enums.clear();
+        attaching.clear();
     }
 };
 
@@ -452,21 +459,26 @@ bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<A
                 continue;
             }
             Ptr<Type> payloadType;
+            Ptr<Ty> payloadTy;
             size_t arity = 0;
             if (funcCtor->funcBody != nullptr) {
                 for (auto& list : funcCtor->funcBody->paramLists) {
                     arity += list->params.size();
-                    if (payloadType == nullptr && !list->params.empty()) {
-                        payloadType = list->params.front()->type;
+                    if (payloadType == nullptr && payloadTy == nullptr && !list->params.empty()) {
+                        auto& param = list->params.front();
+                        payloadType = param->type;
+                        if (payloadType == nullptr) {
+                            payloadTy = param->GetTy();
+                        }
                     }
                 }
             }
-            if (arity != 1 || payloadType == nullptr) {
+            if (arity != 1 || (payloadType == nullptr && payloadTy == nullptr)) {
                 report(DiagKindRefactor::sema_arkts_enum_payload_arity, *funcCtor, funcCtor->identifier.Val());
                 valid = false;
                 continue;
             }
-            members.push_back({funcCtor, ArkTSEnumValueKind::PAYLOAD, "", payloadType});
+            members.push_back({funcCtor, ArkTSEnumValueKind::PAYLOAD, "", payloadType, payloadTy});
             continue;
         }
         if (varCtor == nullptr) {
@@ -480,14 +492,14 @@ bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<A
                            : nullptr;
         if (literal && literal->kind == LitConstKind::STRING) {
             counterValid = false;
-            members.push_back({varCtor, ArkTSEnumValueKind::STRING, literal->stringValue, nullptr});
+            members.push_back({varCtor, ArkTSEnumValueKind::STRING, literal->stringValue, nullptr, nullptr});
             continue;
         }
         if (literal && literal->kind == LitConstKind::BOOL) {
             // A boolean member maps its literal spelling verbatim (true/false);
             // like a string member it disables the numeric auto-increment.
             counterValid = false;
-            members.push_back({varCtor, ArkTSEnumValueKind::BOOLEAN, literal->stringValue, nullptr});
+            members.push_back({varCtor, ArkTSEnumValueKind::BOOLEAN, literal->stringValue, nullptr, nullptr});
             continue;
         }
         if (literal && literal->kind == LitConstKind::INTEGER) {
@@ -502,7 +514,7 @@ bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<A
                 continue;
             }
             counterValid = true;
-            members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr});
+            members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr, nullptr});
             continue;
         }
         if (!counterValid) {
@@ -515,7 +527,7 @@ bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<A
             valid = false;
             continue;
         }
-        members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr});
+        members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr, nullptr});
     }
     return valid && !members.empty();
 }
@@ -647,8 +659,9 @@ void Native::FFI::ArkTS::ResetState()
     g_arktsState.Clear();
 }
 
-void Native::FFI::ArkTS::AttachEnumMembers(
-    ArkTSTypeDesc& desc, const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify, ImportManager* imports)
+void Native::FFI::ArkTS::AttachEnumMembers(ArkTSTypeDesc& desc,
+    const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify,
+    const std::function<ArkTSTypeDesc(Ptr<Ty>)>& classifyTy, ImportManager* imports)
 {
     // The minor that appended AnnoKind.RawValue; an older cjo has no value
     // mapping for an imported enum, so the leaf stays non-generatable.
@@ -656,6 +669,9 @@ void Native::FFI::ArkTS::AttachEnumMembers(
     if (desc.kind == ArkTSTypeDesc::Kind::ENUM) {
         auto decl = DynamicCast<EnumDecl*>(desc.reference.get());
         if (decl != nullptr) {
+            if (!g_arktsState.attaching.insert(decl).second) {
+                return; // recursive payload: leave this leaf without a table
+            }
             auto found = g_arktsState.enums.find(decl);
             if (found == g_arktsState.enums.end() && decl->TestAttr(Attribute::IMPORTED) && imports != nullptr) {
                 std::string packageName;
@@ -675,15 +691,20 @@ void Native::FFI::ArkTS::AttachEnumMembers(
                 for (const auto& member : found->second) {
                     ArkTSEnumMember mapped{member.ctor->identifier.Val(), member.kind, member.value, {}};
                     if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
-                        mapped.payload.push_back(classify(member.payloadType));
+                        if (member.payloadType != nullptr) {
+                            mapped.payload.push_back(classify(member.payloadType));
+                        } else if (member.payloadTy != nullptr) {
+                            mapped.payload.push_back(classifyTy(member.payloadTy));
+                        }
                     }
                     desc.enumMembers.push_back(std::move(mapped));
                 }
             }
+            g_arktsState.attaching.erase(decl);
         }
         return;
     }
     for (auto& element : desc.elements) {
-        AttachEnumMembers(element, classify, imports);
+        AttachEnumMembers(element, classify, classifyTy, imports);
     }
 }
