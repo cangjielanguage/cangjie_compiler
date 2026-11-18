@@ -197,6 +197,8 @@ public:
      */
     void SubstituteImportedTypeAliasTy(const std::vector<Ptr<AST::Package>>& srcPackages);
 
+    void SetImportedCopyTypes(const std::vector<Ptr<AST::Package>>& packages);
+
     /**
      * @brief Replace TypeAliasTy in a node.
      * @param node The node to replace TypeAliasTy.

@@ -218,7 +218,8 @@ void TypeChecker::TypeCheckerImpl::CheckEntryFunc(FuncDecl& fd)
     }
     bool invalidParamTy = std::any_of(fd.funcBody->paramLists[0]->params.begin(),
         fd.funcBody->paramLists[0]->params.end(), [](const OwnedPtr<FuncParam>& fp) {
-            bool isArrayTy = fp->GetTy() && fp->GetTy()->IsStructArray() && !fp->GetTy()->typeArgs.empty();
+            bool isArrayTy = fp->GetTy() && !fp->GetTy().IsLocalType() && fp->GetTy()->IsStructArray() &&
+                !fp->GetTy()->typeArgs.empty();
             bool isArrayStringTy = isArrayTy && fp->GetTy()->typeArgs[0] && fp->GetTy()->typeArgs[0]->IsString();
             if (isArrayStringTy) {
                 return false;

@@ -699,16 +699,22 @@ OwnedPtr<TryExpr> ParserImpl::ParseTryExpr()
     return tryExpr;
 }
 
+void ParserImpl::ParseExceptTypes(ExceptTypePattern& exceptTypePattern)
+{
+    do {
+        if (lastToken.kind == TokenKind::BITOR) {
+            exceptTypePattern.bitOrPosVector.emplace_back(lastToken.Begin());
+        }
+        auto type = ParseType();
+        if (type->modal.HasLocal()) {
+            DiagUnexpectedModal(MakeRange(type->modal.LocalBegin(), type->modal.LocalEnd()));
+        }
+        exceptTypePattern.types.emplace_back(std::move(type));
+    } while (Skip(TokenKind::BITOR));
+}
+
 OwnedPtr<Pattern> ParserImpl::ParseExceptTypePattern()
 {
-    auto parsePatterns = [this](ExceptTypePattern& exceptTypePattern) {
-        do {
-            if (lastToken.kind == TokenKind::BITOR) {
-                exceptTypePattern.bitOrPosVector.emplace_back(lastToken.Begin());
-            }
-            exceptTypePattern.types.emplace_back(ParseType());
-        } while (Skip(TokenKind::BITOR));
-    };
     if (Skip(TokenKind::WILDCARD)) {
         auto wildCardPos = lastToken.Begin();
         auto wildCardPattern = MakeOwned<WildcardPattern>(wildCardPos);
@@ -717,7 +723,7 @@ OwnedPtr<Pattern> ParserImpl::ParseExceptTypePattern()
             exceptTypePattern->colonPos = lastToken.Begin();
             exceptTypePattern->begin = wildCardPos;
             exceptTypePattern->pattern = std::move(wildCardPattern);
-            parsePatterns(*exceptTypePattern);
+            ParseExceptTypes(*exceptTypePattern);
             if (!exceptTypePattern->types.empty()) {
                 exceptTypePattern->end = exceptTypePattern->types.back()->end;
             }
@@ -738,7 +744,7 @@ OwnedPtr<Pattern> ParserImpl::ParseExceptTypePattern()
                 DiagKindRefactor::parse_expected_colon_in_catch_pattern, lookahead, ConvertToken(lookahead));
         }
         exceptTypePattern->colonPos = lastToken.Begin();
-        parsePatterns(*exceptTypePattern);
+        ParseExceptTypes(*exceptTypePattern);
         if (!exceptTypePattern->types.empty()) {
             exceptTypePattern->end = exceptTypePattern->types.back()->end;
         }

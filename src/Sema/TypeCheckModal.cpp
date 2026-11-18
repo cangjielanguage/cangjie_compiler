@@ -286,7 +286,7 @@ struct ModalTypeChecker {
 
     /// 1. external local! used in exclave expr is internal
     /// 2. internal local! used in returned expr of inside exclave expr is external
-    /// 3. member access of external local! is external
+    /// 3. instance fields follow their receiver; function and property call results are internal
     /// 4. tuple, varray index of external local! is external
     /// 5. reference to param of `T` local! is external local!
     /// 6. reference to global/static var is external
@@ -338,6 +338,10 @@ struct ModalTypeChecker {
                     return true;
                 }
             }
+            return false;
+        }
+        // this includes prop calls, which are desugared
+        if (Is<CallExpr>(&expr)) {
             return false;
         }
         if (expr.desugarExpr) {
@@ -493,6 +497,9 @@ private:
                 return VisitAction::SKIP_CHILDREN;
             }
             CheckCallExpr(ctx, *call);
+        }
+        if (auto loop = DynamicCast<ForInExpr>(node); loop && loop->GetTy().IsCorrect()) {
+            CheckExternalReceiver(ctx, *loop->inExpression, loop->inExpression->TyMode());
         }
         if (auto assign = DynamicCast<AssignExpr>(node)) {
             CheckAssignExpr(ctx, *assign);
@@ -809,29 +816,28 @@ private:
         if (!ownerFunc.funcBody || ownerFunc.funcBody->paramLists.empty()) {
             return;
         }
-        std::vector<FuncParam*> ownerParams;
-        for (auto& p : ownerFunc.funcBody->paramLists[0]->params) {
-            if (p) {
-                ownerParams.push_back(p.get());
-            }
-        }
-        Walker walker(&assignment, [this, &ctx, &ownerParams](Ptr<Node> node) -> VisitAction {
-            // Explicit `this.member`: flag if `this` is `@local!` non copy type.
-            if (auto ma = DynamicCast<MemberAccess>(node)) {
-                if (ma->baseExpr && IsThisOrSuper(*ma->baseExpr) && IsInNonCopyFullLocalThis(ctx, *ma)) {
-                    DiagBadCaptureInDefaultParam(*ma, "this");
-                }
-                return VisitAction::WALK_CHILDREN;
+        auto& ownerParams = ownerFunc.funcBody->paramLists[0]->params;
+        Walker walker(&assignment, [this, &ctx, &ownerFunc, &ownerParams](Ptr<Node> node) -> VisitAction {
+            if (auto expr = DynamicCast<Expr>(node); expr && expr->desugarExpr) {
+                CheckDefaultValueRefersToNonCopyLocalParam(ctx, ownerFunc, *expr->desugarExpr);
+                return VisitAction::SKIP_CHILDREN;
             }
             auto ref = DynamicCast<RefExpr>(node);
             if (!ref) {
                 return VisitAction::WALK_CHILDREN;
             }
+            if (IsThisOrSuper(*ref)) {
+                if (IsInNonCopyFullLocalThis(ctx, *ref)) {
+                    DiagBadCaptureInDefaultParam(*ref, "this");
+                }
+                return VisitAction::WALK_CHILDREN;
+            }
             // FuncParam ref: flag if it is `@local!` non copy type.
             if (auto param = DynamicCast<FuncParam>(ref->GetTarget())) {
                 auto paramTy = param->GetTy();
-                if (std::find(ownerParams.begin(), ownerParams.end(), param) != ownerParams.end() &&
-                    IsNonCopyLocalTy(paramTy) && paramTy.Mode().local == Mode::FULL) {
+                auto isOwnerParam = std::any_of(ownerParams.begin(), ownerParams.end(),
+                    [param](const auto& p) { return p.get() == param; });
+                if (isOwnerParam && IsNonCopyLocalTy(paramTy) && paramTy.Mode().local == Mode::FULL) {
                     DiagBadCaptureInDefaultParam(*ref, std::string{param->identifier.Val()});
                 }
                 return VisitAction::WALK_CHILDREN;
@@ -1321,12 +1327,9 @@ private:
         if (!right->GetTy().IsCorrect()) {
             return;
         }
-        if (type.IsCopyType(right->DataTy())) {
-            return;
-        }
         auto rLocal = right->TyMode().local != Mode::NOT ? right->TyMode().local : Mode::NOT;
         auto left = &UnwrapParenExpr(*assign.leftValue);
-        if (!left->GetTy().IsCorrect() || Is<WildcardExpr>(left)) {
+        if (!left->GetTy().IsCorrect() || Is<WildcardExpr>(left) || type.IsCopyType(left->DataTy())) {
             return;
         }
         auto lLocal = GetLvalueLocal(ctx, left);
@@ -1608,9 +1611,80 @@ private:
         return false;
     }
 
-    void DiagBadLocalArg(const Node& pos, const std::string& argMode, const std::string& paramKind = "parameter")
+    void DiagBadLocalArg(const Node& pos, const std::string& paramKind = "parameter")
     {
-        d.DiagnoseRefactor(DiagKindRefactor::sema_external_local_arg, pos, argMode, paramKind);
+        d.DiagnoseRefactor(DiagKindRefactor::sema_external_local_arg, pos, std::string{"@local!"}, paramKind);
+    }
+
+    void CheckExternalReceiver(const ASTContext& ctx, const Expr& receiver, ModalInfo paramMode)
+    {
+        if (paramMode.local == Mode::FULL && receiver.GetTy().IsCorrect() &&
+            receiver.TyMode().local == Mode::FULL &&
+            !type.IsCopyType(receiver.DataTy()) && IsExternalLocal(ctx, receiver)) {
+            DiagBadLocalArg(receiver, "this parameter");
+        }
+    }
+
+    void CheckReceiver(const ASTContext& ctx, const NameReferenceExpr& callee, ModalInfo paramMode)
+    {
+        if (paramMode.local != Mode::FULL) {
+            return;
+        }
+        if (auto ma = DynamicCast<MemberAccess>(&callee)) {
+            CheckExternalReceiver(ctx, *ma->baseExpr, paramMode);
+            return;
+        }
+        auto owner = TypeCheckUtil::GetCurInheritableDecl(ctx, callee.scopeName);
+        if (owner && owner->GetTy().IsCorrect() && type.IsCopyType(owner->DataTy())) {
+            return;
+        }
+        if (TypeCheckUtil::GetCurThisModal(ctx, callee.scopeName).local == Mode::FULL &&
+            !IsInExclaveExpr(ctx, callee)) {
+            DiagBadLocalArg(callee, "this parameter");
+        }
+    }
+
+    void CheckCallableReceiver(const ASTContext& ctx, const NameReferenceExpr& callee, const FuncDecl& func)
+    {
+        if (TypeManager::HasThisParam(func)) {
+            auto thisType = TypeManager::GetThisParamTy(func);
+            if (!type.IsCopyType(thisType.Ty())) {
+                CheckReceiver(ctx, callee, thisType.Mode());
+            }
+        }
+    }
+
+    void CheckCallArgs(const ASTContext& ctx, const CallExpr& call)
+    {
+        auto funcTy = DynamicCast<FuncTy>(call.baseFunc->DataTy());
+        if (!funcTy) {
+            // Numeric alias casts retain call wrappers, and Nothing callees describe unreachable expressions.
+            return;
+        }
+        const auto& paramTys = funcTy->paramTys;
+        std::vector<Ptr<FuncArg>> args;
+        if (call.desugarArgs) {
+            args = *call.desugarArgs;
+        } else {
+            for (auto& arg : call.args) {
+                args.push_back(arg.get());
+            }
+        }
+        for (size_t i{0}; i < args.size(); ++i) {
+            auto& arg = *args[i];
+            if (i >= paramTys.size()) {
+                continue;
+            }
+            auto paramMode = paramTys[i].Mode();
+            if (call.resolvedFunction && call.resolvedFunction->TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
+                paramMode = call.TyMode();
+            }
+            if (paramMode.local == Mode::FULL && arg.expr && arg.expr->GetTy().IsCorrect() &&
+                arg.expr->TyMode().local == Mode::FULL && !type.IsCopyType(paramTys[i].Ty()) &&
+                IsExternalLocal(ctx, *arg.expr)) {
+                DiagBadLocalArg(*arg.expr);
+            }
+        }
     }
 
     void DiagBadInternalLocalReturn(const Expr& expr)
@@ -1618,7 +1692,7 @@ private:
         d.DiagnoseRefactor(DiagKindRefactor::sema_internal_local_return, expr, expr.TyMode().LocalString());
     }
 
-    /// Check call expr args cannot be external @local! type if the param is non Copy @local!
+    /// Non-copy external @local! arguments and receivers cannot be passed to @local! parameters.
     void CheckCallExpr(const ASTContext& ctx, const CallExpr& call)
     {
         if (auto inner = DynamicCast<CallExpr>(call.desugarExpr.get())) {
@@ -1636,46 +1710,14 @@ private:
                 return;
             }
         }
-        auto checkArg = [&ctx, this](const FuncArg& arg) {
-            if (!arg.expr || arg.TyMode().local != Mode::FULL) {
-                return;
-            }
-            if (arg.expr->GetTy().IsCorrect() && !type.IsCopyType(arg.expr->DataTy()) &&
-                IsExternalLocal(ctx, *arg.expr)) {
-                DiagBadLocalArg(*arg.expr, arg.TyMode().LocalString());
-            }
-        };
-        if (call.desugarArgs) {
-            for (auto& arg : *call.desugarArgs) {
-                checkArg(*arg);
-            }
-        } else {
-            for (auto& arg : call.args) {
-                checkArg(*arg);
-            }
-        }
+        CheckCallArgs(ctx, call);
         auto fd = call.resolvedFunction;
         if (!fd || fd->TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
             return;
         }
-        if (TypeManager::HasThisParam(*fd)) {
-            auto thisType = TypeManager::GetThisParamTy(*fd);
-            if (thisType.Mode().local != Mode::FULL || type.IsCopyType(thisType.Ty())) {
-                return;
-            }
-            // The receiver is the implicit this arg; diagnose it instead of the whole call.
-            auto& base = UnwrapParenExpr(*call.baseFunc);
-            if (auto ref = DynamicCast<RefExpr>(&base)) {
-                if (IsInExclaveExpr(ctx, *ref)) { // this is always external, only valid in exclave
-                    return;
-                }
-                DiagBadLocalArg(*ref, "@local!", "this parameter");
-                return;
-            }
-            auto& ma = StaticCast<MemberAccess>(base);
-            if (IsExternalLocal(ctx, ma)) {
-                DiagBadLocalArg(*ma.baseExpr, "@local!", "this parameter");
-            }
+        auto& base = TypeCheckUtil::UnwrapParenExpr(*call.baseFunc);
+        if (auto callee = DynamicCast<NameReferenceExpr>(&base)) {
+            CheckCallableReceiver(ctx, *callee, *fd);
         }
     }
 
@@ -1708,7 +1750,8 @@ private:
     void CheckCopyType(StructDecl& decl, const TypeSubst& subst = {})
     {
         for (auto member : decl.GetMemberDeclPtrs()) {
-            if (auto var = DynamicCast<VarDecl>(member)) {
+            if (auto var = DynamicCast<VarDecl>(member);
+                var && !Is<PropDecl>(var) && !var->TestAttr(Attribute::STATIC)) {
                 if (type.IsCopyType(type.GetInstantiatedTy(var->DataTy(), subst))) {
                     continue;
                 }

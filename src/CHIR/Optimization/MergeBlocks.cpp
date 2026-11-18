@@ -103,7 +103,12 @@ void MergeForInCondBlock(CHIRBuilder& builder, Block& block)
 {
     auto oldPreds = block.GetPredecessors();
     auto oldSuccs = block.GetSuccessors();
-    CJC_ASSERT(!oldPreds.empty());
+    if (oldPreds.empty()) {
+        // The for-in latch is unreachable when the loop body never falls through,
+        // e.g. it ends with an exclave expression. Nothing to merge.
+        block.Remove<GeneratedFromForIn>();
+        return;
+    }
     for (size_t i{0}; i < oldPreds.size() - 1; ++i) {
         auto cpBlock = CopyBlock(builder, block);
         auto pred = oldPreds[i];

@@ -747,6 +747,7 @@ private:
     void ParseCatchBlock(AST::TryExpr& tryExpr);
     void ParseTryWithResource(const ScopeKind& scopeKind, AST::TryExpr& tryExpr);
     OwnedPtr<AST::Pattern> ParseExceptTypePattern();
+    void ParseExceptTypes(AST::ExceptTypePattern& pattern);
     OwnedPtr<AST::Pattern> ParseCommandTypePattern();
     OwnedPtr<AST::ForInExpr> ParseForInExpr();
     OwnedPtr<AST::RefExpr> ParseRefExpr(ExprKind ek = ExprKind::ALL);

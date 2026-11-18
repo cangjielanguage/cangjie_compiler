@@ -350,16 +350,17 @@ bool HasDelegatedThisCall(const AST::FuncBody& func)
     auto& body = func.body->body;
     CJC_ASSERT(!body.empty());
     auto first = body[0].get();
-    while (first) {
-        if (auto paren = DynamicCast<AST::ParenExpr>(first)) {
-            first = paren->expr.get();
-        } else if (auto exclave = DynamicCast<AST::ExclaveExpr>(first)) {
-            first = exclave->body && !exclave->body->body.empty() ? exclave->body->body.front().get() : nullptr;
-        } else {
-            break;
-        }
+    while (auto paren = DynamicCast<AST::ParenExpr>(first)) {
+        first = paren->expr.get();
     }
-    // The delegated call may be wrapped in parentheses and a mandatory exclave.
+    // For exclave { this(...) }, only the delegated constructor should initialize fields.
+    // Exclave cannot be nested, but parentheses may surround it and the delegated call.
+    if (auto exclave = DynamicCast<AST::ExclaveExpr>(first)) {
+        first = exclave->body && !exclave->body->body.empty() ? exclave->body->body.front().get() : nullptr;
+    }
+    while (auto paren = DynamicCast<AST::ParenExpr>(first)) {
+        first = paren->expr.get();
+    }
     if (auto call = DynamicCast<AST::CallExpr>(first)) {
         // the `resolvedFunction` of callExpr with call_function_ptr is null.
         if (call->callKind == AST::CallKind::CALL_FUNCTION_PTR) {

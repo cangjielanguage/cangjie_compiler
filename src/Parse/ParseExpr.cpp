@@ -600,6 +600,9 @@ void ParserImpl::ParseExprWithRightExprOrType(OwnedPtr<Expr>& base, const Token&
             base->EnableAttr(Attribute::HAS_BROKEN);
         } else {
             type = ParseType();
+            if (type->modal.HasLocal()) {
+                DiagUnexpectedModal(MakeRange(type->modal.LocalBegin(), type->modal.LocalEnd()));
+            }
         }
         base->end = type->end;
         base->astKind == ASTKind::IS_EXPR ? StaticAs<ASTKind::IS_EXPR>(base.get())->isType = std::move(type)
