@@ -1541,6 +1541,15 @@ private:
         });
     }
 
+    static const Expr& UnwrapReturnedExpr(const Expr& expr)
+    {
+        auto returned = &UnwrapParenExpr(expr);
+        while (returned->desugarExpr) {
+            returned = returned->desugarExpr.get();
+        }
+        return *returned;
+    }
+
     std::vector<const Expr*> CollectReturnedExpr(FuncBody& body)
     {
         if (!body.body || body.body->body.empty()) {
@@ -1549,7 +1558,7 @@ private:
         std::vector<const Expr*> ret;
         Walker(&body, [&ret](auto n) {
             if (auto re = DynamicCast<ReturnExpr>(n)) {
-                ret.push_back(re->expr.get());
+                ret.push_back(&UnwrapReturnedExpr(*re->expr));
                 return VisitAction::SKIP_CHILDREN;
             }
             if (n->IsFuncLike()) {
@@ -1561,10 +1570,7 @@ private:
         if (!lastExpr) { // last node may be a decl
             return ret;
         }
-        lastExpr = &UnwrapParenExpr(*lastExpr);
-        while (lastExpr->desugarExpr) {
-            lastExpr = &UnwrapParenExpr(*lastExpr->desugarExpr);
-        }
+        lastExpr = &UnwrapReturnedExpr(*lastExpr);
         if (lastExpr->astKind == ASTKind::RETURN_EXPR) {
             return ret;
         }
@@ -1574,11 +1580,7 @@ private:
             if (!lastExpr) {
                 return ret;
             }
-            lastExpr = &UnwrapParenExpr(*lastExpr);
-            while (lastExpr->desugarExpr) {
-                // push last expr of exclave
-                lastExpr = &UnwrapParenExpr(*lastExpr->desugarExpr);
-            }
+            lastExpr = &UnwrapReturnedExpr(*lastExpr);
         }
         if (auto funcTy = DynamicCast<FuncTy>(body.DataTy())) {
             if (funcTy->retTy->IsUnit() || (body.funcDecl && body.funcDecl->TestAttr(Attribute::CONSTRUCTOR))) {
