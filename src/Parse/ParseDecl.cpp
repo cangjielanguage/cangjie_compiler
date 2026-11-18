@@ -318,9 +318,6 @@ void ParserImpl::CheckVarDeclModifiers(
                 (!diag.ignoreScopeCheck && (!HasModifier(modifiers, TokenKind::COMMON) && varDecl->type != nullptr)))) {
             DiagExpectedInitializerForToplevelVar(*varDecl);
         }
-    } else if (HasModifier(modifiers, TokenKind::FOREIGN) && varDecl->initializer != nullptr &&
-        scopeKind == ScopeKind::TOPLEVEL) {
-        ParseDiagnoseRefactor(DiagKindRefactor::parse_foreign_var_with_initializer, *varDecl->initializer);
     }
 }
 

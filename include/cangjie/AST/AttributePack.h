@@ -771,7 +771,12 @@ enum class Attribute {
     // R: type classification, lowering, from-JS construction, CJO writer/loader.
     ARKTS_INTERFACE_WRAPPER,
 
-    // ArkTS foreign functions and variables lowered to ordinary CJ bodies; never C ABI.
+    // An @ArkTS foreign enum lowered in place to a plain Cangjie enum. This is
+    // deliberately separate from the *_WRAPPER markers above: those mark a
+    // declaration rewritten into a generated wrapper (function, class or
+    // interface), while a lowered enum gets no wrapper and only needs to be
+    // recognized as prepared so @RawValue checks and type mapping accept it.
+    // Enums have no wrapper counterpart, so the bits are not interchangeable.
     ARKTS_LOWERED,
     AST_ATTR_END,
 };

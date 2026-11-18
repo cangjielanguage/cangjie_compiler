@@ -374,7 +374,6 @@ ERROR(parse_objc_init_method_must_be_in_mirror_class, "'@ObjCInit' member functi
 ERROR(parse_objc_optional_method_must_be_in_mirror_class, "'@ObjCOptional' member function must be declared within '@ObjC' foreign interface")
 // @ArkTS annotation
 ERROR(parse_raw_value_not_literal, "argument of @RawValue should be an integer, string or boolean literal", "expected a literal value here")
-ERROR(parse_foreign_var_with_initializer, "a foreign variable cannot have an initializer", "remove the initializer here")
 
 
 ERROR(parse_objc_interop_not_supported, "Objective-C interoperability feature '%s' is not yet supported")

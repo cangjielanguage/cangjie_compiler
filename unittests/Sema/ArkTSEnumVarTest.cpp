@@ -264,17 +264,6 @@ foreign var count: Int32
     EXPECT_TRUE(HasErrorContaining(": count"));
 }
 
-// A foreign variable must not carry an initializer; the parser rejects it with
-// the dedicated diagnostic naming the initializer position.
-TEST_F(ArkTSEnumVarTest, ForeignLetWithInitializerIsDiagnosed)
-{
-    CompileSema(R"(package entry
-
-foreign let count: Int32 = 1
-)");
-    EXPECT_TRUE(HasErrorContaining("a foreign variable cannot have an initializer"));
-}
-
 // @RawValue on the enum type itself is misplaced: it maps a constructor,
 // never the enum declaration.
 TEST_F(ArkTSEnumVarTest, RawValueOnEnumTypeIsMisplaced)
