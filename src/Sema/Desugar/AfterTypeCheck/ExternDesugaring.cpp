@@ -51,9 +51,7 @@ OwnedPtr<MemberAccess> CreateForeignRuntimeFuncAccess(
     Ty& runtimeTy, FuncDecl& func, Ptr<Ty> matchedParentTy, Ty& funcTy, const Expr& expr)
 {
     Ptr<Decl> runtimeDecl = GetForeignRuntimeDecl(runtimeTy);
-    if (!runtimeDecl) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(runtimeDecl);
     auto runtimeRef = CreateRefExpr(*runtimeDecl);
     runtimeRef->SetTy({&runtimeTy});
     runtimeRef->isAlone = false;
@@ -84,16 +82,14 @@ OwnedPtr<RefExpr> CreateTmpRef(VarDecl& tmp, const Expr& expr)
 }
 
 /** Append the declaration let name = init to @p nodes. */
-Ptr<VarDecl> AddTmp(std::vector<OwnedPtr<Node>>& nodes, const std::string& name, OwnedPtr<Expr> init, const Expr& expr)
+VarDecl& AddTmp(std::vector<OwnedPtr<Node>>& nodes, const std::string& name, OwnedPtr<Expr> init, const Expr& expr)
 {
-    if (!init) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(init);
     auto tmp = CreateVarDecl(name, std::move(init));
     CopyBasicInfo(&expr, tmp.get());
-    auto ptr = tmp.get();
+    auto& ref = *tmp;
     nodes.emplace_back(std::move(tmp));
-    return ptr;
+    return ref;
 }
 
 /** The innermost desugared expression of @p expr, which holds the mapExpr of @p expr in CHIR. */
@@ -184,11 +180,8 @@ bool ExternDesugaring::TryConvert(Expr& expr, Ty& target)
     if (!valueTy || !NeedExternConversion(typeManager, *valueTy, target)) {
         return false;
     }
-    // Everything that can fail is checked before the operand is moved out of expr.desugarExpr.
     auto func = LookupRuntimeFunc(STD_LIB_TO_EXTERN, target, {valueTy}, expr);
-    if (!func.decl) {
-        return false;
-    }
+    CJC_NULLPTR_CHECK(func.decl);
     std::vector<OwnedPtr<Expr>> args;
     args.emplace_back(expr.desugarExpr ? std::move(expr.desugarExpr) : ASTCloner::Clone(Ptr(&expr)));
     if (expr.mapExpr) {
@@ -214,30 +207,11 @@ bool ExternDesugaring::TryConvert(Expr& expr, Ty& target)
 
 void ExternDesugaring::TryConvertBlock(Block& block, Ty& target)
 {
-    // If the block is empty or ends with a declaration, its value is the unit value.
-    auto lastExprOrDecl = block.GetLastExprOrDecl();
-    Ptr<Ty> lastTy = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-    if (auto expr = DynamicCast<Expr*>(lastExprOrDecl)) {
-        lastTy = expr->DataTy();
+    // Function bodies end with an implicit return, and the wildcard case of o ?? v ends with v.
+    auto lastExpr = DynamicCast<Expr*>(block.GetLastExprOrDecl());
+    if (lastExpr && TryConvert(*lastExpr, target)) {
+        block.SetTy(lastExpr->GetTy());
     }
-    if (!lastTy || !NeedExternConversion(typeManager, *lastTy, target)) {
-        return;
-    }
-    bool addedUnit = Is<Decl>(lastExprOrDecl) || block.body.empty();
-    if (addedUnit) {
-        auto unitExpr = CreateUnitExpr({TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
-        unitExpr->curFile = block.curFile;
-        lastExprOrDecl = unitExpr.get();
-        block.body.emplace_back(std::move(unitExpr));
-    }
-    auto lastExpr = DynamicCast<Expr*>(lastExprOrDecl);
-    if (!lastExpr || !TryConvert(*lastExpr, target)) {
-        if (addedUnit) {
-            block.body.pop_back();
-        }
-        return;
-    }
-    block.SetTy(lastExpr->GetTy());
 }
 
 void ExternDesugaring::HandleVarDecl(const VarDeclAbstract& vd)
@@ -360,7 +334,7 @@ void ExternDesugaring::DesugarOperation(Expr& expr)
             return ae.isCompound ? BuildCompoundAssignment(ae, externTy) : BuildUpdate(ae, externTy);
         },
         []() -> OwnedPtr<Expr> { return nullptr; });
-    CJC_NULLPTR_CHECK(desugared); // for well typed programs the functions of the runtime exist
+    CJC_NULLPTR_CHECK(desugared);
     // The desugared operation has the value of expr, which may be shared with its clones.
     desugared->mapExpr = expr.mapExpr;
     expr.desugarExpr = std::move(desugared);
@@ -394,9 +368,7 @@ OwnedPtr<Expr> ExternDesugaring::BuildUpdate(AssignExpr& ae, Ty& externTy)
     std::vector<OwnedPtr<Expr>> args;
     if (auto ma = DynamicCast<MemberAccess*>(ae.leftValue.get())) {
         auto func = LookupRuntimeFunc(MEMBER_UPDATE_FUNC, externTy, {}, ae);
-        if (!func.decl) {
-            return nullptr;
-        }
+        CJC_NULLPTR_CHECK(func.decl);
         args.emplace_back(ASTCloner::Clone(ma->baseExpr.get()));
         args.emplace_back(CreateFieldName(ma->field.Val(), *func.ty->paramTys[1], *ma));
         args.emplace_back(ASTCloner::Clone(ae.rightExpr.get()));
@@ -424,9 +396,7 @@ OwnedPtr<Expr> ExternDesugaring::BuildCompoundAssignment(AssignExpr& ae, Ty& ext
     } else {
         update = BuildIndexedCompoundUpdate(ae, StaticCast<SubscriptExpr&>(*ae.leftValue), externTy, nodes);
     }
-    if (!update) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(update);
     nodes.emplace_back(std::move(update));
     auto block = CreateBlock(std::move(nodes), {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
     CopyBasicInfo(&ae, block.get());
@@ -436,18 +406,14 @@ OwnedPtr<Expr> ExternDesugaring::BuildCompoundAssignment(AssignExpr& ae, Ty& ext
 OwnedPtr<Expr> ExternDesugaring::BuildMemberCompoundUpdate(
     AssignExpr& ae, MemberAccess& ma, Ty& externTy, std::vector<OwnedPtr<Node>>& nodes)
 {
-    auto receiver = AddTmp(nodes, "$externReceiver", ASTCloner::Clone(ma.baseExpr.get()), ae);
+    auto& receiver = AddTmp(nodes, "$externReceiver", ASTCloner::Clone(ma.baseExpr.get()), ae);
     auto func = LookupRuntimeFunc(MEMBER_UPDATE_FUNC, externTy, {}, ae);
-    if (!receiver || !func.decl) {
-        return nullptr;
-    }
-    auto current = CreateMemberAccessCall(CreateTmpRef(*receiver, ae), ma.field.Val(), externTy, ma);
+    CJC_NULLPTR_CHECK(func.decl);
+    auto current = CreateMemberAccessCall(CreateTmpRef(receiver, ae), ma.field.Val(), externTy, ma);
     auto opCall = CreateCompoundOpCall(ae, std::move(current), externTy, nodes);
-    if (!opCall) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(opCall);
     std::vector<OwnedPtr<Expr>> args;
-    args.emplace_back(CreateTmpRef(*receiver, ae));
+    args.emplace_back(CreateTmpRef(receiver, ae));
     args.emplace_back(CreateFieldName(ma.field.Val(), *func.ty->paramTys[1], ma));
     args.emplace_back(std::move(opCall));
     return CreateRuntimeCall(func, std::move(args), externTy, ae);
@@ -456,22 +422,17 @@ OwnedPtr<Expr> ExternDesugaring::BuildMemberCompoundUpdate(
 OwnedPtr<Expr> ExternDesugaring::BuildIndexedCompoundUpdate(
     AssignExpr& ae, SubscriptExpr& se, Ty& externTy, std::vector<OwnedPtr<Node>>& nodes)
 {
-    auto receiver = AddTmp(nodes, "$externReceiver", ASTCloner::Clone(se.baseExpr.get()), ae);
-    auto index = AddTmp(nodes, "$externIndex", ASTCloner::Clone(se.indexExprs[0].get()), ae);
-    if (!receiver || !index) {
-        return nullptr;
-    }
+    auto& receiver = AddTmp(nodes, "$externReceiver", ASTCloner::Clone(se.baseExpr.get()), ae);
+    auto& index = AddTmp(nodes, "$externIndex", ASTCloner::Clone(se.indexExprs[0].get()), ae);
     std::vector<OwnedPtr<Expr>> accessArgs;
-    accessArgs.emplace_back(CreateTmpRef(*receiver, ae));
-    accessArgs.emplace_back(CreateTmpRef(*index, ae));
+    accessArgs.emplace_back(CreateTmpRef(receiver, ae));
+    accessArgs.emplace_back(CreateTmpRef(index, ae));
     auto current = CreateRuntimeCall(INDEXED_ACCESS_FUNC, std::move(accessArgs), externTy, se);
     auto opCall = CreateCompoundOpCall(ae, std::move(current), externTy, nodes);
-    if (!opCall) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(opCall);
     std::vector<OwnedPtr<Expr>> args;
-    args.emplace_back(CreateTmpRef(*receiver, ae));
-    args.emplace_back(CreateTmpRef(*index, ae));
+    args.emplace_back(CreateTmpRef(receiver, ae));
+    args.emplace_back(CreateTmpRef(index, ae));
     args.emplace_back(std::move(opCall));
     return CreateRuntimeCall(INDEXED_UPDATE_FUNC, std::move(args), externTy, ae);
 }
@@ -481,22 +442,16 @@ OwnedPtr<Expr> ExternDesugaring::CreateCompoundOpCall(
     AssignExpr& ae, OwnedPtr<Expr> current, Ty& externTy, std::vector<OwnedPtr<Node>>& nodes)
 {
     const std::string op = TOKENS[static_cast<int>(COMPOUND_ASSIGN_EXPR_MAP.at(ae.op))];
-    auto opFunc = AddTmp(nodes, "$externOp", CreateMemberAccessCall(std::move(current), op, externTy, ae), ae);
-    if (!opFunc) {
-        return nullptr;
-    }
+    auto& opFunc = AddTmp(nodes, "$externOp", CreateMemberAccessCall(std::move(current), op, externTy, ae), ae);
     std::vector<OwnedPtr<Expr>> args;
     args.emplace_back(ASTCloner::Clone(ae.rightExpr.get()));
-    return CreateFunctionCall(CreateTmpRef(*opFunc, ae), std::move(args), externTy, ae);
+    return CreateFunctionCall(CreateTmpRef(opFunc, ae), std::move(args), externTy, ae);
 }
 
 OwnedPtr<Expr> ExternDesugaring::CreateMemberAccessCall(
     OwnedPtr<Expr> receiver, const std::string& field, Ty& externTy, const Expr& expr)
 {
     auto func = LookupRuntimeFunc(MEMBER_ACCESS_FUNC, externTy, {}, expr);
-    if (!func.decl) {
-        return nullptr;
-    }
     std::vector<OwnedPtr<Expr>> args;
     args.emplace_back(std::move(receiver));
     args.emplace_back(CreateFieldName(field, *func.ty->paramTys[1], expr));
@@ -507,14 +462,11 @@ OwnedPtr<Expr> ExternDesugaring::CreateFunctionCall(
     OwnedPtr<Expr> callee, std::vector<OwnedPtr<Expr>> args, Ty& externTy, const Expr& expr)
 {
     auto func = LookupRuntimeFunc(FUNCTION_CALL_FUNC, externTy, {}, expr);
-    if (!func.decl || std::any_of(args.begin(), args.end(), [](auto& arg) { return !arg; })) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(func.decl);
+    CJC_ASSERT(std::none_of(args.begin(), args.end(), [](auto& arg) { return !arg; }));
     auto arrayLit = CreateArrayLit(std::move(args), func.ty->paramTys[1]);
     AddArrayLitConstructor(*arrayLit);
-    if (!arrayLit->initFunc) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(arrayLit->initFunc);
     CopyBasicInfo(&expr, arrayLit.get());
     arrayLit->EnableAttr(Attribute::IMPLICIT_ADD);
     std::vector<OwnedPtr<Expr>> callArgs;
@@ -531,20 +483,15 @@ ExternDesugaring::RuntimeFunc ExternDesugaring::LookupRuntimeFunc(
     const std::string& name, Ty& externTy, const std::vector<Ptr<Ty>>& instTys, const Expr& expr)
 {
     CJC_ASSERT(externTy.IsCoreExternType());
-    auto& runtimeTy = *externTy.typeArgs[0];
-    if (!GetForeignRuntimeDecl(runtimeTy)) {
-        return {};
-    }
-    auto [decl, matchedParentTy, memberTy] = lookup(runtimeTy, name, expr);
-    if (!decl || !Ty::IsTyCorrect(memberTy.get())) {
-        return {};
-    }
+    auto [decl, matchedParentTy, memberTy] = lookup(*externTy.typeArgs[0], name, expr);
+    CJC_ASSERT(decl && Ty::IsTyCorrect(memberTy.get()));
     TypeSubst mapping;
     if (auto generic = decl->GetGeneric(); generic && generic->typeParameters.size() == 1 && instTys.size() == 1) {
         mapping[StaticCast<TyVar*>(generic->typeParameters[0]->DataTy())] = instTys[0];
     }
     auto ty = DynamicCast<FuncTy*>(typeManager.GetInstantiatedTy(memberTy, mapping));
-    return Ty::IsTyCorrect(ty) ? RuntimeFunc{decl, matchedParentTy, ty} : RuntimeFunc{};
+    CJC_ASSERT(Ty::IsTyCorrect(ty));
+    return {decl, matchedParentTy, ty};
 }
 
 /**
@@ -554,14 +501,10 @@ OwnedPtr<CallExpr> ExternDesugaring::CreateRuntimeCall(const RuntimeFunc& func, 
     Ty& externTy, const Expr& expr, std::vector<Ptr<Ty>> instTys)
 {
     CJC_ASSERT(func.decl && func.ty && func.ty->paramTys.size() == args.size());
-    if (std::any_of(args.begin(), args.end(), [](auto& arg) { return !arg; })) {
-        return nullptr;
-    }
+    CJC_ASSERT(std::none_of(args.begin(), args.end(), [](auto& arg) { return !arg; }));
     auto baseFunc =
         CreateForeignRuntimeFuncAccess(*externTy.typeArgs[0], *func.decl, func.matchedParentTy, *func.ty, expr);
-    if (!baseFunc) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(baseFunc);
     baseFunc->instTys = std::move(instTys);
     std::vector<OwnedPtr<FuncArg>> funcArgs;
     for (size_t i = 0; i < args.size(); ++i) {
@@ -587,9 +530,7 @@ OwnedPtr<CallExpr> ExternDesugaring::CreateRuntimeCall(const std::string& name, 
     Ty& externTy, const Expr& expr, std::vector<Ptr<Ty>> instTys)
 {
     auto func = LookupRuntimeFunc(name, externTy, instTys, expr);
-    if (!func.decl) {
-        return nullptr;
-    }
+    CJC_NULLPTR_CHECK(func.decl);
     return CreateRuntimeCall(func, std::move(args), externTy, expr, std::move(instTys));
 }
 
@@ -597,10 +538,7 @@ ForeignRuntimeFunc TypeChecker::TypeCheckerImpl::LookupForeignRuntimeFunc(
     ASTContext& ctx, Ty& runtimeTy, const std::string& name, const Expr& expr)
 {
     auto foreignRuntime = importManager.GetCoreDecl<InterfaceDecl>(STD_LIB_FOREIGN_RUNTIME);
-    if (!foreignRuntime) {
-        CJC_ASSERT(false);
-        return {};
-    }
+    CJC_NULLPTR_CHECK(foreignRuntime);
     Ptr<FuncDecl> func = nullptr;
     for (auto decl : foreignRuntime->GetMemberDeclPtrs()) {
         if (auto fd = DynamicCast<FuncDecl*>(decl); fd && fd->identifier == name) {
@@ -608,9 +546,7 @@ ForeignRuntimeFunc TypeChecker::TypeCheckerImpl::LookupForeignRuntimeFunc(
             break;
         }
     }
-    if (!func) {
-        return {};
-    }
+    CJC_NULLPTR_CHECK(func);
     if (!runtimeTy.IsGeneric()) {
         // Only an implementation of the ForeignRuntime member qualifies, not an overload with the same name.
         auto implements = [this, &runtimeTy, func](const FuncDecl& fd) {
