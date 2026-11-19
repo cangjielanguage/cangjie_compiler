@@ -218,6 +218,15 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
                 CJC_NULLPTR_CHECK(body);
                 scopeNeedsRegion.emplace(body);
             }
+        } else if (auto box = DynamicCast<Box>(&expr)) {
+            // A box for a local interface is allocated in the current region, including Copyable sources.
+            // Nothing boxes are unreachable placeholders and do not allocate.
+            if (!box->GetSourceType()->StripAllRefs()->IsNothing() &&
+                box->GetTargetType()->StripAllRefs()->IsLocalRegion()) {
+                auto body = expr.GetFuncOrLambdaBody();
+                CJC_NULLPTR_CHECK(body);
+                scopeNeedsRegion.emplace(body);
+            }
         } else if (Is<Constant>(expr)) {
             // 7. a literal whose type does not implement `Copyable` and has mode `local!`.
             if (expr.GetResult()->GetType()->StripAllRefs()->IsMustLocalRegion()) {

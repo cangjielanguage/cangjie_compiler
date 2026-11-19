@@ -11,14 +11,10 @@
 
 #include "ParserImpl.h"
 
-#include "cangjie/AST/Match.h"
-#include "cangjie/Utils/Utils.h"
+#include "cangjie/AST/ASTCasting.h"
 
 using namespace Cangjie;
 using namespace AST;
-
-// LOCAL_MODE_SPECIFIER and IsModalSpecifierPair are shared with the macro pipeline,
-// see include/cangjie/Lex/Token.h.
 
 // BaseType is atomicType in BNF.
 OwnedPtr<AST::Type> ParserImpl::ParseBaseType()

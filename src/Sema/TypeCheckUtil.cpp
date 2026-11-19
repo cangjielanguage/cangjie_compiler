@@ -308,7 +308,7 @@ bool IsFieldOperator(const std::string& field)
 std::vector<ModalTy> GetParamTys(const FuncDecl& fd)
 {
     if (fd.TestAttr(Attribute::IMPORTED) && fd.GetTy().IsCorrect() && fd.GetTy()->IsFunc()) {
-        return DynamicCast<FuncTy*>(fd.DataTy())->paramTys;
+        return StaticCast<FuncTy>(fd.DataTy())->paramTys;
     }
     CJC_NULLPTR_CHECK(fd.funcBody);
     return GetFuncBodyParamTys(*fd.funcBody);

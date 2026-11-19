@@ -228,7 +228,7 @@ llvm::Value* HandleBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
 
     if (srcCGType->GetSize()) {
         // 1. Allocate memory for boxing srcValue.
-        llvm::Value* temp = irBuilder.CallClassIntrinsicAlloc(*DeRef(*srcCHIRType));
+        llvm::Value* temp = irBuilder.CallBoxIntrinsicAlloc(*DeRef(*srcCHIRType), *boxExpr.GetTargetType());
         // 2. store srcValue to temp
         auto payloadPtr = irBuilder.GetPayloadFromObject(temp);
         auto addr = irBuilder.CreateBitCast(payloadPtr,
@@ -241,7 +241,7 @@ llvm::Value* HandleBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
         (void)irBuilder.CreateStore(cgVal, CGValue(addr, addrType));
         return temp;
     } else if (IsThisArgOfStructMethod(*srcObject)) {
-        auto tmp = irBuilder.CallClassIntrinsicAlloc(*DeRef(*srcCHIRType));
+        auto tmp = irBuilder.CallBoxIntrinsicAlloc(*DeRef(*srcCHIRType), *boxExpr.GetTargetType());
         auto payloadPtr = irBuilder.GetPayloadFromObject(tmp);
         auto size = irBuilder.GetLayoutSize_32(*DeRef(*srcCHIRType));
         llvm::Value* srcValue = cgVal.GetRawValue();
