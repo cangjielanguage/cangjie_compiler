@@ -249,6 +249,12 @@ void TypeChecker::TypeCheckerImpl::CheckUnsafeInvoke(const CallExpr& ce)
     if (ce.resolvedFunction == nullptr || !ce.resolvedFunction->GetTy().IsCorrect() || !IsUnsafeBackend(backendType)) {
         return;
     }
+    // Without --experimental an ArkTS declaration keeps its foreign spelling
+    // but no wrapper is prepared; the unsafe rule must not pre-empt the gate
+    // with a second user-facing diagnostic.
+    if (Native::FFI::ArkTS::IsGatedArkTSDecl(*ce.resolvedFunction)) {
+        return;
+    }
     auto funcTy = StaticCast<FuncTy*>(ce.resolvedFunction->GetTy());
     // A prepared @ArkTS wrapper keeps FOREIGN as its source identity but is an
     // ordinary Cangjie function: its calls do not need 'unsafe'. Generic and
@@ -297,7 +303,7 @@ void TypeChecker::TypeCheckerImpl::UnsafeCheck(const FuncBody& fb)
         (fb.funcDecl->HasAnno(AnnotationKind::ARKTS) ||
             (fb.funcDecl->outerDecl && fb.funcDecl->outerDecl->HasAnno(AnnotationKind::ARKTS) &&
                 fb.funcDecl->outerDecl->TestAttr(Attribute::FOREIGN)));
-    if (fb.funcDecl && !arktsDecl &&
+    if (fb.funcDecl && !arktsDecl && !Native::FFI::ArkTS::IsGatedArkTSDecl(*fb.funcDecl) &&
         (fb.funcDecl->TestAttr(Attribute::FOREIGN) || fb.funcDecl->TestAttr(Attribute::C))) {
         CJC_ASSERT(!fb.paramLists.empty() && "function body's param list cannot be empty!");
         for (auto& arg : fb.paramLists[0]->params) {

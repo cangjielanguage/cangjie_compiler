@@ -124,6 +124,11 @@ class ArkTSForeignDiagTest : public testing::Test {
 protected:
     void SetUp() override
     {
+        // ArkTS interop is experimental: the checker enables its prepare and
+        // lower passes only when the user passes --experimental. Tests that
+        // call the ArkTS entry points directly also set the namespace gate.
+        invocation.globalOptions.experimentalMode = true;
+        Native::FFI::ArkTS::SetExperimentalEnabled(true);
         instance = std::make_unique<TestCompilerInstance>(invocation, diag);
 #ifdef PROJECT_SOURCE_DIR
         // Gets the absolute path of the project from the compile parameter.
@@ -4761,4 +4766,239 @@ public func good(): Unit {}
     EXPECT_EQ(registration->begin.column, good->begin.column);
     EXPECT_EQ(registration->end.line, good->end.line);
     EXPECT_EQ(registration->end.column, good->end.column);
+}
+
+// ArkTS interop is experimental. Without --experimental the capability reports
+// one gate diagnostic per source file and no prepare/lower pass runs, so the
+// input cannot silently reach the ArkTS code generator.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateRejectsArkTSWithoutFlag)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+@ArkTS
+public func run(): Unit {
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("requires the '--experimental' compiler option"));
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// The same input is not refused by the gate when the flag is present; any
+// remaining error belongs to the normal ArkTS contract (missing support
+// packages in this bare fixture), not to the experimental gate. That support
+// error is the positive control proving the file passed the gate.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateAllowsArkTSWithFlag)
+{
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+@ArkTS
+public func run(): Unit {
+}
+)");
+    EXPECT_FALSE(HasErrorContaining("requires the '--experimental'"));
+    EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
+}
+
+// @RawValue is an ArkTS-only annotation too: a file that carries it without
+// @ArkTS is still refused by the experimental gate.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateRejectsRawValueWithoutFlag)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+enum Color {
+    @RawValue[1] Red
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("requires the '--experimental' compiler option"));
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+
+// A non-annotated reference to a gated declaration must not produce a second
+// "undeclared" error: the gate is the only user-facing diagnostic.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForAReferencedDeclaration)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+@ArkTS
+public class C {
+    public init() {}
+}
+
+public func make(): C {
+    C()
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// A foreign declaration keeps its foreign spelling when the gate is off; the
+// unsafe-invoke rule must not add a second error on an ordinary call.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForAReferencedForeignFunction)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+@ArkTS[module: "m"]
+public foreign func echo(): Unit
+
+public func callEcho(): Unit {
+    echo()
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// The same cascade applies to a foreign class construction.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForAReferencedForeignClass)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+@ArkTS[foreignName: "C"]
+public foreign class C {
+    public init()
+}
+
+public func make(): C {
+    C()
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// ArkTS-only parser diagnostics are gated too: a malformed annotation must
+// reach Sema and produce the gate, not a parser error that pre-empts it.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForMalformedParserInput)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+enum Color {
+    @RawValue[] Red
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// A source without any ArkTS-only annotation is untouched by the gate.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateLeavesPlainSourceAlone)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+public func plain(): Int64 {
+    return 1
+}
+)");
+    EXPECT_EQ(handler->messages.size(), 0U);
+}
+
+// @WriteOnly takes no arguments; its parser rule is gated like the rest.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateRejectsWriteOnlyArgumentsWithoutFlag)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+public class C {
+    @WriteOnly[1]
+    public mut prop p: Int64 {
+        get() { 0 }
+        set(v) {}
+    }
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// With the flag on, parser ArkTS diagnostics are not over-suppressed.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateKeepsParserDiagnosticsWithFlag)
+{
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+enum Color {
+    @RawValue[] Red
+}
+)");
+    EXPECT_FALSE(HasErrorContaining("requires the '--experimental'"));
+    EXPECT_TRUE(HasErrorContaining("@RawValue"));
+}
+
+// A malformed declaration carrying only @RestParam is still ArkTS-only: the
+// C ABI and unsafe-invoke cascades are suppressed, leaving the gate.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForRestParamOnlyForeign)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+foreign func f(@RestParam xs: Array<Int32>): Unit
+
+public func call(): Unit {
+    f([])
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// Generic placement allow-lists are gated too: an @ArkTS annotation in an
+// invalid position reaches Sema instead of producing a parser error first.
+TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForInvalidPlacement)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+public class C {
+    public prop p: Int64 {
+        @ArkTS
+        get() { 0 }
+    }
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
 }

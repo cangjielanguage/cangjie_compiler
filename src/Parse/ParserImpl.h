@@ -255,6 +255,11 @@ private:
     {
         return Triple::BackendType::CJNATIVE;
     }
+
+    // ArkTS interop is experimental: the parser runs its ArkTS-only
+    // diagnostics only when the user passed --experimental, so the Sema gate
+    // remains the single user-facing diagnostic for a refused file.
+    bool experimentalMode{false};
     // we store line number info from all tokens
     // pair<line num of the begin, line num of the end>
     std::list<std::pair<unsigned, unsigned>> allTokensInOneFile;

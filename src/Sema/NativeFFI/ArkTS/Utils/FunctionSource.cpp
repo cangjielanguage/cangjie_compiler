@@ -4,6 +4,7 @@
 //
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
+#include "../ArkTSInterop.h"
 #include "../FunctionSource.h"
 
 #include <algorithm>
@@ -416,7 +417,8 @@ bool ArkTSWriteOnlyProp(const Decl& decl)
 
 Ptr<PropDecl> ArkTSWriteOnlyTargetProp(const Node& usage)
 {
-    if ((usage.astKind != ASTKind::MEMBER_ACCESS && usage.astKind != ASTKind::REF_EXPR) ||
+    if (!ExperimentalEnabled() ||
+        (usage.astKind != ASTKind::MEMBER_ACCESS && usage.astKind != ASTKind::REF_EXPR) ||
         usage.TestAttr(Attribute::LEFT_VALUE) || usage.TestAttr(Attribute::COMPILER_ADD)) {
         return nullptr;
     }
@@ -451,6 +453,40 @@ bool IsArkTSDecl(const Decl& decl)
     }
     return decl.outerDecl != nullptr &&
         (decl.outerDecl->HasAnno(AnnotationKind::ARKTS) || decl.outerDecl->TestAttr(Attribute::ARKTS));
+}
+
+bool IsGatedArkTSDecl(const Decl& decl)
+{
+    if (ExperimentalEnabled()) {
+        return false;
+    }
+    if (IsArkTSDecl(decl)) {
+        return true;
+    }
+    // A malformed declaration may carry only @RestParam on a parameter; it is
+    // still ArkTS-only and must not gain the unsafe-invoke cascade.
+    auto fd = DynamicCast<const FuncDecl*>(&decl);
+    if (fd == nullptr || fd->funcBody == nullptr) {
+        return false;
+    }
+    for (const auto& list : fd->funcBody->paramLists) {
+        if (list == nullptr) {
+            continue;
+        }
+        for (const auto& param : list->params) {
+            if (param == nullptr) {
+                continue;
+            }
+            for (const auto& anno : param->annotations) {
+                if (anno != nullptr &&
+                    (anno->kind == AnnotationKind::ARKTS || anno->kind == AnnotationKind::RAW_VALUE ||
+                        anno->kind == AnnotationKind::REST_PARAM || anno->kind == AnnotationKind::WRITE_ONLY)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 bool IsArkTSReferenceDecl(const Decl& decl)

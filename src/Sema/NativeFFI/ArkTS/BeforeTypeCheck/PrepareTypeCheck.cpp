@@ -202,6 +202,11 @@ bool HasGeneratedEntry(const GeneratedDeclarations& declarations, const FuncDecl
 void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
     ImportManager* importManager)
 {
+    if (!PassEnabled(pkg)) {
+        // The checker reports the gate once per package before this call; the
+        // prepare pass itself must not run on a refused source.
+        return;
+    }
     // Validate @WriteOnly placement on the source AST, before preparation
     // rewrites member shapes and installs generated accessors.
     DiagnoseArkTSWriteOnlyPlacement(pkg, diag);

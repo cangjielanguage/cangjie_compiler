@@ -22,6 +22,9 @@ using namespace Cangjie::AST;
 
 void CheckAnnoRawValue(Decl& decl, const Annotation& anno, DiagnosticEngine& diag)
 {
+    if (!ExperimentalEnabled()) {
+        return;
+    }
     // @RawValue maps a constructor of an @ArkTS enum to its ArkTS value. Both
     // a lowered foreign enum and an exported non-foreign enum are accepted:
     // the owner is checked through its annotation as well as the prepared

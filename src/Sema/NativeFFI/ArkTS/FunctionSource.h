@@ -116,6 +116,10 @@ void CheckArkTSWriteOnlyRead(AST::Node& usage, DiagnosticEngine& diag);
 // Such a declaration uses the foreign spelling but not the C ABI, so the
 // shared C-interop rules must not treat it as a C declaration.
 bool IsArkTSDecl(const AST::Decl& decl);
+// An ArkTS-only declaration while the experimental gate is off. Shared rules
+// (for example the unsafe-invoke check) must not add their own diagnostic for
+// it: the gate is the only user-facing diagnostic.
+bool IsGatedArkTSDecl(const AST::Decl& decl);
 // A declaration usable as an ArkTS object reference: a prepared foreign class
 // or a prepared foreign interface.
 bool IsArkTSReferenceDecl(const AST::Decl& decl);

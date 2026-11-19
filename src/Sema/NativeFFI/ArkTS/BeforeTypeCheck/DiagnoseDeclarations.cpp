@@ -48,6 +48,14 @@ const Annotation* FindArkTSAnnotation(const Decl& decl)
     return FindAnnotation(decl, AnnotationKind::ARKTS);
 }
 
+// The annotations that exist only for the ArkTS interop capability. Any one of
+// them in source selects the capability and therefore the experimental gate.
+bool IsArkTSOnlyAnnotation(AnnotationKind kind)
+{
+    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::RAW_VALUE || kind == AnnotationKind::REST_PARAM ||
+        kind == AnnotationKind::WRITE_ONLY;
+}
+
 // A non-foreign entry may not declare type parameters. The parser rejects the
 // same shape only for a `foreign` function, so the generic spelling reaches
 // this pass for an ordinary @ArkTS function.
@@ -416,5 +424,34 @@ void DiagnoseArkTSDeclarations(Package& pkg, DiagnosticEngine& diag)
     DiagnoseEntries(pkg, diag);
     DiagnosePlacementAndOptions(pkg, diag);
     DiagnoseReservedGeneratedNames(pkg, diag);
+}
+
+// One diagnostic per source file, at its first ArkTS-only annotation. The walk
+// covers declarations and parameters alike because annotations are AST nodes;
+// a file with several annotated declarations reports the capability once.
+void DiagnoseExperimentalGate(Package& pkg, DiagnosticEngine& diag)
+{
+    if (ExperimentalEnabled() || pkg.TestAttr(Attribute::IMPORTED)) {
+        return;
+    }
+    for (auto& file : pkg.files) {
+        if (file == nullptr) {
+            continue;
+        }
+        bool reported = false;
+        Walker(file.get(), [&diag, &reported](Ptr<Node> node) {
+            // Report once, at the first ArkTS-only annotation of the file.
+            // The declaration is deliberately left unbroken: marking a gated
+            // declaration IS_BROKEN removes it from symbol lookup and turns
+            // every ordinary reference to it into a cascading "undeclared"
+            // error, which would defeat the one-diagnostic gate contract.
+            auto annotation = DynamicCast<Annotation*>(node);
+            if (!reported && annotation != nullptr && IsArkTSOnlyAnnotation(annotation->kind)) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_requires_experimental, *annotation);
+                reported = true;
+            }
+            return VisitAction::WALK_CHILDREN;
+        }).Walk();
+    }
 }
 } // namespace Cangjie::Native::FFI::ArkTS

@@ -18,6 +18,9 @@ using namespace Cangjie::AST;
 
 void ArkTSParserImpl::CheckAnnotation(Annotation& anno) const
 {
+    if (!p.experimentalMode) {
+        return;
+    }
     switch (anno.kind) {
         case AnnotationKind::REST_PARAM: {
             // @RestParam belongs to a parameter, never to the declaration
@@ -35,6 +38,9 @@ void ArkTSParserImpl::CheckAnnotation(Annotation& anno) const
 
 void ArkTSParserImpl::CheckRestParamAnnoArgs(Annotation& anno) const
 {
+    if (!p.experimentalMode) {
+        return;
+    }
     static const std::string REST_PARAM_NAME = "@RestParam";
     // The annotation takes no arguments; the shared FFI parser owns the
     // diagnostic and marks the annotation broken.
@@ -43,6 +49,9 @@ void ArkTSParserImpl::CheckRestParamAnnoArgs(Annotation& anno) const
 
 void ArkTSParserImpl::DiagRestParamOnNonArkTSForeign(const Decl& decl, const Annotation& anno) const
 {
+    if (!p.experimentalMode) {
+        return;
+    }
     // @RestParam only has a meaning on an ArkTS foreign declaration; name
     // the declaration that actually carries it. The parameter is a Decl so
     // the init, primary-constructor and prop-member paths report through
@@ -55,6 +64,9 @@ void ArkTSParserImpl::DiagRestParamOnNonArkTSForeign(const Decl& decl, const Ann
 
 void ArkTSParserImpl::DiagRestParamNotLastPositional(const FuncParam& param, const Annotation& anno) const
 {
+    if (!p.experimentalMode) {
+        return;
+    }
     // The rest parameter must be the last positional parameter, so a
     // named parameter or a trailing positional one is rejected by name.
     // Input -> diagnostic text (verbatim, DiagnosticParser.def):
@@ -65,6 +77,9 @@ void ArkTSParserImpl::DiagRestParamNotLastPositional(const FuncParam& param, con
 
 void ParserImpl::DiagRestParamFunctionHasNamedParams(const Annotation& anno, const FuncParam& namedParam)
 {
+    if (!experimentalMode) {
+        return;
+    }
     // A function that contains a rest parameter cannot contain any named
     // parameter. That Cangjie-side rule is a different error from a
     // misplaced rest annotation, so it gets its own diagnostic instead of

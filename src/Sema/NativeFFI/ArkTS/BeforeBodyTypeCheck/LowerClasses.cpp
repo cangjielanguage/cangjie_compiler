@@ -233,7 +233,7 @@ struct TypeChecker::TypeCheckerImpl::ArkTSDeclLoweringContext {
 void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
 {
     auto& pkg = *ctx.curPackage;
-    if (pkg.TestAttr(Attribute::IMPORTED)) {
+    if (!PassEnabled(pkg)) {
         return;
     }
     // Step 1. Validate every @ArkTS-carrying declaration before any

@@ -17,6 +17,20 @@ class DiagnosticEngine;
 class SourceManager;
 class ImportManager;
 namespace Native::FFI::ArkTS {
+// ArkTS interop is an experimental capability. The checker sets the gate once
+// per semantic pass from GlobalOptions::experimentalMode; every prepare/lower
+// entry point refuses to run while the gate is off, and the package reports
+// one sema_arkts_requires_experimental diagnostic per file that carries an
+// ArkTS-only annotation.
+void SetExperimentalEnabled(bool enabled);
+bool ExperimentalEnabled();
+// The per-package pass gate: the capability is enabled and the package is a
+// source package. Every prepare/lower entry point uses this one predicate so
+// a new pass cannot drift from the gate.
+bool PassEnabled(const AST::Package& pkg);
+// Report the gate diagnostic at the first ArkTS-only annotation of each file.
+// No-op when the capability is enabled or the package is imported.
+void DiagnoseExperimentalGate(AST::Package& pkg, DiagnosticEngine& diag);
 // The real compiler path passes the import manager so an @ArkTS entry whose
 // interop packages are not visible is refused once, before the generated
 // callback signature can surface undeclared-type noise. Unit tests that call

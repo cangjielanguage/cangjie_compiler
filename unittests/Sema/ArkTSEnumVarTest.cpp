@@ -82,6 +82,9 @@ class ArkTSEnumVarTest : public testing::Test {
 protected:
     void SetUp() override
     {
+        // ArkTS interop is experimental: the checker enables its prepare and
+        // lower passes only when the user passes --experimental.
+        invocation.globalOptions.experimentalMode = true;
         instance = std::make_unique<TestCompilerInstance>(invocation, diag);
 #ifdef PROJECT_SOURCE_DIR
         projectPath = PROJECT_SOURCE_DIR;

@@ -12,6 +12,11 @@ functions. The context implementation remains ABI 1: one `ThreadLocal` state,
 enter/current/restore, and the existing native-environment checks. There is no
 application ID in the source or package identity.
 
+ArkTS interop is an experimental compiler capability. `build_sdk.py` always
+passes `--experimental` to the toolchain, matching application builds and any
+`@ArkTS` declaration added to this project. A build that invokes `cjpm`/`cjc`
+directly on a project containing `@ArkTS` must pass the same flag.
+
 Build the package once per target and toolchain combination, outside this
 repository, using `build_sdk.py`. The driver runs real `cjpm build` against a
 complete Cangjie toolchain and the existing OHOS SDK/NDK. It copies the fixed
@@ -57,7 +62,7 @@ same binary dependency directories. Compilation and ELF inspection do not prove
 runtime context isolation; validate it in the paired real applications.
 
 The checked configuration targets API26 with its CJPM 1.2 toolchain layout and
-the paired compiler supporting CJO 0.2.0. `cjc-version = "1.2.0"` is the CJPM
+the paired compiler supporting CJO 0.3.0. `cjc-version = "1.2.0"` is the CJPM
 package compatibility declaration, not a promise that arbitrary compiler or SDK
 versions can be mixed. `--toolchain-root` selects a complete compatible toolchain;
 retain the SDK's standard-library/runtime files and record the actual compiler,

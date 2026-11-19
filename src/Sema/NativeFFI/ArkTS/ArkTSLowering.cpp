@@ -257,6 +257,10 @@ struct ArkTSLoweringState {
 };
 
 ArkTSLoweringState g_arktsState;
+
+// The experimental gate is not part of the per-pass lowering tables: the
+// checker sets it before ResetState, and it must survive that reset.
+bool g_arktsExperimentalEnabled = false;
 }
 
 namespace Cangjie::Native::FFI::ArkTS {
@@ -648,15 +652,33 @@ void Native::FFI::ArkTS::PrepareEnum(AST::EnumDecl& decl, DiagnosticEngine& diag
     g_arktsState.enums.emplace(&decl, std::move(members));
 }
 
+void Native::FFI::ArkTS::SetExperimentalEnabled(bool enabled)
+{
+    g_arktsExperimentalEnabled = enabled;
+}
+
+bool Native::FFI::ArkTS::ExperimentalEnabled()
+{
+    return g_arktsExperimentalEnabled;
+}
+
+bool Native::FFI::ArkTS::PassEnabled(const AST::Package& pkg)
+{
+    return ExperimentalEnabled() && !pkg.TestAttr(Attribute::IMPORTED);
+}
+
 void Native::FFI::ArkTS::PrepareVariablesAndEnums(AST::Package& pkg, DiagnosticEngine& diag)
 {
+    if (!PassEnabled(pkg)) {
+        return;
+    }
     PrepareVariables(pkg, diag);
     PrepareEnums(pkg, diag);
 }
 
 void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
 {
-    if (ctx.curPackage->TestAttr(Attribute::IMPORTED)) {
+    if (!Native::FFI::ArkTS::PassEnabled(*ctx.curPackage)) {
         return;
     }
     for (auto& file : ctx.curPackage->files) {

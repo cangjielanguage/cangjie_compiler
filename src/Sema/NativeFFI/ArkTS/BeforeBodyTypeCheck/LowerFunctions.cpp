@@ -12,6 +12,7 @@
 #include <tuple>
 #include <unordered_map>
 
+#include "../ArkTSInterop.h"
 #include "../FunctionSource.h"
 #include "../Utils/ASTFactory.h"
 #include "Collector.h"
@@ -187,7 +188,7 @@ bool Cangjie::Native::FFI::ArkTS::BindArkTSSupportReferences(Decl& owner, Node& 
 void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
 {
     auto& pkg = *ctx.curPackage;
-    if (pkg.TestAttr(Attribute::IMPORTED)) {
+    if (!PassEnabled(pkg)) {
         return;
     }
     // The option fold below covers the lowered wrappers; every other

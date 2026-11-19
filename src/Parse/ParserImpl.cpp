@@ -226,6 +226,10 @@ void ParserImpl::ApplyCompileOptions()
     // keywords, so we disable them from the parser unless the user
     // explicitly asks to compile with effect handler support
     lexer->SetEHEnabled(opts->enableEH);
+    // ArkTS interop is experimental: the parser runs its ArkTS-only diagnostics
+    // only under --experimental so the Sema gate stays the single user-facing
+    // diagnostic for a refused file.
+    experimentalMode = opts->experimentalMode;
     // set compile options for cjmp implementation
     mpImpl->SetCompileOptions(*opts);
 }

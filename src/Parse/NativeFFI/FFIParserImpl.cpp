@@ -87,6 +87,11 @@ void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos)
             // duplicated builtin annotations are reported with a different diagnostic
             continue;
         }
+        // An ArkTS conflict without --experimental belongs to the Sema gate.
+        if (!p.experimentalMode &&
+            (first->kind == AnnotationKind::ARKTS || (*conflicted)->kind == AnnotationKind::ARKTS)) {
+            continue;
+        }
         auto& lah = p.lookahead;
         DiagConflictingAnnos(p.diag, *first, **conflicted, lah.Value());
     }
@@ -94,6 +99,11 @@ void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos)
 
 void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) const
 {
+    // The block option rules are ArkTS-only. Without --experimental the Sema
+    // gate owns the refusal, so no parser option diagnostic may pre-empt it.
+    if (!p.experimentalMode) {
+        return;
+    }
     // A block annotation is cloned into every member, so every block-level
     // rule is applied once here and the refused part is dropped before
     // cloning.
@@ -219,8 +229,11 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
             }
             case AnnotationKind::WRITE_ONLY: {
                 // The annotation takes no arguments; its placement on a member
-                // is validated by the ArkTS declaration pass.
-                CheckNoArgAnnotation(anno, "@" + anno.identifier.Val());
+                // is validated by the ArkTS declaration pass. Without
+                // --experimental the Sema gate owns the refusal.
+                if (p.experimentalMode) {
+                    CheckNoArgAnnotation(anno, "@" + anno.identifier.Val());
+                }
                 break;
             }
             default:

@@ -34,7 +34,10 @@ protected:
     OwnedPtr<File> Parse(const std::string& code)
     {
         diag.SetSourceManager(&sm);
+        GlobalOptions compileOptions;
+        compileOptions.experimentalMode = true;
         Parser parser(code, diag, sm);
+        parser.SetCompileOptions(compileOptions);
         auto file = parser.ParseTopLevel();
         diag.EmitCategoryDiagnostics(DiagCategory::PARSE);
         return file;

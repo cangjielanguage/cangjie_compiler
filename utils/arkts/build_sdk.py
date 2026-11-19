@@ -102,7 +102,9 @@ def main():
     project = work / "project"
     native_view, toolchain_view = work / "native", work / "toolchain"
     api_view = work / "sdk/api/lib" / f"linux_ohos_{arch}_cjnative"
-    options = ["--dy-std", "--diagnostic-format=noColor", "-B",
+    # ArkTS interop is experimental: the SDK driver opts in like an application
+    # build, so any @ArkTS declaration in this project stays buildable.
+    options = ["--experimental", "--dy-std", "--diagnostic-format=noColor", "-B",
                str(native_view / f"sysroot/usr/lib/{args.target}"), "--sysroot", str(native_view / "sysroot")]
     for directory in (native_view / f"sysroot/usr/lib/{args.target}",
                       native_view / clang_paths[0].relative_to(native),

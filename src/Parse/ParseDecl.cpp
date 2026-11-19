@@ -28,6 +28,15 @@ using namespace AST;
 namespace {
 constexpr std::string_view ELLIPSIS("...");
 
+// The annotations that exist only for the experimental ArkTS capability. The
+// generic placement allow-lists skip them while the capability is off so the
+// Sema gate remains the only user-facing diagnostic for a refused file.
+bool IsArkTSOnlyAnnotationKind(AnnotationKind kind)
+{
+    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::RAW_VALUE ||
+        kind == AnnotationKind::REST_PARAM || kind == AnnotationKind::WRITE_ONLY;
+}
+
 // The access-modifier x FOREIGN conflict is lifted only on declarations
 // carrying the @ArkTS annotation, so the class/interface handlers compute
 // this flag from their annotations (which are still intact here: they are
@@ -370,6 +379,9 @@ void ParserImpl::ParseTypeAndExpr(Ptr<VarDeclAbstract> const ret)
 void ParserImpl::CheckGetterAnnotations(std::vector<OwnedPtr<Annotation>>& annos, const Ptr<Node> getter)
 {
     for (auto& anno : std::as_const(annos)) {
+        if (!experimentalMode && IsArkTSOnlyAnnotationKind(anno->kind)) {
+            continue;
+        }
         DiagUnexpectedAnnoOn(*anno, getter->begin, anno->identifier, "get");
     }
 }
@@ -377,6 +389,9 @@ void ParserImpl::CheckGetterAnnotations(std::vector<OwnedPtr<Annotation>>& annos
 void ParserImpl::CheckSetterAnnotations(std::vector<OwnedPtr<Annotation>>& annos, const Ptr<Node> setter)
 {
     for (auto& anno : std::as_const(annos)) {
+        if (!experimentalMode && IsArkTSOnlyAnnotationKind(anno->kind)) {
+            continue;
+        }
         if (anno->kind != AnnotationKind::DEPRECATED) {
             DiagUnexpectedAnnoOn(*anno, setter->begin, anno->identifier, "set");
         }
@@ -1282,6 +1297,9 @@ OwnedPtr<Decl> ParserImpl::ParseEnumConstructor(
         DiagExpectNoModifier(firstMod);
     }
     for (auto& anno : annos) {
+        if (!experimentalMode && IsArkTSOnlyAnnotationKind(anno->kind)) {
+            continue;
+        }
         if (!(anno->kind == AnnotationKind::WHEN || anno->kind == AnnotationKind::DEPRECATED ||
             anno->kind == AnnotationKind::RAW_VALUE)) {
             DiagUnexpectedAnnoOn(*annos[0], caseIdentPos, annos[0]->identifier, caseIdent);
@@ -2060,6 +2078,9 @@ OwnedPtr<MainDecl> ParserImpl::ParseMainDecl(
         AnnotationKind::C,
     };
     for (auto& anno : annos) {
+        if (!experimentalMode && IsArkTSOnlyAnnotationKind(anno->kind)) {
+            continue;
+        }
         if (std::find(annoOnMain.begin(), annoOnMain.end(), anno->kind) == annoOnMain.end()) {
             DiagUnexpectedAnnoOn(*annos[0], ret->identifier.Begin(), annos[0]->identifier.Val(), ret->identifier.Val());
         }

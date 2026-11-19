@@ -7,6 +7,8 @@
 ERROR(sema_diag_begin, "")
 
 // General
+ERROR(sema_arkts_requires_experimental,
+    "ArkTS interop is an experimental feature and requires the '--experimental' compiler option")
 ERROR(sema_arkts_bridge_pending, "ArkTS foreign declaration is not supported in this compiler build")
 ERROR(sema_arkts_foreign_var_unsupported, "ArkTS foreign variable is not supported; declare it as '@ArkTS[globalVar: true] foreign func': %s")
 ERROR(sema_arkts_exported_var_unsupported_type, "ArkTS exported variable type is not supported: %s")

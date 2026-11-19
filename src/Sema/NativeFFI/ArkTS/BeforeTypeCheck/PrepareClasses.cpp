@@ -331,7 +331,7 @@ bool InstallWrapperMembers(
 // shape, not a user-facing ordering contract.
 void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager* imports)
 {
-    if (imports == nullptr) {
+    if (!PassEnabled(pkg) || imports == nullptr) {
         return;
     }
     // Every top-level declaration of the package by identifier, for the bare

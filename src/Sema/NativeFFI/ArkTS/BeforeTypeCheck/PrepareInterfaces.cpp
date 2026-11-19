@@ -268,7 +268,7 @@ void PrepareInterface(
 // symbol-table building. FOREIGN stays on it as the source identity.
 void PrepareInterfaces(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager* imports)
 {
-    if (imports == nullptr) {
+    if (!PassEnabled(pkg) || imports == nullptr) {
         return;
     }
     for (auto& file : pkg.files) {

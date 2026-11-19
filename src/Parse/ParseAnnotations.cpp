@@ -377,6 +377,9 @@ void ParserImpl::CheckObjCMirrorAnnotation(Annotation& anno) const
 
 void ParserImpl::CheckRawValueAnnotation(const Annotation& anno)
 {
+    if (!experimentalMode) {
+        return;
+    }
     // @RawValue accepts exactly one unnamed argument: an integer, string or
     // boolean literal. The argument-count gate lives here so @RawValue[] or
     // @RawValue[1, 2] cannot fall through to the Sema auto-increment branch

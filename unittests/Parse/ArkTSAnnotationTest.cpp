@@ -32,12 +32,26 @@ using namespace Cangjie::Native::FFI::ArkTS;
 
 class ArkTSEntryTest : public testing::Test {
 protected:
+    // These tests call the ArkTS prepare entry points directly rather than
+    // driving TypeChecker, so they must open the experimental gate themselves.
+    void SetUp() override
+    {
+        SetExperimentalEnabled(true);
+    }
+    void TearDown() override
+    {
+        SetExperimentalEnabled(false);
+    }
+
     SourceManager sm;
     DiagnosticEngine diag;
     OwnedPtr<File> Parse(const std::string& code)
     {
         diag.SetSourceManager(&sm);
+        GlobalOptions compileOptions;
+        compileOptions.experimentalMode = true;
         Parser parser(code, diag, sm);
+        parser.SetCompileOptions(compileOptions);
         auto file = parser.ParseTopLevel();
         diag.EmitCategoryDiagnostics(DiagCategory::PARSE);
         return file;
@@ -48,6 +62,7 @@ protected:
         diag.SetSourceManager(&sm);
         GlobalOptions options;
         options.scanDepPkg = true;
+        options.experimentalMode = true;
         Parser parser(code, diag, sm);
         parser.SetCompileOptions(options);
         return parser.ParseTopLevel();
@@ -63,6 +78,7 @@ protected:
         diag.SetSourceManager(&sm);
         GlobalOptions options;
         options.scanDepPkg = scanDepPkg;
+        options.experimentalMode = true;
         Parser parser(code, diag, sm);
         parser.SetCompileOptions(options);
         return parser.ParseTopLevel();
@@ -976,7 +992,10 @@ TEST_F(ArkTSEntryTest, RepeatedOptionAtOneLevelIsRejectedEvenForEqualValues)
             diagnostics.SetSourceManager(&sourceManager);
             const auto code = "@ArkTS[" + std::string(name) + ": \"first\", " + name + ": \"" +
                 second + "\"] foreign func invalid(): Unit\n";
+            GlobalOptions compileOptions;
+            compileOptions.experimentalMode = true;
             Parser parser(code, diagnostics, sourceManager);
+            parser.SetCompileOptions(compileOptions);
             auto file = parser.ParseTopLevel();
             diagnostics.EmitCategoryDiagnostics(DiagCategory::PARSE);
             EXPECT_EQ(diagnostics.GetErrorCount(), 0);
@@ -1321,7 +1340,10 @@ TEST_F(ArkTSEntryTest, ArkTSRejectsConflictingForeignABIAnnotations)
         SourceManager sourceManager;
         DiagnosticEngine diagnostics;
         diagnostics.SetSourceManager(&sourceManager);
+        GlobalOptions compileOptions;
+        compileOptions.experimentalMode = true;
         Parser parser(code, diagnostics, sourceManager);
+        parser.SetCompileOptions(compileOptions);
         auto file = parser.ParseTopLevel();
         diagnostics.EmitCategoryDiagnostics(DiagCategory::PARSE);
         ASSERT_NE(file, nullptr);
@@ -2016,7 +2038,10 @@ public foreign private class DoublyAccessed {}
         // reset the first case's conflict would be counted again below.
         diag.Reset();
         diag.SetSourceManager(&sm);
+        GlobalOptions compileOptions;
+        compileOptions.experimentalMode = true;
         Parser parser(code, diag, sm);
+        parser.SetCompileOptions(compileOptions);
         auto file = parser.ParseTopLevel();
         ASSERT_NE(file, nullptr);
         const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::PARSE);

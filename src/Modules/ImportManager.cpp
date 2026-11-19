@@ -1254,6 +1254,12 @@ void RemapPctSyncImports(AST::Package& pkg, const GlobalOptions& globalOptions)
 void ImportManager::AddArkTSInteropImports(
     const std::vector<Ptr<Package>>& packages, SourceManager* sourceManager)
 {
+    // The interop packages are compiler-injected support for an experimental
+    // capability; without --experimental the gate diagnostic owns the source
+    // and no implicit import may widen the program's dependencies.
+    if (!opts.experimentalMode) {
+        return;
+    }
     Utils::ProfileRecorder recorder("BuildIndex", "AddArkTSInteropImports");
     for (auto pkg : packages) {
         CJC_NULLPTR_CHECK(pkg);
