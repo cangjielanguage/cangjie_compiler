@@ -771,10 +771,6 @@ bool HasLocalType(const Ty& ty)
 
 bool IsDisabledLocalAPI(const Decl& decl)
 {
-#ifdef __ohos__
-    (void)decl;
-    return false;
-#else
     // Only a property of type 'local!' is unusable; 'local?' is allowed.
     if (auto pd = DynamicCast<PropDecl>(&decl)) {
         return pd->TyMode().local == Mode::FULL || (pd->DataTy() != nullptr && HasLocalType(*pd->DataTy()));
@@ -791,7 +787,6 @@ bool IsDisabledLocalAPI(const Decl& decl)
         return true;
     }
     return fd->DataTy() != nullptr && HasLocalType(*fd->DataTy());
-#endif
 }
 
 ModalInfo GetCurThisModal(const ASTContext& ctx, const std::string& scopeName)
