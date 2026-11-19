@@ -22,15 +22,19 @@ using namespace Cangjie::AST;
 
 void CheckAnnoRawValue(Decl& decl, const Annotation& anno, DiagnosticEngine& diag)
 {
-    // @RawValue maps a constructor of an ArkTS foreign enum to its ArkTS
-    // value. Those enums are marked ARKTS_LOWERED during prepare-typecheck,
-    // which always runs before this check.
+    // @RawValue maps a constructor of an @ArkTS enum to its ArkTS value. Both
+    // a lowered foreign enum and an exported non-foreign enum are accepted:
+    // the owner is checked through its annotation as well as the prepared
+    // marker, so neither spelling is refused.
     auto owner = decl.outerDecl;
-    if (decl.TestAttr(Attribute::ENUM_CONSTRUCTOR) && owner && owner->astKind == ASTKind::ENUM_DECL &&
-        owner->TestAttr(Attribute::ARKTS_LOWERED)) {
-        // A constructor with an associated value maps a type member; its value
-        // is the payload, not a literal, so @RawValue cannot describe it.
-        if (decl.astKind == ASTKind::FUNC_DECL) {
+    const bool arktsEnum = owner && owner->astKind == ASTKind::ENUM_DECL &&
+        (owner->HasAnno(AnnotationKind::ARKTS) || owner->TestAttr(Attribute::ARKTS));
+    if (decl.TestAttr(Attribute::ENUM_CONSTRUCTOR) && arktsEnum) {
+        // A lowered foreign enum constructor with an associated value maps a
+        // type member; its value is the payload, not a literal, so @RawValue
+        // cannot describe it. An exported enum with such a constructor is
+        // refused by the enum shape rule instead.
+        if (decl.astKind == ASTKind::FUNC_DECL && owner->TestAttr(Attribute::ARKTS_LOWERED)) {
             auto& func = static_cast<FuncDecl&>(decl);
             bool hasPayload = false;
             if (func.funcBody != nullptr) {

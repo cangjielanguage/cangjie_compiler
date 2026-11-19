@@ -9,15 +9,18 @@ ERROR(sema_diag_begin, "")
 // General
 ERROR(sema_arkts_bridge_pending, "ArkTS foreign declaration is not supported in this compiler build")
 ERROR(sema_arkts_foreign_var_unsupported, "ArkTS foreign variable is not supported; declare it as '@ArkTS[globalVar: true] foreign func': %s")
+ERROR(sema_arkts_exported_var_unsupported_type, "ArkTS exported variable type is not supported: %s")
 ERROR(sema_arkts_global_var_not_foreign_func, "@ArkTS[globalVar: true] can only annotate a 'foreign func': %s")
 ERROR(sema_arkts_global_var_has_params, "@ArkTS[globalVar: true] 'foreign func' must have no parameters: %s")
+ERROR(sema_arkts_global_var_value_invalid, "'globalVar' option of '@ArkTS' requires a boolean literal")
 ERROR(sema_arkts_enum_member, "ArkTS foreign enum cannot have member functions: %s")
-ERROR(sema_arkts_enum_generic, "ArkTS foreign enum cannot be generic: %s")
-ERROR(sema_arkts_enum_super, "ArkTS foreign enum cannot have super interfaces: %s")
-ERROR(sema_arkts_enum_non_exhaustive, "ArkTS foreign enum must be exhaustive: %s")
+ERROR(sema_arkts_enum_generic, "ArkTS enum cannot be generic: %s")
+ERROR(sema_arkts_enum_super, "ArkTS enum cannot have super interfaces: %s")
+ERROR(sema_arkts_enum_non_exhaustive, "ArkTS enum must be exhaustive: %s")
+ERROR(sema_arkts_enum_payload, "ArkTS enum constructors cannot have payload parameters: %s")
 ERROR(sema_arkts_enum_payload_arity,
     "ArkTS foreign enum constructor '%s' must have exactly one associated value")
-ERROR(sema_arkts_raw_value_misplaced, "@RawValue can only annotate a constructor of a 'foreign enum': %s")
+ERROR(sema_arkts_raw_value_misplaced, "@RawValue can only annotate a constructor of an '@ArkTS' enum: %s")
 ERROR(sema_arkts_raw_value_payload_ctor,
     "@RawValue cannot annotate a 'foreign enum' constructor with associated values: %s")
 ERROR(sema_arkts_raw_value_duplicate, "duplicate @RawValue annotation on enum constructor '%s'")
@@ -454,7 +457,8 @@ ERROR(sema_arkts_foreign_param_type_unsupported,
 ERROR(sema_arkts_foreign_ret_type_unsupported,
     "return type '%s' of @ArkTS foreign function '%s' is not supported")
 ERROR(sema_arkts_foreign_option_invalid,
-    "options of @ArkTS foreign function '%s' must be string literals among 'module', 'namespace' and 'foreignName'")
+    "options of @ArkTS foreign function '%s' must be string literals among 'module', 'namespace' and "
+    "'foreignName', or the boolean option 'globalVar'")
 // A repeated key is a different mistake from a non-literal or unknown one:
 // the key and its value are both legal, only the repetition is not.
 ERROR(sema_arkts_foreign_option_duplicated,
@@ -464,7 +468,8 @@ ERROR(sema_arkts_foreign_option_duplicated,
 // not lower). It carries no declaration kind or name, because the annotated
 // node is the diagnostic range and the shape rule is the same everywhere.
 ERROR(sema_arkts_option_invalid,
-    "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName'")
+    "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName', or the "
+    "boolean option 'globalVar'")
 ERROR(sema_arkts_option_duplicated,
     "duplicated option '%s' in '@ArkTS'")
 // A block option is cloned into every member, so a name that identifies one

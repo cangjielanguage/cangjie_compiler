@@ -7,13 +7,14 @@
 /**
  * @file
  *
- * Sema diagnostics for @ArkTS foreign enums and foreign global variables
- * (AR-07/AR-08). The error contract lives in spec.md section 5: a removed
- * `foreign let`/`foreign var`, a misplaced or duplicated `@RawValue`, and the
- * structural enum refusals (generic, super, non-exhaustive, member, payload,
+ * Sema diagnostics for @ArkTS foreign enums, exported enums and global
+ * variables. A removed `foreign let`/`foreign var`, an invalid `globalVar`
+ * option, a misplaced or duplicated `@RawValue`, and the structural enum
+ * refusals (generic, super, non-exhaustive, member, payload,
  * string-then-omitted) each have one dedicated diagnostic. Positive cases
- * verify that a well-formed `foreign enum` is lowered to a plain enum and that
- * a scalar `@ArkTS[globalVar: true] foreign func` generates a live getter.
+ * verify that a well-formed `foreign enum` is lowered to a plain enum, that a
+ * scalar `@ArkTS[globalVar: true] foreign func` generates a live getter, and
+ * that an exported enum is checked without being lowered.
  */
 
 #include <cstdlib>
@@ -355,7 +356,7 @@ foreign enum E {
     A
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("@RawValue can only annotate a constructor of a 'foreign enum'"));
+    EXPECT_TRUE(HasErrorContaining("@RawValue can only annotate a constructor of an '@ArkTS' enum"));
     EXPECT_TRUE(HasErrorContaining(": E"));
 }
 
@@ -383,7 +384,22 @@ enum E {
     @RawValue[1] A
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("@RawValue can only annotate a constructor of a 'foreign enum'"));
+    EXPECT_TRUE(HasErrorContaining("@RawValue can only annotate a constructor of an '@ArkTS' enum"));
+}
+
+// A non-foreign @ArkTS enum exports its values, so @RawValue is accepted on
+// its constructors even though the enum is never lowered.
+TEST_F(ArkTSEnumVarTest, RawValueOnExportedEnumConstructorIsAccepted)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public enum Color {
+    | Red
+    | @RawValue["blue"] Blue
+}
+)");
+    EXPECT_FALSE(HasErrorContaining("@RawValue can only annotate"));
 }
 
 // A generic `foreign enum` is not supported in phase 1.
@@ -1161,4 +1177,238 @@ foreign func f(value: E): E
     auto fn = FindFunction("f");
     ASSERT_NE(fn, nullptr);
     EXPECT_NE(fn->funcBody->body, nullptr);
+}
+
+// The 'globalVar' option selects an ArkTS variable read, so its value is a
+// boolean literal; a string spelling is not a legal option value.
+TEST_F(ArkTSEnumVarTest, GlobalVarOptionRequiresBooleanLiteral)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: "true"]
+public foreign func liveValue(): Int32
+)");
+    EXPECT_TRUE(HasErrorContaining("'globalVar' option of '@ArkTS' requires a boolean literal"));
+}
+
+// A class has no binding target for a variable read.
+TEST_F(ArkTSEnumVarTest, GlobalVarOnClassIsMisplaced)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public class Holder {}
+)");
+    EXPECT_TRUE(HasErrorContaining("can only annotate a 'foreign func'"));
+    EXPECT_TRUE(HasErrorContaining(": Holder"));
+}
+
+// A non-foreign function maps an ArkTS function, not a variable.
+TEST_F(ArkTSEnumVarTest, GlobalVarOnNonForeignFunctionIsMisplaced)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public func read(): Int32 {
+    return 1
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("can only annotate a 'foreign func'"));
+    EXPECT_TRUE(HasErrorContaining(": read"));
+}
+
+// A non-foreign global variable has no foreign read path.
+TEST_F(ArkTSEnumVarTest, GlobalVarOnExportedVariableIsMisplaced)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public let value: Int32 = 1
+)");
+    EXPECT_TRUE(HasErrorContaining("can only annotate a 'foreign func'"));
+    EXPECT_TRUE(HasErrorContaining(": value"));
+}
+
+// An enum has no binding target for the option either.
+TEST_F(ArkTSEnumVarTest, GlobalVarOnEnumIsMisplaced)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public enum Holder {
+    A
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("can only annotate a 'foreign func'"));
+    EXPECT_TRUE(HasErrorContaining(": Holder"));
+}
+
+// An interface has no binding target for the option either.
+TEST_F(ArkTSEnumVarTest, GlobalVarOnInterfaceIsMisplaced)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public interface Holder {}
+)");
+    EXPECT_TRUE(HasErrorContaining("can only annotate a 'foreign func'"));
+    EXPECT_TRUE(HasErrorContaining(": Holder"));
+}
+
+// A block-level option follows the same value rule as a declaration-level
+// option: a non-boolean literal is refused with the option-specific message.
+TEST_F(ArkTSEnumVarTest, GlobalVarBlockOptionRequiresBooleanLiteral)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: "true"]
+public foreign {
+    func read(): Int32
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("'globalVar' option of '@ArkTS' requires a boolean literal"));
+}
+
+// A member's explicit 'false' overrides the block default: the declaration is
+// an ordinary foreign function, not a variable read.
+TEST_F(ArkTSEnumVarTest, GlobalVarMemberFalseCancelsBlockDefault)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public foreign {
+    @ArkTS[globalVar: false]
+    func read(): Int32
+}
+)");
+    EXPECT_FALSE(HasErrorContaining("can only annotate a 'foreign func'"));
+}
+
+// A block-level option applies to every member of the block, so a class
+// member inherits 'globalVar: true' and is refused by the placement rule.
+TEST_F(ArkTSEnumVarTest, GlobalVarBlockOptionAppliesToMembers)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public foreign {
+    class Holder {}
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("can only annotate a 'foreign func'"));
+    EXPECT_TRUE(HasErrorContaining(": Holder"));
+}
+
+// The variable read takes no arguments: a parameter has no ArkTS counterpart.
+TEST_F(ArkTSEnumVarTest, GlobalVarRejectsParameters)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public foreign func liveValue(index: Int32): Int32
+)");
+    EXPECT_TRUE(HasErrorContaining("must have no parameters"));
+    EXPECT_TRUE(HasErrorContaining(": liveValue"));
+}
+
+// A rest parameter is still a parameter: the variable read takes none.
+TEST_F(ArkTSEnumVarTest, GlobalVarRejectsRestParameter)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[globalVar: true]
+public foreign func liveValue(@RestParam values: Array<Int32>): Int32
+)");
+    EXPECT_TRUE(HasErrorContaining("must have no parameters"));
+    EXPECT_TRUE(HasErrorContaining(": liveValue"));
+}
+
+// An @ArkTS enum that is not foreign is still exported, so the common shape
+// rules apply even though the enum is not lowered.
+TEST_F(ArkTSEnumVarTest, ExportedEnumGenericIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public enum E<T> {
+    A
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("cannot be generic"));
+    EXPECT_TRUE(HasErrorContaining(": E"));
+}
+
+// A super interface is one of the common shape refusals.
+TEST_F(ArkTSEnumVarTest, ExportedEnumSuperIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+interface Marker {}
+
+@ArkTS
+public enum E <: Marker {
+    A
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("cannot have super interfaces"));
+    EXPECT_TRUE(HasErrorContaining(": E"));
+}
+
+// A non-exhaustive constructor is refused for an exported enum too.
+TEST_F(ArkTSEnumVarTest, ExportedEnumNonExhaustiveIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public enum E {
+    A | ...
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("must be exhaustive"));
+    EXPECT_TRUE(HasErrorContaining(": E"));
+}
+
+// An exported enum carries literal values only.
+TEST_F(ArkTSEnumVarTest, ExportedEnumPayloadIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public enum E {
+    A(Int32)
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("cannot have payload parameters"));
+    EXPECT_TRUE(HasErrorContaining(": A"));
+}
+
+// The value chain is shared: a string member disables the auto-increment
+// counter, so an omitted value after it is refused.
+TEST_F(ArkTSEnumVarTest, ExportedEnumStringThenOmittedValueIsDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public enum E {
+    | @RawValue["red"] A
+    | B
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("value type mismatch"));
+    EXPECT_TRUE(HasErrorContaining("expected String"));
+}
+
+// A public non-foreign @ArkTS global variable is exported, so its declared
+// type must be ArkTS-compatible.
+TEST_F(ArkTSEnumVarTest, ExportedVariableTypeMustBeArkTSCompatible)
+{
+    CompileSema(R"(package entry
+
+public class Box {}
+
+@ArkTS
+public let box: Box = Box()
+)");
+    EXPECT_TRUE(HasErrorContaining("ArkTS exported variable type is not supported"));
+    EXPECT_TRUE(HasErrorContaining("Box"));
 }

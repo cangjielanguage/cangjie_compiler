@@ -121,6 +121,25 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
                 p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_block_foreign_name, *arg);
                 continue;
             }
+            // 'globalVar' is the one boolean option and applies to every
+            // member of the block, so it is validated with the same kind rule
+            // as a declaration-level option. The empty-value rule is about
+            // string values and does not apply to it.
+            if (name == "globalVar") {
+                if (!literal || literal->kind != LitConstKind::BOOL) {
+                    // The same value rule as a declaration-level option: the
+                    // option is known, only its value kind is wrong.
+                    auto& at = arg->expr ? *arg->expr : static_cast<Node&>(*annotation);
+                    p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_value_invalid, at);
+                    continue;
+                }
+                if (!seen.emplace(name).second) {
+                    p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, *annotation, name);
+                    continue;
+                }
+                validArgs.emplace_back(std::move(arg));
+                continue;
+            }
             if (!literal || literal->kind != LitConstKind::STRING ||
                 (name != "module" && name != "namespace")) {
                 p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_invalid, *annotation);

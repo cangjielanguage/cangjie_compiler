@@ -79,9 +79,10 @@ ArkTSOptionStatus CheckArkTSOptionLayer(const Annotation& annotation)
         auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
         const bool isGlobalVar = name == "globalVar";
         // module / namespace / foreignName take a string literal; globalVar
-        // takes a boolean literal.
+        // takes a boolean literal. A wrong kind is a value error, not an
+        // unknown option: the name is known, the literal is not acceptable.
         if (!literal || (isGlobalVar ? literal->kind != LitConstKind::BOOL : literal->kind != LitConstKind::STRING)) {
-            status.problem = ArkTSOptionProblem::NON_LITERAL;
+            status.problem = isGlobalVar ? ArkTSOptionProblem::ILL_FORMED_VALUE : ArkTSOptionProblem::NON_LITERAL;
             status.option = name;
             status.at = arg->expr.get();
             return status;
@@ -104,18 +105,16 @@ ArkTSOptionStatus CheckArkTSOptionLayer(const Annotation& annotation)
 
 bool IsGlobalVar(const AST::Decl& decl)
 {
-    for (auto& anno : decl.annotations) {
-        if (anno->kind != AnnotationKind::ARKTS) {
-            continue;
-        }
-        for (auto& arg : anno->args) {
-            if (arg->name.Val() == "globalVar") {
-                auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
-                return literal != nullptr && literal->stringValue == "true";
-            }
-        }
+    // The option fold applies the layers in order and gives the last explicit
+    // value precedence, so a member's 'globalVar: false' cancels a block
+    // default of true. A malformed layer is refused by its owning fold and
+    // never selects the read path.
+    std::unordered_map<std::string, std::string> options;
+    if (!ArkTSDeclOptions(decl, options)) {
+        return false;
     }
-    return false;
+    auto found = options.find("globalVar");
+    return found != options.end() && found->second == "true";
 }
 
 bool ArkTSNamespaceValid(const std::string& ns)
@@ -270,7 +269,12 @@ bool ArkTSDeclOptions(const Decl& decl, std::unordered_map<std::string, std::str
             return false;
         }
         for (auto& arg : annotation->args) {
-            options[arg->name.Val()] = StaticCast<LitConstExpr>(*arg->expr).stringValue;
+            // The layer was validated above, so every argument is a literal;
+            // a boolean option is stored as its canonical "true"/"false" text.
+            const auto& literal = StaticCast<LitConstExpr>(*arg->expr);
+            options[arg->name.Val()] = literal.kind == LitConstKind::BOOL
+                                           ? (literal.stringValue == "true" ? "true" : "false")
+                                           : literal.stringValue;
             if (arg->name.Val() == "namespace") {
                 namespaceAt = arg->expr.get();
             }
@@ -307,6 +311,8 @@ void DiagnoseArkTSOptionProblem(DiagnosticEngine& diag, Decl& decl,
     auto& at = status.at ? *status.at : annotationAt();
     if (status.problem == ArkTSOptionProblem::DUPLICATE) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, at, status.option);
+    } else if (status.problem == ArkTSOptionProblem::ILL_FORMED_VALUE) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_value_invalid, at);
     } else if (status.problem == ArkTSOptionProblem::ILL_FORMED_NAMESPACE) {
         // The fold assigns the namespace value into `options` before
         // validating it, so the offending literal is already available here;
@@ -594,18 +600,24 @@ void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
             std::string namespaceValue;
             if (valid) {
                 for (const auto& arg : annotation->args) {
-                    auto literal = StaticCast<LitConstExpr>(*arg->expr).stringValue;
-                    if (arg->name.Val() == "namespace" && !ArkTSNamespaceValid(literal)) {
+                    const auto& literal = StaticCast<LitConstExpr>(*arg->expr);
+                    const auto name = arg->name.Val();
+                    // The boolean option carries no string value, so the
+                    // empty-value rule does not apply to it.
+                    if (name == "globalVar") {
+                        continue;
+                    }
+                    if (name == "namespace" && !ArkTSNamespaceValid(literal.stringValue)) {
                         valid = false;
                         namespaceAt = arg->expr.get();
-                        namespaceValue = literal;
+                        namespaceValue = literal.stringValue;
                         break;
                     }
                     // An explicitly empty value is a separate mistake from a
                     // malformed namespace or an unknown option: it is fully
                     // spelled and would silently reach the runtime.
-                    if (ArkTSOptionValueEmpty(literal)) {
-                        emptyName = arg->name.Val();
+                    if (ArkTSOptionValueEmpty(literal.stringValue)) {
+                        emptyName = name;
                         break;
                     }
                 }
@@ -617,6 +629,9 @@ void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
                 if (layer.problem == ArkTSOptionProblem::DUPLICATE) {
                     auto& at = layer.at ? *layer.at : static_cast<Node&>(*annotation);
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, at, layer.option);
+                } else if (layer.problem == ArkTSOptionProblem::ILL_FORMED_VALUE) {
+                    auto& at = layer.at ? *layer.at : static_cast<Node&>(*annotation);
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_value_invalid, at);
                 } else if (namespaceAt != nullptr) {
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_namespace_invalid, *namespaceAt, namespaceValue);
                 } else {

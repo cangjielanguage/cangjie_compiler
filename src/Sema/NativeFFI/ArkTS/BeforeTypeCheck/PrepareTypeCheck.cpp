@@ -218,7 +218,11 @@ void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourc
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(decl.get());
-            if (!fd || !IsArkTSForeignFunction(*fd)) {
+            // A declaration already refused by a declaration rule (for
+            // example an invalid 'globalVar') must not get a wrapper: the
+            // wrapper would emit a second round of diagnostics for a
+            // declaration that can never be lowered.
+            if (!fd || !IsArkTSForeignFunction(*fd) || fd->TestAttr(Attribute::IS_BROKEN)) {
                 continue;
             }
             fd->EnableAttr(Attribute::ARKTS_FUNCTION_WRAPPER);

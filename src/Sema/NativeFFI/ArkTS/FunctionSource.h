@@ -58,6 +58,9 @@ enum class ArkTSOptionProblem {
     UNKNOWN_NAME,
     DUPLICATE,
     ILL_FORMED_NAMESPACE,
+    // A known option whose literal has the wrong kind: 'globalVar' must be a
+    // boolean, every other option a string.
+    ILL_FORMED_VALUE,
 };
 struct ArkTSOptionStatus {
     ArkTSOptionProblem problem{ArkTSOptionProblem::NONE};
@@ -137,10 +140,12 @@ std::string ArkTSInterfaceImplName(const AST::Decl& iface);
 // through the package CJO by the deterministic name.
 Ptr<AST::ClassDecl> ArkTSInterfaceImpl(const AST::Decl& iface, ImportManager* imports);
 // One @ArkTS annotation is one option layer. A layer is valid when every
-// argument is a string literal named 'module', 'namespace' or 'foreignName'
-// and no name repeats inside the layer (repetition is rejected even for equal
-// values). The annotation and its argument nodes are only read.
+// argument is a literal named 'module', 'namespace', 'foreignName' (string) or
+// 'globalVar' (boolean) and no name repeats inside the layer (repetition is
+// rejected even for equal values). The annotation and its argument nodes are
+// only read.
 // Example: @ArkTS[module: "a"] -> VALID; @ArkTS[module: 1] -> NON_LITERAL;
+//          @ArkTS[globalVar: 1] -> ILL_FORMED_VALUE;
 //          @ArkTS[bogus: "a"] -> UNKNOWN_NAME;
 //          @ArkTS[module: "a", module: "a"] -> DUPLICATE.
 ArkTSOptionStatus CheckArkTSOptionLayer(const AST::Annotation& annotation);

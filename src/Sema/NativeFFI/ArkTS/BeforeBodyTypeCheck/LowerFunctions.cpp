@@ -229,6 +229,37 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 continue;
             }
             auto& fb = *fd->funcBody;
+            // The option contract is checked before the signature: an illegal
+            // option value is a declaration error of its own, and a later
+            // unsupported-signature refusal must not hide it.
+            std::unordered_map<std::string, std::string> options;
+            // Every illegal option shape - a non-literal value, an unknown
+            // name, a name repeated inside one @ArkTS layer, an empty
+            // namespace segment - is reported here, once per declaration;
+            // the option fold itself is the single source of that rule. A
+            // repeated key gets its own message: the key and value are legal,
+            // only the repetition is not. An ill-formed namespace also has its
+            // own message and points at the namespace literal.
+            ArkTSOptionStatus optionStatus;
+            if (!ArkTSDeclOptions(*fd, options, &optionStatus)) {
+                if (optionStatus.problem == ArkTSOptionProblem::DUPLICATE) {
+                    auto& at = optionStatus.at ? *optionStatus.at : static_cast<Node&>(*fd);
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_option_duplicated, at,
+                        optionStatus.option, fd->identifier.Val());
+                } else if (optionStatus.problem == ArkTSOptionProblem::ILL_FORMED_VALUE) {
+                    auto& at = optionStatus.at ? *optionStatus.at : static_cast<Node&>(*fd);
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_value_invalid, at);
+                } else if (optionStatus.problem == ArkTSOptionProblem::ILL_FORMED_NAMESPACE) {
+                    auto& at = optionStatus.at ? *optionStatus.at : static_cast<Node&>(*fd);
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_namespace_invalid, at,
+                        options.count("namespace") ? options.at("namespace") : std::string(), fd->identifier.Val());
+                } else {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_option_invalid, *fd,
+                        fd->identifier.Val());
+                }
+                fd->EnableAttr(Attribute::IS_BROKEN);
+                continue;
+            }
             // Type description of one signature position, after alias
             // resolution; the spelling is shared with the class member path,
             // so a position cannot mean two things across the two lowering
@@ -357,31 +388,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 }
             }
             if (!supported) {
-                fd->EnableAttr(Attribute::IS_BROKEN);
-                continue;
-            }
-            std::unordered_map<std::string, std::string> options;
-            // Every illegal option shape - a non-literal value, an unknown
-            // name, a name repeated inside one @ArkTS layer, an empty
-            // namespace segment - is reported here, once per declaration;
-            // the option fold itself is the single source of that rule. A
-            // repeated key gets its own message: the key and value are legal,
-            // only the repetition is not. An ill-formed namespace also has its
-            // own message and points at the namespace literal.
-            ArkTSOptionStatus optionStatus;
-            if (!ArkTSDeclOptions(*fd, options, &optionStatus)) {
-                if (optionStatus.problem == ArkTSOptionProblem::DUPLICATE) {
-                    auto& at = optionStatus.at ? *optionStatus.at : static_cast<Node&>(*fd);
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_option_duplicated, at,
-                        optionStatus.option, fd->identifier.Val());
-                } else if (optionStatus.problem == ArkTSOptionProblem::ILL_FORMED_NAMESPACE) {
-                    auto& at = optionStatus.at ? *optionStatus.at : static_cast<Node&>(*fd);
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_namespace_invalid, at,
-                        options.count("namespace") ? options.at("namespace") : std::string(), fd->identifier.Val());
-                } else {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_option_invalid, *fd,
-                        fd->identifier.Val());
-                }
                 fd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }

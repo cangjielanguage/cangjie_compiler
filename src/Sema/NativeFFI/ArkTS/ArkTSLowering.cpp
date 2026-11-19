@@ -369,6 +369,9 @@ bool TypeChecker::TypeCheckerImpl::SpliceArkTSGeneratedBody(ASTContext& ctx, AST
     return true;
 }
 
+// Prepare the variable form: `@ArkTS[globalVar: true] foreign func` keeps its
+// declaration and receives the read body after type checking. The removed
+// `foreign let`/`foreign var` spellings are refused here.
 void Native::FFI::ArkTS::PrepareVariables(Package& pkg, DiagnosticEngine& diag)
 {
     if (pkg.TestAttr(Attribute::IMPORTED)) {
@@ -402,6 +405,29 @@ void Native::FFI::ArkTS::PrepareVariables(Package& pkg, DiagnosticEngine& diag)
     }
 }
 
+namespace Cangjie::Native::FFI::ArkTS {
+// Shape and value contract of a non-foreign @ArkTS enum. The enum is exported
+// to ArkTS but not lowered: only the declaration is checked, and no value
+// table is registered.
+void ValidateExportedEnum(AST::EnumDecl& decl, DiagnosticEngine& diag);
+} // namespace Cangjie::Native::FFI::ArkTS
+
+namespace {
+// Validate the option layer of an enum that has no later option fold of its
+// own. A malformed layer is reported once and the enum is left unvalidated.
+bool ValidateArkTSEnumOptions(EnumDecl& decl, DiagnosticEngine& diag)
+{
+    std::unordered_map<std::string, std::string> options;
+    Native::FFI::ArkTS::ArkTSOptionStatus status;
+    if (!Native::FFI::ArkTS::ArkTSDeclOptions(decl, options, &status)) {
+        Native::FFI::ArkTS::DiagnoseArkTSOptionProblem(diag, decl, options, status);
+        decl.EnableAttr(Attribute::IS_BROKEN);
+        return false;
+    }
+    return true;
+}
+} // namespace
+
 void Native::FFI::ArkTS::PrepareEnums(AST::Package& pkg, DiagnosticEngine& diag)
 {
     if (pkg.TestAttr(Attribute::IMPORTED)) {
@@ -410,20 +436,29 @@ void Native::FFI::ArkTS::PrepareEnums(AST::Package& pkg, DiagnosticEngine& diag)
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto ed = DynamicCast<EnumDecl*>(decl.get());
-            if (!ed || !ed->HasAnno(AnnotationKind::ARKTS) || !ed->TestAttr(Attribute::FOREIGN) || ed->outerDecl) {
+            // A declaration refused by the option contract keeps its single
+            // diagnostic and is not lowered or validated again.
+            if (!ed || !ed->HasAnno(AnnotationKind::ARKTS) || ed->outerDecl ||
+                ed->TestAttr(Attribute::IS_BROKEN) || !ValidateArkTSEnumOptions(*ed, diag)) {
                 continue;
             }
-            PrepareEnum(*ed, diag);
+            if (ed->TestAttr(Attribute::FOREIGN)) {
+                PrepareEnum(*ed, diag);
+            } else {
+                ValidateExportedEnum(*ed, diag);
+            }
         }
     }
 }
 
 namespace Cangjie::Native::FFI::ArkTS {
 
-// Build the value table of a lowered foreign enum. `diag` is null when the enum
-// is imported: its declaration was validated in the declaring package, and only
-// the serialized value mapping is needed here.
-bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<ArkTSEnumMapping>& members)
+bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vector<ArkTSEnumMapping>& members);
+
+// Common declaration shape of an @ArkTS enum: no generics, no super
+// interfaces, no non-exhaustive constructor. A foreign enum also refuses
+// members other than constructors; an exported enum keeps them unexported.
+bool ValidateArkTSEnumShape(EnumDecl& decl, DiagnosticEngine* diag, bool foreign)
 {
     auto report = [&](DiagKindRefactor kind, Node& at, auto&&... args) {
         if (diag != nullptr) {
@@ -442,10 +477,34 @@ bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<A
         report(DiagKindRefactor::sema_arkts_enum_non_exhaustive, decl, decl.identifier.Val());
         return false;
     }
-    if (!decl.members.empty()) {
+    if (foreign && !decl.members.empty()) {
         report(DiagKindRefactor::sema_arkts_enum_member, decl, decl.identifier.Val());
         return false;
     }
+    return true;
+}
+
+// Build the value table of a lowered foreign enum. `diag` is null when the enum
+// is imported: its declaration was validated in the declaring package, and only
+// the serialized value mapping is needed here.
+bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<ArkTSEnumMapping>& members)
+{
+    if (!ValidateArkTSEnumShape(decl, diag, true)) {
+        return false;
+    }
+    return BuildArkTSEnumValueChain(decl, diag, members);
+}
+
+// Build the value chain of an @ArkTS enum. `diag` is null when the enum is
+// imported; the declaring package already validated the values and only needs
+// the serialized mapping.
+bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vector<ArkTSEnumMapping>& members)
+{
+    auto report = [&](DiagKindRefactor kind, Node& at, auto&&... args) {
+        if (diag != nullptr) {
+            diag->DiagnoseRefactor(kind, at, std::forward<decltype(args)>(args)...);
+        }
+    };
     bool valid = true;
     // Auto numbering mirrors ArkTS: the first member defaults to 0 and an
     // omitted value continues the previous numeric value + 1; a string member
@@ -546,6 +605,25 @@ bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<A
     return valid && !members.empty();
 }
 
+void ValidateExportedEnum(EnumDecl& decl, DiagnosticEngine& diag)
+{
+    if (!ValidateArkTSEnumShape(decl, &diag, false)) {
+        return;
+    }
+    // An ArkTS enum carries literal values only, so a constructor with an
+    // associated value has no exported representation.
+    for (auto& ctor : decl.constructors) {
+        if (!DynamicCast<VarDecl*>(ctor.get())) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_payload, *ctor, ctor->identifier.Val());
+            return;
+        }
+    }
+    // The value chain is checked without registering a mapping: the enum is
+    // not lowered, so no foreign-function glue can consult it.
+    std::vector<ArkTSEnumMapping> members;
+    (void)BuildArkTSEnumValueChain(decl, &diag, members);
+}
+
 } // namespace Cangjie::Native::FFI::ArkTS
 
 void Native::FFI::ArkTS::PrepareEnum(AST::EnumDecl& decl, DiagnosticEngine& diag)
@@ -582,6 +660,24 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
         return;
     }
     for (auto& file : ctx.curPackage->files) {
+        // A public non-foreign @ArkTS global variable is exported to ArkTS,
+        // so its declared type must be ArkTS-compatible. An inferred variable
+        // takes its type from the initializer and is not re-checked here.
+        for (auto& decl : file->decls) {
+            auto vd = DynamicCast<VarDecl*>(decl.get());
+            if (!vd || vd->outerDecl || !vd->HasAnno(AnnotationKind::ARKTS) ||
+                vd->TestAnyAttr(Attribute::FOREIGN, Attribute::ARKTS_LOWERED, Attribute::IS_BROKEN) ||
+                !vd->TestAttr(Attribute::PUBLIC) || !vd->type) {
+                continue;
+            }
+            auto desc = ArkTSClassifyPosition(ctx, vd->type.get());
+            if (ArkTSTypeDescGeneratable(desc)) {
+                continue;
+            }
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_exported_var_unsupported_type, *vd,
+                vd->type->GetTy() ? Ty::ToString(vd->type->GetTy()) : vd->identifier.Val());
+            vd->EnableAttr(Attribute::IS_BROKEN);
+        }
         for (auto& decl : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(decl.get());
             if (!fd || !fd->funcBody || fd->funcBody->body || !Native::FFI::ArkTS::IsGlobalVar(*fd)) {
