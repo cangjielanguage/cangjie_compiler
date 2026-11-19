@@ -33414,7 +33414,7 @@ index 19e00e111..324854824 100644
      if (llvm::Expected<APFloat::opStatus> op =
              f.convertFromString(value_str, APFloat::rmNearestTiesToEven)) {
 diff --git a/lldb/source/Version/Version.cpp b/lldb/source/Version/Version.cpp
-index b391fe1ea..e18e5bfcd 100644
+index b391fe1ea..242fcd9e1 100644
 --- a/lldb/source/Version/Version.cpp
 +++ b/lldb/source/Version/Version.cpp
 @@ -4,6 +4,12 @@
@@ -33470,7 +33470,7 @@ index b391fe1ea..e18e5bfcd 100644
        g_version_str += "\n  llvm revision ";
        g_version_str += llvm_rev;
      }
-+    g_version_str += "\n  cangjie 1.3.0-alpha.10";
++    g_version_str += "\n  cangjie 1.3.0-alpha.11";
    }
  
    return g_version_str.c_str();
@@ -46896,10 +46896,10 @@ index 000000000..3a18e4572
 +} // namespace llvm
 diff --git a/llvm/lib/CodeGen/CJStackPointerInserter.cpp b/llvm/lib/CodeGen/CJStackPointerInserter.cpp
 new file mode 100644
-index 000000000..ac7580cbc
+index 000000000..7faee4a0c
 --- /dev/null
 +++ b/llvm/lib/CodeGen/CJStackPointerInserter.cpp
-@@ -0,0 +1,963 @@
+@@ -0,0 +1,1009 @@
 +//===-- CJStackPointerInserter.cpp - Cangjie Insert Stack Pointers---------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -46919,6 +46919,7 @@ index 000000000..ac7580cbc
 +//===----------------------------------------------------------------------===//
 +
 +#include "llvm/CodeGen/CJStackPointerInserter.h"
++#include "llvm/ADT/DenseMap.h"
 +#include "llvm/ADT/DenseSet.h"
 +#include "llvm/CodeGen/MachineDominators.h"
 +#include "llvm/CodeGen/MachineFrameInfo.h"
@@ -47440,64 +47441,68 @@ index 000000000..ac7580cbc
 +    }
 +  }
 +
++  // Apply the transfer function of a single instruction when walking a basic
++  // block backwards: `LiveTmp` holds the stack pointers that are live after
++  // `MI`, and is updated to the stack pointers that are live before it.
++  void computeStackLiveStep(MachineInstr &MI, SetVector<SlotInfo> &LiveTmp) {
++    int FI;
++    unsigned MemBytes;
++
++    if (TII->isLoadFromStackSlot(MI, FI, MemBytes) && MemBytes == 8) {
++      int Imm = getLoadStackOffset(MI);
++      const AllocaInst *AI = MFI.getObjectAllocation(FI);
++      if (AI != nullptr) {
++        assert(MFI.isAliasedObjectIndex(FI));
++        if (isPointerByLocalStack(AI, Imm)) {
++          insertLiveSet(LiveTmp, FI, Imm);
++        }
++        return;
++      }
++      if (MFI.isFixedObjectIndex(FI)) {
++        if (isPointerByFixedObject(FI)) {
++          insertLiveSet(LiveTmp, FI, Imm);
++        }
++        return;
++      }
++      if (MFI.isSpillSlotObjectIndex(FI)) {
++        // The reload is a use point of the stack pointer.
++        insertLiveSet(LiveTmp, FI, Imm);
++        return;
++      }
++      return;
++    }
++
++    if (TII->isStoreToStackSlot(MI, FI, MemBytes) && MemBytes == 8) {
++      int Imm = getStoreStackOffset(MI);
++      const AllocaInst *AI = MFI.getObjectAllocation(FI);
++      if (AI != nullptr) {
++        assert(MFI.isAliasedObjectIndex(FI));
++        if (isPointerByLocalStack(AI, Imm)) {
++          insertLiveSet(LiveTmp, FI, Imm);
++        }
++        return;
++      }
++      if (MFI.isFixedObjectIndex(FI)) {
++        if (isPointerByFixedObject(FI)) {
++          insertLiveSet(LiveTmp, FI, Imm);
++        }
++        return;
++      }
++      if (MFI.isSpillSlotObjectIndex(FI)) {
++        // The spill is a define point of the stack pointer.
++        removeLiveSet(LiveTmp, FI, Imm);
++        return;
++      }
++      assert(MFI.isStatepointSpillSlotObjectIndex(FI) &&
++             "Unknown stack type");
++    }
++  }
++
 +  void computeStackLiveIn(MachineBasicBlock::reverse_iterator Begin,
 +                          MachineBasicBlock::reverse_iterator End,
 +                          SetVector<SlotInfo> &LiveTmp) {
-+    for (auto &MI : make_range(Begin, End)) {
-+      int FI;
-+      unsigned MemBytes;
-+
-+      if (TII->isLoadFromStackSlot(MI, FI, MemBytes) && MemBytes == 8) {
-+        int Imm = getLoadStackOffset(MI);
-+        const AllocaInst *AI = MFI.getObjectAllocation(FI);
-+        if (AI != nullptr) {
-+          assert(MFI.isAliasedObjectIndex(FI));
-+          if (isPointerByLocalStack(AI, Imm)) {
-+            insertLiveSet(LiveTmp, FI, Imm);
-+          }
-+          continue;
-+        }
-+        if (MFI.isFixedObjectIndex(FI)) {
-+          if (isPointerByFixedObject(FI)) {
-+            insertLiveSet(LiveTmp, FI, Imm);
-+          }
-+          continue;
-+        }
-+        if (MFI.isSpillSlotObjectIndex(FI)) {
-+          // The reload is a use point of the stack pointer.
-+          insertLiveSet(LiveTmp, FI, Imm);
-+          continue;
-+        }
-+        // assert(MFI.isStatepointSpillSlotObjectIndex(FI) &&
-+        //        "Unknown stack type");
-+        continue;
-+      }
-+
-+      if (TII->isStoreToStackSlot(MI, FI, MemBytes) && MemBytes == 8) {
-+        int Imm = getStoreStackOffset(MI);
-+        const AllocaInst *AI = MFI.getObjectAllocation(FI);
-+        if (AI != nullptr) {
-+          assert(MFI.isAliasedObjectIndex(FI));
-+          if (isPointerByLocalStack(AI, Imm)) {
-+            insertLiveSet(LiveTmp, FI, Imm);
-+          }
-+          continue;
-+        }
-+        if (MFI.isFixedObjectIndex(FI)) {
-+          if (isPointerByFixedObject(FI)) {
-+            insertLiveSet(LiveTmp, FI, Imm);
-+          }
-+          continue;
-+        }
-+        if (MFI.isSpillSlotObjectIndex(FI)) {
-+          // The spill is a define point of the stack pointer.
-+          removeLiveSet(LiveTmp, FI, Imm);
-+          continue;
-+        }
-+        assert(MFI.isStatepointSpillSlotObjectIndex(FI) &&
-+               "Unknown stack type");
-+      }
-+    }
++    for (auto &MI : make_range(Begin, End))
++      computeStackLiveStep(MI, LiveTmp);
 +  }
 +
 +  void computeStackLiveness() {
@@ -47556,18 +47561,52 @@ index 000000000..ac7580cbc
 +    }
 +  }
 +
-+  void analyzeStatepointLiveness(MachineInstr *MI, CJStackLives &Lives) {
-+    MachineBasicBlock *MBB = MI->getParent();
++  /// Record \p LiveTmp as the live set of the statepoint \p MI.
++  void snapshotStatepointLiveness(MachineInstr &MI,
++                                  const SetVector<SlotInfo> &LiveTmp,
++                                  StatepointLives &LiveData) {
++    LiveData[&MI].Slots.remove_if(
++        [&](SlotInfo V) { return !LiveTmp.contains(V); });
++  }
 +
-+    // Note: The copy is intentional and required
-+    assert(LiveOut.count(MBB));
-+    SetVector<SlotInfo> LiveTmp = LiveOut[MBB];
++  /// Compute the live stack pointer set of every statepoint of the function.
++  ///
++  /// Every basic block is walked backwards only once: the running live set is
++  /// snapshotted into each statepoint met during the walk. Restarting the walk
++  /// from the end of the block for every single statepoint made this analysis
++  /// quadratic in the block length, which dominated the compile time of huge
++  /// array literals (thousands of statepoints inside a single basic block).
++  ///
++  /// \p StatepointsPerMBB holds the number of statepoints of each block, so
++  /// that the walk can stop as soon as the last statepoint of the block has
++  /// been seen. \c MBB.rbegin() is the bundle aware iterator, hence bundled
++  /// instructions are visited through their bundle header, exactly as the
++  /// previous per-statepoint walk that also started at \c MBB->rbegin().
++  void analyzeAllStatepointLiveness(
++      const SetVector<MachineInstr *> &Statepoints, StatepointLives &LiveData,
++      const DenseMap<MachineBasicBlock *, size_t> &StatepointsPerMBB) {
++    for (MachineBasicBlock &MBB : MF) {
++      assert(LiveOut.count(&MBB));
 +
-+    computeStackLiveIn(MBB->rbegin(), ++MI->getIterator().getReverse(),
-+                       LiveTmp);
++      size_t Remaining = StatepointsPerMBB.lookup(&MBB);
++      if (Remaining == 0)
++        continue;
 +
-+    // Records the alive stack pointer.
-+    Lives.Slots.remove_if([&](SlotInfo V) { return !LiveTmp.contains(V); });
++      SetVector<SlotInfo> LiveTmp = LiveOut[&MBB];
++      for (auto It = MBB.rbegin(), End = MBB.rend(); It != End; ++It) {
++        MachineInstr &MI = *It;
++        if (!Statepoints.count(&MI)) {
++          computeStackLiveStep(MI, LiveTmp);
++          continue;
++        }
++        // `LiveTmp` is the live set of `MI` itself, so record it before the
++        // transfer function of `MI` is applied.
++        snapshotStatepointLiveness(MI, LiveTmp, LiveData);
++        if (--Remaining == 0)
++          break;
++        computeStackLiveStep(MI, LiveTmp);
++      }
++    }
 +  }
 +
 +private:
@@ -47822,12 +47861,16 @@ index 000000000..ac7580cbc
 +  if (!MF.getFunction().hasCangjieGC())
 +    return Changed;
 +
-+  // Gather all the MBBs that statepoints need to rewritten.
++  // Gather all the MBBs that statepoints need to rewritten, remembering how
++  // many statepoints each block holds so that the liveness computation below
++  // does not have to scan the blocks again just to count them.
 +  SetVector<MachineInstr *> Statepoints;
++  DenseMap<MachineBasicBlock *, size_t> StatepointsPerMBB;
 +  for (MachineBasicBlock &MBB : MF) {
 +    for (MachineInstr &I : MBB) {
 +      if (needRewriteCall(I)) {
 +        Statepoints.insert(&I);
++        ++StatepointsPerMBB[&MBB];
 +      }
 +    }
 +  }
@@ -47847,8 +47890,11 @@ index 000000000..ac7580cbc
 +
 +  StackLives Live(MF, ArgPtrs);
 +  Live.computeStackLiveness();
++  // The liveness of all the statepoints is computed up front, in a single
++  // backwards walk per basic block, so that the rewrites below cannot affect
++  // the analysis of the statepoints that are still to be rewritten.
++  Live.analyzeAllStatepointLiveness(Statepoints, LiveData, StatepointsPerMBB);
 +  for (auto *MI : Statepoints) {
-+    Live.analyzeStatepointLiveness(MI, LiveData[MI]);
 +    if (rewriteStatepoint(MF, *MI, LiveData[MI], ArgPtrs)) {
 +      RemoveMI.push_back(MI);
 +    }
@@ -91738,7 +91784,7 @@ index 9698ed973..8396f6e5b 100644
      BasicBlock *PreHeader = L->getLoopPreheader();
  
 diff --git a/llvm/lib/Transforms/Scalar/InductiveRangeCheckElimination.cpp b/llvm/lib/Transforms/Scalar/InductiveRangeCheckElimination.cpp
-index 328615011..98d07b460 100644
+index 328615011..2d47f208a 100644
 --- a/llvm/lib/Transforms/Scalar/InductiveRangeCheckElimination.cpp
 +++ b/llvm/lib/Transforms/Scalar/InductiveRangeCheckElimination.cpp
 @@ -99,6 +99,12 @@
@@ -91764,7 +91810,7 @@ index 328615011..98d07b460 100644
    Value *ExitPreLoopAt = nullptr;
    Value *ExitMainLoopAt = nullptr;
    const SCEVConstant *MinusOneS =
-@@ -1882,8 +1891,58 @@ InductiveRangeCheckElimination::isProfitableToTransform(const Loop &L,
+@@ -1882,8 +1891,59 @@ InductiveRangeCheckElimination::isProfitableToTransform(const Loop &L,
    return true;
  }
  
@@ -91804,7 +91850,8 @@ index 328615011..98d07b460 100644
 +    auto *Cond = cast<Instruction>(BI->getCondition());
 +    BI->setCondition(ICI1);
 +
-+    Cond->eraseFromParent();
++    if (Cond->use_empty())
++      Cond->eraseFromParent();
 +    Changed = true;
 +  }
 +  return Changed;
@@ -91823,7 +91870,7 @@ index 328615011..98d07b460 100644
    if (L->getBlocks().size() >= LoopSizeCutoff) {
      LLVM_DEBUG(dbgs() << "irce: giving up constraining loop, too large\n");
      return false;
-@@ -1964,7 +2023,8 @@ bool InductiveRangeCheckElimination::run(
+@@ -1964,7 +2024,8 @@ bool InductiveRangeCheckElimination::run(
      return false;
  
    LoopConstrainer LC(*L, LI, LPMAddNewLoop, LS, SE, DT, SafeIterRange.value());
@@ -130823,6 +130870,84 @@ index 000000000..6533817d3
 +  ret i64 %4
 +}
 \ No newline at end of file
+diff --git a/llvm/test/Transforms/Cangjie/IRCE/optimize-nuw-compare-shared-use.ll b/llvm/test/Transforms/Cangjie/IRCE/optimize-nuw-compare-shared-use.ll
+new file mode 100644
+index 000000000..b83e60d1e
+--- /dev/null
++++ b/llvm/test/Transforms/Cangjie/IRCE/optimize-nuw-compare-shared-use.ll
+@@ -0,0 +1,72 @@
++; RUN: opt < %s -passes='function(irce)' --cangjie-pipeline -S | FileCheck %s
++
++; Test that optimizeNUWCompare does not erase a shared icmp that is still
++; used by another branch in the same loop. Previously this caused
++; "Uses remain when a value is destroyed!" assertion failure (or SIGSEGV
++; in release builds).
++; https://gitcode.com/Cangjie/cangjie_compiler/issues/1277
++
++; CHECK-LABEL: @test_shared_cond
++
++define void @test_shared_cond(i64 %n, i64 %byteAdd, i64 %outputN, i64* %buf) {
++entry:
++  %cmp.entry = icmp sgt i64 %n, 0
++  br i1 %cmp.entry, label %preheader, label %done
++
++preheader:
++  br label %loop
++
++loop:
++  %i = phi i64 [ 0, %preheader ], [ %i.next, %latch ]
++  %icmpslt = icmp ult i64 %i, %n
++  %add = add nuw nsw i64 %i, %byteAdd
++  %icmpuge = icmp ult i64 %add, %outputN
++  br i1 %icmpslt, label %bb58, label %bb59
++
++bb58:
++  br i1 %icmpuge, label %body1, label %throw1
++
++bb59:
++  br i1 %icmpuge, label %body2, label %throw2
++
++body1:
++  %gep1 = getelementptr i64, i64* %buf, i64 %add
++  store i64 1, i64* %gep1, align 8
++  br label %latch
++
++body2:
++  %gep2 = getelementptr i64, i64* %buf, i64 %i
++  store i64 2, i64* %gep2, align 8
++  br label %latch
++
++latch:
++  %i.next = add nuw nsw i64 %i, 1
++  %exit.cmp = icmp ne i64 %i.next, %n
++  br i1 %exit.cmp, label %loop, label %done
++
++throw1:
++  unreachable
++
++throw2:
++  unreachable
++
++done:
++  ret void
++}
++
++; After the fix, both branches get their own optimized comparison using
++; select/sub hoisted to the preheader, and the original shared icmp is
++; cleanly removed (no dangling use).
++;
++; CHECK: preheader:
++; CHECK:    sub i64 %outputN, %byteAdd
++; CHECK:    select i1 {{.*}}, i64 {{%[0-9]+}}, i64 0
++; CHECK:    select i1 {{.*}}, i64 {{%[0-9]+}}, i64 0
++;
++; CHECK: bb58:
++; CHECK:    icmp ult i64 %i, {{%[0-9]+}}
++;
++; CHECK: bb59:
++; CHECK:    icmp ult i64 %i, {{%[0-9]+}}
++;
++; CHECK-NOT: icmp ult i64 %add, %outputN
 diff --git a/llvm/test/Transforms/Cangjie/InstCombine/memcpy-to-load.ll b/llvm/test/Transforms/Cangjie/InstCombine/memcpy-to-load.ll
 new file mode 100644
 index 000000000..9f1c41780
