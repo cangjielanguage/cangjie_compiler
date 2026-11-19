@@ -144,8 +144,27 @@ Function* Translator::ClearOrCreateVarInitFunc(const AST::Decl& decl)
     Function* func = nullptr;
     BlockGroup* body = nullptr;
     auto mangledName = decl.mangledName + POSTFIX;
+
+    auto returnTy = decl.GetTy();
+    if (auto varDecl = DynamicCast<AST::VarDecl>(&decl)) {
+        if (varDecl->initializer) {
+            returnTy = varDecl->initializer->GetTy();
+        }
+    }
+    CJC_ASSERT(returnTy);
+
+    auto returnType = (&decl == &outerDecl) ? builder.GetUnitTy() : TranslateType(returnTy);
+
     if (func = TryGetFromCache<Value, Function>(GLOBAL_VALUE_PREFIX + mangledName, deserializedVals); func) {
-        // found deserialized one
+        // Found the deserialized one. Its signature was built from the common part's initializer,
+        // while the body below is re-translated from this side's initializer. If the two
+        // initializers have different types (e.g. another struct conforming to the declared
+        // interface type), the stale return type leaves the new body inconsistent with its own
+        // signature and with the conversion the caller emits, so refresh it. Only the return
+        // type can differ; the deserialized parameters and signature flags are kept as is.
+        auto oldFuncType = func->GetFuncType();
+        func->SetType(*builder.GetType<FuncType>(oldFuncType->GetParamTypes(), returnType,
+            oldFuncType->HasVarArg(), oldFuncType->IsCFunc(), oldFuncType->GetModalInfo()));
         body = builder.CreateBlockGroup(*func);
         func->ReplaceBody(*body);
         func->SetDebugLocation(DebugLocation());
@@ -155,15 +174,6 @@ Function* Translator::ClearOrCreateVarInitFunc(const AST::Decl& decl)
         auto pkgName = outerDecl.fullPackageName;
         const std::vector<Type*> params = {};
 
-        auto returnTy = decl.GetTy();
-        if (auto varDecl = DynamicCast<AST::VarDecl>(&decl)) {
-            if (varDecl->initializer) {
-                returnTy = varDecl->initializer->GetTy();
-            }
-        }
-        CJC_ASSERT(returnTy);
-
-        auto returnType = (&decl == &outerDecl) ? builder.GetUnitTy() : TranslateType(returnTy);
         auto funcType = builder.GetType<FuncType>(params, returnType);
         funcType = AdjustVarInitType(*funcType, outerDecl, builder, chirTy);
         auto loc = DebugLocation(TranslateLocationWithoutScope(builder.GetChirContext(), decl.begin, decl.end));
