@@ -98,34 +98,28 @@ protected:
 };
 
 /**
- * --- ParseVersion ---
+ * --- cjc_version literal format ---
+ * Version parsing itself is shared with the compiler version parser (see Version.h). The stricter
+ * x.y.z / [0-99] rule of the cfg language is enforced by ConditionCheck.
  */
-TEST_F(ConditionalCompilationImplTest, ParseVersion_InvalidFormat)
+TEST_F(ConditionalCompilationImplTest, CjcVersionConditionCheck_InvalidFormat)
 {
     ResetImpl();
-    EXPECT_FALSE(impl->ParseVersion("x.y.z").isValid);
-    EXPECT_FALSE(impl->ParseVersion("1.2").isValid);
-    EXPECT_FALSE(impl->ParseVersion("").isValid);
-    EXPECT_FALSE(impl->ParseVersion("1.2.x").isValid);
+    EXPECT_FALSE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, "x.y.z"));
+    EXPECT_FALSE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, "1.2"));
+    EXPECT_FALSE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, ""));
+    EXPECT_FALSE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, "1.2.x"));
+    // Parts must be in [0, 99].
+    EXPECT_FALSE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, "100.2.3"));
+    EXPECT_FALSE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, "1.100.3"));
+    EXPECT_FALSE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, "1.2.100"));
 }
 
-TEST_F(ConditionalCompilationImplTest, ParseVersion_OutOfRange)
+TEST_F(ConditionalCompilationImplTest, CjcVersionConditionCheck_ValidFormat)
 {
     ResetImpl();
-    // parts must be in [0, 99].
-    EXPECT_FALSE(impl->ParseVersion("100.2.3").isValid);
-    EXPECT_FALSE(impl->ParseVersion("1.100.3").isValid);
-    EXPECT_FALSE(impl->ParseVersion("1.2.100").isValid);
-}
-
-TEST_F(ConditionalCompilationImplTest, ParseVersion_Valid)
-{
-    ResetImpl();
-    VersionInfo info = impl->ParseVersion("1.2.3");
-    EXPECT_TRUE(info.isValid);
-    EXPECT_EQ(info.major, 1u);
-    EXPECT_EQ(info.minor, 2u);
-    EXPECT_EQ(info.patch, 3u);
+    EXPECT_TRUE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, "1.2.3"));
+    EXPECT_TRUE(impl->ConditionCheck("cjc_version", DEFAULT_POSITION, "99.99.99"));
 }
 
 /**

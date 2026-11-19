@@ -74,6 +74,7 @@ WARNING(driver_cfg_path_ignored, DRIVER_ARG,
 ERROR(driver_option_requires_lto, "%s only takes effect when lto mode is enabled")
 ERROR(driver_unsupported_platform, "%s is not supported on %s")
 ERROR(driver_conflicting_options, "%s and %s cannot be used together")
+ERROR(driver_conflicting_compat_versions, "different compatibility versions cannot be used together: '%s' and '%s'")
 WARNING(driver_ineffective_option, DRIVER_ARG, "%s does not take effect under the current configuration")
 WARNING(driver_apc_conflicts_with_single_bc_output, DRIVER_ARG,
     "'--apc' conflicts with '-o %s' which expects a single output file. '--apc' is set to 1.")

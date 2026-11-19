@@ -119,6 +119,17 @@ const std::unordered_map<std::string, uint8_t> PRINT_BCHIR_MODE_MAP = {
     {"all", uint8_t(GlobalOptions::PrintBCHIROption::ALL)},
 };
 
+bool ParseCompatVersion(const std::string& value, VersionInfo& version)
+{
+    // --compat-version accepts exactly "major.minor": no patch number and no suffix.
+    VersionInfo parsed = ParseVersion(value, false, false);
+    if (!parsed.isValid) {
+        return false;
+    }
+    version = parsed;
+    return true;
+}
+
 bool SeeingTomlComment(const std::string& inputLine)
 {
     if (inputLine.empty()) {
@@ -605,6 +616,24 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
     }},
     { Options::ID::PACKAGE_COMPILE, OPTION_TRUE_ACTION(opts.compilePackage = true) },
     { Options::ID::NO_PRELUDE, OPTION_TRUE_ACTION(opts.implicitPrelude = false) },
+    { Options::ID::COMPAT_VERSION, [](GlobalOptions& opts, const OptionArgInstance& arg) {
+        VersionInfo version;
+        if (!ParseCompatVersion(arg.value, version) ||
+            !GlobalOptions::IsSupportedCompatVersion(version.major, version.minor)) {
+            return false;
+        }
+        if (!opts.IsCompatModeEnabled()) {
+            opts.SetCompatVersion(version);
+            return true;
+        }
+        if (opts.GetCompatVersion() == version) {
+            return true;
+        }
+        DiagnosticEngine diag;
+        (void)diag.DiagnoseRefactor(DiagKindRefactor::driver_conflicting_compat_versions, DEFAULT_POSITION, arg.value,
+            std::to_string(opts.GetCompatVersion().major) + "." + std::to_string(opts.GetCompatVersion().minor));
+        return false;
+    }},
     { Options::ID::INT_OVERFLOW_MODE, [](GlobalOptions& opts, const OptionArgInstance& arg) {
         CJC_ASSERT(ValidOverflowStrategy(arg.value));
         if (!ValidOverflowStrategy(arg.value)) { return false; }
@@ -866,7 +895,9 @@ std::unordered_map<Options::ID, std::function<bool(GlobalOptions&, OptionArgInst
             opts.linkStaticStd = false; // waiting for hotreload's bugfix
         } else {
             CJC_ASSERT(OUTPUT_MODE_MAP.count(arg.value) != 0);
-            if (OUTPUT_MODE_MAP.count(arg.value) == 0) { return false; }
+            if (OUTPUT_MODE_MAP.count(arg.value) == 0) {
+                return false;
+            }
             opts.outputMode = GlobalOptions::OutputMode(OUTPUT_MODE_MAP.at(arg.value));
             opts.enableHotReload = false;
         }

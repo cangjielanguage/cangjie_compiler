@@ -975,6 +975,45 @@ void GlobalOptions::CollectOrderedInputFiles(ArgInstance& arg, uint64_t idx)
     }
 }
 
+bool GlobalOptions::IsCompatModeEnabled() const
+{
+    return compatVersion.has_value();
+}
+
+VersionInfo GlobalOptions::GetCompatVersion() const
+{
+    return compatVersion.value_or(VersionInfo::Current());
+}
+
+void GlobalOptions::SetCompatVersion(const VersionInfo& version)
+{
+    compatVersion = version;
+}
+
+const std::vector<VersionInfo>& GlobalOptions::GetSupportedCompatVersions()
+{
+    // Single source of truth is the compat_version_value whitelist declared in Options.inc;
+    // the option table validates --compat-version against the very same list.
+    static const std::vector<VersionInfo> supportedVersions = [] {
+        std::vector<VersionInfo> versions;
+        for (const auto& optionValue : Options::GetPredefinedValues(Options::ID::COMPAT_VERSION)) {
+            VersionInfo version = ParseVersion(optionValue.value, false, false);
+            CJC_ASSERT(version.isValid);
+            if (version.isValid) {
+                versions.push_back(version);
+            }
+        }
+        return versions;
+    }();
+    return supportedVersions;
+}
+
+bool GlobalOptions::IsSupportedCompatVersion(uint32_t major, uint32_t minor)
+{
+    return std::any_of(GetSupportedCompatVersions().begin(), GetSupportedCompatVersions().end(),
+        [major, minor](const VersionInfo& version) { return version.major == major && version.minor == minor; });
+}
+
 bool GlobalOptions::ParseFromArgs(ArgList& argList)
 {
     this->argList = &argList;
@@ -1371,6 +1410,12 @@ std::pair<std::string, std::string> GlobalOptions::GenerateNamesOfCachedDirAndFi
         for (auto& filePath : sortedSrcFiles) {
             fileName += filePath;
         }
+    }
+    // Compatibility mode can change semantic analysis for identical sources. Include the explicit
+    // target in the cache key so artifacts from different modes are never reused.
+    if (IsCompatModeEnabled()) {
+        const auto version = GetCompatVersion();
+        fileName += "-compat-" + std::to_string(version.major) + "." + std::to_string(version.minor);
     }
     auto hashedFileName = HashString(fileName);
     std::string folder = FileUtil::JoinPath(compilationCachedPath, ".cached");

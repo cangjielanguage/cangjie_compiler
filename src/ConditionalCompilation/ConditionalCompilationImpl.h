@@ -13,7 +13,6 @@
 #ifndef CANGJIE_CONDITIONALCOMPILATION_CONDITIONALCOMPILATIONIMPL_H
 #define CANGJIE_CONDITIONALCOMPILATION_CONDITIONALCOMPILATIONIMPL_H
 
-#include <regex>
 #include <optional>
 
 #include "cangjie/AST/Match.h"
@@ -28,18 +27,7 @@
 
 namespace Cangjie::AST {
 
-/**
- * @brief Version information structure for cjc_version condition compilation.
- * Supports version format: x.y.z (x, y, z: 0-99)
- */
-struct VersionInfo {
-    uint32_t major = 0;
-    uint32_t minor = 0;
-    uint32_t patch = 0;
-
-    bool isValid = false;
-};
-
+using VersionInfo = Cangjie::VersionInfo;
 
 class ConditionalCompilationImpl {
 public:
@@ -104,9 +92,7 @@ private:
     bool EvalLogicBinaryExpr(const BinaryExpr& be);
     bool EvalJudgeBinaryExpr(const BinaryExpr& be);
 
-    static VersionInfo ParseVersion(const std::string& version);
     static int CompareVersion(const VersionInfo& left, const VersionInfo& right);
-    static bool IsValidVersionNumber(uint32_t num);
 
     template <typename T> bool EvalNodeCondition(Ptr<T> node);
 };
