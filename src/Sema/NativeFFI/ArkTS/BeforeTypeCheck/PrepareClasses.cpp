@@ -242,14 +242,9 @@ bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager
         }
         if (ArkTSWriteOnlyProp(*prop)) {
             // Persist the write-only contract for importing packages: the
-            // WRITE_ONLY annotation itself has no CJO record.
+            // WRITE_ONLY annotation itself has no CJO record. A non-mutable
+            // property has already been refused by the placement check.
             prop->EnableAttr(Attribute::ARKTS_WRITE_ONLY_PROP);
-            if (!prop->isVar) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-                    "@WriteOnly requires a mutable property");
-                cd.EnableAttr(Attribute::IS_BROKEN);
-                return false;
-            }
             // Keep a getter declaration for the property contract. The read
             // rejection itself comes from the ArkTS write-only reference
             // check, not from access control (the reference resolves to the

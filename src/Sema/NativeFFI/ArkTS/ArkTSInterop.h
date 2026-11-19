@@ -32,6 +32,10 @@ void PrepareInterfaces(AST::Package& pkg, DiagnosticEngine& diag, SourceManager&
 // entry shape/name, annotation placement and the foreign-only 'module' option.
 // Rejected entries are marked IS_BROKEN so the entry loop skips them.
 void DiagnoseArkTSDeclarations(AST::Package& pkg, DiagnosticEngine& diag);
+// Validate @WriteOnly placement on the source AST, before class/interface
+// preparation: only a mutable property member of an @ArkTS class or interface
+// is valid; a refused annotation is marked broken.
+void DiagnoseArkTSWriteOnlyPlacement(AST::Package& pkg, DiagnosticEngine& diag);
 
 // Sema check for the @RawValue annotation. It lives in the ArkTS namespace
 // (not the C FFI annotation table) because it validates an ArkTS-only annotation

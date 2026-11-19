@@ -556,6 +556,12 @@ const char* ARKTS_CONTEXT_SUPPORT = R"(package cj_arkts_context_v1
 
 import ohos.ark_interop.JSContext
 
+public class ForeignRuntimeException <: Exception {
+    public init(message: String) {
+        super(message)
+    }
+}
+
 public func __cj_arkts_current(): JSContext { return JSContext() }
 public func __cj_arkts_enter(ctx: JSContext): ?JSContext { return None }
 public func __cj_arkts_restore(previous: ?JSContext): Unit {}
@@ -568,12 +574,6 @@ public import cj_arkts_context_v1.*
 public import std.math.numeric.BigInt
 
 public class ExternConversionException <: Exception {
-    public init(message: String) {
-        super(message)
-    }
-}
-
-public class ForeignRuntimeException <: Exception {
     public init(message: String) {
         super(message)
     }
@@ -691,7 +691,7 @@ foreign func count(): Int32
             ++runtimeThrows;
             EXPECT_NE(ref->ref.target, nullptr);
             if (ref->ref.target) {
-                EXPECT_EQ(ref->ref.target->fullPackageName, "arkts.lang");
+                EXPECT_EQ(ref->ref.target->fullPackageName, "cj_arkts_context_v1");
             }
         } else if (name == "ExternConversionException") {
             ++conversionThrows;

@@ -6,6 +6,15 @@ import ohos.ark_interop.JSContext
 
 let CURRENT_CONTEXT = ThreadLocal<JSContext>()
 
+// Raised when a wrapper is used without an active calling scope. The type is
+// re-exported by `arkts.lang` as the interop runtime exception, so callers can
+// catch a scope misuse by the same type as other runtime interop failures.
+public class ForeignRuntimeException <: Exception {
+    public init(message: String) {
+        super(message)
+    }
+}
+
 // Before: the current ThreadLocal slot contains previous (Some(parent) or None).
 // After getNapiEnv() succeeds: slot = Some(ctx), result = previous. The generated
 // callback saves that result and restores it in finally; nested entries can thus
@@ -18,12 +27,12 @@ public func __cj_arkts_enter(ctx: JSContext): ?JSContext {
     return previous
 }
 
-// Before -> after: Some(ctx) in the ThreadLocal slot remains Some(ctx); return
-// that ctx after getNapiEnv() succeeds. A None slot throws ARKTS_NO_CALLING_CONTEXT
-// instead of creating a context. Foreign wrappers call this accessor without a
-// business-code context argument; validation errors propagate to the caller.
+// The context of the active calling scope. Without a scope the call fails with
+// ForeignRuntimeException: interop calls only run inside an @ArkTS entry.
+// Lifecycle and thread checks of the stored context propagate unchanged.
 public func __cj_arkts_current(): JSContext {
-    let ctx = CURRENT_CONTEXT.get() ?? throw Exception("ARKTS_NO_CALLING_CONTEXT")
+    let ctx = CURRENT_CONTEXT.get() ?? throw ForeignRuntimeException(
+        "ArkTS interop call requires an active calling scope: no JSContext is bound to the current thread")
     ctx.getNapiEnv()
     return ctx
 }

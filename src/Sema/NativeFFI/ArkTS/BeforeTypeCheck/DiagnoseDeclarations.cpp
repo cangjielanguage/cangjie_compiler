@@ -23,14 +23,29 @@ constexpr const char* ENTRY_SHAPE_NOTE =
     "an @ArkTS entry is a top-level public parameterless function with an explicit 'Unit' return type";
 constexpr const char* ENTRY_DUPLICATE_NOTE = "entry names are registered with JSModule.registerFunc";
 
-const Annotation* FindArkTSAnnotation(const Decl& decl)
+const Annotation* FindAnnotation(const Decl& decl, AnnotationKind kind)
 {
     for (const auto& annotation : decl.annotations) {
-        if (annotation->kind == AnnotationKind::ARKTS) {
+        if (annotation->kind == kind) {
             return annotation.get();
         }
     }
     return nullptr;
+}
+
+Annotation* FindAnnotation(Decl& decl, AnnotationKind kind)
+{
+    for (auto& annotation : decl.annotations) {
+        if (annotation->kind == kind) {
+            return annotation.get();
+        }
+    }
+    return nullptr;
+}
+
+const Annotation* FindArkTSAnnotation(const Decl& decl)
+{
+    return FindAnnotation(decl, AnnotationKind::ARKTS);
 }
 
 // A non-foreign entry may not declare type parameters. The parser rejects the
@@ -306,7 +321,87 @@ void DiagnosePlacementAndOptions(Package& pkg, DiagnosticEngine& diag)
         walker.Walk();
     }
 }
+
+// An @ArkTS class or interface declaration. The annotation may be written on
+// the declaration or inherited from a foreign block.
+bool IsArkTSAnnotatedClassOrInterface(const Decl* decl)
+{
+    return decl != nullptr && (DynamicCast<const ClassDecl*>(decl) != nullptr ||
+        DynamicCast<const InterfaceDecl*>(decl) != nullptr) && FindArkTSAnnotation(*decl) != nullptr;
+}
+
+// The first unmet @WriteOnly placement rule, in declaration order.
+std::string WriteOnlyPlacementReason(const Decl& decl)
+{
+    auto prop = DynamicCast<const PropDecl*>(&decl);
+    if (prop == nullptr) {
+        return "only a property member can be annotated with '@WriteOnly'";
+    }
+    if (!IsArkTSAnnotatedClassOrInterface(decl.outerDecl)) {
+        return "only a member of an '@ArkTS' class or interface can be annotated with '@WriteOnly'";
+    }
+    if (!prop->isVar) {
+        return "a write-only property must be declared as 'mut prop'";
+    }
+    return {};
+}
+
+// A refused @WriteOnly leaves a foreign owner without a complete wrapper
+// shape; other owners keep their remaining diagnostics.
+void MarkForeignOwnerBroken(Decl* owner)
+{
+    if (auto classDecl = DynamicCast<ClassDecl*>(owner);
+        classDecl != nullptr && IsArkTSForeignClass(*classDecl)) {
+        classDecl->EnableAttr(Attribute::IS_BROKEN);
+        return;
+    }
+    if (auto interfaceDecl = DynamicCast<InterfaceDecl*>(owner);
+        interfaceDecl != nullptr && IsArkTSForeignInterface(*interfaceDecl)) {
+        interfaceDecl->EnableAttr(Attribute::IS_BROKEN);
+    }
+}
 } // namespace
+
+// @WriteOnly is valid only on a mutable property member of an @ArkTS class or
+// interface; a refused annotation is marked broken before preparation.
+void DiagnoseArkTSWriteOnlyPlacement(Package& pkg, DiagnosticEngine& diag)
+{
+    if (pkg.TestAttr(Attribute::IMPORTED)) {
+        return;
+    }
+    for (auto& file : pkg.files) {
+        Walker walker(file.get(), [&diag](Ptr<Node> node) {
+            auto decl = DynamicCast<Decl*>(node);
+            // An enum constructor is refused by the parser's annotation
+            // allow-list; other enum members follow the placement rule.
+            const bool enumConstructor = decl != nullptr && decl->TestAttr(Attribute::ENUM_CONSTRUCTOR);
+            if (decl == nullptr || enumConstructor ||
+                decl->TestAnyAttr(Attribute::COMPILER_ADD, Attribute::IS_BROKEN,
+                    Attribute::ARKTS_FUNCTION_WRAPPER, Attribute::ARKTS_CLASS_WRAPPER,
+                    Attribute::ARKTS_INTERFACE_WRAPPER, Attribute::ARKTS_LOWERED)) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            Annotation* annotation = FindAnnotation(*decl, AnnotationKind::WRITE_ONLY);
+            // The parser reports a malformed annotation (arguments present)
+            // itself; one annotation keeps one report.
+            if (annotation == nullptr || annotation->TestAttr(Attribute::IS_BROKEN)) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            const auto reason = WriteOnlyPlacementReason(*decl);
+            if (reason.empty()) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_write_only_placement_invalid, *annotation, reason);
+            // The annotation itself is refused; the declaration stays usable
+            // for the rest of the package, except a foreign owner whose
+            // wrapper shape can no longer be built.
+            annotation->EnableAttr(Attribute::IS_BROKEN);
+            MarkForeignOwnerBroken(decl->outerDecl);
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+    }
+}
 
 // Validate non-foreign @ArkTS declaration contracts: entry shape and name,
 // reserved generated names, annotation placement and the foreign-only

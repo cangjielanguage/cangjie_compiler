@@ -202,6 +202,9 @@ bool HasGeneratedEntry(const GeneratedDeclarations& declarations, const FuncDecl
 void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager,
     ImportManager* importManager)
 {
+    // Validate @WriteOnly placement on the source AST, before preparation
+    // rewrites member shapes and installs generated accessors.
+    DiagnoseArkTSWriteOnlyPlacement(pkg, diag);
     // Foreign classes are classified before any function work: they become
     // ordinary classes owning a reference to an ArkTS object, so the symbol
     // table and the C ABI checks below see the generated member declarations.

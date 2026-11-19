@@ -525,6 +525,10 @@ ERROR(sema_arkts_foreign_class_invalid,
 // A @WriteOnly property may only be the target of an assignment.
 ERROR(sema_arkts_write_only_read,
     "property '%s' is write-only and cannot be read")
+// @WriteOnly is only valid on a mutable property member of an @ArkTS class or
+// interface. The reason carries the unmet condition.
+ERROR(sema_arkts_write_only_placement_invalid,
+    "invalid @WriteOnly placement: %s; only a 'mut prop' member of an '@ArkTS' class or interface is allowed")
 // Declaration-shape refusals of an @ArkTS foreign interface: a sealed
 // declaration, an unsupported member kind, a non-foreign parent, a
 // reserved generated member name, or a member whose signature has no default

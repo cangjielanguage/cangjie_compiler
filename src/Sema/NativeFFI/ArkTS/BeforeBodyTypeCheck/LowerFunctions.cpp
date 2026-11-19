@@ -121,8 +121,14 @@ bool BindSupportReferences(Decl& owner, Node& root, ImportManager& imports, Diag
             // The interop library's exception carrier is re-exported by the
             // facade under its original package name; both spellings denote
             // the one declaration the call translation must catch.
-            return found->first == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION &&
-                decl->fullPackageName == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION_PACKAGE;
+            if (found->first == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION &&
+                decl->fullPackageName == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION_PACKAGE) {
+                return true;
+            }
+            // The runtime exception is hosted by the call-scope package, which
+            // detects the missing scope, and re-exported by the facade.
+            return found->first == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION &&
+                decl->fullPackageName == ARKTS_CONTEXT_ABI_PACKAGE;
         });
         if (target == visible.end() || !Ty::IsTyCorrect((*target)->GetTy())) {
             reportMissing();

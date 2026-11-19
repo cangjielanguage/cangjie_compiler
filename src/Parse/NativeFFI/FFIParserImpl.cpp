@@ -94,13 +94,23 @@ void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos)
 
 void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) const
 {
-    for (auto& annotation : annos) {
-        if (annotation->kind != AnnotationKind::ARKTS) {
+    // A block annotation is cloned into every member, so every block-level
+    // rule is applied once here and the refused part is dropped before
+    // cloning.
+    for (auto it = annos.begin(); it != annos.end();) {
+        auto& annotation = *it;
+        if (annotation->kind == AnnotationKind::WRITE_ONLY) {
+            p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_write_only_placement_invalid, *annotation,
+                "'@WriteOnly' cannot be applied to a foreign block; annotate a 'mut prop' member instead");
+            it = annos.erase(it);
             continue;
         }
-        // A block annotation is cloned into every member, so an invalid option
-        // must be reported once here and removed. The member clones then keep
-        // only the valid block defaults and cannot repeat the block error.
+        if (annotation->kind != AnnotationKind::ARKTS) {
+            ++it;
+            continue;
+        }
+        // Member clones keep only the valid block defaults and cannot repeat
+        // the block error.
         std::unordered_set<std::string> seen;
         std::vector<OwnedPtr<FuncArg>> validArgs;
         validArgs.reserve(annotation->args.size());
@@ -128,6 +138,7 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
             validArgs.emplace_back(std::move(arg));
         }
         annotation->args = std::move(validArgs);
+        ++it;
     }
 }
 
@@ -188,8 +199,8 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
                 break;
             }
             case AnnotationKind::WRITE_ONLY: {
-                // The design annotation takes no arguments; placement rules
-                // belong to the placement matrix owned by a later requirement.
+                // The annotation takes no arguments; its placement on a member
+                // is validated by the ArkTS declaration pass.
                 CheckNoArgAnnotation(anno, "@" + anno.identifier.Val());
                 break;
             }

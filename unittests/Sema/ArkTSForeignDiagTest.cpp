@@ -1887,10 +1887,10 @@ public foreign class Leaf <: Mid {
     }
 }
 
-// The write-only read diagnostic belongs to a prepared wrapper property; a
-// plain Cangjie class with the misplaced annotation is outside this
-// requirement and is not reported as a wrapper read.
-TEST_F(ArkTSForeignDiagTest, WriteOnlyAnnotationOnPlainClassIsNotAWrappedRead)
+// @WriteOnly is valid only on a member of an @ArkTS class or interface. On a
+// plain Cangjie class the annotation is misplaced and creates no write-only
+// semantics, so the property stays readable.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyOnPlainClassPropertyIsMisplaced)
 {
     ResetWithArkTSSupport();
     CompileSema(R"(package entry
@@ -1909,11 +1909,14 @@ public func read(plain: Plain): Int32 {
     return plain.value
 }
 )");
+    EXPECT_TRUE(HasErrorContaining(
+        "only a member of an '@ArkTS' class or interface can be annotated with '@WriteOnly'"));
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 1);
     EXPECT_FALSE(HasErrorContaining("is write-only and cannot be read"));
 }
 
-// BR-13 restricts @WriteOnly to a mutable property; an immutable property is
-// refused by the class shape rule instead of silently losing the setter.
+// A write-only member must be mutable; an immutable property is refused by the
+// placement matrix before class preparation can build a wrapper.
 TEST_F(ArkTSForeignDiagTest, ForeignClassWriteOnlyRequiresMutableProperty)
 {
     ResetWithArkTSSupport();
@@ -1927,12 +1930,192 @@ public foreign class Counter {
     @WriteOnly public prop value: Int32
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("@WriteOnly requires a mutable property"));
+    EXPECT_TRUE(HasErrorContaining("a write-only property must be declared as 'mut prop'"));
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 1);
+    EXPECT_FALSE(HasErrorContaining("invalid @ArkTS foreign class"));
+    EXPECT_TRUE(IsDeclBroken("Counter"));
 }
 
-// The design annotation takes no arguments (design §5.1.3). The parser owns
-// the rule, as it does for @RestParam; placement stays with the later
-// requirement that owns the placement matrix.
+// A mutable property of a foreign class is the supported placement.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyAcceptsForeignClassMutableProperty)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Counter {
+    public init()
+    @WriteOnly public mut prop value: Int32
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 0);
+    EXPECT_FALSE(IsDeclBroken("Counter"));
+}
+
+// Non-property declarations are never a valid @WriteOnly target. A function, a
+// top-level variable and an enum declaration each report the placement once.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyOnNonPropertyDeclarationsIsMisplaced)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@WriteOnly
+public func host(): Unit {}
+
+@WriteOnly
+public let topLevel: Int32 = 1
+
+@WriteOnly
+public enum Kind {
+    | A
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("only a property member can be annotated with '@WriteOnly'"), 3);
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 3);
+}
+
+// The remaining declaration kinds are not properties either. A member
+// variable, a local binding, a type alias, a struct and an extend each report
+// the placement once.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyOnOtherDeclarationKindsIsMisplaced)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public class Holder {
+    @WriteOnly
+    public var field: Int32 = 0
+}
+
+@WriteOnly
+public type BadAlias = Int32
+
+@WriteOnly
+public struct BadStruct {}
+
+public class Box {}
+
+@WriteOnly
+extend Box {}
+
+public func host(@WriteOnly p: Int32): Unit {
+    @WriteOnly
+    let localValue = 1
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 6);
+}
+
+// An enum constructor is parser-owned; an enum member function is a
+// non-property member and follows the placement rule.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyOnEnumMemberFunctionIsMisplaced)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+public enum Mode {
+    A
+    @WriteOnly
+    public func describe(): String { "a" }
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 1);
+}
+
+// The valid positions are the mutable property members of an @ArkTS class and
+// an @ArkTS interface, including non-foreign declarations.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyPlacementAcceptsArkTSTypeMembers)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS
+public open class Exported {
+    @WriteOnly
+    public mut prop value: Int32 {
+        get() { 0 }
+        set(v) {}
+    }
+}
+
+@ArkTS
+public interface IExported {
+    @WriteOnly
+    public mut prop value: Int32
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 0);
+}
+
+// A member function and a parameter are not properties either.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyOnMemberFunctionAndParameterIsMisplaced)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public class Host {
+    @WriteOnly
+    public func member(@WriteOnly p: Int32): Unit {}
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("only a property member can be annotated with '@WriteOnly'"), 2);
+}
+
+// A foreign block annotation is cloned into every member, so a member-only
+// annotation written on the block must be refused once at the block.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyOnForeignBlockIsMisplaced)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+@WriteOnly
+public foreign {
+    func host(): Unit
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("'@WriteOnly' cannot be applied to a foreign block"));
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 1);
+}
+
+// The placement walk is idempotent: a repeated preparation pass over the same
+// tree does not report the same misplaced annotation again.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyPlacementIsIdempotent)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public class Plain {
+    @WriteOnly
+    public mut prop value: Int32 {
+        get() { 0 }
+        set(v) {}
+    }
+}
+)");
+    auto pkg = instance->GetSourcePackages().front();
+    const auto errorsBefore = diag.GetErrorCount();
+    Native::FFI::ArkTS::PrepareTypeCheck(*pkg, diag, instance->GetSourceManager(), instance->importManager);
+    Native::FFI::ArkTS::PrepareTypeCheck(*pkg, diag, instance->GetSourceManager(), instance->importManager);
+    EXPECT_EQ(diag.GetErrorCount(), errorsBefore);
+}
+
+// The annotation takes no arguments; the parser owns that rule, as it does for
+// @RestParam. Placement is reported separately by the declaration pass.
 TEST_F(ArkTSForeignDiagTest, ForeignClassWriteOnlyRejectsArguments)
 {
     ResetWithArkTSSupport();
@@ -2350,6 +2533,12 @@ const char* ARKTS_CONTEXT_SUPPORT = R"(package cj_arkts_context_v1
 
 import ohos.ark_interop.JSContext
 
+public class ForeignRuntimeException <: Exception {
+    public init(message: String) {
+        super(message)
+    }
+}
+
 public func __cj_arkts_current(): JSContext { return JSContext() }
 public func __cj_arkts_enter(ctx: JSContext): ?JSContext { return None }
 public func __cj_arkts_restore(previous: ?JSContext): Unit {}
@@ -2365,12 +2554,6 @@ public import cj_arkts_context_v1.*
 public import std.math.numeric.BigInt
 
 public class ExternConversionException <: Exception {
-    public init(message: String) {
-        super(message)
-    }
-}
-
-public class ForeignRuntimeException <: Exception {
     public init(message: String) {
         super(message)
     }
@@ -2644,9 +2827,10 @@ TEST_F(ArkTSForeignDiagTest, MissingForeignRuntimeExceptionIsSupportUnavailable)
 {
     diag.ClearError();
     auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
-    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
-    auto langCjo = ExportSupportPackage(WithoutSupportClass(ARKTS_LANG_SUPPORT, "ForeignRuntimeException"),
-        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto contextCjo = ExportSupportPackage(
+        WithoutSupportClass(ARKTS_CONTEXT_SUPPORT, "ForeignRuntimeException"), {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
 
     diag.ClearError();
     handler->messages.clear();
@@ -2820,7 +3004,7 @@ public foreign func echo(value: Int32): Int32
             EXPECT_NE(ref.target, nullptr);
             EXPECT_NE(ref.target, Ptr<Decl>(userRuntime));
             if (ref.target) {
-                EXPECT_EQ(ref.target->fullPackageName, "arkts.lang");
+                EXPECT_EQ(ref.target->fullPackageName, "cj_arkts_context_v1");
             }
         } else if (name == "BusinessException") {
             ++businessRefs;
@@ -3995,6 +4179,9 @@ public foreign interface WriteOnly {
     EXPECT_TRUE(HasErrorContaining("@WriteOnly properties are not supported on a foreign interface"));
     EXPECT_EQ(diag.GetErrorCount(), 1);
     EXPECT_TRUE(IsDeclBroken("WriteOnly"));
+    // The placement itself is legal on an @ArkTS interface's mutable
+    // property; only the interface write-only semantics stay deferred.
+    EXPECT_EQ(CountErrorsContaining("invalid @WriteOnly placement"), 0);
 }
 
 TEST_F(ArkTSForeignDiagTest, ForeignInterfaceBrokenParentDoesNotCascade)

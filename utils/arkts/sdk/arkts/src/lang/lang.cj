@@ -14,6 +14,11 @@ public import ohos.ark_interop.*
 public import cj_arkts_context_v1.__cj_arkts_enter
 public import cj_arkts_context_v1.__cj_arkts_current
 public import cj_arkts_context_v1.__cj_arkts_restore
+// ForeignRuntimeException: target-resolution, callability, ArkTS-side throw and
+// missing-calling-scope failures. Hosted by the call-scope package and
+// re-exported here so generated code and applications name it through
+// `arkts.lang`.
+public import cj_arkts_context_v1.ForeignRuntimeException
 public import std.math.numeric.BigInt
 // The interop library's carrier for an ArkTS-side throw, re-exported so the
 // generated call translation names it through this facade instead of adding an
@@ -38,18 +43,6 @@ public import std.interop.arkts.*
 // logic lives here.
 // ============================================================================
 public class ExternConversionException <: Exception {
-    public init(message: String) {
-        super(message)
-    }
-}
-
-// ForeignRuntimeException: cross-boundary call failures that are not value
-// conversion - a namespace or target that does not resolve, a target that is
-// not callable, and an ArkTS-side throw. The single-String constructor is the
-// compiler-side contract; the message carries the declaration context and, for
-// an ArkTS-side throw, the original message with the ArkTS call stack. No call
-// logic lives here.
-public class ForeignRuntimeException <: Exception {
     public init(message: String) {
         super(message)
     }
