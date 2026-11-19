@@ -45,7 +45,10 @@ bool BindSupportReferences(Decl& owner, Node& root, ImportManager& imports, Diag
     const std::string& diagnosticName, std::set<std::tuple<Ptr<File>, Position, Position>>* reportedRanges)
 {
     static const std::unordered_map<std::string, std::string> packages{{"BigInt", "std.math.numeric"},
-        {"Exception", "std.core"}, {"Option", "std.core"}, {"ExternConversionException", "arkts.lang"}};
+        {"Exception", "std.core"}, {"Option", "std.core"},
+        {"ExternConversionException", Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
+        {Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
+        {Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE}};
     // Base references of the package-qualified generated names; the value is
     // the full package name the injected import must bind.
     static const std::unordered_map<std::string, std::string> supportPackages{
@@ -109,7 +112,17 @@ bool BindSupportReferences(Decl& owner, Node& root, ImportManager& imports, Diag
         }
         const auto visible = imports.GetImportedDeclsByName(*owner.curFile, found->first);
         auto target = std::find_if(visible.begin(), visible.end(), [&](auto decl) {
-            return decl->fullPackageName == found->second && decl->identifier == found->first;
+            if (decl->identifier != found->first) {
+                return false;
+            }
+            if (decl->fullPackageName == found->second) {
+                return true;
+            }
+            // The interop library's exception carrier is re-exported by the
+            // facade under its original package name; both spellings denote
+            // the one declaration the call translation must catch.
+            return found->first == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION &&
+                decl->fullPackageName == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION_PACKAGE;
         });
         if (target == visible.end() || !Ty::IsTyCorrect((*target)->GetTy())) {
             reportMissing();

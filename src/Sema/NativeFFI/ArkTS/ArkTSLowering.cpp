@@ -4,6 +4,7 @@
 #include "TypeCheckerImpl.h"
 #include "ArkTSInterop.h"
 #include "Collector.h"
+#include "FunctionSource.h"
 #include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/IntLiteral.h"
@@ -25,18 +26,23 @@ using namespace Cangjie::AST;
 namespace {
 constexpr auto CONTEXT_PACKAGE = "cj_arkts_context_v1";
 constexpr auto ARKTS_LANGUAGE_PACKAGE = "arkts.lang";
+constexpr auto ARKTS_CONVERSION_EXCEPTION = "ExternConversionException";
 
 // Every conversion failure in generated code is thrown through
 // ExternConversionException, the single type of that name hosted by the
-// arkts.lang facade; it takes one String describing the failure.
+// arkts.lang facade; it takes one String describing the failure. The message
+// keeps the two documented categories: a wrong kind is a type mismatch, a
+// right kind with an illegal value is an invalid value. The wording matches
+// the function-wrapper emitter so every conversion point reports alike.
 std::string FromJS(const std::string& type, const std::string& value,
     const std::string& number, const std::string& result)
 {
     auto mismatch = [&](const std::string& reason) {
-        return "throw ExternConversionException(\"ArkTS type mismatch: " + reason + " for " + type + "\")\n";
+        return "throw " + std::string(ARKTS_CONVERSION_EXCEPTION) + "(\"ArkTS type mismatch: " + reason + " for " +
+            type + "\")\n";
     };
     auto invalid = [&](const std::string& reason) {
-        return "throw ExternConversionException(\"ArkTS value invalid: " + reason + " for " + type + "\")\n";
+        return "throw " + std::string(ARKTS_CONVERSION_EXCEPTION) + "(\"ArkTS value invalid: " + reason + "\")\n";
     };
     if (type == "Nothing") {
         return "throw Exception(\"ArkTS never function returned\")\n";
@@ -48,22 +54,30 @@ std::string FromJS(const std::string& type, const std::string& value,
     if (type == "String" || type == "Bool") {
         auto predicate = type == "String" ? "isString" : "isBoolean";
         auto conversion = type == "String" ? "asString().toString()" : "toBoolean()";
-        return "if (!" + value + "." + predicate + "()) { " + mismatch("wrong kind") +
-            "}\nreturn " + value + "." + conversion + "\n";
+        return "if (!" + value + "." + predicate + "()) { " +
+            mismatch(type == "String" ? "not a string" : "not a boolean") + "}\nreturn " + value + "." + conversion +
+            "\n";
     }
     if (type == "BigInt" || type == "Int64" || type == "UInt64") {
-        std::string code = "if (!" + value + ".isBigInt()) { " + mismatch("wrong kind") +
+        std::string code = "if (!" + value + ".isBigInt()) { " + mismatch("not a bigint") +
             "}\nlet " + number + " = " + value + ".asBigInt().toBigInt()\n";
         if (type == "BigInt") {
             return code + "return " + number + "\n";
         }
-        auto minimum = type == "Int64" ? "-9223372036854775808" : "0";
-        auto maximum = type == "Int64" ? "9223372036854775807" : "18446744073709551615";
-        code += "if (" + number + " < __cj_arkts_BigInt.parse(\"" + minimum + "\") || " +
-            number + " > __cj_arkts_BigInt.parse(\"" + maximum + "\")) { " + invalid("out of range") + "}\n";
+        if (type == "Int64") {
+            code += "if (" + number + " < __cj_arkts_BigInt.parse(\"-9223372036854775808\")) { " +
+                invalid("below Int64 range") + "}\n";
+            code += "if (" + number + " > __cj_arkts_BigInt.parse(\"9223372036854775807\")) { " +
+                invalid("above Int64 range") + "}\n";
+        } else {
+            code += "if (" + number + " < __cj_arkts_BigInt.parse(\"0\")) { " +
+                invalid("negative BigInt for UInt64") + "}\n";
+            code += "if (" + number + " > __cj_arkts_BigInt.parse(\"18446744073709551615\")) { " +
+                invalid("above UInt64 range") + "}\n";
+        }
         return code + "return " + type + ".parse(" + number + ".toString())\n";
     }
-    std::string code = "if (!" + value + ".isNumber()) { " + mismatch("wrong kind") +
+    std::string code = "if (!" + value + ".isNumber()) { " + mismatch("not a number") +
         "}\nlet " + number + " = " + value + ".toNumber()\n";
     if (type == "Float64") {
         return code + "return " + number + "\n";
@@ -80,11 +94,11 @@ std::string FromJS(const std::string& type, const std::string& value,
             upper = "3.4028234663852886e38";
         }
         return code + "if ((" + number + " - " + number + ") == 0.0 && (" + number + " < " + lower + " || " + number +
-            " > " + upper + ")) { " + invalid("out of range") + "}\nlet " + result + " = " + type + "(" + number +
-            ")\nreturn " + result + "\n";
+            " > " + upper + ")) { " + invalid("out of " + type + " range") + "}\nlet " + result + " = " + type + "(" +
+            number + ")\nreturn " + result + "\n";
     }
     code += "if (" + number + " != " + number + " || " + number + ".isInf()) { " +
-        invalid("non-finite value") + "}\n";
+        invalid("not a finite number for " + type) + "}\n";
     static const std::unordered_map<std::string, std::pair<std::string, std::string>> bounds{
         {"Int8", {"-128.0", "127.0"}}, {"Int16", {"-32768.0", "32767.0"}},
         {"Int32", {"-2147483648.0", "2147483647.0"}}, {"UInt8", {"0.0", "255.0"}},
@@ -97,11 +111,11 @@ std::string FromJS(const std::string& type, const std::string& value,
     auto range = bounds.find(type);
     CJC_ASSERT_WITH_MSG(range != bounds.end(), "checked scalar missing bounds row");
     code += "if (" + number + " < " + range->second.first + " || " + number + " > " + range->second.second + ") { " +
-        invalid(type == "Rune" ? "invalid code point" : "out of range") + "}\n";
-    code += "if (" + number + " != Float64(Int64(" + number + "))) { " + invalid("not an integer") + "}\n";
+        invalid(type == "Rune" ? "not a Unicode scalar value for Rune" : "out of " + type + " range") + "}\n";
+    code += "if (" + number + " != Float64(Int64(" + number + "))) { " + invalid("not an integer for " + type) + "}\n";
     if (type == "Rune") {
         return code + "if (" + number + " >= 55296.0 && " + number + " <= 57343.0) { " +
-            invalid("invalid code point") + "}\nreturn Rune(UInt32(" + number + "))\n";
+            invalid("surrogate code point for Rune") + "}\nreturn Rune(UInt32(" + number + "))\n";
     }
     return code + "return " + type + "(" + number + ")\n";
 }
@@ -298,7 +312,7 @@ bool TypeChecker::TypeCheckerImpl::SpliceArkTSGeneratedBody(ASTContext& ctx, AST
                     re->SetTy(target->GetTy());
                 }
             }
-            if (name == "ExternConversionException") {
+            if (name == ARKTS_CONVERSION_EXCEPTION || name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION) {
                 if (auto target = importManager.GetImportedDecl(ARKTS_LANGUAGE_PACKAGE, name)) {
                     re->ref.target = target;
                     re->ref.targets = {target};
@@ -635,9 +649,13 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
             while (start < ns.size()) {
                 auto end = ns.find('.', start);
                 auto key = "__namespace_" + std::to_string(nsIndex) + "__";
+                auto value = freshName("__cj_namespace_value_" + std::to_string(nsIndex));
                 auto next = freshName("__cj_namespace_" + std::to_string(nsIndex++));
                 literals[key] = ns.substr(start, end == std::string::npos ? end : end - start);
-                code += "let " + next + " = " + receiver + ".getProperty(\"" + key + "\").asObject()\n";
+                // A missing namespace segment names the variable, the module
+                // and the path prefix at the failing segment.
+                code += Native::FFI::ArkTS::ArkTSNamespaceResolution(receiver, value, next, nsIndex - 1, "variable",
+                    Native::FFI::ArkTS::ArkTSStringLiteral("__name__"), false, "");
                 receiver = next;
                 if (end == std::string::npos) {
                     break;

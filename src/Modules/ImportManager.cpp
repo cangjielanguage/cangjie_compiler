@@ -119,11 +119,24 @@ constexpr const char* ARKTS_LANG_FULL_PACKAGE = "arkts.lang";
 // user code never writes this type, so the compiler imports the single member
 // instead of asking the user for the facade.
 constexpr const char* ARKTS_CONVERSION_EXCEPTION = "ExternConversionException";
+// The public call-failure exception the wrapper's guards throw, hosted by the
+// same facade and imported the same way.
+constexpr const char* ARKTS_RUNTIME_EXCEPTION = "ForeignRuntimeException";
+// The interop library's carrier for an ArkTS-side throw. The facade re-exports
+// it, so the generated call translation catches it through the same import.
+constexpr const char* ARKTS_BUSINESS_EXCEPTION = "BusinessException";
+
+// The three single-member support imports injected into every @ArkTS file.
+bool IsArkTSSupportMember(const std::string& member)
+{
+    return member == ARKTS_CONVERSION_EXCEPTION || member == ARKTS_RUNTIME_EXCEPTION ||
+        member == ARKTS_BUSINESS_EXCEPTION;
+}
 
 // The compiler-injected @ArkTS imports are implicit so the user never sees
 // them in unused-import warnings, but they are still runtime link
 // dependencies. Dependency generation normally skips implicit imports; the two
-// interop packages and the arkts.lang conversion exception are the deliberate
+// interop packages and the single-member support imports are the deliberate
 // exception.
 bool IsArkTSInteropImport(const ImportSpec& import)
 {
@@ -134,8 +147,8 @@ bool IsArkTSInteropImport(const ImportSpec& import)
     if (packageName == ARKTS_INTEROP_FULL_PACKAGE || packageName == ARKTS_CONTEXT_ABI_FULL_PACKAGE) {
         return true;
     }
-    return import.content.identifier.Val() == ARKTS_CONVERSION_EXCEPTION &&
-        packageName == std::string(ARKTS_LANG_FULL_PACKAGE) + "." + ARKTS_CONVERSION_EXCEPTION;
+    const auto member = import.content.identifier.Val();
+    return IsArkTSSupportMember(member) && packageName == std::string(ARKTS_LANG_FULL_PACKAGE) + "." + member;
 }
 
 // Whether @p member from @p fullPackageName is already visible as a short
@@ -955,11 +968,11 @@ std::string ImportManager::GeneratePkgDepInfo(const Package& pkg, bool exportCJO
             std::string longName;
             std::string shortName;
             if (IsArkTSInteropImport(*import)) {
-                // The injected exception is a member import from arkts.lang;
-                // the dependency is the package, not the member-qualified name.
-                longName = shortName = import->content.identifier.Val() == ARKTS_CONVERSION_EXCEPTION
-                    ? std::string(ARKTS_LANG_FULL_PACKAGE)
-                    : import->content.GetImportedPackageName();
+                // The injected support imports name a single member; the
+                // dependency is the package, not the member-qualified name.
+                const auto member = import->content.identifier.Val();
+                longName = shortName = IsArkTSSupportMember(member) ? std::string(ARKTS_LANG_FULL_PACKAGE)
+                                                                    : import->content.GetImportedPackageName();
             } else {
                 auto names = cjoManager->GetPossibleCjoNames(*import);
                 CJC_ASSERT(!names.empty());
@@ -1291,19 +1304,24 @@ void ImportManager::AddArkTSInteropImports(
             };
             addImport(ARKTS_INTEROP_FULL_PACKAGE);
             addImport(ARKTS_CONTEXT_ABI_FULL_PACKAGE);
-            // The generated conversion guards always throw this public type;
+            // The generated guards always throw or catch these public types;
             // import the single member so the wrapper compiles without asking
-            // the user for the arkts.lang facade. A star import of the facade
-            // already makes it visible.
-            if (pkg->fullPackageName != ARKTS_LANG_FULL_PACKAGE &&
-                !FileImportsMember(*file, ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION) &&
-                IsPackageResolvable(*this, ARKTS_LANG_FULL_PACKAGE)) {
-                auto import = CreateImportSpec(ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION);
+            // the user for the package. A star import of the package already
+            // makes the name visible.
+            auto addMemberImport = [&](const std::string& fullPackageName, const std::string& member) {
+                if (pkg->fullPackageName == fullPackageName || FileImportsMember(*file, fullPackageName, member) ||
+                    !IsPackageResolvable(*this, fullPackageName)) {
+                    return;
+                }
+                auto import = CreateImportSpec(fullPackageName, member);
                 SetSyntheticImportRange(*import, at);
                 import->curFile = file.get();
                 import->content.curFile = file.get();
                 file->imports.emplace_back(std::move(import));
-            }
+            };
+            addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION);
+            addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_RUNTIME_EXCEPTION);
+            addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_BUSINESS_EXCEPTION);
         }
     }
 }

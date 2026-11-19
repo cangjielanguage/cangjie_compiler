@@ -286,6 +286,41 @@ constexpr const char* ARKTS_CONTEXT_CURRENT = "__cj_arkts_current";
 constexpr const char* ARKTS_INTEROP_PACKAGE = "ark_interop";
 constexpr const char* ARKTS_CONTEXT_ABI_PACKAGE = "cj_arkts_context_v1";
 
+// Runtime failure contract of generated wrappers. A target that does not
+// resolve, a target that is not callable and an ArkTS-side throw all surface
+// as the public ForeignRuntimeException; a value conversion stays with
+// ExternConversionException. The library carrier of an ArkTS-side throw is
+// BusinessException, and only its "outside error / ArkTS exception" code is
+// translated; every other library failure keeps its code and message.
+constexpr const char* ARKTS_RUNTIME_EXCEPTION = "ForeignRuntimeException";
+constexpr const char* ARKTS_BUSINESS_EXCEPTION = "BusinessException";
+// The facade that hosts the generated wrappers' support types, and the package
+// that declares the re-exported library carrier.
+constexpr const char* ARKTS_LANGUAGE_PACKAGE = "arkts.lang";
+constexpr const char* ARKTS_BUSINESS_EXCEPTION_PACKAGE = "ohos.business_exception";
+constexpr const char* ARKTS_LIBRARY_EXTERNAL_ERROR = "34300002";
+// An ArkTS-side throw reaches Cangjie as a BusinessException carrying the JS
+// error's own code; a plain `new Error(...)` has none, so its code is 0. Both
+// codes denote a runtime exception and are translated; every other code
+// (thread/lifecycle/type) keeps its identity.
+constexpr const char* ARKTS_LIBRARY_ARKTS_THROW = "0";
+
+// One generated string literal: the single quoting point shared by the
+// wrapper generators and the variable lowering path.
+std::string ArkTSStringLiteral(const std::string& text);
+
+// One generated namespace-segment resolution with a precise failure:
+//   let <value> = <receiver>.getProperty("<ns_i>")
+//   if (<value>.isUndefined()) { throw ForeignRuntimeException(...) }
+//   let <next> = <value>.asObject()
+// `kind` is the declaration kind ("function"/"class"/"variable") and `name` an
+// already-quoted literal (a placeholder or a name), so the failure message
+// names the declaration, the module (or the global object when
+// @p globalReceiver is set) and the namespace path up to the failing segment.
+// Every placeholder is its own literal so the lowering walker rebinds it.
+std::string ArkTSNamespaceResolution(const std::string& receiver, const std::string& value, const std::string& next,
+    size_t index, const std::string& kind, const std::string& name, bool globalReceiver, const std::string& indent);
+
 // Rest-index sentinel: "this signature has no rest parameter" - one
 // spelling shared by both sides of the wrapper contract, with the
 // generator (Utils/FunctionSource.cpp) selecting the plain form for
@@ -400,10 +435,13 @@ enum class ArkTSConstructorForm { DIRECT, SUPER_THUNK };
 //   arg_i = toJS(argument_i); result = recv.callMethod(name, [arg_i...])
 //            (static: recv.getProperty(name).asFunction().call([...], thisArg: recv))
 //   return fromJS(result)   // a Nothing result throws instead
+// ownerKind names the declaration kind in generated runtime-error messages:
+// "class" for a prepared class member, "interface" for a prepared interface
+// member (the interface path reuses this generator for its default bodies).
 std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSMemberReceiver memberReceiver,
     ArkTSReceiverKind receiver, size_t optionalStart,
-    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs, const std::string& ownerKind = "class");
 
 // Constructor body: resolves the ArkTS class, constructs it with the converted
 // arguments and stores the resulting object reference on the receiver.

@@ -758,7 +758,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSInterfaceFunc(
         // Interface members reject optional parameters, so the trailing
         // optional run is empty.
         code = ArkTSClassMethodSource(types, resultType, 0, prefix, restIndex, ArkTSMemberReceiver::INSTANCE,
-            declCtx.receiver, params.size(), classRefs);
+            declCtx.receiver, params.size(), classRefs, "interface");
     }
     if (code.empty()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, fd, id.identifier.Val(),

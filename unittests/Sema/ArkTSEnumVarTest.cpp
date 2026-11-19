@@ -203,6 +203,46 @@ protected:
         return found;
     }
 
+    // Every string literal in the generated body of @p name. Generated
+    // messages are string concatenations, so one message is a sequence of
+    // literals; the concatenated pieces are inspected individually.
+    std::vector<std::string> BodyStringLiterals(const std::string& name) const
+    {
+        std::vector<std::string> literals;
+        auto fn = FindFunction(name);
+        if (!fn || !fn->funcBody || !fn->funcBody->body) {
+            return literals;
+        }
+        Walker(fn->funcBody->body.get(), [&literals](Ptr<Node> node) {
+            auto literal = DynamicCast<LitConstExpr*>(node);
+            if (literal && literal->kind == LitConstKind::STRING) {
+                literals.push_back(literal->stringValue);
+            }
+            return VisitAction::WALK_CHILDREN;
+        }).Walk();
+        return literals;
+    }
+
+    static bool AnyLiteralStartsWith(const std::vector<std::string>& literals, const std::string& prefix)
+    {
+        for (const auto& literal : literals) {
+            if (literal.rfind(prefix, 0) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static bool AnyLiteralContains(const std::vector<std::string>& literals, const std::string& piece)
+    {
+        for (const auto& literal : literals) {
+            if (literal.find(piece) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     Ptr<EnumDecl> FindEnum(const std::string& name) const
     {
         Ptr<EnumDecl> found{nullptr};
@@ -452,12 +492,14 @@ public class JSValue {
     public func isBoolean(): Bool { return false }
     public func isArray(): Bool { return false }
     public func isBigInt(): Bool { return false }
+    public func isFunction(): Bool { return false }
     public func toNumber(): Float64 { return 0.0 }
     public func toBoolean(): Bool { return false }
     public func asString(): JSString { return JSString() }
     public func asBigInt(): JSBigInt { return JSBigInt() }
     public func asArray(): JSArray { return JSArray() }
     public func asObject(): JSObject { return JSObject() }
+    public func asFunction(): JSFunction { return JSFunction() }
     public func getElement(index: Int64): JSValue { return JSValue() }
     public func toJSValue(): JSValue { return this }
 }
@@ -474,10 +516,17 @@ public class JSArray {
     public func getElement(index: Int64): JSValue { return JSValue() }
 }
 
+public class JSFunction {
+    public func call(args: Array<JSValue>, thisArg!: JSValue): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return JSValue() }
+}
+
 public class JSObject {
     public func asObject(): JSObject { return this }
     public func getProperty(key: String): JSValue { return JSValue() }
+    public func setProperty(key: String, value: JSValue): Unit {}
     public func callMethod(key: String, args: Array<JSValue>): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return JSValue() }
 }
 
 public class JSCallInfo {}
@@ -523,7 +572,22 @@ public class ExternConversionException <: Exception {
         super(message)
     }
 }
+
+public class ForeignRuntimeException <: Exception {
+    public init(message: String) {
+        super(message)
+    }
+}
+
+public class BusinessException <: Exception {
+    public let code: Int32
+    public init(code: Int32, message: String) {
+        super(message)
+        this.code = code
+    }
+}
 )";
+
 } // namespace
 
 // A scalar `@ArkTS[globalVar: true] foreign func` lowers to a getter that
@@ -553,6 +617,93 @@ foreign func count(): Int32
     auto getter = FindFunction("count");
     ASSERT_NE(getter, nullptr);
     EXPECT_NE(getter->funcBody->body, nullptr);
+}
+
+// A globalVar getter resolves every namespace segment through a guarded
+// property read and converts the final value through the scalar conversion.
+// A missing segment reports the variable, the module and the failing path,
+// and the conversion failures use the two documented message prefixes.
+TEST_F(ArkTSEnumVarTest, GlobalVarNamespaceGetterKeepsTheRuntimeFailureShape)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+// A same-named package declaration must not capture the runtime support the
+// generated getter throws.
+class ForeignRuntimeException <: Exception {
+    public init(message: String) {
+        super(message)
+    }
+}
+
+@ArkTS[module: "actual", namespace: "outer.inner", globalVar: true]
+foreign func count(): Int32
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto getter = FindFunction("count");
+    ASSERT_NE(getter, nullptr);
+    ASSERT_NE(getter->funcBody->body, nullptr);
+    auto literals = BodyStringLiterals("count");
+    // The namespace guard names the module and the failing path prefix.
+    EXPECT_TRUE(AnyLiteralContains(literals, "module '"));
+    EXPECT_TRUE(AnyLiteralContains(literals, " has no namespace '"));
+    EXPECT_TRUE(AnyLiteralContains(literals, "outer"));
+    EXPECT_TRUE(AnyLiteralContains(literals, "inner"));
+    // Both conversion categories are emitted for a scalar target.
+    EXPECT_TRUE(AnyLiteralStartsWith(literals, "ArkTS type mismatch: "));
+    EXPECT_TRUE(AnyLiteralStartsWith(literals, "ArkTS value invalid: "));
+    // Two guarded namespace reads plus the final value read.
+    size_t propertyReads = 0;
+    Walker(getter->funcBody->body.get(), [&propertyReads](Ptr<Node> node) {
+        auto access = DynamicCast<MemberAccess*>(node);
+        if (access && access->field == "getProperty") {
+            ++propertyReads;
+        }
+        return VisitAction::WALK_CHILDREN;
+    })
+        .Walk();
+    EXPECT_EQ(propertyReads, 3);
+    // The guards throw the public runtime exception visible through the
+    // facade, never the same-named package declaration; the conversion
+    // failures throw the conversion exception.
+    size_t runtimeThrows = 0;
+    size_t conversionThrows = 0;
+    Walker(getter->funcBody->body.get(), [&](Ptr<Node> node) {
+        auto ref = DynamicCast<RefExpr*>(node);
+        if (!ref) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        const auto& name = ref->ref.identifier.Val();
+        if (name == "ForeignRuntimeException") {
+            ++runtimeThrows;
+            EXPECT_NE(ref->ref.target, nullptr);
+            if (ref->ref.target) {
+                EXPECT_EQ(ref->ref.target->fullPackageName, "arkts.lang");
+            }
+        } else if (name == "ExternConversionException") {
+            ++conversionThrows;
+            EXPECT_NE(ref->ref.target, nullptr);
+            if (ref->ref.target) {
+                EXPECT_EQ(ref->ref.target->fullPackageName, "arkts.lang");
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_EQ(runtimeThrows, 2);
+    EXPECT_GT(conversionThrows, 0);
 }
 
 // A `@ArkTS[globalVar: true] foreign func` of a non-scalar type (a class) is

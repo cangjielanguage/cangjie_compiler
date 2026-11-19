@@ -2369,7 +2369,65 @@ public class ExternConversionException <: Exception {
         super(message)
     }
 }
+
+public class ForeignRuntimeException <: Exception {
+    public init(message: String) {
+        super(message)
+    }
+}
+
+public class BusinessException <: Exception {
+    public let code: Int32
+    public init(code: Int32, message: String) {
+        super(message)
+        this.code = code
+    }
+}
 )";
+
+// The interop library package that owns the exception carrier. The facade
+// re-exports it under the original package name, which the pinning rule
+// accepts alongside a direct facade declaration.
+const char* ARKTS_BUSINESS_EXCEPTION_SUPPORT = R"(package ohos.business_exception
+
+public class BusinessException <: Exception {
+    public let code: Int32
+    public init(code: Int32, message: String) {
+        super(message)
+        this.code = code
+    }
+}
+)";
+
+// Remove one top-level class declaration from a support package, leaving the
+// rest of the facade intact. Used to build the missing-support variants.
+std::string WithoutSupportClass(const std::string& support, const std::string& className)
+{
+    const auto start = support.find("public class " + className + " ");
+    if (start == std::string::npos) {
+        return support;
+    }
+    const auto end = support.find("\n}\n", start);
+    if (end == std::string::npos) {
+        return support;
+    }
+    return support.substr(0, start) + support.substr(end + std::string("\n}\n").size());
+}
+
+// Remove the facade's BusinessException declaration and re-export the one
+// from its owning package instead.
+std::string ReexportBusinessException(const std::string& support)
+{
+    auto reduced = WithoutSupportClass(support, "BusinessException");
+    const std::string anchor = "public import std.math.numeric.BigInt\n";
+    auto at = reduced.find(anchor);
+    if (at == std::string::npos) {
+        return reduced;
+    }
+    at += anchor.size();
+    return reduced.substr(0, at) + "public import ohos.business_exception.BusinessException\n" + reduced.substr(at);
+}
+
 } // namespace
 
 // A user function that shares the name of a generated SDK support reference
@@ -2576,6 +2634,206 @@ public foreign func tuple(value: (Int32, Option<Int32>)): (Int32, Option<Int32>)
         return VisitAction::WALK_CHILDREN;
     }).Walk();
     EXPECT_GT(partLets, 0);
+}
+
+// The generated guard throws the public runtime exception, so the facade must
+// declare it. A facade without that declaration is a missing support
+// declaration: the standard support diagnostic is reported and the generated
+// body is dropped, never replaced by a bare name or another exception type.
+TEST_F(ArkTSForeignDiagTest, MissingForeignRuntimeExceptionIsSupportUnavailable)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(WithoutSupportClass(ARKTS_LANG_SUPPORT, "ForeignRuntimeException"),
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign func echo(value: Int32): Int32
+)");
+    EXPECT_GE(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
+    EXPECT_TRUE(HasErrorContaining("'echo'"));
+    auto fd = FindFunction("echo");
+    ASSERT_NE(fd, nullptr);
+    ASSERT_NE(fd->funcBody, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+    EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The call translation catches the library's error carrier. A facade that
+// neither declares nor re-exports it is the same missing support declaration
+// and refuses the wrapper before any body is generated.
+TEST_F(ArkTSForeignDiagTest, MissingBusinessExceptionIsSupportUnavailable)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(WithoutSupportClass(ARKTS_LANG_SUPPORT, "BusinessException"),
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign func echo(value: Int32): Int32
+)");
+    EXPECT_GE(diag.GetErrorCount(), 1);
+    EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
+    EXPECT_TRUE(HasErrorContaining("'echo'"));
+    auto fd = FindFunction("echo");
+    ASSERT_NE(fd, nullptr);
+    ASSERT_NE(fd->funcBody, nullptr);
+    EXPECT_EQ(fd->funcBody->body, nullptr);
+    EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The library carrier keeps its owning package when the facade re-exports it.
+// The generated catch must bind that re-exported declaration, so the wrapper
+// compiles and the reference resolves to the owning package, not a same-named
+// declaration of the compiling package.
+TEST_F(ArkTSForeignDiagTest, ReexportedBusinessExceptionFromItsOwningPackageIsAccepted)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto businessCjo = ExportSupportPackage(ARKTS_BUSINESS_EXCEPTION_SUPPORT);
+    auto langCjo = ExportSupportPackage(ReexportBusinessException(ARKTS_LANG_SUPPORT),
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo},
+            {"ohos.business_exception", businessCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    instance->importManager->SetPackageCjoCache("ohos.business_exception", businessCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign func echo(value: Int32): Int32
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fd = FindFunction("echo");
+    ASSERT_NE(fd, nullptr);
+    ASSERT_NE(fd->funcBody, nullptr);
+    ASSERT_NE(fd->funcBody->body, nullptr);
+    size_t businessRefs = 0;
+    Walker(fd->funcBody->body.get(), [&businessRefs](Ptr<Node> node) {
+        auto type = DynamicCast<RefType*>(node);
+        auto expr = DynamicCast<RefExpr*>(node);
+        if (!type && !expr) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        const auto& ref = type ? type->ref : expr->ref;
+        if (ref.identifier.Val() == "BusinessException") {
+            ++businessRefs;
+            EXPECT_NE(ref.target, nullptr);
+            if (ref.target) {
+                EXPECT_EQ(ref.target->fullPackageName, "ohos.business_exception");
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_EQ(businessRefs, 1);
+}
+
+// A source declaration that reuses a generated runtime support name never
+// captures it: both the thrown runtime exception and the caught library
+// carrier stay bound to the declarations visible through the facade.
+TEST_F(ArkTSForeignDiagTest, SameNamedUserExceptionsDoNotCaptureGeneratedRuntimeSupport)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+class ForeignRuntimeException <: Exception {
+    public init(message: String) { super(message) }
+}
+
+class BusinessException <: Exception {
+    public let code: Int32
+    public init(code: Int32, message: String) {
+        super(message)
+        this.code = code
+    }
+}
+
+@ArkTS[module: "actual", foreignName: "echo"]
+public foreign func echo(value: Int32): Int32
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto userRuntime = FindClass("ForeignRuntimeException");
+    auto userBusiness = FindClass("BusinessException");
+    auto fd = FindFunction("echo");
+    ASSERT_NE(fd, nullptr);
+    ASSERT_NE(fd->funcBody, nullptr);
+    ASSERT_NE(fd->funcBody->body, nullptr);
+    size_t runtimeRefs = 0;
+    size_t businessRefs = 0;
+    Walker(fd->funcBody->body.get(), [&](Ptr<Node> node) {
+        auto type = DynamicCast<RefType*>(node);
+        auto expr = DynamicCast<RefExpr*>(node);
+        if (!type && !expr) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        const auto& ref = type ? type->ref : expr->ref;
+        const auto name = ref.identifier.Val();
+        if (name == "ForeignRuntimeException") {
+            ++runtimeRefs;
+            EXPECT_NE(ref.target, nullptr);
+            EXPECT_NE(ref.target, Ptr<Decl>(userRuntime));
+            if (ref.target) {
+                EXPECT_EQ(ref.target->fullPackageName, "arkts.lang");
+            }
+        } else if (name == "BusinessException") {
+            ++businessRefs;
+            EXPECT_NE(ref.target, nullptr);
+            EXPECT_NE(ref.target, Ptr<Decl>(userBusiness));
+            if (ref.target) {
+                EXPECT_EQ(ref.target->fullPackageName, "arkts.lang");
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_GT(runtimeRefs, 0);
+    EXPECT_EQ(businessRefs, 1);
 }
 
 // An entry whose name is also a support name keeps its own declaration as the

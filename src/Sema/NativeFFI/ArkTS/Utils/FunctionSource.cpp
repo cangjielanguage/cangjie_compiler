@@ -752,6 +752,138 @@ static std::string ArkTSConversionThrow(const std::string& reason, const std::st
     return indent + "throw " + ARKTS_CONVERSION_EXCEPTION + "(\"" + reason + "\")\n";
 }
 
+// ---- Runtime failure contract ----
+// A namespace segment or named target that does not resolve, and a target that
+// is not callable, throw ForeignRuntimeException carrying the declaration
+// context. The target invocation is translated when the library reports an
+// outside error (34300002) or an ArkTS-side throw (the JS error's own code,
+// 0 for a plain Error); every other BusinessException is rethrown unchanged so
+// thread/lifecycle identities stay with the caller. Module loading failures are
+// not caught: their library codes stay the contract. Every placeholder below is
+// emitted as its own string literal so the lowering walker rebinds each
+// occurrence to the real name.
+
+static std::string ArkTSLiteral(const std::string& text)
+{
+    return "\"" + text + "\"";
+}
+
+// "ArkTS foreign <kind> '<name>'" as a generated string expression.
+static std::string ArkTSFailureContext(const std::string& kind, const std::string& name)
+{
+    return ArkTSLiteral("ArkTS foreign " + kind + " '") + " + " + name + " + " + ArkTSLiteral("'");
+}
+
+// "ArkTS foreign <kind> '<owner>' member '<member>' in module '<module>'" as a
+// generated string expression.
+static std::string ArkTSMemberFailureContext(const std::string& kind, const std::string& owner,
+    const std::string& member)
+{
+    return ArkTSLiteral("ArkTS foreign " + kind + " '") + " + " + owner + " + " + ArkTSLiteral("' member '") + " + " +
+        member + " + " + ArkTSLiteral("' in module '") + " + " + ArkTSLiteral(ARKTS_PLACEHOLDER_MODULE) + " + " +
+        ArkTSLiteral("'");
+}
+
+// The locator of a named target: the module specifier, or the global object for
+// the arkts.lang receiver exception.
+static std::string ArkTSFailureLocator(bool globalReceiver)
+{
+    if (globalReceiver) {
+        return ArkTSLiteral("the global object");
+    }
+    return ArkTSLiteral("module '") + " + " + ArkTSLiteral(ARKTS_PLACEHOLDER_MODULE) + " + " + ArkTSLiteral("'");
+}
+
+static std::string ArkTSRuntimeThrow(const std::string& messageExpr, const std::string& indent)
+{
+    return indent + "throw " + ARKTS_RUNTIME_EXCEPTION + "(" + messageExpr + ")\n";
+}
+
+// One namespace placeholder literal.
+static std::string ArkTSNamespaceSegment(size_t index)
+{
+    return ArkTSLiteral(std::string(ARKTS_PLACEHOLDER_NAMESPACE) + std::to_string(index) + "__");
+}
+
+// A dotted namespace path as a generated string expression: segments
+// [begin, end) joined by '.', each one its own placeholder literal.
+static std::string ArkTSNamespacePath(size_t begin, size_t end)
+{
+    std::string path;
+    for (size_t i = begin; i < end; ++i) {
+        if (i != begin) {
+            path += " + " + ArkTSLiteral(".");
+        }
+        path += " + " + ArkTSNamespaceSegment(i);
+    }
+    return path;
+}
+
+// Namespace segment resolution: one existence check before asObject(). The
+// message names the module (or global object) and the namespace path up to and
+// including the failing segment.
+static std::string ArkTSNamespaceGuard(const std::string& receiver, const std::string& value, const std::string& next,
+    size_t index, const std::string& context, bool globalReceiver, const std::string& indent)
+{
+    const auto segment = ArkTSNamespaceSegment;
+    const auto path = ArkTSNamespacePath(0, index + 1);
+    const auto message = context + " + " + ArkTSLiteral(": ") + " + " + ArkTSFailureLocator(globalReceiver) +
+        " + " + ArkTSLiteral(" has no namespace '") + path + " + " + ArkTSLiteral("'");
+    return indent + "let " + value + " = " + receiver + ".getProperty(" + segment(index) + ")\n" + indent + "if (" +
+        value + ".isUndefined()) {\n" + ArkTSRuntimeThrow(message, indent + "    ") + indent + "}\n" + indent +
+        "let " + next + " = " + value + ".asObject()\n";
+}
+
+// Named export resolution with a precise missing-export error. The value stays
+// a JSValue so the caller can check callability before use.
+static std::string ArkTSExportGuard(const std::string& receiver, const std::string& target, const std::string& name,
+    const std::string& context, bool globalReceiver, const std::string& indent, size_t namespaceDepth = 0)
+{
+    auto message = context + " + " + ArkTSLiteral(": ") + " + " + ArkTSFailureLocator(globalReceiver) +
+        " + " + ArkTSLiteral(" has no export '") + " + " + name + " + " + ArkTSLiteral("'");
+    if (namespaceDepth > 0) {
+        // The namespace path narrows the lookup site when the declaration
+        // binds an ArkTS namespace.
+        message += " + " + ArkTSLiteral(" in namespace '") + ArkTSNamespacePath(0, namespaceDepth) + " + " +
+            ArkTSLiteral("'");
+    }
+    return indent + "let " + target + " = " + receiver + ".getProperty(" + name + ")\n" + indent + "if (" + target +
+        ".isUndefined()) {\n" + ArkTSRuntimeThrow(message, indent + "    ") + indent + "}\n";
+}
+
+// Member resolution on an object or class value with a precise missing-member
+// error.
+static std::string ArkTSMemberGuard(const std::string& receiver, const std::string& target, const std::string& member,
+    const std::string& context, const std::string& indent)
+{
+    const auto message = context + " + " + ArkTSLiteral(" does not exist");
+    return indent + "let " + target + " = " + receiver + ".getProperty(" + member + ")\n" + indent + "if (" + target +
+        ".isUndefined()) {\n" + ArkTSRuntimeThrow(message, indent + "    ") + indent + "}\n";
+}
+
+// Callability check for a resolved target. `reason` is the message suffix
+// naming the expected shape (a function, a constructor or a callable value).
+static std::string ArkTSCallableGuard(const std::string& target, const std::string& context, const std::string& reason,
+    const std::string& indent)
+{
+    return indent + "if (!" + target + ".isFunction()) {\n" +
+        ArkTSRuntimeThrow(context + " + " + ArkTSLiteral(reason), indent + "    ") + indent + "}\n";
+}
+
+// Translate a runtime failure: an outside error and an ArkTS-side throw are
+// wrapped; every other BusinessException keeps its type, code and message.
+static std::string ArkTSCallTranslation(const std::string& callExpr, const std::string& context,
+    const std::string& error, const std::string& indent)
+{
+    // The library exception's toString() carries its class name, ArkTS message
+    // and ArkTS-side stack, so the translated message keeps all three.
+    const auto message = context + " + " + ArkTSLiteral(" failed: ") + " + " + error + ".toString()";
+    return "try {\n" + indent + "    " + callExpr + "\n" + indent + "} catch (" + error + ": " +
+        ARKTS_BUSINESS_EXCEPTION + ") {\n" + indent + "    if (" + error + ".code != " + ARKTS_LIBRARY_EXTERNAL_ERROR +
+        " && " + error + ".code != " + ARKTS_LIBRARY_ARKTS_THROW + ") {\n" + indent + "        throw " + error + "\n" +
+        indent + "    }\n" + ArkTSRuntimeThrow(message, indent + "    ") + indent + "}";
+}
+
 // ---- Verified ohos.ark_interop array face ----
 // Array conversions use only the real library API, never compiler-owned
 // helper names: ctx.array(Array<ark_interop.JSValue>) packages converted values,
@@ -1097,7 +1229,7 @@ struct ArkTSValueEmitter {
                         ")) { " + ctorRef(member.name) + " }";
                     first = false;
                 }
-                chain += " else { " + throwInline(std::string(ARKTS_MISMATCH) + "unknown value for " + name) + " })";
+                chain += " else { " + throwInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + " })";
                 return chain;
             };
             auto stringChain = [&](const std::string& stringVar) {
@@ -1111,7 +1243,7 @@ struct ArkTSValueEmitter {
                         StringConvertor::Recover(member.value) + "\") { " + ctorRef(member.name) + " }";
                     first = false;
                 }
-                chain += " else { " + throwInline(std::string(ARKTS_MISMATCH) + "unknown value for " + name) + " })";
+                chain += " else { " + throwInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + " })";
                 return chain;
             };
             auto booleanChain = [&](const std::string& booleanVar) {
@@ -1125,7 +1257,7 @@ struct ArkTSValueEmitter {
                         ") { " + ctorRef(member.name) + " }";
                     first = false;
                 }
-                chain += " else { " + throwInline(std::string(ARKTS_MISMATCH) + "unknown value for " + name) + " })";
+                chain += " else { " + throwInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + " })";
                 return chain;
             };
             bool hasNumber = false;
@@ -1602,6 +1734,8 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     }
     auto ctx = prefix + "context";
     auto recv = prefix + std::string("module");
+    const bool globalReceiver = receiver == ArkTSReceiverKind::GLOBAL;
+    const auto context = ArkTSFailureContext("function", ArkTSLiteral(ARKTS_PLACEHOLDER_NAME));
     std::string code = std::string("func ") + ARKTS_WRAPPER_ENTRY + "() {\n    let " + ctx + ": " +
         ARKTS_JS_CONTEXT + " = " + ARKTS_CONTEXT_ABI_PACKAGE + "." + ARKTS_CONTEXT_CURRENT + "()\n";
     // The receiver line is the only difference between the two forms: the
@@ -1610,20 +1744,20 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     // context's global object and never emits requireArkModule or the
     // module placeholder (there is no ArkTS runtime module named
     // arkts.lang to require: the package is the TS-preset facade).
-    if (receiver == ArkTSReceiverKind::GLOBAL) {
+    if (globalReceiver) {
         code += "    let " + recv + " = " + ctx + ".global\n";
     } else {
         code += "    let " + recv + " = " + ctx + ".requireArkModule(\"" + ARKTS_PLACEHOLDER_MODULE +
             "\").asObject()\n";
     }
-    for (size_t i = 0; i < namespaceDepth; ++i) {
-        auto next = prefix + "namespace_" + std::to_string(i);
-        code += "    let " + next + " = " + recv + ".getProperty(\"" + ARKTS_PLACEHOLDER_NAMESPACE +
-            std::to_string(i) + "__\").asObject()\n";
-        recv = next;
-    }
     ArkTSValueEmitter emitter{prefix};
     emitter.classRefs = classRefs;
+    for (size_t i = 0; i < namespaceDepth; ++i) {
+        auto value = emitter.Fresh("nsvalue");
+        auto next = prefix + "namespace_" + std::to_string(i);
+        code += ArkTSNamespaceGuard(recv, value, next, i, context, globalReceiver, "    ");
+        recv = next;
+    }
     std::vector<std::string> args;
     size_t fixed = rest ? restIndex : types.size();
     for (size_t i = 0; i < fixed; ++i) {
@@ -1656,6 +1790,7 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
         }
     }
     auto result = prefix + "result";
+    std::string callArgsExpr;
     if (!rest && optionalStart < types.size()) {
         // The last Some is forwarded as its own converted value; a None
         // before it is forwarded as the ctx.undefined() produced by its
@@ -1663,24 +1798,9 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
         // all (the ".." prefix stands for the required positions). The shared
         // helper assembles the block-lambda array for both this wrapper and
         // the class member generators.
-        auto callArgs = ArkTSOptionalCallArray(emitter, types, optionalStart, args, ctx, code);
-        code += "    let " + result + " = " + recv + ".callMethod(\"" + ARKTS_PLACEHOLDER_NAME + "\", " + callArgs +
-            ")\n";
+        callArgsExpr = ArkTSOptionalCallArray(emitter, types, optionalStart, args, ctx, code);
     } else if (!rest) {
-        if (args.empty()) {
-            code += "    let " + result + " = " + recv + ".callMethod(\"" + ARKTS_PLACEHOLDER_NAME +
-                "\", Array<JSValue>())\n";
-        } else if (args.size() == 1) {
-            code += "    let " + result + " = " + recv + ".callMethod(\n        \"" + ARKTS_PLACEHOLDER_NAME +
-                "\",\n        [" + args[0] + "]\n    )\n";
-        } else {
-            code +=
-                "    let " + result + " = " + recv + ".callMethod(\n        \"" + ARKTS_PLACEHOLDER_NAME + "\",\n        [\n";
-            for (size_t i = 0; i < args.size(); ++i) {
-                code += "            " + args[i] + (i + 1 < args.size() ? ",\n" : "\n");
-            }
-            code += "        ]\n    )\n";
-        }
+        callArgsExpr = args.empty() ? "Array<JSValue>()" : "[" + ArkTSJoin(args, ", ") + "]";
     } else {
         // The rest element buffer: per-item conversion for Array<T'>, the
         // only rest kind left - an ArkTSArray<T'> rest position was rejected
@@ -1696,8 +1816,7 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
             " =>\n        let " + item + " = " + ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(restIndex) + "[" + index +
             "]\n" + inner.pre + "        " + inner.expr + "\n    })\n";
         if (args.empty()) {
-            code += "    let " + result + " = " + recv + ".callMethod(\n        \"" + ARKTS_PLACEHOLDER_NAME +
-                "\",\n        " + items + "\n    )\n";
+            callArgsExpr = items;
         } else {
             // Fixed arguments keep their converted locals; the rest items
             // follow them, selected by the run-time index. The call array is
@@ -1713,10 +1832,19 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
             }
             code += "            case _ => " + items + "[" + callIndex + " - " + std::to_string(args.size()) +
                 "]\n        }\n    })\n";
-            code += "    let " + result + " = " + recv + ".callMethod(\n        \"" + ARKTS_PLACEHOLDER_NAME +
-                "\",\n        " + callArgs + "\n    )\n";
+            callArgsExpr = callArgs;
         }
     }
+    // Resolve the target first, so a missing or non-callable export names the
+    // module and the export instead of falling through to the library's
+    // generic property error; then translate the runtime-failure codes.
+    auto target = emitter.Fresh("target");
+    auto error = emitter.Fresh("error");
+    code += ArkTSExportGuard(recv, target, ArkTSLiteral(ARKTS_PLACEHOLDER_NAME), context, globalReceiver, "    ",
+        namespaceDepth);
+    code += ArkTSCallableGuard(target, context, ": the export is not a function", "    ");
+    const auto callExpr = recv + ".callMethod(\"" + ARKTS_PLACEHOLDER_NAME + "\", " + callArgsExpr + ")";
+    code += "    let " + result + " = " + ArkTSCallTranslation(callExpr, context, error, "    ") + "\n";
     if (resultType.kind == ArkTSTypeDesc::Kind::SCALAR && resultType.scalar == "Nothing") {
         return code + "    throw " + std::string(ARKTS_NEVER_EXCEPTION) + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n}\n";
     }
@@ -1776,20 +1904,23 @@ std::string ArkTSClassValuePreamble(const std::string& prefix, size_t namespaceD
 {
     auto ctx = prefix + "context";
     auto recv = prefix + "module";
+    const bool globalReceiver = receiver == ArkTSReceiverKind::GLOBAL;
+    const auto context = ArkTSFailureContext("class", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS));
     std::string code = "    let " + recv + " = ";
-    if (receiver == ArkTSReceiverKind::GLOBAL) {
+    if (globalReceiver) {
         code += ctx + ".global\n";
     } else {
         code += ctx + ".requireArkModule(\"" + ARKTS_PLACEHOLDER_MODULE + "\").asObject()\n";
     }
     for (size_t i = 0; i < namespaceDepth; ++i) {
+        auto value = prefix + "nsvalue_" + std::to_string(i);
         auto next = prefix + "namespace_" + std::to_string(i);
-        code += "    let " + next + " = " + recv + ".getProperty(\"" + ARKTS_PLACEHOLDER_NAMESPACE +
-            std::to_string(i) + "__\").asObject()\n";
+        code += ArkTSNamespaceGuard(recv, value, next, i, context, globalReceiver, "    ");
         recv = next;
     }
     classValue = prefix + "classvalue";
-    code += "    let " + classValue + " = " + recv + ".getProperty(\"" + ARKTS_PLACEHOLDER_CLASS + "\")\n";
+    code += ArkTSExportGuard(recv, classValue, ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS), context, globalReceiver, "    ",
+        namespaceDepth);
     return code;
 }
 
@@ -1841,9 +1972,21 @@ std::string ArkTSRestCallArray(ArkTSValueEmitter& emitter, const ArkTSTypeDesc& 
 
 } // namespace
 
+std::string ArkTSStringLiteral(const std::string& text)
+{
+    return ArkTSLiteral(text);
+}
+
+std::string ArkTSNamespaceResolution(const std::string& receiver, const std::string& value, const std::string& next,
+    size_t index, const std::string& kind, const std::string& name, bool globalReceiver, const std::string& indent)
+{
+    return ArkTSNamespaceGuard(receiver, value, next, index, ArkTSFailureContext(kind, name), globalReceiver, indent);
+}
+
 std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSMemberReceiver memberReceiver,
-    ArkTSReceiverKind receiver, size_t optionalStart, std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+    ArkTSReceiverKind receiver, size_t optionalStart, std::unordered_map<std::string, Ptr<Decl>>& classRefs,
+    const std::string& ownerKind)
 {
     if (restIndex != ARKTS_NO_REST &&
         (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
@@ -1875,16 +2018,21 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
     // path: up to the last Some, with a None before it as ctx.undefined().
     // The rest form keeps its existing spread behavior and never truncates.
     const bool optionals = restIndex == ARKTS_NO_REST && optionalStart < args.size();
+    const auto context = ArkTSMemberFailureContext(ownerKind, ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS),
+        ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER));
     // Static members have no object reference: the class value itself is the
     // `this` argument. Instance members call the method on the stored object.
+    // Both resolve the member first, so a missing or non-callable member names
+    // the class and member instead of the library's generic property error.
     auto emitCall = [&](const std::string& argArray) {
-        if (staticMember) {
-            code += "    let " + result + " = " + receiverObject + ".getProperty(\"" + ARKTS_PLACEHOLDER_MEMBER +
-                "\").asFunction().call(" + argArray + ", thisArg: " + receiverObject + ")\n";
-        } else {
-            code += "    let " + result + " = " + receiverObject + ".callMethod(\"" + ARKTS_PLACEHOLDER_MEMBER +
-                "\", " + argArray + ")\n";
-        }
+        auto target = emitter.Fresh("target");
+        auto error = emitter.Fresh("error");
+        code += ArkTSMemberGuard(receiverObject, target, ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER), context, "    ");
+        code += ArkTSCallableGuard(target, context, " is not a function", "    ");
+        const auto callExpr = staticMember
+            ? target + ".asFunction().call(" + argArray + ", thisArg: " + receiverObject + ")"
+            : receiverObject + ".callMethod(\"" + ARKTS_PLACEHOLDER_MEMBER + "\", " + argArray + ")";
+        code += "    let " + result + " = " + ArkTSCallTranslation(callExpr, context, error, "    ") + "\n";
     };
     if (restIndex != ARKTS_NO_REST) {
         // Rest members spread the trailing array item by item.
@@ -1919,7 +2067,9 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
     emitter.classRefs = &classRefs;
     std::string classValue;
     std::string code;
+    const auto context = ArkTSFailureContext("class", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS));
     code += ArkTSClassValuePreamble(prefix, namespaceDepth, receiver, classValue);
+    code += ArkTSCallableGuard(classValue, context, ": the export is not a constructor", "    ");
     auto clazz = prefix + "class";
     code += "    let " + clazz + " = " + classValue + ".asClass()\n";
     auto args = ArkTSArgumentSource(emitter, types, restIndex == ARKTS_NO_REST ? types.size() : restIndex, code);
@@ -1927,21 +2077,22 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
     // A trailing ArkTS optional run is forwarded exactly like a member call.
     // The rest form keeps its existing spread behavior and never truncates.
     const bool optionals = restIndex == ARKTS_NO_REST && optionalStart < args.size();
+    std::string callArgsExpr;
     if (restIndex != ARKTS_NO_REST) {
         // Rest constructor arguments: the trailing array is spread into
         // individual construction arguments.
-        auto callArgs =
+        callArgsExpr =
             ArkTSRestCallArray(emitter, types[restIndex].elements.front(), restIndex, args, prefix, code);
-        code += "    let " + object + " = " + clazz + ".new(" + callArgs + ")\n";
     } else if (optionals) {
-        auto callArgs = ArkTSOptionalCallArray(emitter, types, optionalStart, args, prefix + "context", code);
-        code += "    let " + object + " = " + clazz + ".new(" + callArgs + ")\n";
+        callArgsExpr = ArkTSOptionalCallArray(emitter, types, optionalStart, args, prefix + "context", code);
     } else if (args.empty()) {
-        code += "    let " + object + " = " + clazz + ".new()\n";
+        callArgsExpr = "";
     } else {
-        code += "    let " + object + " = " + clazz + ".new(" +
-            (args.size() == 1 ? args.front() : "[" + ArkTSJoin(args, ", ") + "]") + ")\n";
+        callArgsExpr = args.size() == 1 ? args.front() : "[" + ArkTSJoin(args, ", ") + "]";
     }
+    auto error = emitter.Fresh("error");
+    const auto newExpr = clazz + ".new(" + callArgsExpr + ")";
+    code += "    let " + object + " = " + ArkTSCallTranslation(newExpr, context, error, "    ") + "\n";
     if (form == ArkTSConstructorForm::SUPER_THUNK) {
         // A child wrapper stores nothing itself: the thunk's value is the new
         // object reference, and the parent's thunk-taking wrapping constructor
@@ -1970,14 +2121,23 @@ std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter
     } else {
         object = std::string(ARKTS_SELF) + "." + ARKTS_CLASS_REF_ACCESSOR + "()";
     }
+    // A property value may legitimately be undefined, so there is no
+    // existence check; the access itself is translated because a getter or
+    // setter on the ArkTS side can throw.
+    const auto context = ArkTSMemberFailureContext("class", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS),
+        ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER));
     if (setter) {
         auto value = emitter.ToJS(valueType, std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "0", prefix + "context", "    ");
         code += value.pre;
-        return ArkTSFinishBody(prefix,
-            code + "    " + object + ".setProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\", " + value.expr + ")\n");
+        auto error = emitter.Fresh("error");
+        const auto setExpr =
+            object + ".setProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\", " + value.expr + ")";
+        return ArkTSFinishBody(prefix, code + "    " + ArkTSCallTranslation(setExpr, context, error, "    ") + "\n");
     }
     auto result = prefix + "result";
-    code += "    let " + result + " = " + object + ".getProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\")\n";
+    auto error = emitter.Fresh("error");
+    const auto getExpr = object + ".getProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\")";
+    code += "    let " + result + " = " + ArkTSCallTranslation(getExpr, context, error, "    ") + "\n";
     auto emitted = emitter.FromJS(valueType, result, "    ");
     return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
 }
@@ -1995,17 +2155,25 @@ std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, co
     }
     ArkTSValueEmitter emitter{prefix};
     emitter.classRefs = &classRefs;
+    const auto context = ArkTSMemberFailureContext("interface", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS),
+        ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER));
     auto self = emitter.Fresh("self");
     auto selfValue = emitter.Fresh("selfvalue");
     auto function = emitter.Fresh("function");
     std::string code = "    let " + self + " = " + ARKTS_SELF + "." + ARKTS_CLASS_REF_ACCESSOR + "()\n";
     code += "    let " + selfValue + " = " + self + ".toJSValue()\n";
+    // The call target of an interface value is the value itself; a
+    // non-callable value names the interface instead of failing with the
+    // library's generic type mismatch.
+    code += ArkTSCallableGuard(selfValue, context, " is not callable", "    ");
     code += "    let " + function + " = " + selfValue + ".asFunction()\n";
     auto args = ArkTSArgumentSource(emitter, types, types.size(), code);
     auto result = emitter.Fresh("result");
-    code += "    let " + result + " = " + function + ".call(" +
+    auto error = emitter.Fresh("error");
+    const auto callExpr = function + ".call(" +
         (args.empty() ? std::string("Array<JSValue>()") : "[" + ArkTSJoin(args, ", ") + "]") +
-        ", thisArg: " + selfValue + ")\n";
+        ", thisArg: " + selfValue + ")";
+    code += "    let " + result + " = " + ArkTSCallTranslation(callExpr, context, error, "    ") + "\n";
     if (resultType.kind == ArkTSTypeDesc::Kind::SCALAR && resultType.scalar == "Nothing") {
         return ArkTSFinishBody(prefix,
             code + "    throw " + std::string(ARKTS_NEVER_EXCEPTION) + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n");
@@ -2047,17 +2215,22 @@ std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTST
         code += "    let " + canonical + " = Int64(" + number + ").toString()\n";
         key = canonical;
     }
+    const auto context = ArkTSMemberFailureContext("interface", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS),
+        ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER));
     auto self = emitter.Fresh("self");
     code = "    let " + self + " = " + ARKTS_SELF + "." + ARKTS_CLASS_REF_ACCESSOR + "()\n" + code;
     if (setter) {
         auto value =
             emitter.ToJS(valueType, std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "1", prefix + "context", "    ");
         code += value.pre;
-        code += "    " + self + ".setProperty(" + key + ", " + value.expr + ")\n";
-        return ArkTSFinishBody(prefix, code);
+        auto error = emitter.Fresh("error");
+        const auto setExpr = self + ".setProperty(" + key + ", " + value.expr + ")";
+        return ArkTSFinishBody(prefix, code + "    " + ArkTSCallTranslation(setExpr, context, error, "    ") + "\n");
     }
     auto result = emitter.Fresh("result");
-    code += "    let " + result + " = " + self + ".getProperty(" + key + ")\n";
+    auto error = emitter.Fresh("error");
+    const auto getExpr = self + ".getProperty(" + key + ")";
+    code += "    let " + result + " = " + ArkTSCallTranslation(getExpr, context, error, "    ") + "\n";
     auto inner = emitter.FromJS(valueType, result, "    ");
     const std::string option = "(if (" + result + ".isNull() || " + result + ".isUndefined()) {\n" + "    " +
         ARKTS_OPTION + ".None\n" + "} else {\n" + inner.pre + "    " + ARKTS_OPTION + ".Some(" + inner.expr + ")\n" +
