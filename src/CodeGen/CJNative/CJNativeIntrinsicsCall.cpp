@@ -705,9 +705,9 @@ llvm::Function* GetGCIntrinsicAlloc(const CGModule& cgMod, bool isLocal)
 }
 } // namespace
 
-llvm::Value* IRBuilder2::CallClassIntrinsicAlloc(const CHIR::Type& type)
+llvm::Value* IRBuilder2::CallClassIntrinsicAlloc(const CHIR::Type& type, bool isLocal)
 {
-    auto value = CallClassIntrinsicAlloc({CreateTypeInfo(type), GetLayoutSize_32(type)}, type.IsLocalRegion());
+    auto value = CallClassIntrinsicAlloc({CreateTypeInfo(type), GetLayoutSize_32(type)}, isLocal);
     auto& llvmCtx = getContext();
     if (type.IsClass()) {
         CJC_ASSERT(!type.IsAutoEnvBase() && "Should not reach here, please check CHIR.");
@@ -726,16 +726,6 @@ llvm::Value* IRBuilder2::CallClassIntrinsicAlloc(const CHIR::Type& type)
     }
     if (IsSizeTrustedInCompileUnit(cgMod, type)) {
         value->setMetadata("TrustedSize", llvm::MDNode::get(llvmCtx, {}));
-    }
-    return value;
-}
-
-llvm::Value* IRBuilder2::CallBoxIntrinsicAlloc(const CHIR::Type& valueType, const CHIR::Type& targetType)
-{
-    auto value = CallClassIntrinsicAlloc({CreateTypeInfo(valueType), GetLayoutSize_32(valueType)},
-        targetType.StripAllRefs()->IsLocalRegion());
-    if (IsSizeTrustedInCompileUnit(cgMod, valueType)) {
-        value->setMetadata("TrustedSize", llvm::MDNode::get(getContext(), {}));
     }
     return value;
 }
@@ -839,7 +829,8 @@ inline void CreateExceptionAndThrow(
     auto exceptionClassDef = DynamicCast<CHIR::ClassDef*>(
         GetTypeDefFromImplicitUsedFuncParam(irBuilder.GetCGModule(), exceptionInitFuncName, 0));
     CJC_NULLPTR_CHECK(exceptionClassDef);
-    auto exceptionValue = irBuilder.CallClassIntrinsicAlloc(*exceptionClassDef->GetType());
+    auto exceptionValue = irBuilder.CallClassIntrinsicAlloc(*exceptionClassDef->GetType(),
+        exceptionClassDef->GetType()->IsLocalRegion());
     CreateImplicitUsedFuncCall(
         irBuilder, exceptionInitFuncName, {exceptionValue, irBuilder.CreateTypeInfo(*exceptionClassDef->GetType())});
     irBuilder.CallExceptionIntrinsicThrow(exceptionValue);

@@ -193,8 +193,9 @@ llvm::Value* HandleCastToGenericExpr(IRBuilder2& irBuilder, const CHIR::Expressi
         return cgVal.GetRawValue();
     }
     auto srcCHIRType = castToGenericExpr.GetSourceType();
+    auto srcPointeeTy = DeRef(*srcCHIRType);
     // 1. Allocate memory for boxing srcValue.
-    llvm::Value* temp = irBuilder.CallClassIntrinsicAlloc(*DeRef(*srcCHIRType));
+    llvm::Value* temp = irBuilder.CallClassIntrinsicAlloc(*srcPointeeTy, srcPointeeTy->IsLocalRegion());
     // 2. store srcValue to temp
     auto payloadPtr = irBuilder.GetPayloadFromObject(temp);
 
@@ -226,9 +227,16 @@ llvm::Value* HandleBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
         return cgVal.GetRawValue();
     }
 
+    // The CHIR type system decides which region the box lives in: the box result type carries
+    // the modal of the destination.
+    auto boxResultType = boxExpr.GetTargetType()->StripAllRefs();
+    CJC_NULLPTR_CHECK(boxResultType);
+    bool boxInLocalRegion = boxResultType->IsLocalRegion();
+    auto boxPayloadWriteKind = boxInLocalRegion ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE;
+
     if (srcCGType->GetSize()) {
         // 1. Allocate memory for boxing srcValue.
-        llvm::Value* temp = irBuilder.CallBoxIntrinsicAlloc(*DeRef(*srcCHIRType), *boxExpr.GetTargetType());
+        llvm::Value* temp = irBuilder.CallClassIntrinsicAlloc(*DeRef(*srcCHIRType), boxInLocalRegion);
         // 2. store srcValue to temp
         auto payloadPtr = irBuilder.GetPayloadFromObject(temp);
         auto addr = irBuilder.CreateBitCast(payloadPtr,
@@ -238,10 +246,10 @@ llvm::Value* HandleBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
             srcCHIRType->IsRef() ? srcCHIRType
                                  : CGType::GetRefTypeOf(cgMod.GetCGContext().GetCHIRBuilder(), *srcCHIRType),
             CGType::TypeExtraInfo(1U));
-        (void)irBuilder.CreateStore(cgVal, CGValue(addr, addrType));
+        (void)irBuilder.CreateStore(cgVal, CGValue(addr, addrType), nullptr, boxPayloadWriteKind);
         return temp;
     } else if (IsThisArgOfStructMethod(*srcObject)) {
-        auto tmp = irBuilder.CallBoxIntrinsicAlloc(*DeRef(*srcCHIRType), *boxExpr.GetTargetType());
+        auto tmp = irBuilder.CallClassIntrinsicAlloc(*DeRef(*srcCHIRType), boxInLocalRegion);
         auto payloadPtr = irBuilder.GetPayloadFromObject(tmp);
         auto size = irBuilder.GetLayoutSize_32(*DeRef(*srcCHIRType));
         llvm::Value* srcValue = cgVal.GetRawValue();
@@ -255,7 +263,8 @@ llvm::Value* HandleBoxExpr(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
         // - we are in the scope of a struct instance method(without "$withTI" postfix),
         //   the "struct" mentioned above is the `this` parameter of the method.
         if (IsTypeContainsRef(srcCGType->GetLLVMType())) {
-            irBuilder.CallGCWriteAgg(srcCGType->GetLayoutType(), {tmp, payloadPtr, srcValue, size});
+            irBuilder.CallGCWriteAgg(
+                srcCGType->GetLayoutType(), {tmp, payloadPtr, srcValue, size}, boxPayloadWriteKind);
         } else {
             irBuilder.CreateMemCpy(payloadPtr, llvm::MaybeAlign(), srcValue, llvm::MaybeAlign(), size);
         }
