@@ -267,12 +267,16 @@ void IRBuilder2::CallArrayIntrinsicSet(const CHIR::RawArrayType& arrTy, llvm::Va
 
     auto value = cgVal.GetRawValue();
     auto elePtr = GetArrayElementAddr(arrTy, array, index, isChecked);
+    // A local-region array's element slots are region->heap edges whenever the stored
+    // struct value carries a demode field (its payload legitimately holds heap refs), so
+    // the aggregate writes must stay modal-aware: MAYBE_LOCAL registers heap slots and
+    // no-ops on local ones.
     if (elemType->isStructTy()) {
         if (IsTypeContainsRef(elemType)) {
             auto structType = llvm::cast<llvm::StructType>(elemType);
             auto layOut = GetLLVMModule()->getDataLayout().getStructLayout(structType);
             auto size = getInt64(layOut->getSizeInBytes());
-            CallGCWriteAgg(structType, {array, elePtr, value, size});
+            CallGCWriteAgg(structType, {array, elePtr, value, size}, writeKind);
         } else {
             auto layOut =
                 GetCGModule().GetLLVMModule()->getDataLayout().getStructLayout(llvm::cast<llvm::StructType>(elemType));
@@ -283,7 +287,7 @@ void IRBuilder2::CallArrayIntrinsicSet(const CHIR::RawArrayType& arrTy, llvm::Va
         }
     } else if (elemType->isArrayTy()) {
         auto size = getInt64(GetLLVMModule()->getDataLayout().getTypeAllocSize(elemType));
-        CallGCWriteAgg(elemCGType->GetLayoutType(), {array, elePtr, value, size});
+        CallGCWriteAgg(elemCGType->GetLayoutType(), {array, elePtr, value, size}, writeKind);
     } else if (elemType == CGType::GetRefType(GetLLVMContext())) {
         CallGCWrite({value, array, elePtr},
                     arrTy.IsLocalRegion() ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE);

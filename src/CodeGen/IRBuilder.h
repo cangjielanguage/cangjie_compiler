@@ -223,7 +223,8 @@ public:
     llvm::Instruction* CallGCReadStaticRef(const std::vector<llvm::Value*>& args);
     llvm::Instruction* CallGCReadStaticAgg(llvm::StructType* type, std::vector<llvm::Value*> args);
     llvm::Instruction* CallGCWrite(std::vector<llvm::Value*> args, ModalWriteKind writeKind = ModalWriteKind::NONE);
-    llvm::Instruction* CallGCWriteAgg(llvm::StructType* structType, std::vector<llvm::Value*> args);
+    llvm::Instruction* CallGCWriteAgg(
+        llvm::StructType* structType, std::vector<llvm::Value*> args, ModalWriteKind writeKind = ModalWriteKind::NONE);
     llvm::Instruction* CallGCWriteStaticRef(const std::vector<llvm::Value*>& args);
     llvm::Instruction* CallGCWriteStaticAgg(llvm::StructType* type, std::vector<llvm::Value*> args);
     llvm::Instruction* CreateWriteBarrierForGlobalVariable(const CGValue& value, const CGValue& globalVar);
