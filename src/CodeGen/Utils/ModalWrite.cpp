@@ -112,6 +112,36 @@ ModalWriteKind CodeGen::ClassifyModalWrite(CHIRBuilder& builder, const Expressio
         return ModalWriteKind::NONE;
     }
 
+    // Array element stores (e.g. array literals lowered to RawArrayAllocate + StoreElementRef)
+    // have a RawArray/VArray base, which is not a nominal CustomType: the member-variable walk
+    // below cannot describe them, so the element is resolved straight from the array type.
+    // This mirrors the rule already applied by the other array-element paths in
+    // CJNativeIRBuilder (CallArrayIntrinsicInitWithContent, InitArrayDataUG).
+    if (objectType->IsRawArray() || objectType->IsVArray()) {
+        // A heap array's element slots are ordinary heap->heap edges: the ordinary barrier
+        // already keeps the referents alive and updates them on move.
+        if (!objectType->IsLocalRegion()) {
+            return ModalWriteKind::NONE;
+        }
+        const Type* element = objectType->IsRawArray()
+            ? StaticCast<const RawArrayType*>(objectType)->GetElementType()
+            : StaticCast<const VArrayType*>(objectType)->GetElementType();
+        auto elementDataType = element != nullptr ? element->StripAllRefs() : nullptr;
+        if (elementDataType == nullptr) {
+            return ModalWriteKind::NONE;
+        }
+        // A Copyable element contains no references, so it cannot create a cross-boundary
+        // *ref* edge (e.g. RawArray<UInt8> backing a String, or an all-value tuple).
+        if (elementDataType->IsCopyable()) {
+            return ModalWriteKind::NONE;
+        }
+        // Otherwise the element slot may end up holding a heap object while the array itself
+        // lives in the local region: the region->heap edge must be registered, so the
+        // maybe-local barrier is required. (When the value is itself local, the runtime
+        // barrier stores directly without registering, so the local->local case stays cheap.)
+        return ModalWriteKind::MAYBE_LOCAL;
+    }
+
     // Only nominal types have instance member variables addressable by path. Generic
     // (not-yet-instantiated) receivers are not handled here;
     if (!objectType->IsNominal()) {
