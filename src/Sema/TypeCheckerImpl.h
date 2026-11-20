@@ -87,6 +87,16 @@ struct LookupInfo {
     bool isSetter = false;
 };
 
+/**
+ * A static function of a foreign runtime, its type as a member of the runtime and, if it is an interface member, its
+ * instantiated interface type.
+ */
+struct ForeignRuntimeFunc {
+    Ptr<AST::FuncDecl> decl{nullptr};
+    Ptr<AST::Ty> matchedParentTy{nullptr};
+    Ptr<AST::FuncTy> ty{nullptr};
+};
+
 struct CollectDeclsInfo {
     std::vector<Ptr<AST::FuncDecl>> funcDecls;
     std::vector<Ptr<AST::FuncDecl>> initFuncDecls;
@@ -174,6 +184,11 @@ private:
      * Main entry of the check mode of the type checking.
      */
     bool Check(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node);
+    /** Implicit conversion of an expression to an expected Extern<T>. */
+    bool NeedTryExternConversion(const AST::Ty& target, const AST::Node& node) const;
+    bool ChkWithExternConversion(ASTContext& ctx, AST::Ty& target, AST::Node& node);
+    /** Check that the foreign runtime T of @p externTy, whose static functions @p node calls, is not Nothing. */
+    bool ChkExternRuntime(const AST::Node& node, AST::Ty& externTy);
     bool IsChecked(ASTContext& ctx, AST::Node& node) const;
     std::optional<bool> PerformBasicChecksForCheck(ASTContext& ctx, AST::ModalTy target, Ptr<AST::Node> node) const;
     /**
@@ -616,6 +631,18 @@ private:
     void PerformDesugarAfterTypeCheck(ASTContext& ctx, AST::Package& pkg);
     void GenerateMainInvoke();
     void TryDesugarForCoalescing(AST::Node& root) const;
+    /**
+     * Rewrite expressions implicitly converted to Extern<T> into T.toExtern<U>(e), and dynamic operations on
+     * Extern<T> values into direct calls to the static functions of T.
+     */
+    void DesugarExtern(ASTContext& ctx, AST::Package& pkg);
+    /**
+     * Look up the static function @p name of the foreign runtime @p runtimeTy. A generic runtime is only known through
+     * its upper bounds, so the function is looked up in ForeignRuntime<T>. The function is called in the desugaring of
+     * @p expr, which is diagnosed if the function of a non-generic runtime is not implemented.
+     */
+    ForeignRuntimeFunc LookupForeignRuntimeFunc(
+        ASTContext& ctx, AST::Ty& runtimeTy, const std::string& name, const AST::Expr& expr);
     void DesugarForCoalescing(AST::BinaryExpr& binaryExpr) const;
     void DesugarForInExpr(ASTContext& ctx, AST::ForInExpr& forInExpr);
     void DesugarForInCloseRange(ASTContext& ctx, AST::ForInExpr& forInExpr);
@@ -896,6 +923,8 @@ private:
     bool ChkMatchCaseActions(ASTContext& ctx, AST::ModalTy target, AST::MatchCase& mc);
     bool ChkMatchCaseNoSelector(ASTContext& ctx, AST::ModalTy target, AST::MatchCaseOther& mco);
     bool ChkSubscriptExpr(ASTContext& ctx, AST::ModalTy target, AST::SubscriptExpr& se);
+    /** Check the dynamic index access @p se, whose base has type @p externTy. */
+    bool ChkExternSubscript(AST::ModalTy target, AST::SubscriptExpr& se, AST::Ty& externTy);
     AST::ModalTy SynSubscriptExpr(ASTContext& ctx, AST::SubscriptExpr& se);
     bool ChkTupleAccess(
         ASTContext& ctx, AST::ModalTy target, AST::SubscriptExpr& se, AST::TupleTy& tupleTy, ModalInfo modal);
@@ -936,6 +965,12 @@ private:
     bool ChkVariadicCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce,
         const std::vector<Ptr<AST::FuncDecl>>& candidates, std::vector<Diagnostic>& diagnostics);
     bool SynArgsOfNothingBaseExpr(ASTContext& ctx, AST::CallExpr& ce);
+    /** Check the dynamic call @p ce, whose callee is a value of type Extern<T>. */
+    bool ChkExternCall(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    /** Check that the dynamic member access @p ma has no type arguments, which the foreign runtime cannot receive. */
+    bool ChkExternMemberTypeArguments(const AST::MemberAccess& ma);
+    /** Check that the dynamic subscript @p se has a single index, the foreign runtime receives one index at a time. */
+    bool ChkExternSubscriptIndexCount(const AST::SubscriptExpr& se);
     /**
      * One call expression may have multiple function candidates.
      * Filter them with parameters' conditions before legality check.
@@ -1778,6 +1813,8 @@ private:
     std::optional<AST::ModalTy> SynLiteralInBinaryExprFromRight(ASTContext& ctx, AST::BinaryExpr& be);
     AST::ModalTy SynLiteralInBinaryExprFromLeft(ASTContext& ctx, AST::BinaryExpr& be);
     void DiagnoseForSubscriptAssignExpr(ASTContext& ctx, const AST::AssignExpr& ae, std::vector<Diagnostic>& diags);
+    /** Synthesize the dynamic update e.f = v or e[i] = v on a value e of type Extern<T>, if @p ae is one. */
+    std::optional<AST::ModalTy> SynExternUpdate(ASTContext& ctx, AST::AssignExpr& ae);
     std::optional<AST::ModalTy> InferAssignExprCheckCaseOverloading(
         ASTContext& ctx, AST::AssignExpr& ae, std::vector<Diagnostic>& diags);
     bool PreCheckCompoundAssign(

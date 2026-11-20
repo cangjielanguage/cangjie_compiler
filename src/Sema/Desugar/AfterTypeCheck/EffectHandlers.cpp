@@ -29,6 +29,12 @@ OwnedPtr<RefExpr> CreateRefValue(FuncTy& funcTy)
     (void)refExpr->ref.targets.emplace_back(decl); // for `GetFuncTargets`
     refExpr->SetTy({&funcTy});
     refExpr->instTys = enumTy.TyArgs();
+    // Explicit, so that the value is not used to infer them: it may still need a conversion to Extern<T>.
+    for (auto typeArg : enumTy.TyArgs()) {
+        auto typeArgument = MakeOwned<Type>();
+        typeArgument->SetTy({typeArg});
+        refExpr->typeArguments.emplace_back(std::move(typeArgument));
+    }
     return refExpr;
 }
 

@@ -34,7 +34,8 @@ using namespace TypeCheckUtil;
 namespace {
 OwnedPtr<AST::Expr> TryDesugarFunctionCallExpr(OwnedPtr<AST::Expr> base)
 {
-    if (!Ty::IsInitialTy(base->DataTy()) && base->TyKind() != TypeKind::TYPE_FUNC) {
+    // An Extern<T> value is called directly, as a dynamic call.
+    if (!Ty::IsInitialTy(base->DataTy()) && base->TyKind() != TypeKind::TYPE_FUNC && !IsExternValue(*base)) {
         // Try to desugar base as base.operator().
         // NOTE: 'curFile' and 'curMacroCall' will be set from caller of current method.
         auto newBase = MakeOwnedNode<MemberAccess>();

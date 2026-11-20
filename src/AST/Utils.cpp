@@ -533,6 +533,21 @@ bool IsValidCFuncConstructorCall(const CallExpr& ce)
     return false;
 }
 
+Ptr<CallExpr> GetImplicitToExternCall(const Expr& expr)
+{
+    auto desugared = expr.desugarExpr.get();
+    // A converted block remains a block holding the conversion.
+    if (auto block = DynamicCast<Block*>(desugared); block && block->body.size() == 1) {
+        desugared = DynamicCast<Expr*>(block->body[0].get());
+    }
+    auto ce = DynamicCast<CallExpr*>(desugared);
+    if (!ce || !ce->TestAttr(Attribute::IMPLICIT_ADD) || !ce->resolvedFunction ||
+        ce->resolvedFunction->identifier != STD_LIB_TO_EXTERN || ce->args.size() != 1) {
+        return nullptr;
+    }
+    return ce;
+}
+
 bool IsVirtualMember(const Decl& decl)
 {
     // rule 1: top-level function is not virtual function

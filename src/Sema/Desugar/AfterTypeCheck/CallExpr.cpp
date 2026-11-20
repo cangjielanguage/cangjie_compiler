@@ -67,6 +67,26 @@ void DesugarComparableIntrinsic(AST::CallExpr& expr, TokenKind op)
     expr.desugarExpr = std::move(binExpr);
 }
 
+/**
+ * Desugar getExtern(e) into e.payload and setExtern(e, v) into e.payload = v. The member access is bound to the payload
+ * declaration of Extern<T>, so it is not a dynamic Extern operation.
+ */
+void DesugarExternPayloadIntrinsic(AST::CallExpr& expr, bool isSet)
+{
+    CJC_ASSERT(expr.desugarExpr == nullptr && expr.args.size() == (isSet ? 2U : 1U));
+    auto payload = CreateMemberAccess(std::move(expr.args[0]->expr), STD_LIB_EXTERN_PAYLOAD);
+    CJC_NULLPTR_CHECK(payload->target);
+    CopyBasicInfo(&expr, payload);
+    if (!isSet) {
+        expr.desugarExpr = std::move(payload);
+        return;
+    }
+    payload->EnableAttr(Attribute::LEFT_VALUE);
+    auto assign = CreateAssignExpr(std::move(payload), std::move(expr.args[1]->expr), expr.GetTy());
+    CopyBasicInfo(&expr, assign);
+    expr.desugarExpr = std::move(assign);
+}
+
 void DesugarIntrinsicCallExpr(AST::CallExpr& expr)
 {
     // Check whether the call is an intrinsic function call.
@@ -89,6 +109,11 @@ void DesugarIntrinsicCallExpr(AST::CallExpr& expr)
     
     // Find tokenkind type of the intrinsic function by package name and function name of the intrinsic function.
     std::string identfifier = target->identifier;
+    if (packageName == CORE_PACKAGE_NAME &&
+        (identfifier == STD_LIB_GET_EXTERN || identfifier == STD_LIB_SET_EXTERN)) {
+        DesugarExternPayloadIntrinsic(expr, identfifier == STD_LIB_SET_EXTERN);
+        return;
+    }
     TokenKind op = TokenKind::ILLEGAL;
     auto it = semaPackageMap.find(packageName);
     if (it == semaPackageMap.end() || it->second.find(identfifier) == it->second.end()) {

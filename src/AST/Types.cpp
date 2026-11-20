@@ -500,6 +500,16 @@ bool Ty::IsCoreOptionType() const
         enumTy.declPtr->identifier == STD_LIB_OPTION && enumTy.typeArgs.size() == 1;
 }
 
+bool Ty::IsCoreExternType() const
+{
+    if (!this->IsStruct()) {
+        return false;
+    }
+    auto& structTy = *RawStaticCast<const StructTy*>(this);
+    return structTy.declPtr && structTy.declPtr->fullPackageName == CORE_PACKAGE_NAME &&
+        structTy.declPtr->identifier == STD_LIB_EXTERN && structTy.typeArgs.size() == 1;
+}
+
 bool Ty::IsFunc() const
 {
     return kind == TypeKind::TYPE_FUNC;

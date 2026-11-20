@@ -106,6 +106,12 @@ inline constexpr const char PCT_SYNC_PACKAGE_NAME[] = "stdx.unittest.sync";
 
 // Standard library class name
 inline const std::string STD_LIB_ARRAY = "Array";
+inline const std::string STD_LIB_EXTERN = "Extern";
+inline const std::string STD_LIB_EXTERN_PAYLOAD = "payload";
+inline const std::string STD_LIB_GET_EXTERN = "getExtern";
+inline const std::string STD_LIB_SET_EXTERN = "setExtern";
+inline const std::string STD_LIB_TO_EXTERN = "toExtern";
+inline const std::string STD_LIB_FOREIGN_RUNTIME = "ForeignRuntime";
 inline const std::string STD_LIB_FUTURE = "Future";
 inline const std::string STD_LIB_MONITOR = "Monitor";
 inline const std::string STD_LIB_MUTEX = "Mutex";

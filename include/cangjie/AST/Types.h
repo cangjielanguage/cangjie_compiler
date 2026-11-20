@@ -181,6 +181,10 @@ struct Ty {
      * U: Sema, CodeGen
      */
     bool IsCoreOptionType() const;
+    /** Return whether a ty is core's struct Extern<T>.
+     * U: Sema
+     */
+    bool IsCoreExternType() const;
     /** Return whether a ty is class.
      * U: Sema.
      */

@@ -506,7 +506,7 @@ ErrOrSubst TypeChecker::TypeCheckerImpl::PrepareTyArgsSynthesis(
             .ub = retTyUB,
             .style = BlameStyle::RETURN};
         argPack = {stat.tyVarsToSolve, validArgTys, paramTys,
-            MakeArgBlames(stat, ce, validArgTys, paramTys, typeManager), funcRetTy, stat.retTarget, retBlame};
+            MakeArgBlames(stat, ce, validArgTys, paramTys, typeManager), funcRetTy, stat.retTarget, retBlame, true};
         auto synCtx = LocalTypeArgumentSynthesis(typeManager, argPack, ctx.gcBlames, false);
         stat.solution = synCtx.SynthesizeTypeArguments(true);
         size_t newUnsolvedCount = stat.solution ? synCtx.CountUnsolvedTyVars(*stat.solution) : 0;

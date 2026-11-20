@@ -294,8 +294,9 @@ bool MayBeStructTy(const VarDecl& target)
     if (!target.GetTy().IsCorrect()) {
         return false;
     }
+    // A dynamic update e.f = v on a value e of type Extern<T> does not modify e.
     if (target.GetTy()->IsStruct()) {
-        return true;
+        return !target.GetTy()->IsCoreExternType();
     }
     if (target.GetTy()->IsGeneric()) {
         auto gTy = RawStaticCast<GenericsTy*>(target.DataTy());

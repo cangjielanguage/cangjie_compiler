@@ -2971,6 +2971,8 @@ bool TypeChecker::TypeCheckerImpl::ChkCallBaseMemberAccess(
         return true;
     } else if (ma->GetTy() && ma->GetTy()->IsCFunc() && maRealTarget && maRealTarget->IsBuiltIn()) {
         return false;
+    } else if (IsDynamicExternMemberAccess(*ma)) {
+        return true;
     } else if (!ma->target && ma->targets.empty()) {
         // 'varr' is VArray type, 'varr.size()' is illegitimate, 'size' of VArray is a property.
         if (Is<VArrayTy>(ma->baseExpr->DataTy()) && ma->field == "size") {
@@ -3648,6 +3650,9 @@ bool TypeChecker::TypeCheckerImpl::ChkCallExpr(ASTContext& ctx, ModalTy target, 
     if (ce.baseFunc->GetTy()->IsNothing()) {
         return SynArgsOfNothingBaseExpr(ctx, ce);
     }
+    if (IsDynamicExternCall(ce)) {
+        return ChkExternCall(ctx, target, ce);
+    }
     // Check ToTokens interface implementation.
     if (ce.needCheckToTokens) {
         CheckToTokensImpCallExpr(ce);
@@ -3736,6 +3741,47 @@ bool TypeChecker::TypeCheckerImpl::SynArgsOfNothingBaseExpr(ASTContext& ctx, Cal
     });
     ce.SetTy(isWellTyped ? ModalTy{TypeManager::GetNothingTy()} : ModalTy{TypeManager::GetInvalidTy()});
     return isWellTyped;
+}
+
+bool TypeChecker::TypeCheckerImpl::ChkExternCall(ASTContext& ctx, ModalTy target, CallExpr& ce)
+{
+    ModalTy externTy{ce.baseFunc->DataTy()};
+    bool isWellTyped = true;
+    // The arguments are passed to the foreign runtime as Array<Any>, so they may have any type but cannot be named.
+    for (auto& arg : ce.args) {
+        if (!arg->name.Empty()) {
+            diag.Diagnose(*arg, DiagKind::sema_unsupport_named_argument);
+            isWellTyped = false;
+        }
+        if (arg->withInout) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_inout_can_only_used_in_cfunc_calling, *arg);
+            isWellTyped = false;
+        }
+        bool argWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, arg.get())) &&
+            ReplaceIdealTy(*arg->expr) && ReplaceIdealTy(*arg);
+        isWellTyped = argWellTyped && isWellTyped;
+    }
+    if (!isWellTyped || !ChkExternRuntime(ce, *externTy)) {
+        ce.SetTy({TypeManager::GetInvalidTy()});
+        return false;
+    }
+    if (target && !typeManager.IsSubtype(externTy, target)) {
+        DiagMismatchedTypesWithFoundTy(diag, ce, target, externTy);
+        ce.SetTy({TypeManager::GetInvalidTy()});
+        return false;
+    }
+    ce.SetTy(externTy);
+    return true;
+}
+
+bool TypeChecker::TypeCheckerImpl::ChkExternMemberTypeArguments(const MemberAccess& ma)
+{
+    if (ma.typeArguments.empty()) {
+        return true;
+    }
+    (void)diag.DiagnoseRefactor(
+        DiagKindRefactor::sema_extern_member_type_arguments, ma, MakeRange(ma.leftAnglePos, ma.rightAnglePos + 1));
+    return false;
 }
 
 bool TypeChecker::TypeCheckerImpl::ChkFunctionCallExpr(ASTContext& ctx, ModalTy target, CallExpr& ce)

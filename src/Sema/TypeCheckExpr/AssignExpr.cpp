@@ -301,6 +301,53 @@ std::optional<ModalTy> TypeChecker::TypeCheckerImpl::InferAssignExprCheckCaseOve
     return {};
 }
 
+std::optional<ModalTy> TypeChecker::TypeCheckerImpl::SynExternUpdate(ASTContext& ctx, AssignExpr& ae)
+{
+    if (!ae.leftValue || !ae.rightExpr) {
+        return {};
+    }
+    Ptr<Expr> base = nullptr;
+    if (auto ma = DynamicCast<MemberAccess*>(ae.leftValue.get())) {
+        base = ma->baseExpr.get();
+    } else if (auto se = DynamicCast<SubscriptExpr*>(ae.leftValue.get()); se && !se->indexExprs.empty()) {
+        base = se->baseExpr.get();
+    }
+    if (!base) {
+        return {};
+    }
+    {
+        // Diagnostics of an ill-typed base are reported when the assignment is checked as usual.
+        auto ds = DiagSuppressor(diag);
+        if (Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, base))) {
+            ds.ReportDiag();
+        }
+    }
+    if (!IsDynamicExternUpdate(ae)) {
+        return {};
+    }
+    // && and || cannot be overloaded and evaluate their right operand only if needed, so &&= and ||= need a Bool.
+    bool isWellTyped = ae.op != TokenKind::AND_ASSIGN && ae.op != TokenKind::OR_ASSIGN;
+    if (!isWellTyped) {
+        (void)diag.Diagnose(ae, DiagKind::sema_type_incompatible, "compound assignment expression");
+    }
+    // The index and the value are passed to the foreign runtime as Any, so they may have any type.
+    if (auto ma = DynamicCast<MemberAccess*>(ae.leftValue.get())) {
+        isWellTyped = ChkExternMemberTypeArguments(*ma) && isWellTyped;
+    } else if (auto se = DynamicCast<SubscriptExpr*>(ae.leftValue.get())) {
+        for (auto& index : se->indexExprs) {
+            isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, index.get())) &&
+                ReplaceIdealTy(*index) && isWellTyped;
+        }
+        isWellTyped = ChkExternSubscriptIndexCount(*se) && isWellTyped;
+    }
+    isWellTyped = Ty::IsTyCorrect(Synthesize({ctx, SynPos::EXPR_ARG}, ae.rightExpr.get())) &&
+        ReplaceIdealTy(*ae.rightExpr) && isWellTyped;
+    isWellTyped = ChkExternRuntime(ae, *base->DataTy()) && isWellTyped;
+    ae.leftValue->SetTy({base->DataTy()});
+    ae.SetTy({isWellTyped ? Ptr<Ty>(TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)) : TypeManager::GetInvalidTy()});
+    return {ae.GetTy()};
+}
+
 bool TypeChecker::TypeCheckerImpl::ChkAssignExpr(ASTContext& ctx, ModalTy target, AssignExpr& ae)
 {
     if (!SynAssignExpr(ctx, ae).IsCorrect()) {
@@ -344,6 +391,9 @@ ModalTy TypeChecker::TypeCheckerImpl::SynAssignExpr(ASTContext& ctx, AssignExpr&
             return SynMultipleAssignExpr(ctx, ae);
         }
         return ae.desugarExpr->GetTy();
+    }
+    if (auto ret = SynExternUpdate(ctx, ae)) {
+        return *ret;
     }
     std::vector<Diagnostic> diagsForOverload;
     // Check operator overloading for index accessing or compound assignment.

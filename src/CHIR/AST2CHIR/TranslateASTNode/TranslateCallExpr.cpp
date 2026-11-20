@@ -5,6 +5,7 @@
 // See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 #include "cangjie/AST/AttributePack.h"
+#include "cangjie/AST/Utils.h"
 #include "cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h"
 #include "cangjie/CHIR/AST2CHIR/Utils.h"
 #include "cangjie/CHIR/Utils/ConstantUtils.h"
@@ -1542,6 +1543,20 @@ void Translator::ProcessMapExpr(AST::Node& originExpr, bool isSubScript)
                 StaticCast<AST::RefExpr*>(&originExpr)->isSuper)) {
             auto chirNode = TranslateExprArg(originExpr);
             exprValueTable.Set(originExpr, *chirNode);
+        }
+    } else {
+        // c[i] op= v is rewritten as c.[](i, value: c.[](i').op(v)), where i' is mapped to i so that i is evaluated
+        // once. If the setter's index is implicitly converted to Extern<T>, its desugarExpr is T.toExtern(i), which is
+        // not mapped, so i' would evaluate i again. Instead, i is translated before the arguments of the setter call
+        // and its value is stored in exprValueTable, where i' finds it; each operator converts the value on its own.
+        // Implicit Option boxing, whose desugarExpr is Some(i), has the same problem in the base compiler (issue
+        // #1362); once mapped expressions are found through implicit conversions in general, this branch can be
+        // removed.
+        auto expr = DynamicCast<const AST::Expr*>(&originExpr);
+        auto ce = expr ? AST::GetImplicitToExternCall(*expr) : nullptr;
+        auto shared = ce ? DynamicCast<const AST::Expr*>(GetDesugaredExpr(*ce->args[0]->expr)) : nullptr;
+        if (shared && shared->mapExpr == shared) {
+            exprValueTable.Set(*shared, *TranslateExprArg(*ce->args[0]->expr));
         }
     }
 }
