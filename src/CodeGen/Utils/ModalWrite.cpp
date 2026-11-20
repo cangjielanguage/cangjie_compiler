@@ -70,10 +70,17 @@ bool ResolveMemberStore(const Expression& expr, const Type*& objectType, const s
 
 /// Walks \p path from \p rootType down to the field that is written. Returns false when the path
 /// leaves the nominal-type world (e.g. through a not-yet-instantiated generic member).
+///
+/// \p result.ownerModal is the modal of the object that *physically* stores the written field.
+/// Struct members are stored inline, so walking into them does not move the storage even when
+/// their semantic modal was reset by `demode`: a `d: W` (demode) struct member of a `local!`
+/// holder still physically lives inside the holder. Only a reference-typed member dereferences
+/// into another object, moving the physical storage to its pointee's object.
 bool ResolveFinalMember(
     const CustomType& rootType, const std::vector<uint64_t>& path, CHIRBuilder& builder, FinalMember& result)
 {
     auto current = &rootType;
+    auto physicalOwnerModal = rootType.GetModalInfo();
     for (size_t i = 0; i < path.size(); ++i) {
         auto def = current->GetCustomTypeDef();
         if (def == nullptr) {
@@ -88,15 +95,21 @@ bool ResolveFinalMember(
         }
 
         if (i + 1 == path.size()) {
-            result.ownerModal = current->GetModalInfo();
+            result.ownerModal = physicalOwnerModal;
             result.memberType = memberTys[index];
             result.isDemode = instanceVars[index].TestAttr(Attribute::DEMODE);
             return result.memberType != nullptr;
         }
 
-        auto nextType = memberTys[index]->StripAllRefs();
+        auto memberTy = memberTys[index];
+        auto nextType = memberTy->StripAllRefs();
         if (nextType == nullptr || !nextType->IsNominal()) {
             return false;
+        }
+        if (memberTy->IsRef()) {
+            // Reference-typed member: everything below it physically lives in the pointee's
+            // object, whose modal decides whether that object is on the heap.
+            physicalOwnerModal = nextType->GetModalInfo();
         }
         current = static_cast<const CustomType*>(nextType);
     }
@@ -185,8 +198,19 @@ ModalWriteKind CodeGen::ClassifyModalWrite(CHIRBuilder& builder, const Expressio
     // (e.g. field type `T`) has no static layout: the write is dispatched to gcwrite.generic
     // at runtime, which rejects local objects, so it must keep the maybe-local barrier.
     bool dispatchedOnRuntimeRefness = !member.memberType->IsRef() && memberDataType->IsGenericRelated();
-    if (memberDegree == CHIR::Mode::NONE ||
-        (ownerDegree == CHIR::Mode::MUST && memberDegree == CHIR::Mode::MUST && !dispatchedOnRuntimeRefness)) {
+    if (ownerDegree == CHIR::Mode::NONE) {
+        // The field is physically stored in an object on the heap, so no region -> heap edge
+        // can be created here regardless of the value's modal.
+        return ModalWriteKind::NONE;
+    }
+    if (memberDegree == CHIR::Mode::NONE) {
+        // The value is provably on the heap (its semantic modal is ~local, e.g. inherited
+        // through a demode ancestor), while the physical owner is a local-region object:
+        // a region -> heap edge that must be registered, which is what the demode barrier
+        // does.
+        return ModalWriteKind::DEMODE;
+    }
+    if (ownerDegree == CHIR::Mode::MUST && memberDegree == CHIR::Mode::MUST && !dispatchedOnRuntimeRefness) {
         return ModalWriteKind::NONE;
     }
     return ModalWriteKind::MAYBE_LOCAL;
