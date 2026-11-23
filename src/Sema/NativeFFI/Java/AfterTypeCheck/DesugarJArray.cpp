@@ -222,9 +222,9 @@ Ptr<FuncDecl> DesugarJArray::FindSizeJNITypeConstructorFromInnerDecl(const Decl&
     return FindSizeJNITypeConstructor(*jarray);
 }
 
-void DesugarJArray::ReplaceCallsWithArrayJavaEntityGet(File& file) const
+void DesugarJArray::ReplaceCallsWithArrayJavaEntityGet(AfterTypeCheckContext& ctx, AST::File& file) const
 {
-    Walker(&file, Walker::GetNextWalkerID(), [this, &file](auto node) {
+    Walker(&file, Walker::GetNextWalkerID(), [this, &ctx, &file](auto node) {
         if (!node->IsSamePackage(*file.curPackage)) {
             return VisitAction::WALK_CHILDREN;
         }
@@ -244,35 +244,65 @@ void DesugarJArray::ReplaceCallsWithArrayJavaEntityGet(File& file) const
         auto ma = As<ASTKind::MEMBER_ACCESS>(callExpr->baseFunc);
         CJC_ASSERT_WITH_MSG(!ma->baseExpr->GetTy()->typeArgs.empty(), "JArray type must be generic");
         auto arrayElementType = ma->baseExpr->GetTy()->typeArgs[0];
-        if (!arrayElementType->IsClass() && !arrayElementType->IsCoreOptionType() && !arrayElementType->IsString()) {
+
+        const bool isPrimitive = arrayElementType->IsPrimitive();
+        if (!arrayElementType->IsClass() && !arrayElementType->IsCoreOptionType() &&
+            !arrayElementType->IsString() && !isPrimitive) {
             return VisitAction::WALK_CHILDREN;
         }
 
-        static auto arrayJavaEntityGetDecl = ilib.FindArrayJavaEntityGetDecl(
-            *As<ASTKind::CLASS_DECL>(funcDecl->outerDecl));
-        CJC_ASSERT(arrayJavaEntityGetDecl);
-        auto newCallExpr = ASTCloner::Clone(callExpr);
-        newCallExpr->resolvedFunction = arrayJavaEntityGetDecl;
-        auto base = As<ASTKind::MEMBER_ACCESS>(newCallExpr->baseFunc);
-        base->target = arrayJavaEntityGetDecl;
-        base->SetTy(arrayJavaEntityGetDecl->GetTy());
-        if (IsMirror(*arrayElementType)  || IsImpl(*arrayElementType) || arrayElementType->IsCoreOptionType()) {
-            newCallExpr = ilib.CreateAsJniJobjectCall(std::move(newCallExpr));
-            newCallExpr = ilib.CreateSwapLocalWithGlobalRefCall(ilib.CreateGetJniEnvCall(&file),
-                std::move(newCallExpr));
-            newCallExpr = ilib.CreateJavaEntityJobjectCall(std::move(newCallExpr));
-        }
-        callExpr->desugarExpr =
-            ilib.UnwrapJavaEntity(std::move(newCallExpr), arrayElementType.Ty(), funcDecl->outerDecl);
-        callExpr->desugarArgs = std::nullopt;
+        auto jniEnvPtrDecl = ilib.GetJniEnvPtrDecl();
+        CJC_NULLPTR_CHECK(jniEnvPtrDecl);
+        auto jniEnvVar = CreateTmpVarDecl(jniEnvPtrDecl->type, ilib.CreateGetJniEnvCall(&file));
+        auto jniEnvDecl = jniEnvVar.get();
+        auto jniEnvRef = WithinFile(CreateRefExpr(*jniEnvVar), &file);
+        auto javaArray = ilib.CreateAsJniJobjectCall(CreateJavaRefCall(ASTCloner::Clone(ma->baseExpr.get())));
+        auto arrayIndex = ASTCloner::Clone(callExpr->args[0]->expr.get());
+        OwnedPtr<Block> arrayGetBlock;
+        if (isPrimitive) {
+            arrayGetBlock = factory.CreatePrimitiveArrayGetCall(*arrayElementType, jniEnvRef,
+                std::move(javaArray), std::move(arrayIndex));
+            arrayGetBlock->body.emplace(arrayGetBlock->body.begin(), std::move(jniEnvVar));
+            arrayGetBlock->curFile = &file;
+        } else {
+            auto arrayGetCall = factory.CreateObjectArrayGetCall(jniEnvRef, std::move(javaArray),
+                std::move(arrayIndex));
+            CJC_ASSERT(arrayGetCall != nullptr);
+            arrayGetBlock = CreateBlock({}, arrayElementType);
+            arrayGetBlock->curFile = &file;
+            arrayGetBlock->body.emplace_back(std::move(jniEnvVar));
+            auto resultVar = CreateTmpVarDecl(nullptr, std::move(arrayGetCall));
+            resultVar->curFile = &file;
+            resultVar->SetTy(resultVar->initializer->GetTy());
+            OwnedPtr<Expr> javaObject = WithinFile(CreateRefExpr(*resultVar), &file);
+            arrayGetBlock->body.emplace_back(std::move(resultVar));
 
+            if (IsMirror(*arrayElementType) || IsImpl(*arrayElementType) || arrayElementType->IsCoreOptionType()) {
+                CJC_ASSERT(jniEnvDecl != nullptr);
+                javaObject = ilib.CreateSwapLocalWithGlobalRefCall(WithinFile(CreateRefExpr(*jniEnvDecl), &file),
+                    std::move(javaObject));
+            }
+
+            auto javaEntity = ilib.CreateJavaEntityJobjectCall(std::move(javaObject));
+            auto result = ilib.UnwrapJavaEntity(std::move(javaEntity), arrayElementType.Ty(), funcDecl->outerDecl);
+            arrayGetBlock->body.emplace_back(std::move(result));
+            arrayGetBlock->SetTy(arrayElementType);
+        }
+
+        auto exclusiveScopeCall = WrapWithExclusiveScope(ctx, std::move(arrayGetBlock), arrayElementType);
+        if (!exclusiveScopeCall) {
+            return VisitAction::WALK_CHILDREN;
+        }
+
+        callExpr->desugarExpr = std::move(exclusiveScopeCall);
+        callExpr->desugarArgs = std::nullopt;
         return VisitAction::WALK_CHILDREN;
     }).Walk();
 }
 
-void DesugarJArray::ReplaceCallsWithArrayJavaEntitySet(File& file) const
+void DesugarJArray::ReplaceCallsWithArrayJavaEntitySet(AfterTypeCheckContext& ctx, AST::File& file) const
 {
-    Walker(&file, Walker::GetNextWalkerID(), [this, &file](auto node) {
+    Walker(&file, Walker::GetNextWalkerID(), [this, &ctx, &file](auto node) {
         if (!node->IsSamePackage(*file.curPackage)) {
             return VisitAction::WALK_CHILDREN;
         }
@@ -292,29 +322,43 @@ void DesugarJArray::ReplaceCallsWithArrayJavaEntitySet(File& file) const
         auto ma = As<ASTKind::MEMBER_ACCESS>(callExpr->baseFunc);
         CJC_ASSERT_WITH_MSG(!ma->baseExpr->GetTy()->typeArgs.empty(), "JArray type must be generic");
         auto arrayElementType = ma->baseExpr->GetTy()->typeArgs[0];
-        if (!arrayElementType->IsClass() && !arrayElementType->IsCoreOptionType() && !arrayElementType->IsString()) {
+
+        const bool isPrimitive = arrayElementType->IsPrimitive();
+        if (!isPrimitive && !arrayElementType->IsClass() && !arrayElementType->IsCoreOptionType() &&
+            !arrayElementType->IsString()) {
             return VisitAction::WALK_CHILDREN;
         }
 
-        static auto arrayJavaEntitySetDecl = ilib.FindArrayJavaEntitySetDecl(
-            *As<ASTKind::CLASS_DECL>(funcDecl->outerDecl));
-        CJC_ASSERT(arrayJavaEntitySetDecl);
-        auto newCallExpr = ASTCloner::Clone(callExpr);
-        newCallExpr->resolvedFunction = arrayJavaEntitySetDecl;
+        auto jniEnvPtrDecl = ilib.GetJniEnvPtrDecl();
+        CJC_NULLPTR_CHECK(jniEnvPtrDecl);
 
-        newCallExpr->args[1] = ASTCloner::Clone(newCallExpr->args[1].get());
-        newCallExpr->args[1]->expr = ilib.WrapJavaEntity(std::move(newCallExpr->args[1]->expr));
-        newCallExpr->desugarArgs = std::nullopt;
+        auto jniEnvVar = CreateTmpVarDecl(jniEnvPtrDecl->type, ilib.CreateGetJniEnvCall(&file));
+        auto javaArray = ilib.CreateAsJniJobjectCall(CreateJavaRefCall(ASTCloner::Clone(ma->baseExpr.get())));
+        auto jniEnvRef = WithinFile(CreateRefExpr(*jniEnvVar), &file);
+        auto arrayIndex = ASTCloner::Clone(callExpr->args[0]->expr.get());
+        auto arrayValue = ASTCloner::Clone(callExpr->args[1]->expr.get());
+
+        OwnedPtr<Block> arraySetBlock;
+        if (isPrimitive) {
+            arraySetBlock = factory.CreatePrimitiveArraySetCall(*arrayElementType, jniEnvRef, std::move(javaArray),
+                std::move(arrayIndex), std::move(arrayValue));
+        } else {
+            arraySetBlock = factory.CreateObjectArraySetCall(jniEnvRef, std::move(javaArray),
+                std::move(arrayIndex), std::move(arrayValue));
+        }
+
+        CJC_ASSERT(arraySetBlock != nullptr);
+        arraySetBlock->body.emplace(arraySetBlock->body.begin(), std::move(jniEnvVar));
+        arraySetBlock->curFile = &file;
+
+        auto exclusiveScopeCall = WrapWithExclusiveScope(ctx, std::move(arraySetBlock),
+            {TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)});
+        if (!exclusiveScopeCall) {
+            return VisitAction::WALK_CHILDREN;
+        }
+
+        callExpr->desugarExpr = std::move(exclusiveScopeCall);
         callExpr->desugarArgs = std::nullopt;
-        auto base = As<ASTKind::MEMBER_ACCESS>(newCallExpr->baseFunc);
-        base->target = arrayJavaEntitySetDecl;
-        base->SetTy(arrayJavaEntitySetDecl->GetTy());
-        callExpr->args[1] = ASTCloner::Clone(newCallExpr->args[1].get());
-
-        callExpr->baseFunc = ASTCloner::Clone(newCallExpr->baseFunc.get());
-        callExpr->resolvedFunction = newCallExpr->resolvedFunction;
-        callExpr->desugarExpr = std::move(newCallExpr);
-
         return VisitAction::WALK_CHILDREN;
     }).Walk();
 }
@@ -322,7 +366,8 @@ void DesugarJArray::ReplaceCallsWithArrayJavaEntitySet(File& file) const
 DesugarJArray::DesugarJArray(
     TypeManager& typeManager,
     const ImportManager& importManager,
-    InteropLibBridge& ilib) : typeManager(typeManager), importManager(importManager), ilib(ilib)
+    InteropLibBridge& ilib, ASTFactory& factory) : typeManager(typeManager),
+        importManager(importManager), ilib(ilib), factory(factory)
 {
 }
 
@@ -345,8 +390,8 @@ void DesugarJArray::Process(AfterTypeCheckContext& ctx)
     }
 
     for (auto& file : ctx.pkg.files) {
-        ReplaceCallsWithArrayJavaEntityGet(*file);
-        ReplaceCallsWithArrayJavaEntitySet(*file);
+        ReplaceCallsWithArrayJavaEntityGet(ctx, *file);
+        ReplaceCallsWithArrayJavaEntitySet(ctx, *file);
         TransformConstructorCallsToPassJNIParam(*file);
     }
 }

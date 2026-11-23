@@ -175,6 +175,18 @@ public:
 
     const JniNativeInterfaceBridge interface;
 
+    OwnedPtr<Expr> CreateGetArrayRegionCall(const Ty& elementTy, Ptr<Expr> jniEnvPtr,
+        OwnedPtr<Expr> array, OwnedPtr<Expr> start, OwnedPtr<Expr> len, OwnedPtr<FuncArg> buffer) const;
+
+    OwnedPtr<Expr> CreateSetArrayRegionCall(const Ty& elementTy, Ptr<Expr> jniEnvPtr,
+        OwnedPtr<Expr> array, OwnedPtr<Expr> start, OwnedPtr<Expr> len, OwnedPtr<FuncArg> buffer) const;
+
+    OwnedPtr<Expr> CreateGetObjectArrayElementCall(Ptr<Expr> jniEnvPtr,
+        OwnedPtr<Expr> javaArray, OwnedPtr<Expr> index) const;
+
+    OwnedPtr<Expr> CreateSetObjectArrayElementCall(Ptr<Expr> jniEnvPtr,
+        OwnedPtr<Expr> javaArray, OwnedPtr<Expr> index, OwnedPtr<Expr> value) const;
+
 private:
     AST::Ty& GetJniEnvPtrTy() const;
     AST::Ty& GetJniJobjectDeclTy() const;

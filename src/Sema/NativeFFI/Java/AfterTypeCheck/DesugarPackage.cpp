@@ -48,7 +48,7 @@ void JavaDesugarManager::ProcessJavaMirrorImplStages(AfterTypeCheckContext& ctx,
 
 void JavaDesugarManager::ProcessCallSiteDesugarStages(AfterTypeCheckContext& ctx)
 {
-    Process<DesugarJArray>(ctx, typeManager, importManager, lib);
+    Process<DesugarJArray>(ctx, typeManager, importManager, lib, factory);
     Process<DesugarTypeCheckingAndCasting>(ctx, lib, diag, utils);
 }
 

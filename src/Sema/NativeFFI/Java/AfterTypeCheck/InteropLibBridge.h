@@ -104,6 +104,8 @@ public:
 
     Ptr<FuncDecl> GetJNIHandlePendingExceptionDecl() const;
 
+    Ptr<FuncDecl> GetJNICheckExceptionDecl() const;
+
     /**
      * Java_CFFI_removeFromRegistry
      */
@@ -485,6 +487,8 @@ public:
     OwnedPtr<Expr> CreateJObjectExpr(OwnedPtr<Expr> cjExpr);
 
     OwnedPtr<Expr> CreateJNIHandlePendingExceptionCall(Ptr<Expr> jniEnvPtr);
+
+    OwnedPtr<Expr> CreateJNICheckExceptionCall(Ptr<Expr> jniEnvPtr);
 
 private:
    /**
