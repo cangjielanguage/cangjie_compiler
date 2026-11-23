@@ -2008,6 +2008,12 @@ OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
     }
     if (Seeing(TokenKind::FUNC)) {
         Next();
+        // With a modal (`@local! func`), the token following the modal may not
+        // be the 'func' keyword itself (e.g. when separated by a line break),
+        // so re-anchor keywordPos to the actually consumed FUNC token.
+        if (ret->modal.HasLocal()) {
+            ret->keywordPos = lastToken.Begin();
+        }
     } else {
         ret->EnableAttr(Attribute::IS_BROKEN);
     }

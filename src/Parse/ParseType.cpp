@@ -17,7 +17,8 @@
 using namespace Cangjie;
 using namespace AST;
 
-constexpr std::string_view LOCAL_MODE_SPECIFIER("local");
+// LOCAL_MODE_SPECIFIER and IsModalSpecifierPair are shared with the macro pipeline,
+// see include/cangjie/Lex/Token.h.
 
 // BaseType is atomicType in BNF.
 OwnedPtr<AST::Type> ParserImpl::ParseBaseType()
@@ -381,6 +382,11 @@ bool ParserImpl::IsTokenAdjacent(const Token& first, const Token& second) const
 // Contract: failure rolls back consumed tokens so the caller sees no advance.
 bool ParserImpl::ParseModeSpecifier(ASTModalInfo& out)
 {
+    // SeeingModalInfo detects the modal across the line break between '@' and
+    // the pair (e.g. '@\n local!=') via LookAheadSkipNL; consume the same NL
+    // here, otherwise the pair check below sees the NL and never matches.
+    while (Skip(TokenKind::NL)) {
+    }
     ParserScope scope(*this);
     bool hasTilde = false;
     Position localBegin;
@@ -452,26 +458,10 @@ bool ParserImpl::SeeingModalInfo()
     if (tokens.size() < MODAL_LOOKAHEAD) {
         return false;
     }
-    auto it = tokens.begin();
-    const Token& first = *it;
-    ++it;
-    const Token& second = *it;
-    if (first.kind == TokenKind::BITNOT) {
-        if (second.kind != TokenKind::IDENTIFIER || second.Value() != LOCAL_MODE_SPECIFIER) {
-            return false;
-        }
-        return IsTokenAdjacent(first, second);
-    }
-    if (first.kind == TokenKind::IDENTIFIER && first.Value() == LOCAL_MODE_SPECIFIER) {
-        // NOTEQ covers '@local!=': the '!' of the modal immediately followed by
-        // '=' (e.g. an initializer); ParseModeSpecifier splits the token.
-        if (second.kind != TokenKind::NOT && second.kind != TokenKind::QUEST &&
-            second.kind != TokenKind::NOTEQ) {
-            return false;
-        }
-        return IsTokenAdjacent(first, second);
-    }
-    return false;
+    // Shape is decided by the shared IsModalSpecifierPair; NOTEQ covers '@local!=':
+    // the '!' of the modal immediately followed by '=' (e.g. an initializer);
+    // ParseModeSpecifier splits the token.
+    return IsModalSpecifierPair(tokens.front(), tokens.back()) && IsTokenAdjacent(tokens.front(), tokens.back());
 #endif
 }
 

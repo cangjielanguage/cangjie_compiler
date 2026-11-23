@@ -128,7 +128,7 @@ std::string GetPrimaryName(const MacroInvocation& invocation)
 }
 
 bool HasMacroCallToEval(const std::string& moduleName, const TokenVector& inputTokens, size_t curIndex,
-    size_t tokenSize, std::vector<Position>& escapePosVec)
+    size_t tokenSize, std::vector<Position>& escapePosVec, bool requireAdjacent)
 {
     if (inputTokens[curIndex].Value() != "@" || curIndex >= tokenSize - 1) {
         return false;
@@ -141,7 +141,9 @@ bool HasMacroCallToEval(const std::string& moduleName, const TokenVector& inputT
         return false;
     }
     // @local! / @local? / @~local are modal type/this-mode, not macro calls.
-    if (IsModalAfterAt(inputTokens, curIndex)) {
+    // For source tokens, check adjacency the same way the parser does; for macro-emitted
+    // tokens, the shape match alone decides.
+    if (IsModalAfterAt(inputTokens, curIndex, requireAdjacent)) {
         return false;
     }
     if (!IsIdentifierOrContextualKeyword(inputTokens[curIndex + 1].kind)) {
@@ -507,6 +509,13 @@ void refreshNewTokensPosition(std::vector<Position>& originPos, TokenVector& tok
             begin = tokensToParse[i - 1].End();
             end = begin + tokensToParse[i].Value().size();
         }
+        // Keep local-mode modal pairs glued ('@~local' / '@local!' / '@local?'): a column
+        // gap here makes SeeingModalInfo reject the modal on re-parse, and the enclosing
+        // macro call in tokensToParse is then silently dropped (undeclared identifier).
+        if (IsModalSpecifierPair(tokensToParse[i - 1], tokensToParse[i])) {
+            begin = tokensToParse[i - 1].End();
+            end = begin + tokensToParse[i].Value().size();
+        }
         tokensToParse[i].SetValuePos(tokensToParse[i].Value(), begin, end);
     }
 }
@@ -853,9 +862,11 @@ void MacroEvaluation::CreateMacroCallTree(MacroCall& macCall, bool reEval)
         auto posTmp = inputTokens[curIndex].Begin();
         // Bare `@` that is neither an escaped quote-`@`, a macro call `@Name`, nor a modal
         // `@local!` / `@local?` / `@~local` is illegal in macro input/output.
+        // Adjacency matches HasMacroCallToEval below: source tokens require it, macro-emitted
+        // tokens cannot prove it (positions untrustworthy until RefreshNewTokensPos).
         if (inputTokens[curIndex].kind == TokenKind::AT &&
             std::find(escapePosVec.begin(), escapePosVec.end(), posTmp) == escapePosVec.end() &&
-            !IsModalAfterAt(inputTokens, curIndex) &&
+            !IsModalAfterAt(inputTokens, curIndex, !reEval) &&
             (curIndex == tokenSize - 1 || !IsIdentifierOrContextualKeyword(inputTokens[curIndex + 1].kind))) {
             (void)ci->diag.Diagnose(posTmp, DiagKind::macro_expand_invalid_input_tokens);
         }
@@ -874,7 +885,9 @@ void MacroEvaluation::CreateMacroCallTree(MacroCall& macCall, bool reEval)
             startIndex = curIndex;
             continue;
         }
-        if (!HasMacroCallToEval(moduleName, inputTokens, curIndex, tokenSize, escapePosVec)) {
+        // Source tokens (args) have trustworthy positions: check modal adjacency like the parser.
+        // Re-evaluated tokens come from macro output and are glued by shape.
+        if (!HasMacroCallToEval(moduleName, inputTokens, curIndex, tokenSize, escapePosVec, !reEval)) {
             // Skip a normal token, which is not '@'.
             curIndex++;
             continue;

@@ -59,9 +59,13 @@ bool MacroExpandFailed(const std::vector<Token>& retTokens);
 bool CheckAddSpace(Token curToken, Token nextToken);
 
 /**
- * True when tokens at `atIndex` are a local-mode pattern: @local! / @local? / @~local.
- * When `requireAdjacent` is true, also require the mode pair (~local or local!/?) to have no
- * source column gap (used by RefreshNewTokensPos to keep those tokens glued).
+ * True when tokens from `atIndex` form a local-mode modal: '@local!' / '@local?' / '@~local'.
+ * The modal shape is defined by IsModalSpecifierPair (see Lex/Token.h), the single source of
+ * truth shared with the parser.
+ * When `requireAdjacent` is true, additionally require no source column gap between the mode
+ * pair, matching the parser's IsTokenAdjacent semantics — use it for tokens whose positions are
+ * trustworthy (source tokens). When false, the shape match itself counts as adjacent — use it
+ * for macro-emitted tokens whose Begin/End may be missing or shared until RefreshNewTokensPos.
  */
 bool IsModalAfterAt(const TokenVector& tokens, size_t atIndex, bool requireAdjacent = false);
 

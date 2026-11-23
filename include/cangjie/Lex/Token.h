@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <ostream>
 #include <unordered_map>
 #include <vector>
@@ -164,6 +165,30 @@ private:
     Position begin{INVALID_POSITION};
     Position end{INVALID_POSITION};
 };
+
+// Mode specifier of the local mode: '@~local' / '@local!' / '@local?'.
+inline constexpr std::string_view LOCAL_MODE_SPECIFIER{"local"};
+
+/**
+ * True when (t1, t2) is the mode-specifier pair that may follow '@':
+ *   '~' 'local'              -> @~local
+ *   'local' ('!' | '?')      -> @local! / @local?
+ * The NOTEQ check below is not a fourth mode: when '@local!' is immediately
+ * followed by '=' (e.g. an initializer), the lexer merges '!' and '=' into a
+ * single NOTEQ token, which ParseModeSpecifier splits back.
+ * Single source of truth for the modal shape, shared by the parser
+ * (SeeingModalInfo) and the macro pipeline (IsModalAfterAt, CheckAddSpace).
+ */
+inline bool IsModalSpecifierPair(const Token& t1, const Token& t2)
+{
+    if (t1.kind == TokenKind::BITNOT) {
+        return t2.kind == TokenKind::IDENTIFIER && t2.Value() == LOCAL_MODE_SPECIFIER;
+    }
+    if (t1.kind == TokenKind::IDENTIFIER && t1.Value() == LOCAL_MODE_SPECIFIER) {
+        return t2.kind == TokenKind::NOT || t2.kind == TokenKind::QUEST || t2.kind == TokenKind::NOTEQ;
+    }
+    return false;
+}
 
 /**
  * Split string literal into string content and string expression.

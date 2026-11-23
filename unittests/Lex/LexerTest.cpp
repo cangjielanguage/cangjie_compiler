@@ -14,6 +14,7 @@
 #include "cangjie/Basic/StringConvertor.h"
 #include "cangjie/Basic/Utils.h"
 #include "cangjie/Lex/Lexer.h"
+#include "LexerImpl.h"
 
 using namespace Cangjie;
 
@@ -938,4 +939,36 @@ TEST_F(LexerTest, PrintAsciiControlCode)
     EXPECT_EQ(splits[3].substr(22, 8), "\x1b[30;47m");
     EXPECT_EQ(splits[3].substr(30, 8), "\\u{000D}");
     EXPECT_EQ(splits[3].substr(38, 4), "\x1b[0m");
+}
+
+// Scenario: both paths of LookAheadSkipNL must filter COMMENT tokens
+// consistently (a prerequisite for macro local-mode detection). This test uses
+// the ReserveToken(skipComments=false) backdoor to force [COMMENT, local, !]
+// into the cache, making LookAheadSkipNL take the cache-iteration path (rather
+// than the scan path) and verifying that the returned sequence contains no
+// COMMENT -- i.e. macro-side SeeingModalInfo, which looks ahead through this
+// function, will not misjudge a modal macro as non-modal due to a comment
+// (otherwise re-parsing '@ /*c*/ local!' would mismatch as a macro call that
+// is never evaluated). This test failed before the fix (the cache path only
+// filtered NL).
+TEST_F(LexerTest, LookAheadSkipNLCachePathSkipsComment)
+{
+    DiagnosticEngine testDiag{};
+    SourceManager testSm;
+    std::string code = "/*c*/ local !";
+    auto fileid = testSm.AddSource("skipnl_comment.cj", code);
+    // LexerConfig::posBase is a reference member whose default initializer
+    // binds a temporary, so aggregate-initialize with an lvalue Position
+    // instead of default-constructing.
+    Position posBase{0, 1, 1};
+    LexerConfig cfg{fileid, posBase, /*collectTokenStream=*/false, /*splitAmbiguousToken=*/true};
+    LexerImpl lexer{code, testDiag, testSm, cfg};
+
+    lexer.ReserveToken(3, /*skipNewline=*/false, /*skipComments=*/false);
+    auto ret = lexer.LookAheadSkipNL(2);
+
+    ASSERT_EQ(ret.size(), 2u);
+    EXPECT_EQ(ret.front().kind, TokenKind::IDENTIFIER);
+    EXPECT_EQ(ret.front().Value(), "local");
+    EXPECT_EQ(ret.back().kind, TokenKind::NOT);
 }

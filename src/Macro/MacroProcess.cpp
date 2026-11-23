@@ -134,6 +134,84 @@ static void HandleInterplationStringPosMap(Token& strToken, Position newStartPos
         }
     }
 }
+
+bool IsPosMapSkipped(TokenKind kind)
+{
+    return kind == TokenKind::NL || kind == TokenKind::COMMENT;
+}
+
+bool NeedMacroDebugPos(const CompilerInstance& ci)
+{
+    return ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo;
+}
+
+bool IsTokenInCurFile(const Token& token, const MacroInvocation& invocation, Position mcPos)
+{
+    if (IsPosMapSkipped(token.kind)) {
+        return true;
+    }
+    // Tokens defined in topLevel was not refreshed to at position.
+    if (mcPos.fileID != token.Begin().fileID) {
+        return false;
+    }
+    bool notCurFile = std::any_of(invocation.macroAtPosition.begin(), invocation.macroAtPosition.end(),
+        [&token](auto& atPos) { return token.Begin() == atPos || token.Begin() == atPos + 1; });
+    return !notCurFile;
+}
+
+bool NeedsColumnGap(
+    const Token& beforePrevNonNL, const Token& prevNonNL, const Token& prevOrig, const Token& token)
+{
+    // No column gap for A() A[] A<> A?? >> >= ~init, or @local! / @local? / @~local that must stay adjacent.
+    if (prevNonNL.kind == TokenKind::AT || IsSpecialToken(prevOrig.kind, token.kind)) {
+        return false;
+    }
+    // The modal glue check uses the NL-skipping history: '@' modeWord marker are three
+    // consecutive non-NL tokens regardless of the line breaks between '@' and the pair.
+    // Positions are untrustworthy on macro-emitted tokens, so the pair is matched by
+    // token shape (requireAdjacent = false).
+    TokenVector localModeTokens{beforePrevNonNL, prevNonNL, token};
+    return !IsModalAfterAt(localModeTokens, 0, false);
+}
+
+void UpdateNew2OriginPosMap(
+    MacroInvocation& invocation, Token& token, Position mcPos, unsigned int lastColumn, const CompilerInstance& ci)
+{
+    // still have problem with MULTILINE_STRING, turns out Node generated from interpolation part
+    // not stay in same line, impossible to establish a mapping
+    Position keyPos(mcPos.line, static_cast<int>(lastColumn));
+    if (token.kind == TokenKind::STRING_LITERAL || token.kind == TokenKind::MULTILINE_STRING) {
+        invocation.macroCallDiagInfo.new2originPosMap[keyPos.Hash32()] =
+            token.Begin(); // map original STRING_LITERAL token
+        HandleInterplationStringPosMap(
+            token, Position(mcPos.fileID, mcPos.line, static_cast<int>(lastColumn)), &invocation, ci);
+    } else if (!IsPosMapSkipped(token.kind)) {
+        invocation.macroCallDiagInfo.new2originPosMap[keyPos.Hash32()] = token.Begin();
+    }
+}
+
+unsigned int SetRefreshedPos(Token& token, Position mcPos, unsigned int lastColumn)
+{
+    Position begin = token.Begin();
+    begin.fileID = mcPos.fileID;
+    begin.line = mcPos.line;
+    begin.column = static_cast<int>(lastColumn);
+    lastColumn += static_cast<unsigned int>(GetTokenLenth(token));
+    Position end = token.End();
+    end.fileID = mcPos.fileID;
+    end.line = mcPos.line;
+    end.column = static_cast<int>(lastColumn);
+    token.SetValuePos(token.Value(), begin, end);
+    return lastColumn;
+}
+
+void RecordOrigin2NewPos(MacroInvocation& invocation, uint64_t key, const Token& token)
+{
+    if (!IsPosMapSkipped(token.kind) && invocation.origin2newPosMap.find(key) == invocation.origin2newPosMap.end()) {
+        invocation.origin2newPosMap[key] = token.Begin();
+    }
+}
+
 /**
  * Update positions of generated Tokens after macro expansion.
  *
@@ -159,68 +237,41 @@ void RefreshNewTokensPos(Node& node, SourceManager& sm, const CompilerInstance& 
     auto lastColumn = static_cast<unsigned int>(sm.GetLineEnd(mcPos) + 1);
     Token prevOrig{TokenKind::END};
     Token beforePrevOrig{TokenKind::END};
+    // History that skips NL/COMMENT, for the modal pattern '@' modeWord marker:
+    // the '@' may be separated from the pair by any number of line breaks, so
+    // the window must be line-break agnostic (NL tokens are never merged).
+    Token prevNonNL{TokenKind::END};
+    Token beforePrevNonNL{TokenKind::END};
     pMacroInvocation->macroAtPosition.emplace_back(mcPos);
     size_t threadNum = std::thread::hardware_concurrency();
     Cangjie::Utils::TaskQueue taskQueue(threadNum);
     for (auto& token : pMacroInvocation->newTokens) {
         taskQueue.AddTask<void>([&token, &pMacroInvocation, &mcPos]() {
-            if (token.kind == TokenKind::NL || token.kind == TokenKind::COMMENT) {
-                return token.SetCurFile(true);
-            }
-            // Tokens defined in topLevel was not refreshed to at position.
-            if (mcPos.fileID != token.Begin().fileID) {
-                return token.SetCurFile(false);
-            }
-            bool notCurFile =
-                std::any_of(pMacroInvocation->macroAtPosition.begin(), pMacroInvocation->macroAtPosition.end(),
-                    [&token](auto& atPos) { return token.Begin() == atPos || token.Begin() == atPos + 1; });
-            return token.SetCurFile(!notCurFile);
+            token.SetCurFile(IsTokenInCurFile(token, *pMacroInvocation, mcPos));
         });
     }
     taskQueue.RunAndWaitForAllTasksCompleted();
     for (auto& token : pMacroInvocation->newTokens) {
-        // No column gap for A() A[] A<> A?? >> >= ~init, or @local! / @local? / @~local that must stay adjacent.
-        TokenVector localModeTokens{beforePrevOrig, prevOrig, token};
-        if (!IsSpecialToken(prevOrig.kind, token.kind) && !IsModalAfterAt(localModeTokens, 0, true)) {
+        if (NeedsColumnGap(beforePrevNonNL, prevNonNL, prevOrig, token)) {
             lastColumn += 1;
         }
-        if (ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo) {
+        if (NeedMacroDebugPos(ci)) {
             CollectMacroDebugPosition(*pMacroInvocation, token, lastColumn);
         }
-        // still have problem with MULTILINE_STRING, turns out Node generated from interpolation part
-        // not stay in same line, impossible to establish a mapping
-        Position keyPos(mcPos.line, static_cast<int>(lastColumn));
-        if (token.kind == TokenKind::STRING_LITERAL || token.kind == TokenKind::MULTILINE_STRING) {
-            pMacroInvocation->macroCallDiagInfo.new2originPosMap[keyPos.Hash32()] =
-                token.Begin(); // map original STRING_LITERAL token
-            HandleInterplationStringPosMap(
-                token, Position(mcPos.fileID, mcPos.line, static_cast<int>(lastColumn)), pMacroInvocation, ci);
-        } else if (token.kind != TokenKind::NL && token.kind != TokenKind::COMMENT) {
-            pMacroInvocation->macroCallDiagInfo.new2originPosMap[keyPos.Hash32()] = token.Begin();
-        }
+        UpdateNew2OriginPosMap(*pMacroInvocation, token, mcPos, lastColumn, ci);
         auto key = token.Begin().Hash64();
         // Snapshot original positions before SetValuePos; adjacency checks need the pre-refresh Begin/End.
         Token tokenOrig = token;
-        Position begin = token.Begin();
-        begin.fileID = mcPos.fileID;
-        begin.line = mcPos.line;
-        begin.column = static_cast<int>(lastColumn);
-        lastColumn += static_cast<unsigned int>(GetTokenLenth(token));
-
-        Position end = token.End();
-        end.fileID = mcPos.fileID;
-        end.line = mcPos.line;
-        end.column = static_cast<int>(lastColumn);
-        token.SetValuePos(token.Value(), begin, end);
-
-        if (token.kind != TokenKind::NL && token.kind != TokenKind::COMMENT &&
-            pMacroInvocation->origin2newPosMap.find(key) == pMacroInvocation->origin2newPosMap.end()) {
-            pMacroInvocation->origin2newPosMap[key] = token.Begin();
-        }
+        lastColumn = SetRefreshedPos(token, mcPos, lastColumn);
+        RecordOrigin2NewPos(*pMacroInvocation, key, token);
         beforePrevOrig = prevOrig;
         prevOrig = std::move(tokenOrig);
+        if (!IsPosMapSkipped(token.kind)) {
+            beforePrevNonNL = prevNonNL;
+            prevNonNL = token;
+        }
     }
-    if (ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo) {
+    if (NeedMacroDebugPos(ci)) {
         pMacroInvocation->macroDebugMap[lastColumn] = node.end;
     }
 }
