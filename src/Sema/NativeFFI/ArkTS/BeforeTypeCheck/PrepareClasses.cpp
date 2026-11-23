@@ -253,7 +253,7 @@ bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager
         }
         if (ArkTSWriteOnlyProp(*prop)) {
             // Persist the write-only contract for importing packages: the
-            // WRITE_ONLY annotation itself has no CJO record. A non-mutable
+            // ARKTS_WRITE_ONLY annotation itself has no CJO record. A non-mutable
             // property has already been refused by the placement check.
             prop->EnableAttr(Attribute::ARKTS_WRITE_ONLY_PROP);
             // Keep a getter declaration for the property contract. The read

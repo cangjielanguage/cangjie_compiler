@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -33,8 +33,8 @@ constexpr std::string_view ELLIPSIS("...");
 // Sema gate remains the only user-facing diagnostic for a refused file.
 bool IsArkTSOnlyAnnotationKind(AnnotationKind kind)
 {
-    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::RAW_VALUE ||
-        kind == AnnotationKind::REST_PARAM || kind == AnnotationKind::WRITE_ONLY;
+    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE ||
+        kind == AnnotationKind::ARKTS_REST_PARAM || kind == AnnotationKind::ARKTS_WRITE_ONLY;
 }
 
 // The access-modifier x FOREIGN conflict is lifted only on declarations
@@ -1307,7 +1307,7 @@ OwnedPtr<Decl> ParserImpl::ParseEnumConstructor(
             continue;
         }
         if (!(anno->kind == AnnotationKind::WHEN || anno->kind == AnnotationKind::DEPRECATED ||
-            anno->kind == AnnotationKind::RAW_VALUE)) {
+            anno->kind == AnnotationKind::ARKTS_RAW_VALUE)) {
             DiagUnexpectedAnnoOn(*annos[0], caseIdentPos, annos[0]->identifier, caseIdent);
         }
     }

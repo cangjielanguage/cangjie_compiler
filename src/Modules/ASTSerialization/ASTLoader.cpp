@@ -964,7 +964,7 @@ OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageForma
             annotation->kind = AnnotationKind::OBJ_C;
             break;
         case PackageFormat::AnnoKind_RawValue:
-            annotation->kind = AnnotationKind::RAW_VALUE;
+            annotation->kind = AnnotationKind::ARKTS_RAW_VALUE;
             break;
         case PackageFormat::AnnoKind_HasThis:
             annotation->kind = AnnotationKind::HAS_THIS;

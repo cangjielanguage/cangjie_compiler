@@ -81,18 +81,10 @@ std::vector<GenericType*> GetGenericParamType(const AST::Decl& decl, CHIRType& c
 std::string GetNameOfDefinedPackage(const AST::FuncDecl& funcDecl);
 
 /**
- * @brief Builds attribute information from an attribute pack.
- *
- * @param attr The attribute pack.
- * @return Attribute information.
- */
-AttributeInfo BuildAttr(const AST::AttributePack& attr);
-
-/**
  * @brief Builds attribute information from a declaration.
  *
  * A prepared @ArkTS wrapper keeps Attribute::FOREIGN in AST, but CHIR's FOREIGN means external, so this
- * overload clears it for prepared declarations.
+ * function clears it for prepared declarations.
  *
  * @param decl The declaration.
  * @return Attribute information.

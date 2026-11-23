@@ -109,20 +109,20 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
     // cloning.
     for (auto it = annos.begin(); it != annos.end();) {
         auto& annotation = *it;
-        if (annotation->kind == AnnotationKind::WRITE_ONLY) {
+        if (annotation->kind == AnnotationKind::ARKTS_WRITE_ONLY) {
             p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_write_only_placement_invalid, *annotation,
                 "'@WriteOnly' cannot be applied to a foreign block; annotate a 'mut prop' member instead");
             it = annos.erase(it);
             continue;
         }
-        if (annotation->kind == AnnotationKind::REST_PARAM) {
+        if (annotation->kind == AnnotationKind::ARKTS_REST_PARAM) {
             // A block-level annotation is cloned into every member; refusing
             // it once here keeps the rule from repeating per member.
             p.diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_rest_param_on_block, *annotation);
             it = annos.erase(it);
             continue;
         }
-        if (annotation->kind == AnnotationKind::RAW_VALUE) {
+        if (annotation->kind == AnnotationKind::ARKTS_RAW_VALUE) {
             p.diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_raw_value_on_block, *annotation);
             it = annos.erase(it);
             continue;
@@ -144,10 +144,6 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
         for (auto& arg : annotation->args) {
             const auto name = arg->name.Val();
             auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
-            if (name == "foreignName") {
-                p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_block_foreign_name, *arg);
-                continue;
-            }
             // 'globalVar' is the one boolean option and applies to every
             // member of the block, so it is validated with the same kind rule
             // as a declaration-level option. The empty-value rule is about
@@ -168,7 +164,7 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
                 continue;
             }
             if (!literal || literal->kind != LitConstKind::STRING ||
-                (name != "module" && name != "namespace")) {
+                (name != "module" && name != "namespace" && name != "foreignName")) {
                 p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_invalid, *annotation);
                 continue;
             }
@@ -248,11 +244,11 @@ void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKi
                 op.CheckAnnotation(anno, scopeKind);
                 break;
             }
-            case AnnotationKind::REST_PARAM: {
+            case AnnotationKind::ARKTS_REST_PARAM: {
                 arkTS.CheckAnnotation(anno);
                 break;
             }
-            case AnnotationKind::WRITE_ONLY: {
+            case AnnotationKind::ARKTS_WRITE_ONLY: {
                 // The annotation takes no arguments; its placement on a member
                 // is validated by the ArkTS declaration pass. Without
                 // --experimental the Sema gate owns the refusal.

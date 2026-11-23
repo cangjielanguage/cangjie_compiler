@@ -87,11 +87,9 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertToChir(
     switch (ty.GetTypeKind()) {
         case Type::TYPE_TUPLE:
         case Type::TYPE_STRUCT: {
-            // A value that comes from a cjo written by an older compiler can
-            // carry a representation this compiler does not model (for example
-            // the array-backed String of an older standard library). An
-            // unchecked access aborts with std::bad_variant_access; such a
-            // value is simply not constant-foldable here.
+            // A value from a cjo written by an older compiler can carry a representation this compiler does not
+            // model (for example the array-backed String of an older standard library). An unchecked access aborts
+            // with std::bad_variant_access; such a value is simply not constant-foldable here.
             auto tuplePtr = IValUtils::GetIf<ITuple>(&val);
             if (tuplePtr == nullptr) {
                 return nullptr;
@@ -142,11 +140,9 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertStringToChir(
 {
     std::string stringVal;
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    // The String layout assumed below is the one this compiler emits. A value
-    // decoded from a cjo written by an older compiler can keep String data in
-    // a shape this compiler does not model (an object rather than an array);
-    // report that the value is not foldable instead of aborting on
-    // std::bad_variant_access.
+    // The String layout assumed below is the one this compiler emits. A value decoded from a cjo written by an older
+    // compiler can keep String data in a shape this compiler does not model (an object rather than an array);
+    // report that the value is not foldable instead of aborting on std::bad_variant_access.
     if (val.content.size() < 3) {
         return nullptr;
     }

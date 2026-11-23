@@ -78,5 +78,6 @@
     {"std.math.native", "cp"},
     {"std.math.numeric.native", "cq"},
     {"std.concurrent", "cr"},
+    {"std.interop.arkts", "cs"},
 }
 #endif

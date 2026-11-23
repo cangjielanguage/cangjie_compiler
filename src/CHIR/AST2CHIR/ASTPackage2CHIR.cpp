@@ -735,7 +735,7 @@ void AST2CHIR::CreateImportedValueSignatureAndSetGlobalCache(const AST::VarDecl&
     auto refTy = builder.GetType<RefType>(varType);
     var = builder.CreateGlobalVar(
         refTy, varDecl.mangledName, varDecl.identifier, varDecl.rawMangleName, varDecl.fullPackageName);
-    var->AppendAttributeInfo(BuildAttr(varDecl.GetAttrs()));
+    var->AppendAttributeInfo(BuildAttr(varDecl));
     if (varDecl.IsConst()) {
         var->EnableAttr(Attribute::CONST);
     }

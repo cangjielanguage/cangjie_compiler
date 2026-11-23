@@ -56,8 +56,8 @@ const Annotation* FindArkTSAnnotation(const Decl& decl)
 // them in source selects the capability and therefore the experimental gate.
 bool IsArkTSOnlyAnnotation(AnnotationKind kind)
 {
-    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::RAW_VALUE || kind == AnnotationKind::REST_PARAM ||
-        kind == AnnotationKind::WRITE_ONLY || kind == AnnotationKind::HAS_THIS;
+    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE || kind == AnnotationKind::ARKTS_REST_PARAM ||
+        kind == AnnotationKind::ARKTS_WRITE_ONLY || kind == AnnotationKind::HAS_THIS;
 }
 
 // A non-foreign entry may not declare type parameters. The parser rejects the
@@ -487,7 +487,7 @@ void DiagnoseArkTSWriteOnlyPlacement(Package& pkg, DiagnosticEngine& diag)
                     Attribute::ARKTS_INTERFACE_WRAPPER, Attribute::ARKTS_LOWERED)) {
                 return VisitAction::WALK_CHILDREN;
             }
-            Annotation* annotation = FindAnnotation(*decl, AnnotationKind::WRITE_ONLY);
+            Annotation* annotation = FindAnnotation(*decl, AnnotationKind::ARKTS_WRITE_ONLY);
             // The parser reports a malformed annotation (arguments present)
             // itself; one annotation keeps one report.
             if (annotation == nullptr || annotation->TestAttr(Attribute::IS_BROKEN)) {

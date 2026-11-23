@@ -180,23 +180,7 @@ inline bool IsDefaultImplementation(const AST::Decl& decl)
  * bodyless, C ABI, imported" must test IsExternalForeign, and a reader that
  * identifies the declaration's source kind keeps testing FOREIGN.
  */
-inline bool IsArkTSPrepared(const AST::Decl& decl)
-{
-    switch (decl.astKind) {
-        case ASTKind::FUNC_DECL:
-            return decl.TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
-        case ASTKind::CLASS_DECL:
-            // A prepared interface is an INTERFACE_DECL; the CLASS_DECL here
-            // is its generated <Interface>$arkts_impl, which carries the same
-            // marker as the interface it implements.
-            return decl.TestAttr(Attribute::ARKTS_CLASS_WRAPPER) ||
-                decl.TestAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
-        case ASTKind::INTERFACE_DECL:
-            return decl.TestAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
-        default:
-            return false;
-    }
-}
+bool IsArkTSPrepared(const AST::Decl& decl);
 
 /**
  * Whether @p decl is genuinely external: declared 'foreign' and not yet, or

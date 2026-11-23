@@ -525,7 +525,7 @@ bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vecto
     bool counterValid = true;
     auto findRawValue = [](const Decl& ctor) -> const Annotation* {
         for (auto& anno : ctor.annotations) {
-            if (anno->kind == AnnotationKind::RAW_VALUE) {
+            if (anno->kind == AnnotationKind::ARKTS_RAW_VALUE) {
                 return anno.get(); // Duplicates are rejected by the annotation check.
             }
         }
@@ -668,7 +668,7 @@ void ValidateExportedEnum(EnumDecl& decl, DiagnosticEngine& diag)
             continue;
         }
         for (auto& anno : varCtor->annotations) {
-            if (anno == nullptr || anno->kind != AnnotationKind::RAW_VALUE || anno->args.size() != 1 ||
+            if (anno == nullptr || anno->kind != AnnotationKind::ARKTS_RAW_VALUE || anno->args.size() != 1 ||
                 anno->args.front() == nullptr || anno->args.front()->expr == nullptr) {
                 continue;
             }

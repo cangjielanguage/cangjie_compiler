@@ -946,9 +946,9 @@ foreign enum Color {
     EXPECT_TRUE(ed->TestAttr(Attribute::ARKTS_LOWERED));
     EXPECT_FALSE(ed->TestAttr(Attribute::FOREIGN));
     ASSERT_EQ(ed->constructors.size(), 3);
-    EXPECT_TRUE(ed->constructors[0]->HasAnno(AnnotationKind::RAW_VALUE));
-    EXPECT_FALSE(ed->constructors[1]->HasAnno(AnnotationKind::RAW_VALUE));
-    EXPECT_TRUE(ed->constructors[2]->HasAnno(AnnotationKind::RAW_VALUE));
+    EXPECT_TRUE(ed->constructors[0]->HasAnno(AnnotationKind::ARKTS_RAW_VALUE));
+    EXPECT_FALSE(ed->constructors[1]->HasAnno(AnnotationKind::ARKTS_RAW_VALUE));
+    EXPECT_TRUE(ed->constructors[2]->HasAnno(AnnotationKind::ARKTS_RAW_VALUE));
 }
 
 // A boolean @RawValue is accepted and maps its literal spelling. The Cangjie
@@ -975,8 +975,8 @@ foreign func echo(value: Flag): Flag
     EXPECT_TRUE(ed->TestAttr(Attribute::ARKTS_LOWERED));
     EXPECT_FALSE(ed->TestAttr(Attribute::FOREIGN));
     ASSERT_EQ(ed->constructors.size(), 2);
-    EXPECT_TRUE(ed->constructors[0]->HasAnno(AnnotationKind::RAW_VALUE));
-    EXPECT_TRUE(ed->constructors[1]->HasAnno(AnnotationKind::RAW_VALUE));
+    EXPECT_TRUE(ed->constructors[0]->HasAnno(AnnotationKind::ARKTS_RAW_VALUE));
+    EXPECT_TRUE(ed->constructors[1]->HasAnno(AnnotationKind::ARKTS_RAW_VALUE));
     auto fn = FindFunction("echo");
     ASSERT_NE(fn, nullptr);
     EXPECT_NE(fn->funcBody->body, nullptr);

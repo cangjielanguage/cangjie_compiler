@@ -280,6 +280,13 @@ std::string EscapeString(const std::string& str, const std::unordered_map<char, 
 std::string StringConvertor::Recover(const std::string& str)
 {
     static const std::unordered_map<char, char> ESCAPE_LIST{{'\b', 'b'}, {'\f', 'f'}, {'\n', 'n'}, {'\r', 'r'},
+        {'\t', 't'}, {'\v', 'v'}, {'\\', '\\'}, {'\"', '"'}, {'\'', '\''}, {'\0', '0'}};
+    return EscapeString(str, ESCAPE_LIST);
+}
+
+std::string StringConvertor::RecoverForArkTSSource(const std::string& str)
+{
+    static const std::unordered_map<char, char> ESCAPE_LIST{{'\b', 'b'}, {'\f', 'f'}, {'\n', 'n'}, {'\r', 'r'},
         {'\t', 't'}, {'\v', 'v'}, {'\\', '\\'}, {'\"', '"'}, {'\'', '\''}, {'\0', '0'}, {'$', '$'}};
     return EscapeString(str, ESCAPE_LIST);
 }

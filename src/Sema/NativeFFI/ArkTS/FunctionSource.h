@@ -366,7 +366,7 @@ constexpr size_t ARKTS_NO_REST = SIZE_MAX;
 // Optional-parameter run sentinel: only a named parameter with a default
 // value (`x!: Option<T> = None`) is an ArkTS optional parameter, because only
 // it may be omitted by the caller. Sema rejects a named parameter without a
-// default before generation (user rule, 2026-11-05), so a production wrapper
+// default before generation (design §4.1.2), so a production wrapper
 // never sees `x!: Option<T>` without `= None`; a positional `Option<T>` (the
 // with-rest/open form) is a required nullable argument and is always
 // forwarded. The production path (BeforeBodyTypeCheck/LowerFunctions.cpp)

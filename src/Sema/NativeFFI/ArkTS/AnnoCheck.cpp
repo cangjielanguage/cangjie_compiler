@@ -53,7 +53,7 @@ void CheckAnnoRawValue(Decl& decl, const Annotation& anno, DiagnosticEngine& dia
         }
         const Annotation* first = nullptr;
         for (auto& other : decl.annotations) {
-            if (other->kind != AnnotationKind::RAW_VALUE) {
+            if (other->kind != AnnotationKind::ARKTS_RAW_VALUE) {
                 continue;
             }
             if (first == nullptr) {

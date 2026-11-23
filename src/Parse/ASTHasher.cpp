@@ -841,9 +841,9 @@ struct ASTHasherImpl {
             case AnnotationKind::CUSTOM:
             case AnnotationKind::FROZEN:
             case AnnotationKind::ARKTS:
-            case AnnotationKind::REST_PARAM:
-            case AnnotationKind::WRITE_ONLY:
-            case AnnotationKind::RAW_VALUE:
+            case AnnotationKind::ARKTS_REST_PARAM:
+            case AnnotationKind::ARKTS_WRITE_ONLY:
+            case AnnotationKind::ARKTS_RAW_VALUE:
                 // Entry registration, rest-parameter placement, the write-only
                 // contract and the enum value mapping change generated bodies,
                 // not the original Cangjie signature.
@@ -865,9 +865,9 @@ struct ASTHasherImpl {
             case AnnotationKind::DEPRECATED:
             case AnnotationKind::FROZEN:
             case AnnotationKind::ARKTS:
-            case AnnotationKind::REST_PARAM:
-            case AnnotationKind::WRITE_ONLY:
-            case AnnotationKind::RAW_VALUE:
+            case AnnotationKind::ARKTS_REST_PARAM:
+            case AnnotationKind::ARKTS_WRITE_ONLY:
+            case AnnotationKind::ARKTS_RAW_VALUE:
                 return true;
             case AnnotationKind::C:
             case AnnotationKind::CALLING_CONV:

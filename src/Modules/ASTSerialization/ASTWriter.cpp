@@ -1911,7 +1911,7 @@ std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& d
                 annotations.emplace_back(objc);
                 break;
             }
-            case AST::AnnotationKind::RAW_VALUE: {
+            case AST::AnnotationKind::ARKTS_RAW_VALUE: {
                 // A foreign enum member's value must survive a package boundary:
                 // the importing package rebuilds the enum value table from it.
                 auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));

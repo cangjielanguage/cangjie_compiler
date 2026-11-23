@@ -141,7 +141,7 @@ bool ArkTSParserImpl::CarriesRestParam(const FuncBody* funcBody) const
     }
     for (const auto& param : funcBody->paramLists.front()->params) {
         for (const auto& annotation : param->annotations) {
-            if (annotation->kind == AnnotationKind::REST_PARAM) {
+            if (annotation->kind == AnnotationKind::ARKTS_REST_PARAM) {
                 return true;
             }
         }
@@ -212,7 +212,7 @@ void ArkTSParserImpl::CheckRestParamPlacementImpl(const Decl& decl, const FuncBo
     bool reportedNamedParamMix = false;
     for (size_t index = 0; index < params.size(); ++index) {
         for (auto& annotation : params[index]->annotations) {
-            if (annotation->kind != AnnotationKind::REST_PARAM) {
+            if (annotation->kind != AnnotationKind::ARKTS_REST_PARAM) {
                 continue;
             }
             // The annotation takes no arguments; ParserDiag.cpp routes the

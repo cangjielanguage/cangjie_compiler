@@ -124,10 +124,10 @@ public func run(): Unit {
     // The ArkTS-only annotation kinds sit directly after ARKTS and UNKNOWN
     // stays the trailing sentinel, so the old "ARKTS + 1 == UNKNOWN" invariant
     // now reads as the adjacent steps below.
-    EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS) + 1, static_cast<int>(AnnotationKind::REST_PARAM));
-    EXPECT_EQ(static_cast<int>(AnnotationKind::REST_PARAM) + 1, static_cast<int>(AnnotationKind::WRITE_ONLY));
-    EXPECT_EQ(static_cast<int>(AnnotationKind::WRITE_ONLY) + 1, static_cast<int>(AnnotationKind::RAW_VALUE));
-    EXPECT_EQ(static_cast<int>(AnnotationKind::RAW_VALUE) + 1, static_cast<int>(AnnotationKind::HAS_THIS));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS) + 1, static_cast<int>(AnnotationKind::ARKTS_REST_PARAM));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_REST_PARAM) + 1, static_cast<int>(AnnotationKind::ARKTS_WRITE_ONLY));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_WRITE_ONLY) + 1, static_cast<int>(AnnotationKind::ARKTS_RAW_VALUE));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_RAW_VALUE) + 1, static_cast<int>(AnnotationKind::HAS_THIS));
     EXPECT_EQ(static_cast<int>(AnnotationKind::HAS_THIS) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
 }
 
@@ -466,7 +466,7 @@ type Alias = Int64
     ASSERT_EQ(file->decls.size(), 1);
     auto& alias = *file->decls.front();
     ASSERT_EQ(alias.annotations.size(), 1);
-    EXPECT_EQ(alias.annotations.front()->kind, AnnotationKind::REST_PARAM);
+    EXPECT_EQ(alias.annotations.front()->kind, AnnotationKind::ARKTS_REST_PARAM);
     const auto withAnnotation = ASTHasher::SigHash(alias);
     const auto withAnnotationBody = ASTHasher::BodyHash(alias, {false, false});
     (void)ASTHasher::SrcUseHash(alias);
@@ -485,7 +485,7 @@ foreign func sum(base: Float64, @RestParam nums: Array<Float64>): Float64
     auto& sum = StaticCast<FuncDecl&>(*function->decls.front());
     ASSERT_EQ(sum.funcBody->paramLists[0]->params.size(), 2);
     ASSERT_EQ(sum.funcBody->paramLists[0]->params[1]->annotations.size(), 1);
-    EXPECT_EQ(sum.funcBody->paramLists[0]->params[1]->annotations.front()->kind, AnnotationKind::REST_PARAM);
+    EXPECT_EQ(sum.funcBody->paramLists[0]->params[1]->annotations.front()->kind, AnnotationKind::ARKTS_REST_PARAM);
     auto plainFunction = ParseKeepingDiagnostics(R"(@ArkTS[module: "actual"]
 foreign func sum(base: Float64, nums: Array<Float64>): Float64
 )");
@@ -911,34 +911,42 @@ foreign {
     }
 }
 
-// A foreign block is a parser-only construct whose @ArkTS options are cloned
-// into every member. foreignName names one declaration's ArkTS member and has
-// no block-wide meaning, so it is rejected on the block and removed before
-// cloning.
-TEST_F(ArkTSEntryTest, ForeignNameOnForeignBlockIsRejected)
+// A foreign block is a parser-only construct whose @ArkTS options are merged
+// into every member option by option. foreignName is a valid block default,
+// because a block may hold a single declaration.
+TEST_F(ArkTSEntryTest, ForeignNameOnForeignBlockIsClonedToMembers)
 {
     auto file = ParseKeepingDiagnostics(R"(@ArkTS[module: "actual", foreignName: "blockName"]
 foreign {
     func echo(): Unit
 }
 )");
-    // The block option is reported and removed before it is cloned into the
-    // member; the member keeps the block's module default only. Pin the
-    // dedicated diagnostic instead of accepting any error: a different parse
-    // failure would leave the block option behind and still pass a mere
-    // error-count check.
-    const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::SEMA);
-    EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
-                  [](const auto& diagnostic) {
-                      return diagnostic.rKind == DiagKindRefactor::sema_arkts_foreign_block_foreign_name;
-                  }),
-        1);
+    EXPECT_EQ(diag.GetErrorCount(), 0);
     ASSERT_NE(file, nullptr);
     ASSERT_EQ(file->decls.size(), 1);
     std::unordered_map<std::string, std::string> options;
     ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
     EXPECT_EQ(options.at("module"), "actual");
-    EXPECT_EQ(options.count("foreignName"), 0U);
+    EXPECT_EQ(options.at("foreignName"), "blockName");
+}
+
+// Options merge one by one, and a declaration-level value wins over the block
+// default for the same option.
+TEST_F(ArkTSEntryTest, DeclarationForeignNameOverridesBlockDefault)
+{
+    auto file = ParseKeepingDiagnostics(R"(@ArkTS[module: "actual", foreignName: "blockName"]
+foreign {
+    @ArkTS[foreignName: "memberName"]
+    func echo(): Unit
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(file->decls.size(), 1);
+    std::unordered_map<std::string, std::string> options;
+    ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
+    EXPECT_EQ(options.at("module"), "actual");
+    EXPECT_EQ(options.at("foreignName"), "memberName");
 }
 
 // A block annotation is cloned into every member, so invalid options are
@@ -1507,8 +1515,8 @@ foreign func sum(base: Float64, @RestParam nums: Array<Float64>): Float64
     ASSERT_EQ(params.size(), 2);
     EXPECT_TRUE(params[0]->annotations.empty());
     ASSERT_EQ(params[1]->annotations.size(), 1);
-    EXPECT_EQ(params[1]->annotations.front()->kind, AnnotationKind::REST_PARAM);
-    EXPECT_EQ(AnnotationKindToString(AnnotationKind::REST_PARAM), "RestParam");
+    EXPECT_EQ(params[1]->annotations.front()->kind, AnnotationKind::ARKTS_REST_PARAM);
+    EXPECT_EQ(AnnotationKindToString(AnnotationKind::ARKTS_REST_PARAM), "RestParam");
 }
 
 TEST_F(ArkTSEntryTest, RestParamWrapperSpreadsCopyItemsIntoCallArguments)
@@ -1660,7 +1668,7 @@ foreign {
     auto& params = fd.funcBody->paramLists.front()->params;
     ASSERT_EQ(params.size(), 2);
     ASSERT_EQ(params[1]->annotations.size(), 1);
-    EXPECT_EQ(params[1]->annotations.front()->kind, AnnotationKind::REST_PARAM);
+    EXPECT_EQ(params[1]->annotations.front()->kind, AnnotationKind::ARKTS_REST_PARAM);
 }
 
 TEST_F(ArkTSEntryTest, RestParamWithArgumentsIsRejected)
@@ -1844,7 +1852,7 @@ foreign class Queue {
     auto& params = fd.funcBody->paramLists.front()->params;
     ASSERT_EQ(params.size(), 1);
     ASSERT_EQ(params.front()->annotations.size(), 1);
-    EXPECT_EQ(params.front()->annotations.front()->kind, AnnotationKind::REST_PARAM);
+    EXPECT_EQ(params.front()->annotations.front()->kind, AnnotationKind::ARKTS_REST_PARAM);
 }
 
 TEST_F(ArkTSEntryTest, RestParamOnAnArkTSForeignInterfaceMemberIsAccepted)
@@ -1867,7 +1875,7 @@ foreign interface Listener {
     auto& params = fd.funcBody->paramLists.front()->params;
     ASSERT_EQ(params.size(), 1);
     ASSERT_EQ(params.front()->annotations.size(), 1);
-    EXPECT_EQ(params.front()->annotations.front()->kind, AnnotationKind::REST_PARAM);
+    EXPECT_EQ(params.front()->annotations.front()->kind, AnnotationKind::ARKTS_REST_PARAM);
 }
 
 TEST_F(ArkTSEntryTest, RestParamFollowedByNamedParametersIsRejected)
@@ -2155,7 +2163,7 @@ foreign class Bag {
     auto& params = ctor.funcBody->paramLists.front()->params;
     ASSERT_EQ(params.size(), 1);
     ASSERT_EQ(params.front()->annotations.size(), 1);
-    EXPECT_EQ(params.front()->annotations.front()->kind, AnnotationKind::REST_PARAM);
+    EXPECT_EQ(params.front()->annotations.front()->kind, AnnotationKind::ARKTS_REST_PARAM);
 }
 
 TEST_F(ArkTSEntryTest, RestParamOnANonFinalInitParameterIsRejected)
@@ -2372,7 +2380,7 @@ std::vector<Ptr<FuncParam>> RestParamsOf(ClassDecl& cd)
         }
         for (const auto& param : fd->funcBody->paramLists.front()->params) {
             if (std::any_of(param->annotations.begin(), param->annotations.end(),
-                    [](const auto& anno) { return anno->kind == AnnotationKind::REST_PARAM; })) {
+                    [](const auto& anno) { return anno->kind == AnnotationKind::ARKTS_REST_PARAM; })) {
                 rest.push_back(param.get());
             }
         }

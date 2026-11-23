@@ -22,7 +22,7 @@ void ArkTSParserImpl::CheckAnnotation(Annotation& anno) const
         return;
     }
     switch (anno.kind) {
-        case AnnotationKind::REST_PARAM: {
+        case AnnotationKind::ARKTS_REST_PARAM: {
             // @RestParam belongs to a parameter, never to the declaration
             // itself; the annotation is marked broken so nothing downstream
             // can treat the misplaced annotation as meaningful.

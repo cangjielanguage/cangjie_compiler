@@ -108,7 +108,7 @@ AnnoCheckMap& GetAnnoCheckMap()
         {AnnotationKind::CALLING_CONV, CheckAnnoCallingConv},
         {AnnotationKind::FASTNATIVE, CheckAnnoFastNative},
         {AnnotationKind::FROZEN, CheckAnnoFrozen},
-        {AnnotationKind::RAW_VALUE, Native::FFI::ArkTS::CheckAnnoRawValue},
+        {AnnotationKind::ARKTS_RAW_VALUE, Native::FFI::ArkTS::CheckAnnoRawValue},
     };
     return annoCheckMap;
 }

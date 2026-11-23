@@ -2200,7 +2200,7 @@ public foreign open class Person {
     EXPECT_TRUE(HasErrorContaining("optional parameter cannot be used in 'open' function"));
 }
 
-// The WRITE_ONLY annotation has no CJO annotation record, so class preparation
+// The ARKTS_WRITE_ONLY annotation has no CJO annotation record, so class preparation
 // carries the contract in an attribute; an importing package must still get
 // the write-only read diagnostic instead of a silent read.
 TEST_F(ArkTSForeignDiagTest, ForeignClassWriteOnlySurvivesCjoRoundTrip)

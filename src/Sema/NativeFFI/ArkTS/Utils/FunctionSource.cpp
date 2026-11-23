@@ -204,7 +204,7 @@ bool ArkTSFuncBodyHasRestParam(const FuncBody& body)
                 continue;
             }
             if (std::any_of(param->annotations.begin(), param->annotations.end(), [](const auto& annotation) {
-                    return annotation->kind == AnnotationKind::REST_PARAM;
+                    return annotation->kind == AnnotationKind::ARKTS_REST_PARAM;
                 })) {
                 return true;
             }
@@ -242,7 +242,7 @@ size_t ArkTSRestPosition(const std::vector<Ptr<FuncParam>>& params, size_t scann
     auto restIndex = ARKTS_NO_REST;
     for (size_t i = 0; i < scanned; ++i) {
         for (auto& annotation : params[i]->annotations) {
-            if (annotation->kind == AnnotationKind::REST_PARAM && !params[i]->isNamedParam) {
+            if (annotation->kind == AnnotationKind::ARKTS_REST_PARAM && !params[i]->isNamedParam) {
                 restIndex = i;
             }
         }
@@ -406,12 +406,12 @@ bool ArkTSWriteOnlyProp(const Decl& decl)
 {
     // The annotation identifies a source declaration; the attribute carries
     // the same contract through the CJO round trip, because the annotation
-    // kinds serialized by ASTWriter do not include WRITE_ONLY.
+    // kinds serialized by ASTWriter do not include ARKTS_WRITE_ONLY.
     if (decl.TestAttr(Attribute::ARKTS_WRITE_ONLY_PROP)) {
         return true;
     }
     for (auto& annotation : decl.annotations) {
-        if (annotation->kind == AnnotationKind::WRITE_ONLY) {
+        if (annotation->kind == AnnotationKind::ARKTS_WRITE_ONLY) {
             return true;
         }
     }
@@ -482,8 +482,8 @@ bool IsGatedArkTSDecl(const Decl& decl)
             }
             for (const auto& anno : param->annotations) {
                 if (anno != nullptr &&
-                    (anno->kind == AnnotationKind::ARKTS || anno->kind == AnnotationKind::RAW_VALUE ||
-                        anno->kind == AnnotationKind::REST_PARAM || anno->kind == AnnotationKind::WRITE_ONLY)) {
+                    (anno->kind == AnnotationKind::ARKTS || anno->kind == AnnotationKind::ARKTS_RAW_VALUE ||
+                        anno->kind == AnnotationKind::ARKTS_REST_PARAM || anno->kind == AnnotationKind::ARKTS_WRITE_ONLY)) {
                     return true;
                 }
             }
@@ -1138,7 +1138,8 @@ struct ArkTSValueEmitter {
                 }
                 std::string converted;
                 if (member.kind == ArkTSEnumValueKind::STRING) {
-                    converted = ctx + ".string(\"" + StringConvertor::Recover(member.value) + "\").toJSValue()";
+                    converted =
+                        ctx + ".string(\"" + StringConvertor::RecoverForArkTSSource(member.value) + "\").toJSValue()";
                 } else if (member.kind == ArkTSEnumValueKind::BOOLEAN) {
                     converted = ctx + ".boolean(" + member.value + ").toJSValue()";
                 } else {
@@ -1390,7 +1391,7 @@ struct ArkTSValueEmitter {
                     case ArkTSEnumValueKind::STRING:
                         noteKind(value + ".isString()");
                         return value + ".isString() && " + value + ".asString().toString() == \"" +
-                            StringConvertor::Recover(member.value) + "\"";
+                            StringConvertor::RecoverForArkTSSource(member.value) + "\"";
                     case ArkTSEnumValueKind::BOOLEAN:
                         noteKind(value + ".isBoolean()");
                         return value + ".isBoolean() && " + value + ".toBoolean() == " + member.value;

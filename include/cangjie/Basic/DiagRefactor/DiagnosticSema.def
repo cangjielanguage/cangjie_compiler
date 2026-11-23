@@ -474,10 +474,6 @@ ERROR(sema_arkts_option_invalid,
     "boolean option 'globalVar'")
 ERROR(sema_arkts_option_duplicated,
     "duplicated option '%s' in '@ArkTS'")
-// A block option is cloned into every member, so a name that identifies one
-// declaration cannot be expressed at block level.
-ERROR(sema_arkts_foreign_block_foreign_name,
-    "'foreignName' option cannot be used on an '@ArkTS' foreign block; declare it on the member")
 ERROR(sema_arkts_foreign_module_empty,
     "'module' option of @ArkTS foreign function '%s' must not be an empty string")
 ERROR(sema_arkts_foreign_name_empty,
@@ -501,7 +497,7 @@ ERROR(sema_arkts_namespace_invalid,
 ERROR(sema_arkts_foreign_rest_type_unsupported,
     "rest parameter '%s' of @ArkTS foreign function '%s' must have type 'Array<T>', not '%s'")
 // Every named parameter ('x!:') of an @ArkTS foreign declaration must carry a
-// default value (user rule, 2026-11-05). The generated wrapper cannot tell an
+// default value (design §4.1.2). The generated wrapper cannot tell an
 // omitted named argument from an explicitly passed value, so `x!: Option<T>`
 // without `= None` (and any other named parameter without a default) is
 // rejected before a wrapper is generated. The rule covers both top-level
