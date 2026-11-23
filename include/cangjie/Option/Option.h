@@ -669,6 +669,19 @@ public:
     std::optional<bool> emitStaticLibInLTO = std::nullopt;
 
     /**
+     * @brief Checks whether the std module is statically linked.
+     *
+     * Static std is enabled by '--static-std', disabled by '--dy-std', and by
+     * default enabled for non-shared-library outputs.
+     *
+     * @return bool Returns true if std libraries are statically linked.
+     */
+    bool IsStaticStdLink() const
+    {
+        return linkStaticStd.value_or(outputMode != OutputMode::SHARED_LIB);
+    }
+
+    /**
      * @brief Checks whether LTO is enabled.
      *
      * @return bool Returns true if LTO is enabled, otherwise returns false.
