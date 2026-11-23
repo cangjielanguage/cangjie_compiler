@@ -38,7 +38,12 @@ bool IsInExclave(const Expression& expr)
     CJC_NULLPTR_CHECK(blockGroup);
     auto owner = blockGroup->GetOwnerExpression();
     if (owner == nullptr) {
-        return false;
+        auto func = blockGroup->GetOwnerFunc();
+        return func != nullptr && func->TestAttr(Attribute::EXCLAVE);
+    }
+    if (auto lambda = DynamicCast<Lambda*>(owner)) {
+        // An exclave belongs to its innermost function, not to functions nested inside it.
+        return lambda->TestAttr(Attribute::EXCLAVE);
     }
     if (Cangjie::Is<Exclave>(owner)) {
         return true;
@@ -140,10 +145,17 @@ void SetMemRegion::RunOnPackage(const Package& package)
 std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(const Function& func) const
 {
     std::unordered_set<BlockGroup*> scopeNeedsRegion;
-    Visitor::Visit(*func.GetBody(), [&scopeNeedsRegion](Expression& expr) -> VisitResult {
-        if (Is<Exclave>(expr)) {
-            return VisitResult::SKIP;
-        } else if (Is<FuncCall>(expr)) {
+    std::unordered_set<BlockGroup*> exclaveBodies;
+    if (func.TestAttr(Attribute::EXCLAVE)) {
+        exclaveBodies.emplace(func.GetBody());
+    }
+    Visitor::Visit(*func.GetBody(), [&scopeNeedsRegion, &exclaveBodies](Expression& expr) -> VisitResult {
+        // Skip allocations in this function's exclave, but still visit nested functions.
+        // Lambdas need their own region analysis even when declared inside an exclave.
+        if (!Is<Lambda>(expr) && IsInExclave(expr)) {
+            return VisitResult::CONTINUE;
+        }
+        if (Is<FuncCall>(expr)) {
             // 1. function call where the callee return type does not implement `Copyable` and has mode
             // `local!` or `local?`
             if (expr.GetResult()->GetType()->StripAllRefs()->IsLocalRegion()) {
@@ -176,6 +188,9 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
                 return VisitResult::CONTINUE;
             }
         } else if (auto lambda = DynamicCast<Lambda*>(&expr)) {
+            if (lambda->TestAttr(Attribute::EXCLAVE)) {
+                exclaveBodies.emplace(lambda->GetBody());
+            }
             // 4. lambda where the captured variables are not `Copyable` and have mode `local!` or `local?`
             for (auto var : lambda->GetCapturedVariables()) {
                 if (var->GetType()->StripAllRefs()->IsLocalRegion()) {
@@ -188,7 +203,7 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
             }
             // 5. lambda where the function type is `local!` or `local?`.
             // Although a lambda's type cannot be `local!`, still use IsLocalRegion here.
-            if (lambda->GetFuncType()->IsLocalRegion()) {
+            if (lambda->GetFuncType()->IsLocalRegion() && !IsInExclave(expr)) {
                 auto body = expr.GetResult()->GetFuncOrLambdaBody();
                 CJC_NULLPTR_CHECK(body);
                 scopeNeedsRegion.emplace(body);
@@ -213,8 +228,10 @@ std::unordered_set<BlockGroup*> SetMemRegion::CollectFunctionRegionBlockGroup(co
         }
         return VisitResult::CONTINUE;
     });
-    if (func.TestAttr(Attribute::EXCLAVE)) {
-        scopeNeedsRegion.erase(func.GetBody());
+    // Nested calls and captured-variable chains can request a region for an exclave body.
+    // Remove these bodies only after visiting all lambdas, preserving regions in their nested functions.
+    for (auto body : exclaveBodies) {
+        scopeNeedsRegion.erase(body);
     }
     return scopeNeedsRegion;
 }
@@ -268,6 +285,10 @@ void SetMemRegion::FlattenExclave(Function& func)
         return VisitResult::CONTINUE;
     };
     auto postVisit = [this](Expression& e) -> VisitResult {
+        if (auto lambda = DynamicCast<Lambda*>(&e)) {
+            lambda->DisableAttr(Attribute::EXCLAVE);
+            return VisitResult::CONTINUE;
+        }
         if (!Is<Exclave>(e)) {
             return VisitResult::CONTINUE;
         }

@@ -1683,7 +1683,7 @@ void CHIRChecker::CheckBlockGroup(const BlockGroup& blockGroup, const Function& 
 
 void CHIRChecker::CheckShouldNotHaveRegionExpr(const BlockGroup& blockGroup, const Function& topLevelFunc)
 {
-    // An exclave function body and an Exclave expression body are one block group each. They must
+    // An exclave function/lambda body and an Exclave expression body are one block group each. They must
     // not contain StartRegion or EndRegion. A lambda nested inside them is another block group and
     // is not part of this check.
     auto rejectRegion = [this, &blockGroup, &topLevelFunc](const std::string& where) {
@@ -1699,9 +1699,12 @@ void CHIRChecker::CheckShouldNotHaveRegionExpr(const BlockGroup& blockGroup, con
     if (auto ownerFunc = blockGroup.GetOwnerFunc(); ownerFunc != nullptr &&
         ownerFunc->TestAttr(Attribute::EXCLAVE)) {
         rejectRegion("an exclave function body");
-    } else if (auto ownerExpr = blockGroup.GetOwnerExpression(); ownerExpr != nullptr &&
-        Is<Exclave>(ownerExpr)) {
-        rejectRegion("an exclave expression body");
+    } else if (auto ownerExpr = blockGroup.GetOwnerExpression(); ownerExpr != nullptr) {
+        if (Is<Exclave>(ownerExpr)) {
+            rejectRegion("an exclave expression body");
+        } else if (Is<Lambda>(ownerExpr) && ownerExpr->TestAttr(Attribute::EXCLAVE)) {
+            rejectRegion("an exclave lambda body");
+        }
     }
 }
 
