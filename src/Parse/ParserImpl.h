@@ -838,9 +838,10 @@ private:
     void CheckAnnotationAnno(PtrVector<AST::Annotation>& annos, const OwnedPtr<AST::Decl>& decl);
     // The trailing flag restricts the @ArkTS relaxation: it is true only for
     // declarations carrying the @ArkTS annotation (computed by the
-    // class/interface handlers), and makes GetModifierAttrs skip exactly the
-    // access-modifier x FOREIGN conflict pair. The default keeps every other
-    // caller unchanged.
+    // class/interface/function handlers), and makes GetModifierAttrs skip the
+    // access-modifier x FOREIGN conflict pair; on a function PRIVATE x FOREIGN
+    // still conflicts, because a private foreign declaration is forbidden. The
+    // default keeps every other caller unchanged.
     std::set<AST::Attribute> CheckDeclModifiers(const std::set<AST::Modifier>& modifiers, ScopeKind scopeKind,
         DefKind defKind, bool arktsAnnotated = false);
     AST::Attribute GetModifierAttr(const OwnedPtr<AST::Modifier>& modifier, AST::ASTKind kind) const;
@@ -1072,8 +1073,9 @@ private:
     bool SeeingPrimitiveType();
 
     // Cangjie Native & Java/ObjC FFI
-    void CheckObjCMirrorAnnotation(AST::Annotation& anno) const;
     void CheckRawValueAnnotation(const AST::Annotation& anno);
+    // '@HasThis[TypeName]' accepts exactly one unnamed type reference.
+    void CheckHasThisAnnotation(AST::Annotation& anno);
     // Check whether member decl can be abstract
     bool CanBeAbstract(const AST::Decl& decl, ScopeKind scopeKind) const;
     void CheckConstructorBody(AST::FuncDecl& ctor, ScopeKind scopeKind, bool inMacro = false);

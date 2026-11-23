@@ -294,6 +294,9 @@ constexpr const char* ARKTS_CONTEXT_CURRENT = "__cj_arkts_current";
 // same-named user declaration cannot capture them.
 constexpr const char* ARKTS_INTEROP_PACKAGE = "ark_interop";
 constexpr const char* ARKTS_CONTEXT_ABI_PACKAGE = "cj_arkts_context_v1";
+// The package hosting the preset interop types. Its declarations keep the
+// generic external form; the same shape in a user package is refused.
+constexpr const char* ARKTS_PRESET_PACKAGE = "std.interop.arkts";
 
 // Runtime failure contract of generated wrappers. A target that does not
 // resolve, a target that is not callable and an ArkTS-side throw all surface
@@ -302,6 +305,9 @@ constexpr const char* ARKTS_CONTEXT_ABI_PACKAGE = "cj_arkts_context_v1";
 // BusinessException, and only its "outside error / ArkTS exception" code is
 // translated; every other library failure keeps its code and message.
 constexpr const char* ARKTS_RUNTIME_EXCEPTION = "ForeignRuntimeException";
+// Private alias the injected import binds for the conversion exception in a
+// generated global-variable getter (a bare name is ambiguous with std.core).
+constexpr const char* ARKTS_CONVERSION_ALIAS = "__cj_arkts_extern_conversion";
 constexpr const char* ARKTS_BUSINESS_EXCEPTION = "BusinessException";
 // The facade that hosts the generated wrappers' support types, and the package
 // that declares the re-exported library carrier.
@@ -317,6 +323,22 @@ constexpr const char* ARKTS_LIBRARY_ARKTS_THROW = "0";
 // One generated string literal: the single quoting point shared by the
 // wrapper generators and the variable lowering path.
 std::string ArkTSStringLiteral(const std::string& text);
+
+// Sentinel prefix of every compiler-generated placeholder literal. The
+// generated-body rebinding walkers replace a literal only when it carries this
+// prefix, so a user string value that happens to equal a placeholder name
+// (for example @RawValue["__module__"]) maps verbatim. Generated placeholders
+// go through ArkTSPlaceholderLiteral; user values never do.
+constexpr const char* ARKTS_PLACEHOLDER_LITERAL_PREFIX = "__cj_arkts_literal__";
+// Quote a placeholder as one generated string literal carrying the sentinel
+// prefix above.
+std::string ArkTSPlaceholderLiteral(const std::string& text);
+// Rebind one generated literal: when @p value is a prefixed placeholder whose
+// key is in @p literals, write the mapped text to @p rebound and return true.
+// An unprefixed user value and a prefixed value with no map entry return false
+// and stay verbatim.
+bool ArkTSRebindPlaceholderLiteral(const std::string& value,
+    const std::unordered_map<std::string, std::string>& literals, std::string& rebound);
 
 // One generated namespace-segment resolution with a precise failure:
 //   let <value> = <receiver>.getProperty("<ns_i>")
@@ -401,6 +423,24 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     size_t namespaceDepth, const std::string& prefix, size_t restIndex,
     ArkTSReceiverKind receiver = ArkTSReceiverKind::MODULE, size_t optionalStart = ARKTS_DERIVE_OPTIONAL,
     std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs = nullptr);
+
+// Body of a `@ArkTS[globalVar: true] foreign func`: a module (or global
+// object) property read converted to the declared return type with the same
+// FromJS conversion the function wrapper uses, so every ArkTS-compatible
+// return type (scalar, Option, Array, tuple, foreign class/interface, foreign
+// enum) maps here instead of only the scalar table.
+// The read resolves the named export through the shared export guard (a
+// missing target throws ForeignRuntimeException) and is translated with the
+// shared call translation (an ArkTS-side throw reaches the caller as
+// ForeignRuntimeException); a Nothing result is the never contract and ends in
+// the runtime-exception throw. Returns "" when the description is not
+// generatable or carries a reference without a class-binding map.
+// Before: @ArkTS[globalVar: true] foreign func count(): Int32
+// After:  func __generated() { ctx = current(); m = requireArkModule(...)
+//         value = guarded getProperty("__name__"); return FromJS(value) }
+std::string ArkTSGlobalVariableGetterSource(const ArkTSTypeDesc& valueType, size_t namespaceDepth,
+    const std::string& prefix, ArkTSReceiverKind receiver,
+    std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs);
 
 // ---- Foreign class member generation ----
 // Compiler-owned member names of a lowered foreign class. A class owns one
@@ -494,6 +534,7 @@ std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, co
 //   get: value = self.getProperty(key); return None or Some(fromJS(value))
 //   set: self.setProperty(key, toJS(argument_1))
 std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTSTypeDesc& valueType, bool setter,
-    const std::string& prefix, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+    const std::string& prefix, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs,
+    const std::string& ownerKind = "interface");
 } // namespace Cangjie::Native::FFI::ArkTS
 #endif

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <functional>
 #include <unordered_set>
 
 #include "cangjie/AST/Match.h"
@@ -501,10 +502,6 @@ bool IsArkTSPreparedInterface(const Decl& decl)
     return decl.astKind == ASTKind::INTERFACE_DECL && decl.TestAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
 }
 
-namespace {
-constexpr const char* ARKTS_PRESET_PACKAGE = "std.interop.arkts";
-} // namespace
-
 bool IsArkTSForeignInterface(const InterfaceDecl& id)
 {
     // The stdlib presets keep their external declaration form, matching the
@@ -794,10 +791,11 @@ static constexpr const char* const ARKTS_OPTION = "Option";
 static constexpr const char* const ARKTS_MISMATCH = "ArkTS type mismatch: ";
 static constexpr const char* const ARKTS_INVALID = "ArkTS value invalid: ";
 
-// A never-typed position is a contract violation rather than a conversion
-// failure, so it keeps the plain violation throw and bypasses the
-// conversion exception indirection.
-static constexpr const char* const ARKTS_NEVER_EXCEPTION = "Exception";
+// A never-typed position that unexpectedly produces a value is an ArkTS
+// runtime failure (Appendix B: an ArkTS-side failure reaches Cangjie as
+// ForeignRuntimeException), not a value conversion, so it bypasses the
+// conversion exception.
+static constexpr const char* const ARKTS_NEVER_EXCEPTION = ARKTS_RUNTIME_EXCEPTION;
 static constexpr const char* const ARKTS_NEVER_MESSAGE = "ArkTS never function returned";
 
 static std::string ArkTSConversionThrow(const std::string& reason, const std::string& indent)
@@ -821,6 +819,16 @@ static std::string ArkTSLiteral(const std::string& text)
     return "\"" + text + "\"";
 }
 
+// Placeholder literals carry a compiler-owned sentinel prefix so the rebinding
+// walkers can tell them apart from a user string value that happens to equal a
+// placeholder name (for example @RawValue["__module__"], which the wrapper
+// emits as an ordinary string literal). Only this helper adds the prefix;
+// ArkTSStringLiteral and ArkTSLiteral quote user-facing text verbatim.
+static std::string ArkTSPlaceholderLiteralImpl(const std::string& text)
+{
+    return ArkTSLiteral(std::string(ARKTS_PLACEHOLDER_LITERAL_PREFIX) + text);
+}
+
 // "ArkTS foreign <kind> '<name>'" as a generated string expression.
 static std::string ArkTSFailureContext(const std::string& kind, const std::string& name)
 {
@@ -833,8 +841,8 @@ static std::string ArkTSMemberFailureContext(const std::string& kind, const std:
     const std::string& member)
 {
     return ArkTSLiteral("ArkTS foreign " + kind + " '") + " + " + owner + " + " + ArkTSLiteral("' member '") + " + " +
-        member + " + " + ArkTSLiteral("' in module '") + " + " + ArkTSLiteral(ARKTS_PLACEHOLDER_MODULE) + " + " +
-        ArkTSLiteral("'");
+        member + " + " + ArkTSLiteral("' in module '") + " + " + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MODULE) +
+        " + " + ArkTSLiteral("'");
 }
 
 // The locator of a named target: the module specifier, or the global object for
@@ -844,7 +852,8 @@ static std::string ArkTSFailureLocator(bool globalReceiver)
     if (globalReceiver) {
         return ArkTSLiteral("the global object");
     }
-    return ArkTSLiteral("module '") + " + " + ArkTSLiteral(ARKTS_PLACEHOLDER_MODULE) + " + " + ArkTSLiteral("'");
+    return ArkTSLiteral("module '") + " + " + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MODULE) + " + " +
+        ArkTSLiteral("'");
 }
 
 static std::string ArkTSRuntimeThrow(const std::string& messageExpr, const std::string& indent)
@@ -855,7 +864,7 @@ static std::string ArkTSRuntimeThrow(const std::string& messageExpr, const std::
 // One namespace placeholder literal.
 static std::string ArkTSNamespaceSegment(size_t index)
 {
-    return ArkTSLiteral(std::string(ARKTS_PLACEHOLDER_NAMESPACE) + std::to_string(index) + "__");
+    return ArkTSPlaceholderLiteralImpl(std::string(ARKTS_PLACEHOLDER_NAMESPACE) + std::to_string(index) + "__");
 }
 
 // A dotted namespace path as a generated string expression: segments
@@ -887,10 +896,14 @@ static std::string ArkTSNamespaceGuard(const std::string& receiver, const std::s
         "let " + next + " = " + value + ".asObject()\n";
 }
 
+static std::string ArkTSCallTranslation(const std::string& callExpr, const std::string& context,
+    const std::string& error, const std::string& indent);
+
 // Named export resolution with a precise missing-export error. The value stays
 // a JSValue so the caller can check callability before use.
 static std::string ArkTSExportGuard(const std::string& receiver, const std::string& target, const std::string& name,
-    const std::string& context, bool globalReceiver, const std::string& indent, size_t namespaceDepth = 0)
+    const std::string& context, bool globalReceiver, const std::string& indent, size_t namespaceDepth = 0,
+    const std::string& error = {})
 {
     auto message = context + " + " + ArkTSLiteral(": ") + " + " + ArkTSFailureLocator(globalReceiver) +
         " + " + ArkTSLiteral(" has no export '") + " + " + name + " + " + ArkTSLiteral("'");
@@ -900,7 +913,15 @@ static std::string ArkTSExportGuard(const std::string& receiver, const std::stri
         message += " + " + ArkTSLiteral(" in namespace '") + ArkTSNamespacePath(0, namespaceDepth) + " + " +
             ArkTSLiteral("'");
     }
-    return indent + "let " + target + " = " + receiver + ".getProperty(" + name + ")\n" + indent + "if (" + target +
+    // `error` selects the translated read form: the property access itself may
+    // run an ArkTS getter that throws, so the variable getter wraps it with the
+    // shared call translation. A caller without an error local (the function
+    // and class wrappers, whose target is then called) keeps the plain read.
+    std::string read = receiver + ".getProperty(" + name + ")";
+    if (!error.empty()) {
+        read = ArkTSCallTranslation(read, context, error, indent);
+    }
+    return indent + "let " + target + " = " + read + "\n" + indent + "if (" + target +
         ".isUndefined()) {\n" + ArkTSRuntimeThrow(message, indent + "    ") + indent + "}\n";
 }
 
@@ -1270,98 +1291,35 @@ struct ArkTSValueEmitter {
             auto throwInline = [](const std::string& reason) {
                 return std::string("throw ") + ARKTS_CONVERSION_EXCEPTION + "(\"" + reason + "\")";
             };
-            auto ctorRef = [&](const std::string& memberName) { return slot + "." + memberName; };
-            auto numberChain = [&](const std::string& numberVar) {
-                std::string chain = "(";
-                bool first = true;
-                for (const auto& member : desc.enumMembers) {
-                    if (member.kind != ArkTSEnumValueKind::NUMBER) {
-                        continue;
-                    }
-                    chain += (first ? "if (" : " else if (") + numberVar + " == Float64(" + member.value +
-                        ")) { " + ctorRef(member.name) + " }";
-                    first = false;
+            // Runtime matching follows design §7.2: constructors are tried in
+            // declaration order, a literal matches by value and a payload by
+            // its mapped type, and the first match wins. A literal that does
+            // not match must fall through to later constructors of the same
+            // kind; throwing inside the literal branch would make a same-kind
+            // payload unreachable.
+            std::vector<std::string> kindPredicates;
+            auto noteKind = [&kindPredicates](const std::string& predicate) {
+                if (predicate.empty() || predicate == "true" || predicate == "false") {
+                    return;
                 }
-                chain += " else { " + throwInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + " })";
-                return chain;
+                if (std::find(kindPredicates.begin(), kindPredicates.end(), predicate) == kindPredicates.end()) {
+                    kindPredicates.push_back(predicate);
+                }
             };
-            auto stringChain = [&](const std::string& stringVar) {
-                std::string chain = "(";
-                bool first = true;
-                for (const auto& member : desc.enumMembers) {
-                    if (member.kind != ArkTSEnumValueKind::STRING) {
-                        continue;
-                    }
-                    chain += (first ? "if (" : " else if (") + stringVar + " == \"" +
-                        StringConvertor::Recover(member.value) + "\") { " + ctorRef(member.name) + " }";
-                    first = false;
-                }
-                chain += " else { " + throwInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + " })";
-                return chain;
-            };
-            auto booleanChain = [&](const std::string& booleanVar) {
-                std::string chain = "(";
-                bool first = true;
-                for (const auto& member : desc.enumMembers) {
-                    if (member.kind != ArkTSEnumValueKind::BOOLEAN) {
-                        continue;
-                    }
-                    chain += (first ? "if (" : " else if (") + booleanVar + " == " + member.value +
-                        ") { " + ctorRef(member.name) + " }";
-                    first = false;
-                }
-                chain += " else { " + throwInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + " })";
-                return chain;
-            };
-            bool hasNumber = false;
-            bool hasString = false;
-            bool hasBoolean = false;
-            std::vector<const ArkTSEnumMember*> payloads;
-            for (const auto& member : desc.enumMembers) {
-                if (member.kind == ArkTSEnumValueKind::NUMBER) {
-                    hasNumber = true;
-                } else if (member.kind == ArkTSEnumValueKind::STRING) {
-                    hasString = true;
-                } else if (member.kind == ArkTSEnumValueKind::BOOLEAN) {
-                    hasBoolean = true;
-                } else if (member.kind == ArkTSEnumValueKind::PAYLOAD && !member.payload.empty()) {
-                    payloads.push_back(&member);
-                }
-            }
-            int kindCount = (hasNumber ? 1 : 0) + (hasString ? 1 : 0) + (hasBoolean ? 1 : 0);
-            if (kindCount == 1 && payloads.empty()) {
-                if (hasNumber) {
-                    auto number = Fresh("num");
-                    emitted.pre += KindGuard(value, "isNumber", "a number", name, indent);
-                    emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
-                    emitted.expr = numberChain(number);
-                } else if (hasString) {
-                    auto string = Fresh("str");
-                    emitted.pre += KindGuard(value, "isString", "a string", name, indent);
-                    emitted.pre += indent + "let " + string + " = " + value + ".asString().toString()\n";
-                    emitted.expr = stringChain(string);
-                } else {
-                    auto boolean = Fresh("boo");
-                    emitted.pre += KindGuard(value, "isBoolean", "a boolean", name, indent);
-                    emitted.pre += indent + "let " + boolean + " = " + value + ".toBoolean()\n";
-                    emitted.expr = booleanChain(boolean);
-                }
-                return emitted;
-            }
-            // Literal equality is checked first, then payload members in
-            // declaration order; a payload whose routing cannot be narrowed
-            // (nested enum or Option) is placed last. The conversion is
-            // evaluated only inside the branch that proved the kind.
-            auto payloadGuard = [&](const ArkTSTypeDesc& payload) -> std::string {
+            std::function<std::string(const ArkTSTypeDesc&)> payloadGuard =
+                [&](const ArkTSTypeDesc& payload) -> std::string {
                 switch (payload.kind) {
                     case ArkTSTypeDesc::Kind::SCALAR:
                         if (payload.scalar == "String") {
+                            noteKind(value + ".isString()");
                             return value + ".isString()";
                         }
                         if (payload.scalar == "Bool") {
+                            noteKind(value + ".isBoolean()");
                             return value + ".isBoolean()";
                         }
                         if (payload.scalar == "Int64" || payload.scalar == "UInt64" || payload.scalar == "BigInt") {
+                            noteKind(value + ".isBigInt()");
                             return value + ".isBigInt()";
                         }
                         if (payload.scalar == "Unit") {
@@ -1370,77 +1328,142 @@ struct ArkTSValueEmitter {
                         if (payload.scalar == "Nothing") {
                             return "false";
                         }
+                        noteKind(value + ".isNumber()");
                         return value + ".isNumber()";
                     case ArkTSTypeDesc::Kind::REFERENCE:
+                        noteKind(value + ".isObject()");
                         return value + ".isObject()";
                     case ArkTSTypeDesc::Kind::ARRAY_COPY:
                     case ArkTSTypeDesc::Kind::TUPLE:
+                        noteKind(value + ".isArray()");
                         return value + ".isArray()";
+                    case ArkTSTypeDesc::Kind::OPTIONAL: {
+                        if (payload.elements.empty()) {
+                            return "true";
+                        }
+                        const auto inner = payloadGuard(payload.elements.front());
+                        if (inner == "true") {
+                            return "true";
+                        }
+                        return "(" + value + ".isNull() || " + value + ".isUndefined() || (" + inner + "))";
+                    }
+                    case ArkTSTypeDesc::Kind::ENUM: {
+                        // A nested enum can be pre-checked only when every
+                        // constructor agrees on the JS kind; a mixed union
+                        // stays unroutable and is matched in declaration order.
+                        std::string common;
+                        for (const auto& member : payload.enumMembers) {
+                            std::string current;
+                            if (member.kind == ArkTSEnumValueKind::NUMBER) {
+                                current = value + ".isNumber()";
+                            } else if (member.kind == ArkTSEnumValueKind::STRING) {
+                                current = value + ".isString()";
+                            } else if (member.kind == ArkTSEnumValueKind::BOOLEAN) {
+                                current = value + ".isBoolean()";
+                            } else if (member.kind == ArkTSEnumValueKind::PAYLOAD && !member.payload.empty()) {
+                                current = payloadGuard(member.payload.front());
+                            }
+                            if (current.empty() || current == "true") {
+                                return "true";
+                            }
+                            if (common.empty()) {
+                                common = current;
+                            } else if (common != current) {
+                                return "true";
+                            }
+                        }
+                        if (common.empty()) {
+                            return "true";
+                        }
+                        noteKind(common);
+                        return common;
+                    }
                     default:
                         return "true";
                 }
             };
-            std::stable_sort(payloads.begin(), payloads.end(), [&](const auto* left, const auto* right) {
-                return payloadGuard(left->payload.front()) != "true" && payloadGuard(right->payload.front()) == "true";
-            });
-            auto number = Fresh("num");
-            auto string = Fresh("str");
-            auto boolean = Fresh("boo");
+            auto literalGuard = [&](const ArkTSEnumMember& member) -> std::string {
+                switch (member.kind) {
+                    case ArkTSEnumValueKind::NUMBER:
+                        noteKind(value + ".isNumber()");
+                        return value + ".isNumber() && " + value + ".toNumber() == Float64(" + member.value + ")";
+                    case ArkTSEnumValueKind::STRING:
+                        noteKind(value + ".isString()");
+                        return value + ".isString() && " + value + ".asString().toString() == \"" +
+                            StringConvertor::Recover(member.value) + "\"";
+                    case ArkTSEnumValueKind::BOOLEAN:
+                        noteKind(value + ".isBoolean()");
+                        return value + ".isBoolean() && " + value + ".toBoolean() == " + member.value;
+                    default:
+                        return "";
+                }
+            };
             std::string dispatch = "(";
             bool firstGuard = true;
-            std::vector<std::string> kinds;
+            bool shadowed = false;
+            std::string kindList;
+            auto noteLabel = [&kindList](const std::string& label) {
+                if (kindList.find(label) != std::string::npos) {
+                    return;
+                }
+                if (!kindList.empty()) {
+                    kindList += ", ";
+                }
+                kindList += label;
+            };
             auto addBranch = [&](const std::string& condition, const std::string& body) {
                 dispatch += (firstGuard ? "if (" : " else if (") + condition + ") {\n" + body + indent + "}";
                 firstGuard = false;
             };
-            if (hasNumber) {
-                addBranch(value + ".isNumber()", indent + "    let " + number + " = " + value +
-                    ".toNumber()\n" + indent + "    " + numberChain(number) + "\n");
-                kinds.emplace_back("number");
-            }
-            if (hasString) {
-                addBranch(value + ".isString()", indent + "    let " + string + " = " + value +
-                    ".asString().toString()\n" + indent + "    " + stringChain(string) + "\n");
-                kinds.emplace_back("string");
-            }
-            if (hasBoolean) {
-                addBranch(value + ".isBoolean()", indent + "    let " + boolean + " = " + value +
-                    ".toBoolean()\n" + indent + "    " + booleanChain(boolean) + "\n");
-                kinds.emplace_back("boolean");
-            }
-            bool payloadKindListed = false;
-            bool hasCatchAll = false;
-            for (size_t i = 0; i < payloads.size(); ++i) {
-                const auto* member = payloads[i];
-                auto inner = FromJS(member->payload.front(), value, indent + "    ");
-                std::string body =
-                    inner.pre + indent + "    " + slot + "." + member->name + "(" + inner.expr + ")\n";
-                const auto guard = payloadGuard(member->payload.front());
-                if (guard == "true" && i + 1 == payloads.size()) {
-                    // The unroutable payload catches every remaining value; an
-                    // `if (true)` followed by a throw would leave the throw
-                    // unreachable.
-                    if (firstGuard) {
-                        dispatch = "(" + body + ")";
-                    } else {
-                        dispatch += " else {\n" + body + indent + "})";
+            for (const auto& member : desc.enumMembers) {
+                if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
+                    if (member.payload.empty()) {
+                        continue;
                     }
-                    hasCatchAll = true;
-                    break;
+                    const auto guard = payloadGuard(member.payload.front());
+                    auto inner = FromJS(member.payload.front(), value, indent + "    ");
+                    std::string body =
+                        inner.pre + indent + "    " + slot + "." + member.name + "(" + inner.expr + ")\n";
+                    if (guard == "true") {
+                        // An unroutable payload catches every remaining value;
+                        // later constructors are shadowed by declaration order.
+                        if (firstGuard) {
+                            // The body may carry guard/conversion statements,
+                            // so it needs a block expression rather than a
+                            // parenthesized statement list.
+                            dispatch = "{\n" + body + indent + "}";
+                        } else {
+                            dispatch += " else {\n" + body + indent + "})";
+                        }
+                        shadowed = true;
+                        break;
+                    }
+                    addBranch(guard, body);
+                    noteLabel("payload");
+                } else {
+                    const auto guard = literalGuard(member);
+                    if (guard.empty()) {
+                        continue;
+                    }
+                    addBranch(guard, indent + "    " + slot + "." + member.name + "\n");
+                    noteLabel(member.kind == ArkTSEnumValueKind::NUMBER   ? "number"
+                        : member.kind == ArkTSEnumValueKind::STRING      ? "string"
+                                                                         : "boolean");
                 }
-                addBranch(guard, body);
-                payloadKindListed = true;
             }
-            if (payloadKindListed) {
-                kinds.emplace_back("payload");
-            }
-            if (!hasCatchAll) {
-                std::string kindList;
-                for (size_t i = 0; i < kinds.size(); ++i) {
-                    if (i != 0) {
-                        kindList += (i == kinds.size() - 1 ? " or " : ", ");
+            if (!shadowed && !firstGuard) {
+                std::string predicate;
+                for (const auto& one : kindPredicates) {
+                    if (!predicate.empty()) {
+                        predicate += " || ";
                     }
-                    kindList += kinds[i];
+                    predicate += one;
+                }
+                if (!predicate.empty()) {
+                    // A value of a constructible kind that matched no
+                    // constructor is invalid; any other kind is a mismatch.
+                    dispatch += " else if (" + predicate + ") {\n" + indent + "    " +
+                        throwInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + "\n" + indent + "}";
                 }
                 dispatch += " else {\n" + indent + "    " +
                     throwInline(std::string(ARKTS_MISMATCH) + "not a " + kindList + " for " + name) + "\n" + indent +
@@ -1788,7 +1811,7 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     auto ctx = prefix + "context";
     auto recv = prefix + std::string("module");
     const bool globalReceiver = receiver == ArkTSReceiverKind::GLOBAL;
-    const auto context = ArkTSFailureContext("function", ArkTSLiteral(ARKTS_PLACEHOLDER_NAME));
+    const auto context = ArkTSFailureContext("function", ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_NAME));
     std::string code = std::string("func ") + ARKTS_WRAPPER_ENTRY + "() {\n    let " + ctx + ": " +
         ARKTS_JS_CONTEXT + " = " + ARKTS_CONTEXT_ABI_PACKAGE + "." + ARKTS_CONTEXT_CURRENT + "()\n";
     // The receiver line is the only difference between the two forms: the
@@ -1800,8 +1823,8 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     if (globalReceiver) {
         code += "    let " + recv + " = " + ctx + ".global\n";
     } else {
-        code += "    let " + recv + " = " + ctx + ".requireArkModule(\"" + ARKTS_PLACEHOLDER_MODULE +
-            "\").asObject()\n";
+        code += "    let " + recv + " = " + ctx + ".requireArkModule(" +
+            ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MODULE) + ").asObject()\n";
     }
     ArkTSValueEmitter emitter{prefix};
     emitter.classRefs = classRefs;
@@ -1893,10 +1916,11 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     // generic property error; then translate the runtime-failure codes.
     auto target = emitter.Fresh("target");
     auto error = emitter.Fresh("error");
-    code += ArkTSExportGuard(recv, target, ArkTSLiteral(ARKTS_PLACEHOLDER_NAME), context, globalReceiver, "    ",
-        namespaceDepth);
+    code += ArkTSExportGuard(recv, target, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_NAME), context, globalReceiver,
+        "    ", namespaceDepth);
     code += ArkTSCallableGuard(target, context, ": the export is not a function", "    ");
-    const auto callExpr = recv + ".callMethod(\"" + ARKTS_PLACEHOLDER_NAME + "\", " + callArgsExpr + ")";
+    const auto callExpr =
+        recv + ".callMethod(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_NAME) + ", " + callArgsExpr + ")";
     code += "    let " + result + " = " + ArkTSCallTranslation(callExpr, context, error, "    ") + "\n";
     if (resultType.kind == ArkTSTypeDesc::Kind::SCALAR && resultType.scalar == "Nothing") {
         return code + "    throw " + std::string(ARKTS_NEVER_EXCEPTION) + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n}\n";
@@ -1958,12 +1982,12 @@ std::string ArkTSClassValuePreamble(const std::string& prefix, size_t namespaceD
     auto ctx = prefix + "context";
     auto recv = prefix + "module";
     const bool globalReceiver = receiver == ArkTSReceiverKind::GLOBAL;
-    const auto context = ArkTSFailureContext("class", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS));
+    const auto context = ArkTSFailureContext("class", ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS));
     std::string code = "    let " + recv + " = ";
     if (globalReceiver) {
         code += ctx + ".global\n";
     } else {
-        code += ctx + ".requireArkModule(\"" + ARKTS_PLACEHOLDER_MODULE + "\").asObject()\n";
+        code += ctx + ".requireArkModule(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MODULE) + ").asObject()\n";
     }
     for (size_t i = 0; i < namespaceDepth; ++i) {
         auto value = prefix + "nsvalue_" + std::to_string(i);
@@ -1972,8 +1996,8 @@ std::string ArkTSClassValuePreamble(const std::string& prefix, size_t namespaceD
         recv = next;
     }
     classValue = prefix + "classvalue";
-    code += ArkTSExportGuard(recv, classValue, ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS), context, globalReceiver, "    ",
-        namespaceDepth);
+    code += ArkTSExportGuard(recv, classValue, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS), context,
+        globalReceiver, "    ", namespaceDepth);
     return code;
 }
 
@@ -2030,6 +2054,80 @@ std::string ArkTSStringLiteral(const std::string& text)
     return ArkTSLiteral(text);
 }
 
+std::string ArkTSPlaceholderLiteral(const std::string& text)
+{
+    return ArkTSPlaceholderLiteralImpl(text);
+}
+
+bool ArkTSRebindPlaceholderLiteral(const std::string& value,
+    const std::unordered_map<std::string, std::string>& literals, std::string& rebound)
+{
+    const std::string prefix = ARKTS_PLACEHOLDER_LITERAL_PREFIX;
+    if (value.compare(0, prefix.size(), prefix) != 0) {
+        return false;
+    }
+    auto found = literals.find(value.substr(prefix.size()));
+    if (found == literals.end()) {
+        return false;
+    }
+    rebound = found->second;
+    return true;
+}
+
+// Body of a `@ArkTS[globalVar: true] foreign func`: the module (or global
+// object) receiver, one guarded and translated read of the named export, then
+// the same FromJS conversion the function wrapper applies to its result. Every
+// generatable description is accepted here - the scalar table, Option, Array,
+// tuple and foreign class/interface/enum leaves - so the getter is no longer
+// limited to scalars.
+std::string ArkTSGlobalVariableGetterSource(const ArkTSTypeDesc& valueType, size_t namespaceDepth,
+    const std::string& prefix, ArkTSReceiverKind receiver,
+    std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs)
+{
+    if (!ArkTSTypeDescGeneratable(valueType)) {
+        return {};
+    }
+    // A REFERENCE leaf is emitted by placeholder and bound through classRefs;
+    // without the map the emitter would leave malformed syntax behind.
+    if (classRefs == nullptr && ArkTSTypeDescContainsReference(valueType)) {
+        return {};
+    }
+    auto ctx = prefix + "context";
+    auto recv = prefix + "module";
+    const bool globalReceiver = receiver == ArkTSReceiverKind::GLOBAL;
+    const auto context = ArkTSFailureContext("variable", ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_NAME));
+    std::string code = std::string("func ") + ARKTS_WRAPPER_ENTRY + "() {\n    let " + ctx + ": " + ARKTS_JS_CONTEXT +
+        " = " + ARKTS_CONTEXT_ABI_PACKAGE + "." + ARKTS_CONTEXT_CURRENT + "()\n";
+    if (globalReceiver) {
+        code += "    let " + recv + " = " + ctx + ".global\n";
+    } else {
+        code += "    let " + recv + " = " + ctx + ".requireArkModule(" +
+            ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MODULE) + ").asObject()\n";
+    }
+    ArkTSValueEmitter emitter{prefix};
+    emitter.classRefs = classRefs;
+    for (size_t i = 0; i < namespaceDepth; ++i) {
+        auto value = emitter.Fresh("nsvalue");
+        auto next = prefix + "namespace_" + std::to_string(i);
+        code += ArkTSNamespaceGuard(recv, value, next, i, context, globalReceiver, "    ");
+        recv = next;
+    }
+    // The read is the target resolution: a missing export throws
+    // ForeignRuntimeException, and the translated form maps an ArkTS-side
+    // getter failure through the same contract as a function call.
+    auto value = emitter.Fresh("value");
+    auto error = emitter.Fresh("error");
+    code += ArkTSExportGuard(recv, value, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_NAME), context, globalReceiver,
+        "    ", namespaceDepth, error);
+    if (valueType.kind == ArkTSTypeDesc::Kind::SCALAR && valueType.scalar == "Nothing") {
+        // A never-typed property that produced a value is the same never
+        // contract as a function result.
+        return code + "    throw " + ARKTS_RUNTIME_EXCEPTION + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n}\n";
+    }
+    auto emitted = emitter.FromJS(valueType, value, "    ");
+    return code + emitted.pre + "    return " + emitted.expr + "\n}\n";
+}
+
 std::string ArkTSNamespaceResolution(const std::string& receiver, const std::string& value, const std::string& next,
     size_t index, const std::string& kind, const std::string& name, bool globalReceiver, const std::string& indent)
 {
@@ -2071,8 +2169,8 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
     // path: up to the last Some, with a None before it as ctx.undefined().
     // The rest form keeps its existing spread behavior and never truncates.
     const bool optionals = restIndex == ARKTS_NO_REST && optionalStart < args.size();
-    const auto context = ArkTSMemberFailureContext(ownerKind, ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS),
-        ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER));
+    const auto context = ArkTSMemberFailureContext(ownerKind, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS),
+        ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER));
     // Static members have no object reference: the class value itself is the
     // `this` argument. Instance members call the method on the stored object.
     // Both resolve the member first, so a missing or non-callable member names
@@ -2080,11 +2178,13 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
     auto emitCall = [&](const std::string& argArray) {
         auto target = emitter.Fresh("target");
         auto error = emitter.Fresh("error");
-        code += ArkTSMemberGuard(receiverObject, target, ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER), context, "    ");
+        code += ArkTSMemberGuard(
+            receiverObject, target, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER), context, "    ");
         code += ArkTSCallableGuard(target, context, " is not a function", "    ");
         const auto callExpr = staticMember
             ? target + ".asFunction().call(" + argArray + ", thisArg: " + receiverObject + ")"
-            : receiverObject + ".callMethod(\"" + ARKTS_PLACEHOLDER_MEMBER + "\", " + argArray + ")";
+            : receiverObject + ".callMethod(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER) + ", " +
+                argArray + ")";
         code += "    let " + result + " = " + ArkTSCallTranslation(callExpr, context, error, "    ") + "\n";
     };
     if (restIndex != ARKTS_NO_REST) {
@@ -2120,7 +2220,7 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
     emitter.classRefs = &classRefs;
     std::string classValue;
     std::string code;
-    const auto context = ArkTSFailureContext("class", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS));
+    const auto context = ArkTSFailureContext("class", ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS));
     code += ArkTSClassValuePreamble(prefix, namespaceDepth, receiver, classValue);
     code += ArkTSCallableGuard(classValue, context, ": the export is not a constructor", "    ");
     auto clazz = prefix + "class";
@@ -2177,19 +2277,19 @@ std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter
     // A property value may legitimately be undefined, so there is no
     // existence check; the access itself is translated because a getter or
     // setter on the ArkTS side can throw.
-    const auto context = ArkTSMemberFailureContext("class", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS),
-        ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER));
+    const auto context = ArkTSMemberFailureContext("class", ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS),
+        ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER));
     if (setter) {
         auto value = emitter.ToJS(valueType, std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "0", prefix + "context", "    ");
         code += value.pre;
         auto error = emitter.Fresh("error");
         const auto setExpr =
-            object + ".setProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\", " + value.expr + ")";
+            object + ".setProperty(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER) + ", " + value.expr + ")";
         return ArkTSFinishBody(prefix, code + "    " + ArkTSCallTranslation(setExpr, context, error, "    ") + "\n");
     }
     auto result = prefix + "result";
     auto error = emitter.Fresh("error");
-    const auto getExpr = object + ".getProperty(\"" + ARKTS_PLACEHOLDER_MEMBER + "\")";
+    const auto getExpr = object + ".getProperty(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER) + ")";
     code += "    let " + result + " = " + ArkTSCallTranslation(getExpr, context, error, "    ") + "\n";
     auto emitted = emitter.FromJS(valueType, result, "    ");
     return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
@@ -2208,8 +2308,8 @@ std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, co
     }
     ArkTSValueEmitter emitter{prefix};
     emitter.classRefs = &classRefs;
-    const auto context = ArkTSMemberFailureContext("interface", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS),
-        ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER));
+    const auto context = ArkTSMemberFailureContext("interface", ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS),
+        ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER));
     auto self = emitter.Fresh("self");
     auto selfValue = emitter.Fresh("selfvalue");
     auto function = emitter.Fresh("function");
@@ -2236,7 +2336,7 @@ std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, co
 }
 
 std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTSTypeDesc& valueType, bool setter,
-    const std::string& prefix, std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+    const std::string& prefix, std::unordered_map<std::string, Ptr<Decl>>& classRefs, const std::string& ownerKind)
 {
     if (!ArkTSTypeDescGeneratable(keyType) || ArkTSTypeDescContainsNothing(keyType) ||
         !ArkTSTypeDescGeneratable(valueType) || ArkTSTypeDescContainsNothing(valueType)) {
@@ -2268,8 +2368,8 @@ std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTST
         code += "    let " + canonical + " = Int64(" + number + ").toString()\n";
         key = canonical;
     }
-    const auto context = ArkTSMemberFailureContext("interface", ArkTSLiteral(ARKTS_PLACEHOLDER_CLASS),
-        ArkTSLiteral(ARKTS_PLACEHOLDER_MEMBER));
+    const auto context = ArkTSMemberFailureContext(ownerKind, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS),
+        ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER));
     auto self = emitter.Fresh("self");
     code = "    let " + self + " = " + ARKTS_SELF + "." + ARKTS_CLASS_REF_ACCESSOR + "()\n" + code;
     if (setter) {

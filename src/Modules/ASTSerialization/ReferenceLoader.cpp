@@ -619,9 +619,19 @@ void ASTLoader::ASTLoaderImpl::LoadDeclRefs(const PackageFormat::Decl& declObj, 
                 (!(*annotation)->isCompileTimeVisible && !decl.TestAnyAttr(Attribute::COMMON, Attribute::SPECIFIC)))) {
             ++annotation;
         }
-        CJC_ASSERT(annotation != decl.annotations.end());
+        // A release build compiles CJC_ASSERT away, so the bound must be a real
+        // check: a package whose serialized record count exceeds the visible
+        // custom nodes must not make the loader run past the end. The remaining
+        // constructor references stay unrestored.
+        if (annotation == decl.annotations.end()) {
+            break;
+        }
         CJC_NULLPTR_CHECK(rawAnno->identifier());
-        CJC_ASSERT((*annotation)->identifier == rawAnno->identifier()->str());
+        if ((*annotation)->identifier != rawAnno->identifier()->str()) {
+            // The serialized order and the visible custom nodes disagree; stop
+            // aligning instead of attaching the reference to another annotation.
+            break;
+        }
         LoadAnnotationBaseExpr(*rawAnno, **annotation);
         ++annotation;
     }

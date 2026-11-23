@@ -30,6 +30,16 @@ using namespace Cangjie;
 using namespace Cangjie::AST;
 using namespace Cangjie::Native::FFI::ArkTS;
 
+namespace {
+// One generated placeholder literal as it appears in the raw wrapper text: the
+// sentinel prefix keeps it distinct from a user string value spelling the same
+// name (for example an enum member @RawValue["__module__"]).
+std::string ArkTSPlaceholderText(const std::string& key)
+{
+    return std::string(ARKTS_PLACEHOLDER_LITERAL_PREFIX) + key;
+}
+} // namespace
+
 class ArkTSEntryTest : public testing::Test {
 protected:
     // These tests call the ArkTS prepare entry points directly rather than
@@ -117,7 +127,8 @@ public func run(): Unit {
     EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS) + 1, static_cast<int>(AnnotationKind::REST_PARAM));
     EXPECT_EQ(static_cast<int>(AnnotationKind::REST_PARAM) + 1, static_cast<int>(AnnotationKind::WRITE_ONLY));
     EXPECT_EQ(static_cast<int>(AnnotationKind::WRITE_ONLY) + 1, static_cast<int>(AnnotationKind::RAW_VALUE));
-    EXPECT_EQ(static_cast<int>(AnnotationKind::RAW_VALUE) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::RAW_VALUE) + 1, static_cast<int>(AnnotationKind::HAS_THIS));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::HAS_THIS) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
 }
 
 TEST_F(ArkTSEntryTest, RegistrationRestoresContextInFinally)
@@ -978,6 +989,32 @@ foreign {
     }
 }
 
+// A block-level namespace is cloned into every member, so an ill-formed path
+// is rejected once at the block and removed before cloning; the members neither
+// carry the value nor repeat the diagnostic.
+TEST_F(ArkTSEntryTest, IllFormedNamespaceOnForeignBlockIsReportedOnce)
+{
+    auto file = ParseKeepingDiagnostics(R"(@ArkTS[namespace: ".a"]
+foreign {
+    func one(): Unit
+    func two(): Unit
+}
+)");
+    const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::SEMA);
+    EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
+                  [](const auto& diagnostic) {
+                      return diagnostic.rKind == DiagKindRefactor::sema_arkts_namespace_invalid;
+                  }),
+        1);
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(file->decls.size(), 2);
+    for (auto& decl : file->decls) {
+        std::unordered_map<std::string, std::string> options;
+        ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*decl), options));
+        EXPECT_EQ(options.count("namespace"), 0U);
+    }
+}
+
 TEST_F(ArkTSEntryTest, RepeatedOptionAtOneLevelIsRejectedEvenForEqualValues)
 {
     for (const auto& name : {"module", "namespace", "foreignName"}) {
@@ -1136,7 +1173,7 @@ foreign func echo(): String
     EXPECT_EQ(options.at("foreignName"), "quote\"name");
     auto generated = ArkTSForeignWrapperSource({}, ArkTSScalarDesc("String"), 0, "__locals_");
     EXPECT_EQ(generated.find("quote"), std::string::npos);
-    EXPECT_NE(generated.find("__name__"), std::string::npos);
+    EXPECT_NE(generated.find(ArkTSPlaceholderText("__name__")), std::string::npos);
     EXPECT_NE(generated.find(": ark_interop.JSContext ="), std::string::npos);
 }
 
@@ -1360,7 +1397,9 @@ foreign {
     func echo(): Unit
 }
 )");
-    ASSERT_EQ(diag.GetErrorCount(), 0);
+    // The block-level namespace is validated once at the block and dropped
+    // before cloning, so the member only inherits its own well-formed value.
+    ASSERT_EQ(diag.GetErrorCount(), 1);
     std::unordered_map<std::string, std::string> options;
     EXPECT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
     EXPECT_EQ(options.at("namespace"), "api.nested");
@@ -1507,7 +1546,7 @@ TEST_F(ArkTSEntryTest, RestParamWrapperWithModuleReceiverSpreadsCopyItems)
     EXPECT_NE(code.find("Array<ark_interop.JSValue>(__argument_1.size, { __locals_index_0 =>"), std::string::npos);
     EXPECT_NE(code.find("Array<ark_interop.JSValue>(1 + __argument_1.size, { __locals_index_1 =>"), std::string::npos);
     EXPECT_NE(code.find(".boolean("), std::string::npos);
-    EXPECT_NE(code.find("requireArkModule(\"__module__\")"), std::string::npos);
+    EXPECT_NE(code.find("requireArkModule(\"" + ArkTSPlaceholderText("__module__") + "\")"), std::string::npos);
     auto parsed = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
     EXPECT_EQ(ArkTSCountMemberAccess(parsed.get(), "callMethod"), 1);
@@ -1648,7 +1687,7 @@ foreign func echo(): String
     ASSERT_TRUE(ArkTSDeclOptions(StaticCast<FuncDecl&>(*file->decls.front()), options));
     EXPECT_EQ(options.at("module"), "actual");
     auto code = ArkTSForeignWrapperSource({}, ArkTSScalarDesc("String"), 0, "__locals_");
-    EXPECT_NE(code.find("requireArkModule(\"__module__\")"), std::string::npos);
+    EXPECT_NE(code.find("requireArkModule(\"" + ArkTSPlaceholderText("__module__") + "\")"), std::string::npos);
     auto parsed = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
     EXPECT_EQ(ArkTSCountMemberAccess(parsed.get(), "requireArkModule"), 1);
@@ -1675,8 +1714,8 @@ foreign func parseInt(text: String): Float64
     EXPECT_EQ(options.count("module"), 0u);
     EXPECT_EQ(ArkTSDefaultModule("entry"), "entry");
     auto code = ArkTSForeignWrapperSource({}, ArkTSScalarDesc("Float64"), 0, "__locals_");
-    EXPECT_NE(code.find("requireArkModule(\"__module__\")"), std::string::npos);
-    EXPECT_NE(code.find("__module__"), std::string::npos);
+    EXPECT_NE(code.find("requireArkModule(\"" + ArkTSPlaceholderText("__module__") + "\")"), std::string::npos);
+    EXPECT_NE(code.find(ArkTSPlaceholderText("__module__")), std::string::npos);
     auto parsed = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
     EXPECT_EQ(ArkTSCountMemberAccess(parsed.get(), "callMethod"), 1);
@@ -1713,8 +1752,10 @@ TEST_F(ArkTSEntryTest, GlobalReceiverNamespaceChainResolvesThroughGetProperty)
     // form uses, starting from ctx.global itself.
     auto code = ArkTSForeignWrapperSource({}, ArkTSScalarDesc("Unit"), 2, "__locals_", ArkTSReceiverKind::GLOBAL);
     EXPECT_NE(code.find("let __locals_module = __locals_context.global"), std::string::npos);
-    EXPECT_NE(code.find("__locals_module.getProperty(\"__namespace_0__\")"), std::string::npos);
-    EXPECT_NE(code.find("__locals_namespace_0.getProperty(\"__namespace_1__\")"), std::string::npos);
+    EXPECT_NE(code.find("__locals_module.getProperty(\"" + ArkTSPlaceholderText("__namespace_0__") + "\")"),
+        std::string::npos);
+    EXPECT_NE(code.find("__locals_namespace_0.getProperty(\"" + ArkTSPlaceholderText("__namespace_1__") + "\")"),
+        std::string::npos);
     EXPECT_EQ(code.find("requireArkModule"), std::string::npos);
     EXPECT_EQ(code.find("__module__"), std::string::npos);
     auto parsed = Parse(code);
@@ -1731,9 +1772,11 @@ TEST_F(ArkTSEntryTest, ModuleReceiverWrapperKeepsRequireArkModuleAndNoGlobal)
     // the context's global object.
     auto code = ArkTSForeignWrapperSource({}, ArkTSScalarDesc("Float64"), 1, "__locals_",
         ArkTSReceiverKind::MODULE);
-    EXPECT_NE(code.find("let __locals_module = __locals_context.requireArkModule(\"__module__\")"),
+    EXPECT_NE(code.find("let __locals_module = __locals_context.requireArkModule(\"" +
+                    ArkTSPlaceholderText("__module__") + "\")"),
         std::string::npos);
-    EXPECT_NE(code.find("__locals_module.getProperty(\"__namespace_0__\")"), std::string::npos);
+    EXPECT_NE(code.find("__locals_module.getProperty(\"" + ArkTSPlaceholderText("__namespace_0__") + "\")"),
+        std::string::npos);
     EXPECT_EQ(code.find(".global"), std::string::npos);
     auto parsed = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
@@ -2202,8 +2245,10 @@ TEST_F(ArkTSEntryTest, RestParamOnAnInitOfAnOrdinaryForeignClassIsRejected)
 TEST_F(ArkTSEntryTest, RestParamOnAPrimaryConstructorOfANonForeignArkTSClassIsRejected)
 {
     // Negative, primary constructor + non-foreign guard: @ArkTS without
-    // foreign does not make the class a rest target, so the primary
-    // constructor parameter list keeps the rejection there too.
+    // foreign does not make the class a rest target. The declaration is legal
+    // but its rest-parameter mapping is not implemented, so the primary
+    // constructor parameter list is refused with the dedicated wording rather
+    // than the ordinary annotation rule.
     auto file = ParseKeepingDiagnostics(R"(@ArkTS
 class Pouch {
     Pouch(@RestParam items: Array<Int32>) {
@@ -2214,7 +2259,9 @@ class Pouch {
     const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::PARSE);
     EXPECT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
-        [](const auto& diagnostic) { return diagnostic.rKind == DiagKindRefactor::parse_unexpected_anno_on; }), 1);
+        [](const auto& diagnostic) {
+            return diagnostic.rKind == DiagKindRefactor::parse_arkts_rest_param_non_foreign_not_supported;
+        }), 1);
 }
 
 // ---- regression guards for the shared class/interface parse paths.

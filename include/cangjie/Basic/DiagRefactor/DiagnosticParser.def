@@ -318,6 +318,16 @@ ERROR(parse_annotation_no_arguments, "%s accepts no arguments", "unexpected argu
 
 // Shared diagnostics for Java / Objective-C interoperability
 ERROR(parse_foreign_name_on_ffi_decl_member, "'@ForeignName' can only be used on '@Java' or '@ObjC' declaration member")
+ERROR(parse_foreign_name_on_arkts_constructor,
+    "'@ForeignName' cannot be used on an '@ArkTS foreign' constructor: the constructor maps to 'new'")
+ERROR(parse_arkts_rest_param_on_block,
+    "'@RestParam' cannot be applied to a foreign block; annotate the final parameter of a member function instead")
+ERROR(parse_arkts_raw_value_on_block,
+    "'@RawValue' cannot be applied to a foreign block; annotate an enum constructor instead")
+ERROR(parse_arkts_has_this_on_block,
+    "'@HasThis' cannot be applied to a foreign block; annotate one foreign function instead")
+ERROR(parse_arkts_rest_param_non_foreign_not_supported,
+    "'@RestParam' on a non-foreign '@ArkTS' declaration is not supported yet: %s")
 WARNING(parse_deprecated_interop_annotation, DEPRECATED, "'%s' annotation is deprecated; use '%s' instead")
 
 // Java interoperability
@@ -373,7 +383,11 @@ ERROR(parse_objc_init_method_must_be_static, "'@ObjCInit' member function must b
 ERROR(parse_objc_init_method_must_be_in_mirror_class, "'@ObjCInit' member function must be declared within '@ObjC' foreign class")
 ERROR(parse_objc_optional_method_must_be_in_mirror_class, "'@ObjCOptional' member function must be declared within '@ObjC' foreign interface")
 // @ArkTS annotation
-ERROR(parse_raw_value_not_literal, "argument of @RawValue should be an integer, string or boolean literal", "expected a literal value here")
+ERROR(parse_raw_value_not_literal, "argument of @RawValue should be a numeric, string or boolean literal", "expected a literal value here")
+// '@HasThis' is the ArkTS method-`this` annotation: one unnamed type name.
+ERROR(parse_has_this_invalid_argument,
+    "annotation '@HasThis' requires exactly one unnamed type argument, e.g. '@HasThis[TypeName]'",
+    "expected a type name here")
 
 
 ERROR(parse_objc_interop_not_supported, "Objective-C interoperability feature '%s' is not yet supported")

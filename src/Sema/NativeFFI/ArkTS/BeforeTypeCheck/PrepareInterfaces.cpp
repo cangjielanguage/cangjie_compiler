@@ -275,6 +275,17 @@ void PrepareInterfaces(Package& pkg, DiagnosticEngine& diag, SourceManager& sour
         std::vector<InterfaceDecl*> prepared;
         for (auto& decl : file->decls) {
             auto id = DynamicCast<InterfaceDecl*>(decl.get());
+            // A user generic @ArkTS foreign interface cannot be lowered into
+            // a fixed wrapper; only the stdlib presets keep the generic
+            // external form.
+            if (id != nullptr && !id->TestAttr(Attribute::IS_BROKEN) && id->HasAnno(AnnotationKind::ARKTS) &&
+                id->TestAttr(Attribute::FOREIGN) && !IsArkTSPreparedInterface(*id) && id->generic != nullptr &&
+                !id->generic->typeParameters.empty() && pkg.fullPackageName != ARKTS_PRESET_PACKAGE) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor::sema_arkts_generic_foreign_unsupported, *id, id->identifier.Val());
+                id->EnableAttr(Attribute::IS_BROKEN);
+                continue;
+            }
             // A refused interface has no ARKTS_INTERFACE_WRAPPER, so the broken
             // mark and the wrapper marker are the idempotency guards for a
             // repeated pass. FOREIGN alone no longer separates the states.

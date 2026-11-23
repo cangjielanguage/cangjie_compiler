@@ -160,6 +160,48 @@ void TypeChecker::TypeCheckerImpl::CheckFuncDecl(ASTContext& ctx, FuncDecl& fd)
     } else if (fd.TestAttr(Attribute::OPERATOR)) {
         CheckOperatorOverloadFunc(fd);
     }
+    ApplyArkTSHasThisType(fd);
+}
+
+// '@HasThis[ThisT]' is recorded during preparation; its argument only has a
+// semantic type after CheckAnnotations. Replace the function type of the
+// declaration with the runtime carrier ArkTSFuncWithThis<ThisT, F>, so a
+// reference to the declaration has the design type. The full call lowering of
+// that value is a later requirement; a direct call is refused separately.
+void TypeChecker::TypeCheckerImpl::ApplyArkTSHasThisType(FuncDecl& fd)
+{
+    if (!fd.TestAttr(Attribute::ARKTS_HAS_THIS) || fd.TestAttr(Attribute::IMPORTED) || !fd.GetTy().IsCorrect() ||
+        !fd.GetTy()->IsFunc()) {
+        return;
+    }
+    const Annotation* hasThis = nullptr;
+    for (auto& annotation : fd.annotations) {
+        if (annotation != nullptr && annotation->kind == AnnotationKind::HAS_THIS) {
+            hasThis = annotation.get();
+            break;
+        }
+    }
+    if (hasThis == nullptr || hasThis->args.size() != 1 || hasThis->args.front() == nullptr ||
+        hasThis->args.front()->expr == nullptr) {
+        return;
+    }
+    auto thisTy = hasThis->args.front()->expr->DataTy();
+    if (!Ty::IsTyCorrect(thisTy)) {
+        return;
+    }
+    auto classDecl = importManager.GetImportedDecl<ClassDecl>("arkts.lang", "ArkTSFuncWithThis");
+    if (classDecl == nullptr) {
+        // 'arkts.lang' re-exports the carrier from its defining package; the
+        // import manager records the defining package, so fall back to it.
+        classDecl = importManager.GetImportedDecl<ClassDecl>("std.interop.arkts", "ArkTSFuncWithThis");
+    }
+    if (classDecl == nullptr) {
+        return;
+    }
+    auto classTy = typeManager.GetClassTy(*classDecl, {thisTy, fd.DataTy()});
+    if (classTy != nullptr) {
+        fd.SetTy({classTy});
+    }
 }
 
 void TypeChecker::TypeCheckerImpl::CheckStaticVarAccessNonStatic(const VarDecl& vd)

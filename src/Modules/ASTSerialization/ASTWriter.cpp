@@ -1920,6 +1920,46 @@ std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& d
                 annotations.emplace_back(rawValue);
                 break;
             }
+            case AST::AnnotationKind::HAS_THIS: {
+                // A contract Sema refused must not cross the package boundary:
+                // the loader would otherwise resurrect it as a valid marker.
+                if (annotation->TestAttr(Attribute::IS_BROKEN)) {
+                    break;
+                }
+                // The argument is a type reference, which SaveAnnotationArgs
+                // skips because it is not a literal. Carry the spelled type
+                // name as one unnamed string literal instead, so an importing
+                // package can recover the ThisT contract. The source AST and
+                // its type reference are not modified; the synthetic literal
+                // is retained for the writer's lifetime because serialized
+                // expression slots refer to it by pointer.
+                std::vector<TAnnoArgOffset> hasThisArgs;
+                if (!annotation->args.empty() && annotation->args.front() != nullptr &&
+                    annotation->args.front()->expr != nullptr) {
+                    const auto& typeRef = *annotation->args.front()->expr;
+                    // A source argument is a type reference; an argument that
+                    // already came from a CJO is the string literal the loader
+                    // rebuilt, whose ToString() would include the quotes.
+                    std::string typeSpelling = typeRef.ToString();
+                    if (auto lit = DynamicCast<const LitConstExpr*>(&typeRef);
+                        lit != nullptr && lit->kind == LitConstKind::STRING) {
+                        typeSpelling = lit->stringValue;
+                    }
+                    auto literal = CreateLitConstExpr(LitConstKind::STRING, typeSpelling, {});
+                    literal->begin = typeRef.begin;
+                    literal->end = typeRef.end;
+                    literal->curFile = decl.curFile;
+                    auto retained = literal.get();
+                    syntheticExprs.emplace_back(std::move(literal));
+                    hasThisArgs.emplace_back(PackageFormat::CreateAnnoArg(builder,
+                        builder.CreateString(annotation->args.front()->name.GetRawText()), SaveExpr(*retained)));
+                }
+                auto args = builder.CreateVector<TAnnoArgOffset>(hasThisArgs);
+                auto hasThis = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_HasThis,
+                    builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(hasThis);
+                break;
+            }
             default:
                 break;
         }

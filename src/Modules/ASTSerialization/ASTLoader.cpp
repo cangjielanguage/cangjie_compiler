@@ -892,6 +892,12 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
                 continue;
             }
         }
+        if (rawAnno->kind() == PackageFormat::AnnoKind_HasThis) {
+            // The annotation record is also the carrier of the ThisT contract
+            // across the package boundary; the attribute lets later stages
+            // recognize a prepared wrapper without scanning annotations.
+            astDecl.EnableAttr(Attribute::ARKTS_HAS_THIS);
+        }
         auto anno = LoadAnnotation(*rawAnno);
         if (rawAnno->kind() == PackageFormat::AnnoKind_Annotation) {
             if (auto info = decl.info_as_ClassInfo()) {
@@ -959,6 +965,9 @@ OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageForma
             break;
         case PackageFormat::AnnoKind_RawValue:
             annotation->kind = AnnotationKind::RAW_VALUE;
+            break;
+        case PackageFormat::AnnoKind_HasThis:
+            annotation->kind = AnnotationKind::HAS_THIS;
             break;
         default:
             InternalError("Unhandled annotation kind.");

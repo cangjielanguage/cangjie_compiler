@@ -607,6 +607,48 @@ public interface BadNamespaceOption {}
     EXPECT_FALSE(HasErrorContaining("must be string literals among"));
 }
 
+// An extend whose extended type carries '@ArkTS' is refused: the ArkTS side
+// has no extend form, so the added members would be invisible to ArkTS. Both
+// a non-foreign class and a non-foreign enum are covered.
+TEST_F(ArkTSForeignDiagTest, ExtendOfArkTSDeclIsRejected)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public class ExportedClass {}
+
+extend ExportedClass {
+    public func use(): Unit {}
+}
+
+@ArkTS
+public enum ExportedEnum {
+    | Red
+}
+
+extend ExportedEnum {
+    public func label(): Int32 { return 0 }
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("cannot be extended"), 2U);
+    EXPECT_TRUE(HasErrorContaining("'@ArkTS' declaration 'ExportedClass' cannot be extended"));
+    EXPECT_TRUE(HasErrorContaining("'@ArkTS' declaration 'ExportedEnum' cannot be extended"));
+}
+
+// The same extend shape stays legal when the extended type is not @ArkTS.
+TEST_F(ArkTSForeignDiagTest, ExtendOfPlainTypeIsAccepted)
+{
+    CompileSema(R"(package entry
+
+public class Plain {}
+
+extend Plain {
+    public func use(): Unit {}
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+}
+
 // A global variable carries the annotation on the same terms.
 TEST_F(ArkTSForeignDiagTest, GlobalVariableUnknownOptionIsDiagnosed)
 {
@@ -962,7 +1004,7 @@ foreign func mixedRest(@RestParam xs: Array<Int32>, last!: Int32): Unit
 TEST_F(ArkTSForeignDiagTest, BodylessForeignClassMemberKeepsOptionalParameterSpelling)
 {
     PrepareArkTSSupport();
-    CompileSema(R"(package entry
+    CompileSema(R"(package std.interop.arkts
 
 import arkts.lang.*
 
@@ -1020,13 +1062,13 @@ import arkts.lang.*
 @ArkTS[module: "actual"]
 public foreign class Indexed {
     public func plain(value: Int32): Int32
-    public operator func [](index: Int32): Int32
+    public operator func +(index: Int32): Int32
 }
 )");
     EXPECT_TRUE(HasErrorContaining("operator members on foreign class are not supported"));
     EXPECT_TRUE(HasErrorContaining("'Indexed'"));
     // The refused member is broken and gets no wrapper body.
-    auto member = FindFunction("[]");
+    auto member = FindFunction("+");
     ASSERT_NE(member, nullptr);
     EXPECT_TRUE(member->TestAttr(Attribute::IS_BROKEN));
     ASSERT_NE(member->funcBody, nullptr);
@@ -1387,7 +1429,7 @@ public foreign class MutSetterBody {
 // members would get generated bodies before this rule runs.
 TEST_F(ArkTSForeignDiagTest, BodylessForeignClassMemberNamedParameterWithoutDefaultIsRejected)
 {
-    CompileSema(R"(package entry
+    CompileSema(R"(package std.interop.arkts
 
 @ArkTS[foreignName: "String"]
 public foreign class ArkTSString<T> {
@@ -2571,6 +2613,18 @@ public class BusinessException <: Exception {
         this.code = code
     }
 }
+
+// Carrier types used by the '@HasThis' contract tests. The shipped stub is
+// deliberately small; the real declarations live in std.interop.arkts.
+public class ArkTSFunc<F> {
+    public init(f: F) {}
+}
+
+public class ArkTSFuncWithThis<ThisT, F> {
+    public func bind(thisArg: ThisT): ArkTSFunc<F> {
+        throw Exception("arkts carrier stub")
+    }
+}
 )";
 
 // The interop library package that owns the exception carrier. The facade
@@ -3456,7 +3510,9 @@ public func run(): Unit {}
     }
     EXPECT_EQ(interopImports, 1);
     EXPECT_EQ(contextImports, 1);
-    EXPECT_EQ(exceptionImports, 1);
+    // The bare member import serves the function wrappers and the private
+    // alias serves the global-variable getter.
+    EXPECT_EQ(exceptionImports, 2);
 
     // The imports are implicit, so dependency generation re-admits exactly
     // these runtime packages: they stay visible in dependencies.json even
@@ -3826,7 +3882,8 @@ public foreign interface Box<T> {
     func value(prefix: String): T
 }
 )");
-    EXPECT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_EQ(diag.GetErrorCount(), 1) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_TRUE(HasErrorContaining("generic '@ArkTS foreign' declaration 'Box' is not supported"));
     Ptr<InterfaceDecl> box = nullptr;
     std::vector<Ptr<FuncDecl>> members;
     Walker(instance->GetSourcePackages()[0].get(), [&box, &members](Ptr<Node> node) {
@@ -3861,7 +3918,8 @@ public foreign interface Box<T> {
     func value(): T
 }
 )");
-    EXPECT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_EQ(diag.GetErrorCount(), 1) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_TRUE(HasErrorContaining("generic '@ArkTS foreign' declaration 'Box' is not supported"));
     bool lowered = false;
     Walker(instance->GetSourcePackages()[0].get(), [&lowered](Ptr<Node> node) {
         if (auto cd = DynamicCast<ClassDecl*>(node); cd && cd->identifier.Val() == "Box$arkts_impl") {
@@ -3951,7 +4009,7 @@ public func read(box: Box<Int64>): Int64 {
     return box.value()
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("unsafe function or native function should be invoked in unsafe context"));
+    EXPECT_TRUE(HasErrorContaining("generic '@ArkTS foreign' declaration 'Box' is not supported"));
     Ptr<InterfaceDecl> box = nullptr;
     Walker(instance->GetSourcePackages()[0].get(), [&box](Ptr<Node> node) {
         if (auto id = DynamicCast<InterfaceDecl*>(node); id && id->identifier.Val() == "Box") {
@@ -4422,10 +4480,11 @@ public func use(): String {
     EXPECT_FALSE(IsDeclBroken("IChild"));
 }
 
-// A non-foreign @ArkTS top-level function is an entry only when it satisfies
-// the entry shape. Each violation is reported once with the first unmet rule
-// as its reason, the declaration is refused, and no derived missing-argument
-// or missing-type-argument error is produced.
+// A non-foreign @ArkTS top-level function is exported only when it is public
+// and satisfies this release's minimal entry shape. A non-public declaration
+// is accepted but never exported; a public declaration outside the minimal
+// shape is refused with the staged-limitation wording, and no derived
+// missing-argument or missing-type-argument error is produced.
 TEST_F(ArkTSForeignDiagTest, EntryShapeViolationsAreDiagnosed)
 {
     PrepareArkTSSupport();
@@ -4445,19 +4504,23 @@ public func omittedUnit() {}
 @ArkTS[namespace: "actual"]
 public func withOption(): Unit {}
 )");
-    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS entry 'notPublic': must be 'public'"));
-    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS entry 'withParameters': must not take parameters"));
-    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS entry 'omittedUnit': must declare an explicit 'Unit' return type"));
-    EXPECT_TRUE(HasErrorContaining("invalid @ArkTS entry 'withOption': must not declare options"));
-    EXPECT_EQ(diag.GetErrorCount(), 4);
-    for (const auto& name : {"notPublic", "withParameters", "omittedUnit", "withOption"}) {
+    EXPECT_FALSE(HasErrorContaining("notPublic"));
+    EXPECT_TRUE(HasErrorContaining("the shape of '@ArkTS' entry 'withParameters' is not supported yet: it declares parameters"));
+    EXPECT_TRUE(
+        HasErrorContaining("the shape of '@ArkTS' entry 'omittedUnit' is not supported yet: it does not declare an explicit 'Unit' return type"));
+    EXPECT_TRUE(HasErrorContaining(
+        "the shape of '@ArkTS' entry 'withOption' is not supported yet: it declares options other than 'module'"));
+    EXPECT_EQ(diag.GetErrorCount(), 3);
+    EXPECT_FALSE(IsDeclBroken("notPublic"));
+    for (const auto& name : {"withParameters", "omittedUnit", "withOption"}) {
         EXPECT_TRUE(IsDeclBroken(name)) << name;
     }
     EXPECT_EQ(FindFunction("__cj_arkts_entry_0"), nullptr);
-    auto entryError = handler->FindErrorContaining("invalid @ArkTS entry 'withParameters'");
+    auto entryError = handler->FindErrorContaining("entry 'withParameters'");
     ASSERT_NE(entryError, nullptr);
     const std::string entryNote =
-        "an @ArkTS entry is a top-level public parameterless function with an explicit 'Unit' return type";
+        "this release implements only the minimal entry shape: a public parameterless function with an explicit 'Unit' "
+        "return type";
     EXPECT_NE(std::find(entryError->notes.begin(), entryError->notes.end(), entryNote), entryError->notes.end());
 }
 
@@ -4494,8 +4557,9 @@ public func run(): Unit {}
     EXPECT_EQ(brokenRuns, 1);
 }
 
-// An overload that fails the entry shape is reported by the shape rule. It
-// does not register a name, so the duplicate rule does not apply to it.
+// An overload outside the minimal entry shape is reported by the staged
+// limitation. It does not register a name, so the duplicate rule does not
+// apply to it.
 TEST_F(ArkTSForeignDiagTest, OverloadedEntryIsRejectedByShapeRule)
 {
     PrepareArkTSSupport();
@@ -4509,7 +4573,9 @@ public func run(): Unit {}
 @ArkTS
 public func run(value: Int32): Unit {}
 )");
-    EXPECT_EQ(CountErrorsContaining("invalid @ArkTS entry 'run': must not take parameters"), 1);
+    EXPECT_EQ(CountErrorsContaining(
+                  "the shape of '@ArkTS' entry 'run' is not supported yet: it declares parameters"),
+        1);
     EXPECT_EQ(CountErrorsContaining("duplicate @ArkTS entry name"), 0);
     EXPECT_EQ(diag.GetErrorCount(), 1);
 }
@@ -4579,7 +4645,7 @@ public foreign func legalForeign(): Unit
     EXPECT_TRUE(HasErrorContaining("not on 'nonForeignFunction'"));
     EXPECT_TRUE(HasErrorContaining("not on 'NonForeignClass'"));
     EXPECT_TRUE(HasErrorContaining("not on 'nonForeignVar'"));
-    EXPECT_FALSE(HasErrorContaining("invalid @ArkTS entry"));
+    EXPECT_FALSE(HasErrorContaining("the shape of '@ArkTS' entry"));
     EXPECT_EQ(diag.GetErrorCount(), 3);
 }
 
@@ -4733,10 +4799,11 @@ public func bad(value: Int32): Unit {}
 @ArkTS
 public func good(): Unit {}
 )");
-    auto entryError = handler->FindErrorContaining("invalid @ArkTS entry 'bad'");
+    auto entryError = handler->FindErrorContaining("the shape of '@ArkTS' entry 'bad'");
     ASSERT_NE(entryError, nullptr);
     const std::string entryNote =
-        "an @ArkTS entry is a top-level public parameterless function with an explicit 'Unit' return type";
+        "this release implements only the minimal entry shape: a public parameterless function with an explicit 'Unit' "
+        "return type";
     EXPECT_NE(std::find(entryError->notes.begin(), entryError->notes.end(), entryNote), entryError->notes.end());
     auto bad = FindFunction("bad");
     ASSERT_NE(bad, nullptr);
@@ -5001,4 +5068,478 @@ public class C {
 )");
     EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
     EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// A sealed foreign class cannot be extended and has no ArkTS-side spelling;
+// the class path refuses it like the interface path does.
+TEST_F(ArkTSForeignDiagTest, ForeignClassSealedIsRejected)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public sealed foreign class Sealed {
+    public init()
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("a sealed class is not supported"));
+    EXPECT_TRUE(HasErrorContaining("'Sealed'"));
+}
+
+// The constructor maps to a fixed `new` call, so @ForeignName has no member
+// name to bind; accepting it silently would mislead the user.
+TEST_F(ArkTSForeignDiagTest, ForeignNameOnArkTSConstructorIsRejected)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Holder {
+    @ForeignName["make"]
+    public init()
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("'@ForeignName' cannot be used on an '@ArkTS foreign' constructor"));
+}
+
+// A globalVar function is excluded from the ordinary wrapper option pass, so
+// its module option must still be checked by the variable lowering path.
+TEST_F(ArkTSForeignDiagTest, GlobalVarModulePathIsRejected)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "./actual", globalVar: true]
+public foreign func liveValue(): Int32
+)");
+    EXPECT_TRUE(HasErrorContaining("must be an ArkTS module specifier"));
+    EXPECT_TRUE(HasErrorContaining("'liveValue'"));
+}
+
+// The wrapper option pass refuses an explicitly empty string option; a
+// globalVar function, which that pass skips, must be refused too.
+TEST_F(ArkTSForeignDiagTest, GlobalVarEmptyForeignNameIsRejected)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual", foreignName: "", globalVar: true]
+public foreign func liveValue(): Int32
+)");
+    EXPECT_TRUE(HasErrorContaining("'foreignName' option of '@ArkTS' must not be an empty string"));
+}
+
+// A block-level annotation is cloned to every member; '@HasThis' names one
+// method's `this`, so the block form is refused once instead of silently
+// applying to all members.
+TEST_F(ArkTSForeignDiagTest, HasThisOnForeignBlockIsRejected)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign {
+    func greet(): Unit
+}
+
+public class Person {}
+)");
+    EXPECT_TRUE(HasErrorContaining("'@HasThis' cannot be applied to a foreign block"));
+}
+
+// The base contract of '@HasThis[TypeName]': it is accepted on an '@ArkTS'
+// foreign function, records the marker attribute, leaves the source type
+// reference intact, and gives the declaration the runtime carrier type
+// ArkTSFuncWithThis<ThisT, F>. The full call lowering of that value is a later
+// requirement.
+TEST_F(ArkTSForeignDiagTest, HasThisOnArkTSForeignFunctionIsAccepted)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Person {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign func greet(message: String): Unit
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fd = FindFunction("greet");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_TRUE(fd->TestAttr(Attribute::ARKTS_HAS_THIS));
+    EXPECT_TRUE(fd->HasAnno(AnnotationKind::HAS_THIS));
+    const Annotation* hasThis = nullptr;
+    for (auto& annotation : fd->annotations) {
+        if (annotation->kind == AnnotationKind::HAS_THIS) {
+            hasThis = annotation.get();
+        }
+    }
+    ASSERT_NE(hasThis, nullptr);
+    ASSERT_EQ(hasThis->args.size(), 1);
+    ASSERT_NE(hasThis->args.front()->expr, nullptr);
+    // The source AST keeps the type reference, not a literal: the CJO writer
+    // is what spells it as a string.
+    EXPECT_EQ(hasThis->args.front()->expr->astKind, ASTKind::REF_EXPR);
+    EXPECT_EQ(hasThis->args.front()->expr->ToString(), "Person");
+    auto carrier = DynamicCast<ClassTy*>(fd->DataTy());
+    ASSERT_NE(carrier, nullptr);
+    ASSERT_NE(carrier->decl, nullptr);
+    EXPECT_EQ(carrier->decl->identifier.Val(), "ArkTSFuncWithThis");
+    ASSERT_EQ(carrier->typeArgs.size(), 2);
+    EXPECT_TRUE(carrier->typeArgs[0]->IsClass());
+    EXPECT_TRUE(carrier->typeArgs[1]->IsFunc());
+}
+
+// An '@HasThis' value carries its ArkTS `this` argument, so a direct call is
+// refused with the dedicated diagnostic instead of falling through to a
+// generic "not callable" error.
+TEST_F(ArkTSForeignDiagTest, HasThisDirectCallIsRejected)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Person {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign func greet(message: String): Unit
+
+func callGreet(): Unit {
+    greet("x")
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("is an '@HasThis' function value and cannot be called directly"));
+    EXPECT_EQ(CountErrorsContaining("is an '@HasThis' function value and cannot be called directly"), 1U);
+}
+
+// The carrier type exposes `bind`, but producing and calling the bound value
+// needs the full '@HasThis' lowering. The call is refused with the staged
+// limitation instead of reaching code generation.
+TEST_F(ArkTSForeignDiagTest, HasThisBindIsRejectedAsUnsupported)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Person {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign func greet(message: String): Unit
+
+func bindGreet(person: Person): Unit {
+    let bound = greet.bind(person)
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("'ArkTSFuncWithThis.bind' is not supported yet in this release"), 1U);
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+}
+
+// '@HasThis' on anything other than an '@ArkTS' foreign function is a
+// placement error naming the actual declaration kind.
+TEST_F(ArkTSForeignDiagTest, HasThisOnNonFunctionDeclarationIsMisplaced)
+{
+    CompileSema(R"(package entry
+
+@HasThis[Plain]
+public class Plain {
+    public init() {}
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("'@HasThis' can only annotate an '@ArkTS' foreign function"), 1U);
+    EXPECT_TRUE(HasErrorContaining("a class declaration"));
+}
+
+// An ordinary Cangjie function is not an '@ArkTS' foreign function.
+TEST_F(ArkTSForeignDiagTest, HasThisOnNonForeignFunctionIsMisplaced)
+{
+    CompileSema(R"(package entry
+
+public class Plain {
+    public init() {}
+}
+
+@HasThis[Plain]
+public func host(): Unit {}
+)");
+    EXPECT_EQ(CountErrorsContaining("'@HasThis' can only annotate an '@ArkTS' foreign function"), 1U);
+    EXPECT_TRUE(HasErrorContaining("not an '@ArkTS' foreign function"));
+}
+
+// 'globalVar: true' maps a global variable; '@HasThis' maps a method. The two
+// contracts cannot hold for one declaration and the conflict is reported once.
+TEST_F(ArkTSForeignDiagTest, HasThisConflictsWithGlobalVar)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public class Plain {
+    public init() {}
+}
+
+@ArkTS[module: "actual", globalVar: true]
+@HasThis[Plain]
+foreign func count(): Int32
+)");
+    EXPECT_EQ(CountErrorsContaining("'@HasThis' conflicts with the '@ArkTS' option 'globalVar: true'"), 1U);
+    auto fd = FindFunction("count");
+    ASSERT_NE(fd, nullptr);
+    EXPECT_FALSE(fd->TestAttr(Attribute::ARKTS_HAS_THIS));
+}
+
+// The parser owns the repeated-annotation rule for builtin annotations, so a
+// second '@HasThis' on one declaration is refused before Sema.
+TEST_F(ArkTSForeignDiagTest, DuplicateHasThisIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Person {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+@HasThis[Person]
+public foreign func greet(): Unit
+)");
+    EXPECT_EQ(CountErrorsContaining("duplicated annotation"), 1U);
+    EXPECT_TRUE(HasErrorContaining("@HasThis"));
+}
+
+// '@HasThis' takes exactly one unnamed type name: a literal, a named argument,
+// an empty list and a multiple list are each refused with the dedicated parser
+// diagnostic rather than silently stored.
+TEST_F(ArkTSForeignDiagTest, HasThisRequiresOneUnnamedTypeArgument)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public class Person {
+    public init() {}
+}
+
+@ArkTS[module: "actual"]
+@HasThis[]
+foreign func empty(): Unit
+
+@ArkTS[module: "actual"]
+@HasThis[Person, Person]
+foreign func multiple(): Unit
+
+@ArkTS[module: "actual"]
+@HasThis[name: Person]
+foreign func named(): Unit
+
+@ArkTS[module: "actual"]
+@HasThis["Person"]
+foreign func literal(): Unit
+)");
+    EXPECT_EQ(CountErrorsContaining("requires exactly one unnamed type argument"), 4U);
+}
+
+// The resolved TypeName must be an ArkTS-compatible type. A plain Cangjie
+// class is not an ArkTS object reference, so the contract is refused after
+// type checking rather than carried into the CJO.
+TEST_F(ArkTSForeignDiagTest, HasThisRejectsNonArkTSCompatibleType)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+public class Plain {
+    public init() {}
+}
+
+@ArkTS[module: "actual"]
+@HasThis[Plain]
+public foreign func greet(): Unit
+)");
+    EXPECT_EQ(CountErrorsContaining("is not an ArkTS-compatible"), 1U);
+    EXPECT_TRUE(HasErrorContaining("@HasThis"));
+    EXPECT_TRUE(HasErrorContaining("'Plain'"));
+}
+
+// A '@HasThis' declaration fixes the ArkTS method type, so it cannot join an
+// overload set: sharing its name with another foreign function is refused
+// once, on the annotated declaration, which is then broken.
+TEST_F(ArkTSForeignDiagTest, HasThisOverloadWithSameNameForeignFunctionIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Person {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+public foreign func greet(message: String): Unit
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign func greet(): Unit
+)");
+    EXPECT_EQ(CountErrorsContaining("cannot be overloaded"), 1U);
+    EXPECT_EQ(CountErrorsContaining("'@HasThis' function 'greet'"), 1U);
+    Ptr<FuncDecl> hasThisFd{nullptr};
+    Walker walker(instance->GetSourcePackages()[0].get(), [&hasThisFd](Ptr<Node> node) {
+        auto fd = DynamicCast<FuncDecl*>(node);
+        if (fd != nullptr && fd->HasAnno(AnnotationKind::HAS_THIS)) {
+            hasThisFd = fd;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    ASSERT_NE(hasThisFd, nullptr);
+    EXPECT_TRUE(hasThisFd->TestAttr(Attribute::IS_BROKEN));
+    EXPECT_FALSE(hasThisFd->TestAttr(Attribute::ARKTS_HAS_THIS));
+}
+
+// Two '@HasThis' functions with distinct names do not form an overload set and
+// both keep their contracts.
+TEST_F(ArkTSForeignDiagTest, HasThisFunctionsWithDifferentNamesAreAccepted)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Person {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign func greet(message: String): Unit
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign func salute(message: String): Unit
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto greet = FindFunction("greet");
+    ASSERT_NE(greet, nullptr);
+    EXPECT_TRUE(greet->TestAttr(Attribute::ARKTS_HAS_THIS));
+    auto salute = FindFunction("salute");
+    ASSERT_NE(salute, nullptr);
+    EXPECT_TRUE(salute->TestAttr(Attribute::ARKTS_HAS_THIS));
+}
+
+// The rule is not limited to foreign declarations: any same-name package-level
+// function makes the '@HasThis' declaration an overload participant.
+TEST_F(ArkTSForeignDiagTest, HasThisOverloadWithOrdinaryFunctionIsDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Person {
+    public init()
+}
+
+public func greet(message: String): Unit {}
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign func greet(): Unit
+)");
+    EXPECT_EQ(CountErrorsContaining("cannot be overloaded"), 1U);
+    EXPECT_EQ(CountErrorsContaining("'@HasThis' function 'greet'"), 1U);
+    EXPECT_TRUE(IsDeclBroken("greet"));
+}
+
+// The ThisT spelling crosses a package boundary in the CJO annotation record:
+// the importer rebuilds the '@HasThis' annotation and the marker attribute.
+TEST_F(ArkTSForeignDiagTest, HasThisSurvivesCjoRoundTrip)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto depCjo = ExportSupportPackage(R"(package dep
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Person {
+    public init()
+}
+
+@ArkTS[module: "actual"]
+@HasThis[Person]
+public foreign func greet(): Unit
+)", {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    CompileSema(R"(package entry
+
+import dep.*
+
+// The cross-package contract is the CJO record itself; the carrier-type
+// reconstruction for an imported '@HasThis' declaration is a later
+// requirement, so this test does not call the imported value.
+public func use(person: Person): Unit {
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto imported = instance->importManager->GetImportedDecl("dep", "greet");
+    ASSERT_NE(imported, nullptr);
+    EXPECT_TRUE(imported->TestAttr(Attribute::ARKTS_HAS_THIS));
+    EXPECT_TRUE(imported->HasAnno(AnnotationKind::HAS_THIS));
+    const Annotation* hasThis = nullptr;
+    for (auto& annotation : imported->annotations) {
+        if (annotation->kind == AnnotationKind::HAS_THIS) {
+            hasThis = annotation.get();
+        }
+    }
+    ASSERT_NE(hasThis, nullptr);
+    // The writer carries the type spelling as one unnamed string literal.
+    ASSERT_EQ(hasThis->args.size(), 1);
+    auto literal = DynamicCast<LitConstExpr*>(hasThis->args.front()->expr.get());
+    ASSERT_NE(literal, nullptr);
+    EXPECT_EQ(literal->stringValue, "Person");
 }

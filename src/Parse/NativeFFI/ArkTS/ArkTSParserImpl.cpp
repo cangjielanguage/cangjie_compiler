@@ -72,25 +72,62 @@ bool IsArkTSForeignClassMember(const std::vector<Ptr<Node>>& chain, const Decl& 
     return false;
 }
 
+// Whether a declaration parsed directly in a class-like body belongs to an
+// @ArkTS enclosing declaration. A primary constructor (or an 'init' function)
+// is not parented to its class-like until after ParseDecl returns
+// (SetMemberParentInheritableDecl runs later in ParseClassBody), so
+// `decl.outerDecl` is still null while the rest-parameter check runs; resolve
+// the immediate class-like through the active parser chain instead. Gated to
+// body scopes so a function nested in a member body never resolves to the
+// outer class-like.
+bool EnclosingClassLikeHasARKTSAnnotation(
+    const std::vector<Ptr<Node>>& chain, const Decl& decl, ScopeKind scopeKind)
+{
+    if (scopeKind != ScopeKind::CLASS_BODY && scopeKind != ScopeKind::INTERFACE_BODY &&
+        scopeKind != ScopeKind::STRUCT_BODY) {
+        return false;
+    }
+    for (auto node = chain.rbegin(); node != chain.rend(); ++node) {
+        if (node->get() == &decl) {
+            continue;
+        }
+        auto classLike = DynamicCast<ClassLikeDecl*>(node->get());
+        if (classLike == nullptr) {
+            continue;
+        }
+        return HasArkTSAnnotation(classLike->annotations);
+    }
+    return false;
+}
+
 } // namespace
 
 // Before: top-level @ArkTS foreign func has FOREIGN in the source modifiers.
-// After: return a checking-only copy without FOREIGN and mark FuncDecl FOREIGN;
-// ParseFuncDecl keeps the original source modifier on the AST for body parsing.
-// This postpones C ABI checks until PrepareTypeCheck can classify a CJ wrapper.
-// Other functions return the modifiers unchanged; no glue body is created here.
+// After: mark FuncDecl FOREIGN and return the modifiers unchanged, so the
+// parser's modifier check still sees FOREIGN. ParseFuncDecl passes the @ArkTS
+// relaxation beside it, which exempts the access x FOREIGN pair except
+// PRIVATE; every other FOREIGN conflict (UNSAFE/EXCLAVE/COMMON/SPECIFIC/
+// CONST) is therefore reported. The declaration becomes an ordinary CJ
+// wrapper in NativeFFI before C ABI/type prechecking; no glue body is created
+// here and other functions return their modifiers unchanged.
 std::set<Modifier> ArkTSParserImpl::PrepareForeignFunctionModifiers(ScopeKind scopeKind,
     const std::set<Modifier>& modifiers, const PtrVector<Annotation>& annotations, FuncDecl& function) const
 {
-    // Preserve ordinary C foreign checks. ArkTS foreign will become an
-    // ordinary CJ wrapper in NativeFFI before C ABI/type prechecking.
-    auto checked = modifiers;
     if (scopeKind == ScopeKind::TOPLEVEL && AST::HasModifier(modifiers, TokenKind::FOREIGN) &&
         HasArkTSAnnotation(annotations)) {
-        Utils::EraseIf(checked, [](const auto& modifier) { return modifier.modifier == TokenKind::FOREIGN; });
         function.EnableAttr(Attribute::FOREIGN);
     }
-    return checked;
+    return modifiers;
+}
+
+// A namespace value is legal when it is empty or has no empty leading,
+// trailing or inner segment; "a.b" and "a" are legal, ".a", "a." and "a..b"
+// are not. The block-level option is validated once here before it is cloned
+// into every member; the Sema option fold applies the same rule to
+// declaration-level options.
+bool ArkTSParserImpl::IsArkTSNamespaceValid(const std::string& ns) const
+{
+    return ns.empty() || (ns.front() != '.' && ns.back() != '.' && ns.find("..") == std::string::npos);
 }
 
 // Before: a parsed declaration's function body. After result: whether its first
@@ -147,8 +184,12 @@ void ArkTSParserImpl::CheckRestParamPlacementImpl(const Decl& decl, const FuncBo
     // predicate at parse time, so the enclosing class-like is consulted as
     // an additional source.
     // `annos` may be empty on the init/primary-constructor/prop paths, where
-    // the declaration already owns its parsed annotations.
-    const bool hasArkTS = HasArkTSAnnotation(annos) || HasArkTSAnnotation(decl.annotations);
+    // the declaration already owns its parsed annotations. A constructor is
+    // not yet parented to its class-like at parse time, so the enclosing
+    // class-like is also resolved through the parser chain.
+    const bool hasArkTS = HasArkTSAnnotation(annos) || HasArkTSAnnotation(decl.annotations) ||
+        (decl.outerDecl != nullptr && HasArkTSAnnotation(decl.outerDecl->annotations)) ||
+        EnclosingClassLikeHasARKTSAnnotation(p.chainedAST, decl, scopeKind);
     const bool arktsForeign = (decl.TestAttr(Attribute::FOREIGN) && hasArkTS) ||
         IsArkTSForeignClassMember(p.chainedAST, decl, scopeKind);
     // Pre-scan for the first named parameter of the list, if any. Cangjie
@@ -185,7 +226,17 @@ void ArkTSParserImpl::CheckRestParamPlacementImpl(const Decl& decl, const FuncBo
             // and the placement checks below are skipped for the whole
             // function, so the same signature is not double-reported.
             if (!arktsForeign) {
-                DiagRestParamOnNonArkTSForeign(decl, *annotation);
+                // A non-foreign @ArkTS declaration is a legal declaration
+                // whose rest-parameter mapping is not implemented in this
+                // release; say so instead of reporting a misplaced
+                // annotation. A plain C foreign declaration stays under the
+                // ordinary annotation rule.
+                if (hasArkTS) {
+                    p.diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_rest_param_non_foreign_not_supported,
+                        *annotation, decl.identifier.Val());
+                } else {
+                    DiagRestParamOnNonArkTSForeign(decl, *annotation);
+                }
             } else if (namedParam != nullptr) {
                 if (!reportedNamedParamMix) {
                     p.DiagRestParamFunctionHasNamedParams(*annotation, *namedParam);

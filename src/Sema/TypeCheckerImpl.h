@@ -1714,6 +1714,10 @@ private:
     // FFI Sema Prepare Check.
     void LowerArkTSFunctions(ASTContext& ctx);
     void LowerArkTSClasses(ASTContext& ctx);
+    // A validated '@HasThis' foreign function denotes an
+    // ArkTSFuncWithThis<ThisT, F> value; replace its function type after the
+    // signature is checked.
+    void ApplyArkTSHasThisType(AST::FuncDecl& fd);
     // Shared state of one prepared ArkTS class or interface lowering step.
     // Defined in LowerClasses.cpp: no other translation unit can name it.
     struct ArkTSDeclLoweringContext;
@@ -1766,21 +1770,36 @@ private:
     // type node classifies as the empty (unsupported) description. Shared by
     // the two ArkTS lowering passes, so a position can never mean two things
     // across them.
-    Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyPosition(ASTContext& ctx, Ptr<AST::Type> type);
+    // `allowNestedOptional` is set only by the non-foreign exported-variable
+    // check, where design §3.4 permits a nested Option that unwraps layer by
+    // layer; every foreign signature keeps the default and refuses it.
+    Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyPosition(
+        ASTContext& ctx, Ptr<AST::Type> type, bool allowNestedOptional = false);
 
     // Refuse an extend declaration that adds a prepared @ArkTS foreign
     // interface to another type. Its implemented-interface types are resolved
     // later than the class/interface checks, so PreCheckExtend calls this.
     void RejectArkTSForeignInterfaceExtend(AST::ExtendDecl& ed);
+    // Refuse an extend whose extended type is a declaration carrying '@ArkTS':
+    // the ArkTS side has no extend form, so such members would be invisible
+    // to ArkTS. The extended type is resolved before PreCheckExtend.
+    void RejectArkTSDeclExtend(AST::ExtendDecl& ed);
     void PreCheckAnnoForFFI(AST::Node& root);
     void LowerArkTSVariables(ASTContext& ctx);
+    // Re-check a public non-foreign @ArkTS global variable after type checking:
+    // an inferred declaration has no written Type node at LowerArkTSVariables
+    // time, so the compatibility rule runs again on the resolved `vd->ty`.
+    void CheckArkTSExportedVariables(ASTContext& ctx);
     // Parse glue text produced by lowering and splice its statements into the
     // (still empty) body of \p fd, collecting the new locals like PreCheck does
     // so that references inside the generated code resolve. \p params are the
     // function parameters bound to the synthesized `__argument_N` names.
+    // \p classRefs carries the reference-leaf placeholders of a generated
+    // global-variable getter, bound to their class/enum declarations here.
     bool SpliceArkTSGeneratedBody(ASTContext& ctx, AST::FuncDecl& fd, const std::string& code,
         const std::unordered_map<std::string, std::string>& literals,
-        const std::vector<Ptr<AST::FuncParam>>& params);
+        const std::vector<Ptr<AST::FuncParam>>& params,
+        const std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs = nullptr);
     /**
      * Set the ABI information to Foreign Modifier. By default Foreign Modifier has Attribute::C.
      */

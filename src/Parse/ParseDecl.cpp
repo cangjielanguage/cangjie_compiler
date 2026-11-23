@@ -38,9 +38,9 @@ bool IsArkTSOnlyAnnotationKind(AnnotationKind kind)
 }
 
 // The access-modifier x FOREIGN conflict is lifted only on declarations
-// carrying the @ArkTS annotation, so the class/interface handlers compute
-// this flag from their annotations (which are still intact here: they are
-// moved into the declaration only after the modifier check) and forward it
+// carrying the @ArkTS annotation, so the class/interface/function handlers
+// compute this flag from their annotations (which are still intact here: they
+// are moved into the declaration only after the modifier check) and forward it
 // to CheckDeclModifiers.
 bool HasArkTSAnnotation(const std::vector<OwnedPtr<AST::Annotation>>& annos)
 {
@@ -284,6 +284,12 @@ OwnedPtr<Decl> ParserImpl::ParseVarOrLetOrConst(ScopeKind scopeKind,
         ConsumeUntil(TokenKind::NL);
     }
     ret->annotations = std::move(annos);
+    if (ret->astKind == ASTKind::VAR_DECL && HasArkTSAnnotation(ret->annotations)) {
+        // The CJO writer exports the @ArkTS annotation and its options only for
+        // declarations carrying this attribute; a non-foreign exported variable
+        // would otherwise lose them across a package boundary.
+        ret->EnableAttr(Attribute::ARKTS);
+    }
     if (scopeKind == ScopeKind::TOPLEVEL) {
         ret->EnableAttr(Attribute::GLOBAL);
     }
@@ -1637,7 +1643,14 @@ OwnedPtr<EnumDecl> ParserImpl::ParseEnumDecl(
     // access x FOREIGN conflict waived, so the preset `@ArkTS public foreign enum`
     // spelling parses. `annos` has already been moved into ret->annotations, so
     // read it from there.
-    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::ENUM, HasArkTSAnnotation(ret->annotations));
+    const bool arktsEnum = HasArkTSAnnotation(ret->annotations);
+    if (arktsEnum) {
+        // The CJO writer keys the annotation and option export on this
+        // attribute; without it a non-foreign @ArkTS enum loses its options
+        // across a package boundary.
+        ret->EnableAttr(Attribute::ARKTS);
+    }
+    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::ENUM, arktsEnum);
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
@@ -2099,9 +2112,10 @@ OwnedPtr<MainDecl> ParserImpl::ParseMainDecl(
 
 // ArkTS foreign path, before -> after: tokens/annotations for `foreign func f`
 // become a FuncDecl with FOREIGN/source modifiers, original signature and null
-// FuncBody.body. A checking-only modifier copy bypasses C-foreign restrictions;
-// it does not erase the source FOREIGN modifier. PrepareTypeCheck later turns
-// this declaration into a CJ wrapper and LowerArkTSFunctions fills its body.
+// FuncBody.body. The modifier check keeps FOREIGN in the set, so its conflicts
+// are reported; the @ArkTS relaxation exempts the visibility pair on a function
+// except PRIVATE. PrepareTypeCheck later turns this declaration into a CJ
+// wrapper and LowerArkTSFunctions fills its body.
 OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
     ScopeKind scopeKind, const std::set<Modifier>& modifiers, PtrVector<Annotation> annos)
 {
@@ -2131,8 +2145,11 @@ OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
         // For import: funcdecl with Mut modifier only allow in interface.
         scopeKind = ScopeKind::INTERFACE_BODY;
     }
+    // The @ArkTS relaxation is forwarded beside the untouched modifiers: only
+    // an @ArkTS declaration may spell FOREIGN together with a visibility, and
+    // on a function PRIVATE x FOREIGN still conflicts.
     auto attrs = CheckDeclModifiers(ffiParser->ArkTS().PrepareForeignFunctionModifiers(scopeKind, modifiers, annos, *ret),
-        scopeKind, DefKind::FUNC);
+        scopeKind, DefKind::FUNC, HasAnnotation(annos, AnnotationKind::ARKTS));
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }

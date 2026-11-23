@@ -455,15 +455,15 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
             }
             // An explicit module is a module specifier: a system module name
             // ("@..."), a project module name, or a project ETS source path
-            // such as "entry/src/main/ets/Foo". Any separator shape that is
-            // not a leading relative or absolute spelling ("a/", "a//b",
-            // "a\b") passes. Only "./"/"../" starts, OS-absolute paths,
-            // drive-absolute paths and UNC paths are rejected. Both
-            // separators are checked on every host, because the ArkTS project
-            // may be built on Windows. Existence checking would need the
-            // ArkTS project root, which is not a compiler input, so only the
-            // format is rejected here; existence and named-module
-            // resolvability stay with the runtime module loading.
+            // such as "entry/src/main/ets/Foo". A leading "./"/"../", an
+            // OS-absolute path, a drive-absolute path, a UNC path or any
+            // backslash spelling is rejected; other separator shapes such as
+            // "a/" or "a//b" pass. Both separators are checked on every host,
+            // because the ArkTS project may be built on Windows. Existence
+            // checking would need the ArkTS project root, which is not a
+            // compiler input, so only the format is rejected here; existence
+            // and named-module resolvability stay with the runtime module
+            // loading.
             if (options.count("module") != 0) {
                 const std::string& moduleValue = options.at("module");
                 if (ArkTSModulePathLike(moduleValue)) {
@@ -591,8 +591,11 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 node->curFile = file.get();
                 node->begin = fd->begin;
                 node->end = fd->end;
-                if (auto literal = DynamicCast<LitConstExpr*>(node); literal && literals.count(literal->stringValue)) {
-                    literal->stringValue = literals.at(literal->stringValue);
+                if (auto literal = DynamicCast<LitConstExpr*>(node); literal) {
+                    std::string rebound;
+                    if (ArkTSRebindPlaceholderLiteral(literal->stringValue, literals, rebound)) {
+                        literal->stringValue = std::move(rebound);
+                    }
                 }
                 // Type placeholders carry a reference element in generated
                 // annotations (Array<T>, Option<T>): bind the reference type

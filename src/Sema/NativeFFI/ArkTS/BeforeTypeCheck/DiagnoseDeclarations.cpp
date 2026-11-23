@@ -12,15 +12,19 @@
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 
+#include <algorithm>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 using namespace Cangjie;
 using namespace Cangjie::AST;
 namespace Cangjie::Native::FFI::ArkTS {
 namespace {
 constexpr const char* ENTRY_SHAPE_NOTE =
-    "an @ArkTS entry is a top-level public parameterless function with an explicit 'Unit' return type";
+    "this release implements only the minimal entry shape: a public parameterless function with an explicit 'Unit' "
+    "return type";
 constexpr const char* ENTRY_DUPLICATE_NOTE = "entry names are registered with JSModule.registerFunc";
 
 const Annotation* FindAnnotation(const Decl& decl, AnnotationKind kind)
@@ -53,7 +57,7 @@ const Annotation* FindArkTSAnnotation(const Decl& decl)
 bool IsArkTSOnlyAnnotation(AnnotationKind kind)
 {
     return kind == AnnotationKind::ARKTS || kind == AnnotationKind::RAW_VALUE || kind == AnnotationKind::REST_PARAM ||
-        kind == AnnotationKind::WRITE_ONLY;
+        kind == AnnotationKind::WRITE_ONLY || kind == AnnotationKind::HAS_THIS;
 }
 
 // A non-foreign entry may not declare type parameters. The parser rejects the
@@ -97,24 +101,31 @@ bool HasOnlyWellFormedModuleOption(const Annotation& annotation)
         !ArkTSOptionValueEmpty(literal->stringValue);
 }
 
-// The first unmet entry rule in declaration order. One entry reports one rule,
-// so a later shape mistake is not restated on the same declaration.
+// The first unmet rule of this release's minimal entry shape, in declaration
+// order. One entry reports one rule, so a later shape mistake is not restated
+// on the same declaration. The reasons describe the staged limitation, not a
+// language rule; a non-public declaration never reaches this function.
 std::string EntryShapeReason(const FuncDecl& fd)
 {
-    if (!fd.TestAttr(Attribute::PUBLIC)) {
-        return "must be 'public'";
-    }
     if (!HasSingleEmptyParameterList(fd)) {
-        return "must not take parameters";
+        return "it declares parameters";
     }
     if (!DeclaresExplicitUnitReturnType(fd)) {
-        return "must declare an explicit 'Unit' return type";
+        return "it does not declare an explicit 'Unit' return type";
     }
     const auto* annotation = FindArkTSAnnotation(fd);
     if (annotation != nullptr && !annotation->args.empty() && !HasOnlyWellFormedModuleOption(*annotation)) {
-        return "must not declare options";
+        return "it declares options other than 'module'";
     }
     return {};
+}
+
+// A non-public @ArkTS declaration is accepted but not exported, so it is not
+// an entry: it is neither shape-checked nor registered, and no callback is
+// generated for it.
+bool IsExportedArkTSEntry(const FuncDecl& fd)
+{
+    return IsArkTSEntry(fd) && fd.TestAttr(Attribute::PUBLIC);
 }
 
 // The declaration kind that @ArkTS cannot annotate. An empty result means the
@@ -146,6 +157,10 @@ std::string UnsupportedPlacementKind(const Decl& decl, bool topLevel)
             return "a class member";
         case ASTKind::PRIMARY_CTOR_DECL:
             return "a class member";
+        case ASTKind::FUNC_PARAM:
+            // A parameter annotation has no declaration to carry the
+            // interop contract; it must not be accepted silently.
+            return "a function parameter";
         default:
             return {};
     }
@@ -185,7 +200,7 @@ void DiagnoseReservedGeneratedNames(Package& pkg, DiagnosticEngine& diag)
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(decl.get());
-            if (fd != nullptr && IsArkTSEntry(*fd)) {
+            if (fd != nullptr && IsExportedArkTSEntry(*fd)) {
                 hasEntry = true;
                 break;
             }
@@ -215,7 +230,7 @@ void DiagnoseReservedGeneratedNames(Package& pkg, DiagnosticEngine& diag)
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(decl.get());
-            if (fd != nullptr && IsArkTSEntry(*fd)) {
+            if (fd != nullptr && IsExportedArkTSEntry(*fd)) {
                 fd->EnableAttr(Attribute::IS_BROKEN);
             }
         }
@@ -228,7 +243,8 @@ void DiagnoseEntries(Package& pkg, DiagnosticEngine& diag)
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(decl.get());
-            if (!fd || !IsArkTSEntry(*fd) || fd->TestAttr(Attribute::IS_BROKEN) || !fd->funcBody) {
+            if (!fd || !IsArkTSEntry(*fd) || !fd->TestAttr(Attribute::PUBLIC) ||
+                fd->TestAttr(Attribute::IS_BROKEN) || !fd->funcBody) {
                 continue;
             }
             if (HasTypeParameters(*fd)) {
@@ -241,7 +257,7 @@ void DiagnoseEntries(Package& pkg, DiagnosticEngine& diag)
             if (!reason.empty()) {
                 fd->EnableAttr(Attribute::IS_BROKEN);
                 auto builder = diag.DiagnoseRefactor(
-                    DiagKindRefactor::sema_arkts_entry_invalid, *fd, fd->identifier.Val(), reason);
+                    DiagKindRefactor::sema_arkts_entry_shape_not_supported, *fd, fd->identifier.Val(), reason);
                 builder.AddNote(ENTRY_SHAPE_NOTE);
                 continue;
             }
@@ -354,6 +370,88 @@ std::string WriteOnlyPlacementReason(const Decl& decl)
     return {};
 }
 
+// The placement of a '@HasThis' annotation that is not on an '@ArkTS' foreign
+// function. The wording names the declaration kind the user wrote, so the
+// message reads as a placement mistake rather than an unknown annotation.
+std::string HasThisPlacementKind(const Decl& decl)
+{
+    if (DynamicCast<const FuncDecl*>(&decl) != nullptr) {
+        return "a function that is not an '@ArkTS' foreign function";
+    }
+    switch (decl.astKind) {
+        case ASTKind::CLASS_DECL:
+            return "a class declaration";
+        case ASTKind::INTERFACE_DECL:
+            return "an interface declaration";
+        case ASTKind::STRUCT_DECL:
+            return "a struct declaration";
+        case ASTKind::ENUM_DECL:
+            return "an enum declaration";
+        case ASTKind::VAR_DECL:
+            return "a variable declaration";
+        case ASTKind::PROP_DECL:
+            return "a property declaration";
+        case ASTKind::FUNC_PARAM:
+            return "a function parameter";
+        case ASTKind::TYPE_ALIAS_DECL:
+            return "a type alias";
+        default:
+            return "this declaration";
+    }
+}
+
+// The '@HasThis' argument must be a type reference, which is an identifier or
+// a dotted identifier path. The parser rejects other shapes before this pass;
+// this check keeps a rejected shape from being recorded as a contract if the
+// declaration is reached anyway.
+bool IsHasThisTypeReference(const Expr* expr)
+{
+    if (expr == nullptr) {
+        return false;
+    }
+    if (expr->astKind == ASTKind::REF_EXPR) {
+        return true;
+    }
+    if (auto access = DynamicCast<const MemberAccess*>(expr); access != nullptr) {
+        return IsHasThisTypeReference(access->baseExpr.get());
+    }
+    return false;
+}
+
+// '@HasThis' maps an ArkTS method `this`, so the annotated declaration has a
+// fixed function type and must not participate in a Cangjie overload set: its
+// name has to be unique among the package's top-level functions. Member
+// functions live in their own scopes and are deliberately not indexed, and a
+// declaration already refused by another rule is out of the package scope, so
+// it cannot create a conflict.
+using TopLevelFunctions = std::unordered_map<std::string, std::vector<FuncDecl*>>;
+
+TopLevelFunctions IndexTopLevelFunctions(Package& pkg)
+{
+    TopLevelFunctions byName;
+    for (auto& file : pkg.files) {
+        for (auto& decl : file->decls) {
+            auto fd = DynamicCast<FuncDecl*>(decl.get());
+            if (fd == nullptr || fd->identifier.Empty() ||
+                fd->TestAnyAttr(Attribute::COMPILER_ADD, Attribute::IS_BROKEN)) {
+                continue;
+            }
+            byName[fd->identifier.Val()].push_back(fd);
+        }
+    }
+    return byName;
+}
+
+bool HasSameNameFunction(const FuncDecl& fd, const TopLevelFunctions& byName)
+{
+    auto found = byName.find(fd.identifier.Val());
+    if (found == byName.end()) {
+        return false;
+    }
+    return std::any_of(found->second.begin(), found->second.end(),
+        [&fd](const FuncDecl* other) { return other != &fd; });
+}
+
 // A refused @WriteOnly leaves a foreign owner without a complete wrapper
 // shape; other owners keep their remaining diagnostics.
 void MarkForeignOwnerBroken(Decl* owner)
@@ -452,6 +550,142 @@ void DiagnoseExperimentalGate(Package& pkg, DiagnosticEngine& diag)
             }
             return VisitAction::WALK_CHILDREN;
         }).Walk();
+    }
+}
+
+// '@HasThis[TypeName]' is the ArkTS method-`this` contract. Before preparation
+// rewrites the declaration, the annotation must sit on an '@ArkTS' foreign
+// function, appear once (the parser owns the repeated-annotation rule) and not
+// coexist with 'globalVar: true'. A valid contract is recorded on the
+// declaration so later stages do not re-parse the annotation; the argument's
+// resolved type is checked after type checking, because at this point it is a
+// type reference, not a semantic type.
+void DiagnoseArkTSHasThis(Package& pkg, DiagnosticEngine& diag)
+{
+    if (pkg.TestAttr(Attribute::IMPORTED)) {
+        return;
+    }
+    // The overload name rule spans the whole package, so the index is built
+    // before the per-declaration walk below.
+    const auto topLevelFunctions = IndexTopLevelFunctions(pkg);
+    for (auto& file : pkg.files) {
+        Walker walker(file.get(), [&diag, &topLevelFunctions](Ptr<Node> node) {
+            auto decl = DynamicCast<Decl*>(node);
+            if (decl == nullptr || decl->TestAnyAttr(Attribute::COMPILER_ADD, Attribute::IS_BROKEN)) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            Annotation* hasThis = nullptr;
+            for (auto& annotation : decl->annotations) {
+                if (annotation != nullptr && annotation->kind == AnnotationKind::HAS_THIS &&
+                    !annotation->TestAttr(Attribute::IS_BROKEN)) {
+                    hasThis = annotation.get();
+                    break;
+                }
+            }
+            if (hasThis == nullptr) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            auto fd = DynamicCast<FuncDecl*>(decl);
+            // A prepared wrapper keeps the contract it validated before the
+            // rewrite; a repeated preparation pass must not report it as a
+            // misplaced annotation on a non-foreign function.
+            if (fd != nullptr && fd->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER)) {
+                fd->EnableAttr(Attribute::ARKTS_HAS_THIS);
+                return VisitAction::WALK_CHILDREN;
+            }
+            if (fd == nullptr) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor::sema_arkts_has_this_placement_invalid, *hasThis, HasThisPlacementKind(*decl));
+                hasThis->EnableAttr(Attribute::IS_BROKEN);
+                return VisitAction::WALK_CHILDREN;
+            }
+            if (!IsArkTSForeignFunction(*fd)) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor::sema_arkts_has_this_placement_invalid, *hasThis, HasThisPlacementKind(*decl));
+                hasThis->EnableAttr(Attribute::IS_BROKEN);
+                return VisitAction::WALK_CHILDREN;
+            }
+            if (IsGlobalVar(*fd)) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_global_var_conflict, *hasThis);
+                hasThis->EnableAttr(Attribute::IS_BROKEN);
+                return VisitAction::WALK_CHILDREN;
+            }
+            // The parser refuses a malformed argument before this pass; only a
+            // well-formed type-reference contract reaches the stored attribute
+            // and the post-type-check type rule.
+            const bool wellFormed = hasThis->args.size() == 1 && hasThis->args.front() != nullptr &&
+                hasThis->args.front()->name.Empty() && IsHasThisTypeReference(hasThis->args.front()->expr.get());
+            if (wellFormed) {
+                // A '@HasThis' declaration names one ArkTS method and cannot
+                // join an overload set, so a same-name function in the package
+                // scope is refused here. The refused declaration is broken, so
+                // later stages and references do not report it again.
+                if (HasSameNameFunction(*fd, topLevelFunctions)) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor::sema_arkts_has_this_overload_conflict, *hasThis, fd->identifier.Val());
+                    fd->EnableAttr(Attribute::IS_BROKEN);
+                    hasThis->EnableAttr(Attribute::IS_BROKEN);
+                    return VisitAction::WALK_CHILDREN;
+                }
+                fd->EnableAttr(Attribute::ARKTS_HAS_THIS);
+            } else {
+                hasThis->EnableAttr(Attribute::IS_BROKEN);
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+    }
+}
+
+// The '@HasThis' argument is a type reference, so its semantic type only
+// exists after the checker synthesized the annotation (CheckAnnotations). This
+// post-type-check pass classifies that type with the same shared mapper as an
+// ArkTS signature position. An ArkTS `this` is an object reference, so the
+// resolved TypeName must classify as a reference (a prepared foreign class or
+// interface); a scalar or any unsupported type is refused instead of being
+// carried into the CJO contract.
+void ValidateArkTSHasThisTypes(Package& pkg, DiagnosticEngine& diag, ImportManager* imports)
+{
+    if (pkg.TestAttr(Attribute::IMPORTED) || !PassEnabled(pkg)) {
+        return;
+    }
+    for (auto& file : pkg.files) {
+        Walker walker(file.get(), [&diag, imports](Ptr<Node> node) {
+            auto decl = DynamicCast<Decl*>(node);
+            if (decl == nullptr || !decl->TestAttr(Attribute::ARKTS_HAS_THIS)) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            for (auto& annotation : decl->annotations) {
+                if (annotation == nullptr || annotation->kind != AnnotationKind::HAS_THIS ||
+                    annotation->TestAttr(Attribute::IS_BROKEN)) {
+                    continue;
+                }
+                if (annotation->args.size() != 1 || annotation->args.front() == nullptr ||
+                    !annotation->args.front()->name.Empty() || annotation->args.front()->expr == nullptr) {
+                    // The parser already refused this shape.
+                    continue;
+                }
+                auto& arg = *annotation->args.front();
+                auto ty = arg.expr->DataTy();
+                if (ty == nullptr || !Ty::IsTyCorrect(ty)) {
+                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_type_unsupported, arg,
+                        arg.expr->ToString());
+                    annotation->EnableAttr(Attribute::IS_BROKEN);
+                    continue;
+                }
+                auto desc = ArkTSClassifyType(ty, imports);
+                if (desc.kind != ArkTSTypeDesc::Kind::REFERENCE) {
+                    // Report the spelling the user wrote, not the internal Ty
+                    // name ("Class-Plain").
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor::sema_arkts_has_this_type_unsupported, arg, arg.expr->ToString());
+                    annotation->EnableAttr(Attribute::IS_BROKEN);
+                }
+                break;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
     }
 }
 } // namespace Cangjie::Native::FFI::ArkTS

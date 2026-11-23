@@ -778,6 +778,17 @@ enum class Attribute {
     // recognized as prepared so @RawValue checks and type mapping accept it.
     // Enums have no wrapper counterpart, so the bits are not interchangeable.
     ARKTS_LOWERED,
+
+    // A prepared ArkTS foreign function whose source declaration carried
+    // '@HasThis[TypeName]': the ArkTS target is a method whose `this` has
+    // TypeName. The ThisT spelling itself is carried across the CJO boundary by
+    // the HasThis annotation record; this bit marks the contract on prepared
+    // and imported wrappers without re-parsing the annotation. The call
+    // semantics are a later requirement. Appending keeps existing serialized
+    // attribute indices stable.
+    // W: ArkTS prepare validation and the CJO loader.
+    // R: later @HasThis lowering and the CJO writer/loader.
+    ARKTS_HAS_THIS,
     AST_ATTR_END,
 };
 

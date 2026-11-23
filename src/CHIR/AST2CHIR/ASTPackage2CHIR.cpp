@@ -39,6 +39,19 @@ Linkage GetFuncLinkage(const GlobalOptions& opts, const AST::FuncDecl& func)
     return func.linkage;
 }
 
+// An '@HasThis' declaration carries the ArkTSFuncWithThis<ThisT, F> class type
+// for name resolution, but the CHIR symbol is still the generated function
+// wrapper. Translate the checked function body's type for the symbol so the
+// class type never reaches a FuncType cast.
+Ptr<AST::Ty> GetFuncDeclCHIRType(const AST::FuncDecl& funcDecl)
+{
+    if (funcDecl.TestAttr(AST::Attribute::ARKTS_HAS_THIS) && funcDecl.funcBody &&
+        funcDecl.funcBody->GetTy().IsCorrect() && funcDecl.funcBody->GetTy()->IsFunc()) {
+        return funcDecl.funcBody->GetTy().Ty();
+    }
+    return funcDecl.GetTy().Ty();
+}
+
 bool IsLocalConstFuncInStaticMember(const AST::FuncDecl& astFunc)
 {
     if (!astFunc.isConst) {
@@ -589,7 +602,7 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
         fn->SetFeatures(features);
         return;
     }
-    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(GetFuncDeclCHIRType(funcDecl));
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     // Create BlockGroup with argument
 
@@ -653,7 +666,7 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
 
 void AST2CHIR::CreatePseudoImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
 {
-    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(GetFuncDeclCHIRType(funcDecl));
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     FuncType* funcTy = StaticCast<FuncType*>(fnTy);
     auto genericParamTy = GetGenericParamType(funcDecl, chirType);
@@ -673,7 +686,7 @@ namespace {
 void ConvertImportedFunctionType(
     Function& fn, const AST::FuncDecl& funcDecl, CHIRType& chirType, CHIRBuilder& builder)
 {
-    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(GetFuncDeclCHIRType(funcDecl));
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     if (fn.GetFuncType() == fnTy) {
         return;
@@ -696,7 +709,7 @@ void AST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl&
         fn->SetDebugLocation(loc);
         return;
     }
-    auto fnTy = StaticCast<FuncType*>(chirType.TranslateType(funcDecl.GetTy()));
+    auto fnTy = StaticCast<FuncType*>(chirType.TranslateType(GetFuncDeclCHIRType(funcDecl)));
     fnTy = AdjustFuncType(*fnTy, funcDecl, builder, chirType);
     auto genericParamTy = GetGenericParamType(funcDecl, chirType);
     fn = builder.CreateFunction(fnTy, funcDecl.mangledName, funcDecl.identifier,

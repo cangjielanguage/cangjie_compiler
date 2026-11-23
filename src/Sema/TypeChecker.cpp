@@ -274,6 +274,7 @@ bool TypeChecker::TypeCheckerImpl::CheckNormalFuncBody(ASTContext& ctx, FuncBody
     // Update funcDecl's type after body is checked.
     if (fb.funcDecl) {
         fb.funcDecl->SetTy({funcTy});
+        ApplyArkTSHasThisType(*fb.funcDecl);
     }
     fb.SetTy({funcTy});
     return true;
@@ -2115,6 +2116,14 @@ void TypeChecker::TypeCheckerImpl::PostTypeCheck(std::vector<Ptr<ASTContext>>& c
         CheckInstDupSuperInterfacesEntry(*ctx->curPackage);
         // Check legality of usage after sema type completed.
         CheckLegalityOfUsage(*ctx, *ctx->curPackage);
+        // '@HasThis' carries a type reference; its resolved type is only
+        // available after the annotation was synthesized, so the ArkTS
+        // compatibility rule runs here rather than in the prepare pass.
+        Native::FFI::ArkTS::ValidateArkTSHasThisTypes(*ctx->curPackage, diag, &importManager);
+        // A public non-foreign @ArkTS global variable with an inferred type
+        // only has a resolved `vd->ty` here, so its ArkTS compatibility check
+        // runs post-typecheck.
+        CheckArkTSExportedVariables(*ctx);
         // Check cjmp match rules.
         Utils::ProfileRecorder::Start("Post TypeCheck", "CheckCJMPRules");
         mpImpl->CheckReturnAndVariableTypes(*ctx->curPackage);

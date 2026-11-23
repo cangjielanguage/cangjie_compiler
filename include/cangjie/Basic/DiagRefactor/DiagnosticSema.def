@@ -549,8 +549,19 @@ ERROR(sema_arkts_foreign_interface_invalid,
 ERROR(sema_arkts_foreign_interface_impl_invalid,
     "Cangjie type '%s' cannot implement @ArkTS foreign interface '%s'")
 // Non-foreign @ArkTS declaration rules.
-ERROR(sema_arkts_entry_invalid,
-    "invalid @ArkTS entry '%s': %s")
+// A shape outside this release's minimal entry contract is a staged
+// limitation, not a language rule; the wording must not read as one.
+ERROR(sema_arkts_entry_shape_not_supported,
+    "the shape of '@ArkTS' entry '%s' is not supported yet: %s")
+// '@HasThis' maps a function value carrying its ArkTS `this` argument; the
+// value itself is not directly callable (design 4.1.3/4.2).
+ERROR(sema_arkts_has_this_direct_call_not_allowed,
+    "'%s' is an '@HasThis' function value and cannot be called directly; bind the 'this' argument first")
+// The carrier's `bind` lookup is type-checked, but producing and calling the
+// bound value needs the full '@HasThis' lowering, which this release does not
+// implement. Refuse the call instead of reaching code generation.
+ERROR(sema_arkts_has_this_bind_not_supported,
+    "'ArkTSFuncWithThis.bind' is not supported yet in this release")
 ERROR(sema_arkts_entry_name_duplicated,
     "duplicate @ArkTS entry name '%s' in package '%s'")
 ERROR(sema_arkts_entry_generated_name_conflict,
@@ -559,6 +570,9 @@ ERROR(sema_arkts_option_module_only_foreign,
     "'module' option is only valid on @ArkTS foreign declarations, not on '%s'")
 ERROR(sema_arkts_annotation_placement_invalid,
     "'@ArkTS' cannot be used on %s '%s'")
+ERROR(sema_arkts_generic_foreign_unsupported,
+    "generic '@ArkTS foreign' declaration '%s' is not supported; only the standard-library preset types "
+    "keep a generic external form")
 // A defaulted named parameter must have an Option<T> type so the wrapper can
 // represent an omitted argument.
 ERROR(sema_arkts_foreign_named_param_not_option,
@@ -570,5 +584,30 @@ ERROR(sema_arkts_module_path_invalid,
     "'module' option '%s' of @ArkTS %s '%s' must be an ArkTS module specifier - a module name "
     "such as '@ohos.util' or 'utils', or a project ETS source path such as 'entry/src/main/ets/Foo' - not a "
     "'./' or '../' relative path, a backslash spelling, an OS-absolute, drive-absolute or UNC path")
+// '@HasThis[TypeName]' is the ArkTS method-`this` contract: it is only valid on
+// an '@ArkTS' foreign function. The second argument describes the actual
+// placement. A repeated annotation is owned by the parser's duplicate rule.
+ERROR(sema_arkts_has_this_placement_invalid,
+    "'@HasThis' can only annotate an '@ArkTS' foreign function, not %s")
+// 'globalVar: true' maps a global variable; '@HasThis' maps a method. Both
+// cannot hold for one declaration.
+ERROR(sema_arkts_has_this_global_var_conflict,
+    "'@HasThis' conflicts with the '@ArkTS' option 'globalVar: true'; remove one of them")
+// '@HasThis' fixes the static type of the declaration to the ArkTS method
+// type, so the declaration cannot take part in Cangjie overload resolution:
+// its name must be unique among the package's top-level functions.
+ERROR(sema_arkts_has_this_overload_conflict,
+    "the '@HasThis' function '%s' cannot be overloaded; a '@HasThis' declaration must have a unique name in "
+    "its package")
+// The resolved ThisT is the ArkTS `this` type, so it must be an object
+// reference (a prepared '@ArkTS' class or interface), not a scalar or an
+// unsupported type. The spelling is reported as written so the user can find
+// the argument.
+ERROR(sema_arkts_has_this_type_unsupported,
+    "type argument '%s' of '@HasThis' is not an ArkTS-compatible object type")
+// A declaration carrying '@ArkTS' is the ArkTS-side object; a Cangjie extend
+// would add members the ArkTS side cannot see, so no extend may target it.
+ERROR(sema_arkts_decl_cannot_be_extended,
+    "'@ArkTS' declaration '%s' cannot be extended")
 
 ERROR(sema_diag_end, "")

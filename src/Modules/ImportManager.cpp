@@ -119,6 +119,9 @@ constexpr const char* ARKTS_LANG_FULL_PACKAGE = "arkts.lang";
 // user code never writes this type, so the compiler imports the single member
 // instead of asking the user for the facade.
 constexpr const char* ARKTS_CONVERSION_EXCEPTION = "ExternConversionException";
+// Private alias import the global-variable getter uses for the conversion
+// exception (a bare name is ambiguous with a std.core export).
+constexpr const char* ARKTS_CONVERSION_ALIAS = "__cj_arkts_extern_conversion";
 // The public call-failure exception the wrapper's guards throw, hosted by the
 // same facade and imported the same way.
 constexpr const char* ARKTS_RUNTIME_EXCEPTION = "ForeignRuntimeException";
@@ -168,7 +171,12 @@ bool IsArkTSInteropImport(const ImportSpec& import)
 // name. A star import of the package binds all its members; a single import of
 // the member binds it directly. A package import only binds the package name,
 // and an alias binds the alias, so neither counts.
-bool FileImportsMember(const File& file, const std::string& fullPackageName, const std::string& member)
+// Whether the file binds @p member through a single-member import. A star
+// import is deliberately not enough: another star import of a different
+// package may export the same name (std.core and the ArkTS facade both spell
+// the interop exceptions), so the compiler-injected single-member import must
+// still be added to make the generated reference unambiguous.
+bool FileBindsMemberDirectly(const File& file, const std::string& fullPackageName, const std::string& member)
 {
     const auto memberPackage = fullPackageName + "." + member;
     for (auto& import : file.imports) {
@@ -176,10 +184,6 @@ bool FileImportsMember(const File& file, const std::string& fullPackageName, con
             continue;
         }
         const auto& content = import->content;
-        if (content.kind == ImportKind::IMPORT_ALL && content.aliasName.Empty() &&
-            content.GetImportedPackageName() == fullPackageName) {
-            return true;
-        }
         if (content.kind == ImportKind::IMPORT_SINGLE && content.aliasName.Empty() &&
             content.identifier.Val() == member && content.GetImportedPackageName() == memberPackage) {
             return true;
@@ -551,7 +555,9 @@ Range GetPackageNameRange(const CjoManager& cjoManager, const ImportSpec& import
         : (cjoManager.IsImportPackage(import)
                   ? (im.prefixPoses.empty() ? MakeRange(im.identifier)
                                             : MakeRange(im.prefixPoses.front(), im.identifier.End()))
-                  : MakeRange(im.prefixPoses.front(), im.prefixPoses.back() + im.prefixPaths.back().size()));
+                  : (im.prefixPoses.empty() || im.prefixPaths.empty()
+                            ? MakeRange(im.identifier)
+                            : MakeRange(im.prefixPoses.front(), im.prefixPoses.back() + im.prefixPaths.back().size())));
 }
 } // namespace
 
@@ -937,7 +943,9 @@ void ImportManager::CheckImports(const AST::Package& pkg)
             Utils::EraseIf(decls, [relation](auto it) { return !Modules::IsVisible(*it, relation); });
             if (decls.empty()) {
                 auto& im = import->content;
-                auto nameRange = MakeRange(im.prefixPoses.front(), im.identifier.End());
+                auto nameRange = im.prefixPoses.empty()
+                    ? MakeRange(im.identifier)
+                    : MakeRange(im.prefixPoses.front(), im.identifier.End());
                 diag.DiagnoseRefactor(
                     DiagKindRefactor::package_decl_not_find_in_package, nameRange, im.identifier, fullPackageName);
             }
@@ -1350,7 +1358,8 @@ void ImportManager::AddArkTSInteropImports(
             // the user for the package. A star import of the package already
             // makes the name visible.
             auto addMemberImport = [&](const std::string& fullPackageName, const std::string& member) {
-                if (pkg->fullPackageName == fullPackageName || FileImportsMember(*file, fullPackageName, member) ||
+                if (pkg->fullPackageName == fullPackageName ||
+                    FileBindsMemberDirectly(*file, fullPackageName, member) ||
                     !IsPackageResolvable(*this, fullPackageName)) {
                     return;
                 }
@@ -1379,6 +1388,10 @@ void ImportManager::AddArkTSInteropImports(
                 import->content.curFile = file.get();
                 file->imports.emplace_back(std::move(import));
             };
+            // The global-variable getter spells the conversion exception
+            // through a private alias: a bare name is ambiguous when std.core
+            // also exports it, and a package qualifier is not a type name.
+            addMemberImportAs(ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION, ARKTS_CONVERSION_ALIAS);
             addMemberImportAs(ARKTS_NUMERIC_FULL_PACKAGE, ARKTS_BIGINT_MEMBER, ARKTS_BIGINT_ALIAS);
             addMemberImport(ARKTS_CONVERT_FULL_PACKAGE, ARKTS_PARSABLE_MEMBER);
             // The getter's prologue reads the current call-scope entry through

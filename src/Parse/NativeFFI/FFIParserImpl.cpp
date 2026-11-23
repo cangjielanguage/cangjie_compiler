@@ -115,6 +115,23 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
             it = annos.erase(it);
             continue;
         }
+        if (annotation->kind == AnnotationKind::REST_PARAM) {
+            // A block-level annotation is cloned into every member; refusing
+            // it once here keeps the rule from repeating per member.
+            p.diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_rest_param_on_block, *annotation);
+            it = annos.erase(it);
+            continue;
+        }
+        if (annotation->kind == AnnotationKind::RAW_VALUE) {
+            p.diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_raw_value_on_block, *annotation);
+            it = annos.erase(it);
+            continue;
+        }
+        if (annotation->kind == AnnotationKind::HAS_THIS) {
+            p.diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_has_this_on_block, *annotation);
+            it = annos.erase(it);
+            continue;
+        }
         if (annotation->kind != AnnotationKind::ARKTS) {
             ++it;
             continue;
@@ -162,6 +179,14 @@ void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) c
             if (std::all_of(literal->stringValue.begin(), literal->stringValue.end(),
                     [](unsigned char c) { return std::isspace(c) != 0; })) {
                 p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty, *annotation, name);
+                continue;
+            }
+            // A block namespace is cloned into every member, so an ill-formed
+            // path is reported once here and dropped before cloning; members
+            // keep only the valid block defaults and cannot repeat the error.
+            if (name == "namespace" && !arkTS.IsArkTSNamespaceValid(literal->stringValue)) {
+                p.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_namespace_invalid, *arg->expr,
+                    literal->stringValue);
                 continue;
             }
             validArgs.emplace_back(std::move(arg));
@@ -299,6 +324,14 @@ void FFIParserImpl::CheckForeignNameAnnotation(Decl& decl) const
         // class-like is the marker the parser can check here.
         const bool isArkTSForeignMember = decl.outerDecl != nullptr &&
             decl.outerDecl->HasAnno(AnnotationKind::ARKTS) && decl.outerDecl->TestAttr(Attribute::FOREIGN);
+        if (isArkTSForeignMember && decl.TestAttr(Attribute::CONSTRUCTOR)) {
+            // The ArkTS constructor maps to a fixed `new` call; there is no
+            // ArkTS-side member name for it to bind, so accepting the
+            // annotation only to ignore it would be a silent misdiagnosis.
+            p.diag.DiagnoseRefactor(DiagKindRefactor::parse_foreign_name_on_arkts_constructor, decl);
+            decl.EnableAttr(Attribute::IS_BROKEN);
+            return;
+        }
         if (!decl.outerDecl ||
             (!decl.outerDecl->IsJavaForeign() && !decl.outerDecl->IsJavaExport() &&
                 !decl.outerDecl->TestAnyAttr(Attribute::OBJ_C_FOREIGN, Attribute::OBJ_C_EXPORT) &&

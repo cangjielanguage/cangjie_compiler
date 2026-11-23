@@ -46,6 +46,17 @@ void PrepareInterfaces(AST::Package& pkg, DiagnosticEngine& diag, SourceManager&
 // entry shape/name, annotation placement and the foreign-only 'module' option.
 // Rejected entries are marked IS_BROKEN so the entry loop skips them.
 void DiagnoseArkTSDeclarations(AST::Package& pkg, DiagnosticEngine& diag);
+// Validate '@HasThis' placement and its 'globalVar: true' conflict on the
+// source AST, before class/function preparation rewrites the declaration
+// shape. A valid contract is recorded as Attribute::ARKTS_HAS_THIS. The
+// resolved ThisT type is checked after type checking (the argument is a type
+// reference, not a literal).
+void DiagnoseArkTSHasThis(AST::Package& pkg, DiagnosticEngine& diag);
+// Post-type-check validation of the resolved '@HasThis[TypeName]' argument:
+// every recorded contract must have one resolved ArkTS object-reference type.
+// The annotation argument is a type reference, so its semantic type only
+// exists after the checker has synthesized the annotation.
+void ValidateArkTSHasThisTypes(AST::Package& pkg, DiagnosticEngine& diag, ImportManager* imports);
 // Validate @WriteOnly placement on the source AST, before class/interface
 // preparation: only a mutable property member of an @ArkTS class or interface
 // is valid; a refused annotation is marked broken.

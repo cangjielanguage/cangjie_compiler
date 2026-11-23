@@ -19,20 +19,29 @@ using namespace Cangjie;
 
 namespace {
 // The access-modifier (public/private/internal/protected) x 'foreign'
-// conflict pair. On @ArkTS-annotated declarations exactly this pair is
-// skipped, so the stdlib can spell the preset declarations verbatim, e.g.
+// conflict pair. On @ArkTS-annotated declarations the pair is skipped, so the
+// stdlib can spell the preset declarations verbatim, e.g.
 // '@ArkTS[foreignName: "Array"] public foreign class ArkTSArray<T>'.
-// Every other conflict pair keeps firing, with or without @ArkTS:
-// 'public foreign class C {}' -> "'foreign' and 'public' modifiers
+// An @ArkTS foreign function relaxes every visibility except 'private': the
+// design forbids a private foreign declaration while 'public foreign func' is
+// the ArkTS spelling. Every other conflict pair keeps firing, with or without
+// @ArkTS: 'public foreign class C {}' -> "'foreign' and 'public' modifiers
 // conflict on class declaration"; the @ArkTS spelling above parses.
-bool IsAccessForeignConflict(TokenKind lhs, TokenKind rhs)
+bool IsAccessForeignConflict(DefKind defKind, TokenKind lhs, TokenKind rhs)
 {
     auto isAccessModifier = [](TokenKind kind) {
         return kind == TokenKind::PUBLIC || kind == TokenKind::PRIVATE || kind == TokenKind::INTERNAL ||
             kind == TokenKind::PROTECTED;
     };
-    return (lhs == TokenKind::FOREIGN && isAccessModifier(rhs)) ||
+    bool accessForeign = (lhs == TokenKind::FOREIGN && isAccessModifier(rhs)) ||
         (isAccessModifier(lhs) && rhs == TokenKind::FOREIGN);
+    if (!accessForeign) {
+        return false;
+    }
+    if (defKind == DefKind::FUNC) {
+        return lhs != TokenKind::PRIVATE && rhs != TokenKind::PRIVATE;
+    }
+    return true;
 }
 } // namespace
 
@@ -136,9 +145,10 @@ std::set<AST::Attribute> ParserImpl::GetModifierAttrs(DefKind defKind, ScopeKind
                 continue;
             }
             // On @ArkTS-annotated declarations the access-modifier x FOREIGN
-            // pair is skipped - only this pair, so every other conflict
-            // (SEALED x access, CONST/UNSAFE x FOREIGN, ...) still fires.
-            if (arktsAnnotated && IsAccessForeignConflict(it->modifier, cm)) {
+            // pair is skipped (except PRIVATE on a function) - only this pair,
+            // so every other conflict (SEALED x access, CONST/UNSAFE x
+            // FOREIGN, ...) still fires.
+            if (arktsAnnotated && IsAccessForeignConflict(defKind, it->modifier, cm)) {
                 continue;
             }
             DiagConflictedModifier(**iter, *it);

@@ -18,6 +18,24 @@ using namespace AST;
 
 namespace {
 const std::string OVERFLOW_STRATEGY = "overflow";
+
+// '@HasThis[TypeName]' takes a type reference, which annotation parsing
+// represents as a plain identifier or a dotted identifier path. A literal, a
+// call, an index or a compound expression is not a type reference and is
+// refused at parse time, before any semantic resolution.
+bool IsHasThisTypeReference(const Expr* expr)
+{
+    if (expr == nullptr) {
+        return false;
+    }
+    if (expr->astKind == ASTKind::REF_EXPR) {
+        return true;
+    }
+    if (auto access = DynamicCast<const MemberAccess*>(expr); access != nullptr) {
+        return IsHasThisTypeReference(access->baseExpr.get());
+    }
+    return false;
+}
 } // namespace
 
 void ParserImpl::ParseAttributeAnnotation(Annotation& anno)
@@ -365,16 +383,6 @@ void ParserImpl::CheckDeprecatedAnnotation(const Annotation& anno)
     }
 }
 
-void ParserImpl::CheckObjCMirrorAnnotation(Annotation& anno) const
-{
-    static const std::string OBJ_C_MIRROR_NAME = "@ObjCMirror";
-    static const std::string OBJ_C_IMPL_NAME = "@ObjCImpl";
-
-    const auto& annotationName =
-        anno.kind == AnnotationKind::OBJ_C_MIRROR ? OBJ_C_MIRROR_NAME : OBJ_C_IMPL_NAME;
-    ffiParser->CheckZeroOrSingleStringLitArgAnnotation(anno, annotationName);
-}
-
 void ParserImpl::CheckRawValueAnnotation(const Annotation& anno)
 {
     if (!experimentalMode) {
@@ -397,12 +405,34 @@ void ParserImpl::CheckRawValueAnnotation(const Annotation& anno)
     auto lce = (arg->expr != nullptr && arg->expr->astKind == ASTKind::LIT_CONST_EXPR)
                    ? DynamicCast<LitConstExpr*>(arg->expr.get())
                    : nullptr;
-    // Only integer, string or boolean literals are accepted; FLOAT (e.g. @RawValue[1.5])
-    // is not a legal enum value spelling and is rejected here.
+    // A numeric, string or boolean literal is accepted. Numeric includes
+    // floating values: the design's EnumValueLiteral is NumericLiteral and
+    // ArkTS enum members may be `A = 1.5`. A boolean literal belongs to the
+    // §7.2 union-type mapping; the Cangjie side cannot distinguish a union
+    // carrier from an ArkTS enum, so it is accepted here and lowered as a
+    // boolean member rather than refused.
     if (lce == nullptr ||
-        (lce->kind != LitConstKind::INTEGER && lce->kind != LitConstKind::STRING &&
-            lce->kind != LitConstKind::BOOL)) {
+        (lce->kind != LitConstKind::INTEGER && lce->kind != LitConstKind::FLOAT &&
+            lce->kind != LitConstKind::STRING && lce->kind != LitConstKind::BOOL)) {
         ParseDiagnoseRefactor(DiagKindRefactor::parse_raw_value_not_literal, *arg);
+    }
+}
+
+void ParserImpl::CheckHasThisAnnotation(Annotation& anno)
+{
+    // '@HasThis' takes exactly one unnamed type reference, e.g.
+    // '@HasThis[Person]'. A zero or multiple argument list, a named argument
+    // and a literal or any other value expression are all refused here with
+    // the dedicated diagnostic, so the annotation can never be silently
+    // accepted with a value that has no type meaning.
+    if (anno.args.size() != 1) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_has_this_invalid_argument, anno);
+        return;
+    }
+    auto& arg = anno.args.front();
+    CJC_NULLPTR_CHECK(arg);
+    if (!arg->name.Empty() || !IsHasThisTypeReference(arg->expr.get())) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_has_this_invalid_argument, *arg);
     }
 }
 
@@ -462,6 +492,11 @@ OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
         case AnnotationKind::RAW_VALUE: {
             ParseAnnotationArguments(*annotation);
             CheckRawValueAnnotation(*annotation);
+            break;
+        }
+        case AnnotationKind::HAS_THIS: {
+            ParseAnnotationArguments(*annotation);
+            CheckHasThisAnnotation(*annotation);
             break;
         }
         default: {

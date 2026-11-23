@@ -14,7 +14,6 @@
 
 #include "NativeFFI/ArkTS/ArkTSInterop.h"
 #include "TypeCheckUtil.h"
-#include "NativeFFI/ArkTS/ArkTSInterop.h"
 
 #include "cangjie/AST/Utils.h"
 

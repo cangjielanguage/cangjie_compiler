@@ -582,6 +582,19 @@ enum class AnnotationKind {
     REST_PARAM, // ArkTS rest parameter; only valid on the last positional parameter of an ArkTS foreign function.
     WRITE_ONLY, // ArkTS write-only property; implemented on a mutable property of a prepared @ArkTS foreign class wrapper (placement is deferred to the later placement matrix).
     RAW_VALUE, // @RawValue annotation on an @ArkTS foreign enum constructor.
+    /**
+     * ArkTS method `this` contract: '@HasThis[TypeName]' on an '@ArkTS' foreign
+     * function means the ArkTS target is a method whose `this` has TypeName.
+     * The argument is one unnamed type reference. Placement, repetition and the
+     * 'globalVar: true' conflict are checked in Sema; the semantic calling
+     * convention is a later requirement.
+     * W: parser (annotation kind), ArkTS prepare validation, CJO loader.
+     * R: ArkTS prepare/lowering, CJO writer/loader, diagnostics.
+     * AnnotationKind is not persisted by its numeric value: the CJO format
+     * maps built-in kinds to PackageFormat::AnnoKind. Appending before the
+     * UNKNOWN sentinel therefore does not change any serialized contract.
+     */
+    HAS_THIS,
     UNKNOWN
 };
 

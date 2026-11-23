@@ -42,6 +42,14 @@ protected:
         return file;
     }
 
+    // One generated placeholder literal as it appears in the raw wrapper text:
+    // the sentinel prefix separates it from a user string value that happens to
+    // equal the same name (for example an enum member @RawValue["__module__"]).
+    static std::string Placeholder(const std::string& key)
+    {
+        return std::string(ARKTS_PLACEHOLDER_LITERAL_PREFIX) + key;
+    }
+
     void ExpectSingleCall(Ptr<File> file, const std::string& label, size_t moduleLoads = 1)
     {
         size_t calls = 0;
@@ -234,6 +242,23 @@ TEST_F(ArkTSTypeMappingTest, ClassifyRejectsUnsupportedPositions)
     EnumTy innerOption("Option", coreOption, {int32});
     EnumTy nestedOption("Option", coreOption, {&innerOption});
     EXPECT_EQ(ArkTSClassifyType(&nestedOption).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
+    // Design §3.4 permits it for a non-foreign exported variable, where the
+    // layers unwrap to one ArkTS `T | undefined`; the opt-in keeps every other
+    // caller on the default refusal.
+    auto allowedNested = ArkTSClassifyType(&nestedOption, nullptr, /*allowNestedOptional=*/true);
+    ASSERT_EQ(allowedNested.kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    ASSERT_EQ(allowedNested.elements.size(), 1);
+    EXPECT_EQ(allowedNested.elements.front().kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    EXPECT_FALSE(ArkTSTypeDescGeneratable(allowedNested));
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(allowedNested, /*allowNestedOptional=*/true));
+    EXPECT_EQ(ArkTSTypeDescName(allowedNested), "Option<Option<Int32>>");
+    // The same opt-in accepts deeper layers recursively.
+    EnumTy tripleOption("Option", coreOption, {&nestedOption});
+    auto layered = ArkTSClassifyType(&tripleOption, nullptr, /*allowNestedOptional=*/true);
+    ASSERT_EQ(layered.kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    ASSERT_EQ(layered.elements.front().kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    EXPECT_EQ(layered.elements.front().elements.front().kind, ArkTSTypeDesc::Kind::OPTIONAL);
+    EXPECT_TRUE(ArkTSTypeDescGeneratable(layered, /*allowNestedOptional=*/true));
 
     EnumTy optionIntNative("Option", coreOption, {intNative});
     EXPECT_EQ(ArkTSClassifyType(&optionIntNative).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
@@ -352,9 +377,9 @@ TEST_F(ArkTSTypeMappingTest, EmittedOptionBranchesHandleNullAndUndefined)
     EXPECT_EQ(code.find("asUndefined"), std::string::npos);
     EXPECT_NE(code.find("catch (__locals_error_0: BusinessException)"), std::string::npos);
     // The placeholder and rebinding contract of the wrapper survives.
-    EXPECT_NE(code.find("__module__"), std::string::npos);
-    EXPECT_NE(code.find("__namespace_0__"), std::string::npos);
-    EXPECT_NE(code.find("__name__"), std::string::npos);
+    EXPECT_NE(code.find(Placeholder("__module__")), std::string::npos);
+    EXPECT_NE(code.find(Placeholder("__namespace_0__")), std::string::npos);
+    EXPECT_NE(code.find(Placeholder("__name__")), std::string::npos);
     EXPECT_NE(code.find(": ark_interop.JSContext ="), std::string::npos);
     auto file = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
@@ -783,17 +808,21 @@ TEST_F(ArkTSTypeMappingTest, EverySignatureResolvesThroughRequireArkModule)
     // is arkts.lang and no module option is written) is pinned by the receiver
     // tests of ArkTSAnnotationTest.
     auto code = ArkTSForeignWrapperSource({ScalarDesc("String")}, ScalarDesc("Float64"), 0, "__locals_");
-    EXPECT_NE(code.find("let __locals_module = __locals_context.requireArkModule(\"__module__\")"), std::string::npos);
+    EXPECT_NE(code.find("let __locals_module = __locals_context.requireArkModule(\"" + Placeholder("__module__") +
+                    "\")"),
+        std::string::npos);
     EXPECT_NE(code.find("let __locals_result = try {"), std::string::npos);
     EXPECT_NE(code.find("__locals_module.callMethod("), std::string::npos);
-    EXPECT_NE(code.find("__module__"), std::string::npos);
+    EXPECT_NE(code.find(Placeholder("__module__")), std::string::npos);
     auto file = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
     ExpectSingleCall(file.get(), "module wrapper");
     auto namespaced = ArkTSForeignWrapperSource({}, ScalarDesc("Unit"), 1, "__locals_");
-    EXPECT_NE(namespaced.find("let __locals_module = __locals_context.requireArkModule(\"__module__\")"),
+    EXPECT_NE(namespaced.find("let __locals_module = __locals_context.requireArkModule(\"" + Placeholder("__module__") +
+                    "\")"),
         std::string::npos);
-    EXPECT_NE(namespaced.find("let __locals_nsvalue_0 = __locals_module.getProperty(\"__namespace_0__\")"),
+    EXPECT_NE(namespaced.find("let __locals_nsvalue_0 = __locals_module.getProperty(\"" +
+                    Placeholder("__namespace_0__") + "\")"),
         std::string::npos);
     auto namespacedFile = Parse(namespaced);
     ASSERT_EQ(diag.GetErrorCount(), 0);
@@ -839,7 +868,7 @@ TEST_F(ArkTSTypeMappingTest, ScalarDescriptionsKeepTheAr02Contract)
     auto signedCode = ArkTSForeignWrapperSource({}, ScalarDesc("Int64"), 0, "__locals_");
     EXPECT_NE(signedCode.find(".toInt64()"), std::string::npos);
     auto bound = ArkTSForeignWrapperSource({}, ScalarDesc("String"), 0, "__locals_");
-    EXPECT_NE(bound.find("__name__"), std::string::npos);
+    EXPECT_NE(bound.find(Placeholder("__name__")), std::string::npos);
     EXPECT_NE(bound.find(": ark_interop.JSContext ="), std::string::npos);
 }
 
@@ -1288,7 +1317,8 @@ TEST_F(ArkTSTypeMappingTest, ClassOptionalMembersForwardUpToTheLastSome)
     EXPECT_NE(method.find("case 1 => __locals_arg_1"), std::string::npos);
     EXPECT_NE(method.find("case 2 => __locals_arg_2"), std::string::npos);
     EXPECT_NE(method.find("case _ => __locals_context.undefined().toJSValue()"), std::string::npos);
-    EXPECT_NE(method.find("callMethod(\"__member_name__\", __locals_args_0)"), std::string::npos);
+    EXPECT_NE(method.find("callMethod(\"" + Placeholder("__member_name__") + "\", __locals_args_0)"),
+        std::string::npos);
     auto methodFile = Parse(method);
     ASSERT_EQ(diag.GetErrorCount(), 0);
 
@@ -1309,7 +1339,8 @@ TEST_F(ArkTSTypeMappingTest, ClassOptionalMembersForwardUpToTheLastSome)
         ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, types.size(), classRefs);
     ASSERT_FALSE(plain.empty());
     EXPECT_EQ(plain.find("isSome"), std::string::npos);
-    EXPECT_NE(plain.find("callMethod(\"__member_name__\", [__locals_arg_0, __locals_arg_1, __locals_arg_2])"),
+    EXPECT_NE(plain.find("callMethod(\"" + Placeholder("__member_name__") +
+                    "\", [__locals_arg_0, __locals_arg_1, __locals_arg_2])"),
         std::string::npos);
     auto plainFile = Parse(plain);
     ASSERT_EQ(diag.GetErrorCount(), 0);
@@ -1325,7 +1356,7 @@ TEST_F(ArkTSTypeMappingTest, ClassStaticMemberCallsWithThisArg)
     ASSERT_FALSE(code.empty());
     EXPECT_NE(code.find("asFunction().call("), std::string::npos);
     EXPECT_NE(code.find("thisArg:"), std::string::npos);
-    EXPECT_NE(code.find("getProperty(\"__class_name__\")"), std::string::npos);
+    EXPECT_NE(code.find("getProperty(\"" + Placeholder("__class_name__") + "\")"), std::string::npos);
     // The static path never reads the instance reference accessor.
     EXPECT_EQ(code.find("__cj_arkts_ref_value"), std::string::npos);
     auto file = Parse(code);
@@ -1447,18 +1478,22 @@ TEST_F(ArkTSTypeMappingTest, FunctionWrapperGuardsNamespaceExportAndCallability)
     ASSERT_FALSE(code.empty());
     // Namespace guard: one existence check before asObject(), with the failing
     // segment spelled by placeholder.
-    EXPECT_NE(code.find("let __locals_nsvalue_0 = __locals_module.getProperty(\"__namespace_0__\")"),
+    EXPECT_NE(code.find("let __locals_nsvalue_0 = __locals_module.getProperty(\"" + Placeholder("__namespace_0__") +
+                    "\")"),
         std::string::npos);
     EXPECT_NE(code.find("if (__locals_nsvalue_0.isUndefined()) {"), std::string::npos);
     EXPECT_NE(code.find("let __locals_namespace_0 = __locals_nsvalue_0.asObject()"), std::string::npos);
     EXPECT_NE(code.find("throw ForeignRuntimeException("), std::string::npos);
     // Message pieces: declaration context, module locator, failing prefix.
-    EXPECT_NE(code.find("\"ArkTS foreign function '\" + \"__name__\" + \"'\""), std::string::npos);
-    EXPECT_NE(code.find("\"module '\" + \"__module__\" + \"'\""), std::string::npos);
+    EXPECT_NE(code.find("\"ArkTS foreign function '\" + \"" + Placeholder("__name__") + "\" + \"'\""),
+        std::string::npos);
+    EXPECT_NE(code.find("\"module '\" + \"" + Placeholder("__module__") + "\" + \"'\""), std::string::npos);
     EXPECT_NE(code.find("\" has no namespace '\""), std::string::npos);
     // Export guard: the same lookup yields a JSValue, so callability can be
     // decided before the call.
-    EXPECT_NE(code.find("let __locals_target_0 = __locals_namespace_0.getProperty(\"__name__\")"), std::string::npos);
+    EXPECT_NE(code.find("let __locals_target_0 = __locals_namespace_0.getProperty(\"" + Placeholder("__name__") +
+                    "\")"),
+        std::string::npos);
     EXPECT_NE(code.find("if (__locals_target_0.isUndefined()) {"), std::string::npos);
     EXPECT_NE(code.find("\" has no export '\""), std::string::npos);
     // The namespace path narrows the export lookup site.
@@ -1467,12 +1502,14 @@ TEST_F(ArkTSTypeMappingTest, FunctionWrapperGuardsNamespaceExportAndCallability)
     EXPECT_NE(code.find("if (!__locals_target_0.isFunction()) {"), std::string::npos);
     EXPECT_NE(code.find("\": the export is not a function\""), std::string::npos);
     // The module load is not captured: exactly one try statement in the body.
-    EXPECT_NE(code.find("let __locals_module = __locals_context.requireArkModule(\"__module__\").asObject()"),
+    EXPECT_NE(code.find("let __locals_module = __locals_context.requireArkModule(\"" + Placeholder("__module__") +
+                    "\").asObject()"),
         std::string::npos);
     EXPECT_EQ(CountOccurrences(code, "requireArkModule"), 1);
     EXPECT_EQ(CountOccurrences(code, "try {"), 1);
     // The call itself is the only statement that is translated.
-    EXPECT_NE(code.find("__locals_namespace_0.callMethod(\"__name__\", [__locals_arg_0])"), std::string::npos);
+    EXPECT_NE(code.find("__locals_namespace_0.callMethod(\"" + Placeholder("__name__") + "\", [__locals_arg_0])"),
+        std::string::npos);
     EXPECT_NE(code.find("let __locals_result = try {"), std::string::npos);
     EXPECT_NE(code.find("} catch (__locals_error_0: BusinessException) {"), std::string::npos);
     EXPECT_NE(code.find("if (__locals_error_0.code != 34300002 && __locals_error_0.code != 0) {"), std::string::npos);
@@ -1484,18 +1521,20 @@ TEST_F(ArkTSTypeMappingTest, FunctionWrapperGuardsNamespaceExportAndCallability)
     ExpectSingleCall(file.get(), "function runtime failure wrapper");
 }
 
-// A never-typed result keeps its plain contract violation: the call keeps the
-// same translation, but the violation throw is emitted after the translated
-// call and never passes through a conversion exception.
-TEST_F(ArkTSTypeMappingTest, NothingResultKeepsThePlainContractViolation)
+// A never-typed result that unexpectedly produces a value is an ArkTS runtime
+// failure (Appendix B), so the violation throw uses ForeignRuntimeException.
+// The call keeps the same translation, and the violation throw is emitted after
+// the translated call and never passes through a conversion exception.
+TEST_F(ArkTSTypeMappingTest, NothingResultThrowsForeignRuntimeException)
 {
     auto code = ArkTSForeignWrapperSource({}, ScalarDesc("Nothing"), 1, "__locals_");
     ASSERT_FALSE(code.empty());
-    EXPECT_NE(code.find("    throw Exception(\"ArkTS never function returned\")"), std::string::npos);
+    EXPECT_NE(code.find("    throw ForeignRuntimeException(\"ArkTS never function returned\")"), std::string::npos);
     // The violation throw follows the translated call; the call translation
     // itself is still present for the target invocation.
     EXPECT_NE(code.find("} catch (__locals_error_0: BusinessException) {"), std::string::npos);
-    EXPECT_NE(code.find("    }\n    throw Exception(\"ArkTS never function returned\")"), std::string::npos);
+    EXPECT_NE(code.find("    }\n    throw ForeignRuntimeException(\"ArkTS never function returned\")"),
+        std::string::npos);
     // No conversion wraps the never violation.
     EXPECT_EQ(code.find("ExternConversionException"), std::string::npos);
     auto file = Parse(code);
@@ -1513,12 +1552,15 @@ TEST_F(ArkTSTypeMappingTest, ClassWrapperGuardsTheClassValueAndConstructor)
         ArkTSReceiverKind::MODULE, 1, classRefs);
     ASSERT_FALSE(code.empty());
     // Namespace and export resolution before asClass().
-    EXPECT_NE(code.find("let __locals_nsvalue_0 = __locals_module.getProperty(\"__namespace_0__\")"),
+    EXPECT_NE(code.find("let __locals_nsvalue_0 = __locals_module.getProperty(\"" + Placeholder("__namespace_0__") +
+                    "\")"),
         std::string::npos);
     EXPECT_NE(code.find("if (__locals_nsvalue_0.isUndefined()) {"), std::string::npos);
-    EXPECT_NE(code.find("\"ArkTS foreign class '\" + \"__class_name__\" + \"'\""), std::string::npos);
+    EXPECT_NE(code.find("\"ArkTS foreign class '\" + \"" + Placeholder("__class_name__") + "\" + \"'\""),
+        std::string::npos);
     EXPECT_NE(code.find("\" has no namespace '\""), std::string::npos);
-    EXPECT_NE(code.find("let __locals_classvalue = __locals_namespace_0.getProperty(\"__class_name__\")"),
+    EXPECT_NE(code.find("let __locals_classvalue = __locals_namespace_0.getProperty(\"" +
+                    Placeholder("__class_name__") + "\")"),
         std::string::npos);
     EXPECT_NE(code.find("if (__locals_classvalue.isUndefined()) {"), std::string::npos);
     EXPECT_NE(code.find("\" has no export '\""), std::string::npos);
@@ -1570,19 +1612,20 @@ TEST_F(ArkTSTypeMappingTest, ClassMembersGuardExistenceAndCallability)
     auto instance = ArkTSClassMethodSource({}, ScalarDesc("Unit"), 0, "__locals_", ARKTS_NO_REST,
         ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::MODULE, 0, classRefs);
     ASSERT_FALSE(instance.empty());
-    EXPECT_NE(instance.find("let __locals_target_0 = __cj_arkts_self.__cj_arkts_ref_value().getProperty("
-                            "\"__member_name__\")"),
+    EXPECT_NE(instance.find("let __locals_target_0 = __cj_arkts_self.__cj_arkts_ref_value().getProperty(\"" +
+                            Placeholder("__member_name__") + "\")"),
         std::string::npos);
     EXPECT_NE(instance.find("if (__locals_target_0.isUndefined()) {"), std::string::npos);
-    EXPECT_NE(instance.find("\"ArkTS foreign class '\" + \"__class_name__\" + \"' member '\" + \"__member_name__\" + "
-                            "\"' in module '\" + \"__module__\" + \"'\""),
+    EXPECT_NE(instance.find("\"ArkTS foreign class '\" + \"" + Placeholder("__class_name__") +
+                            "\" + \"' member '\" + \"" + Placeholder("__member_name__") + "\" + " +
+                            "\"' in module '\" + \"" + Placeholder("__module__") + "\" + \"'\""),
         std::string::npos);
     EXPECT_NE(instance.find("\" does not exist\""), std::string::npos);
     EXPECT_NE(instance.find("if (!__locals_target_0.isFunction()) {"), std::string::npos);
     EXPECT_NE(instance.find("\" is not a function\""), std::string::npos);
     EXPECT_NE(instance.find("let __locals_result = try {"), std::string::npos);
-    EXPECT_NE(instance.find(
-                      "__cj_arkts_self.__cj_arkts_ref_value().callMethod(\"__member_name__\", Array<JSValue>())"),
+    EXPECT_NE(instance.find("__cj_arkts_self.__cj_arkts_ref_value().callMethod(\"" + Placeholder("__member_name__") +
+                            "\", Array<JSValue>())"),
         std::string::npos);
     EXPECT_NE(instance.find("} catch (__locals_error_0: BusinessException) {"), std::string::npos);
     EXPECT_NE(instance.find("if (__locals_error_0.code != 34300002 && __locals_error_0.code != 0) {"),
@@ -1596,11 +1639,13 @@ TEST_F(ArkTSTypeMappingTest, ClassMembersGuardExistenceAndCallability)
         ArkTSMemberReceiver::STATIC, ArkTSReceiverKind::MODULE, 0, classRefs);
     ASSERT_FALSE(staticMember.empty());
     // The static path resolves the class value through the namespace first.
-    EXPECT_NE(staticMember.find("let __locals_classvalue = __locals_namespace_0.getProperty(\"__class_name__\")"),
+    EXPECT_NE(staticMember.find("let __locals_classvalue = __locals_namespace_0.getProperty(\"" +
+                    Placeholder("__class_name__") + "\")"),
         std::string::npos);
     EXPECT_NE(staticMember.find("if (__locals_classvalue.isUndefined()) {"), std::string::npos);
     EXPECT_NE(staticMember.find("\" has no export '\""), std::string::npos);
-    EXPECT_NE(staticMember.find("let __locals_target_0 = __locals_classvalue.getProperty(\"__member_name__\")"),
+    EXPECT_NE(staticMember.find("let __locals_target_0 = __locals_classvalue.getProperty(\"" +
+                    Placeholder("__member_name__") + "\")"),
         std::string::npos);
     EXPECT_NE(staticMember.find("if (__locals_target_0.isUndefined()) {"), std::string::npos);
     EXPECT_NE(staticMember.find("\" does not exist\""), std::string::npos);
@@ -1624,7 +1669,8 @@ TEST_F(ArkTSTypeMappingTest, ClassPropertyAccessIsTranslatedWithoutExistenceReje
         ArkTSReceiverKind::MODULE, classRefs);
     ASSERT_FALSE(getter.empty());
     EXPECT_NE(getter.find("let __locals_result = try {"), std::string::npos);
-    EXPECT_NE(getter.find("__cj_arkts_self.__cj_arkts_ref_value().getProperty(\"__member_name__\")"),
+    EXPECT_NE(getter.find("__cj_arkts_self.__cj_arkts_ref_value().getProperty(\"" + Placeholder("__member_name__") +
+                    "\")"),
         std::string::npos);
     EXPECT_NE(getter.find("} catch (__locals_error_0: BusinessException) {"), std::string::npos);
     EXPECT_NE(getter.find("if (__locals_error_0.code != 34300002 && __locals_error_0.code != 0) {"), std::string::npos);
@@ -1639,8 +1685,8 @@ TEST_F(ArkTSTypeMappingTest, ClassPropertyAccessIsTranslatedWithoutExistenceReje
     auto setter = ArkTSClassPropertySource(ScalarDesc("Int32"), true, ArkTSMemberReceiver::INSTANCE, 0, "__locals_",
         ArkTSReceiverKind::MODULE, classRefs);
     ASSERT_FALSE(setter.empty());
-    EXPECT_NE(setter.find("__cj_arkts_self.__cj_arkts_ref_value().setProperty(\"__member_name__\", "
-                          "__locals_context.number(Float64(__argument_0)).toJSValue())"),
+    EXPECT_NE(setter.find("__cj_arkts_self.__cj_arkts_ref_value().setProperty(\"" + Placeholder("__member_name__") +
+                          "\", __locals_context.number(Float64(__argument_0)).toJSValue())"),
         std::string::npos);
     EXPECT_NE(setter.find("} catch (__locals_error_0: BusinessException) {"), std::string::npos);
     EXPECT_NE(setter.find("if (__locals_error_0.code != 34300002 && __locals_error_0.code != 0) {"), std::string::npos);
@@ -1664,8 +1710,9 @@ TEST_F(ArkTSTypeMappingTest, InterfaceWrapperGuardsTheCallSignatureAndTranslates
     EXPECT_NE(call.find("let __locals_self_0 = __cj_arkts_self.__cj_arkts_ref_value()"), std::string::npos);
     EXPECT_NE(call.find("let __locals_selfvalue_0 = __locals_self_0.toJSValue()"), std::string::npos);
     EXPECT_NE(call.find("if (!__locals_selfvalue_0.isFunction()) {"), std::string::npos);
-    EXPECT_NE(call.find("\"ArkTS foreign interface '\" + \"__class_name__\" + \"' member '\" + \"__member_name__\" + "
-                        "\"' in module '\" + \"__module__\" + \"'\""),
+    EXPECT_NE(call.find("\"ArkTS foreign interface '\" + \"" + Placeholder("__class_name__") +
+                        "\" + \"' member '\" + \"" + Placeholder("__member_name__") + "\" + " +
+                        "\"' in module '\" + \"" + Placeholder("__module__") + "\" + \"'\""),
         std::string::npos);
     EXPECT_NE(call.find("\" is not callable\""), std::string::npos);
     EXPECT_NE(call.find("let __locals_function_0 = __locals_selfvalue_0.asFunction()"), std::string::npos);

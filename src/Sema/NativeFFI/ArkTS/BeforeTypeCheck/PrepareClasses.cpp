@@ -138,6 +138,12 @@ ParentKind ResolveParentKind(const std::vector<std::string>& path, const ClassDe
 // a wrapper.
 bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager& imports)
 {
+    if (cd.TestAttr(Attribute::SEALED)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
+            "a sealed class is not supported");
+        cd.EnableAttr(Attribute::IS_BROKEN);
+        return false;
+    }
     for (auto& member : cd.GetMemberDecls()) {
         if (member->identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) == 0) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
@@ -233,7 +239,12 @@ bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager
         return false;
     }
     for (auto& member : cd.GetMemberDecls()) {
-        member->DisableAttr(Attribute::ABSTRACT);
+        // Design §5.1.2 keeps the abstract members of an abstract foreign
+        // class abstract: a Cangjie subclass implements them, so clearing the
+        // modifier would turn the declaration into a redefinition error.
+        if (!(cd.TestAttr(Attribute::ABSTRACT) && member->TestAttr(Attribute::ABSTRACT))) {
+            member->DisableAttr(Attribute::ABSTRACT);
+        }
         // A property declared without accessors gets accessor signatures with
         // the property type cloned onto them; lowering fills their bodies.
         auto prop = DynamicCast<PropDecl*>(member.get());
@@ -347,6 +358,24 @@ void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceM
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
             auto cd = DynamicCast<ClassDecl*>(decl.get());
+            // A user generic @ArkTS foreign class cannot be lowered into a
+            // fixed wrapper; only the stdlib presets keep the generic external
+            // form. Silently leaving it external would surface later as a C
+            // ABI diagnostic or a link failure.
+            if (cd != nullptr && !cd->TestAttr(Attribute::IS_BROKEN) && cd->HasAnno(AnnotationKind::ARKTS) &&
+                cd->TestAttr(Attribute::FOREIGN) && !IsArkTSClassWrapper(*cd) && cd->generic != nullptr &&
+                !cd->generic->typeParameters.empty()) {
+                const auto& packageName =
+                    cd->curFile != nullptr && cd->curFile->curPackage != nullptr
+                    ? cd->curFile->curPackage->fullPackageName
+                    : cd->fullPackageName;
+                if (packageName != ARKTS_PRESET_PACKAGE) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor::sema_arkts_generic_foreign_unsupported, *cd, cd->identifier.Val());
+                    cd->EnableAttr(Attribute::IS_BROKEN);
+                    continue;
+                }
+            }
             // A class already marked broken keeps its refusal diagnostic and
             // its FOREIGN source identity (an installed wrapper also carries
             // ARKTS_CLASS_WRAPPER), so a repeated preparation over the same AST

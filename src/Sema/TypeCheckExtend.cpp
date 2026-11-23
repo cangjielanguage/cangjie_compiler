@@ -346,10 +346,36 @@ void TypeChecker::TypeCheckerImpl::PreCheckExtend(ASTContext& ctx, ExtendDecl& e
         }
     }
     SetExtendExternalAttr(ctx, ed);
+    // A declaration carrying '@ArkTS' is the ArkTS-side object and has no
+    // extend form. Both refusals mark the extend broken, so only the first
+    // applicable one is reported.
+    RejectArkTSDeclExtend(ed);
     // An extend cannot be the user-side implementation of a prepared foreign
     // interface; only the generated implementation class may implement it.
     RejectArkTSForeignInterfaceExtend(ed);
     CheckExtendedTypeValidity(*ed.extendedType);
+}
+
+// An extend targets a Cangjie type; a declaration carrying '@ArkTS' is the
+// ArkTS-side object instead, and an extend would add members the ArkTS side
+// cannot see. The extended type is already resolved here. A target that is
+// itself refused is not reported twice.
+void TypeChecker::TypeCheckerImpl::RejectArkTSDeclExtend(ExtendDecl& ed)
+{
+    if (ed.TestAttr(Attribute::IS_BROKEN) || !ed.extendedType) {
+        return;
+    }
+    auto extendedDecl = Ty::GetDeclOfTy(ed.extendedType->GetTy());
+    if (!extendedDecl || extendedDecl->TestAttr(Attribute::IS_BROKEN)) {
+        return;
+    }
+    // The marker attribute covers declarations whose annotation was consumed
+    // by preparation; both spellings mean the declaration is ArkTS-side.
+    if (!extendedDecl->HasAnno(AnnotationKind::ARKTS) && !extendedDecl->TestAttr(Attribute::ARKTS)) {
+        return;
+    }
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_decl_cannot_be_extended, ed, extendedDecl->identifier.Val());
+    ed.EnableAttr(Attribute::IS_BROKEN);
 }
 
 namespace {

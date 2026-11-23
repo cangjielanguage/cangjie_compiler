@@ -17,6 +17,7 @@
  * that an exported enum is checked without being lowered.
  */
 
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
@@ -42,6 +43,12 @@ using namespace Cangjie;
 using namespace AST;
 
 namespace {
+// Support packages defined below the fixture; the fixture's
+// PrepareArkTSSupport() imports them.
+extern const char* ARKTS_INTEROP_SUPPORT;
+extern const char* ARKTS_CONTEXT_SUPPORT;
+extern const char* ARKTS_LANG_SUPPORT;
+
 std::unordered_map<std::string, std::string> GetEnvironmentVars()
 {
     std::unordered_map<std::string, std::string> envVars;
@@ -183,6 +190,23 @@ protected:
         return cjoData;
     }
 
+    // Inject the minimal ArkTS support packages a lowered foreign function
+    // needs (interop context, arkts.lang facade). Several tests need only this
+    // scaffolding, so it is kept in one place.
+    void PrepareArkTSSupport()
+    {
+        auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+        auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+        auto langCjo = ExportSupportPackage(
+            ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+        diag.ClearError();
+        handler->messages.clear();
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+        instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+        instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+        instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    }
+
     bool HasErrorContaining(const std::string& needle) const
     {
         for (const auto& message : handler->messages) {
@@ -266,6 +290,27 @@ protected:
     // observable from the test, so this inspects the emitted Float64(<value>)
     // conversions instead: a correct 0b1010 -> 10 auto-increment produces
     // Float64(11), while a strtod regression produces Float64(1).
+    // Whether the generated body contains a floating literal spelled exactly
+    // @p value, used by the floating @RawValue and auto-increment checks.
+    bool BodyContainsFloatLiteral(const std::string& name, const std::string& value) const
+    {
+        auto fn = FindFunction(name);
+        if (!fn || !fn->funcBody || !fn->funcBody->body) {
+            return false;
+        }
+        bool found = false;
+        Walker walker(fn->funcBody->body.get(), [&found, &value](Ptr<Node> node) {
+            auto literal = DynamicCast<LitConstExpr*>(node);
+            if (literal && literal->kind == LitConstKind::FLOAT && literal->stringValue == value) {
+                found = true;
+                return VisitAction::STOP_NOW;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return found;
+    }
+
     bool BodyContainsIntLiteral(const std::string& name, const std::string& value) const
     {
         auto fn = FindFunction(name);
@@ -295,9 +340,11 @@ protected:
         return member != nullptr && member->field == field;
     }
 
-    // True when a conversion call appears inside the `if (<guard>())` branch of
-    // the generated enum conversion. A hoisted conversion sits outside the
-    // branch and does not satisfy this.
+    // True when a conversion call is evaluated only after the kind guard
+    // proved the kind. The guard may sit alone or inside a short-circuit
+    // `&&` chain, and the conversion may be in the same condition (after the
+    // guard) or in the branch body. A conversion hoisted before the branch
+    // does not satisfy this.
     bool ConversionIsGuarded(const std::string& name, const std::string& guard, const std::string& conversion) const
     {
         auto fn = FindFunction(name);
@@ -307,18 +354,112 @@ protected:
         bool found = false;
         Walker walker(fn->funcBody->body.get(), [&](Ptr<Node> node) {
             auto ifExpr = DynamicCast<IfExpr*>(node);
-            if (!ifExpr || !ifExpr->condExpr || !ifExpr->thenBody || !IsCallToField(ifExpr->condExpr.get(), guard)) {
+            if (!ifExpr || !ConditionTestsCall(ifExpr->condExpr.get(), guard) || !ifExpr->thenBody) {
                 return VisitAction::WALK_CHILDREN;
             }
-            Walker inner(ifExpr->thenBody.get(), [&](Ptr<Node> innerNode) {
-                if (IsCallToField(innerNode, conversion)) {
-                    found = true;
+            if (ContainsCallUnder(ifExpr->condExpr.get(), conversion) ||
+                ContainsCallUnder(ifExpr->thenBody.get(), conversion)) {
+                found = true;
+                return VisitAction::STOP_NOW;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return found;
+    }
+
+    static bool ContainsCallUnder(Ptr<Node> root, const std::string& field)
+    {
+        bool found = false;
+        Walker walker(root, [&found, &field](Ptr<Node> node) {
+            if (IsCallToField(node, field)) {
+                found = true;
+                return VisitAction::STOP_NOW;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return found;
+    }
+
+    static bool ContainsThrowUnder(Ptr<Node> root)
+    {
+        bool found = false;
+        Walker walker(root, [&found](Ptr<Node> node) {
+            if (DynamicCast<ThrowExpr*>(node) != nullptr) {
+                found = true;
+                return VisitAction::STOP_NOW;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return found;
+    }
+
+    static bool ConditionTestsCall(Ptr<Node> condition, const std::string& field)
+    {
+        return condition != nullptr && ContainsCallUnder(condition, field);
+    }
+
+    // The first branch that tests @p kind must not throw: a literal that did
+    // not match has to fall through to a later constructor of the same kind.
+    // A later branch of that kind must call @p conversion.
+    bool FirstKindBranchFallsThrough(const std::string& name, const std::string& kind,
+        const std::string& conversion) const
+    {
+        auto fn = FindFunction(name);
+        if (!fn || !fn->funcBody || !fn->funcBody->body) {
+            return false;
+        }
+        bool found = false;
+        Walker walker(fn->funcBody->body.get(), [&](Ptr<Node> node) {
+            auto ifExpr = DynamicCast<IfExpr*>(node);
+            if (!ifExpr || !ConditionTestsCall(ifExpr->condExpr.get(), kind) || !ifExpr->thenBody ||
+                ContainsThrowUnder(ifExpr->thenBody.get())) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            bool later = false;
+            Walker laterWalker(ifExpr->elseBody.get(), [&](Ptr<Node> laterNode) {
+                auto laterIf = DynamicCast<IfExpr*>(laterNode);
+                if (!laterIf || !ConditionTestsCall(laterIf->condExpr.get(), kind) || !laterIf->thenBody) {
+                    return VisitAction::WALK_CHILDREN;
+                }
+                if (ContainsCallUnder(laterIf->thenBody.get(), conversion)) {
+                    later = true;
                     return VisitAction::STOP_NOW;
                 }
                 return VisitAction::WALK_CHILDREN;
             });
-            inner.Walk();
-            return found ? VisitAction::STOP_NOW : VisitAction::WALK_CHILDREN;
+            laterWalker.Walk();
+            if (later) {
+                found = true;
+                return VisitAction::STOP_NOW;
+            }
+            return VisitAction::WALK_CHILDREN;
+        });
+        walker.Walk();
+        return found;
+    }
+
+    // The first branch that tests @p kind must be the payload branch when the
+    // payload is declared before the literal: its body converts the value.
+    bool FirstKindBranchCalls(const std::string& name, const std::string& kind, const std::string& conversion) const
+    {
+        auto fn = FindFunction(name);
+        if (!fn || !fn->funcBody || !fn->funcBody->body) {
+            return false;
+        }
+        bool found = false;
+        Walker walker(fn->funcBody->body.get(), [&](Ptr<Node> node) {
+            auto ifExpr = DynamicCast<IfExpr*>(node);
+            if (!ifExpr || !ConditionTestsCall(ifExpr->condExpr.get(), kind) || !ifExpr->thenBody) {
+                return VisitAction::WALK_CHILDREN;
+            }
+            if (ContainsCallUnder(ifExpr->thenBody.get(), conversion)) {
+                found = true;
+                return VisitAction::STOP_NOW;
+            }
+            return VisitAction::WALK_CHILDREN;
         });
         walker.Walk();
         return found;
@@ -493,7 +634,7 @@ foreign enum E {
 }
 )");
     EXPECT_TRUE(HasErrorContaining("value type mismatch"));
-    EXPECT_TRUE(HasErrorContaining("expected String"));
+    EXPECT_TRUE(HasErrorContaining("an explicit '@RawValue'"));
 }
 
 namespace {
@@ -510,6 +651,7 @@ public class JSValue {
     public func isString(): Bool { return false }
     public func isBoolean(): Bool { return false }
     public func isArray(): Bool { return false }
+    public func isObject(): Bool { return false }
     public func isBigInt(): Bool { return false }
     public func isFunction(): Bool { return false }
     public func toNumber(): Float64 { return 0.0 }
@@ -519,6 +661,7 @@ public class JSValue {
     public func asArray(): JSArray { return JSArray() }
     public func asObject(): JSObject { return JSObject() }
     public func asFunction(): JSFunction { return JSFunction() }
+    public func asClass(): JSClass { return JSClass() }
     public func getElement(index: Int64): JSValue { return JSValue() }
     public func toJSValue(): JSValue { return this }
 }
@@ -532,7 +675,18 @@ public class JSBigInt {
 }
 
 public class JSArray {
+    public prop size: Int64 {
+        get() { return 0 }
+    }
     public func getElement(index: Int64): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return JSValue() }
+}
+
+public class JSClass {
+    public func new(): JSValue { return JSValue() }
+    public func new(arg: JSValue): JSValue { return JSValue() }
+    public func new(args: Array<JSValue>): JSValue { return JSValue() }
+    public func toJSValue(): JSValue { return JSValue() }
 }
 
 public class JSFunction {
@@ -558,6 +712,9 @@ public class JSModule {
 }
 
 public class JSContext {
+    public prop env: Int64 {
+        get() { return 0 }
+    }
     public prop global: JSObject {
         get() { return JSObject() }
     }
@@ -603,6 +760,18 @@ public class BusinessException <: Exception {
     public init(code: Int32, message: String) {
         super(message)
         this.code = code
+    }
+}
+
+// Carrier types used by the '@HasThis' contract tests. The shipped stub is
+// deliberately small; the real declarations live in std.interop.arkts.
+public class ArkTSFunc<F> {
+    public init(f: F) {}
+}
+
+public class ArkTSFuncWithThis<ThisT, F> {
+    public func bind(thisArg: ThisT): ArkTSFunc<F> {
+        throw Exception("arkts carrier stub")
     }
 }
 )";
@@ -684,7 +853,7 @@ foreign func count(): Int32
     // Both conversion categories are emitted for a scalar target.
     EXPECT_TRUE(AnyLiteralStartsWith(literals, "ArkTS type mismatch: "));
     EXPECT_TRUE(AnyLiteralStartsWith(literals, "ArkTS value invalid: "));
-    // Two guarded namespace reads plus the final value read.
+    // Two guarded namespace reads plus the guarded final value read.
     size_t propertyReads = 0;
     Walker(getter->funcBody->body.get(), [&propertyReads](Ptr<Node> node) {
         auto access = DynamicCast<MemberAccess*>(node);
@@ -712,7 +881,7 @@ foreign func count(): Int32
             if (ref->ref.target) {
                 EXPECT_EQ(ref->ref.target->fullPackageName, "cj_arkts_context_v1");
             }
-        } else if (name == "ExternConversionException") {
+        } else if (name == "ExternConversionException" || name == "__cj_arkts_extern_conversion") {
             ++conversionThrows;
             EXPECT_NE(ref->ref.target, nullptr);
             if (ref->ref.target) {
@@ -721,12 +890,15 @@ foreign func count(): Int32
         }
         return VisitAction::WALK_CHILDREN;
     }).Walk();
-    EXPECT_EQ(runtimeThrows, 2);
+    // Two namespace guards, the export guard's existence check and the final
+    // value read guard.
+    EXPECT_EQ(runtimeThrows, 4);
     EXPECT_GT(conversionThrows, 0);
 }
 
-// A `@ArkTS[globalVar: true] foreign func` of a non-scalar type (a class) is
-// reported through the general foreign return-type diagnostic.
+// A `@ArkTS[globalVar: true] foreign func` of a type the mapper refuses (a
+// plain class is not a prepared ArkTS reference) is reported through the
+// general foreign return-type diagnostic.
 TEST_F(ArkTSEnumVarTest, GlobalVarUnsupportedTypeIsDiagnosed)
 {
     diag.ClearError();
@@ -777,6 +949,37 @@ foreign enum Color {
     EXPECT_TRUE(ed->constructors[0]->HasAnno(AnnotationKind::RAW_VALUE));
     EXPECT_FALSE(ed->constructors[1]->HasAnno(AnnotationKind::RAW_VALUE));
     EXPECT_TRUE(ed->constructors[2]->HasAnno(AnnotationKind::RAW_VALUE));
+}
+
+// A boolean @RawValue is accepted and maps its literal spelling. The Cangjie
+// side cannot tell whether the foreign enum came from an ArkTS enum or from a
+// §7.2 union-type mapping, so a boolean member is treated as the union case
+// and lowers instead of being refused.
+TEST_F(ArkTSEnumVarTest, ForeignEnumBooleanRawValueLowers)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign enum Flag {
+    | @RawValue[true] On
+    | @RawValue[false] Off
+}
+
+@ArkTS[module: "actual"]
+foreign func echo(value: Flag): Flag
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto ed = FindEnum("Flag");
+    ASSERT_NE(ed, nullptr);
+    EXPECT_TRUE(ed->TestAttr(Attribute::ARKTS_LOWERED));
+    EXPECT_FALSE(ed->TestAttr(Attribute::FOREIGN));
+    ASSERT_EQ(ed->constructors.size(), 2);
+    EXPECT_TRUE(ed->constructors[0]->HasAnno(AnnotationKind::RAW_VALUE));
+    EXPECT_TRUE(ed->constructors[1]->HasAnno(AnnotationKind::RAW_VALUE));
+    auto fn = FindFunction("echo");
+    ASSERT_NE(fn, nullptr);
+    EXPECT_NE(fn->funcBody->body, nullptr);
 }
 
 // AR-08: an @ArkTS foreign enum used as a parameter and/or return type maps
@@ -1180,6 +1383,103 @@ foreign func f(value: E): E
     auto fn = FindFunction("f");
     ASSERT_NE(fn, nullptr);
     EXPECT_NE(fn->funcBody->body, nullptr);
+    // Design §7.2: a literal constructor that does not match must fall through
+    // to the same-kind payload. Value 8 has no literal member but must still
+    // reach number(Float64); the literal branch therefore may not throw.
+    EXPECT_TRUE(FirstKindBranchFallsThrough("f", "isNumber", "toNumber"));
+}
+
+// Constructors are matched in declaration order (design §7.2): a payload
+// declared before a literal of the same kind shadows the literal, so the
+// first string branch must be the payload and cancel the literal chain.
+TEST_F(ArkTSEnumVarTest, PayloadBeforeLiteralShadowsTheLiteral)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign enum Shadowed {
+    | string(String)
+    | @RawValue["hi"] Hi
+}
+
+@ArkTS[module: "actual"]
+foreign func echo(value: Shadowed): Shadowed
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fn = FindFunction("echo");
+    ASSERT_NE(fn, nullptr);
+    EXPECT_NE(fn->funcBody->body, nullptr);
+    EXPECT_TRUE(FirstKindBranchCalls("echo", "isString", "asString"));
+}
+
+// EnumValueLiteral is NumericLiteral (design §7.1.2), so a floating member is
+// legal and the omitted member after it increments in the floating domain.
+TEST_F(ArkTSEnumVarTest, ForeignEnumFloatRawValueLowersCleanly)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign enum Ratio {
+    | @RawValue[1.5] Half
+    | Next
+}
+
+@ArkTS[module: "actual"]
+foreign func echo(value: Ratio): Ratio
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fn = FindFunction("echo");
+    ASSERT_NE(fn, nullptr);
+    EXPECT_NE(fn->funcBody->body, nullptr);
+    EXPECT_TRUE(BodyContainsFloatLiteral("echo", "1.5"));
+    EXPECT_TRUE(BodyContainsFloatLiteral("echo", "2.5"));
+}
+
+// A large floating value is spelled with an exponent; the generated source
+// must use the Cangjie spelling (no '+' after 'e'), or the spliced body would
+// not lex.
+TEST_F(ArkTSEnumVarTest, ForeignEnumLargeFloatSpellingLexes)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign enum Huge {
+    | @RawValue[1e20] Big
+}
+
+@ArkTS[module: "actual"]
+foreign func echo(value: Huge): Huge
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fn = FindFunction("echo");
+    ASSERT_NE(fn, nullptr);
+    EXPECT_NE(fn->funcBody->body, nullptr);
+    EXPECT_TRUE(BodyContainsFloatLiteral("echo", "1e20"));
+}
+
+// A floating spelling may group digits with '_' like any Cangjie numeric
+// literal; the generated value is the canonical decimal spelling.
+TEST_F(ArkTSEnumVarTest, ForeignEnumFloatUnderscoreSpellingLowers)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+@ArkTS[module: "actual"]
+foreign enum Money {
+    | @RawValue[1_000.5] Big
+}
+
+@ArkTS[module: "actual"]
+foreign func echo(value: Money): Money
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fn = FindFunction("echo");
+    ASSERT_NE(fn, nullptr);
+    EXPECT_NE(fn->funcBody->body, nullptr);
+    EXPECT_TRUE(BodyContainsFloatLiteral("echo", "1000.5"));
 }
 
 // The 'globalVar' option selects an ArkTS variable read, so its value is a
@@ -1398,7 +1698,7 @@ public enum E {
 }
 )");
     EXPECT_TRUE(HasErrorContaining("value type mismatch"));
-    EXPECT_TRUE(HasErrorContaining("expected String"));
+    EXPECT_TRUE(HasErrorContaining("an explicit '@RawValue'"));
 }
 
 // A public non-foreign @ArkTS global variable is exported, so its declared
@@ -1414,4 +1714,136 @@ public let box: Box = Box()
 )");
     EXPECT_TRUE(HasErrorContaining("ArkTS exported variable type is not supported"));
     EXPECT_TRUE(HasErrorContaining("Box"));
+}
+
+// An inferred exported variable has no written Type node when the prepare pass
+// runs, so the compatibility rule runs again on the resolved `vd->ty`.
+TEST_F(ArkTSEnumVarTest, ExportedInferredVariableTypeMustBeArkTSCompatible)
+{
+    CompileSema(R"(package entry
+
+public class Box {}
+
+@ArkTS
+public let box = Box()
+)");
+    EXPECT_TRUE(HasErrorContaining("ArkTS exported variable type is not supported"));
+    EXPECT_TRUE(HasErrorContaining("Box"));
+}
+
+// Design §3.4: a non-foreign exported variable may use a nested Option; the
+// layers unwrap to one ArkTS `T | undefined`. The rule covers a written and an
+// inferred type (the latter is checked post-typecheck).
+TEST_F(ArkTSEnumVarTest, ExportedVariableNestedOptionIsAccepted)
+{
+    CompileSema(R"(package entry
+
+@ArkTS
+public let written: Option<Option<Int32>> = Some(Option<Int32>.Some(1))
+
+@ArkTS
+public let inferred = Some(Some(2))
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+}
+
+// The variable read path carries the function path's export guard and call
+// translation: a missing target throws ForeignRuntimeException (never a silent
+// Unit success), and an ArkTS-side getter throw is translated.
+TEST_F(ArkTSEnumVarTest, GlobalVarMissingTargetIsGuardedAndTranslated)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual", globalVar: true]
+foreign func flag(): Unit
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto getter = FindFunction("flag");
+    ASSERT_NE(getter, nullptr);
+    ASSERT_NE(getter->funcBody->body, nullptr);
+    auto literals = BodyStringLiterals("flag");
+    EXPECT_TRUE(AnyLiteralContains(literals, "ArkTS foreign variable '"));
+    EXPECT_TRUE(AnyLiteralContains(literals, " has no export '"));
+    size_t runtimeThrows = 0;
+    size_t translations = 0;
+    Walker(getter->funcBody->body.get(), [&](Ptr<Node> node) {
+        if (DynamicCast<TryExpr*>(node) != nullptr) {
+            ++translations;
+        }
+        auto ref = DynamicCast<RefExpr*>(node);
+        if (ref != nullptr && ref->ref.identifier.Val() == "ForeignRuntimeException") {
+            ++runtimeThrows;
+            EXPECT_NE(ref->ref.target, nullptr);
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_GT(runtimeThrows, 0);
+    EXPECT_EQ(translations, 1);
+}
+
+// Item 5: a Nothing-returning ArkTS function that unexpectedly produces a
+// value is an ArkTS runtime failure (Appendix B), so it throws
+// ForeignRuntimeException rather than the plain std.core Exception.
+TEST_F(ArkTSEnumVarTest, NothingResultThrowsForeignRuntimeException)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign func boom(): Nothing
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fn = FindFunction("boom");
+    ASSERT_NE(fn, nullptr);
+    ASSERT_NE(fn->funcBody->body, nullptr);
+    EXPECT_TRUE(AnyLiteralContains(BodyStringLiterals("boom"), "ArkTS never function returned"));
+    size_t runtimeThrows = 0;
+    size_t plainExceptionRefs = 0;
+    Walker(fn->funcBody->body.get(), [&](Ptr<Node> node) {
+        auto ref = DynamicCast<RefExpr*>(node);
+        if (ref == nullptr) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        const auto& name = ref->ref.identifier.Val();
+        if (name == "ForeignRuntimeException") {
+            ++runtimeThrows;
+        } else if (name == "Exception") {
+            ++plainExceptionRefs;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_GT(runtimeThrows, 0);
+    EXPECT_EQ(plainExceptionRefs, 0);
+}
+
+// Compiled placeholders are rebindable only when they carry the generator's
+// sentinel prefix, so a user @RawValue spelled exactly like a placeholder name
+// reaches the generated body verbatim.
+TEST_F(ArkTSEnumVarTest, RawValuePlaceholderNamesArePreservedInGeneratedBody)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+foreign enum Marker {
+    | @RawValue["__module__"] Module
+    | @RawValue["__name__"] Name
+}
+
+@ArkTS[module: "actual"]
+foreign func marker(value: Marker): Marker
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto literals = BodyStringLiterals("marker");
+    EXPECT_GT(std::count(literals.begin(), literals.end(), std::string("__module__")), 0);
+    EXPECT_GT(std::count(literals.begin(), literals.end(), std::string("__name__")), 0);
+    // The module option placeholder was still rebound to its real value.
+    EXPECT_TRUE(AnyLiteralContains(literals, "actual"));
 }

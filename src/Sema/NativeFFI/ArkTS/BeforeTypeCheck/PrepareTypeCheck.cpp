@@ -207,6 +207,11 @@ void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourc
         // prepare pass itself must not run on a refused source.
         return;
     }
+    // Validate '@HasThis' placement and its 'globalVar: true' conflict on the
+    // source AST, before preparation rewrites the declaration shape. A valid
+    // contract is recorded as ARKTS_HAS_THIS and checked again after the
+    // argument's type is resolved.
+    DiagnoseArkTSHasThis(pkg, diag);
     // Validate @WriteOnly placement on the source AST, before preparation
     // rewrites member shapes and installs generated accessors.
     DiagnoseArkTSWriteOnlyPlacement(pkg, diag);
@@ -248,7 +253,7 @@ void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourc
         const auto prepared = CollectGeneratedDeclarations(*file);
         for (auto& decl : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(decl.get());
-            if (fd && IsArkTSEntry(*fd)) {
+            if (fd && IsArkTSEntry(*fd) && fd->TestAttr(Attribute::PUBLIC)) {
                 if (fd->TestAttr(Attribute::IS_BROKEN)) {
                     continue;
                 }

@@ -182,13 +182,14 @@ void MarkBrokenInterfaceImpl(Decl& impl)
 // unsupported name. A null type node classifies as the empty (unsupported)
 // description. Shared with LowerArkTSFunctions, so a position can never mean
 // two things across the two lowering paths.
-ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(ASTContext& ctx, Ptr<Type> type)
+ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(
+    ASTContext& ctx, Ptr<Type> type, bool allowNestedOptional)
 {
     if (!type) {
         return ArkTSTypeDesc{};
     }
     SetTypeTy(ctx, *type);
-    auto desc = ArkTSClassifyType(type->DataTy(), ci->importManager);
+    auto desc = ArkTSClassifyType(type->DataTy(), ci->importManager, allowNestedOptional);
     // Attach the prepared member value table to every enum leaf, so the wrapper
     // generator can spell the value mapping without reaching into the checker.
     // A prepared enum whose declaration was refused (payload, generic, ...) has
@@ -278,9 +279,13 @@ void TypeChecker::TypeCheckerImpl::RejectArkTSForeignInterfaceImplementers(Packa
 {
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
+            // A prepared foreign class is not a Cangjie implementer: its
+            // `foreign class <: foreign interface` declaration mirrors an
+            // existing ArkTS ancestor relationship (design §5.2.1), which is
+            // not the user-implementation form this rule refuses.
             if (decl->TestAttr(Attribute::IS_BROKEN) || IsArkTSInterfaceImpl(*decl) ||
-                IsArkTSPreparedInterface(*decl) || decl->astKind == ASTKind::INTERFACE_DECL ||
-                decl->astKind == ASTKind::EXTEND_DECL) {
+                IsArkTSPreparedInterface(*decl) || IsArkTSClassWrapper(*decl) ||
+                decl->astKind == ASTKind::INTERFACE_DECL || decl->astKind == ASTKind::EXTEND_DECL) {
                 continue;
             }
             auto inheritable = DynamicCast<InheritableDecl*>(decl.get());
@@ -409,15 +414,10 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassFunc(
     if (fd.TestAttr(Attribute::IS_BROKEN)) {
         return;
     }
-    // An operator member ('operator func []', 'operator func +', ...) has no
-    // method-name spelling: the member wrapper would call the operator's
-    // source token as a method (for example callMethod("[]")), which is not
-    // the ArkTS operator contract. Refuse the member before any signature
-    // classification.
-    if (fd.op != TokenKind::ILLEGAL) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
-            "operator members on foreign class are not supported");
-        fd.EnableAttr(Attribute::IS_BROKEN);
+    // An abstract member of an abstract foreign class stays bodyless: the
+    // Cangjie subclass supplies the implementation, and installing a wrapper
+    // would both clear ABSTRACT and force an `override` on that subclass.
+    if (fd.TestAttr(Attribute::ABSTRACT)) {
         return;
     }
     bool constructor = fd.TestAttr(Attribute::CONSTRUCTOR);
@@ -426,6 +426,75 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassFunc(
     ArkTSTypeDesc resultType;
     if (!AnalyzeArkTSClassFuncSignature(ctx, fd, types, params, resultType)) {
         fd.EnableAttr(Attribute::IS_BROKEN);
+        return;
+    }
+    // The index signature is the one operator with a defined mapping (design
+    // §5.1.2: `[k: K]: V` becomes the Option getter and the named-value
+    // setter). Every other operator has no method-name spelling.
+    if (fd.op != TokenKind::ILLEGAL) {
+        if (fd.identifier.Val() != "[]") {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
+                "operator members on foreign class are not supported");
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return;
+        }
+        if (ArkTSRestPosition(params, params.size()) != ARKTS_NO_REST) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
+                "an index signature must not use a rest parameter");
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return;
+        }
+        bool hasOptional = false;
+        for (auto& param : params) {
+            hasOptional = hasOptional || param->assignment != nullptr;
+        }
+        if (hasOptional) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
+                "optional parameters on an index signature are not supported");
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return;
+        }
+        const ArkTSTypeDesc* valueType = nullptr;
+        bool setter = false;
+        if (types.size() == 1) {
+            if (resultType.kind != ArkTSTypeDesc::Kind::OPTIONAL || resultType.elements.size() != 1) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
+                    "an index getter must return Option<T>");
+                fd.EnableAttr(Attribute::IS_BROKEN);
+                return;
+            }
+            valueType = &resultType.elements.front();
+        } else if (types.size() == 2) {
+            if (!params[1]->isNamedParam) {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
+                    "an index setter's value parameter must be named");
+                fd.EnableAttr(Attribute::IS_BROKEN);
+                return;
+            }
+            if (resultType.kind != ArkTSTypeDesc::Kind::SCALAR || resultType.scalar != "Unit") {
+                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
+                    "an index setter must return Unit");
+                fd.EnableAttr(Attribute::IS_BROKEN);
+                return;
+            }
+            valueType = &types[1];
+            setter = true;
+        } else {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
+                "an index signature takes one key or a key and a named value");
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return;
+        }
+        auto prefix = ArkTSForeignLocalPrefix(params);
+        std::unordered_map<std::string, Ptr<Decl>> classRefs;
+        auto code = ArkTSInterfaceIndexSource(types[0], *valueType, setter, prefix, classRefs, "class");
+        if (code.empty()) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, fd, cd.identifier.Val(),
+                "unsupported member signature");
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return;
+        }
+        InstallArkTSMemberBody(ctx, classCtx, fd, file, code, params, GetArkTSMemberName(fd), classRefs);
         return;
     }
     // The rest scan covers every flattened position of a class member (the
@@ -516,6 +585,10 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassPropMembers(
 void TypeChecker::TypeCheckerImpl::LowerArkTSClassProp(
     ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, File& file, PropDecl& pd)
 {
+    // Same rule as an abstract function member: the subclass implements it.
+    if (pd.TestAttr(Attribute::ABSTRACT)) {
+        return;
+    }
     ArkTSTypeDesc desc;
     if (!ClassifyArkTSPropertyType(ctx, pd, desc)) {
         return;
@@ -1087,8 +1160,11 @@ void TypeChecker::TypeCheckerImpl::InstallArkTSMemberBody(ASTContext& ctx, ArkTS
         node->curFile = &file;
         node->begin = member.begin;
         node->end = member.end;
-        if (auto literal = DynamicCast<LitConstExpr*>(node); literal && literals.count(literal->stringValue)) {
-            literal->stringValue = literals.at(literal->stringValue);
+        if (auto literal = DynamicCast<LitConstExpr*>(node); literal) {
+            std::string rebound;
+            if (ArkTSRebindPlaceholderLiteral(literal->stringValue, literals, rebound)) {
+                literal->stringValue = std::move(rebound);
+            }
         }
         // Type placeholders carry a reference element in generated annotations
         // (Array<T>, Option<T>): bind the reference type and register it like a

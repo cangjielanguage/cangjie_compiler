@@ -112,7 +112,13 @@ std::string ArkTSJoin(const std::vector<std::string>& parts, const std::string& 
 // because its reference semantics is deferred and such signatures are
 // rejected - nested Option, tuples with fewer than two elements, Map/Set/
 // TypedArray and the remaining composite kinds.
-ArkTSTypeDesc ArkTSClassifyType(Ptr<AST::Ty> ty, ImportManager* imports = nullptr);
+// `allowNestedOptional` permits an Option directly nested in an Option. The
+// design enables that shape only for a non-foreign exported variable, where
+// the layers unwrap to one ArkTS `T | undefined` (design §3.4); every foreign
+// signature keeps the default false and still classifies the position as
+// UNSUPPORTED.
+ArkTSTypeDesc ArkTSClassifyType(Ptr<AST::Ty> ty, ImportManager* imports = nullptr,
+    bool allowNestedOptional = false);
 
 // Recognition of the external ArkTS preset types whose mapping is deferred -
 // std.interop.arkts ArkTSArray<T>, ArkTSString and ArkTSType (the ArkTS
@@ -141,7 +147,10 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpe
 // so the two can never drift apart. A Nothing element can never cross the
 // boundary as an argument, so any parameter description containing one is
 // rejected (a Nothing result stays legal: it is the never contract).
-bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc);
+// `allowNestedOptional` accepts an OPTIONAL whose element is again OPTIONAL;
+// only the non-foreign exported-variable check sets it (design §3.4), every
+// wrapper generator keeps the default false.
+bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptional = false);
 bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc);
 // True when any position in the description is a REFERENCE leaf, including
 // under OPTIONAL, ARRAY_COPY and TUPLE. The generator refuses such a

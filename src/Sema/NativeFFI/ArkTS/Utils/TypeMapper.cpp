@@ -95,7 +95,7 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpe
 // no declaration name is matched here; the package-pinned recognition for
 // diagnostics lives in ArkTSDeferredExternalTypeName below.
 // Example: Option<Array<Int32>> -> OPTIONAL(ARRAY_COPY(SCALAR(Int32))).
-ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
+ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports, bool allowNestedOptional)
 {
     ArkTSTypeDesc desc;
     if (!Ty::IsTyCorrect(ty)) {
@@ -115,8 +115,9 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
     // package and reports the deferral message, every other same-named
     // declaration keeps the generic unsupported-type diagnostics.
     if (ty->IsCoreOptionType()) {
-        auto inner = ArkTSClassifyType(ty->typeArgs.front().Ty(), imports);
-        if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED && inner.kind != ArkTSTypeDesc::Kind::OPTIONAL) {
+        auto inner = ArkTSClassifyType(ty->typeArgs.front().Ty(), imports, allowNestedOptional);
+        if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED &&
+            (inner.kind != ArkTSTypeDesc::Kind::OPTIONAL || allowNestedOptional)) {
             desc.kind = ArkTSTypeDesc::Kind::OPTIONAL;
             desc.elements.emplace_back(std::move(inner));
         }
@@ -127,7 +128,7 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
     // single-element requirement stays explicit (a zero- or many-argument
     // Array remains unsupported).
     if (ty->IsStructArray() && ty->typeArgs.size() == 1) {
-        auto inner = ArkTSClassifyType(ty->typeArgs.front().Ty(), imports);
+        auto inner = ArkTSClassifyType(ty->typeArgs.front().Ty(), imports, allowNestedOptional);
         if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED &&
             !ArkTSTypeDescContainsInterfaceReference(inner)) {
             desc.kind = ArkTSTypeDesc::Kind::ARRAY_COPY;
@@ -166,7 +167,7 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
     if (ty->IsTuple() && ty->typeArgs.size() >= 2) {
         desc.kind = ArkTSTypeDesc::Kind::TUPLE;
         for (auto& element : ty->typeArgs) {
-            auto inner = ArkTSClassifyType(element.Ty(), imports);
+            auto inner = ArkTSClassifyType(element.Ty(), imports, allowNestedOptional);
             if (inner.kind == ArkTSTypeDesc::Kind::UNSUPPORTED ||
                 ArkTSTypeDescContainsInterfaceReference(inner)) {
                 return ArkTSTypeDesc{};
@@ -220,7 +221,7 @@ std::string ArkTSDeferredExternalTypeName(Ptr<Ty> ty)
 // honest too:
 //   SCALAR("Int32") -> true; SCALAR("Junk") -> false;
 //   OPTIONAL(OPTIONAL(SCALAR(Int32))) -> false; TUPLE(SCALAR(Int8)) -> false
-bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
+bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptional)
 {
     switch (desc.kind) {
         case ArkTSTypeDesc::Kind::UNSUPPORTED:
@@ -228,10 +229,11 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
         case ArkTSTypeDesc::Kind::SCALAR:
             return ArkTSScalarWhitelist().count(desc.scalar) != 0;
         case ArkTSTypeDesc::Kind::OPTIONAL:
-            return desc.elements.size() == 1 && desc.elements.front().kind != ArkTSTypeDesc::Kind::OPTIONAL &&
-                ArkTSTypeDescGeneratable(desc.elements.front());
+            return desc.elements.size() == 1 &&
+                (desc.elements.front().kind != ArkTSTypeDesc::Kind::OPTIONAL || allowNestedOptional) &&
+                ArkTSTypeDescGeneratable(desc.elements.front(), allowNestedOptional);
         case ArkTSTypeDesc::Kind::ARRAY_COPY:
-            return desc.elements.size() == 1 && ArkTSTypeDescGeneratable(desc.elements.front());
+            return desc.elements.size() == 1 && ArkTSTypeDescGeneratable(desc.elements.front(), allowNestedOptional);
         case ArkTSTypeDesc::Kind::REFERENCE:
             if (desc.reference == nullptr) {
                 return false;
@@ -254,7 +256,8 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
             }
             for (const auto& member : desc.enumMembers) {
                 if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
-                    if (member.payload.size() != 1 || !ArkTSTypeDescGeneratable(member.payload.front())) {
+                    if (member.payload.size() != 1 ||
+                        !ArkTSTypeDescGeneratable(member.payload.front(), allowNestedOptional)) {
                         return false;
                     }
                 }
@@ -268,7 +271,7 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc)
             break;
     }
     for (auto& element : desc.elements) {
-        if (!ArkTSTypeDescGeneratable(element)) {
+        if (!ArkTSTypeDescGeneratable(element, allowNestedOptional)) {
             return false;
         }
     }

@@ -8,6 +8,7 @@
 #define CANGJIE_PRIVATE_PARSE_ARKTS_PARSER_IMPL_H
 
 #include <set>
+#include <string>
 
 #include "cangjie/Parse/Parser.h"
 
@@ -22,6 +23,13 @@ public:
     std::set<AST::Modifier> PrepareForeignFunctionModifiers(ScopeKind scopeKind,
         const std::set<AST::Modifier>& modifiers, const PtrVector<AST::Annotation>& annotations,
         AST::FuncDecl& function) const;
+
+    // The namespace-shape rule of the 'namespace' option: empty, or a
+    // dot-separated path with no empty leading, trailing or inner segment.
+    // A block-level option is cloned into every member, so FFIParserImpl
+    // validates and drops an ill-formed value once at the block. The Sema
+    // option fold applies the same rule to declaration-level options.
+    bool IsArkTSNamespaceValid(const std::string& ns) const;
 
     // Parameter-level diagnostics for @RestParam, dispatched from
     // FFIParserImpl::CheckAnnotations (one entry per language, as for Java and
