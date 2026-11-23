@@ -843,13 +843,6 @@ OwnedPtr<Generic> ASTLoader::ASTLoaderImpl::LoadGeneric(Decl& decl, const Packag
     return genericNode;
 }
 
-// ArkTS metadata, before -> after:
-//   Anno(ArkTS, args=[]) -> Decl.ARKTS only, no Annotation node;
-//   ordered Anno(ArkTS, args=[...]) records -> Decl.ARKTS plus ordered builtin
-//   Annotation(ARKTS, named literal arguments) nodes for lossless re-export.
-// The declaration's generic attribute bits are not the authority for this marker;
-// it is cleared then rebuilt from Anno records. No annotation definition or
-// constructor symbol is loaded, and no wrapper body is generated on import.
 void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl, Decl& astDecl)
 {
     astDecl.identifier = decl.identifier()->str();
@@ -908,12 +901,6 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
     }
 }
 
-// ArkTS option record -> builtin AST node, e.g.
-// Anno(ArkTS, "ArkTS", [module=StringLiteral("a")])
-//   -> Annotation(kind=ARKTS, identifier="ArkTS", args=[module:"a"]).
-// LoadAnnotationArgs restores named literal expressions in record order. The
-// caller attaches this node only for option-bearing ArkTS metadata; this is
-// declaration binding metadata, not an annotation definition/constructor call.
 OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageFormat::Anno& rawAnno)
 {
     auto annotation = MakeOwned<Annotation>();

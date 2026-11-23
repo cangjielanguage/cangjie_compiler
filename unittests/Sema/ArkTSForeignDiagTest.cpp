@@ -3001,7 +3001,9 @@ foreign func echo(value: Int32): Int32
         }
         return VisitAction::WALK_CHILDREN;
     }).Walk();
-    EXPECT_EQ(businessRefs, 1);
+    // The export lookup and the call are both translated, so the facade type is
+    // referenced twice; both references resolve to the same declaration.
+    EXPECT_EQ(businessRefs, 2);
 }
 
 // A source declaration that reuses a generated runtime support name never
@@ -3076,7 +3078,7 @@ public foreign func echo(value: Int32): Int32
         return VisitAction::WALK_CHILDREN;
     }).Walk();
     EXPECT_GT(runtimeRefs, 0);
-    EXPECT_EQ(businessRefs, 1);
+    EXPECT_EQ(businessRefs, 2);
 }
 
 // An entry whose name is also a support name keeps its own declaration as the

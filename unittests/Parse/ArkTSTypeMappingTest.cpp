@@ -720,7 +720,8 @@ TEST_F(ArkTSTypeMappingTest, EmittedWrongKindGuardsThrowConversionExceptions)
     for (const auto& [type, predicate, message] : kinds) {
         auto code = ArkTSForeignWrapperSource({}, ScalarDesc(type), 0, "__locals_");
         EXPECT_NE(code.find("if (!__locals_result." + predicate + "())"), std::string::npos) << type;
-        EXPECT_NE(code.find("throw ExternConversionException(\"ArkTS type mismatch: " + message + "\")"),
+        EXPECT_NE(code.find("throw ExternConversionException(\"ArkTS type mismatch: " + message +
+                        "\" + \", got \" + "),
             std::string::npos) << type;
         // The kind guard precedes every value check.
         EXPECT_LT(code.find(message), code.find("ArkTS value invalid: ")) << type;
@@ -1491,8 +1492,7 @@ TEST_F(ArkTSTypeMappingTest, FunctionWrapperGuardsNamespaceExportAndCallability)
     EXPECT_NE(code.find("\" has no namespace '\""), std::string::npos);
     // Export guard: the same lookup yields a JSValue, so callability can be
     // decided before the call.
-    EXPECT_NE(code.find("let __locals_target_0 = __locals_namespace_0.getProperty(\"" + Placeholder("__name__") +
-                    "\")"),
+    EXPECT_NE(code.find("__locals_namespace_0.getProperty(\"" + Placeholder("__name__") + "\")"),
         std::string::npos);
     EXPECT_NE(code.find("if (__locals_target_0.isUndefined()) {"), std::string::npos);
     EXPECT_NE(code.find("\" has no export '\""), std::string::npos);
@@ -1501,13 +1501,14 @@ TEST_F(ArkTSTypeMappingTest, FunctionWrapperGuardsNamespaceExportAndCallability)
     // Callability guard names the declaration and the export.
     EXPECT_NE(code.find("if (!__locals_target_0.isFunction()) {"), std::string::npos);
     EXPECT_NE(code.find("\": the export is not a function\""), std::string::npos);
-    // The module load is not captured: exactly one try statement in the body.
+    // The module load is not captured; the export lookup and the call are the
+    // two translated statements.
     EXPECT_NE(code.find("let __locals_module = __locals_context.requireArkModule(\"" + Placeholder("__module__") +
                     "\").asObject()"),
         std::string::npos);
     EXPECT_EQ(CountOccurrences(code, "requireArkModule"), 1);
-    EXPECT_EQ(CountOccurrences(code, "try {"), 1);
-    // The call itself is the only statement that is translated.
+    EXPECT_EQ(CountOccurrences(code, "try {"), 2);
+    // The export lookup and the call itself are translated.
     EXPECT_NE(code.find("__locals_namespace_0.callMethod(\"" + Placeholder("__name__") + "\", [__locals_arg_0])"),
         std::string::npos);
     EXPECT_NE(code.find("let __locals_result = try {"), std::string::npos);
@@ -1515,7 +1516,7 @@ TEST_F(ArkTSTypeMappingTest, FunctionWrapperGuardsNamespaceExportAndCallability)
     EXPECT_NE(code.find("if (__locals_error_0.code != 34300002 && __locals_error_0.code != 0) {"), std::string::npos);
     EXPECT_NE(code.find("throw __locals_error_0"), std::string::npos);
     EXPECT_NE(code.find("\" failed: \" + __locals_error_0.toString()"), std::string::npos);
-    EXPECT_EQ(CountOccurrences(code, "catch ("), 1);
+    EXPECT_EQ(CountOccurrences(code, "catch ("), 2);
     auto file = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
     ExpectSingleCall(file.get(), "function runtime failure wrapper");
@@ -1677,7 +1678,7 @@ TEST_F(ArkTSTypeMappingTest, ClassPropertyAccessIsTranslatedWithoutExistenceReje
     EXPECT_NE(getter.find("throw __locals_error_0"), std::string::npos);
     EXPECT_NE(getter.find("\" failed: \" + __locals_error_0.toString()"), std::string::npos);
     EXPECT_EQ(CountOccurrences(getter, "catch ("), 1);
-    EXPECT_EQ(getter.find("isUndefined"), std::string::npos);
+    EXPECT_EQ(getter.find("if (__locals_result.isUndefined()) {\n"), std::string::npos);
     auto getterFile = Parse(getter);
     ASSERT_EQ(diag.GetErrorCount(), 0);
 
@@ -1692,7 +1693,7 @@ TEST_F(ArkTSTypeMappingTest, ClassPropertyAccessIsTranslatedWithoutExistenceReje
     EXPECT_NE(setter.find("if (__locals_error_0.code != 34300002 && __locals_error_0.code != 0) {"), std::string::npos);
     EXPECT_NE(setter.find("throw __locals_error_0"), std::string::npos);
     EXPECT_EQ(CountOccurrences(setter, "catch ("), 1);
-    EXPECT_EQ(setter.find("isUndefined"), std::string::npos);
+    EXPECT_EQ(setter.find("if (__locals_result.isUndefined()) {\n"), std::string::npos);
     auto setterFile = Parse(setter);
     ASSERT_EQ(diag.GetErrorCount(), 0);
 }
@@ -1790,8 +1791,10 @@ TEST_F(ArkTSTypeMappingTest, OnlyRuntimeFailureCodesAreTranslatedAtEachCallSite)
                                                  true, "__locals_", classRefs)});
     for (const auto& site : sites) {
         ASSERT_FALSE(site.code.empty()) << site.label;
-        EXPECT_EQ(CountOccurrences(site.code, "catch ("), 1) << site.label;
-        EXPECT_EQ(CountOccurrences(site.code, "34300002"), 1) << site.label;
+        // The function wrapper translates its export lookup as well as the call.
+        const size_t translated = site.label == "function" ? 2 : 1;
+        EXPECT_EQ(CountOccurrences(site.code, "catch ("), translated) << site.label;
+        EXPECT_EQ(CountOccurrences(site.code, "34300002"), translated) << site.label;
         EXPECT_NE(site.code.find("if (__locals_error_0.code != 34300002 && __locals_error_0.code != 0) {"),
             std::string::npos)
             << site.label;

@@ -9,12 +9,23 @@
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/IntLiteral.h"
 #include "cangjie/AST/Utils.h"
+#include "cangjie/Utils/FileUtil.h"
 #include "cangjie/Modules/CjoVersion.h"
 #include "cangjie/Parse/Parser.h"
 #include "Utils/TypeMapper.h"
 #include <algorithm>
 #include <cerrno>
+#if defined(__has_include)
+#if __has_include(<version>)
+#include <version>
+#endif
+#if __has_include(<charconv>)
 #include <charconv>
+#endif
+#endif
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+#define CJ_HAS_TO_CHARS 1
+#endif
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -52,9 +63,17 @@ struct ArkTSEnumNumberCounter {
     {
         if (floating) {
             char buffer[64];
+#ifdef CJ_HAS_TO_CHARS
             auto result = std::to_chars(buffer, buffer + sizeof(buffer), floatValue, std::chars_format::general);
             std::string spelling =
                 result.ec == std::errc() ? std::string(buffer, result.ptr) : std::to_string(floatValue);
+#else
+            // Older standard libraries lack floating-point std::to_chars. Spell the
+            // value with the shortest round-trip-safe precision instead.
+            int written = std::snprintf(buffer, sizeof(buffer), "%.17g", floatValue);
+            std::string spelling =
+                written > 0 ? std::string(buffer, static_cast<size_t>(written)) : std::to_string(floatValue);
+#endif
             // The Cangjie lexer accepts only a '-' sign after the exponent
             // marker; std::to_chars writes "1e+20". Drop the '+' so the
             // spelling is legal generated source.
@@ -978,7 +997,20 @@ void Native::FFI::ArkTS::AttachEnumMembers(ArkTSTypeDesc& desc,
             if (found != g_arktsState.enums.end()) {
                 desc.enumMembers.reserve(found->second.size());
                 for (const auto& member : found->second) {
-                    ArkTSEnumMember mapped{member.ctor->identifier.Val(), member.kind, member.value, {}};
+                    // The generated wrapper spells the constructor as `case <slot>.<name>`, so the
+                    // identifier has to be a legal Cangjie identifier. A keyword that came from a raw
+                    // identifier gets its backticks back; anything that is not even a raw identifier
+                    // (a forged or corrupted CJO) drops the whole table instead of reaching the source.
+                    std::string memberName = member.ctor->identifier.Val();
+                    if (!FileUtil::IsIdentifier(memberName, true)) {
+                        std::string rawName = "`" + memberName + "`";
+                        if (!FileUtil::IsIdentifier(rawName, true)) {
+                            desc.enumMembers.clear();
+                            break;
+                        }
+                        memberName = rawName;
+                    }
+                    ArkTSEnumMember mapped{memberName, member.kind, member.value, {}};
                     if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
                         if (member.payloadType != nullptr) {
                             mapped.payload.push_back(classify(member.payloadType));

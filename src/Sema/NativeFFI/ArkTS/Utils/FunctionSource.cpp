@@ -168,6 +168,11 @@ bool ArkTSTypeIsSourceOption(const Type& type)
     if (type.astKind == ASTKind::OPTION_TYPE) {
         return true;
     }
+    // A type alias such as 'type Maybe = Option<String>' passes the syntactic
+    // checks below; the semantic type is the reliable answer once Sema has run.
+    if (type.GetTy() != nullptr && type.GetTy()->IsCoreOptionType()) {
+        return true;
+    }
     if (auto ref = DynamicCast<const RefType*>(&type)) {
         return ref->ref.identifier == "Option" && ref->typeArguments.size() == 1;
     }
@@ -798,9 +803,31 @@ static constexpr const char* const ARKTS_INVALID = "ArkTS value invalid: ";
 static constexpr const char* const ARKTS_NEVER_EXCEPTION = ARKTS_RUNTIME_EXCEPTION;
 static constexpr const char* const ARKTS_NEVER_MESSAGE = "ArkTS never function returned";
 
-static std::string ArkTSConversionThrow(const std::string& reason, const std::string& indent)
+// A JSValue has no toString member; describe it with the kind predicates the
+// facade does expose, so a conversion failure can name the actual value.
+static std::string ArkTSValueDescription(const std::string& value)
 {
-    return indent + "throw " + ARKTS_CONVERSION_EXCEPTION + "(\"" + reason + "\")\n";
+    // Numbers are deliberately not read here: the range checks already spell the
+    // offending value, and a number-to-number read would look like a conversion
+    // the BigInt path must not perform.
+    return "(if (" + value + ".isNull()) { \"null\" } else if (" + value + ".isUndefined()) { \"undefined\" } else if (" +
+        value + ".isBoolean()) { " + value + ".toBoolean().toString() } else if (" + value +
+        ".isString()) { " + value + ".asString().toString() } else { \"object\" })";
+}
+
+static std::string ArkTSConversionThrow(const std::string& reason, const std::string& indent,
+    const std::string& gotExpr = {})
+{
+    // A reference or enum type name reaches the message from the mapped
+    // declaration (or from a dependent package's CJO), so escape the literal
+    // instead of trusting it to be free of quotes and line breaks.
+    std::string argument = "\"" + StringConvertor::RecoverForArkTSSource(reason) + "\"";
+    if (!gotExpr.empty()) {
+        // Append the observed value so the message carries the actual type or
+        // out-of-range value, as the conversion contract requires.
+        argument += " + \", got \" + " + gotExpr;
+    }
+    return indent + "throw " + ARKTS_CONVERSION_EXCEPTION + "(" + argument + ")\n";
 }
 
 // ---- Runtime failure contract ----
@@ -903,7 +930,7 @@ static std::string ArkTSCallTranslation(const std::string& callExpr, const std::
 // a JSValue so the caller can check callability before use.
 static std::string ArkTSExportGuard(const std::string& receiver, const std::string& target, const std::string& name,
     const std::string& context, bool globalReceiver, const std::string& indent, size_t namespaceDepth = 0,
-    const std::string& error = {})
+    const std::string& error = {}, bool undefinedIsMissing = true)
 {
     auto message = context + " + " + ArkTSLiteral(": ") + " + " + ArkTSFailureLocator(globalReceiver) +
         " + " + ArkTSLiteral(" has no export '") + " + " + name + " + " + ArkTSLiteral("'");
@@ -921,8 +948,12 @@ static std::string ArkTSExportGuard(const std::string& receiver, const std::stri
     if (!error.empty()) {
         read = ArkTSCallTranslation(read, context, error, indent);
     }
-    return indent + "let " + target + " = " + read + "\n" + indent + "if (" + target +
-        ".isUndefined()) {\n" + ArkTSRuntimeThrow(message, indent + "    ") + indent + "}\n";
+    std::string guard = indent + "let " + target + " = " + read + "\n";
+    if (undefinedIsMissing) {
+        guard += indent + "if (" + target + ".isUndefined()) {\n" + ArkTSRuntimeThrow(message, indent + "    ") +
+            indent + "}\n";
+    }
+    return guard;
 }
 
 // Member resolution on an object or class value with a precise missing-member
@@ -1213,7 +1244,8 @@ struct ArkTSValueEmitter {
         const std::string& typeName, const std::string& indent)
     {
         return indent + "if (!" + value + "." + predicate + "()) {\n" +
-            ArkTSConversionThrow(std::string(ARKTS_MISMATCH) + "not " + kind + " for " + typeName, indent + "    ") +
+            ArkTSConversionThrow(std::string(ARKTS_MISMATCH) + "not " + kind + " for " + typeName, indent + "    ",
+                ArkTSValueDescription(value)) +
             indent + "}\n";
     }
 
@@ -1290,7 +1322,8 @@ struct ArkTSValueEmitter {
                 emitted.pre += NullGuard(value, name, indent);
             }
             auto throwInline = [](const std::string& reason) {
-                return std::string("throw ") + ARKTS_CONVERSION_EXCEPTION + "(\"" + reason + "\")";
+                return std::string("throw ") + ARKTS_CONVERSION_EXCEPTION + "(\"" +
+                    StringConvertor::RecoverForArkTSSource(reason) + "\")";
             };
             // Runtime matching follows design §7.2: constructors are tried in
             // declaration order, a literal matches by value and a payload by
@@ -1562,7 +1595,8 @@ struct ArkTSValueEmitter {
                     indent + "    ") +
                 indent + "}\n";
             emitted.pre += indent + "if (" + number + " < " + lower + " || " + number + " > " + upper + ") {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "out of " + type + " range", indent + "    ") +
+                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "out of " + type + " range", indent + "    ",
+                    number + ".toString()") +
                 indent + "}\n";
             emitted.pre += indent + "if (" + number + " != Float64(Int64(" + number + "))) {\n" +
                 ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not an integer for " + type, indent + "    ") +
@@ -1607,19 +1641,23 @@ struct ArkTSValueEmitter {
             emitted.pre += indent + "let " + big + " = " + value + ".asBigInt().toBigInt()\n";
             if (type == "Int64") {
                 emitted.pre += indent + "if (" + big + " < BigInt(Int64(-9223372036854775808))) {\n" +
-                    ArkTSConversionThrow(std::string(ARKTS_INVALID) + "below Int64 range", indent + "    ") +
+                    ArkTSConversionThrow(std::string(ARKTS_INVALID) + "below Int64 range", indent + "    ",
+                    big + ".toString()") +
                     indent + "}\n";
                 emitted.pre += indent + "if (" + big + " > BigInt(Int64(9223372036854775807))) {\n" +
-                    ArkTSConversionThrow(std::string(ARKTS_INVALID) + "above Int64 range", indent + "    ") +
+                    ArkTSConversionThrow(std::string(ARKTS_INVALID) + "above Int64 range", indent + "    ",
+                    big + ".toString()") +
                     indent + "}\n";
                 emitted.expr = big + ".toInt64()";
                 return emitted;
             }
             emitted.pre += indent + "if (" + big + " < BigInt(Int64(0))) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "negative BigInt for UInt64", indent + "    ") +
+                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "negative BigInt for UInt64", indent + "    ",
+                    big + ".toString()") +
                 indent + "}\n";
             emitted.pre += indent + "if (" + big + " > BigInt(UInt64(18446744073709551615u64))) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "above UInt64 range", indent + "    ") + indent +
+                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "above UInt64 range", indent + "    ",
+                    big + ".toString()") + indent +
                 "}\n";
             emitted.expr = big + ".toUInt64()";
             return emitted;
@@ -1918,7 +1956,7 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     auto target = emitter.Fresh("target");
     auto error = emitter.Fresh("error");
     code += ArkTSExportGuard(recv, target, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_NAME), context, globalReceiver,
-        "    ", namespaceDepth);
+        "    ", namespaceDepth, error);
     code += ArkTSCallableGuard(target, context, ": the export is not a function", "    ");
     const auto callExpr =
         recv + ".callMethod(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_NAME) + ", " + callArgsExpr + ")";
@@ -2118,8 +2156,10 @@ std::string ArkTSGlobalVariableGetterSource(const ArkTSTypeDesc& valueType, size
     // getter failure through the same contract as a function call.
     auto value = emitter.Fresh("value");
     auto error = emitter.Fresh("error");
+    // An undefined value is legal for an Option<T> target (design 3.4 maps it to
+    // None); every other target treats undefined as a missing export.
     code += ArkTSExportGuard(recv, value, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_NAME), context, globalReceiver,
-        "    ", namespaceDepth, error);
+        "    ", namespaceDepth, error, valueType.kind != ArkTSTypeDesc::Kind::OPTIONAL);
     if (valueType.kind == ArkTSTypeDesc::Kind::SCALAR && valueType.scalar == "Nothing") {
         // A never-typed property that produced a value is the same never
         // contract as a function result.
