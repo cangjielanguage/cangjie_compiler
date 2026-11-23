@@ -545,7 +545,7 @@ bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vecto
                         auto& param = list->params.front();
                         payloadType = param->type;
                         if (payloadType == nullptr) {
-                            payloadTy = param->GetTy();
+                            payloadTy = param->DataTy();
                         }
                     }
                 }
@@ -697,7 +697,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
                 continue;
             }
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_exported_var_unsupported_type, *vd,
-                vd->type->GetTy() ? Ty::ToString(vd->type->GetTy()) : vd->identifier.Val());
+                vd->type->DataTy() ? Ty::ToString(vd->type->DataTy()) : vd->identifier.Val());
             vd->EnableAttr(Attribute::IS_BROKEN);
         }
         for (auto& decl : file->decls) {
@@ -732,7 +732,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
                     return std::string{};
                 }
                 SetTypeTy(ctx, *type); // Also substitutes aliases and preserves aliasTy for cjo.
-                return ScalarName(type->GetTy());
+                return ScalarName(type->DataTy());
             };
             auto ret = resolveScalar(fd->funcBody->retType.get());
             if (ret.empty()) {
@@ -742,7 +742,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
                 auto& retType = *fd->funcBody->retType;
                 auto& at = retType.begin.IsZero() ? static_cast<Node&>(*fd) : static_cast<Node&>(retType);
                 diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, at,
-                    retType.GetTy() ? Ty::ToString(retType.GetTy()) : std::string(), fd->identifier.Val());
+                    retType.DataTy() ? Ty::ToString(retType.DataTy()) : std::string(), fd->identifier.Val());
                 continue;
             }
             std::unordered_set<std::string> allocatedNames;

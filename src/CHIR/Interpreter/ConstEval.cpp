@@ -87,7 +87,16 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertToChir(
     switch (ty.GetTypeKind()) {
         case Type::TYPE_TUPLE:
         case Type::TYPE_STRUCT: {
-            auto tuple = IValUtils::Get<ITuple>(val);
+            // A value that comes from a cjo written by an older compiler can
+            // carry a representation this compiler does not model (for example
+            // the array-backed String of an older standard library). An
+            // unchecked access aborts with std::bad_variant_access; such a
+            // value is simply not constant-foldable here.
+            auto tuplePtr = IValUtils::GetIf<ITuple>(&val);
+            if (tuplePtr == nullptr) {
+                return nullptr;
+            }
+            auto& tuple = *tuplePtr;
             if (ty.IsString()) {
                 // Codegen doesn't support strings in constant initializers, so
                 // we have strings here and not in TryConvertToConstant.
@@ -133,19 +142,45 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertStringToChir(
 {
     std::string stringVal;
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    auto& arrPtr = IValUtils::Get<IPointer>(val.content[0]);
-    auto& arrData = IValUtils::Get<IArray>(*arrPtr.content).content;
+    // The String layout assumed below is the one this compiler emits. A value
+    // decoded from a cjo written by an older compiler can keep String data in
+    // a shape this compiler does not model (an object rather than an array);
+    // report that the value is not foldable instead of aborting on
+    // std::bad_variant_access.
+    if (val.content.size() < 3) {
+        return nullptr;
+    }
+    auto arrPtr = IValUtils::GetIf<IPointer>(&val.content[0]);
+    auto startPtr = IValUtils::GetIf<IUInt32>(&val.content[1]);
+    auto lenPtr = IValUtils::GetIf<IUInt32>(&val.content[2]);
+    if (arrPtr == nullptr || arrPtr->content == nullptr || startPtr == nullptr || lenPtr == nullptr) {
+        return nullptr;
+    }
+    auto arrDataPtr = IValUtils::GetIf<IArray>(arrPtr->content);
+    if (arrDataPtr == nullptr) {
+        return nullptr;
+    }
+    auto& arrData = arrDataPtr->content;
 
-    auto start = IValUtils::Get<IUInt32>(val.content[1]).content;
-    CJC_ASSERT(start == static_cast<uint32_t>(0) && "const strings always start at zero");
+    auto start = startPtr->content;
+    if (start != static_cast<uint32_t>(0)) {
+        return nullptr;
+    }
 
-    auto len = IValUtils::Get<IUInt32>(val.content[2]).content;
+    auto len = lenPtr->content;
+
+    if (arrData.size() <= static_cast<size_t>(len)) {
+        return nullptr;
+    }
 
     stringVal.reserve(len);
-    CJC_ASSERT(arrData.size() > static_cast<size_t>(len));
 
     for (uint32_t el = 0; el < len; el++) {
-        stringVal.push_back(static_cast<char>(IValUtils::Get<IUInt8>(arrData[el + 1]).content));
+        auto byte = IValUtils::GetIf<IUInt8>(&arrData[el + 1]);
+        if (byte == nullptr) {
+            return nullptr;
+        }
+        stringVal.push_back(static_cast<char>(byte->content));
     }
 #endif
 

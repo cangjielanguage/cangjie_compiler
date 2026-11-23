@@ -255,7 +255,7 @@ void TypeChecker::TypeCheckerImpl::CheckUnsafeInvoke(const CallExpr& ce)
     if (Native::FFI::ArkTS::IsGatedArkTSDecl(*ce.resolvedFunction)) {
         return;
     }
-    auto funcTy = StaticCast<FuncTy*>(ce.resolvedFunction->GetTy());
+    auto funcTy = StaticCast<FuncTy*>(ce.resolvedFunction->DataTy());
     // A prepared @ArkTS wrapper keeps FOREIGN as its source identity but is an
     // ordinary Cangjie function: its calls do not need 'unsafe'. Generic and
     // preset declarations are still external and keep the requirement.

@@ -122,7 +122,7 @@ void DiagnoseUnsupportedReturnType(DiagnosticEngine& diag, FuncDecl& fd, Ptr<Typ
 {
     if (retType && !retType->begin.IsZero()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *retType,
-            Ty::ToString(retType->GetTy()), fd.identifier.Val());
+            Ty::ToString(retType->DataTy()), fd.identifier.Val());
     } else {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, fd, "", fd.identifier.Val());
     }
@@ -188,7 +188,7 @@ ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(ASTContext& ct
         return ArkTSTypeDesc{};
     }
     SetTypeTy(ctx, *type);
-    auto desc = ArkTSClassifyType(type->GetTy(), ci->importManager);
+    auto desc = ArkTSClassifyType(type->DataTy(), ci->importManager);
     // Attach the prepared member value table to every enum leaf, so the wrapper
     // generator can spell the value mapping without reaching into the checker.
     // A prepared enum whose declaration was refused (payload, generic, ...) has
@@ -977,7 +977,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassMemberDefaultArguments(
             // Only the canonical ArkTS optional spelling is supported: a
             // default of None. Build that expression with the resolved Option
             // type instead of relying on a late scope lookup.
-            Ptr<Ty> paramTy = param->type ? param->type->GetTy() : nullptr;
+            Ptr<Ty> paramTy = param->type ? param->type->DataTy() : nullptr;
             auto original = DynamicCast<RefExpr*>(param->assignment.get());
             bool noneDefault = param->assignment && original && original->ref.identifier.Val() == "None" &&
                 Ty::IsTyCorrect(paramTy) && paramTy->IsCoreOptionType() && !paramTy->typeArgs.empty();
@@ -1019,7 +1019,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassMemberDefaultArguments(
             // The desugar function takes every preceding parameter, so the
             // function type must use that list; a fixed empty list breaks the
             // second and later defaulted parameters.
-            std::vector<Ptr<Ty>> paramTys;
+            std::vector<ModalTy> paramTys;
             for (auto& previous : fb.paramLists.front()->params) {
                 // The clone is created by the generic default pass after the
                 // earlier type walk, so its type node still needs resolving
@@ -1033,8 +1033,8 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassMemberDefaultArguments(
                 }
             }
             auto funcTy = typeManager.GetFunctionTy(paramTys, paramTy);
-            fb.SetTy(funcTy);
-            param->desugarDecl->SetTy(funcTy);
+            fb.SetTy(ModalTy{funcTy});
+            param->desugarDecl->SetTy(ModalTy{funcTy});
             param->desugarDecl->EnableAttr(Attribute::IS_CHECK_VISITED);
             fb.EnableAttr(Attribute::IS_CHECK_VISITED);
             if (!fb.body || !Ty::IsTyCorrect(fb.body->GetTy())) {
@@ -1197,14 +1197,14 @@ bool TypeChecker::TypeCheckerImpl::ClassifyArkTSFuncParameters(ASTContext& ctx, 
             auto desc = ArkTSClassifyPosition(ctx, param->type.get());
             if (!ArkTSTypeDescGeneratable(desc) || ArkTSTypeDescContainsNothing(desc)) {
                 auto& position = param->type ? static_cast<Node&>(*param->type) : static_cast<Node&>(*param);
-                auto deferredName = param->type ? ArkTSDeferredExternalTypeName(param->type->GetTy()) : std::string{};
+                auto deferredName = param->type ? ArkTSDeferredExternalTypeName(param->type->DataTy()) : std::string{};
                 if (!deferredName.empty()) {
                     diag.DiagnoseRefactor(
                         DiagKindRefactor::sema_arkts_foreign_external_type_deferred, position, deferredName);
                 } else {
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_param_type_unsupported, position,
                         param->identifier.Val(), fd.identifier.Val(),
-                        param->type ? Ty::ToString(param->type->GetTy()) : std::string());
+                        param->type ? Ty::ToString(param->type->DataTy()) : std::string());
                 }
                 supported = false;
             }
@@ -1227,15 +1227,15 @@ bool TypeChecker::TypeCheckerImpl::ClassifyArkTSPropertyType(ASTContext& ctx, Pr
         return true;
     }
     if (pd.type) {
-        auto deferredName = ArkTSDeferredExternalTypeName(pd.type->GetTy());
+        auto deferredName = ArkTSDeferredExternalTypeName(pd.type->DataTy());
         if (!deferredName.empty()) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred, *pd.type, deferredName);
         } else if (pd.isVar) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_param_type_unsupported, *pd.type,
-                pd.identifier.Val(), pd.identifier.Val(), Ty::ToString(pd.type->GetTy()));
+                pd.identifier.Val(), pd.identifier.Val(), Ty::ToString(pd.type->DataTy()));
         } else {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *pd.type,
-                Ty::ToString(pd.type->GetTy()), pd.identifier.Val());
+                Ty::ToString(pd.type->DataTy()), pd.identifier.Val());
         }
     }
     pd.EnableAttr(Attribute::IS_BROKEN);
@@ -1251,7 +1251,7 @@ void TypeChecker::TypeCheckerImpl::RejectArkTSForeignInterfaceExtend(ExtendDecl&
     if (!foreignInterface) {
         return;
     }
-    auto ty = ed.extendedType ? ed.extendedType->GetTy() : nullptr;
+    auto ty = ed.extendedType ? ed.extendedType->DataTy() : nullptr;
     auto extendedDecl = ty ? Ty::GetDeclPtrOfTy(ty) : nullptr;
     // The extended type itself may already have been refused; do not report
     // the same relation twice.

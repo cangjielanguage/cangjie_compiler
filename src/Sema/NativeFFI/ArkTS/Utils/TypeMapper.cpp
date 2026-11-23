@@ -115,7 +115,7 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
     // package and reports the deferral message, every other same-named
     // declaration keeps the generic unsupported-type diagnostics.
     if (ty->IsCoreOptionType()) {
-        auto inner = ArkTSClassifyType(ty->typeArgs.front(), imports);
+        auto inner = ArkTSClassifyType(ty->typeArgs.front().Ty(), imports);
         if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED && inner.kind != ArkTSTypeDesc::Kind::OPTIONAL) {
             desc.kind = ArkTSTypeDesc::Kind::OPTIONAL;
             desc.elements.emplace_back(std::move(inner));
@@ -127,7 +127,7 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
     // single-element requirement stays explicit (a zero- or many-argument
     // Array remains unsupported).
     if (ty->IsStructArray() && ty->typeArgs.size() == 1) {
-        auto inner = ArkTSClassifyType(ty->typeArgs.front(), imports);
+        auto inner = ArkTSClassifyType(ty->typeArgs.front().Ty(), imports);
         if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED &&
             !ArkTSTypeDescContainsInterfaceReference(inner)) {
             desc.kind = ArkTSTypeDesc::Kind::ARRAY_COPY;
@@ -166,7 +166,7 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports)
     if (ty->IsTuple() && ty->typeArgs.size() >= 2) {
         desc.kind = ArkTSTypeDesc::Kind::TUPLE;
         for (auto& element : ty->typeArgs) {
-            auto inner = ArkTSClassifyType(element, imports);
+            auto inner = ArkTSClassifyType(element.Ty(), imports);
             if (inner.kind == ArkTSTypeDesc::Kind::UNSUPPORTED ||
                 ArkTSTypeDescContainsInterfaceReference(inner)) {
                 return ArkTSTypeDesc{};
@@ -204,7 +204,7 @@ std::string ArkTSDeferredExternalTypeName(Ptr<Ty> ty)
         return decl->identifier.Val();
     }
     for (auto& arg : ty->typeArgs) {
-        auto nested = ArkTSDeferredExternalTypeName(arg);
+        auto nested = ArkTSDeferredExternalTypeName(arg.Ty());
         if (!nested.empty()) {
             return nested;
         }

@@ -10,6 +10,7 @@
 
 #include "../../ParserImpl.h"
 #include "cangjie/AST/Match.h"
+#include "cangjie/AST/Utils.h"
 #include "cangjie/Utils/Utils.h"
 
 using namespace Cangjie;
@@ -84,7 +85,7 @@ std::set<Modifier> ArkTSParserImpl::PrepareForeignFunctionModifiers(ScopeKind sc
     // Preserve ordinary C foreign checks. ArkTS foreign will become an
     // ordinary CJ wrapper in NativeFFI before C ABI/type prechecking.
     auto checked = modifiers;
-    if (scopeKind == ScopeKind::TOPLEVEL && p.HasModifier(modifiers, TokenKind::FOREIGN) &&
+    if (scopeKind == ScopeKind::TOPLEVEL && AST::HasModifier(modifiers, TokenKind::FOREIGN) &&
         HasArkTSAnnotation(annotations)) {
         Utils::EraseIf(checked, [](const auto& modifier) { return modifier.modifier == TokenKind::FOREIGN; });
         function.EnableAttr(Attribute::FOREIGN);

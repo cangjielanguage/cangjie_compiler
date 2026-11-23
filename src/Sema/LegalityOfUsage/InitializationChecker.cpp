@@ -1628,7 +1628,7 @@ void InitializationChecker::CheckInitInConstructors(FuncDecl& fd, const std::vec
     if (fd.constructorCall == ConstructorCall::OTHER_INIT ||
         (fd.funcBody->parentClassLike &&
             (IsExternalForeign(*fd.funcBody->parentClassLike) ||
-                HasJavaAttr(*fd.funcBody->parentClassLike)))) {
+                fd.funcBody->parentClassLike->IsJavaForeign() || fd.funcBody->parentClassLike->IsJavaExport()))) {
         for (auto decl : unInitNonFuncDecls) {
             decl->EnableAttr(Attribute::INITIALIZED);
         }

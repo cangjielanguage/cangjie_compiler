@@ -387,7 +387,9 @@ bool IsArkTSForeignClass(const ClassDecl& cd)
     // semantics and member surface are delivered with the preset requirements,
     // and their signature spellings (optional constructor parameters) are not
     // part of the wrapper path.
-    if (cd.fullPackageName == "std.interop.arkts") {
+    const auto& packageName =
+        cd.curFile && cd.curFile->curPackage ? cd.curFile->curPackage->fullPackageName : cd.fullPackageName;
+    if (packageName == "std.interop.arkts") {
         return false;
     }
     return cd.HasAnno(AnnotationKind::ARKTS) && cd.TestAttr(Attribute::FOREIGN) &&

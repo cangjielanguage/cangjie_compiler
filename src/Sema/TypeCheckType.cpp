@@ -234,11 +234,11 @@ void TypeChecker::TypeCheckerImpl::CheckRefType(ASTContext& ctx, RefType& rt)
                 // A package qualifier is not a type: the enclosing qualified
                 // type resolves its member through the PackageDecl, so this
                 // reference must not take a declaration type.
-                rt.SetTy(TypeManager::GetInvalidTy());
+                rt.SetTy({TypeManager::GetInvalidTy()});
                 return;
             }
             if (rt.typeArguments.empty()) {
-                rt.SetTy(support->second->GetTy());
+                rt.SetTy({support->second->DataTy()});
             }
         }
     }

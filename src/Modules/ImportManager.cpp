@@ -125,6 +125,19 @@ constexpr const char* ARKTS_RUNTIME_EXCEPTION = "ForeignRuntimeException";
 // The interop library's carrier for an ArkTS-side throw. The facade re-exports
 // it, so the generated call translation catches it through the same import.
 constexpr const char* ARKTS_BUSINESS_EXCEPTION = "BusinessException";
+// The generated global-variable getter compares the ArkTS BigInt against the
+// Int64/UInt64 bounds and parses the value back through the `parse` extensions.
+// Both spellings are compiler-chosen (the user file need not import either
+// package): BigInt is bound under the generated alias, and the parse extensions
+// are reachable once std.convert's Parsable interface is imported. A
+// speculative overload re-check clears the bound target, so the names must also
+// be genuinely resolvable through the file's imports.
+constexpr const char* ARKTS_NUMERIC_FULL_PACKAGE = "std.math.numeric";
+constexpr const char* ARKTS_BIGINT_MEMBER = "BigInt";
+constexpr const char* ARKTS_BIGINT_ALIAS = "__cj_arkts_BigInt";
+constexpr const char* ARKTS_CONVERT_FULL_PACKAGE = "std.convert";
+constexpr const char* ARKTS_PARSABLE_MEMBER = "Parsable";
+constexpr const char* ARKTS_CONTEXT_CURRENT = "__cj_arkts_current";
 
 // The three single-member support imports injected into every @ArkTS file.
 bool IsArkTSSupportMember(const std::string& member)
@@ -190,6 +203,28 @@ bool FileBindsPackageName(const File& file, const std::string& fullPackageName)
             continue;
         }
         if (content.GetImportedPackageName() == fullPackageName) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Whether the file already binds @p alias through an alias import (either a
+// whole import or a member of a multi-import). Injection must be idempotent:
+// BuildIndex runs again on the incremental/LSP path.
+bool FileBindsAlias(const File& file, const std::string& alias)
+{
+    auto binds = [&alias](const ImportContent& content) {
+        return content.aliasName.Val() == alias;
+    };
+    for (auto& import : file.imports) {
+        if (import == nullptr) {
+            continue;
+        }
+        if (binds(import->content)) {
+            return true;
+        }
+        if (std::any_of(import->content.items.begin(), import->content.items.end(), binds)) {
             return true;
         }
     }
@@ -1328,6 +1363,27 @@ void ImportManager::AddArkTSInteropImports(
             addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION);
             addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_RUNTIME_EXCEPTION);
             addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_BUSINESS_EXCEPTION);
+            // The generated global-variable getter names BigInt through the
+            // compiler-generated alias and calls the `parse` extensions; both
+            // must resolve from the file's own imports, not just from the
+            // lowering-time target, because a speculative re-check clears it.
+            auto addMemberImportAs = [&](const std::string& fullPackageName, const std::string& member,
+                                         const std::string& alias) {
+                if (pkg->fullPackageName == fullPackageName || FileBindsAlias(*file, alias) ||
+                    !IsPackageResolvable(*this, fullPackageName)) {
+                    return;
+                }
+                auto import = CreateImportSpec(fullPackageName, member, alias);
+                SetSyntheticImportRange(*import, at);
+                import->curFile = file.get();
+                import->content.curFile = file.get();
+                file->imports.emplace_back(std::move(import));
+            };
+            addMemberImportAs(ARKTS_NUMERIC_FULL_PACKAGE, ARKTS_BIGINT_MEMBER, ARKTS_BIGINT_ALIAS);
+            addMemberImport(ARKTS_CONVERT_FULL_PACKAGE, ARKTS_PARSABLE_MEMBER);
+            // The getter's prologue reads the current call-scope entry through
+            // the bare generated name; bind it from its host package.
+            addMemberImport(ARKTS_CONTEXT_ABI_FULL_PACKAGE, ARKTS_CONTEXT_CURRENT);
         }
     }
 }

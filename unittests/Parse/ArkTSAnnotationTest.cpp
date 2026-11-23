@@ -50,8 +50,7 @@ protected:
         diag.SetSourceManager(&sm);
         GlobalOptions compileOptions;
         compileOptions.experimentalMode = true;
-        Parser parser(code, diag, sm);
-        parser.SetCompileOptions(compileOptions);
+        Parser parser(code, diag, sm, {0, 1, 1}, false, &compileOptions);
         auto file = parser.ParseTopLevel();
         diag.EmitCategoryDiagnostics(DiagCategory::PARSE);
         return file;
@@ -63,8 +62,7 @@ protected:
         GlobalOptions options;
         options.scanDepPkg = true;
         options.experimentalMode = true;
-        Parser parser(code, diag, sm);
-        parser.SetCompileOptions(options);
+        Parser parser(code, diag, sm, {0, 1, 1}, false, &options);
         return parser.ParseTopLevel();
     }
 
@@ -79,8 +77,7 @@ protected:
         GlobalOptions options;
         options.scanDepPkg = scanDepPkg;
         options.experimentalMode = true;
-        Parser parser(code, diag, sm);
-        parser.SetCompileOptions(options);
+        Parser parser(code, diag, sm, {0, 1, 1}, false, &options);
         return parser.ParseTopLevel();
     }
 };
@@ -562,7 +559,7 @@ public func helper(): Unit {}
         auto file = source.files.front().get();
         file->curPackage = &source;
         auto unit = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-        auto signature = types.GetFunctionTy({}, unit);
+        auto signature = types.GetFunctionTy({}, ModalTy{unit});
         for (auto& item : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(item.get());
             ASSERT_NE(fd, nullptr);
@@ -572,10 +569,10 @@ public func helper(): Unit {}
             fd->EnableAttr(Attribute::GLOBAL, Attribute::PUBLIC);
             fd->linkage = Linkage::EXTERNAL;
             fd->fullPackageName = source.fullPackageName;
-            fd->SetTy(signature);
-            fd->funcBody->SetTy(signature);
-            fd->funcBody->retType->SetTy(unit);
-            fd->funcBody->body->SetTy(unit);
+            fd->SetTy(ModalTy{signature});
+            fd->funcBody->SetTy(ModalTy{signature});
+            fd->funcBody->retType->SetTy(ModalTy{unit});
+            fd->funcBody->body->SetTy(ModalTy{unit});
             Walker(fd, [file](Ptr<Node> node) {
                 node->curFile = file;
                 return VisitAction::WALK_CHILDREN;
@@ -729,14 +726,14 @@ public func member(): Unit {}
         ASSERT_NE(function, nullptr);
         function->annotations.emplace_back(std::move(declaration->decls.front()->annotations.front()));
         auto unit = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
-        auto signature = types.GetFunctionTy({}, unit);
+        auto signature = types.GetFunctionTy({}, ModalTy{unit});
         function->EnableAttr(Attribute::GLOBAL, Attribute::PUBLIC);
         function->linkage = Linkage::EXTERNAL;
         function->fullPackageName = source.fullPackageName;
-        function->SetTy(signature);
-        function->funcBody->SetTy(signature);
-        function->funcBody->retType->SetTy(unit);
-        function->funcBody->body->SetTy(unit);
+        function->SetTy(ModalTy{signature});
+        function->funcBody->SetTy(ModalTy{signature});
+        function->funcBody->retType->SetTy(ModalTy{unit});
+        function->funcBody->body->SetTy(ModalTy{unit});
         const auto begin = function->begin;
         const auto end = function->end;
         Walker(function, [file, begin, end](Ptr<Node> node) {
@@ -994,8 +991,7 @@ TEST_F(ArkTSEntryTest, RepeatedOptionAtOneLevelIsRejectedEvenForEqualValues)
                 second + "\"] foreign func invalid(): Unit\n";
             GlobalOptions compileOptions;
             compileOptions.experimentalMode = true;
-            Parser parser(code, diagnostics, sourceManager);
-            parser.SetCompileOptions(compileOptions);
+            Parser parser(code, diagnostics, sourceManager, {0, 1, 1}, false, &compileOptions);
             auto file = parser.ParseTopLevel();
             diagnostics.EmitCategoryDiagnostics(DiagCategory::PARSE);
             EXPECT_EQ(diagnostics.GetErrorCount(), 0);
@@ -1342,8 +1338,7 @@ TEST_F(ArkTSEntryTest, ArkTSRejectsConflictingForeignABIAnnotations)
         diagnostics.SetSourceManager(&sourceManager);
         GlobalOptions compileOptions;
         compileOptions.experimentalMode = true;
-        Parser parser(code, diagnostics, sourceManager);
-        parser.SetCompileOptions(compileOptions);
+        Parser parser(code, diagnostics, sourceManager, {0, 1, 1}, false, &compileOptions);
         auto file = parser.ParseTopLevel();
         diagnostics.EmitCategoryDiagnostics(DiagCategory::PARSE);
         ASSERT_NE(file, nullptr);
@@ -1971,19 +1966,21 @@ public foreign class ArkTSArray<T> {
     EXPECT_TRUE(StaticCast<PropDecl&>(*cd.body->decls[4]).TestAttr(Attribute::ABSTRACT));
 }
 
-TEST_F(ArkTSEntryTest, PublicForeignClassWithoutArkTSStillReportsModifierConflict)
+TEST_F(ArkTSEntryTest, PlainForeignClassDoesNotGetTheArkTSRelaxation)
 {
-    // Gate guard: without the @ArkTS annotation the access x foreign conflict
-    // keeps firing. The parse below runs without EmitCategoryDiagnostics so the
-    // stored PARSE diagnostics stay inspectable (emitting erases them).
+    // Gate guard: without the @ArkTS annotation the declaration keeps the
+    // foreign modifier but never receives the ArkTS marker. Main moved the
+    // plain foreign class/interface rejection to Sema
+    // (sema_unexpected_wrapper), so the parse itself succeeds.
     auto file = ParseKeepingDiagnostics(R"(public foreign class ArkTSArray<T> {
     public func pop(): Option<T>
 }
 )");
     ASSERT_NE(file, nullptr);
-    const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::PARSE);
-    EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
-        [](const auto& diagnostic) { return diagnostic.rKind == DiagKindRefactor::parse_conflict_modifier; }), 1);
+    ASSERT_EQ(file->decls.size(), 1);
+    auto& cd = StaticCast<ClassDecl&>(*file->decls.front());
+    EXPECT_TRUE(cd.TestAttr(Attribute::FOREIGN));
+    EXPECT_FALSE(cd.TestAttr(Attribute::ARKTS));
 }
 
 TEST_F(ArkTSEntryTest, PublicForeignInterfaceRelaxationIsArkTSGated)
@@ -2011,9 +2008,10 @@ public foreign interface Indexed {
 }
 )");
     ASSERT_NE(plain, nullptr);
-    const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::PARSE);
-    EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
-        [](const auto& diagnostic) { return diagnostic.rKind == DiagKindRefactor::parse_conflict_modifier; }), 1);
+    ASSERT_EQ(plain->decls.size(), 1);
+    auto& plainInterface = StaticCast<InterfaceDecl&>(*plain->decls.front());
+    EXPECT_TRUE(plainInterface.TestAttr(Attribute::FOREIGN));
+    EXPECT_FALSE(plainInterface.TestAttr(Attribute::ARKTS));
 }
 
 TEST_F(ArkTSEntryTest, ArkTSForeignClassRelaxationSkipsOnlyTheAccessForeignPair)
@@ -2040,8 +2038,7 @@ public foreign private class DoublyAccessed {}
         diag.SetSourceManager(&sm);
         GlobalOptions compileOptions;
         compileOptions.experimentalMode = true;
-        Parser parser(code, diag, sm);
-        parser.SetCompileOptions(compileOptions);
+        Parser parser(code, diag, sm, {0, 1, 1}, false, &compileOptions);
         auto file = parser.ParseTopLevel();
         ASSERT_NE(file, nullptr);
         const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::PARSE);
@@ -2246,7 +2243,7 @@ class M {
     ASSERT_EQ(file->decls.size(), 1);
     auto& cd = StaticCast<ClassDecl&>(*file->decls.front());
     EXPECT_TRUE(cd.HasAnno(AnnotationKind::JAVA_MIRROR));
-    EXPECT_TRUE(cd.TestAttr(Attribute::JAVA_MIRROR));
+    EXPECT_TRUE(cd.TestAttr(Attribute::JAVA_FOREIGN));
     ASSERT_NE(cd.body, nullptr);
     ASSERT_EQ(cd.body->decls.size(), 1);
     auto& fd = StaticCast<FuncDecl&>(*cd.body->decls.front());
@@ -2277,32 +2274,29 @@ class O {
     ASSERT_EQ(file->decls.size(), 1);
     auto& cd = StaticCast<ClassDecl&>(*file->decls.front());
     EXPECT_TRUE(cd.HasAnno(AnnotationKind::OBJ_C_MIRROR));
-    EXPECT_TRUE(cd.TestAttr(Attribute::OBJ_C_MIRROR));
+    EXPECT_TRUE(cd.TestAttr(Attribute::OBJ_C_FOREIGN));
     ASSERT_NE(cd.body, nullptr);
     ASSERT_EQ(cd.body->decls.size(), 1);
     auto& fd = StaticCast<FuncDecl&>(*cd.body->decls.front());
     EXPECT_EQ(fd.identifier.Val(), "g");
     EXPECT_EQ(fd.outerDecl, &cd);
-    EXPECT_TRUE(fd.TestAttr(Attribute::OBJ_C_MIRROR));
+    EXPECT_TRUE(fd.TestAttr(Attribute::OBJ_C_FOREIGN));
     ASSERT_NE(fd.funcBody, nullptr);
     EXPECT_EQ(fd.funcBody->body, nullptr);
 }
 
-TEST_F(ArkTSEntryTest, MinimalPublicForeignClassWithoutArkTSStillReportsModifierConflict)
+TEST_F(ArkTSEntryTest, MinimalPlainForeignClassDoesNotGetTheArkTSRelaxation)
 {
-    // Gate guard for the shared modifier path: the access x FOREIGN pair is
-    // lifted only for @ArkTS declarations, so the minimal 'public foreign
-    // class C {}' spelling (no members, no other modifiers) keeps exactly
-    // one parse_conflict_modifier. This complements the pre-existing
-    // PublicForeignClassWithoutArkTSStillReportsModifierConflict (generic
-    // class with a member) by pinning the no-body/no-member shape the
-    // stdlib and the language-level tests use.
+    // Gate guard for the minimal 'public foreign class C {}' spelling: the
+    // foreign modifier survives the parse but the ArkTS marker does not, so
+    // Sema's plain foreign class/interface rejection still applies.
     auto file = ParseKeepingDiagnostics(R"(public foreign class C {}
 )");
     ASSERT_NE(file, nullptr);
-    const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::PARSE);
-    EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
-        [](const auto& diagnostic) { return diagnostic.rKind == DiagKindRefactor::parse_conflict_modifier; }), 1);
+    ASSERT_EQ(file->decls.size(), 1);
+    auto& cd = StaticCast<ClassDecl&>(*file->decls.front());
+    EXPECT_TRUE(cd.TestAttr(Attribute::FOREIGN));
+    EXPECT_FALSE(cd.TestAttr(Attribute::ARKTS));
 }
 
 namespace {

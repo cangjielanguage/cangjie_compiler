@@ -88,22 +88,28 @@ bool BindSupportReferences(Decl& owner, Node& root, ImportManager& imports, Diag
         }
         const auto name = ref->identifier.Val();
         if (auto package = supportPackages.find(name); package != supportPackages.end()) {
-            const auto visible = imports.GetImportedDeclsByName(*owner.curFile, name);
-            auto target = std::find_if(visible.begin(), visible.end(), [&](auto decl) {
-                return decl->astKind == ASTKind::PACKAGE_DECL && decl->fullPackageName == package->second;
-            });
-            if (target == visible.end()) {
+            // Resolve the package qualifier through the package table. Main's
+            // import model does not expose a package import's PackageDecl
+            // through GetImportedDeclsByName (a package import binds the
+            // package name, not a member), so the injected import is checked
+            // for presence and the decl is taken from the package manager.
+            const auto hasImport = std::any_of(owner.curFile->imports.begin(), owner.curFile->imports.end(),
+                [&](const auto& import) {
+                    return import != nullptr && import->content.GetImportedPackageName() == package->second;
+                });
+            auto target = hasImport ? imports.GetPackageDecl(package->second) : nullptr;
+            if (target == nullptr) {
                 reportMissing();
                 valid = false;
             } else {
-                ref->target = *target;
-                ref->targets = {*target};
+                ref->target = target;
+                ref->targets = {target};
                 // A package qualifier has no value type; the qualified node
                 // resolves its member through the PackageDecl. Do not set a Ty
                 // here or the restoring re-check would treat the qualifier as a
                 // type name.
-                node->SetTy(TypeManager::GetInvalidTy());
-                bound.emplace_back(node, *target);
+                node->SetTy({TypeManager::GetInvalidTy()});
+                bound.emplace_back(node, target);
             }
             return VisitAction::WALK_CHILDREN;
         }
@@ -284,7 +290,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 // helper takes no part in classification: the position still
                 // classifies UNSUPPORTED, the declaration still ends up
                 // broken and no wrapper is generated.
-                auto deferredName = fb.retType ? ArkTSDeferredExternalTypeName(fb.retType->GetTy()) : std::string{};
+                auto deferredName = fb.retType ? ArkTSDeferredExternalTypeName(fb.retType->DataTy()) : std::string{};
                 if (!deferredName.empty()) {
                     auto& deferredAt = fb.retType->begin.IsZero() ? static_cast<Node&>(*fd)
                                                                   : static_cast<Node&>(*fb.retType);
@@ -314,7 +320,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 // defensive classification.
                 if (fb.retType && !fb.retType->begin.IsZero()) {
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *fb.retType,
-                        Ty::ToString(fb.retType->GetTy()), fd->identifier.Val());
+                        Ty::ToString(fb.retType->DataTy()), fd->identifier.Val());
                 } else {
                     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *fd,
                         std::string(), fd->identifier.Val());
@@ -367,7 +373,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                         // or Nothing-carrying parameter keeps the generic
                         // message below.
                         auto deferredName =
-                            param->type ? ArkTSDeferredExternalTypeName(param->type->GetTy()) : std::string{};
+                            param->type ? ArkTSDeferredExternalTypeName(param->type->DataTy()) : std::string{};
                         if (!deferredName.empty()) {
                             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred,
                                 position, deferredName);
@@ -380,7 +386,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                         } else {
                             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_param_type_unsupported,
                                 position, param->identifier.Val(), fd->identifier.Val(),
-                                param->type ? Ty::ToString(param->type->GetTy()) : std::string());
+                                param->type ? Ty::ToString(param->type->DataTy()) : std::string());
                         }
                         supported = false;
                     }
@@ -526,7 +532,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY) {
                 diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_rest_type_unsupported,
                     *params[restIndex]->type, params[restIndex]->identifier.Val(), fd->identifier.Val(),
-                    Ty::ToString(params[restIndex]->type->GetTy()));
+                    Ty::ToString(params[restIndex]->type->DataTy()));
                 fd->EnableAttr(Attribute::IS_BROKEN);
                 continue;
             }

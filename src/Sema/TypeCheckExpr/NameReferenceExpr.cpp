@@ -573,10 +573,10 @@ void TypeChecker::TypeCheckerImpl::InferRefExpr(ASTContext& ctx, RefExpr& re)
                 // The base of a package-qualified generated name is a package,
                 // not a value: keep the target and leave the type to the
                 // enclosing member access, which resolves through PackageDecl.
-                re.SetTy(TypeManager::GetInvalidTy());
+                re.SetTy({TypeManager::GetInvalidTy()});
                 return;
             }
-            re.SetTy(typeManager.SubstituteTypeAliasInTy(*support->second->GetTy()));
+            re.SetTy(typeManager.SubstituteTypeAliasInTy(support->second->GetTy()));
             return;
         }
     }
