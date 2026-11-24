@@ -505,7 +505,8 @@ foreign enum E {
 }
 
 // Two @RawValue annotations on one constructor are a duplicate, not a
-// second mapping.
+// second mapping. The duplicate is diagnosed by the parser's generic
+// annotation check, consistently with the other builtin annotations.
 TEST_F(ArkTSEnumVarTest, RawValueDuplicateIsDiagnosed)
 {
     CompileSema(R"(package entry
@@ -515,7 +516,7 @@ foreign enum E {
     @RawValue[1] @RawValue[2] A
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("duplicate @RawValue annotation on enum constructor 'A'"));
+    EXPECT_TRUE(HasErrorContaining("duplicated annotation: '@RawValue'"));
 }
 
 // @RawValue on the constructor of a non-foreign enum is misplaced: the

@@ -14,14 +14,11 @@
 #include "cangjie/Parse/Parser.h"
 #include "Utils/TypeMapper.h"
 #include <algorithm>
-#include <cctype>
-#include <cerrno>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
-#include <set>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -118,126 +115,70 @@ struct ArkTSEnumNumberCounter {
     }
 };
 
-// The compiler's literal parser prefix-parses a spelling, so "12abc" would be
-// accepted as 12 and an empty text as 0. A value that comes from a dependent
-// package's CJO is only semi-trusted, so accept the spelling only when the whole
-// text is a legal integer literal (prefix, separators and optional type suffix).
-bool IsWellFormedIntegerSpelling(const std::string& spelling)
+// A numeric @RawValue argument is a LitConstExpr. The CJO loader and the type
+// checker fill its parsed value through AST::InitializeLitConstValue; a literal
+// in the current package is validated here before type checking, so it still
+// has no semantic type. Give it the ideal type the type checker would assign and
+// run the same initializer instead of parsing the spelling again.
+void InitializeRawValueLiteral(LitConstExpr& literal)
 {
-    if (spelling.empty()) {
-        return false;
+    if (literal.kind != LitConstKind::INTEGER && literal.kind != LitConstKind::FLOAT) {
+        return;
     }
-    size_t index = 0;
-    if (spelling[index] == '+' || spelling[index] == '-') {
-        ++index;
+    const auto savedTy = literal.GetTy();
+    if (!savedTy.IsCorrect()) {
+        const auto idealKind =
+            literal.kind == LitConstKind::INTEGER ? TypeKind::TYPE_IDEAL_INT : TypeKind::TYPE_IDEAL_FLOAT;
+        literal.SetTy({TypeManager::GetPrimitiveTy(idealKind)});
     }
-    int base = 10;
-    if (index < spelling.size() && spelling[index] == '0' && index + 1 < spelling.size()) {
-        switch (spelling[index + 1]) {
-            case 'b':
-            case 'B':
-                base = 2;
-                index += 2;
-                break;
-            case 'o':
-            case 'O':
-                base = 8;
-                index += 2;
-                break;
-            case 'x':
-            case 'X':
-                base = 16;
-                index += 2;
-                break;
-            default:
-                break;
-        }
-    }
-    bool sawDigit = false;
-    bool trailingSeparator = false;
-    for (; index < spelling.size(); ++index) {
-        const char c = spelling[index];
-        if (c == '_') {
-            if (!sawDigit || trailingSeparator) {
-                return false;
-            }
-            trailingSeparator = true;
-            continue;
-        }
-        const bool digit = base == 16 ? std::isxdigit(static_cast<unsigned char>(c)) != 0
-            : base == 8                 ? c >= '0' && c <= '7'
-            : base == 2                 ? c == '0' || c == '1'
-                                        : c >= '0' && c <= '9';
-        if (!digit) {
-            break;
-        }
-        sawDigit = true;
-        trailingSeparator = false;
-    }
-    if (!sawDigit || trailingSeparator) {
-        return false;
-    }
-    const std::string suffix = spelling.substr(index);
-    if (suffix.empty()) {
-        return true;
-    }
-    static const std::set<std::string> SUFFIXES{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "Int8",
-        "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64"};
-    return SUFFIXES.count(suffix) != 0;
+    InitializeLitConstValue(literal);
+    literal.SetTy(savedTy);
 }
 
-// Parse a Cangjie integer literal spelling into an exact value. The compiler's
-// canonical literal parser handles 0b/0o/0x prefixes, '_' separators, an
-// optional sign, a legal type suffix and the 64-bit range. A negative spelling
-// uses the signed literal type; a non-negative one may reach UINT64_MAX.
-bool ParseArkTSEnumInteger(const std::string& spelling, ArkTSEnumNumberCounter& out)
+// Read the exact integer @RawValue from the literal's parsed value. IntLiteral
+// already folds 0b/0o/0x prefixes, '_' separators, an optional sign and a type
+// suffix, and records a 64-bit overflow in outOfRange; the counter keeps the
+// magnitude and sign separately so the auto-increment chain stays exact.
+bool ParseArkTSEnumInteger(LitConstExpr& literal, ArkTSEnumNumberCounter& out)
 {
-    if (!IsWellFormedIntegerSpelling(spelling)) {
+    InitializeRawValueLiteral(literal);
+    // An empty spelling cannot be distinguished through IntLiteral: InitIntLiteral
+    // returns early and leaves the default 0 with outOfRange false, so guard the
+    // text itself to avoid a silent 0 from a dependent package's CJO.
+    if (literal.stringValue.empty() || literal.constNumValue.asInt.IsOutOfRange()) {
         return false;
     }
-    IntLiteral literal;
+    const auto& value = literal.constNumValue.asInt;
     out.floating = false;
-    const bool negative = !spelling.empty() && spelling.front() == '-';
-    literal.InitIntLiteral(spelling, negative ? TypeKind::TYPE_IDEAL_INT : TypeKind::TYPE_UINT64);
-    if (literal.IsOutOfRange()) {
-        return false;
-    }
-    auto text = literal.GetValue();
-    out.negative = literal.IsNegativeNum();
-    if (out.negative) {
-        text.erase(0, 1);
-    }
-    out.magnitude = std::stoull(text);
+    out.negative = value.IsNegativeNum();
+    // Uint64() holds the two's-complement representation of a negative value.
+    out.magnitude = out.negative ? 0 - value.Uint64() : value.Uint64();
     return true;
 }
 
-// Parse a floating @RawValue spelling into the enum counter. The design's
+// Read the floating @RawValue from the literal's parsed value. The design's
 // EnumValueLiteral is NumericLiteral, so ArkTS enum members such as `A = 1.5`
-// are legal. Only a finite decimal spelling is accepted; a suffix such as
-// `f32` is stripped before the conversion, and the whole text must parse
-// because it is later spliced into generated source as Float64(<spelling>).
-bool ParseArkTSEnumFloat(const std::string& spelling, ArkTSEnumNumberCounter& out)
+// are legal. InitializeLitConstValue records a signed underflow in flowStatus
+// and a value that does not fit as non-finite; together with the double range
+// conversion below that keeps the rejections the spelling parser had.
+bool ParseArkTSEnumFloat(LitConstExpr& literal, ArkTSEnumNumberCounter& out)
 {
-    std::string text = spelling;
-    if (text.size() > 3) {
-        const auto tail = text.substr(text.size() - 3);
-        if (tail == "f16" || tail == "f32" || tail == "f64" || tail == "F16" || tail == "F32" || tail == "F64") {
-            text.resize(text.size() - 3);
-        }
-    }
-    // Cangjie numeric literals may group digits with '_'; strtod does not.
-    text.erase(std::remove(text.begin(), text.end(), '_'), text.end());
-    if (text.empty()) {
+    InitializeRawValueLiteral(literal);
+    const auto& value = literal.constNumValue.asFloat;
+    if (literal.stringValue.empty() || value.flowStatus != Expr::FlowStatus::NORMAL) {
         return false;
     }
-    char* end = nullptr;
-    errno = 0;
-    const double value = std::strtod(text.c_str(), &end);
-    if (end != text.c_str() + text.size() || errno == ERANGE || !std::isfinite(value)) {
+    const double number = static_cast<double>(value.value);
+    // long double represents values beyond double and near-zero values that
+    // round to 0; reject both instead of splicing an infinity or a silent zero.
+    // A subnormal double is also rejected, matching the strtod range check the
+    // spelling parser applied (it reported every subnormal as ERANGE).
+    if (!std::isfinite(number) || std::fpclassify(number) == FP_SUBNORMAL ||
+        (number == 0.0 && value.value != 0.0L)) {
         return false;
     }
     out.floating = true;
-    out.floatValue = value;
+    out.floatValue = number;
     return true;
 }
 
@@ -615,7 +556,7 @@ bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vecto
     auto findRawValue = [](const Decl& ctor) -> const Annotation* {
         for (auto& anno : ctor.annotations) {
             if (anno->kind == AnnotationKind::ARKTS_RAW_VALUE) {
-                return anno.get(); // Duplicates are rejected by the annotation check.
+                return anno.get(); // Duplicates are rejected by the parser.
             }
         }
         return nullptr;
@@ -690,7 +631,7 @@ bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vecto
             // NumericLiteral in the design includes floating values, so an
             // ArkTS enum member may be `A = 1.5`; the value maps through
             // Float64 exactly like an integer member.
-            if (!ParseArkTSEnumFloat(literal->stringValue, counter)) {
+            if (!ParseArkTSEnumFloat(*literal, counter)) {
                 report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Float64", "out of range");
                 valid = false;
                 continue;
@@ -705,7 +646,7 @@ bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vecto
             // generated Float64(<value>) both see the same exact number; a value
             // at or above 2^63 is spelled as a float literal so the unsuffixed
             // Int64 range check does not reject it.
-            if (!ParseArkTSEnumInteger(literal->stringValue, counter)) {
+            if (!ParseArkTSEnumInteger(*literal, counter)) {
                 report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Integer", "out of range");
                 valid = false;
                 continue;

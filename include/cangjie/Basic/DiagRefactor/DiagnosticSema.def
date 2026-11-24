@@ -25,7 +25,6 @@ ERROR(sema_arkts_enum_payload_arity,
 ERROR(sema_arkts_raw_value_misplaced, "@RawValue can only annotate a constructor of an '@ArkTS' enum: %s")
 ERROR(sema_arkts_raw_value_payload_ctor,
     "@RawValue cannot annotate a 'foreign enum' constructor with associated values: %s")
-ERROR(sema_arkts_raw_value_duplicate, "duplicate @RawValue annotation on enum constructor '%s'")
 ERROR(sema_arkts_enum_value_type_mismatch, "ArkTS enum value type mismatch: expected %s, found %s")
 ERROR(sema_invalid_node_after_check, "semantic error")
 ERROR(sema_unable_to_infer_decl, "unable to infer declaration type, please add type annotation")

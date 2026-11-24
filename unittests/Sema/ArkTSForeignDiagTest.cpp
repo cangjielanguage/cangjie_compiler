@@ -2593,7 +2593,7 @@ public func __cj_arkts_restore(previous: ?JSContext): Unit {}
 
 // The arkts.lang facade the generated support names are pinned to: it
 // re-exports the interop API, the context ABI entries and BigInt and declares
-// the conversion exception, mirroring utils/arkts/sdk/arkts/src/lang/lang.cj.
+// the conversion exception, mirroring the arkts.lang facade in the ArkTS interop SDK repository.
 const char* ARKTS_LANG_SUPPORT = R"(package arkts.lang
 
 public import ohos.ark_interop.*

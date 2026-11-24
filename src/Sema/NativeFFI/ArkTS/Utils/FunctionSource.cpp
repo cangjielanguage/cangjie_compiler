@@ -774,7 +774,7 @@ static std::string ArkTSScalarToJS(const std::string& type, const std::string& c
 // Every conversion failure in generated code is thrown through this helper.
 // No upstream provider ships an ExternConversionException yet, so the
 // facade arkts.lang hosts the only type of this name (a stand-in,
-// utils/arkts/sdk/arkts/src/lang/lang.cj) with a single-String
+// the arkts.lang facade (formerly utils/arkts, now in the ArkTS interop SDK repository) with a single-String
 // constructor; the lowering walker pins this name to that declaration
 // (LowerFunctions.cpp BindSupportReferences), so a same-named source item
 // cannot capture it. This constant stays the single compiler-side

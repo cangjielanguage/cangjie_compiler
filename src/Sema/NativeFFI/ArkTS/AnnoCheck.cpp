@@ -51,22 +51,10 @@ void CheckAnnoRawValue(Decl& decl, const Annotation& anno, DiagnosticEngine& dia
                 return;
             }
         }
-        const Annotation* first = nullptr;
-        for (auto& other : decl.annotations) {
-            if (other->kind != AnnotationKind::ARKTS_RAW_VALUE) {
-                continue;
-            }
-            if (first == nullptr) {
-                first = other.get();
-            }
-            if (other.get() == &anno) {
-                if (first != &anno) {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_raw_value_duplicate, anno,
-                        decl.identifier.Val());
-                }
-                return;
-            }
-        }
+        // A repeated @RawValue is reported by the parser's generic
+        // duplicate-annotation check (ParserImpl::ParseAnnotations), like the
+        // other builtin annotations; Sema only validates placement and payload.
+        return;
     }
     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_raw_value_misplaced, anno, decl.identifier.Val());
 }
