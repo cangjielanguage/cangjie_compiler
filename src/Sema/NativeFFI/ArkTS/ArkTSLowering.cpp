@@ -14,22 +14,14 @@
 #include "cangjie/Parse/Parser.h"
 #include "Utils/TypeMapper.h"
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
-#if defined(__has_include)
-#if __has_include(<version>)
-#include <version>
-#endif
-#if __has_include(<charconv>)
-#include <charconv>
-#endif
-#endif
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-#define CJ_HAS_TO_CHARS 1
-#endif
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -42,10 +34,9 @@ constexpr auto ARKTS_LANGUAGE_PACKAGE = "arkts.lang";
 constexpr auto ARKTS_CONVERSION_EXCEPTION = "ExternConversionException";
 
 // Exact integer value of one numeric enum member. ArkTS maps the value through
-// Float64, but the auto-increment chain must stay exact, so the previous code's
-// double (strtod) was not acceptable: strtod only prefix-parses non-decimal
-// spellings (0b1010 -> 0, 0o17 -> 0, 1_000 -> 1) and loses integrality beyond
-// 2^53, which made the next omitted member silently take the wrong value.
+// Float64, but the auto-increment chain must stay exact: a double would only
+// prefix-parse non-decimal spellings (0b1010 -> 0, 0o17 -> 0, 1_000 -> 1) and
+// would lose integrality beyond 2^53, silently changing the next omitted value.
 struct ArkTSEnumNumberCounter {
     uint64_t magnitude{0};
     bool negative{false};
@@ -56,24 +47,32 @@ struct ArkTSEnumNumberCounter {
     double floatValue{0};
 
     // The canonical decimal spelling emitted into generated code. An unsigned
-    // value at or above 2^63 does not fit the unsuffixed Int64 literal type
-    // (which the generated Float64(<value>) would otherwise trip over), so it
-    // is spelled as a float literal; 2^63 is exactly representable as Float64.
+    // value above INT64_MAX does not fit the unsuffixed Int64 literal type, so
+    // it is spelled with a '.0' suffix and read back as Float64.
     std::string DecimalSpelling() const
     {
         if (floating) {
+            // Spell the value with the shortest precision that reads back exactly. Doing
+            // it here, instead of with a standard-library helper, keeps the generated
+            // source identical whatever standard library the compiler was built with.
             char buffer[64];
-#ifdef CJ_HAS_TO_CHARS
-            auto result = std::to_chars(buffer, buffer + sizeof(buffer), floatValue, std::chars_format::general);
-            std::string spelling =
-                result.ec == std::errc() ? std::string(buffer, result.ptr) : std::to_string(floatValue);
-#else
-            // Older standard libraries lack floating-point std::to_chars. Spell the
-            // value with the shortest round-trip-safe precision instead.
-            int written = std::snprintf(buffer, sizeof(buffer), "%.17g", floatValue);
-            std::string spelling =
-                written > 0 ? std::string(buffer, static_cast<size_t>(written)) : std::to_string(floatValue);
-#endif
+            std::string spelling;
+            for (int precision = 1; precision <= 17; ++precision) {
+                int written = std::snprintf(buffer, sizeof(buffer), "%.*g", precision, floatValue);
+                if (written <= 0 || written >= static_cast<int>(sizeof(buffer))) {
+                    break;
+                }
+                char* end = nullptr;
+                double parsed = std::strtod(buffer, &end);
+                if (end != nullptr && *end == '\0' && !(parsed < floatValue) && !(floatValue < parsed)) {
+                    spelling.assign(buffer, static_cast<size_t>(written));
+                    break;
+                }
+            }
+            if (spelling.empty()) {
+                int written = std::snprintf(buffer, sizeof(buffer), "%.17g", floatValue);
+                spelling = written > 0 ? std::string(buffer, static_cast<size_t>(written)) : std::to_string(floatValue);
+            }
             // The Cangjie lexer accepts only a '-' sign after the exponent
             // marker; std::to_chars writes "1e+20". Drop the '+' so the
             // spelling is legal generated source.
@@ -119,12 +118,83 @@ struct ArkTSEnumNumberCounter {
     }
 };
 
+// The compiler's literal parser prefix-parses a spelling, so "12abc" would be
+// accepted as 12 and an empty text as 0. A value that comes from a dependent
+// package's CJO is only semi-trusted, so accept the spelling only when the whole
+// text is a legal integer literal (prefix, separators and optional type suffix).
+bool IsWellFormedIntegerSpelling(const std::string& spelling)
+{
+    if (spelling.empty()) {
+        return false;
+    }
+    size_t index = 0;
+    if (spelling[index] == '+' || spelling[index] == '-') {
+        ++index;
+    }
+    int base = 10;
+    if (index < spelling.size() && spelling[index] == '0' && index + 1 < spelling.size()) {
+        switch (spelling[index + 1]) {
+            case 'b':
+            case 'B':
+                base = 2;
+                index += 2;
+                break;
+            case 'o':
+            case 'O':
+                base = 8;
+                index += 2;
+                break;
+            case 'x':
+            case 'X':
+                base = 16;
+                index += 2;
+                break;
+            default:
+                break;
+        }
+    }
+    bool sawDigit = false;
+    bool trailingSeparator = false;
+    for (; index < spelling.size(); ++index) {
+        const char c = spelling[index];
+        if (c == '_') {
+            if (!sawDigit || trailingSeparator) {
+                return false;
+            }
+            trailingSeparator = true;
+            continue;
+        }
+        const bool digit = base == 16 ? std::isxdigit(static_cast<unsigned char>(c)) != 0
+            : base == 8                 ? c >= '0' && c <= '7'
+            : base == 2                 ? c == '0' || c == '1'
+                                        : c >= '0' && c <= '9';
+        if (!digit) {
+            break;
+        }
+        sawDigit = true;
+        trailingSeparator = false;
+    }
+    if (!sawDigit || trailingSeparator) {
+        return false;
+    }
+    const std::string suffix = spelling.substr(index);
+    if (suffix.empty()) {
+        return true;
+    }
+    static const std::set<std::string> SUFFIXES{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "Int8",
+        "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64"};
+    return SUFFIXES.count(suffix) != 0;
+}
+
 // Parse a Cangjie integer literal spelling into an exact value. The compiler's
 // canonical literal parser handles 0b/0o/0x prefixes, '_' separators, an
 // optional sign, a legal type suffix and the 64-bit range. A negative spelling
 // uses the signed literal type; a non-negative one may reach UINT64_MAX.
 bool ParseArkTSEnumInteger(const std::string& spelling, ArkTSEnumNumberCounter& out)
 {
+    if (!IsWellFormedIntegerSpelling(spelling)) {
+        return false;
+    }
     IntLiteral literal;
     out.floating = false;
     const bool negative = !spelling.empty() && spelling.front() == '-';

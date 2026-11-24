@@ -277,7 +277,11 @@ void ParserImpl::ParseInheritedAnnotations(const PtrVector<Annotation>& inherite
 {
     // Inherited option annotations provide defaults, so parse member options
     // before prepending them. All other inherited annotations participate in
-    // the normal duplicate check while member annotations are parsed.
+    // the normal duplicate check while member annotations are parsed. For an
+    // ArkTS foreign block this turns
+    //   @ArkTS[module:"a"] foreign { @ArkTS[module:"b"] func echo(): Unit }
+    // into one declaration with the block defaults plus the member overrides,
+    // merged option by option (a declaration-level value wins).
     PtrVector<Annotation> defaults;
     for (const auto& annotation : inherited) {
         auto cloned = ASTCloner::Clone(annotation.get());
@@ -420,13 +424,16 @@ void ParserImpl::CheckRawValueAnnotation(const Annotation& anno)
 
 void ParserImpl::CheckHasThisAnnotation(Annotation& anno)
 {
+    if (!experimentalMode) {
+        return; // Same contract as @RawValue: the Sema gate owns the off-mode diagnostic.
+    }
     // '@HasThis' takes exactly one unnamed type reference, e.g.
     // '@HasThis[Person]'. A zero or multiple argument list, a named argument
-    // and a literal or any other value expression are all refused here with
-    // the dedicated diagnostic, so the annotation can never be silently
-    // accepted with a value that has no type meaning.
+    // and a literal or any other value expression are all refused here, so the
+    // annotation can never be silently accepted with a value that has no type
+    // meaning.
     if (anno.args.size() != 1) {
-        ParseDiagnoseRefactor(DiagKindRefactor::parse_has_this_invalid_argument, anno);
+        DiagAnnotationExpectsOneArgument(anno, "@HasThis");
         return;
     }
     auto& arg = anno.args.front();

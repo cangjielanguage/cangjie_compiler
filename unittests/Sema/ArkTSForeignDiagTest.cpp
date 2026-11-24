@@ -5366,7 +5366,10 @@ foreign func named(): Unit
 @HasThis["Person"]
 foreign func literal(): Unit
 )");
-    EXPECT_EQ(CountErrorsContaining("requires exactly one unnamed type argument"), 4U);
+    // The empty and multiple lists use the shared one-argument diagnostic;
+    // the named argument and the literal keep the dedicated one.
+    EXPECT_EQ(CountErrorsContaining("@HasThis requires exactly one argument"), 2U);
+    EXPECT_EQ(CountErrorsContaining("requires exactly one unnamed type argument"), 2U);
 }
 
 // The resolved TypeName must be an ArkTS-compatible type. A plain Cangjie

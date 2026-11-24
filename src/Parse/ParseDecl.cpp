@@ -34,7 +34,8 @@ constexpr std::string_view ELLIPSIS("...");
 bool IsArkTSOnlyAnnotationKind(AnnotationKind kind)
 {
     return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE ||
-        kind == AnnotationKind::ARKTS_REST_PARAM || kind == AnnotationKind::ARKTS_WRITE_ONLY;
+        kind == AnnotationKind::ARKTS_REST_PARAM || kind == AnnotationKind::ARKTS_WRITE_ONLY ||
+        kind == AnnotationKind::HAS_THIS;
 }
 
 // The access-modifier x FOREIGN conflict is lifted only on declarations

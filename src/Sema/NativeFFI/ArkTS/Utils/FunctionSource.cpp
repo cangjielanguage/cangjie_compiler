@@ -395,7 +395,7 @@ bool IsArkTSForeignClass(const ClassDecl& cd)
     // part of the wrapper path.
     const auto& packageName =
         cd.curFile && cd.curFile->curPackage ? cd.curFile->curPackage->fullPackageName : cd.fullPackageName;
-    if (packageName == "std.interop.arkts") {
+    if (packageName == ARKTS_PRESET_PACKAGE) {
         return false;
     }
     return cd.HasAnno(AnnotationKind::ARKTS) && cd.TestAttr(Attribute::FOREIGN) &&
@@ -846,6 +846,19 @@ static std::string ArkTSLiteral(const std::string& text)
     return "\"" + text + "\"";
 }
 
+// A user string value must never look like one of the compiler's placeholder
+// literals: the lowering walker would rewrite it to the module or member name.
+// Escape the first character so the decoded value stays the same but the
+// sentinel prefix no longer matches.
+static std::string ArkTSUserStringSpelling(const std::string& value)
+{
+    std::string escaped = StringConvertor::RecoverForArkTSSource(value);
+    if (escaped.rfind(ARKTS_PLACEHOLDER_LITERAL_PREFIX, 0) == 0) {
+        escaped = "\\u{5f}" + escaped.substr(1);
+    }
+    return escaped;
+}
+
 // Placeholder literals carry a compiler-owned sentinel prefix so the rebinding
 // walkers can tell them apart from a user string value that happens to equal a
 // placeholder name (for example @RawValue["__module__"], which the wrapper
@@ -1170,7 +1183,7 @@ struct ArkTSValueEmitter {
                 std::string converted;
                 if (member.kind == ArkTSEnumValueKind::STRING) {
                     converted =
-                        ctx + ".string(\"" + StringConvertor::RecoverForArkTSSource(member.value) + "\").toJSValue()";
+                        ctx + ".string(\"" + ArkTSUserStringSpelling(member.value) + "\").toJSValue()";
                 } else if (member.kind == ArkTSEnumValueKind::BOOLEAN) {
                     converted = ctx + ".boolean(" + member.value + ").toJSValue()";
                 } else {
@@ -1424,7 +1437,7 @@ struct ArkTSValueEmitter {
                     case ArkTSEnumValueKind::STRING:
                         noteKind(value + ".isString()");
                         return value + ".isString() && " + value + ".asString().toString() == \"" +
-                            StringConvertor::RecoverForArkTSSource(member.value) + "\"";
+                            ArkTSUserStringSpelling(member.value) + "\"";
                     case ArkTSEnumValueKind::BOOLEAN:
                         noteKind(value + ".isBoolean()");
                         return value + ".isBoolean() && " + value + ".toBoolean() == " + member.value;

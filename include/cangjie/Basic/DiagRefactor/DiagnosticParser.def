@@ -319,7 +319,7 @@ ERROR(parse_annotation_no_arguments, "%s accepts no arguments", "unexpected argu
 // Shared diagnostics for Java / Objective-C interoperability
 ERROR(parse_foreign_name_on_ffi_decl_member, "'@ForeignName' can only be used on '@Java' or '@ObjC' declaration member")
 ERROR(parse_foreign_name_on_arkts_constructor,
-    "'@ForeignName' cannot be used on an '@ArkTS foreign' constructor: the constructor maps to 'new'")
+    "'@ForeignName' cannot be used on an '@ArkTS foreign' constructor", "the constructor maps to 'new'")
 ERROR(parse_arkts_rest_param_on_block,
     "'@RestParam' cannot be applied to a foreign block; annotate the final parameter of a member function instead")
 ERROR(parse_arkts_raw_value_on_block,
