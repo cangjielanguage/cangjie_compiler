@@ -754,12 +754,28 @@ private:
         }
         auto r = CollectReturnedExpr(*body);
         auto retTy = StaticCast<FuncTy>(func.DataTy())->retTy;
+        auto boxedTy = retTy.Ty();
+        while (boxedTy->IsCoreOptionType()) {
+            boxedTy = boxedTy->TyArg(0);
+        }
         for (auto& e : r) {
+            // Modal return restrictions never apply inside an exclave.
+            if (IsInExclaveExpr(ctx, *e)) {
+                continue;
+            }
             auto eTy = e->GetTy();
+            if (!eTy.IsCorrect() || eTy->IsNothing()) {
+                continue;
+            }
+            // Boxing to a local interface allocates in the current region, including Option autowrapping.
+            // Such a return must be in an exclave so that the box is allocated in the caller's region.
+            if (type.IsCopyType(eTy.Ty()) && retTy.IsLocalType() && Is<InterfaceTy>(boxedTy)) {
+                DiagBadInternalLocalReturn(*e);
+                continue;
+            }
             // per spec we should check e->ty is non local copy type, but we check retTy because there can be Some box,
             // and it is boxed after Sema.
-            if (IsInExclaveExpr(ctx, *e) || !eTy.IsCorrect() || eTy->IsNothing() ||
-                (eTy.IsDataType() && retTy.Mode().local == Mode::HALF) || retTy.IsDataType()) {
+            if ((eTy.IsDataType() && retTy.Mode().local == Mode::HALF) || retTy.IsDataType()) {
                 continue;
             }
             // The return slot is external, so the value must be external as well. A non copy value
@@ -1333,6 +1349,10 @@ private:
             return;
         }
         auto lLocal = GetLvalueLocal(ctx, left);
+        // Copyable values can be copied as non-local values; any boxing here allocates on the heap.
+        if (lLocal == Mode::NOT && type.IsCopyType(right->DataTy())) {
+            rLocal = Mode::NOT;
+        }
         if (lLocal == Mode::FULL) {
             CheckLiteralElements(ctx, assign, *right, left->GetTy());
         }

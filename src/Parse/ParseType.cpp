@@ -11,14 +11,10 @@
 
 #include "ParserImpl.h"
 
-#include "cangjie/AST/Match.h"
-#include "cangjie/Utils/Utils.h"
+#include "cangjie/AST/ASTCasting.h"
 
 using namespace Cangjie;
 using namespace AST;
-
-// LOCAL_MODE_SPECIFIER and IsModalSpecifierPair are shared with the macro pipeline,
-// see include/cangjie/Lex/Token.h.
 
 // BaseType is atomicType in BNF.
 OwnedPtr<AST::Type> ParserImpl::ParseBaseType()
@@ -446,10 +442,6 @@ bool ParserImpl::ParseModeSpecifier(ASTModalInfo& out)
 // Seeing a ModalInfo advance, without consuming any token.
 bool ParserImpl::SeeingModalInfo()
 {
-#ifdef __ohos__
-    // local mode is not supported in OHOS builds, so '@local!' is not a modal
-    return false;
-#else
     constexpr size_t MODAL_LOOKAHEAD = 2;
     if (!Seeing(TokenKind::AT)) {
         return false;
@@ -462,7 +454,6 @@ bool ParserImpl::SeeingModalInfo()
     // the '!' of the modal immediately followed by '=' (e.g. an initializer);
     // ParseModeSpecifier splits the token.
     return IsModalSpecifierPair(tokens.front(), tokens.back()) && IsTokenAdjacent(tokens.front(), tokens.back());
-#endif
 }
 
 OwnedPtr<AST::RefType> ParserImpl::ParseRefType(bool onlyRef)

@@ -871,7 +871,7 @@ void TypeChecker::TypeCheckerImpl::ResolveBuiltinDeclMembers(const std::vector<A
         }
         CJC_ASSERT(bd->GetTy().IsCorrect());
         for (auto& member : bd->GetMemberDecls()) {
-            auto fd = DynamicCast<FuncDecl>(member.get());
+            auto fd = StaticCast<FuncDecl>(member.get());
             if (fd->generic) {
                 GetTyFromASTType(fd->generic->typeParameters);
             }

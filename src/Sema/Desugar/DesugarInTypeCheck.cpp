@@ -631,7 +631,7 @@ void TypeChecker::TypeCheckerImpl::DesugarVArrayCall(ASTContext& ctx, CallExpr& 
     auto typeArgs = typeManager.GetTypeArgs(*baseFuncTy); // ArrayTy has 'dims', must using function to get arguments.
     auto baseArgs = ce.baseFunc->GetTypeArgs();
     IgnoreEmptyIntersection(baseArgs);
-    auto varrTy = DynamicCast<VArrayTy>(baseFuncTy.Ty());
+    auto varrTy = StaticCast<VArrayTy>(baseFuncTy.Ty());
     Ptr<Ty> argTy = TypeManager::GetInvalidTy();
     if (!typeArgs.empty()) {
         argTy = typeArgs[0];

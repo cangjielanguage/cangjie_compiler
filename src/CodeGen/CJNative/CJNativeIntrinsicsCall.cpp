@@ -726,6 +726,16 @@ llvm::Value* IRBuilder2::CallClassIntrinsicAlloc(const CHIR::Type& type)
     return value;
 }
 
+llvm::Value* IRBuilder2::CallBoxIntrinsicAlloc(const CHIR::Type& valueType, const CHIR::Type& targetType)
+{
+    auto value = CallClassIntrinsicAlloc({CreateTypeInfo(valueType), GetLayoutSize_32(valueType)},
+        targetType.StripAllRefs()->IsLocalRegion());
+    if (IsSizeTrustedInCompileUnit(cgMod, valueType)) {
+        value->setMetadata("TrustedSize", llvm::MDNode::get(getContext(), {}));
+    }
+    return value;
+}
+
 // parameters = {TypeInfo* ti, i32 size}
 llvm::Instruction* IRBuilder2::CallClassIntrinsicAlloc(const std::vector<llvm::Value*>& parameters, bool isLocal)
 {

@@ -141,7 +141,7 @@ void TypeChecker::TypeCheckerImpl::CheckFuncDecl(ASTContext& ctx, FuncDecl& fd)
         // otherwise it means funcBody contains broken nodes.
         // Update return type to invalid, keep 'fd''s type in funcTy format.
         fd.SetTy({
-            typeManager.GetFunctionTy(DynamicCast<FuncTy*>(fd.DataTy())->paramTys, {TypeManager::GetInvalidTy()})});
+            typeManager.GetFunctionTy(StaticCast<FuncTy>(fd.DataTy())->paramTys, {TypeManager::GetInvalidTy()})});
     }
     if (fd.GetTy().IsCorrect()) {
         if (fd.modal.HasLocal()) {
