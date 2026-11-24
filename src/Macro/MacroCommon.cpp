@@ -349,7 +349,7 @@ size_t TokenSpanLength(const Token& token)
 }
 } // namespace
 
-bool IsModalAfterAt(const TokenVector& tokens, size_t atIndex, bool requireAdjacent)
+bool IsModalAfterAt(const TokenVector& tokens, size_t atIndex, [[maybe_unused]] bool requireAdjacent)
 {
     if (atIndex >= tokens.size() || tokens[atIndex].Value() != "@") {
         return false;
