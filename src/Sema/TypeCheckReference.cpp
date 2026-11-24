@@ -1498,12 +1498,10 @@ void TypeChecker::TypeCheckerImpl::CheckUsageOfDeprecated(
 
         // The ArkTS write-only rule is owned by the NativeFFI stage; this
         // shared pass only routes a usage that names a property of a prepared
-        // wrapper class to it. The cheap gate resolves the target and tests
-        // the owner attribute, so declarations of other languages never reach
-        // the annotation scan.
-        if (Native::FFI::ArkTS::ArkTSWriteOnlyTargetProp(*usage)) {
-            Native::FFI::ArkTS::CheckArkTSWriteOnlyRead(*usage, diag);
-        }
+        // wrapper class to it (the routing helper keeps the cheap gate and the
+        // diagnostic together, so this function stays within its complexity
+        // budget).
+        Native::FFI::ArkTS::CheckArkTSWriteOnlyUsage(*usage, diag);
         if (usage->astKind == ASTKind::CALL_EXPR) {
             CheckUsageOfDeprecatedParameters(usage);
         } else if (usage->astKind == ASTKind::ASSIGN_EXPR) {

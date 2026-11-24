@@ -56,7 +56,8 @@ const Annotation* FindArkTSAnnotation(const Decl& decl)
 // them in source selects the capability and therefore the experimental gate.
 bool IsArkTSOnlyAnnotation(AnnotationKind kind)
 {
-    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE || kind == AnnotationKind::ARKTS_REST_PARAM ||
+    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE ||
+        kind == AnnotationKind::ARKTS_REST_PARAM ||
         kind == AnnotationKind::ARKTS_WRITE_ONLY || kind == AnnotationKind::HAS_THIS;
 }
 
@@ -282,6 +283,65 @@ void DiagnoseEntries(Package& pkg, DiagnosticEngine& diag)
     }
 }
 
+// The 'module' option on a top-level declaration that is not an entry. The
+// option-shape rule keeps precedence: a malformed layer is not re-reported
+// here, and the scan stops at the first 'module' argument.
+void DiagnoseNonEntryModuleOption(const Decl& decl, const Annotation& annotation, DiagnosticEngine& diag)
+{
+    if (CheckArkTSOptionLayer(annotation).problem != ArkTSOptionProblem::NONE) {
+        return;
+    }
+    for (const auto& arg : annotation.args) {
+        if (arg->name.Val() != "module") {
+            continue;
+        }
+        auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
+        if (literal && literal->kind == LitConstKind::STRING && !ArkTSOptionValueEmpty(literal->stringValue)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor::sema_arkts_option_module_only_foreign, *arg->expr, decl.identifier.Val());
+        }
+        break;
+    }
+}
+
+// Placement and the 'module' option of one declaration. A declaration already
+// refused for its placement must not also report its options.
+VisitAction DiagnosePlacementAndOptionsOfDecl(
+    Ptr<Node> node, DiagnosticEngine& diag, const std::unordered_set<const Decl*>& topLevel)
+{
+    auto decl = DynamicCast<Decl*>(node);
+    if (decl == nullptr || IsPreparedOrGenerated(*decl)) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    const auto* annotation = FindArkTSAnnotation(*decl);
+    if (annotation == nullptr) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    const bool isTopLevel = topLevel.count(decl) != 0;
+    const auto kind = UnsupportedPlacementKind(*decl, isTopLevel);
+    if (!kind.empty()) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_annotation_placement_invalid, *annotation, kind,
+            DeclarationDisplayName(*decl));
+        return VisitAction::WALK_CHILDREN;
+    }
+    // An entry reports its annotation options as an entry-shape reason; only
+    // a non-entry declaration reports the dedicated module rule.
+    auto fd = DynamicCast<FuncDecl*>(decl);
+    if (fd != nullptr && isTopLevel && IsArkTSEntry(*fd)) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    // 'module' is checked only on the top-level declaration kinds it applies
+    // to; parameters, enums and other declarations have their own rules.
+    const bool moduleOptionKind = decl->astKind == ASTKind::FUNC_DECL ||
+        decl->astKind == ASTKind::CLASS_DECL || decl->astKind == ASTKind::INTERFACE_DECL ||
+        decl->astKind == ASTKind::VAR_DECL;
+    if (!isTopLevel || !moduleOptionKind) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    DiagnoseNonEntryModuleOption(*decl, *annotation, diag);
+    return VisitAction::WALK_CHILDREN;
+}
+
 // Placement and the 'module' option share one walk because a declaration that
 // is already refused for its placement must not also report its options.
 void DiagnosePlacementAndOptions(Package& pkg, DiagnosticEngine& diag)
@@ -292,55 +352,7 @@ void DiagnosePlacementAndOptions(Package& pkg, DiagnosticEngine& diag)
             topLevel.emplace(decl.get());
         }
         Walker walker(file.get(), [&diag, &topLevel](Ptr<Node> node) {
-            auto decl = DynamicCast<Decl*>(node);
-            if (decl == nullptr || IsPreparedOrGenerated(*decl)) {
-                return VisitAction::WALK_CHILDREN;
-            }
-            const auto* annotation = FindArkTSAnnotation(*decl);
-            if (annotation == nullptr) {
-                return VisitAction::WALK_CHILDREN;
-            }
-            const bool isTopLevel = topLevel.count(decl) != 0;
-            const auto kind = UnsupportedPlacementKind(*decl, isTopLevel);
-            if (!kind.empty()) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_annotation_placement_invalid, *annotation, kind,
-                    DeclarationDisplayName(*decl));
-                return VisitAction::WALK_CHILDREN;
-            }
-            // An entry reports its annotation options as an entry-shape
-            // reason; only a non-entry declaration reports the dedicated
-            // module rule.
-            auto fd = DynamicCast<FuncDecl*>(decl);
-            if (fd != nullptr && isTopLevel && IsArkTSEntry(*fd)) {
-                return VisitAction::WALK_CHILDREN;
-            }
-            // 'module' is checked only on the top-level declaration kinds it
-            // applies to; parameters, enums and other declarations are handled
-            // by their own rules.
-            const bool moduleOptionKind = decl->astKind == ASTKind::FUNC_DECL ||
-                decl->astKind == ASTKind::CLASS_DECL || decl->astKind == ASTKind::INTERFACE_DECL ||
-                decl->astKind == ASTKind::VAR_DECL;
-            if (!isTopLevel || !moduleOptionKind) {
-                return VisitAction::WALK_CHILDREN;
-            }
-            // Option-shape diagnostics keep precedence: when the layer is
-            // malformed (non-literal, unknown, duplicated or empty value), the
-            // existing option rule is the single report for this declaration.
-            if (CheckArkTSOptionLayer(*annotation).problem != ArkTSOptionProblem::NONE) {
-                return VisitAction::WALK_CHILDREN;
-            }
-            for (const auto& arg : annotation->args) {
-                if (arg->name.Val() != "module") {
-                    continue;
-                }
-                auto literal = DynamicCast<LitConstExpr*>(arg->expr.get());
-                if (literal && literal->kind == LitConstKind::STRING && !ArkTSOptionValueEmpty(literal->stringValue)) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::sema_arkts_option_module_only_foreign, *arg->expr, decl->identifier.Val());
-                }
-                break;
-            }
-            return VisitAction::WALK_CHILDREN;
+            return DiagnosePlacementAndOptionsOfDecl(node, diag, topLevel);
         });
         walker.Walk();
     }
@@ -560,6 +572,77 @@ void DiagnoseExperimentalGate(Package& pkg, DiagnosticEngine& diag)
 // declaration so later stages do not re-parse the annotation; the argument's
 // resolved type is checked after type checking, because at this point it is a
 // type reference, not a semantic type.
+namespace {
+// The first usable '@HasThis' annotation of a declaration.
+Annotation* FindUsableHasThisAnnotation(Decl& decl)
+{
+    for (auto& annotation : decl.annotations) {
+        if (annotation != nullptr && annotation->kind == AnnotationKind::HAS_THIS &&
+            !annotation->TestAttr(Attribute::IS_BROKEN)) {
+            return annotation.get();
+        }
+    }
+    return nullptr;
+}
+
+// Record a well-formed '@HasThis' contract, or refuse an overload conflict.
+void ApplyHasThisContract(
+    FuncDecl& fd, Annotation& hasThis, DiagnosticEngine& diag, const TopLevelFunctions& topLevelFunctions)
+{
+    // The parser refuses a malformed argument before this pass; only a
+    // well-formed type-reference contract reaches the stored attribute and the
+    // post-type-check type rule.
+    const bool wellFormed = hasThis.args.size() == 1 && hasThis.args.front() != nullptr &&
+        hasThis.args.front()->name.Empty() && IsHasThisTypeReference(hasThis.args.front()->expr.get());
+    if (!wellFormed) {
+        hasThis.EnableAttr(Attribute::IS_BROKEN);
+        return;
+    }
+    // A '@HasThis' declaration names one ArkTS method and cannot join an
+    // overload set, so a same-name function in the package scope is refused.
+    if (HasSameNameFunction(fd, topLevelFunctions)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_overload_conflict, hasThis, fd.identifier.Val());
+        fd.EnableAttr(Attribute::IS_BROKEN);
+        hasThis.EnableAttr(Attribute::IS_BROKEN);
+        return;
+    }
+    fd.EnableAttr(Attribute::ARKTS_HAS_THIS);
+}
+
+// The '@HasThis' placement rules of one declaration.
+VisitAction DiagnoseHasThisOnDecl(Ptr<Node> node, DiagnosticEngine& diag, const TopLevelFunctions& topLevelFunctions)
+{
+    auto decl = DynamicCast<Decl*>(node);
+    if (decl == nullptr || decl->TestAnyAttr(Attribute::COMPILER_ADD, Attribute::IS_BROKEN)) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    auto hasThis = FindUsableHasThisAnnotation(*decl);
+    if (hasThis == nullptr) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    auto fd = DynamicCast<FuncDecl*>(decl);
+    // A prepared wrapper keeps the contract it validated before the rewrite;
+    // a repeated preparation pass must not report it as misplaced.
+    if (fd != nullptr && fd->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER)) {
+        fd->EnableAttr(Attribute::ARKTS_HAS_THIS);
+        return VisitAction::WALK_CHILDREN;
+    }
+    if (fd == nullptr || !IsArkTSForeignFunction(*fd)) {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor::sema_arkts_has_this_placement_invalid, *hasThis, HasThisPlacementKind(*decl));
+        hasThis->EnableAttr(Attribute::IS_BROKEN);
+        return VisitAction::WALK_CHILDREN;
+    }
+    if (IsGlobalVar(*fd)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_global_var_conflict, *hasThis);
+        hasThis->EnableAttr(Attribute::IS_BROKEN);
+        return VisitAction::WALK_CHILDREN;
+    }
+    ApplyHasThisContract(*fd, *hasThis, diag, topLevelFunctions);
+    return VisitAction::WALK_CHILDREN;
+}
+} // namespace
+
 void DiagnoseArkTSHasThis(Package& pkg, DiagnosticEngine& diag)
 {
     if (pkg.TestAttr(Attribute::IMPORTED)) {
@@ -570,68 +653,7 @@ void DiagnoseArkTSHasThis(Package& pkg, DiagnosticEngine& diag)
     const auto topLevelFunctions = IndexTopLevelFunctions(pkg);
     for (auto& file : pkg.files) {
         Walker walker(file.get(), [&diag, &topLevelFunctions](Ptr<Node> node) {
-            auto decl = DynamicCast<Decl*>(node);
-            if (decl == nullptr || decl->TestAnyAttr(Attribute::COMPILER_ADD, Attribute::IS_BROKEN)) {
-                return VisitAction::WALK_CHILDREN;
-            }
-            Annotation* hasThis = nullptr;
-            for (auto& annotation : decl->annotations) {
-                if (annotation != nullptr && annotation->kind == AnnotationKind::HAS_THIS &&
-                    !annotation->TestAttr(Attribute::IS_BROKEN)) {
-                    hasThis = annotation.get();
-                    break;
-                }
-            }
-            if (hasThis == nullptr) {
-                return VisitAction::WALK_CHILDREN;
-            }
-            auto fd = DynamicCast<FuncDecl*>(decl);
-            // A prepared wrapper keeps the contract it validated before the
-            // rewrite; a repeated preparation pass must not report it as a
-            // misplaced annotation on a non-foreign function.
-            if (fd != nullptr && fd->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER)) {
-                fd->EnableAttr(Attribute::ARKTS_HAS_THIS);
-                return VisitAction::WALK_CHILDREN;
-            }
-            if (fd == nullptr) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor::sema_arkts_has_this_placement_invalid, *hasThis, HasThisPlacementKind(*decl));
-                hasThis->EnableAttr(Attribute::IS_BROKEN);
-                return VisitAction::WALK_CHILDREN;
-            }
-            if (!IsArkTSForeignFunction(*fd)) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor::sema_arkts_has_this_placement_invalid, *hasThis, HasThisPlacementKind(*decl));
-                hasThis->EnableAttr(Attribute::IS_BROKEN);
-                return VisitAction::WALK_CHILDREN;
-            }
-            if (IsGlobalVar(*fd)) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_global_var_conflict, *hasThis);
-                hasThis->EnableAttr(Attribute::IS_BROKEN);
-                return VisitAction::WALK_CHILDREN;
-            }
-            // The parser refuses a malformed argument before this pass; only a
-            // well-formed type-reference contract reaches the stored attribute
-            // and the post-type-check type rule.
-            const bool wellFormed = hasThis->args.size() == 1 && hasThis->args.front() != nullptr &&
-                hasThis->args.front()->name.Empty() && IsHasThisTypeReference(hasThis->args.front()->expr.get());
-            if (wellFormed) {
-                // A '@HasThis' declaration names one ArkTS method and cannot
-                // join an overload set, so a same-name function in the package
-                // scope is refused here. The refused declaration is broken, so
-                // later stages and references do not report it again.
-                if (HasSameNameFunction(*fd, topLevelFunctions)) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::sema_arkts_has_this_overload_conflict, *hasThis, fd->identifier.Val());
-                    fd->EnableAttr(Attribute::IS_BROKEN);
-                    hasThis->EnableAttr(Attribute::IS_BROKEN);
-                    return VisitAction::WALK_CHILDREN;
-                }
-                fd->EnableAttr(Attribute::ARKTS_HAS_THIS);
-            } else {
-                hasThis->EnableAttr(Attribute::IS_BROKEN);
-            }
-            return VisitAction::WALK_CHILDREN;
+            return DiagnoseHasThisOnDecl(node, diag, topLevelFunctions);
         });
         walker.Walk();
     }
@@ -644,6 +666,54 @@ void DiagnoseArkTSHasThis(Package& pkg, DiagnosticEngine& diag)
 // resolved TypeName must classify as a reference (a prepared foreign class or
 // interface); a scalar or any unsupported type is refused instead of being
 // carried into the CJO contract.
+namespace {
+// Classify the resolved type of a '@HasThis' argument. The parser already
+// refused a malformed argument shape (the false result lets the walker look at
+// a later annotation); an ArkTS `this` is an object reference, so anything but
+// a reference type is refused.
+bool ValidateHasThisAnnotationType(Annotation& annotation, DiagnosticEngine& diag, ImportManager* imports)
+{
+    if (annotation.args.size() != 1 || annotation.args.front() == nullptr ||
+        !annotation.args.front()->name.Empty() || annotation.args.front()->expr == nullptr) {
+        return false;
+    }
+    auto& arg = *annotation.args.front();
+    auto ty = arg.expr->DataTy();
+    if (ty == nullptr || !Ty::IsTyCorrect(ty)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_type_unsupported, arg, arg.expr->ToString());
+        annotation.EnableAttr(Attribute::IS_BROKEN);
+        return true;
+    }
+    auto desc = ArkTSClassifyType(ty, imports);
+    if (desc.kind != ArkTSTypeDesc::Kind::REFERENCE) {
+        // Report the spelling the user wrote, not the internal Ty name
+        // ("Class-Plain").
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_type_unsupported, arg, arg.expr->ToString());
+        annotation.EnableAttr(Attribute::IS_BROKEN);
+    }
+    return true;
+}
+
+// Validate the '@HasThis' argument types of one declaration.
+VisitAction ValidateHasThisTypesOnDecl(Ptr<Node> node, DiagnosticEngine& diag, ImportManager* imports)
+{
+    auto decl = DynamicCast<Decl*>(node);
+    if (decl == nullptr || !decl->TestAttr(Attribute::ARKTS_HAS_THIS)) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    for (auto& annotation : decl->annotations) {
+        if (annotation == nullptr || annotation->kind != AnnotationKind::HAS_THIS ||
+            annotation->TestAttr(Attribute::IS_BROKEN)) {
+            continue;
+        }
+        if (ValidateHasThisAnnotationType(*annotation, diag, imports)) {
+            break;
+        }
+    }
+    return VisitAction::WALK_CHILDREN;
+}
+} // namespace
+
 void ValidateArkTSHasThisTypes(Package& pkg, DiagnosticEngine& diag, ImportManager* imports)
 {
     if (pkg.TestAttr(Attribute::IMPORTED) || !PassEnabled(pkg)) {
@@ -651,39 +721,7 @@ void ValidateArkTSHasThisTypes(Package& pkg, DiagnosticEngine& diag, ImportManag
     }
     for (auto& file : pkg.files) {
         Walker walker(file.get(), [&diag, imports](Ptr<Node> node) {
-            auto decl = DynamicCast<Decl*>(node);
-            if (decl == nullptr || !decl->TestAttr(Attribute::ARKTS_HAS_THIS)) {
-                return VisitAction::WALK_CHILDREN;
-            }
-            for (auto& annotation : decl->annotations) {
-                if (annotation == nullptr || annotation->kind != AnnotationKind::HAS_THIS ||
-                    annotation->TestAttr(Attribute::IS_BROKEN)) {
-                    continue;
-                }
-                if (annotation->args.size() != 1 || annotation->args.front() == nullptr ||
-                    !annotation->args.front()->name.Empty() || annotation->args.front()->expr == nullptr) {
-                    // The parser already refused this shape.
-                    continue;
-                }
-                auto& arg = *annotation->args.front();
-                auto ty = arg.expr->DataTy();
-                if (ty == nullptr || !Ty::IsTyCorrect(ty)) {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_type_unsupported, arg,
-                        arg.expr->ToString());
-                    annotation->EnableAttr(Attribute::IS_BROKEN);
-                    continue;
-                }
-                auto desc = ArkTSClassifyType(ty, imports);
-                if (desc.kind != ArkTSTypeDesc::Kind::REFERENCE) {
-                    // Report the spelling the user wrote, not the internal Ty
-                    // name ("Class-Plain").
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::sema_arkts_has_this_type_unsupported, arg, arg.expr->ToString());
-                    annotation->EnableAttr(Attribute::IS_BROKEN);
-                }
-                break;
-            }
-            return VisitAction::WALK_CHILDREN;
+            return ValidateHasThisTypesOnDecl(node, diag, imports);
         });
         walker.Walk();
     }

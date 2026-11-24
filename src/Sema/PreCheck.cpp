@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -1912,6 +1912,17 @@ Ptr<ReturnExpr> GetDanglingReturn(const FuncParam& fp)
 }
 }; // namespace
 
+// A default-value desugar function of an @ArkTS foreign wrapper owns its
+// return expression and must not be rebound to the wrapper's return type.
+// ARKTS_FUNCTION_WRAPPER is the attribute PrepareTypeCheck sets on the wrapper
+// declaration whose body LowerArkTSFunctions generates.
+bool IsArkTSWrapperDesugarReturn(const ReturnExpr& re)
+{
+    return re.refFuncBody && re.refFuncBody->funcDecl && re.refFuncBody->funcDecl->TestAttr(Attribute::HAS_INITIAL) &&
+        re.refFuncBody->funcDecl->ownerFunc &&
+        re.refFuncBody->funcDecl->ownerFunc->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
+}
+
 void TypeChecker::TypeCheckerImpl::CheckReturnAndJump(const ASTContext& ctx)
 {
     auto syms = SearchSymbol::GetSymsByASTKind(ctx, ASTKind::RETURN_EXPR);
@@ -1923,22 +1934,14 @@ void TypeChecker::TypeCheckerImpl::CheckReturnAndJump(const ASTContext& ctx)
             if (refFuncBody->funcDecl && IsStaticInitializer(*refFuncBody->funcDecl)) {
                 re->SetTy({TypeManager::GetInvalidTy()});
                 (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_invalid_return_in_static_init, *sym->node);
-            } else {
+            } else if (!IsArkTSWrapperDesugarReturn(*re)) {
                 // A default-value desugar function of an @ArkTS foreign wrapper owns its return
                 // expression: the value is checked against the parameter type, never the
                 // wrapper's return type. The wrapper body is generated after the symbol table
                 // was built, so its desugar function shares the wrapper's scope gate and
                 // resolving the owner from the scope name would walk out to the wrapper. Every
                 // other declaration, in every language, keeps the rebinding below.
-                // ARKTS_FUNCTION_WRAPPER is the attribute PrepareTypeCheck sets on the wrapper
-                // declaration whose body LowerArkTSFunctions generates.
-                bool arktsWrapperDesugarReturn = re->refFuncBody && re->refFuncBody->funcDecl &&
-                    re->refFuncBody->funcDecl->TestAttr(Attribute::HAS_INITIAL) &&
-                    re->refFuncBody->funcDecl->ownerFunc &&
-                    re->refFuncBody->funcDecl->ownerFunc->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
-                if (!arktsWrapperDesugarReturn) {
-                    re->refFuncBody = refFuncBody;
-                }
+                re->refFuncBody = refFuncBody;
             }
         } else {
             re->SetTy({TypeManager::GetInvalidTy()});

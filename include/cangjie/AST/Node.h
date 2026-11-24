@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -580,7 +580,8 @@ enum class AnnotationKind {
     NON_PRODUCT,
     ARKTS,
     ARKTS_REST_PARAM, // ArkTS rest parameter; only valid on the last positional parameter of an ArkTS foreign function.
-    ARKTS_WRITE_ONLY, // ArkTS write-only property; implemented on a mutable property of a prepared @ArkTS foreign class wrapper (placement is deferred to the later placement matrix).
+    ARKTS_WRITE_ONLY, // ArkTS write-only property; implemented on a mutable property of a prepared
+                      // @ArkTS foreign class wrapper (placement is deferred to the later placement matrix).
     ARKTS_RAW_VALUE, // @RawValue annotation on an @ArkTS foreign enum constructor.
     /**
      * ArkTS method `this` contract: '@HasThis[TypeName]' on an '@ArkTS' foreign

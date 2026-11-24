@@ -20,6 +20,23 @@
 namespace Cangjie::Native::FFI::ArkTS {
 using namespace Cangjie::AST;
 
+namespace {
+// A constructor with an associated-value parameter maps a payload type, not a
+// literal, so @RawValue cannot describe it.
+bool ArkTSRawValuePayloadConstructor(const FuncDecl& func)
+{
+    if (func.funcBody == nullptr) {
+        return false;
+    }
+    for (auto& list : func.funcBody->paramLists) {
+        if (!list->params.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
 void CheckAnnoRawValue(Decl& decl, const Annotation& anno, DiagnosticEngine& diag)
 {
     if (!ExperimentalEnabled()) {
@@ -37,19 +54,11 @@ void CheckAnnoRawValue(Decl& decl, const Annotation& anno, DiagnosticEngine& dia
         // type member; its value is the payload, not a literal, so @RawValue
         // cannot describe it. An exported enum with such a constructor is
         // refused by the enum shape rule instead.
-        if (decl.astKind == ASTKind::FUNC_DECL && owner->TestAttr(Attribute::ARKTS_LOWERED)) {
-            auto& func = static_cast<FuncDecl&>(decl);
-            bool hasPayload = false;
-            if (func.funcBody != nullptr) {
-                for (auto& list : func.funcBody->paramLists) {
-                    hasPayload = hasPayload || !list->params.empty();
-                }
-            }
-            if (hasPayload) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_raw_value_payload_ctor, anno,
-                    decl.identifier.Val());
-                return;
-            }
+        if (decl.astKind == ASTKind::FUNC_DECL && owner->TestAttr(Attribute::ARKTS_LOWERED) &&
+            ArkTSRawValuePayloadConstructor(static_cast<FuncDecl&>(decl))) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_raw_value_payload_ctor, anno,
+                decl.identifier.Val());
+            return;
         }
         // A repeated @RawValue is reported by the parser's generic
         // duplicate-annotation check (ParserImpl::ParseAnnotations), like the

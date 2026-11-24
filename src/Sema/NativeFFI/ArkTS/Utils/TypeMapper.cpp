@@ -82,6 +82,78 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpe
     return {};
 }
 
+namespace {
+// Option<T'>: the inner position must itself be supported; a directly nested
+// Option is refused unless the caller allows it (design §3.4).
+ArkTSTypeDesc ArkTSClassifyOptionalType(const Ty& ty, ImportManager* imports, bool allowNestedOptional)
+{
+    ArkTSTypeDesc desc;
+    auto inner = ArkTSClassifyType(ty.typeArgs.front().Ty(), imports, allowNestedOptional);
+    if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED &&
+        (inner.kind != ArkTSTypeDesc::Kind::OPTIONAL || allowNestedOptional)) {
+        desc.kind = ArkTSTypeDesc::Kind::OPTIONAL;
+        desc.elements.emplace_back(std::move(inner));
+    }
+    return desc;
+}
+
+// Array<T'>: copy semantics. An interface reference element is refused (AR-06
+// BR-11); a class reference stays legal.
+ArkTSTypeDesc ArkTSClassifyArrayType(const Ty& ty, ImportManager* imports, bool allowNestedOptional)
+{
+    ArkTSTypeDesc desc;
+    auto inner = ArkTSClassifyType(ty.typeArgs.front().Ty(), imports, allowNestedOptional);
+    if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED && !ArkTSTypeDescContainsInterfaceReference(inner)) {
+        desc.kind = ArkTSTypeDesc::Kind::ARRAY_COPY;
+        desc.elements.emplace_back(std::move(inner));
+    }
+    return desc;
+}
+
+// An ArkTS class instance is a reference to the ArkTS object. Only a class
+// that went through class preparation carries the wrapper attribute; generic
+// presets keep their external declaration shape and stay unsupported.
+ArkTSTypeDesc ArkTSClassifyReferenceLeaf(Ptr<Decl> decl, ImportManager* imports)
+{
+    ArkTSTypeDesc desc;
+    desc.kind = ArkTSTypeDesc::Kind::REFERENCE;
+    desc.reference = decl;
+    if (IsArkTSPreparedInterface(*decl)) {
+        desc.referenceImpl = ArkTSInterfaceImpl(*decl, imports);
+    }
+    return desc;
+}
+
+// An @ArkTS foreign enum that went through enumeration preparation carries
+// ARKTS_LOWERED; lowering attaches the member value table afterwards. The
+// reference field is reused for the enum declaration, mirroring REFERENCE.
+ArkTSTypeDesc ArkTSClassifyEnumLeaf(Ptr<Decl> decl)
+{
+    ArkTSTypeDesc desc;
+    desc.kind = ArkTSTypeDesc::Kind::ENUM;
+    desc.reference = decl;
+    return desc;
+}
+
+// ArkTS tuple types carry a fixed arity and Cangjie's TupleTy is exactly the
+// base typeArgs list, so a rest element cannot be expressed in a Cangjie
+// signature and no tuple-rest branch exists; the tuple-rest rule is applied to
+// the ArkTS .d.ts side before any Cangjie type exists.
+ArkTSTypeDesc ArkTSClassifyTupleType(const Ty& ty, ImportManager* imports, bool allowNestedOptional)
+{
+    ArkTSTypeDesc desc;
+    desc.kind = ArkTSTypeDesc::Kind::TUPLE;
+    for (auto& element : ty.typeArgs) {
+        auto inner = ArkTSClassifyType(element.Ty(), imports, allowNestedOptional);
+        if (inner.kind == ArkTSTypeDesc::Kind::UNSUPPORTED || ArkTSTypeDescContainsInterfaceReference(inner)) {
+            return ArkTSTypeDesc{};
+        }
+        desc.elements.emplace_back(std::move(inner));
+    }
+    return desc;
+}
+} // namespace
+
 // Classification: scalars resolve through the checked whitelist
 // (ArkTSScalarName); std.core Option<T> -> OPTIONAL, std.core Array<T> ->
 // ARRAY_COPY (copy semantics), an Option directly nested in another Option
@@ -97,12 +169,12 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpe
 // Example: Option<Array<Int32>> -> OPTIONAL(ARRAY_COPY(SCALAR(Int32))).
 ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports, bool allowNestedOptional)
 {
-    ArkTSTypeDesc desc;
     if (!Ty::IsTyCorrect(ty)) {
-        return desc;
+        return ArkTSTypeDesc{};
     }
     auto scalar = ArkTSScalarName(ty);
     if (!scalar.empty()) {
+        ArkTSTypeDesc desc;
         desc.kind = ArkTSTypeDesc::Kind::SCALAR;
         desc.scalar = scalar;
         return desc;
@@ -115,67 +187,26 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports, bool allowNe
     // package and reports the deferral message, every other same-named
     // declaration keeps the generic unsupported-type diagnostics.
     if (ty->IsCoreOptionType()) {
-        auto inner = ArkTSClassifyType(ty->typeArgs.front().Ty(), imports, allowNestedOptional);
-        if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED &&
-            (inner.kind != ArkTSTypeDesc::Kind::OPTIONAL || allowNestedOptional)) {
-            desc.kind = ArkTSTypeDesc::Kind::OPTIONAL;
-            desc.elements.emplace_back(std::move(inner));
-        }
-        return desc;
+        return ArkTSClassifyOptionalType(*ty, imports, allowNestedOptional);
     }
     // IsStructArray() decides the std.core Array struct without a name
     // comparison here; it does not pin the type-argument count, so the
     // single-element requirement stays explicit (a zero- or many-argument
     // Array remains unsupported).
     if (ty->IsStructArray() && ty->typeArgs.size() == 1) {
-        auto inner = ArkTSClassifyType(ty->typeArgs.front().Ty(), imports, allowNestedOptional);
-        if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED &&
-            !ArkTSTypeDescContainsInterfaceReference(inner)) {
-            desc.kind = ArkTSTypeDesc::Kind::ARRAY_COPY;
-            desc.elements.emplace_back(std::move(inner));
-        }
-        return desc;
+        return ArkTSClassifyArrayType(*ty, imports, allowNestedOptional);
     }
-    // An ArkTS class instance is a reference to the ArkTS object. Only a
-    // class that went through class preparation carries the wrapper
-    // attribute; generic presets keep their external declaration shape and
-    // stay unsupported here.
-    if (auto decl = Ty::GetDeclPtrOfTy(ty); decl && IsArkTSReferenceDecl(*decl)) {
-        desc.kind = ArkTSTypeDesc::Kind::REFERENCE;
-        desc.reference = decl;
-        if (IsArkTSPreparedInterface(*decl)) {
-            desc.referenceImpl = ArkTSInterfaceImpl(*decl, imports);
-        }
-        return desc;
+    auto decl = Ty::GetDeclPtrOfTy(ty);
+    if (decl && IsArkTSReferenceDecl(*decl)) {
+        return ArkTSClassifyReferenceLeaf(decl, imports);
     }
-    // An @ArkTS foreign enum that went through enum preparation carries
-    // ARKTS_LOWERED; the classification records the declaration, and lowering
-    // attaches the member value table afterwards (the table lives on the
-    // checker, not in classification). The reference field is reused for the
-    // enum declaration, mirroring the REFERENCE leaf.
-    if (auto decl = Ty::GetDeclPtrOfTy(ty);
-        decl && decl->astKind == ASTKind::ENUM_DECL && decl->TestAttr(Attribute::ARKTS_LOWERED)) {
-        desc.kind = ArkTSTypeDesc::Kind::ENUM;
-        desc.reference = decl;
-        return desc;
+    if (decl && decl->astKind == ASTKind::ENUM_DECL && decl->TestAttr(Attribute::ARKTS_LOWERED)) {
+        return ArkTSClassifyEnumLeaf(decl);
     }
-    // ArkTS tuple types carry a fixed arity and Cangjie's TupleTy is
-    // exactly the base typeArgs list, so a rest element cannot be
-    // expressed in a Cangjie signature and no tuple-rest branch exists;
-    // the tuple-rest rule is applied to the ArkTS .d.ts side before any
-    // Cangjie type exists.
     if (ty->IsTuple() && ty->typeArgs.size() >= 2) {
-        desc.kind = ArkTSTypeDesc::Kind::TUPLE;
-        for (auto& element : ty->typeArgs) {
-            auto inner = ArkTSClassifyType(element.Ty(), imports, allowNestedOptional);
-            if (inner.kind == ArkTSTypeDesc::Kind::UNSUPPORTED ||
-                ArkTSTypeDescContainsInterfaceReference(inner)) {
-                return ArkTSTypeDesc{};
-            }
-            desc.elements.emplace_back(std::move(inner));
-        }
+        return ArkTSClassifyTupleType(*ty, imports, allowNestedOptional);
     }
-    return desc;
+    return ArkTSTypeDesc{};
 }
 
 // Recognition of the external preset types declared by std.interop.arkts
@@ -213,6 +244,43 @@ std::string ArkTSDeferredExternalTypeName(Ptr<Ty> ty)
     return {};
 }
 
+namespace {
+bool ArkTSTypeDescReferenceGeneratable(const ArkTSTypeDesc& desc)
+{
+    if (desc.reference == nullptr) {
+        return false;
+    }
+    // A foreign interface reference also needs its generated implementation
+    // class: every from-JS position constructs it.
+    if (IsArkTSPreparedInterface(*desc.reference)) {
+        return desc.referenceImpl != nullptr;
+    }
+    return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
+}
+
+bool ArkTSTypeDescEnumGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptional)
+{
+    // The enum declaration must have gone through preparation and lowering
+    // must have attached a non-empty value table; a prepared enum whose
+    // declaration was refused (generic, ...) never reaches the table and stays
+    // non-generatable. A payload member's associated value must itself be a
+    // generatable position.
+    if (desc.reference == nullptr || !desc.reference->TestAttr(Attribute::ARKTS_LOWERED) ||
+        desc.enumMembers.empty()) {
+        return false;
+    }
+    for (const auto& member : desc.enumMembers) {
+        if (member.kind != ArkTSEnumValueKind::PAYLOAD) {
+            continue;
+        }
+        if (member.payload.size() != 1 || !ArkTSTypeDescGeneratable(member.payload.front(), allowNestedOptional)) {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
 // A description is generatable when every scalar leaf is a checked name, the
 // single-element composites carry exactly one element, tuples carry at least
 // two, and no Option nests another Option; arrays and tuples may contain
@@ -235,35 +303,9 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptiona
         case ArkTSTypeDesc::Kind::ARRAY_COPY:
             return desc.elements.size() == 1 && ArkTSTypeDescGeneratable(desc.elements.front(), allowNestedOptional);
         case ArkTSTypeDesc::Kind::REFERENCE:
-            if (desc.reference == nullptr) {
-                return false;
-            }
-            // A foreign interface reference also needs its generated
-            // implementation class: every from-JS position constructs it.
-            if (IsArkTSPreparedInterface(*desc.reference)) {
-                return desc.referenceImpl != nullptr;
-            }
-            return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
-        case ArkTSTypeDesc::Kind::ENUM: {
-            // The enum declaration must have gone through preparation and
-            // lowering must have attached a non-empty value table; a prepared
-            // enum whose declaration was refused (generic, ...) never reaches
-            // the table and stays non-generatable. A payload member's
-            // associated value must itself be a generatable position.
-            if (desc.reference == nullptr || !desc.reference->TestAttr(Attribute::ARKTS_LOWERED) ||
-                desc.enumMembers.empty()) {
-                return false;
-            }
-            for (const auto& member : desc.enumMembers) {
-                if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
-                    if (member.payload.size() != 1 ||
-                        !ArkTSTypeDescGeneratable(member.payload.front(), allowNestedOptional)) {
-                        return false;
-                    }
-                }
-            }
-            return true;
-        }
+            return ArkTSTypeDescReferenceGeneratable(desc);
+        case ArkTSTypeDesc::Kind::ENUM:
+            return ArkTSTypeDescEnumGeneratable(desc, allowNestedOptional);
         case ArkTSTypeDesc::Kind::TUPLE:
             if (desc.elements.size() < 2) {
                 return false;

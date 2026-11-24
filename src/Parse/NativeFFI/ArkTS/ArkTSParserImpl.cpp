@@ -100,6 +100,80 @@ bool EnclosingClassLikeHasARKTSAnnotation(
     return false;
 }
 
+// Whether the declaration itself, its owner or its enclosing class-like carries
+// @ArkTS. `annos` may be empty on the init/primary-constructor/prop paths,
+// where the declaration already owns its parsed annotations, and a constructor
+// is not yet parented to its class-like at parse time, so the parser chain is
+// consulted as well.
+bool HasRestParamArkTSContext(const Decl& decl, const PtrVector<Annotation>& annos,
+    const std::vector<Ptr<Node>>& chain, ScopeKind scopeKind)
+{
+    return HasArkTSAnnotation(annos) || HasArkTSAnnotation(decl.annotations) ||
+        (decl.outerDecl != nullptr && HasArkTSAnnotation(decl.outerDecl->annotations)) ||
+        EnclosingClassLikeHasARKTSAnnotation(chain, decl, scopeKind);
+}
+
+// Mirrors IsArkTSForeignFunction (EntrySelection.cpp): FOREIGN alone would also
+// accept ordinary C foreign, and a member of an @ArkTS foreign class/interface
+// matches neither half of that predicate at parse time.
+bool IsArkTSRestParamForeign(
+    const Decl& decl, bool hasArkTS, const std::vector<Ptr<Node>>& chain, ScopeKind scopeKind)
+{
+    return (decl.TestAttr(Attribute::FOREIGN) && hasArkTS) ||
+        IsArkTSForeignClassMember(chain, decl, scopeKind);
+}
+
+// The first named parameter of the list, if any. Cangjie parameter ordering
+// (DiagNamedParameterAfterUnnamed, ParseDecl.cpp) already forces named
+// parameters behind every positional one, so its presence means either a named
+// parameter follows the rest position or the rest position itself is named.
+const FuncParam* FindFirstNamedParam(const std::vector<OwnedPtr<FuncParam>>& params)
+{
+    for (const auto& param : params) {
+        if (param->isNamedParam) {
+            return param.get();
+        }
+    }
+    return nullptr;
+}
+
+enum class RestParamOutcome {
+    // The annotation was accepted or refused here.
+    HANDLED,
+    // The signature mixes a rest parameter with named parameters; the caller
+    // reports it once through the dedicated diagnostic.
+    NAMED_PARAM_MIX,
+};
+
+// The placement verdict for one @RestParam annotation. A mixed signature is
+// handled by the caller, and the placement checks are skipped for the whole
+// function, so the same signature is not double-reported.
+RestParamOutcome DiagnoseRestParamMisuse(ParserImpl& parser, const ArkTSParserImpl& self, const Decl& decl,
+    const FuncParam& param, Annotation& annotation, size_t index, size_t paramCount, const FuncParam* namedParam,
+    bool arktsForeign, bool hasArkTS)
+{
+    if (!arktsForeign) {
+        // A non-foreign @ArkTS declaration is legal but its rest-parameter
+        // mapping is not implemented in this release; a plain C foreign
+        // declaration stays under the ordinary annotation rule.
+        if (hasArkTS) {
+            parser.GetDiagnosticEngine().DiagnoseRefactor(
+                DiagKindRefactor::parse_arkts_rest_param_non_foreign_not_supported, annotation,
+                decl.identifier.Val());
+        } else {
+            self.DiagRestParamOnNonArkTSForeign(decl, annotation);
+        }
+        return RestParamOutcome::HANDLED;
+    }
+    if (namedParam != nullptr) {
+        return RestParamOutcome::NAMED_PARAM_MIX;
+    }
+    if (param.isNamedParam || index + 1 != paramCount) {
+        self.DiagRestParamNotLastPositional(param, annotation);
+    }
+    return RestParamOutcome::HANDLED;
+}
+
 } // namespace
 
 // Before: top-level @ArkTS foreign func has FOREIGN in the source modifiers.
@@ -178,37 +252,9 @@ void ArkTSParserImpl::CheckRestParamPlacementImpl(const Decl& decl, const FuncBo
         return;
     }
     const auto& params = funcBody->paramLists.front()->params;
-    // Mirrors IsArkTSForeignFunction (EntrySelection.cpp), which gates
-    // lowering: FOREIGN alone would also accept ordinary C foreign. A member
-    // of an @ArkTS foreign class/interface matches neither half of that
-    // predicate at parse time, so the enclosing class-like is consulted as
-    // an additional source.
-    // `annos` may be empty on the init/primary-constructor/prop paths, where
-    // the declaration already owns its parsed annotations. A constructor is
-    // not yet parented to its class-like at parse time, so the enclosing
-    // class-like is also resolved through the parser chain.
-    const bool hasArkTS = HasArkTSAnnotation(annos) || HasArkTSAnnotation(decl.annotations) ||
-        (decl.outerDecl != nullptr && HasArkTSAnnotation(decl.outerDecl->annotations)) ||
-        EnclosingClassLikeHasARKTSAnnotation(p.chainedAST, decl, scopeKind);
-    const bool arktsForeign = (decl.TestAttr(Attribute::FOREIGN) && hasArkTS) ||
-        IsArkTSForeignClassMember(p.chainedAST, decl, scopeKind);
-    // Pre-scan for the first named parameter of the list, if any. Cangjie
-    // parameter ordering (DiagNamedParameterAfterUnnamed, ParseDecl.cpp)
-    // already forces named parameters behind every positional one, so its
-    // presence means either a named parameter follows the rest position or
-    // the rest position itself is named - both are the same rule violation:
-    // a function containing a rest parameter cannot contain named
-    // parameters. A named rest lands here too (it is itself a named
-    // parameter of the function), so in practice the placement branch below
-    // only ever sees an unnamed rest; its isNamedParam disjunct stays as the
-    // written contract of the preserved check.
-    const FuncParam* namedParam = nullptr;
-    for (const auto& param : params) {
-        if (param->isNamedParam) {
-            namedParam = param.get();
-            break;
-        }
-    }
+    const bool hasArkTS = HasRestParamArkTSContext(decl, annos, p.chainedAST, scopeKind);
+    const bool arktsForeign = IsArkTSRestParamForeign(decl, hasArkTS, p.chainedAST, scopeKind);
+    const FuncParam* namedParam = FindFirstNamedParam(params);
     bool reportedNamedParamMix = false;
     for (size_t index = 0; index < params.size(); ++index) {
         for (auto& annotation : params[index]->annotations) {
@@ -218,32 +264,11 @@ void ArkTSParserImpl::CheckRestParamPlacementImpl(const Decl& decl, const FuncBo
             // The annotation takes no arguments; ParserDiag.cpp routes the
             // check to the shared FFIParserImpl::CheckNoArgAnnotation.
             CheckRestParamAnnoArgs(*annotation);
-            const auto& param = *params[index];
-            // The placement rule is that the rest parameter must be the
-            // final positional parameter; on top of it, a function containing
-            // a rest parameter cannot contain any named parameter. A mixed
-            // signature is reported once through the dedicated diagnostic
-            // and the placement checks below are skipped for the whole
-            // function, so the same signature is not double-reported.
-            if (!arktsForeign) {
-                // A non-foreign @ArkTS declaration is a legal declaration
-                // whose rest-parameter mapping is not implemented in this
-                // release; say so instead of reporting a misplaced
-                // annotation. A plain C foreign declaration stays under the
-                // ordinary annotation rule.
-                if (hasArkTS) {
-                    p.diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_rest_param_non_foreign_not_supported,
-                        *annotation, decl.identifier.Val());
-                } else {
-                    DiagRestParamOnNonArkTSForeign(decl, *annotation);
-                }
-            } else if (namedParam != nullptr) {
-                if (!reportedNamedParamMix) {
-                    p.DiagRestParamFunctionHasNamedParams(*annotation, *namedParam);
-                    reportedNamedParamMix = true;
-                }
-            } else if (param.isNamedParam || index + 1 != params.size()) {
-                DiagRestParamNotLastPositional(param, *annotation);
+            if (DiagnoseRestParamMisuse(p, *this, decl, *params[index], *annotation, index, params.size(),
+                namedParam, arktsForeign, hasArkTS) == RestParamOutcome::NAMED_PARAM_MIX &&
+                !reportedNamedParamMix) {
+                p.DiagRestParamFunctionHasNamedParams(*annotation, *namedParam);
+                reportedNamedParamMix = true;
             }
         }
     }

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "Desugar/AfterTypeCheck.h"
+#include "NativeFFI/ArkTS/FunctionSource.h"
 
 #include "AutoBoxing.h"
 #include "ExtraScopes.h"
@@ -319,6 +320,10 @@ void TypeChecker::TypeCheckerImpl::DesugarSetForPropDecl(Expr& expr)
         return;
     }
     if (isCompound) {
+        // A compound assignment ('w.p += x') and an increment ('w.p++') read the
+        // property through its getter before writing it, so the ArkTS write-only
+        // contract applies even though the node is a left value.
+        Native::FFI::ArkTS::CheckArkTSWriteOnlyCompoundTarget(*subExpr, diag);
         DesugarCompoundSetForPropDecl(typeManager, expr, *subExpr, *propDecl);
         return;
     }

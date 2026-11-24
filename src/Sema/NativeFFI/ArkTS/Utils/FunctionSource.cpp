@@ -423,11 +423,11 @@ bool ArkTSWriteOnlyProp(const Decl& decl)
     return false;
 }
 
-Ptr<PropDecl> ArkTSWriteOnlyTargetProp(const Node& usage)
+Ptr<PropDecl> ArkTSWriteOnlyTargetProp(const Node& usage, bool readThroughLeftValue)
 {
     if (!ExperimentalEnabled() ||
         (usage.astKind != ASTKind::MEMBER_ACCESS && usage.astKind != ASTKind::REF_EXPR) ||
-        usage.TestAttr(Attribute::LEFT_VALUE) || usage.TestAttr(Attribute::COMPILER_ADD)) {
+        (usage.TestAttr(Attribute::LEFT_VALUE) && !readThroughLeftValue) || usage.TestAttr(Attribute::COMPILER_ADD)) {
         return nullptr;
     }
     auto target = usage.GetTarget();
@@ -444,6 +444,14 @@ Ptr<PropDecl> ArkTSWriteOnlyTargetProp(const Node& usage)
         return prop;
     }
     return nullptr;
+}
+
+void CheckArkTSWriteOnlyCompoundTarget(Node& usage, DiagnosticEngine& diag)
+{
+    auto prop = ArkTSWriteOnlyTargetProp(usage, true);
+    if (prop && ArkTSWriteOnlyProp(*prop)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_write_only_read, usage, prop->identifier.Val());
+    }
 }
 
 void CheckArkTSWriteOnlyRead(Node& usage, DiagnosticEngine& diag)
@@ -463,6 +471,42 @@ bool IsArkTSDecl(const Decl& decl)
         (decl.outerDecl->HasAnno(AnnotationKind::ARKTS) || decl.outerDecl->TestAttr(Attribute::ARKTS));
 }
 
+namespace {
+// The parameter annotations that make a declaration ArkTS-only even when the
+// declaration itself carries no @ArkTS layer.
+bool IsGatedArkTSParamAnnotation(const Ptr<Annotation>& anno)
+{
+    return anno != nullptr &&
+        (anno->kind == AnnotationKind::ARKTS || anno->kind == AnnotationKind::ARKTS_RAW_VALUE ||
+            anno->kind == AnnotationKind::ARKTS_REST_PARAM || anno->kind == AnnotationKind::ARKTS_WRITE_ONLY);
+}
+
+bool ArkTSGatedParam(const FuncParam& param)
+{
+    for (const auto& anno : param.annotations) {
+        if (IsGatedArkTSParamAnnotation(anno)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ArkTSFuncBodyHasGatedParam(const FuncBody& body)
+{
+    for (const auto& list : body.paramLists) {
+        if (list == nullptr) {
+            continue;
+        }
+        for (const auto& param : list->params) {
+            if (param != nullptr && ArkTSGatedParam(*param)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+} // namespace
+
 bool IsGatedArkTSDecl(const Decl& decl)
 {
     if (ExperimentalEnabled()) {
@@ -474,27 +518,7 @@ bool IsGatedArkTSDecl(const Decl& decl)
     // A malformed declaration may carry only @RestParam on a parameter; it is
     // still ArkTS-only and must not gain the unsafe-invoke cascade.
     auto fd = DynamicCast<const FuncDecl*>(&decl);
-    if (fd == nullptr || fd->funcBody == nullptr) {
-        return false;
-    }
-    for (const auto& list : fd->funcBody->paramLists) {
-        if (list == nullptr) {
-            continue;
-        }
-        for (const auto& param : list->params) {
-            if (param == nullptr) {
-                continue;
-            }
-            for (const auto& anno : param->annotations) {
-                if (anno != nullptr &&
-                    (anno->kind == AnnotationKind::ARKTS || anno->kind == AnnotationKind::ARKTS_RAW_VALUE ||
-                        anno->kind == AnnotationKind::ARKTS_REST_PARAM || anno->kind == AnnotationKind::ARKTS_WRITE_ONLY)) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
+    return fd != nullptr && fd->funcBody != nullptr && ArkTSFuncBodyHasGatedParam(*fd->funcBody);
 }
 
 bool IsArkTSReferenceDecl(const Decl& decl)
@@ -533,6 +557,18 @@ std::string ArkTSInterfaceImplName(const Decl& iface)
     return iface.identifier.Val() + "$arkts_impl";
 }
 
+static Ptr<ClassDecl> FindArkTSInterfaceImplInPackage(const Package& pkg, const std::string& name)
+{
+    for (auto& file : pkg.files) {
+        for (auto& decl : file->decls) {
+            if (decl->identifier.Val() == name && IsArkTSInterfaceImpl(*decl)) {
+                return DynamicCast<ClassDecl*>(decl.get());
+            }
+        }
+    }
+    return nullptr;
+}
+
 // Resolve the generated implementation class. The current package is searched
 // in its own AST; an imported interface is resolved through the package CJO by
 // the same deterministic name. A null result is a compilation-local resolution
@@ -547,13 +583,7 @@ Ptr<ClassDecl> ArkTSInterfaceImpl(const Decl& iface, ImportManager* imports)
         return decl;
     }
     if (iface.curFile && iface.curFile->curPackage) {
-        for (auto& file : iface.curFile->curPackage->files) {
-            for (auto& decl : file->decls) {
-                if (decl->identifier.Val() == name && IsArkTSInterfaceImpl(*decl)) {
-                    return DynamicCast<ClassDecl*>(decl.get());
-                }
-            }
-        }
+        return FindArkTSInterfaceImplInPackage(*iface.curFile->curPackage, name);
     }
     return nullptr;
 }
@@ -617,6 +647,149 @@ bool ArkTSModulePathLike(const std::string& module)
     return module.size() > 2 && module[1] == '.' && module[2] == '/';
 }
 
+namespace {
+// The per-layer result of the annotation scan: the layer status plus the
+// first offending argument the layer-level check does not already describe.
+struct ArkTSOptionLayerIssue {
+    bool valid{true};
+    std::string emptyName;
+    // The namespace literal is the anchor of the ill-formed-namespace
+    // diagnostic, so it is kept apart from the annotation-level fallback.
+    Ptr<Node> namespaceAt{nullptr};
+    std::string namespaceValue;
+};
+
+ArkTSOptionLayerIssue ScanArkTSOptionLayer(const Annotation& annotation, const ArkTSOptionStatus& layer)
+{
+    ArkTSOptionLayerIssue issue;
+    issue.valid = layer.problem == ArkTSOptionProblem::NONE;
+    if (!issue.valid) {
+        return issue;
+    }
+    for (const auto& arg : annotation.args) {
+        const auto& literal = StaticCast<LitConstExpr>(*arg->expr);
+        const auto name = arg->name.Val();
+        // The boolean option carries no string value, so the empty-value rule
+        // does not apply to it.
+        if (name == "globalVar") {
+            continue;
+        }
+        if (name == "namespace" && !ArkTSNamespaceValid(literal.stringValue)) {
+            issue.valid = false;
+            issue.namespaceAt = arg->expr.get();
+            issue.namespaceValue = literal.stringValue;
+            break;
+        }
+        // An explicitly empty value is a separate mistake from a malformed
+        // namespace or an unknown option: it is fully spelled and would
+        // silently reach the runtime.
+        if (ArkTSOptionValueEmpty(literal.stringValue)) {
+            issue.emptyName = name;
+            break;
+        }
+    }
+    return issue;
+}
+
+void ReportArkTSOptionLayerIssue(const Ptr<Annotation>& annotation, const ArkTSOptionStatus& layer,
+    const ArkTSOptionLayerIssue& issue, DiagnosticEngine& diag)
+{
+    if (!issue.valid) {
+        // A repeated key has its own message: both the key and the value shape
+        // are legal, only the repetition is not. An ill-formed namespace also
+        // has its own message.
+        if (layer.problem == ArkTSOptionProblem::DUPLICATE) {
+            auto& at = layer.at ? *layer.at : static_cast<Node&>(*annotation);
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, at, layer.option);
+        } else if (layer.problem == ArkTSOptionProblem::ILL_FORMED_VALUE) {
+            auto& at = layer.at ? *layer.at : static_cast<Node&>(*annotation);
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_value_invalid, at);
+        } else if (issue.namespaceAt != nullptr) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_namespace_invalid, *issue.namespaceAt,
+                issue.namespaceValue);
+        } else {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_invalid, *annotation);
+        }
+        return;
+    }
+    if (!issue.emptyName.empty()) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty, *annotation, issue.emptyName);
+    }
+}
+
+void DiagnoseArkTSOptionLayers(const Decl& decl, DiagnosticEngine& diag)
+{
+    for (const auto& annotation : decl.annotations) {
+        if (annotation->kind != AnnotationKind::ARKTS) {
+            continue;
+        }
+        auto layer = CheckArkTSOptionLayer(*annotation);
+        auto issue = ScanArkTSOptionLayer(*annotation, layer);
+        if (!issue.valid || !issue.emptyName.empty()) {
+            ReportArkTSOptionLayerIssue(annotation, layer, issue, diag);
+            break;
+        }
+    }
+}
+
+void DiagnoseArkTSForeignMemberParam(Decl& decl, const FuncParam& param, bool restParam, DiagnosticEngine& diag)
+{
+    if (param.isNamedParam && param.assignment == nullptr) {
+        // A malformed parameter or a rest+named signature was already rejected;
+        // do not restate a different rule on top of that diagnostic.
+        if (!restParam && !ArkTSParamIsBroken(param)) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_named_param_without_default, param,
+                param.identifier.Val(), decl.identifier.Val());
+        }
+        decl.EnableAttr(Attribute::IS_BROKEN);
+        return;
+    }
+    if (DiagnoseArkTSDefaultedNamedParamNotOption(diag, param, decl)) {
+        decl.EnableAttr(Attribute::IS_BROKEN);
+    }
+}
+
+// Bodyless members of an external @ArkTS foreign class-like carry no marker of
+// their own: Sema propagates FOREIGN to them and the @ArkTS annotation stays on
+// the enclosing declaration, so the owner is consulted (the same shape the
+// parser uses to accept a bodyless init). Their named parameters must have a
+// default value for the same reason as a top-level wrapper: the generated
+// binding cannot tell an omitted named argument from an explicitly passed
+// value. A member has no wrapper of its own, so the declaration is only marked
+// broken.
+void DiagnoseArkTSBodylessForeignMember(Decl& decl, DiagnosticEngine& diag)
+{
+    FuncBody* memberBody = nullptr;
+    if (auto fd = DynamicCast<FuncDecl*>(&decl)) {
+        memberBody = fd->funcBody.get();
+    } else if (auto ctor = DynamicCast<PrimaryCtorDecl*>(&decl)) {
+        // Defensive coverage: an @ArkTS foreign class never declares a primary
+        // constructor today, so this branch is unreachable from source; it
+        // stays here so a future parser change cannot silently bypass the rule.
+        // The 'init' spelling is a FuncDecl (covered by
+        // BodylessForeignClassMemberNamedParameterWithoutDefaultIsRejected).
+        memberBody = ctor->funcBody.get();
+    }
+    if (memberBody == nullptr || memberBody->body != nullptr || !ArkTSForeignClassLikeMember(decl)) {
+        return;
+    }
+    // A rest parameter forbids named parameters outright; the parser already
+    // reported that mix, so this rule stays silent. The member is still marked
+    // broken: the shape is rejected either way.
+    const bool restParam = ArkTSFuncBodyHasRestParam(*memberBody);
+    for (auto& list : memberBody->paramLists) {
+        if (list == nullptr) {
+            continue;
+        }
+        for (auto& param : list->params) {
+            if (param != nullptr) {
+                DiagnoseArkTSForeignMemberParam(decl, *param, restParam, diag);
+            }
+        }
+    }
+}
+} // namespace
+
 void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
 {
     Walker(&pkg, [&diag](Ptr<Node> node) {
@@ -626,109 +799,8 @@ void ArkTSDeclOptionsDiagnose(Package& pkg, DiagnosticEngine& diag)
                 Attribute::ARKTS_CLASS_WRAPPER, Attribute::ARKTS_INTERFACE_WRAPPER)) {
             return VisitAction::WALK_CHILDREN;
         }
-        for (const auto& annotation : decl->annotations) {
-            if (annotation->kind != AnnotationKind::ARKTS) {
-                continue;
-            }
-            auto layer = CheckArkTSOptionLayer(*annotation);
-            bool valid = layer.problem == ArkTSOptionProblem::NONE;
-            std::string emptyName;
-            // The namespace literal is the anchor of the ill-formed-namespace
-            // diagnostic, so it is kept apart from the annotation-level
-            // fallback.
-            Ptr<Node> namespaceAt = nullptr;
-            std::string namespaceValue;
-            if (valid) {
-                for (const auto& arg : annotation->args) {
-                    const auto& literal = StaticCast<LitConstExpr>(*arg->expr);
-                    const auto name = arg->name.Val();
-                    // The boolean option carries no string value, so the
-                    // empty-value rule does not apply to it.
-                    if (name == "globalVar") {
-                        continue;
-                    }
-                    if (name == "namespace" && !ArkTSNamespaceValid(literal.stringValue)) {
-                        valid = false;
-                        namespaceAt = arg->expr.get();
-                        namespaceValue = literal.stringValue;
-                        break;
-                    }
-                    // An explicitly empty value is a separate mistake from a
-                    // malformed namespace or an unknown option: it is fully
-                    // spelled and would silently reach the runtime.
-                    if (ArkTSOptionValueEmpty(literal.stringValue)) {
-                        emptyName = name;
-                        break;
-                    }
-                }
-            }
-            if (!valid) {
-                // A repeated key has its own message: both the key and the
-                // value shape are legal, only the repetition is not. An
-                // ill-formed namespace also has its own message.
-                if (layer.problem == ArkTSOptionProblem::DUPLICATE) {
-                    auto& at = layer.at ? *layer.at : static_cast<Node&>(*annotation);
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, at, layer.option);
-                } else if (layer.problem == ArkTSOptionProblem::ILL_FORMED_VALUE) {
-                    auto& at = layer.at ? *layer.at : static_cast<Node&>(*annotation);
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_value_invalid, at);
-                } else if (namespaceAt != nullptr) {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_namespace_invalid, *namespaceAt, namespaceValue);
-                } else {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_invalid, *annotation);
-                }
-                break;
-            }
-            if (!emptyName.empty()) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty, *annotation, emptyName);
-                break;
-            }
-        }
-        // Bodyless members of an external @ArkTS foreign class-like carry no
-        // marker of their own: Sema propagates FOREIGN to them and the @ArkTS
-        // annotation stays on the enclosing declaration, so the owner is
-        // consulted (the same shape the parser uses to accept a bodyless
-        // init). Their named parameters must have a default value for the same
-        // reason as a top-level wrapper: the generated binding cannot tell an
-        // omitted named argument from an explicitly passed value. A member has
-        // no wrapper of its own, so the declaration is only marked broken.
-        FuncBody* memberBody = nullptr;
-        if (auto fd = DynamicCast<FuncDecl*>(decl)) {
-            memberBody = fd->funcBody.get();
-        } else if (auto ctor = DynamicCast<PrimaryCtorDecl*>(decl)) {
-            // Defensive coverage: an @ArkTS foreign class never declares a
-            // primary constructor today, so this branch is unreachable from
-            // source; it stays here so a future parser change cannot silently
-            // bypass the rule. The 'init' spelling is a FuncDecl (covered by
-            // BodylessForeignClassMemberNamedParameterWithoutDefaultIsRejected).
-            memberBody = ctor->funcBody.get();
-        }
-        if (memberBody != nullptr && memberBody->body == nullptr && ArkTSForeignClassLikeMember(*decl)) {
-            // A rest parameter forbids named parameters outright; the parser
-            // already reported that mix, so this rule stays silent. The
-            // member is still marked broken: the shape is rejected either way.
-            const bool restParam = ArkTSFuncBodyHasRestParam(*memberBody);
-            for (auto& list : memberBody->paramLists) {
-                if (list == nullptr) {
-                    continue;
-                }
-                for (auto& param : list->params) {
-                    if (param != nullptr && param->isNamedParam && param->assignment == nullptr) {
-                        // A malformed parameter or a rest+named signature was
-                        // already rejected; do not restate a different rule on
-                        // top of that diagnostic.
-                        if (!restParam && !ArkTSParamIsBroken(*param)) {
-                            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_named_param_without_default,
-                                *param, param->identifier.Val(), decl->identifier.Val());
-                        }
-                        decl->EnableAttr(Attribute::IS_BROKEN);
-                    } else if (param != nullptr &&
-                        DiagnoseArkTSDefaultedNamedParamNotOption(diag, *param, *decl)) {
-                        decl->EnableAttr(Attribute::IS_BROKEN);
-                    }
-                }
-            }
-        }
+        DiagnoseArkTSOptionLayers(*decl, diag);
+        DiagnoseArkTSBodylessForeignMember(*decl, diag);
         return VisitAction::WALK_CHILDREN;
     }).Walk();
 }
@@ -810,8 +882,8 @@ static std::string ArkTSValueDescription(const std::string& value)
     // Numbers are deliberately not read here: the range checks already spell the
     // offending value, and a number-to-number read would look like a conversion
     // the BigInt path must not perform.
-    return "(if (" + value + ".isNull()) { \"null\" } else if (" + value + ".isUndefined()) { \"undefined\" } else if (" +
-        value + ".isBoolean()) { " + value + ".toBoolean().toString() } else if (" + value +
+    return "(if (" + value + ".isNull()) { \"null\" } else if (" + value + ".isUndefined()) { \"undefined\" } " +
+        "else if (" + value + ".isBoolean()) { " + value + ".toBoolean().toString() } else if (" + value +
         ".isString()) { " + value + ".asString().toString() } else { \"object\" })";
 }
 
@@ -1275,308 +1347,376 @@ struct ArkTSValueEmitter {
     ArkTSEmitted FromJS(const ArkTSTypeDesc& desc, const std::string& value, const std::string& indent,
         bool nullablePosition = false)
     {
+        switch (desc.kind) {
+            case ArkTSTypeDesc::Kind::SCALAR:
+                return ScalarFromJS(desc.scalar, value, indent, nullablePosition);
+            case ArkTSTypeDesc::Kind::OPTIONAL:
+                return FromJSOptional(desc, value, indent);
+            case ArkTSTypeDesc::Kind::REFERENCE:
+                return FromJSReference(desc, value, indent, nullablePosition);
+            case ArkTSTypeDesc::Kind::ENUM:
+                return FromJSEnum(desc, value, indent, nullablePosition);
+            case ArkTSTypeDesc::Kind::ARRAY_COPY:
+                return FromJSArrayCopy(desc, value, indent, nullablePosition);
+            case ArkTSTypeDesc::Kind::TUPLE:
+                return FromJSTuple(desc, value, indent, nullablePosition);
+            default:
+                return {};
+        }
+    }
+
+    // Option<T'> from-JS pseudocode: JS null and JS undefined both map to
+    // Option.None, checked through the isNull() and isUndefined() predicates;
+    // anything else reaches Option.Some with the element's own kind and value
+    // checks inside the branch, where the value is already known non-null.
+    ArkTSEmitted FromJSOptional(const ArkTSTypeDesc& desc, const std::string& value, const std::string& indent)
+    {
         ArkTSEmitted emitted;
-        if (desc.kind == ArkTSTypeDesc::Kind::SCALAR) {
-            return ScalarFromJS(desc.scalar, value, indent, nullablePosition);
-        }
-        if (desc.kind == ArkTSTypeDesc::Kind::OPTIONAL) {
-            // Option<T'> from-JS pseudocode: JS null and JS
-            // undefined both map to Option.None, checked through the isNull() and
-            // isUndefined() predicates; anything else reaches Option.Some with the
-            // element's own kind and value checks inside the branch, where
-            // the value is already known non-null.
-            auto inner = FromJS(desc.elements.front(), value, indent + "    ", true);
-            emitted.expr = "(if (" + value + ".isNull() || " + value + ".isUndefined()) {\n" + indent + "    " +
-                ARKTS_OPTION + ".None\n" + indent + "} else {\n" + inner.pre + indent + "    " + ARKTS_OPTION +
-                ".Some(" + inner.expr + ")\n" + indent + "})";
+        auto inner = FromJS(desc.elements.front(), value, indent + "    ", true);
+        emitted.expr = "(if (" + value + ".isNull() || " + value + ".isUndefined()) {\n" + indent + "    " +
+            ARKTS_OPTION + ".None\n" + indent + "} else {\n" + inner.pre + indent + "    " + ARKTS_OPTION +
+            ".Some(" + inner.expr + ")\n" + indent + "})";
+        return emitted;
+    }
+
+    // An ArkTS object reference: null and undefined are not instances, and the
+    // value must be an object before the wrapping constructor is called. The
+    // class is recorded by placeholder so the lowering walker can bind it
+    // without spelling its name here. An interface reference is constructed
+    // through its generated implementation class; a class reference through
+    // its wrapper constructor.
+    ArkTSEmitted FromJSReference(const ArkTSTypeDesc& desc, const std::string& value, const std::string& indent,
+        bool nullablePosition)
+    {
+        ArkTSEmitted emitted;
+        if (!desc.reference || classRefs == nullptr) {
             return emitted;
         }
-        if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
-            // An ArkTS object reference: null and undefined are not instances,
-            // and the value must be an object before the wrapping constructor
-            // is called. The class is recorded by placeholder so the lowering
-            // walker can bind it without spelling its name here. An interface
-            // reference is constructed through its generated implementation
-            // class; a class reference through its wrapper constructor.
-            if (!desc.reference || classRefs == nullptr) {
+        Ptr<Decl> constructor = desc.reference;
+        if (IsArkTSPreparedInterface(*desc.reference)) {
+            if (!desc.referenceImpl) {
                 return emitted;
             }
-            Ptr<Decl> constructor = desc.reference;
-            if (IsArkTSPreparedInterface(*desc.reference)) {
-                if (!desc.referenceImpl) {
-                    return emitted;
+            constructor = desc.referenceImpl;
+        }
+        auto slot = Fresh("class");
+        (*classRefs)[slot] = constructor;
+        if (!nullablePosition) {
+            emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
+            emitted.pre += UndefinedGuard(value, ArkTSTypeDescName(desc), indent);
+        }
+        emitted.pre += KindGuard(value, "isObject", "an object", ArkTSTypeDescName(desc), indent);
+        emitted.expr = slot + "(" + value + ".asObject(), ())";
+        return emitted;
+    }
+
+    static std::string EnumThrowInline(const std::string& reason)
+    {
+        return std::string("throw ") + ARKTS_CONVERSION_EXCEPTION + "(\"" +
+            StringConvertor::RecoverForArkTSSource(reason) + "\")";
+    }
+
+    static void NoteEnumKindPredicate(std::vector<std::string>& kindPredicates, const std::string& predicate)
+    {
+        if (predicate.empty() || predicate == "true" || predicate == "false") {
+            return;
+        }
+        if (std::find(kindPredicates.begin(), kindPredicates.end(), predicate) == kindPredicates.end()) {
+            kindPredicates.push_back(predicate);
+        }
+    }
+
+    static std::string EnumScalarPayloadGuard(const std::string& scalar, const std::string& value,
+        std::vector<std::string>& kindPredicates)
+    {
+        if (scalar == "String") {
+            NoteEnumKindPredicate(kindPredicates, value + ".isString()");
+            return value + ".isString()";
+        }
+        if (scalar == "Bool") {
+            NoteEnumKindPredicate(kindPredicates, value + ".isBoolean()");
+            return value + ".isBoolean()";
+        }
+        if (scalar == "Int64" || scalar == "UInt64" || scalar == "BigInt") {
+            NoteEnumKindPredicate(kindPredicates, value + ".isBigInt()");
+            return value + ".isBigInt()";
+        }
+        if (scalar == "Unit") {
+            return "(" + value + ".isNull() || " + value + ".isUndefined())";
+        }
+        if (scalar == "Nothing") {
+            return "false";
+        }
+        NoteEnumKindPredicate(kindPredicates, value + ".isNumber()");
+        return value + ".isNumber()";
+    }
+
+    // A nested enum can be pre-checked only when every constructor agrees on
+    // the JS kind; a mixed union stays unroutable and is matched in declaration
+    // order.
+    static std::string EnumNestedEnumGuard(const ArkTSTypeDesc& payload, const std::string& value,
+        std::vector<std::string>& kindPredicates)
+    {
+        std::string common;
+        for (const auto& member : payload.enumMembers) {
+            std::string current;
+            if (member.kind == ArkTSEnumValueKind::NUMBER) {
+                current = value + ".isNumber()";
+            } else if (member.kind == ArkTSEnumValueKind::STRING) {
+                current = value + ".isString()";
+            } else if (member.kind == ArkTSEnumValueKind::BOOLEAN) {
+                current = value + ".isBoolean()";
+            } else if (member.kind == ArkTSEnumValueKind::PAYLOAD && !member.payload.empty()) {
+                current = EnumPayloadGuard(member.payload.front(), value, kindPredicates);
+            }
+            if (current.empty() || current == "true") {
+                return "true";
+            }
+            if (common.empty()) {
+                common = current;
+            } else if (common != current) {
+                return "true";
+            }
+        }
+        if (common.empty()) {
+            return "true";
+        }
+        NoteEnumKindPredicate(kindPredicates, common);
+        return common;
+    }
+
+    static std::string EnumPayloadGuard(const ArkTSTypeDesc& payload, const std::string& value,
+        std::vector<std::string>& kindPredicates)
+    {
+        switch (payload.kind) {
+            case ArkTSTypeDesc::Kind::SCALAR:
+                return EnumScalarPayloadGuard(payload.scalar, value, kindPredicates);
+            case ArkTSTypeDesc::Kind::REFERENCE:
+                NoteEnumKindPredicate(kindPredicates, value + ".isObject()");
+                return value + ".isObject()";
+            case ArkTSTypeDesc::Kind::ARRAY_COPY:
+            case ArkTSTypeDesc::Kind::TUPLE:
+                NoteEnumKindPredicate(kindPredicates, value + ".isArray()");
+                return value + ".isArray()";
+            case ArkTSTypeDesc::Kind::OPTIONAL: {
+                if (payload.elements.empty()) {
+                    return "true";
                 }
-                constructor = desc.referenceImpl;
+                const auto inner = EnumPayloadGuard(payload.elements.front(), value, kindPredicates);
+                if (inner == "true") {
+                    return "true";
+                }
+                return "(" + value + ".isNull() || " + value + ".isUndefined() || (" + inner + "))";
             }
-            auto slot = Fresh("class");
-            (*classRefs)[slot] = constructor;
-            if (!nullablePosition) {
-                emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
-                emitted.pre += UndefinedGuard(value, ArkTSTypeDescName(desc), indent);
+            case ArkTSTypeDesc::Kind::ENUM:
+                return EnumNestedEnumGuard(payload, value, kindPredicates);
+            default:
+                return "true";
+        }
+    }
+
+    static std::string EnumLiteralGuard(const ArkTSEnumMember& member, const std::string& value,
+        std::vector<std::string>& kindPredicates)
+    {
+        switch (member.kind) {
+            case ArkTSEnumValueKind::NUMBER:
+                NoteEnumKindPredicate(kindPredicates, value + ".isNumber()");
+                return value + ".isNumber() && " + value + ".toNumber() == Float64(" + member.value + ")";
+            case ArkTSEnumValueKind::STRING:
+                NoteEnumKindPredicate(kindPredicates, value + ".isString()");
+                return value + ".isString() && " + value + ".asString().toString() == \"" +
+                    ArkTSUserStringSpelling(member.value) + "\"";
+            case ArkTSEnumValueKind::BOOLEAN:
+                NoteEnumKindPredicate(kindPredicates, value + ".isBoolean()");
+                return value + ".isBoolean() && " + value + ".toBoolean() == " + member.value;
+            default:
+                return "";
+        }
+    }
+
+    static void NoteEnumKindLabel(std::string& kindList, const std::string& label)
+    {
+        if (kindList.find(label) != std::string::npos) {
+            return;
+        }
+        if (!kindList.empty()) {
+            kindList += ", ";
+        }
+        kindList += label;
+    }
+
+    static void AddEnumBranch(std::string& dispatch, bool& firstGuard, const std::string& indent,
+        const std::string& condition, const std::string& body)
+    {
+        dispatch += (firstGuard ? "if (" : " else if (") + condition + ") {\n" + body + indent + "}";
+        firstGuard = false;
+    }
+
+    // Append one PAYLOAD constructor branch. Returns false when the payload
+    // shadows every later constructor and the caller must stop the member loop.
+    bool AppendEnumPayloadBranch(const ArkTSEnumMember& member, const std::string& value, const std::string& indent,
+        const std::string& slot, std::vector<std::string>& kindPredicates, std::string& dispatch, bool& firstGuard,
+        bool& shadowed, std::string& kindList)
+    {
+        if (member.payload.empty()) {
+            return true;
+        }
+        const auto guard = EnumPayloadGuard(member.payload.front(), value, kindPredicates);
+        auto inner = FromJS(member.payload.front(), value, indent + "    ");
+        std::string body = inner.pre + indent + "    " + slot + "." + member.name + "(" + inner.expr + ")\n";
+        if (guard == "true") {
+            // An unroutable payload catches every remaining value; later
+            // constructors are shadowed by declaration order.
+            if (firstGuard) {
+                // The body may carry guard/conversion statements, so it needs a
+                // block expression rather than a parenthesized statement list.
+                dispatch = "{\n" + body + indent + "}";
+            } else {
+                dispatch += " else {\n" + body + indent + "})";
             }
-            emitted.pre += KindGuard(value, "isObject", "an object", ArkTSTypeDescName(desc), indent);
-            emitted.expr = slot + "(" + value + ".asObject(), ())";
+            shadowed = true;
+            return false;
+        }
+        AddEnumBranch(dispatch, firstGuard, indent, guard, body);
+        NoteEnumKindLabel(kindList, "payload");
+        return true;
+    }
+
+    // Close the dispatch with the invalid-value and mismatch fallbacks; a
+    // shadowing payload or an empty dispatch keeps it as assembled.
+    static std::string FinishEnumDispatch(std::string dispatch, const std::vector<std::string>& kindPredicates,
+        const std::string& kindList, const std::string& name, const std::string& indent, bool shadowed,
+        bool firstGuard)
+    {
+        if (shadowed || firstGuard) {
+            return dispatch;
+        }
+        std::string predicate;
+        for (const auto& one : kindPredicates) {
+            if (!predicate.empty()) {
+                predicate += " || ";
+            }
+            predicate += one;
+        }
+        if (!predicate.empty()) {
+            // A value of a constructible kind that matched no constructor is
+            // invalid; any other kind is a mismatch.
+            dispatch += " else if (" + predicate + ") {\n" + indent + "    " +
+                EnumThrowInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + "\n" + indent + "}";
+        }
+        dispatch += " else {\n" + indent + "    " +
+            EnumThrowInline(std::string(ARKTS_MISMATCH) + "not a " + kindList + " for " + name) + "\n" + indent + "})";
+        return dispatch;
+    }
+
+    // From-JS enum conversion: a numeric member matches the JS number exactly
+    // against Float64(value), a string member matches the JS string exactly
+    // against the value. The first member whose value matches wins, so a
+    // duplicate value maps to the earliest constructor; an unmatched value
+    // throws the mismatch exception named with the enum.
+    ArkTSEmitted FromJSEnum(const ArkTSTypeDesc& desc, const std::string& value, const std::string& indent,
+        bool nullablePosition)
+    {
+        ArkTSEmitted emitted;
+        if (desc.reference == nullptr || classRefs == nullptr || desc.enumMembers.empty()) {
             return emitted;
         }
-        if (desc.kind == ArkTSTypeDesc::Kind::ENUM) {
-            // From-JS enum conversion: a numeric member matches the JS number
-            // exactly against Float64(value), a string member matches the JS
-            // string exactly against the value. The first member whose value
-            // matches wins, so a duplicate value maps to the earliest
-            // constructor; an unmatched value throws the mismatch exception
-            // named with the enum.
-            if (desc.reference == nullptr || classRefs == nullptr || desc.enumMembers.empty()) {
-                return emitted;
-            }
-            auto slot = Fresh("enum");
-            (*classRefs)[slot] = desc.reference;
-            const auto name = ArkTSTypeDescName(desc);
-            if (!nullablePosition) {
-                emitted.pre += NullGuard(value, name, indent);
-            }
-            auto throwInline = [](const std::string& reason) {
-                return std::string("throw ") + ARKTS_CONVERSION_EXCEPTION + "(\"" +
-                    StringConvertor::RecoverForArkTSSource(reason) + "\")";
-            };
-            // Runtime matching follows design §7.2: constructors are tried in
-            // declaration order, a literal matches by value and a payload by
-            // its mapped type, and the first match wins. A literal that does
-            // not match must fall through to later constructors of the same
-            // kind; throwing inside the literal branch would make a same-kind
-            // payload unreachable.
-            std::vector<std::string> kindPredicates;
-            auto noteKind = [&kindPredicates](const std::string& predicate) {
-                if (predicate.empty() || predicate == "true" || predicate == "false") {
-                    return;
-                }
-                if (std::find(kindPredicates.begin(), kindPredicates.end(), predicate) == kindPredicates.end()) {
-                    kindPredicates.push_back(predicate);
-                }
-            };
-            std::function<std::string(const ArkTSTypeDesc&)> payloadGuard =
-                [&](const ArkTSTypeDesc& payload) -> std::string {
-                switch (payload.kind) {
-                    case ArkTSTypeDesc::Kind::SCALAR:
-                        if (payload.scalar == "String") {
-                            noteKind(value + ".isString()");
-                            return value + ".isString()";
-                        }
-                        if (payload.scalar == "Bool") {
-                            noteKind(value + ".isBoolean()");
-                            return value + ".isBoolean()";
-                        }
-                        if (payload.scalar == "Int64" || payload.scalar == "UInt64" || payload.scalar == "BigInt") {
-                            noteKind(value + ".isBigInt()");
-                            return value + ".isBigInt()";
-                        }
-                        if (payload.scalar == "Unit") {
-                            return "(" + value + ".isNull() || " + value + ".isUndefined())";
-                        }
-                        if (payload.scalar == "Nothing") {
-                            return "false";
-                        }
-                        noteKind(value + ".isNumber()");
-                        return value + ".isNumber()";
-                    case ArkTSTypeDesc::Kind::REFERENCE:
-                        noteKind(value + ".isObject()");
-                        return value + ".isObject()";
-                    case ArkTSTypeDesc::Kind::ARRAY_COPY:
-                    case ArkTSTypeDesc::Kind::TUPLE:
-                        noteKind(value + ".isArray()");
-                        return value + ".isArray()";
-                    case ArkTSTypeDesc::Kind::OPTIONAL: {
-                        if (payload.elements.empty()) {
-                            return "true";
-                        }
-                        const auto inner = payloadGuard(payload.elements.front());
-                        if (inner == "true") {
-                            return "true";
-                        }
-                        return "(" + value + ".isNull() || " + value + ".isUndefined() || (" + inner + "))";
-                    }
-                    case ArkTSTypeDesc::Kind::ENUM: {
-                        // A nested enum can be pre-checked only when every
-                        // constructor agrees on the JS kind; a mixed union
-                        // stays unroutable and is matched in declaration order.
-                        std::string common;
-                        for (const auto& member : payload.enumMembers) {
-                            std::string current;
-                            if (member.kind == ArkTSEnumValueKind::NUMBER) {
-                                current = value + ".isNumber()";
-                            } else if (member.kind == ArkTSEnumValueKind::STRING) {
-                                current = value + ".isString()";
-                            } else if (member.kind == ArkTSEnumValueKind::BOOLEAN) {
-                                current = value + ".isBoolean()";
-                            } else if (member.kind == ArkTSEnumValueKind::PAYLOAD && !member.payload.empty()) {
-                                current = payloadGuard(member.payload.front());
-                            }
-                            if (current.empty() || current == "true") {
-                                return "true";
-                            }
-                            if (common.empty()) {
-                                common = current;
-                            } else if (common != current) {
-                                return "true";
-                            }
-                        }
-                        if (common.empty()) {
-                            return "true";
-                        }
-                        noteKind(common);
-                        return common;
-                    }
-                    default:
-                        return "true";
-                }
-            };
-            auto literalGuard = [&](const ArkTSEnumMember& member) -> std::string {
-                switch (member.kind) {
-                    case ArkTSEnumValueKind::NUMBER:
-                        noteKind(value + ".isNumber()");
-                        return value + ".isNumber() && " + value + ".toNumber() == Float64(" + member.value + ")";
-                    case ArkTSEnumValueKind::STRING:
-                        noteKind(value + ".isString()");
-                        return value + ".isString() && " + value + ".asString().toString() == \"" +
-                            ArkTSUserStringSpelling(member.value) + "\"";
-                    case ArkTSEnumValueKind::BOOLEAN:
-                        noteKind(value + ".isBoolean()");
-                        return value + ".isBoolean() && " + value + ".toBoolean() == " + member.value;
-                    default:
-                        return "";
-                }
-            };
-            std::string dispatch = "(";
-            bool firstGuard = true;
-            bool shadowed = false;
-            std::string kindList;
-            auto noteLabel = [&kindList](const std::string& label) {
-                if (kindList.find(label) != std::string::npos) {
-                    return;
-                }
-                if (!kindList.empty()) {
-                    kindList += ", ";
-                }
-                kindList += label;
-            };
-            auto addBranch = [&](const std::string& condition, const std::string& body) {
-                dispatch += (firstGuard ? "if (" : " else if (") + condition + ") {\n" + body + indent + "}";
-                firstGuard = false;
-            };
-            for (const auto& member : desc.enumMembers) {
-                if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
-                    if (member.payload.empty()) {
-                        continue;
-                    }
-                    const auto guard = payloadGuard(member.payload.front());
-                    auto inner = FromJS(member.payload.front(), value, indent + "    ");
-                    std::string body =
-                        inner.pre + indent + "    " + slot + "." + member.name + "(" + inner.expr + ")\n";
-                    if (guard == "true") {
-                        // An unroutable payload catches every remaining value;
-                        // later constructors are shadowed by declaration order.
-                        if (firstGuard) {
-                            // The body may carry guard/conversion statements,
-                            // so it needs a block expression rather than a
-                            // parenthesized statement list.
-                            dispatch = "{\n" + body + indent + "}";
-                        } else {
-                            dispatch += " else {\n" + body + indent + "})";
-                        }
-                        shadowed = true;
-                        break;
-                    }
-                    addBranch(guard, body);
-                    noteLabel("payload");
-                } else {
-                    const auto guard = literalGuard(member);
-                    if (guard.empty()) {
-                        continue;
-                    }
-                    addBranch(guard, indent + "    " + slot + "." + member.name + "\n");
-                    noteLabel(member.kind == ArkTSEnumValueKind::NUMBER   ? "number"
-                        : member.kind == ArkTSEnumValueKind::STRING      ? "string"
-                                                                         : "boolean");
-                }
-            }
-            if (!shadowed && !firstGuard) {
-                std::string predicate;
-                for (const auto& one : kindPredicates) {
-                    if (!predicate.empty()) {
-                        predicate += " || ";
-                    }
-                    predicate += one;
-                }
-                if (!predicate.empty()) {
-                    // A value of a constructible kind that matched no
-                    // constructor is invalid; any other kind is a mismatch.
-                    dispatch += " else if (" + predicate + ") {\n" + indent + "    " +
-                        throwInline(std::string(ARKTS_INVALID) + "unknown value for " + name) + "\n" + indent + "}";
-                }
-                dispatch += " else {\n" + indent + "    " +
-                    throwInline(std::string(ARKTS_MISMATCH) + "not a " + kindList + " for " + name) + "\n" + indent +
-                    "})";
-            }
-            emitted.expr = dispatch;
-            return emitted;
+        auto slot = Fresh("enum");
+        (*classRefs)[slot] = desc.reference;
+        const auto name = ArkTSTypeDescName(desc);
+        if (!nullablePosition) {
+            emitted.pre += NullGuard(value, name, indent);
         }
-        if (desc.kind == ArkTSTypeDesc::Kind::ARRAY_COPY) {
-            auto length = Fresh("length");
-            auto copy = Fresh("copy");
-            auto index = Fresh("index");
+        // Runtime matching follows design §7.2: constructors are tried in
+        // declaration order, a literal matches by value and a payload by its
+        // mapped type, and the first match wins. A literal that does not match
+        // must fall through to later constructors of the same kind; throwing
+        // inside the literal branch would make a same-kind payload unreachable.
+        std::vector<std::string> kindPredicates;
+        std::string dispatch = "(";
+        bool firstGuard = true;
+        bool shadowed = false;
+        std::string kindList;
+        for (const auto& member : desc.enumMembers) {
+            if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
+                if (!AppendEnumPayloadBranch(member, value, indent, slot, kindPredicates, dispatch, firstGuard,
+                        shadowed, kindList)) {
+                    break;
+                }
+                continue;
+            }
+            const auto guard = EnumLiteralGuard(member, value, kindPredicates);
+            if (guard.empty()) {
+                continue;
+            }
+            AddEnumBranch(dispatch, firstGuard, indent, guard, indent + "    " + slot + "." + member.name + "\n");
+            const std::string label = member.kind == ArkTSEnumValueKind::NUMBER ? "number"
+                : member.kind == ArkTSEnumValueKind::STRING                      ? "string"
+                                                                                : "boolean";
+            NoteEnumKindLabel(kindList, label);
+        }
+        emitted.expr = FinishEnumDispatch(dispatch, kindPredicates, kindList, name, indent, shadowed, firstGuard);
+        return emitted;
+    }
+
+    ArkTSEmitted FromJSArrayCopy(const ArkTSTypeDesc& desc, const std::string& value, const std::string& indent,
+        bool nullablePosition)
+    {
+        ArkTSEmitted emitted;
+        auto length = Fresh("length");
+        auto copy = Fresh("copy");
+        auto index = Fresh("index");
+        auto item = Fresh("item");
+        auto inner = FromJS(desc.elements.front(), item, indent + "    ");
+        if (!nullablePosition) {
+            emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
+        }
+        emitted.pre += KindGuard(value, "isArray", "an array", ArkTSTypeDescName(desc), indent);
+        emitted.pre += indent + "let " + length + " = " + value + ".asArray().size\n";
+        // Reference elements keep an explicit type argument so the initializer
+        // lambda stays inferable, but the argument is a placeholder bound by
+        // the lowering walker: no class name is spliced into generated syntax.
+        auto elementType = "<" + TypeName(desc.elements.front()) + ">";
+        emitted.pre += indent + "let " + copy + " = Array" + elementType + "(" + length + ", { " + index +
+            " =>\n" + indent + "    let " + item + " = " + value + ".getElement(" + index + ")\n" + inner.pre +
+            indent + "    " + inner.expr + "\n" + indent + "})\n";
+        emitted.expr = copy;
+        return emitted;
+    }
+
+    ArkTSEmitted FromJSTuple(const ArkTSTypeDesc& desc, const std::string& value, const std::string& indent,
+        bool nullablePosition)
+    {
+        ArkTSEmitted emitted;
+        if (!nullablePosition) {
+            emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
+        }
+        emitted.pre += KindGuard(value, "isArray", "an array", ArkTSTypeDescName(desc), indent);
+        auto length = Fresh("length");
+        emitted.pre += indent + "let " + length + " = " + value + ".asArray().size\n";
+        emitted.pre += indent + "if (" + length + " != " + std::to_string(desc.elements.size()) + ") {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_MISMATCH) + "not a " + std::to_string(desc.elements.size()) +
+                "-element array for " + ArkTSTypeDescName(desc), indent + "    ") +
+            indent + "}\n";
+        std::vector<std::string> converted;
+        for (size_t i = 0; i < desc.elements.size(); ++i) {
+            // Read each element exactly once through getElement, then let the
+            // recursive conversion guard and convert the local. The part local
+            // of an Option element is annotated: its if expression ends in
+            // Option.None, whose type argument cannot be inferred in a plain
+            // let binding without the annotation. Reference types in that
+            // annotation are placeholders bound by the lowering walker.
             auto item = Fresh("item");
-            auto inner = FromJS(desc.elements.front(), item, indent + "    ");
-            if (!nullablePosition) {
-                emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
-            }
-            emitted.pre += KindGuard(value, "isArray", "an array", ArkTSTypeDescName(desc), indent);
-            emitted.pre += indent + "let " + length + " = " + value + ".asArray().size\n";
-            // Reference elements keep an explicit type argument so the
-            // initializer lambda stays inferable, but the argument is a
-            // placeholder bound by the lowering walker: no class name is
-            // spliced into generated syntax.
-            auto elementType = "<" + TypeName(desc.elements.front()) + ">";
-            emitted.pre += indent + "let " + copy + " = Array" + elementType + "(" + length + ", { " + index +
-                " =>\n" + indent + "    let " + item + " = " + value + ".getElement(" + index + ")\n" + inner.pre +
-                indent + "    " + inner.expr + "\n" + indent + "})\n";
-            emitted.expr = copy;
-            return emitted;
+            emitted.pre += indent + "let " + item + " = " + value + ".getElement(" + std::to_string(i) + ")\n";
+            auto part = Fresh("part");
+            auto inner = FromJS(desc.elements[i], item, indent);
+            emitted.pre += inner.pre;
+            emitted.pre += indent + "let " + part +
+                (desc.elements[i].kind == ArkTSTypeDesc::Kind::OPTIONAL ? ": " + TypeName(desc.elements[i]) : "") +
+                " = " + inner.expr + "\n";
+            converted.emplace_back(std::move(part));
         }
-        if (desc.kind == ArkTSTypeDesc::Kind::TUPLE) {
-            if (!nullablePosition) {
-                emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
-            }
-            emitted.pre += KindGuard(value, "isArray", "an array", ArkTSTypeDescName(desc), indent);
-            auto length = Fresh("length");
-            emitted.pre += indent + "let " + length + " = " + value + ".asArray().size\n";
-            emitted.pre += indent + "if (" + length + " != " + std::to_string(desc.elements.size()) + ") {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_MISMATCH) + "not a " + std::to_string(desc.elements.size()) +
-                    "-element array for " + ArkTSTypeDescName(desc), indent + "    ") +
-                indent + "}\n";
-            std::vector<std::string> converted;
-            for (size_t i = 0; i < desc.elements.size(); ++i) {
-                // Read each element exactly once through getElement, then let
-                // the recursive conversion guard and convert the local. The
-                // part local of an Option element is annotated: its if
-                // expression ends in Option.None, whose type argument cannot
-                // be inferred in a plain let binding without the annotation.
-                // Reference types in that annotation are placeholders bound by
-                // the lowering walker.
-                auto item = Fresh("item");
-                emitted.pre += indent + "let " + item + " = " + value + ".getElement(" +
-                    std::to_string(i) + ")\n";
-                auto part = Fresh("part");
-                auto inner = FromJS(desc.elements[i], item, indent);
-                emitted.pre += inner.pre;
-                emitted.pre += indent + "let " + part +
-                    (desc.elements[i].kind == ArkTSTypeDesc::Kind::OPTIONAL
-                            ? ": " + TypeName(desc.elements[i])
-                            : "") +
-                    " = " + inner.expr + "\n";
-                converted.emplace_back(std::move(part));
-            }
-            emitted.expr = "(" + ArkTSJoin(converted, ", ") + ")";
-            return emitted;
-        }
+        emitted.expr = "(" + ArkTSJoin(converted, ", ") + ")";
         return emitted;
     }
 
@@ -1593,145 +1733,25 @@ struct ArkTSValueEmitter {
     ArkTSEmitted ScalarFromJS(const std::string& type, const std::string& value, const std::string& indent,
         bool nullablePosition = false)
     {
-        ArkTSEmitted emitted;
         std::string lower;
         std::string upper;
         if (ArkTSNarrowBounds(type, lower, upper)) {
-            auto number = Fresh("num");
-            if (!nullablePosition) {
-                emitted.pre += NullGuard(value, type, indent);
-            }
-            emitted.pre += KindGuard(value, "isNumber", "a number", type, indent);
-            emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
-            emitted.pre += indent + "if (" + number + " - " + number + " != 0.0) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a finite number for " + type,
-                    indent + "    ") +
-                indent + "}\n";
-            emitted.pre += indent + "if (" + number + " < " + lower + " || " + number + " > " + upper + ") {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "out of " + type + " range", indent + "    ",
-                    number + ".toString()") +
-                indent + "}\n";
-            emitted.pre += indent + "if (" + number + " != Float64(Int64(" + number + "))) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not an integer for " + type, indent + "    ") +
-                indent + "}\n";
-            emitted.expr = type + "(" + number + ")";
-            return emitted;
+            return ScalarFromJSNarrow(type, value, indent, nullablePosition, lower, upper);
         }
         if (type == "Rune") {
-            auto number = Fresh("num");
-            if (!nullablePosition) {
-                emitted.pre += NullGuard(value, type, indent);
-            }
-            emitted.pre += KindGuard(value, "isNumber", "a number", type, indent);
-            emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
-            emitted.pre += indent + "if (" + number + " - " + number + " != 0.0) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a finite number for Rune", indent + "    ") +
-                indent + "}\n";
-            emitted.pre += indent + "if (" + number + " < 0.0 || " + number + " > 1114111.0) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a Unicode scalar value for Rune",
-                    indent + "    ") +
-                indent + "}\n";
-            emitted.pre += indent + "if (" + number + " != Float64(Int64(" + number + "))) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not an integer for Rune", indent + "    ") +
-                indent + "}\n";
-            emitted.pre += indent + "if (" + number + " >= 55296.0 && " + number + " <= 57343.0) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "surrogate code point for Rune",
-                    indent + "    ") +
-                indent + "}\n";
-            emitted.expr = "Rune(UInt32(" + number + "))";
-            return emitted;
+            return ScalarFromJSRune(type, value, indent, nullablePosition);
         }
         if (type == "Int64" || type == "UInt64" || type == "BigInt") {
-            if (!nullablePosition) {
-                emitted.pre += NullGuard(value, type, indent);
-            }
-            emitted.pre += KindGuard(value, "isBigInt", "a bigint", type, indent);
-            if (type == "BigInt") {
-                emitted.expr = value + ".asBigInt().toBigInt()";
-                return emitted;
-            }
-            auto big = Fresh("big");
-            emitted.pre += indent + "let " + big + " = " + value + ".asBigInt().toBigInt()\n";
-            if (type == "Int64") {
-                emitted.pre += indent + "if (" + big + " < BigInt(Int64(-9223372036854775808))) {\n" +
-                    ArkTSConversionThrow(std::string(ARKTS_INVALID) + "below Int64 range", indent + "    ",
-                    big + ".toString()") +
-                    indent + "}\n";
-                emitted.pre += indent + "if (" + big + " > BigInt(Int64(9223372036854775807))) {\n" +
-                    ArkTSConversionThrow(std::string(ARKTS_INVALID) + "above Int64 range", indent + "    ",
-                    big + ".toString()") +
-                    indent + "}\n";
-                emitted.expr = big + ".toInt64()";
-                return emitted;
-            }
-            emitted.pre += indent + "if (" + big + " < BigInt(Int64(0))) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "negative BigInt for UInt64", indent + "    ",
-                    big + ".toString()") +
-                indent + "}\n";
-            emitted.pre += indent + "if (" + big + " > BigInt(UInt64(18446744073709551615u64))) {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "above UInt64 range", indent + "    ",
-                    big + ".toString()") + indent +
-                "}\n";
-            emitted.expr = big + ".toUInt64()";
-            return emitted;
+            return ScalarFromJSBigInt(type, value, indent, nullablePosition);
         }
         if (type == "String" || type == "Bool" || type == "Float16" || type == "Float32" || type == "Float64") {
-            if (!nullablePosition) {
-                emitted.pre += NullGuard(value, type, indent);
-            }
-            if (type == "String") {
-                emitted.pre += KindGuard(value, "isString", "a string", type, indent);
-                emitted.expr = value + ".asString().toString()";
-            } else if (type == "Bool") {
-                emitted.pre += KindGuard(value, "isBoolean", "a boolean", type, indent);
-                emitted.expr = value + ".toBoolean()";
-            } else if (ArkTSFloatBounds(type, lower, upper)) {
-                // Behind the isNumber guard, only a finite value beyond the
-                // exact Float64 image of the target's largest finite value
-                // is rejected: the narrowing constructor would otherwise
-                // turn it into an infinity silently. NaN, +/-Infinity and
-                // negative zero are values the target type represents, so
-                // they convert as-is; in-range values convert at the target
-                // precision and may lose precision (no integrality check).
-                emitted.pre += KindGuard(value, "isNumber", "a number", type, indent);
-                auto number = Fresh("num");
-                emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
-                // The finite test is what exempts the specials: "n - n" is
-                // zero exactly for finite n, so NaN and +/-Infinity skip the
-                // range rejection while a finite overflow still throws.
-                emitted.pre += indent + "if ((" + number + " - " + number + ") == 0.0 && (" + number + " < " + lower +
-                    " || " + number + " > " + upper + ")) {\n" +
-                    ArkTSConversionThrow(std::string(ARKTS_INVALID) + "out of " + type + " range", indent + "    ") +
-                    indent + "}\n";
-                emitted.expr = type + "(" + number + ")";
-            } else {
-                // Float64 - the only row left in this branch - is the
-                // full-range number carrier (number -> Float64 converts
-                // directly with no precision loss), so NaN and infinities
-                // are legal number values and toNumber() passes them
-                // through; the absence of the finite/range checks here is
-                // an intentional difference from the Float16/Float32 and
-                // narrow-int rows above.
-                emitted.pre += KindGuard(value, "isNumber", "a number", type, indent);
-                emitted.expr = value + ".toNumber()";
-            }
-            return emitted;
+            return ScalarFromJSStringOrFloat(type, value, indent, nullablePosition);
         }
         if (type == "Unit") {
-            // Unit from-JS pseudocode: JS null and JS undefined both satisfy
-            // Unit, checked through the isNull()/isUndefined() predicates;
-            // every other value is a kind mismatch.
-            emitted.expr = "(if (" + value + ".isNull() || " + value + ".isUndefined()) {\n" + indent +
-                "    ()\n" + indent + "} else {\n" +
-                ArkTSConversionThrow(std::string(ARKTS_MISMATCH) + "not null or undefined for Unit", indent + "    ") +
-                indent + "})";
-            return emitted;
+            return ScalarFromJSUnit(value, indent);
         }
         if (type == "Nothing") {
-            // A never-typed element can never produce a value; reaching it is
-            // the same contract violation as a never-typed result.
-            emitted.expr = std::string("throw ") + ARKTS_NEVER_EXCEPTION + "(\"" + ARKTS_NEVER_MESSAGE + "\")";
-            return emitted;
+            return ScalarFromJSNothing();
         }
         // Default row of the table. Every name in ArkTSScalarWhitelist has a
         // conversion row above, so an empty expression here would emit
@@ -1743,6 +1763,163 @@ struct ArkTSValueEmitter {
         // build. A missing conversion row is an internal error, never a
         // recoverable user error.
         std::abort(); // checked scalar missing a from-JS conversion row: add it to ScalarFromJS
+        return {};
+    }
+
+    ArkTSEmitted ScalarFromJSNarrow(const std::string& type, const std::string& value, const std::string& indent,
+        bool nullablePosition, const std::string& lower, const std::string& upper)
+    {
+        ArkTSEmitted emitted;
+        auto number = Fresh("num");
+        if (!nullablePosition) {
+            emitted.pre += NullGuard(value, type, indent);
+        }
+        emitted.pre += KindGuard(value, "isNumber", "a number", type, indent);
+        emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
+        emitted.pre += indent + "if (" + number + " - " + number + " != 0.0) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a finite number for " + type, indent + "    ") +
+            indent + "}\n";
+        emitted.pre += indent + "if (" + number + " < " + lower + " || " + number + " > " + upper + ") {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "out of " + type + " range", indent + "    ",
+                number + ".toString()") +
+            indent + "}\n";
+        emitted.pre += indent + "if (" + number + " != Float64(Int64(" + number + "))) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not an integer for " + type, indent + "    ") +
+            indent + "}\n";
+        emitted.expr = type + "(" + number + ")";
+        return emitted;
+    }
+
+    ArkTSEmitted ScalarFromJSRune(const std::string& type, const std::string& value, const std::string& indent,
+        bool nullablePosition)
+    {
+        ArkTSEmitted emitted;
+        auto number = Fresh("num");
+        if (!nullablePosition) {
+            emitted.pre += NullGuard(value, type, indent);
+        }
+        emitted.pre += KindGuard(value, "isNumber", "a number", type, indent);
+        emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
+        emitted.pre += indent + "if (" + number + " - " + number + " != 0.0) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a finite number for Rune", indent + "    ") +
+            indent + "}\n";
+        emitted.pre += indent + "if (" + number + " < 0.0 || " + number + " > 1114111.0) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a Unicode scalar value for Rune", indent + "    ") +
+            indent + "}\n";
+        emitted.pre += indent + "if (" + number + " != Float64(Int64(" + number + "))) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not an integer for Rune", indent + "    ") +
+            indent + "}\n";
+        emitted.pre += indent + "if (" + number + " >= 55296.0 && " + number + " <= 57343.0) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "surrogate code point for Rune", indent + "    ") +
+            indent + "}\n";
+        emitted.expr = "Rune(UInt32(" + number + "))";
+        return emitted;
+    }
+
+    ArkTSEmitted ScalarFromJSBigInt(const std::string& type, const std::string& value, const std::string& indent,
+        bool nullablePosition)
+    {
+        ArkTSEmitted emitted;
+        if (!nullablePosition) {
+            emitted.pre += NullGuard(value, type, indent);
+        }
+        emitted.pre += KindGuard(value, "isBigInt", "a bigint", type, indent);
+        if (type == "BigInt") {
+            emitted.expr = value + ".asBigInt().toBigInt()";
+            return emitted;
+        }
+        auto big = Fresh("big");
+        emitted.pre += indent + "let " + big + " = " + value + ".asBigInt().toBigInt()\n";
+        if (type == "Int64") {
+            emitted.pre += indent + "if (" + big + " < BigInt(Int64(-9223372036854775808))) {\n" +
+                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "below Int64 range", indent + "    ",
+                    big + ".toString()") +
+                indent + "}\n";
+            emitted.pre += indent + "if (" + big + " > BigInt(Int64(9223372036854775807))) {\n" +
+                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "above Int64 range", indent + "    ",
+                    big + ".toString()") +
+                indent + "}\n";
+            emitted.expr = big + ".toInt64()";
+            return emitted;
+        }
+        emitted.pre += indent + "if (" + big + " < BigInt(Int64(0))) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "negative BigInt for UInt64", indent + "    ",
+                big + ".toString()") +
+            indent + "}\n";
+        emitted.pre += indent + "if (" + big + " > BigInt(UInt64(18446744073709551615u64))) {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "above UInt64 range", indent + "    ",
+                big + ".toString()") + indent +
+            "}\n";
+        emitted.expr = big + ".toUInt64()";
+        return emitted;
+    }
+
+    ArkTSEmitted ScalarFromJSStringOrFloat(const std::string& type, const std::string& value,
+        const std::string& indent, bool nullablePosition)
+    {
+        ArkTSEmitted emitted;
+        std::string lower;
+        std::string upper;
+        if (!nullablePosition) {
+            emitted.pre += NullGuard(value, type, indent);
+        }
+        if (type == "String") {
+            emitted.pre += KindGuard(value, "isString", "a string", type, indent);
+            emitted.expr = value + ".asString().toString()";
+        } else if (type == "Bool") {
+            emitted.pre += KindGuard(value, "isBoolean", "a boolean", type, indent);
+            emitted.expr = value + ".toBoolean()";
+        } else if (ArkTSFloatBounds(type, lower, upper)) {
+            // Behind the isNumber guard, only a finite value beyond the exact
+            // Float64 image of the target's largest finite value is rejected:
+            // the narrowing constructor would otherwise turn it into an
+            // infinity silently. NaN, +/-Infinity and negative zero are values
+            // the target type represents, so they convert as-is; in-range
+            // values convert at the target precision and may lose precision
+            // (no integrality check).
+            emitted.pre += KindGuard(value, "isNumber", "a number", type, indent);
+            auto number = Fresh("num");
+            emitted.pre += indent + "let " + number + " = " + value + ".toNumber()\n";
+            // The finite test is what exempts the specials: "n - n" is zero
+            // exactly for finite n, so NaN and +/-Infinity skip the range
+            // rejection while a finite overflow still throws.
+            emitted.pre += indent + "if ((" + number + " - " + number + ") == 0.0 && (" + number + " < " + lower +
+                " || " + number + " > " + upper + ")) {\n" +
+                ArkTSConversionThrow(std::string(ARKTS_INVALID) + "out of " + type + " range", indent + "    ") +
+                indent + "}\n";
+            emitted.expr = type + "(" + number + ")";
+        } else {
+            // Float64 - the only row left in this branch - is the full-range
+            // number carrier (number -> Float64 converts directly with no
+            // precision loss), so NaN and infinities are legal number values
+            // and toNumber() passes them through; the absence of the
+            // finite/range checks here is an intentional difference from the
+            // Float16/Float32 and narrow-int rows above.
+            emitted.pre += KindGuard(value, "isNumber", "a number", type, indent);
+            emitted.expr = value + ".toNumber()";
+        }
+        return emitted;
+    }
+
+    // Unit from-JS pseudocode: JS null and JS undefined both satisfy Unit,
+    // checked through the isNull()/isUndefined() predicates; every other value
+    // is a kind mismatch.
+    ArkTSEmitted ScalarFromJSUnit(const std::string& value, const std::string& indent)
+    {
+        ArkTSEmitted emitted;
+        emitted.expr = "(if (" + value + ".isNull() || " + value + ".isUndefined()) {\n" + indent +
+            "    ()\n" + indent + "} else {\n" +
+            ArkTSConversionThrow(std::string(ARKTS_MISMATCH) + "not null or undefined for Unit", indent + "    ") +
+            indent + "})";
+        return emitted;
+    }
+
+    // A never-typed element can never produce a value; reaching it is the same
+    // contract violation as a never-typed result.
+    ArkTSEmitted ScalarFromJSNothing()
+    {
+        ArkTSEmitted emitted;
+        emitted.expr = std::string("throw ") + ARKTS_NEVER_EXCEPTION + "(\"" + ARKTS_NEVER_MESSAGE + "\")";
         return emitted;
     }
 };
@@ -1760,7 +1937,7 @@ std::string ArkTSForeignLocalPrefix(const std::vector<Ptr<FuncParam>>& params)
     const std::string base = ARKTS_GENERATED_PREFIX;
     auto prefix = base;
     size_t suffix = 0;
-    auto conflicts = [&](Ptr<FuncParam> param) {
+    auto conflicts = [&prefix](Ptr<FuncParam> param) {
         return param->identifier.Val().compare(0, prefix.size(), prefix) == 0;
     };
     while (std::any_of(params.begin(), params.end(), conflicts)) {
@@ -1815,6 +1992,66 @@ std::string ArkTSOptionalCallArray(ArkTSValueEmitter& emitter, const std::vector
     code += "        }\n    })\n";
     return callArgs;
 }
+
+// Defined below; the function wrapper shares the same rest call-array shape
+// and converted-argument locals with the class member generators.
+std::string ArkTSRestCallArray(ArkTSValueEmitter& emitter, const ArkTSTypeDesc& element, size_t restIndex,
+    const std::vector<std::string>& fixed, const std::string& prefix, std::string& code);
+std::vector<std::string> ArkTSArgumentSource(ArkTSValueEmitter& emitter, const std::vector<ArkTSTypeDesc>& types,
+    size_t count, std::string& code);
+
+// Signature gate of the wrapper. A REFERENCE position is emitted as a
+// placeholder that the lowering walker binds through classRefs. Without the
+// map the emitter cannot produce a complete value and would leave malformed
+// syntax behind (for example a bare `return ;`, `Array<>` or `let x = `), so
+// refuse the whole wrapper; the empty string routes to the existing
+// unsupported-signature diagnostic instead.
+bool ArkTSWrapperSignatureSupported(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
+    size_t restIndex, std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs)
+{
+    const bool rest = restIndex != ARKTS_NO_REST;
+    if (rest && (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
+        return false;
+    }
+    for (const auto& type : types) {
+        if (!ArkTSTypeDescGeneratable(type) || ArkTSTypeDescContainsNothing(type)) {
+            return false;
+        }
+    }
+    if (!ArkTSTypeDescGeneratable(resultType)) {
+        return false;
+    }
+    if (classRefs != nullptr) {
+        return true;
+    }
+    bool needsClassBinding = ArkTSTypeDescContainsReference(resultType);
+    for (const auto& type : types) {
+        needsClassBinding = needsClassBinding || ArkTSTypeDescContainsReference(type);
+    }
+    return !needsClassBinding;
+}
+
+// Select and emit the call array: the optional run is derived first (the
+// generator-only entry point), then the rest, optional and plain forms are
+// tried in that order.
+std::string ArkTSWrapperCallArray(ArkTSValueEmitter& emitter, const std::vector<ArkTSTypeDesc>& types,
+    const std::vector<std::string>& args, size_t restIndex, size_t optionalStart, const std::string& ctx,
+    const std::string& prefix, std::string& code)
+{
+    if (optionalStart == ARKTS_DERIVE_OPTIONAL) {
+        optionalStart = types.size();
+        while (optionalStart > 0 && types[optionalStart - 1].kind == ArkTSTypeDesc::Kind::OPTIONAL) {
+            --optionalStart;
+        }
+    }
+    if (restIndex != ARKTS_NO_REST) {
+        return ArkTSRestCallArray(emitter, types[restIndex].elements.front(), restIndex, args, prefix, code);
+    }
+    if (optionalStart < types.size()) {
+        return ArkTSOptionalCallArray(emitter, types, optionalStart, args, ctx, code);
+    }
+    return args.empty() ? "Array<JSValue>()" : "[" + ArkTSJoin(args, ", ") + "]";
+}
 } // namespace
 
 // Emits the wrapper body of a checked synchronous foreign declaration; the
@@ -1833,32 +2070,8 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver,
     size_t optionalStart, std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs)
 {
-    const bool rest = restIndex != ARKTS_NO_REST;
-    if (rest && (restIndex + 1 != types.size() || types[restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY)) {
+    if (!ArkTSWrapperSignatureSupported(types, resultType, restIndex, classRefs)) {
         return {};
-    }
-    for (auto& type : types) {
-        if (!ArkTSTypeDescGeneratable(type) || ArkTSTypeDescContainsNothing(type)) {
-            return {};
-        }
-    }
-    if (!ArkTSTypeDescGeneratable(resultType)) {
-        return {};
-    }
-    // A REFERENCE position is emitted as a placeholder that the lowering
-    // walker binds through classRefs. Without the map the emitter cannot
-    // produce a complete value and would leave malformed syntax behind (for
-    // example a bare `return ;`, `Array<>` or `let x = `), so refuse the whole
-    // wrapper; the empty string routes to the existing unsupported-signature
-    // diagnostic instead.
-    if (classRefs == nullptr) {
-        bool needsClassBinding = ArkTSTypeDescContainsReference(resultType);
-        for (const auto& type : types) {
-            needsClassBinding = needsClassBinding || ArkTSTypeDescContainsReference(type);
-        }
-        if (needsClassBinding) {
-            return {};
-        }
     }
     auto ctx = prefix + "context";
     auto recv = prefix + std::string("module");
@@ -1886,15 +2099,8 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
         code += ArkTSNamespaceGuard(recv, value, next, i, context, globalReceiver, "    ");
         recv = next;
     }
-    std::vector<std::string> args;
-    size_t fixed = rest ? restIndex : types.size();
-    for (size_t i = 0; i < fixed; ++i) {
-        auto emitted = emitter.ToJS(types[i], ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(i), ctx, "    ");
-        auto local = emitter.Fresh("arg");
-        code += emitted.pre;
-        code += "    let " + local + " = " + emitted.expr + "\n";
-        args.emplace_back(std::move(local));
-    }
+    const size_t fixed = restIndex == ARKTS_NO_REST ? types.size() : restIndex;
+    auto args = ArkTSArgumentSource(emitter, types, fixed, code);
     // ArkTS optional parameters are the trailing named `Option<T'> = None`
     // parameters; lowering computes that run from the parameter spelling and
     // passes its first index. The generator-only entry point derives it from
@@ -1911,58 +2117,14 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
     // single optional, None therefore forwards no argument at all. A
     // positional `Option<T'>` (the with-rest form) is a required nullable
     // argument and keeps being forwarded explicitly.
-    if (optionalStart == ARKTS_DERIVE_OPTIONAL) {
-        optionalStart = types.size();
-        while (optionalStart > 0 && types[optionalStart - 1].kind == ArkTSTypeDesc::Kind::OPTIONAL) {
-            --optionalStart;
-        }
-    }
     auto result = prefix + "result";
-    std::string callArgsExpr;
-    if (!rest && optionalStart < types.size()) {
-        // The last Some is forwarded as its own converted value; a None
-        // before it is forwarded as the ctx.undefined() produced by its
-        // conversion; every position after the last Some is not passed at
-        // all (the ".." prefix stands for the required positions). The shared
-        // helper assembles the block-lambda array for both this wrapper and
-        // the class member generators.
-        callArgsExpr = ArkTSOptionalCallArray(emitter, types, optionalStart, args, ctx, code);
-    } else if (!rest) {
-        callArgsExpr = args.empty() ? "Array<JSValue>()" : "[" + ArkTSJoin(args, ", ") + "]";
-    } else {
-        // The rest element buffer: per-item conversion for Array<T'>, the
-        // only rest kind left - an ArkTSArray<T'> rest position was rejected
-        // by the rest validation above, so this branch always converts
-        // element-wise. The buffer and call-array locals come from the
-        // shared per-role Fresh counter, like every other generated local.
-        auto items = emitter.Fresh("rest");
-        auto index = emitter.Fresh("index");
-        auto item = emitter.Fresh("elem");
-        auto inner = emitter.ToJS(types[restIndex].elements.front(), item, ctx, "        ");
-        auto restLength = std::string(ARKTS_PLACEHOLDER_ARGUMENT) + std::to_string(restIndex) + ".size";
-        code += "    let " + items + " = Array<" + ARKTS_JS_VALUE + ">(" + restLength + ", { " + index +
-            " =>\n        let " + item + " = " + ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(restIndex) + "[" + index +
-            "]\n" + inner.pre + "        " + inner.expr + "\n    })\n";
-        if (args.empty()) {
-            callArgsExpr = items;
-        } else {
-            // Fixed arguments keep their converted locals; the rest items
-            // follow them, selected by the run-time index. The call array is
-            // a block-lambda constructor, never a trailing closure: the
-            // generated body is parsed after the trailing-closure desugar
-            // pass, so `f(n) { ... }` would stay an untyped TRAIL_CLOSE_EXPR.
-            auto callIndex = emitter.Fresh("index");
-            auto callArgs = emitter.Fresh("args");
-            code += "    let " + callArgs + " = Array<" + ARKTS_JS_VALUE + ">(" + std::to_string(args.size()) + " + " +
-                restLength + ", { " + callIndex + " =>\n        match (" + callIndex + ") {\n";
-            for (size_t i = 0; i < args.size(); ++i) {
-                code += "            case " + std::to_string(i) + " => " + args[i] + "\n";
-            }
-            code += "            case _ => " + items + "[" + callIndex + " - " + std::to_string(args.size()) +
-                "]\n        }\n    })\n";
-            callArgsExpr = callArgs;
-        }
-    }
+    // The last Some is forwarded as its own converted value; a None before it
+    // is forwarded as the ctx.undefined() produced by its conversion; every
+    // position after the last Some is not passed at all (the ".." prefix
+    // stands for the required positions). The shared helper assembles the
+    // block-lambda array for both this wrapper and the class member
+    // generators, including the rest form's element-wise buffer.
+    auto callArgsExpr = ArkTSWrapperCallArray(emitter, types, args, restIndex, optionalStart, ctx, prefix, code);
     // Resolve the target first, so a missing or non-callable export names the
     // module and the export instead of falling through to the library's
     // generic property error; then translate the runtime-failure codes.
@@ -2060,8 +2222,8 @@ std::vector<std::string> ArkTSArgumentSource(ArkTSValueEmitter& emitter, const s
 {
     std::vector<std::string> args;
     for (size_t i = 0; i < count; ++i) {
-        auto emitted = emitter.ToJS(types[i], ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(i), emitter.prefix + "context",
-            "    ");
+        auto emitted = emitter.ToJS(types[i], ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(i),
+            emitter.prefix + "context", "    ");
         auto local = emitter.Fresh("arg");
         code += emitted.pre;
         code += "    let " + local + " = " + emitted.expr + "\n";
@@ -2081,16 +2243,16 @@ std::string ArkTSRestCallArray(ArkTSValueEmitter& emitter, const ArkTSTypeDesc& 
     auto item = emitter.Fresh("elem");
     auto inner = emitter.ToJS(element, item, prefix + "context", "        ");
     auto restLength = std::string(ARKTS_PLACEHOLDER_ARGUMENT) + std::to_string(restIndex) + ".size";
-    code += "    let " + items + " = Array<" + ARKTS_JS_VALUE + ">(" + restLength + ", { " + index + " =>\n        let " + item +
-        " = " + ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(restIndex) + "[" + index + "]\n" + inner.pre +
-        "        " + inner.expr + "\n    })\n";
+    code += "    let " + items + " = Array<" + ARKTS_JS_VALUE + ">(" + restLength + ", { " + index +
+        " =>\n        let " + item + " = " + ARKTS_PLACEHOLDER_ARGUMENT + std::to_string(restIndex) + "[" + index +
+        "]\n" + inner.pre + "        " + inner.expr + "\n    })\n";
     if (fixed.empty()) {
         return items;
     }
     auto callIndex = emitter.Fresh("index");
     auto callArgs = emitter.Fresh("args");
-    code += "    let " + callArgs + " = Array<" + ARKTS_JS_VALUE + ">(" + std::to_string(fixed.size()) + " + " + restLength +
-        ", { " + callIndex + " =>\n        match (" + callIndex + ") {\n";
+    code += "    let " + callArgs + " = Array<" + ARKTS_JS_VALUE + ">(" + std::to_string(fixed.size()) + " + " +
+        restLength + ", { " + callIndex + " =>\n        match (" + callIndex + ") {\n";
     for (size_t i = 0; i < fixed.size(); ++i) {
         code += "            case " + std::to_string(i) + " => " + fixed[i] + "\n";
     }
@@ -2229,7 +2391,8 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
     // `this` argument. Instance members call the method on the stored object.
     // Both resolve the member first, so a missing or non-callable member names
     // the class and member instead of the library's generic property error.
-    auto emitCall = [&](const std::string& argArray) {
+    auto emitCall = [&emitter, &code, &receiverObject, &context, staticMember, &result](
+        const std::string& argArray) {
         auto target = emitter.Fresh("target");
         auto error = emitter.Fresh("error");
         code += ArkTSMemberGuard(

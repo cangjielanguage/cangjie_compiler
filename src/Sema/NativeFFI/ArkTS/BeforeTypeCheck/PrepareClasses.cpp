@@ -128,6 +128,190 @@ ParentKind ResolveParentKind(const std::vector<std::string>& path, const ClassDe
     return IsArkTSClassWrapper(*member) ? ParentKind::IMPORTED_WRAPPER : ParentKind::PLAIN;
 }
 
+// Refuse a foreign class: report one shape violation and mark the class
+// broken. Returns false so a check can `return RefuseForeignClass(...)`.
+bool RefuseForeignClass(ClassDecl& cd, DiagnosticEngine& diag, const std::string& reason)
+{
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(), reason);
+    cd.EnableAttr(Attribute::IS_BROKEN);
+    return false;
+}
+
+// The class-level modifiers a foreign class must not carry.
+bool CheckForeignClassModifiers(ClassDecl& cd, DiagnosticEngine& diag)
+{
+    if (cd.TestAttr(Attribute::SEALED)) {
+        return RefuseForeignClass(cd, diag, "a sealed class is not supported");
+    }
+    return true;
+}
+
+// A parameter name with the generated-code prefix is reserved.
+bool CheckForeignClassParamNames(const FuncDecl& fd, ClassDecl& cd, DiagnosticEngine& diag)
+{
+    for (auto& list : fd.funcBody->paramLists) {
+        for (auto& param : list->params) {
+            if (param->identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) == 0) {
+                return RefuseForeignClass(
+                    cd, diag, "parameter name '" + param->identifier.Val() + "' is reserved for generated code");
+            }
+        }
+    }
+    return true;
+}
+
+// Member and parameter names reserved for generated code.
+bool CheckForeignClassReservedNames(ClassDecl& cd, DiagnosticEngine& diag)
+{
+    for (auto& member : cd.GetMemberDecls()) {
+        if (member->identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) == 0) {
+            return RefuseForeignClass(
+                cd, diag, "member name '" + member->identifier.Val() + "' is reserved for generated code");
+        }
+        auto fd = DynamicCast<FuncDecl*>(member.get());
+        if (!fd || !fd->funcBody) {
+            continue;
+        }
+        if (!CheckForeignClassParamNames(*fd, cd, diag)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A user-written accessor body, which lowering cannot coexist with.
+bool PropHasUserWrittenBody(const PropDecl& prop)
+{
+    for (const auto& accessor : prop.getters) {
+        if (accessor && accessor->funcBody && accessor->funcBody->body) {
+            return true;
+        }
+    }
+    for (const auto& accessor : prop.setters) {
+        if (accessor && accessor->funcBody && accessor->funcBody->body) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Member shape rules from the declaration constraints: no private members, no
+// member variables, no finalizer or primary constructor, and no user-written
+// member body (lowering supplies every body).
+bool CheckForeignClassMemberShape(Decl& member, ClassDecl& cd, DiagnosticEngine& diag)
+{
+    if (member.TestAttr(Attribute::PRIVATE)) {
+        return RefuseForeignClass(cd, diag, "member '" + member.identifier.Val() + "' must not be private");
+    }
+    if (member.astKind == ASTKind::VAR_DECL || member.astKind == ASTKind::PRIMARY_CTOR_DECL) {
+        return RefuseForeignClass(cd, diag, "member variables and primary constructors are not supported");
+    }
+    // A user-written property accessor is refused by the accessor-body rule;
+    // a compiler-inserted property carries generated accessors only.
+    if (auto prop = DynamicCast<PropDecl*>(&member); prop && !prop->TestAttr(Attribute::COMPILER_ADD)) {
+        if (PropHasUserWrittenBody(*prop)) {
+            return RefuseForeignClass(cd, diag, "member '" + prop->identifier.Val() + "' must not have a body");
+        }
+    }
+    auto fd = DynamicCast<FuncDecl*>(&member);
+    if (fd == nullptr) {
+        return true;
+    }
+    if (fd->IsFinalizer()) {
+        return RefuseForeignClass(cd, diag, "a finalizer is not supported");
+    }
+    if (fd->funcBody && fd->funcBody->body) {
+        return RefuseForeignClass(cd, diag, "member '" + fd->identifier.Val() + "' must not have a body");
+    }
+    return true;
+}
+
+bool CheckForeignClassMemberShapes(ClassDecl& cd, DiagnosticEngine& diag)
+{
+    for (auto& member : cd.GetMemberDecls()) {
+        if (!CheckForeignClassMemberShape(*member, cd, diag)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The wrapper needs the interop JSObject declaration imported.
+bool CheckForeignClassJSObject(ClassDecl& cd, DiagnosticEngine& diag, ImportManager& imports)
+{
+    if (FindArkTSJSObject(imports, *cd.curFile) != nullptr) {
+        return true;
+    }
+    return RefuseForeignClass(cd, diag,
+        "the wrapper needs the imported declaration 'ohos.ark_interop." + std::string(ARKTS_JS_OBJECT) + "'");
+}
+
+// Clone the property type onto the first setter parameter when it lacks one.
+void PrepareSetterParameterType(const PropDecl& prop, FuncDecl& setter)
+{
+    if (!setter.funcBody || setter.funcBody->paramLists.empty() ||
+        setter.funcBody->paramLists.front()->params.empty() || !prop.type) {
+        return;
+    }
+    auto& param = setter.funcBody->paramLists.front()->params.front();
+    if (!param->type) {
+        param->type = ASTCloner::Clone(prop.type.get());
+    }
+}
+
+// Give a property without accessor signatures the ones lowering fills.
+void PreparePropertySignatures(PropDecl& prop)
+{
+    if (ArkTSWriteOnlyProp(prop)) {
+        // Persist the write-only contract for importing packages: the
+        // ARKTS_WRITE_ONLY annotation itself has no CJO record. A non-mutable
+        // property has already been refused by the placement check.
+        prop.EnableAttr(Attribute::ARKTS_WRITE_ONLY_PROP);
+        // Keep a getter declaration for the property contract. The read
+        // rejection itself comes from the ArkTS write-only reference check,
+        // not from access control (the reference resolves to the property
+        // declaration, so the getter visibility does not gate the read).
+        if (prop.getters.empty()) {
+            InsertPropGetterSignature(prop, Attribute::ARKTS_CLASS_WRAPPER);
+        }
+        for (auto& getter : prop.getters) {
+            getter->DisableAttr(Attribute::PUBLIC);
+            getter->EnableAttr(Attribute::PRIVATE);
+        }
+    } else if (prop.getters.empty()) {
+        InsertPropGetterSignature(prop, Attribute::ARKTS_CLASS_WRAPPER);
+    }
+    if (prop.isVar && prop.setters.empty()) {
+        InsertPropSetterSignature(prop, Attribute::ARKTS_CLASS_WRAPPER);
+    }
+    for (auto& getter : prop.getters) {
+        if (getter->funcBody && !getter->funcBody->retType && prop.type) {
+            getter->funcBody->retType = ASTCloner::Clone(prop.type.get());
+        }
+    }
+    for (auto& setter : prop.setters) {
+        PrepareSetterParameterType(prop, *setter);
+    }
+}
+
+// Prepare the user members before wrapper installation: design §5.1.2 keeps
+// the abstract members of an abstract foreign class abstract (a Cangjie
+// subclass implements them), the rest are cleared, and user properties gain
+// their accessor signatures.
+void PrepareForeignClassMembers(ClassDecl& cd)
+{
+    for (auto& member : cd.GetMemberDecls()) {
+        if (!(cd.TestAttr(Attribute::ABSTRACT) && member->TestAttr(Attribute::ABSTRACT))) {
+            member->DisableAttr(Attribute::ABSTRACT);
+        }
+        auto prop = DynamicCast<PropDecl*>(member.get());
+        if (!prop || prop->TestAttr(Attribute::COMPILER_ADD)) {
+            continue;
+        }
+        PreparePropertySignatures(*prop);
+    }
+}
+
 // Before: an unprepared @ArkTS foreign class. After result: every refusal
 // check has run and the user members carry their accessor signatures; the
 // class is marked IS_BROKEN when any check refused it. This is the
@@ -138,158 +322,11 @@ ParentKind ResolveParentKind(const std::vector<std::string>& path, const ClassDe
 // a wrapper.
 bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager& imports)
 {
-    if (cd.TestAttr(Attribute::SEALED)) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-            "a sealed class is not supported");
-        cd.EnableAttr(Attribute::IS_BROKEN);
+    if (!CheckForeignClassModifiers(cd, diag) || !CheckForeignClassReservedNames(cd, diag) ||
+        !CheckForeignClassMemberShapes(cd, diag) || !CheckForeignClassJSObject(cd, diag, imports)) {
         return false;
     }
-    for (auto& member : cd.GetMemberDecls()) {
-        if (member->identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) == 0) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-                "member name '" + member->identifier.Val() + "' is reserved for generated code");
-            cd.EnableAttr(Attribute::IS_BROKEN);
-            return false;
-        }
-        auto fd = DynamicCast<FuncDecl*>(member.get());
-        if (!fd || !fd->funcBody) {
-            continue;
-        }
-        for (auto& list : fd->funcBody->paramLists) {
-            for (auto& param : list->params) {
-                if (param->identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) != 0) {
-                    continue;
-                }
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-                    "parameter name '" + param->identifier.Val() + "' is reserved for generated code");
-                cd.EnableAttr(Attribute::IS_BROKEN);
-                return false;
-            }
-        }
-    }
-    // Member shape rules from the declaration constraints: no private
-    // members, no member variables, no finalizer or primary constructor, and
-    // no user-written member body (lowering supplies every body).
-    for (auto& member : cd.GetMemberDecls()) {
-        if (member->TestAttr(Attribute::PRIVATE)) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-                "member '" + member->identifier.Val() + "' must not be private");
-            cd.EnableAttr(Attribute::IS_BROKEN);
-            return false;
-        }
-        if (member->astKind == ASTKind::VAR_DECL || member->astKind == ASTKind::PRIMARY_CTOR_DECL) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-                "member variables and primary constructors are not supported");
-            cd.EnableAttr(Attribute::IS_BROKEN);
-            return false;
-        }
-        // A user-written property accessor is refused by the accessor-body
-        // rule in the PropDecl block below; the parser requires an accessor
-        // body, so every valid source accessor carries one and a second
-        // declaration-level check here would only duplicate that rule.
-        auto fd = DynamicCast<FuncDecl*>(member.get());
-        // A property accessor is not in GetMemberDecls() (only the PropDecl
-        // is), so the FuncDecl body rule below never sees a user-written
-        // getter or setter body. Lowering supplies every accessor body the
-        // same way it supplies member function bodies, so a user body is
-        // refused with the same message. The accessor signatures inserted by
-        // preparation are COMPILER_ADD and bodyless, and are not present yet
-        // at this point, so they cannot be misreported.
-        if (auto prop = DynamicCast<PropDecl*>(member.get())) {
-            // A compiler-inserted property carries generated accessors only;
-            // never apply the user-body rule to it.
-            if (prop->TestAttr(Attribute::COMPILER_ADD)) {
-                continue;
-            }
-            bool hasBody = false;
-            for (const auto& accessor : prop->getters) {
-                hasBody = hasBody || (accessor && accessor->funcBody && accessor->funcBody->body);
-            }
-            for (const auto& accessor : prop->setters) {
-                hasBody = hasBody || (accessor && accessor->funcBody && accessor->funcBody->body);
-            }
-            if (hasBody) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-                    "member '" + prop->identifier.Val() + "' must not have a body");
-                cd.EnableAttr(Attribute::IS_BROKEN);
-                return false;
-            }
-        }
-        if (!fd) {
-            continue;
-        }
-        if (fd->IsFinalizer()) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-                "a finalizer is not supported");
-            cd.EnableAttr(Attribute::IS_BROKEN);
-            return false;
-        }
-        if (fd->funcBody && fd->funcBody->body) {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-                "member '" + fd->identifier.Val() + "' must not have a body");
-            cd.EnableAttr(Attribute::IS_BROKEN);
-            return false;
-        }
-    }
-    auto jsObject = FindArkTSJSObject(imports, *cd.curFile);
-    if (jsObject == nullptr) {
-        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
-            "the wrapper needs the imported declaration 'ohos.ark_interop." + std::string(ARKTS_JS_OBJECT) + "'");
-        cd.EnableAttr(Attribute::IS_BROKEN);
-        return false;
-    }
-    for (auto& member : cd.GetMemberDecls()) {
-        // Design §5.1.2 keeps the abstract members of an abstract foreign
-        // class abstract: a Cangjie subclass implements them, so clearing the
-        // modifier would turn the declaration into a redefinition error.
-        if (!(cd.TestAttr(Attribute::ABSTRACT) && member->TestAttr(Attribute::ABSTRACT))) {
-            member->DisableAttr(Attribute::ABSTRACT);
-        }
-        // A property declared without accessors gets accessor signatures with
-        // the property type cloned onto them; lowering fills their bodies.
-        auto prop = DynamicCast<PropDecl*>(member.get());
-        if (!prop || prop->TestAttr(Attribute::COMPILER_ADD)) {
-            continue;
-        }
-        if (ArkTSWriteOnlyProp(*prop)) {
-            // Persist the write-only contract for importing packages: the
-            // ARKTS_WRITE_ONLY annotation itself has no CJO record. A non-mutable
-            // property has already been refused by the placement check.
-            prop->EnableAttr(Attribute::ARKTS_WRITE_ONLY_PROP);
-            // Keep a getter declaration for the property contract. The read
-            // rejection itself comes from the ArkTS write-only reference
-            // check, not from access control (the reference resolves to the
-            // property declaration, so the getter visibility does not gate
-            // the source read).
-            if (prop->getters.empty()) {
-                InsertPropGetterSignature(*prop, Attribute::ARKTS_CLASS_WRAPPER);
-            }
-            for (auto& getter : prop->getters) {
-                getter->DisableAttr(Attribute::PUBLIC);
-                getter->EnableAttr(Attribute::PRIVATE);
-            }
-        } else if (prop->getters.empty()) {
-            InsertPropGetterSignature(*prop, Attribute::ARKTS_CLASS_WRAPPER);
-        }
-        if (prop->isVar && prop->setters.empty()) {
-            InsertPropSetterSignature(*prop, Attribute::ARKTS_CLASS_WRAPPER);
-        }
-        for (auto& getter : prop->getters) {
-            if (getter->funcBody && !getter->funcBody->retType && prop->type) {
-                getter->funcBody->retType = ASTCloner::Clone(prop->type.get());
-            }
-        }
-        for (auto& setter : prop->setters) {
-            if (!setter->funcBody || setter->funcBody->paramLists.empty() ||
-                setter->funcBody->paramLists.front()->params.empty() || !prop->type) {
-                continue;
-            }
-            auto& param = setter->funcBody->paramLists.front()->params.front();
-            if (!param->type) {
-                param->type = ASTCloner::Clone(prop->type.get());
-            }
-        }
-    }
+    PrepareForeignClassMembers(cd);
     return true;
 }
 
@@ -314,6 +351,159 @@ bool InstallWrapperMembers(
     Utils::EraseIf(cd.modifiers, [](auto& mod) { return mod.modifier == TokenKind::FOREIGN; });
     cd.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
     return true;
+}
+
+// Every top-level declaration of the package by identifier, for the bare
+// parent spellings; the prepared entries keep the index valid on a repeated
+// pass over an already prepared tree.
+std::unordered_map<std::string, Ptr<Decl>> IndexPackageDecls(const Package& pkg)
+{
+    std::unordered_map<std::string, Ptr<Decl>> packageDecls;
+    for (auto& file : pkg.files) {
+        for (auto& decl : file->decls) {
+            packageDecls.emplace(decl->identifier.Val(), decl.get());
+        }
+    }
+    return packageDecls;
+}
+
+// A user generic @ArkTS foreign class cannot be lowered into a fixed wrapper;
+// only the stdlib presets keep the generic external form.
+bool IsUnsupportedGenericForeignClass(const ClassDecl& cd)
+{
+    return !cd.TestAttr(Attribute::IS_BROKEN) && cd.HasAnno(AnnotationKind::ARKTS) &&
+        cd.TestAttr(Attribute::FOREIGN) && !IsArkTSClassWrapper(cd) && cd.generic != nullptr &&
+        !cd.generic->typeParameters.empty();
+}
+
+// Diagnose an unsupported generic foreign class outside the preset package.
+// Returns true when the class was refused.
+bool RefuseUnsupportedGenericForeignClass(ClassDecl& cd, DiagnosticEngine& diag)
+{
+    if (!IsUnsupportedGenericForeignClass(cd)) {
+        return false;
+    }
+    const auto& packageName = cd.curFile != nullptr && cd.curFile->curPackage != nullptr
+        ? cd.curFile->curPackage->fullPackageName
+        : cd.fullPackageName;
+    if (packageName == ARKTS_PRESET_PACKAGE) {
+        return false;
+    }
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_generic_foreign_unsupported, cd, cd.identifier.Val());
+    cd.EnableAttr(Attribute::IS_BROKEN);
+    return true;
+}
+
+// The check phase for one declaration: the generic rule first, then the shape
+// checks of an unprepared foreign class. Returns the surviving class or null.
+Ptr<ClassDecl> CheckForeignClassDecl(Ptr<Decl> decl, DiagnosticEngine& diag, ImportManager& imports)
+{
+    auto cd = DynamicCast<ClassDecl*>(decl);
+    if (cd != nullptr && RefuseUnsupportedGenericForeignClass(*cd, diag)) {
+        return nullptr;
+    }
+    // A class already marked broken keeps its refusal diagnostic and its
+    // FOREIGN source identity, so a repeated preparation skips the check (an
+    // installed wrapper also carries ARKTS_CLASS_WRAPPER).
+    if (cd == nullptr || !IsArkTSForeignClass(*cd) || cd->TestAttr(Attribute::IS_BROKEN)) {
+        return nullptr;
+    }
+    return CheckForeignClassShape(*cd, diag, imports) ? cd : nullptr;
+}
+
+// The install result of one class.
+enum class InstallResult {
+    // The class became a prepared wrapper.
+    WRAPPER,
+    // The class is broken: its own checks refused it, its parent broke it, or
+    // the wrapper members could not be declared.
+    BROKEN,
+    // The class names itself as an ancestor; the inheritance cycle is
+    // reported by the generic checker, so the class is installed without
+    // taking this parent entry for a wrapper.
+    CYCLIC,
+};
+
+// State shared by the recursive wrapper install.
+struct InstallState {
+    ImportManager& imports;
+    DiagnosticEngine& diag;
+    SourceManager& sourceManager;
+    const std::string& srcPackageName;
+    const std::unordered_map<std::string, Ptr<Decl>>& packageDecls;
+    std::set<Ptr<ClassDecl>>& installing;
+};
+
+using InstallFn = std::function<InstallResult(Ptr<ClassDecl>)>;
+
+void DropBrokenParents(ClassDecl& cd, const std::vector<size_t>& brokenParents)
+{
+    for (auto i = brokenParents.rbegin(); i != brokenParents.rend(); ++i) {
+        cd.inheritedTypes.erase(cd.inheritedTypes.begin() + static_cast<std::ptrdiff_t>(*i));
+    }
+    cd.EnableAttr(Attribute::IS_BROKEN);
+}
+
+// Decide the root/child shape from the parents the class spells, installing
+// same-package wrapper parents first. Returns false when a named parent broke,
+// in which case the child breaks silently.
+bool ResolveWrapperParents(ClassDecl& cd, InstallState& state, const InstallFn& install, bool& wrapperParent)
+{
+    std::vector<size_t> brokenParents;
+    for (size_t i = 0; i < cd.inheritedTypes.size(); ++i) {
+        auto path = ParentSpellingPath(*cd.inheritedTypes[i]);
+        switch (ResolveParentKind(path, cd, state.imports, state.srcPackageName, state.packageDecls)) {
+            case ParentKind::PACKAGE_CANDIDATE: {
+                auto parent = DynamicCast<ClassDecl*>(state.packageDecls.at(path.front()));
+                auto parentResult = install(parent);
+                if (parentResult == InstallResult::BROKEN) {
+                    brokenParents.push_back(i);
+                } else if (parentResult == InstallResult::WRAPPER) {
+                    wrapperParent = true;
+                }
+                // CYCLIC leaves this parent entry out of the shape decision;
+                // the generic checker owns the cycle diagnostic.
+                break;
+            }
+            case ParentKind::IMPORTED_WRAPPER:
+                wrapperParent = true;
+                break;
+            case ParentKind::PLAIN:
+            default:
+                break;
+        }
+    }
+    if (brokenParents.empty()) {
+        return true;
+    }
+    // A child shape would resolve the generated super(...) delegations against
+    // a class that never became a wrapper; the parent refusal has already
+    // spoken, so the child breaks silently and declares no wrapper member.
+    DropBrokenParents(cd, brokenParents);
+    return false;
+}
+
+// Install the wrapper members of one class, and first those of the
+// same-package wrapper parents it names.
+InstallResult InstallClassWrapper(Ptr<ClassDecl> cd, InstallState& state, const InstallFn& install)
+{
+    if (IsArkTSClassWrapper(*cd) && !cd->TestAttr(Attribute::IS_BROKEN)) {
+        return InstallResult::WRAPPER; // installed on demand or by an earlier round
+    }
+    if (cd->TestAttr(Attribute::IS_BROKEN)) {
+        return InstallResult::BROKEN; // the check phase refused this class or its parent
+    }
+    if (!state.installing.insert(cd).second) {
+        return InstallResult::CYCLIC;
+    }
+    bool wrapperParent = false;
+    if (!ResolveWrapperParents(*cd, state, install, wrapperParent)) {
+        state.installing.erase(cd);
+        return InstallResult::BROKEN;
+    }
+    auto installed = InstallWrapperMembers(*cd, wrapperParent, state.diag, state.sourceManager, state.imports);
+    state.installing.erase(cd);
+    return installed ? InstallResult::WRAPPER : InstallResult::BROKEN;
 }
 } // namespace
 
@@ -345,142 +535,20 @@ void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceM
     if (!PassEnabled(pkg) || imports == nullptr) {
         return;
     }
-    // Every top-level declaration of the package by identifier, for the bare
-    // parent spellings; the prepared entries keep the index valid on a
-    // repeated pass over an already prepared tree.
-    std::unordered_map<std::string, Ptr<Decl>> packageDecls;
-    for (auto& file : pkg.files) {
-        for (auto& decl : file->decls) {
-            packageDecls.emplace(decl->identifier.Val(), decl.get());
-        }
-    }
+    const auto packageDecls = IndexPackageDecls(pkg);
     std::vector<Ptr<ClassDecl>> survivors;
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
-            auto cd = DynamicCast<ClassDecl*>(decl.get());
-            // A user generic @ArkTS foreign class cannot be lowered into a
-            // fixed wrapper; only the stdlib presets keep the generic external
-            // form. Silently leaving it external would surface later as a C
-            // ABI diagnostic or a link failure.
-            if (cd != nullptr && !cd->TestAttr(Attribute::IS_BROKEN) && cd->HasAnno(AnnotationKind::ARKTS) &&
-                cd->TestAttr(Attribute::FOREIGN) && !IsArkTSClassWrapper(*cd) && cd->generic != nullptr &&
-                !cd->generic->typeParameters.empty()) {
-                const auto& packageName =
-                    cd->curFile != nullptr && cd->curFile->curPackage != nullptr
-                    ? cd->curFile->curPackage->fullPackageName
-                    : cd->fullPackageName;
-                if (packageName != ARKTS_PRESET_PACKAGE) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::sema_arkts_generic_foreign_unsupported, *cd, cd->identifier.Val());
-                    cd->EnableAttr(Attribute::IS_BROKEN);
-                    continue;
-                }
-            }
-            // A class already marked broken keeps its refusal diagnostic and
-            // its FOREIGN source identity (an installed wrapper also carries
-            // ARKTS_CLASS_WRAPPER), so a repeated preparation over the same AST
-            // must skip the check rather than report the same refusal again.
-            // The install phase below returns at the IS_BROKEN check as well,
-            // so the whole repeated pass is a no-op.
-            if (!cd || !IsArkTSForeignClass(*cd) || cd->TestAttr(Attribute::IS_BROKEN)) {
-                continue;
-            }
-            if (CheckForeignClassShape(*cd, diag, *imports)) {
-                survivors.emplace_back(cd);
+            if (auto survivor = CheckForeignClassDecl(decl.get(), diag, *imports)) {
+                survivors.emplace_back(survivor);
             }
         }
     }
-    // The install result of one class.
-    enum class InstallResult {
-        // The class became a prepared wrapper.
-        WRAPPER,
-        // The class is broken: its own checks refused it, its parent broke
-        // it, or the wrapper members could not be declared.
-        BROKEN,
-        // The class names itself as an ancestor; the inheritance cycle is
-        // reported by the generic checker, so the class is installed without
-        // taking this parent entry for a wrapper.
-        CYCLIC,
-    };
-    // Install the wrapper members of @p cd, and first those of the
-    // same-package wrapper parents it names.
     std::set<Ptr<ClassDecl>> installing;
-    std::function<InstallResult(Ptr<ClassDecl>)> install = [&](Ptr<ClassDecl> cd) -> InstallResult {
-        if (IsArkTSClassWrapper(*cd) && !cd->TestAttr(Attribute::IS_BROKEN)) {
-            return InstallResult::WRAPPER; // installed on demand or by an earlier round
-        }
-        if (cd->TestAttr(Attribute::IS_BROKEN)) {
-            return InstallResult::BROKEN; // the check phase refused this class or its parent
-        }
-        if (!installing.insert(cd).second) {
-            return InstallResult::CYCLIC;
-        }
-        bool wrapperParent = false;
-        // A child shape against this parent would resolve the generated
-        // super(...) delegations against a class that never became a wrapper;
-        // the parent refusal has already spoken, so the child breaks silently
-        // and declares no wrapper member at all. The parent entry is removed
-        // with it: it names a broken declaration, and resolving it would only
-        // report 'undeclared type name' once per subclass for a cause the
-        // parent's own diagnostic already states.
-        //
-        // Removing a source-written inheritance entry is a destructive AST
-        // edit, safe here because the edit cannot outlive this compilation:
-        // - the package carries an error, so it produces no CJO and nothing
-        //   serializes the shortened inherited list;
-        // - the front end parses each source package for every compilation
-        //   (LSP included), so a later pass starts from source, not from this
-        //   tree;
-        // - PrepareTypeCheck runs once per source package per compilation, and
-        //   a repeated in-process pass returns at the IS_BROKEN check above
-        //   before it reaches this list.
-        //
-        // The removal itself is idempotent: the walk below only reads the
-        // inherited list and records the positions to drop, and the erase
-        // happens afterwards, so no iterator is held across the recursive
-        // install() and no erased entry is revisited. Once the entries are
-        // gone, a later pass resolving the same broken parents finds nothing
-        // to drop and erases nothing.
-        std::vector<size_t> brokenParents;
-        for (size_t i = 0; i < cd->inheritedTypes.size(); ++i) {
-            auto path = ParentSpellingPath(*cd->inheritedTypes[i]);
-            switch (ResolveParentKind(path, *cd, *imports, pkg.fullPackageName, packageDecls)) {
-                case ParentKind::PACKAGE_CANDIDATE: {
-                    auto parent = DynamicCast<ClassDecl*>(packageDecls.at(path.front()));
-                    auto parentResult = install(parent);
-                    if (parentResult == InstallResult::BROKEN) {
-                        brokenParents.push_back(i);
-                        continue;
-                    }
-                    if (parentResult == InstallResult::WRAPPER) {
-                        wrapperParent = true;
-                    }
-                    // CYCLIC leaves this parent entry out of the shape
-                    // decision; the generic checker owns the cycle
-                    // diagnostic and a root-shaped member set stays
-                    // resolvable while it is reported.
-                    break;
-                }
-                case ParentKind::IMPORTED_WRAPPER:
-                    wrapperParent = true;
-                    break;
-                case ParentKind::PLAIN:
-                    break;
-                default:
-                    break;
-            }
-        }
-        if (!brokenParents.empty()) {
-            for (auto i = brokenParents.rbegin(); i != brokenParents.rend(); ++i) {
-                cd->inheritedTypes.erase(cd->inheritedTypes.begin() + static_cast<std::ptrdiff_t>(*i));
-            }
-            cd->EnableAttr(Attribute::IS_BROKEN);
-            installing.erase(cd);
-            return InstallResult::BROKEN;
-        }
-        auto installed = InstallWrapperMembers(*cd, wrapperParent, diag, sourceManager, *imports);
-        installing.erase(cd);
-        return installed ? InstallResult::WRAPPER : InstallResult::BROKEN;
+    InstallState state{*imports, diag, sourceManager, pkg.fullPackageName, packageDecls, installing};
+    InstallFn install;
+    install = [&state, &install](Ptr<ClassDecl> cd) -> InstallResult {
+        return InstallClassWrapper(cd, state, install);
     };
     for (auto cd : survivors) {
         (void)install(cd);

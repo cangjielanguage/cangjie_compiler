@@ -105,12 +105,27 @@ bool ArkTSWriteOnlyProp(const AST::Decl& decl);
 // applies before routing a usage to CheckArkTSWriteOnlyRead: it resolves the
 // target and tests the wrapper-owner attribute only, so declarations of other
 // languages never reach the annotation scan.
-Ptr<AST::PropDecl> ArkTSWriteOnlyTargetProp(const AST::Node& usage);
+Ptr<AST::PropDecl> ArkTSWriteOnlyTargetProp(const AST::Node& usage, bool readThroughLeftValue = false);
 // Reject a source read of a write-only property of a prepared wrapper class.
 // The shared reference-check pass routes the usage here only after
 // ArkTSWriteOnlyTargetProp matched; the ArkTS rule (annotation scan and
 // diagnostic) lives in this stage.
 void CheckArkTSWriteOnlyRead(AST::Node& usage, DiagnosticEngine& diag);
+
+// The left value of a compound assignment ('w.p += x') is read before it is
+// written, so the LEFT_VALUE early-out must not hide it from the write-only
+// contract.
+void CheckArkTSWriteOnlyCompoundTarget(AST::Node& usage, DiagnosticEngine& diag);
+
+// The shared deprecated-usage pass calls this single entry: the cheap gate and
+// the write-only diagnostic stay together, so the pass keeps its complexity
+// budget and declarations of other languages never reach the annotation scan.
+inline void CheckArkTSWriteOnlyUsage(AST::Node& usage, DiagnosticEngine& diag)
+{
+    if (ArkTSWriteOnlyTargetProp(usage)) {
+        CheckArkTSWriteOnlyRead(usage, diag);
+    }
+}
 // An @ArkTS declaration, or a member of one: the declaration itself or its
 // enclosing class/interface carries the annotation (or its AST attribute).
 // Such a declaration uses the foreign spelling but not the C ABI, so the

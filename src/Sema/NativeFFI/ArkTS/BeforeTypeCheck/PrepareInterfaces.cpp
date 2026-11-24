@@ -24,11 +24,13 @@ namespace Cangjie::Native::FFI::ArkTS {
 namespace {
 
 // One interface-shape refusal: the reason carries the rule and the interface
-// is broken so lowering never emits a partial implementation.
-void DiagnoseInterface(DiagnosticEngine& diag, InterfaceDecl& id, const std::string& reason)
+// is broken so lowering never emits a partial implementation. Returns false so
+// a validator can `return DiagnoseInterface(...)`.
+bool DiagnoseInterface(DiagnosticEngine& diag, InterfaceDecl& id, const std::string& reason)
 {
     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_interface_invalid, id, id.identifier.Val(), reason);
     id.EnableAttr(Attribute::IS_BROKEN);
+    return false;
 }
 
 void CloneVisibilityAttribute(const Decl& from, Decl& to)
@@ -44,73 +46,86 @@ void CloneVisibilityAttribute(const Decl& from, Decl& to)
     }
 }
 
+// A parameter name with the generated-code prefix is reserved.
+bool ValidateInterfaceParamNames(const FuncDecl& fd, InterfaceDecl& id, DiagnosticEngine& diag)
+{
+    for (auto& list : fd.funcBody->paramLists) {
+        for (auto& param : list->params) {
+            if (param->identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) == 0) {
+                return DiagnoseInterface(
+                    diag, id, "parameter name '" + param->identifier.Val() + "' is reserved for generated code");
+            }
+        }
+    }
+    return true;
+}
+
+// Function-member rules of an external interface.
+bool ValidateInterfaceFunc(FuncDecl& fd, InterfaceDecl& id, DiagnosticEngine& diag)
+{
+    if (fd.TestAttr(Attribute::MUT)) {
+        return DiagnoseInterface(diag, id, "mut function '" + fd.identifier.Val() + "' is not supported");
+    }
+    if (fd.TestAttr(Attribute::OPERATOR) && fd.identifier.Val() != "[]" && fd.identifier.Val() != "()") {
+        return DiagnoseInterface(diag, id,
+            "operator '" + fd.identifier.Val() + "' is not supported; only index and call operators map");
+    }
+    if (fd.funcBody && fd.funcBody->body) {
+        return DiagnoseInterface(diag, id, "member '" + fd.identifier.Val() + "' must not have a body");
+    }
+    if (!fd.funcBody) {
+        return DiagnoseInterface(diag, id, "member '" + fd.identifier.Val() + "' has no signature");
+    }
+    return ValidateInterfaceParamNames(fd, id, diag);
+}
+
+// Property-member rules of an external interface.
+bool ValidateInterfaceProp(PropDecl& pd, InterfaceDecl& id, DiagnosticEngine& diag)
+{
+    if (!pd.getters.empty() || !pd.setters.empty()) {
+        return DiagnoseInterface(diag, id, "property '" + pd.identifier.Val() + "' must not declare accessors");
+    }
+    // @WriteOnly belongs to the class wrapper path; on an interface it would
+    // otherwise be silently accepted as a read-write property (the AR-09
+    // set-only item is outside this requirement), so the declared limitation
+    // is refused explicitly.
+    if (ArkTSWriteOnlyProp(pd)) {
+        return DiagnoseInterface(diag, id, "@WriteOnly properties are not supported on a foreign interface");
+    }
+    return true;
+}
+
+// One member of an external interface. The first refusal marks the interface
+// broken and keeps the declaration order of parameters and members.
+bool ValidateInterfaceMember(Decl& member, InterfaceDecl& id, DiagnosticEngine& diag)
+{
+    if (member.identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) == 0) {
+        return DiagnoseInterface(diag, id,
+            "member name '" + member.identifier.Val() + "' is reserved for generated code");
+    }
+    if (member.TestAttr(Attribute::STATIC)) {
+        return DiagnoseInterface(diag, id, "static member '" + member.identifier.Val() + "' is not supported");
+    }
+    if (auto fd = DynamicCast<FuncDecl*>(&member)) {
+        return ValidateInterfaceFunc(*fd, id, diag);
+    }
+    if (auto pd = DynamicCast<PropDecl*>(&member)) {
+        return ValidateInterfaceProp(*pd, id, diag);
+    }
+    return DiagnoseInterface(diag, id, "only instance properties and functions are supported");
+}
+
 // Declaration constraints of an external interface. Parameters and members keep their
 // declaration order; the first refusal marks the interface broken.
 bool ValidateInterface(InterfaceDecl& id, DiagnosticEngine& diag)
 {
     if (id.TestAttr(Attribute::SEALED)) {
-        DiagnoseInterface(diag, id, "a sealed interface is not supported");
-        return false;
+        return DiagnoseInterface(diag, id, "a sealed interface is not supported");
     }
     for (auto& member : id.GetMemberDecls()) {
-        if (member->identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) == 0) {
-            DiagnoseInterface(
-                diag, id, "member name '" + member->identifier.Val() + "' is reserved for generated code");
+        if (!ValidateInterfaceMember(*member, id, diag)) {
             return false;
         }
-        if (member->TestAttr(Attribute::STATIC)) {
-            DiagnoseInterface(diag, id, "static member '" + member->identifier.Val() + "' is not supported");
-            return false;
-        }
-        if (auto fd = DynamicCast<FuncDecl*>(member.get())) {
-            if (fd->TestAttr(Attribute::MUT)) {
-                DiagnoseInterface(diag, id, "mut function '" + fd->identifier.Val() + "' is not supported");
-                return false;
-            }
-            if (fd->TestAttr(Attribute::OPERATOR) && fd->identifier.Val() != "[]" && fd->identifier.Val() != "()") {
-                DiagnoseInterface(diag, id,
-                    "operator '" + fd->identifier.Val() + "' is not supported; only index and call operators map");
-                return false;
-            }
-            if (fd->funcBody && fd->funcBody->body) {
-                DiagnoseInterface(diag, id, "member '" + fd->identifier.Val() + "' must not have a body");
-                return false;
-            }
-            if (!fd->funcBody) {
-                DiagnoseInterface(diag, id, "member '" + fd->identifier.Val() + "' has no signature");
-                return false;
-            }
-            for (auto& list : fd->funcBody->paramLists) {
-                for (auto& param : list->params) {
-                    if (param->identifier.Val().rfind(ARKTS_RESERVED_PREFIX, 0) != 0) {
-                        continue;
-                    }
-                    DiagnoseInterface(diag, id,
-                        "parameter name '" + param->identifier.Val() + "' is reserved for generated code");
-                    return false;
-                }
-            }
-            continue;
-        }
-        if (auto pd = DynamicCast<PropDecl*>(member.get())) {
-            if (!pd->getters.empty() || !pd->setters.empty()) {
-                DiagnoseInterface(diag, id,
-                    "property '" + pd->identifier.Val() + "' must not declare accessors");
-                return false;
-            }
-            // @WriteOnly belongs to the class wrapper path; on an interface it
-            // would otherwise be silently accepted as a read-write property
-            // (the AR-09 set-only item is outside this requirement), so the
-            // declared limitation is refused explicitly.
-            if (ArkTSWriteOnlyProp(*pd)) {
-                DiagnoseInterface(diag, id,
-                    "@WriteOnly properties are not supported on a foreign interface");
-                return false;
-            }
-            continue;
-        }
-        DiagnoseInterface(diag, id, "only instance properties and functions are supported");
-        return false;
     }
     return true;
 }
@@ -174,34 +189,60 @@ OwnedPtr<ClassDecl> CreateInterfaceImpl(InterfaceDecl& id)
     return impl;
 }
 
-void PrepareInterface(
-    InterfaceDecl& id, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports, File& file)
+// The 'options' and 'module' contract of a foreign interface. Returns false
+// when the interface was refused and marked broken.
+bool PrepareInterfaceOptions(InterfaceDecl& id, const File& file, DiagnosticEngine& diag)
 {
-    if (!ValidateInterface(id, diag)) {
-        return;
-    }
     std::unordered_map<std::string, std::string> options;
     ArkTSOptionStatus optionStatus;
     if (!ArkTSDeclOptions(id, options, &optionStatus)) {
         DiagnoseArkTSOptionProblem(diag, id, options, optionStatus);
         id.EnableAttr(Attribute::IS_BROKEN);
-        return;
+        return false;
     }
     std::string module;
     if (!ResolveArkTSModule(id, options, *file.curPackage, diag,
-            DiagKindRefactor::sema_arkts_foreign_interface_invalid, module)) {
+        DiagKindRefactor::sema_arkts_foreign_interface_invalid, module)) {
         id.EnableAttr(Attribute::IS_BROKEN);
-        return;
+        return false;
     }
-    if (FindArkTSJSObject(imports, *id.curFile) == nullptr) {
-        DiagnoseInterface(diag, id,
-            "the wrapper needs the imported declaration 'ohos.ark_interop." + std::string(ARKTS_JS_OBJECT) + "'");
-        return;
+    return true;
+}
+
+// A property declared without accessors gets default-implementation
+// signatures; lowering fills them. Interface accessors are public.
+void PrepareInterfaceProperty(PropDecl& pd)
+{
+    // The accessors added below are the implementation; the property itself is
+    // therefore not abstract. Leaving ABSTRACT set would make the standard
+    // interface-property pass add a second, bodyless accessor pair.
+    pd.DisableAttr(Attribute::ABSTRACT);
+    if (pd.getters.empty()) {
+        InsertPropGetterSignature(pd, Attribute::ARKTS_INTERFACE_WRAPPER);
     }
-    if (!InsertReferenceAccessor(id, diag, sourceManager, imports)) {
-        DiagnoseInterface(diag, id, "cannot declare the wrapper reference accessor");
-        return;
+    if (pd.isVar && pd.setters.empty()) {
+        InsertPropSetterSignature(pd, Attribute::ARKTS_INTERFACE_WRAPPER);
     }
+    for (auto& getter : pd.getters) {
+        if (getter->funcBody && !getter->funcBody->retType && pd.type) {
+            getter->funcBody->retType = ASTCloner::Clone(pd.type.get());
+        }
+    }
+    for (auto& setter : pd.setters) {
+        if (!setter->funcBody || setter->funcBody->paramLists.empty() ||
+            setter->funcBody->paramLists.front()->params.empty() || !pd.type) {
+            continue;
+        }
+        auto& param = setter->funcBody->paramLists.front()->params.front();
+        if (!param->type) {
+            param->type = ASTCloner::Clone(pd.type.get());
+        }
+    }
+}
+
+// The prepared member contracts of a foreign interface.
+void PrepareInterfaceMembers(InterfaceDecl& id)
+{
     // FOREIGN stays as the declaration's source identity; the marker records
     // the prepared state. The FFI overload rule exempts @ArkTS declarations by
     // annotation rather than by an absent FOREIGN, so the index get/set pair
@@ -215,40 +256,19 @@ void PrepareInterface(
             continue;
         }
         if (auto pd = DynamicCast<PropDecl*>(member.get())) {
-            // The accessors added below are the implementation; the property
-            // itself is therefore not abstract. Leaving ABSTRACT set would
-            // make the standard interface-property pass add a second,
-            // bodyless accessor pair.
-            pd->DisableAttr(Attribute::ABSTRACT);
-            // A property declared without accessors gets default-implementation
-            // signatures; lowering fills them. Interface accessors are public.
-            if (pd->getters.empty()) {
-                InsertPropGetterSignature(*pd, Attribute::ARKTS_INTERFACE_WRAPPER);
-            }
-            if (pd->isVar && pd->setters.empty()) {
-                InsertPropSetterSignature(*pd, Attribute::ARKTS_INTERFACE_WRAPPER);
-            }
-            for (auto& getter : pd->getters) {
-                if (getter->funcBody && !getter->funcBody->retType && pd->type) {
-                    getter->funcBody->retType = ASTCloner::Clone(pd->type.get());
-                }
-            }
-            for (auto& setter : pd->setters) {
-                if (!setter->funcBody || setter->funcBody->paramLists.empty() ||
-                    setter->funcBody->paramLists.front()->params.empty() || !pd->type) {
-                    continue;
-                }
-                auto& param = setter->funcBody->paramLists.front()->params.front();
-                if (!param->type) {
-                    param->type = ASTCloner::Clone(pd->type.get());
-                }
-            }
+            PrepareInterfaceProperty(*pd);
         }
     }
+}
+
+// Generate and insert the implementation class of a prepared interface.
+bool InsertInterfaceImpl(
+    InterfaceDecl& id, File& file, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports)
+{
     auto impl = CreateInterfaceImpl(id);
     if (!InsertArkTSReferenceMembers(*impl, false, diag, sourceManager, imports)) {
         DiagnoseInterface(diag, id, "cannot declare the wrapper reference members");
-        return;
+        return false;
     }
     auto implPtr = impl.get();
     ASTInserter inserter;
@@ -257,6 +277,28 @@ void PrepareInterface(
     // enters the package decl map; a private interface's impl stays local.
     if (implPtr->IsExportedDecl()) {
         imports.GetCjoManager()->AddGeneratedDeclToDeclMap(*implPtr);
+    }
+    return true;
+}
+
+void PrepareInterface(
+    InterfaceDecl& id, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports, File& file)
+{
+    if (!ValidateInterface(id, diag) || !PrepareInterfaceOptions(id, file, diag)) {
+        return;
+    }
+    if (FindArkTSJSObject(imports, *id.curFile) == nullptr) {
+        DiagnoseInterface(diag, id,
+            "the wrapper needs the imported declaration 'ohos.ark_interop." + std::string(ARKTS_JS_OBJECT) + "'");
+        return;
+    }
+    if (!InsertReferenceAccessor(id, diag, sourceManager, imports)) {
+        DiagnoseInterface(diag, id, "cannot declare the wrapper reference accessor");
+        return;
+    }
+    PrepareInterfaceMembers(id);
+    if (!InsertInterfaceImpl(id, file, diag, sourceManager, imports)) {
+        return;
     }
     id.EnableAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
 }

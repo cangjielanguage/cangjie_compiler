@@ -1294,6 +1294,130 @@ void RemapPctSyncImports(AST::Package& pkg, const GlobalOptions& globalOptions)
 }
 } // namespace
 
+namespace {
+
+// First @ArkTS annotation in the file, if the AST carries one. It selects the
+// interop capability and gives the synthesized imports a real source range.
+Ptr<Annotation> FindFirstArkTSAnnotation(File& file)
+{
+    Ptr<Annotation> firstAnnotation{nullptr};
+    Walker(&file, [&firstAnnotation](Ptr<Node> node) {
+        if (firstAnnotation != nullptr) {
+            return VisitAction::STOP_NOW;
+        }
+        auto annotation = DynamicCast<Annotation*>(node);
+        if (annotation != nullptr && annotation->kind == AnnotationKind::ARKTS) {
+            firstAnnotation = annotation;
+            return VisitAction::STOP_NOW;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    return firstAnnotation;
+}
+
+// Whether a file selects the ArkTS interop capability. The scan-dependency
+// parser produces imports only, so fall back to the source text so the
+// auto-import contract also holds for `--scan-dependency`.
+bool FileSelectsArkTSInterop(
+    DiagnosticEngine& diag, SourceManager* sourceManager, File& file, Ptr<Annotation>& firstAnnotation)
+{
+    firstAnnotation = FindFirstArkTSAnnotation(file);
+    if (firstAnnotation != nullptr) {
+        return true;
+    }
+    return sourceManager != nullptr && file.decls.empty() &&
+        SourceUsesArkTSAnnotation(diag, *sourceManager, file);
+}
+
+// Point the synthesized imports at the first @ArkTS annotation, or at the file
+// when the annotation has no source positions.
+Range SyntheticImportRange(File& file, const Ptr<Annotation>& firstAnnotation)
+{
+    auto at = firstAnnotation != nullptr ? MakeRange(firstAnnotation->begin, firstAnnotation->end)
+                                         : MakeRange(file.begin, file.end);
+    if (at.HasZero() && firstAnnotation != nullptr) {
+        at = MakeRange(file.begin, file.end);
+    }
+    return at;
+}
+
+// Phase: package import (`import ohos.ark_interop`).
+void AddSyntheticPackageImport(
+    const ImportManager& importMgr, const Package& pkg, File& file, const Range& at, const std::string& fullPackageName)
+{
+    // Never import the package being compiled: a self import is rejected by
+    // CheckImports.
+    bool resolvable = IsPackageResolvable(importMgr, fullPackageName);
+    if (pkg.fullPackageName == fullPackageName || FileBindsPackageName(file, fullPackageName) || !resolvable) {
+        return;
+    }
+    auto import = CreateSyntheticPackageImport(fullPackageName, at);
+    import->curFile = &file;
+    import->content.curFile = &file;
+    file.imports.emplace_back(std::move(import));
+}
+
+// Phase: single-member import (`import arkts.lang.ExternConversionException`).
+void AddSyntheticMemberImport(const ImportManager& importMgr, const Package& pkg, File& file, const Range& at,
+    const std::string& fullPackageName, const std::string& member)
+{
+    if (pkg.fullPackageName == fullPackageName || FileBindsMemberDirectly(file, fullPackageName, member) ||
+        !IsPackageResolvable(importMgr, fullPackageName)) {
+        return;
+    }
+    auto import = CreateImportSpec(fullPackageName, member);
+    SetSyntheticImportRange(*import, at);
+    import->curFile = &file;
+    import->content.curFile = &file;
+    file.imports.emplace_back(std::move(import));
+}
+
+// Phase: aliased single-member import (`import x.y.Member as Alias`).
+void AddSyntheticMemberImportAs(const ImportManager& importMgr, const Package& pkg, File& file, const Range& at,
+    const std::string& fullPackageName, const std::string& member, const std::string& alias)
+{
+    if (pkg.fullPackageName == fullPackageName || FileBindsAlias(file, alias) ||
+        !IsPackageResolvable(importMgr, fullPackageName)) {
+        return;
+    }
+    auto import = CreateImportSpec(fullPackageName, member, alias);
+    SetSyntheticImportRange(*import, at);
+    import->curFile = &file;
+    import->content.curFile = &file;
+    file.imports.emplace_back(std::move(import));
+}
+
+// Phase: inject the complete interop import set, in the original order.
+void InjectArkTSInteropImports(
+    const ImportManager& importMgr, const Package& pkg, File& file, const Range& at)
+{
+    AddSyntheticPackageImport(importMgr, pkg, file, at, ARKTS_INTEROP_FULL_PACKAGE);
+    AddSyntheticPackageImport(importMgr, pkg, file, at, ARKTS_CONTEXT_ABI_FULL_PACKAGE);
+    // The generated guards always throw or catch these public types; import
+    // the single member so the wrapper compiles without asking the user for
+    // the package. A star import of the package already makes the name visible.
+    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION);
+    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANG_FULL_PACKAGE, ARKTS_RUNTIME_EXCEPTION);
+    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANG_FULL_PACKAGE, ARKTS_BUSINESS_EXCEPTION);
+    // The generated global-variable getter names BigInt through the
+    // compiler-generated alias and calls the `parse` extensions; both must
+    // resolve from the file's own imports, not just from the lowering-time
+    // target, because a speculative re-check clears it.
+    // The global-variable getter spells the conversion exception through a
+    // private alias: a bare name is ambiguous when std.core also exports it,
+    // and a package qualifier is not a type name.
+    AddSyntheticMemberImportAs(importMgr, pkg, file, at, ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION,
+        ARKTS_CONVERSION_ALIAS);
+    AddSyntheticMemberImportAs(importMgr, pkg, file, at, ARKTS_NUMERIC_FULL_PACKAGE, ARKTS_BIGINT_MEMBER,
+        ARKTS_BIGINT_ALIAS);
+    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_CONVERT_FULL_PACKAGE, ARKTS_PARSABLE_MEMBER);
+    // The getter's prologue reads the current call-scope entry through the
+    // bare generated name; bind it from its host package.
+    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_CONTEXT_ABI_FULL_PACKAGE, ARKTS_CONTEXT_CURRENT);
+}
+
+} // namespace
+
 void ImportManager::AddArkTSInteropImports(
     const std::vector<Ptr<Package>>& packages, SourceManager* sourceManager)
 {
@@ -1310,93 +1434,12 @@ void ImportManager::AddArkTSInteropImports(
             CJC_NULLPTR_CHECK(file);
             // Any @ArkTS annotation in the file (on a top-level declaration,
             // a class/interface member, a parameter or a global variable)
-            // selects the ArkTS interop capability. The first one also gives
-            // the synthesized imports a real source range.
+            // selects the ArkTS interop capability.
             Ptr<Annotation> firstAnnotation{nullptr};
-            Walker(file.get(), [&firstAnnotation](Ptr<Node> node) {
-                if (firstAnnotation != nullptr) {
-                    return VisitAction::STOP_NOW;
-                }
-                auto annotation = DynamicCast<Annotation*>(node);
-                if (annotation != nullptr && annotation->kind == AnnotationKind::ARKTS) {
-                    firstAnnotation = annotation;
-                    return VisitAction::STOP_NOW;
-                }
-                return VisitAction::WALK_CHILDREN;
-            }).Walk();
-            if (firstAnnotation == nullptr) {
-                // The scan-dependency parser produces imports only; fall back
-                // to the source text so the auto-import contract also holds
-                // for `--scan-dependency`.
-                if (sourceManager == nullptr || !file->decls.empty() ||
-                    !SourceUsesArkTSAnnotation(diag, *sourceManager, *file)) {
-                    continue;
-                }
+            if (!FileSelectsArkTSInterop(diag, sourceManager, *file, firstAnnotation)) {
+                continue;
             }
-            auto at = firstAnnotation != nullptr ? MakeRange(firstAnnotation->begin, firstAnnotation->end)
-                                                 : MakeRange(file->begin, file->end);
-            if (at.HasZero() && firstAnnotation != nullptr) {
-                at = MakeRange(file->begin, file->end);
-            }
-            auto addImport = [&](const std::string& fullPackageName) {
-                // Never import the package being compiled: a self import is
-                // rejected by CheckImports.
-                bool resolvable = IsPackageResolvable(*this, fullPackageName);
-                if (pkg->fullPackageName == fullPackageName || FileBindsPackageName(*file, fullPackageName) ||
-                    !resolvable) {
-                    return;
-                }
-                auto import = CreateSyntheticPackageImport(fullPackageName, at);
-                import->curFile = file.get();
-                import->content.curFile = file.get();
-                file->imports.emplace_back(std::move(import));
-            };
-            addImport(ARKTS_INTEROP_FULL_PACKAGE);
-            addImport(ARKTS_CONTEXT_ABI_FULL_PACKAGE);
-            // The generated guards always throw or catch these public types;
-            // import the single member so the wrapper compiles without asking
-            // the user for the package. A star import of the package already
-            // makes the name visible.
-            auto addMemberImport = [&](const std::string& fullPackageName, const std::string& member) {
-                if (pkg->fullPackageName == fullPackageName ||
-                    FileBindsMemberDirectly(*file, fullPackageName, member) ||
-                    !IsPackageResolvable(*this, fullPackageName)) {
-                    return;
-                }
-                auto import = CreateImportSpec(fullPackageName, member);
-                SetSyntheticImportRange(*import, at);
-                import->curFile = file.get();
-                import->content.curFile = file.get();
-                file->imports.emplace_back(std::move(import));
-            };
-            addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION);
-            addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_RUNTIME_EXCEPTION);
-            addMemberImport(ARKTS_LANG_FULL_PACKAGE, ARKTS_BUSINESS_EXCEPTION);
-            // The generated global-variable getter names BigInt through the
-            // compiler-generated alias and calls the `parse` extensions; both
-            // must resolve from the file's own imports, not just from the
-            // lowering-time target, because a speculative re-check clears it.
-            auto addMemberImportAs = [&](const std::string& fullPackageName, const std::string& member,
-                                         const std::string& alias) {
-                if (pkg->fullPackageName == fullPackageName || FileBindsAlias(*file, alias) ||
-                    !IsPackageResolvable(*this, fullPackageName)) {
-                    return;
-                }
-                auto import = CreateImportSpec(fullPackageName, member, alias);
-                SetSyntheticImportRange(*import, at);
-                import->curFile = file.get();
-                import->content.curFile = file.get();
-                file->imports.emplace_back(std::move(import));
-            };
-            // The global-variable getter spells the conversion exception
-            // through a private alias: a bare name is ambiguous when std.core
-            // also exports it, and a package qualifier is not a type name.
-            addMemberImportAs(ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION, ARKTS_CONVERSION_ALIAS);
-            addMemberImportAs(ARKTS_NUMERIC_FULL_PACKAGE, ARKTS_BIGINT_MEMBER, ARKTS_BIGINT_ALIAS);
-            addMemberImport(ARKTS_CONVERT_FULL_PACKAGE, ARKTS_PARSABLE_MEMBER);
-            // The getter's prologue reads the current call-scope entry through
-            // the bare generated name; bind it from its host package.
-            addMemberImport(ARKTS_CONTEXT_ABI_FULL_PACKAGE, ARKTS_CONTEXT_CURRENT);
+            InjectArkTSInteropImports(*this, *pkg, *file, SyntheticImportRange(*file, firstAnnotation));
         }
     }
 }

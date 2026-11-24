@@ -126,7 +126,8 @@ bool CallsSourceEntry(const FuncDecl& wrapper, const FuncDecl& entry)
         context->ref.identifier == contextParam->identifier &&
         (!context->ref.target || context->ref.target == contextParam) &&
         ref && (!ref->ref.target || ref->ref.target == &entry) && ref->ref.identifier == entry.identifier &&
-        ref->ref.identifier.Begin() == entry.identifier.Begin() && ref->ref.identifier.End() == entry.identifier.End() &&
+        ref->ref.identifier.Begin() == entry.identifier.Begin() &&
+        ref->ref.identifier.End() == entry.identifier.End() &&
         guarded->tryBlock->body.back()->astKind == ASTKind::RETURN_EXPR &&
         restoreName && (*restoreName == "__cj_arkts_restore" || *restoreName == "__cj_arkts_restore_scope") &&
         restoredValue &&
@@ -170,6 +171,80 @@ bool HasGeneratedEntry(const GeneratedDeclarations& declarations, const FuncDecl
     auto registration = DynamicCast<const VarDecl*>(registrationIt->second);
     return wrapper && registration && CallsSourceEntry(*wrapper, entry) &&
         RegistersWrapper(*registration, *wrapper, entry);
+}
+
+// Classify foreign declarations before the symbol table sees their ABI: mark
+// each surviving @ArkTS foreign function as its wrapper and drop the external
+// linkage markers. A declaration already refused by a declaration rule must
+// not get a wrapper, or it would emit a second round of diagnostics.
+void MarkForeignFunctionWrappers(Package& pkg)
+{
+    for (auto& file : pkg.files) {
+        for (auto& decl : file->decls) {
+            auto fd = DynamicCast<FuncDecl*>(decl.get());
+            if (!fd || !IsArkTSForeignFunction(*fd) || fd->TestAttr(Attribute::IS_BROKEN)) {
+                continue;
+            }
+            fd->EnableAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
+            fd->DisableAttr(Attribute::C, Attribute::NO_MANGLE);
+            fd->funcBody->DisableAttr(Attribute::C);
+            Utils::EraseIf(fd->modifiers, [](auto& mod) { return mod.modifier == TokenKind::FOREIGN; });
+        }
+    }
+}
+
+// Generate the callback and registration pair of one exported source entry.
+// Generating the callback first and failing later in BindSupportReferences
+// would leave PreCheck to report the generated signature's package-qualified
+// types as undeclared names, so the missing interop packages are detected up
+// front and nothing is generated.
+void GenerateEntryForDecl(File& file, FuncDecl& fd, ImportManager* importManager, DiagnosticEngine& diag,
+    ASTFactory& factory, ASTMangler& mangler, const std::string& prefix, size_t& index,
+    const GeneratedDeclarations& prepared, std::vector<OwnedPtr<Decl>>& generated)
+{
+    if (fd.TestAttr(Attribute::IS_BROKEN)) {
+        return;
+    }
+    const auto suffix = std::to_string(index++);
+    if (importManager != nullptr && !FileBindsInteropPackages(file)) {
+        auto builder =
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_support_unavailable, fd, fd.identifier.Val());
+        builder.AddNote("the entry registration requires 'ohos.ark_interop' and 'cj_arkts_context_v1' imports");
+        return;
+    }
+    if (HasGeneratedEntry(prepared, fd, suffix, prefix)) {
+        return;
+    }
+    for (auto& item : factory.CreateEntry(fd, suffix, prefix)) {
+        item->rawMangleName = mangler.Mangle(*item);
+        item->toBeCompiled = true;
+        generated.emplace_back(std::move(item));
+    }
+}
+
+// Reuse a verified existing callback/registration pair, otherwise generate one
+// per exported source entry and append all of them to their permanent files.
+void GenerateEntryDeclarations(
+    Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager* importManager)
+{
+    ASTFactory factory(diag, sourceManager);
+    ASTMangler mangler(pkg.fullPackageName);
+    const std::string prefix = ARKTS_GENERATED_PREFIX;
+    std::vector<OwnedPtr<Decl>> generated;
+    size_t index = 0;
+    for (auto& file : pkg.files) {
+        const auto prepared = CollectGeneratedDeclarations(*file);
+        for (auto& decl : file->decls) {
+            auto fd = DynamicCast<FuncDecl*>(decl.get());
+            if (fd && IsArkTSEntry(*fd) && fd->TestAttr(Attribute::PUBLIC)) {
+                GenerateEntryForDecl(
+                    *file, *fd, importManager, diag, factory, mangler, prefix, index, prepared, generated);
+            }
+        }
+    }
+    for (auto& decl : generated) {
+        decl->curFile->decls.emplace_back(std::move(decl));
+    }
 }
 
 } // namespace
@@ -225,64 +300,10 @@ void PrepareTypeCheck(Package& pkg, DiagnosticEngine& diag, SourceManager& sourc
     PrepareInterfaces(pkg, diag, sourceManager, importManager);
     // Classify foreign declarations before the symbol table sees their ABI;
     // their bodies are generated after semantic alias types are resolved.
-    for (auto& file : pkg.files) {
-        for (auto& decl : file->decls) {
-            auto fd = DynamicCast<FuncDecl*>(decl.get());
-            // A declaration already refused by a declaration rule (for
-            // example an invalid 'globalVar') must not get a wrapper: the
-            // wrapper would emit a second round of diagnostics for a
-            // declaration that can never be lowered.
-            if (!fd || !IsArkTSForeignFunction(*fd) || fd->TestAttr(Attribute::IS_BROKEN)) {
-                continue;
-            }
-            fd->EnableAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
-            fd->DisableAttr(Attribute::C, Attribute::NO_MANGLE);
-            fd->funcBody->DisableAttr(Attribute::C);
-            Utils::EraseIf(fd->modifiers, [](auto& mod) { return mod.modifier == TokenKind::FOREIGN; });
-        }
-    }
+    MarkForeignFunctionWrappers(pkg);
     // Validate declaration contracts before any entry is generated: a rejected
     // entry must not reach CreateEntry and produce derived diagnostics.
     DiagnoseArkTSDeclarations(pkg, diag);
-    ASTFactory factory(diag, sourceManager);
-    ASTMangler mangler(pkg.fullPackageName);
-    const std::string prefix = ARKTS_GENERATED_PREFIX;
-    std::vector<OwnedPtr<Decl>> generated;
-    size_t index = 0;
-    for (auto& file : pkg.files) {
-        const auto prepared = CollectGeneratedDeclarations(*file);
-        for (auto& decl : file->decls) {
-            auto fd = DynamicCast<FuncDecl*>(decl.get());
-            if (fd && IsArkTSEntry(*fd) && fd->TestAttr(Attribute::PUBLIC)) {
-                if (fd->TestAttr(Attribute::IS_BROKEN)) {
-                    continue;
-                }
-                const auto suffix = std::to_string(index++);
-                // Generating the callback first and failing later in
-                // BindSupportReferences would leave PreCheck to report the
-                // generated signature's package-qualified types as undeclared
-                // names. Detect the missing interop packages up front, report
-                // the single user-facing refusal, and generate nothing.
-                if (importManager != nullptr && !FileBindsInteropPackages(*file)) {
-                    auto builder = diag.DiagnoseRefactor(
-                        DiagKindRefactor::sema_arkts_foreign_support_unavailable, *fd, fd->identifier.Val());
-                    builder.AddNote(
-                        "the entry registration requires 'ohos.ark_interop' and 'cj_arkts_context_v1' imports");
-                    continue;
-                }
-                if (HasGeneratedEntry(prepared, *fd, suffix, prefix)) {
-                    continue;
-                }
-                for (auto& item : factory.CreateEntry(*fd, suffix, prefix)) {
-                    item->rawMangleName = mangler.Mangle(*item);
-                    item->toBeCompiled = true;
-                    generated.emplace_back(std::move(item));
-                }
-            }
-        }
-    }
-    for (auto& decl : generated) {
-        decl->curFile->decls.emplace_back(std::move(decl));
-    }
+    GenerateEntryDeclarations(pkg, diag, sourceManager, importManager);
 }
 } // namespace Cangjie::Native::FFI::ArkTS

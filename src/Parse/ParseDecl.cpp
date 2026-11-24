@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -2149,7 +2149,8 @@ OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
     // The @ArkTS relaxation is forwarded beside the untouched modifiers: only
     // an @ArkTS declaration may spell FOREIGN together with a visibility, and
     // on a function PRIVATE x FOREIGN still conflicts.
-    auto attrs = CheckDeclModifiers(ffiParser->ArkTS().PrepareForeignFunctionModifiers(scopeKind, modifiers, annos, *ret),
+    auto attrs = CheckDeclModifiers(
+        ffiParser->ArkTS().PrepareForeignFunctionModifiers(scopeKind, modifiers, annos, *ret),
         scopeKind, DefKind::FUNC, HasAnnotation(annos, AnnotationKind::ARKTS));
     for (auto& it : attrs) {
         ret->EnableAttr(it);

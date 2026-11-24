@@ -9,6 +9,9 @@
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/IntLiteral.h"
 #include "cangjie/AST/Utils.h"
+#include "cangjie/Basic/DiagnosticEngine.h"
+#include "cangjie/Basic/SourceManager.h"
+#include "cangjie/Lex/Lexer.h"
 #include "cangjie/Utils/FileUtil.h"
 #include "cangjie/Modules/CjoVersion.h"
 #include "cangjie/Parse/Parser.h"
@@ -135,12 +138,39 @@ void InitializeRawValueLiteral(LitConstExpr& literal)
     literal.SetTy(savedTy);
 }
 
+// The CJO value is only semi-trusted, and the compiler's literal parser
+// prefix-parses a spelling. Validate the whole text with the compiler's own
+// lexer: exactly one literal token, of the expected kind, then END. A leading
+// sign is a separate operator token, so only the magnitude is lexed.
+bool IsWholeNumberLiteralSpelling(const std::string& spelling, bool floating)
+{
+    if (spelling.empty()) {
+        return false;
+    }
+    const bool signedSpelling = spelling.front() == '-' || spelling.front() == '+';
+    const auto magnitude = spelling.substr(signedSpelling ? 1 : 0);
+    if (magnitude.empty()) {
+        return false;
+    }
+    DiagnosticEngine diag; // No handlers: lexer diagnostics stay local and are dropped.
+    SourceManager sourceManager;
+    Lexer lexer(magnitude, diag, sourceManager);
+    const auto literal = lexer.Next();
+    if (literal.kind != (floating ? TokenKind::FLOAT_LITERAL : TokenKind::INTEGER_LITERAL)) {
+        return false;
+    }
+    return lexer.Next().kind == TokenKind::END;
+}
+
 // Read the exact integer @RawValue from the literal's parsed value. IntLiteral
 // already folds 0b/0o/0x prefixes, '_' separators, an optional sign and a type
 // suffix, and records a 64-bit overflow in outOfRange; the counter keeps the
 // magnitude and sign separately so the auto-increment chain stays exact.
 bool ParseArkTSEnumInteger(LitConstExpr& literal, ArkTSEnumNumberCounter& out)
 {
+    if (!IsWholeNumberLiteralSpelling(literal.stringValue, false)) {
+        return false;
+    }
     InitializeRawValueLiteral(literal);
     // An empty spelling cannot be distinguished through IntLiteral: InitIntLiteral
     // returns early and leaves the default 0 with outOfRange false, so guard the
@@ -163,6 +193,9 @@ bool ParseArkTSEnumInteger(LitConstExpr& literal, ArkTSEnumNumberCounter& out)
 // conversion below that keeps the rejections the spelling parser had.
 bool ParseArkTSEnumFloat(LitConstExpr& literal, ArkTSEnumNumberCounter& out)
 {
+    if (!IsWholeNumberLiteralSpelling(literal.stringValue, true)) {
+        return false;
+    }
     InitializeRawValueLiteral(literal);
     const auto& value = literal.constNumValue.asFloat;
     if (literal.stringValue.empty() || value.flowStatus != Expr::FlowStatus::NORMAL) {
@@ -214,6 +247,195 @@ ArkTSLoweringState g_arktsState;
 // The experimental gate is not part of the per-pass lowering tables: the
 // checker sets it before ResetState, and it must survive that reset.
 bool g_arktsExperimentalEnabled = false;
+
+// Bind an injected package qualifier (ark_interop, cj_arkts_context_v1) to its
+// PackageDecl, so a same-named user declaration cannot capture it. Returns
+// whether the name was one of the package qualifiers.
+bool BindArkTSGeneratedPackageRef(Node& node, Reference& ref, const std::string& name,
+    ImportManager& importManager)
+{
+    if (name != Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE &&
+        name != Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE) {
+        return false;
+    }
+    auto fullName = name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE
+                        ? std::string("ohos.ark_interop")
+                        : std::string(Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE);
+    if (auto target = importManager.GetPackageDecl(fullName)) {
+        ref.target = target;
+        ref.targets = {target};
+        // A package qualifier has no value type; keep it untyped so the
+        // qualified node resolves its member through the PackageDecl.
+        node.SetTy({TypeManager::GetInvalidTy()});
+    }
+    return true;
+}
+
+// Bind a class/enum placeholder leaf of generated code to the declaration the
+// wrapper recorded for it.
+void BindArkTSGeneratedClassRef(Node& node, Reference& ref, const std::string& name,
+    const std::unordered_map<std::string, Ptr<Decl>>* classRefs)
+{
+    if (classRefs == nullptr) {
+        return;
+    }
+    auto found = classRefs->find(name);
+    if (found == classRefs->end()) {
+        return;
+    }
+    ref.identifier = found->second->identifier;
+    ref.target = found->second;
+    ref.targets = {found->second};
+    node.SetTy({found->second->GetTy()});
+}
+
+// Bind a well-known generated name (Option, the context support symbols and
+// the arkts.lang exceptions) to its imported declaration.
+void BindArkTSGeneratedKnownRef(RefExpr& re, const std::string& name, ImportManager& importManager)
+{
+    Ptr<Decl> target;
+    if (name == "Option") {
+        target = importManager.GetImportedDecl("std.core", "Option");
+    } else if (name == "__cj_arkts_current") {
+        target = importManager.GetImportedDecl(CONTEXT_PACKAGE, name);
+    } else if (name == "__cj_arkts_BigInt") {
+        target = importManager.GetImportedDecl("std.math.numeric", "BigInt");
+    } else if (name == "Exception") {
+        target = importManager.GetImportedDecl("std.core", "Exception");
+    } else if (name == ARKTS_CONVERSION_EXCEPTION || name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS ||
+        name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION ||
+        name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION) {
+        target = importManager.GetImportedDecl(ARKTS_LANGUAGE_PACKAGE, name);
+    }
+    if (target == nullptr) {
+        return;
+    }
+    re.ref.target = target;
+    re.ref.targets = {target};
+    re.SetTy(target->GetTy());
+}
+
+// Bind the synthesized `__argument_N` names to the function parameters. A
+// parameter precedes the generated body; using the declaration's beginning
+// makes Lookup reject it as declared after this compiler-generated use.
+void BindArkTSGeneratedArgumentRef(RefExpr& re, const FuncDecl& fd, const std::string& name,
+    const std::vector<Ptr<FuncParam>>& params)
+{
+    for (size_t i = 0; i < params.size(); ++i) {
+        if (name != "__argument_" + std::to_string(i)) {
+            continue;
+        }
+        re.ref.identifier = params[i]->identifier;
+        re.ref.target = params[i];
+        re.begin = fd.end;
+    }
+}
+
+// Rebinding of one generated RefType: a support-type qualifier, the shared
+// Option annotation, or a class/enum reference leaf.
+VisitAction RebindArkTSGeneratedRefType(RefType& refType, ImportManager& importManager,
+    const std::unordered_map<std::string, Ptr<Decl>>* classRefs)
+{
+    const auto name = refType.ref.identifier.Val();
+    if (BindArkTSGeneratedPackageRef(refType, refType.ref, name, importManager)) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    // A generated annotation such as Option<T> is pinned to std.core; a
+    // parameterized reference keeps its type arguments.
+    if (name == "Option") {
+        if (auto target = importManager.GetImportedDecl("std.core", "Option")) {
+            refType.ref.target = target;
+            refType.ref.targets = {target};
+            if (refType.typeArguments.empty()) {
+                refType.SetTy(target->GetTy());
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    }
+    BindArkTSGeneratedClassRef(refType, refType.ref, name, classRefs);
+    return VisitAction::WALK_CHILDREN;
+}
+
+// Rebinding of one generated RefExpr: a package qualifier, a reference leaf,
+// a support symbol or one of the function's own parameters.
+VisitAction RebindArkTSGeneratedRefExpr(RefExpr& re, const FuncDecl& fd,
+    const std::vector<Ptr<FuncParam>>& params, ImportManager& importManager,
+    const std::unordered_map<std::string, Ptr<Decl>>* classRefs)
+{
+    const auto name = re.ref.identifier.Val();
+    if (BindArkTSGeneratedPackageRef(re, re.ref, name, importManager)) {
+        return VisitAction::WALK_CHILDREN;
+    }
+    BindArkTSGeneratedClassRef(re, re.ref, name, classRefs);
+    BindArkTSGeneratedKnownRef(re, name, importManager);
+    BindArkTSGeneratedArgumentRef(re, fd, name, params);
+    return VisitAction::WALK_CHILDREN;
+}
+
+// Rebind one parsed node of a generated body: positions, placeholder literals,
+// reference leaves and return expressions pointing at the spliced body.
+VisitAction RebindArkTSGeneratedNode(Ptr<Node> node, const FuncDecl& fd, FuncBody& fb,
+    const std::unordered_map<std::string, std::string>& literals,
+    const std::vector<Ptr<FuncParam>>& params,
+    const std::unordered_map<std::string, Ptr<Decl>>* classRefs, ImportManager& importManager)
+{
+    node->begin = fd.begin;
+    node->end = fd.end;
+    if (auto literal = DynamicCast<LitConstExpr*>(node)) {
+        std::string rebound;
+        if (Native::FFI::ArkTS::ArkTSRebindPlaceholderLiteral(literal->stringValue, literals, rebound)) {
+            literal->stringValue = rebound;
+        }
+    }
+    if (auto refType = DynamicCast<RefType*>(node)) {
+        return RebindArkTSGeneratedRefType(*refType, importManager, classRefs);
+    }
+    if (auto re = DynamicCast<RefExpr*>(node)) {
+        return RebindArkTSGeneratedRefExpr(*re, fd, params, importManager, classRefs);
+    }
+    if (auto returned = DynamicCast<ReturnExpr*>(node)) {
+        returned->refFuncBody = &fb;
+    }
+    return VisitAction::WALK_CHILDREN;
+}
+
+// Enter the generated body's scope (one level below the function body),
+// collect its statements into the symbol table and expose the new locals to
+// declaration lookup; restores the previous scope before returning.
+void CollectArkTSGeneratedBodyScope(ASTContext& ctx, FuncBody& fb,
+    const std::vector<Ptr<FuncParam>>& params, ScopeManager& scopeManager, bool buildTrie)
+{
+    auto oldScope = ctx.currentScopeName;
+    auto oldLevel = ctx.currentScopeLevel;
+    ctx.currentScopeName = params.empty() ? fb.scopeName : params.front()->scopeName;
+    if (params.empty()) {
+        auto gate = ctx.currentScopeName.find_last_of(ScopeManagerApi::childScopeNameSplit);
+        if (gate != std::string::npos) {
+            ctx.currentScopeName[gate] = ScopeManagerApi::scopeNameSplit;
+        }
+    }
+    ctx.currentScopeLevel = fb.scopeLevel + 1;
+    Collector collector(scopeManager);
+    auto previousSymbol = ctx.symbolTable.empty() ? ctx.symbolTable.end() : std::prev(ctx.symbolTable.end());
+    // Function-body statements live directly in the parameter scope;
+    // collecting the Block would create a nested scope unlike
+    // Collector::CollectFuncBody and hide the generated local bindings.
+    for (auto& statement : fb.body->body) {
+        collector.BuildSymbolTable(ctx, statement.get(), buildTrie);
+    }
+    // PreCheck has already built the declaration lookup map. Updating
+    // only the symbol table leaves these new locals invisible to Lookup.
+    auto firstGenerated =
+        previousSymbol == ctx.symbolTable.end() ? ctx.symbolTable.begin() : std::next(previousSymbol);
+    for (auto it = firstGenerated; it != ctx.symbolTable.end(); ++it) {
+        auto& sym = *it;
+        if (auto generatedDecl = DynamicCast<Decl*>(sym->node)) {
+            ctx.AddDeclName({sym->name, ScopeManagerApi::GetScopeNameWithoutTail(sym->scopeName)}, *generatedDecl);
+        }
+    }
+    ctx.currentScopeName = oldScope;
+    ctx.currentScopeLevel = oldLevel;
+}
 }
 
 namespace Cangjie::Native::FFI::ArkTS {
@@ -241,173 +463,37 @@ bool TypeChecker::TypeCheckerImpl::SpliceArkTSGeneratedBody(ASTContext& ctx, AST
         return false;
     }
     fb.body = std::move(generatedFunc->funcBody->body);
-    Walker(fb.body.get(), [&](Ptr<Node> node) {
-        node->begin = fd.begin;
-        node->end = fd.end;
-        if (auto literal = DynamicCast<LitConstExpr*>(node); literal) {
-            std::string rebound;
-            if (Native::FFI::ArkTS::ArkTSRebindPlaceholderLiteral(literal->stringValue, literals, rebound)) {
-                literal->stringValue = rebound;
-            }
-        }
-        // Reference leaves of a generated getter body carry a class/enum
-        // placeholder: a type position (Array<T>, Option<T>) or a constructor
-        // reference. Bind both to the recorded declaration like the function
-        // and class walkers do.
-        if (auto refType = DynamicCast<RefType*>(node)) {
-            auto name = refType->ref.identifier.Val();
-            // A generated type annotation may qualify a support type
-            // (ark_interop.JSContext, ark_interop.JSValue); bind that package
-            // base like the function wrapper's support-reference pass does.
-            if (name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE ||
-                name == Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE) {
-                auto fullName = name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE
-                                    ? std::string("ohos.ark_interop")
-                                    : std::string(Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE);
-                if (auto target = importManager.GetPackageDecl(fullName)) {
-                    refType->ref.target = target;
-                    refType->ref.targets = {target};
-                    refType->SetTy({TypeManager::GetInvalidTy()});
-                }
-                return VisitAction::WALK_CHILDREN;
-            }
-            if (name == "Option") {
-                // A generated annotation such as Option<T> is pinned to
-                // std.core; a parameterized reference keeps its type arguments.
-                if (auto target = importManager.GetImportedDecl("std.core", "Option")) {
-                    refType->ref.target = target;
-                    refType->ref.targets = {target};
-                    if (refType->typeArguments.empty()) {
-                        refType->SetTy(target->GetTy());
-                    }
-                }
-                return VisitAction::WALK_CHILDREN;
-            }
-            if (classRefs != nullptr) {
-                auto found = classRefs->find(name);
-                if (found != classRefs->end()) {
-                    refType->ref.identifier = found->second->identifier;
-                    refType->ref.target = found->second;
-                    refType->ref.targets = {found->second};
-                    refType->SetTy(found->second->GetTy());
-                }
-            }
-            return VisitAction::WALK_CHILDREN;
-        }
-        if (auto re = DynamicCast<RefExpr*>(node)) {
-            auto name = re->ref.identifier.Val();
-            // Generated code spells the interop surface through the injected
-            // package qualifiers; bind the base reference to its PackageDecl so
-            // a same-named user declaration cannot capture it.
-            if (name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE ||
-                name == Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE) {
-                auto fullName = name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE
-                                    ? std::string("ohos.ark_interop")
-                                    : std::string(Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE);
-                if (auto target = importManager.GetPackageDecl(fullName)) {
-                    re->ref.target = target;
-                    re->ref.targets = {target};
-                    // A package qualifier has no value type; keep it untyped so
-                    // the qualified node resolves its member through the
-                    // PackageDecl.
-                    re->SetTy({TypeManager::GetInvalidTy()});
-                }
-                return VisitAction::WALK_CHILDREN;
-            }
-            if (classRefs != nullptr) {
-                auto found = classRefs->find(name);
-                if (found != classRefs->end()) {
-                    re->ref.identifier = found->second->identifier;
-                    re->ref.target = found->second;
-                    re->ref.targets = {found->second};
-                    re->SetTy(found->second->GetTy());
-                }
-            }
-            if (name == "Option") {
-                if (auto target = importManager.GetImportedDecl("std.core", "Option")) {
-                    re->ref.target = target;
-                    re->ref.targets = {target};
-                    re->SetTy(target->GetTy());
-                }
-            }
-            if (name == "__cj_arkts_current") {
-                if (auto target = importManager.GetImportedDecl(CONTEXT_PACKAGE, name)) {
-                    re->ref.target = target;
-                    re->ref.targets = {target};
-                    re->SetTy(target->GetTy());
-                }
-            }
-            if (name == "__cj_arkts_BigInt") {
-                if (auto target = importManager.GetImportedDecl("std.math.numeric", "BigInt")) {
-                    re->ref.target = target;
-                    re->ref.targets = {target};
-                    re->SetTy(target->GetTy());
-                }
-            }
-            if (name == "Exception") {
-                if (auto target = importManager.GetImportedDecl("std.core", "Exception")) {
-                    re->ref.target = target;
-                    re->ref.targets = {target};
-                    re->SetTy(target->GetTy());
-                }
-            }
-            if (name == ARKTS_CONVERSION_EXCEPTION || name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS ||
-                name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION ||
-                name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION) {
-                if (auto target = importManager.GetImportedDecl(ARKTS_LANGUAGE_PACKAGE, name)) {
-                    re->ref.target = target;
-                    re->ref.targets = {target};
-                    re->SetTy(target->GetTy());
-                }
-            }
-            for (size_t i = 0; i < params.size(); ++i) {
-                if (name == "__argument_" + std::to_string(i)) {
-                    re->ref.identifier = params[i]->identifier;
-                    re->ref.target = params[i];
-                    // Parameters precede the generated body. Using the
-                    // declaration's beginning makes Lookup reject them
-                    // as declared after this compiler-generated use.
-                    re->begin = fd.end;
-                }
-            }
-        }
-        if (auto returned = DynamicCast<ReturnExpr*>(node)) {
-            returned->refFuncBody = &fb;
-        }
-        return VisitAction::WALK_CHILDREN;
+    Walker(fb.body.get(), [&fd, &fb, &literals, &params, classRefs, this](Ptr<Node> node) {
+        return RebindArkTSGeneratedNode(node, fd, fb, literals, params, classRefs, importManager);
     }).Walk();
     AddCurFile(*fb.body, file);
-    auto oldScope = ctx.currentScopeName;
-    auto oldLevel = ctx.currentScopeLevel;
-    ctx.currentScopeName = params.empty() ? fb.scopeName : params.front()->scopeName;
-    if (params.empty()) {
-        auto gate = ctx.currentScopeName.find_last_of(ScopeManagerApi::childScopeNameSplit);
-        if (gate != std::string::npos) {
-            ctx.currentScopeName[gate] = ScopeManagerApi::scopeNameSplit;
-        }
-    }
-    ctx.currentScopeLevel = fb.scopeLevel + 1;
-    Collector collector(scopeManager);
-    auto previousSymbol = ctx.symbolTable.empty() ? ctx.symbolTable.end() : std::prev(ctx.symbolTable.end());
-    // Function-body statements live directly in the parameter scope;
-    // collecting the Block would create a nested scope unlike
-    // Collector::CollectFuncBody and hide the generated local bindings.
-    for (auto& statement : fb.body->body) {
-        collector.BuildSymbolTable(ctx, statement.get(), ci->buildTrie);
-    }
-    // PreCheck has already built the declaration lookup map. Updating
-    // only the symbol table leaves these new locals invisible to Lookup.
-    auto firstGenerated = previousSymbol == ctx.symbolTable.end() ? ctx.symbolTable.begin() : std::next(previousSymbol);
-    for (auto it = firstGenerated; it != ctx.symbolTable.end(); ++it) {
-        auto& sym = *it;
-        if (auto generatedDecl = DynamicCast<Decl*>(sym->node)) {
-            ctx.AddDeclName({sym->name, ScopeManagerApi::GetScopeNameWithoutTail(sym->scopeName)},
-                *generatedDecl);
-        }
-    }
-    ctx.currentScopeName = oldScope;
-    ctx.currentScopeLevel = oldLevel;
+    CollectArkTSGeneratedBodyScope(ctx, fb, params, scopeManager, ci->buildTrie);
     return true;
+}
+
+// Refuse the two removed `foreign let`/`foreign var` spellings at one
+// top-level declaration. ArkTS global variables are declared with
+// `@ArkTS[globalVar: true] foreign func`.
+void CheckArkTSGlobalVarDecl(Decl& decl, DiagnosticEngine& diag)
+{
+    if (decl.outerDecl) {
+        return;
+    }
+    if (Native::FFI::ArkTS::IsGlobalVar(decl)) {
+        auto fd = DynamicCast<FuncDecl*>(&decl);
+        if (fd == nullptr || !decl.TestAttr(Attribute::FOREIGN)) {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_not_foreign_func, decl,
+                decl.identifier.Val());
+        }
+        return;
+    }
+    if (!decl.HasAnno(AnnotationKind::ARKTS) || !decl.TestAttr(Attribute::FOREIGN)) {
+        return;
+    }
+    auto vd = DynamicCast<VarDecl*>(&decl);
+    if (vd) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_var_unsupported, *vd, vd->identifier.Val());
+    }
 }
 
 // Prepare the variable form: `@ArkTS[globalVar: true] foreign func` keeps its
@@ -418,30 +504,9 @@ void Native::FFI::ArkTS::PrepareVariables(Package& pkg, DiagnosticEngine& diag)
     if (pkg.TestAttr(Attribute::IMPORTED)) {
         return;
     }
-    // ArkTS global variables are declared with `@ArkTS[globalVar: true] foreign
-    // func`. Refuse the two removed spellings here, before the C FFI path would
-    // try to lower them as external C bindings: a foreign `let`/`var`, and a
-    // `globalVar: true` on anything other than a foreign func.
     for (auto& file : pkg.files) {
         for (auto& decl : file->decls) {
-            if (decl->outerDecl) {
-                continue;
-            }
-            if (IsGlobalVar(*decl)) {
-                auto fd = DynamicCast<FuncDecl*>(decl.get());
-                if (fd == nullptr || !decl->TestAttr(Attribute::FOREIGN)) {
-                    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_not_foreign_func, *decl,
-                        decl->identifier.Val());
-                }
-                continue;
-            }
-            if (!decl->HasAnno(AnnotationKind::ARKTS) || !decl->TestAttr(Attribute::FOREIGN)) {
-                continue;
-            }
-            auto vd = DynamicCast<VarDecl*>(decl.get());
-            if (vd) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_var_unsupported, *vd, vd->identifier.Val());
-            }
+            CheckArkTSGlobalVarDecl(*decl, diag);
         }
     }
 }
@@ -501,7 +566,7 @@ bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vecto
 // members other than constructors; an exported enum keeps them unexported.
 bool ValidateArkTSEnumShape(EnumDecl& decl, DiagnosticEngine* diag, bool foreign)
 {
-    auto report = [&](DiagKindRefactor kind, Node& at, auto&&... args) {
+    auto report = [&diag](DiagKindRefactor kind, Node& at, auto&&... args) {
         if (diag != nullptr) {
             diag->DiagnoseRefactor(kind, at, std::forward<decltype(args)>(args)...);
         }
@@ -536,16 +601,184 @@ bool BuildArkTSEnumMembers(EnumDecl& decl, DiagnosticEngine* diag, std::vector<A
     return BuildArkTSEnumValueChain(decl, diag, members);
 }
 
+namespace {
+const Annotation* FindArkTSRawValue(const Decl& ctor)
+{
+    for (auto& anno : ctor.annotations) {
+        if (anno->kind == AnnotationKind::ARKTS_RAW_VALUE) {
+            return anno.get(); // Duplicates are rejected by the parser.
+        }
+    }
+    return nullptr;
+}
+
+LitConstExpr* ArkTSRawValueLiteral(const Annotation* value)
+{
+    if (value == nullptr || value->args.size() != 1 || value->args[0]->expr == nullptr) {
+        return nullptr;
+    }
+    return DynamicCast<LitConstExpr*>(value->args[0]->expr.get());
+}
+
+void ReportArkTSEnumMismatch(
+    DiagnosticEngine* diag, Node& at, const std::string& expected, const std::string& actual)
+{
+    if (diag != nullptr) {
+        diag->DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, at, expected, actual);
+    }
+}
+
+void ReportArkTSEnumPayloadArity(DiagnosticEngine* diag, Node& at, const std::string& name)
+{
+    if (diag != nullptr) {
+        diag->DiagnoseRefactor(DiagKindRefactor::sema_arkts_enum_payload_arity, at, name);
+    }
+}
+
+// Associated-value position of a payload constructor: arity plus the first
+// parameter's type node (declaring package) or resolved type (imported ctor).
+struct ArkTSPayloadSlot {
+    Ptr<Type> type;
+    Ptr<Ty> ty;
+    size_t arity{0};
+};
+
+ArkTSPayloadSlot CollectArkTSPayloadSlot(const FuncDecl& funcCtor)
+{
+    ArkTSPayloadSlot slot;
+    if (funcCtor.funcBody == nullptr) {
+        return slot;
+    }
+    for (auto& list : funcCtor.funcBody->paramLists) {
+        slot.arity += list->params.size();
+        if (slot.type != nullptr || slot.ty != nullptr || list->params.empty()) {
+            continue;
+        }
+        slot.type = list->params.front()->type;
+        if (slot.type == nullptr) {
+            slot.ty = list->params.front()->DataTy();
+        }
+    }
+    return slot;
+}
+
+// A constructor with an associated value maps a type member of a union-mode
+// enum. It carries its payload type, never a literal @RawValue value.
+bool AddArkTSEnumPayloadMember(FuncDecl& funcCtor, DiagnosticEngine* diag,
+    std::vector<ArkTSEnumMapping>& members)
+{
+    if (FindArkTSRawValue(funcCtor) != nullptr) {
+        return false; // The annotation check reports the misplaced value.
+    }
+    const auto slot = CollectArkTSPayloadSlot(funcCtor);
+    if (slot.arity != 1 || (slot.type == nullptr && slot.ty == nullptr)) {
+        ReportArkTSEnumPayloadArity(diag, funcCtor, funcCtor.identifier.Val());
+        return false;
+    }
+    members.push_back({&funcCtor, ArkTSEnumValueKind::PAYLOAD, "", slot.type, slot.ty});
+    return true;
+}
+
+bool AddArkTSEnumBoolMember(VarDecl& varCtor, const LitConstExpr& literal, DiagnosticEngine* diag,
+    bool& counterValid, std::vector<ArkTSEnumMapping>& members)
+{
+    // A boolean member maps its literal spelling verbatim (true/false); like a
+    // string member it disables the numeric auto-increment. The design keeps
+    // boolean for the §7.2 union-type mapping; an ArkTS enum and a union
+    // carrier are indistinguishable here, so a boolean member is accepted as
+    // that case. The spelling is spliced into generated source, so an imported
+    // package whose CJO carries any other text is refused here.
+    counterValid = false;
+    if (literal.stringValue != "true" && literal.stringValue != "false") {
+        ReportArkTSEnumMismatch(diag, varCtor, "Boolean", "true or false");
+        return false;
+    }
+    members.push_back({&varCtor, ArkTSEnumValueKind::BOOLEAN, literal.stringValue, nullptr, nullptr});
+    return true;
+}
+
+bool AddArkTSEnumFloatMember(VarDecl& varCtor, LitConstExpr& literal, DiagnosticEngine* diag,
+    ArkTSEnumNumberCounter& counter, bool& counterValid, std::vector<ArkTSEnumMapping>& members)
+{
+    // NumericLiteral in the design includes floating values, so an ArkTS enum
+    // member may be `A = 1.5`; the value maps through Float64 exactly like an
+    // integer member.
+    if (!ParseArkTSEnumFloat(literal, counter)) {
+        ReportArkTSEnumMismatch(diag, varCtor, "Float64", "out of range");
+        return false;
+    }
+    counterValid = true;
+    members.push_back({&varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr, nullptr});
+    return true;
+}
+
+bool AddArkTSEnumIntegerMember(VarDecl& varCtor, LitConstExpr& literal, DiagnosticEngine* diag,
+    ArkTSEnumNumberCounter& counter, bool& counterValid, std::vector<ArkTSEnumMapping>& members)
+{
+    // Normalize the spelling to canonical decimal text (folding 0b/0o/0x
+    // prefixes and '_' separators) so the auto-increment chain and the
+    // generated Float64(<value>) both see the same exact number; a value at or
+    // above 2^63 is spelled as a float literal so the unsuffixed Int64 range
+    // check does not reject it.
+    if (!ParseArkTSEnumInteger(literal, counter)) {
+        ReportArkTSEnumMismatch(diag, varCtor, "Integer", "out of range");
+        return false;
+    }
+    counterValid = true;
+    members.push_back({&varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr, nullptr});
+    return true;
+}
+
+// An omitted value continues the numeric chain. It is refused after a string
+// or boolean member, where no auto-increment rule applies.
+bool AddArkTSEnumOmittedMember(VarDecl& varCtor, DiagnosticEngine* diag,
+    ArkTSEnumNumberCounter& counter, bool counterValid, std::vector<ArkTSEnumMapping>& members)
+{
+    if (!counterValid) {
+        ReportArkTSEnumMismatch(
+            diag, varCtor, "an explicit '@RawValue'", "a value after a non-numeric member");
+        return false;
+    }
+    if (!counter.Increment()) {
+        ReportArkTSEnumMismatch(diag, varCtor, "Integer", "out of range");
+        return false;
+    }
+    members.push_back({&varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr, nullptr});
+    return true;
+}
+
+// One non-payload constructor: dispatch on the literal kind of its @RawValue,
+// falling back to the auto-increment rule when no literal is present.
+bool AddArkTSEnumValueMember(VarDecl& varCtor, const Annotation* value, DiagnosticEngine* diag,
+    ArkTSEnumNumberCounter& counter, bool& counterValid, std::vector<ArkTSEnumMapping>& members)
+{
+    auto literal = ArkTSRawValueLiteral(value);
+    if (literal != nullptr) {
+        switch (literal->kind) {
+            case LitConstKind::STRING:
+                counterValid = false;
+                members.push_back(
+                    {&varCtor, ArkTSEnumValueKind::STRING, literal->stringValue, nullptr, nullptr});
+                return true;
+            case LitConstKind::BOOL:
+                return AddArkTSEnumBoolMember(varCtor, *literal, diag, counterValid, members);
+            case LitConstKind::FLOAT:
+                return AddArkTSEnumFloatMember(varCtor, *literal, diag, counter, counterValid, members);
+            case LitConstKind::INTEGER:
+                return AddArkTSEnumIntegerMember(varCtor, *literal, diag, counter, counterValid, members);
+            default:
+                break;
+        }
+    }
+    return AddArkTSEnumOmittedMember(varCtor, diag, counter, counterValid, members);
+}
+} // namespace
+
 // Build the value chain of an @ArkTS enum. `diag` is null when the enum is
 // imported; the declaring package already validated the values and only needs
 // the serialized mapping.
 bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vector<ArkTSEnumMapping>& members)
 {
-    auto report = [&](DiagKindRefactor kind, Node& at, auto&&... args) {
-        if (diag != nullptr) {
-            diag->DiagnoseRefactor(kind, at, std::forward<decltype(args)>(args)...);
-        }
-    };
     bool valid = true;
     // Auto numbering mirrors ArkTS: the first member defaults to 0 and an
     // omitted value continues the previous numeric value + 1; a string member
@@ -553,123 +786,20 @@ bool BuildArkTSEnumValueChain(EnumDecl& decl, DiagnosticEngine* diag, std::vecto
     // is exact (not double), so large or non-decimal spellings do not drift.
     ArkTSEnumNumberCounter counter{1, true}; // -1, so the first omitted member is 0.
     bool counterValid = true;
-    auto findRawValue = [](const Decl& ctor) -> const Annotation* {
-        for (auto& anno : ctor.annotations) {
-            if (anno->kind == AnnotationKind::ARKTS_RAW_VALUE) {
-                return anno.get(); // Duplicates are rejected by the parser.
-            }
-        }
-        return nullptr;
-    };
     for (auto& ctor : decl.constructors) {
+        if (auto funcCtor = DynamicCast<FuncDecl*>(ctor.get())) {
+            valid = AddArkTSEnumPayloadMember(*funcCtor, diag, members) && valid;
+            continue;
+        }
         auto varCtor = DynamicCast<VarDecl*>(ctor.get());
-        auto funcCtor = DynamicCast<FuncDecl*>(ctor.get());
-        if (funcCtor != nullptr) {
-            // A constructor with an associated value maps a type member of a
-            // union-mode enum. It carries its payload type, never a literal
-            // @RawValue value.
-            if (findRawValue(*funcCtor) != nullptr) {
-                valid = false; // The annotation check reports the misplaced value.
-                continue;
-            }
-            Ptr<Type> payloadType;
-            Ptr<Ty> payloadTy;
-            size_t arity = 0;
-            if (funcCtor->funcBody != nullptr) {
-                for (auto& list : funcCtor->funcBody->paramLists) {
-                    arity += list->params.size();
-                    if (payloadType == nullptr && payloadTy == nullptr && !list->params.empty()) {
-                        auto& param = list->params.front();
-                        payloadType = param->type;
-                        if (payloadType == nullptr) {
-                            payloadTy = param->DataTy();
-                        }
-                    }
-                }
-            }
-            if (arity != 1 || (payloadType == nullptr && payloadTy == nullptr)) {
-                report(DiagKindRefactor::sema_arkts_enum_payload_arity, *funcCtor, funcCtor->identifier.Val());
-                valid = false;
-                continue;
-            }
-            members.push_back({funcCtor, ArkTSEnumValueKind::PAYLOAD, "", payloadType, payloadTy});
-            continue;
-        }
         if (varCtor == nullptr) {
-            report(DiagKindRefactor::sema_arkts_enum_payload_arity, *ctor, ctor->identifier.Val());
+            ReportArkTSEnumPayloadArity(diag, *ctor, ctor->identifier.Val());
             valid = false;
             continue;
         }
-        const Annotation* value = findRawValue(*varCtor);
-        auto literal = (value != nullptr && value->args.size() == 1 && value->args[0]->expr != nullptr)
-                           ? DynamicCast<LitConstExpr*>(value->args[0]->expr.get())
-                           : nullptr;
-        if (literal && literal->kind == LitConstKind::STRING) {
-            counterValid = false;
-            members.push_back({varCtor, ArkTSEnumValueKind::STRING, literal->stringValue, nullptr, nullptr});
-            continue;
-        }
-        if (literal && literal->kind == LitConstKind::BOOL) {
-            // A boolean member maps its literal spelling verbatim (true/false);
-            // like a string member it disables the numeric auto-increment. The
-            // design keeps boolean for the §7.2 union-type mapping; an ArkTS
-            // enum and a union carrier are indistinguishable here, so a boolean
-            // member is accepted as that case. The spelling is spliced into
-            // generated source, so an imported package whose CJO carries any
-            // other text is refused here instead of reaching the generator.
-            counterValid = false;
-            if (literal->stringValue != "true" && literal->stringValue != "false") {
-                report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Boolean",
-                    "true or false");
-                valid = false;
-                continue;
-            }
-            members.push_back({varCtor, ArkTSEnumValueKind::BOOLEAN, literal->stringValue, nullptr, nullptr});
-            continue;
-        }
-        if (literal && literal->kind == LitConstKind::FLOAT) {
-            // NumericLiteral in the design includes floating values, so an
-            // ArkTS enum member may be `A = 1.5`; the value maps through
-            // Float64 exactly like an integer member.
-            if (!ParseArkTSEnumFloat(*literal, counter)) {
-                report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Float64", "out of range");
-                valid = false;
-                continue;
-            }
-            counterValid = true;
-            members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr, nullptr});
-            continue;
-        }
-        if (literal && literal->kind == LitConstKind::INTEGER) {
-            // Normalize the spelling to canonical decimal text (folding 0b/0o/0x
-            // prefixes and '_' separators) so the auto-increment chain and the
-            // generated Float64(<value>) both see the same exact number; a value
-            // at or above 2^63 is spelled as a float literal so the unsuffixed
-            // Int64 range check does not reject it.
-            if (!ParseArkTSEnumInteger(*literal, counter)) {
-                report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Integer", "out of range");
-                valid = false;
-                continue;
-            }
-            counterValid = true;
-            members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr, nullptr});
-            continue;
-        }
-        if (!counterValid) {
-            // An omitted value follows a string or boolean member, so no
-            // auto-increment rule applies; name the requirement instead of
-            // claiming a String predecessor.
-            report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "an explicit '@RawValue'",
-                "a value after a non-numeric member");
-            valid = false;
-            continue;
-        }
-        if (!counter.Increment()) {
-            report(DiagKindRefactor::sema_arkts_enum_value_type_mismatch, *varCtor, "Integer", "out of range");
-            valid = false;
-            continue;
-        }
-        members.push_back({varCtor, ArkTSEnumValueKind::NUMBER, counter.DecimalSpelling(), nullptr, nullptr});
+        valid = AddArkTSEnumValueMember(*varCtor, FindArkTSRawValue(*varCtor), diag, counter, counterValid,
+                    members) &&
+            valid;
     }
     return valid && !members.empty();
 }
@@ -764,11 +894,234 @@ void Native::FFI::ArkTS::PrepareVariablesAndEnums(AST::Package& pkg, DiagnosticE
     PrepareEnums(pkg, diag);
 }
 
+namespace {
+// Checker-owned entry points and state that a free helper cannot reach
+// directly, assembled once per package by LowerArkTSVariables.
+struct ArkTSGlobalVarLowering {
+    ASTContext& ctx;
+    DiagnosticEngine& diag;
+    ImportManager& importManager;
+    std::unordered_map<Ptr<const Node>, Ptr<Decl>>& supportRefs;
+    std::function<Native::FFI::ArkTS::ArkTSTypeDesc(Ptr<Type>, bool)> classifyPosition;
+    std::function<bool(FuncDecl&, const std::string&, const std::unordered_map<std::string, std::string>&,
+        const std::vector<Ptr<FuncParam>>&, const std::unordered_map<std::string, Ptr<Decl>>*)>
+        spliceBody;
+};
+
+bool IsArkTSGlobalVarGetter(const FuncDecl& fd)
+{
+    return fd.funcBody != nullptr && fd.funcBody->body == nullptr && Native::FFI::ArkTS::IsGlobalVar(fd);
+}
+
+bool ArkTSGlobalVarHasParams(const FuncDecl& fd)
+{
+    for (auto& list : fd.funcBody->paramLists) {
+        if (!list->params.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Fold and diagnose the @ArkTS options of a globalVar getter, then resolve the
+// module value its receiver is selected from.
+bool FoldArkTSGlobalVarOptions(FuncDecl& fd, const ASTContext& ctx, DiagnosticEngine& diag,
+    std::unordered_map<std::string, std::string>& options, std::string& moduleValue)
+{
+    Native::FFI::ArkTS::ArkTSOptionStatus optionStatus;
+    if (!Native::FFI::ArkTS::ArkTSDeclOptions(fd, options, &optionStatus)) {
+        Native::FFI::ArkTS::DiagnoseArkTSOptionProblem(diag, fd, options, optionStatus);
+        fd.EnableAttr(Attribute::IS_BROKEN);
+        return false;
+    }
+    // The wrapper option pass also refuses an explicitly empty string option;
+    // the globalVar path must not accept one just because that pass skips it.
+    Ptr<Annotation> arktsLayer = nullptr;
+    for (auto& annotation : fd.annotations) {
+        if (annotation != nullptr && annotation->kind == AnnotationKind::ARKTS) {
+            arktsLayer = annotation.get();
+            break;
+        }
+    }
+    for (const auto& [optionName, optionValue] : options) {
+        if (!Native::FFI::ArkTS::ArkTSOptionValueEmpty(optionValue)) {
+            continue;
+        }
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty,
+            arktsLayer != nullptr ? static_cast<Node&>(*arktsLayer) : static_cast<Node&>(fd), optionName);
+        fd.EnableAttr(Attribute::IS_BROKEN);
+        return false;
+    }
+    moduleValue = options.count("module") != 0 ? options.at("module") : ctx.curPackage->fullPackageName;
+    if (moduleValue.empty()) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_unsupported_signature, fd, fd.identifier.Val());
+        fd.EnableAttr(Attribute::IS_BROKEN);
+        return false;
+    }
+    if (options.count("module") != 0 && Native::FFI::ArkTS::ArkTSModulePathLike(moduleValue)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_module_path_invalid, fd, moduleValue,
+            fd.identifier.Val());
+        fd.EnableAttr(Attribute::IS_BROKEN);
+        return false;
+    }
+    return true;
+}
+
+std::unordered_map<std::string, std::string> MakeArkTSGlobalVarLiterals(const FuncDecl& fd,
+    const std::unordered_map<std::string, std::string>& options, const std::string& moduleValue,
+    const std::vector<std::string>& segments)
+{
+    std::unordered_map<std::string, std::string> literals{
+        {Native::FFI::ArkTS::ARKTS_PLACEHOLDER_MODULE, moduleValue},
+        {Native::FFI::ArkTS::ARKTS_PLACEHOLDER_NAME,
+            options.count("foreignName") ? options.at("foreignName") : fd.identifier.Val()}};
+    for (size_t i = 0; i < segments.size(); ++i) {
+        literals[std::string(Native::FFI::ArkTS::ARKTS_PLACEHOLDER_NAMESPACE) + std::to_string(i) + "__"] =
+            segments[i];
+    }
+    return literals;
+}
+
+// The getter's conversion throws use the private alias injected for this file;
+// a bare ExternConversionException is ambiguous with std.core's export.
+std::string AliasArkTSConversionException(const std::string& code)
+{
+    // Only identifier occurrences in the generated *code* are aliased: a user
+    // string value that spells the same text (an enum @RawValue, for example)
+    // must keep its bytes. The generator's strings use only the escapes emitted
+    // by StringConvertor, so a quote/backslash scanner is enough here.
+    const std::string bareConversion = "ExternConversionException";
+    const std::string aliasedConversion = Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS;
+    auto isIdentifierChar = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_'; };
+    std::string result;
+    result.reserve(code.size() + 32);
+    bool inString = false;
+    bool escaped = false;
+    for (size_t i = 0; i < code.size();) {
+        const char c = code[i];
+        if (inString) {
+            result += c;
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                inString = false;
+            }
+            ++i;
+            continue;
+        }
+        if (c == '"') {
+            inString = true;
+            result += c;
+            ++i;
+            continue;
+        }
+        const bool matches = code.compare(i, bareConversion.size(), bareConversion) == 0;
+        const bool leftBoundary = i == 0 || !isIdentifierChar(code[i - 1]);
+        const size_t after = i + bareConversion.size();
+        const bool rightBoundary = after >= code.size() || !isIdentifierChar(code[after]);
+        if (matches && leftBoundary && rightBoundary) {
+            result += aliasedConversion;
+            i = after;
+            continue;
+        }
+        result += c;
+        ++i;
+    }
+    return result;
+}
+
+// Lower one `@ArkTS[globalVar: true] foreign func` into its read body. The
+// declaration passed the IsArkTSGlobalVarGetter guard.
+void LowerArkTSGlobalVarGetter(ArkTSGlobalVarLowering& lower, FuncDecl& fd)
+{
+    auto& diag = lower.diag;
+    // A globalVar func maps an ArkTS global variable: it must be parameterless
+    // and carry an explicit return type (the value's type). Lowering reads the
+    // module property once and converts it, exactly like the former
+    // `foreign let` getter did.
+    if (ArkTSGlobalVarHasParams(fd)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_has_params, fd, fd.identifier.Val());
+        return;
+    }
+    if (fd.funcBody->retType == nullptr) {
+        // The parser already rejects a foreign function without an explicit
+        // return type; keep the guard so the lowering below never dereferences
+        // a null type.
+        return;
+    }
+    if (!lower.importManager.GetImportedDecl(CONTEXT_PACKAGE, "__cj_arkts_current")) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_bridge_pending, fd);
+        return;
+    }
+    // The getter result maps through the same classifier as a foreign function
+    // return, so every ArkTS-compatible position (scalar, Option, Array, tuple,
+    // foreign class/interface, foreign enum) is accepted; a genuinely
+    // unsupported position keeps the general foreign return-type diagnostic.
+    auto resultType = lower.classifyPosition(fd.funcBody->retType.get(), false);
+    if (!Native::FFI::ArkTS::ArkTSTypeDescGeneratable(resultType)) {
+        auto& retType = *fd.funcBody->retType;
+        auto& at = retType.begin.IsZero() ? static_cast<Node&>(fd) : static_cast<Node&>(retType);
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, at,
+            retType.DataTy() ? Ty::ToString(retType.DataTy()) : std::string(), fd.identifier.Val());
+        return;
+    }
+    // A globalVar function is excluded from the wrapper option pass in
+    // LowerFunctions, so its options are folded and diagnosed here. It must
+    // obey the same module non-empty / path-like rules as an ordinary foreign
+    // function.
+    std::unordered_map<std::string, std::string> options;
+    std::string moduleValue;
+    if (!FoldArkTSGlobalVarOptions(fd, lower.ctx, diag, options, moduleValue)) {
+        return;
+    }
+    // The receiver follows the shared rule: an omitted module option in
+    // arkts.lang selects ctx.global, every other declaration resolves the
+    // ArkTS module object.
+    Native::FFI::ArkTS::ArkTSReceiverKind receiver =
+        Native::FFI::ArkTS::ArkTSReceiverFor(options.count("module") != 0, moduleValue);
+    auto segments =
+        Native::FFI::ArkTS::ArkTSNamespaceSegments(options.count("namespace") ? options.at("namespace") : "");
+    auto literals = MakeArkTSGlobalVarLiterals(fd, options, moduleValue, segments);
+    // Reference leaves (foreign class/interface/enum) are emitted by
+    // placeholder; SpliceArkTSGeneratedBody binds them through this map.
+    std::unordered_map<std::string, Ptr<Decl>> classRefs;
+    auto code = AliasArkTSConversionException(Native::FFI::ArkTS::ArkTSGlobalVariableGetterSource(
+        resultType, segments.size(), Native::FFI::ArkTS::ARKTS_GENERATED_PREFIX, receiver, &classRefs));
+    if (code.empty() || !lower.spliceBody(fd, code, literals, {}, &classRefs)) {
+        // A failed splice leaves the declaration without a body; report it here
+        // instead of letting it fail later in CHIR or codegen.
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_wrapper_unavailable, fd, fd.identifier.Val());
+        fd.EnableAttr(Attribute::IS_BROKEN);
+        return;
+    }
+    // A composite getter emits the same support references as a function
+    // wrapper (ExternConversionException and friends); bind them to the
+    // imported declarations so an unqualified name cannot resolve ambiguously
+    // through two star imports.
+    if (!Native::FFI::ArkTS::BindArkTSSupportReferences(
+            fd, *fd.funcBody->body, lower.importManager, diag, lower.supportRefs, fd.identifier.Val())) {
+        fd.EnableAttr(Attribute::IS_BROKEN);
+    }
+}
+} // namespace
+
 void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
 {
     if (!Native::FFI::ArkTS::PassEnabled(*ctx.curPackage)) {
         return;
     }
+    ArkTSGlobalVarLowering lower{ctx, diag, importManager, arktsSupportRefs,
+        [this, &ctx](Ptr<Type> type, bool allowNestedOptional) {
+            return ArkTSClassifyPosition(ctx, type, allowNestedOptional);
+        },
+        [this, &ctx](FuncDecl& fd, const std::string& code,
+            const std::unordered_map<std::string, std::string>& literals,
+            const std::vector<Ptr<FuncParam>>& params,
+            const std::unordered_map<std::string, Ptr<Decl>>* classRefs) {
+            return SpliceArkTSGeneratedBody(ctx, fd, code, literals, params, classRefs);
+        }};
     for (auto& file : ctx.curPackage->files) {
         // A public non-foreign @ArkTS global variable is exported to ArkTS,
         // so its declared type must be ArkTS-compatible. An inferred variable
@@ -794,138 +1147,10 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
         }
         for (auto& decl : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(decl.get());
-            if (!fd || !fd->funcBody || fd->funcBody->body || !Native::FFI::ArkTS::IsGlobalVar(*fd)) {
+            if (!fd || !IsArkTSGlobalVarGetter(*fd)) {
                 continue;
             }
-            // A globalVar func maps an ArkTS global variable: it must be
-            // parameterless and carry an explicit return type (the value's
-            // type). Lowering reads the module property once and converts it,
-            // exactly like the former `foreign let` getter did.
-            bool hasParams = false;
-            for (auto& list : fd->funcBody->paramLists) {
-                hasParams = hasParams || !list->params.empty();
-            }
-            if (hasParams) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_has_params, *fd, fd->identifier.Val());
-                continue;
-            }
-            if (fd->funcBody->retType == nullptr) {
-                // The parser already rejects a foreign function without an
-                // explicit return type; keep the guard so the lowering below
-                // never dereferences a null type.
-                continue;
-            }
-            if (!importManager.GetImportedDecl(CONTEXT_PACKAGE, "__cj_arkts_current")) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_bridge_pending, *fd);
-                continue;
-            }
-            // The getter result maps through the same classifier as a foreign
-            // function return, so every ArkTS-compatible position (scalar,
-            // Option, Array, tuple, foreign class/interface, foreign enum) is
-            // accepted; a genuinely unsupported position keeps the general
-            // foreign return-type diagnostic below.
-            auto resultType = ArkTSClassifyPosition(ctx, fd->funcBody->retType.get());
-            if (!ArkTSTypeDescGeneratable(resultType)) {
-                auto& retType = *fd->funcBody->retType;
-                auto& at = retType.begin.IsZero() ? static_cast<Node&>(*fd) : static_cast<Node&>(retType);
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, at,
-                    retType.DataTy() ? Ty::ToString(retType.DataTy()) : std::string(), fd->identifier.Val());
-                continue;
-            }
-            // A globalVar function is excluded from the wrapper option pass in
-            // LowerFunctions, so its options are folded and diagnosed here.
-            // It must obey the same module non-empty / path-like rules as an
-            // ordinary foreign function.
-            std::unordered_map<std::string, std::string> options;
-            Native::FFI::ArkTS::ArkTSOptionStatus optionStatus;
-            if (!Native::FFI::ArkTS::ArkTSDeclOptions(*fd, options, &optionStatus)) {
-                Native::FFI::ArkTS::DiagnoseArkTSOptionProblem(diag, *fd, options, optionStatus);
-                fd->EnableAttr(Attribute::IS_BROKEN);
-                continue;
-            }
-            // The wrapper option pass also refuses an explicitly empty string
-            // option; the globalVar path must not accept one just because that
-            // pass skips it.
-            Ptr<Annotation> arktsLayer = nullptr;
-            for (auto& annotation : fd->annotations) {
-                if (annotation != nullptr && annotation->kind == AnnotationKind::ARKTS) {
-                    arktsLayer = annotation.get();
-                    break;
-                }
-            }
-            bool emptyOption = false;
-            for (const auto& [optionName, optionValue] : options) {
-                if (!Native::FFI::ArkTS::ArkTSOptionValueEmpty(optionValue)) {
-                    continue;
-                }
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty,
-                    arktsLayer != nullptr ? static_cast<Node&>(*arktsLayer) : static_cast<Node&>(*fd), optionName);
-                emptyOption = true;
-                break;
-            }
-            if (emptyOption) {
-                fd->EnableAttr(Attribute::IS_BROKEN);
-                continue;
-            }
-            std::string moduleValue =
-                options.count("module") != 0 ? options.at("module") : ctx.curPackage->fullPackageName;
-            if (moduleValue.empty() ||
-                (options.count("module") != 0 && Native::FFI::ArkTS::ArkTSModulePathLike(moduleValue))) {
-                if (moduleValue.empty()) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::sema_arkts_foreign_unsupported_signature, *fd, fd->identifier.Val());
-                } else {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor::sema_arkts_foreign_module_path_invalid, *fd, moduleValue, fd->identifier.Val());
-                }
-                fd->EnableAttr(Attribute::IS_BROKEN);
-                continue;
-            }
-            // The receiver follows the shared rule: an omitted module option in
-            // arkts.lang selects ctx.global, every other declaration resolves
-            // the ArkTS module object.
-            Native::FFI::ArkTS::ArkTSReceiverKind receiver =
-                Native::FFI::ArkTS::ArkTSReceiverFor(options.count("module") != 0, moduleValue);
-            std::unordered_map<std::string, std::string> literals{
-                {Native::FFI::ArkTS::ARKTS_PLACEHOLDER_MODULE, moduleValue},
-                {Native::FFI::ArkTS::ARKTS_PLACEHOLDER_NAME,
-                    options.count("foreignName") ? options.at("foreignName") : fd->identifier.Val()}};
-            auto segments =
-                Native::FFI::ArkTS::ArkTSNamespaceSegments(options.count("namespace") ? options.at("namespace") : "");
-            for (size_t i = 0; i < segments.size(); ++i) {
-                literals[std::string(Native::FFI::ArkTS::ARKTS_PLACEHOLDER_NAMESPACE) + std::to_string(i) + "__"] =
-                    segments[i];
-            }
-            // Reference leaves (foreign class/interface/enum) are emitted by
-            // placeholder; SpliceArkTSGeneratedBody binds them through this map.
-            std::unordered_map<std::string, Ptr<Decl>> classRefs;
-            auto code = Native::FFI::ArkTS::ArkTSGlobalVariableGetterSource(resultType, segments.size(),
-                Native::FFI::ArkTS::ARKTS_GENERATED_PREFIX, receiver, &classRefs);
-            // The getter's conversion throws use the private alias injected
-            // for this file; a bare ExternConversionException is ambiguous
-            // with std.core's export.
-            const std::string bareConversion = "ExternConversionException";
-            const std::string aliasedConversion = Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS;
-            for (size_t pos = code.find(bareConversion); pos != std::string::npos;
-                 pos = code.find(bareConversion, pos + aliasedConversion.size())) {
-                code.replace(pos, bareConversion.size(), aliasedConversion);
-            }
-            if (code.empty() || !SpliceArkTSGeneratedBody(ctx, *fd, code, literals, {}, &classRefs)) {
-                // A failed splice leaves the declaration without a body; report
-                // it here instead of letting it fail later in CHIR or codegen.
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor::sema_arkts_foreign_wrapper_unavailable, *fd, fd->identifier.Val());
-                fd->EnableAttr(Attribute::IS_BROKEN);
-                continue;
-            }
-            // A composite getter emits the same support references as a
-            // function wrapper (ExternConversionException and friends); bind
-            // them to the imported declarations so an unqualified name cannot
-            // resolve ambiguously through two star imports.
-            if (!Native::FFI::ArkTS::BindArkTSSupportReferences(
-                    *fd, *fd->funcBody->body, *ci->importManager, diag, arktsSupportRefs, fd->identifier.Val())) {
-                fd->EnableAttr(Attribute::IS_BROKEN);
-            }
+            LowerArkTSGlobalVarGetter(lower, *fd);
         }
     }
 }
@@ -978,62 +1203,111 @@ void Native::FFI::ArkTS::ResetState()
     g_arktsState.Clear();
 }
 
+namespace Cangjie::Native::FFI::ArkTS {
+namespace {
+// Find the prepared value table of a lowered enum, rebuilding it from the
+// serialized mapping for an imported enum whose cjo carries @RawValue.
+const std::vector<ArkTSEnumMapping>* FindArkTSEnumTable(EnumDecl& decl, ImportManager* imports)
+{
+    auto found = g_arktsState.enums.find(&decl);
+    if (found != g_arktsState.enums.end()) {
+        return &found->second;
+    }
+    if (!decl.TestAttr(Attribute::IMPORTED) || imports == nullptr) {
+        return nullptr;
+    }
+    // The minor that appended AnnoKind.RawValue; an older cjo has no value
+    // mapping for an imported enum, so the leaf stays non-generatable.
+    constexpr uint8_t RAW_VALUE_CJO_MINOR = 3;
+    std::string packageName;
+    if (decl.curFile != nullptr && decl.curFile->curPackage != nullptr) {
+        packageName = decl.curFile->curPackage->fullPackageName;
+    }
+    auto version = imports->GetPackageCjoVersion(packageName);
+    if (version.first != CJO_MAJOR_VERSION || version.second < RAW_VALUE_CJO_MINOR) {
+        return nullptr;
+    }
+    std::vector<ArkTSEnumMapping> built;
+    if (!BuildArkTSEnumMembers(decl, nullptr, built)) {
+        return nullptr;
+    }
+    return &g_arktsState.enums.emplace(&decl, std::move(built)).first->second;
+}
+
+// Map one prepared member to its generated form. Returns false when the
+// constructor name cannot be spelled in generated source.
+bool MapArkTSEnumMember(const ArkTSEnumMapping& member,
+    const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify,
+    const std::function<ArkTSTypeDesc(Ptr<Ty>)>& classifyTy, ArkTSEnumMember& mapped)
+{
+    // The generated wrapper spells the constructor as `case <slot>.<name>`, so
+    // the identifier has to be a legal Cangjie identifier. A keyword that came
+    // from a raw identifier gets its backticks back; anything that is not even
+    // a raw identifier (a forged or corrupted CJO) drops the whole table
+    // instead of reaching the source.
+    std::string memberName = member.ctor->identifier.Val();
+    if (!FileUtil::IsIdentifier(memberName, true)) {
+        std::string rawName = "`" + memberName + "`";
+        if (!FileUtil::IsIdentifier(rawName, true)) {
+            return false;
+        }
+        memberName = rawName;
+    }
+    mapped.name = memberName;
+    mapped.kind = member.kind;
+    mapped.value = member.value;
+    if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
+        if (member.payloadType != nullptr) {
+            mapped.payload.push_back(classify(member.payloadType));
+        } else if (member.payloadTy != nullptr) {
+            mapped.payload.push_back(classifyTy(member.payloadTy));
+        }
+    }
+    return true;
+}
+
+void PopulateArkTSEnumMembers(ArkTSTypeDesc& desc, const std::vector<ArkTSEnumMapping>& table,
+    const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify,
+    const std::function<ArkTSTypeDesc(Ptr<Ty>)>& classifyTy)
+{
+    desc.enumMembers.reserve(table.size());
+    for (const auto& member : table) {
+        ArkTSEnumMember mapped;
+        if (!MapArkTSEnumMember(member, classify, classifyTy, mapped)) {
+            desc.enumMembers.clear();
+            return;
+        }
+        desc.enumMembers.push_back(std::move(mapped));
+    }
+}
+
+// Attach the value table to one ENUM leaf. A recursive payload stops at an
+// already-attaching enum instead of rebuilding the same table forever.
+void AttachArkTSEnumLeaf(ArkTSTypeDesc& desc,
+    const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify,
+    const std::function<ArkTSTypeDesc(Ptr<Ty>)>& classifyTy, ImportManager* imports)
+{
+    auto decl = DynamicCast<EnumDecl*>(desc.reference.get());
+    if (decl == nullptr) {
+        return;
+    }
+    if (!g_arktsState.attaching.insert(decl).second) {
+        return;
+    }
+    if (const auto* table = FindArkTSEnumTable(*decl, imports)) {
+        PopulateArkTSEnumMembers(desc, *table, classify, classifyTy);
+    }
+    g_arktsState.attaching.erase(decl);
+}
+} // namespace
+} // namespace Cangjie::Native::FFI::ArkTS
+
 void Native::FFI::ArkTS::AttachEnumMembers(ArkTSTypeDesc& desc,
     const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify,
     const std::function<ArkTSTypeDesc(Ptr<Ty>)>& classifyTy, ImportManager* imports)
 {
-    // The minor that appended AnnoKind.RawValue; an older cjo has no value
-    // mapping for an imported enum, so the leaf stays non-generatable.
-    constexpr uint8_t RAW_VALUE_CJO_MINOR = 3;
     if (desc.kind == ArkTSTypeDesc::Kind::ENUM) {
-        auto decl = DynamicCast<EnumDecl*>(desc.reference.get());
-        if (decl != nullptr) {
-            if (!g_arktsState.attaching.insert(decl).second) {
-                return; // recursive payload: leave this leaf without a table
-            }
-            auto found = g_arktsState.enums.find(decl);
-            if (found == g_arktsState.enums.end() && decl->TestAttr(Attribute::IMPORTED) && imports != nullptr) {
-                std::string packageName;
-                if (decl->curFile != nullptr && decl->curFile->curPackage != nullptr) {
-                    packageName = decl->curFile->curPackage->fullPackageName;
-                }
-                auto version = imports->GetPackageCjoVersion(packageName);
-                if (version.first == CJO_MAJOR_VERSION && version.second >= RAW_VALUE_CJO_MINOR) {
-                    std::vector<ArkTSEnumMapping> built;
-                    if (BuildArkTSEnumMembers(*decl, nullptr, built)) {
-                        found = g_arktsState.enums.emplace(decl, std::move(built)).first;
-                    }
-                }
-            }
-            if (found != g_arktsState.enums.end()) {
-                desc.enumMembers.reserve(found->second.size());
-                for (const auto& member : found->second) {
-                    // The generated wrapper spells the constructor as `case <slot>.<name>`, so the
-                    // identifier has to be a legal Cangjie identifier. A keyword that came from a raw
-                    // identifier gets its backticks back; anything that is not even a raw identifier
-                    // (a forged or corrupted CJO) drops the whole table instead of reaching the source.
-                    std::string memberName = member.ctor->identifier.Val();
-                    if (!FileUtil::IsIdentifier(memberName, true)) {
-                        std::string rawName = "`" + memberName + "`";
-                        if (!FileUtil::IsIdentifier(rawName, true)) {
-                            desc.enumMembers.clear();
-                            break;
-                        }
-                        memberName = rawName;
-                    }
-                    ArkTSEnumMember mapped{memberName, member.kind, member.value, {}};
-                    if (member.kind == ArkTSEnumValueKind::PAYLOAD) {
-                        if (member.payloadType != nullptr) {
-                            mapped.payload.push_back(classify(member.payloadType));
-                        } else if (member.payloadTy != nullptr) {
-                            mapped.payload.push_back(classifyTy(member.payloadTy));
-                        }
-                    }
-                    desc.enumMembers.push_back(std::move(mapped));
-                }
-            }
-            g_arktsState.attaching.erase(decl);
-        }
+        AttachArkTSEnumLeaf(desc, classify, classifyTy, imports);
         return;
     }
     for (auto& element : desc.elements) {

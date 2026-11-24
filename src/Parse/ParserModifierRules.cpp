@@ -43,11 +43,11 @@ const TokenKind ACCESS_PROTECTED[] = {TokenKind::PUBLIC, TokenKind::PRIVATE, Tok
 // conflict is checked symmetrically (`public foreign enum` and
 // `foreign public enum` are both rejected alike). The COMMON/SPECIFIC tables
 // differ from ACCESS_* and never appear as enum access modifiers.
-const TokenKind ENUM_PUBLIC[] = {TokenKind::PRIVATE, TokenKind::INTERNAL, TokenKind::PROTECTED, TokenKind::FOREIGN};
-const TokenKind ENUM_PRIVATE[] = {TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PROTECTED, TokenKind::COMMON,
+const TokenKind ENUM_PUBLIC[4] = {TokenKind::PRIVATE, TokenKind::INTERNAL, TokenKind::PROTECTED, TokenKind::FOREIGN};
+const TokenKind ENUM_PRIVATE[6] = {TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PROTECTED, TokenKind::COMMON,
     TokenKind::SPECIFIC, TokenKind::FOREIGN};
-const TokenKind ENUM_INTERNAL[] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::PROTECTED, TokenKind::FOREIGN};
-const TokenKind ENUM_PROTECTED[] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::INTERNAL, TokenKind::FOREIGN};
+const TokenKind ENUM_INTERNAL[4] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::PROTECTED, TokenKind::FOREIGN};
+const TokenKind ENUM_PROTECTED[4] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::INTERNAL, TokenKind::FOREIGN};
 const TokenKind COMMON_SPECIFIC[] = {TokenKind::SPECIFIC};
 const TokenKind SPECIFIC_COMMON[] = {TokenKind::COMMON};
 const TokenKind OVERRIDE_STATIC_REDEF[] = {TokenKind::STATIC, TokenKind::REDEF};
