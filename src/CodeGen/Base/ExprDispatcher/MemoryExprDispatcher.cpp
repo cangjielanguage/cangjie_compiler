@@ -272,7 +272,12 @@ void HandleStoreElementRef(IRBuilder2& irBuilder, const CHIR::StoreElementRef& s
         }
         auto typeInfoOfSrc = irBuilder.CreateTypeInfo(srcCGType->GetOriginal());
         auto size = irBuilder.GetLayoutSize_32(srcCGType->GetOriginal());
-        auto tmp = irBuilder.CallClassIntrinsicAlloc({typeInfoOfSrc, size}, false);
+        // The box region follows the struct value's modal: a `S @local!` this must be
+        // boxed into the region, and its reference-bearing payload slots are then
+        // region->heap edges that need the modal-aware barrier.
+        bool boxInLocalRegion = srcCGType->GetOriginal().IsLocalRegion();
+        auto payloadWriteKind = boxInLocalRegion ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE;
+        auto tmp = irBuilder.CallClassIntrinsicAlloc({typeInfoOfSrc, size}, boxInLocalRegion);
         auto payloadPtr = irBuilder.GetPayloadFromObject(tmp);
         // Note: in this branch, it means:
         // - we are assigning a "struct" that doesn't begin with TypeInfo* to an address
@@ -280,12 +285,13 @@ void HandleStoreElementRef(IRBuilder2& irBuilder, const CHIR::StoreElementRef& s
         // - we are in the scope of a struct instance method(without "$withTI" postfix),
         //   the "struct" mentioned above is the `this` parameter of the method.
         if (IsTypeContainsRef(srcCGType->GetLLVMType())) {
-            irBuilder.CallGCWriteAgg(srcCGType->GetLayoutType(), {tmp, payloadPtr, srcValue, size});
+            irBuilder.CallGCWriteAgg(srcCGType->GetLayoutType(), {tmp, payloadPtr, srcValue, size}, payloadWriteKind);
         } else {
             irBuilder.CreateMemCpy(payloadPtr, llvm::MaybeAlign(), srcValue, llvm::MaybeAlign(), size);
         }
         auto destAddr = irBuilder.CreateGEP(*place, path);
-        irBuilder.CreateStore(CGValue(tmp, destAddr.GetCGType()->GetPointerElementType()), destAddr);
+        irBuilder.CreateStore(CGValue(tmp, destAddr.GetCGType()->GetPointerElementType()), destAddr, nullptr,
+            ClassifyModalWrite(irBuilder.GetCGContext().GetCHIRBuilder(), storeElementRef));
     } else if (auto node = DynamicCast<CHIR::LocalVar*>(rhs);
                node && node->GetExpr()->IsConstantNull() && rhs->GetType()->IsClass()) {
         // If the source is null or class, do nothing.

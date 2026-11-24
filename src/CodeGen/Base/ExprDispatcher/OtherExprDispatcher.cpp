@@ -196,7 +196,9 @@ llvm::Value* HandleCastToGenericExpr(IRBuilder2& irBuilder, const CHIR::Expressi
     auto srcPointeeTy = DeRef(*srcCHIRType);
     // 1. Allocate memory for boxing srcValue.
     llvm::Value* temp = irBuilder.CallClassIntrinsicAlloc(*srcPointeeTy, srcPointeeTy->IsLocalRegion());
-    // 2. store srcValue to temp
+    // 2. store srcValue to temp. The cast result's region follows the source pointee's
+    // modal, so its payload slots need the modal-aware barrier (mirrors HandleBoxExpr).
+    auto payloadWriteKind = srcPointeeTy->IsLocalRegion() ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE;
     auto payloadPtr = irBuilder.GetPayloadFromObject(temp);
 
     auto addr = irBuilder.CreateBitCast(payloadPtr,
@@ -205,7 +207,7 @@ llvm::Value* HandleCastToGenericExpr(IRBuilder2& irBuilder, const CHIR::Expressi
     auto addrType = CGType::GetOrCreate(cgMod,
         srcCHIRType->IsRef() ? srcCHIRType : CGType::GetRefTypeOf(cgMod.GetCGContext().GetCHIRBuilder(), *srcCHIRType),
         CGType::TypeExtraInfo(1U));
-    (void)irBuilder.CreateStore(cgVal, CGValue(addr, addrType));
+    (void)irBuilder.CreateStore(cgVal, CGValue(addr, addrType), nullptr, payloadWriteKind);
     return temp;
 }
 
