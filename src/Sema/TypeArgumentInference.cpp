@@ -585,6 +585,12 @@ std::vector<SubstPack> TypeChecker::TypeCheckerImpl::GenerateTypeMappingByInfere
     if (!fd.GetTy().IsCorrect() || !fd.GetTy()->IsFunc()) {
         return {};
     }
+    // Invalid argument types may come from suppressed speculative errors, so track actual errors to avoid silent
+    // failure.
+    bool hasInvalidArg = Utils::In(candidate.argCombinations, [](const auto& args) {
+        return Utils::In(args, [](ModalTy ty) { return ty && !ty.IsCorrect(); });
+    });
+    auto ds = DiagSuppressor(diag);
     std::vector<SubstPack> typeMappings;
     size_t combinationSize = candidate.argCombinations.size();
     size_t cbIndex = 0;
@@ -604,8 +610,10 @@ std::vector<SubstPack> TypeChecker::TypeCheckerImpl::GenerateTypeMappingByInfere
             diagInfo = std::get<SolvingErrInfo>(errOrSubst);
         }
     } while (cbIndex < combinationSize);
-    if (typeMappings.empty() && !Utils::In(ce.args, [](const auto& arg) { return !arg->GetTy().IsCorrect(); })) {
+    // A reported argument or candidate-body error suppresses the redundant inference diagnostic.
+    if (typeMappings.empty() && !hasInvalidArg && !ds.HasError()) {
         DiagnoseForCallInference(diag, ce, fd, typeManager.GetInstMapping(), diagInfo);
     }
+    ds.ReportDiag();
     return typeMappings;
 }
