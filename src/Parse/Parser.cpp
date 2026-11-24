@@ -42,7 +42,7 @@ const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_KIND = {
     {"FastNative", AST::AnnotationKind::FASTNATIVE}, {"Annotation", AST::AnnotationKind::ANNOTATION},
     {"ConstSafe", AST::AnnotationKind::CONSTSAFE}, {"Deprecated", AST::AnnotationKind::DEPRECATED},
     {"Frozen", AST::AnnotationKind::FROZEN}, {"EnsurePreparedToMock", AST::AnnotationKind::ENSURE_PREPARED_TO_MOCK},
-    {"NonProduct", AST::AnnotationKind::NON_PRODUCT}, {"HasThis", AST::AnnotationKind::HAS_THIS}};
+    {"NonProduct", AST::AnnotationKind::NON_PRODUCT}, {"HasThis", AST::AnnotationKind::ARKTS_HAS_THIS}};
 
 const std::unordered_map<AST::AnnotationKind, std::string> ANNO_KIND_TO_NAME = [] {
     std::unordered_map<AST::AnnotationKind, std::string> result;

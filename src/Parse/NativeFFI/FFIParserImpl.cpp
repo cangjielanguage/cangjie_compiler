@@ -123,7 +123,7 @@ BlockAnnotationAction CheckBlockAnnotationPlacement(DiagnosticEngine& diag, cons
         case AnnotationKind::ARKTS_RAW_VALUE:
             diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_raw_value_on_block, annotation);
             return BlockAnnotationAction::DROP;
-        case AnnotationKind::HAS_THIS:
+        case AnnotationKind::ARKTS_HAS_THIS:
             diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_has_this_on_block, annotation);
             return BlockAnnotationAction::DROP;
         default:

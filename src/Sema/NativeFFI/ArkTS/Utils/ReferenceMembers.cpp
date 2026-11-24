@@ -19,9 +19,6 @@ using namespace Cangjie::AST;
 using namespace Cangjie::Interop::ObjC;
 
 namespace Cangjie::Native::FFI::ArkTS {
-namespace {
-constexpr const char* ARKTS_INTEROP_FULL_PACKAGE = "ohos.ark_interop";
-} // namespace
 
 Ptr<Decl> FindArkTSJSObject(ImportManager& imports, const File& file)
 {

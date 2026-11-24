@@ -848,7 +848,7 @@ struct ASTHasherImpl {
                 // contract and the enum value mapping change generated bodies,
                 // not the original Cangjie signature.
                 return false;
-            case AnnotationKind::HAS_THIS:
+            case AnnotationKind::ARKTS_HAS_THIS:
                 // The ThisT argument decides the carrier type
                 // ArkTSFuncWithThis<ThisT, F>, so it is part of the signature.
                 return true;
@@ -872,7 +872,7 @@ struct ASTHasherImpl {
             case AnnotationKind::ARKTS_REST_PARAM:
             case AnnotationKind::ARKTS_WRITE_ONLY:
             case AnnotationKind::ARKTS_RAW_VALUE:
-            case AnnotationKind::HAS_THIS:
+            case AnnotationKind::ARKTS_HAS_THIS:
                 return true;
             case AnnotationKind::C:
             case AnnotationKind::CALLING_CONV:

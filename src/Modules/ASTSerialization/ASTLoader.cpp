@@ -954,7 +954,7 @@ OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageForma
             annotation->kind = AnnotationKind::ARKTS_RAW_VALUE;
             break;
         case PackageFormat::AnnoKind_HasThis:
-            annotation->kind = AnnotationKind::HAS_THIS;
+            annotation->kind = AnnotationKind::ARKTS_HAS_THIS;
             break;
         default:
             InternalError("Unhandled annotation kind.");

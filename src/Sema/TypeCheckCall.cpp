@@ -3647,32 +3647,7 @@ bool TypeChecker::TypeCheckerImpl::ChkCallExpr(ASTContext& ctx, ModalTy target, 
     if (!ce.baseFunc->GetTy().IsCorrect()) {
         return false;
     }
-    // A member call on the '@HasThis' carrier is type-checked, but producing
-    // and calling the bound value needs the full '@HasThis' lowering. Refuse
-    // the call before code generation instead of crashing there.
-    if (auto ma = DynamicCast<MemberAccess*>(ce.baseFunc.get()); ma != nullptr && ma->baseExpr != nullptr) {
-        if (auto carrier = DynamicCast<ClassTy*>(ma->baseExpr->DataTy());
-            carrier != nullptr && carrier->decl != nullptr && carrier->decl->identifier.Val() == "ArkTSFuncWithThis" &&
-            (carrier->decl->fullPackageName == "std.interop.arkts" ||
-                carrier->decl->fullPackageName == "arkts.lang") &&
-            ma->field.Val() == "bind") {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_bind_not_supported, ce);
-            ce.SetTy({TypeManager::GetInvalidTy()});
-            ce.callKind = CallKind::CALL_INVALID;
-            return false;
-        }
-    }
-    // An '@HasThis' declaration denotes an ArkTS function value carrying its
-    // `this` argument; the design refuses a direct call and requires the
-    // caller to bind that argument first. The base expression is resolved by
-    // now, so the declaration is available even though its type is the
-    // carrier class, not a function type.
-    if (auto hasThis = TypeCheckUtil::GetRealTarget(decl);
-        hasThis != nullptr && hasThis->TestAttr(Attribute::ARKTS_HAS_THIS)) {
-        diag.DiagnoseRefactor(
-            DiagKindRefactor::sema_arkts_has_this_direct_call_not_allowed, ce, hasThis->identifier.Val());
-        ce.SetTy({TypeManager::GetInvalidTy()});
-        ce.callKind = CallKind::CALL_INVALID;
+    if (RefuseArkTSHasThisCall(ce, decl)) {
         return false;
     }
     if (ce.baseFunc->GetTy()->IsNothing()) {
@@ -3685,7 +3660,46 @@ bool TypeChecker::TypeCheckerImpl::ChkCallExpr(ASTContext& ctx, ModalTy target, 
     if (ce.needCheckToTokens) {
         CheckToTokensImpCallExpr(ce);
     }
+    // Step 2 and Step 3: check the call kind and match the candidates.
+    return ChkCallExprCandidates(ctx, target, ce, decl, candidates, argsTys, prevCheckTrue);
+}
 
+bool TypeChecker::TypeCheckerImpl::RefuseArkTSHasThisCall(CallExpr& ce, const Ptr<Decl>& decl)
+{
+    // A member call on the '@HasThis' carrier is type-checked, but producing
+    // and calling the bound value needs the full '@HasThis' lowering. Refuse
+    // the call before code generation instead of crashing there.
+    if (auto ma = DynamicCast<MemberAccess*>(ce.baseFunc.get()); ma != nullptr && ma->baseExpr != nullptr) {
+        if (auto carrier = DynamicCast<ClassTy*>(ma->baseExpr->DataTy());
+            carrier != nullptr && carrier->decl != nullptr && carrier->decl->identifier.Val() == "ArkTSFuncWithThis" &&
+            (carrier->decl->fullPackageName == "std.interop.arkts" ||
+                carrier->decl->fullPackageName == "arkts.lang") &&
+            ma->field.Val() == "bind") {
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_bind_not_supported, ce);
+            ce.SetTy({TypeManager::GetInvalidTy()});
+            ce.callKind = CallKind::CALL_INVALID;
+            return true;
+        }
+    }
+    // An '@HasThis' declaration denotes an ArkTS function value carrying its
+    // `this` argument; the design refuses a direct call and requires the
+    // caller to bind that argument first. The base expression is resolved by
+    // now, so the declaration is available even though its type is the
+    // carrier class, not a function type.
+    auto hasThis = TypeCheckUtil::GetRealTarget(decl);
+    if (hasThis == nullptr || !hasThis->TestAttr(Attribute::ARKTS_HAS_THIS)) {
+        return false;
+    }
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_direct_call_not_allowed, ce, hasThis->identifier.Val());
+    ce.SetTy({TypeManager::GetInvalidTy()});
+    ce.callKind = CallKind::CALL_INVALID;
+    return true;
+}
+
+bool TypeChecker::TypeCheckerImpl::ChkCallExprCandidates(ASTContext& ctx, ModalTy target, CallExpr& ce,
+    const Ptr<Decl>& decl, std::vector<Ptr<FuncDecl>> candidates, const std::vector<ModalTy>& argsTys,
+    bool prevCheckTrue)
+{
     // Step 2: Check & set callKind.
     // Function pointer call, operator () function call and non-valid call base, return false.
     if (!CheckCallKind(ce, decl, ce.callKind)) {

@@ -501,7 +501,7 @@ OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
             CheckRawValueAnnotation(*annotation);
             break;
         }
-        case AnnotationKind::HAS_THIS: {
+        case AnnotationKind::ARKTS_HAS_THIS: {
             ParseAnnotationArguments(*annotation);
             CheckHasThisAnnotation(*annotation);
             break;

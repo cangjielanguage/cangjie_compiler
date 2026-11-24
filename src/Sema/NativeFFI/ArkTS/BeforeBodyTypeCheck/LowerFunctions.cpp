@@ -82,16 +82,21 @@ bool IsArkTSSupportDecl(const std::string& name, const std::string& package, con
     return name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION && decl.fullPackageName == ARKTS_CONTEXT_ABI_PACKAGE;
 }
 
-// The visible declaration @p name binds in @p package, or null when it is
-// missing or carries no valid type.
-Ptr<Decl> FindArkTSSupportDecl(ImportManager& imports, File& file, const std::string& name,
-    const std::string& package)
+// The declaration @p name binds in @p package, or null when it is missing or
+// carries no valid type. The injected support imports are kept out of the
+// per-file imported-name map, so the package manager is queried directly; that
+// also covers a member the facade re-exports from its original package.
+Ptr<Decl> FindArkTSSupportDecl(ImportManager& imports, const std::string& name, const std::string& package)
 {
-    const auto visible = imports.GetImportedDeclsByName(file, name);
-    auto target = std::find_if(visible.begin(), visible.end(), [&name, &package](auto decl) {
+    auto cjoManager = imports.GetCjoManager();
+    if (cjoManager == nullptr) {
+        return nullptr;
+    }
+    auto& candidates = cjoManager->GetPackageMembersByName(package, name);
+    auto target = std::find_if(candidates.cbegin(), candidates.cend(), [&name, &package](auto decl) {
         return IsArkTSSupportDecl(name, package, *decl);
     });
-    if (target == visible.end() || !Ty::IsTyCorrect((*target)->GetTy())) {
+    if (target == candidates.cend() || !Ty::IsTyCorrect((*target)->GetTy())) {
         return nullptr;
     }
     return *target;
@@ -104,8 +109,8 @@ bool BindArkTSSupportPackageReference(Node& node, Reference& ref, Decl& owner, I
     bool& valid)
 {
     static const std::unordered_map<std::string, std::string> supportPackages{
-        {ARKTS_INTEROP_PACKAGE, "ohos.ark_interop"},
-        {ARKTS_CONTEXT_ABI_PACKAGE, "cj_arkts_context_v1"}};
+        {ARKTS_INTEROP_PACKAGE, ARKTS_INTEROP_FULL_PACKAGE},
+        {ARKTS_CONTEXT_ABI_PACKAGE, ARKTS_CONTEXT_ABI_FULL_PACKAGE}};
     auto package = supportPackages.find(name);
     if (package == supportPackages.end()) {
         return false;
@@ -133,20 +138,26 @@ bool BindArkTSSupportPackageReference(Node& node, Reference& ref, Decl& owner, I
 // generic type reference keeps its type arguments, because presetting the
 // declaration's own generic type (e.g. Option<T>) would drop the
 // instantiation and make the generated annotation uninferable.
-void BindArkTSSupportDeclReference(Node& node, Reference& ref, RefType* type, Decl& owner, ImportManager& imports,
+void BindArkTSSupportDeclReference(Node& node, Reference& ref, RefType* type, ImportManager& imports,
     const std::string& name, ArkTSSupportReport& report, std::vector<std::pair<Ptr<Node>, Ptr<Decl>>>& bound,
     bool& valid)
 {
     static const std::unordered_map<std::string, std::string> packages{{"BigInt", "std.math.numeric"},
         {"Exception", "std.core"}, {"Option", "std.core"},
-        {"ExternConversionException", Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
+        {Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
+        {Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
         {Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
         {Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE}};
     auto found = packages.find(name);
     if (found == packages.end()) {
         return;
     }
-    auto target = FindArkTSSupportDecl(imports, *owner.curFile, found->first, found->second);
+    // The getter spells the conversion exception through the private alias;
+    // both spellings denote the one exported declaration.
+    const auto declName = name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS
+        ? std::string(Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION)
+        : name;
+    auto target = FindArkTSSupportDecl(imports, declName, found->second);
     if (target == nullptr) {
         if (valid) {
             report.Missing();
@@ -162,24 +173,45 @@ void BindArkTSSupportDeclReference(Node& node, Reference& ref, RefType* type, De
     bound.emplace_back(&node, target);
 }
 
+// A generated support name: the pinned packages, the context entry and the
+// short names resolved through arkts.lang / std.core.
+bool IsArkTSSupportReferenceName(const std::string& name)
+{
+    return name == "Option" || name == "BigInt" || name == "Exception" ||
+        name == Native::FFI::ArkTS::ARKTS_CONTEXT_CURRENT ||
+        name == Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION ||
+        name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS ||
+        name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION ||
+        name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION ||
+        name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE ||
+        name == Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE;
+}
+
 // Bind the support references of one generated node. A reference that already
 // carries a target keeps it: only the names the generator left unresolved are
 // supplied here. The wrapper's parameter placeholders and the entry
 // callback's call to the source entry are bound before this walk and may be
 // named like a support item, so re-resolving by name would replace a
-// deliberate binding.
+// deliberate binding. A deliberate support binding is still recorded, because
+// a speculative re-check clears targets and restores them from that map.
 VisitAction BindSupportReferenceNode(Node& node, Decl& owner, ImportManager& imports, ArkTSSupportReport& report,
     std::vector<std::pair<Ptr<Node>, Ptr<Decl>>>& bound, bool& valid)
 {
     auto expr = DynamicCast<RefExpr*>(&node);
     auto type = DynamicCast<RefType*>(&node);
     auto ref = expr ? &expr->ref : type ? &type->ref : nullptr;
-    if (!ref || ref->target) {
+    if (!ref) {
         return VisitAction::WALK_CHILDREN;
     }
     const auto name = ref->identifier.Val();
+    if (ref->target) {
+        if (IsArkTSSupportReferenceName(name)) {
+            bound.emplace_back(&node, ref->target);
+        }
+        return VisitAction::WALK_CHILDREN;
+    }
     if (!BindArkTSSupportPackageReference(node, *ref, owner, imports, name, report, bound, valid)) {
-        BindArkTSSupportDeclReference(node, *ref, type, owner, imports, name, report, bound, valid);
+        BindArkTSSupportDeclReference(node, *ref, type, imports, name, report, bound, valid);
     }
     return VisitAction::WALK_CHILDREN;
 }

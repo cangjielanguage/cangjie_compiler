@@ -147,12 +147,15 @@ public:
 
     /**
      * Add the ArkTS interop package imports to every source file that carries an
-     * @ArkTS annotation: `import ohos.ark_interop` (bound as `ark_interop`) and
-     * `import cj_arkts_context_v1`. Generated wrapper code spells the interop
-     * types as package-qualified names, so the package name must be visible.
-     * The imports are COMPILER_ADD + IMPLICIT_ADD + PRIVATE: they stay hidden
-     * from user-facing checks (no unused-import warning), and dependency
-     * generation re-admits these two packages explicitly for linking.
+     * @ArkTS annotation: the packages `ohos.ark_interop` (bound as
+     * `ark_interop`) and `cj_arkts_context_v1`, plus the support members the
+     * generated wrappers name. Package imports stay visible because a generated
+     * package qualifier is re-resolved after a speculative re-check; member
+     * imports are marked ImportSpec::isCompilerInjectedImport, so they never
+     * bind a user-visible name. The imports are COMPILER_ADD + IMPLICIT_ADD +
+     * PRIVATE: they stay hidden from user-facing checks (no unused-import
+     * warning), and dependency generation records the packages marked in
+     * ImportSpec::implicitDependencyPackage for linking.
      * A package is only injected when its cjo is resolvable, so toolchains
      * without the ArkTS add-on keep reporting no extra diagnostics. This is
      * idempotent: a file that already binds the package name is left alone.
@@ -281,10 +284,6 @@ public:
     {
         return cjoManager.get();
     }
-    // CJO format version of an imported package; {0, 0} when it is not loaded or
-    // its cjo carries no version.
-    std::pair<uint8_t, uint8_t> GetPackageCjoVersion(const std::string& fullPackageName) const;
-
     /** @brief Clear the cache for BCHIR packages. */
     void ClearPackageBCHIRCache()
     {

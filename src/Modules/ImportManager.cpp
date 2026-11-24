@@ -25,10 +25,8 @@
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Utils.h"
-#include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/SourceManager.h"
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
-#include "cangjie/Lex/Lexer.h"
 #include "cangjie/Frontend/CompilerInstance.h"
 #include "cangjie/Modules/ASTSerialization.h"
 #include "cangjie/Modules/ModulesUtils.h"
@@ -99,220 +97,6 @@ void AddImplicitPctImport(File& file)
     }
     file.imports.emplace_back(
         CreateImportSpec(PCT_CONCURRENT_PACKAGE_NAME, "pctMarkInstrumented", "", fullPackageNameToPrefixPaths));
-}
-
-// ---- @ArkTS interop package imports ----
-// The wrapper generator spells the interop surface with package-qualified
-// names (ark_interop.JSContext, cj_arkts_context_v1.__cj_arkts_current), so a
-// file that uses the @ArkTS capability needs those package names in scope even
-// when the user wrote no package import. The imports are compiler-added,
-// private and implicit: the user must not see glue imports (an @ArkTS class or
-// an early-rejected signature generates no wrapper, which would otherwise
-// surface an unused-import warning). Dependency generation re-admits these two
-// implicit packages explicitly (IsArkTSInteropImport), because linking needs
-// them.
-constexpr const char* ARKTS_INTEROP_FULL_PACKAGE = "ohos.ark_interop";
-constexpr const char* ARKTS_CONTEXT_ABI_FULL_PACKAGE = "cj_arkts_context_v1";
-constexpr const char* ARKTS_LANG_FULL_PACKAGE = "arkts.lang";
-// The public conversion exception the wrapper's guards throw. It is declared
-// by the arkts.lang facade and exists only because the wrapper references it:
-// user code never writes this type, so the compiler imports the single member
-// instead of asking the user for the facade.
-constexpr const char* ARKTS_CONVERSION_EXCEPTION = "ExternConversionException";
-// Private alias import the global-variable getter uses for the conversion
-// exception (a bare name is ambiguous with a std.core export).
-constexpr const char* ARKTS_CONVERSION_ALIAS = "__cj_arkts_extern_conversion";
-// The public call-failure exception the wrapper's guards throw, hosted by the
-// same facade and imported the same way.
-constexpr const char* ARKTS_RUNTIME_EXCEPTION = "ForeignRuntimeException";
-// The interop library's carrier for an ArkTS-side throw. The facade re-exports
-// it, so the generated call translation catches it through the same import.
-constexpr const char* ARKTS_BUSINESS_EXCEPTION = "BusinessException";
-// The generated global-variable getter compares the ArkTS BigInt against the
-// Int64/UInt64 bounds and parses the value back through the `parse` extensions.
-// Both spellings are compiler-chosen (the user file need not import either
-// package): BigInt is bound under the generated alias, and the parse extensions
-// are reachable once std.convert's Parsable interface is imported. A
-// speculative overload re-check clears the bound target, so the names must also
-// be genuinely resolvable through the file's imports.
-constexpr const char* ARKTS_NUMERIC_FULL_PACKAGE = "std.math.numeric";
-constexpr const char* ARKTS_BIGINT_MEMBER = "BigInt";
-constexpr const char* ARKTS_BIGINT_ALIAS = "__cj_arkts_BigInt";
-constexpr const char* ARKTS_CONVERT_FULL_PACKAGE = "std.convert";
-constexpr const char* ARKTS_PARSABLE_MEMBER = "Parsable";
-constexpr const char* ARKTS_CONTEXT_CURRENT = "__cj_arkts_current";
-
-// The three single-member support imports injected into every @ArkTS file.
-bool IsArkTSSupportMember(const std::string& member)
-{
-    return member == ARKTS_CONVERSION_EXCEPTION || member == ARKTS_RUNTIME_EXCEPTION ||
-        member == ARKTS_BUSINESS_EXCEPTION;
-}
-
-// The compiler-injected @ArkTS imports are implicit so the user never sees
-// them in unused-import warnings, but they are still runtime link
-// dependencies. Dependency generation normally skips implicit imports; the two
-// interop packages and the single-member support imports are the deliberate
-// exception.
-bool IsArkTSInteropImport(const ImportSpec& import)
-{
-    if (!import.TestAttr(Attribute::IMPLICIT_ADD)) {
-        return false;
-    }
-    const auto packageName = import.content.GetImportedPackageName();
-    if (packageName == ARKTS_INTEROP_FULL_PACKAGE || packageName == ARKTS_CONTEXT_ABI_FULL_PACKAGE) {
-        return true;
-    }
-    const auto member = import.content.identifier.Val();
-    return IsArkTSSupportMember(member) && packageName == std::string(ARKTS_LANG_FULL_PACKAGE) + "." + member;
-}
-
-// Whether @p member from @p fullPackageName is already visible as a short
-// name. A star import of the package binds all its members; a single import of
-// the member binds it directly. A package import only binds the package name,
-// and an alias binds the alias, so neither counts.
-// Whether the file binds @p member through a single-member import. A star
-// import is deliberately not enough: another star import of a different
-// package may export the same name (std.core and the ArkTS facade both spell
-// the interop exceptions), so the compiler-injected single-member import must
-// still be added to make the generated reference unambiguous.
-bool FileBindsMemberDirectly(const File& file, const std::string& fullPackageName, const std::string& member)
-{
-    const auto memberPackage = fullPackageName + "." + member;
-    for (auto& import : file.imports) {
-        if (import == nullptr) {
-            continue;
-        }
-        const auto& content = import->content;
-        if (content.kind == ImportKind::IMPORT_SINGLE && content.aliasName.Empty() &&
-            content.identifier.Val() == member && content.GetImportedPackageName() == memberPackage) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Whether the file already binds @p fullPackageName as a package name. A
-// star import does not bind the package name (only its members), so it does
-// not count; an alias import binds the alias instead.
-bool FileBindsPackageName(const File& file, const std::string& fullPackageName)
-{
-    for (auto& import : file.imports) {
-        if (import == nullptr) {
-            continue;
-        }
-        const auto& content = import->content;
-        if (content.kind == ImportKind::IMPORT_ALL || content.kind == ImportKind::IMPORT_MULTI ||
-            !content.aliasName.Empty()) {
-            continue;
-        }
-        if (content.GetImportedPackageName() == fullPackageName) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Whether the file already binds @p alias through an alias import (either a
-// whole import or a member of a multi-import). Injection must be idempotent:
-// BuildIndex runs again on the incremental/LSP path.
-bool FileBindsAlias(const File& file, const std::string& alias)
-{
-    auto binds = [&alias](const ImportContent& content) {
-        return content.aliasName.Val() == alias;
-    };
-    for (auto& import : file.imports) {
-        if (import == nullptr) {
-            continue;
-        }
-        if (binds(import->content)) {
-            return true;
-        }
-        if (std::any_of(import->content.items.begin(), import->content.items.end(), binds)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Whether the imported package can be loaded: its cjo is on the search path,
-// or an LSP/unit-test cache already holds it (those caches have no file on
-// disk). Checked only after UpdateSearchPath.
-bool IsPackageResolvable(const ImportManager& importMgr, const std::string& fullPackageName)
-{
-    if (!FileUtil::FindSerializationFile(fullPackageName, SERIALIZED_FILE_EXTENSION, importMgr.GetSearchPath())
-             .empty()) {
-        return true;
-    }
-    return !importMgr.GetCjoManager()->GetPackageCjoPath(fullPackageName).empty();
-}
-
-// In --scan-dependency mode the parser reads only the package header and
-// imports, so a file that carries @ArkTS has no annotation AST node. Detect the
-// annotation lexically instead; comments, string literals and raw identifiers
-// are tokenized the same way the parser sees them. Only called for scan-mode
-// files (no parsed declarations).
-bool SourceUsesArkTSAnnotation(DiagnosticEngine& diag, SourceManager& sourceManager, const File& file)
-{
-    if (file.begin.IsZero()) {
-        return false;
-    }
-    auto& source = sourceManager.GetSource(file.begin.fileID);
-    if (source.buffer.empty()) {
-        return false;
-    }
-    Lexer lexer(file.begin.fileID, source.buffer, diag, sourceManager);
-    bool afterAt = false;
-    for (auto token = lexer.Next(); token.kind != TokenKind::END; token = lexer.Next()) {
-        if (token.kind == TokenKind::COMMENT) {
-            continue;
-        }
-        if (afterAt && token.kind == TokenKind::IDENTIFIER && token.Value() == "ArkTS") {
-            return true;
-        }
-        afterAt = token.kind == TokenKind::AT;
-    }
-    return false;
-}
-
-// Position a synthesized import at @p at. The real source range keeps the
-// dependency json and diagnostics locatable; an IMPLICIT_ADD import is allowed
-// a zero position, but pointing at the first @ArkTS annotation is still more
-// useful than a default position.
-void SetSyntheticImportRange(ImportSpec& import, const Range& at)
-{
-    import.begin = at.begin;
-    import.end = at.end;
-    import.importPos = at.begin;
-    import.content.begin = at.begin;
-    import.content.end = at.end;
-    import.content.identifier.SetPos(at.begin, at.end);
-    if (!import.content.prefixPaths.empty()) {
-        import.content.prefixPoses.assign(import.content.prefixPaths.size(), at.begin);
-        import.content.prefixDotPoses.assign(import.content.prefixPaths.size(), at.begin);
-    }
-}
-
-// Build `import <fullPackageName>` (package import, not a member import).
-// A dotted name splits at the last dot; a top-level package has no prefix
-// path, matching the parser's representation of `import name`.
-OwnedPtr<ImportSpec> CreateSyntheticPackageImport(const std::string& fullPackageName, const Range& at)
-{
-    OwnedPtr<ImportSpec> import;
-    const auto lastDot = fullPackageName.rfind('.');
-    if (lastDot == std::string::npos) {
-        import = MakeOwned<ImportSpec>();
-        import->content.kind = ImportKind::IMPORT_SINGLE;
-        import->content.identifier = Identifier(fullPackageName, at.begin, at.end);
-        import->EnableAttr(Attribute::COMPILER_ADD, Attribute::IMPLICIT_ADD, Attribute::PRIVATE);
-    } else {
-        import = CreateImportSpec(fullPackageName.substr(0, lastDot), fullPackageName.substr(lastDot + 1));
-    }
-    // COMPILER_ADD, IMPLICIT_ADD and PRIVATE stay: the import is owned by the
-    // compiler, hidden from user-facing checks, and not re-exported. The
-    // dependency json re-admits the two interop packages explicitly.
-    SetSyntheticImportRange(*import, at);
-    return import;
 }
 
 void AddImplicitImports(Package& pkg, const GlobalOptions& opts)
@@ -959,10 +743,10 @@ void ImportManager::CheckRedefinition(const AST::Package& pkg)
     std::unordered_map<Ptr<File>, std::unordered_map<std::string, Range>> fileImportNamePos;
     for (auto& file : pkg.files) {
         for (auto& import : file->imports) {
-            // Implicit imports are compiler-added (core.*, and the ArkTS
-            // interop packages); they must not take part in user-facing
-            // import-conflict warnings.
-            if (import->IsImportMulti() || import->IsImportAll() || import->TestAttr(Attribute::IMPLICIT_ADD)) {
+            // Compiler-injected imports bind no name for user code, so they
+            // cannot take part in user-facing import-conflict warnings. Every
+            // other implicit import keeps participating, as on the main branch.
+            if (import->IsImportMulti() || import->IsImportAll() || import->isCompilerInjectedImport) {
                 continue;
             }
             auto& posMap = import->IsReExport() ? pkgImportNamePos : fileImportNamePos[file.get()];
@@ -998,24 +782,20 @@ std::string ImportManager::GeneratePkgDepInfo(const Package& pkg, bool exportCJO
     bool isProduct{true};
     for (auto& file : pkg.files) {
         for (auto& import : file->imports) {
-            // The compiler-injected ArkTS interop imports are implicit but are
-            // real runtime dependencies, so they are admitted explicitly.
+            // A compiler-injected import is invisible to user code; its pass
+            // records the package when it is also a runtime link dependency.
             if (import->IsImportMulti() ||
-                (import->TestAttr(Attribute::IMPLICIT_ADD) && !IsArkTSInteropImport(*import))) {
+                (import->TestAttr(Attribute::IMPLICIT_ADD) && import->implicitDependencyPackage.empty())) {
                 continue;
             }
-            // The injected ArkTS interop imports are named by the exact package
-            // the compiler imported. In scan-dependency mode the package map is
-            // not built, so GetPossibleCjoNames would offer the prefix `ohos`
-            // as a candidate and shorten the dependency name.
             std::string longName;
             std::string shortName;
-            if (IsArkTSInteropImport(*import)) {
-                // The injected support imports name a single member; the
-                // dependency is the package, not the member-qualified name.
-                const auto member = import->content.identifier.Val();
-                longName = shortName = IsArkTSSupportMember(member) ? std::string(ARKTS_LANG_FULL_PACKAGE)
-                                                                    : import->content.GetImportedPackageName();
+            if (!import->implicitDependencyPackage.empty()) {
+                // A support import may name a single member; the dependency is
+                // the package, not the member-qualified name. In scan-dependency
+                // mode the package map is not built, so GetPossibleCjoNames
+                // would otherwise shorten the name to a prefix.
+                longName = shortName = import->implicitDependencyPackage;
             } else {
                 auto names = cjoManager->GetPossibleCjoNames(*import);
                 CJC_ASSERT(!names.empty());
@@ -1294,156 +1074,6 @@ void RemapPctSyncImports(AST::Package& pkg, const GlobalOptions& globalOptions)
 }
 } // namespace
 
-namespace {
-
-// First @ArkTS annotation in the file, if the AST carries one. It selects the
-// interop capability and gives the synthesized imports a real source range.
-Ptr<Annotation> FindFirstArkTSAnnotation(File& file)
-{
-    Ptr<Annotation> firstAnnotation{nullptr};
-    Walker(&file, [&firstAnnotation](Ptr<Node> node) {
-        if (firstAnnotation != nullptr) {
-            return VisitAction::STOP_NOW;
-        }
-        auto annotation = DynamicCast<Annotation*>(node);
-        if (annotation != nullptr && annotation->kind == AnnotationKind::ARKTS) {
-            firstAnnotation = annotation;
-            return VisitAction::STOP_NOW;
-        }
-        return VisitAction::WALK_CHILDREN;
-    }).Walk();
-    return firstAnnotation;
-}
-
-// Whether a file selects the ArkTS interop capability. The scan-dependency
-// parser produces imports only, so fall back to the source text so the
-// auto-import contract also holds for `--scan-dependency`.
-bool FileSelectsArkTSInterop(
-    DiagnosticEngine& diag, SourceManager* sourceManager, File& file, Ptr<Annotation>& firstAnnotation)
-{
-    firstAnnotation = FindFirstArkTSAnnotation(file);
-    if (firstAnnotation != nullptr) {
-        return true;
-    }
-    return sourceManager != nullptr && file.decls.empty() &&
-        SourceUsesArkTSAnnotation(diag, *sourceManager, file);
-}
-
-// Point the synthesized imports at the first @ArkTS annotation, or at the file
-// when the annotation has no source positions.
-Range SyntheticImportRange(File& file, const Ptr<Annotation>& firstAnnotation)
-{
-    auto at = firstAnnotation != nullptr ? MakeRange(firstAnnotation->begin, firstAnnotation->end)
-                                         : MakeRange(file.begin, file.end);
-    if (at.HasZero() && firstAnnotation != nullptr) {
-        at = MakeRange(file.begin, file.end);
-    }
-    return at;
-}
-
-// Phase: package import (`import ohos.ark_interop`).
-void AddSyntheticPackageImport(
-    const ImportManager& importMgr, const Package& pkg, File& file, const Range& at, const std::string& fullPackageName)
-{
-    // Never import the package being compiled: a self import is rejected by
-    // CheckImports.
-    bool resolvable = IsPackageResolvable(importMgr, fullPackageName);
-    if (pkg.fullPackageName == fullPackageName || FileBindsPackageName(file, fullPackageName) || !resolvable) {
-        return;
-    }
-    auto import = CreateSyntheticPackageImport(fullPackageName, at);
-    import->curFile = &file;
-    import->content.curFile = &file;
-    file.imports.emplace_back(std::move(import));
-}
-
-// Phase: single-member import (`import arkts.lang.ExternConversionException`).
-void AddSyntheticMemberImport(const ImportManager& importMgr, const Package& pkg, File& file, const Range& at,
-    const std::string& fullPackageName, const std::string& member)
-{
-    if (pkg.fullPackageName == fullPackageName || FileBindsMemberDirectly(file, fullPackageName, member) ||
-        !IsPackageResolvable(importMgr, fullPackageName)) {
-        return;
-    }
-    auto import = CreateImportSpec(fullPackageName, member);
-    SetSyntheticImportRange(*import, at);
-    import->curFile = &file;
-    import->content.curFile = &file;
-    file.imports.emplace_back(std::move(import));
-}
-
-// Phase: aliased single-member import (`import x.y.Member as Alias`).
-void AddSyntheticMemberImportAs(const ImportManager& importMgr, const Package& pkg, File& file, const Range& at,
-    const std::string& fullPackageName, const std::string& member, const std::string& alias)
-{
-    if (pkg.fullPackageName == fullPackageName || FileBindsAlias(file, alias) ||
-        !IsPackageResolvable(importMgr, fullPackageName)) {
-        return;
-    }
-    auto import = CreateImportSpec(fullPackageName, member, alias);
-    SetSyntheticImportRange(*import, at);
-    import->curFile = &file;
-    import->content.curFile = &file;
-    file.imports.emplace_back(std::move(import));
-}
-
-// Phase: inject the complete interop import set, in the original order.
-void InjectArkTSInteropImports(
-    const ImportManager& importMgr, const Package& pkg, File& file, const Range& at)
-{
-    AddSyntheticPackageImport(importMgr, pkg, file, at, ARKTS_INTEROP_FULL_PACKAGE);
-    AddSyntheticPackageImport(importMgr, pkg, file, at, ARKTS_CONTEXT_ABI_FULL_PACKAGE);
-    // The generated guards always throw or catch these public types; import
-    // the single member so the wrapper compiles without asking the user for
-    // the package. A star import of the package already makes the name visible.
-    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION);
-    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANG_FULL_PACKAGE, ARKTS_RUNTIME_EXCEPTION);
-    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANG_FULL_PACKAGE, ARKTS_BUSINESS_EXCEPTION);
-    // The generated global-variable getter names BigInt through the
-    // compiler-generated alias and calls the `parse` extensions; both must
-    // resolve from the file's own imports, not just from the lowering-time
-    // target, because a speculative re-check clears it.
-    // The global-variable getter spells the conversion exception through a
-    // private alias: a bare name is ambiguous when std.core also exports it,
-    // and a package qualifier is not a type name.
-    AddSyntheticMemberImportAs(importMgr, pkg, file, at, ARKTS_LANG_FULL_PACKAGE, ARKTS_CONVERSION_EXCEPTION,
-        ARKTS_CONVERSION_ALIAS);
-    AddSyntheticMemberImportAs(importMgr, pkg, file, at, ARKTS_NUMERIC_FULL_PACKAGE, ARKTS_BIGINT_MEMBER,
-        ARKTS_BIGINT_ALIAS);
-    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_CONVERT_FULL_PACKAGE, ARKTS_PARSABLE_MEMBER);
-    // The getter's prologue reads the current call-scope entry through the
-    // bare generated name; bind it from its host package.
-    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_CONTEXT_ABI_FULL_PACKAGE, ARKTS_CONTEXT_CURRENT);
-}
-
-} // namespace
-
-void ImportManager::AddArkTSInteropImports(
-    const std::vector<Ptr<Package>>& packages, SourceManager* sourceManager)
-{
-    // The interop packages are compiler-injected support for an experimental
-    // capability; without --experimental the gate diagnostic owns the source
-    // and no implicit import may widen the program's dependencies.
-    if (!opts.experimentalMode) {
-        return;
-    }
-    Utils::ProfileRecorder recorder("BuildIndex", "AddArkTSInteropImports");
-    for (auto pkg : packages) {
-        CJC_NULLPTR_CHECK(pkg);
-        for (auto& file : pkg->files) {
-            CJC_NULLPTR_CHECK(file);
-            // Any @ArkTS annotation in the file (on a top-level declaration,
-            // a class/interface member, a parameter or a global variable)
-            // selects the ArkTS interop capability.
-            Ptr<Annotation> firstAnnotation{nullptr};
-            if (!FileSelectsArkTSInterop(diag, sourceManager, *file, firstAnnotation)) {
-                continue;
-            }
-            InjectArkTSInteropImports(*this, *pkg, *file, SyntheticImportRange(*file, firstAnnotation));
-        }
-    }
-}
-
 bool ImportManager::BuildIndex(
     const std::string& cangjieModules, const GlobalOptions& globalOptions, std::vector<Ptr<Package>>& packages)
 {
@@ -1660,11 +1290,13 @@ void ImportManager::AddImportedDeclsForSourcePackage(const AST::Package& pkg)
 void ImportManager::AddImportedDeclsForFile(const Package& pkg, const File& file)
 {
     for (auto& import : file.imports) {
-        auto& declMap = import->IsReExport() ? importedDeclsMap : fileImportedDeclsMap[file.fileHash];
         CJC_NULLPTR_CHECK(import);
-        if (import->IsImportMulti()) {
+        // A compiler-injected import must not bind any name for user code:
+        // generated references are pre-bound by their pass.
+        if (import->IsImportMulti() || import->hidesFromNameLookup) {
             continue;
         }
+        auto& declMap = import->IsReExport() ? importedDeclsMap : fileImportedDeclsMap[file.fileHash];
         auto fullPackageName = cjoManager->GetPackageNameByImport(*import);
         auto pkgDecl = cjoManager->GetPackageDecl(fullPackageName);
         if (fullPackageName.empty() || !pkgDecl) {
@@ -2185,10 +1817,4 @@ bool ImportManager::AnalyzeDepStdPkgsOfBC(const std::string& fullPackageName)
         }
     }
     return true;
-}
-
-std::pair<uint8_t, uint8_t> ImportManager::GetPackageCjoVersion(const std::string& fullPackageName) const
-{
-    return cjoManager == nullptr ? std::pair<uint8_t, uint8_t>{0, 0}
-                                 : cjoManager->GetPackageCjoVersion(fullPackageName);
 }

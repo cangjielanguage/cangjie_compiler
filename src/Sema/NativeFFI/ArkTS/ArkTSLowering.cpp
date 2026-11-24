@@ -29,9 +29,6 @@ using namespace Cangjie;
 using namespace Cangjie::AST;
 
 namespace {
-constexpr auto CONTEXT_PACKAGE = "cj_arkts_context_v1";
-constexpr auto ARKTS_LANGUAGE_PACKAGE = "arkts.lang";
-constexpr auto ARKTS_CONVERSION_EXCEPTION = "ExternConversionException";
 
 // Exact integer value of one numeric enum member. ArkTS maps the value through
 // Float64, but the auto-increment chain must stay exact: a double would only
@@ -259,7 +256,7 @@ bool BindArkTSGeneratedPackageRef(Node& node, Reference& ref, const std::string&
         return false;
     }
     auto fullName = name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE
-                        ? std::string("ohos.ark_interop")
+                        ? std::string(Native::FFI::ArkTS::ARKTS_INTEROP_FULL_PACKAGE)
                         : std::string(Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE);
     if (auto target = importManager.GetPackageDecl(fullName)) {
         ref.target = target;
@@ -296,16 +293,21 @@ void BindArkTSGeneratedKnownRef(RefExpr& re, const std::string& name, ImportMana
     Ptr<Decl> target;
     if (name == "Option") {
         target = importManager.GetImportedDecl("std.core", "Option");
-    } else if (name == "__cj_arkts_current") {
-        target = importManager.GetImportedDecl(CONTEXT_PACKAGE, name);
+    } else if (name == Native::FFI::ArkTS::ARKTS_CONTEXT_CURRENT) {
+        target = importManager.GetImportedDecl(Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE, name);
     } else if (name == "__cj_arkts_BigInt") {
         target = importManager.GetImportedDecl("std.math.numeric", "BigInt");
     } else if (name == "Exception") {
         target = importManager.GetImportedDecl("std.core", "Exception");
-    } else if (name == ARKTS_CONVERSION_EXCEPTION || name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS ||
-        name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION ||
+    } else if (name == Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION ||
+        name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS) {
+        // The getter spells the conversion exception through the private alias
+        // the injected import binds; both spellings denote one declaration.
+        target = importManager.GetImportedDecl(
+            Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE, Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION);
+    } else if (name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION ||
         name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION) {
-        target = importManager.GetImportedDecl(ARKTS_LANGUAGE_PACKAGE, name);
+        target = importManager.GetImportedDecl(Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE, name);
     }
     if (target == nullptr) {
         return;
@@ -990,7 +992,7 @@ std::string AliasArkTSConversionException(const std::string& code)
     // string value that spells the same text (an enum @RawValue, for example)
     // must keep its bytes. The generator's strings use only the escapes emitted
     // by StringConvertor, so a quote/backslash scanner is enough here.
-    const std::string bareConversion = "ExternConversionException";
+    const std::string bareConversion = Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION;
     const std::string aliasedConversion = Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS;
     auto isIdentifierChar = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_'; };
     std::string result;
@@ -1051,7 +1053,8 @@ void LowerArkTSGlobalVarGetter(ArkTSGlobalVarLowering& lower, FuncDecl& fd)
         // a null type.
         return;
     }
-    if (!lower.importManager.GetImportedDecl(CONTEXT_PACKAGE, "__cj_arkts_current")) {
+    if (!lower.importManager.GetImportedDecl(
+            Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE, Native::FFI::ArkTS::ARKTS_CONTEXT_CURRENT)) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_bridge_pending, fd);
         return;
     }
@@ -1223,7 +1226,9 @@ const std::vector<ArkTSEnumMapping>* FindArkTSEnumTable(EnumDecl& decl, ImportMa
     if (decl.curFile != nullptr && decl.curFile->curPackage != nullptr) {
         packageName = decl.curFile->curPackage->fullPackageName;
     }
-    auto version = imports->GetPackageCjoVersion(packageName);
+    auto cjoManager = imports->GetCjoManager();
+    auto version = cjoManager == nullptr ? std::pair<uint8_t, uint8_t>{0, 0}
+                                         : cjoManager->GetPackageCjoVersion(packageName);
     if (version.first != CJO_MAJOR_VERSION || version.second < RAW_VALUE_CJO_MINOR) {
         return nullptr;
     }

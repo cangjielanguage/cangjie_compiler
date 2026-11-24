@@ -309,6 +309,11 @@ constexpr const char* ARKTS_CONTEXT_CURRENT = "__cj_arkts_current";
 // same-named user declaration cannot capture them.
 constexpr const char* ARKTS_INTEROP_PACKAGE = "ark_interop";
 constexpr const char* ARKTS_CONTEXT_ABI_PACKAGE = "cj_arkts_context_v1";
+// The full package names the injected imports name and dependency generation
+// records. Single-sourced here: the ArkTS layer is the only place that knows
+// OHOS package names.
+constexpr const char* ARKTS_INTEROP_FULL_PACKAGE = "ohos.ark_interop";
+constexpr const char* ARKTS_CONTEXT_ABI_FULL_PACKAGE = ARKTS_CONTEXT_ABI_PACKAGE;
 // The package hosting the preset interop types. Its declarations keep the
 // generic external form; the same shape in a user package is refused.
 constexpr const char* ARKTS_PRESET_PACKAGE = "std.interop.arkts";
@@ -319,6 +324,7 @@ constexpr const char* ARKTS_PRESET_PACKAGE = "std.interop.arkts";
 // ExternConversionException. The library carrier of an ArkTS-side throw is
 // BusinessException, and only its "outside error / ArkTS exception" code is
 // translated; every other library failure keeps its code and message.
+constexpr const char* ARKTS_CONVERSION_EXCEPTION = "ExternConversionException";
 constexpr const char* ARKTS_RUNTIME_EXCEPTION = "ForeignRuntimeException";
 // Private alias the injected import binds for the conversion exception in a
 // generated global-variable getter (a bare name is ambiguous with std.core).

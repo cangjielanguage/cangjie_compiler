@@ -176,7 +176,7 @@ void TypeChecker::TypeCheckerImpl::ApplyArkTSHasThisType(FuncDecl& fd)
     }
     const Annotation* hasThis = nullptr;
     for (auto& annotation : fd.annotations) {
-        if (annotation != nullptr && annotation->kind == AnnotationKind::HAS_THIS) {
+        if (annotation != nullptr && annotation->kind == AnnotationKind::ARKTS_HAS_THIS) {
             hasThis = annotation.get();
             break;
         }

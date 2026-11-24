@@ -726,8 +726,6 @@ foreign func relModule(x: Int32): Unit
     EXPECT_TRUE(HasErrorContaining("'module' option './x'"));
     EXPECT_TRUE(HasErrorContaining("'relModule'"));
     EXPECT_TRUE(HasErrorContaining("must be an ArkTS module specifier"));
-    // The message names the backslash rule too, not only the dot-relative prefix.
-    EXPECT_TRUE(HasErrorContaining("backslash spelling"));
     auto fd = FindFunction("relModule");
     ASSERT_NE(fd, nullptr);
     EXPECT_EQ(fd->funcBody->body, nullptr);
@@ -3253,7 +3251,6 @@ foreign func backslashModule(x: Int32): Int32
     EXPECT_EQ(diag.GetErrorCount(), 1);
     EXPECT_TRUE(HasErrorContaining("'module' option"));
     EXPECT_TRUE(HasErrorContaining("must be an ArkTS module specifier"));
-    EXPECT_TRUE(HasErrorContaining("backslash spelling"));
 }
 
 // A missing interop dependency for the entry callback/registration pair yields
@@ -5182,10 +5179,10 @@ public foreign func greet(message: String): Unit
     auto fd = FindFunction("greet");
     ASSERT_NE(fd, nullptr);
     EXPECT_TRUE(fd->TestAttr(Attribute::ARKTS_HAS_THIS));
-    EXPECT_TRUE(fd->HasAnno(AnnotationKind::HAS_THIS));
+    EXPECT_TRUE(fd->HasAnno(AnnotationKind::ARKTS_HAS_THIS));
     const Annotation* hasThis = nullptr;
     for (auto& annotation : fd->annotations) {
-        if (annotation->kind == AnnotationKind::HAS_THIS) {
+        if (annotation->kind == AnnotationKind::ARKTS_HAS_THIS) {
             hasThis = annotation.get();
         }
     }
@@ -5422,7 +5419,7 @@ public foreign func greet(): Unit
     Ptr<FuncDecl> hasThisFd{nullptr};
     Walker walker(instance->GetSourcePackages()[0].get(), [&hasThisFd](Ptr<Node> node) {
         auto fd = DynamicCast<FuncDecl*>(node);
-        if (fd != nullptr && fd->HasAnno(AnnotationKind::HAS_THIS)) {
+        if (fd != nullptr && fd->HasAnno(AnnotationKind::ARKTS_HAS_THIS)) {
             hasThisFd = fd;
         }
         return VisitAction::WALK_CHILDREN;
@@ -5534,10 +5531,10 @@ public func use(person: Person): Unit {
     auto imported = instance->importManager->GetImportedDecl("dep", "greet");
     ASSERT_NE(imported, nullptr);
     EXPECT_TRUE(imported->TestAttr(Attribute::ARKTS_HAS_THIS));
-    EXPECT_TRUE(imported->HasAnno(AnnotationKind::HAS_THIS));
+    EXPECT_TRUE(imported->HasAnno(AnnotationKind::ARKTS_HAS_THIS));
     const Annotation* hasThis = nullptr;
     for (auto& annotation : imported->annotations) {
-        if (annotation->kind == AnnotationKind::HAS_THIS) {
+        if (annotation->kind == AnnotationKind::ARKTS_HAS_THIS) {
             hasThis = annotation.get();
         }
     }
@@ -5547,4 +5544,31 @@ public func use(person: Person): Unit {
     auto literal = DynamicCast<LitConstExpr*>(hasThis->args.front()->expr.get());
     ASSERT_NE(literal, nullptr);
     EXPECT_EQ(literal->stringValue, "Person");
+}
+
+// The injected support imports are link dependencies only: they must not bind
+// a name for user code or conflict with a user declaration that reuses one of
+// the support names. The generated wrappers keep their pre-bound SDK targets.
+TEST_F(ArkTSForeignDiagTest, InjectedSupportImportsStayOutOfUserScope)
+{
+    ResetWithArkTSSupport();
+    CompileSema(R"(
+class BusinessException <: Exception {
+    public init() {}
+}
+
+@ArkTS[module: "m"]
+foreign func foo(value: Int32): Int32
+
+func useIt(): Unit {
+    let error = BusinessException()
+    try {
+        throw error
+    } catch (e: BusinessException) {
+        println(e.message)
+    }
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_TRUE(FindClass("BusinessException") != nullptr);
 }

@@ -940,6 +940,20 @@ private:
      * Check call expressions' related APIs.
      */
     bool ChkCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    /**
+     * Step 2 and Step 3 of ChkCallExpr: check the call kind, match the resolved
+     * candidates and finish the call. @p argsTys and @p prevCheckTrue are the
+     * pre-check state used to recover argument types on failure.
+     */
+    bool ChkCallExprCandidates(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce, const Ptr<AST::Decl>& decl,
+        std::vector<Ptr<AST::FuncDecl>> candidates, const std::vector<AST::ModalTy>& argsTys,
+        bool prevCheckTrue);
+    /**
+     * The '@HasThis' carrier is not callable as a value until the later
+     * lowering lands: refuse a direct call of the declaration and the carrier's
+     * `bind` call. Returns true when the call was refused and marked invalid.
+     */
+    bool RefuseArkTSHasThisCall(AST::CallExpr& ce, const Ptr<AST::Decl>& decl);
     bool ChkDesugarExprOfCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
     bool CheckCallKind(const AST::CallExpr& ce, Ptr<AST::Decl> decl, AST::CallKind& type);
     /**

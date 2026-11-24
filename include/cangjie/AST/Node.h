@@ -595,7 +595,7 @@ enum class AnnotationKind {
      * maps built-in kinds to PackageFormat::AnnoKind. Appending before the
      * UNKNOWN sentinel therefore does not change any serialized contract.
      */
-    HAS_THIS,
+    ARKTS_HAS_THIS,
     UNKNOWN
 };
 
@@ -3043,6 +3043,24 @@ struct ImportSpec : Node {
      * approved entry path.
      */
     bool isPctSyncRemapped{false};
+    /**
+     * Set by a compiler pass that synthesizes an import for generated code.
+     * Such an import is skipped by the per-file imported-name map, so a user
+     * declaration of one of its names neither conflicts with nor resolves to
+     * it; the generated references are pre-bound by the pass that created
+     * them. When @c implicitDependencyPackage is non-empty the import is also
+     * a real runtime link dependency, and dependency generation records that
+     * package instead of deriving one from the (possibly member-qualified)
+     * import name.
+     */
+    bool isCompilerInjectedImport{false};
+    /**
+     * The import must not bind its names for user code. A generated package
+     * qualifier is re-resolved after a speculative re-check, so package
+     * imports stay visible; a single-member import is pre-bound and is hidden.
+     */
+    bool hidesFromNameLookup{false};
+    std::string implicitDependencyPackage;
     ImportSpec() : Node(ASTKind::IMPORT_SPEC)
     {
     }

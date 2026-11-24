@@ -127,8 +127,8 @@ public func run(): Unit {
     EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS) + 1, static_cast<int>(AnnotationKind::ARKTS_REST_PARAM));
     EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_REST_PARAM) + 1, static_cast<int>(AnnotationKind::ARKTS_WRITE_ONLY));
     EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_WRITE_ONLY) + 1, static_cast<int>(AnnotationKind::ARKTS_RAW_VALUE));
-    EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_RAW_VALUE) + 1, static_cast<int>(AnnotationKind::HAS_THIS));
-    EXPECT_EQ(static_cast<int>(AnnotationKind::HAS_THIS) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_RAW_VALUE) + 1, static_cast<int>(AnnotationKind::ARKTS_HAS_THIS));
+    EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_HAS_THIS) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
 }
 
 TEST_F(ArkTSEntryTest, RegistrationRestoresContextInFinally)

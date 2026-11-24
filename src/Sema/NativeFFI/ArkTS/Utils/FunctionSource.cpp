@@ -844,16 +844,14 @@ static std::string ArkTSScalarToJS(const std::string& type, const std::string& c
 }
 
 // Every conversion failure in generated code is thrown through this helper.
-// No upstream provider ships an ExternConversionException yet, so the
-// facade arkts.lang hosts the only type of this name (a stand-in,
-// the arkts.lang facade (formerly utils/arkts, now in the ArkTS interop SDK repository) with a single-String
-// constructor; the lowering walker pins this name to that declaration
+// The facade arkts.lang hosts the only type of the name spelled by
+// ARKTS_CONVERSION_EXCEPTION (FunctionSource.h) with a single-String
+// constructor; the lowering walker pins that name to the declaration
 // (LowerFunctions.cpp BindSupportReferences), so a same-named source item
-// cannot capture it. This constant stays the single compiler-side
-// indirection: when the real type lands, re-export it from the facade (or
-// change only this constant, the pinning package and the throw shape
-// below), never the call sites.
-static constexpr const char* const ARKTS_CONVERSION_EXCEPTION = "ExternConversionException";
+// cannot capture it. ARKTS_CONVERSION_EXCEPTION stays the single
+// compiler-side indirection: when the real type lands, re-export it from the
+// facade (or change only that constant, the pinning package and the throw
+// shape below), never the call sites.
 
 // Option constructors are spelled as qualified members of the std.core
 // enum: Some/None are the enum's constructors, not package members, so no

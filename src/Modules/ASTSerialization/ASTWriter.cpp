@@ -1920,7 +1920,7 @@ std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& d
                 annotations.emplace_back(rawValue);
                 break;
             }
-            case AST::AnnotationKind::HAS_THIS: {
+            case AST::AnnotationKind::ARKTS_HAS_THIS: {
                 // A contract Sema refused must not cross the package boundary:
                 // the loader would otherwise resurrect it as a valid marker.
                 if (annotation->TestAttr(Attribute::IS_BROKEN)) {

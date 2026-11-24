@@ -505,9 +505,7 @@ ERROR(sema_arkts_foreign_rest_type_unsupported,
 ERROR(sema_arkts_foreign_named_param_without_default,
     "named parameter '%s' of @ArkTS foreign declaration '%s' must have a default value")
 ERROR(sema_arkts_foreign_module_path_invalid,
-    "'module' option '%s' of @ArkTS foreign function '%s' must be an ArkTS module specifier - a module name "
-    "such as '@ohos.util' or 'utils', or a project ETS source path such as 'entry/src/main/ets/Foo' - not a "
-    "'./' or '../' relative path, a backslash spelling, an OS-absolute, drive-absolute or UNC path")
+    "'module' option '%s' of @ArkTS foreign function '%s' must be an ArkTS module specifier")
 // Routing-only diagnostic for every position spelled with an external ArkTS
 // preset type (std.interop.arkts ArkTSArray<T>, ArkTSString, ArkTSType) whose
 // mapping is not part of this version: classification itself is untouched and

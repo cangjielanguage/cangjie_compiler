@@ -58,7 +58,7 @@ bool IsArkTSOnlyAnnotation(AnnotationKind kind)
 {
     return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE ||
         kind == AnnotationKind::ARKTS_REST_PARAM ||
-        kind == AnnotationKind::ARKTS_WRITE_ONLY || kind == AnnotationKind::HAS_THIS;
+        kind == AnnotationKind::ARKTS_WRITE_ONLY || kind == AnnotationKind::ARKTS_HAS_THIS;
 }
 
 // A non-foreign entry may not declare type parameters. The parser rejects the
@@ -577,7 +577,7 @@ namespace {
 Annotation* FindUsableHasThisAnnotation(Decl& decl)
 {
     for (auto& annotation : decl.annotations) {
-        if (annotation != nullptr && annotation->kind == AnnotationKind::HAS_THIS &&
+        if (annotation != nullptr && annotation->kind == AnnotationKind::ARKTS_HAS_THIS &&
             !annotation->TestAttr(Attribute::IS_BROKEN)) {
             return annotation.get();
         }
@@ -702,7 +702,7 @@ VisitAction ValidateHasThisTypesOnDecl(Ptr<Node> node, DiagnosticEngine& diag, I
         return VisitAction::WALK_CHILDREN;
     }
     for (auto& annotation : decl->annotations) {
-        if (annotation == nullptr || annotation->kind != AnnotationKind::HAS_THIS ||
+        if (annotation == nullptr || annotation->kind != AnnotationKind::ARKTS_HAS_THIS ||
             annotation->TestAttr(Attribute::IS_BROKEN)) {
             continue;
         }

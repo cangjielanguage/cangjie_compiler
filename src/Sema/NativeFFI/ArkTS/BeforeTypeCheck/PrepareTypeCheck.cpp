@@ -55,8 +55,8 @@ bool FileBindsInteropPackages(const File& file)
             continue;
         }
         const auto packageName = content.GetImportedPackageName();
-        interop = interop || packageName == "ohos.ark_interop";
-        contextAbi = contextAbi || packageName == "cj_arkts_context_v1";
+        interop = interop || packageName == ARKTS_INTEROP_FULL_PACKAGE;
+        contextAbi = contextAbi || packageName == ARKTS_CONTEXT_ABI_FULL_PACKAGE;
     }
     return interop && contextAbi;
 }

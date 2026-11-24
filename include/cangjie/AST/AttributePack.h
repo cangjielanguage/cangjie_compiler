@@ -187,15 +187,9 @@ enum class Attribute {
     OPERATOR,
 
     /**
-     * Mark whether a declaration was written with the 'foreign' modifier. The
-     * bit survives @ArkTS wrapper preparation as the declaration's source
-     * identity, so it does NOT mean "external" any more: a prepared wrapper
-     * carries this bit and behaves as an ordinary Cangjie declaration.
-     * Use AST::IsExternalForeign for "external: bodyless, C ABI, imported,
-     * needs unsafe" and AST::IsArkTSPrepared for the prepared state.
-     * W: Parser, PreCheck.
-     * R: Parser, PreCheck, TypeChecker, AST2CHIR, CodeGenHLIR, CodeGenJs,
-     *    WellFormednessChecker.
+     * Mark whether a declaration is a foreign one.
+     * W: PreCheck.
+     * R: AST2CHIR, CodeGenHLIR, CodeGenJs, WellFormednessChecker, Parser, TypeChecker, PreCheck.
      */
     FOREIGN,
 
@@ -742,9 +736,11 @@ enum class Attribute {
     OBJ_C_EXPORT_MOVED_MEMBER_PROXY,
 
     /**
-     * Mark a function declared with @ArkTS, including declarations imported from CJO.
+     * Mark a declaration declared with @ArkTS, including declarations imported
+     * from CJO.
      * W: Parser, ASTLoader.
-     * R: ArkTS entry selection, ASTWriter.
+     * R: ASTWriter, AnnoCheck, FunctionSource, EntrySelection, TypeChecker,
+     * TypeCheckExtend, LowerClasses, TypeCheckCall.
      */
     ARKTS,
     // Ordinary CJ wrapper generated from an ArkTS foreign function.
@@ -756,8 +752,8 @@ enum class Attribute {
     // keeps existing serialized attribute indices stable.
     ARKTS_CLASS_WRAPPER,
     // A @WriteOnly property of a prepared ArkTS wrapper class. The annotation
-    // itself is not part of the CJO annotation records, so the attribute
-    // carries the write-only contract to importing packages.
+    // is not serialized into CJO, so the attribute carries the write-only
+    // contract to importing packages.
     // W: Sema class preparation.
     // R: the write-only read diagnostic. Appending keeps existing serialized
     // attribute indices stable.
@@ -781,11 +777,11 @@ enum class Attribute {
 
     // A prepared ArkTS foreign function whose source declaration carried
     // '@HasThis[TypeName]': the ArkTS target is a method whose `this` has
-    // TypeName. The ThisT spelling itself is carried across the CJO boundary by
-    // the HasThis annotation record; this bit marks the contract on prepared
-    // and imported wrappers without re-parsing the annotation. The call
-    // semantics are a later requirement. Appending keeps existing serialized
-    // attribute indices stable.
+    // TypeName. The ThisT spelling is carried across the CJO boundary by the
+    // HasThis annotation record; this bit records the validated contract for
+    // passes that read the attribute instead of re-parsing the annotation. The
+    // call semantics are a later requirement. Appending keeps existing
+    // serialized attribute indices stable.
     // W: ArkTS prepare validation and the CJO loader.
     // R: later @HasThis lowering and the CJO writer/loader.
     ARKTS_HAS_THIS,
