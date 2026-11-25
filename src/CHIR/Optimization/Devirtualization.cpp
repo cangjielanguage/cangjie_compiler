@@ -148,6 +148,9 @@ std::string CreateInstFuncMangleName(
     if (!context.instTypeArgs.empty()) {
         genericTypes.insert(genericTypes.end(), context.instTypeArgs.begin(), context.instTypeArgs.end());
     }
+    // Instantiation also replaces This with the call-site receiver type. Different
+    // subclasses can share the same parent type arguments but resolve static calls differently.
+    genericTypes.emplace_back(context.thisType);
     // 2. get mangle
     return CHIRMangling::GenerateInstantiateFuncMangleName(oriIdentifer, genericTypes);
 }
