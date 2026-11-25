@@ -2763,6 +2763,14 @@ ModalTy TypeManager::ObtainsAliasTypeOfRefType(Ptr<const RefType> rt)
 
 ModalTy TypeManager::ObtainsAliasTypeOfFuncDecl(Ptr<const FuncDecl> fd)
 {
+    // An '@HasThis' declaration's static type is the carrier class
+    // ArkTSFuncWithThis<ThisT, F>, not a function type. Its type arguments are
+    // ThisT and F, so rebuilding it from the signature's parameter and return
+    // types below would drop ThisT and corrupt the exported type. Keep the
+    // checked carrier type; this is the type the importing package must see.
+    if (!fd->GetTy()->IsFunc()) {
+        return fd->GetTy();
+    }
     auto& fb = fd->funcBody;
     std::vector<ModalTy> typeArgs;
     for (auto& param : fb->paramLists[0]->params) {

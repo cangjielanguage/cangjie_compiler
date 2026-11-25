@@ -1732,6 +1732,9 @@ private:
     // ArkTSFuncWithThis<ThisT, F> value; replace its function type after the
     // signature is checked.
     void ApplyArkTSHasThisType(AST::FuncDecl& fd);
+    // Rebuild ThisT for an imported '@HasThis' declaration from the spelling
+    // kept in its CJO; returns null when the name cannot be reconstructed.
+    Ptr<AST::Ty> ResolveImportedHasThisTy(const AST::FuncDecl& fd, const AST::Expr& arg);
     // Shared state of one prepared ArkTS class or interface lowering step.
     // Defined in LowerClasses.cpp: no other translation unit can name it.
     struct ArkTSDeclLoweringContext;

@@ -5536,9 +5536,10 @@ public foreign func greet(): Unit
     EXPECT_TRUE(IsDeclBroken("greet"));
 }
 
-// The ThisT spelling crosses a package boundary in the CJO annotation record:
-// the importer rebuilds the '@HasThis' annotation and the marker attribute,
-// and the imported declaration keeps the direct-call refusal.
+// The carrier type ArkTSFuncWithThis<ThisT, F> crosses the package boundary as
+// the declaration's serialized type, so an imported '@HasThis' declaration is
+// usable as a value exactly like a same-package one. The annotation record
+// still carries the ThisT spelling, and the direct-call refusal stays.
 TEST_F(ArkTSForeignDiagTest, HasThisSurvivesCjoRoundTrip)
 {
     diag.ClearError();
@@ -5572,14 +5573,15 @@ public foreign func greet(): Unit
 
 import dep.*
 
-// The cross-package contract is the CJO record plus the marker attribute; a
-// direct call of the imported value is still refused. The carrier-type
-// reconstruction for an imported '@HasThis' declaration is a later
-// requirement, so the refusal is the observable cross-package behavior.
+// The imported declaration has the same carrier type as a same-package one,
+// so binding it to a value is accepted; only the direct call is refused.
 public func call(): Unit {
+    let value = greet
     greet()
 }
 )");
+    // Exactly one error: the direct-call refusal. The value use adds none.
+    EXPECT_EQ(handler->messages.size(), 1U);
     EXPECT_EQ(CountErrorsContaining("cannot be called directly"), 1U);
     auto imported = instance->importManager->GetImportedDecl("dep", "greet");
     ASSERT_NE(imported, nullptr);
@@ -5597,6 +5599,37 @@ public func call(): Unit {
     auto literal = DynamicCast<LitConstExpr*>(hasThis->args.front()->expr.get());
     ASSERT_NE(literal, nullptr);
     EXPECT_EQ(literal->stringValue, "Person");
+    // The imported static type is the carrier, not a function type. A
+    // signature-shaped substitution would have dropped ThisT.
+    auto carrier = DynamicCast<ClassTy*>(imported->DataTy());
+    ASSERT_NE(carrier, nullptr);
+    ASSERT_NE(carrier->decl, nullptr);
+    EXPECT_EQ(carrier->decl->identifier.Val(), "ArkTSFuncWithThis");
+    ASSERT_EQ(carrier->typeArgs.size(), 2U);
+    EXPECT_EQ(carrier->typeArgs[0].Ty()->String(), "Class-Person");
+    EXPECT_TRUE(carrier->typeArgs[0]->IsClass());
+    EXPECT_TRUE(carrier->typeArgs[1]->IsFunc());
+
+    // The imported carrier keeps the same staged refusal as the source one:
+    // 'bind' is found through the carrier type and rejected before codegen.
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    CompileSema(R"(package entry
+
+import dep.*
+
+public func use(person: Person): Unit {
+    let bound = greet.bind(person)
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("'ArkTSFuncWithThis.bind' is not supported yet"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
 }
 
 // A prepared @WriteOnly property crosses the package boundary through the
@@ -5732,4 +5765,141 @@ func useIt(): Unit {
 )");
     ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
     EXPECT_TRUE(FindClass("BusinessException") != nullptr);
+}
+
+// The experimental gate is a source-file gate: it skips packages marked
+// IMPORTED, so a prepared @ArkTS declaration imported from a dependency CJO
+// must not re-trigger it when the importing package compiles without
+// --experimental. The consumer here carries no ArkTS-only annotation of its
+// own and only calls the imported declaration.
+TEST_F(ArkTSForeignDiagTest, ImportedArkTSDoesNotReTriggerExperimentalGate)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto depCjo = ExportSupportPackage(R"(package dep
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign func answer(): Int32
+)", {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+
+    // Fresh instance with the flag off, as a user compiling a plain consumer
+    // against an already prepared dependency would see it.
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    invocation.globalOptions.experimentalMode = false;
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    CompileSema(R"(package entry
+
+import dep.*
+
+public func use(): Int32 {
+    answer()
+}
+)");
+    // Zero gate diagnostics proves the gate did not inspect the imported
+    // package; zero errors of any kind proves the imported declaration is
+    // still usable with the capability disabled.
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(handler->messages.size(), 0U);
+
+    // Positive control: the flag really is off for this compilation, so source
+    // ArkTS in the consumer is still refused exactly once even while the
+    // imported @ArkTS declaration stays silent.
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    CompileSema(R"(package entry
+
+import dep.*
+
+@ArkTS
+public func run(): Unit {
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// The target gate is scoped the same way: with the SetUp host-target escape
+// removed, source ArkTS is refused on this Linux target, but an @ArkTS
+// declaration imported from a prepared dependency CJO must not re-report the
+// target gate.
+TEST_F(ArkTSForeignDiagTest, ImportedArkTSDoesNotReTriggerTargetGate)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto depCjo = ExportSupportPackage(R"(package dep
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign func answer(): Int32
+)", {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+
+    // The dependency was exported while the host-target escape was still set;
+    // drop it now so the gate would fire for any source-file ArkTS.
+#ifdef _WIN32
+    _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "");
+#else
+    unsetenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET");
+#endif
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    CompileSema(R"(package entry
+
+import dep.*
+
+public func use(): Int32 {
+    answer()
+}
+)");
+    // The imported package is skipped, so the non-OHOS target produces no
+    // diagnostic at all for this plain consumer.
+    EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 0U);
+    EXPECT_EQ(handler->messages.size(), 0U);
+
+    // Positive control: source ArkTS on the same target is still refused once,
+    // proving the gate is active and only the imported package escaped it.
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    CompileSema(R"(package entry
+
+@ArkTS[module: "m"]
+public foreign func echo(): Int32
+)");
+    EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+
+    // Restore the escape even though SetUp sets it for every test.
+#ifdef _WIN32
+    _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1");
+#else
+    setenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1", 1);
+#endif
 }
