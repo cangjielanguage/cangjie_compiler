@@ -13,6 +13,7 @@
 #include <functional>
 
 namespace Cangjie {
+class GlobalOptions;
 class DiagnosticEngine;
 class SourceManager;
 class ImportManager;
@@ -24,13 +25,28 @@ namespace Native::FFI::ArkTS {
 // ArkTS-only annotation.
 void SetExperimentalEnabled(bool enabled);
 bool ExperimentalEnabled();
+// Whether the compilation target supports the capability: only OHOS may use
+// ArkTS interop. The host-target LLT and unit suites have no OHOS std module
+// set, so they take the CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET escape instead.
+// The variable is a test-harness escape: it is deliberately undocumented and
+// never emitted by the driver.
+bool ArkTSTargetSupported(const GlobalOptions& opts);
+// The checker sets the target gate once per semantic pass, next to the
+// experimental gate. It must survive ResetState.
+void SetTargetSupported(bool supported);
+bool TargetSupported();
+// The capability is usable only when both gates pass. Every check that
+// suppresses the normal ArkTS contract must key on this predicate, so a
+// target refusal cannot add a second, unrelated diagnostic.
+bool CapabilityEnabled();
 // The per-package pass gate: the capability is enabled and the package is a
 // source package. Every prepare/lower entry point uses this one predicate so
 // a new pass cannot drift from the gate.
 bool PassEnabled(const AST::Package& pkg);
-// Report the gate diagnostic at the first ArkTS-only annotation of each file.
-// No-op when the capability is enabled or the package is imported.
-void DiagnoseExperimentalGate(AST::Package& pkg, DiagnosticEngine& diag);
+// Report the failed gate diagnostic at the first ArkTS-only annotation of
+// each file: the experimental diagnostic when @p experimentalGate is set, the
+// OHOS-target diagnostic otherwise. No-op for imported packages.
+void DiagnoseCapabilityGate(AST::Package& pkg, DiagnosticEngine& diag, bool experimentalGate);
 // The real compiler path passes the import manager so an @ArkTS entry whose
 // interop packages are not visible is refused once, before the generated
 // callback signature can surface undeclared-type noise. Unit tests that call

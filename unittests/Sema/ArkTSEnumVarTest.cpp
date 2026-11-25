@@ -90,8 +90,15 @@ protected:
     void SetUp() override
     {
         // ArkTS interop is experimental: the checker enables its prepare and
-        // lower passes only when the user passes --experimental.
+        // lower passes only when the user passes --experimental. The host has
+        // no OHOS std module set, so these front-end tests take the
+        // host-target escape for the OHOS-only target gate.
         invocation.globalOptions.experimentalMode = true;
+#ifdef _WIN32
+        _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1");
+#else
+        setenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1", 1);
+#endif
         instance = std::make_unique<TestCompilerInstance>(invocation, diag);
 #ifdef PROJECT_SOURCE_DIR
         projectPath = PROJECT_SOURCE_DIR;

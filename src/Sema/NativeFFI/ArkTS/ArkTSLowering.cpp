@@ -241,9 +241,10 @@ struct ArkTSLoweringState {
 
 ArkTSLoweringState g_arktsState;
 
-// The experimental gate is not part of the per-pass lowering tables: the
-// checker sets it before ResetState, and it must survive that reset.
+// The capability gates are not part of the per-pass lowering tables: the
+// checker sets them before ResetState, and they must survive that reset.
 bool g_arktsExperimentalEnabled = false;
+bool g_arktsTargetSupported = false;
 
 // Bind an injected package qualifier (ark_interop, cj_arkts_context_v1) to its
 // PackageDecl, so a same-named user declaration cannot capture it. Returns
@@ -882,9 +883,24 @@ bool Native::FFI::ArkTS::ExperimentalEnabled()
     return g_arktsExperimentalEnabled;
 }
 
+void Native::FFI::ArkTS::SetTargetSupported(bool supported)
+{
+    g_arktsTargetSupported = supported;
+}
+
+bool Native::FFI::ArkTS::TargetSupported()
+{
+    return g_arktsTargetSupported;
+}
+
+bool Native::FFI::ArkTS::CapabilityEnabled()
+{
+    return ExperimentalEnabled() && TargetSupported();
+}
+
 bool Native::FFI::ArkTS::PassEnabled(const AST::Package& pkg)
 {
-    return ExperimentalEnabled() && !pkg.TestAttr(Attribute::IMPORTED);
+    return CapabilityEnabled() && !pkg.TestAttr(Attribute::IMPORTED);
 }
 
 void Native::FFI::ArkTS::PrepareVariablesAndEnums(AST::Package& pkg, DiagnosticEngine& diag)

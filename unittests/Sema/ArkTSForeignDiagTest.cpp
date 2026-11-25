@@ -143,6 +143,14 @@ protected:
 #else
         instance->invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::AARCH64;
 #endif
+    // ArkTS interop is OHOS-only, but the host has no OHOS std module set, so
+    // the front-end tests take the documented host-target escape instead of
+    // pretending to target OHOS (which would also redirect std module lookup).
+#ifdef _WIN32
+    _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1");
+#else
+    setenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1", 1);
+#endif
 #ifdef _WIN32
         instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::WINDOWS;
         invocation.globalOptions.executablePath = projectPath + "\\output\\bin\\";
@@ -4854,6 +4862,48 @@ public func run(): Unit {
     EXPECT_EQ(handler->messages.size(), 1U);
 }
 
+// ArkTS interop is OHOS-only. With --experimental but a non-OHOS target the
+// capability reports one target diagnostic per file and no wrapper is
+// generated.
+TEST_F(ArkTSForeignDiagTest, TargetGateRejectsNonOhosTarget)
+{
+    // The host-target escape from SetUp is what normally keeps the front-end
+    // tests running; remove it so the gate sees the real Linux target.
+#ifdef _WIN32
+    _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "");
+#else
+    unsetenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET");
+#endif
+    diag.ClearError();
+    handler->messages.clear();
+    CompileSema(R"(package entry
+
+@ArkTS[module: "m"]
+foreign func echo(): Int32
+
+public func call(): Int32 {
+    unsafe {
+        echo()
+    }
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("only available when targeting OHOS"));
+    EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 1U);
+    // No cascading unsafe-call/undeclared diagnostics and no generated roots:
+    // the refused capability suppresses the ArkTS contract for the whole file.
+    EXPECT_EQ(handler->messages.size(), 1U);
+    bool generated = false;
+    Walker(instance->GetSourcePackages()[0].get(), [&generated](Ptr<Node> node) {
+        auto decl = DynamicCast<Decl*>(node);
+        if (decl != nullptr && decl->TestAttr(Attribute::COMPILER_ADD) &&
+            decl->identifier.Val().rfind("__cj_arkts_", 0) == 0) {
+            generated = true;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_FALSE(generated);
+}
+
 // The same input is not refused by the gate when the flag is present; any
 // remaining error belongs to the normal ArkTS contract (missing support
 // packages in this bare fixture), not to the experimental gate. That support
@@ -5487,7 +5537,8 @@ public foreign func greet(): Unit
 }
 
 // The ThisT spelling crosses a package boundary in the CJO annotation record:
-// the importer rebuilds the '@HasThis' annotation and the marker attribute.
+// the importer rebuilds the '@HasThis' annotation and the marker attribute,
+// and the imported declaration keeps the direct-call refusal.
 TEST_F(ArkTSForeignDiagTest, HasThisSurvivesCjoRoundTrip)
 {
     diag.ClearError();
@@ -5521,13 +5572,15 @@ public foreign func greet(): Unit
 
 import dep.*
 
-// The cross-package contract is the CJO record itself; the carrier-type
+// The cross-package contract is the CJO record plus the marker attribute; a
+// direct call of the imported value is still refused. The carrier-type
 // reconstruction for an imported '@HasThis' declaration is a later
-// requirement, so this test does not call the imported value.
-public func use(person: Person): Unit {
+// requirement, so the refusal is the observable cross-package behavior.
+public func call(): Unit {
+    greet()
 }
 )");
-    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_EQ(CountErrorsContaining("cannot be called directly"), 1U);
     auto imported = instance->importManager->GetImportedDecl("dep", "greet");
     ASSERT_NE(imported, nullptr);
     EXPECT_TRUE(imported->TestAttr(Attribute::ARKTS_HAS_THIS));
@@ -5544,6 +5597,114 @@ public func use(person: Person): Unit {
     auto literal = DynamicCast<LitConstExpr*>(hasThis->args.front()->expr.get());
     ASSERT_NE(literal, nullptr);
     EXPECT_EQ(literal->stringValue, "Person");
+}
+
+// A prepared @WriteOnly property crosses the package boundary through the
+// ARKTS_WRITE_ONLY_PROP attribute: the annotation itself has no CJO record, so
+// the importer relies on the attribute and still rejects a read while keeping
+// the write.
+TEST_F(ArkTSForeignDiagTest, WriteOnlySurvivesCjoRoundTrip)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto depCjo = ExportSupportPackage(R"(package dep
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Counter {
+    public init()
+    @WriteOnly public mut prop value: Int32
+}
+)", {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    CompileSema(R"(package entry
+
+import dep.*
+
+public func write(c: Counter): Unit {
+    c.value = 1
+}
+
+public func read(c: Counter): Int32 {
+    return c.value
+}
+)");
+    // The write stays legal; only the read of the imported property is refused.
+    EXPECT_EQ(diag.GetErrorCount(), 1) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_EQ(CountErrorsContaining("is write-only and cannot be read"), 1U);
+    auto counter = DynamicCast<ClassDecl*>(instance->importManager->GetImportedDecl("dep", "Counter"));
+    ASSERT_NE(counter, nullptr);
+    bool writeOnly = false;
+    Walker(counter, [&writeOnly](Ptr<Node> node) {
+        auto prop = DynamicCast<PropDecl*>(node);
+        if (prop != nullptr && prop->identifier.Val() == "value") {
+            writeOnly = prop->TestAttr(Attribute::ARKTS_WRITE_ONLY_PROP);
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_TRUE(writeOnly);
+}
+
+// @RestParam shapes the wrapper generated in the declaring package and has no
+// CJO record: the importer sees the lowered array parameter and can call it,
+// without the rest annotation reappearing on the imported declaration.
+TEST_F(ArkTSForeignDiagTest, RestParamSignatureSurvivesCjoRoundTrip)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(
+        ARKTS_LANG_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto depCjo = ExportSupportPackage(R"(package dep
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign func names(@RestParam items: Array<String>): Float64
+)", {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    CompileSema(R"(package entry
+
+import dep.*
+
+public func call(): Float64 {
+    return names(["a", "b"])
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto names = DynamicCast<FuncDecl*>(instance->importManager->GetImportedDecl("dep", "names"));
+    ASSERT_NE(names, nullptr);
+    ASSERT_NE(names->funcBody, nullptr);
+    ASSERT_EQ(names->funcBody->paramLists.size(), 1U);
+    ASSERT_EQ(names->funcBody->paramLists.front()->params.size(), 1U);
+    auto& param = *names->funcBody->paramLists.front()->params.front();
+    // @RestParam is a parameter annotation and has no CJO record, so it must
+    // not reappear on the imported wrapper's parameter.
+    EXPECT_TRUE(std::none_of(param.annotations.begin(), param.annotations.end(), [](const auto& anno) {
+        return anno != nullptr && anno->kind == AnnotationKind::ARKTS_REST_PARAM;
+    }));
+    // The consumer call above compiles with an array argument, which pins the
+    // imported parameter shape as the lowered Array<String>.
 }
 
 // The injected support imports are link dependencies only: they must not bind

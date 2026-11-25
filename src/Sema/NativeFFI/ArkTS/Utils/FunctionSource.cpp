@@ -425,7 +425,7 @@ bool ArkTSWriteOnlyProp(const Decl& decl)
 
 Ptr<PropDecl> ArkTSWriteOnlyTargetProp(const Node& usage, bool readThroughLeftValue)
 {
-    if (!ExperimentalEnabled() ||
+    if (!CapabilityEnabled() ||
         (usage.astKind != ASTKind::MEMBER_ACCESS && usage.astKind != ASTKind::REF_EXPR) ||
         (usage.TestAttr(Attribute::LEFT_VALUE) && !readThroughLeftValue) || usage.TestAttr(Attribute::COMPILER_ADD)) {
         return nullptr;
@@ -509,7 +509,7 @@ bool ArkTSFuncBodyHasGatedParam(const FuncBody& body)
 
 bool IsGatedArkTSDecl(const Decl& decl)
 {
-    if (ExperimentalEnabled()) {
+    if (CapabilityEnabled()) {
         return false;
     }
     if (IsArkTSDecl(decl)) {

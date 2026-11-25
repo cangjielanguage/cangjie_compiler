@@ -2072,6 +2072,8 @@ std::vector<Ptr<ASTContext>> TypeChecker::TypeCheckerImpl::PreTypeCheck(const st
     // The experimental gate belongs to the semantic pass, not to the per-pass
     // lowering tables, so it is set before ResetState clears those tables.
     Native::FFI::ArkTS::SetExperimentalEnabled(ci->invocation.globalOptions.experimentalMode);
+    Native::FFI::ArkTS::SetTargetSupported(
+        Native::FFI::ArkTS::ArkTSTargetSupported(ci->invocation.globalOptions));
     Native::FFI::ArkTS::ResetState();
     for (auto& ctx : contexts) {
         // Report the experimental gate here rather than in the CJNATIVE-only
@@ -2079,7 +2081,9 @@ std::vector<Ptr<ASTContext>> TypeChecker::TypeCheckerImpl::PreTypeCheck(const st
         // is refused. One diagnostic per file that carries an ArkTS-only
         // annotation; prepare/lower pass bodies then early-return on the gate.
         if (!Native::FFI::ArkTS::ExperimentalEnabled()) {
-            Native::FFI::ArkTS::DiagnoseExperimentalGate(*ctx->curPackage, diag);
+            Native::FFI::ArkTS::DiagnoseCapabilityGate(*ctx->curPackage, diag, true);
+        } else if (!Native::FFI::ArkTS::TargetSupported()) {
+            Native::FFI::ArkTS::DiagnoseCapabilityGate(*ctx->curPackage, diag, false);
         }
         PrepareTypeCheck(*ctx, *ctx->curPackage);
     }

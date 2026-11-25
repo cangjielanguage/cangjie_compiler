@@ -39,7 +39,7 @@ bool ArkTSRawValuePayloadConstructor(const FuncDecl& func)
 
 void CheckAnnoRawValue(Decl& decl, const Annotation& anno, DiagnosticEngine& diag)
 {
-    if (!ExperimentalEnabled()) {
+    if (!CapabilityEnabled()) {
         return;
     }
     // @RawValue maps a constructor of an @ArkTS enum to its ArkTS value. Both

@@ -47,10 +47,12 @@ protected:
     void SetUp() override
     {
         SetExperimentalEnabled(true);
+        SetTargetSupported(true);
     }
     void TearDown() override
     {
         SetExperimentalEnabled(false);
+        SetTargetSupported(false);
     }
 
     SourceManager sm;

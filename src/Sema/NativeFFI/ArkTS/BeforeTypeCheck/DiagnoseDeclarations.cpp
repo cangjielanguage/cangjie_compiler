@@ -11,8 +11,10 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
+#include "cangjie/Option/Option.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -536,20 +538,34 @@ void DiagnoseArkTSDeclarations(Package& pkg, DiagnosticEngine& diag)
     DiagnoseReservedGeneratedNames(pkg, diag);
 }
 
+bool ArkTSTargetSupported(const GlobalOptions& opts)
+{
+    // Host-target LLT and unit suites have no OHOS std module set, so they
+    // cannot compile for the real target. The variable is a test-harness
+    // escape, deliberately undocumented and never emitted by the driver.
+    const char* testHostTarget = std::getenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET");
+    if (testHostTarget != nullptr && std::string(testHostTarget) == "1") {
+        return true;
+    }
+    return opts.target.env == Triple::Environment::OHOS;
+}
+
 // One diagnostic per source file, at its first ArkTS-only annotation. The walk
 // covers declarations and parameters alike because annotations are AST nodes;
-// a file with several annotated declarations reports the capability once.
-void DiagnoseExperimentalGate(Package& pkg, DiagnosticEngine& diag)
+// a file with several annotated declarations reports the failed gate once.
+void DiagnoseCapabilityGate(Package& pkg, DiagnosticEngine& diag, bool experimentalGate)
 {
-    if (ExperimentalEnabled() || pkg.TestAttr(Attribute::IMPORTED)) {
+    if (pkg.TestAttr(Attribute::IMPORTED)) {
         return;
     }
+    const auto kind = experimentalGate ? DiagKindRefactor::sema_arkts_requires_experimental
+                                       : DiagKindRefactor::sema_arkts_requires_ohos_target;
     for (auto& file : pkg.files) {
         if (file == nullptr) {
             continue;
         }
         bool reported = false;
-        Walker(file.get(), [&diag, &reported](Ptr<Node> node) {
+        Walker(file.get(), [&diag, &reported, kind](Ptr<Node> node) {
             // Report once, at the first ArkTS-only annotation of the file.
             // The declaration is deliberately left unbroken: marking a gated
             // declaration IS_BROKEN removes it from symbol lookup and turns
@@ -557,7 +573,7 @@ void DiagnoseExperimentalGate(Package& pkg, DiagnosticEngine& diag)
             // error, which would defeat the one-diagnostic gate contract.
             auto annotation = DynamicCast<Annotation*>(node);
             if (!reported && annotation != nullptr && IsArkTSOnlyAnnotation(annotation->kind)) {
-                diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_requires_experimental, *annotation);
+                diag.DiagnoseRefactor(kind, *annotation);
                 reported = true;
             }
             return VisitAction::WALK_CHILDREN;
