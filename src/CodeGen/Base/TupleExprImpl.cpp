@@ -259,8 +259,11 @@ llvm::Value* GenerateCommonEnum(IRBuilder2& irBuilder, const CHIR::Tuple& tuple)
         enumCaseTi = irBuilder.CallIntrinsicGetTypeInfo({enumCaseTi, irBuilder.getInt32(typeArgs.size()), typeArgsArr});
     }
     // 2. allocate memory for the Enum's constructor.
-    auto enumVal = irBuilder.CallClassIntrinsicAlloc({enumCaseTi, irBuilder.GetSizeFromTypeInfo(enumCaseTi)}, false);
-    // 3. store tag and associated values
+    bool isLocalEnum = enumType->IsLocalRegion();
+    auto enumVal = irBuilder.CallClassIntrinsicAlloc(
+        {enumCaseTi, irBuilder.GetSizeFromTypeInfo(enumCaseTi)}, isLocalEnum);
+    // 3. store tag and associated values.
+    auto payloadWriteKind = isLocalEnum ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE;
     if (genericArgs.empty()) {
         std::vector<llvm::Type*> elemTypes;
         for (unsigned idx = 0; idx < tuple.GetNumOfOperands(); ++idx) {
@@ -277,7 +280,7 @@ llvm::Value* GenerateCommonEnum(IRBuilder2& irBuilder, const CHIR::Tuple& tuple)
             auto fieldPtr = irBuilder.CreateStructGEP(layoutType, castedEnumValPtr, idx);
             cgCtx.SetBasePtr(fieldPtr, enumVal);
             auto cgAddr = CGValue(fieldPtr, fieldAddrType);
-            irBuilder.CreateStore(*(cgMod | field), cgAddr);
+            irBuilder.CreateStore(*(cgMod | field), cgAddr, nullptr, payloadWriteKind);
         }
     } else {
         for (unsigned idx = 0; idx < tuple.GetNumOfOperands(); ++idx) {
@@ -295,7 +298,7 @@ llvm::Value* GenerateCommonEnum(IRBuilder2& irBuilder, const CHIR::Tuple& tuple)
             }
             cgCtx.SetBasePtr(fieldAddr, enumVal);
             auto cgAddr = CGValue(fieldAddr, fieldAddrType);
-            irBuilder.CreateStore(*(cgMod | field), cgAddr);
+            irBuilder.CreateStore(*(cgMod | field), cgAddr, nullptr, payloadWriteKind);
         }
     }
     return enumVal;

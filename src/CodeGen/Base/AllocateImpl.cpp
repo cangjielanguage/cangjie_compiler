@@ -25,7 +25,7 @@ llvm::Value* CodeGen::GenerateAllocate(IRBuilder2& irBuilder, const CHIR::Alloca
     auto allocaType = alloca.GetType();
     if (allocaType->IsClass()) {
         auto classType = StaticCast<CHIR::ClassType*>(allocaType);
-        auto ret = irBuilder.CallClassIntrinsicAlloc(*classType);
+        auto ret = irBuilder.CallClassIntrinsicAlloc(*classType, classType->IsLocalRegion());
         if (classType->IsAutoEnv()) {
             CJC_ASSERT(!classType->IsAutoEnvBase());
             auto payload = irBuilder.GetPayloadFromObject(ret);

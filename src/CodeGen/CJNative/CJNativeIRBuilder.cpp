@@ -596,7 +596,8 @@ llvm::Instruction* IRBuilder2::CallGCWrite(std::vector<llvm::Value*> args, Modal
     return CreateCall(func, args);
 }
 
-llvm::Instruction* IRBuilder2::CallGCWriteAgg(llvm::StructType* structType, std::vector<llvm::Value*> args)
+llvm::Instruction* IRBuilder2::CallGCWriteAgg(
+    llvm::StructType* structType, std::vector<llvm::Value*> args, ModalWriteKind writeKind)
 {
     // The intrinsic function has 4 arguments.
     CJC_ASSERT(args.size() == 4);
@@ -607,7 +608,12 @@ llvm::Instruction* IRBuilder2::CallGCWriteAgg(llvm::StructType* structType, std:
     // real type of third parameter: args[2]->getType()
     llvm::Type* type = llvm::Type::getInt8PtrTy(GetLLVMContext(), args[2]->getType()->getPointerAddressSpace());
     // Func: void @llvm.cj.gcwrite.struct(i8 addr1* baseObj, i8 addr1* dst, i8 addr1*/ i8* src, i64 length)
-    auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), llvm::Intrinsic::cj_gcwrite_struct, {type, GetSizetLLVMType()});
+    // Func: void @llvm.cj.maybe.local.write.struct(the same operands) — additionally registers
+    // region->heap edges for the reference slots of local-region owners, which is what a
+    // DEMODE/MAYBE_LOCAL classification demands for aggregate stores.
+    auto intrinsic = writeKind == ModalWriteKind::NONE ? llvm::Intrinsic::cj_gcwrite_struct
+                                                       : llvm::Intrinsic::cj_maybe_local_write_struct;
+    auto func = llvm::Intrinsic::getDeclaration(cgMod.GetLLVMModule(), intrinsic, {type, GetSizetLLVMType()});
     args[3] = CreateZExtOrTrunc(args[3], GetSizetLLVMType());
     ConvertArgsType(*this, func, args);
     auto inst = CreateCall(func, args);
@@ -840,7 +846,7 @@ llvm::Instruction* EmitStructFieldCopyViaTemp(
     auto tempVal = irBuilder.CreateEntryAlloca(structType);
     auto size = irBuilder.getInt64(sizeInBytes);
     irBuilder.CallGCReadAgg(structType, {tempVal, valOwnerPtr, store.val, size});
-    return irBuilder.CallGCWriteAgg(structType, {store.fieldOwnerPtr, store.destAddr, tempVal, size});
+    return irBuilder.CallGCWriteAgg(structType, {store.fieldOwnerPtr, store.destAddr, tempVal, size}, store.modalWrite);
 }
 
 llvm::Instruction* EmitStructFieldWriteBarrier(IRBuilder2& irBuilder, const StoreLowering& store)
@@ -859,7 +865,8 @@ llvm::Instruction* EmitStructFieldWriteBarrier(IRBuilder2& irBuilder, const Stor
     }
     auto size =
         llvm::ConstantInt::get(llvm::Type::getInt64Ty(irBuilder.GetLLVMContext()), structLayout->getSizeInBytes());
-    return irBuilder.CallGCWriteAgg(structType, {store.fieldOwnerPtr, store.destAddr, store.val, size});
+    return irBuilder.CallGCWriteAgg(
+        structType, {store.fieldOwnerPtr, store.destAddr, store.val, size}, store.modalWrite);
 }
 
 llvm::Instruction* EmitVArrayFieldWriteBarrier(IRBuilder2& irBuilder, const StoreLowering& store)
@@ -869,7 +876,7 @@ llvm::Instruction* EmitVArrayFieldWriteBarrier(IRBuilder2& irBuilder, const Stor
     auto size = irBuilder.getInt64(dataLayout.getTypeAllocSize(elemCGType->GetLLVMType()));
     if (IsTypeContainsRef(elemCGType->GetLLVMType())) {
         return irBuilder.CallGCWriteAgg(
-            elemCGType->GetLayoutType(), {store.fieldOwnerPtr, store.destAddr, store.val, size});
+            elemCGType->GetLayoutType(), {store.fieldOwnerPtr, store.destAddr, store.val, size}, store.modalWrite);
     }
     auto align = llvm::Align(dataLayout.getABITypeAlignment(elemCGType->GetLLVMType()));
     return irBuilder.CreateMemCpy(store.destAddr, align, store.val, align, size);
@@ -1442,6 +1449,9 @@ llvm::Value* IRBuilder2::CallArrayIntrinsicInitWithContent(const CHIR::RawArrayL
     }
 
     auto elemType = CGType::GetOrCreate(cgMod, rawArrTy->GetElementType());
+    // Element stores into a local-region array must keep the local-aware barrier for the
+    // reference slots of aggregate elements, same rule as the ref-element branch below.
+    auto elemWriteKind = rawArrTy->IsLocalRegion() ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE;
     for (size_t i = 0; i < elements.size(); ++i) {
         auto element = cgMod.GetMappedValue(elements[i]);
         CJC_ASSERT(element);
@@ -1460,7 +1470,7 @@ llvm::Value* IRBuilder2::CallArrayIntrinsicInitWithContent(const CHIR::RawArrayL
             auto size = getInt64(layOut->getSizeInBytes());
             CJC_NULLPTR_CHECK(layOut);
             if (IsTypeContainsRef(elemType->GetLLVMType())) {
-                CallGCWriteAgg(structType, {arrayV, elemPtr, elemValue, size});
+                CallGCWriteAgg(structType, {arrayV, elemPtr, elemValue, size}, elemWriteKind);
             } else {
                 auto align = layOut->getAlignment();
                 CreateMemCpy(elemPtr, align, elemValue, align, size);
@@ -1469,14 +1479,13 @@ llvm::Value* IRBuilder2::CallArrayIntrinsicInitWithContent(const CHIR::RawArrayL
             auto layout = GetLLVMModule()->getDataLayout();
             auto size = getInt64(layout.getTypeAllocSize(elemType->GetLLVMType()));
             if (IsTypeContainsRef(elemType->GetLLVMType())) {
-                CallGCWriteAgg(elemType->GetLayoutType(), {arrayV, elemPtr, elemValue, size});
+                CallGCWriteAgg(elemType->GetLayoutType(), {arrayV, elemPtr, elemValue, size}, elemWriteKind);
             } else {
                 auto align = llvm::Align(layout.getABITypeAlignment(elemType->GetLLVMType()));
                 CreateMemCpy(elemPtr, align, elemValue, align, size);
             }
         } else if (elemType->IsRefType()) {
-            CallGCWrite({elemValue, arrayV, elemPtr},
-                        arrTy->IsLocalRegion() ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE);
+            CallGCWrite({elemValue, arrayV, elemPtr}, elemWriteKind);
         } else {
             CreateStore(elemValue, elemPtr);
         }
@@ -1703,7 +1712,8 @@ void InitArrayDataUG(IRBuilder2& irBuilder, llvm::Value* arrPtr, llvm::Value* ar
 }
 
 void InitArrayData(
-    IRBuilder2& irBuilder, llvm::Value* arrPtr, llvm::Value* arrayLen, llvm::Value* value, llvm::Type* arrayType)
+    IRBuilder2& irBuilder, llvm::Value* arrPtr, llvm::Value* arrayLen, llvm::Value* value, llvm::Type* arrayType,
+    ModalWriteKind writeKind)
 {
     // Prepare basic blocks.
     auto [startBB, bodyBB, endBB] = Vec2Tuple<3>(irBuilder.CreateAndInsertBasicBlocks(
@@ -1725,12 +1735,16 @@ void InitArrayData(
     auto elemPtr = irBuilder.CreateGEP(arrayType->getStructElementType(1)->getArrayElementType(), dataPtr, index);
 
     auto elemType = arrayType->getStructElementType(1)->getArrayElementType();
+    // A local-region array's element slots are region->heap edges whenever the repeated
+    // struct value carries a demode field (its payload legitimately holds heap refs), so
+    // the aggregate writes must stay modal-aware: MAYBE_LOCAL registers heap slots and
+    // no-ops on local ones.
     if (elemType->isStructTy()) {
         if (IsTypeContainsRef(elemType)) {
             auto structType = llvm::cast<llvm::StructType>(elemType);
             auto layOut = irBuilder.GetLLVMModule()->getDataLayout().getStructLayout(structType);
             auto size = irBuilder.getInt64(layOut->getSizeInBytes());
-            irBuilder.CallGCWriteAgg(structType, {arrPtr, elemPtr, value, size});
+            irBuilder.CallGCWriteAgg(structType, {arrPtr, elemPtr, value, size}, writeKind);
         } else {
             auto layOut = irBuilder.GetCGModule().GetLLVMModule()->getDataLayout().getStructLayout(
                 llvm::cast<llvm::StructType>(elemType));
@@ -1741,9 +1755,9 @@ void InitArrayData(
         }
     } else if (elemType->isArrayTy()) {
         auto size = irBuilder.getInt64(irBuilder.GetLLVMModule()->getDataLayout().getTypeAllocSize(elemType));
-        irBuilder.CallGCWriteAgg(llvm::cast<llvm::StructType>(arrayType), {arrPtr, elemPtr, value, size});
+        irBuilder.CallGCWriteAgg(llvm::cast<llvm::StructType>(arrayType), {arrPtr, elemPtr, value, size}, writeKind);
     } else if (elemType == CGType::GetRefType(irBuilder.GetLLVMContext())) {
-        irBuilder.CallGCWrite({value, arrPtr, elemPtr});
+        irBuilder.CallGCWrite({value, arrPtr, elemPtr}, writeKind);
     } else {
         irBuilder.CreateStore(value, elemPtr);
     }
@@ -1803,7 +1817,8 @@ void IRBuilder2::CallArrayInit(
         SetInsertPoint(optBB);
         return;
     }
-    InitArrayData(*this, arrPtr, arrayLen, elemValue, arrayType);
+    InitArrayData(*this, arrPtr, arrayLen, elemValue, arrayType,
+        arrTy.IsLocalRegion() ? ModalWriteKind::MAYBE_LOCAL : ModalWriteKind::NONE);
     (void)CreateBr(optBB);
 
     // generate optBB

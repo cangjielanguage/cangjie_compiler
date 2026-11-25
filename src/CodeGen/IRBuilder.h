@@ -223,7 +223,8 @@ public:
     llvm::Instruction* CallGCReadStaticRef(const std::vector<llvm::Value*>& args);
     llvm::Instruction* CallGCReadStaticAgg(llvm::StructType* type, std::vector<llvm::Value*> args);
     llvm::Instruction* CallGCWrite(std::vector<llvm::Value*> args, ModalWriteKind writeKind = ModalWriteKind::NONE);
-    llvm::Instruction* CallGCWriteAgg(llvm::StructType* structType, std::vector<llvm::Value*> args);
+    llvm::Instruction* CallGCWriteAgg(
+        llvm::StructType* structType, std::vector<llvm::Value*> args, ModalWriteKind writeKind = ModalWriteKind::NONE);
     llvm::Instruction* CallGCWriteStaticRef(const std::vector<llvm::Value*>& args);
     llvm::Instruction* CallGCWriteStaticAgg(llvm::StructType* type, std::vector<llvm::Value*> args);
     llvm::Instruction* CreateWriteBarrierForGlobalVariable(const CGValue& value, const CGValue& globalVar);
@@ -404,9 +405,7 @@ public:
     llvm::Value* ReleaseRawData(const CHIR::IntrinsicBase& intrinsic);
     ///*----------------- Class related --------------------//
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    llvm::Value* CallClassIntrinsicAlloc(const CHIR::Type& type);
-    // The value type determines the box payload; the target type determines its allocation region.
-    llvm::Value* CallBoxIntrinsicAlloc(const CHIR::Type& valueType, const CHIR::Type& targetType);
+    llvm::Value* CallClassIntrinsicAlloc(const CHIR::Type& type, bool isLocal);
     llvm::Instruction* CallClassIntrinsicAlloc(const std::vector<llvm::Value*>& parameters, bool isLocal);
 #endif
     llvm::Value* CallClassIntrinsicInstanceOf(llvm::Value* instance, const CHIR::Type* targetTy);
