@@ -386,7 +386,8 @@ llvm::Value* HandleGetRTTI(IRBuilder2& irBuilder, const CHIR::Expression& chirEx
 {
     auto& cgMod = irBuilder.GetCGModule();
     auto& expr = StaticCast<const CHIR::GetRTTI&>(chirExpr);
-    auto value = irBuilder.GetTypeInfoFromObject(**(cgMod | expr.GetOperand()));
+    auto value = irBuilder.GetTypeInfoFromObject(**(cgMod | expr.GetOperand()),
+        DeRef(*expr.GetOperand()->GetType())->IsLocalRegion());
     return irBuilder.CreateBitCast(value, CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext()));
 }
 

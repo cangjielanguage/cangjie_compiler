@@ -1432,7 +1432,10 @@ llvm::Value* IRBuilder2::CreateTypeInfo(const CHIR::Type& gt,
             auto f = cgFunction->GetRawFunction();
             auto thisArg = f->getArg(f->hasStructRetAttr() ? 1U : 0U);
             CJC_ASSERT(thisArg->getType()->isPointerTy() && thisArg->getType()->getPointerAddressSpace() == 1U);
-            return GetTypeInfoFromObject(thisArg);
+            // Always keep the state-word mask here: this TI comes from a `this` whose
+            // static type may be a vtable wrapper's modal-erased declared type, so the
+            // modal cannot prove the object is not in the local region.
+            return GetTypeInfoFromObject(thisArg, true);
         }
     }
 
@@ -1559,7 +1562,8 @@ llvm::Value* GetRealUUIDForAutoEnvClass(IRBuilder2& irBuilder, llvm::Value* obj)
 
     irBuilder.SetInsertPoint(judgeBB);
     auto newObj0 = irBuilder.CreateLoad(i81PtrTy, newObjPtr);
-    auto cgTi = CGValue(irBuilder.CreateBitCast(irBuilder.GetTypeInfoFromObject(newObj0), i80PtrTy), CGType::GetOrCreate(irBuilder.GetCGModule(), CGType::GetRefTypeOfCHIRInt8(irBuilder.GetCGContext().GetCHIRBuilder())));
+    auto cgTi = CGValue(irBuilder.CreateBitCast(irBuilder.GetTypeInfoFromObject(newObj0, true), i80PtrTy),
+        CGType::GetOrCreate(irBuilder.GetCGModule(), CGType::GetRefTypeOfCHIRInt8(irBuilder.GetCGContext().GetCHIRBuilder())));
     auto isWrapperClass = irBuilder.CallIntrinsicFunction(llvm::Type::getInt1Ty(irBuilder.GetLLVMContext()), "CJ_MCC_IsWrapperClassForAutoEnv", {&cgTi}, {});
     irBuilder.CreateCondBr(isWrapperClass, wrapperClassBB, endBB);
 
@@ -1573,7 +1577,7 @@ llvm::Value* GetRealUUIDForAutoEnvClass(IRBuilder2& irBuilder, llvm::Value* obj)
 
     irBuilder.SetInsertPoint(endBB);
     auto newObj2 = irBuilder.CreateLoad(i81PtrTy, newObjPtr);
-    auto ti = irBuilder.GetTypeInfoFromObject(newObj2);
+    auto ti = irBuilder.GetTypeInfoFromObject(newObj2, true);
     auto uuid = irBuilder.GetUUIDFromTypeInfo(ti);
     return uuid;
 }

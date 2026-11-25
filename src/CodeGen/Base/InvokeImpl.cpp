@@ -99,7 +99,8 @@ void GenIRToUnboxResult(IRBuilder2& irBuilder, const CHIRInvokeWrapper& invoke)
 
     auto [handleBoxedBB, handleEndBB] =
         Vec2Tuple<2>(irBuilder.CreateAndInsertBasicBlocks({"handle_boxed", "handle_end"}));
-    auto thisValueTI = irBuilder.GetTypeInfoFromObject(thisValue);
+    auto thisValueTI = irBuilder.GetTypeInfoFromObject(thisValue,
+        DeRef(*invoke.GetThisParam()->GetType())->IsLocalRegion());
     irBuilder.CreateCondBr(irBuilder.CreateTypeInfoIsReferenceCall(thisValueTI), handleEndBB, handleBoxedBB);
 
     irBuilder.SetInsertPoint(handleBoxedBB);
@@ -127,7 +128,8 @@ llvm::Value* CodeGen::GenerateInvoke(IRBuilder2& irBuilder, CHIRInvokeWrapper in
     if (objType->IsAutoEnv()) {
         funcPtr = GenerateFuncPtrForAutoEnv(irBuilder, invoke);
     } else {
-        auto thisTI = irBuilder.GetTypeInfoFromObject(**(irBuilder.GetCGModule() | invoke.GetObject()));
+        auto thisTI = irBuilder.GetTypeInfoFromObject(**(irBuilder.GetCGModule() | invoke.GetObject()),
+            objType->IsLocalRegion());
         funcPtr = GenerateFuncPtrForNonAutoEnv(irBuilder, thisTI, invoke);
     }
     auto funcType = invoke.GetMethodType();
