@@ -466,7 +466,7 @@ llvm::Value* CodeGen::GenerateApply(IRBuilder2& irBuilder, const CHIRApplyWrappe
             CJC_NULLPTR_CHECK(curCGFunc);
             CJC_NULLPTR_CHECK(curFunc);
             auto thisParam = curCGFunc->IsSRet() ? curFunc->arg_begin() + 1 : curFunc->arg_begin();
-            thisTI = irBuilder.GetTypeInfoFromObject(thisParam);
+            thisTI = irBuilder.GetTypeInfoFromObject(thisParam, true);
         } else {
             thisTI = irBuilder.CreateBitCast(irBuilder.CreateTypeInfo(apply.GetThisType()),
                 CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext()));

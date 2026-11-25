@@ -31,7 +31,7 @@ llvm::Value* CodeGen::GenerateInstanceOf(IRBuilder2& irBuilder, const CHIR::Inst
     auto objectCHIRType = DeRef(*object->GetType());
     auto objectVal = *(irBuilder.GetCGModule() | object);
     if (objectCHIRType->IsAny() || objectCHIRType->IsGeneric()) {
-        auto instanceTi = irBuilder.GetTypeInfoFromObject(*objectVal);
+        auto instanceTi = irBuilder.GetTypeInfoFromObject(*objectVal, objectCHIRType->IsLocalRegion());
         auto typeKind = irBuilder.GetTypeKindFromTypeInfo(instanceTi);
         auto isTuple = irBuilder.CreateICmpEQ(typeKind, irBuilder.getInt8(static_cast<uint8_t>(UGTypeKind::UG_TUPLE)));
         auto [isTupleBB, nonTupleBB, endBB] =
@@ -53,7 +53,7 @@ llvm::Value* CodeGen::GenerateInstanceOf(IRBuilder2& irBuilder, const CHIR::Inst
         phi->addIncoming(nonTupleRet, nonTupleBB);
         return phi;
     } else if (objectCHIRType->IsClass()) {
-        auto instanceTi = irBuilder.GetTypeInfoFromObject(*objectVal);
+        auto instanceTi = irBuilder.GetTypeInfoFromObject(*objectVal, objectCHIRType->IsLocalRegion());
         return irBuilder.CallIntrinsicIsSubtype({instanceTi, targetTi});
     } else if (objectCHIRType->IsTuple()) {
         auto i8PtrTy = llvm::Type::getInt8PtrTy(irBuilder.GetLLVMContext());

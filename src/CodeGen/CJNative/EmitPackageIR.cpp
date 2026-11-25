@@ -30,7 +30,7 @@ void CreatePrintStackTraceCall(IRBuilder2& irBuilder, llvm::Value* exceptionValu
     auto printStackTraceFuncNode = cgCtx.GetCGPkgContext().FindCHIRGlobalValue(printStackTraceFuncName);
     auto printStackTraceFuncType = static_cast<CHIR::FuncType*>(printStackTraceFuncNode->GetType());
     // For now:
-    auto exceptionTi = irBuilder.GetTypeInfoFromObject(exceptionValue);
+    auto exceptionTi = irBuilder.GetTypeInfoFromObject(exceptionValue, true);
     // Get the func ptr of `printStackTrace`
     // `printStackTrace` is the 3rd virtual method defined in `class Error`
     auto idxOfError = irBuilder.getInt64(1U);

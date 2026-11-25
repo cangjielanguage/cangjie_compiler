@@ -433,7 +433,11 @@ public:
     llvm::Value* GetTypeForTypeParameter(llvm::Value* typeInfo);
     llvm::Value* GetTypeArgsFromTypeInfo(llvm::Value* typeInfo);
     llvm::Value* GetTypeInfoFromTiArray(llvm::Value* tiArray, std::size_t index, const std::string& name = "");
-    llvm::Value* GetTypeInfoFromObject(llvm::Value* obj);
+    // `mayBeLocal` tells whether the object may be a local-region object. The object header packs
+    // the object state into its high 16 bits, so the raw header word is only a valid TypeInfo
+    // pointer for objects that are provably on the heap. Pass false only when the static type of
+    // `obj` has no local modal (`@~local`), where Sema guarantees it never holds a local object.
+    llvm::Value* GetTypeInfoFromObject(llvm::Value* obj, bool mayBeLocal);
     llvm::Value* GetPayloadFromObject(llvm::Value* obj);
 
     // `canChangeBB` is just used in `CJNativeExtensionDef.cpp`, it is a workaround for now :(

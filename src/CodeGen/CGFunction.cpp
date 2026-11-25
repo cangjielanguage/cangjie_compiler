@@ -62,7 +62,9 @@ void CreateFunctionWrapperForNormalCases(
         CGType::GetOrCreate(cgMod, DeRef(cgType.GetParamType(0)->GetOriginal()))->GetLLVMType()->getPointerTo(1U);
     auto dataPtr = builder.CreateBitCast(builder.GetPayloadFromObject(thisVal), p1This);
     if (!cgType.HasBasePtr()) {
-        auto ti = builder.GetTypeInfoFromObject(thisVal);
+        // The param type is the callee's declared type, which may be a modal-erased
+        // wrapper signature; it cannot prove `thisVal` is not a local object.
+        auto ti = builder.GetTypeInfoFromObject(thisVal, true);
         auto size = builder.GetSizeFromTypeInfo(ti);
         auto paramDerefType = CGType::GetOrCreate(cgMod, DeRef(cgType.GetParamType(0)->GetOriginal()))->GetLLVMType();
         CJC_ASSERT(paramDerefType->isIntegerTy(8U) && "Should not reach here.");

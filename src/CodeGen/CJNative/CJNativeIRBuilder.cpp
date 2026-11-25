@@ -269,7 +269,9 @@ std::vector<llvm::Value*> IRBuilder2::TransformFuncArgs(const CGFunctionType& ca
         auto autoEnvOfInitFunc = varrayBuilder.GetInitFunc();
         auto autoEnvVal = **(cgMod | autoEnvOfInitFunc);
         auto typeInfoPtrType = CGType::GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext());
-        auto typeInfo = CreateBitCast(GetTypeInfoFromObject(autoEnvVal), typeInfoPtrType);
+        auto typeInfo = CreateBitCast(
+            GetTypeInfoFromObject(autoEnvVal, DeRef(*autoEnvOfInitFunc->GetType())->IsLocalRegion()),
+            typeInfoPtrType);
         (void)argsVal.emplace_back(typeInfo);
     }
     return argsVal;
@@ -366,14 +368,18 @@ llvm::Value* IRBuilder2::CreateOuterTypeInfo(const CHIRCallExpr& callExprWrapper
     // Invoke
     auto& invokeWrapper = StaticCast<const CHIRInvokeWrapper&>(callExprWrapper);
     if (DeRef(*invokeWrapper.GetObject()->GetType())->IsAutoEnv()) {
-        return GetTypeInfoFromObject(**(cgMod | callExprWrapper.GetThisParam()));
+        auto thisParam = callExprWrapper.GetThisParam();
+        auto isLocalRegion = DeRef(*thisParam->GetType())->IsLocalRegion();
+        return GetTypeInfoFromObject(**(cgMod | thisParam), isLocalRegion);
     } else if (GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(*outerCHIRClassType)) {
         auto backupBB = GetInsertBlock();
         auto prepForVirtualCallBB = invokeWrapper.GetPrepForVirtualCallBB();
         if (prepForVirtualCallBB) {
             SetInsertPoint(prepForVirtualCallBB->getTerminator());
         }
-        auto typeInfo = GetTypeInfoFromObject(**(cgMod | callExprWrapper.GetThisParam()));
+        auto thisParam = callExprWrapper.GetThisParam();
+        auto isLocalRegion = DeRef(*thisParam->GetType())->IsLocalRegion();
+        auto typeInfo = GetTypeInfoFromObject(**(cgMod | thisParam), isLocalRegion);
         auto outerType = CallIntrinsicMethodOuterType(
             {typeInfo, CreateTypeInfo(outerCHIRType), getInt64(invokeWrapper.GetVirtualMethodOffset())});
         if (prepForVirtualCallBB) {
@@ -2264,17 +2270,19 @@ llvm::Value* IRBuilder2::GetTypeInfoFromTiArray(llvm::Value* tiArray, std::size_
     return inst;
 }
 
-llvm::Value* IRBuilder2::GetTypeInfoFromObject(llvm::Value* obj)
+llvm::Value* IRBuilder2::GetTypeInfoFromObject(llvm::Value* obj, bool mayBeLocal)
 {
     auto tiPtrType = CGType::GetOrCreateTypeInfoPtrType(getContext());
     auto inst =
         LLVMIRBuilder2::CreateLoad(tiPtrType, LLVMIRBuilder2::CreateBitCast(obj, tiPtrType->getPointerTo(1U)), "ti");
     inst->setMetadata(llvm::LLVMContext::MD_invariant_load, llvm::MDNode::get(getContext(), {}));
-    if (GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32) {
+    if (GetCGContext().GetCompileOptions().target.arch == Triple::ArchType::ARM32 || !mayBeLocal) {
         return inst;
     }
 
     // The high 16 bits of the 64-bit object header are used by runtime StateWord state codes.
+    // Only local-region objects carry a persistent state code, so an object whose static type has
+    // no local modal (`@~local`) can use the header word directly and skip the mask.
     auto rawTi = LLVMIRBuilder2::CreatePtrToInt(inst, getInt64Ty());
     auto tiAddress = LLVMIRBuilder2::CreateAnd(rawTi, getInt64(0x0000FFFFFFFFFFFFULL), "ti.addr");
     return LLVMIRBuilder2::CreateIntToPtr(tiAddress, tiPtrType);
