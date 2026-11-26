@@ -6477,6 +6477,78 @@ public func callIt(cb: ArkTSFunc<(Int32) -> Int32>): Unit {
     EXPECT_EQ(CountErrorsContaining("cannot be called directly"), 1);
 }
 
+// An ordinary call written with one explicit type argument is not carrier
+// construction syntax: the recognition hook must leave it to the ordinary
+// base check. The hook runs before the base check has assigned the call
+// context (callOrPattern), so a speculative resolution of any other name
+// used to answer a one-parameter enum constructor sugar with a premature
+// undeclared-identifier error that the ordinary (successful) resolution
+// could no longer prevent.
+TEST_F(ArkTSForeignDiagTest, OneTypeArgumentCallsWithoutCarrierNameAreOrdinaryCalls)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+enum E<T> { | A(T) | B }
+
+class Box<T> {
+    public init(x: T) {}
+}
+
+func id<T>(x: T): T { return x }
+
+func g<T>(x: T): E<T> { return A<T>(x) }
+
+func f<T>(x: T): Option<T> { return Some<T>(x) }
+
+public func build(): Unit {
+    let e = A<Int64>(1)
+    let o = Some<Int64>(1)
+    let b = Box<Int64>(1)
+    let i = id<Int64>(1)
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier"), 0);
+}
+
+// The gate keeps the carrier construction itself intact while the same shape
+// (one type argument, one value argument) on other names resolves on the
+// ordinary path in the same file: no name steals the carrier's lowering and
+// the carrier does not steal their resolution.
+TEST_F(ArkTSForeignDiagTest, CarrierConstructionCoexistsWithOneTypeArgumentCalls)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+@ArkTS[module: "actual"]
+public foreign func takeFunc(cb: ArkTSFunc<(Int32) -> Int32>): Unit
+
+func cb(x: Int32): Int32 { return x }
+
+enum E<T> { | A(T) | B }
+
+func g<T>(x: T): E<T> { return A<T>(x) }
+
+func f<T>(x: T): Option<T> { return Some<T>(x) }
+
+public func build(): ArkTSFunc<(Int32) -> Int32> {
+    let carrier = ArkTSFunc<(Int32) -> Int32>(cb)
+    let e = A<Int64>(1)
+    let o = Some<Int64>(1)
+    return carrier
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier"), 0);
+    EXPECT_EQ(CountErrorsContaining("no matching constructor"), 0);
+    EXPECT_EQ(CountErrorsContaining("has unsupported type"), 0);
+}
+
 // String literals of one generated body, in source order: generated messages
 // are concatenations, so the pieces are inspected individually.
 static std::vector<std::string> GeneratedBodyStringLiterals(Ptr<FuncDecl> fn)

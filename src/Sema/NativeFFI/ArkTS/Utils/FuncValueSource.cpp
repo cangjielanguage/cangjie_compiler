@@ -147,6 +147,27 @@ Ptr<Decl> FindConstructionOwner(ASTContext& ctx, CallExpr& ce)
     return body->funcDecl;
 }
 
+// The written shape of one explicit construction: the callee is a reference
+// carrying one type argument (`F`) and is literally named `ArkTSFunc`; a
+// same-named user class resolves elsewhere and keeps its ordinary meaning.
+// Only the written spelling gates the construction syntax: this hook runs at
+// the call-check entry, before the base check has assigned `callOrPattern`
+// and resolved the reference, so the caller's speculative resolution would
+// otherwise run without the call context the ordinary resolution relies on
+// and answer a generic enum constructor sugar (`Some<T>(x)`) with a premature
+// undeclared-identifier error.
+RefExpr* ArkTSFuncConstructionCallee(CallExpr& ce)
+{
+    auto re = DynamicCast<RefExpr*>(ce.baseFunc.get());
+    if (re == nullptr || re->typeArguments.size() != 1) {
+        return nullptr;
+    }
+    if (re->ref.identifier.Val() != ARKTS_FUNC_CARRIER) {
+        return nullptr;
+    }
+    return re;
+}
+
 } // namespace
 } // namespace Cangjie::Native::FFI::ArkTS
 
@@ -295,6 +316,63 @@ void TypeChecker::TypeCheckerImpl::ResolveArkTSReplacementTypes(ASTContext& ctx,
     }).Walk();
 }
 
+// The silent speculative base resolution of a candidate carrier construction:
+// it mirrors the ordinary base check — the call is the reference's enclosing
+// call, so the enum sugar and overload paths see the argument count like
+// `ChkCallBaseRefExpr` would leave it — but no diagnostic may escape: one
+// emitted here would precede the ordinary path's own verdict and turn into a
+// user-visible error before a success. The call context (`callOrPattern`) is
+// set for the attempt and put back afterwards; the reference keeps whatever
+// resolution the attempt produced, and the caller restores the written state
+// when the attempt did not resolve cleanly.
+bool TypeChecker::TypeCheckerImpl::SynthesizeArkTSFuncCalleeOnce(ASTContext& ctx, CallExpr& ce, RefExpr& re)
+{
+    const auto savedCallOrPattern = re.callOrPattern;
+    bool resolvedCleanly = false;
+    {
+        re.callOrPattern = &ce;
+        DiagSuppressor suppressor(diag);
+        (void)Synthesize({ctx, SynPos::EXPR_ARG}, ce.baseFunc.get());
+        resolvedCleanly = !suppressor.HasError();
+    }
+    re.callOrPattern = savedCallOrPattern;
+    return resolvedCleanly;
+}
+
+// Whether the resolved target of a candidate carrier construction is the ArkTS
+// preset carrier class: the package pin applies to the resolved declaration,
+// so a same-named user class keeps its ordinary meaning and this hook never
+// touches it.
+bool TypeChecker::TypeCheckerImpl::ResolvedToArkTSFuncCarrier(CallExpr& ce, RefExpr& re)
+{
+    auto callee = GetRealTarget(ce.baseFunc.get(), re.GetTarget());
+    return callee != nullptr && callee->astKind == ASTKind::CLASS_DECL && IsArkTSPresetFunc(*callee);
+}
+
+// One accepted construction: the carrier's constraint refusals win over
+// everything else — the dedicated diagnostics replace the generic
+// unsupported-type message (design 4.2.1 e3/e4) — then the argument must be a
+// function value of exactly F (the ordinary argument check keeps its mismatch
+// diagnostics on the user node) and the construction is lowered at the use
+// site. Returns the call's own well-typedness.
+bool TypeChecker::TypeCheckerImpl::ApplyArkTSFuncConstruction(
+    ASTContext& ctx, ModalTy target, CallExpr& ce, RefExpr& re, Ptr<Ty> carrierTy)
+{
+    auto desc = ArkTSClassifyType(carrierTy, &importManager);
+    if (desc.kind != ArkTSTypeDesc::Kind::ARKTS_FUNC) {
+        (void)DiagnoseArkTSFuncCarrierPosition(diag, *re.typeArguments.front(), carrierTy);
+        ce.SetTy({TypeManager::GetInvalidTy()});
+        ce.callKind = CallKind::CALL_INVALID;
+        return true;
+    }
+    if (!Check(ctx, ModalTy{desc.funcTy}, ce.args.front()->expr.get())) {
+        ce.SetTy({TypeManager::GetInvalidTy()});
+        ce.callKind = CallKind::CALL_INVALID;
+        return true;
+    }
+    return LowerArkTSFuncConstruction(ctx, target, ce, desc);
+}
+
 // Recognition, constraint checks and use-site rewrite of one explicit construction. Returns true when the call WAS the
 // carrier constructor shape (the preset class name called with one type argument and one positional argument); the
 // result is then the call's own well-typedness. Everything else returns false and continues the normal call check.
@@ -302,20 +380,33 @@ void TypeChecker::TypeCheckerImpl::ResolveArkTSReplacementTypes(ASTContext& ctx,
 // to a bodyless target.
 bool TypeChecker::TypeCheckerImpl::ChkArkTSFuncConstruction(ASTContext& ctx, ModalTy target, CallExpr& ce)
 {
-    // The written shape: the preset class name as the callee, one type argument (`F`) and one positional argument
-    // (the function value). A same-named user class resolves elsewhere and keeps its ordinary meaning.
-    auto re = DynamicCast<RefExpr*>(ce.baseFunc.get());
-    if (re == nullptr || re->typeArguments.size() != 1) {
+    auto re = ArkTSFuncConstructionCallee(ce);
+    if (re == nullptr) {
         return false;
     }
     // Resolve the base reference before judging it (this hook runs at the call-check entry, before the base check
-    // would have): the package pin applies to the resolved declaration, so a same-named user class keeps its
-    // ordinary meaning and this hook never touches it.
+    // would have). The resolution is speculative: it stays silent, and on any failure the reference keeps exactly
+    // the state it had here, so the ordinary base check redoes it with the call context in place and reports
+    // whatever it finds.
+    const auto savedTarget = re->ref.target;
+    const auto savedTargets = re->ref.targets;
+    const auto savedInstTys = re->instTys;
+    const auto savedTy = re->GetTy();
+    auto restoreRefState = [&re, &savedTarget, &savedTargets, &savedInstTys, &savedTy]() {
+        re->ref.target = savedTarget;
+        re->ref.targets = savedTargets;
+        re->instTys = savedInstTys;
+        re->SetTy(savedTy);
+    };
     if (re->GetTarget() == nullptr || !Ty::IsTyCorrect(re->DataTy())) {
-        (void)Synthesize({ctx, SynPos::EXPR_ARG}, ce.baseFunc.get());
+        if (!SynthesizeArkTSFuncCalleeOnce(ctx, ce, *re) || re->GetTarget() == nullptr
+            || !Ty::IsTyCorrect(re->DataTy())) {
+            restoreRefState();
+            return false;
+        }
     }
-    auto callee = GetRealTarget(ce.baseFunc.get(), re->GetTarget());
-    if (callee == nullptr || callee->astKind != ASTKind::CLASS_DECL || !IsArkTSPresetFunc(*callee)) {
+    if (!ResolvedToArkTSFuncCarrier(ce, *re)) {
+        restoreRefState();
         return false;
     }
     // Every call naming the preset class is carrier construction syntax. The wrong shape (named argument — the stale
@@ -329,29 +420,15 @@ bool TypeChecker::TypeCheckerImpl::ChkArkTSFuncConstruction(ASTContext& ctx, Mod
         return true;
     }
     if (ce.args.size() != 1) {
+        restoreRefState();
         return false;
     }
     auto carrierTy = re->DataTy();
     if (!Ty::IsTyCorrect(carrierTy)) {
+        restoreRefState();
         return false;
     }
-    // Constraint refusals win over everything else: the dedicated diagnostics
-    // replace the generic unsupported-type message (design 4.2.1 e3/e4).
-    auto desc = ArkTSClassifyType(carrierTy, &importManager);
-    if (desc.kind != ArkTSTypeDesc::Kind::ARKTS_FUNC) {
-        (void)DiagnoseArkTSFuncCarrierPosition(diag, *re->typeArguments.front(), carrierTy);
-        ce.SetTy({TypeManager::GetInvalidTy()});
-        ce.callKind = CallKind::CALL_INVALID;
-        return true;
-    }
-    // The argument must be a function value of exactly F; the ordinary
-    // argument check keeps its mismatch diagnostics on the user node.
-    if (!Check(ctx, ModalTy{desc.funcTy}, ce.args.front()->expr.get())) {
-        ce.SetTy({TypeManager::GetInvalidTy()});
-        ce.callKind = CallKind::CALL_INVALID;
-        return true;
-    }
-    return LowerArkTSFuncConstruction(ctx, target, ce, desc);
+    return ApplyArkTSFuncConstruction(ctx, target, ce, *re, carrierTy);
 }
 
 // The direct-call refusal: `cb(args)` where cb carries an ArkTS function reference is refused in this release

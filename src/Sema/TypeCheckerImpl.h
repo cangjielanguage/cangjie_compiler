@@ -971,6 +971,17 @@ private:
     void CollectArkTSFuncReplacementSymbols(ASTContext& ctx, AST::CallExpr& ce, AST::Expr& replacement);
     // Resolve every written type position inside the generated replacement.
     void ResolveArkTSReplacementTypes(ASTContext& ctx, AST::Expr& replacement);
+    // The silent speculative base resolution of a candidate carrier
+    // construction: the call context is set for the attempt and no diagnostic
+    // may escape; reports whether the attempt resolved without a diagnostic.
+    bool SynthesizeArkTSFuncCalleeOnce(ASTContext& ctx, AST::CallExpr& ce, AST::RefExpr& re);
+    // Whether the resolved target of a candidate carrier construction is the
+    // ArkTS preset carrier class.
+    bool ResolvedToArkTSFuncCarrier(AST::CallExpr& ce, AST::RefExpr& re);
+    // Constraint refusals, the argument check and the use-site lowering of one
+    // accepted construction; returns the call's own well-typedness.
+    bool ApplyArkTSFuncConstruction(
+        ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce, AST::RefExpr& re, Ptr<AST::Ty> carrierTy);
     bool RefuseArkTSFuncValueCall(AST::CallExpr& ce);
     bool ChkDesugarExprOfCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
     bool CheckCallKind(const AST::CallExpr& ce, Ptr<AST::Decl> decl, AST::CallKind& type);
