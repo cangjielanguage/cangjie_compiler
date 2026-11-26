@@ -17,12 +17,14 @@
 #include "cangjie/Parse/Parser.h"
 #include "Utils/TypeMapper.h"
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
+#include <iomanip>
 #include <iterator>
 #include <limits>
+#include <locale>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -50,20 +52,20 @@ struct ArkTSEnumNumberCounter {
     std::string DecimalSpelling() const
     {
         if (floating) {
-            // Spell the value with the shortest precision that reads back exactly. Doing
-            // the shortest-round-trip search here, with an explicit precision, keeps the
-            // generated source identical whatever standard library the compiler was built
-            // with.
-            char buffer[64];
+            // Spell the value with the shortest precision that reads back exactly. The
+            // stream uses the classic locale and an explicit precision so the generated
+            // source stays identical whatever standard library or process locale the
+            // compiler runs under.
+            auto spellWithPrecision = [this](int precision) {
+                std::ostringstream stream;
+                stream.imbue(std::locale::classic());
+                stream << std::setprecision(precision) << floatValue;
+                return stream.str();
+            };
             std::string spelling;
             constexpr int maxPrecision = std::numeric_limits<double>::max_digits10;
             for (int precision = 1; precision <= maxPrecision; ++precision) {
-                auto result = std::to_chars(buffer, buffer + sizeof(buffer), floatValue,
-                    std::chars_format::general, precision);
-                if (result.ec != std::errc{}) {
-                    break;
-                }
-                std::string candidate(buffer, static_cast<size_t>(result.ptr - buffer));
+                std::string candidate = spellWithPrecision(precision);
                 char* end = nullptr;
                 double parsed = std::strtod(candidate.c_str(), &end);
                 if (end != nullptr && *end == '\0' && !(parsed < floatValue) && !(floatValue < parsed)) {
@@ -72,14 +74,10 @@ struct ArkTSEnumNumberCounter {
                 }
             }
             if (spelling.empty()) {
-                auto result = std::to_chars(buffer, buffer + sizeof(buffer), floatValue,
-                    std::chars_format::general, maxPrecision);
-                spelling = result.ec == std::errc{} ?
-                    std::string(buffer, static_cast<size_t>(result.ptr - buffer)) :
-                    std::to_string(floatValue);
+                spelling = spellWithPrecision(maxPrecision);
             }
             // The Cangjie lexer accepts only a '-' sign after the exponent
-            // marker; std::to_chars writes "1e+20". Drop the '+' so the
+            // marker; the stream writes "1e+20". Drop the '+' so the
             // spelling is legal generated source.
             for (size_t pos = spelling.find("e+"); pos != std::string::npos; pos = spelling.find("e+", pos)) {
                 spelling.erase(pos + 1, 1);

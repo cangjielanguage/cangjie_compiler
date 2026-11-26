@@ -538,8 +538,9 @@ void DiagnoseArkTSDeclarations(Package& pkg, DiagnosticEngine& diag)
     DiagnoseReservedGeneratedNames(pkg, diag);
 }
 
-bool ArkTSTargetSupported(const GlobalOptions& opts)
+bool ArkTSTargetSupported([[maybe_unused]] const GlobalOptions& opts)
 {
+#ifdef CANGJIE_ENABLE_ARKTS_INTEROP
     // Host-target LLT and unit suites have no OHOS std module set, so they
     // cannot compile for the real target. The variable is a test-harness
     // escape, deliberately undocumented and never emitted by the driver.
@@ -548,6 +549,11 @@ bool ArkTSTargetSupported(const GlobalOptions& opts)
         return true;
     }
     return opts.target.env == Triple::Environment::OHOS;
+#else
+    // The target gate is part of the optional interop capability: a build that does
+    // not enable it treats every target as unsupported.
+    return false;
+#endif
 }
 
 // One diagnostic per source file, at its first ArkTS-only annotation. The walk
