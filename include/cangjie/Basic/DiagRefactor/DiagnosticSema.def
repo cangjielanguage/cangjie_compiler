@@ -84,6 +84,8 @@ ERROR(sema_cannot_ref_to_pkg_name, "package name cannot be referred independentl
 ERROR(sema_use_expr_without_import, "import '%s' to use the '%s' expression")
 
 // Generic
+ERROR(sema_generic_member_type_argument_different,
+    "%s '%s' type parameter count is %s, but %s requires %s")
 ERROR(sema_generic_func_without_type_arg, "type arguments needed for the generic function%s",
     "cannot infer type arguments for the generic function")
 ERROR(sema_generic_type_inconsistent, "generic types substitutions are inconsistent for '%s'")

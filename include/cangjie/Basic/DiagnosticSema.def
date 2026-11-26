@@ -213,8 +213,6 @@ ERROR(sema_missing_overridden_func, "'override' %s '%s' does not have an overrid
 ERROR(sema_missing_redefined_func, "'redef' %s '%s' does not have a redefined 'static' %s in its supertype")
 ERROR(sema_static_and_non_static_member_cannot_have_same_name,
     "%s member '%s' cannot have the same name with %s member in %s")
-ERROR(sema_generic_member_type_argument_different,
-    " type argument of function '%s' is different in parent class or interfaces")
 ERROR(sema_c_type_cannot_implement_interface, "c type '%s' cannot implement interface")
 
 ERROR(sema_illegal_access_non_static_member, "'%s' is non-static member, cannot access by type name")
