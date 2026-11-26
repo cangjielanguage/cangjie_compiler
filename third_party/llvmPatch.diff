@@ -33414,7 +33414,7 @@ index 19e00e111..324854824 100644
      if (llvm::Expected<APFloat::opStatus> op =
              f.convertFromString(value_str, APFloat::rmNearestTiesToEven)) {
 diff --git a/lldb/source/Version/Version.cpp b/lldb/source/Version/Version.cpp
-index b391fe1ea..242fcd9e1 100644
+index b391fe1ea..2bc3c2f73 100644
 --- a/lldb/source/Version/Version.cpp
 +++ b/lldb/source/Version/Version.cpp
 @@ -4,6 +4,12 @@
@@ -33470,7 +33470,7 @@ index b391fe1ea..242fcd9e1 100644
        g_version_str += "\n  llvm revision ";
        g_version_str += llvm_rev;
      }
-+    g_version_str += "\n  cangjie 1.3.0-alpha.11";
++    g_version_str += "\n  cangjie 1.3.0-alpha.12";
    }
  
    return g_version_str.c_str();
@@ -37010,7 +37010,7 @@ index 4ff48c366..fd01aa3bd 100644
  class AssumeInst : public IntrinsicInst {
  public:
 diff --git a/llvm/include/llvm/IR/Intrinsics.td b/llvm/include/llvm/IR/Intrinsics.td
-index d46fa4fbf..0b92e7d44 100644
+index d46fa4fbf..a399efa0a 100644
 --- a/llvm/include/llvm/IR/Intrinsics.td
 +++ b/llvm/include/llvm/IR/Intrinsics.td
 @@ -180,6 +180,9 @@ class LLVMQualPointerType<LLVMType elty, int addrspace>
@@ -37082,7 +37082,7 @@ index d46fa4fbf..0b92e7d44 100644
  
  def llvm_x86mmx_ty     : LLVMType<x86mmx>;
  def llvm_ptrx86mmx_ty  : LLVMPointerType<llvm_x86mmx_ty>;         // <1 x i64>*
-@@ -417,6 +432,241 @@ def int_gcwrite : Intrinsic<[],
+@@ -417,6 +432,245 @@ def int_gcwrite : Intrinsic<[],
                              [IntrArgMemOnly, NoCapture<ArgIndex<1>>,
                               NoCapture<ArgIndex<2>>]>;
  
@@ -37129,6 +37129,10 @@ index d46fa4fbf..0b92e7d44 100644
 +def int_cj_maybe_local_write_ref    : Intrinsic<[],
 +                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptrgcptr_ty],
 +                                                [IntrArgMemOnly, NoCapture<ArgIndex<1>>, NoCapture<ArgIndex<2>>]>;
++def int_cj_maybe_local_write_struct : Intrinsic<[],
++                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_anyptr_ty, llvm_anyint_ty],
++                                                [IntrArgMemOnly, NoCapture<ArgIndex<1>>, NoCapture<ArgIndex<2>>, NoAlias<ArgIndex<1>>,
++                                                 NoAlias<ArgIndex<2>>, WriteOnly<ArgIndex<1>>, ReadOnly<ArgIndex<2>>]>;
 +def int_cj_maybe_local_write_generic : Intrinsic<[],
 +                                                [llvm_gcptr_ty, llvm_gcptr_ty, llvm_gcptr_ty, llvm_i32_ty],
 +                                                [IntrArgMemOnly, IntrWillReturn,
@@ -37324,7 +37328,7 @@ index d46fa4fbf..0b92e7d44 100644
  //===------------------- ObjC ARC runtime Intrinsics --------------------===//
  //
  // Note these are to support the Objective-C ARC optimizer which wants to
-@@ -1257,6 +1507,25 @@ def int_experimental_gc_get_pointer_offset : Intrinsic<[llvm_i64_ty],
+@@ -1257,6 +1511,25 @@ def int_experimental_gc_get_pointer_offset : Intrinsic<[llvm_i64_ty],
                   [llvm_anyptr_ty], [IntrNoMem, IntrWillReturn,
                   ReadNone<ArgIndex<0>>, NoCapture<ArgIndex<0>>]>;
  
@@ -41504,10 +41508,10 @@ index f8eba1a00..f6356240b 100644
  /// or unreachable). These paths are hidden if the corresponding cl::opts
 diff --git a/llvm/lib/Analysis/CJAliasAnalysis.cpp b/llvm/lib/Analysis/CJAliasAnalysis.cpp
 new file mode 100644
-index 000000000..17ec2fbf4
+index 000000000..c9fac2acc
 --- /dev/null
 +++ b/llvm/lib/Analysis/CJAliasAnalysis.cpp
-@@ -0,0 +1,327 @@
+@@ -0,0 +1,329 @@
 +//===- CJAliasAnalysis.cpp --------------------------------------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -41682,6 +41686,7 @@ index 000000000..17ec2fbf4
 +  default:
 +    break;
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +    Src = MemoryLocation::getCJMemTransferSource(II);
 +    Dst = MemoryLocation::getForDest(II, TLI);
 +    Base = MemoryLocation::getAfter(getBaseObj(II));
@@ -41767,6 +41772,7 @@ index 000000000..17ec2fbf4
 +  } break;
 +  case Intrinsic::cj_gcread_struct:
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +  case Intrinsic::cj_gcwrite_generic:
 +  case Intrinsic::cj_gcread_generic:
 +  case Intrinsic::cj_assign_generic:
@@ -42889,7 +42895,7 @@ index fce9d5b24..1eb697dfe 100644
      }
  
 diff --git a/llvm/lib/Analysis/MemoryLocation.cpp b/llvm/lib/Analysis/MemoryLocation.cpp
-index 2ed32227b..a56c3dabd 100644
+index 2ed32227b..8a2a1e775 100644
 --- a/llvm/lib/Analysis/MemoryLocation.cpp
 +++ b/llvm/lib/Analysis/MemoryLocation.cpp
 @@ -16,6 +16,10 @@
@@ -42942,7 +42948,7 @@ index 2ed32227b..a56c3dabd 100644
    default:
      return None;
    }
-@@ -103,6 +124,23 @@ MemoryLocation MemoryLocation::getForSource(const AnyMemTransferInst *MTI) {
+@@ -103,6 +124,24 @@ MemoryLocation MemoryLocation::getForSource(const AnyMemTransferInst *MTI) {
    return getForArgument(MTI, 1, nullptr);
  }
  
@@ -42954,6 +42960,7 @@ index 2ed32227b..a56c3dabd 100644
 +    case Intrinsic::cj_gcread_static_struct:
 +      return getForArgument(II, 1, nullptr);
 +    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct:
 +    case Intrinsic::cj_gcread_struct:
 +      return getForArgument(II, 2, nullptr);
 +    default:
@@ -42966,7 +42973,7 @@ index 2ed32227b..a56c3dabd 100644
  MemoryLocation MemoryLocation::getForDest(const MemIntrinsic *MI) {
    return getForDest(cast<AnyMemIntrinsic>(MI));
  }
-@@ -125,6 +163,20 @@ MemoryLocation::getForDest(const CallBase *CB, const TargetLibraryInfo &TLI) {
+@@ -125,6 +164,21 @@ MemoryLocation::getForDest(const CallBase *CB, const TargetLibraryInfo &TLI) {
      // TODO: remove implementation restriction
      return None;
  
@@ -42978,6 +42985,7 @@ index 2ed32227b..a56c3dabd 100644
 +    case Intrinsic::cj_gcread_static_struct:
 +      return getForArgument(CB, 0, &TLI);
 +    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct:
 +      return getForArgument(CB, 1, &TLI);
 +    default:
 +      break;
@@ -42987,7 +42995,7 @@ index 2ed32227b..a56c3dabd 100644
    Value *UsedV = nullptr;
    Optional<unsigned> UsedIdx;
    for (unsigned i = 0; i < CB->arg_size(); i++) {
-@@ -169,6 +221,9 @@ MemoryLocation MemoryLocation::getForArgument(const CallBase *Call,
+@@ -169,6 +223,9 @@ MemoryLocation MemoryLocation::getForArgument(const CallBase *Call,
      default:
        break;
      case Intrinsic::memset:
@@ -42997,11 +43005,12 @@ index 2ed32227b..a56c3dabd 100644
      case Intrinsic::memcpy:
      case Intrinsic::memcpy_inline:
      case Intrinsic::memmove:
-@@ -182,6 +237,15 @@ MemoryLocation MemoryLocation::getForArgument(const CallBase *Call,
+@@ -182,6 +239,16 @@ MemoryLocation MemoryLocation::getForArgument(const CallBase *Call,
                                AATags);
        return MemoryLocation::getAfter(Arg, AATags);
  
 +    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct:
 +    case Intrinsic::cj_gcread_struct:
 +      assert((ArgIdx == 0 || ArgIdx == 1 || ArgIdx == 2) &&
 +             "Invalid argument index for cj.gcwrite.struct");
@@ -44776,10 +44785,10 @@ index c3ca9c92b..81e8a7c55 100644
  
 diff --git a/llvm/lib/CodeGen/CJBarrierLowering.cpp b/llvm/lib/CodeGen/CJBarrierLowering.cpp
 new file mode 100644
-index 000000000..9c878ab33
+index 000000000..50424d2af
 --- /dev/null
 +++ b/llvm/lib/CodeGen/CJBarrierLowering.cpp
-@@ -0,0 +1,1224 @@
+@@ -0,0 +1,1245 @@
 +//===-- GCBarrierLowering.cpp - Cangjie Barrier Lowering ------------------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -44847,6 +44856,7 @@ index 000000000..9c878ab33
 +const static StdMap<unsigned, StringRef> IntrinsicMap{
 +    {Intrinsic::cj_gcwrite_ref, "CJ_MCC_WriteRefField"},
 +    {Intrinsic::cj_gcwrite_struct, "CJ_MCC_WriteStructField"},
++    {Intrinsic::cj_maybe_local_write_struct, "CJ_MCC_MaybeLocalWriteStruct"},
 +    {Intrinsic::cj_gcwrite_static_ref, "CJ_MCC_WriteStaticRef"},
 +    {Intrinsic::cj_gcwrite_static_struct, "CJ_MCC_WriteStaticStruct"},
 +    {Intrinsic::cj_gcread_ref, "CJ_MCC_ReadRefField"},
@@ -44922,7 +44932,8 @@ index 000000000..9c878ab33
 +
 +    Function *Callee = getOrInsertRuntimeFunc(II);
 +    switch (II->getIntrinsicID()) {
-+    case Intrinsic::cj_gcwrite_struct: {
++    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct: {
 +      Value *GCTib = getOrInsertGCTib(II);
 +      Value *Param[6] = {II->getArgOperand(GCWriteStruct::BaseObj),
 +                         II->getArgOperand(GCWriteStruct::Dst),
@@ -45017,7 +45028,8 @@ index 000000000..9c878ab33
 +    const Triple TT(II->getModule()->getTargetTriple());
 +    auto isARM = TT.isARM();
 +    switch (II->getIntrinsicID()) {
-+    case Intrinsic::cj_gcwrite_struct: {
++    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct: {
 +      Type *ParamType[6] = {GCPtr, GCPtr, I64, GCPtr, I64, I8Ptr};
 +      if (isARM)
 +        ParamType[2] = ParamType[4] = I32;
@@ -45133,6 +45145,8 @@ index 000000000..9c878ab33
 +    switch (IID) {
 +    // If Write barrier baseObj is null, we will replace to store.
 +    // Others, inline to fastbarrier.
++    // Note: cj_maybe_local_write_struct never reaches this switch; its registry write
++    // must not be replaced by a plain copy (see fastBarrierInline).
 +    case Intrinsic::cj_gcwrite_ref:
 +    case Intrinsic::cj_gcwrite_struct: {
 +      Value *BaseObj = getBaseObj(CI);
@@ -45589,6 +45603,20 @@ index 000000000..9c878ab33
 +          Changed |= GCPhase.fastBarrier(IID, CI);
 +        }
 +        continue;
++      case Intrinsic::cj_maybe_local_write_struct:
++        if (DisableGCSupport || EnableSafepointOnly) {
++          IRBuilder<> Builder(CI);
++          createStoreOrMems(CI, Builder);
++          CI->eraseFromParent();
++          Changed = true;
++        }
++        // Unlike the ordinary struct barrier, the maybe-local one must NOT take the
++        // GC-phase inline fast path: when the GC is idle, the fast path is a plain copy
++        // that would skip AddLocalRoot, but the registry entry is persistent state that
++        // every later GC cycle relies on. The runtime entry registers unconditionally,
++        // so the call must survive as-is (mirrors the ref/generic maybe-local barriers,
++        // which never enter this inline fast path either).
++        continue;
 +      case Intrinsic::cj_array_copy_ref:
 +      case Intrinsic::cj_array_copy_struct:
 +      case Intrinsic::cj_atomic_store:
@@ -45639,6 +45667,7 @@ index 000000000..9c878ab33
 +        BP = getPointerArg(CI);
 +        break;
 +      case Intrinsic::cj_gcwrite_struct:
++      case Intrinsic::cj_maybe_local_write_struct:
 +        BP = getBaseObj(CI);
 +        break;
 +      case Intrinsic::cj_gcwrite_static_struct:
@@ -45841,6 +45870,7 @@ index 000000000..9c878ab33
 +    return false;
 +  case Intrinsic::cj_gcwrite_ref:
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +  case Intrinsic::cj_gcwrite_static_ref:
 +  case Intrinsic::cj_gcwrite_static_struct:
 +  case Intrinsic::cj_gcread_ref:
@@ -49004,7 +49034,7 @@ index 6696b79cf..f21abc156 100644
    SDValue PromoteIntOp_STACKMAP(SDNode *N, unsigned OpNo);
    SDValue PromoteIntOp_PATCHPOINT(SDNode *N, unsigned OpNo);
 diff --git a/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp b/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
-index ecdaef044..2224ca854 100644
+index ecdaef044..12b617db9 100644
 --- a/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
 +++ b/llvm/lib/CodeGen/SelectionDAG/SelectionDAGBuilder.cpp
 @@ -129,6 +129,10 @@ static cl::opt<unsigned> SwitchPeelThreshold(
@@ -49074,7 +49104,7 @@ index ecdaef044..2224ca854 100644
      case Intrinsic::experimental_gc_statepoint:
        LowerStatepoint(cast<GCStatepointInst>(I), EHPadBB);
        break;
-@@ -6749,7 +6779,31 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
+@@ -6749,7 +6779,32 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
    }
    case Intrinsic::gcread:
    case Intrinsic::gcwrite:
@@ -49085,6 +49115,7 @@ index ecdaef044..2224ca854 100644
 +  case Intrinsic::cj_gcread_static_struct:
 +  case Intrinsic::cj_gcwrite_ref:
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +  case Intrinsic::cj_gcwrite_static_ref:
 +  case Intrinsic::cj_gcwrite_static_struct:
 +  case Intrinsic::cj_array_copy_ref:
@@ -49107,7 +49138,7 @@ index ecdaef044..2224ca854 100644
    case Intrinsic::flt_rounds:
      Res = DAG.getNode(ISD::FLT_ROUNDS_, sdl, {MVT::i32, MVT::Other}, getRoot());
      setValue(&I, Res);
-@@ -6928,13 +6982,16 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
+@@ -6928,13 +6983,16 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
      visitPatchpoint(I);
      return;
    case Intrinsic::experimental_gc_statepoint:
@@ -49125,7 +49156,7 @@ index ecdaef044..2224ca854 100644
      return;
    case Intrinsic::instrprof_cover:
      llvm_unreachable("instrprof failed to lower a cover");
-@@ -7737,6 +7794,44 @@ SelectionDAGBuilder::lowerInvokable(TargetLowering::CallLoweringInfo &CLI,
+@@ -7737,6 +7795,44 @@ SelectionDAGBuilder::lowerInvokable(TargetLowering::CallLoweringInfo &CLI,
    return Result;
  }
  
@@ -49170,7 +49201,7 @@ index ecdaef044..2224ca854 100644
  void SelectionDAGBuilder::LowerCallTo(const CallBase &CB, SDValue Callee,
                                        bool isTailCall,
                                        bool isMustTailCall,
-@@ -7751,20 +7846,8 @@ void SelectionDAGBuilder::LowerCallTo(const CallBase &CB, SDValue Callee,
+@@ -7751,20 +7847,8 @@ void SelectionDAGBuilder::LowerCallTo(const CallBase &CB, SDValue Callee,
    const Value *SwiftErrorVal = nullptr;
    const TargetLowering &TLI = DAG.getTargetLoweringInfo();
  
@@ -49193,7 +49224,7 @@ index ecdaef044..2224ca854 100644
    }
  
    for (auto I = CB.arg_begin(), E = CB.arg_end(); I != E; ++I) {
-@@ -9267,8 +9350,6 @@ void SelectionDAGBuilder::populateCallLoweringInfo(
+@@ -9267,8 +9351,6 @@ void SelectionDAGBuilder::populateCallLoweringInfo(
         ArgI != ArgE; ++ArgI) {
      const Value *V = Call->getOperand(ArgI);
  
@@ -49202,7 +49233,7 @@ index ecdaef044..2224ca854 100644
      TargetLowering::ArgListEntry Entry;
      Entry.Node = getValue(V);
      Entry.Ty = V->getType();
-@@ -9276,13 +9357,30 @@ void SelectionDAGBuilder::populateCallLoweringInfo(
+@@ -9276,13 +9358,30 @@ void SelectionDAGBuilder::populateCallLoweringInfo(
      Args.push_back(Entry);
    }
  
@@ -49240,7 +49271,7 @@ index ecdaef044..2224ca854 100644
  }
  
  /// Add a stack map intrinsic call's live variable operands to a stackmap
-@@ -10237,6 +10335,11 @@ static void tryToElideArgumentCopy(
+@@ -10237,6 +10336,11 @@ static void tryToElideArgumentCopy(
                        << DebugStr(MFI.getObjectAlign(FixedIndex)) << ")\n");
      return;
    }
@@ -52866,10 +52897,10 @@ index e9ef034c4..00225982c 100644
  void llvm::linkAllBuiltinGCs() {}
 diff --git a/llvm/lib/IR/CJIntrinsics.cpp b/llvm/lib/IR/CJIntrinsics.cpp
 new file mode 100644
-index 000000000..ab8917dd5
+index 000000000..910c00261
 --- /dev/null
 +++ b/llvm/lib/IR/CJIntrinsics.cpp
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,164 @@
 +//===- CJIntrinsics.cpp - Cangjie Intrinsic Wrappers ------------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -52899,6 +52930,7 @@ index 000000000..ab8917dd5
 +  case Intrinsic::cj_gcwrite_ref:
 +    return CI->getArgOperand(GCWriteRef::BaseObj);
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +    return CI->getArgOperand(GCWriteStruct::BaseObj);
 +  case Intrinsic::cj_gcread_ref:
 +    return CI->getArgOperand(GCReadRef::BaseObj);
@@ -52945,6 +52977,7 @@ index 000000000..ab8917dd5
 +    report_fatal_error("Unsupported intrinsic type");
 +    return nullptr;
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +    return CI->getArgOperand(GCWriteStruct::Dst);
 +  case Intrinsic::cj_gcwrite_static_struct:
 +    return CI->getArgOperand(GCWriteStaticStruct::Dst);
@@ -52972,6 +53005,7 @@ index 000000000..ab8917dd5
 +    report_fatal_error("Unsupported intrinsic type");
 +    return nullptr;
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +    return CI->getArgOperand(GCWriteStruct::Src);
 +  case Intrinsic::cj_gcwrite_static_struct:
 +    return CI->getArgOperand(GCWriteStaticStruct::Src);
@@ -52999,6 +53033,7 @@ index 000000000..ab8917dd5
 +    report_fatal_error("Unsupported intrinsic type");
 +    return nullptr;
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +    return CI->getArgOperand(GCWriteStruct::Size);
 +  case Intrinsic::cj_gcwrite_static_struct:
 +    return CI->getArgOperand(GCWriteStaticStruct::Size);
@@ -53879,7 +53914,7 @@ index d85cefbbe..bd2a8d753 100644
                                                        StringRef PassName) {
    if (ClassToPassName[ClassName].empty())
 diff --git a/llvm/lib/IR/SafepointIRVerifier.cpp b/llvm/lib/IR/SafepointIRVerifier.cpp
-index 5d3fa28f7..2df996ed4 100644
+index 5d3fa28f7..a6296ce7d 100644
 --- a/llvm/lib/IR/SafepointIRVerifier.cpp
 +++ b/llvm/lib/IR/SafepointIRVerifier.cpp
 @@ -35,15 +35,23 @@
@@ -53942,7 +53977,7 @@ index 5d3fa28f7..2df996ed4 100644
  // Debugging aid -- prints a [Begin, End) range of values.
  template<typename IteratorTy>
  static void PrintValueSet(raw_ostream &OS, IteratorTy Begin, IteratorTy End) {
-@@ -909,3 +897,323 @@ static void Verify(const Function &F, const DominatorTree &DT,
+@@ -909,3 +897,324 @@ static void Verify(const Function &F, const DominatorTree &DT,
             << "\n";
    }
  }
@@ -54071,6 +54106,7 @@ index 5d3fa28f7..2df996ed4 100644
 +    CI->replaceAllUsesWith(NewInst);
 +    break;
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +  case Intrinsic::cj_gcread_struct:
 +  case Intrinsic::cj_gcwrite_static_struct:
 +  case Intrinsic::cj_gcread_static_struct:
@@ -54331,7 +54367,7 @@ index 3990536f3..673d2d6a1 100644
      return false;
    }
 diff --git a/llvm/lib/IR/Verifier.cpp b/llvm/lib/IR/Verifier.cpp
-index e3ea256af..0d48707cc 100644
+index e3ea256af..86d2f3d2d 100644
 --- a/llvm/lib/IR/Verifier.cpp
 +++ b/llvm/lib/IR/Verifier.cpp
 @@ -2246,9 +2246,12 @@ void Verifier::verifyInlineAsmCall(const CallBase &Call) {
@@ -54503,12 +54539,13 @@ index e3ea256af..0d48707cc 100644
                  F->getIntrinsicID() == Intrinsic::donothing ||
                  F->getIntrinsicID() == Intrinsic::seh_try_begin ||
                  F->getIntrinsicID() == Intrinsic::seh_try_end ||
-@@ -5115,6 +5123,25 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
+@@ -5115,6 +5123,26 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
      Check(Call.getParent()->getParent()->hasGC(),
            "Enclosing function does not use GC.", Call);
      break;
 +  case Intrinsic::cj_gcwrite_ref:
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +  case Intrinsic::cj_gcwrite_static_ref:
 +  case Intrinsic::cj_gcwrite_static_struct:
 +  case Intrinsic::cj_array_copy_ref:
@@ -54529,7 +54566,7 @@ index e3ea256af..0d48707cc 100644
    case Intrinsic::init_trampoline:
      Check(isa<Function>(Call.getArgOperand(1)->stripPointerCasts()),
            "llvm.init_trampoline parameter #2 must resolve to a function.",
-@@ -5159,7 +5186,7 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
+@@ -5159,7 +5187,7 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
          std::max(uint64_t(Entry.second), IdxArg->getLimitedValue(~0U) + 1));
      break;
    }
@@ -54538,7 +54575,7 @@ index e3ea256af..0d48707cc 100644
    case Intrinsic::experimental_gc_statepoint:
      if (auto *CI = dyn_cast<CallInst>(&Call))
        Check(!CI->isInlineAsm(),
-@@ -5169,6 +5196,7 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
+@@ -5169,6 +5197,7 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
  
      verifyStatepoint(Call);
      break;
@@ -54546,7 +54583,7 @@ index e3ea256af..0d48707cc 100644
    case Intrinsic::experimental_gc_result: {
      Check(Call.getParent()->getParent()->hasGC(),
            "Enclosing function does not use GC.", Call);
-@@ -5176,19 +5204,37 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
+@@ -5176,19 +5205,37 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
      const auto *StatepointCall = dyn_cast<CallBase>(Call.getArgOperand(0));
      const Function *StatepointFn =
          StatepointCall ? StatepointCall->getCalledFunction() : nullptr;
@@ -59076,7 +59113,7 @@ index 183febe75..5eef12ee9 100644
  }
  
 diff --git a/llvm/lib/Target/ARM/ARMBaseRegisterInfo.cpp b/llvm/lib/Target/ARM/ARMBaseRegisterInfo.cpp
-index 1d0e743b9..b566bb11a 100644
+index 1d0e743b9..85704c1ce 100644
 --- a/llvm/lib/Target/ARM/ARMBaseRegisterInfo.cpp
 +++ b/llvm/lib/Target/ARM/ARMBaseRegisterInfo.cpp
 @@ -69,6 +69,8 @@ ARMBaseRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
@@ -59093,7 +59130,7 @@ index 1d0e743b9..b566bb11a 100644
                                  : CSR_AAPCS_SwiftTail_RegMask;
    }
 +  if (CC == CallingConv::CangjieGC)
-+    return CSR_CangjieGC_RegMask;
++    return CSR_CangjieGC_NoIP_RegMask;
    if (STI.getTargetLowering()->supportSwiftError() &&
        MF.getFunction().getAttributes().hasAttrSomewhere(Attribute::SwiftError))
      return STI.isTargetDarwin() ? CSR_iOS_SwiftError_RegMask
@@ -59113,16 +59150,22 @@ index 6d389cc82..a640fbcc3 100644
    BBI.PostAlign = Align(1);
  
 diff --git a/llvm/lib/Target/ARM/ARMCallingConv.td b/llvm/lib/Target/ARM/ARMCallingConv.td
-index d14424c2d..7f2b49fb2 100644
+index d14424c2d..b910b3fd3 100644
 --- a/llvm/lib/Target/ARM/ARMCallingConv.td
 +++ b/llvm/lib/Target/ARM/ARMCallingConv.td
-@@ -270,6 +270,10 @@ def CSR_FPRegs : CalleeSavedRegs<(add (sequence "D%u", 0, 31))>;
+@@ -270,6 +270,16 @@ def CSR_FPRegs : CalleeSavedRegs<(add (sequence "D%u", 0, 31))>;
  def CSR_AAPCS : CalleeSavedRegs<(add LR, R11, R10, R9, R8, R7, R6, R5, R4,
                                       (sequence "D%u", 15, 8))>;
  
 +def CSR_CangjieGC
 +    : CalleeSavedRegs<(add LR, SP, (sequence "R%u", 12, 1),
 +                      (sequence "D%u", 31, 0))>;
++
++// CangjieGC calls may go through a PLT entry or linker veneer that clobbers
++// R12 (IP) before the callee can save it. Exclude R12 from the caller's
++// preserved mask, but keep the callee save list unchanged so the callee still
++// preserves its incoming R12 value.
++def CSR_CangjieGC_NoIP : CalleeSavedRegs<(sub CSR_CangjieGC, R12)>;
 +
  // The Windows Control Flow Guard Check function preserves the same registers as
  // AAPCS, and also preserves all floating point registers.
@@ -61876,10 +61919,10 @@ index 8c77b6937..4e65ed2e2 100644
        F->addParamAttr(ArgNo, Attribute::NoAlias);
 diff --git a/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp b/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp
 new file mode 100644
-index 000000000..56a3c3201
+index 000000000..fda6d4c03
 --- /dev/null
 +++ b/llvm/lib/Transforms/IPO/CJPartialEscapeAnalysis.cpp
-@@ -0,0 +1,4312 @@
+@@ -0,0 +1,4315 @@
 +//===- CJPartialEscapeAnalysis.cpp - escape analysis for Cangjie ----------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -62196,6 +62239,7 @@ index 000000000..56a3c3201
 +    // The plain-IR form of the same content-copy hazard: arg1 = source.
 +    return Arg1;
 +  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct:
 +    return Arg2; // arg2 = source
 +  case Intrinsic::cj_gcread_struct:
 +    return Args12; // arg1/arg2 = source side
@@ -64162,6 +64206,7 @@ index 000000000..56a3c3201
 +        handleGCWriteStatic(II);
 +        return true;
 +      case Intrinsic::cj_gcwrite_struct:
++      case Intrinsic::cj_maybe_local_write_struct:
 +        handleGCWriteAgg(II, false);
 +        return true;
 +      case Intrinsic::cj_gcwrite_static_struct:
@@ -65698,6 +65743,7 @@ index 000000000..56a3c3201
 +        handleGCWriteStatic(II);
 +        return true;
 +      case Intrinsic::cj_gcwrite_struct:
++      case Intrinsic::cj_maybe_local_write_struct:
 +        handleGCWriteAgg(II, false);
 +        return true;
 +      case Intrinsic::cj_gcwrite_static_struct:
@@ -67935,7 +67981,7 @@ index 90a796a09..3a74a600a 100644
  
    for (unsigned ID : KnownIDs)
 diff --git a/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp b/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp
-index 71c763de4..56fa4217d 100644
+index 71c763de4..4ed85b552 100644
 --- a/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp
 +++ b/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp
 @@ -167,6 +167,10 @@ MaxArraySize("instcombine-maxarray-size", cl::init(1024),
@@ -67967,7 +68013,7 @@ index 71c763de4..56fa4217d 100644
              Users.emplace_back(I);
              continue;
            case Intrinsic::launder_invariant_group:
-@@ -2793,6 +2799,29 @@ static bool isAllocSiteRemovable(Instruction *AI,
+@@ -2793,6 +2799,30 @@ static bool isAllocSiteRemovable(Instruction *AI,
              Users.emplace_back(I);
              Worklist.push_back(I);
              continue;
@@ -67977,6 +68023,7 @@ index 71c763de4..56fa4217d 100644
 +            Users.emplace_back(I);
 +            continue;
 +          case Intrinsic::cj_gcwrite_struct:
++          case Intrinsic::cj_maybe_local_write_struct:
 +          case Intrinsic::cj_gcwrite_generic:
 +            // PI is written to memory, it cannot be removed.
 +            if (II->getOperand(2) == PI)
@@ -67997,7 +68044,7 @@ index 71c763de4..56fa4217d 100644
            }
          }
  
-@@ -3403,9 +3432,6 @@ static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
+@@ -3403,9 +3433,6 @@ static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
    case EHPersonality::GNU_C:
    case EHPersonality::GNU_C_SjLj:
    case EHPersonality::Rust:
@@ -68007,7 +68054,7 @@ index 71c763de4..56fa4217d 100644
    case EHPersonality::Unknown:
      return false;
    case EHPersonality::GNU_Ada:
-@@ -3886,7 +3912,7 @@ bool InstCombinerImpl::freezeOtherUses(FreezeInst &FI) {
+@@ -3886,7 +3913,7 @@ bool InstCombinerImpl::freezeOtherUses(FreezeInst &FI) {
      while (isa<AllocaInst>(MoveBefore))
        MoveBefore = MoveBefore->getNextNode();
    } else if (auto *PN = dyn_cast<PHINode>(Op)) {
@@ -68016,7 +68063,7 @@ index 71c763de4..56fa4217d 100644
    } else if (auto *II = dyn_cast<InvokeInst>(Op)) {
      MoveBefore = II->getNormalDest()->getFirstNonPHI();
    } else if (auto *CB = dyn_cast<CallBrInst>(Op)) {
-@@ -4389,6 +4415,16 @@ public:
+@@ -4389,6 +4416,16 @@ public:
    }
  };
  
@@ -68033,7 +68080,7 @@ index 71c763de4..56fa4217d 100644
  /// Populate the IC worklist from a function, by walking it in depth-first
  /// order and adding all reachable code to the worklist.
  ///
-@@ -4421,6 +4457,15 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
+@@ -4421,6 +4458,15 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
        if (!Inst.use_empty() &&
            (Inst.getNumOperands() == 0 || isa<Constant>(Inst.getOperand(0))))
          if (Constant *C = ConstantFoldInstruction(&Inst, DL, TLI)) {
@@ -72574,10 +72621,10 @@ index 000000000..170460913
 +}
 diff --git a/llvm/lib/Transforms/Scalar/CJBarrierOpt.cpp b/llvm/lib/Transforms/Scalar/CJBarrierOpt.cpp
 new file mode 100644
-index 000000000..cf13c1964
+index 000000000..5321c8bed
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJBarrierOpt.cpp
-@@ -0,0 +1,911 @@
+@@ -0,0 +1,915 @@
 +//===- CJBarrierOpt.cpp - optimize cangjie write barriers -----------------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -72960,6 +73007,7 @@ index 000000000..cf13c1964
 +    case Intrinsic::cj_gcread_struct:
 +      return isa<AllocaInst>(Barrier->getArgOperand(1)->stripPointerCasts());
 +    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct:
 +    case Intrinsic::cj_gcread_ref:
 +      return isa<AllocaInst>(Barrier->getArgOperand(0)->stripPointerCasts());
 +    case Intrinsic::cj_array_copy_ref:
@@ -73034,6 +73082,7 @@ index 000000000..cf13c1964
 +    case Intrinsic::cj_gcread_ref:
 +    // BaseObj, DstPtr, SrcPtr, Size
 +    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct:
 +      BasePtr = Barrier->getArgOperand(0);
 +      FieldPtr = Barrier->getArgOperand(1);
 +      break;
@@ -73171,7 +73220,8 @@ index 000000000..cf13c1964
 +      }
 +    }
 +
-+    if (Barrier->getIntrinsicID() == Intrinsic::cj_gcwrite_struct) {
++    if (Barrier->getIntrinsicID() == Intrinsic::cj_gcwrite_struct ||
++        Barrier->getIntrinsicID() == Intrinsic::cj_maybe_local_write_struct) {
 +      auto Src = Barrier->getArgOperand(2)->stripPointerCasts();
 +      // 64 is 64-bit integer
 +      APInt Offset(DL.getIndexSizeInBits(0u), -1);
@@ -73266,6 +73316,7 @@ index 000000000..cf13c1964
 +          break;
 +        case Intrinsic::cj_gcwrite_ref:
 +        case Intrinsic::cj_gcwrite_struct:
++        case Intrinsic::cj_maybe_local_write_struct:
 +        case Intrinsic::cj_gcread_ref:
 +        case Intrinsic::cj_gcread_struct:
 +        case Intrinsic::cj_array_copy_ref:
@@ -77337,10 +77388,10 @@ index 000000000..331d379b7
 \ No newline at end of file
 diff --git a/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp b/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp
 new file mode 100644
-index 000000000..f4426e732
+index 000000000..d356bea64
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJGCLiveAnalysis.cpp
-@@ -0,0 +1,2130 @@
+@@ -0,0 +1,2132 @@
 +//===- CJGCLiveAnalysis.cpp - GC Live Analysis For Cangjie ------*- C++ -*-===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -79139,7 +79190,9 @@ index 000000000..f4426e732
 +    break;
 +  }
 +  // cj.gcwrite.struct(AS(1) *basePtr, AS(1) *dstPtr, anyAS *srcPtr, size)
-+  case Intrinsic::cj_gcwrite_struct: {
++  // cj.maybe.local.write.struct has the same operand layout.
++  case Intrinsic::cj_gcwrite_struct:
++  case Intrinsic::cj_maybe_local_write_struct: {
 +    uint64_t MemSize = 0;
 +    if (auto Size = dyn_cast<ConstantInt>(getSize(II))) {
 +      MemSize = Size->getZExtValue();
@@ -80386,10 +80439,10 @@ index 000000000..0f54f788e
 +                "Cangjie Generic Intrinsics Optimize", false, false)
 diff --git a/llvm/lib/Transforms/Scalar/CJIRVerifier.cpp b/llvm/lib/Transforms/Scalar/CJIRVerifier.cpp
 new file mode 100644
-index 000000000..89d1bab14
+index 000000000..7c2d808f4
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/CJIRVerifier.cpp
-@@ -0,0 +1,826 @@
+@@ -0,0 +1,829 @@
 +//===- CJIRVerifier.cpp - Cangjie IR Verifier --------------*- C++ -*------===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -80621,6 +80674,7 @@ index 000000000..89d1bab14
 +      break;
 +    }
 +    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct:
 +    case Intrinsic::cj_gcread_struct: {
 +      // The size should not be 0.
 +      auto *SizeArg = dyn_cast<ConstantInt>(getSize(&Call));
@@ -80680,6 +80734,8 @@ index 000000000..89d1bab14
 +      case Intrinsic::cj_malloc_local_object:
 +      case Intrinsic::cj_malloc_array:
 +      case Intrinsic::cj_malloc_array_generic:
++      case Intrinsic::cj_malloc_local_array:
++      case Intrinsic::cj_malloc_local_array_generic:
 +      case Intrinsic::cj_division_check_sdiv:
 +      case Intrinsic::cj_division_check_udiv:
 +      case Intrinsic::cj_division_check_srem:
@@ -91498,7 +91554,7 @@ index 3f0dad7ee..770af3028 100644
    }
  
 diff --git a/llvm/lib/Transforms/Scalar/EarlyCSE.cpp b/llvm/lib/Transforms/Scalar/EarlyCSE.cpp
-index cf2824954..8fa54674a 100644
+index cf2824954..4c2a4e270 100644
 --- a/llvm/lib/Transforms/Scalar/EarlyCSE.cpp
 +++ b/llvm/lib/Transforms/Scalar/EarlyCSE.cpp
 @@ -28,6 +28,7 @@
@@ -91567,18 +91623,19 @@ index cf2824954..8fa54674a 100644
          }
        }
      }
-@@ -815,6 +853,10 @@ private:
+@@ -815,6 +853,11 @@ private:
      switch (ID) {
      case Intrinsic::masked_load:
      case Intrinsic::masked_store:
 +    case Intrinsic::cj_gcwrite_ref:
 +    case Intrinsic::cj_gcwrite_struct:
++    case Intrinsic::cj_maybe_local_write_struct:
 +    case Intrinsic::cj_gcread_ref:
 +    case Intrinsic::cj_gcread_static_ref:
        return true;
      }
      return false;
-@@ -855,8 +897,12 @@ private:
+@@ -855,8 +898,12 @@ private:
                                                  Type *ExpectedType) const {
      switch (II->getIntrinsicID()) {
      case Intrinsic::masked_load:
@@ -91591,7 +91648,7 @@ index cf2824954..8fa54674a 100644
        return II->getOperand(0);
      }
      return nullptr;
-@@ -905,6 +951,11 @@ private:
+@@ -905,6 +952,11 @@ private:
          return II->getOperand(0);
        if (II->getIntrinsicID() == Intrinsic::masked_store)
          return II->getOperand(1);
@@ -91603,7 +91660,7 @@ index cf2824954..8fa54674a 100644
        llvm_unreachable("Unexpected IntrinsicInst");
      };
      auto MaskOp = [](const IntrinsicInst *II) {
-@@ -961,6 +1012,14 @@ private:
+@@ -961,6 +1013,14 @@ private:
        //   mask.
        return IsSubmask(MaskOp(Earlier), MaskOp(Later));
      }
@@ -91618,7 +91675,7 @@ index cf2824954..8fa54674a 100644
      return false;
    }
  
-@@ -977,6 +1036,21 @@ private:
+@@ -977,6 +1037,21 @@ private:
      // by MemorySSA's getClobberingMemoryAccess.
      MSSAUpdater->removeMemoryAccess(&Inst, true);
    }
@@ -91640,7 +91697,7 @@ index cf2824954..8fa54674a 100644
  };
  
  } // end anonymous namespace
-@@ -1119,8 +1193,10 @@ Value *EarlyCSE::getMatchingValue(LoadValue &InVal, ParseMemoryInst &MemInst,
+@@ -1119,8 +1194,10 @@ Value *EarlyCSE::getMatchingValue(LoadValue &InVal, ParseMemoryInst &MemInst,
                                    unsigned CurrentGeneration) {
    if (InVal.DefInst == nullptr)
      return nullptr;
@@ -91651,7 +91708,7 @@ index cf2824954..8fa54674a 100644
    // We don't yet handle removing loads with ordering of any kind.
    if (MemInst.isVolatile() || !MemInst.isUnordered())
      return nullptr;
-@@ -1146,8 +1222,10 @@ Value *EarlyCSE::getMatchingValue(LoadValue &InVal, ParseMemoryInst &MemInst,
+@@ -1146,8 +1223,10 @@ Value *EarlyCSE::getMatchingValue(LoadValue &InVal, ParseMemoryInst &MemInst,
    // Deal with non-target memory intrinsics.
    bool MatchingNTI = isHandledNonTargetIntrinsic(Matching);
    bool OtherNTI = isHandledNonTargetIntrinsic(Other);
@@ -91662,7 +91719,7 @@ index cf2824954..8fa54674a 100644
    if (OtherNTI && MatchingNTI) {
      if (!isNonTargetIntrinsicMatch(cast<IntrinsicInst>(InVal.DefInst),
                                     cast<IntrinsicInst>(MemInst.get())))
-@@ -1355,6 +1433,10 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
+@@ -1355,6 +1434,10 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
        } else {
          bool Killed = false;
          if (!Inst.use_empty()) {
@@ -91882,10 +91939,10 @@ index 328615011..2d47f208a 100644
      auto PrintConstrainedLoopInfo = [L]() {
 diff --git a/llvm/lib/Transforms/Scalar/InsertCJTBAA.cpp b/llvm/lib/Transforms/Scalar/InsertCJTBAA.cpp
 new file mode 100644
-index 000000000..f8d12c0aa
+index 000000000..dc257a707
 --- /dev/null
 +++ b/llvm/lib/Transforms/Scalar/InsertCJTBAA.cpp
-@@ -0,0 +1,949 @@
+@@ -0,0 +1,950 @@
 +//===- InsertCJTBAA.cpp - Insert Cangjie TBAA Metadata ----------*- C++ -*-===//
 +//
 +// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -92790,6 +92847,7 @@ index 000000000..f8d12c0aa
 +      }
 +      case Intrinsic::cj_gcwrite_static_ref:
 +      case Intrinsic::cj_gcwrite_struct:
++      case Intrinsic::cj_maybe_local_write_struct:
 +      case Intrinsic::cj_array_copy_ref:
 +      case Intrinsic::cj_array_copy_struct:
 +        // 1: Dst Operand for these
@@ -106630,6 +106688,57 @@ index 9ce9e96e9..b850bbe09 100644
    %r = call <3 x double> @llvm.sin.v3f64(<3 x double> %x)
    ret <3 x double> %r
  }
+diff --git a/llvm/test/CodeGen/ARM/cangjiegc-plt-stack-address.ll b/llvm/test/CodeGen/ARM/cangjiegc-plt-stack-address.ll
+new file mode 100644
+index 000000000..3be7e34f5
+--- /dev/null
++++ b/llvm/test/CodeGen/ARM/cangjiegc-plt-stack-address.ll
+@@ -0,0 +1,45 @@
++; RUN: llc -mtriple=armv7a-linux-android23 -mcpu=cortex-a9 -relocation-model=pic -frame-pointer=non-leaf -cangjie-pipeline -verify-machineinstrs -stop-after=virtregrewriter < %s | FileCheck %s --check-prefix=MIR
++; RUN: llc -mtriple=armv7a-linux-android23 -mcpu=cortex-a9 -relocation-model=pic -frame-pointer=non-leaf -cangjie-pipeline -verify-machineinstrs < %s | FileCheck %s --check-prefix=ASM
++;
++; A reduced stack-address case from RenderOptions.deserialize. No inline asm
++; or fixed-register constraints. LocalStackSlotAllocation materializes a base
++; for the two halfword stores before the stack check. R12 must not carry that
++; base across the call because an ARM PLT overwrites it.
++; Use the generic GC strategy to isolate call/regmask lowering from CJ frame
++; generation and stack-pointer metadata (the call convention remains CangjieGC).
++
++; MIR-LABEL: name: repro
++; MIR: renamable $[[BASE:r([0-9]|10|11)]] = ADDri %stack.1.tag, 0,
++; MIR: STATEPOINT 5, {{.*}}@CJ_MCC_StackCheck, {{.*}}csr_cangjiegc_noip,
++; MIR: STRH {{.*}}$[[BASE]], $noreg, 0,
++; MIR: STRH {{.*}}$[[BASE]], $noreg, 0,
++
++; ASM-LABEL: repro:
++; ASM: sub sp, sp, #{{[0-9]+}}
++; ASM-NEXT: add [[BASE:r([0-9]|10|11)]], sp, #{{[0-9]+}}
++; ASM: bl CJ_MCC_StackGrowStub
++; ASM: strh {{r[0-9]+}}, {{\[}}[[BASE]]{{\]}}
++; ASM: strh {{r[0-9]+}}, {{\[}}[[BASE]]{{\]}}
++
++target triple = "armv7a-linux-android23"
++
++declare void @CJ_MCC_StackCheck() #0
++declare token @llvm.cj.gc.statepoint(...)
++declare void @consume(i8*, i8*, i8*, i32, i32, i32)
++
++define void @repro(i32 %a0, i32 %a1, i32 %a2) gc "statepoint-example" {
++entry:
++  %left = alloca [160 x i8], align 8
++  %tag = alloca i16, align 8
++  %right = alloca [160 x i8], align 8
++  %p = bitcast i16* %tag to i8*
++  %l = bitcast [160 x i8]* %left to i8*
++  %r = bitcast [160 x i8]* %right to i8*
++  %token = call cangjiegccc token (...) @llvm.cj.gc.statepoint(i64 5, i32 0, void ()* @CJ_MCC_StackCheck, i32 0, i32 0)
++  store volatile i16 0, i16* %tag, align 8
++  store volatile i16 1, i16* %tag, align 8
++  %other = call token (...) @llvm.cj.gc.statepoint(i64 0, i32 0, void (i8*, i8*, i8*, i32, i32, i32)* @consume, i32 6, i32 0, i8* %l, i8* %p, i8* %r, i32 %a0, i32 %a1, i32 %a2)
++  ret void
++}
++
++attributes #0 = { "cj-stack-check" }
 diff --git a/llvm/test/CodeGen/X86/CangjieGC/CFile/CFile-mac-package.ll b/llvm/test/CodeGen/X86/CangjieGC/CFile/CFile-mac-package.ll
 new file mode 100644
 index 000000000..56f592191
@@ -114018,6 +114127,47 @@ index 000000000..690407a1f
 +declare void @llvm.cj.memset(i8*, i8, i64, i1) #10
 +
 +declare void @llvm.cj.gcwrite.static.struct(i8* noalias nocapture writeonly, i8* noalias nocapture readonly, i64) #9
+diff --git a/llvm/test/Transforms/CJIRVerifier/local_array_invoke.ll b/llvm/test/Transforms/CJIRVerifier/local_array_invoke.ll
+new file mode 100644
+index 000000000..7f152813d
+--- /dev/null
++++ b/llvm/test/Transforms/CJIRVerifier/local_array_invoke.ll
+@@ -0,0 +1,35 @@
++; RUN: opt -passes=cj-ir-verifier -disable-output < %s
++
++declare i32 @personality(...)
++declare i8 addrspace(1)* @llvm.cj.malloc.local.array(i8*, i64, i64)
++declare i8 addrspace(1)* @llvm.cj.malloc.local.array.generic(i8*, i64)
++
++define i8 addrspace(1)* @local_array(i8* %ti, i64 %length, i64 %size)
++    gc "cangjie" personality i32 (...)* @personality {
++entry:
++  %array = invoke i8 addrspace(1)* @llvm.cj.malloc.local.array(
++      i8* %ti, i64 %length, i64 %size)
++      to label %normal unwind label %unwind
++
++normal:
++  ret i8 addrspace(1)* %array
++
++unwind:
++  %exception = landingpad { i8*, i32 } cleanup
++  resume { i8*, i32 } %exception
++}
++
++define i8 addrspace(1)* @local_generic_array(i8* %ti, i64 %length)
++    gc "cangjie" personality i32 (...)* @personality {
++entry:
++  %array = invoke i8 addrspace(1)* @llvm.cj.malloc.local.array.generic(
++      i8* %ti, i64 %length)
++      to label %normal unwind label %unwind
++
++normal:
++  ret i8 addrspace(1)* %array
++
++unwind:
++  %exception = landingpad { i8*, i32 } cleanup
++  resume { i8*, i32 } %exception
++}
 diff --git a/llvm/test/Transforms/CJIRVerifier/struct_addrspacecast.ll b/llvm/test/Transforms/CJIRVerifier/struct_addrspacecast.ll
 new file mode 100644
 index 000000000..ca4bfe091
