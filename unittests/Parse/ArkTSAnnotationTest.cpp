@@ -441,8 +441,9 @@ TEST_F(ArkTSEntryTest, LegacyBodyHashHandlesArkTSMetadata)
     ASSERT_EQ(file->decls.size(), 1);
     auto& alias = *file->decls.front();
     const auto withoutAnnotation = ASTHasher::SigHash(alias);
-    // An internal AST fixture exercises the legacy body-hash branch. This does
-    // not declare support for applying @ArkTS to a source type alias.
+    // An internal AST fixture exercises the body-hash branch of ASTHasher
+    // (existing compiler behavior, unchanged here); this does not declare
+    // support for applying @ArkTS to a source type alias.
     auto annotation = MakeOwned<Annotation>();
     annotation->kind = AnnotationKind::ARKTS;
     annotation->identifier = "ArkTS";
@@ -2140,7 +2141,8 @@ TEST_F(ArkTSEntryTest, BodylessInitOfForeignClassWithoutArkTSStillDiagnosed)
 
 // ---- @RestParam placement on the constructor, primary constructor and prop
 // getter/setter parameter lists: the parse paths that never reach
-// FFIParserImpl::CheckFuncSignature, where the annotation used to be inert ----
+// FFIParserImpl::CheckFuncSignature; placement is checked on the parse side
+// for these paths ----
 
 TEST_F(ArkTSEntryTest, RestParamOnAnArkTSForeignClassInitIsAccepted)
 {
@@ -2513,4 +2515,47 @@ foreign class C {
         }), 1);
     EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
         [](const auto& diagnostic) { return diagnostic.rKind == DiagKindRefactor::parse_unexpected_anno_on; }), 0);
+}
+
+// A @ForeignName argument that is not a string literal is diagnosed once and
+// the annotation is marked broken, so Sema never reads a value that was never
+// a literal.
+TEST_F(ArkTSEntryTest, ForeignNameNonLiteralArgumentIsDiagnosedAndMarkedBroken)
+{
+    auto file = ParseKeepingDiagnostics(R"(@ForeignName[hashCode]
+public func echo(): Unit {}
+)");
+    ASSERT_NE(file, nullptr);
+    const auto diagnostics = diag.GetCategoryDiagnostic(DiagCategory::PARSE);
+    EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),
+                  [](const auto& diagnostic) {
+                      return diagnostic.rKind == DiagKindRefactor::parse_annotation_one_argument;
+                  }),
+        1);
+    ASSERT_EQ(file->decls.size(), 1);
+    auto& fd = StaticCast<FuncDecl&>(*file->decls.front());
+    ASSERT_EQ(fd.annotations.size(), 1);
+    EXPECT_EQ(fd.annotations.front()->kind, AnnotationKind::FOREIGN_NAME);
+    EXPECT_TRUE(fd.annotations.front()->TestAttr(Attribute::IS_BROKEN));
+}
+
+// The rebinding walker matches the raw source spelling: a generated placeholder
+// carries the sentinel prefix unescaped, while a user value that collides with
+// a placeholder name is escaped in the source and therefore never matches.
+TEST_F(ArkTSEntryTest, PlaceholderRebindMatchesOnlyUnescapedSpellings)
+{
+    const std::unordered_map<std::string, std::string> literals{{"__module__", "actual"}};
+    std::string rebound;
+    const std::string prefix = ARKTS_PLACEHOLDER_LITERAL_PREFIX;
+    // A generated placeholder: prefix + key, spelled without escapes.
+    EXPECT_TRUE(ArkTSRebindPlaceholderLiteral(prefix + "__module__", literals, rebound));
+    EXPECT_EQ(rebound, "actual");
+    // The escaped spelling of a colliding user value starts with the escape,
+    // not with the prefix.
+    const std::string escapedUserValue = "\\u{5f}" + prefix + "__module__";
+    EXPECT_FALSE(ArkTSRebindPlaceholderLiteral(escapedUserValue, literals, rebound));
+    // A plain user value has no prefix at all.
+    EXPECT_FALSE(ArkTSRebindPlaceholderLiteral("__module__", literals, rebound));
+    // A prefixed spelling with no map entry stays verbatim.
+    EXPECT_FALSE(ArkTSRebindPlaceholderLiteral(prefix + "__missing__", literals, rebound));
 }

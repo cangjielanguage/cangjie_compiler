@@ -15,6 +15,7 @@
 #include "../../Utils.h"
 #include "../ArkTSInterop.h"
 #include "../FunctionSource.h"
+#include "../Utils/FuncValueSource.h"
 #include "../Utils/ASTFactory.h"
 #include "Collector.h"
 #include "PlaceholderBinding.h"
@@ -121,6 +122,13 @@ bool IsBrokenForeignInterfaceParent(Ptr<Decl> parent)
 // the declaration otherwise (a constructor-like spelling).
 void DiagnoseUnsupportedReturnType(DiagnosticEngine& diag, FuncDecl& fd, Ptr<Type> retType)
 {
+    // An ArkTSFunc<F> position whose function-type constraint failed reports
+    // its dedicated message before the generic unsupported-type text.
+    if (retType && DiagnoseArkTSFuncCarrierPosition(
+        diag, retType->begin.IsZero() ? static_cast<Node&>(fd) : static_cast<Node&>(*retType),
+        retType->DataTy())) {
+        return;
+    }
     if (retType && !retType->begin.IsZero()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *retType,
             Ty::ToString(retType->DataTy()), fd.identifier.Val());
@@ -264,7 +272,9 @@ bool ClassifyArkTSIndexSignature(DiagnosticEngine& diag, FuncDecl& fd, const std
         valueType = &resultType.elements.front();
         return true;
     }
-    if (types.size() == 2) {
+    // A setter signature spells one key type plus the named value type.
+    constexpr size_t indexSetterArity = 2;
+    if (types.size() == indexSetterArity) {
         if (!params[1]->isNamedParam) {
             diag.DiagnoseRefactor(invalidKind, fd, ownerName, "an index setter's value parameter must be named");
             return false;
@@ -324,9 +334,9 @@ bool BuildArkTSClassIndexMemberSource(DiagnosticEngine& diag, ClassDecl& cd, Fun
     const ArkTSTypeDesc* valueType = nullptr;
     bool setter = false;
     if (!ValidateArkTSIndexSignature(diag, fd, cd.identifier.Val(),
-            DiagKindRefactor::sema_arkts_foreign_class_invalid, types, params, resultType,
-            ArkTSRestPosition(params, params.size()),
-            "optional parameters on an index signature are not supported", valueType, setter)) {
+        DiagKindRefactor::sema_arkts_foreign_class_invalid, types, params, resultType,
+        ArkTSRestPosition(params, params.size()),
+        "optional parameters on an index signature are not supported", valueType, setter)) {
         fd.EnableAttr(Attribute::IS_BROKEN);
         return false;
     }
@@ -346,13 +356,17 @@ std::string BuildArkTSClassMemberSource(ClassDecl& cd, size_t namespaceDepth, Ar
     if (constructor) {
         // A child wrapper (no field of its own) moves the whole construction
         // into the super(...) thunk; a root wrapper keeps the direct field
-        // assignment.
-        auto form = OwnsReferenceField(cd) ? ArkTSConstructorForm::DIRECT : ArkTSConstructorForm::SUPER_THUNK;
+        // assignment. The preset string stores a ctx.string primitive instead
+        // of constructing an ArkTS object at all.
+        auto form = IsArkTSPresetString(cd) ? ArkTSConstructorForm::PRESET_STRING
+                                            : (OwnsReferenceField(cd) ? ArkTSConstructorForm::DIRECT
+                                                                      : ArkTSConstructorForm::SUPER_THUNK);
         return ArkTSClassConstructorSource(
             types, namespaceDepth, prefix, restIndex, receiver, optionalStart, classRefs, form);
     }
     return ArkTSClassMethodSource(types, resultType, namespaceDepth, prefix, restIndex,
-        isStatic ? ArkTSMemberReceiver::STATIC : ArkTSMemberReceiver::INSTANCE, receiver, optionalStart, classRefs);
+        isStatic ? ArkTSMemberReceiver::STATIC : ArkTSMemberReceiver::INSTANCE, receiver, optionalStart, classRefs,
+        "class", IsArkTSPresetString(cd));
 }
 
 // A class member's @RestParam position must be the trailing Array<T'>; its
@@ -400,8 +414,8 @@ bool BuildArkTSInterfaceIndexMemberSource(DiagnosticEngine& diag, InterfaceDecl&
     const ArkTSTypeDesc* valueType = nullptr;
     bool setter = false;
     if (!ValidateArkTSIndexSignature(diag, fd, id.identifier.Val(),
-            DiagKindRefactor::sema_arkts_foreign_interface_invalid, types, params, resultType, restIndex, nullptr,
-            valueType, setter)) {
+        DiagKindRefactor::sema_arkts_foreign_interface_invalid, types, params, resultType, restIndex, nullptr,
+        valueType, setter)) {
         fd.EnableAttr(Attribute::IS_BROKEN);
         id.EnableAttr(Attribute::IS_BROKEN);
         return false;
@@ -656,7 +670,10 @@ VisitAction RebindArkTSPlaceholderNode(Node& node, FuncDecl& member, Decl& owner
     node.end = member.end;
     if (auto literal = DynamicCast<LitConstExpr*>(&node); literal) {
         std::string rebound;
-        if (ArkTSRebindPlaceholderLiteral(literal->stringValue, literals, rebound)) {
+        // The raw spelling decides: a placeholder literal is generated without
+        // escapes, while a user value that collides with a placeholder name is
+        // escaped in the source, so only the real placeholders match here.
+        if (ArkTSRebindPlaceholderLiteral(literal->rawString, literals, rebound)) {
             literal->stringValue = std::move(rebound);
         }
     }
@@ -809,6 +826,11 @@ std::vector<ClassDecl*> LoweredArkTSClassWrappers(Package& pkg)
 void DiagnoseArkTSUnsupportedParameterType(DiagnosticEngine& diag, const FuncDecl& fd, FuncParam& param)
 {
     auto& position = param.type ? static_cast<Node&>(*param.type) : static_cast<Node&>(param);
+    // The carrier constraint failure keeps its dedicated message; the
+    // deferral routing below stays for the genuinely deferred presets.
+    if (param.type && DiagnoseArkTSFuncCarrierPosition(diag, position, param.type->DataTy())) {
+        return;
+    }
     auto deferredName = param.type ? ArkTSDeferredExternalTypeName(param.type->DataTy()) : std::string{};
     if (!deferredName.empty()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred, position, deferredName);
@@ -843,8 +865,8 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
     // offending bodyless member IS_BROKEN, and the member loops below must
     // observe that mark so a refused member never gets a wrapper body.
     // Running this after class lowering would generate the body first and
-    // suppress the diagnostic. LowerArkTSFunctions no longer repeats this
-    // call.
+    // suppress the diagnostic. This call happens only here;
+    // LowerArkTSFunctions does not repeat it.
     ArkTSDeclOptionsDiagnose(pkg, diag);
 
     // Step 2. Only the generated implementation class may implement a
@@ -865,8 +887,8 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
     // may have been visited before the parent refused in step 5.
     PropagateBrokenArkTSInterfaceParents(pkg);
 
-    // Step 7. Member bodies now exist, so a member with a defaulted parameter
-    // is no longer treated as bodyless by the generic default-function pass.
+    // Step 7. Member bodies already exist, so the generic default-function
+    // pass treats members with a defaulted parameter as having bodies.
     LowerArkTSClassDefaultArguments(ctx, pkg);
 }
 
@@ -1015,6 +1037,14 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassFunc(
     if (fd.TestAttr(Attribute::IS_BROKEN)) {
         return;
     }
+    // A member with a written body is the source of truth: the shape checks
+    // refuse bodies on the members of an unprepared foreign class, so only
+    // the prepared generic preset array reaches this line with one (its
+    // member bodies are written in the runtime source against the element
+    // constraint). Installing a generated body would discard it.
+    if (fd.funcBody->body != nullptr) {
+        return;
+    }
     // An abstract member of an abstract foreign class stays bodyless: the
     // Cangjie subclass supplies the implementation, and installing a wrapper
     // would both clear ABSTRACT and force an `override` on that subclass.
@@ -1108,6 +1138,20 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassProp(
     if (pd.TestAttr(Attribute::ABSTRACT)) {
         return;
     }
+    // A property whose accessors carry written bodies is the source of truth:
+    // only the prepared generic preset array reaches a wrapper lowering with
+    // one (its member bodies are written in the runtime source). Installing
+    // generated accessors would discard them.
+    for (const auto& accessor : pd.getters) {
+        if (accessor && accessor->funcBody && accessor->funcBody->body) {
+            return;
+        }
+    }
+    for (const auto& accessor : pd.setters) {
+        if (accessor && accessor->funcBody && accessor->funcBody->body) {
+            return;
+        }
+    }
     ArkTSTypeDesc desc;
     if (!ClassifyArkTSPropertyType(ctx, pd, desc)) {
         return;
@@ -1120,7 +1164,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassProp(
         }
         std::unordered_map<std::string, Ptr<Decl>> classRefs;
         auto code = ArkTSClassPropertySource(desc, false, receiver, classCtx.namespaces.size(),
-            ArkTSForeignLocalPrefix({}), classCtx.receiver, classRefs);
+            ArkTSForeignLocalPrefix({}), classCtx.receiver, classRefs, IsArkTSPresetString(classCtx.owner));
         if (code.empty()) {
             getter->EnableAttr(Attribute::IS_BROKEN);
             continue;
@@ -1134,7 +1178,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassProp(
         }
         std::unordered_map<std::string, Ptr<Decl>> classRefs;
         auto code = ArkTSClassPropertySource(desc, true, receiver, classCtx.namespaces.size(),
-            ArkTSForeignLocalPrefix({}), classCtx.receiver, classRefs);
+            ArkTSForeignLocalPrefix({}), classCtx.receiver, classRefs, IsArkTSPresetString(classCtx.owner));
         if (code.empty()) {
             setter->EnableAttr(Attribute::IS_BROKEN);
             continue;
@@ -1275,12 +1319,12 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSInterfaceFunc(
     std::string code;
     if (indexOperator) {
         if (!BuildArkTSInterfaceIndexMemberSource(diag, id, fd, types, params, resultType, restIndex, prefix,
-                classRefs, code)) {
+            classRefs, code)) {
             return;
         }
     } else if (callOperator) {
         if (!BuildArkTSInterfaceCallMemberSource(
-                diag, id, fd, types, resultType, prefix, restIndex, classRefs, code)) {
+            diag, id, fd, types, resultType, prefix, restIndex, classRefs, code)) {
             return;
         }
     } else {
@@ -1393,12 +1437,19 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSInterfaceProp(
 // lowered class member against the final parameter types. A broken class is a
 // class-level refusal (its members were never lowered and its default
 // functions, if any, were built by the generic pass), so the post-pass leaves
-// it alone. Member-level refusals no longer mark the class: a broken member
-// is skipped individually, so one refused member never suppresses the
-// default functions of its siblings.
+// it alone. Member-level refusals mark only the member, never the class; a
+// refused member is skipped individually, so one refused member never
+// suppresses the default functions of its siblings.
 void TypeChecker::TypeCheckerImpl::LowerArkTSClassDefaultArguments(ASTContext& ctx, Package& pkg)
 {
     for (auto* cd : LoweredArkTSClassWrappers(pkg)) {
+        // The preset array's members keep their runtime-written bodies and
+        // ordinary Cangjie defaults: their `= None` desugar functions come
+        // from the shared default-argument pass, not the rebuilt mapping-only
+        // form, so the class is skipped whole.
+        if (IsArkTSPresetArray(*cd)) {
+            continue;
+        }
         for (auto& member : cd->GetMemberDecls()) {
             auto fd = DynamicCast<FuncDecl*>(member.get());
             if (!fd || !fd->funcBody || fd->TestAttr(Attribute::IS_BROKEN)) {
@@ -1476,7 +1527,7 @@ void TypeChecker::TypeCheckerImpl::InstallArkTSMemberBody(ASTContext& ctx, ArkTS
     std::unordered_map<Ptr<const Node>, Ptr<Decl>> pendingRefs;
     RebindArkTSPlaceholders(*fb.body, member, lowering.owner, file, params, literals, classRefs, pendingRefs);
     if (!BindArkTSSupportReferences(member, *fb.body, *ci->importManager, diag, pendingRefs,
-            ArkTSMemberDiagnosticName(member, lowering.owner, memberName))) {
+        ArkTSMemberDiagnosticName(member, lowering.owner, memberName))) {
         fb.body.reset();
         // The missing support belongs to this member's body, so only the
         // member is refused and the class keeps lowering the rest.
@@ -1523,7 +1574,7 @@ bool TypeChecker::TypeCheckerImpl::ClassifyArkTSPropertyType(ASTContext& ctx, Pr
     if (ArkTSTypeDescGeneratable(desc) && !ArkTSTypeDescContainsNothing(desc)) {
         return true;
     }
-    if (pd.type) {
+    if (pd.type && !DiagnoseArkTSFuncCarrierPosition(diag, *pd.type, pd.type->DataTy())) {
         auto deferredName = ArkTSDeferredExternalTypeName(pd.type->DataTy());
         if (!deferredName.empty()) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred, *pd.type, deferredName);

@@ -28,6 +28,8 @@
 #include "cangjie/AST/Utils.h"
 #include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
+#include "cangjie/Modules/ASTSerialization.h"
+#include "cangjie/Modules/CjoManager.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -48,6 +50,8 @@ namespace {
 extern const char* ARKTS_INTEROP_SUPPORT;
 extern const char* ARKTS_CONTEXT_SUPPORT;
 extern const char* ARKTS_LANG_SUPPORT;
+extern const char* ARKTS_STDLIB_SUPPORT;
+extern const char* ARKTS_BUSINESS_EXCEPTION_SUPPORT;
 } // namespace
 
 namespace {
@@ -350,6 +354,29 @@ protected:
         instance = std::make_unique<TestCompilerInstance>(invocation, diag);
         instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
         instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+        instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    }
+
+    // Same as PrepareArkTSSupport, plus the std.interop.arkts package that
+    // declares the ArkTSType root interface. The root is package-pinned, so the
+    // relation tests must import it from its declaring package rather than
+    // re-declaring it in a user package.
+    void PrepareArkTSTypeRelationSupport()
+    {
+        diag.ClearError();
+        auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+        auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+        auto stdCjo = ExportSupportPackage(
+            ARKTS_STDLIB_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+        auto langCjo = ExportSupportPackage(ARKTS_LANG_SUPPORT,
+            {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+        diag.ClearError();
+        handler->messages.clear();
+        handler->errors.clear();
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+        instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+        instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+        instance->importManager->SetPackageCjoCache("std.interop.arkts", stdCjo);
         instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
     }
 
@@ -774,6 +801,25 @@ foreign func absoluteModule(x: Int32): Unit
     EXPECT_EQ(fd->funcBody->body, nullptr);
 }
 
+// A bare dot segment is a relative path, not a module specifier: it is
+// rejected at compile time together with the "./x" and "../x" prefixes.
+TEST_F(ArkTSForeignDiagTest, ModuleBareDotSegmentsAreDiagnosed)
+{
+    CompileSema(R"(package entry
+
+@ArkTS[module: "."]
+foreign func dotModule(x: Int32): Unit
+
+@ArkTS[module: ".."]
+foreign func dotDotModule(x: Int32): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 2);
+    EXPECT_TRUE(HasErrorContaining("'module' option '.'"));
+    EXPECT_TRUE(HasErrorContaining("'dotModule'"));
+    EXPECT_TRUE(HasErrorContaining("'module' option '..'"));
+    EXPECT_TRUE(HasErrorContaining("'dotDotModule'"));
+}
+
 // A system module name ("@...") and a single-segment project module name pass
 // the format check with zero format errors. The support declarations are not
 // imported in this fixture, so lowering then refuses the wrapper; only those
@@ -818,10 +864,9 @@ foreign func projectModule(text: String): Float64
     EXPECT_EQ(FindFunction("projectModule")->funcBody->body, nullptr);
 }
 
-// A rest parameter position must carry Array<T'> (copy semantics); an
-// ArkTSArray<T'> rest position is rejected by the parameter loop with the
-// dedicated deferral diagnostic before this check can run. Parse only checks
-// the placement, Sema checks the type.
+// A rest parameter position must carry Array<T'> (copy semantics); any other
+// type is rejected by the rest check with the dedicated diagnostic. Parse only
+// checks the placement, Sema checks the type.
 TEST_F(ArkTSForeignDiagTest, NonArrayRestParameterIsDiagnosed)
 {
     CompileSema(R"(package entry
@@ -887,22 +932,17 @@ class ExternConversionException <: Exception {
 // the declaring package (std.interop.arkts, like BigInt in std.math.numeric),
 // so the preset declarations are spelled in place here: the 1.2.0 toolchain
 // ships no std.interop.arkts module, and only the declaring package - not the
-// type name - selects the deferral message.
+// type name - selects the deferral message. The prepared generic preset
+// array lowers like reference leaves, so an ArkTSArray position spelled with
+// an unprepared declaration keeps the generic message - the shape a stale CJO
+// produces.
 TEST_F(ArkTSForeignDiagTest, PresetExternalTypesGetDeferralDiagnostic)
 {
     CompileSema(R"(package std.interop.arkts
 
-class ArkTSArray<T> {}
-
 class ArkTSString {}
 
 interface ArkTSType {}
-
-@ArkTS[module: "actual"]
-foreign func echoParam(values: ArkTSArray<Int32>): Unit
-
-@ArkTS[module: "actual"]
-foreign func source(): ArkTSArray<Int32>
 
 @ArkTS[module: "actual"]
 foreign func wrap(text: ArkTSString): Unit
@@ -910,23 +950,25 @@ foreign func wrap(text: ArkTSString): Unit
 @ArkTS[module: "actual"]
 foreign func dynamic(value: ArkTSType): Unit
 )");
-    ASSERT_EQ(diag.GetErrorCount(), 4);
+    ASSERT_EQ(diag.GetErrorCount(), 2);
     // The deferral message names the type and the deferral only: the reference
     // semantics of that external type are unavailable in this version. The
     // position (parameter/return) is carried by the diagnostic range, not the
-    // text.
-    EXPECT_TRUE(
-        HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSArray' is not available"));
+    // text. The prepared generic preset array lowers like reference leaves,
+    // so this diagnostic never names it; the stale-CJO array shape is pinned
+    // in ArkTSTypeMappingTest.
     EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSString' is not available"));
     EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSType' is not available"));
     EXPECT_TRUE(HasErrorContaining("is not available in this version"));
     EXPECT_FALSE(HasErrorContaining("copy mapping"));
-    for (const auto& name : {"echoParam", "source", "wrap", "dynamic"}) {
+    EXPECT_FALSE(
+        HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSArray' is not available"));
+    for (const auto& name : {"wrap", "dynamic"}) {
         auto fd = FindFunction(name);
         ASSERT_NE(fd, nullptr) << name;
-        EXPECT_EQ(fd->funcBody->body, nullptr) << name;
         // The deferral diagnostic marks the declaration broken while
         // classification keeps returning UNSUPPORTED for the position.
+        EXPECT_EQ(fd->funcBody->body, nullptr) << name;
         EXPECT_TRUE(fd->TestAttr(Attribute::IS_BROKEN)) << name;
     }
 }
@@ -965,26 +1007,196 @@ foreign func wrap(text: ArkTSString): Unit
     }
 }
 
+TEST_F(ArkTSForeignDiagTest, ArkTSTypeImplicitSupertypeAcceptsForeignLeaves)
+{
+    PrepareArkTSTypeRelationSupport();
+    // The arkts.lang facade re-exports std.interop.arkts and, like the real
+    // facade, brings the interop packages into scope so the @ArkTS wrapper
+    // injection resolves; the root itself stays package-pinned.
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+import std.interop.arkts.*
+
+@ArkTS[module: "actual", foreignName: "Person"]
+public foreign class Person {
+    public init()
+}
+
+@ArkTS[module: "actual", foreignName: "Face"]
+public foreign interface Face {
+    func hi(): Unit
+}
+
+public func assign(p: Person): ArkTSType {
+    let x: ArkTSType = p
+    return x
+}
+
+public func assignFace(f: Face): ArkTSType {
+    return f
+}
+
+public func store<T>(v: T): T where T <: ArkTSType {
+    return v
+}
+
+public func useGeneric(p: Person): ArkTSType {
+    return store<Person>(p)
+}
+
+public func pick(v: ArkTSType): Int32 { return 1 }
+public func pick(v: Int32): Int32 { return 2 }
+
+public func choose(p: Person): Int32 {
+    return pick(p)
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    // Overload selection consumed the relation: `pick(p)` resolves to the
+    // ArkTSType overload, not the Int32 one.
+    Ptr<FuncDecl> resolved{nullptr};
+    Walker(instance->GetSourcePackages()[0].get(), [&resolved](Ptr<Node> node) {
+        auto call = DynamicCast<CallExpr*>(node);
+        if (call == nullptr || call->resolvedFunction == nullptr) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        auto fd = DynamicCast<FuncDecl*>(call->resolvedFunction);
+        if (fd != nullptr && fd->identifier.Val() == "pick") {
+            resolved = fd;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    ASSERT_NE(resolved, nullptr);
+    ASSERT_FALSE(resolved->funcBody->paramLists.empty());
+    auto paramTy = resolved->funcBody->paramLists[0]->params[0]->type->GetTy();
+    ASSERT_TRUE(Ty::IsTyCorrect(paramTy));
+    ASSERT_TRUE(paramTy->IsInterface());
+    EXPECT_EQ(StaticCast<InterfaceTy>(*paramTy).decl->identifier.Val(), "ArkTSType");
+}
+
+// The relation is restricted to the design §3.3 population: a plain user
+// class, a primitive and an Array composite are not ArkTSType subtypes even
+// though the root interface is imported and usable.
+TEST_F(ArkTSForeignDiagTest, ArkTSTypeImplicitSupertypeExcludesOrdinaryLeaves)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+import std.interop.arkts.*
+
+class Plain {}
+
+func neg(p: Plain, i: Int32, a: Array<Int32>): Unit {
+    let x1: ArkTSType = p
+    let x2: ArkTSType = i
+    let x3: ArkTSType = a
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 3);
+    EXPECT_EQ(CountErrorsContaining("mismatched types"), 3);
+}
+
+// The root interface is recognized only in std.interop.arkts. A user package
+// that declares its own `ArkTSType` interface does not become the relation's
+// root, so an @ArkTS foreign type is not assignable to it.
+TEST_F(ArkTSForeignDiagTest, ArkTSTypeRelationIsPinnedToTheStdlibPackage)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+@ArkTS
+public class Local {}
+
+public interface ArkTSType {}
+
+public func f(v: Local): Unit {
+    let x: ArkTSType = v
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(CountErrorsContaining("mismatched types"), 1);
+}
+
+// The relation is static-only. `is`, `as` and a type pattern keep their
+// declaration-based runtime check: none is lowered to an always-matching case
+// (matchBeforeRuntime false), and each still emits the runtime check
+// (needRuntimeTypeCheck true) instead of silently becoming "always true".
+TEST_F(ArkTSForeignDiagTest, ArkTSTypeImplicitSupertypeStaysOutOfRuntimeChecks)
+{
+    PrepareArkTSTypeRelationSupport();
+    instance->code = R"(package entry
+
+import arkts.lang.*
+import std.interop.arkts.*
+
+@ArkTS[module: "actual", foreignName: "Person"]
+public foreign class Person {
+    public init()
+}
+
+public func isCheck(p: Person): Bool {
+    return p is ArkTSType
+}
+
+public func asCheck(p: Person): Option<ArkTSType> {
+    return p as ArkTSType
+}
+
+public func matchCheck(p: Person): Bool {
+    match (p) {
+        case _: ArkTSType => true
+        case _ => false
+    }
+}
+)";
+    instance->invocation.globalOptions.implicitPrelude = true;
+    instance->invocation.globalOptions.outputMode = GlobalOptions::OutputMode::SHARED_LIB;
+    // Generic instantiation re-derives the runtime-check decision for type
+    // patterns (UpdateTypePatternMatchResult), so this stage also pins that the
+    // static-only relation does not leak into that recomputation.
+    ASSERT_TRUE(instance->Compile(CompileStage::GENERIC_INSTANTIATION));
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    size_t patterns = 0;
+    Walker(instance->GetSourcePackages()[0].get(), [&patterns](Ptr<Node> node) {
+        auto tp = DynamicCast<TypePattern*>(node);
+        if (tp == nullptr) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        ++patterns;
+        EXPECT_FALSE(tp->matchBeforeRuntime);
+        EXPECT_TRUE(tp->needRuntimeTypeCheck);
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    EXPECT_EQ(patterns, 3);
+}
+
 // A nested preset type reaches the same deferral diagnostic: the routing helper
-// searches the type arguments recursively, so Array<ArkTSArray<T>> and
-// Option<ArkTSString> are not demoted to the generic message.
+// searches the type arguments recursively, so Option<ArkTSString> is not
+// demoted to the generic message. Array<ArkTSArray<T>> left the deferral
+// routing with the prepared array: the unprepared inner declaration stays
+// unsupported, which poisons the whole Array position into the generic
+// unsupported-type message.
 TEST_F(ArkTSForeignDiagTest, NestedPresetExternalTypeGetsDeferralDiagnostic)
 {
     CompileSema(R"(package std.interop.arkts
 
-class ArkTSArray<T> {}
-
 class ArkTSString {}
 
-@ArkTS[module: "actual"]
-foreign func nestedArrays(values: Array<ArkTSArray<Int32>>): Unit
+interface ArkTSType {}
 
 @ArkTS[module: "actual"]
 foreign func nestedOption(text: Option<ArkTSString>): Unit
+
+@ArkTS[module: "actual"]
+foreign func nestedDynamic(value: Option<ArkTSType>): Unit
 )");
     ASSERT_EQ(diag.GetErrorCount(), 2);
-    EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSArray' is not available"));
+    // The routing helper searches the type arguments recursively, so an
+    // Option over a deferred preset is not demoted to the generic message.
     EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSString' is not available"));
+    EXPECT_TRUE(HasErrorContaining("the reference semantics of the external ArkTS type 'ArkTSType' is not available"));
     EXPECT_FALSE(HasErrorContaining("has unsupported type"));
 }
 
@@ -1005,22 +1217,75 @@ foreign func mixedRest(@RestParam xs: Array<Int32>, last!: Int32): Unit
     EXPECT_EQ(fd->funcBody->body, nullptr);
 }
 
-// A generic foreign class keeps its external declaration form, so its bodyless
-// members may keep the ArkTS optional-parameter spelling as mapping metadata.
-TEST_F(ArkTSForeignDiagTest, BodylessForeignClassMemberKeepsOptionalParameterSpelling)
+// The preset array is a prepared generic wrapper: the compiler installs the
+// JSObject carrier storage beside the runtime-written member bodies, and the
+// bodies typecheck against the hidden `T <: JSInteropType<T>` constraint with
+// ordinary Cangjie default arguments. The old bodyless foreign shape is gone.
+TEST_F(ArkTSForeignDiagTest, PresetArrayPreparedGenericWrapperLowersBodies)
 {
     PrepareArkTSSupport();
     CompileSema(R"(package std.interop.arkts
 
-import arkts.lang.*
+import ohos.ark_interop.*
+import ohos.ark_interop.JSInteropType
 
 @ArkTS[foreignName: "Array"]
-public foreign class ArkTSArray<T> {
-    public init(value!: Option<String> = None)
-    public func slice(start!: Option<Float64> = None, end!: Option<Float64> = None): ArkTSArray<T>
+public class ArkTSArray<T> where T <: JSInteropType<T> {
+    public init(items: Array<T>) {
+        let ctx = cj_arkts_context_v1.__cj_arkts_current()
+        let jsItems = Array<JSValue>(items.size, { i => items[i].toJSValue(ctx) })
+        this.__cj_arkts_ref = ctx.array(jsItems).toJSValue().asObject()
+    }
+
+    public prop length: Float64 {
+        get() {
+            let ctx = cj_arkts_context_v1.__cj_arkts_current()
+            return Float64.fromJSValue(ctx, this.__cj_arkts_ref.getProperty("length"))
+        }
+    }
+
+    public func pop(): Option<T> {
+        let ctx = cj_arkts_context_v1.__cj_arkts_current()
+        let last = this.__cj_arkts_ref.callMethod("pop", Array<JSValue>())
+        if (last.isNull() || last.isUndefined()) {
+            return Option<T>.None
+        }
+        return Option<T>.Some(T.fromJSValue(ctx, last))
+    }
+
+    public func join(separator!: Option<String> = None): String {
+        let ctx = cj_arkts_context_v1.__cj_arkts_current()
+        let args = match (separator) {
+            case Option.Some(sep) => [ctx.string(sep).toJSValue()]
+            case Option.None => Array<JSValue>()
+        }
+        let joined = this.__cj_arkts_ref.callMethod("join", args)
+        return String.fromJSValue(ctx, joined)
+    }
 }
 )");
+    for (const auto& message : handler->messages) {
+        fprintf(stderr, "B4C-DIAG-C: %s\n", message.c_str());
+    }
     ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto cd = FindClass("ArkTSArray");
+    ASSERT_NE(cd, nullptr);
+    EXPECT_TRUE(cd->TestAttr(Attribute::ARKTS_CLASS_WRAPPER));
+    // Preparation installed the compiler-owned carrier storage beside the
+    // written members: the reference accessor and the two wrapping
+    // constructors.
+    bool hasAccessor = false;
+    bool hasWrappingCtor = false;
+    for (auto& member : cd->GetMemberDecls()) {
+        if (member->identifier.Val() == "__cj_arkts_ref_value") {
+            hasAccessor = true;
+        }
+        if (member->TestAttr(Attribute::COMPILER_ADD) && member->identifier.Val() == "init") {
+            hasWrappingCtor = true;
+        }
+    }
+    EXPECT_TRUE(hasAccessor);
+    EXPECT_TRUE(hasWrappingCtor);
 }
 
 // A member spelling a compiler-owned name would collide with the generated
@@ -1901,8 +2166,8 @@ public foreign class Leaf <: Mid {
     ASSERT_NE(leaf, nullptr);
     // The first pass removed the entry that named a broken parent. Once the
     // explicit parent is gone the generic checker gives the class the
-    // implicit Object parent, so the list is not empty - it just no longer
-    // names Base or Mid anywhere.
+    // implicit Object parent, so the list is not empty - it never names
+    // Base or Mid.
     auto inheritedNames = [](ClassDecl& cd) {
         std::vector<std::string> names;
         for (auto& type : cd.inheritedTypes) {
@@ -2493,7 +2758,8 @@ const char* ARKTS_INTEROP_SUPPORT = R"(package ohos.ark_interop
 
 import std.math.numeric.BigInt
 
-public class JSValue {
+public open class JSValue {
+    public open func toJSValue(): JSValue { return this }
     public func isNull(): Bool { return false }
     public func isUndefined(): Bool { return false }
     public func isNumber(): Bool { return false }
@@ -2514,7 +2780,6 @@ public class JSValue {
     public func getProperty(key: String): JSValue { return JSValue() }
     public func setProperty(key: String, value: JSValue): Unit {}
     public func getElement(index: Int64): JSValue { return JSValue() }
-    public func toJSValue(): JSValue { return this }
 }
 
 public class JSString {
@@ -2535,9 +2800,12 @@ public class JSArray {
     public func toJSValue(): JSValue { return JSValue() }
 }
 
-public class JSFunction {
+// JSFunction is a JSValue subtype in the shipped interop API, so the
+// construction glue's `ctx.function(lambda)` argument matches the carrier's
+// JSValue wrapping constructor.
+public class JSFunction <: JSValue {
     public func call(args: Array<JSValue>, thisArg!: JSValue): JSValue { return JSValue() }
-    public func toJSValue(): JSValue { return JSValue() }
+    public override func toJSValue(): JSValue { return this }
 }
 
 public class JSObject {
@@ -2555,7 +2823,9 @@ public class JSClass {
     public func toJSValue(): JSValue { return JSValue() }
 }
 
-public class JSCallInfo {}
+public class JSCallInfo {
+    public operator func [](index: Int64): JSValue { return JSValue() }
+}
 
 public type JSLambda = (JSContext, JSCallInfo) -> JSValue
 
@@ -2573,11 +2843,45 @@ public class JSContext {
     }
     public func requireArkModule(name: String): JSModule { return JSModule() }
     public func array(arr: Array<JSValue>): JSArray { return JSArray() }
+    public func function(lambda: JSLambda): JSFunction { return JSFunction() }
     public func number(value: Float64): JSValue { return JSValue() }
     public func string(value: String): JSValue { return JSValue() }
     public func boolean(value: Bool): JSValue { return JSValue() }
     public func bigint(value: BigInt): JSValue { return JSValue() }
     public func undefined(): JSValue { return JSValue() }
+}
+
+// js_interop_type.cj:39 `public interface JSInteropType<T>` and the element
+// conformances the prepared ArkTSArray<T> bodies spell, reduced to the
+// positions this file's tests use. The stub bodies return dummies.
+public interface JSInteropType<T> {
+    static func fromJSValue(context: JSContext, input: JSValue): T
+    func toJSValue(context: JSContext): JSValue
+    static func toArktsType(): String
+}
+
+extend Int32 <: JSInteropType<Int32> {
+    public static func fromJSValue(_: JSContext, _: JSValue): Int32 { return 0 }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "number" }
+}
+
+extend Float64 <: JSInteropType<Float64> {
+    public static func fromJSValue(_: JSContext, _: JSValue): Float64 { return 0.0 }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "number" }
+}
+
+extend String <: JSInteropType<String> {
+    public static func fromJSValue(_: JSContext, _: JSValue): String { return "" }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "string" }
+}
+
+extend<T> Option<T> <: JSInteropType<Option<T>> where T <: JSInteropType<T> {
+    public static func fromJSValue(_: JSContext, _: JSValue): Option<T> { return Option<T>.None }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "union" }
 }
 )";
 
@@ -2595,6 +2899,30 @@ public class ForeignRuntimeException <: Exception {
 public func __cj_arkts_current(): JSContext { return JSContext() }
 public func __cj_arkts_enter(ctx: JSContext): ?JSContext { return None }
 public func __cj_arkts_restore(previous: ?JSContext): Unit {}
+)";
+
+// The stdlib package that declares the ArkTSType root interface. Only the
+// marker-bearing interface is needed for the implicit-supertype tests; the
+// package name is what the compiler pins.
+const char* ARKTS_STDLIB_SUPPORT = R"(package std.interop.arkts
+
+import ohos.ark_interop.JSValue
+
+@ArkTS
+public interface ArkTSType {}
+
+// The preset function carrier, declared exactly like the shipped stdlib:
+// the preparation pass installs the JSValue carrier storage and removes the
+// bodyless init(f: F), and the dedicated carrier rules key on this package.
+@ArkTS
+public foreign class ArkTSFunc<F> {
+    public init(f: F)
+}
+
+@ArkTS
+public foreign class ArkTSFuncWithThis<ThisT, F> {
+    public func bind(thisArg: ThisT): ArkTSFunc<F>
+}
 )";
 
 // The arkts.lang facade the generated support names are pinned to: it
@@ -2631,6 +2959,7 @@ public class ArkTSFuncWithThis<ThisT, F> {
         throw Exception("arkts carrier stub")
     }
 }
+
 )";
 
 // The interop library package that owns the exception carrier. The facade
@@ -4790,6 +5119,55 @@ public foreign interface Indexed {
     EXPECT_EQ(diag.GetErrorCount(), 0);
 }
 
+// The class twin of IndexSetterNamedValueParameterStaysAccepted: a foreign
+// class index setter spells its required value parameter as a named parameter
+// without a default, so the bodyless-member named-parameter rule must not
+// reject the member before the class lowering classifies the index signature.
+// Both directions generate the JS property access on the wrapper reference,
+// and the index access type-checks on the class receiver.
+TEST_F(ArkTSForeignDiagTest, ForeignClassIndexSetterNamedValueParameterIsGenerated)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class StringBox {
+    public init()
+    public operator func[](k: String): Option<String>
+    public operator func[](k: String, value!: String): Unit
+}
+
+public func use(): Unit {
+    let box = StringBox()
+    box["k"] = "v"
+    let _ = box["k"]
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    Ptr<FuncDecl> setter{nullptr};
+    size_t getProperty = 0;
+    size_t setProperty = 0;
+    Walker(instance->GetSourcePackages()[0].get(), [&](Ptr<Node> node) {
+        if (auto fd = DynamicCast<FuncDecl*>(node); fd && fd->identifier.Val() == "[]" && fd->funcBody &&
+            !fd->funcBody->paramLists.empty() && fd->funcBody->paramLists[0] &&
+            fd->funcBody->paramLists[0]->params.size() == 2) {
+            setter = fd;
+        }
+        if (auto access = DynamicCast<MemberAccess*>(node)) {
+            getProperty += access->field == "getProperty" ? 1 : 0;
+            setProperty += access->field == "setProperty" ? 1 : 0;
+        }
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    ASSERT_NE(setter, nullptr);
+    EXPECT_FALSE(setter->TestAttr(Attribute::IS_BROKEN));
+    EXPECT_NE(setter->funcBody->body, nullptr);
+    EXPECT_GE(getProperty, 1);
+    EXPECT_GE(setProperty, 1);
+}
+
 // Entry diagnostics anchor at the user entry and carry the registration note.
 // A valid entry's generated callback keeps the entry's source range instead of
 // an internal generated location.
@@ -5902,4 +6280,451 @@ public foreign func echo(): Int32
 #else
     setenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1", 1);
 #endif
+}
+
+// ---- B4b: ArkTSFunc<F> function carrier ----
+
+// The tests below use the preset-package carrier declared in the mock
+// std.interop.arkts (the package pin decides); the arkts.lang stub carrier
+// stays untouched for the '@HasThis' suites, so these files import only the
+// preset package.
+
+// Passing and returning ArkTSFunc<F> is supported: the position classifies
+// as the carrier and lowers with identity conversions (isFunction guard on
+// the way in, JSValue handle on the way out); no dedicated constraint
+// diagnostic and no generic "unsupported type" text fires.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncSignaturePositionsAreAccepted)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+@ArkTS[module: "actual"]
+public foreign func takeFunc(cb: ArkTSFunc<(Int32) -> Int32>): Unit
+
+@ArkTS[module: "actual"]
+public foreign func giveFunc(): ArkTSFunc<(String) -> Bool>
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    auto give = FindFunction("giveFunc");
+    ASSERT_NE(give, nullptr);
+    EXPECT_TRUE(give->funcBody != nullptr && give->funcBody->body != nullptr);
+}
+
+// F is not a function type: the dedicated invalid-type-argument diagnostic
+// names the written argument; the ordinary constructor machinery never
+// answers with the generic unsupported-type text.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncNonFunctionArgumentIsRejected)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+func cb(x: Int32): Int32 { return x }
+
+public func build(): Unit {
+    let f = ArkTSFunc<Int32>(cb)
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(CountErrorsContaining("must be a concrete function type"), 1);
+}
+
+// A parameter of F is not ArkTS-compatible: the dedicated member diagnostic
+// fires on the construction, naming the written function type.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncUnsupportedMemberIsRejected)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+class Point {
+    public var x: Int32 = 0
+}
+
+func cb(p: Point): Unit {}
+
+public func build(): Unit {
+    let f = ArkTSFunc<(Point) -> Unit>(cb)
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(CountErrorsContaining("not ArkTS-compatible"), 1);
+}
+
+// Design 4.2.1 e3/e4: an ordinary (non-@ArkTS) generic function may construct
+// a carrier, but only for a concrete F. An F that mentions the enclosing
+// declaration's type parameter has nothing to instantiate against.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncOuterGenericArgumentIsRejected)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+public func wrap<T>(f: (T) -> Int32): ArkTSFunc<(T) -> Int32> {
+    return ArkTSFunc<(T) -> Int32>(f)
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(CountErrorsContaining("must not depend on an enclosing declaration's type parameter"), 1);
+}
+
+// The same constraint inside a @ArkTS foreign signature reports the carrier
+// diagnostic on the written position, not the generic parameter-type text.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncBadSignaturePositionIsDiagnosed)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+@ArkTS[module: "actual"]
+public foreign func takeFunc(cb: ArkTSFunc<Int32>): Unit
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(CountErrorsContaining("must be a concrete function type"), 1);
+    EXPECT_EQ(CountErrorsContaining("has unsupported type"), 0);
+}
+
+// A well-shaped explicit construction is lowered at the use site onto the
+// carrier's JSValue wrapping constructor through the generated `(ctx, info)`
+// lambda: no diagnostic at all, never the generic constructor-mismatch text
+// and never the unsupported-type text. The file carries an @ArkTS annotation,
+// so the injected interop imports select the capability for the generated
+// glue — the same rule every generated-body site follows.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncConstructionIsLowered)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+@ArkTS[module: "actual"]
+public foreign func takeFunc(cb: ArkTSFunc<(Int32) -> Int32>): Unit
+
+func cb(x: Int32): Int32 { return x }
+
+public func build(): ArkTSFunc<(Int32) -> Int32> {
+    let f = ArkTSFunc<(Int32) -> Int32>(cb)
+    return f
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 0);
+    EXPECT_EQ(CountErrorsContaining("has unsupported type"), 0);
+    EXPECT_EQ(CountErrorsContaining("no matching constructor"), 0);
+}
+
+// The generated glue resolves the interop context through the compiler-injected
+// imports, so a construction in a file that carries no @ArkTS annotation has no
+// capability selected and is refused with the support-availability diagnostic
+// naming the enclosing function.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncConstructionWithoutCapabilityIsRefused)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+func cb(x: Int32): Int32 { return x }
+
+public func build(): ArkTSFunc<(Int32) -> Int32> {
+    return ArkTSFunc<(Int32) -> Int32>(cb)
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(
+        CountErrorsContaining("requires ArkTS interop declarations that are not available"), 1);
+}
+
+// The wrong construction shape (named argument) is told apart from the
+// constraint failures and from the ordinary overload machinery.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncNamedConstructionArgumentIsRefused)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+func cb(x: Int32): Int32 { return x }
+
+public func build(): Unit {
+    let f = ArkTSFunc<(Int32) -> Int32>(f: cb)
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(CountErrorsContaining("exactly one positional function value"), 1);
+}
+
+// The carrier value is passed and returned, never invoked from Cangjie: a
+// direct call reports the dedicated refusal instead of the generic
+// "not callable" overload text (design 4.2.1 e6).
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncDirectCallIsRefusedCleanly)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+public func callIt(cb: ArkTSFunc<(Int32) -> Int32>): Unit {
+    cb(1)
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(CountErrorsContaining("cannot be called directly"), 1);
+}
+
+// String literals of one generated body, in source order: generated messages
+// are concatenations, so the pieces are inspected individually.
+static std::vector<std::string> GeneratedBodyStringLiterals(Ptr<FuncDecl> fn)
+{
+    std::vector<std::string> literals;
+    if (!fn || !fn->funcBody || !fn->funcBody->body) {
+        return literals;
+    }
+    Walker walker(fn->funcBody->body.get(), [&literals](Ptr<Node> node) {
+        auto literal = DynamicCast<LitConstExpr*>(node);
+        if (literal && literal->kind == LitConstKind::STRING) {
+            literals.push_back(literal->stringValue);
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    return literals;
+}
+
+// A @ForeignName argument that is not a string literal has no readable value:
+// the parser reports it and marks the annotation broken, and lowering falls
+// back to the Cangjie identifier instead of dereferencing a missing literal.
+TEST_F(ArkTSForeignDiagTest, ForeignNameNonLiteralArgumentDoesNotBreakSema)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Holder {
+    public init()
+    @ForeignName[hashCode]
+    public func echo(): Unit
+}
+)");
+    EXPECT_TRUE(HasErrorContaining("requires exactly one 'String' literal"));
+    // The wrapper still lowers with the Cangjie identifier as the member name,
+    // so the class and its member stay usable.
+    auto holder = FindClass("Holder");
+    ASSERT_NE(holder, nullptr);
+    EXPECT_TRUE(holder->TestAttr(Attribute::ARKTS_CLASS_WRAPPER));
+    EXPECT_FALSE(IsDeclBroken("Holder"));
+    EXPECT_FALSE(IsDeclBroken("echo"));
+}
+
+// A compound assignment and an increment read the property through its getter
+// before writing it, so a write-only property refuses them exactly like a
+// plain read; the plain assignment stays legal.
+TEST_F(ArkTSForeignDiagTest, WriteOnlyCompoundAssignmentAndIncrementAreDiagnosed)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual"]
+public foreign class Counter {
+    public init()
+    @WriteOnly public mut prop value: Int32
+}
+
+public func bump(c: Counter): Unit {
+    c.value += 1
+}
+
+public func tick(c: Counter): Unit {
+    c.value++
+}
+
+public func set(c: Counter): Unit {
+    c.value = 1
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("is write-only and cannot be read"), 2U);
+    EXPECT_FALSE(IsDeclBroken("Counter"));
+}
+
+// A user string value that spells a placeholder name (sentinel prefix plus a
+// real key) is emitted verbatim: the rebinding walker matches the raw source
+// spelling, which carries the escape, so only compiler-generated placeholders
+// are rewritten. The module name binding still works.
+TEST_F(ArkTSForeignDiagTest, RawValueSpellingAPlaceholderNameStaysVerbatim)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual", foreignName: "Marked"]
+foreign enum Marked {
+    | @RawValue["__cj_arkts_literal____module__"] A
+    | @RawValue["plain"] B
+}
+
+@ArkTS[module: "actual", foreignName: "echoMarked"]
+foreign func echoMarked(value: Marked): Marked
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto fn = FindFunction("echoMarked");
+    ASSERT_NE(fn, nullptr);
+    ASSERT_NE(fn->funcBody->body, nullptr);
+    auto literals = GeneratedBodyStringLiterals(fn);
+    // The colliding value survives both the conversion and the kind guard
+    // verbatim; only the module placeholder is rebound to the module name.
+    EXPECT_NE(std::find(literals.begin(), literals.end(), "__cj_arkts_literal____module__"), literals.end());
+    EXPECT_NE(std::find(literals.begin(), literals.end(), "plain"), literals.end());
+    EXPECT_NE(std::find(literals.begin(), literals.end(), "actual"), literals.end());
+}
+
+// The getter's conversion throws use the private alias injected for this file.
+// The alias pass rewrites bare identifiers in code only, never the inside of
+// string literals, so a user-supplied name that spells the same text keeps its
+// bytes in the failure message while the throws still bind to the alias.
+TEST_F(ArkTSForeignDiagTest, GetterAliasDoesNotTouchUserStrings)
+{
+    PrepareArkTSSupport();
+    CompileSema(R"(package entry
+
+import arkts.lang.*
+
+@ArkTS[module: "actual", foreignName: "ExternConversionException", globalVar: true]
+foreign func flag(): Bool
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto getter = FindFunction("flag");
+    ASSERT_NE(getter, nullptr);
+    ASSERT_NE(getter->funcBody->body, nullptr);
+    auto literals = GeneratedBodyStringLiterals(getter);
+    // The variable name reaches the failure context as string bytes, untouched
+    // by the alias pass; the alias identifier only appears as a reference.
+    EXPECT_NE(std::find(literals.begin(), literals.end(), "ExternConversionException"), literals.end());
+    for (const auto& literal : literals) {
+        EXPECT_EQ(literal.find("__cj_arkts_extern_conversion"), std::string::npos) << literal;
+    }
+    size_t aliasThrows = 0;
+    Walker walker(getter->funcBody->body.get(), [&aliasThrows](Ptr<Node> node) {
+        auto ref = DynamicCast<RefExpr*>(node);
+        if (ref && ref->ref.identifier.Val() == "__cj_arkts_extern_conversion") {
+            ++aliasThrows;
+            EXPECT_NE(ref->ref.target, nullptr);
+            if (ref->ref.target) {
+                EXPECT_EQ(ref->ref.target->fullPackageName, "arkts.lang");
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    EXPECT_GT(aliasThrows, 0);
+}
+
+// A pattern whose serialized tyModes vector holds fewer entries than its type
+// list is a corrupt cjo: the loader treats every missing entry as "no mode"
+// instead of indexing out of bounds, and the declaration still loads.
+TEST_F(ArkTSForeignDiagTest, PatternTyModesShorterThanTypesLoadAsMissing)
+{
+    CompileSema(R"(package patmod
+
+@Frozen
+public func run(v: Int64): Unit {
+    match (v) {
+        case num: Int64 => ()
+    }
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto& sourcePkg = *instance->GetSourcePackages()[0];
+    // Give the type pattern a modal type so the writer serializes a tyModes
+    // entry alongside its single type; a healthy writer never emits a pattern
+    // whose tyModes list is shorter than its type list, so the shortfall below
+    // is a corruption the loader must survive.
+    Walker patternWalker(&sourcePkg, [](Ptr<Node> node) {
+        if (auto tp = DynamicCast<TypePattern*>(node)) {
+            tp->SetTy({tp->GetTy().Ty(), ModalInfo{Mode::FULL}});
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    patternWalker.Walk();
+
+    ExportConfig config;
+    config.exportContent = true;
+    config.exportForIncr = true;
+    auto& cjoManager = *instance->importManager->GetCjoManager();
+    auto packageDecl = cjoManager.GetPackageDecl("patmod");
+    ASSERT_NE(packageDecl, nullptr);
+    ASTWriter writer(diag, "", config, cjoManager, *instance->typeManager);
+    writer.PreSaveFullExportDecls(sourcePkg);
+    writer.ExportAST(*packageDecl);
+    std::vector<uint8_t> buffer;
+    writer.AST2FB(buffer, *packageDecl);
+    ASSERT_FALSE(buffer.empty());
+
+    // Locate the serialized type pattern and truncate its tyModes vector to
+    // zero entries: the bytes of the former entry stay in place, so a loader
+    // that indexes without a length check reads a stale mode instead of
+    // treating the entry as missing.
+    const auto* rawPackage = PackageFormat::GetPackage(buffer.data());
+    ASSERT_NE(rawPackage->allExprs(), nullptr);
+    const PackageFormat::Pattern* patternObj = nullptr;
+    for (auto* exprObj : *rawPackage->allExprs()) {
+        if (exprObj->kind() != PackageFormat::ExprKind_MatchCase || exprObj->info() == nullptr) {
+            continue;
+        }
+        auto info = exprObj->info_as_MatchCaseInfo();
+        if (info == nullptr || info->patterns() == nullptr) {
+            continue;
+        }
+        for (auto* candidate : *info->patterns()) {
+            if (candidate->kind() == PackageFormat::PatternKind_TypePattern && candidate->tyModes() != nullptr) {
+                patternObj = candidate;
+            }
+        }
+    }
+    ASSERT_NE(patternObj, nullptr);
+    ASSERT_EQ(patternObj->tyModes()->size(), 1U);
+    // Zero the vector's length field (the first member of the flatbuffers
+    // Vector header): the entry becomes "missing" for the reader while its
+    // bytes stay in place, so a loader that indexes without a length check
+    // reads a stale mode instead of treating the entry as absent.
+    const auto* modes = patternObj->tyModes();
+    const_cast<uint32_t*>(reinterpret_cast<const uint32_t*>(modes))[0] = 0;
+
+    diag.ClearError();
+    handler->messages.clear();
+    handler->errors.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("patmod", buffer);
+    CompileSema(R"(package entry
+
+import patmod.*
+
+public func use(): Unit {
+    run(1)
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto run = DynamicCast<FuncDecl*>(instance->importManager->GetImportedDecl("patmod", "run"));
+    ASSERT_NE(run, nullptr);
+    bool found = false;
+    Walker runWalker(run, [&found](Ptr<Node> node) {
+        auto tp = DynamicCast<TypePattern*>(node);
+        if (tp) {
+            found = true;
+            EXPECT_EQ(tp->GetTy().Mode().local, Mode::NOT);
+            EXPECT_TRUE(Ty::IsTyCorrect(tp->GetTy().Ty()));
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    runWalker.Walk();
+    EXPECT_TRUE(found);
 }

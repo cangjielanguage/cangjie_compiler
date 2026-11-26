@@ -30,7 +30,18 @@ PackageFormat::LocalMode AstLocalToFormat(Mode astModal)
  */
 Mode FormatToAstLocal(PackageFormat::LocalMode formatModal)
 {
-    return static_cast<Mode>(static_cast<int>(formatModal) + 1);
+    // The cjo stores the modal as a plain byte, so a corrupt file can carry a
+    // value outside the enum; every out-of-range value decodes as @~local (the
+    // default modal) instead of an out-of-range Mode.
+    switch (formatModal) {
+        case PackageFormat::LocalMode_FULL:
+            return Mode::FULL;
+        case PackageFormat::LocalMode_HALF:
+            return Mode::HALF;
+        case PackageFormat::LocalMode_NOT:
+        default:
+            return Mode::NOT;
+    }
 }
 } // namespace
 

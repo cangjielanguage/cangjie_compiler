@@ -186,7 +186,9 @@ bool IsSubtypeBoxed(TypeManager& typeManager, ModalTy leaf, ModalTy root)
     } else if (leaf->IsFunc() && root->IsFunc()) {
         return IsFuncSubTypeBoxed(typeManager, static_cast<FuncTy&>(*leaf), static_cast<FuncTy&>(*root));
     } else {
-        return typeManager.IsSubtype(leaf, root, true, false);
+        // Runtime pattern checks follow declarations, not the static-only
+        // ArkTSType implicit-supertype relation.
+        return typeManager.IsSubtype(leaf, root, true, false, ModalMatchMode::SUBTYPE, false);
     }
 }
 } // namespace
@@ -328,7 +330,10 @@ bool TypeChecker::TypeCheckerImpl::ChkTypePattern(ASTContext& ctx, ModalTy targe
     CJC_NULLPTR_CHECK(p.type);
     p.type->SetTy(Synthesize({ctx, SynPos::NONE}, p.type.get()));
     CJC_NULLPTR_CHECK(p.type->GetTy());
-    if (typeManager.IsSubtype(target, p.type->GetTy(), true, false)) {
+    // Declaration-based only: the ArkTSType implicit-supertype relation is
+    // static-only, so `case _: ArkTSType` must not silently become an
+    // always-matching case. The pattern keeps its runtime type check.
+    if (typeManager.IsSubtype(target, p.type->GetTy(), true, false, ModalMatchMode::SUBTYPE, false)) {
         p.needRuntimeTypeCheck = false;
         p.matchBeforeRuntime = true;
     } else {

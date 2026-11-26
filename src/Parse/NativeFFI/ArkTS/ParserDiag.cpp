@@ -41,10 +41,9 @@ void ArkTSParserImpl::CheckRestParamAnnoArgs(Annotation& anno) const
     if (!p.experimentalMode) {
         return;
     }
-    static const std::string REST_PARAM_NAME = "@RestParam";
     // The annotation takes no arguments; the shared FFI parser owns the
     // diagnostic and marks the annotation broken.
-    p.ffiParser->CheckNoArgAnnotation(anno, REST_PARAM_NAME);
+    p.ffiParser->CheckNoArgAnnotation(anno, "@RestParam");
 }
 
 void ArkTSParserImpl::DiagRestParamOnNonArkTSForeign(const Decl& decl, const Annotation& anno) const

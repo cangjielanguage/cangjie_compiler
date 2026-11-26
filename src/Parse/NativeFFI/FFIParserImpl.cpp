@@ -375,12 +375,13 @@ void FFIParserImpl::CheckForeignNameAnnoTarget(const Annotation& anno) const
     }
 }
 
-void FFIParserImpl::CheckForeignNameAnnoArgs(const Annotation& anno) const
+void FFIParserImpl::CheckForeignNameAnnoArgs(Annotation& anno) const
 {
-    static const std::string FOREIGN_NAME_NAME = "@ForeignName";
-
     if (anno.args.size() != 1 || !IsLitString(anno.args[0]->expr)) {
-        p.DiagAnnotationExpectsOneArgument(anno, FOREIGN_NAME_NAME, "'String' literal");
+        p.DiagAnnotationExpectsOneArgument(anno, "@ForeignName", "'String' literal");
+        // The argument is not a usable name: mark the annotation so Sema skips
+        // it instead of reading a value that was never a literal.
+        anno.EnableAttr(Attribute::IS_BROKEN);
         return;
     }
 }

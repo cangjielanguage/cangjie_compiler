@@ -48,6 +48,8 @@ const TokenKind ENUM_PRIVATE[6] = {TokenKind::PUBLIC, TokenKind::INTERNAL, Token
     TokenKind::SPECIFIC, TokenKind::FOREIGN};
 const TokenKind ENUM_INTERNAL[4] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::PROTECTED, TokenKind::FOREIGN};
 const TokenKind ENUM_PROTECTED[4] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::INTERNAL, TokenKind::FOREIGN};
+const TokenKind ENUM_FOREIGN_CONFLICTS[6] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::INTERNAL,
+    TokenKind::PROTECTED, TokenKind::COMMON, TokenKind::SPECIFIC};
 const TokenKind COMMON_SPECIFIC[] = {TokenKind::SPECIFIC};
 const TokenKind SPECIFIC_COMMON[] = {TokenKind::COMMON};
 const TokenKind OVERRIDE_STATIC_REDEF[] = {TokenKind::STATIC, TokenKind::REDEF};
@@ -83,8 +85,7 @@ const ConflictRule TOPLEVEL_ENUM_MODIFIERS[] = {
     CR_ARR(TokenKind::PROTECTED, ENUM_PROTECTED),
     CR(TokenKind::COMMON, TokenKind::PRIVATE, TokenKind::SPECIFIC),
     CR(TokenKind::SPECIFIC, TokenKind::PRIVATE, TokenKind::COMMON),
-    CR(TokenKind::FOREIGN, TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::INTERNAL, TokenKind::PROTECTED,
-        TokenKind::COMMON, TokenKind::SPECIFIC),
+    CR_ARR(TokenKind::FOREIGN, ENUM_FOREIGN_CONFLICTS),
 };
 
 const ConflictRule CLASS_BODY_VARIABLE_MODIFIERS[] = {

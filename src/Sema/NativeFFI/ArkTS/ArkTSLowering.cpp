@@ -17,11 +17,12 @@
 #include "cangjie/Parse/Parser.h"
 #include "Utils/TypeMapper.h"
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
-#include <cstdio>
 #include <iterator>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -50,25 +51,32 @@ struct ArkTSEnumNumberCounter {
     {
         if (floating) {
             // Spell the value with the shortest precision that reads back exactly. Doing
-            // it here, instead of with a standard-library helper, keeps the generated
-            // source identical whatever standard library the compiler was built with.
+            // the shortest-round-trip search here, with an explicit precision, keeps the
+            // generated source identical whatever standard library the compiler was built
+            // with.
             char buffer[64];
             std::string spelling;
-            for (int precision = 1; precision <= 17; ++precision) {
-                int written = std::snprintf(buffer, sizeof(buffer), "%.*g", precision, floatValue);
-                if (written <= 0 || written >= static_cast<int>(sizeof(buffer))) {
+            constexpr int maxPrecision = std::numeric_limits<double>::max_digits10;
+            for (int precision = 1; precision <= maxPrecision; ++precision) {
+                auto result = std::to_chars(buffer, buffer + sizeof(buffer), floatValue,
+                    std::chars_format::general, precision);
+                if (result.ec != std::errc{}) {
                     break;
                 }
+                std::string candidate(buffer, static_cast<size_t>(result.ptr - buffer));
                 char* end = nullptr;
-                double parsed = std::strtod(buffer, &end);
+                double parsed = std::strtod(candidate.c_str(), &end);
                 if (end != nullptr && *end == '\0' && !(parsed < floatValue) && !(floatValue < parsed)) {
-                    spelling.assign(buffer, static_cast<size_t>(written));
+                    spelling = std::move(candidate);
                     break;
                 }
             }
             if (spelling.empty()) {
-                int written = std::snprintf(buffer, sizeof(buffer), "%.17g", floatValue);
-                spelling = written > 0 ? std::string(buffer, static_cast<size_t>(written)) : std::to_string(floatValue);
+                auto result = std::to_chars(buffer, buffer + sizeof(buffer), floatValue,
+                    std::chars_format::general, maxPrecision);
+                spelling = result.ec == std::errc{} ?
+                    std::string(buffer, static_cast<size_t>(result.ptr - buffer)) :
+                    std::to_string(floatValue);
             }
             // The Cangjie lexer accepts only a '-' sign after the exponent
             // marker; std::to_chars writes "1e+20". Drop the '+' so the
@@ -386,7 +394,10 @@ VisitAction RebindArkTSGeneratedNode(Ptr<Node> node, const FuncDecl& fd, FuncBod
     node->end = fd.end;
     if (auto literal = DynamicCast<LitConstExpr*>(node)) {
         std::string rebound;
-        if (Native::FFI::ArkTS::ArkTSRebindPlaceholderLiteral(literal->stringValue, literals, rebound)) {
+        // The raw spelling decides: a placeholder literal is generated without
+        // escapes, while a user value that collides with a placeholder name is
+        // escaped in the source, so only the real placeholders match here.
+        if (Native::FFI::ArkTS::ArkTSRebindPlaceholderLiteral(literal->rawString, literals, rebound)) {
             literal->stringValue = rebound;
         }
     }
@@ -1011,8 +1022,10 @@ std::string AliasArkTSConversionException(const std::string& code)
     const std::string bareConversion = Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION;
     const std::string aliasedConversion = Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS;
     auto isIdentifierChar = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_'; };
+    // Extra capacity for the alias expansion of every conversion-throw site.
+    constexpr size_t aliasReserveSlack = 32;
     std::string result;
-    result.reserve(code.size() + 32);
+    result.reserve(code.size() + aliasReserveSlack);
     bool inString = false;
     bool escaped = false;
     for (size_t i = 0; i < code.size();) {
@@ -1057,8 +1070,8 @@ void LowerArkTSGlobalVarGetter(ArkTSGlobalVarLowering& lower, FuncDecl& fd)
     auto& diag = lower.diag;
     // A globalVar func maps an ArkTS global variable: it must be parameterless
     // and carry an explicit return type (the value's type). Lowering reads the
-    // module property once and converts it, exactly like the former
-    // `foreign let` getter did.
+    // module property once and converts it; this is the whole globalVar
+    // getter contract.
     if (ArkTSGlobalVarHasParams(fd)) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_has_params, fd, fd.identifier.Val());
         return;
@@ -1070,7 +1083,7 @@ void LowerArkTSGlobalVarGetter(ArkTSGlobalVarLowering& lower, FuncDecl& fd)
         return;
     }
     if (!lower.importManager.GetImportedDecl(
-            Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE, Native::FFI::ArkTS::ARKTS_CONTEXT_CURRENT)) {
+        Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE, Native::FFI::ArkTS::ARKTS_CONTEXT_CURRENT)) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_bridge_pending, fd);
         return;
     }
@@ -1120,9 +1133,26 @@ void LowerArkTSGlobalVarGetter(ArkTSGlobalVarLowering& lower, FuncDecl& fd)
     // imported declarations so an unqualified name cannot resolve ambiguously
     // through two star imports.
     if (!Native::FFI::ArkTS::BindArkTSSupportReferences(
-            fd, *fd.funcBody->body, lower.importManager, diag, lower.supportRefs, fd.identifier.Val())) {
+        fd, *fd.funcBody->body, lower.importManager, diag, lower.supportRefs, fd.identifier.Val())) {
         fd.EnableAttr(Attribute::IS_BROKEN);
     }
+}
+
+// A public non-foreign @ArkTS global variable is exported to ArkTS, so its
+// declared type must be ArkTS-compatible. A non-foreign exported variable is
+// not a foreign signature, so design §3.4 permits a nested Option here: the
+// layers unwrap to one ArkTS `T | undefined` at the boundary. An inferred
+// variable has no written type yet; CheckArkTSExportedVariables re-checks it
+// on the resolved type after type checking.
+void DiagnoseArkTSExportedVarWrittenType(const ArkTSGlobalVarLowering& lower, VarDecl& vd)
+{
+    auto desc = lower.classifyPosition(vd.type.get(), true);
+    if (ArkTSTypeDescGeneratable(desc, true)) {
+        return;
+    }
+    lower.diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_exported_var_unsupported_type, vd,
+        vd.type->DataTy() ? Ty::ToString(vd.type->DataTy()) : vd.identifier.Val());
+    vd.EnableAttr(Attribute::IS_BROKEN);
 }
 } // namespace
 
@@ -1142,10 +1172,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
             return SpliceArkTSGeneratedBody(ctx, fd, code, literals, params, classRefs);
         }};
     for (auto& file : ctx.curPackage->files) {
-        // A public non-foreign @ArkTS global variable is exported to ArkTS,
-        // so its declared type must be ArkTS-compatible. An inferred variable
-        // has no written type yet; CheckArkTSExportedVariables re-checks it on
-        // the resolved `vd->ty` after type checking.
         for (auto& decl : file->decls) {
             auto vd = DynamicCast<VarDecl*>(decl.get());
             if (!vd || vd->outerDecl || !vd->HasAnno(AnnotationKind::ARKTS) ||
@@ -1153,16 +1179,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSVariables(ASTContext& ctx)
                 !vd->TestAttr(Attribute::PUBLIC) || !vd->type) {
                 continue;
             }
-            // A non-foreign exported variable is not a foreign signature, so
-            // design §3.4 permits a nested Option here: the layers unwrap to
-            // one ArkTS `T | undefined` at the boundary.
-            auto desc = ArkTSClassifyPosition(ctx, vd->type.get(), /*allowNestedOptional=*/true);
-            if (ArkTSTypeDescGeneratable(desc, /*allowNestedOptional=*/true)) {
-                continue;
-            }
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_exported_var_unsupported_type, *vd,
-                vd->type->DataTy() ? Ty::ToString(vd->type->DataTy()) : vd->identifier.Val());
-            vd->EnableAttr(Attribute::IS_BROKEN);
+            DiagnoseArkTSExportedVarWrittenType(lower, *vd);
         }
         for (auto& decl : file->decls) {
             auto fd = DynamicCast<FuncDecl*>(decl.get());
@@ -1189,14 +1206,17 @@ void TypeChecker::TypeCheckerImpl::CheckArkTSExportedVariables(ASTContext& ctx)
         for (auto& decl : file->decls) {
             auto vd = DynamicCast<VarDecl*>(decl.get());
             // Only the inferred form is left: every written type was checked
-            // before type checking.
+            // before type checking. A non-foreign exported variable is not a
+            // foreign signature, so design §3.4 permits a nested Option in the
+            // classification below: the layers unwrap to one ArkTS
+            // `T | undefined` at the boundary.
             if (!vd || vd->outerDecl || !vd->HasAnno(AnnotationKind::ARKTS) ||
                 vd->TestAnyAttr(Attribute::FOREIGN, Attribute::ARKTS_LOWERED, Attribute::IS_BROKEN) ||
                 !vd->TestAttr(Attribute::PUBLIC) || vd->type || !Ty::IsTyCorrect(vd->GetTy().get())) {
                 continue;
             }
-            auto desc = Native::FFI::ArkTS::ArkTSClassifyType(
-                vd->GetTy().get(), ci->importManager, /*allowNestedOptional=*/true);
+            auto desc =
+                Native::FFI::ArkTS::ArkTSClassifyType(vd->GetTy().get(), ci->importManager, true);
             // Attach the prepared member value table to every enum leaf, so a
             // variable inferred as a prepared foreign enum is judged by the
             // same rule as a written one.
@@ -1207,7 +1227,7 @@ void TypeChecker::TypeCheckerImpl::CheckArkTSExportedVariables(ASTContext& ctx)
                 return Native::FFI::ArkTS::ArkTSClassifyType(payloadTy, ci->importManager);
             };
             Native::FFI::ArkTS::AttachEnumMembers(desc, classifyType, classifyTy, ci->importManager);
-            if (Native::FFI::ArkTS::ArkTSTypeDescGeneratable(desc, /*allowNestedOptional=*/true)) {
+            if (Native::FFI::ArkTS::ArkTSTypeDescGeneratable(desc, true)) {
                 continue;
             }
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_exported_var_unsupported_type, *vd,
@@ -1237,7 +1257,7 @@ const std::vector<ArkTSEnumMapping>* FindArkTSEnumTable(EnumDecl& decl, ImportMa
     }
     // The minor that appended AnnoKind.RawValue; an older cjo has no value
     // mapping for an imported enum, so the leaf stays non-generatable.
-    constexpr uint8_t RAW_VALUE_CJO_MINOR = 3;
+    constexpr uint8_t rawValueCjoMinor = 3;
     std::string packageName;
     if (decl.curFile != nullptr && decl.curFile->curPackage != nullptr) {
         packageName = decl.curFile->curPackage->fullPackageName;
@@ -1245,7 +1265,7 @@ const std::vector<ArkTSEnumMapping>* FindArkTSEnumTable(EnumDecl& decl, ImportMa
     auto cjoManager = imports->GetCjoManager();
     auto version = cjoManager == nullptr ? std::pair<uint8_t, uint8_t>{0, 0}
                                          : cjoManager->GetPackageCjoVersion(packageName);
-    if (version.first != CJO_MAJOR_VERSION || version.second < RAW_VALUE_CJO_MINOR) {
+    if (version.first != CJO_MAJOR_VERSION || version.second < rawValueCjoMinor) {
         return nullptr;
     }
     std::vector<ArkTSEnumMapping> built;

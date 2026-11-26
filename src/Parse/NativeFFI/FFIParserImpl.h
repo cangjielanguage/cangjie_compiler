@@ -50,7 +50,7 @@ public:
 
 private:
     // friend JFFIParserImpl;
-    void CheckForeignNameAnnoArgs(const Annotation& anno) const;
+    void CheckForeignNameAnnoArgs(Annotation& anno) const;
     void CheckForeignNameAnnoTarget(const Annotation& anno) const;
 
     void CheckForeignGetterSetterNameAnnoArgs(const Annotation& anno) const;

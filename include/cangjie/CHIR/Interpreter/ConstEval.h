@@ -46,11 +46,27 @@ public:
     Value* ConvertToChir(Type& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent);
 
 private:
+    // Dispatch for the kinds that carry a constant representation beyond the
+    // plain literals of TryConvertToConstant. Kinds without one return nullptr.
+    Value* ConvertNonConstantToChir(
+        Type& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent);
+    Value* ConvertUnfoldablePrimitiveToChir(Type& ty);
+    Value* ConvertUnfoldableOtherToChir(Type& ty);
     Value* ConvertStringToChir(
         Type& ty, const ITuple& val, const std::function<void(Expression*)>& insertExpr, Block& parent);
     Value* ConvertTupleToChir(Type& ty, const ITuple& val, std::function<void(Expression*)>& insertExpr, Block& parent);
     Value* ConvertEnumToChir(
         EnumType& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent);
+    // Trivial enums carry the selector value only; payload enums decode to one
+    // [selector, param...] tuple. Both return null for non-decodable values.
+    Value* ConvertTrivialEnumToChir(EnumType& ty, Type* selectorTy, Block& parent, const IVal& val,
+        std::function<void(Expression*)>& insertExpr);
+    Value* ConvertPayloadEnumToChir(
+        EnumType& ty, Type* selectorTy, Block& parent, const IVal& val, std::function<void(Expression*)>& insertExpr);
+    // Constant of a class reference; other reference kinds are not supported
+    // by const eval and return nullptr in ConvertRefToChir.
+    Value* ConvertClassRefToChir(
+        RefType& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent);
     Value* ConvertRefToChir(RefType& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent);
     Value* ConvertFuncToChir(const FuncType& ty, const IFunc& val);
     Value* ConvertArrayToChir(

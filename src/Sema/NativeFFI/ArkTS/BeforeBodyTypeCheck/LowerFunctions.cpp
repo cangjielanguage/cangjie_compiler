@@ -16,6 +16,7 @@
 #include "../ArkTSInterop.h"
 #include "../FunctionSource.h"
 #include "../Utils/ASTFactory.h"
+#include "../Utils/FuncValueSource.h"
 #include "Collector.h"
 #include "PlaceholderBinding.h"
 #include "cangjie/AST/Utils.h"
@@ -138,26 +139,53 @@ bool BindArkTSSupportPackageReference(Node& node, Reference& ref, Decl& owner, I
 // generic type reference keeps its type arguments, because presetting the
 // declaration's own generic type (e.g. Option<T>) would drop the
 // instantiation and make the generated annotation uninferable.
-void BindArkTSSupportDeclReference(Node& node, Reference& ref, RefType* type, ImportManager& imports,
-    const std::string& name, ArkTSSupportReport& report, std::vector<std::pair<Ptr<Node>, Ptr<Decl>>>& bound,
-    bool& valid)
+// The owner's package picks the search package: the preset package's own
+// generated bodies are part of std.interop.arkts, so its conversion-exception
+// spelling resolves same-package (left unbound for the ordinary lookup; the
+// compiler-generated alias never appears there - there are no global-variable
+// getters in the package), and its runtime/business exception spellings bind
+// from their host packages, which the preset-package injection imports
+// directly instead of the facade.
+void BindArkTSSupportDeclReference(Decl& owner, Node& node, Reference& ref, [[maybe_unused]] RefType* type,
+    ImportManager& imports, const std::string& name, ArkTSSupportReport& report,
+    std::vector<std::pair<Ptr<Node>, Ptr<Decl>>>& bound, bool& valid)
 {
     static const std::unordered_map<std::string, std::string> packages{{"BigInt", "std.math.numeric"},
         {"Exception", "std.core"}, {"Option", "std.core"},
         {Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
         {Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
         {Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
-        {Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE}};
+        {Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
+        {Native::FFI::ArkTS::ARKTS_FUNC_CARRIER, Native::FFI::ArkTS::ARKTS_PRESET_PACKAGE}};
     auto found = packages.find(name);
     if (found == packages.end()) {
         return;
+    }
+    if (owner.fullPackageName == Native::FFI::ArkTS::ARKTS_PRESET_PACKAGE) {
+        if (name == Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION ||
+            name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS || name == Native::FFI::ArkTS::ARKTS_FUNC_CARRIER) {
+            // Same-package declaration: the ordinary lookup resolves it, so
+            // no support binding (and no missing-support diagnostic) applies.
+            return;
+        }
     }
     // The getter spells the conversion exception through the private alias;
     // both spellings denote the one exported declaration.
     const auto declName = name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS
         ? std::string(Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION)
         : name;
-    auto target = FindArkTSSupportDecl(imports, declName, found->second);
+    // A preset-package body binds the runtime and business exceptions from
+    // their host packages: the facade is deliberately not a dependency of the
+    // preset package (the cycle above), so its re-export is not loaded there.
+    std::string package = found->second;
+    if (owner.fullPackageName == Native::FFI::ArkTS::ARKTS_PRESET_PACKAGE) {
+        if (name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION) {
+            package = Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_FULL_PACKAGE;
+        } else if (name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION) {
+            package = Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION_PACKAGE;
+        }
+    }
+    auto target = FindArkTSSupportDecl(imports, declName, package);
     if (target == nullptr) {
         if (valid) {
             report.Missing();
@@ -167,7 +195,18 @@ void BindArkTSSupportDeclReference(Node& node, Reference& ref, RefType* type, Im
     }
     ref.target = target;
     ref.targets = {target};
-    if (!type || type->typeArguments.empty()) {
+    // Skip the type preset whenever the reference carries written type
+    // arguments: a RefType annotation (Option<T>) and a RefExpr constructor
+    // base (ArkTSFunc<(Int32) -> Int32>(...)) both need the checker's own
+    // instantiation pass, and presetting the declaration's generic type would
+    // drop the written arguments and leave the candidate match un-instantiated
+    // (the arity mismatch of the carrier constructor). Without type arguments
+    // the declaration's type is the whole story and is preset.
+    auto* refTypeNode = DynamicCast<RefType*>(&node);
+    auto* exprRef = DynamicCast<RefExpr*>(&node);
+    const bool hasTypeArgs = (refTypeNode != nullptr && !refTypeNode->typeArguments.empty()) ||
+        (exprRef != nullptr && !exprRef->typeArguments.empty());
+    if (!hasTypeArgs) {
         node.SetTy(target->GetTy());
     }
     bound.emplace_back(&node, target);
@@ -183,6 +222,7 @@ bool IsArkTSSupportReferenceName(const std::string& name)
         name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS ||
         name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION ||
         name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION ||
+        name == Native::FFI::ArkTS::ARKTS_FUNC_CARRIER ||
         name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE ||
         name == Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE;
 }
@@ -211,7 +251,7 @@ VisitAction BindSupportReferenceNode(Node& node, Decl& owner, ImportManager& imp
         return VisitAction::WALK_CHILDREN;
     }
     if (!BindArkTSSupportPackageReference(node, *ref, owner, imports, name, report, bound, valid)) {
-        BindArkTSSupportDeclReference(node, *ref, type, imports, name, report, bound, valid);
+        BindArkTSSupportDeclReference(owner, node, *ref, type, imports, name, report, bound, valid);
     }
     return VisitAction::WALK_CHILDREN;
 }
@@ -349,6 +389,16 @@ bool RefuseArkTSFunctionReturnType(DiagnosticEngine& diag, FuncDecl& fd, const F
     if (ArkTSTypeDescGeneratable(resultType)) {
         return false;
     }
+    // An ArkTSFunc<F> return position whose function-type constraint failed
+    // gets the dedicated message naming F, before the deferral routing for
+    // the genuinely deferred presets.
+    if (fb.retType) {
+        auto& retAt = fb.retType->begin.IsZero() ? static_cast<Node&>(fd) : static_cast<Node&>(*fb.retType);
+        if (DiagnoseArkTSFuncCarrierPosition(diag, retAt, fb.retType->DataTy())) {
+            fd.EnableAttr(Attribute::IS_BROKEN);
+            return true;
+        }
+    }
     // A return position spelled with an external ArkTS preset type is not a
     // spelling mistake - its mapping is deferred - so it reports the dedicated
     // deferral diagnostic instead of the generic unsupported-type error.
@@ -410,11 +460,18 @@ bool DiagnoseArkTSNamedParameterRules(DiagnosticEngine& diag, FuncDecl& fd, Func
 
 // Report one unsupported parameter position: an external preset type keeps
 // the dedicated deferral diagnostic, an imported enum without a value table
-// gets the legacy-CJO note, every other position the generic message.
+// gets the dedicated no-value-table note, every other position the generic
+// message.
 void DiagnoseArkTSUnsupportedFunctionParameter(DiagnosticEngine& diag, FuncDecl& fd, FuncParam& param,
     const ArkTSTypeDesc& desc)
 {
     auto& position = param.type ? static_cast<Node&>(*param.type) : static_cast<Node&>(param);
+    // An ArkTSFunc<F> parameter position whose function-type constraint
+    // failed gets the dedicated message naming F, before the deferral routing
+    // for the genuinely deferred presets.
+    if (param.type && DiagnoseArkTSFuncCarrierPosition(diag, position, param.type->DataTy())) {
+        return;
+    }
     auto deferredName = param.type ? ArkTSDeferredExternalTypeName(param.type->DataTy()) : std::string{};
     if (!deferredName.empty()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred, position, deferredName);
@@ -652,7 +709,10 @@ VisitAction RebindArkTSFunctionPlaceholderNode(Node& node, FuncDecl& fd, File& f
     node.end = fd.end;
     if (auto literal = DynamicCast<LitConstExpr*>(&node); literal) {
         std::string rebound;
-        if (ArkTSRebindPlaceholderLiteral(literal->stringValue, literals, rebound)) {
+        // The raw spelling decides: a placeholder literal is generated without
+        // escapes, while a user value that collides with a placeholder name is
+        // escaped in the source, so only the real placeholders match here.
+        if (ArkTSRebindPlaceholderLiteral(literal->rawString, literals, rebound)) {
             literal->stringValue = std::move(rebound);
         }
     }

@@ -481,9 +481,9 @@ protected:
     RecordingDiagnosticHandler* handler{nullptr};
 };
 
-// A `@ArkTS` foreign variable (`let` or `var`) is no longer supported; the
-// design moved it to `@ArkTS[globalVar: true] foreign func`. It is rejected
-// before the C FFI path lowers it as an external C variable.
+// This version does not support `@ArkTS` foreign variables (`let` or `var`);
+// the capability is spelled `@ArkTS[globalVar: true] foreign func`. It is
+// rejected before the C FFI path lowers it as an external C variable.
 TEST_F(ArkTSEnumVarTest, ForeignVariableIsDiagnosed)
 {
     CompileSema(R"(package entry
@@ -733,6 +733,46 @@ public class JSContext {
     public func boolean(value: Bool): JSValue { return JSValue() }
     public func bigint(value: BigInt): JSValue { return JSValue() }
     public func undefined(): JSValue { return JSValue() }
+}
+
+// js_interop_type.cj:39 `public interface JSInteropType<T>` and the
+// conformance table at js_interop_type.cj:80..:905, reduced to the element
+// positions the prepared ArkTSArray<T> tests spell. The stub bodies return
+// dummies: the tests compile, they never run the conversion.
+public interface JSInteropType<T> {
+    static func fromJSValue(context: JSContext, input: JSValue): T
+    func toJSValue(context: JSContext): JSValue
+    static func toArktsType(): String
+}
+
+extend Int32 <: JSInteropType<Int32> {
+    public static func fromJSValue(_: JSContext, _: JSValue): Int32 { return 0 }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "number" }
+}
+
+extend Float64 <: JSInteropType<Float64> {
+    public static func fromJSValue(_: JSContext, _: JSValue): Float64 { return 0.0 }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "number" }
+}
+
+extend String <: JSInteropType<String> {
+    public static func fromJSValue(_: JSContext, _: JSValue): String { return "" }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "string" }
+}
+
+extend Bool <: JSInteropType<Bool> {
+    public static func fromJSValue(_: JSContext, _: JSValue): Bool { return false }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "boolean" }
+}
+
+extend<T> Option<T> <: JSInteropType<Option<T>> where T <: JSInteropType<T> {
+    public static func fromJSValue(_: JSContext, _: JSValue): Option<T> { return Option<T>.None }
+    public func toJSValue(_: JSContext): JSValue { return JSValue() }
+    public static func toArktsType(): String { return "union" }
 }
 )";
 

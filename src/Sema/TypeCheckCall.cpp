@@ -3639,7 +3639,19 @@ bool TypeChecker::TypeCheckerImpl::ChkCallExpr(ASTContext& ctx, ModalTy target, 
     // Decl only be set when call base is valid RefExpr or MemberAccess.
     Ptr<Decl> decl{nullptr};
     std::vector<Ptr<FuncDecl>> candidates;
+    // An explicit ArkTSFunc<F> construction is a compiler-builtin operation:
+    // recognized before the base check (the preset's init(f: F) is removed
+    // at preparation, so the ordinary candidate path could only misreport or
+    // crash); the recognition synthesizes the base reference itself, exactly
+    // like the base check would, and the resolution stays valid for the
+    // ordinary flow when the shape does not match.
+    if (ChkArkTSFuncConstruction(ctx, target, ce)) {
+        return ce.GetTy().IsCorrect();
+    }
     if (!ChkCallBaseExpr(ctx, ce, decl, target, candidates)) {
+        if (RefuseArkTSFuncValueCall(ce)) {
+            return false;
+        }
         CheckCallPostfixModal(diag, ce, decl);
         // If no call base exist, expr may be array or pointer builtin api call.
         return ChkBuiltinCall(ctx, TypeManager::GetNonNullTy(target), ce);
@@ -3831,6 +3843,14 @@ bool TypeChecker::TypeCheckerImpl::ChkFunctionCallExpr(ASTContext& ctx, ModalTy 
     DesugarCallExpr(ctx, ce);
     auto desugarCallExpr = StaticAs<ASTKind::CALL_EXPR>(ce.desugarExpr.get());
     if (!ChkCallExpr(ctx, target, *desugarCallExpr)) {
+        // A dedicated refusal inside the base check (the ArkTS function
+        // carrier call) already reported the failure; the generic
+        // "no matching operator ()" text must not restate it.
+        if (arkTSFuncValueCallRefused) {
+            arkTSFuncValueCallRefused = false;
+            ce.SetTy({TypeManager::GetInvalidTy()});
+            return false;
+        }
         RecoverToCallExpr(ce);
         diag.Diagnose(ce, DiagKind::sema_no_match_operator_function_call);
         ce.SetTy({TypeManager::GetInvalidTy()});

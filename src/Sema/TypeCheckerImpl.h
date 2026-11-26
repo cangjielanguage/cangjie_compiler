@@ -547,6 +547,8 @@ private:
     AST::VisitAction CheckDefaultParamFunc(const AST::InterfaceDecl& ifd) const;
     AST::VisitAction CheckDefaultParamFunc(const AST::EnumDecl& ed) const;
     void GetSingleParamFunc(AST::Decl& decl);
+    void BuildDefaultParamFunction(AST::FuncDecl& fd, AST::FuncParam& fp, bool isStatic,
+        std::vector<Ptr<AST::FuncParam>>& funcParams);
     /// After ResolveNames: mark desugared default-param funcs as `exclave` when the param is non-copy local!/local?.
     void AttachExclaveToDefaultParamFunctions(AST::Package& pkg);
     void CheckPrimaryCtorForClassOrStruct(AST::InheritableDecl& id);
@@ -954,6 +956,22 @@ private:
      * `bind` call. Returns true when the call was refused and marked invalid.
      */
     bool RefuseArkTSHasThisCall(AST::CallExpr& ce, const Ptr<AST::Decl>& decl);
+    // ArkTSFunc<F> construction rewriting and the carrier direct-call refusal
+    // (B4b; implemented in NativeFFI/ArkTS/Utils/FuncValueSource.cpp).
+    bool ChkArkTSFuncConstruction(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    bool LowerArkTSFuncConstruction(
+        ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce,
+        const Native::FFI::ArkTS::ArkTSTypeDesc& desc);
+    // Parse the compiler-owned probe declaration of one explicit construction
+    // and detach its return expression; an empty result refuses the call.
+    OwnedPtr<AST::Expr> ParseArkTSFuncConstructionProbe(const Native::FFI::ArkTS::ArkTSTypeDesc& desc,
+        AST::CallExpr& ce, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+    // Collect the generated replacement into the call's scope and register its
+    // generated declarations by name.
+    void CollectArkTSFuncReplacementSymbols(ASTContext& ctx, AST::CallExpr& ce, AST::Expr& replacement);
+    // Resolve every written type position inside the generated replacement.
+    void ResolveArkTSReplacementTypes(ASTContext& ctx, AST::Expr& replacement);
+    bool RefuseArkTSFuncValueCall(AST::CallExpr& ce);
     bool ChkDesugarExprOfCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
     bool CheckCallKind(const AST::CallExpr& ce, Ptr<AST::Decl> decl, AST::CallKind& type);
     /**
@@ -1862,6 +1880,8 @@ private:
         const Ptr<AST::Decl> target
     );
     void CheckUsageOfDeprecated(AST::Node& node);
+    AST::VisitAction CheckDeprecatedUsageNode(const Ptr<AST::Node> usage);
+    AST::VisitAction RestoreDeprecatedContext(const Ptr<AST::Node> usage);
     void CheckUsageOfDeprecatedParameters(const Ptr<AST::Node> usage);
     void CheckUsageOfDeprecatedNominative(
         const Ptr<AST::Node> usage,
@@ -2028,6 +2048,10 @@ private:
      * is restored instead of resolved by name.
      */
     std::unordered_map<Ptr<const AST::Node>, Ptr<AST::Decl>> arktsSupportRefs;
+    // Set when RefuseArkTSFuncValueCall reported the dedicated carrier-call
+    // refusal; ChkFunctionCallExpr consumes it and skips the generic
+    // "no matching operator ()" restatement.
+    bool arkTSFuncValueCallRefused{false};
     Triple::BackendType backendType;
     // outermost @Derpecated declaration
     Ptr<AST::Node> deprecatedContext = nullptr;

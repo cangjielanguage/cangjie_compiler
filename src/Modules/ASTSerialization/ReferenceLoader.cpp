@@ -22,6 +22,15 @@ using namespace Cangjie;
 using namespace AST;
 
 namespace {
+// The serialized tyModes vector only carries entries when the cjo stores a
+// modal, so a corrupt file can hold fewer entries than the type list. A missing
+// entry loads as "no mode" instead of indexing out of bounds.
+const PackageFormat::Mode* LoadTyMode(const PackageFormat::Pattern& pObj, uoffset_t index)
+{
+    const auto* modes = pObj.tyModes();
+    return (modes != nullptr && index < modes->size()) ? modes->Get(index) : nullptr;
+}
+
 void SetFuncParentReference(const FuncDecl& fd, Decl& parentDecl)
 {
     CJC_ASSERT(fd.funcBody);
@@ -572,8 +581,11 @@ void ASTLoader::ASTLoaderImpl::LoadNominalDeclRef(const PackageFormat::Decl& dec
         auto declTy = astDecl.GetTy();
         auto carrier = astDecl.TestAttr(Attribute::ARKTS_HAS_THIS) ?
             DynamicCast<ClassTy*>(declTy.Ty()) : nullptr;
-        if (carrier != nullptr && carrier->typeArgs.size() == 2 && carrier->typeArgs[1].IsCorrect() &&
-            carrier->typeArgs[1].Ty()->IsFunc()) {
+        // ArkTSFuncWithThis<ThisT, F> carries this type and function signature
+        // as its two type arguments; the signature slot feeds the funcBody.
+        constexpr size_t arktsThisCarrierTypeArgs = 2;
+        if (carrier != nullptr && carrier->typeArgs.size() == arktsThisCarrierTypeArgs &&
+            carrier->typeArgs[1].IsCorrect() && carrier->typeArgs[1].Ty()->IsFunc()) {
             astDecl.funcBody->SetTy(carrier->typeArgs[1]);
         } else {
             astDecl.funcBody->SetTy(declTy);
@@ -890,7 +902,7 @@ void ASTLoader::ASTLoaderImpl::LoadPatternRefs(const PackageFormat::Pattern& pOb
 {
     CJC_ASSERT(pObj.types()->size() >= 1);
     pattern.SetTy(ApplyLoadedModal(LoadType(static_cast<FormattedIndex>(pObj.types()->Get(0))),
-        pObj.tyModes() != nullptr ? pObj.tyModes()->Get(0) : nullptr));
+        LoadTyMode(pObj, 0)));
     // Sub patterns is guaranteed and created during 'LoadPattern'.
     switch (pObj.kind()) {
         case PackageFormat::PatternKind_TuplePattern:
@@ -915,7 +927,7 @@ void ASTLoader::ASTLoaderImpl::LoadPatternRefs(const PackageFormat::Pattern& pOb
             for (uoffset_t i = 1; i < pObj.types()->size(); i++) {
                 etp.types[i - 1] = WrapType(ApplyLoadedModal(
                     LoadType(static_cast<FormattedIndex>(pObj.types()->Get(i))),
-                    pObj.tyModes() != nullptr ? pObj.tyModes()->Get(i) : nullptr));
+                    LoadTyMode(pObj, i)));
             }
             break;
         }
@@ -927,7 +939,7 @@ void ASTLoader::ASTLoaderImpl::LoadPatternRefs(const PackageFormat::Pattern& pOb
             for (uoffset_t i = 1; i < pObj.types()->size(); i++) {
                 ctp.types[i - 1] = WrapType(ApplyLoadedModal(
                     LoadType(static_cast<FormattedIndex>(pObj.types()->Get(i))),
-                    pObj.tyModes() != nullptr ? pObj.tyModes()->Get(i) : nullptr));
+                    LoadTyMode(pObj, i)));
             }
             break;
         }

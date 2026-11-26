@@ -2652,6 +2652,38 @@ OwnedPtr<FuncDecl> MakeDefaultParamFunction(
 #endif
     return ret;
 }
+
+// At this stage a member of an @ArkTS foreign class/interface is still
+// bodyless and may carry the ArkTS optional-parameter spelling
+// (`x!: Option<T> = None`). The default is mapping metadata for those
+// declarations, not an abstract-function default. A lowered class member is
+// refused when it keeps one. The flag only relaxes the ABSTRACT diagnostic
+// and selects the metadata-only skip; every other declaration keeps the
+// existing default-parameter checks, and an accepted parameter is appended
+// after the caller's block.
+// This predicate is deliberately narrower than the shared
+// ArkTSForeignClassLikeMember rule: it accepts the external FOREIGN spelling
+// and a prepared @ArkTS foreign interface, not a prepared ARKTS_CLASS_WRAPPER
+// member. The two tests cover different states, not different spellings:
+// FOREIGN survives preparation as the source identity, so IsExternalForeign
+// selects only the declarations preparation did not rewrite - a generic or
+// preset declaration, or one refused before preparation installed a marker -
+// while ARKTS_INTERFACE_WRAPPER selects a prepared interface (its generated
+// implementation class carries the same attribute, so the interface
+// declaration kind distinguishes the two). Neither test covers the other's
+// state. A prepared member must get its default-parameter function here,
+// before the wrapper body is lowered; creating it after lowering (as the
+// class post-pass would) makes the constructor's generated return expression
+// perturb the initialization checker. The shared rule stays authoritative for
+// ArkTSDeclOptionsDiagnose, which sees the same members before their bodies
+// exist.
+bool IsArkTSForeignBodylessMember(const FuncDecl& fd)
+{
+    return fd.outerDecl != nullptr && fd.outerDecl->HasAnno(AnnotationKind::ARKTS) &&
+        (IsExternalForeign(*fd.outerDecl) ||
+            Native::FFI::ArkTS::IsArkTSPreparedInterface(*fd.outerDecl)) &&
+        fd.funcBody && !fd.funcBody->body;
+}
 } // namespace
 
 void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
@@ -2664,58 +2696,9 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
     }
     std::vector<Ptr<FuncParam>> funcParams;
     bool isStatic = fd->TestAttr(Attribute::STATIC);
-    auto walkFunc = [isStatic, this](Ptr<Node> node) -> VisitAction {
-        CJC_ASSERT(node);
-        if (node->astKind == ASTKind::FUNC_DECL) {
-            if (isStatic) {
-                node->EnableAttr(Attribute::STATIC); // Functions inside static function also has static attribute.
-            }
-            GetSingleParamFunc(*StaticAs<ASTKind::FUNC_DECL>(node));
-        }
-        return VisitAction::WALK_CHILDREN;
-    };
-    // Decls inside origin default assignment will report error if exists.
-    // Compiler added function only used for code generation.
-    auto walkOrigin = [isStatic](Ptr<Node> node) -> VisitAction {
-        if (node->astKind == ASTKind::FUNC_DECL && isStatic) {
-            node->EnableAttr(Attribute::STATIC); // Functions inside static function also has static attribute.
-        }
-        return VisitAction::WALK_CHILDREN;
-    };
     for (auto& fp : fd->funcBody->paramLists[0]->params) {
         if (fp && fp->assignment && !fp->TestAttr(Attribute::HAS_INITIAL)) {
-            // At this stage a member of an @ArkTS foreign class/interface is
-            // still bodyless and may carry the ArkTS optional-parameter
-            // spelling (`x!: Option<T> = None`). The default is mapping
-            // metadata for those declarations, not an abstract-function
-            // default. A lowered class member is refused when it keeps one.
-            // The flag only relaxes the ABSTRACT diagnostic and selects the
-            // metadata-only skip below; every other declaration keeps the
-            // existing default-parameter checks, and an accepted parameter is
-            // appended after this block.
-            // This predicate is deliberately narrower than the shared
-            // ArkTSForeignClassLikeMember rule: it accepts the external FOREIGN
-            // spelling and a prepared @ArkTS foreign interface, not a prepared
-            // ARKTS_CLASS_WRAPPER member. The two tests cover different states,
-            // not different spellings: FOREIGN survives preparation as the
-            // source identity, so IsExternalForeign selects only the
-            // declarations preparation did not rewrite - a generic or preset
-            // declaration, or one refused before preparation installed a
-            // marker - while ARKTS_INTERFACE_WRAPPER selects a prepared
-            // interface (its generated implementation class carries the same
-            // attribute, so the interface declaration kind distinguishes the
-            // two). Neither test covers the other's state. A prepared
-            // member must get its default-parameter function here, before the
-            // wrapper body is lowered; creating it after lowering (as the
-            // class post-pass would) makes the constructor's generated return
-            // expression perturb the initialization checker. The shared rule
-            // stays authoritative for ArkTSDeclOptionsDiagnose, which sees the
-            // same members before their bodies exist.
-            const bool isArkTSForeignBodylessMember = fd->outerDecl != nullptr &&
-                fd->outerDecl->HasAnno(AnnotationKind::ARKTS) &&
-                (IsExternalForeign(*fd->outerDecl) ||
-                    Native::FFI::ArkTS::IsArkTSPreparedInterface(*fd->outerDecl)) &&
-                fd->funcBody && !fd->funcBody->body;
+            const bool isArkTSForeignBodylessMember = IsArkTSForeignBodylessMember(*fd);
             if (fd->op != TokenKind::ILLEGAL || fd->TestAttr(Attribute::OPEN) ||
                 (fd->TestAttr(Attribute::ABSTRACT) && !isArkTSForeignBodylessMember) ||
                 fd->TestAttr(Attribute::DEFAULT)) {
@@ -2728,16 +2711,40 @@ void TypeChecker::TypeCheckerImpl::GetSingleParamFunc(Decl& decl)
                 funcParams.push_back(fp.get());
                 continue;
             }
-            fp->desugarDecl = MakeDefaultParamFunction(*fp, *fd, funcParams);
-            // There may be nested functions inside default value function.
-            Walker walker(fp->desugarDecl.get(), walkFunc);
-            walker.Walk();
-            Walker originWalker(fp->assignment.get(), walkOrigin);
-            originWalker.Walk();
-            MarkParamWithInitialValue(*fp->assignment);
+            BuildDefaultParamFunction(*fd, *fp, isStatic, funcParams);
         }
         funcParams.push_back(fp.get());
     }
+}
+
+void TypeChecker::TypeCheckerImpl::BuildDefaultParamFunction(FuncDecl& fd, FuncParam& fp, bool isStatic,
+    std::vector<Ptr<FuncParam>>& funcParams)
+{
+    fp.desugarDecl = MakeDefaultParamFunction(fp, fd, funcParams);
+    auto walkFunc = [isStatic, this](Ptr<Node> node) -> VisitAction {
+        CJC_ASSERT(node);
+        if (node->astKind == ASTKind::FUNC_DECL) {
+            if (isStatic) {
+                node->EnableAttr(Attribute::STATIC); // Functions inside static function also has static attribute.
+            }
+            GetSingleParamFunc(*StaticAs<ASTKind::FUNC_DECL>(node));
+        }
+        return VisitAction::WALK_CHILDREN;
+    };
+    // There may be nested functions inside default value function.
+    Walker walker(fp.desugarDecl.get(), walkFunc);
+    walker.Walk();
+    // Decls inside origin default assignment will report error if exists.
+    // Compiler added function only used for code generation.
+    auto walkOrigin = [isStatic](Ptr<Node> node) -> VisitAction {
+        if (node->astKind == ASTKind::FUNC_DECL && isStatic) {
+            node->EnableAttr(Attribute::STATIC); // Functions inside static function also has static attribute.
+        }
+        return VisitAction::WALK_CHILDREN;
+    };
+    Walker originWalker(fp.assignment.get(), walkOrigin);
+    originWalker.Walk();
+    MarkParamWithInitialValue(*fp.assignment);
 }
 
 Ptr<Decl> TypeChecker::TypeCheckerImpl::GetDupInterfaceRecursively(const Node& triggerNode, ModalTy interfaceTy,

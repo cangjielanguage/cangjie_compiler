@@ -30,6 +30,17 @@ Ptr<Decl> FindArkTSJSObject(ImportManager& imports, const File& file)
     return nullptr;
 }
 
+// The same lookup for the JSValue carrier of a preset string.
+Ptr<Decl> FindArkTSJSValue(ImportManager& imports, const File& file)
+{
+    for (auto decl : imports.GetImportedDeclsByName(file, ARKTS_JS_VALUE_CARRIER)) {
+        if (decl->fullPackageName == ARKTS_INTEROP_FULL_PACKAGE) {
+            return decl;
+        }
+    }
+    return nullptr;
+}
+
 OwnedPtr<Decl> ParseArkTSReferenceHolder(const std::string& code, const Decl& anchor, DiagnosticEngine& diag,
     SourceManager& sourceManager, ImportManager& imports)
 {
@@ -41,15 +52,25 @@ OwnedPtr<Decl> ParseArkTSReferenceHolder(const std::string& code, const Decl& an
         return nullptr;
     }
     auto jsObject = FindArkTSJSObject(imports, *anchor.curFile);
-    if (jsObject == nullptr) {
+    auto jsValue = FindArkTSJSValue(imports, *anchor.curFile);
+    // A JSValue-only holder (the preset string) must still bind its carrier;
+    // a JSObject holder binds JSObject. Which one the holder spells follows
+    // the text the caller passed, so both lookups run and each binds its own.
+    if (jsObject == nullptr && jsValue == nullptr) {
         return nullptr;
     }
     auto decl = std::move(holder->decls.front());
-    Walker(decl.get(), [&jsObject](Ptr<Node> node) {
+    Walker(decl.get(), [&jsObject, &jsValue](Ptr<Node> node) {
         auto type = DynamicCast<RefType*>(node);
-        if (type && type->ref.identifier == ARKTS_JS_OBJECT && !type->ref.target) {
+        if (!type || type->ref.target) {
+            return VisitAction::WALK_CHILDREN;
+        }
+        if (type->ref.identifier == ARKTS_JS_OBJECT && jsObject != nullptr) {
             type->ref.target = jsObject;
             type->SetTy(jsObject->GetTy());
+        } else if (type->ref.identifier == ARKTS_JS_VALUE_CARRIER && jsValue != nullptr) {
+            type->ref.target = jsValue;
+            type->SetTy(jsValue->GetTy());
         }
         return VisitAction::WALK_CHILDREN;
     }).Walk();
@@ -59,7 +80,8 @@ OwnedPtr<Decl> ParseArkTSReferenceHolder(const std::string& code, const Decl& an
 // Before: the class body carries no generated storage. After result: the
 // compiler-owned wrapper members parsed from a holder shape and reparented
 // onto the user class. Source positions and the permanent file are the
-// class's; the holder itself is discarded.
+// class's; the holder itself is discarded. The carrier type spells the stored
+// value: JSObject for an ordinary wrapper, JSValue for the ArkTSString preset.
 // A root wrapper (no wrapper parent) owns the storage:
 //   class C { ... }
 //     -> class C { ...; private var __cj_arkts_ref: JSObject
@@ -71,33 +93,30 @@ OwnedPtr<Decl> ParseArkTSReferenceHolder(const std::string& code, const Decl& an
 // constructor's first expression, so the multi-statement construction reaches
 // it as one thunk value).
 // A child wrapper (wrapper parent) inherits the root's field and accessor and
-// only redeclares the two wrapping constructors as delegations, because
-// constructors are not inherited and the missing declarations would otherwise
-// make the class unconstructible from an ArkTS value at every level below the
-// root:
-//   class C <: WrapperParent { ... }
-//     -> class C <: WrapperParent { ...;
-//                  public init(__cj_arkts_ref: JSObject, _: Unit) { super(__cj_arkts_ref, ()) }
-//                  public init(__cj_arkts_ref: () -> JSObject, _: Unit) { super(__cj_arkts_ref, ()) } }
+// only redeclares the two wrapping constructors as delegations to the parent's
+// constructors, because constructors are not inherited and the missing
+// declarations would otherwise make the class unconstructible from an ArkTS
+// value at every level below the root.
 bool InsertArkTSReferenceMembers(
-    ClassDecl& cd, bool wrapperParent, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports)
+    ClassDecl& cd, bool wrapperParent, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports,
+    const std::string& carrierType)
 {
     std::string code = std::string("class ") + ARKTS_SUPPORT_HOLDER + " {\n";
     if (!wrapperParent) {
-        code += "    private var " + std::string(ARKTS_CLASS_REF_FIELD) + ": " + ARKTS_JS_OBJECT + "\n";
+        code += "    private var " + std::string(ARKTS_CLASS_REF_FIELD) + ": " + carrierType + "\n";
     }
-    code += "    public init(" + std::string(ARKTS_CLASS_CTOR_PARAM) + ": " + ARKTS_JS_OBJECT + ", _: Unit) {\n";
+    code += "    public init(" + std::string(ARKTS_CLASS_CTOR_PARAM) + ": " + carrierType + ", _: Unit) {\n";
     code += wrapperParent ? std::string("        super(") + ARKTS_CLASS_CTOR_PARAM + ", ())\n"
                           : std::string("        this.") + ARKTS_CLASS_REF_FIELD + " = " + ARKTS_CLASS_CTOR_PARAM +
             "\n";
     code += "    }\n";
-    code += "    public init(" + std::string(ARKTS_CLASS_CTOR_PARAM) + ": () -> " + ARKTS_JS_OBJECT + ", _: Unit) {\n";
+    code += "    public init(" + std::string(ARKTS_CLASS_CTOR_PARAM) + ": () -> " + carrierType + ", _: Unit) {\n";
     code += wrapperParent ? std::string("        super(") + ARKTS_CLASS_CTOR_PARAM + ", ())\n"
                           : std::string("        this.") + ARKTS_CLASS_REF_FIELD + " = " + ARKTS_CLASS_CTOR_PARAM +
             "()\n";
     code += "    }\n";
     if (!wrapperParent) {
-        code += "    public func " + std::string(ARKTS_CLASS_REF_ACCESSOR) + "(): " + ARKTS_JS_OBJECT +
+        code += "    public func " + std::string(ARKTS_CLASS_REF_ACCESSOR) + "(): " + carrierType +
             " {\n        return this." + ARKTS_CLASS_REF_FIELD + "\n    }\n";
     }
     code += "}\n";

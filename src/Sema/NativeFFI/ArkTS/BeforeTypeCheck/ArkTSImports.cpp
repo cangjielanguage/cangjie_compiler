@@ -330,18 +330,41 @@ void AddSyntheticMemberImportAs(const ImportManager& importMgr, const Package& p
     file.imports.emplace_back(std::move(import));
 }
 
-// Phase: inject the complete interop import set, in the original order.
+// Phase: inject the complete interop import set, in the order the generated
+// code needs it. The preset package std.interop.arkts is the one exception to
+// the facade routing: arkts.lang publicly imports std.interop.arkts, so
+// injecting arkts.lang imports into the preset package would close a same-
+// package cycle. Its generated bodies name ForeignRuntimeException and
+// BusinessException through their host packages (cj_arkts_context_v1 and
+// ohos.business_exception, both imported below) and ExternConversionException
+// through its own package (same package, no import); every other package
+// keeps the facade imports.
 void InjectArkTSInteropImports(
     const ImportManager& importMgr, const Package& pkg, File& file, const Range& at)
 {
+    const bool presetPackage = pkg.fullPackageName == ARKTS_PRESET_PACKAGE;
     AddSyntheticPackageImport(importMgr, pkg, file, at, ARKTS_INTEROP_FULL_PACKAGE);
     AddSyntheticPackageImport(importMgr, pkg, file, at, ARKTS_CONTEXT_ABI_FULL_PACKAGE);
     // The generated guards always throw or catch these public types; import
     // the single member so the wrapper compiles without asking the user for
     // the package. A star import of the package already makes the name visible.
-    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANGUAGE_PACKAGE, ARKTS_CONVERSION_EXCEPTION);
-    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANGUAGE_PACKAGE, ARKTS_RUNTIME_EXCEPTION);
-    AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANGUAGE_PACKAGE, ARKTS_BUSINESS_EXCEPTION);
+    if (presetPackage) {
+        AddSyntheticMemberImport(
+            importMgr, pkg, file, at, ARKTS_CONTEXT_ABI_FULL_PACKAGE, ARKTS_RUNTIME_EXCEPTION);
+        AddSyntheticMemberImport(
+            importMgr, pkg, file, at, ARKTS_BUSINESS_EXCEPTION_PACKAGE, ARKTS_BUSINESS_EXCEPTION);
+        // ExternConversionException is hosted by the preset package itself
+        // (the generated bodies are part of it); a self import is rejected.
+    } else {
+        AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANGUAGE_PACKAGE, ARKTS_CONVERSION_EXCEPTION);
+        AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANGUAGE_PACKAGE, ARKTS_RUNTIME_EXCEPTION);
+        AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_LANGUAGE_PACKAGE, ARKTS_BUSINESS_EXCEPTION);
+        // The generated global-variable getter spells the conversion exception
+        // through a compiler-generated alias. The preset package has no
+        // global-variable getters, so the alias import is facade-only too.
+        AddSyntheticMemberImportAs(importMgr, pkg, file, at, ARKTS_LANGUAGE_PACKAGE, ARKTS_CONVERSION_EXCEPTION,
+            ARKTS_CONVERSION_ALIAS);
+    }
     // The generated global-variable getter spells BigInt through a
     // compiler-generated alias and reaches the `parse` extensions through the
     // std.convert interface. The references are pre-bound by the lowering
@@ -349,8 +372,6 @@ void InjectArkTSInteropImports(
     // aliases stay invisible to user code like the rest of the set. The
     // conversion exception also has its own private alias, because a bare name
     // is ambiguous when std.core also exports it.
-    AddSyntheticMemberImportAs(importMgr, pkg, file, at, ARKTS_LANGUAGE_PACKAGE, ARKTS_CONVERSION_EXCEPTION,
-        ARKTS_CONVERSION_ALIAS);
     AddSyntheticMemberImportAs(importMgr, pkg, file, at, ARKTS_NUMERIC_FULL_PACKAGE, ARKTS_BIGINT_MEMBER,
         ARKTS_BIGINT_ALIAS);
     AddSyntheticMemberImport(importMgr, pkg, file, at, ARKTS_CONVERT_FULL_PACKAGE, ARKTS_PARSABLE_MEMBER);

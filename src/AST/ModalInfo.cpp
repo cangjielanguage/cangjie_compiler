@@ -70,11 +70,19 @@ int ToIndex(ModalInfo modal)
     if (modal.local == Mode::IDEAL) {
         return static_cast<int>(Mode::NOT) - 1; // == 0, the NOT slot
     }
-    return static_cast<int>(modal.local) - 1;
+    // A modal decoded from a cjo can carry a value outside the concrete range;
+    // such a value falls back to the NOT slot instead of indexing out of bounds.
+    const int index = static_cast<int>(modal.local) - 1;
+    return (index >= 0 && index < MODAL_INFO_COUNT) ? index : 0;
 }
 
 ModalInfo ToModalInfo(int index)
 {
+    // An out-of-range index comes only from a decoded cjo; it maps back to the
+    // default @~local instead of an out-of-range Mode.
+    if (index < 0 || index >= MODAL_INFO_COUNT) {
+        return {};
+    }
     return {static_cast<Mode>(index + 1)};
 }
 

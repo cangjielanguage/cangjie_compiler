@@ -93,8 +93,37 @@ bool ResolveArkTSModule(AST::Decl& decl, const std::unordered_map<std::string, s
 // A source @ArkTS foreign class that has not been prepared yet: annotated, not
 // generic, and without the wrapper marker. FOREIGN alone no longer separates
 // the states, because preparation keeps it. Generic declarations keep their
-// external form (the stdlib presets) and are never lowered into wrappers.
+// external form (the stdlib presets) and are never lowered into wrappers -
+// except the one non-generic preset, ArkTSString, which is prepared below.
 bool IsArkTSForeignClass(const AST::ClassDecl& cd);
+// The stdlib preset std.interop.arkts.ArkTSString. It is prepared as an
+// ordinary wrapper (the only non-generic preset that is), so its storage is a
+// JSValue - a JS string is a primitive, not an object - and its construction
+// goes through ctx.string instead of resolving the class constructor. Pinned
+// to the declaring package the way the deferral recognition is: a same-named
+// class in any other package is an ordinary wrapper and keeps the JSObject
+// carrier.
+bool IsArkTSPresetString(const AST::Decl& decl);
+// The stdlib preset std.interop.arkts.ArkTSArray<T>. Its positions map like
+// any reference leaf (a JS array is an object, so the carrier is the default
+// JSObject), and its element conversion lives in the prepared generic member
+// bodies the runtime declares under the hidden `T <: JSInteropType<T>`
+// constraint - the compiler only installs the carrier storage. Like the
+// preset string it is pinned to the declaring package: a same-named class in
+// any other package never receives preset treatment.
+bool IsArkTSPresetArray(const AST::Decl& decl);
+// The stdlib presets std.interop.arkts.ArkTSFunc<F> and
+// ArkTSFuncWithThis<ThisT, F>: compiler-builtin carriers of an ArkTS function
+// reference (design 3.5: no same-named ArkTS class, both are specially
+// processed). ArkTSFunc is prepared as a carrier-only wrapper - JSValue
+// storage, wrapping constructors and accessor, with the bodyless init(f: F)
+// removed because a generic body cannot invoke a value of type F; its
+// construction is rewritten at the use site (FuncValueSource). ArkTSFuncWithThis
+// keeps the external form: its values arrive with the deferred '@HasThis'
+// lowering, and only the dedicated refusals mention it for now. Pinned to the
+// declaring package the way the preset-string and deferral recognition are.
+bool IsArkTSPresetFunc(const AST::Decl& decl);
+bool IsArkTSPresetFuncWithThis(const AST::Decl& decl);
 // Prepared wrapper class; also true for an imported wrapper, whose attribute
 // survives the CJO round trip.
 bool IsArkTSClassWrapper(const AST::Decl& decl);
@@ -263,19 +292,21 @@ std::string ArkTSForeignLocalPrefix(const std::vector<Ptr<AST::FuncParam>>& para
 
 // The receiver shape of a generated wrapper. MODULE is the default: the
 // module object reached through ctx.requireArkModule(<module placeholder>).
-// GLOBAL is the arkts.lang rule: a declaration in arkts.lang (or a
-// subpackage) without an explicit module option is a TS-preset declaration,
-// so its wrapper takes the context's global JS object (ctx.global) as the
-// receiver and never emits requireArkModule("arkts.lang"). This is a
-// language property of that one package, not a fallback for an unmappable
-// package name, and must not be extended to other packages (arkts.ohos
-// included); an explicit module option always selects MODULE.
+// GLOBAL covers the two package-pinned rules: a declaration of arkts.lang (or
+// a subpackage) and a declaration of the preset package std.interop.arkts
+// whose module option is omitted is a TS-preset declaration, so its wrapper
+// takes the context's global JS object (ctx.global) as the receiver and never
+// emits requireArkModule("<package>") - requireArkModule validates specifiers
+// and a Cangjie package name is not one. This is a language property of those
+// two packages, not a fallback for an unmappable package name, and must not be
+// extended to other packages (arkts.ohos included); an explicit module option
+// always selects MODULE.
 enum class ArkTSReceiverKind { MODULE, GLOBAL };
 
 // The receiver of one declaration under the rule above: MODULE unless the
 // module option is omitted and the resolved module is arkts.lang (or a
-// subpackage of it). Shared by the function and class member lowering paths,
-// so the one receiver exception cannot drift between them.
+// subpackage of it) or the preset package. Shared by the function and class
+// member lowering paths, so the receiver exceptions cannot drift between them.
 ArkTSReceiverKind ArkTSReceiverFor(bool explicitModule, const std::string& module);
 
 // ---- Placeholder and generated-name contract (single-sourced) ----
@@ -314,9 +345,21 @@ constexpr const char* ARKTS_CONTEXT_ABI_PACKAGE = "cj_arkts_context_v1";
 // OHOS package names.
 constexpr const char* ARKTS_INTEROP_FULL_PACKAGE = "ohos.ark_interop";
 constexpr const char* ARKTS_CONTEXT_ABI_FULL_PACKAGE = ARKTS_CONTEXT_ABI_PACKAGE;
-// The package hosting the preset interop types. Its declarations keep the
-// generic external form; the same shape in a user package is refused.
+// The package hosting the preset interop types. ArkTSType keeps the external
+// form; ArkTSString is the non-generic preset and goes through ordinary
+// wrapper preparation with a JSValue carrier. ArkTSArray<T> is prepared as a
+// generic wrapper (JSObject carrier storage; its member bodies are written in
+// the runtime source against the hidden `T <: JSInteropType<T>` constraint).
+// ArkTSFunc<F> is prepared as a carrier-only wrapper (JSValue storage,
+// wrapping constructors and accessor; its bodyless init(f: F) is removed,
+// construction is rewritten at the use site), ArkTSFuncWithThis keeps the
+// external form until the '@HasThis' lowering lands.
 constexpr const char* ARKTS_PRESET_PACKAGE = "std.interop.arkts";
+// Compiler-owned spelling of the function carrier in generated text. The
+// support binders pin it to the preset declaration, so a same-named source
+// item cannot capture a generated position; it never appears as a classRefs
+// placeholder.
+constexpr const char* ARKTS_FUNC_CARRIER = "ArkTSFunc";
 
 // Runtime failure contract of generated wrappers. A target that does not
 // resolve, a target that is not callable and an ArkTS-side throw all surface
@@ -357,14 +400,17 @@ std::string ArkTSPlaceholderLiteral(const std::string& text);
 // Rebind one generated literal: when @p value is a prefixed placeholder whose
 // key is in @p literals, write the mapped text to @p rebound and return true.
 // An unprefixed user value and a prefixed value with no map entry return false
-// and stay verbatim.
+// and stay verbatim. @p value is the literal's raw source spelling
+// (LitConstExpr::rawString): generated placeholders carry no escapes, while a
+// user value that collides with a placeholder name is escaped in the source and
+// therefore never matches.
 bool ArkTSRebindPlaceholderLiteral(const std::string& value,
     const std::unordered_map<std::string, std::string>& literals, std::string& rebound);
 
-// One generated namespace-segment resolution with a precise failure:
-//   let <value> = <receiver>.getProperty("<ns_i>")
-//   if (<value>.isUndefined()) { throw ForeignRuntimeException(...) }
-//   let <next> = <value>.asObject()
+// One generated namespace-segment resolution with a precise failure. The
+// receiver's named property is read into a fresh local; an undefined read
+// throws a ForeignRuntimeException and a successful read is converted to an
+// object for the next segment.
 // `kind` is the declaration kind ("function"/"class"/"variable") and `name` an
 // already-quoted literal (a placeholder or a name), so the failure message
 // names the declaration, the module (or the global object when
@@ -487,10 +533,14 @@ enum class ArkTSMemberReceiver { INSTANCE, STATIC };
 // statements move inside a thunk literal passed to `super(..., ())`, whose
 // value the parent's thunk-taking wrapping constructor stores, because Cangjie
 // requires super(...) to be the constructor's first expression, so a
-// multi-statement construction can only reach it as one thunk value. Either
-// way the ArkTS object is constructed exactly once, by the class's own
+// multi-statement construction can only reach it as one thunk value.
+// PRESET_STRING is the ArkTSString form: the class has no ArkTS class value to
+// resolve and no `new` to run - the wrapper field stores the JS string
+// primitive built by ctx.string, so the constructor converts the Option<String>
+// argument (None becomes the empty string) and assigns it directly.
+// Either way the ArkTS value is produced exactly once, by the class's own
 // constructor; the parent side never constructs again.
-enum class ArkTSConstructorForm { DIRECT, SUPER_THUNK };
+enum class ArkTSConstructorForm { DIRECT, SUPER_THUNK, PRESET_STRING };
 
 // Instance/static member function body. Instance calls run on the stored
 // object reference; static calls resolve the class object through the module
@@ -500,18 +550,23 @@ enum class ArkTSConstructorForm { DIRECT, SUPER_THUNK };
 // caller computes it from the written spelling exactly as the function path
 // does. Every position up to the last Some is forwarded (a None in that range
 // becomes ctx.undefined()) and every optional after the last Some is omitted.
-// Body pseudocode:
-//   ctx = current(); recv = this.ref() or module/namespace getProperty(class)
-//   arg_i = toJS(argument_i); result = recv.callMethod(name, [arg_i...])
-//            (static: recv.getProperty(name).asFunction().call([...], thisArg: recv))
-//   return fromJS(result)   // a Nothing result throws instead
+// The body reads the current context and resolves the receiver (the stored
+// reference for an instance member, the class object through the module or
+// namespace for a static one), converts every argument with the to-JS
+// emitter, calls the named method and returns the converted result; a Nothing
+// result throws instead of returning.
 // ownerKind names the declaration kind in generated runtime-error messages:
 // "class" for a prepared class member, "interface" for a prepared interface
 // member (the interface path reuses this generator for its default bodies).
+// primitiveReceiver selects the ArkTSString preset shape: the stored reference
+// is a JS primitive with no properties, so the member is resolved and called
+// on Object(this.ref()) - the boxed String object - while the stored handle
+// stays the primitive.
 std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSMemberReceiver memberReceiver,
     ArkTSReceiverKind receiver, size_t optionalStart,
-    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs, const std::string& ownerKind = "class");
+    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs, const std::string& ownerKind = "class",
+    bool primitiveReceiver = false);
 
 // Constructor body: resolves the ArkTS class, constructs it with the converted
 // arguments and stores the resulting object reference on the receiver.
@@ -523,10 +578,11 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
 // whose parent is a prepared wrapper (the reference field lives on the root
 // wrapper, so a child constructor forwards the new object through the parent's
 // thunk-taking wrapping constructor instead of assigning a field it does not
-// declare).
-// Body pseudocode:
-//   ctx = current(); clazz = module/namespace getProperty(class).asClass()
-//   object = clazz.new([toJS(argument_i)...]); this.ref() = object.asObject()
+// declare); PRESET_STRING stores the ctx.string primitive directly, with no
+// class resolution at all.
+// The body reads the current context, resolves the class object through the
+// module or namespace and enters it, constructs it with the converted
+// arguments and stores the object reference on the receiver's field.
 std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types, size_t namespaceDepth,
     const std::string& prefix, size_t restIndex, ArkTSReceiverKind receiver, size_t optionalStart,
     std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs,
@@ -538,14 +594,37 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
 // Getter pseudocode:  return fromJS(recv.getProperty(name))
 // Setter pseudocode:  recv.setProperty(name, toJS(argument_0))
 // where recv is this.ref() (instance) or the resolved class value (static).
+// presetStringReceiver selects the ArkTSString preset shape: the stored
+// reference is a primitive, so recv is Object(this.ref()), the boxed String
+// object (a primitive has no properties to read or write).
 std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter,
     ArkTSMemberReceiver memberReceiver, size_t namespaceDepth, const std::string& prefix, ArkTSReceiverKind receiver,
+    std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs, bool presetStringReceiver = false);
+
+// ---- ArkTSFunc<F> construction glue (B4b) ----
+// The splice placeholder of the construction text: the generator writes one
+// call `__cj_arkts_fc_fn(args...)`; the rewriting pass (FuncValueSource)
+// replaces that callee with the user's function value node, never spliced
+// as text. Single-sourced so the two sides cannot drift.
+constexpr const char* ARKTS_FUNC_SPLICE_CALLEE = "__cj_arkts_fc_fn";
+
+// Lowered text of one concrete construction with the carrier description
+// produced by classification (kind ARKTS_FUNC). The text is a temporary
+// declaration the caller parses, detaches from the generated function and
+// checks in place of the original call. It returns the carrier value built
+// from the current context's function value: a lambda reads every info slot
+// through the From-JS guards, invokes the splice callee with the converted
+// arguments and returns the To-JS converted result.
+// `classRefs` receives every reference/enum placeholder emitted for F's
+// positions (the caller binds them, like the lowering walker does for
+// wrappers). Returns "" when the description is not a supported carrier.
+std::string ArkTSFuncConstructionSource(const ArkTSTypeDesc& carrier, const std::string& prefix,
     std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
 
 // ---- Foreign interface member generation ----
-// Call-signature default implementation:
-//   self = this.__cj_arkts_ref_value(); self.toJSValue().asFunction()
-//       .call([toJS(argument_i)...], thisArg: self.toJSValue())
+// The call-signature default implementation reads the wrapper's reference
+// value, converts it to a function and calls it with the converted arguments,
+// passing the same converted reference as the this argument.
 std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     const std::string& prefix, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
 

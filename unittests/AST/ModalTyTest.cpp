@@ -8,6 +8,7 @@
 
 #include "gtest/gtest.h"
 
+#include "../../src/Modules/ASTSerialization/ASTSerializeUtils.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Types.h"
 #include "cangjie/Sema/TypeManager.h"
@@ -226,4 +227,47 @@ TEST(ModalTypeManager, MissingPropertyAccessorHasNoCandidate)
     PropDecl property;
     EXPECT_EQ(TypeCheckUtil::GetUsedMemberDecl(property, true), nullptr);
     EXPECT_EQ(TypeCheckUtil::GetUsedMemberDecl(property, false), nullptr);
+}
+
+// The cjo stores a modal as a plain byte, so a corrupt file can carry a value
+// outside the LocalMode enum. Every out-of-range byte decodes as the default
+// @~local instead of an out-of-range Mode, and the in-range bytes keep their
+// modals.
+TEST(ModalInfoBoundary, DecodedLocalModeOutOfRangeLoadsAsNot)
+{
+    for (const uint8_t raw : {uint8_t{3}, uint8_t{64}, uint8_t{200}, uint8_t{255}}) {
+        flatbuffers::FlatBufferBuilder fbb;
+        auto offset = PackageFormat::CreateMode(fbb, static_cast<PackageFormat::LocalMode>(raw));
+        fbb.Finish(offset);
+        const auto* mode = flatbuffers::GetRoot<PackageFormat::Mode>(fbb.GetBufferPointer());
+        EXPECT_EQ(ReadModal(mode).local, Mode::NOT) << static_cast<int>(raw);
+    }
+    const std::vector<std::pair<uint8_t, Mode>> inRange{{0, Mode::NOT}, {1, Mode::FULL}, {2, Mode::HALF}};
+    for (const auto& [raw, expected] : inRange) {
+        flatbuffers::FlatBufferBuilder fbb;
+        auto offset = PackageFormat::CreateMode(fbb, static_cast<PackageFormat::LocalMode>(raw));
+        fbb.Finish(offset);
+        const auto* mode = flatbuffers::GetRoot<PackageFormat::Mode>(fbb.GetBufferPointer());
+        EXPECT_EQ(ReadModal(mode).local, expected);
+    }
+}
+
+// The slot mapping must stay total: a Mode decoded from a corrupt cjo falls
+// back to the NOT slot instead of indexing out of bounds, and the inverse
+// mapping of an out-of-range index returns the default @~local.
+TEST(ModalInfoBoundary, ToIndexAndToModalInfoStayInRange)
+{
+    EXPECT_EQ(ToIndex(ModalInfo{Mode::NOT}), 0);
+    EXPECT_EQ(ToIndex(ModalInfo{Mode::FULL}), 1);
+    EXPECT_EQ(ToIndex(ModalInfo{Mode::HALF}), 2);
+    EXPECT_EQ(ToIndex(ModalInfo{Mode::IDEAL}), 0);
+    for (const uint8_t raw : {uint8_t{4}, uint8_t{127}, uint8_t{200}, uint8_t{255}}) {
+        EXPECT_EQ(ToIndex(ModalInfo{static_cast<Mode>(raw)}), 0) << static_cast<int>(raw);
+    }
+    EXPECT_EQ(ToModalInfo(0), ModalInfo{Mode::NOT});
+    EXPECT_EQ(ToModalInfo(1), ModalInfo{Mode::FULL});
+    EXPECT_EQ(ToModalInfo(2), ModalInfo{Mode::HALF});
+    for (const int index : {-2, -1, 3, 100}) {
+        EXPECT_EQ(ToModalInfo(index), ModalInfo{}) << index;
+    }
 }

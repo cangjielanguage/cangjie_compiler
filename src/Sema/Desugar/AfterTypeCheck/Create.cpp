@@ -17,7 +17,12 @@ OwnedPtr<TypePattern> CreateRuntimePreparedTypePattern(
     TypeManager& typeManager, OwnedPtr<Pattern> pattern, OwnedPtr<Type>  type, Expr& selector)
 {
     auto typePattern = CreateTypePattern(std::move(pattern), std::move(type), selector);
-    typePattern->matchBeforeRuntime = typeManager.IsSubtype(selector.GetTy(), typePattern->GetTy(), true, false);
+    // The ArkTSType implicit-supertype relation is static-only: a runtime
+    // check must follow the declarations, so this site opts out of it. An
+    // @ArkTS value therefore keeps the ordinary declaration-based `is`/`as`
+    // behavior instead of silently matching every case.
+    typePattern->matchBeforeRuntime =
+        typeManager.IsSubtype(selector.GetTy(), typePattern->GetTy(), true, false, ModalMatchMode::SUBTYPE, false);
     typePattern->needRuntimeTypeCheck =
         !typePattern->matchBeforeRuntime && IsNeedRuntimeCheck(typeManager, selector.DataTy(), typePattern->DataTy());
     return typePattern;

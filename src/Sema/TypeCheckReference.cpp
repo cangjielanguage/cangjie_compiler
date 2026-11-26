@@ -1460,72 +1460,77 @@ void TypeChecker::TypeCheckerImpl::CheckUsageOfDeprecatedWithTarget(
     }
 }
 
+VisitAction TypeChecker::TypeCheckerImpl::CheckDeprecatedUsageNode(const Ptr<Node> usage)
+{
+    if (usage->astKind == ASTKind::ENUM_PATTERN) {
+        return VisitAction::SKIP_CHILDREN;
+    }
+    if (usage->IsDecl()) {
+        auto decl = StaticCast<Decl>(usage);
+        if (decl->TestAttr(AST::Attribute::FROM_COMMON_PART)) {
+            // This was already analyzed during the common compilation and reported.
+            // Additional platform-specific deprecations aren't allowed,
+            // so there's no need to re-run this check.
+            // It is important to skip it because deserialized nodes can lack positions
+            // so reporting deprecations on such nodes is impossible
+            return VisitAction::SKIP_CHILDREN;
+        }
+        if (decl && decl->HasAnno(AnnotationKind::DEPRECATED)) {
+            if (IsDeprecatedStrict(decl) && !strictDeprecatedContext) {
+                strictDeprecatedContext = usage;
+            } else if (!deprecatedContext) {
+                deprecatedContext = usage;
+            }
+        }
+        if (auto cd = As<ASTKind::CLASS_DECL>(usage); cd && cd->body) {
+            CheckOverridingOrRedefinitionOfDeprecated(cd);
+        }
+        if (decl && decl->HasAnno(AnnotationKind::DEPRECATED)) {
+            if (auto cl = DynamicCast<ClassLikeDecl*>(decl); cl) {
+                CheckDeprecationLevelOnInheritors(cl);
+            }
+        }
+        return VisitAction::WALK_CHILDREN;
+    }
+
+    // The ArkTS write-only rule is owned by the NativeFFI stage; this
+    // shared pass only routes a usage that names a property of a prepared
+    // wrapper class to it (the routing helper keeps the cheap gate and the
+    // diagnostic together, so this function stays within its complexity
+    // budget).
+    Native::FFI::ArkTS::CheckArkTSWriteOnlyUsage(*usage, diag);
+    if (usage->astKind == ASTKind::CALL_EXPR) {
+        CheckUsageOfDeprecatedParameters(usage);
+    } else if (usage->astKind == ASTKind::ASSIGN_EXPR) {
+        CheckUsageOfDeprecatedSetter(usage);
+    }
+
+    if (auto target = usage->GetTarget(); target && target != usage) {
+        CheckUsageOfDeprecatedWithTarget(usage, target);
+    }
+
+    return VisitAction::WALK_CHILDREN;
+}
+
+VisitAction TypeChecker::TypeCheckerImpl::RestoreDeprecatedContext(const Ptr<Node> usage)
+{
+    if (deprecatedContext == usage) {
+        deprecatedContext = nullptr;
+    }
+
+    if (strictDeprecatedContext == usage) {
+        strictDeprecatedContext = nullptr;
+    }
+
+    return VisitAction::KEEP_DECISION;
+}
+
 void TypeChecker::TypeCheckerImpl::CheckUsageOfDeprecated(
     Node& node
 )
 {
-    auto enterVisitor = [this](const Ptr<Node> usage) {
-        if (usage->astKind == ASTKind::ENUM_PATTERN) {
-            return VisitAction::SKIP_CHILDREN;
-        }
-        if (usage->IsDecl()) {
-            auto decl = StaticCast<Decl>(usage);
-            if (decl->TestAttr(AST::Attribute::FROM_COMMON_PART)) {
-                // This was already analyzed during the common compilation and reported.
-                // Additional platform-specific deprecations aren't allowed,
-                // so there's no need to re-run this check.
-                // It is important to skip it because deserialized nodes can lack positions
-                // so reporting deprecations on such nodes is impossible
-                return VisitAction::SKIP_CHILDREN;
-            }
-            if (decl && decl->HasAnno(AnnotationKind::DEPRECATED)) {
-                if (IsDeprecatedStrict(decl) && !strictDeprecatedContext) {
-                    strictDeprecatedContext = usage;
-                } else if (!deprecatedContext) {
-                    deprecatedContext = usage;
-                }
-            }
-            if (auto cd = As<ASTKind::CLASS_DECL>(usage); cd && cd->body) {
-                CheckOverridingOrRedefinitionOfDeprecated(cd);
-            }
-            if (decl && decl->HasAnno(AnnotationKind::DEPRECATED)) {
-                if (auto cl = DynamicCast<ClassLikeDecl*>(decl); cl) {
-                    CheckDeprecationLevelOnInheritors(cl);
-                }
-            }
-            return VisitAction::WALK_CHILDREN;
-        }
-
-        // The ArkTS write-only rule is owned by the NativeFFI stage; this
-        // shared pass only routes a usage that names a property of a prepared
-        // wrapper class to it (the routing helper keeps the cheap gate and the
-        // diagnostic together, so this function stays within its complexity
-        // budget).
-        Native::FFI::ArkTS::CheckArkTSWriteOnlyUsage(*usage, diag);
-        if (usage->astKind == ASTKind::CALL_EXPR) {
-            CheckUsageOfDeprecatedParameters(usage);
-        } else if (usage->astKind == ASTKind::ASSIGN_EXPR) {
-            CheckUsageOfDeprecatedSetter(usage);
-        }
-
-        if (auto target = usage->GetTarget(); target && target != usage) {
-            CheckUsageOfDeprecatedWithTarget(usage, target);
-        }
-
-        return VisitAction::WALK_CHILDREN;
-    };
-
-    auto exitVisitor = [this](const Ptr<Node> usage) {
-        if (deprecatedContext == usage) {
-            deprecatedContext = nullptr;
-        }
-
-        if (strictDeprecatedContext == usage) {
-            strictDeprecatedContext = nullptr;
-        }
-
-        return VisitAction::KEEP_DECISION;
-    };
+    auto enterVisitor = [this](const Ptr<Node> usage) { return CheckDeprecatedUsageNode(usage); };
+    auto exitVisitor = [this](const Ptr<Node> usage) { return RestoreDeprecatedContext(usage); };
 
     Walker(&node, enterVisitor, exitVisitor).Walk();
 }

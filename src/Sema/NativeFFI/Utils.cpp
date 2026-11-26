@@ -317,14 +317,21 @@ Ptr<std::string> GetSingleArgumentAnnotationValue(const Decl& target, Annotation
             continue;
         }
 
-        if (anno->args.size() != 1) {
+        if (anno->args.size() != 1 || anno->TestAttr(Attribute::IS_BROKEN)) {
             break;
         }
 
-        CJC_ASSERT(anno->args.size() == 1);
-        CJC_ASSERT(anno->args[0]->expr->astKind == ASTKind::LIT_CONST_EXPR);
-        auto lce = As<ASTKind::LIT_CONST_EXPR>(anno->args[0]->expr.get());
-        CJC_ASSERT(lce);
+        // A malformed annotation keeps its argument expression but the parser
+        // refuses anything that is not a string literal; only a string literal
+        // has a readable value here, so anything else yields null.
+        const auto& expr = anno->args[0]->expr;
+        if (expr == nullptr || expr->astKind != ASTKind::LIT_CONST_EXPR) {
+            break;
+        }
+        auto lce = As<ASTKind::LIT_CONST_EXPR>(expr.get());
+        if (lce->kind != LitConstKind::STRING) {
+            break;
+        }
 
         return &lce->stringValue;
     }

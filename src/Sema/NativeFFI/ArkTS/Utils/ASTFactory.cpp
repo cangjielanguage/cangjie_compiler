@@ -24,25 +24,11 @@ namespace Cangjie::Native::FFI::ArkTS {
 // required and no short name can be captured by a same-named user declaration.
 // This function returns text only; CreateEntry binds the original declaration
 // and exported name after parsing. The source entry itself remains unchanged.
-// Source example:
-//   @ArkTS public func run(): Unit { println(42) }
-// Generated declarations:
-//   func __cj_arkts_entry_0(__cj_arkts_ctx: ark_interop.JSContext,
-//       _: ark_interop.JSCallInfo): ark_interop.JSValue {
-//       let previous = cj_arkts_context_v1.__cj_arkts_enter(__cj_arkts_ctx)
-//       try { run(); return __cj_arkts_ctx.undefined().toJSValue() }
-//       finally { cj_arkts_context_v1.__cj_arkts_restore(previous) }
-//   }
-//   let __cj_arkts_registration_0 = ark_interop.JSModule.registerFunc(
-//       "run", __cj_arkts_entry_0)
-// Generated CJ pseudocode (prefix/suffix are compiler-owned names):
-//   func entry(ctx: ark_interop.JSContext,
-//       _: ark_interop.JSCallInfo): ark_interop.JSValue {
-//       previous = cj_arkts_context_v1.__cj_arkts_enter(ctx)
-//       try { original(); return ctx.undefined().toJSValue() }
-//       finally { cj_arkts_context_v1.__cj_arkts_restore(previous) }
-//   }
-//   let registration = ark_interop.JSModule.registerFunc("<actual entry name>", entry)
+// For an entry named `run`, the returned text declares a callback taking the
+// context and call info that enters the context, calls the entry and returns
+// the context's undefined value converted to JSValue inside the try, restores
+// the saved context in the finally block, and is followed by a variable that
+// registers the callback with ark_interop.JSModule under the entry name.
 // Parse the skeleton first; rebind original's RefExpr and the registration
 // string literal to the source declaration. User text never becomes CJ syntax.
 std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string& prefix)
@@ -64,12 +50,12 @@ std::string ArkTSEntryWrapperSource(const std::string& suffix, const std::string
 // The returned nodes are not yet appended to File.decls. Their curFile/ranges
 // refer to run's source file, call(run).ref.target is run, and both roots carry
 // COMPILER_ADD. PrepareTypeCheck attaches and mangles them; run is not rewritten.
-// AST construction pseudocode:
-//   parse the compiler-owned skeleton; retain each declaration only after its
-//   source positions and all File pointers refer to the permanent source file;
-//   bind the original function and exported-name placeholder as AST values;
-//   mark each generated root declaration so preparation can distinguish its
-//   callback/registration pair from user declarations during a repeated pass.
+// The construction parses the compiler-owned skeleton and retains each
+// declaration only after its source positions and all File pointers refer to
+// the permanent source file; it binds the original function and exported-name
+// placeholder as AST values and marks each generated root declaration so
+// preparation can distinguish its callback/registration pair from user
+// declarations during a repeated pass.
 // User identifiers and literal strings never become generated source syntax.
 std::vector<OwnedPtr<Decl>> Native::FFI::ArkTS::ASTFactory::CreateEntry(
     FuncDecl& entry, const std::string& suffix, const std::string& prefix) const

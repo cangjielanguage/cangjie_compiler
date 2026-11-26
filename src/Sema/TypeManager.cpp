@@ -88,6 +88,61 @@ bool TypeManager::IsCopyInterfaceTy(DataTy ty) const
     return false;
 }
 
+namespace {
+// The stdlib package that declares the ArkTS preset interop types. Pinned by
+// full package name, the way BigInt is pinned to std.math.numeric and Copy to
+// std.core: a same-named declaration in any other package stays ordinary.
+const std::string ARKTS_PRESET_PACKAGE_NAME = "std.interop.arkts";
+const std::string ARKTS_ROOT_TYPE_NAME = "ArkTSType";
+const std::string ARKTS_ARRAY_TYPE_NAME = "ArkTSArray";
+const std::string ARKTS_STRING_TYPE_NAME = "ArkTSString";
+} // namespace
+
+// The ArkTSType root interface is recognized by its declaring package and name
+// only, so the relation does not depend on the interface carrying the @ArkTS
+// marker in a consumer's CJO.
+bool TypeManager::IsArkTSRootInterface(const Ty& root) const
+{
+    if (!root.IsInterface()) {
+        return false;
+    }
+    auto& interfaceTy = static_cast<const InterfaceTy&>(root);
+    return interfaceTy.decl != nullptr && interfaceTy.decl->fullPackageName == ARKTS_PRESET_PACKAGE_NAME &&
+        interfaceTy.decl->identifier == ARKTS_ROOT_TYPE_NAME;
+}
+
+// Every @ArkTS-annotated class-like declaration participates: foreign classes,
+// interfaces and enums, their prepared wrappers, and the preset types that
+// carry the annotation (ArkTSType, ArkTSArray, ArkTSString, ArkTSFunc). The
+// preset names are also matched by package pin so a prebuilt CJO that predates
+// the annotation-marker round trip still behaves. Extern<ArkTS> (the dynamic
+// carrier, design §8.1) is included when its payload is ArkTS-compatible.
+// Primitive, Option, Array and tuple composites are deliberately absent: the
+// design maps them structurally at the boundary, never as ArkTSType subtypes.
+bool TypeManager::IsArkTSCompatibleLeaf(const Ty& leaf, bool implicitBoxed) const
+{
+    if (auto decl = Ty::GetDeclOfTy(&leaf)) {
+        if (decl->TestAttr(Attribute::ARKTS)) {
+            return true;
+        }
+        if (decl->fullPackageName == ARKTS_PRESET_PACKAGE_NAME &&
+            (decl->identifier == ARKTS_ROOT_TYPE_NAME || decl->identifier == ARKTS_ARRAY_TYPE_NAME ||
+                decl->identifier == ARKTS_STRING_TYPE_NAME)) {
+            return true;
+        }
+    }
+    // Extern<ArkTS> is a struct carrier: it can only satisfy the interface by
+    // implicit boxing, so it participates only where boxing is allowed.
+    if (implicitBoxed && leaf.IsCoreExternType()) {
+        auto& externTy = static_cast<const StructTy&>(leaf);
+        if (!externTy.typeArgs.empty() && externTy.typeArgs[0] != nullptr &&
+            IsArkTSCompatibleLeaf(*externTy.typeArgs[0], implicitBoxed)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static std::vector<PrimitiveTy> GeneratePrimitiveTys()
 {
     std::vector<PrimitiveTy> tys;
@@ -763,36 +818,53 @@ bool TypeManager::IsPlaceholderSubtype(
     return false;
 }
 
-bool TypeManager::IsGenericSubtype(Ty& leaf, Ty& root, bool implicitBoxed, bool allowOptionBox)
+// Subtyping with a generic leaf: the 'Any' target needs implicit boxing, a
+// direct upper bound matches, a legal alias parameter is accepted, and
+// otherwise some upper bound must reach the root through subtyping. Returns
+// false when no upper bound reaches the root.
+bool TypeManager::IsGenericLeafSubtype(
+    GenericsTy& gTy, Ty& root, bool implicitBoxed, bool allowOptionBox, bool includeArkTSImplicitSupertype)
+{
+    if (root.IsAny() && !implicitBoxed) {
+        // If implicit box is not allowed and the target type is 'Any',
+        // only return true when there exists any class type upper found.
+        return std::any_of(gTy.upperBounds.begin(), gTy.upperBounds.end(), [](auto it) { return it->IsClass(); });
+    }
+    // NOTE: transmitting upperBound of generic types are flattened in 'PreCheck' step.
+    // If the constraint can be found in typeConstraintCollection, return true.
+    if (gTy.upperBounds.find(&root) != gTy.upperBounds.end()) {
+        return true;
+    }
+    if (!gTy.isUpperBoundLegal) {
+        return false;
+    }
+    if (gTy.isAliasParam) {
+        return true;
+    }
+    for (auto& upperbound : gTy.upperBounds) {
+        if (IsSubtype(
+            upperbound, &root, implicitBoxed, allowOptionBox, std::nullopt, std::nullopt,
+            includeArkTSImplicitSupertype)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TypeManager::IsGenericSubtype(
+    Ty& leaf, Ty& root, bool implicitBoxed, bool allowOptionBox, bool includeArkTSImplicitSupertype)
 {
     if (leaf.IsGeneric()) {
-        auto& gTy = static_cast<GenericsTy&>(leaf);
-        if (root.IsAny() && !implicitBoxed) {
-            // If implicit box is not allowed and the target type is 'Any',
-            // only return true when there exists any class type upper found.
-            return std::any_of(gTy.upperBounds.begin(), gTy.upperBounds.end(), [](auto it) { return it->IsClass(); });
-        }
-        // NOTE: transmitting upperBound of generic types are flattened in 'PreCheck' step.
-        // If the constraint can be found in typeConstraintCollection, return true.
-        if (gTy.upperBounds.find(&root) != gTy.upperBounds.end()) {
+        if (IsGenericLeafSubtype(static_cast<GenericsTy&>(leaf), root, implicitBoxed, allowOptionBox,
+            includeArkTSImplicitSupertype)) {
             return true;
-        }
-        if (!gTy.isUpperBoundLegal) {
-            return false;
-        }
-        if (gTy.isAliasParam) {
-            return true;
-        }
-        for (auto& upperbound : gTy.upperBounds) {
-            if (IsSubtype(upperbound, &root, implicitBoxed, allowOptionBox)) {
-                return true;
-            }
         }
     }
     if (leaf.kind == TypeKind::TYPE_INTERSECTION) {
         auto& iSectTy = static_cast<IntersectionTy&>(leaf);
         for (auto& ty : iSectTy.tys) {
-            if (IsSubtype(ty, &root, implicitBoxed, allowOptionBox)) {
+            if (IsSubtype(ty, &root, implicitBoxed, allowOptionBox, std::nullopt, std::nullopt,
+                    includeArkTSImplicitSupertype)) {
                 return true;
             }
         }
@@ -801,7 +873,8 @@ bool TypeManager::IsGenericSubtype(Ty& leaf, Ty& root, bool implicitBoxed, bool 
         auto& iSectTy = static_cast<IntersectionTy&>(root);
         auto success = true;
         for (auto& ty : iSectTy.tys) {
-            success = success && IsSubtype(&leaf, ty, implicitBoxed, allowOptionBox);
+            success = success && IsSubtype(&leaf, ty, implicitBoxed, allowOptionBox, std::nullopt,
+                std::nullopt, includeArkTSImplicitSupertype);
         }
         return success;
     }
@@ -809,7 +882,8 @@ bool TypeManager::IsGenericSubtype(Ty& leaf, Ty& root, bool implicitBoxed, bool 
         auto& unionTy = static_cast<UnionTy&>(leaf);
         auto success = true;
         for (auto& ty : unionTy.tys) {
-            success = success && IsSubtype(ty, &root, implicitBoxed, allowOptionBox);
+            success = success && IsSubtype(ty, &root, implicitBoxed, allowOptionBox, std::nullopt,
+                                      std::nullopt, includeArkTSImplicitSupertype);
         }
         return success;
     }
@@ -835,16 +909,18 @@ bool IsCommonAndSpecificRelation(const Ty& leafTy, const Ty& rootTy)
     return false;
 }
 
-bool TypeManager::IsClassLikeSubtype(Ty& leaf, Ty& root, bool implicitBoxed, bool allowOptionBox)
+bool TypeManager::IsClassLikeSubtype(
+    Ty& leaf, Ty& root, bool implicitBoxed, bool allowOptionBox, bool includeArkTSImplicitSupertype)
 {
     if (auto thisTyOfLeaf = DynamicCast<ClassThisTy*>(&leaf); thisTyOfLeaf && thisTyOfLeaf->declPtr) {
         auto leafClassTy = GetClassTy(*thisTyOfLeaf->declPtr, thisTyOfLeaf->TyArgs());
         if (auto thisTyOfRoot = DynamicCast<ClassThisTy*>(&root); thisTyOfRoot && thisTyOfRoot->declPtr) {
             // 'root' is class type, must not exist boxing relation.
-            return IsSubtype(
-                leafClassTy, GetClassTy(*thisTyOfRoot->declPtr, thisTyOfRoot->TyArgs()), implicitBoxed, allowOptionBox);
+            return IsSubtype(leafClassTy, GetClassTy(*thisTyOfRoot->declPtr, thisTyOfRoot->TyArgs()), implicitBoxed,
+                allowOptionBox, std::nullopt, std::nullopt, includeArkTSImplicitSupertype);
         }
-        return IsSubtype(leafClassTy, &root, implicitBoxed, allowOptionBox);
+        return IsSubtype(leafClassTy, &root, implicitBoxed, allowOptionBox, std::nullopt, std::nullopt,
+            includeArkTSImplicitSupertype);
     }
     if (leaf.IsClassLike() && root.IsClassLike()) {
         // Types are class like, only may existing extend boxing relation.
@@ -906,7 +982,8 @@ bool TypeManager::IsClassTyEqual(Ty& leaf, Ty& root)
         std::all_of(leaf.typeArgs.begin(), leaf.typeArgs.end(), predFunc);
 }
 
-bool TypeManager::IsStructOrEnumSubtype(Ty& leaf, Ty& root, bool implicitBoxed, bool allowOptionBox)
+bool TypeManager::IsStructOrEnumSubtype(
+    Ty& leaf, Ty& root, bool implicitBoxed, bool allowOptionBox, bool includeArkTSImplicitSupertype)
 {
     auto b1 = Is<RefEnumTy>(leaf) && Is<EnumTy>(root);
     auto b2 = Is<RefEnumTy>(root) && Is<EnumTy>(leaf);
@@ -938,7 +1015,8 @@ bool TypeManager::IsStructOrEnumSubtype(Ty& leaf, Ty& root, bool implicitBoxed, 
         if (root.IsCoreOptionType() && allowOptionBox &&
             CountOptionNestedLevel(&leaf) < CountOptionNestedLevel(&root)) {
             // Core's enum Option check, support for auto package Option.
-            return IsSubtype(&leaf, root.TyArg(0), implicitBoxed);
+            return IsSubtype(&leaf, root.TyArg(0), implicitBoxed, true, std::nullopt, std::nullopt,
+                includeArkTSImplicitSupertype);
         }
 
         if (leaf.IsEnum() && root.kind == TypeKind::TYPE_INTERFACE) {
@@ -951,28 +1029,31 @@ bool TypeManager::IsStructOrEnumSubtype(Ty& leaf, Ty& root, bool implicitBoxed, 
     return false;
 }
 
-bool TypeManager::IsFuncSubtype(const Ty& leaf, const Ty& root)
+bool TypeManager::IsFuncSubtype(const Ty& leaf, const Ty& root, bool includeArkTSImplicitSupertype)
 {
     if (!leaf.IsFunc() || !root.IsFunc()) {
         return false;
     }
     auto& leafFuncType = static_cast<const FuncTy&>(leaf);
     auto& rootFuncType = static_cast<const FuncTy&>(root);
-    if (IsFuncParametersSubtype(leafFuncType, rootFuncType)) {
+    if (IsFuncParametersSubtype(leafFuncType, rootFuncType, includeArkTSImplicitSupertype)) {
         bool noCast = leafFuncType.noCast || rootFuncType.noCast;
-        return IsSubtype(leafFuncType.retTy, rootFuncType.retTy, noCast, true, ModalMatchMode::NON_COPY);
+        return IsSubtype(leafFuncType.retTy, rootFuncType.retTy, noCast, true, ModalMatchMode::NON_COPY,
+            includeArkTSImplicitSupertype);
     }
     return false;
 }
 
-bool TypeManager::IsFuncParametersSubtype(const FuncTy& leaf, const FuncTy& root)
+bool TypeManager::IsFuncParametersSubtype(
+    const FuncTy& leaf, const FuncTy& root, bool includeArkTSImplicitSupertype)
 {
     bool noCast = leaf.noCast || root.noCast;
     if (leaf.paramTys.size() == root.paramTys.size()) {
         bool result = true;
         for (size_t i = 0; i < leaf.paramTys.size(); i++) {
             // Contravariant params: no copy-type mode erasure as subtyping basis.
-            result = result && IsSubtype(root.paramTys[i], leaf.paramTys[i], noCast, true, ModalMatchMode::NON_COPY);
+            result = result && IsSubtype(root.paramTys[i], leaf.paramTys[i], noCast, true,
+                ModalMatchMode::NON_COPY, includeArkTSImplicitSupertype);
             if (!result) {
                 return false;
             }
@@ -984,11 +1065,12 @@ bool TypeManager::IsFuncParametersSubtype(const FuncTy& leaf, const FuncTy& root
     return false;
 }
 
-bool TypeManager::IsTupleSubtype(const Ty& leaf, const Ty& root)
+bool TypeManager::IsTupleSubtype(const Ty& leaf, const Ty& root, bool includeArkTSImplicitSupertype)
 {
     if (leaf.IsTuple() && root.IsTuple() && leaf.typeArgs.size() == root.typeArgs.size()) {
         for (size_t i = 0; i < leaf.typeArgs.size(); i++) {
-            if (!IsSubtype(leaf.typeArgs[i], root.typeArgs[i], false)) {
+            if (!IsSubtype(leaf.typeArgs[i], root.typeArgs[i], false, true, ModalMatchMode::SUBTYPE,
+                includeArkTSImplicitSupertype)) {
                 return false;
             }
         }
@@ -1079,7 +1161,8 @@ bool TypeManager::IsPrimitiveSubtype(const Ty& leaf, Ty& root)
 // covariant & contravariant are both not allowed for elements' value types (implementing interfaces)
 // and class type (when implementing interfaces by extend). For this situation, implicitBoxed is false.
 bool TypeManager::IsSubtype(
-    ModalTy leaf, ModalTy root, bool implicitBoxed, bool allowOptionBox, ModalMatchMode modalMatchMode)
+    ModalTy leaf, ModalTy root, bool implicitBoxed, bool allowOptionBox, ModalMatchMode modalMatchMode,
+    bool includeArkTSImplicitSupertype)
 {
     if (!leaf.IsCorrect() || !root.IsCorrect()) {
         return false;
@@ -1113,14 +1196,17 @@ bool TypeManager::IsSubtype(
     // as the placeholder's upper bound for SolveLamExprParamTys's modal re-application.
     if (modalSubtyping && (leaf.Ty()->IsPlaceholder() || root.Ty()->IsPlaceholder())) {
         return modalSubtyping &&
-            IsSubtype(leaf.Ty(), root.Ty(), implicitBoxed, allowOptionBox, leaf.Mode(), root.Mode());
+            IsSubtype(leaf.Ty(), root.Ty(), implicitBoxed, allowOptionBox, leaf.Mode(), root.Mode(),
+                includeArkTSImplicitSupertype);
     }
-    return modalSubtyping && IsSubtype(leaf.Ty(), root.Ty(), implicitBoxed, allowOptionBox);
+    return modalSubtyping &&
+        IsSubtype(leaf.Ty(), root.Ty(), implicitBoxed, allowOptionBox, std::nullopt, std::nullopt,
+            includeArkTSImplicitSupertype);
 }
 
 bool TypeManager::IsSubtype(
     DataTy leaf, DataTy root, bool implicitBoxed, bool allowOptionBox, std::optional<ModalInfo> leafModal,
-    std::optional<ModalInfo> rootModal)
+    std::optional<ModalInfo> rootModal, bool includeArkTSImplicitSupertype)
 {
     // NOTE: all cffi types are not classLike type, so using conditions as below.
     bool ffiFastCheck = (leaf->IsMetCType() && root->IsCType());
@@ -1136,8 +1222,20 @@ bool TypeManager::IsSubtype(
     if (root->IsNothing()) {
         return false;
     }
+    // Compiler-special ArkTSType implicit supertype (design §3.3): every
+    // @ArkTS-annotated type and the stdlib ArkTS presets implement the root
+    // interface std.interop.arkts.ArkTSType. The rule is declaration-stable, but
+    // it is returned before the cache is consulted or filled: the static-only
+    // opt-out (includeArkTSImplicitSupertype == false) must never read an answer
+    // the relation produced. Runtime-check sites pass false; every static
+    // question keeps the default true.
+    if (includeArkTSImplicitSupertype && IsArkTSRootInterface(*root) &&
+        IsArkTSCompatibleLeaf(*leaf, implicitBoxed)) {
+        return true;
+    }
     // Note: this cache is NOT for speedup, but to avoid recursive judgement on same types
-    SubtypeCacheKey cacheKey(leaf, root, implicitBoxed, allowOptionBox);
+    SubtypeCacheKey cacheKey(leaf, root, implicitBoxed, allowOptionBox, ModalMatchMode::SUBTYPE,
+        includeArkTSImplicitSupertype);
     auto cacheResult = subtypeCache.find(cacheKey);
     if (cacheResult != subtypeCache.cend()) {
         return cacheResult->second;
@@ -1147,17 +1245,17 @@ bool TypeManager::IsSubtype(
         cacheEntry->second = true;
     } else if (IsPlaceholderSubtype(*leaf, *root, leafModal, rootModal)) {
         cacheEntry->second = true;
-    } else if (IsGenericSubtype(*leaf, *root, implicitBoxed, allowOptionBox)) {
+    } else if (IsGenericSubtype(*leaf, *root, implicitBoxed, allowOptionBox, includeArkTSImplicitSupertype)) {
         cacheEntry->second = true;
-    } else if (IsClassLikeSubtype(*leaf, *root, implicitBoxed, allowOptionBox)) {
+    } else if (IsClassLikeSubtype(*leaf, *root, implicitBoxed, allowOptionBox, includeArkTSImplicitSupertype)) {
         cacheEntry->second = true;
     } else if (IsPointerSubtype(*leaf, *root)) {
         cacheEntry->second = true;
-    } else if (IsStructOrEnumSubtype(*leaf, *root, implicitBoxed, allowOptionBox)) {
+    } else if (IsStructOrEnumSubtype(*leaf, *root, implicitBoxed, allowOptionBox, includeArkTSImplicitSupertype)) {
         cacheEntry->second = true;
-    } else if (IsFuncSubtype(*leaf, *root)) {
+    } else if (IsFuncSubtype(*leaf, *root, includeArkTSImplicitSupertype)) {
         cacheEntry->second = true;
-    } else if (IsTupleSubtype(*leaf, *root)) {
+    } else if (IsTupleSubtype(*leaf, *root, includeArkTSImplicitSupertype)) {
         cacheEntry->second = true;
     } else if (IsArraySubtype(*leaf, *root)) {
         cacheEntry->second = true;

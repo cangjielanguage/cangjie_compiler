@@ -514,7 +514,7 @@ void DiagnoseArkTSWriteOnlyPlacement(Package& pkg, DiagnosticEngine& diag)
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_write_only_placement_invalid, *annotation, reason);
             // The annotation itself is refused; the declaration stays usable
             // for the rest of the package, except a foreign owner whose
-            // wrapper shape can no longer be built.
+            // wrapper shape cannot be built.
             annotation->EnableAttr(Attribute::IS_BROKEN);
             MarkForeignOwnerBroken(decl->outerDecl);
             return VisitAction::WALK_CHILDREN;

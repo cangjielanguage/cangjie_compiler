@@ -19,8 +19,17 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include "cangjie/AST/ASTCasting.h"
+#include "cangjie/AST/Types.h"
 
 namespace Cangjie::Native::FFI::ArkTS {
+namespace {
+// A tuple that maps to the ArkTS tuple shape needs at least two elements.
+constexpr size_t MIN_TUPLE_ARITY = 2;
+// ArkTSFunc<F> carries exactly one type argument; anything else is not the
+// carrier shape the constraint rules describe (a stale or hand-written form).
+constexpr size_t ARKTS_FUNC_TYPE_ARGUMENTS = 1;
+} // namespace
 using namespace Cangjie::AST;
 
 // Checked scalar names (the checked scalar table): the number candidates
@@ -75,7 +84,31 @@ std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpe
             if (reference) {
                 return reference(desc);
             }
+            if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE && desc.reference &&
+                IsArkTSPresetArray(*desc.reference) && desc.elements.size() == 1) {
+                // The generic preset array spells its type argument in
+                // diagnostic text, matching the construction spelling.
+                return desc.reference->identifier.Val() + "<" +
+                    ArkTSTypeDescName(desc.elements.front(), reference) + ">";
+            }
             return desc.reference ? desc.reference->identifier.Val() : std::string{};
+        case ArkTSTypeDesc::Kind::ARKTS_FUNC: {
+            // "ArkTSFunc<(Int32, Point) -> Option<String>>": the function-type
+            // spelling is built from the parameter and result descriptions with
+            // the same reference callback, so generated type positions get the
+            // placeholder spelling and diagnostics get the class identifier.
+            std::vector<std::string> names;
+            names.reserve(desc.elements.size());
+            for (auto& element : desc.elements) {
+                names.emplace_back(ArkTSTypeDescName(element, reference));
+            }
+            std::string spelling = "(" + ArkTSJoin(names, ", ") + ")";
+            // The result is always spelled: a parenthesized type is a tuple
+            // shape, not `-> Unit`, and generated type positions must carry
+            // the exact function type.
+            return std::string(desc.reference ? desc.reference->identifier.Val() : "ArkTSFunc") + "<" + spelling +
+                " -> " + ArkTSTypeDescName(desc.FuncResult(), reference) + ">";
+        }
         case ArkTSTypeDesc::Kind::UNSUPPORTED:
             break;
     }
@@ -124,6 +157,32 @@ ArkTSTypeDesc ArkTSClassifyReferenceLeaf(Ptr<Decl> decl, ImportManager* imports)
     return desc;
 }
 
+// The prepared generic preset array `ArkTSArray<T>`: a reference leaf whose
+// single element description records the written type argument. The element
+// conversion itself lives in the prepared generic member bodies (the runtime
+// declares the class under `T <: JSInteropType<T>`), so a position only needs
+// the argument to map its construction spelling `ArkTSArray<T'>(...)` and its
+// diagnostic name. A position without exactly one type argument, an element
+// that does not itself map, and an element carrying Nothing (no values exist,
+// so no JSInteropType conformance can accept it) or a prepared-interface
+// reference (the AR-06 container rule arrays share) stay unsupported.
+ArkTSTypeDesc ArkTSClassifyPresetArrayLeaf(Ptr<Decl> decl, const Ty& ty, ImportManager* imports)
+{
+    ArkTSTypeDesc desc;
+    if (ty.typeArgs.size() != 1) {
+        return desc;
+    }
+    auto element = ArkTSClassifyType(ty.typeArgs.front().Ty(), imports);
+    if (element.kind == ArkTSTypeDesc::Kind::UNSUPPORTED || ArkTSTypeDescContainsNothing(element) ||
+        ArkTSTypeDescContainsInterfaceReference(element)) {
+        return desc;
+    }
+    desc.kind = ArkTSTypeDesc::Kind::REFERENCE;
+    desc.reference = decl;
+    desc.elements.emplace_back(std::move(element));
+    return desc;
+}
+
 // An @ArkTS foreign enum that went through enumeration preparation carries
 // ARKTS_LOWERED; lowering attaches the member value table afterwards. The
 // reference field is reused for the enum declaration, mirroring REFERENCE.
@@ -152,17 +211,105 @@ ArkTSTypeDesc ArkTSClassifyTupleType(const Ty& ty, ImportManager* imports, bool 
     }
     return desc;
 }
+
+// ArkTSFunc<F> carrier decision: `F` must be a function type (design 3.5),
+// every parameter and the result must be an ArkTS-compatible position, and
+// `F` must not mention an enclosing declaration's type parameter (4.2.1 e3/e4:
+// the per-F glue is generated once per concrete F, so a type parameter has
+// nothing to instantiate against). The reject field records the first failed
+// rule for the dedicated diagnostics; the positive path returns an
+// ARKTS_FUNC description whose elements are the parameter descriptions, whose
+// funcResult is the result description and whose funcTy is the resolved F.
+// A zero-parameter F yields an empty elements list, so callers must not read
+// "no elements" as "no parameters checked"; the kind decides.
+struct ArkTSFuncCarrierDecision {
+    ArkTSTypeDesc desc;
+    ArkTSFuncCarrierReject reject{ArkTSFuncCarrierReject::NONE};
+};
+
+ArkTSFuncCarrierDecision DecideArkTSFuncCarrier(Ptr<Ty> carrierTy, ImportManager* imports, bool allowNestedOptional)
+{
+    ArkTSFuncCarrierDecision decision;
+    auto& ty = *carrierTy;
+    if (ty.typeArgs.size() != ARKTS_FUNC_TYPE_ARGUMENTS) {
+        decision.reject = ArkTSFuncCarrierReject::NOT_A_FUNCTION;
+        return decision;
+    }
+    auto funcTy = DynamicCast<FuncTy>(ty.typeArgs.front().Ty());
+    if (funcTy == nullptr || funcTy->HasQuestTy()) {
+        decision.reject = ArkTSFuncCarrierReject::NOT_A_FUNCTION;
+        return decision;
+    }
+    if (funcTy->HasGeneric()) {
+        decision.reject = ArkTSFuncCarrierReject::OUTER_GENERIC;
+        return decision;
+    }
+    std::vector<ArkTSTypeDesc> params;
+    for (auto& param : funcTy->paramTys) {
+        auto inner = ArkTSClassifyType(param.Ty(), imports, allowNestedOptional);
+        if (inner.kind == ArkTSTypeDesc::Kind::UNSUPPORTED) {
+            // The failing leaf may itself be a carrier whose own constraint
+            // broke: name that rule instead of the generic member message.
+            auto nested = ArkTSFuncCarrierRejectReason(param.Ty());
+            decision.reject = nested != ArkTSFuncCarrierReject::NONE ? nested
+                                                                       : ArkTSFuncCarrierReject::UNSUPPORTED_MEMBER;
+            return decision;
+        }
+        if (ArkTSTypeDescContainsNothing(inner)) {
+            decision.reject = ArkTSFuncCarrierReject::UNSUPPORTED_MEMBER;
+            return decision;
+        }
+        params.emplace_back(std::move(inner));
+    }
+    auto result = ArkTSClassifyType(funcTy->retTy.Ty(), imports, allowNestedOptional);
+    if (result.kind == ArkTSTypeDesc::Kind::UNSUPPORTED) {
+        auto nested = ArkTSFuncCarrierRejectReason(funcTy->retTy.Ty());
+        decision.reject = nested != ArkTSFuncCarrierReject::NONE ? nested
+                                                                 : ArkTSFuncCarrierReject::UNSUPPORTED_MEMBER;
+        return decision;
+    }
+    decision.desc.kind = ArkTSTypeDesc::Kind::ARKTS_FUNC;
+    decision.desc.reference = Ty::GetDeclPtrOfTy(carrierTy);
+    decision.desc.funcTy = ty.typeArgs.front().Ty();
+    decision.desc.elements = std::move(params);
+    decision.desc.funcResult = std::make_shared<ArkTSTypeDesc>(std::move(result));
+    return decision;
+}
 } // namespace
+
+// Diagnostic routing for a refused ArkTSFunc<F> position: package-pinned
+// recognition (same pin as the classification branch below), then the failed
+// constraint. Every other type reports NONE and keeps the generic
+// unsupported-type or deferral message.
+ArkTSFuncCarrierReject ArkTSFuncCarrierRejectReason(Ptr<Ty> ty)
+{
+    if (!Ty::IsTyCorrect(ty)) {
+        return ArkTSFuncCarrierReject::NONE;
+    }
+    auto decl = Ty::GetDeclPtrOfTy(ty);
+    if (decl == nullptr || !IsArkTSPresetFunc(*decl)) {
+        return ArkTSFuncCarrierReject::NONE;
+    }
+    auto decision = DecideArkTSFuncCarrier(ty, nullptr, false);
+    if (decision.desc.kind == ArkTSTypeDesc::Kind::ARKTS_FUNC) {
+        return ArkTSFuncCarrierReject::NONE;
+    }
+    return decision.reject;
+}
 
 // Classification: scalars resolve through the checked whitelist
 // (ArkTSScalarName); std.core Option<T> -> OPTIONAL, std.core Array<T> ->
 // ARRAY_COPY (copy semantics), an Option directly nested in another Option
 // or an unsupported element refusing the whole position; array and tuple
 // elements may be REFERENCE nodes, also under an OPTIONAL element; tuples
-// need >= 2 supported elements; every
-// ArkTSArray-named class (the stdlib preset included) is unsupported -
-// its reference semantics is deferred; so is everything else (IntNative,
-// Map/Set/TypedArray and friends, function types, same-name user decls).
+// need >= 2 supported elements; the package-pinned prepared generic preset
+// array `ArkTSArray<T'>` maps to a REFERENCE leaf carrying its element
+// description, and every other ArkTSArray-named class stays unsupported;
+// the package-pinned ArkTSFunc<F>
+// carrier classifies as ARKTS_FUNC when F satisfies the function-type
+// constraints (a bare function type and everything else stay unsupported);
+// so is IntNative,
+// Map/Set/TypedArray and the remaining composite kinds.
 // The Option/Array rows: decided by Ty::IsCoreOptionType()/IsStructArray(),
 // no declaration name is matched here; the package-pinned recognition for
 // diagnostics lives in ArkTSDeferredExternalTypeName below.
@@ -179,13 +326,13 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports, bool allowNe
         desc.scalar = scalar;
         return desc;
     }
-    // Every ArkTSArray-named class - the stdlib preset std.interop.arkts
-    // included - is unsupported by this classification: its reference
-    // semantics is deferred (the member-level glue it would need is not
-    // declarable on the stdlib face). Diagnostic routing is separate:
-    // ArkTSDeferredExternalTypeName recognises the preset by its declaring
-    // package and reports the deferral message, every other same-named
-    // declaration keeps the generic unsupported-type diagnostics.
+    // The prepared generic preset array maps before the prepared-reference
+    // branch: the plain REFERENCE leaf carries no type argument, and the
+    // position needs one to spell its construction and diagnostic name.
+    auto arrayDecl = Ty::GetDeclPtrOfTy(ty);
+    if (arrayDecl && IsArkTSPresetArray(*arrayDecl) && IsArkTSClassWrapper(*arrayDecl)) {
+        return ArkTSClassifyPresetArrayLeaf(arrayDecl, *ty, imports);
+    }
     if (ty->IsCoreOptionType()) {
         return ArkTSClassifyOptionalType(*ty, imports, allowNestedOptional);
     }
@@ -197,33 +344,44 @@ ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports, bool allowNe
         return ArkTSClassifyArrayType(*ty, imports, allowNestedOptional);
     }
     auto decl = Ty::GetDeclPtrOfTy(ty);
+    // The ArkTSFunc<F> carrier is classified before the prepared-reference
+    // branch: the preset keeps a package-pinned rule of its own (the prepared
+    // carrier class also carries the wrapper marker, and a REFERENCE leaf
+    // would emit object conversions for what is a function handle).
+    if (decl != nullptr && IsArkTSPresetFunc(*decl)) {
+        return DecideArkTSFuncCarrier(ty, imports, allowNestedOptional).desc;
+    }
     if (decl && IsArkTSReferenceDecl(*decl)) {
         return ArkTSClassifyReferenceLeaf(decl, imports);
     }
     if (decl && decl->astKind == ASTKind::ENUM_DECL && decl->TestAttr(Attribute::ARKTS_LOWERED)) {
         return ArkTSClassifyEnumLeaf(decl);
     }
-    if (ty->IsTuple() && ty->typeArgs.size() >= 2) {
+    if (ty->IsTuple() && ty->typeArgs.size() >= MIN_TUPLE_ARITY) {
         return ArkTSClassifyTupleType(*ty, imports, allowNestedOptional);
     }
     return ArkTSTypeDesc{};
 }
 
 // Recognition of the external preset types declared by std.interop.arkts
-// whose mapping is deferred (ArkTSArray<T>, ArkTSString, ArkTSType) -
+// whose mapping is not available (ArkTSType, and ArkTSString in
+// the shapes that never went through wrapper preparation) -
 // diagnostic routing ONLY, never a classification input: classification keeps
 // returning UNSUPPORTED for every such position; this helper only lets
 // LowerFunctions pick the dedicated deferral diagnostic over the generic
-// message. The declaring package is pinned the way BigInt is pinned to
-// std.math.numeric, so a same-named user or facade class keeps the generic
-// rejection instead. The package name is the only recognition key: the preset
-// declarations are preinstalled and not built with the application, so their
-// members cannot be relied on here. A generic instance resolves to the same
-// declaration and reports the bare name; nested positions are searched
+// message. A prepared ArkTSString is a generatable REFERENCE leaf and never
+// reaches this helper; the prepared generic preset array ArkTSArray<T'> maps
+// to a generatable reference leaf for the same reason, so both names left
+// this list. The declaring package is pinned the way BigInt is
+// pinned to std.math.numeric, so a same-named user or facade class keeps the
+// generic rejection instead. The package name is the only recognition key: the
+// preset declarations are preinstalled and not built with the application, so
+// their members cannot be relied on here. A generic instance resolves to the
+// same declaration and reports the bare name; nested positions are searched
 // recursively so a preset type inside Array, Option or a tuple still reaches
 // this diagnostic.
-//   std.interop.arkts.ArkTSArray<Int32> -> "ArkTSArray";
-//   Array<ArkTSArray<Int32>> of another package -> ""
+//   std.interop.arkts.ArkTSType -> "ArkTSType";
+//   Array<ArkTSType> of another package -> ""
 std::string ArkTSDeferredExternalTypeName(Ptr<Ty> ty)
 {
     if (!Ty::IsTyCorrect(ty)) {
@@ -231,8 +389,7 @@ std::string ArkTSDeferredExternalTypeName(Ptr<Ty> ty)
     }
     auto decl = Ty::GetDeclPtrOfTy(ty);
     if (decl && decl->fullPackageName == "std.interop.arkts" &&
-        (decl->identifier == "ArkTSArray" || decl->identifier == "ArkTSString" ||
-            decl->identifier == "ArkTSType")) {
+        (decl->identifier == "ArkTSString" || decl->identifier == "ArkTSType")) {
         return decl->identifier.Val();
     }
     for (auto& arg : ty->typeArgs) {
@@ -254,6 +411,13 @@ bool ArkTSTypeDescReferenceGeneratable(const ArkTSTypeDesc& desc)
     // class: every from-JS position constructs it.
     if (IsArkTSPreparedInterface(*desc.reference)) {
         return desc.referenceImpl != nullptr;
+    }
+    // The generic preset array is generatable only when its element position
+    // is: the construction spelling carries the element as an explicit type
+    // argument, so an unsupported element would leave unspellable syntax.
+    if (IsArkTSPresetArray(*desc.reference)) {
+        return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER) && desc.elements.size() == 1 &&
+            ArkTSTypeDescGeneratable(desc.elements.front());
     }
     return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
 }
@@ -286,8 +450,7 @@ bool ArkTSTypeDescEnumGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOpt
 // two, and no Option nests another Option; arrays and tuples may contain
 // Option elements. ArkTSClassifyType and the scalar-name adapter already
 // produce only generatable descriptions; this guard keeps hand-built ones
-// honest too:
-//   SCALAR("Int32") -> true; SCALAR("Junk") -> false;
+// honest too. SCALAR("Int32") -> true; SCALAR("Junk") -> false;
 //   OPTIONAL(OPTIONAL(SCALAR(Int32))) -> false; TUPLE(SCALAR(Int8)) -> false
 bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptional)
 {
@@ -306,8 +469,16 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptiona
             return ArkTSTypeDescReferenceGeneratable(desc);
         case ArkTSTypeDesc::Kind::ENUM:
             return ArkTSTypeDescEnumGeneratable(desc, allowNestedOptional);
+        case ArkTSTypeDesc::Kind::ARKTS_FUNC:
+            // The classification built the parameter/result descriptions from
+            // supported positions; the guard re-checks them (and the carrier
+            // declaration) so a hand-built description stays honest.
+            if (desc.reference == nullptr || !ArkTSTypeDescGeneratable(desc.FuncResult(), allowNestedOptional)) {
+                return false;
+            }
+            break;
         case ArkTSTypeDesc::Kind::TUPLE:
-            if (desc.elements.size() < 2) {
+            if (desc.elements.size() < MIN_TUPLE_ARITY) {
                 return false;
             }
             break;
@@ -322,8 +493,7 @@ bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptiona
 
 // Nothing has no values, so it can never cross the boundary as an
 // argument; as a result position it is the never contract handled by the
-// wrapper:
-//   parameter SCALAR(Nothing) / OPTIONAL(SCALAR(Nothing)) -> true: no wrapper
+// wrapper. Parameter SCALAR(Nothing) / OPTIONAL(SCALAR(Nothing)) -> true: no wrapper
 //   result SCALAR(Nothing) -> false: the wrapper is generated and ends in
 //   the never-contract throw instead of a return
 bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc)
@@ -351,14 +521,22 @@ bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc)
 // generator; the generator therefore refuses a description containing one when
 // no map is supplied. Scalars and unsupported positions carry no reference,
 // OPTIONAL/ARRAY_COPY recurse into their single element, TUPLE into every
-// element:
-//   REFERENCE(Point) -> true; ENUM(Color) -> true;
+// element. REFERENCE(Point) -> true; ENUM(Color) -> true;
 //   OPTIONAL(REFERENCE(Point)) -> true;
 //   TUPLE(SCALAR(Int32), REFERENCE(Point)) -> true; SCALAR(Int32) -> false
 bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc)
 {
     if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE || desc.kind == ArkTSTypeDesc::Kind::ENUM) {
         return true;
+    }
+    // A carrier emits its own parameter and result positions (the generated
+    // lambda converts both), so a reference under either makes the whole
+    // description placeholder-bound; the carrier itself is spelled by
+    // compiler-owned name and needs no slot.
+    if (desc.kind == ArkTSTypeDesc::Kind::ARKTS_FUNC) {
+        if (ArkTSTypeDescContainsReference(desc.FuncResult())) {
+            return true;
+        }
     }
     for (auto& element : desc.elements) {
         if (ArkTSTypeDescContainsReference(element)) {
@@ -382,6 +560,9 @@ bool ArkTSTypeDescContainsInterfaceReference(const ArkTSTypeDesc& desc)
 {
     if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
         return desc.reference != nullptr && IsArkTSPreparedInterface(*desc.reference);
+    }
+    if (desc.kind == ArkTSTypeDesc::Kind::ARKTS_FUNC && ArkTSTypeDescContainsInterfaceReference(desc.FuncResult())) {
+        return true;
     }
     for (auto& element : desc.elements) {
         if (ArkTSTypeDescContainsInterfaceReference(element)) {
@@ -408,6 +589,12 @@ std::string ArkTSTypeDescImportedEnumName(const ArkTSTypeDesc& desc)
     if (desc.kind == ArkTSTypeDesc::Kind::ENUM && desc.enumMembers.empty() && desc.reference &&
         desc.reference->TestAttr(Attribute::IMPORTED)) {
         return desc.reference->identifier.Val();
+    }
+    if (desc.kind == ArkTSTypeDesc::Kind::ARKTS_FUNC) {
+        auto name = ArkTSTypeDescImportedEnumName(desc.FuncResult());
+        if (!name.empty()) {
+            return name;
+        }
     }
     for (auto& element : desc.elements) {
         auto name = ArkTSTypeDescImportedEnumName(element);

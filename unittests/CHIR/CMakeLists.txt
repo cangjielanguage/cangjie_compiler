@@ -25,7 +25,7 @@ if(CANGJIE_CODEGEN_CJNATIVE_BACKEND)
         ConstAnalysisBitwiseTest.cpp ConstAnalysisRelationalEqNeTest.cpp ConstAnalysisRelationalCmpTest.cpp
         ConstAnalysisTypeCastTerminatorTest.cpp
         ConstAnalysisValueLogicTest.cpp ConstAnalysisControlAndWrapperTest.cpp ConstAnalysisApplyArrayCastTest.cpp
-        ConstantRangeTest.cpp SIntDomainTest.cpp SIntTest.cpp VArrayTypeTest.cpp)
+        ConstantRangeTest.cpp SIntDomainTest.cpp SIntTest.cpp VArrayTypeTest.cpp ConstEvalTest.cpp)
     target_link_libraries(
         CHIROptTests
         cangjie-lsp

@@ -93,19 +93,19 @@ const Identifier* CalleeName(const Expr* callee)
 // the saved context. Its parameters are the current context and argument list.
 bool CallsSourceEntry(const FuncDecl& wrapper, const FuncDecl& entry)
 {
-    constexpr size_t CALLBACK_STATEMENTS = 2;
-    constexpr size_t GUARDED_STATEMENTS = 2;
-    constexpr size_t CALLBACK_PARAMETERS = 2;
-    if (!wrapper.funcBody || !wrapper.funcBody->body || wrapper.funcBody->body->body.size() != CALLBACK_STATEMENTS) {
+    constexpr size_t callbackStatements = 2;
+    constexpr size_t guardedStatements = 2;
+    constexpr size_t callbackParameters = 2;
+    if (!wrapper.funcBody || !wrapper.funcBody->body || wrapper.funcBody->body->body.size() != callbackStatements) {
         return false;
     }
     const auto& body = wrapper.funcBody->body->body;
     auto previous = DynamicCast<const VarDecl*>(body[0].get());
     auto guarded = DynamicCast<const TryExpr*>(body[1].get());
     if (!previous || !guarded || !guarded->tryBlock || !guarded->finallyBlock ||
-        guarded->tryBlock->body.size() != GUARDED_STATEMENTS || guarded->finallyBlock->body.size() != 1 ||
+        guarded->tryBlock->body.size() != guardedStatements || guarded->finallyBlock->body.size() != 1 ||
         !guarded->catchBlocks.empty() || wrapper.funcBody->paramLists.size() != 1 ||
-        wrapper.funcBody->paramLists.front()->params.size() != CALLBACK_PARAMETERS) {
+        wrapper.funcBody->paramLists.front()->params.size() != callbackParameters) {
         return false;
     }
     auto enter = DynamicCast<const CallExpr*>(previous->initializer.get());
@@ -141,7 +141,9 @@ bool CallsSourceEntry(const FuncDecl& wrapper, const FuncDecl& entry)
 bool RegistersWrapper(const VarDecl& registration, const FuncDecl& wrapper, const FuncDecl& entry)
 {
     auto call = DynamicCast<const CallExpr*>(registration.initializer.get());
-    if (!call || call->args.size() != 2) {
+    // The registration call is registerFunc(name, wrapper): exactly two arguments.
+    constexpr size_t registrationArguments = 2;
+    if (!call || call->args.size() != registrationArguments) {
         return false;
     }
     auto name = DynamicCast<const LitConstExpr*>(call->args[0]->expr.get());
