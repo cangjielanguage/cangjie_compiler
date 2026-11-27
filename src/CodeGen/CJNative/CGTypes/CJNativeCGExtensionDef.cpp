@@ -110,13 +110,9 @@ llvm::Value* CGExtensionDef::CreateTypeComparison(
             irBuilder.LLVMIRBuilder2::CreateLoad(irBuilder.getInt8PtrTy(), realTypeTemplatePtr, prefix + "_tt");
         auto typeCmp = irBuilder.CreateICmpEQ(realTypeTemplate, GetTargetType(cgMod, *derefType));
         HandleShortcutBranch(irBuilder, typeCmp, prefix + "_tt");
-        auto backupBB = irBuilder.GetInsertBlock();
-        auto backupIt = irBuilder.GetInsertPoint();
-        irBuilder.SetInsertPointForPreparingTypeInfo();
         auto typeInfosPtr = irBuilder.CreateStructGEP(typeInfoType, typeInfo, static_cast<size_t>(TYPEINFO_TYPE_ARGS));
         llvm::Value* typeInfos = irBuilder.LLVMIRBuilder2::CreateLoad(irBuilder.getInt8PtrTy(), typeInfosPtr);
         typeInfos = irBuilder.CreateBitCast(typeInfos, typeInfoType->getPointerTo()->getPointerTo());
-        irBuilder.SetInsertPoint(backupBB, backupIt);
         return CreateCompareArgs(irBuilder, typeInfos, derefType->GetTypeArgs(), prefix);
     }
 }
@@ -128,14 +124,10 @@ llvm::Value* CGExtensionDef::CreateCompareArgs(
     auto argSize = typeArgs.size();
     llvm::Value* retVal = nullptr;
     for (size_t i = 0; i < argSize; ++i) {
-        auto backupBB = irBuilder.GetInsertBlock();
-        auto backupIt = irBuilder.GetInsertPoint();
-        irBuilder.SetInsertPointForPreparingTypeInfo();
         llvm::Value* tiPtr = irBuilder.CreateConstGEP1_32(typeInfoPtrType, typeInfos, i);
         auto ti = irBuilder.LLVMIRBuilder2::CreateLoad(typeInfoPtrType, tiPtr, std::to_string(i) + "ti");
         auto chirType = typeArgs[i];
         innerTypeMap.emplace(chirType, InnerTiInfo{ti, true});
-        irBuilder.SetInsertPoint(backupBB, backupIt);
         auto idxStr = prefix + "_" + std::to_string(i);
         if (i == 0) {
             retVal = CreateTypeComparison(irBuilder, ti, *chirType, idxStr);
@@ -195,15 +187,11 @@ llvm::Value* CGExtensionDef::GetTypeInfoWithPath(IRBuilder2& irBuilder, const CH
     while (!remainPath.empty()) {
         auto idx = remainPath.front();
         remainPath.pop();
-        auto backupBB = irBuilder.GetInsertBlock();
-        auto backupIt = irBuilder.GetInsertPoint();
-        irBuilder.SetInsertPointForPreparingTypeInfo();
         auto curTiPtr = irBuilder.CreateConstGEP1_32(typeInfoPtrType, typeArgs, idx);
         auto curTi = irBuilder.LLVMIRBuilder2::CreateLoad(typeInfoPtrType, curTiPtr);
         // Also update 'innerTypeMap'.
         curType = DeRef(*curType)->GetTypeArgs()[idx];
         (void)innerTypeMap.emplace(curType, InnerTiInfo{curTi, true});
-        irBuilder.SetInsertPoint(backupBB, backupIt);
         if (!remainPath.empty()) {
             auto typeInfosPtr = irBuilder.CreateStructGEP(typeInfoType, curTi, static_cast<size_t>(TYPEINFO_TYPE_ARGS));
             typeArgs = irBuilder.LLVMIRBuilder2::CreateLoad(irBuilder.getInt8PtrTy(), typeInfosPtr);

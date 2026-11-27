@@ -449,7 +449,8 @@ public:
     llvm::Value* CreateTypeInfo(const CHIR::Type* type, bool canChangeBB = true);
 
     llvm::Value* CreateTypeInfoArray(const std::vector<CHIR::Type*>& types,
-        const std::unordered_map<const CHIR::Type*, std::function<llvm::Value*(IRBuilder2&)>>& map);
+        const std::unordered_map<const CHIR::Type*, std::function<llvm::Value*(IRBuilder2&)>>& map,
+        bool canChangeBB = true);
     llvm::Value* CreateTypeInfoArray(const std::vector<CHIR::Type*>& types);
 
     llvm::Instruction* CallIntrinsicGetTypeInfo(const std::vector<llvm::Value*>& parameters);
