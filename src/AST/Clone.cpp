@@ -1524,6 +1524,11 @@ OwnedPtr<ImportSpec> ASTCloner::CloneImportSpec(const ImportSpec& is, const Visi
     for (auto& it : is.annotations) {
         ret->annotations.emplace_back(CloneNode(it.get(), visitor));
     }
+    // Preserve compiler-injected import state so cloned specs keep their lookup
+    // hiding and dependency-package semantics across macro expansion and re-checks.
+    ret->isCompilerInjectedImport = is.isCompilerInjectedImport;
+    ret->hidesFromNameLookup = is.hidesFromNameLookup;
+    ret->implicitDependencyPackage = is.implicitDependencyPackage;
     return ret;
 }
 
