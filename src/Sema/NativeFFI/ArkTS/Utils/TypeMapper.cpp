@@ -268,6 +268,16 @@ ArkTSFuncCarrierDecision DecideArkTSFuncCarrier(Ptr<Ty> carrierTy, ImportManager
                                                                  : ArkTSFuncCarrierReject::UNSUPPORTED_MEMBER;
         return decision;
     }
+    // A composite Nothing in the result has no to-JS conversion row: the
+    // wrapper's ToJS recursion would reach the scalar table with a Nothing
+    // element, which no row answers. Only the top-level SCALAR result stays
+    // legal as the never contract; every composite one is refused the same
+    // way a Nothing parameter is.
+    if (ArkTSTypeDescContainsNothing(result) &&
+        !(result.kind == ArkTSTypeDesc::Kind::SCALAR && result.scalar == "Nothing")) {
+        decision.reject = ArkTSFuncCarrierReject::UNSUPPORTED_MEMBER;
+        return decision;
+    }
     decision.desc.kind = ArkTSTypeDesc::Kind::ARKTS_FUNC;
     decision.desc.reference = Ty::GetDeclPtrOfTy(carrierTy);
     decision.desc.funcTy = ty.typeArgs.front().Ty();

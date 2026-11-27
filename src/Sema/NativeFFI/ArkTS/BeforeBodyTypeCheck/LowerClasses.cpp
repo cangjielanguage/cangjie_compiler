@@ -198,20 +198,35 @@ ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(
         return ArkTSTypeDesc{};
     }
     SetTypeTy(ctx, *type);
+    std::function<ArkTSTypeDesc(Ptr<Type>)> classifyType = [this, &ctx](Ptr<Type> payloadType) {
+        return ArkTSClassifyPosition(ctx, payloadType);
+    };
+    std::function<ArkTSTypeDesc(Ptr<Ty>)> classifyTy = [this, &ctx](Ptr<Ty> payloadTy) {
+        return ArkTSClassifyValuePosition(ctx, payloadTy);
+    };
     auto desc = ArkTSClassifyType(type->DataTy(), ci->importManager, allowNestedOptional);
     // Attach the prepared member value table to every enum leaf, so the wrapper
     // generator can spell the value mapping without reaching into the checker.
     // A prepared enum whose declaration was refused (payload, generic, ...) has
     // no table entry and stays non-generatable through the empty member list.
+    Native::FFI::ArkTS::AttachEnumMembers(desc, classifyType, classifyTy, ci->importManager);
+    return desc;
+}
+
+// Value-position entry of the same classification: an explicit ArkTSFunc<F>
+// construction carries F only as the resolved type argument of the carrier
+// reference, so its positions classify from Tys. The enum-table attachment and
+// the payload recursion are the written-type entry's, so an enum leaf means
+// the same thing in both paths.
+ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyValuePosition(ASTContext& ctx, Ptr<Ty> ty)
+{
     std::function<ArkTSTypeDesc(Ptr<Type>)> classifyType = [this, &ctx](Ptr<Type> payloadType) {
         return ArkTSClassifyPosition(ctx, payloadType);
     };
-    std::function<ArkTSTypeDesc(Ptr<Ty>)> classifyTy = [this, &classifyType, &classifyTy](Ptr<Ty> payloadTy) {
-        auto payload = ArkTSClassifyType(payloadTy, ci->importManager);
-        Native::FFI::ArkTS::AttachEnumMembers(
-            payload, classifyType, classifyTy, ci->importManager);
-        return payload;
+    std::function<ArkTSTypeDesc(Ptr<Ty>)> classifyTy = [this, &ctx](Ptr<Ty> payloadTy) {
+        return ArkTSClassifyValuePosition(ctx, payloadTy);
     };
+    auto desc = ArkTSClassifyType(ty, ci->importManager);
     Native::FFI::ArkTS::AttachEnumMembers(desc, classifyType, classifyTy, ci->importManager);
     return desc;
 }

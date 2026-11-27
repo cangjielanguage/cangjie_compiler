@@ -358,9 +358,26 @@ bool TypeChecker::TypeCheckerImpl::ResolvedToArkTSFuncCarrier(CallExpr& ce, RefE
 bool TypeChecker::TypeCheckerImpl::ApplyArkTSFuncConstruction(
     ASTContext& ctx, ModalTy target, CallExpr& ce, RefExpr& re, Ptr<Ty> carrierTy)
 {
-    auto desc = ArkTSClassifyType(carrierTy, &importManager);
+    // The value-position entry attaches the enum member tables, so an enum
+    // position inside F is judged and generated through its value table like a
+    // foreign-signature position, never through the empty default that would
+    // break the generated glue silently.
+    auto desc = ArkTSClassifyValuePosition(ctx, carrierTy);
     if (desc.kind != ArkTSTypeDesc::Kind::ARKTS_FUNC) {
         (void)DiagnoseArkTSFuncCarrierPosition(diag, *re.typeArguments.front(), carrierTy);
+        ce.SetTy({TypeManager::GetInvalidTy()});
+        ce.callKind = CallKind::CALL_INVALID;
+        return true;
+    }
+    // The classification alone does not decide the glue: every position inside
+    // F must be generatable and free of Nothing (an enum leaf without a value
+    // table, a prepared interface whose implementation class cannot be
+    // resolved, a Nothing argument position). A classified carrier reports
+    // NONE on the reject routing, so the unsupported-member message is emitted
+    // directly on the written type argument.
+    if (!ArkTSTypeDescGeneratable(desc) || ArkTSTypeDescContainsNothing(desc)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_func_type_argument_unsupported, *re.typeArguments.front(),
+            FuncCarrierArgumentSpelling(carrierTy));
         ce.SetTy({TypeManager::GetInvalidTy()});
         ce.callKind = CallKind::CALL_INVALID;
         return true;

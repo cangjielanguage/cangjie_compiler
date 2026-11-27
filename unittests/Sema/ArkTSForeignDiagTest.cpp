@@ -249,6 +249,40 @@ protected:
         return cjoData;
     }
 
+    // Exports the support package @p code with one compiler-added class erased
+    // from the serialized AST: the imported interface stays prepared while its
+    // generated implementation class is missing, which is the stale-CJO shape
+    // the implementation-class resolution defends against.
+    std::vector<uint8_t> ExportSupportPackageWithoutCompilerAddedClass(const std::string& code,
+        const std::string& className,
+        const std::vector<std::pair<std::string, std::vector<uint8_t>>>& caches = {})
+    {
+        diag.ClearError();
+        TestCompilerInstance support(invocation, diag);
+        for (auto& [name, data] : caches) {
+            support.importManager->SetPackageCjoCache(name, data);
+        }
+        support.code = code;
+        support.invocation.globalOptions.implicitPrelude = true;
+        support.invocation.globalOptions.outputMode = GlobalOptions::OutputMode::SHARED_LIB;
+        support.Compile(CompileStage::SEMA);
+        EXPECT_EQ(diag.GetErrorCount(), 0);
+        std::vector<uint8_t> cjoData;
+        auto pkg = support.GetSourcePackages()[0].get();
+        for (auto& file : pkg->files) {
+            auto& decls = file->decls;
+            for (auto it = decls.begin(); it != decls.end();) {
+                if ((*it)->identifier.Val() == className && (*it)->TestAttr(Attribute::COMPILER_ADD)) {
+                    it = decls.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        support.importManager->ExportAST(false, cjoData, *pkg);
+        return cjoData;
+    }
+
     // Recreate the compiler instance with the three ArkTS support packages
     // visible; a test then compiles one snippet without repeating the export.
     void ResetWithArkTSSupport()
@@ -6566,6 +6600,268 @@ static std::vector<std::string> GeneratedBodyStringLiterals(Ptr<FuncDecl> fn)
     });
     walker.Walk();
     return literals;
+}
+
+// ---- B4b: the carrier result and construction fail-closed rules ----
+
+// A composite Nothing in F's result has no to-JS conversion row: Option, Array
+// and tuple shapes are each refused with the dedicated unsupported-member
+// message naming the written function type, exactly one diagnostic per shape.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncOptionNothingResultIsRejected)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+func cb(x: Int32): Int32 { return x }
+
+public func build(): Unit {
+    let f = ArkTSFunc<()->Option<Nothing>>(cb)
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 1) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_EQ(CountErrorsContaining("not ArkTS-compatible"), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncArrayNothingResultIsRejected)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+func cb(x: Int32): Int32 { return x }
+
+public func build(): Unit {
+    let f = ArkTSFunc<()->Array<Nothing>>(cb)
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 1) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_EQ(CountErrorsContaining("not ArkTS-compatible"), 1);
+}
+
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncTupleNothingResultIsRejected)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+func cb(x: Int32): Int32 { return x }
+
+public func build(): Unit {
+    let f = ArkTSFunc<()->(Int32, Nothing)>(cb)
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 1) << (handler->messages.empty() ? "" : handler->messages.front());
+    EXPECT_EQ(CountErrorsContaining("not ArkTS-compatible"), 1);
+}
+
+// The control: a top-level Nothing result is the never contract, not a
+// composite. The construction is accepted, generates the glue and the lambda
+// ends in the never-contract throw instead of a result conversion.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncTopLevelNothingResultKeepsNeverContract)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+
+@ArkTS[module: "actual"]
+public foreign func takeFunc(cb: ArkTSFunc<()->Nothing>): Unit
+
+func cb(): Nothing { throw Exception("never") }
+
+public func build(): ArkTSFunc<()->Nothing> {
+    let f = ArkTSFunc<()->Nothing>(cb)
+    return f
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto build = FindFunction("build");
+    ASSERT_NE(build, nullptr);
+    auto literals = GeneratedBodyStringLiterals(build);
+    EXPECT_NE(std::find(literals.begin(), literals.end(), std::string("ArkTS never function returned")),
+        literals.end());
+}
+
+// An imported foreign enum enters F through its serialized value table: the
+// construction succeeds and the generated glue converts the enum parameter
+// (null guard and dispatch throws name the enum).
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncEnumMemberFromImportedCjoIsConverted)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto depCjo = ExportSupportPackage(R"(package dep
+
+@ArkTS[module: "actual"]
+public foreign enum E {
+    | @RawValue["a"] A
+    | @RawValue[7] B
+    | number(Float64)
+}
+)");
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto stdCjo = ExportSupportPackage(
+        ARKTS_STDLIB_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto langCjo = ExportSupportPackage(ARKTS_LANG_SUPPORT,
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("std.interop.arkts", stdCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+import dep.E
+
+@ArkTS[module: "actual"]
+public foreign func takeFunc(cb: ArkTSFunc<(E) -> Unit>): Unit
+
+func cb(e: E): Unit {}
+
+public func build(): ArkTSFunc<(E) -> Unit> {
+    let f = ArkTSFunc<(E) -> Unit>(cb)
+    return f
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto build = FindFunction("build");
+    ASSERT_NE(build, nullptr);
+    auto literals = GeneratedBodyStringLiterals(build);
+    EXPECT_NE(std::find(literals.begin(), literals.end(), std::string("ArkTS type mismatch: null for E")),
+        literals.end());
+    EXPECT_NE(std::find(literals.begin(), literals.end(), std::string("ArkTS value invalid: unknown value for E")),
+        literals.end());
+}
+
+// A same-package foreign class enters F: the construction succeeds and the
+// generated glue converts the reference parameter through the wrapping
+// constructor (the object-kind guard names the class).
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncForeignClassMemberEntersCarrier)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import ohos.ark_interop.JSObject
+import std.interop.arkts.*
+
+@ArkTS[module: "actual"]
+public foreign class Point {
+    public init(x: Float64)
+}
+
+@ArkTS[module: "actual"]
+public foreign func takeFunc(cb: ArkTSFunc<(Point) -> Float64>): Unit
+
+func cb(p: Point): Float64 { return 0.0 }
+
+public func build(): ArkTSFunc<(Point) -> Float64> {
+    let f = ArkTSFunc<(Point) -> Float64>(cb)
+    return f
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto build = FindFunction("build");
+    ASSERT_NE(build, nullptr);
+    auto literals = GeneratedBodyStringLiterals(build);
+    EXPECT_NE(std::find(literals.begin(), literals.end(), std::string("ArkTS type mismatch: not an object for Point")),
+        literals.end());
+}
+
+// A same-package foreign interface enters F: its generated implementation
+// class is resolvable, so the construction succeeds and the glue constructs
+// the implementation class for the parameter.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncForeignInterfaceMemberEntersCarrier)
+{
+    PrepareArkTSTypeRelationSupport();
+    CompileSema(R"(package entry
+
+import ohos.ark_interop.JSObject
+import std.interop.arkts.*
+
+@ArkTS[module: "actual"]
+public foreign interface IWorker {
+    func work(): Unit
+}
+
+@ArkTS[module: "actual"]
+public foreign func takeFunc(cb: ArkTSFunc<(IWorker) -> Unit>): Unit
+
+func cb(w: IWorker): Unit {}
+
+public func build(): ArkTSFunc<(IWorker) -> Unit> {
+    let f = ArkTSFunc<(IWorker) -> Unit>(cb)
+    return f
+}
+)");
+    ASSERT_EQ(diag.GetErrorCount(), 0) << (handler->messages.empty() ? "" : handler->messages.front());
+    auto build = FindFunction("build");
+    ASSERT_NE(build, nullptr);
+    bool implConstructed = false;
+    Walker walker(build->funcBody->body.get(), [&implConstructed](Ptr<Node> node) {
+        auto ref = DynamicCast<RefExpr*>(node);
+        if (ref && ref->ref.identifier.Val() == "IWorker$arkts_impl") {
+            implConstructed = true;
+        }
+        return VisitAction::WALK_CHILDREN;
+    });
+    walker.Walk();
+    EXPECT_TRUE(implConstructed);
+}
+
+// A prepared foreign interface whose implementation class cannot be resolved
+// in this compilation enters F: the dedicated unsupported-member message
+// replaces the silent CALL_INVALID the ungeneratable glue used to produce.
+// The dep package is exported with the compiler-added implementation class
+// erased, so the imported interface stays prepared while the resolution of
+// its implementation class fails.
+TEST_F(ArkTSForeignDiagTest, ArkTSFuncUnresolvableInterfaceImplIsDiagnosed)
+{
+    diag.ClearError();
+    auto interopCjo = ExportSupportPackage(ARKTS_INTEROP_SUPPORT);
+    auto contextCjo = ExportSupportPackage(ARKTS_CONTEXT_SUPPORT, {{"ohos.ark_interop", interopCjo}});
+    auto langCjo = ExportSupportPackage(ARKTS_LANG_SUPPORT,
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    auto depCjo = ExportSupportPackageWithoutCompilerAddedClass(R"(package dep
+
+import ohos.ark_interop.JSObject
+
+@ArkTS[module: "actual"]
+public foreign interface IWorker {
+    func work(): Unit
+}
+)",
+        "IWorker$arkts_impl",
+        {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
+    auto stdCjo = ExportSupportPackage(
+        ARKTS_STDLIB_SUPPORT, {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}});
+    diag.ClearError();
+    handler->messages.clear();
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
+    instance->importManager->SetPackageCjoCache("dep", depCjo);
+    instance->importManager->SetPackageCjoCache("ohos.ark_interop", interopCjo);
+    instance->importManager->SetPackageCjoCache("cj_arkts_context_v1", contextCjo);
+    instance->importManager->SetPackageCjoCache("std.interop.arkts", stdCjo);
+    instance->importManager->SetPackageCjoCache("arkts.lang", langCjo);
+    CompileSema(R"(package entry
+
+import std.interop.arkts.*
+import dep.IWorker
+
+func cb(w: IWorker): Unit {}
+
+public func build(): Unit {
+    let f = ArkTSFunc<(IWorker) -> Unit>(cb)
+}
+)");
+    EXPECT_EQ(diag.GetErrorCount(), 1);
+    EXPECT_EQ(CountErrorsContaining("not ArkTS-compatible"), 1);
 }
 
 // A @ForeignName argument that is not a string literal has no readable value:

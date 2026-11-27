@@ -878,6 +878,12 @@ struct ArkTSValueEmitter {
     // The lowering walker rebinds each recorded placeholder to the class as an
     // AST value, so no user identifier enters generated syntax.
     std::unordered_map<std::string, Ptr<Decl>>* classRefs{nullptr};
+    // Set when a leaf conversion cannot produce a value (a reference or enum
+    // position without its declaration, binding map or value table). The
+    // emission such a leaf leaves behind is not spellable source, so every
+    // generation entry point refuses the whole body when this is set instead
+    // of splicing the broken conversion into the generated code.
+    bool broken{false};
 
     std::string Fresh(const std::string& role)
     {
@@ -1159,11 +1165,13 @@ struct ArkTSValueEmitter {
     {
         ArkTSEmitted emitted;
         if (!desc.reference || classRefs == nullptr) {
+            broken = true;
             return emitted;
         }
         Ptr<Decl> constructor = desc.reference;
         if (IsArkTSPreparedInterface(*desc.reference)) {
             if (!desc.referenceImpl) {
+                broken = true;
                 return emitted;
             }
             constructor = desc.referenceImpl;
@@ -1431,6 +1439,7 @@ struct ArkTSValueEmitter {
     {
         ArkTSEmitted emitted;
         if (desc.reference == nullptr || classRefs == nullptr || desc.enumMembers.empty()) {
+            broken = true;
             return emitted;
         }
         auto slot = Fresh("enum");
@@ -1955,6 +1964,9 @@ std::string ArkTSForeignWrapperSource(const std::vector<ArkTSTypeDesc>& types, c
         return code + "    throw " + std::string(ARKTS_NEVER_EXCEPTION) + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n}\n";
     }
     auto emitted = emitter.FromJS(resultType, result, "    ");
+    if (emitter.broken) {
+        return {};
+    }
     return code + emitted.pre + "    return " + emitted.expr + "\n}\n";
 }
 
@@ -2155,6 +2167,9 @@ std::string ArkTSGlobalVariableGetterSource(const ArkTSTypeDesc& valueType, size
         return code + "    throw " + ARKTS_RUNTIME_EXCEPTION + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n}\n";
     }
     auto emitted = emitter.FromJS(valueType, value, "    ");
+    if (emitter.broken) {
+        return {};
+    }
     return code + emitted.pre + "    return " + emitted.expr + "\n}\n";
 }
 
@@ -2261,6 +2276,9 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
             code + "    throw " + std::string(ARKTS_NEVER_EXCEPTION) + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n");
     }
     auto emitted = emitter.FromJS(resultType, result, "    ");
+    if (emitter.broken) {
+        return {};
+    }
     return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
 }
 
@@ -2388,6 +2406,9 @@ std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter
     const auto getExpr = object + ".getProperty(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER) + ")";
     code += "    let " + result + " = " + ArkTSCallTranslation(getExpr, context, error, "    ") + "\n";
     auto emitted = emitter.FromJS(valueType, result, "    ");
+    if (emitter.broken) {
+        return {};
+    }
     return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
 }
 
@@ -2428,6 +2449,9 @@ std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, co
             code + "    throw " + std::string(ARKTS_NEVER_EXCEPTION) + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n");
     }
     auto emitted = emitter.FromJS(resultType, result, "    ");
+    if (emitter.broken) {
+        return {};
+    }
     return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
 }
 
@@ -2481,6 +2505,9 @@ std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTST
     const auto getExpr = self + ".getProperty(" + key + ")";
     code += "    let " + result + " = " + ArkTSCallTranslation(getExpr, context, error, "    ") + "\n";
     auto inner = emitter.FromJS(valueType, result, "    ");
+    if (emitter.broken) {
+        return {};
+    }
     const std::string option = "(if (" + result + ".isNull() || " + result + ".isUndefined()) {\n" + "    " +
         ARKTS_OPTION + ".None\n" + "} else {\n" + inner.pre + "    " + ARKTS_OPTION + ".Some(" + inner.expr + ")\n" +
         "})";
@@ -2532,6 +2559,12 @@ std::string ArkTSFuncConstructionSource(const ArkTSTypeDesc& carrier, const std:
         body += indent + "let " + raw + " = " + info + "[" + std::to_string(i) + "]\n" + converted.pre + indent +
             "let " + arg + " = " + converted.expr + "\n";
         callArgs.emplace_back(std::move(arg));
+    }
+    // A leaf conversion that cannot produce a value (a reference or enum
+    // position without its declaration, binding map or value table) leaves
+    // unspellable source behind, so the whole glue is refused instead.
+    if (emitter.broken) {
+        return {};
     }
     auto result = emitter.Fresh("result");
     body += indent + "let " + result + " = " + ARKTS_FUNC_SPLICE_CALLEE + "(" + ArkTSJoin(callArgs, ", ") + ")\n";

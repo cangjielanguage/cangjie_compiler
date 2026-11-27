@@ -1821,6 +1821,13 @@ private:
     // layer; every foreign signature keeps the default and refuses it.
     Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyPosition(
         ASTContext& ctx, Ptr<AST::Type> type, bool allowNestedOptional = false);
+    // One value position as an ArkTS type description: the classification and
+    // enum-table attachment of ArkTSClassifyPosition, entered from a resolved
+    // type instead of a written type node (the explicit ArkTSFunc<F>
+    // construction carries F only as the resolved type argument of the carrier
+    // reference). The payload recursion is the written-type entry's, so an
+    // enum leaf means the same thing in both paths.
+    Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyValuePosition(ASTContext& ctx, Ptr<AST::Ty> ty);
 
     // Refuse an extend declaration that adds a prepared @ArkTS foreign
     // interface to another type. Its implemented-interface types are resolved
