@@ -5287,34 +5287,31 @@ public func run(): Unit {
     EXPECT_EQ(CountErrorsContaining("undeclared identifier 'run'"), 0U);
 }
 
-// ArkTS interop is OHOS-only. With --experimental but a non-OHOS target the
-// capability reports one target diagnostic per file and no wrapper is
-// generated.
-TEST_F(ArkTSForeignDiagTest, TargetGateRejectsNonOhosTarget)
+// ArkTS interop is OHOS-only, and the five ArkTS annotation names are reserved
+// only in its environment. With --experimental but a non-OHOS target the names
+// are ordinary macro names, so the parser files `@ArkTS` as a user macro and
+// the Sema target gate never sees an ArkTS-only annotation. The declaration
+// keeps its ordinary spelling and no wrapper is generated.
+TEST_F(ArkTSForeignDiagTest, NonOhosTargetTreatsArkTSAsAnOrdinaryMacro)
 {
     // The fixture declares an OHOS target; switch it back to the real host
-    // target so the gate sees a non-OHOS compilation. Recreating the instance
-    // also materializes the host target module directory the frontend probes.
+    // target so the parser and the gate see a non-OHOS compilation.
     instance->invocation.globalOptions.target.env = Cangjie::Triple::Environment::GNU;
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     diag.ClearError();
     handler->messages.clear();
     CompileSema(R"(package entry
 
-@ArkTS[module: "m"]
-foreign func echo(): Int32
-
-public func call(): Int32 {
-    unsafe {
-        echo()
-    }
+@ArkTS
+public func run(): Unit {
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("only available when targeting OHOS"));
-    EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 1U);
-    // No cascading unsafe-call/undeclared diagnostics and no generated roots:
-    // the refused capability suppresses the ArkTS contract for the whole file.
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_FALSE(HasErrorContaining("only available when targeting OHOS"));
+    EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 0U);
+    // The ordinary macro path reports the unresolved name once; the wrapped
+    // declaration keeps its spelling, so references to it do not cascade.
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'ArkTS'"), 1U);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'run'"), 0U);
     bool generated = false;
     Walker(instance->GetSourcePackages()[0].get(), [&generated](Ptr<Node> node) {
         auto decl = DynamicCast<Decl*>(node);
@@ -6312,10 +6309,10 @@ public func run(): Unit {
     EXPECT_EQ(CountErrorsContaining("undeclared identifier 'ArkTS'"), 1U);
 }
 
-// The target gate is scoped the same way: with the consumer switched back to
-// the real host target, source ArkTS is refused on this Linux target, but an
-// @ArkTS declaration imported from a prepared dependency CJO must not
-// re-report the target gate.
+// The capability scope is the same for imported metadata: with the consumer
+// switched back to the real host target, an @ArkTS declaration imported from a
+// prepared dependency CJO must not re-report the target gate. Source ArkTS on
+// that target is an ordinary macro name, so no gate is produced at all.
 TEST_F(ArkTSForeignDiagTest, ImportedArkTSDoesNotReTriggerTargetGate)
 {
     diag.ClearError();
@@ -6356,19 +6353,22 @@ public func use(): Int32 {
     EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 0U);
     EXPECT_EQ(handler->messages.size(), 0U);
 
-    // Positive control: source ArkTS on the same target is still refused once,
-    // proving the gate is active and only the imported package escaped it.
+    // Positive control: source ArkTS on the same target takes the ordinary
+    // macro path. The five names are not reserved outside an OHOS target, so
+    // no ArkTS-only annotation reaches the Sema gate and the unresolved name
+    // is reported instead.
     diag.ClearError();
     handler->messages.clear();
     handler->errors.clear();
     instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     CompileSema(R"(package entry
 
-@ArkTS[module: "m"]
-public foreign func echo(): Int32
+@ArkTS
+public func run(): Unit {
+}
 )");
-    EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 0U);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'ArkTS'"), 1U);
 
     // Restore the fixture's OHOS target for any later compilation in this
     // test.

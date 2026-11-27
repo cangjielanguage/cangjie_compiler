@@ -230,6 +230,9 @@ void ParserImpl::ApplyCompileOptions()
     // only under --experimental so the Sema gate stays the single user-facing
     // diagnostic for a refused file.
     experimentalMode = opts->experimentalMode;
+    // The ArkTS annotation names are reserved only for the interop capability
+    // on an OHOS target; everywhere else they stay ordinary macro names.
+    arktsAnnotationNamesEnabled = IsArkTSInteropAnnotationEnabled(*opts);
     // set compile options for cjmp implementation
     mpImpl->SetCompileOptions(*opts);
 }

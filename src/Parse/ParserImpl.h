@@ -260,6 +260,10 @@ private:
     // diagnostics only when the user passed --experimental, so the Sema gate
     // remains the single user-facing diagnostic for a refused file.
     bool experimentalMode{false};
+    // The ArkTS annotation names count as builtin only in an interop-capable
+    // build targeting OHOS under --experimental. This gate is narrower than
+    // experimentalMode, so user macros keep the five names on other targets.
+    bool arktsAnnotationNamesEnabled{false};
     // we store line number info from all tokens
     // pair<line num of the begin, line num of the end>
     std::list<std::pair<unsigned, unsigned>> allTokensInOneFile;

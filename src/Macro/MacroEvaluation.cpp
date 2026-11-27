@@ -128,7 +128,7 @@ std::string GetPrimaryName(const MacroInvocation& invocation)
 }
 
 bool HasMacroCallToEval(const std::string& moduleName, const TokenVector& inputTokens, size_t curIndex,
-    size_t tokenSize, std::vector<Position>& escapePosVec, bool requireAdjacent, bool experimentalMode)
+    size_t tokenSize, std::vector<Position>& escapePosVec, bool requireAdjacent, bool arktsAnnotationNamesEnabled)
 {
     if (inputTokens[curIndex].Value() != "@" || curIndex >= tokenSize - 1) {
         return false;
@@ -137,7 +137,7 @@ bool HasMacroCallToEval(const std::string& moduleName, const TokenVector& inputT
     if (std::find(escapePosVec.begin(), escapePosVec.end(), inputTokens[curIndex].Begin()) != escapePosVec.end()) {
         return false;
     }
-    if (IsBuiltinAnnotation(moduleName, inputTokens[curIndex + 1].Value(), experimentalMode)) {
+    if (IsBuiltinAnnotation(moduleName, inputTokens[curIndex + 1].Value(), arktsAnnotationNamesEnabled)) {
         return false;
     }
     // @local! / @local? / @~local are modal type/this-mode, not macro calls.
@@ -169,12 +169,12 @@ bool HasChildMacroCall(MacroCall& macCall)
 // Check if there are any macro calls in the given tokens.
 // Used to determine if a custom annotation's newTokens contains macro calls that need re-evaluation.
 static bool HasMacroCallInTokens(const TokenVector& tokens, const std::string& moduleName,
-    const std::string& currentIdentifier, bool experimentalMode)
+    const std::string& currentIdentifier, bool arktsAnnotationNamesEnabled)
 {
     for (size_t i = 0; i + 1 < tokens.size(); i++) {
         if (tokens[i].Value() == "@" && !IsModalAfterAt(tokens, i) &&
             IsIdentifierOrContextualKeyword(tokens[i + 1].kind) &&
-            !IsBuiltinAnnotation(moduleName, tokens[i + 1].Value(), experimentalMode) &&
+            !IsBuiltinAnnotation(moduleName, tokens[i + 1].Value(), arktsAnnotationNamesEnabled) &&
             tokens[i + 1].Value() != currentIdentifier) {
             return true;
         }
@@ -787,7 +787,7 @@ bool MacroEvaluation::NeedCreateMacroCallTreeForReEval(MacroCall& macCall, AST::
             auto names = Utils::SplitQualifiedName(node->curFile->curPackage->fullPackageName);
             auto moduleName = names.size() > 1 ? names.front() : "";
             if (HasMacroCallInTokens(pInvocation->newTokens, moduleName, pInvocation->macroCallDiagInfo.identifier,
-                ci->invocation.globalOptions.experimentalMode)) {
+                IsArkTSInteropAnnotationEnabled(ci->invocation.globalOptions))) {
                 return true;
             }
         }
@@ -889,7 +889,7 @@ void MacroEvaluation::CreateMacroCallTree(MacroCall& macCall, bool reEval)
         // Source tokens (args) have trustworthy positions: check modal adjacency like the parser.
         // Re-evaluated tokens come from macro output and are glued by shape.
         if (!HasMacroCallToEval(moduleName, inputTokens, curIndex, tokenSize, escapePosVec, !reEval,
-            ci->invocation.globalOptions.experimentalMode)) {
+            IsArkTSInteropAnnotationEnabled(ci->invocation.globalOptions))) {
             // Skip a normal token, which is not '@'.
             curIndex++;
             continue;

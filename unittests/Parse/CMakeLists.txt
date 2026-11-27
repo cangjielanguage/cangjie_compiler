@@ -73,10 +73,16 @@ target_link_libraries(
     TestCompilerInstanceObject)
 add_test(NAME ParseOuterInterfaceTest COMMAND ParseOuterInterfaceTest)
 
-add_executable(ArkTSAnnotationTest ArkTSAnnotationTest.cpp)
-target_link_libraries(ArkTSAnnotationTest cangjie-lsp ${CMAKE_DL_LIBS} boundscheck-static GTest::gtest GTest::gtest_main)
-target_include_directories(ArkTSAnnotationTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
-add_test(NAME ArkTSAnnotationTest COMMAND ArkTSAnnotationTest)
+# These tests exercise the ArkTS interop parse behavior: the five ArkTS-only
+# annotation names are builtin only in a capability build targeting OHOS, so they
+# are only meaningful (and only pass) when CANGJIE_ENABLE_ARKTS_INTEROP is ON.
+if(CANGJIE_ENABLE_ARKTS_INTEROP)
+    add_executable(ArkTSAnnotationTest ArkTSAnnotationTest.cpp)
+    target_link_libraries(
+        ArkTSAnnotationTest cangjie-lsp ${CMAKE_DL_LIBS} boundscheck-static GTest::gtest GTest::gtest_main)
+    target_include_directories(ArkTSAnnotationTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
+    add_test(NAME ArkTSAnnotationTest COMMAND ArkTSAnnotationTest)
+endif()
 
 add_executable(ArkTSTypeMappingTest ArkTSTypeMappingTest.cpp)
 target_link_libraries(ArkTSTypeMappingTest cangjie-lsp ${CMAKE_DL_LIBS} boundscheck-static GTest::gtest GTest::gtest_main)

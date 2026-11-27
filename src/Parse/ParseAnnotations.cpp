@@ -195,9 +195,26 @@ bool IsArkTSOnlyAnnotationKind(AnnotationKind kind)
         kind == AnnotationKind::ARKTS_HAS_THIS;
 }
 
-bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier, bool experimentalMode)
+bool IsArkTSInteropAnnotationEnabled(const GlobalOptions& options)
 {
-    if (!experimentalMode) {
+#ifdef CANGJIE_ENABLE_ARKTS_INTEROP
+    // These names are reserved only for the ArkTS interop capability itself:
+    // an interop-capable compiler, the experimental switch and the OHOS target.
+    // A host --compile-macro run and every non-OHOS target keep the names free
+    // for user macros.
+    return options.experimentalMode && options.target.env == Triple::Environment::OHOS;
+#else
+    // Without the capability the five names are ordinary macro names even
+    // with --experimental.
+    (void)options;
+    return false;
+#endif
+}
+
+bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier,
+    bool arktsAnnotationNamesEnabled)
+{
+    if (!arktsAnnotationNamesEnabled) {
         auto kindIter = NAME_TO_ANNO_KIND.find(identifier);
         if (kindIter != NAME_TO_ANNO_KIND.end() && IsArkTSOnlyAnnotationKind(kindIter->second)) {
             return false;
@@ -237,7 +254,7 @@ bool ParserImpl::SeeingBuiltinAnnotation()
     if (tokens.begin()->kind != TokenKind::IDENTIFIER) {
         return false;
     }
-    return IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), experimentalMode);
+    return IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), arktsAnnotationNamesEnabled);
 }
 
 bool ParserImpl::SeeingAtWhen()
@@ -264,7 +281,7 @@ bool ParserImpl::SeeingMacroCall()
         (tokens.begin()->kind < TokenKind::PUBLIC || tokens.begin()->kind > TokenKind::OPEN)) {
         return false;
     }
-    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), experimentalMode);
+    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), arktsAnnotationNamesEnabled);
 }
 
 bool ParserImpl::SeeingMacroCallDecl()
@@ -281,7 +298,7 @@ bool ParserImpl::SeeingMacroCallDecl()
         (tokens.begin()->kind < TokenKind::PUBLIC || tokens.begin()->kind > TokenKind::OPEN)) {
         return false;
     }
-    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), experimentalMode);
+    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), arktsAnnotationNamesEnabled);
 }
 
 // Before: a block default @ArkTS[module:"a", namespace:"n"] and a member

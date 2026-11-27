@@ -100,6 +100,9 @@ protected:
         diag.SetSourceManager(&sm);
         GlobalOptions compileOptions;
         compileOptions.experimentalMode = true;
+        // The ArkTS annotation names are reserved only for the OHOS target in
+        // an interop-capable build; these fixtures exercise that capability.
+        compileOptions.target.env = Triple::Environment::OHOS;
         Parser parser(code, diag, sm, {0, 1, 1}, false, &compileOptions);
         auto file = parser.ParseTopLevel();
         diag.EmitCategoryDiagnostics(DiagCategory::PARSE);
@@ -112,6 +115,7 @@ protected:
         GlobalOptions options;
         options.scanDepPkg = true;
         options.experimentalMode = true;
+        options.target.env = Triple::Environment::OHOS;
         Parser parser(code, diag, sm, {0, 1, 1}, false, &options);
         return parser.ParseTopLevel();
     }
@@ -127,6 +131,7 @@ protected:
         GlobalOptions options;
         options.scanDepPkg = scanDepPkg;
         options.experimentalMode = true;
+        options.target.env = Triple::Environment::OHOS;
         Parser parser(code, diag, sm, {0, 1, 1}, false, &options);
         return parser.ParseTopLevel();
     }
@@ -172,8 +177,8 @@ public func run(): Unit {
 }
 
 // IsBuiltinAnnotation keeps the two-argument call form for source compatibility with stdx.syntax. The default value
-// keeps the experimental gate off, so the ArkTS-only names are not builtin unless the flag is passed explicitly; an
-// unknown name is never builtin.
+// keeps the ArkTS annotation-name gate off, so the ArkTS-only names are not builtin unless the gate is passed
+// explicitly; an unknown name is never builtin.
 TEST_F(ArkTSEntryTest, TwoArgumentIsBuiltinAnnotationDefaultsToGatedBehavior)
 {
     SetExperimentalEnabled(false);
@@ -182,6 +187,94 @@ TEST_F(ArkTSEntryTest, TwoArgumentIsBuiltinAnnotationDefaultsToGatedBehavior)
     EXPECT_FALSE(IsBuiltinAnnotation("std", "NoSuchAnnotation"));
     EXPECT_FALSE(IsBuiltinAnnotation("std", "ArkTS", false));
     EXPECT_TRUE(IsBuiltinAnnotation("std", "ArkTS", true));
+}
+
+// The ArkTS-only names are builtin only for an interop-capable compiler
+// targeting OHOS under --experimental. On the default host target - the shape
+// of a --compile-macro run - they stay ordinary macro names: the conflict
+// diagnostic must not fire and a user macro with one of these names defines
+// normally.
+TEST_F(ArkTSEntryTest, UserMacroKeepsArkTSAnnotationNamesOnTheHostTarget)
+{
+    GlobalOptions hostOptions;
+    hostOptions.experimentalMode = true;
+    const bool namesEnabled = IsArkTSInteropAnnotationEnabled(hostOptions);
+    EXPECT_FALSE(namesEnabled);
+    for (const auto& name : {"ArkTS", "RestParam", "WriteOnly", "RawValue", "HasThis"}) {
+        EXPECT_FALSE(IsBuiltinAnnotation("m", name, namesEnabled)) << name;
+    }
+
+    SourceManager sourceManager;
+    DiagnosticEngine diagnostics;
+    diagnostics.SetSourceManager(&sourceManager);
+    GlobalOptions options;
+    options.experimentalMode = true;
+    const std::string code = R"(macro package mpg
+public macro RawValue(input: Tokens): Tokens { input }
+)";
+    Parser parser(code, diagnostics, sourceManager, {0, 1, 1}, false, &options);
+    auto file = parser.ParseTopLevel();
+    const auto parseDiagnostics = diagnostics.GetCategoryDiagnostic(DiagCategory::PARSE);
+    EXPECT_EQ(std::count_if(parseDiagnostics.begin(), parseDiagnostics.end(),
+                  [](const auto& diagnostic) {
+                      return diagnostic.rKind == DiagKindRefactor::parse_macro_define_conflicted_with_builtin;
+                  }),
+        0);
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(file->decls.size(), 1);
+    auto macro = DynamicCast<MacroDecl*>(file->decls.front().get());
+    ASSERT_NE(macro, nullptr);
+    EXPECT_EQ(macro->identifier.Val(), "RawValue");
+}
+
+// On the host target '@RawValue' is not a builtin annotation, so the parser
+// treats it as a user annotation: the AST kind stays CUSTOM and the identifier
+// keeps the user spelling instead of becoming ARKTS_RAW_VALUE.
+TEST_F(ArkTSEntryTest, RawValueParsesAsAUserAnnotationOnTheHostTarget)
+{
+    SourceManager sourceManager;
+    DiagnosticEngine diagnostics;
+    diagnostics.SetSourceManager(&sourceManager);
+    GlobalOptions options;
+    options.experimentalMode = true;
+    const std::string code = R"(macro package mpg
+public macro RawValue(input: Tokens): Tokens { input }
+
+@RawValue
+public func guarded(): Unit {}
+)";
+    Parser parser(code, diagnostics, sourceManager, {0, 1, 1}, false, &options);
+    parser.EnableCustomAnno();
+    auto file = parser.ParseTopLevel();
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(file->decls.size(), 2);
+    auto& guarded = StaticCast<FuncDecl&>(*file->decls[1]);
+    ASSERT_EQ(guarded.annotations.size(), 1);
+    EXPECT_EQ(guarded.annotations.front()->kind, AnnotationKind::CUSTOM);
+    EXPECT_EQ(guarded.annotations.front()->identifier.Val(), "RawValue");
+}
+
+// Positive control for the gate: an interop-capable build targeting OHOS under
+// --experimental reserves the five names. A build without the capability keeps
+// them free even for an OHOS target.
+TEST_F(ArkTSEntryTest, InteropTargetReservesTheArkTSAnnotationNames)
+{
+    GlobalOptions options;
+    options.experimentalMode = true;
+    options.target.env = Triple::Environment::OHOS;
+#ifdef CANGJIE_ENABLE_ARKTS_INTEROP
+    const bool namesEnabled = IsArkTSInteropAnnotationEnabled(options);
+    EXPECT_TRUE(namesEnabled);
+    for (const auto& name : {"ArkTS", "RestParam", "WriteOnly", "RawValue", "HasThis"}) {
+        EXPECT_TRUE(IsBuiltinAnnotation("m", name, namesEnabled)) << name;
+    }
+#else
+    const bool namesEnabled = IsArkTSInteropAnnotationEnabled(options);
+    EXPECT_FALSE(namesEnabled);
+    for (const auto& name : {"ArkTS", "RestParam", "WriteOnly", "RawValue", "HasThis"}) {
+        EXPECT_FALSE(IsBuiltinAnnotation("m", name, namesEnabled)) << name;
+    }
+#endif
 }
 
 TEST_F(ArkTSEntryTest, RegistrationRestoresContextInFinally)
@@ -1286,6 +1379,7 @@ TEST_F(ArkTSEntryTest, RepeatedOptionAtOneLevelIsRejectedEvenForEqualValues)
                 second + "\"] foreign func invalid(): Unit\n";
             GlobalOptions compileOptions;
             compileOptions.experimentalMode = true;
+            compileOptions.target.env = Triple::Environment::OHOS;
             Parser parser(code, diagnostics, sourceManager, {0, 1, 1}, false, &compileOptions);
             auto file = parser.ParseTopLevel();
             diagnostics.EmitCategoryDiagnostics(DiagCategory::PARSE);
@@ -1633,6 +1727,7 @@ TEST_F(ArkTSEntryTest, ArkTSRejectsConflictingForeignABIAnnotations)
         diagnostics.SetSourceManager(&sourceManager);
         GlobalOptions compileOptions;
         compileOptions.experimentalMode = true;
+        compileOptions.target.env = Triple::Environment::OHOS;
         Parser parser(code, diagnostics, sourceManager, {0, 1, 1}, false, &compileOptions);
         auto file = parser.ParseTopLevel();
         diagnostics.EmitCategoryDiagnostics(DiagCategory::PARSE);
@@ -2339,6 +2434,7 @@ public foreign private class DoublyAccessed {}
         diag.SetSourceManager(&sm);
         GlobalOptions compileOptions;
         compileOptions.experimentalMode = true;
+        compileOptions.target.env = Triple::Environment::OHOS;
         Parser parser(code, diag, sm, {0, 1, 1}, false, &compileOptions);
         auto file = parser.ParseTopLevel();
         ASSERT_NE(file, nullptr);
