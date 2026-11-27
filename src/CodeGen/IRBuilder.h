@@ -381,9 +381,9 @@ public:
     llvm::Value* CallAtomicIntrinsics(const CHIR::IntrinsicBase& intrinsic, const std::vector<CGValue*>& args);
     llvm::Value* CallAtomicPrimitiveIntrinsics(
         const CHIR::IntrinsicBase& intrinsic, const std::vector<CGValue*>& args, llvm::Value* fieldPtr);
-    llvm::Value* EmitPCTSleep(llvm::Value* nanosVal);
     void EmitPCTMarkInstrumented();
-    void EmitPCTDispatcherCall(const std::string& symbol);
+    llvm::Value* EmitPCTDispatcherCall(
+        const std::string& nameAndSignature, llvm::ArrayRef<llvm::Value*> extraArgs = llvm::None);
 
     ///*----------------- Array related --------------------//
     void CallArrayIntrinsicIndexCheck(llvm::Value* array, llvm::Value* index);
