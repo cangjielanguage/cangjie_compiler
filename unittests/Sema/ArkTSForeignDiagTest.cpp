@@ -133,7 +133,6 @@ protected:
         // call the ArkTS entry points directly also set the namespace gate.
         invocation.globalOptions.experimentalMode = true;
         Native::FFI::ArkTS::SetExperimentalEnabled(true);
-        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
 #ifdef PROJECT_SOURCE_DIR
         // Gets the absolute path of the project from the compile parameter.
         projectPath = PROJECT_SOURCE_DIR;
@@ -143,26 +142,18 @@ protected:
         projectPath = "..";
 #endif
 #ifdef __x86_64__
-        instance->invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::X86_64;
+        invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::X86_64;
 #else
-        instance->invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::AARCH64;
-#endif
-    // ArkTS interop is OHOS-only, but the host has no OHOS std module set, so
-    // the front-end tests take the documented host-target escape instead of
-    // pretending to target OHOS (which would also redirect std module lookup).
-#ifdef _WIN32
-    _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1");
-#else
-    setenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1", 1);
+        invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::AARCH64;
 #endif
 #ifdef _WIN32
-        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::WINDOWS;
+        invocation.globalOptions.target.os = Cangjie::Triple::OSType::WINDOWS;
         invocation.globalOptions.executablePath = projectPath + "\\output\\bin\\";
 #elif defined(__APPLE__)
-        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::DARWIN;
+        invocation.globalOptions.target.os = Cangjie::Triple::OSType::DARWIN;
         invocation.globalOptions.executablePath = projectPath + "/output/bin/";
 #elif defined(__unix__)
-        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::LINUX;
+        invocation.globalOptions.target.os = Cangjie::Triple::OSType::LINUX;
         invocation.globalOptions.executablePath = projectPath + "/output/bin/";
 #endif
         std::string cangjieHome = projectPath + "/output";
@@ -183,6 +174,13 @@ protected:
         setenv("CANGJIE_PATH", cangjiePath.c_str(), 1);
 #endif
         invocation.globalOptions.ReadPathsFromEnvironmentVars(GetEnvironmentVars());
+        // ArkTS interop is OHOS-only, and the host has no OHOS std module set,
+        // so the front-end tests declare an OHOS target inside GlobalOptions.
+        // The target is set only after the host module search path is
+        // captured, so std modules still resolve from the host SDK while the
+        // production target gate sees the real OHOS environment.
+        invocation.globalOptions.target.env = Cangjie::Triple::Environment::OHOS;
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
         Cangjie::MacroProcMsger::GetInstance().CloseMacroSrv();
         // Swap the default handler for a recording subclass once the
         // instance is fully constructed; the engine owns the handler.
@@ -5279,13 +5277,11 @@ public func run(): Unit {
 // generated.
 TEST_F(ArkTSForeignDiagTest, TargetGateRejectsNonOhosTarget)
 {
-    // The host-target escape from SetUp is what normally keeps the front-end
-    // tests running; remove it so the gate sees the real Linux target.
-#ifdef _WIN32
-    _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "");
-#else
-    unsetenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET");
-#endif
+    // The fixture declares an OHOS target; switch it back to the real host
+    // target so the gate sees a non-OHOS compilation. Recreating the instance
+    // also materializes the host target module directory the frontend probes.
+    instance->invocation.globalOptions.target.env = Cangjie::Triple::Environment::GNU;
+    instance = std::make_unique<TestCompilerInstance>(invocation, diag);
     diag.ClearError();
     handler->messages.clear();
     CompileSema(R"(package entry
@@ -6247,10 +6243,10 @@ public func run(): Unit {
     EXPECT_EQ(handler->messages.size(), 1U);
 }
 
-// The target gate is scoped the same way: with the SetUp host-target escape
-// removed, source ArkTS is refused on this Linux target, but an @ArkTS
-// declaration imported from a prepared dependency CJO must not re-report the
-// target gate.
+// The target gate is scoped the same way: with the consumer switched back to
+// the real host target, source ArkTS is refused on this Linux target, but an
+// @ArkTS declaration imported from a prepared dependency CJO must not
+// re-report the target gate.
 TEST_F(ArkTSForeignDiagTest, ImportedArkTSDoesNotReTriggerTargetGate)
 {
     diag.ClearError();
@@ -6266,13 +6262,10 @@ import arkts.lang.*
 public foreign func answer(): Int32
 )", {{"ohos.ark_interop", interopCjo}, {"cj_arkts_context_v1", contextCjo}, {"arkts.lang", langCjo}});
 
-    // The dependency was exported while the host-target escape was still set;
-    // drop it now so the gate would fire for any source-file ArkTS.
-#ifdef _WIN32
-    _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "");
-#else
-    unsetenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET");
-#endif
+    // The dependency was exported with the fixture's OHOS target; switch the
+    // consumer back to the real host target so the gate would fire for any
+    // source-file ArkTS.
+    instance->invocation.globalOptions.target.env = Cangjie::Triple::Environment::GNU;
     diag.ClearError();
     handler->messages.clear();
     handler->errors.clear();
@@ -6308,12 +6301,9 @@ public foreign func echo(): Int32
     EXPECT_EQ(CountErrorsContaining("only available when targeting OHOS"), 1U);
     EXPECT_EQ(handler->messages.size(), 1U);
 
-    // Restore the escape even though SetUp sets it for every test.
-#ifdef _WIN32
-    _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1");
-#else
-    setenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1", 1);
-#endif
+    // Restore the fixture's OHOS target for any later compilation in this
+    // test.
+    instance->invocation.globalOptions.target.env = Cangjie::Triple::Environment::OHOS;
 }
 
 // ---- B4b: ArkTSFunc<F> function carrier ----

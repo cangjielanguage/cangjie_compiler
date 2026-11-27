@@ -42,14 +42,15 @@ Linkage GetFuncLinkage(const GlobalOptions& opts, const AST::FuncDecl& func)
 // An '@HasThis' declaration carries the ArkTSFuncWithThis<ThisT, F> class type
 // for name resolution, but the CHIR symbol is still the generated function
 // wrapper. Translate the checked function body's type for the symbol so the
-// class type never reaches a FuncType cast.
-Ptr<AST::Ty> GetFuncDeclCHIRType(const AST::FuncDecl& funcDecl)
+// class type never reaches a FuncType cast. The modal type is kept intact so
+// the locality mode reaches TranslateType.
+AST::ModalTy GetFuncDeclCHIRType(const AST::FuncDecl& funcDecl)
 {
     if (funcDecl.TestAttr(AST::Attribute::ARKTS_HAS_THIS) && funcDecl.funcBody &&
         funcDecl.funcBody->GetTy().IsCorrect() && funcDecl.funcBody->GetTy()->IsFunc()) {
-        return funcDecl.funcBody->GetTy().Ty();
+        return funcDecl.funcBody->GetTy();
     }
-    return funcDecl.GetTy().Ty();
+    return funcDecl.GetTy();
 }
 
 bool IsLocalConstFuncInStaticMember(const AST::FuncDecl& astFunc)

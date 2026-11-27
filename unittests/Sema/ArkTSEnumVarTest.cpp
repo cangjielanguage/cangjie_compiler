@@ -91,33 +91,29 @@ protected:
     {
         // ArkTS interop is experimental: the checker enables its prepare and
         // lower passes only when the user passes --experimental. The host has
-        // no OHOS std module set, so these front-end tests take the
-        // host-target escape for the OHOS-only target gate.
+        // no OHOS std module set, so these front-end tests declare an OHOS
+        // target inside GlobalOptions instead of relying on a host-target
+        // escape. Module lookup still uses the host CANGJIE_PATH configured
+        // below.
         invocation.globalOptions.experimentalMode = true;
-#ifdef _WIN32
-        _putenv_s("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1");
-#else
-        setenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET", "1", 1);
-#endif
-        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
 #ifdef PROJECT_SOURCE_DIR
         projectPath = PROJECT_SOURCE_DIR;
 #else
         projectPath = "..";
 #endif
 #ifdef __x86_64__
-        instance->invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::X86_64;
+        invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::X86_64;
 #else
-        instance->invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::AARCH64;
+        invocation.globalOptions.target.arch = Cangjie::Triple::ArchType::AARCH64;
 #endif
 #ifdef _WIN32
-        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::WINDOWS;
+        invocation.globalOptions.target.os = Cangjie::Triple::OSType::WINDOWS;
         invocation.globalOptions.executablePath = projectPath + "\\output\\bin\\";
 #elif defined(__APPLE__)
-        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::DARWIN;
+        invocation.globalOptions.target.os = Cangjie::Triple::OSType::DARWIN;
         invocation.globalOptions.executablePath = projectPath + "/output/bin/";
 #elif defined(__unix__)
-        instance->invocation.globalOptions.target.os = Cangjie::Triple::OSType::LINUX;
+        invocation.globalOptions.target.os = Cangjie::Triple::OSType::LINUX;
         invocation.globalOptions.executablePath = projectPath + "/output/bin/";
 #endif
         std::string cangjieHome = projectPath + "/output";
@@ -138,6 +134,11 @@ protected:
         setenv("CANGJIE_PATH", cangjiePath.c_str(), 1);
 #endif
         invocation.globalOptions.ReadPathsFromEnvironmentVars(GetEnvironmentVars());
+        // Construct the OHOS target only after the host module search path is
+        // captured, so the target gate sees the real OHOS environment while
+        // std modules still resolve from the host SDK.
+        invocation.globalOptions.target.env = Cangjie::Triple::Environment::OHOS;
+        instance = std::make_unique<TestCompilerInstance>(invocation, diag);
         Cangjie::MacroProcMsger::GetInstance().CloseMacroSrv();
         auto recording = std::make_unique<RecordingDiagnosticHandler>(diag);
         handler = recording.get();

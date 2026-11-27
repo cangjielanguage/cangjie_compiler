@@ -14,7 +14,6 @@
 #include "cangjie/Option/Option.h"
 
 #include <algorithm>
-#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -541,13 +540,6 @@ void DiagnoseArkTSDeclarations(Package& pkg, DiagnosticEngine& diag)
 bool ArkTSTargetSupported([[maybe_unused]] const GlobalOptions& opts)
 {
 #ifdef CANGJIE_ENABLE_ARKTS_INTEROP
-    // Host-target LLT and unit suites have no OHOS std module set, so they
-    // cannot compile for the real target. The variable is a test-harness
-    // escape, deliberately undocumented and never emitted by the driver.
-    const char* testHostTarget = std::getenv("CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET");
-    if (testHostTarget != nullptr && std::string(testHostTarget) == "1") {
-        return true;
-    }
     return opts.target.env == Triple::Environment::OHOS;
 #else
     // The target gate is part of the optional interop capability: a build that does

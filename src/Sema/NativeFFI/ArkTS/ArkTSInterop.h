@@ -26,10 +26,8 @@ namespace Native::FFI::ArkTS {
 void SetExperimentalEnabled(bool enabled);
 bool ExperimentalEnabled();
 // Whether the compilation target supports the capability: only OHOS may use
-// ArkTS interop. The host-target LLT and unit suites have no OHOS std module
-// set, so they take the CANGJIE_ARKTS_INTEROP_TEST_HOST_TARGET escape instead.
-// The variable is a test-harness escape: it is deliberately undocumented and
-// never emitted by the driver.
+// ArkTS interop. There is no host-target escape; a non-OHOS compilation is
+// always refused.
 bool ArkTSTargetSupported(const GlobalOptions& opts);
 // The checker sets the target gate once per semantic pass, next to the
 // experimental gate. It must survive ResetState.
