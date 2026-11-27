@@ -101,6 +101,12 @@ if(CANGJIE_ENABLE_SANITIZE_OPTION)
     add_compile_definitions(CANGJIE_ENABLE_SANITIZE_OPTION)
 endif()
 
+# The ArkTS interop target gate is compiled in only when the capability is enabled.
+option(CANGJIE_ENABLE_ARKTS_INTEROP "Enable the ArkTS interop capability" OFF)
+if(CANGJIE_ENABLE_ARKTS_INTEROP)
+    add_compile_definitions(CANGJIE_ENABLE_ARKTS_INTEROP)
+endif()
+
 set(CANGJIE_ASAN_SUPPORT OFF)
 set(CANGJIE_TSAN_SUPPORT OFF)
 set(CANGJIE_HWASAN_SUPPORT OFF)

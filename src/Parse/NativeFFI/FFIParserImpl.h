@@ -15,6 +15,7 @@
 
 #include "cangjie/AST/Node.h"
 #include "cangjie/Parse/Parser.h"
+#include "ArkTS/ArkTSParserImpl.h"
 #include "Java/JFFIParserImpl.h"
 #include "ObjC/OCFFIParserImpl.h"
 
@@ -23,26 +24,33 @@ using namespace AST;
 
 class FFIParserImpl final {
 public:
-    explicit FFIParserImpl(ParserImpl& parserImpl): p(parserImpl), jp(parserImpl), op(parserImpl)
+    explicit FFIParserImpl(ParserImpl& parserImpl): p(parserImpl), jp(parserImpl), op(parserImpl), arkTS(parserImpl)
     {
     }
     ~FFIParserImpl() = default;
 
+    bool AllowsInheritedAnnotationOptions(AnnotationKind kind) const;
     void CheckAnnotationsConflict(const PtrVector<Annotation>& annos) const;
     void CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const;
+    // A foreign block is a parser-only construct; its @ArkTS options are
+    // cloned into every member and merged option by option, where a
+    // declaration-level value wins. foreignName is a valid block default.
+    void CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) const;
     void CheckForeignNameAnnotation(Decl& decl) const;
     void CheckZeroOrSingleStringLitArgAnnotation(AST::Annotation &anno, const std::string &annotationName) const;
     void CheckNoArgAnnotation(AST::Annotation &anno, const std::string &annotationName) const;
 
     void CheckClassLikeSignature(AST::ClassLikeDecl& decl, const PtrVector<Annotation>& annos) const;
-    void CheckFuncSignature(AST::FuncDecl& decl, const PtrVector<Annotation>& annos) const;
+    void CheckFuncSignature(
+        AST::FuncDecl& decl, const PtrVector<Annotation>& annos, ScopeKind scopeKind) const;
 
     JFFIParserImpl Java() const;
     OCFFIParserImpl ObjC() const;
+    ArkTSParserImpl ArkTS() const;
 
 private:
     // friend JFFIParserImpl;
-    void CheckForeignNameAnnoArgs(const Annotation& anno) const;
+    void CheckForeignNameAnnoArgs(Annotation& anno) const;
     void CheckForeignNameAnnoTarget(const Annotation& anno) const;
 
     void CheckForeignGetterSetterNameAnnoArgs(const Annotation& anno) const;
@@ -53,6 +61,7 @@ private:
     ParserImpl& p;
     JFFIParserImpl jp;
     OCFFIParserImpl op;
+    ArkTSParserImpl arkTS;
 };
 
 void DiagConflictingAnnos(DiagnosticEngine& diag, Annotation& first, Annotation& second);
@@ -60,7 +69,7 @@ void DiagConflictingAnnos(DiagnosticEngine& diag, Annotation& first, Annotation&
 const std::unordered_set<AnnotationKind> CONFLICTED_FFI_ANNOS {
     AnnotationKind::JAVA_MIRROR, AnnotationKind::JAVA_IMPL,
     AnnotationKind::OBJ_C_IMPL, AnnotationKind::OBJ_C_MIRROR,
-    AnnotationKind::C, AnnotationKind::JAVA, AnnotationKind::OBJ_C
+    AnnotationKind::C, AnnotationKind::JAVA, AnnotationKind::OBJ_C, AnnotationKind::ARKTS
 };
 
 namespace Native::FFI {

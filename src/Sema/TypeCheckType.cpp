@@ -223,6 +223,25 @@ void TypeChecker::TypeCheckerImpl::CheckRefTypeWithRealTarget(RefType& rt)
 
 void TypeChecker::TypeCheckerImpl::CheckRefType(ASTContext& ctx, RefType& rt)
 {
+    // Same rule as generated wrapper RefExprs: restore the compiler-bound SDK
+    // declaration if a speculative re-check cleared this type reference.
+    if (!rt.ref.target) {
+        auto support = arktsSupportRefs.find(&rt);
+        if (support != arktsSupportRefs.end()) {
+            rt.ref.target = support->second;
+            rt.ref.targets = {support->second};
+            if (Is<PackageDecl>(*support->second)) {
+                // A package qualifier is not a type: the enclosing qualified
+                // type resolves its member through the PackageDecl, so this
+                // reference must not take a declaration type.
+                rt.SetTy({TypeManager::GetInvalidTy()});
+                return;
+            }
+            if (rt.typeArguments.empty()) {
+                rt.SetTy({support->second->DataTy()});
+            }
+        }
+    }
     auto target = rt.ref.target;
     // If no target found in name resolution stage, return directly.
     if (!target) {

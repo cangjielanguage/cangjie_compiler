@@ -161,7 +161,7 @@ public:
 
     /** APIs to check type relations. */
     bool IsSubtype(AST::ModalTy leaf, AST::ModalTy root, bool implicitBoxed = true, bool allowOptionBox = true,
-        ModalMatchMode modalMatchMode = ModalMatchMode::SUBTYPE);
+        ModalMatchMode modalMatchMode = ModalMatchMode::SUBTYPE, bool includeArkTSImplicitSupertype = true);
     /**
      * Whether \p leaf is a subtype of \p root, comparing the data types themselves (their modals
      * are ignored unless either side is a placeholder, see \p leafModal / \p rootModal).
@@ -174,13 +174,21 @@ public:
      *        modal (e.g. @local!) is recorded for SolveLamExprParamTys to re-apply; otherwise
      *        ignored, keeping the legacy modal-less bounds
      * @param rootModal the modal of \p root, symmetric to \p leafModal
+     * @param includeArkTSImplicitSupertype whether the compiler-special ArkTSType
+     *        implicit-supertype relation participates. It is a static-only rule, so the
+     *        runtime-check sites (is/as/type pattern) pass false and keep the
+     *        declaration-based relation; every static question (assignment,
+     *        generic constraint, overload, member lookup) keeps the default true.
+     *        Distinct values are cached under distinct keys.
      */
     bool IsSubtype(AST::DataTy leaf, AST::DataTy root, bool implicitBoxed = true, bool allowOptionBox = true,
         std::optional<Cangjie::ModalInfo> leafModal = std::nullopt,
-        std::optional<Cangjie::ModalInfo> rootModal = std::nullopt);
-    bool IsFuncSubtype(const AST::Ty& leaf, const AST::Ty& root);
-    bool IsFuncParametersSubtype(const AST::FuncTy& leaf, const AST::FuncTy& root);
-    bool IsTupleSubtype(const AST::Ty& leaf, const AST::Ty& root);
+        std::optional<Cangjie::ModalInfo> rootModal = std::nullopt,
+        bool includeArkTSImplicitSupertype = true);
+    bool IsFuncSubtype(const AST::Ty& leaf, const AST::Ty& root, bool includeArkTSImplicitSupertype = true);
+    bool IsFuncParametersSubtype(
+        const AST::FuncTy& leaf, const AST::FuncTy& root, bool includeArkTSImplicitSupertype = true);
+    bool IsTupleSubtype(const AST::Ty& leaf, const AST::Ty& root, bool includeArkTSImplicitSupertype = true);
     bool IsTyEqual(AST::DataTy subTy, AST::DataTy baseTy);
     bool IsTyEqual(AST::ModalTy subTy, AST::ModalTy baseTy);
     bool IsPlaceholderEqual(AST::Ty& leaf, AST::Ty& root);
@@ -498,10 +506,15 @@ private:
         bool implicitBoxed{false};
         bool allowOptionBox{false};
         ModalMatchMode mode;
+        // Kept in the key: the ArkTSType implicit-supertype relation is static-only,
+        // so a declaration-based answer (runtime-check sites) must not be reused
+        // for a static question, nor the reverse.
+        bool includeArkTSImplicitSupertype{true};
 
         SubtypeCacheKey(AST::ModalTy leaf, AST::ModalTy root, bool implicitBoxed = true, bool allowOptionBox = true,
-            ModalMatchMode m = ModalMatchMode::SUBTYPE)
-            : leaf(leaf), root(root), implicitBoxed(implicitBoxed), allowOptionBox(allowOptionBox), mode{m}
+            ModalMatchMode m = ModalMatchMode::SUBTYPE, bool includeArkTSImplicitSupertype = true)
+            : leaf(leaf), root(root), implicitBoxed(implicitBoxed), allowOptionBox(allowOptionBox), mode{m},
+              includeArkTSImplicitSupertype{includeArkTSImplicitSupertype}
         {
         }
     };
@@ -513,14 +526,17 @@ private:
             ret = hash_combine(ret, key.root);
             ret = hash_combine(ret, key.implicitBoxed);
             ret = hash_combine(ret, key.allowOptionBox);
+            ret = hash_combine(ret, key.includeArkTSImplicitSupertype);
             return ret;
         }
     };
     struct SubtypeCacheKeyEqual {
         bool operator()(const SubtypeCacheKey& lhs, const SubtypeCacheKey& rhs) const
         {
-            return std::tie(lhs.leaf, lhs.root, lhs.implicitBoxed, lhs.allowOptionBox) ==
-                std::tie(rhs.leaf, rhs.root, rhs.implicitBoxed, rhs.allowOptionBox);
+            return std::tie(lhs.leaf, lhs.root, lhs.implicitBoxed, lhs.allowOptionBox,
+                lhs.includeArkTSImplicitSupertype) ==
+                std::tie(rhs.leaf, rhs.root, rhs.implicitBoxed, rhs.allowOptionBox,
+                    rhs.includeArkTSImplicitSupertype);
         }
     };
     std::unordered_map<SubtypeCacheKey, bool, SubtypeCacheKeyHash, SubtypeCacheKeyEqual> subtypeCache;
@@ -628,14 +644,39 @@ private:
     bool IsPlaceholderSubtype(AST::Ty& leaf, AST::Ty& root,
         std::optional<Cangjie::ModalInfo> leafModal = std::nullopt,
         std::optional<Cangjie::ModalInfo> rootModal = std::nullopt);
-    bool IsGenericSubtype(AST::Ty& leaf, AST::Ty& root, bool implicitBoxed, bool allowOptionBox);
-    bool IsClassLikeSubtype(AST::Ty& leaf, AST::Ty& root, bool implicitBoxed, bool allowOptionBox);
-    bool IsStructOrEnumSubtype(AST::Ty& leaf, AST::Ty& root, bool implicitBoxed, bool allowOptionBox);
+    bool IsGenericSubtype(AST::Ty& leaf, AST::Ty& root, bool implicitBoxed, bool allowOptionBox,
+        bool includeArkTSImplicitSupertype = true);
+    // Subtyping with a generic leaf: the 'Any' target needs implicit boxing, a
+    // direct upper bound matches, a legal alias parameter is accepted, and
+    // otherwise some upper bound must reach the root through subtyping.
+    bool IsGenericLeafSubtype(AST::GenericsTy& gTy, AST::Ty& root, bool implicitBoxed, bool allowOptionBox,
+        bool includeArkTSImplicitSupertype);
+    bool IsClassLikeSubtype(AST::Ty& leaf, AST::Ty& root, bool implicitBoxed, bool allowOptionBox,
+        bool includeArkTSImplicitSupertype = true);
+    bool IsStructOrEnumSubtype(AST::Ty& leaf, AST::Ty& root, bool implicitBoxed, bool allowOptionBox,
+        bool includeArkTSImplicitSupertype = true);
     bool IsArraySubtype(const AST::Ty& leaf, const AST::Ty& root);
     bool IsVArraySubtype(const AST::Ty& leaf, const AST::Ty& root);
     bool IsPointerSubtype(const AST::Ty& leaf, const AST::Ty& root);
     bool IsPrimitiveSubtype(const AST::Ty& leaf, AST::Ty& root);
     bool IsTyExtendInterface(const AST::Ty& classTy, const AST::Ty& interfaceTy);
+    /**
+     * The compiler-special ArkTSType implicit-supertype relation (design §3.3):
+     * an @ArkTS-annotated type implicitly implements the stdlib preset root
+     * interface std.interop.arkts.ArkTSType. Pinned to the declaring package so
+     * a same-named interface elsewhere stays ordinary. Static-only: the
+     * runtime-check sites do not consume it (see IsSubtype's
+     * includeArkTSImplicitSupertype).
+     */
+    bool IsArkTSRootInterface(const AST::Ty& root) const;
+    /**
+     * A leaf that participates in the ArkTSType relation: an @ArkTS-annotated
+     * class/interface/enum (foreign or prepared wrapper), the package-pinned
+     * ArkTSType root, or Extern<ArkTS> when implicit boxing is allowed (Extern
+     * is a struct and must be boxed to reach the interface). Deliberately
+     * excludes primitives, Option/Array/tuple composites and arbitrary types.
+     */
+    bool IsArkTSCompatibleLeaf(const AST::Ty& leaf, bool implicitBoxed) const;
 
     bool CheckGenericType(AST::ModalTy lvalue, AST::ModalTy rvalue, bool implicitBoxed = true);
 

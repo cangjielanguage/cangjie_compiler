@@ -332,7 +332,7 @@ private:
             return nullptr;
         }
         std::string key = GLOBAL_VALUE_PREFIX + decl.mangledName;
-        if (decl.TestAttr(AST::Attribute::FOREIGN) && decl.IsFunc()) {
+        if (AST::IsExternalForeign(decl) && decl.IsFunc()) {
             key = decl.rawMangleName;
         }
         T* res = nullptr;

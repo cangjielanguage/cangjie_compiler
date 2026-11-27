@@ -561,6 +561,25 @@ bool TypeChecker::TypeCheckerImpl::SynTargetOnUsed(ASTContext& ctx, const NameRe
 
 void TypeChecker::TypeCheckerImpl::InferRefExpr(ASTContext& ctx, RefExpr& re)
 {
+    // A generated ArkTS wrapper reference keeps the SDK declaration bound by
+    // lowering even after a speculative re-check cleared this subtree: a
+    // same-named user declaration must never capture it.
+    if (!re.ref.target) {
+        auto support = arktsSupportRefs.find(&re);
+        if (support != arktsSupportRefs.end()) {
+            re.ref.target = support->second;
+            re.ref.targets = {support->second};
+            if (Is<PackageDecl>(*support->second)) {
+                // The base of a package-qualified generated name is a package,
+                // not a value: keep the target and leave the type to the
+                // enclosing member access, which resolves through PackageDecl.
+                re.SetTy({TypeManager::GetInvalidTy()});
+                return;
+            }
+            re.SetTy(typeManager.SubstituteTypeAliasInTy(support->second->GetTy()));
+            return;
+        }
+    }
     if (re.ref.target && re.GetTy().IsCorrect() && !re.ref.target->GetTy()->IsPlaceholder()) {
         return; // If the target is already existed and type is valid, we can exit early.
     }

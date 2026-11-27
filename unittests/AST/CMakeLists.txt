@@ -122,4 +122,6 @@ target_link_libraries(
     boundscheck-static
     GTest::gtest
     GTest::gtest_main)
+target_include_directories(ModalTyTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
+add_dependencies(ModalTyTest CangjieFlatbuffersHeaders)
 add_test(NAME ModalTyTest COMMAND ModalTyTest)

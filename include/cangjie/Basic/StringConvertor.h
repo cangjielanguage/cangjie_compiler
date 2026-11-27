@@ -30,6 +30,9 @@ public:
     static std::string Normalize(const std::string& str, bool isRawString = false);
     /// convert string into raw string which contains escape characters.
     static std::string Recover(const std::string& str);
+    /// convert string into raw string for ArkTS generated Cangjie source, which also escapes '$' so that the
+    /// spliced literal is not read as an interpolation.
+    static std::string RecoverForArkTSSource(const std::string& str);
 
     /**
     * Convert utf-8 string to codepoint vector.

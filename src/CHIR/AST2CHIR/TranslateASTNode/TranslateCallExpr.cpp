@@ -892,7 +892,7 @@ Ptr<Value> Translator::TranslateForeignFuncCall(const AST::CallExpr& expr)
     if (expr.resolvedFunction == nullptr) {
         return nullptr;
     }
-    if (!expr.resolvedFunction->TestAttr(AST::Attribute::FOREIGN)) {
+    if (!AST::IsExternalForeign(*expr.resolvedFunction)) {
         return nullptr;
     }
     auto [paramInstTys, retInstTy] = GetMemberFuncParamAndRetInstTypes(expr);

@@ -51,7 +51,7 @@ void UpdateDeclAttributes(Package& pkg, bool exportForTest)
         if (exportForTest) {
             if (auto fd = DynamicCast<FuncDecl*>(node); fd && !fd->TestAttr(Attribute::PRIVATE)) {
                 auto isExtend = Is<ExtendDecl>(fd->outerDecl);
-                auto isForeignFunc = fd->TestAttr(Attribute::FOREIGN);
+                auto isForeignFunc = IsExternalForeign(*fd);
                 if (!isExtend && !isForeignFunc) {
                     return VisitAction::WALK_CHILDREN;
                 }

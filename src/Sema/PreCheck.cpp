@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -16,6 +16,8 @@
 #include "SearchSymbol.h"
 #include "TypeCheckUtil.h"
 #include "TypeCheckerImpl.h"
+
+#include "NativeFFI/ArkTS/ArkTSInterop.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -1644,7 +1646,10 @@ void TypeChecker::TypeCheckerImpl::PreCheckFuncRedefinitionForFFI(const std::vec
 {
     std::vector<Ptr<FuncDecl>> nativeDuplicates;
     std::copy_if(funcs.begin(), funcs.end(), std::back_inserter(nativeDuplicates),
-        [](Ptr<const FuncDecl> fd) { return fd->TestAnyAttr(Attribute::FOREIGN, Attribute::C); });
+        [](Ptr<const FuncDecl> fd) {
+            return fd->TestAnyAttr(Attribute::FOREIGN, Attribute::C) &&
+                !Native::FFI::ArkTS::IsArkTSDecl(*fd);
+        });
     if (nativeDuplicates.size() <= 1) {
         return;
     }
@@ -1907,6 +1912,17 @@ Ptr<ReturnExpr> GetDanglingReturn(const FuncParam& fp)
 }
 }; // namespace
 
+// A default-value desugar function of an @ArkTS foreign wrapper owns its
+// return expression and must not be rebound to the wrapper's return type.
+// ARKTS_FUNCTION_WRAPPER is the attribute PrepareTypeCheck sets on the wrapper
+// declaration whose body LowerArkTSForeignFunctions generates.
+bool IsArkTSWrapperDesugarReturn(const ReturnExpr& re)
+{
+    return re.refFuncBody && re.refFuncBody->funcDecl && re.refFuncBody->funcDecl->TestAttr(Attribute::HAS_INITIAL) &&
+        re.refFuncBody->funcDecl->ownerFunc &&
+        re.refFuncBody->funcDecl->ownerFunc->TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
+}
+
 void TypeChecker::TypeCheckerImpl::CheckReturnAndJump(const ASTContext& ctx)
 {
     auto syms = SearchSymbol::GetSymsByASTKind(ctx, ASTKind::RETURN_EXPR);
@@ -1918,7 +1934,13 @@ void TypeChecker::TypeCheckerImpl::CheckReturnAndJump(const ASTContext& ctx)
             if (refFuncBody->funcDecl && IsStaticInitializer(*refFuncBody->funcDecl)) {
                 re->SetTy({TypeManager::GetInvalidTy()});
                 (void)diag.DiagnoseRefactor(DiagKindRefactor::sema_invalid_return_in_static_init, *sym->node);
-            } else {
+            } else if (!IsArkTSWrapperDesugarReturn(*re)) {
+                // A default-value desugar function of an @ArkTS foreign wrapper owns its return
+                // expression: the value is checked against the parameter type, never the
+                // wrapper's return type. The wrapper body is generated after the symbol table
+                // was built, so its desugar function shares the wrapper's scope gate and
+                // resolving the owner from the scope name would walk out to the wrapper. Every
+                // other declaration, in every language, keeps the rebinding below.
                 re->refFuncBody = refFuncBody;
             }
         } else {
@@ -2068,7 +2090,7 @@ void TypeChecker::TypeCheckerImpl::PreSetDeclType(const ASTContext& ctx)
             retTy = ModalTy{TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT)};
         }
         bool isCFunc =
-            fd->funcBody->TestAttr(Attribute::C) || (fd->TestAttr(Attribute::FOREIGN) && IsUnsafeBackend(backendType));
+            fd->funcBody->TestAttr(Attribute::C) || (IsExternalForeign(*fd) && IsUnsafeBackend(backendType));
         bool hasVariableLenArg = fd->hasVariableLenArg ||
             (!fd->funcBody->paramLists.empty() && fd->funcBody->paramLists[0]->hasVariableLenArg);
         fd->SetTy({typeManager.GetFunctionTy(paramTys, retTy, {isCFunc, false, hasVariableLenArg})});
@@ -2269,6 +2291,9 @@ void TypeChecker::TypeCheckerImpl::CollectDeclsWithMember(Ptr<Package> pkg, ASTC
 void TypeChecker::TypeCheckerImpl::PreCheck(const std::vector<Ptr<ASTContext>>& contexts)
 {
     Utils::ProfileRecorder recorder("Pre TypeCheck", "PreCheck");
+    // Support bindings from a previous compilation (incremental/LSP reuse of this checker)
+    // refer to released AST nodes; clear them before any stage touches the new trees.
+    arktsSupportRefs.clear();
     // NOTE: PreCheck should not contains any 'Synthesize' call.
     Utils::ProfileRecorder::Start("PreCheck", "CheckRedefinition");
     for (auto& ctx : contexts) {
@@ -2285,6 +2310,19 @@ void TypeChecker::TypeCheckerImpl::PreCheck(const std::vector<Ptr<ASTContext>>& 
     Utils::ProfileRecorder::Stop("PreCheck", "ResolveDecls");
     // Resolve type alias separately after all user-defined type resolved.
     ResolveTypeAlias(contexts);
+    // Before -> after ArkTS lowering: prepared, bodyless wrapper FuncDecls with
+    // resolved alias declarations -> the same signatures with resolved scalar
+    // types, generated glue Blocks, rebound references and collected locals.
+    // ResolveTypeAlias must precede this step so an alias selects its scalar
+    // conversion; ordinary body type checking consumes the resulting AST.
+    // LowerArkTSVariables lives here too: it installs the foreign-let getter
+    // bodies, so it belongs with the other lowering passes, not the annotation
+    // check below.
+    for (auto& ctx : contexts) {
+        LowerArkTSClasses(*ctx);
+        LowerArkTSForeignFunctions(*ctx);
+        LowerArkTSVariables(*ctx);
+    }
 
     // Clear extend related data before iteration of all packages.
     typeManager.ClearMapCache();

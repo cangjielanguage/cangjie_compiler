@@ -22,6 +22,15 @@ using namespace Cangjie;
 using namespace AST;
 
 namespace {
+// The serialized tyModes vector only carries entries when the cjo stores a
+// modal, so a corrupt file can hold fewer entries than the type list. A missing
+// entry loads as "no mode" instead of indexing out of bounds.
+const PackageFormat::Mode* LoadTyMode(const PackageFormat::Pattern& pObj, uoffset_t index)
+{
+    const auto* modes = pObj.tyModes();
+    return (modes != nullptr && index < modes->size()) ? modes->Get(index) : nullptr;
+}
+
 void SetFuncParentReference(const FuncDecl& fd, Decl& parentDecl)
 {
     CJC_ASSERT(fd.funcBody);
@@ -563,6 +572,8 @@ void ASTLoader::ASTLoaderImpl::LoadNominalDeclRef(const PackageFormat::Decl& dec
             auto type = WrapType(retTy);
             UpdateType(astDecl.funcBody->retType, std::move(type));
         }
+        // The funcBody always denotes the function signature; CHIR translates
+        // the function symbol from it. Keep the declaration's checked type.
         astDecl.funcBody->SetTy(astDecl.GetTy());
     }
     if constexpr (std::is_same_v<DeclT, ExtendDecl>) {
@@ -605,10 +616,44 @@ void ASTLoader::ASTLoaderImpl::LoadDeclRefs(const PackageFormat::Decl& declObj, 
         return; // Skip following steps if ty is not correct during loading cache.
     }
     LoadGenericConstraintsRef(declObj.generic(), decl.GetGeneric());
-    for (uoffset_t i = 0; i < declObj.annotations()->size(); i++) {
-        CJC_NULLPTR_CHECK(declObj.annotations()->Get(i));
-        CJC_NULLPTR_CHECK(decl.annotations[i]);
-        LoadAnnotationBaseExpr(*declObj.annotations()->Get(i), *decl.annotations[i]);
+    // Only custom annotations carry constructor references. Match their serialized
+    // order to the visible custom nodes; marker records and source-only annotations
+    // have no corresponding reference to restore.
+    auto annotation = decl.annotations.begin();
+    // The annotations vector is optional in the schema; a cjo without it has no
+    // constructor references to restore. Skip the alignment, not the references
+    // loaded below.
+    if (declObj.annotations() != nullptr) {
+        for (auto rawAnno : *declObj.annotations()) {
+            if (rawAnno == nullptr || rawAnno->kind() != PackageFormat::AnnoKind_Custom) {
+                continue;
+            }
+            while (annotation != decl.annotations.end() &&
+                ((*annotation)->kind != AnnotationKind::CUSTOM ||
+                    (!(*annotation)->isCompileTimeVisible &&
+                        !decl.TestAnyAttr(Attribute::COMMON, Attribute::SPECIFIC)))) {
+                ++annotation;
+            }
+            // A release build compiles CJC_ASSERT away, so the bound must be a real
+            // check: a package whose serialized record count exceeds the visible
+            // custom nodes must not make the loader run past the end. The remaining
+            // constructor references stay unrestored.
+            if (annotation == decl.annotations.end()) {
+                break;
+            }
+            if (rawAnno->identifier() == nullptr) {
+                // The record cannot be matched by name; stop aligning instead of
+                // attaching the reference to another annotation.
+                break;
+            }
+            if ((*annotation)->identifier != rawAnno->identifier()->str()) {
+                // The serialized order and the visible custom nodes disagree; stop
+                // aligning instead of attaching the reference to another annotation.
+                break;
+            }
+            LoadAnnotationBaseExpr(*rawAnno, **annotation);
+            ++annotation;
+        }
     }
     switch (declObj.kind()) {
         case PackageFormat::DeclKind_FuncDecl: {
@@ -851,7 +896,7 @@ void ASTLoader::ASTLoaderImpl::LoadPatternRefs(const PackageFormat::Pattern& pOb
 {
     CJC_ASSERT(pObj.types()->size() >= 1);
     pattern.SetTy(ApplyLoadedModal(LoadType(static_cast<FormattedIndex>(pObj.types()->Get(0))),
-        pObj.tyModes() != nullptr ? pObj.tyModes()->Get(0) : nullptr));
+        LoadTyMode(pObj, 0)));
     // Sub patterns is guaranteed and created during 'LoadPattern'.
     switch (pObj.kind()) {
         case PackageFormat::PatternKind_TuplePattern:
@@ -876,7 +921,7 @@ void ASTLoader::ASTLoaderImpl::LoadPatternRefs(const PackageFormat::Pattern& pOb
             for (uoffset_t i = 1; i < pObj.types()->size(); i++) {
                 etp.types[i - 1] = WrapType(ApplyLoadedModal(
                     LoadType(static_cast<FormattedIndex>(pObj.types()->Get(i))),
-                    pObj.tyModes() != nullptr ? pObj.tyModes()->Get(i) : nullptr));
+                    LoadTyMode(pObj, i)));
             }
             break;
         }
@@ -888,7 +933,7 @@ void ASTLoader::ASTLoaderImpl::LoadPatternRefs(const PackageFormat::Pattern& pOb
             for (uoffset_t i = 1; i < pObj.types()->size(); i++) {
                 ctp.types[i - 1] = WrapType(ApplyLoadedModal(
                     LoadType(static_cast<FormattedIndex>(pObj.types()->Get(i))),
-                    pObj.tyModes() != nullptr ? pObj.tyModes()->Get(i) : nullptr));
+                    LoadTyMode(pObj, i)));
             }
             break;
         }

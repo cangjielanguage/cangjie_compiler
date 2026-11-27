@@ -167,7 +167,12 @@ void DeclAttributeChecker::SetCommonAttributes(Decl& d) const
     SetDeclInternal(d);
     for (auto memberDecl : d.GetMemberDeclPtrs()) {
         CJC_ASSERT(memberDecl);
-        if (d.TestAttr(Attribute::FOREIGN)) {
+        // A prepared @ArkTS wrapper keeps FOREIGN as its source identity, but
+        // its members are ordinary declarations: stamping FOREIGN onto them
+        // would re-enter every C-ABI, unsafe-call and imported-body rule for
+        // the generated bodies. Generic and preset declarations are still
+        // external, and keep the propagation.
+        if (IsExternalForeign(d)) {
             memberDecl->EnableAttr(Attribute::FOREIGN);
         }
         SetDeclInternal(*memberDecl);

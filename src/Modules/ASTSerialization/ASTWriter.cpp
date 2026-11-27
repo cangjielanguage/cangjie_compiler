@@ -11,6 +11,7 @@
 
 #include "ASTWriterImpl.h"
 
+#include <algorithm>
 #include <optional>
 #include <queue>
 
@@ -1740,6 +1741,11 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveDecl(const Decl& decl, bool isTopLe
     TPosition posEnd(fileIndex, pkgIndex, end.line, end.column, end.GetStatus() == PositionStatus::IGNORE);
     TPosition identifierPos(fileIndex, pkgIndex, decl.GetIdentifierPos().line, decl.GetIdentifierPos().column, false);
     TDeclHash declHash(decl.hash.instVar, decl.hash.virt, decl.hash.sig, decl.hash.srcUse, decl.hash.bodyHash);
+    // ArkTS declaration export, before -> after: a local copy of Decl attributes
+    // with ARKTS -> serialized attributes without ARKTS plus the Anno record(s)
+    // from SaveAnnotations. The original Decl.ARKTS flag is not cleared.
+    // Persist this marker only as an Anno record, not in the general attribute vector.
+    attrs.SetAttr(Attribute::ARKTS, false);
     auto attributes = SaveAttributes(attrs);
     auto isConst = decl.IsConst();
     auto annotations = builder.CreateVector<TAnnoOffset>(SaveAnnotations(decl));
@@ -1768,6 +1774,13 @@ FormattedIndex ASTWriter::ASTWriterImpl::SaveDecl(const Decl& decl, bool isTopLe
 // Affect both **member variable** and **primary constructor parameter**.
 // But separate records will be created for them.
 // Means there is no global `allSavedAnnotations` map.
+// ArkTS AST -> CJO annotation records (the source AST is not modified):
+//   Decl.ARKTS + ordered option-bearing Annotation(ARKTS) nodes
+//     -> ordered Anno(ArkTS, identifier, named literal arguments) records;
+//   Decl.ARKTS without option-bearing nodes -> one parameterless Anno marker.
+// Thus inherited defaults/member overrides survive re-export in the same order,
+// while a marker-only imported declaration needs no reconstructed Annotation.
+// No annotation definition or constructor is serialized for either case.
 std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& decl)
 {
     std::vector<TAnnoOffset> annotations;
@@ -1803,6 +1816,17 @@ std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& d
                 auto frozen = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_Frozen,
                     builder.CreateString(annotation->identifier.Val()), builder.CreateVector<TAnnoArgOffset>({}));
                 annotations.emplace_back(frozen);
+                break;
+            }
+            case AST::AnnotationKind::ARKTS: {
+                // Save binding metadata only for declarations classified for ArkTS interop.
+                // Keep inherited and explicit records ordered; no annotation constructor is saved.
+                if (decl.TestAttr(Attribute::ARKTS) && !annotation->args.empty()) {
+                    auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
+                    auto arkTS = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_ArkTS,
+                        builder.CreateString(annotation->identifier.Val()), args);
+                    annotations.emplace_back(arkTS);
+                }
                 break;
             }
             case AST::AnnotationKind::JAVA_MIRROR: {
@@ -1887,9 +1911,70 @@ std::vector<TAnnoOffset> ASTWriter::ASTWriterImpl::SaveAnnotations(const Decl& d
                 annotations.emplace_back(objc);
                 break;
             }
+            case AST::AnnotationKind::ARKTS_RAW_VALUE: {
+                // A foreign enum member's value must survive a package boundary:
+                // the importing package rebuilds the enum value table from it.
+                auto args = builder.CreateVector<TAnnoArgOffset>(SaveAnnotationArgs(*annotation));
+                auto rawValue = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_RawValue,
+                    builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(rawValue);
+                break;
+            }
+            case AST::AnnotationKind::ARKTS_HAS_THIS: {
+                // A contract Sema refused must not cross the package boundary:
+                // the loader would otherwise resurrect it as a valid marker.
+                if (annotation->TestAttr(Attribute::IS_BROKEN)) {
+                    break;
+                }
+                // The argument is a type reference, which SaveAnnotationArgs
+                // skips because it is not a literal. Carry the spelled type
+                // name as one unnamed string literal instead, so an importing
+                // package can recover the ThisT contract. The source AST and
+                // its type reference are not modified; the synthetic literal
+                // is retained for the writer's lifetime because serialized
+                // expression slots refer to it by pointer.
+                std::vector<TAnnoArgOffset> hasThisArgs;
+                if (!annotation->args.empty() && annotation->args.front() != nullptr &&
+                    annotation->args.front()->expr != nullptr) {
+                    const auto& typeRef = *annotation->args.front()->expr;
+                    // A source argument is a type reference; an argument that
+                    // already came from a CJO is the string literal the loader
+                    // rebuilt, whose ToString() would include the quotes.
+                    std::string typeSpelling = typeRef.ToString();
+                    if (auto lit = DynamicCast<const LitConstExpr*>(&typeRef);
+                        lit != nullptr && lit->kind == LitConstKind::STRING) {
+                        typeSpelling = lit->stringValue;
+                    }
+                    auto literal = CreateLitConstExpr(LitConstKind::STRING, typeSpelling, {});
+                    literal->begin = typeRef.begin;
+                    literal->end = typeRef.end;
+                    literal->curFile = decl.curFile;
+                    auto retained = literal.get();
+                    syntheticExprs.emplace_back(std::move(literal));
+                    hasThisArgs.emplace_back(PackageFormat::CreateAnnoArg(builder,
+                        builder.CreateString(annotation->args.front()->name.GetRawText()), SaveExpr(*retained)));
+                }
+                auto args = builder.CreateVector<TAnnoArgOffset>(hasThisArgs);
+                auto hasThis = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_HasThis,
+                    builder.CreateString(annotation->identifier.Val()), args);
+                annotations.emplace_back(hasThis);
+                break;
+            }
             default:
                 break;
         }
+    }
+    const bool hasArkTSOptions = std::any_of(decl.annotations.begin(), decl.annotations.end(),
+        [](const auto& annotation) {
+            return annotation->kind == AST::AnnotationKind::ARKTS && !annotation->args.empty();
+        });
+    if (decl.TestAttr(Attribute::ARKTS) && !hasArkTSOptions) {
+        // Pseudocode: append one parameterless marker record after the ordinary
+        // annotation records when no parameter-bearing metadata record was emitted.
+        // Save no annotation definition or constructor target for this marker.
+        auto marker = PackageFormat::CreateAnno(builder, PackageFormat::AnnoKind_ArkTS,
+            builder.CreateString("ArkTS"), builder.CreateVector<TAnnoArgOffset>({}));
+        annotations.emplace_back(marker);
     }
     return annotations;
 }

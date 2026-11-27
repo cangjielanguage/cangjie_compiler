@@ -176,7 +176,9 @@ inline bool NotAssignableVariable(const VarDecl& vd, bool inInitFunction)
 
 inline bool CanSkipInitCheck(const Node& node)
 {
-    return node.TestAnyAttr(Attribute::IMPORTED, Attribute::FOREIGN, Attribute::ENUM_CONSTRUCTOR);
+    auto decl = DynamicCast<const Decl*>(&node);
+    return node.TestAttr(Attribute::IMPORTED) || (decl && IsExternalForeign(*decl)) ||
+        node.TestAttr(Attribute::ENUM_CONSTRUCTOR);
 }
 
 // Check whether member variable is used in member function/property except constructor.
@@ -1624,7 +1626,7 @@ void InitializationChecker::CheckInitInConstructors(FuncDecl& fd, const std::vec
         return; // If the function is broken, we can quit now.
     }
     if (fd.constructorCall == ConstructorCall::OTHER_INIT ||
-        (fd.funcBody->parentClassLike && fd.funcBody->parentClassLike->TestAttr(Attribute::FOREIGN))) {
+        (fd.funcBody->parentClassLike && IsExternalForeign(*fd.funcBody->parentClassLike))) {
         for (auto decl : unInitNonFuncDecls) {
             decl->EnableAttr(Attribute::INITIALIZED);
         }

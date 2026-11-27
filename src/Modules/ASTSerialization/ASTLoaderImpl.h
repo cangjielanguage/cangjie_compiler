@@ -18,6 +18,8 @@
 #include "cangjie/Option/Option.h"
 #include "flatbuffers/CjoFormat_generated.h"
 
+#include <optional>
+
 #include "ASTSerializeUtils.h"
 
 namespace Cangjie {
@@ -159,6 +161,7 @@ private:
     OwnedPtr<AST::FuncBody> LoadFuncBody(
         const PackageFormat::FuncBody& body, bool isInline = false, bool isConst = true);
     void LoadDeclBasicInfo(const PackageFormat::Decl& decl, AST::Decl& astDecl);
+    void LoadDeclAnnotations(const PackageFormat::Decl& decl, AST::Decl& astDecl);
     void LoadFuncDeclAdvancedInfo(const PackageFormat::Decl& decl, AST::FuncDecl& funcDecl);
     void LoadEnumDeclAdvancedInfo(const PackageFormat::Decl& decl, AST::EnumDecl& enumDecl);
     void LoadInheritableDeclAdvancedInfo(const PackageFormat::Decl& decl, AST::InheritableDecl& id);
@@ -394,7 +397,11 @@ private:
     void LoadMatchCaseRef(FormattedIndex index, AST::MatchCase& mc, AST::Expr& selector);
 
     OwnedPtr<AST::Annotation> LoadAnnotation(const PackageFormat::Anno& rawAnno);
-    std::vector<OwnedPtr<AST::FuncArg>> LoadAnnotationArgs(const PackageFormat::Anno& rawAnno);
+    // Report a malformed annotation record with the loader's recoverable
+    // "unsupported content" diagnostic. The caller refuses the record and keeps
+    // loading, so a corrupt cjo degrades to a compile error instead of an abort.
+    void DiagnoseUnreadableAnnotation();
+    std::optional<std::vector<OwnedPtr<AST::FuncArg>>> LoadAnnotationArgs(const PackageFormat::Anno& rawAnno);
 };
 } // namespace Cangjie
 

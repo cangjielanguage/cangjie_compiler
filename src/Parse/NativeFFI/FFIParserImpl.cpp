@@ -10,12 +10,20 @@
  * This file contains logics related to Cangjie Native interoperation with Java, Objective-C
  */
 
+#include "FFIParserImpl.h"
+
+#include <algorithm>
+#include <cctype>
+#include <functional>
+#include <iterator>
+#include <unordered_set>
+#include <vector>
+
 #include "../ParserImpl.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/AST/Utils.h"
 
-#include "FFIParserImpl.h"
 #include "cangjie/Lex/Token.h"
 
 namespace Cangjie {
@@ -52,6 +60,14 @@ void DiagConflictingAnnos(DiagnosticEngine &diag, Annotation &first, Annotation 
         first.identifier, second.identifier, onStr);
 }
 
+// Before: an inherited annotation kind. After result: only ARKTS may remain
+// a separate default layer beside member options. This predicate changes no AST
+// and does not permit repeated explicit @ArkTS annotations on one declaration.
+bool FFIParserImpl::AllowsInheritedAnnotationOptions(AnnotationKind kind) const
+{
+    return kind == AnnotationKind::ARKTS;
+}
+
 void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos) const
 {
     std::vector<Ptr<Annotation>> candidates;
@@ -72,61 +88,275 @@ void FFIParserImpl::CheckAnnotationsConflict(const PtrVector<Annotation>& annos)
             // duplicated builtin annotations are reported with a different diagnostic
             continue;
         }
+        // An ArkTS conflict without --experimental belongs to the Sema gate.
+        if (!p.experimentalMode &&
+            (first->kind == AnnotationKind::ARKTS || (*conflicted)->kind == AnnotationKind::ARKTS)) {
+            continue;
+        }
         auto& lah = p.lookahead;
         DiagConflictingAnnos(p.diag, *first, **conflicted, lah.Value());
     }
 }
 
+namespace {
+
+// What a block-level annotation does after its placement rule: an accepted
+// annotation is cloned into every member, a refused one is dropped before
+// the clone.
+enum class BlockAnnotationAction { KEEP, DROP };
+
+// The four annotations that cannot be a foreign-block default. Each is
+// diagnosed once at the block and dropped, so the member clones cannot repeat
+// the error.
+BlockAnnotationAction CheckBlockAnnotationPlacement(DiagnosticEngine& diag, const Annotation& annotation)
+{
+    switch (annotation.kind) {
+        case AnnotationKind::ARKTS_WRITE_ONLY:
+            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_write_only_placement_invalid, annotation,
+                "'@WriteOnly' cannot be applied to a foreign block; annotate a 'mut prop' member instead");
+            return BlockAnnotationAction::DROP;
+        case AnnotationKind::ARKTS_REST_PARAM:
+            // A block-level annotation is cloned into every member; refusing
+            // it once here keeps the rule from repeating per member.
+            diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_rest_param_on_block, annotation);
+            return BlockAnnotationAction::DROP;
+        case AnnotationKind::ARKTS_RAW_VALUE:
+            diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_raw_value_on_block, annotation);
+            return BlockAnnotationAction::DROP;
+        case AnnotationKind::ARKTS_HAS_THIS:
+            diag.DiagnoseRefactor(DiagKindRefactor::parse_arkts_has_this_on_block, annotation);
+            return BlockAnnotationAction::DROP;
+        default:
+            return BlockAnnotationAction::KEEP;
+    }
+}
+
+// Record one option name in the block layer; a repeat is diagnosed and the
+// option is refused.
+bool RegisterBlockOption(DiagnosticEngine& diag, const Annotation& annotation, const std::string& name,
+    std::unordered_set<std::string>& seen)
+{
+    if (!seen.emplace(name).second) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_duplicated, annotation, name);
+        return false;
+    }
+    return true;
+}
+
+// 'globalVar' is the one boolean option and applies to every member of the
+// block, so it is validated with the same kind rule as a declaration-level
+// option. The empty-value rule is about string values and does not apply.
+bool ValidateGlobalVarBlockOption(DiagnosticEngine& diag, const Annotation& annotation, const FuncArg& arg,
+    std::unordered_set<std::string>& seen)
+{
+    auto literal = DynamicCast<LitConstExpr*>(arg.expr.get());
+    if (!literal || literal->kind != LitConstKind::BOOL) {
+        // The same value rule as a declaration-level option: the option is
+        // known, only its value kind is wrong.
+        const auto& at = arg.expr ? static_cast<const Node&>(*arg.expr) : static_cast<const Node&>(annotation);
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_global_var_value_invalid, at);
+        return false;
+    }
+    return RegisterBlockOption(diag, annotation, arg.name.Val(), seen);
+}
+
+// The string-valued block options; a value of any other name is unknown.
+bool IsStringBlockOption(const std::string& name)
+{
+    return name == "module" || name == "namespace" || name == "foreignName";
+}
+
+// Validate one 'module', 'namespace' or 'foreignName' option: value kind,
+// then duplicate, then empty value, then namespace shape.
+bool ValidateStringBlockOption(DiagnosticEngine& diag, const ArkTSParserImpl& arkTS, const Annotation& annotation,
+    const FuncArg& arg, std::unordered_set<std::string>& seen)
+{
+    const auto& name = arg.name.Val();
+    auto literal = DynamicCast<LitConstExpr*>(arg.expr.get());
+    if (!literal || literal->kind != LitConstKind::STRING || !IsStringBlockOption(name)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_invalid, annotation);
+        return false;
+    }
+    if (!RegisterBlockOption(diag, annotation, name, seen)) {
+        return false;
+    }
+    if (std::all_of(literal->stringValue.begin(), literal->stringValue.end(),
+        [](unsigned char c) { return std::isspace(c) != 0; })) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_option_empty, annotation, name);
+        return false;
+    }
+    // A block namespace is cloned into every member, so an ill-formed path is
+    // reported once here and dropped before cloning; members keep only the
+    // valid block defaults and cannot repeat the error.
+    if (name == "namespace" && !arkTS.IsArkTSNamespaceValid(literal->stringValue)) {
+        diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_namespace_invalid, *arg.expr, literal->stringValue);
+        return false;
+    }
+    return true;
+}
+
+// Validate the option layer of a block-level @ArkTS annotation in source
+// order and keep only the accepted arguments.
+void FilterBlockAnnotationOptions(DiagnosticEngine& diag, const ArkTSParserImpl& arkTS, Annotation& annotation)
+{
+    std::unordered_set<std::string> seen;
+    std::vector<OwnedPtr<FuncArg>> validArgs;
+    validArgs.reserve(annotation.args.size());
+    for (auto& arg : annotation.args) {
+        const bool accepted = arg->name.Val() == "globalVar"
+            ? ValidateGlobalVarBlockOption(diag, annotation, *arg, seen)
+            : ValidateStringBlockOption(diag, arkTS, annotation, *arg, seen);
+        if (accepted) {
+            validArgs.emplace_back(std::move(arg));
+        }
+    }
+    annotation.args = std::move(validArgs);
+}
+
+} // namespace
+
+void FFIParserImpl::CheckForeignBlockAnnotations(PtrVector<Annotation>& annos) const
+{
+    // The block option rules are ArkTS-only. Without --experimental the Sema
+    // gate owns the refusal, so no parser option diagnostic may pre-empt it.
+    if (!p.experimentalMode) {
+        return;
+    }
+    // A block annotation is cloned into every member, so every block-level
+    // rule is applied once here and the refused part is dropped before
+    // cloning.
+    for (auto it = annos.begin(); it != annos.end();) {
+        auto& annotation = *it;
+        if (CheckBlockAnnotationPlacement(p.diag, *annotation) == BlockAnnotationAction::DROP) {
+            it = annos.erase(it);
+            continue;
+        }
+        // Member clones keep only the valid block defaults and cannot repeat
+        // the block error.
+        if (annotation->kind == AnnotationKind::ARKTS) {
+            FilterBlockAnnotationOptions(p.diag, arkTS, *annotation);
+        }
+        ++it;
+    }
+}
+
+namespace {
+
+using DeprecatedAnnotationDiag = std::function<void(const Annotation&)>;
+using AnnotationChecker = std::function<void(Annotation&)>;
+using NoArgAnnotationChecker = std::function<void(Annotation&, const std::string&)>;
+
+// Java annotations: every kind takes the J-FFI argument rules; the mirror and
+// impl spellings are also deprecated.
+void CheckJavaAnnotation(const JFFIParserImpl& jp, Annotation& anno, const DeprecatedAnnotationDiag& diagDeprecated)
+{
+    jp.CheckAnnotation(anno);
+    // `@JavaMirror` and `@JavaImpl` annotations are deprecated.
+    // The migration way is to use `@Java foreign` and `@Java` instead.
+    if (anno.kind == AnnotationKind::JAVA_MIRROR || anno.kind == AnnotationKind::JAVA_IMPL) {
+        diagDeprecated(anno);
+    }
+}
+
+// Objective-C annotations: every kind takes the O-FFI target rules; the
+// mirror and impl spellings are also deprecated.
+void CheckObjCAnnotation(const OCFFIParserImpl& op, Annotation& anno, ScopeKind scopeKind,
+    const DeprecatedAnnotationDiag& diagDeprecated)
+{
+    op.CheckAnnotation(anno, scopeKind);
+    // `@ObjCMirror` and `@ObjCImpl` annotations are deprecated.
+    // The migration way is to use `@ObjC foreign` and `@ObjC` instead.
+    if (anno.kind == AnnotationKind::OBJ_C_MIRROR || anno.kind == AnnotationKind::OBJ_C_IMPL) {
+        diagDeprecated(anno);
+    }
+}
+
+// The two foreign-name flavours: a declaration name and an accessor name.
+void CheckForeignNameAnnotation(Annotation& anno, const AnnotationChecker& checkForeignName,
+    const AnnotationChecker& checkGetterSetterName)
+{
+    if (anno.kind == AnnotationKind::FOREIGN_NAME) {
+        checkForeignName(anno);
+    } else {
+        checkGetterSetterName(anno);
+    }
+}
+
+// @RestParam takes the shared argument rule; @WriteOnly takes no arguments and
+// its placement on a member is validated by the ArkTS declaration pass.
+// Without --experimental the Sema gate owns the refusal.
+void CheckArkTSAnnotation(const ArkTSParserImpl& arkTS, Annotation& anno, bool experimentalMode,
+    const NoArgAnnotationChecker& checkNoArg)
+{
+    if (anno.kind == AnnotationKind::ARKTS_REST_PARAM) {
+        arkTS.CheckAnnotation(anno);
+        return;
+    }
+    if (experimentalMode) {
+        checkNoArg(anno, "@" + anno.identifier.Val());
+    }
+}
+
+// Dispatch one annotation to its per-language group. The two rules owned by
+// FFIParserImpl arrive as callbacks so the dispatch stays flat; the call order
+// for each annotation kind is unchanged.
+void CheckAnnotationByKind(const JFFIParserImpl& jp, const OCFFIParserImpl& op, const ArkTSParserImpl& arkTS,
+    Annotation& anno, ScopeKind scopeKind, bool experimentalMode, const DeprecatedAnnotationDiag& diagDeprecated,
+    const AnnotationChecker& checkForeignName, const AnnotationChecker& checkGetterSetterName,
+    const NoArgAnnotationChecker& checkNoArg)
+{
+    switch (anno.kind) {
+        case AnnotationKind::JAVA_MIRROR:
+        case AnnotationKind::JAVA_IMPL:
+        case AnnotationKind::JAVA:
+        case AnnotationKind::JAVA_HAS_DEFAULT:
+            CheckJavaAnnotation(jp, anno, diagDeprecated);
+            break;
+        case AnnotationKind::FOREIGN_NAME:
+        case AnnotationKind::FOREIGN_GETTER_NAME:
+        case AnnotationKind::FOREIGN_SETTER_NAME:
+            CheckForeignNameAnnotation(anno, checkForeignName, checkGetterSetterName);
+            break;
+        case AnnotationKind::OBJ_C_MIRROR:
+        case AnnotationKind::OBJ_C_IMPL:
+        case AnnotationKind::OBJ_C:
+        case AnnotationKind::OBJ_C_INIT:
+        case AnnotationKind::OBJ_C_OPTIONAL:
+            CheckObjCAnnotation(op, anno, scopeKind, diagDeprecated);
+            break;
+        case AnnotationKind::ARKTS_REST_PARAM:
+        case AnnotationKind::ARKTS_WRITE_ONLY:
+            CheckArkTSAnnotation(arkTS, anno, experimentalMode, checkNoArg);
+            break;
+        default:
+            break;
+    }
+}
+
+} // namespace
+
 void FFIParserImpl::CheckAnnotations(const PtrVector<Annotation>& annos, ScopeKind scopeKind) const
 {
+    // @ArkTS declaration-annotation option rules (unknown name, non-literal
+    // value, a name repeated inside one layer, namespace shape) are diagnosed
+    // once by the Sema option fold; block-level options are validated in
+    // CheckForeignBlockAnnotations.
+    const std::function<void(const Annotation&)> diagDeprecated = [this](const Annotation& anno) {
+        DiagDeprecatedAnnotation(anno);
+    };
+    const std::function<void(Annotation&)> checkForeignName = [this](Annotation& anno) {
+        CheckForeignNameAnnoArgs(anno);
+        CheckForeignNameAnnoTarget(anno);
+    };
+    const std::function<void(Annotation&)> checkGetterSetterName = [this](Annotation& anno) {
+        CheckForeignGetterSetterNameAnnoArgs(anno);
+        CheckForeignGetterSetterNameAnnoTarget(anno);
+    };
+    const std::function<void(Annotation&, const std::string&)> checkNoArg =
+        [this](Annotation& anno, const std::string& name) { CheckNoArgAnnotation(anno, name); };
     for (auto& it : annos) {
-        auto& anno = *it;
-        switch (it->kind) {
-            case AnnotationKind::JAVA_MIRROR:
-            case AnnotationKind::JAVA_IMPL: {
-                jp.CheckAnnotation(anno);
-                // `@JavaMirror` and `@JavaImpl` annotations are deprecated.
-                // The migration way is to use `@Java foreign` and `@Java` instead.
-                DiagDeprecatedAnnotation(anno);
-                break;
-            }
-            case AnnotationKind::JAVA:
-            case AnnotationKind::JAVA_HAS_DEFAULT: {
-                jp.CheckAnnotation(anno);
-                break;
-            }
-            case AnnotationKind::FOREIGN_NAME: {
-                CheckForeignNameAnnoArgs(anno);
-                
-                CheckForeignNameAnnoTarget(anno);
-                break;
-            }
-            case AnnotationKind::FOREIGN_GETTER_NAME:
-            case AnnotationKind::FOREIGN_SETTER_NAME: {
-                CheckForeignGetterSetterNameAnnoArgs(anno);
-                CheckForeignGetterSetterNameAnnoTarget(anno);
-                break;
-            }
-            case AnnotationKind::OBJ_C_MIRROR:
-            case AnnotationKind::OBJ_C_IMPL: {
-                op.CheckAnnotation(anno, scopeKind);
-                // `@ObjCMirror` and `@ObjCImpl` annotations are deprecated.
-                // The migration way is to use `@ObjC foreign` and `@ObjC` instead.
-                DiagDeprecatedAnnotation(anno);
-                break;
-            }
-            case AnnotationKind::OBJ_C: {
-                op.CheckAnnotation(anno, scopeKind);
-                break;
-            }
-            
-            case AnnotationKind::OBJ_C_INIT:
-            case AnnotationKind::OBJ_C_OPTIONAL: {
-                op.CheckAnnotation(anno, scopeKind);
-                break;
-            }
-            default: continue;
-        }
+        CheckAnnotationByKind(jp, op, arkTS, *it, scopeKind, p.experimentalMode, diagDeprecated, checkForeignName,
+            checkGetterSetterName, checkNoArg);
     }
 
     CheckAnnotationsConflict(annos);
@@ -145,12 +375,13 @@ void FFIParserImpl::CheckForeignNameAnnoTarget(const Annotation& anno) const
     }
 }
 
-void FFIParserImpl::CheckForeignNameAnnoArgs(const Annotation& anno) const
+void FFIParserImpl::CheckForeignNameAnnoArgs(Annotation& anno) const
 {
-    static const std::string FOREIGN_NAME_NAME = "@ForeignName";
-
     if (anno.args.size() != 1 || !IsLitString(anno.args[0]->expr)) {
-        p.DiagAnnotationExpectsOneArgument(anno, FOREIGN_NAME_NAME, "'String' literal");
+        p.DiagAnnotationExpectsOneArgument(anno, "@ForeignName", "'String' literal");
+        // The argument is not a usable name: mark the annotation so Sema skips
+        // it instead of reading a value that was never a literal.
+        anno.EnableAttr(Attribute::IS_BROKEN);
         return;
     }
 }
@@ -182,9 +413,23 @@ void FFIParserImpl::CheckForeignNameAnnotation(Decl& decl) const
         if (it->kind != AnnotationKind::FOREIGN_NAME) {
             continue;
         }
+        // Members of an @ArkTS foreign class are FFI declarations even though
+        // FOREIGN reaches the member only later, in Sema: the enclosing
+        // class-like is the marker the parser can check here.
+        const bool isArkTSForeignMember = decl.outerDecl != nullptr &&
+            decl.outerDecl->HasAnno(AnnotationKind::ARKTS) && decl.outerDecl->TestAttr(Attribute::FOREIGN);
+        if (isArkTSForeignMember && decl.TestAttr(Attribute::CONSTRUCTOR)) {
+            // The ArkTS constructor maps to a fixed `new` call; there is no
+            // ArkTS-side member name for it to bind, so accepting the
+            // annotation only to ignore it would be a silent misdiagnosis.
+            p.diag.DiagnoseRefactor(DiagKindRefactor::parse_foreign_name_on_arkts_constructor, decl);
+            decl.EnableAttr(Attribute::IS_BROKEN);
+            return;
+        }
         if (!decl.outerDecl ||
             (!decl.outerDecl->IsJavaForeign() && !decl.outerDecl->IsJavaExport() &&
-                !decl.outerDecl->TestAnyAttr(Attribute::OBJ_C_FOREIGN, Attribute::OBJ_C_EXPORT))) {
+                !decl.outerDecl->TestAnyAttr(Attribute::OBJ_C_FOREIGN, Attribute::OBJ_C_EXPORT) &&
+                !isArkTSForeignMember)) {
             p.diag.DiagnoseRefactor(DiagKindRefactor::parse_foreign_name_on_ffi_decl_member, decl);
             decl.EnableAttr(Attribute::IS_BROKEN);
             return;
@@ -200,6 +445,11 @@ JFFIParserImpl FFIParserImpl::Java() const
 OCFFIParserImpl FFIParserImpl::ObjC() const
 {
     return op;
+}
+
+ArkTSParserImpl FFIParserImpl::ArkTS() const
+{
+    return arkTS;
 }
 
 void FFIParserImpl::CheckZeroOrSingleStringLitArgAnnotation(AST::Annotation &anno,
@@ -262,15 +512,26 @@ void FFIParserImpl::CheckClassLikeSignature(AST::ClassLikeDecl& decl, const PtrV
     }
 }
 
-void FFIParserImpl::CheckFuncSignature(AST::FuncDecl& decl, const PtrVector<Annotation>& annos) const
+void FFIParserImpl::CheckFuncSignature(
+    AST::FuncDecl& decl, const PtrVector<Annotation>& annos, ScopeKind scopeKind) const
 {
+    // Signature-level checks stay in the per-language implementations; the
+    // shared entry only routes to them.
+    // The @RestParam rules are ArkTS-specific, so the call is gated on the
+    // annotation being present: a signature without it keeps its own
+    // language's handling, and one that carries it is accepted or rejected by
+    // the ArkTS implementation.
+    if (arkTS.CarriesRestParam(decl.funcBody.get())) {
+        arkTS.CheckRestParamPlacement(decl, annos, scopeKind);
+    }
     for (auto& anno : annos) {
         switch (anno->kind) {
             case AnnotationKind::OBJ_C_MIRROR:
             case AnnotationKind::OBJ_C:
                 op.CheckMirrorSignature(decl, annos);
                 break;
-            default: break;
+            default:
+                break;
         }
     }
 }

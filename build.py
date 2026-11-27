@@ -173,6 +173,7 @@ def generate_cmake_defs(args):
         "-DCANGJIE_LINK_JOB_POOL=" + (str(args.link_jobs) if args.link_jobs != 0 else ""),
         "-DCANGJIE_DISABLE_STACK_GROW_FEATURE=" + bool_to_opt(args.disable_stack_grow_feature),
         "-DCANGJIE_USE_OH_LLVM_REPO=" + bool_to_opt(args.use_oh_llvm_repo),
+        "-DCANGJIE_ENABLE_ARKTS_INTEROP=" + bool_to_opt(not args.use_oh_llvm_repo),
         "-DCANGJIE_ENABLE_SANITIZE_OPTION=" + bool_to_opt(args.enable_sanitize_option)]
 
     if args.version:

@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -6,6 +6,9 @@
 
 #include "ParserImpl.h"
 
+#include <iterator>
+
+#include "cangjie/AST/Clone.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Node.h"
 #include "cangjie/Basic/Print.h"
@@ -15,6 +18,24 @@ using namespace AST;
 
 namespace {
 const std::string OVERFLOW_STRATEGY = "overflow";
+
+// '@HasThis[TypeName]' takes a type reference, which annotation parsing
+// represents as a plain identifier or a dotted identifier path. A literal, a
+// call, an index or a compound expression is not a type reference and is
+// refused at parse time, before any semantic resolution.
+bool IsHasThisTypeReference(const Expr* expr)
+{
+    if (expr == nullptr) {
+        return false;
+    }
+    if (expr->astKind == ASTKind::REF_EXPR) {
+        return true;
+    }
+    if (auto access = DynamicCast<const MemberAccess*>(expr); access != nullptr) {
+        return IsHasThisTypeReference(access->baseExpr.get());
+    }
+    return false;
+}
 } // namespace
 
 void ParserImpl::ParseAttributeAnnotation(Annotation& anno)
@@ -167,12 +188,47 @@ static const std::set<std::string> STD_ONLY_ANNO = {
     // Disable const evaluation checker for items annotated with `@ConstSafe`.
     "ConstSafe"};
 
-bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier)
+bool IsArkTSOnlyAnnotationKind(AnnotationKind kind)
 {
+    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE ||
+        kind == AnnotationKind::ARKTS_REST_PARAM || kind == AnnotationKind::ARKTS_WRITE_ONLY ||
+        kind == AnnotationKind::ARKTS_HAS_THIS;
+}
+
+bool IsArkTSInteropAnnotationEnabled(const GlobalOptions& options)
+{
+#ifdef CANGJIE_ENABLE_ARKTS_INTEROP
+    // These names are reserved only for the ArkTS interop capability itself:
+    // an interop-capable compiler, the experimental switch and the OHOS target.
+    // A host --compile-macro run and every non-OHOS target keep the names free
+    // for user macros.
+    return options.experimentalMode && options.target.env == Triple::Environment::OHOS;
+#else
+    // Without the capability the five names are ordinary macro names even
+    // with --experimental.
+    (void)options;
+    return false;
+#endif
+}
+
+bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier,
+    bool arktsAnnotationNamesEnabled)
+{
+    if (!arktsAnnotationNamesEnabled) {
+        auto kindIter = NAME_TO_ANNO_KIND.find(identifier);
+        if (kindIter != NAME_TO_ANNO_KIND.end() && IsArkTSOnlyAnnotationKind(kindIter->second)) {
+            return false;
+        }
+    }
     if (STD_ONLY_ANNO.find(identifier) != STD_ONLY_ANNO.end()) {
         return moduleName == "std";
     }
     return NAME_TO_ANNO_KIND.find(identifier) != NAME_TO_ANNO_KIND.end();
+}
+
+bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier)
+{
+    return IsBuiltinAnnotation(moduleName, identifier, false);
 }
 
 std::string AnnotationKindToString(AnnotationKind kind)
@@ -198,7 +254,7 @@ bool ParserImpl::SeeingBuiltinAnnotation()
     if (tokens.begin()->kind != TokenKind::IDENTIFIER) {
         return false;
     }
-    return IsBuiltinAnnotation(moduleName, tokens.begin()->Value());
+    return IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), arktsAnnotationNamesEnabled);
 }
 
 bool ParserImpl::SeeingAtWhen()
@@ -225,7 +281,7 @@ bool ParserImpl::SeeingMacroCall()
         (tokens.begin()->kind < TokenKind::PUBLIC || tokens.begin()->kind > TokenKind::OPEN)) {
         return false;
     }
-    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value());
+    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), arktsAnnotationNamesEnabled);
 }
 
 bool ParserImpl::SeeingMacroCallDecl()
@@ -242,7 +298,37 @@ bool ParserImpl::SeeingMacroCallDecl()
         (tokens.begin()->kind < TokenKind::PUBLIC || tokens.begin()->kind > TokenKind::OPEN)) {
         return false;
     }
-    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value());
+    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), arktsAnnotationNamesEnabled);
+}
+
+// Before: a block default @ArkTS[module:"a", namespace:"n"] and a member
+// @ArkTS[module:"b"]. After: that member owns two independent Annotation nodes
+// ordered [cloned block default, parsed member override]. ArkTSDeclOptions
+// later folds them to {module:"b", namespace:"n"}; no shared block node changes.
+// The default layer is withheld during member duplicate checks, so a block
+// default plus one member annotation is valid, but two explicit member @ArkTS
+// annotations still fail. Other annotation kinds retain the normal duplicate check.
+void ParserImpl::ParseInheritedAnnotations(const PtrVector<Annotation>& inherited, PtrVector<Annotation>& annotations)
+{
+    // Inherited option annotations provide defaults, so parse member options
+    // before prepending them. All other inherited annotations participate in
+    // the normal duplicate check while member annotations are parsed. For an
+    // ArkTS foreign block this turns
+    //   @ArkTS[module:"a"] foreign { @ArkTS[module:"b"] func echo(): Unit }
+    // into one declaration with the block defaults plus the member overrides,
+    // merged option by option (a declaration-level value wins).
+    PtrVector<Annotation> defaults;
+    for (const auto& annotation : inherited) {
+        auto cloned = ASTCloner::Clone(annotation.get());
+        if (ffiParser->AllowsInheritedAnnotationOptions(annotation->kind)) {
+            defaults.emplace_back(std::move(cloned));
+        } else {
+            annotations.emplace_back(std::move(cloned));
+        }
+    }
+    ParseAnnotations(annotations);
+    annotations.insert(
+        annotations.begin(), std::make_move_iterator(defaults.begin()), std::make_move_iterator(defaults.end()));
 }
 
 void ParserImpl::ParseAnnotations(PtrVector<Annotation>& annos)
@@ -336,6 +422,62 @@ void ParserImpl::CheckDeprecatedAnnotation(const Annotation& anno)
     }
 }
 
+void ParserImpl::CheckRawValueAnnotation(const Annotation& anno)
+{
+    if (!experimentalMode) {
+        return;
+    }
+    // @RawValue accepts exactly one unnamed argument: an integer, string or
+    // boolean literal. The argument-count gate lives here so @RawValue[] or
+    // @RawValue[1, 2] cannot fall through to the Sema auto-increment branch
+    // (args.size() != 1) and be silently ignored.
+    if (anno.args.size() != 1) {
+        DiagAnnotationExpectsOneArgument(anno, "@RawValue");
+        return;
+    }
+    auto& arg = anno.args[0];
+    CJC_NULLPTR_CHECK(arg);
+    if (!arg->name.Empty()) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_raw_value_not_literal, *arg);
+        return;
+    }
+    auto lce = (arg->expr != nullptr && arg->expr->astKind == ASTKind::LIT_CONST_EXPR)
+                   ? DynamicCast<LitConstExpr*>(arg->expr.get())
+                   : nullptr;
+    // A numeric, string or boolean literal is accepted. Numeric includes
+    // floating values: the design's EnumValueLiteral is NumericLiteral and
+    // ArkTS enum members may be `A = 1.5`. A boolean literal belongs to the
+    // §7.2 union-type mapping; the Cangjie side cannot distinguish a union
+    // carrier from an ArkTS enum, so it is accepted here and lowered as a
+    // boolean member rather than refused.
+    if (lce == nullptr ||
+        (lce->kind != LitConstKind::INTEGER && lce->kind != LitConstKind::FLOAT &&
+            lce->kind != LitConstKind::STRING && lce->kind != LitConstKind::BOOL)) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_raw_value_not_literal, *arg);
+    }
+}
+
+void ParserImpl::CheckHasThisAnnotation(Annotation& anno)
+{
+    if (!experimentalMode) {
+        return; // Same contract as @RawValue: the Sema gate owns the off-mode diagnostic.
+    }
+    // '@HasThis' takes exactly one unnamed type reference, e.g.
+    // '@HasThis[Person]'. A zero or multiple argument list, a named argument
+    // and a literal or any other value expression are all refused here, so the
+    // annotation can never be silently accepted with a value that has no type
+    // meaning.
+    if (anno.args.size() != 1) {
+        DiagAnnotationExpectsOneArgument(anno, "@HasThis");
+        return;
+    }
+    auto& arg = anno.args.front();
+    CJC_NULLPTR_CHECK(arg);
+    if (!arg->name.Empty() || !IsHasThisTypeReference(arg->expr.get())) {
+        ParseDiagnoseRefactor(DiagKindRefactor::parse_has_this_invalid_argument, *arg);
+    }
+}
+
 OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
 {
     if (this->enableCustomAnno && SeeingMacroCallDecl()) {
@@ -387,6 +529,16 @@ OwnedPtr<Annotation> ParserImpl::ParseAnnotation()
         case AnnotationKind::OBJ_C_IMPL:
         case AnnotationKind::OBJ_C: {
             ParseAnnotationArguments(*annotation);
+            break;
+        }
+        case AnnotationKind::ARKTS_RAW_VALUE: {
+            ParseAnnotationArguments(*annotation);
+            CheckRawValueAnnotation(*annotation);
+            break;
+        }
+        case AnnotationKind::ARKTS_HAS_THIS: {
+            ParseAnnotationArguments(*annotation);
+            CheckHasThisAnnotation(*annotation);
             break;
         }
         default: {

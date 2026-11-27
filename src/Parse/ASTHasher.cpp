@@ -840,7 +840,18 @@ struct ASTHasherImpl {
             case AnnotationKind::ANNOTATION:
             case AnnotationKind::CUSTOM:
             case AnnotationKind::FROZEN:
+            case AnnotationKind::ARKTS:
+            case AnnotationKind::ARKTS_REST_PARAM:
+            case AnnotationKind::ARKTS_WRITE_ONLY:
+            case AnnotationKind::ARKTS_RAW_VALUE:
+                // Entry registration, rest-parameter placement, the write-only
+                // contract and the enum value mapping change generated bodies,
+                // not the original Cangjie signature.
                 return false;
+            case AnnotationKind::ARKTS_HAS_THIS:
+                // The ThisT argument is part of the declaration's type
+                // contract, so it is part of the signature.
+                return true;
             default:
                 CJC_ASSERT(false);
                 return false;
@@ -857,6 +868,11 @@ struct ASTHasherImpl {
             case AnnotationKind::CUSTOM:
             case AnnotationKind::DEPRECATED:
             case AnnotationKind::FROZEN:
+            case AnnotationKind::ARKTS:
+            case AnnotationKind::ARKTS_REST_PARAM:
+            case AnnotationKind::ARKTS_WRITE_ONLY:
+            case AnnotationKind::ARKTS_RAW_VALUE:
+            case AnnotationKind::ARKTS_HAS_THIS:
                 return true;
             case AnnotationKind::C:
             case AnnotationKind::CALLING_CONV:
@@ -1028,6 +1044,22 @@ struct ASTHasherImpl {
         HashSpecificModifiers(decl, {TokenKind::OPEN, TokenKind::ABSTRACT});
     }
 
+    // Parameter annotations are not part of the mangled name, so a change in
+    // them never reaches the signature hash; hash the ones that affect the
+    // generated body here instead, keeping their association with the
+    // parameter they annotate.
+    void HashBodyParamAnnotations(const std::vector<OwnedPtr<Annotation>>& annos)
+    {
+        std::vector<std::reference_wrapper<Annotation>> cons;
+        cons.reserve(annos.size());
+        for (auto& anno : annos) {
+            if (IsConsideredInBodyHash(*anno)) {
+                cons.push_back(std::ref(*anno));
+            }
+        }
+        HashAnnotationsNoOrder(cons);
+    }
+
     // hash funcbody of a funclet (func/main/primary ctor/macro/lambda decl)
     void HashBodyOfFuncLike(const FuncBody& funcBody, const std::pair<bool, bool>& srcInfo)
     {
@@ -1037,6 +1069,7 @@ struct ASTHasherImpl {
             if (!param->isNamedParam && !param->hasLetOrVar) {
                 CombineHash(param->identifier.Val());
             }
+            HashBodyParamAnnotations(param->annotations);
             if (srcInfo.first || srcInfo.second) {
                 (void)CombineTwoHashes(Hash<ALL>(param->assignment.get()));
             } else {

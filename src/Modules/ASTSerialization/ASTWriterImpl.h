@@ -111,6 +111,10 @@ private:
     std::unordered_map<Ptr<const AST::Ty>, FormattedIndex> savedTypeMap;
     std::unordered_map<Ptr<const AST::Decl>, FormattedIndex> savedDeclMap;
     std::unordered_map<Ptr<const AST::Expr>, FormattedIndex> savedExprMap;
+    // Synthetic nodes created while serializing metadata (the '@HasThis'
+    // type-name literal). They must outlive the writer because savedExprMap
+    // keys and serialized expression slots refer to them by raw pointer.
+    std::vector<OwnedPtr<AST::Expr>> syntheticExprs;
 
     std::unordered_set<Ptr<const AST::Decl>> topLevelDecls;
     std::unordered_set<Ptr<const AST::Decl>> preSavedDecls;

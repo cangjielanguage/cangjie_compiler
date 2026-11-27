@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -17,6 +17,7 @@
 
 #include "CJMP/MPTypeCheckerImpl.h"
 #include "InheritanceChecker/MemberSignature.h"
+#include "NativeFFI/ArkTS/Utils/TypeMapper.h"
 #include "Promotion.h"
 #include "ScopeManager.h"
 #include "TypeCheckUtil.h"
@@ -546,6 +547,8 @@ private:
     AST::VisitAction CheckDefaultParamFunc(const AST::InterfaceDecl& ifd) const;
     AST::VisitAction CheckDefaultParamFunc(const AST::EnumDecl& ed) const;
     void GetSingleParamFunc(AST::Decl& decl);
+    void BuildDefaultParamFunction(AST::FuncDecl& fd, AST::FuncParam& fp, bool isStatic,
+        std::vector<Ptr<AST::FuncParam>>& funcParams);
     /// After ResolveNames: mark desugared default-param funcs as `exclave` when the param is non-copy local!/local?.
     void AttachExclaveToDefaultParamFunctions(AST::Package& pkg);
     void CheckPrimaryCtorForClassOrStruct(AST::InheritableDecl& id);
@@ -939,6 +942,14 @@ private:
      * Check call expressions' related APIs.
      */
     bool ChkCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
+    /**
+     * Step 2 and Step 3 of ChkCallExpr: check the call kind, match the resolved
+     * candidates and finish the call. @p argsTys and @p prevCheckTrue are the
+     * pre-check state used to recover argument types on failure.
+     */
+    bool ChkCallExprCandidates(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce, const Ptr<AST::Decl>& decl,
+        std::vector<Ptr<AST::FuncDecl>> candidates, const std::vector<AST::ModalTy>& argsTys,
+        bool prevCheckTrue);
     bool ChkDesugarExprOfCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
     bool CheckCallKind(const AST::CallExpr& ce, Ptr<AST::Decl> decl, AST::CallKind& type);
     /**
@@ -1711,7 +1722,99 @@ private:
 
     void MarkOutermostBinaryExpressions(AST::Package& pkg) const;
     // FFI Sema Prepare Check.
+    void LowerArkTSForeignFunctions(ASTContext& ctx);
+    void LowerArkTSClasses(ASTContext& ctx);
+    // The '@HasThis' annotation still parses and passes its placement checks,
+    // but the ArkTS function carrier that would give the declaration its type
+    // is not provided; report that explicitly.
+    void ApplyArkTSHasThisType(AST::FuncDecl& fd);
+    // Shared state of one prepared ArkTS class or interface lowering step.
+    // Defined in LowerClasses.cpp: no other translation unit can name it.
+    struct ArkTSDeclLoweringContext;
+    // Steps of LowerArkTSClasses, in call order. The orchestrator definition
+    // carries the numbered sequence; each helper owns one phase or one
+    // declaration so the pass stays readable.
+    void RejectArkTSForeignInterfaceImplementers(AST::Package& pkg);
+    void LowerArkTSClassBodies(ASTContext& ctx, AST::Package& pkg);
+    void LowerArkTSClass(ASTContext& ctx, AST::ClassDecl& cd, AST::File& file, AST::Package& pkg);
+    bool CheckArkTSClassParents(AST::ClassDecl& cd);
+    void LowerArkTSClassFuncMembers(
+        ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, AST::ClassDecl& cd, AST::File& file);
+    void LowerArkTSClassFunc(
+        ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, AST::ClassDecl& cd, AST::File& file, AST::FuncDecl& fd);
+    bool AnalyzeArkTSClassFuncSignature(ASTContext& ctx, AST::FuncDecl& fd,
+        std::vector<Native::FFI::ArkTS::ArkTSTypeDesc>& types, std::vector<Ptr<AST::FuncParam>>& params,
+        Native::FFI::ArkTS::ArkTSTypeDesc& resultType);
+    void LowerArkTSClassPropMembers(
+        ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, AST::ClassDecl& cd, AST::File& file);
+    void LowerArkTSClassProp(
+        ASTContext& ctx, ArkTSDeclLoweringContext& classCtx, AST::File& file, AST::PropDecl& pd);
+    void PropagateBrokenArkTSInterfaceParents(AST::Package& pkg);
+    void LowerArkTSInterfaceBodies(ASTContext& ctx, AST::Package& pkg);
+    void LowerArkTSInterface(ASTContext& ctx, AST::InterfaceDecl& id, AST::File& file, AST::Package& pkg);
+    bool CheckArkTSInterfaceParents(AST::InterfaceDecl& id);
+    void LowerArkTSInterfaceFuncMembers(
+        ASTContext& ctx, ArkTSDeclLoweringContext& declCtx, AST::InterfaceDecl& id, AST::File& file);
+    void LowerArkTSInterfaceFunc(
+        ASTContext& ctx, ArkTSDeclLoweringContext& declCtx, AST::InterfaceDecl& id, AST::File& file, AST::FuncDecl& fd);
+    bool AnalyzeArkTSInterfaceSignature(ASTContext& ctx, AST::FuncDecl& fd, const std::string& ownerName,
+        DiagKindRefactor invalidKind, const char* optionalReason,
+        std::vector<Native::FFI::ArkTS::ArkTSTypeDesc>& types, std::vector<Ptr<AST::FuncParam>>& params,
+        Native::FFI::ArkTS::ArkTSTypeDesc& resultType, size_t& restIndex);
+    void LowerArkTSInterfacePropMembers(
+        ASTContext& ctx, ArkTSDeclLoweringContext& declCtx, AST::InterfaceDecl& id, AST::File& file);
+    void LowerArkTSInterfaceProp(
+        ASTContext& ctx, ArkTSDeclLoweringContext& declCtx, AST::InterfaceDecl& id, AST::File& file, AST::PropDecl& pd);
+    void LowerArkTSClassDefaultArguments(ASTContext& ctx, AST::Package& pkg);
+    void LowerArkTSClassMemberDefaultArguments(ASTContext& ctx, AST::ClassDecl& cd, AST::FuncDecl& fd);
+    void InstallArkTSMemberBody(ASTContext& ctx, ArkTSDeclLoweringContext& lowering, AST::FuncDecl& member,
+        AST::File& file, const std::string& code, const std::vector<Ptr<AST::FuncParam>>& params,
+        const std::string& memberName, const std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
+    bool ClassifyArkTSForeignFunctionTypes(ASTContext& ctx, AST::FuncDecl& fd,
+        std::vector<Native::FFI::ArkTS::ArkTSTypeDesc>& types, std::vector<Ptr<AST::FuncParam>>& params);
+    bool ClassifyArkTSPropertyType(
+        ASTContext& ctx, AST::PropDecl& pd, Native::FFI::ArkTS::ArkTSTypeDesc& desc);
+    // One signature position as an ArkTS type description: the written type
+    // is resolved through the checker's alias substitution before
+    // classification, so a type alias position lowers by its target. A null
+    // type node classifies as the empty (unsupported) description. Shared by
+    // the two ArkTS lowering passes, so a position can never mean two things
+    // across them.
+    // `allowNestedOptional` is set only by the non-foreign exported-variable
+    // check, where design §3.4 permits a nested Option that unwraps layer by
+    // layer; every foreign signature keeps the default and refuses it.
+    Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyPosition(
+        ASTContext& ctx, Ptr<AST::Type> type, bool allowNestedOptional = false);
+    // One value position as an ArkTS type description: the classification and
+    // enum-table attachment of ArkTSClassifyPosition, entered from a resolved
+    // type instead of a written type node. The payload recursion is the
+    // written-type entry's, so an enum leaf means the same thing in both paths.
+    Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyValuePosition(ASTContext& ctx, Ptr<AST::Ty> ty);
+
+    // Refuse an extend declaration that adds a prepared @ArkTS foreign
+    // interface to another type. Its implemented-interface types are resolved
+    // later than the class/interface checks, so PreCheckExtend calls this.
+    void RejectArkTSForeignInterfaceExtend(AST::ExtendDecl& ed);
+    // Refuse an extend whose extended type is a declaration carrying '@ArkTS':
+    // the ArkTS side has no extend form, so such members would be invisible
+    // to ArkTS. The extended type is resolved before PreCheckExtend.
+    void RejectArkTSDeclExtend(AST::ExtendDecl& ed);
     void PreCheckAnnoForFFI(AST::Node& root);
+    void LowerArkTSVariables(ASTContext& ctx);
+    // Re-check a public non-foreign @ArkTS global variable after type checking:
+    // an inferred declaration has no written Type node at LowerArkTSVariables
+    // time, so the compatibility rule runs again on the resolved `vd->ty`.
+    void CheckArkTSExportedVariables(ASTContext& ctx);
+    // Parse glue text produced by lowering and splice its statements into the
+    // (still empty) body of \p fd, collecting the new locals like PreCheck does
+    // so that references inside the generated code resolve. \p params are the
+    // function parameters bound to the synthesized `__argument_N` names.
+    // \p classRefs carries the reference-leaf placeholders of a generated
+    // global-variable getter, bound to their class/enum declarations here.
+    bool SpliceArkTSGeneratedBody(ASTContext& ctx, AST::FuncDecl& fd, const std::string& code,
+        const std::unordered_map<std::string, std::string>& literals,
+        const std::vector<Ptr<AST::FuncParam>>& params,
+        const std::unordered_map<std::string, Ptr<AST::Decl>>* classRefs = nullptr);
     /**
      * Set the ABI information to Foreign Modifier. By default Foreign Modifier has Attribute::C.
      */
@@ -1757,6 +1860,8 @@ private:
         const Ptr<AST::Decl> target
     );
     void CheckUsageOfDeprecated(AST::Node& node);
+    AST::VisitAction CheckDeprecatedUsageNode(const Ptr<AST::Node> usage);
+    AST::VisitAction RestoreDeprecatedContext(const Ptr<AST::Node> usage);
     void CheckUsageOfDeprecatedParameters(const Ptr<AST::Node> usage);
     void CheckUsageOfDeprecatedNominative(
         const Ptr<AST::Node> usage,
@@ -1913,6 +2018,16 @@ private:
     ScopeManager scopeManager;
     std::unordered_map<Ptr<AST::File>, std::unordered_set<Ptr<AST::Decl>>> mainFunctionMap;
     std::unordered_map<Ptr<const AST::FuncDecl>, bool> inoutCache;
+    /**
+     * SDK support references of generated ArkTS foreign wrapper bodies
+     * (BigInt, JSContext, __cj_arkts_*, Exception), pre-bound to their
+     * declarations before body type checking. Speculative overload checking
+     * clears a whole subtree through Node::Clear(), which drops RefExpr and
+     * RefType targets and would let a same-named user declaration capture the
+     * generated reference. This map survives the clear so the compiler binding
+     * is restored instead of resolved by name.
+     */
+    std::unordered_map<Ptr<const AST::Node>, Ptr<AST::Decl>> arktsSupportRefs;
     Triple::BackendType backendType;
     // outermost @Derpecated declaration
     Ptr<AST::Node> deprecatedContext = nullptr;

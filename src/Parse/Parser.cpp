@@ -28,7 +28,9 @@ namespace Cangjie {
 const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_KIND = {
     {"JavaMirror", AST::AnnotationKind::JAVA_MIRROR}, {"JavaImpl", AST::AnnotationKind::JAVA_IMPL},
     {"Java", AST::AnnotationKind::JAVA}, {"ObjC", AST::AnnotationKind::OBJ_C},
-    {"JavaHasDefault", AST::AnnotationKind::JAVA_HAS_DEFAULT}, {"ObjCMirror", AST::AnnotationKind::OBJ_C_MIRROR},
+    {"JavaHasDefault", AST::AnnotationKind::JAVA_HAS_DEFAULT}, {"ArkTS", AST::AnnotationKind::ARKTS},
+    {"RestParam", AST::AnnotationKind::ARKTS_REST_PARAM}, {"WriteOnly", AST::AnnotationKind::ARKTS_WRITE_ONLY},
+    {"RawValue", AST::AnnotationKind::ARKTS_RAW_VALUE}, {"ObjCMirror", AST::AnnotationKind::OBJ_C_MIRROR},
     {"ObjCImpl", AST::AnnotationKind::OBJ_C_IMPL}, {"ForeignGetterName", AST::AnnotationKind::FOREIGN_GETTER_NAME},
     {"ForeignSetterName", AST::AnnotationKind::FOREIGN_SETTER_NAME}, {"ObjCInit", AST::AnnotationKind::OBJ_C_INIT},
     {"ObjCOptional", AST::AnnotationKind::OBJ_C_OPTIONAL}, {"ForeignName", AST::AnnotationKind::FOREIGN_NAME},
@@ -40,7 +42,7 @@ const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_KIND = {
     {"FastNative", AST::AnnotationKind::FASTNATIVE}, {"Annotation", AST::AnnotationKind::ANNOTATION},
     {"ConstSafe", AST::AnnotationKind::CONSTSAFE}, {"Deprecated", AST::AnnotationKind::DEPRECATED},
     {"Frozen", AST::AnnotationKind::FROZEN}, {"EnsurePreparedToMock", AST::AnnotationKind::ENSURE_PREPARED_TO_MOCK},
-    {"NonProduct", AST::AnnotationKind::NON_PRODUCT}};
+    {"NonProduct", AST::AnnotationKind::NON_PRODUCT}, {"HasThis", AST::AnnotationKind::ARKTS_HAS_THIS}};
 
 const std::unordered_map<AST::AnnotationKind, std::string> ANNO_KIND_TO_NAME = [] {
     std::unordered_map<AST::AnnotationKind, std::string> result;
@@ -346,6 +348,9 @@ OwnedPtr<PackageSpec> ParserImpl::ParsePackageHeader(std::set<Modifier>&& modifi
     return packageHeader;
 }
 
+// A foreign block expands to the declarations it contains. The block modifiers
+// and annotations are cloned into each member by ParseInheritedAnnotations; the
+// block itself is not an AST parent.
 std::vector<OwnedPtr<Decl>> ParserImpl::ParseForeignDecls(
     const std::set<Modifier>& modifiers, PtrVector<Annotation>& annos)
 {
@@ -357,6 +362,7 @@ std::vector<OwnedPtr<Decl>> ParserImpl::ParseForeignDecls(
         return ret;
     }
     CheckNoDeprecatedAnno(annos, "foreign block");
+    ffiParser->CheckForeignBlockAnnotations(annos);
     Position leftCurlyBracePos = lastToken.Begin();
     SkipBlank(TokenKind::SEMI);
     std::set<Modifier>(modifiers).swap(foreignBlockModifiers);
@@ -368,13 +374,12 @@ std::vector<OwnedPtr<Decl>> ParserImpl::ParseForeignDecls(
             DiagExpectedRightDelimiter("{", leftCurlyBracePos);
             break;
         }
+        // Cloning keeps standalone member semantics, including the
+        // @RestParam placement check and the access-modifier gate.
         auto clonedMods = modifiers;
         // Copy annos here, because ParseDecl(xxx) will move annos.
         PtrVector<Annotation> clonedAnnos;
-        for (auto& it : annos) {
-            (void)clonedAnnos.emplace_back(ASTCloner::Clone(it.get()));
-        }
-        ParseAnnotations(clonedAnnos);
+        ParseInheritedAnnotations(annos, clonedAnnos);
         auto decl = ParseDecl(ScopeKind::TOPLEVEL, clonedMods, std::move(clonedAnnos));
 
         ret.emplace_back(std::move(decl));

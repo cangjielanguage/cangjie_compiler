@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -578,6 +578,24 @@ enum class AnnotationKind {
     FROZEN,
     ENSURE_PREPARED_TO_MOCK,
     NON_PRODUCT,
+    ARKTS,
+    ARKTS_REST_PARAM, // ArkTS rest parameter; only valid on the last positional parameter of an ArkTS foreign function.
+    ARKTS_WRITE_ONLY, // ArkTS write-only property; implemented on a mutable property of a prepared
+                      // @ArkTS foreign class wrapper (placement is deferred to the later placement matrix).
+    ARKTS_RAW_VALUE, // @RawValue annotation on an @ArkTS foreign enum constructor.
+    /**
+     * ArkTS method `this` contract: '@HasThis[TypeName]' on an '@ArkTS' foreign
+     * function means the ArkTS target is a method whose `this` has TypeName.
+     * The argument is one unnamed type reference. Placement, repetition and the
+     * 'globalVar: true' conflict are checked in Sema; the semantic calling
+     * convention is a later requirement.
+     * W: parser (annotation kind), ArkTS prepare validation, CJO loader.
+     * R: ArkTS prepare/lowering, CJO writer/loader, diagnostics.
+     * AnnotationKind is not persisted by its numeric value: the CJO format
+     * maps built-in kinds to PackageFormat::AnnoKind. Appending before the
+     * UNKNOWN sentinel therefore does not change any serialized contract.
+     */
+    ARKTS_HAS_THIS,
     UNKNOWN
 };
 
@@ -3025,6 +3043,24 @@ struct ImportSpec : Node {
      * approved entry path.
      */
     bool isPctSyncRemapped{false};
+    /**
+     * Set by a compiler pass that synthesizes an import for generated code.
+     * Such an import is skipped by the per-file imported-name map, so a user
+     * declaration of one of its names neither conflicts with nor resolves to
+     * it; the generated references are pre-bound by the pass that created
+     * them. When @c implicitDependencyPackage is non-empty the import is also
+     * a real runtime link dependency, and dependency generation records that
+     * package instead of deriving one from the (possibly member-qualified)
+     * import name.
+     */
+    bool isCompilerInjectedImport{false};
+    /**
+     * The import must not bind its names for user code. A generated package
+     * qualifier is re-resolved after a speculative re-check, so package
+     * imports stay visible; a single-member import is pre-bound and is hidden.
+     */
+    bool hidesFromNameLookup{false};
+    std::string implicitDependencyPackage;
     ImportSpec() : Node(ASTKind::IMPORT_SPEC)
     {
     }

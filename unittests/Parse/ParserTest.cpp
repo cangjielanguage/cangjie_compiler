@@ -2562,13 +2562,13 @@ TEST(ParserTestNative, NativePrint)
     foreign func ok():unit
     foreign func ok1():unit
     foreign var a: Int32
-    foreign var b: Int32 = 1
+    foreign var b: Int32
     foreign let c: Int32
     foreign{func ok2():unit}
     foreign {
         func ok2():unit
         var a1: Int32
-        var b1: Int32 = 1
+        var b1: Int32
         let a2: Int32
     }
     foreign func ok():unit

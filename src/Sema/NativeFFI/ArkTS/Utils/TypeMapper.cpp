@@ -1,0 +1,420 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// This source file is part of the Cangjie project, licensed under Apache-2.0
+// with Runtime Library Exception.
+//
+// See https://cangjie-lang.cn/pages/LICENSE for license information.
+
+/**
+ * @file
+ *
+ * This file implements the Cangjie <-> ArkTS type mapping: classification of
+ * semantic types into recursive descriptions and the predicates over those
+ * descriptions shared by lowering and the wrapper generator.
+ */
+
+#include "TypeMapper.h"
+
+#include "../FunctionSource.h"
+
+#include <string>
+#include <unordered_set>
+#include <vector>
+#include "cangjie/AST/ASTCasting.h"
+#include "cangjie/AST/Types.h"
+
+namespace Cangjie::Native::FFI::ArkTS {
+namespace {
+// A tuple that maps to the ArkTS tuple shape needs at least two elements.
+constexpr size_t MIN_TUPLE_ARITY = 2;
+} // namespace
+using namespace Cangjie::AST;
+
+// Checked scalar names (the checked scalar table): the number candidates
+// Int8 through UInt32, Float16 through Float64 and Rune; the bigint
+// candidates Int64, UInt64 and BigInt; plus Bool, String, Unit and Nothing.
+// String, Rune and BigInt resolve earlier in ArkTSScalarName, but the
+// description mapping below accepts all checked names uniformly:
+//   "Int32"     -> in the set: SCALAR(Int32) stays generatable
+//   "IntNative" -> not in the set: the position is refused, no wrapper
+const std::unordered_set<std::string>& ArkTSScalarWhitelist()
+{
+    static const std::unordered_set<std::string> supported{"Int8", "Int16", "Int32", "UInt8", "UInt16", "UInt32",
+        "Float16", "Float32", "Float64", "Rune", "Int64", "UInt64", "BigInt", "Bool", "String", "Unit", "Nothing"};
+    return supported;
+}
+
+std::string ArkTSJoin(const std::vector<std::string>& parts, const std::string& separator)
+{
+    std::string joined;
+    bool first = true;
+    for (auto& part : parts) {
+        joined += first ? part : separator + part;
+        first = false;
+    }
+    return joined;
+}
+
+// Desc -> Cangjie spelling used in diagnostic and mismatch messages.
+// Generated type positions use ArkTSValueEmitter::TypeName, which supplies a
+// placeholder spelling for the reference leaf instead of the class identifier.
+// ARRAY_COPY(SCALAR(String)) -> "Array<String>"
+// TUPLE(SCALAR(UInt16), OPTIONAL(SCALAR(Bool))) -> "(UInt16, Option<Bool>)"
+std::string ArkTSTypeDescName(const ArkTSTypeDesc& desc, const ArkTSReferenceSpelling& reference)
+{
+    switch (desc.kind) {
+        case ArkTSTypeDesc::Kind::SCALAR:
+            return desc.scalar;
+        case ArkTSTypeDesc::Kind::OPTIONAL:
+            return "Option<" + ArkTSTypeDescName(desc.elements.front(), reference) + ">";
+        case ArkTSTypeDesc::Kind::ARRAY_COPY:
+            return "Array<" + ArkTSTypeDescName(desc.elements.front(), reference) + ">";
+        case ArkTSTypeDesc::Kind::TUPLE: {
+            std::vector<std::string> names;
+            names.reserve(desc.elements.size());
+            for (auto& element : desc.elements) {
+                names.emplace_back(ArkTSTypeDescName(element, reference));
+            }
+            return "(" + ArkTSJoin(names, ", ") + ")";
+        }
+        case ArkTSTypeDesc::Kind::REFERENCE:
+        case ArkTSTypeDesc::Kind::ENUM:
+            if (reference) {
+                return reference(desc);
+            }
+            return desc.reference ? desc.reference->identifier.Val() : std::string{};
+        case ArkTSTypeDesc::Kind::UNSUPPORTED:
+            break;
+    }
+    return {};
+}
+
+namespace {
+// Option<T'>: the inner position must itself be supported; a directly nested
+// Option is refused unless the caller allows it (design §3.4).
+ArkTSTypeDesc ArkTSClassifyOptionalType(const Ty& ty, ImportManager* imports, bool allowNestedOptional)
+{
+    ArkTSTypeDesc desc;
+    auto inner = ArkTSClassifyType(ty.typeArgs.front().Ty(), imports, allowNestedOptional);
+    if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED &&
+        (inner.kind != ArkTSTypeDesc::Kind::OPTIONAL || allowNestedOptional)) {
+        desc.kind = ArkTSTypeDesc::Kind::OPTIONAL;
+        desc.elements.emplace_back(std::move(inner));
+    }
+    return desc;
+}
+
+// Array<T'>: copy semantics. An interface reference element is refused (AR-06
+// BR-11); a class reference stays legal.
+ArkTSTypeDesc ArkTSClassifyArrayType(const Ty& ty, ImportManager* imports, bool allowNestedOptional)
+{
+    ArkTSTypeDesc desc;
+    auto inner = ArkTSClassifyType(ty.typeArgs.front().Ty(), imports, allowNestedOptional);
+    if (inner.kind != ArkTSTypeDesc::Kind::UNSUPPORTED && !ArkTSTypeDescContainsInterfaceReference(inner)) {
+        desc.kind = ArkTSTypeDesc::Kind::ARRAY_COPY;
+        desc.elements.emplace_back(std::move(inner));
+    }
+    return desc;
+}
+
+// An ArkTS class instance is a reference to the ArkTS object. Only a class
+// that went through class preparation carries the wrapper attribute; generic
+// presets keep their external declaration shape and stay unsupported.
+ArkTSTypeDesc ArkTSClassifyReferenceLeaf(Ptr<Decl> decl, ImportManager* imports)
+{
+    ArkTSTypeDesc desc;
+    desc.kind = ArkTSTypeDesc::Kind::REFERENCE;
+    desc.reference = decl;
+    if (IsArkTSPreparedInterface(*decl)) {
+        desc.referenceImpl = ArkTSInterfaceImpl(*decl, imports);
+    }
+    return desc;
+}
+
+// An @ArkTS foreign enum that went through enumeration preparation carries
+// ARKTS_LOWERED; lowering attaches the member value table afterwards. The
+// reference field is reused for the enum declaration, mirroring REFERENCE.
+ArkTSTypeDesc ArkTSClassifyEnumLeaf(Ptr<Decl> decl)
+{
+    ArkTSTypeDesc desc;
+    desc.kind = ArkTSTypeDesc::Kind::ENUM;
+    desc.reference = decl;
+    return desc;
+}
+
+// ArkTS tuple types carry a fixed arity and Cangjie's TupleTy is exactly the
+// base typeArgs list, so a rest element cannot be expressed in a Cangjie
+// signature and no tuple-rest branch exists; the tuple-rest rule is applied to
+// the ArkTS .d.ts side before any Cangjie type exists.
+ArkTSTypeDesc ArkTSClassifyTupleType(const Ty& ty, ImportManager* imports, bool allowNestedOptional)
+{
+    ArkTSTypeDesc desc;
+    desc.kind = ArkTSTypeDesc::Kind::TUPLE;
+    for (auto& element : ty.typeArgs) {
+        auto inner = ArkTSClassifyType(element.Ty(), imports, allowNestedOptional);
+        if (inner.kind == ArkTSTypeDesc::Kind::UNSUPPORTED || ArkTSTypeDescContainsInterfaceReference(inner)) {
+            return ArkTSTypeDesc{};
+        }
+        desc.elements.emplace_back(std::move(inner));
+    }
+    return desc;
+}
+
+} // namespace
+
+// Classification: scalars resolve through the checked whitelist
+// (ArkTSScalarName); std.core Option<T> -> OPTIONAL, std.core Array<T> ->
+// ARRAY_COPY (copy semantics), an Option directly nested in another Option
+// or an unsupported element refusing the whole position; array and tuple
+// elements may be REFERENCE nodes, also under an OPTIONAL element; tuples
+// need >= 2 supported elements; IntNative, Map/Set/TypedArray and the
+// remaining composite kinds stay unsupported.
+// The Option/Array rows are decided by Ty::IsCoreOptionType()/IsStructArray(),
+// no declaration name is matched here; the package-pinned recognition for
+// diagnostics lives in ArkTSDeferredExternalTypeName below.
+// Example: Option<Array<Int32>> -> OPTIONAL(ARRAY_COPY(SCALAR(Int32))).
+ArkTSTypeDesc ArkTSClassifyType(Ptr<Ty> ty, ImportManager* imports, bool allowNestedOptional)
+{
+    if (!Ty::IsTyCorrect(ty)) {
+        return ArkTSTypeDesc{};
+    }
+    auto scalar = ArkTSScalarName(ty);
+    if (!scalar.empty()) {
+        ArkTSTypeDesc desc;
+        desc.kind = ArkTSTypeDesc::Kind::SCALAR;
+        desc.scalar = scalar;
+        return desc;
+    }
+    if (ty->IsCoreOptionType()) {
+        return ArkTSClassifyOptionalType(*ty, imports, allowNestedOptional);
+    }
+    // IsStructArray() decides the std.core Array struct without a name
+    // comparison here; it does not pin the type-argument count, so the
+    // single-element requirement stays explicit (a zero- or many-argument
+    // Array remains unsupported).
+    if (ty->IsStructArray() && ty->typeArgs.size() == 1) {
+        return ArkTSClassifyArrayType(*ty, imports, allowNestedOptional);
+    }
+    auto decl = Ty::GetDeclPtrOfTy(ty);
+    if (decl && IsArkTSReferenceDecl(*decl)) {
+        return ArkTSClassifyReferenceLeaf(decl, imports);
+    }
+    if (decl && decl->astKind == ASTKind::ENUM_DECL && decl->TestAttr(Attribute::ARKTS_LOWERED)) {
+        return ArkTSClassifyEnumLeaf(decl);
+    }
+    if (ty->IsTuple() && ty->typeArgs.size() >= MIN_TUPLE_ARITY) {
+        return ArkTSClassifyTupleType(*ty, imports, allowNestedOptional);
+    }
+    return ArkTSTypeDesc{};
+}
+
+// Recognition of the external preset type declared by std.interop.arkts whose
+// mapping is not available: ArkTSType, the ArkTS `unknown` root. Diagnostic
+// routing ONLY, never a classification input: classification keeps returning
+// UNSUPPORTED for the position; this helper only lets LowerFunctions pick the
+// dedicated deferral diagnostic over the generic message. The declaring
+// package is pinned the way BigInt is pinned to std.math.numeric, so a
+// same-named user or facade interface keeps the generic rejection. The package
+// name is the only recognition key: the preset declaration is preinstalled and
+// not built with the application. A generic instance resolves to the same
+// declaration and reports the bare name; nested positions are searched
+// recursively so ArkTSType inside Array, Option or a tuple still reaches this
+// diagnostic.
+//   std.interop.arkts.ArkTSType -> "ArkTSType";
+//   ArkTSType of another package -> ""
+std::string ArkTSDeferredExternalTypeName(Ptr<Ty> ty)
+{
+    if (!Ty::IsTyCorrect(ty)) {
+        return {};
+    }
+    auto decl = Ty::GetDeclPtrOfTy(ty);
+    if (decl && decl->fullPackageName == "std.interop.arkts" && decl->identifier == "ArkTSType") {
+        return decl->identifier.Val();
+    }
+    for (auto& arg : ty->typeArgs) {
+        auto nested = ArkTSDeferredExternalTypeName(arg.Ty());
+        if (!nested.empty()) {
+            return nested;
+        }
+    }
+    return {};
+}
+
+namespace {
+bool ArkTSTypeDescReferenceGeneratable(const ArkTSTypeDesc& desc)
+{
+    if (desc.reference == nullptr) {
+        return false;
+    }
+    // A foreign interface reference also needs its generated implementation
+    // class: every from-JS position constructs it.
+    if (IsArkTSPreparedInterface(*desc.reference)) {
+        return desc.referenceImpl != nullptr;
+    }
+    return desc.reference->TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
+}
+
+bool ArkTSTypeDescEnumGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptional)
+{
+    // The enum declaration must have gone through preparation and lowering
+    // must have attached a non-empty value table; a prepared enum whose
+    // declaration was refused (generic, ...) never reaches the table and stays
+    // non-generatable. A payload member's associated value must itself be a
+    // generatable position.
+    if (desc.reference == nullptr || !desc.reference->TestAttr(Attribute::ARKTS_LOWERED) ||
+        desc.enumMembers.empty()) {
+        return false;
+    }
+    for (const auto& member : desc.enumMembers) {
+        if (member.kind != ArkTSEnumValueKind::PAYLOAD) {
+            continue;
+        }
+        if (member.payload.size() != 1 || !ArkTSTypeDescGeneratable(member.payload.front(), allowNestedOptional)) {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
+// A description is generatable when every scalar leaf is a checked name, the
+// single-element composites carry exactly one element, tuples carry at least
+// two, and no Option nests another Option; arrays and tuples may contain
+// Option elements. ArkTSClassifyType and the scalar-name adapter already
+// produce only generatable descriptions; this guard keeps hand-built ones
+// honest too. SCALAR("Int32") -> true; SCALAR("Junk") -> false;
+//   OPTIONAL(OPTIONAL(SCALAR(Int32))) -> false; TUPLE(SCALAR(Int8)) -> false
+bool ArkTSTypeDescGeneratable(const ArkTSTypeDesc& desc, bool allowNestedOptional)
+{
+    switch (desc.kind) {
+        case ArkTSTypeDesc::Kind::UNSUPPORTED:
+            return false;
+        case ArkTSTypeDesc::Kind::SCALAR:
+            return ArkTSScalarWhitelist().count(desc.scalar) != 0;
+        case ArkTSTypeDesc::Kind::OPTIONAL:
+            return desc.elements.size() == 1 &&
+                (desc.elements.front().kind != ArkTSTypeDesc::Kind::OPTIONAL || allowNestedOptional) &&
+                ArkTSTypeDescGeneratable(desc.elements.front(), allowNestedOptional);
+        case ArkTSTypeDesc::Kind::ARRAY_COPY:
+            return desc.elements.size() == 1 && ArkTSTypeDescGeneratable(desc.elements.front(), allowNestedOptional);
+        case ArkTSTypeDesc::Kind::REFERENCE:
+            return ArkTSTypeDescReferenceGeneratable(desc);
+        case ArkTSTypeDesc::Kind::ENUM:
+            return ArkTSTypeDescEnumGeneratable(desc, allowNestedOptional);
+        case ArkTSTypeDesc::Kind::TUPLE:
+            if (desc.elements.size() < MIN_TUPLE_ARITY) {
+                return false;
+            }
+            break;
+    }
+    for (auto& element : desc.elements) {
+        if (!ArkTSTypeDescGeneratable(element, allowNestedOptional)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Nothing has no values, so it can never cross the boundary as an
+// argument; as a result position it is the never contract handled by the
+// wrapper. Parameter SCALAR(Nothing) / OPTIONAL(SCALAR(Nothing)) -> true: no wrapper
+//   result SCALAR(Nothing) -> false: the wrapper is generated and ends in
+//   the never-contract throw instead of a return
+bool ArkTSTypeDescContainsNothing(const ArkTSTypeDesc& desc)
+{
+    if (desc.kind == ArkTSTypeDesc::Kind::SCALAR) {
+        return desc.scalar == "Nothing";
+    }
+    for (auto& element : desc.elements) {
+        if (ArkTSTypeDescContainsNothing(element)) {
+            return true;
+        }
+    }
+    for (const auto& member : desc.enumMembers) {
+        for (const auto& payload : member.payload) {
+            if (ArkTSTypeDescContainsNothing(payload)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// A reference or enum leaf is emitted by placeholder, never by its own name,
+// and the placeholder is registered in the map supplied to the wrapper
+// generator; the generator therefore refuses a description containing one when
+// no map is supplied. Scalars and unsupported positions carry no reference,
+// OPTIONAL/ARRAY_COPY recurse into their single element, TUPLE into every
+// element. REFERENCE(Point) -> true; ENUM(Color) -> true;
+//   OPTIONAL(REFERENCE(Point)) -> true;
+//   TUPLE(SCALAR(Int32), REFERENCE(Point)) -> true; SCALAR(Int32) -> false
+bool ArkTSTypeDescContainsReference(const ArkTSTypeDesc& desc)
+{
+    if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE || desc.kind == ArkTSTypeDesc::Kind::ENUM) {
+        return true;
+    }
+    for (auto& element : desc.elements) {
+        if (ArkTSTypeDescContainsReference(element)) {
+            return true;
+        }
+    }
+    for (const auto& member : desc.enumMembers) {
+        for (const auto& payload : member.payload) {
+            if (ArkTSTypeDescContainsReference(payload)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Whether any leaf is a prepared foreign-interface reference. Used to keep
+// interface references out of Array and tuple positions (AR-06 BR-11); class
+// references remain legal there per the AR-04 container contract.
+bool ArkTSTypeDescContainsInterfaceReference(const ArkTSTypeDesc& desc)
+{
+    if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
+        return desc.reference != nullptr && IsArkTSPreparedInterface(*desc.reference);
+    }
+    for (auto& element : desc.elements) {
+        if (ArkTSTypeDescContainsInterfaceReference(element)) {
+            return true;
+        }
+    }
+    for (const auto& member : desc.enumMembers) {
+        for (const auto& payload : member.payload) {
+            if (ArkTSTypeDescContainsInterfaceReference(payload)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// A prepared enum leaf whose declaration is imported carries no value table:
+// PrepareEnums skips imported packages, so classification finds no prepared
+// value-table entry and the leaf stays non-generatable. The declaration still
+// carries ARKTS_LOWERED (the attribute survives the cjo round trip), so it is
+// told apart from a same-package refused enum (payload/generic) by IMPORTED.
+std::string ArkTSTypeDescImportedEnumName(const ArkTSTypeDesc& desc)
+{
+    if (desc.kind == ArkTSTypeDesc::Kind::ENUM && desc.enumMembers.empty() && desc.reference &&
+        desc.reference->TestAttr(Attribute::IMPORTED)) {
+        return desc.reference->identifier.Val();
+    }
+    for (auto& element : desc.elements) {
+        auto name = ArkTSTypeDescImportedEnumName(element);
+        if (!name.empty()) {
+            return name;
+        }
+    }
+    for (const auto& member : desc.enumMembers) {
+        for (const auto& payload : member.payload) {
+            auto name = ArkTSTypeDescImportedEnumName(payload);
+            if (!name.empty()) {
+                return name;
+            }
+        }
+    }
+    return {};
+}
+} // namespace Cangjie::Native::FFI::ArkTS

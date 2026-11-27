@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -10,6 +10,8 @@
  */
 
 #include "ParserImpl.h"
+
+#include <algorithm>
 
 #include "cangjie/AST/AttributePack.h"
 #include "cangjie/AST/Match.h"
@@ -25,6 +27,31 @@ using namespace AST;
 
 namespace {
 constexpr std::string_view ELLIPSIS("...");
+
+// The access-modifier x FOREIGN conflict is lifted only on declarations
+// carrying the @ArkTS annotation, so the class/interface/function handlers
+// compute this flag from their annotations (which are still intact here: they
+// are moved into the declaration only after the modifier check) and forward it
+// to CheckDeclModifiers.
+bool HasArkTSAnnotation(const std::vector<OwnedPtr<AST::Annotation>>& annos)
+{
+    return std::any_of(annos.begin(), annos.end(),
+        [](const OwnedPtr<AST::Annotation>& anno) { return anno->kind == AnnotationKind::ARKTS; });
+}
+
+// Bodyless 'init' member of an @ArkTS foreign class-like (such constructors
+// are declared without bodies). The
+// enclosing declaration is tested because the member itself carries neither
+// marker at parse time: FOREIGN reaches members only through Sema's owner
+// propagation (DeclAttributeChecker::SetCommonAttributes), and the @ArkTS
+// annotation stays on the class-like. outerDecl is already set when this runs:
+// SetMemberParentInheritableDecl precedes CheckInitCtorDeclBody in
+// ParseClassBody, and the class-like enables FOREIGN before parsing its body.
+bool IsArkTSForeignClassLikeMember(const Decl& member)
+{
+    return member.outerDecl != nullptr && member.outerDecl->IsClassLikeDecl() &&
+        member.outerDecl->TestAttr(Attribute::FOREIGN) && member.outerDecl->HasAnno(AnnotationKind::ARKTS);
+}
 } // namespace
 
 ParserImpl::DeclHandler ParserImpl::LookupDeclHandler(TokenKind kind)
@@ -248,6 +275,12 @@ OwnedPtr<Decl> ParserImpl::ParseVarOrLetOrConst(ScopeKind scopeKind,
         ConsumeUntil(TokenKind::NL);
     }
     ret->annotations = std::move(annos);
+    if (ret->astKind == ASTKind::VAR_DECL && HasArkTSAnnotation(ret->annotations)) {
+        // The CJO writer exports the @ArkTS annotation and its options only for
+        // declarations carrying this attribute; a non-foreign exported variable
+        // would otherwise lose them across a package boundary.
+        ret->EnableAttr(Attribute::ARKTS);
+    }
     if (scopeKind == ScopeKind::TOPLEVEL) {
         ret->EnableAttr(Attribute::GLOBAL);
     }
@@ -343,6 +376,9 @@ void ParserImpl::ParseTypeAndExpr(Ptr<VarDeclAbstract> const ret)
 void ParserImpl::CheckGetterAnnotations(std::vector<OwnedPtr<Annotation>>& annos, const Ptr<Node> getter)
 {
     for (auto& anno : std::as_const(annos)) {
+        if (!experimentalMode && IsArkTSOnlyAnnotationKind(anno->kind)) {
+            continue;
+        }
         DiagUnexpectedAnnoOn(*anno, getter->begin, anno->identifier, "get");
     }
 }
@@ -350,6 +386,9 @@ void ParserImpl::CheckGetterAnnotations(std::vector<OwnedPtr<Annotation>>& annos
 void ParserImpl::CheckSetterAnnotations(std::vector<OwnedPtr<Annotation>>& annos, const Ptr<Node> setter)
 {
     for (auto& anno : std::as_const(annos)) {
+        if (!experimentalMode && IsArkTSOnlyAnnotationKind(anno->kind)) {
+            continue;
+        }
         if (anno->kind != AnnotationKind::DEPRECATED) {
             DiagUnexpectedAnnoOn(*anno, setter->begin, anno->identifier, "set");
         }
@@ -434,6 +473,22 @@ OwnedPtr<FuncDecl> ParserImpl::ParsePropMemberDecl(const std::set<AST::Modifier>
         ret->funcBody = ParseFuncBody(ScopeKind::PROP_MEMBER_SETTER_BODY);
     } else {
         ret->funcBody = ParseFuncBody(ScopeKind::PROP_MEMBER_GETTER_BODY);
+    }
+    // Prop getter/setter parameter lists are parsed above on a path that
+    // never reaches FFIParserImpl::CheckFuncSignature, so the ArkTS
+    // rest-parameter placement check runs here directly. The prop-member
+    // scope kind resolves the enclosing class-like through the parser chain
+    // (this declaration hangs off the PropDecl; IsArkTSForeignClassMember
+    // accepts exactly that chain shape), and the member's own annotations
+    // are attached by the caller (ParsePropBody), so an empty list is passed
+    // - a getter/setter never carries FOREIGN or @ArkTS itself.
+
+    // The accepting half is unreachable today: member props of an @ArkTS
+    // foreign class-like cannot provide accessors, so no setter formal
+    // is ever checked here; kept for future accessor support.
+    if (ffiParser->ArkTS().CarriesRestParam(ret->funcBody.get())) {
+        ffiParser->ArkTS().CheckRestParamPlacement(*ret, {},
+            isGetter ? ScopeKind::PROP_MEMBER_GETTER_BODY : ScopeKind::PROP_MEMBER_SETTER_BODY);
     }
     if (!ret->funcBody->body) {
         DiagMissingBody(!ret->identifier.Valid() ? "" : "function", " '" + ret->identifier + "'", lastToken.End());
@@ -535,6 +590,12 @@ void ParserImpl::CheckInitCtorDeclBody(FuncDecl& ctor)
     }
     if (ctor.outerDecl && ctor.outerDecl->IsJavaForeign()) {
         // constructor in java mirror should not have body.
+        return;
+    }
+    // Constructors of an @ArkTS foreign class may be declared without a
+    // body; the exemption is gated on the enclosing class so ordinary
+    // bodyless constructors keep the diagnostic below.
+    if (IsArkTSForeignClassLikeMember(ctor)) {
         return;
     }
 
@@ -857,6 +918,9 @@ void ParserImpl::ParseFuncDeclAnnos(std::vector<OwnedPtr<AST::Annotation>>& anno
 {
     funcDecl.annotations = std::move(annos);
     for (auto& it : funcDecl.annotations) {
+        if (it->kind == AnnotationKind::ARKTS) {
+            funcDecl.EnableAttr(Attribute::ARKTS);
+        }
         if (it->kind == AnnotationKind::INTRINSIC) {
             funcDecl.EnableAttr(Attribute::INTRINSIC);
         }
@@ -995,6 +1059,14 @@ OwnedPtr<FuncDecl> ParserImpl::ParseConstructor(
         DiagThisParamNotAllowed(*funcDecl->funcBody->paramLists[0]->thisParam);
         funcDecl->EnableAttr(Attribute::IS_BROKEN);
     }
+    // The constructor parameter list is parsed above and never reaches
+    // FFIParserImpl::CheckFuncSignature (only ParseFuncDecl does), so the
+    // ArkTS rest-parameter placement check runs here directly - before
+    // CheckVariableParams below may erase a '...' parameter, mirroring the
+    // ParseFuncDecl ordering (CheckFuncSignature precedes CheckFuncBody).
+    if (ffiParser->ArkTS().CarriesRestParam(funcDecl->funcBody.get())) {
+        ffiParser->ArkTS().CheckRestParamPlacement(*funcDecl, annos, scopeKind);
+    }
 
     auto initAttrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::CONSTRUCTOR);
     for (auto& it : initAttrs) {
@@ -1051,6 +1123,17 @@ OwnedPtr<PrimaryCtorDecl> ParserImpl::ParsePrimaryConstructor(
         primaryCtorDecl->funcBody = ParseFuncBody(ScopeKind::PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT);
         CheckVariableParams(*primaryCtorDecl);
         primaryCtorDecl->EnableAttr(Attribute::IN_STRUCT);
+    }
+    // Same direct routing for the primary constructor parameter list (a
+    // PrimaryCtorDecl is not a FuncDecl, so the PrimaryCtorDecl overload of
+    // the ArkTS rest-parameter placement check is used). CheckVariableParams
+    // above never erases a parameter for primary constructors, so this runs
+    // on the list exactly as written.
+    // The accepting half is unreachable today: an @ArkTS foreign class
+    // never declares a primary constructor, so ordinary classes' rest
+    // formals only ever reach this call as rejections.
+    if (ffiParser->ArkTS().CarriesRestParam(primaryCtorDecl->funcBody.get())) {
+        ffiParser->ArkTS().CheckRestParamPlacement(*primaryCtorDecl, annos, scopeKind);
     }
     primaryCtorDecl->EnableAttr(Attribute::CONSTRUCTOR);
     auto initAttrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::PRIMARY_CONSTRUCTOR);
@@ -1211,7 +1294,11 @@ OwnedPtr<Decl> ParserImpl::ParseEnumConstructor(
         DiagExpectNoModifier(firstMod);
     }
     for (auto& anno : annos) {
-        if (!(anno->kind == AnnotationKind::WHEN || anno->kind == AnnotationKind::DEPRECATED)) {
+        if (!experimentalMode && IsArkTSOnlyAnnotationKind(anno->kind)) {
+            continue;
+        }
+        if (!(anno->kind == AnnotationKind::WHEN || anno->kind == AnnotationKind::DEPRECATED ||
+            anno->kind == AnnotationKind::ARKTS_RAW_VALUE)) {
             DiagUnexpectedAnnoOn(*annos[0], caseIdentPos, annos[0]->identifier, caseIdent);
         }
     }
@@ -1407,12 +1494,16 @@ OwnedPtr<ClassDecl> ParserImpl::ParseClassDecl(
     ret->identifier = ExpectIdentifierWithPos(*ret);
     ParseInterfaceDeclOrClassDeclGeneric(*ret);
     CheckDeclarationInScope(scopeKind, DefKind::CLASS);
-    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::CLASS);
+    // Lift the access x FOREIGN conflict for @ArkTS declarations.
+    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::CLASS, HasArkTSAnnotation(annos));
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     ret->annotations = std::move(annos);
+    if (HasArkTSAnnotation(ret->annotations)) {
+        ret->EnableAttr(Attribute::ARKTS);
+    }
     ffiParser->CheckClassLikeSignature(*ret, ret->annotations);
     // Used to parse nested classDecl or primary ctor decl.
     SetPrimaryDecl(ret->identifier, ret->identifier.IsRaw());
@@ -1434,12 +1525,16 @@ OwnedPtr<InterfaceDecl> ParserImpl::ParseInterfaceDecl(
     ret->identifier = ExpectIdentifierWithPos(*ret);
     ParseInterfaceDeclOrClassDeclGeneric(*ret);
     CheckDeclarationInScope(scopeKind, DefKind::INTERFACE);
-    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::INTERFACE);
+    // Lift the access x FOREIGN conflict for @ArkTS declarations.
+    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::INTERFACE, HasArkTSAnnotation(annos));
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
     ret->modifiers.insert(modifiers.begin(), modifiers.end());
     ret->annotations = std::move(annos);
+    if (HasArkTSAnnotation(ret->annotations)) {
+        ret->EnableAttr(Attribute::ARKTS);
+    }
     ffiParser->CheckClassLikeSignature(*ret, ret->annotations);
     ret->body = ParseInterfaceBody(*ret);
     ret->end = lastToken.End();
@@ -1535,7 +1630,18 @@ OwnedPtr<EnumDecl> ParserImpl::ParseEnumDecl(
     ret->begin = lookahead.Begin();
     ret->keywordPos = lookahead.Begin();
     CheckDeclarationInScope(scopeKind, DefKind::ENUM);
-    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::ENUM);
+    // Match class/interface: an @ArkTS-annotated enum declaration also needs the
+    // access x FOREIGN conflict waived, so the preset `@ArkTS public foreign enum`
+    // spelling parses. `annos` has already been moved into ret->annotations, so
+    // read it from there.
+    const bool arktsEnum = HasArkTSAnnotation(ret->annotations);
+    if (arktsEnum) {
+        // The CJO writer keys the annotation and option export on this
+        // attribute; without it a non-foreign @ArkTS enum loses its options
+        // across a package boundary.
+        ret->EnableAttr(Attribute::ARKTS);
+    }
+    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::ENUM, arktsEnum);
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
@@ -1976,6 +2082,9 @@ OwnedPtr<MainDecl> ParserImpl::ParseMainDecl(
         AnnotationKind::C,
     };
     for (auto& anno : annos) {
+        if (!experimentalMode && IsArkTSOnlyAnnotationKind(anno->kind)) {
+            continue;
+        }
         if (std::find(annoOnMain.begin(), annoOnMain.end(), anno->kind) == annoOnMain.end()) {
             DiagUnexpectedAnnoOn(*annos[0], ret->identifier.Begin(), annos[0]->identifier.Val(), ret->identifier.Val());
         }
@@ -1992,6 +2101,12 @@ OwnedPtr<MainDecl> ParserImpl::ParseMainDecl(
     return ret;
 }
 
+// ArkTS foreign path, before -> after: tokens/annotations for `foreign func f`
+// become a FuncDecl with FOREIGN/source modifiers, original signature and null
+// FuncBody.body. The modifier check keeps FOREIGN in the set, so its conflicts
+// are reported; the @ArkTS relaxation exempts the visibility pair on a function
+// except PRIVATE. PrepareTypeCheck later turns this declaration into a CJ
+// wrapper and LowerArkTSForeignFunctions fills its body.
 OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
     ScopeKind scopeKind, const std::set<Modifier>& modifiers, PtrVector<Annotation> annos)
 {
@@ -2021,7 +2136,12 @@ OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
         // For import: funcdecl with Mut modifier only allow in interface.
         scopeKind = ScopeKind::INTERFACE_BODY;
     }
-    auto attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind::FUNC);
+    // The @ArkTS relaxation is forwarded beside the untouched modifiers: only
+    // an @ArkTS declaration may spell FOREIGN together with a visibility, and
+    // on a function PRIVATE x FOREIGN still conflicts.
+    auto attrs = CheckDeclModifiers(
+        ffiParser->ArkTS().PrepareForeignFunctionModifiers(scopeKind, modifiers, annos, *ret),
+        scopeKind, DefKind::FUNC, HasAnnotation(annos, AnnotationKind::ARKTS));
     for (auto& it : attrs) {
         ret->EnableAttr(it);
     }
@@ -2052,7 +2172,7 @@ OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
         DiagThisParamNotAllowed(*ret->funcBody->paramLists[0]->thisParam);
         ret->EnableAttr(Attribute::IS_BROKEN);
     }
-    ffiParser->CheckFuncSignature(*ret, annos);
+    ffiParser->CheckFuncSignature(*ret, annos, scopeKind);
     ParseFuncDeclAnnos(annos, *ret);
     CheckFuncBody(scopeKind, *ret);
     if (ret->funcBody) {

@@ -160,6 +160,34 @@ void TypeChecker::TypeCheckerImpl::CheckFuncDecl(ASTContext& ctx, FuncDecl& fd)
     } else if (fd.TestAttr(Attribute::OPERATOR)) {
         CheckOperatorOverloadFunc(fd);
     }
+    ApplyArkTSHasThisType(fd);
+}
+
+// '@HasThis' is recorded during preparation; the ArkTS function carrier that
+// would give the declaration its interop type is not provided, so report the
+// capability as unsupported. The parser still validates the
+// annotation's placement and argument shape, and those diagnostics keep
+// running; the declaration is left with its ordinary function type.
+void TypeChecker::TypeCheckerImpl::ApplyArkTSHasThisType(FuncDecl& fd)
+{
+    if (!fd.TestAttr(Attribute::ARKTS_HAS_THIS)) {
+        return;
+    }
+    const Annotation* hasThis = nullptr;
+    for (auto& annotation : fd.annotations) {
+        if (annotation != nullptr && annotation->kind == AnnotationKind::ARKTS_HAS_THIS) {
+            hasThis = annotation.get();
+            break;
+        }
+    }
+    // A malformed, misplaced or type-invalid annotation already reported its
+    // own diagnostic and marked itself broken; do not pile the capability
+    // diagnostic on top of it.
+    if (hasThis != nullptr && hasThis->TestAttr(Attribute::IS_BROKEN)) {
+        return;
+    }
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_not_supported,
+        hasThis != nullptr ? static_cast<const Node&>(*hasThis) : static_cast<const Node&>(fd));
 }
 
 void TypeChecker::TypeCheckerImpl::CheckStaticVarAccessNonStatic(const VarDecl& vd)

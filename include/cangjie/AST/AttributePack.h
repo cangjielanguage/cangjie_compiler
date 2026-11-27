@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // This source file is part of the Cangjie project, licensed under Apache-2.0
 // with Runtime Library Exception.
 //
@@ -735,6 +735,56 @@ enum class Attribute {
      */
     OBJ_C_EXPORT_MOVED_MEMBER_PROXY,
 
+    /**
+     * Mark a declaration declared with @ArkTS, including declarations imported
+     * from CJO.
+     * W: Parser, ASTLoader.
+     * R: ASTWriter, AnnoCheck, FunctionSource, EntrySelection, TypeChecker,
+     * TypeCheckExtend, LowerClasses, TypeCheckCall.
+     */
+    ARKTS,
+    // Ordinary CJ wrapper generated from an ArkTS foreign function.
+    ARKTS_FUNCTION_WRAPPER,
+    // Ordinary CJ class generated from an ArkTS foreign class. Its members are
+    // lowered into wrappers over the ArkTS object it references.
+    // W: Sema class preparation.
+    // R: type classification, lowering, CJO writer/loader. Appending the value
+    // keeps existing serialized attribute indices stable.
+    ARKTS_CLASS_WRAPPER,
+    // A @WriteOnly property of a prepared ArkTS wrapper class. The annotation
+    // is not serialized into CJO, so the attribute carries the write-only
+    // contract to importing packages.
+    // W: Sema class preparation.
+    // R: the write-only read diagnostic. Appending keeps existing serialized
+    // attribute indices stable.
+    ARKTS_WRITE_ONLY_PROP,
+    // One prepared @ArkTS foreign interface and its generated implementation
+    // class form one wrapper pair and share this attribute. On the interface,
+    // members become default implementations dispatching through the generated
+    // accessor; the implementation class stores the JSObject reference and
+    // implements the accessor. The declaration kind distinguishes the two.
+    // W: Sema interface preparation.
+    // R: type classification, lowering, from-JS construction, CJO writer/loader.
+    ARKTS_INTERFACE_WRAPPER,
+
+    // An @ArkTS foreign enum lowered in place to a plain Cangjie enum. This is
+    // deliberately separate from the *_WRAPPER markers above: those mark a
+    // declaration rewritten into a generated wrapper (function, class or
+    // interface), while a lowered enum gets no wrapper and only needs to be
+    // recognized as prepared so @RawValue checks and type mapping accept it.
+    // Enums have no wrapper counterpart, so the bits are not interchangeable.
+    ARKTS_LOWERED,
+
+    // A prepared ArkTS foreign function whose source declaration carried
+    // '@HasThis[TypeName]': the ArkTS target is a method whose `this` has
+    // TypeName. The ThisT spelling is carried across the CJO boundary by the
+    // HasThis annotation record; this bit records the validated contract for
+    // passes that read the attribute instead of re-parsing the annotation. The
+    // call semantics are a later requirement. Appending keeps existing
+    // serialized attribute indices stable.
+    // W: ArkTS prepare validation and the CJO loader.
+    // R: later @HasThis lowering and the CJO writer/loader.
+    ARKTS_HAS_THIS,
     AST_ATTR_END,
 };
 

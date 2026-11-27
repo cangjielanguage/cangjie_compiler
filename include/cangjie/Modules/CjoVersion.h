@@ -149,7 +149,10 @@
 
 namespace Cangjie {
 constexpr uint8_t CJO_MAJOR_VERSION = 0;
-constexpr uint8_t CJO_MINOR_VERSION = 2;
+// 0.3 appends AnnoKind.RawValue, AnnoKind.ArkTS and AnnoKind.HasThis; every
+// existing AnnoKind value is unchanged, so the minor stays 0.3 while it is
+// unreleased.
+constexpr uint8_t CJO_MINOR_VERSION = 3;
 constexpr uint8_t CJO_PATCH_VERSION = 0;
 // Last modified: local-mode types, receiver modes, and BuiltInType::Copy added to CjoFormat.
 } // namespace Cangjie

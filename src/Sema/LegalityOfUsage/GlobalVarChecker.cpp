@@ -89,7 +89,7 @@ Ptr<Decl> GetTargetIfShouldCollect(const Expr& expr)
 
 inline bool CanBeIgnored(const Decl& decl)
 {
-    return decl.TestAnyAttr(Attribute::UNSAFE, Attribute::IMPORTED, Attribute::FOREIGN);
+    return decl.TestAttr(Attribute::UNSAFE) || decl.TestAttr(Attribute::IMPORTED) || IsExternalForeign(decl);
 }
 
 bool IsInSameFile(const Node& n1, const Node& n2)
@@ -504,7 +504,8 @@ void GlobalVarChecker::CollectVarUsageBFSImpl(const Node& node, std::queue<Ptr<c
 void GlobalVarChecker::CollectInRefExpr(const RefExpr& re)
 {
     if (re.ref.target == nullptr || re.ref.target->astKind == ASTKind::GENERIC_PARAM_DECL || re.isThis ||
-        re.ref.target->TestAnyAttr(Attribute::IMPORTED, Attribute::FOREIGN, Attribute::ENUM_CONSTRUCTOR)) {
+        re.ref.target->TestAttr(Attribute::IMPORTED) || IsExternalForeign(*re.ref.target) ||
+        re.ref.target->TestAttr(Attribute::ENUM_CONSTRUCTOR)) {
         return;
     }
     // If referring a global or static variable, add it in the graph.

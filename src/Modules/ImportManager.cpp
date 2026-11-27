@@ -25,7 +25,6 @@
 #include "cangjie/AST/Create.h"
 #include "cangjie/AST/Match.h"
 #include "cangjie/AST/Utils.h"
-#include "cangjie/AST/Walker.h"
 #include "cangjie/Basic/SourceManager.h"
 #include "cangjie/CHIR/Interpreter/BCHIR.h"
 #include "cangjie/Frontend/CompilerInstance.h"
@@ -340,7 +339,9 @@ Range GetPackageNameRange(const CjoManager& cjoManager, const ImportSpec& import
         : (cjoManager.IsImportPackage(import)
                   ? (im.prefixPoses.empty() ? MakeRange(im.identifier)
                                             : MakeRange(im.prefixPoses.front(), im.identifier.End()))
-                  : MakeRange(im.prefixPoses.front(), im.prefixPoses.back() + im.prefixPaths.back().size()));
+                  : (im.prefixPoses.empty() || im.prefixPaths.empty()
+                            ? MakeRange(im.identifier)
+                            : MakeRange(im.prefixPoses.front(), im.prefixPoses.back() + im.prefixPaths.back().size())));
 }
 } // namespace
 
@@ -726,7 +727,9 @@ void ImportManager::CheckImports(const AST::Package& pkg)
             Utils::EraseIf(decls, [relation](auto it) { return !Modules::IsVisible(*it, relation); });
             if (decls.empty()) {
                 auto& im = import->content;
-                auto nameRange = MakeRange(im.prefixPoses.front(), im.identifier.End());
+                auto nameRange = im.prefixPoses.empty()
+                    ? MakeRange(im.identifier)
+                    : MakeRange(im.prefixPoses.front(), im.identifier.End());
                 diag.DiagnoseRefactor(
                     DiagKindRefactor::package_decl_not_find_in_package, nameRange, im.identifier, fullPackageName);
             }
@@ -740,7 +743,10 @@ void ImportManager::CheckRedefinition(const AST::Package& pkg)
     std::unordered_map<Ptr<File>, std::unordered_map<std::string, Range>> fileImportNamePos;
     for (auto& file : pkg.files) {
         for (auto& import : file->imports) {
-            if (import->IsImportMulti() || import->IsImportAll()) {
+            // Compiler-injected imports bind no name for user code, so they
+            // cannot take part in user-facing import-conflict warnings. Every
+            // other implicit import keeps participating, as on the main branch.
+            if (import->IsImportMulti() || import->IsImportAll() || import->isCompilerInjectedImport) {
                 continue;
             }
             auto& posMap = import->IsReExport() ? pkgImportNamePos : fileImportNamePos[file.get()];
@@ -776,13 +782,26 @@ std::string ImportManager::GeneratePkgDepInfo(const Package& pkg, bool exportCJO
     bool isProduct{true};
     for (auto& file : pkg.files) {
         for (auto& import : file->imports) {
-            if (import->IsImportMulti() || import->TestAttr(Attribute::IMPLICIT_ADD)) {
+            // A compiler-injected import is invisible to user code; its pass
+            // records the package when it is also a runtime link dependency.
+            if (import->IsImportMulti() ||
+                (import->TestAttr(Attribute::IMPLICIT_ADD) && import->implicitDependencyPackage.empty())) {
                 continue;
             }
-            auto names = cjoManager->GetPossibleCjoNames(*import);
-            CJC_ASSERT(!names.empty());
-            std::string longName = FileUtil::ToPackageName(names.front());
-            std::string shortName = FileUtil::ToPackageName(names.back());
+            std::string longName;
+            std::string shortName;
+            if (!import->implicitDependencyPackage.empty()) {
+                // A support import may name a single member; the dependency is
+                // the package, not the member-qualified name. In scan-dependency
+                // mode the package map is not built, so GetPossibleCjoNames
+                // would otherwise shorten the name to a prefix.
+                longName = shortName = import->implicitDependencyPackage;
+            } else {
+                auto names = cjoManager->GetPossibleCjoNames(*import);
+                CJC_ASSERT(!names.empty());
+                longName = FileUtil::ToPackageName(names.front());
+                shortName = FileUtil::ToPackageName(names.back());
+            }
             auto iter = dependencies.find(longName);
             if (iter == dependencies.cend()) {
                 DependencyInfoItem dependInfo{"", "", false, {}};
@@ -1066,6 +1085,11 @@ bool ImportManager::BuildIndex(
     } else {
         ClearCachesForRebuild();
     }
+    // Runs on both the initial and the incremental/LSP path: injection is
+    // idempotent, so a rebuild does not duplicate the imports. It must run
+    // after the search path is refreshed, because availability is checked
+    // against it.
+    AddArkTSInteropImports(packages);
     Utils::ProfileRecorder::Start("BuildIndex", "AddImplicitImports");
     for (auto pkg : packages) {
         if (pkg->HasFtrDirective()) {
@@ -1266,11 +1290,13 @@ void ImportManager::AddImportedDeclsForSourcePackage(const AST::Package& pkg)
 void ImportManager::AddImportedDeclsForFile(const Package& pkg, const File& file)
 {
     for (auto& import : file.imports) {
-        auto& declMap = import->IsReExport() ? importedDeclsMap : fileImportedDeclsMap[file.fileHash];
         CJC_NULLPTR_CHECK(import);
-        if (import->IsImportMulti()) {
+        // A compiler-injected import must not bind any name for user code:
+        // generated references are pre-bound by their pass.
+        if (import->IsImportMulti() || import->hidesFromNameLookup) {
             continue;
         }
+        auto& declMap = import->IsReExport() ? importedDeclsMap : fileImportedDeclsMap[file.fileHash];
         auto fullPackageName = cjoManager->GetPackageNameByImport(*import);
         auto pkgDecl = cjoManager->GetPackageDecl(fullPackageName);
         if (fullPackageName.empty() || !pkgDecl) {

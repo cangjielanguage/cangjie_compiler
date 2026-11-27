@@ -37,6 +37,7 @@ class TypeManager;
 class ASTLoader;
 class ASTWriter;
 class CjoManager;
+class SourceManager;
 
 struct ExternalLibCfg {
     std::string name;
@@ -143,6 +144,28 @@ public:
      */
     bool BuildIndex(const std::string& cangjieModules, const GlobalOptions& globalOptions,
         std::vector<Ptr<AST::Package>>& packages);
+
+    /**
+     * Add the ArkTS interop package imports to every source file that carries an
+     * @ArkTS annotation: the packages `ohos.ark_interop` (bound as
+     * `ark_interop`) and `cj_arkts_context_v1`, plus the support members the
+     * generated wrappers name. Package imports stay visible because a generated
+     * package qualifier is re-resolved after a speculative re-check; member
+     * imports are marked ImportSpec::isCompilerInjectedImport, so they never
+     * bind a user-visible name. The imports are COMPILER_ADD + IMPLICIT_ADD +
+     * PRIVATE: they stay hidden from user-facing checks (no unused-import
+     * warning), and dependency generation records the packages marked in
+     * ImportSpec::implicitDependencyPackage for linking.
+     * A package is only injected when its cjo is resolvable, so toolchains
+     * without the ArkTS add-on keep reporting no extra diagnostics. This is
+     * idempotent: a file that already binds the package name is left alone.
+     * Must be called after CjoManager::UpdateSearchPath.
+     * @p sourceManager is supplied by the --scan-dependency path, whose parser
+     * reads only the package header and imports: with no declaration AST to
+     * walk, the annotation is detected lexically from the source buffer.
+     */
+    void AddArkTSInteropImports(
+        const std::vector<Ptr<AST::Package>>& packages, SourceManager* sourceManager = nullptr);
 
     /**
      * Load package from package name and cjo path.
@@ -261,7 +284,6 @@ public:
     {
         return cjoManager.get();
     }
-
     /** @brief Clear the cache for BCHIR packages. */
     void ClearPackageBCHIRCache()
     {

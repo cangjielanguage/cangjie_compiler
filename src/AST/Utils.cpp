@@ -777,6 +777,24 @@ bool HasModifier(const Decl& decl, TokenKind kind)
 {
     return HasModifier(decl.modifiers, kind);
 }
+
+bool IsArkTSPrepared(const Decl& decl)
+{
+    switch (decl.astKind) {
+        case ASTKind::FUNC_DECL:
+            return decl.TestAttr(Attribute::ARKTS_FUNCTION_WRAPPER);
+        case ASTKind::CLASS_DECL:
+            // A prepared interface is an INTERFACE_DECL; the CLASS_DECL here
+            // is its generated <Interface>$arkts_impl, which carries the same
+            // marker as the interface it implements.
+            return decl.TestAttr(Attribute::ARKTS_CLASS_WRAPPER) ||
+                decl.TestAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
+        case ASTKind::INTERFACE_DECL:
+            return decl.TestAttr(Attribute::ARKTS_INTERFACE_WRAPPER);
+        default:
+            return false;
+    }
+}
 } // namespace Cangjie::AST
 
 namespace Cangjie::Interop::Java {

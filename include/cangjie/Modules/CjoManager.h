@@ -13,6 +13,10 @@
 #ifndef CANGJIE_MODULES_CJO_MANAGER_H
 #define CANGJIE_MODULES_CJO_MANAGER_H
 
+#include <cstdint>
+#include <string>
+#include <utility>
+
 #include "cangjie/AST/Node.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
 #include "cangjie/Sema/TypeManager.h"
@@ -33,6 +37,9 @@ public:
 
     void AddSourcePackage(AST::Package& pkg) const;
     void AddImportedPackageFromASTNode(OwnedPtr<AST::Package>&& pkg) const;
+    // CJO format version of an imported package; {0, 0} when the package is not
+    // loaded or its cjo carries no version.
+    std::pair<uint8_t, uint8_t> GetPackageCjoVersion(const std::string& fullPackageName) const;
     bool LoadPackageHeader(const std::string& fullPackageName, const std::string& cjoPath) const;
     void LoadAllDeclsAndRefs() const;
     bool NeedCollectDependency(const std::string& curName, bool isCurMacro, const std::string& depName) const;

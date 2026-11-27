@@ -159,7 +159,7 @@ bool IsClosedSealedHierarchy(const ClassLikeTy& ty, const Package& currentPackag
     }
     const ClassLikeDecl& decl = *ty.commonDecl;
     if (decl.TestAnyAttr(Attribute::COMMON, Attribute::SPECIFIC, Attribute::FROM_COMMON_PART) ||
-        !IsCurrentPackageDecl(decl, currentPackage) || decl.TestAttr(Attribute::FOREIGN) ||
+        !IsCurrentPackageDecl(decl, currentPackage) || IsExternalForeign(decl) ||
         (isRoot ? !IsClosedSealedRoot(ty, decl) : !IsClosedSealedLeaf(ty, decl))) {
         return false;
     }
@@ -361,8 +361,12 @@ public:
                 return other.kind == ConstructorKind::TUPLE;
             }
             case ConstructorKind::TYPE: {
+                // Pattern usefulness mirrors runtime dispatch, which is
+                // declaration-based: the static-only ArkTSType implicit-supertype
+                // relation must not make a reachable later case look covered.
                 return other.kind == ConstructorKind::TYPE &&
-                    typeManager.IsSubtype(std::get<ModalTy>(ctor), std::get<ModalTy>(other.ctor), true, false);
+                    typeManager.IsSubtype(std::get<ModalTy>(ctor), std::get<ModalTy>(other.ctor), true, false,
+                        ModalMatchMode::SUBTYPE, false);
             }
             default: {
                 return false;
@@ -656,7 +660,11 @@ private:
         // For example: In `match (x) { case _: ToString => ... }`, where `x: Int64`,
         // the type pattern is equivalent to a wildcard.
         // An exception is that `Nothing` is always unreachable, it will be handled by `IsUnreachableTypePattern`.
-        if (!typePattern.GetTy()->IsNothing() && typeManager.IsSubtype(goalTy.Ty(), typePattern.GetTy(), true, false)) {
+        // Declaration-based only: the static-only ArkTSType implicit-supertype relation
+        // must not turn `case _: ArkTSType` into a wildcard, which would both hide the
+        // runtime check and make a following case look unreachable.
+        if (!typePattern.GetTy()->IsNothing() &&
+            typeManager.IsSubtype(goalTy.Ty(), typePattern.GetTy(), true, false, ModalMatchMode::SUBTYPE, false)) {
             return {Constructor::Wildcard(), {}, goalTy, &typePattern};
         }
         return {Constructor::Type(typePattern.GetTy().With(goalTy.Mode())), {}, goalTy, &typePattern};

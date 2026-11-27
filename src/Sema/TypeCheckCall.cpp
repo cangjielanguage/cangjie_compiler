@@ -1657,7 +1657,7 @@ bool TypeChecker::TypeCheckerImpl::CheckCallCompatible(ASTContext& ctx, Function
             return false;
         }
         candidate.stat.matchedArgs++;
-        if (fd.TestAttr(Attribute::FOREIGN) && fd.hasVariableLenArg && i >= fd.funcBody->paramLists[0]->params.size()) {
+        if (IsExternalForeign(fd) && fd.hasVariableLenArg && i >= fd.funcBody->paramLists[0]->params.size()) {
             continue;
         }
         if (auto st = DynamicCast<StructTy>(ce.args[i]->DataTy());
@@ -3482,7 +3482,7 @@ bool TypeChecker::TypeCheckerImpl::PostCheckCallExpr(
     ce.baseFunc->SetTarget(&func);
     UpdateCallTargetsForLSP(ce, func);
     DynamicBindingThisType(*ce.baseFunc, func, typeMapping);
-    if (!func.TestAttr(Attribute::FOREIGN) && !func.TestAttr(Attribute::C)) {
+    if (!IsExternalForeign(func) && !func.TestAttr(Attribute::C)) {
         bool valid = true;
         for (auto& fa : ce.args) {
             if (fa->withInout) {
@@ -3657,7 +3657,14 @@ bool TypeChecker::TypeCheckerImpl::ChkCallExpr(ASTContext& ctx, ModalTy target, 
     if (ce.needCheckToTokens) {
         CheckToTokensImpCallExpr(ce);
     }
+    // Step 2 and Step 3: check the call kind and match the candidates.
+    return ChkCallExprCandidates(ctx, target, ce, decl, candidates, argsTys, prevCheckTrue);
+}
 
+bool TypeChecker::TypeCheckerImpl::ChkCallExprCandidates(ASTContext& ctx, ModalTy target, CallExpr& ce,
+    const Ptr<Decl>& decl, std::vector<Ptr<FuncDecl>> candidates, const std::vector<ModalTy>& argsTys,
+    bool prevCheckTrue)
+{
     // Step 2: Check & set callKind.
     // Function pointer call, operator () function call and non-valid call base, return false.
     if (!CheckCallKind(ce, decl, ce.callKind)) {

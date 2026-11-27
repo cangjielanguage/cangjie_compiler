@@ -139,6 +139,49 @@ bool VersionExactly(uint8_t cjoMajor, uint8_t cjoMinor, uint8_t requiredMajor, u
 {
     return CompareCjoVersion(cjoMajor, cjoMinor, requiredMajor, requiredMinor) == CjoVersionOrder::EQUAL;
 }
+
+// Map a serialized annotation kind to the AST annotation it denotes. Kinds that carry
+// extra payload (TEST_REGISTER attributes, compile-time visibility) are completed by the
+// caller; a kind this compiler does not model yields no value and is refused there.
+std::optional<AnnotationKind> DecodeAnnotationKind(PackageFormat::AnnoKind kind)
+{
+    switch (kind) {
+        case PackageFormat::AnnoKind_ArkTS:
+            return AnnotationKind::ARKTS;
+        case PackageFormat::AnnoKind_Deprecated:
+            return AnnotationKind::DEPRECATED;
+        case PackageFormat::AnnoKind_TestRegistration:
+            return AnnotationKind::ATTRIBUTE;
+        case PackageFormat::AnnoKind_Frozen:
+            return AnnotationKind::FROZEN;
+        case PackageFormat::AnnoKind_JavaMirror:
+            return AnnotationKind::JAVA_MIRROR;
+        case PackageFormat::AnnoKind_JavaImpl:
+            return AnnotationKind::JAVA_IMPL;
+        case PackageFormat::AnnoKind_JavaHasDefault:
+            return AnnotationKind::JAVA_HAS_DEFAULT;
+        case PackageFormat::AnnoKind_ObjCMirror:
+            return AnnotationKind::OBJ_C_MIRROR;
+        case PackageFormat::AnnoKind_ObjCImpl:
+            return AnnotationKind::OBJ_C_IMPL;
+        case PackageFormat::AnnoKind_ForeignName:
+            return AnnotationKind::FOREIGN_NAME;
+        case PackageFormat::AnnoKind_Custom:
+            return AnnotationKind::CUSTOM;
+        case PackageFormat::AnnoKind_Annotation:
+            return AnnotationKind::ANNOTATION;
+        case PackageFormat::AnnoKind_Java:
+            return AnnotationKind::JAVA;
+        case PackageFormat::AnnoKind_ObjC:
+            return AnnotationKind::OBJ_C;
+        case PackageFormat::AnnoKind_RawValue:
+            return AnnotationKind::ARKTS_RAW_VALUE;
+        case PackageFormat::AnnoKind_HasThis:
+            return AnnotationKind::ARKTS_HAS_THIS;
+        default:
+            return std::nullopt;
+    }
+}
 } // namespace
 
 const std::unordered_map<PackageFormat::AccessLevel, AST::AccessLevel> ACCESS_LEVEL_RMAP = {
@@ -873,10 +916,43 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
         astDecl.genericDecl = GetDeclFromIndex(fullId);
     }
 
+    LoadDeclAnnotations(decl, astDecl);
+}
+
+void ASTLoader::ASTLoaderImpl::LoadDeclAnnotations(const PackageFormat::Decl& decl, Decl& astDecl)
+{
+    astDecl.DisableAttr(Attribute::ARKTS);
+    // The annotations vector is optional in the schema; a cjo without it carries
+    // no annotation records to restore.
+    if (decl.annotations() == nullptr) {
+        return;
+    }
     uoffset_t length = static_cast<uoffset_t>(decl.annotations()->size());
     for (uoffset_t i = 0; i < length; i++) {
         auto rawAnno = decl.annotations()->Get(i);
+        if (rawAnno == nullptr) {
+            continue;
+        }
+        // Parameterless records need only a marker. Restore option-bearing metadata
+        // as builtin nodes without resolving an annotation declaration or constructor.
+        if (rawAnno->kind() == PackageFormat::AnnoKind_ArkTS) {
+            astDecl.EnableAttr(Attribute::ARKTS);
+            if (rawAnno->args() == nullptr || rawAnno->args()->size() == 0) {
+                continue;
+            }
+        }
+        if (rawAnno->kind() == PackageFormat::AnnoKind_HasThis) {
+            // The annotation record is also the carrier of the ThisT contract
+            // across the package boundary; the attribute lets later stages
+            // recognize a prepared wrapper without scanning annotations.
+            astDecl.EnableAttr(Attribute::ARKTS_HAS_THIS);
+        }
         auto anno = LoadAnnotation(*rawAnno);
+        if (anno == nullptr) {
+            // The malformed record was refused with a diagnostic; keep loading the
+            // decl without it instead of trusting a half-read annotation.
+            continue;
+        }
         if (rawAnno->kind() == PackageFormat::AnnoKind_Annotation) {
             if (auto info = decl.info_as_ClassInfo()) {
                 anno->runtimeVisible = info->runtimeVisible();
@@ -886,75 +962,83 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
     }
 }
 
+void ASTLoader::ASTLoaderImpl::DiagnoseUnreadableAnnotation()
+{
+    diag.DiagnoseRefactor(DiagKindRefactor::package_unsupported_load, DEFAULT_POSITION, "annotation");
+}
+
 OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageFormat::Anno& rawAnno)
 {
-    auto annotation = MakeOwned<Annotation>();
-
-    switch (rawAnno.kind()) {
-        case PackageFormat::AnnoKind_Deprecated:
-            annotation->kind = AnnotationKind::DEPRECATED;
-            break;
-        case PackageFormat::AnnoKind_TestRegistration:
-            annotation->kind = AnnotationKind::ATTRIBUTE;
-            annotation->attrs.emplace_back(TokenKind::IDENTIFIER, "TEST_REGISTER");
-            break;
-        case PackageFormat::AnnoKind_Frozen:
-            annotation->kind = AnnotationKind::FROZEN;
-            break;
-        case PackageFormat::AnnoKind_JavaMirror:
-            annotation->kind = AnnotationKind::JAVA_MIRROR;
-            break;
-        case PackageFormat::AnnoKind_JavaImpl:
-            annotation->kind = AnnotationKind::JAVA_IMPL;
-            break;
-        case PackageFormat::AnnoKind_JavaHasDefault:
-            annotation->kind = AnnotationKind::JAVA_HAS_DEFAULT;
-            break;
-        case PackageFormat::AnnoKind_ObjCMirror:
-            annotation->kind = AnnotationKind::OBJ_C_MIRROR;
-            break;
-        case PackageFormat::AnnoKind_ObjCImpl:
-            annotation->kind = AnnotationKind::OBJ_C_IMPL;
-            break;
-        case PackageFormat::AnnoKind_ForeignName:
-            annotation->kind = AnnotationKind::FOREIGN_NAME;
-            break;
-        case PackageFormat::AnnoKind_Custom:
-            annotation->kind = AnnotationKind::CUSTOM;
-            annotation->isCompileTimeVisible = true;
-            break;
-        case PackageFormat::AnnoKind_Annotation:
-            annotation->kind = AnnotationKind::ANNOTATION;
-            break;
-        case PackageFormat::AnnoKind_Java:
-            annotation->kind = AnnotationKind::JAVA;
-            break;
-        case PackageFormat::AnnoKind_ObjC:
-            annotation->kind = AnnotationKind::OBJ_C;
-            break;
-        default:
-            InternalError("Unhandled annotation kind.");
+    auto kind = DecodeAnnotationKind(rawAnno.kind());
+    if (!kind) {
+        // A kind this compiler does not model cannot be interpreted; refuse the
+        // record instead of aborting the compiler on a malformed cjo.
+        DiagnoseUnreadableAnnotation();
+        return nullptr;
     }
-    CJC_NULLPTR_CHECK(rawAnno.identifier());
+    auto annotation = MakeOwned<Annotation>();
+    annotation->kind = *kind;
+    if (rawAnno.kind() == PackageFormat::AnnoKind_TestRegistration) {
+        annotation->attrs.emplace_back(TokenKind::IDENTIFIER, "TEST_REGISTER");
+    }
+    if (rawAnno.kind() == PackageFormat::AnnoKind_Custom) {
+        annotation->isCompileTimeVisible = true;
+    }
+    if (rawAnno.identifier() == nullptr) {
+        DiagnoseUnreadableAnnotation();
+        return nullptr;
+    }
     annotation->identifier = rawAnno.identifier()->str();
-    CJC_NULLPTR_CHECK(rawAnno.args());
-    for (auto&& arg : LoadAnnotationArgs(rawAnno)) {
+    // 'args' is optional in the schema; the writer always stores a vector (possibly
+    // empty), so a missing vector means the record cannot be reconstructed.
+    if (rawAnno.args() == nullptr) {
+        DiagnoseUnreadableAnnotation();
+        return nullptr;
+    }
+    auto args = LoadAnnotationArgs(rawAnno);
+    if (!args) {
+        return nullptr;
+    }
+    for (auto&& arg : *args) {
         annotation->args.emplace_back(std::move(arg));
     }
 
     return annotation;
 }
 
-std::vector<OwnedPtr<FuncArg>> ASTLoader::ASTLoaderImpl::LoadAnnotationArgs(const PackageFormat::Anno& rawAnno)
+std::optional<std::vector<OwnedPtr<FuncArg>>> ASTLoader::ASTLoaderImpl::LoadAnnotationArgs(
+    const PackageFormat::Anno& rawAnno)
 {
     std::vector<OwnedPtr<FuncArg>> args;
 
     for (const auto& rawArg : *rawAnno.args()) {
+        // Every field of an AnnoArg is optional in the schema; a record with an
+        // unnamed or expression-less argument cannot be rebuilt.
+        if (rawArg == nullptr || rawArg->name() == nullptr) {
+            DiagnoseUnreadableAnnotation();
+            return std::nullopt;
+        }
         auto arg = MakeOwned<FuncArg>();
         arg->name = rawArg->name()->str();
-        arg->expr = LoadExpr(rawArg->expr());
+        // The stored expression index is a vector offset plus one: zero means
+        // absent, anything past the expression table is out of bounds. Both make
+        // the argument unreadable, so refuse the record instead of indexing.
+        auto exprIndex = rawArg->expr();
+        if (exprIndex == INVALID_FORMAT_INDEX || package->allExprs() == nullptr ||
+            exprIndex > package->allExprs()->size()) {
+            DiagnoseUnreadableAnnotation();
+            return std::nullopt;
+        }
+        arg->expr = LoadExpr(exprIndex);
+        if (arg->expr == nullptr) {
+            DiagnoseUnreadableAnnotation();
+            return std::nullopt;
+        }
         if (rawAnno.kind() != PackageFormat::AnnoKind_Annotation && arg->expr->astKind != ASTKind::LIT_CONST_EXPR) {
-            InternalError("Kind of deserialized argument must be constant literal.");
+            // Only literal arguments can cross the package boundary; a record that
+            // carries anything else is refused, not fatal.
+            DiagnoseUnreadableAnnotation();
+            return std::nullopt;
         }
         args.emplace_back(std::move(arg));
     }

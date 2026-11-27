@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "Desugar/AfterTypeCheck.h"
+#include "NativeFFI/ArkTS/FunctionSource.h"
 
 #include "AutoBoxing.h"
 #include "ExtraScopes.h"
@@ -227,13 +228,13 @@ void DesugarSimpleSetForPropDecl(TypeManager& tyMgr, AssignExpr& expr, PropDecl&
 
 void UpdatePosForMacroExpandedNodes(const std::vector<Ptr<AST::Package>>& pkgs)
 {
-    auto visit = [](Ptr<AST::Node> curNode) -> AST::VisitAction {
+    auto visit = [](Ptr<Node> curNode) -> VisitAction {
         if (!curNode->curMacroCall) {
-            return AST::VisitAction::WALK_CHILDREN;
+            return VisitAction::WALK_CHILDREN;
         }
         curNode->begin = curNode->GetDebugPos(curNode->begin);
         curNode->end = curNode->GetDebugPos(curNode->end);
-        return AST::VisitAction::WALK_CHILDREN;
+        return VisitAction::WALK_CHILDREN;
     };
     for (auto pkg : pkgs) {
         AST::Walker walker(pkg, visit);
@@ -319,6 +320,10 @@ void TypeChecker::TypeCheckerImpl::DesugarSetForPropDecl(Expr& expr)
         return;
     }
     if (isCompound) {
+        // A compound assignment ('w.p += x') and an increment ('w.p++') read the
+        // property through its getter before writing it, so the ArkTS write-only
+        // contract applies even though the node is a left value.
+        Native::FFI::ArkTS::CheckArkTSWriteOnlyCompoundTarget(*subExpr, diag);
         DesugarCompoundSetForPropDecl(typeManager, expr, *subExpr, *propDecl);
         return;
     }

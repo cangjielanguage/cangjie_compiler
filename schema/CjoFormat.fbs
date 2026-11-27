@@ -314,6 +314,11 @@ table Decl {
   tyMode:Mode;
 }
 
+// Only annotations a consumer of the .cjo needs are recorded. The ArkTS
+// annotations RestParam and WriteOnly are deliberately absent: they shape the
+// wrapper generated inside the declaring package and have no cross-package
+// reader (a write-only property crosses as Attribute::ARKTS_WRITE_ONLY_PROP).
+// New kinds are appended so existing serialized indices stay stable.
 enum AnnoKind : uint16 {
   Deprecated,
   TestRegistration,
@@ -327,7 +332,10 @@ enum AnnoKind : uint16 {
   JavaHasDefault,
   Annotation,
   Java,
-  ObjC
+  ObjC,
+  ArkTS,
+  RawValue,
+  HasThis
 }
 
 // Current annotation representation is a balance between needs of @Deprecated

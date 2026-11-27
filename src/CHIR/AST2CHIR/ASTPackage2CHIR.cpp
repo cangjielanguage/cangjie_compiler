@@ -39,6 +39,20 @@ Linkage GetFuncLinkage(const GlobalOptions& opts, const AST::FuncDecl& func)
     return func.linkage;
 }
 
+// An '@HasThis' declaration may carry a non-function checked type for name
+// resolution, while the CHIR symbol is still the generated function wrapper.
+// Translate the checked function body's type for the symbol so a non-function
+// type never reaches a FuncType cast. The modal type is kept intact so the
+// locality mode reaches TranslateType.
+AST::ModalTy GetFuncDeclCHIRType(const AST::FuncDecl& funcDecl)
+{
+    if (funcDecl.TestAttr(AST::Attribute::ARKTS_HAS_THIS) && funcDecl.funcBody &&
+        funcDecl.funcBody->GetTy().IsCorrect() && funcDecl.funcBody->GetTy()->IsFunc()) {
+        return funcDecl.funcBody->GetTy();
+    }
+    return funcDecl.GetTy();
+}
+
 bool IsLocalConstFuncInStaticMember(const AST::FuncDecl& astFunc)
 {
     if (!astFunc.isConst) {
@@ -162,7 +176,7 @@ void AST2CHIR::CollectFuncDecl(AST::FuncDecl& funcDecl)
         return;
     }
 
-    if (funcDecl.TestAttr(AST::Attribute::FOREIGN)) {
+    if (AST::IsExternalForeign(funcDecl)) {
         CollectDeclToList(funcDecl, foreignFuncs);
         return;
     }
@@ -515,7 +529,7 @@ void AST2CHIR::CollectDeclsInCurPkg(AST::Package& node)
 void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Function& chirFunc)
 {
     // 1. ----------------------- Attribute -----------------------
-    chirFunc.AppendAttributeInfo(BuildAttr(astFunc.GetAttrs()));
+    chirFunc.AppendAttributeInfo(BuildAttr(astFunc));
     if (astFunc.isConst) {
         chirFunc.EnableAttr(Attribute::CONST);
     }
@@ -557,7 +571,7 @@ void AST2CHIR::SetFuncAttributeAndLinkageType(const AST::FuncDecl& astFunc, Func
     }
 
     // foreign function must be imported
-    if (astFunc.TestAttr(AST::Attribute::FOREIGN)) {
+    if (AST::IsExternalForeign(astFunc)) {
         chirFunc.EnableAttr(Attribute::IMPORTED);
     }
 
@@ -589,7 +603,7 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
         fn->SetFeatures(features);
         return;
     }
-    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(GetFuncDeclCHIRType(funcDecl));
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     // Create BlockGroup with argument
 
@@ -653,7 +667,7 @@ void AST2CHIR::CreateFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDec
 
 void AST2CHIR::CreatePseudoImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl& funcDecl)
 {
-    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(GetFuncDeclCHIRType(funcDecl));
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     FuncType* funcTy = StaticCast<FuncType*>(fnTy);
     auto genericParamTy = GetGenericParamType(funcDecl, chirType);
@@ -673,7 +687,7 @@ namespace {
 void ConvertImportedFunctionType(
     Function& fn, const AST::FuncDecl& funcDecl, CHIRType& chirType, CHIRBuilder& builder)
 {
-    auto fnTy = chirType.TranslateType(funcDecl.GetTy());
+    auto fnTy = chirType.TranslateType(GetFuncDeclCHIRType(funcDecl));
     fnTy = AdjustFuncType(*StaticCast<FuncType*>(fnTy), funcDecl, builder, chirType);
     if (fn.GetFuncType() == fnTy) {
         return;
@@ -696,7 +710,7 @@ void AST2CHIR::CreateImportedFuncSignatureAndSetGlobalCache(const AST::FuncDecl&
         fn->SetDebugLocation(loc);
         return;
     }
-    auto fnTy = StaticCast<FuncType*>(chirType.TranslateType(funcDecl.GetTy()));
+    auto fnTy = StaticCast<FuncType*>(chirType.TranslateType(GetFuncDeclCHIRType(funcDecl)));
     fnTy = AdjustFuncType(*fnTy, funcDecl, builder, chirType);
     auto genericParamTy = GetGenericParamType(funcDecl, chirType);
     fn = builder.CreateFunction(fnTy, funcDecl.mangledName, funcDecl.identifier,
@@ -722,7 +736,7 @@ void AST2CHIR::CreateImportedValueSignatureAndSetGlobalCache(const AST::VarDecl&
     auto refTy = builder.GetType<RefType>(varType);
     var = builder.CreateGlobalVar(
         refTy, varDecl.mangledName, varDecl.identifier, varDecl.rawMangleName, varDecl.fullPackageName);
-    var->AppendAttributeInfo(BuildAttr(varDecl.GetAttrs()));
+    var->AppendAttributeInfo(BuildAttr(varDecl));
     if (varDecl.IsConst()) {
         var->EnableAttr(Attribute::CONST);
     }
@@ -889,7 +903,7 @@ void AST2CHIR::CreateAnnoOnlyDeclSig(const AST::Decl& decl)
 
 static void SetCustomTypeDefAttr(CustomTypeDef& def, const AST::Decl& decl)
 {
-    def.AppendAttributeInfo(BuildAttr(decl.GetAttrs()));
+    def.AppendAttributeInfo(BuildAttr(decl));
     if (auto structDef = DynamicCast<StructDef*>(&def)) {
         if (decl.TestAttr(AST::Attribute::C)) {
             structDef->SetCStruct(true);

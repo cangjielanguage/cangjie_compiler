@@ -78,3 +78,32 @@ target_link_libraries(
     GTest::gtest_main
     TestCompilerInstanceObject)
 add_test(NAME OverrideFunctionResolverTest COMMAND OverrideFunctionResolverTest)
+
+# These suites drive the ArkTS interop front-end: the five ArkTS-only annotation
+# names are builtin only in a capability build targeting OHOS, so they are only
+# meaningful (and only pass) when CANGJIE_ENABLE_ARKTS_INTEROP is ON.
+if(CANGJIE_ENABLE_ARKTS_INTEROP)
+    add_executable(ArkTSForeignDiagTest ArkTSForeignDiagTest.cpp)
+    target_link_libraries(
+        ArkTSForeignDiagTest
+        cangjie-lsp
+        ${LINK_LIBS}
+        boundscheck-static
+        GTest::gtest
+        GTest::gtest_main
+        TestCompilerInstanceObject)
+    target_include_directories(ArkTSForeignDiagTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
+    add_test(NAME ArkTSForeignDiagTest COMMAND ArkTSForeignDiagTest)
+
+    add_executable(ArkTSEnumVarTest ArkTSEnumVarTest.cpp)
+    target_link_libraries(
+        ArkTSEnumVarTest
+        cangjie-lsp
+        ${LINK_LIBS}
+        boundscheck-static
+        GTest::gtest
+        GTest::gtest_main
+        TestCompilerInstanceObject)
+    target_include_directories(ArkTSEnumVarTest PRIVATE ${FLATBUFFERS_INCLUDE_DIR})
+    add_test(NAME ArkTSEnumVarTest COMMAND ArkTSEnumVarTest)
+endif()

@@ -7,6 +7,27 @@
 ERROR(sema_diag_begin, "")
 
 // General
+ERROR(sema_arkts_requires_experimental,
+    "ArkTS interop is an experimental feature and requires the '--experimental' compiler option")
+ERROR(sema_arkts_requires_ohos_target,
+    "ArkTS interop is only available when targeting OHOS; the current target is not OHOS")
+ERROR(sema_arkts_bridge_pending, "ArkTS foreign declaration is not supported in this compiler build")
+ERROR(sema_arkts_foreign_var_unsupported, "ArkTS foreign variable is not supported; declare it as '@ArkTS[globalVar: true] foreign func': %s")
+ERROR(sema_arkts_exported_var_unsupported_type, "ArkTS exported variable type is not supported: %s")
+ERROR(sema_arkts_global_var_not_foreign_func, "@ArkTS[globalVar: true] can only annotate a 'foreign func': %s")
+ERROR(sema_arkts_global_var_has_params, "@ArkTS[globalVar: true] 'foreign func' must have no parameters: %s")
+ERROR(sema_arkts_global_var_value_invalid, "'globalVar' option of '@ArkTS' requires a boolean literal")
+ERROR(sema_arkts_enum_member, "ArkTS foreign enum cannot have member functions: %s")
+ERROR(sema_arkts_enum_generic, "ArkTS enum cannot be generic: %s")
+ERROR(sema_arkts_enum_super, "ArkTS enum cannot have super interfaces: %s")
+ERROR(sema_arkts_enum_non_exhaustive, "ArkTS enum must be exhaustive: %s")
+ERROR(sema_arkts_enum_payload, "ArkTS enum constructors cannot have payload parameters: %s")
+ERROR(sema_arkts_enum_payload_arity,
+    "ArkTS foreign enum constructor '%s' must have exactly one associated value")
+ERROR(sema_arkts_raw_value_misplaced, "@RawValue can only annotate a constructor of an '@ArkTS' enum: %s")
+ERROR(sema_arkts_raw_value_payload_ctor,
+    "@RawValue cannot annotate a 'foreign enum' constructor with associated values: %s")
+ERROR(sema_arkts_enum_value_type_mismatch, "ArkTS enum value type mismatch: expected %s, found %s")
 ERROR(sema_invalid_node_after_check, "semantic error")
 ERROR(sema_unable_to_infer_decl, "unable to infer declaration type, please add type annotation")
 ERROR(sema_mismatched_types, "mismatched types", "expected '%s', found '%s'")
@@ -312,6 +333,19 @@ ERROR(sema_java_mirror_cannot_be_extended_with_interface, "'@Java' foreign class
 ERROR(sema_java_impl_cannot_be_extended_with_interface, "exported '@Java' class cannot be extended with interface")
 ERROR(sema_java_impl_redefinition, "redefinition of java declaration '%s'")
 ERROR(sema_java_mirror_interoplib_must_be_imported, "'java.lang' must be imported to use java interoperability")
+ERROR(sema_arkts_foreign_wrapper_unavailable, "cannot generate wrapper for '@ArkTS foreign' function: %s")
+// The generator refusing a signature must never silently drop the binding.
+// The message is user-facing and carries no internal reason: every precisely
+// diagnosable refusal was already reported with its own diagnostic above.
+ERROR(sema_arkts_foreign_unsupported_signature,
+    "@ArkTS foreign function '%s' has a signature that ArkTS interop does not support")
+// The interop declarations a generated binding needs (the interop package and
+// its context ABI) are not visible. The user action is on the project's
+// dependencies, not on an internal generated symbol, so no internal package or
+// declaration name appears in the message.
+ERROR(sema_arkts_foreign_support_unavailable,
+    "@ArkTS foreign function '%s' requires ArkTS interop declarations that are not available; "
+    "check the project's ArkTS interop dependencies")
 ERROR(sema_java_interop_not_supported, "Java interoperability feature '%s' is not yet supported")
 ERROR(sema_generic_parameter_of_java_type, "'@Java %s' type cannot be used on generic declaration '%s'")
 WARNING(sema_java_interoplib_version_too_old, UNGROUPED,
@@ -420,4 +454,153 @@ ERROR(sema_local_api_disabled, "cannot use local API '%s' when local mode is dis
 
 WARNING(sema_unused_import, UNUSED, "unused import '%s'", "unused import")
 
+// ArkTS interop
+ERROR(sema_arkts_foreign_param_type_unsupported,
+    "parameter '%s' of @ArkTS foreign function '%s' has unsupported type '%s'")
+ERROR(sema_arkts_foreign_ret_type_unsupported,
+    "return type '%s' of @ArkTS foreign function '%s' is not supported")
+ERROR(sema_arkts_foreign_option_invalid,
+    "options of @ArkTS foreign function '%s' must be string literals among 'module', 'namespace' and "
+    "'foreignName', or the boolean option 'globalVar'")
+// A repeated key is a different mistake from a non-literal or unknown one:
+// the key and its value are both legal, only the repetition is not.
+ERROR(sema_arkts_foreign_option_duplicated,
+    "duplicated option '%s' in @ArkTS foreign function '%s'")
+// The same option shape rule on every other declaration that carries @ArkTS
+// (class, interface, variable, parameter, or a function the wrapper fold does
+// not lower). It carries no declaration kind or name, because the annotated
+// node is the diagnostic range and the shape rule is the same everywhere.
+ERROR(sema_arkts_option_invalid,
+    "options of '@ArkTS' must be string literals among 'module', 'namespace' and 'foreignName', or the "
+    "boolean option 'globalVar'")
+ERROR(sema_arkts_option_duplicated,
+    "duplicated option '%s' in '@ArkTS'")
+ERROR(sema_arkts_foreign_module_empty,
+    "'module' option of @ArkTS foreign function '%s' must not be an empty string")
+ERROR(sema_arkts_foreign_name_empty,
+    "'foreignName' option of @ArkTS foreign function '%s' must not be an empty string")
+ERROR(sema_arkts_foreign_namespace_empty,
+    "'namespace' option of @ArkTS foreign function '%s' must not be an empty string")
+// The namespace value itself is anchored: a leading/trailing dot or an empty
+// inner segment is a value-shape mistake, not an unknown option.
+ERROR(sema_arkts_foreign_namespace_invalid,
+    "'namespace' option '%s' of @ArkTS foreign function '%s' must be a dot-separated identifier path "
+    "with no empty segments")
+// The same explicit-empty-value rule on every other @ArkTS-carrying
+// declaration. The option name is part of the message because the annotated
+// node is the diagnostic range for every declaration kind.
+ERROR(sema_arkts_option_empty,
+    "'%s' option of '@ArkTS' must not be an empty string")
+// The same ill-formed-namespace rule on every other @ArkTS-carrying
+// declaration; the namespace literal is the anchored node.
+ERROR(sema_arkts_namespace_invalid,
+    "'namespace' option '%s' of '@ArkTS' must be a dot-separated identifier path with no empty segments")
+ERROR(sema_arkts_foreign_rest_type_unsupported,
+    "rest parameter '%s' of @ArkTS foreign function '%s' must have type 'Array<T>', not '%s'")
+// Every named parameter ('x!:') of an @ArkTS foreign declaration must carry a
+// default value (design §4.1.2). The generated wrapper cannot tell an
+// omitted named argument from an explicitly passed value, so `x!: Option<T>`
+// without `= None` (and any other named parameter without a default) is
+// rejected before a wrapper is generated. The rule covers both top-level
+// wrapper functions and bodyless members of an @ArkTS foreign class/interface;
+// ordinary Cangjie named parameters are never checked here.
+ERROR(sema_arkts_foreign_named_param_without_default,
+    "named parameter '%s' of @ArkTS foreign declaration '%s' must have a default value")
+ERROR(sema_arkts_foreign_module_path_invalid,
+    "'module' option '%s' of @ArkTS foreign function '%s' must be an ArkTS module specifier")
+// Routing-only diagnostic for every position spelled with the external ArkTS
+// preset root std.interop.arkts.ArkTSType, whose foreign-signature mapping is
+// not part of this version: classification itself is untouched and stays
+// UNSUPPORTED, and the message names the deferred external type instead of
+// reporting the generic unsupported-type error.
+// The deferral is about the reference semantics only, so no copy-mapping
+// advice is given. It does not describe the type relation: the compiler
+// already treats @ArkTS-annotated types and this preset as implicit
+// (static-only) subtypes of ArkTSType. Recognition is pinned to the declaring
+// package, so a same-named declaration in any other package keeps the generic
+// message.
+ERROR(sema_arkts_foreign_external_type_deferred,
+    "the reference semantics of the external ArkTS type '%s' is not available in this version")
+// Declaration-shape refusals of an @ArkTS foreign class: a reserved generated
+// member name, an unsupported member kind, inheritance of a foreign class, or
+// a member whose signature has no wrapper form. The reason carries the rule.
+// It has no numeric runtime error code; consumers match the diagnostic kind.
+ERROR(sema_arkts_foreign_class_invalid,
+    "invalid @ArkTS foreign class '%s': %s")
+// A @WriteOnly property may only be the target of an assignment.
+ERROR(sema_arkts_write_only_read,
+    "property '%s' is write-only and cannot be read")
+// @WriteOnly is only valid on a mutable property member of an @ArkTS class or
+// interface. The reason carries the unmet condition.
+ERROR(sema_arkts_write_only_placement_invalid,
+    "invalid @WriteOnly placement: %s; only a 'mut prop' member of an '@ArkTS' class or interface is allowed")
+// Declaration-shape refusals of an @ArkTS foreign interface: a sealed
+// declaration, an unsupported member kind, a non-foreign parent, a
+// reserved generated member name, or a member whose signature has no default
+// implementation form. The reason carries the rule. It has no numeric runtime
+// error code; consumers match the diagnostic kind.
+ERROR(sema_arkts_foreign_interface_invalid,
+    "invalid @ArkTS foreign interface '%s': %s")
+// A Cangjie declaration has no shared ArkTS object; only the
+// compiler-generated implementation class may implement a prepared foreign
+// interface.
+ERROR(sema_arkts_foreign_interface_impl_invalid,
+    "Cangjie type '%s' cannot implement @ArkTS foreign interface '%s'")
+// Non-foreign @ArkTS declaration rules.
+// A shape outside this release's minimal entry contract is a staged
+// limitation, not a language rule; the wording must not read as one.
+ERROR(sema_arkts_entry_shape_not_supported,
+    "the shape of '@ArkTS' entry '%s' is not supported yet: %s")
+// '@HasThis' requires an ArkTS function carrier that is not available: the
+// annotation still parses and its placement/argument-shape rules still report
+// their own diagnostics, but the declaration gets no usable interop type. The
+// message must not read as a missing dependency.
+ERROR(sema_arkts_has_this_not_supported,
+    "'@HasThis' is not supported: the ArkTS function carrier that the annotation needs is not available")
+ERROR(sema_arkts_entry_name_duplicated,
+    "duplicate @ArkTS entry name '%s' in package '%s'")
+ERROR(sema_arkts_entry_generated_name_conflict,
+    "declaration '%s' conflicts with a name reserved for generated ArkTS entry code")
+ERROR(sema_arkts_option_module_only_foreign,
+    "'module' option is only valid on @ArkTS foreign declarations, not on '%s'")
+ERROR(sema_arkts_annotation_placement_invalid,
+    "'@ArkTS' cannot be used on %s '%s'")
+ERROR(sema_arkts_generic_foreign_unsupported,
+    "generic '@ArkTS foreign' declaration '%s' is not supported")
+// A defaulted named parameter must have an Option<T> type so the wrapper can
+// represent an omitted argument.
+ERROR(sema_arkts_foreign_named_param_not_option,
+    "named parameter '%s' of @ArkTS foreign declaration '%s' must have type 'Option<T>', not '%s'")
+ERROR(sema_arkts_foreign_function_generic,
+    "@ArkTS function '%s' must not be generic")
+// A foreign class/interface 'module' option that names a path.
+ERROR(sema_arkts_module_path_invalid,
+    "'module' option '%s' of @ArkTS %s '%s' must be an ArkTS module specifier - a module name "
+    "such as '@ohos.util' or 'utils', or a project ETS source path such as 'entry/src/main/ets/Foo' - not a "
+    "'./' or '../' relative path, a backslash spelling, an OS-absolute, drive-absolute or UNC path")
+// '@HasThis[TypeName]' is the ArkTS method-`this` contract: it is only valid on
+// an '@ArkTS' foreign function. The second argument describes the actual
+// placement. A repeated annotation is owned by the parser's duplicate rule.
+ERROR(sema_arkts_has_this_placement_invalid,
+    "'@HasThis' can only annotate an '@ArkTS' foreign function, not %s")
+// 'globalVar: true' maps a global variable; '@HasThis' maps a method. Both
+// cannot hold for one declaration.
+ERROR(sema_arkts_has_this_global_var_conflict,
+    "'@HasThis' conflicts with the '@ArkTS' option 'globalVar: true'; remove one of them")
+// '@HasThis' fixes the static type of the declaration to the ArkTS method
+// type, so the declaration cannot take part in Cangjie overload resolution:
+// its name must be unique among the package's top-level functions.
+ERROR(sema_arkts_has_this_overload_conflict,
+    "the '@HasThis' function '%s' cannot be overloaded; a '@HasThis' declaration must have a unique name in "
+    "its package")
+// The resolved ThisT is the ArkTS `this` type, so it must be an object
+// reference (a prepared '@ArkTS' class or interface), not a scalar or an
+// unsupported type. The spelling is reported as written so the user can find
+// the argument.
+ERROR(sema_arkts_has_this_type_unsupported,
+    "type argument '%s' of '@HasThis' is not an ArkTS-compatible object type")
+// A declaration carrying '@ArkTS' is the ArkTS-side object; a Cangjie extend
+// would add members the ArkTS side cannot see, so no extend may target it.
+ERROR(sema_arkts_decl_cannot_be_extended,
+    "'@ArkTS' declaration '%s' cannot be extended")
 ERROR(sema_diag_end, "")

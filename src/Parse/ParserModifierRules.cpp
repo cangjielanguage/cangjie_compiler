@@ -38,6 +38,18 @@ const TokenKind ACCESS_PUBLIC[] = {TokenKind::PRIVATE, TokenKind::INTERNAL, Toke
 const TokenKind ACCESS_PRIVATE[] = {TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PROTECTED};
 const TokenKind ACCESS_INTERNAL[] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::PROTECTED};
 const TokenKind ACCESS_PROTECTED[] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::INTERNAL};
+// Enum-specific access-modifier conflict tables: mirror class/interface by also
+// listing FOREIGN among the access modifiers, so the FOREIGN x access-modifier
+// conflict is checked symmetrically (`public foreign enum` and
+// `foreign public enum` are both rejected alike). The COMMON/SPECIFIC tables
+// differ from ACCESS_* and never appear as enum access modifiers.
+const TokenKind ENUM_PUBLIC[4] = {TokenKind::PRIVATE, TokenKind::INTERNAL, TokenKind::PROTECTED, TokenKind::FOREIGN};
+const TokenKind ENUM_PRIVATE[6] = {TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PROTECTED, TokenKind::COMMON,
+    TokenKind::SPECIFIC, TokenKind::FOREIGN};
+const TokenKind ENUM_INTERNAL[4] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::PROTECTED, TokenKind::FOREIGN};
+const TokenKind ENUM_PROTECTED[4] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::INTERNAL, TokenKind::FOREIGN};
+const TokenKind ENUM_FOREIGN_CONFLICTS[6] = {TokenKind::PUBLIC, TokenKind::PRIVATE, TokenKind::INTERNAL,
+    TokenKind::PROTECTED, TokenKind::COMMON, TokenKind::SPECIFIC};
 const TokenKind COMMON_SPECIFIC[] = {TokenKind::SPECIFIC};
 const TokenKind SPECIFIC_COMMON[] = {TokenKind::COMMON};
 const TokenKind OVERRIDE_STATIC_REDEF[] = {TokenKind::STATIC, TokenKind::REDEF};
@@ -67,13 +79,13 @@ const ConflictRule TOPLEVEL_COMMON_MODIFIERS[] = {
 };
 
 const ConflictRule TOPLEVEL_ENUM_MODIFIERS[] = {
-    CR_ARR(TokenKind::PUBLIC, ACCESS_PUBLIC),
-    CR(TokenKind::PRIVATE, TokenKind::PUBLIC, TokenKind::INTERNAL, TokenKind::PROTECTED, TokenKind::COMMON,
-        TokenKind::SPECIFIC),
-    CR_ARR(TokenKind::INTERNAL, ACCESS_INTERNAL),
-    CR_ARR(TokenKind::PROTECTED, ACCESS_PROTECTED),
+    CR_ARR(TokenKind::PUBLIC, ENUM_PUBLIC),
+    CR_ARR(TokenKind::PRIVATE, ENUM_PRIVATE),
+    CR_ARR(TokenKind::INTERNAL, ENUM_INTERNAL),
+    CR_ARR(TokenKind::PROTECTED, ENUM_PROTECTED),
     CR(TokenKind::COMMON, TokenKind::PRIVATE, TokenKind::SPECIFIC),
     CR(TokenKind::SPECIFIC, TokenKind::PRIVATE, TokenKind::COMMON),
+    CR_ARR(TokenKind::FOREIGN, ENUM_FOREIGN_CONFLICTS),
 };
 
 const ConflictRule CLASS_BODY_VARIABLE_MODIFIERS[] = {

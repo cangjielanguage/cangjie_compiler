@@ -1350,7 +1350,11 @@ void GIM::GenericInstantiationManagerImpl::UpdateTypePatternMatchResult(Pattern&
         if (!tp || tp->matchBeforeRuntime) {
             return;
         }
-        tp->matchBeforeRuntime = typeManager.IsSubtype(targetTy, tp->type->GetTy(), true, false);
+        // Declaration-based only: the static-only ArkTSType implicit-supertype
+        // relation must not turn `case _: ArkTSType` into an always-matching case
+        // when instantiation re-adds the runtime-check decision.
+        tp->matchBeforeRuntime = typeManager.IsSubtype(targetTy, tp->type->GetTy(), true, false,
+            ModalMatchMode::SUBTYPE, false);
         // Only set 'needRuntimeTypeCheck' true if both selector type and pattern type are classlike type.
         tp->needRuntimeTypeCheck = !tp->matchBeforeRuntime && tp->type->GetTy() &&
             IsNeedRuntimeCheck(typeManager, targetTy.Ty(), tp->type->DataTy());

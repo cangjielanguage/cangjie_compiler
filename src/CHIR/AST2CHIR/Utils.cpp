@@ -136,20 +136,25 @@ std::string GetNameOfDefinedPackage(const AST::FuncDecl& funcDecl)
     return funcDecl.fullPackageName;
 }
 
-AttributeInfo BuildAttr(const AST::AttributePack& attr)
+AttributeInfo BuildAttr(const AST::Decl& decl)
 {
+    const auto& attr = decl.GetAttrs();
     AttributeInfo attrInfo;
     for (auto& it : std::as_const(g_attrMap)) {
         if (attr.TestAttr(it.first)) {
             attrInfo.SetAttr(it.second, true);
         }
     }
+    // CHIR Attribute::FOREIGN means external, so a prepared wrapper must not carry it.
+    if (AST::IsArkTSPrepared(decl)) {
+        attrInfo.SetAttr(Attribute::FOREIGN, false);
+    }
     return attrInfo;
 }
 
 AttributeInfo BuildVarDeclAttr(const AST::VarDecl& decl)
 {
-    auto attrInfo = BuildAttr(decl.GetAttrs());
+    auto attrInfo = BuildAttr(decl);
     if (!decl.isVar) {
         attrInfo.SetAttr(Attribute::READONLY, true);
     }

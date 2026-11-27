@@ -12,6 +12,7 @@
 
 #include "cangjie/Parse/Parser.h"
 #include "cangjie/Basic/DiagnosticEngine.h"
+#include "cangjie/Basic/StringConvertor.h"
 
 using namespace Cangjie;
 using namespace AST;
@@ -3101,4 +3102,13 @@ TEST(ToStringTest, ConstructedGetStableSuperInterfaceTysComparator)
     cd->inheritedTypes.push_back(std::move(ref2));
     auto supers = cd->GetStableSuperInterfaceTys();
     ASSERT_EQ(2u, supers.size());
+}
+
+// Recover is shared with the AST printer, so it must keep '$' as-is; only the
+// ArkTS source splice escapes it, because that text becomes Cangjie source
+// where '$' would start an interpolation.
+TEST(ToStringTest, RecoverKeepsDollarUnlessArkTSSource)
+{
+    EXPECT_EQ(StringConvertor::Recover("a$b"), "a$b");
+    EXPECT_EQ(StringConvertor::RecoverForArkTSSource("a$b"), "a\\$b");
 }

@@ -26,48 +26,73 @@
 using Cangjie::CHIR::Interpreter::ConstEvalPass;
 using Cangjie::CHIR::Interpreter::IVal2CHIR;
 
+namespace {
+// A value decoded from a foreign cjo can carry a representation that does not
+// match the type kind recorded next to it; such a value is not constant-foldable
+// here, so every extraction is checked and yields null instead of an unchecked
+// std::get abort.
+
+// Builds an integer constant from the matching primitive content; the narrowed
+// cast keeps the zero/sign-extension the type kind defines.
+template <class IType, typename Narrowed>
+Cangjie::CHIR::Constant* TryIntLiteral(Cangjie::CHIR::CHIRBuilder& builder, Cangjie::CHIR::Type& ty,
+    Cangjie::CHIR::Block& parent, const Cangjie::CHIR::Interpreter::IVal& val)
+{
+    const auto* value = Cangjie::CHIR::Interpreter::IValUtils::GetIf<IType>(&val);
+    if (value == nullptr) {
+        return nullptr;
+    }
+    return builder.CreateConstantExpression<Cangjie::CHIR::IntLiteral>(
+        &ty, &parent, static_cast<Narrowed>(value->content));
+}
+
+// Builds a non-integer primitive constant (float, rune or boolean) from the
+// matching primitive content.
+template <class IType, class Literal>
+Cangjie::CHIR::Constant* TryValueLiteral(Cangjie::CHIR::CHIRBuilder& builder, Cangjie::CHIR::Type& ty,
+    Cangjie::CHIR::Block& parent, const Cangjie::CHIR::Interpreter::IVal& val)
+{
+    const auto* value = Cangjie::CHIR::Interpreter::IValUtils::GetIf<IType>(&val);
+    if (value == nullptr) {
+        return nullptr;
+    }
+    return builder.CreateConstantExpression<Literal>(&ty, &parent, value->content);
+}
+} // namespace
+
 Cangjie::CHIR::Constant* IVal2CHIR::TryConvertToConstant(Type& ty, const IVal& val, Block& parent)
 {
     switch (ty.GetTypeKind()) {
         case Type::TYPE_INT8:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(
-                &ty, &parent, static_cast<uint8_t>(IValUtils::Get<IInt8>(val).content));
+            return TryIntLiteral<IInt8, uint8_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_INT16:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(
-                &ty, &parent, static_cast<uint16_t>(IValUtils::Get<IInt16>(val).content));
+            return TryIntLiteral<IInt16, uint16_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_INT32:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(
-                &ty, &parent, static_cast<uint32_t>(IValUtils::Get<IInt32>(val).content));
+            return TryIntLiteral<IInt32, uint32_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_INT64:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(
-                &ty, &parent, static_cast<uint64_t>(IValUtils::Get<IInt64>(val).content));
+            return TryIntLiteral<IInt64, uint64_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_INT_NATIVE:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(
-                &ty, &parent, static_cast<uint64_t>(IValUtils::Get<IIntNat>(val).content));
+            return TryIntLiteral<IIntNat, uint64_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_UINT8:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(&ty, &parent, IValUtils::Get<IUInt8>(val).content);
+            return TryIntLiteral<IUInt8, uint8_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_UINT16:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(&ty, &parent, IValUtils::Get<IUInt16>(val).content);
+            return TryIntLiteral<IUInt16, uint16_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_UINT32:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(&ty, &parent, IValUtils::Get<IUInt32>(val).content);
+            return TryIntLiteral<IUInt32, uint32_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_UINT64:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(&ty, &parent, IValUtils::Get<IUInt64>(val).content);
+            return TryIntLiteral<IUInt64, uint64_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_UINT_NATIVE:
-            return chirBuilder.CreateConstantExpression<IntLiteral>(
-                &ty, &parent, IValUtils::Get<IUIntNat>(val).content);
+            return TryIntLiteral<IUIntNat, uint64_t>(chirBuilder, ty, parent, val);
         case Type::TYPE_FLOAT16:
-            return chirBuilder.CreateConstantExpression<FloatLiteral>(
-                &ty, &parent, IValUtils::Get<IFloat16>(val).content);
+            return TryValueLiteral<IFloat16, FloatLiteral>(chirBuilder, ty, parent, val);
         case Type::TYPE_FLOAT32:
-            return chirBuilder.CreateConstantExpression<FloatLiteral>(
-                &ty, &parent, IValUtils::Get<IFloat32>(val).content);
+            return TryValueLiteral<IFloat32, FloatLiteral>(chirBuilder, ty, parent, val);
         case Type::TYPE_FLOAT64:
-            return chirBuilder.CreateConstantExpression<FloatLiteral>(
-                &ty, &parent, IValUtils::Get<IFloat64>(val).content);
+            return TryValueLiteral<IFloat64, FloatLiteral>(chirBuilder, ty, parent, val);
         case Type::TYPE_RUNE:
-            return chirBuilder.CreateConstantExpression<RuneLiteral>(&ty, &parent, IValUtils::Get<IRune>(val).content);
+            return TryValueLiteral<IRune, RuneLiteral>(chirBuilder, ty, parent, val);
         case Type::TYPE_BOOLEAN:
-            return chirBuilder.CreateConstantExpression<BoolLiteral>(&ty, &parent, IValUtils::Get<IBool>(val).content);
+            return TryValueLiteral<IBool, BoolLiteral>(chirBuilder, ty, parent, val);
         default:
             if (IValUtils::GetIf<INullptr>(&val)) {
                 return chirBuilder.CreateConstantExpression<NullLiteral>(&ty, &parent);
@@ -84,10 +109,25 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertToChir(
         insertExpr(constant);
         return constant->GetResult();
     }
+    return ConvertNonConstantToChir(ty, val, insertExpr, parent);
+}
+
+// Dispatch for the kinds that carry a constant representation beyond the plain
+// literals of TryConvertToConstant. Kinds without one return nullptr.
+Cangjie::CHIR::Value* IVal2CHIR::ConvertNonConstantToChir(
+    Type& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent)
+{
     switch (ty.GetTypeKind()) {
         case Type::TYPE_TUPLE:
         case Type::TYPE_STRUCT: {
-            auto tuple = IValUtils::Get<ITuple>(val);
+            // A value from a cjo written by an older compiler can carry a representation this compiler does not
+            // model (for example the array-backed String of an older standard library). An unchecked access aborts
+            // with std::bad_variant_access; such a value is simply not constant-foldable here.
+            auto tuplePtr = IValUtils::GetIf<ITuple>(&val);
+            if (tuplePtr == nullptr) {
+                return nullptr;
+            }
+            auto& tuple = *tuplePtr;
             if (ty.IsString()) {
                 // Codegen doesn't support strings in constant initializers, so
                 // we have strings here and not in TryConvertToConstant.
@@ -108,8 +148,47 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertToChir(
             return expr->GetResult();
         }
         case Type::TYPE_VARRAY: {
-            return ConvertArrayToChir(StaticCast<VArrayType&>(ty), IValUtils::Get<IArray>(val), insertExpr, parent);
+            auto arrayVal = IValUtils::GetIf<IArray>(&val);
+            if (arrayVal == nullptr) {
+                return nullptr;
+            }
+            return ConvertArrayToChir(StaticCast<VArrayType&>(ty), *arrayVal, insertExpr, parent);
         }
+        default:
+            return ConvertUnfoldablePrimitiveToChir(ty);
+    }
+}
+
+// Primitive types are handled by TryConvertToConstant. A value whose
+// representation does not match the type was rejected there, so it is
+// not foldable; it is not an unsupported type kind.
+Cangjie::CHIR::Value* IVal2CHIR::ConvertUnfoldablePrimitiveToChir(Type& ty)
+{
+    switch (ty.GetTypeKind()) {
+        case Type::TYPE_INT8:
+        case Type::TYPE_INT16:
+        case Type::TYPE_INT32:
+        case Type::TYPE_INT64:
+        case Type::TYPE_INT_NATIVE:
+        case Type::TYPE_UINT8:
+        case Type::TYPE_UINT16:
+        case Type::TYPE_UINT32:
+        case Type::TYPE_UINT64:
+        case Type::TYPE_UINT_NATIVE:
+        case Type::TYPE_FLOAT16:
+        case Type::TYPE_FLOAT32:
+        case Type::TYPE_FLOAT64:
+        case Type::TYPE_RUNE:
+        case Type::TYPE_BOOLEAN:
+            return nullptr;
+        default:
+            return ConvertUnfoldableOtherToChir(ty);
+    }
+}
+
+Cangjie::CHIR::Value* IVal2CHIR::ConvertUnfoldableOtherToChir(Type& ty)
+{
+    switch (ty.GetTypeKind()) {
         // Should always be behind RefType.
         case Type::TYPE_CLASS:
         // Not supported as constants.
@@ -133,19 +212,46 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertStringToChir(
 {
     std::string stringVal;
 #ifdef CANGJIE_CODEGEN_CJNATIVE_BACKEND
-    auto& arrPtr = IValUtils::Get<IPointer>(val.content[0]);
-    auto& arrData = IValUtils::Get<IArray>(*arrPtr.content).content;
+    // The String layout assumed below is the one this compiler emits. A value decoded from a cjo written by an older
+    // compiler can keep String data in a shape this compiler does not model (an object rather than an array);
+    // report that the value is not foldable instead of aborting on std::bad_variant_access.
+    // The translated String layout is [array, start, length]; fewer fields
+    // mean the cjo predates this layout and the value is not foldable.
+    constexpr size_t STRING_LAYOUT_FIELD_COUNT = 3;
+    if (val.content.size() < STRING_LAYOUT_FIELD_COUNT) {
+        return nullptr;
+    }
+    auto arrPtr = IValUtils::GetIf<IPointer>(&val.content[0]);
+    auto startPtr = IValUtils::GetIf<IUInt32>(&val.content[1]);
+    auto lenPtr = IValUtils::GetIf<IUInt32>(&val.content[2]);
+    if (arrPtr == nullptr || arrPtr->content == nullptr || startPtr == nullptr || lenPtr == nullptr) {
+        return nullptr;
+    }
+    auto arrDataPtr = IValUtils::GetIf<IArray>(arrPtr->content);
+    if (arrDataPtr == nullptr) {
+        return nullptr;
+    }
+    auto& arrData = arrDataPtr->content;
 
-    auto start = IValUtils::Get<IUInt32>(val.content[1]).content;
-    CJC_ASSERT(start == static_cast<uint32_t>(0) && "const strings always start at zero");
+    auto start = startPtr->content;
+    if (start != static_cast<uint32_t>(0)) {
+        return nullptr;
+    }
 
-    auto len = IValUtils::Get<IUInt32>(val.content[2]).content;
+    auto len = lenPtr->content;
+
+    if (arrData.size() <= static_cast<size_t>(len)) {
+        return nullptr;
+    }
 
     stringVal.reserve(len);
-    CJC_ASSERT(arrData.size() > static_cast<size_t>(len));
 
     for (uint32_t el = 0; el < len; el++) {
-        stringVal.push_back(static_cast<char>(IValUtils::Get<IUInt8>(arrData[el + 1]).content));
+        auto byte = IValUtils::GetIf<IUInt8>(&arrData[el + 1]);
+        if (byte == nullptr) {
+            return nullptr;
+        }
+        stringVal.push_back(static_cast<char>(byte->content));
     }
 #endif
 
@@ -165,7 +271,15 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertTupleToChir(
     }
     auto elementVals = val.content;
     std::vector<Value*> elements;
-    CJC_ASSERT(elementVals.size() == elementTys.size());
+    // A release build compiles CJC_ASSERT away, so the shape check must be a real
+    // one: a cjo whose stored element count disagrees with the declared type (or
+    // whose type describes more elements than the value carries) would make
+    // 'elementTys[idx]' below index out of bounds. Such a value is not foldable.
+    // An empty value against an equally empty type is a consistent empty shape and
+    // falls through.
+    if (elementVals.size() != elementTys.size()) {
+        return nullptr;
+    }
     for (std::size_t idx = 0; idx < elementVals.size(); idx++) {
         auto elementVal = ConvertToChir(*elementTys[idx], elementVals[idx], insertExpr, parent);
         if (!elementVal) {
@@ -193,42 +307,141 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertTupleToChir(
     return expr->GetResult();
 }
 
+// An all-trivial enum value carries only the selector: it maps to one integer
+// constant cast to the enum type. A non-matching value representation is not
+// foldable.
+Cangjie::CHIR::Value* IVal2CHIR::ConvertTrivialEnumToChir(EnumType& ty, Type* selectorTy, Block& parent,
+    const IVal& val, std::function<void(Expression*)>& insertExpr)
+{
+    auto selectorVal = IValUtils::GetIf<IUInt32>(&val);
+    if (selectorVal == nullptr) {
+        return nullptr;
+    }
+    auto expr = chirBuilder.CreateConstantExpression<IntLiteral>(selectorTy, &parent, selectorVal->content);
+    auto ret = chirBuilder.CreateExpression<ClassStaticCast>(&ty, expr->GetResult(), &parent);
+    insertExpr(expr);
+    insertExpr(ret);
+    return ret->GetResult();
+}
+
+// A payload enum value decodes to one tuple: the selector element names the
+// constructor variant, every other element maps one constructor parameter
+// type. Any shape mismatch or non-matching element representation is not
+// foldable.
+Cangjie::CHIR::Value* IVal2CHIR::ConvertPayloadEnumToChir(EnumType& ty, Type* selectorTy, Block& parent,
+    const IVal& val, std::function<void(Expression*)>& insertExpr)
+{
+    auto tupleVal = IValUtils::GetIf<ITuple>(&val);
+    if (tupleVal == nullptr || tupleVal->content.empty()) {
+        return nullptr;
+    }
+    auto& elementVals = tupleVal->content;
+    uint64_t variantIndex = 0;
+    if (selectorTy->IsBoolean()) {
+        auto flagVal = IValUtils::GetIf<IBool>(&elementVals[0]);
+        if (flagVal == nullptr) {
+            return nullptr;
+        }
+        variantIndex = static_cast<uint64_t>(flagVal->content);
+    } else {
+        auto indexVal = IValUtils::GetIf<IUInt32>(&elementVals[0]);
+        if (indexVal == nullptr) {
+            return nullptr;
+        }
+        variantIndex = indexVal->content;
+    }
+    const auto ctorInfos = ty.GetConstructorInfos(chirBuilder);
+    if (variantIndex >= ctorInfos.size() || ctorInfos[variantIndex].funcType == nullptr) {
+        return nullptr;
+    }
+    auto selectorChir = ConvertToChir(*selectorTy, elementVals[0], insertExpr, parent);
+    if (selectorChir == nullptr) {
+        return nullptr;
+    }
+    std::vector<Value*> elements;
+    elements.push_back(selectorChir);
+    auto elementTys = ctorInfos[variantIndex].funcType->GetParamTypes();
+    if (elementVals.size() != elementTys.size() + 1) {
+        return nullptr;
+    }
+    for (std::size_t idx = 0; idx < elementTys.size(); idx++) {
+        auto elementVal = ConvertToChir(*elementTys[idx], elementVals[idx + 1], insertExpr, parent);
+        if (!elementVal) {
+            return nullptr;
+        }
+        elements.push_back(elementVal);
+    }
+    auto expr = chirBuilder.CreateExpression<Tuple>(&ty, elements, &parent);
+    insertExpr(expr);
+    return expr->GetResult();
+}
+
 Cangjie::CHIR::Value* IVal2CHIR::ConvertEnumToChir(
     EnumType& ty, const IVal& val, std::function<void(Expression*)>& insertExpr, Block& parent)
 {
     auto selectorTyKind = GetSelectorType(*ty.GetEnumDef());
     auto selectorTy = chirBuilder.GetChirContext().ToSelectorType(selectorTyKind);
     if (ty.GetEnumDef()->IsAllCtorsTrivial()) {
-        auto expr = chirBuilder.CreateConstantExpression<IntLiteral>(
-            selectorTy, &parent, IValUtils::Get<IUInt32>(val).content);
-        auto ret = chirBuilder.CreateExpression<ClassStaticCast>(&ty, expr->GetResult(), &parent);
-        insertExpr(expr);
-        insertExpr(ret);
-        return ret->GetResult();
-    } else {
-        auto elementVals = IValUtils::Get<ITuple>(val).content;
-        std::vector<Value*> elements;
-        uint64_t variantIndex;
-        if (selectorTy->IsBoolean()) {
-            variantIndex = static_cast<uint64_t>(IValUtils::Get<IBool>(elementVals[0]).content);
-            elements.push_back(ConvertToChir(*selectorTy, elementVals[0], insertExpr, parent));
-        } else {
-            variantIndex = IValUtils::Get<IUInt32>(elementVals[0]).content;
-            elements.push_back(ConvertToChir(*selectorTy, elementVals[0], insertExpr, parent));
-        }
-        auto elementTys = ty.GetConstructorInfos(chirBuilder)[variantIndex].funcType->GetParamTypes();
-        CJC_ASSERT(elementVals.size() == elementTys.size() + 1);
-        for (std::size_t idx = 0; idx < elementTys.size(); idx++) {
-            auto elementVal = ConvertToChir(*elementTys[idx], elementVals[idx + 1], insertExpr, parent);
-            if (!elementVal) {
-                return nullptr;
-            }
-            elements.push_back(elementVal);
-        }
-        auto expr = chirBuilder.CreateExpression<Tuple>(&ty, elements, &parent);
-        insertExpr(expr);
-        return expr->GetResult();
+        return ConvertTrivialEnumToChir(ty, selectorTy, parent, val, insertExpr);
     }
+    return ConvertPayloadEnumToChir(ty, selectorTy, parent, val, insertExpr);
+}
+
+// Constant of a class reference: allocate the dynamic class value named by
+// the stored object, store every converted member into it and cast back to
+// the reference's declared type when the dynamic type differs. Returns
+// nullptr for a non-decodable object or an unresolvable class.
+Cangjie::CHIR::Value* IVal2CHIR::ConvertClassRefToChir(
+    RefType& ty, const IVal& valContent, std::function<void(Expression*)>& insertExpr, Block& parent)
+{
+    auto referencedType = ty.GetBaseType();
+    auto obj = IValUtils::GetIf<IObject>(&valContent);
+    if (obj == nullptr) {
+        return nullptr;
+    }
+    auto classIt = bchir.GetClassTable().find(obj->classId);
+    if (classIt == bchir.GetClassTable().end()) {
+        return nullptr;
+    }
+
+    // This is only partially implemeneted:
+    // If a constant references another constant, then it should not create a deep copy of that constant.
+    auto classType = StaticCast<ClassType*>(referencedType);
+    auto& valClassName = classIt->second.mangledName;
+    auto refType = &ty;
+    auto needCast = false;
+
+    if (valClassName != classType->GetClassDef()->GetIdentifierWithoutPrefix()) {
+        needCast = true;
+        classType = FindClassType(valClassName);
+        if (classType == nullptr) {
+            return nullptr;
+        }
+        refType = chirBuilder.GetType<RefType>(classType);
+    }
+
+    auto allocExpr = chirBuilder.CreateExpression<Allocate>(refType, classType, &parent);
+    insertExpr(allocExpr);
+    auto classVal = allocExpr->GetResult();
+    auto members = classType->GetClassDef()->GetAllInstanceVars();
+    if (members.size() != obj->content.size()) {
+        return nullptr;
+    }
+    for (std::uint64_t idx = 0; idx < members.size(); idx++) {
+        auto memberTy = members[idx].type;
+        auto memberVal = ConvertToChir(*memberTy, obj->content[idx], insertExpr, parent);
+        if (!memberVal) {
+            return nullptr;
+        }
+        insertExpr(chirBuilder.CreateExpression<StoreElementRef>(
+            chirBuilder.GetUnitTy(), memberVal, classVal, std::vector<std::uint64_t>{idx}, &parent));
+    }
+    if (needCast) {
+        auto typeCast = chirBuilder.CreateExpression<ClassStaticCast>(&ty, classVal, &parent);
+        insertExpr(typeCast);
+        return typeCast->GetResult();
+    }
+    return classVal;
 }
 
 Cangjie::CHIR::Value* IVal2CHIR::ConvertRefToChir(
@@ -236,47 +449,19 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertRefToChir(
 {
     auto referencedType = ty.GetBaseType();
 
-    auto valContent = IValUtils::Get<IPointer>(val).content;
+    const auto* pointer = IValUtils::GetIf<IPointer>(&val);
+    if (pointer == nullptr) {
+        return nullptr;
+    }
     switch (referencedType->GetTypeKind()) {
         case Type::TYPE_CLASS: {
-            auto obj = IValUtils::GetIf<IObject>(valContent);
-
-            // This is only partially implemeneted:
-            // If a constant references another constant, then it should not create a deep copy of that constant.
-            auto classType = StaticCast<ClassType*>(referencedType);
-            auto& valClassName = bchir.GetClassTable().find(obj->classId)->second.mangledName;
-            auto refType = &ty;
-            auto needCast = false;
-
-            if (valClassName != classType->GetClassDef()->GetIdentifierWithoutPrefix()) {
-                needCast = true;
-                classType = FindClassType(valClassName);
-                if (classType == nullptr) {
-                    return nullptr;
-                }
-                refType = chirBuilder.GetType<RefType>(classType);
+            // 'IPointer::content' is a raw pointer the decoder owns; a value from a
+            // damaged cjo can keep it null. Like the String path, treat the value as
+            // not foldable instead of dereferencing.
+            if (pointer->content == nullptr) {
+                return nullptr;
             }
-
-            auto allocExpr = chirBuilder.CreateExpression<Allocate>(refType, classType, &parent);
-            insertExpr(allocExpr);
-            auto classVal = allocExpr->GetResult();
-            auto members = classType->GetClassDef()->GetAllInstanceVars();
-            CJC_ASSERT(members.size() == obj->content.size());
-            for (std::uint64_t idx = 0; idx < members.size(); idx++) {
-                auto memberTy = members[idx].type;
-                auto memberVal = ConvertToChir(*memberTy, obj->content[idx], insertExpr, parent);
-                if (!memberVal) {
-                    return nullptr;
-                }
-                insertExpr(chirBuilder.CreateExpression<StoreElementRef>(
-                    chirBuilder.GetUnitTy(), memberVal, classVal, std::vector<std::uint64_t>{idx}, &parent));
-            }
-            if (needCast) {
-                auto typeCast = chirBuilder.CreateExpression<ClassStaticCast>(&ty, classVal, &parent);
-                insertExpr(typeCast);
-                return typeCast->GetResult();
-            }
-            return classVal;
+            return ConvertClassRefToChir(ty, *pointer->content, insertExpr, parent);
         }
         default: {
             // Other types not supported by const eval

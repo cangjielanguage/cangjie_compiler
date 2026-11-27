@@ -12,6 +12,7 @@
 
 #include "TypeCheckerImpl.h"
 
+#include "NativeFFI/ArkTS/ArkTSInterop.h"
 #include "TypeCheckUtil.h"
 
 #include "cangjie/AST/Utils.h"
@@ -44,7 +45,7 @@ void CheckAnnoCallingConv(Decl& decl, const Annotation& anno, DiagnosticEngine& 
         diag.DiagnoseRefactor(DiagKindRefactor::sema_illegal_scope_use_of_annotation, anno, "@CallingConv");
         return;
     }
-    if (decl.astKind != ASTKind::FUNC_DECL || (!decl.TestAttr(Attribute::FOREIGN) && !decl.TestAttr(Attribute::C))) {
+    if (decl.astKind != ASTKind::FUNC_DECL || (!IsExternalForeign(decl) && !decl.TestAttr(Attribute::C))) {
         // Will be replaced with anno->identifier.
         diag.DiagnoseRefactor(DiagKindRefactor::sema_only_cfunc_can_use_annotation, anno, "@CallingConv");
         return;
@@ -72,7 +73,7 @@ void CheckAnnoFastNative(const Decl& decl, const Annotation& anno, DiagnosticEng
     if (!anno.args.empty()) {
         diag.Diagnose(*anno.args[0], DiagKind::sema_annotation_error_arg_num, "@FastNative", "no");
     }
-    if (decl.astKind != ASTKind::FUNC_DECL || !decl.TestAttr(Attribute::FOREIGN)) {
+    if (decl.astKind != ASTKind::FUNC_DECL || !IsExternalForeign(decl)) {
         // Will be merged with sema_illegal_scope_use_of_annotation.
         std::string prefix = decl.astKind == ASTKind::FUNC_DECL ? "non-foreign " : "";
         diag.Diagnose(anno, DiagKind::sema_illegal_use_of_annotation, prefix + DeclKindToString(decl), "@FastNative");
@@ -107,6 +108,7 @@ AnnoCheckMap& GetAnnoCheckMap()
         {AnnotationKind::CALLING_CONV, CheckAnnoCallingConv},
         {AnnotationKind::FASTNATIVE, CheckAnnoFastNative},
         {AnnotationKind::FROZEN, CheckAnnoFrozen},
+        {AnnotationKind::ARKTS_RAW_VALUE, Native::FFI::ArkTS::CheckAnnoRawValue},
     };
     return annoCheckMap;
 }
@@ -171,7 +173,7 @@ void TypeChecker::TypeCheckerImpl::SetForeignABIAttr(Decl& decl)
 {
     // Will unify the judgment of foreign, foreign, C, and backend.
     // Update W/R in class Attribute.
-    if (HasModifier(decl.modifiers, TokenKind::FOREIGN)) {
+    if (HasModifier(decl.modifiers, TokenKind::FOREIGN) && !Native::FFI::ArkTS::IsArkTSDecl(decl)) {
         auto defaultABI = GetDefaultABI();
         for (auto& anno : decl.annotations) {
             if (anno->kind == AnnotationKind::C) {
@@ -246,9 +248,18 @@ void TypeChecker::TypeCheckerImpl::CheckUnsafeInvoke(const CallExpr& ce)
     if (ce.resolvedFunction == nullptr || !ce.resolvedFunction->GetTy().IsCorrect() || !IsUnsafeBackend(backendType)) {
         return;
     }
+    // Without --experimental an ArkTS declaration keeps its foreign spelling
+    // but no wrapper is prepared; the unsafe rule must not pre-empt the gate
+    // with a second user-facing diagnostic.
+    if (Native::FFI::ArkTS::IsGatedArkTSDecl(*ce.resolvedFunction)) {
+        return;
+    }
     auto funcTy = StaticCast<FuncTy*>(ce.resolvedFunction->DataTy());
+    // A prepared @ArkTS wrapper keeps FOREIGN as its source identity but is an
+    // ordinary Cangjie function: its calls do not need 'unsafe'. Generic and
+    // preset declarations are still external and keep the requirement.
     bool isUnsafe = ce.resolvedFunction->TestAttr(Attribute::UNSAFE) ||
-        ce.resolvedFunction->TestAttr(Attribute::FOREIGN) || funcTy->isC;
+        IsExternalForeign(*ce.resolvedFunction) || funcTy->isC;
     if (!isUnsafe) {
         return;
     }
@@ -279,7 +290,20 @@ void TypeChecker::TypeCheckerImpl::CheckLegalityOfUnsafeAndInout(Node& root)
 
 void TypeChecker::TypeCheckerImpl::UnsafeCheck(const FuncBody& fb)
 {
-    if (fb.funcDecl && (fb.funcDecl->TestAttr(Attribute::FOREIGN) || fb.funcDecl->TestAttr(Attribute::C))) {
+    // ArkTS declarations use the C-foreign spelling but not the C ABI: their
+    // parameter types are ArkTS-mapped types (Option/Array/...), not C
+    // types. The exemption therefore requires the C-foreign spelling on the
+    // function itself (FOREIGN) and one of the two ArkTS shapes: its own
+    // @ArkTS annotation (an @ArkTS foreign declaration) or an enclosing
+    // @ArkTS foreign class/interface (the Sema equivalent of
+    // IsArkTSForeignClassMember). An @ArkTS class that is not FOREIGN must
+    // not exempt its foreign members from the C ABI checks.
+    bool arktsDecl = fb.funcDecl && fb.funcDecl->TestAttr(Attribute::FOREIGN) &&
+        (fb.funcDecl->HasAnno(AnnotationKind::ARKTS) ||
+            (fb.funcDecl->outerDecl && fb.funcDecl->outerDecl->HasAnno(AnnotationKind::ARKTS) &&
+                fb.funcDecl->outerDecl->TestAttr(Attribute::FOREIGN)));
+    if (fb.funcDecl && !arktsDecl && !Native::FFI::ArkTS::IsGatedArkTSDecl(*fb.funcDecl) &&
+        (fb.funcDecl->TestAttr(Attribute::FOREIGN) || fb.funcDecl->TestAttr(Attribute::C))) {
         CJC_ASSERT(!fb.paramLists.empty() && "function body's param list cannot be empty!");
         for (auto& arg : fb.paramLists[0]->params) {
             CheckCFuncParam(*arg);
@@ -345,7 +369,8 @@ void TypeChecker::TypeCheckerImpl::CheckCFuncParamType(const AST::Type& type)
 
 void TypeChecker::TypeCheckerImpl::PreCheckAnnoForCFFI(Decl& decl)
 {
-    if (HasModifier(decl.modifiers, TokenKind::FOREIGN) && !decl.HasAnno(AnnotationKind::C)) {
+    if (HasModifier(decl.modifiers, TokenKind::FOREIGN) && !decl.HasAnno(AnnotationKind::C) &&
+        !decl.HasAnno(AnnotationKind::ARKTS)) {
         // Check node.
         auto modifier = decl.modifiers.crbegin();
         if (decl.astKind == ASTKind::CLASS_DECL) {
@@ -353,6 +378,9 @@ void TypeChecker::TypeCheckerImpl::PreCheckAnnoForCFFI(Decl& decl)
         }
         if (decl.astKind == ASTKind::INTERFACE_DECL) {
             diag.Diagnose(*modifier, DiagKind::sema_unexpected_wrapper, "interface declaration");
+        }
+        if (decl.astKind == ASTKind::ENUM_DECL) {
+            diag.Diagnose(*modifier, DiagKind::sema_unexpected_wrapper, "enum declaration");
         }
         // Will be merged with sema_unexpected_wrapper.
         if (decl.astKind == ASTKind::VAR_DECL) {
@@ -375,7 +403,7 @@ void TypeChecker::TypeCheckerImpl::PreCheckAnnoForCFFI(Decl& decl)
         }
     }
 
-    if (decl.astKind == ASTKind::FUNC_DECL) {
+    if (decl.astKind == ASTKind::FUNC_DECL && !Native::FFI::ArkTS::IsArkTSDecl(decl)) {
         if (decl.TestAttr(AST::Attribute::FOREIGN)) {
             decl.EnableAttr(Attribute::NO_MANGLE);
         }
