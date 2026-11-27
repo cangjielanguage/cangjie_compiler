@@ -163,42 +163,14 @@ void TypeChecker::TypeCheckerImpl::CheckFuncDecl(ASTContext& ctx, FuncDecl& fd)
     ApplyArkTSHasThisType(fd);
 }
 
-// Resolve the ThisT of an imported '@HasThis' declaration. The CJO record
-// carries the declaring source spelling as one unnamed string literal (see
-// ASTWriter's ARKTS_HAS_THIS case), so the importing package resolves that
-// name against the declaring package's exported members and rebuilds the type
-// the declaring package computed before export. A resolved type argument is
-// used directly when the annotation already carries one.
-Ptr<Ty> TypeChecker::TypeCheckerImpl::ResolveImportedHasThisTy(const FuncDecl& fd, const Expr& arg)
-{
-    auto literal = DynamicCast<const LitConstExpr*>(&arg);
-    if (literal == nullptr || literal->kind != LitConstKind::STRING) {
-        return Ty::IsTyCorrect(arg.DataTy()) ? arg.DataTy() : nullptr;
-    }
-    auto decl = importManager.GetImportedDecl(fd.fullPackageName, literal->stringValue);
-    if (decl == nullptr || !decl->IsTypeDecl()) {
-        return nullptr;
-    }
-    auto ty = GetTyFromASTType(*decl, {}, {});
-    if (!Ty::IsTyCorrect(ty)) {
-        return nullptr;
-    }
-    // The spelling names the source type, which may be a type alias; the
-    // carrier's type argument must be the aliased reference type.
-    auto resolved = typeManager.SubstituteTypeAliasInTy(ty);
-    return Ty::IsTyCorrect(resolved) ? resolved.Ty() : nullptr;
-}
-
-// '@HasThis[ThisT]' is recorded during preparation; its argument only has a
-// semantic type after CheckAnnotations. Replace the function type of the
-// declaration with the runtime carrier ArkTSFuncWithThis<ThisT, F>, so a
-// reference to the declaration has the design type. The full call lowering of
-// that value is a later requirement; a direct call is refused separately.
-// An imported declaration rebuilds ThisT from the spelling carried by its CJO,
-// so cross-package value use has the same carrier type as same-package use.
+// '@HasThis' is recorded during preparation; the ArkTS function carrier that
+// would give the declaration its interop type is not provided, so report the
+// capability as unsupported. The parser still validates the
+// annotation's placement and argument shape, and those diagnostics keep
+// running; the declaration is left with its ordinary function type.
 void TypeChecker::TypeCheckerImpl::ApplyArkTSHasThisType(FuncDecl& fd)
 {
-    if (!fd.TestAttr(Attribute::ARKTS_HAS_THIS) || !fd.GetTy().IsCorrect() || !fd.GetTy()->IsFunc()) {
+    if (!fd.TestAttr(Attribute::ARKTS_HAS_THIS)) {
         return;
     }
     const Annotation* hasThis = nullptr;
@@ -208,35 +180,14 @@ void TypeChecker::TypeCheckerImpl::ApplyArkTSHasThisType(FuncDecl& fd)
             break;
         }
     }
-    if (hasThis == nullptr || hasThis->args.size() != 1 || hasThis->args.front() == nullptr ||
-        hasThis->args.front()->expr == nullptr) {
+    // A malformed, misplaced or type-invalid annotation already reported its
+    // own diagnostic and marked itself broken; do not pile the capability
+    // diagnostic on top of it.
+    if (hasThis != nullptr && hasThis->TestAttr(Attribute::IS_BROKEN)) {
         return;
     }
-    Ptr<Ty> thisTy = nullptr;
-    if (fd.TestAttr(Attribute::IMPORTED)) {
-        thisTy = ResolveImportedHasThisTy(fd, *hasThis->args.front()->expr);
-    } else {
-        auto sourceTy = hasThis->args.front()->expr->DataTy();
-        if (Ty::IsTyCorrect(sourceTy)) {
-            thisTy = sourceTy;
-        }
-    }
-    if (thisTy == nullptr) {
-        return;
-    }
-    auto classDecl = importManager.GetImportedDecl<ClassDecl>("arkts.lang", "ArkTSFuncWithThis");
-    if (classDecl == nullptr) {
-        // 'arkts.lang' re-exports the carrier from its defining package; the
-        // import manager records the defining package, so fall back to it.
-        classDecl = importManager.GetImportedDecl<ClassDecl>("std.interop.arkts", "ArkTSFuncWithThis");
-    }
-    if (classDecl == nullptr) {
-        return;
-    }
-    auto classTy = typeManager.GetClassTy(*classDecl, {thisTy, fd.DataTy()});
-    if (classTy != nullptr) {
-        fd.SetTy({classTy});
-    }
+    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_not_supported,
+        hasThis != nullptr ? static_cast<const Node&>(*hasThis) : static_cast<const Node&>(fd));
 }
 
 void TypeChecker::TypeCheckerImpl::CheckStaticVarAccessNonStatic(const VarDecl& vd)

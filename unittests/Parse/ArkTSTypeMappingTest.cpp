@@ -150,18 +150,6 @@ TEST_F(ArkTSTypeMappingTest, ClassifyCompositesAndTheirNesting)
     StructDecl arrayDecl;
     arrayDecl.identifier = "Array";
     arrayDecl.fullPackageName = "std.core";
-    // The package-pinned prepared generic preset array maps to a REFERENCE
-    // leaf carrying its element description; a same-named class without the
-    // prepared-wrapper attribute (a stale CJO, or any other same-named
-    // declaration) stays unsupported.
-    ClassDecl arkTsArrayDecl;
-    arkTsArrayDecl.identifier = "ArkTSArray";
-    arkTsArrayDecl.fullPackageName = "std.interop.arkts";
-    arkTsArrayDecl.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
-    ClassDecl staleArkTsArrayDecl;
-    staleArkTsArrayDecl.identifier = "ArkTSArray";
-    staleArkTsArrayDecl.fullPackageName = "std.interop.arkts";
-
     EnumTy optionInt32("Option", optionDecl, {int32});
     auto optional = ArkTSClassifyType(&optionInt32);
     ASSERT_EQ(optional.kind, ArkTSTypeDesc::Kind::OPTIONAL);
@@ -174,23 +162,6 @@ TEST_F(ArkTSTypeMappingTest, ClassifyCompositesAndTheirNesting)
     ASSERT_EQ(copy.kind, ArkTSTypeDesc::Kind::ARRAY_COPY);
     ASSERT_EQ(copy.elements.size(), 1);
     EXPECT_EQ(copy.elements.front().scalar, "Int32");
-
-    // The stdlib preset itself: a generatable REFERENCE leaf carrying the
-    // element description; the same name without the prepared-wrapper
-    // attribute (a stale CJO) stays unsupported with no elements.
-    ClassTy refInt32("ArkTSArray", arkTsArrayDecl, {int32});
-    auto reference = ArkTSClassifyType(&refInt32);
-    ASSERT_EQ(reference.kind, ArkTSTypeDesc::Kind::REFERENCE);
-    ASSERT_EQ(reference.elements.size(), 1);
-    EXPECT_EQ(reference.elements.front().kind, ArkTSTypeDesc::Kind::SCALAR);
-    EXPECT_EQ(reference.elements.front().scalar, "Int32");
-    EXPECT_TRUE(ArkTSTypeDescGeneratable(reference));
-    EXPECT_EQ(ArkTSTypeDescName(reference), "ArkTSArray<Int32>");
-
-    ClassTy staleRefInt32("ArkTSArray", staleArkTsArrayDecl, {int32});
-    auto stale = ArkTSClassifyType(&staleRefInt32);
-    EXPECT_EQ(stale.kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-    EXPECT_TRUE(stale.elements.empty());
 
     StructTy arrayOfOption("Array", arrayDecl, {&optionInt32});
     auto nestedCopy = ArkTSClassifyType(&arrayOfOption);
@@ -213,11 +184,6 @@ TEST_F(ArkTSTypeMappingTest, ClassifyCompositesAndTheirNesting)
     ASSERT_EQ(tuple.elements.size(), 2);
     EXPECT_EQ(tuple.elements.front().scalar, "Int32");
     EXPECT_EQ(tuple.elements.back().scalar, "String");
-
-    // An unprepared ArkTSArray element poisons the whole tuple (foreign-side
-    // rule: one unsupported element leaves the position unsupported).
-    TupleTy mixed({&optionInt32, &staleRefInt32});
-    EXPECT_EQ(ArkTSClassifyType(&mixed).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
 }
 
 TEST_F(ArkTSTypeMappingTest, ClassifyRejectsUnsupportedPositions)
@@ -245,12 +211,6 @@ TEST_F(ArkTSTypeMappingTest, ClassifyRejectsUnsupportedPositions)
     StructDecl userBigInt;
     userBigInt.identifier = "BigInt";
     userBigInt.fullPackageName = "application";
-    ClassDecl userArkTsArray;
-    userArkTsArray.identifier = "ArkTSArray";
-    userArkTsArray.fullPackageName = "application";
-    ClassDecl facadeArkTsArray;
-    facadeArkTsArray.identifier = "ArkTSArray";
-    facadeArkTsArray.fullPackageName = "arkts.lang";
 
     // Foreign signatures reject nested Option.
     EnumTy innerOption("Option", coreOption, {int32});
@@ -295,17 +255,6 @@ TEST_F(ArkTSTypeMappingTest, ClassifyRejectsUnsupportedPositions)
     StructTy foreignBigInt("BigInt", userBigInt, {});
     EXPECT_EQ(ArkTSClassifyType(&foreignBigInt).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
 
-    // Every ArkTSArray-named class outside the preset package is unsupported.
-    // A class that merely shares the name in another package - a user package
-    // or the arkts.lang facade - is unsupported as well: classification never
-    // matches a declaration name, so a same-named class can only reach the
-    // generic rejection and never the preset deferral routing.
-    ClassTy appArkTsArray("ArkTSArray", userArkTsArray, {int32});
-    EXPECT_EQ(ArkTSClassifyType(&appArkTsArray).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-
-    ClassTy langArkTsArray("ArkTSArray", facadeArkTsArray, {int32});
-    EXPECT_EQ(ArkTSClassifyType(&langArkTsArray).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-
     // Only tuples with at least two elements map.
     TupleTy single({int32});
     EXPECT_EQ(ArkTSClassifyType(&single).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
@@ -316,63 +265,39 @@ TEST_F(ArkTSTypeMappingTest, ClassifyRejectsUnsupportedPositions)
 
 TEST_F(ArkTSTypeMappingTest, DeferredExternalTypeRecognitionIsPinnedToThePresetPackage)
 {
-    auto int32 = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32);
-    // The preset declarations of std.interop.arkts are recognised by their
-    // declaring package - the same pinning BigInt gets in std.math.numeric.
-    ClassDecl presetArray;
-    presetArray.identifier = "ArkTSArray";
-    presetArray.fullPackageName = "std.interop.arkts";
-    ClassDecl presetString;
-    presetString.identifier = "ArkTSString";
-    presetString.fullPackageName = "std.interop.arkts";
+    // The ArkTSType root is recognised by its declaring package - the same
+    // pinning BigInt gets in std.math.numeric.
     InterfaceDecl presetType;
     presetType.identifier = "ArkTSType";
     presetType.fullPackageName = "std.interop.arkts";
-    // Same names outside that package: a user package and the arkts.lang facade.
-    ClassDecl userArray;
-    userArray.identifier = "ArkTSArray";
-    userArray.fullPackageName = "application";
-    ClassDecl userString;
-    userString.identifier = "ArkTSString";
-    userString.fullPackageName = "application";
-    ClassDecl userType;
+    // The same name outside that package (a user package, the arkts.lang
+    // facade) routes nothing: classification never matches a declaration name.
+    InterfaceDecl userType;
     userType.identifier = "ArkTSType";
     userType.fullPackageName = "application";
-    ClassDecl facadeArray;
-    facadeArray.identifier = "ArkTSArray";
-    facadeArray.fullPackageName = "arkts.lang";
+    InterfaceDecl facadeType;
+    facadeType.identifier = "ArkTSType";
+    facadeType.fullPackageName = "arkts.lang";
 
-    ClassTy presetArrayInt32("ArkTSArray", presetArray, {int32});
-    ClassTy presetStringPlain("ArkTSString", presetString, {});
     InterfaceTy presetTypePlain("ArkTSType", presetType, {});
-    // The prepared generic preset array left the deferral routing: its
-    // positions classify as generatable reference leaves, so the name routes
-    // nothing; ArkTSType and an unprepared ArkTSString still defer.
-    EXPECT_EQ(ArkTSDeferredExternalTypeName(&presetArrayInt32), "");
-    EXPECT_EQ(ArkTSDeferredExternalTypeName(&presetStringPlain), "ArkTSString");
     EXPECT_EQ(ArkTSDeferredExternalTypeName(&presetTypePlain), "ArkTSType");
-
-    // A generic instance resolves to the same declaration, and the nested
-    // positions are searched recursively.
-    ClassTy userArrayInt32("ArkTSArray", userArray, {int32});
-    ClassTy userStringPlain("ArkTSString", userString, {});
-    ClassTy userTypePlain("ArkTSType", userType, {});
-    ClassTy facadeArrayInt32("ArkTSArray", facadeArray, {int32});
-    EXPECT_EQ(ArkTSDeferredExternalTypeName(&userArrayInt32), "");
-    EXPECT_EQ(ArkTSDeferredExternalTypeName(&userStringPlain), "");
+    InterfaceTy userTypePlain("ArkTSType", userType, {});
+    InterfaceTy facadeTypePlain("ArkTSType", facadeType, {});
     EXPECT_EQ(ArkTSDeferredExternalTypeName(&userTypePlain), "");
-    EXPECT_EQ(ArkTSDeferredExternalTypeName(&facadeArrayInt32), "");
+    EXPECT_EQ(ArkTSDeferredExternalTypeName(&facadeTypePlain), "");
+
+    // Nested positions are searched recursively.
     StructDecl coreArray;
     coreArray.identifier = "Array";
     coreArray.fullPackageName = "std.core";
-    StructTy arrayOfPreset("Array", coreArray, {&presetArrayInt32});
-    StructTy arrayOfUser("Array", coreArray, {&userArrayInt32});
-    EXPECT_EQ(ArkTSDeferredExternalTypeName(&arrayOfPreset), "");
+    StructTy arrayOfPreset("Array", coreArray, {&presetTypePlain});
+    StructTy arrayOfUser("Array", coreArray, {&userTypePlain});
+    EXPECT_EQ(ArkTSDeferredExternalTypeName(&arrayOfPreset), "ArkTSType");
     EXPECT_EQ(ArkTSDeferredExternalTypeName(&arrayOfUser), "");
     EXPECT_EQ(ArkTSDeferredExternalTypeName(nullptr), "");
     // Recognition only routes diagnostics: an unprepared preset shape (a
     // stale CJO) stays unsupported with the generic message.
-    EXPECT_EQ(ArkTSClassifyType(&presetArrayInt32).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
+    EXPECT_EQ(ArkTSClassifyType(&presetTypePlain).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
 }
 
 TEST_F(ArkTSTypeMappingTest, EmittedOptionBranchesHandleNullAndUndefined)
@@ -502,70 +427,6 @@ TEST_F(ArkTSTypeMappingTest, EmittedArrayCopyBranchesUseTheInteropArrayApi)
     auto file = Parse(code);
     ASSERT_EQ(diag.GetErrorCount(), 0);
     ExpectSingleCall(file.get(), "array copy wrapper");
-}
-
-TEST_F(ArkTSTypeMappingTest, PresetArrayPositionsGenerateReferenceGlueAndArrayCopyStillGenerates)
-{
-    // The prepared generic preset array maps to a generatable reference leaf
-    // with an explicit element description, so a signature position carrying
-    // it lowers like any wrapper position: to-JS passes the stored JSObject
-    // handle, from-JS guards isArray and constructs the wrapper with the
-    // element spelled as an explicit type argument. An unprepared same-name
-    // class (a stale CJO) stays unsupported and refuses generation. The
-    // Array<T'> copy path is untouched.
-    auto int32 = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32);
-    ClassDecl arkTsArrayDecl;
-    arkTsArrayDecl.identifier = "ArkTSArray";
-    arkTsArrayDecl.fullPackageName = "std.interop.arkts";
-    arkTsArrayDecl.EnableAttr(Attribute::ARKTS_CLASS_WRAPPER);
-    ClassTy refInt32("ArkTSArray", arkTsArrayDecl, {int32});
-    auto reference = ArkTSClassifyType(&refInt32);
-    ASSERT_EQ(reference.kind, ArkTSTypeDesc::Kind::REFERENCE);
-    std::unordered_map<std::string, Ptr<Decl>> classRefs;
-    auto code = ArkTSForeignWrapperSource({reference}, reference, 0, "__locals_", ArkTSReceiverKind::MODULE,
-        ARKTS_DERIVE_OPTIONAL, &classRefs);
-    ASSERT_FALSE(code.empty());
-    EXPECT_EQ(classRefs.size(), 1);
-    // To-JS: the stored reference crosses through its accessor and the heap
-    // handle conversion, exactly like any wrapper reference.
-    EXPECT_NE(code.find("(__argument_0).__cj_arkts_ref_value().toJSValue()"), std::string::npos);
-    // From-JS: null and undefined guards, then the isArray kind guard, then
-    // the wrapping constructor carrying the element type argument on the
-    // asObject carrier.
-    EXPECT_NE(code.find("if (!__locals_result.isArray())"), std::string::npos);
-    EXPECT_NE(code.find("ArkTS type mismatch: not an array for ArkTSArray<Int32>"), std::string::npos);
-    EXPECT_NE(code.find("asObject(), ())"), std::string::npos);
-    EXPECT_NE(code.find("<Int32>("), std::string::npos);
-    auto file = Parse(code);
-    ASSERT_EQ(diag.GetErrorCount(), 0);
-    ExpectSingleCall(file.get(), "preset array wrapper");
-
-    ClassDecl staleArrayDecl;
-    staleArrayDecl.identifier = "ArkTSArray";
-    staleArrayDecl.fullPackageName = "std.interop.arkts";
-    ClassTy staleRefInt32("ArkTSArray", staleArrayDecl, {int32});
-    auto stale = ArkTSClassifyType(&staleRefInt32);
-    ASSERT_EQ(stale.kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-    EXPECT_TRUE(ArkTSForeignWrapperSource({stale}, stale, 0, "__locals_").empty());
-    EXPECT_TRUE(ArkTSForeignWrapperSource({stale}, ScalarDesc("Int32"), 0, "__locals_").empty());
-    EXPECT_TRUE(ArkTSForeignWrapperSource({}, stale, 0, "__locals_").empty());
-
-    StructDecl arrayDecl;
-    arrayDecl.identifier = "Array";
-    arrayDecl.fullPackageName = "std.core";
-    StructTy arrayInt32("Array", arrayDecl, {int32});
-    auto copy = ArkTSClassifyType(&arrayInt32);
-    ASSERT_EQ(copy.kind, ArkTSTypeDesc::Kind::ARRAY_COPY);
-    auto copyCode = ArkTSForeignWrapperSource({copy}, copy, 0, "__locals_");
-    EXPECT_FALSE(copyCode.empty());
-    EXPECT_NE(copyCode.find("let __locals_elems_0 = Array<ark_interop.JSValue>(__argument_0.size, {"),
-        std::string::npos);
-    EXPECT_NE(copyCode.find("let __locals_arg_0 = __locals_context.array(__locals_elems_0).toJSValue()"),
-        std::string::npos);
-    EXPECT_NE(copyCode.find("let __locals_copy_0 = Array<Int32>("), std::string::npos);
-    auto copyFile = Parse(copyCode);
-    ASSERT_EQ(diag.GetErrorCount(), 0);
-    ExpectSingleCall(copyFile.get(), "array copy wrapper after the flip");
 }
 
 TEST_F(ArkTSTypeMappingTest, EmittedTupleConversionRecursesPerElement)
@@ -945,16 +806,6 @@ TEST_F(ArkTSTypeMappingTest, UnsupportedDescriptionsRefuseGeneration)
     auto classified = ArkTSClassifyType(&map);
     EXPECT_EQ(classified.kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
     EXPECT_TRUE(ArkTSForeignWrapperSource({classified}, classified, 0, "__locals_").empty());
-    // A same-name ArkTSArray outside std.interop.arkts classifies as
-    // unsupported and therefore refuses generation, exactly like Map above.
-    auto int32 = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32);
-    ClassDecl userArrayDecl;
-    userArrayDecl.identifier = "ArkTSArray";
-    userArrayDecl.fullPackageName = "application";
-    ClassTy userArray("ArkTSArray", userArrayDecl, {int32});
-    auto userRef = ArkTSClassifyType(&userArray);
-    EXPECT_EQ(userRef.kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-    EXPECT_TRUE(ArkTSForeignWrapperSource({userRef}, userRef, 0, "__locals_").empty());
     // Unknown scalar names never produce a wrapper either: a hand-built
     // SCALAR description with a non-whitelisted name fails the generatable
     // guard.
@@ -985,13 +836,10 @@ TEST_F(ArkTSTypeMappingTest, GeneratedWrappersRemainParseableAcrossKinds)
     }
 }
 
-TEST_F(ArkTSTypeMappingTest, RestParamKeepsArrayCopyAndRefusesArkTSArray)
+TEST_F(ArkTSTypeMappingTest, RestParamKeepsArrayCopy)
 {
-    // The rest position accepts Array<T'> only. An ArkTSArray<T'> rest
-    // position is rejected by the Sema rest diagnostic before the generator
-    // runs, so the generator itself has no branch for it and returns an empty
-    // string - this assertion is the generator-side half of that contract. The
-    // Array<T'> rest spread keeps generating.
+    // The rest position accepts Array<T'> only; the Array<T'> rest spread keeps
+    // generating through the array-copy path.
     auto restCopy = ArkTSForeignWrapperSource({WrappedDesc(ArkTSTypeDesc::Kind::ARRAY_COPY, ScalarDesc("String"))},
         ScalarDesc("Unit"), 0, "__locals_", 0);
     EXPECT_FALSE(restCopy.empty());
@@ -1000,14 +848,6 @@ TEST_F(ArkTSTypeMappingTest, RestParamKeepsArrayCopyAndRefusesArkTSArray)
     auto restCopyFile = Parse(restCopy);
     ASSERT_EQ(diag.GetErrorCount(), 0);
     ExpectSingleCall(restCopyFile.get(), "array copy rest wrapper");
-    auto int32 = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32);
-    ClassDecl arkTsArrayDecl;
-    arkTsArrayDecl.identifier = "ArkTSArray";
-    arkTsArrayDecl.fullPackageName = "std.interop.arkts";
-    ClassTy refInt32("ArkTSArray", arkTsArrayDecl, {int32});
-    auto reference = ArkTSClassifyType(&refInt32);
-    ASSERT_EQ(reference.kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-    EXPECT_TRUE(ArkTSForeignWrapperSource({reference}, ScalarDesc("Unit"), 0, "__locals_", 0).empty());
 }
 
 // Generated code names the interop surface through the packages the compiler
@@ -1853,172 +1693,4 @@ TEST_F(ArkTSTypeMappingTest, OnlyRuntimeFailureCodesAreTranslatedAtEachCallSite)
             EXPECT_EQ(site.code.find(otherCode), std::string::npos) << site.label << " " << otherCode;
         }
     }
-}
-
-// The ArkTSString preset's constructor stores the ctx.string primitive
-// directly (PRESET_STRING form): the Option<String> argument converts through
-// the scalar string row, and None becomes the empty string per the preset
-// ruling, so both call spellings carry a real primitive into the wrapper
-// field. No ArkTS class value is resolved and no `new` runs.
-TEST_F(ArkTSTypeMappingTest, PresetStringConstructorStoresTheStringPrimitive)
-{
-    std::unordered_map<std::string, Ptr<Decl>> classRefs;
-    auto code = ArkTSClassConstructorSource(
-        {WrappedDesc(ArkTSTypeDesc::Kind::OPTIONAL, ScalarDesc("String"))}, 0, "__locals_", ARKTS_NO_REST,
-        ArkTSReceiverKind::GLOBAL, 0, classRefs, ArkTSConstructorForm::PRESET_STRING);
-    ASSERT_FALSE(code.empty());
-    // Both Option spellings lower to ctx.string(...).toJSValue(); None is the
-    // empty string, not ctx.undefined().
-    EXPECT_NE(code.find("case Option.Some(__locals_some_0) =>"), std::string::npos);
-    EXPECT_NE(code.find("__locals_context.string(__locals_some_0).toJSValue()"), std::string::npos);
-    EXPECT_NE(code.find("case Option.None =>"), std::string::npos);
-    EXPECT_NE(code.find("__locals_context.string(\"\").toJSValue()"), std::string::npos);
-    EXPECT_EQ(CountOccurrences(code, "ctx.string"), 0);
-    // The class-value preamble never runs: no requireArkModule and no new().
-    EXPECT_EQ(code.find("requireArkModule"), std::string::npos);
-    EXPECT_EQ(code.find("asClass"), std::string::npos);
-    EXPECT_NE(code.find("__cj_arkts_self.__cj_arkts_ref = "), std::string::npos);
-    auto file = Parse(code);
-    ASSERT_EQ(diag.GetErrorCount(), 0);
-}
-
-// A preset-string member call resolves the member on the boxed receiver:
-// the stored handle is a JS primitive and member access rejects primitives,
-// so the member is looked up on Object(value). The stored handle itself stays
-// a primitive, so a value crossing back to ArkTS is still a string.
-TEST_F(ArkTSTypeMappingTest, PresetStringMemberCallUsesBoxedReceiver)
-{
-    std::unordered_map<std::string, Ptr<Decl>> classRefs;
-    auto code = ArkTSClassMethodSource({ScalarDesc("Float64")}, ScalarDesc("String"), 0, "__locals_", ARKTS_NO_REST,
-        ArkTSMemberReceiver::INSTANCE, ArkTSReceiverKind::GLOBAL, 1, classRefs, "class", true);
-    ASSERT_FALSE(code.empty());
-    EXPECT_NE(code.find("let __locals_boxed = __locals_context.global.getProperty(\"Object\").asClass().new("
-                        "__cj_arkts_self.__cj_arkts_ref_value()).asObject()"),
-        std::string::npos);
-    EXPECT_NE(code.find("let __locals_target_0 = __locals_boxed.getProperty(\"" +
-                        Placeholder("__member_name__") + "\")"),
-        std::string::npos);
-    EXPECT_NE(code.find("if (!__locals_target_0.isFunction()) {"), std::string::npos);
-    EXPECT_NE(code.find("__locals_boxed.callMethod(\"" + Placeholder("__member_name__") + "\", [__locals_arg_0])"),
-        std::string::npos);
-    // The stored primitive is never used as a member receiver directly.
-    EXPECT_EQ(code.find("__cj_arkts_self.__cj_arkts_ref_value().getProperty"), std::string::npos);
-    auto file = Parse(code);
-    ASSERT_EQ(diag.GetErrorCount(), 0);
-}
-
-// ---- B4b: ArkTSFunc<F> carrier classification and construction glue ----
-
-namespace {
-// A hand-built carrier description for the generator tests: the same shape
-// classification produces for a satisfied `F`.
-ArkTSTypeDesc CarrierDescForTest(Ptr<Decl> preset, std::vector<ArkTSTypeDesc> params, const ArkTSTypeDesc& result)
-{
-    ArkTSTypeDesc desc;
-    desc.kind = ArkTSTypeDesc::Kind::ARKTS_FUNC;
-    desc.reference = preset;
-    desc.elements = std::move(params);
-    desc.funcResult = std::make_shared<ArkTSTypeDesc>(result);
-    return desc;
-}
-
-void FillPresetFuncDecl(ClassDecl& decl, const std::string& package)
-{
-    decl.identifier = "ArkTSFunc";
-    decl.fullPackageName = package;
-}
-} // namespace
-
-TEST_F(ArkTSTypeMappingTest, CarrierClassifiesWhenFunctionConstraintsHold)
-{
-    auto int32 = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32);
-    auto boolean = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
-    ClassDecl presetDecl;
-    FillPresetFuncDecl(presetDecl, "std.interop.arkts");
-    auto& preset = presetDecl;
-    FuncTy func({ModalTy{int32}}, ModalTy{boolean});
-    ClassTy carrier("ArkTSFunc", preset, {&func});
-    auto desc = ArkTSClassifyType(&carrier);
-    ASSERT_EQ(desc.kind, ArkTSTypeDesc::Kind::ARKTS_FUNC);
-    EXPECT_EQ(desc.reference, &preset);
-    ASSERT_EQ(desc.elements.size(), 1);
-    EXPECT_EQ(desc.elements.front().scalar, "Int32");
-    EXPECT_EQ(desc.FuncResult().scalar, "Bool");
-    EXPECT_TRUE(ArkTSTypeDescGeneratable(desc));
-    EXPECT_EQ(ArkTSFuncCarrierRejectReason(&carrier), ArkTSFuncCarrierReject::NONE);
-}
-
-TEST_F(ArkTSTypeMappingTest, CarrierRejectsNonFunctionArgument)
-{
-    auto int32 = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT32);
-    ClassDecl presetDecl;
-    FillPresetFuncDecl(presetDecl, "std.interop.arkts");
-    auto& preset = presetDecl;
-    ClassTy carrier("ArkTSFunc", preset, {int32});
-    EXPECT_EQ(ArkTSClassifyType(&carrier).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-    EXPECT_EQ(ArkTSFuncCarrierRejectReason(&carrier), ArkTSFuncCarrierReject::NOT_A_FUNCTION);
-    // A same-named user class keeps the generic routing (NONE here too: the
-    // dedicated messages are preset-pinned).
-    ClassDecl userDecl;
-    FillPresetFuncDecl(userDecl, "application");
-    auto& user = userDecl;
-    ClassTy userCarrier("ArkTSFunc", user, {int32});
-    EXPECT_EQ(ArkTSClassifyType(&userCarrier).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-    EXPECT_EQ(ArkTSFuncCarrierRejectReason(&userCarrier), ArkTSFuncCarrierReject::NONE);
-}
-
-TEST_F(ArkTSTypeMappingTest, CarrierRejectsUnsupportedMemberAndOuterGeneric)
-{
-    auto boolean = TypeManager::GetPrimitiveTy(TypeKind::TYPE_BOOLEAN);
-    auto intNative = TypeManager::GetPrimitiveTy(TypeKind::TYPE_INT_NATIVE);
-    ClassDecl presetDecl;
-    FillPresetFuncDecl(presetDecl, "std.interop.arkts");
-    auto& preset = presetDecl;
-    FuncTy badMember({ModalTy{intNative}}, ModalTy{boolean});
-    ClassTy badMemberCarrier("ArkTSFunc", preset, {&badMember});
-    EXPECT_EQ(ArkTSClassifyType(&badMemberCarrier).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-    EXPECT_EQ(ArkTSFuncCarrierRejectReason(&badMemberCarrier), ArkTSFuncCarrierReject::UNSUPPORTED_MEMBER);
-
-    GenericParamDecl param;
-    GenericsTy typeVar("T", param);
-    FuncTy generic({ModalTy{&typeVar}}, ModalTy{boolean});
-    ClassTy genericCarrier("ArkTSFunc", preset, {&generic});
-    EXPECT_EQ(ArkTSClassifyType(&genericCarrier).kind, ArkTSTypeDesc::Kind::UNSUPPORTED);
-    EXPECT_EQ(ArkTSFuncCarrierRejectReason(&genericCarrier), ArkTSFuncCarrierReject::OUTER_GENERIC);
-}
-
-TEST_F(ArkTSTypeMappingTest, ConstructionGlueConvertsEveryPosition)
-{
-    ClassDecl presetDecl;
-    FillPresetFuncDecl(presetDecl, "std.interop.arkts");
-    auto& preset = presetDecl;
-    auto carrier = CarrierDescForTest(&preset, {ScalarDesc("Int32"), ScalarDesc("String")}, ScalarDesc("Bool"));
-    std::unordered_map<std::string, Ptr<Decl>> classRefs;
-    auto code = ArkTSFuncConstructionSource(carrier, "__cj_arkts_fc_", classRefs);
-    ASSERT_FALSE(code.empty());
-    EXPECT_NE(code.find("return ArkTSFunc<(Int32, String) -> Bool>("), std::string::npos);
-    EXPECT_NE(code.find("cj_arkts_context_v1.__cj_arkts_current().function("), std::string::npos);
-    EXPECT_NE(code.find("let __cj_arkts_fc_raw_0 = __cj_arkts_fc_info[0]"), std::string::npos);
-    EXPECT_NE(code.find("let __cj_arkts_fc_raw_1 = __cj_arkts_fc_info[1]"), std::string::npos);
-    EXPECT_NE(code.find("throw ExternConversionException(\"ArkTS type mismatch: null for Int32\")"), std::string::npos);
-    EXPECT_NE(code.find("__cj_arkts_fc_fn(__cj_arkts_fc_arg_0, __cj_arkts_fc_arg_1)"), std::string::npos);
-    EXPECT_NE(code.find("__cj_arkts_fc_ctx.boolean(__cj_arkts_fc_result_0).toJSValue()"), std::string::npos);
-    auto file = Parse(code);
-    ASSERT_EQ(diag.GetErrorCount(), 0);
-}
-
-TEST_F(ArkTSTypeMappingTest, ConstructionGlueHandlesZeroParameterUnitResult)
-{
-    ClassDecl presetDecl;
-    FillPresetFuncDecl(presetDecl, "std.interop.arkts");
-    auto& preset = presetDecl;
-    auto carrier = CarrierDescForTest(&preset, {}, ScalarDesc("Unit"));
-    std::unordered_map<std::string, Ptr<Decl>> classRefs;
-    auto code = ArkTSFuncConstructionSource(carrier, "__cj_arkts_fc_", classRefs);
-    ASSERT_FALSE(code.empty());
-    EXPECT_NE(code.find("return ArkTSFunc<() -> Unit>("), std::string::npos);
-    EXPECT_NE(code.find("__cj_arkts_fc_fn()"), std::string::npos);
-    EXPECT_NE(code.find("__cj_arkts_fc_ctx.undefined().toJSValue()"), std::string::npos);
-    auto file = Parse(code);
-    ASSERT_EQ(diag.GetErrorCount(), 0);
 }

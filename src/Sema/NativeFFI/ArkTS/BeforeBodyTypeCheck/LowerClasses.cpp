@@ -15,7 +15,6 @@
 #include "../../Utils.h"
 #include "../ArkTSInterop.h"
 #include "../FunctionSource.h"
-#include "../Utils/FuncValueSource.h"
 #include "../Utils/ASTFactory.h"
 #include "Collector.h"
 #include "PlaceholderBinding.h"
@@ -122,13 +121,6 @@ bool IsBrokenForeignInterfaceParent(Ptr<Decl> parent)
 // the declaration otherwise (a constructor-like spelling).
 void DiagnoseUnsupportedReturnType(DiagnosticEngine& diag, FuncDecl& fd, Ptr<Type> retType)
 {
-    // An ArkTSFunc<F> position whose function-type constraint failed reports
-    // its dedicated message before the generic unsupported-type text.
-    if (retType && DiagnoseArkTSFuncCarrierPosition(
-        diag, retType->begin.IsZero() ? static_cast<Node&>(fd) : static_cast<Node&>(*retType),
-        retType->DataTy())) {
-        return;
-    }
     if (retType && !retType->begin.IsZero()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_ret_type_unsupported, *retType,
             Ty::ToString(retType->DataTy()), fd.identifier.Val());
@@ -189,7 +181,7 @@ void MarkBrokenInterfaceImpl(Decl& impl)
 // resolved through the checker's alias substitution before classification,
 // so a type alias position lowers by its target and never as an opaque
 // unsupported name. A null type node classifies as the empty (unsupported)
-// description. Shared with LowerArkTSFunctions, so a position can never mean
+// description. Shared with LowerArkTSForeignFunctions, so a position can never mean
 // two things across the two lowering paths.
 ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(
     ASTContext& ctx, Ptr<Type> type, bool allowNestedOptional)
@@ -213,9 +205,8 @@ ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyPosition(
     return desc;
 }
 
-// Value-position entry of the same classification: an explicit ArkTSFunc<F>
-// construction carries F only as the resolved type argument of the carrier
-// reference, so its positions classify from Tys. The enum-table attachment and
+// Value-position entry of the same classification: it classifies from a
+// resolved Ty instead of a written type node. The enum-table attachment and
 // the payload recursion are the written-type entry's, so an enum leaf means
 // the same thing in both paths.
 ArkTSTypeDesc TypeChecker::TypeCheckerImpl::ArkTSClassifyValuePosition(ASTContext& ctx, Ptr<Ty> ty)
@@ -371,17 +362,14 @@ std::string BuildArkTSClassMemberSource(ClassDecl& cd, size_t namespaceDepth, Ar
     if (constructor) {
         // A child wrapper (no field of its own) moves the whole construction
         // into the super(...) thunk; a root wrapper keeps the direct field
-        // assignment. The preset string stores a ctx.string primitive instead
-        // of constructing an ArkTS object at all.
-        auto form = IsArkTSPresetString(cd) ? ArkTSConstructorForm::PRESET_STRING
-                                            : (OwnsReferenceField(cd) ? ArkTSConstructorForm::DIRECT
-                                                                      : ArkTSConstructorForm::SUPER_THUNK);
+        // assignment.
+        auto form = OwnsReferenceField(cd) ? ArkTSConstructorForm::DIRECT : ArkTSConstructorForm::SUPER_THUNK;
         return ArkTSClassConstructorSource(
             types, namespaceDepth, prefix, restIndex, receiver, optionalStart, classRefs, form);
     }
     return ArkTSClassMethodSource(types, resultType, namespaceDepth, prefix, restIndex,
         isStatic ? ArkTSMemberReceiver::STATIC : ArkTSMemberReceiver::INSTANCE, receiver, optionalStart, classRefs,
-        "class", IsArkTSPresetString(cd));
+        "class");
 }
 
 // A class member's @RestParam position must be the trailing Array<T'>; its
@@ -841,11 +829,6 @@ std::vector<ClassDecl*> LoweredArkTSClassWrappers(Package& pkg)
 void DiagnoseArkTSUnsupportedParameterType(DiagnosticEngine& diag, const FuncDecl& fd, FuncParam& param)
 {
     auto& position = param.type ? static_cast<Node&>(*param.type) : static_cast<Node&>(param);
-    // The carrier constraint failure keeps its dedicated message; the
-    // deferral routing below stays for the genuinely deferred presets.
-    if (param.type && DiagnoseArkTSFuncCarrierPosition(diag, position, param.type->DataTy())) {
-        return;
-    }
     auto deferredName = param.type ? ArkTSDeferredExternalTypeName(param.type->DataTy()) : std::string{};
     if (!deferredName.empty()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred, position, deferredName);
@@ -881,7 +864,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClasses(ASTContext& ctx)
     // observe that mark so a refused member never gets a wrapper body.
     // Running this after class lowering would generate the body first and
     // suppress the diagnostic. This call happens only here;
-    // LowerArkTSFunctions does not repeat it.
+    // LowerArkTSForeignFunctions does not repeat it.
     ArkTSDeclOptionsDiagnose(pkg, diag);
 
     // Step 2. Only the generated implementation class may implement a
@@ -1119,7 +1102,7 @@ bool TypeChecker::TypeCheckerImpl::AnalyzeArkTSClassFuncSignature(ASTContext& ct
     auto& fb = *fd.funcBody;
     bool constructor = fd.TestAttr(Attribute::CONSTRUCTOR);
     resultType = ArkTSClassifyPosition(ctx, fb.retType.get());
-    bool supported = ClassifyArkTSFuncParameters(ctx, fd, types, params);
+    bool supported = ClassifyArkTSForeignFunctionTypes(ctx, fd, types, params);
     if (!constructor && !ArkTSTypeDescGeneratable(resultType)) {
         DiagnoseUnsupportedReturnType(diag, fd, fb.retType.get());
         supported = false;
@@ -1179,7 +1162,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassProp(
         }
         std::unordered_map<std::string, Ptr<Decl>> classRefs;
         auto code = ArkTSClassPropertySource(desc, false, receiver, classCtx.namespaces.size(),
-            ArkTSForeignLocalPrefix({}), classCtx.receiver, classRefs, IsArkTSPresetString(classCtx.owner));
+            ArkTSForeignLocalPrefix({}), classCtx.receiver, classRefs);
         if (code.empty()) {
             getter->EnableAttr(Attribute::IS_BROKEN);
             continue;
@@ -1193,7 +1176,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSClassProp(
         }
         std::unordered_map<std::string, Ptr<Decl>> classRefs;
         auto code = ArkTSClassPropertySource(desc, true, receiver, classCtx.namespaces.size(),
-            ArkTSForeignLocalPrefix({}), classCtx.receiver, classRefs, IsArkTSPresetString(classCtx.owner));
+            ArkTSForeignLocalPrefix({}), classCtx.receiver, classRefs);
         if (code.empty()) {
             setter->EnableAttr(Attribute::IS_BROKEN);
             continue;
@@ -1379,7 +1362,7 @@ bool TypeChecker::TypeCheckerImpl::AnalyzeArkTSInterfaceSignature(ASTContext& ct
         fd.EnableAttr(Attribute::IS_BROKEN);
         return false;
     }
-    bool supported = ClassifyArkTSFuncParameters(ctx, fd, types, params);
+    bool supported = ClassifyArkTSForeignFunctionTypes(ctx, fd, types, params);
     resultType = ArkTSClassifyPosition(ctx, fb.retType.get());
     if (!ArkTSTypeDescGeneratable(resultType)) {
         DiagnoseUnsupportedReturnType(diag, fd, fb.retType.get());
@@ -1458,13 +1441,6 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSInterfaceProp(
 void TypeChecker::TypeCheckerImpl::LowerArkTSClassDefaultArguments(ASTContext& ctx, Package& pkg)
 {
     for (auto* cd : LoweredArkTSClassWrappers(pkg)) {
-        // The preset array's members keep their runtime-written bodies and
-        // ordinary Cangjie defaults: their `= None` desugar functions come
-        // from the shared default-argument pass, not the rebuilt mapping-only
-        // form, so the class is skipped whole.
-        if (IsArkTSPresetArray(*cd)) {
-            continue;
-        }
         for (auto& member : cd->GetMemberDecls()) {
             auto fd = DynamicCast<FuncDecl*>(member.get());
             if (!fd || !fd->funcBody || fd->TestAttr(Attribute::IS_BROKEN)) {
@@ -1514,7 +1490,7 @@ void TypeChecker::TypeCheckerImpl::InstallArkTSMemberBody(ASTContext& ctx, ArkTS
     // A repeated pass (LSP/incremental AST reuse) may see the body this
     // lowering already installed. Preparation rejects user-written bodies, so
     // an existing body is ours; keep it instead of overwriting or failing.
-    // LowerArkTSFunctions skips already-bodied wrappers the same way.
+    // LowerArkTSForeignFunctions skips already-bodied wrappers the same way.
     if (fb.body) {
         return;
     }
@@ -1560,7 +1536,7 @@ void TypeChecker::TypeCheckerImpl::InstallArkTSMemberBody(ASTContext& ctx, ArkTS
 // caller keeps the same arity and one diagnostic is emitted per bad position.
 // Returns false when at least one position is unsupported; the caller marks
 // the member broken.
-bool TypeChecker::TypeCheckerImpl::ClassifyArkTSFuncParameters(ASTContext& ctx, FuncDecl& fd,
+bool TypeChecker::TypeCheckerImpl::ClassifyArkTSForeignFunctionTypes(ASTContext& ctx, FuncDecl& fd,
     std::vector<ArkTSTypeDesc>& types, std::vector<Ptr<FuncParam>>& params)
 {
     bool supported = true;
@@ -1589,7 +1565,7 @@ bool TypeChecker::TypeCheckerImpl::ClassifyArkTSPropertyType(ASTContext& ctx, Pr
     if (ArkTSTypeDescGeneratable(desc) && !ArkTSTypeDescContainsNothing(desc)) {
         return true;
     }
-    if (pd.type && !DiagnoseArkTSFuncCarrierPosition(diag, *pd.type, pd.type->DataTy())) {
+    if (pd.type) {
         auto deferredName = ArkTSDeferredExternalTypeName(pd.type->DataTy());
         if (!deferredName.empty()) {
             diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred, *pd.type, deferredName);

@@ -92,7 +92,7 @@ std::vector<OwnedPtr<Decl>> Native::FFI::ArkTS::ASTFactory::CreateEntry(
 // the compiler-owned temporary declaration `func __generated() { <glue> }`.
 // After result: the detached Block(<glue>); the temporary FuncDecl is discarded.
 // This function does not change the source signature or attach the block.
-// LowerArkTSFunctions installs it, rebinds its nodes and collects its locals.
+// LowerArkTSForeignFunctions installs it, rebinds its nodes and collects its locals.
 // A non-function, missing body or new parser error returns nullptr instead.
 OwnedPtr<Block> Native::FFI::ArkTS::ASTFactory::CreateForeignBody(FuncDecl& function, const std::string& code) const
 {

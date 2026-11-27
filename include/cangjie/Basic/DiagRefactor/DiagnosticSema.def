@@ -508,21 +508,14 @@ ERROR(sema_arkts_foreign_named_param_without_default,
     "named parameter '%s' of @ArkTS foreign declaration '%s' must have a default value")
 ERROR(sema_arkts_foreign_module_path_invalid,
     "'module' option '%s' of @ArkTS foreign function '%s' must be an ArkTS module specifier")
-// Routing-only diagnostic for every position spelled with an external ArkTS
-// preset type (std.interop.arkts ArkTSType, and an ArkTSString that never
-// went through wrapper preparation) whose foreign-signature mapping
-// is not part of this version: classification itself is untouched and stays
+// Routing-only diagnostic for every position spelled with the external ArkTS
+// preset root std.interop.arkts.ArkTSType, whose foreign-signature mapping is
+// not part of this version: classification itself is untouched and stays
 // UNSUPPORTED, and the message names the deferred external type instead of
-// reporting the generic unsupported-type error. A prepared ArkTSString is an
-// ordinary wrapper (JSValue carrier, ctx.string construction) and its
-// positions lower like any other reference, so they never reach this
-// diagnostic; the prepared generic preset array ArkTSArray<T'> likewise maps
-// to a generatable reference leaf (JSObject carrier, its element conversion
-// lives in the runtime-written generic member bodies) and never reaches this
-// routing.
-// The deferral is about the reference semantics only, so no
-// copy-mapping advice is given. It does not describe the type relation: the
-// compiler already treats @ArkTS-annotated types and these presets as implicit
+// reporting the generic unsupported-type error.
+// The deferral is about the reference semantics only, so no copy-mapping
+// advice is given. It does not describe the type relation: the compiler
+// already treats @ArkTS-annotated types and this preset as implicit
 // (static-only) subtypes of ArkTSType. Recognition is pinned to the declaring
 // package, so a same-named declaration in any other package keeps the generic
 // message.
@@ -558,15 +551,12 @@ ERROR(sema_arkts_foreign_interface_impl_invalid,
 // limitation, not a language rule; the wording must not read as one.
 ERROR(sema_arkts_entry_shape_not_supported,
     "the shape of '@ArkTS' entry '%s' is not supported yet: %s")
-// '@HasThis' maps a function value carrying its ArkTS `this` argument; the
-// value itself is not directly callable (design 4.1.3/4.2).
-ERROR(sema_arkts_has_this_direct_call_not_allowed,
-    "'%s' is an '@HasThis' function value and cannot be called directly; bind the 'this' argument first")
-// The carrier's `bind` lookup is type-checked, but producing and calling the
-// bound value needs the full '@HasThis' lowering, which this release does not
-// implement. Refuse the call instead of reaching code generation.
-ERROR(sema_arkts_has_this_bind_not_supported,
-    "'ArkTSFuncWithThis.bind' is not supported yet in this release")
+// '@HasThis' requires an ArkTS function carrier that is not available: the
+// annotation still parses and its placement/argument-shape rules still report
+// their own diagnostics, but the declaration gets no usable interop type. The
+// message must not read as a missing dependency.
+ERROR(sema_arkts_has_this_not_supported,
+    "'@HasThis' is not supported: the ArkTS function carrier that the annotation needs is not available")
 ERROR(sema_arkts_entry_name_duplicated,
     "duplicate @ArkTS entry name '%s' in package '%s'")
 ERROR(sema_arkts_entry_generated_name_conflict,
@@ -576,8 +566,7 @@ ERROR(sema_arkts_option_module_only_foreign,
 ERROR(sema_arkts_annotation_placement_invalid,
     "'@ArkTS' cannot be used on %s '%s'")
 ERROR(sema_arkts_generic_foreign_unsupported,
-    "generic '@ArkTS foreign' declaration '%s' is not supported; only the standard-library preset types "
-    "keep a generic external form")
+    "generic '@ArkTS foreign' declaration '%s' is not supported")
 // A defaulted named parameter must have an Option<T> type so the wrapper can
 // represent an omitted argument.
 ERROR(sema_arkts_foreign_named_param_not_option,
@@ -614,28 +603,4 @@ ERROR(sema_arkts_has_this_type_unsupported,
 // would add members the ArkTS side cannot see, so no extend may target it.
 ERROR(sema_arkts_decl_cannot_be_extended,
     "'@ArkTS' declaration '%s' cannot be extended")
-// The ArkTS function carrier ArkTSFunc<F> fixes F to a concrete function type
-// whose every parameter and result is ArkTS-compatible and that does not
-// depend on an enclosing declaration's type parameter (design 4.2.1 e3/e4).
-// The reported spelling is the written type argument or parameter, so the
-// user finds the position. A same-named class outside the preset package is
-// never reported here: it keeps the generic unsupported-type diagnostics.
-ERROR(sema_arkts_func_type_argument_invalid,
-    "type argument '%s' of 'ArkTSFunc' must be a concrete function type")
-ERROR(sema_arkts_func_type_argument_unsupported,
-    "the function type '%s' of 'ArkTSFunc' has a parameter or result type that is not ArkTS-compatible")
-ERROR(sema_arkts_func_outer_generic_not_allowed,
-    "the function type '%s' of 'ArkTSFunc' must not depend on an enclosing declaration's type parameter")
-// A carrier value crosses the boundary as an ArkTS function reference, but
-// calling it from Cangjie needs the per-signature call lowering, which this
-// release does not ship. The refusal keeps the value usable for passing and
-// returning (design 4.2.1 e6).
-ERROR(sema_arkts_func_direct_call_not_allowed,
-    "'%s' is an 'ArkTSFunc' function carrier and cannot be called directly in this release")
-// Explicit construction is the one builtin operation of the carrier: exactly
-// one positional function value (design 4.2.1 e1). A named argument or a
-// different arity never reaches the carrier constructor.
-ERROR(sema_arkts_func_construction_shape_invalid,
-    "construction of 'ArkTSFunc' takes exactly one positional function value")
-
 ERROR(sema_diag_end, "")

@@ -16,7 +16,6 @@
 #include "../ArkTSInterop.h"
 #include "../FunctionSource.h"
 #include "../Utils/ASTFactory.h"
-#include "../Utils/FuncValueSource.h"
 #include "Collector.h"
 #include "PlaceholderBinding.h"
 #include "cangjie/AST/Utils.h"
@@ -93,14 +92,21 @@ Ptr<Decl> FindArkTSSupportDecl(ImportManager& imports, const std::string& name, 
     if (cjoManager == nullptr) {
         return nullptr;
     }
-    auto& candidates = cjoManager->GetPackageMembersByName(package, name);
-    auto target = std::find_if(candidates.cbegin(), candidates.cend(), [&name, &package](auto decl) {
-        return IsArkTSSupportDecl(name, package, *decl);
-    });
-    if (target == candidates.cend() || !Ty::IsTyCorrect((*target)->GetTy())) {
-        return nullptr;
+    auto pick = [&name, &package](const OrderedDeclSet& candidates) -> Ptr<Decl> {
+        auto target = std::find_if(candidates.cbegin(), candidates.cend(), [&name, &package](auto decl) {
+            return IsArkTSSupportDecl(name, package, *decl);
+        });
+        if (target == candidates.cend() || !Ty::IsTyCorrect((*target)->GetTy())) {
+            return nullptr;
+        }
+        return *target;
+    };
+    if (auto found = pick(cjoManager->GetPackageMembersByName(package, name))) {
+        return found;
     }
-    return *target;
+    // std.core is the implicit prelude package, so its members live in the
+    // implicit member map rather than the explicit per-package one.
+    return pick(cjoManager->GetImplicitPackageMembersByName(package, name));
 }
 
 // Bind one package-qualified support reference (`ark_interop`,
@@ -139,53 +145,29 @@ bool BindArkTSSupportPackageReference(Node& node, Reference& ref, Decl& owner, I
 // generic type reference keeps its type arguments, because presetting the
 // declaration's own generic type (e.g. Option<T>) would drop the
 // instantiation and make the generated annotation uninferable.
-// The owner's package picks the search package: the preset package's own
-// generated bodies are part of std.interop.arkts, so its conversion-exception
-// spelling resolves same-package (left unbound for the ordinary lookup; the
-// compiler-generated alias never appears there - there are no global-variable
-// getters in the package), and its runtime/business exception spellings bind
-// from their host packages, which the preset-package injection imports
-// directly instead of the facade.
-void BindArkTSSupportDeclReference(Decl& owner, Node& node, Reference& ref, [[maybe_unused]] RefType* type,
+// The owner's package picks the search package. The conversion exception binds
+// from std.core; the runtime and business exceptions bind from the arkts.lang
+// facade.
+void BindArkTSSupportDeclReference(Node& node, Reference& ref, [[maybe_unused]] RefType* type,
     ImportManager& imports, const std::string& name, ArkTSSupportReport& report,
     std::vector<std::pair<Ptr<Node>, Ptr<Decl>>>& bound, bool& valid)
 {
     static const std::unordered_map<std::string, std::string> packages{{"BigInt", "std.math.numeric"},
         {"Exception", "std.core"}, {"Option", "std.core"},
-        {Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
-        {Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
+        {Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION, Native::FFI::ArkTS::ARKTS_CORE_PACKAGE},
+        {Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS, Native::FFI::ArkTS::ARKTS_CORE_PACKAGE},
         {Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
-        {Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE},
-        {Native::FFI::ArkTS::ARKTS_FUNC_CARRIER, Native::FFI::ArkTS::ARKTS_PRESET_PACKAGE}};
+        {Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION, Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE}};
     auto found = packages.find(name);
     if (found == packages.end()) {
         return;
-    }
-    if (owner.fullPackageName == Native::FFI::ArkTS::ARKTS_PRESET_PACKAGE) {
-        if (name == Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION ||
-            name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS || name == Native::FFI::ArkTS::ARKTS_FUNC_CARRIER) {
-            // Same-package declaration: the ordinary lookup resolves it, so
-            // no support binding (and no missing-support diagnostic) applies.
-            return;
-        }
     }
     // The getter spells the conversion exception through the private alias;
     // both spellings denote the one exported declaration.
     const auto declName = name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS
         ? std::string(Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION)
         : name;
-    // A preset-package body binds the runtime and business exceptions from
-    // their host packages: the facade is deliberately not a dependency of the
-    // preset package (the cycle above), so its re-export is not loaded there.
-    std::string package = found->second;
-    if (owner.fullPackageName == Native::FFI::ArkTS::ARKTS_PRESET_PACKAGE) {
-        if (name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION) {
-            package = Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_FULL_PACKAGE;
-        } else if (name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION) {
-            package = Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION_PACKAGE;
-        }
-    }
-    auto target = FindArkTSSupportDecl(imports, declName, package);
+    auto target = FindArkTSSupportDecl(imports, declName, found->second);
     if (target == nullptr) {
         if (valid) {
             report.Missing();
@@ -196,12 +178,10 @@ void BindArkTSSupportDeclReference(Decl& owner, Node& node, Reference& ref, [[ma
     ref.target = target;
     ref.targets = {target};
     // Skip the type preset whenever the reference carries written type
-    // arguments: a RefType annotation (Option<T>) and a RefExpr constructor
-    // base (ArkTSFunc<(Int32) -> Int32>(...)) both need the checker's own
+    // arguments: a RefType annotation (Option<T>) needs the checker's own
     // instantiation pass, and presetting the declaration's generic type would
-    // drop the written arguments and leave the candidate match un-instantiated
-    // (the arity mismatch of the carrier constructor). Without type arguments
-    // the declaration's type is the whole story and is preset.
+    // drop the written arguments. Without type arguments the declaration's type
+    // is the whole story and is preset.
     auto* refTypeNode = DynamicCast<RefType*>(&node);
     auto* exprRef = DynamicCast<RefExpr*>(&node);
     const bool hasTypeArgs = (refTypeNode != nullptr && !refTypeNode->typeArguments.empty()) ||
@@ -222,7 +202,6 @@ bool IsArkTSSupportReferenceName(const std::string& name)
         name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS ||
         name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION ||
         name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION ||
-        name == Native::FFI::ArkTS::ARKTS_FUNC_CARRIER ||
         name == Native::FFI::ArkTS::ARKTS_INTEROP_PACKAGE ||
         name == Native::FFI::ArkTS::ARKTS_CONTEXT_ABI_PACKAGE;
 }
@@ -251,7 +230,7 @@ VisitAction BindSupportReferenceNode(Node& node, Decl& owner, ImportManager& imp
         return VisitAction::WALK_CHILDREN;
     }
     if (!BindArkTSSupportPackageReference(node, *ref, owner, imports, name, report, bound, valid)) {
-        BindArkTSSupportDeclReference(owner, node, *ref, type, imports, name, report, bound, valid);
+        BindArkTSSupportDeclReference(node, *ref, type, imports, name, report, bound, valid);
     }
     return VisitAction::WALK_CHILDREN;
 }
@@ -329,7 +308,7 @@ bool Cangjie::Native::FFI::ArkTS::BindArkTSSupportReferences(Decl& owner, Node& 
 namespace {
 // One lowered function wrapper's analyzed signature and the values its
 // generated body is built from.
-struct ArkTSFunctionSignature {
+struct ArkTSForeignFunctionSignature {
     std::unordered_map<std::string, std::string> options;
     std::vector<ArkTSTypeDesc> types;
     std::vector<Ptr<FuncParam>> params;
@@ -362,7 +341,7 @@ size_t ArkTSTrailingOptionalStart(const std::vector<Ptr<FuncParam>>& params,
 // Report one option-fold failure. Every illegal option shape - a non-literal
 // value, an unknown name, a name repeated inside one @ArkTS layer, an empty
 // namespace segment - is reported with its own message and anchor.
-void DiagnoseArkTSFunctionOptionProblem(DiagnosticEngine& diag, FuncDecl& fd,
+void DiagnoseArkTSForeignFunctionOptionProblem(DiagnosticEngine& diag, FuncDecl& fd,
     const std::unordered_map<std::string, std::string>& options, const ArkTSOptionStatus& optionStatus)
 {
     if (optionStatus.problem == ArkTSOptionProblem::DUPLICATE) {
@@ -383,21 +362,11 @@ void DiagnoseArkTSFunctionOptionProblem(DiagnosticEngine& diag, FuncDecl& fd,
 
 // Diagnose an unsupported return position and mark the declaration broken.
 // Returns true when the wrapper must be refused.
-bool RefuseArkTSFunctionReturnType(DiagnosticEngine& diag, FuncDecl& fd, const FuncBody& fb,
+bool RefuseArkTSForeignFunctionReturnType(DiagnosticEngine& diag, FuncDecl& fd, const FuncBody& fb,
     const ArkTSTypeDesc& resultType)
 {
     if (ArkTSTypeDescGeneratable(resultType)) {
         return false;
-    }
-    // An ArkTSFunc<F> return position whose function-type constraint failed
-    // gets the dedicated message naming F, before the deferral routing for
-    // the genuinely deferred presets.
-    if (fb.retType) {
-        auto& retAt = fb.retType->begin.IsZero() ? static_cast<Node&>(fd) : static_cast<Node&>(*fb.retType);
-        if (DiagnoseArkTSFuncCarrierPosition(diag, retAt, fb.retType->DataTy())) {
-            fd.EnableAttr(Attribute::IS_BROKEN);
-            return true;
-        }
     }
     // A return position spelled with an external ArkTS preset type is not a
     // spelling mistake - its mapping is deferred - so it reports the dedicated
@@ -466,12 +435,6 @@ void DiagnoseArkTSUnsupportedFunctionParameter(DiagnosticEngine& diag, FuncDecl&
     const ArkTSTypeDesc& desc)
 {
     auto& position = param.type ? static_cast<Node&>(*param.type) : static_cast<Node&>(param);
-    // An ArkTSFunc<F> parameter position whose function-type constraint
-    // failed gets the dedicated message naming F, before the deferral routing
-    // for the genuinely deferred presets.
-    if (param.type && DiagnoseArkTSFuncCarrierPosition(diag, position, param.type->DataTy())) {
-        return;
-    }
     auto deferredName = param.type ? ArkTSDeferredExternalTypeName(param.type->DataTy()) : std::string{};
     if (!deferredName.empty()) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_external_type_deferred, position, deferredName);
@@ -491,14 +454,14 @@ void DiagnoseArkTSUnsupportedFunctionParameter(DiagnosticEngine& diag, FuncDecl&
 // rules. Positions after the first failure are still classified and appended,
 // so the caller keeps the same arity and one diagnostic is emitted per bad
 // position. Returns false when any position is refused.
-bool ClassifyArkTSFunctionParameters(DiagnosticEngine& diag, FuncDecl& fd, const FuncBody& fb,
-    const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify, ArkTSFunctionSignature& sig)
+bool ClassifyArkTSForeignFunctionParameters(DiagnosticEngine& diag, FuncDecl& fd, const FuncBody& fb,
+    const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify, ArkTSForeignFunctionSignature& sig)
 {
     bool supported = true;
     // A function with a rest parameter cannot declare named parameters; the
     // parser has already reported that mix, so the named-default rule stays
     // silent for this signature.
-    const bool restParam = ArkTSFuncBodyHasRestParam(fb);
+    const bool restParam = ArkTSBodyHasRestParam(fb);
     for (auto& list : fb.paramLists) {
         for (auto& param : list->params) {
             if (!DiagnoseArkTSNamedParameterRules(diag, fd, *param, restParam)) {
@@ -593,7 +556,8 @@ Ptr<Node> FindArkTSModuleOptionNode(FuncDecl& fd, const std::unordered_map<std::
 // an explicit module takes the Cangjie package name verbatim
 // (ArkTSDefaultModule), except the arkts.lang preset, which takes the GLOBAL
 // receiver. Returns false when the declaration was refused.
-bool PrepareArkTSFunctionModule(DiagnosticEngine& diag, Package& pkg, FuncDecl& fd, ArkTSFunctionSignature& sig)
+bool PrepareArkTSForeignFunctionModule(
+    DiagnosticEngine& diag, Package& pkg, FuncDecl& fd, ArkTSForeignFunctionSignature& sig)
 {
     if (DiagnoseArkTSEmptyOptionValue(diag, fd)) {
         return false;
@@ -638,8 +602,8 @@ bool PrepareArkTSFunctionModule(DiagnosticEngine& diag, Package& pkg, FuncDecl& 
 // of the written signature. @RestParam is a parse-time rule on the first list
 // only, so lowering scans only that list; the position must carry Array<T'>
 // (its element was already validated by the parameter analysis).
-bool FinalizeArkTSFunctionSignature(DiagnosticEngine& diag, FuncDecl& fd, const FuncBody& fb,
-    ArkTSFunctionSignature& sig)
+bool FinalizeArkTSForeignFunctionSignature(DiagnosticEngine& diag, FuncDecl& fd, const FuncBody& fb,
+    ArkTSForeignFunctionSignature& sig)
 {
     sig.restIndex = ArkTSRestPosition(sig.params, fb.paramLists.empty() ? 0 : fb.paramLists.front()->params.size());
     if (sig.restIndex != ARKTS_NO_REST && sig.types[sig.restIndex].kind != ArkTSTypeDesc::Kind::ARRAY_COPY) {
@@ -655,7 +619,7 @@ bool FinalizeArkTSFunctionSignature(DiagnosticEngine& diag, FuncDecl& fd, const 
 
 // The wrapper body source; reference positions record their class declarations
 // in sig.classRefs for the placeholder walker.
-std::string BuildArkTSFunctionWrapperSource(ArkTSFunctionSignature& sig)
+std::string BuildArkTSForeignFunctionWrapperSource(ArkTSForeignFunctionSignature& sig)
 {
     auto prefix = ArkTSForeignLocalPrefix(sig.params);
     if (sig.restIndex == ARKTS_NO_REST) {
@@ -668,7 +632,7 @@ std::string BuildArkTSFunctionWrapperSource(ArkTSFunctionSignature& sig)
 
 // Rebind one argument placeholder to the parameter it denotes. Returns false
 // for a reference that is not an argument placeholder.
-bool RebindArkTSFunctionArgumentPlaceholder(RefExpr& ref, const FuncDecl& fd,
+bool RebindArkTSForeignFunctionArgumentPlaceholder(RefExpr& ref, const FuncDecl& fd,
     const std::vector<Ptr<FuncParam>>& params)
 {
     for (size_t i = 0; i < params.size(); ++i) {
@@ -684,7 +648,7 @@ bool RebindArkTSFunctionArgumentPlaceholder(RefExpr& ref, const FuncDecl& fd,
 }
 
 // Bind a foreign class reference placeholder recorded by the generator.
-void RebindArkTSFunctionClassReference(RefExpr& ref, const std::unordered_map<std::string, Ptr<Decl>>& classRefs)
+void RebindArkTSForeignFunctionClassReference(RefExpr& ref, const std::unordered_map<std::string, Ptr<Decl>>& classRefs)
 {
     auto found = classRefs.find(ref.ref.identifier.Val());
     if (found == classRefs.end()) {
@@ -699,7 +663,7 @@ void RebindArkTSFunctionClassReference(RefExpr& ref, const std::unordered_map<st
 // Rebind the placeholders of one generated body node: source position,
 // module/name/namespace literals, type placeholders, argument/class references
 // and return-function links.
-VisitAction RebindArkTSFunctionPlaceholderNode(Node& node, FuncDecl& fd, File& file,
+VisitAction RebindArkTSForeignFunctionPlaceholderNode(Node& node, FuncDecl& fd, File& file,
     const std::vector<Ptr<FuncParam>>& params, const std::unordered_map<std::string, std::string>& literals,
     const std::unordered_map<std::string, Ptr<Decl>>& classRefs,
     std::unordered_map<Ptr<const Node>, Ptr<Decl>>& pendingRefs)
@@ -725,8 +689,8 @@ VisitAction RebindArkTSFunctionPlaceholderNode(Node& node, FuncDecl& fd, File& f
         return VisitAction::WALK_CHILDREN;
     }
     if (auto ref = DynamicCast<RefExpr*>(&node)) {
-        if (!RebindArkTSFunctionArgumentPlaceholder(*ref, fd, params)) {
-            RebindArkTSFunctionClassReference(*ref, classRefs);
+        if (!RebindArkTSForeignFunctionArgumentPlaceholder(*ref, fd, params)) {
+            RebindArkTSForeignFunctionClassReference(*ref, classRefs);
         }
     }
     if (auto returned = DynamicCast<ReturnExpr*>(&node)) {
@@ -736,19 +700,19 @@ VisitAction RebindArkTSFunctionPlaceholderNode(Node& node, FuncDecl& fd, File& f
 }
 
 // Rebind every placeholder of one installed generated function body.
-void RebindArkTSFunctionPlaceholders(Node& body, FuncDecl& fd, File& file,
+void RebindArkTSForeignFunctionPlaceholders(Node& body, FuncDecl& fd, File& file,
     const std::vector<Ptr<FuncParam>>& params, const std::unordered_map<std::string, std::string>& literals,
     const std::unordered_map<std::string, Ptr<Decl>>& classRefs,
     std::unordered_map<Ptr<const Node>, Ptr<Decl>>& pendingRefs)
 {
     Walker(&body, [&fd, &file, &params, &literals, &classRefs, &pendingRefs](Ptr<Node> node) {
-        return RebindArkTSFunctionPlaceholderNode(*node, fd, file, params, literals, classRefs, pendingRefs);
+        return RebindArkTSForeignFunctionPlaceholderNode(*node, fd, file, params, literals, classRefs, pendingRefs);
     }).Walk();
 }
 
 // Merge the retained type placeholders into the long-lived support map, only
 // after the body passed BindArkTSSupportReferences.
-void MergeArkTSFunctionSupportReferences(std::unordered_map<Ptr<const Node>, Ptr<Decl>>& supportRefs,
+void MergeArkTSForeignFunctionSupportReferences(std::unordered_map<Ptr<const Node>, Ptr<Decl>>& supportRefs,
     const std::unordered_map<Ptr<const Node>, Ptr<Decl>>& pendingRefs)
 {
     for (auto& [node, target] : pendingRefs) {
@@ -759,7 +723,7 @@ void MergeArkTSFunctionSupportReferences(std::unordered_map<Ptr<const Node>, Ptr
 // Build the symbol table of one installed generated body: locals share the
 // parameter scope (Collector::CollectFuncBody) and are registered in the
 // checker's declaration names, then the previous scope state is restored.
-void BuildArkTSFunctionBodySymbols(ASTContext& ctx, ScopeManager& scopeManager, FuncBody& fb,
+void BuildArkTSForeignFunctionBodySymbols(ASTContext& ctx, ScopeManager& scopeManager, FuncBody& fb,
     const std::vector<Ptr<FuncParam>>& params, bool buildTrie)
 {
     auto oldScope = ctx.currentScopeName;
@@ -791,11 +755,11 @@ void BuildArkTSFunctionBodySymbols(ASTContext& ctx, ScopeManager& scopeManager, 
 // Parse the generated wrapper into the FuncBody and rebind its placeholders,
 // support references and scope names. A generated skeleton that fails to
 // parse already reported its own diagnostics.
-bool InstallArkTSFunctionBody(ASTContext& ctx, DiagnosticEngine& diag, ImportManager& imports,
+bool InstallArkTSForeignFunctionBody(ASTContext& ctx, DiagnosticEngine& diag, ImportManager& imports,
     ScopeManager& scopeManager, SourceManager& sourceManager, bool buildTrie, File& file, FuncDecl& fd,
-    ArkTSFunctionSignature& sig, std::unordered_map<Ptr<const Node>, Ptr<Decl>>& supportRefs)
+    ArkTSForeignFunctionSignature& sig, std::unordered_map<Ptr<const Node>, Ptr<Decl>>& supportRefs)
 {
-    auto code = BuildArkTSFunctionWrapperSource(sig);
+    auto code = BuildArkTSForeignFunctionWrapperSource(sig);
     // A generator refusal must never silently drop the wrapper: the remaining
     // refusals are rest placements the parse checks already reject and
     // hand-built descriptions, so the message stays generic.
@@ -811,51 +775,51 @@ bool InstallArkTSFunctionBody(ASTContext& ctx, DiagnosticEngine& diag, ImportMan
         return false;
     }
     std::unordered_map<Ptr<const Node>, Ptr<Decl>> pendingRefs;
-    RebindArkTSFunctionPlaceholders(*fb.body, fd, file, sig.params, sig.literals, sig.classRefs, pendingRefs);
+    RebindArkTSForeignFunctionPlaceholders(*fb.body, fd, file, sig.params, sig.literals, sig.classRefs, pendingRefs);
     if (!BindSupportReferences(fd, *fb.body, imports, diag, pendingRefs, false, fd.identifier.Val(), nullptr)) {
         fb.body.reset();
         fd.EnableAttr(Attribute::IS_BROKEN);
         fb.EnableAttr(Attribute::IS_BROKEN);
         return false;
     }
-    MergeArkTSFunctionSupportReferences(supportRefs, pendingRefs);
-    BuildArkTSFunctionBodySymbols(ctx, scopeManager, fb, sig.params, buildTrie);
+    MergeArkTSForeignFunctionSupportReferences(supportRefs, pendingRefs);
+    BuildArkTSForeignFunctionBodySymbols(ctx, scopeManager, fb, sig.params, buildTrie);
     return true;
 }
 
 // One marked wrapper: analyze (options, return, parameters), prepare (module
 // and generated names), finalize (rest and optional run) and install. Every
 // refusal returns without generating the remaining pieces of this wrapper.
-void LowerArkTSFunctionDecl(ASTContext& ctx, DiagnosticEngine& diag, ImportManager& imports,
+void LowerArkTSForeignFunctionDecl(ASTContext& ctx, DiagnosticEngine& diag, ImportManager& imports,
     ScopeManager& scopeManager, SourceManager& sourceManager, bool buildTrie, Package& pkg, File& file,
     FuncDecl& fd, std::unordered_map<Ptr<const Node>, Ptr<Decl>>& supportRefs,
     const std::function<ArkTSTypeDesc(Ptr<Type>)>& classify)
 {
-    ArkTSFunctionSignature sig;
+    ArkTSForeignFunctionSignature sig;
     // The option contract is checked before the signature: an illegal option
     // value is a declaration error of its own, and a later unsupported
     // signature refusal must not hide it.
     ArkTSOptionStatus optionStatus;
     if (!ArkTSDeclOptions(fd, sig.options, &optionStatus)) {
-        DiagnoseArkTSFunctionOptionProblem(diag, fd, sig.options, optionStatus);
+        DiagnoseArkTSForeignFunctionOptionProblem(diag, fd, sig.options, optionStatus);
         fd.EnableAttr(Attribute::IS_BROKEN);
         return;
     }
     sig.resultType = classify(fd.funcBody->retType.get());
-    if (RefuseArkTSFunctionReturnType(diag, fd, *fd.funcBody, sig.resultType)) {
+    if (RefuseArkTSForeignFunctionReturnType(diag, fd, *fd.funcBody, sig.resultType)) {
         return;
     }
-    if (!ClassifyArkTSFunctionParameters(diag, fd, *fd.funcBody, classify, sig)) {
+    if (!ClassifyArkTSForeignFunctionParameters(diag, fd, *fd.funcBody, classify, sig)) {
         fd.EnableAttr(Attribute::IS_BROKEN);
         return;
     }
-    if (!PrepareArkTSFunctionModule(diag, pkg, fd, sig)) {
+    if (!PrepareArkTSForeignFunctionModule(diag, pkg, fd, sig)) {
         return;
     }
-    if (!FinalizeArkTSFunctionSignature(diag, fd, *fd.funcBody, sig)) {
+    if (!FinalizeArkTSForeignFunctionSignature(diag, fd, *fd.funcBody, sig)) {
         return;
     }
-    InstallArkTSFunctionBody(
+    InstallArkTSForeignFunctionBody(
         ctx, diag, imports, scopeManager, sourceManager, buildTrie, file, fd, sig, supportRefs);
 }
 } // namespace
@@ -876,7 +840,7 @@ void LowerArkTSFunctionDecl(ASTContext& ctx, DiagnosticEngine& diag, ImportManag
 // so a class, interface, variable, parameter or entry cannot silently carry an
 // illegal option; wrappers stay owned by the fold below.
 
-void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
+void TypeChecker::TypeCheckerImpl::LowerArkTSForeignFunctions(ASTContext& ctx)
 {
     auto& pkg = *ctx.curPackage;
     if (!PassEnabled(pkg)) {
@@ -905,7 +869,7 @@ void TypeChecker::TypeCheckerImpl::LowerArkTSFunctions(ASTContext& ctx)
                 IsGlobalVar(*fd)) {
                 continue;
             }
-            LowerArkTSFunctionDecl(ctx, diag, *ci->importManager, scopeManager, ci->GetSourceManager(),
+            LowerArkTSForeignFunctionDecl(ctx, diag, *ci->importManager, scopeManager, ci->GetSourceManager(),
                 ci->buildTrie, pkg, *file, *fd, arktsSupportRefs, classify);
         }
     }

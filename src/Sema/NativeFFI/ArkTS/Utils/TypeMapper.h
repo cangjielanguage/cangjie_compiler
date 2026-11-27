@@ -34,8 +34,8 @@ namespace Cangjie::Native::FFI::ArkTS {
 // again descriptions; classification never invents names outside the
 // checked sets.
 // Example: Option<Array<Int32>> -> OPTIONAL{ARRAY_COPY{SCALAR "Int32"}};
-//          ArkTSArray<Int32> or a nested Option -> UNSUPPORTED with no
-//          elements - no wrapper is generated for such positions.
+//          a nested Option -> UNSUPPORTED with no elements - no wrapper is
+//          generated for such positions.
 // Value kind of one ArkTS enum member, shared by the classification side and
 // the lowering side so their spellings cannot drift: a numeric member is mapped
 // through Float64, a string member through ctx.string, a boolean member through
@@ -68,7 +68,6 @@ struct ArkTSTypeDesc {
         TUPLE,        // (T1', ..., Tn') with n >= 2
         REFERENCE,    // @ArkTS foreign class instance: reference to an ArkTS object
         ENUM,         // @ArkTS foreign enum: value mapped through @RawValue
-        ARKTS_FUNC,   // std.interop.arkts ArkTSFunc<F>: carrier of an ArkTS function
     };
     Kind kind{Kind::UNSUPPORTED};
     // Checked scalar name for SCALAR nodes (for example "Int8"); empty for
@@ -92,37 +91,7 @@ struct ArkTSTypeDesc {
     // kind keeps it empty. Populated by lowering from the prepared enum
     // mapping, never by classification alone.
     std::vector<ArkTSEnumMember> enumMembers;
-    // ARKTS_FUNC nodes: the resolved `F` of ArkTSFunc<F> (a FuncTy), its
-    // parameter descriptions in `elements` (empty for a zero-parameter `F`)
-    // and its result description in `funcResult`. Every other kind keeps
-    // funcTy null and funcResult null. The result is a pointer because the
-    // description is recursive: the carrier's result is itself a description.
-    Ptr<AST::Ty> funcTy;
-    std::shared_ptr<ArkTSTypeDesc> funcResult;
-    // The result description of an ARKTS_FUNC node; UNSUPPORTED (empty) for
-    // every other kind or a carrier whose result was not filled in.
-    const ArkTSTypeDesc& FuncResult() const
-    {
-        static const ArkTSTypeDesc unsupported{};
-        return funcResult ? *funcResult : unsupported;
-    }
 };
-
-// Why an ArkTSFunc<F> / ArkTSFuncWithThis<ThisT, F> position was not
-// classified as a carrier. The kinds select the dedicated diagnostics: F is
-// not a function type, one of F's parameter/return types is not
-// ArkTS-compatible, or F depends on an enclosing declaration's type
-// parameter (design 4.2.1 e3/e4). NONE also for every type that is not the
-// package-pinned preset carrier: those keep the generic unsupported-type and
-// deferral routing unchanged.
-enum class ArkTSFuncCarrierReject { NONE, NOT_A_FUNCTION, UNSUPPORTED_MEMBER, OUTER_GENERIC };
-
-// Recognizes a position spelled with the preset carrier whose function-type
-// constraint failed; the check is pinned to the declaring package the way
-// ArkTSDeferredExternalTypeName is, so a same-named user class keeps the
-// generic diagnostics. Classification is the positive path; this helper is
-// diagnostic routing ONLY.
-ArkTSFuncCarrierReject ArkTSFuncCarrierRejectReason(Ptr<AST::Ty> ty);
 
 // Checked scalar names (the checked scalar table): the number candidates
 // Int8 through UInt32, Float16 through Float64 and Rune; the bigint
@@ -139,12 +108,9 @@ std::string ArkTSJoin(const std::vector<std::string>& parts, const std::string& 
 
 // Maps a semantic type to its description. Everything the foreign side
 // cannot accept yields kind UNSUPPORTED with no elements: non-whitelisted
-// scalars (IntNative and friends), non-core Option/Array decls,
-// every ArkTSArray-named class except the package-pinned prepared generic
-// preset (the latter maps to a REFERENCE leaf carrying its element
-// description; a stale CJO that predates the preparation keeps the generic
-// rejection), nested Option, tuples with fewer than two elements, Map/Set/
-// TypedArray and the remaining composite kinds.
+// scalars (IntNative and friends), non-core Option/Array decls, nested
+// Option, tuples with fewer than two elements, Map/Set/TypedArray and the
+// remaining composite kinds.
 // `allowNestedOptional` permits an Option directly nested in an Option. The
 // design enables that shape only for a non-foreign exported variable, where
 // the layers unwrap to one ArkTS `T | undefined` (design §3.4); every foreign
@@ -153,29 +119,20 @@ std::string ArkTSJoin(const std::vector<std::string>& parts, const std::string& 
 ArkTSTypeDesc ArkTSClassifyType(Ptr<AST::Ty> ty, ImportManager* imports = nullptr,
     bool allowNestedOptional = false);
 
-// Recognition of the external ArkTS preset types whose signature-position
-// mapping is not available - std.interop.arkts ArkTSType
-// (the ArkTS `unknown` parent type), plus ArkTSString in the shapes that did
-// not go through preparation (an unprepared or stale-CJO declaration).
-// ArkTSString is otherwise prepared as an ordinary wrapper (IsArkTSPresetString)
-// and its positions classify as generatable REFERENCE leaves, so this
-// recognition is diagnostic routing ONLY - never a classification input:
-// classification returns UNSUPPORTED only for the genuinely deferred shapes;
-// LowerFunctions uses the returned name solely to pick the dedicated deferral
-// diagnostic over the generic unsupported-type message. The prepared generic
-// preset array ArkTSArray<T'> takes the reference-leaf route: its positions
-// classify as generatable reference leaves with an explicit element
-// description. A stale CJO that predates the array preparation keeps the
-// generic rejection.
-// Recognition is pinned
-// to the declaring package - the way BigInt is pinned to std.math.numeric - so
-// a same-named declaration in any other package keeps the generic rejection.
-// This deferral is about the foreign-signature mapping and reference semantics
-// only. The static type relation is separate and IS available: the compiler
-// treats @ArkTS-annotated types and these presets as implicit subtypes of
-// std.interop.arkts.ArkTSType (see TypeManager::IsSubtype), static-only - the
-// relation backs assignment, generic constraints, overloads and member lookup,
-// not a runtime check.
+// Recognition of the external ArkTS preset type whose signature-position
+// mapping is not available: std.interop.arkts ArkTSType, the ArkTS `unknown`
+// parent type. This recognition is diagnostic routing ONLY - never a
+// classification input: classification returns UNSUPPORTED for the position,
+// and LowerFunctions uses the returned name solely to pick the dedicated
+// deferral diagnostic over the generic unsupported-type message.
+// Recognition is pinned to the declaring package - the way BigInt is pinned to
+// std.math.numeric - so a same-named declaration in any other package keeps
+// the generic rejection. This deferral is about the foreign-signature mapping
+// and reference semantics only. The static type relation is separate and IS
+// available: the compiler treats @ArkTS-annotated types and this preset as
+// implicit subtypes of std.interop.arkts.ArkTSType (see TypeManager::IsSubtype),
+// static-only - the relation backs assignment, generic constraints, overloads
+// and member lookup, not a runtime check.
 std::string ArkTSDeferredExternalTypeName(Ptr<AST::Ty> ty);
 
 // Spelling for one REFERENCE leaf. Unset means the class identifier, which is

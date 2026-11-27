@@ -671,11 +671,10 @@ private:
     bool IsArkTSRootInterface(const AST::Ty& root) const;
     /**
      * A leaf that participates in the ArkTSType relation: an @ArkTS-annotated
-     * class/interface/enum (foreign or prepared wrapper), a package-pinned
-     * preset (ArkTSType/ArkTSArray/ArkTSString), or Extern<ArkTS> when implicit
-     * boxing is allowed (Extern is a struct and must be boxed to reach the
-     * interface). Deliberately excludes primitives, Option/Array/tuple
-     * composites and arbitrary types.
+     * class/interface/enum (foreign or prepared wrapper), the package-pinned
+     * ArkTSType root, or Extern<ArkTS> when implicit boxing is allowed (Extern
+     * is a struct and must be boxed to reach the interface). Deliberately
+     * excludes primitives, Option/Array/tuple composites and arbitrary types.
      */
     bool IsArkTSCompatibleLeaf(const AST::Ty& leaf, bool implicitBoxed) const;
 

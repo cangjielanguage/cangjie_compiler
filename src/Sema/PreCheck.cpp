@@ -1915,7 +1915,7 @@ Ptr<ReturnExpr> GetDanglingReturn(const FuncParam& fp)
 // A default-value desugar function of an @ArkTS foreign wrapper owns its
 // return expression and must not be rebound to the wrapper's return type.
 // ARKTS_FUNCTION_WRAPPER is the attribute PrepareTypeCheck sets on the wrapper
-// declaration whose body LowerArkTSFunctions generates.
+// declaration whose body LowerArkTSForeignFunctions generates.
 bool IsArkTSWrapperDesugarReturn(const ReturnExpr& re)
 {
     return re.refFuncBody && re.refFuncBody->funcDecl && re.refFuncBody->funcDecl->TestAttr(Attribute::HAS_INITIAL) &&
@@ -2320,7 +2320,7 @@ void TypeChecker::TypeCheckerImpl::PreCheck(const std::vector<Ptr<ASTContext>>& 
     // check below.
     for (auto& ctx : contexts) {
         LowerArkTSClasses(*ctx);
-        LowerArkTSFunctions(*ctx);
+        LowerArkTSForeignFunctions(*ctx);
         LowerArkTSVariables(*ctx);
     }
 

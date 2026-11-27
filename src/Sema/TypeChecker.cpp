@@ -2067,7 +2067,7 @@ std::vector<Ptr<ASTContext>> TypeChecker::TypeCheckerImpl::PreTypeCheck(const st
     // PrepareTypeCheck loop below, which runs before PreCheck, so they are
     // cleared here, once per pass, ahead of that population. They cannot be
     // cleared next to arktsSupportRefs (inside PreCheck, near
-    // LowerArkTSFunctions/LowerArkTSVariables): that runs after PrepareTypeCheck
+    // LowerArkTSForeignFunctions/LowerArkTSVariables): that runs after PrepareTypeCheck
     // has already filled them and would wipe the fresh tables this pass needs.
     // The experimental gate belongs to the semantic pass, not to the per-pass
     // lowering tables, so it is set before ResetState clears those tables.

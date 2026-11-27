@@ -21,7 +21,7 @@ namespace {
 // The access-modifier (public/private/internal/protected) x 'foreign'
 // conflict pair. On @ArkTS-annotated declarations the pair is skipped, so the
 // stdlib can spell the preset declarations verbatim, e.g.
-// '@ArkTS[foreignName: "Array"] public foreign class ArkTSArray<T>'.
+// '@ArkTS[foreignName: "Foo"] public foreign class Foo'.
 // An @ArkTS foreign function relaxes every visibility except 'private': the
 // design forbids a private foreign declaration while 'public foreign func' is
 // the ArkTS spelling. Every other conflict pair keeps firing, with or without

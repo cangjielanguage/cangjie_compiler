@@ -237,19 +237,14 @@ bool CheckForeignClassMemberShapes(ClassDecl& cd, DiagnosticEngine& diag)
 }
 
 // The wrapper needs the interop declaration of its carrier imported: JSObject
-// for an ordinary wrapper, JSValue for the ArkTSString preset (its holder
-// spells the primitive carrier).
+// for an ordinary wrapper.
 bool CheckForeignClassJSObject(ClassDecl& cd, DiagnosticEngine& diag, ImportManager& imports)
 {
-    const bool presetString = IsArkTSPresetString(cd);
-    const bool found = presetString ? FindArkTSJSValue(imports, *cd.curFile) != nullptr
-                                    : FindArkTSJSObject(imports, *cd.curFile) != nullptr;
-    if (found) {
+    if (FindArkTSJSObject(imports, *cd.curFile) != nullptr) {
         return true;
     }
     return RefuseForeignClass(cd, diag,
-        "the wrapper needs the imported declaration 'ohos.ark_interop." + std::string(
-            presetString ? ARKTS_JS_VALUE_CARRIER : ARKTS_JS_OBJECT) + "'");
+        "the wrapper needs the imported declaration 'ohos.ark_interop." + std::string(ARKTS_JS_OBJECT) + "'");
 }
 
 // Clone the property type onto the first setter parameter when it lacks one.
@@ -348,11 +343,7 @@ bool CheckForeignClassShape(ClassDecl& cd, DiagnosticEngine& diag, ImportManager
 bool InstallWrapperMembers(
     ClassDecl& cd, bool wrapperParent, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports)
 {
-    // A preset string stores a JS primitive and the function carrier stores a
-    // JSValue function reference; every other wrapper stores a JSObject handle.
-    const std::string carrier =
-        IsArkTSPresetString(cd) || IsArkTSPresetFunc(cd) ? ARKTS_JS_VALUE_CARRIER : ARKTS_JS_OBJECT;
-    if (!InsertArkTSReferenceMembers(cd, wrapperParent, diag, sourceManager, imports, carrier)) {
+    if (!InsertArkTSReferenceMembers(cd, wrapperParent, diag, sourceManager, imports)) {
         diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_foreign_class_invalid, cd, cd.identifier.Val(),
             "cannot declare the wrapper reference members");
         cd.EnableAttr(Attribute::IS_BROKEN);
@@ -393,87 +384,11 @@ bool RefuseUnsupportedGenericForeignClass(ClassDecl& cd, DiagnosticEngine& diag)
     if (!IsUnsupportedGenericForeignClass(cd)) {
         return false;
     }
-    const auto& packageName = cd.curFile != nullptr && cd.curFile->curPackage != nullptr
-        ? cd.curFile->curPackage->fullPackageName
-        : cd.fullPackageName;
-    if (packageName == ARKTS_PRESET_PACKAGE) {
-        return false;
-    }
     diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_generic_foreign_unsupported, cd, cd.identifier.Val());
     cd.EnableAttr(Attribute::IS_BROKEN);
     return true;
 }
 
-// Drop the bodyless constructors of the preset function carrier. A generic
-// body cannot invoke a value of the type parameter F (the language has no
-// callable constraint), so `init(f: F)` has no lowerable form: the class is
-// left with the compiler-owned carrier members only, and every construction
-// is rewritten at the use site (FuncValueSource) onto the JSValue wrapping
-// constructor. An already-installed carrier has no bodyless member left.
-void DropPresetFuncInit(ClassDecl& cd)
-{
-    Utils::EraseIf(cd.GetMemberDecls(), [](auto& member) {
-        // A bodyless constructor carries a parameter-list body without a
-        // statement block (the parser names constructors "init" until the
-        // rename); lowering can never supply a body for the generic form, so
-        // the member is dropped and construction moves to the use site.
-        auto fd = DynamicCast<FuncDecl*>(member.get());
-        if (fd == nullptr || !IsInstanceConstructor(*fd)) {
-            return false;
-        }
-        return fd->funcBody == nullptr || fd->funcBody->body == nullptr;
-    });
-}
-
-// Install the carrier storage of the preset function carrier: JSValue
-// storage, the two wrapping constructors and the accessor (the same holder
-// the preset string uses), the generic external marker cleared and the
-// wrapper attribute set, so the class survives the cjo round trip as a
-// prepared carrier. Outside the stdlib package nothing matches the pin, and
-// an already installed carrier is left alone (the pass may run twice on an
-// incremental or repeated tree).
-void PreparePresetFuncCarriers(
-    Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports)
-{
-    for (auto& file : pkg.files) {
-        for (auto& decl : file->decls) {
-            auto cd = DynamicCast<ClassDecl*>(decl.get());
-            if (cd == nullptr || !IsArkTSPresetFunc(*cd) || IsArkTSClassWrapper(*cd)) {
-                continue;
-            }
-            DropPresetFuncInit(*cd);
-            (void)InstallWrapperMembers(*cd, false, diag, sourceManager, imports);
-        }
-    }
-}
-
-// Install the carrier storage of the preset array: the default JSObject
-// carrier (a JS array is an object), the wrapping constructors and the
-// accessor, and the wrapper attribute so the class survives the cjo round
-// trip as a prepared wrapper and its signature positions classify as
-// reference leaves. The member bodies are not generated: the runtime writes
-// them against the hidden `T <: JSInteropType<T>` constraint, and the shape
-// checks of an unprepared foreign class do not apply (the declaration is not
-// foreign and its members carry bodies by design). Nothing outside the
-// stdlib package matches the pin, and an already installed wrapper is left
-// alone. The class keeps its own public constructors, so the wrapping
-// constructors install as overloads beside them.
-void PreparePresetArrayCarriers(
-    Package& pkg, DiagnosticEngine& diag, SourceManager& sourceManager, ImportManager& imports)
-{
-    for (auto& file : pkg.files) {
-        for (auto& decl : file->decls) {
-            auto cd = DynamicCast<ClassDecl*>(decl.get());
-            if (cd == nullptr || !IsArkTSPresetArray(*cd) || IsArkTSClassWrapper(*cd) ||
-                cd->TestAttr(Attribute::IS_BROKEN)) {
-                continue;
-            }
-            if (!InstallWrapperMembers(*cd, false, diag, sourceManager, imports)) {
-                cd->EnableAttr(Attribute::IS_BROKEN);
-            }
-        }
-    }
-}
 // The check phase for one declaration: the generic rule first, then the shape
 // checks of an unprepared foreign class. Returns the surviving class or null.
 Ptr<ClassDecl> CheckForeignClassDecl(Ptr<Decl> decl, DiagnosticEngine& diag, ImportManager& imports)
@@ -589,11 +504,7 @@ InstallResult InstallClassWrapper(Ptr<ClassDecl> cd, InstallState& state, const 
 
 // Walk every source file and prepare each unprepared non-generic foreign
 // class; member bodies stay empty until lowering fills them. Generic classes
-// keep their external declaration form; the stdlib presets are handled by
-// their package-pinned passes (the preset array gains the JSObject carrier
-// storage beside its runtime-written member bodies, the preset function
-// carrier becomes a constructor-only carrier, ArkTSString goes through the
-// ordinary non-generic path).
+// keep their external declaration form.
 // Preparation runs in two phases over the package:
 // - the check phase (file order) runs every refusal check and the
 //   user-member preparation of each foreign class, so each class's fate is
@@ -636,13 +547,5 @@ void PrepareClasses(Package& pkg, DiagnosticEngine& diag, SourceManager& sourceM
     for (auto cd : survivors) {
         (void)install(cd);
     }
-    // The preset function carrier is installed after the ordinary wrappers:
-    // it is package-pinned, generic, and needs neither the shape checks nor
-    // a parent decision (it never inherits).
-    PreparePresetFuncCarriers(pkg, diag, sourceManager, *imports);
-    // The preset array is installed the same way: package-pinned, generic,
-    // no shape checks (its members carry runtime-written bodies), no parent
-    // decision (it never inherits).
-    PreparePresetArrayCarriers(pkg, diag, sourceManager, *imports);
 }
 } // namespace Cangjie::Native::FFI::ArkTS

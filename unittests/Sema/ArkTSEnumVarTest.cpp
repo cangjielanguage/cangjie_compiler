@@ -738,8 +738,8 @@ public class JSContext {
 
 // js_interop_type.cj:39 `public interface JSInteropType<T>` and the
 // conformance table at js_interop_type.cj:80..:905, reduced to the element
-// positions the prepared ArkTSArray<T> tests spell. The stub bodies return
-// dummies: the tests compile, they never run the conversion.
+// positions the prepared wrappers spell. The stub bodies return dummies: the
+// tests compile, they never run the conversion.
 public interface JSInteropType<T> {
     static func fromJSValue(context: JSContext, input: JSValue): T
     func toJSValue(context: JSContext): JSValue
@@ -798,29 +798,11 @@ public import ohos.ark_interop.*
 public import cj_arkts_context_v1.*
 public import std.math.numeric.BigInt
 
-public class ExternConversionException <: Exception {
-    public init(message: String) {
-        super(message)
-    }
-}
-
 public class BusinessException <: Exception {
     public let code: Int32
     public init(code: Int32, message: String) {
         super(message)
         this.code = code
-    }
-}
-
-// Carrier types used by the '@HasThis' contract tests. The shipped stub is
-// deliberately small; the real declarations live in std.interop.arkts.
-public class ArkTSFunc<F> {
-    public init(f: F) {}
-}
-
-public class ArkTSFuncWithThis<ThisT, F> {
-    public func bind(thisArg: ThisT): ArkTSFunc<F> {
-        throw Exception("arkts carrier stub")
     }
 }
 )";
@@ -934,7 +916,7 @@ foreign func count(): Int32
             ++conversionThrows;
             EXPECT_NE(ref->ref.target, nullptr);
             if (ref->ref.target) {
-                EXPECT_EQ(ref->ref.target->fullPackageName, "arkts.lang");
+                EXPECT_EQ(ref->ref.target->fullPackageName, "std.core");
             }
         }
         return VisitAction::WALK_CHILDREN;

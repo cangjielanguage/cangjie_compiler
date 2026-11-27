@@ -572,24 +572,9 @@ void ASTLoader::ASTLoaderImpl::LoadNominalDeclRef(const PackageFormat::Decl& dec
             auto type = WrapType(retTy);
             UpdateType(astDecl.funcBody->retType, std::move(type));
         }
-        // A '@HasThis' declaration's decl type is the carrier class
-        // ArkTSFuncWithThis<ThisT, F>, while its funcBody always denotes the
-        // underlying function signature F. Keep that signature here: CHIR
-        // translates the function symbol from the funcBody type, and a carrier
-        // class type would make the imported symbol a class value instead of
-        // the generated function wrapper it is.
-        auto declTy = astDecl.GetTy();
-        auto carrier = astDecl.TestAttr(Attribute::ARKTS_HAS_THIS) ?
-            DynamicCast<ClassTy*>(declTy.Ty()) : nullptr;
-        // ArkTSFuncWithThis<ThisT, F> carries this type and function signature
-        // as its two type arguments; the signature slot feeds the funcBody.
-        constexpr size_t arktsThisCarrierTypeArgs = 2;
-        if (carrier != nullptr && carrier->typeArgs.size() == arktsThisCarrierTypeArgs &&
-            carrier->typeArgs[1].IsCorrect() && carrier->typeArgs[1].Ty()->IsFunc()) {
-            astDecl.funcBody->SetTy(carrier->typeArgs[1]);
-        } else {
-            astDecl.funcBody->SetTy(declTy);
-        }
+        // The funcBody always denotes the function signature; CHIR translates
+        // the function symbol from it. Keep the declaration's checked type.
+        astDecl.funcBody->SetTy(astDecl.GetTy());
     }
     if constexpr (std::is_same_v<DeclT, ExtendDecl>) {
         UpdateType(astDecl.extendedType, WrapType(astDecl.GetTy()));

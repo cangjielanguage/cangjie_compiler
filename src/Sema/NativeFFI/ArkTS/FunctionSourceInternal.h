@@ -61,8 +61,6 @@ std::string ArkTSExportGuard(const std::string& receiver, const std::string& tar
 // error.
 std::string ArkTSMemberGuard(const std::string& receiver, const std::string& target, const std::string& member,
     const std::string& context, const std::string& indent);
-// Boxed receiver source for the ArkTSString preset's primitive handle.
-std::string ArkTSPresetStringReceiverSource(const std::string& prefix, std::string& receiver);
 // Callability check for a resolved target.
 std::string ArkTSCallableGuard(const std::string& target, const std::string& context, const std::string& reason,
     const std::string& indent);

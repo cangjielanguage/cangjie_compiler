@@ -950,39 +950,6 @@ private:
     bool ChkCallExprCandidates(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce, const Ptr<AST::Decl>& decl,
         std::vector<Ptr<AST::FuncDecl>> candidates, const std::vector<AST::ModalTy>& argsTys,
         bool prevCheckTrue);
-    /**
-     * The '@HasThis' carrier is not callable as a value until the later
-     * lowering lands: refuse a direct call of the declaration and the carrier's
-     * `bind` call. Returns true when the call was refused and marked invalid.
-     */
-    bool RefuseArkTSHasThisCall(AST::CallExpr& ce, const Ptr<AST::Decl>& decl);
-    // ArkTSFunc<F> construction rewriting and the carrier direct-call refusal
-    // (B4b; implemented in NativeFFI/ArkTS/Utils/FuncValueSource.cpp).
-    bool ChkArkTSFuncConstruction(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
-    bool LowerArkTSFuncConstruction(
-        ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce,
-        const Native::FFI::ArkTS::ArkTSTypeDesc& desc);
-    // Parse the compiler-owned probe declaration of one explicit construction
-    // and detach its return expression; an empty result refuses the call.
-    OwnedPtr<AST::Expr> ParseArkTSFuncConstructionProbe(const Native::FFI::ArkTS::ArkTSTypeDesc& desc,
-        AST::CallExpr& ce, std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
-    // Collect the generated replacement into the call's scope and register its
-    // generated declarations by name.
-    void CollectArkTSFuncReplacementSymbols(ASTContext& ctx, AST::CallExpr& ce, AST::Expr& replacement);
-    // Resolve every written type position inside the generated replacement.
-    void ResolveArkTSReplacementTypes(ASTContext& ctx, AST::Expr& replacement);
-    // The silent speculative base resolution of a candidate carrier
-    // construction: the call context is set for the attempt and no diagnostic
-    // may escape; reports whether the attempt resolved without a diagnostic.
-    bool SynthesizeArkTSFuncCalleeOnce(ASTContext& ctx, AST::CallExpr& ce, AST::RefExpr& re);
-    // Whether the resolved target of a candidate carrier construction is the
-    // ArkTS preset carrier class.
-    bool ResolvedToArkTSFuncCarrier(AST::CallExpr& ce, AST::RefExpr& re);
-    // Constraint refusals, the argument check and the use-site lowering of one
-    // accepted construction; returns the call's own well-typedness.
-    bool ApplyArkTSFuncConstruction(
-        ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce, AST::RefExpr& re, Ptr<AST::Ty> carrierTy);
-    bool RefuseArkTSFuncValueCall(AST::CallExpr& ce);
     bool ChkDesugarExprOfCallExpr(ASTContext& ctx, AST::ModalTy target, AST::CallExpr& ce);
     bool CheckCallKind(const AST::CallExpr& ce, Ptr<AST::Decl> decl, AST::CallKind& type);
     /**
@@ -1755,15 +1722,12 @@ private:
 
     void MarkOutermostBinaryExpressions(AST::Package& pkg) const;
     // FFI Sema Prepare Check.
-    void LowerArkTSFunctions(ASTContext& ctx);
+    void LowerArkTSForeignFunctions(ASTContext& ctx);
     void LowerArkTSClasses(ASTContext& ctx);
-    // A validated '@HasThis' foreign function denotes an
-    // ArkTSFuncWithThis<ThisT, F> value; replace its function type after the
-    // signature is checked.
+    // The '@HasThis' annotation still parses and passes its placement checks,
+    // but the ArkTS function carrier that would give the declaration its type
+    // is not provided; report that explicitly.
     void ApplyArkTSHasThisType(AST::FuncDecl& fd);
-    // Rebuild ThisT for an imported '@HasThis' declaration from the spelling
-    // kept in its CJO; returns null when the name cannot be reconstructed.
-    Ptr<AST::Ty> ResolveImportedHasThisTy(const AST::FuncDecl& fd, const AST::Expr& arg);
     // Shared state of one prepared ArkTS class or interface lowering step.
     // Defined in LowerClasses.cpp: no other translation unit can name it.
     struct ArkTSDeclLoweringContext;
@@ -1806,7 +1770,7 @@ private:
     void InstallArkTSMemberBody(ASTContext& ctx, ArkTSDeclLoweringContext& lowering, AST::FuncDecl& member,
         AST::File& file, const std::string& code, const std::vector<Ptr<AST::FuncParam>>& params,
         const std::string& memberName, const std::unordered_map<std::string, Ptr<AST::Decl>>& classRefs);
-    bool ClassifyArkTSFuncParameters(ASTContext& ctx, AST::FuncDecl& fd,
+    bool ClassifyArkTSForeignFunctionTypes(ASTContext& ctx, AST::FuncDecl& fd,
         std::vector<Native::FFI::ArkTS::ArkTSTypeDesc>& types, std::vector<Ptr<AST::FuncParam>>& params);
     bool ClassifyArkTSPropertyType(
         ASTContext& ctx, AST::PropDecl& pd, Native::FFI::ArkTS::ArkTSTypeDesc& desc);
@@ -1823,10 +1787,8 @@ private:
         ASTContext& ctx, Ptr<AST::Type> type, bool allowNestedOptional = false);
     // One value position as an ArkTS type description: the classification and
     // enum-table attachment of ArkTSClassifyPosition, entered from a resolved
-    // type instead of a written type node (the explicit ArkTSFunc<F>
-    // construction carries F only as the resolved type argument of the carrier
-    // reference). The payload recursion is the written-type entry's, so an
-    // enum leaf means the same thing in both paths.
+    // type instead of a written type node. The payload recursion is the
+    // written-type entry's, so an enum leaf means the same thing in both paths.
     Native::FFI::ArkTS::ArkTSTypeDesc ArkTSClassifyValuePosition(ASTContext& ctx, Ptr<AST::Ty> ty);
 
     // Refuse an extend declaration that adds a prepared @ArkTS foreign
@@ -2066,10 +2028,6 @@ private:
      * is restored instead of resolved by name.
      */
     std::unordered_map<Ptr<const AST::Node>, Ptr<AST::Decl>> arktsSupportRefs;
-    // Set when RefuseArkTSFuncValueCall reported the dedicated carrier-call
-    // refusal; ChkFunctionCallExpr consumes it and skips the generic
-    // "no matching operator ()" restatement.
-    bool arkTSFuncValueCallRefused{false};
     Triple::BackendType backendType;
     // outermost @Derpecated declaration
     Ptr<AST::Node> deprecatedContext = nullptr;

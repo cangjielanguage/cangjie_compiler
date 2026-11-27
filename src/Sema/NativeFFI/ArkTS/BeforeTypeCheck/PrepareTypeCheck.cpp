@@ -257,7 +257,7 @@ void GenerateEntryDeclarations(
 //        the FOREIGN modifier are removed (also C on FuncBody) while FOREIGN
 //        itself stays as the declaration's source identity. Every check that
 //        used FOREIGN to mean "external" reads IsExternalForeign instead. Body
-//        stays empty until LowerArkTSFunctions resolves its semantic
+//        stays empty until LowerArkTSForeignFunctions resolves its semantic
 //        parameter/return types.
 //   @ArkTS public func run(): Unit { ... }
 //     -> unchanged run plus a generated callback and registration VarDecl in

@@ -94,8 +94,6 @@ namespace {
 // std.core: a same-named declaration in any other package stays ordinary.
 const std::string ARKTS_PRESET_PACKAGE_NAME = "std.interop.arkts";
 const std::string ARKTS_ROOT_TYPE_NAME = "ArkTSType";
-const std::string ARKTS_ARRAY_TYPE_NAME = "ArkTSArray";
-const std::string ARKTS_STRING_TYPE_NAME = "ArkTSString";
 } // namespace
 
 // The ArkTSType root interface is recognized by its declaring package and name
@@ -112,10 +110,9 @@ bool TypeManager::IsArkTSRootInterface(const Ty& root) const
 }
 
 // Every @ArkTS-annotated class-like declaration participates: foreign classes,
-// interfaces and enums, their prepared wrappers, and the preset types that
-// carry the annotation (ArkTSType, ArkTSArray, ArkTSString, ArkTSFunc). The
-// preset names are also matched by package pin so a prebuilt CJO that predates
-// the annotation-marker round trip still behaves. Extern<ArkTS> (the dynamic
+// interfaces and enums, their prepared wrappers, and the ArkTSType preset root.
+// The root is also matched by package pin so a prebuilt CJO that predates the
+// annotation-marker round trip still behaves. Extern<ArkTS> (the dynamic
 // carrier, design §8.1) is included when its payload is ArkTS-compatible.
 // Primitive, Option, Array and tuple composites are deliberately absent: the
 // design maps them structurally at the boundary, never as ArkTSType subtypes.
@@ -125,9 +122,7 @@ bool TypeManager::IsArkTSCompatibleLeaf(const Ty& leaf, bool implicitBoxed) cons
         if (decl->TestAttr(Attribute::ARKTS)) {
             return true;
         }
-        if (decl->fullPackageName == ARKTS_PRESET_PACKAGE_NAME &&
-            (decl->identifier == ARKTS_ROOT_TYPE_NAME || decl->identifier == ARKTS_ARRAY_TYPE_NAME ||
-                decl->identifier == ARKTS_STRING_TYPE_NAME)) {
+        if (decl->fullPackageName == ARKTS_PRESET_PACKAGE_NAME && decl->identifier == ARKTS_ROOT_TYPE_NAME) {
             return true;
         }
     }
@@ -2861,11 +2856,10 @@ ModalTy TypeManager::ObtainsAliasTypeOfRefType(Ptr<const RefType> rt)
 
 ModalTy TypeManager::ObtainsAliasTypeOfFuncDecl(Ptr<const FuncDecl> fd)
 {
-    // An '@HasThis' declaration's static type is the carrier class
-    // ArkTSFuncWithThis<ThisT, F>, not a function type. Its type arguments are
-    // ThisT and F, so rebuilding it from the signature's parameter and return
-    // types below would drop ThisT and corrupt the exported type. Keep the
-    // checked carrier type; this is the type the importing package must see.
+    // An imported declaration may carry a checked type that is not a function
+    // type (for example a stale CJO from a compiler that recorded a wrapper
+    // class). Rebuilding it from the signature below would corrupt that type,
+    // so keep the checked type; this is the type the importing package sees.
     if (!fd->GetTy()->IsFunc()) {
         return fd->GetTy();
     }

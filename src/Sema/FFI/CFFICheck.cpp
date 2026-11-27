@@ -291,7 +291,7 @@ void TypeChecker::TypeCheckerImpl::CheckLegalityOfUnsafeAndInout(Node& root)
 void TypeChecker::TypeCheckerImpl::UnsafeCheck(const FuncBody& fb)
 {
     // ArkTS declarations use the C-foreign spelling but not the C ABI: their
-    // parameter types are ArkTS-mapped types (Option/ArkTSArray/...), not C
+    // parameter types are ArkTS-mapped types (Option/Array/...), not C
     // types. The exemption therefore requires the C-foreign spelling on the
     // function itself (FOREIGN) and one of the two ArkTS shapes: its own
     // @ArkTS annotation (an @ArkTS foreign declaration) or an enclosing

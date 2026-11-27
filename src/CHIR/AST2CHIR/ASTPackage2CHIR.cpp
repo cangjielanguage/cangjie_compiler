@@ -39,11 +39,11 @@ Linkage GetFuncLinkage(const GlobalOptions& opts, const AST::FuncDecl& func)
     return func.linkage;
 }
 
-// An '@HasThis' declaration carries the ArkTSFuncWithThis<ThisT, F> class type
-// for name resolution, but the CHIR symbol is still the generated function
-// wrapper. Translate the checked function body's type for the symbol so the
-// class type never reaches a FuncType cast. The modal type is kept intact so
-// the locality mode reaches TranslateType.
+// An '@HasThis' declaration may carry a non-function checked type for name
+// resolution, while the CHIR symbol is still the generated function wrapper.
+// Translate the checked function body's type for the symbol so a non-function
+// type never reaches a FuncType cast. The modal type is kept intact so the
+// locality mode reaches TranslateType.
 AST::ModalTy GetFuncDeclCHIRType(const AST::FuncDecl& funcDecl)
 {
     if (funcDecl.TestAttr(AST::Attribute::ARKTS_HAS_THIS) && funcDecl.funcBody &&

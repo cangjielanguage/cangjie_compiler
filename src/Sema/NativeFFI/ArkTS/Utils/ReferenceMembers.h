@@ -17,20 +17,15 @@ namespace Native::FFI::ArkTS {
 // Generated member names shared by class and interface wrappers. A member
 // spelling one of these prefixes is reserved for compiler-owned storage.
 inline constexpr const char* ARKTS_RESERVED_PREFIX = "__cj_arkts_";
-// The type text of one wrapper reference holder: the default JSObject carrier
-// of an ordinary wrapper, or the JSValue carrier of the ArkTSString preset (a
-// JS string is a primitive, so the holder stores the JSValue handle).
+// The type text of one wrapper reference holder: the JSObject carrier of an
+// ordinary wrapper.
 inline constexpr const char* ARKTS_JS_OBJECT = "JSObject";
-inline constexpr const char* ARKTS_JS_VALUE_CARRIER = "JSValue";
 inline constexpr const char* ARKTS_SUPPORT_HOLDER = "__cj_arkts_support";
 
 // The imported ohos.ark_interop.JSObject declaration, or null when the file
 // does not import it. The wrapper members need this declaration to type the
 // stored reference.
 Ptr<AST::Decl> FindArkTSJSObject(ImportManager& imports, const AST::File& file);
-
-// The same lookup for the JSValue carrier of the ArkTSString preset.
-Ptr<AST::Decl> FindArkTSJSValue(ImportManager& imports, const AST::File& file);
 
 // Parse one compiler-owned support holder at the anchor's position, bind its
 // JSObject references to the imported declaration, and return the parsed
@@ -45,14 +40,11 @@ OwnedPtr<AST::Decl> ParseArkTSReferenceHolder(const std::string& code, const AST
 // (wrapperParent=false) gets the private carrier field, both wrapping
 // constructors and the accessor; a child wrapper (wrapperParent=true) only
 // redeclares both wrapping constructors as super(...) delegations, because
-// constructors are not inherited. The carrier is ARKTS_JS_OBJECT by default;
-// the ArkTSString preset passes ARKTS_JS_VALUE_CARRIER (its stored value is a
-// JSValue primitive). Source positions and the permanent file are the class's.
-// Returns false when the holder cannot be built or the carrier type is not
-// imported.
+// constructors are not inherited. Source positions and the permanent file are
+// the class's. Returns false when the holder cannot be built or the carrier
+// type is not imported.
 bool InsertArkTSReferenceMembers(AST::ClassDecl& cd, bool wrapperParent, DiagnosticEngine& diag,
-    SourceManager& sourceManager, ImportManager& imports,
-    const std::string& carrierType = ARKTS_JS_OBJECT);
+    SourceManager& sourceManager, ImportManager& imports);
 } // namespace Native::FFI::ArkTS
 } // namespace Cangjie
 #endif

@@ -1887,9 +1887,9 @@ TEST_F(ArkTSEntryTest, RestParamWrapperSpreadsCopyItemsIntoCallArguments)
 
 TEST_F(ArkTSEntryTest, RestParamWrapperWithModuleReceiverSpreadsCopyItems)
 {
-    // Array<T'> is the only generable rest kind: an ArkTSArray<T'> rest
-    // position classifies as unsupported and is rejected by the Sema rest
-    // diagnostic, so the generator has no branch for it. Each copy element is
+    // Array<T'> is the only generable rest kind: any other rest position is
+    // rejected by the Sema rest diagnostic, so the generator has no branch for
+    // it. Each copy element is
     // converted individually and becomes one callMethod argument. The MODULE
     // receiver - an explicit module, or a package name other than the
     // arkts.lang TS preset - reaches its target through requireArkModule.
@@ -1909,9 +1909,9 @@ TEST_F(ArkTSEntryTest, RestParamWrapperWithModuleReceiverSpreadsCopyItems)
 TEST_F(ArkTSEntryTest, RestParamRequiresAFinalArrayTypedPosition)
 {
     // Generator contract: the rest index must be the last position and carry
-    // Array<T'> (an ArkTSArray<T'> rest position is rejected upstream by the
-    // Sema rest diagnostic); anything else produces no wrapper rather than a
-    // mis-mapped call.
+    // Array<T'> (any other rest position is rejected upstream by the Sema rest
+    // diagnostic); anything else produces no wrapper rather than a mis-mapped
+    // call.
     auto scalar = ArkTSScalarDesc("Int32");
     auto arrayRest = ArkTSWrappedDesc(ArkTSTypeDesc::Kind::ARRAY_COPY, ArkTSScalarDesc("Int32"));
     EXPECT_TRUE(
@@ -1982,7 +1982,7 @@ foreign {
     EXPECT_GT(diag.GetErrorCount(), errorsBefore);
 }
 
-TEST_F(ArkTSEntryTest, RestParamOnANonForeignArkTSFunctionIsRejected)
+TEST_F(ArkTSEntryTest, RestParamOnANonForeignFunctionIsRejected)
 {
     // An @ArkTS entry (no foreign modifier) is not a rest target either:
     // the tightened predicate requires FOREIGN and @ArkTS together, in line
@@ -2324,11 +2324,11 @@ class FutureClass {
 TEST_F(ArkTSEntryTest, ArkTSAnnotatedPublicForeignClassParsesWithBodylessMembers)
 {
     // With the @ArkTS annotation the access x foreign modifier conflict is
-    // lifted and the constructor body requirement is waived, so the stdlib
+    // lifted and the constructor body requirement is waived, so the generic
     // spelling parses verbatim: 'public foreign class' with a generic parameter
     // and bodyless init/func/prop members.
     auto file = Parse(R"(@ArkTS[foreignName: "Array"]
-public foreign class ArkTSArray<T> {
+public foreign class Handle<T> {
     public init(arrayLength: Float64)
     public init(@RestParam items: Array<T>)
     public static func isArray(arg: ArkTSType): Bool
@@ -2368,7 +2368,7 @@ TEST_F(ArkTSEntryTest, PlainForeignClassDoesNotGetTheArkTSRelaxation)
     // foreign modifier but never receives the ArkTS marker. Main moved the
     // plain foreign class/interface rejection to Sema
     // (sema_unexpected_wrapper), so the parse itself succeeds.
-    auto file = ParseKeepingDiagnostics(R"(public foreign class ArkTSArray<T> {
+    auto file = ParseKeepingDiagnostics(R"(public foreign class Handle<T> {
     public func pop(): Option<T>
 }
 )");
@@ -2489,10 +2489,10 @@ TEST_F(ArkTSEntryTest, BodylessInitOfForeignClassWithoutArkTSStillDiagnosed)
 
 TEST_F(ArkTSEntryTest, RestParamOnAnArkTSForeignClassInitIsAccepted)
 {
-    // Positive: the bodyless 'init' of an @ArkTS foreign class is the stdlib
-    // preset spelling (ArkTSArray.init(@RestParam items: Array<T>)); with the
-    // rest parameter in the final position and no named parameter, the
-    // constructor path of the placement check stays silent.
+    // Positive: the bodyless 'init' of an @ArkTS foreign class accepts the
+    // generic spelling (Bag.init(@RestParam items: Array<T>)); with the rest
+    // parameter in the final position and no named parameter, the constructor
+    // path of the placement check stays silent.
     auto file = Parse(R"(@ArkTS
 foreign class Bag {
     public init(@RestParam items: Array<Int32>)
@@ -2699,140 +2699,6 @@ TEST_F(ArkTSEntryTest, MinimalPlainForeignClassDoesNotGetTheArkTSRelaxation)
     auto& cd = StaticCast<ClassDecl&>(*file->decls.front());
     EXPECT_TRUE(cd.TestAttr(Attribute::FOREIGN));
     EXPECT_FALSE(cd.TestAttr(Attribute::ARKTS));
-}
-
-namespace {
-// Counts the members that belong to the class-like under test, so the preset
-// declaration tests below state the member surface independently of the
-// declaration text (14 members for ArkTSArray, 11 for ArkTSString).
-size_t CountClassMembers(ClassDecl& cd)
-{
-    size_t count = 0;
-    Walker(&cd, [&count](Ptr<Node> node) {
-        if (node->astKind == ASTKind::FUNC_DECL || node->astKind == ASTKind::PROP_DECL) {
-            ++count;
-        }
-        return VisitAction::WALK_CHILDREN;
-    }).Walk();
-    return count;
-}
-
-std::vector<Ptr<FuncParam>> RestParamsOf(ClassDecl& cd)
-{
-    std::vector<Ptr<FuncParam>> rest;
-    Walker(&cd, [&rest](Ptr<Node> node) {
-        auto fd = DynamicCast<FuncDecl*>(node);
-        if (fd == nullptr || fd->funcBody == nullptr || fd->funcBody->paramLists.empty()) {
-            return VisitAction::WALK_CHILDREN;
-        }
-        for (const auto& param : fd->funcBody->paramLists.front()->params) {
-            if (std::any_of(param->annotations.begin(), param->annotations.end(),
-                    [](const auto& anno) { return anno->kind == AnnotationKind::ARKTS_REST_PARAM; })) {
-                rest.push_back(param.get());
-            }
-        }
-        return VisitAction::WALK_CHILDREN;
-    }).Walk();
-    return rest;
-}
-
-// Every member of a preset declaration is implemented on the ArkTS side: a
-// bodyless function member must have no body, and a prop member must declare
-// neither getter nor setter (the existing bodyless-member convention of
-// ArkTSAnnotatedPublicForeignClassParsesWithBodylessMembers).
-void ExpectAllMembersBodyless(const ClassDecl& cd)
-{
-    ASSERT_NE(cd.body, nullptr);
-    for (const auto& member : cd.body->decls) {
-        if (auto fd = DynamicCast<FuncDecl*>(member.get())) {
-            ASSERT_NE(fd->funcBody, nullptr) << fd->identifier;
-            EXPECT_EQ(fd->funcBody->body, nullptr) << fd->identifier;
-        } else if (auto pd = DynamicCast<PropDecl*>(member.get())) {
-            EXPECT_TRUE(pd->getters.empty()) << pd->identifier;
-            EXPECT_TRUE(pd->setters.empty()) << pd->identifier;
-        } else {
-            EXPECT_TRUE(false) << "unexpected member kind in preset declaration";
-        }
-    }
-}
-} // namespace
-
-TEST_F(ArkTSEntryTest, PresetArkTSArrayDeclarationParsesAllFourteenMembers)
-{
-    // The complete stdlib declaration of ArkTSArray<T> is parsed verbatim, so
-    // "the preset declaration is parseable" is exercised by the baseline ctest
-    // instead of only by the structure script. The three rest parameters keep
-    // the Cangjie Array<T> type - the ArkTSArray<T> reference form is out of
-    // scope here - and no member has a body.
-    auto file = Parse(R"(@ArkTS[foreignName: "Array"]
-public foreign class ArkTSArray<T> {
-    public init(arrayLength: Float64)
-    public init(@RestParam items: Array<T>)
-    public static func isArray(arg: ArkTSType): Bool
-    public prop prototype: ArkTSType
-    public prop length: Float64
-    public func pop(): Option<T>
-    public func push(@RestParam items: Array<T>): Float64
-    public func join(separator!: Option<String> = None): String
-    public func reverse(): ArkTSArray<T>
-    public func shift(): Option<T>
-    public func unshift(@RestParam items: Array<T>): Float64
-    public func slice(start!: Option<Float64> = None, end!: Option<Float64> = None): ArkTSArray<T>
-    public func indexOf(searchElement: T, fromIndex!: Option<Float64> = None): Float64
-    public func lastIndexOf(searchElement: T, fromIndex!: Option<Float64> = None): Float64
-}
-)");
-    ASSERT_NE(file, nullptr);
-    ASSERT_EQ(diag.GetErrorCount(), 0);
-    ASSERT_EQ(file->decls.size(), 1);
-    auto& cd = StaticCast<ClassDecl&>(*file->decls.front());
-    EXPECT_TRUE(cd.TestAttr(Attribute::FOREIGN));
-    EXPECT_TRUE(cd.HasAnno(AnnotationKind::ARKTS));
-    EXPECT_EQ(CountClassMembers(cd), 14u);
-    EXPECT_EQ(cd.body->decls.size(), 14u);
-    auto rest = RestParamsOf(cd);
-    ASSERT_EQ(rest.size(), 3u);
-    for (const auto& param : rest) {
-        EXPECT_EQ(param->identifier.Val(), "items");
-        EXPECT_EQ(param->type->ToString(), "Array<T>");
-        auto refType = DynamicCast<RefType*>(param->type.get());
-        ASSERT_NE(refType, nullptr);
-        EXPECT_EQ(refType->ref.identifier.Val(), "Array");
-        ASSERT_EQ(refType->typeArguments.size(), 1u);
-        EXPECT_EQ(refType->typeArguments.front()->ToString(), "T");
-    }
-    ExpectAllMembersBodyless(cd);
-}
-
-TEST_F(ArkTSEntryTest, PresetArkTSStringDeclarationParsesAllElevenMembers)
-{
-    // Mirror of the array case: the complete stdlib declaration of ArkTSString
-    // parses verbatim with no member body.
-    auto file = Parse(R"(@ArkTS[foreignName: "String"]
-public foreign class ArkTSString {
-    public init(value!: Option<String> = None)
-    public prop length: Float64
-    public func charAt(pos: Float64): String
-    public func charCodeAt(pos: Float64): Float64
-    public func indexOf(searchString: String, position!: Option<Float64> = None): Float64
-    public func lastIndexOf(searchString: String, position!: Option<Float64> = None): Float64
-    public func slice(start!: Option<Float64> = None, end!: Option<Float64> = None): ArkTSString
-    public func substring(start: Float64, end!: Option<Float64> = None): ArkTSString
-    public func toUpperCase(): ArkTSString
-    public func toLowerCase(): ArkTSString
-    public func toString(): String
-}
-)");
-    ASSERT_NE(file, nullptr);
-    ASSERT_EQ(diag.GetErrorCount(), 0);
-    ASSERT_EQ(file->decls.size(), 1);
-    auto& cd = StaticCast<ClassDecl&>(*file->decls.front());
-    EXPECT_TRUE(cd.TestAttr(Attribute::FOREIGN));
-    EXPECT_TRUE(cd.HasAnno(AnnotationKind::ARKTS));
-    EXPECT_EQ(CountClassMembers(cd), 11u);
-    EXPECT_EQ(cd.body->decls.size(), 11u);
-    EXPECT_TRUE(RestParamsOf(cd).empty());
-    ExpectAllMembersBodyless(cd);
 }
 
 TEST_F(ArkTSEntryTest, ArkTSForeignInitRestWithNamedParameterStillReportsDedicatedDiagnostic)

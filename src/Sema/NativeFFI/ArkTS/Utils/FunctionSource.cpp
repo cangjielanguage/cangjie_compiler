@@ -143,15 +143,13 @@ std::vector<std::string> ArkTSNamespaceSegments(const std::string& ns)
 }
 
 // The receiver rule beside ArkTSReceiverKind: the GLOBAL cases are the
-// package-pinned preset declarations - arkts.lang (or a subpackage) and the
-// interop preset package std.interop.arkts - whose module option is omitted;
-// every other spelling - explicit option included - resolves the module
-// object.
+// package-pinned arkts.lang facade (or a subpackage) whose module option is
+// omitted; every other spelling - explicit option included - resolves the
+// module object.
 ArkTSReceiverKind ArkTSReceiverFor(bool explicitModule, const std::string& module)
 {
-    const bool presetLike = module == "arkts.lang" || module.rfind("arkts.lang.", 0) == 0 ||
-        module == ARKTS_PRESET_PACKAGE;
-    return !explicitModule && presetLike ? ArkTSReceiverKind::GLOBAL : ArkTSReceiverKind::MODULE;
+    const bool facadeLike = module == "arkts.lang" || module.rfind("arkts.lang.", 0) == 0;
+    return !explicitModule && facadeLike ? ArkTSReceiverKind::GLOBAL : ArkTSReceiverKind::MODULE;
 }
 
 bool ArkTSOptionValueEmpty(const std::string& value)
@@ -199,7 +197,7 @@ bool DiagnoseArkTSDefaultedNamedParamNotOption(DiagnosticEngine& diag, const Fun
     return true;
 }
 
-bool ArkTSFuncBodyHasRestParam(const FuncBody& body)
+bool ArkTSBodyHasRestParam(const FuncBody& body)
 {
     for (const auto& list : body.paramLists) {
         if (list == nullptr) {
@@ -469,7 +467,7 @@ bool ArkTSGatedParam(const FuncParam& param)
     return false;
 }
 
-bool ArkTSFuncBodyHasGatedParam(const FuncBody& body)
+bool ArkTSBodyHasGatedParam(const FuncBody& body)
 {
     for (const auto& list : body.paramLists) {
         if (list == nullptr) {
@@ -496,7 +494,7 @@ bool IsGatedArkTSDecl(const Decl& decl)
     // A malformed declaration may carry only @RestParam on a parameter; it is
     // still ArkTS-only and must not gain the unsafe-invoke cascade.
     auto fd = DynamicCast<const FuncDecl*>(&decl);
-    return fd != nullptr && fd->funcBody != nullptr && ArkTSFuncBodyHasGatedParam(*fd->funcBody);
+    return fd != nullptr && fd->funcBody != nullptr && ArkTSBodyHasGatedParam(*fd->funcBody);
 }
 
 bool IsArkTSReferenceDecl(const Decl& decl)
@@ -511,16 +509,6 @@ bool IsArkTSPreparedInterface(const Decl& decl)
 
 bool IsArkTSForeignInterface(const InterfaceDecl& id)
 {
-    // The stdlib presets keep their external declaration form, matching the
-    // class path: their implementation is delivered with the preset
-    // requirements, not by this preparation pass. The package check reads the
-    // declaration or its file package because the Collector may not have
-    // filled the declaration field yet during preparation.
-    const auto& packageName =
-        id.curFile && id.curFile->curPackage ? id.curFile->curPackage->fullPackageName : id.fullPackageName;
-    if (packageName == ARKTS_PRESET_PACKAGE) {
-        return false;
-    }
     return id.HasAnno(AnnotationKind::ARKTS) && id.TestAttr(Attribute::FOREIGN) &&
         !IsArkTSPreparedInterface(id) && (!id.generic || id.generic->typeParameters.empty());
 }
@@ -568,7 +556,7 @@ Ptr<ClassDecl> ArkTSInterfaceImpl(const Decl& iface, ImportManager* imports)
 
 // Walk the package and validate the declaration rules the function fold does
 // not own. A lowered wrapper carries ARKTS_FUNCTION_WRAPPER and is validated
-// by ArkTSDeclOptions in LowerArkTSFunctions, so it is skipped here.
+// by ArkTSDeclOptions in LowerArkTSForeignFunctions, so it is skipped here.
 // Every other declaration with an @ArkTS annotation - a class, an interface,
 // a variable, a parameter, an entry - is checked layer by layer, and one
 // declaration yields at most one option diagnostic at its first illegal
@@ -781,7 +769,7 @@ void DiagnoseArkTSBodylessForeignMember(Decl& decl, DiagnosticEngine& diag)
     // A rest parameter forbids named parameters outright; the parser already
     // reported that mix, so this rule stays silent. The member is still marked
     // broken: the shape is rejected either way.
-    const bool restParam = ArkTSFuncBodyHasRestParam(*memberBody);
+    const bool restParam = ArkTSBodyHasRestParam(*memberBody);
     // An index setter's value parameter is required; see
     // ArkTSIndexSetterValueSpelling for the shape that skips the rule below.
     const bool indexSetterValue = memberFunc != nullptr && ArkTSIndexSetterValueSpelling(*memberFunc, *memberBody);
@@ -894,9 +882,7 @@ struct ArkTSValueEmitter {
     // with ArkTSTypeDescName, and a reference leaf is recorded as a
     // placeholder for the lowering walker to bind. Without the placeholder map
     // the source is refused (empty type argument) instead of splicing a user
-    // class identifier. The generic preset array spells its element inside the
-    // placeholder's type-argument list - scalars by their checked name,
-    // nested references by their own placeholders.
+    // class identifier.
     std::string TypeName(const ArkTSTypeDesc& desc)
     {
         return ArkTSTypeDescName(desc, [this](const ArkTSTypeDesc& reference) {
@@ -905,23 +891,10 @@ struct ArkTSValueEmitter {
             }
             auto slot = Fresh("type");
             (*classRefs)[slot] = reference.reference;
-            if (IsArkTSPresetArray(*reference.reference) && reference.elements.size() == 1) {
-                return slot + "<" + TypeName(reference.elements.front()) + ">";
-            }
             return slot;
         });
     }
 
-    // To-JS conversion per kind (an ArkTSArray<T'> position never reaches
-    // the emitter: classification rejects it as deferred):
-    //   scalar -> the checked ctx.number/string/boolean/bigint table above
-    //   Option<T'> -> match: Option.Some(v) converts v recursively, Option.None -> ctx.undefined()
-    //   Array<T'> -> a JSValue array built from the converted elements, then
-    //                 ctx.array(...).toJSValue() packages it
-    //   tuple -> convert each element, hoist to locals, ctx.array([...]).toJSValue()
-    // Before: Option<Int32> __argument_0
-    // After:  "match (__argument_0) { case Option.Some(__locals_some_0) => ... }" with
-    //         "case Option.None => __locals_context.undefined().toJSValue()"
     ArkTSEmitted ToJS(const ArkTSTypeDesc& desc, const std::string& source, const std::string& ctx,
         const std::string& indent)
     {
@@ -935,22 +908,7 @@ struct ArkTSValueEmitter {
         if (desc.kind == ArkTSTypeDesc::Kind::REFERENCE) {
             // The stored reference is a global handle; toJSValue() gives the
             // ArkTS side a local view of the same object, preserving identity.
-            // A preset string is already stored as a JSValue primitive, and
-            // JSValue has no toJSValue() (it is not a heap object), so its
-            // handle passes through unchanged.
-            if (desc.reference && IsArkTSPresetString(*desc.reference)) {
-                emitted.expr = "(" + source + ")." + ARKTS_CLASS_REF_ACCESSOR + "()";
-                return emitted;
-            }
             emitted.expr = "(" + source + ")." + ARKTS_CLASS_REF_ACCESSOR + "().toJSValue()";
-            return emitted;
-        }
-        if (desc.kind == ArkTSTypeDesc::Kind::ARKTS_FUNC) {
-            // The function carrier stores the ArkTS function reference as a
-            // JSValue: passing it is identity on the handle (no toJSValue,
-            // same rule as the preset string), so the ArkTS side sees the
-            // very function that was constructed or received.
-            emitted.expr = "(" + source + ")." + ARKTS_CLASS_REF_ACCESSOR + "()";
             return emitted;
         }
         if (desc.kind == ArkTSTypeDesc::Kind::ENUM) {
@@ -1127,8 +1085,6 @@ struct ArkTSValueEmitter {
                 return FromJSOptional(desc, value, indent);
             case ArkTSTypeDesc::Kind::REFERENCE:
                 return FromJSReference(desc, value, indent, nullablePosition);
-            case ArkTSTypeDesc::Kind::ARKTS_FUNC:
-                return FromJSFuncCarrier(desc, value, indent, nullablePosition);
             case ArkTSTypeDesc::Kind::ENUM:
                 return FromJSEnum(desc, value, indent, nullablePosition);
             case ArkTSTypeDesc::Kind::ARRAY_COPY:
@@ -1182,51 +1138,8 @@ struct ArkTSValueEmitter {
             emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
             emitted.pre += UndefinedGuard(value, ArkTSTypeDescName(desc), indent);
         }
-        // A preset string arrives as a JS primitive, not an object: the kind
-        // guard checks isString and the wrapping constructor receives the
-        // JSValue itself (its carrier type is JSValue, not JSObject).
-        if (IsArkTSPresetString(*desc.reference)) {
-            emitted.pre += KindGuard(value, "isString", "a string", ArkTSTypeDescName(desc), indent);
-            emitted.expr = slot + "(" + value + ", ())";
-            return emitted;
-        }
-        // The generic preset array is an object, so the wrapping constructor
-        // takes the asObject() carrier like any wrapper - but the call spells
-        // the element as an explicit type argument (the constructor cannot
-        // infer it from its JSValue/JSObject parameters), and the kind guard
-        // checks isArray instead of isObject. The element placeholder inside
-        // the argument list is bound by the lowering walker like any other
-        // reference type position.
-        if (IsArkTSPresetArray(*desc.reference) && !desc.elements.empty()) {
-            emitted.pre += KindGuard(value, "isArray", "an array", ArkTSTypeDescName(desc), indent);
-            emitted.expr = slot + "<" + TypeName(desc.elements.front()) + ">(" + value + ".asObject(), ())";
-            return emitted;
-        }
         emitted.pre += KindGuard(value, "isObject", "an object", ArkTSTypeDescName(desc), indent);
         emitted.expr = slot + "(" + value + ".asObject(), ())";
-        return emitted;
-    }
-
-    // An ArkTS function reference: null and undefined are not functions, and
-    // the value must satisfy isFunction() before the wrapping constructor
-    // stores the handle. The carrier is spelled by its compiler-owned name
-    // with the written function type as type argument, so no placeholder is
-    // registered for the carrier itself; only the classes and enums inside F
-    // go through the classRefs contract (TypeName records them). The stored
-    // JSValue keeps the ArkTS function identity through every crossing.
-    ArkTSEmitted FromJSFuncCarrier(const ArkTSTypeDesc& desc, const std::string& value, const std::string& indent,
-        bool nullablePosition)
-    {
-        ArkTSEmitted emitted;
-        if (desc.reference == nullptr || classRefs == nullptr) {
-            return emitted;
-        }
-        if (!nullablePosition) {
-            emitted.pre += NullGuard(value, ArkTSTypeDescName(desc), indent);
-            emitted.pre += UndefinedGuard(value, ArkTSTypeDescName(desc), indent);
-        }
-        emitted.pre += KindGuard(value, "isFunction", "a function", ArkTSTypeDescName(desc), indent);
-        emitted.expr = TypeName(desc) + "(" + value + ", ())";
         return emitted;
     }
 
@@ -2090,7 +2003,7 @@ std::string ArkTSRestCallArray(ArkTSValueEmitter& emitter, const ArkTSTypeDesc& 
 
 } // namespace
 
-std::string ArkTSStringLiteral(const std::string& text)
+std::string ArkTSQuotedLiteral(const std::string& text)
 {
     return ArkTSLiteral(text);
 }
@@ -2200,12 +2113,9 @@ static bool ArkTSClassMethodSignatureValid(const std::vector<ArkTSTypeDesc>& typ
 // Static members have no object reference: the class value itself is the
 // `this` argument. Instance members call the method on the stored object.
 // Both resolve the member first, so a missing or non-callable member names
-// the class and member instead of the library's generic property error. A
-// primitive receiver (the ArkTSString preset) has no callMethod - the resolved
-// member function is invoked with the primitive itself as thisArg.
+// the class and member instead of the library's generic property error.
 static void EmitArkTSMethodCall(ArkTSValueEmitter& emitter, std::string& code, const std::string& receiverObject,
-    const std::string& context, bool staticMember, const std::string& result, const std::string& argArray,
-    bool primitiveReceiver)
+    const std::string& context, bool staticMember, const std::string& result, const std::string& argArray)
 {
     auto target = emitter.Fresh("target");
     auto error = emitter.Fresh("error");
@@ -2214,20 +2124,15 @@ static void EmitArkTSMethodCall(ArkTSValueEmitter& emitter, std::string& code, c
     code += ArkTSCallableGuard(target, context, " is not a function", "    ");
     const auto callExpr = staticMember
         ? target + ".asFunction().call(" + argArray + ", thisArg: " + receiverObject + ")"
-        : primitiveReceiver
-            // A preset string is a JSValue primitive, and callMethod exists
-            // only on JSObject; invoke the resolved method with the primitive
-            // itself as thisArg.
-            ? target + ".asFunction().call(" + argArray + ", thisArg: " + receiverObject + ")"
-            : receiverObject + ".callMethod(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER) + ", " +
-                argArray + ")";
+        : receiverObject + ".callMethod(" + ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER) + ", " + argArray +
+            ")";
     code += "    let " + result + " = " + ArkTSCallTranslation(callExpr, context, error, "    ") + "\n";
 }
 
 std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, const ArkTSTypeDesc& resultType,
     size_t namespaceDepth, const std::string& prefix, size_t restIndex, ArkTSMemberReceiver memberReceiver,
     ArkTSReceiverKind receiver, size_t optionalStart, std::unordered_map<std::string, Ptr<Decl>>& classRefs,
-    const std::string& ownerKind, bool primitiveReceiver)
+    const std::string& ownerKind)
 {
     if (!ArkTSClassMethodSignatureValid(types, resultType, restIndex)) {
         return {};
@@ -2243,12 +2148,6 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
         code += ArkTSClassValuePreamble(prefix, namespaceDepth, receiver, classValue);
         receiverObject = classValue;
     }
-    if (memberReceiver == ArkTSMemberReceiver::INSTANCE && primitiveReceiver) {
-        // A preset string's stored handle is a JS primitive: resolve the
-        // String member on the boxed object (Object(value)) and call it there.
-        code += ArkTSPresetStringReceiverSource(prefix, receiverObject);
-        primitiveReceiver = false;
-    }
     auto args = ArkTSArgumentSource(emitter, types, restIndex == ARKTS_NO_REST ? types.size() : restIndex, code);
     auto result = prefix + "result";
     const bool staticMember = memberReceiver == ArkTSMemberReceiver::STATIC;
@@ -2261,15 +2160,13 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
     if (restIndex != ARKTS_NO_REST) {
         // Rest members spread the trailing array item by item.
         EmitArkTSMethodCall(emitter, code, receiverObject, context, staticMember, result,
-            ArkTSRestCallArray(emitter, types[restIndex].elements.front(), restIndex, args, prefix, code),
-            primitiveReceiver);
+            ArkTSRestCallArray(emitter, types[restIndex].elements.front(), restIndex, args, prefix, code));
     } else if (optionals) {
         EmitArkTSMethodCall(emitter, code, receiverObject, context, staticMember, result,
-            ArkTSOptionalCallArray(emitter, types, optionalStart, args, prefix + "context", code), primitiveReceiver);
+            ArkTSOptionalCallArray(emitter, types, optionalStart, args, prefix + "context", code));
     } else {
         EmitArkTSMethodCall(emitter, code, receiverObject, context, staticMember, result,
-            args.empty() ? "Array<" + std::string(ARKTS_JS_VALUE) + ">()" : "[" + ArkTSJoin(args, ", ") + "]",
-            primitiveReceiver);
+            args.empty() ? "Array<" + std::string(ARKTS_JS_VALUE) + ">()" : "[" + ArkTSJoin(args, ", ") + "]");
     }
     if (resultType.kind == ArkTSTypeDesc::Kind::SCALAR && resultType.scalar == "Nothing") {
         return ArkTSFinishBody(prefix,
@@ -2280,33 +2177,6 @@ std::string ArkTSClassMethodSource(const std::vector<ArkTSTypeDesc>& types, cons
         return {};
     }
     return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
-}
-
-// Constructor body of the ArkTSString preset. The preset has no ArkTS class
-// value to resolve and no `new` to run: its constructor converts the
-// Option<String> argument - None becomes the empty string, per the preset
-// ruling - into the ctx.string primitive and stores it directly in the wrapper
-// field. The argument is always forwarded (the caller always passes an Option
-// value; a trailing optional run never truncates the assignment away). Returns
-// "" for any other argument shape.
-static std::string ArkTSPresetStringConstructorSource(ArkTSValueEmitter& emitter,
-    const std::vector<ArkTSTypeDesc>& types, size_t restIndex)
-{
-    const bool stringOption = types.size() == 1 && restIndex == ARKTS_NO_REST &&
-        types.front().kind == ArkTSTypeDesc::Kind::OPTIONAL &&
-        types.front().elements.size() == 1 && types.front().elements.front().kind == ArkTSTypeDesc::Kind::SCALAR &&
-        types.front().elements.front().scalar == "String";
-    if (!stringOption) {
-        return {};
-    }
-    const auto& prefix = emitter.prefix;
-    auto bound = emitter.Fresh("some");
-    auto inner = emitter.ToJS(types.front().elements.front(), bound, prefix + "context", "        ");
-    return ArkTSFinishBody(prefix, "    match (" + std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "0) {\n" +
-        "        case " + ARKTS_OPTION + ".Some(" + bound + ") =>\n" + inner.pre + "            " + ARKTS_SELF +
-        "." + ARKTS_CLASS_REF_FIELD + " = " + inner.expr + "\n" + "        case " + ARKTS_OPTION +
-        ".None =>\n            " + ARKTS_SELF + "." + ARKTS_CLASS_REF_FIELD + " = " + prefix + "context" +
-        ".string(\"\").toJSValue()\n" + "    }\n");
 }
 
 std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types, size_t namespaceDepth,
@@ -2324,9 +2194,6 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
     }
     ArkTSValueEmitter emitter{prefix};
     emitter.classRefs = &classRefs;
-    if (form == ArkTSConstructorForm::PRESET_STRING) {
-        return ArkTSPresetStringConstructorSource(emitter, types, restIndex);
-    }
     std::string classValue;
     std::string code;
     const auto context = ArkTSFailureContext("class", ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS));
@@ -2367,7 +2234,7 @@ std::string ArkTSClassConstructorSource(const std::vector<ArkTSTypeDesc>& types,
 
 std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter,
     ArkTSMemberReceiver memberReceiver, size_t namespaceDepth, const std::string& prefix, ArkTSReceiverKind receiver,
-    std::unordered_map<std::string, Ptr<Decl>>& classRefs, bool presetStringReceiver)
+    std::unordered_map<std::string, Ptr<Decl>>& classRefs)
 {
     if (!ArkTSTypeDescGeneratable(valueType) || ArkTSTypeDescContainsNothing(valueType)) {
         return {};
@@ -2382,11 +2249,6 @@ std::string ArkTSClassPropertySource(const ArkTSTypeDesc& valueType, bool setter
         object = classValue;
     } else {
         object = std::string(ARKTS_SELF) + "." + ARKTS_CLASS_REF_ACCESSOR + "()";
-        if (presetStringReceiver) {
-            // The preset string's stored handle is a primitive with no
-            // properties; read/write on the boxed String object instead.
-            code += ArkTSPresetStringReceiverSource(prefix, object);
-        }
     }
     // A property value may legitimately be undefined, so there is no
     // existence check; the access itself is translated because a getter or
@@ -2538,78 +2400,6 @@ std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTST
         return ArkTSInterfaceIndexSetterBody(emitter, valueType, prefix, code, self, key, context);
     }
     return ArkTSInterfaceIndexGetterBody(emitter, valueType, prefix, code, self, key, context);
-}
-
-// ---- ArkTSFunc<F> construction glue (B4b) ----
-// One concrete construction `ArkTSFunc<F>(f)` lowered to text. Shape (a
-// temporary declaration the caller parses and detaches; the spliced call is
-// rebound to the user expression, the bare support names to the SDK
-// declarations).
-//   func __generated() {
-//       return ArkTSFunc<F-spelling>(cj_arkts_context_v1.__cj_arkts_current()
-//           .function((__cj_arkts_fc_ctx, __cj_arkts_fc_info) => {
-//               let __cj_arkts_fc_raw_i = __cj_arkts_fc_info[i]
-//               <FromJS guards on the raw local>          // throws the
-//               let __cj_arkts_fc_arg_i = <FromJS expr>   // conversion exception
-//               let __cj_arkts_fc_result = __cj_arkts_fc_fn(arg...)
-//               <ToJS pre>
-//               <ToJS expr>   // the JSValue the ArkTS caller receives
-//           }), ())
-//   }
-// Each info slot is read exactly once; every argument of the spliced call is
-// a converted parameter local, and the lambda's final expression is the
-// JSValue converted from the result (a Nothing result keeps the never-
-// contract throw instead, exactly like a foreign wrapper's). Reference and
-// enum positions inside F are emitted through `classRefs` placeholders like
-// every other generated position; the carrier name itself is compiler-owned
-// and pinned by the support binders. Returns "" for a description that is
-// not a supported carrier (the caller reports the dedicated constraint
-// diagnostic before ever getting here).
-std::string ArkTSFuncConstructionSource(const ArkTSTypeDesc& carrier, const std::string& prefix,
-    std::unordered_map<std::string, Ptr<Decl>>& classRefs)
-{
-    if (carrier.kind != ArkTSTypeDesc::Kind::ARKTS_FUNC || carrier.reference == nullptr) {
-        return {};
-    }
-    ArkTSValueEmitter emitter{prefix};
-    emitter.classRefs = &classRefs;
-    const auto ctx = prefix + "ctx";
-    const auto info = prefix + "info";
-    const std::string indent = "                ";
-    std::string body;
-    std::vector<std::string> callArgs;
-    for (size_t i = 0; i < carrier.elements.size(); ++i) {
-        auto raw = emitter.Fresh("raw");
-        auto arg = emitter.Fresh("arg");
-        auto converted = emitter.FromJS(carrier.elements[i], raw, indent);
-        body += indent + "let " + raw + " = " + info + "[" + std::to_string(i) + "]\n" + converted.pre + indent +
-            "let " + arg + " = " + converted.expr + "\n";
-        callArgs.emplace_back(std::move(arg));
-    }
-    // A leaf conversion that cannot produce a value (a reference or enum
-    // position without its declaration, binding map or value table) leaves
-    // unspellable source behind, so the whole glue is refused instead.
-    if (emitter.broken) {
-        return {};
-    }
-    auto result = emitter.Fresh("result");
-    body += indent + "let " + result + " = " + ARKTS_FUNC_SPLICE_CALLEE + "(" + ArkTSJoin(callArgs, ", ") + ")\n";
-    const auto& funcResult = carrier.FuncResult();
-    if (funcResult.kind == ArkTSTypeDesc::Kind::SCALAR && funcResult.scalar == "Nothing") {
-        body += indent + "throw " + ARKTS_NEVER_EXCEPTION + "(\"" + ARKTS_NEVER_MESSAGE + "\")\n";
-    } else {
-        auto toJs = emitter.ToJS(funcResult, result, ctx, indent);
-        body += toJs.pre + indent + toJs.expr + "\n";
-    }
-    // The lambda is a block lambda with the bare parameter spelling
-    // `{ ctx, info => ... }` (the parenthesized form is not a call-argument
-    // expression in this grammar); the conversion statements run inside its
-    // body block, whose final expression is the JSValue for the ArkTS caller.
-    auto glue = "            { " + ctx + ", " + info + " =>\n" + body + "            }";
-    return "func " + std::string(ARKTS_WRAPPER_ENTRY) + "() {\n    return " +
-        ArkTSTypeDescName(carrier, [&](const ArkTSTypeDesc& leaf) { return emitter.TypeName(leaf); }) +
-        "(cj_arkts_context_v1." + ARKTS_CONTEXT_CURRENT + "().function(" + glue +
-        ").toJSValue(), ())\n}\n";
 }
 
 } // namespace Cangjie::Native::FFI::ArkTS

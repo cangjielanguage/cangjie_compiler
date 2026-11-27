@@ -39,8 +39,8 @@ bool HasArkTSAnnotation(const std::vector<OwnedPtr<AST::Annotation>>& annos)
         [](const OwnedPtr<AST::Annotation>& anno) { return anno->kind == AnnotationKind::ARKTS; });
 }
 
-// Bodyless 'init' member of an @ArkTS foreign class-like (the stdlib
-// ArkTSArray/ArkTSString constructors are declared without bodies). The
+// Bodyless 'init' member of an @ArkTS foreign class-like (such constructors
+// are declared without bodies). The
 // enclosing declaration is tested because the member itself carries neither
 // marker at parse time: FOREIGN reaches members only through Sema's owner
 // propagation (DeclAttributeChecker::SetCommonAttributes), and the @ArkTS
@@ -2106,7 +2106,7 @@ OwnedPtr<MainDecl> ParserImpl::ParseMainDecl(
 // FuncBody.body. The modifier check keeps FOREIGN in the set, so its conflicts
 // are reported; the @ArkTS relaxation exempts the visibility pair on a function
 // except PRIVATE. PrepareTypeCheck later turns this declaration into a CJ
-// wrapper and LowerArkTSFunctions fills its body.
+// wrapper and LowerArkTSForeignFunctions fills its body.
 OwnedPtr<AST::FuncDecl> ParserImpl::ParseFuncDecl(
     ScopeKind scopeKind, const std::set<Modifier>& modifiers, PtrVector<Annotation> annos)
 {

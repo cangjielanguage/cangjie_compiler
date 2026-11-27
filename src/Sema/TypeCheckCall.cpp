@@ -3639,27 +3639,12 @@ bool TypeChecker::TypeCheckerImpl::ChkCallExpr(ASTContext& ctx, ModalTy target, 
     // Decl only be set when call base is valid RefExpr or MemberAccess.
     Ptr<Decl> decl{nullptr};
     std::vector<Ptr<FuncDecl>> candidates;
-    // An explicit ArkTSFunc<F> construction is a compiler-builtin operation:
-    // recognized before the base check (the preset's init(f: F) is removed
-    // at preparation, so the ordinary candidate path could only misreport or
-    // crash); the recognition synthesizes the base reference itself, exactly
-    // like the base check would, and the resolution stays valid for the
-    // ordinary flow when the shape does not match.
-    if (ChkArkTSFuncConstruction(ctx, target, ce)) {
-        return ce.GetTy().IsCorrect();
-    }
     if (!ChkCallBaseExpr(ctx, ce, decl, target, candidates)) {
-        if (RefuseArkTSFuncValueCall(ce)) {
-            return false;
-        }
         CheckCallPostfixModal(diag, ce, decl);
         // If no call base exist, expr may be array or pointer builtin api call.
         return ChkBuiltinCall(ctx, TypeManager::GetNonNullTy(target), ce);
     }
     if (!ce.baseFunc->GetTy().IsCorrect()) {
-        return false;
-    }
-    if (RefuseArkTSHasThisCall(ce, decl)) {
         return false;
     }
     if (ce.baseFunc->GetTy()->IsNothing()) {
@@ -3674,38 +3659,6 @@ bool TypeChecker::TypeCheckerImpl::ChkCallExpr(ASTContext& ctx, ModalTy target, 
     }
     // Step 2 and Step 3: check the call kind and match the candidates.
     return ChkCallExprCandidates(ctx, target, ce, decl, candidates, argsTys, prevCheckTrue);
-}
-
-bool TypeChecker::TypeCheckerImpl::RefuseArkTSHasThisCall(CallExpr& ce, const Ptr<Decl>& decl)
-{
-    // A member call on the '@HasThis' carrier is type-checked, but producing
-    // and calling the bound value needs the full '@HasThis' lowering. Refuse
-    // the call before code generation instead of crashing there.
-    if (auto ma = DynamicCast<MemberAccess*>(ce.baseFunc.get()); ma != nullptr && ma->baseExpr != nullptr) {
-        if (auto carrier = DynamicCast<ClassTy*>(ma->baseExpr->DataTy());
-            carrier != nullptr && carrier->decl != nullptr && carrier->decl->identifier.Val() == "ArkTSFuncWithThis" &&
-            (carrier->decl->fullPackageName == "std.interop.arkts" ||
-                carrier->decl->fullPackageName == "arkts.lang") &&
-            ma->field.Val() == "bind") {
-            diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_bind_not_supported, ce);
-            ce.SetTy({TypeManager::GetInvalidTy()});
-            ce.callKind = CallKind::CALL_INVALID;
-            return true;
-        }
-    }
-    // An '@HasThis' declaration denotes an ArkTS function value carrying its
-    // `this` argument; the design refuses a direct call and requires the
-    // caller to bind that argument first. The base expression is resolved by
-    // now, so the declaration is available even though its type is the
-    // carrier class, not a function type.
-    auto hasThis = TypeCheckUtil::GetRealTarget(decl);
-    if (hasThis == nullptr || !hasThis->TestAttr(Attribute::ARKTS_HAS_THIS)) {
-        return false;
-    }
-    diag.DiagnoseRefactor(DiagKindRefactor::sema_arkts_has_this_direct_call_not_allowed, ce, hasThis->identifier.Val());
-    ce.SetTy({TypeManager::GetInvalidTy()});
-    ce.callKind = CallKind::CALL_INVALID;
-    return true;
 }
 
 bool TypeChecker::TypeCheckerImpl::ChkCallExprCandidates(ASTContext& ctx, ModalTy target, CallExpr& ce,
@@ -3843,14 +3796,6 @@ bool TypeChecker::TypeCheckerImpl::ChkFunctionCallExpr(ASTContext& ctx, ModalTy 
     DesugarCallExpr(ctx, ce);
     auto desugarCallExpr = StaticAs<ASTKind::CALL_EXPR>(ce.desugarExpr.get());
     if (!ChkCallExpr(ctx, target, *desugarCallExpr)) {
-        // A dedicated refusal inside the base check (the ArkTS function
-        // carrier call) already reported the failure; the generic
-        // "no matching operator ()" text must not restate it.
-        if (arkTSFuncValueCallRefused) {
-            arkTSFuncValueCallRefused = false;
-            ce.SetTy({TypeManager::GetInvalidTy()});
-            return false;
-        }
         RecoverToCallExpr(ce);
         diag.Diagnose(ce, DiagKind::sema_no_match_operator_function_call);
         ce.SetTy({TypeManager::GetInvalidTy()});

@@ -293,8 +293,9 @@ void BindArkTSGeneratedClassRef(Node& node, Reference& ref, const std::string& n
     node.SetTy({found->second->GetTy()});
 }
 
-// Bind a well-known generated name (Option, the context support symbols and
-// the arkts.lang exceptions) to its imported declaration.
+// Bind a well-known generated name (Option, the context support symbols, the
+// std.core conversion exception and the arkts.lang runtime exceptions) to its
+// imported declaration.
 void BindArkTSGeneratedKnownRef(RefExpr& re, const std::string& name, ImportManager& importManager)
 {
     Ptr<Decl> target;
@@ -309,9 +310,9 @@ void BindArkTSGeneratedKnownRef(RefExpr& re, const std::string& name, ImportMana
     } else if (name == Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION ||
         name == Native::FFI::ArkTS::ARKTS_CONVERSION_ALIAS) {
         // The getter spells the conversion exception through the private alias
-        // the injected import binds; both spellings denote one declaration.
+        // the injected import binds; both spellings denote the std.core one.
         target = importManager.GetImportedDecl(
-            Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE, Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION);
+            Native::FFI::ArkTS::ARKTS_CORE_PACKAGE, Native::FFI::ArkTS::ARKTS_CONVERSION_EXCEPTION);
     } else if (name == Native::FFI::ArkTS::ARKTS_RUNTIME_EXCEPTION ||
         name == Native::FFI::ArkTS::ARKTS_BUSINESS_EXCEPTION) {
         target = importManager.GetImportedDecl(Native::FFI::ArkTS::ARKTS_LANGUAGE_PACKAGE, name);
@@ -1009,8 +1010,8 @@ std::unordered_map<std::string, std::string> MakeArkTSGlobalVarLiterals(const Fu
     return literals;
 }
 
-// The getter's conversion throws use the private alias injected for this file;
-// a bare ExternConversionException is ambiguous with std.core's export.
+// The getter's conversion throws use the private alias injected for this file,
+// so the generated name does not depend on the implicit std.core pre-import.
 std::string AliasArkTSConversionException(const std::string& code)
 {
     // Only identifier occurrences in the generated *code* are aliased: a user
@@ -1127,9 +1128,9 @@ void LowerArkTSGlobalVarGetter(ArkTSGlobalVarLowering& lower, FuncDecl& fd)
         return;
     }
     // A composite getter emits the same support references as a function
-    // wrapper (ExternConversionException and friends); bind them to the
-    // imported declarations so an unqualified name cannot resolve ambiguously
-    // through two star imports.
+    // wrapper (the std.core conversion exception and the arkts.lang runtime
+    // exceptions); bind them to the imported declarations so an unqualified
+    // name cannot resolve ambiguously through two star imports.
     if (!Native::FFI::ArkTS::BindArkTSSupportReferences(
         fd, *fd.funcBody->body, lower.importManager, diag, lower.supportRefs, fd.identifier.Val())) {
         fd.EnableAttr(Attribute::IS_BROKEN);

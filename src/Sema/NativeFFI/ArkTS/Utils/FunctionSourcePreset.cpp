@@ -14,22 +14,9 @@ namespace Cangjie::Native::FFI::ArkTS {
 using namespace Cangjie::AST;
 
 // A class with type parameters keeps the generic external declaration form; its members cannot be lowered to fixed
-// conversions without per-instantiation code, so it is left untouched (the stdlib presets live here) - except the
-// non-generic preset, ArkTSString, which is prepared as an ordinary wrapper with a JSValue carrier
-// (IsArkTSPresetString).
+// conversions without per-instantiation code, so it is left untouched.
 bool IsArkTSForeignClass(const ClassDecl& cd)
 {
-    // The stdlib presets keep their external declaration form: their reference semantics and member surface are
-    // delivered with the preset requirements, and their signature spellings (optional constructor parameters) are
-    // not part of the wrapper path. ArkTSString is the delivered exception: it is non-generic, its construction maps
-    // to ctx.string, and its positions lower like any other prepared wrapper. ArkTSArray<T> is prepared by its own
-    // pass (PreparePresetArrayCarriers) and never enters this path: its declaration is not foreign anymore and its
-    // member bodies are written in the runtime source.
-    const auto& packageName =
-        cd.curFile && cd.curFile->curPackage ? cd.curFile->curPackage->fullPackageName : cd.fullPackageName;
-    if (packageName == ARKTS_PRESET_PACKAGE && cd.identifier != "ArkTSString") {
-        return false;
-    }
     return cd.HasAnno(AnnotationKind::ARKTS) && cd.TestAttr(Attribute::FOREIGN) &&
         !cd.TestAttr(Attribute::ARKTS_CLASS_WRAPPER) && (!cd.generic || cd.generic->typeParameters.empty());
 }
@@ -37,55 +24,6 @@ bool IsArkTSForeignClass(const ClassDecl& cd)
 bool IsArkTSClassWrapper(const Decl& decl)
 {
     return decl.TestAttr(Attribute::ARKTS_CLASS_WRAPPER);
-}
-
-bool IsArkTSPresetString(const Decl& decl)
-{
-    if (decl.identifier != "ArkTSString") {
-        return false;
-    }
-    const auto& packageName = decl.curFile && decl.curFile->curPackage
-        ? decl.curFile->curPackage->fullPackageName
-        : decl.fullPackageName;
-    return packageName == ARKTS_PRESET_PACKAGE;
-}
-
-// The stdlib preset array. Its declaring source is a prepared generic wrapper (the runtime writes the member bodies
-// against the JSInteropType element constraint), so recognition only drives carrier installation and the
-// signature-position reference mapping. Same package pin as the preset string.
-bool IsArkTSPresetArray(const Decl& decl)
-{
-    if (decl.identifier != "ArkTSArray") {
-        return false;
-    }
-    const auto& packageName = decl.curFile && decl.curFile->curPackage
-        ? decl.curFile->curPackage->fullPackageName
-        : decl.fullPackageName;
-    return packageName == ARKTS_PRESET_PACKAGE;
-}
-
-// The two function carriers. Same package pin as the preset string: a same-named class in any other package is an
-// ordinary declaration and keeps the generic unsupported-type diagnostics.
-bool IsArkTSPresetFunc(const Decl& decl)
-{
-    if (decl.identifier != "ArkTSFunc") {
-        return false;
-    }
-    const auto& packageName = decl.curFile && decl.curFile->curPackage
-        ? decl.curFile->curPackage->fullPackageName
-        : decl.fullPackageName;
-    return packageName == ARKTS_PRESET_PACKAGE;
-}
-
-bool IsArkTSPresetFuncWithThis(const Decl& decl)
-{
-    if (decl.identifier != "ArkTSFuncWithThis") {
-        return false;
-    }
-    const auto& packageName = decl.curFile && decl.curFile->curPackage
-        ? decl.curFile->curPackage->fullPackageName
-        : decl.fullPackageName;
-    return packageName == ARKTS_PRESET_PACKAGE;
 }
 
 // Generated argument expression per checked scalar, using the existing ark_interop.JSContext API; the statically
@@ -136,12 +74,10 @@ std::string ArkTSValueDescription(const std::string& value)
         ".isString()) { " + value + ".asString().toString() } else { \"object\" })";
 }
 
-// Every conversion failure in generated code is thrown through this helper. The facade arkts.lang hosts the only type
-// of the name spelled by ARKTS_CONVERSION_EXCEPTION (FunctionSource.h) with a single-String constructor; the lowering
-// walker pins that name to the declaration (LowerFunctions.cpp BindSupportReferences), so a same-named source item
-// cannot capture it. ARKTS_CONVERSION_EXCEPTION stays the single compiler-side indirection: when the real type lands,
-// re-export it from the facade (or change only that constant, the pinning package and the throw shape below),
-// never the call sites.
+// Every conversion failure in generated code is thrown through this helper. std.core declares the type spelled by
+// ARKTS_CONVERSION_EXCEPTION (FunctionSource.h) with a single-String constructor; the lowering walker pins that name
+// to the declaration (LowerFunctions.cpp BindArkTSSupportDeclReference), so a same-named source item cannot capture
+// it. ARKTS_CONVERSION_EXCEPTION stays the single compiler-side indirection: never change the call sites.
 std::string ArkTSConversionThrow(const std::string& reason, const std::string& indent, const std::string& gotExpr)
 {
     // A reference or enum type name reaches the message from the mapped
@@ -183,7 +119,7 @@ std::string ArkTSUserStringSpelling(const std::string& value)
 
 // Placeholder literals carry a compiler-owned sentinel prefix so the rebinding walkers can tell them apart from a user
 // string value that happens to equal a placeholder name (for example @RawValue["__module__"], which the wrapper emits
-// as an ordinary string literal). Only this helper adds the prefix; ArkTSStringLiteral and ArkTSLiteral quote
+// as an ordinary string literal). Only this helper adds the prefix; ArkTSQuotedLiteral and ArkTSLiteral quote
 // user-facing text verbatim.
 std::string ArkTSPlaceholderLiteralImpl(const std::string& text)
 {
@@ -289,19 +225,6 @@ std::string ArkTSMemberGuard(const std::string& receiver, const std::string& tar
     const auto message = context + " + " + ArkTSLiteral(" does not exist");
     return indent + "let " + target + " = " + receiver + ".getProperty(" + member + ")\n" + indent + "if (" + target +
         ".isUndefined()) {\n" + ArkTSRuntimeThrow(message, indent + "    ") + indent + "}\n";
-}
-
-// The stored reference of the ArkTSString preset is a JS primitive, and a primitive has no properties
-// (JSValue.getProperty() rejects it). Resolve the String members through Object(value), the boxed String object,
-// and use that boxed object as the receiver; the stored handle itself is never changed, so a value crossing the
-// boundary back to ArkTS stays a primitive string.
-std::string ArkTSPresetStringReceiverSource(const std::string& prefix, std::string& receiver)
-{
-    auto boxed = prefix + "boxed";
-    receiver = boxed;
-    return "    let " + boxed + " = " + prefix +
-        "context.global.getProperty(\"Object\").asClass().new(" + std::string(ARKTS_SELF) + "." +
-        ARKTS_CLASS_REF_ACCESSOR + "()).asObject()\n";
 }
 
 // Callability check for a resolved target. `reason` is the message suffix naming the expected shape (a function,

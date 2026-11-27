@@ -849,8 +849,8 @@ struct ASTHasherImpl {
                 // not the original Cangjie signature.
                 return false;
             case AnnotationKind::ARKTS_HAS_THIS:
-                // The ThisT argument decides the carrier type
-                // ArkTSFuncWithThis<ThisT, F>, so it is part of the signature.
+                // The ThisT argument is part of the declaration's type
+                // contract, so it is part of the signature.
                 return true;
             default:
                 CJC_ASSERT(false);
