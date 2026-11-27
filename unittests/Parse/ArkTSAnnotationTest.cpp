@@ -171,6 +171,19 @@ public func run(): Unit {
     EXPECT_EQ(static_cast<int>(AnnotationKind::ARKTS_HAS_THIS) + 1, static_cast<int>(AnnotationKind::UNKNOWN));
 }
 
+// IsBuiltinAnnotation keeps the two-argument call form for source compatibility with stdx.syntax. The default value
+// keeps the experimental gate off, so the ArkTS-only names are not builtin unless the flag is passed explicitly; an
+// unknown name is never builtin.
+TEST_F(ArkTSEntryTest, TwoArgumentIsBuiltinAnnotationDefaultsToGatedBehavior)
+{
+    SetExperimentalEnabled(false);
+    EXPECT_FALSE(IsBuiltinAnnotation("std", "ArkTS"));
+    EXPECT_FALSE(IsBuiltinAnnotation("m", "RestParam"));
+    EXPECT_FALSE(IsBuiltinAnnotation("std", "NoSuchAnnotation"));
+    EXPECT_FALSE(IsBuiltinAnnotation("std", "ArkTS", false));
+    EXPECT_TRUE(IsBuiltinAnnotation("std", "ArkTS", true));
+}
+
 TEST_F(ArkTSEntryTest, RegistrationRestoresContextInFinally)
 {
     auto source = Parse(R"(@ArkTS

@@ -209,6 +209,11 @@ bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& ident
     return NAME_TO_ANNO_KIND.find(identifier) != NAME_TO_ANNO_KIND.end();
 }
 
+bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier)
+{
+    return IsBuiltinAnnotation(moduleName, identifier, false);
+}
+
 std::string AnnotationKindToString(AnnotationKind kind)
 {
     auto nameIter = ANNO_KIND_TO_NAME.find(kind);

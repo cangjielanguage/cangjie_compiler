@@ -57,11 +57,15 @@ extern const std::unordered_map<AST::AnnotationKind, std::string> ANNO_KIND_TO_N
 /// refused file.
 bool IsArkTSOnlyAnnotationKind(AST::AnnotationKind kind);
 
-/// Whether @identifier is a compiler builtin annotation for the module. The
-/// experimental ArkTS-only names count as builtin only when the capability is
-/// enabled; otherwise they parse as ordinary macro calls, so user macros with
-/// these names keep working without --experimental.
+/// Whether @identifier is a compiler builtin annotation for the module. The experimental ArkTS-only names count as
+/// builtin only when the capability is enabled; otherwise they parse as ordinary macro calls, so user macros with these
+/// names keep working without --experimental.
 bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier, bool experimentalMode);
+/// ABI and source compatibility entry point for the historical two-argument call form. It is deliberately out of line
+/// so the old exported symbol that existing stdx.syntax binaries bind to stays in libcangjie-lsp, and it forwards to
+/// the three-argument overload with the compiler default gate (experimental off). Callers that need pre-gate
+/// recognition must pass true to the three-argument overload explicitly.
+bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier);
 std::string AnnotationKindToString(AST::AnnotationKind kind);
 
 inline bool IsIdentifierOrContextualKeyword(const TokenKind& kind)
