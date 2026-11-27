@@ -874,9 +874,17 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
     }
 
     astDecl.DisableAttr(Attribute::ARKTS);
+    // The annotations vector is optional in the schema; a cjo without it carries
+    // no annotation records to restore.
+    if (decl.annotations() == nullptr) {
+        return;
+    }
     uoffset_t length = static_cast<uoffset_t>(decl.annotations()->size());
     for (uoffset_t i = 0; i < length; i++) {
         auto rawAnno = decl.annotations()->Get(i);
+        if (rawAnno == nullptr) {
+            continue;
+        }
         // Parameterless records need only a marker. Restore option-bearing metadata
         // as builtin nodes without resolving an annotation declaration or constructor.
         if (rawAnno->kind() == PackageFormat::AnnoKind_ArkTS) {
@@ -892,6 +900,11 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
             astDecl.EnableAttr(Attribute::ARKTS_HAS_THIS);
         }
         auto anno = LoadAnnotation(*rawAnno);
+        if (anno == nullptr) {
+            // The malformed record was refused with a diagnostic; keep loading the
+            // decl without it instead of trusting a half-read annotation.
+            continue;
+        }
         if (rawAnno->kind() == PackageFormat::AnnoKind_Annotation) {
             if (auto info = decl.info_as_ClassInfo()) {
                 anno->runtimeVisible = info->runtimeVisible();
@@ -899,6 +912,11 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
         }
         astDecl.annotations.emplace_back(std::move(anno));
     }
+}
+
+void ASTLoader::ASTLoaderImpl::DiagnoseUnreadableAnnotation()
+{
+    diag.DiagnoseRefactor(DiagKindRefactor::package_unsupported_load, DEFAULT_POSITION, "annotation");
 }
 
 OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageFormat::Anno& rawAnno)
@@ -957,28 +975,66 @@ OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageForma
             annotation->kind = AnnotationKind::ARKTS_HAS_THIS;
             break;
         default:
-            InternalError("Unhandled annotation kind.");
+            // A kind this compiler does not model cannot be interpreted; refuse the
+            // record instead of aborting the compiler on a malformed cjo.
+            DiagnoseUnreadableAnnotation();
+            return nullptr;
     }
-    CJC_NULLPTR_CHECK(rawAnno.identifier());
+    if (rawAnno.identifier() == nullptr) {
+        DiagnoseUnreadableAnnotation();
+        return nullptr;
+    }
     annotation->identifier = rawAnno.identifier()->str();
-    CJC_NULLPTR_CHECK(rawAnno.args());
-    for (auto&& arg : LoadAnnotationArgs(rawAnno)) {
+    // 'args' is optional in the schema; the writer always stores a vector (possibly
+    // empty), so a missing vector means the record cannot be reconstructed.
+    if (rawAnno.args() == nullptr) {
+        DiagnoseUnreadableAnnotation();
+        return nullptr;
+    }
+    auto args = LoadAnnotationArgs(rawAnno);
+    if (!args) {
+        return nullptr;
+    }
+    for (auto&& arg : *args) {
         annotation->args.emplace_back(std::move(arg));
     }
 
     return annotation;
 }
 
-std::vector<OwnedPtr<FuncArg>> ASTLoader::ASTLoaderImpl::LoadAnnotationArgs(const PackageFormat::Anno& rawAnno)
+std::optional<std::vector<OwnedPtr<FuncArg>>> ASTLoader::ASTLoaderImpl::LoadAnnotationArgs(
+    const PackageFormat::Anno& rawAnno)
 {
     std::vector<OwnedPtr<FuncArg>> args;
 
     for (const auto& rawArg : *rawAnno.args()) {
+        // Every field of an AnnoArg is optional in the schema; a record with an
+        // unnamed or expression-less argument cannot be rebuilt.
+        if (rawArg == nullptr || rawArg->name() == nullptr) {
+            DiagnoseUnreadableAnnotation();
+            return std::nullopt;
+        }
         auto arg = MakeOwned<FuncArg>();
         arg->name = rawArg->name()->str();
-        arg->expr = LoadExpr(rawArg->expr());
+        // The stored expression index is a vector offset plus one: zero means
+        // absent, anything past the expression table is out of bounds. Both make
+        // the argument unreadable, so refuse the record instead of indexing.
+        auto exprIndex = rawArg->expr();
+        if (exprIndex == INVALID_FORMAT_INDEX || package->allExprs() == nullptr ||
+            exprIndex > package->allExprs()->size()) {
+            DiagnoseUnreadableAnnotation();
+            return std::nullopt;
+        }
+        arg->expr = LoadExpr(exprIndex);
+        if (arg->expr == nullptr) {
+            DiagnoseUnreadableAnnotation();
+            return std::nullopt;
+        }
         if (rawAnno.kind() != PackageFormat::AnnoKind_Annotation && arg->expr->astKind != ASTKind::LIT_CONST_EXPR) {
-            InternalError("Kind of deserialized argument must be constant literal.");
+            // Only literal arguments can cross the package boundary; a record that
+            // carries anything else is refused, not fatal.
+            DiagnoseUnreadableAnnotation();
+            return std::nullopt;
         }
         args.emplace_back(std::move(arg));
     }

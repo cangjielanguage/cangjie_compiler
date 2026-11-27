@@ -271,7 +271,15 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertTupleToChir(
     }
     auto elementVals = val.content;
     std::vector<Value*> elements;
-    CJC_ASSERT(elementVals.size() == elementTys.size());
+    // A release build compiles CJC_ASSERT away, so the shape check must be a real
+    // one: a cjo whose stored element count disagrees with the declared type (or
+    // whose type describes more elements than the value carries) would make
+    // 'elementTys[idx]' below index out of bounds. Such a value is not foldable.
+    // An empty value against an equally empty type is a consistent empty shape and
+    // falls through.
+    if (elementVals.size() != elementTys.size()) {
+        return nullptr;
+    }
     for (std::size_t idx = 0; idx < elementVals.size(); idx++) {
         auto elementVal = ConvertToChir(*elementTys[idx], elementVals[idx], insertExpr, parent);
         if (!elementVal) {
@@ -447,6 +455,12 @@ Cangjie::CHIR::Value* IVal2CHIR::ConvertRefToChir(
     }
     switch (referencedType->GetTypeKind()) {
         case Type::TYPE_CLASS: {
+            // 'IPointer::content' is a raw pointer the decoder owns; a value from a
+            // damaged cjo can keep it null. Like the String path, treat the value as
+            // not foldable instead of dereferencing.
+            if (pointer->content == nullptr) {
+                return nullptr;
+            }
             return ConvertClassRefToChir(ty, *pointer->content, insertExpr, parent);
         }
         default: {

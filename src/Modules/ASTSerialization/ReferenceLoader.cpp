@@ -635,31 +635,40 @@ void ASTLoader::ASTLoaderImpl::LoadDeclRefs(const PackageFormat::Decl& declObj, 
     // order to the visible custom nodes; marker records and source-only annotations
     // have no corresponding reference to restore.
     auto annotation = decl.annotations.begin();
-    for (auto rawAnno : *declObj.annotations()) {
-        CJC_NULLPTR_CHECK(rawAnno);
-        if (rawAnno->kind() != PackageFormat::AnnoKind_Custom) {
-            continue;
-        }
-        while (annotation != decl.annotations.end() &&
-            ((*annotation)->kind != AnnotationKind::CUSTOM ||
-                (!(*annotation)->isCompileTimeVisible && !decl.TestAnyAttr(Attribute::COMMON, Attribute::SPECIFIC)))) {
+    // The annotations vector is optional in the schema; a cjo without it has no
+    // constructor references to restore. Skip the alignment, not the references
+    // loaded below.
+    if (declObj.annotations() != nullptr) {
+        for (auto rawAnno : *declObj.annotations()) {
+            if (rawAnno == nullptr || rawAnno->kind() != PackageFormat::AnnoKind_Custom) {
+                continue;
+            }
+            while (annotation != decl.annotations.end() &&
+                ((*annotation)->kind != AnnotationKind::CUSTOM ||
+                    (!(*annotation)->isCompileTimeVisible &&
+                        !decl.TestAnyAttr(Attribute::COMMON, Attribute::SPECIFIC)))) {
+                ++annotation;
+            }
+            // A release build compiles CJC_ASSERT away, so the bound must be a real
+            // check: a package whose serialized record count exceeds the visible
+            // custom nodes must not make the loader run past the end. The remaining
+            // constructor references stay unrestored.
+            if (annotation == decl.annotations.end()) {
+                break;
+            }
+            if (rawAnno->identifier() == nullptr) {
+                // The record cannot be matched by name; stop aligning instead of
+                // attaching the reference to another annotation.
+                break;
+            }
+            if ((*annotation)->identifier != rawAnno->identifier()->str()) {
+                // The serialized order and the visible custom nodes disagree; stop
+                // aligning instead of attaching the reference to another annotation.
+                break;
+            }
+            LoadAnnotationBaseExpr(*rawAnno, **annotation);
             ++annotation;
         }
-        // A release build compiles CJC_ASSERT away, so the bound must be a real
-        // check: a package whose serialized record count exceeds the visible
-        // custom nodes must not make the loader run past the end. The remaining
-        // constructor references stay unrestored.
-        if (annotation == decl.annotations.end()) {
-            break;
-        }
-        CJC_NULLPTR_CHECK(rawAnno->identifier());
-        if ((*annotation)->identifier != rawAnno->identifier()->str()) {
-            // The serialized order and the visible custom nodes disagree; stop
-            // aligning instead of attaching the reference to another annotation.
-            break;
-        }
-        LoadAnnotationBaseExpr(*rawAnno, **annotation);
-        ++annotation;
     }
     switch (declObj.kind()) {
         case PackageFormat::DeclKind_FuncDecl: {

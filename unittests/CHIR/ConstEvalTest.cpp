@@ -142,3 +142,38 @@ TEST(ConstEvalTest, ReferenceWithUnexpectedRepresentationYieldsNull)
     IVal pointerVal = pointer;
     EXPECT_EQ(fx.converter.ConvertToChir(*refTy, pointerVal, insert, *fx.entry), nullptr);
 }
+
+// A pointer constant whose content is null is a shape only a damaged cjo can
+// produce. Like the String path, the value is not foldable; the pointer must
+// not be dereferenced.
+TEST(ConstEvalTest, ReferenceWithNullPointerContentYieldsNull)
+{
+    Fixture fx("ref-null-content");
+    auto* classDef = fx.builder.CreateClass(INVALID_LOCATION, "C", "C", "default", true, false);
+    auto* classTy = fx.builder.GetType<ClassType>(classDef);
+    classDef->SetType(*classTy);
+    auto* refTy = fx.builder.GetType<RefType>(classTy);
+
+    std::function<void(Expression*)> insert = [](Expression*) {};
+    IPointer pointer{nullptr};
+    IVal pointerVal = pointer;
+    EXPECT_EQ(fx.converter.ConvertToChir(*refTy, pointerVal, insert, *fx.entry), nullptr);
+}
+
+// A tuple value from a corrupt cjo can disagree with its declared type on the
+// element count. The declared types bound the conversion loop, so any
+// disagreement must answer null instead of indexing past them; a matching
+// shape still converts.
+TEST(ConstEvalTest, TupleValueShapeMismatchYieldsNull)
+{
+    Fixture fx("tuple-shape");
+    auto* tupleTy = fx.builder.GetType<TupleType>(std::vector<Type*>{fx.builder.GetInt64Ty()}, ModalInfo{});
+
+    std::function<void(Expression*)> insert = [](Expression*) {};
+    // More elements than the type describes.
+    EXPECT_EQ(fx.converter.ConvertToChir(*tupleTy, ITuple{{IInt64{1}, IInt64{2}}}, insert, *fx.entry), nullptr);
+    // Fewer elements than the type describes.
+    EXPECT_EQ(fx.converter.ConvertToChir(*tupleTy, ITuple{{}}, insert, *fx.entry), nullptr);
+    // The matching shape still produces the tuple expression.
+    EXPECT_NE(fx.converter.ConvertToChir(*tupleTy, ITuple{{IInt64{1}}}, insert, *fx.entry), nullptr);
+}

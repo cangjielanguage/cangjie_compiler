@@ -18,6 +18,8 @@
 #include "cangjie/Option/Option.h"
 #include "flatbuffers/CjoFormat_generated.h"
 
+#include <optional>
+
 #include "ASTSerializeUtils.h"
 
 namespace Cangjie {
@@ -394,7 +396,11 @@ private:
     void LoadMatchCaseRef(FormattedIndex index, AST::MatchCase& mc, AST::Expr& selector);
 
     OwnedPtr<AST::Annotation> LoadAnnotation(const PackageFormat::Anno& rawAnno);
-    std::vector<OwnedPtr<AST::FuncArg>> LoadAnnotationArgs(const PackageFormat::Anno& rawAnno);
+    // Report a malformed annotation record with the loader's recoverable
+    // "unsupported content" diagnostic. The caller refuses the record and keeps
+    // loading, so a corrupt cjo degrades to a compile error instead of an abort.
+    void DiagnoseUnreadableAnnotation();
+    std::optional<std::vector<OwnedPtr<AST::FuncArg>>> LoadAnnotationArgs(const PackageFormat::Anno& rawAnno);
 };
 } // namespace Cangjie
 

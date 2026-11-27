@@ -21,6 +21,8 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <cstring>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -38,6 +40,42 @@ std::string ArkTSPlaceholderText(const std::string& key)
 {
     return std::string(ARKTS_PLACEHOLDER_LITERAL_PREFIX) + key;
 }
+
+// Patch primitives for the malformed-annotation-record test: they edit a
+// flatbuffer the test itself just wrote, so the exact bytes are known. A table
+// record starts with the signed distance back to its vtable, and each vtable
+// slot holds the 16-bit offset of one field inside the record. Clearing a slot
+// hides a schema-optional field; overwriting a scalar plants an out-of-range
+// value. Both mirror what a damaged or hand-crafted cjo can carry.
+uint8_t* PatchVTableOf(uint8_t* tableStart)
+{
+    int32_t back = 0;
+    std::memcpy(&back, tableStart, sizeof(back));
+    return tableStart - back;
+}
+
+uint8_t* PatchTableBytes(const void* table)
+{
+    return const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(table));
+}
+
+void PatchClearField(uint8_t* tableStart, flatbuffers::voffset_t vtableSlot)
+{
+    uint16_t absent = 0;
+    std::memcpy(PatchVTableOf(tableStart) + vtableSlot, &absent, sizeof(absent));
+}
+
+void PatchScalarField(uint8_t* tableStart, flatbuffers::voffset_t vtableSlot, uint64_t value, size_t width)
+{
+    uint16_t fieldOffset = 0;
+    std::memcpy(&fieldOffset, PatchVTableOf(tableStart) + vtableSlot, sizeof(fieldOffset));
+    std::memcpy(tableStart + fieldOffset, &value, width);
+}
+
+// Values planted into the malformed-annotation-record test's copies of a cjo.
+constexpr uint64_t kHasThisAnnoKind = static_cast<uint64_t>(PackageFormat::AnnoKind_HasThis);
+constexpr uint64_t kUnknownAnnoKind = 0x00FF;
+constexpr uint64_t kOutOfRangeExprIndex = 0xFFFFFFFE;
 } // namespace
 
 class ArkTSEntryTest : public testing::Test {
@@ -844,6 +882,202 @@ public func member(): Unit {}
     }
 }
 
+
+TEST_F(ArkTSEntryTest, MalformedAnnotationRecordIsRefusedWithoutAborting)
+{
+    // A damaged or hand-crafted cjo can null the schema-optional annotation
+    // fields or point their expression index past the expression table. Every
+    // such record must come back as a refusal - one recoverable diagnostic and
+    // a dropped record - never a crash or an internal error.
+    TypeManager types;
+    GlobalOptions options;
+    bool importSource = false;
+    CjoManager sourcePackages({diag, types, options, importSource});
+    Package source;
+    source.fullPackageName = "arkts_anno_hardening";
+    source.files.emplace_back(Parse(R"(package arkts_anno_hardening
+
+@ArkTS[module: "block"]
+public func member(): Unit {}
+)"));
+    ASSERT_EQ(diag.GetErrorCount(), 0);
+    auto file = source.files.front().get();
+    file->curPackage = &source;
+    auto function = DynamicCast<FuncDecl*>(file->decls.front().get());
+    ASSERT_NE(function, nullptr);
+    auto unit = TypeManager::GetPrimitiveTy(TypeKind::TYPE_UNIT);
+    auto signature = types.GetFunctionTy({}, ModalTy{unit});
+    function->EnableAttr(Attribute::GLOBAL, Attribute::PUBLIC);
+    function->linkage = Linkage::EXTERNAL;
+    function->fullPackageName = source.fullPackageName;
+    function->SetTy(ModalTy{signature});
+    function->funcBody->SetTy(ModalTy{signature});
+    function->funcBody->retType->SetTy(ModalTy{unit});
+    function->funcBody->body->SetTy(ModalTy{unit});
+    const auto begin = function->begin;
+    const auto end = function->end;
+    Walker(function, [file, begin, end](Ptr<Node> node) {
+        node->curFile = file;
+        node->begin = begin;
+        node->end = end;
+        return VisitAction::WALK_CHILDREN;
+    }).Walk();
+    function->rawMangleName = ASTMangler(source.fullPackageName).Mangle(*function);
+    function->mangledName = "__arkts_anno_hardening_member";
+    function->hash.bodyHash = ASTHasher::BodyHash(*function, {false, false});
+    sourcePackages.AddSourcePackage(source);
+    auto packageDecl = sourcePackages.GetPackageDecl(source.fullPackageName);
+    ASSERT_NE(packageDecl, nullptr);
+    ExportConfig config;
+    ASTWriter writer(diag, "", config, sourcePackages, types);
+    writer.PreSaveFullExportDecls(source);
+    writer.ExportAST(*packageDecl);
+    std::vector<uint8_t> buffer;
+    writer.AST2FB(buffer, *packageDecl);
+    ASSERT_FALSE(buffer.empty());
+    auto* raw = PackageFormat::GetPackage(buffer.data());
+    ASSERT_EQ(raw->allDecls()->size(), 1);
+    auto* records = raw->allDecls()->Get(0)->annotations();
+    ASSERT_NE(records, nullptr);
+    // One option-bearing record; the parameterless marker appears only when no
+    // option-bearing record was written.
+    ASSERT_EQ(records->size(), 1);
+    ASSERT_NE(records->Get(0)->args(), nullptr);
+    ASSERT_EQ(records->Get(0)->args()->size(), 1);
+    ASSERT_EQ(records->Get(0)->args()->Get(0)->name()->str(), "module");
+    ASSERT_NE(records->Get(0)->args()->Get(0)->expr(), 0);
+
+    // The pristine file must load cleanly before any corruption is applied.
+    {
+        auto before = diag.GetErrorCount();
+        TypeManager loadTypes;
+        CjoManager importedPackages({diag, loadTypes, options, importSource});
+        std::vector<uint8_t> copy = buffer;
+        ASTLoader reader(std::move(copy), source.fullPackageName, loadTypes, importedPackages, options);
+        auto imported = reader.LoadPackageDependencies();
+        ASSERT_NE(imported, nullptr);
+        auto package = imported.get();
+        importedPackages.AddImportedPackageFromASTNode(std::move(imported));
+        reader.LoadPackageDecls();
+        reader.LoadRefs();
+        ASSERT_EQ(diag.GetErrorCount(), before);
+        ASSERT_EQ(package->files.size(), 1);
+        ASSERT_EQ(package->files.front()->decls.size(), 1);
+        auto restored = DynamicCast<FuncDecl*>(package->files.front()->decls.front().get());
+        ASSERT_NE(restored, nullptr);
+        EXPECT_TRUE(restored->TestAttr(Attribute::ARKTS));
+        EXPECT_TRUE(restored->HasAnno(AnnotationKind::ARKTS));
+        ASSERT_EQ(restored->annotations.size(), 1);
+        std::unordered_map<std::string, std::string> merged;
+        ASSERT_TRUE(ArkTSDeclOptions(*restored, merged));
+        EXPECT_EQ(merged.at("module"), "block");
+    }
+
+    struct AnnoCorruption {
+        std::string name;
+        // Whether the corrupted record keeps the @HasThis kind: the loader then
+        // enables the ARKTS_HAS_THIS attribute from the record kind before the
+        // refusal, and later stages must tolerate an attribute without a record.
+        bool hasThisCarrier;
+        std::function<void(std::vector<uint8_t>&)> apply;
+    };
+    const std::vector<AnnoCorruption> corruptions = {
+        {"args vector absent",
+            true,
+            [](std::vector<uint8_t>& data) {
+                auto* record =
+                    PackageFormat::GetPackage(data.data())->allDecls()->Get(0)->annotations()->Get(0);
+                PatchScalarField(
+                    PatchTableBytes(record), PackageFormat::Anno::VT_KIND, kHasThisAnnoKind, sizeof(uint16_t));
+                PatchClearField(PatchTableBytes(record), PackageFormat::Anno::VT_ARGS);
+                EXPECT_EQ(record->kind(), PackageFormat::AnnoKind_HasThis);
+                EXPECT_EQ(record->args(), nullptr);
+            }},
+        {"argument name absent",
+            true,
+            [](std::vector<uint8_t>& data) {
+                auto* raw = PackageFormat::GetPackage(data.data());
+                auto* record = raw->allDecls()->Get(0)->annotations()->Get(0);
+                PatchScalarField(
+                    PatchTableBytes(record), PackageFormat::Anno::VT_KIND, kHasThisAnnoKind, sizeof(uint16_t));
+                auto* arg = record->args()->Get(0);
+                PatchClearField(PatchTableBytes(arg), PackageFormat::AnnoArg::VT_NAME);
+                EXPECT_EQ(arg->name(), nullptr);
+            }},
+        {"argument expression index out of range",
+            true,
+            [](std::vector<uint8_t>& data) {
+                auto* raw = PackageFormat::GetPackage(data.data());
+                auto* record = raw->allDecls()->Get(0)->annotations()->Get(0);
+                PatchScalarField(
+                    PatchTableBytes(record), PackageFormat::Anno::VT_KIND, kHasThisAnnoKind, sizeof(uint16_t));
+                auto* arg = record->args()->Get(0);
+                PatchScalarField(
+                    PatchTableBytes(arg), PackageFormat::AnnoArg::VT_EXPR, kOutOfRangeExprIndex, sizeof(uint32_t));
+                EXPECT_EQ(arg->expr(), kOutOfRangeExprIndex);
+            }},
+        {"argument expression index absent",
+            true,
+            [](std::vector<uint8_t>& data) {
+                auto* raw = PackageFormat::GetPackage(data.data());
+                auto* record = raw->allDecls()->Get(0)->annotations()->Get(0);
+                PatchScalarField(
+                    PatchTableBytes(record), PackageFormat::Anno::VT_KIND, kHasThisAnnoKind, sizeof(uint16_t));
+                auto* arg = record->args()->Get(0);
+                PatchScalarField(PatchTableBytes(arg), PackageFormat::AnnoArg::VT_EXPR, 0, sizeof(uint32_t));
+                EXPECT_EQ(arg->expr(), 0);
+            }},
+        {"record identifier absent",
+            true,
+            [](std::vector<uint8_t>& data) {
+                auto* record =
+                    PackageFormat::GetPackage(data.data())->allDecls()->Get(0)->annotations()->Get(0);
+                PatchScalarField(
+                    PatchTableBytes(record), PackageFormat::Anno::VT_KIND, kHasThisAnnoKind, sizeof(uint16_t));
+                PatchClearField(PatchTableBytes(record), PackageFormat::Anno::VT_IDENTIFIER);
+                EXPECT_EQ(record->identifier(), nullptr);
+            }},
+        {"record kind unhandled",
+            false,
+            [](std::vector<uint8_t>& data) {
+                auto* record =
+                    PackageFormat::GetPackage(data.data())->allDecls()->Get(0)->annotations()->Get(0);
+                PatchScalarField(
+                    PatchTableBytes(record), PackageFormat::Anno::VT_KIND, kUnknownAnnoKind, sizeof(uint16_t));
+                EXPECT_EQ(record->kind(), kUnknownAnnoKind);
+            }},
+    };
+    for (const auto& corruption : corruptions) {
+        std::vector<uint8_t> corrupted = buffer;
+        corruption.apply(corrupted);
+        // A fresh engine per variant: the diagnostic handler deduplicates
+        // identical diagnostics at one position by design, so six refusals
+        // carrying the same message would otherwise count as a single error.
+        DiagnosticEngine localDiag;
+        localDiag.SetSourceManager(&sm);
+        TypeManager loadTypes;
+        CjoManager importedPackages({localDiag, loadTypes, options, importSource});
+        ASTLoader reader(std::move(corrupted), source.fullPackageName, loadTypes, importedPackages, options);
+        auto imported = reader.LoadPackageDependencies();
+        ASSERT_NE(imported, nullptr) << corruption.name;
+        auto package = imported.get();
+        importedPackages.AddImportedPackageFromASTNode(std::move(imported));
+        reader.LoadPackageDecls();
+        reader.LoadRefs();
+        EXPECT_GT(localDiag.GetErrorCount(), 0) << corruption.name;
+        ASSERT_EQ(package->files.size(), 1) << corruption.name;
+        ASSERT_EQ(package->files.front()->decls.size(), 1) << corruption.name;
+        auto restored = DynamicCast<FuncDecl*>(package->files.front()->decls.front().get());
+        ASSERT_NE(restored, nullptr) << corruption.name;
+        // The malformed record is dropped; the loader keeps the declaration. With
+        // the record refused, no annotation node or ARKTS attribute remains: the
+        // attribute was only ever derived from a record that now loads.
+        EXPECT_TRUE(restored->annotations.empty()) << corruption.name;
+        EXPECT_FALSE(restored->TestAttr(Attribute::ARKTS)) << corruption.name;
+        EXPECT_EQ(restored->TestAttr(Attribute::ARKTS_HAS_THIS), corruption.hasThisCarrier) << corruption.name;
+        EXPECT_TRUE(Ty::IsTyCorrect(restored->GetTy())) << corruption.name;
+    }
+}
 
 TEST_F(ArkTSEntryTest, PublicForeignFunctionInheritsBlockOptions)
 {
