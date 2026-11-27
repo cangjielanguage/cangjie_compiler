@@ -28,16 +28,6 @@ using namespace AST;
 namespace {
 constexpr std::string_view ELLIPSIS("...");
 
-// The annotations that exist only for the experimental ArkTS capability. The
-// generic placement allow-lists skip them while the capability is off so the
-// Sema gate remains the only user-facing diagnostic for a refused file.
-bool IsArkTSOnlyAnnotationKind(AnnotationKind kind)
-{
-    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE ||
-        kind == AnnotationKind::ARKTS_REST_PARAM || kind == AnnotationKind::ARKTS_WRITE_ONLY ||
-        kind == AnnotationKind::ARKTS_HAS_THIS;
-}
-
 // The access-modifier x FOREIGN conflict is lifted only on declarations
 // carrying the @ArkTS annotation, so the class/interface/function handlers
 // compute this flag from their annotations (which are still intact here: they

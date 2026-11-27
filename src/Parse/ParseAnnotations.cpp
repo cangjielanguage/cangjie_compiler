@@ -188,8 +188,21 @@ static const std::set<std::string> STD_ONLY_ANNO = {
     // Disable const evaluation checker for items annotated with `@ConstSafe`.
     "ConstSafe"};
 
-bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier)
+bool IsArkTSOnlyAnnotationKind(AnnotationKind kind)
 {
+    return kind == AnnotationKind::ARKTS || kind == AnnotationKind::ARKTS_RAW_VALUE ||
+        kind == AnnotationKind::ARKTS_REST_PARAM || kind == AnnotationKind::ARKTS_WRITE_ONLY ||
+        kind == AnnotationKind::ARKTS_HAS_THIS;
+}
+
+bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier, bool experimentalMode)
+{
+    if (!experimentalMode) {
+        auto kindIter = NAME_TO_ANNO_KIND.find(identifier);
+        if (kindIter != NAME_TO_ANNO_KIND.end() && IsArkTSOnlyAnnotationKind(kindIter->second)) {
+            return false;
+        }
+    }
     if (STD_ONLY_ANNO.find(identifier) != STD_ONLY_ANNO.end()) {
         return moduleName == "std";
     }
@@ -219,7 +232,7 @@ bool ParserImpl::SeeingBuiltinAnnotation()
     if (tokens.begin()->kind != TokenKind::IDENTIFIER) {
         return false;
     }
-    return IsBuiltinAnnotation(moduleName, tokens.begin()->Value());
+    return IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), experimentalMode);
 }
 
 bool ParserImpl::SeeingAtWhen()
@@ -246,7 +259,7 @@ bool ParserImpl::SeeingMacroCall()
         (tokens.begin()->kind < TokenKind::PUBLIC || tokens.begin()->kind > TokenKind::OPEN)) {
         return false;
     }
-    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value());
+    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), experimentalMode);
 }
 
 bool ParserImpl::SeeingMacroCallDecl()
@@ -263,7 +276,7 @@ bool ParserImpl::SeeingMacroCallDecl()
         (tokens.begin()->kind < TokenKind::PUBLIC || tokens.begin()->kind > TokenKind::OPEN)) {
         return false;
     }
-    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value());
+    return !IsBuiltinAnnotation(moduleName, tokens.begin()->Value(), experimentalMode);
 }
 
 // Before: a block default @ArkTS[module:"a", namespace:"n"] and a member

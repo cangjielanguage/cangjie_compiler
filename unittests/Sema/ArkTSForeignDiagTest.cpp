@@ -226,6 +226,18 @@ protected:
         instance->Compile(CompileStage::SEMA);
     }
 
+    // Compiles @p code through the parse stage only. Used by the macro-name
+    // regression tests: the builtin-annotation conflict is a parse diagnostic,
+    // and stopping after Parse keeps the macro-evaluation machinery (and its
+    // environment noise) out of the picture.
+    void CompileParse(const std::string& code)
+    {
+        instance->code = code;
+        instance->invocation.globalOptions.implicitPrelude = true;
+        instance->invocation.globalOptions.outputMode = GlobalOptions::OutputMode::SHARED_LIB;
+        instance->Compile(CompileStage::PARSE);
+    }
+
     // Compiles the support package @p code and returns its serialized AST, so
     // a following compilation can import it without a prebuilt SDK module.
     // @p caches injects already exported dependencies into the support build.
@@ -5252,10 +5264,13 @@ public func good(): Unit {}
     EXPECT_EQ(registration->end.column, good->end.column);
 }
 
-// ArkTS interop is experimental. Without --experimental the capability reports
-// one gate diagnostic per source file and no prepare/lower pass runs, so the
-// input cannot silently reach the ArkTS code generator.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateRejectsArkTSWithoutFlag)
+// ArkTS interop is experimental. Without --experimental the ArkTS-only
+// annotation names are not builtin annotations: `@ArkTS` parses as an ordinary
+// macro call with no macro definition, so the file reports the ordinary
+// undefined-macro diagnostic instead of the experimental gate. The wrapped
+// declaration keeps its ordinary spelling, so references to it resolve without
+// a cascade.
+TEST_F(ArkTSForeignDiagTest, ArkTSAnnotationWithoutFlagIsAnOrdinaryMacroCall)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5267,9 +5282,9 @@ TEST_F(ArkTSForeignDiagTest, ExperimentalGateRejectsArkTSWithoutFlag)
 public func run(): Unit {
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("requires the '--experimental' compiler option"));
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_FALSE(HasErrorContaining("requires the '--experimental' compiler option"));
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'ArkTS'"), 1U);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'run'"), 0U);
 }
 
 // ArkTS interop is OHOS-only. With --experimental but a non-OHOS target the
@@ -5330,9 +5345,10 @@ public func run(): Unit {
     EXPECT_TRUE(HasErrorContaining("requires ArkTS interop declarations that are not available"));
 }
 
-// @RawValue is an ArkTS-only annotation too: a file that carries it without
-// @ArkTS is still refused by the experimental gate.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateRejectsRawValueWithoutFlag)
+// @RawValue is an ArkTS-only annotation too. Without --experimental it is an
+// ordinary macro call: the enum constructor keeps its spelling and the file
+// reports the ordinary undefined-macro diagnostic instead of the gate.
+TEST_F(ArkTSForeignDiagTest, RawValueAnnotationWithoutFlagIsAnOrdinaryMacroCall)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5344,15 +5360,18 @@ enum Color {
     @RawValue[1] Red
 }
 )");
-    EXPECT_TRUE(HasErrorContaining("requires the '--experimental' compiler option"));
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_FALSE(HasErrorContaining("requires the '--experimental' compiler option"));
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'RawValue'"), 1U);
 }
 
 
-// A non-annotated reference to a gated declaration must not produce a second
-// "undeclared" error: the gate is the only user-facing diagnostic.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForAReferencedDeclaration)
+// A referenced declaration wrapped by an undefined macro: without the flag the
+// gate is gone and the ordinary macro path reports the missing macro once. The
+// reference cascades in this fixture only because the macro-evaluation runtime
+// is unavailable here, so the wrapped class is never re-declared; the real
+// no-cascade behavior is pinned by the guard/requires_experimental.cj LLT,
+// whose helper still resolves the wrapped declarations.
+TEST_F(ArkTSForeignDiagTest, ArkTSAnnotationWithoutFlagReportsTheMacroPath)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5369,13 +5388,17 @@ public func make(): C {
     C()
 }
 )");
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'ArkTS'"), 1U);
 }
 
-// A foreign declaration keeps its foreign spelling when the gate is off; the
-// unsafe-invoke rule must not add a second error on an ordinary call.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForAReferencedForeignFunction)
+// Without the flag the annotation does not lift the public x FOREIGN conflict,
+// so the wrapped foreign function takes the ordinary foreign-declaration rules
+// and the conflict diagnostic fires instead of the gate. (The fixture cannot
+// run the macro-evaluation runtime that re-declares the wrapped function, so
+// the call site cascades here; guard/requires_experimental.cj pins the real
+// behavior where the wrapped spelling still resolves.)
+TEST_F(ArkTSForeignDiagTest, ArkTSForeignFunctionWithoutFlagKeepsOrdinaryForeignRules)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5390,12 +5413,15 @@ public func callEcho(): Unit {
     echo()
 }
 )");
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(CountErrorsContaining("'foreign' and 'public' modifiers conflict"), 1U);
 }
 
-// The same cascade applies to a foreign class construction.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForAReferencedForeignClass)
+// The same ordinary-rules shape applies to a foreign class: without the flag
+// the annotation is an undefined macro call and the bodyless constructor takes
+// the ordinary class diagnostic instead of the gate. (The wrapped-class
+// reference cascade is a fixture artifact; see the foreign-function case.)
+TEST_F(ArkTSForeignDiagTest, ArkTSForeignClassWithoutFlagKeepsOrdinaryClassRules)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5412,13 +5438,14 @@ public func make(): C {
     C()
 }
 )");
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(CountErrorsContaining("body of constructor is missing"), 1U);
 }
 
-// ArkTS-only parser diagnostics are gated too: a malformed annotation must
-// reach Sema and produce the gate, not a parser error that pre-empts it.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForMalformedParserInput)
+// Without the flag an empty-attribute annotation call is an ordinary macro
+// call too: the parser accepts the shape, and the macro stage reports the
+// missing macro once instead of a parser diagnostic.
+TEST_F(ArkTSForeignDiagTest, RawValueEmptyArgumentsWithoutFlagTakeTheMacroPath)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5430,8 +5457,8 @@ enum Color {
     @RawValue[] Red
 }
 )");
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'RawValue'"), 1U);
 }
 
 // A source without any ArkTS-only annotation is untouched by the gate.
@@ -5451,7 +5478,7 @@ public func plain(): Int64 {
 }
 
 // @WriteOnly takes no arguments; its parser rule is gated like the rest.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateRejectsWriteOnlyArgumentsWithoutFlag)
+TEST_F(ArkTSForeignDiagTest, WriteOnlyArgumentsWithoutFlagTakeTheMacroPath)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5467,8 +5494,8 @@ public class C {
     }
 }
 )");
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'WriteOnly'"), 1U);
 }
 
 // With the flag on, parser ArkTS diagnostics are not over-suppressed.
@@ -5486,9 +5513,48 @@ enum Color {
     EXPECT_TRUE(HasErrorContaining("@RawValue"));
 }
 
-// A malformed declaration carrying only @RestParam is still ArkTS-only: the
-// C ABI and unsafe-invoke cascades are suppressed, leaving the gate.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForRestParamOnlyForeign)
+// The ArkTS-only annotation names are reserved only under --experimental.
+// Without the flag a user macro named like the annotation defines as an
+// ordinary macro: the parse stage reports nothing.
+TEST_F(ArkTSForeignDiagTest, UserMacroNamedWriteOnlyDefinesWithoutFlag)
+{
+    invocation.globalOptions.experimentalMode = false;
+    instance->invocation.globalOptions.experimentalMode = false;
+    diag.ClearError();
+    handler->messages.clear();
+    CompileParse(R"(macro package entry
+
+internal import std.ast.*
+
+public macro WriteOnly(input: Tokens): Tokens {
+    return input
+}
+)");
+    EXPECT_EQ(handler->messages.size(), 0U);
+}
+
+// With the flag on the same name collides with the builtin annotation, so the
+// macro definition is refused at parse time.
+TEST_F(ArkTSForeignDiagTest, UserMacroNamedWriteOnlyConflictsWithFlag)
+{
+    diag.ClearError();
+    handler->messages.clear();
+    CompileParse(R"(macro package entry
+
+internal import std.ast.*
+
+public macro WriteOnly(input: Tokens): Tokens {
+    return input
+}
+)");
+    EXPECT_EQ(CountErrorsContaining("conflicted with builtin annotation identifier"), 1U);
+    EXPECT_EQ(handler->messages.size(), 1U);
+}
+
+// Without the flag a @RestParam parameter is an ordinary macro call in
+// parameter position: the file reports the missing macro once and the ordinary
+// foreign-call rules run without a second ArkTS-specific diagnostic.
+TEST_F(ArkTSForeignDiagTest, RestParamWithoutFlagTakesTheMacroPath)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5502,13 +5568,14 @@ public func call(): Unit {
     f([])
 }
 )");
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'RestParam'"), 1U);
 }
 
-// Generic placement allow-lists are gated too: an @ArkTS annotation in an
-// invalid position reaches Sema instead of producing a parser error first.
-TEST_F(ArkTSForeignDiagTest, ExperimentalGateReportsOnceForInvalidPlacement)
+// Without the flag the generic placement allow-lists no longer see ArkTS-only
+// annotations at all: `@ArkTS` in a getter position is an unexpected token and
+// takes the ordinary parse diagnostic.
+TEST_F(ArkTSForeignDiagTest, ArkTSGetterPlacementWithoutFlagIsAnOrdinaryParseError)
 {
     invocation.globalOptions.experimentalMode = false;
     instance->invocation.globalOptions.experimentalMode = false;
@@ -5523,7 +5590,8 @@ public class C {
     }
 }
 )");
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(CountErrorsContaining("expected 'get' or 'set' in prop body"), 1U);
     EXPECT_EQ(handler->messages.size(), 1U);
 }
 
@@ -6221,8 +6289,9 @@ public func use(): Int32 {
     EXPECT_EQ(handler->messages.size(), 0U);
 
     // Positive control: the flag really is off for this compilation, so source
-    // ArkTS in the consumer is still refused exactly once even while the
-    // imported @ArkTS declaration stays silent.
+    // ArkTS in the consumer takes the ordinary macro path (the annotation is an
+    // undefined macro call) even while the imported @ArkTS declaration stays
+    // silent.
     diag.ClearError();
     handler->messages.clear();
     handler->errors.clear();
@@ -6239,8 +6308,8 @@ import dep.*
 public func run(): Unit {
 }
 )");
-    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 1U);
-    EXPECT_EQ(handler->messages.size(), 1U);
+    EXPECT_EQ(CountErrorsContaining("requires the '--experimental' compiler option"), 0U);
+    EXPECT_EQ(CountErrorsContaining("undeclared identifier 'ArkTS'"), 1U);
 }
 
 // The target gate is scoped the same way: with the consumer switched back to

@@ -198,8 +198,7 @@ OwnedPtr<MacroDecl> ParserImpl::ParseMacroDecl(
     }
     ret->EnableAttr(Attribute::MACRO_FUNC);
     ret->identifier = ExpectIdentifierWithPos(*ret);
-    if (IsBuiltinAnnotation(moduleName, ret->identifier) ||
-        IsBuiltinMacro(ret->identifier)) {
+    if (IsBuiltinAnnotation(moduleName, ret->identifier, experimentalMode) || IsBuiltinMacro(ret->identifier)) {
         auto builtinKind = IsBuiltinMacro(ret->identifier) ? "macro" : "annotation";
         ParseDiagnoseRefactor(DiagKindRefactor::parse_macro_define_conflicted_with_builtin, MakeRange(ret->identifier),
             ret->identifier, builtinKind);

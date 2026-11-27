@@ -51,7 +51,17 @@ extern const std::unordered_map<std::string, AST::AnnotationKind> NAME_TO_ANNO_K
 
 extern const std::unordered_map<AST::AnnotationKind, std::string> ANNO_KIND_TO_NAME;
 
-bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier);
+/// Whether the annotation kind exists only for the experimental ArkTS
+/// capability. While the capability is off these kinds never arise from source
+/// parsing, so the Sema gate stays the single user-facing diagnostic for a
+/// refused file.
+bool IsArkTSOnlyAnnotationKind(AST::AnnotationKind kind);
+
+/// Whether @identifier is a compiler builtin annotation for the module. The
+/// experimental ArkTS-only names count as builtin only when the capability is
+/// enabled; otherwise they parse as ordinary macro calls, so user macros with
+/// these names keep working without --experimental.
+bool IsBuiltinAnnotation(const std::string& moduleName, const std::string& identifier, bool experimentalMode);
 std::string AnnotationKindToString(AST::AnnotationKind kind);
 
 inline bool IsIdentifierOrContextualKeyword(const TokenKind& kind)
