@@ -2455,6 +2455,62 @@ std::string ArkTSInterfaceCallSource(const std::vector<ArkTSTypeDesc>& types, co
     return ArkTSFinishBody(prefix, code + emitted.pre + "    return " + emitted.expr + "\n");
 }
 
+// Spell a numeric index key: JS property keys are strings, so a Float64 key
+// is accepted only when it is a finite integer that fits Int64, and the key
+// is named by the integer's canonical decimal spelling, so obj[2] and
+// obj["2"] address the same property. Emits the guard statements into `code`
+// and replaces the raw argument placeholder in `key` with the key expression.
+static void EmitArkTSNumberIndexKey(ArkTSValueEmitter& emitter, std::string& key, std::string& code)
+{
+    auto number = emitter.Fresh("keynum");
+    auto canonical = emitter.Fresh("key");
+    code += "    let " + number + " = " + key + "\n";
+    code += "    if (" + number + " - " + number + " != 0.0) {\n" +
+        ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a finite number for an index key", "        ") +
+        "    }\n";
+    code += "    if (" + number + " < -9.223372036854776e18 || " + number + " >= 9.223372036854776e18) {\n" +
+        ArkTSConversionThrow(std::string(ARKTS_INVALID) + "index key out of Int64 range", "        ") + "    }\n";
+    code += "    if (" + number + " != Float64(Int64(" + number + "))) {\n" +
+        ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not an integer index key", "        ") + "    }\n";
+    code += "    let " + canonical + " = Int64(" + number + ").toString()\n";
+    key = canonical;
+}
+
+// Setter tail of the index-signature default implementation: convert the
+// second argument to JS and store it into the indexed property.
+static std::string ArkTSInterfaceIndexSetterBody(ArkTSValueEmitter& emitter, const ArkTSTypeDesc& valueType,
+    const std::string& prefix, const std::string& code, const std::string& self, const std::string& key,
+    const std::string& context)
+{
+    auto value = emitter.ToJS(valueType, std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "1", prefix + "context", "    ");
+    auto error = emitter.Fresh("error");
+    const auto setExpr = self + ".setProperty(" + key + ", " + value.expr + ")";
+    return ArkTSFinishBody(prefix,
+        code + value.pre + "    " + ArkTSCallTranslation(setExpr, context, error, "    ") + "\n");
+}
+
+// Getter tail of the index-signature default implementation: read the
+// indexed property and wrap it in an Option, a null or undefined property
+// being Option.None and any other property Option.Some of the converted
+// value. Refuses the whole body when the conversion cannot spell a value.
+static std::string ArkTSInterfaceIndexGetterBody(ArkTSValueEmitter& emitter, const ArkTSTypeDesc& valueType,
+    const std::string& prefix, const std::string& code, const std::string& self, const std::string& key,
+    const std::string& context)
+{
+    auto result = emitter.Fresh("result");
+    auto error = emitter.Fresh("error");
+    const auto getExpr = self + ".getProperty(" + key + ")";
+    const auto read = "    let " + result + " = " + ArkTSCallTranslation(getExpr, context, error, "    ") + "\n";
+    auto inner = emitter.FromJS(valueType, result, "    ");
+    if (emitter.broken) {
+        return {};
+    }
+    const std::string option = "(if (" + result + ".isNull() || " + result + ".isUndefined()) {\n" + "    " +
+        ARKTS_OPTION + ".None\n" + "} else {\n" + inner.pre + "    " + ARKTS_OPTION + ".Some(" + inner.expr + ")\n" +
+        "})";
+    return ArkTSFinishBody(prefix, code + read + "    return " + option + "\n");
+}
+
 std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTSTypeDesc& valueType, bool setter,
     const std::string& prefix, std::unordered_map<std::string, Ptr<Decl>>& classRefs, const std::string& ownerKind)
 {
@@ -2472,46 +2528,16 @@ std::string ArkTSInterfaceIndexSource(const ArkTSTypeDesc& keyType, const ArkTST
     std::string key = std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "0";
     std::string code;
     if (numberKey) {
-        // JS property keys are strings. Accept only finite integers that fit
-        // Int64 and use their canonical decimal spelling, so obj[2] and
-        // obj["2"] address the same property.
-        auto number = emitter.Fresh("keynum");
-        auto canonical = emitter.Fresh("key");
-        code += "    let " + number + " = " + key + "\n";
-        code += "    if (" + number + " - " + number + " != 0.0) {\n" +
-            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not a finite number for an index key", "        ") +
-            "    }\n";
-        code += "    if (" + number + " < -9.223372036854776e18 || " + number + " >= 9.223372036854776e18) {\n" +
-            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "index key out of Int64 range", "        ") + "    }\n";
-        code += "    if (" + number + " != Float64(Int64(" + number + "))) {\n" +
-            ArkTSConversionThrow(std::string(ARKTS_INVALID) + "not an integer index key", "        ") + "    }\n";
-        code += "    let " + canonical + " = Int64(" + number + ").toString()\n";
-        key = canonical;
+        EmitArkTSNumberIndexKey(emitter, key, code);
     }
     const auto context = ArkTSMemberFailureContext(ownerKind, ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_CLASS),
         ArkTSPlaceholderLiteralImpl(ARKTS_PLACEHOLDER_MEMBER));
     auto self = emitter.Fresh("self");
     code = "    let " + self + " = " + ARKTS_SELF + "." + ARKTS_CLASS_REF_ACCESSOR + "()\n" + code;
     if (setter) {
-        auto value =
-            emitter.ToJS(valueType, std::string(ARKTS_PLACEHOLDER_ARGUMENT) + "1", prefix + "context", "    ");
-        code += value.pre;
-        auto error = emitter.Fresh("error");
-        const auto setExpr = self + ".setProperty(" + key + ", " + value.expr + ")";
-        return ArkTSFinishBody(prefix, code + "    " + ArkTSCallTranslation(setExpr, context, error, "    ") + "\n");
+        return ArkTSInterfaceIndexSetterBody(emitter, valueType, prefix, code, self, key, context);
     }
-    auto result = emitter.Fresh("result");
-    auto error = emitter.Fresh("error");
-    const auto getExpr = self + ".getProperty(" + key + ")";
-    code += "    let " + result + " = " + ArkTSCallTranslation(getExpr, context, error, "    ") + "\n";
-    auto inner = emitter.FromJS(valueType, result, "    ");
-    if (emitter.broken) {
-        return {};
-    }
-    const std::string option = "(if (" + result + ".isNull() || " + result + ".isUndefined()) {\n" + "    " +
-        ARKTS_OPTION + ".None\n" + "} else {\n" + inner.pre + "    " + ARKTS_OPTION + ".Some(" + inner.expr + ")\n" +
-        "})";
-    return ArkTSFinishBody(prefix, code + "    return " + option + "\n");
+    return ArkTSInterfaceIndexGetterBody(emitter, valueType, prefix, code, self, key, context);
 }
 
 // ---- ArkTSFunc<F> construction glue (B4b) ----
