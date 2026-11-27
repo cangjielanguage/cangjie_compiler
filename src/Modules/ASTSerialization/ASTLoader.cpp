@@ -139,6 +139,49 @@ bool VersionExactly(uint8_t cjoMajor, uint8_t cjoMinor, uint8_t requiredMajor, u
 {
     return CompareCjoVersion(cjoMajor, cjoMinor, requiredMajor, requiredMinor) == CjoVersionOrder::EQUAL;
 }
+
+// Map a serialized annotation kind to the AST annotation it denotes. Kinds that carry
+// extra payload (TEST_REGISTER attributes, compile-time visibility) are completed by the
+// caller; a kind this compiler does not model yields no value and is refused there.
+std::optional<AnnotationKind> DecodeAnnotationKind(PackageFormat::AnnoKind kind)
+{
+    switch (kind) {
+        case PackageFormat::AnnoKind_ArkTS:
+            return AnnotationKind::ARKTS;
+        case PackageFormat::AnnoKind_Deprecated:
+            return AnnotationKind::DEPRECATED;
+        case PackageFormat::AnnoKind_TestRegistration:
+            return AnnotationKind::ATTRIBUTE;
+        case PackageFormat::AnnoKind_Frozen:
+            return AnnotationKind::FROZEN;
+        case PackageFormat::AnnoKind_JavaMirror:
+            return AnnotationKind::JAVA_MIRROR;
+        case PackageFormat::AnnoKind_JavaImpl:
+            return AnnotationKind::JAVA_IMPL;
+        case PackageFormat::AnnoKind_JavaHasDefault:
+            return AnnotationKind::JAVA_HAS_DEFAULT;
+        case PackageFormat::AnnoKind_ObjCMirror:
+            return AnnotationKind::OBJ_C_MIRROR;
+        case PackageFormat::AnnoKind_ObjCImpl:
+            return AnnotationKind::OBJ_C_IMPL;
+        case PackageFormat::AnnoKind_ForeignName:
+            return AnnotationKind::FOREIGN_NAME;
+        case PackageFormat::AnnoKind_Custom:
+            return AnnotationKind::CUSTOM;
+        case PackageFormat::AnnoKind_Annotation:
+            return AnnotationKind::ANNOTATION;
+        case PackageFormat::AnnoKind_Java:
+            return AnnotationKind::JAVA;
+        case PackageFormat::AnnoKind_ObjC:
+            return AnnotationKind::OBJ_C;
+        case PackageFormat::AnnoKind_RawValue:
+            return AnnotationKind::ARKTS_RAW_VALUE;
+        case PackageFormat::AnnoKind_HasThis:
+            return AnnotationKind::ARKTS_HAS_THIS;
+        default:
+            return std::nullopt;
+    }
+}
 } // namespace
 
 const std::unordered_map<PackageFormat::AccessLevel, AST::AccessLevel> ACCESS_LEVEL_RMAP = {
@@ -873,6 +916,11 @@ void ASTLoader::ASTLoaderImpl::LoadDeclBasicInfo(const PackageFormat::Decl& decl
         astDecl.genericDecl = GetDeclFromIndex(fullId);
     }
 
+    LoadDeclAnnotations(decl, astDecl);
+}
+
+void ASTLoader::ASTLoaderImpl::LoadDeclAnnotations(const PackageFormat::Decl& decl, Decl& astDecl)
+{
     astDecl.DisableAttr(Attribute::ARKTS);
     // The annotations vector is optional in the schema; a cjo without it carries
     // no annotation records to restore.
@@ -921,64 +969,20 @@ void ASTLoader::ASTLoaderImpl::DiagnoseUnreadableAnnotation()
 
 OwnedPtr<Annotation> ASTLoader::ASTLoaderImpl::LoadAnnotation(const PackageFormat::Anno& rawAnno)
 {
+    auto kind = DecodeAnnotationKind(rawAnno.kind());
+    if (!kind) {
+        // A kind this compiler does not model cannot be interpreted; refuse the
+        // record instead of aborting the compiler on a malformed cjo.
+        DiagnoseUnreadableAnnotation();
+        return nullptr;
+    }
     auto annotation = MakeOwned<Annotation>();
-
-    switch (rawAnno.kind()) {
-        case PackageFormat::AnnoKind_ArkTS:
-            annotation->kind = AnnotationKind::ARKTS;
-            break;
-        case PackageFormat::AnnoKind_Deprecated:
-            annotation->kind = AnnotationKind::DEPRECATED;
-            break;
-        case PackageFormat::AnnoKind_TestRegistration:
-            annotation->kind = AnnotationKind::ATTRIBUTE;
-            annotation->attrs.emplace_back(TokenKind::IDENTIFIER, "TEST_REGISTER");
-            break;
-        case PackageFormat::AnnoKind_Frozen:
-            annotation->kind = AnnotationKind::FROZEN;
-            break;
-        case PackageFormat::AnnoKind_JavaMirror:
-            annotation->kind = AnnotationKind::JAVA_MIRROR;
-            break;
-        case PackageFormat::AnnoKind_JavaImpl:
-            annotation->kind = AnnotationKind::JAVA_IMPL;
-            break;
-        case PackageFormat::AnnoKind_JavaHasDefault:
-            annotation->kind = AnnotationKind::JAVA_HAS_DEFAULT;
-            break;
-        case PackageFormat::AnnoKind_ObjCMirror:
-            annotation->kind = AnnotationKind::OBJ_C_MIRROR;
-            break;
-        case PackageFormat::AnnoKind_ObjCImpl:
-            annotation->kind = AnnotationKind::OBJ_C_IMPL;
-            break;
-        case PackageFormat::AnnoKind_ForeignName:
-            annotation->kind = AnnotationKind::FOREIGN_NAME;
-            break;
-        case PackageFormat::AnnoKind_Custom:
-            annotation->kind = AnnotationKind::CUSTOM;
-            annotation->isCompileTimeVisible = true;
-            break;
-        case PackageFormat::AnnoKind_Annotation:
-            annotation->kind = AnnotationKind::ANNOTATION;
-            break;
-        case PackageFormat::AnnoKind_Java:
-            annotation->kind = AnnotationKind::JAVA;
-            break;
-        case PackageFormat::AnnoKind_ObjC:
-            annotation->kind = AnnotationKind::OBJ_C;
-            break;
-        case PackageFormat::AnnoKind_RawValue:
-            annotation->kind = AnnotationKind::ARKTS_RAW_VALUE;
-            break;
-        case PackageFormat::AnnoKind_HasThis:
-            annotation->kind = AnnotationKind::ARKTS_HAS_THIS;
-            break;
-        default:
-            // A kind this compiler does not model cannot be interpreted; refuse the
-            // record instead of aborting the compiler on a malformed cjo.
-            DiagnoseUnreadableAnnotation();
-            return nullptr;
+    annotation->kind = *kind;
+    if (rawAnno.kind() == PackageFormat::AnnoKind_TestRegistration) {
+        annotation->attrs.emplace_back(TokenKind::IDENTIFIER, "TEST_REGISTER");
+    }
+    if (rawAnno.kind() == PackageFormat::AnnoKind_Custom) {
+        annotation->isCompileTimeVisible = true;
     }
     if (rawAnno.identifier() == nullptr) {
         DiagnoseUnreadableAnnotation();

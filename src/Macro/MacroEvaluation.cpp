@@ -787,7 +787,7 @@ bool MacroEvaluation::NeedCreateMacroCallTreeForReEval(MacroCall& macCall, AST::
             auto names = Utils::SplitQualifiedName(node->curFile->curPackage->fullPackageName);
             auto moduleName = names.size() > 1 ? names.front() : "";
             if (HasMacroCallInTokens(pInvocation->newTokens, moduleName, pInvocation->macroCallDiagInfo.identifier,
-                    ci->invocation.globalOptions.experimentalMode)) {
+                ci->invocation.globalOptions.experimentalMode)) {
                 return true;
             }
         }
@@ -889,7 +889,7 @@ void MacroEvaluation::CreateMacroCallTree(MacroCall& macCall, bool reEval)
         // Source tokens (args) have trustworthy positions: check modal adjacency like the parser.
         // Re-evaluated tokens come from macro output and are glued by shape.
         if (!HasMacroCallToEval(moduleName, inputTokens, curIndex, tokenSize, escapePosVec, !reEval,
-                ci->invocation.globalOptions.experimentalMode)) {
+            ci->invocation.globalOptions.experimentalMode)) {
             // Skip a normal token, which is not '@'.
             curIndex++;
             continue;

@@ -161,6 +161,7 @@ private:
     OwnedPtr<AST::FuncBody> LoadFuncBody(
         const PackageFormat::FuncBody& body, bool isInline = false, bool isConst = true);
     void LoadDeclBasicInfo(const PackageFormat::Decl& decl, AST::Decl& astDecl);
+    void LoadDeclAnnotations(const PackageFormat::Decl& decl, AST::Decl& astDecl);
     void LoadFuncDeclAdvancedInfo(const PackageFormat::Decl& decl, AST::FuncDecl& funcDecl);
     void LoadEnumDeclAdvancedInfo(const PackageFormat::Decl& decl, AST::EnumDecl& enumDecl);
     void LoadInheritableDeclAdvancedInfo(const PackageFormat::Decl& decl, AST::InheritableDecl& id);
