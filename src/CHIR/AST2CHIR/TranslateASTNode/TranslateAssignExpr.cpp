@@ -103,7 +103,7 @@ Value* Translator::TranslateVArrayAssign(const AssignExpr& assign)
         .kind = IntrinsicKind::VARRAY_GET,
         .args = std::vector<Value*>({loadLHSValue->GetResult(), index})
     };
-    auto lhs = CreateAndAppendExpression<Intrinsic>(loc, lhsType, arrGetContext, currentBlock)->GetResult();
+    auto lhs = TryCreate<Intrinsic>(currentBlock, loc, lhsType, arrGetContext)->GetResult();
     if (assign.op == TokenKind::AND_ASSIGN) {
         auto res = TransShortCircuitAnd(lhs, *assign.rightExpr, loc);
         CreateAndAppendVArraySet(*lhsBase, *res, *index, *lhsType, loc);
@@ -128,12 +128,12 @@ Value* Translator::TranslateVArrayAssign(const AssignExpr& assign)
 void Translator::CreateAndAppendVArraySet(
     Value& lhs, Value& rhs, Value& index, Type& elementType, const DebugLocation& loc)
 {
-    // VArraySet doesn't need to care about exception handling, because Sema does all checking for it
+    // A dynamic index can throw even when Sema cannot prove it is out of bounds.
     auto arrSetContext = IntrisicCallContext {
         .kind = IntrinsicKind::VARRAY_SET,
         .args = std::vector<Value*>({&lhs, TypeCastOrBoxIfNeeded(rhs, elementType, loc), &index})
     };
-    CreateAndAppendExpression<Intrinsic>(loc, builder.GetUnitTy(), arrSetContext, currentBlock);
+    TryCreate<Intrinsic>(currentBlock, loc, builder.GetUnitTy(), arrSetContext);
 }
 
 void Translator::CreateAndAppendWrappedStoreElementByName(

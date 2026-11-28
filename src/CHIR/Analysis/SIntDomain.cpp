@@ -80,13 +80,23 @@ Mem<SIntDomain> SIntDomain::FromNumeric(RelationalOperation rel, const SInt& val
     return {ConstantRange::From(rel, value, !isUnsigned), isUnsigned};
 }
 
-Mem<SIntDomain> SIntDomain::FromSymbolic(RelationalOperation rel, PtrSymbol symbol, IntWidth width, bool isUnsigned)
+Mem<SIntDomain> SIntDomain::FromSymbolic(RelationalOperation rel, PtrSymbol symbol, IntWidth width)
 {
-    SIntDomain res{ConstantRange::Full(width), isUnsigned};
+    SIntDomain res{ConstantRange::Full(width), /* isUnsigned = */ false};
     if (rel == RelationalOperation::NE) {
         return res;
     }
-    res.symbolics.emplace(symbol, ConstantRange::From(rel, {width, 0}, !isUnsigned));
+    // A symbolic bound records the difference `value - symbol`, and consumers always interpret that
+    // difference as a signed range (see NumericBoundToSignedSymbolicBound and the signed Compare calls
+    // in ComputeTotalOrderingIntBinop). Building it as unsigned would clamp the negative half away:
+    // unsigned From(LE, 0) is the single value {0}, which claims `value == symbol` instead of
+    // `value <= symbol`.
+    //
+    // Because the encoding is inherently signed, it can only express an unsigned relation when the
+    // difference happens to be signed-representable. It is not in general -- for UInt64 a = 0,
+    // b = UInt64.Max, `a <u b` holds while `a - b` is +1 as a signed value -- so callers must not
+    // build symbolic bounds from unsigned comparisons.
+    res.symbolics.emplace(symbol, ConstantRange::From(rel, {width, 0}, /* isSigned = */ true));
     return res;
 }
 

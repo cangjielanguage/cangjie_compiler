@@ -1407,7 +1407,9 @@ private:
         CJC_ASSERT(arrType->IsVArray());
         auto len = StaticCast<VArrayType*>(arrType)->GetSize();
         auto res = RaiseOutOfBoundError(intrinsic, static_cast<size_t>(len), index);
-        if (res == ExceptionKind::SUCCESS) {
+        // A loop index may only be constant during the first analysis iteration.
+        // Remove the check only after the data-flow state has converged.
+        if (this->isStable && res == ExceptionKind::SUCCESS) {
             const_cast<TIntrinsic*>(intrinsic)->template Set<NeedCheckArrayBound>(false);
         }
         return res;

@@ -363,9 +363,6 @@ llvm::Constant* CGExtensionDef::GenerateOuterTiFn(const CHIR::VirtualMethodInfo&
         auto outerTi = irBuilder.CreateTypeInfo(*parentType, genericParamsMap, false);
         innerTypeMap.clear();
         irBuilder.CreateRet(irBuilder.CreateBitCast(outerTi, typeInfoPtrType));
-    } else {
-        CJC_ASSERT_WITH_MSG(
-            false, "GenerateOuterTiFn should not be called multiple times for the same function. Something is wrong.");
     }
     return llvm::ConstantExpr::getBitCast(getOuterTiFn, llvm::Type::getInt8PtrTy(llvmCtx));
 }

@@ -113,5 +113,5 @@ Ptr<Value> Translator::TranslateVArrayAccess(const AST::SubscriptExpr& subscript
         .args = indexs
     };
     auto elementTy = chirTy.TranslateType(subscriptExpr.GetTy());
-    return CreateAndAppendExpression<Intrinsic>(loc, elementTy, callContext, currentBlock)->GetResult();
+    return TryCreate<Intrinsic>(currentBlock, loc, elementTy, callContext)->GetResult();
 }

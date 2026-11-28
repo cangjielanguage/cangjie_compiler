@@ -39,16 +39,14 @@ public:
     /**
      * @brief Main process to do range propagation.
      * @param package package to do optimization.
-     * @param isDebug flag whether print debug log.
      */
-    void RunOnPackage(const Ptr<const Package>& package, bool isDebug);
+    void RunOnPackage(const Ptr<const Package>& package);
 
     /**
-     * @brief Main process to do const propagation per func.
+     * @brief Main process to do range propagation per func.
      * @param func func to do optimization.
-     * @param isDebug flag whether print debug log.
      */
-    void RunOnFunc(const Ptr<const Function>& func, bool isDebug);
+    void RunOnFunc(const Ptr<const Function>& func);
 
     /**
      * @brief Get effect map after this pass.
@@ -85,7 +83,7 @@ private:
      * This function will rewrite an expression based on the @p rewriteInfo, which stores
      * the exrpession to be rewrited, the index of this expression and the new expression.
      */
-    void RewriteToConstExpr(const RewriteInfo& rewriteInfo, bool isDebug) const;
+    void RewriteToConstExpr(const RewriteInfo& rewriteInfo) const;
 
     // ==================== Rewrite Terminator Expressions ==================== //
 
@@ -93,11 +91,11 @@ private:
      * This function will rewrite a Branch terminator or a MultiBranch terminator to a GoTo
      * terminator. The new successor will be @p targetSucc.
      */
-    void RewriteBranchTerminator(const Ptr<Expression>& branch, const Ptr<Block>& targetSucc, bool isDebug);
+    void RewriteBranchTerminator(const Ptr<Expression>& branch, const Ptr<Block>& targetSucc);
 
     void RecordEffectMap(const Expression* expr, const Function* func) const;
 
-    void CheckVarrayIndex(const Ptr<Intrinsic>& intrin, const RangeDomain& state) const;
+    void CheckVarrayIndex(const Ptr<IntrinsicBase>& intrin, const RangeDomain& state) const;
 
     CHIRBuilder& builder;
     RangeAnalysisWrapper* analysisWrapper;
