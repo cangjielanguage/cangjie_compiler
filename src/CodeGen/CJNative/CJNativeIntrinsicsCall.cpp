@@ -1376,7 +1376,7 @@ llvm::Instruction* IRBuilder2::CallIntrinsicAssignGeneric(const std::vector<llvm
 }
 
 llvm::Value* IRBuilder2::CreateTypeInfoArray(const std::vector<CHIR::Type*>& types,
-    const std::unordered_map<const CHIR::Type*, std::function<llvm::Value*(IRBuilder2&)>>& map)
+    const std::unordered_map<const CHIR::Type*, std::function<llvm::Value*(IRBuilder2&)>>& map, bool canChangeBB)
 {
     auto typeInfoPtrType = CGType::GetOrCreateTypeInfoPtrType(GetLLVMContext());
     auto argSize = types.size();
@@ -1390,7 +1390,7 @@ llvm::Value* IRBuilder2::CreateTypeInfoArray(const std::vector<CHIR::Type*>& typ
         auto localGt = CGType::GetOrCreate(cgMod, type);
         if (localGt->IsDynamicGI()) {
             typeInfoElements.emplace_back(llvm::Constant::getNullValue(typeInfoPtrType));
-            auto tiDynamic = CreateBitCast(CreateTypeInfo(*type, map), typeInfoPtrType);
+            auto tiDynamic = CreateBitCast(CreateTypeInfo(*type, map, canChangeBB), typeInfoPtrType);
             auto storeAt = CreateConstInBoundsGEP2_32(arrayType, typeArgsArr, 0, idx);
             (void)CreateStore(tiDynamic, storeAt);
         } else {
@@ -1513,7 +1513,7 @@ llvm::Value* IRBuilder2::CreateTypeInfo(const CHIR::Type& gt,
         if (canChangeBB) {
             SetInsertPointForPreparingTypeInfo();
         }
-        auto typeArgsArr = CreateTypeInfoArray(genericArgs, map);
+        auto typeArgsArr = CreateTypeInfoArray(genericArgs, map, canChangeBB);
         res = CallIntrinsicGetTypeInfo({tt, getInt32(genericArgs.size()), typeArgsArr});
         LLVMIRBuilder2::SetInsertPoint(curBB, curPt);
     }
